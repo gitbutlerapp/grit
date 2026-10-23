@@ -521,6 +521,26 @@ impl Remote {
             )?),
             RemoteUrl::Local(_) | RemoteUrl::File(_) => {
                 let remote_git = local_git_dir_from_url(url, repo.git_dir(), repo.work_tree())?;
+                let cfg = ConfigSet::load(&opts.environment, Some(repo.git_dir()), true)
+                    .map_err(RemoteError::Library)?;
+                if opts.filter.is_none() {
+                    if let Some(name) = opts.remote_name.as_deref().or(self.name.as_deref()) {
+                        opts.filter = crate::partial_clone::stored_remote_filter(&cfg, name);
+                    }
+                }
+                if crate::partial_clone::fetch_requires_upload_pack(
+                    opts.filter.as_ref(),
+                    &cfg,
+                    opts.remote_name.as_deref().or(self.name.as_deref()),
+                ) {
+                    let mut conn = crate::transport::connect_local_upload_pack(
+                        &remote_git,
+                        Service::UploadPack,
+                        &connect,
+                    )
+                    .map_err(RemoteError::Library)?;
+                    return Ok(fetch_remote(repo.git_dir(), &mut *conn, opts, progress)?);
+                }
                 Ok(fetch_local_with_progress(
                     repo.git_dir(),
                     &remote_git,

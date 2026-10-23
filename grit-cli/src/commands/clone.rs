@@ -466,6 +466,7 @@ fn clone_into(
         initial_branch: "main".to_owned(),
         thread_policy: crate::context::thread_policy_for_repo(),
         depth: shallow.then_some(1),
+        filter: None,
     };
     let outcome = clone_repo(clone_opts, &mut *term_progress, Some(&factory))?;
 

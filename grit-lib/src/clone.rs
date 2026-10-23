@@ -13,6 +13,7 @@ use crate::environment::RepositoryOptions;
 use crate::error::{Error, Result};
 use crate::fetch::{fetch_operation_identity, Progress};
 use crate::objects::ObjectId;
+use crate::partial_clone::{ObjectFilterSpec, PartialCloneConfig};
 use crate::ref_storage::RefStorageFormat;
 use crate::refs;
 use crate::remote::{HttpClientFactory, ListRefsOptions, Remote, DEFAULT_REMOTE};
@@ -80,6 +81,8 @@ pub struct CloneOptions {
     /// Truncate fetched history to this many commits per ref tip
     /// (`git clone --depth N`). `Some(1)` matches a shallow clone.
     pub depth: Option<u32>,
+    /// Partial-clone object filter applied to the initial fetch and recorded in config.
+    pub filter: Option<ObjectFilterSpec>,
 }
 
 impl CloneOptions {
@@ -94,6 +97,7 @@ impl CloneOptions {
             initial_branch: "main".to_owned(),
             thread_policy: crate::parallel::ThreadPolicy::default(),
             depth: None,
+            filter: None,
         }
     }
 }
@@ -263,12 +267,18 @@ pub fn clone(
         thread_policy: opts.thread_policy,
         remote_progress: progress.remote_sideband_progress(),
         fetch_depth: opts.depth.and_then(crate::transfer::FetchDepth::depth),
+        filter: opts.filter,
         ..Default::default()
     };
     if let Ok(v) = crate::protocol::try_effective_client_protocol_version_from_config(&config) {
         fetch_opts.http_protocol_version = Some(v);
     }
     let fetch_outcome = remote.fetch(&repo, fetch_opts, progress, http_factory)?;
+
+    if let Some(spec) = opts.filter {
+        PartialCloneConfig::write(repo.git_dir(), &opts.remote_name, &spec)
+            .map_err(CloneError::Library)?;
+    }
 
     let default = choose_clone_default_branch(
         &repo,

@@ -16,6 +16,7 @@
 //! [`crate::push_report::PushRefStatus`] rather than redefining it.
 
 use crate::environment::RepositoryOptions;
+use crate::partial_clone::ObjectFilterSpec;
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
@@ -207,6 +208,14 @@ pub struct FetchOptions {
     /// When true, omit the `no-progress` capability/argument so the remote may
     /// send side-band channel-2 progress. Default false preserves today's wire bytes.
     pub remote_progress: bool,
+    /// Object filter for partial clone (`blob:none`, `blob:limit=<n>`). Omitted when
+    /// unset; promisor remotes may reapply `remote.*.partialclonefilter` automatically.
+    pub filter: Option<ObjectFilterSpec>,
+    /// When true, the received pack is written with a sibling `.promisor` marker.
+    ///
+    /// Set by the fetch driver when a filter was sent on the wire; callers should
+    /// leave this `false`.
+    pub mark_received_pack_promisor: bool,
 }
 
 impl Default for FetchOptions {
@@ -233,6 +242,8 @@ impl Default for FetchOptions {
             pack_spool_only: false,
             http_protocol_version: None,
             remote_progress: false,
+            filter: None,
+            mark_received_pack_promisor: false,
         }
     }
 }
@@ -270,6 +281,8 @@ impl Clone for FetchOptions {
             pack_spool_only: self.pack_spool_only,
             http_protocol_version: self.http_protocol_version,
             remote_progress: self.remote_progress,
+            filter: self.filter,
+            mark_received_pack_promisor: self.mark_received_pack_promisor,
         }
     }
 }
@@ -882,6 +895,7 @@ fn ingest_pack_options_for_fetch(
         threads: index_threads,
         merged_config: Some(pack_config),
         environment: fetch_opts.environment.clone(),
+        mark_promisor_pack: fetch_opts.mark_received_pack_promisor,
     })
 }
 

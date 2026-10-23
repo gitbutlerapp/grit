@@ -116,6 +116,8 @@ pub struct IngestPackOptions {
     pub merged_config: Option<crate::config::ConfigSet>,
     /// Environment used when [`Self::merged_config`] is unset and config is loaded from disk.
     pub environment: crate::environment::Environment,
+    /// When true, write an empty sibling `.promisor` file next to the installed pack.
+    pub mark_promisor_pack: bool,
 }
 
 impl Default for IngestPackOptions {
@@ -126,6 +128,7 @@ impl Default for IngestPackOptions {
             skip_post_index_verify: false,
             merged_config: None,
             environment: crate::environment::Environment::empty(),
+            mark_promisor_pack: false,
         }
     }
 }
@@ -377,6 +380,9 @@ pub fn install_pack_path_with_progress(
             let _ = std::fs::remove_file(&final_pack);
             Error::Io(e)
         })?;
+        if opts.mark_promisor_pack {
+            std::fs::write(final_pack.with_extension("promisor"), b"").map_err(Error::Io)?;
+        }
         let _ = std::fs::remove_dir(&stage);
         Ok(IngestedPack {
             object_ids: oids,

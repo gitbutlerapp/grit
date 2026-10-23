@@ -1008,6 +1008,51 @@ impl Connection for SshConnection {
     }
 }
 
+/// Spawn `git upload-pack` on a local repository path (Git's `file://` wire path).
+///
+/// Used when partial-clone filters require upload-pack instead of in-process
+/// [`crate::transfer::fetch_local`].
+pub(crate) fn connect_local_upload_pack(
+    remote_git_dir: &std::path::Path,
+    service: Service,
+    opts: &ConnectOptions,
+) -> Result<Box<dyn Connection>> {
+    if service != Service::UploadPack {
+        return Err(Error::Message(
+            "local upload-pack connect supports fetch only".to_owned(),
+        ));
+    }
+    let mut cmd = std::process::Command::new("git");
+    cmd.arg("upload-pack").arg(remote_git_dir);
+    cmd.stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::inherit());
+    if opts.protocol_version > 0 {
+        cmd.env("GIT_PROTOCOL", format!("version={}", opts.protocol_version));
+    }
+    let mut child = cmd.spawn().map_err(|e| {
+        Error::Message(format!(
+            "failed to spawn git upload-pack on {}: {e}",
+            remote_git_dir.display()
+        ))
+    })?;
+    let writer = child
+        .stdin
+        .take()
+        .ok_or_else(|| Error::Message("git upload-pack missing stdin".to_owned()))?;
+    let mut reader = child
+        .stdout
+        .take()
+        .ok_or_else(|| Error::Message("git upload-pack missing stdout".to_owned()))?;
+    let adv = read_advertisement(&mut reader)?;
+    Ok(Box::new(SshConnection {
+        child,
+        writer: Some(writer),
+        reader,
+        adv,
+    }))
+}
+
 impl Drop for SshConnection {
     fn drop(&mut self) {
         // Close the write half (child stdin) *before* waiting: a remote blocked

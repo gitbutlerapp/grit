@@ -167,6 +167,11 @@ pub(crate) struct ShallowUpdate {
 /// `deepen` / `deepen-since` / `deepen-not` the caller requested. Gated on the
 /// matching server capability where one exists. Mirrors the CLI's
 /// `append_fetch_request_extensions_v0_v1`.
+fn append_filter_request_v0(req: &mut Vec<u8>, wire_filter: &str) -> Result<()> {
+    pkt_line::write_line_to_vec(req, &format!("filter {wire_filter}"))?;
+    Ok(())
+}
+
 fn append_shallow_request_v0(
     req: &mut Vec<u8>,
     server_caps: &str,
@@ -230,8 +235,9 @@ fn negotiate_pack(
     local_git_dir: &Path,
     conn: &mut dyn Connection,
     wants: &[ObjectId],
-    opts: &FetchOptions,
+    opts: &mut FetchOptions,
     local_shallow: &[ObjectId],
+    wire_filter: Option<&str>,
     progress: &mut dyn Progress,
 ) -> Result<(Option<std::path::PathBuf>, ShallowUpdate)> {
     crate::trace::trace_span!("grit.fetch.negotiate");
@@ -270,6 +276,9 @@ fn negotiate_pack(
         }
         caps.push_str(" deepen-relative");
     }
+    if wire_filter.is_some() {
+        caps.push_str(" filter");
+    }
 
     let mut req: Vec<u8> = Vec::new();
     let w0 = format!("want {}{}", first_want.to_hex(), caps);
@@ -282,6 +291,9 @@ fn negotiate_pack(
     // shallow/deepen lines instead.)
     if wants.len() == 1 && !shallow_request {
         pkt_line::write_line_to_vec(&mut req, &format!("want {}", first_want.to_hex()))?;
+    }
+    if let Some(spec) = wire_filter {
+        append_filter_request_v0(&mut req, spec)?;
     }
     append_shallow_request_v0(&mut req, &server_caps, local_shallow, opts)?;
     req.extend_from_slice(b"0000");
@@ -740,6 +752,7 @@ pub(crate) fn v2_local_haves(local_git_dir: &Path, wants: &[ObjectId]) -> Result
 /// (`acknowledgments`, optional `shallow-info`, then `wanted-refs`, then `packfile`) and
 /// demuxes the side-band-64k pack. Lifted from `write_v2_fetch_request` +
 /// `read_v2_acknowledgments` / `read_v2_fetch_pack_response`.
+#[allow(clippy::too_many_arguments)]
 fn negotiate_pack_v2(
     local_git_dir: &Path,
     conn: &mut dyn Connection,
@@ -747,6 +760,7 @@ fn negotiate_pack_v2(
     local_odb: &crate::odb::Odb,
     wants: &[ObjectId],
     deepen: &V2DeepenArgs,
+    wire_filter: Option<&str>,
     progress: &mut dyn Progress,
 ) -> Result<(Option<std::path::PathBuf>, ShallowUpdate)> {
     if wants.is_empty() {
@@ -782,6 +796,7 @@ fn negotiate_pack_v2(
             &[],
             sideband_all,
             deepen,
+            wire_filter,
             true,
         )?;
         read_v2_fetch_pack_response(
@@ -805,6 +820,7 @@ fn negotiate_pack_v2(
         &haves[..first_batch],
         sideband_all,
         deepen,
+        wire_filter,
         false,
     )?;
 
@@ -848,6 +864,7 @@ fn negotiate_pack_v2(
                 haves_round2,
                 sideband_all,
                 deepen,
+                wire_filter,
                 true,
             )?;
             read_v2_fetch_pack_response(
@@ -934,6 +951,7 @@ pub(crate) fn write_v2_fetch_request(
     haves: &[ObjectId],
     sideband_all: bool,
     deepen: &V2DeepenArgs,
+    wire_filter: Option<&str>,
     send_done: bool,
 ) -> Result<()> {
     let mut req: Vec<u8> = Vec::new();
@@ -977,6 +995,9 @@ pub(crate) fn write_v2_fetch_request(
     }
     for excl in &deepen.deepen_not {
         pkt_line::write_line(&mut req, &format!("deepen-not {excl}"))?;
+    }
+    if let Some(spec) = wire_filter {
+        pkt_line::write_line(&mut req, &format!("filter {spec}"))?;
     }
 
     for want in wants {
@@ -1183,7 +1204,7 @@ fn skip_v2_section_until_boundary(reader: &mut dyn Read, sideband_all: bool) -> 
 pub fn fetch_remote(
     local_git_dir: &Path,
     conn: &mut dyn Connection,
-    opts: &FetchOptions,
+    opts: &mut FetchOptions,
     progress: &mut dyn Progress,
 ) -> Result<FetchOutcome> {
     use crate::net_trace::net_trace;
@@ -1200,6 +1221,12 @@ pub fn fetch_remote(
         opts.fetch_depth
     );
     validate_fetch_depth_local(local_git_dir, opts)?;
+    let local_cfg = crate::config::ConfigSet::load(&opts.environment, Some(local_git_dir), true)?;
+    if opts.filter.is_none() {
+        if let Some(remote) = opts.remote_name.as_deref() {
+            opts.filter = crate::partial_clone::stored_remote_filter(&local_cfg, remote);
+        }
+    }
     let local_odb = open_odb(local_git_dir);
 
     // 1. Remote refs + default branch.
@@ -1369,6 +1396,19 @@ pub fn fetch_remote(
 
     let mut dry_run_quarantine: Option<crate::receive_quarantine::ReceiveQuarantine> = None;
 
+    let v0_caps = if v2_caps.is_none() {
+        Some(conn.capabilities().join(" "))
+    } else {
+        None
+    };
+    let (wire_filter, filter_sent) = crate::partial_clone::wire_filter_for_capabilities(
+        opts.filter.as_ref(),
+        v2_caps.as_deref(),
+        v0_caps.as_deref(),
+    );
+    opts.mark_received_pack_promisor = filter_sent;
+    let wire_filter = wire_filter.as_deref();
+
     if wants.is_empty() {
         crate::transport::send_client_flush(conn)?;
     } else {
@@ -1387,10 +1427,19 @@ pub fn fetch_remote(
                 &local_odb,
                 &wants,
                 &deepen,
+                wire_filter,
                 progress,
             )?
         } else {
-            negotiate_pack(local_git_dir, conn, &wants, opts, &local_shallow, progress)?
+            negotiate_pack(
+                local_git_dir,
+                conn,
+                &wants,
+                opts,
+                &local_shallow,
+                wire_filter,
+                progress,
+            )?
         };
         shallow_update = su;
         net_trace!(
@@ -1438,6 +1487,7 @@ pub fn fetch_remote(
                         threads: index_threads,
                         merged_config: Some(pack_config),
                         environment: opts.environment.clone(),
+                        mark_promisor_pack: opts.mark_received_pack_promisor,
                     },
                     Some(progress),
                 )?
@@ -1451,6 +1501,7 @@ pub fn fetch_remote(
                         threads: index_threads,
                         merged_config: Some(pack_config),
                         environment: opts.environment.clone(),
+                        mark_promisor_pack: opts.mark_received_pack_promisor,
                     },
                     Some(progress),
                 )?

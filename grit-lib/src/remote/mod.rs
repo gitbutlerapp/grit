@@ -85,6 +85,10 @@ pub mod clone {
     //! clone API (re-exported at this path).
     pub use crate::clone::*;
 }
+pub mod partial_clone {
+    //! Partial-clone filter specs and promisor-remote config.
+    pub use crate::partial_clone::*;
+}
 pub mod serve {
     //! serve API (re-exported at this path).
     pub use crate::serve::receive_pack;

@@ -510,6 +510,14 @@ pub fn fsck(
         let index_roots_set = index_object_roots(repo)?;
         let index_roots = oid_hash_set_from(&index_roots_set);
         let roots = reachability_roots(repo)?;
+        let promisor_parents =
+            if crate::promisor::repo_treats_promisor_packs(repo.git_dir(), &config) {
+                oid_hash_set_from(&crate::promisor::promisor_pack_object_ids(
+                    &repo.git_dir().join("objects"),
+                ))
+            } else {
+                oid_hash_set()
+            };
         let (walked, connectivity_issues) = walk_connectivity(
             repo,
             &roots,
@@ -520,6 +528,7 @@ pub fn fsck(
             options.strict,
             progress,
             cancel,
+            &promisor_parents,
         )?;
         reachable = walked;
         issues.extend(connectivity_issues);
@@ -1101,6 +1110,7 @@ fn walk_connectivity(
     strict: bool,
     progress: &mut dyn ProgressSink,
     cancel: &dyn Cancel,
+    promisor_parents: &OidHashSet,
 ) -> Result<(OidHashSet, Vec<FsckIssue>)> {
     let odb = repo.odb();
     let algo = odb.hash_algo();
@@ -1142,6 +1152,7 @@ fn walk_connectivity(
                 parent,
                 root_kind,
                 links,
+                promisor_parents,
             );
             continue;
         }
@@ -1195,6 +1206,7 @@ fn walk_connectivity(
                         oid,
                         ObjectKind::Commit,
                         "parent",
+                        promisor_parents,
                     );
                 }
                 follow_typed_link(
@@ -1209,6 +1221,7 @@ fn walk_connectivity(
                     oid,
                     ObjectKind::Tree,
                     "tree",
+                    promisor_parents,
                 );
             }
             ObjectKind::Tree => {
@@ -1223,6 +1236,7 @@ fn walk_connectivity(
                     oid,
                     &obj.data,
                     algo.len(),
+                    promisor_parents,
                 );
             }
             ObjectKind::Tag => {
@@ -1249,6 +1263,7 @@ fn walk_connectivity(
                     oid,
                     expected,
                     "object",
+                    promisor_parents,
                 );
             }
             ObjectKind::Blob => {}
@@ -1320,6 +1335,7 @@ fn walk_tree_entries_from_data(
     tree_oid: ObjectId,
     tree_data: &[u8],
     oid_len: usize,
+    promisor_parents: &OidHashSet,
 ) {
     let entries = TreeRefIter::with_oid_len(tree_data, oid_len).collect::<Result<Vec<_>>>();
     let entries = match entries {
@@ -1340,6 +1356,7 @@ fn walk_tree_entries_from_data(
             seen,
             tree_oid,
             entry,
+            promisor_parents,
         );
     }
 }
@@ -1355,6 +1372,7 @@ fn walk_tree_entries(
     seen: &mut OidHashSet,
     tree_oid: ObjectId,
     entries: &[TreeEntry],
+    promisor_parents: &OidHashSet,
 ) {
     for entry in entries {
         walk_one_tree_entry(
@@ -1371,6 +1389,7 @@ fn walk_tree_entries(
                 name: &entry.name,
                 oid: entry.oid,
             },
+            promisor_parents,
         );
     }
 }
@@ -1386,6 +1405,7 @@ fn walk_one_tree_entry(
     seen: &mut OidHashSet,
     tree_oid: ObjectId,
     entry: TreeEntryRef<'_>,
+    promisor_parents: &OidHashSet,
 ) {
     if entry.mode == MODE_GITLINK {
         return;
@@ -1393,6 +1413,9 @@ fn walk_one_tree_entry(
     if let Some(expected) = kind_for_tree_mode(entry.mode) {
         match child_exists_with_kind(odb, store_links, entry.oid, expected) {
             ChildKindProbe::Missing => {
+                if expected == ObjectKind::Blob && promisor_parents.contains(&tree_oid) {
+                    return;
+                }
                 if should_emit(config, strict, "missingObject") {
                     issues.push(FsckIssue::MissingObject {
                         oid: entry.oid,
@@ -1435,6 +1458,7 @@ fn walk_from_validated_links(
     _parent: ObjectId,
     _root_kind: WalkRootKind,
     links: &ValidatedObjectLinks,
+    promisor_parents: &OidHashSet,
 ) {
     match links {
         ValidatedObjectLinks::Commit { tree, parents } => {
@@ -1451,6 +1475,7 @@ fn walk_from_validated_links(
                     oid,
                     ObjectKind::Commit,
                     "parent",
+                    promisor_parents,
                 );
             }
             follow_typed_link(
@@ -1465,6 +1490,7 @@ fn walk_from_validated_links(
                 oid,
                 ObjectKind::Tree,
                 "tree",
+                promisor_parents,
             );
         }
         ValidatedObjectLinks::Tree(entries) => {
@@ -1478,6 +1504,7 @@ fn walk_from_validated_links(
                 seen,
                 oid,
                 entries,
+                promisor_parents,
             );
         }
         ValidatedObjectLinks::Tag {
@@ -1496,6 +1523,7 @@ fn walk_from_validated_links(
                 oid,
                 *object_type,
                 "object",
+                promisor_parents,
             );
         }
         ValidatedObjectLinks::Blob => {}
@@ -1515,9 +1543,13 @@ fn follow_typed_link(
     parent: ObjectId,
     expected: ObjectKind,
     link_name: &str,
+    promisor_parents: &OidHashSet,
 ) {
     match child_exists_with_kind(odb, store_links, target, expected) {
         ChildKindProbe::Missing => {
+            if expected == ObjectKind::Blob && promisor_parents.contains(&parent) {
+                return;
+            }
             if should_emit(config, strict, "missingObject") {
                 issues.push(FsckIssue::MissingObject {
                     oid: target,

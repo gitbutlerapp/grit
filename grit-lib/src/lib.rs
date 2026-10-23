@@ -191,6 +191,7 @@ pub(crate) mod github_auth;
 pub(crate) mod line_interner;
 pub(crate) mod oid_abbrev_cache;
 pub(crate) mod pack_roll_delta;
+pub(crate) mod partial_clone;
 
 #[path = "bench_fixture/mod.rs"]
 mod bench_fixture_root;
