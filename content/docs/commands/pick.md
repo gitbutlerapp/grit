@@ -9,6 +9,7 @@ order: 4
 
 ```text
 grit pick [<commit> | <range>]...
+grit pick --check [<commit> | <range>]...
 grit pick --continue | --abort | --skip
 ```
 
@@ -44,7 +45,10 @@ Resolve conflicts, stage with [`grit add`](../add/), then run `grit pick --conti
 | `-m`, `--message` | Replace the message (only with exactly one commit). |
 | `--message-file` | Read the message from a file (only with exactly one commit). |
 | `--mainline` | Parent number when replaying a merge commit (library support; CLI wiring pending). |
-| `--dry-run` | Print the commits that would be replayed without changing refs or the worktree. |
+| `--check` | Predict whether the pick would succeed without changing refs, the index, or the worktree. Exit **0** when every step would apply cleanly; exit **1** when a step would conflict or stop as empty (with `--empty stop`). Conflicts with `--continue`, `--abort`, `--skip`, and `--dry-run`. |
+| `--dry-run` | Print the commits that would be replayed without changing refs or the worktree. Conflicts with `--check`. |
+| `-X ours\|theirs` | Auto-resolve replay conflicts: keep the current branch side (`ours`) or the picked change (`theirs`). |
+| `--conflict merge\|diff3\|zdiff3` | Conflict marker style when a step stops with conflicts (default from `merge.conflictStyle`). |
 
 ## Examples
 
@@ -82,7 +86,9 @@ Pass `--json` for stable, scripting-friendly output:
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
-| `result` | string | `picked`, `conflicts`, `empty`, `aborted`, or `skipped`. |
+| `result` | string | `picked`, `clean`, `conflicts`, `empty`, `aborted`, or `skipped`. |
+| `oid` | string or null | Predicted final tree oid when `result` is `clean` (`--check` only). |
+| `check` | boolean | True when `--check` was used (nothing was picked). |
 | `commits` | array | Each picked or attempted step: `source`, `oid`, `change_id`, `subject`. |
 | `dropped` | array | Source commit oids skipped as empty (`--empty drop`). |
 | `conflicts` | array or null | Conflicted paths when `result` is `conflicts`. |

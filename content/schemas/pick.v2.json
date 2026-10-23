@@ -58,14 +58,25 @@
     },
     "PickResult": {
       "description": "Integration result for `grit pick` (`--json` contract).",
-      "enum": [
-        "picked",
-        "conflicts",
-        "empty",
-        "aborted",
-        "skipped"
-      ],
-      "type": "string"
+      "oneOf": [
+        {
+          "enum": [
+            "picked",
+            "conflicts",
+            "empty",
+            "aborted",
+            "skipped"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Every step would apply cleanly (`grit pick --check` only).",
+          "enum": [
+            "clean"
+          ],
+          "type": "string"
+        }
+      ]
     }
   },
   "description": "Result of `grit pick`.",
@@ -78,6 +89,10 @@
         "array",
         "null"
       ]
+    },
+    "check": {
+      "description": "True when this outcome is from `grit pick --check` (nothing was picked).",
+      "type": "boolean"
     },
     "commits": {
       "description": "Commits picked or attempted in this invocation.",
@@ -114,6 +129,13 @@
       },
       "type": [
         "array",
+        "null"
+      ]
+    },
+    "oid": {
+      "description": "Predicted result tree (full hex) when `result` is `clean` from `--check`.",
+      "type": [
+        "string",
         "null"
       ]
     },

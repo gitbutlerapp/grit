@@ -65,6 +65,13 @@
           "type": "string"
         },
         {
+          "description": "Every step would apply cleanly (`grit pick --check` only).",
+          "enum": [
+            "clean"
+          ],
+          "type": "string"
+        },
+        {
           "description": "The sequence stopped on merge conflicts.",
           "enum": [
             "conflicts"
@@ -106,6 +113,10 @@
         "string",
         "null"
       ]
+    },
+    "check": {
+      "description": "True when this outcome is from `grit pick --check` (nothing was picked).",
+      "type": "boolean"
     },
     "commits": {
       "description": "Pick commits created in this invocation (in apply order).",
