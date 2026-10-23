@@ -2429,20 +2429,22 @@ fn schema_top_level_keys_are_stable() -> TestResult {
     gs_ok(&seed, &["add", "drop.txt"]);
     gs_ok(&seed, &["commit", "track drop"]);
     let removed = gs_json(&seed, &["rm", "drop.txt"]);
-    assert_eq!(keys(&removed), ["removed"]);
+    assert_eq!(keys(&removed), ["dry_run", "removed"]);
+    assert_eq!(removed["dry_run"], false);
     assert_eq!(removed["removed"][0], "drop.txt");
 
     write_file(&seed.join("from.txt"), "mv\n");
     gs_ok(&seed, &["add", "from.txt"]);
     gs_ok(&seed, &["commit", "track from"]);
     let renamed = gs_json(&seed, &["mv", "from.txt", "to.txt"]);
-    assert_eq!(keys(&renamed), ["from", "to"]);
-    assert_eq!(renamed["from"], "from.txt");
-    assert_eq!(renamed["to"], "to.txt");
+    assert_eq!(keys(&renamed), ["dry_run", "moves"]);
+    assert_eq!(renamed["dry_run"], false);
+    assert_eq!(renamed["moves"][0]["from"], "from.txt");
+    assert_eq!(renamed["moves"][0]["to"], "to.txt");
 
     write_file(&seed.join("scratch.txt"), "x\n");
     let clean_preview = gs_json(&seed, &["clean"]);
-    assert_eq!(keys(&clean_preview), ["dry_run", "removed"]);
+    assert_eq!(keys(&clean_preview), ["dry_run", "removed", "scope"]);
     assert_eq!(clean_preview["dry_run"], Value::Bool(true));
     assert!(clean_preview["removed"]
         .as_array()
@@ -2451,7 +2453,7 @@ fn schema_top_level_keys_are_stable() -> TestResult {
         .any(|p| p.as_str() == Some("scratch.txt")));
     assert!(seed.join("scratch.txt").is_file());
     let clean_forced = gs_json(&seed, &["clean", "-f"]);
-    assert_eq!(keys(&clean_forced), ["dry_run", "removed"]);
+    assert_eq!(keys(&clean_forced), ["dry_run", "removed", "scope"]);
     assert_eq!(clean_forced["dry_run"], Value::Bool(false));
     assert!(!seed.join("scratch.txt").is_file());
     let committed = gs_json(&seed, &["commit", "first"]);

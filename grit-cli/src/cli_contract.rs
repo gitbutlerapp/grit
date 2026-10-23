@@ -958,18 +958,6 @@ const EXCEPTIONS: &[(&str, ContractRule, &str, &str)] = &[
         "reset has no `--dry-run` yet",
     ),
     (
-        "rm",
-        ContractRule::DryRun,
-        "workspace-extras",
-        "rm has no `--dry-run` yet",
-    ),
-    (
-        "mv",
-        ContractRule::DryRun,
-        "workspace-extras",
-        "mv has no `--dry-run` yet",
-    ),
-    (
         "auth",
         ContractRule::DryRun,
         "s6 dry-run",

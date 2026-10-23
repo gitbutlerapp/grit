@@ -121,7 +121,7 @@ pub fn schema_id_v2(command: &str) -> String {
 }
 
 /// Commands whose live `--json` shape is versioned separately from the frozen v1 contract.
-const SCHEMA_V2_COMMANDS: &[&str] = &["merge", "pull", "pick"];
+const SCHEMA_V2_COMMANDS: &[&str] = &["merge", "pull", "pick", "mv"];
 
 /// File name for a command schema under [`schemas_dir`].
 pub fn schema_file_name(command: &str) -> String {
@@ -1024,7 +1024,7 @@ mod tests {
             "schema index must list every committed schema document exactly"
         );
         let file_count: usize = on_disk.values().map(|v| v.len()).sum();
-        assert_eq!(file_count, 90, "expected 90 schema files indexed");
+        assert_eq!(file_count, 92, "expected 92 schema files indexed");
     }
 
     fn load_snapshot_json_stdout(name: &str, snapshot_dir: &Path) -> Value {

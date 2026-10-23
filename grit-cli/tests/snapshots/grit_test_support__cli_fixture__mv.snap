@@ -10,12 +10,12 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\"from\":\"second.txt\",\"to\":\"renamed.txt\"}\n",
+    "stdout": "{\"dry_run\":false,\"moves\":[{\"from\":\"second.txt\",\"to\":\"renamed.txt\"}]}\n",
     "stderr": ""
   },
   "markdown": {
     "exit": 0,
-    "stdout": "- **from**: `second.txt`\n- **to**: `renamed.txt`\n",
+    "stdout": "- **moves**:\n  - `second.txt` → `renamed.txt`\n",
     "stderr": ""
   }
 }

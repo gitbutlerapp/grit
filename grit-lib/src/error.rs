@@ -848,6 +848,72 @@ pub enum Error {
     /// A directory pathspec was used without `recursive` ([`crate::porcelain::paths::remove_paths`]).
     #[error("not removing '{0}' recursively without -r")]
     NotRemovingRecursively(String),
+
+    /// A porcelain path operation requires a checked-out work tree.
+    #[error("this operation must be run in a work tree")]
+    RequiresWorkTree,
+
+    /// [`crate::porcelain::paths::remove_paths`] was called with no pathspecs.
+    #[error("you must specify path(s) to remove")]
+    RemovePathsRequired,
+
+    /// [`crate::porcelain::paths::move_path`] / [`crate::porcelain::paths::move_paths`] source is not tracked.
+    #[error("not under version control, source={src}")]
+    MoveSourceNotTracked {
+        /// Untracked or missing source path.
+        src: String,
+    },
+
+    /// Move refused because the destination already exists without `--force`.
+    #[error("destination exists, source={src}, destination={destination}")]
+    MoveDestinationExists {
+        /// Source path in the move request.
+        src: String,
+        /// Existing destination path.
+        destination: String,
+    },
+
+    /// Move refused because the destination lies under the source directory.
+    #[error("cannot move '{src}' to a subdirectory of itself, '{destination}'")]
+    MoveIntoSubdirectory {
+        /// Source directory path.
+        src: String,
+        /// Invalid destination under the source.
+        destination: String,
+    },
+
+    /// Move refused because source and destination are the same path.
+    #[error("cannot move into itself, source={src}, destination={destination}")]
+    MoveIntoSelf {
+        /// Source path.
+        src: String,
+        /// Destination equal to the source.
+        destination: String,
+    },
+
+    /// Move refused because the source has no tracked index entries.
+    #[error("nothing to move, source={src}")]
+    MoveNothingToMove {
+        /// Source path with no index entries.
+        src: String,
+    },
+
+    /// A worktree source path is missing or not a file, directory, or symlink.
+    #[error("bad source, source={src}, destination={destination}")]
+    MoveBadSource {
+        /// Source path.
+        src: String,
+        /// Planned destination path.
+        destination: String,
+    },
+
+    /// Internal invariant: a planned rename references a missing index entry.
+    #[error("internal error: missing index entry for '{path}'")]
+    MoveMissingIndexEntry {
+        /// Index path that should exist during a move.
+        path: String,
+    },
+
     /// The remote transport failed before a valid ref advertisement (SSH down, missing repo, etc.).
     #[error("could not read from remote repository")]
     RemoteReadFailed,

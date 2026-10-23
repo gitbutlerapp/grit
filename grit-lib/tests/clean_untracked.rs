@@ -6,7 +6,7 @@ use std::path::Path;
 use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::porcelain::clean::{clean_untracked, CleanOptions};
+use grit_lib::porcelain::clean::{clean_untracked, CleanOptions, CleanScope};
 use grit_lib::porcelain::commit::{create_commit, CommitRequest, HookPolicy};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
@@ -221,7 +221,7 @@ fn include_ignored_matches_git_clean_fdx() {
         &repo,
         &CleanOptions {
             directories: true,
-            include_ignored: true,
+            scope: CleanScope::UntrackedAndIgnored,
             dry_run: false,
             ..CleanOptions::default()
         },

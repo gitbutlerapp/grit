@@ -83,6 +83,21 @@ $ grit commit -m "Explain what changed and why"
 
 `grit add --json` returns `{added, modified, removed, intent_to_add, dry_run, count, staged}` with repository-relative paths. Use `--dry-run` before bulk staging to bound agent work; path lists are sorted and stable. With `--patch-file`, paths come from the patch (same JSON fields as path-based staging).
 
+### Removing, renaming, and cleaning paths
+
+| Task | Command |
+| --- | --- |
+| Stop tracking (and delete from disk by default) | `grit rm -- <paths>` |
+| Preview `rm` without writing | `grit rm --dry-run -- <paths>` |
+| Ignore missing pathspecs on `rm` | `grit rm --ignore-unmatch -- <paths>` |
+| Rename or move tracked paths | `grit mv <source>... <destination>` |
+| Preview `mv` | `grit mv --dry-run <source>... <destination>` (`--json` → `{moves:[{from,to}], dry_run}`) |
+| List untracked paths to delete | `grit clean` (dry run by default) |
+| Delete untracked paths | `grit clean -f` |
+| Remove only ignored untracked files | `grit clean --only-ignored` (not combinable with `--ignored`) |
+| Exclude paths from clean | `grit clean -e '<pattern>'` (repeatable) |
+| Clean files but not directories | `grit clean --files-only` |
+
 `grit commit` fails with "nothing to commit" on a clean tree unless you pass `--allow-empty`. On detached HEAD it advances `HEAD` without moving a branch; use `grit switch -c <name>` to keep the commits on a new branch.
 
 Each commit gets a stable **`change-id`** header (on by default) that survives `--amend`. Disable with `grit config grit.changeIds false` when you need Git-identical commit objects. See the docs site section on change ids for derivation and testing config.

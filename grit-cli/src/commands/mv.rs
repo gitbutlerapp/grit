@@ -1,7 +1,7 @@
 //! `grit mv` — rename or move tracked paths.
 
 use anyhow::{bail, Context, Result};
-use grit_lib::porcelain::paths::move_path;
+use grit_lib::porcelain::paths::{move_paths, MoveOptions, PathMove};
 use grit_lib::repo::Repository;
 use grit_lib::worktree::pathspec::{pathdiff, resolve_pathspec_in_worktree_with_git_dir};
 use schemars::JsonSchema;
@@ -11,31 +11,61 @@ use std::io::Write;
 use crate::context;
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 
-/// CLI outcome for `grit mv`.
-#[derive(Serialize, JsonSchema)]
-pub struct MvOutcome {
+/// One path rename in `grit mv` JSON output.
+#[derive(Serialize, JsonSchema, Clone)]
+pub struct PathMoveJson {
     /// Source path before the move.
     pub from: String,
     /// Destination path after the move.
     pub to: String,
 }
 
+/// CLI outcome for `grit mv`.
+#[derive(Serialize, JsonSchema)]
+pub struct MvOutcome {
+    /// Individual renames performed or previewed.
+    pub moves: Vec<PathMoveJson>,
+    /// Whether this run only previewed moves.
+    pub dry_run: bool,
+}
+
 impl HumanRender for MvOutcome {
     fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        outln!(w, "Renamed {} -> {}.", self.from, self.to);
+        let prefix = if self.dry_run {
+            "Would rename"
+        } else {
+            "Renamed"
+        };
+        if self.moves.is_empty() {
+            return Ok(());
+        }
+        if self.moves.len() == 1 {
+            let mv = &self.moves[0];
+            outln!(w, "{prefix} {} -> {}.", mv.from, mv.to);
+            return Ok(());
+        }
+        for mv in &self.moves {
+            outln!(w, "{prefix} {} -> {}.", mv.from, mv.to);
+        }
         Ok(())
     }
 }
 
 impl MarkdownRender for MvOutcome {
     fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        outln!(w, "- **from**: `{}`", self.from);
-        outln!(w, "- **to**: `{}`", self.to);
+        if self.moves.is_empty() {
+            outln!(w, "- **moves**: _(none)_");
+            return Ok(());
+        }
+        outln!(w, "- **moves**:");
+        for mv in &self.moves {
+            outln!(w, "  - `{}` → `{}`", mv.from, mv.to);
+        }
         Ok(())
     }
 }
 
-pub fn run(sources: &[String], force: bool) -> Result<MvOutcome> {
+pub fn run(sources: &[String], force: bool, dry_run: bool) -> Result<MvOutcome> {
     if sources.len() < 2 {
         bail!("usage: grit mv <source>... <destination>");
     }
@@ -45,27 +75,24 @@ pub fn run(sources: &[String], force: bool) -> Result<MvOutcome> {
     let resolved_srcs = resolve_paths(&repo, srcs)?;
     let resolved_dst = resolve_one(&repo, dst)?;
 
-    if resolved_srcs.len() == 1 {
-        let outcome = move_path(&repo, &resolved_srcs[0], &resolved_dst, force)
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
-        return Ok(MvOutcome {
-            from: outcome.from,
-            to: outcome.to,
-        });
-    }
-
-    for src in &resolved_srcs {
-        let base = std::path::Path::new(src)
-            .file_name()
-            .and_then(|s| s.to_str())
-            .unwrap_or(src.as_str());
-        let target = format!("{resolved_dst}/{base}");
-        move_path(&repo, src, &target, force).map_err(|e| anyhow::anyhow!("{e}"))?;
-    }
+    let lib_outcome = move_paths(
+        &repo,
+        &MoveOptions {
+            sources: resolved_srcs,
+            destination: resolved_dst,
+            force,
+            dry_run,
+        },
+    )
+    .map_err(|e| anyhow::anyhow!("{e}"))?;
 
     Ok(MvOutcome {
-        from: resolved_srcs.join(" "),
-        to: resolved_dst,
+        moves: lib_outcome
+            .moves
+            .into_iter()
+            .map(|PathMove { from, to }| PathMoveJson { from, to })
+            .collect(),
+        dry_run,
     })
 }
 

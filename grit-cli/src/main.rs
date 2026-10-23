@@ -791,6 +791,12 @@ enum Command {
         /// Remove even when paths have local modifications.
         #[arg(short = 'f', long = "force")]
         force: bool,
+        /// List paths that would be removed without changing the index or work tree.
+        #[arg(long = "dry-run")]
+        dry_run: bool,
+        /// Treat non-matching pathspecs as success with an empty result.
+        #[arg(long = "ignore-unmatch")]
+        ignore_unmatch: bool,
     },
     /// Rename or move tracked paths.
     Mv {
@@ -800,17 +806,32 @@ enum Command {
         /// Replace existing files at the destination.
         #[arg(short = 'f', long = "force")]
         force: bool,
+        /// List moves that would happen without changing the index or work tree.
+        #[arg(long = "dry-run")]
+        dry_run: bool,
     },
     /// Remove untracked files from the working tree.
     Clean {
         #[command(flatten)]
         pathspecs: pathspec_args::PathspecArgs,
         /// Actually delete files. Without this flag, only prints what would be removed.
-        #[arg(short, long)]
+        #[arg(short, long, conflicts_with = "dry_run")]
         force: bool,
+        /// Explicit dry run (default when `-f` is not passed).
+        #[arg(long = "dry-run", conflicts_with = "force")]
+        dry_run: bool,
         /// Remove ignored files as well (like `git clean -x`).
-        #[arg(long)]
+        #[arg(long, conflicts_with = "only_ignored")]
         ignored: bool,
+        /// Remove only ignored files (like `git clean -X`).
+        #[arg(long = "only-ignored", conflicts_with = "ignored")]
+        only_ignored: bool,
+        /// Additional exclude patterns; matching paths are not removed.
+        #[arg(short = 'e', long = "exclude", value_name = "PATTERN", action = clap::ArgAction::Append)]
+        exclude: Vec<String>,
+        /// Remove only files, not untracked directories.
+        #[arg(long = "files-only")]
+        files_only: bool,
     },
     /// Pack reachable objects and remove redundant packs.
     Repack {
@@ -2126,14 +2147,36 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             pathspecs,
             cached,
             force,
-        } => emit(&commands::rm::run(&pathspecs, cached, force)?, opts, ctx),
-        Command::Mv { paths, force } => emit(&commands::mv::run(&paths, force)?, opts, ctx),
+            dry_run,
+            ignore_unmatch,
+        } => emit(
+            &commands::rm::run(&pathspecs, cached, force, dry_run, ignore_unmatch)?,
+            opts,
+            ctx,
+        ),
+        Command::Mv {
+            paths,
+            force,
+            dry_run,
+        } => emit(&commands::mv::run(&paths, force, dry_run)?, opts, ctx),
         Command::Clean {
             pathspecs,
             force,
+            dry_run,
             ignored,
+            only_ignored,
+            exclude,
+            files_only,
         } => emit(
-            &commands::clean::run(&pathspecs, force, ignored)?,
+            &commands::clean::run(
+                &pathspecs,
+                force,
+                dry_run,
+                ignored,
+                only_ignored,
+                &exclude,
+                files_only,
+            )?,
             opts,
             ctx,
         ),

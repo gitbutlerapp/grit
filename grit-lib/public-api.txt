@@ -4864,6 +4864,24 @@ pub grit_lib::error::Error::MergeCommit
 pub grit_lib::error::Error::MergeCommit::oid: grit_lib::objects::ObjectId
 pub grit_lib::error::Error::Message(alloc::string::String)
 pub grit_lib::error::Error::Midx(grit_lib::prelude::MidxError)
+pub grit_lib::error::Error::MoveBadSource
+pub grit_lib::error::Error::MoveBadSource::destination: alloc::string::String
+pub grit_lib::error::Error::MoveBadSource::src: alloc::string::String
+pub grit_lib::error::Error::MoveDestinationExists
+pub grit_lib::error::Error::MoveDestinationExists::destination: alloc::string::String
+pub grit_lib::error::Error::MoveDestinationExists::src: alloc::string::String
+pub grit_lib::error::Error::MoveIntoSelf
+pub grit_lib::error::Error::MoveIntoSelf::destination: alloc::string::String
+pub grit_lib::error::Error::MoveIntoSelf::src: alloc::string::String
+pub grit_lib::error::Error::MoveIntoSubdirectory
+pub grit_lib::error::Error::MoveIntoSubdirectory::destination: alloc::string::String
+pub grit_lib::error::Error::MoveIntoSubdirectory::src: alloc::string::String
+pub grit_lib::error::Error::MoveMissingIndexEntry
+pub grit_lib::error::Error::MoveMissingIndexEntry::path: alloc::string::String
+pub grit_lib::error::Error::MoveNothingToMove
+pub grit_lib::error::Error::MoveNothingToMove::src: alloc::string::String
+pub grit_lib::error::Error::MoveSourceNotTracked
+pub grit_lib::error::Error::MoveSourceNotTracked::src: alloc::string::String
 pub grit_lib::error::Error::NoReplayInProgress
 pub grit_lib::error::Error::NotARepository(alloc::string::String)
 pub grit_lib::error::Error::NotFastForward
@@ -4913,9 +4931,11 @@ pub grit_lib::error::Error::ReflogUnknownRef
 pub grit_lib::error::Error::ReflogUnknownRef::refname: alloc::string::String
 pub grit_lib::error::Error::Reftable(grit_lib::refs::reftable::ReftableError)
 pub grit_lib::error::Error::RemoteReadFailed
+pub grit_lib::error::Error::RemovePathsRequired
 pub grit_lib::error::Error::ReplayAbortHeadMoved
 pub grit_lib::error::Error::ReplayContinueUnmerged
 pub grit_lib::error::Error::ReplaySourceAtHead
+pub grit_lib::error::Error::RequiresWorkTree
 pub grit_lib::error::Error::RestoreConflictMissingOurs
 pub grit_lib::error::Error::RestoreConflictMissingOurs::path: alloc::string::String
 pub grit_lib::error::Error::RestoreConflictMissingTheirs
@@ -11504,11 +11524,35 @@ pub fn grit_lib::porcelain::cherry_pick::same_blob(&grit_lib::index::IndexEntry,
 pub fn grit_lib::porcelain::cherry_pick::same_blob_renames(&std::collections::hash::map::HashMap<alloc::vec::Vec<u8>, grit_lib::index::IndexEntry>, &std::collections::hash::map::HashMap<alloc::vec::Vec<u8>, grit_lib::index::IndexEntry>) -> alloc::vec::Vec<(alloc::vec::Vec<u8>, alloc::vec::Vec<u8>)>
 pub fn grit_lib::porcelain::cherry_pick::stage_entry_at(&mut grit_lib::index::Index, &[u8], &grit_lib::index::IndexEntry, u8)
 pub mod grit_lib::porcelain::clean
+pub enum grit_lib::porcelain::clean::CleanScope
+pub grit_lib::porcelain::clean::CleanScope::OnlyIgnored
+pub grit_lib::porcelain::clean::CleanScope::Untracked
+pub grit_lib::porcelain::clean::CleanScope::UntrackedAndIgnored
+impl core::clone::Clone for grit_lib::porcelain::clean::CleanScope
+pub fn grit_lib::porcelain::clean::CleanScope::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::clean::CleanScope
+impl core::cmp::PartialEq for grit_lib::porcelain::clean::CleanScope
+pub fn grit_lib::porcelain::clean::CleanScope::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::porcelain::clean::CleanScope
+pub fn grit_lib::porcelain::clean::CleanScope::default() -> Self
+impl core::fmt::Debug for grit_lib::porcelain::clean::CleanScope
+pub fn grit_lib::porcelain::clean::CleanScope::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::porcelain::clean::CleanScope
+impl core::marker::StructuralPartialEq for grit_lib::porcelain::clean::CleanScope
+impl core::marker::Freeze for grit_lib::porcelain::clean::CleanScope
+impl core::marker::Send for grit_lib::porcelain::clean::CleanScope
+impl core::marker::Sync for grit_lib::porcelain::clean::CleanScope
+impl core::marker::Unpin for grit_lib::porcelain::clean::CleanScope
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::clean::CleanScope
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::clean::CleanScope
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::clean::CleanScope
 pub struct grit_lib::porcelain::clean::CleanOptions
 pub grit_lib::porcelain::clean::CleanOptions::directories: bool
 pub grit_lib::porcelain::clean::CleanOptions::dry_run: bool
-pub grit_lib::porcelain::clean::CleanOptions::include_ignored: bool
+pub grit_lib::porcelain::clean::CleanOptions::excludes: alloc::vec::Vec<alloc::string::String>
+pub grit_lib::porcelain::clean::CleanOptions::files_only: bool
 pub grit_lib::porcelain::clean::CleanOptions::pathspecs: alloc::vec::Vec<alloc::string::String>
+pub grit_lib::porcelain::clean::CleanOptions::scope: grit_lib::porcelain::clean::CleanScope
 impl core::clone::Clone for grit_lib::porcelain::clean::CleanOptions
 pub fn grit_lib::porcelain::clean::CleanOptions::clone(&self) -> Self
 impl core::default::Default for grit_lib::porcelain::clean::CleanOptions
@@ -12337,9 +12381,24 @@ pub fn grit_lib::porcelain::merge::tree_merge_has_conflicts(&grit_lib::diff::mer
 pub fn grit_lib::porcelain::merge::tree_to_index_entries(&grit_lib::repo::Repository, &grit_lib::objects::ObjectId, &str) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::index::IndexEntry>>
 pub fn grit_lib::porcelain::merge::tree_to_map(alloc::vec::Vec<grit_lib::index::IndexEntry>) -> std::collections::hash::map::HashMap<alloc::vec::Vec<u8>, grit_lib::index::IndexEntry>
 pub mod grit_lib::porcelain::paths
+pub struct grit_lib::porcelain::paths::MoveOptions
+pub grit_lib::porcelain::paths::MoveOptions::destination: alloc::string::String
+pub grit_lib::porcelain::paths::MoveOptions::dry_run: bool
+pub grit_lib::porcelain::paths::MoveOptions::force: bool
+pub grit_lib::porcelain::paths::MoveOptions::sources: alloc::vec::Vec<alloc::string::String>
+impl core::clone::Clone for grit_lib::porcelain::paths::MoveOptions
+pub fn grit_lib::porcelain::paths::MoveOptions::clone(&self) -> Self
+impl core::fmt::Debug for grit_lib::porcelain::paths::MoveOptions
+pub fn grit_lib::porcelain::paths::MoveOptions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::porcelain::paths::MoveOptions
+impl core::marker::Send for grit_lib::porcelain::paths::MoveOptions
+impl core::marker::Sync for grit_lib::porcelain::paths::MoveOptions
+impl core::marker::Unpin for grit_lib::porcelain::paths::MoveOptions
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::paths::MoveOptions
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::paths::MoveOptions
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::paths::MoveOptions
 pub struct grit_lib::porcelain::paths::MoveOutcome
-pub grit_lib::porcelain::paths::MoveOutcome::from: alloc::string::String
-pub grit_lib::porcelain::paths::MoveOutcome::to: alloc::string::String
+pub grit_lib::porcelain::paths::MoveOutcome::moves: alloc::vec::Vec<grit_lib::porcelain::paths::PathMove>
 impl core::clone::Clone for grit_lib::porcelain::paths::MoveOutcome
 pub fn grit_lib::porcelain::paths::MoveOutcome::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::porcelain::paths::MoveOutcome
@@ -12355,12 +12414,34 @@ impl core::marker::Unpin for grit_lib::porcelain::paths::MoveOutcome
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::paths::MoveOutcome
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::paths::MoveOutcome
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::paths::MoveOutcome
+pub struct grit_lib::porcelain::paths::PathMove
+pub grit_lib::porcelain::paths::PathMove::from: alloc::string::String
+pub grit_lib::porcelain::paths::PathMove::to: alloc::string::String
+impl core::clone::Clone for grit_lib::porcelain::paths::PathMove
+pub fn grit_lib::porcelain::paths::PathMove::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::paths::PathMove
+impl core::cmp::PartialEq for grit_lib::porcelain::paths::PathMove
+pub fn grit_lib::porcelain::paths::PathMove::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::porcelain::paths::PathMove
+pub fn grit_lib::porcelain::paths::PathMove::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::porcelain::paths::PathMove
+impl core::marker::Freeze for grit_lib::porcelain::paths::PathMove
+impl core::marker::Send for grit_lib::porcelain::paths::PathMove
+impl core::marker::Sync for grit_lib::porcelain::paths::PathMove
+impl core::marker::Unpin for grit_lib::porcelain::paths::PathMove
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::paths::PathMove
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::paths::PathMove
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::paths::PathMove
 pub struct grit_lib::porcelain::paths::RemoveOptions
 pub grit_lib::porcelain::paths::RemoveOptions::cached: bool
+pub grit_lib::porcelain::paths::RemoveOptions::dry_run: bool
 pub grit_lib::porcelain::paths::RemoveOptions::force: bool
+pub grit_lib::porcelain::paths::RemoveOptions::ignore_unmatch: bool
 pub grit_lib::porcelain::paths::RemoveOptions::pathspec_sources: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::porcelain::paths::RemoveOptions::pathspecs: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::porcelain::paths::RemoveOptions::recursive: bool
+impl grit_lib::porcelain::paths::RemoveOptions
+pub fn grit_lib::porcelain::paths::RemoveOptions::resolve_recursive(&mut self, &grit_lib::repo::Repository) -> grit_lib::error::Result<()>
 impl core::clone::Clone for grit_lib::porcelain::paths::RemoveOptions
 pub fn grit_lib::porcelain::paths::RemoveOptions::clone(&self) -> Self
 impl core::default::Default for grit_lib::porcelain::paths::RemoveOptions
@@ -12394,6 +12475,7 @@ impl core::marker::UnsafeUnpin for grit_lib::porcelain::paths::RemoveOutcome
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::paths::RemoveOutcome
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::paths::RemoveOutcome
 pub fn grit_lib::porcelain::paths::move_path(&grit_lib::repo::Repository, &str, &str, bool) -> grit_lib::error::Result<grit_lib::porcelain::paths::MoveOutcome>
+pub fn grit_lib::porcelain::paths::move_paths(&grit_lib::repo::Repository, &grit_lib::porcelain::paths::MoveOptions) -> grit_lib::error::Result<grit_lib::porcelain::paths::MoveOutcome>
 pub fn grit_lib::porcelain::paths::remove_paths(&grit_lib::repo::Repository, &grit_lib::porcelain::paths::RemoveOptions) -> grit_lib::error::Result<grit_lib::porcelain::paths::RemoveOutcome>
 pub mod grit_lib::porcelain::pathspec_match
 pub fn grit_lib::porcelain::pathspec_match::ensure_pathspec_matches_known_in_repository(&grit_lib::repo::Repository, &str, &str) -> grit_lib::error::Result<()>
@@ -13690,6 +13772,24 @@ pub grit_lib::prelude::Error::MergeCommit
 pub grit_lib::prelude::Error::MergeCommit::oid: grit_lib::objects::ObjectId
 pub grit_lib::prelude::Error::Message(alloc::string::String)
 pub grit_lib::prelude::Error::Midx(grit_lib::prelude::MidxError)
+pub grit_lib::prelude::Error::MoveBadSource
+pub grit_lib::prelude::Error::MoveBadSource::destination: alloc::string::String
+pub grit_lib::prelude::Error::MoveBadSource::src: alloc::string::String
+pub grit_lib::prelude::Error::MoveDestinationExists
+pub grit_lib::prelude::Error::MoveDestinationExists::destination: alloc::string::String
+pub grit_lib::prelude::Error::MoveDestinationExists::src: alloc::string::String
+pub grit_lib::prelude::Error::MoveIntoSelf
+pub grit_lib::prelude::Error::MoveIntoSelf::destination: alloc::string::String
+pub grit_lib::prelude::Error::MoveIntoSelf::src: alloc::string::String
+pub grit_lib::prelude::Error::MoveIntoSubdirectory
+pub grit_lib::prelude::Error::MoveIntoSubdirectory::destination: alloc::string::String
+pub grit_lib::prelude::Error::MoveIntoSubdirectory::src: alloc::string::String
+pub grit_lib::prelude::Error::MoveMissingIndexEntry
+pub grit_lib::prelude::Error::MoveMissingIndexEntry::path: alloc::string::String
+pub grit_lib::prelude::Error::MoveNothingToMove
+pub grit_lib::prelude::Error::MoveNothingToMove::src: alloc::string::String
+pub grit_lib::prelude::Error::MoveSourceNotTracked
+pub grit_lib::prelude::Error::MoveSourceNotTracked::src: alloc::string::String
 pub grit_lib::prelude::Error::NoReplayInProgress
 pub grit_lib::prelude::Error::NotARepository(alloc::string::String)
 pub grit_lib::prelude::Error::NotFastForward
@@ -13739,9 +13839,11 @@ pub grit_lib::prelude::Error::ReflogUnknownRef
 pub grit_lib::prelude::Error::ReflogUnknownRef::refname: alloc::string::String
 pub grit_lib::prelude::Error::Reftable(grit_lib::refs::reftable::ReftableError)
 pub grit_lib::prelude::Error::RemoteReadFailed
+pub grit_lib::prelude::Error::RemovePathsRequired
 pub grit_lib::prelude::Error::ReplayAbortHeadMoved
 pub grit_lib::prelude::Error::ReplayContinueUnmerged
 pub grit_lib::prelude::Error::ReplaySourceAtHead
+pub grit_lib::prelude::Error::RequiresWorkTree
 pub grit_lib::prelude::Error::RestoreConflictMissingOurs
 pub grit_lib::prelude::Error::RestoreConflictMissingOurs::path: alloc::string::String
 pub grit_lib::prelude::Error::RestoreConflictMissingTheirs

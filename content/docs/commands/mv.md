@@ -8,14 +8,14 @@ order: 4
 ## Synopsis
 
 ```text
-grit mv [-f|--force] <source>... <destination>
+grit mv [-f|--force] [--dry-run] <source>... <destination>
 ```
 
 ## Description
 
 Renames or moves tracked paths in the working tree and index, preserving object ids and cached stat data. The last argument is the destination; earlier arguments are sources.
 
-When the destination is an existing directory, each source is moved into that directory under its original base name. Moving a directory renames the whole tree of tracked files.
+When the destination is an existing directory, each source is moved into that directory under its original base name. Moving a directory renames the whole tree of tracked files. Multiple sources are validated together before anything moves; the index is updated once.
 
 Grit refuses untracked sources, overwriting an existing destination without `--force`, and moving a directory into one of its own subdirectories.
 
@@ -28,6 +28,7 @@ On case-insensitive volumes with `core.ignorecase=true`, case-only renames (for 
 | `<source>...` | One or more tracked paths to move. |
 | `<destination>` | Final path or existing directory (last argument). |
 | `-f`, `--force` | Replace an existing file at the destination. |
+| `--dry-run` | List planned renames without changing the index or work tree. |
 
 ## Examples
 
@@ -42,37 +43,42 @@ Move into a directory:
 
 ```console
 $ grit mv report.txt docs/
-Renamed report.txt -> docs/.
+Renamed report.txt -> docs/report.txt.
 ```
 
 ## JSON output
 
-Schema: [v1](/schemas/mv/v1.json)
+Live `--json` output follows schema [v2](/schemas/mv/v2.json). The frozen [v1](/schemas/mv/v1.json) schema documents the legacy `{from, to}` shape.
 
 Pass `--json` for stable, scripting-friendly output:
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
-| `from` | string | Source path (space-separated when multiple sources were moved into a directory). |
-| `to` | string | Destination path after the move. |
+| `moves` | array of `{from, to}` | Each rename performed or previewed. |
+| `dry_run` | boolean | `true` when `--dry-run` was passed. |
 
 Example:
 
 ```json
 {
-  "from": "draft.txt",
-  "to": "final.txt"
+  "dry_run": false,
+  "moves": [
+    {
+      "from": "draft.txt",
+      "to": "final.txt"
+    }
+  ]
 }
 ```
 
 ## Markdown output
 
-Schema: [v1](/schemas/mv/v1.json)
+Schema: [v2](/schemas/mv/v2.json)
 Pass [`--markdown`](../global-options/) for agent-friendly output:
 
 ```text
-- **from**: `draft.txt`
-- **to**: `final.txt`
+- **moves**:
+  - `draft.txt` → `final.txt`
 ```
 
 ## See also
