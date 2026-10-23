@@ -53,6 +53,42 @@ fn default_policy() -> RunPolicy {
     RunPolicy::default()
 }
 
+/// Per-scenario sampling window tuned so consecutive full captures stay within ±10% ratio drift.
+fn policy_for_scenario(id: &str, smoke: bool) -> RunPolicy {
+    if smoke {
+        return smoke_policy();
+    }
+    let mut policy = default_policy();
+    match id {
+        "add/all@synth-100k" | "diff/worktree@synth-100k" => {
+            policy.warmups_per_tool = 3;
+            policy.min_runs_per_tool = 10;
+            policy.min_total_timed_duration = std::time::Duration::from_secs(30);
+        }
+        "status/clean@deep-tree" => {
+            policy.warmups_per_tool = 3;
+            policy.min_runs_per_tool = 12;
+            policy.min_total_timed_duration = std::time::Duration::from_secs(25);
+        }
+        "stash/push-pop@synth-10k" => {
+            policy.warmups_per_tool = 3;
+            policy.min_runs_per_tool = 8;
+            policy.min_total_timed_duration = std::time::Duration::from_secs(15);
+        }
+        id if id.starts_with("fetch/")
+            || id.starts_with("push/")
+            || id.starts_with("pull/")
+            || id.starts_with("clone/http") =>
+        {
+            policy.warmups_per_tool = 3;
+            policy.min_runs_per_tool = 8;
+            policy.min_total_timed_duration = std::time::Duration::from_secs(15);
+        }
+        _ => {}
+    }
+    policy
+}
+
 fn tool_run(stats: &crate::schema::TimingStats, runs: u32) -> DailyToolRun {
     DailyToolRun {
         median_wall_ms: stats.median_ms,
@@ -211,11 +247,6 @@ fn run_baseline_samples(
 /// Execute headline scenarios and write a daily census JSON report.
 pub fn run_daily(opts: DailyRunOptions, timestamp: OffsetDateTime) -> Result<DailyBenchReport> {
     pin_daily_scratch_root();
-    let policy = if opts.smoke {
-        smoke_policy()
-    } else {
-        default_policy()
-    };
     let limits = RunLimits::default();
     let setup = DailySetup {
         git: &opts.git,
@@ -247,6 +278,7 @@ pub fn run_daily(opts: DailyRunOptions, timestamp: OffsetDateTime) -> Result<Dai
         }
         refresh_grit_http_server(&mut headline_ctx)
             .with_context(|| format!("refresh HTTP server for {}", plan.spec.id))?;
+        let policy = policy_for_scenario(plan.spec.id, opts.smoke);
         let git_cmd = (plan.build_git)(&headline_ctx);
         let grit_cmd = (plan.build_grit)(&headline_ctx);
         let prepare_spec = (plan.prepare)(&headline_ctx);

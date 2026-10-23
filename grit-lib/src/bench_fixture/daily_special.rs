@@ -319,9 +319,10 @@ pub fn generate_daily_special_repo(
     fs::create_dir_all(out).map_err(Error::Io)?;
     let repo = Repository::init(out, &InitOptions::default())?;
     let head = generate_into_repo(&repo, spec)?;
+    let wants = pack_wants_from_refs(&repo)?;
     let pack_bytes = build_pack(
         repo.odb(),
-        &[head],
+        &wants,
         &[],
         &PackBuildOptions {
             delta: false,
@@ -611,6 +612,19 @@ fn collect_blob_oids(odb: &Odb, tree_oid: &ObjectId, out: &mut Vec<ObjectId>) ->
     Ok(())
 }
 
+fn pack_wants_from_refs(repo: &Repository) -> Result<Vec<ObjectId>> {
+    use std::collections::HashSet;
+    let listed = crate::refs::list_refs(repo.git_dir(), "refs/")?;
+    let mut set = HashSet::new();
+    for (_, oid) in listed {
+        set.insert(oid);
+    }
+    if set.is_empty() {
+        return Err(Error::InvalidRef("special fixture repo has no refs".into()));
+    }
+    Ok(set.into_iter().collect())
+}
+
 fn commit_tree(repo: &Repository, head: ObjectId) -> Result<ObjectId> {
     let head_obj = repo.odb().read(&head)?;
     let commit = crate::objects::parse_commit(&head_obj.data)?;
@@ -700,6 +714,30 @@ mod tests {
         assert_eq!(smoke.file_count, 10);
         assert_eq!(smoke.big_binary_count, 1);
         assert_eq!(smoke.big_binary_revisions, 1);
+        assert_eq!(smoke.loose_after_pack, 0);
+    }
+
+    #[test]
+    fn big_blobs_smoke_leaves_no_loose_objects() {
+        let dir = TempDir::new().unwrap();
+        generate_daily_special_repo(dir.path(), DailySpecialShape::BigBlobs, true).unwrap();
+        let objects = dir.path().join(".git").join("objects");
+        let mut loose = 0usize;
+        for entry in std::fs::read_dir(&objects).expect("objects dir") {
+            let entry = entry.expect("objects entry");
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name == "info" || name == "pack" {
+                continue;
+            }
+            if name.len() == 2 {
+                loose += std::fs::read_dir(entry.path()).expect("shard dir").count();
+            }
+        }
+        assert_eq!(
+            loose, 0,
+            "smoke big-blobs must be pack-only (no stray loose objects)"
+        );
     }
 
     #[test]
