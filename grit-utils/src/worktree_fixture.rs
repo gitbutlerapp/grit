@@ -569,6 +569,25 @@ pub fn shell_grit_add_hunks(grit: &Path) -> String {
     format!("H=$(cat {ids_q}) && {prog_q} add --hunks \"$H\" -- {file_q} > /dev/null 2>&1")
 }
 
+/// Shell snippet: `grit restore --hunks` using prepared ids (half of 500 hunks).
+pub fn shell_grit_restore_hunks(grit: &Path) -> String {
+    let prog_q = shell_quote(&grit.to_string_lossy());
+    let ids_q = shell_quote(&scratch_dir().join(HUNKS_HALF_IDS_MARKER).to_string_lossy());
+    let file_q = shell_quote(LARGE_HUNKS_FILE);
+    format!("H=$(cat {ids_q}) && {prog_q} restore --hunks \"$H\" -- {file_q} > /dev/null 2>&1")
+}
+
+/// Shell snippet: `git apply -R` for the same half-hunk patch on the worktree.
+pub fn shell_git_apply_hunks_reverse(git: &Path) -> String {
+    let prog_q = shell_quote(&git.to_string_lossy());
+    let patch_q = shell_quote(
+        &scratch_dir()
+            .join(HUNKS_HALF_PATCH_MARKER)
+            .to_string_lossy(),
+    );
+    format!("{prog_q} apply -R {patch_q} > /dev/null 2>&1")
+}
+
 /// Shell snippet: `git apply --cached` for the same half-hunk patch.
 pub fn shell_git_apply_hunks_half(git: &Path) -> String {
     let prog_q = shell_quote(&git.to_string_lossy());

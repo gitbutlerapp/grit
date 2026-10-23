@@ -13,6 +13,8 @@ use std::collections::BTreeMap;
 pub struct IndexApplyOptions {
     /// When true, validate and report paths without writing the index or objects.
     pub dry_run: bool,
+    /// When true, reverse each patch before applying (`git apply --cached -R`).
+    pub reverse: bool,
 }
 
 /// Result of applying patches to the index.
@@ -93,7 +95,7 @@ pub fn apply_patch_to_index(
                 message: "submodule/gitlink patches are not supported".to_string(),
             });
         }
-        let changes = plan_one_file_patch(repo, &trial, patch, &mut fn_table, &mut outcome)?;
+        let changes = plan_one_file_patch(repo, &trial, patch, opts, &mut fn_table, &mut outcome)?;
         for change in &changes {
             apply_planned_to_index(&mut trial, change);
             planned.push(change.clone());
@@ -142,6 +144,7 @@ fn plan_one_file_patch(
     repo: &Repository,
     index: &Index,
     patch: &FilePatch,
+    opts: &IndexApplyOptions,
     fn_table: &mut BTreeMap<String, FnState>,
     outcome: &mut IndexApplyOutcome,
 ) -> std::result::Result<Vec<PlannedChange>, ApplyError> {
@@ -156,7 +159,14 @@ fn plan_one_file_patch(
 
     if patch.is_deleted {
         let base_blob = read_preimage_blob(repo, index, patch, &target)?;
-        apply_patch_to_blob(&base_blob, patch, &BlobApplyOptions::default())?;
+        apply_patch_to_blob(
+            &base_blob,
+            patch,
+            &BlobApplyOptions {
+                reverse: opts.reverse,
+                ..BlobApplyOptions::default()
+            },
+        )?;
         if index.get(target.as_bytes(), 0).is_none() {
             return Err(ApplyError::NotInIndex {
                 path: target.clone(),
@@ -178,7 +188,14 @@ fn plan_one_file_patch(
     }
 
     let base_blob = read_preimage_blob(repo, index, patch, &target)?;
-    let new_blob = apply_patch_to_blob(&base_blob, patch, &BlobApplyOptions::default())?;
+    let new_blob = apply_patch_to_blob(
+        &base_blob,
+        patch,
+        &BlobApplyOptions {
+            reverse: opts.reverse,
+            ..BlobApplyOptions::default()
+        },
+    )?;
     let mode = resolve_mode(index, patch, &target)?;
     let oid = hash_blob(repo, &new_blob)?;
 

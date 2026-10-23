@@ -212,8 +212,15 @@ fn map_hunk_error(err: HunkSelectError) -> anyhow::Error {
 pub fn run_patch_file(patch_file: &str, dry_run: bool) -> Result<AddOutcome> {
     let repo = context::discover()?;
     let patches = crate::patch_selection::parse_patch_file(patch_file)?;
-    let outcome = apply_patch_to_index_and_write(&repo, &patches, &IndexApplyOptions { dry_run })
-        .map_err(map_apply_error)?;
+    let outcome = apply_patch_to_index_and_write(
+        &repo,
+        &patches,
+        &IndexApplyOptions {
+            dry_run,
+            ..IndexApplyOptions::default()
+        },
+    )
+    .map_err(map_apply_error)?;
     let count = outcome.added.len() + outcome.modified.len() + outcome.removed.len();
     Ok(AddOutcome {
         added: outcome.added,
