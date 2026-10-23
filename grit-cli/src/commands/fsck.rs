@@ -6,13 +6,12 @@ use std::io::Write;
 use anyhow::Result;
 use grit_lib::config::ConfigSet;
 use grit_lib::maintenance::repository_fsck::{
-    issue_msg_id, issue_severity, issue_visible_by_default, missing_object_detail, FsckIssue,
-    FsckOptions, FsckReport, FsckSeverity,
+    issue_msg_id, issue_severity, issue_visible_by_default, FsckIssue, FsckOptions, FsckReport,
+    FsckSeverity,
 };
-use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::progress::{NeverCancel, ProgressSink};
 use schemars::JsonSchema;
-use serde::Serialize;
+use serde::{Serialize, Serializer};
 
 use crate::context;
 use crate::output::{outln, HumanRender, MarkdownRender, OutputMode, RenderContext};
@@ -43,9 +42,6 @@ pub struct FsckOutcome {
     pub objects_checked: usize,
     pub issues: Vec<FsckIssueJson>,
     pub dangling: Vec<DanglingJson>,
-    /// True when at least one issue has error severity (not serialized).
-    #[serde(skip)]
-    pub has_errors: bool,
     /// Include info-level issues in human listing (not serialized).
     #[serde(skip)]
     pub verbose: bool,
@@ -54,7 +50,9 @@ pub struct FsckOutcome {
 #[derive(Serialize, JsonSchema)]
 pub struct FsckIssueJson {
     pub kind: String,
-    pub severity: String,
+    #[serde(serialize_with = "serialize_severity")]
+    #[schemars(with = "String")]
+    pub severity: FsckSeverity,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub oid: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -78,12 +76,8 @@ impl FsckOutcome {
         options: &FsckOptions,
         verbose: bool,
     ) -> Self {
-        let has_errors = report
-            .issues
-            .iter()
-            .any(|issue| issue_severity(issue, config, options.strict) == FsckSeverity::Error);
         Self {
-            ok: !has_errors,
+            ok: report.ok(config, options),
             objects_checked: report.objects_checked,
             issues: report
                 .issues
@@ -94,22 +88,18 @@ impl FsckOutcome {
                 .dangling
                 .iter()
                 .map(|(kind, oid)| DanglingJson {
-                    kind: object_kind_label(*kind).to_owned(),
+                    kind: kind.as_str().to_owned(),
                     oid: oid.to_hex(),
                 })
                 .collect(),
-            has_errors,
             verbose,
         }
     }
 
     fn issues_for_human(&self) -> Vec<&FsckIssueJson> {
-        if self.verbose {
-            return self.issues.iter().collect();
-        }
         self.issues
             .iter()
-            .filter(|issue| issue.show_in_human_default)
+            .filter(|issue| self.verbose || issue.show_in_human_default)
             .collect()
     }
 }
@@ -117,81 +107,7 @@ impl FsckOutcome {
 fn visible_has_warning_or_error(issues: &[&FsckIssueJson]) -> bool {
     issues
         .iter()
-        .any(|issue| issue.severity == "error" || issue.severity == "warning")
-}
-
-fn object_kind_label(kind: ObjectKind) -> &'static str {
-    match kind {
-        ObjectKind::Commit => "commit",
-        ObjectKind::Tree => "tree",
-        ObjectKind::Blob => "blob",
-        ObjectKind::Tag => "tag",
-    }
-}
-
-fn issue_oid(issue: &FsckIssue) -> Option<ObjectId> {
-    match issue {
-        FsckIssue::CorruptLoose { oid, .. }
-        | FsckIssue::HashMismatch { oid, .. }
-        | FsckIssue::BadObject { oid, .. }
-        | FsckIssue::MissingObject { oid, .. } => Some(*oid),
-        FsckIssue::BrokenLink { tree, .. } => Some(*tree),
-        FsckIssue::BadRef(_) | FsckIssue::PackChecksum { .. } | FsckIssue::IdxMismatch { .. } => {
-            None
-        }
-        FsckIssue::MidxInvalid { .. } | FsckIssue::CommitGraphInvalid { .. } => None,
-        _ => None,
-    }
-}
-
-fn issue_path(issue: &FsckIssue) -> Option<String> {
-    match issue {
-        FsckIssue::BadRef(r) => Some(r.path.clone()),
-        FsckIssue::PackChecksum { pack } | FsckIssue::IdxMismatch { pack } => {
-            Some(pack.display().to_string())
-        }
-        FsckIssue::CorruptLoose { path, .. } | FsckIssue::HashMismatch { path, .. } => {
-            Some(path.display().to_string())
-        }
-        FsckIssue::MidxInvalid { .. } => Some("multi-pack-index".to_owned()),
-        FsckIssue::CommitGraphInvalid { .. } => Some("commit-graph".to_owned()),
-        _ => None,
-    }
-}
-
-fn issue_detail(issue: &FsckIssue) -> String {
-    match issue {
-        FsckIssue::CorruptLoose { path, .. } => format!("could not read {}", path.display()),
-        FsckIssue::HashMismatch { path, .. } => {
-            format!("loose hash mismatch at {}", path.display())
-        }
-        FsckIssue::BadObject { error, .. } => {
-            if error.id == "sha1Collision" {
-                format!("SHA-1 chosen-prefix collision: {}", error.detail)
-            } else {
-                error.detail.clone()
-            }
-        }
-        FsckIssue::PackChecksum { pack } => format!("pack checksum invalid for {}", pack.display()),
-        FsckIssue::IdxMismatch { pack } => {
-            format!("index checksum mismatch for {}", pack.display())
-        }
-        FsckIssue::MissingObject { oid, referrer } => missing_object_detail(*oid, *referrer),
-        FsckIssue::BrokenLink {
-            tree,
-            name,
-            mode,
-            target,
-        } => format!(
-            "tree {} entry {name} mode {mode:o} -> {}",
-            tree.to_hex(),
-            target.to_hex()
-        ),
-        FsckIssue::BadRef(r) => r.detail.clone(),
-        FsckIssue::MidxInvalid { details } => details.join("; "),
-        FsckIssue::CommitGraphInvalid { detail } => detail.clone(),
-        _ => "unknown fsck issue".to_owned(),
-    }
+        .any(|issue| issue.severity != FsckSeverity::Info)
 }
 
 fn severity_label(severity: FsckSeverity) -> &'static str {
@@ -202,14 +118,17 @@ fn severity_label(severity: FsckSeverity) -> &'static str {
     }
 }
 
+fn serialize_severity<S: Serializer>(severity: &FsckSeverity, ser: S) -> Result<S::Ok, S::Error> {
+    ser.serialize_str(severity_label(*severity))
+}
+
 fn issue_to_json(issue: &FsckIssue, config: &ConfigSet, strict: bool) -> FsckIssueJson {
-    let severity = issue_severity(issue, config, strict);
     FsckIssueJson {
         kind: issue_msg_id(issue).to_owned(),
-        severity: severity_label(severity).to_owned(),
-        oid: issue_oid(issue).map(|o| o.to_hex()),
-        path: issue_path(issue),
-        detail: issue_detail(issue),
+        severity: issue_severity(issue, config, strict),
+        oid: issue.oid().map(|o| o.to_hex()),
+        path: issue.location().map(|p| p.into_owned()),
+        detail: issue.detail(),
         show_in_human_default: issue_visible_by_default(issue, config, strict),
     }
 }
@@ -256,7 +175,7 @@ impl HumanRender for FsckOutcome {
             }
         }
 
-        if self.has_errors {
+        if !self.ok {
             outln!(w, "\nIntegrity check failed.");
         } else if visible_has_warning_or_error(&visible) {
             outln!(w, "\nCompleted with warnings only.");
@@ -284,7 +203,7 @@ impl MarkdownRender for FsckOutcome {
                     w,
                     "| `{}` | {} | {} | {} | {} |",
                     issue.kind,
-                    issue.severity,
+                    severity_label(issue.severity),
                     issue.oid.as_deref().unwrap_or("—"),
                     issue
                         .path
@@ -301,17 +220,9 @@ impl MarkdownRender for FsckOutcome {
                 outln!(w, "- `{}` `{}`", d.kind, d.oid);
             }
         }
-        let human_visible: Vec<&FsckIssueJson> = if self.verbose {
-            self.issues.iter().collect()
-        } else {
-            self.issues
-                .iter()
-                .filter(|i| i.show_in_human_default)
-                .collect()
-        };
-        if self.has_errors {
+        if !self.ok {
             outln!(w, "\n**Integrity check failed.**");
-        } else if visible_has_warning_or_error(&human_visible) {
+        } else if visible_has_warning_or_error(&self.issues_for_human()) {
             outln!(w, "\n**Completed with warnings only.**");
         }
         Ok(())
@@ -347,10 +258,10 @@ pub fn run(options: FsckRunOptions) -> Result<FsckOutcome> {
 
 /// Exit code helper: non-zero when error-severity issues were found.
 pub fn exit_code(outcome: &FsckOutcome) -> i32 {
-    if outcome.has_errors {
-        1
-    } else {
+    if outcome.ok {
         0
+    } else {
+        1
     }
 }
 
@@ -358,6 +269,7 @@ pub fn exit_code(outcome: &FsckOutcome) -> i32 {
 mod tests {
     use super::*;
     use grit_lib::maintenance::repository_fsck::MissingObjectReferrer;
+    use grit_lib::objects::ObjectId;
 
     #[test]
     fn json_issue_maps_missing_object() {
@@ -370,8 +282,10 @@ mod tests {
         let config = ConfigSet::default();
         let json = issue_to_json(&issue, &config, false);
         assert_eq!(json.kind, "missingObject");
-        assert_eq!(json.severity, "error");
+        assert_eq!(json.severity, FsckSeverity::Error);
         assert!(json.oid.is_some());
+        let value = serde_json::to_value(&json).expect("serialize issue");
+        assert_eq!(value["severity"], "error");
     }
 
     #[test]
@@ -383,21 +297,5 @@ mod tests {
             ),
         };
         assert_eq!(issue_msg_id(&issue), "missingObject");
-    }
-
-    #[test]
-    fn index_missing_object_detail_omits_zero_referrer() {
-        let issue = FsckIssue::MissingObject {
-            oid: ObjectId::from_hex("abcd1234abcd1234abcd1234abcd1234abcd1234").expect("oid"),
-            referrer: MissingObjectReferrer::Index,
-        };
-        let detail = issue_detail(&issue);
-        assert!(detail.contains("staged in index"));
-
-        let pack = FsckIssue::MissingObject {
-            oid: ObjectId::from_hex("abcd1234abcd1234abcd1234abcd1234abcd1234").expect("oid"),
-            referrer: MissingObjectReferrer::Pack,
-        };
-        assert!(issue_detail(&pack).contains("missing from pack"));
     }
 }
