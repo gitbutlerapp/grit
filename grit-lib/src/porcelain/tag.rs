@@ -19,9 +19,12 @@
 //!   extraction ([`get_tag_annotation`]).
 //! - The `-m`/`-F` message cleanup ([`strip_comments`]).
 
+use std::cell::OnceCell;
 use std::collections::{HashSet, VecDeque};
+use std::sync::Arc;
 
 use crate::check_ref_format::validate_tag_short_name;
+use crate::commit_graph_file::CommitGraphChain;
 use crate::error::{Error, Result};
 use crate::hash::hash_object;
 use crate::objects::{parse_commit, parse_tag, serialize_tag, ObjectId, ObjectKind, TagData};
@@ -30,6 +33,7 @@ use crate::refs::listing::{
     compare_version_names, creator_date as listing_creator_date, epoch_from_identity,
     pattern_matches_short_name,
 };
+use crate::refs::PackedRefPeels;
 use crate::repo::Repository;
 use crate::signing::{should_sign_tag, sign_serialized_tag, GpgConfig};
 
@@ -230,22 +234,24 @@ pub struct TagInfo {
     pub peeled: Option<ObjectId>,
 }
 
-/// List the tags (`refs/tags/*`) of `repo`, sorted by name and classified with
+/// List the tags (`refs/tags/*`) of `repo`, sorted by name and classified like
 /// [`tag_ref_metadata`].
 ///
 /// Reads through the repository's ref store, so the reftable backend is honoured.
+/// When `packed-refs` records a tag's peeled value the tag object is not read; the
+/// peeled object is confirmed to be a commit through the commit-graph or its header.
 ///
 /// # Errors
 ///
 /// Returns an error when the ref store cannot be read. Unreadable tag targets are
 /// reported as lightweight with no peeled commit rather than failing the listing.
 pub fn list_tags(repo: &Repository) -> Result<Vec<TagInfo>> {
-    Ok(repo
-        .references()
-        .list(TAGS_PREFIX)?
+    let refs = repo.references().list(TAGS_PREFIX)?;
+    let classifier = TagClassifier::new(repo);
+    Ok(refs
         .into_iter()
         .map(|(refname, oid)| {
-            let (kind, peeled) = tag_ref_metadata(repo, &oid);
+            let (kind, peeled) = classifier.classify(&refname, &oid);
             TagInfo {
                 name: refname
                     .strip_prefix(TAGS_PREFIX)
@@ -257,6 +263,53 @@ pub fn list_tags(repo: &Repository) -> Result<Vec<TagInfo>> {
             }
         })
         .collect())
+}
+
+/// Classifies tag refs for [`list_tags`], preferring the peel lines of `packed-refs`
+/// over reading tag objects.
+struct TagClassifier<'a> {
+    repo: &'a Repository,
+    packed: Option<PackedRefPeels>,
+    graph: OnceCell<Option<Arc<CommitGraphChain>>>,
+}
+
+impl<'a> TagClassifier<'a> {
+    fn new(repo: &'a Repository) -> Self {
+        // A malformed `packed-refs` only loses the shortcut; classification falls back to
+        // the objects.
+        let packed = PackedRefPeels::load(repo.git_dir(), repo.refs().format()).ok();
+        Self {
+            repo,
+            packed,
+            graph: OnceCell::new(),
+        }
+    }
+
+    fn classify(&self, refname: &str, oid: &ObjectId) -> (TagKind, Option<ObjectId>) {
+        match self.packed.as_ref().and_then(|p| p.peeled(refname, oid)) {
+            Some(Some(peeled)) => (
+                TagKind::Annotated,
+                self.is_commit(&peeled).then_some(peeled),
+            ),
+            Some(None) => (TagKind::Lightweight, self.is_commit(oid).then_some(*oid)),
+            None => tag_ref_metadata(self.repo, oid),
+        }
+    }
+
+    fn is_commit(&self, oid: &ObjectId) -> bool {
+        let graph = self.graph.get_or_init(|| {
+            self.repo
+                .caches()
+                .commit_graph_chain(self.repo.odb().objects_dir())
+        });
+        if graph.as_ref().is_some_and(|g| g.find_commit(oid).is_some()) {
+            return true;
+        }
+        self.repo
+            .odb()
+            .read_info(oid)
+            .is_ok_and(|info| info.kind == ObjectKind::Commit)
+    }
 }
 
 /// Delete `refs/tags/<name>` through the repository's ref store.
