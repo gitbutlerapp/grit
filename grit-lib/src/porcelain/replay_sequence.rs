@@ -23,7 +23,7 @@ use crate::operation::Conflict;
 use crate::porcelain::checkout::checkout_between_trees;
 use crate::porcelain::commit::{stamp_change_id_on_new_commit, write_commit_object};
 use crate::porcelain::index_from_tree::index_from_tree_with_worktree_stats;
-use crate::porcelain::merge::apply_conflict_merge_worktree;
+use crate::porcelain::merge::{apply_conflict_merge_worktree, MemOverlayGuard};
 use crate::porcelain::replay::ReplayDirection;
 use crate::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
 use crate::porcelain::revert::merge_commit_message_for_revert;
@@ -105,6 +105,69 @@ pub struct ReplayCreated {
     pub new_oid: ObjectId,
     /// Stored `change-id` on `new_oid` when present.
     pub change_id: Option<ChangeId>,
+}
+
+/// In-memory prediction of [`start_replay_sequence`] (no refs, index, worktree, or on-disk object writes).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SequencePrediction {
+    /// Every step would apply cleanly; `tree` is the final tree after all commits.
+    Clean {
+        /// Resulting tree OID after replaying the full sequence.
+        tree: ObjectId,
+        /// Source commits that would be dropped as empty per `empty`.
+        dropped: Vec<ObjectId>,
+    },
+    /// The sequence would stop on merge conflicts at this commit.
+    Conflicts {
+        /// Source commit that would conflict.
+        commit: ObjectId,
+        /// Conflicted paths and kinds.
+        conflicts: Vec<Conflict>,
+    },
+    /// The sequence would stop on an empty step when `empty` is [`ReplayEmptyPolicy::Stop`].
+    Empty {
+        /// Source commit that would be empty.
+        commit: ObjectId,
+    },
+}
+
+/// Predict replaying `req.commits` onto the current branch without touching refs, the index,
+/// merge state files, or the working tree.
+///
+/// Object writes from tree merges are routed through the ODB in-memory overlay and discarded
+/// before return. Clean steps chain trees across the sequence without recording commits.
+///
+/// # Errors
+///
+/// Same validation failures as [`start_replay_sequence`] except worktree cleanliness and
+/// in-progress replay checks are skipped.
+pub fn predict_replay_sequence(
+    repo: &Repository,
+    req: &ReplaySequenceRequest,
+) -> Result<SequencePrediction> {
+    let (_, head_oid) = branch_head(repo)?;
+    if req.commits.is_empty() {
+        let tree = commit_tree(repo, &head_oid)?;
+        return Ok(SequencePrediction::Clean {
+            tree,
+            dropped: Vec::new(),
+        });
+    }
+    if req.commits.len() > 1 && req.options.message_override.is_some() {
+        return Err(Error::Message(
+            "message_override is only valid when replaying a single commit".into(),
+        ));
+    }
+    let todo = build_todo_from_commits(repo, req.direction, &req.commits)?;
+    let _overlay = MemOverlayGuard::enter(repo.odb());
+    predict_sequence(
+        repo,
+        head_oid,
+        req.direction,
+        &req.options,
+        &todo,
+        Vec::new(),
+    )
 }
 
 /// Result of starting or advancing a replay sequence.
@@ -637,6 +700,153 @@ enum StepResult {
     EmptyStop,
 }
 
+fn predict_sequence(
+    repo: &Repository,
+    head_oid: ObjectId,
+    direction: ReplayDirection,
+    opts: &ReplayOptions,
+    todo: &[TodoEntry],
+    mut dropped: Vec<ObjectId>,
+) -> Result<SequencePrediction> {
+    let mut head_tree = commit_tree(repo, &head_oid)?;
+    for entry in todo {
+        match predict_one_step(repo, head_oid, &mut head_tree, direction, opts, entry)? {
+            PredictStepResult::Advanced => {}
+            PredictStepResult::DroppedEmpty => dropped.push(entry.oid),
+            PredictStepResult::Conflicts { conflicts } => {
+                return Ok(SequencePrediction::Conflicts {
+                    commit: entry.oid,
+                    conflicts,
+                });
+            }
+            PredictStepResult::EmptyStop => {
+                return Ok(SequencePrediction::Empty { commit: entry.oid });
+            }
+        }
+    }
+    Ok(SequencePrediction::Clean {
+        tree: head_tree,
+        dropped,
+    })
+}
+
+enum PredictStepResult {
+    Advanced,
+    DroppedEmpty,
+    Conflicts { conflicts: Vec<Conflict> },
+    EmptyStop,
+}
+
+fn replay_step_presentation<'a>(
+    entry: &TodoEntry,
+    head_oid: ObjectId,
+    source_oid: ObjectId,
+    opts: &ReplayOptions,
+    theirs_label: &'a mut String,
+    base_label: &'a mut String,
+) -> TreeMergeConflictPresentation<'a> {
+    *theirs_label = format!("{} ({})", abbrev_oid(source_oid), entry.subject);
+    *base_label = format!("parent of {theirs_label}");
+    TreeMergeConflictPresentation {
+        label_theirs: crate::merge_trees::TheirsConflictLabel::Fixed(theirs_label),
+        label_base: base_label,
+        style: opts.conflict_style,
+        df_directory_ours_commit: Some(head_oid),
+        df_directory_theirs_commit: Some(source_oid),
+        ..TreeMergeConflictPresentation::default()
+    }
+}
+
+fn predict_one_step(
+    repo: &Repository,
+    head_commit: ObjectId,
+    head_tree: &mut ObjectId,
+    direction: ReplayDirection,
+    opts: &ReplayOptions,
+    entry: &TodoEntry,
+) -> Result<PredictStepResult> {
+    let source_oid = entry.oid;
+    if direction == ReplayDirection::Pick && source_oid == head_commit {
+        return Err(Error::ReplaySourceAtHead);
+    }
+    let source_obj = repo.odb().read(&source_oid)?;
+    let source = parse_commit(&source_obj.data)?;
+    let head_tree_saved = *head_tree;
+    let ours_tree = if opts.no_commit {
+        index_stage0_tree(repo)?
+    } else {
+        head_tree_saved
+    };
+    let empty_compare_tree = if opts.no_commit {
+        ours_tree
+    } else {
+        head_tree_saved
+    };
+    let (base_tree, ours_tree, theirs_tree) = merge_trees_for_replay(
+        repo,
+        direction,
+        &source,
+        ours_tree,
+        opts.mainline,
+        source_oid,
+    )?;
+
+    if direction == ReplayDirection::Pick && base_tree == source.tree {
+        return match opts.empty {
+            ReplayEmptyPolicy::Stop => Ok(PredictStepResult::EmptyStop),
+            ReplayEmptyPolicy::Drop => Ok(PredictStepResult::DroppedEmpty),
+            ReplayEmptyPolicy::Keep if opts.no_commit => Ok(PredictStepResult::EmptyStop),
+            ReplayEmptyPolicy::Keep => {
+                *head_tree = empty_compare_tree;
+                Ok(PredictStepResult::Advanced)
+            }
+        };
+    }
+
+    let mut theirs_label = String::new();
+    let mut base_label = String::new();
+    let presentation = replay_step_presentation(
+        entry,
+        head_commit,
+        source_oid,
+        opts,
+        &mut theirs_label,
+        &mut base_label,
+    );
+    let merged = merge_trees_three_way(
+        repo,
+        base_tree,
+        ours_tree,
+        theirs_tree,
+        opts.favor,
+        WhitespaceMergeOptions::default(),
+        None,
+        presentation,
+    )?;
+
+    if crate::operation::tree_merge_has_conflicts(&merged) {
+        return Ok(PredictStepResult::Conflicts {
+            conflicts: crate::operation::conflicts_from_tree_merge(&merged),
+        });
+    }
+
+    let new_tree = merged.result_tree;
+    if new_tree == empty_compare_tree {
+        return match opts.empty {
+            ReplayEmptyPolicy::Stop => Ok(PredictStepResult::EmptyStop),
+            ReplayEmptyPolicy::Drop => Ok(PredictStepResult::DroppedEmpty),
+            ReplayEmptyPolicy::Keep if opts.no_commit => Ok(PredictStepResult::EmptyStop),
+            ReplayEmptyPolicy::Keep => {
+                *head_tree = empty_compare_tree;
+                Ok(PredictStepResult::Advanced)
+            }
+        };
+    }
+
+    *head_tree = new_tree;
+    Ok(PredictStepResult::Advanced)
+}
+
 #[allow(clippy::too_many_arguments)]
 fn apply_one_step(
     repo: &Repository,
@@ -695,12 +905,16 @@ fn apply_one_step(
         };
     }
 
-    let presentation = TreeMergeConflictPresentation {
-        style: opts.conflict_style,
-        df_directory_ours_commit: Some(*head),
-        df_directory_theirs_commit: Some(source_oid),
-        ..TreeMergeConflictPresentation::default()
-    };
+    let mut theirs_label = String::new();
+    let mut base_label = String::new();
+    let presentation = replay_step_presentation(
+        entry,
+        *head,
+        source_oid,
+        opts,
+        &mut theirs_label,
+        &mut base_label,
+    );
     let merged = merge_trees_three_way(
         repo,
         base_tree,

@@ -209,6 +209,30 @@ pub fn render_revert_conflict_footer_human() {
     );
 }
 
+/// Human output for `grit pick --check` when the pick would conflict.
+pub fn render_pick_check_conflicts_human(
+    conflicts: &[ConflictJson],
+    w: &mut dyn Write,
+) -> Result<()> {
+    outln!(w, "Would conflict during pick");
+    for item in conflicts {
+        outln!(w, "  {}", item.path);
+    }
+    Ok(())
+}
+
+/// Human output for `grit revert --check` when the revert would conflict.
+pub fn render_revert_check_conflicts_human(
+    conflicts: &[ConflictJson],
+    w: &mut dyn Write,
+) -> Result<()> {
+    outln!(w, "Would conflict during revert");
+    for item in conflicts {
+        outln!(w, "  {}", item.path);
+    }
+    Ok(())
+}
+
 /// Human hint after a paused pick sequence.
 pub fn render_pick_conflict_footer_human() {
     eprintln!(

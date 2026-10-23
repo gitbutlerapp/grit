@@ -407,13 +407,13 @@ pub fn predict_merge(
 
 /// Enable the ODB mem overlay for the scope of a [`predict_merge`] call without disturbing
 /// an overlay already active on the shared [`Repository`] handle.
-struct MemOverlayGuard<'a> {
+pub(crate) struct MemOverlayGuard<'a> {
     odb: &'a crate::objects::odb::Odb,
     enabled_here: bool,
 }
 
 impl<'a> MemOverlayGuard<'a> {
-    fn enter(odb: &'a crate::objects::odb::Odb) -> Self {
+    pub(crate) fn enter(odb: &'a crate::objects::odb::Odb) -> Self {
         let already_active = odb.is_mem_overlay_active();
         if !already_active {
             odb.enable_mem_overlay();

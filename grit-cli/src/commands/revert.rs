@@ -1,5 +1,6 @@
 //! `grit revert` — undo one or more commits with new inverse commits.
 
+use crate::commands::replay_merge_args::ReplayMergeArgs;
 use crate::context;
 use crate::markdown;
 use crate::operation_output::{
@@ -15,8 +16,9 @@ use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::replay::ReplayDirection;
 use grit_lib::porcelain::replay_sequence::{
-    abort_replay_sequence, continue_replay_sequence, skip_replay_step, start_replay_sequence,
-    ReplayCreated, ReplayEmptyPolicy, ReplayOptions, ReplaySequenceRequest, SequenceOutcome,
+    abort_replay_sequence, continue_replay_sequence, predict_replay_sequence, skip_replay_step,
+    start_replay_sequence, ReplayCreated, ReplayEmptyPolicy, ReplayOptions, ReplaySequenceRequest,
+    SequenceOutcome, SequencePrediction,
 };
 use grit_lib::porcelain::revert::{committer_timestamp, revision_range_apply_order};
 use grit_lib::revwalk::parse_rev_walk_tokens;
@@ -68,6 +70,8 @@ pub struct RevertCommitEntry {
 pub enum RevertResult {
     /// Every requested step finished (or `--dry-run` printed the plan).
     Completed,
+    /// Every step would apply cleanly (`grit revert --check` only).
+    Clean,
     /// The sequence stopped on merge conflicts.
     Conflicts,
     /// `--abort` restored the pre-revert state.
@@ -116,6 +120,9 @@ pub struct RevertOutcome {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(skip_serializing_if = "Option::is_none")]
     pub dry_run: Option<bool>,
+    /// True when this outcome is from `grit revert --check` (nothing was reverted).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub check: bool,
 }
 
 impl RevertOutcome {
@@ -132,6 +139,7 @@ impl RevertOutcome {
             next_steps: None,
             alternatives: None,
             dry_run: None,
+            check: false,
         }
     }
 
@@ -156,6 +164,7 @@ impl RevertOutcome {
             next_steps: None,
             alternatives: None,
             dry_run: Some(true),
+            check: false,
         }
     }
 }
@@ -168,9 +177,20 @@ impl HumanRender for RevertOutcome {
             }
             RevertResult::Conflicts => {
                 if let Some(details) = &self.conflicts {
-                    render_conflicts_human(details, w)?;
+                    if self.check {
+                        crate::operation_output::render_revert_check_conflicts_human(details, w)?;
+                    } else {
+                        render_conflicts_human(details, w)?;
+                        render_revert_conflict_footer_human();
+                    }
                 }
-                render_revert_conflict_footer_human();
+            }
+            RevertResult::Clean => {
+                if let Some(oid) = &self.oid {
+                    outln!(w, "Would revert cleanly (tree {oid})");
+                } else {
+                    outln!(w, "Would revert cleanly");
+                }
             }
             RevertResult::Empty => {
                 outln!(w, "Revert stopped on an empty commit.");
@@ -218,6 +238,9 @@ pub struct RevertRunOptions {
     pub message: Option<String>,
     pub message_file: Option<String>,
     pub dry_run: bool,
+    pub check: bool,
+    #[allow(clippy::struct_field_names)]
+    pub replay_merge: ReplayMergeArgs,
 }
 
 /// Revert commits onto the current branch, or continue/skip/abort an in-progress sequence.
@@ -252,6 +275,13 @@ pub fn run(opts: &RevertRunOptions) -> Result<RevertOutcome> {
         return Ok(RevertOutcome::dry_run(sources));
     }
 
+    let favor = opts.replay_merge.favor();
+    let conflict_style = opts.replay_merge.conflict_style(&repo);
+
+    if opts.check {
+        return run_check(&repo, sources, opts, favor, conflict_style);
+    }
+
     let message_override =
         read_message_override(opts.message.as_deref(), opts.message_file.as_deref())?;
     let mainline = opts
@@ -267,6 +297,8 @@ pub fn run(opts: &RevertRunOptions) -> Result<RevertOutcome> {
         empty: opts.empty.into(),
         message_override,
         mainline,
+        favor,
+        conflict_style,
         ..ReplayOptions::default()
     };
 
@@ -281,6 +313,93 @@ pub fn run(opts: &RevertRunOptions) -> Result<RevertOutcome> {
     )
     .map_err(map_replay_error)?;
     map_sequence_outcome(&repo, outcome)
+}
+
+fn run_check(
+    repo: &grit_lib::repo::Repository,
+    sources: Vec<ObjectId>,
+    opts: &RevertRunOptions,
+    favor: grit_lib::diff::merge_file::MergeFavor,
+    conflict_style: grit_lib::diff::merge_file::ConflictStyle,
+) -> Result<RevertOutcome> {
+    let mainline = opts
+        .mainline
+        .map(|n| {
+            NonZeroU32::new(n).ok_or_else(|| {
+                anyhow::anyhow!("--mainline requires a positive parent number (1, 2, …)")
+            })
+        })
+        .transpose()?;
+    let replay_opts = ReplayOptions {
+        no_commit: opts.no_commit,
+        empty: opts.empty.into(),
+        message_override: None,
+        mainline,
+        favor,
+        conflict_style,
+        ..ReplayOptions::default()
+    };
+    let prediction = predict_replay_sequence(
+        repo,
+        &ReplaySequenceRequest {
+            commits: sources,
+            direction: ReplayDirection::Revert,
+            committer: String::new(),
+            options: replay_opts,
+        },
+    )
+    .map_err(map_replay_error)?;
+    map_prediction_outcome(prediction)
+}
+
+fn map_prediction_outcome(prediction: SequencePrediction) -> Result<RevertOutcome> {
+    match prediction {
+        SequencePrediction::Clean { tree, dropped } => Ok(RevertOutcome {
+            result: RevertResult::Clean,
+            source: None,
+            oid: Some(tree.to_hex()),
+            subject: None,
+            change_id: None,
+            commits: Vec::new(),
+            dropped: dropped.iter().map(ObjectId::to_hex).collect(),
+            conflicts: None,
+            next_steps: None,
+            alternatives: None,
+            dry_run: None,
+            check: true,
+        }),
+        SequencePrediction::Conflicts { commit, conflicts } => {
+            let block = OperationConflictBlock::for_revert(&conflicts);
+            Ok(RevertOutcome {
+                result: RevertResult::Conflicts,
+                source: Some(commit.to_hex()),
+                oid: None,
+                subject: None,
+                change_id: None,
+                commits: Vec::new(),
+                dropped: Vec::new(),
+                conflicts: Some(block.conflicts),
+                next_steps: None,
+                alternatives: None,
+                dry_run: None,
+                check: true,
+            })
+        }
+        SequencePrediction::Empty { commit } => Ok(RevertOutcome {
+            result: RevertResult::Empty,
+            source: Some(commit.to_hex()),
+            oid: None,
+            subject: None,
+            change_id: None,
+            commits: Vec::new(),
+            dropped: Vec::new(),
+            conflicts: None,
+            next_steps: None,
+            alternatives: None,
+            dry_run: None,
+            check: true,
+        }),
+    }
 }
 
 fn resolve_revert_commits(
@@ -382,6 +501,7 @@ fn build_completed_outcome(
         next_steps: None,
         alternatives: None,
         dry_run: None,
+        check: false,
     })
 }
 
@@ -407,6 +527,7 @@ fn build_conflicts_outcome(
         next_steps: Some(block.next_steps),
         alternatives: block.alternatives,
         dry_run: None,
+        check: false,
     }
 }
 
@@ -431,6 +552,7 @@ fn build_empty_outcome(
         next_steps: Some(block.next_steps),
         alternatives: block.alternatives,
         dry_run: None,
+        check: false,
     }
 }
 

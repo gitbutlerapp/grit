@@ -9,6 +9,7 @@ order: 4
 
 ```text
 grit pick [<commit>...]
+grit pick --check [<commit>...]
 grit pick --continue | --abort | --skip
 ```
 
@@ -41,7 +42,10 @@ Merge commits require `--mainline <n>` (1-based parent number, long option only)
 | `--empty stop\|keep\|drop` | When a step would not change the tree: stop (default), record an empty commit, or skip the step. |
 | `-m`, `--message` | Replace the pick message (**single commit only**). |
 | `--message-file` | Read the pick message from a file (**single commit only**). |
-| `--dry-run` | List commits that would be picked without changing refs or the worktree. |
+| `--check` | Predict whether the pick would succeed without changing refs, the index, or the worktree. Exit **0** when every step would apply cleanly; exit **1** when a step would conflict or stop as empty (with `--empty stop`). Conflicts with `--continue`, `--abort`, `--skip`, and `--dry-run`. |
+| `--dry-run` | List commits that would be picked without changing refs or the worktree. Conflicts with `--check`. |
+| `-X ours\|theirs` | Auto-resolve replay conflicts: keep the current branch side (`ours`) or the picked change (`theirs`). |
+| `--conflict merge\|diff3\|zdiff3` | Conflict marker style when a step stops with conflicts (default from `merge.conflictStyle`). |
 
 ## Examples
 
@@ -75,9 +79,9 @@ Pass `--json` for stable, scripting-friendly output:
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
-| `result` | string | `completed`, `conflicts`, `aborted`, or `empty`. |
+| `result` | string | `completed`, `clean`, `conflicts`, `aborted`, or `empty`. |
 | `source` | string or null | Source commit for the last pick created when `result` is `completed`. |
-| `oid` | string or null | New pick commit on the current branch when `result` is `completed`. |
+| `oid` | string or null | New pick commit when `result` is `completed`, or the predicted final tree oid when `result` is `clean`. |
 | `subject` | string or null | Subject of the last pick commit when `result` is `completed`. |
 | `change_id` | string or null | Stored `change-id` on the last pick commit, or `null`. |
 | `commits` | array | Each pick commit created in this invocation (in apply order). |
@@ -86,6 +90,7 @@ Pass `--json` for stable, scripting-friendly output:
 | `next_steps` | array or null | Suggested follow-up commands when paused. |
 | `alternatives` | array or null | `--abort` / `--skip` when paused. |
 | `dry_run` | boolean or null | True when `--dry-run` was used. |
+| `check` | boolean | True when `--check` was used (nothing was picked). |
 
 Example:
 
