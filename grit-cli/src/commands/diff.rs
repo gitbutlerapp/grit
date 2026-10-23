@@ -1521,14 +1521,23 @@ fn staged_file_changes_for_entries(
     repo: &grit_lib::repo::Repository,
     entries: Vec<DiffEntry>,
 ) -> Result<Vec<FileChange>> {
-    entries
-        .into_iter()
-        .map(|e| {
-            let (old_bytes, old_bin) = old_side_bytes(repo.odb(), &e)?;
-            let (new_bytes, new_bin) = new_side_bytes(repo.odb(), &e, None)?;
-            Ok(file_change(e, old_bytes, new_bytes, old_bin || new_bin))
-        })
-        .collect()
+    let config = repo.config().context("could not load config")?;
+    let par_opts = repo
+        .thread_policy()
+        .resolve(ParallelOp::DiffContent, config.as_ref());
+    let odb = repo.odb();
+    let est_bytes = entries.len().saturating_mul(8192);
+    grit_lib::parallel::try_par_map(&entries, par_opts, est_bytes, |e| {
+        let (old_bytes, old_bin) = old_side_bytes(odb, e)?;
+        let (new_bytes, new_bin) = new_side_bytes(odb, e, None)?;
+        Ok::<_, anyhow::Error>(file_change(
+            e.clone(),
+            old_bytes,
+            new_bytes,
+            old_bin || new_bin,
+        ))
+    })
+    .map_err(|grit_lib::parallel::ParallelHashError::Task(e)| e)
 }
 
 fn peer_unstaged_changes_for_hunk_ids<'a>(
@@ -2466,7 +2475,7 @@ fn blob_bytes(odb: &Odb, oid: &ObjectId) -> Result<(SideBytes, bool)> {
 
 /// Convert bytes to `(SideBytes, is_binary)`. NUL in the first 8 KiB ⇒ binary.
 fn bytes_for_diff(data: Vec<u8>) -> (SideBytes, bool) {
-    if data.iter().take(8000).any(|&b| b == 0) {
+    if data[..data.len().min(8000)].contains(&0) {
         (SideBytes::from_bytes(Vec::new()), true)
     } else {
         (SideBytes::from_bytes(data), false)
