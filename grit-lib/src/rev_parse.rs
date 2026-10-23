@@ -2121,7 +2121,23 @@ fn describe_generation_count(
     Ok(from_head.difference(&from_tag).count())
 }
 
+/// Cheap necessary condition for [`try_resolve_describe_name`]'s pattern: the text after the
+/// last `-` is `g` followed by hex digits, and another `-` precedes it. Lets plain names like
+/// `HEAD` or `main` skip compiling the regex.
+fn may_be_describe_name(spec: &str) -> bool {
+    let Some((head, tail)) = spec.rsplit_once('-') else {
+        return false;
+    };
+    let Some(hex) = tail.strip_prefix(['g', 'G']) else {
+        return false;
+    };
+    !hex.is_empty() && hex.bytes().all(|b| b.is_ascii_hexdigit()) && head.contains('-')
+}
+
 fn try_resolve_describe_name(repo: &Repository, spec: &str) -> Result<Option<ObjectId>> {
+    if !may_be_describe_name(spec) {
+        return Ok(None);
+    }
     let re = Regex::new(r"(?i)^(.+)-(\d+)-g([0-9a-fA-F]+)$")
         .map_err(|_| Error::from(RevParseError::InternalDescribeRegex))?;
     let Some(caps) = re.captures(spec) else {
@@ -5038,6 +5054,36 @@ mod line_coverage_tests {
     }
 
     #[test]
+    fn describe_prefilter_accepts_everything_the_pattern_matches() {
+        let re = Regex::new(r"(?i)^(.+)-(\d+)-g([0-9a-fA-F]+)$").unwrap();
+        for spec in [
+            "v1-1-gabc1234",
+            "V1-2-GABC",
+            "a-b-c-10-g0",
+            "v2.47.0-rc1-3-gdeadbeef",
+            "x-1-gab-2-gcd",
+            "tag-٣-gabc",
+            "HEAD",
+            "main",
+            "v1-gabc",
+            "-1-gabc",
+            "v1-1-g",
+            "v1-1-gxyz",
+            "v1-1-gabc-",
+            "feature/x-1-gabc\nfoo",
+            "a--gabc",
+        ] {
+            if re.is_match(spec) {
+                assert!(may_be_describe_name(spec), "{spec:?}");
+            }
+        }
+        assert!(!may_be_describe_name("HEAD"));
+        assert!(!may_be_describe_name("refs/heads/main"));
+        assert!(!may_be_describe_name("v1-gabc"));
+        assert!(!may_be_describe_name("v1-1-gxyz"));
+    }
+
+    #[test]
     fn describe_name_and_dwim_helpers() -> crate::error::Result<()> {
         let dir = tempdir().map_err(crate::error::Error::Io)?;
         Repository::init(
@@ -5071,7 +5117,13 @@ mod line_coverage_tests {
             .map_err(crate::error::Error::Io)?;
         let abbrev = &c2.to_hex()[..7];
         let describe_name = format!("v1-1-g{abbrev}");
-        let _ = try_resolve_describe_name(&repo, &describe_name)?;
+        assert_eq!(try_resolve_describe_name(&repo, &describe_name)?, Some(c2));
+        assert_eq!(
+            try_resolve_describe_name(&repo, &format!("V1-1-G{}", abbrev.to_uppercase()))?,
+            Some(c2)
+        );
+        assert_eq!(try_resolve_describe_name(&repo, "main")?, None);
+        assert_eq!(try_resolve_describe_name(&repo, "HEAD")?, None);
         let _ = dwim_refname(&repo, "main");
         let _ = reflog_display_name("refs/heads/main", "main");
         Ok(())
