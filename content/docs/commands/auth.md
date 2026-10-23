@@ -9,7 +9,7 @@ order: 5
 
 ```text
 grit auth
-grit auth logout
+grit auth logout [--dry-run]
 ```
 
 ## Description
@@ -35,6 +35,7 @@ $ grit config --global credential.helper store         # a plain-text file, any 
 | Option | Description |
 | --- | --- |
 | `logout` | Remove the saved GitHub token. |
+| `--dry-run` | On `logout`, report which stored credential would be erased without calling the helper. |
 
 ## Examples
 
@@ -65,8 +66,10 @@ Pass `--json` for stable, scripting-friendly output:
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
 | `authenticated` | boolean | For sign-in, whether a token was stored. |
-| `logged_out` | boolean | For `logout`, whether a stored token was removed. |
+| `logged_out` | boolean | For `logout`, whether a stored token was removed (or would be removed with `--dry-run`). |
 | `host` | string | GitHub host the credential applies to (usually `github.com`). |
+| `dry_run` | boolean | On `logout`, `true` when `--dry-run` was used. |
+| `credential` | object or omitted | With `--dry-run`, describes the helper entry that would be removed (`protocol`, `host`, `username`; never includes a password). |
 
 After sign-in:
 

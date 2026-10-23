@@ -1,8 +1,45 @@
 {
   "$id": "https://grit-scm.com/schemas/auth.logout/v1.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "definitions": {
+    "LogoutCredentialPreview": {
+      "description": "Stored credential fields reported by `grit auth logout --dry-run`.",
+      "properties": {
+        "host": {
+          "type": "string"
+        },
+        "protocol": {
+          "type": "string"
+        },
+        "username": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "host",
+        "protocol"
+      ],
+      "type": "object"
+    }
+  },
   "description": "Result of `grit auth logout`.",
   "properties": {
+    "credential": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/LogoutCredentialPreview"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "dry_run": {
+      "type": "boolean"
+    },
     "host": {
       "type": "string"
     },

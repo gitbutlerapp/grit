@@ -160,20 +160,38 @@ enum GcAction {
         /// Write a reachability `.bitmap` sidecar for the new pack.
         #[arg(long)]
         bitmaps: bool,
+        /// Report what would be packed without writing.
+        #[arg(long = "dry-run")]
+        dry_run: bool,
     },
     /// Write a reachable commit-graph with changed-path Bloom filters.
     #[command(name = "commit-graph")]
-    CommitGraph,
+    CommitGraph {
+        /// Report commit count without writing the graph file.
+        #[arg(long = "dry-run")]
+        dry_run: bool,
+    },
     /// Write or refresh the multi-pack-index.
-    Midx,
+    Midx {
+        /// Report pack coverage without writing the index.
+        #[arg(long = "dry-run")]
+        dry_run: bool,
+    },
     /// Pack loose refs into `packed-refs` (or compact reftable).
     #[command(name = "pack-refs")]
-    PackRefs,
+    PackRefs {
+        /// Report refs that would be packed without writing.
+        #[arg(long = "dry-run")]
+        dry_run: bool,
+    },
     /// Delete unreachable loose objects.
     Prune {
         /// Only remove objects older than this date (Git approxidate syntax).
         #[arg(long = "older-than", value_name = "DATE")]
         older_than: Option<String>,
+        /// Report objects that would be deleted without removing them.
+        #[arg(long = "dry-run")]
+        dry_run: bool,
     },
 }
 
@@ -513,6 +531,9 @@ enum BundleAction {
         /// Include every ref tip in the bundle header (`HEAD`, all branches and tags).
         #[arg(long)]
         all: bool,
+        /// Report refs, prerequisites, and object count without writing a file.
+        #[arg(long = "dry-run")]
+        dry_run: bool,
     },
     /// Check that a bundle file is well-formed.
     Verify {
@@ -528,6 +549,9 @@ enum BundleAction {
     Unbundle {
         /// Bundle file to read.
         file: String,
+        /// Verify and list ref updates without ingesting objects or writing refs.
+        #[arg(long = "dry-run")]
+        dry_run: bool,
     },
 }
 
@@ -550,7 +574,11 @@ enum HooksAction {
 #[derive(Debug, Subcommand)]
 enum AuthAction {
     /// Forget the stored GitHub token (sign out).
-    Logout,
+    Logout {
+        /// Report which stored credential would be removed without erasing it.
+        #[arg(long = "dry-run")]
+        dry_run: bool,
+    },
 }
 
 /// Top-level `grit` commands.
@@ -2086,14 +2114,24 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             let mode = opts.mode;
             let outcome = match action {
                 None => commands::gc::run(dry_run, quiet, mode)?,
-                Some(GcAction::Repack { bitmaps }) => {
-                    commands::gc::run_repack(bitmaps, dry_run, quiet, mode)?
+                Some(GcAction::Repack {
+                    bitmaps,
+                    dry_run: repack_dry,
+                }) => commands::gc::run_repack(bitmaps, dry_run || repack_dry, quiet, mode)?,
+                Some(GcAction::CommitGraph { dry_run: sub_dry }) => {
+                    commands::gc::run_commit_graph(dry_run || sub_dry, quiet, mode)?
                 }
-                Some(GcAction::CommitGraph) => commands::gc::run_commit_graph(quiet, mode)?,
-                Some(GcAction::Midx) => commands::gc::run_midx(quiet, mode)?,
-                Some(GcAction::PackRefs) => commands::gc::run_pack_refs(quiet, mode)?,
-                Some(GcAction::Prune { older_than }) => {
-                    commands::gc::run_prune(older_than.as_deref(), quiet, mode)?
+                Some(GcAction::Midx { dry_run: sub_dry }) => {
+                    commands::gc::run_midx(dry_run || sub_dry, quiet, mode)?
+                }
+                Some(GcAction::PackRefs { dry_run: sub_dry }) => {
+                    commands::gc::run_pack_refs(dry_run || sub_dry, quiet, mode)?
+                }
+                Some(GcAction::Prune {
+                    older_than,
+                    dry_run: sub_dry,
+                }) => {
+                    commands::gc::run_prune(older_than.as_deref(), dry_run || sub_dry, quiet, mode)?
                 }
             };
             emit(&outcome, opts, ctx)
@@ -2292,8 +2330,13 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             ctx,
         ),
         Command::Bundle { action } => match action {
-            BundleAction::Create { file, revs, all } => emit(
-                &commands::bundle::run_create(file.into(), revs, all)?,
+            BundleAction::Create {
+                file,
+                revs,
+                all,
+                dry_run,
+            } => emit(
+                &commands::bundle::run_create(file.into(), revs, all, dry_run)?,
                 opts,
                 ctx,
             ),
@@ -2308,9 +2351,11 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             BundleAction::List { file } => {
                 emit(&commands::bundle::run_list(file.into())?, opts, ctx)
             }
-            BundleAction::Unbundle { file } => {
-                emit(&commands::bundle::run_unbundle(file.into())?, opts, ctx)
-            }
+            BundleAction::Unbundle { file, dry_run } => emit(
+                &commands::bundle::run_unbundle(file.into(), dry_run)?,
+                opts,
+                ctx,
+            ),
         },
         Command::Notes { notes_ref, action } => {
             use commands::notes::NotesRunAction::*;
@@ -2914,7 +2959,9 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
         }
         Command::Auth { action } => match action {
             None => emit(&commands::auth::run()?, opts, ctx),
-            Some(AuthAction::Logout) => emit(&commands::auth::logout()?, opts, ctx),
+            Some(AuthAction::Logout { dry_run }) => {
+                emit(&commands::auth::logout(dry_run)?, opts, ctx)
+            }
         },
         Command::Update => emit(&commands::update::run(opts.mode)?, opts, ctx),
         Command::Skill => emit(&commands::skill::run()?, opts, ctx),

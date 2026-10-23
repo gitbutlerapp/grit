@@ -11,11 +11,11 @@ order: 3
 grit gc
 grit gc --dry-run
 grit gc --quiet
-grit gc repack [--bitmaps]
-grit gc commit-graph
-grit gc midx
-grit gc pack-refs
-grit gc prune [--older-than DATE]
+grit gc repack [--bitmaps] [--dry-run]
+grit gc commit-graph [--dry-run]
+grit gc midx [--dry-run]
+grit gc pack-refs [--dry-run]
+grit gc prune [--older-than DATE] [--dry-run]
 ```
 
 ## Description
@@ -38,7 +38,7 @@ Progress lines go to **stderr**. The human summary lists each task, key counters
 
 | Option | Description |
 | --- | --- |
-| `--dry-run` | Reflog expiry and repack estimate only; no refs or objects are modified (full `grit gc` only). |
+| `--dry-run` | Preview maintenance without writing refs or objects (full `grit gc`, or combine with a task subcommand). |
 | `-q`, `--quiet` | Suppress the human task summary. |
 
 ### `grit gc repack`
@@ -46,13 +46,20 @@ Progress lines go to **stderr**. The human summary lists each task, key counters
 | Option | Description |
 | --- | --- |
 | `--bitmaps` | Write a reachability `.bitmap` sidecar for the new pack. |
-| `--dry-run` | Inherited from the parent `grit gc` flags when invoked as `grit gc --dry-run repack` is not supported; use `grit gc repack` without `--dry-run` or run bare `grit gc --dry-run`. |
+| `--dry-run` | Report how many objects would be packed; no pack files or refs are modified. |
+
+### `grit gc commit-graph`, `grit gc midx`, `grit gc pack-refs`
+
+| Option | Description |
+| --- | --- |
+| `--dry-run` | Report counters and paths that would be written; leave the repository unchanged. |
 
 ### `grit gc prune`
 
 | Option | Description |
 | --- | --- |
 | `--older-than DATE` | Git approxidate cutoff; default is `gc.pruneExpire` from config. |
+| `--dry-run` | Report unreachable loose objects that would be deleted without removing them. |
 
 ## Examples
 

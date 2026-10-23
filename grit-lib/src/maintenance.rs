@@ -182,6 +182,8 @@ pub struct RepackStats {
 pub struct CommitGraphOptions {
     /// When true, emit Bloom filter chunks for changed-path queries.
     pub changed_paths: bool,
+    /// Report without writing `objects/info/commit-graph`.
+    pub dry_run: bool,
 }
 
 impl CommitGraphOptions {
@@ -190,6 +192,15 @@ impl CommitGraphOptions {
     pub fn with_changed_paths(changed_paths: bool) -> Self {
         Self {
             changed_paths,
+            ..Self::default()
+        }
+    }
+
+    /// Build options with [`Self::dry_run`] set.
+    #[must_use]
+    pub fn with_dry_run(dry_run: bool) -> Self {
+        Self {
+            dry_run,
             ..Self::default()
         }
     }
@@ -215,6 +226,8 @@ pub struct CommitGraphWriteReport {
 pub struct MidxOptions {
     /// Write a reachability `.bitmap` sidecar when the MIDX is a root file.
     pub bitmap: bool,
+    /// Report without writing `multi-pack-index`.
+    pub dry_run: bool,
 }
 
 impl MidxOptions {
@@ -223,6 +236,15 @@ impl MidxOptions {
     pub fn with_bitmap(bitmap: bool) -> Self {
         Self {
             bitmap,
+            ..Self::default()
+        }
+    }
+
+    /// Build options with [`Self::dry_run`] set.
+    #[must_use]
+    pub fn with_dry_run(dry_run: bool) -> Self {
+        Self {
+            dry_run,
             ..Self::default()
         }
     }
@@ -246,6 +268,8 @@ pub struct MidxWriteReport {
 pub struct PackRefsOptions {
     /// When true, pack every packable ref (`git pack-refs --all`); otherwise only tags.
     pub all: bool,
+    /// Report without rewriting `packed-refs` or deleting loose refs.
+    pub dry_run: bool,
 }
 
 impl PackRefsOptions {
@@ -254,6 +278,15 @@ impl PackRefsOptions {
     pub fn with_all(all: bool) -> Self {
         Self {
             all,
+            ..Self::default()
+        }
+    }
+
+    /// Build options with [`Self::dry_run`] set.
+    #[must_use]
+    pub fn with_dry_run(dry_run: bool) -> Self {
+        Self {
+            dry_run,
             ..Self::default()
         }
     }
@@ -520,6 +553,16 @@ pub fn write_commit_graph(
     let mut sorted: Vec<ObjectId> = commits.into_iter().collect();
     sorted.sort();
     let commit_count = sorted.len();
+    let path = objects_dir.join("info").join("commit-graph");
+
+    if opts.dry_run {
+        return Ok(CommitGraphWriteReport {
+            path,
+            commit_count,
+            removed_chain: false,
+            bloom_stats: opts.changed_paths.then_some(BloomWriteStats::default()),
+        });
+    }
 
     let mut infos = oid_hash_map();
     for oid in &sorted {
@@ -554,12 +597,12 @@ pub fn write_commit_graph(
         write_generation,
     )?;
 
-    let path = atomic_replace_commit_graph(objects_dir, &bytes)?;
+    let written_path = atomic_replace_commit_graph(objects_dir, &bytes)?;
     let removed_chain = remove_commit_graph_chain_dir(objects_dir);
     repo.caches().invalidate_commit_graph_cache();
 
     Ok(CommitGraphWriteReport {
-        path,
+        path: written_path,
         commit_count,
         removed_chain,
         bloom_stats: opts.changed_paths.then_some(bloom_stats),
@@ -589,13 +632,20 @@ pub fn write_midx(repo: &Repository, opts: &MidxOptions) -> Result<MidxWriteRepo
         })
         .unwrap_or(0);
 
+    let path = pack_dir.join("multi-pack-index");
+    if opts.dry_run {
+        return Ok(MidxWriteReport {
+            path,
+            pack_count,
+            bitmap: MidxBitmapWriteOutcome::NotRequested,
+        });
+    }
     let write_opts = WriteMultiPackIndexOptions {
         write_bitmap: opts.bitmap,
         ..WriteMultiPackIndexOptions::default()
     };
     let WriteMultiPackIndexResult { bitmap } =
         write_multi_pack_index_with_options(&pack_dir, &write_opts)?;
-    let path = pack_dir.join("multi-pack-index");
     Ok(MidxWriteReport {
         path,
         pack_count,
@@ -1014,9 +1064,6 @@ fn should_auto_skip_repack(
 pub fn prune_loose_objects(repo: &Repository, opts: &PruneOptions) -> Result<PruneStats> {
     let odb = repo.odb();
     odb.require_files_primary("prune")?;
-    if opts.dry_run {
-        return Ok(PruneStats::default());
-    }
     let cfg = repo.config()?;
     let now = gc_now_unix(0);
     let keep_newer_than = match opts.older_than {
@@ -1027,7 +1074,7 @@ pub fn prune_loose_objects(repo: &Repository, opts: &PruneOptions) -> Result<Pru
         },
     };
     let roots = collect_maintenance_object_roots(repo)?;
-    prune_loose_unreachable(odb, &roots, keep_newer_than)
+    crate::gc::prune_loose_unreachable_with_dry_run(odb, &roots, keep_newer_than, opts.dry_run)
 }
 
 fn duration_ms(d: std::time::Duration) -> u64 {
@@ -1394,7 +1441,8 @@ fn pack_has_keep_marker(pack_dir: &Path, path: &Path) -> bool {
 ///
 /// Propagates ref-store, locking, and I/O failures.
 pub fn pack_refs(repo: &Repository, opts: &PackRefsOptions) -> Result<PackRefsReport> {
-    let (path, refs_packed, refs_pruned) = crate::refs::pack_refs_for_repository(repo, opts.all)?;
+    let (path, refs_packed, refs_pruned) =
+        crate::refs::pack_refs_for_repository(repo, opts.all, opts.dry_run)?;
     Ok(PackRefsReport {
         path,
         refs_packed,

@@ -3,9 +3,10 @@
 use std::fs::File;
 use std::path::Path;
 
+use crate::bundle::bundle_remote::BundleCreateOptions;
 use crate::bundle::{
-    write_bundle, Bundle, BundleError, BundleSpec, BundleVerifyReport, UnbundleOutcome,
-    UnbundledRef,
+    plan_bundle_create, plan_bundle_unbundle, write_bundle, Bundle, BundleCreatePlan, BundleError,
+    BundleSpec, BundleUnbundlePlan, BundleVerifyReport, UnbundleOutcome, UnbundledRef,
 };
 use crate::objects::ObjectId;
 use crate::progress::{NullProgress, ProgressSink};
@@ -35,6 +36,45 @@ impl<'repo> RepositoryBundles<'repo> {
     #[must_use]
     pub fn repository(&self) -> &'repo Repository {
         self.repo
+    }
+
+    /// Plan bundle creation for `spec` without writing a file.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`BundleError::EmptyRefs`] when `spec.include` is empty, or pack generation fails.
+    pub fn plan_create(
+        &self,
+        spec: &BundleSpec,
+    ) -> std::result::Result<BundleCreatePlan, BundleError> {
+        plan_bundle_create(self.repo, spec)
+    }
+
+    /// Plan bundle creation from CLI-style revision options.
+    ///
+    /// # Errors
+    ///
+    /// Propagates rev-list, ref resolution, and pack failures.
+    pub fn plan_create_with_options(
+        &self,
+        options: &BundleCreateOptions,
+    ) -> std::result::Result<BundleCreatePlan, BundleError> {
+        let spec = crate::bundle::bundle_remote::resolve_bundle_spec(self.repo, options)
+            .map_err(lib_error_to_bundle_error)?;
+        plan_bundle_create(self.repo, &spec)
+    }
+
+    /// Plan unbundle verification and ref updates without ingesting the pack.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`BundleError`] when the bundle file is invalid.
+    pub fn plan_unbundle(
+        &self,
+        path: &Path,
+    ) -> std::result::Result<BundleUnbundlePlan, BundleError> {
+        let bundle = Bundle::open(path)?;
+        plan_bundle_unbundle(&bundle, self.repo)
     }
 
     /// Write a bundle to `path` using `spec`.
@@ -127,6 +167,13 @@ impl<'repo> RepositoryBundles<'repo> {
     /// Open a bundle file handle for repeated operations.
     pub fn open(&self, path: impl AsRef<Path>) -> std::result::Result<Bundle, BundleError> {
         Bundle::open(path)
+    }
+}
+
+fn lib_error_to_bundle_error(err: crate::error::Error) -> BundleError {
+    match err {
+        crate::error::Error::BundleMissingPrerequisites => BundleError::PrerequisitesNotConnected,
+        other => BundleError::Io(other.to_string()),
     }
 }
 

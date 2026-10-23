@@ -13,11 +13,27 @@ use serde::Serialize;
 use crate::context;
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 /// Outcome of `grit bundle create`.
 #[derive(Serialize, JsonSchema)]
 pub struct BundleCreateOutcome {
     pub path: String,
     pub refs: usize,
+    #[serde(default, skip_serializing_if = "is_false")]
+    #[schemars(skip_serializing_if = "is_false")]
+    pub dry_run: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub object_count: Option<u32>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(skip_serializing_if = "Vec::is_empty")]
+    pub references: Vec<BundleRefJson>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(skip_serializing_if = "Vec::is_empty")]
+    pub prerequisites: Vec<String>,
 }
 
 /// Outcome of `grit bundle verify`.
@@ -38,13 +54,41 @@ pub struct BundleListOutcome {
     pub references: Vec<BundleRefJson>,
 }
 
+/// One ref update that would be applied when unbundling with ref writes enabled.
+#[derive(Serialize, JsonSchema)]
+pub struct BundleRefUpdateJson {
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub old_oid: Option<String>,
+    pub new_oid: String,
+}
+
 /// Outcome of `grit bundle unbundle`.
 #[derive(Serialize, JsonSchema)]
 pub struct BundleUnbundleOutcome {
     pub path: String,
+    #[serde(default, skip_serializing_if = "is_false")]
+    #[schemars(skip_serializing_if = "is_false")]
+    pub dry_run: bool,
     pub references: Vec<BundleRefJson>,
-    pub objects: u64,
-    pub bytes: u64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub objects: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub bytes: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub object_count: Option<u32>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(skip_serializing_if = "Vec::is_empty")]
+    pub ref_updates: Vec<BundleRefUpdateJson>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub ok: Option<bool>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(skip_serializing_if = "Vec::is_empty")]
+    pub missing_prerequisites: Vec<String>,
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -64,7 +108,17 @@ impl From<(&str, ObjectId)> for BundleRefJson {
 
 impl HumanRender for BundleCreateOutcome {
     fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        outln!(w, "Wrote bundle {} ({} refs).", self.path, self.refs);
+        if self.dry_run {
+            outln!(
+                w,
+                "Dry run: would write bundle {} ({} refs, {} objects).",
+                self.path,
+                self.refs,
+                self.object_count.unwrap_or(0)
+            );
+        } else {
+            outln!(w, "Wrote bundle {} ({} refs).", self.path, self.refs);
+        }
         Ok(())
     }
 }
@@ -101,6 +155,12 @@ impl MarkdownRender for BundleCreateOutcome {
         outln!(w, "## Bundle create\n");
         outln!(w, "- **path:** `{}`", self.path);
         outln!(w, "- **refs:** {}", self.refs);
+        if self.dry_run {
+            outln!(w, "- **dry_run:** true");
+            if let Some(n) = self.object_count {
+                outln!(w, "- **object_count:** {n}");
+            }
+        }
         Ok(())
     }
 }
@@ -151,13 +211,23 @@ impl HumanRender for BundleListOutcome {
 
 impl HumanRender for BundleUnbundleOutcome {
     fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        outln!(
-            w,
-            "Unbundled {} ({} objects, {} bytes).",
-            self.path,
-            self.objects,
-            self.bytes
-        );
+        if self.dry_run {
+            outln!(
+                w,
+                "Dry run: would unbundle {} ({} objects, {} ref updates).",
+                self.path,
+                self.object_count.unwrap_or(0),
+                self.ref_updates.len()
+            );
+        } else {
+            outln!(
+                w,
+                "Unbundled {} ({} objects, {} bytes).",
+                self.path,
+                self.objects.unwrap_or(0),
+                self.bytes.unwrap_or(0)
+            );
+        }
         for reference in &self.references {
             outln!(w, "{} {}", reference.oid, reference.name);
         }
@@ -169,8 +239,15 @@ impl MarkdownRender for BundleUnbundleOutcome {
     fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         outln!(w, "## Bundle unbundle\n");
         outln!(w, "- **path:** `{}`", self.path);
-        outln!(w, "- **objects:** {}", self.objects);
-        outln!(w, "- **bytes:** {}", self.bytes);
+        if self.dry_run {
+            outln!(w, "- **dry_run:** true");
+            if let Some(n) = self.object_count {
+                outln!(w, "- **object_count:** {n}");
+            }
+        } else if let Some(objects) = self.objects {
+            outln!(w, "- **objects:** {objects}");
+            outln!(w, "- **bytes:** {}", self.bytes.unwrap_or(0));
+        }
         if !self.references.is_empty() {
             outln!(w, "\n| Ref | OID |");
             outln!(w, "| --- | --- |");
@@ -184,23 +261,52 @@ impl MarkdownRender for BundleUnbundleOutcome {
 }
 
 /// Create a bundle from the current repository.
-pub fn run_create(path: PathBuf, revs: Vec<String>, all: bool) -> Result<BundleCreateOutcome> {
+pub fn run_create(
+    path: PathBuf,
+    revs: Vec<String>,
+    all: bool,
+    dry_run: bool,
+) -> Result<BundleCreateOutcome> {
     let repo = context::discover()?;
     if revs.is_empty() && !all {
         bail!("at least one revision is required (use `--all` to bundle every ref)");
     }
-    let refs = bundle_remote::write_bundle_with_options(
-        &repo,
-        &path,
-        &BundleCreateOptions {
-            all_refs: all,
-            rev_tokens: revs,
-        },
-    )
-    .map_err(map_lib_error)?;
+    let options = BundleCreateOptions {
+        all_refs: all,
+        rev_tokens: revs,
+    };
+    if dry_run {
+        let plan = repo
+            .bundles()
+            .plan_create_with_options(&options)
+            .map_err(map_bundle_error)?;
+        let references: Vec<BundleRefJson> = plan
+            .refs
+            .iter()
+            .map(|r| BundleRefJson {
+                name: r.name.clone(),
+                oid: r.oid.to_hex(),
+            })
+            .collect();
+        let prerequisites = plan.prerequisites.iter().map(|p| p.oid.to_hex()).collect();
+        return Ok(BundleCreateOutcome {
+            path: path.display().to_string(),
+            refs: plan.refs.len(),
+            dry_run: true,
+            object_count: Some(plan.object_count),
+            references,
+            prerequisites,
+        });
+    }
+    let refs =
+        bundle_remote::write_bundle_with_options(&repo, &path, &options).map_err(map_lib_error)?;
     Ok(BundleCreateOutcome {
         path: path.display().to_string(),
         refs,
+        dry_run: false,
+        object_count: None,
+        references: Vec::new(),
+        prerequisites: Vec::new(),
     })
 }
 
@@ -216,14 +322,54 @@ pub fn run_verify(path: PathBuf) -> Result<BundleVerifyOutcome> {
 }
 
 /// Ingest a bundle pack into the current repository (refs are not updated).
-pub fn run_unbundle(path: PathBuf) -> Result<BundleUnbundleOutcome> {
+pub fn run_unbundle(path: PathBuf, dry_run: bool) -> Result<BundleUnbundleOutcome> {
     let repo = context::discover()?;
+    if dry_run {
+        let plan = repo
+            .bundles()
+            .plan_unbundle(&path)
+            .map_err(map_bundle_error)?;
+        let bundle = Bundle::open(&path).map_err(map_bundle_error)?;
+        let references = bundle
+            .header()
+            .refs
+            .iter()
+            .map(|(name, oid)| BundleRefJson::from((name.as_str(), *oid)))
+            .collect();
+        let ref_updates = plan
+            .ref_updates
+            .iter()
+            .map(|u| BundleRefUpdateJson {
+                name: u.name.clone(),
+                old_oid: u.old_oid.map(|o| o.to_hex()),
+                new_oid: u.new_oid.to_hex(),
+            })
+            .collect();
+        let missing_prerequisites = plan
+            .verify
+            .missing_prerequisites
+            .iter()
+            .map(|(oid, _)| oid.to_hex())
+            .collect();
+        return Ok(BundleUnbundleOutcome {
+            path: path.display().to_string(),
+            dry_run: true,
+            references,
+            objects: None,
+            bytes: None,
+            object_count: Some(plan.object_count),
+            ref_updates,
+            ok: Some(plan.verify.is_ok()),
+            missing_prerequisites,
+        });
+    }
     let outcome = repo
         .bundles()
         .unbundle_with_progress(&path, &mut grit_lib::progress::NullProgress)
         .map_err(map_bundle_error)?;
     Ok(BundleUnbundleOutcome {
         path: path.display().to_string(),
+        dry_run: false,
         references: outcome
             .refs
             .iter()
@@ -232,8 +378,12 @@ pub fn run_unbundle(path: PathBuf) -> Result<BundleUnbundleOutcome> {
                 oid: r.oid.to_hex(),
             })
             .collect(),
-        objects: outcome.transfer.objects,
-        bytes: outcome.transfer.bytes,
+        objects: Some(outcome.transfer.objects),
+        bytes: Some(outcome.transfer.bytes),
+        object_count: None,
+        ref_updates: Vec::new(),
+        ok: None,
+        missing_prerequisites: Vec::new(),
     })
 }
 

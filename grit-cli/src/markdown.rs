@@ -1371,6 +1371,21 @@ pub fn print_auth_outcome(w: &mut dyn Write, outcome: &AuthOutcome) -> anyhow::R
 pub fn print_logout_outcome(w: &mut dyn Write, outcome: &LogoutOutcome) -> anyhow::Result<()> {
     outln!(w, "## Auth logout");
     outln!(w);
+    if outcome.dry_run {
+        outln!(w, "- **dry_run:** true");
+        if let Some(cred) = &outcome.credential {
+            outln!(
+                w,
+                "- Would remove **`{}`** credential for **`{}`** (`{}`)",
+                cred.username.as_deref().unwrap_or("(no username)"),
+                cred.host,
+                cred.protocol
+            );
+        } else {
+            outln!(w, "- No stored credential would be removed");
+        }
+        return Ok(());
+    }
     if outcome.logged_out {
         outln!(
             w,

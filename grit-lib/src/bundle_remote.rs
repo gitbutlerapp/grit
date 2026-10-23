@@ -5,7 +5,7 @@ use std::fs::File;
 use std::io::{BufWriter, Write};
 use std::path::Path;
 
-use crate::bundle::{Bundle, BundleError, BundleSpec};
+use crate::bundle::{plan_bundle_create, Bundle, BundleCreatePlan, BundleError, BundleSpec};
 use crate::environment::RepositoryOptions;
 use crate::error::{Error, Result};
 use crate::fetch::{NoProgress, Progress};
@@ -73,11 +73,12 @@ pub fn write_bundle_from_rev_specs(
 /// # Errors
 ///
 /// Propagates rev-list, ref resolution, and bundle write failures.
-pub fn write_bundle_with_options(
-    repo: &Repository,
-    path: &Path,
-    options: &BundleCreateOptions,
-) -> Result<usize> {
+/// Resolve [`BundleSpec`] from create options without writing a file.
+///
+/// # Errors
+///
+/// Propagates rev-list, ref resolution, and empty-ref failures.
+pub fn resolve_bundle_spec(repo: &Repository, options: &BundleCreateOptions) -> Result<BundleSpec> {
     let (rev_tokens, all_from_token) = strip_all_rev_flag(&options.rev_tokens);
     let all_refs = options.all_refs || all_from_token;
 
@@ -105,11 +106,37 @@ pub fn write_bundle_with_options(
         return Err(map_bundle_err(BundleError::EmptyRefs));
     }
 
-    let spec = BundleSpec {
+    Ok(BundleSpec {
         include,
         exclude: revs.boundary_commits.clone(),
         filter: None,
-    };
+    })
+}
+
+/// Plan bundle creation from revision options without writing a file.
+///
+/// # Errors
+///
+/// Same as [`resolve_bundle_spec`] and [`plan_bundle_create`].
+pub fn plan_create_with_options(
+    repo: &Repository,
+    options: &BundleCreateOptions,
+) -> Result<BundleCreatePlan> {
+    let spec = resolve_bundle_spec(repo, options)?;
+    plan_bundle_create(repo, &spec).map_err(map_bundle_err)
+}
+
+/// Write a bundle file using ref-set flags and revision tokens.
+///
+/// # Errors
+///
+/// Propagates rev-list, ref resolution, and bundle write failures.
+pub fn write_bundle_with_options(
+    repo: &Repository,
+    path: &Path,
+    options: &BundleCreateOptions,
+) -> Result<usize> {
+    let spec = resolve_bundle_spec(repo, options)?;
     let file = File::create(path).map_err(Error::Io)?;
     let mut out = BufWriter::new(file);
     crate::bundle::write_bundle(repo, &spec, &mut out).map_err(map_bundle_err)?;

@@ -16,6 +16,28 @@
         "oid"
       ],
       "type": "object"
+    },
+    "BundleRefUpdateJson": {
+      "description": "One ref update that would be applied when unbundling with ref writes enabled.",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "new_oid": {
+          "type": "string"
+        },
+        "old_oid": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "name",
+        "new_oid"
+      ],
+      "type": "object"
     }
   },
   "description": "Outcome of `grit bundle unbundle`.",
@@ -23,15 +45,50 @@
     "bytes": {
       "format": "uint64",
       "minimum": 0.0,
-      "type": "integer"
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "dry_run": {
+      "type": "boolean"
+    },
+    "missing_prerequisites": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "object_count": {
+      "format": "uint32",
+      "minimum": 0.0,
+      "type": [
+        "integer",
+        "null"
+      ]
     },
     "objects": {
       "format": "uint64",
       "minimum": 0.0,
-      "type": "integer"
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "ok": {
+      "type": [
+        "boolean",
+        "null"
+      ]
     },
     "path": {
       "type": "string"
+    },
+    "ref_updates": {
+      "items": {
+        "$ref": "#/definitions/BundleRefUpdateJson"
+      },
+      "type": "array"
     },
     "references": {
       "items": {
@@ -41,8 +98,6 @@
     }
   },
   "required": [
-    "bytes",
-    "objects",
     "path",
     "references"
   ],

@@ -382,15 +382,16 @@ pub fn run_repack(
     })
 }
 
-pub fn run_commit_graph(quiet: bool, mode: OutputMode) -> Result<GcOutcome> {
+pub fn run_commit_graph(dry_run: bool, quiet: bool, mode: OutputMode) -> Result<GcOutcome> {
     let repo = context::discover()?;
+    let mut opts = CommitGraphOptions::with_changed_paths(true);
+    opts.dry_run = dry_run;
     let (report, elapsed) = timed(mode, "Writing commit-graph…", || {
-        write_commit_graph(&repo, &CommitGraphOptions::with_changed_paths(true))
-            .map_err(|e| anyhow::anyhow!("{e}"))
+        write_commit_graph(&repo, &opts).map_err(|e| anyhow::anyhow!("{e}"))
     })?;
     Ok(GcOutcome {
         quiet,
-        dry_run: false,
+        dry_run,
         tasks: vec![GcTaskReport::CommitGraph {
             duration_ms: elapsed.as_millis() as u64,
             commit_count: report.commit_count,
@@ -400,14 +401,16 @@ pub fn run_commit_graph(quiet: bool, mode: OutputMode) -> Result<GcOutcome> {
     })
 }
 
-pub fn run_midx(quiet: bool, mode: OutputMode) -> Result<GcOutcome> {
+pub fn run_midx(dry_run: bool, quiet: bool, mode: OutputMode) -> Result<GcOutcome> {
     let repo = context::discover()?;
+    let mut opts = MidxOptions::default();
+    opts.dry_run = dry_run;
     let (report, elapsed) = timed(mode, "Writing multi-pack-index…", || {
-        write_midx(&repo, &MidxOptions::default()).map_err(|e| anyhow::anyhow!("{e}"))
+        write_midx(&repo, &opts).map_err(|e| anyhow::anyhow!("{e}"))
     })?;
     Ok(GcOutcome {
         quiet,
-        dry_run: false,
+        dry_run,
         tasks: vec![GcTaskReport::Midx {
             duration_ms: elapsed.as_millis() as u64,
             pack_count: report.pack_count,
@@ -417,14 +420,16 @@ pub fn run_midx(quiet: bool, mode: OutputMode) -> Result<GcOutcome> {
     })
 }
 
-pub fn run_pack_refs(quiet: bool, mode: OutputMode) -> Result<GcOutcome> {
+pub fn run_pack_refs(dry_run: bool, quiet: bool, mode: OutputMode) -> Result<GcOutcome> {
     let repo = context::discover()?;
+    let mut opts = PackRefsOptions::default();
+    opts.dry_run = dry_run;
     let (report, elapsed) = timed(mode, "Packing refs…", || {
-        pack_refs(&repo, &PackRefsOptions::default()).map_err(|e| anyhow::anyhow!("{e}"))
+        pack_refs(&repo, &opts).map_err(|e| anyhow::anyhow!("{e}"))
     })?;
     Ok(GcOutcome {
         quiet,
-        dry_run: false,
+        dry_run,
         tasks: vec![GcTaskReport::PackRefs {
             duration_ms: elapsed.as_millis() as u64,
             refs_packed: report.refs_packed,
@@ -434,16 +439,22 @@ pub fn run_pack_refs(quiet: bool, mode: OutputMode) -> Result<GcOutcome> {
     })
 }
 
-pub fn run_prune(older_than: Option<&str>, quiet: bool, mode: OutputMode) -> Result<GcOutcome> {
+pub fn run_prune(
+    older_than: Option<&str>,
+    dry_run: bool,
+    quiet: bool,
+    mode: OutputMode,
+) -> Result<GcOutcome> {
     let repo = context::discover()?;
     let cutoff = older_than.map(parse_older_than).transpose()?.flatten();
     let (stats, elapsed) = timed(mode, "Pruning unreachable loose objects…", || {
-        let prune_opts = PruneOptions::with_older_than(cutoff);
+        let mut prune_opts = PruneOptions::with_older_than(cutoff);
+        prune_opts.dry_run = dry_run;
         prune_loose_objects(&repo, &prune_opts).map_err(|e| anyhow::anyhow!("{e}"))
     })?;
     Ok(GcOutcome {
         quiet,
-        dry_run: false,
+        dry_run,
         tasks: vec![GcTaskReport::Prune {
             duration_ms: elapsed.as_millis() as u64,
             pruned: stats.pruned,

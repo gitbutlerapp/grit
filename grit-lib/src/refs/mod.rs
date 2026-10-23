@@ -2703,21 +2703,25 @@ fn load_packed_refs_with_peel(
 pub(crate) fn pack_refs_for_repository(
     repo: &crate::repo::Repository,
     all: bool,
+    dry_run: bool,
 ) -> Result<(PathBuf, usize, usize)> {
     let git_dir = repo.git_dir();
     if open_ref_store(git_dir)?.format() != RefStorageFormat::Files {
-        return pack_refs_reftable(git_dir);
+        return pack_refs_reftable(git_dir, dry_run);
     }
-    pack_refs_files(git_dir, repo.odb(), all)
+    pack_refs_files(git_dir, repo.odb(), all, dry_run)
 }
 
-fn pack_refs_reftable(git_dir: &Path) -> Result<(PathBuf, usize, usize)> {
+fn pack_refs_reftable(git_dir: &Path, dry_run: bool) -> Result<(PathBuf, usize, usize)> {
     use crate::reftable::ReftableStack;
     let store_git_dir = common_dir(git_dir).unwrap_or_else(|| git_dir.to_path_buf());
     let rt_dir = store_git_dir.join("reftable");
     let tables_before = fs::read_to_string(rt_dir.join("tables.list"))
         .map(|s| s.lines().filter(|l| !l.is_empty()).count())
         .unwrap_or(0);
+    if dry_run {
+        return Ok((rt_dir, 0, 0));
+    }
     let mut stack = ReftableStack::open(&store_git_dir)?;
     stack.compact()?;
     let tables_after = fs::read_to_string(rt_dir.join("tables.list"))
@@ -2730,6 +2734,7 @@ fn pack_refs_files(
     git_dir: &Path,
     odb: &crate::odb::Odb,
     all: bool,
+    dry_run: bool,
 ) -> Result<(PathBuf, usize, usize)> {
     let storage_git_dir = common_dir(git_dir).unwrap_or_else(|| git_dir.to_path_buf());
     let packed_path = store::paths::packed_refs_path(&storage_git_dir);
@@ -2769,6 +2774,10 @@ fn pack_refs_files(
 
     if packed_loose == 0 && merged.is_empty() {
         return Ok((packed_path, 0, 0));
+    }
+
+    if dry_run {
+        return Ok((packed_path, packed_loose, to_prune.len()));
     }
 
     let mut names: Vec<String> = merged.keys().cloned().collect();
@@ -5293,7 +5302,8 @@ mod pack_refs_tests {
             write_ref(&git_dir_hook, "refs/heads/race", &c2_hook).expect("concurrent update");
         })));
 
-        let (_path, packed, pruned) = pack_refs_files(&git_dir, repo.odb(), true).expect("pack");
+        let (_path, packed, pruned) =
+            pack_refs_files(&git_dir, repo.odb(), true, false).expect("pack");
         pack_refs_test_hooks::set_before_prune(None);
         assert!(packed >= 1);
         assert_eq!(pruned, 0, "stale CAS must not delete the updated loose ref");
@@ -5338,7 +5348,7 @@ mod pack_refs_tests {
             .expect("outer tag");
         write_ref(repo.git_dir(), "refs/tags/outer", &outer).expect("tag ref");
 
-        pack_refs_files(repo.git_dir(), repo.odb(), false).expect("pack");
+        pack_refs_files(repo.git_dir(), repo.odb(), false, false).expect("pack");
         let body =
             fs::read_to_string(store::paths::packed_refs_path(repo.git_dir())).expect("packed");
         let mut lines = body.lines();
@@ -5375,7 +5385,7 @@ mod pack_refs_tests {
             .expect("tag");
         write_ref(repo.git_dir(), "refs/tags/tree-tag", &tag).expect("tag ref");
 
-        pack_refs_files(repo.git_dir(), repo.odb(), true).expect("pack");
+        pack_refs_files(repo.git_dir(), repo.odb(), true, false).expect("pack");
         let body =
             fs::read_to_string(store::paths::packed_refs_path(repo.git_dir())).expect("packed");
         assert!(body.contains("refs/tags/tree-tag"));

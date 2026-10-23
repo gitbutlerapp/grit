@@ -198,6 +198,57 @@ pub struct BundleSpec {
     pub filter: Option<FilterSpec>,
 }
 
+/// One ref tip that would appear in a bundle header.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BundleRefEntry {
+    /// Full ref name (for example `refs/heads/main`).
+    pub name: String,
+    /// Tip object id.
+    pub oid: ObjectId,
+}
+
+/// One prerequisite commit line (`-oid`) for an incremental bundle.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BundlePrerequisite {
+    /// Required commit oid.
+    pub oid: ObjectId,
+    /// Optional subject from the commit message.
+    pub subject: Option<String>,
+}
+
+/// Planned bundle contents without writing a file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BundleCreatePlan {
+    /// Ref tips that would be listed in the header.
+    pub refs: Vec<BundleRefEntry>,
+    /// Prerequisite commits the recipient must already have.
+    pub prerequisites: Vec<BundlePrerequisite>,
+    /// Object count encoded in the pack stream.
+    pub object_count: u32,
+}
+
+/// One ref movement that would occur when applying bundle header tips locally.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BundleRefUpdatePlan {
+    /// Ref to update.
+    pub name: String,
+    /// Current tip when the ref exists locally.
+    pub old_oid: Option<ObjectId>,
+    /// Tip from the bundle header.
+    pub new_oid: ObjectId,
+}
+
+/// Planned unbundle work: verification outcome and ref updates without ingesting the pack.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BundleUnbundlePlan {
+    /// Verification against the open repository.
+    pub verify: BundleVerifyReport,
+    /// Ref updates implied by the bundle header (refs are not written during unbundle).
+    pub ref_updates: Vec<BundleRefUpdatePlan>,
+    /// Object count in the embedded pack.
+    pub object_count: u32,
+}
+
 /// An opened bundle file on disk.
 #[derive(Debug, Clone)]
 pub struct Bundle {
@@ -232,6 +283,15 @@ impl Bundle {
     #[must_use]
     pub fn path(&self) -> &Path {
         &self.path
+    }
+
+    /// Object count from the embedded pack header.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`BundleError::MissingPack`] when the pack stream is absent or truncated.
+    pub fn pack_object_count(&self) -> std::result::Result<u32, BundleError> {
+        bundle_pack_object_count(self)
     }
 
     /// Byte offset in [`Self::path`] where the `PACK` stream begins.
@@ -472,6 +532,144 @@ fn ensure_pack_magic(reader: &mut dyn BufRead) -> std::result::Result<(), Bundle
     }
 }
 
+/// Plan a bundle for `spec` without writing a file.
+///
+/// # Errors
+///
+/// Returns [`BundleError::EmptyRefs`] when `spec.include` is empty, or pack generation failures.
+pub fn plan_bundle_create(
+    repo: &Repository,
+    spec: &BundleSpec,
+) -> std::result::Result<BundleCreatePlan, BundleError> {
+    if spec.include.is_empty() {
+        return Err(BundleError::EmptyRefs);
+    }
+    let header = bundle_header_parts(repo, spec)?;
+    let pack = build_bundle_pack(repo, spec)?;
+    let object_count = crate::receive_pack::pack_object_count(&pack).unwrap_or(0);
+    Ok(BundleCreatePlan {
+        refs: header
+            .refs
+            .into_iter()
+            .map(|(oid, name)| BundleRefEntry { name, oid })
+            .collect(),
+        prerequisites: header
+            .prerequisites
+            .into_iter()
+            .map(|(oid, subject)| BundlePrerequisite { oid, subject })
+            .collect(),
+        object_count,
+    })
+}
+
+/// Plan unbundle verification and ref updates without ingesting the pack or writing refs.
+///
+/// # Errors
+///
+/// Returns [`BundleError`] when the bundle cannot be read or verified.
+pub fn plan_bundle_unbundle(
+    bundle: &Bundle,
+    repo: &Repository,
+) -> std::result::Result<BundleUnbundlePlan, BundleError> {
+    let verify = bundle.verify(repo)?;
+    let ref_updates = planned_ref_updates_from_header(repo, &bundle.header().refs);
+    let object_count = bundle_pack_object_count(bundle)?;
+    Ok(BundleUnbundlePlan {
+        verify,
+        ref_updates,
+        object_count,
+    })
+}
+
+fn bundle_pack_object_count(bundle: &Bundle) -> std::result::Result<u32, BundleError> {
+    let mut input = File::open(&bundle.path).map_err(BundleError::from)?;
+    Seek::seek(&mut input, std::io::SeekFrom::Start(bundle.pack_offset))
+        .map_err(BundleError::from)?;
+    let mut header = [0u8; 12];
+    read_exact_or_missing_pack(&mut input, &mut header)?;
+    Ok(crate::receive_pack::pack_object_count(&header).unwrap_or(0))
+}
+
+fn planned_ref_updates_from_header(
+    repo: &Repository,
+    refs: &[(String, ObjectId)],
+) -> Vec<BundleRefUpdatePlan> {
+    let git_dir = repo.git_dir();
+    let mut updates = Vec::new();
+    for (name, new_oid) in refs {
+        if name.ends_with("^{}") {
+            continue;
+        }
+        let old_oid = crate::refs::resolve_ref(git_dir, name).ok();
+        if old_oid.as_ref() == Some(new_oid) {
+            continue;
+        }
+        updates.push(BundleRefUpdatePlan {
+            name: name.clone(),
+            old_oid,
+            new_oid: *new_oid,
+        });
+    }
+    updates
+}
+
+struct BundleHeaderParts {
+    prerequisites: Vec<(ObjectId, Option<String>)>,
+    refs: Vec<(ObjectId, String)>,
+}
+
+fn bundle_header_parts(
+    repo: &Repository,
+    spec: &BundleSpec,
+) -> std::result::Result<BundleHeaderParts, BundleError> {
+    let include_oids: Vec<ObjectId> = spec.include.iter().map(|(o, _)| *o).collect();
+    let prerequisites = prerequisite_commits(repo.odb(), &include_oids, &spec.exclude)?;
+    Ok(BundleHeaderParts {
+        prerequisites,
+        refs: spec.include.clone(),
+    })
+}
+
+fn build_bundle_pack(
+    repo: &Repository,
+    spec: &BundleSpec,
+) -> std::result::Result<Vec<u8>, BundleError> {
+    let include_oids: Vec<ObjectId> = spec.include.iter().map(|(o, _)| *o).collect();
+    let mut haves: Vec<ObjectId> = spec
+        .exclude
+        .iter()
+        .map(|oid| peel_to_commit(repo.odb(), *oid))
+        .collect::<std::result::Result<Vec<_>, Error>>()
+        .map_err(|e| BundleError::Io(e.to_string()))?;
+    haves.sort();
+    haves.dedup();
+    let pack_opts = PackBuildOptions::for_local_push(None);
+    let empty_shallow = HashSet::new();
+    let have_closure = reachable_closure(repo.odb(), &haves, &HashSet::new(), true, &empty_shallow)
+        .map_err(|e| BundleError::Io(e.to_string()))?;
+    if let Some(filter) = spec.filter.as_ref() {
+        let send = filtered_pack_objects(
+            repo,
+            &include_oids,
+            &spec.exclude,
+            filter.as_filter(),
+            &have_closure,
+        )
+        .map_err(|e| BundleError::Io(e.to_string()))?;
+        build_pack_from_send_list(
+            repo.odb(),
+            &send,
+            &have_closure,
+            &pack_opts,
+            &HashMap::new(),
+        )
+        .map_err(|e| BundleError::Io(e.to_string()))
+    } else {
+        build_pack(repo.odb(), &include_oids, &haves, &pack_opts)
+            .map_err(|e| BundleError::Io(e.to_string()))
+    }
+}
+
 /// Write a bundle to `out` from `repo` using `spec`.
 ///
 /// # Errors
@@ -499,9 +697,8 @@ pub fn write_bundle(
         }
     }
 
-    let include_oids: Vec<ObjectId> = spec.include.iter().map(|(o, _)| *o).collect();
-    let boundaries = prerequisite_commits(repo.odb(), &include_oids, &spec.exclude)?;
-    for (oid, subject) in &boundaries {
+    let header = bundle_header_parts(repo, spec)?;
+    for (oid, subject) in &header.prerequisites {
         write!(out, "-{} ", oid.to_hex()).map_err(|e| BundleError::Io(e.to_string()))?;
         if let Some(s) = subject {
             write!(out, "{s}").map_err(|e| BundleError::Io(e.to_string()))?;
@@ -509,44 +706,12 @@ pub fn write_bundle(
         writeln!(out).map_err(|e| BundleError::Io(e.to_string()))?;
     }
 
-    for (oid, name) in &spec.include {
+    for (oid, name) in &header.refs {
         writeln!(out, "{} {name}", oid.to_hex()).map_err(|e| BundleError::Io(e.to_string()))?;
     }
     writeln!(out).map_err(|e| BundleError::Io(e.to_string()))?;
 
-    let mut haves: Vec<ObjectId> = spec
-        .exclude
-        .iter()
-        .map(|oid| peel_to_commit(repo.odb(), *oid))
-        .collect::<std::result::Result<Vec<_>, Error>>()
-        .map_err(|e| BundleError::Io(e.to_string()))?;
-    haves.sort();
-    haves.dedup();
-    let pack_opts = PackBuildOptions::for_local_push(None);
-    let empty_shallow = HashSet::new();
-    let have_closure = reachable_closure(repo.odb(), &haves, &HashSet::new(), true, &empty_shallow)
-        .map_err(|e| BundleError::Io(e.to_string()))?;
-    let pack = if let Some(filter) = spec.filter.as_ref() {
-        let send = filtered_pack_objects(
-            repo,
-            &include_oids,
-            &spec.exclude,
-            filter.as_filter(),
-            &have_closure,
-        )
-        .map_err(|e| BundleError::Io(e.to_string()))?;
-        build_pack_from_send_list(
-            repo.odb(),
-            &send,
-            &have_closure,
-            &pack_opts,
-            &HashMap::new(),
-        )
-        .map_err(|e| BundleError::Io(e.to_string()))?
-    } else {
-        build_pack(repo.odb(), &include_oids, &haves, &pack_opts)
-            .map_err(|e| BundleError::Io(e.to_string()))?
-    };
+    let pack = build_bundle_pack(repo, spec)?;
     out.write_all(&pack)
         .map_err(|e| BundleError::Io(e.to_string()))?;
     Ok(())

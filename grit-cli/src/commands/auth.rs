@@ -34,6 +34,10 @@ use serde::Serialize;
 use crate::markdown;
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 /// Result of `grit auth` (sign-in).
 #[derive(Serialize, JsonSchema)]
 pub struct AuthOutcome {
@@ -59,15 +63,48 @@ impl MarkdownRender for AuthOutcome {
     }
 }
 
+/// Stored credential fields reported by `grit auth logout --dry-run`.
+#[derive(Serialize, JsonSchema)]
+pub struct LogoutCredentialPreview {
+    pub protocol: String,
+    pub host: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub username: Option<String>,
+}
+
 /// Result of `grit auth logout`.
 #[derive(Serialize, JsonSchema)]
 pub struct LogoutOutcome {
     pub logged_out: bool,
     pub host: String,
+    #[serde(default, skip_serializing_if = "is_false")]
+    #[schemars(skip_serializing_if = "is_false")]
+    pub dry_run: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub credential: Option<LogoutCredentialPreview>,
 }
 
 impl HumanRender for LogoutOutcome {
     fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
+        if self.dry_run {
+            if let Some(cred) = &self.credential {
+                outln!(
+                    w,
+                    "Dry run: would remove stored credential for {} ({}) on {}.",
+                    cred.host,
+                    cred.username.as_deref().unwrap_or("(no username)"),
+                    cred.protocol
+                );
+            } else {
+                outln!(
+                    w,
+                    "Dry run: no stored credential for {} would be removed.",
+                    self.host
+                );
+            }
+            return Ok(());
+        }
         if self.logged_out {
             outln!(
                 w,
@@ -140,24 +177,47 @@ pub fn run() -> Result<AuthOutcome> {
 /// `credential.helper` (`erase`). This removes the same credential `grit auth`
 /// writes — `https://x-access-token@github.com` — so a later push/fetch no longer
 /// authenticates with it.
-pub fn logout() -> Result<LogoutOutcome> {
+pub fn logout(dry_run: bool) -> Result<LogoutOutcome> {
     let config = load_config();
+    let lookup = github_token_credential(None);
 
     // Without a helper there's nothing that could be holding the token.
     if !has_token_helper(&config) {
         return Ok(LogoutOutcome {
             logged_out: false,
             host: GITHUB_HOST.to_owned(),
+            dry_run,
+            credential: None,
+        });
+    }
+
+    if dry_run {
+        let filled = HelperCredentialProvider::new(config.clone())
+            .fill(&lookup)
+            .ok()
+            .filter(|c| c.password.as_ref().is_some_and(|p| !p.is_empty()));
+        let credential = filled.map(|c| LogoutCredentialPreview {
+            protocol: c.protocol.unwrap_or_else(|| "https".to_owned()),
+            host: c.host.unwrap_or_else(|| GITHUB_HOST.to_owned()),
+            username: c.username,
+        });
+        return Ok(LogoutOutcome {
+            logged_out: credential.is_some(),
+            host: GITHUB_HOST.to_owned(),
+            dry_run: true,
+            credential,
         });
     }
 
     HelperCredentialProvider::new(config)
-        .reject(&github_token_credential(None))
+        .reject(&lookup)
         .context("removing the token with your credential helper")?;
 
     Ok(LogoutOutcome {
         logged_out: true,
         host: GITHUB_HOST.to_owned(),
+        dry_run: false,
+        credential: None,
     })
 }
 

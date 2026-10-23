@@ -65,9 +65,19 @@ pub fn prune_loose_unreachable(
     reachable_roots: &[ObjectId],
     keep_newer_than: Option<SystemTime>,
 ) -> Result<PruneStats> {
+    prune_loose_unreachable_with_dry_run(odb, reachable_roots, keep_newer_than, false)
+}
+
+/// Like [`prune_loose_unreachable`], but skips deletion when `dry_run` is true.
+pub fn prune_loose_unreachable_with_dry_run(
+    odb: &Odb,
+    reachable_roots: &[ObjectId],
+    keep_newer_than: Option<SystemTime>,
+    dry_run: bool,
+) -> Result<PruneStats> {
     odb.require_files_primary("gc")?;
     let loose = odb.enumerate_local_loose_objects()?;
-    prune_unreachable_from(odb, loose, reachable_roots, keep_newer_than)
+    prune_unreachable_from(odb, loose, reachable_roots, keep_newer_than, dry_run)
 }
 
 /// [`prune_loose_unreachable`] right after a repack built from the same `reachable_roots`.
@@ -88,7 +98,7 @@ pub(crate) fn prune_loose_unreachable_after_repack(
     if loose.is_empty() {
         return Ok(PruneStats::default());
     }
-    prune_unreachable_from(odb, loose, reachable_roots, keep_newer_than)
+    prune_unreachable_from(odb, loose, reachable_roots, keep_newer_than, false)
 }
 
 fn prune_unreachable_from(
@@ -96,6 +106,7 @@ fn prune_unreachable_from(
     loose: Vec<(ObjectId, std::path::PathBuf)>,
     reachable_roots: &[ObjectId],
     keep_newer_than: Option<SystemTime>,
+    dry_run: bool,
 ) -> Result<PruneStats> {
     let mut stats = PruneStats::default();
     let reachable = reachable_closure(odb, reachable_roots)?;
@@ -119,6 +130,10 @@ fn prune_unreachable_from(
             }
         }
 
+        if dry_run {
+            stats.pruned += 1;
+            continue;
+        }
         match std::fs::remove_file(&path) {
             Ok(()) => stats.pruned += 1,
             // A concurrent prune may have already removed it; treat as pruned.

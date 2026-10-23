@@ -74,6 +74,8 @@ fn auth_render() {
     let logout = LogoutOutcome {
         logged_out: true,
         host: "github.com".to_owned(),
+        dry_run: false,
+        credential: None,
     };
     let payload = AuthRenderSnapshot {
         sign_in: capture_outcome(&sign_in, &ctx),
