@@ -26,6 +26,7 @@ pub(crate) struct MergeTreeCache {
 
 impl MergeTreeCache {
     /// Drop parsed trees and path hints so long replay sequences do not retain every step's trees.
+    #[allow(dead_code)]
     pub(crate) fn clear_retained(&mut self) {
         self.parsed.clear();
         self.dir_with_descendant = [HashSet::new(), HashSet::new(), HashSet::new()];

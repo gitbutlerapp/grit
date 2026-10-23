@@ -44,9 +44,7 @@ The target branch is the first that exists of: the `target.branch` config value,
 
 `grit diff --json` on **`--staged`** or **`--unstaged`** patch output includes stable **`hunks[].id`** (12 lowercase hex chars) and **`hunks[].index`** (0-based within the file). Ids hash side, path, and line bodies (not line numbers), so they stay valid when earlier hunks are staged. Use **`grit add --hunks <id,...>`** or **`grit add --lines path:start-end`** (new-side **`lines[].new`**, 1-based inclusive); commit-range diffs omit `id` for now.
 
-**Partial staging:** `grit diff --unstaged --json -- path | jq '.files[].hunks[] | .id'` → `grit add --hunks id1,id2 -- path`, or pick **`lines[].new`** → `grit add --lines path:10-15 -- path`. Mix `--hunks` and `--lines`. One-shot commit: **`grit commit --hunks id1,id2 -m msg -- path`** or **`grit commit --lines path:10-15 -m msg -- path`**. Use `--dry-run` to preview. Exit code **2** for unknown/stale ids or invalid line ranges.
-
-**Partial discard / unstage:** same ids or line ranges on **`grit restore --hunks`** / **`grit restore --lines`** (default: worktree; add **`--staged`** to unstage selected hunks). **`--dry-run`** previews without writing.
+**Partial staging:** `grit diff --unstaged --json -- path | jq '.files[].hunks[] | .id'` → `grit add --hunks id1,id2 -- path`, or pick **`lines[].new`** → `grit add --lines path:10-15 -- path`. Mix `--hunks` and `--lines`. Use `--dry-run` to preview. Exit code **2** for unknown/stale ids or invalid line ranges.
 
 Revisions can be full or short ids, branch or tag names, or expressions like `HEAD~2`.
 
@@ -59,8 +57,6 @@ $ grit commit -m "Explain what changed and why"
 ```
 
 `grit commit` **auto-stages** the whole worktree by default (`commit.autoStage=true`). Use **`grit commit --staged`** to commit only the index (set `commit.autoStage=false` to make that the default). Use **`grit commit -m msg -- <paths>`** (or `--pathspec-from-file`) for a partial commit that leaves other staged changes alone — like `git commit --only`. `-a` / `--all` forces auto-stage; `--staged` and paths cannot be combined with each other or with `-a`.
-
-**Partial hunks:** `grit diff --unstaged --json` → pick `hunks[].id` → **`grit commit --hunks id1,id2 -m msg`** (optional `-- paths`). Same exit code **2** as `grit add --hunks` for unknown or stale ids. **`grit commit --patch-file file`** applies a cached patch then commits. Neither mode auto-stages the rest of the tree.
 
 ### Staging (`grit add`)
 
@@ -87,8 +83,6 @@ Each commit gets a stable **`change-id`** header (on by default) that survives `
 | Task | Command |
 | --- | --- |
 | List branches | `grit branch` |
-| List with filters / JSON detail | `grit branch --list 'feat*' -a --merged main --sort date -n 20 --json` |
-| Current branch name only | `grit branch --show-current` |
 | Create a branch at the current commit (no switch) | `grit branch <name>` |
 | Create at a specific commit | `grit branch <name> <start>` |
 | Create with upstream tracking | `grit branch -t <name> <remote>/<branch>` or rely on `branch.autoSetupMerge` |
@@ -101,22 +95,19 @@ Each commit gets a stable **`change-id`** header (on by default) that survives `
 | Delete regardless of merge | `grit branch --force-delete <name>` (short `-D`) |
 | Predict merge conflicts (no repo changes) | `grit merge --check <branch>` (exit 0 = clean/ff/up to date, 1 = would conflict; `--json` → `result: clean\|conflicts\|…`) |
 
-`grit branch --json` and `--markdown` list with `full_ref`, `oid`, `subject`, `date`, optional `upstream` (`ref`, `remote`, `gone`, `ahead`, `behind`), and `worktree` when checked out elsewhere. Human list output adds an upstream marker when configured.
-
 `grit switch`, `grit merge`, `grit pick`, `grit revert` and `grit pull` refuse to run when checkout would overwrite local edits or untracked files. Preflight with `grit switch <branch> --dry-run --json` (checks only; reports `changed_paths`) before switching. On refusal, `--json` emits `kind: would_overwrite` with `reason` (`local_changes` or `untracked`) and sorted `paths`.
 
 ## Combining work
 
-- `grit merge <branch>` fast-forwards when it can, otherwise records a merge commit. `<branch>` can be local or remote-tracking (`origin/main`). Use `grit merge --check <branch>` to predict conflicts in memory without touching refs, the index, or the worktree. Common flags: `--ff-only` (exit 128 when diverged), `--no-ff`, `--squash` (writes `SQUASH_MSG`; finish with `grit commit`), `--no-commit` (Git merge state; finish with `grit commit`), `-X ours|theirs`, `--conflict diff3|zdiff3|merge`, `--allow-unrelated-histories`, `-m` / `--message-file`.
-- `grit pick <commit>` applies one non-merge commit to the current branch as a new commit, keeping its author and message.
-- `grit revert [<commit>…]` undoes one or more commits (ranges OK; newest first). Merge commits need `--mainline <n>`. `-m` / `--message-file` set the message for a **single** commit only.
+- `grit merge <branch>` fast-forwards when it can, otherwise records a merge commit. `<branch>` can be local or remote-tracking (`origin/main`). Use `grit merge --check <branch>` to predict conflicts in memory without touching refs, the index, or the worktree. Common flags: `--ff-only` (exit 128 when diverged), `--no-ff`, `--squash` (writes `SQUASH_MSG`; finish with `grit commit`), `--no-commit` (Git merge state; finish with `grit commit`), `-m` / `--message-file`.
+- `grit pick [<commit>…]` cherry-picks commits onto the current branch (ranges OK). Use `grit pick --check` to predict conflicts without changing refs, the index, or the worktree (exit 0 = clean, 1 = would conflict or empty stop). `-X ours|theirs` auto-resolves replay conflicts; `--conflict diff3|zdiff3|merge` sets marker style when a step stops.
+- `grit revert [<commit>…]` undoes one or more commits (ranges OK; newest first). Merge commits need `--mainline <n>`. `-m` / `--message-file` set the message for a **single** commit only. `grit revert --check` matches pick’s `--check` contract; same `-X` and `--conflict` flags apply.
 - `grit revert --continue`, `--abort`, and `--skip` resume or cancel a stopped revert sequence (same conflict model as pick).
 - On a conflict these commands update the index and working tree with conflict markers, exit 1, and leave merge/pick/revert/rebase state on disk. To inspect a side or recreate markers without resolving, use `grit restore --ours`, `--theirs`, or `--merge` on the conflicted paths (index stays unmerged). Fix conflicts (`grit diff`), stage (`grit add`), then finish with `grit commit` for merges or `grit pick --continue` / `grit revert --continue` / `grit rebase --continue`. Use `--abort` on the same command to cancel; `grit rebase --skip` skips the current commit.
 
 ## History rewrites
 
 - `grit history drop`, `move`, `reword`, `fixup`, `squash`, and `absorb` share `--dry-run`, `--update-refs`, `--empty=(drop|keep|abort)` (empty replayed commits), and `--keep-committer` (preserve each replayed commit’s committer line).
-- `grit history fixup` accepts **`--hunks`** and **`--lines`** like `grit add` to fold selected unstaged edits into a historical commit without staging the whole file; optional `-- paths` narrows the diff. Without those flags, fixup uses the staged index (same as before).
 
 ## Remotes
 
@@ -151,8 +142,7 @@ URLs can be `https://`, `ssh://`, `user@host:path`, `git://`, `file://` or a loc
 
 ## Tags and config
 
-- `grit tag` lists tags (default `--sort=version`). Filters: `-l/--list <pattern>` (repeatable), `--sort version|date|name`, `--reverse`, `--contains [REV]`, `--points-at <REV>`, `-n` / `--limit`. List `--json` includes `target_kind` and `annotation` (subject, message, tagger, date) on annotated tags; human output shows the subject beside the name.
-- `grit tag <name> [<target>]` creates a lightweight tag at `HEAD` or `<target>`. `-m` / `-F` create an annotated tag; `-f` replaces an existing tag; `--dry-run` previews create/delete. `grit tag -d <name>` deletes one. `grit tag --verify <name>…` checks annotated tag signatures and optional `tree-sha256` claims (exit 1 if any fail); `--no-signature` skips signature checks.
+- `grit tag` lists tags. `grit tag <name> [<target>]` creates a lightweight tag at `HEAD` or `<target>`. `-m` / `-F` create an annotated tag; `-f` replaces an existing tag; `--dry-run` previews create/delete. `grit tag -d <name>` deletes one. `grit tag --verify <name>…` checks annotated tag signatures and optional `tree-sha256` claims (exit 1 if any fail); `--no-signature` skips signature checks.
 - `grit config <key>` reads, `grit config <key> <value>` sets, `grit config --unset <key>` removes, `grit config --list` lists. Add `--global` for the per-user file.
 
 ## Staying non-interactive
@@ -164,4 +154,4 @@ URLs can be `https://`, `ssh://`, `user@host:path`, `git://`, `file://` or a loc
 
 ## What grit doesn't do
 
-grit has no equivalent of `rebase`, `reset`, interactive commands, or annotated or signed tags. Partial staging and discard use `--hunks`, `--lines`, and `--patch-file` on `add` and `restore`, not Git's `-p` / `-i`. During a merge conflict, use `grit restore --ours|--theirs|--merge` to compare sides or restore markers, then `grit merge --continue` (or `grit commit` for Git-compatible finish). Use `grit commit --amend` (optional message, JSON `amended` field) to rewrite the tip commit. For `grit stash pop` or `grit stash apply` with conflicts, use `git` to finish resolving. When a task needs something else on this list, use `git` on the same repository and come back to `grit` afterwards.
+grit has no equivalent of `rebase`, `reset`, interactive commands, or annotated or signed tags. Partial staging uses `--hunks`, `--lines`, and `--patch-file` on `add` (and related commands as they land), not Git's `-p` / `-i`. During a merge conflict, use `grit restore --ours|--theirs|--merge` to compare sides or restore markers, then `grit merge --continue` (or `grit commit` for Git-compatible finish). Use `grit commit --amend` (optional message, JSON `amended` field) to rewrite the tip commit. For `grit stash pop` or `grit stash apply` with conflicts, use `git` to finish resolving. When a task needs something else on this list, use `git` on the same repository and come back to `grit` afterwards.

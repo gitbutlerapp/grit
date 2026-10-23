@@ -267,7 +267,7 @@ fn segments_text(segments: &[Segment]) -> String {
     segments.iter().map(|s| s.text.as_str()).collect()
 }
 
-/// Branch list as a table with upstream and worktree columns when present.
+/// Branch list: current branch marked, others plain.
 pub fn print_branch_list(
     w: &mut dyn Write,
     branches: &[crate::commands::branch::BranchEntry],
@@ -278,54 +278,12 @@ pub fn print_branch_list(
         return Ok(());
     }
     outln!(w, "## Branches");
-    outln!(
-        w,
-        "| Branch | Current | OID | Subject | Upstream | Worktree |"
-    );
-    outln!(w, "| --- | --- | --- | --- | --- | --- |");
     for branch in branches {
-        let short_oid = branch
-            .short_oid
-            .as_deref()
-            .or(branch.oid.as_deref())
-            .map(|oid| oid.get(..7).unwrap_or(oid))
-            .unwrap_or("");
-        let current = if branch.current { "yes" } else { "" };
-        let subject = branch
-            .subject
-            .as_deref()
-            .map(escape_table_cell)
-            .unwrap_or_default();
-        let upstream = branch
-            .upstream
-            .as_ref()
-            .map(|up| {
-                let label = if up.gone {
-                    format!("{} [gone]", up.ref_name)
-                } else {
-                    match (up.ahead, up.behind) {
-                        (Some(a), Some(b)) => format!("{} (+{a}/-{b})", up.ref_name),
-                        _ => up.ref_name.clone(),
-                    }
-                };
-                escape_table_cell(&label)
-            })
-            .unwrap_or_default();
-        let worktree = branch
-            .worktree
-            .as_deref()
-            .map(escape_table_cell)
-            .unwrap_or_default();
-        outln!(
-            w,
-            "| `{}` | {} | `{}` | {} | {} | {} |",
-            escape_table_cell(&branch.name),
-            current,
-            short_oid,
-            subject,
-            upstream,
-            worktree
-        );
+        if branch.current {
+            outln!(w, "- **`{}`** (current)", branch.name);
+        } else {
+            outln!(w, "- `{}`", branch.name);
+        }
     }
     Ok(())
 }
@@ -445,17 +403,7 @@ pub fn print_tag_list(
             .as_ref()
             .map(|p| format!(" → `{}`", p.get(..7).unwrap_or(p.as_str())))
             .unwrap_or_default();
-        let subject = tag
-            .annotation
-            .as_ref()
-            .map(|a| format!(" — {}", a.subject))
-            .unwrap_or_default();
-        outln!(
-            w,
-            "- `{}` · {} `{short}`{peel}{subject}",
-            tag.name,
-            tag.kind
-        );
+        outln!(w, "- `{}` · {} `{short}`{peel}", tag.name, tag.kind);
     }
     Ok(())
 }
@@ -806,52 +754,57 @@ pub fn print_pick_outcome(w: &mut dyn Write, outcome: &PickOutcome) -> anyhow::R
     outln!(w, "## Pick");
     outln!(w);
     match outcome.result {
-        PickResult::Picked | PickResult::Skipped => {
+        PickResult::Aborted => outln!(w, "Pick aborted."),
+        PickResult::Conflicts => {
+            if outcome.check {
+                outln!(w, "- Would conflict during pick");
+                if let Some(details) = &outcome.conflicts {
+                    for item in details {
+                        outln!(w, "  - `{path}`", path = item.path);
+                    }
+                }
+            } else {
+                outln!(w, "- Pick stopped with conflicts");
+                outln!(w);
+                if let Some(details) = &outcome.conflicts {
+                    crate::operation_output::render_conflicts_markdown(details, w)?;
+                }
+                crate::operation_output::render_operation_guidance_markdown(
+                    outcome.next_steps.as_deref().unwrap_or(&[]),
+                    outcome.alternatives.as_deref(),
+                    w,
+                )?;
+            }
+        }
+        PickResult::Clean => {
+            outln!(w, "- Would pick cleanly");
+            if let Some(oid) = &outcome.oid {
+                outln!(w, "  - tree `{oid}`");
+            }
+        }
+        PickResult::Empty => {
+            outln!(w, "- Pick stopped on an empty commit");
+            crate::operation_output::render_operation_guidance_markdown(
+                outcome.next_steps.as_deref().unwrap_or(&[]),
+                outcome.alternatives.as_deref(),
+                w,
+            )?;
+        }
+        PickResult::Completed => {
             if outcome.dry_run == Some(true) {
-                outln!(w, "- Would pick **{}** commit(s)", outcome.commits.len());
-                for row in &outcome.commits {
-                    let src = short_hex(&row.source);
+                outln!(w, "- Would pick {} commit(s)", outcome.commits.len());
+                for entry in &outcome.commits {
+                    let src = short_hex(&entry.source);
                     outln!(w, "  - `{src}`");
                 }
             } else {
-                for row in &outcome.commits {
-                    let src = short_hex(&row.source);
-                    if let Some(oid) = &row.oid {
-                        let new = short_hex(oid);
-                        outln!(w, "- `{src}` → `{new}` — {}", row.subject);
-                    } else {
-                        outln!(w, "- `{src}` — {} (no commit)", row.subject);
-                    }
-                }
-                if !outcome.dropped.is_empty() {
-                    outln!(w, "- Dropped **{}** empty commit(s)", outcome.dropped.len());
+                for entry in &outcome.commits {
+                    let src = short_hex(&entry.source);
+                    let new = short_hex(&entry.oid);
+                    outln!(w, "- `{src}` → `{new}` — {}", entry.subject);
                 }
             }
         }
-        PickResult::Conflicts => {
-            outln!(w, "- Pick stopped with conflicts");
-            outln!(w);
-            if let Some(details) = &outcome.conflicts {
-                crate::operation_output::render_conflicts_markdown(details, w)?;
-            }
-            crate::operation_output::render_operation_guidance_markdown(
-                outcome.next_steps.as_deref().unwrap_or(&[]),
-                outcome.alternatives.as_deref(),
-                w,
-            )?;
-        }
-        PickResult::Empty => {
-            if let Some(row) = outcome.commits.last() {
-                let src = short_hex(&row.source);
-                outln!(w, "- Stopped on empty commit `{src}` — {}", row.subject);
-            }
-            crate::operation_output::render_operation_guidance_markdown(
-                outcome.next_steps.as_deref().unwrap_or(&[]),
-                outcome.alternatives.as_deref(),
-                w,
-            )?;
-        }
-        PickResult::Aborted => outln!(w, "Pick aborted."),
     }
     Ok(())
 }
@@ -864,16 +817,31 @@ pub fn print_revert_outcome(w: &mut dyn Write, outcome: &RevertOutcome) -> anyho
     match outcome.result {
         RevertResult::Aborted => outln!(w, "Revert aborted."),
         RevertResult::Conflicts => {
-            outln!(w, "- Revert stopped with conflicts");
-            outln!(w);
-            if let Some(details) = &outcome.conflicts {
-                crate::operation_output::render_conflicts_markdown(details, w)?;
+            if outcome.check {
+                outln!(w, "- Would conflict during revert");
+                if let Some(details) = &outcome.conflicts {
+                    for item in details {
+                        outln!(w, "  - `{path}`", path = item.path);
+                    }
+                }
+            } else {
+                outln!(w, "- Revert stopped with conflicts");
+                outln!(w);
+                if let Some(details) = &outcome.conflicts {
+                    crate::operation_output::render_conflicts_markdown(details, w)?;
+                }
+                crate::operation_output::render_operation_guidance_markdown(
+                    outcome.next_steps.as_deref().unwrap_or(&[]),
+                    outcome.alternatives.as_deref(),
+                    w,
+                )?;
             }
-            crate::operation_output::render_operation_guidance_markdown(
-                outcome.next_steps.as_deref().unwrap_or(&[]),
-                outcome.alternatives.as_deref(),
-                w,
-            )?;
+        }
+        RevertResult::Clean => {
+            outln!(w, "- Would revert cleanly");
+            if let Some(oid) = &outcome.oid {
+                outln!(w, "  - tree `{oid}`");
+            }
         }
         RevertResult::Empty => {
             outln!(w, "- Revert stopped on an empty commit");
@@ -1476,38 +1444,6 @@ mod tests {
     #[test]
     fn escape_table_cell_replaces_internal_newlines_and_pipes() {
         assert_eq!(escape_table_cell("a|b\nc"), "a\\|b\\nc");
-    }
-
-    #[test]
-    fn branch_list_table_escapes_pipe_in_subject() {
-        use crate::commands::branch::BranchEntry;
-
-        use crate::commands::branch::BranchListScope;
-
-        let branches = vec![BranchEntry {
-            name: "main".into(),
-            current: true,
-            is_remote: false,
-            full_ref: Some("refs/heads/main".into()),
-            remote: None,
-            oid: Some("b5ea30de417ac84c09b8cfc0acf5f2c39efc611f".into()),
-            short_oid: Some("b5ea30de".into()),
-            subject: Some("fix|widget".into()),
-            date: None,
-            upstream: None,
-            worktree: None,
-        }];
-        let mut buf = Vec::new();
-        super::print_branch_list(&mut buf, &branches, BranchListScope::Local).expect("markdown");
-        let rendered = String::from_utf8(buf).expect("utf-8");
-        let row = rendered
-            .lines()
-            .find(|line| line.contains("| `main` |"))
-            .expect("branch row");
-        assert!(
-            row.contains("fix\\|widget"),
-            "subject cell should escape pipe delimiters: {row}"
-        );
     }
 
     #[test]

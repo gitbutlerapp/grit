@@ -140,7 +140,7 @@ fn pick_json_reports_new_change_id() {
     fs::write(dir.join("main.txt"), b"main-only\n").unwrap();
     json_stdout(&["commit", "-m", "main diverge", "--json"], &dir);
     let json = json_stdout(&["pick", &source, "--json"], &dir);
-    assert_eq!(json["result"], "picked");
+    assert_eq!(json["result"], "completed");
     let row = &json["commits"][0];
     assert_ne!(row["oid"].as_str(), Some(source.as_str()));
     let pick_id = row["change_id"].as_str().expect("pick change_id");

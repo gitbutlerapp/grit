@@ -34,6 +34,7 @@ pub mod push;
 pub mod reflog;
 pub mod remote;
 pub mod repack;
+pub mod replay_merge_args;
 pub mod reset;
 pub mod resolve;
 pub mod restore;

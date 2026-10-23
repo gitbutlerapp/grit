@@ -13,28 +13,22 @@ use std::path::Path;
 
 use crate::change_id::{change_id, ChangeId, ChangeIdPolicy};
 use crate::commit_trailers::finalize_cherry_pick_message;
-use crate::config::ConfigSet;
 use crate::error::{Error, Result};
 use crate::merge_file::{ConflictStyle, MergeFavor};
 use crate::merge_trees::{
-    merge_trees_three_way_cached, MergeTreeCache, TreeMergeConflictPresentation,
-    WhitespaceMergeOptions,
+    merge_trees_three_way, TreeMergeConflictPresentation, WhitespaceMergeOptions,
 };
 use crate::objects::{parse_commit, CommitData, ObjectId, ObjectKind};
 use crate::operation::Conflict;
 use crate::porcelain::checkout::checkout_between_trees;
 use crate::porcelain::commit::{stamp_change_id_on_new_commit, write_commit_object};
 use crate::porcelain::index_from_tree::index_from_tree_with_worktree_stats;
-use crate::porcelain::merge::apply_conflict_merge_worktree;
+use crate::porcelain::merge::{apply_conflict_merge_worktree, MemOverlayGuard};
 use crate::porcelain::replay::ReplayDirection;
 use crate::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
-use crate::porcelain::revert::{merge_commit_message_for_revert, revert_mainline_extra_body};
-use crate::porcelain::tree_merge_checkout::{
-    apply_clean_tree_merge_to_worktree, apply_clean_tree_merge_to_worktree_with_snapshot,
-};
-use crate::porcelain::worktree_guard::{
-    ensure_worktree_clean_for_pick, load_worktree_snapshot, WorktreeSnapshot,
-};
+use crate::porcelain::revert::merge_commit_message_for_revert;
+use crate::porcelain::tree_merge_checkout::apply_clean_tree_merge_to_worktree;
+use crate::porcelain::worktree_guard::ensure_worktree_clean_for_pick;
 use crate::refs::{update_branch_for_commit_with_config, BranchCommitRefUpdate};
 use crate::repo::Repository;
 use crate::rev_list::{rev_list, OrderingMode, RevListOptions};
@@ -43,6 +37,7 @@ use crate::state::{
     read_cherry_pick_head, read_merge_msg, read_orig_head, read_revert_head, resolve_head,
     HeadState,
 };
+use crate::stripspace::{process as stripspace_process, Mode as StripspaceMode};
 use crate::write_tree::{write_tree_update_index, WriteTreeFlags};
 
 /// How to handle a replay step whose merged tree matches `HEAD` (empty patch).
@@ -103,59 +98,46 @@ pub struct ReplaySequenceRequest {
     pub options: ReplayOptions,
 }
 
-/// One commit produced by a replay step, paired with its source.
+/// One commit produced by a replay step (pick or revert).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReplayCreated {
-    /// Commit that was cherry-picked or reverted.
+    /// Commit that was replayed.
     pub source: ObjectId,
-    /// New commit on the current branch.
+    /// New commit written onto the current branch.
     pub new_oid: ObjectId,
     /// Stored `change-id` on `new_oid` when present.
     pub change_id: Option<ChangeId>,
 }
 
-/// Result of starting or advancing a replay sequence.
+/// In-memory prediction of [`start_replay_sequence`] (no refs, index, worktree, or on-disk object writes).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum SequenceOutcome {
-    /// Every requested step finished (commits may have been dropped per `empty`).
-    Completed {
-        /// New commits created during this call, each paired with its source.
-        created: Vec<ReplayCreated>,
-        /// Source commits skipped as empty/redundant.
+pub enum SequencePrediction {
+    /// Every step would apply cleanly; `tree` is the final tree after all commits.
+    Clean {
+        /// Resulting tree OID after replaying the full sequence.
+        tree: ObjectId,
+        /// Source commits that would be dropped as empty per `empty`.
         dropped: Vec<ObjectId>,
     },
-    /// The current step stopped on merge conflicts.
+    /// The sequence would stop on merge conflicts at this commit.
     Conflicts {
-        /// Source commit being replayed.
-        current: ObjectId,
+        /// Source commit that would conflict.
+        commit: ObjectId,
         /// Conflicted paths and kinds.
         conflicts: Vec<Conflict>,
-        /// Commits created before this stop in the sequence.
-        created_so_far: Vec<ReplayCreated>,
-        /// Remaining todo oids (including `current`).
-        remaining: Vec<ObjectId>,
     },
-    /// The current step is empty relative to `HEAD` and `empty` is [`ReplayEmptyPolicy::Stop`].
+    /// The sequence would stop on an empty step when `empty` is [`ReplayEmptyPolicy::Stop`].
     Empty {
         /// Source commit that would be empty.
-        current: ObjectId,
-        /// Commits created before this stop.
-        created_so_far: Vec<ReplayCreated>,
-        /// Remaining todo oids (including `current`).
-        remaining: Vec<ObjectId>,
+        commit: ObjectId,
     },
 }
 
-/// Expand revision arguments for a pick/revert sequence into commit OIDs, oldest first.
-///
-/// Each entry in `specs` is either a single commit-ish (`branch`, `HEAD~2`, full oid) or a
-/// two-dot range `A..B` / `..B` / `A..` (commits reachable from the right tip but not the left,
-/// in topological order from oldest to newest). Symmetric `A...B` is not supported here.
+/// Expand pick/revert commit arguments (single revisions and `A..B` ranges) into replay order.
 ///
 /// # Errors
 ///
-/// Propagates rev-parse and rev-list errors. Merge commits are not rejected here; replay stops
-/// with [`Error::MergeCommit`] when a step is applied without `mainline`.
+/// Revision parsing and range walk failures from [`rev_list`].
 pub fn commits_to_replay(repo: &Repository, specs: &[String]) -> Result<Vec<ObjectId>> {
     let mut out = Vec::new();
     for spec in specs {
@@ -185,6 +167,77 @@ pub fn commits_to_replay(repo: &Repository, specs: &[String]) -> Result<Vec<Obje
         }
     }
     Ok(out)
+}
+
+/// Predict replaying `req.commits` onto the current branch without touching refs, the index,
+/// merge state files, or the working tree.
+///
+/// Object writes from tree merges are routed through the ODB in-memory overlay and discarded
+/// before return. Clean steps chain trees across the sequence without recording commits.
+///
+/// # Errors
+///
+/// Same validation failures as [`start_replay_sequence`] except worktree cleanliness and
+/// in-progress replay checks are skipped.
+pub fn predict_replay_sequence(
+    repo: &Repository,
+    req: &ReplaySequenceRequest,
+) -> Result<SequencePrediction> {
+    let (_, head_oid) = branch_head(repo)?;
+    if req.commits.is_empty() {
+        let tree = commit_tree(repo, &head_oid)?;
+        return Ok(SequencePrediction::Clean {
+            tree,
+            dropped: Vec::new(),
+        });
+    }
+    if req.commits.len() > 1 && req.options.message_override.is_some() {
+        return Err(Error::Message(
+            "message_override is only valid when replaying a single commit".into(),
+        ));
+    }
+    let todo = build_todo_from_commits(repo, req.direction, &req.commits)?;
+    let _overlay = MemOverlayGuard::enter(repo.odb());
+    predict_sequence(
+        repo,
+        head_oid,
+        req.direction,
+        &req.options,
+        &todo,
+        Vec::new(),
+    )
+}
+
+/// Result of starting or advancing a replay sequence.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SequenceOutcome {
+    /// Every requested step finished (commits may have been dropped per `empty`).
+    Completed {
+        /// New commits created during this call (not prior `created_so_far`).
+        created: Vec<ReplayCreated>,
+        /// Source commits skipped as empty/redundant.
+        dropped: Vec<ObjectId>,
+    },
+    /// The current step stopped on merge conflicts.
+    Conflicts {
+        /// Source commit being replayed.
+        current: ObjectId,
+        /// Conflicted paths and kinds.
+        conflicts: Vec<Conflict>,
+        /// Commits created before this stop in the sequence.
+        created_so_far: Vec<ReplayCreated>,
+        /// Remaining todo oids (including `current`).
+        remaining: Vec<ObjectId>,
+    },
+    /// The current step is empty relative to `HEAD` and `empty` is [`ReplayEmptyPolicy::Stop`].
+    Empty {
+        /// Source commit that would be empty.
+        current: ObjectId,
+        /// Commits created before this stop.
+        created_so_far: Vec<ReplayCreated>,
+        /// Remaining todo oids (including `current`).
+        remaining: Vec<ObjectId>,
+    },
 }
 
 /// Apply `req.commits` onto the current branch, stopping on conflict or empty per `req.options`.
@@ -217,7 +270,7 @@ pub fn start_replay_sequence(
         ));
     }
     let mut todo = build_todo_from_commits(repo, req.direction, &req.commits)?;
-    write_sequence_bootstrap(repo, head_oid, &todo, req)?;
+    write_replay_sequence_start(repo, head_oid, req)?;
     run_sequence(
         repo,
         &refname,
@@ -230,8 +283,28 @@ pub fn start_replay_sequence(
         &mut todo,
         Vec::new(),
         Vec::new(),
-        &mut Vec::new(),
     )
+}
+
+fn sanitize_replay_continue_message(repo: &Repository, raw: &str) -> Result<String> {
+    let config = repo.config()?;
+    let comment_char = config
+        .get("core.commentChar")
+        .and_then(|v| v.chars().next())
+        .unwrap_or('#');
+    let processed = stripspace_process(
+        raw.as_bytes(),
+        &StripspaceMode::StripComments(comment_char.to_string()),
+    );
+    let message = String::from_utf8(processed).map_err(|_| Error::NothingToCommit)?;
+    if message.trim().is_empty() {
+        return Err(Error::NothingToCommit);
+    }
+    let mut message = message;
+    if !message.ends_with('\n') {
+        message.push('\n');
+    }
+    Ok(message)
 }
 
 /// Commit the resolved index for the current step and apply subsequent todo entries.
@@ -248,85 +321,134 @@ pub fn continue_replay_sequence(repo: &Repository, identity: &str) -> Result<Seq
     }
     let (refname, head_oid) = branch_head(repo)?;
     let source = active.current_source()?.ok_or(Error::NoReplayInProgress)?;
-    let message = read_merge_msg(repo.git_dir())?.ok_or(Error::NoReplayInProgress)?;
+    let raw_message = read_merge_msg(repo.git_dir())?.ok_or(Error::NoReplayInProgress)?;
+    let message = sanitize_replay_continue_message(repo, &raw_message)?;
     let new_tree = write_tree_update_index(
         repo.odb(),
         &mut index,
         "",
         crate::write_tree::WriteTreeFlags::silent(),
     )?;
-    let allow_empty = active.opts.empty == ReplayEmptyPolicy::Keep;
-    if !allow_empty {
-        let head_tree = commit_tree(repo, &head_oid)?;
+    repo.write_index(&mut index)?;
+    let head_tree = commit_tree(repo, &head_oid)?;
+    if active.opts.no_commit {
         if new_tree == head_tree {
             return Err(Error::NothingToCommit);
         }
+    } else if new_tree == head_tree {
+        match active.opts.empty {
+            ReplayEmptyPolicy::Keep => {}
+            ReplayEmptyPolicy::Stop => return Err(Error::NothingToCommit),
+            ReplayEmptyPolicy::Drop => {
+                clear_step_heads(repo.git_dir(), active.direction)?;
+                let mut todo = active.todo;
+                if !todo.is_empty() {
+                    todo.remove(0);
+                }
+                write_sequencer_todo(repo.git_dir(), &todo)?;
+                if todo.is_empty() {
+                    clear_replay_state(repo.git_dir())?;
+                    return Ok(SequenceOutcome::Completed {
+                        created: Vec::new(),
+                        dropped: vec![source],
+                    });
+                }
+                let sequence_start =
+                    read_sequencer_head(repo.git_dir()).unwrap_or(active.abort_safety);
+                return run_sequence(
+                    repo,
+                    &refname,
+                    head_oid,
+                    head_oid,
+                    sequence_start,
+                    active.direction,
+                    identity,
+                    &active.opts,
+                    &mut todo,
+                    Vec::new(),
+                    vec![source],
+                );
+            }
+        }
     }
-    let mut todo = active.todo;
-    let mut created_records = read_created_records(repo.git_dir())?;
-    let mut created_so_far: Vec<ObjectId> = created_records.iter().map(|r| r.new_oid).collect();
+
     if active.opts.no_commit {
-        let head_tree = commit_tree(repo, &head_oid)?;
-        repo.write_index(&mut index)?;
-        checkout_between_trees(repo, Some(&head_tree), &new_tree)?;
         clear_step_heads(repo.git_dir(), active.direction)?;
-    } else {
-        let config = repo.config()?;
-        let change_id_policy = ChangeIdPolicy::from_config(&config);
-        let new_oid = write_replay_commit(
+        let mut todo = active.todo;
+        if !todo.is_empty() {
+            todo.remove(0);
+        }
+        write_sequencer_todo(repo.git_dir(), &todo)?;
+        write_sequencer_abort_safety(repo.git_dir(), head_oid)?;
+        if todo.is_empty() {
+            clear_replay_state(repo.git_dir())?;
+            return Ok(SequenceOutcome::Completed {
+                created: Vec::new(),
+                dropped: Vec::new(),
+            });
+        }
+        let sequence_start = read_sequencer_head(repo.git_dir()).unwrap_or(active.abort_safety);
+        return run_sequence(
             repo,
             &refname,
             head_oid,
-            identity,
-            &message,
-            &source,
+            head_oid,
+            sequence_start,
             active.direction,
-            new_tree,
-            allow_empty,
-            &config,
-            &change_id_policy,
-        )?;
-        created_records.push(replay_created_record(repo, source, new_oid)?);
-        created_so_far.push(new_oid);
-        write_created_records(repo.git_dir(), &created_records)?;
-        clear_step_heads(repo.git_dir(), active.direction)?;
+            identity,
+            &active.opts,
+            &mut todo,
+            Vec::new(),
+            Vec::new(),
+        );
     }
+    let allow_empty = active.opts.empty == ReplayEmptyPolicy::Keep;
+    let new_oid = write_replay_commit(
+        repo,
+        &refname,
+        head_oid,
+        identity,
+        &message,
+        &source,
+        active.direction,
+        new_tree,
+        allow_empty,
+    )?;
+    clear_step_heads(repo.git_dir(), active.direction)?;
+    let mut todo = active.todo;
     if !todo.is_empty() {
         todo.remove(0);
     }
     write_sequencer_todo(repo.git_dir(), &todo)?;
+    write_sequencer_abort_safety(repo.git_dir(), new_oid)?;
     if todo.is_empty() {
         clear_replay_state(repo.git_dir())?;
+        let created = replay_created_record(repo, source, new_oid)?;
         return Ok(SequenceOutcome::Completed {
-            created: created_records,
+            created: vec![created],
             dropped: Vec::new(),
         });
     }
     let sequence_start = read_sequencer_head(repo.git_dir()).unwrap_or(active.abort_safety);
-    let head_after = created_so_far.last().copied().unwrap_or(head_oid);
-    persist_sequence_checkpoint(
-        repo,
-        sequence_start,
-        head_after,
-        &todo,
-        &active.opts,
-        active.direction,
-        identity,
-    )?;
-    run_sequence(
+    let continued = replay_created_record(repo, source, new_oid)?;
+    match run_sequence(
         repo,
         &refname,
-        head_after,
-        head_after,
+        new_oid,
+        new_oid,
         sequence_start,
         active.direction,
         identity,
         &active.opts,
         &mut todo,
-        created_so_far,
+        vec![continued],
         Vec::new(),
-        &mut created_records,
-    )
+    )? {
+        SequenceOutcome::Completed { created, dropped } => {
+            Ok(SequenceOutcome::Completed { created, dropped })
+        }
+        other => Ok(other),
+    }
 }
 
 /// Skip the current todo step and apply later entries.
@@ -357,7 +479,6 @@ pub fn skip_replay_step(repo: &Repository, identity: &str) -> Result<SequenceOut
     }
     let dropped: Vec<ObjectId> = dropped.into_iter().collect();
     let sequence_start = read_sequencer_head(repo.git_dir()).unwrap_or(active.abort_safety);
-    let mut created_records = read_created_records(repo.git_dir())?;
     match run_sequence(
         repo,
         &refname,
@@ -368,9 +489,8 @@ pub fn skip_replay_step(repo: &Repository, identity: &str) -> Result<SequenceOut
         identity,
         &active.opts,
         &mut todo,
-        created_records.iter().map(|r| r.new_oid).collect(),
+        Vec::new(),
         dropped,
-        &mut created_records,
     )? {
         SequenceOutcome::Completed { created, dropped } => {
             Ok(SequenceOutcome::Completed { created, dropped })
@@ -387,13 +507,14 @@ pub fn skip_replay_step(repo: &Repository, identity: &str) -> Result<SequenceOut
 /// - [`Error::ReplayAbortHeadMoved`] when `HEAD` is no longer at `sequencer/abort-safety`.
 pub fn abort_replay_sequence(repo: &Repository) -> Result<()> {
     let active = load_active_replay(repo)?;
-    let (refname, head_oid) = branch_head(repo)?;
+    let (_, head_oid) = branch_head(repo)?;
     if head_oid != active.abort_safety {
         return Err(Error::ReplayAbortHeadMoved);
     }
     let restore_oid = read_sequencer_head(repo.git_dir())
         .or(read_orig_head(repo.git_dir()).ok().flatten())
         .unwrap_or(active.abort_safety);
+    let (refname, _) = branch_head(repo)?;
     hard_reset_branch(repo, &refname, restore_oid)?;
     clear_replay_state(repo.git_dir())?;
     Ok(())
@@ -486,84 +607,56 @@ fn run_sequence(
     committer: &str,
     opts: &ReplayOptions,
     todo: &mut Vec<TodoEntry>,
-    mut created_so_far: Vec<ObjectId>,
+    prior_created: Vec<ReplayCreated>,
     mut dropped: Vec<ObjectId>,
-    created_records: &mut Vec<ReplayCreated>,
 ) -> Result<SequenceOutcome> {
     let mut head = head_oid;
+    let mut created_this_call = Vec::new();
     let _ = abort_safety;
-    let config = repo.config()?;
-    let change_id_policy = ChangeIdPolicy::from_config(&config);
-    let mut merge_cache = MergeTreeCache::default();
-    let mut cached_head_tree = commit_tree(repo, &head)?;
-    let mut worktree_snapshot = repo
-        .work_tree()
-        .is_some()
-        .then(|| load_worktree_snapshot(repo))
-        .transpose()?;
+    write_sequencer_abort_safety(repo.git_dir(), head_oid)?;
     while let Some(entry) = todo.first().cloned() {
-        let step = match apply_one_step(
+        match apply_one_step(
             repo,
             refname,
             &mut head,
-            &mut cached_head_tree,
             sequence_start,
             direction,
             committer,
             opts,
             &entry,
-            &config,
-            &change_id_policy,
-            &mut merge_cache,
-            &mut worktree_snapshot,
-        ) {
-            Ok(result) => result,
-            Err(err) => {
-                if head != sequence_start || !created_so_far.is_empty() {
-                    let _ = persist_sequence_checkpoint(
-                        repo,
-                        sequence_start,
-                        head,
-                        todo,
-                        opts,
-                        direction,
-                        committer,
-                    );
-                }
-                return Err(err);
-            }
-        };
-        match step {
-            StepResult::Committed { oid, tree } => {
+        )? {
+            StepResult::Committed { oid } => {
                 todo.remove(0);
-                created_so_far.push(oid);
-                created_records.push(replay_created_record(repo, entry.oid, oid)?);
-                write_created_records(repo.git_dir(), created_records)?;
-                cached_head_tree = tree;
-                merge_cache.clear_retained();
+                let record = replay_created_record(repo, entry.oid, oid)?;
+                created_this_call.push(record);
+                write_sequencer_abort_safety(repo.git_dir(), oid)?;
+                write_sequencer_todo(repo.git_dir(), todo)?;
                 if todo.is_empty() {
                     clear_replay_state(repo.git_dir())?;
                     return Ok(SequenceOutcome::Completed {
-                        created: created_records.clone(),
+                        created: merge_created_records(&prior_created, &created_this_call),
                         dropped,
                     });
                 }
+                write_sequencer_abort_safety(repo.git_dir(), head)?;
             }
-            StepResult::AppliedNoCommit { tree } => {
+            StepResult::AppliedNoCommit => {
                 todo.remove(0);
-                cached_head_tree = tree;
-                merge_cache.clear_retained();
+                write_sequencer_todo(repo.git_dir(), todo)?;
+                write_sequencer_abort_safety(repo.git_dir(), head)?;
                 if todo.is_empty() {
                     clear_replay_state(repo.git_dir())?;
                     return Ok(SequenceOutcome::Completed {
-                        created: created_records.clone(),
+                        created: merge_created_records(&prior_created, &created_this_call),
                         dropped,
                     });
                 }
+                write_sequencer_abort_safety(repo.git_dir(), head)?;
             }
             StepResult::DroppedEmpty => {
                 todo.remove(0);
                 dropped.push(entry.oid);
+                write_sequencer_todo(repo.git_dir(), todo)?;
                 continue;
             }
             StepResult::Conflicts { conflicts } => {
@@ -576,7 +669,6 @@ fn run_sequence(
                     opts,
                     direction,
                     committer,
-                    true,
                 )?;
                 record_replay_stop(
                     repo,
@@ -590,7 +682,7 @@ fn run_sequence(
                 return Ok(SequenceOutcome::Conflicts {
                     current: entry.oid,
                     conflicts,
-                    created_so_far: created_records.clone(),
+                    created_so_far: merge_created_records(&prior_created, &created_this_call),
                     remaining,
                 });
             }
@@ -604,7 +696,6 @@ fn run_sequence(
                     opts,
                     direction,
                     committer,
-                    true,
                 )?;
                 record_replay_stop(
                     repo,
@@ -617,7 +708,7 @@ fn run_sequence(
                 )?;
                 return Ok(SequenceOutcome::Empty {
                     current: entry.oid,
-                    created_so_far: created_records.clone(),
+                    created_so_far: merge_created_records(&prior_created, &created_this_call),
                     remaining,
                 });
             }
@@ -625,17 +716,173 @@ fn run_sequence(
     }
     clear_replay_state(repo.git_dir())?;
     Ok(SequenceOutcome::Completed {
-        created: created_records.clone(),
+        created: merge_created_records(&prior_created, &created_this_call),
         dropped,
     })
 }
 
+fn merge_created_records(
+    started: &[ReplayCreated],
+    this_call: &[ReplayCreated],
+) -> Vec<ReplayCreated> {
+    let mut out = started.to_vec();
+    out.extend_from_slice(this_call);
+    out
+}
+
 enum StepResult {
-    Committed { oid: ObjectId, tree: ObjectId },
-    AppliedNoCommit { tree: ObjectId },
+    Committed { oid: ObjectId },
+    AppliedNoCommit,
     DroppedEmpty,
     Conflicts { conflicts: Vec<Conflict> },
     EmptyStop,
+}
+
+fn predict_sequence(
+    repo: &Repository,
+    head_oid: ObjectId,
+    direction: ReplayDirection,
+    opts: &ReplayOptions,
+    todo: &[TodoEntry],
+    mut dropped: Vec<ObjectId>,
+) -> Result<SequencePrediction> {
+    let mut head_tree = commit_tree(repo, &head_oid)?;
+    for entry in todo {
+        match predict_one_step(repo, head_oid, &mut head_tree, direction, opts, entry)? {
+            PredictStepResult::Advanced => {}
+            PredictStepResult::DroppedEmpty => dropped.push(entry.oid),
+            PredictStepResult::Conflicts { conflicts } => {
+                return Ok(SequencePrediction::Conflicts {
+                    commit: entry.oid,
+                    conflicts,
+                });
+            }
+            PredictStepResult::EmptyStop => {
+                return Ok(SequencePrediction::Empty { commit: entry.oid });
+            }
+        }
+    }
+    Ok(SequencePrediction::Clean {
+        tree: head_tree,
+        dropped,
+    })
+}
+
+enum PredictStepResult {
+    Advanced,
+    DroppedEmpty,
+    Conflicts { conflicts: Vec<Conflict> },
+    EmptyStop,
+}
+
+fn replay_step_presentation<'a>(
+    entry: &TodoEntry,
+    head_oid: ObjectId,
+    source_oid: ObjectId,
+    opts: &ReplayOptions,
+    theirs_label: &'a mut String,
+    base_label: &'a mut String,
+) -> TreeMergeConflictPresentation<'a> {
+    *theirs_label = format!("{} ({})", abbrev_oid(source_oid), entry.subject);
+    *base_label = format!("parent of {theirs_label}");
+    TreeMergeConflictPresentation {
+        label_theirs: crate::merge_trees::TheirsConflictLabel::Fixed(theirs_label),
+        label_base: base_label,
+        style: opts.conflict_style,
+        df_directory_ours_commit: Some(head_oid),
+        df_directory_theirs_commit: Some(source_oid),
+        ..TreeMergeConflictPresentation::default()
+    }
+}
+
+fn predict_one_step(
+    repo: &Repository,
+    head_commit: ObjectId,
+    head_tree: &mut ObjectId,
+    direction: ReplayDirection,
+    opts: &ReplayOptions,
+    entry: &TodoEntry,
+) -> Result<PredictStepResult> {
+    let source_oid = entry.oid;
+    if direction == ReplayDirection::Pick && source_oid == head_commit {
+        return Err(Error::ReplaySourceAtHead);
+    }
+    let source_obj = repo.odb().read(&source_oid)?;
+    let source = parse_commit(&source_obj.data)?;
+    let head_tree_saved = *head_tree;
+    let ours_tree = if opts.no_commit {
+        index_stage0_tree(repo)?
+    } else {
+        head_tree_saved
+    };
+    let empty_compare_tree = if opts.no_commit {
+        ours_tree
+    } else {
+        head_tree_saved
+    };
+    let (base_tree, ours_tree, theirs_tree) = merge_trees_for_replay(
+        repo,
+        direction,
+        &source,
+        ours_tree,
+        opts.mainline,
+        source_oid,
+    )?;
+
+    if direction == ReplayDirection::Pick && base_tree == source.tree {
+        return match opts.empty {
+            ReplayEmptyPolicy::Stop => Ok(PredictStepResult::EmptyStop),
+            ReplayEmptyPolicy::Drop => Ok(PredictStepResult::DroppedEmpty),
+            ReplayEmptyPolicy::Keep if opts.no_commit => Ok(PredictStepResult::EmptyStop),
+            ReplayEmptyPolicy::Keep => {
+                *head_tree = empty_compare_tree;
+                Ok(PredictStepResult::Advanced)
+            }
+        };
+    }
+
+    let mut theirs_label = String::new();
+    let mut base_label = String::new();
+    let presentation = replay_step_presentation(
+        entry,
+        head_commit,
+        source_oid,
+        opts,
+        &mut theirs_label,
+        &mut base_label,
+    );
+    let merged = merge_trees_three_way(
+        repo,
+        base_tree,
+        ours_tree,
+        theirs_tree,
+        opts.favor,
+        WhitespaceMergeOptions::default(),
+        None,
+        presentation,
+    )?;
+
+    if crate::operation::tree_merge_has_conflicts(&merged) {
+        return Ok(PredictStepResult::Conflicts {
+            conflicts: crate::operation::conflicts_from_tree_merge(&merged),
+        });
+    }
+
+    let new_tree = merged.result_tree;
+    if new_tree == empty_compare_tree {
+        return match opts.empty {
+            ReplayEmptyPolicy::Stop => Ok(PredictStepResult::EmptyStop),
+            ReplayEmptyPolicy::Drop => Ok(PredictStepResult::DroppedEmpty),
+            ReplayEmptyPolicy::Keep if opts.no_commit => Ok(PredictStepResult::EmptyStop),
+            ReplayEmptyPolicy::Keep => {
+                *head_tree = empty_compare_tree;
+                Ok(PredictStepResult::Advanced)
+            }
+        };
+    }
+
+    *head_tree = new_tree;
+    Ok(PredictStepResult::Advanced)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -643,16 +890,11 @@ fn apply_one_step(
     repo: &Repository,
     refname: &str,
     head: &mut ObjectId,
-    cached_head_tree: &mut ObjectId,
     _sequence_start: ObjectId,
     direction: ReplayDirection,
     committer: &str,
     opts: &ReplayOptions,
     entry: &TodoEntry,
-    config: &ConfigSet,
-    change_id_policy: &ChangeIdPolicy,
-    merge_cache: &mut MergeTreeCache,
-    worktree_snapshot: &mut Option<WorktreeSnapshot>,
 ) -> Result<StepResult> {
     let source_oid = entry.oid;
     if direction == ReplayDirection::Pick && source_oid == *head {
@@ -660,12 +902,13 @@ fn apply_one_step(
     }
     let source_obj = repo.odb().read(&source_oid)?;
     let source = parse_commit(&source_obj.data)?;
-    let head_tree = *cached_head_tree;
+    let head_tree = commit_tree(repo, head)?;
     let ours_tree = if opts.no_commit {
         index_stage0_tree(repo)?
     } else {
         head_tree
     };
+    let empty_compare_tree = if opts.no_commit { ours_tree } else { head_tree };
     let (base_tree, ours_tree, theirs_tree) = merge_trees_for_replay(
         repo,
         direction,
@@ -682,7 +925,7 @@ fn apply_one_step(
             ReplayEmptyPolicy::Keep if opts.no_commit => Ok(StepResult::EmptyStop),
             ReplayEmptyPolicy::Keep => {
                 let message =
-                    replay_message(config, opts, direction, &source, source_oid, committer)?;
+                    replay_message(repo, opts, direction, &source, source_oid, committer)?;
                 let new_oid = write_replay_commit(
                     repo,
                     refname,
@@ -693,27 +936,25 @@ fn apply_one_step(
                     direction,
                     head_tree,
                     true,
-                    config,
-                    change_id_policy,
                 )?;
                 *head = new_oid;
-                Ok(StepResult::Committed {
-                    oid: new_oid,
-                    tree: head_tree,
-                })
+                Ok(StepResult::Committed { oid: new_oid })
             }
         };
     }
 
-    let presentation = TreeMergeConflictPresentation {
-        style: opts.conflict_style,
-        df_directory_ours_commit: Some(*head),
-        df_directory_theirs_commit: Some(source_oid),
-        ..TreeMergeConflictPresentation::default()
-    };
-    let merged = merge_trees_three_way_cached(
+    let mut theirs_label = String::new();
+    let mut base_label = String::new();
+    let presentation = replay_step_presentation(
+        entry,
+        *head,
+        source_oid,
+        opts,
+        &mut theirs_label,
+        &mut base_label,
+    );
+    let merged = merge_trees_three_way(
         repo,
-        merge_cache,
         base_tree,
         ours_tree,
         theirs_tree,
@@ -731,14 +972,14 @@ fn apply_one_step(
     }
 
     let new_tree = merged.result_tree;
-    if new_tree == head_tree {
+    if new_tree == empty_compare_tree {
         return match opts.empty {
             ReplayEmptyPolicy::Stop => Ok(StepResult::EmptyStop),
             ReplayEmptyPolicy::Drop => Ok(StepResult::DroppedEmpty),
             ReplayEmptyPolicy::Keep if opts.no_commit => Ok(StepResult::EmptyStop),
             ReplayEmptyPolicy::Keep => {
                 let message =
-                    replay_message(config, opts, direction, &source, source_oid, committer)?;
+                    replay_message(repo, opts, direction, &source, source_oid, committer)?;
                 let new_oid = write_replay_commit(
                     repo,
                     refname,
@@ -747,63 +988,35 @@ fn apply_one_step(
                     &message,
                     &source_oid,
                     direction,
-                    head_tree,
+                    empty_compare_tree,
                     true,
-                    config,
-                    change_id_policy,
                 )?;
                 *head = new_oid;
-                Ok(StepResult::Committed {
-                    oid: new_oid,
-                    tree: head_tree,
-                })
+                Ok(StepResult::Committed { oid: new_oid })
             }
         };
     }
 
     if opts.no_commit {
-        apply_clean_merge_worktree(repo, &ours_tree, &merged, worktree_snapshot)?;
-        return Ok(StepResult::AppliedNoCommit { tree: new_tree });
+        apply_clean_tree_merge_to_worktree(repo, &ours_tree, &merged)?;
+        return Ok(StepResult::AppliedNoCommit);
     }
 
-    let message = replay_message(config, opts, direction, &source, source_oid, committer)?;
-    apply_clean_merge_worktree(repo, &head_tree, &merged, worktree_snapshot)?;
-    let new_oid = write_replay_commit_with_head_tree(
+    let message = replay_message(repo, opts, direction, &source, source_oid, committer)?;
+    apply_clean_tree_merge_to_worktree(repo, &head_tree, &merged)?;
+    let new_oid = write_replay_commit(
         repo,
         refname,
         *head,
-        head_tree,
         committer,
         &message,
         &source_oid,
         direction,
         new_tree,
         false,
-        config,
-        change_id_policy,
     )?;
     *head = new_oid;
-    Ok(StepResult::Committed {
-        oid: new_oid,
-        tree: new_tree,
-    })
-}
-
-fn apply_clean_merge_worktree(
-    repo: &Repository,
-    from_tree: &ObjectId,
-    merged: &crate::merge_trees::TreeMergeOutput,
-    worktree_snapshot: &mut Option<WorktreeSnapshot>,
-) -> Result<()> {
-    if worktree_snapshot.is_none() {
-        *worktree_snapshot = Some(load_worktree_snapshot(repo)?);
-    }
-    match worktree_snapshot.as_mut() {
-        Some(snapshot) => {
-            apply_clean_tree_merge_to_worktree_with_snapshot(repo, from_tree, merged, snapshot)
-        }
-        None => apply_clean_tree_merge_to_worktree(repo, from_tree, merged),
-    }
+    Ok(StepResult::Committed { oid: new_oid })
 }
 
 fn merge_trees_for_replay(
@@ -855,7 +1068,7 @@ fn merge_trees_for_replay(
 }
 
 fn replay_message(
-    config: &ConfigSet,
+    repo: &Repository,
     opts: &ReplayOptions,
     direction: ReplayDirection,
     source: &CommitData,
@@ -869,6 +1082,7 @@ fn replay_message(
         }
         return Ok(message);
     }
+    let config = repo.config()?;
     match direction {
         ReplayDirection::Pick => {
             let (name, email) = identity_name_email(committer);
@@ -878,7 +1092,7 @@ fn replay_message(
                 false,
                 name,
                 email,
-                config,
+                config.as_ref(),
                 &source_oid.to_hex(),
             ))
         }
@@ -891,11 +1105,8 @@ fn replay_message(
                     })
                 })
                 .flatten();
-            let (title, mut body) =
-                merge_commit_message_for_revert(source, source_oid, false, '#', None);
-            if let Some(parent) = mainline_parent {
-                body.push_str(&revert_mainline_extra_body(source_oid, parent));
-            }
+            let (title, body) =
+                merge_commit_message_for_revert(source, source_oid, false, '#', mainline_parent);
             Ok(format!("{title}\n{body}"))
         }
     }
@@ -935,45 +1146,12 @@ fn write_replay_commit(
     head_oid: ObjectId,
     committer: &str,
     message: &str,
-    source: &ObjectId,
-    direction: ReplayDirection,
-    tree: ObjectId,
-    allow_empty: bool,
-    config: &ConfigSet,
-    change_id_policy: &ChangeIdPolicy,
-) -> Result<ObjectId> {
-    let head_tree = commit_tree(repo, &head_oid)?;
-    write_replay_commit_with_head_tree(
-        repo,
-        refname,
-        head_oid,
-        head_tree,
-        committer,
-        message,
-        source,
-        direction,
-        tree,
-        allow_empty,
-        config,
-        change_id_policy,
-    )
-}
-
-#[allow(clippy::too_many_arguments)]
-fn write_replay_commit_with_head_tree(
-    repo: &Repository,
-    refname: &str,
-    head_oid: ObjectId,
-    head_tree: ObjectId,
-    committer: &str,
-    message: &str,
     _source: &ObjectId,
     direction: ReplayDirection,
     tree: ObjectId,
     allow_empty: bool,
-    config: &ConfigSet,
-    change_id_policy: &ChangeIdPolicy,
 ) -> Result<ObjectId> {
+    let head_tree = commit_tree(repo, &head_oid)?;
     if !allow_empty && tree == head_tree {
         return Err(Error::NothingToCommit);
     }
@@ -995,7 +1173,9 @@ fn write_replay_commit_with_head_tree(
         raw_message: None,
         extra_headers: Vec::new(),
     };
-    stamp_change_id_on_new_commit(repo, change_id_policy, &mut commit_data)?;
+    let config = repo.config()?;
+    let policy = ChangeIdPolicy::from_config(config.as_ref());
+    stamp_change_id_on_new_commit(repo, &policy, &mut commit_data)?;
     let new_oid = write_commit_object(repo, &commit_data, None)?;
     let subject = commit_data.message.lines().next().unwrap_or("").trim_end();
     let reflog_msg = match direction {
@@ -1009,7 +1189,7 @@ fn write_replay_commit_with_head_tree(
         identity: committer,
         reflog_message: &reflog_msg,
     };
-    update_branch_for_commit_with_config(repo.git_dir(), &ref_update, config)?;
+    update_branch_for_commit_with_config(repo.git_dir(), &ref_update, config.as_ref())?;
     Ok(new_oid)
 }
 
@@ -1026,9 +1206,12 @@ fn record_replay_stop(
     let git_dir = repo.git_dir();
     let source_obj = repo.odb().read(&source_oid)?;
     let source = parse_commit(&source_obj.data)?;
-    let config = repo.config()?;
-    let message = replay_message(&config, opts, direction, &source, source_oid, committer)?;
-    write_orig_head_if_absent(git_dir, orig_head)?;
+    let message = replay_message(repo, opts, direction, &source, source_oid, committer)?;
+    fs::write(
+        git_dir.join("ORIG_HEAD"),
+        format!("{}\n", orig_head.to_hex()),
+    )
+    .map_err(Error::Io)?;
     fs::write(git_dir.join("MERGE_MSG"), &message).map_err(Error::Io)?;
     let head_name = match direction {
         ReplayDirection::Pick => "CHERRY_PICK_HEAD",
@@ -1043,7 +1226,33 @@ fn record_replay_stop(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
+fn write_replay_sequence_start(
+    repo: &Repository,
+    sequence_start: ObjectId,
+    req: &ReplaySequenceRequest,
+) -> Result<()> {
+    let git_dir = repo.git_dir();
+    fs::create_dir_all(git_dir.join("sequencer")).map_err(Error::Io)?;
+    fs::write(
+        git_dir.join("sequencer").join("head"),
+        format!("{}\n", sequence_start.to_hex()),
+    )
+    .map_err(Error::Io)?;
+    write_sequencer_abort_safety(git_dir, sequence_start)?;
+    write_persisted_options(git_dir, req)?;
+    Ok(())
+}
+
+fn write_sequencer_abort_safety(git_dir: &Path, head: ObjectId) -> Result<()> {
+    fs::create_dir_all(git_dir.join("sequencer")).map_err(Error::Io)?;
+    fs::write(
+        git_dir.join("sequencer").join("abort-safety"),
+        format!("{}\n", head.to_hex()),
+    )
+    .map_err(Error::Io)?;
+    Ok(())
+}
+
 fn write_sequencer_state(
     repo: &Repository,
     sequence_start: ObjectId,
@@ -1052,7 +1261,6 @@ fn write_sequencer_state(
     opts: &ReplayOptions,
     direction: ReplayDirection,
     committer: &str,
-    rewrite_opts: bool,
 ) -> Result<()> {
     let git_dir = repo.git_dir();
     fs::create_dir_all(git_dir.join("sequencer")).map_err(Error::Io)?;
@@ -1067,18 +1275,15 @@ fn write_sequencer_state(
     )
     .map_err(Error::Io)?;
     write_sequencer_todo(git_dir, todo)?;
-    if rewrite_opts {
-        write_persisted_options(
-            git_dir,
-            &ReplaySequenceRequest {
-                commits: Vec::new(),
-                direction,
-                committer: committer.to_owned(),
-                options: opts.clone(),
-            },
-        )?;
-    }
-    Ok(())
+    write_persisted_options(
+        git_dir,
+        &ReplaySequenceRequest {
+            commits: Vec::new(),
+            direction,
+            committer: committer.to_owned(),
+            options: opts.clone(),
+        },
+    )
 }
 
 fn write_sequencer_todo(git_dir: &Path, todo: &[TodoEntry]) -> Result<()> {
@@ -1342,107 +1547,8 @@ fn clear_step_heads(git_dir: &Path, direction: ReplayDirection) -> Result<()> {
     Ok(())
 }
 
-fn write_orig_head_if_absent(git_dir: &Path, oid: ObjectId) -> Result<()> {
-    let path = git_dir.join("ORIG_HEAD");
-    if path.exists() {
-        return Ok(());
-    }
-    fs::write(path, format!("{}\n", oid.to_hex())).map_err(Error::Io)
-}
-
-fn persist_sequence_checkpoint(
-    repo: &Repository,
-    sequence_start: ObjectId,
-    current_head: ObjectId,
-    todo: &[TodoEntry],
-    opts: &ReplayOptions,
-    direction: ReplayDirection,
-    committer: &str,
-) -> Result<()> {
-    write_sequencer_state(
-        repo,
-        sequence_start,
-        current_head,
-        todo,
-        opts,
-        direction,
-        committer,
-        false,
-    )
-}
-
-fn write_sequence_bootstrap(
-    repo: &Repository,
-    head_oid: ObjectId,
-    todo: &[TodoEntry],
-    req: &ReplaySequenceRequest,
-) -> Result<()> {
-    write_orig_head_if_absent(repo.git_dir(), head_oid)?;
-    write_sequencer_state(
-        repo,
-        head_oid,
-        head_oid,
-        todo,
-        &req.options,
-        req.direction,
-        &req.committer,
-        true,
-    )?;
-    write_created_records(repo.git_dir(), &[])?;
-    Ok(())
-}
-
-fn write_created_records(git_dir: &Path, records: &[ReplayCreated]) -> Result<()> {
-    let seq = git_dir.join("sequencer");
-    if records.is_empty() && !seq.is_dir() {
-        return Ok(());
-    }
-    fs::create_dir_all(&seq).map_err(Error::Io)?;
-    let mut body = String::new();
-    for record in records {
-        body.push_str(&format!(
-            "{} {}\n",
-            record.source.to_hex(),
-            record.new_oid.to_hex()
-        ));
-    }
-    fs::write(seq.join("created"), body).map_err(Error::Io)
-}
-
-fn read_created_records(git_dir: &Path) -> Result<Vec<ReplayCreated>> {
-    let path = git_dir.join("sequencer").join("created");
-    if !path.is_file() {
-        return Ok(Vec::new());
-    }
-    let content = fs::read_to_string(&path).map_err(Error::Io)?;
-    let mut out = Vec::new();
-    for line in content.lines() {
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-        let mut parts = line.split_whitespace();
-        let src = parts.next().ok_or_else(|| {
-            Error::Message("invalid sequencer/created line: missing source oid".into())
-        })?;
-        let new = parts.next().ok_or_else(|| {
-            Error::Message("invalid sequencer/created line: missing new oid".into())
-        })?;
-        let source = ObjectId::from_hex(src)
-            .map_err(|_| Error::Message("invalid sequencer/created line: bad source oid".into()))?;
-        let new_oid = ObjectId::from_hex(new)
-            .map_err(|_| Error::Message("invalid sequencer/created line: bad new oid".into()))?;
-        out.push(ReplayCreated {
-            source,
-            new_oid,
-            change_id: None,
-        });
-    }
-    Ok(out)
-}
-
 fn clear_replay_state(git_dir: &Path) -> Result<()> {
-    for name in ["CHERRY_PICK_HEAD", "REVERT_HEAD", "MERGE_MSG"] {
+    for name in ["CHERRY_PICK_HEAD", "REVERT_HEAD", "ORIG_HEAD", "MERGE_MSG"] {
         let path = git_dir.join(name);
         if path.exists() {
             fs::remove_file(path).map_err(Error::Io)?;

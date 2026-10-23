@@ -65,6 +65,13 @@
           "type": "string"
         },
         {
+          "description": "Every step would apply cleanly (`grit revert --check` only).",
+          "enum": [
+            "clean"
+          ],
+          "type": "string"
+        },
+        {
           "description": "The sequence stopped on merge conflicts.",
           "enum": [
             "conflicts"
@@ -106,6 +113,10 @@
         "string",
         "null"
       ]
+    },
+    "check": {
+      "description": "True when this outcome is from `grit revert --check` (nothing was reverted).",
+      "type": "boolean"
     },
     "commits": {
       "description": "Revert commits created in this invocation (newest first).",
