@@ -357,6 +357,14 @@ impl Bundle {
 ///
 /// Returns [`BundleError`] when the signature or header is invalid.
 pub fn read_header(reader: &mut dyn BufRead) -> std::result::Result<BundleHeader, BundleError> {
+    let header = read_header_lines(reader)?;
+    ensure_pack_magic(reader)?;
+    Ok(header)
+}
+
+/// Parse the signature, capability, prerequisite and ref lines up to and including the
+/// blank line that ends the header, without inspecting the pack that follows.
+fn read_header_lines(reader: &mut dyn BufRead) -> std::result::Result<BundleHeader, BundleError> {
     let signature = read_line(reader)?;
     let version = match signature.as_str() {
         s if s == V2_SIGNATURE.trim_end() => BundleVersion::V2,
@@ -404,8 +412,6 @@ pub fn read_header(reader: &mut dyn BufRead) -> std::result::Result<BundleHeader
         }
     }
 
-    ensure_pack_magic(reader)?;
-
     Ok(BundleHeader {
         version,
         object_format,
@@ -415,15 +421,38 @@ pub fn read_header(reader: &mut dyn BufRead) -> std::result::Result<BundleHeader
     })
 }
 
+/// Buffer size for streaming the header; most headers fit in one read, and the pack that
+/// follows (often far larger than the header) is never pulled into memory.
+const HEADER_READ_BUF: usize = 64 * 1024;
+
 fn read_header_from_file(path: &Path) -> std::result::Result<(BundleHeader, u64), BundleError> {
-    let bytes = std::fs::read(path).map_err(BundleError::from)?;
-    let mut slice: &[u8] = &bytes;
-    let header = read_header(&mut slice)?;
-    let pack_offset = (bytes.len() - slice.len()) as u64;
-    if !bytes[pack_offset as usize..].starts_with(b"PACK") {
+    let file = File::open(path).map_err(BundleError::from)?;
+    let mut reader = std::io::BufReader::with_capacity(HEADER_READ_BUF, file);
+    let header = read_header_lines(&mut reader)?;
+    let mut pack_offset = reader.stream_position().map_err(BundleError::from)?;
+    let mut magic = [0u8; 4];
+    loop {
+        read_exact_or_missing_pack(&mut reader, &mut magic[..1])?;
+        if magic[0] != b'\n' && magic[0] != b'\r' {
+            break;
+        }
+        pack_offset += 1;
+    }
+    read_exact_or_missing_pack(&mut reader, &mut magic[1..])?;
+    if &magic != b"PACK" {
         return Err(BundleError::MissingPack);
     }
     Ok((header, pack_offset))
+}
+
+fn read_exact_or_missing_pack(
+    reader: &mut dyn std::io::Read,
+    buf: &mut [u8],
+) -> std::result::Result<(), BundleError> {
+    reader.read_exact(buf).map_err(|e| match e.kind() {
+        std::io::ErrorKind::UnexpectedEof => BundleError::MissingPack,
+        _ => BundleError::from(e),
+    })
 }
 
 fn ensure_pack_magic(reader: &mut dyn BufRead) -> std::result::Result<(), BundleError> {
@@ -866,5 +895,88 @@ mod tests {
         };
         let err = report.into_result().unwrap_err();
         assert!(matches!(err, BundleError::MissingPrerequisite { .. }));
+    }
+
+    fn write_bundle_file(bytes: &[u8]) -> tempfile::NamedTempFile {
+        let mut file = tempfile::NamedTempFile::new().expect("tempfile");
+        file.write_all(bytes).expect("write bundle");
+        file.flush().expect("flush bundle");
+        file
+    }
+
+    #[test]
+    fn open_reports_pack_offset_after_header() {
+        let oid = "a".repeat(40);
+        let header = format!("# v2 git bundle\n{oid} refs/heads/main\n\n");
+        let mut data = header.clone().into_bytes();
+        data.extend_from_slice(b"PACK\0\0\0\x02\0\0\0\0");
+        let file = write_bundle_file(&data);
+        let bundle = Bundle::open(file.path()).expect("open");
+        assert_eq!(bundle.pack_byte_offset(), header.len() as u64);
+        assert_eq!(bundle.header().refs.len(), 1);
+    }
+
+    #[test]
+    fn open_skips_blank_lines_before_pack() {
+        let oid = "a".repeat(40);
+        let header = format!("# v2 git bundle\n{oid} HEAD\n\n\r\n\n");
+        let mut data = header.clone().into_bytes();
+        data.extend_from_slice(b"PACK");
+        let file = write_bundle_file(&data);
+        let bundle = Bundle::open(file.path()).expect("open");
+        assert_eq!(bundle.pack_byte_offset(), header.len() as u64);
+    }
+
+    #[test]
+    fn open_handles_pack_magic_across_read_buffer_boundary() {
+        let oid = "c".repeat(40);
+        let signature = "# v2 git bundle\n";
+        let ref_line = |i: usize| format!("{oid} refs/tags/t{i:06}\n");
+        let line_len = ref_line(0).len();
+        // Grow the header until the blank terminator lands two bytes before the first
+        // buffer refill, so "PACK" straddles the boundary.
+        let mut refs = 0usize;
+        while signature.len() + (refs + 1) * line_len + 1 + 2 <= HEADER_READ_BUF {
+            refs += 1;
+        }
+        let mut header = String::from(signature);
+        for i in 0..refs {
+            header.push_str(&ref_line(i));
+        }
+        header.push('\n');
+        let pad = HEADER_READ_BUF - 2 - header.len();
+        let mut data = header.clone().into_bytes();
+        data.extend(std::iter::repeat_n(b'\n', pad));
+        data.extend_from_slice(b"PACK\0\0\0\x02");
+        assert_eq!(&data[HEADER_READ_BUF - 2..HEADER_READ_BUF + 2], b"PACK");
+        let file = write_bundle_file(&data);
+        let bundle = Bundle::open(file.path()).expect("open");
+        assert_eq!(bundle.header().refs.len(), refs);
+        assert_eq!(bundle.pack_byte_offset(), (HEADER_READ_BUF - 2) as u64);
+    }
+
+    #[test]
+    fn open_without_pack_is_missing_pack() {
+        let oid = "a".repeat(40);
+        let truncated = format!("# v2 git bundle\n{oid} HEAD\n\n");
+        let file = write_bundle_file(truncated.as_bytes());
+        assert_eq!(
+            Bundle::open(file.path()).unwrap_err(),
+            BundleError::MissingPack
+        );
+
+        let short = format!("# v2 git bundle\n{oid} HEAD\n\nPA");
+        let file = write_bundle_file(short.as_bytes());
+        assert_eq!(
+            Bundle::open(file.path()).unwrap_err(),
+            BundleError::MissingPack
+        );
+
+        let garbage = format!("# v2 git bundle\n{oid} HEAD\n\nJUNK");
+        let file = write_bundle_file(garbage.as_bytes());
+        assert_eq!(
+            Bundle::open(file.path()).unwrap_err(),
+            BundleError::MissingPack
+        );
     }
 }
