@@ -326,6 +326,7 @@ mod tests {
             "main",
             None,
             crate::RefStorageFormat::Files,
+            crate::objects::HashAlgo::Sha1,
         )
         .unwrap();
         fs::write(

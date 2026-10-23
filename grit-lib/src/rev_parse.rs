@@ -4050,7 +4050,7 @@ mod line_coverage_tests {
             dir.path(),
             &InitOptions {
                 bare: true,
-                initial_branch: "main".to_owned(),
+
                 ref_storage: crate::RefStorageFormat::Files,
                 ..InitOptions::default()
             },
@@ -4136,7 +4136,7 @@ mod line_coverage_tests {
             dir.path(),
             &InitOptions {
                 bare: true,
-                initial_branch: "main".to_owned(),
+
                 ref_storage: crate::RefStorageFormat::Files,
                 ..InitOptions::default()
             },
@@ -4230,7 +4230,7 @@ mod line_coverage_tests {
             dir.path(),
             &InitOptions {
                 bare: true,
-                initial_branch: "main".to_owned(),
+
                 ref_storage: crate::RefStorageFormat::Files,
                 ..InitOptions::default()
             },
@@ -4322,7 +4322,7 @@ mod line_coverage_tests {
             dir.path(),
             &InitOptions {
                 bare: true,
-                initial_branch: "main".to_owned(),
+
                 ref_storage: crate::RefStorageFormat::Files,
                 ..InitOptions::default()
             },
@@ -4405,7 +4405,7 @@ mod line_coverage_tests {
             dir.path(),
             &InitOptions {
                 bare: true,
-                initial_branch: "main".to_owned(),
+
                 ref_storage: RefStorageFormat::Files,
                 ..InitOptions::default()
             },
@@ -4507,7 +4507,7 @@ mod line_coverage_tests {
             dir.path(),
             &InitOptions {
                 bare: true,
-                initial_branch: "main".to_owned(),
+
                 ref_storage: RefStorageFormat::Files,
                 ..InitOptions::default()
             },
@@ -4850,7 +4850,7 @@ mod line_coverage_tests {
             dir.path(),
             &InitOptions {
                 bare: true,
-                initial_branch: "main".to_owned(),
+
                 ref_storage: RefStorageFormat::Files,
                 ..InitOptions::default()
             },
@@ -5100,7 +5100,7 @@ mod line_coverage_tests {
             dir.path(),
             &InitOptions {
                 bare: true,
-                initial_branch: "main".to_owned(),
+
                 ref_storage: crate::RefStorageFormat::Files,
                 ..InitOptions::default()
             },
@@ -5306,7 +5306,7 @@ mod line_coverage_tests {
             dir.path(),
             &InitOptions {
                 bare: true,
-                initial_branch: "main".into(),
+
                 ref_storage: RefStorageFormat::Files,
                 ..InitOptions::default()
             },

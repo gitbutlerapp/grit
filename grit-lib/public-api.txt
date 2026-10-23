@@ -4820,6 +4820,7 @@ pub grit_lib::error::Error::IndexPathPrefixConflict
 pub grit_lib::error::Error::IndexPathPrefixConflict::directory: std::path::PathBuf
 pub grit_lib::error::Error::IndexPathPrefixConflict::file: std::path::PathBuf
 pub grit_lib::error::Error::IndexUnmerged
+pub grit_lib::error::Error::InitObjectFormatChange
 pub grit_lib::error::Error::InvalidNotesRef(alloc::string::String)
 pub grit_lib::error::Error::InvalidObjectId(alloc::string::String)
 pub grit_lib::error::Error::InvalidPath(alloc::string::String)
@@ -13619,6 +13620,7 @@ pub grit_lib::prelude::Error::IndexPathPrefixConflict
 pub grit_lib::prelude::Error::IndexPathPrefixConflict::directory: std::path::PathBuf
 pub grit_lib::prelude::Error::IndexPathPrefixConflict::file: std::path::PathBuf
 pub grit_lib::prelude::Error::IndexUnmerged
+pub grit_lib::prelude::Error::InitObjectFormatChange
 pub grit_lib::prelude::Error::InvalidNotesRef(alloc::string::String)
 pub grit_lib::prelude::Error::InvalidObjectId(alloc::string::String)
 pub grit_lib::prelude::Error::InvalidPath(alloc::string::String)
@@ -14282,7 +14284,9 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::index::Index
 #[non_exhaustive] pub struct grit_lib::prelude::InitOptions
 pub grit_lib::prelude::InitOptions::bare: bool
 pub grit_lib::prelude::InitOptions::bare_with_worktree_at_path: bool
-pub grit_lib::prelude::InitOptions::initial_branch: alloc::string::String
+pub grit_lib::prelude::InitOptions::environment: core::option::Option<grit_lib::config::environment::Environment>
+pub grit_lib::prelude::InitOptions::initial_branch: core::option::Option<alloc::string::String>
+pub grit_lib::prelude::InitOptions::object_format: grit_lib::objects::HashAlgo
 pub grit_lib::prelude::InitOptions::ref_storage: grit_lib::refs::ref_storage::RefStorageFormat
 pub grit_lib::prelude::InitOptions::separate_git_dir: core::option::Option<std::path::PathBuf>
 pub grit_lib::prelude::InitOptions::template_dir: core::option::Option<std::path::PathBuf>
@@ -14290,7 +14294,9 @@ impl grit_lib::repo::InitOptions
 pub fn grit_lib::repo::InitOptions::new() -> Self
 pub fn grit_lib::repo::InitOptions::with_bare(self, bool) -> Self
 pub fn grit_lib::repo::InitOptions::with_bare_with_worktree_at_path(self, bool) -> Self
+pub fn grit_lib::repo::InitOptions::with_environment(self, grit_lib::config::environment::Environment) -> Self
 pub fn grit_lib::repo::InitOptions::with_initial_branch(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn grit_lib::repo::InitOptions::with_object_format(self, grit_lib::objects::HashAlgo) -> Self
 pub fn grit_lib::repo::InitOptions::with_ref_storage(self, grit_lib::refs::ref_storage::RefStorageFormat) -> Self
 pub fn grit_lib::repo::InitOptions::with_separate_git_dir(self, core::option::Option<std::path::PathBuf>) -> Self
 pub fn grit_lib::repo::InitOptions::with_template_dir(self, core::option::Option<std::path::PathBuf>) -> Self
@@ -14307,6 +14313,24 @@ impl core::marker::Unpin for grit_lib::repo::InitOptions
 impl core::marker::UnsafeUnpin for grit_lib::repo::InitOptions
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::repo::InitOptions
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::repo::InitOptions
+pub struct grit_lib::prelude::InitOutcome
+pub grit_lib::prelude::InitOutcome::initial_branch: alloc::string::String
+pub grit_lib::prelude::InitOutcome::reinitialized: bool
+impl core::clone::Clone for grit_lib::repo::InitOutcome
+pub fn grit_lib::repo::InitOutcome::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::repo::InitOutcome
+impl core::cmp::PartialEq for grit_lib::repo::InitOutcome
+pub fn grit_lib::repo::InitOutcome::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::repo::InitOutcome
+pub fn grit_lib::repo::InitOutcome::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::repo::InitOutcome
+impl core::marker::Freeze for grit_lib::repo::InitOutcome
+impl core::marker::Send for grit_lib::repo::InitOutcome
+impl core::marker::Sync for grit_lib::repo::InitOutcome
+impl core::marker::Unpin for grit_lib::repo::InitOutcome
+impl core::marker::UnsafeUnpin for grit_lib::repo::InitOutcome
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::repo::InitOutcome
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::repo::InitOutcome
 pub struct grit_lib::prelude::NullDiagnostics
 impl core::clone::Clone for grit_lib::diagnostics::NullDiagnostics
 pub fn grit_lib::diagnostics::NullDiagnostics::clone(&self) -> Self
@@ -14513,6 +14537,7 @@ pub fn grit_lib::repo::Repository::hooks(&self) -> grit_lib::repo_handles::Repos
 pub fn grit_lib::repo::Repository::identity_now(&self) -> time::offset_date_time::OffsetDateTime
 pub fn grit_lib::repo::Repository::index_handle(&self) -> grit_lib::index::handle::IndexHandle<'_>
 pub fn grit_lib::repo::Repository::init(&std::path::Path, &grit_lib::repo::InitOptions) -> grit_lib::error::Result<Self>
+pub fn grit_lib::repo::Repository::init_with_outcome(&std::path::Path, &grit_lib::repo::InitOptions) -> grit_lib::error::Result<(Self, grit_lib::repo::InitOutcome)>
 pub fn grit_lib::repo::Repository::is_bare(&self) -> bool
 pub fn grit_lib::repo::Repository::linked_worktree_discover_options(&self) -> grit_lib::config::environment::RepositoryOptions
 pub fn grit_lib::repo::Repository::network_trace_enabled(&self) -> bool
@@ -14646,6 +14671,7 @@ pub fn grit_lib::diagnostics::CollectingDiagnostics::warn(&self, grit_lib::diagn
 impl grit_lib::diagnostics::DiagnosticSink for grit_lib::diagnostics::NullDiagnostics
 pub fn grit_lib::diagnostics::NullDiagnostics::trace(&self, grit_lib::diagnostics::Trace)
 pub fn grit_lib::diagnostics::NullDiagnostics::warn(&self, grit_lib::diagnostics::Warning)
+pub fn grit_lib::prelude::resolve_initial_branch(&grit_lib::config::environment::Environment, core::option::Option<&str>) -> grit_lib::error::Result<alloc::string::String>
 pub type grit_lib::prelude::Result<T> = core::result::Result<T, grit_lib::error::Error>
 pub mod grit_lib::progress
 #[non_exhaustive] pub enum grit_lib::progress::ProgressPhase
@@ -18908,7 +18934,9 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::repo::DiscoveryInfo
 #[non_exhaustive] pub struct grit_lib::repo::InitOptions
 pub grit_lib::repo::InitOptions::bare: bool
 pub grit_lib::repo::InitOptions::bare_with_worktree_at_path: bool
-pub grit_lib::repo::InitOptions::initial_branch: alloc::string::String
+pub grit_lib::repo::InitOptions::environment: core::option::Option<grit_lib::config::environment::Environment>
+pub grit_lib::repo::InitOptions::initial_branch: core::option::Option<alloc::string::String>
+pub grit_lib::repo::InitOptions::object_format: grit_lib::objects::HashAlgo
 pub grit_lib::repo::InitOptions::ref_storage: grit_lib::refs::ref_storage::RefStorageFormat
 pub grit_lib::repo::InitOptions::separate_git_dir: core::option::Option<std::path::PathBuf>
 pub grit_lib::repo::InitOptions::template_dir: core::option::Option<std::path::PathBuf>
@@ -18916,7 +18944,9 @@ impl grit_lib::repo::InitOptions
 pub fn grit_lib::repo::InitOptions::new() -> Self
 pub fn grit_lib::repo::InitOptions::with_bare(self, bool) -> Self
 pub fn grit_lib::repo::InitOptions::with_bare_with_worktree_at_path(self, bool) -> Self
+pub fn grit_lib::repo::InitOptions::with_environment(self, grit_lib::config::environment::Environment) -> Self
 pub fn grit_lib::repo::InitOptions::with_initial_branch(self, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn grit_lib::repo::InitOptions::with_object_format(self, grit_lib::objects::HashAlgo) -> Self
 pub fn grit_lib::repo::InitOptions::with_ref_storage(self, grit_lib::refs::ref_storage::RefStorageFormat) -> Self
 pub fn grit_lib::repo::InitOptions::with_separate_git_dir(self, core::option::Option<std::path::PathBuf>) -> Self
 pub fn grit_lib::repo::InitOptions::with_template_dir(self, core::option::Option<std::path::PathBuf>) -> Self
@@ -18933,6 +18963,24 @@ impl core::marker::Unpin for grit_lib::repo::InitOptions
 impl core::marker::UnsafeUnpin for grit_lib::repo::InitOptions
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::repo::InitOptions
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::repo::InitOptions
+pub struct grit_lib::repo::InitOutcome
+pub grit_lib::repo::InitOutcome::initial_branch: alloc::string::String
+pub grit_lib::repo::InitOutcome::reinitialized: bool
+impl core::clone::Clone for grit_lib::repo::InitOutcome
+pub fn grit_lib::repo::InitOutcome::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::repo::InitOutcome
+impl core::cmp::PartialEq for grit_lib::repo::InitOutcome
+pub fn grit_lib::repo::InitOutcome::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::repo::InitOutcome
+pub fn grit_lib::repo::InitOutcome::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::repo::InitOutcome
+impl core::marker::Freeze for grit_lib::repo::InitOutcome
+impl core::marker::Send for grit_lib::repo::InitOutcome
+impl core::marker::Sync for grit_lib::repo::InitOutcome
+impl core::marker::Unpin for grit_lib::repo::InitOutcome
+impl core::marker::UnsafeUnpin for grit_lib::repo::InitOutcome
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::repo::InitOutcome
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::repo::InitOutcome
 pub struct grit_lib::repo::Repository
 impl grit_lib::repo::Repository
 pub fn grit_lib::repo::Repository::bundles(&self) -> grit_lib::repo_handles::RepositoryBundles<'_>
@@ -18952,6 +19000,7 @@ pub fn grit_lib::repo::Repository::hooks(&self) -> grit_lib::repo_handles::Repos
 pub fn grit_lib::repo::Repository::identity_now(&self) -> time::offset_date_time::OffsetDateTime
 pub fn grit_lib::repo::Repository::index_handle(&self) -> grit_lib::index::handle::IndexHandle<'_>
 pub fn grit_lib::repo::Repository::init(&std::path::Path, &grit_lib::repo::InitOptions) -> grit_lib::error::Result<Self>
+pub fn grit_lib::repo::Repository::init_with_outcome(&std::path::Path, &grit_lib::repo::InitOptions) -> grit_lib::error::Result<(Self, grit_lib::repo::InitOutcome)>
 pub fn grit_lib::repo::Repository::is_bare(&self) -> bool
 pub fn grit_lib::repo::Repository::linked_worktree_discover_options(&self) -> grit_lib::config::environment::RepositoryOptions
 pub fn grit_lib::repo::Repository::network_trace_enabled(&self) -> bool
@@ -19026,6 +19075,7 @@ pub fn grit_lib::repo::init_worktree_config(&std::path::Path) -> grit_lib::error
 pub fn grit_lib::repo::repository_format_warning(&std::path::Path) -> grit_lib::error::Result<core::option::Option<alloc::string::String>>
 pub fn grit_lib::repo::resolve_dot_git(&std::path::Path) -> grit_lib::error::Result<std::path::PathBuf>
 pub fn grit_lib::repo::resolve_git_directory_arg(&std::path::Path) -> grit_lib::error::Result<std::path::PathBuf>
+pub fn grit_lib::repo::resolve_initial_branch(&grit_lib::config::environment::Environment, core::option::Option<&str>) -> grit_lib::error::Result<alloc::string::String>
 pub fn grit_lib::repo::validate_repo_config(&str) -> core::result::Result<(), alloc::string::String>
 pub fn grit_lib::repo::validate_repo_format(&std::path::Path) -> grit_lib::error::Result<()>
 pub fn grit_lib::repo::worktree_config_enabled(&std::path::Path) -> bool

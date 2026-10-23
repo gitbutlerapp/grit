@@ -184,6 +184,7 @@ fn init_emits_json() -> TestResult {
     assert_eq!(v["reinitialized"], Value::Null);
     assert_eq!(v["bare"], Value::Bool(false));
     assert_eq!(v["branch"], "main");
+    assert_eq!(v["object_format"], "sha1");
     assert!(
         v["path"].as_str().unwrap().ends_with(".git"),
         "path should be the .git dir: {v}"
@@ -192,6 +193,56 @@ fn init_emits_json() -> TestResult {
     let again = gs_json(scratch.path(), &["init", "."]);
     assert_eq!(again["initialized"], Value::Bool(false));
     assert_eq!(again["reinitialized"], Value::Bool(true));
+    Ok(())
+}
+
+#[test]
+fn init_initial_branch_flag_json() -> TestResult {
+    let scratch = Scratch::new("init-b")?;
+    let v = gs_json(scratch.path(), &["init", "-b", "develop", "."]);
+    assert_eq!(v["branch"], "develop");
+    assert_eq!(v["object_format"], "sha1");
+    Ok(())
+}
+
+#[test]
+fn init_separate_git_dir_flag_json() -> TestResult {
+    let scratch = Scratch::new("init-separate")?;
+    let wt = scratch.child("wt");
+    fs::create_dir_all(&wt)?;
+    let git_dir = scratch.path().join("external.git");
+    let v = gs_json(
+        scratch.path(),
+        &[
+            "init",
+            "--separate-git-dir",
+            git_dir.to_str().unwrap(),
+            wt.to_str().unwrap(),
+        ],
+    );
+    assert!(v["git_dir"].as_str().unwrap().contains("external.git"));
+    assert_eq!(v["branch"], "main");
+    Ok(())
+}
+
+#[test]
+fn init_object_format_sha256_json() -> TestResult {
+    let scratch = Scratch::new("init-sha256")?;
+    let v = gs_json(scratch.path(), &["init", "--object-format", "sha256", "."]);
+    assert_eq!(v["object_format"], "sha256");
+    let again = gs_json(scratch.path(), &["init", "--object-format", "sha256", "."]);
+    assert_eq!(again["reinitialized"], Value::Bool(true));
+    assert_eq!(again["object_format"], "sha256");
+    Ok(())
+}
+
+#[test]
+fn init_reinit_reports_existing_branch_json() -> TestResult {
+    let scratch = Scratch::new("init-reinit-branch")?;
+    gs_ok(scratch.path(), &["init", "-b", "first", "."]);
+    let v = gs_json(scratch.path(), &["init", "-b", "other", "."]);
+    assert_eq!(v["reinitialized"], Value::Bool(true));
+    assert_eq!(v["branch"], "first");
     Ok(())
 }
 

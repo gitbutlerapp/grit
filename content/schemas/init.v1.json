@@ -9,6 +9,14 @@
     "branch": {
       "type": "string"
     },
+    "git_dir": {
+      "description": "Separate git directory when `--separate-git-dir` was used.",
+      "type": "string"
+    },
+    "object_format": {
+      "description": "Object hash algorithm (`sha1` or `sha256`).",
+      "type": "string"
+    },
     "initialized": {
       "description": "`true` when a new repository was created.",
       "type": "boolean"
@@ -30,6 +38,7 @@
     "bare",
     "branch",
     "initialized",
+    "object_format",
     "path",
     "ref_format"
   ],

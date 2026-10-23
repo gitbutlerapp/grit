@@ -549,6 +549,10 @@ pub enum Error {
         value: String,
     },
 
+    /// [`crate::repo::Repository::init_with_outcome`] refused to change object format on reinit.
+    #[error("cannot change object format in an existing repository")]
+    InitObjectFormatChange,
+
     /// A supplied object ID string was not valid hex or the wrong length.
     #[error("invalid object id '{0}'")]
     InvalidObjectId(String),

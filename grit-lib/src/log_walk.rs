@@ -423,7 +423,7 @@ mod tests {
             dir.path(),
             &InitOptions {
                 bare: true,
-                initial_branch: "main".to_owned(),
+
                 ref_storage: crate::RefStorageFormat::Files,
                 ..InitOptions::default()
             },

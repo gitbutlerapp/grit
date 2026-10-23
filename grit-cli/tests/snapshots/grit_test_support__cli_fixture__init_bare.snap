@@ -10,12 +10,12 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\"initialized\":true,\"path\":\"[REPO]\",\"bare\":true,\"branch\":\"main\",\"ref_format\":\"files\"}\n",
+    "stdout": "{\"initialized\":true,\"path\":\"[REPO]\",\"bare\":true,\"branch\":\"main\",\"ref_format\":\"files\",\"object_format\":\"sha1\"}\n",
     "stderr": ""
   },
   "markdown": {
     "exit": 0,
-    "stdout": "Initialized empty bare repository at `[REPO]` (default branch `main`, ref-format `files`).\n",
+    "stdout": "Initialized empty bare repository at `[REPO]` (default branch `main`, ref-format `files`, object format `sha1`).\n",
     "stderr": ""
   }
 }

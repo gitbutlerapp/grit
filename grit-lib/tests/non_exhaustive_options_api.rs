@@ -12,7 +12,7 @@ use tempfile::TempDir;
 fn init_options_new_matches_default_branch_and_storage() {
     let opts = InitOptions::new();
     assert!(!opts.bare);
-    assert_eq!(opts.initial_branch, "main");
+    assert_eq!(opts.initial_branch, None);
     assert_eq!(opts.ref_storage, RefStorageFormat::Files);
 }
 
@@ -25,7 +25,7 @@ fn init_options_with_bare() {
 #[test]
 fn init_options_with_initial_branch() {
     let opts = InitOptions::new().with_initial_branch("develop");
-    assert_eq!(opts.initial_branch, "develop");
+    assert_eq!(opts.initial_branch.as_deref(), Some("develop"));
 }
 
 #[test]

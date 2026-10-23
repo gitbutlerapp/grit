@@ -91,7 +91,14 @@ fn repository_open_discover_and_index_roundtrip() -> crate::error::Result<()> {
 fn separate_git_dir_and_bare_init_paths() -> crate::error::Result<()> {
     let wt = tempdir().map_err(crate::error::Error::Io)?;
     let separate = wt.path().join("repo.git");
-    init_repository_separate_git_dir(wt.path(), &separate, "main", None, RefStorageFormat::Files)?;
+    init_repository_separate_git_dir(
+        wt.path(),
+        &separate,
+        "main",
+        None,
+        RefStorageFormat::Files,
+        crate::objects::HashAlgo::Sha1,
+    )?;
     let repo =
         RepositoryBuilder::new(RepositoryOptions::empty()).open(&separate, Some(wt.path()))?;
     let _ = repo.load_index()?;
@@ -102,7 +109,14 @@ fn separate_git_dir_and_bare_init_paths() -> crate::error::Result<()> {
 
     let bare_wt = tempdir().map_err(crate::error::Error::Io)?;
     let git = bare_wt.path().join(".git");
-    init_bare_with_env_worktree(&git, bare_wt.path(), "main", None, RefStorageFormat::Files)?;
+    init_bare_with_env_worktree(
+        &git,
+        bare_wt.path(),
+        "main",
+        None,
+        RefStorageFormat::Files,
+        crate::objects::HashAlgo::Sha1,
+    )?;
 
     let nested = tempdir().map_err(crate::error::Error::Io)?;
     let nested_git = nested.path().join("nested.git");
@@ -110,7 +124,6 @@ fn separate_git_dir_and_bare_init_paths() -> crate::error::Result<()> {
         nested.path(),
         &InitOptions {
             separate_git_dir: Some(nested_git),
-            initial_branch: "main".into(),
             ..InitOptions::default()
         },
     )?;
@@ -124,7 +137,6 @@ fn open_for_serving_and_bare_worktree_at_path() -> crate::error::Result<()> {
         wt.path(),
         &InitOptions {
             bare_with_worktree_at_path: true,
-            initial_branch: "main".into(),
             ..InitOptions::default()
         },
     )?;

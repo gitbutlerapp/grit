@@ -48,6 +48,11 @@ use clap_complete::Shell;
 
 use output::{emit, OutputMode, OutputOptions, RenderContext};
 
+fn parse_init_object_format(value: &str) -> Result<grit_lib::objects::HashAlgo, String> {
+    grit_lib::objects::HashAlgo::from_name(value)
+        .ok_or_else(|| format!("unknown object format '{value}' (expected sha1 or sha256)"))
+}
+
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]
 enum LogGroupByArg {
     Author,
@@ -564,6 +569,20 @@ enum Command {
         /// Ref storage backend for the new repository.
         #[arg(long, value_name = "FORMAT", default_value = "files")]
         ref_format: grit_lib::refs::ref_storage::RefStorageFormat,
+        /// Initial branch name (overrides `init.defaultBranch` from config).
+        #[arg(short = 'b', long = "initial-branch", value_name = "NAME")]
+        initial_branch: Option<String>,
+        /// Place the git directory here and link from the work tree via a gitfile.
+        #[arg(long = "separate-git-dir", value_name = "DIR")]
+        separate_git_dir: Option<std::path::PathBuf>,
+        /// Object hash algorithm for the new repository.
+        #[arg(
+            long = "object-format",
+            value_name = "ALGO",
+            default_value = "sha1",
+            value_parser = parse_init_object_format
+        )]
+        object_format: grit_lib::objects::HashAlgo,
     },
     /// Copy a remote repository into a new directory.
     Clone {
@@ -1794,7 +1813,21 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             path,
             bare,
             ref_format,
-        } => emit(&commands::init::run(path, bare, ref_format)?, opts, ctx),
+            initial_branch,
+            separate_git_dir,
+            object_format,
+        } => emit(
+            &commands::init::run(
+                path,
+                bare,
+                ref_format,
+                initial_branch,
+                separate_git_dir,
+                object_format,
+            )?,
+            opts,
+            ctx,
+        ),
         Command::Clone { url, dir, shallow } => emit(
             &commands::clone::run(&url, dir, shallow, opts.mode)?,
             opts,
@@ -3321,10 +3354,10 @@ Example:
     fn json_examples_parse_requires_field_table_not_prose() {
         let section = r#"Pass `--json` for output.
 
-The keys are `initialized`, `path`, `bare`, and `branch`.
+The keys are `initialized`, `path`, `bare`, `branch`, `object_format`, and optionally `git_dir`.
 
 ```json
-{"initialized": true, "path": "/tmp/x", "bare": false, "branch": "main"}
+{"initialized": true, "path": "/tmp/x", "bare": false, "branch": "main", "object_format": "sha1"}
 ```
 "#;
         assert!(!json_section_has_field_table(section));
