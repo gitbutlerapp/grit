@@ -12,6 +12,9 @@
     "conflicts": {
       "type": "boolean"
     },
+    "index_restored": {
+      "type": "boolean"
+    },
     "index": {
       "format": "uint",
       "minimum": 0.0,
@@ -20,7 +23,8 @@
   },
   "required": [
     "conflicts",
-    "index"
+    "index",
+    "index_restored"
   ],
   "title": "StashApplyOutcome",
   "type": "object"

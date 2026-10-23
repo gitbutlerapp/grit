@@ -206,6 +206,46 @@ fn stash_pop_untracked_collision_keeps_stash_and_file() {
 }
 
 #[test]
+fn stash_push_pathspec_json_and_keeps_other_changes() {
+    let dir = scratch("pathspec-json");
+    init_repo(&dir);
+    fs::write(dir.join("a.txt"), "a\n").expect("write");
+    fs::write(dir.join("b.txt"), "b\n").expect("write");
+    git(&dir, &["add", "."]);
+    git(&dir, &["commit", "-qm", "init"]);
+    fs::write(dir.join("a.txt"), "A\n").expect("modify a");
+    fs::write(dir.join("b.txt"), "B\n").expect("modify b");
+    git(&dir, &["add", "b.txt"]);
+
+    let (code, stdout, stderr) = grit(&dir, &["stash", "push", "--json", "--", "a.txt"]);
+    assert_eq!(code, 0, "push failed: {stderr}");
+    let v: serde_json::Value = serde_json::from_str(stdout.trim()).expect("json");
+    assert_eq!(v["paths"], serde_json::json!(["a.txt"]));
+    assert!(
+        git(&dir, &["status", "--porcelain"]).contains("b.txt"),
+        "b.txt should remain staged"
+    );
+}
+
+#[test]
+fn stash_apply_index_json_reports_index_restored() {
+    let dir = scratch("apply-index-json");
+    init_repo(&dir);
+    fs::write(dir.join("s.txt"), "base\n").expect("write");
+    git(&dir, &["add", "s.txt"]);
+    git(&dir, &["commit", "-qm", "init"]);
+    fs::write(dir.join("s.txt"), "staged\n").expect("write");
+    git(&dir, &["add", "s.txt"]);
+    grit(&dir, &["stash", "push", "-m", "s"]);
+    git(&dir, &["reset", "--hard", "HEAD"]);
+
+    let (code, stdout, stderr) = grit(&dir, &["stash", "apply", "--index", "--json"]);
+    assert_eq!(code, 0, "apply failed: {stderr}");
+    let v: serde_json::Value = serde_json::from_str(stdout.trim()).expect("json");
+    assert_eq!(v["index_restored"], true);
+}
+
+#[test]
 fn stash_interop_with_git() {
     let dir = scratch("interop");
     init_repo(&dir);

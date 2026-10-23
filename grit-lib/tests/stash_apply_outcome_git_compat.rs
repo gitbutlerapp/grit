@@ -5,7 +5,7 @@ use std::path::Path;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
 use grit_lib::porcelain::stash::{
-    apply_stash_entry, list_stashes, pop_stash_entry, StashApplyOutcome,
+    apply_stash_entry, list_stashes, pop_stash_entry, StashApplyOptions, StashApplyOutcome,
 };
 use grit_lib::repo::Repository;
 use grit_test_support::git;
@@ -99,7 +99,13 @@ fn apply_entry_reports_conflicts_git_also_sees() {
     copy_repo(dir.path(), reference.path());
 
     let repo = open_grit(dir.path());
-    let outcome = apply_stash_entry(&repo, dir.path(), 0, false).expect("apply");
+    let outcome = apply_stash_entry(
+        &repo,
+        dir.path(),
+        0,
+        &grit_lib::porcelain::stash::StashApplyOptions::default(),
+    )
+    .expect("apply");
     assert!(outcome.has_conflicts());
     assert_eq!(outcome.conflicted_paths, ["a.txt", "dir/b.txt"]);
 
@@ -128,7 +134,14 @@ fn pop_entry_with_conflicts_keeps_entry() {
     conflicting_stash(dir.path());
     let repo = open_grit(dir.path());
 
-    let outcome = pop_stash_entry(&repo, dir.path(), 0, false, IDENTITY).expect("pop");
+    let outcome = pop_stash_entry(
+        &repo,
+        dir.path(),
+        0,
+        &StashApplyOptions::default(),
+        IDENTITY,
+    )
+    .expect("pop");
     assert_eq!(outcome.conflicted_paths, ["a.txt", "dir/b.txt"]);
     assert_eq!(list_stashes(&repo).expect("list").len(), 1);
     assert_eq!(git(dir.path(), &["stash", "list"]).lines().count(), 1);
@@ -147,7 +160,8 @@ fn clean_apply_and_pop_report_no_conflicts() {
     git(dir.path(), &["stash", "push", "-q", "-m", "newer"]);
     let repo = open_grit(dir.path());
 
-    let applied = apply_stash_entry(&repo, dir.path(), 1, false).expect("apply older");
+    let applied = apply_stash_entry(&repo, dir.path(), 1, &StashApplyOptions::default())
+        .expect("apply older");
     assert_eq!(applied, StashApplyOutcome::default());
     assert!(!applied.has_conflicts());
     assert_eq!(
@@ -157,7 +171,14 @@ fn clean_apply_and_pop_report_no_conflicts() {
     assert_eq!(list_stashes(&repo).expect("list").len(), 2);
 
     git(dir.path(), &["checkout", "-q", "--", "f.txt"]);
-    let popped = pop_stash_entry(&repo, dir.path(), 0, false, IDENTITY).expect("pop newer");
+    let popped = pop_stash_entry(
+        &repo,
+        dir.path(),
+        0,
+        &StashApplyOptions::default(),
+        IDENTITY,
+    )
+    .expect("pop newer");
     assert!(!popped.has_conflicts());
     assert_eq!(
         std::fs::read_to_string(dir.path().join("f.txt")).expect("read"),
@@ -177,8 +198,15 @@ fn entry_out_of_range_is_stash_not_found() {
     git(dir.path(), &["commit", "-q", "--allow-empty", "-m", "init"]);
     let repo = open_grit(dir.path());
 
-    let err = apply_stash_entry(&repo, dir.path(), 0, false).unwrap_err();
+    let err = apply_stash_entry(&repo, dir.path(), 0, &StashApplyOptions::default()).unwrap_err();
     assert!(matches!(err, Error::StashNotFound { n: 0 }), "{err:?}");
-    let err = pop_stash_entry(&repo, dir.path(), 3, false, IDENTITY).unwrap_err();
+    let err = pop_stash_entry(
+        &repo,
+        dir.path(),
+        3,
+        &StashApplyOptions::default(),
+        IDENTITY,
+    )
+    .unwrap_err();
     assert!(matches!(err, Error::StashNotFound { n: 3 }), "{err:?}");
 }

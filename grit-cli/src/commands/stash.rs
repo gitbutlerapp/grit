@@ -3,6 +3,7 @@
 use std::io::IsTerminal;
 use std::io::Write;
 
+use crate::pathspec_args::TrailingPathspecArgs;
 use anyhow::{Context, Result};
 use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::error::Error;
@@ -12,7 +13,7 @@ use grit_lib::porcelain::hunk_select::{
 };
 use grit_lib::porcelain::stash::{
     apply_stash_entry, drop_stash, list_stashes, pop_stash_entry, push_stash, stash_diff,
-    StashCreateOptions,
+    StashApplyOptions, StashCreateOptions,
 };
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -38,6 +39,8 @@ pub enum StashPushOutcome {
         stashed_hunks: BTreeMap<String, Vec<String>>,
         #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
         stashed_lines: BTreeMap<String, Vec<String>>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        paths: Vec<String>,
     },
     /// Working tree and index already matched `HEAD`; nothing was saved.
     Nothing { stashed: bool },
@@ -171,6 +174,7 @@ impl MarkdownRender for StashShowOutcome {
 pub struct StashApplyOutcome {
     pub index: usize,
     pub conflicts: bool,
+    pub index_restored: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[schemars(default)]
     pub conflict_paths: Vec<String>,
@@ -203,6 +207,7 @@ pub struct StashPopOutcome {
     pub index: usize,
     pub dropped: bool,
     pub conflicts: bool,
+    pub index_restored: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     #[schemars(default)]
     pub conflict_paths: Vec<String>,
@@ -274,6 +279,7 @@ pub fn run_push(
     hunks: &[String],
     lines: &[String],
     dry_run: bool,
+    pathspec_args: &TrailingPathspecArgs,
 ) -> Result<StashPushOutcome> {
     let repo = context::discover()?;
     let env = context::environment();
@@ -290,13 +296,17 @@ pub fn run_push(
         }
         Some(sel)
     };
-    if dry_run && selection.is_none() {
-        anyhow::bail!("--dry-run on stash push requires --hunks or --lines");
-    }
     if include_untracked && selection.is_some() {
         anyhow::bail!("--include-untracked cannot be used with --hunks or --lines");
     }
-    let pathspecs: Vec<String> = Vec::new();
+    let resolved = pathspec_args.resolve(&repo)?;
+    let (pathspecs, _) = resolved.into_pathspec_lists();
+    if !pathspecs.is_empty() && selection.is_some() {
+        anyhow::bail!("path arguments cannot be used with --hunks or --lines");
+    }
+    if dry_run && selection.is_none() && pathspecs.is_empty() {
+        anyhow::bail!("--dry-run on stash push requires --hunks or --lines");
+    }
     let (stashed_hunks, stashed_lines) = if let Some(ref sel) = selection {
         let report =
             report_unstaged_hunk_selection(&repo, sel, &pathspecs).map_err(anyhow::Error::new)?;
@@ -314,6 +324,7 @@ pub fn run_push(
     } else {
         (BTreeMap::new(), BTreeMap::new())
     };
+    let push_paths = pathspecs.clone();
     let options = StashCreateOptions {
         message: message.clone(),
         include_untracked,
@@ -330,6 +341,7 @@ pub fn run_push(
             dry_run,
             stashed_hunks,
             stashed_lines,
+            paths: push_paths,
         },
         None => StashPushOutcome::Nothing { stashed: false },
     })
@@ -372,21 +384,23 @@ pub fn run_show(index: Option<String>, patch: bool) -> Result<StashShowOutcome> 
     })
 }
 
-pub fn run_apply(index: Option<String>) -> Result<StashApplyOutcome> {
+pub fn run_apply(index: Option<String>, restore_index: bool) -> Result<StashApplyOutcome> {
     let repo = context::discover()?;
     let work_tree = repo
         .work_tree()
         .context("grit stash apply needs a working tree")?;
     let n = parse_stash_index(index.as_deref())?;
-    let applied = apply_stash_entry(&repo, work_tree, n, false).map_err(map_stash_error)?;
+    let applied = apply_stash_entry(&repo, work_tree, n, &StashApplyOptions { restore_index })
+        .map_err(map_stash_error)?;
     Ok(StashApplyOutcome {
         index: n,
         conflicts: applied.has_conflicts(),
+        index_restored: restore_index,
         conflict_paths: applied.conflicted_paths,
     })
 }
 
-pub fn run_pop(index: Option<String>) -> Result<StashPopOutcome> {
+pub fn run_pop(index: Option<String>, restore_index: bool) -> Result<StashPopOutcome> {
     let repo = context::discover()?;
     let work_tree = repo
         .work_tree()
@@ -396,12 +410,20 @@ pub fn run_pop(index: Option<String>) -> Result<StashPopOutcome> {
     let config = repo.config().context("could not load config")?;
     let now = context::wall_clock_now(&env);
     let identity = context::reflog_identity(&env, &config, now);
-    let popped = pop_stash_entry(&repo, work_tree, n, false, &identity).map_err(map_stash_error)?;
+    let popped = pop_stash_entry(
+        &repo,
+        work_tree,
+        n,
+        &StashApplyOptions { restore_index },
+        &identity,
+    )
+    .map_err(map_stash_error)?;
     let conflicts = popped.has_conflicts();
     Ok(StashPopOutcome {
         index: n,
         dropped: !conflicts,
         conflicts,
+        index_restored: restore_index,
         conflict_paths: popped.conflicted_paths,
     })
 }
@@ -446,7 +468,13 @@ fn map_stash_error(err: Error) -> anyhow::Error {
         Error::StashCouldNotRestoreUntracked { path } => {
             anyhow::anyhow!("stash untracked restore blocked: '{path}' already exists on disk")
         }
-        Error::PathError(msg) if msg.contains("bare") => anyhow::anyhow!("{msg}"),
+        Error::StashBareRepository => anyhow::anyhow!("cannot stash in a bare repository"),
+        Error::StashIndexConflict => {
+            anyhow::anyhow!("conflicts in index while applying stash with --index")
+        }
+        Error::PathspecNoMatch { spec } => {
+            anyhow::anyhow!("pathspec '{spec}' did not match any file(s) known to git")
+        }
         Error::HunkSelection(err) => anyhow::Error::new(err),
         other => anyhow::Error::new(other),
     }

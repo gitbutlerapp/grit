@@ -12,6 +12,9 @@
     "conflicts": {
       "type": "boolean"
     },
+    "index_restored": {
+      "type": "boolean"
+    },
     "dropped": {
       "type": "boolean"
     },
@@ -24,7 +27,8 @@
   "required": [
     "conflicts",
     "dropped",
-    "index"
+    "index",
+    "index_restored"
   ],
   "title": "StashPopOutcome",
   "type": "object"

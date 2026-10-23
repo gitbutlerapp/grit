@@ -31,6 +31,12 @@
             "type": "array"
           },
           "type": "object"
+        },
+        "paths": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
         }
       },
       "required": [

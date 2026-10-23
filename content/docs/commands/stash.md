@@ -8,18 +8,20 @@ order: 4
 ## Synopsis
 
 ```text
-grit stash [-m <msg>] [-u]
-grit stash push [-m <msg>] [-u] [--hunks <id,...>] [--lines <path:start-end>] [--dry-run]
+grit stash [-m <msg>] [-u] [-- path…]
+grit stash push [-m <msg>] [-u] [--hunks <id,...>] [--lines <path:start-end>] [--dry-run] [-- path…]
 grit stash list
 grit stash show [<n>] [-p]
-grit stash apply [<n>]
-grit stash pop [<n>]
+grit stash apply [<n>] [--index]
+grit stash pop [<n>] [--index]
 grit stash drop [<n>]
 ```
 
 ## Description
 
 Shelve uncommitted changes and restore them later. With no subcommand, `grit stash` saves local changes (same as `grit stash push`), resets the working tree and index to `HEAD`, and records a stash entry compatible with Git's `refs/stash` format.
+
+Pass `--` followed by pathspecs (or `--pathspec-from-file`) on push to stash only matching paths; other staged and unstaged changes stay in place. The stash commit still records the full index on its index parent; the working-tree parent and optional untracked parent are limited to those paths, matching `git stash push -- <pathspec>`.
 
 Stash indices follow Git: `0` is the newest entry. You can pass an integer or `stash@{n}`.
 
@@ -36,6 +38,9 @@ When a stash was created with `-u` / `--include-untracked`, `apply` and `pop` re
 | `--hunks` | Stash only listed unstaged hunk ids from `grit diff --unstaged --json`. |
 | `--lines` | Stash only unstaged line ranges (`path:start-end`, same as `grit add --lines`). |
 | `--dry-run` | Preview a partial stash (`--hunks` / `--lines`); no ref, index, or worktree updates. |
+| `-- path…` | Limit push to these paths (same pathspec rules as `grit add`). |
+| `--pathspec-from-file` | Read pathspecs from a file (`-` for stdin); optional `--pathspec-file-nul`. |
+| `--index` | On `apply` / `pop`, restore the stashed index as well as the worktree. |
 | `<n>` | Stash index for `show`, `apply`, `pop`, or `drop` (default `0`). |
 | `-p`, `--patch` | Show the full patch in `grit stash show` instead of a diffstat. |
 | `push` | Save changes explicitly (same flags as bare `grit stash`). |
@@ -127,6 +132,7 @@ When there was nothing to save:
 | `dry_run` | boolean | When `true`, nothing was written to refs, the index, or the worktree (partial stash preview only). Omitted when `false`. |
 | `stashed_hunks` | object | Map of repository-relative path → hunk id strings stashed (partial `--hunks` only; same shape as `grit add --json`). Omitted when empty. |
 | `stashed_lines` | object | Map of path → line range labels stashed (partial `--lines` only). Omitted when empty. |
+| `paths` | array of strings | Resolved pathspecs when push was limited with `-- path…` or `--pathspec-from-file`. Omitted when empty. |
 | `stashed` | boolean | Present and `false` only on the empty-worktree result. |
 
 ### `grit stash list`
@@ -186,7 +192,8 @@ With `--patch`, a `patch` object with the same shape as [`grit diff`](../diff/) 
 ```json
 {
   "index": 0,
-  "conflicts": false
+  "conflicts": false,
+  "index_restored": false
 }
 ```
 
@@ -198,6 +205,7 @@ Pop adds `dropped` (whether the entry was removed):
 | ----- | ---- | ------- |
 | `index` | number | Stash index targeted. |
 | `conflicts` | boolean | Whether merge conflicts remain. |
+| `index_restored` | boolean | Whether `--index` was used. |
 | `conflict_paths` | array of strings | Paths with unmerged index entries when `conflicts` is true. |
 | `dropped` | boolean | (`pop` only) Whether the stash entry was removed. |
 

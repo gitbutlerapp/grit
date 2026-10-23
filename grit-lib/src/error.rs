@@ -1020,6 +1020,15 @@ pub enum Error {
     #[error("cannot stash without a commit")]
     StashNoInitialCommit,
 
+    /// Stash create/apply/pop requires a working tree (not a bare repository).
+    #[error("cannot stash in a bare repository")]
+    StashBareRepository,
+
+    /// [`apply_stash_entry`](crate::porcelain::stash::apply_stash_entry) with `restore_index` could
+    /// not merge the current index with the stashed index parent.
+    #[error("conflicts in index while applying stash with --index")]
+    StashIndexConflict,
+
     /// Partial [`push_stash`](crate::porcelain::stash::push_stash) hunk selection failed.
     #[error(transparent)]
     HunkSelection(#[from] crate::porcelain::hunk_select::HunkSelectError),

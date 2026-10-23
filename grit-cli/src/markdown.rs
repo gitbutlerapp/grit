@@ -1200,8 +1200,7 @@ pub fn print_stash_push_outcome(
             oid,
             message,
             dry_run,
-            stashed_hunks: _,
-            stashed_lines: _,
+            ..
         } => {
             let short = short_hex(oid);
             let verb = if *dry_run { "Would stash" } else { "Saved" };

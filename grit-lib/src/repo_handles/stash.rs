@@ -7,7 +7,7 @@ use crate::objects::ObjectId;
 use crate::porcelain::hunk_select::HunkSelection;
 use crate::porcelain::stash::{
     apply_stash_entry, create_stash, drop_stash, list_stashes, pop_stash, push_stash,
-    StashCreateOptions, StashEntry,
+    StashApplyOptions as StashEntryApplyOptions, StashCreateOptions, StashEntry,
 };
 use crate::repo::Repository;
 
@@ -143,10 +143,15 @@ impl<'repo> RepositoryStash<'repo> {
     ///
     /// Propagates apply failures.
     pub fn apply(&self, work_tree: &Path, options: &StashApplyOptions) -> Result<bool> {
-        Ok(
-            apply_stash_entry(self.repo, work_tree, options.index, options.restore_index)?
-                .has_conflicts(),
-        )
+        Ok(apply_stash_entry(
+            self.repo,
+            work_tree,
+            options.index,
+            &StashEntryApplyOptions {
+                restore_index: options.restore_index,
+            },
+        )?
+        .has_conflicts())
     }
 
     /// Apply `stash@{options.index}` and drop it when there are no conflicts.

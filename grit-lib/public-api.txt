@@ -13048,7 +13048,7 @@ pub fn grit_lib::porcelain::stash::add_stage_entry(&mut grit_lib::index::Index, 
 pub fn grit_lib::porcelain::stash::apply_merge_autostash(&grit_lib::repo::Repository) -> grit_lib::error::Result<bool>
 pub fn grit_lib::porcelain::stash::apply_operation_autostash(&grit_lib::repo::Repository, &grit_lib::objects::ObjectId, &str) -> grit_lib::error::Result<bool>
 pub fn grit_lib::porcelain::stash::apply_stash(&grit_lib::repo::Repository, &std::path::Path, &grit_lib::objects::ObjectId, bool, &str) -> grit_lib::error::Result<bool>
-pub fn grit_lib::porcelain::stash::apply_stash_entry(&grit_lib::repo::Repository, &std::path::Path, usize, bool) -> grit_lib::error::Result<grit_lib::stash::StashApplyOutcome>
+pub fn grit_lib::porcelain::stash::apply_stash_entry(&grit_lib::repo::Repository, &std::path::Path, usize, &grit_lib::stash::StashApplyOptions) -> grit_lib::error::Result<grit_lib::stash::StashApplyOutcome>
 pub fn grit_lib::porcelain::stash::check_stash_apply_would_overwrite_local_changes(&grit_lib::repo::Repository, &std::path::Path, &grit_lib::objects::CommitData) -> grit_lib::error::Result<()>
 pub fn grit_lib::porcelain::stash::create_stash(&grit_lib::repo::Repository, &grit_lib::stash::StashCreateOptions) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectId>>
 pub fn grit_lib::porcelain::stash::drop_stash(&grit_lib::repo::Repository, usize, &str) -> grit_lib::error::Result<()>
@@ -13057,7 +13057,7 @@ pub fn grit_lib::porcelain::stash::flat_tree_lookup<'a>(&'a [grit_lib::stash::Fl
 pub fn grit_lib::porcelain::stash::flatten_tree_full(&grit_lib::objects::odb::Odb, &grit_lib::objects::ObjectId, &str, grit_lib::path_validate::ProtectOptions) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::stash::FlatTreeEntry>>
 pub fn grit_lib::porcelain::stash::list_stashes(&grit_lib::repo::Repository) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::stash::StashEntry>>
 pub fn grit_lib::porcelain::stash::pop_stash(&grit_lib::repo::Repository, &std::path::Path, usize, bool, &str) -> grit_lib::error::Result<bool>
-pub fn grit_lib::porcelain::stash::pop_stash_entry(&grit_lib::repo::Repository, &std::path::Path, usize, bool, &str) -> grit_lib::error::Result<grit_lib::stash::StashApplyOutcome>
+pub fn grit_lib::porcelain::stash::pop_stash_entry(&grit_lib::repo::Repository, &std::path::Path, usize, &grit_lib::stash::StashApplyOptions, &str) -> grit_lib::error::Result<grit_lib::stash::StashApplyOutcome>
 pub fn grit_lib::porcelain::stash::push_operation_autostash(&grit_lib::repo::Repository, &str) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectId>>
 pub fn grit_lib::porcelain::stash::push_stash(&grit_lib::repo::Repository, &grit_lib::stash::StashCreateOptions) -> grit_lib::error::Result<core::option::Option<grit_lib::stash::StashPushResult>>
 pub fn grit_lib::porcelain::stash::remove_empty_dirs(&std::path::Path, &std::path::Path, &grit_lib::config::environment::Environment)
@@ -22232,7 +22232,7 @@ pub fn grit_lib::stash::add_stage_entry(&mut grit_lib::index::Index, &[u8], &gri
 pub fn grit_lib::stash::apply_merge_autostash(&grit_lib::repo::Repository) -> grit_lib::error::Result<bool>
 pub fn grit_lib::stash::apply_operation_autostash(&grit_lib::repo::Repository, &grit_lib::objects::ObjectId, &str) -> grit_lib::error::Result<bool>
 pub fn grit_lib::stash::apply_stash(&grit_lib::repo::Repository, &std::path::Path, &grit_lib::objects::ObjectId, bool, &str) -> grit_lib::error::Result<bool>
-pub fn grit_lib::stash::apply_stash_entry(&grit_lib::repo::Repository, &std::path::Path, usize, bool) -> grit_lib::error::Result<grit_lib::stash::StashApplyOutcome>
+pub fn grit_lib::stash::apply_stash_entry(&grit_lib::repo::Repository, &std::path::Path, usize, &grit_lib::stash::StashApplyOptions) -> grit_lib::error::Result<grit_lib::stash::StashApplyOutcome>
 pub fn grit_lib::stash::check_stash_apply_would_overwrite_local_changes(&grit_lib::repo::Repository, &std::path::Path, &grit_lib::objects::CommitData) -> grit_lib::error::Result<()>
 pub fn grit_lib::stash::create_stash(&grit_lib::repo::Repository, &grit_lib::stash::StashCreateOptions) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectId>>
 pub fn grit_lib::stash::drop_stash(&grit_lib::repo::Repository, usize, &str) -> grit_lib::error::Result<()>
@@ -22241,7 +22241,7 @@ pub fn grit_lib::stash::flat_tree_lookup<'a>(&'a [grit_lib::stash::FlatTreeEntry
 pub fn grit_lib::stash::flatten_tree_full(&grit_lib::objects::odb::Odb, &grit_lib::objects::ObjectId, &str, grit_lib::path_validate::ProtectOptions) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::stash::FlatTreeEntry>>
 pub fn grit_lib::stash::list_stashes(&grit_lib::repo::Repository) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::stash::StashEntry>>
 pub fn grit_lib::stash::pop_stash(&grit_lib::repo::Repository, &std::path::Path, usize, bool, &str) -> grit_lib::error::Result<bool>
-pub fn grit_lib::stash::pop_stash_entry(&grit_lib::repo::Repository, &std::path::Path, usize, bool, &str) -> grit_lib::error::Result<grit_lib::stash::StashApplyOutcome>
+pub fn grit_lib::stash::pop_stash_entry(&grit_lib::repo::Repository, &std::path::Path, usize, &grit_lib::stash::StashApplyOptions, &str) -> grit_lib::error::Result<grit_lib::stash::StashApplyOutcome>
 pub fn grit_lib::stash::push_operation_autostash(&grit_lib::repo::Repository, &str) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectId>>
 pub fn grit_lib::stash::push_stash(&grit_lib::repo::Repository, &grit_lib::stash::StashCreateOptions) -> grit_lib::error::Result<core::option::Option<grit_lib::stash::StashPushResult>>
 pub fn grit_lib::stash::remove_empty_dirs(&std::path::Path, &std::path::Path, &grit_lib::config::environment::Environment)
