@@ -703,19 +703,7 @@ fn filter_hunk_complement_by_intervals(
             StructuredLineKind::Del => {
                 let removal = new_cur;
                 let old_n = line.old.unwrap_or(old_cur);
-                if deletion_selected(removal, intervals) {
-                    let text: String = line.segments.iter().map(|s| s.text.as_str()).collect();
-                    out_lines.push(StructuredLine {
-                        kind: StructuredLineKind::Context,
-                        old: Some(old_n),
-                        new: Some(removal),
-                        segments: vec![StructuredSegment {
-                            text,
-                            emphasis: false,
-                        }],
-                        no_newline_at_eof: line.no_newline_at_eof,
-                    });
-                } else {
+                if !deletion_selected(removal, intervals) {
                     out_lines.push(line.clone());
                     any_change = true;
                 }
@@ -723,7 +711,20 @@ fn filter_hunk_complement_by_intervals(
             }
             StructuredLineKind::Add => {
                 let new_n = line.new.unwrap_or(new_cur);
-                if !line_in_intervals(new_n, intervals) {
+                if line_in_intervals(new_n, intervals) {
+                    let text: String = line.segments.iter().map(|s| s.text.as_str()).collect();
+                    out_lines.push(StructuredLine {
+                        kind: StructuredLineKind::Context,
+                        old: Some(old_cur),
+                        new: Some(new_n),
+                        segments: vec![StructuredSegment {
+                            text,
+                            emphasis: false,
+                        }],
+                        no_newline_at_eof: line.no_newline_at_eof,
+                    });
+                    old_cur = old_cur.saturating_add(1);
+                } else {
                     out_lines.push(line.clone());
                     any_change = true;
                 }

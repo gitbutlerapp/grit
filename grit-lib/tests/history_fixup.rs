@@ -825,6 +825,103 @@ fn fixup_lines_preserves_preexisting_staged_and_consumes_selected_line() {
     git(wt, &["fsck", "--strict"]);
 }
 
+fn thirty_line_base() -> String {
+    let mut base = String::new();
+    for i in 0..30 {
+        base.push_str(&format!("line{i}\n"));
+    }
+    base
+}
+
+#[test]
+fn fixup_lines_same_structured_hunk_preserves_unselected_and_staged() {
+    let repo = HistoryRepo::init();
+    let wt = repo.worktree();
+    let base = thirty_line_base();
+    commit_file(wt, "f.txt", &base, "init");
+    commit_file(wt, "other.t", "x\n", "second");
+    let target = git_rev_parse(wt, "HEAD~1").expect("target");
+    let mut edited = base.clone();
+    edited = edited.replacen("line5\n", "LINE5\n", 1);
+    edited = edited.replacen("line7\n", "LINE7\n", 1);
+    edited = edited.replacen("line18\n", "LINE18\n", 1);
+    fs::write(wt.join("f.txt"), &edited).expect("write");
+    let grit = open_grit(wt);
+    grit_lib::porcelain::hunk_select::stage_hunks(
+        &grit,
+        DiffSide::Unstaged,
+        &HunkSelection {
+            ids: Vec::new(),
+            ranges: vec![LineRange {
+                path: "f.txt".into(),
+                start: 19,
+                end: 19,
+            }],
+        },
+        &[],
+        false,
+    )
+    .expect("stage line-18 only");
+    let selection = HunkSelection {
+        ids: Vec::new(),
+        ranges: vec![LineRange {
+            path: "f.txt".into(),
+            start: 6,
+            end: 6,
+        }],
+    };
+    plan_and_apply_hunks(
+        &grit,
+        wt,
+        target,
+        &fixup_opts_with_selection(RefScope::Head, EmptyPolicy::Drop, selection),
+    );
+    let parent = git_rev_parse(wt, "HEAD~1").expect("parent");
+    let fixed = parse_commit(&grit.odb().read(&parent).expect("read").data).expect("parse");
+    let blob = grit.odb().read(&fixed.tree).expect("tree");
+    let entries = grit_lib::objects::parse_tree(&blob.data).expect("parse tree");
+    let file = entries.iter().find(|e| e.name == b"f.txt").expect("file");
+    let blob = grit.odb().read(&file.oid).expect("blob");
+    let content = String::from_utf8_lossy(&blob.data);
+    assert!(content.contains("LINE5"));
+    assert!(!content.contains("LINE7"));
+    assert!(!content.contains("LINE18"));
+    let worktree = fs::read_to_string(wt.join("f.txt")).expect("read wt");
+    assert!(worktree.contains("LINE7"));
+    assert!(worktree.contains("LINE18"));
+    let staged_after = Command::new("git")
+        .current_dir(wt)
+        .args(["diff", "--cached", "f.txt"])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("diff cached after");
+    assert!(staged_after.status.success());
+    let staged_text = String::from_utf8_lossy(&staged_after.stdout);
+    assert!(
+        staged_text.contains("LINE18"),
+        "pre-staged line-18 edit must remain staged: {staged_text}"
+    );
+    assert!(
+        !staged_text.contains("LINE5"),
+        "consumed line-5 selection must not remain staged: {staged_text}"
+    );
+    let unstaged_after = Command::new("git")
+        .current_dir(wt)
+        .args(["diff", "f.txt"])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("diff unstaged after");
+    assert!(unstaged_after.status.success());
+    let unstaged_text = String::from_utf8_lossy(&unstaged_after.stdout);
+    assert!(
+        unstaged_text.contains("LINE7"),
+        "unselected line-7 edit must stay unstaged: {unstaged_text}"
+    );
+    git(wt, &["fsck", "--strict"]);
+}
+
 #[test]
 fn fixup_hunks_stale_id_no_rewrite() {
     let repo = HistoryRepo::init();
