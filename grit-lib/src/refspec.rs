@@ -243,6 +243,138 @@ pub fn valid_push_refspec(refspec: &str) -> bool {
     parse_refspec(refspec, false).is_ok()
 }
 
+/// Map `refname` through a single `*` glob in `pattern`, producing `replacement` with its `*`.
+fn match_refname_with_pattern(pattern: &str, refname: &str, replacement: &str) -> Option<String> {
+    match (pattern.find('*'), replacement.find('*')) {
+        (Some(pstar), Some(vstar)) => {
+            let kprefix = &pattern[..pstar];
+            let ksuffix = &pattern[pstar + 1..];
+            if !refname.starts_with(kprefix) || !refname.ends_with(ksuffix) {
+                return None;
+            }
+            if refname.len() < kprefix.len() + ksuffix.len() {
+                return None;
+            }
+            let middle = &refname[kprefix.len()..refname.len() - ksuffix.len()];
+            Some(format!(
+                "{}{}{}",
+                &replacement[..vstar],
+                middle,
+                &replacement[vstar + 1..]
+            ))
+        }
+        (None, None) if pattern == refname => Some(replacement.to_owned()),
+        _ => None,
+    }
+}
+
+fn refspec_match(item: &RefspecItem, refname: &str) -> bool {
+    let Some(src) = item.src.as_deref() else {
+        return false;
+    };
+    if item.pattern {
+        match_refname_with_pattern(src, refname, src).is_some()
+    } else {
+        src == refname
+    }
+}
+
+fn refname_matches_negative_refspec_item(refname: &str, items: &[RefspecItem]) -> bool {
+    items
+        .iter()
+        .any(|item| item.negative && refspec_match(item, refname))
+}
+
+fn refspec_find_negative_match(items: &[RefspecItem], query: &RefspecItem) -> bool {
+    let find_src = query.src.is_none();
+    let needle = if find_src {
+        query.dst.as_deref()
+    } else {
+        query.src.as_deref()
+    };
+    let Some(needle) = needle else {
+        return false;
+    };
+    let mut reversed = Vec::new();
+    for item in items {
+        if item.negative {
+            continue;
+        }
+        if item.pattern {
+            let key = item.dst.as_deref().or(item.src.as_deref()).unwrap_or("");
+            let value = item.src.as_deref().unwrap_or("");
+            if let Some(expanded) = match_refname_with_pattern(key, needle, value) {
+                reversed.push(expanded);
+            }
+        } else if item.matching {
+            reversed.push(needle.to_owned());
+        } else if let Some(src) = item.src.as_deref() {
+            if needle == src {
+                reversed.push(src.to_owned());
+            }
+        }
+    }
+    reversed
+        .iter()
+        .any(|src| refname_matches_negative_refspec_item(src, items))
+}
+
+/// Find a positive refspec match, filling in the missing side of `query`.
+///
+/// When `query.src` is set, matches against refspec sources and sets `query.dst`.
+/// When `query.dst` is set, matches against refspec destinations and sets `query.src`.
+/// Returns `true` on match (and updates `query.force` from the matched refspec).
+#[must_use]
+pub(crate) fn refspec_find_match(items: &[RefspecItem], query: &mut RefspecItem) -> bool {
+    let find_src = query.src.is_none();
+    if find_src && query.dst.is_none() {
+        return false;
+    }
+    if refspec_find_negative_match(items, query) {
+        return false;
+    }
+    let needle = if find_src {
+        query.dst.as_deref().unwrap_or("")
+    } else {
+        query.src.as_deref().unwrap_or("")
+    };
+    for item in items {
+        if item.negative || item.dst.is_none() {
+            continue;
+        }
+        let key = if find_src {
+            item.dst.as_deref().unwrap_or("")
+        } else {
+            item.src.as_deref().unwrap_or("")
+        };
+        let value = if find_src {
+            item.src.as_deref().unwrap_or("")
+        } else {
+            item.dst.as_deref().unwrap_or("")
+        };
+        if item.pattern {
+            if let Some(mapped) = match_refname_with_pattern(key, needle, value) {
+                if find_src {
+                    query.src = Some(mapped);
+                } else {
+                    query.dst = Some(mapped);
+                }
+                query.force = item.force;
+                return true;
+            }
+        } else if needle == key {
+            if find_src {
+                query.src = Some(value.to_owned());
+            } else {
+                query.dst = Some(value.to_owned());
+            }
+            query.force = item.force;
+            return true;
+        }
+    }
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -344,5 +476,16 @@ mod tests {
     fn utf8_and_tab() {
         fetch_valid("refs/heads/\u{00C4}");
         fetch_invalid("refs/heads/\ttab");
+    }
+
+    #[test]
+    fn find_match_maps_tracking_ref_to_remote_head() {
+        let items = vec![parse_fetch_refspec("+refs/heads/*:refs/remotes/origin/*").unwrap()];
+        let mut query = RefspecItem {
+            dst: Some("refs/remotes/origin/main".to_owned()),
+            ..RefspecItem::default()
+        };
+        assert!(refspec_find_match(&items, &mut query));
+        assert_eq!(query.src.as_deref(), Some("refs/heads/main"));
     }
 }

@@ -10,6 +10,7 @@ order: 1
 ```text
 grit remote
 grit remote add <name> <url>
+grit remote remove <name> [--dry-run]
 grit remote refs <remote-or-url> [--heads] [--tags] [--sort name|version] [--reverse] [-n N] [<prefix>…]
 ```
 
@@ -19,6 +20,8 @@ A remote is another copy of the repository that you fetch from and push to, usua
 
 `grit remote add` adds a remote. It writes `remote.<name>.url` and the fetch refspec `+refs/heads/*:refs/remotes/<name>/*` to the repository's shared config, also when run from a linked worktree. It fails if a remote with that name is already configured, or if the name could not be used in a ref such as `refs/remotes/<name>/main` (for example names with spaces, `..` or `:`). [`grit fetch`](../fetch/) then stores the remote's branches as remote-tracking branches named `<name>/<branch>`, such as `origin/main`. [`grit clone`](../clone/) adds a remote called `origin` for you.
 
+`grit remote remove` deletes a configured remote: it removes the `remote.<name>` section from the shared config, deletes every remote-tracking ref this remote's fetch refspecs map to (including `refs/remotes/<name>/HEAD`), and clears `branch.<b>.remote`, `branch.<b>.merge`, and matching `branch.<b>.pushRemote` / `remote.pushDefault` keys. Tracking refs that another remote's fetch refspec also maps to are kept. `--dry-run` reports what would change without writing config or refs. There is no `rm` alias.
+
 `grit remote refs` lists references on a configured remote name or a literal URL, scp-style `host:path` or path (same transports as [`grit clone`](../clone/)), matching `git ls-remote` ordering. An argument that is none of these fails with `unknown remote`. SSH URLs use the same `GIT_SSH_COMMAND`, `GIT_SSH`, and `core.sshCommand` resolution as [`grit clone`](../clone/) and [`grit fetch`](../fetch/).
 
 ## Options
@@ -26,6 +29,7 @@ A remote is another copy of the repository that you fetch from and push to, usua
 | Option | Description |
 | --- | --- |
 | `add <name> <url>` | Add a remote called `<name>` at `<url>`. Fails if a remote with that name exists or the name is not valid in a ref. |
+| `remove <name>` | Remove remote `<name>` and its tracking refs. `--dry-run` previews without writing. |
 | `refs <remote-or-url>` | List refs on the remote (or URL). |
 | `--heads` | With `refs`, only `refs/heads/`. |
 | `--tags` | With `refs`, only `refs/tags/`. |
@@ -55,7 +59,7 @@ Pass `--json` for stable, scripting-friendly output:
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
-| `action` | string | `list`, `add`, or `refs`. |
+| `action` | string | `list`, `add`, `remove`, or `refs`. |
 | `remotes` | array | For `list`, each remote with `name` and `url`. |
 | `name` | string | For `add`, the remote name. |
 | `url` | string | For `add`, the remote URL or path. |
@@ -82,6 +86,18 @@ Adding a remote:
   "action": "add",
   "name": "origin",
   "url": "https://github.com/ada/project.git"
+}
+```
+
+Removing a remote:
+
+```json
+{
+  "action": "remove",
+  "name": "origin",
+  "refs_deleted": ["refs/remotes/origin/HEAD", "refs/remotes/origin/main"],
+  "branches_untracked": ["main"],
+  "dry_run": false
 }
 ```
 

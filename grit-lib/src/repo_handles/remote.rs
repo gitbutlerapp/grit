@@ -6,6 +6,9 @@ use crate::check_ref_format::{check_refname_format, RefNameOptions};
 use crate::config::{ConfigFile, ConfigScope, ConfigSet};
 use crate::error::Result;
 use crate::fetch::Progress;
+use crate::refs::store::{Expected, RefUpdate, RefUpdateFlags};
+use crate::refs::{commit_ref_updates_on_store, list_refs_for_repository};
+use crate::refspec::{parse_fetch_refspec, refspec_find_match, RefspecItem};
 use crate::remote::{
     HttpClientFactory, ListRefsOptions, Remote, RemoteError, RemoteRef, DEFAULT_REMOTE,
 };
@@ -291,6 +294,230 @@ impl<'repo> RepositoryRemotes<'repo> {
     ) -> std::result::Result<PushOutcome, RemoteError> {
         remote.push(self.repo, refs, options, progress, http_factory)
     }
+
+    /// Remove remote `name`: drop its config section, remote-tracking refs, and branch upstream keys.
+    ///
+    /// Tracking refs another remote's fetch refspec also maps to are kept, matching `git remote remove`.
+    ///
+    /// # Errors
+    ///
+    /// - [`RemoteError::UnknownRemote`] when no `remote.<name>.*` section exists.
+    /// - [`RemoteError::Library`] when config or ref updates fail.
+    pub fn remove(
+        &self,
+        name: &str,
+        options: RemoveOptions,
+    ) -> std::result::Result<RemoteRemoval, RemoteError> {
+        let config = self.repo.config().map_err(RemoteError::Library)?;
+        if !has_remote_section(config.as_ref(), name) {
+            return Err(RemoteError::UnknownRemote(name.to_owned()));
+        }
+
+        let refs_to_delete = refs_to_delete_for_remote(self.repo, config.as_ref(), name)?;
+        let branches_untracked = branches_to_untrack(config.as_ref(), name);
+        let mut config_keys_removed = branch_untrack_config_keys(&branches_untracked);
+        for branch in branches_with_push_remote(config.as_ref(), name) {
+            if !branches_untracked.contains(&branch) {
+                config_keys_removed.push(format!("branch.{branch}.pushRemote"));
+            }
+        }
+        if config.get("remote.pushDefault").as_deref() == Some(name) {
+            config_keys_removed.push("remote.pushDefault".to_owned());
+        }
+        for entry in config.entries() {
+            if entry.key.starts_with(&format!("remote.{name}.")) {
+                config_keys_removed.push(entry.key.clone());
+            }
+        }
+        config_keys_removed.sort_unstable();
+        config_keys_removed.dedup();
+
+        if options.dry_run {
+            return Ok(RemoteRemoval {
+                name: name.to_owned(),
+                refs_deleted: refs_to_delete,
+                config_keys_removed,
+                branches_untracked,
+                dry_run: true,
+            });
+        }
+
+        let path = crate::repo::common_git_dir_for_config(self.repo.git_dir()).join("config");
+        let mut file = match ConfigFile::from_path(&path, ConfigScope::Local)? {
+            Some(file) => file,
+            None => ConfigFile::parse(&path, "", ConfigScope::Local)?,
+        };
+
+        for branch in &branches_untracked {
+            for suffix in ["remote", "merge"] {
+                let key = format!("branch.{branch}.{suffix}");
+                file.unset(&key)?;
+            }
+        }
+        for branch in branches_with_push_remote(config.as_ref(), name) {
+            file.unset(&format!("branch.{branch}.pushRemote"))?;
+        }
+        if config.get("remote.pushDefault").as_deref() == Some(name) {
+            file.unset("remote.pushDefault")?;
+        }
+
+        let delete_flags = RefUpdateFlags {
+            no_deref: true,
+            ..RefUpdateFlags::default()
+        };
+        let updates: Vec<RefUpdate> = refs_to_delete
+            .iter()
+            .map(|refname| RefUpdate {
+                name: refname.clone(),
+                new_value: None,
+                expected: Expected::Any,
+                reflog: None,
+                flags: delete_flags,
+            })
+            .collect();
+        if !updates.is_empty() {
+            commit_ref_updates_on_store(self.repo.refs(), &updates, &[])?;
+        }
+
+        file.remove_section(&format!("remote.{name}"))?;
+        file.write()?;
+        self.repo.reload_config()?;
+
+        Ok(RemoteRemoval {
+            name: name.to_owned(),
+            refs_deleted: refs_to_delete,
+            config_keys_removed,
+            branches_untracked,
+            dry_run: false,
+        })
+    }
+}
+
+/// Options for [`RepositoryRemotes::remove`].
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RemoveOptions {
+    /// When true, report what would change without writing config or refs.
+    pub dry_run: bool,
+}
+
+/// Outcome of removing a remote.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemoteRemoval {
+    /// Removed remote name.
+    pub name: String,
+    /// Deleted remote-tracking ref names (including `refs/remotes/<name>/HEAD` when removed).
+    pub refs_deleted: Vec<String>,
+    /// Config keys removed or unset (includes `remote.<name>.*` entries).
+    pub config_keys_removed: Vec<String>,
+    /// Local branch short names whose upstream keys were cleared.
+    pub branches_untracked: Vec<String>,
+    /// Whether this was a dry run.
+    pub dry_run: bool,
+}
+
+/// Branch short names with `branch.<name>.remote` equal to `remote`.
+#[must_use]
+pub(crate) fn branches_tracking(config: &ConfigSet, remote: &str) -> Vec<String> {
+    let mut branches = BTreeSet::new();
+    for entry in config.entries() {
+        let Some(rest) = entry.key.strip_prefix("branch.") else {
+            continue;
+        };
+        let Some((branch, key)) = rest.rsplit_once('.') else {
+            continue;
+        };
+        if key == "remote" && entry.value.as_deref() == Some(remote) {
+            branches.insert(branch.to_owned());
+        }
+    }
+    branches.into_iter().collect()
+}
+
+fn branches_to_untrack(config: &ConfigSet, remote: &str) -> Vec<String> {
+    branches_tracking(config, remote)
+}
+
+fn branches_with_push_remote(config: &ConfigSet, remote: &str) -> Vec<String> {
+    let mut branches = BTreeSet::new();
+    for entry in config.entries() {
+        let Some(rest) = entry.key.strip_prefix("branch.") else {
+            continue;
+        };
+        let Some((branch, key)) = rest.rsplit_once('.') else {
+            continue;
+        };
+        if key == "pushRemote" && entry.value.as_deref() == Some(remote) {
+            branches.insert(branch.to_owned());
+        }
+    }
+    branches.into_iter().collect()
+}
+
+fn branch_untrack_config_keys(branches: &[String]) -> Vec<String> {
+    let mut keys = Vec::with_capacity(branches.len() * 2);
+    for branch in branches {
+        keys.push(format!("branch.{branch}.remote"));
+        keys.push(format!("branch.{branch}.merge"));
+    }
+    keys
+}
+
+fn positive_fetch_items(
+    config: &ConfigSet,
+    remote: &str,
+) -> std::result::Result<Vec<RefspecItem>, RemoteError> {
+    let mut raw = config.get_all(&format!("remote.{remote}.fetch"));
+    raw.retain(|s| !s.trim().is_empty());
+    if raw.is_empty() {
+        raw.push(format!("+refs/heads/*:refs/remotes/{remote}/*"));
+    }
+    let mut items = Vec::new();
+    for spec in raw {
+        let item = parse_fetch_refspec(&spec)
+            .map_err(|e| RemoteError::Library(crate::error::Error::Message(e.to_string())))?;
+        if !item.negative {
+            items.push(item);
+        }
+    }
+    Ok(items)
+}
+
+fn ref_tracked_by_fetch(items: &[RefspecItem], refname: &str) -> bool {
+    let mut query = RefspecItem {
+        dst: Some(refname.to_owned()),
+        ..RefspecItem::default()
+    };
+    refspec_find_match(items, &mut query)
+}
+
+fn refs_to_delete_for_remote(
+    repo: &Repository,
+    config: &ConfigSet,
+    remote: &str,
+) -> std::result::Result<Vec<String>, RemoteError> {
+    let items = positive_fetch_items(config, remote)?;
+    let other_items: Vec<Vec<RefspecItem>> = configured_remotes(config)
+        .into_iter()
+        .map(|r| r.name)
+        .filter(|n| n != remote)
+        .filter_map(|name| positive_fetch_items(config, &name).ok())
+        .collect();
+
+    let all_refs = list_refs_for_repository(repo, "refs/").map_err(RemoteError::Library)?;
+    let mut refs_to_delete = BTreeSet::new();
+    for (refname, _) in all_refs {
+        if !ref_tracked_by_fetch(&items, &refname) {
+            continue;
+        }
+        if other_items
+            .iter()
+            .any(|other| ref_tracked_by_fetch(other, &refname))
+        {
+            continue;
+        }
+        refs_to_delete.insert(refname);
+    }
+    Ok(refs_to_delete.into_iter().collect())
 }
 
 /// Whether `remote.<name>.skipFetchAll` disables [`RepositoryRemotes::fetch_all`].

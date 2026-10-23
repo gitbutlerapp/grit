@@ -5,12 +5,13 @@ use super::super::plan::{DailyHeadlineContext, DailyHeadlinePlan, DailyPrepare};
 use super::super::remote_fixture::{
     clone_bench_script, clone_bench_script_grit, setup_git_git_file_remote,
     setup_git_git_grit_http_fetch_remote, setup_git_git_grit_http_push_remote,
-    setup_many_refs_file_remote, setup_synth10k_file_remote, setup_synth10k_grit_http_remote,
-    setup_synth10k_pull_rebase_remote, verify_clone_http, verify_clone_local, verify_fetch_deepen,
-    verify_fetch_dry_run, verify_fetch_incremental, verify_fetch_incremental_http,
-    verify_fetch_noop, verify_fetch_one_branch, verify_ls_remote_all, verify_pull_check,
-    verify_pull_fast_forward, verify_pull_rebase, verify_push_force_with_lease,
-    verify_push_incremental, verify_push_incremental_http, verify_push_refspec,
+    setup_many_refs_file_remote, setup_remote_remove_many_refs, setup_synth10k_file_remote,
+    setup_synth10k_grit_http_remote, setup_synth10k_pull_rebase_remote, verify_clone_http,
+    verify_clone_local, verify_fetch_deepen, verify_fetch_dry_run, verify_fetch_incremental,
+    verify_fetch_incremental_http, verify_fetch_noop, verify_fetch_one_branch,
+    verify_ls_remote_all, verify_pull_check, verify_pull_fast_forward, verify_pull_rebase,
+    verify_push_force_with_lease, verify_push_incremental, verify_push_incremental_http,
+    verify_push_refspec,
 };
 use super::super::runner::BenchArgv;
 use crate::shell::shell_quote;
@@ -436,6 +437,15 @@ fn matrix_plans() -> Vec<DailyHeadlinePlan> {
             build_git: pull_check_git,
             build_grit: pull_check_grit,
             correctness: Some(correctness_pull_check),
+        },
+        DailyHeadlinePlan {
+            spec: matrix_spec("remote/remove@many-refs"),
+            pending: false,
+            setup: setup_remote_remove_many_refs,
+            prepare: super::super::matrix_helpers::prepare_remote_remove,
+            build_git: |c| super::super::matrix_helpers::remote_remove_bench(c).1,
+            build_grit: |c| super::super::matrix_helpers::remote_remove_bench(c).0,
+            correctness: None,
         },
     ]
 }

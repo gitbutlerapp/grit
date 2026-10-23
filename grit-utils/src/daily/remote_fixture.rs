@@ -312,6 +312,17 @@ pub fn setup_synth10k_file_remote(setup: &DailySetup<'_>) -> Result<DailyHeadlin
     })
 }
 
+pub fn setup_remote_remove_many_refs(setup: &DailySetup<'_>) -> Result<DailyHeadlineContext> {
+    let mut ctx = setup_many_refs_file_remote(setup)?;
+    let remote = ctx.remote.as_ref().context("remote state")?;
+    let client = ensure_client(setup.git, remote)?;
+    configure_client_remote(setup.git, &client, remote)?;
+    run_git(setup.git, &client, &["fetch", "-q", "origin"])?;
+    run_git(setup.git, &client, &["pack-refs", "--all"])?;
+    ctx.repo = client;
+    Ok(ctx)
+}
+
 pub fn setup_many_refs_file_remote(setup: &DailySetup<'_>) -> Result<DailyHeadlineContext> {
     with_remote_scratch("many-refs-ls", |scratch| {
         let kind = if setup.smoke {

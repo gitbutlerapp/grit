@@ -731,6 +731,39 @@ pub fn remote_list_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
     )
 }
 
+pub fn remote_remove_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
+    (
+        sh_devnull(&ctx.grit, &["remote", "remove", "origin"]),
+        sh_devnull(&ctx.git, &["remote", "remove", "origin"]),
+    )
+}
+
+pub fn prepare_remote_remove(ctx: &DailyHeadlineContext) -> DailyPrepare {
+    let Some(remote) = ctx.remote.as_ref() else {
+        return DailyPrepare::None;
+    };
+    let reset = prepare_daily_reset_script(&ctx.git);
+    let repo_q = shell_quote_path(&ctx.repo);
+    let fetch = shell_command(
+        &ctx.git,
+        &[
+            "fetch",
+            "-q",
+            "origin",
+            "+refs/heads/*:refs/remotes/origin/*",
+        ],
+    );
+    let pack = shell_command(&ctx.git, &["pack-refs", "--all"]);
+    let remove = shell_command(&ctx.git, &["remote", "remove", "origin"]);
+    let add = shell_command(
+        &ctx.git,
+        &["remote", "add", "origin", remote.remote_url.as_str()],
+    );
+    let script =
+        format!("{reset}\ncd {repo_q}\n{remove} 2>/dev/null || true\n{add}\n{fetch}\n{pack}\n",);
+    DailyPrepare::Shell(BenchArgv::new("/bin/sh", ["-c", script.as_str()]))
+}
+
 pub fn verify_bundle(ctx: &DailyHeadlineContext) -> Result<()> {
     let bundle = ctx.bundle_path.as_ref().context("bundle path")?;
     if !bundle.is_file() {

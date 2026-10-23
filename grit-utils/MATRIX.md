@@ -163,6 +163,7 @@ Overview of **grit-lib** coverage, **`grit` commands**, common workflows, and **
 | `push/incremental@git-git` | Incremental push vs git push |
 | `push/force-with-lease@git-git` | Amended commit push with `--force-with-lease` vs git |
 | `remote/list@small` | List remotes vs git remote |
+| `remote/remove@many-refs` | Remove origin with 10k packed tracking refs vs git remote remove |
 
 ## maintenance
 **grit-lib:** `grit_lib::maintenance`, `grit_lib::fsck`, `grit_lib::bundle`
