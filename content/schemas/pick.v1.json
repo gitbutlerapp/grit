@@ -24,43 +24,48 @@
       ],
       "type": "object"
     },
-    "PickCommitEntry": {
-      "description": "One pick commit created on the current branch.",
+    "PickCommitRecord": {
+      "description": "One commit recorded in pick `--json` output.",
       "properties": {
         "change_id": {
-          "description": "Stored `change-id` on the pick commit, or JSON `null` when absent.",
+          "description": "Stored `change-id` on `oid` when present.",
           "type": [
             "string",
             "null"
           ]
         },
         "oid": {
-          "description": "New commit on the current branch (full hex oid).",
-          "type": "string"
+          "description": "New commit on the current branch, or JSON `null` when `--no-commit` or stopped early.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "source": {
-          "description": "Source commit that was picked (full hex oid).",
+          "description": "Source commit that was replayed (full hex oid).",
           "type": "string"
         },
         "subject": {
-          "description": "Subject line of the pick commit.",
+          "description": "Subject line from the source commit (or the new commit when available).",
           "type": "string"
         }
       },
       "required": [
-        "oid",
         "source",
         "subject"
       ],
       "type": "object"
     },
     "PickResult": {
-      "description": "High-level result of `grit pick`.",
+      "description": "Integration result for `grit pick` (`--json` contract).",
       "oneOf": [
         {
-          "description": "Every requested step finished (or `--dry-run` printed the plan).",
           "enum": [
-            "completed"
+            "picked",
+            "conflicts",
+            "empty",
+            "aborted",
+            "skipped"
           ],
           "type": "string"
         },
@@ -70,27 +75,6 @@
             "clean"
           ],
           "type": "string"
-        },
-        {
-          "description": "The sequence stopped on merge conflicts.",
-          "enum": [
-            "conflicts"
-          ],
-          "type": "string"
-        },
-        {
-          "description": "`--abort` restored the pre-pick state.",
-          "enum": [
-            "aborted"
-          ],
-          "type": "string"
-        },
-        {
-          "description": "A step would be empty and `--empty stop` halted the sequence.",
-          "enum": [
-            "empty"
-          ],
-          "type": "string"
         }
       ]
     }
@@ -98,7 +82,6 @@
   "description": "Result of `grit pick`.",
   "properties": {
     "alternatives": {
-      "description": "Mutually exclusive options (`--abort`, `--skip`) when paused.",
       "items": {
         "type": "string"
       },
@@ -107,26 +90,18 @@
         "null"
       ]
     },
-    "change_id": {
-      "description": "`change-id` on the last pick commit, when `result` is `completed`.",
-      "type": [
-        "string",
-        "null"
-      ]
-    },
     "check": {
       "description": "True when this outcome is from `grit pick --check` (nothing was picked).",
       "type": "boolean"
     },
     "commits": {
-      "description": "Pick commits created in this invocation (in apply order).",
+      "description": "Commits picked or attempted in this invocation.",
       "items": {
-        "$ref": "#/definitions/PickCommitEntry"
+        "$ref": "#/definitions/PickCommitRecord"
       },
       "type": "array"
     },
     "conflicts": {
-      "description": "Conflicted paths when `result` is `conflicts`.",
       "items": {
         "$ref": "#/definitions/ConflictJson"
       },
@@ -136,21 +111,19 @@
       ]
     },
     "dropped": {
-      "description": "Source commits skipped as empty per `--empty drop`.",
+      "description": "Source commits skipped as empty/redundant (`--empty drop` or already applied).",
       "items": {
         "type": "string"
       },
       "type": "array"
     },
     "dry_run": {
-      "description": "True when `--dry-run` was set (no refs or objects were updated).",
       "type": [
         "boolean",
         "null"
       ]
     },
     "next_steps": {
-      "description": "Suggested follow-up commands when `result` is `conflicts` or `empty`.",
       "items": {
         "type": "string"
       },
@@ -160,7 +133,7 @@
       ]
     },
     "oid": {
-      "description": "The last pick commit created (full hex), when `result` is `completed`.",
+      "description": "Predicted result tree (full hex) when `result` is `clean` from `--check`.",
       "type": [
         "string",
         "null"
@@ -168,20 +141,6 @@
     },
     "result": {
       "$ref": "#/definitions/PickResult"
-    },
-    "source": {
-      "description": "The last source commit picked in this invocation (full hex), when `result` is `completed`.",
-      "type": [
-        "string",
-        "null"
-      ]
-    },
-    "subject": {
-      "description": "Subject of the last pick commit, when `result` is `completed`.",
-      "type": [
-        "string",
-        "null"
-      ]
     }
   },
   "required": [

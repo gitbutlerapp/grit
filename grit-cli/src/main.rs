@@ -7,9 +7,9 @@
 
 mod branch_list_args;
 mod clap_value_args;
-mod cli_messages;
 #[cfg(test)]
 mod cli_command;
+mod cli_messages;
 #[cfg(test)]
 mod cli_test_stack;
 mod commands;
@@ -3072,7 +3072,7 @@ mod tests {
         const STACK: usize = 16 * 1024 * 1024;
         std::thread::Builder::new()
             .stack_size(STACK)
-            .spawn(move || run(Cli::command()))
+            .spawn(move || run(crate::cli_command::build_cli_command()))
             .expect("spawn cli root builder")
             .join()
             .expect("join cli root builder")

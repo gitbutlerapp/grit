@@ -2,6 +2,28 @@
   "$id": "https://grit-scm.com/schemas/rebase/v1.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "definitions": {
+    "ConflictJson": {
+      "description": "One conflicted path in `--json` operation output.",
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "summary": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "path"
+      ],
+      "type": "object"
+    },
     "ExecResultJson": {
       "description": "One `rebase --exec` command result in `--json` output.",
       "properties": {
@@ -43,6 +65,15 @@
         "old"
       ],
       "type": "object"
+    },
+    "RebaseResult": {
+      "description": "High-level result of `grit rebase`.",
+      "enum": [
+        "completed",
+        "conflicts",
+        "aborted"
+      ],
+      "type": "string"
     },
     "RefPair": {
       "description": "One ref tip before and after rewrite.",
@@ -107,10 +138,33 @@
       "type": "object"
     }
   },
-  "description": "Result of `grit history drop`, `move`, `reword`, `fixup`, `squash`, or `grit rebase` / `grit history rebase`.",
+  "description": "Result of `grit rebase` and `grit history rebase`.",
   "properties": {
+    "alternatives": {
+      "items": {
+        "type": "string"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "commit": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "conflicts": {
+      "items": {
+        "$ref": "#/definitions/ConflictJson"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
     "dry_run": {
-      "description": "Whether refs were left unchanged (`true` for `--dry-run`).",
       "type": "boolean"
     },
     "exec": {
@@ -129,21 +183,34 @@
           "type": "null"
         }
       ],
-      "description": "Previous and new `HEAD` commit OIDs when `HEAD`'s commit changes; JSON `null` when unchanged."
+      "default": null,
+      "description": "Previous and new `HEAD` commit OIDs when `HEAD`'s commit changes."
+    },
+    "next_steps": {
+      "items": {
+        "type": "string"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
     },
     "operation": {
-      "description": "Operation name (`drop`, `move`, `reword`, `fixup`, `squash`, or `rebase`).",
-      "type": "string"
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "refs": {
-      "description": "Planned or applied ref tip updates.",
       "items": {
         "$ref": "#/definitions/RefPair"
       },
       "type": "array"
     },
+    "result": {
+      "$ref": "#/definitions/RebaseResult"
+    },
     "rewritten": {
-      "description": "Original and replacement commit OIDs for every rewritten commit.",
       "items": {
         "$ref": "#/definitions/RewrittenPair"
       },
@@ -151,12 +218,9 @@
     }
   },
   "required": [
-    "dry_run",
     "head",
-    "operation",
-    "refs",
-    "rewritten"
+    "result"
   ],
-  "title": "HistoryRewriteOutcome",
+  "title": "RebaseCliOutcome",
   "type": "object"
 }

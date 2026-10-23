@@ -16,11 +16,11 @@ use grit_lib::revwalk::history::{
     apply_rewrite, continue_rebase, drop as history_drop, fixup, format_hunk_range_header,
     move_commit, plan_rebase, plan_rebase_check, reword_with, skip_rebase, split, squash,
     staged_fixup_paths, start_rebase, undo_last_rewrite, verify_rebase_with_exec,
-    verify_rewrite_plan, AbsorbOptions, ExecRunRecord, ExecSpec,
-    ApplyOptions, EmptyPolicy, FixupOptions, HistoryError, HunkAssignment, HunkRange, Placement,
-    RebaseCheckPlan, RebaseOntoOptions, RebaseOutcome, RebasePlan, RebaseRequest,
-    RebaseSessionError, RefScope, RewordOptions, RewriteOptions, RewritePlan, SplitOptions,
-    SquashMessage, SquashOptions, StartRebaseOptions, UnassignedHunk,
+    verify_rewrite_plan, AbsorbOptions, ApplyOptions, EmptyPolicy, ExecRunRecord, ExecSpec,
+    FixupOptions, HistoryError, HunkAssignment, HunkRange, Placement, RebaseCheckPlan,
+    RebaseOntoOptions, RebaseOutcome, RebasePlan, RebaseRequest, RebaseSessionError, RefScope,
+    RewordOptions, RewriteOptions, RewritePlan, SplitOptions, SquashMessage, SquashOptions,
+    StartRebaseOptions, UnassignedHunk,
 };
 use grit_lib::revwalk::rev_parse::resolve_revision_as_commit;
 use grit_lib::revwalk::rev_parse_error::RevParseError;
