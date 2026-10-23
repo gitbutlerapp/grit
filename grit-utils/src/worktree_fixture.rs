@@ -208,6 +208,7 @@ pub fn ensure_worktree_bench_repo(
     let mut rel = list_tracked_files(git, &dest)?
         .into_iter()
         .filter(|p| p.to_string_lossy() != ".gitmodules")
+        .filter(|p| !skip_big_blob_worktree_path(p))
         .collect::<Vec<_>>();
     rel.sort_by(|a, b| a.as_os_str().cmp(b.as_os_str()));
     let modify_count = (rel.len() / MODIFY_FRACTION_DENOM).max(1).min(rel.len());
