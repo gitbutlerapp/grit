@@ -1,0 +1,95 @@
+{
+  "schema": "grit-daily-bench/1",
+  "generated_at": "2026-10-23T15:52:24.682258478Z",
+  "machine": {
+    "cpu_model": "Intel(R) Xeon(R) Processor",
+    "physical_cores": 4,
+    "logical_cores": 4,
+    "ram_bytes": 16780574720,
+    "os": "linux",
+    "kernel": "Linux 6.12.94+",
+    "scratch_filesystem": "ext4",
+    "rustc_version": "rustc 1.99.0 (b940084d7 2026-09-28)",
+    "cargo_profile": "release"
+  },
+  "tools": {
+    "git": "git version 2.43.0",
+    "grit": "grit 0.5.17",
+    "grit_commit": "c73984bb6695a8692ab8892050e626628044190a",
+    "baseline_grit": "grit 0.5.17"
+  },
+  "scenarios": [
+    {
+      "id": "diff/worktree@big-blobs",
+      "area": "diff",
+      "description": "Unstaged worktree diff on big-blobs: grit diff vs git diff",
+      "git": {
+        "median_wall_ms": 312.403357,
+        "peak_rss_bytes": 190672896,
+        "runs": 6
+      },
+      "grit": {
+        "median_wall_ms": 203.8975715,
+        "peak_rss_bytes": 380542976,
+        "runs": 6
+      },
+      "ratio": 0.6526740732174654
+    },
+    {
+      "id": "diff/worktree@deep-tree",
+      "area": "diff",
+      "description": "Unstaged worktree diff on deep-tree: grit diff vs git diff",
+      "git": {
+        "median_wall_ms": 104.15417199999999,
+        "peak_rss_bytes": 40448000,
+        "runs": 6
+      },
+      "grit": {
+        "median_wall_ms": 457.18779800000004,
+        "peak_rss_bytes": 68100096,
+        "runs": 6
+      },
+      "ratio": 4.389529379581647
+    },
+    {
+      "id": "diff/worktree@synth-100k",
+      "area": "diff",
+      "description": "Unstaged worktree diff (~1% modified): grit diff vs git diff",
+      "git": {
+        "median_wall_ms": 123.577264,
+        "peak_rss_bytes": 30281728,
+        "runs": 13
+      },
+      "grit": {
+        "median_wall_ms": 102.24630599999999,
+        "peak_rss_bytes": 69234688,
+        "runs": 13
+      },
+      "ratio": 0.8273876819282873
+    },
+    {
+      "id": "diff/worktree@synth-10k",
+      "area": "diff",
+      "headline": true,
+      "name": "diff",
+      "description": "Worktree diff vs git diff",
+      "git": {
+        "median_wall_ms": 7.057778000000001,
+        "peak_rss_bytes": 9965568,
+        "runs": 20
+      },
+      "grit": {
+        "median_wall_ms": 7.74008,
+        "peak_rss_bytes": 16719872,
+        "runs": 20
+      },
+      "ratio": 1.0966737689964177,
+      "baseline_grit": {
+        "median_wall_ms": 10.427451000000001,
+        "peak_rss_bytes": 18509824,
+        "runs": 3
+      },
+      "baseline_grit_ratio": 1.477441058644803
+    }
+  ]
+}

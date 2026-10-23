@@ -1,0 +1,174 @@
+{
+  "schema": "grit-daily-bench/1",
+  "generated_at": "2026-10-23T16:56:33.314392643Z",
+  "machine": {
+    "cpu_model": "Intel(R) Xeon(R) Processor",
+    "physical_cores": 4,
+    "logical_cores": 4,
+    "ram_bytes": 16780574720,
+    "os": "linux",
+    "kernel": "Linux 6.12.94+",
+    "scratch_filesystem": "ext4",
+    "rustc_version": "rustc 1.99.0 (b940084d7 2026-09-28)",
+    "cargo_profile": "release"
+  },
+  "tools": {
+    "git": "git version 2.43.0",
+    "grit": "grit 0.5.17",
+    "grit_commit": "c73984bb6695a8692ab8892050e626628044190a"
+  },
+  "scenarios": [
+    {
+      "id": "add/modified@synth-10k",
+      "area": "worktree",
+      "headline": true,
+      "name": "add",
+      "description": "Stage modified files vs git add -A",
+      "git": {
+        "median_wall_ms": 17.8396245,
+        "peak_rss_bytes": 12410880,
+        "runs": 20
+      },
+      "grit": {
+        "median_wall_ms": 16.768529,
+        "peak_rss_bytes": 27529216,
+        "runs": 20
+      },
+      "ratio": 0.9399597508344417
+    },
+    {
+      "id": "commit/small@synth-10k",
+      "area": "worktree",
+      "headline": true,
+      "name": "commit",
+      "description": "Commit staged changes vs git commit",
+      "git": {
+        "median_wall_ms": 27.240117499999997,
+        "peak_rss_bytes": 40509440,
+        "runs": 20
+      },
+      "grit": {
+        "median_wall_ms": 22.259439,
+        "peak_rss_bytes": 20557824,
+        "runs": 20
+      },
+      "ratio": 0.8171564972140816
+    },
+    {
+      "id": "diff/staged@deep-tree",
+      "area": "index",
+      "description": "Staged diff on deep-tree: grit diff --staged vs git diff --cached",
+      "git": {
+        "median_wall_ms": 39.654393,
+        "peak_rss_bytes": 42676224,
+        "runs": 20
+      },
+      "grit": {
+        "median_wall_ms": 42.832466,
+        "peak_rss_bytes": 46817280,
+        "runs": 20
+      },
+      "ratio": 1.0801442856532943
+    },
+    {
+      "id": "diff/staged@synth-100k",
+      "area": "index",
+      "description": "Index vs HEAD diff: grit diff --staged vs git diff --cached",
+      "git": {
+        "median_wall_ms": 80.7803585,
+        "peak_rss_bytes": 30965760,
+        "runs": 20
+      },
+      "grit": {
+        "median_wall_ms": 54.103208,
+        "peak_rss_bytes": 69230592,
+        "runs": 20
+      },
+      "ratio": 0.6697569682115239
+    },
+    {
+      "id": "diff/worktree@big-blobs",
+      "area": "diff",
+      "description": "Unstaged worktree diff on big-blobs: grit diff vs git diff",
+      "git": {
+        "median_wall_ms": 317.591407,
+        "peak_rss_bytes": 190676992,
+        "runs": 6
+      },
+      "grit": {
+        "median_wall_ms": 212.473176,
+        "peak_rss_bytes": 380375040,
+        "runs": 6
+      },
+      "ratio": 0.6690142469755171
+    },
+    {
+      "id": "diff/worktree@deep-tree",
+      "area": "diff",
+      "description": "Unstaged worktree diff on deep-tree: grit diff vs git diff",
+      "git": {
+        "median_wall_ms": 100.23945,
+        "peak_rss_bytes": 40296448,
+        "runs": 6
+      },
+      "grit": {
+        "median_wall_ms": 465.0837985,
+        "peak_rss_bytes": 67973120,
+        "runs": 6
+      },
+      "ratio": 4.639728155930624
+    },
+    {
+      "id": "diff/worktree@synth-100k",
+      "area": "diff",
+      "description": "Unstaged worktree diff (~1% modified): grit diff vs git diff",
+      "git": {
+        "median_wall_ms": 119.31246900000001,
+        "peak_rss_bytes": 30035968,
+        "runs": 15
+      },
+      "grit": {
+        "median_wall_ms": 88.913778,
+        "peak_rss_bytes": 69378048,
+        "runs": 15
+      },
+      "ratio": 0.7452178196060966
+    },
+    {
+      "id": "status/clean@synth-10k",
+      "area": "worktree",
+      "headline": true,
+      "name": "status-clean",
+      "description": "Clean worktree status vs git status -s",
+      "git": {
+        "median_wall_ms": 7.383087,
+        "peak_rss_bytes": 9535488,
+        "runs": 20
+      },
+      "grit": {
+        "median_wall_ms": 9.080628,
+        "peak_rss_bytes": 16281600,
+        "runs": 20
+      },
+      "ratio": 1.2299229306115451
+    },
+    {
+      "id": "status/dirty@synth-10k",
+      "area": "worktree",
+      "headline": true,
+      "name": "status-dirty",
+      "description": "Dirty worktree status vs git status -s",
+      "git": {
+        "median_wall_ms": 11.0412845,
+        "peak_rss_bytes": 9699328,
+        "runs": 20
+      },
+      "grit": {
+        "median_wall_ms": 9.6240095,
+        "peak_rss_bytes": 16351232,
+        "runs": 20
+      },
+      "ratio": 0.8716385761095097
+    }
+  ]
+}
