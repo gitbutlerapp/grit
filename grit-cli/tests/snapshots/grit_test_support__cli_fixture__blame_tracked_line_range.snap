@@ -10,7 +10,7 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\"file\":\"tracked.txt\",\"rev\":\"83352a61f6715ec3f0a297c6d6150725154fb833\",\"lines\":[{\"commit\":\"83352a61f6715ec3f0a297c6d6150725154fb833\",\"original_line\":1,\"final_line\":1,\"content\":\"tracked v2\"}],\"commits\":{\"83352a61f6715ec3f0a297c6d6150725154fb833\":{\"author\":{\"name\":\"Test\",\"email\":\"test@example.com\",\"date\":\"2023-11-14T22:13:20Z\"},\"summary\":\"second\"}}}\n",
+    "stdout": "{\"file\":\"tracked.txt\",\"rev\":\"83352a61f6715ec3f0a297c6d6150725154fb833\",\"lines\":[{\"commit\":\"83352a61f6715ec3f0a297c6d6150725154fb833\",\"original_line\":1,\"original_path\":\"tracked.txt\",\"final_line\":1,\"content\":\"tracked v2\"}],\"commits\":{\"83352a61f6715ec3f0a297c6d6150725154fb833\":{\"author\":{\"name\":\"Test\",\"email\":\"test@example.com\",\"date\":\"2023-11-14T22:13:20Z\"},\"summary\":\"second\"}}}\n",
     "stderr": ""
   },
   "markdown": {
