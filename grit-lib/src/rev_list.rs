@@ -10,7 +10,6 @@ use std::collections::{BTreeSet, BinaryHeap, HashMap, HashSet, VecDeque};
 use std::fs;
 use std::io::Write;
 use std::path::Path;
-use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::bitmap_walk::{bitmap_filter_supported, BitmapWalkError, PeeledTips, ReachableSet};
@@ -5003,18 +5002,12 @@ struct DenseWalkCache {
     component_hits: u64,
     component_misses: u64,
     tree_reads: u64,
-    /// Parsed tree bodies reused when a full entry list is needed.
-    parsed_trees: HashMap<ObjectId, Rc<[TreeEntry]>>,
-    /// Inflated tree object bytes (each OID is read at most once per walk).
-    tree_bodies: HashMap<ObjectId, Arc<[u8]>>,
-    tree_body_evict_order: VecDeque<ObjectId>,
-    /// Reused across tree reads in one dense walk.
+    /// Reused across tree reads in one dense walk (not retained per OID).
     tree_read_buf: Vec<u8>,
 }
 
 const LITERAL_TREE_DIFF_CAP: usize = 4096;
 const COMPONENT_CACHE_MAX_ENTRIES: usize = 512 * 1024;
-const TREE_BODY_CACHE_MAX_ENTRIES: usize = 512 * 1024;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CachedTreeChild {
@@ -5038,24 +5031,7 @@ impl DenseWalkCache {
         self.tree_reads
     }
 
-    fn insert_tree_body(&mut self, tree: ObjectId, body: Arc<[u8]>) {
-        if self.tree_bodies.contains_key(&tree) {
-            return;
-        }
-        while self.tree_bodies.len() >= TREE_BODY_CACHE_MAX_ENTRIES {
-            let Some(evict) = self.tree_body_evict_order.pop_front() else {
-                break;
-            };
-            self.tree_bodies.remove(&evict);
-        }
-        self.tree_bodies.insert(tree, body);
-        self.tree_body_evict_order.push_back(tree);
-    }
-
-    fn tree_body(&mut self, repo: &Repository, tree: ObjectId) -> Result<Arc<[u8]>> {
-        if let Some(body) = self.tree_bodies.get(&tree) {
-            return Ok(Arc::clone(body));
-        }
+    fn read_tree_into_buf(&mut self, repo: &Repository, tree: ObjectId) -> Result<()> {
         self.tree_read_buf.clear();
         let kind = if let Some(reader) = self.pack_session.get(repo.odb()) {
             match reader.read_object_into(&tree, &mut self.tree_read_buf) {
@@ -5068,12 +5044,7 @@ impl DenseWalkCache {
         if kind != ObjectKind::Tree {
             return Err(Error::CorruptObject(format!("object {tree} is not a tree")));
         }
-        let data = std::mem::take(&mut self.tree_read_buf);
-        let cap = data.len().max(4096);
-        let body: Arc<[u8]> = Arc::from(data);
-        self.tree_read_buf = Vec::with_capacity(cap);
-        self.insert_tree_body(tree, Arc::clone(&body));
-        Ok(body)
+        Ok(())
     }
 
     fn insert_component(
@@ -5115,15 +5086,12 @@ impl DenseWalkCache {
         self.component_misses += 1;
         self.tree_reads += 1;
         let oid_len = repo.odb().hash_algo().len();
-        let body = self.tree_body(repo, tree)?;
+        self.read_tree_into_buf(repo, tree)?;
+        let data = self.tree_read_buf.as_slice();
         let found = if as_tree {
-            find_tree_entry_by_name_in_data(body.as_ref(), oid_len, component.as_bytes(), true)?
+            find_tree_entry_by_name_in_data(data, oid_len, component.as_bytes(), true)?
         } else {
-            find_tree_entry_by_name_dir_or_file_in_data(
-                body.as_ref(),
-                oid_len,
-                component.as_bytes(),
-            )?
+            find_tree_entry_by_name_dir_or_file_in_data(data, oid_len, component.as_bytes())?
         };
         let resolved = match found {
             Some(entry) => CachedTreeChild::Found {
@@ -5532,27 +5500,14 @@ fn pathspec_entry_is_relevant(path: &str, is_tree: bool, pathspecs: &[String]) -
     false
 }
 
-fn read_parsed_tree_cached(
-    repo: &Repository,
-    tree_oid: ObjectId,
-    cache: &mut Option<&mut DenseWalkCache>,
-) -> Result<Vec<TreeEntry>> {
-    if let Some(c) = cache.as_ref() {
-        if let Some(entries) = c.parsed_trees.get(&tree_oid) {
-            return Ok(entries.iter().cloned().collect());
-        }
-    }
+fn read_parsed_tree_for_diff(repo: &Repository, tree_oid: ObjectId) -> Result<Vec<TreeEntry>> {
     let object = repo.odb().read(&tree_oid)?;
     if object.kind != ObjectKind::Tree {
         return Err(Error::CorruptObject(format!(
             "object {tree_oid} is not a tree"
         )));
     }
-    let entries = parse_tree(&object.data)?;
-    if let Some(c) = cache.as_deref_mut() {
-        c.parsed_trees.insert(tree_oid, entries.clone().into());
-    }
-    Ok(entries)
+    parse_tree(&object.data)
 }
 
 /// Whether any blob path under `tree_oid` matches `pathspecs` (root-commit visibility).
@@ -5634,7 +5589,7 @@ fn trees_differ_for_pathspecs_optional(
     new_tree: Option<ObjectId>,
     prefix: &str,
     pathspecs: &[String],
-    mut cache: Option<&mut DenseWalkCache>,
+    cache: Option<&mut DenseWalkCache>,
 ) -> Result<bool> {
     if prefix.is_empty() && pathspecs.len() == 1 {
         if let Some(literal) = normalized_plain_literal_treesame_path(repo, &pathspecs[0]) {
@@ -5651,11 +5606,11 @@ fn trees_differ_for_pathspecs_optional(
         (Some(a), Some(b)) if a == b => Ok(false),
         (old_o, new_o) => {
             let old_entries = match old_o {
-                Some(oid) => read_parsed_tree_cached(repo, oid, &mut cache)?,
+                Some(oid) => read_parsed_tree_for_diff(repo, oid)?,
                 None => Vec::new(),
             };
             let new_entries = match new_o {
-                Some(oid) => read_parsed_tree_cached(repo, oid, &mut cache)?,
+                Some(oid) => read_parsed_tree_for_diff(repo, oid)?,
                 None => Vec::new(),
             };
             trees_differ_tree_entries(repo, &old_entries, &new_entries, prefix, pathspecs)
@@ -7649,6 +7604,13 @@ impl<'r> CommitGraph<'r> {
             .insert(oid, commit.author_unix_seconds_for_ordering());
         self.commit_trees.insert(oid, tree);
         self.parents.insert(oid, parents);
+        let subject = commit
+            .message()
+            .lines()
+            .find(|line| !line.trim().is_empty())
+            .map(|line| line.trim().to_owned())
+            .unwrap_or_else(|| "(no subject)".to_owned());
+        self.subjects.insert(oid, subject);
         Ok(())
     }
 }
@@ -10347,7 +10309,7 @@ mod tests {
 #[cfg(test)]
 mod line_coverage_tests {
     use super::*;
-    use crate::objects::ObjectKind;
+    use crate::objects::{serialize_commit, CommitData, ObjectKind};
     use crate::repo::{InitOptions, Repository};
     use crate::RefStorageFormat;
     use std::collections::HashSet;
@@ -11535,6 +11497,59 @@ mod line_coverage_tests {
         assert_eq!(cache.component_cache_misses(), 1);
         assert_eq!(cache.component_tree_reads(), 1);
 
+        Ok(())
+    }
+
+    #[test]
+    fn commit_graph_populate_caches_decoded_encoded_subject() -> Result<()> {
+        use crate::commit::encoding;
+
+        let dir = tempdir().expect("tempdir");
+        let repo = Repository::init(
+            dir.path(),
+            &InitOptions {
+                bare: true,
+                initial_branch: "main".into(),
+                ref_storage: RefStorageFormat::Files,
+                ..InitOptions::default()
+            },
+        )?;
+        let empty_tree = repo.odb().write(ObjectKind::Tree, b"")?;
+        let parent_body = format!(
+            "tree {empty_tree}\nauthor T <t@e> 1 +0000\ncommitter T <t@e> 1 +0000\n\nbase\n"
+        );
+        let parent = repo
+            .odb()
+            .write(ObjectKind::Commit, parent_body.as_bytes())?;
+        let (message, enc_label, raw_body) = encoding::finalize_stored_commit_message(
+            "caf\u{00e9}\n".to_owned(),
+            Some("ISO-8859-1"),
+        );
+        let commit = CommitData {
+            tree: empty_tree,
+            parents: vec![parent],
+            author: "T <t@e> 1 +0000".to_owned(),
+            committer: "T <t@e> 1 +0000".to_owned(),
+            author_raw: Vec::new(),
+            committer_raw: Vec::new(),
+            encoding: enc_label,
+            message,
+            raw_message: raw_body,
+            extra_headers: Vec::new(),
+        };
+        let oid = repo
+            .odb()
+            .write(ObjectKind::Commit, &serialize_commit(&commit))?;
+
+        let mut graph = CommitGraph::new(&repo, false);
+        graph.parents_of(oid)?;
+        let subject = graph
+            .subject_of(oid)
+            .expect("subject cached during populate");
+        assert!(
+            subject.contains('é'),
+            "expected decoded subject, got {subject:?}"
+        );
         Ok(())
     }
 }
