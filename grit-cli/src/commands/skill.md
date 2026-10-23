@@ -116,6 +116,7 @@ Each commit gets a stable **`change-id`** header (on by default) that survives `
 ## History rewrites
 
 - `grit history drop`, `move`, `reword`, `fixup`, `squash`, and `absorb` share `--dry-run`, `--update-refs`, `--empty=(drop|keep|abort)` (empty replayed commits), and `--keep-committer` (preserve each replayed commit’s committer line).
+- `grit history fixup` accepts **`--hunks`** and **`--lines`** like `grit add` to fold selected unstaged edits into a historical commit without staging the whole file; optional `-- paths` narrows the diff. Without those flags, fixup uses the staged index (same as before).
 
 ## Remotes
 

@@ -69,7 +69,9 @@ pub use absorb::{
 pub use apply::{apply_absorb_rewrite, apply_fixup_rewrite, apply_rewrite, verify_rewrite_plan};
 pub use drop::drop;
 pub use error::HistoryError;
-pub use fixup::{fixup, staged_fixup_paths, FixupOptions};
+pub use fixup::{
+    apply_fixup_hunk_selection, fixup, fixup_selection_paths, staged_fixup_paths, FixupOptions,
+};
 pub use last::{read_history_last, HistoryLastRecord};
 pub use plan::plan_rewrite;
 #[cfg(any(test, feature = "unstable-bench-helpers"))]

@@ -8,16 +8,17 @@ use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::config::ConfigSet;
 use grit_lib::error::Error as LibError;
 use grit_lib::objects::ObjectId;
+use grit_lib::porcelain::hunk_select::{parse_hunk_id_list, HunkSelectError, HunkSelection};
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
-    abort_rebase, absorb, apply_absorb_rewrite, apply_fixup_rewrite, apply_rewrite,
-    continue_rebase, drop as history_drop, fixup, format_hunk_range_header, move_commit,
-    plan_rebase, plan_rebase_check, reword_with, skip_rebase, split, squash, staged_fixup_paths,
-    start_rebase, undo_last_rewrite, verify_rewrite_plan, AbsorbOptions, ApplyOptions, EmptyPolicy,
-    FixupOptions, HistoryError, HunkAssignment, HunkRange, Placement, RebaseCheckPlan,
-    RebaseOntoOptions, RebaseOutcome, RebasePlan, RebaseRequest, RebaseSessionError, RefScope,
-    RewordOptions, RewriteOptions, RewritePlan, SplitOptions, SquashMessage, SquashOptions,
-    StartRebaseOptions, UnassignedHunk,
+    abort_rebase, absorb, apply_absorb_rewrite, apply_fixup_hunk_selection, apply_fixup_rewrite,
+    apply_rewrite, continue_rebase, drop as history_drop, fixup, format_hunk_range_header,
+    move_commit, plan_rebase, plan_rebase_check, reword_with, skip_rebase, split, squash,
+    staged_fixup_paths, start_rebase, undo_last_rewrite, verify_rewrite_plan, AbsorbOptions,
+    ApplyOptions, EmptyPolicy, FixupOptions, HistoryError, HunkAssignment, HunkRange, Placement,
+    RebaseCheckPlan, RebaseOntoOptions, RebaseOutcome, RebasePlan, RebaseRequest,
+    RebaseSessionError, RefScope, RewordOptions, RewriteOptions, RewritePlan, SplitOptions,
+    SquashMessage, SquashOptions, StartRebaseOptions, UnassignedHunk,
 };
 use grit_lib::revwalk::rev_parse::resolve_revision_as_commit;
 use grit_lib::revwalk::rev_parse_error::RevParseError;
@@ -700,13 +701,18 @@ pub fn run_fixup(
     commit: &str,
     message: Option<String>,
     message_file: Option<String>,
+    hunks: &[String],
+    lines: &[String],
+    pathspecs: &TrailingPathspecArgs,
     shared: &HistoryRewriteArgs,
 ) -> Result<HistoryRewriteOutcome> {
     let message = read_message(message, message_file)?;
     let on_err = history_error("history fixup");
     let repo = context::discover()?;
     let commit_oid = resolve_commit(&repo, commit, "commit")?;
-    let staged_paths = staged_fixup_paths(&repo).map_err(on_err)?;
+    let resolved = pathspecs.resolve(&repo)?;
+    let (pathspec_list, _) = resolved.into_pathspec_lists();
+    let hunk_selection = hunk_selection_from_args(hunks, lines)?;
     let rewrite = Rewrite::new(repo, shared)?;
     let empty = rewrite.options.empty;
     let plan = fixup(
@@ -716,23 +722,53 @@ pub fn run_fixup(
             message,
             empty,
             rewrite: rewrite.options.clone(),
+            selection: hunk_selection.clone(),
+            pathspecs: pathspec_list.clone(),
         },
     )
-    .map_err(on_err)?;
+    .map_err(map_fixup_error)?;
     if !shared.dry_run {
         let subject = match plan.replacement(commit_oid) {
             Some(new_oid) => rewrite.subject(new_oid)?,
             None => commit.to_owned(),
         };
-        apply_fixup_rewrite(
-            &rewrite.repo,
-            &plan,
-            &rewrite.apply_options("fixup", format!("history fixup: {subject}"))?,
-            &staged_paths,
-        )
-        .map_err(on_err)?;
+        let apply_opts = rewrite.apply_options("fixup", format!("history fixup: {subject}"))?;
+        if let Some(selection) = hunk_selection.as_ref() {
+            apply_fixup_hunk_selection(
+                &rewrite.repo,
+                &plan,
+                &apply_opts,
+                selection,
+                &pathspec_list,
+            )
+            .map_err(map_fixup_error)?;
+        } else {
+            let staged_paths = staged_fixup_paths(&rewrite.repo).map_err(on_err)?;
+            apply_fixup_rewrite(&rewrite.repo, &plan, &apply_opts, &staged_paths)
+                .map_err(on_err)?;
+        }
     }
     Ok(HistoryRewriteOutcome::new("fixup", &plan, shared.dry_run))
+}
+
+fn hunk_selection_from_args(hunks: &[String], lines: &[String]) -> Result<Option<HunkSelection>> {
+    if hunks.is_empty() && lines.is_empty() {
+        return Ok(None);
+    }
+    let mut selection = parse_hunk_id_list(hunks).map_err(map_hunk_select_error)?;
+    selection.ranges = crate::commands::add::parse_line_range_list(lines)?;
+    Ok(Some(selection))
+}
+
+fn map_hunk_select_error(err: HunkSelectError) -> anyhow::Error {
+    anyhow::Error::new(err)
+}
+
+fn map_fixup_error(err: HistoryError) -> anyhow::Error {
+    match err {
+        HistoryError::HunkSelect(h) => anyhow::Error::new(h),
+        other => history_error("history fixup")(other),
+    }
 }
 
 /// Squash a revision range into the oldest commit and replay descendants.

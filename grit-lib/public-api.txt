@@ -11761,6 +11761,8 @@ impl core::convert::From<grit_lib::error::Error> for grit_lib::porcelain::hunk_s
 pub fn grit_lib::porcelain::hunk_select::HunkSelectError::from(grit_lib::error::Error) -> Self
 impl core::convert::From<grit_lib::porcelain::hunk_select::HunkSelectError> for grit_lib::porcelain::commit::CommitPatchError
 pub fn grit_lib::porcelain::commit::CommitPatchError::from(grit_lib::porcelain::hunk_select::HunkSelectError) -> Self
+impl core::convert::From<grit_lib::porcelain::hunk_select::HunkSelectError> for grit_lib::revwalk::history::HistoryError
+pub fn grit_lib::revwalk::history::HistoryError::from(grit_lib::porcelain::hunk_select::HunkSelectError) -> Self
 impl core::error::Error for grit_lib::porcelain::hunk_select::HunkSelectError
 pub fn grit_lib::porcelain::hunk_select::HunkSelectError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
 impl core::fmt::Debug for grit_lib::porcelain::hunk_select::HunkSelectError
@@ -19886,6 +19888,7 @@ pub grit_lib::revwalk::history::HistoryError::FixupMakesTargetEmpty::commit: gri
 pub grit_lib::revwalk::history::HistoryError::HeadMovedSincePlan
 pub grit_lib::revwalk::history::HistoryError::HeadMovedSincePlan::planned_commit: grit_lib::objects::ObjectId
 pub grit_lib::revwalk::history::HistoryError::HeadMovedSincePlan::planned_ref: core::option::Option<alloc::string::String>
+pub grit_lib::revwalk::history::HistoryError::HunkSelect(grit_lib::porcelain::hunk_select::HunkSelectError)
 pub grit_lib::revwalk::history::HistoryError::InsertBeforeOnMerge
 pub grit_lib::revwalk::history::HistoryError::InsertBeforeOnMerge::commit: grit_lib::objects::ObjectId
 pub grit_lib::revwalk::history::HistoryError::InvalidAuthor(grit_lib::ident::AuthorArgError)
@@ -19932,6 +19935,8 @@ pub grit_lib::revwalk::history::HistoryError::WorktreeApply
 pub grit_lib::revwalk::history::HistoryError::WorktreeApply::message: alloc::string::String
 impl core::convert::From<grit_lib::ident::AuthorArgError> for grit_lib::revwalk::history::HistoryError
 pub fn grit_lib::revwalk::history::HistoryError::from(grit_lib::ident::AuthorArgError) -> Self
+impl core::convert::From<grit_lib::porcelain::hunk_select::HunkSelectError> for grit_lib::revwalk::history::HistoryError
+pub fn grit_lib::revwalk::history::HistoryError::from(grit_lib::porcelain::hunk_select::HunkSelectError) -> Self
 impl core::convert::From<grit_lib::revwalk::history::HistoryError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::revwalk::history::HistoryError) -> Self
 impl core::convert::From<grit_lib::revwalk::history::HistoryError> for grit_lib::revwalk::history::RebaseSessionError
@@ -20207,7 +20212,9 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::history::ApplyO
 pub struct grit_lib::revwalk::history::FixupOptions
 pub grit_lib::revwalk::history::FixupOptions::empty: grit_lib::revwalk::history::EmptyPolicy
 pub grit_lib::revwalk::history::FixupOptions::message: core::option::Option<alloc::string::String>
+pub grit_lib::revwalk::history::FixupOptions::pathspecs: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::revwalk::history::FixupOptions::rewrite: grit_lib::revwalk::history::RewriteOptions
+pub grit_lib::revwalk::history::FixupOptions::selection: core::option::Option<grit_lib::porcelain::hunk_select::HunkSelection>
 impl core::clone::Clone for grit_lib::revwalk::history::FixupOptions
 pub fn grit_lib::revwalk::history::FixupOptions::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::revwalk::history::FixupOptions
@@ -20606,6 +20613,7 @@ pub const grit_lib::revwalk::history::DEFAULT_ABSORB_STACK_LIMIT: usize
 pub fn grit_lib::revwalk::history::abort_rebase(&grit_lib::repo::Repository, &str) -> core::result::Result<(), grit_lib::revwalk::history::RebaseSessionError>
 pub fn grit_lib::revwalk::history::absorb(&grit_lib::repo::Repository, &grit_lib::revwalk::history::AbsorbOptions) -> core::result::Result<grit_lib::revwalk::history::AbsorbPlan, grit_lib::revwalk::history::HistoryError>
 pub fn grit_lib::revwalk::history::apply_absorb_rewrite(&grit_lib::repo::Repository, &grit_lib::revwalk::history::AbsorbPlan, &grit_lib::revwalk::history::ApplyOptions) -> core::result::Result<grit_lib::revwalk::history::AppliedRewrite, grit_lib::revwalk::history::HistoryError>
+pub fn grit_lib::revwalk::history::apply_fixup_hunk_selection(&grit_lib::repo::Repository, &grit_lib::revwalk::history::RewritePlan, &grit_lib::revwalk::history::ApplyOptions, &grit_lib::porcelain::hunk_select::HunkSelection, &[alloc::string::String]) -> core::result::Result<grit_lib::revwalk::history::AppliedRewrite, grit_lib::revwalk::history::HistoryError>
 pub fn grit_lib::revwalk::history::apply_fixup_rewrite(&grit_lib::repo::Repository, &grit_lib::revwalk::history::RewritePlan, &grit_lib::revwalk::history::ApplyOptions, &[alloc::string::String]) -> core::result::Result<grit_lib::revwalk::history::AppliedRewrite, grit_lib::revwalk::history::HistoryError>
 pub fn grit_lib::revwalk::history::apply_rewrite(&grit_lib::repo::Repository, &grit_lib::revwalk::history::RewritePlan, &grit_lib::revwalk::history::ApplyOptions) -> core::result::Result<grit_lib::revwalk::history::AppliedRewrite, grit_lib::revwalk::history::HistoryError>
 pub fn grit_lib::revwalk::history::commit_message_subject_line(&str) -> alloc::string::String
@@ -20613,6 +20621,7 @@ pub fn grit_lib::revwalk::history::continue_rebase(&grit_lib::repo::Repository, 
 pub fn grit_lib::revwalk::history::default_absorb_base(&grit_lib::repo::Repository, grit_lib::objects::ObjectId) -> core::result::Result<grit_lib::objects::ObjectId, grit_lib::revwalk::history::HistoryError>
 pub fn grit_lib::revwalk::history::drop(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, &grit_lib::revwalk::history::RewriteOptions) -> core::result::Result<grit_lib::revwalk::history::RewritePlan, grit_lib::revwalk::history::HistoryError>
 pub fn grit_lib::revwalk::history::fixup(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, &grit_lib::revwalk::history::FixupOptions) -> core::result::Result<grit_lib::revwalk::history::RewritePlan, grit_lib::revwalk::history::HistoryError>
+pub fn grit_lib::revwalk::history::fixup_selection_paths(&grit_lib::repo::Repository, &grit_lib::porcelain::hunk_select::HunkSelection, &[alloc::string::String]) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, grit_lib::revwalk::history::HistoryError>
 pub fn grit_lib::revwalk::history::format_hunk_range_header(&grit_lib::revwalk::history::HunkRange) -> alloc::string::String
 pub fn grit_lib::revwalk::history::move_commit(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, grit_lib::revwalk::history::Placement, &grit_lib::revwalk::history::RewriteOptions) -> core::result::Result<grit_lib::revwalk::history::RewritePlan, grit_lib::revwalk::history::HistoryError>
 pub fn grit_lib::revwalk::history::normalize_rewrite_message(&str) -> core::result::Result<alloc::string::String, grit_lib::revwalk::history::HistoryError>
