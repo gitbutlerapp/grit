@@ -1,13 +1,13 @@
 //! Following annotated tags to the object they ultimately name.
 //!
 //! Every caller that turns a ref tip into "the commit it means" (revision walks, fetch
-//! negotiation, bundles, commit-graph tips, `packed-refs` peel lines) shares these two
-//! [`Odb`] methods instead of its own tag loop.
+//! negotiation, bundles, bitmaps, commit-graph tips, `packed-refs` and `ls-remote` peel lines,
+//! `--with-tree`) shares these [`Odb`] methods instead of its own tag loop.
 
 use std::collections::HashSet;
 
 use crate::error::{Error, Result};
-use crate::objects::{tag_object_line_oid, ObjectId, ObjectKind};
+use crate::objects::{tag_object_line_oid, CommitRef, ObjectId, ObjectKind};
 
 use super::Odb;
 
@@ -71,6 +71,30 @@ impl Odb {
     pub fn peel_to_commit(&self, oid: ObjectId) -> Result<Option<ObjectId>> {
         let (peeled, kind) = self.peel_tags(oid)?;
         Ok((kind == ObjectKind::Commit).then_some(peeled))
+    }
+
+    /// The object an annotated tag ultimately names: the `^{}` value of a ref advertisement or
+    /// a `packed-refs` peel line.
+    ///
+    /// Returns `None` when `oid` is not a tag. Errors are those of [`Self::peel_tags`].
+    pub(crate) fn peel_tag_target(&self, oid: ObjectId) -> Result<Option<ObjectId>> {
+        let (peeled, _) = self.peel_tags(oid)?;
+        Ok((peeled != oid).then_some(peeled))
+    }
+
+    /// Peel `oid` through annotated tags and a commit to a tree.
+    ///
+    /// Returns `None` when the chain ends at a blob. Errors are those of [`Self::peel_tags`],
+    /// plus [`Error::CorruptObject`] for a commit without a valid `tree` header.
+    pub(crate) fn peel_to_tree(&self, oid: ObjectId) -> Result<Option<ObjectId>> {
+        match self.peel_tags(oid)? {
+            (tree, ObjectKind::Tree) => Ok(Some(tree)),
+            (commit, ObjectKind::Commit) => {
+                let obj = self.read(&commit)?;
+                Ok(Some(CommitRef::parse(&obj.data)?.tree()))
+            }
+            _ => Ok(None),
+        }
     }
 }
 
@@ -175,6 +199,63 @@ mod tests {
             tip = tag(&odb, tip, "tag", &format!("t{i}"));
         }
         assert_eq!(odb.peel_to_commit(tip).unwrap(), Some(c));
+    }
+
+    #[test]
+    fn peel_tag_target_names_the_innermost_object_of_tags_only() {
+        let dir = TempDir::new().unwrap();
+        let odb = Odb::new(dir.path());
+        let c = commit(&odb);
+        let inner = tag(&odb, c, "commit", "inner");
+        let outer = tag(&odb, inner, "tag", "outer");
+        let blob = odb.write(ObjectKind::Blob, b"data").unwrap();
+        let tag_of_blob = tag(&odb, blob, "blob", "b");
+        assert_eq!(odb.peel_tag_target(c).unwrap(), None);
+        assert_eq!(odb.peel_tag_target(blob).unwrap(), None);
+        assert_eq!(odb.peel_tag_target(inner).unwrap(), Some(c));
+        assert_eq!(odb.peel_tag_target(outer).unwrap(), Some(c));
+        assert_eq!(odb.peel_tag_target(tag_of_blob).unwrap(), Some(blob));
+
+        let missing = ObjectId::from_hex("1111111111111111111111111111111111111111").unwrap();
+        let dangling = tag(&odb, missing, "commit", "dangling");
+        assert!(matches!(
+            odb.peel_tag_target(dangling),
+            Err(Error::ObjectNotFound(_))
+        ));
+    }
+
+    #[test]
+    fn peel_to_tree_follows_tags_and_commits() {
+        let dir = TempDir::new().unwrap();
+        let odb = Odb::new(dir.path());
+        let tree = odb.write(ObjectKind::Tree, b"").unwrap();
+        let c = commit(&odb);
+        let outer = tag(&odb, tag(&odb, c, "commit", "inner"), "tag", "outer");
+        let tag_of_tree = tag(&odb, tree, "tree", "t");
+        let blob = odb.write(ObjectKind::Blob, b"data").unwrap();
+        let tag_of_blob = tag(&odb, blob, "blob", "b");
+        assert_eq!(odb.peel_to_tree(tree).unwrap(), Some(tree));
+        assert_eq!(odb.peel_to_tree(c).unwrap(), Some(tree));
+        assert_eq!(odb.peel_to_tree(outer).unwrap(), Some(tree));
+        assert_eq!(odb.peel_to_tree(tag_of_tree).unwrap(), Some(tree));
+        assert_eq!(odb.peel_to_tree(blob).unwrap(), None);
+        assert_eq!(odb.peel_to_tree(tag_of_blob).unwrap(), None);
+    }
+
+    #[test]
+    fn peel_to_tree_rejects_a_commit_without_a_tree_header() {
+        let dir = TempDir::new().unwrap();
+        let odb = Odb::new(dir.path());
+        let bad = odb
+            .write(
+                ObjectKind::Commit,
+                b"author A <a@example.com> 0 +0000\n\nno tree\n",
+            )
+            .unwrap();
+        assert!(matches!(
+            odb.peel_to_tree(bad),
+            Err(Error::CorruptObject(_))
+        ));
     }
 
     #[test]

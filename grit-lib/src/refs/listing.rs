@@ -647,15 +647,7 @@ fn fill_peeled_from_odb(odb: &Odb, entry: &mut CollectedRef) {
     if entry.peeled.is_some() {
         return;
     }
-    let Ok(info) = odb.read_info(&entry.oid) else {
-        return;
-    };
-    if info.kind != ObjectKind::Tag {
-        return;
-    }
-    if let Ok((peeled, _)) = odb.peel_tags(entry.oid) {
-        entry.peeled = Some(peeled);
-    }
+    entry.peeled = odb.peel_tag_target(entry.oid).ok().flatten();
 }
 
 fn compare_entries(
