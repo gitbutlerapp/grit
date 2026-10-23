@@ -260,7 +260,7 @@ impl ExitStatus {
         ]
     }
 
-    /// Snake-case slug used in [`content/docs/exit-codes.md`].
+    /// Snake-case slug used in [Exit codes](https://grit-scm.com/docs/exit-codes).
     #[must_use]
     #[allow(dead_code)]
     pub fn doc_slug(self) -> &'static str {

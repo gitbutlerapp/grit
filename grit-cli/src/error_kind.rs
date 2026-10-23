@@ -60,7 +60,7 @@ impl ErrorKind {
         }
     }
 
-    /// Snake-case slug documented on [`content/docs/exit-codes.md`].
+    /// Snake-case slug documented on [Exit codes](https://grit-scm.com/docs/exit-codes).
     #[must_use]
     #[allow(dead_code)]
     pub fn doc_slug(self) -> &'static str {
