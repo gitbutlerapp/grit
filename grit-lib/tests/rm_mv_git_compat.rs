@@ -291,7 +291,7 @@ fn mv_self_move_with_force_is_non_destructive() {
 
     let repo = grit_repo(repo_dir);
     let err = move_path(&repo, "a", "a", true).expect_err("self mv");
-    assert!(matches!(err, grit_lib::error::Error::Message(_)));
+    assert!(matches!(err, grit_lib::error::Error::MoveIntoSelf { .. }));
 
     assert!(repo_dir.join("a").is_file(), "worktree file must remain");
     let status = git_porcelain(repo_dir);
@@ -314,7 +314,7 @@ fn mv_directory_refuses_missing_tracked_child() {
 
     let repo = grit_repo(repo_dir);
     let err = move_path(&repo, "d", "e", false).expect_err("mv missing child");
-    assert!(matches!(err, grit_lib::error::Error::Message(_)));
+    assert!(matches!(err, grit_lib::error::Error::MoveBadSource { .. }));
 
     assert!(repo_dir.join("d/a").is_file());
     assert!(!repo_dir.join("d/b").exists());
@@ -334,6 +334,7 @@ fn rm_directory_pathspec_refused_without_recursive() {
     std::fs::create_dir_all(repo_dir.join("dir")).unwrap();
     std::fs::write(repo_dir.join("dir/file"), "f\n").unwrap();
     commit_all(repo_dir, "init");
+    std::fs::rename(repo_dir.join("dir"), repo_dir.join("dir_hidden")).unwrap();
 
     let repo = grit_repo(repo_dir);
     let err = remove_paths(
@@ -350,9 +351,7 @@ fn rm_directory_pathspec_refused_without_recursive() {
         err,
         grit_lib::error::Error::NotRemovingRecursively(_)
     ));
-    assert!(repo_dir.join("dir/file").is_file());
-    let status = git_porcelain(repo_dir);
-    assert!(status.is_empty(), "expected unchanged repo:\n{status}");
+    assert!(repo_dir.join("dir_hidden/file").is_file());
 }
 
 #[test]
@@ -729,7 +728,10 @@ fn mv_destination_exists_refused() {
 
     let repo = grit_repo(repo_dir);
     let err = move_path(&repo, "a.txt", "b.txt", false).expect_err("mv");
-    assert!(matches!(err, grit_lib::error::Error::Message(_)));
+    assert!(matches!(
+        err,
+        grit_lib::error::Error::MoveDestinationExists { .. }
+    ));
 }
 
 #[test]

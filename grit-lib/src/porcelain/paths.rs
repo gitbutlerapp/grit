@@ -1201,6 +1201,7 @@ mod index_lock_transaction_tests {
             &RemoveOptions {
                 pathspecs: vec!["a.txt".into()],
                 pathspec_sources: vec!["a.txt".into()],
+                force: true,
                 ..Default::default()
             },
         )
