@@ -213,6 +213,15 @@ pub fn grit_source_commit() -> Option<String> {
     grit_source_commit_from(&repo, bench_branch.as_deref())
 }
 
+/// Commit to record for the timed grit binary: `GRIT_BENCH_REPORT_GRIT_COMMIT` when set
+/// (the binary under test was built elsewhere), else [`grit_source_commit`].
+pub fn report_grit_commit() -> Option<String> {
+    env::var("GRIT_BENCH_REPORT_GRIT_COMMIT")
+        .ok()
+        .filter(|s| !s.is_empty())
+        .or_else(grit_source_commit)
+}
+
 fn find_on_path(name: &str) -> Result<PathBuf> {
     let paths = env::var_os("PATH").context("PATH is not set")?;
     for dir in env::split_paths(&paths) {
@@ -232,6 +241,17 @@ mod tests {
     use std::fs;
     use std::process::Command;
     use tempfile::TempDir;
+
+    #[test]
+    fn report_grit_commit_prefers_the_override() {
+        env::set_var("GRIT_BENCH_REPORT_GRIT_COMMIT", "0123abcd-override");
+        let with_override = report_grit_commit();
+        env::set_var("GRIT_BENCH_REPORT_GRIT_COMMIT", "");
+        let empty_override = report_grit_commit();
+        env::remove_var("GRIT_BENCH_REPORT_GRIT_COMMIT");
+        assert_eq!(with_override.as_deref(), Some("0123abcd-override"));
+        assert_eq!(empty_override, grit_source_commit());
+    }
 
     #[test]
     fn grit_source_commit_is_committish() {

@@ -464,7 +464,7 @@ GRIT_BENCH_BRANCH=factory/reftable-refs-perf-783 GRIT_BENCH_REFS_ONLY=reftable .
 
 Use a **≥ 2.45** system **`git`** (or an explicit `--git` path) when refreshing the reftable baseline; older git skips the reftable fixture.
 
-Set `GRIT_BENCH_BRANCH` to the GitButler branch you are benchmarking so `grit_commit` in the JSON matches that branch tip (required on `gitbutler/workspace` checkouts).
+Set `GRIT_BENCH_BRANCH` to the GitButler branch you are benchmarking so `grit_commit` in the JSON matches that branch tip (required on `gitbutler/workspace` checkouts). When `--grit` points at a binary built from a different commit than `grit-bench` itself (for example a before/after pair timed with one harness), set `GRIT_BENCH_REPORT_GRIT_COMMIT` to that binary's commit; every suite, including `grit-bench daily`, records it as `grit_commit`.
 
 Driver **`for-each-ref`** output is checked against git byte-for-byte in `grit-utils` integration tests (1 000-ref fixture).
 

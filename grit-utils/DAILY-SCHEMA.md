@@ -32,7 +32,7 @@ export interface MachineInfo {
 export interface DailyToolVersions {
   git: string;
   grit: string;
-  grit_commit?: string;
+  grit_commit?: string; // GRIT_BENCH_REPORT_GRIT_COMMIT, else the grit-bench source commit
   baseline_grit?: string;
   baseline_grit_commit?: string;
 }

@@ -20,7 +20,7 @@ use super::runner::{
 use super::schema::{
     DailyBenchReport, DailyScenarioResult, DailyToolRun, DailyToolVersions, SCHEMA_TAG,
 };
-use crate::binary::{grit_source_commit, tool_version};
+use crate::binary::{report_grit_commit, tool_version};
 use crate::capped_run::TerminationKind;
 use crate::machine::{collect_machine_info, format_timestamp};
 
@@ -314,7 +314,7 @@ pub fn run_daily(opts: DailyRunOptions, timestamp: OffsetDateTime) -> Result<Dai
     let baseline_version = opts.baseline_grit.as_ref().map(|p| tool_version(p));
     let baseline_commit = opts.baseline_grit.as_ref().and_then(|base| {
         if base == &opts.grit {
-            grit_source_commit()
+            report_grit_commit()
         } else {
             None
         }
@@ -327,7 +327,7 @@ pub fn run_daily(opts: DailyRunOptions, timestamp: OffsetDateTime) -> Result<Dai
         tools: DailyToolVersions {
             git: tool_version(&opts.git),
             grit: tool_version(&opts.grit),
-            grit_commit: grit_source_commit(),
+            grit_commit: report_grit_commit(),
             baseline_grit: baseline_version,
             baseline_grit_commit: baseline_commit,
         },

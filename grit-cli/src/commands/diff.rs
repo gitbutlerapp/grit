@@ -963,15 +963,7 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
             anyhow::bail!("--staged cannot be combined with revision arguments or --against");
         }
         let pathspecs = resolve_worktree_diff_pathspecs(&repo, &path_args)?;
-        let index = repo
-            .index_handle()
-            .load()
-            .context("could not load the index")?;
-        let entries = filter_diff_entries(
-            staged_entries_in_index(&repo, &index, &diff_options)?,
-            &repo,
-            &pathspecs,
-        );
+        let entries = filter_diff_entries(staged_entries(&repo, &diff_options)?, &repo, &pathspecs);
         let outcome = match detail {
             DiffDetail::Stat | DiffDetail::NameOnly | DiffDetail::NameStatus => {
                 outcome_from_entries(&repo, entries, detail, diff_options, format)?
@@ -1529,14 +1521,23 @@ fn staged_file_changes_for_entries(
     repo: &grit_lib::repo::Repository,
     entries: Vec<DiffEntry>,
 ) -> Result<Vec<FileChange>> {
-    entries
-        .into_iter()
-        .map(|e| {
-            let (old_bytes, old_bin) = old_side_bytes(repo.odb(), &e)?;
-            let (new_bytes, new_bin) = new_side_bytes(repo.odb(), &e, None)?;
-            Ok(file_change(e, old_bytes, new_bytes, old_bin || new_bin))
-        })
-        .collect()
+    let config = repo.config().context("could not load config")?;
+    let par_opts = repo
+        .thread_policy()
+        .resolve(ParallelOp::DiffContent, config.as_ref());
+    let odb = repo.odb();
+    let est_bytes = entries.len().saturating_mul(8192);
+    grit_lib::parallel::try_par_map(&entries, par_opts, est_bytes, |e| {
+        let (old_bytes, old_bin) = old_side_bytes(odb, e)?;
+        let (new_bytes, new_bin) = new_side_bytes(odb, e, None)?;
+        Ok::<_, anyhow::Error>(file_change(
+            e.clone(),
+            old_bytes,
+            new_bytes,
+            old_bin || new_bin,
+        ))
+    })
+    .map_err(|grit_lib::parallel::ParallelHashError::Task(e)| e)
 }
 
 fn peer_unstaged_changes_for_hunk_ids<'a>(
@@ -2427,7 +2428,7 @@ fn new_side_bytes(
             index_entry,
             Some(&rules),
         )?;
-        Ok(bytes_for_diff(&data))
+        Ok(bytes_for_diff(data))
     } else {
         blob_bytes(odb, &e.new_oid)
     }
@@ -2469,15 +2470,15 @@ fn blob_bytes(odb: &Odb, oid: &ObjectId) -> Result<(SideBytes, bool)> {
         return Ok((SideBytes::from_bytes(Vec::new()), false));
     }
     let data = odb.read(oid)?.data;
-    Ok(bytes_for_diff(&data))
+    Ok(bytes_for_diff(data))
 }
 
 /// Convert bytes to `(SideBytes, is_binary)`. NUL in the first 8 KiB ⇒ binary.
-fn bytes_for_diff(data: &[u8]) -> (SideBytes, bool) {
-    if data.iter().take(8000).any(|&b| b == 0) {
+fn bytes_for_diff(data: Vec<u8>) -> (SideBytes, bool) {
+    if data[..data.len().min(8000)].contains(&0) {
         (SideBytes::from_bytes(Vec::new()), true)
     } else {
-        (SideBytes::from_bytes(data.to_vec()), false)
+        (SideBytes::from_bytes(data), false)
     }
 }
 
@@ -2824,8 +2825,11 @@ fn num_cell(n: Option<usize>, width: usize, code: &str, changed: bool, color: bo
 }
 
 /// Expand tabs to the next [`TAB_WIDTH`] stop, given the starting column.
-fn expand_tabs(s: &str, start_col: usize) -> String {
-    let mut out = String::new();
+fn expand_tabs(s: &str, start_col: usize) -> std::borrow::Cow<'_, str> {
+    if !s.contains('\t') {
+        return std::borrow::Cow::Borrowed(s);
+    }
+    let mut out = String::with_capacity(s.len() + TAB_WIDTH);
     let mut col = start_col;
     for ch in s.chars() {
         if ch == '\t' {
@@ -2837,5 +2841,21 @@ fn expand_tabs(s: &str, start_col: usize) -> String {
             col += 1;
         }
     }
-    out
+    std::borrow::Cow::Owned(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::expand_tabs;
+    use std::borrow::Cow;
+
+    #[test]
+    fn expand_tabs_borrows_tab_free_text_and_aligns_tab_stops() {
+        assert!(matches!(expand_tabs("plain ü text", 3), Cow::Borrowed(_)));
+        assert_eq!(expand_tabs("\tx", 0), "        x");
+        assert_eq!(expand_tabs("ab\tc", 0), "ab      c");
+        assert_eq!(expand_tabs("ü\tc", 0), "ü       c");
+        assert_eq!(expand_tabs("\t", 5), "   ");
+        assert_eq!(expand_tabs("", 0), "");
+    }
 }

@@ -6,7 +6,7 @@ use std::process::Command;
 use anyhow::{Context, Result};
 
 use crate::bench_env::isolated_env_prefix;
-use crate::binary::{grit_source_commit, tool_version};
+use crate::binary::{report_grit_commit, tool_version};
 use crate::fixture::{
     bench_work_dir, create_blame_deep_history_repo, create_blame_large_mid_churn_repo,
     create_blame_large_tail_churn_repo, create_deep_leaf_dogfood_repo,
@@ -1224,10 +1224,7 @@ pub(crate) fn build_merge_check_report(
     report.tools = ToolVersions {
         git: tool_version(git),
         grit: tool_version(bench_exe),
-        grit_commit: std::env::var("GRIT_BENCH_REPORT_GRIT_COMMIT")
-            .ok()
-            .filter(|s| !s.is_empty())
-            .or_else(crate::binary::grit_source_commit),
+        grit_commit: report_grit_commit(),
         hyperfine: Some(tool_version(hyperfine)),
     };
     report
@@ -1262,10 +1259,7 @@ pub(crate) fn build_report_with_fixtures(
         tools: ToolVersions::without_hyperfine(
             tool_version(git),
             tool_version(grit),
-            std::env::var("GRIT_BENCH_REPORT_GRIT_COMMIT")
-                .ok()
-                .filter(|s| !s.is_empty())
-                .or_else(grit_source_commit),
+            report_grit_commit(),
         ),
         fixtures,
         scenarios,
