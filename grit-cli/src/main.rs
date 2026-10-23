@@ -5,6 +5,7 @@
 //! doubles as the home base: running `grit` with no arguments shows you where you
 //! are, what's changed, and what to do next.
 
+#[cfg(test)]
 mod cli_command;
 mod cli_messages;
 mod commands;

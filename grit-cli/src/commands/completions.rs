@@ -32,9 +32,9 @@ mod tests {
                 );
                 String::from_utf8(buf.into_inner()).expect("completion script is utf-8")
             })
-            .expect("spawn completion generator thread")
-            .join()
-            .expect("join completion generator thread")
+            .ok()
+            .and_then(|handle| handle.join().ok())
+            .unwrap_or_else(|| panic!("completion generator thread failed"))
     }
 
     #[test]
