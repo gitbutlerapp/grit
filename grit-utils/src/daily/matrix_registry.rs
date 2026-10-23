@@ -237,6 +237,13 @@ pub const MATRIX_SCENARIOS: &[ScenarioSpec] = &[
         name: None,
         description: "Staged diff on deep-tree: grit diff --staged vs git diff --cached",
     },
+    ScenarioSpec {
+        id: "diff/stat@synth-100k",
+        area: Area::Diff,
+        headline: false,
+        name: None,
+        description: "Unstaged worktree diff stat (~1% modified): grit diff --stat vs git diff --stat",
+    },
     // History / revwalk / blame
     ScenarioSpec {
         id: "log/oneline-100@synth-100k",
@@ -251,6 +258,20 @@ pub const MATRIX_SCENARIOS: &[ScenarioSpec] = &[
         headline: false,
         name: None,
         description: "Last 100 commits JSON: grit log --limit 100 --json vs git log -100 with verbose --format",
+    },
+    ScenarioSpec {
+        id: "log/json-filter@git-git",
+        area: Area::Revwalk,
+        headline: false,
+        name: None,
+        description: "Last 50 commit oids via grit log --json --filter '.commits[].oid' vs git log -50 --format=%H",
+    },
+    ScenarioSpec {
+        id: "log/stat-n50@git-git",
+        area: Area::Revwalk,
+        headline: false,
+        name: None,
+        description: "Last 50 commits with stat: grit log --limit 50 --stat vs git log --stat -50",
     },
     ScenarioSpec {
         id: "log/all@git-git",
@@ -560,6 +581,13 @@ pub const MATRIX_SCENARIOS: &[ScenarioSpec] = &[
         headline: false,
         name: None,
         description: "List notes vs git notes list",
+    },
+    ScenarioSpec {
+        id: "notes/list-n100@synth-10k",
+        area: Area::Notes,
+        headline: false,
+        name: None,
+        description: "List 100 seeded notes vs git notes list",
     },
     ScenarioSpec {
         id: "bundle/create@synth-10k",

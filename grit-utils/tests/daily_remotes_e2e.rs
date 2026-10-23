@@ -87,11 +87,14 @@ const REMOTE_HEADLINE_IDS: [&str; 5] = [
     "clone/local@synth-10k",
 ];
 
-const HTTP_MATRIX_IDS: [&str; 3] = [
+const HTTP_MATRIX_IDS: [&str; 4] = [
     "clone/http@synth-10k",
+    "clone/shallow-depth1-http@synth-10k",
     "fetch/incremental-http@git-git",
     "push/incremental-http@git-git",
 ];
+
+const CLONE_SHALLOW_FILE_ID: &str = "clone/shallow-depth1@synth-10k";
 
 const FETCH_MATRIX_IDS: [&str; 4] = [
     "fetch/one-branch@git-git",
@@ -136,6 +139,34 @@ fn network_headlines_smoke() {
         assert!(row.git.peak_rss_bytes > 0, "{id} git rss");
         assert!(row.grit.peak_rss_bytes > 0, "{id} grit rss");
     }
+}
+
+#[test]
+fn clone_shallow_file_smoke() {
+    let _guard = lock_e2e();
+    let git = resolve_git();
+    let (grit, _http, _bench) = build_binaries();
+    let cache = TempDir::new().expect("cache");
+    std::env::set_var("GRIT_BENCH_CACHE", cache.path());
+    prepare_fixtures(&git, &[FixtureKind::Synth10kSmoke]);
+
+    let daily_root = cache.path().join("clone_shallow_file");
+    std::env::set_var("GRIT_BENCH_DAILY_ROOT", &daily_root);
+    let out_path = cache.path().join("daily-clone-shallow-file.json");
+    let out = run_daily(&git, &grit, &out_path, &["--only", CLONE_SHALLOW_FILE_ID]);
+    assert!(
+        out.status.success(),
+        "daily shallow clone file failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+
+    let report = grit_utils::validate_daily_report(&out_path).expect("validate");
+    assert_eq!(report.scenarios.len(), 1);
+    let row = &report.scenarios[0];
+    assert_eq!(row.id, CLONE_SHALLOW_FILE_ID);
+    assert!(!row.pending);
+    assert!(row.git.peak_rss_bytes > 0);
+    assert!(row.grit.peak_rss_bytes > 0);
 }
 
 #[test]

@@ -4,6 +4,7 @@ use std::collections::HashSet;
 use std::path::PathBuf;
 use std::process::Command;
 
+use grit_utils::daily::areas;
 use grit_utils::daily::coverage::{
     all_registry_scenarios, exemption_commands, matrix_registry_gaps, scenario_command,
     scenario_ids_in_matrix, uncovered_commands,
@@ -73,6 +74,19 @@ fn daily_matrix_covers_every_command() {
         "grit subcommands without a daily scenario or MATRIX.md exemption: {missing:?}\n\
          Add a registry row or an Exemptions table entry in grit-utils/MATRIX.md"
     );
+}
+
+#[test]
+fn registry_scenarios_have_daily_plans() {
+    let plan_ids: std::collections::HashSet<_> =
+        areas::all_daily_plans().iter().map(|p| p.spec.id).collect();
+    for spec in all_registry_scenarios() {
+        assert!(
+            plan_ids.contains(spec.id),
+            "missing daily plan for registry id {}",
+            spec.id
+        );
+    }
 }
 
 #[test]

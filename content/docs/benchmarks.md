@@ -288,6 +288,16 @@ At **100k** files the same suites land in **`dashboard/current.json`** (22 scena
 
 Factory follow-ups (queued as **Speed:** tasks): `diff-100000`, `add-100000`, `pick-series-100000`, `pick-100000`, `revert-100000`, `pick-series-10000`, `add-10000`, `diff-10000`, `pick-10000`, `revert-10000`, `merge-10000`, `log-100000`. The `pick-*` and `revert-*` rows were closed on 2026-10-22. See [Pick, revert and merge apply path](#pick-revert-and-merge-apply-path-2026-10-22).
 
+### Daily common paths (roadmap 2)
+
+**`grit-utils/baselines/daily-common-paths.json`** records six **`grit-bench daily`** matrix ids added for roadmap-2 CLI conventions: **`diff/stat@synth-100k`**, **`log/stat-n50@git-git`**, **`log/json-filter@git-git`**, **`notes/list-n100@synth-10k`**, and shallow clone over **`file://`** and grit smart HTTP (**`clone/shallow-depth1@synth-10k`**, **`clone/shallow-depth1-http@synth-10k`**). Each row includes hyperfine medians and **`peak_rss_bytes`** for grit and system git; pre-timed hooks check output equivalence where semantics match (stat summary, commit oids, note counts, shallow clone refs). On the factory VM capture (2026-10-23), **`log/stat-n50@git-git`** is the largest time gap (**~4.3×** git); that row is queued for the speed agent rather than fixed in the registry change.
+
+```bash
+cargo build --release -p grit-cli -p grit-http-server -p grit-utils
+./target/release/grit-bench daily --only 'diff/stat@synth-100k,log/stat-n50@git-git,log/json-filter@git-git,notes/list-n100@synth-10k,clone/shallow-depth1@synth-10k,clone/shallow-depth1-http@synth-10k' \
+  --format json --output grit-utils/baselines/daily-common-paths.json
+```
+
 ### git.git headlines (hyperfine wall time + peak RSS)
 
 **`grit-utils/baselines/dashboard/git-dot-git-headlines.json`** uses the standard grit-bench schema (hyperfine medians + **`peak_rss_bytes`** per side). Headline wall times are **not** taken from the daily RSS poll loop (which quantized sub-50 ms commands to ~50 ms); they use the same hyperfine + **`measure-rss`** path as other scenario suites.

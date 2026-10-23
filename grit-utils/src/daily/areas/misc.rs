@@ -1,7 +1,7 @@
 //! Diff matrix scenarios and misc (config, ignore, hooks, notes, bundles, worktrees, remotes).
 
 use super::super::helpers::{
-    ctx, diff_staged_bench, diff_worktree_bench, headline_spec, prepare_none,
+    ctx, diff_staged_bench, diff_stat_bench, diff_worktree_bench, headline_spec, prepare_none,
     prepare_worktree_diff, prepare_worktree_staged_diff, scenario_spec, setup_big_blobs,
     setup_deep_tree, setup_registry_worktree, setup_synth100k, synth10k_kind,
 };
@@ -10,9 +10,9 @@ use super::super::matrix_helpers::{
     correctness_bundle_create, hooks_list_bench, ignore_check_bench, notes_add_bench,
     notes_list_bench, prepare_bundle_create, prepare_bundle_verify, prepare_config_set,
     prepare_notes_add, prepare_worktree_add, prepare_worktree_remove, remote_list_bench,
-    setup_ignore_check, setup_notes_list, setup_remote_list, setup_small, setup_synth10k_bundle,
-    setup_synth10k_linked_worktree, setup_worktree_remove, verify_bundle, worktree_add_bench,
-    worktree_remove_bench,
+    setup_ignore_check, setup_notes_list, setup_notes_list_n100, setup_remote_list, setup_small,
+    setup_synth10k_bundle, setup_synth10k_linked_worktree, setup_worktree_remove, verify_bundle,
+    worktree_add_bench, worktree_remove_bench,
 };
 use super::super::plan::{DailyHeadlinePlan, DailySetup};
 
@@ -81,6 +81,15 @@ pub fn plans() -> Vec<DailyHeadlinePlan> {
             correctness: None,
         },
         DailyHeadlinePlan {
+            spec: scenario_spec("diff/stat@synth-100k"),
+            pending: false,
+            setup: setup_synth100k,
+            prepare: prepare_worktree_diff,
+            build_git: |c| diff_stat_bench(c).1,
+            build_grit: |c| diff_stat_bench(c).0,
+            correctness: None,
+        },
+        DailyHeadlinePlan {
             spec: headline_spec("config/get@small"),
             pending: false,
             setup: setup_small,
@@ -129,6 +138,15 @@ pub fn plans() -> Vec<DailyHeadlinePlan> {
             spec: headline_spec("notes/list@synth-10k"),
             pending: false,
             setup: setup_notes_list,
+            prepare: prepare_none,
+            build_git: |c| notes_list_bench(c).1,
+            build_grit: |c| notes_list_bench(c).0,
+            correctness: None,
+        },
+        DailyHeadlinePlan {
+            spec: scenario_spec("notes/list-n100@synth-10k"),
+            pending: false,
+            setup: setup_notes_list_n100,
             prepare: prepare_none,
             build_git: |c| notes_list_bench(c).1,
             build_grit: |c| notes_list_bench(c).0,

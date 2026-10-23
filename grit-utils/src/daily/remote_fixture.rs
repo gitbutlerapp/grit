@@ -783,6 +783,10 @@ pub fn pre_timed_for(id: &str) -> Option<fn(&DailyHeadlineContext) -> Result<()>
         "push/incremental@git-git" | "push/incremental-http@git-git" => {
             Some(pre_verify_push_incremental)
         }
+        "diff/stat@synth-100k" => Some(super::matrix_helpers::verify_diff_stat),
+        "log/stat-n50@git-git" => Some(super::matrix_helpers::verify_log_stat_n50),
+        "log/json-filter@git-git" => Some(super::matrix_helpers::verify_log_json_filter),
+        "notes/list-n100@synth-10k" => Some(super::matrix_helpers::verify_notes_list_n100),
         _ => None,
     }
 }
@@ -867,6 +871,41 @@ pub fn verify_clone_local(ctx: &DailyHeadlineContext, cwd: &Path) -> Result<()> 
 
 pub fn verify_clone_http(ctx: &DailyHeadlineContext, cwd: &Path) -> Result<()> {
     verify_clone_local(ctx, cwd)
+}
+
+pub fn verify_clone_shallow(ctx: &DailyHeadlineContext, cwd: &Path) -> Result<()> {
+    let remote = remote_state(ctx)?;
+    let dest = remote.meta.clone_dest.clone();
+    let dest_name = dest
+        .file_name()
+        .and_then(|s| s.to_str())
+        .context("clone dest name")?;
+    prepare_network_clone(&remote.bare)?;
+    run_git(
+        &ctx.git,
+        cwd,
+        &[
+            "clone",
+            "--depth",
+            "1",
+            "-q",
+            remote.remote_url.as_str(),
+            dest_name,
+        ],
+    )?;
+    verify_clone_against_bare(&ctx.git, &remote.bare, &dest, &remote.meta.default_branch)?;
+    prepare_network_clone(&remote.bare)?;
+    run_grit(
+        &ctx.grit,
+        cwd,
+        &["clone", "--shallow", remote.remote_url.as_str(), dest_name],
+    )?;
+    verify_clone_against_bare(&ctx.git, &remote.bare, &dest, &remote.meta.default_branch)?;
+    Ok(())
+}
+
+pub fn verify_clone_shallow_http(ctx: &DailyHeadlineContext, cwd: &Path) -> Result<()> {
+    verify_clone_shallow(ctx, cwd)
 }
 
 pub fn verify_fetch_incremental_http(ctx: &DailyHeadlineContext, cwd: &Path) -> Result<()> {
@@ -978,6 +1017,22 @@ pub fn clone_bench_script(tool: &Path, url: &str, dest: &Path) -> String {
     let dest_q = shell_quote(&dest.to_string_lossy());
     let dest_name = dest.file_name().and_then(|s| s.to_str()).unwrap_or("clone");
     format!("rm -rf {dest_q} && {tool_q} clone -q {url_q} {dest_name}")
+}
+
+pub fn clone_shallow_bench_script_git(tool: &Path, url: &str, dest: &Path) -> String {
+    let tool_q = shell_quote(&tool.to_string_lossy());
+    let url_q = shell_quote(url);
+    let dest_q = shell_quote(&dest.to_string_lossy());
+    let dest_name = dest.file_name().and_then(|s| s.to_str()).unwrap_or("clone");
+    format!("rm -rf {dest_q} && {tool_q} clone --depth 1 -q {url_q} {dest_name}")
+}
+
+pub fn clone_shallow_bench_script_grit(tool: &Path, url: &str, dest: &Path) -> String {
+    let tool_q = shell_quote(&tool.to_string_lossy());
+    let url_q = shell_quote(url);
+    let dest_q = shell_quote(&dest.to_string_lossy());
+    let dest_name = dest.file_name().and_then(|s| s.to_str()).unwrap_or("clone");
+    format!("rm -rf {dest_q} && {tool_q} clone --shallow {url_q} {dest_name}")
 }
 
 /// Ensure the smart HTTP server is running and the client remote URL is current.

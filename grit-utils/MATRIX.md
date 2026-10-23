@@ -46,6 +46,9 @@ Overview of **grit-lib** coverage, **`grit` commands**, common workflows, and **
 | `add/all@synth-100k` | Stage all changes: grit add vs git add -A (after ~1% modified) |
 | `add/update@synth-100k` | Stage tracked changes: grit add -u vs git add -u (after ~1% modified) |
 | `add/dry-run@synth-10k` | Preview staging: grit add --dry-run vs git add -n -A |
+| `add/patch-file@synth-10k` | Apply worktree diff to index: grit add --patch-file vs git apply --cached |
+| `add/hunks@large-file` | Stage half of 500 hunks in a 50k-line file: grit add --hunks vs git apply --cached |
+| `add/lines@large-file` | Stage first 25k new-side lines in a 50k-line file: grit add --lines vs git apply --cached |
 | `add/modified@big-blobs` | Stage ~1% modified paths: grit add -- <paths> vs git add -- <paths> |
 | `add/modified@synth-10k` | Stage modified files vs git add -A |
 | `clean/untracked@synth-10k` | Remove untracked files: grit clean -f vs git clean -fd |
@@ -54,11 +57,13 @@ Overview of **grit-lib** coverage, **`grit` commands**, common workflows, and **
 | `commit/small@synth-10k` | Commit staged changes vs git commit |
 | `commit/staged@synth-100k` | Commit index only: grit commit --staged vs git commit (after partial stage) |
 | `commit/paths@synth-10k` | Partial commit: grit commit -- \<paths\> vs git commit --only |
+| `commit/dry-run@synth-10k` | Preview commit: grit commit --dry-run vs git commit --dry-run |
 | `init/empty@small` | Initialize empty repo: grit init vs git init in an empty directory |
 | `mv/file@synth-10k` | Rename tracked file: grit mv <src> <dst> vs git mv <src> <dst> |
 | `reset/hard@synth-10k` | Hard reset dirty tree: grit reset --hard HEAD vs git reset --hard HEAD |
 | `reset/mixed@synth-10k` | Mixed reset dirty tree: grit reset HEAD vs git reset --mixed HEAD |
 | `restore/paths@synth-10k` | Restore ~1% paths from index: grit restore -- <paths> vs git restore -- <paths> |
+| `restore/hunks@large-file` | Discard half of 500 hunks in a 50k-line file: grit restore --hunks vs git apply -R |
 | `rm/dir@synth-10k` | Remove tracked directory: grit rm -r <dir> vs git rm -r <dir> |
 | `stash/push-pop@synth-10k` | Stash push and pop vs git stash |
 | `status/clean@deep-tree` | Clean worktree on deep-tree: grit status vs git status -s |
@@ -84,6 +89,7 @@ Overview of **grit-lib** coverage, **`grit` commands**, common workflows, and **
 | `diff/worktree@deep-tree` | Unstaged worktree diff on deep-tree: grit diff vs git diff |
 | `diff/worktree@synth-100k` | Unstaged worktree diff (~1% modified): grit diff vs git diff |
 | `diff/worktree@synth-10k` | Worktree diff vs git diff |
+| `diff/stat@synth-100k` | Unstaged diff stat (~1% modified): grit diff --stat vs git diff --stat |
 
 ## revwalk
 **grit-lib:** `grit_lib::revwalk`, `grit_lib::revision`, `grit_lib::objects`
@@ -94,9 +100,10 @@ Overview of **grit-lib** coverage, **`grit` commands**, common workflows, and **
 | --- | --- |
 | `cat/blob@git-git` | Print one blob at HEAD:<path>: grit cat <oid> vs git cat-file -p <oid> (oid from git rev-parse HEAD:<path>) |
 | `log/all@git-git` | Full reachable history: grit log (paged) vs git log --oneline |
-| `log/author@git-git` | GAP: grit log has no --author; git log --author=<name> (pending until roadmap filter lands) |
 | `log/oneline-100@git-git` | Last 100 commits one line each vs git log --oneline |
 | `log/json-100@git-git` | Last 100 commits as JSON vs git log -100 with verbose `--format` |
+| `log/json-filter@git-git` | Commit oids via grit log --json --filter '.commits[].oid' vs git log -50 --format=%H |
+| `log/stat-n50@git-git` | Last 50 commits with stat: grit log --limit 50 --stat vs git log --stat -50 |
 | `log/oneline-100@synth-100k` | Last 100 commits: grit log --limit 100 vs git log --oneline -100 |
 | `log/path@git-git` | History for one path: grit log -- <path> vs git log --oneline -- <path> |
 | `merge-base/branches@git-git` | Merge base of two branches: grit merge-base <a> <b> vs git merge-base <a> <b> |
@@ -105,6 +112,8 @@ Overview of **grit-lib** coverage, **`grit` commands**, common workflows, and **
 | `resolve/head-n@git-git` | Resolve HEAD: grit resolve HEAD vs git rev-parse HEAD |
 | `resolve/change-id@git-git` | Resolve change-id prefix: grit resolve \<cid\> vs git log --all --format=%H |
 | `revs/count@git-git` | Count commits at HEAD: grit revs --count HEAD vs git rev-list --count HEAD |
+| `revs/count-path@git-git` | Literal path count without commit-graph: grit revs --count 7e34d81 -- Documentation/git-log.txt vs git rev-list |
+| `log/limit-path@git-git` | Bounded path log without commit-graph: grit log -n 200 -- Documentation vs git log |
 | `shortlog/ahead@git-git` | Ahead-of-target commits: grit shortlog vs git log <target>..HEAD --oneline |
 | `show/head@big-blobs` | Show HEAD on big-blobs: grit show vs git show |
 | `show/head@git-git` | Show HEAD commit vs git show |
@@ -131,17 +140,23 @@ Overview of **grit-lib** coverage, **`grit` commands**, common workflows, and **
 | `branch/delete@many-refs` | Delete one branch vs git branch -D |
 | `branch/rename@many-refs` | Rename one branch vs git branch -m |
 | `branch/list@many-refs` | List branches vs git branch |
+| `branch/list-json@many-refs` | List branches with JSON vs git branch -vv |
 | `branch/list@many-refs-loose` | List branches on loose many-refs fixture vs git branch |
+| `branch/merged@many-refs` | Branch --merged vs git branch --merged |
 | `branch/merged-ref@many-refs` | Branch --merged ref query vs git for-each-ref on many-refs |
 | `history/reword@synth-10k` | History reword vs git history reword or scripted rebase |
 | `merge/clean@synth-100k` | Merge branch on 100k-file synthetic vs git merge |
 | `merge/clean@synth-10k` | Merge branch vs git merge |
 | `pick/one@synth-100k` | Cherry-pick one commit on 100k-file synthetic vs git cherry-pick |
 | `pick/one@synth-10k` | Cherry-pick one commit vs git cherry-pick |
+| `rebase/onto@synth-10k` | Rebase onto upstream vs git rebase on synth-10k history fixture |
+| `rebase/onto@git-git` | Rebase onto HEAD~10 vs git rebase on pinned git.git (conflict-free replay) |
 | `revert/one@synth-10k` | Revert one commit vs git revert --no-edit |
 | `stash/list@synth-10k` | List stash entries vs git stash list |
 | `switch/branch@synth-100k` | Switch branch on 100k-file synthetic vs git switch |
 | `tag/create@many-refs` | Create lightweight tag vs git tag |
+| `tag/contains@git-git` | Tag --contains ref query vs git tag -l on git.git (commit-graph) |
+| `tag/list-sort-version@git-git` | Tag list --sort=version vs git tag -l --sort=version:refname on git.git |
 | `tag/list@many-refs` | List tags vs git tag -l |
 
 ## remotes
@@ -153,13 +168,20 @@ Overview of **grit-lib** coverage, **`grit` commands**, common workflows, and **
 | --- | --- |
 | `clone/http@synth-10k` | Clone synth-10k over grit smart HTTP vs git clone |
 | `clone/local@synth-10k` | Clone over file:// (not git clone --local hardlink shortcut) vs git clone |
+| `clone/shallow-depth1@synth-10k` | Shallow clone over file://: grit clone --shallow vs git clone --depth 1 |
+| `clone/shallow-depth1-http@synth-10k` | Shallow clone over grit smart HTTP: grit clone --shallow vs git clone --depth 1 |
 | `fetch/incremental-http@git-git` | Incremental fetch over grit smart HTTP (git-git bare remote) |
 | `fetch/incremental@git-git` | Incremental fetch vs git fetch |
+| `fetch/one-branch@git-git` | Fetch one branch refspec vs git fetch origin main |
+| `fetch/dry-run@git-git` | Fetch dry-run reports updates without writing refs or objects |
+| `fetch/deepen@git-git` | Deepen a depth-1 client by 50 commits vs git fetch --deepen 50 |
 | `fetch/noop@git-git` | No-op fetch when client already matches remote (file:// git-git) |
 | `ls-remote/all@many-refs` | List all refs on many-refs bare remote vs git ls-remote |
 | `pull/fast-forward@git-git` | Fast-forward pull vs git pull --ff-only |
 | `pull/rebase@synth-10k` | Rebase pull (3 local onto 5 upstream) vs git pull --rebase |
+| `pull/check@git-git` | Pull --check reports fast-forward possibility without changing HEAD |
 | `push/incremental-http@git-git` | Incremental push over grit smart HTTP (git-git bare remote) |
+| `push/refspec@git-git` | Explicit refspec push HEAD:refs/heads/bench vs git push |
 | `push/incremental@git-git` | Incremental push vs git push |
 | `push/force-with-lease@git-git` | Amended commit push with `--force-with-lease` vs git |
 | `remote/list@small` | List remotes vs git remote |
@@ -214,6 +236,7 @@ Overview of **grit-lib** coverage, **`grit` commands**, common workflows, and **
 | --- | --- |
 | `notes/add@synth-10k` | Add commit note vs git notes add |
 | `notes/list@synth-10k` | List notes vs git notes list |
+| `notes/list-n100@synth-10k` | List 100 seeded notes vs git notes list |
 
 ## bundles
 **grit-lib:** `grit_lib::bundle`
@@ -256,7 +279,7 @@ Commands present in `grit` without a daily registry row (plumbing, agent-only, o
 
 Common paths not yet in the daily matrix or blocked on roadmap CLI:
 
-- **`grit log --author` / `--since` / `--until`** — `log/author@git-git` is registered as **pending** until revwalk author/date filters land (roadmap 2).
+- **`grit log --since` / `--until`** — date filters beyond deep-history matrix rows are not duplicated in daily census yet.
 - **`grit rebase` / `grit history rebase`** — Top-level rebase is a later roadmap item; no daily row until the history engine exposes it.
 - **`grit commit --dry-run`** — Preview only; no daily row (covered indirectly by commit scenarios).
 - **Partial clone `--blobs`** — Fetch/clone blob filters land with roadmap partial-clone work.

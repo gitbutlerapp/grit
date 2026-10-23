@@ -123,4 +123,5 @@ baseline = [
   "grit-utils/baselines/dashboard/current.json",
   "grit-utils/baselines/dashboard/git-dot-git-headlines.json",
   "grit-utils/baselines/dashboard/git-dot-git-worktree-status.json",
+  "grit-utils/baselines/daily-common-paths.json",
 ]

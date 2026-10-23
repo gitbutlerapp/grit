@@ -470,6 +470,37 @@ pub fn diff_staged_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
     )
 }
 
+pub fn diff_stat_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
+    (
+        sh_devnull(&ctx.grit, &["diff", "--stat"]),
+        sh_devnull(&ctx.git, &["diff", "--stat"]),
+    )
+}
+
+pub fn log_stat_n50_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
+    (
+        sh_devnull(&ctx.grit, &["log", "--limit", "50", "--stat"]),
+        sh_devnull(&ctx.git, &["log", "--stat", "-50"]),
+    )
+}
+
+pub fn log_json_filter_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
+    (
+        sh_devnull(
+            &ctx.grit,
+            &[
+                "log",
+                "--limit",
+                "50",
+                "--json",
+                "--filter",
+                ".commits[].oid",
+            ],
+        ),
+        sh_devnull(&ctx.git, &["log", "-50", "--format=%H"]),
+    )
+}
+
 pub fn add_all_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
     (
         sh_devnull(&ctx.grit, &["add"]),

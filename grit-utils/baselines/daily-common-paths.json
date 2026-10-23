@@ -1,0 +1,118 @@
+{
+  "schema": "grit-daily-bench/1",
+  "generated_at": "2026-10-23T19:05:02.254502971Z",
+  "machine": {
+    "cpu_model": "Intel(R) Xeon(R) Processor",
+    "physical_cores": 4,
+    "logical_cores": 4,
+    "ram_bytes": 16780574720,
+    "os": "linux",
+    "kernel": "Linux 6.12.94+",
+    "scratch_filesystem": "ext4",
+    "rustc_version": "rustc 1.99.0 (b940084d7 2026-09-28)",
+    "cargo_profile": "release"
+  },
+  "tools": {
+    "git": "git version 2.43.0",
+    "grit": "grit 0.5.17",
+    "grit_commit": "a4d3ac2ef6d2d96fd757460967dc095059cf7b9c"
+  },
+  "scenarios": [
+    {
+      "id": "clone/shallow-depth1-http@synth-10k",
+      "area": "remotes",
+      "description": "Shallow clone over grit smart HTTP: grit clone --shallow vs git clone --depth 1",
+      "git": {
+        "median_wall_ms": 1088.444105,
+        "peak_rss_bytes": 33325056,
+        "runs": 3
+      },
+      "grit": {
+        "median_wall_ms": 1161.575035,
+        "peak_rss_bytes": 56455168,
+        "runs": 3
+      },
+      "ratio": 1.067188502987023
+    },
+    {
+      "id": "clone/shallow-depth1@synth-10k",
+      "area": "remotes",
+      "description": "Shallow clone over file://: grit clone --shallow vs git clone --depth 1",
+      "git": {
+        "median_wall_ms": 180.1394505,
+        "peak_rss_bytes": 29429760,
+        "runs": 6
+      },
+      "grit": {
+        "median_wall_ms": 334.9101065,
+        "peak_rss_bytes": 56397824,
+        "runs": 6
+      },
+      "ratio": 1.8591713562488077
+    },
+    {
+      "id": "diff/stat@synth-100k",
+      "area": "diff",
+      "description": "Unstaged worktree diff stat (~1% modified): grit diff --stat vs git diff --stat",
+      "git": {
+        "median_wall_ms": 107.45529400000001,
+        "peak_rss_bytes": 30224384,
+        "runs": 13
+      },
+      "grit": {
+        "median_wall_ms": 128.100918,
+        "peak_rss_bytes": 61370368,
+        "runs": 13
+      },
+      "ratio": 1.1921322182599956
+    },
+    {
+      "id": "log/json-filter@git-git",
+      "area": "revwalk",
+      "description": "Last 50 commit oids via grit log --json --filter '.commits[].oid' vs git log -50 --format=%H",
+      "git": {
+        "median_wall_ms": 2.2276559999999996,
+        "peak_rss_bytes": 10792960,
+        "runs": 20
+      },
+      "grit": {
+        "median_wall_ms": 5.4379595,
+        "peak_rss_bytes": 23351296,
+        "runs": 20
+      },
+      "ratio": 2.4411127660644194
+    },
+    {
+      "id": "log/stat-n50@git-git",
+      "area": "revwalk",
+      "description": "Last 50 commits with stat: grit log --limit 50 --stat vs git log --stat -50",
+      "git": {
+        "median_wall_ms": 98.1938125,
+        "peak_rss_bytes": 40218624,
+        "runs": 6
+      },
+      "grit": {
+        "median_wall_ms": 418.4800095,
+        "peak_rss_bytes": 126308352,
+        "runs": 6
+      },
+      "ratio": 4.261775755982588
+    },
+    {
+      "id": "notes/list-n100@synth-10k",
+      "area": "notes",
+      "description": "List 100 seeded notes vs git notes list",
+      "git": {
+        "median_wall_ms": 2.2228075,
+        "peak_rss_bytes": 7557120,
+        "runs": 20
+      },
+      "grit": {
+        "median_wall_ms": 3.2963385,
+        "peak_rss_bytes": 15495168,
+        "runs": 20
+      },
+      "ratio": 1.4829617499491072
+    }
+  ]
+}

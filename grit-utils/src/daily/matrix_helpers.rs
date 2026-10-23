@@ -682,6 +682,139 @@ pub fn notes_list_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
     )
 }
 
+fn notes_seed_count(smoke: bool) -> usize {
+    if smoke {
+        10
+    } else {
+        100
+    }
+}
+
+pub fn setup_notes_list_n100(setup: &DailySetup<'_>) -> Result<DailyHeadlineContext> {
+    let ctx = setup_synth10k(setup)?;
+    let count = notes_seed_count(setup.smoke);
+    for i in 0..count {
+        let rev = if i == 0 {
+            "HEAD".to_string()
+        } else {
+            format!("HEAD~{i}")
+        };
+        run_git(
+            setup.git,
+            &ctx.repo,
+            &["notes", "add", "-f", "-m", NOTES_BENCH_MSG, &rev],
+        )?;
+    }
+    Ok(ctx)
+}
+
+fn tool_stdout(tool: &Path, cwd: &Path, args: &[&str]) -> Result<String> {
+    let mut cmd = Command::new(tool);
+    cmd.args(args).current_dir(cwd);
+    git_env(&mut cmd);
+    let out = cmd
+        .output()
+        .with_context(|| format!("{} {}", tool.display(), args.join(" ")))?;
+    if !out.status.success() {
+        anyhow::bail!(
+            "{} {} failed: {}",
+            tool.display(),
+            args.join(" "),
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).to_string())
+}
+
+fn diff_shortstat_line(text: &str) -> Option<String> {
+    text.lines()
+        .map(str::trim)
+        .rfind(|line| line.contains("changed") && line.contains("insertion"))
+        .map(str::to_string)
+}
+
+pub fn verify_diff_stat(ctx: &DailyHeadlineContext) -> Result<()> {
+    let git_out = tool_stdout(&ctx.git, &ctx.repo, &["diff", "--stat"])?;
+    let grit_out = tool_stdout(&ctx.grit, &ctx.repo, &["diff", "--stat"])?;
+    let git_line = diff_shortstat_line(&git_out).context("git diff --stat summary")?;
+    let grit_line = diff_shortstat_line(&grit_out).context("grit diff --stat summary")?;
+    if git_line != grit_line {
+        anyhow::bail!("diff --stat summary mismatch:\ngit:  {git_line}\ngrit: {grit_line}");
+    }
+    Ok(())
+}
+
+pub fn verify_log_stat_n50(ctx: &DailyHeadlineContext) -> Result<()> {
+    verify_log_json_filter(ctx)?;
+    tool_stdout(&ctx.git, &ctx.repo, &["log", "--stat", "-50"])?;
+    tool_stdout(&ctx.grit, &ctx.repo, &["log", "--limit", "50", "--stat"])?;
+    Ok(())
+}
+
+pub fn verify_log_json_filter(ctx: &DailyHeadlineContext) -> Result<()> {
+    let git_out = tool_stdout(&ctx.git, &ctx.repo, &["log", "-50", "--format=%H"])?;
+    let grit_out = tool_stdout(
+        &ctx.grit,
+        &ctx.repo,
+        &[
+            "log",
+            "--limit",
+            "50",
+            "--json",
+            "--filter",
+            ".commits[].oid",
+        ],
+    )?;
+    let mut git_oids: Vec<_> = git_out
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(str::to_string)
+        .collect();
+    let mut grit_oids: Vec<String> = if grit_out.trim_start().starts_with('[') {
+        serde_json::from_str(grit_out.trim()).context("parse grit log filter json array")?
+    } else {
+        grit_out
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .map(|l| l.trim_matches('"').to_string())
+            .collect()
+    };
+    git_oids.sort();
+    grit_oids.sort();
+    if git_oids != grit_oids {
+        anyhow::bail!(
+            "log json-filter oids differ (git {} grit {})",
+            git_oids.len(),
+            grit_oids.len()
+        );
+    }
+    Ok(())
+}
+
+pub fn verify_notes_list_n100(ctx: &DailyHeadlineContext) -> Result<()> {
+    let expected = notes_seed_count(ctx.smoke);
+    let git_out = tool_stdout(&ctx.git, &ctx.repo, &["notes", "list"])?;
+    let grit_out = tool_stdout(&ctx.grit, &ctx.repo, &["notes", "--json"])?;
+    let git_lines = git_out.lines().filter(|l| !l.is_empty()).count();
+    let grit_json: serde_json::Value =
+        serde_json::from_str(grit_out.trim()).context("parse grit notes --json")?;
+    let grit_count = grit_json
+        .get("notes")
+        .and_then(|v| v.as_array())
+        .map(|a| a.len())
+        .unwrap_or(0);
+    let grit_action = grit_json.get("action").and_then(|v| v.as_str());
+    if grit_action != Some("list") {
+        anyhow::bail!("expected notes list json action, got {grit_action:?}");
+    }
+    if git_lines != expected || grit_count != expected {
+        anyhow::bail!("notes list count git {git_lines} grit {grit_count} expected {expected}");
+    }
+    Ok(())
+}
+
 pub fn bundle_create_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
     let bundle = ctx
         .bundle_path
