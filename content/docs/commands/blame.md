@@ -8,7 +8,7 @@ order: 2
 ## Synopsis
 
 ```text
-grit blame [--rev <commit>] [-L START,END] [--first-parent] <file>
+grit blame [<rev>] [--rev <commit>] [-L RANGE] [--first-parent] [--] <file>
 ```
 
 ## Description
@@ -23,8 +23,9 @@ When a commit renamed or moved the file (including rename-and-edit in the same c
 
 | Option | Description |
 | --- | --- |
-| `--rev <commit>` | Blame the file as it existed at this revision (branch, tag, oid, `HEAD~N`, …). Defaults to `HEAD`. |
-| `-L START,END` | Limit output to an inclusive 1-based line range in the final file. Blame stops once every line in the range is attributed. |
+| `<rev>` | Optional revision before `--` (same values as `--rev`). Defaults to `HEAD` when omitted. |
+| `--rev <commit>` | Blame the file as it existed at this revision. Cannot be combined with a positional `<rev>`. |
+| `-L RANGE` | Limit output with a Git-style line range in the final file (see below). Blame stops once every line in the range is attributed. |
 | `--lines` | Same as `-L` (long form). |
 | `--first-parent` | At merge commits, follow only the first parent when attributing lines. Default matches Git blame: all parents are considered. |
 
@@ -41,7 +42,11 @@ f4e5d6c (bob 1 week ago    2) fn main() {
 Blame an older revision and a slice of lines:
 
 ```console
+$ grit blame v1.0 -- README.md
 $ grit blame --rev=v1.0 -L 10,25 README.md
+$ grit blame -L 10,+20 src/lib.rs
+$ grit blame -L '/fn main/' src/main.rs
+$ grit blame -L ':my_function' src/lib.rs
 ```
 
 Scripting with JSON:

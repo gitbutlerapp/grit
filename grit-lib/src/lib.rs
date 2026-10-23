@@ -189,6 +189,7 @@ pub mod error;
 mod ewah_bitmap;
 pub(crate) mod github_auth;
 pub(crate) mod line_interner;
+pub mod line_range;
 pub(crate) mod oid_abbrev_cache;
 pub(crate) mod pack_roll_delta;
 

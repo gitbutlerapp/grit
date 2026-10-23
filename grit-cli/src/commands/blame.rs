@@ -1,15 +1,13 @@
 //! `grit blame` — show who last modified each line of a file.
 
-use std::collections::BTreeMap;
-use std::io::Write;
-use std::ops::RangeInclusive;
-
-use anyhow::{Context, Result};
-use grit_lib::blame::{blame_file, BlameOptions, BlameResult};
+use anyhow::{bail, Context, Result};
+use grit_lib::blame::{blame_file, resolve_blame_line_range, BlameOptions, BlameResult};
 use grit_lib::objects::ObjectId;
 use grit_lib::revwalk::rev_parse::resolve_revision_as_commit;
 use schemars::JsonSchema;
 use serde::Serialize;
+use std::collections::BTreeMap;
+use std::io::Write;
 
 use crate::context::{self, relative_date_from};
 use crate::markdown;
@@ -107,20 +105,31 @@ fn normalize_blame_line_content(content: String) -> String {
 }
 
 pub fn run(
-    file: String,
+    rev_pos: Option<String>,
+    file: Option<String>,
     rev: Option<String>,
     line_range: Option<String>,
     first_parent: bool,
     now: time::OffsetDateTime,
 ) -> Result<BlameOutcome> {
+    let (rev_pos, file) = match (rev_pos, file) {
+        (None, Some(file)) => (None, file),
+        (Some(rev), Some(file)) => (Some(rev), file),
+        (Some(only), None) => (None, only),
+        (None, None) => bail!("missing file path"),
+    };
+    if rev.is_some() && rev_pos.is_some() {
+        bail!("cannot use both `--rev` and a positional revision before `--`");
+    }
+    let rev_spec = rev.or(rev_pos).unwrap_or_else(|| "HEAD".to_owned());
+
     let repo = context::discover()?;
-    let rev_spec = rev.unwrap_or_else(|| "HEAD".to_owned());
     let start = resolve_revision_as_commit(&repo, &rev_spec)
         .with_context(|| format!("could not resolve revision '{rev_spec}'"))?;
 
     let range = line_range
         .as_deref()
-        .map(parse_line_range)
+        .map(|spec| resolve_blame_line_range(&repo, start, &file, spec))
         .transpose()
         .with_context(|| "could not parse line range")?;
 
@@ -150,27 +159,6 @@ pub fn run(
         result,
         now.unix_timestamp(),
     ))
-}
-
-fn parse_line_range(spec: &str) -> Result<RangeInclusive<usize>> {
-    let (start, end) = spec
-        .split_once(',')
-        .with_context(|| format!("line range must be START,END (got '{spec}')"))?;
-    let start: usize = start
-        .trim()
-        .parse()
-        .with_context(|| format!("invalid start line in '{spec}'"))?;
-    let end: usize = end
-        .trim()
-        .parse()
-        .with_context(|| format!("invalid end line in '{spec}'"))?;
-    if start == 0 || end == 0 {
-        anyhow::bail!("line numbers are 1-based and must be positive");
-    }
-    if end < start {
-        anyhow::bail!("line range end must be >= start");
-    }
-    Ok(start..=end)
 }
 
 fn outcome_from_result(file: String, rev: String, result: BlameResult, now: i64) -> BlameOutcome {
@@ -227,11 +215,6 @@ fn outcome_from_result(file: String, rev: String, result: BlameResult, now: i64)
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn parse_line_range_accepts_inclusive_bounds() {
-        assert_eq!(parse_line_range("2,5").unwrap(), 2..=5);
-    }
 
     #[test]
     fn normalize_blame_line_content_strips_trailing_crlf() {

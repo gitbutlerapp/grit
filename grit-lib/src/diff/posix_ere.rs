@@ -80,7 +80,8 @@ mod imp {
             count
         }
 
-        fn find_from(&self, haystack: &[u8], from: usize) -> Option<(usize, usize)> {
+        /// Leftmost match starting at or after `from` (Git `regexec` with `REG_STARTEND`).
+        pub(crate) fn find_from(&self, haystack: &[u8], from: usize) -> Option<(usize, usize)> {
             if from > haystack.len() {
                 return None;
             }
@@ -231,6 +232,14 @@ mod imp {
             }
             let text = String::from_utf8_lossy(haystack);
             self.re.find_iter(&text).count()
+        }
+
+        pub(crate) fn find_from(&self, haystack: &[u8], from: usize) -> Option<(usize, usize)> {
+            if from > haystack.len() {
+                return None;
+            }
+            let text = String::from_utf8_lossy(haystack);
+            self.re.find_at(&text, from).map(|m| (m.start(), m.end()))
         }
     }
 }

@@ -28,6 +28,8 @@ mod options;
 mod patch_log;
 pub mod pickaxe;
 mod posix_ere;
+pub(crate) use core::is_func_line;
+pub(crate) use posix_ere::PosixEre;
 mod targets;
 mod tree_content;
 mod unified_emit;

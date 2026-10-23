@@ -348,17 +348,16 @@ fn blame_head_start(repo: &Repository) -> Result<grit_lib::objects::ObjectId> {
     }
 }
 
-/// Parse a `START,END` inclusive 1-based line range for blame.
-pub fn parse_blame_line_range(spec: &str) -> Result<std::ops::RangeInclusive<usize>> {
-    let (start, end) = spec
-        .split_once(',')
-        .ok_or_else(|| anyhow::anyhow!("expected START,END line range, got {spec:?}"))?;
-    let start: usize = start.trim().parse().context("range start")?;
-    let end: usize = end.trim().parse().context("range end")?;
-    if start == 0 || end < start {
-        anyhow::bail!("invalid blame line range {spec}");
-    }
-    Ok(start..=end)
+/// Parse and resolve a Git-style `-L` range for blame at `HEAD`.
+pub fn parse_blame_line_range(
+    repo: &Repository,
+    path: &str,
+    spec: &str,
+) -> Result<std::ops::RangeInclusive<usize>> {
+    use grit_lib::blame::resolve_blame_line_range;
+
+    let start = blame_head_start(repo)?;
+    resolve_blame_line_range(repo, start, path, spec).map_err(|e| anyhow::anyhow!("{e}"))
 }
 
 /// Emit `git blame --porcelain` for one worktree path at `HEAD`.

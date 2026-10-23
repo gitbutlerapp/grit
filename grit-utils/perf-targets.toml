@@ -254,6 +254,9 @@ followup = "ROADMAP item 26"
 documented = "Paginated log and patch generation still above 1.1× or fail on campaign fixtures"
 followup = "ROADMAP item 26"
 
+[scenario."git-dot-git/blame-L-funcname"]
+max_regression_ratio = 1.05
+
 [scenario."git-dot-git/blame"]
 documented = "Deep blame on git.git remains above 1.1× without commit-graph/blame fast paths at scale"
 followup = "ROADMAP item 27"

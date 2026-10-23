@@ -23,6 +23,8 @@ use std::ops::RangeInclusive;
 
 use similar::Algorithm as SimilarAlgorithm;
 
+pub use crate::line_range::{resolve_line_range, LineRangeError};
+
 /// Diff algorithm used when mapping lines between blob revisions during blame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BlameDiffAlgorithm {
@@ -3211,6 +3213,52 @@ fn commit_parents_for_blame(
             .parents
             .clone(),
     )
+}
+
+/// Resolve a Git-style `-L` range against the blob at `start` for `path`.
+///
+/// Uses the same line splitting and funcname rules as [`blame_file`].
+///
+/// # Errors
+///
+/// Returns [`LineRangeError`] when the spec is invalid or out of range for the file at `start`.
+pub fn resolve_blame_line_range(
+    repo: &crate::repo::Repository,
+    start: crate::objects::ObjectId,
+    path: &str,
+    spec: &str,
+) -> std::result::Result<RangeInclusive<usize>, LineRangeError> {
+    use crate::attributes::load_gitattributes_for_check_attr_source;
+    use crate::diff::merge_diff::read_blob_at_path;
+    use crate::userdiff::matcher_for_path_parsed;
+
+    let file_path = normalize_blame_path(repo, path);
+    let commit = get_blame_commit(repo.odb(), start, &mut BlameCommitCache::default(), None)
+        .map_err(|e| LineRangeError::InvalidSpec {
+            spec: spec.to_owned(),
+            detail: e.to_string(),
+        })?;
+    let Some(content_bytes) = read_blob_at_path(repo.odb(), &commit.tree, &file_path) else {
+        return Err(LineRangeError::InvalidSpec {
+            spec: spec.to_owned(),
+            detail: format!("file '{file_path}' not found in revision"),
+        });
+    };
+    let content = String::from_utf8_lossy(&content_bytes).into_owned();
+    let config = repo.config().map(|c| (*c).clone()).unwrap_or_default();
+    let parsed = load_gitattributes_for_check_attr_source(repo, &commit.tree).map_err(|e| {
+        LineRangeError::InvalidSpec {
+            spec: spec.to_owned(),
+            detail: e.to_string(),
+        }
+    })?;
+    let matcher =
+        matcher_for_path_parsed(&config, &parsed.rules, &parsed.macros, &file_path, false)
+            .map_err(|e| LineRangeError::InvalidSpec {
+                spec: spec.to_owned(),
+                detail: e,
+            })?;
+    resolve_line_range(spec, &content, &file_path, &config, matcher.as_ref(), 1)
 }
 
 /// Options for [`blame_file`].

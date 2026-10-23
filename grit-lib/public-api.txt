@@ -501,6 +501,25 @@ impl core::marker::UnsafeUnpin for grit_lib::blame::BlameTextconvContext
 impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::blame::BlameTextconvContext
 impl !core::panic::unwind_safe::UnwindSafe for grit_lib::blame::BlameTextconvContext
 pub fn grit_lib::blame::blame_file(&grit_lib::repo::Repository, &str, &grit_lib::blame::BlameOptions) -> grit_lib::error::Result<grit_lib::blame::BlameResult>
+pub enum grit_lib::blame::LineRangeError
+pub grit_lib::blame::LineRangeError::EmptyRange { spec: alloc::string::String }
+pub grit_lib::blame::LineRangeError::FuncnameAtEof { pattern: alloc::string::String }
+pub grit_lib::blame::LineRangeError::FuncnameInvalidPattern { pattern: alloc::string::String, detail: alloc::string::String }
+pub grit_lib::blame::LineRangeError::FuncnameNoMatch { pattern: alloc::string::String, start_line: usize }
+pub grit_lib::blame::LineRangeError::InvalidLineNumber { spec: alloc::string::String, line: i64 }
+pub grit_lib::blame::LineRangeError::InvalidRegex { pattern: alloc::string::String, detail: alloc::string::String }
+pub grit_lib::blame::LineRangeError::InvalidSpec { spec: alloc::string::String, detail: alloc::string::String }
+pub grit_lib::blame::LineRangeError::OutOfRange { spec: alloc::string::String, lines: usize }
+pub grit_lib::blame::LineRangeError::RegexNoMatch { pattern: alloc::string::String, start_line: usize }
+impl core::fmt::Display for grit_lib::blame::LineRangeError
+pub fn grit_lib::blame::LineRangeError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::error::Error for grit_lib::blame::LineRangeError
+impl core::fmt::Debug for grit_lib::blame::LineRangeError
+pub fn grit_lib::blame::LineRangeError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::cmp::Eq for grit_lib::blame::LineRangeError
+impl core::cmp::PartialEq for grit_lib::blame::LineRangeError
+pub fn grit_lib::blame::LineRangeError::eq(&self, &Self) -> bool
+pub fn grit_lib::blame::resolve_blame_line_range(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, &str, &str) -> core::result::Result<core::ops::range::RangeInclusive<usize>, grit_lib::blame::LineRangeError>
 pub fn grit_lib::blame::build_exact_relocate_line_map(&[&str], &[&str], &[core::option::Option<usize>]) -> alloc::vec::Vec<core::option::Option<usize>>
 pub fn grit_lib::blame::build_fuzzy_line_map(&[&str], &[&str], &[core::option::Option<usize>]) -> alloc::vec::Vec<core::option::Option<usize>>
 pub fn grit_lib::blame::build_line_map(&[&str], &[&str], grit_lib::blame::BlameDiffAlgorithm, bool) -> alloc::vec::Vec<core::option::Option<usize>>
@@ -6139,6 +6158,10 @@ pub fn grit_lib::index::index_file_mtime(&std::path::Path) -> core::option::Opti
 pub fn grit_lib::index::munge_index_size(u64) -> u32
 pub fn grit_lib::index::normalize_mode(u32) -> u32
 pub fn grit_lib::index::worktree_path_from_index_rel(&std::path::Path, &[u8]) -> std::path::PathBuf
+pub mod grit_lib::line_range
+pub enum grit_lib::line_range::LineRangeError
+pub fn grit_lib::line_range::resolve_line_range(&str, &str, &str, &grit_lib::config::ConfigSet, core::option::Option<&grit_lib::userdiff::FuncnameMatcher>, usize) -> core::result::Result<core::ops::range::RangeInclusive<usize>, grit_lib::line_range::LineRangeError>
+pub fn grit_lib::line_range::split_content_lines(&str) -> alloc::vec::Vec<&str>
 pub mod grit_lib::lockfile
 #[non_exhaustive] pub enum grit_lib::lockfile::LockError
 pub grit_lib::lockfile::LockError::Held
