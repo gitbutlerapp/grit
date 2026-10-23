@@ -171,6 +171,13 @@ pub fn finish_git_git_matrix_ctx(headline: &mut DailyHeadlineContext, git: &Path
     Ok(())
 }
 
+pub fn setup_git_git_no_commit_graph(setup: &DailySetup<'_>) -> Result<DailyHeadlineContext> {
+    let headline = setup_git_git_history(setup)?;
+    super::matrix_helpers::remove_commit_graph_if_present(&headline.repo)?;
+    super::matrix_helpers::ensure_commit_graph_absent(&headline.repo)?;
+    Ok(headline)
+}
+
 pub fn setup_git_git_history(setup: &DailySetup<'_>) -> Result<DailyHeadlineContext> {
     let repo = setup_git_git_worktree(setup)?;
     let mut headline = ctx(repo, setup);
@@ -567,6 +574,60 @@ pub fn revs_count_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
         sh_devnull(&ctx.git, &["rev-list", "--count", "HEAD"]),
     )
 }
+
+/// Literal-path count on git.git without commit-graph (issue #1517 repro).
+pub fn revs_count_literal_path_git_git_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
+    (
+        sh_devnull(
+            &ctx.grit,
+            &[
+                "revs",
+                "--count",
+                GIT_GIT_LITERAL_PATH_BENCH_REV,
+                "--",
+                GIT_GIT_LITERAL_PATH_BENCH_FILE,
+            ],
+        ),
+        sh_devnull(
+            &ctx.git,
+            &[
+                "rev-list",
+                "--count",
+                GIT_GIT_LITERAL_PATH_BENCH_REV,
+                "--",
+                GIT_GIT_LITERAL_PATH_BENCH_FILE,
+            ],
+        ),
+    )
+}
+
+/// Bounded path log on git.git Documentation/ (issue #1517 repro).
+pub fn log_limit_documentation_git_git_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
+    (
+        sh_devnull(
+            &ctx.grit,
+            &["log", "-n", "200", "--", GIT_GIT_LITERAL_PATH_BENCH_DIR],
+        ),
+        sh_devnull(
+            &ctx.git,
+            &[
+                "log",
+                "-n",
+                "200",
+                "--format=%H",
+                "--",
+                GIT_GIT_LITERAL_PATH_BENCH_DIR,
+            ],
+        ),
+    )
+}
+
+/// Pinned revision for no-commit-graph path-limited benchmarks on git.git.
+pub const GIT_GIT_LITERAL_PATH_BENCH_REV: &str = "7e34d81";
+/// Single-file path for literal path-limited rev-list benchmarks.
+pub const GIT_GIT_LITERAL_PATH_BENCH_FILE: &str = "Documentation/git-log.txt";
+/// Directory path for bounded `log -n` benchmarks on git.git.
+pub const GIT_GIT_LITERAL_PATH_BENCH_DIR: &str = "Documentation";
 
 pub fn merge_base_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
     let a = ctx.merge_base_a.as_deref().unwrap_or("master");

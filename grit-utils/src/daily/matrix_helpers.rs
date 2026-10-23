@@ -780,6 +780,17 @@ pub fn verify_git_commit_graph(ctx: &DailyHeadlineContext) -> Result<()> {
     verify_git_commit_graph_in_repo(&ctx.git, &ctx.repo)
 }
 
+/// Remove a commit-graph file when present (shared git-git worktrees may carry one).
+pub fn remove_commit_graph_if_present(repo: &Path) -> Result<()> {
+    if !commit_graph_present(repo) {
+        return Ok(());
+    }
+    let path = commit_graph_path(repo);
+    std::fs::remove_file(&path)
+        .with_context(|| format!("remove commit-graph at {}", path.display()))?;
+    Ok(())
+}
+
 /// Fail when a commit-graph file is present (no-graph benchmark/daily preflight).
 pub fn ensure_commit_graph_absent(repo: &Path) -> Result<()> {
     anyhow::ensure!(

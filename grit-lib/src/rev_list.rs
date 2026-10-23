@@ -24,12 +24,10 @@ use crate::merge_base::{
     commits_reachable_excluding_ancestors_of_cutoffs, ReachableWalkCommitterCutoffs,
 };
 use crate::objects::{
-    find_tree_entry_by_name_dir_or_file_in_data, find_tree_entry_by_name_in_data, oid_hash_map,
-    oid_hash_set, parse_commit, parse_tag, parse_tree, CommitData, CommitRef, ObjectId, ObjectKind,
-    OidHashMap, OidHashSet, TreeEntry, TreeRefIter,
+    oid_hash_map, oid_hash_set, parse_commit, parse_tag, parse_tree, CommitData, ObjectId,
+    ObjectKind, OidHashMap, OidHashSet, TreeEntry, TreeRefIter,
 };
 use crate::odb::store::ObjectStore;
-use crate::pack::SingleLocalPackReader;
 use crate::pack_bitmap::BitmapIndex;
 use crate::patch_ids::{compute_patch_id, compute_patch_id_for_paths};
 use crate::ref_exclusions::{git_namespace_prefix, strip_git_namespace, RefExclusions};
@@ -4974,27 +4972,9 @@ struct DenseBloomCtx<'a> {
     cwd: Option<&'a str>,
 }
 
-/// One pack reader for a dense path walk (monotonic OID cursor + delta-base reuse).
-#[derive(Default)]
-struct SessionPackReader {
-    reader: Option<SingleLocalPackReader>,
-    opened: bool,
-}
-
-impl SessionPackReader {
-    fn get(&mut self, odb: &crate::odb::Odb) -> Option<&mut SingleLocalPackReader> {
-        if !self.opened {
-            self.opened = true;
-            self.reader = odb.open_session_pack_reader().ok().flatten();
-        }
-        self.reader.as_mut()
-    }
-}
-
 /// Memo for literal-path tree-same results and bounded `(tree, component) → child` lookups.
 #[derive(Default)]
 struct DenseWalkCache {
-    pack_session: SessionPackReader,
     literal_tree_diff: HashMap<(ObjectId, ObjectId, u64), bool>,
     component_child: HashMap<(ObjectId, Arc<str>, bool), CachedTreeChild>,
     /// FIFO eviction order; stale keys are skipped when popping (O(1) insert, no scan on hit).
@@ -5029,22 +5009,6 @@ impl DenseWalkCache {
     #[cfg(test)]
     fn component_tree_reads(&self) -> u64 {
         self.tree_reads
-    }
-
-    fn read_tree_into_buf(&mut self, repo: &Repository, tree: ObjectId) -> Result<()> {
-        self.tree_read_buf.clear();
-        let kind = if let Some(reader) = self.pack_session.get(repo.odb()) {
-            match reader.read_object_into(&tree, &mut self.tree_read_buf) {
-                Ok(kind) => kind,
-                Err(_) => repo.odb().read_into(&tree, &mut self.tree_read_buf)?,
-            }
-        } else {
-            repo.odb().read_into(&tree, &mut self.tree_read_buf)?
-        };
-        if kind != ObjectKind::Tree {
-            return Err(Error::CorruptObject(format!("object {tree} is not a tree")));
-        }
-        Ok(())
     }
 
     fn insert_component(
@@ -5085,15 +5049,8 @@ impl DenseWalkCache {
         }
         self.component_misses += 1;
         self.tree_reads += 1;
-        let oid_len = repo.odb().hash_algo().len();
-        self.read_tree_into_buf(repo, tree)?;
-        let data = self.tree_read_buf.as_slice();
-        let found = if as_tree {
-            find_tree_entry_by_name_in_data(data, oid_len, component.as_bytes(), true)?
-        } else {
-            find_tree_entry_by_name_dir_or_file_in_data(data, oid_len, component.as_bytes())?
-        };
-        let resolved = match found {
+        let entries = read_parsed_tree(repo, tree)?;
+        let resolved = match tree_entry_by_name(&entries, component, as_tree) {
             Some(entry) => CachedTreeChild::Found {
                 oid: entry.oid,
                 mode: entry.mode,
@@ -5500,7 +5457,7 @@ fn pathspec_entry_is_relevant(path: &str, is_tree: bool, pathspecs: &[String]) -
     false
 }
 
-fn read_parsed_tree_for_diff(repo: &Repository, tree_oid: ObjectId) -> Result<Vec<TreeEntry>> {
+fn read_parsed_tree(repo: &Repository, tree_oid: ObjectId) -> Result<Vec<TreeEntry>> {
     let object = repo.odb().read(&tree_oid)?;
     if object.kind != ObjectKind::Tree {
         return Err(Error::CorruptObject(format!(
@@ -5508,6 +5465,25 @@ fn read_parsed_tree_for_diff(repo: &Repository, tree_oid: ObjectId) -> Result<Ve
         )));
     }
     parse_tree(&object.data)
+}
+
+fn tree_entry_by_name<'a>(
+    entries: &'a [TreeEntry],
+    name: &str,
+    name_is_tree: bool,
+) -> Option<&'a TreeEntry> {
+    let name_bytes = name.as_bytes();
+    let idx = entries.binary_search_by(|e| {
+        crate::objects::tree_entry_cmp(&e.name, is_tree_mode(e.mode), name_bytes, name_is_tree)
+    });
+    idx.ok().and_then(|i| {
+        let entry = &entries[i];
+        if entry.name.as_slice() == name_bytes {
+            Some(entry)
+        } else {
+            None
+        }
+    })
 }
 
 /// Whether any blob path under `tree_oid` matches `pathspecs` (root-commit visibility).
@@ -5606,11 +5582,11 @@ fn trees_differ_for_pathspecs_optional(
         (Some(a), Some(b)) if a == b => Ok(false),
         (old_o, new_o) => {
             let old_entries = match old_o {
-                Some(oid) => read_parsed_tree_for_diff(repo, oid)?,
+                Some(oid) => read_parsed_tree(repo, oid)?,
                 None => Vec::new(),
             };
             let new_entries = match new_o {
-                Some(oid) => read_parsed_tree_for_diff(repo, oid)?,
+                Some(oid) => read_parsed_tree(repo, oid)?,
                 None => Vec::new(),
             };
             trees_differ_tree_entries(repo, &old_entries, &new_entries, prefix, pathspecs)
@@ -7376,8 +7352,6 @@ pub(crate) struct CommitGraph<'r> {
     shallow_boundaries: OidHashSet,
     graft_parents: OidHashMap<Vec<ObjectId>>,
     subjects: HashMap<ObjectId, String>,
-    pack_session: SessionPackReader,
-    commit_read_buf: Vec<u8>,
     /// Parsed commits kept for the caller once [`Self::retain_parsed_commits`] is called.
     retained: Option<OidHashMap<CommitData>>,
 }
@@ -7417,8 +7391,6 @@ impl<'r> CommitGraph<'r> {
             shallow_boundaries,
             graft_parents,
             subjects: HashMap::new(),
-            pack_session: SessionPackReader::default(),
-            commit_read_buf: Vec::new(),
             retained: None,
         }
     }
@@ -7573,24 +7545,11 @@ impl<'r> CommitGraph<'r> {
             return Ok(());
         }
 
-        self.commit_read_buf.clear();
-        let kind = if let Some(reader) = self.pack_session.get(self.repo.odb()) {
-            match reader.read_object_into(&oid, &mut self.commit_read_buf) {
-                Ok(kind) => kind,
-                Err(_) => self.repo.odb().read_into(&oid, &mut self.commit_read_buf)?,
-            }
-        } else {
-            self.repo.odb().read_into(&oid, &mut self.commit_read_buf)?
-        };
-        if kind != ObjectKind::Commit {
-            return Err(rev_list_unexpected_kind(oid, "commit"));
-        }
-        let commit = CommitRef::parse(&self.commit_read_buf)?;
-        let tree = commit.tree();
-        let mut parents: Vec<ObjectId> = if self.shallow_boundaries.contains(&oid) {
+        let mut commit = load_commit(self.repo, oid)?;
+        let mut parents = if self.shallow_boundaries.contains(&oid) {
             Vec::new()
         } else {
-            commit.parents().to_vec()
+            std::mem::take(&mut commit.parents)
         };
         if let Some(graft_parents) = self.graft_parents.get(&oid) {
             parents = graft_parents.clone();
@@ -7599,20 +7558,24 @@ impl<'r> CommitGraph<'r> {
             parents.truncate(1);
         }
         self.committer_time
-            .insert(oid, commit.committer_unix_seconds_for_ordering());
+            .insert(oid, committer_unix_seconds_for_ordering(&commit.committer));
         self.author_time
-            .insert(oid, commit.author_unix_seconds_for_ordering());
-        self.commit_trees.insert(oid, tree);
+            .insert(oid, committer_unix_seconds_for_ordering(&commit.author));
+        self.commit_trees.insert(oid, commit.tree);
         self.parents.insert(oid, parents);
-        let subject = commit
-            .message()
-            .lines()
-            .find(|line| !line.trim().is_empty())
-            .map(|line| line.trim().to_owned())
-            .unwrap_or_else(|| "(no subject)".to_owned());
-        self.subjects.insert(oid, subject);
+        self.subjects
+            .insert(oid, subject_line_from_commit_message(&commit.message));
         Ok(())
     }
+}
+
+fn subject_line_from_commit_message(message: &str) -> String {
+    message
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .map(str::trim)
+        .unwrap_or("(no subject)")
+        .to_owned()
 }
 
 /// Load shallow boundary commit OIDs from `.git/shallow`.

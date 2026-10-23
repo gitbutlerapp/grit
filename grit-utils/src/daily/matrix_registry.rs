@@ -302,6 +302,20 @@ pub const MATRIX_SCENARIOS: &[ScenarioSpec] = &[
         description: "Count commits at HEAD: grit revs --count HEAD vs git rev-list --count HEAD",
     },
     ScenarioSpec {
+        id: "revs/count-path@git-git",
+        area: Area::Revwalk,
+        headline: false,
+        name: None,
+        description: "Literal path count without commit-graph: grit revs --count 7e34d81 -- Documentation/git-log.txt vs git rev-list (issue #1517)",
+    },
+    ScenarioSpec {
+        id: "log/limit-path@git-git",
+        area: Area::Revwalk,
+        headline: false,
+        name: None,
+        description: "Bounded path log without commit-graph: grit log -n 200 -- Documentation vs git log (issue #1517)",
+    },
+    ScenarioSpec {
         id: "merge-base/branches@git-git",
         area: Area::Revwalk,
         headline: false,
