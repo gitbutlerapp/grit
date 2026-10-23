@@ -1,0 +1,44 @@
+{
+  "$id": "https://grit-scm.com/schemas/mv/v2.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "definitions": {
+    "PathMoveJson": {
+      "description": "One path rename in `grit mv` JSON output.",
+      "properties": {
+        "from": {
+          "description": "Source path before the move.",
+          "type": "string"
+        },
+        "to": {
+          "description": "Destination path after the move.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "from",
+        "to"
+      ],
+      "type": "object"
+    }
+  },
+  "description": "CLI outcome for `grit mv`.",
+  "properties": {
+    "dry_run": {
+      "description": "Whether this run only previewed moves.",
+      "type": "boolean"
+    },
+    "moves": {
+      "description": "Individual renames performed or previewed.",
+      "items": {
+        "$ref": "#/definitions/PathMoveJson"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "dry_run",
+    "moves"
+  ],
+  "title": "MvOutcome",
+  "type": "object"
+}

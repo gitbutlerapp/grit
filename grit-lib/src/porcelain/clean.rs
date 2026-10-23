@@ -18,6 +18,18 @@ use crate::progress::ProgressSink;
 use crate::repo::Repository;
 use crate::worktree_rules::WorktreeRules;
 
+/// Which untracked/ignored paths [`clean_untracked`] may remove.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum CleanScope {
+    /// Untracked non-ignored paths only (default `git clean` without `-x`/`-X`).
+    #[default]
+    Untracked,
+    /// Untracked and ignored paths (`git clean -x`).
+    UntrackedAndIgnored,
+    /// Ignored paths only (`git clean -X`).
+    OnlyIgnored,
+}
+
 /// Inputs for [`clean_untracked`].
 #[derive(Debug, Clone, Default)]
 pub struct CleanOptions {
@@ -25,10 +37,25 @@ pub struct CleanOptions {
     pub pathspecs: Vec<String>,
     /// When true, remove untracked directories as well as files (like `git clean -d`).
     pub directories: bool,
-    /// When true, also remove ignored paths (like `git clean -x`).
-    pub include_ignored: bool,
+    /// When true, remove only files, not directories (like `git clean` without `-d`).
+    pub files_only: bool,
+    /// Which paths are eligible for removal.
+    pub scope: CleanScope,
+    /// Extra exclude patterns; matching paths are never removed (like `git clean -e`).
+    pub excludes: Vec<String>,
     /// When true, report paths that would be removed without deleting anything.
     pub dry_run: bool,
+}
+
+fn clean_scope_includes_untracked(scope: CleanScope) -> bool {
+    scope != CleanScope::OnlyIgnored
+}
+
+fn clean_scope_includes_ignored(scope: CleanScope) -> bool {
+    matches!(
+        scope,
+        CleanScope::UntrackedAndIgnored | CleanScope::OnlyIgnored
+    )
 }
 
 /// Result of [`clean_untracked`].
@@ -54,12 +81,13 @@ pub fn clean_untracked(
     let mut index = repo.load_index()?;
     let rules = WorktreeRules::from_repository(repo, &index)?;
 
-    let ignored_mode = if opts.include_ignored {
+    let remove_directories = opts.directories && !opts.files_only;
+    let ignored_mode = if clean_scope_includes_ignored(opts.scope) {
         IgnoredMode::Traditional
     } else {
         IgnoredMode::No
     };
-    let show_all = !opts.directories;
+    let show_all = !remove_directories;
 
     let scan = UntrackedScan {
         ignored_mode,
@@ -78,17 +106,20 @@ pub fn clean_untracked(
         &rules,
     )?;
 
-    let mut candidates = untracked;
-    if opts.include_ignored {
+    let mut candidates = Vec::new();
+    if clean_scope_includes_untracked(opts.scope) {
+        candidates.extend(untracked);
+    }
+    if clean_scope_includes_ignored(opts.scope) {
         candidates.extend(ignored);
     }
-    if opts.directories {
+    if remove_directories {
         let empty_dirs = empty_untracked_directories(
             repo,
             &index,
             &opts.pathspecs,
             &rules,
-            opts.include_ignored,
+            opts.scope,
             &candidates,
         )?;
         candidates.extend(empty_dirs);
@@ -96,22 +127,23 @@ pub fn clean_untracked(
     candidates.sort();
     candidates.dedup();
 
+    let pathspec_ctx = repo.pathspec_match_context();
     let mut removed = Vec::new();
     for rel in candidates {
         if should_skip_nested_git(work_tree, &rel) {
             continue;
         }
-        if !opts.directories && rel.ends_with('/') {
+        if !remove_directories && rel.ends_with('/') {
             continue;
         }
         let paths_to_add = if rel.ends_with('/') {
             let trimmed = rel.trim_end_matches('/');
             let abs = work_tree.join(trimmed);
             if nested_git_worktree_descendant_under(&abs)
-                || (!opts.include_ignored
+                || (!clean_scope_includes_ignored(opts.scope)
                     && dir_preserves_ignored_descendants(repo, &index, &rules, work_tree, &abs)?)
             {
-                expand_collapsed_dir_paths(repo, &index, &rules, opts.include_ignored, trimmed)?
+                expand_collapsed_dir_paths(repo, &index, &rules, opts.scope, trimmed)?
             } else {
                 vec![rel]
             }
@@ -122,7 +154,10 @@ pub fn clean_untracked(
             if should_skip_nested_git(work_tree, &path) {
                 continue;
             }
-            if !opts.directories && path.ends_with('/') {
+            if !remove_directories && path.ends_with('/') {
+                continue;
+            }
+            if path_matches_clean_exclude(&path, &opts.excludes, pathspec_ctx) {
                 continue;
             }
             if crate::worktree_cwd::cwd_would_be_removed_with_repo_path(
@@ -147,7 +182,7 @@ pub fn clean_untracked(
     let mut actually_removed = Vec::new();
     let environment = repo.environment();
     for rel in removal_order(&removed) {
-        if remove_one_path(work_tree, &rel, opts.directories, environment)? {
+        if remove_one_path(work_tree, &rel, remove_directories, environment)? {
             actually_removed.push(rel);
         }
     }
@@ -163,7 +198,7 @@ fn empty_untracked_directories(
     index: &Index,
     pathspecs: &[String],
     rules: &WorktreeRules,
-    include_ignored: bool,
+    scope: CleanScope,
     already_listed: &[String],
 ) -> Result<Vec<String>> {
     let work_tree = repo
@@ -188,19 +223,31 @@ fn empty_untracked_directories(
             continue;
         }
         if let Some(path) = highest_empty_untracked_dir(
-            repo,
-            index,
-            &child_abs,
-            &name,
-            pathspecs,
-            rules,
-            include_ignored,
-            &listed,
+            repo, index, &child_abs, &name, pathspecs, rules, scope, &listed,
         )? {
             found.push(path);
         }
     }
     Ok(found)
+}
+
+fn path_matches_clean_exclude(
+    path: &str,
+    patterns: &[String],
+    ctx: crate::pathspec::PathspecMatchContext,
+) -> bool {
+    if patterns.is_empty() {
+        return false;
+    }
+    let trimmed = path.trim_end_matches('/');
+    patterns.iter().any(|pat| {
+        crate::pathspec::matches_pathspec_list_with_context(trimmed, std::slice::from_ref(pat), ctx)
+            || crate::pathspec::matches_pathspec_list_with_context(
+                &format!("{trimmed}/"),
+                std::slice::from_ref(pat),
+                ctx,
+            )
+    })
 }
 
 /// Returns the highest empty untracked directory marker under `abs` (e.g. `outer/` not `outer/inner/`).
@@ -212,7 +259,7 @@ fn highest_empty_untracked_dir(
     rel: &str,
     pathspecs: &[String],
     rules: &WorktreeRules,
-    include_ignored: bool,
+    scope: CleanScope,
     listed: &BTreeSet<String>,
 ) -> Result<Option<String>> {
     if !rel.is_empty() && is_nested_git_worktree(abs) {
@@ -262,7 +309,7 @@ fn highest_empty_untracked_dir(
     let (ignored, _) = rules
         .ignore_mut()
         .check_path(repo, Some(index), rel, true)?;
-    if ignored && !include_ignored {
+    if ignored && !clean_scope_includes_ignored(scope) {
         return Ok(None);
     }
 
@@ -272,14 +319,7 @@ fn highest_empty_untracked_dir(
 
     for (child_rel, child_abs) in &child_dirs {
         if highest_empty_untracked_dir(
-            repo,
-            index,
-            child_abs,
-            child_rel,
-            pathspecs,
-            rules,
-            include_ignored,
-            listed,
+            repo, index, child_abs, child_rel, pathspecs, rules, scope, listed,
         )?
         .is_none()
         {
@@ -377,7 +417,7 @@ fn expand_collapsed_dir_paths(
     repo: &Repository,
     index: &Index,
     rules: &WorktreeRules,
-    include_ignored: bool,
+    scope: CleanScope,
     dir_rel: &str,
 ) -> Result<Vec<String>> {
     let work_tree = repo
@@ -388,7 +428,7 @@ fn expand_collapsed_dir_paths(
         repo,
         index,
         rules,
-        include_ignored,
+        scope,
         &work_tree.join(dir_rel),
         dir_rel,
         &mut paths,
@@ -403,7 +443,7 @@ fn walk_expand_collapsed_dir(
     repo: &Repository,
     index: &Index,
     rules: &WorktreeRules,
-    include_ignored: bool,
+    scope: CleanScope,
     abs: &Path,
     rel: &str,
     out: &mut Vec<String>,
@@ -430,7 +470,7 @@ fn walk_expand_collapsed_dir(
         };
         if child_abs.is_dir() {
             child_dirs.push((child_rel, child_abs));
-        } else if removable_untracked_path(repo, index, rules, include_ignored, &child_rel)? {
+        } else if removable_untracked_path(repo, index, rules, scope, &child_rel)? {
             out.push(child_rel);
         }
     }
@@ -440,24 +480,10 @@ fn walk_expand_collapsed_dir(
             continue;
         }
         let before = out.len();
-        walk_expand_collapsed_dir(
-            repo,
-            index,
-            rules,
-            include_ignored,
-            &child_abs,
-            &child_rel,
-            out,
-        )?;
+        walk_expand_collapsed_dir(repo, index, rules, scope, &child_abs, &child_rel, out)?;
         if out.len() == before
             && empty_untracked_directory(&child_abs)
-            && removable_untracked_path(
-                repo,
-                index,
-                rules,
-                include_ignored,
-                &format!("{child_rel}/"),
-            )?
+            && removable_untracked_path(repo, index, rules, scope, &format!("{child_rel}/"))?
         {
             out.push(format!("{child_rel}/"));
         }
@@ -475,11 +501,19 @@ fn removable_untracked_path(
     repo: &Repository,
     index: &Index,
     rules: &WorktreeRules,
-    include_ignored: bool,
+    scope: CleanScope,
     rel: &str,
 ) -> Result<bool> {
-    if include_ignored {
+    if clean_scope_includes_ignored(scope) && scope == CleanScope::UntrackedAndIgnored {
         return Ok(true);
+    }
+    if scope == CleanScope::OnlyIgnored {
+        let is_dir = rel.ends_with('/');
+        let check_path = rel.trim_end_matches('/');
+        let (ignored, _) = rules
+            .ignore_mut()
+            .check_path(repo, Some(index), check_path, is_dir)?;
+        return Ok(ignored);
     }
     let is_dir = rel.ends_with('/');
     let check_path = rel.trim_end_matches('/');

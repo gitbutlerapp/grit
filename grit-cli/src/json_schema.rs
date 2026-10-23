@@ -52,7 +52,7 @@ pub fn schema_id_v2(command: &str) -> String {
 }
 
 /// Commands whose live `--json` shape is versioned separately from the frozen v1 contract.
-const SCHEMA_V2_COMMANDS: &[&str] = &["merge", "pull", "pick"];
+const SCHEMA_V2_COMMANDS: &[&str] = &["merge", "pull", "pick", "mv"];
 
 /// File name for a command schema under [`schemas_dir`].
 pub fn schema_file_name(command: &str) -> String {

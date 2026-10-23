@@ -3,6 +3,10 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "description": "CLI outcome for `grit rm`.",
   "properties": {
+    "dry_run": {
+      "description": "Whether this run only previewed removals.",
+      "type": "boolean"
+    },
     "removed": {
       "description": "Paths removed from the index (and work tree unless `--cached`).",
       "items": {
@@ -12,6 +16,7 @@
     }
   },
   "required": [
+    "dry_run",
     "removed"
   ],
   "title": "RmOutcome",

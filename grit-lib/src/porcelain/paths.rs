@@ -31,6 +31,25 @@ pub struct RemoveOptions {
     pub force: bool,
     /// Allow removing directories (all tracked paths under a directory prefix).
     pub recursive: bool,
+    /// Run every check and report [`RemoveOutcome::removed`] without writing the index or work tree.
+    pub dry_run: bool,
+    /// Treat non-matching pathspecs as success with an empty removal list.
+    pub ignore_unmatch: bool,
+}
+
+impl RemoveOptions {
+    /// When `recursive` is false, infer directory removal from trailing slashes or existing directories.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::RequiresWorkTree`] when the repository has no work tree.
+    pub fn resolve_recursive(&mut self, repo: &Repository) -> Result<()> {
+        if self.recursive {
+            return Ok(());
+        }
+        self.recursive = infer_remove_recursive(repo, &self.pathspec_sources, &self.pathspecs)?;
+        Ok(())
+    }
 }
 
 /// Result of [`remove_paths`].
@@ -40,13 +59,33 @@ pub struct RemoveOutcome {
     pub removed: Vec<String>,
 }
 
-/// Result of [`move_path`].
+/// One tracked path rename performed by [`move_paths`].
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct MoveOutcome {
+pub struct PathMove {
     /// Source path before the move.
     pub from: String,
     /// Destination path after the move.
     pub to: String,
+}
+
+/// Options for [`move_paths`].
+#[derive(Debug, Clone)]
+pub struct MoveOptions {
+    /// Tracked source paths to move (repository-relative).
+    pub sources: Vec<String>,
+    /// Destination path or existing directory.
+    pub destination: String,
+    /// Replace an existing destination in the work tree and index.
+    pub force: bool,
+    /// Validate and report [`MoveOutcome::moves`] without writing the index or work tree.
+    pub dry_run: bool,
+}
+
+/// Result of [`move_paths`] and [`move_path`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MoveOutcome {
+    /// Individual renames applied (or that would be applied when `dry_run`).
+    pub moves: Vec<PathMove>,
 }
 
 /// Remove paths matching `opts.pathspecs` from the index and (unless `cached`) the work tree.
@@ -61,20 +100,20 @@ pub struct MoveOutcome {
 /// Returns [`Error::PathspecNoMatch`], [`Error::PathsHaveLocalModifications`],
 /// [`Error::NotRemovingRecursively`], or I/O / object-store failures.
 pub fn remove_paths(repo: &Repository, opts: &RemoveOptions) -> Result<RemoveOutcome> {
-    let work_tree = repo
-        .work_tree()
-        .ok_or_else(|| Error::Message("this operation must be run in a work tree".into()))?;
+    let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
 
     if opts.pathspecs.is_empty() {
-        return Err(Error::Message("you must specify path(s) to remove".into()));
+        return Err(Error::RemovePathsRequired);
     }
 
-    let mut lock = repo.begin_index_update()?;
+    let mut opts = opts.clone();
+    opts.resolve_recursive(repo)?;
+
     let mut index = repo.load_index()?;
     let head_tree = resolve_head_tree(repo)?;
     let tracked_paths = tracked_index_paths(&index);
 
-    let to_remove = collect_removal_paths(repo, &tracked_paths, work_tree, opts)?;
+    let to_remove = collect_removal_paths(repo, &tracked_paths, work_tree, &opts)?;
 
     if !opts.force {
         let modified =
@@ -89,10 +128,11 @@ pub fn remove_paths(repo: &Repository, opts: &RemoveOptions) -> Result<RemoveOut
         }
     }
 
-    if to_remove.is_empty() {
-        return Ok(RemoveOutcome::default());
+    if to_remove.is_empty() || opts.dry_run {
+        return Ok(RemoveOutcome { removed: to_remove });
     }
 
+    let mut lock = repo.begin_index_update()?;
     let path_bytes: Vec<&[u8]> = to_remove.iter().map(|p| p.as_bytes()).collect();
     index.remove_paths(path_bytes);
     repo.commit_index_update(&mut lock, &mut index, !opts.cached)?;
@@ -117,52 +157,40 @@ pub fn remove_paths(repo: &Repository, opts: &RemoveOptions) -> Result<RemoveOut
 
 /// Rename `src` to `dst` in the working tree and index, preserving stat data and object ids.
 ///
-/// Supports moving into an existing directory and moving whole directory trees. Refuses
-/// untracked sources, existing destinations without `force`, and moves into a subdirectory
-/// of the source directory.
+/// Thin wrapper around [`move_paths`] for a single source path.
 ///
 /// # Errors
 ///
-/// Returns [`Error::InvalidPath`] when `src` or `dst` is absolute or contains `..`,
-/// [`Error::Message`] for untracked sources or invalid destinations, or I/O failures.
+/// Same as [`move_paths`].
 pub fn move_path(repo: &Repository, src: &str, dst: &str, force: bool) -> Result<MoveOutcome> {
-    let work_tree = repo
-        .work_tree()
-        .ok_or_else(|| Error::Message("this operation must be run in a work tree".into()))?;
+    move_paths(
+        repo,
+        &MoveOptions {
+            sources: vec![src.to_owned()],
+            destination: dst.to_owned(),
+            force,
+            dry_run: false,
+        },
+    )
+}
 
-    let mut lock = repo.begin_index_update()?;
-    let mut index = repo.load_index()?;
-    let src = normalize_and_validate_repo_relative(repo, work_tree, src)?;
-    let dst = normalize_and_validate_repo_relative(repo, work_tree, dst)?;
-
-    let src_entries = index_paths_under(&index, &src, true);
-    if src_entries.is_empty() {
-        return Err(Error::Message(format!(
-            "not under version control, source={src}"
-        )));
+/// Move one or more tracked sources into `opts.destination`, updating the index once.
+///
+/// When multiple sources are given, `destination` must name an existing directory; each
+/// source is moved under that directory using its final path component. With `dry_run`,
+/// every validation runs but the index and work tree are left unchanged.
+///
+/// # Errors
+///
+/// Returns [`Error::InvalidPath`], [`Error::MoveSourceNotTracked`], [`Error::MoveDestinationExists`],
+/// and related move errors, or I/O failures.
+pub fn move_paths(repo: &Repository, opts: &MoveOptions) -> Result<MoveOutcome> {
+    let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
+    if opts.sources.is_empty() {
+        return Err(Error::MoveNothingToMove {
+            src: opts.destination.clone(),
+        });
     }
-
-    let (final_dst, dst_is_dir_target) = resolve_move_destination(work_tree, &index, &src, &dst)?;
-    let final_dst = normalize_and_validate_repo_relative(repo, work_tree, &final_dst)?;
-
-    if is_subdirectory(&final_dst, &src) {
-        return Err(Error::Message(format!(
-            "cannot move '{src}' to a subdirectory of itself, '{final_dst}'"
-        )));
-    }
-
-    if final_dst == src {
-        return Err(Error::Message(format!(
-            "cannot move into itself, source={src}, destination={final_dst}"
-        )));
-    }
-
-    let renames = plan_index_renames(&index, &src, &final_dst)?;
-    if renames.is_empty() {
-        return Err(Error::Message(format!("nothing to move, source={src}")));
-    }
-
-    ensure_worktree_move_sources_exist(work_tree, &renames)?;
 
     let ignorecase = repo
         .config()
@@ -170,64 +198,206 @@ pub fn move_path(repo: &Repository, src: &str, dst: &str, force: bool) -> Result
         .and_then(|cfg| cfg.get_bool("core.ignorecase").and_then(|r| r.ok()))
         .unwrap_or(false);
 
+    let mut index = repo.load_index()?;
+    let dst = normalize_and_validate_repo_relative(repo, work_tree, &opts.destination)?;
+
+    let mut planned: Vec<SingleMovePlan> = Vec::new();
+    let mut simulated = index.clone();
+
+    for src_raw in &opts.sources {
+        let src = normalize_and_validate_repo_relative(repo, work_tree, src_raw)?;
+        let plan = plan_single_move(
+            repo,
+            work_tree,
+            &simulated,
+            &src,
+            &dst,
+            opts.sources.len() > 1,
+            opts.force,
+            ignorecase,
+        )?;
+        apply_renames_to_index(&mut simulated, &plan.renames)?;
+        planned.push(plan);
+    }
+
+    let moves: Vec<PathMove> = planned
+        .iter()
+        .flat_map(|plan| {
+            plan.renames.iter().map(|(from, to)| PathMove {
+                from: from.clone(),
+                to: to.clone(),
+            })
+        })
+        .collect();
+
+    if opts.dry_run {
+        return Ok(MoveOutcome { moves });
+    }
+
+    let mut lock = repo.begin_index_update()?;
+    index = repo.load_index()?;
+
+    let mut force_clear_worktree: Vec<String> = Vec::new();
+    if opts.force {
+        for plan in &planned {
+            force_clear_worktree.extend(worktree_paths_to_clear(
+                work_tree,
+                &index,
+                &plan.final_dst,
+            ));
+        }
+        force_clear_worktree.sort();
+        force_clear_worktree.dedup();
+    }
+
+    let cleared_backup = if !force_clear_worktree.is_empty() {
+        backup_and_remove_worktree_paths(work_tree, &force_clear_worktree)?
+    } else {
+        Vec::new()
+    };
+
+    for plan in &planned {
+        if opts.force {
+            clear_destination_index(&mut index, &plan.final_dst);
+        }
+        if let Err(err) = rename_worktree_paths(
+            work_tree,
+            &plan.src,
+            &plan.final_dst,
+            &plan.renames,
+            ignorecase,
+        ) {
+            let _ = restore_worktree_backups(work_tree, &cleared_backup);
+            return Err(err);
+        }
+    }
+
+    let all_renames: Vec<(String, String)> = planned
+        .iter()
+        .flat_map(|plan| plan.renames.clone())
+        .collect();
+    if let Err(err) = apply_renames_to_index(&mut index, &all_renames) {
+        let _ = restore_worktree_backups(work_tree, &cleared_backup);
+        return Err(err);
+    }
+
+    repo.flush_index_update(&mut lock, &mut index)?;
+    repo.finish_index_update(&mut lock, true)?;
+
+    Ok(MoveOutcome { moves })
+}
+
+struct SingleMovePlan {
+    src: String,
+    final_dst: String,
+    renames: Vec<(String, String)>,
+}
+
+fn plan_single_move(
+    repo: &Repository,
+    work_tree: &Path,
+    index: &Index,
+    src: &str,
+    dst: &str,
+    multi_source: bool,
+    force: bool,
+    ignorecase: bool,
+) -> Result<SingleMovePlan> {
+    let src_entries = index_paths_under(index, src, true);
+    if src_entries.is_empty() {
+        return Err(Error::MoveSourceNotTracked {
+            src: src.to_owned(),
+        });
+    }
+
+    let (final_dst, dst_is_dir_target) = resolve_move_destination(work_tree, index, src, dst)?;
+    let final_dst = normalize_and_validate_repo_relative(repo, work_tree, &final_dst)?;
+
+    if multi_source && !dst_is_dir_target {
+        return Err(Error::MoveDestinationExists {
+            src: src.to_owned(),
+            destination: final_dst,
+        });
+    }
+
+    if is_subdirectory(&final_dst, src) {
+        return Err(Error::MoveIntoSubdirectory {
+            src: src.to_owned(),
+            destination: final_dst,
+        });
+    }
+
+    if final_dst == *src {
+        return Err(Error::MoveIntoSelf {
+            src: src.to_owned(),
+            destination: final_dst,
+        });
+    }
+
+    let renames = plan_index_renames(index, src, &final_dst)?;
+    if renames.is_empty() {
+        return Err(Error::MoveNothingToMove {
+            src: src.to_owned(),
+        });
+    }
+
+    ensure_worktree_move_sources_exist(work_tree, &renames)?;
+
     if !force
         && destination_exists(
             work_tree,
-            &index,
+            index,
             &final_dst,
             dst_is_dir_target,
             ignorecase,
             &renames,
         )
     {
-        return Err(Error::Message(format!(
-            "destination exists, source={src}, destination={final_dst}"
-        )));
+        return Err(Error::MoveDestinationExists {
+            src: src.to_owned(),
+            destination: final_dst,
+        });
     }
 
-    let force_clear_worktree = if force {
-        worktree_paths_to_clear(work_tree, &index, &final_dst)
-    } else {
-        Vec::new()
-    };
+    Ok(SingleMovePlan {
+        src: src.to_owned(),
+        final_dst,
+        renames,
+    })
+}
 
+fn apply_renames_to_index(index: &mut Index, renames: &[(String, String)]) -> Result<()> {
+    if renames.is_empty() {
+        return Ok(());
+    }
     let old_paths: Vec<Vec<u8>> = renames
         .iter()
         .map(|(from, _)| from.as_bytes().to_vec())
         .collect();
     let mut new_entries = Vec::with_capacity(renames.len());
-    for (from, to) in &renames {
-        let old = index.get(from.as_bytes(), 0).ok_or_else(|| {
-            Error::Message(format!("internal error: missing index entry for '{from}'"))
-        })?;
+    for (from, to) in renames {
+        let old = index
+            .get(from.as_bytes(), 0)
+            .ok_or_else(|| Error::MoveMissingIndexEntry { path: from.clone() })?;
         new_entries.push(entry_with_relpath(old.clone(), to));
     }
-
-    let cleared_backup = if force && !force_clear_worktree.is_empty() {
-        backup_and_remove_worktree_paths(work_tree, &force_clear_worktree)?
-    } else {
-        Vec::new()
-    };
-
-    if let Err(err) = rename_worktree_paths(work_tree, &src, &final_dst, &renames, ignorecase) {
-        restore_worktree_backups(work_tree, &cleared_backup)?;
-        return Err(err);
-    }
-
-    if force {
-        clear_destination_index(&mut index, &final_dst);
-    }
-
     let old_refs: Vec<&[u8]> = old_paths.iter().map(|p| p.as_slice()).collect();
     index.remove_paths_and_insert(old_refs, new_entries);
+    Ok(())
+}
 
-    repo.flush_index_update(&mut lock, &mut index)?;
-    repo.finish_index_update(&mut lock, true)?;
-
-    Ok(MoveOutcome {
-        from: src,
-        to: final_dst,
-    })
+fn infer_remove_recursive(repo: &Repository, sources: &[String], specs: &[String]) -> Result<bool> {
+    let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
+    let source_labels = if sources.is_empty() { specs } else { sources };
+    for (sel, spec) in source_labels.iter().zip(specs.iter()) {
+        if sel.ends_with('/') || sel.ends_with('\\') {
+            return Ok(true);
+        }
+        if work_tree.join(spec).is_dir() {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 fn resolve_head_tree(repo: &Repository) -> Result<Option<ObjectId>> {
@@ -290,6 +460,9 @@ fn collect_removal_paths(
                 .cloned()
                 .collect();
             if under.is_empty() {
+                if opts.ignore_unmatch {
+                    continue;
+                }
                 return Err(Error::PathspecNoMatch {
                     spec: label.clone(),
                 });
@@ -736,9 +909,10 @@ fn ensure_worktree_move_sources_exist(
         if abs.is_dir() {
             continue;
         }
-        return Err(Error::Message(format!(
-            "bad source, source={from}, destination={to}"
-        )));
+        return Err(Error::MoveBadSource {
+            src: from.clone(),
+            destination: to.clone(),
+        });
     }
     Ok(())
 }

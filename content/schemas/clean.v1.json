@@ -8,16 +8,21 @@
       "type": "boolean"
     },
     "removed": {
-      "description": "Paths removed, or that would be removed when `-f` was not passed.",
+      "description": "Paths removed, or that would be removed when dry-run.",
       "items": {
         "type": "string"
       },
       "type": "array"
+    },
+    "scope": {
+      "description": "Which paths were eligible for removal.",
+      "type": "string"
     }
   },
   "required": [
     "dry_run",
-    "removed"
+    "removed",
+    "scope"
   ],
   "title": "CleanOutcome",
   "type": "object"
