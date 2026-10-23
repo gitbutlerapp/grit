@@ -34,19 +34,34 @@ pub(crate) fn open_ref_store_uncached(
         OnDiskFormat::detect(git_dir)?
     };
     let store: Arc<dyn RefStore> = match format {
-        OnDiskFormat::Files => {
-            let git_dir_buf = std::path::PathBuf::from(git_dir);
-            let git_dir_canon = std::fs::canonicalize(&git_dir_buf).unwrap_or(git_dir_buf);
-            let common_dir = resolve_common_dir(&git_dir_canon);
-            Arc::new(FilesRefStore::open(FilesRefStoreConfig {
-                git_dir: git_dir_canon,
-                common_dir,
-                namespace_prefix: crate::ref_namespace::ref_storage_prefix(env),
-            }))
-        }
+        OnDiskFormat::Files => Arc::new(files_ref_store(git_dir, env)),
         OnDiskFormat::Reftable => Arc::new(ReftableRefStore::open(git_dir.to_path_buf())?),
     };
     Ok(store)
+}
+
+/// The files backend [`open_ref_store`] opens for `git_dir`, or `None` when the repository
+/// stores refs in reftable.
+///
+/// # Errors
+///
+/// Propagates ref storage format detection failures.
+pub(crate) fn open_files_ref_store(git_dir: &Path) -> Result<Option<FilesRefStore>> {
+    Ok(match OnDiskFormat::detect(git_dir)? {
+        OnDiskFormat::Files => Some(files_ref_store(git_dir, &Environment::empty())),
+        OnDiskFormat::Reftable => None,
+    })
+}
+
+fn files_ref_store(git_dir: &Path, env: &Environment) -> FilesRefStore {
+    let git_dir_buf = std::path::PathBuf::from(git_dir);
+    let git_dir_canon = std::fs::canonicalize(&git_dir_buf).unwrap_or(git_dir_buf);
+    let common_dir = resolve_common_dir(&git_dir_canon);
+    FilesRefStore::open(FilesRefStoreConfig {
+        git_dir: git_dir_canon,
+        common_dir,
+        namespace_prefix: crate::ref_namespace::ref_storage_prefix(env),
+    })
 }
 
 #[cfg(test)]

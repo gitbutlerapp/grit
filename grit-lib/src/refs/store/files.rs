@@ -12,8 +12,9 @@ use crate::objects::ObjectId;
 use crate::reflog::{self, ReflogEntry};
 use crate::refs::{
     lock_path_for_ref, loose_ref_list_walk_root, prune_empty_loose_ref_parents,
-    read_packed_refs_file_view, read_packed_refs_map_for_prefix, read_ref_file,
-    remove_empty_ref_directory, remove_packed_ref, remove_packed_ref_under_lock, Ref,
+    read_packed_refs_file_view, read_packed_refs_map_for_prefix_filtered, read_ref_file,
+    remove_empty_ref_directory, remove_packed_ref, remove_packed_ref_under_lock, PackedPeel,
+    PackedRecordFilter, Ref,
 };
 
 use super::apply::{
@@ -439,7 +440,13 @@ impl FilesRefStore {
         }
     }
 
-    fn load_raw_map_prefix(&self, logical_prefix: &str) -> Result<BTreeMap<String, RawRef>> {
+    /// Raw refs whose logical names start with `logical_prefix`, loose values overriding packed
+    /// ones. `keep`, given a packed record's storage name, id and peel, may leave it out.
+    fn load_raw_map_prefix(
+        &self,
+        logical_prefix: &str,
+        keep: Option<PackedRecordFilter<'_>>,
+    ) -> Result<BTreeMap<String, RawRef>> {
         let logical_prefix = logical_prefix.trim_end_matches('/');
         let mut map: BTreeMap<String, RawRef> = BTreeMap::new();
         if logical_prefix.is_empty() {
@@ -447,7 +454,9 @@ impl FilesRefStore {
             let cache = self.packed_cache.lock().unwrap_or_else(|e| e.into_inner());
             if let Some(packed) = cache.map.as_ref() {
                 for (storage, oid) in packed.iter() {
-                    if !self.packed_storage_visible(storage) {
+                    if !self.packed_storage_visible(storage)
+                        || keep.is_some_and(|keep| !keep(storage, oid, PackedPeel::Unknown))
+                    {
                         continue;
                     }
                     let logical = self.logical_name(storage);
@@ -468,7 +477,9 @@ impl FilesRefStore {
                     continue;
                 }
                 let packed_prefix = self.packed_refs_scan_prefix(logical_prefix);
-                for (storage, oid) in read_packed_refs_map_for_prefix(base, &packed_prefix)? {
+                for (storage, oid) in
+                    read_packed_refs_map_for_prefix_filtered(base, &packed_prefix, keep)?
+                {
                     if !self.packed_storage_visible(&storage) {
                         continue;
                     }
@@ -997,6 +1008,41 @@ impl FilesRefStore {
     }
 }
 
+impl FilesRefStore {
+    /// [`RefStore::for_each_ref`], skipping the `packed-refs` records `keep` rejects.
+    ///
+    /// `keep` sees each packed record's storage name, object id and [`PackedPeel`] before
+    /// anything is allocated for it. A loose ref is listed whatever `keep` says about a packed
+    /// record of the same name.
+    pub(crate) fn for_each_ref_filtered(
+        &self,
+        prefix: &str,
+        keep: Option<PackedRecordFilter<'_>>,
+        f: &mut dyn FnMut(&RefEntry) -> ControlFlow<()>,
+    ) -> Result<()> {
+        let prefix = prefix.trim_end_matches('/');
+        let mut map = self.load_raw_map_prefix(prefix, keep)?;
+        for (name, value) in map.split_off(prefix) {
+            if !name.starts_with(prefix) {
+                break;
+            }
+            let peeled = match &value {
+                RawRef::Direct(_) => None,
+                RawRef::Symbolic(target) => self.resolve(target).ok(),
+            };
+            let entry = RefEntry {
+                name,
+                value,
+                peeled,
+            };
+            if f(&entry).is_break() {
+                break;
+            }
+        }
+        Ok(())
+    }
+}
+
 impl RefStore for FilesRefStore {
     fn format(&self) -> RefStorageFormat {
         RefStorageFormat::Files
@@ -1011,26 +1057,7 @@ impl RefStore for FilesRefStore {
         prefix: &str,
         f: &mut dyn FnMut(&RefEntry) -> ControlFlow<()>,
     ) -> Result<()> {
-        let prefix = prefix.trim_end_matches('/');
-        let map = self.load_raw_map_prefix(prefix)?;
-        for (name, value) in map.range(prefix.to_string()..) {
-            if !name.starts_with(prefix) {
-                break;
-            }
-            let peeled = match &value {
-                RawRef::Direct(_) => None,
-                RawRef::Symbolic(target) => self.resolve(target).ok(),
-            };
-            let entry = RefEntry {
-                name: name.clone(),
-                value: value.clone(),
-                peeled,
-            };
-            if f(&entry).is_break() {
-                break;
-            }
-        }
-        Ok(())
+        self.for_each_ref_filtered(prefix, None, f)
     }
 
     fn prepare(
