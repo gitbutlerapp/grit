@@ -144,7 +144,9 @@ pub fn format_warning_message(w: &Warning) -> String {
         Warning::IndexVersionConfigInvalid { fallback } => format!(
             "`index.version` is not a valid index format number (using format {fallback})"
         ),
-        Warning::MailmapUnreadable { detail } => detail.clone(),
+        Warning::MailmapUnreadable { spec, kind } => {
+            format!("mailmap blob `{spec}` is a {kind}, not a blob; skipping")
+        }
         Warning::ReflogNotWritten { refname, detail } => {
             format!("{refname} was updated, but its reflog could not be written: {detail}")
         }

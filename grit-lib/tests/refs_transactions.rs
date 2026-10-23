@@ -500,6 +500,64 @@ fn update_branch_for_commit_writes_head_and_branch_reflogs() {
 }
 
 #[test]
+fn update_branch_for_commit_stale_tip_is_typed_expected_mismatch() {
+    use grit_lib::error::Error;
+    use grit_lib::refs::store::{Expected, RawRef, RefStoreError};
+    use grit_lib::refs::verify_branch_commit_cas;
+
+    each_backend(|backend, repo| {
+        let git_dir = repo.git_dir();
+        let (c1, c2) = two_commit_oids(&repo);
+        write_ref(&git_dir, "refs/heads/main", &c2).expect("branch");
+        fs::write(git_dir.join("HEAD"), "ref: refs/heads/main\n").expect("symref HEAD");
+        let refs_before = ref_store_bytes_snapshot(&git_dir);
+
+        for expected_old in [Some(c1), None] {
+            let err = update_branch_for_commit(
+                &git_dir,
+                &BranchCommitRefUpdate {
+                    branch_ref: "refs/heads/main",
+                    expected_old,
+                    new_oid: c1,
+                    identity: "Refs Tx Author <refs-harness@example.com> 1700000000 +0000",
+                    reflog_message: "commit: stale tip",
+                },
+            )
+            .expect_err("stale expected tip must be rejected");
+            let Error::RefStore(RefStoreError::ExpectedMismatch {
+                name,
+                expected,
+                actual,
+            }) = err
+            else {
+                panic!("{backend:?}: expected ExpectedMismatch, got {err:?}");
+            };
+            assert_eq!(name, "refs/heads/main");
+            assert_eq!(
+                expected,
+                expected_old.map_or(Expected::Missing, Expected::Oid)
+            );
+            assert_eq!(actual, Some(RawRef::Direct(c2)));
+        }
+
+        assert_eq!(resolve_ref(&git_dir, "refs/heads/main").unwrap(), c2);
+        assert_eq!(ref_store_bytes_snapshot(&git_dir), refs_before);
+    });
+
+    let oid = ObjectId::from_bytes(&[7; 20]).expect("oid");
+    verify_branch_commit_cas(None, None, "refs/heads/unborn").expect("both absent");
+    verify_branch_commit_cas(Some(oid), Some(oid), "refs/heads/main").expect("equal");
+    assert!(matches!(
+        verify_branch_commit_cas(Some(oid), None, "refs/heads/gone"),
+        Err(Error::RefStore(RefStoreError::ExpectedMismatch {
+            expected: Expected::Oid(want),
+            actual: None,
+            ..
+        })) if want == oid
+    ));
+}
+
+#[test]
 fn reftable_transaction_one_table_single_update_index() {
     each_backend(|backend, repo| {
         if backend != Backend::Reftable {

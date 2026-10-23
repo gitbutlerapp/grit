@@ -1583,19 +1583,35 @@ fn resolve_tree_path(repo: &Repository, tree_oid: &ObjectId, path: &str) -> Resu
     resolve_treeish_path_to_object(repo, *tree_oid, path)
 }
 
+/// Why a `treeish:path` walk stopped before reaching a usable leaf.
+#[derive(Debug)]
+enum TreePathError {
+    /// A path component names no entry in the tree being walked.
+    NotInTree,
+    /// Any other failure; returned to the caller unchanged.
+    Other(Error),
+}
+
+impl From<Error> for TreePathError {
+    fn from(err: Error) -> Self {
+        Self::Other(err)
+    }
+}
+
 /// Like Git `rev-parse` for `treeish:path`: the leaf may be a blob or a tree OID.
 fn resolve_tree_path_rev_parse(
     repo: &Repository,
     tree_oid: &ObjectId,
     path: &str,
-) -> Result<ObjectId> {
+) -> std::result::Result<ObjectId, TreePathError> {
     let obj = repo.odb().read(tree_oid)?;
     let entries = crate::objects::parse_tree(&obj.data)?;
     let components: Vec<&str> = path.split('/').filter(|c| !c.is_empty()).collect();
     if components.is_empty() {
         return Err(Error::InvalidRef(format!(
             "path '{path}' does not name an object in tree {tree_oid}"
-        )));
+        ))
+        .into());
     }
 
     let first = components[0];
@@ -1612,14 +1628,12 @@ fn resolve_tree_path_rev_parse(
                 return Ok(entry.oid);
             }
             if entry.mode != crate::index::MODE_TREE {
-                return Err(Error::ObjectNotFound(path.to_owned()));
+                return Err(Error::ObjectNotFound(path.to_owned()).into());
             }
             return resolve_tree_path_rev_parse(repo, &entry.oid, &rest.join("/"));
         }
     }
-    Err(Error::ObjectNotFound(format!(
-        "path '{path}' not found in tree {tree_oid}"
-    )))
+    Err(TreePathError::NotInTree)
 }
 
 /// Resolved blob (non-tree) at `treeish:path` for diff plumbing.
@@ -1705,14 +1719,15 @@ fn walk_tree_to_blob_entry(
     repo: &Repository,
     tree_oid: &ObjectId,
     path: &str,
-) -> Result<(ObjectId, String)> {
+) -> std::result::Result<(ObjectId, String), TreePathError> {
     let obj = repo.read_replaced(tree_oid)?;
     let entries = crate::objects::parse_tree(&obj.data)?;
     let components: Vec<&str> = path.split('/').filter(|c| !c.is_empty()).collect();
     if components.is_empty() {
         return Err(Error::InvalidRef(format!(
             "path '{path}' does not name a blob in tree {tree_oid}"
-        )));
+        ))
+        .into());
     }
 
     let first = components[0];
@@ -1722,19 +1737,17 @@ fn walk_tree_to_blob_entry(
         if name == first {
             if rest.is_empty() {
                 if entry.mode == crate::index::MODE_TREE {
-                    return Err(Error::InvalidRef(format!("'{path}' is a tree, not a blob")));
+                    return Err(Error::InvalidRef(format!("'{path}' is a tree, not a blob")).into());
                 }
                 return Ok((entry.oid, entry.mode_str()));
             }
             if entry.mode != crate::index::MODE_TREE {
-                return Err(Error::ObjectNotFound(path.to_owned()));
+                return Err(Error::ObjectNotFound(path.to_owned()).into());
             }
             return walk_tree_to_blob_entry(repo, &entry.oid, &rest.join("/"));
         }
     }
-    Err(Error::ObjectNotFound(format!(
-        "path '{path}' not found in tree {tree_oid}"
-    )))
+    Err(TreePathError::NotInTree)
 }
 
 /// A single parent/ancestor navigation step.
@@ -3189,13 +3202,10 @@ fn diagnose_tree_path_error(
     rev_label: &str,
     raw_after_colon: &str,
     clean_path: &str,
-    err: Error,
+    err: TreePathError,
 ) -> Error {
-    let Error::ObjectNotFound(msg) = err else {
+    if let TreePathError::Other(err) = err {
         return err;
-    };
-    if !msg.contains("not found in tree") {
-        return Error::ObjectNotFound(msg);
     }
     let rel_display: &str =
         if raw_after_colon.starts_with("./") || raw_after_colon.starts_with("../") {
@@ -4928,7 +4938,7 @@ mod line_coverage_tests {
             "HEAD",
             "missing",
             "missing",
-            Error::ObjectNotFound("missing".into()),
+            Error::ObjectNotFound("missing".into()).into(),
         );
         let _ =
             diagnose_index_path_error(&repo, "missing", 0, Error::ObjectNotFound("missing".into()));
@@ -5221,7 +5231,7 @@ mod line_coverage_tests {
             "HEAD",
             "./sub/leaf.txt",
             "sub/leaf.txt",
-            Error::ObjectNotFound("not found in tree".into()),
+            TreePathError::NotInTree,
         );
         Ok(())
     }
