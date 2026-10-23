@@ -19672,6 +19672,7 @@ pub fn grit_lib::repo_handles::RepositoryRemotes<'repo>::ls_remote(&self, &grit_
 pub fn grit_lib::repo_handles::RepositoryRemotes<'repo>::push(&self, &grit_lib::remote::Remote, &[grit_lib::remote::transfer::PushRefSpec], grit_lib::remote::transfer::PushOptions, &mut dyn grit_lib::remote::fetch::Progress, core::option::Option<&dyn grit_lib::remote::HttpClientFactory>) -> core::result::Result<grit_lib::remote::transfer::PushOutcome, grit_lib::remote::RemoteError>
 pub fn grit_lib::repo_handles::RepositoryRemotes<'repo>::repository(&self) -> &'repo grit_lib::repo::Repository
 pub fn grit_lib::repo_handles::RepositoryRemotes<'repo>::set_url(&self, &str, &str, grit_lib::repo_handles::RemoteUrlKind, bool) -> core::result::Result<grit_lib::repo_handles::UrlChange, grit_lib::remote::RemoteError>
+pub fn grit_lib::repo_handles::RepositoryRemotes<'repo>::rename(&self, &str, &str, bool) -> core::result::Result<grit_lib::repo_handles::RemoteRename, grit_lib::remote::RemoteError>
 impl<'repo> core::clone::Clone for grit_lib::repo_handles::RepositoryRemotes<'repo>
 pub fn grit_lib::repo_handles::RepositoryRemotes<'repo>::clone(&self) -> Self
 impl<'repo> core::fmt::Debug for grit_lib::repo_handles::RepositoryRemotes<'repo>
@@ -19758,6 +19759,28 @@ impl core::marker::Unpin for grit_lib::repo_handles::StashPushOptions
 impl core::marker::UnsafeUnpin for grit_lib::repo_handles::StashPushOptions
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::repo_handles::StashPushOptions
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::repo_handles::StashPushOptions
+pub struct grit_lib::repo_handles::RemoteRename
+pub grit_lib::repo_handles::RemoteRename::branches_updated: alloc::vec::Vec<alloc::string::String>
+pub grit_lib::repo_handles::RemoteRename::dry_run: bool
+pub grit_lib::repo_handles::RemoteRename::new: alloc::string::String
+pub grit_lib::repo_handles::RemoteRename::old: alloc::string::String
+pub grit_lib::repo_handles::RemoteRename::refs_renamed: usize
+pub grit_lib::repo_handles::RemoteRename::refspecs_updated: alloc::vec::Vec<alloc::string::String>
+impl core::clone::Clone for grit_lib::repo_handles::RemoteRename
+pub fn grit_lib::repo_handles::RemoteRename::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::repo_handles::RemoteRename
+impl core::cmp::PartialEq for grit_lib::repo_handles::RemoteRename
+pub fn grit_lib::repo_handles::RemoteRename::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::repo_handles::RemoteRename
+pub fn grit_lib::repo_handles::RemoteRename::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::repo_handles::RemoteRename
+impl core::marker::Freeze for grit_lib::repo_handles::RemoteRename
+impl core::marker::Send for grit_lib::repo_handles::RemoteRename
+impl core::marker::Sync for grit_lib::repo_handles::RemoteRename
+impl core::marker::Unpin for grit_lib::repo_handles::RemoteRename
+impl core::marker::UnsafeUnpin for grit_lib::repo_handles::RemoteRename
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::repo_handles::RemoteRename
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::repo_handles::RemoteRename
 pub struct grit_lib::repo_handles::UrlChange
 pub grit_lib::repo_handles::UrlChange::new: alloc::string::String
 pub grit_lib::repo_handles::UrlChange::old: core::option::Option<alloc::string::String>

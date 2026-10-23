@@ -491,7 +491,7 @@ pub(crate) fn has_remote_section(config: &ConfigSet, name: &str) -> bool {
 }
 
 /// Whether `name` can name a remote: its tracking refs `refs/remotes/<name>/…` must be valid.
-fn is_valid_remote_name(name: &str) -> bool {
+pub(crate) fn is_valid_remote_name(name: &str) -> bool {
     !name.is_empty()
         && check_refname_format(
             &format!("refs/remotes/{name}/test"),

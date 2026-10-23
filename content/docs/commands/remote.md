@@ -11,6 +11,7 @@ order: 1
 grit remote [-v]
 grit remote add <name> <url>
 grit remote set-url <name> <url> [--push] [--dry-run]
+grit remote rename <old> <new> [--dry-run]
 grit remote refs <remote-or-url> [--heads] [--tags] [--sort name|version] [--reverse] [-n N] [<prefix>…]
 ```
 
@@ -24,6 +25,8 @@ A remote is another copy of the repository that you fetch from and push to, usua
 
 `grit remote set-url` changes the fetch URL (`remote.<name>.url`) or, with `--push`, replaces every `remote.<name>.pushurl` with a single new push URL. It fails when the remote is not configured. `--dry-run` reports the change without writing config.
 
+`grit remote rename` renames a configured remote. When the remote uses the default fetch refspec into `refs/remotes/<name>/`, every remote-tracking ref is renamed in one transaction (reflogs preserved), then the config section is renamed, default fetch refspecs are updated, and `branch.*.remote`, `branch.*.pushRemote`, and `remote.pushDefault` entries that pointed at the old name are retargeted. Custom fetch refspecs that do not map into `refs/remotes/<old>/` are left unchanged. `--dry-run` reports counts without changing the repository.
+
 `grit remote refs` lists references on a configured remote name or a literal URL, scp-style `host:path` or path (same transports as [`grit clone`](../clone/)), matching `git ls-remote` ordering. An argument that is none of these fails with `unknown remote`. SSH URLs use the same `GIT_SSH_COMMAND`, `GIT_SSH`, and `core.sshCommand` resolution as [`grit clone`](../clone/) and [`grit fetch`](../fetch/).
 
 ## Options
@@ -34,7 +37,8 @@ A remote is another copy of the repository that you fetch from and push to, usua
 | `add <name> <url>` | Add a remote called `<name>` at `<url>`. Fails if a remote with that name exists or the name is not valid in a ref. |
 | `set-url <name> <url>` | Set the fetch URL for `<name>`. Use `--push` for `pushurl`. |
 | `--push` | With `set-url`, update push URL(s) instead of fetch. |
-| `--dry-run` | With `set-url`, show the change without writing config. |
+| `--dry-run` | With `set-url` or `rename`, show the change without writing. |
+| `rename <old> <new>` | Rename remote `<old>` to `<new>`. Fails when `<new>` exists or is not a valid remote name. |
 | `refs <remote-or-url>` | List refs on the remote (or URL). |
 | `--heads` | With `refs`, only `refs/heads/`. |
 | `--tags` | With `refs`, only `refs/tags/`. |
@@ -59,7 +63,10 @@ origin	https://github.com/ada/project.git (push)
 $ grit remote set-url origin git@github.com:ada/project.git
 Set remote origin fetch URL to git@github.com:ada/project.git
 
-$ grit remote refs origin
+$ grit remote rename origin upstream
+Renamed remote origin → upstream (3 tracking refs updated)
+
+$ grit remote refs upstream
 a1b2c3d4e5f6789012345678901234567890abcd	refs/heads/main
 ```
 
@@ -71,13 +78,18 @@ Pass `--json` for stable, scripting-friendly output:
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
-| `action` | string | `list`, `add`, `set_url`, or `refs`. |
+| `action` | string | `list`, `add`, `set_url`, `rename`, or `refs`. |
 | `remotes` | array | For `list`, each remote with `name` and `url`; with `-v`, also `fetch_url`, `push_url`, and `refspecs`. |
 | `name` | string | For `add` or `set_url`, the remote name. |
 | `url` | string | For `add` or `set_url`, the remote URL or path. |
 | `kind` | string | For `set_url`, `fetch` or `push`. |
 | `old_url` | string or null | For `set_url`, previous URL for that kind, if any. |
-| `dry_run` | boolean | For `set_url`, whether config was left unchanged. |
+| `dry_run` | boolean | For `set_url` or `rename`, whether the repository was left unchanged. |
+| `old` | string | For `rename`, the previous remote name. |
+| `new` | string | For `rename`, the new remote name. |
+| `refs_renamed` | number | For `rename`, remote-tracking refs renamed. |
+| `refspecs_updated` | array | For `rename`, fetch refspec strings rewritten for the new name. |
+| `branches_updated` | array | For `rename`, branch short names whose upstream remote was retargeted. |
 | `refs` | array | For `refs`, each entry with `name`, `oid`, optional `peeled`, optional `symref_target`. |
 
 Listing remotes:
@@ -113,6 +125,20 @@ Setting a URL:
   "kind": "fetch",
   "old_url": "https://github.com/ada/old.git",
   "url": "https://github.com/ada/project.git",
+  "dry_run": false
+}
+```
+
+Renaming a remote:
+
+```json
+{
+  "action": "rename",
+  "old": "origin",
+  "new": "upstream",
+  "refs_renamed": 3,
+  "refspecs_updated": ["+refs/heads/*:refs/remotes/upstream/*"],
+  "branches_updated": ["main"],
   "dry_run": false
 }
 ```

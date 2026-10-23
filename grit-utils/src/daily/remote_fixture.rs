@@ -339,6 +339,35 @@ pub fn setup_many_refs_file_remote(setup: &DailySetup<'_>) -> Result<DailyHeadli
     })
 }
 
+/// Client repo with ~10k packed `refs/remotes/origin/*` after fetch from the many-refs bare remote.
+pub fn setup_remote_rename_many_refs(setup: &DailySetup<'_>) -> Result<DailyHeadlineContext> {
+    with_remote_scratch("remote-rename-many-refs", |scratch| {
+        let kind = if setup.smoke {
+            FixtureKind::ManyRefsSmoke
+        } else {
+            FixtureKind::ManyRefs
+        };
+        let (worktree, _) = fixture_registry::ensure_cached(setup.git, kind, setup.offline)?;
+        let bare = scratch.join("remote.git");
+        worktree_to_bare(setup.git, &worktree, &bare)?;
+        let meta = install_network_meta(setup.git, &bare, setup.smoke)?;
+        let remote_url = file_url(&bare)?;
+        std::env::set_var("GRIT_BENCH_DAILY_NETWORK_BARE", &bare);
+        let remote = DailyRemoteState {
+            bare: bare.clone(),
+            meta: meta.clone(),
+            remote_url: remote_url.clone(),
+            grit_http: None,
+            git_http: None,
+        };
+        let client = ensure_client(setup.git, &remote)?;
+        configure_remote(setup.git, &client, &remote_url, &meta.default_branch)?;
+        run_git(setup.git, &client, &["fetch", "-q", "origin"])?;
+        run_git(setup.git, &client, &["pack-refs", "--all"])?;
+        Ok(ctx_with_remote(client, setup, remote))
+    })
+}
+
 pub fn setup_git_git_grit_http_remote(setup: &DailySetup<'_>) -> Result<DailyHeadlineContext> {
     setup_git_git_grit_http_remote_label(setup, "git-git-http")
 }

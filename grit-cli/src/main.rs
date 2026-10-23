@@ -113,6 +113,16 @@ enum RemoteAction {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Rename an existing remote.
+    Rename {
+        /// Current remote name.
+        old: String,
+        /// New remote name.
+        new: String,
+        /// Show what would change without writing the repository.
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// List references on a remote (like `git ls-remote`).
     Refs {
         /// Configured remote name or a literal URL/path.
@@ -1905,6 +1915,11 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
                 dry_run,
             }) => emit(
                 &commands::remote::run_set_url(&name, &url, push, dry_run)?,
+                opts,
+                ctx,
+            ),
+            Some(RemoteAction::Rename { old, new, dry_run }) => emit(
+                &commands::remote::run_rename(&old, &new, dry_run)?,
                 opts,
                 ctx,
             ),

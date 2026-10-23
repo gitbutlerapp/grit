@@ -596,4 +596,11 @@ pub const MATRIX_SCENARIOS: &[ScenarioSpec] = &[
         name: None,
         description: "List remotes vs git remote",
     },
+    ScenarioSpec {
+        id: "remote/rename@many-refs",
+        area: Area::Remotes,
+        headline: false,
+        name: None,
+        description: "Rename remote with many packed tracking refs vs git remote rename",
+    },
 ];

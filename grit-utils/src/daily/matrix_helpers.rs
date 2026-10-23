@@ -31,6 +31,7 @@ use crate::worktree_fixture::{
 
 pub const BRANCH_BENCH_NAME: &str = "daily-bench-branch";
 pub const BRANCH_RENAME_TARGET: &str = "daily-bench-branch-renamed";
+pub const REMOTE_RENAME_TARGET: &str = "upstream";
 pub const TAG_BENCH_NAME: &str = "daily-bench-tag";
 pub const BUNDLE_FILE: &str = "daily-bench.bundle";
 pub const LINKED_WT_DIR: &str = "daily-linked-wt";
@@ -432,6 +433,32 @@ pub fn branch_delete_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv)
     (
         sh_devnull(&ctx.grit, &["branch", "-D", name]),
         sh_devnull(&ctx.git, &["branch", "-D", name]),
+    )
+}
+
+pub fn prepare_remote_rename_reset(ctx: &DailyHeadlineContext) -> BenchArgv {
+    let reset = prepare_daily_reset_script(&ctx.git);
+    let undo = shell_command(
+        &ctx.git,
+        &["remote", "rename", REMOTE_RENAME_TARGET, "origin"],
+    );
+    let script = format!(
+        "{reset}\ncd {} && ({undo} 2>/dev/null || true)\n",
+        ctx.repo.display()
+    );
+    BenchArgv::new("/bin/sh", ["-c", script.as_str()])
+}
+
+pub fn remote_rename_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
+    (
+        sh_devnull(
+            &ctx.grit,
+            &["remote", "rename", "origin", REMOTE_RENAME_TARGET],
+        ),
+        sh_devnull(
+            &ctx.git,
+            &["remote", "rename", "origin", REMOTE_RENAME_TARGET],
+        ),
     )
 }
 

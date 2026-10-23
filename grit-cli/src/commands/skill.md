@@ -131,6 +131,7 @@ Each commit gets a stable **`change-id`** header (on by default) that survives `
 | Copy a repository | `grit clone <url> [<dir>]` (`--depth N`, `-b` / `--branch` for a branch or tag; hidden `--shallow` = `--depth 1`) |
 | List or add remotes | `grit remote`, `grit remote add <name> <url>`, `grit remote -v` |
 | Fix a remote URL | `grit remote set-url <name> <url>` (fetch URL); `grit remote set-url --push <name> <url>` for push only; `--dry-run` to preview |
+| Rename a remote | `grit remote rename <old> <new>`; `--dry-run` to preview; renames tracking refs and retargets branch upstream config |
 | Download without changing your branch | `grit fetch [<remote>]` |
 | Fetch one branch or ref | `grit fetch origin main` (or `grit fetch origin pull/123/head:pr-123` for a PR) |
 | Shallow fetch controls | `grit fetch --depth N`, `--deepen N`, or `--unshallow` (same semantics as Git; mutually exclusive) |
