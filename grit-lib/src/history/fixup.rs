@@ -491,7 +491,11 @@ fn index_tree_for_fixup_selection(
         repo,
         &mut index,
         &patches,
-        &IndexApplyOptions { dry_run: false },
+        &IndexApplyOptions {
+            dry_run: false,
+            reverse: false,
+            head_tree_oid: None,
+        },
     )
     .map_err(|e| HistoryError::Planning {
         message: e.to_string(),
