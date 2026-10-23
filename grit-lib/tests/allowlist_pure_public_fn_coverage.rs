@@ -13,12 +13,10 @@ use grit_lib::command_runner::hooks::{
     run_reference_transaction_committed_for_head_update,
 };
 use grit_lib::command_runner::{run_program, CommandStdin, CommandStdio, RecordingRunner};
-use grit_lib::commit::signing::{GpgConfig, SignatureCheck};
 use grit_lib::config::config_file_display_for_error;
 use grit_lib::config::dotfile::is_ntfs_dot_gitignore;
 use grit_lib::config::ident::SignatureTimestamp;
 use grit_lib::config::ident::{fsck_commit_idents, timestamp_for_at_ct};
-use grit_lib::config::ConfigSet;
 use grit_lib::diff::{
     detect_copies, format_stat_line, read_submodule_head_for_checkout,
     submodule_commit_subject_line, unified_diff, unified_diff_with_prefix,
@@ -40,7 +38,6 @@ use grit_lib::remote::clone::{cleanup_failed_clone, derive_clone_dir};
 use grit_lib::remote::pkt_line::{
     read_data_lines_until_flush, read_until_flush_or_delim, write_flush, write_line_to_vec, Packet,
 };
-use grit_lib::remote::push_cert::{cert_env_from_check, verify_push_cert};
 use grit_lib::remote::transport::http::{
     discover_upload_pack, discover_upload_pack_exact, discover_upload_pack_for_list_refs,
     discover_upload_pack_for_list_refs_from_body, discover_upload_pack_from_body, HttpClient,
@@ -169,7 +166,7 @@ fn clone_config_command_runner_and_cwd_helpers() {
 }
 
 #[test]
-fn pkt_line_promisor_push_cert_and_ref_helpers() {
+fn pkt_line_promisor_and_ref_helpers() {
     let mut pkt = Vec::new();
     write_line_to_vec(&mut pkt, "line").expect("line");
     write_flush(&mut pkt).expect("flush");
@@ -294,11 +291,6 @@ fn pkt_line_promisor_push_cert_and_ref_helpers() {
     );
 
     assert!(parse_advertisement("version https://git-scm.com/docs/pack-protocol/2\n").is_empty());
-
-    let check = SignatureCheck::default_none();
-    let _ = cert_env_from_check(&check, "oid".to_owned(), None);
-    let gpg = GpgConfig::from_config(&ConfigSet::new()).expect("gpg cfg");
-    let _ = verify_push_cert(&gpg, b"not a tag");
 
     let mut excl = RefExclusions::default();
     excl.clear();

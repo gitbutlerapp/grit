@@ -277,7 +277,6 @@ pub(crate) mod protocol;
 pub(crate) mod protocol_v2;
 pub(crate) mod prune_packed;
 pub(crate) mod push;
-pub(crate) mod push_cert;
 pub(crate) mod push_report;
 #[path = "quote_path.rs"]
 mod quote_path_root;

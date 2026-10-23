@@ -77,10 +77,6 @@ pub mod receive_pack {
     //! receive_pack API (re-exported at this path).
     pub use crate::receive_pack::*;
 }
-pub mod push_cert {
-    //! push_cert API (re-exported at this path).
-    pub use crate::push_cert::*;
-}
 pub mod push_report {
     //! push_report API (re-exported at this path).
     pub use crate::push_report::*;

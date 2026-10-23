@@ -15,7 +15,7 @@
 //! **Checksums** detect corruption in pack, index, MIDX, commit-graph, and related
 //! file trailers. They use the same digest algorithms but are not object identities.
 //! Use [`ChecksumHasher`] / [`HashAlgo::checksum_digest`], [`HashingWriter`], and
-//! [`verify_trailer`]. Push certificate nonces use [`hmac_sha1`].
+//! [`verify_trailer`].
 
 use std::io::{self, Write};
 
@@ -101,9 +101,6 @@ pub fn backend(algo: HashAlgo) -> Backend {
         Backend::Portable
     }
 }
-/// RFC 2104 HMAC block size for SHA-1.
-const HMAC_BLOCK_SIZE: usize = 64;
-
 /// Maximum length of a Git object header (`"<kind> <decimal-len>\\0"`) on the stack.
 ///
 /// Longest kind name is `"commit"` (6 bytes) plus space, up to 20 decimal digits
@@ -483,44 +480,6 @@ pub fn verify_trailer(algo: HashAlgo, bytes: &[u8]) -> std::result::Result<(), T
     }
 }
 
-/// RFC 2104 HMAC-SHA1 (Git push certificate nonces and related signing).
-///
-/// `key_in` is the HMAC key material; `text` is the authenticated message.
-/// Returns the 20-byte authenticator.
-#[must_use]
-pub fn hmac_sha1(key_in: &[u8], text: &[u8]) -> [u8; 20] {
-    let mut key = [0u8; HMAC_BLOCK_SIZE];
-    if key_in.len() > HMAC_BLOCK_SIZE {
-        let mut hasher = Sha1::new();
-        hasher.update(key_in);
-        let digest = hasher.finalize();
-        key[..20].copy_from_slice(&digest);
-    } else {
-        key[..key_in.len()].copy_from_slice(key_in);
-    }
-
-    let mut k_ipad = [0u8; HMAC_BLOCK_SIZE];
-    let mut k_opad = [0u8; HMAC_BLOCK_SIZE];
-    for i in 0..HMAC_BLOCK_SIZE {
-        k_ipad[i] = key[i] ^ 0x36;
-        k_opad[i] = key[i] ^ 0x5c;
-    }
-
-    let mut inner = Sha1::new();
-    inner.update(k_ipad);
-    inner.update(text);
-    let inner_digest = inner.finalize();
-
-    let mut outer = Sha1::new();
-    outer.update(k_opad);
-    outer.update(inner_digest);
-    let outer_digest = outer.finalize();
-
-    let mut out = [0u8; 20];
-    out.copy_from_slice(&outer_digest);
-    out
-}
-
 /// Write `"<kind> <len>\\0"` into `buf` and return the number of bytes used.
 fn write_object_header(buf: &mut [u8], kind: ObjectKind, len: u64) -> usize {
     let kind_bytes = kind.as_str().as_bytes();
@@ -837,45 +796,6 @@ mod tests {
         let err = verify_trailer(HashAlgo::Sha1, &file).unwrap_err();
         assert!(matches!(err, TrailerMismatch { .. }));
         assert_ne!(err.expected, err.found);
-    }
-
-    #[test]
-    fn hmac_sha1_rfc2202_vectors() {
-        let key20 = [0x0b_u8; 20];
-        let mac = hmac_sha1(&key20, b"Hi There");
-        assert_eq!(hex::encode(mac), "b617318655057264e28bc0b6fb378c8ef146be00");
-
-        let key4 = b"Jefe";
-        let mac = hmac_sha1(key4, b"what do ya want for nothing?");
-        assert_eq!(hex::encode(mac), "effcdf6ae5eb2fa2d27416d5f184df9c259a7c79");
-
-        let key = [0xaa_u8; 20];
-        let data = [0xdd_u8; 50];
-        let mac = hmac_sha1(&key, &data);
-        assert_eq!(hex::encode(mac), "125d7342b9ac11cd91a39af48aa17b4f63f175d3");
-
-        let key = hex::decode("0102030405060708090a0b0c0d0e0f10111213141516171819").unwrap();
-        let data = [0xcd_u8; 50];
-        let mac = hmac_sha1(&key, &data);
-        assert_eq!(hex::encode(mac), "4c9007f4026250c6bc8414f9bf50c86c2d7235da");
-
-        let key = [0x0c_u8; 20];
-        let mac = hmac_sha1(&key, b"Test With Truncation");
-        assert_eq!(hex::encode(mac), "4c1a03424b55e07fe7f27be1d58bb9324a9a5a04");
-
-        let key = [0xaa_u8; 80];
-        let mac = hmac_sha1(
-            &key,
-            b"Test Using Larger Than Block-Size Key - Hash Key First",
-        );
-        assert_eq!(hex::encode(mac), "aa4ae5e15272d00e95705637ce8a3b55ed402112");
-
-        let key = [0xaa_u8; 80];
-        let mac = hmac_sha1(
-            &key,
-            b"Test Using Larger Than Block-Size Key and Larger Than One Block-Size Data",
-        );
-        assert_eq!(hex::encode(mac), "e8e99d0f45237d786d6bbaa7965c7808bbff1a91");
     }
 
     #[test]
