@@ -21,7 +21,7 @@
 
 use std::ops::RangeInclusive;
 
-use similar::Algorithm as SimilarAlgorithm;
+use similar::{Algorithm as SimilarAlgorithm, DiffOp};
 
 #[path = "blame_ignore_revs.rs"]
 mod blame_ignore_revs;
@@ -116,8 +116,9 @@ fn partition_pending_by_affix(
     par: &BlobLines,
     cur: &BlobLines,
     pending: Vec<TrackedLine>,
+    ws: crate::diff::WhitespaceMode,
 ) -> (Vec<TrackedLine>, Vec<TrackedLine>) {
-    let (prefix, suffix, _, _, _, _) = common_affix_trim_blob_lines(par, cur);
+    let (prefix, suffix, _, _, _, _) = common_affix_trim_blob_lines(par, cur, ws);
     let new_len = cur.len();
     let suffix_start = new_len.saturating_sub(suffix);
     let mut affix_mapped = Vec::new();
@@ -138,18 +139,93 @@ fn partition_pending_by_affix(
     (affix_mapped, need_diff)
 }
 
+fn blame_lines_equal(a: &str, b: &str, ws: crate::diff::WhitespaceMode) -> bool {
+    if !ws.normalizes_line_compare() {
+        a == b
+    } else {
+        ws.normalize_line_for_compare(a) == ws.normalize_line_for_compare(b)
+    }
+}
+
+fn blame_compacted_line_ops(
+    old_mid: &[&str],
+    new_mid: &[&str],
+    diff_algorithm: BlameDiffAlgorithm,
+    indent_heuristic: bool,
+    ws: crate::diff::WhitespaceMode,
+) -> Vec<DiffOp> {
+    use similar::TextDiff;
+
+    if !ws.normalizes_line_compare() {
+        if diff_algorithm == BlameDiffAlgorithm::Myers {
+            return crate::diff::line_diff_ops_git_xdiff_compacted(
+                old_mid,
+                new_mid,
+                indent_heuristic,
+            );
+        }
+        return crate::diff_indent_heuristic::diff_slice_ops_compacted(
+            old_mid,
+            new_mid,
+            diff_algorithm.to_similar(),
+            indent_heuristic,
+        );
+    }
+    let old_norm: Vec<String> = old_mid
+        .iter()
+        .map(|l| ws.normalize_line_for_compare(l).into_owned())
+        .collect();
+    let new_norm: Vec<String> = new_mid
+        .iter()
+        .map(|l| ws.normalize_line_for_compare(l).into_owned())
+        .collect();
+    let old_cmp: Vec<&str> = old_norm.iter().map(String::as_str).collect();
+    let new_cmp: Vec<&str> = new_norm.iter().map(String::as_str).collect();
+    if diff_algorithm == BlameDiffAlgorithm::Myers {
+        use crate::line_interner::LineInterner;
+        let mut interner = LineInterner::default();
+        let ids1 = interner.intern_all(&old_cmp);
+        let ids2 = interner.intern_all(&new_cmp);
+        return crate::diff::line_diff_ops_git_xdiff_compacted_ids(
+            &ids1,
+            &ids2,
+            old_mid,
+            new_mid,
+            indent_heuristic,
+        );
+    }
+    let diff = TextDiff::configure()
+        .algorithm(diff_algorithm.to_similar())
+        .diff_slices(&old_cmp, &new_cmp);
+    let raw = diff.ops().to_vec();
+    crate::diff_indent_heuristic::apply_change_compact_to_ops(
+        &raw,
+        old_mid,
+        new_mid,
+        indent_heuristic,
+    )
+}
+
 fn common_affix_trim_blob_lines(
     old: &BlobLines,
     new: &BlobLines,
+    ws: crate::diff::WhitespaceMode,
 ) -> (usize, usize, usize, usize, usize, usize) {
     let mut prefix = 0usize;
-    while prefix < old.len() && prefix < new.len() && old.line(prefix) == new.line(prefix) {
+    while prefix < old.len()
+        && prefix < new.len()
+        && blame_lines_equal(old.line(prefix), new.line(prefix), ws)
+    {
         prefix += 1;
     }
     let mut suffix = 0usize;
     while suffix < old.len().saturating_sub(prefix)
         && suffix < new.len().saturating_sub(prefix)
-        && old.line(old.len() - 1 - suffix) == new.line(new.len() - 1 - suffix)
+        && blame_lines_equal(
+            old.line(old.len() - 1 - suffix),
+            new.line(new.len() - 1 - suffix),
+            ws,
+        )
     {
         suffix += 1;
     }
@@ -161,15 +237,19 @@ fn common_affix_trim_blob_lines(
 fn common_affix_trim<'a>(
     old: &'a [&'a str],
     new: &'a [&'a str],
+    ws: crate::diff::WhitespaceMode,
 ) -> (usize, usize, &'a [&'a str], &'a [&'a str]) {
     let mut prefix = 0usize;
-    while prefix < old.len() && prefix < new.len() && old[prefix] == new[prefix] {
+    while prefix < old.len()
+        && prefix < new.len()
+        && blame_lines_equal(old[prefix], new[prefix], ws)
+    {
         prefix += 1;
     }
     let mut suffix = 0usize;
     while suffix < old.len().saturating_sub(prefix)
         && suffix < new.len().saturating_sub(prefix)
-        && old[old.len() - 1 - suffix] == new[new.len() - 1 - suffix]
+        && blame_lines_equal(old[old.len() - 1 - suffix], new[new.len() - 1 - suffix], ws)
     {
         suffix += 1;
     }
@@ -185,7 +265,15 @@ pub fn build_line_map(
     diff_algorithm: BlameDiffAlgorithm,
     indent_heuristic: bool,
 ) -> Vec<Option<usize>> {
-    build_line_map_with_changed_flags(old, new, diff_algorithm, indent_heuristic, false).0
+    build_line_map_with_changed_flags(
+        old,
+        new,
+        diff_algorithm,
+        indent_heuristic,
+        false,
+        crate::diff::WhitespaceMode::default(),
+    )
+    .0
 }
 
 /// True when every focused child line index lies in the unchanged prefix or suffix
@@ -215,8 +303,10 @@ fn build_line_map_with_changed_flags_owned(
     indent_heuristic: bool,
     with_changed_flags: bool,
     child_focus: Option<&[usize]>,
+    ws: crate::diff::WhitespaceMode,
 ) -> (Vec<Option<usize>>, Vec<bool>) {
-    let (prefix, suffix, old_lo, old_hi, new_lo, new_hi) = common_affix_trim_blob_lines(old, new);
+    let (prefix, suffix, old_lo, old_hi, new_lo, new_hi) =
+        common_affix_trim_blob_lines(old, new, ws);
     let mut map = vec![None; new.len()];
     for (i, slot) in map.iter_mut().take(prefix).enumerate() {
         *slot = Some(i);
@@ -256,16 +346,7 @@ fn build_line_map_with_changed_flags_owned(
     let new_mid_owned: Vec<&str> = (new_w_lo..new_w_hi).map(|i| new.line(i)).collect();
     let old_mid = old_mid_owned.as_slice();
     let new_mid = new_mid_owned.as_slice();
-    let ops = if diff_algorithm == BlameDiffAlgorithm::Myers {
-        crate::diff::line_diff_ops_git_xdiff_compacted(old_mid, new_mid, indent_heuristic)
-    } else {
-        crate::diff_indent_heuristic::diff_slice_ops_compacted(
-            old_mid,
-            new_mid,
-            diff_algorithm.to_similar(),
-            indent_heuristic,
-        )
-    };
+    let ops = blame_compacted_line_ops(old_mid, new_mid, diff_algorithm, indent_heuristic, ws);
     let mid_map = crate::diff_indent_heuristic::map_new_to_old_from_ops(&ops, new_mid.len());
     let old_base = old_w_lo;
     let new_base = new_w_lo;
@@ -292,8 +373,9 @@ fn build_line_map_with_changed_flags(
     diff_algorithm: BlameDiffAlgorithm,
     indent_heuristic: bool,
     with_changed_flags: bool,
+    ws: crate::diff::WhitespaceMode,
 ) -> (Vec<Option<usize>>, Vec<bool>) {
-    let (prefix, suffix, old_mid, new_mid) = common_affix_trim(old, new);
+    let (prefix, suffix, old_mid, new_mid) = common_affix_trim(old, new, ws);
     let mut map = vec![None; new.len()];
     let mut flags = vec![false; new.len()];
     for (i, slot) in map.iter_mut().take(prefix).enumerate() {
@@ -309,16 +391,7 @@ fn build_line_map_with_changed_flags(
     }
     // `--indent-heuristic` / `diff.indentHeuristic` shifts ambiguous add/delete
     // runs like Git's xdiff, which changes which lines blame attributes (t4061).
-    let ops = if diff_algorithm == BlameDiffAlgorithm::Myers {
-        crate::diff::line_diff_ops_git_xdiff_compacted(old_mid, new_mid, indent_heuristic)
-    } else {
-        crate::diff_indent_heuristic::diff_slice_ops_compacted(
-            old_mid,
-            new_mid,
-            diff_algorithm.to_similar(),
-            indent_heuristic,
-        )
-    };
+    let ops = blame_compacted_line_ops(old_mid, new_mid, diff_algorithm, indent_heuristic, ws);
     let mid_map = crate::diff_indent_heuristic::map_new_to_old_from_ops(&ops, new_mid.len());
     for (j, parent) in mid_map.into_iter().enumerate() {
         map[prefix + j] = parent.map(|idx| idx + prefix);
@@ -339,18 +412,44 @@ fn fill_exact_text_relocate(
     new: &[&str],
     map: &mut [Option<usize>],
     used_old: &mut [usize],
+    ws: crate::diff::WhitespaceMode,
 ) {
-    let mut by_content: HashMap<&str, Vec<usize>> = HashMap::new();
-    for (idx, line) in old.iter().enumerate() {
-        by_content.entry(*line).or_default().push(idx);
+    let mut by_content_norm: HashMap<String, Vec<usize>> = HashMap::new();
+    if ws.normalizes_line_compare() {
+        for (idx, line) in old.iter().enumerate() {
+            let key = ws.normalize_line_for_compare(line).into_owned();
+            by_content_norm.entry(key).or_default().push(idx);
+        }
+    } else {
+        let mut by_content: HashMap<&str, Vec<usize>> = HashMap::new();
+        for (idx, line) in old.iter().enumerate() {
+            by_content.entry(*line).or_default().push(idx);
+        }
+        fill_exact_text_relocate_with_lookup(old, new, map, used_old, |line| {
+            by_content.get(line).map(Vec::as_slice)
+        });
+        return;
     }
 
+    fill_exact_text_relocate_with_lookup(old, new, map, used_old, |line| {
+        let key = ws.normalize_line_for_compare(line).into_owned();
+        by_content_norm.get(&key).map(Vec::as_slice)
+    });
+}
+
+fn fill_exact_text_relocate_with_lookup<'a>(
+    _old: &[&str],
+    new: &[&str],
+    map: &mut [Option<usize>],
+    used_old: &mut [usize],
+    mut lookup: impl FnMut(&str) -> Option<&'a [usize]>,
+) {
     let mut windowed: Vec<usize> = Vec::new();
     for new_idx in 0..map.len() {
         if map[new_idx].is_some() {
             continue;
         }
-        let Some(candidates) = by_content.get(new[new_idx]) else {
+        let Some(candidates) = lookup(new[new_idx]) else {
             continue;
         };
         let mut best: Option<(usize, usize, usize)> = None;
@@ -394,6 +493,15 @@ pub fn build_exact_relocate_line_map(
     new: &[&str],
     exact_map: &[Option<usize>],
 ) -> Vec<Option<usize>> {
+    build_exact_relocate_line_map_ws(old, new, exact_map, crate::diff::WhitespaceMode::default())
+}
+
+fn build_exact_relocate_line_map_ws(
+    old: &[&str],
+    new: &[&str],
+    exact_map: &[Option<usize>],
+    ws: crate::diff::WhitespaceMode,
+) -> Vec<Option<usize>> {
     let mut fuzzy_map = exact_map.to_vec();
     let mut used_old = vec![0usize; old.len()];
     for old_idx in fuzzy_map.iter().flatten() {
@@ -402,7 +510,7 @@ pub fn build_exact_relocate_line_map(
         }
     }
 
-    fill_exact_text_relocate(old, new, &mut fuzzy_map, &mut used_old);
+    fill_exact_text_relocate(old, new, &mut fuzzy_map, &mut used_old, ws);
 
     fuzzy_map
 }
@@ -545,6 +653,15 @@ pub fn build_fuzzy_line_map(
     new: &[&str],
     exact_map: &[Option<usize>],
 ) -> Vec<Option<usize>> {
+    build_fuzzy_line_map_ws(old, new, exact_map, crate::diff::WhitespaceMode::default())
+}
+
+fn build_fuzzy_line_map_ws(
+    old: &[&str],
+    new: &[&str],
+    exact_map: &[Option<usize>],
+    ws: crate::diff::WhitespaceMode,
+) -> Vec<Option<usize>> {
     let mut fuzzy_map = exact_map.to_vec();
     let mut used_old = vec![0usize; old.len()];
     for old_idx in fuzzy_map.iter().flatten() {
@@ -556,7 +673,7 @@ pub fn build_fuzzy_line_map(
     // First, greedily recover exact-text matches among unresolved lines.
     // This is important for reorders where Myers may not anchor every moved
     // line and fuzzy similarity can otherwise pair the wrong include.
-    fill_exact_text_relocate(old, new, &mut fuzzy_map, &mut used_old);
+    fill_exact_text_relocate(old, new, &mut fuzzy_map, &mut used_old, ws);
 
     let mut anchors: Vec<(usize, usize)> = exact_map
         .iter()
@@ -1371,6 +1488,7 @@ struct PairMapCacheKey {
     indent_heuristic: bool,
     fuzzy: bool,
     include_stop_blame: bool,
+    whitespace: crate::diff::WhitespaceMode,
 }
 
 type BloomKeyCacheEntry = (String, u32, Arc<Vec<Vec<u32>>>);
@@ -1387,6 +1505,7 @@ struct BlameSession<'a> {
     odb: &'a Odb,
     textconv_ctx: Option<&'a BlameTextconvContext>,
     use_textconv: bool,
+    whitespace: crate::diff::WhitespaceMode,
     copy_score_parallel: ParallelOptions,
     commit_graph: Option<Arc<CommitGraphChain>>,
     bloom_pathspec: Vec<String>,
@@ -1416,6 +1535,7 @@ impl<'a> BlameSession<'a> {
             odb,
             textconv_ctx,
             use_textconv,
+            whitespace: crate::diff::WhitespaceMode::default(),
             copy_score_parallel: diff_rename_parallel_options(&config, thread_policy),
             commit_graph: None,
             bloom_pathspec: Vec::new(),
@@ -1578,6 +1698,7 @@ impl<'a> BlameSession<'a> {
         include_stop_blame: bool,
         child_focus: Option<&[usize]>,
     ) -> PairMapCacheValue {
+        let ws = self.whitespace;
         let key = PairMapCacheKey {
             parent: parent_oid,
             parent_path: parent_path.to_owned(),
@@ -1589,6 +1710,7 @@ impl<'a> BlameSession<'a> {
             indent_heuristic,
             fuzzy: is_ignored,
             include_stop_blame,
+            whitespace: ws,
         };
         let cacheable = child_focus.is_none();
         if cacheable {
@@ -1610,6 +1732,7 @@ impl<'a> BlameSession<'a> {
                 indent_heuristic,
                 true,
                 child_focus,
+                ws,
             )
         } else {
             (
@@ -1620,6 +1743,7 @@ impl<'a> BlameSession<'a> {
                     indent_heuristic,
                     false,
                     child_focus,
+                    ws,
                 )
                 .0,
                 Vec::new(),
@@ -1643,9 +1767,9 @@ impl<'a> BlameSession<'a> {
                 let par_refs = Self::line_refs(par_lines);
                 let cur_refs = Self::line_refs(cur_lines);
                 let mut line_map =
-                    build_exact_relocate_line_map(&par_refs, &cur_refs, &diff_line_map);
+                    build_exact_relocate_line_map_ws(&par_refs, &cur_refs, &diff_line_map, ws);
                 if is_ignored {
-                    line_map = build_fuzzy_line_map(&par_refs, &cur_refs, &line_map);
+                    line_map = build_fuzzy_line_map_ws(&par_refs, &cur_refs, &line_map, ws);
                 }
                 let stop = if par_lines.len() == cur_lines.len() {
                     blame_stops_on_current_commit(&diff_line_map, &line_map, &xdiff_changed)
@@ -1766,9 +1890,11 @@ pub fn compute_blame(
     grafts: &HashMap<ObjectId, Vec<ObjectId>>,
     indent_heuristic: bool,
     line_range: Option<RangeInclusive<usize>>,
+    whitespace: crate::diff::WhitespaceMode,
     thread_policy: &ThreadPolicy,
 ) -> Result<Vec<BlameLine>> {
     let mut session = BlameSession::new(odb, textconv_ctx, use_textconv, thread_policy);
+    session.whitespace = whitespace;
     compute_blame_with_session(
         odb,
         start_oid,
@@ -2611,6 +2737,7 @@ fn compute_blame_with_session(
                     par_lines_arc.as_ref(),
                     cur_lines_arc.as_ref(),
                     pending_batch,
+                    session.whitespace,
                 );
                 // Only use affix partition when it avoids work: affix-only skip, or mixed
                 // affix + middle. When every pending line sits in the edited middle, fall back
@@ -3228,6 +3355,8 @@ pub struct BlameOptions {
     pub first_parent_only: bool,
     /// Commits to treat as transparent during the history walk.
     pub ignore: IgnoreRevs,
+    /// Whitespace rules when comparing lines between revisions (`-w` / ignore-all-space today).
+    pub whitespace: crate::diff::WhitespaceMode,
 }
 
 /// One blamed line returned by [`blame_file`].
@@ -3294,6 +3423,7 @@ pub fn blame_file(repo: &Repository, path: &str, options: &BlameOptions) -> Resu
 
     let thread_policy = repo.thread_policy();
     let mut session = BlameSession::new(repo.odb(), None, false, &thread_policy);
+    session.whitespace = options.whitespace;
     session.commit_graph = repo.caches().commit_graph_chain(repo.odb().objects_dir());
     let (lines, commits) = repo.odb().with_pack_read_context(
         || -> Result<(Vec<BlameAttributedLine>, HashMap<ObjectId, BlameCommitInfo>)> {
@@ -3508,7 +3638,8 @@ mod tests {
             ignored: false,
             source_path: None,
         }];
-        let (affix, need) = partition_pending_by_affix(&old, &new, pending);
+        let (affix, need) =
+            partition_pending_by_affix(&old, &new, pending, crate::diff::WhitespaceMode::default());
         assert!(need.is_empty());
         assert_eq!(affix[0].current_idx, 0);
 
@@ -3518,7 +3649,12 @@ mod tests {
             ignored: false,
             source_path: None,
         }];
-        let (affix, need) = partition_pending_by_affix(&old, &new, pending_mid);
+        let (affix, need) = partition_pending_by_affix(
+            &old,
+            &new,
+            pending_mid,
+            crate::diff::WhitespaceMode::default(),
+        );
         assert!(affix.is_empty());
         assert_eq!(need.len(), 1);
     }

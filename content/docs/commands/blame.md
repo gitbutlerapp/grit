@@ -8,7 +8,7 @@ order: 2
 ## Synopsis
 
 ```text
-grit blame [--rev <commit>] [-L START,END] [--first-parent]
+grit blame [--rev <commit>] [-L START,END] [--first-parent] [-w]
   [--ignore-rev <REV>]... [--ignore-revs-file <FILE>]... <file>
 ```
 
@@ -30,6 +30,7 @@ When a commit renamed or moved the file (including rename-and-edit in the same c
 | `--first-parent` | At merge commits, follow only the first parent when attributing lines. Default matches Git blame: all parents are considered. |
 | `--ignore-rev <REV>` | Treat this commit as transparent while walking history (repeatable). Unknown revisions are an error. |
 | `--ignore-revs-file <FILE>` | Read full-length commit oids to ignore, one per line (`#` comments, blank lines skipped). Repeatable; `""` clears entries loaded from config or earlier files. Missing files are an error. Relative paths are resolved from the repository root. Config `blame.ignoreRevsFile` (multi-valued) is applied before CLI files. |
+| `-w`, `--ignore-all-space` | Ignore whitespace when comparing lines between revisions (same rules as [`grit diff -w`](../diff/)). Whitespace-only edits do not move blame to a newer commit. |
 
 Human output prefixes ignored lines with `?` and lines that cannot be blamed past an ignored commit with `*` (same markers Git uses when `blame.markIgnoredLines` / `blame.markUnblamableLines` are enabled).
 

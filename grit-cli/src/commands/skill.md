@@ -46,6 +46,7 @@ The target branch is the first that exists of: the `target.branch` config value,
 | History with patches or file lists | `grit log -p`, `grit log --stat`, `grit log --name-status`, … (same format flags as `grit diff`) |
 | Commits on this branch not on the target | `grit shortlog` |
 | Skip formatting commits in blame | `grit blame --ignore-rev <OID>` or `grit blame --ignore-revs-file .git-blame-ignore-revs` (set `blame.ignoreRevsFile` in config for a default list) |
+| Ignore whitespace-only edits in blame | `grit blame -w` / `--ignore-all-space` (same spelling as `grit diff -w`) |
 | What happened to this branch recently | `grit reflog [REF] --json` (`old_oid`, `new_oid`, `date`, `committer`, plus `oid` / `relative_date`) |
 
 `grit diff --json` on **`--staged`** or **`--unstaged`** patch output includes stable **`hunks[].id`** (12 lowercase hex chars) and **`hunks[].index`** (0-based within the file). Ids hash side, path, and line bodies (not line numbers), so they stay valid when earlier hunks are staged. Use **`grit add --hunks <id,...>`** or **`grit add --lines path:start-end`** (new-side **`lines[].new`**, 1-based inclusive); commit-range diffs omit `id` for now.

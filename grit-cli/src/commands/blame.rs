@@ -6,6 +6,7 @@ use std::ops::RangeInclusive;
 
 use anyhow::{Context, Result};
 use grit_lib::blame::{blame_file, BlameOptions, BlameResult, IgnoreRevs, IgnoreRevsSources};
+use grit_lib::diff::WhitespaceMode;
 use grit_lib::objects::ObjectId;
 use grit_lib::revwalk::rev_parse::resolve_revision_as_commit;
 use schemars::JsonSchema;
@@ -134,6 +135,7 @@ fn normalize_blame_line_content(content: String) -> String {
     content.trim_end_matches(['\n', '\r']).to_owned()
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn run(
     file: String,
     rev: Option<String>,
@@ -141,6 +143,7 @@ pub fn run(
     first_parent: bool,
     ignore_rev: Vec<String>,
     ignore_revs_file: Vec<String>,
+    ignore_all_space: bool,
     now: time::OffsetDateTime,
 ) -> Result<BlameOutcome> {
     let repo = context::discover()?;
@@ -173,6 +176,11 @@ pub fn run(
         },
     )?;
 
+    let mut whitespace = WhitespaceMode::default();
+    if ignore_all_space {
+        whitespace = WhitespaceMode::ignore_all_space();
+    }
+
     let result = blame_file(
         &repo,
         &file,
@@ -181,6 +189,7 @@ pub fn run(
             line_range: range,
             first_parent_only: first_parent,
             ignore,
+            whitespace,
         },
     )?;
 

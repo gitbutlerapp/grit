@@ -72,6 +72,7 @@ fn compute_blame_public_entry_point_attributes_lines() {
         &grafts,
         false,
         None,
+        grit_lib::diff::WhitespaceMode::default(),
         &grit_lib::parallel::ThreadPolicy::default(),
     )
     .expect("compute_blame");
@@ -119,6 +120,7 @@ fn compute_blame_line_range_limits_output_and_work() {
         &grafts,
         false,
         Some(1..=1),
+        grit_lib::diff::WhitespaceMode::default(),
         &policy,
     )
     .expect("ranged blame");
@@ -206,6 +208,7 @@ fn compute_blame_line_range_through_ignored_merge_after_line_insert() {
         &grafts,
         false,
         None,
+        grit_lib::diff::WhitespaceMode::default(),
         &policy,
     )
     .expect("full blame");
@@ -228,6 +231,7 @@ fn compute_blame_line_range_through_ignored_merge_after_line_insert() {
         &grafts,
         false,
         Some(2..=2),
+        grit_lib::diff::WhitespaceMode::default(),
         &policy,
     )
     .expect("ranged blame");

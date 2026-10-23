@@ -6,7 +6,7 @@ use crate::ws::is_space_git;
 
 /// Whitespace handling for line diffs ([`super::DiffOptions::whitespace`]).
 #[non_exhaustive]
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 pub struct WhitespaceMode {
     /// `-w` / `--ignore-all-space`: drop every whitespace character when comparing lines.
     pub ignore_all_space: bool,

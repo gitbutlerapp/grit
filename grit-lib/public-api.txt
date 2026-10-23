@@ -452,6 +452,7 @@ pub grit_lib::blame::BlameOptions::first_parent_only: bool
 pub grit_lib::blame::BlameOptions::ignore: grit_lib::blame::IgnoreRevs
 pub grit_lib::blame::BlameOptions::line_range: core::option::Option<core::ops::range::RangeInclusive<usize>>
 pub grit_lib::blame::BlameOptions::start: core::option::Option<grit_lib::objects::ObjectId>
+pub grit_lib::blame::BlameOptions::whitespace: grit_lib::diff::WhitespaceMode
 impl core::clone::Clone for grit_lib::blame::BlameOptions
 pub fn grit_lib::blame::BlameOptions::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::blame::BlameOptions

@@ -519,6 +519,7 @@ fn blame_copy_serial_matches_parallel_scoring() {
         &grafts,
         false,
         None,
+        grit_lib::diff::WhitespaceMode::default(),
         &serial_policy(),
     )
     .expect("serial blame");
@@ -535,6 +536,7 @@ fn blame_copy_serial_matches_parallel_scoring() {
         &grafts,
         false,
         None,
+        grit_lib::diff::WhitespaceMode::default(),
         &parallel_policy(),
     )
     .expect("parallel blame");

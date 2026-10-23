@@ -713,6 +713,9 @@ enum Command {
         /// Read revision oids to ignore from a file (repeatable; `""` clears prior entries).
         #[arg(long = "ignore-revs-file", value_name = "FILE")]
         ignore_revs_file: Vec<String>,
+        /// Ignore whitespace when comparing lines (`git blame -w`).
+        #[arg(short = 'w', long = "ignore-all-space")]
+        ignore_all_space: bool,
     },
     /// Show changes as a diff. No argument: uncommitted changes; with a commit:
     /// the change that commit introduced; with two commits (or `A..B`) diff their trees.
@@ -2007,6 +2010,7 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             first_parent,
             ignore_rev,
             ignore_revs_file,
+            ignore_all_space,
         } => emit(
             &commands::blame::run(
                 file,
@@ -2015,6 +2019,7 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
                 first_parent,
                 ignore_rev,
                 ignore_revs_file,
+                ignore_all_space,
                 ctx.now,
             )?,
             opts,
