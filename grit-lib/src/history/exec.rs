@@ -162,11 +162,9 @@ pub fn verify_rebase_with_exec(
             });
             if exit_code != 0 {
                 let (completed_runs, stdout, stderr) = match runs.split_last() {
-                    Some((failed, prior)) => (
-                        prior.to_vec(),
-                        failed.stdout.clone(),
-                        failed.stderr.clone(),
-                    ),
+                    Some((failed, prior)) => {
+                        (prior.to_vec(), failed.stdout.clone(), failed.stderr.clone())
+                    }
                     None => (Vec::new(), stdout, stderr),
                 };
                 let exec_err = HistoryError::ExecFailed {
