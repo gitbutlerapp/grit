@@ -4,7 +4,10 @@ use anyhow::{Context, Result};
 use grit_lib::config::ConfigSet;
 use grit_lib::refs::listing::{RefSort, SortKey};
 use grit_lib::remote::fetch_request::resolve_remote_argument;
-use grit_lib::remote::{fold_peeled_refs, DefaultHttpClientFactory, ListRefsOptions, RemoteRef};
+use grit_lib::remote::{
+    fold_peeled_refs, DefaultHttpClientFactory, InspectOptions, ListRefsOptions,
+    RemoteBranchStateKind, RemoteRef, RemoteSummary,
+};
 use grit_lib::repo::Repository;
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -33,6 +36,46 @@ pub enum RemoteOutcome {
         #[schemars(skip)]
         lines: Vec<RemoteRefLine>,
     },
+    Show {
+        #[serde(flatten)]
+        summary: RemoteShowJson,
+    },
+}
+
+/// JSON view of [`RemoteSummary`] for `grit remote show --json`.
+#[derive(Serialize, JsonSchema, Clone)]
+pub struct RemoteShowJson {
+    pub name: String,
+    pub fetch_url: String,
+    pub push_url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub head_branch: Option<String>,
+    pub branches: Vec<RemoteShowBranchJson>,
+    pub pull: Vec<RemoteShowPullJson>,
+}
+
+/// One branch row in a `show` JSON outcome.
+#[derive(Serialize, JsonSchema, Clone)]
+pub struct RemoteShowBranchJson {
+    pub name: String,
+    pub state: RemoteShowBranchStateJson,
+}
+
+/// Branch tracking state in JSON (`tracked` / `new` / `stale`).
+#[derive(Serialize, JsonSchema, Clone, Copy)]
+#[serde(rename_all = "snake_case")]
+pub enum RemoteShowBranchStateJson {
+    Tracked,
+    New,
+    Stale,
+}
+
+/// One pull-config row in a `show` JSON outcome.
+#[derive(Serialize, JsonSchema, Clone)]
+pub struct RemoteShowPullJson {
+    pub local: String,
+    pub merges: String,
 }
 
 /// One remote in a `list` outcome.
@@ -85,6 +128,7 @@ impl HumanRender for RemoteOutcome {
                     }
                 }
             }
+            RemoteOutcome::Show { summary } => render_show_human(w, summary)?,
         }
         Ok(())
     }
@@ -95,6 +139,7 @@ impl MarkdownRender for RemoteOutcome {
         match self {
             RemoteOutcome::List { remotes } => markdown::print_remote_list(w, remotes)?,
             RemoteOutcome::Add { name, url } => outln!(w, "Added remote `{name}` → {url}."),
+            RemoteOutcome::Show { summary } => render_show_markdown(w, summary)?,
             RemoteOutcome::Refs { refs, .. } => {
                 outln!(w, "## Remote refs\n");
                 if refs.is_empty() {
@@ -259,4 +304,128 @@ fn add_remote(repo: &Repository, name: &str, url: &str) -> Result<RemoteOutcome>
         name: name.to_owned(),
         url: url.to_owned(),
     })
+}
+
+/// CLI flags for `grit remote show`.
+#[derive(Debug, Clone, Copy)]
+pub struct RemoteShowCliOptions {
+    /// When `false`, use local remote-tracking refs only (no network).
+    pub query: bool,
+    pub limit: Option<usize>,
+}
+
+pub fn run_show(name: &str, cli: &RemoteShowCliOptions) -> Result<RemoteOutcome> {
+    let factory = DefaultHttpClientFactory;
+    let repo = context::discover()?;
+    let options = InspectOptions {
+        query: cli.query,
+        limit: cli.limit,
+    };
+    let summary = repo
+        .remotes()
+        .inspect(name, &options, Some(&factory))
+        .map_err(map_remote_error)?;
+    Ok(RemoteOutcome::Show {
+        summary: map_remote_show(&summary),
+    })
+}
+
+fn map_remote_show(summary: &RemoteSummary) -> RemoteShowJson {
+    RemoteShowJson {
+        name: summary.name.clone(),
+        fetch_url: summary.fetch_url.clone(),
+        push_url: summary.push_url.clone(),
+        head_branch: summary.head_branch.clone(),
+        branches: summary
+            .branches
+            .iter()
+            .map(|b| RemoteShowBranchJson {
+                name: b.name.clone(),
+                state: match b.state {
+                    RemoteBranchStateKind::Tracked => RemoteShowBranchStateJson::Tracked,
+                    RemoteBranchStateKind::New => RemoteShowBranchStateJson::New,
+                    RemoteBranchStateKind::Stale => RemoteShowBranchStateJson::Stale,
+                },
+            })
+            .collect(),
+        pull: summary
+            .pull
+            .iter()
+            .map(|p| RemoteShowPullJson {
+                local: p.local.clone(),
+                merges: p.merges.clone(),
+            })
+            .collect(),
+    }
+}
+
+fn render_show_human(w: &mut dyn Write, summary: &RemoteShowJson) -> Result<()> {
+    outln!(w, "* remote {}", summary.name);
+    outln!(w, "  Fetch URL: {}", summary.fetch_url);
+    outln!(w, "  Push  URL: {}", summary.push_url);
+    if let Some(head) = &summary.head_branch {
+        outln!(w, "  HEAD branch: {head}");
+    }
+    outln!(w, "  Remote branches:");
+    if summary.branches.is_empty() {
+        outln!(w, "    (none)");
+    } else {
+        for branch in &summary.branches {
+            let state = match branch.state {
+                RemoteShowBranchStateJson::Tracked => "tracked",
+                RemoteShowBranchStateJson::New => "new",
+                RemoteShowBranchStateJson::Stale => "stale",
+            };
+            outln!(w, "    {} {}", branch.name, state);
+        }
+    }
+    if !summary.pull.is_empty() {
+        outln!(w, "  Local branches configured for pull:");
+        for row in &summary.pull {
+            let merge_short = row
+                .merges
+                .strip_prefix("refs/heads/")
+                .unwrap_or(row.merges.as_str());
+            outln!(w, "    {} merges with remote {}", row.local, merge_short);
+        }
+    }
+    Ok(())
+}
+
+fn render_show_markdown(w: &mut dyn Write, summary: &RemoteShowJson) -> Result<()> {
+    outln!(w, "## Remote `{}`\n", summary.name);
+    outln!(w, "| | |");
+    outln!(w, "| --- | --- |");
+    outln!(w, "| Fetch URL | {} |", summary.fetch_url);
+    outln!(w, "| Push URL | {} |", summary.push_url);
+    if let Some(head) = &summary.head_branch {
+        outln!(w, "| HEAD branch | `{head}` |");
+    }
+    outln!(w);
+    outln!(w, "### Remote branches\n");
+    if summary.branches.is_empty() {
+        outln!(w, "No remote branches.\n");
+    } else {
+        outln!(w, "| Branch | State |");
+        outln!(w, "| --- | --- |");
+        for branch in &summary.branches {
+            let state = match branch.state {
+                RemoteShowBranchStateJson::Tracked => "tracked",
+                RemoteShowBranchStateJson::New => "new",
+                RemoteShowBranchStateJson::Stale => "stale",
+            };
+            outln!(w, "| `{}` | {} |", branch.name, state);
+        }
+        outln!(w);
+    }
+    if !summary.pull.is_empty() {
+        outln!(w, "### Pull configuration\n");
+        outln!(w, "| Local branch | Merges |");
+        outln!(w, "| --- | --- |");
+        for row in &summary.pull {
+            outln!(w, "| `{}` | `{}` |", row.local, row.merges);
+        }
+        outln!(w);
+    }
+    Ok(())
 }

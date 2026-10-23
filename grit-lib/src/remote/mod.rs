@@ -13,9 +13,14 @@
 //! # }
 //! ```
 mod core;
+mod inspect;
 pub mod push_plan;
 
 pub use core::*;
+pub use inspect::{
+    inspect_remote, InspectOptions, RemoteBranchState, RemoteBranchStateKind, RemotePullBranch,
+    RemoteSummary,
+};
 
 pub mod fetch {
     //! fetch API (re-exported at this path).

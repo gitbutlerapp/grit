@@ -18,6 +18,41 @@
       ],
       "type": "object"
     },
+    "RemoteShowBranchJson": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "tracked",
+            "new",
+            "stale"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "state"
+      ],
+      "type": "object"
+    },
+    "RemoteShowPullJson": {
+      "properties": {
+        "local": {
+          "type": "string"
+        },
+        "merges": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "local",
+        "merges"
+      ],
+      "type": "object"
+    },
     "RemoteRefEntry": {
       "description": "One ref in a `refs` JSON outcome (annotated tags carry `peeled`; no separate `^{}` row).",
       "properties": {
@@ -47,7 +82,7 @@
       "type": "object"
     }
   },
-  "description": "Result of `grit remote`, tagged by `action` (`list` / `add` / `refs`).",
+  "description": "Result of `grit remote`, tagged by `action` (`list` / `add` / `refs` / `show`).",
   "oneOf": [
     {
       "properties": {
@@ -110,6 +145,52 @@
       "required": [
         "action",
         "refs"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "action": {
+          "enum": [
+            "show"
+          ],
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "fetch_url": {
+          "type": "string"
+        },
+        "push_url": {
+          "type": "string"
+        },
+        "head_branch": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "branches": {
+          "items": {
+            "$ref": "#/definitions/RemoteShowBranchJson"
+          },
+          "type": "array"
+        },
+        "pull": {
+          "items": {
+            "$ref": "#/definitions/RemoteShowPullJson"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "action",
+        "name",
+        "fetch_url",
+        "push_url",
+        "branches",
+        "pull"
       ],
       "type": "object"
     }

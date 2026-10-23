@@ -26,6 +26,8 @@ To turn a user's repository argument (a configured name, a URL, an scp-style `ho
 
 [`repo.remotes().add(name, url)`](rustdoc:grit_lib::repo_handles::RepositoryRemotes::add) writes `remote.<name>.url` and the default fetch refspec to the shared repository config (also from a linked worktree), then reloads the repository's config. Like `git remote add`, it refuses an existing remote (`RemoteError::RemoteExists`) and a name whose tracking refs `refs/remotes/<name>/…` would be invalid (`RemoteError::InvalidRemoteName`), and it stores the URL as given.
 
+[`repo.remotes().inspect(name, options, http_factory)`](rustdoc:grit_lib::repo_handles::RepositoryRemotes::inspect) returns a [`RemoteSummary`](rustdoc:grit_lib::remote::RemoteSummary): fetch and push URLs, optional [`head_branch`](rustdoc:grit_lib::remote::RemoteSummary::head_branch), [`RemoteBranchState`](rustdoc:grit_lib::remote::RemoteBranchState) rows (`tracked`, `new`, or `stale`), and [`RemotePullBranch`](rustdoc:grit_lib::remote::RemotePullBranch) entries from `branch.*` config. With [`InspectOptions::query`](rustdoc:grit_lib::remote::InspectOptions::query) it lists refs on the remote (symrefs included) and compares them to local tracking refs; stale detection reuses [`tracking_refs_gone_on_remote`](rustdoc:grit_lib::remote::transfer::tracking_refs_gone_on_remote), the same rules as fetch prune. Without a query, branch names come from `refs/remotes/<name>/…` and are all reported as tracked.
+
 ## list refs
 
 `Remote::list_refs` takes `ListRefsOptions` (prefixes, heads, tags, symrefs, peel) and returns `RemoteRef` entries in `git ls-remote` order. On disk it uses `list_refs_from_git_dir`. Over the wire it uses protocol v2 `ls-refs` when available, otherwise the v0/v1 ref advertisement.

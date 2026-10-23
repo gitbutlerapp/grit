@@ -2900,20 +2900,19 @@ fn is_default_head_under_tracking_prefix(refname: &str, tracking_prefix: &str) -
     refname == format!("{tracking_prefix}HEAD")
 }
 
-/// Delete local tracking refs whose remote counterpart no longer exists.
+/// Local tracking refs that would be removed by `git fetch --prune` given the current remote.
 ///
-/// A local tracking ref is a prune candidate when it lives under the destination
-/// namespace of some positive wildcard refspec and no current remote ref maps to
-/// it. Matches `git fetch --prune` for the common `refs/remotes/<remote>/*` case.
-pub(crate) fn prune_tracking_refs(
+/// Returns full ref names and their current object ids. The default-branch symref
+/// `refs/remotes/<remote>/HEAD` is never included.
+///
+/// # Errors
+///
+/// Propagates ref listing failures.
+pub fn tracking_refs_gone_on_remote(
     local_git_dir: &Path,
     positive: &[RefspecItem],
     remote_refs: &[(String, ObjectId)],
-    dry_run: bool,
-    updates: &mut Vec<RefUpdate>,
-    mut store_batch: Option<&mut Vec<crate::refs::store::RefUpdate>>,
-) -> Result<()> {
-    // Set of local tracking refs that the current remote justifies.
+) -> Result<Vec<(String, ObjectId)>> {
     let mut live: HashSet<String> = HashSet::new();
     for (name, _) in remote_refs {
         if let Some(Some(dst)) = match_positive(name, positive) {
@@ -2927,9 +2926,6 @@ pub(crate) fn prune_tracking_refs(
             continue;
         };
         if let Some(star) = dst.find('*') {
-            // Wildcard refspec: enumerate existing local refs under its
-            // destination prefix and prune those the current remote no longer
-            // justifies.
             let prefix = &dst[..star];
             for (name, oid) in crate::refs::list_refs(local_git_dir, prefix)? {
                 if !name.starts_with(prefix) {
@@ -2947,21 +2943,35 @@ pub(crate) fn prune_tracking_refs(
             if exact_prefix.is_some_and(|p| is_default_head_under_tracking_prefix(dst, p)) {
                 continue;
             }
-            // Exact refspec (e.g. `refs/heads/a2:refs/remotes/origin/a2`): when
-            // the source ref is gone from the remote, `dst` is absent from `live`,
-            // so prune the tracking ref if it still exists locally. This is the
-            // explicit `git fetch <remote> <branch>` / `--prune` deletion case.
             if let Ok(oid) = crate::refs::resolve_ref(local_git_dir, dst) {
                 pruned.entry(dst.to_owned()).or_insert(oid);
             }
         }
     }
+    Ok(pruned.into_iter().collect())
+}
+
+/// Delete local tracking refs whose remote counterpart no longer exists.
+///
+/// A local tracking ref is a prune candidate when it lives under the destination
+/// namespace of some positive wildcard refspec and no current remote ref maps to
+/// it. Matches `git fetch --prune` for the common `refs/remotes/<remote>/*` case.
+pub(crate) fn prune_tracking_refs(
+    local_git_dir: &Path,
+    positive: &[RefspecItem],
+    remote_refs: &[(String, ObjectId)],
+    dry_run: bool,
+    updates: &mut Vec<RefUpdate>,
+    mut store_batch: Option<&mut Vec<crate::refs::store::RefUpdate>>,
+) -> Result<()> {
+    let pruned: Vec<(String, ObjectId)> =
+        tracking_refs_gone_on_remote(local_git_dir, positive, remote_refs)?;
 
     let prune_delete_flags = crate::refs::store::RefUpdateFlags {
         no_deref: true,
         ..Default::default()
     };
-    for (name, oid) in pruned {
+    for (name, oid) in pruned.into_iter() {
         if !dry_run {
             if let Some(batch) = store_batch.as_mut() {
                 batch.push(crate::refs::store::RefUpdate {

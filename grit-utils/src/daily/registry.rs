@@ -234,7 +234,7 @@ pub const HEADLINE_SCENARIOS: [HeadlineScenario; 22] = [
 ];
 
 /// Remote matrix scenarios (non-headline) for the daily census.
-pub const REMOTE_MATRIX_SCENARIOS: [ScenarioSpec; 10] = [
+pub const REMOTE_MATRIX_SCENARIOS: [ScenarioSpec; 11] = [
     ScenarioSpec {
         id: "fetch/noop@git-git",
         area: Area::Remotes,
@@ -248,6 +248,13 @@ pub const REMOTE_MATRIX_SCENARIOS: [ScenarioSpec; 10] = [
         headline: false,
         name: None,
         description: "List all refs on many-refs bare remote vs git ls-remote",
+    },
+    ScenarioSpec {
+        id: "remote/show@many-refs",
+        area: Area::Remotes,
+        headline: false,
+        name: None,
+        description: "Remote show on many-refs client vs git remote show origin",
     },
     ScenarioSpec {
         id: "clone/http@synth-10k",

@@ -5,12 +5,13 @@ use super::super::plan::{DailyHeadlineContext, DailyHeadlinePlan, DailyPrepare};
 use super::super::remote_fixture::{
     clone_bench_script, clone_bench_script_grit, setup_git_git_file_remote,
     setup_git_git_grit_http_fetch_remote, setup_git_git_grit_http_push_remote,
-    setup_many_refs_file_remote, setup_synth10k_file_remote, setup_synth10k_grit_http_remote,
-    setup_synth10k_pull_rebase_remote, verify_clone_http, verify_clone_local, verify_fetch_deepen,
-    verify_fetch_dry_run, verify_fetch_incremental, verify_fetch_incremental_http,
-    verify_fetch_noop, verify_fetch_one_branch, verify_ls_remote_all, verify_pull_check,
-    verify_pull_fast_forward, verify_pull_rebase, verify_push_force_with_lease,
-    verify_push_incremental, verify_push_incremental_http, verify_push_refspec,
+    setup_many_refs_file_remote, setup_many_refs_remote_show, setup_synth10k_file_remote,
+    setup_synth10k_grit_http_remote, setup_synth10k_pull_rebase_remote, verify_clone_http,
+    verify_clone_local, verify_fetch_deepen, verify_fetch_dry_run, verify_fetch_incremental,
+    verify_fetch_incremental_http, verify_fetch_noop, verify_fetch_one_branch,
+    verify_ls_remote_all, verify_pull_check, verify_pull_fast_forward, verify_pull_rebase,
+    verify_push_force_with_lease, verify_push_incremental, verify_push_incremental_http,
+    verify_push_refspec,
 };
 use super::super::runner::BenchArgv;
 use crate::shell::shell_quote;
@@ -272,6 +273,14 @@ fn ls_remote_grit(ctx: &DailyHeadlineContext) -> BenchArgv {
     sh_devnull(&ctx.grit, &["remote", "refs", url])
 }
 
+fn remote_show_git(ctx: &DailyHeadlineContext) -> BenchArgv {
+    sh_devnull(&ctx.git, &["remote", "show", "origin"])
+}
+
+fn remote_show_grit(ctx: &DailyHeadlineContext) -> BenchArgv {
+    sh_devnull(&ctx.grit, &["remote", "show", "origin"])
+}
+
 fn clone_http_git(ctx: &DailyHeadlineContext) -> BenchArgv {
     clone_local_git(ctx)
 }
@@ -364,6 +373,15 @@ fn matrix_plans() -> Vec<DailyHeadlinePlan> {
             build_git: ls_remote_git,
             build_grit: ls_remote_grit,
             correctness: Some(correctness_ls_remote),
+        },
+        DailyHeadlinePlan {
+            spec: matrix_spec("remote/show@many-refs"),
+            pending: false,
+            setup: setup_many_refs_remote_show,
+            prepare: prepare_none,
+            build_git: remote_show_git,
+            build_grit: remote_show_grit,
+            correctness: None,
         },
         DailyHeadlinePlan {
             spec: matrix_spec("clone/http@synth-10k"),

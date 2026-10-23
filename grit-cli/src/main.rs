@@ -93,6 +93,17 @@ enum RemoteAction {
         /// The remote's URL or path.
         url: String,
     },
+    /// Summarize a remote (URLs, branches, pull config).
+    Show {
+        /// Configured remote name.
+        name: String,
+        /// Use local remote-tracking refs only; do not contact the remote.
+        #[arg(long = "no-query")]
+        no_query: bool,
+        /// Return at most this many remote branches.
+        #[arg(short = 'n', long = "limit", value_name = "N")]
+        limit: Option<usize>,
+    },
     /// List references on a remote (like `git ls-remote`).
     Refs {
         /// Configured remote name or a literal URL/path.
@@ -1807,6 +1818,17 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
                 opts,
                 ctx,
             ),
+            Some(RemoteAction::Show {
+                name,
+                no_query,
+                limit,
+            }) => {
+                let show_cli = commands::remote::RemoteShowCliOptions {
+                    query: !no_query,
+                    limit,
+                };
+                emit(&commands::remote::run_show(&name, &show_cli)?, opts, ctx)
+            }
             Some(RemoteAction::Refs {
                 remote_or_url,
                 heads,

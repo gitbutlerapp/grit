@@ -312,6 +312,32 @@ pub fn setup_synth10k_file_remote(setup: &DailySetup<'_>) -> Result<DailyHeadlin
     })
 }
 
+pub fn setup_many_refs_remote_show(setup: &DailySetup<'_>) -> Result<DailyHeadlineContext> {
+    with_remote_scratch("many-refs-show", |scratch| {
+        let kind = if setup.smoke {
+            FixtureKind::ManyRefsSmoke
+        } else {
+            FixtureKind::ManyRefs
+        };
+        let (worktree, _) = fixture_registry::ensure_cached(setup.git, kind, setup.offline)?;
+        let bare = scratch.join("remote.git");
+        worktree_to_bare(setup.git, &worktree, &bare)?;
+        let meta = install_network_meta(setup.git, &bare, setup.smoke)?;
+        let remote_url = file_url(&bare)?;
+        std::env::set_var("GRIT_BENCH_DAILY_NETWORK_BARE", &bare);
+        let remote = DailyRemoteState {
+            bare: bare.clone(),
+            meta: meta.clone(),
+            remote_url: remote_url.clone(),
+            grit_http: None,
+            git_http: None,
+        };
+        let client = ensure_client(setup.git, &remote)?;
+        configure_client_remote(setup.git, &client, &remote)?;
+        Ok(ctx_with_remote(client, setup, remote))
+    })
+}
+
 pub fn setup_many_refs_file_remote(setup: &DailySetup<'_>) -> Result<DailyHeadlineContext> {
     with_remote_scratch("many-refs-ls", |scratch| {
         let kind = if setup.smoke {

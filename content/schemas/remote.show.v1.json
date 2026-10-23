@@ -1,0 +1,87 @@
+{
+  "$id": "https://grit-scm.com/schemas/remote.show/v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "definitions": {
+    "RemoteShowBranchJson": {
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "state": {
+          "enum": [
+            "tracked",
+            "new",
+            "stale"
+          ],
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "state"
+      ],
+      "type": "object"
+    },
+    "RemoteShowPullJson": {
+      "properties": {
+        "local": {
+          "type": "string"
+        },
+        "merges": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "local",
+        "merges"
+      ],
+      "type": "object"
+    }
+  },
+  "description": "Result of `grit remote show`.",
+  "properties": {
+    "action": {
+      "enum": [
+        "show"
+      ],
+      "type": "string"
+    },
+    "branches": {
+      "items": {
+        "$ref": "#/definitions/RemoteShowBranchJson"
+      },
+      "type": "array"
+    },
+    "fetch_url": {
+      "type": "string"
+    },
+    "head_branch": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "name": {
+      "type": "string"
+    },
+    "pull": {
+      "items": {
+        "$ref": "#/definitions/RemoteShowPullJson"
+      },
+      "type": "array"
+    },
+    "push_url": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "action",
+    "name",
+    "fetch_url",
+    "push_url",
+    "branches",
+    "pull"
+  ],
+  "title": "RemoteShowOutcome",
+  "type": "object"
+}
