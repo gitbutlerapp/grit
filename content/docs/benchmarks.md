@@ -18,6 +18,17 @@ Scenario suites reuse prepared repositories under **`GRIT_BENCH_CACHE`** (defaul
 ./target/release/grit-bench fixtures list --format markdown
 ```
 
+### Daily matrix: partial staging on `large.txt`
+
+Two **`grit-bench daily`** worktree scenarios share the same prepare hook (`prepare-worktree-add-hunks`): reset index/worktree to **`HEAD`**, then apply **500** one-line edits on a committed **50 000**-line `large.txt`. Each timed iteration runs that prepare again so partial staging from the previous sample does not carry over.
+
+| Scenario id | Grit (timed) | Git (timed) |
+| --- | --- | --- |
+| **`add/hunks@large-file`** | `grit add --hunks` with the first **half** of unstaged hunk ids (same selection grit uses when writing bench artifacts) | `git diff -- large.txt`, keep the first **half** of unified hunks in file order, pipe to **`git apply --cached -`** |
+| **`add/patch-file@large-file`** | `grit add --patch-file` on the prebuilt half-hunk unified diff written during prepare | **`git apply --cached`** on the same prebuilt patch (apply-only) |
+
+Acceptance for both: grit median wall time and peak RSS must be **≤** git on the same scenario.
+
 ## grit-lib: parallel object hashing
 
 Criterion group `hash/batch_parallel` (`cargo bench -p grit-lib --bench objects hash/batch_parallel`) hashes **20 000** Git blob objects of **16 KiB** each using [`hash_objects_parallel`](https://docs.rs/grit-lib/latest/grit_lib/hash/fn.hash_objects_parallel.html) (SHA-1, release build).

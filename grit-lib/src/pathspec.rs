@@ -1135,6 +1135,25 @@ pub(crate) fn sorted_paths_match_pathspec<S: AsRef<str>>(
     has_path_with_prefix(&format!("{spec}/"))
 }
 
+/// Repository-relative paths when every spec is a plain literal file path (no trailing `/`).
+///
+/// Used to narrow index/worktree diffs to a small path set without scanning the full index.
+pub(crate) fn exact_literal_pathspec_set(
+    specs: &[String],
+    ctx: PathspecMatchContext,
+) -> Option<std::collections::BTreeSet<String>> {
+    if specs.is_empty() {
+        return None;
+    }
+    if !specs
+        .iter()
+        .all(|s| is_plain_literal_pathspec(s, ctx) && !s.ends_with('/'))
+    {
+        return None;
+    }
+    Some(specs.iter().cloned().collect())
+}
+
 /// Whether `spec` matches exactly the path `spec` and everything under directory `spec`
 /// (no magic, no wildcards, no `./`, and no context that changes trailing-`/` handling).
 fn is_plain_literal_pathspec(spec: &str, ctx: PathspecMatchContext) -> bool {

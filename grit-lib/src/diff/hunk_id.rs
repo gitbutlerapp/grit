@@ -9,6 +9,10 @@ use std::str::FromStr;
 use thiserror::Error;
 
 use super::structured::{StructuredHunk, StructuredLine, StructuredLineKind};
+use crate::diff::structured::{
+    hash_hunk_body_from_unified_slice, hunk_body_digest_from_unified_slice,
+};
+use crate::diff::unified_hunk_header_counts;
 use crate::hash::ChecksumHasher;
 use crate::objects::HashAlgo;
 
@@ -138,22 +142,124 @@ fn duplicate_ranks(hunks: &[StructuredHunk], peer_hunks: &[StructuredHunk]) -> V
         .enumerate()
         .map(|(i, h)| {
             let body = hunk_body_digest(h);
-            if body_counts.get(&body).copied().unwrap_or(0) <= 1 {
+            duplicate_rank_for_body(
+                i,
+                &body,
+                hunks,
+                peer_hunks,
+                body_counts.get(&body).copied(),
+            )
+        })
+        .collect()
+}
+
+fn duplicate_rank_for_body(
+    index: usize,
+    body: &[u8],
+    hunks: &[StructuredHunk],
+    peer_hunks: &[StructuredHunk],
+    body_count: Option<u32>,
+) -> Option<u32> {
+    if body_count.unwrap_or(0) <= 1 {
+        return None;
+    }
+    let mut keys: Vec<DuplicateSortKey> = Vec::new();
+    for (j, x) in hunks.iter().enumerate() {
+        if hunk_body_digest(x) == body {
+            keys.push(DuplicateSortKey {
+                old_start: x.old_start,
+                new_start: x.new_start,
+                is_peer: false,
+                index: j,
+            });
+        }
+    }
+    for (j, x) in peer_hunks.iter().enumerate() {
+        if hunk_body_digest(x) == body {
+            keys.push(DuplicateSortKey {
+                old_start: x.old_start,
+                new_start: x.new_start,
+                is_peer: true,
+                index: j,
+            });
+        }
+    }
+    keys.sort();
+    keys.iter()
+        .position(|k| !k.is_peer && k.index == index)
+        .map(|p| p as u32)
+}
+
+fn unified_slice_starts(slice: &str) -> (usize, usize) {
+    slice
+        .split('\n')
+        .next()
+        .and_then(unified_hunk_header_counts)
+        .map(|(o, _, n, _)| (o, n))
+        .unwrap_or((0, 0))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn duplicate_ranks_unified_slices(
+    slices: &[&str],
+    before_count: usize,
+    after_count: usize,
+    before_ends_nl: bool,
+    after_ends_nl: bool,
+    peer_hunks: &[StructuredHunk],
+) -> Vec<Option<u32>> {
+    let bodies: Vec<Option<Vec<u8>>> = slices
+        .iter()
+        .map(|slice| {
+            hunk_body_digest_from_unified_slice(
+                slice,
+                before_count,
+                after_count,
+                before_ends_nl,
+                after_ends_nl,
+            )
+        })
+        .collect();
+    let mut body_counts: std::collections::HashMap<Vec<u8>, u32> = std::collections::HashMap::new();
+    for body in bodies.iter().flatten() {
+        *body_counts.entry(body.clone()).or_insert(0) += 1;
+    }
+    for h in peer_hunks {
+        let body = hunk_body_digest(h);
+        *body_counts.entry(body).or_insert(0) += 1;
+    }
+    bodies
+        .iter()
+        .enumerate()
+        .map(|(i, body)| {
+            let body = body.as_ref()?;
+            if body_counts.get(body).copied().unwrap_or(0) <= 1 {
                 return None;
             }
             let mut keys: Vec<DuplicateSortKey> = Vec::new();
-            for (j, x) in hunks.iter().enumerate() {
-                if hunk_body_digest(x) == body {
-                    keys.push(DuplicateSortKey {
-                        old_start: x.old_start,
-                        new_start: x.new_start,
-                        is_peer: false,
-                        index: j,
-                    });
+            for (j, other) in slices.iter().enumerate() {
+                let Some(other_body) = hunk_body_digest_from_unified_slice(
+                    other,
+                    before_count,
+                    after_count,
+                    before_ends_nl,
+                    after_ends_nl,
+                ) else {
+                    continue;
+                };
+                if &other_body != body {
+                    continue;
                 }
+                let (o, n) = unified_slice_starts(other);
+                keys.push(DuplicateSortKey {
+                    old_start: o,
+                    new_start: n,
+                    is_peer: false,
+                    index: j,
+                });
             }
             for (j, x) in peer_hunks.iter().enumerate() {
-                if hunk_body_digest(x) == body {
+                if hunk_body_digest(x) == *body {
                     keys.push(DuplicateSortKey {
                         old_start: x.old_start,
                         new_start: x.new_start,
@@ -163,13 +269,43 @@ fn duplicate_ranks(hunks: &[StructuredHunk], peer_hunks: &[StructuredHunk]) -> V
                 }
             }
             keys.sort();
-            let rank = keys
-                .iter()
+            keys.iter()
                 .position(|k| !k.is_peer && k.index == i)
-                .map(|p| p as u32)?;
-            Some(rank)
+                .map(|p| p as u32)
         })
         .collect()
+}
+
+#[allow(clippy::too_many_arguments)]
+fn hash_hunk_id_from_unified_slice(
+    side: DiffSide,
+    path: &str,
+    slice: &str,
+    before_count: usize,
+    after_count: usize,
+    before_ends_nl: bool,
+    after_ends_nl: bool,
+    duplicate_rank: Option<u32>,
+) -> Option<HunkId> {
+    let mut hasher = HashAlgo::Sha1.checksum_hasher();
+    hasher.update(&[side.tag_byte()]);
+    hasher.update(path.as_bytes());
+    hasher.update(&[0]);
+    if !hash_hunk_body_from_unified_slice(
+        &mut hasher,
+        slice,
+        before_count,
+        after_count,
+        before_ends_nl,
+        after_ends_nl,
+    ) {
+        return None;
+    }
+    if let Some(rank) = duplicate_rank {
+        hasher.update(&rank.to_le_bytes());
+    }
+    let digest = hasher.finalize();
+    Some(HunkId::from_digest(&digest))
 }
 
 fn body_count_map(
@@ -230,6 +366,45 @@ pub fn hunk_ids_with_duplicate_peers(
         .iter()
         .zip(ranks)
         .map(|(h, rank)| hash_hunk_id(side, path, h, rank))
+        .collect()
+}
+
+/// Stable ids for unified hunk slices (`@@` …) in the same order as [`super::core::imara_unified_hunk_slices`].
+#[must_use]
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn hunk_ids_for_unified_slices(
+    side: DiffSide,
+    path: &str,
+    slices: &[&str],
+    before_count: usize,
+    after_count: usize,
+    before_ends_nl: bool,
+    after_ends_nl: bool,
+    peer_hunks: &[StructuredHunk],
+) -> Vec<HunkId> {
+    let ranks = duplicate_ranks_unified_slices(
+        slices,
+        before_count,
+        after_count,
+        before_ends_nl,
+        after_ends_nl,
+        peer_hunks,
+    );
+    slices
+        .iter()
+        .zip(ranks)
+        .filter_map(|(slice, rank)| {
+            hash_hunk_id_from_unified_slice(
+                side,
+                path,
+                slice,
+                before_count,
+                after_count,
+                before_ends_nl,
+                after_ends_nl,
+                rank,
+            )
+        })
         .collect()
 }
 
@@ -360,6 +535,44 @@ mod tests {
     }
 
     #[test]
+    fn hunk_ids_unified_slices_match_structured_hunks() {
+        use crate::diff::imara_unified_hunk_slices;
+        use crate::diff::unified_hunk_body_for_diff_options;
+        use crate::diff::DiffOptions;
+
+        let old = "a\nb\nc\n";
+        let new = "a\nB\nc\nd\n";
+        let opts = DiffOptions::default();
+        let body = unified_hunk_body_for_diff_options(old, new, &opts);
+        let slices: Vec<&str> = imara_unified_hunk_slices(&body);
+        let before_count = 3;
+        let after_count = 4;
+        let from_slices = hunk_ids_for_unified_slices(
+            DiffSide::Unstaged,
+            "f.txt",
+            &slices,
+            before_count,
+            after_count,
+            true,
+            true,
+            &[],
+        );
+        let structured: Vec<StructuredHunk> = slices
+            .iter()
+            .filter_map(|slice| {
+                crate::diff::structured::structured_hunk_for_id_from_unified_slice(
+                    slice,
+                    before_count,
+                    after_count,
+                    true,
+                    true,
+                )
+            })
+            .collect();
+        let from_structured = hunk_ids(DiffSide::Unstaged, "f.txt", &structured);
+        assert_eq!(from_slices, from_structured);
+    }
+
     fn hunk_id_roundtrips_display_fromstr() {
         let id = hunk_ids(
             DiffSide::Other,

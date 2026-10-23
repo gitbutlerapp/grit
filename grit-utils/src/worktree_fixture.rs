@@ -327,6 +327,7 @@ const PATCH_FILE_MARKER: &str = "patch-file.diff";
 const LARGE_HUNKS_FILE: &str = "large.txt";
 const HUNKS_HALF_IDS_MARKER: &str = "hunks-half.ids";
 const HUNKS_HALF_PATCH_MARKER: &str = "hunks-half.patch";
+const HUNKS_HALF_COUNT_MARKER: &str = "hunks-half.count";
 
 /// Modify ~1% of paths and write `git diff` to the bench scratch dir for `--patch-file` scenarios.
 pub fn prepare_add_patch_file(git: &Path) -> Result<()> {
@@ -375,6 +376,12 @@ pub fn prepare_add_hunks_large(git: &Path) -> Result<()> {
 
     let repo = active_worktree_repo();
     ensure_large_file_committed(git, &repo)?;
+    // Each hyperfine iteration must start from a clean index and worktree at `HEAD`, then only
+    // the 500 one-line worktree edits below (partial staging from the timed command must not
+    // carry over).
+    run_git(git, &repo, &["reset", "--hard", "HEAD"])?;
+    run_git(git, &repo, &["clean", "-fd", "-q"])?;
+    pin_worktree_bench_config(git, &repo)?;
     modify_large_file_five_hundred_hunks(&repo)?;
     let grit_repo = Repository::discover(Some(&repo), &RepositoryOptions::default())?;
     let pathspec = vec![LARGE_HUNKS_FILE.to_string()];
@@ -382,13 +389,14 @@ pub fn prepare_add_hunks_large(git: &Path) -> Result<()> {
     let (file, peer) = snapshots
         .first()
         .context("large.txt should appear in unstaged diff")?;
-    let ids = hunk_ids_with_duplicate_peers(
-        DiffSide::Unstaged,
-        LARGE_HUNKS_FILE,
-        &file.hunks,
-        peer,
-    );
+    let ids =
+        hunk_ids_with_duplicate_peers(DiffSide::Unstaged, LARGE_HUNKS_FILE, &file.hunks, peer);
     let half_len = ids.len() / 2;
+    fs::write(
+        scratch_dir().join(HUNKS_HALF_COUNT_MARKER),
+        format!("{half_len}\n").as_bytes(),
+    )
+    .context("write hunk half count")?;
     let half_ids: Vec<_> = ids.iter().take(half_len).cloned().collect();
     let id_line = half_ids
         .iter()
@@ -406,7 +414,8 @@ pub fn prepare_add_hunks_large(git: &Path) -> Result<()> {
         &HunkSelection { ids: half_ids },
         &pathspec,
     )
-    .map_err(|e| anyhow::anyhow!("resolve hunk selection: {e}"))?;
+    .map_err(|e| anyhow::anyhow!("resolve hunk selection: {e}"))?
+    .patches;
     let mut patch_text = String::new();
     for patch in &patches {
         patch_text.push_str(&format_file_patch_for_git(patch));
@@ -509,7 +518,7 @@ pub fn shell_grit_add_hunks(grit: &Path) -> String {
     format!("H=$(cat {ids_q}) && {prog_q} add --hunks \"$H\" -- {file_q} > /dev/null 2>&1")
 }
 
-/// Shell snippet: `git apply --cached` for the same half-hunk patch.
+/// Shell snippet: `git apply --cached` for the prebuilt half-hunk patch (apply-only arm).
 pub fn shell_git_apply_hunks_half(git: &Path) -> String {
     let prog_q = shell_quote(&git.to_string_lossy());
     let patch_q = shell_quote(
@@ -518,6 +527,40 @@ pub fn shell_git_apply_hunks_half(git: &Path) -> String {
             .to_string_lossy(),
     );
     format!("{prog_q} apply --cached {patch_q} > /dev/null 2>&1")
+}
+
+/// Shell snippet: live `git diff`, keep the first half of hunks, pipe to `git apply --cached`.
+pub fn shell_git_diff_apply_half_hunks(git: &Path) -> String {
+    let prog_q = shell_quote(&git.to_string_lossy());
+    let file_q = shell_quote(LARGE_HUNKS_FILE);
+    let count_q = shell_quote(
+        &scratch_dir()
+            .join(HUNKS_HALF_COUNT_MARKER)
+            .to_string_lossy(),
+    );
+    format!(
+        "N=$(cat {count_q}) && {prog_q} diff -- {file_q} | awk -v N=\"$N\" '
+/^@@ / {{
+  if (hunk >= N) {{ inhunk=0; next }}
+  hunk++
+  inhunk=1
+  print
+  next
+}}
+hunk==0 || inhunk {{ print }}
+' | {prog_q} apply --cached - > /dev/null 2>&1"
+    )
+}
+
+/// Shell snippet: `grit add --patch-file` using the prebuilt half-hunk patch.
+pub fn shell_grit_add_patch_file_half(grit: &Path) -> String {
+    let prog_q = shell_quote(&grit.to_string_lossy());
+    let patch_q = shell_quote(
+        &scratch_dir()
+            .join(HUNKS_HALF_PATCH_MARKER)
+            .to_string_lossy(),
+    );
+    format!("{prog_q} add --patch-file {patch_q} > /dev/null 2>&1")
 }
 
 const RM_DIR_MARKER: &str = ".grit-bench-rm-dir";

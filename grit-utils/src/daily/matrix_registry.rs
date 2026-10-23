@@ -94,7 +94,14 @@ pub const MATRIX_SCENARIOS: &[ScenarioSpec] = &[
         area: Area::Worktree,
         headline: false,
         name: None,
-        description: "Stage half of 500 hunks in a 50k-line file: grit add --hunks vs git apply --cached",
+        description: "Stage half of 500 hunks in a 50k-line file: grit add --hunks vs git diff (same path) + first-half hunk select + git apply --cached",
+    },
+    ScenarioSpec {
+        id: "add/patch-file@large-file",
+        area: Area::Worktree,
+        headline: false,
+        name: None,
+        description: "Apply prebuilt half-hunk patch to index: grit add --patch-file vs git apply --cached",
     },
     ScenarioSpec {
         id: "add/update@synth-100k",

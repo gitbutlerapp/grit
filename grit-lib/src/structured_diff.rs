@@ -13,6 +13,12 @@ use crate::diff::options::DiffOptions;
 #[path = "diff/line_engine.rs"]
 mod line_engine;
 
+pub(crate) use line_engine::{
+    hash_hunk_body_from_unified_slice, hunk_body_digest_from_unified_slice,
+};
+#[cfg(test)]
+pub(crate) use line_engine::structured_hunk_for_id_from_unified_slice;
+
 /// Bytes of one file side prepared for diffing.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SideBytes {
