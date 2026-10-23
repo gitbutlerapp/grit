@@ -17246,9 +17246,31 @@ impl core::marker::Unpin for grit_lib::remote::push_plan::PushPlanKind
 impl core::marker::UnsafeUnpin for grit_lib::remote::push_plan::PushPlanKind
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::push_plan::PushPlanKind
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::push_plan::PushPlanKind
+pub struct grit_lib::remote::push_plan::PushInvocation
+pub grit_lib::remote::push_plan::PushInvocation::refspecs: alloc::vec::Vec<alloc::string::String>
+pub grit_lib::remote::push_plan::PushInvocation::remote: core::option::Option<alloc::string::String>
+impl core::clone::Clone for grit_lib::remote::push_plan::PushInvocation
+pub fn grit_lib::remote::push_plan::PushInvocation::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::remote::push_plan::PushInvocation
+impl core::cmp::PartialEq for grit_lib::remote::push_plan::PushInvocation
+pub fn grit_lib::remote::push_plan::PushInvocation::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::remote::push_plan::PushInvocation
+pub fn grit_lib::remote::push_plan::PushInvocation::default() -> Self
+impl core::fmt::Debug for grit_lib::remote::push_plan::PushInvocation
+pub fn grit_lib::remote::push_plan::PushInvocation::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::remote::push_plan::PushInvocation
+impl core::marker::Freeze for grit_lib::remote::push_plan::PushInvocation
+impl core::marker::Send for grit_lib::remote::push_plan::PushInvocation
+impl core::marker::Sync for grit_lib::remote::push_plan::PushInvocation
+impl core::marker::Unpin for grit_lib::remote::push_plan::PushInvocation
+impl core::marker::UnsafeUnpin for grit_lib::remote::push_plan::PushInvocation
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::push_plan::PushInvocation
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::push_plan::PushInvocation
 pub struct grit_lib::remote::push_plan::PushPlanContext
 pub grit_lib::remote::push_plan::PushPlanContext::remote_branch_tips: std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>
 pub grit_lib::remote::push_plan::PushPlanContext::remote_ref_names: std::collections::hash::set::HashSet<alloc::string::String>
+impl grit_lib::remote::push_plan::PushPlanContext
+pub fn grit_lib::remote::push_plan::PushPlanContext::from_advertised_refs(impl core::iter::traits::collect::IntoIterator<Item = grit_lib::remote::RemoteRef>) -> Self
 impl core::clone::Clone for grit_lib::remote::push_plan::PushPlanContext
 pub fn grit_lib::remote::push_plan::PushPlanContext::clone(&self) -> Self
 impl core::default::Default for grit_lib::remote::push_plan::PushPlanContext
@@ -17307,9 +17329,12 @@ pub const grit_lib::remote::push_plan::DEFAULT_REMOTE: &str
 pub fn grit_lib::remote::push_plan::apply_set_upstream_after_push(&grit_lib::repo::Repository, &str, bool, bool, &[grit_lib::remote::transfer::PushRefSpec], &[grit_lib::remote::push_report::PushRefResult]) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, grit_lib::error::Error>
 pub fn grit_lib::remote::push_plan::configured_remote_for_push(&grit_lib::repo::Repository, &grit_lib::config::ConfigSet, core::option::Option<&str>) -> core::result::Result<alloc::string::String, grit_lib::remote::push_plan::PushPlanError>
 pub fn grit_lib::remote::push_plan::follow_tag_push_specs(&grit_lib::repo::Repository, &[grit_lib::remote::transfer::PushRefSpec], &grit_lib::remote::push_plan::PushPlanContext) -> core::result::Result<alloc::vec::Vec<grit_lib::remote::transfer::PushRefSpec>, grit_lib::remote::push_plan::PushPlanError>
+pub fn grit_lib::remote::push_plan::load_push_plan_context(&grit_lib::repo::Repository, &grit_lib::config::ConfigSet, core::option::Option<&str>, core::option::Option<&dyn grit_lib::remote::HttpClientFactory>) -> core::result::Result<grit_lib::remote::push_plan::PushPlanContext, grit_lib::remote::push_plan::PushPlanError>
+pub fn grit_lib::remote::push_plan::open_push_destination(&grit_lib::config::ConfigSet, &str) -> core::result::Result<grit_lib::remote::Remote, grit_lib::remote::RemoteError>
 pub fn grit_lib::remote::push_plan::parse_force_mode(&grit_lib::repo::Repository, bool, core::option::Option<core::option::Option<alloc::string::String>>) -> core::result::Result<grit_lib::remote::push_plan::ForceMode, grit_lib::remote::push_plan::PushPlanError>
 pub fn grit_lib::remote::push_plan::push_follow_tags_config(&grit_lib::config::ConfigSet) -> bool
 pub fn grit_lib::remote::push_plan::resolve_push(&grit_lib::repo::Repository, &grit_lib::config::ConfigSet, &grit_lib::remote::push_plan::PushRequest, &grit_lib::remote::push_plan::PushPlanContext) -> core::result::Result<grit_lib::remote::push_plan::ResolvedPush, grit_lib::remote::push_plan::PushPlanError>
+pub fn grit_lib::remote::push_plan::resolve_push_invocation(&grit_lib::config::ConfigSet, core::option::Option<&str>, &[alloc::string::String]) -> core::result::Result<grit_lib::remote::push_plan::PushInvocation, grit_lib::remote::push_plan::PushPlanError>
 pub mod grit_lib::remote::push_report
 pub enum grit_lib::remote::push_report::PushRefStatus
 pub grit_lib::remote::push_report::PushRefStatus::AtomicPushFailed
