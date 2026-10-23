@@ -1250,6 +1250,48 @@ fn build_malformed_commit_fixture() -> tempfile::TempDir {
     tmp
 }
 
+fn git_git_worktree() -> Option<std::path::PathBuf> {
+    if let Ok(p) = std::env::var("GRIT_GIT_GIT_PATH") {
+        let path = std::path::PathBuf::from(p);
+        if path.is_dir() {
+            return Some(path);
+        }
+    }
+    let default = std::path::PathBuf::from("/tmp/gitgit");
+    default.is_dir().then_some(default)
+}
+
+fn git_git_has_full_history(root: &Path) -> bool {
+    let mut cmd = Command::new("git");
+    cmd.current_dir(root)
+        .args(["cat-file", "-e", "ae12e59a8c:builtin-add.c"]);
+    git_env(&mut cmd);
+    cmd.output().map(|o| o.status.success()).unwrap_or(false)
+}
+
+/// Dogfood fixture: `builtin/add.c` at HEAD and historical revs (#1610).
+#[test]
+fn blame_git_git_builtin_add_c_matches_git_porcelain() {
+    let Some(root) = git_git_worktree() else {
+        eprintln!("SKIP: set GRIT_GIT_GIT_PATH or clone git/git to /tmp/gitgit");
+        return;
+    };
+    if !git_git_has_full_history(&root) {
+        eprintln!("SKIP: git/git worktree lacks full history for blame walk");
+        return;
+    }
+    let repo = Repository::discover(Some(&root), &RepositoryOptions::empty()).expect("open");
+    assert_blame_matches(&repo, &root, "builtin/add.c", None, Some((6, 8)));
+    assert_blame_matches(&repo, &root, "builtin/add.c", None, Some((47, 47)));
+    assert_blame_matches(
+        &repo,
+        &root,
+        "builtin-add.c",
+        Some("ae12e59a8c"),
+        None,
+    );
+}
+
 #[test]
 fn blame_through_commits_missing_author_or_committer_matches_git_loose_and_packed() {
     let tmp = build_malformed_commit_fixture();
