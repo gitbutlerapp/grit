@@ -848,6 +848,7 @@ pub(crate) fn find_tree_entry_by_name_in_data(
     data: &[u8],
     oid_len: usize,
     name: &[u8],
+    name_is_tree: bool,
 ) -> Result<Option<TreeEntry>> {
     let mut pos = 0usize;
     while pos < data.len() {
@@ -872,12 +873,28 @@ pub(crate) fn find_tree_entry_by_name_in_data(
                 oid: ObjectId::from_bytes(&rest[oid_start..oid_end])?,
             }));
         }
-        if tree_entry_cmp(entry_name, mode == 0o040000, name, true) == std::cmp::Ordering::Greater {
+        if tree_entry_cmp(entry_name, mode == 0o040000, name, name_is_tree)
+            == std::cmp::Ordering::Greater
+        {
             return Ok(None);
         }
         pos += oid_end;
     }
     Ok(None)
+}
+
+/// Like [`find_tree_entry_by_name_in_data`], trying directory ordering first then file.
+pub(crate) fn find_tree_entry_by_name_dir_or_file_in_data(
+    data: &[u8],
+    oid_len: usize,
+    name: &[u8],
+) -> Result<Option<TreeEntry>> {
+    if let Some(entry) = find_tree_entry_by_name_in_data(data, oid_len, name, true)? {
+        if entry.mode == 0o040000 {
+            return Ok(Some(entry));
+        }
+    }
+    find_tree_entry_by_name_in_data(data, oid_len, name, false)
 }
 
 /// Parsed representation of a commit object.
@@ -1613,7 +1630,7 @@ mod commit_parse_tests {
         });
         let data = serialize_tree(&entries);
         assert!(entries.len() >= 48);
-        let found = find_tree_entry_by_name_in_data(&data, HashAlgo::Sha1.len(), b"sub")?
+        let found = find_tree_entry_by_name_in_data(&data, HashAlgo::Sha1.len(), b"sub", true)?
             .expect("sub directory in wide tree");
         assert_eq!(found.mode, 0o040000);
         assert_eq!(found.name, b"sub");
@@ -1665,14 +1682,20 @@ mod commit_parse_tests {
         ];
         let data = sorted_tree_data(&mut entries);
         for expected in parse_tree(&data)? {
-            let found =
-                find_tree_entry_by_name_in_data(&data, HashAlgo::Sha1.len(), &expected.name)?
-                    .expect("entry present");
+            let name_is_tree = expected.mode == 0o040000;
+            let found = find_tree_entry_by_name_in_data(
+                &data,
+                HashAlgo::Sha1.len(),
+                &expected.name,
+                name_is_tree,
+            )?
+            .expect("entry present");
             assert_eq!(found, expected);
         }
         for missing in [&b"fo"[..], b"foo/", b"foo.d", b"zzz", b"", b"AAA", b"lin"] {
             assert!(
-                find_tree_entry_by_name_in_data(&data, HashAlgo::Sha1.len(), missing)?.is_none(),
+                find_tree_entry_by_name_in_data(&data, HashAlgo::Sha1.len(), missing, false)?
+                    .is_none(),
                 "unexpected match for {:?}",
                 String::from_utf8_lossy(missing)
             );
@@ -1697,11 +1720,13 @@ mod commit_parse_tests {
         ];
         let mut data = sorted_tree_data(&mut entries);
         data.extend_from_slice(b"garbage without separators");
-        let found = find_tree_entry_by_name_in_data(&data, HashAlgo::Sha1.len(), b"a")?;
+        let found = find_tree_entry_by_name_in_data(&data, HashAlgo::Sha1.len(), b"a", false)?;
         assert_eq!(found.map(|e| e.name), Some(b"a".to_vec()));
-        assert!(find_tree_entry_by_name_in_data(&data, HashAlgo::Sha1.len(), b"b")?.is_none());
+        assert!(
+            find_tree_entry_by_name_in_data(&data, HashAlgo::Sha1.len(), b"b", false)?.is_none()
+        );
         assert!(matches!(
-            find_tree_entry_by_name_in_data(&data, HashAlgo::Sha1.len(), b"d"),
+            find_tree_entry_by_name_in_data(&data, HashAlgo::Sha1.len(), b"d", false),
             Err(Error::CorruptObject(_))
         ));
         Ok(())
@@ -1711,12 +1736,12 @@ mod commit_parse_tests {
     fn find_tree_entry_by_name_in_data_rejects_bad_mode_and_truncated_oid() {
         let bad_mode = b"10x644 a\0aaaaaaaaaaaaaaaaaaaa";
         assert!(matches!(
-            find_tree_entry_by_name_in_data(bad_mode, HashAlgo::Sha1.len(), b"a"),
+            find_tree_entry_by_name_in_data(bad_mode, HashAlgo::Sha1.len(), b"a", false),
             Err(Error::CorruptObject(_))
         ));
         let truncated = b"100644 a\0short";
         assert!(matches!(
-            find_tree_entry_by_name_in_data(truncated, HashAlgo::Sha1.len(), b"a"),
+            find_tree_entry_by_name_in_data(truncated, HashAlgo::Sha1.len(), b"a", false),
             Err(Error::CorruptObject(_))
         ));
     }
@@ -1726,8 +1751,8 @@ mod commit_parse_tests {
         let oid = ObjectId::from_bytes(&[0x5au8; 32])?;
         let mut raw = b"100644 file\0".to_vec();
         raw.extend_from_slice(oid.as_bytes());
-        let found =
-            find_tree_entry_by_name_in_data(&raw, HashAlgo::Sha256.len(), b"file")?.expect("file");
+        let found = find_tree_entry_by_name_in_data(&raw, HashAlgo::Sha256.len(), b"file", false)?
+            .expect("file");
         assert_eq!(found.oid, oid);
         assert_eq!(found.mode, 0o100644);
         Ok(())

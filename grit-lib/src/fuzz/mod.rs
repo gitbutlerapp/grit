@@ -39,8 +39,8 @@ pub fn tree_parse(data: &[u8]) {
 
 /// Walk tree bytes via span-based lookup (covers zero-copy tree paths without building a full vec).
 pub fn tree_lookup_scan(data: &[u8]) {
-    let _ = crate::objects::find_tree_entry_by_name_in_data(data, 20, b"");
-    let _ = crate::objects::find_tree_entry_by_name_in_data(data, 32, b"");
+    let _ = crate::objects::find_tree_entry_by_name_in_data(data, 20, b"", false);
+    let _ = crate::objects::find_tree_entry_by_name_in_data(data, 32, b"", false);
 }
 
 /// [`parse_commit`] with serialize → parse when successful.

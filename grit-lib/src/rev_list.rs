@@ -10,6 +10,7 @@ use std::collections::{BTreeSet, BinaryHeap, HashMap, HashSet, VecDeque};
 use std::fs;
 use std::io::Write;
 use std::path::Path;
+use std::rc::Rc;
 use std::sync::Arc;
 
 use crate::bitmap_walk::{bitmap_filter_supported, BitmapWalkError, PeeledTips, ReachableSet};
@@ -24,10 +25,12 @@ use crate::merge_base::{
     commits_reachable_excluding_ancestors_of_cutoffs, ReachableWalkCommitterCutoffs,
 };
 use crate::objects::{
-    oid_hash_map, oid_hash_set, parse_commit, parse_tag, parse_tree, CommitData, ObjectId,
-    ObjectKind, OidHashMap, OidHashSet, TreeRefIter,
+    find_tree_entry_by_name_dir_or_file_in_data, find_tree_entry_by_name_in_data, oid_hash_map,
+    oid_hash_set, parse_commit, parse_tag, parse_tree, CommitData, CommitRef, ObjectId, ObjectKind,
+    OidHashMap, OidHashSet, TreeEntry, TreeRefIter,
 };
 use crate::odb::store::ObjectStore;
+use crate::pack::SingleLocalPackReader;
 use crate::pack_bitmap::BitmapIndex;
 use crate::patch_ids::{compute_patch_id, compute_patch_id_for_paths};
 use crate::ref_exclusions::{git_namespace_prefix, strip_git_namespace, RefExclusions};
@@ -1167,16 +1170,18 @@ pub fn rev_list(
             stats: options.bloom_stats.as_ref(),
             cwd: bloom_cwd.as_deref(),
         };
-        let (selected, walked, walk_order) = walk_dense_path_limited_closure(
-            repo,
-            &mut graph,
-            &include,
-            &excluded,
-            &options.paths,
-            options.sparse,
-            options.show_pulls,
-            Some(&bloom_ctx),
-        )?;
+        let (selected, walked, walk_order) = repo.odb().with_pack_read_context(|| {
+            walk_dense_path_limited_closure(
+                repo,
+                &mut graph,
+                &include,
+                &excluded,
+                &options.paths,
+                options.sparse,
+                options.show_pulls,
+                Some(&bloom_ctx),
+            )
+        })?;
         included = selected;
         if discovery_order.is_empty() {
             discovery_order = walk_order;
@@ -4970,9 +4975,27 @@ struct DenseBloomCtx<'a> {
     cwd: Option<&'a str>,
 }
 
+/// One pack reader for a dense path walk (monotonic OID cursor + delta-base reuse).
+#[derive(Default)]
+struct SessionPackReader {
+    reader: Option<SingleLocalPackReader>,
+    opened: bool,
+}
+
+impl SessionPackReader {
+    fn get(&mut self, odb: &crate::odb::Odb) -> Option<&mut SingleLocalPackReader> {
+        if !self.opened {
+            self.opened = true;
+            self.reader = odb.open_session_pack_reader().ok().flatten();
+        }
+        self.reader.as_mut()
+    }
+}
+
 /// Memo for literal-path tree-same results and bounded `(tree, component) → child` lookups.
 #[derive(Default)]
 struct DenseWalkCache {
+    pack_session: SessionPackReader,
     literal_tree_diff: HashMap<(ObjectId, ObjectId, u64), bool>,
     component_child: HashMap<(ObjectId, Arc<str>, bool), CachedTreeChild>,
     /// FIFO eviction order; stale keys are skipped when popping (O(1) insert, no scan on hit).
@@ -4980,12 +5003,18 @@ struct DenseWalkCache {
     component_hits: u64,
     component_misses: u64,
     tree_reads: u64,
+    /// Parsed tree bodies reused when a full entry list is needed.
+    parsed_trees: HashMap<ObjectId, Rc<[TreeEntry]>>,
+    /// Inflated tree object bytes (each OID is read at most once per walk).
+    tree_bodies: HashMap<ObjectId, Arc<[u8]>>,
+    tree_body_evict_order: VecDeque<ObjectId>,
     /// Reused across tree reads in one dense walk.
     tree_read_buf: Vec<u8>,
 }
 
 const LITERAL_TREE_DIFF_CAP: usize = 4096;
 const COMPONENT_CACHE_MAX_ENTRIES: usize = 512 * 1024;
+const TREE_BODY_CACHE_MAX_ENTRIES: usize = 512 * 1024;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum CachedTreeChild {
@@ -5007,6 +5036,44 @@ impl DenseWalkCache {
     #[cfg(test)]
     fn component_tree_reads(&self) -> u64 {
         self.tree_reads
+    }
+
+    fn insert_tree_body(&mut self, tree: ObjectId, body: Arc<[u8]>) {
+        if self.tree_bodies.contains_key(&tree) {
+            return;
+        }
+        while self.tree_bodies.len() >= TREE_BODY_CACHE_MAX_ENTRIES {
+            let Some(evict) = self.tree_body_evict_order.pop_front() else {
+                break;
+            };
+            self.tree_bodies.remove(&evict);
+        }
+        self.tree_bodies.insert(tree, body);
+        self.tree_body_evict_order.push_back(tree);
+    }
+
+    fn tree_body(&mut self, repo: &Repository, tree: ObjectId) -> Result<Arc<[u8]>> {
+        if let Some(body) = self.tree_bodies.get(&tree) {
+            return Ok(Arc::clone(body));
+        }
+        self.tree_read_buf.clear();
+        let kind = if let Some(reader) = self.pack_session.get(repo.odb()) {
+            match reader.read_object_into(&tree, &mut self.tree_read_buf) {
+                Ok(kind) => kind,
+                Err(_) => repo.odb().read_into(&tree, &mut self.tree_read_buf)?,
+            }
+        } else {
+            repo.odb().read_into(&tree, &mut self.tree_read_buf)?
+        };
+        if kind != ObjectKind::Tree {
+            return Err(Error::CorruptObject(format!("object {tree} is not a tree")));
+        }
+        let data = std::mem::take(&mut self.tree_read_buf);
+        let cap = data.len().max(4096);
+        let body: Arc<[u8]> = Arc::from(data);
+        self.tree_read_buf = Vec::with_capacity(cap);
+        self.insert_tree_body(tree, Arc::clone(&body));
+        Ok(body)
     }
 
     fn insert_component(
@@ -5047,8 +5114,18 @@ impl DenseWalkCache {
         }
         self.component_misses += 1;
         self.tree_reads += 1;
-        let entries = read_parsed_tree(repo, tree)?;
-        let resolved = match tree_entry_by_name(&entries, component, as_tree) {
+        let oid_len = repo.odb().hash_algo().len();
+        let body = self.tree_body(repo, tree)?;
+        let found = if as_tree {
+            find_tree_entry_by_name_in_data(body.as_ref(), oid_len, component.as_bytes(), true)?
+        } else {
+            find_tree_entry_by_name_dir_or_file_in_data(
+                body.as_ref(),
+                oid_len,
+                component.as_bytes(),
+            )?
+        };
+        let resolved = match found {
             Some(entry) => CachedTreeChild::Found {
                 oid: entry.oid,
                 mode: entry.mode,
@@ -5307,6 +5384,10 @@ fn dense_path_limited_action(
     let mut first_parent_differs = false;
     for (nth, parent_oid) in parents.iter().enumerate() {
         let parent_tree = graph.commit_tree(*parent_oid)?;
+        if commit_tree == parent_tree {
+            treesame.push(*parent_oid);
+            continue;
+        }
         let differs = trees_differ_for_pathspecs_with_bloom(
             repo,
             commit_tree,
@@ -5451,17 +5532,27 @@ fn pathspec_entry_is_relevant(path: &str, is_tree: bool, pathspecs: &[String]) -
     false
 }
 
-fn read_parsed_tree(
+fn read_parsed_tree_cached(
     repo: &Repository,
     tree_oid: ObjectId,
-) -> Result<Vec<crate::objects::TreeEntry>> {
+    cache: &mut Option<&mut DenseWalkCache>,
+) -> Result<Vec<TreeEntry>> {
+    if let Some(c) = cache.as_ref() {
+        if let Some(entries) = c.parsed_trees.get(&tree_oid) {
+            return Ok(entries.iter().cloned().collect());
+        }
+    }
     let object = repo.odb().read(&tree_oid)?;
     if object.kind != ObjectKind::Tree {
         return Err(Error::CorruptObject(format!(
             "object {tree_oid} is not a tree"
         )));
     }
-    parse_tree(&object.data)
+    let entries = parse_tree(&object.data)?;
+    if let Some(c) = cache.as_deref_mut() {
+        c.parsed_trees.insert(tree_oid, entries.clone().into());
+    }
+    Ok(entries)
 }
 
 /// Whether any blob path under `tree_oid` matches `pathspecs` (root-commit visibility).
@@ -5543,7 +5634,7 @@ fn trees_differ_for_pathspecs_optional(
     new_tree: Option<ObjectId>,
     prefix: &str,
     pathspecs: &[String],
-    cache: Option<&mut DenseWalkCache>,
+    mut cache: Option<&mut DenseWalkCache>,
 ) -> Result<bool> {
     if prefix.is_empty() && pathspecs.len() == 1 {
         if let Some(literal) = normalized_plain_literal_treesame_path(repo, &pathspecs[0]) {
@@ -5560,11 +5651,11 @@ fn trees_differ_for_pathspecs_optional(
         (Some(a), Some(b)) if a == b => Ok(false),
         (old_o, new_o) => {
             let old_entries = match old_o {
-                Some(oid) => read_parsed_tree(repo, oid)?,
+                Some(oid) => read_parsed_tree_cached(repo, oid, &mut cache)?,
                 None => Vec::new(),
             };
             let new_entries = match new_o {
-                Some(oid) => read_parsed_tree(repo, oid)?,
+                Some(oid) => read_parsed_tree_cached(repo, oid, &mut cache)?,
                 None => Vec::new(),
             };
             trees_differ_tree_entries(repo, &old_entries, &new_entries, prefix, pathspecs)
@@ -5711,46 +5802,47 @@ fn format_path_for_tree_diff(prefix: &str, name: &str) -> String {
     }
 }
 
-fn tree_entry_by_name<'a>(
-    entries: &'a [crate::objects::TreeEntry],
-    name: &str,
-    name_is_tree: bool,
-) -> Option<&'a crate::objects::TreeEntry> {
-    let name_bytes = name.as_bytes();
-    let idx = entries.binary_search_by(|e| {
-        crate::objects::tree_entry_cmp(&e.name, is_tree_mode(e.mode), name_bytes, name_is_tree)
-    });
-    idx.ok().and_then(|i| {
-        let entry = &entries[i];
-        if entry.name.as_slice() == name_bytes {
-            Some(entry)
-        } else {
-            None
-        }
-    })
-}
-
-fn tree_oid_at_literal_prefix(
+fn tree_dir_child(
     repo: &Repository,
     tree: ObjectId,
-    components: &[&str],
+    part: &str,
     cache: &mut DenseWalkCache,
 ) -> Result<Option<ObjectId>> {
-    if components.is_empty() {
-        return Ok(Some(tree));
+    match cache.lookup_tree_component(repo, tree, part, true)? {
+        CachedTreeChild::Found { oid, mode } if is_tree_mode(mode) => Ok(Some(oid)),
+        _ => Ok(None),
     }
-    let mut current = tree;
+}
+
+/// Walk `components` on two trees in lockstep, doing one lookup when both sides share a tree.
+fn tree_oids_at_literal_prefix_pair(
+    repo: &Repository,
+    mut old_tree: Option<ObjectId>,
+    mut new_tree: Option<ObjectId>,
+    components: &[&str],
+    cache: &mut DenseWalkCache,
+) -> Result<(Option<ObjectId>, Option<ObjectId>)> {
     for &part in components {
-        let child = cache.lookup_tree_component(repo, current, part, true)?;
-        let CachedTreeChild::Found { oid, mode } = child else {
-            return Ok(None);
-        };
-        if !is_tree_mode(mode) {
-            return Ok(None);
+        match (old_tree, new_tree) {
+            (None, None) => return Ok((None, None)),
+            (Some(o), Some(n)) if o == n => {
+                let next = tree_dir_child(repo, o, part, cache)?;
+                old_tree = next;
+                new_tree = next;
+            }
+            (old_o, new_o) => {
+                old_tree = match old_o {
+                    Some(o) => tree_dir_child(repo, o, part, cache)?,
+                    None => None,
+                };
+                new_tree = match new_o {
+                    Some(n) => tree_dir_child(repo, n, part, cache)?,
+                    None => None,
+                };
+            }
         }
-        current = oid;
     }
-    Ok(Some(current))
+    Ok((old_tree, new_tree))
 }
 
 fn trees_differ_at_literal_path(
@@ -5780,15 +5872,8 @@ fn trees_differ_at_literal_path(
             }
             let (dir, leaf) = parts.split_at(parts.len().saturating_sub(1));
             let leaf = leaf[0];
-            let (old_dir, new_dir) = match (old_o, new_o) {
-                (Some(old), Some(new)) => (
-                    tree_oid_at_literal_prefix(repo, old, dir, cache)?,
-                    tree_oid_at_literal_prefix(repo, new, dir, cache)?,
-                ),
-                (Some(old), None) => (tree_oid_at_literal_prefix(repo, old, dir, cache)?, None),
-                (None, Some(new)) => (None, tree_oid_at_literal_prefix(repo, new, dir, cache)?),
-                (None, None) => (None, None),
-            };
+            let (old_dir, new_dir) =
+                tree_oids_at_literal_prefix_pair(repo, old_o, new_o, dir, cache)?;
             let leaf_entry = |tree: Option<ObjectId>,
                               cache: &mut DenseWalkCache|
              -> Result<Option<(ObjectId, u32)>> {
@@ -7336,6 +7421,8 @@ pub(crate) struct CommitGraph<'r> {
     shallow_boundaries: OidHashSet,
     graft_parents: OidHashMap<Vec<ObjectId>>,
     subjects: HashMap<ObjectId, String>,
+    pack_session: SessionPackReader,
+    commit_read_buf: Vec<u8>,
     /// Parsed commits kept for the caller once [`Self::retain_parsed_commits`] is called.
     retained: Option<OidHashMap<CommitData>>,
 }
@@ -7375,6 +7462,8 @@ impl<'r> CommitGraph<'r> {
             shallow_boundaries,
             graft_parents,
             subjects: HashMap::new(),
+            pack_session: SessionPackReader::default(),
+            commit_read_buf: Vec::new(),
             retained: None,
         }
     }
@@ -7504,14 +7593,49 @@ impl<'r> CommitGraph<'r> {
                 return Ok(());
             }
         }
-        let mut commit = load_commit(self.repo, oid)?;
-        // Shallow boundaries: treat commit as having no parents
-        let mut parents = if self.shallow_boundaries.contains(&oid) {
-            Vec::new()
-        } else if self.retained.is_some() {
-            commit.parents.clone()
+        if self.retained.is_some() {
+            let commit = load_commit(self.repo, oid)?;
+            let mut parents = if self.shallow_boundaries.contains(&oid) {
+                Vec::new()
+            } else {
+                commit.parents.clone()
+            };
+            if let Some(graft_parents) = self.graft_parents.get(&oid) {
+                parents = graft_parents.clone();
+            }
+            if self.first_parent_only && parents.len() > 1 {
+                parents.truncate(1);
+            }
+            self.committer_time
+                .insert(oid, committer_unix_seconds_for_ordering(&commit.committer));
+            self.author_time
+                .insert(oid, committer_unix_seconds_for_ordering(&commit.author));
+            self.commit_trees.insert(oid, commit.tree);
+            self.parents.insert(oid, parents);
+            if let Some(retained) = self.retained.as_mut() {
+                retained.insert(oid, commit);
+            }
+            return Ok(());
+        }
+
+        self.commit_read_buf.clear();
+        let kind = if let Some(reader) = self.pack_session.get(self.repo.odb()) {
+            match reader.read_object_into(&oid, &mut self.commit_read_buf) {
+                Ok(kind) => kind,
+                Err(_) => self.repo.odb().read_into(&oid, &mut self.commit_read_buf)?,
+            }
         } else {
-            std::mem::take(&mut commit.parents)
+            self.repo.odb().read_into(&oid, &mut self.commit_read_buf)?
+        };
+        if kind != ObjectKind::Commit {
+            return Err(rev_list_unexpected_kind(oid, "commit"));
+        }
+        let commit = CommitRef::parse(&self.commit_read_buf)?;
+        let tree = commit.tree();
+        let mut parents: Vec<ObjectId> = if self.shallow_boundaries.contains(&oid) {
+            Vec::new()
+        } else {
+            commit.parents().to_vec()
         };
         if let Some(graft_parents) = self.graft_parents.get(&oid) {
             parents = graft_parents.clone();
@@ -7520,31 +7644,13 @@ impl<'r> CommitGraph<'r> {
             parents.truncate(1);
         }
         self.committer_time
-            .insert(oid, committer_unix_seconds_for_ordering(&commit.committer));
+            .insert(oid, commit.committer_unix_seconds_for_ordering());
         self.author_time
-            .insert(oid, committer_unix_seconds_for_ordering(&commit.author));
-        self.commit_trees.insert(oid, commit.tree);
+            .insert(oid, commit.author_unix_seconds_for_ordering());
+        self.commit_trees.insert(oid, tree);
         self.parents.insert(oid, parents);
-        match self.retained.as_mut() {
-            Some(retained) => {
-                retained.insert(oid, commit);
-            }
-            None => {
-                self.subjects
-                    .insert(oid, subject_line_from_commit_message(&commit.message));
-            }
-        }
         Ok(())
     }
-}
-
-fn subject_line_from_commit_message(message: &str) -> String {
-    message
-        .lines()
-        .find(|line| !line.trim().is_empty())
-        .map(str::trim)
-        .unwrap_or("(no subject)")
-        .to_owned()
 }
 
 /// Load shallow boundary commit OIDs from `.git/shallow`.

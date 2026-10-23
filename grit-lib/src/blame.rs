@@ -859,7 +859,7 @@ use crate::diff::{detect_renames, diff_trees, DiffEntry, DiffStatus};
 use crate::diff_rename_parallel::{diff_rename_parallel_options, parallel_map_indices};
 use crate::error::{Error as LibError, Result};
 use crate::objects::{
-    commit_author_and_message_lenient, find_tree_entry_by_name_in_data,
+    commit_author_and_message_lenient, find_tree_entry_by_name_dir_or_file_in_data,
     parse_commit_tree_and_parents_lenient, parse_commit_tree_and_parents_prefix, parse_tree,
     Object, ObjectId, ObjectKind,
 };
@@ -1446,7 +1446,10 @@ impl<'a> BlameSession<'a> {
             return Err(LibError::Message("expected tree".to_string()));
         }
         let oid_len = self.odb.hash_algo().len();
-        Ok(find_tree_entry_by_name_in_data(&obj.data, oid_len, name)?.map(|e| (e.oid, e.mode)))
+        Ok(
+            find_tree_entry_by_name_dir_or_file_in_data(&obj.data, oid_len, name)?
+                .map(|e| (e.oid, e.mode)),
+        )
     }
 
     fn merge_aware_blame(&self, first_parent_only: bool) -> bool {
