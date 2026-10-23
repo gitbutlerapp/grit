@@ -657,7 +657,7 @@ pub fn log_limit_documentation_git_git_bench(ctx: &DailyHeadlineContext) -> (Ben
 }
 
 /// Pinned revision for no-commit-graph path-limited benchmarks on git.git.
-pub const GIT_GIT_LITERAL_PATH_BENCH_REV: &str = "7e34d81";
+pub const GIT_GIT_LITERAL_PATH_BENCH_REV: &str = "c8e5cb0";
 /// Single-file path for literal path-limited rev-list benchmarks.
 pub const GIT_GIT_LITERAL_PATH_BENCH_FILE: &str = "Documentation/git-log.txt";
 /// Directory path for bounded `log -n` benchmarks on git.git.
