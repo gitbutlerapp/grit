@@ -832,7 +832,10 @@ fn branch_json_list_create_delete() -> TestResult {
         .find(|b| b["name"] == "main")
         .expect("main");
     assert_eq!(main["current"], Value::Bool(true));
-    assert_eq!(main["is_remote"], Value::Bool(false));
+    assert!(
+        main.get("is_remote").is_none(),
+        "local branches must omit is_remote when false"
+    );
     assert!(main["full_ref"]
         .as_str()
         .unwrap()
