@@ -717,10 +717,12 @@ fn continue_after_range_conflict_pairs_all_created_sources() {
             ReplayCreated {
                 source: c1,
                 new_oid: created[0].new_oid,
+                change_id: created[0].change_id.clone(),
             },
             ReplayCreated {
                 source: c2,
                 new_oid: created[1].new_oid,
+                change_id: created[1].change_id.clone(),
             },
         ]
     );
