@@ -6,7 +6,6 @@ use grit_lib::config::ident::{author_identity_line, parse_author_arg};
 use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::error::Error;
 use grit_lib::objects::parse_commit;
-use grit_lib::porcelain::add::stage_for_commit;
 use grit_lib::porcelain::commit::{
     commit_with_patch, commit_with_scope, default_commit_scope, pending_commit_message,
     CommitPatchError, CommitPatchInput, CommitRequest, CommitScope, HookPolicy,
@@ -186,7 +185,6 @@ pub fn run_hunks(
         dry_run,
         amend,
         allow_empty,
-        None,
     )?;
     let outcome = commit_with_patch(
         &repo,
@@ -247,7 +245,6 @@ pub fn run_patch_file(
         dry_run,
         amend,
         allow_empty,
-        None,
     )?;
     let outcome = commit_with_patch(
         &repo,
@@ -314,7 +311,6 @@ pub fn run(
         dry_run,
         amend,
         allow_empty,
-        Some(&scope),
     )?;
     let outcome =
         commit_with_scope(&repo, &req, scope, &mut NullProgress).map_err(map_commit_error)?;
@@ -345,7 +341,6 @@ fn build_commit_request(
     dry_run: bool,
     amend: bool,
     allow_empty: bool,
-    scope_for_auto_stage: Option<&CommitScope>,
 ) -> Result<CommitRequest> {
     let reuse_message_from = if let Some(rev) = reuse_message.as_deref() {
         Some(
@@ -364,9 +359,6 @@ fn build_commit_request(
         reuse_message_from.is_some(),
     )?;
     if message.is_none() && !amend && reuse_message_from.is_none() {
-        if !dry_run && matches!(scope_for_auto_stage, Some(CommitScope::AutoStage)) {
-            stage_for_commit(repo, &mut NullProgress).map_err(|e| anyhow::anyhow!("{e}"))?;
-        }
         bail!("provide a commit message, e.g. grit commit \"what changed\"");
     }
     let message_text = message.as_deref().unwrap_or("");
