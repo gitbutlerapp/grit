@@ -221,6 +221,13 @@ impl Repository {
         }
         let (count, full) = expand_ref_dwim_full_name(self, spec).map_err(map_resolve_ref_error)?;
         if count == 0 {
+            if spec == "HEAD" {
+                if let Ok(Some(_)) = self.refs().read_raw("HEAD") {
+                    return Err(RevParseError::InvalidObjectName {
+                        name: "HEAD".to_owned(),
+                    });
+                }
+            }
             return Ok(None);
         }
         if count > 1 && strict {
@@ -342,7 +349,11 @@ fn infer_ref_names(repo: &Repository, spec: &str, oid: ObjectId) -> Option<Resol
     if base.is_empty() || looks_like_abbrev_hex(base, repo) {
         return None;
     }
-    let resolved = repo.resolve_ref_name(base).ok().flatten()?;
+    let resolved = match repo.resolve_ref_name(base) {
+        Ok(v) => v?,
+        Err(RevParseError::InvalidObjectName { .. }) => return None,
+        Err(_) => return None,
+    };
     if repo.resolve_ref_oid(&resolved.full).ok() == Some(oid) {
         Some(resolved)
     } else {

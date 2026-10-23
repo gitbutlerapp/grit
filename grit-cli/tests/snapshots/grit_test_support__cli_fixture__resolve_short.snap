@@ -10,12 +10,12 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\"results\":[{\"spec\":\"HEAD\",\"oid\":\"83352a6\",\"kind\":\"commit\",\"size\":244,\"ref_name\":\"HEAD\"}]}\n",
+    "stdout": "{\"results\":[{\"spec\":\"HEAD\",\"oid\":\"83352a6\",\"kind\":\"commit\",\"size\":244,\"ref_name\":\"main\",\"full_ref\":\"refs/heads/main\"}]}\n",
     "stderr": ""
   },
   "markdown": {
     "exit": 0,
-    "stdout": "## Resolve\n\n| Spec | OID | Kind | Size | Ref |\n| --- | --- | --- | ---: | --- |\n| `HEAD` | `83352a6` | commit | 244 | HEAD |\n",
+    "stdout": "## Resolve\n\n| Spec | OID | Kind | Size | Ref |\n| --- | --- | --- | ---: | --- |\n| `HEAD` | `83352a6` | commit | 244 | main |\n",
     "stderr": ""
   }
 }

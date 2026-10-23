@@ -83,6 +83,12 @@ fn resolve_ref_name_matches_git_on_both_backends() {
         assert_ref_names(&grit, wt, "origin/main");
         assert_ref_names(&grit, wt, "@{u}");
 
+        git(wt, &["symbolic-ref", "refs/heads/alias", "refs/heads/main"]);
+        git(wt, &["symbolic-ref", "HEAD", "refs/heads/alias"]);
+        assert_ref_names(&open_grit(wt), wt, "HEAD");
+
+        git(wt, &["symbolic-ref", "HEAD", "refs/heads/main"]);
+
         git(wt, &["checkout", "-q", "topic"]);
         git(wt, &["checkout", "-q", "main"]);
         assert_ref_names(&open_grit(wt), wt, "@{-1}");
@@ -99,6 +105,9 @@ fn resolve_ref_name_matches_git_on_both_backends() {
         assert_ref_names(&open_grit(wt), wt, "refs/tags/x");
         assert_ref_names(&open_grit(wt), wt, "x");
         assert_ref_names(&open_grit(wt), wt, "heads/x");
+
+        git(wt, &["config", "core.warnAmbiguousRefs", "FALSE"]);
+        assert_ref_names(&open_grit(wt), wt, "refs/tags/x");
 
         let _ = backend;
     });

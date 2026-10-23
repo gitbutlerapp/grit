@@ -10,12 +10,12 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\"results\":[{\"spec\":\"HEAD\",\"oid\":\"83352a61f6715ec3f0a297c6d6150725154fb833\",\"kind\":\"commit\",\"size\":244,\"ref_name\":\"HEAD\"},{\"spec\":\"HEAD^{tree}\",\"oid\":\"cc5dd251b2645c614c83ffc5402450dfe72cedfd\",\"kind\":\"tree\",\"size\":77,\"ref_name\":\"HEAD\"}]}\n",
+    "stdout": "{\"results\":[{\"spec\":\"HEAD\",\"oid\":\"83352a61f6715ec3f0a297c6d6150725154fb833\",\"kind\":\"commit\",\"size\":244,\"ref_name\":\"main\",\"full_ref\":\"refs/heads/main\"},{\"spec\":\"HEAD^{tree}\",\"oid\":\"cc5dd251b2645c614c83ffc5402450dfe72cedfd\",\"kind\":\"tree\",\"size\":77}]}\n",
     "stderr": ""
   },
   "markdown": {
     "exit": 0,
-    "stdout": "## Resolve\n\n| Spec | OID | Kind | Size | Ref |\n| --- | --- | --- | ---: | --- |\n| `HEAD` | `83352a61f6715ec3f0a297c6d6150725154fb833` | commit | 244 | HEAD |\n| `HEAD^{tree}` | `cc5dd251b2645c614c83ffc5402450dfe72cedfd` | tree | 77 | HEAD |\n",
+    "stdout": "## Resolve\n\n| Spec | OID | Kind | Size | Ref |\n| --- | --- | --- | ---: | --- |\n| `HEAD` | `83352a61f6715ec3f0a297c6d6150725154fb833` | commit | 244 | main |\n| `HEAD^{tree}` | `cc5dd251b2645c614c83ffc5402450dfe72cedfd` | tree | 77 |  |\n",
     "stderr": ""
   }
 }
