@@ -43,6 +43,7 @@ You can also treat a bundle path like a remote: [`grit fetch`](../fetch/) and [`
 | Argument | Description |
 | --- | --- |
 | `<file>` | Existing bundle file. |
+| `-n`, `--limit <N>` | For `list`: print at most `N` header refs (`truncated` in JSON when more exist). |
 
 ## Examples
 

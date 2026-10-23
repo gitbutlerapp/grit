@@ -25,7 +25,7 @@ grit branch [--dry-run] …
 
 With no arguments, lists your local branches and marks the current one with `*`. When a branch has a configured upstream, the line includes a short marker such as `[origin/main: ahead 2, behind 1]` or `[gone]` when the tracking ref is missing.
 
-Use `-r` / `--remotes` for remote-tracking branches (`origin/main`, …) and `-a` / `--all` for both (remote names use the `remotes/origin/main` form, like `git branch -a`). `--list`, `--merged`, `--no-merged`, `--contains`, `--sort`, `--reverse`, and `-n` / `--max-count` follow Git’s branch listing filters. `--show-current` prints only the current branch name.
+Use `-r` / `--remotes` for remote-tracking branches (`origin/main`, …) and `-a` / `--all` for both (remote names use the `remotes/origin/main` form, like `git branch -a`). `--list`, `--merged`, `--no-merged`, `--contains`, `--sort`, `--reverse`, and `-n` / `--limit` follow Git’s branch listing filters (`--max-count` is an alias). `--show-current` prints only the current branch name.
 
 With `--json` or `--markdown`, list output includes `full_ref`, commit `subject` and `date`, upstream details, and linked `worktree` paths when present. Plain human list stays names plus upstream markers.
 
@@ -74,7 +74,7 @@ On failure with `--json`, stdout includes `error` and a stable `kind` (for examp
 | `--contains [REV]` | Branches whose tip contains `REV` (default `HEAD`). |
 | `--sort name\|version\|date` | Sort key (default name). |
 | `--reverse` | Reverse sort order. |
-| `-n`, `--max-count <N>` | Limit the number of branches listed. |
+| `-n`, `--limit <N>` | Limit the number of branches listed (`--max-count` alias). |
 | `--show-current` | Print only the current branch name (nothing when detached). |
 | `--dry-run` | Preview without writing refs, config, or reflogs. |
 
@@ -122,6 +122,8 @@ Deleted branch spike (was a7020c2).
 ```
 
 ## JSON output
+
+List results include `truncated: true` when `-n` / `--limit` caps the branch list and more branches matched.
 
 Schema: [v1](/schemas/branch/v1.json)
 

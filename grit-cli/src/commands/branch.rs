@@ -82,6 +82,10 @@ pub enum BranchOutcome {
         /// The current branch, or `null` when detached / unborn.
         current: Option<String>,
         branches: Vec<BranchEntry>,
+        /// True when more branches matched than returned (`-n` / `--limit`).
+        #[serde(default, skip_serializing_if = "is_false")]
+        #[schemars(default)]
+        truncated: bool,
         #[serde(skip)]
         #[schemars(skip)]
         scope: BranchListScope,
@@ -458,7 +462,7 @@ pub fn run(opts: BranchRunOptions) -> Result<BranchOutcome> {
 fn list_args_active(args: &BranchListArgs) -> bool {
     args.remotes
         || args.all
-        || args.limit.is_some()
+        || args.limit.get().is_some()
         || !args.patterns.is_empty()
         || args.merged.is_some()
         || args.no_merged.is_some()
@@ -554,7 +558,11 @@ fn list(repo: &Repository, opts: &BranchRunOptions) -> Result<BranchOutcome> {
     } else {
         BranchDetail::Names
     };
+    let limit = list.limit.get();
     let rows = list_branches(repo, &query, detail).context("could not list branches")?;
+    let limited = grit_lib::list_limit::Limited::from_vec(rows, limit);
+    let rows = limited.items;
+    let truncated = limited.truncated;
     let current = match resolve_head_for_repository(repo)? {
         HeadState::Branch { short_name, .. } => Some(short_name),
         HeadState::Detached { .. } | HeadState::Invalid => None,
@@ -571,6 +579,7 @@ fn list(repo: &Repository, opts: &BranchRunOptions) -> Result<BranchOutcome> {
             .into_iter()
             .map(|row| summary_to_entry(row, opts.list_full_detail))
             .collect(),
+        truncated,
         scope: list_scope,
     })
 }
@@ -592,7 +601,7 @@ fn build_ref_query(repo: &Repository, args: &BranchListArgs) -> Result<RefQuery>
             key: sort_key,
             reverse: args.reverse,
         },
-        limit: args.limit,
+        limit: grit_lib::list_limit::fetch_plus_one(args.limit.get()),
         contains: resolve_filter_revs(repo, args.contains.as_deref())?,
         merged: resolve_filter_revs(repo, args.merged.as_deref())?,
         no_merged: resolve_filter_revs(repo, args.no_merged.as_deref())?,

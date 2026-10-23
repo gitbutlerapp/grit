@@ -29,6 +29,10 @@ use std::io::{self, Read, Write};
 use std::time::{Duration, Instant};
 use time::OffsetDateTime;
 
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 /// Sort order for `grit tag` list mode.
 #[derive(Clone, Copy, Debug, Default, clap::ValueEnum, PartialEq, Eq)]
 pub enum TagListSort {
@@ -56,7 +60,13 @@ impl TagListSort {
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum TagOutcome {
     /// Tags matching the list query.
-    List { tags: Vec<TagEntry> },
+    List {
+        tags: Vec<TagEntry>,
+        /// True when more tags matched than returned (`-n` / `--limit`).
+        #[serde(default, skip_serializing_if = "is_false")]
+        #[schemars(default)]
+        truncated: bool,
+    },
     /// A new tag was created.
     Create {
         name: String,
@@ -230,7 +240,7 @@ pub struct TagEntry {
 impl HumanRender for TagOutcome {
     fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         match self {
-            TagOutcome::List { tags } => {
+            TagOutcome::List { tags, .. } => {
                 if tags.is_empty() {
                     outln!(w, "No tags yet.");
                     return Ok(());
@@ -278,7 +288,7 @@ impl HumanRender for TagOutcome {
 impl MarkdownRender for TagOutcome {
     fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         match self {
-            TagOutcome::List { tags } => markdown::print_tag_list(w, tags)?,
+            TagOutcome::List { tags, .. } => markdown::print_tag_list(w, tags)?,
             TagOutcome::Create {
                 name,
                 oid,
@@ -610,12 +620,19 @@ fn resolve_points_at(
 }
 
 fn list_with_query(repo: &Repository, query: RefQuery) -> Result<TagOutcome> {
-    let tags = list_tags(repo, &query)
+    let user_limit = query.limit;
+    let mut fetch_query = query;
+    fetch_query.limit = grit_lib::list_limit::fetch_plus_one(user_limit);
+    let tags = list_tags(repo, &fetch_query)
         .context("could not list tags")?
         .into_iter()
         .map(tag_entry_from_summary)
-        .collect();
-    Ok(TagOutcome::List { tags })
+        .collect::<Vec<_>>();
+    let limited = grit_lib::list_limit::Limited::from_vec(tags, user_limit);
+    Ok(TagOutcome::List {
+        tags: limited.items,
+        truncated: limited.truncated,
+    })
 }
 
 fn tag_entry_from_summary(tag: TagSummary) -> TagEntry {

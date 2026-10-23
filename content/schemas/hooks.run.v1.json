@@ -43,6 +43,10 @@
             "$ref": "#/definitions/HookEntryJson"
           },
           "type": "array"
+        },
+        "truncated": {
+          "description": "True when more hook scripts existed than returned (`-n` / `--limit`).",
+          "type": "boolean"
         }
       },
       "required": [

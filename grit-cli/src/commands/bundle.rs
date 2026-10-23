@@ -36,6 +36,14 @@ pub struct BundleVerifyOutcome {
 pub struct BundleListOutcome {
     pub path: String,
     pub references: Vec<BundleRefJson>,
+    /// True when the bundle header held more refs than returned (`-n` / `--limit`).
+    #[serde(default, skip_serializing_if = "is_false")]
+    #[schemars(default)]
+    pub truncated: bool,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 /// Outcome of `grit bundle unbundle`.
@@ -238,16 +246,23 @@ pub fn run_unbundle(path: PathBuf) -> Result<BundleUnbundleOutcome> {
 }
 
 /// List refs contained in a bundle.
-pub fn run_list(path: PathBuf) -> Result<BundleListOutcome> {
-    let bundle = Bundle::open(&path).map_err(map_bundle_error)?;
+pub fn run_list(path: PathBuf, limit: Option<usize>) -> Result<BundleListOutcome> {
+    let repo = context::discover()?;
+    let listed = repo
+        .bundles()
+        .list_heads(&path, limit)
+        .map_err(map_bundle_error)?;
     Ok(BundleListOutcome {
         path: path.display().to_string(),
-        references: bundle
-            .header()
-            .refs
+        references: listed
+            .items
             .iter()
-            .map(|(name, oid)| BundleRefJson::from((name.as_str(), *oid)))
+            .map(|head| BundleRefJson {
+                name: head.name.clone(),
+                oid: head.oid.to_hex(),
+            })
             .collect(),
+        truncated: listed.truncated,
     })
 }
 

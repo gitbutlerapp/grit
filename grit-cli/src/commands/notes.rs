@@ -18,6 +18,10 @@ use crate::markdown;
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 use time::OffsetDateTime;
 
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 /// Result of `grit notes`, tagged by `action`.
 #[derive(Serialize, JsonSchema)]
 #[serde(tag = "action", rename_all = "snake_case")]
@@ -26,6 +30,10 @@ pub enum NotesOutcome {
     List {
         notes_ref: String,
         notes: Vec<NoteEntry>,
+        /// True when more notes existed than returned (`-n` / `--limit`).
+        #[serde(default, skip_serializing_if = "is_false")]
+        #[schemars(default)]
+        truncated: bool,
     },
     /// Note bytes for one object.
     Show {
@@ -103,7 +111,9 @@ impl HumanRender for NotesOutcome {
 impl MarkdownRender for NotesOutcome {
     fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         match self {
-            NotesOutcome::List { notes_ref, notes } => {
+            NotesOutcome::List {
+                notes_ref, notes, ..
+            } => {
                 markdown::print_notes_list(w, notes_ref, notes)?;
             }
             NotesOutcome::Show {
@@ -175,13 +185,14 @@ pub enum NotesRunAction {
 pub fn run(
     notes_ref_flag: Option<String>,
     action: NotesRunAction,
+    limit: Option<usize>,
     now: OffsetDateTime,
 ) -> Result<NotesOutcome> {
     let repo = context::discover()?;
     let notes_ref = resolve_notes_ref(&repo, notes_ref_flag.as_deref())?;
 
     match action {
-        NotesRunAction::List => list_notes(&repo, &notes_ref),
+        NotesRunAction::List => list_notes(&repo, &notes_ref, limit),
         NotesRunAction::Show { rev } => show_note(&repo, &notes_ref, &rev),
         NotesRunAction::Add {
             rev,
@@ -200,11 +211,17 @@ fn resolve_notes_ref(repo: &Repository, override_ref: Option<&str>) -> Result<No
     resolve_configured_notes_ref(repo.environment(), config.as_ref()).map_err(map_notes_error)
 }
 
-fn list_notes(repo: &Repository, notes_ref: &NotesRef) -> Result<NotesOutcome> {
-    let notes = repo
+fn list_notes(
+    repo: &Repository,
+    notes_ref: &NotesRef,
+    limit: Option<usize>,
+) -> Result<NotesOutcome> {
+    let listed = repo
         .notes()
-        .list_with_bodies(notes_ref)
-        .map_err(map_notes_error)?
+        .list_with_bodies(notes_ref, limit)
+        .map_err(map_notes_error)?;
+    let notes = listed
+        .items
         .into_iter()
         .map(|note| NoteEntry {
             object: note.object.to_hex(),
@@ -216,6 +233,7 @@ fn list_notes(repo: &Repository, notes_ref: &NotesRef) -> Result<NotesOutcome> {
     Ok(NotesOutcome::List {
         notes_ref: notes_ref.to_string(),
         notes,
+        truncated: listed.truncated,
     })
 }
 

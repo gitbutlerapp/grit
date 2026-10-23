@@ -10,12 +10,22 @@ use std::io::Write;
 use crate::context;
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 
+fn is_false(value: &bool) -> bool {
+    !*value
+}
+
 /// Result of `grit hooks list` or `grit hooks run`.
 #[derive(Serialize, JsonSchema)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum HooksOutcome {
     /// Installed hook scripts in the resolved hooks directory.
-    List { hooks: Vec<HookEntryJson> },
+    List {
+        hooks: Vec<HookEntryJson>,
+        /// True when more hook scripts existed than returned (`-n` / `--limit`).
+        #[serde(default, skip_serializing_if = "is_false")]
+        #[schemars(default)]
+        truncated: bool,
+    },
     /// A hook subprocess finished (see `exit_code`).
     Run {
         name: String,
@@ -50,7 +60,7 @@ impl From<HookInfo> for HookEntryJson {
 impl HumanRender for HooksOutcome {
     fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         match self {
-            HooksOutcome::List { hooks } => {
+            HooksOutcome::List { hooks, .. } => {
                 for hook in hooks {
                     let exec = if hook.executable { "yes" } else { "no" };
                     outln!(
@@ -72,7 +82,7 @@ impl HumanRender for HooksOutcome {
 impl MarkdownRender for HooksOutcome {
     fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         match self {
-            HooksOutcome::List { hooks } => {
+            HooksOutcome::List { hooks, .. } => {
                 outln!(w, "## Hooks\n");
                 if hooks.is_empty() {
                     outln!(w, "No hook scripts found.");
@@ -107,11 +117,15 @@ impl MarkdownRender for HooksOutcome {
 }
 
 /// List hook scripts in the repository hooks directory.
-pub fn run_list() -> Result<HooksOutcome> {
+pub fn run_list(limit: Option<usize>) -> Result<HooksOutcome> {
     let repo = context::discover()?;
-    let hooks = repo.hooks().list().map_err(|e| anyhow::anyhow!("{e}"))?;
+    let listed = repo
+        .hooks()
+        .list(limit)
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
     Ok(HooksOutcome::List {
-        hooks: hooks.into_iter().map(HookEntryJson::from).collect(),
+        hooks: listed.items.into_iter().map(HookEntryJson::from).collect(),
+        truncated: listed.truncated,
     })
 }
 

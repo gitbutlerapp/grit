@@ -15,6 +15,7 @@ use grit_lib::revwalk::{
 };
 
 use crate::json_error::{invalid_commit_filter, invalid_pickaxe};
+use crate::limit_args::LimitArgs;
 
 const CURSOR_PREFIX: &str = "lw1.";
 
@@ -25,9 +26,8 @@ pub struct RevSelectArgs {
     #[arg(value_name = "REV")]
     pub revs: Vec<String>,
 
-    /// Stop after this many commits.
-    #[arg(short = 'n', long = "max-count", alias = "limit", value_name = "N")]
-    pub max_count: Option<usize>,
+    #[command(flatten)]
+    pub limit: LimitArgs,
 
     /// Skip this many commits after ordering.
     #[arg(long, default_value_t = 0)]
@@ -219,7 +219,7 @@ impl RevSelectArgs {
         let pickaxe = self.build_pickaxe().map_err(invalid_pickaxe)?;
         let _ = default_revs;
         Ok(RevWalkListOptions {
-            limit: self.max_count,
+            limit: self.limit.get(),
             skip: self.skip,
             since,
             until,
@@ -361,4 +361,12 @@ fn ref_selections(args: &RevSelectArgs) -> Vec<RefSelection> {
         out.push(RefSelection::Remotes(pattern));
     }
     out
+}
+
+impl RevSelectArgs {
+    /// Commit list limit (`-n` / `--limit`, alias `--max-count`).
+    #[must_use]
+    pub fn max_count(&self) -> Option<usize> {
+        self.limit.get()
+    }
 }

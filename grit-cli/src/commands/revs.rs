@@ -115,7 +115,7 @@ pub fn run(rev: RevSelectArgs, count: bool, left_right: bool) -> Result<RevsOutc
     let walk = repo.rev_walk();
     let token_refs = rev.rev_tokens(&[]);
     if count {
-        if rev.max_count == Some(0) {
+        if rev.max_count() == Some(0) {
             return Ok(RevsOutcome {
                 commits: Vec::new(),
                 count: if left_right { None } else { Some(0) },
@@ -144,7 +144,7 @@ pub fn run(rev: RevSelectArgs, count: bool, left_right: bool) -> Result<RevsOutc
         });
     }
 
-    if rev.max_count == Some(0) {
+    if rev.max_count() == Some(0) {
         return Ok(RevsOutcome {
             commits: Vec::new(),
             count: None,
@@ -154,10 +154,10 @@ pub fn run(rev: RevSelectArgs, count: bool, left_right: bool) -> Result<RevsOutc
         });
     }
     let mut fetch_opts = opts.clone();
-    fetch_opts.limit = fetch_limit_plus_one(rev.max_count);
+    fetch_opts.limit = fetch_limit_plus_one(rev.max_count());
     fetch_opts.retain_commit_data = true;
     let list_result = walk.rev_list_result(&token_refs, &fetch_opts)?;
-    let (oids, truncated) = truncate_oid_list(list_result.commits, rev.max_count);
+    let (oids, truncated) = truncate_oid_list(list_result.commits, rev.max_count());
     let now = context::wall_clock_now(env).unix_timestamp();
     let loader = CommitJsonLoader::for_listed_commits();
     let mut parsed = list_result.commit_data;

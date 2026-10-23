@@ -2,6 +2,8 @@
 
 use clap::Args;
 
+use crate::limit_args::LimitArgs;
+
 /// Flags that apply when listing branches (no positional `NAME`).
 #[derive(Args, Debug, Default, Clone)]
 pub struct BranchListArgs {
@@ -44,9 +46,8 @@ pub struct BranchListArgs {
     /// Reverse sort order.
     #[arg(long = "reverse")]
     pub reverse: bool,
-    /// Maximum number of branches to print.
-    #[arg(short = 'n', long = "max-count", value_name = "N")]
-    pub limit: Option<usize>,
+    #[command(flatten)]
+    pub limit: LimitArgs,
     /// Print the current branch name only (same as `git branch --show-current`).
     #[arg(long = "show-current")]
     pub show_current: bool,

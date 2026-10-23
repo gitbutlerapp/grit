@@ -33,7 +33,7 @@ Author, committer, message, and pickaxe filters use the same rules as [`grit log
 | Option | Description |
 | --- | --- |
 | `<RANGE>…` | One or more revision ranges (required unless a ref-set flag such as `--all` is used). |
-| `-n`, `--max-count <N>` | Stop after `N` commits (listing mode only). `--limit` is a hidden alias for one release. |
+| `-n`, `--limit <N>` | Stop after `N` commits (listing mode only). `--max-count` is Git’s well-known alias. |
 | `--count` | Print only the commit count (or left/right counts with `--left-right`). |
 | `--left-right` | With `--count` and one `A...B` range, print `{left, right}` instead of a single total. |
 | `--skip <N>` | Skip `N` commits after ordering. |

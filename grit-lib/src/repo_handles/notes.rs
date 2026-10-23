@@ -1,9 +1,11 @@
 //! Git notes scoped to a [`Repository`](crate::repo::Repository) and a [`NotesRef`](crate::notes::NotesRef).
 
 use crate::error::Result;
+use crate::list_limit::{fetch_plus_one, Limited};
 use crate::notes::{
-    note_object_name, read_blob_bytes, read_notes_snapshot, read_notes_tree, remove_note_entry,
-    upsert_note_entry, write_notes_commit_idents, NotesRef, NotesSnapshot, NotesTreeEntry,
+    note_object_name, read_blob_bytes, read_notes_snapshot, read_notes_tree,
+    read_notes_tree_limited, remove_note_entry, upsert_note_entry, write_notes_commit_idents,
+    NotesRef, NotesSnapshot, NotesTreeEntry,
 };
 use crate::objects::{ObjectId, ObjectKind};
 use crate::repo::Repository;
@@ -90,14 +92,20 @@ impl<'repo> RepositoryNotes<'repo> {
     /// # use std::path::Path;
     /// # fn demo() -> grit_lib::error::Result<()> {
     /// let repo = Repository::discover(Some(Path::new(".")), &grit_lib::config::environment::RepositoryOptions::empty())?;
-    /// let notes = repo.notes().list(&NotesRef::commits())?;
-    /// let _ = notes.len();
+    /// let notes = repo.notes().list(&NotesRef::commits(), None)?;
+    /// let _ = notes.items.len();
     /// # Ok(())
     /// # }
     /// ```
-    pub fn list(&self, notes_ref: &NotesRef) -> Result<Vec<NoteListing>> {
-        let entries = read_notes_tree(self.repo, notes_ref.as_str())?;
-        Ok(listings(entries).collect())
+    pub fn list(&self, notes_ref: &NotesRef, limit: Option<usize>) -> Result<Limited<NoteListing>> {
+        let cap = fetch_plus_one(limit);
+        let (entries, stopped_early) = read_notes_tree_limited(self.repo, notes_ref.as_str(), cap)?;
+        let notes: Vec<NoteListing> = listings(entries).collect();
+        let mut limited = Limited::from_vec(notes, limit);
+        if stopped_early {
+            limited.truncated = true;
+        }
+        Ok(limited)
     }
 
     /// List notes under `notes_ref` together with their contents, sorted by annotated object.
@@ -108,10 +116,14 @@ impl<'repo> RepositoryNotes<'repo> {
     /// - [`Error::NotesObjectKind`](crate::error::Error::NotesObjectKind) when a note entry is
     ///   not a blob, and object read failures (a missing note blob is an error, not an empty
     ///   note).
-    pub fn list_with_bodies(&self, notes_ref: &NotesRef) -> Result<Vec<Note>> {
-        let entries = read_notes_tree(self.repo, notes_ref.as_str())?;
-        let mut notes = Vec::with_capacity(entries.len());
-        for listing in listings(entries) {
+    pub fn list_with_bodies(
+        &self,
+        notes_ref: &NotesRef,
+        limit: Option<usize>,
+    ) -> Result<Limited<Note>> {
+        let listed = self.list(notes_ref, limit)?;
+        let mut notes = Vec::with_capacity(listed.items.len());
+        for listing in listed.items {
             notes.push(Note {
                 body: read_blob_bytes(self.repo, &listing.note_blob)?,
                 object: listing.object,
@@ -119,7 +131,10 @@ impl<'repo> RepositoryNotes<'repo> {
             });
         }
         notes.sort_by_key(|note| note.object);
-        Ok(notes)
+        Ok(Limited {
+            items: notes,
+            truncated: listed.truncated,
+        })
     }
 
     /// Read note bytes for `object`, if present.

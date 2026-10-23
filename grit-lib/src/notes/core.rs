@@ -78,7 +78,13 @@ fn collect_notes_tree_entries(
     tree_oid: &ObjectId,
     prefix: &[u8],
     out: &mut Vec<NotesTreeEntry>,
+    max_entries: Option<usize>,
+    truncated: &mut bool,
 ) -> Result<()> {
+    if max_entries.is_some_and(|max| out.len() >= max) {
+        *truncated = true;
+        return Ok(());
+    }
     let tree_obj = repo.odb().read(tree_oid)?;
     if tree_obj.kind != ObjectKind::Tree {
         return Err(Error::NotesObjectKind {
@@ -89,6 +95,10 @@ fn collect_notes_tree_entries(
     }
 
     for entry in parse_tree(&tree_obj.data)? {
+        if max_entries.is_some_and(|max| out.len() >= max) {
+            *truncated = true;
+            return Ok(());
+        }
         let mut path = prefix.to_vec();
         if !path.is_empty() {
             path.push(b'/');
@@ -96,7 +106,10 @@ fn collect_notes_tree_entries(
         path.extend_from_slice(&entry.name);
 
         if entry.mode == 0o040000 {
-            collect_notes_tree_entries(repo, &entry.oid, &path, out)?;
+            collect_notes_tree_entries(repo, &entry.oid, &path, out, max_entries, truncated)?;
+            if *truncated {
+                return Ok(());
+            }
         } else {
             out.push(NotesTreeEntry {
                 mode: entry.mode,
@@ -171,11 +184,54 @@ pub(crate) fn read_notes_snapshot(repo: &Repository, notes_ref: &str) -> Result<
         }
     };
     let mut entries = Vec::new();
-    collect_notes_tree_entries(repo, &tree_oid, b"", &mut entries)?;
+    let mut truncated = false;
+    collect_notes_tree_entries(repo, &tree_oid, b"", &mut entries, None, &mut truncated)?;
+    debug_assert!(!truncated, "unlimited notes collect must not truncate");
     Ok(NotesSnapshot {
         tip: ref_tip,
         entries,
     })
+}
+
+/// Read note tree entries, stopping after `max_entries` when set.
+///
+/// Returns `(entries, truncated)` where `truncated` is true when the tree held more entries
+/// than returned.
+pub fn read_notes_tree_limited(
+    repo: &Repository,
+    notes_ref: &str,
+    max_entries: Option<usize>,
+) -> Result<(Vec<NotesTreeEntry>, bool)> {
+    let ref_tip = notes_ref_tip(repo, notes_ref)?;
+    let tip = match ref_tip {
+        Some(oid) => oid,
+        None => match resolve_revision(repo, notes_ref) {
+            Ok(oid) => oid,
+            Err(_) => return Ok((Vec::new(), false)),
+        },
+    };
+    let obj = repo.odb().read(&tip)?;
+    let tree_oid = match obj.kind {
+        ObjectKind::Commit => parse_commit(&obj.data)?.tree,
+        ObjectKind::Tree => tip,
+        found => {
+            return Err(Error::NotesRefNotCommit {
+                notes_ref: notes_ref.to_owned(),
+                found,
+            })
+        }
+    };
+    let mut entries = Vec::new();
+    let mut truncated = false;
+    collect_notes_tree_entries(
+        repo,
+        &tree_oid,
+        b"",
+        &mut entries,
+        max_entries,
+        &mut truncated,
+    )?;
+    Ok((entries, truncated))
 }
 
 fn notes_fanout(entries: &[NotesTreeEntry]) -> usize {
@@ -639,7 +695,9 @@ fn notes_tree_blob_by_object(
     tree_oid: &ObjectId,
 ) -> Result<HashMap<ObjectId, ObjectId>> {
     let mut flat = Vec::new();
-    collect_notes_tree_entries(repo, tree_oid, b"", &mut flat)?;
+    let mut truncated = false;
+    collect_notes_tree_entries(repo, tree_oid, b"", &mut flat, None, &mut truncated)?;
+    debug_assert!(!truncated);
     let mut map = HashMap::new();
     for entry in flat {
         let Some(hex) = note_object_name(&entry.path) else {
@@ -1131,7 +1189,9 @@ pub fn notes_merge_inner(
             let mut commit_msg = format!("Merged notes from {remote_ref} into {local_ref}\n\n");
             let pairs = build_merge_pairs(base_tree, local_tree, remote_tree, repo)?;
             let mut entries = Vec::new();
-            collect_notes_tree_entries(repo, &local_tree, b"", &mut entries)?;
+            let mut truncated = false;
+            collect_notes_tree_entries(repo, &local_tree, b"", &mut entries, None, &mut truncated)?;
+            debug_assert!(!truncated);
             let worktree = notes_merge_worktree_path(repo);
             let conflicts = merge_changes_into_entries(
                 repo,

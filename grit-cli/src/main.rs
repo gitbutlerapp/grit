@@ -26,6 +26,7 @@ mod json_error;
 mod json_filter;
 #[cfg(test)]
 mod json_schema;
+mod limit_args;
 mod log_display;
 mod markdown;
 mod merge_strategy_args;
@@ -521,6 +522,8 @@ enum BundleAction {
     List {
         /// Bundle file to read.
         file: String,
+        #[command(flatten)]
+        limit: limit_args::LimitArgs,
     },
     /// Ingest a bundle pack into the current repository.
     Unbundle {
@@ -822,6 +825,8 @@ enum Command {
     },
     /// List hook scripts or run one by name.
     Hooks {
+        #[command(flatten)]
+        limit: limit_args::LimitArgs,
         #[command(subcommand)]
         action: Option<HooksAction>,
     },
@@ -1368,6 +1373,8 @@ enum Command {
         /// Notes ref (default: `core.notesRef` or `refs/notes/commits`).
         #[arg(long = "ref", value_name = "REF", global = true)]
         notes_ref: Option<String>,
+        #[command(flatten)]
+        limit: limit_args::LimitArgs,
         #[command(subcommand)]
         action: Option<NotesAction>,
     },
@@ -1401,9 +1408,8 @@ enum Command {
         /// Only tags pointing at this object (repeatable).
         #[arg(long = "points-at", value_name = "REV")]
         points_at: Vec<String>,
-        /// Maximum number of tags to list.
-        #[arg(short = 'n', long = "limit", value_name = "N")]
-        limit: Option<usize>,
+        #[command(flatten)]
+        limit: limit_args::LimitArgs,
         /// Delete the named tag instead of creating it.
         #[arg(short = 'd', long = "delete")]
         delete: bool,
@@ -2129,8 +2135,10 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
                 Ok(())
             }
         },
-        Command::Hooks { action } => match action {
-            None | Some(HooksAction::List) => emit(&commands::hooks::run_list()?, opts, ctx),
+        Command::Hooks { limit, action } => match action {
+            None | Some(HooksAction::List) => {
+                emit(&commands::hooks::run_list(limit.get())?, opts, ctx)
+            }
             Some(HooksAction::Run { name, hook_args }) => {
                 let outcome = commands::hooks::run_hook_by_name(&name, &hook_args)?;
                 let code = commands::hooks::run_exit_code(&outcome);
@@ -2303,14 +2311,20 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
                 }
                 Ok(())
             }
-            BundleAction::List { file } => {
-                emit(&commands::bundle::run_list(file.into())?, opts, ctx)
-            }
+            BundleAction::List { file, limit } => emit(
+                &commands::bundle::run_list(file.into(), limit.get())?,
+                opts,
+                ctx,
+            ),
             BundleAction::Unbundle { file } => {
                 emit(&commands::bundle::run_unbundle(file.into())?, opts, ctx)
             }
         },
-        Command::Notes { notes_ref, action } => {
+        Command::Notes {
+            notes_ref,
+            limit,
+            action,
+        } => {
             use commands::notes::NotesRunAction::*;
             let run_action = match action {
                 None | Some(NotesAction::List) => List,
@@ -2327,7 +2341,7 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
                 Some(NotesAction::Remove { revs }) => Remove { revs },
             };
             emit(
-                &commands::notes::run(notes_ref, run_action, ctx.now)?,
+                &commands::notes::run(notes_ref, run_action, limit.get(), ctx.now)?,
                 opts,
                 ctx,
             )
@@ -2383,7 +2397,7 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
                 reverse,
                 contains,
                 points_at,
-                limit,
+                limit: limit.get(),
                 tree_sha256,
                 exclude_submodule,
             })?;

@@ -332,7 +332,7 @@ pub fn run(
         }
         let resume = LogWalkCursor::decode(token).context("invalid log continuation cursor")?;
         let query = resume.query().clone();
-        let page_size = rev.max_count.unwrap_or(PAGE);
+        let page_size = rev.max_count().unwrap_or(PAGE);
         let page = LogWalkCursor::step(&repo, &query, Some(&resume), page_size)
             .context("could not list commits")?;
         let truncated = page.next.is_some();
@@ -353,7 +353,7 @@ pub fn run(
     }
 
     let token_refs = rev.rev_tokens(&["HEAD"]);
-    let page_size = rev.max_count.unwrap_or(PAGE);
+    let page_size = rev.max_count().unwrap_or(PAGE);
 
     let mut walk_opts = opts.clone();
     walk_opts.graph = display.graph;
@@ -361,7 +361,7 @@ pub fn run(
     let use_rev_walk = display.graph
         || display.group_by.is_some()
         || !rev.paths.is_empty()
-        || rev.max_count.is_some()
+        || rev.max_count().is_some()
         || walk_opts
             .commit_filter
             .as_ref()
@@ -370,15 +370,15 @@ pub fn run(
         || LogWalkQuery::from_rev_walk(&repo, &token_refs, &walk_opts)?.is_none();
 
     if use_rev_walk {
-        if rev.max_count == Some(0) {
+        if rev.max_count() == Some(0) {
             return empty_outcome(display);
         }
         let walk = repo.rev_walk();
         let mut fetch_opts = walk_opts.clone();
-        let page_limit = if display.graph && rev.max_count.is_none() {
+        let page_limit = if display.graph && rev.max_count().is_none() {
             Some(PAGE)
         } else {
-            rev.max_count
+            rev.max_count()
         };
         fetch_opts.limit = fetch_limit_plus_one(page_limit);
         fetch_opts.retain_commit_data = !display.graph && display.group_by.is_none();
@@ -392,7 +392,7 @@ pub fn run(
             let use_mailmap = rev_select::log_mailmap_enabled(&repo, rev.no_mailmap);
             let mailmap = mailmap_for_grouping(&repo, use_mailmap)?;
             if display.group_count_only {
-                if rev.max_count.is_none() {
+                if rev.max_count().is_none() {
                     let grouped = group_commits_by_author_from_rev(
                         &repo,
                         &token_refs,
@@ -407,7 +407,7 @@ pub fn run(
                     .rev_walk()
                     .commits(&token_refs, &fetch_opts)
                     .context("could not list commits")?;
-                let (oids, truncated) = truncate_oid_list(oids, rev.max_count);
+                let (oids, truncated) = truncate_oid_list(oids, rev.max_count());
                 let grouped = group_commits_by_author(
                     &repo,
                     &oids,
@@ -421,7 +421,7 @@ pub fn run(
                 .rev_walk()
                 .commits(&token_refs, &fetch_opts)
                 .context("could not list commits")?;
-            let (oids, truncated) = truncate_oid_list(oids, rev.max_count);
+            let (oids, truncated) = truncate_oid_list(oids, rev.max_count());
             return build_author_group_outcome(&repo, &oids, truncated, display, use_mailmap);
         }
         return build_commit_outcome(

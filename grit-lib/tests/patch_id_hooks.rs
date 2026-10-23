@@ -286,7 +286,7 @@ fn hooks_list_respects_core_hooks_path() {
         &RepositoryOptions::empty().with_work_tree(dir.path()),
     )
     .expect("open");
-    let hooks = repo.hooks().list().expect("list");
+    let hooks = repo.hooks().list(None).expect("list").items;
     assert_eq!(hooks.len(), 1);
     assert_eq!(hooks[0].name, "pre-commit");
     assert_eq!(hooks[0].path, hook_path);
@@ -320,7 +320,7 @@ fn non_executable_hook_reported() {
         &RepositoryOptions::empty().with_work_tree(dir.path()),
     )
     .expect("open");
-    let hooks = repo.hooks().list().expect("list");
+    let hooks = repo.hooks().list(None).expect("list").items;
     assert_eq!(hooks.len(), 1);
     assert_eq!(hooks[0].name, "pre-push");
     assert!(!hooks[0].executable);

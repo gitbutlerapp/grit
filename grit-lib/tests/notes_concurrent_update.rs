@@ -187,8 +187,9 @@ fn annotated(fx: &Fixture) -> Vec<ObjectId> {
     let mut objects: Vec<ObjectId> = fx
         .repo
         .notes()
-        .list(&NotesRef::commits())
+        .list(&NotesRef::commits(), None)
         .expect("list")
+        .items
         .into_iter()
         .map(|n| n.object)
         .collect();

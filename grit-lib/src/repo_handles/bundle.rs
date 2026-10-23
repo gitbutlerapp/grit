@@ -7,6 +7,7 @@ use crate::bundle::{
     write_bundle, Bundle, BundleError, BundleSpec, BundleVerifyReport, UnbundleOutcome,
     UnbundledRef,
 };
+use crate::list_limit::Limited;
 use crate::objects::ObjectId;
 use crate::progress::{NullProgress, ProgressSink};
 use crate::repo::Repository;
@@ -93,9 +94,13 @@ impl<'repo> RepositoryBundles<'repo> {
     /// # Errors
     ///
     /// Returns [`BundleError`] when the signature or header is malformed.
-    pub fn list_heads(&self, path: &Path) -> std::result::Result<Vec<BundleHead>, BundleError> {
+    pub fn list_heads(
+        &self,
+        path: &Path,
+        limit: Option<usize>,
+    ) -> std::result::Result<Limited<BundleHead>, BundleError> {
         let bundle = Bundle::open(path)?;
-        Ok(bundle
+        let heads: Vec<BundleHead> = bundle
             .header()
             .refs
             .iter()
@@ -103,7 +108,8 @@ impl<'repo> RepositoryBundles<'repo> {
                 name: name.clone(),
                 oid: *oid,
             })
-            .collect())
+            .collect();
+        Ok(Limited::from_vec(heads, limit))
     }
 
     /// Ingest the pack stream from `path` into this repository (refs are not updated).

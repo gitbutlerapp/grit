@@ -62,7 +62,7 @@ fn main() -> Result<(), grit_lib::error::Error> {
     let text = String::from_utf8_lossy(&body);
     println!("note={text}");
 
-    for note in repo.notes().list_with_bodies(&notes_ref)? {
+    for note in repo.notes().list_with_bodies(&notes_ref, None)?.items {
         println!(
             "{} {}",
             note.object.to_hex(),

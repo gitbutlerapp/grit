@@ -45,6 +45,10 @@
         },
         "notes_ref": {
           "type": "string"
+        },
+        "truncated": {
+          "description": "True when more notes existed than returned (`-n` / `--limit`).",
+          "type": "boolean"
         }
       },
       "required": [

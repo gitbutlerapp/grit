@@ -63,8 +63,9 @@ fn main() -> Result<(), grit_lib::error::Error> {
 
     let heads = repo
         .bundles()
-        .list_heads(&bundle_path)
-        .map_err(|e| grit_lib::error::Error::Message(e.to_string()))?;
+        .list_heads(&bundle_path, None)
+        .map_err(|e| grit_lib::error::Error::Message(e.to_string()))?
+        .items;
     for head in heads {
         println!("bundle_head {} {}", head.name, head.oid.to_hex());
     }

@@ -326,8 +326,9 @@ fn list_with_bodies_matches_git_notes() {
     let repo = open_grit(dir.path());
     let notes = repo
         .notes()
-        .list_with_bodies(&NotesRef::commits())
-        .expect("list with bodies");
+        .list_with_bodies(&NotesRef::commits(), None)
+        .expect("list with bodies")
+        .items;
 
     let mut expected: Vec<(ObjectId, ObjectId)> = git_cmd(dir.path(), &["notes", "list"])
         .lines()
@@ -377,13 +378,17 @@ fn list_with_bodies_reports_missing_note_blob() {
 
     let repo = open_grit(dir.path());
     assert_eq!(
-        repo.notes().list(&NotesRef::commits()).expect("list").len(),
+        repo.notes()
+            .list(&NotesRef::commits(), None)
+            .expect("list")
+            .items
+            .len(),
         1,
         "listing without bodies only reads the tree"
     );
     let err = repo
         .notes()
-        .list_with_bodies(&NotesRef::commits())
+        .list_with_bodies(&NotesRef::commits(), None)
         .expect_err("a missing note blob must not read as an empty note");
     assert!(
         matches!(err, Error::ObjectNotFound(_)),
@@ -490,7 +495,10 @@ fn notes_on_reftable_repository_use_the_ref_store() {
         notes.read(&notes_ref, &commit).expect("read"),
         Some(b"lgtm\n".to_vec())
     );
-    let listed = notes.list_with_bodies(&notes_ref).expect("list");
+    let listed = notes
+        .list_with_bodies(&notes_ref, None)
+        .expect("list")
+        .items;
     assert_eq!(listed.len(), 1);
     assert_eq!(listed[0].object, commit);
     assert_eq!(listed[0].body, b"lgtm\n");

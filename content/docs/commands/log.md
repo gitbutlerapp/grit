@@ -42,7 +42,7 @@ With `--graph`, human output draws a commit graph in the left margin (ASCII by d
 | Option | Description |
 | --- | --- |
 | `<REV>…` | Tips and ranges to walk (default `HEAD`). |
-| `-n`, `--max-count <N>` | Stop after `N` commits. On the default walk, this is the page size (including when continuing with `--cursor`). With path filters, caps how many matching commits are returned; omit it to list all matches. A one-shot `-n` without `--cursor` and without paths lists `N` commits with no `next` cursor. `--limit` is a hidden alias for one release. |
+| `-n`, `--limit <N>` | Stop after `N` commits. On the default walk, this is the page size (including when continuing with `--cursor`). With path filters, caps how many matching commits are returned; omit it to list all matches. A one-shot `-n` without `--cursor` and without paths lists `N` commits with no `next` cursor. `--max-count` is Git’s well-known alias. |
 | `--cursor <token>` | Continue a paged walk using the opaque `next` cursor from a previous `--json` page (or the `→ more` line). The cursor encodes the original revision selection, date cutoffs, and walk queue—pass `--cursor` alone (optional `-n` for page size). Revision operands, date filters, and ref-set flags are rejected with `--cursor`. Cannot be combined with path operands. |
 | `--before <date>` | Alias for `--until` (date cutoff). Values starting with `lw1.` are still accepted as a deprecated continuation cursor (with a warning); use `--cursor` instead. |
 | `--skip <N>` | Skip `N` commits after ordering (cursor walks do not support `--skip`). |

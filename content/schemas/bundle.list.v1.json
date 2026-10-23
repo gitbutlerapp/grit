@@ -28,6 +28,10 @@
         "$ref": "#/definitions/BundleRefJson"
       },
       "type": "array"
+    },
+    "truncated": {
+      "description": "True when the bundle header held more refs than returned (`-n` / `--limit`).",
+      "type": "boolean"
     }
   },
   "required": [

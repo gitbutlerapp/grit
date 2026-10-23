@@ -293,6 +293,10 @@
             "$ref": "#/definitions/TagEntry"
           },
           "type": "array"
+        },
+        "truncated": {
+          "description": "True when more tags matched than returned (`-n` / `--limit`).",
+          "type": "boolean"
         }
       },
       "required": [

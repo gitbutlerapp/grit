@@ -25,7 +25,9 @@ Discovers traditional hook scripts in the resolved hooks directory (`core.hooksP
 
 ### `grit hooks list`
 
-No flags beyond [global options](../global-options.md).
+| `-n`, `--limit <N>` | List at most `N` hook scripts (`truncated` in JSON when more exist). |
+
+Other [global options](../global-options.md) apply.
 
 ### `grit hooks run`
 

@@ -454,7 +454,7 @@ fn hooks_helpers_with_repo() {
     let dir = tempdir().expect("tempdir");
     let repo = init_repo(dir.path());
     let _ = resolve_hooks_dir(&repo);
-    let _ = repo.hooks().list();
+    let _ = repo.hooks().list(None);
     let _ = run_hook_with_env(&repo, "pre-commit", &[], None, &[]);
     let _ = run_hook_capture(&repo, "pre-commit", &[], None);
     let head = grit_lib::state::resolve_head(repo.git_dir()).expect("head");

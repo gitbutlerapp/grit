@@ -28,6 +28,7 @@ Notes update commits use your configured `user.name` / `user.email` (and optiona
 | Option | Description |
 | --- | --- |
 | `--ref` | Notes namespace (`commits`, `refs/notes/commits`, …). Overrides `core.notesRef` / `GIT_NOTES_REF`. |
+| `-n`, `--limit <N>` | List at most `N` notes (`truncated` in JSON when more exist). |
 | `-m`, `--message` | Note text for `add` (required). |
 | `--force` | Replace an existing note on `add`. |
 
@@ -63,6 +64,7 @@ Pass `--json` for stable output. The top-level `action` field is `list`, `show`,
 | `action` | string | `list`, `show`, `add`, or `remove`. |
 | `notes_ref` | string | Ref that was read or updated. |
 | `notes` | array | For `list`: `object`, `blob`, and `body` for each note. |
+| `truncated` | boolean | For `list`: `true` when more notes exist than returned (`-n`). |
 | `object` | string | For `show` / `add`: annotated commit id (full hex). |
 | `body` | string | For `show`: note text. |
 | `replaced` | boolean | For `add`: whether a note was overwritten. |

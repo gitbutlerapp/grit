@@ -187,7 +187,11 @@ fn handle_bundle_verify_and_git_unbundle() {
         "git bundle verify:\n{verify}"
     );
 
-    let heads = repo.bundles().list_heads(&bundle_path).expect("heads");
+    let heads = repo
+        .bundles()
+        .list_heads(&bundle_path, None)
+        .expect("heads")
+        .items;
     assert!(heads.iter().any(|h| h.name == "refs/heads/main"));
 
     let consumer = tempfile::tempdir().expect("consumer");

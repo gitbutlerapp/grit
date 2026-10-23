@@ -9,6 +9,7 @@ use std::os::unix::fs::PermissionsExt;
 use crate::config::ConfigSet;
 use crate::error::Result;
 use crate::hooks::resolve_hooks_dir;
+use crate::list_limit::Limited;
 use crate::repo::Repository;
 
 /// Where a traditional hook script was discovered.
@@ -59,9 +60,10 @@ impl<'repo> RepositoryHooks<'repo> {
     ///
     /// Returns [`crate::error::Error::Config`] when config cannot be read, or I/O errors from
     /// reading the hooks directory.
-    pub fn list(&self) -> Result<Vec<HookInfo>> {
+    pub fn list(&self, limit: Option<usize>) -> Result<Limited<HookInfo>> {
         let config = self.repo.config()?;
-        list_hooks_in_dir(self.repo, config.as_ref())
+        let hooks = list_hooks_in_dir(self.repo, config.as_ref())?;
+        Ok(Limited::from_vec(hooks, limit))
     }
 }
 

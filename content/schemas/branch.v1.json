@@ -133,6 +133,10 @@
             "string",
             "null"
           ]
+        },
+        "truncated": {
+          "description": "True when more branches matched than returned (`-n` / `--limit`).",
+          "type": "boolean"
         }
       },
       "required": [
