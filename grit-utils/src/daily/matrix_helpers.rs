@@ -1144,7 +1144,15 @@ fn git_rev_parse(git: &Path, repo: &Path, spec: &str) -> Result<String> {
 /// Git-git worktree with a deep-history `--contains` target for tag ref queries.
 pub fn setup_git_git_ref_contains(setup: &DailySetup<'_>) -> Result<DailyHeadlineContext> {
     let mut ctx = super::helpers::setup_git_git_history(setup)?;
-    ctx.ref_query_contains = Some(git_rev_parse(setup.git, &ctx.repo, "HEAD~5000")?);
+    // Use a tagged release so `--contains` matches real tags without scanning deep history.
+    ctx.ref_query_contains = Some(git_rev_parse(setup.git, &ctx.repo, "v2.46.0^{commit}")?);
+    Ok(ctx)
+}
+
+/// Many-refs worktree with HEAD as `--contains` target for tag ref queries (fast vs git.git).
+pub fn setup_many_refs_ref_contains(setup: &DailySetup<'_>) -> Result<DailyHeadlineContext> {
+    let mut ctx = setup_many_refs(setup)?;
+    ctx.ref_query_contains = Some(git_rev_parse(setup.git, &ctx.repo, "HEAD")?);
     Ok(ctx)
 }
 
@@ -1155,33 +1163,26 @@ pub fn setup_many_refs_merged(setup: &DailySetup<'_>) -> Result<DailyHeadlineCon
     Ok(ctx)
 }
 
-/// Tag `--contains` ref query via `refs-driver` vs `git for-each-ref`.
+/// Tag `--contains` listing: grit `tag --contains` vs `git for-each-ref`.
 pub fn ref_query_contains_tags_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
     let Some(contains) = ctx.ref_query_contains.as_deref() else {
         return noop_bench();
     };
-    let grit = BenchArgv::new(
-        &ctx.bench,
-        vec![
-            "refs-driver".to_string(),
-            "ref-query".to_string(),
-            ctx.repo.display().to_string(),
-            "--namespace".to_string(),
-            "tags".to_string(),
-            "--contains".to_string(),
-            contains.to_string(),
-        ],
-    );
-    let git = BenchArgv::new(
-        &ctx.git,
-        vec![
-            "for-each-ref".to_string(),
-            "refs/tags/".to_string(),
-            format!("--contains={contains}"),
-            "--format=%(refname)".to_string(),
-        ],
-    );
-    (grit, git)
+    (
+        super::helpers::sh_devnull(
+            &ctx.grit,
+            &["tag", "--contains", contains, "--sort=version"],
+        ),
+        BenchArgv::new(
+            &ctx.git,
+            vec![
+                "for-each-ref".to_string(),
+                "refs/tags/".to_string(),
+                format!("--contains={contains}"),
+                "--format=%(refname)".to_string(),
+            ],
+        ),
+    )
 }
 
 /// Branch `--merged` ref query via `refs-driver` vs `git for-each-ref`.
