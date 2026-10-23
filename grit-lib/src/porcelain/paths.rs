@@ -206,16 +206,16 @@ pub fn move_paths(repo: &Repository, opts: &MoveOptions) -> Result<MoveOutcome> 
 
     for src_raw in &opts.sources {
         let src = normalize_and_validate_repo_relative(repo, work_tree, src_raw)?;
-        let plan = plan_single_move(
+        let plan = plan_single_move(PlanSingleMoveParams {
             repo,
             work_tree,
-            &simulated,
-            &src,
-            &dst,
-            opts.sources.len() > 1,
-            opts.force,
+            index: &simulated,
+            src: &src,
+            dst: &dst,
+            multi_source: opts.sources.len() > 1,
+            force: opts.force,
             ignorecase,
-        )?;
+        })?;
         apply_renames_to_index(&mut simulated, &plan.renames)?;
         planned.push(plan);
     }
@@ -293,16 +293,28 @@ struct SingleMovePlan {
     renames: Vec<(String, String)>,
 }
 
-fn plan_single_move(
-    repo: &Repository,
-    work_tree: &Path,
-    index: &Index,
-    src: &str,
-    dst: &str,
+struct PlanSingleMoveParams<'a> {
+    repo: &'a Repository,
+    work_tree: &'a Path,
+    index: &'a Index,
+    src: &'a str,
+    dst: &'a str,
     multi_source: bool,
     force: bool,
     ignorecase: bool,
-) -> Result<SingleMovePlan> {
+}
+
+fn plan_single_move(params: PlanSingleMoveParams<'_>) -> Result<SingleMovePlan> {
+    let PlanSingleMoveParams {
+        repo,
+        work_tree,
+        index,
+        src,
+        dst,
+        multi_source,
+        force,
+        ignorecase,
+    } = params;
     let src_entries = index_paths_under(index, src, true);
     if src_entries.is_empty() {
         return Err(Error::MoveSourceNotTracked {
