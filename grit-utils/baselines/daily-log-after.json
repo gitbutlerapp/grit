@@ -1,0 +1,154 @@
+{
+  "schema": "grit-daily-bench/1",
+  "generated_at": "2026-10-23T04:15:14.156314293Z",
+  "machine": {
+    "cpu_model": "Intel(R) Xeon(R) Processor",
+    "physical_cores": 4,
+    "logical_cores": 4,
+    "ram_bytes": 16780574720,
+    "os": "linux",
+    "kernel": "Linux 6.12.94+",
+    "scratch_filesystem": "ext4",
+    "rustc_version": "rustc 1.99.0 (b940084d7 2026-09-28)",
+    "cargo_profile": "release"
+  },
+  "tools": {
+    "git": "git version 2.43.0",
+    "grit": "grit 0.5.17",
+    "grit_commit": "f6b499f7e8fa8764296821aef6e6efe868cc20b4"
+  },
+  "scenarios": [
+    {
+      "id": "log/all@git-git",
+      "area": "revwalk",
+      "description": "Full reachable history: grit log (paged) vs git log --oneline",
+      "git": {
+        "median_wall_ms": 45.2404705,
+        "peak_rss_bytes": 21041152,
+        "runs": 20
+      },
+      "grit": {
+        "median_wall_ms": 62.73653349999999,
+        "peak_rss_bytes": 39555072,
+        "runs": 20
+      },
+      "ratio": 1.3867347710276354
+    },
+    {
+      "id": "log/author-n50@deep-history",
+      "area": "revwalk",
+      "description": "grit log --author=. -n 50 vs git log on deep-history (no commit-graph)",
+      "git": {
+        "median_wall_ms": 2.2208295,
+        "peak_rss_bytes": 9035776,
+        "runs": 20
+      },
+      "grit": {
+        "median_wall_ms": 4.356267,
+        "peak_rss_bytes": 16318464,
+        "runs": 20
+      },
+      "ratio": 1.961549502111711
+    },
+    {
+      "id": "log/author-n50@deep-history-cg",
+      "area": "revwalk",
+      "description": "grit log --author=. -n 50 vs git log on deep-history (commit-graph written)",
+      "git": {
+        "median_wall_ms": 2.2344245000000003,
+        "peak_rss_bytes": 12238848,
+        "runs": 20
+      },
+      "grit": {
+        "median_wall_ms": 4.3815170000000006,
+        "peak_rss_bytes": 18186240,
+        "runs": 20
+      },
+      "ratio": 1.9609152155286518
+    },
+    {
+      "id": "log/author@git-git",
+      "area": "revwalk",
+      "description": "grit log --author=. -n 50 vs git log on git.git",
+      "git": {
+        "median_wall_ms": 3.272449,
+        "peak_rss_bytes": 12570624,
+        "runs": 20
+      },
+      "grit": {
+        "median_wall_ms": 4.3973025,
+        "peak_rss_bytes": 20447232,
+        "runs": 20
+      },
+      "ratio": 1.3437344630886534
+    },
+    {
+      "id": "log/json-100@git-git",
+      "area": "revwalk",
+      "headline": true,
+      "name": "log",
+      "description": "Last 100 commits as JSON vs git log with a verbose --format",
+      "git": {
+        "median_wall_ms": 3.2856815,
+        "peak_rss_bytes": 14811136,
+        "runs": 20
+      },
+      "grit": {
+        "median_wall_ms": 5.4412225,
+        "peak_rss_bytes": 21921792,
+        "runs": 20
+      },
+      "ratio": 1.656040763537184
+    },
+    {
+      "id": "log/oneline-100@git-git",
+      "area": "revwalk",
+      "headline": true,
+      "name": "log",
+      "description": "Last 100 commits one line each vs git log --oneline",
+      "git": {
+        "median_wall_ms": 3.3016975,
+        "peak_rss_bytes": 14864384,
+        "runs": 20
+      },
+      "grit": {
+        "median_wall_ms": 4.3921565000000005,
+        "peak_rss_bytes": 21716992,
+        "runs": 20
+      },
+      "ratio": 1.3302722311780533
+    },
+    {
+      "id": "log/oneline-100@synth-100k",
+      "area": "revwalk",
+      "description": "Last 100 commits: grit log --limit 100 vs git log --oneline -100",
+      "git": {
+        "median_wall_ms": 3.2812085,
+        "peak_rss_bytes": 11546624,
+        "runs": 20
+      },
+      "grit": {
+        "median_wall_ms": 4.3648425,
+        "peak_rss_bytes": 19931136,
+        "runs": 20
+      },
+      "ratio": 1.330254538838358
+    },
+    {
+      "id": "log/path@git-git",
+      "area": "revwalk",
+      "description": "History for one path: grit log -- <path> vs git log --oneline -- <path>",
+      "git": {
+        "median_wall_ms": 347.21941400000003,
+        "peak_rss_bytes": 262295552,
+        "runs": 3
+      },
+      "grit": {
+        "median_wall_ms": 2307.1334669999997,
+        "peak_rss_bytes": 319520768,
+        "runs": 3
+      },
+      "ratio": 6.644598124343357
+    }
+  ]
+}
