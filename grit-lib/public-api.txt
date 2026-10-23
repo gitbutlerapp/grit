@@ -17453,6 +17453,7 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::push_plan::PushI
 pub struct grit_lib::remote::push_plan::PushPlanContext
 pub grit_lib::remote::push_plan::PushPlanContext::remote_branch_tips: std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>
 pub grit_lib::remote::push_plan::PushPlanContext::remote_ref_names: std::collections::hash::set::HashSet<alloc::string::String>
+pub grit_lib::remote::push_plan::PushPlanContext::remote_tips: core::option::Option<alloc::vec::Vec<grit_lib::objects::ObjectId>>
 impl grit_lib::remote::push_plan::PushPlanContext
 pub fn grit_lib::remote::push_plan::PushPlanContext::from_advertised_refs(impl core::iter::traits::collect::IntoIterator<Item = grit_lib::remote::RemoteRef>) -> Self
 impl core::clone::Clone for grit_lib::remote::push_plan::PushPlanContext
@@ -18047,6 +18048,7 @@ pub grit_lib::remote::transfer::PushOptions::diagnostics: core::option::Option<g
 pub grit_lib::remote::transfer::PushOptions::dry_run: bool
 pub grit_lib::remote::transfer::PushOptions::network_trace: bool
 pub grit_lib::remote::transfer::PushOptions::push_options: alloc::vec::Vec<alloc::string::String>
+pub grit_lib::remote::transfer::PushOptions::remote_ref_tips: core::option::Option<alloc::vec::Vec<grit_lib::objects::ObjectId>>
 pub grit_lib::remote::transfer::PushOptions::tracking_remote: core::option::Option<alloc::string::String>
 impl core::clone::Clone for grit_lib::remote::transfer::PushOptions
 pub fn grit_lib::remote::transfer::PushOptions::clone(&self) -> Self
@@ -18694,6 +18696,7 @@ pub fn grit_lib::remote::Remote::fetch(&self, &grit_lib::repo::Repository, grit_
 pub fn grit_lib::remote::Remote::fetch_url(&self) -> &grit_lib::remote::RemoteUrl
 pub fn grit_lib::remote::Remote::from_config(&grit_lib::config::ConfigSet, &str) -> core::result::Result<Self, grit_lib::remote::RemoteError>
 pub fn grit_lib::remote::Remote::from_url(&str) -> core::result::Result<Self, grit_lib::remote::RemoteError>
+pub fn grit_lib::remote::Remote::list_push_refs(&self, &grit_lib::repo::Repository, core::option::Option<&dyn grit_lib::remote::HttpClientFactory>) -> core::result::Result<alloc::vec::Vec<grit_lib::remote::RemoteRef>, grit_lib::remote::RemoteError>
 pub fn grit_lib::remote::Remote::list_refs(&self, core::option::Option<&grit_lib::repo::Repository>, &grit_lib::remote::ListRefsOptions, core::option::Option<&dyn grit_lib::remote::HttpClientFactory>) -> core::result::Result<alloc::vec::Vec<grit_lib::remote::RemoteRef>, grit_lib::remote::RemoteError>
 pub fn grit_lib::remote::Remote::push(&self, &grit_lib::repo::Repository, &[grit_lib::remote::transfer::PushRefSpec], grit_lib::remote::transfer::PushOptions, &mut dyn grit_lib::remote::fetch::Progress, core::option::Option<&dyn grit_lib::remote::HttpClientFactory>) -> core::result::Result<grit_lib::remote::transfer::PushOutcome, grit_lib::remote::RemoteError>
 pub fn grit_lib::remote::Remote::push_url(&self) -> &grit_lib::remote::RemoteUrl

@@ -20,7 +20,7 @@ use crate::objects::{ObjectId, ObjectKind};
 use crate::push_report::PushRefResult;
 use crate::refs;
 use crate::refspec::{parse_push_refspec, RefspecItem};
-use crate::remote::{HttpClientFactory, ListRefsOptions, Remote, RemoteError, RemoteRef};
+use crate::remote::{HttpClientFactory, Remote, RemoteError, RemoteRef};
 use crate::repo::Repository;
 use crate::rev_parse::{resolve_push_full_ref_for_branch, resolve_revision_for_verify};
 use crate::state::{resolve_head, HeadState};
@@ -102,6 +102,13 @@ pub struct PushPlanContext {
     /// Tips of `refs/heads/*` on the remote (reserved for push planning; follow-tags
     /// uses commit-graph ancestor queries instead of materializing reachable sets).
     pub remote_branch_tips: HashSet<ObjectId>,
+    /// Tip of every advertised ref, or `None` when the advertisement was not read.
+    ///
+    /// Pass it on as [`PushOptions::remote_ref_tips`](crate::transfer::PushOptions) so a local
+    /// push does not scan the remote's refs a second time. Only pass it to a push to the same
+    /// remote: [`load_push_plan_context`] and [`resolve_push`] select the same remote when given
+    /// the same override.
+    pub remote_tips: Option<Vec<ObjectId>>,
 }
 
 /// Errors while planning a push (typed; no stringly matching in callers).
@@ -646,6 +653,7 @@ impl PushPlanContext {
     #[must_use]
     pub fn from_advertised_refs(refs: impl IntoIterator<Item = RemoteRef>) -> Self {
         let mut ctx = Self::default();
+        let mut tips = Vec::new();
         for remote_ref in refs {
             if remote_ref.peeled_tag().is_some() {
                 continue;
@@ -653,17 +661,19 @@ impl PushPlanContext {
             if remote_ref.name.starts_with("refs/heads/") {
                 ctx.remote_branch_tips.insert(remote_ref.oid);
             }
+            tips.push(remote_ref.oid);
             ctx.remote_ref_names.insert(remote_ref.name);
         }
+        ctx.remote_tips = Some(tips);
         ctx
     }
 }
 
 /// Load the [`PushPlanContext`] for the remote a push would select.
 ///
-/// The remote is chosen with [`configured_remote_for_push`] and opened with
-/// [`open_push_destination`], so literal URLs and paths are listed like configured remotes.
-/// The context is best-effort: a remote without a URL, or one whose refs cannot be listed,
+/// The remote is chosen with [`configured_remote_for_push`], opened with
+/// [`open_push_destination`] (so literal URLs and paths are listed like configured remotes) and
+/// listed with [`Remote::list_push_refs`]. The context is best-effort: a remote without a URL, or one whose refs cannot be listed,
 /// yields an empty context, and the push itself reports any connection failure.
 ///
 /// # Errors
@@ -679,9 +689,9 @@ pub fn load_push_plan_context(
     let Ok(handle) = open_push_destination(config, &remote) else {
         return Ok(PushPlanContext::default());
     };
-    let advertised = handle
-        .list_refs(Some(repo), &ListRefsOptions::default(), http_factory)
-        .unwrap_or_default();
+    let Ok(advertised) = handle.list_push_refs(repo, http_factory) else {
+        return Ok(PushPlanContext::default());
+    };
     Ok(PushPlanContext::from_advertised_refs(advertised))
 }
 
@@ -1563,6 +1573,16 @@ mod tests {
             ]
         );
         assert_eq!(ctx.remote_branch_tips, HashSet::from([oid("1"), oid("2")]));
+        assert_eq!(
+            ctx.remote_tips,
+            Some(vec![oid("1"), oid("1"), oid("2"), oid("3")])
+        );
+    }
+
+    #[test]
+    fn plan_context_from_empty_advertisement_knows_remote_has_no_tips() {
+        let ctx = PushPlanContext::from_advertised_refs([]);
+        assert_eq!(ctx.remote_tips, Some(Vec::new()));
     }
 
     #[test]
@@ -1572,5 +1592,17 @@ mod tests {
             .expect("context");
         assert!(ctx.remote_ref_names.is_empty());
         assert!(ctx.remote_branch_tips.is_empty());
+        assert_eq!(ctx.remote_tips, None);
+    }
+
+    #[test]
+    fn plan_context_for_missing_path_assumes_no_remote_objects() {
+        let (tmp, repo) = init_repo();
+        let missing = tmp.path().join("missing.git");
+        let missing = missing.to_str().expect("utf-8 path");
+        let ctx =
+            load_push_plan_context(&repo, &ConfigSet::new(), Some(missing), None).expect("context");
+        assert!(ctx.remote_ref_names.is_empty());
+        assert!(ctx.remote_tips.as_ref().is_none_or(Vec::is_empty));
     }
 }

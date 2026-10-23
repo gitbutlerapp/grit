@@ -460,6 +460,48 @@ impl Remote {
         }
     }
 
+    /// List the refs a push to this remote's [`push_url`](Self::push_url) starts from.
+    ///
+    /// Local and `file://` destinations are read with one scan of every ref under `refs/`, the
+    /// set `git receive-pack` advertises (no `HEAD` line). Other transports return the
+    /// [`list_refs`](Self::list_refs) listing of the push URL.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RemoteError`] on resolution or wire failures, and
+    /// [`RemoteError::UnsupportedScheme`] for bundles.
+    pub fn list_push_refs(
+        &self,
+        repo: &Repository,
+        http_factory: Option<&dyn HttpClientFactory>,
+    ) -> RemoteResult<Vec<RemoteRef>> {
+        let url = self.push_url();
+        match url {
+            RemoteUrl::Bundle(_) => Err(RemoteError::UnsupportedScheme),
+            RemoteUrl::Local(_) | RemoteUrl::File(_) => {
+                let remote_git = local_git_dir_from_url(url, repo.git_dir(), repo.work_tree())?;
+                let refs =
+                    crate::refs::list_refs(&remote_git, "refs/").map_err(RemoteError::Library)?;
+                Ok(refs
+                    .into_iter()
+                    .map(|(name, oid)| RemoteRef {
+                        name,
+                        oid,
+                        symref_target: None,
+                    })
+                    .collect())
+            }
+            wire => self.list_refs_wire(
+                wire,
+                repo.git_dir(),
+                Some(repo.odb()),
+                &ListRefsOptions::default(),
+                http_factory,
+                Some(repo),
+            ),
+        }
+    }
+
     #[allow(clippy::too_many_arguments)]
     fn dispatch_fetch(
         &self,

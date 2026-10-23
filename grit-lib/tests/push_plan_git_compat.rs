@@ -168,6 +168,129 @@ fn literal_path_remote_context_guesses_short_dst_like_git() {
     compare_with_git(&fx.local, &[bare.as_str(), "main:x"], &specs, &fx.bare);
 }
 
+#[test]
+fn list_push_refs_matches_git_for_each_ref_on_destination() {
+    let fx = setup_feature_and_main();
+    git(&fx.local, &["push", "-q", "origin", "main", "feature"]);
+    git(
+        &fx.bare,
+        &[
+            "update-ref",
+            "refs/remotes/upstream/main",
+            "refs/heads/main",
+        ],
+    );
+    git(
+        &fx.bare,
+        &["update-ref", "refs/notes/commits", "refs/heads/main"],
+    );
+    let repo = open_repo(&fx.local);
+    let config = load_config(&repo);
+    let listed = open_push_destination(&config, "origin")
+        .expect("remote")
+        .list_push_refs(&repo, None)
+        .expect("list");
+    let names: HashSet<String> = listed.into_iter().map(|r| r.name).collect();
+    assert!(!names.contains("HEAD"));
+    assert_eq!(names, push_plan_context(&fx.bare).remote_ref_names);
+}
+
+#[test]
+fn plan_context_lists_pushurl_not_fetch_url() {
+    let fx = setup_feature_and_main();
+    git(&fx.local, &["push", "-q", "origin", "main"]);
+    let push_bare = fx._tmp.path().join("push.git");
+    std::fs::create_dir_all(&push_bare).unwrap();
+    git(&push_bare, &["init", "-q", "--bare", "-b", "main", "."]);
+    git(
+        &fx.local,
+        &[
+            "remote",
+            "set-url",
+            "--push",
+            "origin",
+            push_bare.to_str().unwrap(),
+        ],
+    );
+    git(
+        &fx.local,
+        &[
+            "push",
+            "-q",
+            "origin",
+            "feature:refs/heads/only-on-push-url",
+        ],
+    );
+    let repo = open_repo(&fx.local);
+    let config = load_config(&repo);
+    let ctx = load_push_plan_context(&repo, &config, Some("origin"), None).expect("context");
+    assert_eq!(
+        ctx.remote_ref_names,
+        push_plan_context(&push_bare).remote_ref_names
+    );
+    assert!(ctx.remote_ref_names.contains("refs/heads/only-on-push-url"));
+}
+
+#[test]
+fn push_with_planning_tips_sends_missing_objects_to_literal_remote() {
+    let fx = setup_feature_and_main();
+    git(&fx.local, &["checkout", "-q", "main"]);
+    git(&fx.local, &["push", "-q", "origin", "main"]);
+    git(&fx.local, &["checkout", "-q", "feature"]);
+    std::fs::write(fx.local.join("h"), "3\n").unwrap();
+    git(&fx.local, &["add", "h"]);
+    git(&fx.local, &["commit", "-q", "-m", "c3"]);
+    let repo = open_repo(&fx.local);
+    let config = load_config(&repo);
+    let bare = fx.bare.to_str().expect("utf-8 path").to_owned();
+    let ctx = load_push_plan_context(&repo, &config, Some(&bare), None).expect("context");
+    let main_tip = git_cmd(&["rev-parse", "main"]).in_dir(&fx.local).exec();
+    let main_tip = ObjectId::from_hex(main_tip.stdout.trim()).expect("main oid");
+    assert!(ctx
+        .remote_tips
+        .as_ref()
+        .is_some_and(|t| t.contains(&main_tip)));
+    let plan = resolve_push(
+        &repo,
+        &config,
+        &PushRequest {
+            remote: Some(bare.clone()),
+            refspecs: vec!["feature".into()],
+            ..Default::default()
+        },
+        &ctx,
+    )
+    .expect("plan");
+    open_push_destination(&config, &plan.remote)
+        .expect("remote")
+        .push(
+            &repo,
+            &plan.specs,
+            PushOptions {
+                remote_ref_tips: ctx.remote_tips.clone(),
+                ..Default::default()
+            },
+            &mut NoProgress,
+            None,
+        )
+        .expect("push");
+
+    let local_tip = git_cmd(&["rev-parse", "feature"]).in_dir(&fx.local).exec();
+    let remote_tip = git_cmd(&["rev-parse", "refs/heads/feature"])
+        .in_dir(&fx.bare)
+        .exec();
+    assert!(remote_tip.ok(), "rev-parse: {}", remote_tip.stderr);
+    assert_eq!(remote_tip.stdout, local_tip.stdout);
+    let fsck = git_cmd(&["fsck", "--strict", "--no-dangling"])
+        .in_dir(&fx.bare)
+        .exec();
+    assert!(fsck.ok(), "git fsck: {}{}", fsck.stdout, fsck.stderr);
+    let log = git_cmd(&["log", "--format=%s", "refs/heads/feature"])
+        .in_dir(&fx.bare)
+        .exec();
+    assert_eq!(log.stdout, "c3\nc2\nc1\n");
+}
+
 fn setup_main_and_private_with_negative_push_config(negative_first: bool) -> Fixture {
     let tmp = tempfile::tempdir().expect("tempdir");
     let local = tmp.path().join("local");
@@ -632,5 +755,6 @@ fn push_plan_context(bare: &Path) -> PushPlanContext {
     PushPlanContext {
         remote_ref_names,
         remote_branch_tips,
+        remote_tips: None,
     }
 }

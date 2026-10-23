@@ -693,6 +693,14 @@ pub struct PushOptions {
     pub diagnostics: Option<crate::diagnostics::DiagnosticsHandle>,
     /// When true with [`Self::diagnostics`], push paths may emit network trace events.
     pub network_trace: bool,
+    /// Ref tips already read from the remote, for example while planning
+    /// ([`PushPlanContext::remote_tips`](crate::remote::push_plan::PushPlanContext)).
+    ///
+    /// A local push uses them as the objects the remote already has instead of listing the
+    /// remote's refs again; ref updates still check each destination's current value. They
+    /// must come from the push destination, or objects the destination lacks may be left out
+    /// of the pack. Wire pushes read the advertisement from their connection and ignore this.
+    pub remote_ref_tips: Option<Vec<ObjectId>>,
 }
 
 /// The structured result of a push. Reuses [`PushRefResult`] for per-ref status.
@@ -2091,10 +2099,13 @@ pub fn push_local(
 
     // The remote's existing ref tips become the `haves` for pack building, so the
     // copied object closure excludes everything the remote already has.
-    let remote_have_tips: Vec<ObjectId> = crate::refs::list_refs(remote_git_dir, "refs/")?
-        .into_iter()
-        .map(|(_, oid)| oid)
-        .collect();
+    let remote_have_tips: Vec<ObjectId> = match &opts.remote_ref_tips {
+        Some(tips) => tips.clone(),
+        None => crate::refs::list_refs(remote_git_dir, "refs/")?
+            .into_iter()
+            .map(|(_, oid)| oid)
+            .collect(),
+    };
 
     // First pass: decide each ref's status without mutating anything.
     let mut decisions: Vec<PushDecision> = Vec::with_capacity(refs.len());

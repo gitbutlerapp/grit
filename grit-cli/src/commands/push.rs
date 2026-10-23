@@ -2,6 +2,7 @@
 
 use anyhow::{Context, Result};
 use grit_lib::config::ConfigSet;
+use grit_lib::objects::ObjectId;
 use grit_lib::remote::push_plan::{
     apply_set_upstream_after_push, load_push_plan_context, open_push_destination, parse_force_mode,
     push_follow_tags_config, resolve_push, resolve_push_invocation, PushPlanError, PushPlanKind,
@@ -150,6 +151,7 @@ struct PushWireOptions<'a> {
     dry_run: bool,
     atomic: bool,
     push_options: &'a [String],
+    remote_ref_tips: Option<Vec<ObjectId>>,
 }
 
 /// Positional `[<remote>] [<refspec>...]` plus flags.
@@ -199,6 +201,7 @@ pub fn run(
         dry_run,
         atomic,
         push_options,
+        remote_ref_tips: plan_ctx.remote_tips,
     };
     let report = match push_once(&repo, &config, &plan.remote, &plan.specs, &wire, &factory) {
         Ok(report) => report,
@@ -294,6 +297,7 @@ fn push_once(
                 dry_run: wire.dry_run,
                 atomic: wire.atomic,
                 push_options: wire.push_options.to_vec(),
+                remote_ref_tips: wire.remote_ref_tips.clone(),
                 tracking_remote: Some(remote_name.to_owned()),
                 ..Default::default()
             },
