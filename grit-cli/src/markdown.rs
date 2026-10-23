@@ -1200,8 +1200,7 @@ pub fn print_stash_push_outcome(
             oid,
             message,
             dry_run,
-            stashed_hunks: _,
-            stashed_lines: _,
+            ..
         } => {
             let short = short_hex(oid);
             let verb = if *dry_run { "Would stash" } else { "Saved" };
@@ -1209,6 +1208,20 @@ pub fn print_stash_push_outcome(
                 outln!(w, "- {verb} working tree and index state · `{short}`");
             } else {
                 outln!(w, "- {verb} **{message}** · `{short}`");
+            }
+        }
+        StashPushOutcome::Preview {
+            paths, untracked, ..
+        } => {
+            outln!(w, "- Would stash **{}** tracked path(s)", paths.len());
+            for path in paths {
+                outln!(w, "  - `{path}`");
+            }
+            if !untracked.is_empty() {
+                outln!(w, "- Would stash **{}** untracked path(s)", untracked.len());
+                for path in untracked {
+                    outln!(w, "  - `{path}`");
+                }
             }
         }
     }

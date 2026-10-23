@@ -231,6 +231,27 @@ pub fn remove_empty_dirs(
     }
 }
 
+/// Which local changes [`push_stash`] saves and how the worktree/index are left afterward.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum StashMode {
+    /// Stash staged and unstaged tracked changes (default).
+    #[default]
+    All,
+    /// Stash only index changes vs `HEAD`; unstaged worktree edits on other paths remain.
+    StagedOnly,
+    /// Stash everything, then reset the worktree to match the index (staged content stays).
+    KeepIndex,
+}
+
+/// Paths that would be recorded by [`preview_stash`] or a `--dry-run` push.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StashPreview {
+    /// Repository-relative paths with tracked changes that would be stashed.
+    pub paths: Vec<String>,
+    /// Untracked paths that would be included when `include_untracked` is set.
+    pub untracked: Vec<String>,
+}
+
 /// Options for [`create_stash`] and [`push_stash`].
 #[derive(Debug, Clone)]
 pub struct StashCreateOptions {
@@ -244,8 +265,82 @@ pub struct StashCreateOptions {
     pub selection: Option<HunkSelection>,
     /// Pathspecs narrowing hunk resolution (same as `grit add --hunks`).
     pub pathspecs: Vec<String>,
-    /// Preview stash creation without updating refs, the worktree, or the index.
+    /// When true, callers must use [`preview_stash`] instead of [`push_stash`].
     pub dry_run: bool,
+    /// Push mode (`--staged`, `--keep-index`, or default).
+    pub mode: StashMode,
+}
+
+impl StashCreateOptions {
+    /// Reject flag combinations Git and grit do not support.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::StashOptionConflict`] when options conflict.
+    pub fn validate(&self) -> Result<()> {
+        if self.mode == StashMode::StagedOnly && self.include_untracked {
+            return Err(Error::StashOptionConflict(
+                "cannot combine --staged with --include-untracked".into(),
+            ));
+        }
+        if self.mode == StashMode::StagedOnly && selection_is_active(self) {
+            return Err(Error::StashOptionConflict(
+                "cannot combine --staged with --hunks or --lines".into(),
+            ));
+        }
+        if self.mode == StashMode::KeepIndex && selection_is_active(self) {
+            return Err(Error::StashOptionConflict(
+                "cannot combine --keep-index with --hunks or --lines".into(),
+            ));
+        }
+        if !self.pathspecs.is_empty() && self.mode == StashMode::StagedOnly {
+            return Err(Error::StashOptionConflict(
+                "pathspecs are not supported with --staged".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    /// Staged-only push cannot run when a staged path also has unstaged worktree edits.
+    pub fn validate_staged_worktree(
+        &self,
+        repo: &Repository,
+        work_tree: &Path,
+        head_tree: &ObjectId,
+    ) -> Result<()> {
+        if self.mode != StashMode::StagedOnly {
+            return Ok(());
+        }
+        let mut index = repo.load_index()?;
+        let staged: HashSet<String> = staged_change_paths(repo, &index, head_tree)?
+            .into_iter()
+            .collect();
+        if staged.is_empty() {
+            return Ok(());
+        }
+        let index_mtime = index_file_mtime(&repo.index_path());
+        let worktree_rules = WorktreeRules::from_repository(repo, &index)?;
+        let rules_arc = std::sync::Arc::new(std::sync::Mutex::new(worktree_rules));
+        let diff_opts = DiffIndexToWorktreeOptions {
+            index_mtime,
+            ignore_submodule_untracked: true,
+            repository_git_dir: Some(repo.git_dir().to_path_buf()),
+            config: repo.config().ok(),
+            worktree_rules: Some(std::sync::Arc::clone(&rules_arc)),
+            ..Default::default()
+        };
+        let (unstaged, _) =
+            diff_index_to_worktree_with_options(repo.odb(), &mut index, work_tree, diff_opts)?;
+        for entry in unstaged {
+            let path = entry.path();
+            if staged.contains(path) {
+                return Err(Error::StashOptionConflict(format!(
+                    "cannot stash staged changes for '{path}': worktree has unstaged changes"
+                )));
+            }
+        }
+        Ok(())
+    }
 }
 
 /// One entry from [`list_stashes`] (`stash@{{index}}` in newest-first order).
@@ -297,16 +392,29 @@ fn stash_context_message(
     Ok(format!("{branch}: {short} {subject}"))
 }
 
+fn staged_change_paths(
+    repo: &Repository,
+    index: &Index,
+    head_tree: &ObjectId,
+) -> Result<Vec<String>> {
+    let staged = diff_index_to_tree(repo.odb(), index, Some(head_tree), true)?;
+    Ok(staged.into_iter().map(|e| e.path().to_string()).collect())
+}
+
 fn has_stashable_changes(
     repo: &Repository,
     work_tree: &Path,
     head_tree: &ObjectId,
-    include_untracked: bool,
+    options: &StashCreateOptions,
 ) -> Result<bool> {
     let mut index = repo.load_index()?;
+    if options.mode == StashMode::StagedOnly {
+        return Ok(!staged_change_paths(repo, &index, head_tree)?.is_empty());
+    }
     if !diff_index_to_tree(repo.odb(), &index, Some(head_tree), true)?.is_empty() {
         return Ok(true);
     }
+    let include_untracked = options.include_untracked;
     let index_mtime = index_file_mtime(&repo.index_path());
     let worktree_rules = crate::worktree_rules::WorktreeRules::from_repository(repo, &index)?;
     let rules_arc = std::sync::Arc::new(std::sync::Mutex::new(worktree_rules));
@@ -622,35 +730,12 @@ fn remove_stashed_untracked(repo: &Repository, work_tree: &Path, paths: &[String
 struct BuiltStash {
     w_commit: ObjectId,
     w_tree: ObjectId,
+    i_tree: ObjectId,
     message: String,
     untracked_paths: Vec<String>,
     partial_patches: Option<Vec<FilePatch>>,
-}
-
-struct MemOverlayGuard<'a> {
-    odb: &'a Odb,
-    enabled_here: bool,
-}
-
-impl<'a> MemOverlayGuard<'a> {
-    fn enter(odb: &'a Odb) -> Self {
-        let already_active = odb.is_mem_overlay_active();
-        if !already_active {
-            odb.enable_mem_overlay();
-        }
-        Self {
-            odb,
-            enabled_here: !already_active,
-        }
-    }
-}
-
-impl Drop for MemOverlayGuard<'_> {
-    fn drop(&mut self) {
-        if self.enabled_here {
-            self.odb.disable_mem_overlay();
-        }
-    }
+    staged_only_paths: Vec<String>,
+    mode: StashMode,
 }
 
 fn selection_is_active(options: &StashCreateOptions) -> bool {
@@ -658,6 +743,137 @@ fn selection_is_active(options: &StashCreateOptions) -> bool {
         .selection
         .as_ref()
         .is_some_and(|sel| !sel.ids.is_empty() || !sel.ranges.is_empty())
+}
+
+fn apply_staged_only_reset(
+    repo: &Repository,
+    work_tree: &Path,
+    head_tree: &ObjectId,
+    staged_paths: &[String],
+) -> Result<()> {
+    if staged_paths.is_empty() {
+        return Ok(());
+    }
+    let head_entries = flatten_tree_full_for_repo(repo, head_tree, "")?;
+    let mut index = repo.load_index()?;
+    let worktree_rules = WorktreeRules::from_repository(repo, &index)?;
+    for path in staged_paths {
+        if let Some(entry) = flat_tree_lookup(&head_entries, path) {
+            materialize_flat_entry_in_worktree(repo, work_tree, &worktree_rules, entry)?;
+            if let Some(ie) = index.get(path.as_bytes(), 0).cloned() {
+                let mut updated = ie;
+                updated.oid = entry.oid;
+                updated.mode = entry.mode;
+                index.add_or_replace(updated);
+            }
+        } else {
+            index.remove(path.as_bytes());
+            let file_path = work_tree.join(path);
+            if file_path.is_dir() {
+                if !is_nested_git_worktree(&file_path) {
+                    let _ = fs::remove_dir_all(&file_path);
+                }
+            } else if file_path.exists() || file_path.symlink_metadata().is_ok() {
+                let _ = fs::remove_file(&file_path);
+            }
+            if let Some(parent) = file_path.parent() {
+                remove_empty_dirs(parent, work_tree, repo.environment());
+            }
+        }
+    }
+    repo.write_index(&mut index)?;
+    Ok(())
+}
+
+fn tracked_stash_preview_paths(
+    repo: &Repository,
+    work_tree: &Path,
+    head_tree: &ObjectId,
+    options: &StashCreateOptions,
+) -> Result<Vec<String>> {
+    let mut index = repo.load_index()?;
+    let mut paths: BTreeSet<String> = BTreeSet::new();
+    if options.mode != StashMode::StagedOnly {
+        let index_mtime = index_file_mtime(&repo.index_path());
+        let worktree_rules = crate::worktree_rules::WorktreeRules::from_repository(repo, &index)?;
+        let rules_arc = std::sync::Arc::new(std::sync::Mutex::new(worktree_rules));
+        let diff_opts = DiffIndexToWorktreeOptions {
+            index_mtime,
+            ignore_submodule_untracked: true,
+            repository_git_dir: Some(repo.git_dir().to_path_buf()),
+            config: repo.config().ok(),
+            worktree_rules: Some(std::sync::Arc::clone(&rules_arc)),
+            ..Default::default()
+        };
+        let (unstaged, _) =
+            diff_index_to_worktree_with_options(repo.odb(), &mut index, work_tree, diff_opts)?;
+        for entry in unstaged {
+            paths.insert(entry.path().to_string());
+        }
+    }
+    for path in staged_change_paths(repo, &index, head_tree)? {
+        paths.insert(path);
+    }
+    if let Some(ref patches) = resolve_partial_stash_patches(repo, options)? {
+        for patch in patches {
+            if let Some(path) = patch.new_path.as_ref().or(patch.old_path.as_ref()) {
+                paths.insert(path.clone());
+            }
+        }
+    }
+    Ok(paths.into_iter().collect())
+}
+
+/// List paths that would be stashed without writing objects, refs, or worktree state.
+///
+/// Returns `None` when there is nothing to save.
+///
+/// # Errors
+///
+/// Propagates validation and diff failures.
+pub fn preview_stash(
+    repo: &Repository,
+    options: &StashCreateOptions,
+) -> Result<Option<StashPreview>> {
+    options.validate()?;
+    let work_tree = repo
+        .work_tree()
+        .ok_or_else(|| Error::PathError("cannot stash in a bare repository".into()))?;
+    let head = resolve_head(repo.git_dir())?;
+    let head_oid = head_commit_oid(&head)?;
+    let head_obj = repo.odb().read(&head_oid)?;
+    let head_tree = parse_commit(&head_obj.data)?.tree;
+
+    if selection_is_active(options) {
+        let patches = resolve_partial_stash_patches(repo, options)?.unwrap_or_default();
+        if patches.is_empty() {
+            return Ok(None);
+        }
+        let paths: Vec<String> = patches
+            .into_iter()
+            .filter_map(|p| p.new_path.or(p.old_path))
+            .collect();
+        return Ok(Some(StashPreview {
+            paths,
+            untracked: Vec::new(),
+        }));
+    }
+
+    options.validate_staged_worktree(repo, work_tree, &head_tree)?;
+    if !has_stashable_changes(repo, work_tree, &head_tree, options)? {
+        return Ok(None);
+    }
+
+    let paths = tracked_stash_preview_paths(repo, work_tree, &head_tree, options)?;
+    let untracked = if options.include_untracked && options.mode != StashMode::StagedOnly {
+        collect_untracked_paths(repo, work_tree)?
+    } else {
+        Vec::new()
+    };
+    if paths.is_empty() && untracked.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(StashPreview { paths, untracked }))
 }
 
 fn resolve_partial_stash_patches(
@@ -679,23 +895,33 @@ fn build_stash_commit(
     work_tree: &Path,
     options: &StashCreateOptions,
 ) -> Result<Option<BuiltStash>> {
+    options.validate()?;
     let head = resolve_head(repo.git_dir())?;
     let head_oid = head_commit_oid(&head)?;
     let head_obj = repo.odb().read(&head_oid)?;
     let head_commit = parse_commit(&head_obj.data)?;
     let head_tree = head_commit.tree;
+    options.validate_staged_worktree(repo, work_tree, &head_tree)?;
 
     let partial_patches = resolve_partial_stash_patches(repo, options)?;
     if let Some(ref patches) = partial_patches {
         if patches.is_empty() {
             return Ok(None);
         }
-    } else if !has_stashable_changes(repo, work_tree, &head_tree, options.include_untracked)? {
+    } else if !has_stashable_changes(repo, work_tree, &head_tree, options)? {
         return Ok(None);
     }
 
     let context = stash_context_message(repo, &head, &head_oid)?;
     let mut index = repo.load_index()?;
+    let staged_only_paths = if options.mode == StashMode::StagedOnly {
+        staged_change_paths(repo, &index, &head_tree)?
+    } else {
+        Vec::new()
+    };
+    if options.mode == StashMode::StagedOnly && staged_only_paths.is_empty() {
+        return Ok(None);
+    }
     let i_tree = write_stash_tree_from_index(repo, &mut index)?;
 
     let index_msg = format!("index on {context}\n");
@@ -730,23 +956,27 @@ fn build_stash_commit(
         )?)
     };
 
-    let mut w_index = index_from_tree(repo, &i_tree)?;
-    if let Some(ref patches) = partial_patches {
-        apply_patch_to_index(
-            repo,
-            &mut w_index,
-            patches,
-            &IndexApplyOptions {
-                dry_run: false,
-                reverse: false,
-                head_tree_oid: None,
-            },
-        )
-        .map_err(|e| Error::Message(e.to_string()))?;
+    let w_tree = if options.mode == StashMode::StagedOnly {
+        i_tree
     } else {
-        apply_worktree_diff_to_index(repo, work_tree, &mut w_index)?;
-    }
-    let w_tree = write_stash_tree_from_index(repo, &mut w_index)?;
+        let mut w_index = index_from_tree(repo, &i_tree)?;
+        if let Some(ref patches) = partial_patches {
+            apply_patch_to_index(
+                repo,
+                &mut w_index,
+                patches,
+                &IndexApplyOptions {
+                    dry_run: false,
+                    reverse: false,
+                    head_tree_oid: None,
+                },
+            )
+            .map_err(|e| Error::Message(e.to_string()))?;
+        } else {
+            apply_worktree_diff_to_index(repo, work_tree, &mut w_index)?;
+        }
+        write_stash_tree_from_index(repo, &mut w_index)?
+    };
 
     let w_message = match &options.message {
         Some(msg) => format!("On {}: {}\n", head_branch_label(&head), msg),
@@ -774,9 +1004,12 @@ fn build_stash_commit(
     Ok(Some(BuiltStash {
         w_commit,
         w_tree,
+        i_tree,
         message: w_message.trim_end().to_owned(),
         untracked_paths,
         partial_patches,
+        staged_only_paths,
+        mode: options.mode,
     }))
 }
 
@@ -838,10 +1071,14 @@ pub fn push_stash(
     repo: &Repository,
     options: &StashCreateOptions,
 ) -> Result<Option<StashPushResult>> {
+    if options.dry_run {
+        return Err(Error::StashOptionConflict(
+            "push_stash does not run with dry_run; use preview_stash".into(),
+        ));
+    }
     let work_tree = repo
         .work_tree()
         .ok_or_else(|| Error::PathError("cannot stash in a bare repository".into()))?;
-    let _overlay = options.dry_run.then(|| MemOverlayGuard::enter(repo.odb()));
     let Some(built) = build_stash_commit(repo, work_tree, options)? else {
         return Ok(None);
     };
@@ -850,9 +1087,6 @@ pub fn push_stash(
         message: built.message.clone(),
         w_tree: built.w_tree,
     };
-    if options.dry_run {
-        return Ok(Some(result));
-    }
     store_stash(repo, built.w_commit, &built.message, &options.identity)?;
     if let Some(ref patches) = built.partial_patches {
         if !built.untracked_paths.is_empty() {
@@ -874,9 +1108,19 @@ pub fn push_stash(
         if !built.untracked_paths.is_empty() {
             remove_stashed_untracked(repo, work_tree, &built.untracked_paths)?;
         }
-        checkout_between_trees(repo, Some(&built.w_tree), &head_tree)?;
-        let mut head_index = index_from_tree_with_worktree_stats(repo, &head_tree)?;
-        repo.write_index(&mut head_index)?;
+        match built.mode {
+            StashMode::StagedOnly => {
+                apply_staged_only_reset(repo, work_tree, &head_tree, &built.staged_only_paths)?;
+            }
+            StashMode::KeepIndex => {
+                checkout_between_trees(repo, Some(&built.w_tree), &built.i_tree)?;
+            }
+            StashMode::All => {
+                checkout_between_trees(repo, Some(&built.w_tree), &head_tree)?;
+                let mut head_index = index_from_tree_with_worktree_stats(repo, &head_tree)?;
+                repo.write_index(&mut head_index)?;
+            }
+        }
     }
     Ok(Some(result))
 }
@@ -1835,6 +2079,7 @@ pub fn push_operation_autostash(repo: &Repository, identity: &str) -> Result<Opt
             selection: None,
             pathspecs: Vec::new(),
             dry_run: false,
+            mode: StashMode::default(),
         },
     )?
     .map(|r| r.oid))
@@ -1979,6 +2224,7 @@ mod coverage_tests {
             selection: None,
             pathspecs: Vec::new(),
             dry_run: false,
+            mode: StashMode::default(),
         };
         let oid = create_stash(&repo, &opts).expect("create").expect("some");
         store_stash(&repo, oid, "On main: msg", ident).expect("store");
@@ -2035,6 +2281,7 @@ mod coverage_tests {
             selection: None,
             pathspecs: Vec::new(),
             dry_run: false,
+            mode: StashMode::default(),
         };
         push_stash(&repo, &opts).expect("push").expect("oid");
 
@@ -2060,6 +2307,7 @@ mod coverage_tests {
             selection: None,
             pathspecs: Vec::new(),
             dry_run: false,
+            mode: StashMode::default(),
         };
         assert!(push_stash(&repo, &opts).expect("push").is_none());
     }
@@ -2077,6 +2325,7 @@ mod coverage_tests {
             selection: None,
             pathspecs: Vec::new(),
             dry_run: false,
+            mode: StashMode::default(),
         };
         push_stash(&repo, &opts).expect("push").expect("oid");
         fs::write(tmp.path().join("u.txt"), b"precious\n").unwrap();
@@ -2184,7 +2433,7 @@ mod hunk_push_tests {
     fn stash_push_hunks_dry_run_does_not_mutate_repo() {
         let (tmp, repo, selection) = setup_two_hunk_repo();
         let before = fs::read_to_string(tmp.path().join("f.txt")).unwrap();
-        let result = push_stash(
+        let preview = preview_stash(
             &repo,
             &StashCreateOptions {
                 message: Some("preview".into()),
@@ -2193,15 +2442,12 @@ mod hunk_push_tests {
                 selection: Some(selection),
                 pathspecs: Vec::new(),
                 dry_run: true,
+                mode: StashMode::default(),
             },
         )
-        .expect("push")
-        .expect("preview");
-        assert!(
-            result.message.contains("preview"),
-            "dry-run message uses reflog format: {}",
-            result.message
-        );
+        .expect("preview")
+        .expect("paths");
+        assert!(preview.paths.iter().any(|p| p == "f.txt"));
         assert_eq!(list_stashes(&repo).expect("list").len(), 0);
         assert_eq!(
             fs::read_to_string(tmp.path().join("f.txt")).unwrap(),
@@ -2222,6 +2468,7 @@ mod hunk_push_tests {
                 selection: Some(selection),
                 pathspecs: Vec::new(),
                 dry_run: false,
+                mode: StashMode::default(),
             },
         )
         .expect("push")
@@ -2250,6 +2497,7 @@ mod hunk_push_tests {
                 selection: Some(selection),
                 pathspecs: Vec::new(),
                 dry_run: false,
+                mode: StashMode::default(),
             },
         )
         .expect("push")
@@ -2278,6 +2526,7 @@ mod hunk_push_tests {
                 selection: Some(selection),
                 pathspecs: Vec::new(),
                 dry_run: false,
+                mode: StashMode::default(),
             },
         )
         .expect("push")
@@ -2304,6 +2553,7 @@ mod hunk_push_tests {
                 selection: Some(selection),
                 pathspecs: Vec::new(),
                 dry_run: false,
+                mode: StashMode::default(),
             },
         )
         .expect("push")

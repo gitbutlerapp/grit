@@ -62,6 +62,7 @@ fn handle_stash_roundtrip_with_git() {
             selection: None,
             pathspecs: Vec::new(),
             dry_run: false,
+            mode: grit_lib::porcelain::stash::StashMode::default(),
         })
         .expect("push")
         .expect("changes");

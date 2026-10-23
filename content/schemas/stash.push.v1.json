@@ -5,10 +5,15 @@
     {
       "description": "Local changes were saved to the stash.",
       "properties": {
-        "dry_run": {
-          "type": "boolean"
-        },
         "message": {
+          "type": "string"
+        },
+        "mode": {
+          "enum": [
+            "all",
+            "staged_only",
+            "keep_index"
+          ],
           "type": "string"
         },
         "oid": {
@@ -36,6 +41,53 @@
       "required": [
         "message",
         "oid"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "`--dry-run` preview of what would be stashed.",
+      "properties": {
+        "mode": {
+          "enum": [
+            "all",
+            "staged_only",
+            "keep_index"
+          ],
+          "type": "string"
+        },
+        "paths": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "stashed_hunks": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "type": "object"
+        },
+        "stashed_lines": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "type": "object"
+        },
+        "untracked": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "paths"
       ],
       "type": "object"
     },

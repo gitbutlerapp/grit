@@ -117,6 +117,35 @@ fn stash_list_json() {
 }
 
 #[test]
+fn stash_push_staged_and_dry_run_json() {
+    let dir = scratch("staged-dry");
+    init_repo(&dir);
+    fs::write(dir.join("a"), "base\n").expect("write");
+    git(&dir, &["add", "a"]);
+    git(&dir, &["commit", "-qm", "init"]);
+    fs::write(dir.join("a"), "unstaged\n").expect("unstaged");
+    fs::write(dir.join("b"), "staged\n").expect("staged");
+    git(&dir, &["add", "b"]);
+
+    let (code, stdout, stderr) = grit(&dir, &["stash", "push", "--staged", "--json"]);
+    assert_eq!(code, 0, "stderr={stderr}");
+    let saved: serde_json::Value = serde_json::from_str(stdout.trim()).expect("json");
+    assert_eq!(saved["mode"], "staged_only");
+    assert!(saved["oid"].as_str().is_some());
+
+    let porcelain = git(&dir, &["status", "--porcelain"]);
+    assert!(porcelain.contains("a"), "unstaged change on a remains");
+
+    fs::write(dir.join("c"), "dirty\n").expect("dirty");
+    let (code, stdout, _) = grit(&dir, &["stash", "--dry-run", "--json"]);
+    assert_eq!(code, 0);
+    let preview: serde_json::Value = serde_json::from_str(stdout.trim()).expect("preview json");
+    assert!(preview["paths"].as_array().is_some());
+    assert!(preview.get("oid").is_none());
+    assert!(dir.join("c").exists(), "dry-run must not remove files");
+}
+
+#[test]
 fn stash_push_json_shapes() {
     let dir = scratch("push-json");
     init_repo(&dir);

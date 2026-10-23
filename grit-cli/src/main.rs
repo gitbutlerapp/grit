@@ -219,9 +219,23 @@ enum StashAction {
             conflicts_with = "include_untracked"
         )]
         lines: Vec<String>,
-        /// Preview partial stash without updating refs, index, or worktree.
+        /// Preview stash without updating refs, index, or worktree.
         #[arg(long = "dry-run")]
         dry_run: bool,
+        /// Stash only index changes vs `HEAD`.
+        #[arg(
+            short = 'S',
+            long = "staged",
+            conflicts_with_all = ["keep_index", "hunks", "lines", "include_untracked"]
+        )]
+        staged: bool,
+        /// Leave staged content in the index and worktree after stashing.
+        #[arg(
+            short = 'k',
+            long = "keep-index",
+            conflicts_with_all = ["staged", "hunks", "lines"]
+        )]
+        keep_index: bool,
     },
     /// List stash entries.
     List,
@@ -1223,9 +1237,28 @@ enum Command {
             conflicts_with = "include_untracked"
         )]
         lines: Vec<String>,
-        /// Preview partial stash without updating refs, index, or worktree.
+        /// Preview stash without updating refs, index, or worktree.
         #[arg(long = "dry-run", global = true)]
         dry_run: bool,
+        /// Stash only index changes vs `HEAD` (unstaged edits on other paths remain).
+        #[arg(
+            short = 'S',
+            long = "staged",
+            global = true,
+            conflicts_with_all = ["keep_index", "hunks", "lines", "include_untracked"]
+        )]
+        staged: bool,
+        /// After stashing, leave the index and worktree matching staged content.
+        #[arg(
+            short = 'k',
+            long = "keep-index",
+            global = true,
+            conflicts_with_all = ["staged", "hunks", "lines"]
+        )]
+        keep_index: bool,
+        /// Cap path lists in `--dry-run` preview output.
+        #[arg(short = 'n', long = "limit", global = true, value_name = "N")]
+        stash_limit: Option<usize>,
         #[command(subcommand)]
         action: Option<StashAction>,
     },
@@ -2675,10 +2708,21 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             hunks,
             lines,
             dry_run,
+            staged,
+            keep_index,
+            stash_limit,
         } => match action {
             None => {
-                let outcome =
-                    commands::stash::run_push(message, include_untracked, &hunks, &lines, dry_run);
+                let outcome = commands::stash::run_push(commands::stash::StashPushRunArgs {
+                    message,
+                    include_untracked,
+                    staged,
+                    keep_index,
+                    hunks: &hunks,
+                    lines: &lines,
+                    dry_run,
+                    limit: stash_limit,
+                });
                 match outcome {
                     Ok(o) => emit(&o, opts, ctx),
                     Err(err) => {
@@ -2698,6 +2742,8 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
                 hunks: push_hunks,
                 lines: push_lines,
                 dry_run: push_dry_run,
+                staged: push_staged,
+                keep_index: push_keep_index,
             }) => {
                 let merged_hunks = if push_hunks.is_empty() {
                     hunks
@@ -2709,13 +2755,16 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
                 } else {
                     push_lines
                 };
-                let outcome = commands::stash::run_push(
-                    push_message.or(message),
-                    include_untracked || push_untracked,
-                    &merged_hunks,
-                    &merged_lines,
-                    dry_run || push_dry_run,
-                );
+                let outcome = commands::stash::run_push(commands::stash::StashPushRunArgs {
+                    message: push_message.or(message),
+                    include_untracked: include_untracked || push_untracked,
+                    staged: staged || push_staged,
+                    keep_index: keep_index || push_keep_index,
+                    hunks: &merged_hunks,
+                    lines: &merged_lines,
+                    dry_run: dry_run || push_dry_run,
+                    limit: stash_limit,
+                });
                 match outcome {
                     Ok(o) => emit(&o, opts, ctx),
                     Err(err) => {

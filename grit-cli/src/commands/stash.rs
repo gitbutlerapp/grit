@@ -11,8 +11,8 @@ use grit_lib::porcelain::hunk_select::{
     parse_hunk_id_list, report_unstaged_hunk_selection, HunkSelectError,
 };
 use grit_lib::porcelain::stash::{
-    apply_stash_entry, drop_stash, list_stashes, pop_stash_entry, push_stash, stash_diff,
-    StashCreateOptions,
+    apply_stash_entry, drop_stash, list_stashes, pop_stash_entry, preview_stash, push_stash,
+    stash_diff, StashCreateOptions, StashMode,
 };
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -34,6 +34,20 @@ pub enum StashPushOutcome {
         message: String,
         #[serde(default, skip_serializing_if = "is_false")]
         dry_run: bool,
+        #[serde(default, skip_serializing_if = "StashPushMode::is_default")]
+        mode: StashPushMode,
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        stashed_hunks: BTreeMap<String, Vec<String>>,
+        #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+        stashed_lines: BTreeMap<String, Vec<String>>,
+    },
+    /// `--dry-run` preview of what would be stashed.
+    Preview {
+        #[serde(default, skip_serializing_if = "StashPushMode::is_default")]
+        mode: StashPushMode,
+        paths: Vec<String>,
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        untracked: Vec<String>,
         #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
         stashed_hunks: BTreeMap<String, Vec<String>>,
         #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
@@ -41,6 +55,44 @@ pub enum StashPushOutcome {
     },
     /// Working tree and index already matched `HEAD`; nothing was saved.
     Nothing { stashed: bool },
+}
+
+#[derive(Serialize, JsonSchema, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum StashPushMode {
+    #[default]
+    All,
+    StagedOnly,
+    KeepIndex,
+}
+
+impl StashPushMode {
+    fn is_default(mode: &Self) -> bool {
+        matches!(mode, Self::All)
+    }
+}
+
+impl From<StashMode> for StashPushMode {
+    fn from(value: StashMode) -> Self {
+        match value {
+            StashMode::All => Self::All,
+            StashMode::StagedOnly => Self::StagedOnly,
+            StashMode::KeepIndex => Self::KeepIndex,
+        }
+    }
+}
+
+fn stash_mode_from_flags(staged: bool, keep_index: bool) -> Result<StashMode> {
+    if staged && keep_index {
+        anyhow::bail!("cannot combine --staged with --keep-index");
+    }
+    Ok(if staged {
+        StashMode::StagedOnly
+    } else if keep_index {
+        StashMode::KeepIndex
+    } else {
+        StashMode::All
+    })
 }
 
 fn is_false(v: &bool) -> bool {
@@ -67,6 +119,20 @@ impl HumanRender for StashPushOutcome {
                     outln!(w, "{verb} {short}");
                 } else {
                     outln!(w, "{verb} {message} {short}");
+                }
+            }
+            Self::Preview {
+                paths, untracked, ..
+            } => {
+                outln!(w, "Would stash {} tracked path(s)", paths.len());
+                for path in paths {
+                    outln!(w, "  {path}");
+                }
+                if !untracked.is_empty() {
+                    outln!(w, "Would stash {} untracked path(s)", untracked.len());
+                    for path in untracked {
+                        outln!(w, "  {path}");
+                    }
                 }
             }
         }
@@ -268,13 +334,37 @@ pub fn hunks_exit_code(err: &anyhow::Error) -> i32 {
     }
 }
 
-pub fn run_push(
-    message: Option<String>,
-    include_untracked: bool,
-    hunks: &[String],
-    lines: &[String],
-    dry_run: bool,
-) -> Result<StashPushOutcome> {
+/// Arguments for [`run_push`].
+pub struct StashPushRunArgs<'a> {
+    /// Stash message.
+    pub message: Option<String>,
+    /// Include untracked paths.
+    pub include_untracked: bool,
+    /// `--staged` mode.
+    pub staged: bool,
+    /// `--keep-index` mode.
+    pub keep_index: bool,
+    /// Partial stash hunk ids.
+    pub hunks: &'a [String],
+    /// Partial stash line ranges.
+    pub lines: &'a [String],
+    /// Preview without writing.
+    pub dry_run: bool,
+    /// Cap dry-run path listing.
+    pub limit: Option<usize>,
+}
+
+pub fn run_push(args: StashPushRunArgs<'_>) -> Result<StashPushOutcome> {
+    let StashPushRunArgs {
+        message,
+        include_untracked,
+        staged,
+        keep_index,
+        hunks,
+        lines,
+        dry_run,
+        limit,
+    } = args;
     let repo = context::discover()?;
     let env = context::environment();
     let config = repo.config().context("could not load config")?;
@@ -290,12 +380,10 @@ pub fn run_push(
         }
         Some(sel)
     };
-    if dry_run && selection.is_none() {
-        anyhow::bail!("--dry-run on stash push requires --hunks or --lines");
-    }
     if include_untracked && selection.is_some() {
         anyhow::bail!("--include-untracked cannot be used with --hunks or --lines");
     }
+    let mode = stash_mode_from_flags(staged, keep_index)?;
     let pathspecs: Vec<String> = Vec::new();
     let (stashed_hunks, stashed_lines) = if let Some(ref sel) = selection {
         let report =
@@ -321,13 +409,36 @@ pub fn run_push(
         selection: selection.take(),
         pathspecs,
         dry_run,
+        mode,
     };
+    if dry_run {
+        let preview = preview_stash(&repo, &options).map_err(map_stash_error)?;
+        return Ok(match preview {
+            Some(p) => {
+                let mut paths = p.paths;
+                let mut untracked = p.untracked;
+                if let Some(n) = limit {
+                    paths.truncate(n);
+                    untracked.truncate(n.saturating_sub(paths.len()));
+                }
+                StashPushOutcome::Preview {
+                    mode: mode.into(),
+                    paths,
+                    untracked,
+                    stashed_hunks,
+                    stashed_lines,
+                }
+            }
+            None => StashPushOutcome::Nothing { stashed: false },
+        });
+    }
     let pushed = push_stash(&repo, &options).map_err(map_stash_error)?;
     Ok(match pushed {
         Some(result) => StashPushOutcome::Saved {
             oid: result.oid.to_hex(),
             message: result.message,
-            dry_run,
+            dry_run: false,
+            mode: mode.into(),
             stashed_hunks,
             stashed_lines,
         },
@@ -448,6 +559,7 @@ fn map_stash_error(err: Error) -> anyhow::Error {
         }
         Error::PathError(msg) if msg.contains("bare") => anyhow::anyhow!("{msg}"),
         Error::HunkSelection(err) => anyhow::Error::new(err),
+        Error::StashOptionConflict(msg) => anyhow::anyhow!("{msg}"),
         other => anyhow::Error::new(other),
     }
 }

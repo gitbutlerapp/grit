@@ -1020,6 +1020,10 @@ pub enum Error {
     #[error("cannot stash without a commit")]
     StashNoInitialCommit,
 
+    /// Incompatible [`StashCreateOptions`](crate::porcelain::stash::StashCreateOptions) flags.
+    #[error("{0}")]
+    StashOptionConflict(String),
+
     /// Partial [`push_stash`](crate::porcelain::stash::push_stash) hunk selection failed.
     #[error(transparent)]
     HunkSelection(#[from] crate::porcelain::hunk_select::HunkSelectError),

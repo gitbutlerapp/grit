@@ -17,7 +17,7 @@ use grit_lib::objects::{serialize_commit, CommitData, ObjectId, ObjectKind};
 use grit_lib::porcelain::checkout::checkout_between_trees;
 use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
 use grit_lib::porcelain::staging::stage_worktree_changes;
-use grit_lib::porcelain::stash::{apply_stash, push_stash, StashCreateOptions};
+use grit_lib::porcelain::stash::{apply_stash, push_stash, StashCreateOptions, StashMode};
 use grit_lib::porcelain::status::{status, StatusOptions};
 use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
 use grit_lib::progress::NullProgress;
@@ -482,6 +482,7 @@ pub fn bench_push_stash(fx: &HotPathsFixture) {
         selection: None,
         pathspecs: Vec::new(),
         dry_run: false,
+        mode: StashMode::default(),
     };
     let _ = push_stash(&fx.repo, &options).expect("push_stash");
 }

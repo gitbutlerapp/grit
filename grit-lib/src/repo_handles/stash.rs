@@ -7,7 +7,7 @@ use crate::objects::ObjectId;
 use crate::porcelain::hunk_select::HunkSelection;
 use crate::porcelain::stash::{
     apply_stash_entry, create_stash, drop_stash, list_stashes, pop_stash, push_stash,
-    StashCreateOptions, StashEntry,
+    StashCreateOptions, StashEntry, StashMode,
 };
 use crate::repo::Repository;
 
@@ -26,6 +26,8 @@ pub struct StashPushOptions {
     pub pathspecs: Vec<String>,
     /// Preview without updating refs, index, or worktree.
     pub dry_run: bool,
+    /// Push mode (`--staged`, `--keep-index`, or default).
+    pub mode: StashMode,
 }
 
 /// Options for [`RepositoryStash::apply`] and [`RepositoryStash::pop`].
@@ -101,6 +103,7 @@ impl<'repo> RepositoryStash<'repo> {
     ///     selection: None,
     ///     pathspecs: Vec::new(),
     ///     dry_run: false,
+    ///     mode: StashMode::default(),
     /// };
     /// let _ = repo.stash().push(&opts)?;
     /// # Ok(())
@@ -114,6 +117,7 @@ impl<'repo> RepositoryStash<'repo> {
             selection: options.selection.clone(),
             pathspecs: options.pathspecs.clone(),
             dry_run: options.dry_run,
+            mode: options.mode,
         };
         push_stash(self.repo, &inner).map(|o| o.map(|r| r.oid))
     }
@@ -131,6 +135,7 @@ impl<'repo> RepositoryStash<'repo> {
             selection: options.selection.clone(),
             pathspecs: options.pathspecs.clone(),
             dry_run: options.dry_run,
+            mode: options.mode,
         };
         create_stash(self.repo, &inner)
     }

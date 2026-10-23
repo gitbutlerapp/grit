@@ -42,6 +42,7 @@ fn main() -> Result<(), grit_lib::error::Error> {
         selection: None,
         pathspecs: Vec::new(),
         dry_run: false,
+        mode: grit_lib::porcelain::stash::StashMode::default(),
     })?;
     println!("stash_pushed={}", pushed.is_some());
 

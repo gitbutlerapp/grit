@@ -382,6 +382,7 @@ fn porcelain_stash_tag_status_and_worktree() {
         selection: None,
         pathspecs: Vec::new(),
         dry_run: false,
+        mode: grit_lib::porcelain::stash::StashMode::default(),
     });
     let _ = repo.stash().pop(
         work_tree,

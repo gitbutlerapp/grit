@@ -7,7 +7,7 @@ The stash stack is Git-compatible ref and commit machinery under [`stash`](rustd
 
 ## Push and list
 
-`StashPushOptions` carries the message, whether to include untracked files, and the identity line used for stash commits. `RepositoryStash::push` returns `Ok(None)` when there is nothing to stash.
+`StashPushOptions` carries the message, whether to include untracked files, [`StashMode`](rustdoc:grit_lib::porcelain::stash::StashMode) (`All`, `StagedOnly`, `KeepIndex`), and the identity line used for stash commits. [`preview_stash`](rustdoc:grit_lib::porcelain::stash::preview_stash) lists paths that would be saved without writing objects or refs; `RepositoryStash::push` returns `Ok(None)` when there is nothing to stash.
 
 ## Apply and pop
 

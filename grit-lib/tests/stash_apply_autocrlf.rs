@@ -26,6 +26,7 @@ fn stash_options() -> StashCreateOptions {
         selection: None,
         pathspecs: Vec::new(),
         dry_run: false,
+        mode: grit_lib::porcelain::stash::StashMode::default(),
     }
 }
 
@@ -37,6 +38,7 @@ fn stash_options_untracked() -> StashCreateOptions {
         selection: None,
         pathspecs: Vec::new(),
         dry_run: false,
+        mode: grit_lib::porcelain::stash::StashMode::default(),
     }
 }
 
