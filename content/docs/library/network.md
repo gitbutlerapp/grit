@@ -22,9 +22,11 @@ To turn a user's repository argument (a configured name, a URL, an scp-style `ho
 
 ## Managing remotes
 
-[`repo.remotes().configured()`](rustdoc:grit_lib::repo_handles::RepositoryRemotes::configured) lists every remote with a `remote.<name>.*` section, sorted by name, the same set `git remote` prints. Each [`ConfiguredRemote`](rustdoc:grit_lib::repo_handles::ConfiguredRemote) carries its URL, or `None` when the section has no URL. [`list()`](rustdoc:grit_lib::repo_handles::RepositoryRemotes::list) returns only the names that have a URL.
+[`repo.remotes().configured()`](rustdoc:grit_lib::repo_handles::RepositoryRemotes::configured) lists every remote with a `remote.<name>.*` section, sorted by name, the same set `git remote` prints. Each [`ConfiguredRemote`](rustdoc:grit_lib::repo_handles::ConfiguredRemote) carries its URL, or `None` when the section has no URL, plus raw `push_urls`, `fetch_refspecs`, and effective fetch/push URLs after `url.*.insteadOf` / `pushInsteadOf`. [`list()`](rustdoc:grit_lib::repo_handles::RepositoryRemotes::list) returns only the names that have a URL.
 
 [`repo.remotes().add(name, url)`](rustdoc:grit_lib::repo_handles::RepositoryRemotes::add) writes `remote.<name>.url` and the default fetch refspec to the shared repository config (also from a linked worktree), then reloads the repository's config. Like `git remote add`, it refuses an existing remote (`RemoteError::RemoteExists`) and a name whose tracking refs `refs/remotes/<name>/…` would be invalid (`RemoteError::InvalidRemoteName`), and it stores the URL as given.
+
+[`repo.remotes().set_url(name, url, kind, dry_run)`](rustdoc:grit_lib::repo_handles::RepositoryRemotes::set_url) updates fetch or push URLs on an existing remote (`RemoteUrlKind::Fetch` or `Push`), returning [`UrlChange`](rustdoc:grit_lib::repo_handles::UrlChange). Push replaces every `pushurl` with one value. Returns [`RemoteError::UnknownRemote`](rustdoc:grit_lib::remote::RemoteError::UnknownRemote) when the section is missing.
 
 ## list refs
 

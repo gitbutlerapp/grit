@@ -11,6 +11,7 @@ use crate::remote::{
 };
 use crate::repo::Repository;
 use crate::transfer::{FetchOptions, FetchOutcome, PushOptions, PushOutcome, PushRefSpec};
+use crate::url_rewrite;
 
 /// Remote names and network operations for one open repository.
 #[derive(Debug, Copy, Clone)]
@@ -63,6 +64,59 @@ impl<'repo> RepositoryRemotes<'repo> {
     pub fn configured(&self) -> Result<Vec<ConfiguredRemote>> {
         let config = self.repo.config()?;
         Ok(configured_remotes(config.as_ref()))
+    }
+
+    /// Replace the fetch or push URL for an existing remote.
+    ///
+    /// Fetch updates `remote.<name>.url`. Push removes every `remote.<name>.pushurl` entry and
+    /// writes a single new one, matching `git remote set-url --push`. Writes the shared
+    /// repository config (same rules as [`Self::add`]), then reloads config unless `dry_run`.
+    ///
+    /// # Errors
+    ///
+    /// - [`RemoteError::UnknownRemote`] when no `remote.<name>.*` section exists.
+    /// - [`RemoteError::Library`] when config cannot be read or written.
+    pub fn set_url(
+        &self,
+        name: &str,
+        url: &str,
+        kind: RemoteUrlKind,
+        dry_run: bool,
+    ) -> std::result::Result<UrlChange, RemoteError> {
+        let config = self.repo.config().map_err(RemoteError::Library)?;
+        if !has_remote_section(config.as_ref(), name) {
+            return Err(RemoteError::UnknownRemote(name.to_owned()));
+        }
+        let old = match kind {
+            RemoteUrlKind::Fetch => config.get(&format!("remote.{name}.url")),
+            RemoteUrlKind::Push => config
+                .get(&format!("remote.{name}.pushurl"))
+                .filter(|u| !u.trim().is_empty()),
+        };
+        let change = UrlChange {
+            old,
+            new: url.to_owned(),
+        };
+        if dry_run {
+            return Ok(change);
+        }
+        let path = crate::repo::common_git_dir_for_config(self.repo.git_dir()).join("config");
+        let mut file = match ConfigFile::from_path(&path, ConfigScope::Local)? {
+            Some(file) => file,
+            None => ConfigFile::parse(&path, "", ConfigScope::Local)?,
+        };
+        match kind {
+            RemoteUrlKind::Fetch => {
+                file.set(&format!("remote.{name}.url"), url)?;
+            }
+            RemoteUrlKind::Push => {
+                file.unset(&format!("remote.{name}.pushurl"))?;
+                file.set(&format!("remote.{name}.pushurl"), url)?;
+            }
+        }
+        file.write()?;
+        self.repo.reload_config()?;
+        Ok(change)
     }
 
     /// Add remote `name` at `url` to the repository's local config.
@@ -322,6 +376,24 @@ pub fn configured_remote_names_in_config_order(config: &ConfigSet) -> Vec<String
     names
 }
 
+/// Which URL field [`RepositoryRemotes::set_url`] updates.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RemoteUrlKind {
+    /// `remote.<name>.url` (fetch).
+    Fetch,
+    /// `remote.<name>.pushurl` (replaces all push URLs with one).
+    Push,
+}
+
+/// Result of [`RepositoryRemotes::set_url`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UrlChange {
+    /// Previous URL for the selected kind, if any.
+    pub old: Option<String>,
+    /// New URL written (or that would be written when dry-run).
+    pub new: String,
+}
+
 /// A remote that has a `remote.<name>.*` section in config.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ConfiguredRemote {
@@ -329,6 +401,45 @@ pub struct ConfiguredRemote {
     pub name: String,
     /// Last `remote.<name>.url` value, or `None` when the section has no URL.
     pub url: Option<String>,
+    /// Raw `remote.<name>.pushurl` values from config (may be empty).
+    pub push_urls: Vec<String>,
+    /// Raw `remote.<name>.fetch` refspecs (empty when unset).
+    pub fetch_refspecs: Vec<String>,
+    /// Fetch URL after `url.*.insteadOf`, when [`Self::url`] is set.
+    pub effective_fetch_url: Option<String>,
+    /// Push URL after `pushInsteadOf` / `insteadOf`; equals [`Self::effective_fetch_url`] when no push URL is configured.
+    pub effective_push_url: Option<String>,
+}
+
+fn configured_remote_from_config(config: &ConfigSet, name: String) -> ConfiguredRemote {
+    let url = config.get(&format!("remote.{name}.url"));
+    let mut fetch_refspecs = config.get_all(&format!("remote.{name}.fetch"));
+    fetch_refspecs.retain(|s| !s.trim().is_empty());
+    let push_urls: Vec<String> = config
+        .get_all(&format!("remote.{name}.pushurl"))
+        .into_iter()
+        .filter(|s| !s.trim().is_empty())
+        .collect();
+    let (effective_fetch_url, effective_push_url) = match url.as_deref().filter(|u| !u.is_empty()) {
+        Some(raw) => {
+            let effective_fetch_url = url_rewrite::rewrite_fetch_url(config, raw);
+            let push_source = config
+                .get(&format!("remote.{name}.pushurl"))
+                .filter(|u| !u.trim().is_empty())
+                .unwrap_or_else(|| raw.to_owned());
+            let effective_push_url = url_rewrite::rewrite_push_url(config, push_source.as_str());
+            (Some(effective_fetch_url), Some(effective_push_url))
+        }
+        None => (None, None),
+    };
+    ConfiguredRemote {
+        name,
+        url,
+        push_urls,
+        fetch_refspecs,
+        effective_fetch_url,
+        effective_push_url,
+    }
 }
 
 /// Every remote with at least one `remote.<name>.*` key, sorted by name.
@@ -348,10 +459,7 @@ pub fn configured_remotes(config: &ConfigSet) -> Vec<ConfiguredRemote> {
     }
     names
         .into_iter()
-        .map(|name| ConfiguredRemote {
-            name: name.to_owned(),
-            url: config.get(&format!("remote.{name}.url")),
-        })
+        .map(|name| configured_remote_from_config(config, name.to_owned()))
         .collect()
 }
 
@@ -423,10 +531,18 @@ mod tests {
                 ConfiguredRemote {
                     name: "team.prod".to_owned(),
                     url: None,
+                    push_urls: vec![],
+                    fetch_refspecs: vec!["+refs/heads/*:refs/remotes/team.prod/*".to_owned()],
+                    effective_fetch_url: None,
+                    effective_push_url: None,
                 },
                 ConfiguredRemote {
                     name: "zeta".to_owned(),
                     url: Some("/tmp/z2.git".to_owned()),
+                    push_urls: vec![],
+                    fetch_refspecs: vec![],
+                    effective_fetch_url: Some("/tmp/z2.git".to_owned()),
+                    effective_push_url: Some("/tmp/z2.git".to_owned()),
                 },
             ]
         );

@@ -6,6 +6,7 @@ use grit_lib::refs::listing::{RefSort, SortKey};
 use grit_lib::remote::fetch_request::resolve_remote_argument;
 use grit_lib::remote::{fold_peeled_refs, DefaultHttpClientFactory, ListRefsOptions, RemoteRef};
 use grit_lib::repo::Repository;
+use grit_lib::repo_handles::{RemoteUrlKind, UrlChange};
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::io::Write;
@@ -22,10 +23,20 @@ use crate::output::{outln, HumanRender, MarkdownRender, OutputMode, RenderContex
 pub enum RemoteOutcome {
     List {
         remotes: Vec<RemoteEntry>,
+        #[serde(skip)]
+        #[schemars(skip)]
+        verbose_lines: Vec<RemoteVerboseLine>,
     },
     Add {
         name: String,
         url: String,
+    },
+    SetUrl {
+        name: String,
+        kind: String,
+        old_url: Option<String>,
+        url: String,
+        dry_run: bool,
     },
     Refs {
         refs: Vec<RemoteRefEntry>,
@@ -40,6 +51,29 @@ pub enum RemoteOutcome {
 pub struct RemoteEntry {
     pub name: String,
     pub url: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub fetch_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub push_url: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub refspecs: Option<Vec<String>>,
+}
+
+/// One line of `grit remote -v` output.
+#[derive(Clone)]
+pub struct RemoteVerboseLine {
+    pub name: String,
+    pub url: String,
+    pub kind: RemoteVerboseKind,
+}
+
+#[derive(Clone, Copy)]
+pub enum RemoteVerboseKind {
+    Fetch,
+    Push,
 }
 
 /// One ref in a `refs` JSON outcome (annotated tags carry `peeled`; no separate `^{}` row).
@@ -66,16 +100,43 @@ pub struct RemoteRefLine {
 impl HumanRender for RemoteOutcome {
     fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         match self {
-            RemoteOutcome::List { remotes } => {
+            RemoteOutcome::List {
+                remotes,
+                verbose_lines,
+            } => {
                 if remotes.is_empty() {
                     outln!(w, "No remotes. Add one with: grit remote add <name> <url>");
                     return Ok(());
                 }
-                for remote in remotes {
-                    outln!(w, "{}\t{}", remote.name, remote.url);
+                if !verbose_lines.is_empty() {
+                    for line in verbose_lines {
+                        let label = match line.kind {
+                            RemoteVerboseKind::Fetch => "fetch",
+                            RemoteVerboseKind::Push => "push",
+                        };
+                        outln!(w, "{}\t{} ({label})", line.name, line.url);
+                    }
+                } else {
+                    for remote in remotes {
+                        outln!(w, "{}\t{}", remote.name, remote.url);
+                    }
                 }
             }
             RemoteOutcome::Add { name, url } => outln!(w, "Added remote {name} → {url}"),
+            RemoteOutcome::SetUrl {
+                name,
+                kind,
+                old_url,
+                url,
+                dry_run,
+            } => {
+                let prefix = if *dry_run { "[dry-run] " } else { "" };
+                if let Some(old) = old_url {
+                    outln!(w, "{prefix}Updated remote {name} {kind} URL: {old} → {url}");
+                } else {
+                    outln!(w, "{prefix}Set remote {name} {kind} URL to {url}");
+                }
+            }
             RemoteOutcome::Refs { lines, .. } => {
                 for line in lines {
                     if line.symref {
@@ -93,8 +154,28 @@ impl HumanRender for RemoteOutcome {
 impl MarkdownRender for RemoteOutcome {
     fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         match self {
-            RemoteOutcome::List { remotes } => markdown::print_remote_list(w, remotes)?,
+            RemoteOutcome::List {
+                remotes,
+                verbose_lines: _,
+            } => markdown::print_remote_list(w, remotes)?,
             RemoteOutcome::Add { name, url } => outln!(w, "Added remote `{name}` → {url}."),
+            RemoteOutcome::SetUrl {
+                name,
+                kind,
+                old_url,
+                url,
+                dry_run,
+            } => {
+                let dry = if *dry_run { " (dry-run)" } else { "" };
+                if let Some(old) = old_url {
+                    outln!(
+                        w,
+                        "Updated remote `{name}` {kind} URL{dry}: `{old}` → {url}."
+                    );
+                } else {
+                    outln!(w, "Set remote `{name}` {kind} URL{dry} to {url}.");
+                }
+            }
             RemoteOutcome::Refs { refs, .. } => {
                 outln!(w, "## Remote refs\n");
                 if refs.is_empty() {
@@ -133,11 +214,44 @@ impl MarkdownRender for RemoteOutcome {
 }
 
 /// `Some((name, url))` adds a remote; `None` lists them.
-pub fn run_list_or_add(add: Option<(String, String)>) -> Result<RemoteOutcome> {
+pub fn run_list_or_add(add: Option<(String, String)>, verbose: bool) -> Result<RemoteOutcome> {
     let repo = context::discover()?;
     match add {
-        None => list(&repo),
+        None => list(&repo, verbose),
         Some((name, url)) => add_remote(&repo, &name, &url),
+    }
+}
+
+pub fn run_set_url(name: &str, url: &str, push: bool, dry_run: bool) -> Result<RemoteOutcome> {
+    let repo = context::discover()?;
+    let kind = if push {
+        RemoteUrlKind::Push
+    } else {
+        RemoteUrlKind::Fetch
+    };
+    let change = repo
+        .remotes()
+        .set_url(name, url, kind, dry_run)
+        .map_err(map_remote_error)?;
+    Ok(set_url_outcome(name, kind, change, dry_run))
+}
+
+fn set_url_outcome(
+    name: &str,
+    kind: RemoteUrlKind,
+    change: UrlChange,
+    dry_run: bool,
+) -> RemoteOutcome {
+    let kind_label = match kind {
+        RemoteUrlKind::Fetch => "fetch",
+        RemoteUrlKind::Push => "push",
+    };
+    RemoteOutcome::SetUrl {
+        name: name.to_owned(),
+        kind: kind_label.to_owned(),
+        old_url: change.old,
+        url: change.new,
+        dry_run,
     }
 }
 
@@ -239,18 +353,62 @@ fn map_remote_refs(raw: &[RemoteRef]) -> (Vec<RemoteRefEntry>, Vec<RemoteRefLine
     (refs, remote_ref_lines(raw))
 }
 
-fn list(repo: &Repository) -> Result<RemoteOutcome> {
-    let remotes = repo
+fn list(repo: &Repository, verbose: bool) -> Result<RemoteOutcome> {
+    let configured = repo
         .remotes()
         .configured()
-        .context("could not load config")?
+        .context("could not load config")?;
+    let mut verbose_lines = Vec::new();
+    let remotes = configured
         .into_iter()
-        .map(|remote| RemoteEntry {
-            name: remote.name,
-            url: remote.url.unwrap_or_else(|| "(no url)".to_owned()),
+        .map(|remote| {
+            let display_url = remote.url.clone().unwrap_or_else(|| "(no url)".to_owned());
+            if verbose {
+                if let Some(fetch) = remote.url.as_deref() {
+                    verbose_lines.push(RemoteVerboseLine {
+                        name: remote.name.clone(),
+                        url: fetch.to_owned(),
+                        kind: RemoteVerboseKind::Fetch,
+                    });
+                    if remote.push_urls.is_empty() {
+                        verbose_lines.push(RemoteVerboseLine {
+                            name: remote.name.clone(),
+                            url: fetch.to_owned(),
+                            kind: RemoteVerboseKind::Push,
+                        });
+                    }
+                }
+                for push in &remote.push_urls {
+                    verbose_lines.push(RemoteVerboseLine {
+                        name: remote.name.clone(),
+                        url: push.clone(),
+                        kind: RemoteVerboseKind::Push,
+                    });
+                }
+            }
+            RemoteEntry {
+                name: remote.name.clone(),
+                url: display_url,
+                fetch_url: verbose.then(|| {
+                    remote
+                        .effective_fetch_url
+                        .clone()
+                        .unwrap_or_else(|| "(no url)".to_owned())
+                }),
+                push_url: verbose.then(|| {
+                    remote
+                        .effective_push_url
+                        .clone()
+                        .unwrap_or_else(|| "(no url)".to_owned())
+                }),
+                refspecs: verbose.then(|| remote.fetch_refspecs.clone()),
+            }
         })
         .collect();
-    Ok(RemoteOutcome::List { remotes })
+    Ok(RemoteOutcome::List {
+        remotes,
+        verbose_lines,
+    })
 }
 
 fn add_remote(repo: &Repository, name: &str, url: &str) -> Result<RemoteOutcome> {

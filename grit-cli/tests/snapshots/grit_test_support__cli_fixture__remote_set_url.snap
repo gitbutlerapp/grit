@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "Updated remote origin fetch URL: [REPO]/origin.git → https://example.com/new.git\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\"action\":\"set_url\",\"name\":\"origin\",\"kind\":\"fetch\",\"old_url\":\"[REPO]/origin.git\",\"url\":\"https://example.com/new.git\",\"dry_run\":false}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "Updated remote `origin` fetch URL: `[REPO]/origin.git` → https://example.com/new.git.\n",
+    "stderr": ""
+  }
+}

@@ -93,6 +93,19 @@ enum RemoteAction {
         /// The remote's URL or path.
         url: String,
     },
+    /// Set the fetch or push URL for an existing remote.
+    SetUrl {
+        /// Remote to update.
+        name: String,
+        /// New URL or path.
+        url: String,
+        /// Update `pushurl` instead of `url`.
+        #[arg(long)]
+        push: bool,
+        /// Show what would change without writing config.
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// List references on a remote (like `git ls-remote`).
     Refs {
         /// Configured remote name or a literal URL/path.
@@ -577,6 +590,9 @@ enum Command {
     },
     /// List remotes, or add one.
     Remote {
+        /// Show fetch and push URLs (like `git remote -v`).
+        #[arg(short = 'v', long)]
+        verbose: bool,
         #[command(subcommand)]
         action: Option<RemoteAction>,
     },
@@ -1800,10 +1816,24 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             opts,
             ctx,
         ),
-        Command::Remote { action } => match action {
-            None => emit(&commands::remote::run_list_or_add(None)?, opts, ctx),
+        Command::Remote { verbose, action } => match action {
+            None => emit(
+                &commands::remote::run_list_or_add(None, verbose)?,
+                opts,
+                ctx,
+            ),
             Some(RemoteAction::Add { name, url }) => emit(
-                &commands::remote::run_list_or_add(Some((name, url)))?,
+                &commands::remote::run_list_or_add(Some((name, url)), false)?,
+                opts,
+                ctx,
+            ),
+            Some(RemoteAction::SetUrl {
+                name,
+                url,
+                push,
+                dry_run,
+            }) => emit(
+                &commands::remote::run_set_url(&name, &url, push, dry_run)?,
                 opts,
                 ctx,
             ),

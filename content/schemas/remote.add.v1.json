@@ -5,8 +5,29 @@
     "RemoteEntry": {
       "description": "One remote in a `list` outcome.",
       "properties": {
+        "fetch_url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "name": {
           "type": "string"
+        },
+        "push_url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "refspecs": {
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
         },
         "url": {
           "type": "string"
@@ -87,6 +108,42 @@
       },
       "required": [
         "action",
+        "name",
+        "url"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "action": {
+          "enum": [
+            "set_url"
+          ],
+          "type": "string"
+        },
+        "dry_run": {
+          "type": "boolean"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "old_url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "dry_run",
+        "kind",
         "name",
         "url"
       ],
