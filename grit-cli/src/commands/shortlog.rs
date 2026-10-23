@@ -1,22 +1,30 @@
 //! `grit shortlog` — the commits on this branch that aren't on the target yet.
 
-use anyhow::{bail, Context, Result};
-use grit_lib::objects::ObjectId;
-use grit_lib::refs::branch_tracking::target_branch;
-use grit_lib::revwalk::merge_base::ahead_of_target_commits;
-use grit_lib::state::{resolve_head, HeadState};
+use anyhow::{Context, Result};
+use clap::Args;
+use grit_lib::refs::branch_tracking::{
+    compare_with_target_optional, TargetComparisonOptions, TargetSpec,
+};
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::io::Write;
 
-use crate::context::{self, CommitSummary};
-
-/// Maximum commits to load for `grit shortlog` display (full ahead count is still reported).
-const SHORTLOG_LIST_LIMIT: usize = 100;
 use crate::commits_json::CommitJsonLoader;
+use crate::context::{self, CommitSummary};
 use crate::markdown;
 use crate::output::{outln, CommitJson, HumanRender, MarkdownRender, RenderContext};
 use crate::ui;
+
+/// Maximum commits to load for `grit shortlog` display (full ahead count is still reported).
+const SHORTLOG_LIST_LIMIT: usize = 100;
+
+/// CLI flags for [`run`].
+#[derive(Args, Debug, Default)]
+pub struct ShortlogCliArgs {
+    /// Compare against this ref or revision instead of the discovered target branch.
+    #[arg(long = "target", value_name = "REF")]
+    pub target: Option<String>,
+}
 
 /// Result of `grit shortlog`.
 #[derive(Serialize, JsonSchema)]
@@ -80,14 +88,23 @@ impl MarkdownRender for ShortlogOutcome {
     }
 }
 
-pub fn run() -> Result<ShortlogOutcome> {
+pub fn run(args: &ShortlogCliArgs) -> Result<ShortlogOutcome> {
     let repo = context::discover()?;
-    let head = resolve_head(repo.git_dir()).context("could not resolve HEAD")?;
-    let (branch_name, head_oid) = current_branch_and_oid(&head)?;
-
-    let Some(target) = target_branch(&repo).context("could not resolve the target branch")? else {
+    let opts = TargetComparisonOptions {
+        target: args.target.as_ref().map(|t| TargetSpec(t.clone())),
+        list_limit: SHORTLOG_LIST_LIMIT,
+    };
+    let Some(comparison) =
+        compare_with_target_optional(&repo, &opts).context("could not compare with target")?
+    else {
+        let head =
+            grit_lib::state::resolve_head(repo.git_dir()).context("could not resolve HEAD")?;
+        let branch = match head {
+            grit_lib::state::HeadState::Branch { short_name, .. } => short_name,
+            _ => "HEAD".to_owned(),
+        };
         return Ok(ShortlogOutcome {
-            branch: branch_name.to_owned(),
+            branch,
             target: None,
             ahead: 0,
             commits: Vec::new(),
@@ -97,36 +114,18 @@ pub fn run() -> Result<ShortlogOutcome> {
         });
     };
 
-    let (ahead_count, newest) =
-        ahead_of_target_commits(&repo, head_oid, target.oid, SHORTLOG_LIST_LIMIT)?;
     let now = context::wall_clock_now(repo.environment()).unix_timestamp();
     let loader = CommitJsonLoader::for_listed_commits();
-    let (commits, commit_rows) = loader.load_with_summaries(&repo, &newest, now)?;
-    let truncated = ahead_count > commits.len();
+    let (commits, commit_rows) =
+        loader.load_with_summaries(&repo, &comparison.newest_ahead, now)?;
+    let truncated = comparison.ahead > commits.len();
     Ok(ShortlogOutcome {
-        branch: branch_name.to_owned(),
-        target: Some(target.name),
-        ahead: ahead_count,
+        branch: comparison.branch,
+        target: Some(comparison.base.name),
+        ahead: comparison.ahead,
         commits,
         truncated,
         next: None,
         commit_rows,
     })
-}
-
-fn current_branch_and_oid(head: &HeadState) -> Result<(&str, ObjectId)> {
-    match head {
-        HeadState::Branch {
-            short_name,
-            oid: Some(oid),
-            ..
-        } => Ok((short_name.as_str(), *oid)),
-        HeadState::Branch { short_name, .. } => {
-            bail!("branch '{short_name}' does not have any commits yet")
-        }
-        HeadState::Detached { .. } => {
-            bail!("HEAD is detached; grit shortlog needs a current branch")
-        }
-        HeadState::Invalid => bail!("HEAD is invalid"),
-    }
 }

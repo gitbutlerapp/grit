@@ -711,8 +711,11 @@ enum Command {
         status: commands::status::StatusCliArgs,
     },
     /// List the commits on this branch that aren't on the target branch yet.
-    #[command(alias = "sl")]
-    Shortlog,
+    #[command(alias = "sl", visible_alias = "ahead")]
+    Shortlog {
+        #[command(flatten)]
+        shortlog: commands::shortlog::ShortlogCliArgs,
+    },
     /// Stage changes. With no paths, stages everything.
     Add {
         #[command(flatten)]
@@ -1982,7 +1985,7 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             )
         }
         Command::Status { status } => emit(&commands::status::run(&status)?, opts, ctx),
-        Command::Shortlog => emit(&commands::shortlog::run()?, opts, ctx),
+        Command::Shortlog { shortlog } => emit(&commands::shortlog::run(&shortlog)?, opts, ctx),
         Command::Add {
             pathspecs,
             update,

@@ -636,6 +636,27 @@ fn append_hot_path_scenarios(
         &fixture.worktree,
     )?);
 
+    let (grit_shortlog_target, git_shortlog_target) = shortlog_target_argv(grit, git, meta);
+    out.push(run_scenario(
+        hyperfine,
+        git,
+        grit,
+        cfg,
+        &Scenario {
+            id: sid(fixture.id, "shortlog-target"),
+            group: "shortlog".into(),
+            fixture: fixture.label.clone(),
+            description: "ahead commits with explicit target vs git log range".into(),
+            grit_argv: grit_shortlog_target,
+            git_argv: git_shortlog_target,
+            driver: Driver::Cli,
+            prepare_kind: Some(PrepareKind::PickReset),
+            grit_via_shell: true,
+            git_via_shell: true,
+        },
+        &fixture.worktree,
+    )?);
+
     let (grit_merge, git_merge) = merge_argv(meta);
     out.push(run_scenario(
         hyperfine,
@@ -1118,6 +1139,34 @@ fn pick_argv(meta: &HotPathMeta) -> (Vec<String>, Vec<String>) {
             meta.pick_commit.clone(),
         ],
     )
+}
+
+fn shortlog_target_argv(grit: &Path, git: &Path, meta: &HotPathMeta) -> (Vec<String>, Vec<String>) {
+    let target = format!("{}~100", meta.main_tip);
+    let range = format!("{target}..HEAD");
+    let grit_cmd = chain_shell_public(
+        grit,
+        &[
+            vec!["checkout".into(), "-q".into(), meta.topic_branch.clone()],
+            vec!["shortlog".into(), "--target".into(), target.clone()],
+            vec!["checkout".into(), "-q".into(), meta.main_branch.clone()],
+        ],
+    );
+    let git_cmd = chain_shell_public(
+        git,
+        &[
+            vec!["checkout".into(), "-q".into(), meta.topic_branch.clone()],
+            vec![
+                "log".into(),
+                "--oneline".into(),
+                "-n".into(),
+                "100".into(),
+                range,
+            ],
+            vec!["checkout".into(), "-q".into(), meta.main_branch.clone()],
+        ],
+    );
+    (sh_script(grit_cmd), sh_script(git_cmd))
 }
 
 fn revert_argv(meta: &HotPathMeta) -> (Vec<String>, Vec<String>) {

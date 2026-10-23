@@ -7,7 +7,7 @@ use crate::config::{parse_git_config_maybe_bool, ConfigSet};
 use crate::environment::Environment;
 use crate::error::Result;
 use crate::fetch_head::merge_object_ids_hex;
-use crate::merge_base::ahead_behind_of_target_commits;
+use crate::merge_base::{ahead_behind_of_target_commits, ahead_of_target_commits};
 use crate::objects::ObjectId;
 use crate::push_report::{PushRefResult, PushRefStatus};
 use crate::refs;
@@ -15,7 +15,8 @@ use crate::refs::store::{Expected, RawRef, RefUpdate, RefUpdateFlags};
 use crate::refspec::{parse_fetch_refspec, RefspecItem};
 use crate::repo::Repository;
 use crate::rev_parse::abbreviate_ref_name;
-use crate::state::{HeadState, InProgressOperation};
+use crate::rev_parse::{peel_to_commit_for_merge_base, resolve_revision_for_range_end};
+use crate::state::{resolve_head, HeadState, InProgressOperation};
 use crate::transfer::PushRefSpec;
 use crate::transfer::{match_positive, ref_excluded};
 
@@ -251,7 +252,13 @@ pub(crate) fn upstream_ref_for_merge(
 pub enum BaseSource {
     /// The branch's configured upstream (`branch.<name>.remote` / `branch.<name>.merge`).
     Upstream,
-    /// The repository's target branch (see [`target_branch`]).
+    /// Explicit comparison ref from [`TargetSpec`] (for example `grit shortlog --target`).
+    Explicit,
+    /// The repository's target branch from the `target.branch` config value.
+    ConfiguredTarget,
+    /// A default target candidate ([`DEFAULT_TARGET_CANDIDATES`]).
+    DefaultTarget,
+    /// The repository's target branch (see [`target_branch`]); covers configured and default.
     Target,
 }
 
@@ -272,10 +279,200 @@ pub struct ComparisonBase {
 /// Trunk names tried, in order, after `target.branch` when looking for the target branch.
 pub const DEFAULT_TARGET_CANDIDATES: [&str; 4] = ["origin/master", "origin/main", "master", "main"];
 
+/// User-provided ref or revision to compare the current branch against.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TargetSpec(pub String);
+
+/// Options for [`compare_with_target`].
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TargetComparisonOptions {
+    /// When set, compare against this ref or revision instead of discovering a target branch.
+    pub target: Option<TargetSpec>,
+    /// Maximum number of newest ahead commit oids to retain.
+    pub list_limit: usize,
+}
+
+/// Ahead-of-target view of the current branch (`grit shortlog` / `grit ahead`).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TargetComparison {
+    /// Current branch short name.
+    pub branch: String,
+    /// Resolved comparison base (explicit, configured, or default target).
+    pub base: ComparisonBase,
+    /// Commits reachable from the branch tip but not from the base (full count).
+    pub ahead: usize,
+    /// Newest commits in the ahead set (newest first), up to the requested limit.
+    pub newest_ahead: Vec<ObjectId>,
+}
+
 /// Resolve `refname` through the repository's ref store; refs that are missing or cannot be
 /// resolved (dangling symrefs, unreadable files) count as absent.
 fn resolve_optional(repo: &Repository, refname: &str) -> Option<ObjectId> {
     repo.refs().resolve(refname).ok()
+}
+
+fn ref_tip_as_commit(repo: &Repository, oid: ObjectId) -> Result<ObjectId> {
+    if !repo.odb().exists(&oid) {
+        return Ok(oid);
+    }
+    match peel_to_commit_for_merge_base(repo, oid) {
+        Ok(commit) => Ok(commit),
+        Err(crate::error::Error::ObjectNotFound(_)) => Ok(oid),
+        Err(err) => Err(err),
+    }
+}
+
+fn comparison_base_from_candidate(
+    repo: &Repository,
+    candidate: &str,
+    full_ref: &str,
+    oid: ObjectId,
+    source: BaseSource,
+) -> Result<ComparisonBase> {
+    Ok(ComparisonBase {
+        name: candidate.to_owned(),
+        full_ref: full_ref.to_owned(),
+        oid: ref_tip_as_commit(repo, oid)?,
+        source,
+    })
+}
+
+fn try_resolve_target_candidate(
+    repo: &Repository,
+    candidate: &str,
+    source: BaseSource,
+) -> Result<Option<ComparisonBase>> {
+    for full_ref in target_candidate_refnames(candidate) {
+        if let Some(oid) = resolve_optional(repo, &full_ref) {
+            return Ok(Some(comparison_base_from_candidate(
+                repo, candidate, &full_ref, oid, source,
+            )?));
+        }
+    }
+    Ok(None)
+}
+
+fn discover_target_branch(repo: &Repository) -> Result<Option<ComparisonBase>> {
+    let config = repo.config()?;
+    let configured = config
+        .get("target.branch")
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty());
+    if let Some(candidate) = configured {
+        if let Some(base) =
+            try_resolve_target_candidate(repo, &candidate, BaseSource::ConfiguredTarget)?
+        {
+            return Ok(Some(base));
+        }
+    }
+    for candidate in DEFAULT_TARGET_CANDIDATES {
+        if let Some(base) =
+            try_resolve_target_candidate(repo, candidate, BaseSource::DefaultTarget)?
+        {
+            return Ok(Some(base));
+        }
+    }
+    Ok(None)
+}
+
+fn resolve_explicit_target(repo: &Repository, spec: &str) -> Result<ComparisonBase> {
+    let spec = spec.trim();
+    if spec.is_empty() {
+        return Err(crate::error::Error::InvalidRef(
+            "empty target revision".into(),
+        ));
+    }
+    if let Some(base) = try_resolve_target_candidate(repo, spec, BaseSource::Explicit)? {
+        return Ok(ComparisonBase {
+            name: spec.to_owned(),
+            ..base
+        });
+    }
+    let oid = resolve_revision_for_range_end(repo, spec)?;
+    let commit = ref_tip_as_commit(repo, oid)?;
+    Ok(ComparisonBase {
+        name: spec.to_owned(),
+        full_ref: spec.to_owned(),
+        oid: commit,
+        source: BaseSource::Explicit,
+    })
+}
+
+/// Compare the current branch tip against a target ref or the repository's default target branch.
+///
+/// When [`TargetComparisonOptions::target`] is [`None`], the target is discovered in the same
+/// order as [`target_branch`]. When it is set, the spec is resolved through the ref store and
+/// revision parser and peeled to a commit.
+///
+/// # Errors
+///
+/// Returns [`crate::error::Error::DetachedHead`] when `HEAD` is detached,
+/// [`crate::error::Error::UnbornHead`] when the current branch has no commits yet, and revision
+/// resolution errors when an explicit target does not resolve.
+pub fn compare_with_target(
+    repo: &Repository,
+    opts: &TargetComparisonOptions,
+) -> Result<TargetComparison> {
+    let head = resolve_head(repo.git_dir())?;
+    let (branch_name, head_oid) = match &head {
+        HeadState::Branch {
+            short_name,
+            oid: Some(oid),
+            ..
+        } => (short_name.clone(), *oid),
+        HeadState::Branch { .. } => return Err(crate::error::Error::UnbornHead),
+        HeadState::Detached { .. } => return Err(crate::error::Error::DetachedHead),
+        HeadState::Invalid => return Err(crate::error::Error::InvalidRef("invalid HEAD".into())),
+    };
+
+    let base = match &opts.target {
+        Some(TargetSpec(spec)) => resolve_explicit_target(repo, spec)?,
+        None => discover_target_branch(repo)?
+            .ok_or_else(|| crate::error::Error::InvalidRef("no target branch".into()))?,
+    };
+
+    let (ahead, newest_ahead) = ahead_of_target_commits(repo, head_oid, base.oid, opts.list_limit)?;
+    Ok(TargetComparison {
+        branch: branch_name,
+        base,
+        ahead,
+        newest_ahead,
+    })
+}
+
+/// Like [`compare_with_target`], but returns `Ok(None)` when no target branch can be discovered
+/// (only when [`TargetComparisonOptions::target`] is [`None`]).
+pub fn compare_with_target_optional(
+    repo: &Repository,
+    opts: &TargetComparisonOptions,
+) -> Result<Option<TargetComparison>> {
+    let head = resolve_head(repo.git_dir())?;
+    let (branch_name, head_oid) = match &head {
+        HeadState::Branch {
+            short_name,
+            oid: Some(oid),
+            ..
+        } => (short_name.clone(), *oid),
+        HeadState::Branch { .. } => return Err(crate::error::Error::UnbornHead),
+        HeadState::Detached { .. } => return Err(crate::error::Error::DetachedHead),
+        HeadState::Invalid => return Err(crate::error::Error::InvalidRef("invalid HEAD".into())),
+    };
+
+    let base = match &opts.target {
+        Some(TargetSpec(spec)) => Some(resolve_explicit_target(repo, spec)?),
+        None => discover_target_branch(repo)?,
+    };
+    let Some(base) = base else {
+        return Ok(None);
+    };
+
+    let (ahead, newest_ahead) = ahead_of_target_commits(repo, head_oid, base.oid, opts.list_limit)?;
+    Ok(Some(TargetComparison {
+        branch: branch_name,
+        base,
+        ahead,
+        newest_ahead,
+    }))
 }
 
 /// Full refs to try for one target-branch candidate, most specific first.
@@ -315,27 +512,10 @@ fn target_candidate_refnames(candidate: &str) -> Vec<String> {
 ///
 /// Returns an error when the repository configuration cannot be loaded.
 pub fn target_branch(repo: &Repository) -> Result<Option<ComparisonBase>> {
-    let config = repo.config()?;
-    let configured = config
-        .get("target.branch")
-        .map(|value| value.trim().to_owned())
-        .filter(|value| !value.is_empty());
-    let candidates = configured
-        .into_iter()
-        .chain(DEFAULT_TARGET_CANDIDATES.iter().map(|c| (*c).to_owned()));
-    for candidate in candidates {
-        for full_ref in target_candidate_refnames(&candidate) {
-            if let Some(oid) = resolve_optional(repo, &full_ref) {
-                return Ok(Some(ComparisonBase {
-                    name: candidate,
-                    full_ref,
-                    oid,
-                    source: BaseSource::Target,
-                }));
-            }
-        }
-    }
-    Ok(None)
+    Ok(discover_target_branch(repo)?.map(|mut base| {
+        base.source = BaseSource::Target;
+        base
+    }))
 }
 
 /// The configured upstream of local branch `branch_short`, when it is set and resolves.
