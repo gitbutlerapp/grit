@@ -76,10 +76,44 @@ impl Odb {
     /// The object an annotated tag ultimately names: the `^{}` value of a ref advertisement or
     /// a `packed-refs` peel line.
     ///
-    /// Returns `None` when `oid` is not a tag. Errors are those of [`Self::peel_tags`].
+    /// Returns `None` when `oid` is not a tag. Unlike [`Self::peel_tags`], each tag's `type`
+    /// header decides whether the chain continues, so the final object is never read and may
+    /// be missing. Git computes these values the same way, and listing many tags pays for one
+    /// object read per tag instead of two.
+    ///
+    /// # Errors
+    ///
+    /// - [`Error::ObjectNotFound`] when `oid` or an intermediate tag is missing.
+    /// - [`Error::CorruptObject`] when a tag has no valid `object` header, a `type tag` header
+    ///   names an object that is not a tag, or the chain loops.
     pub(crate) fn peel_tag_target(&self, oid: ObjectId) -> Result<Option<ObjectId>> {
-        let (peeled, _) = self.peel_tags(oid)?;
-        Ok((peeled != oid).then_some(peeled))
+        if self.read_info(&oid)?.kind != ObjectKind::Tag {
+            return Ok(None);
+        }
+        let mut current = oid;
+        let mut visited: Option<HashSet<ObjectId>> = None;
+        loop {
+            let tag = self.read(&current)?;
+            if tag.kind != ObjectKind::Tag {
+                return Err(Error::CorruptObject(format!(
+                    "{current} is named as a tag but is a {}",
+                    tag.kind
+                )));
+            }
+            let (target, names_tag) = tag_target_header(&tag.data);
+            let target = target.ok_or_else(|| {
+                Error::CorruptObject(format!("tag {current} has no valid object header"))
+            })?;
+            if !names_tag {
+                return Ok(Some(target));
+            }
+            if !visited.get_or_insert_with(HashSet::new).insert(current) {
+                return Err(Error::CorruptObject(format!(
+                    "tag chain from {oid} loops back to {current}"
+                )));
+            }
+            current = target;
+        }
     }
 
     /// Peel `oid` through annotated tags and a commit to a tree.
@@ -96,6 +130,28 @@ impl Odb {
             _ => Ok(None),
         }
     }
+}
+
+/// The first `object` header of a tag and whether its first `type` header is `tag`, read
+/// without allocating.
+fn tag_target_header(data: &[u8]) -> (Option<ObjectId>, bool) {
+    let mut target: Option<Option<ObjectId>> = None;
+    let mut names_tag = None;
+    for line in data.split(|&b| b == b'\n') {
+        if line.is_empty() || (target.is_some() && names_tag.is_some()) {
+            break;
+        }
+        if let Some(hex) = line.strip_prefix(b"object ") {
+            target.get_or_insert_with(|| {
+                std::str::from_utf8(hex)
+                    .ok()
+                    .and_then(|s| s.trim().parse().ok())
+            });
+        } else if let Some(kind) = line.strip_prefix(b"type ") {
+            names_tag.get_or_insert(kind.trim_ascii() == b"tag");
+        }
+    }
+    (target.flatten(), names_tag.unwrap_or(false))
 }
 
 #[cfg(test)]
@@ -218,9 +274,47 @@ mod tests {
 
         let missing = ObjectId::from_hex("1111111111111111111111111111111111111111").unwrap();
         let dangling = tag(&odb, missing, "commit", "dangling");
+        assert_eq!(odb.peel_tag_target(dangling).unwrap(), Some(missing));
+        let dangling_outer = tag(&odb, missing, "tag", "dangling-outer");
         assert!(matches!(
-            odb.peel_tag_target(dangling),
+            odb.peel_tag_target(dangling_outer),
             Err(Error::ObjectNotFound(_))
+        ));
+        assert!(matches!(
+            odb.peel_tag_target(missing),
+            Err(Error::ObjectNotFound(_))
+        ));
+    }
+
+    #[test]
+    fn peel_tag_target_rejects_a_type_tag_header_naming_a_non_tag() {
+        let dir = TempDir::new().unwrap();
+        let odb = Odb::new(dir.path());
+        let c = commit(&odb);
+        let lying = tag(&odb, c, "tag", "lying");
+        assert!(matches!(
+            odb.peel_tag_target(lying),
+            Err(Error::CorruptObject(_))
+        ));
+    }
+
+    #[test]
+    fn peel_tag_target_detects_a_tag_cycle() {
+        let store = Arc::new(MemoryStore::new(HashAlgo::Sha1));
+        let a = ObjectId::from_hex("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").unwrap();
+        let b = ObjectId::from_hex("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb").unwrap();
+        for (from, to) in [(a, b), (b, a)] {
+            let body = format!("object {to}\ntype tag\ntag cycle\n\n");
+            store.insert_object(from, ObjectKind::Tag, Arc::from(body.into_bytes()));
+        }
+        let dir = TempDir::new().unwrap();
+        let odb = OdbBuilder::files(dir.path())
+            .primary(store)
+            .alternates(false)
+            .build();
+        assert!(matches!(
+            odb.peel_tag_target(a),
+            Err(Error::CorruptObject(_))
         ));
     }
 
