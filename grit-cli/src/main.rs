@@ -2947,6 +2947,8 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
 }
 
 #[cfg(test)]
+mod error_outcome_snapshots;
+#[cfg(test)]
 mod render_outcome_snapshots;
 
 #[cfg(test)]

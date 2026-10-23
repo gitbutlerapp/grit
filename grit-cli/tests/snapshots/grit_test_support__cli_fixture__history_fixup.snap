@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "Fixed up 2 commit(s)\n  commit 062ca6e → 22fc9ce (first)\n  commit 83352a6 → 4b0001b (second)\n  refs/heads/feature 062ca6e → 22fc9ce\n  refs/heads/main 83352a6 → 4b0001b\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\"operation\":\"fixup\",\"rewritten\":[{\"old\":\"062ca6e74f5603f4d09063c0f46cd07d8c96e019\",\"new\":\"22fc9ce272ee14906b69342faa2f7fcad183713a\",\"change_id\":\"prkwwuwrytvxrwozplzrxmvozwutplkq\",\"subject\":\"first\"},{\"old\":\"83352a61f6715ec3f0a297c6d6150725154fb833\",\"new\":\"4b0001b495cd992a6e04557d3ee49923b59244d6\",\"change_id\":\"xzyqzyyzswyupvtlsovyzultryuqzlvk\",\"subject\":\"second\"}],\"refs\":[{\"ref\":\"refs/heads/feature\",\"name\":\"refs/heads/feature\",\"old\":\"062ca6e74f5603f4d09063c0f46cd07d8c96e019\",\"new\":\"22fc9ce272ee14906b69342faa2f7fcad183713a\"},{\"ref\":\"refs/heads/main\",\"name\":\"refs/heads/main\",\"old\":\"83352a61f6715ec3f0a297c6d6150725154fb833\",\"new\":\"4b0001b495cd992a6e04557d3ee49923b59244d6\"}],\"head\":{\"old\":\"83352a61f6715ec3f0a297c6d6150725154fb833\",\"new\":\"4b0001b495cd992a6e04557d3ee49923b59244d6\"},\"dry_run\":false}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "## History fixup\n\n- commit `062ca6e` → `22fc9ce` — first\n  - change id `prkwwuw`\n- commit `83352a6` → `4b0001b` — second\n  - change id `xzyqzyy`\n- `refs/heads/feature` `062ca6e` → `22fc9ce`\n- `refs/heads/main` `83352a6` → `4b0001b`\n- HEAD `83352a6` → `4b0001b`\n",
+    "stderr": ""
+  }
+}

@@ -263,18 +263,17 @@ fn snapshot_rebase() {
     );
 }
 
-fn prepare_history_drop(fixture: &CliFixture) {
-    fixture
-        .run(&["commit", "-m", "third on main"])
-        .expect_success("commit third on main for history drop snapshot");
-}
-
 #[test]
 fn snapshot_history_drop() {
-    snapshot_fresh(
+    CliFixture::snapshot_fresh_all_modes(
         "history_drop",
-        &["history", "drop", "HEAD~1"],
-        prepare_history_drop,
+        &["history", "drop", "HEAD~1", "--dry-run"],
+        snapshot_dir(),
+        || {
+            let fixture = CliFixture::empty();
+            prepare_linear_history_repo(&fixture);
+            fixture
+        },
     );
 }
 
@@ -379,7 +378,12 @@ fn snapshot_branch_delete() {
 
 #[test]
 fn snapshot_notes_list() {
-    snapshot_all_modes("notes_list", &["notes"]);
+    snapshot_all_modes("notes_list", &["notes", "list"]);
+}
+
+#[test]
+fn snapshot_notes() {
+    snapshot_all_modes("notes", &["notes"]);
 }
 
 #[test]
@@ -731,6 +735,11 @@ fn snapshot_stash_push() {
 }
 
 #[test]
+fn snapshot_stash() {
+    snapshot_fresh("stash", &["stash", "-m", "wip stash"], |_| {});
+}
+
+#[test]
 fn snapshot_stash_list() {
     snapshot_fresh("stash_list", &["stash", "list"], prepare_stash);
 }
@@ -816,6 +825,20 @@ fn snapshot_worktree_unlock() {
 }
 
 #[test]
+fn snapshot_hooks() {
+    snapshot_fresh("hooks", &["hooks"], |fixture| {
+        let hook = fixture.path().join(".git/hooks/pre-commit");
+        std::fs::write(&hook, "#!/bin/sh\nexit 0\n").expect("write hook");
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o100755))
+                .expect("chmod");
+        }
+    });
+}
+
+#[test]
 fn snapshot_hooks_list() {
     snapshot_fresh("hooks_list", &["hooks", "list"], |fixture| {
         let hook = fixture.path().join(".git/hooks/pre-commit");
@@ -865,6 +888,152 @@ fn snapshot_hooks_run_propagates_exit_code() {
 #[test]
 fn snapshot_patch_id() {
     snapshot_all_modes("patch_id", &["patch-id", "HEAD"]);
+}
+
+fn prepare_third_commit(fixture: &CliFixture) {
+    fixture
+        .run(&["commit", "-m", "third on main"])
+        .expect_success("commit third on main");
+}
+
+fn prepare_linear_history_repo(fixture: &CliFixture) {
+    for (name, msg) in [
+        ("one.txt", "one"),
+        ("two.txt", "two"),
+        ("three.txt", "three"),
+    ] {
+        fixture.write_repo_file(name, &format!("{msg}\n"));
+        fixture.run_ok(&["add", name]);
+        fixture.run_ok(&["commit", "-m", msg]);
+    }
+}
+
+#[test]
+fn snapshot_history_move() {
+    CliFixture::snapshot_fresh_all_modes(
+        "history_move",
+        &[
+            "history",
+            "move",
+            "HEAD~1",
+            "--before",
+            "HEAD~2",
+            "--dry-run",
+        ],
+        snapshot_dir(),
+        || {
+            let fixture = CliFixture::empty();
+            prepare_linear_history_repo(&fixture);
+            fixture
+        },
+    );
+}
+
+#[test]
+fn snapshot_history_fixup() {
+    snapshot_fresh(
+        "history_fixup",
+        &["history", "fixup", "HEAD~1"],
+        |fixture| {
+            fixture.write_repo_file("fixup.txt", "fixup change\n");
+            fixture.run_ok(&["add", "fixup.txt"]);
+        },
+    );
+}
+
+#[test]
+fn snapshot_history_absorb() {
+    snapshot_fresh(
+        "history_absorb",
+        &["history", "absorb", "--dry-run"],
+        |fixture| {
+            fixture.write_repo_file("absorb.txt", "absorb me\n");
+            fixture.run_ok(&["add", "absorb.txt"]);
+        },
+    );
+}
+
+#[test]
+fn snapshot_history_rebase() {
+    snapshot_fresh(
+        "history_rebase",
+        &["history", "rebase", "HEAD~2", "--dry-run"],
+        prepare_history_rebase,
+    );
+}
+
+fn prepare_history_split(fixture: &CliFixture) {
+    fixture.write_repo_file("split-foo", "foo\n");
+    fixture.write_repo_file("split-bar", "bar\n");
+    fixture.run_ok(&["add", "split-foo", "split-bar"]);
+    fixture.run_ok(&["commit", "-m", "split me"]);
+}
+
+#[test]
+fn snapshot_history_split() {
+    snapshot_fresh(
+        "history_split",
+        &[
+            "history",
+            "split",
+            "HEAD",
+            "-m",
+            "split part",
+            "--",
+            "split-foo",
+        ],
+        prepare_history_split,
+    );
+}
+
+#[test]
+fn snapshot_history_undo() {
+    CliFixture::snapshot_fresh_all_modes(
+        "history_undo",
+        &["history", "undo", "--dry-run"],
+        snapshot_dir(),
+        || {
+            let fixture = CliFixture::new();
+            prepare_third_commit(&fixture);
+            fixture
+                .run(&["history", "drop", "HEAD", "--update-refs", "head"])
+                .expect_success("history drop for undo snapshot");
+            fixture
+        },
+    );
+}
+
+#[test]
+fn snapshot_rebase_check() {
+    snapshot_fresh(
+        "rebase_check",
+        &["rebase", "HEAD~2", "--check"],
+        prepare_history_rebase,
+    );
+}
+
+#[test]
+fn snapshot_reflog_delete() {
+    snapshot_fresh("reflog_delete", &["reflog", "delete", "HEAD@{1}"], |_| {});
+}
+
+#[test]
+fn snapshot_reflog_expire() {
+    snapshot_fresh(
+        "reflog_expire",
+        &["reflog", "expire", "--expire", "now"],
+        |_| {},
+    );
+}
+
+#[test]
+fn snapshot_worktree_prune() {
+    snapshot_fresh("worktree_prune", &["worktree", "prune"], |fixture| {
+        fixture
+            .run(&["worktree", "add", "gone-wt", "-b", "gone-branch"])
+            .expect_success("worktree add");
+        std::fs::remove_dir_all(fixture.path().join("gone-wt")).expect("remove worktree dir");
+    });
 }
 
 trait ExpectSuccess {

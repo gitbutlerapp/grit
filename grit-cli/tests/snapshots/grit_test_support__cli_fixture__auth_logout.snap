@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "✓ Signed out of GitHub — removed the stored token for github.com.\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\"logged_out\":true,\"host\":\"github.com\"}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "## Auth logout\n\n- Signed out of **`github.com`** (stored token removed)\n",
+    "stderr": ""
+  }
+}

@@ -1,0 +1,21 @@
+---
+source: grit-cli/src/error_outcome_snapshots.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 1,
+    "stdout": "",
+    "stderr": "history move has conflicts in:\n  tracked.txt\n\nNothing was changed. grit can't resolve conflicts yet."
+  },
+  "json": {
+    "exit": 1,
+    "stdout": "{\"error\":\"history move has conflicts\",\"kind\":\"conflict\",\"conflicts\":[\"tracked.txt\"]}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 1,
+    "stdout": "## Error\n\n- **conflict** — history move has conflicts",
+    "stderr": ""
+  }
+}

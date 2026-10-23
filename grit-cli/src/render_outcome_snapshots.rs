@@ -88,6 +88,19 @@ fn auth_render() {
 }
 
 #[test]
+fn auth_logout_render() {
+    let ctx = sample_ctx();
+    let logout = LogoutOutcome {
+        logged_out: true,
+        host: "github.com".to_owned(),
+    };
+    let human = render_to_string(&logout, OutputMode::Human, &ctx).expect("human");
+    let json = render_to_string(&logout, OutputMode::Json, &ctx).expect("json");
+    let markdown = render_to_string(&logout, OutputMode::Markdown, &ctx).expect("markdown");
+    CliFixture::snapshot_rendered_modes("auth_logout", snapshot_dir(), &human, &json, &markdown);
+}
+
+#[test]
 fn update_render() {
     let ctx = sample_ctx();
     let outcome = UpdateOutcome {

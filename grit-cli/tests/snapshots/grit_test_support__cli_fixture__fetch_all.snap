@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "Already up to date with origin.\n  refs/remotes/extra/feature  ← refs/heads/feature  new → 062ca6e\n  refs/remotes/extra/main  ← refs/heads/main  new → 83352a6\nFetched 2 updates from extra.\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\"remotes\":[{\"remote\":\"origin\",\"updates\":[],\"updated\":0},{\"remote\":\"extra\",\"updates\":[{\"ref\":\"refs/remotes/extra/feature\",\"remote_ref\":\"refs/heads/feature\",\"status\":\"new\",\"old_oid\":null,\"new_oid\":\"062ca6e74f5603f4d09063c0f46cd07d8c96e019\"},{\"ref\":\"refs/remotes/extra/main\",\"remote_ref\":\"refs/heads/main\",\"status\":\"new\",\"old_oid\":null,\"new_oid\":\"83352a61f6715ec3f0a297c6d6150725154fb833\"}],\"updated\":2}],\"updated\":2,\"dry_run\":false}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "Already up to date with `origin`.\n## Updates from `extra`\n- `refs/remotes/extra/feature` ← `refs/heads/feature` · `new` → `062ca6e`\n- `refs/remotes/extra/main` ← `refs/heads/main` · `new` → `83352a6`\n\nFetched **2** updates.\n",
+    "stderr": ""
+  }
+}

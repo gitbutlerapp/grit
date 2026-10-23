@@ -430,8 +430,10 @@ impl CliFixture {
         let mut argv: Vec<String> = args.iter().map(|s| (*s).to_string()).collect();
         match kind {
             ModeKind::Human => {}
-            ModeKind::Json => argv.push("--json".into()),
-            ModeKind::Markdown => argv.push("--markdown".into()),
+            // Global output flags must precede the subcommand so they are not parsed as
+            // pathspecs after `--`.
+            ModeKind::Json => argv.insert(0, "--json".into()),
+            ModeKind::Markdown => argv.insert(0, "--markdown".into()),
         }
         let arg_refs: Vec<&str> = argv.iter().map(String::as_str).collect();
         let out = self.run_grit_in(cwd, &arg_refs);

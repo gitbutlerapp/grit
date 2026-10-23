@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "Dry run — refs would change:\n  commit 4248320 → a9a26db (one)\n  commit e813550 → 42941b1 (two)\n  commit ac49499 → a34df68 (three)\n  refs/heads/main ac49499 → a34df68\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\"operation\":\"move\",\"rewritten\":[{\"old\":\"4248320bc0a4be8092b67b35d1792d66488d76f2\",\"new\":\"a9a26db4b9019767fe5f7a8000e21d4bad5811a9\",\"change_id\":\"uomrkkpuvqrlxtxummqwvokxwlylmxxu\",\"subject\":\"one\"},{\"old\":\"e813550422978d1bee2b329b9edd6f3f6ee720c0\",\"new\":\"42941b1bb3ada27922885458910716f8ab7df44c\",\"change_id\":\"vxyqmpprwxymvkpwpqwtwlxykruvrmuu\",\"subject\":\"two\"},{\"old\":\"ac494998bfc5bae9e4d7248e01c68a8cb132d59d\",\"new\":\"a34df68cbb959f28f8e05eb08db3749bdb8d9ff3\",\"change_id\":\"nlwnxqtupktoznmkxunmoxzuwuskvolr\",\"subject\":\"three\"}],\"refs\":[{\"ref\":\"refs/heads/main\",\"name\":\"refs/heads/main\",\"old\":\"ac494998bfc5bae9e4d7248e01c68a8cb132d59d\",\"new\":\"a34df68cbb959f28f8e05eb08db3749bdb8d9ff3\"}],\"head\":{\"old\":\"ac494998bfc5bae9e4d7248e01c68a8cb132d59d\",\"new\":\"a34df68cbb959f28f8e05eb08db3749bdb8d9ff3\"},\"dry_run\":true}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "## History move\n\n- Dry run (refs unchanged)\n- commit `4248320` → `a9a26db` — one\n  - change id `uomrkkp`\n- commit `e813550` → `42941b1` — two\n  - change id `vxyqmpp`\n- commit `ac49499` → `a34df68` — three\n  - change id `nlwnxqt`\n- `refs/heads/main` `ac49499` → `a34df68`\n- HEAD `ac49499` → `a34df68`\n",
+    "stderr": ""
+  }
+}

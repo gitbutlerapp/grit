@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "Split 1 commit(s)\n  commit b1fbf82 → a71616e (split me)\n  refs/heads/main b1fbf82 → a71616e\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\"operation\":\"split\",\"rewritten\":[{\"old\":\"b1fbf82b783ab768996c8a3110c3c905de433b06\",\"new\":\"a71616ee6fc48884e990e3046e9fad6c57c89ac1\",\"change_id\":\"rzqyrqrkntmmkpvlqnnqlzmotmmrrnsn\",\"subject\":\"split me\"}],\"refs\":[{\"ref\":\"refs/heads/main\",\"name\":\"refs/heads/main\",\"old\":\"b1fbf82b783ab768996c8a3110c3c905de433b06\",\"new\":\"a71616ee6fc48884e990e3046e9fad6c57c89ac1\"}],\"head\":{\"old\":\"b1fbf82b783ab768996c8a3110c3c905de433b06\",\"new\":\"a71616ee6fc48884e990e3046e9fad6c57c89ac1\"},\"dry_run\":false}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "## History split\n\n- commit `b1fbf82` → `a71616e` — split me\n  - change id `rzqyrqr`\n- `refs/heads/main` `b1fbf82` → `a71616e`\n- HEAD `b1fbf82` → `a71616e`\n",
+    "stderr": ""
+  }
+}

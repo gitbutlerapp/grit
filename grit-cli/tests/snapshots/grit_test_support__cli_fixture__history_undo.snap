@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "Dry run — undo would restore refs:\n  refs/heads/main 83352a6 → 2d78f4f\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\"operation\":\"undo\",\"rewritten\":[],\"refs\":[{\"ref\":\"refs/heads/main\",\"name\":\"refs/heads/main\",\"old\":\"83352a61f6715ec3f0a297c6d6150725154fb833\",\"new\":\"2d78f4f965bfd745ea6586feca7a3581cea724ad\"}],\"head\":{\"old\":\"83352a61f6715ec3f0a297c6d6150725154fb833\",\"new\":\"2d78f4f965bfd745ea6586feca7a3581cea724ad\"},\"dry_run\":true}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "## History undo\n\n- Dry run (refs unchanged)\n- `refs/heads/main` `83352a6` → `2d78f4f`\n- HEAD `83352a6` → `2d78f4f`\n",
+    "stderr": ""
+  }
+}

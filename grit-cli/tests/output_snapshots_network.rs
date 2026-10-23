@@ -108,6 +108,26 @@ fn snapshot_fetch_new() {
 }
 
 #[test]
+fn snapshot_fetch_all() {
+    CliFixture::new().with_upstream().snapshot_network(
+        "fetch_all",
+        snapshot_dir(),
+        noop_opts(),
+        |mode| {
+            let net = Box::new(CliFixture::new().with_upstream());
+            let client = client_synced(net.as_ref(), mode);
+            let extra = net.upstream_path().to_str().expect("upstream utf8");
+            let _ = grit(&client, &["remote", "add", "extra", extra]);
+            PreparedNetworkRun::from_owned_upstream(
+                net,
+                client,
+                vec!["fetch".into(), "--all".into()],
+            )
+        },
+    );
+}
+
+#[test]
 fn snapshot_fetch_prune() {
     CliFixture::new().with_upstream().snapshot_network(
         "fetch_prune",

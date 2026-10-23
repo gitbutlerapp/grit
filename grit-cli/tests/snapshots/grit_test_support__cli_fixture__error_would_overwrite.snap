@@ -1,0 +1,21 @@
+---
+source: grit-cli/src/error_outcome_snapshots.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 1,
+    "stdout": "",
+    "stderr": "error: switch would overwrite local changes"
+  },
+  "json": {
+    "exit": 1,
+    "stdout": "{\"error\":\"switch would overwrite local changes\",\"kind\":\"would_overwrite\",\"would_overwrite\":{\"reason\":\"local_changes\",\"paths\":[\"tracked.txt\"]}}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 1,
+    "stdout": "## Error\n\n- **would_overwrite** — switch would overwrite local changes",
+    "stderr": ""
+  }
+}

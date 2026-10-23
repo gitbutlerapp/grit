@@ -1,6 +1,6 @@
 //! v1 JSON Schema generation and registry for `--json` command outcomes.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -39,6 +39,75 @@ pub const NO_JSON_COMMANDS: &[&str] = &["completions", "manager", "upload-pack",
 /// Relative path from the workspace root to committed schema files.
 pub fn schemas_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../content/schemas")
+}
+
+/// Published schema index at `content/docs/schemas.md`.
+pub fn schemas_index_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../content/docs/schemas.md")
+}
+
+/// Every committed schema document: command path → version numbers present on disk.
+pub fn discover_committed_schema_documents() -> BTreeMap<String, BTreeSet<u32>> {
+    use std::collections::{BTreeMap, BTreeSet};
+
+    let mut out: BTreeMap<String, BTreeSet<u32>> = BTreeMap::new();
+    let dir = schemas_dir();
+    for entry in fs::read_dir(&dir).unwrap_or_else(|e| panic!("read schemas dir: {e}")) {
+        let entry = entry.unwrap_or_else(|e| panic!("schema dir entry: {e}"));
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        let Some((command, version)) = name.strip_suffix(".json").and_then(|stem| {
+            stem.rsplit_once(".v")
+                .and_then(|(cmd, ver)| ver.parse::<u32>().ok().map(|v| (cmd.to_owned(), v)))
+        }) else {
+            continue;
+        };
+        out.entry(command).or_default().insert(version);
+    }
+    out
+}
+
+/// Parse `/schemas/<command>/vN.json` links from the schema index table body.
+pub fn parse_schemas_index_links(markdown: &str) -> BTreeMap<String, BTreeSet<u32>> {
+    use std::collections::{BTreeMap, BTreeSet};
+
+    let mut out: BTreeMap<String, BTreeSet<u32>> = BTreeMap::new();
+    for line in markdown.lines() {
+        let Some(rest) = line.strip_prefix("| `") else {
+            continue;
+        };
+        let Some((command, links_cell)) = rest.split_once("` | ") else {
+            continue;
+        };
+        let links = links_cell.strip_suffix(" |").unwrap_or(links_cell);
+        for link in links.split(',') {
+            let Some(url) = link
+                .trim()
+                .strip_prefix('[')
+                .and_then(|s| s.split_once("]("))
+                .map(|(_, url)| url.trim_end_matches(')'))
+            else {
+                continue;
+            };
+            let Some(path) = url.strip_prefix("/schemas/") else {
+                continue;
+            };
+            let Some((cmd, ver)) = path.strip_suffix(".json").and_then(|p| {
+                p.rsplit_once("/v")
+                    .and_then(|(c, v)| v.parse::<u32>().ok().map(|n| (c.to_owned(), n)))
+            }) else {
+                continue;
+            };
+            assert_eq!(
+                cmd, command,
+                "schema index row `{command}` links to `/schemas/{cmd}/`"
+            );
+            out.entry(command.to_owned()).or_default().insert(ver);
+        }
+    }
+    out
 }
 
 /// Stable `$id` URL for a command's v1 schema document.
@@ -232,8 +301,15 @@ fn schema_for_type<T: JsonSchema>() -> RootSchema {
     schema_for!(T)
 }
 
+fn args_has_flag(args: &[&str], flag: &str) -> bool {
+    args.iter().copied().any(|a| a == flag)
+}
+
 /// Resolve the schema registry key for a `grit` argv slice (no global flags).
 pub fn schema_command_key(args: &[&str]) -> Option<String> {
+    if args.first().copied() == Some("__error_fixture__") {
+        return Some("error".into());
+    }
     let positional: Vec<&str> = args
         .iter()
         .copied()
@@ -294,6 +370,22 @@ pub fn schema_command_key(args: &[&str]) -> Option<String> {
             Some("check") => "ignore.check",
             _ => return None,
         },
+        "notes" => match positional.get(1).copied() {
+            None => "notes",
+            Some("list") => "notes.list",
+            Some("show") => "notes.show",
+            Some("add") => "notes.add",
+            Some("remove") => "notes.remove",
+            _ => return None,
+        },
+        "hooks" => match positional.get(1).copied() {
+            None => "hooks",
+            Some("list") => "hooks.list",
+            Some("run") => "hooks.run",
+            _ => return None,
+        },
+        "fetch" if args_has_flag(args, "--all") => "fetch.all",
+        "rebase" if args_has_flag(args, "--check") => "rebase.check",
         "gc" => match positional.get(1).copied() {
             None => "gc",
             Some("repack") => "gc.repack",
@@ -500,6 +592,22 @@ fn collect_json_commands(cmd: &clap::Command, prefix: Option<&str>, out: &mut Ve
 /// Insta snapshot file prefix under `grit-cli/tests/snapshots/`.
 pub const SNAPSHOT_FILE_PREFIX: &str = "grit_test_support__cli_fixture__";
 
+/// Snapshot stems skipped by [`json_snapshots_match_schemas`] and the reason why.
+pub const SNAPSHOT_JSON_SCHEMA_SKIP_REASONS: &[(&str, &str)] = &[
+    (
+        "auth_render",
+        "In-process auth render fixture; JSON bundles sign-in and logout envelopes.",
+    ),
+    (
+        "log_json_filter_commits_oid",
+        "`--json --filter` stdout is a filtered slice, not a full command outcome object.",
+    ),
+    (
+        "update_render",
+        "In-process update render fixture; not produced by a single argv invocation.",
+    ),
+];
+
 /// Snapshot stems whose `json.stdout` is not a single command outcome object (render
 /// fixtures, jq filter slices, and similar). Skipped by [`json_snapshots_match_schemas`] only;
 /// output snapshot coverage still requires human/json/markdown sections for render stems.
@@ -618,7 +726,7 @@ pub fn snapshot_command_args() -> &'static [(&'static str, &'static [&'static st
             "history_reword",
             &["history", "reword", "HEAD~1", "-m", "reworded subject"],
         ),
-        ("history_drop", &["history", "drop", "HEAD~1"]),
+        ("history_drop", &["history", "drop", "HEAD~1", "--dry-run"]),
         (
             "history_squash",
             &["history", "squash", "HEAD~2..HEAD", "--update-refs", "head"],
@@ -645,7 +753,10 @@ pub fn snapshot_command_args() -> &'static [(&'static str, &'static [&'static st
         ("tag_lightweight", &["tag", "v1.0"]),
         ("tag_annotated", &["tag", "-m", "release note", "v2.0"]),
         ("tag_delete", &["tag", "-d", "drop-me"]),
-        ("notes_list", &["notes"]),
+        ("notes", &["notes"]),
+        ("notes_list", &["notes", "list"]),
+        ("hooks", &["hooks"]),
+        ("stash", &["stash"]),
         ("notes_show", &["notes", "show", "HEAD"]),
         ("notes_add", &["notes", "add", "HEAD", "-m", "hello notes"]),
         ("notes_remove", &["notes", "remove", "HEAD"]),
@@ -737,6 +848,52 @@ pub fn snapshot_command_args() -> &'static [(&'static str, &'static [&'static st
         ("hooks_run", &["hooks", "run", "pre-commit"]),
         ("hooks_run_exit_17", &["hooks", "run", "pre-commit"]),
         ("patch_id", &["patch-id", "HEAD"]),
+        ("auth_logout", &["auth", "logout"]),
+        ("fetch_all", &["fetch", "--all"]),
+        (
+            "history_move",
+            &[
+                "history",
+                "move",
+                "HEAD~1",
+                "--before",
+                "HEAD~2",
+                "--dry-run",
+            ],
+        ),
+        ("history_fixup", &["history", "fixup", "HEAD~1"]),
+        ("history_absorb", &["history", "absorb", "--dry-run"]),
+        (
+            "history_rebase",
+            &["history", "rebase", "HEAD~2", "--dry-run"],
+        ),
+        (
+            "history_split",
+            &[
+                "history",
+                "split",
+                "HEAD~1",
+                "-m",
+                "split part",
+                "--",
+                "tracked.txt",
+            ],
+        ),
+        ("history_undo", &["history", "undo", "--dry-run"]),
+        ("rebase_check", &["rebase", "HEAD~2", "--check"]),
+        ("reflog_delete", &["reflog", "delete", "HEAD@{1}"]),
+        ("reflog_expire", &["reflog", "expire", "--expire", "now"]),
+        ("worktree_prune", &["worktree", "prune"]),
+        ("error_usage", &["__error_fixture__", "usage"]),
+        (
+            "error_invalid_pattern",
+            &["__error_fixture__", "invalid_pattern"],
+        ),
+        (
+            "error_would_overwrite",
+            &["__error_fixture__", "would_overwrite"],
+        ),
+        ("error_conflict", &["__error_fixture__", "conflict"]),
         ("auth_render", &[]),
         ("update_render", &[]),
     ]
@@ -744,6 +901,7 @@ pub fn snapshot_command_args() -> &'static [(&'static str, &'static [&'static st
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
     use std::env;
     use std::fs;
 
@@ -840,6 +998,169 @@ mod tests {
     }
 
     #[test]
+    fn snapshot_skip_entries_have_reasons() {
+        let skip: BTreeSet<_> = SNAPSHOT_JSON_SCHEMA_SKIP.iter().copied().collect();
+        let reasons: BTreeSet<_> = SNAPSHOT_JSON_SCHEMA_SKIP_REASONS
+            .iter()
+            .map(|(name, _)| *name)
+            .collect();
+        assert_eq!(
+            skip, reasons,
+            "SNAPSHOT_JSON_SCHEMA_SKIP must match SNAPSHOT_JSON_SCHEMA_SKIP_REASONS stems"
+        );
+        for (stem, reason) in SNAPSHOT_JSON_SCHEMA_SKIP_REASONS {
+            assert!(
+                !reason.is_empty(),
+                "snapshot `{stem}` needs a non-empty skip reason"
+            );
+        }
+    }
+
+    #[test]
+    fn schema_index_lists_every_schema() {
+        let index_text = fs::read_to_string(schemas_index_path())
+            .unwrap_or_else(|e| panic!("read schema index: {e}"));
+        let on_disk = discover_committed_schema_documents();
+        let indexed = parse_schemas_index_links(&index_text);
+        assert_eq!(
+            on_disk, indexed,
+            "schema index must list every committed schema document exactly"
+        );
+        let file_count: usize = on_disk.values().map(|v| v.len()).sum();
+        assert_eq!(file_count, 90, "expected 90 schema files indexed");
+    }
+
+    fn load_snapshot_json_stdout(name: &str, snapshot_dir: &Path) -> Value {
+        let path = snapshot_dir.join(format!("{SNAPSHOT_FILE_PREFIX}{name}.snap"));
+        let text = fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read snapshot {}: {e}", path.display()));
+        let json_body = text
+            .rsplit_once("\n---\n")
+            .map(|(_, body)| body)
+            .unwrap_or_else(|| panic!("snapshot {name} missing insta separator"));
+        let payload: Value = serde_json::from_str(json_body)
+            .unwrap_or_else(|e| panic!("parse snapshot {}: {e}", path.display()));
+        let stdout = payload["json"]["stdout"]
+            .as_str()
+            .unwrap_or_else(|| panic!("snapshot {name} missing json.stdout"));
+        serde_json::from_str(stdout.trim())
+            .unwrap_or_else(|e| panic!("parse json stdout in {name}: {e}"))
+    }
+
+    fn snapshot_validates_for_command(name: &str, args: &[&str], instance: &Value) -> bool {
+        let schema_key = if args.first().copied() == Some("__error_fixture__") {
+            "error".to_owned()
+        } else if instance.get("error").is_some() && instance.get("kind").is_none() {
+            "error".to_owned()
+        } else if instance.get("error").is_some() && instance.get("kind").is_some() {
+            "error".to_owned()
+        } else {
+            schema_command_key(args)
+                .unwrap_or_else(|| panic!("no schema key for snapshot {name} args {args:?}"))
+        };
+        let schema_value = load_committed_schema(&schema_key);
+        let compiled = match jsonschema::validator_for(&schema_value) {
+            Ok(v) => v,
+            Err(_) => return false,
+        };
+        compiled.is_valid(instance)
+    }
+
+    #[test]
+    fn every_schema_has_a_validated_snapshot() {
+        use std::collections::{BTreeMap, BTreeSet};
+
+        let snapshot_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/snapshots");
+        assert_snapshot_args_cover_disk(&snapshot_dir);
+
+        let mut covered: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        let mut error_kinds: BTreeSet<String> = BTreeSet::new();
+
+        for name in discover_snapshot_stems(&snapshot_dir) {
+            if name == "auth_render" {
+                let path = snapshot_dir.join(format!("{SNAPSHOT_FILE_PREFIX}{name}.snap"));
+                let text = fs::read_to_string(&path).unwrap();
+                let payload: Value =
+                    serde_json::from_str(text.rsplit_once("\n---\n").unwrap().1).unwrap();
+                for (section, command, args) in [
+                    ("sign_in", "auth", &["auth"][..]),
+                    ("logout", "auth.logout", &["auth", "logout"][..]),
+                ] {
+                    let stdout = payload[section]["json"]["stdout"].as_str().unwrap();
+                    let instance: Value = serde_json::from_str(stdout.trim()).unwrap();
+                    let schema_key = schema_command_key(args).unwrap();
+                    assert_eq!(schema_key, command);
+                    let schema_value = load_committed_schema(command);
+                    let compiled = jsonschema::validator_for(&schema_value).unwrap();
+                    assert!(compiled.is_valid(&instance));
+                    covered
+                        .entry(command.to_owned())
+                        .or_default()
+                        .push(format!("{name}:{section}"));
+                }
+                continue;
+            }
+            if name == "update_render" {
+                let instance = load_snapshot_json_stdout(&name, &snapshot_dir);
+                assert!(snapshot_validates_for_command(
+                    &name,
+                    &["update"],
+                    &instance
+                ));
+                covered
+                    .entry("update".into())
+                    .or_default()
+                    .push(name.clone());
+                continue;
+            }
+            if SNAPSHOT_JSON_SCHEMA_SKIP.contains(&name.as_str()) {
+                continue;
+            }
+            let args = snapshot_args_lookup(&name)
+                .unwrap_or_else(|| panic!("snapshot {name} missing from snapshot_command_args()"));
+            let instance = load_snapshot_json_stdout(&name, &snapshot_dir);
+            assert!(
+                snapshot_validates_for_command(&name, args, &instance),
+                "snapshot `{name}` JSON must validate against its schema"
+            );
+            let command = if args.first().copied() == Some("__error_fixture__") {
+                "error".to_owned()
+            } else if instance.get("error").is_some() {
+                "error".to_owned()
+            } else {
+                schema_command_key(args)
+                    .unwrap_or_else(|| panic!("no schema key for snapshot {name} args {args:?}"))
+            };
+            covered.entry(command).or_default().push(name.clone());
+            if let Some(kind) = instance.get("kind").and_then(|k| k.as_str()) {
+                error_kinds.insert(kind.to_owned());
+            }
+        }
+
+        for entry in schema_registry() {
+            if entry.command == "error" {
+                continue;
+            }
+            assert!(
+                covered.contains_key(entry.command),
+                "schema registry command `{}` has no validated output snapshot (covered: {:?})",
+                entry.command,
+                covered.keys().collect::<Vec<_>>()
+            );
+        }
+        assert!(
+            covered.contains_key("error"),
+            "expected at least one snapshot validating against the error schema"
+        );
+        for kind in ["conflict", "would_overwrite", "usage", "invalid_pattern"] {
+            assert!(
+                error_kinds.contains(kind),
+                "missing structured error snapshot for kind `{kind}`"
+            );
+        }
+    }
+
+    #[test]
     fn json_snapshots_match_schemas() {
         let snapshot_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/snapshots");
         assert_snapshot_args_cover_disk(&snapshot_dir);
@@ -865,6 +1186,11 @@ mod tests {
                 .unwrap_or_else(|| panic!("snapshot {name} missing json.stdout"));
             let instance: Value = serde_json::from_str(stdout.trim())
                 .unwrap_or_else(|e| panic!("parse json stdout in {name}: {e}"));
+
+            if args.first().copied() == Some("__error_fixture__") {
+                validate_json_against_schema(&name, "error", &instance);
+                continue;
+            }
 
             if instance.get("error").is_some() {
                 validate_json_against_schema(&name, "error", &instance);

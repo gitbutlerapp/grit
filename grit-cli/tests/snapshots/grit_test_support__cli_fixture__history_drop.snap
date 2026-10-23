@@ -4,18 +4,18 @@ expression: payload
 ---
 {
   "human": {
-    "exit": 1,
-    "stdout": "",
-    "stderr": "error: history drop has conflicts in:\n  tracked.txt\n\nNothing was changed. grit can't resolve conflicts yet.\n"
+    "exit": 0,
+    "stdout": "Dry run — refs would change:\n  commit e813550 → (dropped) (two)\n  commit ac49499 → 5973cf5 (three)\n  refs/heads/main ac49499 → 5973cf5\n",
+    "stderr": ""
   },
   "json": {
-    "exit": 1,
-    "stdout": "{\"conflicts\":[\"tracked.txt\"],\"error\":\"history drop has conflicts\",\"kind\":\"conflict\"}\n",
+    "exit": 0,
+    "stdout": "{\"operation\":\"drop\",\"rewritten\":[{\"old\":\"e813550422978d1bee2b329b9edd6f3f6ee720c0\",\"new\":null,\"change_id\":null,\"subject\":\"two\"},{\"old\":\"ac494998bfc5bae9e4d7248e01c68a8cb132d59d\",\"new\":\"5973cf5b1aa8adc0a1a1c1c61ecaeb102c7faefd\",\"change_id\":\"nlwnxqtupktoznmkxunmoxzuwuskvolr\",\"subject\":\"three\"}],\"refs\":[{\"ref\":\"refs/heads/main\",\"name\":\"refs/heads/main\",\"old\":\"ac494998bfc5bae9e4d7248e01c68a8cb132d59d\",\"new\":\"5973cf5b1aa8adc0a1a1c1c61ecaeb102c7faefd\"}],\"head\":{\"old\":\"ac494998bfc5bae9e4d7248e01c68a8cb132d59d\",\"new\":\"5973cf5b1aa8adc0a1a1c1c61ecaeb102c7faefd\"},\"dry_run\":true}\n",
     "stderr": ""
   },
   "markdown": {
-    "exit": 1,
-    "stdout": "**Error:** history drop has conflicts in:\n  tracked.txt\n\nNothing was changed. grit can't resolve conflicts yet.\n",
+    "exit": 0,
+    "stdout": "## History drop\n\n- Dry run (refs unchanged)\n- commit `e813550` → (dropped) — two\n- commit `ac49499` → `5973cf5` — three\n  - change id `nlwnxqt`\n- `refs/heads/main` `ac49499` → `5973cf5`\n- HEAD `ac49499` → `5973cf5`\n",
     "stderr": ""
   }
 }
