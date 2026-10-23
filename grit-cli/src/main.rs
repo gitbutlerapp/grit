@@ -849,6 +849,15 @@ enum Command {
         /// Print the full symbolic ref name for each spec (like `git rev-parse --symbolic-full-name`).
         #[arg(long = "symbolic-full-name", conflicts_with = "abbrev_ref")]
         symbolic_full_name: bool,
+        /// Resolve exactly one spec strictly (`git rev-parse --verify`); requires one `<SPEC>`.
+        #[arg(
+            long = "verify",
+            conflicts_with_all = ["abbrev_ref", "symbolic_full_name"]
+        )]
+        verify: bool,
+        /// With `--verify`, answer yes/no via exit status only (no stdout/stderr).
+        #[arg(short = 'q', long = "quiet", requires = "verify")]
+        quiet: bool,
     },
     /// Show blob, tree, commit, or tag contents for a revision spec.
     Cat {
@@ -2155,20 +2164,40 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             short,
             abbrev_ref,
             symbolic_full_name,
+            verify,
+            quiet,
         } => {
             use commands::resolve::RefNameOutput;
-            let ref_output = if abbrev_ref {
-                RefNameOutput::AbbrevRef
-            } else if symbolic_full_name {
-                RefNameOutput::SymbolicFullName
+            if verify {
+                if specs.len() != 1 {
+                    anyhow::bail!("--verify requires exactly one SPEC");
+                }
+                let Some(spec) = specs.into_iter().next() else {
+                    anyhow::bail!("--verify requires exactly one SPEC");
+                };
+                let outcome = commands::resolve::run_verify(spec, short);
+                let code = commands::resolve::verify_exit_code(&outcome);
+                if quiet {
+                    std::process::exit(code);
+                }
+                emit(&outcome?, opts, ctx)
             } else {
-                RefNameOutput::ObjectIds
-            };
-            emit(
-                &commands::resolve::run(specs, short, ref_output)?,
-                opts,
-                ctx,
-            )
+                if quiet {
+                    anyhow::bail!("--quiet requires --verify");
+                }
+                let ref_output = if abbrev_ref {
+                    RefNameOutput::AbbrevRef
+                } else if symbolic_full_name {
+                    RefNameOutput::SymbolicFullName
+                } else {
+                    RefNameOutput::ObjectIds
+                };
+                emit(
+                    &commands::resolve::run(specs, short, ref_output)?,
+                    opts,
+                    ctx,
+                )
+            }
         }
         Command::Cat { spec } => emit(&commands::cat::run(spec)?, opts, ctx),
         Command::Commit {

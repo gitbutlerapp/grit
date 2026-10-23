@@ -8,7 +8,7 @@ order: 4
 ## Synopsis
 
 ```text
-grit resolve [--short] [--abbrev-ref | --symbolic-full-name] <SPEC>...
+grit resolve [--short] [--abbrev-ref | --symbolic-full-name] [--verify [-q]] <SPEC>...
 ```
 
 ## Description
@@ -19,13 +19,15 @@ Each spec prints on its own line as `OID TYPE` (full hex by default). With `--sh
 
 With `--abbrev-ref` or `--symbolic-full-name`, output switches to ref names (one line per spec): the shortest unambiguous short name, or the full symbolic ref name, matching `git rev-parse` for the same flags. Specs that are not refs (commit oids, peeled objects, unknown names) produce no line for that spec; exit status stays `0` unless a spec fails for another reason (for example `@{u}` with no upstream).
 
+With `--verify`, exactly one `<SPEC>` is resolved strictly (like `git rev-parse --verify`): revision ranges (`A..B`, `A...B`) are rejected, full hex ids must exist in the object database, and peel suffixes such as `^{commit}` are honored. Success prints one object id line (abbreviated when `--short` is set). Combine with `-q` / `--quiet` to suppress all stdout and stderr and answer with exit status only (`0` = exists, `1` = not). `--json --quiet` prints nothing; the exit code alone answers.
+
 ### Exit status
 
 | Code | Meaning |
 | ---: | --- |
-| `0` | Every spec resolved successfully. |
-| `1` | At least one spec failed (unknown revision, ambiguous short object id, or ambiguous change id with candidate rows on stderr). |
-| `2` | Usage error (unknown flag or command). |
+| `0` | Every spec resolved successfully (default mode), or `--verify` / `--verify --quiet` resolved the spec. |
+| `1` | At least one spec failed (unknown revision, ambiguous short object id, or ambiguous change id with candidate rows on stderr), or `--verify` / `--verify --quiet` could not resolve the spec. |
+| `2` | Usage error (unknown flag or command, or `--verify` with zero or multiple specs). |
 
 ## Options
 
@@ -35,6 +37,8 @@ With `--abbrev-ref` or `--symbolic-full-name`, output switches to ref names (one
 | `--short` | Print abbreviated object ids instead of full hex. |
 | `--abbrev-ref` | Print the shortest unambiguous ref name for each spec (conflicts with default oid output). |
 | `--symbolic-full-name` | Print the full symbolic ref name for each spec. |
+| `--verify` | Resolve exactly one spec strictly; requires one `<SPEC>` (conflicts with ref-name modes). |
+| `-q`, `--quiet` | With `--verify`, suppress stdout and stderr; exit `0` or `1` only. |
 
 ## Examples
 

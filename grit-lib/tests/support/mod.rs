@@ -25,10 +25,10 @@ pub use history_harness::{
     git_history_stderr_indicates_unavailable, git_history_subcommand_available, git_ls_files_stage,
     git_ls_files_stage0_map, git_merge_base, git_merge_base_is_ancestor, git_merge_expect_conflict,
     git_rev_list, git_rev_list_lines, git_rev_list_object_set, git_rev_list_with_boundary,
-    git_rev_parse, git_rev_parse_verify, git_version, git_version_at_least, grit_rev_list_commits,
-    grit_rev_list_commits_in_repo, grit_rev_list_object_set, harness_committer_line,
-    open_grit_repo, ordering_from_git_args, reset_harness_commit_clock, rev_parse_many,
-    skip_unless_git_at_least, HistoryRepo,
+    git_rev_parse, git_rev_parse_verify, git_rev_parse_verify_exit, git_version,
+    git_version_at_least, grit_rev_list_commits, grit_rev_list_commits_in_repo,
+    grit_rev_list_object_set, harness_committer_line, open_grit_repo, ordering_from_git_args,
+    reset_harness_commit_clock, rev_parse_many, skip_unless_git_at_least, HistoryRepo,
 };
 pub use index_ext_harness::*;
 pub use index_harness::{

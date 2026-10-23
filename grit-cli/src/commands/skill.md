@@ -41,6 +41,7 @@ The target branch is the first that exists of: the `target.branch` config value,
 | Recent history, ten at a time | `grit log`, then `grit log --before <next>` using the `next` value |
 | History with patches or file lists | `grit log -p`, `grit log --stat`, `grit log --name-status`, … (same format flags as `grit diff`) |
 | Commits on this branch not on the target | `grit shortlog` |
+| Does this ref or object exist? | `grit resolve --verify --quiet <SPEC>` (exit `0` = yes, `1` = no; no output; add `--json` only when you need the oid without `--quiet`) |
 
 `grit diff --json` on **`--staged`** or **`--unstaged`** patch output includes stable **`hunks[].id`** (12 lowercase hex chars) and **`hunks[].index`** (0-based within the file). Ids hash side, path, and line bodies (not line numbers), so they stay valid when earlier hunks are staged. Use **`grit add --hunks <id,...>`** or **`grit add --lines path:start-end`** (new-side **`lines[].new`**, 1-based inclusive); commit-range diffs omit `id` for now.
 

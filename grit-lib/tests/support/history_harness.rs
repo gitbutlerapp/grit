@@ -636,6 +636,14 @@ pub fn git_rev_parse_verify(dir: &Path, spec: &str) -> Option<ObjectId> {
     String::from_utf8_lossy(&out.stdout).trim().parse().ok()
 }
 
+/// Exit status of `git rev-parse --verify -q` for `spec` (0 = resolved, non-zero = not).
+pub fn git_rev_parse_verify_exit(dir: &Path, spec: &str) -> i32 {
+    hermetic_git(dir, &["rev-parse", "--verify", "-q", spec])
+        .status
+        .code()
+        .unwrap_or(1)
+}
+
 /// Run `git merge-base` with arguments; returns OIDs in git's order (one per line).
 pub fn git_merge_base(dir: &Path, args: &[&str]) -> Vec<ObjectId> {
     let mut full: Vec<&str> = vec!["merge-base"];

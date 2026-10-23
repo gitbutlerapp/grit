@@ -6876,8 +6876,14 @@ pub grit_lib::object_inspect::ResolveError::AmbiguousShortObject::spec: alloc::s
 pub grit_lib::object_inspect::ResolveError::PathNotInTree
 pub grit_lib::object_inspect::ResolveError::PathNotInTree::path: alloc::string::String
 pub grit_lib::object_inspect::ResolveError::PathNotInTree::revision: alloc::string::String
+pub grit_lib::object_inspect::ResolveError::RevisionRange
+pub grit_lib::object_inspect::ResolveError::RevisionRange::spec: alloc::string::String
 pub grit_lib::object_inspect::ResolveError::UnknownRevision
 pub grit_lib::object_inspect::ResolveError::UnknownRevision::spec: alloc::string::String
+pub grit_lib::object_inspect::ResolveError::WrongObjectKind
+pub grit_lib::object_inspect::ResolveError::WrongObjectKind::expected: grit_lib::objects::ObjectKind
+pub grit_lib::object_inspect::ResolveError::WrongObjectKind::found: grit_lib::objects::ObjectKind
+pub grit_lib::object_inspect::ResolveError::WrongObjectKind::spec: alloc::string::String
 impl core::convert::From<grit_lib::revwalk::rev_parse_error::RevParseError> for grit_lib::revwalk::object_inspect::ResolveError
 pub fn grit_lib::revwalk::object_inspect::ResolveError::from(grit_lib::revwalk::rev_parse_error::RevParseError) -> Self
 impl core::error::Error for grit_lib::revwalk::object_inspect::ResolveError
@@ -14559,6 +14565,7 @@ pub fn grit_lib::repo::Repository::read_object_for_display(&self, &grit_lib::obj
 pub fn grit_lib::repo::Repository::read_object_raw_for_display(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::objects::Object>
 pub fn grit_lib::repo::Repository::resolve(&self, &str) -> core::result::Result<grit_lib::revwalk::object_inspect::ResolvedObject, grit_lib::revwalk::object_inspect::ResolveError>
 pub fn grit_lib::repo::Repository::resolve_ref_name(&self, &str) -> core::result::Result<core::option::Option<grit_lib::revwalk::object_inspect::ResolvedRefName>, grit_lib::revwalk::rev_parse_error::RevParseError>
+pub fn grit_lib::repo::Repository::verify_object(&self, &str, core::option::Option<grit_lib::objects::ObjectKind>) -> core::result::Result<grit_lib::objects::ObjectId, grit_lib::revwalk::object_inspect::ResolveError>
 impl grit_lib::repo::Repository
 pub fn grit_lib::repo::Repository::write_commit_graph(&self, &grit_lib::maintenance::CommitGraphOptions) -> grit_lib::error::Result<grit_lib::maintenance::CommitGraphWriteReport>
 pub fn grit_lib::repo::Repository::write_midx(&self, &grit_lib::maintenance::MidxOptions) -> grit_lib::error::Result<grit_lib::maintenance::MidxWriteReport>
@@ -19002,6 +19009,7 @@ pub fn grit_lib::repo::Repository::read_object_for_display(&self, &grit_lib::obj
 pub fn grit_lib::repo::Repository::read_object_raw_for_display(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::objects::Object>
 pub fn grit_lib::repo::Repository::resolve(&self, &str) -> core::result::Result<grit_lib::revwalk::object_inspect::ResolvedObject, grit_lib::revwalk::object_inspect::ResolveError>
 pub fn grit_lib::repo::Repository::resolve_ref_name(&self, &str) -> core::result::Result<core::option::Option<grit_lib::revwalk::object_inspect::ResolvedRefName>, grit_lib::revwalk::rev_parse_error::RevParseError>
+pub fn grit_lib::repo::Repository::verify_object(&self, &str, core::option::Option<grit_lib::objects::ObjectKind>) -> core::result::Result<grit_lib::objects::ObjectId, grit_lib::revwalk::object_inspect::ResolveError>
 impl grit_lib::repo::Repository
 pub fn grit_lib::repo::Repository::write_commit_graph(&self, &grit_lib::maintenance::CommitGraphOptions) -> grit_lib::error::Result<grit_lib::maintenance::CommitGraphWriteReport>
 pub fn grit_lib::repo::Repository::write_midx(&self, &grit_lib::maintenance::MidxOptions) -> grit_lib::error::Result<grit_lib::maintenance::MidxWriteReport>
@@ -20986,8 +20994,14 @@ pub grit_lib::revwalk::object_inspect::ResolveError::AmbiguousShortObject::spec:
 pub grit_lib::revwalk::object_inspect::ResolveError::PathNotInTree
 pub grit_lib::revwalk::object_inspect::ResolveError::PathNotInTree::path: alloc::string::String
 pub grit_lib::revwalk::object_inspect::ResolveError::PathNotInTree::revision: alloc::string::String
+pub grit_lib::revwalk::object_inspect::ResolveError::RevisionRange
+pub grit_lib::revwalk::object_inspect::ResolveError::RevisionRange::spec: alloc::string::String
 pub grit_lib::revwalk::object_inspect::ResolveError::UnknownRevision
 pub grit_lib::revwalk::object_inspect::ResolveError::UnknownRevision::spec: alloc::string::String
+pub grit_lib::revwalk::object_inspect::ResolveError::WrongObjectKind
+pub grit_lib::revwalk::object_inspect::ResolveError::WrongObjectKind::expected: grit_lib::objects::ObjectKind
+pub grit_lib::revwalk::object_inspect::ResolveError::WrongObjectKind::found: grit_lib::objects::ObjectKind
+pub grit_lib::revwalk::object_inspect::ResolveError::WrongObjectKind::spec: alloc::string::String
 impl core::convert::From<grit_lib::revwalk::rev_parse_error::RevParseError> for grit_lib::revwalk::object_inspect::ResolveError
 pub fn grit_lib::revwalk::object_inspect::ResolveError::from(grit_lib::revwalk::rev_parse_error::RevParseError) -> Self
 impl core::error::Error for grit_lib::revwalk::object_inspect::ResolveError

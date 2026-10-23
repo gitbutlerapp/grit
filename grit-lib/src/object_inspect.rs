@@ -31,7 +31,9 @@ use crate::refs::{
 use crate::repo::Repository;
 use crate::rev_parse::{
     abbreviate_object_id, ambiguous_object_hint_lines, expand_at_minus_to_branch_name,
-    parse_peel_suffix, resolve_revision, resolve_upstream_symbolic_name, upstream_suffix_info,
+    parse_peel_suffix, resolve_revision, resolve_revision_for_verify,
+    resolve_upstream_symbolic_name, split_double_dot_range, split_triple_dot_range,
+    upstream_suffix_info,
 };
 use crate::rev_parse_error::{AmbiguousChangeIdHint, AmbiguousObjectHint, RevParseError};
 
@@ -71,6 +73,24 @@ pub enum ResolveError {
         path: String,
         /// Revision label for the tree that was searched.
         revision: String,
+    },
+
+    /// The spec names a revision range or set, not a single object (`git rev-parse --verify`).
+    #[error("revision range or set '{spec}' is not a single object")]
+    RevisionRange {
+        /// User revision string.
+        spec: String,
+    },
+
+    /// The resolved object is not of the expected kind.
+    #[error("object '{spec}' is a {found}, not a {expected}")]
+    WrongObjectKind {
+        /// User revision string.
+        spec: String,
+        /// Kind that was resolved.
+        found: ObjectKind,
+        /// Kind the caller required.
+        expected: ObjectKind,
     },
 }
 
@@ -188,6 +208,81 @@ impl Repository {
             ref_name: ref_names.as_ref().map(|n| n.short.clone()),
             full_ref: ref_names.map(|n| n.full),
         })
+    }
+
+    /// Strict single-object resolution for plumbing verify (`git rev-parse --verify`).
+    ///
+    /// Accepts one spec that names one existing object, honoring `^{type}` peels. Rejects
+    /// revision ranges (`A..B`, `A...B`). Verifies the object exists
+    /// in the object database (full hex ids must refer to stored objects, not merely parse).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ResolveError::RevisionRange`] for range or set syntax,
+    /// [`ResolveError::UnknownRevision`] when the spec cannot be resolved or the object is missing,
+    /// [`ResolveError::AmbiguousShortObject`] for ambiguous abbreviated ids, and
+    /// [`ResolveError::WrongObjectKind`] when `expected` is set and the peeled kind differs.
+    pub fn verify_object(
+        &self,
+        spec: &str,
+        expected: Option<ObjectKind>,
+    ) -> std::result::Result<ObjectId, ResolveError> {
+        if split_double_dot_range(spec).is_some() || split_triple_dot_range(spec).is_some() {
+            return Err(ResolveError::RevisionRange {
+                spec: spec.to_owned(),
+            });
+        }
+
+        let oid = match resolve_revision_for_verify(self, spec) {
+            Ok(o) => o,
+            Err(Error::ObjectNotFound(_)) => {
+                return Err(ResolveError::UnknownRevision {
+                    spec: spec.to_owned(),
+                });
+            }
+            Err(Error::RevParse(RevParseError::AmbiguousShortObject { spec: prefix })) => {
+                let candidates =
+                    ambiguous_object_hint_lines(self, &prefix, None).unwrap_or_default();
+                return Err(ResolveError::AmbiguousShortObject {
+                    spec: spec.to_owned(),
+                    candidates,
+                });
+            }
+            Err(Error::RevParse(RevParseError::AmbiguousChangeId { prefix, candidates })) => {
+                return Err(ResolveError::AmbiguousChangeId {
+                    spec: prefix,
+                    candidates,
+                });
+            }
+            Err(Error::RevParse(e)) => return Err(e.into()),
+            Err(_) => {
+                return Err(ResolveError::UnknownRevision {
+                    spec: spec.to_owned(),
+                });
+            }
+        };
+
+        if let Some(want) = expected {
+            let info =
+                self.read_info_replaced(&oid)
+                    .map_err(|_| ResolveError::UnknownRevision {
+                        spec: spec.to_owned(),
+                    })?;
+            if info.kind != want {
+                return Err(ResolveError::WrongObjectKind {
+                    spec: spec.to_owned(),
+                    found: info.kind,
+                    expected: want,
+                });
+            }
+        } else if !spec_is_literal_full_object_id(self, spec) {
+            self.read_info_replaced(&oid)
+                .map_err(|_| ResolveError::UnknownRevision {
+                    spec: spec.to_owned(),
+                })?;
+        }
+
+        Ok(oid)
     }
 
     /// Resolve `spec` to ref names when it names a ref (`rev-parse --abbrev-ref` / `--symbolic-full-name`).
@@ -341,6 +436,13 @@ fn map_resolve_ref_error(err: Error) -> RevParseError {
             name: other.to_string(),
         },
     }
+}
+
+/// Whether `spec` is a literal full object id (Git accepts missing objects for `--verify`).
+fn spec_is_literal_full_object_id(repo: &Repository, spec: &str) -> bool {
+    let rev_part = spec.split(':').next().unwrap_or(spec);
+    let (base, _) = parse_peel_suffix(rev_part);
+    base.len() == repo.odb().hash_algo().hex_len() && base.chars().all(|c| c.is_ascii_hexdigit())
 }
 
 fn infer_ref_names(repo: &Repository, spec: &str, oid: ObjectId) -> Option<ResolvedRefName> {

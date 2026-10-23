@@ -55,6 +55,26 @@ pub fn map_resolve_error(spec: &str, err: ResolveError) -> anyhow::Error {
             anyhow::anyhow!("path '{path}' does not exist in '{revision}'")
         }
         ResolveError::UnknownRevision { .. } => anyhow::anyhow!("unknown revision '{spec}'"),
+        ResolveError::RevisionRange { .. } => {
+            anyhow::anyhow!("revision range or set '{spec}' is not a single object")
+        }
+        ResolveError::WrongObjectKind {
+            found, expected, ..
+        } => anyhow::anyhow!(
+            "object '{spec}' is a {}, not a {}",
+            object_kind_label(found),
+            object_kind_label(expected)
+        ),
         _ => anyhow::anyhow!("could not resolve '{spec}'"),
+    }
+}
+
+fn object_kind_label(kind: grit_lib::objects::ObjectKind) -> &'static str {
+    use grit_lib::objects::ObjectKind;
+    match kind {
+        ObjectKind::Blob => "blob",
+        ObjectKind::Tree => "tree",
+        ObjectKind::Commit => "commit",
+        ObjectKind::Tag => "tag",
     }
 }
