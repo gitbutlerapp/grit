@@ -2305,13 +2305,11 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<ExitS
         },
         Command::Hooks { limit, action } => match action {
             None => emit_success(&commands::hooks::run_list(limit.get())?, opts, ctx),
-            Some(HooksAction::List { limit: sub_limit }) => {
-                emit_success(
-                    &commands::hooks::run_list(sub_limit.get().or(limit.get()))?,
-                    opts,
-                    ctx,
-                )
-            }
+            Some(HooksAction::List { limit: sub_limit }) => emit_success(
+                &commands::hooks::run_list(sub_limit.get().or(limit.get()))?,
+                opts,
+                ctx,
+            ),
             Some(HooksAction::Run { name, hook_args }) => {
                 let outcome = commands::hooks::run_hook_by_name(&name, &hook_args)?;
                 emit_success(&outcome, opts, ctx)?;
