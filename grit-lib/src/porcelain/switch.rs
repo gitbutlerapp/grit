@@ -934,7 +934,7 @@ fn checkout_prepared_tree_transition(
         &mut prepared.index,
         CheckoutApplyOptions {
             parallel_prepare_blobs: true,
-            checkout_parallel_threshold: Some(0),
+            checkout_parallel_threshold: None,
             trust_wholesale_dir_removal: prepared.trust_wholesale_dir_removal,
             preverified_wholesale_dirs: prepared.preverified_wholesale_dirs,
             wholesale_safety_precomputed: prepared.wholesale_safety_precomputed,

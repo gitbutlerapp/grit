@@ -305,14 +305,33 @@ fn resolve_pack_threads(
 
 #[must_use]
 fn resolve_checkout_workers(config: &ConfigSet, override_threads: Option<usize>) -> NonZeroUsize {
-    if let Some(n) = override_threads {
-        return Parallelism::resolve(Some(n)).threads();
+    let configured = match config.get_i64("checkout.workers") {
+        None => None,
+        Some(Ok(n)) if n < 1 => None,
+        Some(Ok(n)) => Some(n as usize),
+        Some(Err(_)) => None,
+    };
+
+    #[cfg(windows)]
+    {
+        if let Some(n) = configured {
+            return Parallelism::resolve(Some(n)).threads();
+        }
+        // Git keeps checkout serial unless `checkout.workers` is set. Global `--threads`
+        // must not fan out NTFS writes/deletes (issue #1613).
+        let _ = override_threads;
+        return NonZeroUsize::MIN;
     }
-    match config.get_i64("checkout.workers") {
-        None => Parallelism::resolve(None).threads(),
-        Some(Ok(n)) if n < 1 => Parallelism::resolve(None).threads(),
-        Some(Ok(n)) => Parallelism::resolve(Some(n as usize)).threads(),
-        Some(Err(_)) => Parallelism::resolve(None).threads(),
+
+    #[cfg(not(windows))]
+    {
+        if let Some(n) = override_threads {
+            return Parallelism::resolve(Some(n)).threads();
+        }
+        match configured {
+            None => Parallelism::resolve(None).threads(),
+            Some(n) => Parallelism::resolve(Some(n)).threads(),
+        }
     }
 }
 
@@ -438,6 +457,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(not(windows))]
     fn checkout_workers_unset_defaults_to_auto() {
         let cfg = ConfigSet::new();
         let opts = ThreadPolicy::default().resolve(ParallelOp::Checkout, &cfg);
@@ -448,6 +468,24 @@ mod tests {
                 .unwrap_or(1)
         );
         assert_eq!(opts.signed_entry_threshold, Some(100));
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn checkout_workers_unset_defaults_to_serial() {
+        let cfg = ConfigSet::new();
+        let opts = ThreadPolicy::default().resolve(ParallelOp::Checkout, &cfg);
+        assert_eq!(opts.threads, NonZeroUsize::MIN);
+        assert_eq!(opts.signed_entry_threshold, Some(100));
+    }
+
+    #[test]
+    #[cfg(windows)]
+    fn checkout_global_threads_override_ignored_without_checkout_workers() {
+        let cfg = ConfigSet::new();
+        let policy = ThreadPolicy::with_threads_override(Some(8));
+        let opts = policy.resolve(ParallelOp::Checkout, &cfg);
+        assert_eq!(opts.threads, NonZeroUsize::MIN);
     }
 
     #[test]

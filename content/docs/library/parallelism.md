@@ -19,7 +19,7 @@ Call [`ThreadPolicy::resolve`](https://docs.rs/grit-lib/latest/grit_lib/parallel
 | --- | --- | --- |
 | `IndexRefresh` | `core.preloadIndex`, `index.threads` | `core.preloadIndex` defaults **on** (same as Git). `index.threads` unset → auto (all logical CPUs) for hash-style refresh; serial when preload is off or `index.threads` is `1` / `false`. Batch: **≥32** entries and **≥256 KiB** total payload before pooling. |
 | `IndexLoad` | `core.preloadIndex`, `index.threads` | Same thread semantics as refresh. Batch: **≥4000** index entries (`2 × LAZY_THREAD_COST`, Git `name-hash.c`) before lazy name-hash threading. |
-| `Checkout` | `checkout.workers`, `checkout.thresholdForParallelism` | **`checkout.workers` unset → 1 worker** (Git serial checkout until configured). Threshold **100** entries (Git default) — parallel file creation only when `\|entries\| ≥ threshold`. |
+| `Checkout` | `checkout.workers`, `checkout.thresholdForParallelism` | **Windows:** `checkout.workers` unset → **1 worker**; global `--threads` does not enable parallel checkout (set `checkout.workers` explicitly). **Other platforms:** unset → auto (all logical CPUs) unless `--threads` caps the process. Threshold **100** entries (Git default) — parallel file creation only when `\|entries\| ≥ threshold`. [`grit switch`](../commands/switch.md) uses the repository threshold (not a forced zero). |
 | `IndexPack` | `pack.threads` | Unset / `0` → auto; invalid values error via [`try_resolve`](https://docs.rs/grit-lib/latest/grit_lib/parallel/struct.ThreadPolicy.html#method.try_resolve). No item-count floor (`min_items = 0`). |
 | `PackWrite` | `pack.threads` | Same as `IndexPack`. Parallel delta encoding + zlib; on-wire order matches the single-threaded writer. |
 | `PackDeltaSearch` | `pack.threads` | Same as `IndexPack`. Segments are fixed from object count and `pack.window` so chosen delta bases do **not** depend on worker count. |
@@ -64,9 +64,9 @@ Optional `pack.windowMemory` caps sliding-window retention during delta search (
 
 | Value | Effect |
 | --- | --- |
-| **`0`** | Auto — all logical CPUs for ops that honor unset config (`index.threads`, `pack.threads`, etc.). Does **not** turn on checkout parallelism by itself: unset **`checkout.workers`** still means one worker until you set **`checkout.workers`** or pass **`--threads` ≥ 2**. |
-| **`1`** | Force serial pools (`threads = 1`) regardless of `index.threads` / `pack.threads` / `checkout.workers`. |
-| **`N > 1`** | Cap workers at **`min(N, available CPUs)`** for all parallel operations (including checkout when the entry threshold is met). |
+| **`0`** | Auto — all logical CPUs for ops that honor unset config (`index.threads`, `pack.threads`, etc.). On **Windows**, checkout stays serial until **`checkout.workers`** is set in config. On other platforms, unset **`checkout.workers`** also uses auto unless you pass **`--threads` ≥ 2** to cap checkout workers. |
+| **`1`** | Force serial pools (`threads = 1`) regardless of `index.threads` / `pack.threads` / `checkout.workers` (non-Windows checkout). |
+| **`N > 1`** | Cap workers at **`min(N, available CPUs)`** for index/pack/diff operations. On non-Windows, checkout honors the cap when the entry threshold is met; on **Windows**, only an explicit **`checkout.workers`** enables parallel checkout. |
 
 Embedders pass the same semantics via [`ThreadPolicy::with_threads_override`](https://docs.rs/grit-lib/latest/grit_lib/parallel/struct.ThreadPolicy.html#method.with_threads_override).
 

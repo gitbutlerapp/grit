@@ -321,7 +321,7 @@ pub(crate) struct CheckoutApplyOptions {
     /// Only set when every OID is known to exist (e.g. tree-to-tree switch); general checkout
     /// must keep serial prepare so missing blobs flush earlier writes before failing.
     pub parallel_prepare_blobs: bool,
-    /// Override `checkout.thresholdForParallelism` for this apply (switch uses a low threshold).
+    /// Override `checkout.thresholdForParallelism` for this apply (`None` = repository config).
     pub checkout_parallel_threshold: Option<i64>,
     /// When true, wholesale directory removal skips the on-disk safety walk (switch already
     /// verified no untracked paths under those directories).
