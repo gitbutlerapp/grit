@@ -518,6 +518,24 @@ fn snapshot_remote_set_url() {
 }
 
 #[test]
+fn snapshot_remote_remove() {
+    let fixture = CliFixture::new();
+    let bare = fixture.path().join("origin.git");
+    fixture.run_ok(&["init", "--bare", bare.to_str().expect("utf8 bare path")]);
+    fixture.run_ok(&[
+        "remote",
+        "add",
+        "origin",
+        bare.to_str().expect("utf8 bare path"),
+    ]);
+    fixture.snapshot_all_modes(
+        "remote_remove",
+        &["remote", "remove", "origin", "--dry-run"],
+        snapshot_dir(),
+    );
+}
+
+#[test]
 fn snapshot_bundle_create() {
     let fixture = CliFixture::new();
     fixture.snapshot_all_modes(

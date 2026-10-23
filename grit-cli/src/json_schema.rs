@@ -804,6 +804,10 @@ pub fn snapshot_command_args() -> &'static [(&'static str, &'static [&'static st
             &["remote", "set-url", "origin", "https://example.com/new.git"],
         ),
         (
+            "remote_remove",
+            &["remote", "remove", "origin", "--dry-run"],
+        ),
+        (
             "bundle_create",
             &["bundle", "create", "snap.bundle", "HEAD"],
         ),
@@ -1055,7 +1059,7 @@ mod tests {
             "schema index must list every committed schema document exactly"
         );
         let file_count: usize = on_disk.values().map(|v| v.len()).sum();
-        assert_eq!(file_count, 92, "expected 92 schema files indexed");
+        assert_eq!(file_count, 93, "expected 93 schema files indexed");
     }
 
     fn load_snapshot_json_stdout(name: &str, snapshot_dir: &Path) -> Value {

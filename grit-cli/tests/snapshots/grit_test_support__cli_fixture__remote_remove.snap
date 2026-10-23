@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "Would remove remote origin\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\"action\":\"remove\",\"name\":\"origin\",\"refs_deleted\":[],\"branches_untracked\":[],\"dry_run\":true}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "Would remove remote `origin`.\n",
+    "stderr": ""
+  }
+}

@@ -500,6 +500,14 @@ const COMMAND_CONTRACTS: &[(&str, CommandContract)] = &[
         },
     ),
     (
+        "remote.remove",
+        CommandContract {
+            kind: CommandKind::Mutation,
+            takes_message: false,
+            takes_paths: false,
+        },
+    ),
+    (
         "remote.set-url",
         CommandContract {
             kind: CommandKind::Mutation,
@@ -950,12 +958,6 @@ const EXCEPTIONS: &[(&str, ContractRule, &str, &str)] = &[
         ContractRule::DryRun,
         "workspace-extras",
         "config set/unset has no `--dry-run` yet",
-    ),
-    (
-        "reset",
-        ContractRule::DryRun,
-        "workspace-extras",
-        "reset has no `--dry-run` yet",
     ),
     (
         "auth",
