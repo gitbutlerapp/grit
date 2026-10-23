@@ -18,7 +18,7 @@ use anyhow::{bail, Result};
 use grit_lib::diff::{DiffEntry, DiffStatus};
 use schemars::JsonSchema;
 use serde::Serialize;
-use std::io::{ErrorKind, Write};
+use std::io::{ErrorKind, IsTerminal, Write};
 use time::OffsetDateTime;
 
 use crate::cli_messages::human_error_message;
@@ -103,13 +103,26 @@ pub fn emit<T: Serialize + HumanRender + MarkdownRender>(
     opts.validate()?;
     let stdout = std::io::stdout();
     let mut lock = stdout.lock();
-    match opts.mode {
-        OutputMode::Human => value.render_human(&mut lock, ctx)?,
-        OutputMode::Json => write_json(&mut lock, value, opts.filter.as_deref())?,
-        OutputMode::Markdown => value.render_markdown(&mut lock, ctx)?,
+    let render = |w: &mut dyn Write| -> Result<()> {
+        match opts.mode {
+            OutputMode::Human => value.render_human(w, ctx),
+            OutputMode::Json => write_json(w, value, opts.filter.as_deref()),
+            OutputMode::Markdown => value.render_markdown(w, ctx),
+        }
+    };
+    // Rust's stdout flushes every line, so a large single-line JSON document, or a long list,
+    // costs a write per kilobyte or per line. Buffer like C stdio does: always for the single
+    // JSON value, and for text unless a terminal is watching it appear.
+    if opts.mode != OutputMode::Json && lock.is_terminal() {
+        return render(&mut lock);
     }
-    Ok(())
+    let mut buffered = std::io::BufWriter::with_capacity(OUTPUT_BUFFER_BYTES, lock);
+    render(&mut buffered)?;
+    stdio::io_result(buffered.flush()).map_err(|e| anyhow::anyhow!("writing output: {e}"))
 }
+
+/// Stdout buffer size for [`emit`] when output is not shown on a terminal.
+const OUTPUT_BUFFER_BYTES: usize = 64 * 1024;
 
 /// Render an outcome into an in-memory string (for snapshot tests).
 #[cfg(test)]
