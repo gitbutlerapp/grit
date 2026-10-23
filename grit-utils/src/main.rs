@@ -1330,7 +1330,7 @@ fn main() -> Result<()> {
                 for m in &outcome.mismatches {
                     let metric = match m.metric {
                         grit_utils::daily::DailyCompareMetric::Time => "time",
-                        grit_utils::DailyCompareMetric::Memory => "memory",
+                        grit_utils::daily::DailyCompareMetric::Memory => "memory",
                     };
                     eprintln!(
                         "  {} [{metric}]: {:.4} vs {:.4} (delta {:.4})",
