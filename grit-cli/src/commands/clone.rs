@@ -4,8 +4,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
-use anyhow::{Context, Result};
-use grit_lib::porcelain::checkout::checkout_between_trees_with_progress;
+use anyhow::Result;
 use grit_lib::remote::clone::{
     cleanup_failed_clone, clone as clone_repo, derive_clone_dir, dest_preexisted_empty,
     CloneCheckout, CloneError, CloneOptions, CloneOutcome as LibCloneOutcome,
@@ -14,7 +13,6 @@ use grit_lib::remote::DefaultHttpClientFactory;
 use schemars::JsonSchema;
 use serde::Serialize;
 
-use crate::context;
 use crate::output::{outln, progress, HumanRender, MarkdownRender, OutputMode, RenderContext};
 use crate::progress::{
     format_bytes, format_duration, format_rate, group_digits, paint, phase_label, phase_palette,
@@ -75,6 +73,8 @@ pub struct CloneOutcome {
     /// Why no working-tree checkout happened, when `files` is zero.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub no_checkout_reason: Option<String>,
+    /// Whether the clone destination is a bare repository.
+    pub bare: bool,
     /// Remote branch names that have commits when `no_checkout_reason` is `unborn_default_branch`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub branches_with_commits: Option<Vec<String>>,
@@ -371,6 +371,7 @@ fn emit_no_checkout_note(mode: OutputMode, outcome: &LibCloneOutcome) {
                 eprintln!("> The remote repository is empty.");
             }
         }
+        CloneCheckout::Skipped => {}
         CloneCheckout::UnbornDefaultBranch => {
             let branch = &outcome.branch;
             if mode == OutputMode::Human {
@@ -409,11 +410,13 @@ pub fn run(
     url: &str,
     dir: Option<String>,
     shallow: bool,
+    bare: bool,
+    no_checkout: bool,
     mode: OutputMode,
 ) -> Result<CloneOutcome> {
     let dir = match dir {
         Some(d) => d,
-        None => derive_clone_dir(url).map_err(|e| anyhow::anyhow!("{e}"))?,
+        None => derive_clone_dir(url, bare).map_err(|e| anyhow::anyhow!("{e}"))?,
     };
     let path = PathBuf::from(&dir);
     let dest_preexisted_empty = dest_preexisted_empty(&path);
@@ -433,7 +436,17 @@ pub fn run(
     } else {
         progress(mode, &format!("Cloning into '{dir}' ..."));
     }
-    match clone_into(url, &path, &dir, shallow, mode, started, &mut term_progress) {
+    match clone_into(
+        url,
+        &path,
+        &dir,
+        shallow,
+        bare,
+        no_checkout,
+        mode,
+        started,
+        &mut term_progress,
+    ) {
         Ok(outcome) => Ok(outcome),
         Err(err) => {
             let skip_cleanup = matches!(
@@ -448,11 +461,14 @@ pub fn run(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn clone_into(
     url: &str,
     path: &Path,
     dir: &str,
     shallow: bool,
+    bare: bool,
+    no_checkout: bool,
     mode: OutputMode,
     started: Instant,
     term_progress: &mut TerminalProgress,
@@ -466,37 +482,35 @@ fn clone_into(
         initial_branch: "main".to_owned(),
         thread_policy: crate::context::thread_policy_for_repo(),
         depth: shallow.then_some(1),
+        bare,
+        checkout: !no_checkout,
     };
     let outcome = clone_repo(clone_opts, &mut *term_progress, Some(&factory))?;
 
-    let (files, worktree_bytes, no_checkout_reason, branches_with_commits) =
-        if let CloneCheckout::CheckedOut(oid) = outcome.checkout {
-            let tree = context::commit_tree(&outcome.repo, &oid)?;
-            checkout_between_trees_with_progress(&outcome.repo, None, &tree, &mut *term_progress)
-                .context("could not check out files")?;
-            let index = outcome
-                .repo
-                .index_handle()
-                .load()
-                .context("could not read index")?;
-            let entries = index.entries();
-            (
-                u64::try_from(entries.len()).unwrap_or(u64::MAX),
-                entries.iter().map(|e| u64::from(e.size)).sum(),
-                None,
-                None,
-            )
-        } else {
+    let files = outcome.files;
+    let worktree_bytes = outcome.worktree_bytes;
+    let (no_checkout_reason, branches_with_commits) = match outcome.checkout {
+        CloneCheckout::CheckedOut(_) => (None, None),
+        CloneCheckout::Skipped => {
+            let reason = if bare {
+                Some("bare".to_owned())
+            } else {
+                Some("no_checkout".to_owned())
+            };
+            (reason, None)
+        }
+        CloneCheckout::EmptyRemote | CloneCheckout::UnbornDefaultBranch => {
             emit_no_checkout_note(mode, &outcome);
             let reason = match outcome.checkout {
                 CloneCheckout::EmptyRemote => Some("empty_remote".to_owned()),
                 CloneCheckout::UnbornDefaultBranch => Some("unborn_default_branch".to_owned()),
-                CloneCheckout::CheckedOut(_) => None,
+                CloneCheckout::CheckedOut(_) | CloneCheckout::Skipped => None,
             };
             let tips = (!outcome.branches_with_commits.is_empty())
                 .then(|| outcome.branches_with_commits.clone());
-            (0, 0, reason, tips)
-        };
+            (reason, tips)
+        }
+    };
     let records = term_progress.phases().to_vec();
     let elapsed = started.elapsed();
 
@@ -530,6 +544,7 @@ fn clone_into(
         records,
         no_checkout_reason,
         branches_with_commits,
+        bare: outcome.bare,
     })
 }
 
@@ -578,6 +593,7 @@ mod tests {
             records,
             no_checkout_reason: None,
             branches_with_commits: None,
+            bare: false,
         }
     }
 

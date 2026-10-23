@@ -281,13 +281,8 @@ fn library_clone_api_passes_fsck_and_status() {
     let dest = tempfile::tempdir().expect("clone dest");
     let outcome = clone_repo(
         CloneOptions {
-            url: upstream.path().to_string_lossy().into_owned(),
-            dest: dest.path().to_path_buf(),
             environment: Environment::capture_process(),
-            remote_name: grit_lib::remote::DEFAULT_REMOTE.to_owned(),
-            initial_branch: "main".to_owned(),
-            thread_policy: grit_lib::parallel::ThreadPolicy::default(),
-            depth: None,
+            ..CloneOptions::new(upstream.path().to_string_lossy(), dest.path().to_path_buf())
         },
         &mut NoProgress,
         None,

@@ -16772,6 +16772,7 @@ pub enum grit_lib::remote::clone::CloneCheckout
 pub grit_lib::remote::clone::CloneCheckout::CheckedOut(grit_lib::objects::ObjectId)
 pub grit_lib::remote::clone::CloneCheckout::EmptyRemote
 pub grit_lib::remote::clone::CloneCheckout::UnbornDefaultBranch
+pub grit_lib::remote::clone::CloneCheckout::Skipped
 impl core::clone::Clone for grit_lib::remote::clone::CloneCheckout
 pub fn grit_lib::remote::clone::CloneCheckout::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::remote::clone::CloneCheckout
@@ -16813,6 +16814,8 @@ impl core::marker::UnsafeUnpin for grit_lib::remote::clone::CloneError
 impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::clone::CloneError
 impl !core::panic::unwind_safe::UnwindSafe for grit_lib::remote::clone::CloneError
 pub struct grit_lib::remote::clone::CloneOptions
+pub grit_lib::remote::clone::CloneOptions::bare: bool
+pub grit_lib::remote::clone::CloneOptions::checkout: bool
 pub grit_lib::remote::clone::CloneOptions::depth: core::option::Option<u32>
 pub grit_lib::remote::clone::CloneOptions::dest: std::path::PathBuf
 pub grit_lib::remote::clone::CloneOptions::environment: grit_lib::config::environment::Environment
@@ -16830,16 +16833,19 @@ impl core::marker::UnsafeUnpin for grit_lib::remote::clone::CloneOptions
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::clone::CloneOptions
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::clone::CloneOptions
 pub struct grit_lib::remote::clone::CloneOutcome
+pub grit_lib::remote::clone::CloneOutcome::bare: bool
 pub grit_lib::remote::clone::CloneOutcome::branch: alloc::string::String
 pub grit_lib::remote::clone::CloneOutcome::branches: u64
 pub grit_lib::remote::clone::CloneOutcome::branches_with_commits: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::remote::clone::CloneOutcome::checkout: grit_lib::remote::clone::CloneCheckout
 pub grit_lib::remote::clone::CloneOutcome::checkout_oid: grit_lib::objects::ObjectId
+pub grit_lib::remote::clone::CloneOutcome::files: u64
 pub grit_lib::remote::clone::CloneOutcome::path: std::path::PathBuf
 pub grit_lib::remote::clone::CloneOutcome::repo: grit_lib::repo::Repository
 pub grit_lib::remote::clone::CloneOutcome::tags: u64
 pub grit_lib::remote::clone::CloneOutcome::transfer: grit_lib::remote::transfer::TransferStats
 pub grit_lib::remote::clone::CloneOutcome::url: alloc::string::String
+pub grit_lib::remote::clone::CloneOutcome::worktree_bytes: u64
 impl core::fmt::Debug for grit_lib::remote::clone::CloneOutcome
 pub fn grit_lib::remote::clone::CloneOutcome::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl !core::marker::Freeze for grit_lib::remote::clone::CloneOutcome
@@ -16851,7 +16857,7 @@ impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::clone::Clone
 impl !core::panic::unwind_safe::UnwindSafe for grit_lib::remote::clone::CloneOutcome
 pub fn grit_lib::remote::clone::cleanup_failed_clone(&std::path::Path, bool)
 pub fn grit_lib::remote::clone::clone(grit_lib::remote::clone::CloneOptions, &mut dyn grit_lib::remote::fetch::Progress, core::option::Option<&dyn grit_lib::remote::HttpClientFactory>) -> core::result::Result<grit_lib::remote::clone::CloneOutcome, grit_lib::remote::clone::CloneError>
-pub fn grit_lib::remote::clone::derive_clone_dir(&str) -> core::result::Result<alloc::string::String, grit_lib::remote::transport_path::NoDirectoryName>
+pub fn grit_lib::remote::clone::derive_clone_dir(&str, bool) -> core::result::Result<alloc::string::String, grit_lib::remote::transport_path::NoDirectoryName>
 pub fn grit_lib::remote::clone::dest_preexisted_empty(&std::path::Path) -> bool
 pub mod grit_lib::remote::credentials
 pub struct grit_lib::remote::credentials::Credential

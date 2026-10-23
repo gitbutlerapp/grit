@@ -869,6 +869,68 @@ pub fn verify_clone_http(ctx: &DailyHeadlineContext, cwd: &Path) -> Result<()> {
     verify_clone_local(ctx, cwd)
 }
 
+pub fn verify_clone_bare(ctx: &DailyHeadlineContext, cwd: &Path) -> Result<()> {
+    let remote = remote_state(ctx)?;
+    let dest = remote.meta.clone_dest.clone();
+    let dest_name = dest
+        .file_name()
+        .and_then(|s| s.to_str())
+        .context("clone dest name")?;
+    prepare_network_clone(&remote.bare)?;
+    run_git(
+        &ctx.git,
+        cwd,
+        &[
+            "clone",
+            "-q",
+            "--bare",
+            "--no-local",
+            remote.remote_url.as_str(),
+            dest_name,
+        ],
+    )?;
+    let git_refs = bare_clone_for_each_ref(&ctx.git, &dest)?;
+    prepare_network_clone(&remote.bare)?;
+    run_grit(
+        &ctx.grit,
+        cwd,
+        &["clone", "--bare", remote.remote_url.as_str(), dest_name],
+    )?;
+    let grit_refs = bare_clone_for_each_ref(&ctx.git, &dest)?;
+    if git_refs != grit_refs {
+        bail!(
+            "bare clone for-each-ref mismatch (git {} lines vs grit {})",
+            git_refs.len(),
+            grit_refs.len()
+        );
+    }
+    Ok(())
+}
+
+fn bare_clone_for_each_ref(git: &Path, repo: &Path) -> Result<Vec<String>> {
+    let out = Command::new(git)
+        .args(["for-each-ref", "--format=%(refname) %(objectname)", "refs/"])
+        .current_dir(repo)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .with_context(|| format!("git for-each-ref in {}", repo.display()))?;
+    if !out.status.success() {
+        bail!(
+            "git for-each-ref failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
+    let mut lines: Vec<String> = String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .map(str::to_owned)
+        .collect();
+    lines.sort();
+    Ok(lines)
+}
+
 pub fn verify_fetch_incremental_http(ctx: &DailyHeadlineContext, cwd: &Path) -> Result<()> {
     let remote = remote_state(ctx)?;
     configure_client_remote(&ctx.git, cwd, remote)?;
@@ -1005,4 +1067,20 @@ pub fn clone_bench_script_grit(tool: &Path, url: &str, dest: &Path) -> String {
     let dest_q = shell_quote(&dest.to_string_lossy());
     let dest_name = dest.file_name().and_then(|s| s.to_str()).unwrap_or("clone");
     format!("rm -rf {dest_q} && {tool_q} clone {url_q} {dest_name}")
+}
+
+pub fn clone_bare_bench_script(tool: &Path, url: &str, dest: &Path) -> String {
+    let tool_q = shell_quote(&tool.to_string_lossy());
+    let url_q = shell_quote(url);
+    let dest_q = shell_quote(&dest.to_string_lossy());
+    let dest_name = dest.file_name().and_then(|s| s.to_str()).unwrap_or("clone");
+    format!("rm -rf {dest_q} && {tool_q} clone -q --bare --no-local {url_q} {dest_name}")
+}
+
+pub fn clone_bare_bench_script_grit(tool: &Path, url: &str, dest: &Path) -> String {
+    let tool_q = shell_quote(&tool.to_string_lossy());
+    let url_q = shell_quote(url);
+    let dest_q = shell_quote(&dest.to_string_lossy());
+    let dest_name = dest.file_name().and_then(|s| s.to_str()).unwrap_or("clone");
+    format!("rm -rf {dest_q} && {tool_q} clone --bare {url_q} {dest_name}")
 }

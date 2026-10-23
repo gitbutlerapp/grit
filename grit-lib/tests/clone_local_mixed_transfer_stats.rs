@@ -78,13 +78,8 @@ fn clone_local_repacked_plus_loose_reports_full_transfer_stats() {
     let dest = tmp.path().join("c5");
     let outcome = clone_repo(
         CloneOptions {
-            url: bare.to_string_lossy().into_owned(),
-            dest: dest.clone(),
             environment: Environment::capture_process(),
-            remote_name: grit_lib::remote::DEFAULT_REMOTE.to_owned(),
-            initial_branch: "main".to_owned(),
-            thread_policy: grit_lib::parallel::ThreadPolicy::default(),
-            depth: None,
+            ..CloneOptions::new(bare.to_string_lossy(), dest.clone())
         },
         &mut NoProgress,
         None,

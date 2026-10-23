@@ -121,13 +121,9 @@ fn file_url(path: &Path) -> String {
 fn grit_clone(url: String, dest: PathBuf) {
     clone_repo(
         CloneOptions {
-            url,
-            dest,
+            url: url.clone(),
             environment: Environment::capture_process(),
-            remote_name: grit_lib::remote::DEFAULT_REMOTE.to_owned(),
-            initial_branch: "main".to_owned(),
-            thread_policy: grit_lib::parallel::ThreadPolicy::default(),
-            depth: None,
+            ..CloneOptions::new(url, dest)
         },
         &mut NoProgress,
         None,

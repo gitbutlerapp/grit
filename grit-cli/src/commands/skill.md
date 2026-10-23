@@ -123,7 +123,7 @@ Each commit gets a stable **`change-id`** header (on by default) that survives `
 
 | Task | Command |
 | --- | --- |
-| Copy a repository | `grit clone <url> [<dir>]` |
+| Copy a repository | `grit clone <url> [<dir>]` (`--bare`, `--no-checkout`, `--shallow`) |
 | List or add remotes | `grit remote`, `grit remote add <name> <url>` |
 | Download without changing your branch | `grit fetch [<remote>]` |
 | Fetch one branch or ref | `grit fetch origin main` (or `grit fetch origin pull/123/head:pr-123` for a PR) |

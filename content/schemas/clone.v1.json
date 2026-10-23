@@ -69,6 +69,10 @@
   },
   "description": "Result of `grit clone`.",
   "properties": {
+    "bare": {
+      "description": "Whether the clone destination is a bare repository.",
+      "type": "boolean"
+    },
     "branch": {
       "description": "Default branch checked out.",
       "type": "string"
@@ -158,6 +162,7 @@
     }
   },
   "required": [
+    "bare",
     "branch",
     "branches",
     "bytes",

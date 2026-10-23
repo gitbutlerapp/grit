@@ -90,13 +90,8 @@ fn clone_local_mixed_packed_tree_and_loose_blob() {
     let dest = tmp.path().join("pc");
     let outcome = clone_repo(
         CloneOptions {
-            url: remote.to_string_lossy().into_owned(),
-            dest: dest.clone(),
             environment: Environment::capture_process(),
-            remote_name: grit_lib::remote::DEFAULT_REMOTE.to_owned(),
-            initial_branch: "main".to_owned(),
-            thread_policy: grit_lib::parallel::ThreadPolicy::default(),
-            depth: None,
+            ..CloneOptions::new(remote.to_string_lossy(), dest.clone())
         },
         &mut NoProgress,
         None,

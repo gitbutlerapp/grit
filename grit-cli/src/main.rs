@@ -574,6 +574,12 @@ enum Command {
         /// Fetch only the tip commit on each branch (same as `git clone --depth=1`).
         #[arg(long)]
         shallow: bool,
+        /// Create a bare repository (`git clone --bare`).
+        #[arg(long)]
+        bare: bool,
+        /// Do not check out the default branch (`git clone --no-checkout`).
+        #[arg(long = "no-checkout")]
+        no_checkout: bool,
     },
     /// List remotes, or add one.
     Remote {
@@ -1795,8 +1801,14 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             bare,
             ref_format,
         } => emit(&commands::init::run(path, bare, ref_format)?, opts, ctx),
-        Command::Clone { url, dir, shallow } => emit(
-            &commands::clone::run(&url, dir, shallow, opts.mode)?,
+        Command::Clone {
+            url,
+            dir,
+            shallow,
+            bare,
+            no_checkout,
+        } => emit(
+            &commands::clone::run(&url, dir, shallow, bare, no_checkout, opts.mode)?,
             opts,
             ctx,
         ),

@@ -1,6 +1,5 @@
-//! Clone a remote repository: initialize, configure `origin`, fetch, and set up the default branch.
-//!
-//! File checkout is left to the caller (typically [`crate::porcelain::checkout`]).
+//! Clone a remote repository: initialize, configure `origin`, fetch, set up the default branch,
+//! and optionally check out the working tree.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -80,6 +79,10 @@ pub struct CloneOptions {
     /// Truncate fetched history to this many commits per ref tip
     /// (`git clone --depth N`). `Some(1)` matches a shallow clone.
     pub depth: Option<u32>,
+    /// Create a bare repository (`git clone --bare`).
+    pub bare: bool,
+    /// Populate the index and working tree after fetch (`git clone --no-checkout` when false).
+    pub checkout: bool,
 }
 
 impl CloneOptions {
@@ -94,6 +97,8 @@ impl CloneOptions {
             initial_branch: "main".to_owned(),
             thread_policy: crate::parallel::ThreadPolicy::default(),
             depth: None,
+            bare: false,
+            checkout: true,
         }
     }
 }
@@ -107,9 +112,11 @@ pub enum CloneCheckout {
     EmptyRemote,
     /// The remote advertised default branch has no commits yet; other refs may exist.
     UnbornDefaultBranch,
+    /// A commit was fetched but the working tree was not checked out (`--bare` or `--no-checkout`).
+    Skipped,
 }
 
-/// Result of a successful [`clone`] before working-tree checkout.
+/// Result of a successful [`clone`].
 #[derive(Debug)]
 pub struct CloneOutcome {
     /// Source URL string from the options.
@@ -135,6 +142,12 @@ pub struct CloneOutcome {
     pub branches: u64,
     /// Remote tags fetched (from the fetch ref updates).
     pub tags: u64,
+    /// Working-tree files checked out (zero when checkout was skipped or not applicable).
+    pub files: u64,
+    /// Total size of checked-out files in bytes.
+    pub worktree_bytes: u64,
+    /// Whether the destination is a bare repository.
+    pub bare: bool,
 }
 
 /// Derive a destination directory from a clone URL (Git [`git_url_basename`]).
@@ -143,8 +156,8 @@ pub struct CloneOutcome {
 ///
 /// Returns [`NoDirectoryName`] when no directory name can be guessed (same as `git clone`
 /// without `<dir>`).
-pub fn derive_clone_dir(url: &str) -> std::result::Result<String, NoDirectoryName> {
-    git_url_basename(url, false, false)
+pub fn derive_clone_dir(url: &str, bare: bool) -> std::result::Result<String, NoDirectoryName> {
+    git_url_basename(url, false, bare)
 }
 
 /// Whether `path` is an existing empty directory (used for failed-clone cleanup policy).
@@ -178,7 +191,7 @@ pub fn cleanup_failed_clone(path: &Path, keep_toplevel: bool) {
     }
 }
 
-/// Initialize, fetch, and configure the default branch; does not check out files.
+/// Initialize, fetch, configure the default branch, and optionally check out files.
 ///
 /// # Errors
 ///
@@ -202,9 +215,10 @@ pub fn clone(
         return Err(CloneError::DestNotEmpty(dir.to_owned()));
     }
 
+    let bare = opts.bare;
     init_repository(
         &opts.dest,
-        false,
+        bare,
         &opts.initial_branch,
         None,
         RefStorageFormat::Files,
@@ -212,13 +226,25 @@ pub fn clone(
     .map_err(|e| {
         CloneError::Library(Error::Message(format!("could not initialize '{dir}': {e}")))
     })?;
-    let git_dir = opts.dest.join(".git");
-    let repo = Repository::open(
-        &git_dir,
-        &RepositoryOptions::with_environment(opts.environment.clone())
-            .with_work_tree(opts.dest.clone()),
-    )
-    .map_err(CloneError::Library)?;
+    let git_dir = if bare {
+        opts.dest.clone()
+    } else {
+        opts.dest.join(".git")
+    };
+    let repo = if bare {
+        Repository::open(
+            &git_dir,
+            &RepositoryOptions::with_environment(opts.environment.clone()),
+        )
+        .map_err(CloneError::Library)?
+    } else {
+        Repository::open(
+            &git_dir,
+            &RepositoryOptions::with_environment(opts.environment.clone())
+                .with_work_tree(opts.dest.clone()),
+        )
+        .map_err(CloneError::Library)?
+    };
 
     let origin_url = stored_clone_remote_url(&opts.url);
     set_local_config(
@@ -233,13 +259,15 @@ pub fn clone(
         .map_err(CloneError::Library)?;
     let remote = Remote::from_config(&config, &opts.remote_name)?;
     let fetch_refspec = clone_initial_fetch_refspec(&opts, &remote, &repo, http_factory)?;
-    set_local_config(
-        &repo,
-        &[(
-            &format!("remote.{}.fetch", opts.remote_name),
-            fetch_refspec.clone(),
-        )],
-    )?;
+    if !bare {
+        set_local_config(
+            &repo,
+            &[(
+                &format!("remote.{}.fetch", opts.remote_name),
+                fetch_refspec.clone(),
+            )],
+        )?;
+    }
 
     let clone_message = format!("clone: from {}", opts.url);
     let identity =
@@ -257,7 +285,11 @@ pub fn clone(
             TagMode::All
         },
         initial_remote_fetch: true,
-        remote_name: Some(opts.remote_name.clone()),
+        remote_name: if bare {
+            None
+        } else {
+            Some(opts.remote_name.clone())
+        },
         clone_reflog: Some(clone_reflog),
         environment: opts.environment.clone(),
         thread_policy: opts.thread_policy,
@@ -276,13 +308,18 @@ pub fn clone(
         &opts.url,
         &opts.remote_name,
         &opts.initial_branch,
+        bare,
     );
 
-    let tracking = format!("refs/remotes/{}/{default}", opts.remote_name);
-    let oid = refs::resolve_ref(repo.git_dir(), &tracking).unwrap_or(ObjectId::zero());
     let branch_ref = format!("refs/heads/{default}");
+    let oid = if bare {
+        refs::resolve_ref(repo.git_dir(), &branch_ref).unwrap_or(ObjectId::zero())
+    } else {
+        let tracking = format!("refs/remotes/{}/{default}", opts.remote_name);
+        refs::resolve_ref(repo.git_dir(), &tracking).unwrap_or(ObjectId::zero())
+    };
     let zero = ObjectId::zero();
-    if !oid.is_zero() {
+    if !bare && !oid.is_zero() {
         refs::write_ref(repo.git_dir(), &branch_ref, &oid).map_err(CloneError::Library)?;
         refs::append_reflog(
             repo.git_dir(),
@@ -308,27 +345,44 @@ pub fn clone(
         )
         .map_err(CloneError::Library)?;
     }
-    set_local_config(
-        &repo,
-        &[
-            (
-                &format!("branch.{default}.remote"),
-                opts.remote_name.clone(),
-            ),
-            (
-                &format!("branch.{default}.merge"),
-                format!("refs/heads/{default}"),
-            ),
-        ],
-    )?;
+    if !bare {
+        set_local_config(
+            &repo,
+            &[
+                (
+                    &format!("branch.{default}.remote"),
+                    opts.remote_name.clone(),
+                ),
+                (
+                    &format!("branch.{default}.merge"),
+                    format!("refs/heads/{default}"),
+                ),
+            ],
+        )?;
+    }
 
-    let branches_with_commits = remote_branch_names_with_commits(&repo, &opts.remote_name);
-    let checkout = classify_clone_checkout(
+    let branches_with_commits = if bare {
+        local_branch_names_with_commits(&repo)
+    } else {
+        remote_branch_names_with_commits(&repo, &opts.remote_name)
+    };
+    let mut checkout = classify_clone_checkout(
         oid,
         &fetch_outcome.transfer,
         fetch_outcome.branch_count(),
         &branches_with_commits,
     );
+
+    let mut files = 0;
+    let mut worktree_bytes = 0;
+    if opts.checkout && !bare {
+        if let CloneCheckout::CheckedOut(checkout_oid) = checkout {
+            (files, worktree_bytes) = perform_clone_checkout(&repo, checkout_oid, progress)
+                .map_err(CloneError::Library)?;
+        }
+    } else if matches!(checkout, CloneCheckout::CheckedOut(_)) {
+        checkout = CloneCheckout::Skipped;
+    }
 
     Ok(CloneOutcome {
         url: opts.url.clone(),
@@ -341,7 +395,37 @@ pub fn clone(
         transfer: fetch_outcome.transfer,
         branches: fetch_outcome.branch_count(),
         tags: fetch_outcome.tag_count(),
+        files,
+        worktree_bytes,
+        bare,
     })
+}
+
+fn perform_clone_checkout(
+    repo: &Repository,
+    commit: ObjectId,
+    progress: &mut dyn Progress,
+) -> Result<(u64, u64)> {
+    let tree = crate::diff::tree_oid_of_commit_in_repo(repo, &commit)?;
+    crate::porcelain::checkout::checkout_between_trees_with_progress(repo, None, &tree, progress)?;
+    let index = repo.index_handle().load()?;
+    let entries = index.entries();
+    let files = u64::try_from(entries.len()).unwrap_or(u64::MAX);
+    let worktree_bytes = entries.iter().map(|e| u64::from(e.size)).sum();
+    Ok((files, worktree_bytes))
+}
+
+fn local_branch_names_with_commits(repo: &Repository) -> Vec<String> {
+    refs::list_refs(repo.git_dir(), "refs/heads/")
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|(name, oid)| {
+            if oid.is_zero() {
+                return None;
+            }
+            name.strip_prefix("refs/heads/").map(str::to_owned)
+        })
+        .collect()
 }
 
 fn remote_branch_names_with_commits(repo: &Repository, remote_name: &str) -> Vec<String> {
@@ -397,10 +481,16 @@ fn clone_initial_fetch_refspec(
             &opts.url,
             &opts.initial_branch,
         )?;
+        if opts.bare {
+            return Ok(format!("+refs/heads/{branch}:refs/heads/{branch}"));
+        }
         return Ok(format!(
             "+refs/heads/{branch}:refs/remotes/{}/{}",
             opts.remote_name, branch
         ));
+    }
+    if opts.bare {
+        return Ok("+refs/heads/*:refs/heads/*".to_owned());
     }
     Ok(format!("+refs/heads/*:refs/remotes/{}/*", opts.remote_name))
 }
@@ -479,6 +569,7 @@ fn choose_clone_default_branch(
     url: &str,
     remote_name: &str,
     initial_branch: &str,
+    bare: bool,
 ) -> String {
     if let Some(advertised) = fetch_outcome.default_branch.as_deref() {
         let name = advertised.strip_prefix("refs/heads/").unwrap_or(advertised);
@@ -495,13 +586,21 @@ fn choose_clone_default_branch(
             }
         }
     };
-    push(pick_default_branch(repo, remote_name));
+    if bare {
+        push(pick_default_branch_bare(repo));
+    } else {
+        push(pick_default_branch(repo, remote_name));
+    }
     push(default_branch_from_local_remote(url, repo));
     push(Some(initial_branch.to_owned()));
 
     for name in &candidates {
-        let tracking = format!("refs/remotes/{remote_name}/{name}");
-        if refs::resolve_ref(repo.git_dir(), &tracking).is_ok() {
+        let resolved = if bare {
+            format!("refs/heads/{name}")
+        } else {
+            format!("refs/remotes/{remote_name}/{name}")
+        };
+        if refs::resolve_ref(repo.git_dir(), &resolved).is_ok() {
             return name.clone();
         }
     }
@@ -509,6 +608,18 @@ fn choose_clone_default_branch(
         .into_iter()
         .next()
         .unwrap_or_else(|| initial_branch.to_owned())
+}
+
+fn pick_default_branch_bare(repo: &Repository) -> Option<String> {
+    for candidate in ["main", "master"] {
+        if refs::resolve_ref(repo.git_dir(), &format!("refs/heads/{candidate}")).is_ok() {
+            return Some(candidate.to_owned());
+        }
+    }
+    refs::list_refs(repo.git_dir(), "refs/heads/")
+        .ok()?
+        .into_iter()
+        .find_map(|(name, _)| name.strip_prefix("refs/heads/").map(str::to_owned))
 }
 
 fn default_branch_from_local_remote(url: &str, repo: &Repository) -> Option<String> {
@@ -819,12 +930,16 @@ mod tests {
     #[test]
     fn derive_clone_dir_windows_style_paths() {
         assert_eq!(
-            derive_clone_dir(r"..\..\origin.git").expect("name"),
+            derive_clone_dir(r"..\..\origin.git", false).expect("name"),
             "origin"
         );
         assert_eq!(
-            derive_clone_dir(r"C:\scratch\a\origin.git").expect("name"),
+            derive_clone_dir(r"C:\scratch\a\origin.git", false).expect("name"),
             "origin"
+        );
+        assert_eq!(
+            derive_clone_dir(r"..\..\origin.git", true).expect("name"),
+            "origin.git"
         );
     }
 

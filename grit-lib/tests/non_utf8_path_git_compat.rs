@@ -246,10 +246,7 @@ fn non_utf8_tracked_status_diff_add_clone_and_restore() {
             url: r1.to_string_lossy().into_owned(),
             dest: clone_dest.clone(),
             environment: Environment::capture_process(),
-            remote_name: grit_lib::remote::DEFAULT_REMOTE.to_owned(),
-            initial_branch: "main".to_owned(),
-            thread_policy: grit_lib::parallel::ThreadPolicy::default(),
-            depth: None,
+            ..CloneOptions::new("", clone_dest.clone())
         },
         &mut NoProgress,
         None,

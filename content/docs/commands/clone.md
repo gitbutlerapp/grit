@@ -8,7 +8,7 @@ order: 2
 ## Synopsis
 
 ```text
-grit clone <url> [<dir>] [--shallow]
+grit clone <url> [<dir>] [--shallow] [--bare] [--no-checkout]
 ```
 
 ## Description
@@ -42,6 +42,8 @@ When the remote advertises a default branch that has no commits yet but other br
 
 Pass `--shallow` for the same result as `git clone --depth=1`: only the remote's default branch is fetched (single-branch), with a `.git/shallow` boundary at its tip. Other branches are not downloaded until you fetch them explicitly. Later [`grit fetch`](../fetch/) respects the shallow boundary.
 
+`--bare` creates a bare repository at the destination (the directory itself is the git directory, named with a `.git` suffix when the URL is derived automatically), fetches `refs/heads/*` and tags directly, and configures only `remote.<name>.url` — matching `git clone --bare`. `--no-checkout` fetches and sets `HEAD` to the default branch without writing the index or work tree files, matching `git clone --no-checkout`.
+
 You can also clone from a shallow repository (including one created with `git clone --depth`); grit copies the shallow boundary into the new repository so history matches the source.
 
 Working-tree materialization after fetch uses the same parallel checkout path as [`grit switch`](../switch/). Configure [`checkout.workers`](../../library/parallelism.md) and `checkout.thresholdForParallelism` in the repository config, or pass global [`--threads`](../global-options.md) to override worker count for this process.
@@ -61,6 +63,8 @@ Object ids in received packs use plain SHA-1 like Git, so repositories such as `
 | `<url>` | The repository to clone: a URL or a local path. |
 | `<dir>` | The directory to clone into. Defaults to the repository's name. |
 | `--shallow` | Shallow clone of the default branch only (`git clone --depth=1`). |
+| `--bare` | Bare repository; no working tree (`git clone --bare`). |
+| `--no-checkout` | Fetch refs but do not check out files (`git clone --no-checkout`). |
 
 ## Examples
 
@@ -128,7 +132,8 @@ Pass `--json` for stable, scripting-friendly output:
 | `worktree_bytes` | integer | Total size of the checked-out files. |
 | `seconds` | number | Wall-clock seconds for the whole clone. |
 | `phases` | array | Time spent in each step, in order: `phase` (`receiving`, `indexing`, `resolving_deltas`, `copying` or `checkout`), `unit` (`bytes`, `objects` or `files`), `count` and `seconds`. Steps that processed nothing are left out. |
-| `no_checkout_reason` | string or omitted | When no files were checked out: `empty_remote` (nothing on the remote) or `unborn_default_branch` (default branch unborn but other refs may exist). Omitted when checkout succeeded. |
+| `bare` | boolean | `true` when `--bare` was used. |
+| `no_checkout_reason` | string or omitted | When no files were checked out: `empty_remote`, `unborn_default_branch`, `bare`, or `no_checkout`. Omitted when checkout succeeded. |
 | `branches_with_commits` | array of strings | Remote branch names that have commits when `no_checkout_reason` is `unborn_default_branch`. Omitted when empty. |
 
 Example (repository with commits):
