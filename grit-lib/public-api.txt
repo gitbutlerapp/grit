@@ -11878,8 +11878,8 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::hunk_select::
 pub fn grit_lib::porcelain::hunk_select::parse_hunk_id_list(&[alloc::string::String]) -> core::result::Result<grit_lib::porcelain::hunk_select::HunkSelection, grit_lib::porcelain::hunk_select::HunkSelectError>
 pub fn grit_lib::porcelain::hunk_select::report_unstaged_hunk_selection(&grit_lib::repo::Repository, &grit_lib::porcelain::hunk_select::HunkSelection, &[alloc::string::String]) -> core::result::Result<grit_lib::porcelain::hunk_select::HunkSelectionReport, grit_lib::porcelain::hunk_select::HunkSelectError>
 pub fn grit_lib::porcelain::hunk_select::resolve_selection(&grit_lib::repo::Repository, grit_lib::diff::hunk_id::DiffSide, &grit_lib::porcelain::hunk_select::HunkSelection, &[alloc::string::String]) -> core::result::Result<alloc::vec::Vec<grit_lib::apply::FilePatch>, grit_lib::porcelain::hunk_select::HunkSelectError>
-pub fn grit_lib::porcelain::hunk_select::reverse_apply_patches_to_worktree(&grit_lib::repo::Repository, &[grit_lib::apply::FilePatch], &grit_lib::porcelain::hunk_select::WorktreeReverseApplyOptions) -> core::result::Result<(), grit_lib::error::ApplyError>
 pub fn grit_lib::porcelain::hunk_select::restore_hunks(&grit_lib::repo::Repository, &grit_lib::porcelain::hunk_select::HunkSelection, &[alloc::string::String], bool, bool, bool) -> core::result::Result<grit_lib::porcelain::hunk_select::RestoreHunksOutcome, grit_lib::porcelain::hunk_select::HunkSelectError>
+pub fn grit_lib::porcelain::hunk_select::reverse_apply_patches_to_worktree(&grit_lib::repo::Repository, &[grit_lib::apply::FilePatch], &grit_lib::porcelain::hunk_select::WorktreeReverseApplyOptions) -> core::result::Result<(), grit_lib::error::ApplyError>
 pub fn grit_lib::porcelain::hunk_select::stage_hunks(&grit_lib::repo::Repository, grit_lib::diff::hunk_id::DiffSide, &grit_lib::porcelain::hunk_select::HunkSelection, &[alloc::string::String], bool) -> core::result::Result<grit_lib::porcelain::hunk_select::StageHunksOutcome, grit_lib::porcelain::hunk_select::HunkSelectError>
 pub fn grit_lib::porcelain::hunk_select::unstaged_file_diffs(&grit_lib::repo::Repository, &[alloc::string::String]) -> core::result::Result<alloc::vec::Vec<(grit_lib::diff::FileDiff, alloc::vec::Vec<grit_lib::diff::structured::StructuredHunk>)>, grit_lib::error::Error>
 pub mod grit_lib::porcelain::index_mode
@@ -13030,6 +13030,7 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::stash::StashEntry
 pub struct grit_lib::porcelain::stash::StashPushResult
 pub grit_lib::porcelain::stash::StashPushResult::message: alloc::string::String
 pub grit_lib::porcelain::stash::StashPushResult::oid: grit_lib::objects::ObjectId
+pub grit_lib::porcelain::stash::StashPushResult::w_tree: grit_lib::objects::ObjectId
 impl core::clone::Clone for grit_lib::stash::StashPushResult
 pub fn grit_lib::stash::StashPushResult::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::stash::StashPushResult
@@ -22182,6 +22183,7 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::stash::StashEntry
 pub struct grit_lib::stash::StashPushResult
 pub grit_lib::stash::StashPushResult::message: alloc::string::String
 pub grit_lib::stash::StashPushResult::oid: grit_lib::objects::ObjectId
+pub grit_lib::stash::StashPushResult::w_tree: grit_lib::objects::ObjectId
 impl core::clone::Clone for grit_lib::stash::StashPushResult
 pub fn grit_lib::stash::StashPushResult::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::stash::StashPushResult
