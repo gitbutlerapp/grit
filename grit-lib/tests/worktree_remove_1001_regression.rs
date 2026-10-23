@@ -21,7 +21,9 @@ use grit_lib::progress::NullProgress;
 use grit_lib::refs::{update_branch_for_commit_with_config, BranchCommitRefUpdate};
 use grit_lib::repo::Repository;
 use grit_lib::worktree::worktree_rules::WorktreeRules;
-use grit_lib::worktree::{add_linked_worktree, remove_linked_worktree, AddLinkedWorktreeOptions};
+use grit_lib::worktree::{
+    add_linked_worktree, remove_linked_worktree, AddLinkedWorktreeOptions, WorktreeBranch,
+};
 use grit_test_support::git;
 
 fn commit_request(message: &str) -> CommitRequest {
@@ -61,11 +63,12 @@ fn linked_worktree_fixture() -> (tempfile::TempDir, PathBuf, PathBuf, Repository
         &main_repo,
         &AddLinkedWorktreeOptions {
             path: linked.clone(),
-            branch: Some("linked".to_owned()),
-            new_branch: true,
-            detach: false,
+            branch: Some(WorktreeBranch::Create("linked".to_owned())),
             start_point: Some("HEAD".to_owned()),
             force: false,
+            lock: None,
+            no_checkout: false,
+            track: false,
         },
     )
     .expect("add linked");

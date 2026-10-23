@@ -23912,12 +23912,13 @@ impl core::marker::UnsafeUnpin for grit_lib::worktree::worktree_rules::WorktreeR
 impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::worktree::worktree_rules::WorktreeRules
 impl !core::panic::unwind_safe::UnwindSafe for grit_lib::worktree::worktree_rules::WorktreeRules
 pub struct grit_lib::worktree::AddLinkedWorktreeOptions
-pub grit_lib::worktree::AddLinkedWorktreeOptions::branch: core::option::Option<alloc::string::String>
-pub grit_lib::worktree::AddLinkedWorktreeOptions::detach: bool
+pub grit_lib::worktree::AddLinkedWorktreeOptions::branch: core::option::Option<grit_lib::worktree::WorktreeBranch>
 pub grit_lib::worktree::AddLinkedWorktreeOptions::force: bool
-pub grit_lib::worktree::AddLinkedWorktreeOptions::new_branch: bool
+pub grit_lib::worktree::AddLinkedWorktreeOptions::lock: core::option::Option<grit_lib::worktree::LockWorktreeOptions>
+pub grit_lib::worktree::AddLinkedWorktreeOptions::no_checkout: bool
 pub grit_lib::worktree::AddLinkedWorktreeOptions::path: std::path::PathBuf
 pub grit_lib::worktree::AddLinkedWorktreeOptions::start_point: core::option::Option<alloc::string::String>
+pub grit_lib::worktree::AddLinkedWorktreeOptions::track: bool
 impl core::clone::Clone for grit_lib::worktree::AddLinkedWorktreeOptions
 pub fn grit_lib::worktree::AddLinkedWorktreeOptions::clone(&self) -> Self
 impl core::fmt::Debug for grit_lib::worktree::AddLinkedWorktreeOptions
@@ -23980,7 +23981,80 @@ pub fn grit_lib::worktree::ensure_branch_not_checked_out_in_any_worktree(&grit_l
 pub fn grit_lib::worktree::find_worktree_with_branch_checked_out(&grit_lib::repo::Repository, &str, core::option::Option<&std::path::Path>) -> grit_lib::error::Result<core::option::Option<grit_lib::worktree::BranchWorktreeCheckout>>
 pub fn grit_lib::worktree::is_bare_repository(&std::path::Path) -> bool
 pub fn grit_lib::worktree::list_worktrees(&grit_lib::repo::Repository) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::worktree::WorktreeEntry>>
-pub fn grit_lib::worktree::prune_linked_worktrees(&grit_lib::repo::Repository) -> grit_lib::error::Result<alloc::vec::Vec<std::path::PathBuf>>
+pub struct grit_lib::worktree::LockWorktreeOptions
+pub grit_lib::worktree::LockWorktreeOptions::reason: core::option::Option<alloc::string::String>
+impl core::clone::Clone for grit_lib::worktree::LockWorktreeOptions
+pub fn grit_lib::worktree::LockWorktreeOptions::clone(&self) -> Self
+impl core::default::Default for grit_lib::worktree::LockWorktreeOptions
+pub fn grit_lib::worktree::LockWorktreeOptions::default() -> Self
+impl core::fmt::Debug for grit_lib::worktree::LockWorktreeOptions
+pub fn grit_lib::worktree::LockWorktreeOptions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::worktree::LockWorktreeOptions
+impl core::marker::Send for grit_lib::worktree::LockWorktreeOptions
+impl core::marker::Sync for grit_lib::worktree::LockWorktreeOptions
+impl core::marker::Unpin for grit_lib::worktree::LockWorktreeOptions
+impl core::marker::UnsafeUnpin for grit_lib::worktree::LockWorktreeOptions
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::worktree::LockWorktreeOptions
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::worktree::LockWorktreeOptions
+pub struct grit_lib::worktree::PruneWorktreesOptions
+pub grit_lib::worktree::PruneWorktreesOptions::dry_run: bool
+impl core::clone::Clone for grit_lib::worktree::PruneWorktreesOptions
+pub fn grit_lib::worktree::PruneWorktreesOptions::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::worktree::PruneWorktreesOptions
+impl core::cmp::PartialEq for grit_lib::worktree::PruneWorktreesOptions
+pub fn grit_lib::worktree::PruneWorktreesOptions::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::worktree::PruneWorktreesOptions
+pub fn grit_lib::worktree::PruneWorktreesOptions::default() -> Self
+impl core::fmt::Debug for grit_lib::worktree::PruneWorktreesOptions
+pub fn grit_lib::worktree::PruneWorktreesOptions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::worktree::PruneWorktreesOptions
+impl core::marker::StructuralPartialEq for grit_lib::worktree::PruneWorktreesOptions
+impl core::marker::Freeze for grit_lib::worktree::PruneWorktreesOptions
+impl core::marker::Send for grit_lib::worktree::PruneWorktreesOptions
+impl core::marker::Sync for grit_lib::worktree::PruneWorktreesOptions
+impl core::marker::Unpin for grit_lib::worktree::PruneWorktreesOptions
+impl core::marker::UnsafeUnpin for grit_lib::worktree::PruneWorktreesOptions
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::worktree::PruneWorktreesOptions
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::worktree::PruneWorktreesOptions
+pub struct grit_lib::worktree::PrunedWorktreeEntry
+pub grit_lib::worktree::PrunedWorktreeEntry::path: std::path::PathBuf
+pub grit_lib::worktree::PrunedWorktreeEntry::reason: alloc::string::String
+impl core::clone::Clone for grit_lib::worktree::PrunedWorktreeEntry
+pub fn grit_lib::worktree::PrunedWorktreeEntry::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::worktree::PrunedWorktreeEntry
+impl core::cmp::PartialEq for grit_lib::worktree::PrunedWorktreeEntry
+pub fn grit_lib::worktree::PrunedWorktreeEntry::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::worktree::PrunedWorktreeEntry
+pub fn grit_lib::worktree::PrunedWorktreeEntry::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::worktree::PrunedWorktreeEntry
+impl core::marker::Freeze for grit_lib::worktree::PrunedWorktreeEntry
+impl core::marker::Send for grit_lib::worktree::PrunedWorktreeEntry
+impl core::marker::Sync for grit_lib::worktree::PrunedWorktreeEntry
+impl core::marker::Unpin for grit_lib::worktree::PrunedWorktreeEntry
+impl core::marker::UnsafeUnpin for grit_lib::worktree::PrunedWorktreeEntry
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::worktree::PrunedWorktreeEntry
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::worktree::PrunedWorktreeEntry
+pub enum grit_lib::worktree::WorktreeBranch
+pub grit_lib::worktree::WorktreeBranch::Create(alloc::string::String)
+pub grit_lib::worktree::WorktreeBranch::CreateOrReset(alloc::string::String)
+pub grit_lib::worktree::WorktreeBranch::Detach
+pub grit_lib::worktree::WorktreeBranch::Existing(alloc::string::String)
+impl core::clone::Clone for grit_lib::worktree::WorktreeBranch
+pub fn grit_lib::worktree::WorktreeBranch::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::worktree::WorktreeBranch
+impl core::cmp::PartialEq for grit_lib::worktree::WorktreeBranch
+pub fn grit_lib::worktree::WorktreeBranch::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::worktree::WorktreeBranch
+pub fn grit_lib::worktree::WorktreeBranch::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::worktree::WorktreeBranch
+impl core::marker::Freeze for grit_lib::worktree::WorktreeBranch
+impl core::marker::Send for grit_lib::worktree::WorktreeBranch
+impl core::marker::Sync for grit_lib::worktree::WorktreeBranch
+impl core::marker::Unpin for grit_lib::worktree::WorktreeBranch
+impl core::marker::UnsafeUnpin for grit_lib::worktree::WorktreeBranch
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::worktree::WorktreeBranch
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::worktree::WorktreeBranch
+pub fn grit_lib::worktree::prune_linked_worktrees(&grit_lib::repo::Repository, &grit_lib::worktree::PruneWorktreesOptions) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::worktree::PrunedWorktreeEntry>>
 pub fn grit_lib::worktree::read_worktree_path(&std::path::Path) -> grit_lib::error::Result<std::path::PathBuf>
 pub fn grit_lib::worktree::registered_worktree_count(&std::path::Path) -> usize
 pub fn grit_lib::worktree::remove_linked_worktree(&grit_lib::repo::Repository, &std::path::Path, bool) -> grit_lib::error::Result<()>

@@ -5,17 +5,17 @@ expression: payload
 {
   "human": {
     "exit": 0,
-    "stdout": "Pruned worktree [REPO]/gone-wt\n",
+    "stdout": "Pruned worktree [REPO]/gone-wt (gitdir file points to non-existent location)\n",
     "stderr": ""
   },
   "json": {
     "exit": 0,
-    "stdout": "{\"action\":\"prune\",\"pruned\":[\"[REPO]/gone-wt\"]}\n",
+    "stdout": "{\"action\":\"prune\",\"dry_run\":false,\"pruned\":[{\"path\":\"[REPO]/gone-wt\",\"reason\":\"gitdir file points to non-existent location\"}]}\n",
     "stderr": ""
   },
   "markdown": {
     "exit": 0,
-    "stdout": "## Worktree prune\n\n- Pruned **`[REPO]/gone-wt`**\n",
+    "stdout": "## Worktree prune\n\n- Pruned **`[REPO]/gone-wt`** · gitdir file points to non-existent location\n",
     "stderr": ""
   }
 }

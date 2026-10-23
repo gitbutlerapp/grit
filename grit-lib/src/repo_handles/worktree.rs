@@ -9,12 +9,7 @@ use crate::worktree::{
     WorktreeEntry,
 };
 
-/// Options for [`RepositoryWorktrees::lock`].
-#[derive(Debug, Clone, Default)]
-pub struct LockWorktreeOptions {
-    /// Optional reason stored in the `locked` file (shown by `git worktree list`).
-    pub reason: Option<String>,
-}
+pub use crate::worktree::LockWorktreeOptions;
 
 /// Worktree listing and linked-worktree mutations for one open repository.
 #[derive(Debug, Copy, Clone)]
@@ -71,11 +66,12 @@ impl<'repo> RepositoryWorktrees<'repo> {
     /// # let repo = grit_lib::repo::Repository::discover(None, &grit_lib::config::environment::RepositoryOptions::empty())?;
     /// let opts = AddLinkedWorktreeOptions {
     ///     path: PathBuf::from("/tmp/wt"),
-    ///     branch: Some("feature".into()),
-    ///     new_branch: true,
-    ///     detach: false,
+    ///     branch: Some(grit_lib::worktree::WorktreeBranch::Create("feature".into())),
     ///     start_point: None,
     ///     force: false,
+    ///     lock: None,
+    ///     no_checkout: false,
+    ///     track: false,
     /// };
     /// let _ = repo.worktrees().add(&opts);
     /// # Ok(())

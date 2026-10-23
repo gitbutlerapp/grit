@@ -6,6 +6,7 @@ use grit_lib::objects::ObjectKind;
 use grit_lib::repo::Repository;
 use grit_lib::worktree::{
     add_linked_worktree, list_worktrees, prune_linked_worktrees, AddLinkedWorktreeOptions,
+    WorktreeBranch,
 };
 use std::process::Command;
 
@@ -40,11 +41,12 @@ fn missing_registered_worktree_rejects_duplicate_add() {
         &repo,
         &AddLinkedWorktreeOptions {
             path: wt.clone(),
-            branch: Some("feat9".into()),
-            new_branch: true,
-            detach: false,
+            branch: Some(WorktreeBranch::Create("feat9".into())),
             start_point: Some("HEAD".into()),
             force: false,
+            lock: None,
+            no_checkout: false,
+            track: false,
         },
     )
     .expect("first add");
@@ -60,11 +62,12 @@ fn missing_registered_worktree_rejects_duplicate_add() {
         &repo,
         &AddLinkedWorktreeOptions {
             path: wt.clone(),
-            branch: Some("feat10".into()),
-            new_branch: true,
-            detach: false,
+            branch: Some(WorktreeBranch::Create("feat10".into())),
             start_point: Some("HEAD".into()),
             force: false,
+            lock: None,
+            no_checkout: false,
+            track: false,
         },
     )
     .expect_err("must not register a second admin dir");
@@ -80,11 +83,12 @@ fn missing_registered_worktree_rejects_duplicate_add() {
         &repo,
         &AddLinkedWorktreeOptions {
             path: wt.clone(),
-            branch: Some("feat10".into()),
-            new_branch: true,
-            detach: false,
+            branch: Some(WorktreeBranch::Create("feat10".into())),
             start_point: Some("HEAD".into()),
             force: true,
+            lock: None,
+            no_checkout: false,
+            track: false,
         },
     )
     .expect("force add");
@@ -128,11 +132,12 @@ fn forced_add_keeps_stale_registration_when_validation_fails() {
         &repo,
         &AddLinkedWorktreeOptions {
             path: wt.clone(),
-            branch: Some("feat9".into()),
-            new_branch: true,
-            detach: false,
+            branch: Some(WorktreeBranch::Create("feat9".into())),
             start_point: Some("HEAD".into()),
             force: false,
+            lock: None,
+            no_checkout: false,
+            track: false,
         },
     )
     .expect("first add");
@@ -142,11 +147,12 @@ fn forced_add_keeps_stale_registration_when_validation_fails() {
         &repo,
         &AddLinkedWorktreeOptions {
             path: wt.clone(),
-            branch: Some("feat10".into()),
-            new_branch: true,
-            detach: false,
+            branch: Some(WorktreeBranch::Create("feat10".into())),
             start_point: Some("no-such-revision".into()),
             force: true,
+            lock: None,
+            no_checkout: false,
+            track: false,
         },
     )
     .expect_err("invalid revision must not drop stale registration");
@@ -186,11 +192,12 @@ fn forced_add_restores_stale_registration_when_checkout_fails() {
         &repo,
         &AddLinkedWorktreeOptions {
             path: wt.clone(),
-            branch: Some("feat9".into()),
-            new_branch: true,
-            detach: false,
+            branch: Some(WorktreeBranch::Create("feat9".into())),
             start_point: Some("HEAD".into()),
             force: false,
+            lock: None,
+            no_checkout: false,
+            track: false,
         },
     )
     .expect("first add");
@@ -214,11 +221,12 @@ fn forced_add_restores_stale_registration_when_checkout_fails() {
         &repo,
         &AddLinkedWorktreeOptions {
             path: wt.clone(),
-            branch: Some("feat10".into()),
-            new_branch: true,
-            detach: false,
+            branch: Some(WorktreeBranch::Create("feat10".into())),
             start_point: Some(bad_commit.to_hex()),
             force: true,
+            lock: None,
+            no_checkout: false,
+            track: false,
         },
     )
     .expect_err("checkout must fail on missing blob");
@@ -265,17 +273,20 @@ fn prune_drops_missing_worktree_registration() {
         &repo,
         &AddLinkedWorktreeOptions {
             path: wt.clone(),
-            branch: Some("side".into()),
-            new_branch: true,
-            detach: false,
+            branch: Some(WorktreeBranch::Create("side".into())),
             start_point: Some("HEAD".into()),
             force: false,
+            lock: None,
+            no_checkout: false,
+            track: false,
         },
     )
     .unwrap();
     std::fs::remove_dir_all(&wt).unwrap();
 
-    let pruned = prune_linked_worktrees(&repo).expect("prune");
+    let pruned =
+        prune_linked_worktrees(&repo, &grit_lib::worktree::PruneWorktreesOptions::default())
+            .expect("prune");
     assert_eq!(pruned.len(), 1);
     assert_eq!(list_worktrees(&repo).unwrap().len(), 1);
 }

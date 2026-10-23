@@ -5,7 +5,7 @@ use grit_lib::repo::Repository;
 use grit_lib::worktree::{
     add_linked_worktree, ensure_branch_not_checked_out_elsewhere,
     find_worktree_with_branch_checked_out, list_worktrees, remove_linked_worktree,
-    AddLinkedWorktreeOptions,
+    AddLinkedWorktreeOptions, WorktreeBranch,
 };
 use grit_test_support::git;
 use std::fs;
@@ -36,11 +36,12 @@ fn add_detach_linked_worktree_and_list_locked_state() {
         &Repository::discover(Some(main.as_path()), &RepositoryOptions::empty()).expect("discover"),
         &AddLinkedWorktreeOptions {
             path: linked.clone(),
-            branch: None,
-            new_branch: false,
-            detach: true,
+            branch: Some(WorktreeBranch::Detach),
             start_point: Some("HEAD".into()),
             force: false,
+            lock: None,
+            no_checkout: false,
+            track: false,
         },
     )
     .expect("detach add");
@@ -88,11 +89,12 @@ fn add_worktree_on_existing_branch() {
         &Repository::discover(Some(main.as_path()), &RepositoryOptions::empty()).expect("discover"),
         &AddLinkedWorktreeOptions {
             path: linked.clone(),
-            branch: Some("feature".into()),
-            new_branch: false,
-            detach: false,
+            branch: Some(WorktreeBranch::Existing("feature".into())),
             start_point: None,
             force: false,
+            lock: None,
+            no_checkout: false,
+            track: false,
         },
     )
     .expect("existing branch checkout");
@@ -114,11 +116,12 @@ fn remove_dirty_worktree_requires_force() {
         &Repository::discover(Some(main.as_path()), &RepositoryOptions::empty()).expect("discover"),
         &AddLinkedWorktreeOptions {
             path: linked.clone(),
-            branch: Some("dirty".into()),
-            new_branch: true,
-            detach: false,
+            branch: Some(WorktreeBranch::Create("dirty".into())),
             start_point: Some("HEAD".into()),
             force: false,
+            lock: None,
+            no_checkout: false,
+            track: false,
         },
     )
     .expect("add");
@@ -144,11 +147,12 @@ fn second_worktree_same_branch_is_rejected() {
         &Repository::discover(Some(main.as_path()), &RepositoryOptions::empty()).expect("discover"),
         &AddLinkedWorktreeOptions {
             path: first.clone(),
-            branch: Some("shared".into()),
-            new_branch: true,
-            detach: false,
+            branch: Some(WorktreeBranch::Create("shared".into())),
             start_point: Some("HEAD".into()),
             force: false,
+            lock: None,
+            no_checkout: false,
+            track: false,
         },
     )
     .expect("first");
@@ -158,11 +162,12 @@ fn second_worktree_same_branch_is_rejected() {
         &Repository::discover(Some(main.as_path()), &RepositoryOptions::empty()).expect("discover"),
         &AddLinkedWorktreeOptions {
             path: second,
-            branch: Some("shared".into()),
-            new_branch: false,
-            detach: false,
+            branch: Some(WorktreeBranch::Existing("shared".into())),
             start_point: None,
             force: false,
+            lock: None,
+            no_checkout: false,
+            track: false,
         },
     )
     .is_err());

@@ -4,6 +4,7 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::repo::Repository;
 use grit_lib::worktree::{
     add_linked_worktree, list_worktrees, remove_linked_worktree, AddLinkedWorktreeOptions,
+    WorktreeBranch,
 };
 use std::process::Command;
 
@@ -39,11 +40,12 @@ fn grit_add_and_remove_linked_worktree_git_list() {
         &repo,
         &AddLinkedWorktreeOptions {
             path: linked.clone(),
-            branch: Some("linked".to_owned()),
-            new_branch: true,
-            detach: false,
+            branch: Some(WorktreeBranch::Create("linked".to_owned())),
             start_point: Some("HEAD".to_owned()),
             force: false,
+            lock: None,
+            no_checkout: false,
+            track: false,
         },
     )
     .expect("add worktree");

@@ -154,7 +154,7 @@ URLs can be `https://`, `ssh://`, `user@host:path`, `git://`, `file://` or a loc
 | Task | Command |
 | --- | --- |
 | Offline pack transfer | `grit bundle create`, `verify`, `list`, `unbundle` |
-| Extra working trees | `grit worktree list`, `add`, `remove`, `lock`, `unlock`, `prune` |
+| Extra working trees | `grit worktree list`, `add` (`-b`, `-B`, `--detach`, `--lock`, `--no-checkout`, `--track`), `remove`, `lock`, `unlock`, `prune` (`--dry-run`) |
 
 ## Tags and config
 

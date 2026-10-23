@@ -8,7 +8,9 @@ use grit_lib::porcelain::add::{stage, StageOptions};
 use grit_lib::porcelain::commit::{create_commit, CommitRequest, HookPolicy};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
-use grit_lib::worktree::{add_linked_worktree, remove_linked_worktree, AddLinkedWorktreeOptions};
+use grit_lib::worktree::{
+    add_linked_worktree, remove_linked_worktree, AddLinkedWorktreeOptions, WorktreeBranch,
+};
 use grit_test_support::git_cmd as git_shell;
 
 fn write_system_autocrlf_config(dir: &Path) -> PathBuf {
@@ -84,11 +86,12 @@ fn remove_linked_worktree_with_system_inherited_autocrlf_and_crlf_worktree_file(
         &main_repo,
         &AddLinkedWorktreeOptions {
             path: linked.clone(),
-            branch: Some("f".to_owned()),
-            new_branch: true,
-            detach: false,
+            branch: Some(WorktreeBranch::Create("f".to_owned())),
             start_point: Some("HEAD".to_owned()),
             force: false,
+            lock: None,
+            no_checkout: false,
+            track: false,
         },
     )
     .expect("worktree add");
@@ -137,11 +140,12 @@ fn remove_linked_worktree_windows_crlf_set_content() {
         &main_repo,
         &AddLinkedWorktreeOptions {
             path: linked.clone(),
-            branch: Some("f".to_owned()),
-            new_branch: true,
-            detach: false,
+            branch: Some(WorktreeBranch::Create("f".to_owned())),
             start_point: Some("HEAD".to_owned()),
             force: false,
+            lock: None,
+            no_checkout: false,
+            track: false,
         },
     )
     .expect("worktree add");

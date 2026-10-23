@@ -11,7 +11,7 @@ use std::process::Command;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::refs::reflog::read_reflog;
 use grit_lib::repo::Repository;
-use grit_lib::worktree::{add_linked_worktree, AddLinkedWorktreeOptions};
+use grit_lib::worktree::{add_linked_worktree, AddLinkedWorktreeOptions, WorktreeBranch};
 use grit_test_support::git;
 
 fn git_cmd(repo: &std::path::Path, args: &[&str]) -> String {
@@ -750,11 +750,12 @@ fn t3908_stash_in_linked_worktree() {
         &open_grit(&main),
         &AddLinkedWorktreeOptions {
             path: linked.clone(),
-            branch: Some("linked".into()),
-            new_branch: true,
-            detach: false,
+            branch: Some(WorktreeBranch::Create("linked".into())),
             start_point: Some("HEAD".into()),
             force: false,
+            lock: None,
+            no_checkout: false,
+            track: false,
         },
     )
     .expect("add worktree");

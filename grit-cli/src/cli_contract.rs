@@ -952,12 +952,6 @@ const EXCEPTIONS: &[(&str, ContractRule, &str, &str)] = &[
         "config set/unset has no `--dry-run` yet",
     ),
     (
-        "reset",
-        ContractRule::DryRun,
-        "workspace-extras",
-        "reset has no `--dry-run` yet",
-    ),
-    (
         "rm",
         ContractRule::DryRun,
         "workspace-extras",
@@ -1058,12 +1052,6 @@ const EXCEPTIONS: &[(&str, ContractRule, &str, &str)] = &[
         ContractRule::DryRun,
         "workspace-extras",
         "worktree remove has no `--dry-run` yet",
-    ),
-    (
-        "worktree.prune",
-        ContractRule::DryRun,
-        "workspace-extras",
-        "worktree prune has no `--dry-run` yet",
     ),
     (
         "worktree.lock",

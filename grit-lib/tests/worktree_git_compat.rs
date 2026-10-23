@@ -6,7 +6,7 @@ use grit_lib::repo::{init_worktree_config, Repository};
 use grit_lib::worktree::worktree_ref::{parse_worktree_ref, resolve_ref_storage, RefWorktreeType};
 use grit_lib::worktree::{
     add_linked_worktree, copy_filtered_worktree_config, list_worktrees, remove_linked_worktree,
-    AddLinkedWorktreeOptions,
+    AddLinkedWorktreeOptions, WorktreeBranch,
 };
 use grit_test_support::git;
 use std::fs;
@@ -50,11 +50,12 @@ fn t2400_worktree_admin_dir_roundtrip_with_git() {
         &open_grit(&main),
         &AddLinkedWorktreeOptions {
             path: grit_linked.clone(),
-            branch: Some("grit-wt".into()),
-            new_branch: true,
-            detach: false,
+            branch: Some(WorktreeBranch::Create("grit-wt".into())),
             start_point: Some("HEAD".into()),
             force: false,
+            lock: None,
+            no_checkout: false,
+            track: false,
         },
     )
     .expect("grit add");
@@ -111,11 +112,12 @@ fn t2404_worktree_config_matches_git() {
         &open_grit(&main),
         &AddLinkedWorktreeOptions {
             path: linked.clone(),
-            branch: Some("cfg-wt".into()),
-            new_branch: true,
-            detach: false,
+            branch: Some(WorktreeBranch::Create("cfg-wt".into())),
             start_point: Some("HEAD".into()),
             force: false,
+            lock: None,
+            no_checkout: false,
+            track: false,
         },
     )
     .expect("add");
@@ -158,11 +160,12 @@ fn t2402_worktree_list_matches_git_porcelain() {
         &open_grit(&main),
         &AddLinkedWorktreeOptions {
             path: linked.clone(),
-            branch: Some("list-wt".into()),
-            new_branch: true,
-            detach: false,
+            branch: Some(WorktreeBranch::Create("list-wt".into())),
             start_point: Some("HEAD".into()),
             force: false,
+            lock: None,
+            no_checkout: false,
+            track: false,
         },
     )
     .expect("add");
@@ -204,11 +207,12 @@ fn per_worktree_refs_resolve_like_git() {
         &open_grit(&main),
         &AddLinkedWorktreeOptions {
             path: linked.clone(),
-            branch: Some("ref-wt".into()),
-            new_branch: true,
-            detach: false,
+            branch: Some(WorktreeBranch::Create("ref-wt".into())),
             start_point: Some("HEAD".into()),
             force: false,
+            lock: None,
+            no_checkout: false,
+            track: false,
         },
     )
     .expect("add");
@@ -259,11 +263,12 @@ fn t2401_remove_linked_worktree_matches_git() {
         &open_grit(&main),
         &AddLinkedWorktreeOptions {
             path: grit_wt.clone(),
-            branch: Some("rm-wt".into()),
-            new_branch: true,
-            detach: false,
+            branch: Some(WorktreeBranch::Create("rm-wt".into())),
             start_point: Some("HEAD".into()),
             force: false,
+            lock: None,
+            no_checkout: false,
+            track: false,
         },
     )
     .expect("add");

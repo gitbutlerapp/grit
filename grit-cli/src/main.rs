@@ -492,14 +492,29 @@ enum WorktreeAction {
         #[arg(value_name = "REV")]
         start_point: Option<String>,
         /// Create and check out a new branch.
-        #[arg(short = 'b', long = "branch", value_name = "NAME")]
+        #[arg(short = 'b', long = "branch", value_name = "NAME", conflicts_with_all = ["force_branch", "detach"])]
         branch: Option<String>,
+        /// Create or reset a branch to the start point (`-B`).
+        #[arg(short = 'B', value_name = "NAME", conflicts_with_all = ["branch", "detach"])]
+        force_branch: Option<String>,
         /// Check out in detached HEAD mode.
-        #[arg(long = "detach")]
+        #[arg(long = "detach", conflicts_with_all = ["branch", "force_branch"])]
         detach: bool,
         /// Reuse a stale registration when the working tree directory is missing.
         #[arg(short, long)]
         force: bool,
+        /// Mark the new worktree locked before checkout finishes.
+        #[arg(long = "lock")]
+        lock: bool,
+        /// Reason stored in the lock file (requires `--lock`).
+        #[arg(long = "reason", requires = "lock")]
+        reason: Option<String>,
+        /// Register the worktree without populating files (HEAD only).
+        #[arg(long = "no-checkout")]
+        no_checkout: bool,
+        /// Set upstream when the start point is a remote-tracking branch.
+        #[arg(long = "track")]
+        track: bool,
     },
     /// Remove a linked worktree.
     Remove {
@@ -510,7 +525,11 @@ enum WorktreeAction {
         force: bool,
     },
     /// Drop registrations for linked worktrees whose directories are gone.
-    Prune,
+    Prune {
+        /// List prunable worktrees without removing registrations.
+        #[arg(long = "dry-run")]
+        dry_run: bool,
+    },
     /// Mark a linked worktree as locked (prevents accidental removal).
     Lock {
         /// Path to the linked worktree.
@@ -2510,27 +2529,35 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
                 path,
                 start_point,
                 branch,
+                force_branch,
                 detach,
                 force,
-            } => {
-                let new_branch = branch.is_some();
-                emit(
-                    &commands::worktree::run_add(
-                        path,
-                        start_point,
-                        branch,
-                        new_branch,
-                        detach,
-                        force,
-                    )?,
-                    opts,
-                    ctx,
-                )
-            }
+                lock,
+                reason,
+                no_checkout,
+                track,
+            } => emit(
+                &commands::worktree::run_add(
+                    path,
+                    start_point,
+                    branch,
+                    force_branch,
+                    detach,
+                    force,
+                    lock,
+                    reason,
+                    no_checkout,
+                    track,
+                )?,
+                opts,
+                ctx,
+            ),
             WorktreeAction::Remove { path, force } => {
                 emit(&commands::worktree::run_remove(path, force)?, opts, ctx)
             }
-            WorktreeAction::Prune => emit(&commands::worktree::run_prune()?, opts, ctx),
+            WorktreeAction::Prune { dry_run } => {
+                emit(&commands::worktree::run_prune(dry_run)?, opts, ctx)
+            }
             WorktreeAction::Lock { path, reason } => {
                 emit(&commands::worktree::run_lock(path, reason)?, opts, ctx)
             }

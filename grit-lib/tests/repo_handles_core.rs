@@ -11,7 +11,7 @@ use grit_lib::objects::ObjectKind;
 use grit_lib::refs::store::{MemoryRefStore, RefName, RefStorageFormat};
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::rev_list::RevListOptions;
-use grit_lib::worktree::{add_linked_worktree, AddLinkedWorktreeOptions};
+use grit_lib::worktree::{add_linked_worktree, AddLinkedWorktreeOptions, WorktreeBranch};
 
 mod support;
 
@@ -303,11 +303,12 @@ fn config_handle_set_local_linked_worktree_matches_git() {
         &open_grit_repo(main),
         &AddLinkedWorktreeOptions {
             path: linked.clone(),
-            branch: Some("linked".into()),
-            new_branch: true,
-            detach: false,
+            branch: Some(WorktreeBranch::Create("linked".into())),
             start_point: Some("HEAD".into()),
             force: false,
+            lock: None,
+            no_checkout: false,
+            track: false,
         },
     )
     .expect("add linked worktree");

@@ -2,6 +2,21 @@
   "$id": "https://grit-scm.com/schemas/worktree.add/v1.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "definitions": {
+    "PrunedWorktreeRow": {
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "reason": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "reason"
+      ],
+      "type": "object"
+    },
     "WorktreeRow": {
       "properties": {
         "bare": {
@@ -83,8 +98,14 @@
             "null"
           ]
         },
+        "checked_out": {
+          "type": "boolean"
+        },
         "head": {
           "type": "string"
+        },
+        "locked": {
+          "type": "boolean"
         },
         "path": {
           "type": "string"
@@ -92,7 +113,9 @@
       },
       "required": [
         "action",
+        "checked_out",
         "head",
+        "locked",
         "path"
       ],
       "type": "object"
@@ -123,15 +146,19 @@
           ],
           "type": "string"
         },
+        "dry_run": {
+          "type": "boolean"
+        },
         "pruned": {
           "items": {
-            "type": "string"
+            "$ref": "#/definitions/PrunedWorktreeRow"
           },
           "type": "array"
         }
       },
       "required": [
         "action",
+        "dry_run",
         "pruned"
       ],
       "type": "object"

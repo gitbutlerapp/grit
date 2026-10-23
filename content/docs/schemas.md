@@ -96,7 +96,7 @@ Plain command failures with `--json` validate against the shared [error schema](
 | `worktree.add` | [v1](/schemas/worktree.add/v1.json) |
 | `worktree.list` | [v1](/schemas/worktree.list/v1.json) |
 | `worktree.lock` | [v1](/schemas/worktree.lock/v1.json) |
-| `worktree.prune` | [v1](/schemas/worktree.prune/v1.json) |
+| `worktree.prune` | [v2](/schemas/worktree.prune/v2.json) |
 | `worktree.remove` | [v1](/schemas/worktree.remove/v1.json) |
 | `worktree.unlock` | [v1](/schemas/worktree.unlock/v1.json) |
 

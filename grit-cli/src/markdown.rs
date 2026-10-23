@@ -1275,7 +1275,13 @@ pub fn print_worktree_outcome(w: &mut dyn Write, outcome: &WorktreeOutcome) -> a
             outln!(w);
             print_worktree_table(w, worktrees)?;
         }
-        WorktreeOutcome::Add { path, branch, head } => {
+        WorktreeOutcome::Add {
+            path,
+            branch,
+            head,
+            locked,
+            checked_out,
+        } => {
             outln!(w, "## Worktree add");
             outln!(w);
             let short = short_hex(head);
@@ -1284,20 +1290,34 @@ pub fn print_worktree_outcome(w: &mut dyn Write, outcome: &WorktreeOutcome) -> a
             } else {
                 outln!(w, "- Created **`{path}`** (detached) · `{short}`");
             }
+            if *locked {
+                outln!(w, "- Locked during creation");
+            }
+            if !checked_out {
+                outln!(w, "- Registered without checkout (`--no-checkout`)");
+            }
         }
         WorktreeOutcome::Remove { path } => {
             outln!(w, "## Worktree remove");
             outln!(w);
             outln!(w, "- Removed **`{path}`**");
         }
-        WorktreeOutcome::Prune { pruned } => {
+        WorktreeOutcome::Prune { dry_run, pruned } => {
             outln!(w, "## Worktree prune");
             outln!(w);
+            if *dry_run {
+                outln!(w, "Dry run (no registrations removed).");
+                outln!(w);
+            }
             if pruned.is_empty() {
                 outln!(w, "No prunable worktrees.");
+            } else if *dry_run {
+                for row in pruned {
+                    outln!(w, "- Would prune **`{}`** · {}", row.path, row.reason);
+                }
             } else {
-                for path in pruned {
-                    outln!(w, "- Pruned **`{path}`**");
+                for row in pruned {
+                    outln!(w, "- Pruned **`{}`** · {}", row.path, row.reason);
                 }
             }
         }

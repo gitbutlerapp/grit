@@ -7,7 +7,7 @@ Working-tree behavior lives under [`worktree`](rustdoc:grit_lib::worktree): igno
 
 ## Linked worktrees (handle)
 
-`Repository::worktrees` returns `RepositoryWorktrees`: list main and linked checkouts, add/remove/lock linked worktrees with the same on-disk layout Git uses (`worktrees/` admin files, `gitdir` links). Options such as `AddLinkedWorktreeOptions` mirror the fields the CLI exposes.
+`Repository::worktrees` returns `RepositoryWorktrees`: list main and linked checkouts, add/remove/lock linked worktrees with the same on-disk layout Git uses (`worktrees/` admin files, `gitdir` links). [`AddLinkedWorktreeOptions`](rustdoc:grit_lib::worktree::AddLinkedWorktreeOptions) uses [`WorktreeBranch`](rustdoc:grit_lib::worktree::WorktreeBranch) for branch modes (`Create`, `CreateOrReset`, `Existing`, `Detach`), optional lock-before-checkout, `--no-checkout`, and `--track`. [`prune_linked_worktrees`](rustdoc:grit_lib::worktree::prune_linked_worktrees) accepts [`PruneWorktreesOptions`](rustdoc:grit_lib::worktree::PruneWorktreesOptions) and returns [`PrunedWorktreeEntry`](rustdoc:grit_lib::worktree::PrunedWorktreeEntry) rows with a reason string.
 
 ## Example
 

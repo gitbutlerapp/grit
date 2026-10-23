@@ -7,7 +7,8 @@ use grit_lib::repo_handles::LockWorktreeOptions;
 use grit_lib::state::HeadState;
 use grit_lib::worktree::{
     add_linked_worktree, list_worktrees, prune_linked_worktrees, remove_linked_worktree,
-    resolve_linked_worktree_add_path, AddLinkedWorktreeOptions,
+    resolve_linked_worktree_add_path, AddLinkedWorktreeOptions, PruneWorktreesOptions,
+    WorktreeBranch,
 };
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -30,12 +31,15 @@ pub enum WorktreeOutcome {
         path: String,
         branch: Option<String>,
         head: String,
+        locked: bool,
+        checked_out: bool,
     },
     Remove {
         path: String,
     },
     Prune {
-        pruned: Vec<String>,
+        dry_run: bool,
+        pruned: Vec<PrunedWorktreeRow>,
     },
     Lock {
         path: String,
@@ -60,6 +64,12 @@ pub struct WorktreeRow {
     #[schemars(skip_serializing_if = "Option::is_none")]
     pub lock_reason: Option<String>,
     pub prunable: bool,
+}
+
+#[derive(Serialize, JsonSchema)]
+pub struct PrunedWorktreeRow {
+    pub path: String,
+    pub reason: String,
 }
 
 impl HumanRender for WorktreeOutcome {
@@ -91,12 +101,16 @@ impl HumanRender for WorktreeOutcome {
                 }
             }
             WorktreeOutcome::Remove { path } => outln!(w, "Removed worktree {path}"),
-            WorktreeOutcome::Prune { pruned } => {
+            WorktreeOutcome::Prune { dry_run, pruned } => {
                 if pruned.is_empty() {
                     outln!(w, "No prunable worktrees");
+                } else if *dry_run {
+                    for row in pruned {
+                        outln!(w, "Would prune worktree {} ({})", row.path, row.reason);
+                    }
                 } else {
-                    for path in pruned {
-                        outln!(w, "Pruned worktree {path}");
+                    for row in pruned {
+                        outln!(w, "Pruned worktree {} ({})", row.path, row.reason);
                     }
                 }
             }
@@ -127,26 +141,43 @@ pub fn run_list() -> Result<WorktreeOutcome> {
     Ok(WorktreeOutcome::List { worktrees })
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn run_add(
     path: PathBuf,
     start_point: Option<String>,
     branch: Option<String>,
-    new_branch: bool,
+    force_branch: Option<String>,
     detach: bool,
     force: bool,
+    lock: bool,
+    lock_reason: Option<String>,
+    no_checkout: bool,
+    track: bool,
 ) -> Result<WorktreeOutcome> {
-    if new_branch {
-        if let Some(ref b) = branch {
-            if let Err(err) = validate_branch_short_name(b) {
-                bail!(branch_short_name_error_message(b, &err));
-            }
-        } else {
-            bail!("`-b` requires a branch name");
+    let branch_modes = [branch.is_some(), force_branch.is_some(), detach]
+        .into_iter()
+        .filter(|b| *b)
+        .count();
+    if branch_modes > 1 {
+        bail!("use only one of `-b`, `-B`, or `--detach`");
+    }
+    if let Some(b) = branch.as_deref().or(force_branch.as_deref()) {
+        if let Err(err) = validate_branch_short_name(b) {
+            bail!(branch_short_name_error_message(b, &err));
         }
     }
-    if detach && branch.is_some() {
-        bail!("use either `--detach` or `-b`, not both");
+    if lock_reason.is_some() && !lock {
+        bail!("`--reason` requires `--lock`");
     }
+
+    let branch_mode = if detach {
+        Some(WorktreeBranch::Detach)
+    } else if let Some(name) = force_branch {
+        Some(WorktreeBranch::CreateOrReset(name))
+    } else {
+        branch.map(WorktreeBranch::Create)
+    };
+
     let repo = context::discover()?;
     let relative_to = std::env::current_dir().context("could not read working directory")?;
     let path = resolve_linked_worktree_add_path(&path, &relative_to).map_err(anyhow::Error::new)?;
@@ -154,11 +185,14 @@ pub fn run_add(
         &repo,
         &AddLinkedWorktreeOptions {
             path,
-            branch,
-            new_branch,
-            detach,
+            branch: branch_mode,
             start_point,
             force,
+            lock: lock.then(|| LockWorktreeOptions {
+                reason: lock_reason.clone(),
+            }),
+            no_checkout,
+            track,
         },
     )
     .map_err(anyhow::Error::new)?;
@@ -167,6 +201,8 @@ pub fn run_add(
         path: entry.path.display().to_string(),
         branch: branch_name,
         head: head_hex,
+        locked: entry.is_locked,
+        checked_out: !no_checkout,
     })
 }
 
@@ -179,13 +215,18 @@ pub fn run_remove(path: PathBuf, force: bool) -> Result<WorktreeOutcome> {
     })
 }
 
-pub fn run_prune() -> Result<WorktreeOutcome> {
+pub fn run_prune(dry_run: bool) -> Result<WorktreeOutcome> {
     let repo = context::discover()?;
-    let pruned = prune_linked_worktrees(&repo).map_err(anyhow::Error::new)?;
+    let pruned = prune_linked_worktrees(&repo, &PruneWorktreesOptions { dry_run })
+        .map_err(anyhow::Error::new)?;
     Ok(WorktreeOutcome::Prune {
+        dry_run,
         pruned: pruned
             .into_iter()
-            .map(|p| p.display().to_string())
+            .map(|e| PrunedWorktreeRow {
+                path: e.path.display().to_string(),
+                reason: e.reason,
+            })
             .collect(),
     })
 }
