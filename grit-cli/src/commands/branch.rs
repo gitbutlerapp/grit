@@ -23,6 +23,7 @@ use time::format_description::well_known::Rfc3339;
 
 use crate::branch_list_args::BranchListArgs;
 use crate::context;
+use crate::error_kind::ErrorKind;
 use crate::json_error::{self, StructuredCliError, StructuredJsonError};
 use crate::markdown;
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
@@ -360,7 +361,7 @@ fn branch_usage(message: impl Into<String>) -> AnyhowError {
     AnyhowError::new(StructuredCliError {
         payload: StructuredJsonError {
             error: human.clone(),
-            kind: "usage",
+            kind: ErrorKind::Usage,
             conflicts: None,
             commit: None,
             would_overwrite: None,
@@ -369,11 +370,6 @@ fn branch_usage(message: impl Into<String>) -> AnyhowError {
         human,
     })
     .context(BranchUsageError)
-}
-
-pub(crate) fn is_branch_usage_error(err: &AnyhowError) -> bool {
-    err.chain()
-        .any(|cause| cause.downcast_ref::<BranchUsageError>().is_some())
 }
 
 /// List, create, delete, rename, or configure a branch depending on `opts`.
@@ -823,22 +819,6 @@ fn short_hex(full: &str) -> String {
     full[..7.min(full.len())].to_owned()
 }
 
-fn branch_error_kind(err: &grit_lib::porcelain::branch::BranchError) -> &'static str {
-    use grit_lib::porcelain::branch::BranchError;
-    match err {
-        BranchError::AlreadyExists { .. } => "branch_already_exists",
-        BranchError::NotFound { .. } => "branch_not_found",
-        BranchError::InvalidName { .. } => "branch_invalid_name",
-        BranchError::NotFullyMerged { .. } => "branch_not_fully_merged",
-        BranchError::CheckedOut { .. } => "branch_checked_out",
-        BranchError::NoCommits => "branch_no_commits",
-        BranchError::InvalidStartPoint { .. } => "branch_invalid_start_point",
-        BranchError::UpstreamNotTracking { .. } => "branch_upstream_not_tracking",
-        BranchError::NoUpstream { .. } => "branch_no_upstream",
-        _ => "branch_error",
-    }
-}
-
 fn branch_error_message(err: &grit_lib::porcelain::branch::BranchError) -> String {
     use grit_lib::porcelain::branch::BranchError;
     match err {
@@ -859,7 +839,7 @@ pub fn map_branch_error(err: Error) -> anyhow::Error {
             anyhow::Error::new(StructuredCliError {
                 payload: StructuredJsonError {
                     error: human.clone(),
-                    kind: branch_error_kind(&branch_err),
+                    kind: ErrorKind::from_branch_error(&branch_err),
                     conflicts: None,
                     commit: None,
                     would_overwrite: None,
@@ -873,7 +853,7 @@ pub fn map_branch_error(err: Error) -> anyhow::Error {
             anyhow::Error::new(StructuredCliError {
                 payload: StructuredJsonError {
                     error: human.clone(),
-                    kind: "branch_checked_out",
+                    kind: ErrorKind::BranchCheckedOut,
                     conflicts: None,
                     commit: None,
                     would_overwrite: None,

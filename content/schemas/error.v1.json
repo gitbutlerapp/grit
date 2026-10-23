@@ -25,6 +25,123 @@
     }
   ],
   "definitions": {
+    "ErrorKind": {
+      "description": "Machine-readable failure category in structured JSON errors (`kind` field).",
+      "oneOf": [
+        {
+          "description": "Merge, pick, rebase, or similar would introduce conflicts.",
+          "enum": [
+            "conflict"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Object ingestion detected an SHA-1 chosen-prefix collision (sha1dc).",
+          "enum": [
+            "hash_collision"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Checkout or switch would overwrite local or untracked files.",
+          "enum": [
+            "would_overwrite"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Invalid `--author`, `--grep`, pickaxe, or similar filter pattern.",
+          "enum": [
+            "invalid_pattern"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Invalid command arguments for a specific subcommand (exit code 2).",
+          "enum": [
+            "usage"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Incompatible flag combination (often with `--json` / `--markdown`).",
+          "enum": [
+            "incompatible_flags"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Branch already exists on create.",
+          "enum": [
+            "branch_already_exists"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Named branch does not exist.",
+          "enum": [
+            "branch_not_found"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Branch name failed validation.",
+          "enum": [
+            "branch_invalid_name"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Delete refused: branch is not fully merged.",
+          "enum": [
+            "branch_not_fully_merged"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Branch is checked out in this or another worktree.",
+          "enum": [
+            "branch_checked_out"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Repository has no commits yet.",
+          "enum": [
+            "branch_no_commits"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "`--start` / tracking start point could not be resolved.",
+          "enum": [
+            "branch_invalid_start_point"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Upstream is not a tracking branch.",
+          "enum": [
+            "branch_upstream_not_tracking"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Branch has no upstream configured.",
+          "enum": [
+            "branch_no_upstream"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Other branch operation failure.",
+          "enum": [
+            "branch_error"
+          ],
+          "type": "string"
+        }
+      ]
+    },
     "StructuredJsonError": {
       "description": "JSON object emitted on stdout for structured command failures.",
       "properties": {
@@ -50,8 +167,12 @@
           "type": "string"
         },
         "kind": {
-          "description": "Machine-readable category (e.g. `conflict`).",
-          "type": "string"
+          "allOf": [
+            {
+              "$ref": "#/definitions/ErrorKind"
+            }
+          ],
+          "description": "Machine-readable category (e.g. `conflict`)."
         },
         "oid": {
           "description": "Plain SHA-1 digest for colliding input, when `kind == \"hash_collision\"`.",

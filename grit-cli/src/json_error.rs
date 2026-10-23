@@ -9,6 +9,8 @@ use grit_lib::objects::ObjectId;
 use schemars::JsonSchema;
 use serde::Serialize;
 
+use crate::error_kind::ErrorKind;
+
 /// Paths that would be overwritten, when `kind == "would_overwrite"`.
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct WouldOverwriteJson {
@@ -24,7 +26,7 @@ pub struct StructuredJsonError {
     /// Short, stable summary for scripts.
     pub error: String,
     /// Machine-readable category (e.g. `conflict`).
-    pub kind: &'static str,
+    pub kind: ErrorKind,
     /// Conflicting paths, when `kind == "conflict"`.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(skip_serializing_if = "Option::is_none")]
@@ -77,7 +79,7 @@ pub fn operation_conflict(
     Error::new(StructuredCliError {
         payload: StructuredJsonError {
             error: format!("{operation} has conflicts"),
-            kind: "conflict",
+            kind: ErrorKind::Conflict,
             conflicts: Some(paths),
             commit: commit.map(|oid| oid.to_hex()),
             would_overwrite: None,
@@ -95,7 +97,7 @@ pub fn hash_collision(oid: ObjectId) -> Error {
     Error::new(StructuredCliError {
         payload: StructuredJsonError {
             error: "SHA-1 hash collision".to_owned(),
-            kind: "hash_collision",
+            kind: ErrorKind::HashCollision,
             conflicts: None,
             commit: None,
             would_overwrite: None,
@@ -117,7 +119,7 @@ pub fn would_overwrite_error(
     Error::new(StructuredCliError {
         payload: StructuredJsonError {
             error: human.clone(),
-            kind: "would_overwrite",
+            kind: ErrorKind::WouldOverwrite,
             conflicts: None,
             commit: None,
             would_overwrite: Some(WouldOverwriteJson {
@@ -209,7 +211,7 @@ pub fn structured_json_payload(err: &Error) -> Option<StructuredJsonError> {
         let hex = oid.to_hex();
         StructuredJsonError {
             error: "SHA-1 hash collision".to_owned(),
-            kind: "hash_collision",
+            kind: ErrorKind::HashCollision,
             conflicts: None,
             commit: None,
             would_overwrite: None,
@@ -219,7 +221,7 @@ pub fn structured_json_payload(err: &Error) -> Option<StructuredJsonError> {
 }
 
 /// Build a structured error for incompatible `--json` / `--markdown` flag combinations.
-pub fn incompatible_output_flags(human: impl Into<String>, kind: &'static str) -> Error {
+pub fn incompatible_output_flags(human: impl Into<String>, kind: ErrorKind) -> Error {
     let human = human.into();
     Error::new(StructuredCliError {
         payload: StructuredJsonError {
@@ -234,10 +236,7 @@ pub fn incompatible_output_flags(human: impl Into<String>, kind: &'static str) -
     })
 }
 
-/// Exit code for invalid `--author` / `--grep` patterns (documented on `grit log` / `grit revs`).
-pub const INVALID_COMMIT_FILTER_EXIT: i32 = 129;
-
-/// Marker for [`INVALID_COMMIT_FILTER_EXIT`] in the top-level error handler.
+/// Marker for invalid commit filter exit (129) in the top-level error handler.
 #[derive(Debug)]
 pub struct InvalidCommitFilterExit;
 
@@ -255,7 +254,7 @@ pub fn invalid_commit_filter(err: grit_lib::revwalk::filter::CommitFilterError) 
     Error::new(StructuredCliError {
         payload: StructuredJsonError {
             error: human.clone(),
-            kind: "invalid_pattern",
+            kind: ErrorKind::InvalidPattern,
             conflicts: None,
             commit: None,
             would_overwrite: None,
@@ -272,7 +271,7 @@ pub fn invalid_pickaxe(err: grit_lib::diff::PickaxeError) -> Error {
     Error::new(StructuredCliError {
         payload: StructuredJsonError {
             error: human.clone(),
-            kind: "invalid_pattern",
+            kind: ErrorKind::InvalidPattern,
             conflicts: None,
             commit: None,
             would_overwrite: None,

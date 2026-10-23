@@ -545,7 +545,7 @@ mod map_remote_error_tests {
         let oid = ObjectId::from_hex("f92d74e3874587aaf443d1db961d4e26dde13e9c").expect("oid");
         let err = map_remote_error(RemoteError::Library(LibError::HashCollision { oid }));
         let payload = structured_json_payload(&err).expect("structured payload");
-        assert_eq!(payload.kind, "hash_collision");
+        assert_eq!(payload.kind, crate::error_kind::ErrorKind::HashCollision);
         assert_eq!(payload.oid.as_deref(), Some(oid.to_hex().as_str()));
     }
 

@@ -27,7 +27,7 @@ $ grit log --json --filter '.commits[].subject'
 | **Failure stdout** | One object `{"error": "…"}` (see [error schema](/schemas/error/v1.json)). Some failures add structured fields such as `kind`; parsers should accept unknown keys. |
 | **stderr** | Progress, auth hints, and human `error:` lines. Scripts should parse **stdout only** for the outcome when `--json` is set. |
 | **`--filter`** | Requires `--json`. Runs jq-like logic on the outcome; multiple results become one JSON array. |
-| **Exit codes** | `0` success, `1` command failure (JSON error object may still be on stdout), `2` usage error (no JSON on stdout). |
+| **Exit codes** | See [Exit codes](../exit-codes/). `0` success, `1` command failure, `2` usage (including bad `--hunks` ids and `diff --exit-code` errors), `128`/`129` for cases in the table. With `--json`, usage and most failures still print `{"error":"…"}` on stdout. |
 
 Pass `--json` on every command you script. Plumbing commands ([`grit manager`](../manager/), [`grit upload-pack`](../upload-pack/), [`grit receive-pack`](../receive-pack/)) speak wire protocols instead of JSON.
 

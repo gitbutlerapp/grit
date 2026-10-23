@@ -279,7 +279,7 @@ pub fn run(
         if output_mode == OutputMode::Json {
             return Err(crate::json_error::incompatible_output_flags(
                 "`grit log --graph` is for human output only; omit `--graph` when using `--json`",
-                "incompatible_flags",
+                crate::error_kind::ErrorKind::IncompatibleFlags,
             ));
         }
     }

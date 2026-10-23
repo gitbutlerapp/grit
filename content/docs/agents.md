@@ -86,7 +86,11 @@ error: provide a commit message, e.g. grit commit "what changed"
 | --- | --- |
 | **0** | Success (including some jq filters that evaluate to `null` when a path is missing). |
 | **1** | Command failed (missing repo, rejected push, validation error, and similar). With `--json`, stdout still contains `{"error": "…"}`. |
-| **2** | Usage error (unknown option or subcommand). Clap prints help to stderr; there is no JSON error object on stdout. |
+| **2** | Usage error (unknown option, invalid subcommand flags, bad `--hunks` ids, or `diff --exit-code` when diff fails). Clap still prints help to stderr. With **`--json`**, stdout is `{"error":"…"}` even for clap usage errors. Without `--json`, usage errors may have empty stdout. |
+| **128** | Remote unreadable (clone/fetch), bundle missing prerequisites, or `merge --ff-only` refused. |
+| **129** | Invalid `--author` / `--grep` / pickaxe pattern (`kind`: `invalid_pattern`). |
+
+See [Exit codes](../exit-codes/) for the full table and structured `kind` values.
 
 ```console
 $ grit --nope
@@ -95,6 +99,11 @@ error: unexpected argument '--nope' found
 Usage: grit [OPTIONS] [COMMAND]
 
 For more information, try '--help'.
+```
+
+```console
+$ grit --json --nope
+{"error":"unexpected argument '--nope' found"}
 ```
 
 ```console
