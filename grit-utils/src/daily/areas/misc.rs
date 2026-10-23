@@ -6,12 +6,13 @@ use super::super::helpers::{
     setup_deep_tree, setup_registry_worktree, setup_synth100k, synth10k_kind,
 };
 use super::super::matrix_helpers::{
-    bundle_create_bench, bundle_verify_bench, config_get_bench, config_set_bench,
-    correctness_bundle_create, hooks_list_bench, ignore_check_bench, notes_add_bench,
-    notes_list_bench, prepare_bundle_create, prepare_bundle_verify, prepare_config_set,
-    prepare_notes_add, prepare_worktree_add, prepare_worktree_remove, remote_list_bench,
-    setup_ignore_check, setup_notes_list, setup_remote_list, setup_small, setup_synth10k_bundle,
-    setup_synth10k_linked_worktree, setup_worktree_remove, verify_bundle, worktree_add_bench,
+    bundle_create_bench, bundle_verify_bench, config_get_bench, config_get_origin_bench,
+    config_set_bench, correctness_bundle_create, hooks_list_bench, ignore_check_bench,
+    notes_add_bench, notes_list_bench, prepare_bundle_create, prepare_bundle_verify,
+    prepare_config_set, prepare_notes_add, prepare_worktree_add, prepare_worktree_remove,
+    remote_list_bench, setup_ignore_check, setup_notes_list, setup_remote_list, setup_small,
+    setup_synth10k_bundle, setup_synth10k_linked_worktree, setup_worktree_list_many,
+    setup_worktree_remove, verify_bundle, worktree_add_bench, worktree_list_bench,
     worktree_remove_bench,
 };
 use super::super::plan::{DailyHeadlinePlan, DailySetup};
@@ -87,6 +88,15 @@ pub fn plans() -> Vec<DailyHeadlinePlan> {
             prepare: prepare_none,
             build_git: |c| config_get_bench(c).1,
             build_grit: |c| config_get_bench(c).0,
+            correctness: None,
+        },
+        DailyHeadlinePlan {
+            spec: scenario_spec("config/get-origin@small"),
+            pending: false,
+            setup: setup_small,
+            prepare: prepare_none,
+            build_git: |c| config_get_origin_bench(c).1,
+            build_grit: |c| config_get_origin_bench(c).0,
             correctness: None,
         },
         DailyHeadlinePlan {
@@ -168,6 +178,15 @@ pub fn plans() -> Vec<DailyHeadlinePlan> {
             prepare: prepare_worktree_remove,
             build_git: |c| worktree_remove_bench(c).1,
             build_grit: |c| worktree_remove_bench(c).0,
+            correctness: None,
+        },
+        DailyHeadlinePlan {
+            spec: scenario_spec("worktree/list@synth-10k"),
+            pending: false,
+            setup: setup_worktree_list_many,
+            prepare: prepare_none,
+            build_git: |c| worktree_list_bench(c).1,
+            build_grit: |c| worktree_list_bench(c).0,
             correctness: None,
         },
         DailyHeadlinePlan {

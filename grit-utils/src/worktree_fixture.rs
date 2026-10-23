@@ -702,6 +702,43 @@ pub fn shell_rm_dir_grit(program: &Path) -> String {
     shell_redirect_devnull(program, &["rm", &dir])
 }
 
+pub fn shell_rm_dir_dry_run_git(program: &Path) -> String {
+    let dir = read_marker(RM_DIR_MARKER).unwrap_or_else(|_| "data/d0000".into());
+    shell_redirect_devnull(program, &["rm", "-n", "-r", &dir])
+}
+
+pub fn shell_rm_dir_dry_run_grit(program: &Path) -> String {
+    let dir = read_marker(RM_DIR_MARKER).unwrap_or_else(|_| "data/d0000".into());
+    shell_redirect_devnull(program, &["rm", "--dry-run", &dir])
+}
+
+fn shell_stash_push_paths_inner(program: &Path, quiet_flag: &str) -> String {
+    let prog_q = shell_quote(&program.to_string_lossy());
+    let paths_q = shell_quote(&scratch_dir().join(PATHS_MARKER).to_string_lossy());
+    format!(
+        r#"set -eu
+if [ -s {paths_q} ]; then
+  tr '\n' '\0' < {paths_q} | xargs -0 {prog_q} stash push{quiet_flag} -- > /dev/null 2>&1
+fi"#
+    )
+}
+
+/// Shell snippet: stash only the ~1% modified path set (git accepts `-q`).
+pub fn shell_git_stash_push_paths(program: &Path) -> String {
+    shell_stash_push_paths_inner(program, " -q")
+}
+
+/// Shell snippet: stash only the ~1% modified path set (grit has no `-q`).
+pub fn shell_grit_stash_push_paths(program: &Path) -> String {
+    shell_stash_push_paths_inner(program, "")
+}
+
+/// Untracked file used as unrelated local edit for `reset --keep` benchmarks.
+pub const RESET_KEEP_LOCAL_FILE: &str = ".grit-bench-reset-keep-local.txt";
+
+/// Ignored-untracked suffix for `clean --only-ignored` benchmarks.
+pub const CLEAN_BENCH_IGNORED_SUFFIX: &str = "grit-bench-ignored";
+
 pub fn shell_mv_file(program: &Path) -> String {
     let src = read_marker(MV_SRC_MARKER).unwrap_or_else(|_| "data/d0000/f0000.txt".into());
     let dst = read_marker(MV_DST_MARKER).unwrap_or_else(|_| "data/d0000/f_bench_mv.txt".into());

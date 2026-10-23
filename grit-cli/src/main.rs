@@ -2298,8 +2298,9 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<ExitS
                 Ok(ExitStatus::from_ignore_check(&outcome))
             }
         },
-        Command::Hooks { limit, action } => match action {
-            None | Some(HooksAction::List) => {
+        Command::Hooks { action } => match action {
+            None => emit_success(&commands::hooks::run_list(None)?, opts, ctx),
+            Some(HooksAction::List { limit }) => {
                 emit_success(&commands::hooks::run_list(limit.get())?, opts, ctx)
             }
             Some(HooksAction::Run { name, hook_args }) => {

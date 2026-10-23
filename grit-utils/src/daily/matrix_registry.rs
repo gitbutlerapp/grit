@@ -195,11 +195,53 @@ pub const MATRIX_SCENARIOS: &[ScenarioSpec] = &[
         description: "Remove untracked files: grit clean -f vs git clean -fd",
     },
     ScenarioSpec {
+        id: "clean/only-ignored@synth-10k",
+        area: Area::Worktree,
+        headline: false,
+        name: None,
+        description: "Preview ignored untracked removal: grit clean --only-ignored vs git clean -n -X",
+    },
+    ScenarioSpec {
+        id: "stash/push-paths@synth-10k",
+        area: Area::Worktree,
+        headline: false,
+        name: None,
+        description: "Stash ~1% pathspec: grit stash push -- <paths> vs git stash push -- <paths>",
+    },
+    ScenarioSpec {
+        id: "stash/pop-index@synth-10k",
+        area: Area::Worktree,
+        headline: false,
+        name: None,
+        description: "Restore index from stash: grit stash pop --index vs git stash pop --index",
+    },
+    ScenarioSpec {
+        id: "reset/keep@synth-10k",
+        area: Area::Worktree,
+        headline: false,
+        name: None,
+        description: "Reset branch with unrelated local edits: grit reset --keep HEAD~1 vs git reset --keep HEAD~1",
+    },
+    ScenarioSpec {
+        id: "rm/dry-run@synth-10k",
+        area: Area::Worktree,
+        headline: false,
+        name: None,
+        description: "Preview remove directory: grit rm --dry-run <dir> vs git rm -n -r <dir>",
+    },
+    ScenarioSpec {
         id: "init/empty@small",
         area: Area::Worktree,
         headline: false,
         name: None,
         description: "Initialize empty repo: grit init vs git init in an empty directory",
+    },
+    ScenarioSpec {
+        id: "init/branch@small",
+        area: Area::Worktree,
+        headline: false,
+        name: None,
+        description: "Initialize repo with branch name: grit init -b trunk vs git init -b trunk",
     },
     // Diff / index
     ScenarioSpec {
@@ -527,6 +569,13 @@ pub const MATRIX_SCENARIOS: &[ScenarioSpec] = &[
         description: "Read one config key vs git config",
     },
     ScenarioSpec {
+        id: "config/get-origin@small",
+        area: Area::Config,
+        headline: false,
+        name: None,
+        description: "Read config with provenance: grit config --json <key> vs git config --show-origin --show-scope --get <key>",
+    },
+    ScenarioSpec {
         id: "config/set@small",
         area: Area::Config,
         headline: false,
@@ -588,6 +637,13 @@ pub const MATRIX_SCENARIOS: &[ScenarioSpec] = &[
         headline: false,
         name: None,
         description: "Remove linked worktree vs git worktree remove",
+    },
+    ScenarioSpec {
+        id: "worktree/list@synth-10k",
+        area: Area::Worktrees,
+        headline: false,
+        name: None,
+        description: "List ~20 linked worktrees: grit worktree list --json vs git worktree list --porcelain",
     },
     ScenarioSpec {
         id: "remote/list@small",

@@ -24,7 +24,8 @@ use crate::worktree_fixture::{
     shell_git_add_modified_set, shell_git_add_modified_set_and_commit, shell_git_apply_cached,
     shell_git_commit_paths_only, shell_grit_add_modified_set, shell_grit_add_patch_file,
     shell_grit_commit_paths, shell_mv_file, shell_redirect_devnull, shell_restore_modified_set,
-    shell_rm_dir_git, shell_rm_dir_grit,
+    shell_rm_dir_dry_run_git, shell_rm_dir_dry_run_grit, shell_rm_dir_git, shell_rm_dir_grit,
+    shell_git_stash_push_paths, shell_grit_stash_push_paths,
 };
 
 /// Shortlog/compare target for git-git matrix rows (tag present on pinned git.git).
@@ -537,6 +538,48 @@ pub fn init_empty_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
     (
         sh_devnull(&ctx.grit, &["init"]),
         sh_devnull(&ctx.git, &["init"]),
+    )
+}
+
+pub fn init_branch_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
+    (
+        sh_devnull(&ctx.grit, &["init", "-b", "trunk"]),
+        sh_devnull(&ctx.git, &["init", "-b", "trunk"]),
+    )
+}
+
+pub fn stash_push_paths_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
+    (
+        sh_script(shell_grit_stash_push_paths(&ctx.grit)),
+        sh_script(shell_git_stash_push_paths(&ctx.git)),
+    )
+}
+
+pub fn stash_pop_index_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
+    (
+        sh_devnull(&ctx.grit, &["stash", "pop", "--index"]),
+        sh_devnull(&ctx.git, &["stash", "pop", "--index"]),
+    )
+}
+
+pub fn reset_keep_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
+    (
+        sh_devnull(&ctx.grit, &["reset", "--keep", "HEAD~1"]),
+        sh_devnull(&ctx.git, &["reset", "--keep", "HEAD~1"]),
+    )
+}
+
+pub fn rm_dry_run_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
+    (
+        sh_script(shell_rm_dir_dry_run_grit(&ctx.grit)),
+        sh_script(shell_rm_dir_dry_run_git(&ctx.git)),
+    )
+}
+
+pub fn clean_only_ignored_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
+    (
+        sh_devnull(&ctx.grit, &["clean", "--only-ignored"]),
+        sh_devnull(&ctx.git, &["clean", "-n", "-X"]),
     )
 }
 

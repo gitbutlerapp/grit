@@ -2,18 +2,23 @@
 
 use super::super::helpers::{
     add_all_bench, add_dry_run_bench, add_hunks_bench, add_lines_bench, add_modified_bench,
-    add_patch_file_bench, add_update_bench, clean_untracked_bench, commit_dry_run_bench,
-    commit_paths_bench, commit_small_bench, commit_staged_bench, ctx, headline_spec,
-    init_empty_bench, mv_file_bench, prepare_stash_reset, prepare_switch_reset,
-    prepare_worktree_add, prepare_worktree_add_hunks, prepare_worktree_add_lines,
-    prepare_worktree_add_patch_file, prepare_worktree_clean_untracked, prepare_worktree_commit,
-    prepare_worktree_commit_staged, prepare_worktree_init_empty, prepare_worktree_mv_file,
-    prepare_worktree_restore_hunks, prepare_worktree_restore_paths, prepare_worktree_rm_dir,
-    prepare_worktree_status_clean, prepare_worktree_status_dirty, reset_hard_bench,
-    reset_mixed_bench, restore_hunks_bench, restore_paths_bench, rm_dir_bench, scenario_spec,
-    setup_big_blobs, setup_deep_tree, setup_hot_path_switch, setup_init_empty,
-    setup_shape_worktree, setup_small, setup_stash_repo, setup_synth100k, stash_bench,
+    add_patch_file_bench, add_update_bench, clean_only_ignored_bench, clean_untracked_bench,
+    commit_dry_run_bench, commit_paths_bench, commit_small_bench, commit_staged_bench, ctx,
+    headline_spec, init_branch_bench, init_empty_bench, mv_file_bench, prepare_stash_reset,
+    prepare_switch_reset, prepare_worktree_add, prepare_worktree_add_hunks,
+    prepare_worktree_add_lines, prepare_worktree_add_patch_file, prepare_worktree_clean_untracked,
+    prepare_worktree_commit, prepare_worktree_commit_staged, prepare_worktree_init_empty,
+    prepare_worktree_mv_file, prepare_worktree_restore_hunks, prepare_worktree_restore_paths,
+    prepare_worktree_rm_dir, prepare_worktree_status_clean, prepare_worktree_status_dirty,
+    reset_hard_bench, reset_keep_bench, reset_mixed_bench, restore_hunks_bench,
+    restore_paths_bench, rm_dir_bench, rm_dry_run_bench, scenario_spec, setup_big_blobs,
+    setup_deep_tree, setup_hot_path_switch, setup_init_empty, setup_shape_worktree, setup_small,
+    setup_stash_repo, setup_synth100k, stash_bench, stash_pop_index_bench, stash_push_paths_bench,
     status_clean_bench, status_dirty_bench, status_paths_bench, status_renamed_bench, switch_bench,
+};
+use super::super::matrix_helpers::{
+    prepare_clean_only_ignored, prepare_reset_keep, prepare_stash_pop_index,
+    prepare_stash_push_paths,
 };
 use super::super::plan::{DailyHeadlinePlan, DailySetup};
 use super::super::registry::RepoShape;
@@ -294,12 +299,66 @@ pub fn plans() -> Vec<DailyHeadlinePlan> {
         correctness: None,
     });
     plans.push(DailyHeadlinePlan {
+        spec: scenario_spec("clean/only-ignored@synth-10k"),
+        pending: false,
+        setup: setup_synth10k,
+        prepare: prepare_clean_only_ignored,
+        build_git: |c| clean_only_ignored_bench(c).1,
+        build_grit: |c| clean_only_ignored_bench(c).0,
+        correctness: None,
+    });
+    plans.push(DailyHeadlinePlan {
+        spec: scenario_spec("stash/push-paths@synth-10k"),
+        pending: false,
+        setup: setup_synth10k,
+        prepare: prepare_stash_push_paths,
+        build_git: |c| stash_push_paths_bench(c).1,
+        build_grit: |c| stash_push_paths_bench(c).0,
+        correctness: None,
+    });
+    plans.push(DailyHeadlinePlan {
+        spec: scenario_spec("stash/pop-index@synth-10k"),
+        pending: false,
+        setup: setup_synth10k,
+        prepare: prepare_stash_pop_index,
+        build_git: |c| stash_pop_index_bench(c).1,
+        build_grit: |c| stash_pop_index_bench(c).0,
+        correctness: None,
+    });
+    plans.push(DailyHeadlinePlan {
+        spec: scenario_spec("reset/keep@synth-10k"),
+        pending: false,
+        setup: setup_synth10k,
+        prepare: prepare_reset_keep,
+        build_git: |c| reset_keep_bench(c).1,
+        build_grit: |c| reset_keep_bench(c).0,
+        correctness: None,
+    });
+    plans.push(DailyHeadlinePlan {
+        spec: scenario_spec("rm/dry-run@synth-10k"),
+        pending: false,
+        setup: setup_synth10k,
+        prepare: prepare_worktree_rm_dir,
+        build_git: |c| rm_dry_run_bench(c).1,
+        build_grit: |c| rm_dry_run_bench(c).0,
+        correctness: None,
+    });
+    plans.push(DailyHeadlinePlan {
         spec: scenario_spec("init/empty@small"),
         pending: false,
         setup: setup_init_empty,
         prepare: prepare_worktree_init_empty,
         build_git: |c| init_empty_bench(c).1,
         build_grit: |c| init_empty_bench(c).0,
+        correctness: None,
+    });
+    plans.push(DailyHeadlinePlan {
+        spec: scenario_spec("init/branch@small"),
+        pending: false,
+        setup: setup_init_empty,
+        prepare: prepare_worktree_init_empty,
+        build_git: |c| init_branch_bench(c).1,
+        build_grit: |c| init_branch_bench(c).0,
         correctness: None,
     });
 

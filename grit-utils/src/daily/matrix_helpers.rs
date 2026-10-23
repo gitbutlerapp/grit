@@ -34,6 +34,8 @@ pub const BRANCH_RENAME_TARGET: &str = "daily-bench-branch-renamed";
 pub const TAG_BENCH_NAME: &str = "daily-bench-tag";
 pub const BUNDLE_FILE: &str = "daily-bench.bundle";
 pub const LINKED_WT_DIR: &str = "daily-linked-wt";
+pub const WORKTREE_LIST_COUNT: usize = 20;
+pub const CONFIG_BENCH_GET_KEY: &str = "core.repositoryformatversion";
 pub const CONFIG_BENCH_KEY: &str = "daily.bench.key";
 pub const CONFIG_BENCH_VALUE: &str = "daily-bench-value";
 pub const NOTES_BENCH_MSG: &str = "daily bench note";
@@ -600,8 +602,24 @@ pub fn repack_commit_graph_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, Benc
 
 pub fn config_get_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
     (
-        sh_devnull(&ctx.grit, &["config", "core.repositoryformatversion"]),
-        sh_devnull(&ctx.git, &["config", "core.repositoryformatversion"]),
+        sh_devnull(&ctx.grit, &["config", CONFIG_BENCH_GET_KEY]),
+        sh_devnull(&ctx.git, &["config", CONFIG_BENCH_GET_KEY]),
+    )
+}
+
+pub fn config_get_origin_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
+    (
+        sh_devnull(&ctx.grit, &["config", "--json", CONFIG_BENCH_GET_KEY]),
+        sh_devnull(
+            &ctx.git,
+            &[
+                "config",
+                "--show-origin",
+                "--show-scope",
+                "--get",
+                CONFIG_BENCH_GET_KEY,
+            ],
+        ),
     )
 }
 
@@ -722,6 +740,110 @@ pub fn worktree_remove_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArg
         sh_devnull(&ctx.grit, &["worktree", "remove", "--force", &path]),
         sh_devnull(&ctx.git, &["worktree", "remove", "--force", &path]),
     )
+}
+
+pub fn worktree_list_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
+    (
+        sh_devnull(&ctx.grit, &["worktree", "list", "--json"]),
+        sh_devnull(&ctx.git, &["worktree", "list", "--porcelain"]),
+    )
+}
+
+pub fn setup_worktree_list_many(setup: &DailySetup<'_>) -> Result<DailyHeadlineContext> {
+    let ctx = setup_synth10k(setup)?;
+    let parent = ctx.repo.parent().unwrap_or(&ctx.repo);
+    for i in 0..WORKTREE_LIST_COUNT {
+        let path = parent.join(format!("daily-wt-{i:02}"));
+        if path.exists() {
+            let _ = run_git(
+                setup.git,
+                &ctx.repo,
+                &["worktree", "remove", "--force", &path.display().to_string()],
+            );
+            let _ = std::fs::remove_dir_all(&path);
+        }
+        run_git(
+            setup.git,
+            &ctx.repo,
+            &["worktree", "add", "-q", &path.display().to_string(), "HEAD"],
+        )?;
+    }
+    Ok(ctx)
+}
+
+pub fn prepare_stash_push_paths(ctx: &DailyHeadlineContext) -> DailyPrepare {
+    let reset = prepare_daily_reset_script(&ctx.git);
+    let prep = shell_command(
+        &std::env::current_exe().unwrap_or_else(|_| PathBuf::from("grit-bench")),
+        &[
+            "prepare-worktree-add",
+            "--git",
+            &ctx.git.display().to_string(),
+        ],
+    );
+    let repo_q = shell_quote_path(&ctx.repo);
+    let script = format!("set -eu\n{reset}\ncd {repo_q} && {prep}");
+    DailyPrepare::Shell(BenchArgv::new("/bin/sh", ["-c", script.as_str()]))
+}
+
+pub fn prepare_stash_pop_index(ctx: &DailyHeadlineContext) -> DailyPrepare {
+    let reset = prepare_daily_reset_script(&ctx.git);
+    let staged = shell_command(
+        &std::env::current_exe().unwrap_or_else(|_| PathBuf::from("grit-bench")),
+        &[
+            "prepare-worktree-commit-staged",
+            "--git",
+            &ctx.git.display().to_string(),
+        ],
+    );
+    let paths_q = shell_quote_path(
+        &crate::fixture::scratch_dir().join(".grit-bench-worktree-paths"),
+    );
+    let push = shell_command(
+        &ctx.git,
+        &["stash", "push", "-q", "-m", "daily-bench-index"],
+    );
+    let clear = shell_command(&ctx.git, &["stash", "clear"]);
+    let repo_q = shell_quote_path(&ctx.repo);
+    let script = format!(
+        r#"set -eu
+{reset}
+cd {repo_q}
+{staged}
+first=$(head -1 {paths_q})
+echo bench >> "$first"
+({clear} 2>/dev/null || true)
+{push}
+"#
+    );
+    DailyPrepare::Shell(BenchArgv::new("/bin/sh", ["-c", script.as_str()]))
+}
+
+pub fn prepare_reset_keep(ctx: &DailyHeadlineContext) -> DailyPrepare {
+    use crate::worktree_fixture::RESET_KEEP_LOCAL_FILE;
+    let reset = prepare_daily_reset_script(&ctx.git);
+    let repo_q = shell_quote_path(&ctx.repo);
+    let script = format!("set -eu\n{reset}\ncd {repo_q} && echo bench > {RESET_KEEP_LOCAL_FILE}");
+    DailyPrepare::Shell(BenchArgv::new("/bin/sh", ["-c", script.as_str()]))
+}
+
+pub fn prepare_clean_only_ignored(ctx: &DailyHeadlineContext) -> DailyPrepare {
+    use crate::worktree_fixture::CLEAN_BENCH_IGNORED_SUFFIX;
+    let reset = prepare_daily_reset_script(&ctx.git);
+    let repo_q = shell_quote_path(&ctx.repo);
+    let ignored = format!("daily-clean.{CLEAN_BENCH_IGNORED_SUFFIX}");
+    let script = format!(
+        r#"set -eu
+{reset}
+cd {repo_q}
+exclude=.git/info/exclude
+mkdir -p .git/info
+grep -qxF '*.{CLEAN_BENCH_IGNORED_SUFFIX}' "$exclude" 2>/dev/null || echo '*.{CLEAN_BENCH_IGNORED_SUFFIX}' >> "$exclude"
+echo ignored > {ignored}
+echo scratch > daily-clean-scratch.txt
+"#
+    );
+    DailyPrepare::Shell(BenchArgv::new("/bin/sh", ["-c", script.as_str()]))
 }
 
 pub fn remote_list_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {

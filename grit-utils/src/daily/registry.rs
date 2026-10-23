@@ -234,7 +234,7 @@ pub const HEADLINE_SCENARIOS: [HeadlineScenario; 22] = [
 ];
 
 /// Remote matrix scenarios (non-headline) for the daily census.
-pub const REMOTE_MATRIX_SCENARIOS: [ScenarioSpec; 11] = [
+pub const REMOTE_MATRIX_SCENARIOS: [ScenarioSpec; 12] = [
     ScenarioSpec {
         id: "fetch/noop@git-git",
         area: Area::Remotes,
