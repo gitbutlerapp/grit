@@ -1,7 +1,5 @@
 //! Reflog listing, deletion, and expiry for one [`Repository`](crate::repo::Repository).
 
-use std::fs;
-use std::io;
 use std::ops::ControlFlow;
 use std::path::Path;
 
@@ -346,11 +344,11 @@ fn scan_loose_reflog_newest_first(
     let mut index_from_newest = 0usize;
     while let Some(line_bytes) = reader.next_nonempty_line()? {
         let line = std::str::from_utf8(&line_bytes).unwrap_or("");
-        let index = index_from_newest;
-        index_from_newest += 1;
         let Some(entry) = parse_reflog_line_for_store(line) else {
             continue;
         };
+        let index = index_from_newest;
+        index_from_newest += 1;
         if state.visit(index, &entry).is_break() {
             state.more_older_lines_remain = reader.has_older_bytes();
             break;
@@ -438,6 +436,8 @@ fn expire_target_refs(git_dir: &Path, all: bool) -> Result<Vec<String>> {
 
 #[cfg(test)]
 mod tests {
+    use std::fs;
+
     use super::*;
     use crate::refs::append_reflog;
     use crate::repo::{InitOptions, Repository};
@@ -457,10 +457,8 @@ mod tests {
             &git_dir,
             refname,
             &crate::objects::ObjectId::zero(),
-            &crate::objects::ObjectId::from_hex(
-                "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-            )
-            .expect("oid"),
+            &crate::objects::ObjectId::from_hex("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+                .expect("oid"),
             "T <t@example.com> 1000000000 +0000",
             "commit: one",
             true,
@@ -492,6 +490,31 @@ mod tests {
             "not-a-valid-reflog-line\n0000000000000000000000000000000000000000 {oid} T <t@e.com> 2000 +0000\tcommit: newest\n"
         );
         // Newest line is valid (index 0); the unparseable line is older and does not consume an index.
+        let path = crate::reflog::reflog_path(&git_dir, refname);
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent).expect("mkdir");
+        }
+        fs::write(&path, body).expect("write");
+        let name = RefName::try_from(refname).expect("valid");
+        let page = repo
+            .reflogs()
+            .query(&name, &ReflogQuery::default())
+            .expect("query");
+        assert_eq!(page.entries.len(), 1);
+        assert_eq!(page.entries[0].index, 0);
+    }
+
+    #[test]
+    fn loose_scan_index_skips_unparseable_newer_line_without_renumbering() {
+        let (_dir, repo) = init_repo();
+        let git_dir = repo.git_dir().to_path_buf();
+        let refname = "refs/heads/y";
+        let oid = crate::objects::ObjectId::from_hex("cccccccccccccccccccccccccccccccccccccccc")
+            .expect("oid");
+        // Newest line is unparseable; the valid entry is older and must stay at index 0.
+        let body = format!(
+            "0000000000000000000000000000000000000000 {oid} T <t@e.com> 2000 +0000\tcommit: older\nnot-a-valid-reflog-line\n"
+        );
         let path = crate::reflog::reflog_path(&git_dir, refname);
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent).expect("mkdir");

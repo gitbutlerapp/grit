@@ -167,6 +167,35 @@ fn seed_reflog_repo_with_spread_timestamps() -> TestRepo {
 }
 
 #[test]
+fn reflog_query_index_skips_unparseable_newer_line_like_git() {
+    if !git_interop_available(Backend::Files) {
+        eprintln!("SKIP: git not available");
+        return;
+    }
+    let repo = seed_reflog_repo();
+    let log_path = repo.git_dir().join("logs/HEAD");
+    let mut body = std::fs::read_to_string(&log_path).expect("read");
+    body.push_str("not-a-valid-reflog-line\n");
+    std::fs::write(&log_path, &body).expect("append invalid newest line");
+
+    let limit = 10usize;
+    let git_idx = git_reflog_indices(repo.worktree(), &["--max-count", &limit.to_string()]);
+    let grit_idx = grit_indices(
+        repo.worktree(),
+        &ReflogQuery {
+            limit: Some(limit),
+            ..ReflogQuery::default()
+        },
+    );
+    assert_eq!(git_idx, grit_idx);
+    assert_eq!(
+        grit_idx.first(),
+        Some(&0),
+        "newest valid entry must stay HEAD@{{0}}"
+    );
+}
+
+#[test]
 fn reflog_query_grep_matches_git_log_g() {
     if !git_interop_available(Backend::Files) {
         eprintln!("SKIP: git not available");

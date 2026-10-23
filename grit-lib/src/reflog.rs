@@ -11,8 +11,8 @@
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::fs::File;
-use std::io::{Read, Seek, SeekFrom};
 use std::io;
+use std::io::{Read, Seek, SeekFrom};
 use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
 
@@ -281,7 +281,7 @@ impl ReverseReflogLineReader {
     ///
     /// Propagates I/O errors other than a missing path (which yields `Ok(None)`).
     pub fn open(path: &Path) -> Result<Option<Self>> {
-        let mut file = match File::open(path) {
+        let file = match File::open(path) {
             Ok(f) => f,
             Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(None),
             Err(e) => return Err(Error::Io(e)),
