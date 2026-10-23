@@ -322,3 +322,8 @@ followup = "ROADMAP item 23"
 documented = "grit commit with pathspec on synth-10k is ~21.4× git (493.7 ms vs 23.0 ms); partial commit builds temp index from HEAD tree and re-stages matching paths"
 followup = "ROADMAP item 23"
 
+[scenario."pick-range-20"]
+ratio = 1.0
+documented = "grit pick base..topic (20 commits) on synthetic-10000: ~2.04× git median time and ~1.57× peak RSS (release hyperfine, git 2.43); acceptance goal remains ≤1.0× time / ≤1.2× RSS"
+followup = "GitHub issue #2977"
+
