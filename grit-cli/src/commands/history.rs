@@ -13,9 +13,9 @@ use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
     absorb, apply_absorb_rewrite, apply_fixup_rewrite, apply_rewrite, drop as history_drop, fixup,
     move_commit, plan_rebase, reword, squash, staged_fixup_paths, verify_rebase_with_exec,
-    verify_rewrite_plan, AbsorbOptions, ApplyOptions, EmptyPolicy, ExecSpec, FixupOptions,
-    HistoryError, HunkAssignment, HunkRange, Placement, RebaseOntoOptions, RebasePlan,
-    RebaseRequest, RefScope, RewriteOptions, RewritePlan, SquashMessage, SquashOptions,
+    verify_rewrite_plan, AbsorbOptions, ApplyOptions, EmptyPolicy, ExecRunRecord, ExecSpec,
+    FixupOptions, HistoryError, HunkAssignment, HunkRange, Placement, RebaseOntoOptions,
+    RebasePlan, RebaseRequest, RefScope, RewriteOptions, RewritePlan, SquashMessage, SquashOptions,
     UnassignedHunk,
 };
 use grit_lib::revwalk::rev_parse::resolve_revision_as_commit;
@@ -86,10 +86,11 @@ pub struct HistoryRewriteArgs {
     pub keep_committer: bool,
 }
 
-/// Result of `grit history drop`, `move`, `reword`, `fixup` and `squash`.
+/// Result of `grit history drop`, `move`, `reword`, `fixup`, `squash`, or `grit rebase` /
+/// `grit history rebase`.
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct HistoryRewriteOutcome {
-    /// Operation name (`drop`, `move`, `reword`, `fixup` or `squash`).
+    /// Operation name (`drop`, `move`, `reword`, `fixup`, `squash`, or `rebase`).
     pub operation: String,
     /// Original and replacement commit OIDs for every rewritten commit.
     pub rewritten: Vec<RewrittenPair>,
@@ -618,20 +619,22 @@ impl std::fmt::Display for RebaseExecExit {
 
 impl std::error::Error for RebaseExecExit {}
 
-/// Render a rebase outcome, exiting with the subprocess code when `--exec` fails.
+/// Render a rebase outcome; returns [`RebaseExecExit`] when `--exec` fails so `main` sets the exit code.
 pub fn emit_rebase_outcome(
     result: Result<HistoryRewriteOutcome>,
     opts: &crate::output::OutputOptions,
     ctx: &RenderContext,
 ) -> Result<()> {
-    if let Err(err) = &result {
-        if let Some(ex) = err.downcast_ref::<RebaseExecExit>() {
-            crate::output::emit_error(err, opts);
-            std::process::exit(ex.code);
+    match result {
+        Err(err) if err.downcast_ref::<RebaseExecExit>().is_some() => {
+            crate::output::emit_error(&err, opts);
+            Err(err)
+        }
+        other => {
+            let outcome = other?;
+            crate::output::emit(&outcome, opts, ctx)
         }
     }
-    let outcome = result?;
-    crate::output::emit(&outcome, opts, ctx)
 }
 
 /// Replay local commits onto a new base (`grit rebase` / `grit history rebase`).
@@ -678,7 +681,7 @@ pub fn run_rebase(
                 match verify_rebase_with_exec(&rewrite.repo, &plan, &spec, runner.as_ref()) {
                     Ok(report) => {
                         for row in &report.runs {
-                            let _ = io::stderr().write_all(&row.stderr);
+                            write_exec_streams_to_stderr(row);
                             exec_json.push(ExecResultJson {
                                 commit: row.commit.to_hex(),
                                 command: row.command.clone(),
@@ -687,8 +690,16 @@ pub fn run_rebase(
                         }
                     }
                     Err(HistoryError::ExecFailed {
-                        exit_code, stderr, ..
+                        exit_code,
+                        stdout,
+                        stderr,
+                        completed_runs,
+                        ..
                     }) => {
+                        for row in &completed_runs {
+                            write_exec_streams_to_stderr(row);
+                        }
+                        let _ = io::stderr().write_all(&stdout);
                         let _ = io::stderr().write_all(&stderr);
                         return Err(RebaseExecExit { code: exit_code }.into());
                     }
@@ -704,6 +715,11 @@ pub fn run_rebase(
             Ok(HistoryRewriteOutcome::new("rebase", &plan, shared.dry_run).with_exec(exec_json))
         }
     }
+}
+
+fn write_exec_streams_to_stderr(row: &ExecRunRecord) {
+    let _ = io::stderr().write_all(&row.stdout);
+    let _ = io::stderr().write_all(&row.stderr);
 }
 
 fn resolve_rebase_upstream(repo: &Repository, upstream: Option<&str>) -> Result<ObjectId> {

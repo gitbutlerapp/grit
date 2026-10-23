@@ -149,8 +149,12 @@ pub enum HistoryError {
         commit: ObjectId,
         /// Subprocess exit code.
         exit_code: i32,
+        /// Subprocess stdout from the failing command.
+        stdout: Vec<u8>,
         /// Subprocess stderr from the failing command.
         stderr: Vec<u8>,
+        /// Successful `--exec` runs before the failure (stdout/stderr captured).
+        completed_runs: Vec<super::ExecRunRecord>,
     },
 
     /// Selected commits do not form one connected component with allowed parents.

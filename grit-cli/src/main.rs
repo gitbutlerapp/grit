@@ -1376,6 +1376,8 @@ fn main() {
                 .is_some_and(|payload| payload.kind == "usage")
         {
             2
+        } else if let Some(ex) = err.downcast_ref::<commands::history::RebaseExecExit>() {
+            ex.code
         } else {
             1
         };

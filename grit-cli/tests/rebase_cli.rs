@@ -378,6 +378,41 @@ fn rebase_exec_failure_exit_code_and_refs_unchanged() -> TestResult {
 }
 
 #[test]
+fn rebase_exec_forwards_stdout_and_stderr() -> TestResult {
+    let scratch = Scratch::new("exec-streams")?;
+    let dir = scratch.path();
+    let (upstream, onto, tip) = init_rebase_fixture(dir)?;
+    gs(dir, ["config", "grit.changeIds", "false"])?;
+    let out = gs(
+        dir,
+        [
+            "rebase",
+            "--onto",
+            &onto,
+            &upstream,
+            "--exec",
+            "echo EXEC_STDOUT; echo EXEC_STDERR >&2",
+            "--exec",
+            "exit 7",
+            "--json",
+        ],
+    )?;
+    assert_eq!(out.status, Some(7), "stderr:\n{}", out.stderr);
+    assert_eq!(git(dir, &["rev-parse", "HEAD"])?.trim(), tip);
+    assert!(
+        out.stderr.contains("EXEC_STDOUT"),
+        "stdout from successful --exec must be forwarded: {}",
+        out.stderr
+    );
+    assert!(
+        out.stderr.contains("EXEC_STDERR"),
+        "stderr from --exec must be forwarded: {}",
+        out.stderr
+    );
+    Ok(())
+}
+
+#[test]
 fn rebase_exec_sees_each_commit_tree() -> TestResult {
     let scratch = Scratch::new("exec-log")?;
     let dir = scratch.path();

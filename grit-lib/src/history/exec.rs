@@ -8,7 +8,10 @@ use crate::command_runner::{
 };
 use crate::objects::ObjectId;
 use crate::porcelain::checkout::checkout_between_trees;
-use crate::porcelain::checkout::checkout_hard_to_tree_from_head_tree;
+use crate::porcelain::switch::{
+    checkout_tree_transition_allow_local, verify_tree_transition_allow_local,
+    TreeTransitionVerifyError,
+};
 use crate::porcelain::worktree_guard::ensure_worktree_clean_for_rebase_exec;
 use crate::refs::{write_ref, write_symbolic_ref};
 use crate::repo::Repository;
@@ -60,6 +63,30 @@ struct ExecPrestate {
     head_tree: ObjectId,
 }
 
+struct ExecDetachedSession<'a> {
+    repo: &'a Repository,
+    prestate: &'a ExecPrestate,
+    current_tree: ObjectId,
+    active: bool,
+}
+
+impl ExecDetachedSession<'_> {
+    fn restore(&mut self) -> Result<(), HistoryError> {
+        if !self.active {
+            return Ok(());
+        }
+        self.active = false;
+        restore_exec_prestate(self.repo, self.prestate, self.current_tree)
+    }
+}
+
+fn fail_exec_session(session: &mut ExecDetachedSession<'_>, err: HistoryError) -> HistoryError {
+    match session.restore() {
+        Ok(()) => err,
+        Err(restore_err) => restore_err,
+    }
+}
+
 /// Checkout each rewritten commit in plan order, run `spec.commands`, then restore `HEAD`,
 /// the index, and the worktree. Refs are not modified.
 ///
@@ -67,6 +94,7 @@ struct ExecPrestate {
 ///
 /// - [`HistoryError::BareRepository`] in a bare repository.
 /// - [`HistoryError::UncommittedChanges`] when the worktree or index is dirty.
+/// - [`HistoryError::LocalChangesWouldBeOverwritten`] when a checkout would clobber local paths.
 /// - [`HistoryError::ExecFailed`] when a command exits non-zero (state is rolled back).
 /// - I/O, checkout, or subprocess failures.
 pub fn verify_rebase_with_exec(
@@ -96,45 +124,82 @@ pub fn verify_rebase_with_exec(
     }
 
     let mut runs = Vec::new();
-    let mut current_tree = prestate.head_tree;
+    let mut session = ExecDetachedSession {
+        repo,
+        prestate: &prestate,
+        current_tree: prestate.head_tree,
+        active: false,
+    };
 
     for commit in commits {
         let commit_tree = commit_tree_for_apply(repo, commit)?;
         write_ref(repo.git_dir(), "HEAD", &commit).map_err(|e| HistoryError::WorktreeApply {
             message: e.to_string(),
         })?;
-        checkout_between_trees(repo, Some(&current_tree), &commit_tree).map_err(|e| {
-            let _ = restore_exec_prestate(repo, &prestate, current_tree);
-            HistoryError::WorktreeApply {
-                message: e.to_string(),
-            }
-        })?;
-        current_tree = commit_tree;
+        session.active = true;
+
+        if let Err(err) =
+            checkout_exec_tree_transition(repo, Some(&session.current_tree), &commit_tree)
+        {
+            return Err(fail_exec_session(&mut session, err));
+        }
+        session.current_tree = commit_tree;
 
         for command in &spec.commands {
-            let output = run_exec_command(runner, command, worktree)?;
+            let output = match run_exec_command(runner, command, worktree) {
+                Ok(output) => output,
+                Err(err) => return Err(fail_exec_session(&mut session, err)),
+            };
             let exit_code = output.status.code.unwrap_or(1);
+            let stdout = output.stdout;
             let stderr = output.stderr;
             runs.push(ExecRunRecord {
                 commit,
                 command: command.clone(),
                 exit_code,
-                stdout: output.stdout,
+                stdout: stdout.clone(),
                 stderr: stderr.clone(),
             });
             if exit_code != 0 {
-                let _ = restore_exec_prestate(repo, &prestate, current_tree);
-                return Err(HistoryError::ExecFailed {
+                let completed_runs = runs;
+                let failed = completed_runs.last().expect("just pushed");
+                let exec_err = HistoryError::ExecFailed {
                     commit,
                     exit_code,
-                    stderr,
-                });
+                    stdout: failed.stdout.clone(),
+                    stderr: failed.stderr.clone(),
+                    completed_runs: completed_runs[..completed_runs.len() - 1].to_vec(),
+                };
+                return Err(fail_exec_session(&mut session, exec_err));
             }
         }
     }
 
-    restore_exec_prestate(repo, &prestate, current_tree)?;
+    session.restore()?;
     Ok(ExecReport { runs })
+}
+
+fn checkout_exec_tree_transition(
+    repo: &Repository,
+    from_tree: Option<&ObjectId>,
+    to_tree: &ObjectId,
+) -> Result<(), HistoryError> {
+    match verify_tree_transition_allow_local(repo, from_tree, to_tree) {
+        Ok(()) => {}
+        Err(TreeTransitionVerifyError::WouldOverwrite(paths)) => {
+            return Err(HistoryError::LocalChangesWouldBeOverwritten { paths });
+        }
+        Err(TreeTransitionVerifyError::Failed(err)) => {
+            return Err(HistoryError::WorktreeApply {
+                message: err.to_string(),
+            });
+        }
+    }
+    checkout_tree_transition_allow_local(repo, from_tree, to_tree).map_err(|e| {
+        HistoryError::WorktreeApply {
+            message: e.to_string(),
+        }
+    })
 }
 
 fn run_exec_command(
@@ -208,13 +273,13 @@ fn restore_exec_prestate(
             })?;
         }
     }
-    fs::write(repo.index_path(), &pre.index_bytes).map_err(|e| HistoryError::WorktreeApply {
-        message: e.to_string(),
-    })?;
-    checkout_hard_to_tree_from_head_tree(repo, &current_tree, &pre.head_tree).map_err(|e| {
+    checkout_between_trees(repo, Some(&current_tree), &pre.head_tree).map_err(|e| {
         HistoryError::WorktreeApply {
             message: e.to_string(),
         }
+    })?;
+    fs::write(repo.index_path(), &pre.index_bytes).map_err(|e| HistoryError::WorktreeApply {
+        message: e.to_string(),
     })?;
     Ok(())
 }
@@ -232,7 +297,14 @@ fn resolve_head_commit_oid(repo: &Repository) -> Result<ObjectId, HistoryError> 
 
 #[cfg(test)]
 mod tests {
-    use crate::command_runner::{RecordedResponse, RecordingRunner};
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    use std::io;
+    use std::sync::Arc;
+
+    use crate::command_runner::{
+        CommandRunner, CommandSpec, RecordedResponse, RecordingRunner, RunningCommand,
+    };
     use crate::history::{
         plan_rewrite, CommitEdit, EmptyPolicy, HistoryEdits, RefScope, RewriteOptions,
     };
@@ -244,10 +316,26 @@ mod tests {
 
     use super::*;
 
+    #[derive(Debug)]
+    struct SpawnFailRunner;
+
+    impl CommandRunner for SpawnFailRunner {
+        fn spawn(&self, _spec: &CommandSpec) -> io::Result<RunningCommand> {
+            Err(io::Error::other("spawn failed"))
+        }
+    }
+
     fn init_repo() -> (tempfile::TempDir, Repository) {
         let dir = tempfile::tempdir().expect("tempdir");
         let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
         (dir, repo)
+    }
+
+    fn index_sha256(repo: &Repository) -> u64 {
+        let bytes = fs::read(repo.index_path()).expect("index");
+        let mut hasher = DefaultHasher::new();
+        bytes.hash(&mut hasher);
+        hasher.finish()
     }
 
     fn commit_file(
@@ -289,6 +377,41 @@ mod tests {
         let commit = serialize_commit(&CommitData {
             tree,
             parents,
+            author: "T <t@t> 0 +0000".into(),
+            committer: "T <t@t> 0 +0000".into(),
+            author_raw: vec![],
+            committer_raw: vec![],
+            encoding: None,
+            message: message.into(),
+            raw_message: None,
+            extra_headers: vec![],
+        });
+        let oid = repo
+            .odb()
+            .write(ObjectKind::Commit, &commit)
+            .expect("commit");
+        write_ref(repo.git_dir(), &format!("refs/heads/{branch}"), &oid).expect("ref");
+        write_symbolic_ref(repo.git_dir(), "HEAD", &format!("refs/heads/{branch}")).expect("head");
+        oid
+    }
+
+    fn remove_path_from_index_and_commit(
+        repo: &Repository,
+        branch: &str,
+        path: &str,
+        message: &str,
+        parent: ObjectId,
+    ) -> ObjectId {
+        let worktree = repo.work_tree().expect("worktree");
+        let file_path = worktree.join(path);
+        let _ = std::fs::remove_file(&file_path);
+        let mut index = repo.load_index().expect("index");
+        index.remove(path.as_bytes());
+        let tree = write_tree_from_index(repo.odb(), &index, "").expect("tree");
+        repo.write_index(&mut index).expect("write index");
+        let commit = serialize_commit(&CommitData {
+            tree,
+            parents: vec![parent],
             author: "T <t@t> 0 +0000".into(),
             committer: "T <t@t> 0 +0000".into(),
             author_raw: vec![],
@@ -376,6 +499,17 @@ mod tests {
         let (_dir, repo) = init_repo();
         let root = commit_file(&repo, "main", "a.txt", b"1\n", "root\n", None);
         let tip = commit_file(&repo, "main", "b.txt", b"2\n", "tip\n", Some(root));
+        let worktree = repo.work_tree().expect("worktree");
+        let a_path = worktree.join("a.txt");
+        let a_contents = fs::read(&a_path).expect("a.txt");
+        let mut index = repo.load_index().expect("index");
+        if let Some(entry) = index.get_mut(b"a.txt", 0) {
+            entry.set_assume_unchanged(true);
+        }
+        repo.write_index(&mut index).expect("write index");
+        let index_before = fs::read(repo.index_path()).expect("index bytes");
+        let index_hash_before = index_sha256(&repo);
+
         let main_before = resolve_ref(repo.git_dir(), "refs/heads/main").expect("main");
         let plan = two_commit_plan(&repo, root, tip);
         let rewritten: Vec<ObjectId> = plan.commits.iter().filter_map(|r| r.new).collect();
@@ -402,6 +536,91 @@ mod tests {
             main_before
         );
         assert_eq!(resolve_ref(repo.git_dir(), "HEAD").expect("head"), tip);
+        assert_eq!(fs::read(repo.index_path()).expect("index"), index_before);
+        assert_eq!(index_sha256(&repo), index_hash_before);
+        let restored = repo.load_index().expect("load index");
+        let a_entry = restored.get(b"a.txt", 0).expect("a.txt still tracked");
+        assert!(a_entry.assume_unchanged());
+        assert_eq!(fs::read(&a_path).expect("worktree a.txt"), a_contents);
+    }
+
+    #[test]
+    fn exec_runner_error_restores_head_index_and_worktree() {
+        let (_dir, repo) = init_repo();
+        let root = commit_file(&repo, "main", "a.txt", b"1\n", "root\n", None);
+        let tip = commit_file(&repo, "main", "b.txt", b"2\n", "tip\n", Some(root));
+        let head_before = resolve_ref(repo.git_dir(), "HEAD").expect("head");
+        let main_before = resolve_ref(repo.git_dir(), "refs/heads/main").expect("main");
+        let index_before = fs::read(repo.index_path()).expect("index");
+        let a_before = fs::read(repo.work_tree().expect("wt").join("a.txt")).expect("a.txt");
+        let plan = two_commit_plan(&repo, root, tip);
+        let runner = Arc::new(SpawnFailRunner);
+        let err = verify_rebase_with_exec(
+            &repo,
+            &plan,
+            &ExecSpec {
+                commands: vec!["true".into()],
+            },
+            runner.as_ref(),
+        )
+        .expect_err("spawn error");
+        assert!(matches!(err, HistoryError::WorktreeApply { .. }));
+        assert_eq!(
+            resolve_ref(repo.git_dir(), "HEAD").expect("head"),
+            head_before
+        );
+        assert_eq!(
+            resolve_ref(repo.git_dir(), "refs/heads/main").expect("main"),
+            main_before
+        );
+        assert_eq!(fs::read(repo.index_path()).expect("index"), index_before);
+        assert_eq!(
+            fs::read(repo.work_tree().expect("wt").join("a.txt")).expect("a.txt"),
+            a_before
+        );
+    }
+
+    #[test]
+    fn exec_refuses_checkout_that_overwrites_untracked() {
+        let (dir, repo) = init_repo();
+        let root = commit_file(&repo, "main", "base.txt", b"base\n", "root\n", None);
+        let mid = commit_file(
+            &repo,
+            "main",
+            "collision.txt",
+            b"tracked\n",
+            "add collision\n",
+            Some(root),
+        );
+        let tip = remove_path_from_index_and_commit(
+            &repo,
+            "main",
+            "collision.txt",
+            "drop collision\n",
+            mid,
+        );
+        let _tip = tip;
+        let collision = dir.path().join("collision.txt");
+        std::fs::write(&collision, b"precious untracked").expect("untracked collision");
+        let plan = two_commit_plan(&repo, root, mid);
+        let runner = RecordingRunner::always_success();
+        let err = verify_rebase_with_exec(
+            &repo,
+            &plan,
+            &ExecSpec {
+                commands: vec!["true".into()],
+            },
+            runner.as_ref(),
+        )
+        .expect_err("must not clobber untracked");
+        assert!(matches!(
+            err,
+            HistoryError::LocalChangesWouldBeOverwritten { .. }
+        ));
+        assert_eq!(
+            fs::read(&collision).expect("untracked survives"),
+            b"precious untracked"
+        );
     }
 
     #[test]

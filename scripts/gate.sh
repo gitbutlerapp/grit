@@ -33,7 +33,7 @@ run_stage "fmt" cargo fmt --all --check
 run_stage "clippy" cargo clippy --workspace -- -D warnings
 run_stage "rustdoc" env RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features
 run_stage "public module doctests" cargo test -p grit-lib --test public_module_doctests
-run_stage "test" env RUST_MIN_STACK=8388608 cargo test --workspace
+run_stage "test" cargo test --workspace
 
 echo ""
 echo "Gate passed."
