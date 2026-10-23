@@ -365,33 +365,9 @@ fn map_sequence_outcome(
     }
 }
 
-fn records_for_completed_from_replay(
+fn records_before_stop(
     repo: &grit_lib::repo::Repository,
     sources: &[ObjectId],
-<<<<<<< New base: fix: pick sequencer review blockers (abort, continue, ORIG_HEAD, clap)
-    created: &[grit_lib::porcelain::replay_sequence::ReplayCreated],
-||||||| Common ancestor
-    stop_at: ObjectId,
-    created: &[ObjectId],
-) -> Vec<PickCommitRecord> {
-    let mut commits = Vec::new();
-    let mut created_iter = created.iter();
-    for &source in sources {
-        if source == stop_at {
-            break;
-        }
-        if let Some(&oid) = created_iter.next() {
-            commits.push(source_record(repo, source, Some(oid)));
-        }
-    }
-    commits
-}
-
-fn records_for_completed(
-    repo: &grit_lib::repo::Repository,
-    sources: &[ObjectId],
-    created: &[ObjectId],
-=======
     stop_at: ObjectId,
     created: &[ObjectId],
 ) -> Vec<PickCommitRecord> {
@@ -412,7 +388,6 @@ fn records_for_completed_from_replay(
     repo: &grit_lib::repo::Repository,
     sources: &[ObjectId],
     created: &[grit_lib::porcelain::replay_sequence::ReplayCreated],
->>>>>>> Current commit: fix: pair multi-commit continue JSON and tune replay hot path
     dropped: &[ObjectId],
 ) -> (Vec<PickCommitRecord>, Vec<String>) {
     let dropped_set: std::collections::HashSet<_> = dropped.iter().copied().collect();

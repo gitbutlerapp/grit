@@ -11,11 +11,11 @@ use std::fs;
 use std::num::NonZeroU32;
 use std::path::Path;
 
-use crate::change_id::ChangeIdPolicy;
+use crate::change_id::{change_id, ChangeId, ChangeIdPolicy};
 use crate::commit_trailers::finalize_cherry_pick_message;
+use crate::config::ConfigSet;
 use crate::error::{Error, Result};
 use crate::merge_file::{ConflictStyle, MergeFavor};
-use crate::config::ConfigSet;
 use crate::merge_trees::{
     merge_trees_three_way_cached, MergeTreeCache, TreeMergeConflictPresentation,
     WhitespaceMergeOptions,
@@ -100,12 +100,14 @@ pub struct ReplaySequenceRequest {
 }
 
 /// One commit produced by a replay step, paired with its source.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReplayCreated {
     /// Commit that was cherry-picked or reverted.
     pub source: ObjectId,
     /// New commit on the current branch.
     pub new_oid: ObjectId,
+    /// Stored `change-id` on `new_oid` when present.
+    pub change_id: Option<ChangeId>,
 }
 
 /// Result of starting or advancing a replay sequence.
@@ -125,7 +127,7 @@ pub enum SequenceOutcome {
         /// Conflicted paths and kinds.
         conflicts: Vec<Conflict>,
         /// Commits created before this stop in the sequence.
-        created_so_far: Vec<ObjectId>,
+        created_so_far: Vec<ReplayCreated>,
         /// Remaining todo oids (including `current`).
         remaining: Vec<ObjectId>,
     },
@@ -134,7 +136,7 @@ pub enum SequenceOutcome {
         /// Source commit that would be empty.
         current: ObjectId,
         /// Commits created before this stop.
-        created_so_far: Vec<ObjectId>,
+        created_so_far: Vec<ReplayCreated>,
         /// Remaining todo oids (including `current`).
         remaining: Vec<ObjectId>,
     },
@@ -282,7 +284,7 @@ pub fn continue_replay_sequence(repo: &Repository, identity: &str) -> Result<Seq
             &config,
             &change_id_policy,
         )?;
-        created_records.push(ReplayCreated { source, new_oid });
+        created_records.push(replay_created_record(repo, source, new_oid)?);
         created_so_far.push(new_oid);
         clear_step_heads(repo.git_dir(), active.direction)?;
     }
@@ -523,10 +525,7 @@ fn run_sequence(
             StepResult::Committed { oid } => {
                 todo.remove(0);
                 created_so_far.push(oid);
-                created_records.push(ReplayCreated {
-                    source: entry.oid,
-                    new_oid: oid,
-                });
+                created_records.push(replay_created_record(repo, entry.oid, oid)?);
                 if todo.is_empty() {
                     clear_replay_state(repo.git_dir())?;
                     return Ok(SequenceOutcome::Completed {
@@ -574,7 +573,7 @@ fn run_sequence(
                 return Ok(SequenceOutcome::Conflicts {
                     current: entry.oid,
                     conflicts,
-                    created_so_far,
+                    created_so_far: created_records.clone(),
                     remaining,
                 });
             }
@@ -601,7 +600,7 @@ fn run_sequence(
                 )?;
                 return Ok(SequenceOutcome::Empty {
                     current: entry.oid,
-                    created_so_far,
+                    created_so_far: created_records.clone(),
                     remaining,
                 });
             }
@@ -663,9 +662,8 @@ fn apply_one_step(
             ReplayEmptyPolicy::Drop => Ok(StepResult::DroppedEmpty),
             ReplayEmptyPolicy::Keep if opts.no_commit => Ok(StepResult::EmptyStop),
             ReplayEmptyPolicy::Keep => {
-                let message = replay_message(
-                    config, opts, direction, &source, source_oid, committer,
-                )?;
+                let message =
+                    replay_message(config, opts, direction, &source, source_oid, committer)?;
                 let new_oid = write_replay_commit(
                     repo,
                     refname,
@@ -717,9 +715,8 @@ fn apply_one_step(
             ReplayEmptyPolicy::Drop => Ok(StepResult::DroppedEmpty),
             ReplayEmptyPolicy::Keep if opts.no_commit => Ok(StepResult::EmptyStop),
             ReplayEmptyPolicy::Keep => {
-                let message = replay_message(
-                    config, opts, direction, &source, source_oid, committer,
-                )?;
+                let message =
+                    replay_message(config, opts, direction, &source, source_oid, committer)?;
                 let new_oid = write_replay_commit(
                     repo,
                     refname,
@@ -744,8 +741,7 @@ fn apply_one_step(
         return Ok(StepResult::AppliedNoCommit);
     }
 
-    let message =
-        replay_message(config, opts, direction, &source, source_oid, committer)?;
+    let message = replay_message(config, opts, direction, &source, source_oid, committer)?;
     apply_clean_tree_merge_to_worktree(repo, &head_tree, &merged)?;
     let new_oid = write_replay_commit(
         repo,
@@ -841,18 +837,36 @@ fn replay_message(
             ))
         }
         ReplayDirection::Revert => {
-            let (title, mut body) = merge_commit_message_for_revert(source, source_oid, false, '#');
-            if source.parents.len() > 1 {
-                if let Some(m) = opts.mainline {
-                    let idx = m.get() as usize - 1;
-                    if let Some(parent) = source.parents.get(idx) {
-                        body.push_str(&revert_mainline_extra_body(source_oid, *parent));
-                    }
-                }
+            let mainline_parent = (source.parents.len() > 1)
+                .then(|| {
+                    opts.mainline.and_then(|m| {
+                        let idx = m.get() as usize - 1;
+                        source.parents.get(idx).copied()
+                    })
+                })
+                .flatten();
+            let (title, mut body) =
+                merge_commit_message_for_revert(source, source_oid, false, '#', None);
+            if let Some(parent) = mainline_parent {
+                body.push_str(&revert_mainline_extra_body(source_oid, parent));
             }
             Ok(format!("{title}\n{body}"))
         }
     }
+}
+
+fn replay_created_record(
+    repo: &Repository,
+    source: ObjectId,
+    new_oid: ObjectId,
+) -> Result<ReplayCreated> {
+    let obj = repo.odb().read(&new_oid)?;
+    let commit = parse_commit(&obj.data)?;
+    Ok(ReplayCreated {
+        source,
+        new_oid,
+        change_id: change_id(&commit),
+    })
 }
 
 fn identity_name_email(ident: &str) -> (&str, &str) {
