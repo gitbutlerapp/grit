@@ -6,16 +6,16 @@ expression: payload
   "human": {
     "exit": 1,
     "stdout": "",
-    "stderr": "error: key 'user.email' is not set\n"
+    "stderr": ""
   },
   "json": {
     "exit": 1,
-    "stdout": "{\"error\":\"key 'user.email' is not set\"}\n",
+    "stdout": "{\"action\":\"get\",\"key\":\"user.email\",\"value\":null,\"scope\":null,\"file\":null,\"line\":null}\n",
     "stderr": ""
   },
   "markdown": {
     "exit": 1,
-    "stdout": "**Error:** key 'user.email' is not set\n",
+    "stdout": "# Config `user.email`\n\n**Value:** _not set_\n",
     "stderr": ""
   }
 }

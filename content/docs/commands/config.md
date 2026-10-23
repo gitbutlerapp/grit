@@ -8,17 +8,17 @@ order: 4
 ## Synopsis
 
 ```text
-grit config [--global] <key>
-grit config [--global] <key> <value>
-grit config [--global] --unset <key>
-grit config [--global] --list
+grit config [--global | --local | -f <path>] <key>
+grit config [--global | --local | -f <path>] <key> <value>
+grit config [--global | --local | -f <path>] --unset <key>
+grit config [--global | --local | -f <path>] --list
 ```
 
 ## Description
 
 Reads and writes Git configuration. `grit` uses the same config files as Git: the repository's `.git/config`, and your per-user `~/.gitconfig`. Settings you've made with Git apply to `grit`, and the other way around.
 
-With just a key, `grit config` prints its value. Reads look at every config file, with the repository's settings taking priority over your global ones. With a key and a value, it sets the value in the repository's config. Add `--global` to read or write your per-user config instead.
+With just a key, `grit config` prints its value. By default, reads use the full config cascade (system, global, local, then command-line overrides), with later layers winning. Writes go to the repository's local config (`.git/config`). Use `--global` or `-f` to read or write a different file instead. `--local` limits reads to the repository config only (writes already target that file).
 
 Keys are written as `section.name`, for example `user.email`.
 
@@ -44,11 +44,21 @@ Keys are written as `section.name`, for example `user.email`.
 | --- | --- |
 | `<key>` | The setting to read, set or remove. |
 | `<value>` | The value to set. Omit it to read the current value. |
-| `--global` | Use your per-user config (`~/.gitconfig`) instead of the repository's. |
+| `--global` | Use your per-user config instead of the repository's. Mutually exclusive with `--local` and `-f`. |
+| `--local` | Read or write only this repository's config file. Default for writes; optional for reads. |
+| `-f`, `--file <path>` | Read or write only the given config file (no repository required). |
 | `-l`, `--list` | List every setting as `key=value`. |
 | `--unset` | Remove the setting. |
 
-Reading or removing a key that isn't set is an error.
+### Exit codes
+
+| Situation | Code |
+| --- | --- |
+| Success | `0` |
+| `get` when the key is not set | `1` (human mode prints nothing; `--json` still prints a `get` object with `"value": null`) |
+| Other errors (invalid key, not in a repository for `--local`, …) | `1` with an error message |
+
+Reading or removing a key that is not set in the chosen scope is an error for `--unset`; `get` treats a missing key as exit `1` without treating it as a command failure in `--json` mode.
 
 ## Examples
 
@@ -72,6 +82,19 @@ Use a different email address in one repository:
 $ grit config user.email ada@work.example
 ```
 
+Read only the repository file (ignore global overrides for keys set locally):
+
+```console
+$ grit config --local user.email
+ada@work.example
+```
+
+Edit a standalone config file:
+
+```console
+$ grit config -f ~/.gitconfig.user user.email ada@personal.example
+```
+
 List everything:
 
 ```console
@@ -92,7 +115,7 @@ $ grit config --unset target.branch
 
 ## JSON output
 
-Schema: [v1](/schemas/config/v1.json)
+Schema: [v2](/schemas/config/v2.json) · [v1](/schemas/config/v1.json)
 
 Pass `--json` for stable, scripting-friendly output. The object's `action` field says what happened:
 
@@ -100,8 +123,11 @@ Pass `--json` for stable, scripting-friendly output. The object's `action` field
 | ----- | ---- | ------- |
 | `action` | string | `get`, `set`, `unset`, or `list`. |
 | `key` | string | Configuration key for `get`, `set`, or `unset`. |
-| `value` | string | Value for `get` or `set`. |
-| `entries` | array | For `list`, each entry with `key`, optional `value`, `scope` (`system`, `global`, `local`, …), and optional `file` path. Later entries in the merged list override earlier ones for the same key. |
+| `value` | string or `null` | Value for `get` or `set`. `null` when `get` did not find the key (exit `1`). |
+| `scope` | string or `null` | For `get`, which layer won (`system`, `global`, `local`, `worktree`, `command`). |
+| `file` | string or `null` | For `get`, source path when file-backed. |
+| `line` | integer or `null` | For `get`, one-based line number in `file`. |
+| `entries` | array | For `list`, each entry with `key`, optional `value`, `scope`, and optional `file`. |
 
 Reading a value:
 
@@ -109,7 +135,23 @@ Reading a value:
 {
   "action": "get",
   "key": "user.name",
-  "value": "Ada Lovelace"
+  "value": "Ada Lovelace",
+  "scope": "global",
+  "file": "/home/ada/.gitconfig",
+  "line": 2
+}
+```
+
+Missing key:
+
+```json
+{
+  "action": "get",
+  "key": "missing.key",
+  "value": null,
+  "scope": null,
+  "file": null,
+  "line": null
 }
 ```
 
@@ -133,9 +175,9 @@ Listing values:
 
 Pass [`--markdown`](../global-options/) for agent-friendly output.
 
-Schema: [v1](/schemas/config/v1.json)
+Schema: [v2](/schemas/config/v2.json) · [v1](/schemas/config/v1.json)
 
-Markdown uses headings, bullet lists, and fenced blocks; pipe characters inside table cells are escaped. See the JSON output section for the stable field contract.
+For `get`, markdown includes the value (when set) plus scope, file, and line. See the JSON output section for the stable field contract.
 
 ## See also
 

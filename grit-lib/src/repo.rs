@@ -2821,7 +2821,7 @@ fn longest_ancestor_length(path: &str, ceilings: &[String]) -> Option<usize> {
 /// worktree admin directory that has no separate `config` file).
 ///
 /// Used when writing `git config --local` semantics from library code.
-pub(crate) fn local_config_write_path(git_dir: &Path) -> PathBuf {
+pub fn local_config_write_path(git_dir: &Path) -> PathBuf {
     if let Some(path) = repository_config_path(git_dir) {
         return path;
     }

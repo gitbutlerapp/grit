@@ -24,7 +24,7 @@ Plain command failures with `--json` validate against the shared [error schema](
 | `clean` | [v1](/schemas/clean/v1.json) |
 | `clone` | [v1](/schemas/clone/v1.json) |
 | `commit` | [v1](/schemas/commit/v1.json) |
-| `config` | [v1](/schemas/config/v1.json) |
+| `config` | [v2](/schemas/config/v2.json), [v1](/schemas/config/v1.json) |
 | `diff` | [v1](/schemas/diff/v1.json) |
 | `error` | [v1](/schemas/error/v1.json) |
 | `fetch` | [v1](/schemas/fetch/v1.json) |
