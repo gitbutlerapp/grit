@@ -7,7 +7,11 @@ use grit_lib::config::environment::Environment;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::config::ConfigSet;
 use grit_lib::objects::ObjectId;
-use grit_lib::remote::push_plan::{resolve_push, PushPlanContext, PushRequest};
+use grit_lib::remote::fetch::NoProgress;
+use grit_lib::remote::push_plan::{
+    load_push_plan_context, open_push_destination, resolve_push, resolve_push_invocation,
+    PushPlanContext, PushRequest,
+};
 use grit_lib::remote::transfer::{push_local, PushOptions, PushRefSpec};
 use grit_lib::repo::Repository;
 use grit_test_support::{git, git_cmd};
@@ -473,6 +477,105 @@ fn dry_run_leaves_bare_refs_unchanged() {
     .expect("dry-run");
     let after = list_remote_refs(&fx.bare);
     assert_eq!(before, after);
+}
+
+#[test]
+fn loaded_plan_context_matches_git_for_each_ref() {
+    let fx = setup_feature_and_main();
+    git(&fx.local, &["tag", "-a", "-m", "annotated", "v1"]);
+    git(
+        &fx.local,
+        &["push", "-q", "origin", "main", "feature", "v1"],
+    );
+    let repo = open_repo(&fx.local);
+    let config = load_config(&repo);
+    let mut ctx = load_push_plan_context(&repo, &config, None, None).expect("context");
+    ctx.remote_ref_names.remove("HEAD");
+    let expected = push_plan_context(&fx.bare);
+    assert_eq!(ctx.remote_ref_names, expected.remote_ref_names);
+    assert_eq!(ctx.remote_branch_tips, expected.remote_branch_tips);
+}
+
+#[test]
+fn push_from_positionals_is_readable_by_git() {
+    let fx = setup_feature_and_main();
+    let repo = open_repo(&fx.local);
+    let config = load_config(&repo);
+    let positionals = vec!["origin".to_owned(), "feature".to_owned()];
+    let invocation = resolve_push_invocation(&config, None, &positionals).expect("invocation");
+    assert_eq!(invocation.remote.as_deref(), Some("origin"));
+    let ctx = load_push_plan_context(&repo, &config, invocation.remote.as_deref(), None)
+        .expect("context");
+    let plan = resolve_push(
+        &repo,
+        &config,
+        &PushRequest {
+            remote: invocation.remote,
+            refspecs: invocation.refspecs,
+            ..Default::default()
+        },
+        &ctx,
+    )
+    .expect("plan");
+    open_push_destination(&config, &plan.remote)
+        .expect("remote")
+        .push(
+            &repo,
+            &plan.specs,
+            PushOptions::default(),
+            &mut NoProgress,
+            None,
+        )
+        .expect("push");
+
+    let local_tip = git_cmd(&["rev-parse", "refs/heads/feature"])
+        .in_dir(&fx.local)
+        .exec();
+    let remote_tip = git_cmd(&["rev-parse", "refs/heads/feature"])
+        .in_dir(&fx.bare)
+        .exec();
+    assert!(remote_tip.ok(), "rev-parse: {}", remote_tip.stderr);
+    assert_eq!(remote_tip.stdout, local_tip.stdout);
+    let fsck = git_cmd(&["fsck", "--strict"]).in_dir(&fx.bare).exec();
+    assert!(fsck.ok(), "git fsck: {}", fsck.stderr);
+}
+
+#[test]
+fn push_to_literal_path_remote_is_readable_by_git() {
+    let fx = setup_feature_and_main();
+    git(&fx.local, &["checkout", "-q", "main"]);
+    let repo = open_repo(&fx.local);
+    let config = load_config(&repo);
+    let bare = fx.bare.to_str().expect("utf-8 path").to_owned();
+    let invocation = resolve_push_invocation(&config, None, &[bare.clone(), "main".to_owned()])
+        .expect("invocation");
+    assert_eq!(invocation.remote.as_deref(), Some(bare.as_str()));
+    let remote = open_push_destination(&config, &bare).expect("literal remote");
+    assert_eq!(remote.name, None);
+    let plan = resolve_push(
+        &repo,
+        &config,
+        &PushRequest {
+            remote: invocation.remote,
+            refspecs: invocation.refspecs,
+            ..Default::default()
+        },
+        &PushPlanContext::default(),
+    )
+    .expect("plan");
+    remote
+        .push(
+            &repo,
+            &plan.specs,
+            PushOptions::default(),
+            &mut NoProgress,
+            None,
+        )
+        .expect("push");
+    let out = git_cmd(&["rev-parse", "--verify", "refs/heads/main"])
+        .in_dir(&fx.bare)
+        .exec();
+    assert!(out.ok(), "rev-parse: {}", out.stderr);
 }
 
 fn list_remote_refs(bare: &Path) -> HashSet<String> {
