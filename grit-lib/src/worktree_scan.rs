@@ -1146,30 +1146,26 @@ fn matching_dir_entry<'a>(
         .find(|entry| dir_entry_name_matches(index_file_name, entry))
 }
 
-/// Prefer path metadata on Windows (Git/mingw semantics); fall back to the matched `DirEntry`
-/// when the path probe fails even though `read_dir` listed the name (#1518).
+/// Prefer `DirEntry::metadata` from the directory scan (no extra handle open on Windows);
+/// fall back to path `symlink_metadata` when the name was not listed or dir-entry stat fails
+/// (#1518). Index disagreements with the scan stat are corrected later by
+/// [`align_lookup_stat_with_index_path_windows`].
 #[cfg(windows)]
 fn blob_lookup_from_dir_entry_or_path(
     dir_entry: Option<&fs::DirEntry>,
     target_abs: impl FnOnce() -> PathBuf,
 ) -> BlobDiskLookup {
+    if let Some(entry) = dir_entry {
+        match dir_entry_metadata(entry) {
+            Ok(m) => return BlobDiskLookup::Present(BlobDiskStat::from_metadata(&m)),
+            Err(e) if e.kind() == io::ErrorKind::NotFound || e.raw_os_error() == Some(20) => {}
+            Err(e) => return BlobDiskLookup::Io(e),
+        }
+    }
     match symlink_metadata_path(&target_abs()) {
         Ok(meta) => BlobDiskLookup::Present(BlobDiskStat::from_metadata(&meta)),
         Err(e) if e.kind() == io::ErrorKind::NotFound || e.raw_os_error() == Some(20) => {
-            if let Some(entry) = dir_entry {
-                match dir_entry_metadata(entry) {
-                    Ok(m) => BlobDiskLookup::Present(BlobDiskStat::from_metadata(&m)),
-                    Err(e2)
-                        if e2.kind() == io::ErrorKind::NotFound
-                            || e2.raw_os_error() == Some(20) =>
-                    {
-                        BlobDiskLookup::Missing
-                    }
-                    Err(e2) => BlobDiskLookup::Io(e2),
-                }
-            } else {
-                BlobDiskLookup::Missing
-            }
+            BlobDiskLookup::Missing
         }
         Err(e) => BlobDiskLookup::Io(e),
     }
@@ -1492,6 +1488,56 @@ mod tests {
         assert!(
             matches!(lookup, BlobDiskLookup::Present(_)),
             "read_dir listing must win over a failed path stat (issue #1518 / Bugbot)"
+        );
+    }
+
+    #[test]
+    fn listed_blob_lookup_one_metadata_probe_per_file() {
+        let tmp = TempDir::new().unwrap();
+        let wt = tmp.path().to_path_buf();
+        fs::create_dir_all(wt.join(".git/objects")).unwrap();
+        const FILES: usize = 40;
+        let mut index = Index::new();
+        for f in 0..FILES {
+            let rel = format!("flat/f{f}.txt");
+            let oid = write_blob_file(&wt, &rel, format!("{f}\n").as_bytes());
+            index.add_or_replace(
+                entry_from_stat(&wt.join(&rel), rel.as_bytes(), oid, 0o100644).unwrap(),
+            );
+        }
+        let plan = group_blob_entries_by_dir(&index, false);
+        let _probe = reset_worktree_metadata_probe(&wt);
+        let wt_dir = wt.clone();
+        let dir_abs = move |dir: &[u8]| {
+            if dir.is_empty() {
+                wt_dir.clone()
+            } else {
+                crate::index::worktree_path_from_index_rel(&wt_dir, dir)
+            }
+        };
+        let file_abs = {
+            let wt_dir = wt.clone();
+            move |rel: &[u8]| crate::index::worktree_path_from_index_rel(&wt_dir, rel)
+        };
+        let mut seen = 0usize;
+        for_each_blob_by_directory(
+            &index,
+            &plan,
+            dir_abs,
+            file_abs,
+            |_| false,
+            |_, lookup| {
+                assert!(matches!(lookup, BlobDiskLookup::Present(_)));
+                seen += 1;
+                Ok(())
+            },
+        )
+        .unwrap();
+        assert_eq!(seen, FILES);
+        assert!(
+            worktree_metadata_probe_count() <= FILES + 4,
+            "listed files should stat via read_dir entries, not a path probe each (got {} probes)",
+            worktree_metadata_probe_count()
         );
     }
 
