@@ -12,8 +12,8 @@ use grit_lib::diff::merge_file::{ConflictStyle, MergeFavor};
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::replay::ReplayDirection;
 use grit_lib::porcelain::replay_sequence::{
-    predict_replay_sequence, start_replay_sequence, ReplayOptions, ReplaySequenceRequest,
-    SequenceOutcome, SequencePrediction,
+    predict_replay_sequence, start_replay_sequence, ReplayEmptyPolicy, ReplayOptions,
+    ReplaySequenceRequest, SequenceOutcome, SequencePrediction,
 };
 use grit_lib::repo::Repository;
 
@@ -76,6 +76,11 @@ fn head_tree(_repo: &Repository, root: &Path) -> ObjectId {
     ObjectId::from_hex(&hex).expect("tree oid")
 }
 
+fn index_tree_from_git(root: &Path) -> ObjectId {
+    let hex = git(root, &["write-tree"]).trim().to_owned();
+    ObjectId::from_hex(&hex).expect("tree oid")
+}
+
 fn count_loose_objects(git_dir: &Path) -> usize {
     let objects = git_dir.join("objects");
     let mut count = 0usize;
@@ -108,6 +113,100 @@ fn pick_req(commits: Vec<ObjectId>, opts: ReplayOptions) -> ReplaySequenceReques
         committer: IDENT.to_owned(),
         options: opts,
     }
+}
+
+#[test]
+fn predict_empty_keep_intrinsic_advances_head_for_following_pick() {
+    let root = tempfile::tempdir().expect("tempdir");
+    init_repo(root.path());
+    commit_file(root.path(), "f.txt", "base\n", "base");
+    let h = oid_from_rev(root.path(), "HEAD");
+    git(root.path(), &["switch", "-c", "topic"]);
+    git(root.path(), &["commit", "--allow-empty", "-qm", "empty"]);
+    let e = oid_from_rev(root.path(), "HEAD");
+    git(root.path(), &["switch", "main"]);
+
+    let repo = open_repo(root.path());
+    let mut opts = ReplayOptions::default();
+    opts.empty = ReplayEmptyPolicy::Keep;
+    let req = pick_req(vec![e, h], opts.clone());
+
+    let prediction =
+        predict_replay_sequence(&repo, &req).expect("predict must not treat HEAD as stale");
+    assert!(
+        matches!(prediction, SequencePrediction::Clean { .. }),
+        "expected clean prediction after empty keep then replay of original HEAD, got {prediction:?}"
+    );
+
+    let out = start_replay_sequence(&repo, &req).expect("pick");
+    assert!(matches!(out, SequenceOutcome::Completed { .. }));
+    assert_ne!(
+        oid_from_rev(root.path(), "HEAD"),
+        h,
+        "empty keep must advance HEAD before the second pick"
+    );
+}
+
+#[test]
+fn predict_no_commit_chains_index_tree_across_pick_range() {
+    let root = tempfile::tempdir().expect("tempdir");
+    init_repo(root.path());
+    commit_file(root.path(), "base.txt", "base\n", "base");
+    git(root.path(), &["switch", "-c", "topic"]);
+    commit_file(root.path(), "one.txt", "one\n", "one");
+    commit_file(root.path(), "two.txt", "two\n", "two");
+    let c1 = oid_from_rev(root.path(), "topic~1");
+    let c2 = oid_from_rev(root.path(), "topic");
+    git(root.path(), &["switch", "main"]);
+
+    let repo = open_repo(root.path());
+    let opts = ReplayOptions {
+        no_commit: true,
+        ..ReplayOptions::default()
+    };
+    let req = pick_req(vec![c1, c2], opts.clone());
+    let out = start_replay_sequence(&repo, &req).expect("pick");
+    assert!(matches!(out, SequenceOutcome::Completed { .. }));
+    let applied_index_tree = index_tree_from_git(root.path());
+
+    let prediction = predict_replay_sequence(&repo, &req).expect("predict");
+    let SequencePrediction::Clean { tree, .. } = prediction else {
+        panic!("expected clean prediction");
+    };
+    assert_eq!(
+        tree, applied_index_tree,
+        "predict --no-commit must chain trees across steps like the real index"
+    );
+}
+
+#[test]
+fn predict_no_commit_chains_index_tree_across_revert_range() {
+    let root = tempfile::tempdir().expect("tempdir");
+    init_repo(root.path());
+    commit_file(root.path(), "base.txt", "base\n", "base");
+    let c1 = commit_file(root.path(), "one.txt", "one\n", "one");
+    let c2 = commit_file(root.path(), "two.txt", "two\n", "two");
+
+    let repo = open_repo(root.path());
+    let opts = ReplayOptions {
+        no_commit: true,
+        ..ReplayOptions::default()
+    };
+    let req = ReplaySequenceRequest {
+        commits: vec![c2, c1],
+        direction: ReplayDirection::Revert,
+        committer: IDENT.to_owned(),
+        options: opts.clone(),
+    };
+    let out = start_replay_sequence(&repo, &req).expect("revert");
+    assert!(matches!(out, SequenceOutcome::Completed { .. }));
+    let applied_index_tree = index_tree_from_git(root.path());
+
+    let prediction = predict_replay_sequence(&repo, &req).expect("predict");
+    let SequencePrediction::Clean { tree, .. } = prediction else {
+        panic!("expected clean prediction");
+    };
+    assert_eq!(tree, applied_index_tree);
 }
 
 #[test]

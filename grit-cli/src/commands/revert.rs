@@ -193,9 +193,13 @@ impl HumanRender for RevertOutcome {
                 }
             }
             RevertResult::Empty => {
-                outln!(w, "Revert stopped on an empty commit.");
-                if let Some(steps) = &self.next_steps {
-                    eprintln!("→ {}, or `--skip` / `--abort`.", steps.join(", then "));
+                if self.check {
+                    outln!(w, "Would stop on an empty revert step.");
+                } else {
+                    outln!(w, "Revert stopped on an empty commit.");
+                    if let Some(steps) = &self.next_steps {
+                        eprintln!("→ {}, or `--skip` / `--abort`.", steps.join(", then "));
+                    }
                 }
             }
             RevertResult::Completed => {

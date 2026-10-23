@@ -856,15 +856,24 @@ pub fn print_pick_outcome(w: &mut dyn Write, outcome: &PickOutcome) -> anyhow::R
             }
         }
         PickResult::Empty => {
-            if let Some(row) = outcome.commits.last() {
+            if outcome.check {
+                outln!(w, "- Would stop on an empty pick step");
+            } else if let Some(row) = outcome.commits.last() {
                 let src = short_hex(&row.source);
                 outln!(w, "- Stopped on empty commit `{src}` — {}", row.subject);
+                crate::operation_output::render_operation_guidance_markdown(
+                    outcome.next_steps.as_deref().unwrap_or(&[]),
+                    outcome.alternatives.as_deref(),
+                    w,
+                )?;
+            } else {
+                outln!(w, "- Pick stopped on an empty commit");
+                crate::operation_output::render_operation_guidance_markdown(
+                    outcome.next_steps.as_deref().unwrap_or(&[]),
+                    outcome.alternatives.as_deref(),
+                    w,
+                )?;
             }
-            crate::operation_output::render_operation_guidance_markdown(
-                outcome.next_steps.as_deref().unwrap_or(&[]),
-                outcome.alternatives.as_deref(),
-                w,
-            )?;
         }
         PickResult::Aborted => outln!(w, "Pick aborted."),
     }
@@ -906,12 +915,16 @@ pub fn print_revert_outcome(w: &mut dyn Write, outcome: &RevertOutcome) -> anyho
             }
         }
         RevertResult::Empty => {
-            outln!(w, "- Revert stopped on an empty commit");
-            crate::operation_output::render_operation_guidance_markdown(
-                outcome.next_steps.as_deref().unwrap_or(&[]),
-                outcome.alternatives.as_deref(),
-                w,
-            )?;
+            if outcome.check {
+                outln!(w, "- Would stop on an empty revert step");
+            } else {
+                outln!(w, "- Revert stopped on an empty commit");
+                crate::operation_output::render_operation_guidance_markdown(
+                    outcome.next_steps.as_deref().unwrap_or(&[]),
+                    outcome.alternatives.as_deref(),
+                    w,
+                )?;
+            }
         }
         RevertResult::Completed => {
             if outcome.dry_run == Some(true) {
