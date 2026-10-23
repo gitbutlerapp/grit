@@ -497,3 +497,67 @@ fn git_git_sized_write_smoke() {
         String::from_utf8_lossy(&git_test.stderr)
     );
 }
+
+/// More commits than the writer bitmaps unconditionally, so only tip selection can pick the
+/// commit an annotated tag of a tag names.
+fn fast_import_long_history_with_nested_tag_only_tip(repo: &RepoFixture) -> ObjectId {
+    let mut stream = String::new();
+    for i in 1..=150u32 {
+        let msg = format!("c{i}\n");
+        let body = format!("{i}\n");
+        stream.push_str(&format!(
+            "commit refs/heads/main\nmark :{i}\ncommitter T <t@example.com> {} +0000\ndata {}\n{msg}",
+            1_000_000_000 + i,
+            msg.len()
+        ));
+        if i > 1 {
+            stream.push_str(&format!("from :{}\n", i - 1));
+        }
+        stream.push_str(&format!("M 644 inline f\ndata {}\n{body}\n", body.len()));
+    }
+    let msg = "lonely\n";
+    stream.push_str(&format!(
+        "commit refs/heads/lonely\nmark :999\ncommitter T <t@example.com> 900000000 +0000\ndata {}\n{msg}M 644 inline g\ndata 2\ng\n\n",
+        msg.len()
+    ));
+    let mut child = Command::new("git")
+        .current_dir(repo.path())
+        .args(["fast-import", "--quiet"])
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .expect("fast-import");
+    std::io::Write::write_all(&mut child.stdin.take().expect("stdin"), stream.as_bytes())
+        .expect("write stream");
+    assert!(child.wait().expect("wait").success());
+    git_ok(repo, &["tag", "-a", "-m", "inner", "inner", "lonely"]);
+    git_ok(repo, &["tag", "-a", "-m", "outer", "outer", "inner"]);
+    git_ok(repo, &["tag", "-d", "inner"]);
+    git_ok(repo, &["branch", "-D", "lonely"]);
+    git_ok(repo, &["checkout", "-q", "main"]);
+    ObjectId::from_hex(&git_stdout(repo, &["rev-parse", "outer^{commit}"])).expect("oid")
+}
+
+#[test]
+fn nested_tag_tip_gets_a_bitmap() {
+    let fixture = RepoFixture::init(HashAlgo::Sha1).expect("init");
+    let lonely = fast_import_long_history_with_nested_tag_only_tip(&fixture);
+    git_ok(&fixture, &["repack", "-ad"]);
+    let repo = open_repo(fixture.path());
+    grit_write_bitmap(&repo, &fixture, PackBitmapWriteOptions::default());
+    let index = BitmapIndex::open(&repo).expect("open").expect("bitmap");
+    assert!(
+        index.commit_bitmap(&lonely).is_some(),
+        "commit named only by a nested tag has no bitmap"
+    );
+    let out = Command::new("git")
+        .current_dir(fixture.path())
+        .args(["rev-list", "--test-bitmap", &lonely.to_hex()])
+        .output()
+        .expect("test-bitmap");
+    assert!(
+        out.status.success(),
+        "git --test-bitmap {lonely}: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    verify_all_commit_bitmaps(&repo, &index);
+}

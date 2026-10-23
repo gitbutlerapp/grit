@@ -3195,15 +3195,15 @@ fn resolve_specs_with_options(
             Err(Error::ObjectNotFound(_) | Error::InvalidRef(_)) if ignore_missing => continue,
             Err(err) => return Err(err),
         };
-        match peel_to_commit(repo, oid) {
-            Ok(commit_oid) => out.push(commit_oid),
+        match repo.odb().peel_to_commit(oid) {
+            Ok(Some(commit_oid)) => out.push(commit_oid),
             // `git rev-list <obj>` accepts a positive tip that is (or peels to) a non-commit
             // object such as a blob or a tag-of-blob: it simply contributes no commits and exits
             // 0 (verified against git: `git rev-list tag-of-blob` prints nothing, exit 0). Mirror
             // that here so callers that feed all freshly-fetched ref tips into a commit walk
             // (e.g. submodule-change detection over a remote carrying a tag-of-blob, t5516
             // "refuse fetch to current branch of worktree") do not abort.
-            Err(Error::CorruptObject(_)) if object_peels_to_non_commit(repo, oid) => {}
+            Ok(None) => {}
             Err(Error::ObjectNotFound(_) | Error::InvalidRef(_)) if ignore_missing => {}
             Err(err) => return Err(err),
         }
@@ -3373,18 +3373,16 @@ fn resolve_specs_for_objects_with_options(
             Err(Error::ObjectNotFound(_) | Error::InvalidRef(_)) if ignore_missing => continue,
             Err(err) => return Err(err),
         };
-        if let Ok(obj) = repo.odb().read(&oid) {
-            if obj.kind == ObjectKind::Tag {
-                if let Ok(commit_oid) = peel_to_commit(repo, oid) {
+        match repo.odb().peel_to_commit(oid) {
+            Ok(Some(commit_oid)) => {
+                if commit_oid != oid {
                     tip_annotated_tag_by_commit.insert(commit_oid, oid);
                 }
+                commits.push(commit_oid);
             }
-        }
-        match peel_to_commit(repo, oid) {
-            Ok(commit_oid) => commits.push(commit_oid),
-            Err(Error::CorruptObject(_)) if ignore_missing => {}
-            Err(Error::ObjectNotFound(_)) if ignore_missing => {}
-            Err(Error::CorruptObject(_)) | Err(Error::ObjectNotFound(_)) => {
+            Ok(None) | Err(Error::CorruptObject(_) | Error::ObjectNotFound(_))
+                if ignore_missing => {}
+            Ok(None) | Err(Error::CorruptObject(_) | Error::ObjectNotFound(_)) => {
                 roots.push(RootObject {
                     oid,
                     input: spec.clone(),
@@ -3400,59 +3398,22 @@ fn resolve_specs_for_objects_with_options(
     Ok((commits, roots, tip_annotated_tag_by_commit))
 }
 
-/// Returns `true` when `oid` is a readable object that peels (through any tag chain) to a blob or
-/// tree rather than a commit. Used to mirror `git rev-list`'s tolerance of a non-commit positive
-/// tip: such a tip is silently ignored, whereas a genuinely missing/corrupt object is an error.
-fn object_peels_to_non_commit(repo: &Repository, mut oid: ObjectId) -> bool {
-    loop {
-        let Ok(object) = repo.odb().read(&oid) else {
-            return false;
-        };
-        match object.kind {
-            ObjectKind::Commit => return false,
-            ObjectKind::Blob | ObjectKind::Tree => return true,
-            ObjectKind::Tag => match parse_tag(&object.data) {
-                Ok(tag) => oid = tag.object,
-                Err(_) => return false,
-            },
-        }
-    }
-}
-
-/// Peel an object (possibly a tag) to the underlying commit.
-fn peel_to_commit(repo: &Repository, mut oid: ObjectId) -> Result<ObjectId> {
-    loop {
-        let object = repo.odb().read(&oid)?;
-        match object.kind {
-            ObjectKind::Commit => return Ok(oid),
-            ObjectKind::Tag => {
-                let tag = parse_tag(&object.data)?;
-                oid = tag.object;
-            }
-            other => {
-                return Err(Error::CorruptObject(format!(
-                    "object {oid} is a {other:?}, not a commit"
-                )));
-            }
-        }
-    }
-}
-
 fn reflog_commit_tips(repo: &Repository) -> Result<Vec<ObjectId>> {
     let z = zero_oid();
     let mut out = Vec::new();
     let mut seen = HashSet::new();
+    let mut peeled_raw = HashSet::new();
     for refname in list_reflog_refs(repo.git_dir())? {
         let entries = read_reflog(repo.git_dir(), &refname)?;
         for e in entries {
             for oid in [e.old_oid, e.new_oid] {
-                if oid == z {
+                if oid == z || !peeled_raw.insert(oid) {
                     continue;
                 }
-                match peel_to_commit(repo, oid) {
-                    Ok(c) if seen.insert(c) => out.push(c),
-                    Err(_) => {}
-                    _ => {}
+                if let Ok(Some(c)) = repo.odb().peel_to_commit(oid) {
+                    if seen.insert(c) {
+                        out.push(c);
+                    }
                 }
             }
         }
@@ -7614,11 +7575,15 @@ fn commit_tips_from_ref_pairs(
 fn peel_ref_oids_to_unique_commits(repo: &Repository, raw: Vec<ObjectId>) -> Result<Vec<ObjectId>> {
     let mut out = Vec::new();
     let mut seen = HashSet::new();
+    let mut peeled_raw = HashSet::with_capacity(raw.len());
     for oid in raw {
-        match peel_to_commit(repo, oid) {
-            Ok(commit_oid) if seen.insert(commit_oid) => out.push(commit_oid),
-            Err(_) => {}
-            _ => {}
+        if !peeled_raw.insert(oid) {
+            continue;
+        }
+        if let Ok(Some(commit_oid)) = repo.odb().peel_to_commit(oid) {
+            if seen.insert(commit_oid) {
+                out.push(commit_oid);
+            }
         }
     }
     out.sort();
@@ -9882,6 +9847,55 @@ mod tests {
         assert!(ObjectFilter::TreeDepth(1).includes_tree(0));
         assert!(ObjectFilter::ObjectType(FilterObjectKind::Commit)
             .includes_commit_or_tag_object(ObjectKind::Commit));
+    }
+
+    #[test]
+    fn repeated_ref_tips_are_peeled_once() {
+        use crate::hot_path_test_metrics::HotPathMetricsScope;
+
+        let dir = tempdir().expect("tempdir");
+        Repository::init(
+            dir.path(),
+            &InitOptions {
+                bare: true,
+                initial_branch: "main".to_owned(),
+                ref_storage: crate::RefStorageFormat::Files,
+                ..InitOptions::default()
+            },
+        )
+        .expect("init");
+        let repo = Repository::open(dir.path(), &RepositoryOptions::empty()).expect("open");
+        let tree = repo.odb().write(ObjectKind::Tree, b"").expect("tree");
+        let body = format!(
+            "tree {tree}\nauthor T <t@e.com> 1 +0000\ncommitter T <t@e.com> 1 +0000\n\nm\n"
+        );
+        let commit = repo
+            .odb()
+            .write(ObjectKind::Commit, body.as_bytes())
+            .expect("commit");
+        let tag_body =
+            format!("object {commit}\ntype commit\ntag t\ntagger T <t@e.com> 1 +0000\n\nt\n");
+        let tag = repo
+            .odb()
+            .write(ObjectKind::Tag, tag_body.as_bytes())
+            .expect("tag");
+        let raw: Vec<ObjectId> = std::iter::repeat_n(commit, 200)
+            .chain(std::iter::repeat_n(tag, 100))
+            .collect();
+
+        let metrics = repo.odb().hot_path_metrics();
+        metrics.set_loose_open_counting(true);
+        metrics.reset_loose_path_open_attempts();
+        let _scope = HotPathMetricsScope::install(repo.odb().hot_path_metrics_arc());
+        let tips = peel_ref_oids_to_unique_commits(&repo, raw).expect("peel");
+        assert_eq!(tips, vec![commit]);
+        // One info read of the commit; the tag costs an info read, a full read, and an info
+        // read of its target.
+        assert!(
+            metrics.loose_path_open_attempts() <= 4,
+            "{} object lookups for two distinct tips",
+            metrics.loose_path_open_attempts()
+        );
     }
 
     #[test]

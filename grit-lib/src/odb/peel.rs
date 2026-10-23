@@ -1,13 +1,13 @@
 //! Following annotated tags to the object they ultimately name.
 //!
 //! Every caller that turns a ref tip into "the commit it means" (revision walks, fetch
-//! negotiation, bundles, commit-graph tips, `packed-refs` peel lines) shares these two
-//! [`Odb`] methods instead of its own tag loop.
+//! negotiation, bundles, bitmaps, commit-graph tips, `packed-refs` and `ls-remote` peel lines,
+//! `--with-tree`) shares these [`Odb`] methods instead of its own tag loop.
 
 use std::collections::HashSet;
 
 use crate::error::{Error, Result};
-use crate::objects::{tag_object_line_oid, ObjectId, ObjectKind};
+use crate::objects::{tag_object_line_oid, CommitRef, ObjectId, ObjectKind};
 
 use super::Odb;
 
@@ -72,6 +72,86 @@ impl Odb {
         let (peeled, kind) = self.peel_tags(oid)?;
         Ok((kind == ObjectKind::Commit).then_some(peeled))
     }
+
+    /// The object an annotated tag ultimately names: the `^{}` value of a ref advertisement or
+    /// a `packed-refs` peel line.
+    ///
+    /// Returns `None` when `oid` is not a tag. Unlike [`Self::peel_tags`], each tag's `type`
+    /// header decides whether the chain continues, so the final object is never read and may
+    /// be missing. Git computes these values the same way, and listing many tags pays for one
+    /// object read per tag instead of two.
+    ///
+    /// # Errors
+    ///
+    /// - [`Error::ObjectNotFound`] when `oid` or an intermediate tag is missing.
+    /// - [`Error::CorruptObject`] when a tag has no valid `object` header, a `type tag` header
+    ///   names an object that is not a tag, or the chain loops.
+    pub(crate) fn peel_tag_target(&self, oid: ObjectId) -> Result<Option<ObjectId>> {
+        if self.read_info(&oid)?.kind != ObjectKind::Tag {
+            return Ok(None);
+        }
+        let mut current = oid;
+        let mut visited: Option<HashSet<ObjectId>> = None;
+        loop {
+            let tag = self.read(&current)?;
+            if tag.kind != ObjectKind::Tag {
+                return Err(Error::CorruptObject(format!(
+                    "{current} is named as a tag but is a {}",
+                    tag.kind
+                )));
+            }
+            let (target, names_tag) = tag_target_header(&tag.data);
+            let target = target.ok_or_else(|| {
+                Error::CorruptObject(format!("tag {current} has no valid object header"))
+            })?;
+            if !names_tag {
+                return Ok(Some(target));
+            }
+            if !visited.get_or_insert_with(HashSet::new).insert(current) {
+                return Err(Error::CorruptObject(format!(
+                    "tag chain from {oid} loops back to {current}"
+                )));
+            }
+            current = target;
+        }
+    }
+
+    /// Peel `oid` through annotated tags and a commit to a tree.
+    ///
+    /// Returns `None` when the chain ends at a blob. Errors are those of [`Self::peel_tags`],
+    /// plus [`Error::CorruptObject`] for a commit without a valid `tree` header.
+    pub(crate) fn peel_to_tree(&self, oid: ObjectId) -> Result<Option<ObjectId>> {
+        match self.peel_tags(oid)? {
+            (tree, ObjectKind::Tree) => Ok(Some(tree)),
+            (commit, ObjectKind::Commit) => {
+                let obj = self.read(&commit)?;
+                Ok(Some(CommitRef::parse(&obj.data)?.tree()))
+            }
+            _ => Ok(None),
+        }
+    }
+}
+
+/// The first `object` header of a tag and whether its first `type` header is `tag`, read
+/// without allocating.
+fn tag_target_header(data: &[u8]) -> (Option<ObjectId>, bool) {
+    let mut target: Option<Option<ObjectId>> = None;
+    let mut names_tag = None;
+    for line in data.split(|&b| b == b'\n') {
+        if line.is_empty() || (target.is_some() && names_tag.is_some()) {
+            break;
+        }
+        if let Some(hex) = line.strip_prefix(b"object ") {
+            target.get_or_insert_with(|| {
+                std::str::from_utf8(hex)
+                    .ok()
+                    .and_then(|s| s.trim().parse().ok())
+            });
+        } else if let Some(kind) = line.strip_prefix(b"type ") {
+            names_tag.get_or_insert(kind.trim_ascii() == b"tag");
+        }
+    }
+    (target.flatten(), names_tag.unwrap_or(false))
 }
 
 #[cfg(test)]
@@ -175,6 +255,101 @@ mod tests {
             tip = tag(&odb, tip, "tag", &format!("t{i}"));
         }
         assert_eq!(odb.peel_to_commit(tip).unwrap(), Some(c));
+    }
+
+    #[test]
+    fn peel_tag_target_names_the_innermost_object_of_tags_only() {
+        let dir = TempDir::new().unwrap();
+        let odb = Odb::new(dir.path());
+        let c = commit(&odb);
+        let inner = tag(&odb, c, "commit", "inner");
+        let outer = tag(&odb, inner, "tag", "outer");
+        let blob = odb.write(ObjectKind::Blob, b"data").unwrap();
+        let tag_of_blob = tag(&odb, blob, "blob", "b");
+        assert_eq!(odb.peel_tag_target(c).unwrap(), None);
+        assert_eq!(odb.peel_tag_target(blob).unwrap(), None);
+        assert_eq!(odb.peel_tag_target(inner).unwrap(), Some(c));
+        assert_eq!(odb.peel_tag_target(outer).unwrap(), Some(c));
+        assert_eq!(odb.peel_tag_target(tag_of_blob).unwrap(), Some(blob));
+
+        let missing = ObjectId::from_hex("1111111111111111111111111111111111111111").unwrap();
+        let dangling = tag(&odb, missing, "commit", "dangling");
+        assert_eq!(odb.peel_tag_target(dangling).unwrap(), Some(missing));
+        let dangling_outer = tag(&odb, missing, "tag", "dangling-outer");
+        assert!(matches!(
+            odb.peel_tag_target(dangling_outer),
+            Err(Error::ObjectNotFound(_))
+        ));
+        assert!(matches!(
+            odb.peel_tag_target(missing),
+            Err(Error::ObjectNotFound(_))
+        ));
+    }
+
+    #[test]
+    fn peel_tag_target_rejects_a_type_tag_header_naming_a_non_tag() {
+        let dir = TempDir::new().unwrap();
+        let odb = Odb::new(dir.path());
+        let c = commit(&odb);
+        let lying = tag(&odb, c, "tag", "lying");
+        assert!(matches!(
+            odb.peel_tag_target(lying),
+            Err(Error::CorruptObject(_))
+        ));
+    }
+
+    #[test]
+    fn peel_tag_target_detects_a_tag_cycle() {
+        let store = Arc::new(MemoryStore::new(HashAlgo::Sha1));
+        let a = ObjectId::from_hex("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").unwrap();
+        let b = ObjectId::from_hex("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb").unwrap();
+        for (from, to) in [(a, b), (b, a)] {
+            let body = format!("object {to}\ntype tag\ntag cycle\n\n");
+            store.insert_object(from, ObjectKind::Tag, Arc::from(body.into_bytes()));
+        }
+        let dir = TempDir::new().unwrap();
+        let odb = OdbBuilder::files(dir.path())
+            .primary(store)
+            .alternates(false)
+            .build();
+        assert!(matches!(
+            odb.peel_tag_target(a),
+            Err(Error::CorruptObject(_))
+        ));
+    }
+
+    #[test]
+    fn peel_to_tree_follows_tags_and_commits() {
+        let dir = TempDir::new().unwrap();
+        let odb = Odb::new(dir.path());
+        let tree = odb.write(ObjectKind::Tree, b"").unwrap();
+        let c = commit(&odb);
+        let outer = tag(&odb, tag(&odb, c, "commit", "inner"), "tag", "outer");
+        let tag_of_tree = tag(&odb, tree, "tree", "t");
+        let blob = odb.write(ObjectKind::Blob, b"data").unwrap();
+        let tag_of_blob = tag(&odb, blob, "blob", "b");
+        assert_eq!(odb.peel_to_tree(tree).unwrap(), Some(tree));
+        assert_eq!(odb.peel_to_tree(c).unwrap(), Some(tree));
+        assert_eq!(odb.peel_to_tree(outer).unwrap(), Some(tree));
+        assert_eq!(odb.peel_to_tree(tag_of_tree).unwrap(), Some(tree));
+        assert_eq!(odb.peel_to_tree(blob).unwrap(), None);
+        assert_eq!(odb.peel_to_tree(tag_of_blob).unwrap(), None);
+    }
+
+    #[test]
+    fn peel_to_tree_rejects_a_commit_without_a_tree_header() {
+        let dir = TempDir::new().unwrap();
+        let odb = Odb::new(dir.path());
+        let bad = odb
+            .write(
+                ObjectKind::Commit,
+                b"author A <a@example.com> 0 +0000\n\nno tree\n",
+            )
+            .unwrap();
+        assert!(matches!(
+            odb.peel_to_tree(bad),
+            Err(Error::CorruptObject(_))
+        ));
     }
 
     #[test]

@@ -2937,7 +2937,9 @@ impl Index {
         prefix: &[u8],
     ) -> Result<()> {
         let oid = rev_parse::resolve_revision(repo, treeish)?;
-        let tree_oid = peel_to_tree_oid(repo, oid)?;
+        let tree_oid = repo.odb().peel_to_tree(oid)?.ok_or_else(|| {
+            Error::ObjectNotFound(format!("cannot peel {oid} to tree for --with-tree"))
+        })?;
         for e in self.entries.iter_mut() {
             if e.stage() != 0 {
                 e.set_stage(3);
@@ -2975,24 +2977,6 @@ impl Index {
             }
         }
         Ok(())
-    }
-}
-
-fn peel_to_tree_oid(repo: &Repository, oid: ObjectId) -> Result<ObjectId> {
-    let obj = repo.odb().read(&oid)?;
-    match obj.kind {
-        ObjectKind::Tree => Ok(oid),
-        ObjectKind::Commit => {
-            let commit = crate::objects::parse_commit(&obj.data)?;
-            Ok(commit.tree)
-        }
-        ObjectKind::Tag => {
-            let tag = crate::objects::parse_tag(&obj.data)?;
-            peel_to_tree_oid(repo, tag.object)
-        }
-        _ => Err(Error::ObjectNotFound(format!(
-            "cannot peel {oid} to tree for --with-tree"
-        ))),
     }
 }
 

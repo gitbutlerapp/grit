@@ -463,31 +463,9 @@ fn peel_to_commit(
     repo: &Repository,
     oid: ObjectId,
 ) -> Result<Option<ObjectId>, PackBitmapWriteError> {
-    let obj = repo
-        .odb()
-        .read(&oid)
-        .map_err(|e| PackBitmapWriteError::Object(e.to_string()))?;
-    match obj.kind {
-        ObjectKind::Commit => Ok(Some(oid)),
-        ObjectKind::Tag => {
-            let tag =
-                parse_tag(&obj.data).map_err(|e| PackBitmapWriteError::Object(e.to_string()))?;
-            Ok(
-                if repo
-                    .odb()
-                    .read(&tag.object)
-                    .map_err(|e| PackBitmapWriteError::Object(e.to_string()))?
-                    .kind
-                    == ObjectKind::Commit
-                {
-                    Some(tag.object)
-                } else {
-                    None
-                },
-            )
-        }
-        _ => Ok(None),
-    }
+    repo.odb()
+        .peel_to_commit(oid)
+        .map_err(|e| PackBitmapWriteError::Object(e.to_string()))
 }
 
 fn verify_order_closure(

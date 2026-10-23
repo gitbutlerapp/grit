@@ -227,3 +227,46 @@ fn object_walk_over_merges_and_nested_dir_edits_matches_git() {
         }
     }
 }
+
+#[test]
+fn nested_annotated_tag_tips_peel_like_git() {
+    let repo = HistoryRepo::init();
+    let wt = repo.worktree();
+    commit_file(wt, "data.bin", "payload\n", "first");
+    commit_file(wt, "more.txt", "more\n", "second");
+    git(wt, &["tag", "-a", "inner", "-m", "inner", "HEAD~1"]);
+    git(wt, &["tag", "-a", "outer", "-m", "outer", "inner"]);
+    let blob = git(wt, &["rev-parse", "HEAD:data.bin"]).trim().to_string();
+    git(wt, &["tag", "-a", "blob-inner", "-m", "blob", &blob]);
+    git(
+        wt,
+        &["tag", "-a", "blob-outer", "-m", "blob outer", "blob-inner"],
+    );
+
+    let grit_repo = support::open_grit_repo(wt);
+    let cases: [(&[&str], &[&str]); 3] = [
+        (&["outer"], &[]),
+        (&["blob-outer", "outer"], &[]),
+        (&["HEAD"], &["outer"]),
+    ];
+    for (positive, negative) in cases {
+        let mut args = vec!["rev-list".to_owned()];
+        args.extend(positive.iter().map(|s| (*s).to_owned()));
+        args.extend(negative.iter().map(|s| format!("^{s}")));
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        let git_commits: Vec<String> = git(wt, &args).lines().map(str::to_owned).collect();
+        let owned = |specs: &[&str]| specs.iter().map(|s| (*s).to_owned()).collect::<Vec<_>>();
+        let grit_commits: Vec<String> = rev_list(
+            &grit_repo,
+            &owned(positive),
+            &owned(negative),
+            &RevListOptions::default(),
+        )
+        .expect("commit walk")
+        .commits
+        .iter()
+        .map(|c| c.to_hex())
+        .collect();
+        assert_eq!(grit_commits, git_commits, "{args:?}");
+    }
+}

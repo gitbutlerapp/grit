@@ -251,3 +251,46 @@ fn fold_peeled_refs_matches_git_ls_remote() {
         .iter()
         .any(|r| r.name == "refs/tags/v1" && r.peeled.is_some()));
 }
+
+#[test]
+fn local_ls_remote_peels_nested_tags_like_git() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    init_repo(tmp.path());
+    git(tmp.path(), &["tag", "-a", "-m", "inner", "inner"]);
+    git(tmp.path(), &["tag", "-a", "-m", "outer", "outer", "inner"]);
+    std::fs::write(tmp.path().join("blob.txt"), "blob\n").unwrap();
+    let blob = git(tmp.path(), &["hash-object", "-w", "blob.txt"]);
+    git(
+        tmp.path(),
+        &["tag", "-a", "-m", "blob tag", "blob-tag", blob.trim()],
+    );
+
+    let ls_remote = git(tmp.path(), &["ls-remote", "."]);
+    let mut git_lines: Vec<(String, String)> = ls_remote
+        .lines()
+        .filter_map(|line| line.split_once('\t'))
+        .map(|(oid, name)| (oid.to_owned(), name.to_owned()))
+        .collect();
+    git_lines.sort();
+
+    let config = open(tmp.path()).config().expect("config");
+    let remote = resolve_remote_argument(&config, tmp.path().to_str().unwrap()).expect("remote");
+    let mut grit_lines: Vec<(String, String)> = remote
+        .list_refs(
+            None,
+            &ListRefsOptions {
+                peel: true,
+                ..Default::default()
+            },
+            None,
+        )
+        .expect("list refs")
+        .into_iter()
+        .map(|r| (r.oid.to_hex(), r.name))
+        .collect();
+    grit_lines.sort();
+
+    assert_eq!(grit_lines, git_lines);
+    let head = git(tmp.path(), &["rev-parse", "HEAD"]);
+    assert!(grit_lines.contains(&(head.trim().to_owned(), "refs/tags/outer^{}".to_owned())));
+}

@@ -30,7 +30,7 @@ To turn a user's repository argument (a configured name, a URL, an scp-style `ho
 
 `Remote::list_refs` takes `ListRefsOptions` (prefixes, heads, tags, symrefs, peel) and returns `RemoteRef` entries in `git ls-remote` order. On disk it uses `list_refs_from_git_dir`. Over the wire it uses protocol v2 `ls-refs` when available, otherwise the v0/v1 ref advertisement.
 
-With `peel` set, annotated tags come back as two entries, the tag and a `<tag>^{}` line holding the object it peels to. [`RemoteRef::peeled_tag`](rustdoc:grit_lib::remote::RemoteRef::peeled_tag) identifies those lines, and [`fold_peeled_refs`](rustdoc:grit_lib::remote::fold_peeled_refs) folds them into one [`PeeledRemoteRef`](rustdoc:grit_lib::remote::PeeledRemoteRef) per ref, with `peeled` set, keeping the listing order.
+With `peel` set, annotated tags come back as two entries, the tag and a `<tag>^{}` line holding the object it peels to: the first non-tag object, through any chain of tags of tags, as `git ls-remote` reports it. [`RemoteRef::peeled_tag`](rustdoc:grit_lib::remote::RemoteRef::peeled_tag) identifies those lines, and [`fold_peeled_refs`](rustdoc:grit_lib::remote::fold_peeled_refs) folds them into one [`PeeledRemoteRef`](rustdoc:grit_lib::remote::PeeledRemoteRef) per ref, with `peeled` set, keeping the listing order.
 
 ## Fetch and push
 
