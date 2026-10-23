@@ -1193,7 +1193,13 @@ pub fn print_stash_push_outcome(
     outln!(w);
     match outcome {
         StashPushOutcome::Nothing { .. } => outln!(w, "No local changes to save."),
-        StashPushOutcome::Saved { oid, message } => {
+        StashPushOutcome::Saved {
+            oid,
+            message,
+            dry_run: _,
+            stashed_hunks: _,
+            stashed_lines: _,
+        } => {
             let short = short_hex(oid);
             if message.is_empty() {
                 outln!(w, "- Saved working tree and index state · `{short}`");

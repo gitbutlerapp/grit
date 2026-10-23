@@ -39,6 +39,9 @@ fn main() -> Result<(), grit_lib::error::Error> {
         message: Some("library guide stash".into()),
         include_untracked: false,
         identity: IDENT.into(),
+        selection: None,
+        pathspecs: Vec::new(),
+        dry_run: false,
     })?;
     println!("stash_pushed={}", pushed.is_some());
 

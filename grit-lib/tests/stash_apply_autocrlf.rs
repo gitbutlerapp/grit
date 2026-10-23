@@ -23,6 +23,9 @@ fn stash_options() -> StashCreateOptions {
         message: None,
         include_untracked: false,
         identity: "T <t@e.com> 1000000000 +0000".to_owned(),
+        selection: None,
+        pathspecs: Vec::new(),
+        dry_run: false,
     }
 }
 
@@ -31,6 +34,9 @@ fn stash_options_untracked() -> StashCreateOptions {
         message: None,
         include_untracked: true,
         identity: "T <t@e.com> 1000000000 +0000".to_owned(),
+        selection: None,
+        pathspecs: Vec::new(),
+        dry_run: false,
     }
 }
 

@@ -9,7 +9,7 @@ order: 4
 
 ```text
 grit stash [-m <msg>] [-u]
-grit stash push [-m <msg>] [-u]
+grit stash push [-m <msg>] [-u] [--hunks <id,...>] [--lines <path:start-end>] [--dry-run]
 grit stash list
 grit stash show [<n>] [-p]
 grit stash apply [<n>]
@@ -32,7 +32,10 @@ When a stash was created with `-u` / `--include-untracked`, `apply` and `pop` re
 | Option | Description |
 | --- | --- |
 | `-m`, `--message` | Message stored on the stash reflog (push / bare `grit stash`). |
-| `-u`, `--include-untracked` | Include untracked files in the stash. |
+| `-u`, `--include-untracked` | Include untracked files in the stash (not with `--hunks` / `--lines`). |
+| `--hunks` | Stash only listed unstaged hunk ids from `grit diff --unstaged --json`. |
+| `--lines` | Stash only unstaged line ranges (`path:start-end`, same as `grit add --lines`). |
+| `--dry-run` | Preview a partial stash (`--hunks` / `--lines`); no ref, index, or worktree updates. |
 | `<n>` | Stash index for `show`, `apply`, `pop`, or `drop` (default `0`). |
 | `-p`, `--patch` | Show the full patch in `grit stash show` instead of a diffstat. |
 | `push` | Save changes explicitly (same flags as bare `grit stash`). |
@@ -102,9 +105,12 @@ When something was stashed:
 ```json
 {
   "oid": "6e513d5cd6ab8d618238e22d7ca55d942b55964a",
-  "message": "On main: wip feature"
+  "message": "On main: wip feature",
+  "dry_run": false
 }
 ```
+
+Partial stash (`--hunks` / `--lines`) also includes `stashed_hunks` and `stashed_lines` maps (same shape as `grit add --json`).
 
 When there was nothing to save:
 

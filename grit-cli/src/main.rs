@@ -195,8 +195,31 @@ enum StashAction {
         #[arg(short = 'm', long = "message", allow_hyphen_values = true)]
         message: Option<String>,
         /// Include untracked files in the stash.
-        #[arg(short = 'u', long = "include-untracked")]
+        #[arg(
+            short = 'u',
+            long = "include-untracked",
+            conflicts_with_all = ["hunks", "lines"]
+        )]
         include_untracked: bool,
+        /// Stash only unstaged hunks from `grit diff --json`.
+        #[arg(
+            long = "hunks",
+            value_name = "ID,...",
+            action = clap::ArgAction::Append,
+            conflicts_with = "include_untracked"
+        )]
+        hunks: Vec<String>,
+        /// Stash only unstaged line ranges (`path:start-end`).
+        #[arg(
+            long = "lines",
+            value_name = "PATH:START-END",
+            action = clap::ArgAction::Append,
+            conflicts_with = "include_untracked"
+        )]
+        lines: Vec<String>,
+        /// Preview partial stash without updating refs, index, or worktree.
+        #[arg(long = "dry-run")]
+        dry_run: bool,
     },
     /// List stash entries.
     List,
@@ -1173,8 +1196,34 @@ enum Command {
         )]
         message: Option<String>,
         /// Include untracked files (bare `grit stash` / `grit stash push`).
-        #[arg(short = 'u', long = "include-untracked", global = true)]
+        #[arg(
+            short = 'u',
+            long = "include-untracked",
+            global = true,
+            conflicts_with_all = ["hunks", "lines"]
+        )]
         include_untracked: bool,
+        /// Stash only unstaged hunks from `grit diff --json` (comma-separated, repeatable).
+        #[arg(
+            long = "hunks",
+            value_name = "ID,...",
+            action = clap::ArgAction::Append,
+            global = true,
+            conflicts_with = "include_untracked"
+        )]
+        hunks: Vec<String>,
+        /// Stash only unstaged line ranges (`path:start-end`, same as `grit add --lines`).
+        #[arg(
+            long = "lines",
+            value_name = "PATH:START-END",
+            action = clap::ArgAction::Append,
+            global = true,
+            conflicts_with = "include_untracked"
+        )]
+        lines: Vec<String>,
+        /// Preview partial stash without updating refs, index, or worktree.
+        #[arg(long = "dry-run", global = true)]
+        dry_run: bool,
         #[command(subcommand)]
         action: Option<StashAction>,
     },
@@ -2623,23 +2672,63 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             action,
             message,
             include_untracked,
+            hunks,
+            lines,
+            dry_run,
         } => match action {
-            None => emit(
-                &commands::stash::run_push(message, include_untracked)?,
-                opts,
-                ctx,
-            ),
+            None => {
+                let outcome =
+                    commands::stash::run_push(message, include_untracked, &hunks, &lines, dry_run);
+                match outcome {
+                    Ok(o) => emit(&o, opts, ctx),
+                    Err(err) => {
+                        let code = commands::stash::hunks_exit_code(&err);
+                        if opts.mode == OutputMode::Json {
+                            output::emit_error(&err, opts);
+                        } else {
+                            eprintln!("error: {err:#}");
+                        }
+                        std::process::exit(code);
+                    }
+                }
+            }
             Some(StashAction::Push {
                 message: push_message,
                 include_untracked: push_untracked,
-            }) => emit(
-                &commands::stash::run_push(
+                hunks: push_hunks,
+                lines: push_lines,
+                dry_run: push_dry_run,
+            }) => {
+                let merged_hunks = if push_hunks.is_empty() {
+                    hunks
+                } else {
+                    push_hunks
+                };
+                let merged_lines = if push_lines.is_empty() {
+                    lines
+                } else {
+                    push_lines
+                };
+                let outcome = commands::stash::run_push(
                     push_message.or(message),
                     include_untracked || push_untracked,
-                )?,
-                opts,
-                ctx,
-            ),
+                    &merged_hunks,
+                    &merged_lines,
+                    dry_run || push_dry_run,
+                );
+                match outcome {
+                    Ok(o) => emit(&o, opts, ctx),
+                    Err(err) => {
+                        let code = commands::stash::hunks_exit_code(&err);
+                        if opts.mode == OutputMode::Json {
+                            output::emit_error(&err, opts);
+                        } else {
+                            eprintln!("error: {err:#}");
+                        }
+                        std::process::exit(code);
+                    }
+                }
+            }
             Some(StashAction::List) => emit(&commands::stash::run_list()?, opts, ctx),
             Some(StashAction::Show { index, patch }) => {
                 emit(&commands::stash::run_show(index, patch)?, opts, ctx)

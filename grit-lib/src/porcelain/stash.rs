@@ -25,6 +25,8 @@ use crate::diff::{
 use crate::error::{Error, Result};
 use crate::index::{index_file_mtime, Index, IndexEntry, MODE_GITLINK, MODE_SYMLINK, MODE_TREE};
 // `MODE_EXECUTABLE` only drives the Unix executable-bit application below.
+use crate::apply::{apply_patch_to_index, FilePatch, IndexApplyOptions};
+use crate::diff::hunk_id::DiffSide;
 #[cfg(unix)]
 use crate::index::MODE_EXECUTABLE;
 use crate::objects::{parse_commit, parse_tree, CommitData, ObjectId, ObjectKind};
@@ -33,6 +35,10 @@ use crate::porcelain::checkout::checkout_between_trees;
 use crate::porcelain::checkout::smudge_bytes_for_worktree_path;
 use crate::porcelain::clean::{is_nested_git_worktree, path_in_nested_git_worktree};
 use crate::porcelain::commit::write_commit_object;
+use crate::porcelain::hunk_select::{
+    resolve_selection, reverse_apply_patches_to_worktree, HunkSelection,
+    WorktreeReverseApplyOptions,
+};
 use crate::porcelain::index_from_tree::{index_from_tree, index_from_tree_with_worktree_stats};
 use crate::porcelain::status::{
     collect_untracked_and_ignored_inner, expand_untracked_for_staging_with_rules, IgnoredMode,
@@ -234,6 +240,12 @@ pub struct StashCreateOptions {
     pub include_untracked: bool,
     /// Full author/committer identity (`Name <email> timestamp tz`).
     pub identity: String,
+    /// When set, stash only these unstaged hunks (index is left unchanged on push).
+    pub selection: Option<HunkSelection>,
+    /// Pathspecs narrowing hunk resolution (same as `grit add --hunks`).
+    pub pathspecs: Vec<String>,
+    /// Preview stash creation without updating refs, the worktree, or the index.
+    pub dry_run: bool,
 }
 
 /// One entry from [`list_stashes`] (`stash@{{index}}` in newest-first order).
@@ -612,6 +624,54 @@ struct BuiltStash {
     w_tree: ObjectId,
     message: String,
     untracked_paths: Vec<String>,
+    partial_patches: Option<Vec<FilePatch>>,
+}
+
+struct MemOverlayGuard<'a> {
+    odb: &'a Odb,
+    enabled_here: bool,
+}
+
+impl<'a> MemOverlayGuard<'a> {
+    fn enter(odb: &'a Odb) -> Self {
+        let already_active = odb.is_mem_overlay_active();
+        if !already_active {
+            odb.enable_mem_overlay();
+        }
+        Self {
+            odb,
+            enabled_here: !already_active,
+        }
+    }
+}
+
+impl Drop for MemOverlayGuard<'_> {
+    fn drop(&mut self) {
+        if self.enabled_here {
+            self.odb.disable_mem_overlay();
+        }
+    }
+}
+
+fn selection_is_active(options: &StashCreateOptions) -> bool {
+    options
+        .selection
+        .as_ref()
+        .is_some_and(|sel| !sel.ids.is_empty() || !sel.ranges.is_empty())
+}
+
+fn resolve_partial_stash_patches(
+    repo: &Repository,
+    options: &StashCreateOptions,
+) -> Result<Option<Vec<FilePatch>>> {
+    if !selection_is_active(options) {
+        return Ok(None);
+    }
+    let Some(sel) = options.selection.as_ref() else {
+        return Ok(None);
+    };
+    let patches = resolve_selection(repo, DiffSide::Unstaged, sel, &options.pathspecs)?;
+    Ok(Some(patches))
 }
 
 fn build_stash_commit(
@@ -625,7 +685,12 @@ fn build_stash_commit(
     let head_commit = parse_commit(&head_obj.data)?;
     let head_tree = head_commit.tree;
 
-    if !has_stashable_changes(repo, work_tree, &head_tree, options.include_untracked)? {
+    let partial_patches = resolve_partial_stash_patches(repo, options)?;
+    if let Some(ref patches) = partial_patches {
+        if patches.is_empty() {
+            return Ok(None);
+        }
+    } else if !has_stashable_changes(repo, work_tree, &head_tree, options.include_untracked)? {
         return Ok(None);
     }
 
@@ -666,7 +731,19 @@ fn build_stash_commit(
     };
 
     let mut w_index = index_from_tree(repo, &i_tree)?;
-    apply_worktree_diff_to_index(repo, work_tree, &mut w_index)?;
+    if let Some(ref patches) = partial_patches {
+        apply_patch_to_index(
+            repo,
+            &mut w_index,
+            patches,
+            &IndexApplyOptions {
+                dry_run: options.dry_run,
+            },
+        )
+        .map_err(|e| Error::Message(e.to_string()))?;
+    } else {
+        apply_worktree_diff_to_index(repo, work_tree, &mut w_index)?;
+    }
     let w_tree = write_stash_tree_from_index(repo, &mut w_index)?;
 
     let w_message = match &options.message {
@@ -697,6 +774,7 @@ fn build_stash_commit(
         w_tree,
         message: w_message.trim_end().to_owned(),
         untracked_paths,
+        partial_patches,
     }))
 }
 
@@ -747,22 +825,38 @@ pub fn push_stash(repo: &Repository, options: &StashCreateOptions) -> Result<Opt
     let work_tree = repo
         .work_tree()
         .ok_or_else(|| Error::PathError("cannot stash in a bare repository".into()))?;
+    let _overlay = options.dry_run.then(|| MemOverlayGuard::enter(repo.odb()));
     let Some(built) = build_stash_commit(repo, work_tree, options)? else {
         return Ok(None);
     };
-    store_stash(repo, built.w_commit, &built.message, &options.identity)?;
-    let head = resolve_head(repo.git_dir())?;
-    let head_oid = head_commit_oid(&head)?;
-    let head_tree = {
-        let obj = repo.odb().read(&head_oid)?;
-        parse_commit(&obj.data)?.tree
-    };
-    if !built.untracked_paths.is_empty() {
-        remove_stashed_untracked(repo, work_tree, &built.untracked_paths)?;
+    if options.dry_run {
+        return Ok(Some(built.w_commit));
     }
-    checkout_between_trees(repo, Some(&built.w_tree), &head_tree)?;
-    let mut head_index = index_from_tree_with_worktree_stats(repo, &head_tree)?;
-    repo.write_index(&mut head_index)?;
+    store_stash(repo, built.w_commit, &built.message, &options.identity)?;
+    if let Some(ref patches) = built.partial_patches {
+        if !built.untracked_paths.is_empty() {
+            remove_stashed_untracked(repo, work_tree, &built.untracked_paths)?;
+        }
+        reverse_apply_patches_to_worktree(
+            repo,
+            patches,
+            &WorktreeReverseApplyOptions { dry_run: false },
+        )
+        .map_err(|e| Error::Message(e.to_string()))?;
+    } else {
+        let head = resolve_head(repo.git_dir())?;
+        let head_oid = head_commit_oid(&head)?;
+        let head_tree = {
+            let obj = repo.odb().read(&head_oid)?;
+            parse_commit(&obj.data)?.tree
+        };
+        if !built.untracked_paths.is_empty() {
+            remove_stashed_untracked(repo, work_tree, &built.untracked_paths)?;
+        }
+        checkout_between_trees(repo, Some(&built.w_tree), &head_tree)?;
+        let mut head_index = index_from_tree_with_worktree_stats(repo, &head_tree)?;
+        repo.write_index(&mut head_index)?;
+    }
     Ok(Some(built.w_commit))
 }
 
@@ -1717,6 +1811,9 @@ pub fn push_operation_autostash(repo: &Repository, identity: &str) -> Result<Opt
             message: Some("autostash".to_owned()),
             include_untracked: true,
             identity: identity.to_owned(),
+            selection: None,
+            pathspecs: Vec::new(),
+            dry_run: false,
         },
     )
 }
@@ -1857,6 +1954,9 @@ mod coverage_tests {
             message: Some("msg".into()),
             include_untracked: false,
             identity: ident.into(),
+            selection: None,
+            pathspecs: Vec::new(),
+            dry_run: false,
         };
         let oid = create_stash(&repo, &opts).expect("create").expect("some");
         store_stash(&repo, oid, "On main: msg", ident).expect("store");
@@ -1910,6 +2010,9 @@ mod coverage_tests {
             message: None,
             include_untracked: false,
             identity: "T <t@t> 1 +0000".into(),
+            selection: None,
+            pathspecs: Vec::new(),
+            dry_run: false,
         };
         push_stash(&repo, &opts).expect("push").expect("oid");
 
@@ -1932,6 +2035,9 @@ mod coverage_tests {
             message: None,
             include_untracked: false,
             identity: "T <t@t> 1 +0000".into(),
+            selection: None,
+            pathspecs: Vec::new(),
+            dry_run: false,
         };
         assert!(push_stash(&repo, &opts).expect("push").is_none());
     }
@@ -1946,6 +2052,9 @@ mod coverage_tests {
             message: Some("m".into()),
             include_untracked: true,
             identity: ident.into(),
+            selection: None,
+            pathspecs: Vec::new(),
+            dry_run: false,
         };
         push_stash(&repo, &opts).expect("push").expect("oid");
         fs::write(tmp.path().join("u.txt"), b"precious\n").unwrap();
@@ -1958,5 +2067,204 @@ mod coverage_tests {
             err,
             Error::StashCouldNotRestoreUntracked { ref path } if path == "u.txt"
         ));
+    }
+}
+
+#[cfg(test)]
+mod hunk_push_tests {
+    #![allow(clippy::expect_used, clippy::unwrap_used)]
+
+    use super::*;
+    use crate::diff::hunk_id::{hunk_ids_with_duplicate_peers, DiffSide};
+    use crate::diff::{unstaged_file_diffs_with_peer_hunks, DiffOptions};
+    use crate::environment::RepositoryOptions;
+    use crate::porcelain::hunk_select::HunkSelection;
+    use crate::porcelain::index_from_tree::index_from_tree;
+    use crate::repo::Repository;
+    use std::process::Command;
+    use tempfile::TempDir;
+
+    fn git(dir: &std::path::Path, args: &[&str]) {
+        let out = Command::new("git")
+            .current_dir(dir)
+            .args(args)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .output()
+            .expect("git");
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    fn open_repo(root: &std::path::Path) -> Repository {
+        git(root, &["config", "user.email", "t@example.com"]);
+        git(root, &["config", "user.name", "Test"]);
+        Repository::discover(Some(root), &RepositoryOptions::empty()).expect("discover")
+    }
+
+    fn two_hunk_file() -> (String, String) {
+        let mut base = String::new();
+        for i in 0..24 {
+            base.push_str(&format!("line{i}\n"));
+        }
+        let mut edited = base.clone();
+        edited = edited.replacen("line5\n", "LINE5\n", 1);
+        edited = edited.replacen("line18\n", "LINE18\n", 1);
+        (base, edited)
+    }
+
+    fn tree_blob(repo: &Repository, tree_oid: &ObjectId, path: &str) -> Vec<u8> {
+        let index = index_from_tree(repo, tree_oid).expect("tree index");
+        let entry = index.get(path.as_bytes(), 0).expect("path in tree");
+        repo.odb().read(&entry.oid).expect("blob").data
+    }
+
+    fn stash_w_tree(repo: &Repository, stash_oid: &ObjectId) -> ObjectId {
+        let obj = repo.odb().read(stash_oid).unwrap();
+        parse_commit(&obj.data).unwrap().tree
+    }
+
+    fn hunk_selection_for_first_hunk(repo: &Repository) -> HunkSelection {
+        let (files, peers) =
+            unstaged_file_diffs_with_peer_hunks(repo, &[], DiffOptions::default()).unwrap();
+        let ids = hunk_ids_with_duplicate_peers(
+            DiffSide::Unstaged,
+            "f.txt",
+            &files[0].hunks,
+            peers.get("f.txt").map(|v| v.as_slice()).unwrap_or(&[]),
+        );
+        HunkSelection {
+            ids: vec![ids[0].clone()],
+            ranges: Vec::new(),
+        }
+    }
+
+    const IDENT: &str = "Test <t@example.com> 1000000000 +0000";
+
+    fn setup_two_hunk_repo() -> (TempDir, Repository, HunkSelection) {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        git(root, &["init", "-q", "-b", "main"]);
+        let (base, edited) = two_hunk_file();
+        fs::write(root.join("f.txt"), base).unwrap();
+        git(root, &["add", "f.txt"]);
+        git(root, &["commit", "-qm", "init"]);
+        let repo = open_repo(root);
+        fs::write(root.join("f.txt"), edited).unwrap();
+        let selection = hunk_selection_for_first_hunk(&repo);
+        (tmp, repo, selection)
+    }
+
+    #[test]
+    fn stash_push_hunks_stashes_only_selected() {
+        let (tmp, repo, selection) = setup_two_hunk_repo();
+        let oid = push_stash(
+            &repo,
+            &StashCreateOptions {
+                message: Some("partial".into()),
+                include_untracked: false,
+                identity: IDENT.into(),
+                selection: Some(selection),
+                pathspecs: Vec::new(),
+                dry_run: false,
+            },
+        )
+        .expect("push")
+        .expect("oid");
+        let w_tree = stash_w_tree(&repo, &oid);
+        let blob = tree_blob(&repo, &w_tree, "f.txt");
+        let text = String::from_utf8_lossy(&blob);
+        assert!(text.contains("LINE5"), "stashed hunk in W tree: {text}");
+        assert!(
+            !text.contains("LINE18"),
+            "unselected hunk must not be in stash tree: {text}"
+        );
+        git(tmp.path(), &["fsck", "--strict"]);
+    }
+
+    #[test]
+    fn stash_push_hunks_worktree_keeps_rest() {
+        let (tmp, repo, selection) = setup_two_hunk_repo();
+        push_stash(
+            &repo,
+            &StashCreateOptions {
+                message: None,
+                include_untracked: false,
+                identity: IDENT.into(),
+                selection: Some(selection),
+                pathspecs: Vec::new(),
+                dry_run: false,
+            },
+        )
+        .expect("push")
+        .expect("oid");
+        let on_disk = fs::read_to_string(tmp.path().join("f.txt")).unwrap();
+        assert!(
+            on_disk.contains("line5\n") && !on_disk.contains("LINE5"),
+            "first hunk reverted toward index: {on_disk}"
+        );
+        assert!(
+            on_disk.contains("LINE18"),
+            "second hunk still unstaged on disk: {on_disk}"
+        );
+        git(tmp.path(), &["fsck", "--strict"]);
+    }
+
+    #[test]
+    fn stash_push_hunks_roundtrip_with_git_stash_apply() {
+        let (tmp, repo, selection) = setup_two_hunk_repo();
+        push_stash(
+            &repo,
+            &StashCreateOptions {
+                message: None,
+                include_untracked: false,
+                identity: IDENT.into(),
+                selection: Some(selection),
+                pathspecs: Vec::new(),
+                dry_run: false,
+            },
+        )
+        .expect("push")
+        .expect("oid");
+        git(
+            tmp.path(),
+            &["restore", "--worktree", "--source=HEAD", "--", "f.txt"],
+        );
+        git(tmp.path(), &["stash", "apply"]);
+        let on_disk = fs::read_to_string(tmp.path().join("f.txt")).unwrap();
+        assert!(on_disk.contains("LINE5"), "git stash apply restored hunk");
+        git(tmp.path(), &["fsck", "--strict"]);
+    }
+
+    #[test]
+    fn stash_push_hunks_pop_restores() {
+        let (tmp, repo, selection) = setup_two_hunk_repo();
+        push_stash(
+            &repo,
+            &StashCreateOptions {
+                message: None,
+                include_untracked: false,
+                identity: IDENT.into(),
+                selection: Some(selection),
+                pathspecs: Vec::new(),
+                dry_run: false,
+            },
+        )
+        .expect("push")
+        .expect("oid");
+        git(
+            tmp.path(),
+            &["restore", "--worktree", "--source=HEAD", "--", "f.txt"],
+        );
+        git(tmp.path(), &["stash", "pop"]);
+        let on_disk = fs::read_to_string(tmp.path().join("f.txt")).unwrap();
+        assert!(
+            on_disk.contains("LINE5"),
+            "pop restored stashed hunk: {on_disk}"
+        );
+        git(tmp.path(), &["fsck", "--strict"]);
     }
 }
