@@ -155,11 +155,18 @@ pub fn run(rev: RevSelectArgs, count: bool, left_right: bool) -> Result<RevsOutc
     }
     let mut fetch_opts = opts.clone();
     fetch_opts.limit = fetch_limit_plus_one(rev.max_count);
-    let oids = walk.commits(&token_refs, &fetch_opts)?;
-    let (oids, truncated) = truncate_oid_list(oids, rev.max_count);
+    fetch_opts.retain_commit_data = true;
+    let list_result = walk.rev_list_result(&token_refs, &fetch_opts)?;
+    let (oids, truncated) = truncate_oid_list(list_result.commits, rev.max_count);
     let now = context::wall_clock_now(env).unix_timestamp();
     let loader = CommitJsonLoader::for_listed_commits();
-    let commits = loader.load(&repo, &oids, now)?;
+    let mut parsed = list_result.commit_data;
+    let commits = repo
+        .odb()
+        .with_pack_read_context(|| {
+            loader.load_with_summaries_reusing(&repo, &oids, now, &mut parsed)
+        })?
+        .0;
     Ok(RevsOutcome {
         commits,
         count: None,

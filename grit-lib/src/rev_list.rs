@@ -6683,6 +6683,41 @@ fn try_bounded_topo_limit_list(
     Ok(Some((out, linkage)))
 }
 
+/// One commit from a single positive tip with `-n 1` (matches `git rev-list -n 1 <tip>`).
+pub(crate) fn single_tip_bounded_page(
+    repo: &Repository,
+    tip: ObjectId,
+    retain_commit_data: bool,
+) -> Result<RevListResult> {
+    single_tip_bounded_page_with_parent_probe(repo, tip, 1, retain_commit_data)
+}
+
+/// Like [`single_tip_bounded_page`], optionally including the first parent when `max_fetch >= 2`
+/// so callers can detect truncation without a full date-order walk.
+pub(crate) fn single_tip_bounded_page_with_parent_probe(
+    repo: &Repository,
+    tip: ObjectId,
+    max_fetch: usize,
+    retain_commit_data: bool,
+) -> Result<RevListResult> {
+    let mut commits = vec![tip];
+    if max_fetch >= 2 {
+        if let Some(parent) = crate::rev_parse::commit_parents_for_navigation(repo, tip)?
+            .first()
+            .copied()
+        {
+            commits.push(parent);
+        }
+    }
+    commits.truncate(max_fetch);
+    let mut result = rev_list_result_from_commits(commits);
+    if retain_commit_data {
+        let commit = load_commit(repo, tip)?;
+        result.commit_data.insert(tip, commit);
+    }
+    Ok(result)
+}
+
 fn try_bounded_limit_list(
     repo: &Repository,
     include: &[ObjectId],
@@ -6691,6 +6726,18 @@ fn try_bounded_limit_list(
 ) -> Result<Option<RevListResult>> {
     if include.is_empty() || !can_use_bounded_limit_list(options) {
         return Ok(None);
+    }
+    if exclude.is_empty()
+        && include.len() == 1
+        && options.skip == 0
+        && options.max_count == Some(1)
+        && can_stream_default_order(exclude, options)
+    {
+        return Ok(Some(single_tip_bounded_page(
+            repo,
+            include[0],
+            options.retain_commit_data,
+        )?));
     }
     if can_stream_default_order(exclude, options) {
         return streaming_default_order_list(repo, include, options).map(Some);

@@ -337,6 +337,29 @@ fn retain_commit_data_returns_parsed_listed_commits() {
 }
 
 #[test]
+fn rev_walk_single_positive_limit_one_matches_git() {
+    let repo = support::HistoryRepo::init();
+    let wt = repo.worktree();
+    for i in 0..50 {
+        support::commit_file(wt, &format!("f{i}.txt"), "x\n", &format!("m{i}"));
+    }
+    let grit_repo =
+        Repository::discover(Some(wt), &RepositoryOptions::empty()).expect("discover");
+    let expected = support::git_rev_list(wt, &["-n", "1", "HEAD~20"]);
+    let result = grit_repo
+        .rev_walk()
+        .rev_list_result(
+            &["HEAD~20"],
+            &RevWalkListOptions {
+                limit: Some(1),
+                ..Default::default()
+            },
+        )
+        .expect("rev walk");
+    assert_eq!(result.commits, expected);
+}
+
+#[test]
 fn rev_walk_forwards_retain_commit_data() {
     let dir = tempdir().expect("tempdir");
     let repo = open_bare(dir.path()).expect("repo");

@@ -309,6 +309,52 @@ fn commit_count_from_result(result: RevListResult) -> Result<usize> {
     Ok(result.commit_count())
 }
 
+fn walk_list_is_single_positive_bounded_page(walk: &RevWalkListOptions) -> bool {
+    walk.skip == 0
+        && matches!(walk.limit, Some(1) | Some(2))
+        && !walk.reverse
+        && walk.merges == MergeFilter::Any
+        && !walk.first_parent
+        && walk.paths.is_empty()
+        && walk.refs.is_empty()
+        && walk.since.is_none()
+        && walk.until.is_none()
+        && walk.pickaxe.is_none()
+        && walk.commit_filter.as_ref().is_none_or(|f| !f.is_active())
+        && !walk.graph
+}
+
+/// Resolve one positive tip when `-n 1` lists exactly that commit (no range tokens).
+fn try_single_positive_bounded_page(
+    repo: &Repository,
+    tokens: &[&str],
+    walk: &RevWalkListOptions,
+) -> Result<Option<RevListResult>> {
+    if !walk_list_is_single_positive_bounded_page(walk) || tokens.len() != 1 {
+        return Ok(None);
+    }
+    let parsed = parse_rev_walk_tokens(repo, tokens)?;
+    if !parsed.negative.is_empty() || parsed.symmetric_left.is_some() || parsed.positive.len() != 1
+    {
+        return Ok(None);
+    }
+    let spec = &parsed.positive[0];
+    if spec.contains("..") {
+        return Ok(None);
+    }
+    let oid = resolve_revision_for_range_end(repo, spec)?;
+    let oid = peel_to_commit_for_merge_base(repo, oid)?;
+    let max_fetch = walk.limit.unwrap_or(1);
+    Ok(Some(
+        crate::rev_list::single_tip_bounded_page_with_parent_probe(
+            repo,
+            oid,
+            max_fetch,
+            walk.retain_commit_data,
+        )?,
+    ))
+}
+
 impl<'repo> RevWalk<'repo> {
     /// List commit object ids reachable from `tokens` in default `rev-list` order.
     ///
@@ -330,6 +376,9 @@ impl<'repo> RevWalk<'repo> {
         options: &RevWalkListOptions,
     ) -> Result<crate::rev_list::RevListResult> {
         let repo = self.repository();
+        if let Some(result) = try_single_positive_bounded_page(repo, tokens, options)? {
+            return Ok(result);
+        }
         let (parsed, positive, all_refs) = positive_specs_for_walk(repo, tokens, options)?;
         let opts = rev_list_options_from_walk(repo, options, &parsed, all_refs, false)?;
         rev_list(repo, &positive, &parsed.negative, &opts)
