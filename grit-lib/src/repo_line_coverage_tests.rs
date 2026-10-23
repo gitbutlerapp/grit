@@ -73,7 +73,7 @@ fn repository_open_discover_and_index_roundtrip() -> crate::error::Result<()> {
     let _ = repo.bloom_pathspec_cwd();
     let _ = repo.pathspec_precompose_enabled();
     let discovered = Repository::discover(Some(dir.path()), &RepositoryOptions::empty())?;
-    let _ = discovered.resolve_ref_name("HEAD")?;
+    let _ = discovered.resolve_ref_oid("HEAD")?;
     let mut index = discovered.load_index()?;
     let blob = discovered.odb().write(ObjectKind::Blob, b"indexed\n")?;
     index.entries_mut().push(index_entry("indexed.txt", blob));

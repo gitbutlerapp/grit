@@ -88,7 +88,8 @@ Each commit gets a stable **`change-id`** header (on by default) that survives `
 | --- | --- |
 | List branches | `grit branch` |
 | List with filters / JSON detail | `grit branch --list 'feat*' -a --merged main --sort date -n 20 --json` |
-| Current branch name only | `grit branch --show-current` |
+| Current branch name only | `grit branch --show-current` or `grit resolve --abbrev-ref HEAD` |
+| Upstream tracking branch name | `grit resolve --abbrev-ref '@{u}'` (full: `grit resolve --symbolic-full-name '@{u}'`) |
 | Create a branch at the current commit (no switch) | `grit branch <name>` |
 | Create at a specific commit | `grit branch <name> <start>` |
 | Create with upstream tracking | `grit branch -t <name> <remote>/<branch>` or rely on `branch.autoSetupMerge` |

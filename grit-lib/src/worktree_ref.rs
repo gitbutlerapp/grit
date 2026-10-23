@@ -105,7 +105,7 @@ pub fn is_linked_worktree_git_dir(git_dir: &Path) -> bool {
 }
 
 /// DWIM rules matching Git `ref_rev_parse_rules` (`refs.c`).
-const DWIM_RULES: &[&str] = &[
+pub(crate) const DWIM_RULES: &[&str] = &[
     "{0}",
     "refs/{0}",
     "refs/tags/{0}",

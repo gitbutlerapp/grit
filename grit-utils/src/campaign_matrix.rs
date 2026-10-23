@@ -520,6 +520,26 @@ pub fn run_fixture_cli_matrix(
         grit,
         cfg,
         &Scenario {
+            id: sid(fixture.id, "resolve-abbrev-ref"),
+            group: "resolve".into(),
+            fixture: fixture.label.clone(),
+            description: "resolve-abbrev-ref HEAD".into(),
+            grit_argv: vec!["resolve".into(), "--abbrev-ref".into(), "HEAD".into()],
+            git_argv: vec!["rev-parse".into(), "--abbrev-ref".into(), "HEAD".into()],
+            driver: Driver::Cli,
+            prepare_kind: None,
+            grit_via_shell: false,
+            git_via_shell: false,
+        },
+        &fixture.worktree,
+    )?);
+
+    out.push(run_scenario(
+        hyperfine,
+        git,
+        grit,
+        cfg,
+        &Scenario {
             id: sid(fixture.id, "cat"),
             group: "cat".into(),
             fixture: fixture.label.clone(),

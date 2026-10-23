@@ -843,6 +843,12 @@ enum Command {
         /// Print abbreviated object ids.
         #[arg(long)]
         short: bool,
+        /// Print the shortest unambiguous ref name for each spec (like `git rev-parse --abbrev-ref`).
+        #[arg(long = "abbrev-ref", conflicts_with = "symbolic_full_name")]
+        abbrev_ref: bool,
+        /// Print the full symbolic ref name for each spec (like `git rev-parse --symbolic-full-name`).
+        #[arg(long = "symbolic-full-name", conflicts_with = "abbrev_ref")]
+        symbolic_full_name: bool,
     },
     /// Show blob, tree, commit, or tag contents for a revision spec.
     Cat {
@@ -2144,8 +2150,25 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
         Command::PatchId { revs, unstable } => {
             emit(&commands::patch_id::run(&revs, unstable)?, opts, ctx)
         }
-        Command::Resolve { specs, short } => {
-            emit(&commands::resolve::run(specs, short)?, opts, ctx)
+        Command::Resolve {
+            specs,
+            short,
+            abbrev_ref,
+            symbolic_full_name,
+        } => {
+            use commands::resolve::RefNameOutput;
+            let ref_output = if abbrev_ref {
+                RefNameOutput::AbbrevRef
+            } else if symbolic_full_name {
+                RefNameOutput::SymbolicFullName
+            } else {
+                RefNameOutput::ObjectIds
+            };
+            emit(
+                &commands::resolve::run(specs, short, ref_output)?,
+                opts,
+                ctx,
+            )
         }
         Command::Cat { spec } => emit(&commands::cat::run(spec)?, opts, ctx),
         Command::Commit {

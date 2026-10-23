@@ -5,11 +5,29 @@
     "ResolveEntry": {
       "description": "One resolved spec (`--json` row).",
       "properties": {
+        "full_ref": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "kind": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "oid": {
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ref_display": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "ref_name": {
           "type": [
@@ -20,16 +38,16 @@
         "size": {
           "format": "uint64",
           "minimum": 0.0,
-          "type": "integer"
+          "type": [
+            "integer",
+            "null"
+          ]
         },
         "spec": {
           "type": "string"
         }
       },
       "required": [
-        "kind",
-        "oid",
-        "size",
         "spec"
       ],
       "type": "object"

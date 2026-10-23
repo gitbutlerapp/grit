@@ -8,7 +8,7 @@ order: 4
 ## Synopsis
 
 ```text
-grit resolve [--short] <SPEC>...
+grit resolve [--short] [--abbrev-ref | --symbolic-full-name] <SPEC>...
 ```
 
 ## Description
@@ -16,6 +16,8 @@ grit resolve [--short] <SPEC>...
 Resolves one or more revision specs to an object id, plus the object type and uncompressed size. Type and size follow `git cat-file` semantics, including `refs/replace` when replace refs are enabled (honor `GIT_NO_REPLACE_OBJECTS` to read the stored object instead). Supported forms match the library rev-parse surface: branches and tags, `HEAD~n`, peel suffixes such as `^{tree}`, path suffixes such as `main:path/file`, reflog selectors like `@{1}`, abbreviated object ids, and **change ids** (reverse-hex tokens in `k`–`z`, 4–32 characters — stored header or derived id). See [Change ids — Revisions](../library/change-ids.md#revisions).
 
 Each spec prints on its own line as `OID TYPE` (full hex by default). With `--short`, oids are abbreviated using the same uniqueness rules as elsewhere in grit.
+
+With `--abbrev-ref` or `--symbolic-full-name`, output switches to ref names (one line per spec): the shortest unambiguous short name, or the full symbolic ref name, matching `git rev-parse` for the same flags. Specs that are not refs (commit oids, peeled objects, unknown names) produce no line for that spec; exit status stays `0` unless a spec fails for another reason (for example `@{u}` with no upstream).
 
 ### Exit status
 
@@ -31,6 +33,8 @@ Each spec prints on its own line as `OID TYPE` (full hex by default). With `--sh
 | --- | --- |
 | `<SPEC>…` | One or more revision specs to resolve (required). |
 | `--short` | Print abbreviated object ids instead of full hex. |
+| `--abbrev-ref` | Print the shortest unambiguous ref name for each spec (conflicts with default oid output). |
+| `--symbolic-full-name` | Print the full symbolic ref name for each spec. |
 
 ## Examples
 
@@ -63,7 +67,10 @@ Pass `--json` for stable, scripting-friendly output:
 | `results[].oid` | string | Resolved object id (abbreviated when `--short` is set). |
 | `results[].kind` | string | `blob`, `tree`, `commit`, or `tag`. |
 | `results[].size` | number | Uncompressed object size in bytes. |
-| `results[].ref_name` | string | Present when the spec named a ref directly. |
+| `results[].ref_name` | string | Short ref name when the spec named a ref. |
+| `results[].full_ref` | string | Full ref name (for example `refs/heads/main`). |
+| `results[].ref_display` | string | Human/markdown line for `--abbrev-ref` / `--symbolic-full-name` mode. |
+| `results[].oid` / `kind` / `size` | | Omitted in ref-name modes; present for default oid resolution. |
 
 Example:
 

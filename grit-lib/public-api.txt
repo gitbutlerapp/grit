@@ -6892,10 +6892,14 @@ impl core::marker::Unpin for grit_lib::revwalk::object_inspect::ResolveError
 impl core::marker::UnsafeUnpin for grit_lib::revwalk::object_inspect::ResolveError
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::object_inspect::ResolveError
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::object_inspect::ResolveError
+pub struct grit_lib::object_inspect::ResolvedRefName
+pub grit_lib::object_inspect::ResolvedRefName::full: alloc::string::String
+pub grit_lib::object_inspect::ResolvedRefName::short: alloc::string::String
 pub struct grit_lib::object_inspect::ResolvedObject
 pub grit_lib::object_inspect::ResolvedObject::kind: grit_lib::objects::ObjectKind
 pub grit_lib::object_inspect::ResolvedObject::oid: grit_lib::objects::ObjectId
 pub grit_lib::object_inspect::ResolvedObject::ref_name: core::option::Option<alloc::string::String>
+pub grit_lib::object_inspect::ResolvedObject::full_ref: core::option::Option<alloc::string::String>
 pub grit_lib::object_inspect::ResolvedObject::size: u64
 impl core::clone::Clone for grit_lib::revwalk::object_inspect::ResolvedObject
 pub fn grit_lib::revwalk::object_inspect::ResolvedObject::clone(&self) -> Self
@@ -14554,6 +14558,7 @@ impl grit_lib::repo::Repository
 pub fn grit_lib::repo::Repository::read_object_for_display(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::revwalk::object_inspect::ObjectContents>
 pub fn grit_lib::repo::Repository::read_object_raw_for_display(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::objects::Object>
 pub fn grit_lib::repo::Repository::resolve(&self, &str) -> core::result::Result<grit_lib::revwalk::object_inspect::ResolvedObject, grit_lib::revwalk::object_inspect::ResolveError>
+pub fn grit_lib::repo::Repository::resolve_ref_name(&self, &str) -> core::result::Result<core::option::Option<grit_lib::revwalk::object_inspect::ResolvedRefName>, grit_lib::revwalk::rev_parse_error::RevParseError>
 impl grit_lib::repo::Repository
 pub fn grit_lib::repo::Repository::write_commit_graph(&self, &grit_lib::maintenance::CommitGraphOptions) -> grit_lib::error::Result<grit_lib::maintenance::CommitGraphWriteReport>
 pub fn grit_lib::repo::Repository::write_midx(&self, &grit_lib::maintenance::MidxOptions) -> grit_lib::error::Result<grit_lib::maintenance::MidxWriteReport>
@@ -16705,7 +16710,10 @@ pub fn grit_lib::refs::reflog_file_path(&std::path::Path, &str) -> std::path::Pa
 pub fn grit_lib::refs::resolve_at_n_branch(&std::path::Path, &str) -> grit_lib::error::Result<alloc::string::String>
 pub fn grit_lib::refs::resolve_ref(&std::path::Path, &str) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::refs::resolve_ref_cached(&std::path::Path, &str, &grit_lib::refs::PackedRefs) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectId>>
+pub fn grit_lib::refs::expand_ref_dwim_full_name(&grit_lib::repo::Repository, &str) -> grit_lib::error::Result<(usize, core::option::Option<alloc::string::String>)>
 pub fn grit_lib::refs::resolve_ref_dwim(&std::path::Path, &str) -> (usize, core::option::Option<grit_lib::objects::ObjectId>)
+pub fn grit_lib::refs::shorten_unambiguous(&grit_lib::repo::Repository, &str, bool) -> grit_lib::error::Result<alloc::string::String>
+pub fn grit_lib::refs::warn_ambiguous_refs_from_config(&grit_lib::repo::Repository) -> bool
 pub fn grit_lib::refs::should_autocreate_reflog(&std::path::Path, &str) -> bool
 pub fn grit_lib::refs::should_autocreate_reflog_for_mode(&str, grit_lib::refs::LogRefsConfig) -> bool
 pub fn grit_lib::refs::should_autocreate_reflog_with_config(&grit_lib::config::ConfigSet, &std::path::Path, &str) -> bool
@@ -18993,6 +19001,7 @@ impl grit_lib::repo::Repository
 pub fn grit_lib::repo::Repository::read_object_for_display(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::revwalk::object_inspect::ObjectContents>
 pub fn grit_lib::repo::Repository::read_object_raw_for_display(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::objects::Object>
 pub fn grit_lib::repo::Repository::resolve(&self, &str) -> core::result::Result<grit_lib::revwalk::object_inspect::ResolvedObject, grit_lib::revwalk::object_inspect::ResolveError>
+pub fn grit_lib::repo::Repository::resolve_ref_name(&self, &str) -> core::result::Result<core::option::Option<grit_lib::revwalk::object_inspect::ResolvedRefName>, grit_lib::revwalk::rev_parse_error::RevParseError>
 impl grit_lib::repo::Repository
 pub fn grit_lib::repo::Repository::write_commit_graph(&self, &grit_lib::maintenance::CommitGraphOptions) -> grit_lib::error::Result<grit_lib::maintenance::CommitGraphWriteReport>
 pub fn grit_lib::repo::Repository::write_midx(&self, &grit_lib::maintenance::MidxOptions) -> grit_lib::error::Result<grit_lib::maintenance::MidxWriteReport>
@@ -20993,10 +21002,14 @@ impl core::marker::Unpin for grit_lib::revwalk::object_inspect::ResolveError
 impl core::marker::UnsafeUnpin for grit_lib::revwalk::object_inspect::ResolveError
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::object_inspect::ResolveError
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::object_inspect::ResolveError
+pub struct grit_lib::revwalk::object_inspect::ResolvedRefName
+pub grit_lib::revwalk::object_inspect::ResolvedRefName::full: alloc::string::String
+pub grit_lib::revwalk::object_inspect::ResolvedRefName::short: alloc::string::String
 pub struct grit_lib::revwalk::object_inspect::ResolvedObject
 pub grit_lib::revwalk::object_inspect::ResolvedObject::kind: grit_lib::objects::ObjectKind
 pub grit_lib::revwalk::object_inspect::ResolvedObject::oid: grit_lib::objects::ObjectId
 pub grit_lib::revwalk::object_inspect::ResolvedObject::ref_name: core::option::Option<alloc::string::String>
+pub grit_lib::revwalk::object_inspect::ResolvedObject::full_ref: core::option::Option<alloc::string::String>
 pub grit_lib::revwalk::object_inspect::ResolvedObject::size: u64
 impl core::clone::Clone for grit_lib::revwalk::object_inspect::ResolvedObject
 pub fn grit_lib::revwalk::object_inspect::ResolvedObject::clone(&self) -> Self
@@ -21589,6 +21602,8 @@ pub mod grit_lib::revwalk::rev_parse_error
 #[non_exhaustive] pub enum grit_lib::revwalk::rev_parse_error::RevParseError
 pub grit_lib::revwalk::rev_parse_error::RevParseError::AmbiguousArgument
 pub grit_lib::revwalk::rev_parse_error::RevParseError::AmbiguousArgument::spec: alloc::string::String
+pub grit_lib::revwalk::rev_parse_error::RevParseError::AmbiguousRefname
+pub grit_lib::revwalk::rev_parse_error::RevParseError::AmbiguousRefname::spec: alloc::string::String
 pub grit_lib::revwalk::rev_parse_error::RevParseError::AmbiguousChangeId
 pub grit_lib::revwalk::rev_parse_error::RevParseError::AmbiguousChangeId::candidates: alloc::vec::Vec<grit_lib::revwalk::rev_parse_error::AmbiguousChangeIdHint>
 pub grit_lib::revwalk::rev_parse_error::RevParseError::AmbiguousChangeId::prefix: alloc::string::String

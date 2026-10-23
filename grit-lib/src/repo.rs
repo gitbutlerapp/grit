@@ -957,7 +957,7 @@ impl Repository {
     /// # Errors
     ///
     /// Propagates [`crate::refs::store::RefStoreError`] as [`Error::RefStore`].
-    pub(crate) fn resolve_ref_name(&self, refname: &str) -> Result<crate::objects::ObjectId> {
+    pub(crate) fn resolve_ref_oid(&self, refname: &str) -> Result<crate::objects::ObjectId> {
         self.ref_store.resolve(refname)
     }
 

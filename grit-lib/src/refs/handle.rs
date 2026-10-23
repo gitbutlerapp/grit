@@ -78,7 +78,7 @@ impl<'repo> References<'repo> {
     /// ```
     #[inline]
     pub fn resolve(&self, name: &RefName) -> Result<ObjectId> {
-        self.repo.resolve_ref_name(name.as_str())
+        self.repo.resolve_ref_oid(name.as_str())
     }
 
     /// Read `name` when it exists: its stored value and the object it resolves to.
@@ -92,7 +92,7 @@ impl<'repo> References<'repo> {
         };
         let oid = match &raw {
             RawRef::Direct(oid) => *oid,
-            RawRef::Symbolic(_) => self.repo.resolve_ref_name(name)?,
+            RawRef::Symbolic(_) => self.repo.resolve_ref_oid(name)?,
         };
         Ok(Some(ExistingRef { raw, oid }))
     }

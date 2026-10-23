@@ -25,10 +25,13 @@ use crate::objects::{
     parse_commit, parse_tag, parse_tree, CommitData, Object, ObjectId, ObjectKind, TagData,
     TreeEntry,
 };
+use crate::refs::{
+    expand_ref_dwim_full_name, shorten_unambiguous, warn_ambiguous_refs_from_config,
+};
 use crate::repo::Repository;
 use crate::rev_parse::{
-    abbreviate_object_id, ambiguous_object_hint_lines, parse_peel_suffix, resolve_revision,
-    symbolic_full_name,
+    abbreviate_object_id, ambiguous_object_hint_lines, expand_at_minus_to_branch_name,
+    parse_peel_suffix, resolve_revision, resolve_upstream_symbolic_name, upstream_suffix_info,
 };
 use crate::rev_parse_error::{AmbiguousChangeIdHint, AmbiguousObjectHint, RevParseError};
 
@@ -94,6 +97,15 @@ impl From<RevParseError> for ResolveError {
     }
 }
 
+/// Full and shortened ref names for a spec (`rev-parse --symbolic-full-name` / `--abbrev-ref`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ResolvedRefName {
+    /// Canonical full ref name (for example `refs/heads/main`).
+    pub full: String,
+    /// Shortest unambiguous short name (for example `main`).
+    pub short: String,
+}
+
 /// Result of resolving one revision spec to a concrete object.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ResolvedObject {
@@ -105,6 +117,8 @@ pub struct ResolvedObject {
     pub size: u64,
     /// Short ref name when the spec named a ref directly (for example `main`, `v1.0`).
     pub ref_name: Option<String>,
+    /// Full ref name when the spec named a ref directly (for example `refs/heads/main`).
+    pub full_ref: Option<String>,
 }
 
 /// Parsed object payload for display or serialization.
@@ -166,12 +180,59 @@ impl Repository {
             .map_err(|_| ResolveError::UnknownRevision {
                 spec: spec.to_owned(),
             })?;
+        let ref_names = infer_ref_names(self, spec, oid);
         Ok(ResolvedObject {
             oid,
             kind: info.kind,
             size: info.size,
-            ref_name: infer_ref_name(self, spec, oid),
+            ref_name: ref_names.as_ref().map(|n| n.short.clone()),
+            full_ref: ref_names.map(|n| n.full),
         })
+    }
+
+    /// Resolve `spec` to ref names when it names a ref (`rev-parse --abbrev-ref` / `--symbolic-full-name`).
+    ///
+    /// Returns `Ok(None)` when the spec does not name a ref (for example a commit oid or `HEAD^{tree}`).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`RevParseError::AmbiguousRefname`] when DWIM finds multiple refs and
+    /// `core.warnAmbiguousRefs` is enabled, and other [`RevParseError`] variants for invalid
+    /// upstream / `@{-N}` specs.
+    pub fn resolve_ref_name(
+        &self,
+        spec: &str,
+    ) -> std::result::Result<Option<ResolvedRefName>, RevParseError> {
+        let strict = warn_ambiguous_refs_from_config(self);
+        if upstream_suffix_info(spec).is_some() {
+            let full = resolve_upstream_symbolic_name(self, spec).map_err(map_resolve_ref_error)?;
+            let short = shorten_unambiguous(self, &full, strict).map_err(map_resolve_ref_error)?;
+            return Ok(Some(ResolvedRefName { full, short }));
+        }
+        if let Some(branch) =
+            expand_at_minus_to_branch_name(self, spec).map_err(map_resolve_ref_error)?
+        {
+            let full = format!("refs/heads/{branch}");
+            if self.resolve_ref_oid(&full).is_err() {
+                return Ok(None);
+            }
+            let short = shorten_unambiguous(self, &full, strict).map_err(map_resolve_ref_error)?;
+            return Ok(Some(ResolvedRefName { full, short }));
+        }
+        let (count, full) = expand_ref_dwim_full_name(self, spec).map_err(map_resolve_ref_error)?;
+        if count == 0 {
+            return Ok(None);
+        }
+        if count > 1 && strict {
+            return Err(RevParseError::AmbiguousRefname {
+                spec: spec.to_owned(),
+            });
+        }
+        let full = full.ok_or_else(|| RevParseError::AmbiguousRefname {
+            spec: spec.to_owned(),
+        })?;
+        let short = shorten_unambiguous(self, &full, strict).map_err(map_resolve_ref_error)?;
+        Ok(Some(ResolvedRefName { full, short }))
     }
 
     /// Read uncompressed object bytes for display, following replace refs when enabled.
@@ -266,22 +327,27 @@ pub fn abbreviate_for_display(repo: &Repository, oid: ObjectId, short: bool) -> 
     }
 }
 
-fn infer_ref_name(repo: &Repository, spec: &str, oid: ObjectId) -> Option<String> {
+fn map_resolve_ref_error(err: Error) -> RevParseError {
+    match err {
+        Error::RevParse(e) => e,
+        other => RevParseError::InvalidObjectName {
+            name: other.to_string(),
+        },
+    }
+}
+
+fn infer_ref_names(repo: &Repository, spec: &str, oid: ObjectId) -> Option<ResolvedRefName> {
     let rev_part = spec.split(':').next().unwrap_or(spec);
     let (base, _) = parse_peel_suffix(rev_part);
     if base.is_empty() || looks_like_abbrev_hex(base, repo) {
         return None;
     }
-    if symbolic_full_name(repo, base).is_some() {
-        return Some(base.to_owned());
+    let resolved = repo.resolve_ref_name(base).ok().flatten()?;
+    if repo.resolve_ref_oid(&resolved.full).ok() == Some(oid) {
+        Some(resolved)
+    } else {
+        None
     }
-    for prefix in ["refs/heads/", "refs/tags/"] {
-        let full = format!("{prefix}{base}");
-        if repo.resolve_ref_name(&full).ok() == Some(oid) {
-            return Some(base.to_owned());
-        }
-    }
-    None
 }
 
 fn looks_like_abbrev_hex(base: &str, repo: &Repository) -> bool {

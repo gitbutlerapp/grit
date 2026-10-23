@@ -66,6 +66,13 @@ pub enum RevParseError {
         branch: String,
     },
 
+    /// Short ref name matches more than one ref under DWIM rules.
+    #[error("refname '{spec}' is ambiguous")]
+    AmbiguousRefname {
+        /// User ref spec.
+        spec: String,
+    },
+
     /// Could not read `.git/AUTO_MERGE`.
     #[error("failed to read AUTO_MERGE: {detail}")]
     AutoMergeRead {

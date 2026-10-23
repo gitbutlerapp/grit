@@ -29,8 +29,13 @@
 pub mod handle;
 pub mod listing;
 pub mod query_reachability;
+pub mod shorten;
 pub mod store;
 pub mod version_sort;
+
+pub use shorten::{
+    expand_ref_dwim_full_name, shorten_unambiguous, warn_ambiguous_refs_from_config,
+};
 
 mod domain_reexports;
 pub use domain_reexports::*;

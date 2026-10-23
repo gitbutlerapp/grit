@@ -152,7 +152,7 @@ pub fn symbolic_full_name(repo: &Repository, spec: &str) -> Option<String> {
 
     if let Ok(Some(branch)) = expand_at_minus_to_branch_name(repo, spec) {
         let ref_name = format!("refs/heads/{branch}");
-        if repo.resolve_ref_name(&ref_name).is_ok() {
+        if repo.resolve_ref_oid(&ref_name).is_ok() {
             return Some(ref_name);
         }
         return None;
@@ -166,7 +166,7 @@ pub fn symbolic_full_name(repo: &Repository, spec: &str) -> Option<String> {
     }
     // If it's already a full ref path
     if spec.starts_with("refs/") {
-        if repo.resolve_ref_name(spec).is_ok() {
+        if repo.resolve_ref_oid(spec).is_ok() {
             return Some(spec.to_owned());
         }
         return None;
@@ -174,7 +174,7 @@ pub fn symbolic_full_name(repo: &Repository, spec: &str) -> Option<String> {
     // DWIM: try refs/heads, refs/tags, refs/remotes
     for prefix in &["refs/heads/", "refs/tags/", "refs/remotes/"] {
         let candidate = format!("{prefix}{spec}");
-        if repo.resolve_ref_name(&candidate).is_ok() {
+        if repo.resolve_ref_oid(&candidate).is_ok() {
             return Some(candidate);
         }
     }
@@ -298,7 +298,7 @@ fn resolve_upstream_full_ref_name(repo: &Repository, base: &str, is_push: bool) 
         .strip_prefix("refs/heads/")
         .ok_or_else(|| Error::InvalidRef(format!("invalid merge ref: {merge}")))?;
     let tracking = format!("refs/remotes/{remote}/{merge_branch}");
-    if repo.resolve_ref_name(&tracking).is_err() {
+    if repo.resolve_ref_oid(&tracking).is_err() {
         return Err(RevParseError::UpstreamNotTracked {
             merge: merge.to_owned(),
         }
@@ -323,7 +323,7 @@ pub fn resolve_push_full_ref_for_branch(repo: &Repository, branch_short: &str) -
             }
             let mb = merge.strip_prefix("refs/heads/").unwrap_or(&merge);
             let tr = format!("refs/remotes/{remote}/{mb}");
-            if repo.resolve_ref_name(&tr).is_ok() {
+            if repo.resolve_ref_oid(&tr).is_ok() {
                 Some(tr)
             } else {
                 None
@@ -396,14 +396,14 @@ pub fn resolve_push_full_ref_for_branch(repo: &Repository, branch_short: &str) -
         }),
         "simple" => {
             if let Some(ref up) = upstream_tracking {
-                if up == &current_tracking && repo.resolve_ref_name(&current_tracking).is_ok() {
+                if up == &current_tracking && repo.resolve_ref_oid(&current_tracking).is_ok() {
                     return Ok(current_tracking);
                 }
             }
             Err(RevParseError::PushDefaultSimpleMismatch.into())
         }
         _ => {
-            if repo.resolve_ref_name(&current_tracking).is_ok() {
+            if repo.resolve_ref_oid(&current_tracking).is_ok() {
                 Ok(current_tracking)
             } else if let Some(up) = upstream_tracking {
                 Ok(up)
@@ -586,7 +586,7 @@ fn resolve_upstream_branch_context(repo: &Repository, base: &str) -> Result<(Str
         return Ok((base.to_owned(), base.to_owned()));
     }
     let refname = format!("refs/heads/{base}");
-    if repo.resolve_ref_name(&refname).is_err() {
+    if repo.resolve_ref_oid(&refname).is_err() {
         return Err(RevParseError::NoSuchBranch {
             branch: base.to_owned(),
         }
@@ -1191,7 +1191,7 @@ fn resolve_ref_dwim_for_rev_parse(repo: &Repository, spec: &str) -> (usize, Opti
         let candidate = rule.replace("{0}", spec);
         if let Ok(Some(target)) = refs::read_symbolic_ref_for_repository(repo, &candidate) {
             if check_refname_format(&target, &refname_opts).is_err()
-                || repo.resolve_ref_name(&target).is_err()
+                || repo.resolve_ref_oid(&target).is_err()
             {
                 // Match upstream `expand_ref` (refs.c): a dangling symref is
                 // silently ignored when it is literally `HEAD` (e.g. an unborn
@@ -1206,7 +1206,7 @@ fn resolve_ref_dwim_for_rev_parse(repo: &Repository, spec: &str) -> (usize, Opti
                 continue;
             }
         }
-        if let Ok(oid) = repo.resolve_ref_name(&candidate) {
+        if let Ok(oid) = repo.resolve_ref_oid(&candidate) {
             count += 1;
             if first.is_none() {
                 first = Some(oid);
@@ -1253,7 +1253,7 @@ fn resolve_revision_impl(
     if let Some(tag_path) = spec.strip_prefix("tags/") {
         if !tag_path.is_empty() {
             let tag_ref = format!("refs/tags/{tag_path}");
-            if let Ok(oid) = repo.resolve_ref_name(&tag_ref) {
+            if let Ok(oid) = repo.resolve_ref_oid(&tag_ref) {
                 return Ok(oid);
             }
         }
@@ -1276,7 +1276,7 @@ fn resolve_revision_impl(
     // treeish / DWIM path logic so a worktree path named `other` cannot shadow `refs/tags/other`
     // (`git rev-parse refs/tags/other`, t5332).
     if spec.starts_with("refs/") && !spec.contains(':') {
-        if let Ok(oid) = repo.resolve_ref_name(spec) {
+        if let Ok(oid) = repo.resolve_ref_oid(spec) {
             return Ok(oid);
         }
     }
@@ -2011,7 +2011,7 @@ fn warn_if_branch_refname_collides_with_abbrev_hex(
         return;
     }
     let branch_ref = format!("refs/heads/{spec}");
-    let Ok(ref_oid) = repo.resolve_ref_name(&branch_ref) else {
+    let Ok(ref_oid) = repo.resolve_ref_oid(&branch_ref) else {
         return;
     };
     if ref_oid != object_oid {
@@ -2178,8 +2178,8 @@ fn try_resolve_describe_name(repo: &Repository, spec: &str) -> Result<Option<Obj
     commit_candidates.dedup();
 
     if let Ok(tag_oid) = repo
-        .resolve_ref_name(&format!("refs/tags/{tag_name}"))
-        .or_else(|_| repo.resolve_ref_name(tag_name))
+        .resolve_ref_oid(&format!("refs/tags/{tag_name}"))
+        .or_else(|_| repo.resolve_ref_oid(tag_name))
     {
         let tag_commit = peel_to_commit_for_merge_base(repo, tag_oid)?;
         let mut strict_candidates = commit_candidates
@@ -2301,7 +2301,7 @@ fn resolve_base(
     if upstream_suffix_info(spec).is_some() {
         let full_ref = resolve_upstream_symbolic_name(repo, spec)?;
         return repo
-            .resolve_ref_name(&full_ref)
+            .resolve_ref_oid(&full_ref)
             .map_err(|_| Error::ObjectNotFound(spec.to_owned()));
     }
 
@@ -2390,7 +2390,7 @@ fn resolve_base(
         // A full 40-hex OID is always accepted, even if the object
         // doesn't exist in the ODB (matches git behavior).
         let rn = format!("refs/heads/{spec}");
-        if repo.resolve_ref_name(&rn).is_ok() {
+        if repo.resolve_ref_oid(&rn).is_ok() {
             repo.warn(crate::diagnostics::Warning::AmbiguousRefname {
                 spec: spec.to_owned(),
             });
@@ -2408,12 +2408,12 @@ fn resolve_base(
     // string as an abbreviated object id (t5334 incremental MIDX).
     if is_hex_prefix(spec) && spec.len() < repo.odb().hash_algo().hex_len() {
         let tag_ref = format!("refs/tags/{spec}");
-        if let Ok(oid) = repo.resolve_ref_name(&tag_ref) {
+        if let Ok(oid) = repo.resolve_ref_oid(&tag_ref) {
             warn_if_hex_ref_collides_with_objects(repo, spec, oid);
             return Ok(oid);
         }
         let branch_ref = format!("refs/heads/{spec}");
-        if let Ok(oid) = repo.resolve_ref_name(&branch_ref) {
+        if let Ok(oid) = repo.resolve_ref_oid(&branch_ref) {
             warn_if_hex_ref_collides_with_objects(repo, spec, oid);
             return Ok(oid);
         }
@@ -2470,7 +2470,7 @@ fn resolve_base(
     // `remotes/<remote>/<ref>` is a common shorthand for `refs/remotes/<remote>/<ref>` (t2024).
     if let Some(rest) = spec.strip_prefix("remotes/") {
         let full = format!("refs/remotes/{rest}");
-        if let Ok(oid) = repo.resolve_ref_name(&full) {
+        if let Ok(oid) = repo.resolve_ref_oid(&full) {
             return Ok(oid);
         }
     }
@@ -2489,16 +2489,16 @@ fn resolve_base(
         && spec != "stash"
     {
         let local_branch = format!("refs/heads/{spec}");
-        if repo.resolve_ref_name(&local_branch).is_err() {
+        if repo.resolve_ref_oid(&local_branch).is_err() {
             let remote_head = format!("refs/remotes/{spec}/HEAD");
-            if let Ok(oid) = repo.resolve_ref_name(&remote_head) {
+            if let Ok(oid) = repo.resolve_ref_oid(&remote_head) {
                 return Ok(oid);
             }
         }
     }
     // DWIM: bare `stash` refers to `refs/stash` (like upstream Git), not `.git/stash`.
     if spec == "stash" {
-        if let Ok(oid) = repo.resolve_ref_name("refs/stash") {
+        if let Ok(oid) = repo.resolve_ref_oid("refs/stash") {
             return Ok(oid);
         }
     }
@@ -2507,8 +2507,8 @@ fn resolve_base(
     // and warn, matching upstream ambiguous-refname behavior.
     let head_ref = format!("refs/heads/{spec}");
     let tag_ref = format!("refs/tags/{spec}");
-    let head_oid = repo.resolve_ref_name(&head_ref).ok();
-    let tag_oid = repo.resolve_ref_name(&tag_ref).ok();
+    let head_oid = repo.resolve_ref_oid(&head_ref).ok();
+    let tag_oid = repo.resolve_ref_oid(&tag_ref).ok();
     match (head_oid, tag_oid) {
         (Some(h), Some(t)) if h != t => {
             repo.warn(crate::diagnostics::Warning::AmbiguousRefname {
@@ -2533,7 +2533,7 @@ fn resolve_base(
         let mut ref_match: Option<ObjectId> = None;
         for prefix in ["refs/heads/", "refs/tags/", "refs/remotes/", "refs/notes/"] {
             let full = format!("{prefix}{spec}");
-            if let Ok(oid) = repo.resolve_ref_name(&full) {
+            if let Ok(oid) = repo.resolve_ref_oid(&full) {
                 ref_match = Some(oid);
                 break;
             }
@@ -2543,14 +2543,14 @@ fn resolve_base(
         }
     }
     for candidate in &[format!("refs/remotes/{spec}"), format!("refs/notes/{spec}")] {
-        if let Ok(oid) = repo.resolve_ref_name(candidate) {
+        if let Ok(oid) = repo.resolve_ref_oid(candidate) {
             return Ok(oid);
         }
     }
 
     // `git log one` / `git rev-parse one`: remote name → `refs/remotes/<name>/HEAD` (Git DWIM).
     if let Some(head_ref) = remote_tracking_head_symbolic_target(repo, spec) {
-        if let Ok(oid) = repo.resolve_ref_name(&head_ref) {
+        if let Ok(oid) = repo.resolve_ref_oid(&head_ref) {
             return Ok(oid);
         }
     }
@@ -2666,7 +2666,7 @@ fn try_resolve_at_minus(repo: &Repository, spec: &str) -> Result<Option<ObjectId
                 if let Some(to_pos) = rest.find(" to ") {
                     let from_branch = &rest[..to_pos];
                     let ref_name = format!("refs/heads/{from_branch}");
-                    if let Ok(oid) = repo.resolve_ref_name(&ref_name) {
+                    if let Ok(oid) = repo.resolve_ref_oid(&ref_name) {
                         return Ok(Some(oid));
                     }
                     if let Ok(oid) = from_branch.parse::<ObjectId>() {
@@ -2767,11 +2767,11 @@ fn dwim_refname(repo: &Repository, raw: &str) -> String {
         return raw.to_owned();
     }
     // Bare `stash` is `refs/stash` (not `refs/heads/stash`); reflog lives at `logs/refs/stash`.
-    if raw == "stash" && repo.resolve_ref_name("refs/stash").is_ok() {
+    if raw == "stash" && repo.resolve_ref_oid("refs/stash").is_ok() {
         return "refs/stash".to_owned();
     }
     let candidate = format!("refs/heads/{raw}");
-    if repo.resolve_ref_name(&candidate).is_ok() {
+    if repo.resolve_ref_oid(&candidate).is_ok() {
         candidate
     } else {
         raw.to_owned()
@@ -2825,7 +2825,7 @@ fn resolve_reflog_oid(
                         }
                         .into());
                     }
-                    return repo.resolve_ref_name(refname).map_err(|_| {
+                    return repo.resolve_ref_oid(refname).map_err(|_| {
                         RevParseError::ReflogEmpty {
                             ref_display: display.clone(),
                         }
@@ -2976,7 +2976,7 @@ pub fn resolve_reflog_walk_log_ref(repo: &Repository, r: &str) -> Result<String>
         return Ok(r.to_string());
     }
     let candidate = format!("refs/heads/{r}");
-    if repo.resolve_ref_name(&candidate).is_ok() {
+    if repo.resolve_ref_oid(&candidate).is_ok() {
         Ok(candidate)
     } else {
         Ok(r.to_string())
@@ -3065,7 +3065,7 @@ fn try_resolve_reflog_index(repo: &Repository, spec: &str) -> Result<Option<Obje
 
     let refname_raw = current_spec.as_str();
     let refname = dwim_refname(repo, refname_raw);
-    repo.resolve_ref_name(&refname)
+    repo.resolve_ref_oid(&refname)
         .map(Some)
         .map_err(|_| Error::ObjectNotFound(spec.to_owned()))
 }
@@ -3185,7 +3185,7 @@ fn approxidate_at(s: &str, now_ts: i64) -> Option<i64> {
 }
 
 fn head_tree_oid(repo: &Repository) -> Result<ObjectId> {
-    let head_oid = repo.resolve_ref_name("HEAD")?;
+    let head_oid = repo.resolve_ref_oid("HEAD")?;
     peel_to_tree(repo, head_oid)
 }
 
