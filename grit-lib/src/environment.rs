@@ -726,6 +726,8 @@ pub struct RepositoryOptions {
     pub validate_repository_format: bool,
     /// When true, [`crate::repo::Repository::open`] resolves `path` like wire-protocol serving.
     pub open_for_serving: bool,
+    /// Optional on-demand fetcher for partial-clone promisor objects.
+    pub promisor_fetcher: Option<std::sync::Arc<dyn crate::promisor_fetch::PromisorFetcher>>,
 }
 
 impl std::fmt::Debug for RepositoryOptions {
@@ -753,6 +755,7 @@ impl Default for RepositoryOptions {
             work_tree: None,
             validate_repository_format: true,
             open_for_serving: false,
+            promisor_fetcher: None,
         }
     }
 }
@@ -819,6 +822,16 @@ impl RepositoryOptions {
     #[must_use]
     pub fn with_network_trace(mut self, network_trace: bool) -> Self {
         self.network_trace = network_trace;
+        self
+    }
+
+    /// Install a promisor on-demand object fetcher for repositories opened with these options.
+    #[must_use]
+    pub fn with_promisor_fetcher(
+        mut self,
+        fetcher: Option<std::sync::Arc<dyn crate::promisor_fetch::PromisorFetcher>>,
+    ) -> Self {
+        self.promisor_fetcher = fetcher;
         self
     }
 }

@@ -1227,6 +1227,9 @@ pub fn fetch_remote(
             opts.filter = crate::partial_clone::stored_remote_filter(&local_cfg, remote);
         }
     }
+    if !opts.object_wants.is_empty() {
+        return fetch_remote_object_wants(local_git_dir, conn, opts, progress);
+    }
     let local_odb = open_odb(local_git_dir);
 
     // 1. Remote refs + default branch.
@@ -1746,6 +1749,141 @@ pub fn fetch_remote(
     Ok(FetchOutcome {
         updates,
         default_branch,
+        new_shallow: crate::shallow::dedupe_shallow_list(shallow_update.shallow),
+        new_unshallow: shallow_update.unshallow,
+        transfer,
+    })
+}
+
+/// Promisor on-demand fetch: negotiate a pack for [`FetchOptions::object_wants`] only.
+fn fetch_remote_object_wants(
+    local_git_dir: &Path,
+    conn: &mut dyn Connection,
+    opts: &mut FetchOptions,
+    progress: &mut dyn Progress,
+) -> Result<FetchOutcome> {
+    use crate::net_trace::net_trace;
+
+    let t_begin = std::time::Instant::now();
+    let local_odb = open_odb(local_git_dir);
+    let wants: Vec<ObjectId> = opts
+        .object_wants
+        .iter()
+        .copied()
+        .filter(|oid| !local_odb.exists_local(oid))
+        .collect();
+    if wants.is_empty() {
+        return Ok(FetchOutcome {
+            updates: Vec::new(),
+            default_branch: None,
+            new_shallow: Vec::new(),
+            new_unshallow: Vec::new(),
+            transfer: crate::transfer::TransferStats::default(),
+        });
+    }
+
+    let v2_caps = if conn.protocol_version() >= 2 {
+        Some(conn.capabilities().to_vec())
+    } else {
+        None
+    };
+    let v0_caps = if v2_caps.is_none() {
+        Some(conn.capabilities().join(" "))
+    } else {
+        None
+    };
+    let (wire_filter, _filter_sent) = crate::partial_clone::wire_filter_for_capabilities(
+        opts.filter.as_ref(),
+        v2_caps.as_deref(),
+        v0_caps.as_deref(),
+    );
+    if opts.promisor_object_fetch {
+        opts.mark_received_pack_promisor = true;
+    } else {
+        opts.mark_received_pack_promisor = opts.filter.is_some();
+    }
+    let wire_filter = wire_filter.as_deref();
+    let local_shallow = crate::shallow::load_shallow_oids(local_git_dir)?;
+    let mut transfer = crate::transfer::TransferStats::default();
+
+    net_trace!(
+        opts.network_trace,
+        opts.diagnostics.as_ref(),
+        "fetch_remote_object_wants: {} object(s) [+{:?} since begin]",
+        wants.len(),
+        t_begin.elapsed()
+    );
+
+    let (pack_path, shallow_update) = if let Some(caps) = v2_caps.as_ref() {
+        validate_fetch_depth_server(opts, None, Some(caps))?;
+        let deepen = V2DeepenArgs::from_opts(opts, &local_shallow);
+        negotiate_pack_v2(
+            local_git_dir,
+            conn,
+            caps,
+            &local_odb,
+            &wants,
+            &deepen,
+            wire_filter,
+            progress,
+        )?
+    } else {
+        negotiate_pack(
+            local_git_dir,
+            conn,
+            &wants,
+            opts,
+            &local_shallow,
+            wire_filter,
+            progress,
+        )?
+    };
+    if let Some(path) = pack_path {
+        let pack_config =
+            crate::config::ConfigSet::load(&opts.environment, Some(local_git_dir), true)?;
+        let index_threads = crate::parallel::index_pack_threads_for_ingest(
+            opts.thread_policy,
+            &pack_config,
+            opts.index_pack_threads,
+        )?;
+        let ingested = crate::index_pack::ingest_received_pack_path_with_progress(
+            path,
+            &local_odb,
+            &crate::index_pack::IngestPackOptions {
+                fix_thin: true,
+                skip_post_index_verify: true,
+                threads: index_threads,
+                merged_config: Some(pack_config),
+                environment: opts.environment.clone(),
+                mark_promisor_pack: opts.mark_received_pack_promisor,
+            },
+            Some(progress),
+        )?;
+        let bytes = std::fs::metadata(&ingested.pack_path)
+            .map_err(crate::error::Error::Io)?
+            .len();
+        transfer = crate::transfer::TransferStats {
+            objects: u64::try_from(ingested.object_ids.len()).unwrap_or(u64::MAX),
+            bytes,
+            kinds: Some(ingested.object_counts),
+        };
+    }
+
+    if v2_caps.is_some() && !wants.is_empty() {
+        conn.finish_send();
+    }
+
+    if !opts.dry_run {
+        crate::shallow::apply_shallow_updates(
+            local_git_dir,
+            &shallow_update.shallow,
+            &shallow_update.unshallow,
+        )?;
+    }
+
+    Ok(FetchOutcome {
+        updates: Vec::new(),
+        default_branch: None,
         new_shallow: crate::shallow::dedupe_shallow_list(shallow_update.shallow),
         new_unshallow: shallow_update.unshallow,
         transfer,

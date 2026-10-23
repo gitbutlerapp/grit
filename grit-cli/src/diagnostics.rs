@@ -241,5 +241,10 @@ pub fn repository_options(
         .duration_since(std::time::UNIX_EPOCH)
         .ok()
         .map(|d| d.as_secs() as i64);
+    options.promisor_fetcher = Some(std::sync::Arc::new(
+        grit_lib::objects::promisor::DefaultPromisorFetcher::new(std::sync::Arc::new(
+            grit_lib::remote::DefaultHttpClientFactory,
+        )),
+    ));
     (options, sink)
 }

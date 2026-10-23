@@ -572,6 +572,10 @@ pub enum Error {
     #[error("object not found: {0}")]
     ObjectNotFound(String),
 
+    /// A partial-clone promisor object is not present locally and no fetcher ran.
+    #[error("promised object not available locally: {0}")]
+    PromisedObjectMissing(crate::objects::ObjectId),
+
     /// An object's stored data is corrupt or malformed.
     #[error("corrupt object: {0}")]
     CorruptObject(String),

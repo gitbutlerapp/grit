@@ -1680,6 +1680,15 @@ impl Odb {
             return Err(err);
         }
 
+        if let (Some(caches), Some(env)) = (&self.shared_config_state, &self.shared_environment) {
+            match crate::promisor_fetch::handle_promisor_read_miss(caches, self, oid, env.as_ref())
+            {
+                Ok(Some(())) => return self.read(oid),
+                Ok(None) => {}
+                Err(err) => return Err(err),
+            }
+        }
+
         Err(Error::ObjectNotFound(oid.to_hex()))
     }
 

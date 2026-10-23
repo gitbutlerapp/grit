@@ -467,6 +467,9 @@ fn clone_into(
         thread_policy: crate::context::thread_policy_for_repo(),
         depth: shallow.then_some(1),
         filter: None,
+        promisor_fetcher: Some(std::sync::Arc::new(
+            grit_lib::objects::promisor::DefaultPromisorFetcher::new(std::sync::Arc::new(factory)),
+        )),
     };
     let outcome = clone_repo(clone_opts, &mut *term_progress, Some(&factory))?;
 

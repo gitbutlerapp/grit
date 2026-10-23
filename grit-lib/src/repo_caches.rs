@@ -37,6 +37,7 @@ use crate::pack_bitmap::BitmapIndexCache;
 use crate::precompose_config::{
     effective_core_precomposeunicode_with_config, filesystem_nfd_nfc_aliases,
 };
+use crate::promisor_fetch::{PromisorFetcher, PromisorLazyFetchDepth};
 use crate::ref_storage::RefStorageFormat;
 use crate::repo::Repository;
 
@@ -67,6 +68,8 @@ pub struct RepoCaches {
     pub(crate) ref_stores: Mutex<HashMap<PathBuf, Arc<dyn crate::refs::store::RefStore>>>,
     filters: FilterProcessState,
     promisor_hydrate: Mutex<Option<PromisorHydrateHook>>,
+    promisor_fetcher: Mutex<Option<Arc<dyn PromisorFetcher>>>,
+    promisor_lazy_depth: PromisorLazyFetchDepth,
     commit_graph_warn_seen: Mutex<HashSet<String>>,
     commit_graph: Mutex<Option<Arc<CommitGraphChain>>>,
     commit_linkage: Mutex<CommitLinkageCache>,
@@ -109,6 +112,8 @@ impl RepoCaches {
             ref_stores: Mutex::new(HashMap::new()),
             filters: FilterProcessState::new(command_runner),
             promisor_hydrate: Mutex::new(None),
+            promisor_fetcher: Mutex::new(None),
+            promisor_lazy_depth: PromisorLazyFetchDepth::default(),
             commit_graph_warn_seen: Mutex::new(HashSet::new()),
             commit_graph: Mutex::new(None),
             commit_linkage: Mutex::new(CommitLinkageCache::default()),
@@ -572,6 +577,23 @@ impl RepoCaches {
     #[must_use]
     pub fn promisor_hydrate_hook(&self) -> Option<PromisorHydrateHook> {
         self.promisor_hydrate.lock().ok().and_then(|g| *g)
+    }
+
+    /// Install the promisor on-demand fetcher for this repository handle.
+    pub fn set_promisor_fetcher(&self, fetcher: Option<Arc<dyn PromisorFetcher>>) {
+        if let Ok(mut slot) = self.promisor_fetcher.lock() {
+            *slot = fetcher;
+        }
+    }
+
+    /// Return the promisor fetcher installed on this repository, if any.
+    #[must_use]
+    pub fn promisor_fetcher(&self) -> Option<Arc<dyn PromisorFetcher>> {
+        self.promisor_fetcher.lock().ok().and_then(|g| g.clone())
+    }
+
+    pub(crate) fn promisor_lazy_depth(&self) -> &PromisorLazyFetchDepth {
+        &self.promisor_lazy_depth
     }
 }
 

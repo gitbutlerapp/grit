@@ -251,6 +251,7 @@ fn non_utf8_tracked_status_diff_add_clone_and_restore() {
             thread_policy: grit_lib::parallel::ThreadPolicy::default(),
             depth: None,
             filter: None,
+            promisor_fetcher: None,
         },
         &mut NoProgress,
         None,

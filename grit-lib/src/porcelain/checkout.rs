@@ -1256,6 +1256,38 @@ fn checkout_bulk_deleted_tree_changes(
     Ok(())
 }
 
+fn prefetch_promisor_blobs_for_checkout(repo: &Repository, changes: &[DiffEntry]) -> Result<()> {
+    let config = repo.config()?;
+    if !crate::promisor::repo_treats_promisor_packs(repo.git_dir(), config.as_ref()) {
+        return Ok(());
+    }
+    if !crate::promisor_fetch::promisor_lazy_fetch_enabled(config.as_ref(), repo.environment()) {
+        return Ok(());
+    }
+    if repo.caches().promisor_fetcher().is_none() {
+        return Ok(());
+    }
+    let odb = repo.odb();
+    let mut oids = Vec::new();
+    for change in changes {
+        if change.status == DiffStatus::Deleted {
+            continue;
+        }
+        let mode = parse_git_mode(&change.new_mode);
+        if mode != MODE_REGULAR && mode != MODE_EXECUTABLE && mode != MODE_SYMLINK {
+            continue;
+        }
+        if change.new_oid.is_zero() || odb.exists_local(&change.new_oid) {
+            continue;
+        }
+        oids.push(change.new_oid);
+    }
+    if oids.is_empty() {
+        return Ok(());
+    }
+    repo.prefetch_promised(&oids)
+}
+
 fn checkout_tree_changes_with_progress(
     repo: &Repository,
     changes: &[DiffEntry],
@@ -1267,6 +1299,8 @@ fn checkout_tree_changes_with_progress(
     let work_tree = repo
         .work_tree()
         .ok_or_else(|| Error::PathError("cannot update a bare repository's working tree".into()))?;
+
+    prefetch_promisor_blobs_for_checkout(repo, changes)?;
 
     let mut loaded_index;
     let index_mut: &mut Index = if let Some(index) = reuse_index {

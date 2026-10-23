@@ -216,6 +216,10 @@ pub struct FetchOptions {
     /// Set by the fetch driver when a filter was sent on the wire; callers should
     /// leave this `false`.
     pub mark_received_pack_promisor: bool,
+    /// Explicit object ids to fetch (promisor on-demand); skips refspec matching and ref updates.
+    pub object_wants: Vec<ObjectId>,
+    /// On-demand promisor object fetch: always mark the received pack promisor.
+    pub promisor_object_fetch: bool,
 }
 
 impl Default for FetchOptions {
@@ -244,6 +248,8 @@ impl Default for FetchOptions {
             remote_progress: false,
             filter: None,
             mark_received_pack_promisor: false,
+            object_wants: Vec::new(),
+            promisor_object_fetch: false,
         }
     }
 }
@@ -283,6 +289,8 @@ impl Clone for FetchOptions {
             remote_progress: self.remote_progress,
             filter: self.filter,
             mark_received_pack_promisor: self.mark_received_pack_promisor,
+            object_wants: self.object_wants.clone(),
+            promisor_object_fetch: self.promisor_object_fetch,
         }
     }
 }

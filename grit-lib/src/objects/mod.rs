@@ -128,6 +128,9 @@ pub mod prune_packed {
 pub mod promisor {
     //! promisor API (re-exported at this path).
     pub use crate::promisor::*;
+    pub use crate::promisor_fetch::{
+        DefaultPromisorFetcher, PromisorFetcher, PROMISOR_LAZY_FETCH_CONFIG,
+    };
 }
 pub mod promisor_remote {
     //! Promisor remote configuration for partial clones.

@@ -276,6 +276,7 @@ pub mod pathspec;
 pub(crate) mod pkt_line;
 pub(crate) mod precompose_config;
 pub(crate) mod promisor;
+pub(crate) mod promisor_fetch;
 pub(crate) mod promisor_remote;
 pub(crate) mod protocol;
 pub(crate) mod protocol_v2;

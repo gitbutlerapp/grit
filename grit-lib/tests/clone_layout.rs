@@ -289,6 +289,7 @@ fn library_clone_api_passes_fsck_and_status() {
             thread_policy: grit_lib::parallel::ThreadPolicy::default(),
             depth: None,
             filter: None,
+            promisor_fetcher: None,
         },
         &mut NoProgress,
         None,

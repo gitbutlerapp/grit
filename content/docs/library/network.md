@@ -64,6 +64,18 @@ The `grit-examples` crate also ships `gritx-fetch` and `gritx-push`, which dispa
 
 Integration test `guide_network` builds bare and consumer repos with system Git, runs the binary, then requires clean `git fsck --strict` on both sides and matching `git rev-parse` on the pushed ref.
 
+## Partial clone and promisor fetch
+
+Filtered fetch and clone record a promisor remote (`remote.<name>.promisor`, `extensions.partialclone`, and `remote.<name>.partialclonefilter`). Blobs omitted from the initial pack are **promised**: they appear in the object database as missing until fetched on demand.
+
+Install a [`PromisorFetcher`](rustdoc:grit_lib::objects::promisor::PromisorFetcher) on [`RepositoryOptions::with_promisor_fetcher`](rustdoc:grit_lib::config::environment::RepositoryOptions::with_promisor_fetcher) (no global state). The default [`DefaultPromisorFetcher`](rustdoc:grit_lib::objects::promisor::DefaultPromisorFetcher) sends `want` lines for the missing object ids with the remote's filter, does not update refs, and ingests the reply as a promisor pack. The `grit` CLI installs this fetcher for every opened repository.
+
+When a fetcher is installed and [`fetch.promisorLazy`](rustdoc:grit_lib::objects::promisor::PROMISOR_LAZY_FETCH_CONFIG) is true (the default), an ODB read miss in a partial-clone repository triggers one batched fetch (with recursion protection) and retries the read. With no fetcher, or when lazy fetch is disabled, reads return [`Error::PromisedObjectMissing`](rustdoc:grit_lib::error::Error::PromisedObjectMissing). Set `fetch.promisorLazy=false` in config, or `GRIT_NO_LAZY_FETCH=1` / `GIT_NO_LAZY_FETCH=1` in the environment, to opt out.
+
+[`Repository::prefetch_promised`](rustdoc:grit_lib::repo::Repository::prefetch_promised) batch-fetches object ids before bulk reads. Tree-to-tree checkout (including clone checkout and [`grit switch`](../switch/)) collects missing blob oids from the diff and prefetches them in a single request when a fetcher is present.
+
+[`CloneOptions::promisor_fetcher`](rustdoc:grit_lib::remote::clone::CloneOptions) carries the fetcher through to the opened repository so blobless clone checkout can prefetch without a separate reopen.
+
 ## Bundles
 
 Offline bundle files are documented on the [Bundle](../bundle/) guide (`RepositoryBundles`). Smart HTTP and local remotes above cover online fetch/push.

@@ -46,7 +46,7 @@ use crate::error::{Error, Result};
 use crate::hooks::run_hook;
 use crate::index::Index;
 use crate::init_filesystem::{apply_init_filesystem_config, InitFilesystemConfigOptions};
-use crate::objects::{parse_commit, HashAlgo};
+use crate::objects::{parse_commit, HashAlgo, ObjectId};
 use crate::odb::Odb;
 use crate::repo_caches::RepoCaches;
 use crate::rev_parse::is_inside_work_tree;
@@ -472,6 +472,7 @@ impl Repository {
             Arc::clone(&command_runner),
             Arc::clone(&options.diagnostics),
         );
+        caches.set_promisor_fetcher(options.promisor_fetcher.clone());
         let odb = if let Some(ref wt) = work_tree {
             Odb::with_work_tree(&objects_dir, wt)
                 .with_config_git_dir(git_dir.clone())
@@ -611,6 +612,7 @@ impl Repository {
             work_tree: None,
             validate_repository_format: true,
             open_for_serving: false,
+            promisor_fetcher: self.caches().promisor_fetcher(),
         }
     }
 
@@ -1109,6 +1111,20 @@ impl Repository {
     #[must_use]
     pub fn odb(&self) -> &Odb {
         &self.odb
+    }
+
+    /// Fetch missing promisor objects in one batch before checkout or other bulk reads.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::error::Error::Message`] when no fetcher is installed, or transport failures.
+    pub fn prefetch_promised(&self, oids: &[ObjectId]) -> Result<()> {
+        let Some(fetcher) = self.caches().promisor_fetcher() else {
+            return Err(Error::Message(
+                "promisor prefetch requires a PromisorFetcher on RepositoryOptions".into(),
+            ));
+        };
+        fetcher.fetch_missing(self, oids)
     }
 
     /// Discovery provenance for safe-directory and setup tracing.

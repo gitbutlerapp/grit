@@ -4,6 +4,7 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use thiserror::Error;
 
@@ -14,6 +15,7 @@ use crate::error::{Error, Result};
 use crate::fetch::{fetch_operation_identity, Progress};
 use crate::objects::ObjectId;
 use crate::partial_clone::{ObjectFilterSpec, PartialCloneConfig};
+use crate::promisor_fetch::PromisorFetcher;
 use crate::ref_storage::RefStorageFormat;
 use crate::refs;
 use crate::remote::{HttpClientFactory, ListRefsOptions, Remote, DEFAULT_REMOTE};
@@ -83,6 +85,8 @@ pub struct CloneOptions {
     pub depth: Option<u32>,
     /// Partial-clone object filter applied to the initial fetch and recorded in config.
     pub filter: Option<ObjectFilterSpec>,
+    /// Optional on-demand promisor fetcher installed on the opened repository (for checkout prefetch).
+    pub promisor_fetcher: Option<Arc<dyn PromisorFetcher>>,
 }
 
 impl CloneOptions {
@@ -98,6 +102,7 @@ impl CloneOptions {
             thread_policy: crate::parallel::ThreadPolicy::default(),
             depth: None,
             filter: None,
+            promisor_fetcher: None,
         }
     }
 }
@@ -217,12 +222,12 @@ pub fn clone(
         CloneError::Library(Error::Message(format!("could not initialize '{dir}': {e}")))
     })?;
     let git_dir = opts.dest.join(".git");
-    let repo = Repository::open(
-        &git_dir,
-        &RepositoryOptions::with_environment(opts.environment.clone())
-            .with_work_tree(opts.dest.clone()),
-    )
-    .map_err(CloneError::Library)?;
+    let mut open_opts = RepositoryOptions::with_environment(opts.environment.clone())
+        .with_work_tree(opts.dest.clone());
+    if let Some(fetcher) = opts.promisor_fetcher.clone() {
+        open_opts = open_opts.with_promisor_fetcher(Some(fetcher));
+    }
+    let repo = Repository::open(&git_dir, &open_opts).map_err(CloneError::Library)?;
 
     let origin_url = stored_clone_remote_url(&opts.url);
     set_local_config(
