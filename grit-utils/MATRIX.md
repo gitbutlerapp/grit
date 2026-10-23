@@ -132,6 +132,7 @@ Overview of **grit-lib** coverage, **`grit` commands**, common workflows, and **
 | `branch/rename@many-refs` | Rename one branch vs git branch -m |
 | `branch/list@many-refs` | List branches vs git branch |
 | `branch/list@many-refs-loose` | List branches on loose many-refs fixture vs git branch |
+| `branch/merged-ref@many-refs` | Branch --merged ref query vs git for-each-ref on many-refs |
 | `history/reword@synth-10k` | History reword vs git history reword or scripted rebase |
 | `merge/clean@synth-100k` | Merge branch on 100k-file synthetic vs git merge |
 | `merge/clean@synth-10k` | Merge branch vs git merge |
