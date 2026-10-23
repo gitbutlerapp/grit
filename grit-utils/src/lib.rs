@@ -11,6 +11,8 @@ pub mod campaign_worktree;
 pub mod capped_run;
 pub mod chromium_synth;
 pub mod compare;
+pub mod conflicts_fixture;
+pub mod conflicts_suite;
 pub mod criterion_summary;
 pub mod daily;
 pub mod fixture;

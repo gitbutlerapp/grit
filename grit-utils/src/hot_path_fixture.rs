@@ -74,7 +74,7 @@ pub struct HotPathMeta {
 }
 
 pub fn meta_path(repo: &Path) -> PathBuf {
-    repo.join(".grit-bench-hot-path.json")
+    repo.join(".git/grit-bench-hot-path.json")
 }
 
 pub fn load_meta(repo: &Path) -> Result<HotPathMeta> {
@@ -92,7 +92,7 @@ fn git_env(cmd: &mut Command) {
         .env("GIT_COMMITTER_EMAIL", "b@example.com");
 }
 
-fn run_git(git: &Path, dir: &Path, args: &[&str]) -> Result<()> {
+pub(crate) fn run_git(git: &Path, dir: &Path, args: &[&str]) -> Result<()> {
     let mut cmd = Command::new(git);
     cmd.args(args).current_dir(dir);
     git_env(&mut cmd);
@@ -109,7 +109,7 @@ fn run_git(git: &Path, dir: &Path, args: &[&str]) -> Result<()> {
     Ok(())
 }
 
-fn rev_parse(git: &Path, dir: &Path, rev: &str) -> Result<String> {
+pub(crate) fn rev_parse(git: &Path, dir: &Path, rev: &str) -> Result<String> {
     let mut cmd = Command::new(git);
     cmd.args(["rev-parse", rev]).current_dir(dir);
     git_env(&mut cmd);
@@ -120,7 +120,7 @@ fn rev_parse(git: &Path, dir: &Path, rev: &str) -> Result<String> {
     Ok(String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
-fn list_tracked_files(repo: &Path) -> Result<Vec<PathBuf>> {
+pub(crate) fn list_tracked_files(repo: &Path) -> Result<Vec<PathBuf>> {
     let mut files = Vec::new();
     walk(repo, repo, &mut files)?;
     Ok(files)
@@ -155,7 +155,7 @@ fn write_files(repo: &Path, rel_paths: &[PathBuf], suffix: &str) -> Result<()> {
     Ok(())
 }
 
-fn populate_tree(repo: &Path, file_count: usize, dir_count: usize) -> Result<()> {
+pub(crate) fn populate_tree(repo: &Path, file_count: usize, dir_count: usize) -> Result<()> {
     let files_per_dir = file_count.div_ceil(dir_count.max(1));
     let mut created = 0usize;
     for d in 0..dir_count.max(1) {
@@ -175,7 +175,7 @@ fn populate_tree(repo: &Path, file_count: usize, dir_count: usize) -> Result<()>
     Ok(())
 }
 
-fn extend_history(git: &Path, repo: &Path, extra_commits: usize) -> Result<()> {
+pub(crate) fn extend_history(git: &Path, repo: &Path, extra_commits: usize) -> Result<()> {
     let files = list_tracked_files(repo)?;
     if files.is_empty() {
         return Ok(());
@@ -354,7 +354,7 @@ pub fn assert_pick_merge_sibling_topology(
     Ok(())
 }
 
-fn commit_main_diverge(git: &Path, dir: &Path, files: &[PathBuf]) -> Result<String> {
+pub(crate) fn commit_main_diverge(git: &Path, dir: &Path, files: &[PathBuf]) -> Result<String> {
     let rel = files.last().context("need at least one tracked file")?;
     write_files(dir, std::slice::from_ref(rel), "main-diverge")?;
     let rel_str = rel.to_string_lossy();
@@ -439,40 +439,51 @@ pub fn setup_pick_series_fixture(
 ) -> Result<(PathBuf, HotPathMeta)> {
     let dir = scratch_dir();
     remove_dir_robust(&dir);
-    fs::create_dir_all(&dir)?;
-    run_git(git, &dir, &["init", "-q"])?;
-    populate_tree(&dir, spec.file_count, spec.dir_count)?;
-    run_git(git, &dir, &["add", "-A"])?;
-    run_git(git, &dir, &["commit", "-q", "-m", "initial"])?;
+    setup_pick_series_fixture_in(git, &dir, spec)
+}
+
+pub fn setup_pick_series_fixture_in(
+    git: &Path,
+    dir: &Path,
+    spec: HotPathRepoSpec,
+) -> Result<(PathBuf, HotPathMeta)> {
+    if dir.exists() {
+        remove_dir_robust(dir);
+    }
+    fs::create_dir_all(dir)?;
+    run_git(git, dir, &["init", "-q"])?;
+    populate_tree(dir, spec.file_count, spec.dir_count)?;
+    run_git(git, dir, &["add", "-A"])?;
+    run_git(git, dir, &["commit", "-q", "-m", "initial"])?;
     if spec.history_commits > 1 {
-        extend_history(git, &dir, spec.history_commits.saturating_sub(1))?;
+        extend_history(git, dir, spec.history_commits.saturating_sub(1))?;
     }
 
     let main_branch = "main".to_string();
     let topic_branch = "topic".to_string();
-    run_git(git, &dir, &["branch", "-q", &main_branch])?;
-    let base_commit = rev_parse(git, &dir, "HEAD")?;
-    run_git(git, &dir, &["checkout", "-q", "-b", &topic_branch])?;
+    run_git(git, dir, &["branch", "-q", &main_branch])?;
+    let base_commit = rev_parse(git, dir, "HEAD")?;
+    run_git(git, dir, &["checkout", "-q", "-b", &topic_branch])?;
 
-    let files = list_tracked_files(&dir)?;
+    let files = list_tracked_files(dir)?;
     let mut series = Vec::new();
     const SERIES_LEN: usize = 20;
     for i in 0..SERIES_LEN {
         let rel = &files[i % files.len()];
-        write_files(&dir, std::slice::from_ref(rel), &format!("series-{i}"))?;
-        run_git(git, &dir, &["add", "-A"])?;
-        run_git(git, &dir, &["commit", "-q", "-m", &format!("series {i}")])?;
-        series.push(rev_parse(git, &dir, "HEAD")?);
+        write_files(dir, std::slice::from_ref(rel), &format!("series-{i}"))?;
+        run_git(git, dir, &["add", "-A"])?;
+        run_git(git, dir, &["commit", "-q", "-m", &format!("series {i}")])?;
+        series.push(rev_parse(git, dir, "HEAD")?);
     }
     let pick_commit = series.last().cloned().unwrap_or_default();
 
-    run_git(git, &dir, &["checkout", "-q", &main_branch])?;
-    let main_tip = commit_main_diverge(git, &dir, &files)?;
+    run_git(git, dir, &["checkout", "-q", &main_branch])?;
+    let main_tip = commit_main_diverge(git, dir, &files)?;
 
     if spec.fsmonitor {
-        let hook = write_fsmonitor_hook(&dir)?;
-        enable_fsmonitor(git, &dir, &hook)?;
-        assert_fsmonitor_index_ready(git, &dir)?;
+        let hook = write_fsmonitor_hook(dir)?;
+        enable_fsmonitor(git, dir, &hook)?;
+        assert_fsmonitor_index_ready(git, dir)?;
     }
 
     let meta = HotPathMeta {
@@ -487,9 +498,9 @@ pub fn setup_pick_series_fixture(
         wide: false,
         wide_branch_b: None,
     };
-    assert_pick_merge_sibling_topology(git, &dir, &meta)?;
-    fs::write(meta_path(&dir), serde_json::to_string_pretty(&meta)?)?;
-    Ok((dir, meta))
+    assert_pick_merge_sibling_topology(git, dir, &meta)?;
+    fs::write(meta_path(dir), serde_json::to_string_pretty(&meta)?)?;
+    Ok((dir.to_path_buf(), meta))
 }
 
 pub fn prepare_switch(git: &Path, repo: &Path) -> Result<()> {
