@@ -21,7 +21,7 @@ use super::plan::{
 use super::types::{CommitEdit, HistoryEdits, RefScope, RewriteOptions, RewritePlan};
 
 #[cfg(any(test, feature = "unstable-bench-helpers"))]
-thread_local! {
+thread_local! { // hygiene: patch-id compute counter for tests and unstable-bench-helpers
     static PATCH_ID_COMPUTE_CALLS: Cell<usize> = const { Cell::new(0) };
 }
 

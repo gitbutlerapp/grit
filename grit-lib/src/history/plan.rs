@@ -29,6 +29,7 @@ use super::types::{
     RewritePlan, RewrittenCommit,
 };
 
+// hygiene: resumable replay control and merge-tree call counter (thread-local for parallel tests)
 thread_local! {
     #[cfg(any(test, feature = "unstable-bench-helpers"))]
     static MERGE_TREE_CALLS: Cell<usize> = const { Cell::new(0) };
