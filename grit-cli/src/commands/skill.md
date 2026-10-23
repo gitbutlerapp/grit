@@ -46,6 +46,8 @@ The target branch is the first that exists of: the `target.branch` config value,
 
 **Partial staging:** `grit diff --unstaged --json -- path | jq '.files[].hunks[] | .id'` → `grit add --hunks id1,id2 -- path`, or pick **`lines[].new`** → `grit add --lines path:10-15 -- path`. Mix `--hunks` and `--lines`. Use `--dry-run` to preview. Exit code **2** for unknown/stale ids or invalid line ranges.
 
+**Partial discard / unstage:** same ids or line ranges on **`grit restore --hunks`** / **`grit restore --lines`** (default: worktree; add **`--staged`** to unstage selected hunks). **`--dry-run`** previews without writing.
+
 Revisions can be full or short ids, branch or tag names, or expressions like `HEAD~2`.
 
 Commit rows in `--json` from `log`, `show`, `revs`, and `status` share `change_id` (reverse-hex) and `change_id_stored`. Human `log` and `show` prefix each commit with `change <8 chars>`; `--oneline` does not.
@@ -154,4 +156,4 @@ URLs can be `https://`, `ssh://`, `user@host:path`, `git://`, `file://` or a loc
 
 ## What grit doesn't do
 
-grit has no equivalent of `rebase`, `reset`, interactive commands, or annotated or signed tags. Partial staging uses `--hunks`, `--lines`, and `--patch-file` on `add` (and related commands as they land), not Git's `-p` / `-i`. During a merge conflict, use `grit restore --ours|--theirs|--merge` to compare sides or restore markers, then `grit merge --continue` (or `grit commit` for Git-compatible finish). Use `grit commit --amend` (optional message, JSON `amended` field) to rewrite the tip commit. For `grit stash pop` or `grit stash apply` with conflicts, use `git` to finish resolving. When a task needs something else on this list, use `git` on the same repository and come back to `grit` afterwards.
+grit has no equivalent of `rebase`, `reset`, interactive commands, or annotated or signed tags. Partial staging and discard use `--hunks`, `--lines`, and `--patch-file` on `add` and `restore`, not Git's `-p` / `-i`. During a merge conflict, use `grit restore --ours|--theirs|--merge` to compare sides or restore markers, then `grit merge --continue` (or `grit commit` for Git-compatible finish). Use `grit commit --amend` (optional message, JSON `amended` field) to rewrite the tip commit. For `grit stash pop` or `grit stash apply` with conflicts, use `git` to finish resolving. When a task needs something else on this list, use `git` on the same repository and come back to `grit` afterwards.

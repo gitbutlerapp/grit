@@ -1,6 +1,9 @@
 //! `grit restore` — restore working tree and/or index paths.
 
 use anyhow::{Context, Result};
+use grit_lib::porcelain::hunk_select::{
+    parse_hunk_id_list, restore_hunks, HunkSelectError, RestoreHunksOutcome,
+};
 use grit_lib::porcelain::restore::{
     restore_paths, ConflictSide, RestoreOptions, RestoreOutcome, RestoreSource,
 };
@@ -9,17 +12,24 @@ use crate::conflict_style::{self, ConflictStyleArg};
 use grit_lib::revwalk::rev_parse::resolve_revision;
 use schemars::JsonSchema;
 use serde::Serialize;
+use std::collections::BTreeMap;
 use std::io::Write;
 
 use crate::context;
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 use crate::pathspec_args::PathspecArgs;
 
-/// CLI result (mirrors [`RestoreOutcome`]).
+/// CLI result (mirrors [`RestoreOutcome`] or [`RestoreHunksOutcome`]).
 #[derive(Serialize, JsonSchema, Clone)]
 pub struct RestoreCliOutcome {
     pub restored: Vec<String>,
     pub removed: Vec<String>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub restored_hunks: BTreeMap<String, Vec<String>>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub restored_lines: BTreeMap<String, Vec<String>>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub dry_run: bool,
 }
 
 impl From<RestoreOutcome> for RestoreCliOutcome {
@@ -27,14 +37,39 @@ impl From<RestoreOutcome> for RestoreCliOutcome {
         Self {
             restored: value.restored,
             removed: value.removed,
+            restored_hunks: BTreeMap::new(),
+            restored_lines: BTreeMap::new(),
+            dry_run: false,
+        }
+    }
+}
+
+impl From<RestoreHunksOutcome> for RestoreCliOutcome {
+    fn from(value: RestoreHunksOutcome) -> Self {
+        let restored_hunks: BTreeMap<String, Vec<String>> = value
+            .restored_hunks
+            .into_iter()
+            .map(|(path, ids)| (path, ids.into_iter().map(|id| id.as_str()).collect()))
+            .collect();
+        Self {
+            restored: value.restored,
+            removed: value.removed,
+            restored_hunks,
+            restored_lines: value.restored_lines,
+            dry_run: value.dry_run,
         }
     }
 }
 
 impl HumanRender for RestoreCliOutcome {
     fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
+        let prefix = if self.dry_run {
+            "Would restore"
+        } else {
+            "Restored"
+        };
         for path in &self.restored {
-            outln!(w, "Restored {path}");
+            outln!(w, "{prefix} {path}");
         }
         for path in &self.removed {
             outln!(w, "Removed {path}");
@@ -64,6 +99,38 @@ impl MarkdownRender for RestoreCliOutcome {
         }
         Ok(())
     }
+}
+
+/// Exit code for `--hunks` / `--lines` failures.
+pub fn hunks_exit_code(err: &anyhow::Error) -> i32 {
+    if err.downcast_ref::<HunkSelectError>().is_some() {
+        2
+    } else {
+        1
+    }
+}
+
+fn map_hunk_error(err: HunkSelectError) -> anyhow::Error {
+    anyhow::Error::new(err)
+}
+
+/// Run partial restore via hunk ids and/or line ranges.
+pub fn run_hunks(
+    args: &PathspecArgs,
+    hunks: &[String],
+    lines: &[String],
+    staged: bool,
+    worktree: bool,
+    dry_run: bool,
+) -> Result<RestoreCliOutcome> {
+    let repo = context::discover()?;
+    let resolved = args.resolve(&repo)?;
+    let (pathspecs, _) = resolved.into_pathspec_lists();
+    let mut selection = parse_hunk_id_list(hunks).map_err(map_hunk_error)?;
+    selection.ranges = super::add::parse_line_range_list(lines)?;
+    let outcome = restore_hunks(&repo, &selection, &pathspecs, staged, worktree, dry_run)
+        .map_err(map_hunk_error)?;
+    Ok(outcome.into())
 }
 
 /// Run `grit restore` with the given flags and path arguments.
