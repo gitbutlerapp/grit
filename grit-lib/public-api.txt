@@ -86,6 +86,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::apply::BinaryPatchSec
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::apply::BinaryPatchSection
 pub struct grit_lib::apply::BlobApplyOptions
 pub grit_lib::apply::BlobApplyOptions::allow_binary_marker_only: bool
+pub grit_lib::apply::BlobApplyOptions::reverse: bool
 impl core::clone::Clone for grit_lib::apply::BlobApplyOptions
 pub fn grit_lib::apply::BlobApplyOptions::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::apply::BlobApplyOptions
@@ -165,6 +166,8 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::apply::Hunk
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::apply::Hunk
 pub struct grit_lib::apply::IndexApplyOptions
 pub grit_lib::apply::IndexApplyOptions::dry_run: bool
+pub grit_lib::apply::IndexApplyOptions::head_tree_oid: core::option::Option<grit_lib::objects::ObjectId>
+pub grit_lib::apply::IndexApplyOptions::reverse: bool
 impl core::clone::Clone for grit_lib::apply::IndexApplyOptions
 pub fn grit_lib::apply::IndexApplyOptions::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::apply::IndexApplyOptions
@@ -11811,6 +11814,29 @@ impl core::marker::Unpin for grit_lib::porcelain::hunk_select::LineRange
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::hunk_select::LineRange
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::hunk_select::LineRange
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::hunk_select::LineRange
+pub struct grit_lib::porcelain::hunk_select::RestoreHunksOutcome
+pub grit_lib::porcelain::hunk_select::RestoreHunksOutcome::dry_run: bool
+pub grit_lib::porcelain::hunk_select::RestoreHunksOutcome::removed: alloc::vec::Vec<alloc::string::String>
+pub grit_lib::porcelain::hunk_select::RestoreHunksOutcome::restored: alloc::vec::Vec<alloc::string::String>
+pub grit_lib::porcelain::hunk_select::RestoreHunksOutcome::restored_hunks: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::vec::Vec<grit_lib::diff::hunk_id::HunkId>>
+pub grit_lib::porcelain::hunk_select::RestoreHunksOutcome::restored_lines: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::vec::Vec<alloc::string::String>>
+impl core::clone::Clone for grit_lib::porcelain::hunk_select::RestoreHunksOutcome
+pub fn grit_lib::porcelain::hunk_select::RestoreHunksOutcome::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::hunk_select::RestoreHunksOutcome
+impl core::cmp::PartialEq for grit_lib::porcelain::hunk_select::RestoreHunksOutcome
+pub fn grit_lib::porcelain::hunk_select::RestoreHunksOutcome::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::porcelain::hunk_select::RestoreHunksOutcome
+pub fn grit_lib::porcelain::hunk_select::RestoreHunksOutcome::default() -> Self
+impl core::fmt::Debug for grit_lib::porcelain::hunk_select::RestoreHunksOutcome
+pub fn grit_lib::porcelain::hunk_select::RestoreHunksOutcome::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::porcelain::hunk_select::RestoreHunksOutcome
+impl core::marker::Freeze for grit_lib::porcelain::hunk_select::RestoreHunksOutcome
+impl core::marker::Send for grit_lib::porcelain::hunk_select::RestoreHunksOutcome
+impl core::marker::Sync for grit_lib::porcelain::hunk_select::RestoreHunksOutcome
+impl core::marker::Unpin for grit_lib::porcelain::hunk_select::RestoreHunksOutcome
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::hunk_select::RestoreHunksOutcome
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::hunk_select::RestoreHunksOutcome
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::hunk_select::RestoreHunksOutcome
 pub struct grit_lib::porcelain::hunk_select::StageHunksOutcome
 pub grit_lib::porcelain::hunk_select::StageHunksOutcome::added: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::porcelain::hunk_select::StageHunksOutcome::dry_run: bool
@@ -11835,6 +11861,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::hunk_selec
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::hunk_select::StageHunksOutcome
 pub fn grit_lib::porcelain::hunk_select::parse_hunk_id_list(&[alloc::string::String]) -> core::result::Result<grit_lib::porcelain::hunk_select::HunkSelection, grit_lib::porcelain::hunk_select::HunkSelectError>
 pub fn grit_lib::porcelain::hunk_select::resolve_selection(&grit_lib::repo::Repository, grit_lib::diff::hunk_id::DiffSide, &grit_lib::porcelain::hunk_select::HunkSelection, &[alloc::string::String]) -> core::result::Result<alloc::vec::Vec<grit_lib::apply::FilePatch>, grit_lib::porcelain::hunk_select::HunkSelectError>
+pub fn grit_lib::porcelain::hunk_select::restore_hunks(&grit_lib::repo::Repository, &grit_lib::porcelain::hunk_select::HunkSelection, &[alloc::string::String], bool, bool, bool) -> core::result::Result<grit_lib::porcelain::hunk_select::RestoreHunksOutcome, grit_lib::porcelain::hunk_select::HunkSelectError>
 pub fn grit_lib::porcelain::hunk_select::stage_hunks(&grit_lib::repo::Repository, grit_lib::diff::hunk_id::DiffSide, &grit_lib::porcelain::hunk_select::HunkSelection, &[alloc::string::String], bool) -> core::result::Result<grit_lib::porcelain::hunk_select::StageHunksOutcome, grit_lib::porcelain::hunk_select::HunkSelectError>
 pub fn grit_lib::porcelain::hunk_select::unstaged_file_diffs(&grit_lib::repo::Repository, &[alloc::string::String]) -> core::result::Result<alloc::vec::Vec<(grit_lib::diff::FileDiff, alloc::vec::Vec<grit_lib::diff::structured::StructuredHunk>)>, grit_lib::error::Error>
 pub mod grit_lib::porcelain::index_mode

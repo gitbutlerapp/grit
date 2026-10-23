@@ -167,6 +167,13 @@ pub const MATRIX_SCENARIOS: &[ScenarioSpec] = &[
         description: "Restore ~1% paths from index: grit restore -- <paths> vs git restore -- <paths>",
     },
     ScenarioSpec {
+        id: "restore/hunks@large-file",
+        area: Area::Worktree,
+        headline: false,
+        name: None,
+        description: "Discard half of 500 hunks in a 50k-line file: grit restore --hunks vs git apply -R",
+    },
+    ScenarioSpec {
         id: "reset/hard@synth-10k",
         area: Area::Worktree,
         headline: false,

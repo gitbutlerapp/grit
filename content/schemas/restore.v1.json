@@ -1,8 +1,11 @@
 {
   "$id": "https://grit-scm.com/schemas/restore/v1.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "description": "CLI result (mirrors [`RestoreOutcome`]).",
+  "description": "CLI result (mirrors [`RestoreOutcome`] or [`RestoreHunksOutcome`]).",
   "properties": {
+    "dry_run": {
+      "type": "boolean"
+    },
     "removed": {
       "items": {
         "type": "string"
@@ -14,6 +17,24 @@
         "type": "string"
       },
       "type": "array"
+    },
+    "restored_hunks": {
+      "additionalProperties": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "type": "object"
+    },
+    "restored_lines": {
+      "additionalProperties": {
+        "items": {
+          "type": "string"
+        },
+        "type": "array"
+      },
+      "type": "object"
     }
   },
   "required": [

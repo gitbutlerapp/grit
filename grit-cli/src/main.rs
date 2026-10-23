@@ -1179,6 +1179,15 @@ enum Command {
         /// Conflict marker style (implies `--merge`).
         #[arg(long = "conflict", value_enum, conflicts_with_all = ["ours", "theirs"])]
         conflict_style: Option<conflict_style::ConflictStyleArg>,
+        /// Discard only the listed unstaged hunk ids (`grit diff --unstaged --json`) or unstage staged ids (`--staged`).
+        #[arg(long = "hunks", value_name = "ID,...", action = clap::ArgAction::Append)]
+        hunks: Vec<String>,
+        /// Discard or unstage only new-side line ranges (`path:start-end` from `grit diff --json`).
+        #[arg(long = "lines", value_name = "PATH:START-END", action = clap::ArgAction::Append)]
+        lines: Vec<String>,
+        /// Report paths that would change without writing the worktree or index.
+        #[arg(long = "dry-run")]
+        dry_run: bool,
     },
     /// Download refs and objects from a remote.
     Fetch {
@@ -2611,6 +2620,9 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             theirs,
             merge,
             conflict_style,
+            hunks,
+            lines,
+            dry_run,
         } => {
             use grit_lib::porcelain::restore::ConflictSide;
             let side = if ours {
@@ -2620,19 +2632,42 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             } else {
                 None
             };
-            emit(
-                &commands::restore::run(
-                    &pathspecs,
-                    staged,
-                    worktree,
-                    source,
-                    side,
-                    merge,
-                    conflict_style,
-                )?,
-                opts,
-                ctx,
-            )
+            if !hunks.is_empty() || !lines.is_empty() {
+                if source.is_some() || side.is_some() || merge || conflict_style.is_some() {
+                    bail!("--hunks and --lines cannot be used with --source, --ours, --theirs, or --merge");
+                }
+                match commands::restore::run_hunks(
+                    &pathspecs, &hunks, &lines, staged, worktree, dry_run,
+                ) {
+                    Ok(outcome) => emit(&outcome, opts, ctx),
+                    Err(err) => {
+                        let code = commands::restore::hunks_exit_code(&err);
+                        if opts.mode == OutputMode::Json {
+                            output::emit_error(&err, opts);
+                        } else {
+                            eprintln!("error: {err:#}");
+                        }
+                        std::process::exit(code);
+                    }
+                }
+            } else {
+                if dry_run {
+                    bail!("--dry-run requires --hunks or --lines");
+                }
+                emit(
+                    &commands::restore::run(
+                        &pathspecs,
+                        staged,
+                        worktree,
+                        source,
+                        side,
+                        merge,
+                        conflict_style,
+                    )?,
+                    opts,
+                    ctx,
+                )
+            }
         }
         Command::Fetch { fetch } => {
             let outcome = commands::fetch::run(&fetch, opts.mode)?;

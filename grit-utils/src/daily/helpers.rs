@@ -410,6 +410,15 @@ pub fn add_hunks_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
     )
 }
 
+pub fn restore_hunks_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
+    (
+        sh_script(crate::worktree_fixture::shell_grit_restore_hunks(&ctx.grit)),
+        sh_script(crate::worktree_fixture::shell_git_apply_hunks_reverse(
+            &ctx.git,
+        )),
+    )
+}
+
 pub fn add_lines_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
     (
         sh_script(crate::worktree_fixture::shell_grit_add_lines(&ctx.grit)),
@@ -820,6 +829,12 @@ pub fn prepare_worktree_add_patch_file(
     _: &super::plan::DailyHeadlineContext,
 ) -> super::plan::DailyPrepare {
     super::plan::DailyPrepare::Hook(PrepareKind::WorktreeAddPatchFile)
+}
+
+pub fn prepare_worktree_restore_hunks(
+    ctx: &super::plan::DailyHeadlineContext,
+) -> super::plan::DailyPrepare {
+    prepare_worktree_add_hunks(ctx)
 }
 
 pub fn prepare_worktree_add_hunks(

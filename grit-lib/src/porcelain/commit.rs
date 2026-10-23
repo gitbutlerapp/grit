@@ -368,7 +368,10 @@ fn commit_patch_scope(
         repo,
         &mut index,
         &patches,
-        &IndexApplyOptions { dry_run: false },
+        &IndexApplyOptions {
+            dry_run: false,
+            ..IndexApplyOptions::default()
+        },
     )?;
 
     let mut req = req.clone();
