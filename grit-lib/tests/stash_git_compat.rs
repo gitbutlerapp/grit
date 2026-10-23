@@ -1,11 +1,15 @@
 //! Round-trip stash create/list/pop/drop with system `git`.
 
+use grit_lib::diff::DiffStatus;
 use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
+use grit_lib::porcelain::branch_error::BranchError;
 use grit_lib::porcelain::stash::{
-    apply_stash, create_stash, drop_stash, list_stashes, pop_stash, push_stash, stash_diff,
-    StashCreateOptions,
+    apply_stash, clear_stashes, create_stash, drop_stash, list_stashes, pop_stash, push_stash,
+    stash_branch, stash_diff, StashCreateOptions, StashDiffOptions,
 };
+use grit_lib::porcelain::status::{status, StatusOptions};
+use grit_lib::progress::NullProgress;
 use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
@@ -589,7 +593,7 @@ fn stash_diff_matches_git_show_stat_paths() {
         .expect("push")
         .expect("oid");
 
-    let diffs = stash_diff(&repo, 0).expect("diff");
+    let diffs = stash_diff(&repo, 0, &StashDiffOptions::default()).expect("diff");
     assert!(
         diffs.iter().any(|d| d.path().contains("d")),
         "stash diff should include changed path"
@@ -1015,5 +1019,162 @@ fn push_stash_untracked_normalizes_crlf_under_gitattributes_eol_crlf() {
         stash_blob, "n\n",
         "untracked stash parent must LF-normalize under eol=crlf"
     );
+    assert_fsck_strict(dir.path());
+}
+
+fn git_stash_name_status(
+    repo: &std::path::Path,
+    index: &str,
+    include_untracked: bool,
+) -> Vec<(char, String)> {
+    let mut args = vec!["stash", "show", "--name-status"];
+    if include_untracked {
+        args.push("-u");
+    }
+    args.push(index);
+    git_cmd(repo, &args)
+        .lines()
+        .filter_map(|line| {
+            let mut parts = line.split_whitespace();
+            let status = parts.next()?.chars().next()?;
+            let path = parts.next()?.to_owned();
+            Some((status, path))
+        })
+        .collect()
+}
+
+fn grit_stash_name_status(
+    repo: &Repository,
+    n: usize,
+    include_untracked: bool,
+) -> Vec<(char, String)> {
+    let diffs = stash_diff(repo, n, &StashDiffOptions { include_untracked }).expect("stash diff");
+    diffs
+        .into_iter()
+        .map(|entry| {
+            let status = match entry.status {
+                DiffStatus::Added => 'A',
+                DiffStatus::Deleted => 'D',
+                DiffStatus::Modified | DiffStatus::TypeChanged => 'M',
+                DiffStatus::Renamed => 'R',
+                DiffStatus::Copied => 'C',
+                _ => '?',
+            };
+            (status, entry.path().to_owned())
+        })
+        .collect()
+}
+
+#[test]
+fn stash_show_untracked_lists_u_commit_files() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    init_repo(dir.path());
+    std::fs::write(dir.path().join("tracked.txt"), "base\n").expect("write");
+    git_cmd(dir.path(), &["add", "tracked.txt"]);
+    git_cmd(dir.path(), &["commit", "-qm", "init"]);
+    std::fs::write(dir.path().join("tracked.txt"), "dirty\n").expect("modify");
+    std::fs::write(dir.path().join("untracked.txt"), "new\n").expect("untracked");
+
+    let repo = open_grit(dir.path());
+    push_stash(&repo, &stash_options(true, None))
+        .expect("push")
+        .expect("changes");
+
+    let git_lines = git_stash_name_status(dir.path(), "stash@{0}", true);
+    let grit_lines = grit_stash_name_status(&repo, 0, true);
+    assert_eq!(
+        git_lines, grit_lines,
+        "stash show -u must match git name-status"
+    );
+}
+
+#[test]
+fn stash_branch_creates_branch_at_base_and_restores_index() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    init_repo(dir.path());
+    std::fs::write(dir.path().join("f.txt"), "base\n").expect("write");
+    git_cmd(dir.path(), &["add", "f.txt"]);
+    git_cmd(dir.path(), &["commit", "-qm", "init"]);
+    std::fs::write(dir.path().join("f.txt"), "worktree\n").expect("wt");
+    std::fs::write(dir.path().join("staged.txt"), "staged\n").expect("staged");
+    git_cmd(dir.path(), &["add", "staged.txt"]);
+
+    let repo = open_grit(dir.path());
+    let base = git_cmd(dir.path(), &["rev-parse", "HEAD"])
+        .trim()
+        .to_owned();
+    push_stash(&repo, &stash_options(false, Some("branch me")))
+        .expect("push")
+        .expect("changes");
+
+    let ident = "Test <t@example.com> 1000000001 +0000";
+    let outcome = stash_branch(&repo, "from-stash", 0, ident).expect("stash branch");
+    assert!(!outcome.conflicts);
+    assert_eq!(outcome.base.to_hex(), base);
+    assert_eq!(
+        git_cmd(dir.path(), &["rev-parse", "from-stash"]).trim(),
+        base
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("f.txt")).expect("read"),
+        "worktree\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("staged.txt")).expect("read staged"),
+        "staged\n"
+    );
+    let mut progress = NullProgress;
+    let model = status(&repo, &StatusOptions::default(), &mut progress).expect("status");
+    assert!(
+        model.staged.iter().any(|e| e.path() == "staged.txt"),
+        "index must restore staged.txt"
+    );
+    assert!(list_stashes(&repo).expect("list").is_empty());
+    assert!(git_cmd(dir.path(), &["stash", "list"]).trim().is_empty());
+    assert_fsck_strict(dir.path());
+}
+
+#[test]
+fn stash_branch_existing_name_is_typed_error() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    init_repo(dir.path());
+    std::fs::write(dir.path().join("a"), "v\n").expect("write");
+    git_cmd(dir.path(), &["add", "a"]);
+    git_cmd(dir.path(), &["commit", "-qm", "init"]);
+    git_cmd(dir.path(), &["branch", "taken"]);
+    std::fs::write(dir.path().join("a"), "dirty\n").expect("dirty");
+    let repo = open_grit(dir.path());
+    push_stash(&repo, &stash_options(false, None))
+        .expect("push")
+        .expect("changes");
+    let err = stash_branch(&repo, "taken", 0, "Test <t@example.com> 0 +0000").unwrap_err();
+    assert!(matches!(
+        err,
+        Error::Branch(BranchError::AlreadyExists { name }) if name == "taken"
+    ));
+}
+
+#[test]
+fn stash_clear_removes_ref_and_reflog_git_agrees() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    init_repo(dir.path());
+    std::fs::write(dir.path().join("a"), "v\n").expect("write");
+    git_cmd(dir.path(), &["add", "a"]);
+    git_cmd(dir.path(), &["commit", "-qm", "init"]);
+    let repo = open_grit(dir.path());
+    std::fs::write(dir.path().join("a"), "one\n").expect("one");
+    push_stash(&repo, &stash_options(false, Some("first")))
+        .expect("push")
+        .expect("changes");
+    std::fs::write(dir.path().join("a"), "two\n").expect("two");
+    push_stash(&repo, &stash_options(false, Some("second")))
+        .expect("push")
+        .expect("changes");
+
+    let cleared = clear_stashes(&repo).expect("clear");
+    assert_eq!(cleared, 2);
+    assert!(git_cmd(dir.path(), &["stash", "list"]).trim().is_empty());
+    let reflog = read_reflog(dir.path().join(".git").as_path(), "refs/stash").unwrap_or_default();
+    assert!(reflog.is_empty(), "stash reflog must be empty after clear");
     assert_fsck_strict(dir.path());
 }

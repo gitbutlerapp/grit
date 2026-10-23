@@ -313,3 +313,81 @@ fn stash_interop_with_git() {
         "git-stash\n"
     );
 }
+
+#[test]
+fn stash_show_untracked_json() {
+    let dir = scratch("show-u-json");
+    init_repo(&dir);
+    fs::write(dir.join("t.txt"), "base\n").expect("write");
+    git(&dir, &["add", "t.txt"]);
+    git(&dir, &["commit", "-qm", "init"]);
+    fs::write(dir.join("t.txt"), "dirty\n").expect("dirty");
+    fs::write(dir.join("u.txt"), "new\n").expect("untracked");
+    grit(&dir, &["stash", "-u"]);
+
+    let (code, stdout, stderr) = grit(&dir, &["stash", "show", "-u", "--json"]);
+    assert_eq!(code, 0, "show failed: {stderr}");
+    let v: serde_json::Value = serde_json::from_str(stdout.trim()).expect("json");
+    assert_eq!(v["include_untracked"], true);
+    assert!(
+        v["stat"]["files"]
+            .as_array()
+            .expect("files")
+            .iter()
+            .any(|f| f["path"] == "u.txt"),
+        "untracked path must appear in stat: {v}"
+    );
+}
+
+#[test]
+fn stash_branch_json() {
+    let dir = scratch("branch-json");
+    init_repo(&dir);
+    fs::write(dir.join("f.txt"), "base\n").expect("write");
+    git(&dir, &["add", "f.txt"]);
+    git(&dir, &["commit", "-qm", "init"]);
+    fs::write(dir.join("f.txt"), "wip\n").expect("wip");
+    grit(&dir, &["stash"]);
+    let base = git(&dir, &["rev-parse", "HEAD"]).trim().to_owned();
+
+    let (code, stdout, stderr) = grit(&dir, &["stash", "branch", "wip-branch", "--json"]);
+    assert_eq!(code, 0, "branch failed: {stderr}");
+    let v: serde_json::Value = serde_json::from_str(stdout.trim()).expect("json");
+    assert_eq!(v["branch"], "wip-branch");
+    assert_eq!(v["base"], base);
+    assert_eq!(v["index"], 0);
+    assert_eq!(v["conflicts"], false);
+    assert!(git(&dir, &["stash", "list"]).trim().is_empty());
+}
+
+#[test]
+fn stash_clear_without_force_exits_nonzero_and_json_dry_run() {
+    let dir = scratch("clear-no-force");
+    init_repo(&dir);
+    fs::write(dir.join("a"), "v\n").expect("write");
+    git(&dir, &["add", "a"]);
+    git(&dir, &["commit", "-qm", "init"]);
+    fs::write(dir.join("a"), "dirty\n").expect("dirty");
+    grit(&dir, &["stash"]);
+
+    let (code, stdout, stderr) = grit(&dir, &["stash", "clear", "--json"]);
+    assert_ne!(code, 0, "clear without --force must fail: {stderr}");
+    let v: serde_json::Value = serde_json::from_str(stdout.trim()).expect("json");
+    assert_eq!(v["cleared"], 1);
+    assert_eq!(v["dry_run"], true);
+    assert!(!git(&dir, &["stash", "list"]).trim().is_empty());
+
+    let (code, stdout, _) = grit(&dir, &["stash", "clear", "--force", "--dry-run", "--json"]);
+    assert_eq!(code, 0);
+    let v: serde_json::Value = serde_json::from_str(stdout.trim()).expect("json");
+    assert_eq!(v["cleared"], 1);
+    assert_eq!(v["dry_run"], true);
+    assert!(!git(&dir, &["stash", "list"]).trim().is_empty());
+
+    let (code, stdout, _) = grit(&dir, &["stash", "clear", "--force", "--json"]);
+    assert_eq!(code, 0);
+    let v: serde_json::Value = serde_json::from_str(stdout.trim()).expect("json");
+    assert_eq!(v["cleared"], 1);
+    assert_eq!(v["dry_run"], false);
+    assert!(git(&dir, &["stash", "list"]).trim().is_empty());
+}

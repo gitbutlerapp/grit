@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "Created branch 'from-stash' at 83352a6 and applied stash@{0}\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\"branch\":\"from-stash\",\"base\":\"83352a61f6715ec3f0a297c6d6150725154fb833\",\"index\":0,\"conflicts\":false}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "Created branch **from-stash** at `83352a61f6715ec3f0a297c6d6150725154fb833` and applied stash@{0}.\n",
+    "stderr": ""
+  }
+}

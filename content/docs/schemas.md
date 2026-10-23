@@ -89,6 +89,8 @@ Plain command failures with `--json` validate against the shared [error schema](
 | `stash.pop` | [v1](/schemas/stash.pop/v1.json) |
 | `stash.push` | [v1](/schemas/stash.push/v1.json) |
 | `stash.show` | [v1](/schemas/stash.show/v1.json) |
+| `stash.branch` | [v1](/schemas/stash.branch/v1.json) |
+| `stash.clear` | [v1](/schemas/stash.clear/v1.json) |
 | `status` | [v1](/schemas/status/v1.json) |
 | `switch` | [v1](/schemas/switch/v1.json) |
 | `tag` | [v1](/schemas/tag/v1.json) |

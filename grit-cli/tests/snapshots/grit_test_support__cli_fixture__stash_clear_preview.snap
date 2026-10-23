@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 1,
+    "stdout": "1 stash entry would be cleared (use --force)\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 1,
+    "stdout": "{\"cleared\":1,\"dry_run\":true}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 1,
+    "stdout": "Would clear **1** stash entry.\n",
+    "stderr": ""
+  }
+}

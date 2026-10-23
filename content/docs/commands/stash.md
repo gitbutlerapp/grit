@@ -11,10 +11,12 @@ order: 4
 grit stash [-m <msg>] [-u] [-- path…]
 grit stash push [-m <msg>] [-u] [--hunks <id,...>] [--lines <path:start-end>] [--dry-run] [-- path…]
 grit stash list
-grit stash show [<n>] [-p]
+grit stash show [<n>] [--stat] [-p] [-u]
 grit stash apply [<n>] [--index]
 grit stash pop [<n>] [--index]
+grit stash branch <name> [<n>]
 grit stash drop [<n>]
+grit stash clear [--force] [--dry-run]
 ```
 
 ## Description
@@ -42,13 +44,17 @@ When a stash was created with `-u` / `--include-untracked`, `apply` and `pop` re
 | `--pathspec-from-file` | Read pathspecs from a file (`-` for stdin); optional `--pathspec-file-nul`. |
 | `--index` | On `apply` / `pop`, restore the stashed index as well as the worktree. |
 | `<n>` | Stash index for `show`, `apply`, `pop`, or `drop` (default `0`). |
+| `--stat` | Show a diffstat in `grit stash show` (default when `-p` is not set). |
 | `-p`, `--patch` | Show the full patch in `grit stash show` instead of a diffstat. |
+| `-u`, `--include-untracked` | On `show`, include untracked files from the stash U parent (same as `git stash show -u`). |
 | `push` | Save changes explicitly (same flags as bare `grit stash`). |
 | `list` | List stash entries. |
 | `show` | Show a diffstat or patch for one entry. |
 | `apply` | Apply an entry without removing it. |
 | `pop` | Apply an entry and drop it when clean. |
 | `drop` | Remove an entry without applying it. |
+| `branch` | Create a branch at the stash base commit, check it out, apply with `--index`, and drop the entry on success. |
+| `clear` | Remove every stash entry. Requires `--force`; without it the command exits non-zero and reports how many entries would be cleared. `--dry-run` reports the count without deleting. |
 
 ## Examples
 
@@ -99,7 +105,7 @@ stash untracked restore blocked: 'notes.txt' already exists on disk
 
 ## JSON output
 
-Schema: [v1](/schemas/stash/v1.json) · [stash.push v1](/schemas/stash.push/v1.json) · [stash.list v1](/schemas/stash.list/v1.json) · [stash.show v1](/schemas/stash.show/v1.json) · [stash.apply v1](/schemas/stash.apply/v1.json) · [stash.pop v1](/schemas/stash.pop/v1.json) · [stash.drop v1](/schemas/stash.drop/v1.json)
+Schema: [v1](/schemas/stash/v1.json) · [stash.push v1](/schemas/stash.push/v1.json) · [stash.list v1](/schemas/stash.list/v1.json) · [stash.show v1](/schemas/stash.show/v1.json) · [stash.apply v1](/schemas/stash.apply/v1.json) · [stash.pop v1](/schemas/stash.pop/v1.json) · [stash.drop v1](/schemas/stash.drop/v1.json) · [stash.branch v1](/schemas/stash.branch/v1.json) · [stash.clear v1](/schemas/stash.clear/v1.json)
 
 Pass `--json` for stable, scripting-friendly output.
 
@@ -162,6 +168,7 @@ Diffstat (default):
 ```json
 {
   "index": 0,
+  "include_untracked": true,
   "stat": {
     "files_changed": 1,
     "insertions": 1,
@@ -184,8 +191,55 @@ With `--patch`, a `patch` object with the same shape as [`grit diff`](../diff/) 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
 | `index` | number | Stash index shown. |
+| `include_untracked` | boolean | Whether `-u` / `--include-untracked` was used (omitted when false). |
 | `stat` | object | Diffstat summary (when `-p` is not set). |
 | `patch` | object | Full diff outcome (when `-p` is set). |
+
+### `grit stash branch`
+
+```json
+{
+  "branch": "from-stash",
+  "base": "a1b2c3d4e5f6789012345678901234567890abcd",
+  "index": 0,
+  "conflicts": false
+}
+```
+
+When `conflicts` is true, `conflict_paths` lists paths with unmerged index entries.
+
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `branch` | string | Branch created and checked out. |
+| `base` | string | Stash base commit (parent 1 of the W commit). |
+| `index` | number | Stash index that was applied. |
+| `conflicts` | boolean | Whether merge conflicts remain after apply. |
+| `conflict_paths` | array of strings | Conflicted paths when `conflicts` is true. |
+
+### `grit stash clear`
+
+Without `--force` (preview only):
+
+```json
+{
+  "cleared": 2,
+  "dry_run": true
+}
+```
+
+After `grit stash clear --force`:
+
+```json
+{
+  "cleared": 2,
+  "dry_run": false
+}
+```
+
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `cleared` | number | Stash reflog entries removed or that would be removed. |
+| `dry_run` | boolean | True when nothing was deleted (`--force` missing or `--dry-run`). |
 
 ### `grit stash apply` / `grit stash pop`
 

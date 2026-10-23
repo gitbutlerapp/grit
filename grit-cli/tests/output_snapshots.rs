@@ -783,6 +783,28 @@ fn snapshot_stash_drop() {
 }
 
 #[test]
+fn snapshot_stash_branch() {
+    snapshot_fresh("stash_branch", &["stash", "branch", "from-stash"], prepare_stash);
+}
+
+#[test]
+fn snapshot_stash_clear() {
+    snapshot_fresh("stash_clear", &["stash", "clear", "--force"], prepare_stash);
+}
+
+#[test]
+fn snapshot_stash_clear_preview() {
+    let fixture = CliFixture::new();
+    prepare_stash(&fixture);
+    fixture.snapshot_all_modes_exits(
+        "stash_clear_preview",
+        &["stash", "clear"],
+        snapshot_dir(),
+        SnapshotExitCodes::all(1),
+    );
+}
+
+#[test]
 fn snapshot_worktree_list() {
     snapshot_fresh("worktree_list", &["worktree", "list"], |fixture| {
         fixture

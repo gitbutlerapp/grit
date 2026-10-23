@@ -1,0 +1,21 @@
+{
+  "$id": "https://grit-scm.com/schemas/stash.clear/v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Result of `grit stash clear`.",
+  "properties": {
+    "cleared": {
+      "format": "uint",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "dry_run": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "cleared",
+    "dry_run"
+  ],
+  "title": "StashClearOutcome",
+  "type": "object"
+}

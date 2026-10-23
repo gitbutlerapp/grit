@@ -1,0 +1,35 @@
+{
+  "$id": "https://grit-scm.com/schemas/stash.branch/v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Result of `grit stash branch`.",
+  "properties": {
+    "base": {
+      "type": "string"
+    },
+    "branch": {
+      "type": "string"
+    },
+    "conflict_paths": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "conflicts": {
+      "type": "boolean"
+    },
+    "index": {
+      "format": "uint",
+      "minimum": 0.0,
+      "type": "integer"
+    }
+  },
+  "required": [
+    "base",
+    "branch",
+    "conflicts",
+    "index"
+  ],
+  "title": "StashBranchOutcome",
+  "type": "object"
+}

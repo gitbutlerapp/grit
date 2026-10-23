@@ -180,8 +180,8 @@ fn build_schema_registry() -> Vec<SchemaRegistryEntry> {
         show::ShowRunResult,
         skill::SkillOutcome,
         stash::{
-            StashApplyOutcome, StashDropOutcome, StashListOutcome, StashPopOutcome,
-            StashPushOutcome, StashShowOutcome,
+            StashApplyOutcome, StashBranchOutcome, StashClearOutcome, StashDropOutcome,
+            StashListOutcome, StashPopOutcome, StashPushOutcome, StashShowOutcome,
         },
         status::StatusOutcome,
         switch::SwitchOutcome,
@@ -258,6 +258,8 @@ fn build_schema_registry() -> Vec<SchemaRegistryEntry> {
         entry::<StashApplyOutcome>("stash.apply"),
         entry::<StashPopOutcome>("stash.pop"),
         entry::<StashDropOutcome>("stash.drop"),
+        entry::<StashBranchOutcome>("stash.branch"),
+        entry::<StashClearOutcome>("stash.clear"),
         entry::<RestoreCliOutcome>("restore"),
         entry::<FetchOutcome>("fetch"),
         entry::<FetchAllOutcome>("fetch.all"),
@@ -344,6 +346,8 @@ pub fn schema_command_key(args: &[&str]) -> Option<String> {
             Some("apply") => "stash.apply",
             Some("pop") => "stash.pop",
             Some("drop") => "stash.drop",
+            Some("branch") => "stash.branch",
+            Some("clear") => "stash.clear",
             _ => return None,
         },
         "bundle" => match positional.get(1).copied() {
@@ -858,6 +862,9 @@ pub fn snapshot_command_args() -> &'static [(&'static str, &'static [&'static st
         ("stash_apply", &["stash", "apply"]),
         ("stash_pop", &["stash", "pop"]),
         ("stash_drop", &["stash", "drop"]),
+        ("stash_branch", &["stash", "branch", "from-stash"]),
+        ("stash_clear", &["stash", "clear", "--force"]),
+        ("stash_clear_preview", &["stash", "clear"]),
         ("ignore_check", &["ignore", "check", "noise.log"]),
         (
             "ignore_check_all",
@@ -1055,7 +1062,7 @@ mod tests {
             "schema index must list every committed schema document exactly"
         );
         let file_count: usize = on_disk.values().map(|v| v.len()).sum();
-        assert_eq!(file_count, 92, "expected 92 schema files indexed");
+        assert_eq!(file_count, 93, "expected 93 schema files indexed");
     }
 
     fn load_snapshot_json_stdout(name: &str, snapshot_dir: &Path) -> Value {

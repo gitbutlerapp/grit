@@ -263,9 +263,31 @@ enum StashAction {
     Show {
         /// Stash index (`0` is newest) or `stash@{n}`.
         index: Option<String>,
+        /// Show a diffstat summary (default).
+        #[arg(long = "stat")]
+        stat: bool,
         /// Show the full patch instead of a diffstat.
         #[arg(short = 'p', long = "patch")]
         patch: bool,
+        /// Include untracked files from the stash U parent.
+        #[arg(short = 'u', long = "include-untracked")]
+        include_untracked: bool,
+    },
+    /// Create a branch at the stash base commit and apply the stash with `--index`.
+    Branch {
+        /// New branch name.
+        name: String,
+        /// Stash index (`0` is newest) or `stash@{n}`.
+        index: Option<String>,
+    },
+    /// Remove every stash entry.
+    Clear {
+        /// Delete all stash entries (required).
+        #[arg(long = "force")]
+        force: bool,
+        /// Report how many entries would be cleared without deleting.
+        #[arg(long = "dry-run")]
+        dry_run: bool,
     },
     /// Apply a stash entry without removing it.
     Apply {
@@ -2298,8 +2320,9 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<ExitS
                 Ok(ExitStatus::from_ignore_check(&outcome))
             }
         },
-        Command::Hooks { limit, action } => match action {
-            None | Some(HooksAction::List) => {
+        Command::Hooks { action } => match action {
+            None => emit_success(&commands::hooks::run_list(None)?, opts, ctx),
+            Some(HooksAction::List { limit }) => {
                 emit_success(&commands::hooks::run_list(limit.get())?, opts, ctx)
             }
             Some(HooksAction::Run { name, hook_args }) => {
@@ -2897,8 +2920,29 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<ExitS
                 }
             }
             Some(StashAction::List) => emit_success(&commands::stash::run_list()?, opts, ctx),
-            Some(StashAction::Show { index, patch }) => {
-                emit_success(&commands::stash::run_show(index, patch)?, opts, ctx)
+            Some(StashAction::Show {
+                index,
+                stat: _,
+                patch,
+                include_untracked,
+            }) => emit_success(
+                &commands::stash::run_show(index, patch, include_untracked)?,
+                opts,
+                ctx,
+            ),
+            Some(StashAction::Branch { name, index }) => {
+                let outcome = commands::stash::run_branch(index, &name)?;
+                emit_success(&outcome, opts, ctx)?;
+                Ok(ExitStatus::from_stash_conflicts(outcome.conflicts))
+            }
+            Some(StashAction::Clear { force, dry_run }) => {
+                let outcome = commands::stash::run_clear(force, dry_run)?;
+                emit_success(&outcome, opts, ctx)?;
+                if !force {
+                    Ok(ExitStatus::Failure)
+                } else {
+                    Ok(ExitStatus::Success)
+                }
             }
             Some(StashAction::Apply {
                 index,

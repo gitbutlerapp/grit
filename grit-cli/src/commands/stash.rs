@@ -12,8 +12,8 @@ use grit_lib::porcelain::hunk_select::{
     parse_hunk_id_list, report_unstaged_hunk_selection, HunkSelectError,
 };
 use grit_lib::porcelain::stash::{
-    apply_stash_entry, drop_stash, list_stashes, pop_stash_entry, push_stash, stash_diff,
-    StashApplyOptions, StashCreateOptions,
+    apply_stash_entry, clear_stashes, drop_stash, list_stashes, pop_stash_entry, push_stash,
+    stash_branch, stash_diff, StashApplyOptions, StashCreateOptions, StashDiffOptions,
 };
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -129,6 +129,8 @@ impl MarkdownRender for StashListOutcome {
 #[derive(Serialize, JsonSchema)]
 pub struct StashShowOutcome {
     pub index: usize,
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub include_untracked: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(skip_serializing_if = "Option::is_none")]
     pub stat: Option<DiffStat>,
@@ -362,25 +364,198 @@ pub fn run_list() -> Result<StashListOutcome> {
     ))
 }
 
-pub fn run_show(index: Option<String>, patch: bool) -> Result<StashShowOutcome> {
+pub fn run_show(
+    index: Option<String>,
+    patch: bool,
+    include_untracked: bool,
+) -> Result<StashShowOutcome> {
     let repo = context::discover()?;
     let n = parse_stash_index(index.as_deref())?;
+    let diff_options = StashDiffOptions { include_untracked };
     if patch {
-        let entries = stash_diff(&repo, n).map_err(map_stash_error)?;
+        let entries = stash_diff(&repo, n, &diff_options).map_err(map_stash_error)?;
         let patch = diff::outcome_from_tree_entries(&repo, entries)?;
         return Ok(StashShowOutcome {
             index: n,
+            include_untracked,
             stat: None,
             patch: Some(patch),
         });
     }
-    let entries = stash_diff(&repo, n).map_err(map_stash_error)?;
+    let entries = stash_diff(&repo, n, &diff_options).map_err(map_stash_error)?;
     let full = diff::outcome_from_tree_entries(&repo, entries)?;
     let stat = diff_render::diffstat_from_files(&full.files);
     Ok(StashShowOutcome {
         index: n,
+        include_untracked,
         stat: Some(stat),
         patch: None,
+    })
+}
+
+/// Result of `grit stash branch`.
+#[derive(Serialize, JsonSchema)]
+pub struct StashBranchOutcome {
+    pub branch: String,
+    pub base: String,
+    pub index: usize,
+    pub conflicts: bool,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(default)]
+    pub conflict_paths: Vec<String>,
+}
+
+impl HumanRender for StashBranchOutcome {
+    fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
+        if self.conflicts {
+            eprintln!("Stash branch left conflicts in:");
+            for path in &self.conflict_paths {
+                eprintln!("  {path}");
+            }
+        } else {
+            outln!(
+                w,
+                "Created branch '{}' at {} and applied stash@{{{}}}",
+                self.branch,
+                &self.base[..7.min(self.base.len())],
+                self.index
+            );
+        }
+        Ok(())
+    }
+}
+
+impl MarkdownRender for StashBranchOutcome {
+    fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
+        if self.conflicts {
+            outln!(w, "## Stash branch conflicts\n");
+            for path in &self.conflict_paths {
+                outln!(w, "- `{path}`");
+            }
+        } else {
+            outln!(
+                w,
+                "Created branch **{}** at `{}` and applied stash@{{{}}}.",
+                self.branch,
+                self.base,
+                self.index
+            );
+        }
+        Ok(())
+    }
+}
+
+pub fn run_branch(index: Option<String>, name: &str) -> Result<StashBranchOutcome> {
+    let repo = context::discover()?;
+    let work_tree = repo
+        .work_tree()
+        .context("grit stash branch needs a working tree")?;
+    let _ = work_tree;
+    let n = parse_stash_index(index.as_deref())?;
+    let env = context::environment();
+    let config = repo.config().context("could not load config")?;
+    let now = context::wall_clock_now(&env);
+    let identity = context::reflog_identity(&env, &config, now);
+    let outcome = stash_branch(&repo, name, n, &identity).map_err(map_stash_error)?;
+    Ok(StashBranchOutcome {
+        branch: outcome.branch,
+        base: outcome.base.to_hex(),
+        index: outcome.index,
+        conflicts: outcome.conflicts,
+        conflict_paths: outcome.conflict_paths,
+    })
+}
+
+/// Result of `grit stash clear`.
+#[derive(Serialize, JsonSchema)]
+pub struct StashClearOutcome {
+    pub cleared: usize,
+    pub dry_run: bool,
+}
+
+impl HumanRender for StashClearOutcome {
+    fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
+        if self.dry_run {
+            if self.cleared == 0 {
+                outln!(w, "No stash entries to clear.");
+            } else {
+                outln!(
+                    w,
+                    "{} stash {} would be cleared (use --force)",
+                    self.cleared,
+                    if self.cleared == 1 {
+                        "entry"
+                    } else {
+                        "entries"
+                    }
+                );
+            }
+        } else if self.cleared == 0 {
+            outln!(w, "No stash entries to clear.");
+        } else {
+            outln!(
+                w,
+                "Cleared {} stash {}",
+                self.cleared,
+                if self.cleared == 1 {
+                    "entry"
+                } else {
+                    "entries"
+                }
+            );
+        }
+        Ok(())
+    }
+}
+
+impl MarkdownRender for StashClearOutcome {
+    fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
+        if self.dry_run {
+            outln!(
+                w,
+                "Would clear **{}** stash {}.",
+                self.cleared,
+                if self.cleared == 1 {
+                    "entry"
+                } else {
+                    "entries"
+                }
+            );
+        } else {
+            outln!(
+                w,
+                "Cleared **{}** stash {}.",
+                self.cleared,
+                if self.cleared == 1 {
+                    "entry"
+                } else {
+                    "entries"
+                }
+            );
+        }
+        Ok(())
+    }
+}
+
+pub fn run_clear(force: bool, dry_run: bool) -> Result<StashClearOutcome> {
+    let repo = context::discover()?;
+    let count = list_stashes(&repo).map_err(map_stash_error)?.len();
+    if !force {
+        return Ok(StashClearOutcome {
+            cleared: count,
+            dry_run: true,
+        });
+    }
+    if dry_run {
+        return Ok(StashClearOutcome {
+            cleared: count,
+            dry_run: true,
+        });
+    }
+    let cleared = clear_stashes(&repo).map_err(map_stash_error)?;
+    Ok(StashClearOutcome {
+        cleared,
+        dry_run: false,
     })
 }
 
@@ -476,6 +651,7 @@ fn map_stash_error(err: Error) -> anyhow::Error {
             anyhow::anyhow!("pathspec '{spec}' did not match any file(s) known to git")
         }
         Error::HunkSelection(err) => anyhow::Error::new(err),
+        Error::Branch(err) => anyhow::Error::new(err),
         other => anyhow::Error::new(other),
     }
 }

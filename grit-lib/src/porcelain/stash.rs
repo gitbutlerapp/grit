@@ -19,13 +19,14 @@ use std::io;
 use std::path::Path;
 
 use crate::diff::{
-    diff_index_to_tree, diff_index_to_worktree_with_options, diff_trees,
-    worktree_differs_from_index_entry, DiffEntry, DiffIndexToWorktreeOptions, DiffStatus,
+    diff_index_to_tree, diff_index_to_worktree_with_options, diff_trees, format_mode,
+    worktree_differs_from_index_entry, zero_oid, DiffEntry, DiffIndexToWorktreeOptions, DiffStatus,
 };
 use crate::error::{Error, Result};
 use crate::index::{index_file_mtime, Index, IndexEntry, MODE_GITLINK, MODE_SYMLINK, MODE_TREE};
 // `MODE_EXECUTABLE` only drives the Unix executable-bit application below.
 use crate::apply::{apply_patch_to_index, FilePatch, IndexApplyOptions};
+use crate::check_ref_format::validate_branch_short_name;
 use crate::diff::hunk_id::DiffSide;
 #[cfg(unix)]
 use crate::index::MODE_EXECUTABLE;
@@ -36,6 +37,7 @@ use crate::merge_trees::{
 use crate::objects::{parse_commit, parse_tree, CommitData, ObjectId, ObjectKind};
 use crate::odb::Odb;
 use crate::pathspec::{has_glob_chars, pathspec_is_exclude, PathspecListMatcher};
+use crate::porcelain::branch_error::BranchError;
 use crate::porcelain::checkout::checkout_between_trees;
 use crate::porcelain::checkout::smudge_bytes_for_worktree_path;
 use crate::porcelain::clean::{is_nested_git_worktree, path_in_nested_git_worktree};
@@ -50,8 +52,10 @@ use crate::porcelain::status::{
     collect_untracked_and_ignored_inner, expand_untracked_for_staging_with_rules, IgnoredMode,
     UntrackedCacheMissAction, UntrackedScan,
 };
+use crate::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
 use crate::porcelain::worktree_guard::untracked_would_be_overwritten_by_tree_changes;
 use crate::reflog::{delete_reflog_entries_rechain, read_reflog, truncate_last_reflog_line};
+use crate::refs::store::open_ref_store;
 use crate::refs::{self, append_reflog, delete_ref, write_ref};
 use crate::repo::Repository;
 use crate::state::{resolve_head, HeadState};
@@ -259,6 +263,28 @@ pub struct StashCreateOptions {
 pub struct StashApplyOptions {
     /// Restore the stashed index parent instead of keeping the current index at touched paths.
     pub restore_index: bool,
+}
+
+/// Options for [`stash_diff`].
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct StashDiffOptions {
+    /// Include untracked files from the stash U parent (same as `git stash show -u`).
+    pub include_untracked: bool,
+}
+
+/// Result of [`stash_branch`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StashBranchOutcome {
+    /// Short name of the branch created at the stash base commit.
+    pub branch: String,
+    /// Stash base commit (parent 1 of the W commit).
+    pub base: ObjectId,
+    /// Stash index that was branched.
+    pub index: usize,
+    /// Whether applying the stash left merge conflicts.
+    pub conflicts: bool,
+    /// Paths with unmerged index entries when [`Self::conflicts`] is true.
+    pub conflict_paths: Vec<String>,
 }
 
 /// One entry from [`list_stashes`] (`stash@{{index}}` in newest-first order).
@@ -1231,10 +1257,18 @@ pub fn pop_stash(
 
 /// Tree diff of stash W against its `HEAD` parent (`stash show` without `--index`).
 ///
+/// When [`StashDiffOptions::include_untracked`] is set, paths from the U parent that were
+/// not in the base tree are appended as [`DiffStatus::Added`] entries (matching
+/// `git stash show -u`).
+///
 /// # Errors
 ///
 /// Returns [`Error::StashNotFound`] or [`Error::CorruptStash`] when the entry is invalid.
-pub fn stash_diff(repo: &Repository, n: usize) -> Result<Vec<DiffEntry>> {
+pub fn stash_diff(
+    repo: &Repository,
+    n: usize,
+    options: &StashDiffOptions,
+) -> Result<Vec<DiffEntry>> {
     let oid = stash_oid_at(repo, n)?;
     let obj = repo.odb().read(&oid)?;
     let stash_commit = parse_commit(&obj.data)?;
@@ -1244,12 +1278,134 @@ pub fn stash_diff(repo: &Repository, n: usize) -> Result<Vec<DiffEntry>> {
         .ok_or(Error::CorruptStash("expected at least 2 parents"))?;
     let head_obj = repo.odb().read(head_parent)?;
     let head_commit = parse_commit(&head_obj.data)?;
-    diff_trees(
+    let mut diffs = diff_trees(
         repo.odb(),
         Some(&head_commit.tree),
         Some(&stash_commit.tree),
         "",
-    )
+    )?;
+    if options.include_untracked {
+        append_stash_untracked_show_entries(repo, &head_commit.tree, &stash_commit, &mut diffs)?;
+    }
+    Ok(diffs)
+}
+
+fn append_stash_untracked_show_entries(
+    repo: &Repository,
+    head_tree: &ObjectId,
+    stash_commit: &CommitData,
+    diffs: &mut Vec<DiffEntry>,
+) -> Result<()> {
+    if stash_commit.parents.len() < 3 {
+        return Ok(());
+    }
+    let ut_oid = &stash_commit.parents[2];
+    let ut_obj = repo.odb().read(ut_oid)?;
+    let ut_commit = parse_commit(&ut_obj.data)?;
+    let head_entries = flatten_tree_full_for_repo(repo, head_tree, "")?;
+    let ut_entries = flatten_tree_full_for_repo(repo, &ut_commit.tree, "")?;
+    let head_paths: HashSet<&str> = head_entries.iter().map(|e| e.path.as_str()).collect();
+    let diff_paths: HashSet<String> = diffs.iter().map(|e| e.path().to_owned()).collect();
+    for entry in ut_entries {
+        if head_paths.contains(entry.path.as_str()) || diff_paths.contains(&entry.path) {
+            continue;
+        }
+        diffs.push(DiffEntry {
+            status: DiffStatus::Added,
+            old_path: None,
+            new_path: Some(entry.path.clone()),
+            old_mode: "000000".to_owned(),
+            new_mode: format_mode(entry.mode),
+            old_oid: zero_oid(),
+            new_oid: entry.oid,
+            score: None,
+        });
+    }
+    diffs.sort_by(|a, b| a.path().cmp(b.path()));
+    Ok(())
+}
+
+/// Create `refs/heads/<name>` at the stash base commit, check it out, apply with `--index`, and drop on success.
+///
+/// # Errors
+///
+/// Returns [`BranchError::AlreadyExists`] when the branch name is taken,
+/// [`Error::StashNotFound`] when `n` is out of range, and apply/switch failures otherwise.
+pub fn stash_branch(
+    repo: &Repository,
+    name: &str,
+    n: usize,
+    identity: &str,
+) -> Result<StashBranchOutcome> {
+    validate_branch_short_name(name)
+        .map_err(|e| Error::Message(format!("invalid branch name '{name}': {e}")))?;
+    let branch_ref = format!("refs/heads/{name}");
+    if refs::resolve_ref(repo.git_dir(), &branch_ref).is_ok() {
+        return Err(BranchError::AlreadyExists {
+            name: name.to_owned(),
+        }
+        .into());
+    }
+    let work_tree = repo.work_tree().ok_or(Error::StashBareRepository)?;
+    let stash_oid = stash_oid_at(repo, n)?;
+    let obj = repo.odb().read(&stash_oid)?;
+    let stash_commit = parse_commit(&obj.data)?;
+    let base = *stash_commit
+        .parents
+        .first()
+        .ok_or(Error::CorruptStash("expected at least 2 parents"))?;
+
+    switch_repository(
+        repo,
+        &SwitchOptions {
+            mode: SwitchMode::Create {
+                branch: name.to_owned(),
+                start_oid: base,
+                create_source_label: format!("stash@{{{n}}}"),
+                track_upstream: None,
+            },
+            dry_run: false,
+        },
+    )?;
+
+    let applied = apply_stash_entry(
+        repo,
+        work_tree,
+        n,
+        &StashApplyOptions {
+            restore_index: true,
+        },
+    )?;
+    if !applied.has_conflicts() {
+        drop_stash(repo, n, identity)?;
+    }
+    Ok(StashBranchOutcome {
+        branch: name.to_owned(),
+        base,
+        index: n,
+        conflicts: applied.has_conflicts(),
+        conflict_paths: applied.conflicted_paths,
+    })
+}
+
+/// Delete `refs/stash` and its reflog, removing every stash entry.
+///
+/// # Returns
+///
+/// The number of reflog entries that were present (0 when there was no stash).
+///
+/// # Errors
+///
+/// Propagates ref store and reflog delete failures.
+pub fn clear_stashes(repo: &Repository) -> Result<usize> {
+    let entries = read_reflog(repo.git_dir(), STASH_REF)?;
+    let count = entries.len();
+    if count == 0 {
+        return Ok(0);
+    }
+    open_ref_store(repo.git_dir())?.delete_reflog(STASH_REF)?;
+    delete_ref(repo.git_dir(), STASH_REF)?;
+    Ok(count)
 }
 
 /// Write one flattened tree entry into the worktree (blob, symlink, or gitlink).
@@ -2287,7 +2443,7 @@ mod coverage_tests {
         let listed = list_stashes(&repo).expect("list");
         assert_eq!(listed.len(), 1);
         assert_eq!(listed[0].oid, oid);
-        let diffs = stash_diff(&repo, 0).expect("diff");
+        let diffs = stash_diff(&repo, 0, &StashDiffOptions::default()).expect("diff");
         assert!(!diffs.is_empty());
         drop_stash(&repo, 0, ident).expect("drop");
         assert!(list_stashes(&repo).expect("list").is_empty());
