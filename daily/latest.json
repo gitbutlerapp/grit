@@ -1,9 +1,9 @@
 {
   "schema": "grit-daily-bench/1",
-  "date": "2026-10-21",
-  "timestamp": "2026-10-22T01:31:37Z",
+  "date": "2026-10-22",
+  "timestamp": "2026-10-23T00:44:14Z",
   "grit": {
-    "commit": "d4844e92ad8e126cc4f4bb5455283b14860010fc",
+    "commit": "4c131b942fefebf95fb4a268dfa89897cdf0c13f",
     "version": "grit 0.5.16"
   },
   "git_version": "git version 2.43.0",
@@ -83,60 +83,6 @@
   ],
   "scenarios": [
     {
-      "id": "status/clean@synth-10k",
-      "command": "status",
-      "case": "clean",
-      "repo": "synth-10k",
-      "area": "worktree",
-      "headline": true,
-      "name": "status-clean",
-      "description": "Clean worktree status vs git status -s",
-      "git": {
-        "median_ms": 7.501,
-        "stddev_ms": null,
-        "max_rss_kb": 9464,
-        "runs": 20
-      },
-      "grit": {
-        "median_ms": 17.917,
-        "stddev_ms": null,
-        "max_rss_kb": 17748,
-        "runs": 20
-      },
-      "error": null,
-      "baseline": {
-        "median_ms": 58.917,
-        "max_rss_kb": 36256
-      }
-    },
-    {
-      "id": "status/dirty@synth-10k",
-      "command": "status",
-      "case": "dirty",
-      "repo": "synth-10k",
-      "area": "worktree",
-      "headline": true,
-      "name": "status-dirty",
-      "description": "Dirty worktree status vs git status -s",
-      "git": {
-        "median_ms": 11.113,
-        "stddev_ms": null,
-        "max_rss_kb": 9388,
-        "runs": 20
-      },
-      "grit": {
-        "median_ms": 18.325,
-        "stddev_ms": null,
-        "max_rss_kb": 17908,
-        "runs": 20
-      },
-      "error": null,
-      "baseline": {
-        "median_ms": 65.246,
-        "max_rss_kb": 36464
-      }
-    },
-    {
       "id": "add/modified@synth-10k",
       "command": "add",
       "case": "modified",
@@ -146,135 +92,25 @@
       "name": "add",
       "description": "Stage modified files vs git add -A",
       "git": {
-        "median_ms": 17.408,
+        "median_ms": 17.636,
         "stddev_ms": null,
-        "max_rss_kb": 12016,
+        "max_rss_kb": 12106,
         "runs": 20
       },
       "grit": {
-        "median_ms": 17.827,
+        "median_ms": 17.624,
         "stddev_ms": null,
-        "max_rss_kb": 20604,
+        "max_rss_kb": 21574,
         "runs": 20
       },
       "error": null,
       "baseline": {
-        "median_ms": 48.872,
-        "max_rss_kb": 40056
-      }
-    },
-    {
-      "id": "commit/small@synth-10k",
-      "command": "commit",
-      "case": "small",
-      "repo": "synth-10k",
-      "area": "worktree",
-      "headline": true,
-      "name": "commit",
-      "description": "Commit staged changes vs git commit",
-      "git": {
-        "median_ms": 26.615,
-        "stddev_ms": null,
-        "max_rss_kb": 39568,
-        "runs": 20
-      },
-      "grit": {
-        "median_ms": 32.562,
-        "stddev_ms": null,
-        "max_rss_kb": 21756,
-        "runs": 20
-      },
-      "error": null,
-      "baseline": {
-        "median_ms": 117.787,
-        "max_rss_kb": 37552
-      }
-    },
-    {
-      "id": "diff/worktree@synth-10k",
-      "command": "diff",
-      "case": "worktree",
-      "repo": "synth-10k",
-      "area": "worktree",
-      "headline": true,
-      "name": "diff",
-      "description": "Worktree diff vs git diff",
-      "git": {
-        "median_ms": 7.104,
-        "stddev_ms": null,
-        "max_rss_kb": 9642,
-        "runs": 20
-      },
-      "grit": {
-        "median_ms": 11.682,
-        "stddev_ms": null,
-        "max_rss_kb": 19196,
-        "runs": 20
-      },
-      "error": null,
-      "baseline": {
-        "median_ms": 46.422,
-        "max_rss_kb": 38868
+        "median_ms": 48.596,
+        "max_rss_kb": 40176
       },
       "rerun": {
         "samples": 4,
-        "first_pass_ratio": 1.613
-      }
-    },
-    {
-      "id": "log/oneline-100@git-git",
-      "command": "log",
-      "case": "oneline-100",
-      "repo": "git-git",
-      "area": "history",
-      "headline": true,
-      "name": "log",
-      "description": "Last 100 commits one line each vs git log --oneline",
-      "git": {
-        "median_ms": 3.294,
-        "stddev_ms": null,
-        "max_rss_kb": 14440,
-        "runs": 20
-      },
-      "grit": {
-        "median_ms": 5.419,
-        "stddev_ms": null,
-        "max_rss_kb": 22668,
-        "runs": 20
-      },
-      "error": null,
-      "baseline": null,
-      "baseline_note": "v0.5.0 cannot run this scenario's command (unsupported subcommand or flag); baseline not measured"
-    },
-    {
-      "id": "show/head@git-git",
-      "command": "show",
-      "case": "head",
-      "repo": "git-git",
-      "area": "history",
-      "headline": true,
-      "name": "show",
-      "description": "Show HEAD commit vs git show",
-      "git": {
-        "median_ms": 2.233,
-        "stddev_ms": null,
-        "max_rss_kb": 8038,
-        "runs": 20
-      },
-      "grit": {
-        "median_ms": 14.425,
-        "stddev_ms": null,
-        "max_rss_kb": 45436,
-        "runs": 20
-      },
-      "error": null,
-      "baseline": {
-        "median_ms": 250.134,
-        "max_rss_kb": 280136
-      },
-      "rerun": {
-        "samples": 4,
-        "first_pass_ratio": 6.419
+        "first_pass_ratio": 1.008
       }
     },
     {
@@ -287,47 +123,20 @@
       "name": "blame",
       "description": "Blame one tracked file vs git blame",
       "git": {
-        "median_ms": 288.288,
+        "median_ms": 280.183,
         "stddev_ms": null,
-        "max_rss_kb": 240132,
-        "runs": 3
+        "max_rss_kb": 240024,
+        "runs": 5
       },
       "grit": {
-        "median_ms": 879.418,
+        "median_ms": 344.635,
         "stddev_ms": null,
-        "max_rss_kb": 617284,
-        "runs": 3
+        "max_rss_kb": 284928,
+        "runs": 5
       },
       "error": null,
       "baseline": null,
       "baseline_note": "v0.5.0 cannot run this scenario's command (unsupported subcommand or flag); baseline not measured"
-    },
-    {
-      "id": "switch/branch@synth-10k",
-      "command": "switch",
-      "case": "branch",
-      "repo": "synth-10k",
-      "area": "worktree",
-      "headline": true,
-      "name": "switch",
-      "description": "Switch branch vs git switch",
-      "git": {
-        "median_ms": 22.765,
-        "stddev_ms": null,
-        "max_rss_kb": 10320,
-        "runs": 20
-      },
-      "grit": {
-        "median_ms": 19.877,
-        "stddev_ms": null,
-        "max_rss_kb": 18592,
-        "runs": 20
-      },
-      "error": null,
-      "baseline": {
-        "median_ms": 62.422,
-        "max_rss_kb": 14552
-      }
     },
     {
       "id": "branch/list@many-refs",
@@ -339,181 +148,21 @@
       "name": "branch",
       "description": "List branches vs git branch",
       "git": {
-        "median_ms": 2.213,
+        "median_ms": 2.209,
         "stddev_ms": null,
-        "max_rss_kb": 6772,
+        "max_rss_kb": 6872,
         "runs": 20
       },
       "grit": {
-        "median_ms": 3.295,
+        "median_ms": 3.282,
         "stddev_ms": null,
-        "max_rss_kb": 13484,
-        "runs": 20
-      },
-      "error": null,
-      "baseline": {
-        "median_ms": 3.297,
-        "max_rss_kb": 6684
-      }
-    },
-    {
-      "id": "merge/clean@synth-10k",
-      "command": "merge",
-      "case": "clean",
-      "repo": "synth-10k",
-      "area": "branching",
-      "headline": true,
-      "name": "merge",
-      "description": "Merge branch vs git merge",
-      "git": {
-        "median_ms": 101.999,
-        "stddev_ms": null,
-        "max_rss_kb": 13820,
-        "runs": 10
-      },
-      "grit": {
-        "median_ms": 204.622,
-        "stddev_ms": null,
-        "max_rss_kb": 23488,
-        "runs": 10
-      },
-      "error": null,
-      "baseline": {
-        "median_ms": 303.685,
-        "max_rss_kb": 39884
-      }
-    },
-    {
-      "id": "pick/one@synth-10k",
-      "command": "pick",
-      "case": "one",
-      "repo": "synth-10k",
-      "area": "branching",
-      "headline": true,
-      "name": "pick",
-      "description": "Cherry-pick one commit vs git cherry-pick",
-      "git": {
-        "median_ms": 111.904,
-        "stddev_ms": null,
-        "max_rss_kb": 9088,
-        "runs": 10
-      },
-      "grit": {
-        "median_ms": 204.913,
-        "stddev_ms": null,
-        "max_rss_kb": 24972,
-        "runs": 10
-      },
-      "error": null,
-      "baseline": {
-        "median_ms": 155.61,
-        "max_rss_kb": 22856
-      }
-    },
-    {
-      "id": "stash/push-pop@synth-10k",
-      "command": "stash",
-      "case": "push-pop",
-      "repo": "synth-10k",
-      "area": "worktree",
-      "headline": true,
-      "name": "stash",
-      "description": "Stash push and pop vs git stash",
-      "git": {
-        "median_ms": 193.439,
-        "stddev_ms": null,
-        "max_rss_kb": 17936,
-        "runs": 6
-      },
-      "grit": {
-        "median_ms": 349.344,
-        "stddev_ms": null,
-        "max_rss_kb": 25788,
-        "runs": 6
-      },
-      "error": null,
-      "baseline": null,
-      "baseline_note": "v0.5.0 cannot run this scenario's command (unsupported subcommand or flag); baseline not measured"
-    },
-    {
-      "id": "fetch/incremental@git-git",
-      "command": "fetch",
-      "case": "incremental",
-      "repo": "git-git",
-      "area": "remote",
-      "headline": true,
-      "name": "fetch",
-      "description": "Incremental fetch vs git fetch",
-      "git": {
-        "median_ms": 122.112,
-        "stddev_ms": null,
-        "max_rss_kb": 85884,
-        "runs": 20
-      },
-      "grit": {
-        "median_ms": 15.168,
-        "stddev_ms": null,
-        "max_rss_kb": 30396,
+        "max_rss_kb": 13628,
         "runs": 20
       },
       "error": null,
       "baseline": {
-        "median_ms": 72474.151,
-        "max_rss_kb": 697192
-      }
-    },
-    {
-      "id": "pull/fast-forward@git-git",
-      "command": "pull",
-      "case": "fast-forward",
-      "repo": "git-git",
-      "area": "remote",
-      "headline": true,
-      "name": "pull",
-      "description": "Fast-forward pull vs git pull --ff-only",
-      "git": {
-        "median_ms": 134.07,
-        "stddev_ms": null,
-        "max_rss_kb": 91948,
-        "runs": 19
-      },
-      "grit": {
-        "median_ms": 22.888,
-        "stddev_ms": null,
-        "max_rss_kb": 30448,
-        "runs": 19
-      },
-      "error": null,
-      "baseline": {
-        "median_ms": 78025.855,
-        "max_rss_kb": 731716
-      }
-    },
-    {
-      "id": "push/incremental@git-git",
-      "command": "push",
-      "case": "incremental",
-      "repo": "git-git",
-      "area": "remote",
-      "headline": true,
-      "name": "push",
-      "description": "Incremental push vs git push",
-      "git": {
-        "median_ms": 1562.706,
-        "stddev_ms": null,
-        "max_rss_kb": 196264,
-        "runs": 3
-      },
-      "grit": {
-        "median_ms": 5.454,
-        "stddev_ms": null,
-        "max_rss_kb": 18576,
-        "runs": 3
-      },
-      "error": null,
-      "baseline": {
-        "median_ms": 37610.12,
-        "max_rss_kb": 453724
+        "median_ms": 2.23,
+        "max_rss_kb": 7848
       }
     },
     {
@@ -526,21 +175,451 @@
       "name": "clone",
       "description": "Clone over file:// (not git clone --local hardlink shortcut) vs git clone",
       "git": {
-        "median_ms": 940.731,
+        "median_ms": 983.258,
         "stddev_ms": null,
-        "max_rss_kb": 71892,
+        "max_rss_kb": 71928,
         "runs": 3
       },
       "grit": {
-        "median_ms": 694.865,
+        "median_ms": 676.428,
         "stddev_ms": null,
-        "max_rss_kb": 66064,
+        "max_rss_kb": 67048,
         "runs": 3
       },
       "error": null,
       "baseline": {
-        "median_ms": 4568.811,
-        "max_rss_kb": 133152
+        "median_ms": 4500.531,
+        "max_rss_kb": 132380
+      }
+    },
+    {
+      "id": "commit/small@synth-10k",
+      "command": "commit",
+      "case": "small",
+      "repo": "synth-10k",
+      "area": "worktree",
+      "headline": true,
+      "name": "commit",
+      "description": "Commit staged changes vs git commit",
+      "git": {
+        "median_ms": 28.173,
+        "stddev_ms": null,
+        "max_rss_kb": 39460,
+        "runs": 20
+      },
+      "grit": {
+        "median_ms": 25.516,
+        "stddev_ms": null,
+        "max_rss_kb": 22880,
+        "runs": 20
+      },
+      "error": null,
+      "baseline": {
+        "median_ms": 119.974,
+        "max_rss_kb": 37776
+      }
+    },
+    {
+      "id": "diff/worktree@synth-10k",
+      "command": "diff",
+      "case": "worktree",
+      "repo": "synth-10k",
+      "area": "worktree",
+      "headline": true,
+      "name": "diff",
+      "description": "Worktree diff vs git diff",
+      "git": {
+        "median_ms": 7.733,
+        "stddev_ms": null,
+        "max_rss_kb": 9686,
+        "runs": 20
+      },
+      "grit": {
+        "median_ms": 11.996,
+        "stddev_ms": null,
+        "max_rss_kb": 22888,
+        "runs": 20
+      },
+      "error": null,
+      "baseline": {
+        "median_ms": 46.686,
+        "max_rss_kb": 38888
+      },
+      "rerun": {
+        "samples": 4,
+        "first_pass_ratio": 1.694
+      }
+    },
+    {
+      "id": "fetch/incremental@git-git",
+      "command": "fetch",
+      "case": "incremental",
+      "repo": "git-git",
+      "area": "remote",
+      "headline": true,
+      "name": "fetch",
+      "description": "Incremental fetch vs git fetch",
+      "git": {
+        "median_ms": 109.061,
+        "stddev_ms": null,
+        "max_rss_kb": 83620,
+        "runs": 20
+      },
+      "grit": {
+        "median_ms": 14.001,
+        "stddev_ms": null,
+        "max_rss_kb": 27952,
+        "runs": 20
+      },
+      "error": null,
+      "baseline": {
+        "median_ms": 72281.059,
+        "max_rss_kb": 695696
+      }
+    },
+    {
+      "id": "log/json-100@git-git",
+      "command": "log",
+      "case": "json-100",
+      "repo": "git-git",
+      "area": "history",
+      "headline": true,
+      "name": "log",
+      "description": "Last 100 commits as JSON vs git log with a verbose --format",
+      "git": {
+        "median_ms": 3.286,
+        "stddev_ms": null,
+        "max_rss_kb": 14132,
+        "runs": 20
+      },
+      "grit": {
+        "median_ms": 6.519,
+        "stddev_ms": null,
+        "max_rss_kb": 24352,
+        "runs": 20
+      },
+      "error": null,
+      "baseline": null,
+      "baseline_note": "v0.5.0 cannot run this scenario's command (unsupported subcommand or flag); baseline not measured"
+    },
+    {
+      "id": "log/oneline-100@git-git",
+      "command": "log",
+      "case": "oneline-100",
+      "repo": "git-git",
+      "area": "history",
+      "headline": true,
+      "name": "log",
+      "description": "Last 100 commits one line each vs git log --oneline",
+      "git": {
+        "median_ms": 3.287,
+        "stddev_ms": null,
+        "max_rss_kb": 14084,
+        "runs": 20
+      },
+      "grit": {
+        "median_ms": 5.442,
+        "stddev_ms": null,
+        "max_rss_kb": 23716,
+        "runs": 20
+      },
+      "error": null,
+      "baseline": null,
+      "baseline_note": "v0.5.0 cannot run this scenario's command (unsupported subcommand or flag); baseline not measured"
+    },
+    {
+      "id": "merge/clean@synth-10k",
+      "command": "merge",
+      "case": "clean",
+      "repo": "synth-10k",
+      "area": "branching",
+      "headline": true,
+      "name": "merge",
+      "description": "Merge branch vs git merge",
+      "git": {
+        "median_ms": 99.018,
+        "stddev_ms": null,
+        "max_rss_kb": 13956,
+        "runs": 18
+      },
+      "grit": {
+        "median_ms": 75.665,
+        "stddev_ms": null,
+        "max_rss_kb": 24636,
+        "runs": 18
+      },
+      "error": null,
+      "baseline": {
+        "median_ms": 302.551,
+        "max_rss_kb": 39820
+      }
+    },
+    {
+      "id": "pick/one@synth-10k",
+      "command": "pick",
+      "case": "one",
+      "repo": "synth-10k",
+      "area": "branching",
+      "headline": true,
+      "name": "pick",
+      "description": "Cherry-pick one commit vs git cherry-pick",
+      "git": {
+        "median_ms": 112.297,
+        "stddev_ms": null,
+        "max_rss_kb": 9140,
+        "runs": 18
+      },
+      "grit": {
+        "median_ms": 58.11,
+        "stddev_ms": null,
+        "max_rss_kb": 25152,
+        "runs": 18
+      },
+      "error": null,
+      "baseline": {
+        "median_ms": 162.129,
+        "max_rss_kb": 22844
+      }
+    },
+    {
+      "id": "pull/fast-forward@git-git",
+      "command": "pull",
+      "case": "fast-forward",
+      "repo": "git-git",
+      "area": "remote",
+      "headline": true,
+      "name": "pull",
+      "description": "Fast-forward pull vs git pull --ff-only",
+      "git": {
+        "median_ms": 119.248,
+        "stddev_ms": null,
+        "max_rss_kb": 89076,
+        "runs": 20
+      },
+      "grit": {
+        "median_ms": 20.566,
+        "stddev_ms": null,
+        "max_rss_kb": 27876,
+        "runs": 20
+      },
+      "error": null,
+      "baseline": {
+        "median_ms": 81363.193,
+        "max_rss_kb": 735136
+      }
+    },
+    {
+      "id": "pull/rebase@synth-10k",
+      "command": "pull",
+      "case": "rebase",
+      "repo": "synth-10k",
+      "area": "remote",
+      "headline": true,
+      "name": "pull",
+      "description": "Rebase pull (3 local onto 5 upstream) vs git pull --rebase",
+      "git": {
+        "median_ms": 69.774,
+        "stddev_ms": null,
+        "max_rss_kb": 60808,
+        "runs": 20
+      },
+      "grit": {
+        "median_ms": 38.423,
+        "stddev_ms": null,
+        "max_rss_kb": 40724,
+        "runs": 20
+      },
+      "error": null,
+      "baseline": null,
+      "baseline_note": "v0.5.0 cannot run this scenario's command (unsupported subcommand or flag); baseline not measured"
+    },
+    {
+      "id": "push/force-with-lease@git-git",
+      "command": "push",
+      "case": "force-with-lease",
+      "repo": "git-git",
+      "area": "remote",
+      "headline": true,
+      "name": "push",
+      "description": "Amended commit force-with-lease push vs git push --force-with-lease",
+      "git": {
+        "median_ms": 1608.682,
+        "stddev_ms": null,
+        "max_rss_kb": 195468,
+        "runs": 3
+      },
+      "grit": {
+        "median_ms": 625.879,
+        "stddev_ms": null,
+        "max_rss_kb": 79648,
+        "runs": 3
+      },
+      "error": null,
+      "baseline": null,
+      "baseline_note": "v0.5.0 cannot run this scenario's command (unsupported subcommand or flag); baseline not measured"
+    },
+    {
+      "id": "push/incremental@git-git",
+      "command": "push",
+      "case": "incremental",
+      "repo": "git-git",
+      "area": "remote",
+      "headline": true,
+      "name": "push",
+      "description": "Incremental push vs git push",
+      "git": {
+        "median_ms": 1643.415,
+        "stddev_ms": null,
+        "max_rss_kb": 196046,
+        "runs": 3
+      },
+      "grit": {
+        "median_ms": 8.637,
+        "stddev_ms": null,
+        "max_rss_kb": 25942,
+        "runs": 3
+      },
+      "error": null,
+      "baseline": {
+        "median_ms": 38991.898,
+        "max_rss_kb": 459912
+      },
+      "rerun": {
+        "samples": 4,
+        "first_pass_ratio": 0.005
+      }
+    },
+    {
+      "id": "show/head@git-git",
+      "command": "show",
+      "case": "head",
+      "repo": "git-git",
+      "area": "history",
+      "headline": true,
+      "name": "show",
+      "description": "Show HEAD commit vs git show",
+      "git": {
+        "median_ms": 2.222,
+        "stddev_ms": null,
+        "max_rss_kb": 8196,
+        "runs": 20
+      },
+      "grit": {
+        "median_ms": 5.431,
+        "stddev_ms": null,
+        "max_rss_kb": 18340,
+        "runs": 20
+      },
+      "error": null,
+      "baseline": {
+        "median_ms": 147.754,
+        "max_rss_kb": 281564
+      }
+    },
+    {
+      "id": "stash/push-pop@synth-10k",
+      "command": "stash",
+      "case": "push-pop",
+      "repo": "synth-10k",
+      "area": "worktree",
+      "headline": true,
+      "name": "stash",
+      "description": "Stash push and pop vs git stash",
+      "git": {
+        "median_ms": 215.764,
+        "stddev_ms": null,
+        "max_rss_kb": 17976,
+        "runs": 6
+      },
+      "grit": {
+        "median_ms": 368.914,
+        "stddev_ms": null,
+        "max_rss_kb": 26356,
+        "runs": 6
+      },
+      "error": null,
+      "baseline": null,
+      "baseline_note": "v0.5.0 cannot run this scenario's command (unsupported subcommand or flag); baseline not measured"
+    },
+    {
+      "id": "status/clean@synth-10k",
+      "command": "status",
+      "case": "clean",
+      "repo": "synth-10k",
+      "area": "worktree",
+      "headline": true,
+      "name": "status-clean",
+      "description": "Clean worktree status vs git status -s",
+      "git": {
+        "median_ms": 7.772,
+        "stddev_ms": null,
+        "max_rss_kb": 9304,
+        "runs": 20
+      },
+      "grit": {
+        "median_ms": 11.054,
+        "stddev_ms": null,
+        "max_rss_kb": 18760,
+        "runs": 20
+      },
+      "error": null,
+      "baseline": {
+        "median_ms": 55.111,
+        "max_rss_kb": 36556
+      }
+    },
+    {
+      "id": "status/dirty@synth-10k",
+      "command": "status",
+      "case": "dirty",
+      "repo": "synth-10k",
+      "area": "worktree",
+      "headline": true,
+      "name": "status-dirty",
+      "description": "Dirty worktree status vs git status -s",
+      "git": {
+        "median_ms": 11.79,
+        "stddev_ms": null,
+        "max_rss_kb": 9512,
+        "runs": 20
+      },
+      "grit": {
+        "median_ms": 12.349,
+        "stddev_ms": null,
+        "max_rss_kb": 18932,
+        "runs": 20
+      },
+      "error": null,
+      "baseline": {
+        "median_ms": 63.733,
+        "max_rss_kb": 36548
+      }
+    },
+    {
+      "id": "switch/branch@synth-10k",
+      "command": "switch",
+      "case": "branch",
+      "repo": "synth-10k",
+      "area": "worktree",
+      "headline": true,
+      "name": "switch",
+      "description": "Switch branch vs git switch",
+      "git": {
+        "median_ms": 23.354,
+        "stddev_ms": null,
+        "max_rss_kb": 10344,
+        "runs": 20
+      },
+      "grit": {
+        "median_ms": 20.549,
+        "stddev_ms": null,
+        "max_rss_kb": 19624,
+        "runs": 20
+      },
+      "error": null,
+      "baseline": {
+        "median_ms": 66.373,
+        "max_rss_kb": 14592
       }
     },
     {
@@ -549,19 +628,39 @@
       "case": "all",
       "repo": "synth-100k",
       "area": "worktree",
-      "headline": false,
       "description": "Stage all changes: grit add vs git add -A (after ~1% modified)",
       "git": {
-        "median_ms": 140.3,
+        "median_ms": 145.925,
         "stddev_ms": null,
-        "max_rss_kb": 28228,
+        "max_rss_kb": 28884,
         "runs": 4
       },
       "grit": {
-        "median_ms": 729.47,
+        "median_ms": 704.715,
         "stddev_ms": null,
-        "max_rss_kb": 47724,
+        "max_rss_kb": 48316,
         "runs": 4
+      },
+      "error": null
+    },
+    {
+      "id": "add/dry-run@synth-10k",
+      "command": "add",
+      "case": "dry-run",
+      "repo": "synth-10k",
+      "area": "worktree",
+      "description": "Preview staging: grit add --dry-run vs git add -n -A",
+      "git": {
+        "median_ms": 8.764,
+        "stddev_ms": null,
+        "max_rss_kb": 12836,
+        "runs": 20
+      },
+      "grit": {
+        "median_ms": 16.703,
+        "stddev_ms": null,
+        "max_rss_kb": 19644,
+        "runs": 20
       },
       "error": null
     },
@@ -571,19 +670,60 @@
       "case": "modified",
       "repo": "big-blobs",
       "area": "worktree",
-      "headline": false,
       "description": "Stage ~1% modified paths: grit add -- <paths> vs git add -- <paths>",
       "git": {
-        "median_ms": 214.403,
+        "median_ms": 219.756,
         "stddev_ms": null,
-        "max_rss_kb": 80008,
+        "max_rss_kb": 79936,
         "runs": 5
       },
       "grit": {
-        "median_ms": 461.698,
+        "median_ms": 399.86,
         "stddev_ms": null,
-        "max_rss_kb": 157428,
+        "max_rss_kb": 158324,
         "runs": 5
+      },
+      "error": null
+    },
+    {
+      "id": "add/patch-file@synth-10k",
+      "command": "add",
+      "case": "patch-file",
+      "repo": "synth-10k",
+      "area": "worktree",
+      "description": "Apply worktree diff to index: grit add --patch-file vs git apply --cached",
+      "git": {
+        "median_ms": 6.536,
+        "stddev_ms": null,
+        "max_rss_kb": 9436,
+        "runs": 20
+      },
+      "grit": {
+        "median_ms": 8.654,
+        "stddev_ms": null,
+        "max_rss_kb": 17996,
+        "runs": 20
+      },
+      "error": null
+    },
+    {
+      "id": "add/update@synth-100k",
+      "command": "add",
+      "case": "update",
+      "repo": "synth-100k",
+      "area": "worktree",
+      "description": "Stage tracked changes: grit add -u vs git add -u (after ~1% modified)",
+      "git": {
+        "median_ms": 108.788,
+        "stddev_ms": null,
+        "max_rss_kb": 29260,
+        "runs": 13
+      },
+      "grit": {
+        "median_ms": 127.47,
+        "stddev_ms": null,
+        "max_rss_kb": 40800,
+        "runs": 13
       },
       "error": null
     },
@@ -593,18 +733,17 @@
       "case": "file",
       "repo": "deep-tree",
       "area": "history",
-      "headline": false,
       "description": "Blame one file on deep-tree: grit blame <path> vs git blame --porcelain <path>",
       "git": {
-        "median_ms": 409.885,
+        "median_ms": 416.464,
         "stddev_ms": null,
-        "max_rss_kb": 85616,
+        "max_rss_kb": 85504,
         "runs": 6
       },
       "grit": {
-        "median_ms": 165.237,
+        "median_ms": 115.703,
         "stddev_ms": null,
-        "max_rss_kb": 120240,
+        "max_rss_kb": 62208,
         "runs": 6
       },
       "error": null
@@ -615,18 +754,17 @@
       "case": "create",
       "repo": "many-refs",
       "area": "branching",
-      "headline": false,
       "description": "Create one branch vs git branch",
       "git": {
-        "median_ms": 2.224,
+        "median_ms": 2.207,
         "stddev_ms": null,
-        "max_rss_kb": 7680,
+        "max_rss_kb": 7592,
         "runs": 20
       },
       "grit": {
-        "median_ms": 29.356,
+        "median_ms": 3.308,
         "stddev_ms": null,
-        "max_rss_kb": 23256,
+        "max_rss_kb": 15808,
         "runs": 20
       },
       "error": null
@@ -637,25 +775,20 @@
       "case": "delete",
       "repo": "many-refs",
       "area": "branching",
-      "headline": false,
       "description": "Delete one branch vs git branch -D",
       "git": {
-        "median_ms": 4.574,
+        "median_ms": 4.4,
         "stddev_ms": null,
-        "max_rss_kb": 7718,
+        "max_rss_kb": 7784,
         "runs": 20
       },
       "grit": {
-        "median_ms": 9.733,
+        "median_ms": 7.899,
         "stddev_ms": null,
-        "max_rss_kb": 16286,
+        "max_rss_kb": 16736,
         "runs": 20
       },
-      "error": null,
-      "rerun": {
-        "samples": 4,
-        "first_pass_ratio": 2.112
-      }
+      "error": null
     },
     {
       "id": "branch/list@many-refs-loose",
@@ -663,21 +796,30 @@
       "case": "list",
       "repo": "many-refs-loose",
       "area": "branching",
-      "headline": false,
       "description": "List branches on loose many-refs fixture vs git branch",
       "git": {
-        "median_ms": 2.207,
+        "median_ms": 2.215,
         "stddev_ms": null,
-        "max_rss_kb": 6604,
+        "max_rss_kb": 6348,
         "runs": 20
       },
       "grit": {
-        "median_ms": 3.305,
+        "median_ms": 3.283,
         "stddev_ms": null,
-        "max_rss_kb": 13516,
+        "max_rss_kb": 13568,
         "runs": 20
       },
       "error": null
+    },
+    {
+      "id": "branch/rename@many-refs",
+      "command": "branch",
+      "case": "rename",
+      "repo": "many-refs",
+      "area": "other",
+      "git": null,
+      "grit": null,
+      "error": "harness prepare step failed on the first attempt (with and without the baseline): the scenario's prepare command exits 128 before any timing, so neither tool was timed. Not substituted."
     },
     {
       "id": "bundle/create@synth-10k",
@@ -685,25 +827,20 @@
       "case": "create",
       "repo": "synth-10k",
       "area": "objects",
-      "headline": false,
       "description": "Create bundle file vs git bundle create",
       "git": {
-        "median_ms": 261.893,
+        "median_ms": 263.786,
         "stddev_ms": null,
-        "max_rss_kb": 63538,
+        "max_rss_kb": 63668,
         "runs": 3
       },
       "grit": {
-        "median_ms": 3415.778,
+        "median_ms": 914.317,
         "stddev_ms": null,
-        "max_rss_kb": 226102,
+        "max_rss_kb": 227816,
         "runs": 3
       },
-      "error": null,
-      "rerun": {
-        "samples": 4,
-        "first_pass_ratio": 12.99
-      }
+      "error": null
     },
     {
       "id": "bundle/verify@synth-10k",
@@ -711,18 +848,17 @@
       "case": "verify",
       "repo": "synth-10k",
       "area": "objects",
-      "headline": false,
       "description": "Verify bundle vs git bundle verify",
       "git": {
-        "median_ms": 2.223,
+        "median_ms": 2.22,
         "stddev_ms": null,
-        "max_rss_kb": 6368,
+        "max_rss_kb": 6220,
         "runs": 20
       },
       "grit": {
-        "median_ms": 14.15,
+        "median_ms": 14.7,
         "stddev_ms": null,
-        "max_rss_kb": 34328,
+        "max_rss_kb": 34172,
         "runs": 20
       },
       "error": null
@@ -733,18 +869,17 @@
       "case": "blob",
       "repo": "git-git",
       "area": "history",
-      "headline": false,
       "description": "Print one blob at HEAD:<path>: grit cat <oid> vs git cat-file -p <oid> (oid from git rev-parse HEAD:<path>)",
       "git": {
-        "median_ms": 2.213,
+        "median_ms": 2.208,
         "stddev_ms": null,
-        "max_rss_kb": 6960,
+        "max_rss_kb": 7052,
         "runs": 20
       },
       "grit": {
-        "median_ms": 3.298,
+        "median_ms": 3.3,
         "stddev_ms": null,
-        "max_rss_kb": 14764,
+        "max_rss_kb": 14872,
         "runs": 20
       },
       "error": null
@@ -755,18 +890,59 @@
       "case": "untracked",
       "repo": "synth-10k",
       "area": "worktree",
-      "headline": false,
       "description": "Remove untracked files: grit clean -f vs git clean -fd",
       "git": {
-        "median_ms": 4.377,
+        "median_ms": 5.432,
         "stddev_ms": null,
-        "max_rss_kb": 8580,
+        "max_rss_kb": 8616,
         "runs": 20
       },
       "grit": {
-        "median_ms": 13.043,
+        "median_ms": 7.648,
         "stddev_ms": null,
-        "max_rss_kb": 15800,
+        "max_rss_kb": 16228,
+        "runs": 20
+      },
+      "error": null
+    },
+    {
+      "id": "clone/http@synth-10k",
+      "command": "clone",
+      "case": "http",
+      "repo": "synth-10k",
+      "area": "remote",
+      "description": "Clone synth-10k over grit smart HTTP vs git clone",
+      "git": {
+        "median_ms": 1068.947,
+        "stddev_ms": null,
+        "max_rss_kb": 35468,
+        "runs": 3
+      },
+      "grit": {
+        "median_ms": 1286.844,
+        "stddev_ms": null,
+        "max_rss_kb": 56848,
+        "runs": 3
+      },
+      "error": null
+    },
+    {
+      "id": "commit/dry-run@synth-10k",
+      "command": "commit",
+      "case": "dry-run",
+      "repo": "synth-10k",
+      "area": "worktree",
+      "description": "Preview commit: grit commit --dry-run vs git commit --dry-run",
+      "git": {
+        "median_ms": 11.462,
+        "stddev_ms": null,
+        "max_rss_kb": 10016,
+        "runs": 20
+      },
+      "grit": {
+        "median_ms": 28.16,
+        "stddev_ms": null,
+        "max_rss_kb": 22080,
         "runs": 20
       },
       "error": null
@@ -777,18 +953,17 @@
       "case": "paths",
       "repo": "synth-10k",
       "area": "worktree",
-      "headline": false,
       "description": "Partial commit of ~1% paths: grit commit -- paths vs git commit --only",
       "git": {
-        "median_ms": 22.646,
+        "median_ms": 23.101,
         "stddev_ms": null,
-        "max_rss_kb": 42324,
+        "max_rss_kb": 42552,
         "runs": 6
       },
       "grit": {
-        "median_ms": 518.763,
+        "median_ms": 542.963,
         "stddev_ms": null,
-        "max_rss_kb": 27932,
+        "max_rss_kb": 28776,
         "runs": 6
       },
       "error": null
@@ -799,25 +974,20 @@
       "case": "small",
       "repo": "small",
       "area": "worktree",
-      "headline": false,
       "description": "Commit on small synth: grit commit bench vs git add+commit",
       "git": {
-        "median_ms": 5.605,
+        "median_ms": 6.151,
         "stddev_ms": null,
-        "max_rss_kb": 11742,
+        "max_rss_kb": 11820,
         "runs": 20
       },
       "grit": {
-        "median_ms": 6.44,
+        "median_ms": 7.586,
         "stddev_ms": null,
-        "max_rss_kb": 16264,
+        "max_rss_kb": 17424,
         "runs": 20
       },
-      "error": null,
-      "rerun": {
-        "samples": 4,
-        "first_pass_ratio": 1.183
-      }
+      "error": null
     },
     {
       "id": "commit/small@synth-100k",
@@ -825,18 +995,17 @@
       "case": "small",
       "repo": "synth-100k",
       "area": "worktree",
-      "headline": false,
       "description": "Commit after staging ~1% paths: grit commit bench vs git add+commit",
       "git": {
-        "median_ms": 913.57,
+        "median_ms": 951.155,
         "stddev_ms": null,
-        "max_rss_kb": 37396,
+        "max_rss_kb": 36620,
         "runs": 3
       },
       "grit": {
-        "median_ms": 392.185,
+        "median_ms": 326.566,
         "stddev_ms": null,
-        "max_rss_kb": 48388,
+        "max_rss_kb": 44156,
         "runs": 3
       },
       "error": null
@@ -847,19 +1016,18 @@
       "case": "staged",
       "repo": "synth-100k",
       "area": "worktree",
-      "headline": false,
       "description": "Commit pre-staged index: grit commit --staged vs git commit",
       "git": {
-        "median_ms": 70.593,
+        "median_ms": 73.226,
         "stddev_ms": null,
-        "max_rss_kb": 37320,
-        "runs": 15
+        "max_rss_kb": 36452,
+        "runs": 16
       },
       "grit": {
-        "median_ms": 126.95,
+        "median_ms": 117.272,
         "stddev_ms": null,
-        "max_rss_kb": 42420,
-        "runs": 15
+        "max_rss_kb": 43500,
+        "runs": 16
       },
       "error": null
     },
@@ -869,25 +1037,20 @@
       "case": "get",
       "repo": "small",
       "area": "other",
-      "headline": false,
       "description": "Read one config key vs git config",
       "git": {
-        "median_ms": 1.686,
+        "median_ms": 2.191,
         "stddev_ms": null,
-        "max_rss_kb": 5694,
+        "max_rss_kb": 6224,
         "runs": 20
       },
       "grit": {
-        "median_ms": 2.594,
+        "median_ms": 3.272,
         "stddev_ms": null,
-        "max_rss_kb": 10666,
+        "max_rss_kb": 12528,
         "runs": 20
       },
-      "error": null,
-      "rerun": {
-        "samples": 4,
-        "first_pass_ratio": 2.438
-      }
+      "error": null
     },
     {
       "id": "config/set@small",
@@ -895,18 +1058,17 @@
       "case": "set",
       "repo": "small",
       "area": "other",
-      "headline": false,
       "description": "Set one config key vs git config",
       "git": {
-        "median_ms": 2.208,
+        "median_ms": 2.204,
         "stddev_ms": null,
-        "max_rss_kb": 6440,
+        "max_rss_kb": 6432,
         "runs": 20
       },
       "grit": {
-        "median_ms": 3.905,
+        "median_ms": 3.914,
         "stddev_ms": null,
-        "max_rss_kb": 12508,
+        "max_rss_kb": 12640,
         "runs": 20
       },
       "error": null
@@ -917,24 +1079,23 @@
       "case": "staged",
       "repo": "deep-tree",
       "area": "worktree",
-      "headline": false,
       "description": "Staged diff on deep-tree: grit diff --staged vs git diff --cached",
       "git": {
-        "median_ms": 39.048,
+        "median_ms": 38.525,
         "stddev_ms": null,
-        "max_rss_kb": 41680,
-        "runs": 16
+        "max_rss_kb": 41650,
+        "runs": 6
       },
       "grit": {
-        "median_ms": 163.08,
+        "median_ms": 489.818,
         "stddev_ms": null,
-        "max_rss_kb": 54060,
-        "runs": 16
+        "max_rss_kb": 78454,
+        "runs": 6
       },
       "error": null,
       "rerun": {
         "samples": 4,
-        "first_pass_ratio": 4.153
+        "first_pass_ratio": 12.16
       }
     },
     {
@@ -943,21 +1104,24 @@
       "case": "staged",
       "repo": "synth-100k",
       "area": "worktree",
-      "headline": false,
       "description": "Index vs HEAD diff: grit diff --staged vs git diff --cached",
       "git": {
-        "median_ms": 68.428,
+        "median_ms": 71.679,
         "stddev_ms": null,
-        "max_rss_kb": 30156,
-        "runs": 15
+        "max_rss_kb": 30152,
+        "runs": 13
       },
       "grit": {
-        "median_ms": 133.64,
+        "median_ms": 172.368,
         "stddev_ms": null,
-        "max_rss_kb": 69396,
-        "runs": 15
+        "max_rss_kb": 83800,
+        "runs": 13
       },
-      "error": null
+      "error": null,
+      "rerun": {
+        "samples": 4,
+        "first_pass_ratio": 2.398
+      }
     },
     {
       "id": "diff/worktree@big-blobs",
@@ -965,25 +1129,20 @@
       "case": "worktree",
       "repo": "big-blobs",
       "area": "worktree",
-      "headline": false,
       "description": "Unstaged worktree diff on big-blobs: grit diff vs git diff",
       "git": {
-        "median_ms": 314.655,
+        "median_ms": 313.55,
         "stddev_ms": null,
-        "max_rss_kb": 186192,
+        "max_rss_kb": 186144,
         "runs": 6
       },
       "grit": {
-        "median_ms": 213.666,
+        "median_ms": 221.809,
         "stddev_ms": null,
-        "max_rss_kb": 372446,
+        "max_rss_kb": 373036,
         "runs": 6
       },
-      "error": null,
-      "rerun": {
-        "samples": 4,
-        "first_pass_ratio": 0.639
-      }
+      "error": null
     },
     {
       "id": "diff/worktree@deep-tree",
@@ -991,25 +1150,20 @@
       "case": "worktree",
       "repo": "deep-tree",
       "area": "worktree",
-      "headline": false,
       "description": "Unstaged worktree diff on deep-tree: grit diff vs git diff",
       "git": {
-        "median_ms": 102.97,
+        "median_ms": 104.964,
         "stddev_ms": null,
-        "max_rss_kb": 39366,
+        "max_rss_kb": 39316,
         "runs": 6
       },
       "grit": {
-        "median_ms": 480.599,
+        "median_ms": 481.038,
         "stddev_ms": null,
-        "max_rss_kb": 95494,
+        "max_rss_kb": 72140,
         "runs": 6
       },
-      "error": null,
-      "rerun": {
-        "samples": 4,
-        "first_pass_ratio": 4.741
-      }
+      "error": null
     },
     {
       "id": "diff/worktree@synth-100k",
@@ -1017,19 +1171,81 @@
       "case": "worktree",
       "repo": "synth-100k",
       "area": "worktree",
-      "headline": false,
       "description": "Unstaged worktree diff (~1% modified): grit diff vs git diff",
       "git": {
-        "median_ms": 110.424,
+        "median_ms": 122.435,
         "stddev_ms": null,
-        "max_rss_kb": 29520,
-        "runs": 12
+        "max_rss_kb": 29244,
+        "runs": 11
       },
       "grit": {
-        "median_ms": 156.824,
+        "median_ms": 153.984,
         "stddev_ms": null,
-        "max_rss_kb": 69040,
-        "runs": 12
+        "max_rss_kb": 76224,
+        "runs": 11
+      },
+      "error": null
+    },
+    {
+      "id": "fetch/deepen@git-git",
+      "command": "fetch",
+      "case": "deepen",
+      "repo": "git-git",
+      "area": "remote",
+      "description": "Deepen a depth-1 client by 50 commits vs git fetch --deepen 50",
+      "git": {
+        "median_ms": 805.705,
+        "stddev_ms": null,
+        "max_rss_kb": 334556,
+        "runs": 3
+      },
+      "grit": {
+        "median_ms": 1212.465,
+        "stddev_ms": null,
+        "max_rss_kb": 69440,
+        "runs": 3
+      },
+      "error": null
+    },
+    {
+      "id": "fetch/dry-run@git-git",
+      "command": "fetch",
+      "case": "dry-run",
+      "repo": "git-git",
+      "area": "remote",
+      "description": "Fetch dry-run reports updates without writing refs or objects",
+      "git": {
+        "median_ms": 112.06,
+        "stddev_ms": null,
+        "max_rss_kb": 83692,
+        "runs": 20
+      },
+      "grit": {
+        "median_ms": 9.767,
+        "stddev_ms": null,
+        "max_rss_kb": 22016,
+        "runs": 20
+      },
+      "error": null
+    },
+    {
+      "id": "fetch/incremental-http@git-git",
+      "command": "fetch",
+      "case": "incremental-http",
+      "repo": "git-git",
+      "area": "remote",
+      "description": "Incremental fetch over grit smart HTTP (git-git bare remote)",
+      "git": {
+        "median_ms": 76800.978,
+        "stddev_ms": null,
+        "max_rss_kb": 146744,
+        "runs": 1
+      },
+      "grit": {
+        "median_ms": 79824.994,
+        "stddev_ms": null,
+        "max_rss_kb": 64384,
+        "runs": 1
       },
       "error": null
     },
@@ -1039,1299 +1255,59 @@
       "case": "noop",
       "repo": "git-git",
       "area": "remote",
-      "headline": false,
       "description": "No-op fetch when client already matches remote (file:// git-git)",
       "git": {
-        "median_ms": 20.36,
+        "median_ms": 22.987,
         "stddev_ms": null,
-        "max_rss_kb": 48352,
+        "max_rss_kb": 48260,
         "runs": 20
       },
       "grit": {
-        "median_ms": 7.619,
+        "median_ms": 8.665,
         "stddev_ms": null,
-        "max_rss_kb": 14920,
+        "max_rss_kb": 15800,
         "runs": 20
       },
       "error": null
     },
     {
-      "id": "gc/default@synth-10k",
-      "command": "gc",
-      "case": "default",
-      "repo": "synth-10k",
-      "area": "maintenance",
-      "headline": false,
-      "description": "Full grit gc vs git gc on synth-10k with loose objects",
-      "git": {
-        "median_ms": 349.267,
-        "stddev_ms": null,
-        "max_rss_kb": 48210,
-        "runs": 3
-      },
-      "grit": {
-        "median_ms": 15200.113,
-        "stddev_ms": null,
-        "max_rss_kb": 223496,
-        "runs": 3
-      },
-      "error": null,
-      "rerun": {
-        "samples": 4,
-        "first_pass_ratio": 44.22
-      }
-    },
-    {
-      "id": "gc/pack-refs@synth-10k",
-      "command": "gc",
-      "case": "pack-refs",
-      "repo": "synth-10k",
-      "area": "refs",
-      "headline": false,
-      "description": "Pack loose tags via grit gc pack-refs vs git pack-refs",
-      "git": {
-        "median_ms": 2.221,
-        "stddev_ms": null,
-        "max_rss_kb": 6816,
-        "runs": 20
-      },
-      "grit": {
-        "median_ms": 4.368,
-        "stddev_ms": null,
-        "max_rss_kb": 14536,
-        "runs": 20
-      },
-      "error": null
-    },
-    {
-      "id": "history/reword@synth-10k",
-      "command": "history",
-      "case": "reword",
-      "repo": "synth-10k",
-      "area": "history",
-      "headline": false,
-      "description": "History reword vs git history reword or scripted rebase",
-      "git": {
-        "median_ms": 6094.916,
-        "stddev_ms": null,
-        "max_rss_kb": 31836,
-        "runs": 3
-      },
-      "grit": {
-        "median_ms": 150.802,
-        "stddev_ms": null,
-        "max_rss_kb": 46160,
-        "runs": 3
-      },
-      "error": null
-    },
-    {
-      "id": "hooks/list@small",
-      "command": "hooks",
-      "case": "list",
-      "repo": "small",
-      "area": "other",
-      "headline": false,
-      "description": "List hook scripts vs listing .git/hooks",
-      "git": {
-        "median_ms": 2.237,
-        "stddev_ms": null,
-        "max_rss_kb": 6140,
-        "runs": 20
-      },
-      "grit": {
-        "median_ms": 2.249,
-        "stddev_ms": null,
-        "max_rss_kb": 12472,
-        "runs": 20
-      },
-      "error": null
-    },
-    {
-      "id": "ignore/check-1000@synth-10k",
-      "command": "ignore",
-      "case": "check-1000",
-      "repo": "synth-10k",
-      "area": "other",
-      "headline": false,
-      "description": "Check 1000 paths against ignore rules vs git check-ignore",
-      "git": {
-        "median_ms": 2.245,
-        "stddev_ms": null,
-        "max_rss_kb": 6576,
-        "runs": 20
-      },
-      "grit": {
-        "median_ms": 9.8,
-        "stddev_ms": null,
-        "max_rss_kb": 15828,
-        "runs": 20
-      },
-      "error": null
-    },
-    {
-      "id": "init/empty@small",
-      "command": "init",
-      "case": "empty",
-      "repo": "small",
-      "area": "worktree",
-      "headline": false,
-      "description": "Initialize empty repo: grit init vs git init in an empty directory",
-      "git": {
-        "median_ms": 3.28,
-        "stddev_ms": null,
-        "max_rss_kb": 6568,
-        "runs": 20
-      },
-      "grit": {
-        "median_ms": 4.379,
-        "stddev_ms": null,
-        "max_rss_kb": 12324,
-        "runs": 20
-      },
-      "error": null
-    },
-    {
-      "id": "log/all@git-git",
-      "command": "log",
-      "case": "all",
-      "repo": "git-git",
-      "area": "history",
-      "headline": false,
-      "description": "Full reachable history: grit log (paged) vs git log --oneline",
-      "git": {
-        "median_ms": 46.226,
-        "stddev_ms": null,
-        "max_rss_kb": 20336,
-        "runs": 4
-      },
-      "grit": {
-        "median_ms": 797.324,
-        "stddev_ms": null,
-        "max_rss_kb": 127104,
-        "runs": 4
-      },
-      "error": null
-    },
-    {
-      "id": "log/author@git-git",
-      "command": "log",
-      "case": "author",
-      "repo": "git-git",
-      "area": "history",
-      "headline": false,
-      "description": "grit log --author=. -n 50 vs git log on git.git",
-      "git": {
-        "median_ms": 2.827,
-        "stddev_ms": null,
-        "max_rss_kb": 10348,
-        "runs": 20
-      },
-      "grit": {
-        "median_ms": 15.15,
-        "stddev_ms": null,
-        "max_rss_kb": 45192,
-        "runs": 20
-      },
-      "error": null
-    },
-    {
-      "id": "log/author-n50@deep-history",
-      "command": "log",
-      "case": "author-n50",
-      "repo": "deep-history",
-      "area": "history",
-      "headline": false,
-      "description": "grit log --author=. -n 50 vs git log on deep-history (no commit-graph)",
-      "git": {
-        "median_ms": 2.227,
-        "stddev_ms": null,
-        "max_rss_kb": 8824,
-        "runs": 20
-      },
-      "grit": {
-        "median_ms": 4.373,
-        "stddev_ms": null,
-        "max_rss_kb": 16176,
-        "runs": 20
-      },
-      "error": null
-    },
-    {
-      "id": "log/author-n50@deep-history-cg",
-      "command": "log",
-      "case": "author-n50",
-      "repo": "deep-history-cg",
-      "area": "history",
-      "headline": false,
-      "description": "grit log --author=. -n 50 vs git log on deep-history (commit-graph written)",
-      "git": {
-        "median_ms": 2.225,
-        "stddev_ms": null,
-        "max_rss_kb": 10388,
-        "runs": 20
-      },
-      "grit": {
-        "median_ms": 4.367,
-        "stddev_ms": null,
-        "max_rss_kb": 19128,
-        "runs": 20
-      },
-      "error": null
-    },
-    {
-      "id": "log/json-100@git-git",
-      "command": "log",
-      "case": "json-100",
-      "repo": "git-git",
-      "area": "history",
-      "headline": false,
-      "description": "Last 100 commits as JSON vs git log with a verbose --format",
-      "git": {
-        "median_ms": 3.297,
-        "stddev_ms": null,
-        "max_rss_kb": 14568,
-        "runs": 20
-      },
-      "grit": {
-        "median_ms": 15.428,
-        "stddev_ms": null,
-        "max_rss_kb": 45228,
-        "runs": 20
-      },
-      "error": null
-    },
-    {
-      "id": "log/oneline-100@synth-100k",
-      "command": "log",
-      "case": "oneline-100",
-      "repo": "synth-100k",
-      "area": "history",
-      "headline": false,
-      "description": "Last 100 commits: grit log --limit 100 vs git log --oneline -100",
-      "git": {
-        "median_ms": 2.842,
-        "stddev_ms": null,
-        "max_rss_kb": 12256,
-        "runs": 20
-      },
-      "grit": {
-        "median_ms": 4.382,
-        "stddev_ms": null,
-        "max_rss_kb": 22224,
-        "runs": 20
-      },
-      "error": null
-    },
-    {
-      "id": "log/path@git-git",
-      "command": "log",
-      "case": "path",
-      "repo": "git-git",
-      "area": "history",
-      "headline": false,
-      "description": "History for one path: grit log -- <path> vs git log --oneline -- <path>",
-      "git": {
-        "median_ms": 357.789,
-        "stddev_ms": null,
-        "max_rss_kb": 256920,
-        "runs": 3
-      },
-      "grit": {
-        "median_ms": 2381.927,
-        "stddev_ms": null,
-        "max_rss_kb": 317068,
-        "runs": 3
-      },
-      "error": null
-    },
-    {
-      "id": "ls-remote/all@many-refs",
-      "command": "ls-remote",
-      "case": "all",
-      "repo": "many-refs",
-      "area": "remote",
-      "headline": false,
-      "description": "List all refs on many-refs bare remote vs git ls-remote",
-      "git": {
-        "median_ms": 12.253,
-        "stddev_ms": null,
-        "max_rss_kb": 18416,
-        "runs": 20
-      },
-      "grit": {
-        "median_ms": 35.498,
-        "stddev_ms": null,
-        "max_rss_kb": 18168,
-        "runs": 20
-      },
-      "error": null
-    },
-    {
-      "id": "merge-base/branches@git-git",
-      "command": "merge-base",
-      "case": "branches",
-      "repo": "git-git",
-      "area": "history",
-      "headline": false,
-      "description": "Merge base of two branches: grit merge-base <a> <b> vs git merge-base <a> <b>",
-      "git": {
-        "median_ms": 15.5,
-        "stddev_ms": null,
-        "max_rss_kb": 19208,
-        "runs": 17
-      },
-      "grit": {
-        "median_ms": 168.413,
-        "stddev_ms": null,
-        "max_rss_kb": 59360,
-        "runs": 17
-      },
-      "error": null
-    },
-    {
-      "id": "merge/clean@synth-100k",
-      "command": "merge",
-      "case": "clean",
-      "repo": "synth-100k",
-      "area": "branching",
-      "headline": false,
-      "description": "Merge branch on 100k-file synthetic vs git merge",
-      "git": {
-        "median_ms": 274.243,
-        "stddev_ms": null,
-        "max_rss_kb": 45356,
-        "runs": 3
-      },
-      "grit": {
-        "median_ms": 1597.019,
-        "stddev_ms": null,
-        "max_rss_kb": 56288,
-        "runs": 3
-      },
-      "error": null
-    },
-    {
-      "id": "mv/file@synth-10k",
-      "command": "mv",
-      "case": "file",
-      "repo": "synth-10k",
-      "area": "worktree",
-      "headline": false,
-      "description": "Rename tracked file: grit mv <src> <dst> vs git mv <src> <dst>",
-      "git": {
-        "median_ms": 6.515,
-        "stddev_ms": null,
-        "max_rss_kb": 8692,
-        "runs": 20
-      },
-      "grit": {
-        "median_ms": 7.613,
-        "stddev_ms": null,
-        "max_rss_kb": 15652,
-        "runs": 20
-      },
-      "error": null
-    },
-    {
-      "id": "notes/add@synth-10k",
-      "command": "notes",
-      "case": "add",
-      "repo": "synth-10k",
-      "area": "history",
-      "headline": false,
-      "description": "Add commit note vs git notes add",
-      "git": {
-        "median_ms": 2.232,
-        "stddev_ms": null,
-        "max_rss_kb": 7392,
-        "runs": 20
-      },
-      "grit": {
-        "median_ms": 4.35,
-        "stddev_ms": null,
-        "max_rss_kb": 15820,
-        "runs": 20
-      },
-      "error": null
-    },
-    {
-      "id": "notes/list@synth-10k",
-      "command": "notes",
-      "case": "list",
-      "repo": "synth-10k",
-      "area": "history",
-      "headline": false,
-      "description": "List notes vs git notes list",
-      "git": {
-        "median_ms": 2.229,
-        "stddev_ms": null,
-        "max_rss_kb": 6788,
-        "runs": 20
-      },
-      "grit": {
-        "median_ms": 3.295,
-        "stddev_ms": null,
-        "max_rss_kb": 14156,
-        "runs": 20
-      },
-      "error": null
-    },
-    {
-      "id": "patch-id/commit@git-git",
-      "command": "patch-id",
-      "case": "commit",
-      "repo": "git-git",
-      "area": "history",
-      "headline": false,
-      "description": "Stable patch-id for HEAD: grit patch-id HEAD vs git patch-id --stable HEAD",
-      "git": {
-        "median_ms": 2.259,
-        "stddev_ms": null,
-        "max_rss_kb": 12304,
-        "runs": 20
-      },
-      "grit": {
-        "median_ms": 3.317,
-        "stddev_ms": null,
-        "max_rss_kb": 16096,
-        "runs": 20
-      },
-      "error": null
-    },
-    {
-      "id": "pick/one@synth-100k",
-      "command": "pick",
-      "case": "one",
-      "repo": "synth-100k",
-      "area": "branching",
-      "headline": false,
-      "description": "Cherry-pick one commit on 100k-file synthetic vs git cherry-pick",
-      "git": {
-        "median_ms": 186.419,
-        "stddev_ms": null,
-        "max_rss_kb": 37984,
-        "runs": 3
-      },
-      "grit": {
-        "median_ms": 1713.896,
-        "stddev_ms": null,
-        "max_rss_kb": 68436,
-        "runs": 3
-      },
-      "error": null
-    },
-    {
-      "id": "reflog/list@synth-10k",
-      "command": "reflog",
-      "case": "list",
-      "repo": "synth-10k",
-      "area": "history",
-      "headline": false,
-      "description": "Reflog for HEAD: grit reflog vs git reflog",
-      "git": {
-        "median_ms": 2.231,
-        "stddev_ms": null,
-        "max_rss_kb": 7436,
-        "runs": 20
-      },
-      "grit": {
-        "median_ms": 2.249,
-        "stddev_ms": null,
-        "max_rss_kb": 11396,
-        "runs": 20
-      },
-      "error": null
-    },
-    {
-      "id": "remote/list@small",
-      "command": "remote",
-      "case": "list",
-      "repo": "small",
-      "area": "remote",
-      "headline": false,
-      "description": "List remotes vs git remote",
-      "git": {
-        "median_ms": 1.761,
-        "stddev_ms": null,
-        "max_rss_kb": 6412,
-        "runs": 20
-      },
-      "grit": {
-        "median_ms": 2.383,
-        "stddev_ms": null,
-        "max_rss_kb": 10756,
-        "runs": 20
-      },
-      "error": null
-    },
-    {
-      "id": "repack/commit-graph@git-git",
-      "command": "repack",
-      "case": "commit-graph",
-      "repo": "git-git",
-      "area": "maintenance",
-      "headline": false,
-      "description": "grit gc commit-graph vs git commit-graph write on git.git",
-      "git": {
-        "median_ms": 645.018,
-        "stddev_ms": null,
-        "max_rss_kb": 73658,
-        "runs": 3
-      },
-      "grit": {
-        "median_ms": 1391.85,
-        "stddev_ms": null,
-        "max_rss_kb": 165472,
-        "runs": 3
-      },
-      "error": null,
-      "rerun": {
-        "samples": 4,
-        "first_pass_ratio": 2.121
-      }
-    },
-    {
-      "id": "reset/hard@synth-10k",
-      "command": "reset",
-      "case": "hard",
-      "repo": "synth-10k",
-      "area": "worktree",
-      "headline": false,
-      "description": "Hard reset dirty tree: grit reset --hard HEAD vs git reset --hard HEAD",
-      "git": {
-        "median_ms": 16.35,
-        "stddev_ms": null,
-        "max_rss_kb": 10860,
-        "runs": 20
-      },
-      "grit": {
-        "median_ms": 38.305,
-        "stddev_ms": null,
-        "max_rss_kb": 24636,
-        "runs": 20
-      },
-      "error": null
-    },
-    {
-      "id": "reset/mixed@synth-10k",
-      "command": "reset",
-      "case": "mixed",
-      "repo": "synth-10k",
-      "area": "worktree",
-      "headline": false,
-      "description": "Mixed reset dirty tree: grit reset HEAD vs git reset --mixed HEAD",
-      "git": {
-        "median_ms": 8.158,
-        "stddev_ms": null,
-        "max_rss_kb": 9232,
-        "runs": 20
-      },
-      "grit": {
-        "median_ms": 40.637,
-        "stddev_ms": null,
-        "max_rss_kb": 20708,
-        "runs": 20
-      },
-      "error": null
-    },
-    {
-      "id": "resolve/change-id@git-git",
-      "command": "resolve",
-      "case": "change-id",
-      "repo": "git-git",
-      "area": "history",
-      "headline": false,
-      "description": "Resolve change id prefix: grit resolve <cid> vs git log --all --format=%H",
-      "git": {
-        "median_ms": 540.926,
-        "stddev_ms": null,
-        "max_rss_kb": 63024,
-        "runs": 3
-      },
-      "grit": {
-        "median_ms": 703.214,
-        "stddev_ms": null,
-        "max_rss_kb": 111628,
-        "runs": 3
-      },
-      "error": null
-    },
-    {
-      "id": "resolve/head-n@git-git",
-      "command": "resolve",
-      "case": "head-n",
-      "repo": "git-git",
-      "area": "history",
-      "headline": false,
-      "description": "Resolve HEAD: grit resolve HEAD vs git rev-parse HEAD",
-      "git": {
-        "median_ms": 1.69,
-        "stddev_ms": null,
-        "max_rss_kb": 6238,
-        "runs": 20
-      },
-      "grit": {
-        "median_ms": 3.313,
-        "stddev_ms": null,
-        "max_rss_kb": 14606,
-        "runs": 20
-      },
-      "error": null,
-      "rerun": {
-        "samples": 4,
-        "first_pass_ratio": 2.789
-      }
-    },
-    {
-      "id": "restore/paths@synth-10k",
-      "command": "restore",
-      "case": "paths",
-      "repo": "synth-10k",
-      "area": "worktree",
-      "headline": false,
-      "description": "Restore ~1% paths from index: grit restore -- <paths> vs git restore -- <paths>",
-      "git": {
-        "median_ms": 12.407,
-        "stddev_ms": null,
-        "max_rss_kb": 12284,
-        "runs": 20
-      },
-      "grit": {
-        "median_ms": 14.13,
-        "stddev_ms": null,
-        "max_rss_kb": 20540,
-        "runs": 20
-      },
-      "error": null
-    },
-    {
-      "id": "revert/one@synth-10k",
-      "command": "revert",
-      "case": "one",
-      "repo": "synth-10k",
-      "area": "branching",
-      "headline": false,
-      "description": "Revert one commit vs git revert --no-edit",
-      "git": {
-        "median_ms": 105.108,
-        "stddev_ms": null,
-        "max_rss_kb": 9188,
-        "runs": 10
-      },
-      "grit": {
-        "median_ms": 202.223,
-        "stddev_ms": null,
-        "max_rss_kb": 25060,
-        "runs": 10
-      },
-      "error": null
-    },
-    {
-      "id": "revs/author-n50@deep-history",
-      "command": "revs",
-      "case": "author-n50",
-      "repo": "deep-history",
-      "area": "history",
-      "headline": false,
-      "description": "rev-list -n 50 --author=. HEAD on deep-history (no commit-graph)",
-      "git": {
-        "median_ms": 2.233,
-        "stddev_ms": null,
-        "max_rss_kb": 8732,
-        "runs": 20
-      },
-      "grit": {
-        "median_ms": 4.362,
-        "stddev_ms": null,
-        "max_rss_kb": 17648,
-        "runs": 20
-      },
-      "error": null
-    },
-    {
-      "id": "revs/author-n50@deep-history-cg",
-      "command": "revs",
-      "case": "author-n50",
-      "repo": "deep-history-cg",
-      "area": "history",
-      "headline": false,
-      "description": "rev-list -n 50 --author=. HEAD on deep-history (commit-graph written)",
-      "git": {
-        "median_ms": 2.228,
-        "stddev_ms": null,
-        "max_rss_kb": 11372,
-        "runs": 20
-      },
-      "grit": {
-        "median_ms": 4.377,
-        "stddev_ms": null,
-        "max_rss_kb": 20840,
-        "runs": 20
-      },
-      "error": null
-    },
-    {
-      "id": "revs/count-author@deep-history",
-      "command": "revs",
-      "case": "count-author",
-      "repo": "deep-history",
-      "area": "history",
-      "headline": false,
-      "description": "rev-list --count --author=. HEAD on deep-history (no commit-graph)",
-      "git": {
-        "median_ms": 110.88,
-        "stddev_ms": null,
-        "max_rss_kb": 21068,
-        "runs": 6
-      },
-      "grit": {
-        "median_ms": 461.389,
-        "stddev_ms": null,
-        "max_rss_kb": 62872,
-        "runs": 6
-      },
-      "error": null
-    },
-    {
-      "id": "revs/count-author@deep-history-cg",
-      "command": "revs",
-      "case": "count-author",
-      "repo": "deep-history-cg",
-      "area": "history",
-      "headline": false,
-      "description": "rev-list --count --author=. HEAD on deep-history (commit-graph written)",
-      "git": {
-        "median_ms": 116.435,
-        "stddev_ms": null,
-        "max_rss_kb": 24272,
-        "runs": 6
-      },
-      "grit": {
-        "median_ms": 467.649,
-        "stddev_ms": null,
-        "max_rss_kb": 67716,
-        "runs": 6
-      },
-      "error": null
-    },
-    {
-      "id": "revs/count@git-git",
-      "command": "revs",
-      "case": "count",
-      "repo": "git-git",
-      "area": "history",
-      "headline": false,
-      "description": "Count commits at HEAD: grit revs --count HEAD vs git rev-list --count HEAD",
-      "git": {
-        "median_ms": 504.884,
-        "stddev_ms": null,
-        "max_rss_kb": 61292,
-        "runs": 3
-      },
-      "grit": {
-        "median_ms": 755.831,
-        "stddev_ms": null,
-        "max_rss_kb": 127128,
-        "runs": 3
-      },
-      "error": null
-    },
-    {
-      "id": "revs/count-since@deep-history",
-      "command": "revs",
-      "case": "count-since",
-      "repo": "deep-history",
-      "area": "history",
-      "headline": false,
-      "description": "Bounded rev-list count with --since on deep-history vs grit rev-walk driver",
-      "git": {
-        "median_ms": 2.22,
-        "stddev_ms": null,
-        "max_rss_kb": 8436,
-        "runs": 20
-      },
-      "grit": {
-        "median_ms": 3.301,
-        "stddev_ms": null,
-        "max_rss_kb": 16464,
-        "runs": 20
-      },
-      "error": null
-    },
-    {
-      "id": "revs/left-right-count@deep-history",
-      "command": "revs",
-      "case": "left-right-count",
-      "repo": "deep-history",
-      "area": "history",
-      "headline": false,
-      "description": "Symmetric-range left/right counts on deep-history",
-      "git": {
-        "median_ms": 3.311,
-        "stddev_ms": null,
-        "max_rss_kb": 8892,
-        "runs": 12
-      },
-      "grit": {
-        "median_ms": 251.781,
-        "stddev_ms": null,
-        "max_rss_kb": 42816,
-        "runs": 12
-      },
-      "error": null
-    },
-    {
-      "id": "rm/dir@synth-10k",
-      "command": "rm",
-      "case": "dir",
-      "repo": "synth-10k",
-      "area": "worktree",
-      "headline": false,
-      "description": "Remove tracked directory: grit rm -r <dir> vs git rm -r <dir>",
-      "git": {
-        "median_ms": 11.002,
-        "stddev_ms": null,
-        "max_rss_kb": 9392,
-        "runs": 20
-      },
-      "grit": {
-        "median_ms": 32.87,
-        "stddev_ms": null,
-        "max_rss_kb": 19580,
-        "runs": 20
-      },
-      "error": null
-    },
-    {
-      "id": "shortlog/ahead@git-git",
-      "command": "shortlog",
-      "case": "ahead",
-      "repo": "git-git",
-      "area": "history",
-      "headline": false,
-      "description": "Ahead-of-target commits: grit shortlog vs git log <target>..HEAD --oneline",
-      "git": {
-        "median_ms": 16.361,
-        "stddev_ms": null,
-        "max_rss_kb": 19440,
-        "runs": 20
-      },
-      "grit": {
-        "median_ms": 2.28,
-        "stddev_ms": null,
-        "max_rss_kb": 11224,
-        "runs": 20
-      },
-      "error": null
-    },
-    {
-      "id": "show/head@big-blobs",
-      "command": "show",
-      "case": "head",
-      "repo": "big-blobs",
-      "area": "history",
-      "headline": false,
-      "description": "Show HEAD on big-blobs: grit show vs git show",
-      "git": {
-        "median_ms": 2.245,
-        "stddev_ms": null,
-        "max_rss_kb": 7292,
-        "runs": 20
-      },
-      "grit": {
-        "median_ms": 3.486,
-        "stddev_ms": null,
-        "max_rss_kb": 18084,
-        "runs": 20
-      },
-      "error": null
-    },
-    {
-      "id": "show/head@synth-10k",
-      "command": "show",
-      "case": "head",
-      "repo": "synth-10k",
-      "area": "history",
-      "headline": false,
-      "description": "Show HEAD commit: grit show vs git show",
-      "git": {
-        "median_ms": 2.239,
-        "stddev_ms": null,
-        "max_rss_kb": 8106,
-        "runs": 20
-      },
-      "grit": {
-        "median_ms": 8.668,
-        "stddev_ms": null,
-        "max_rss_kb": 33658,
-        "runs": 20
-      },
-      "error": null,
-      "rerun": {
-        "samples": 4,
-        "first_pass_ratio": 3.856
-      }
-    },
-    {
-      "id": "stash/list@synth-10k",
-      "command": "stash",
-      "case": "list",
-      "repo": "synth-10k",
-      "area": "branching",
-      "headline": false,
-      "description": "List stash entries vs git stash list",
-      "git": {
-        "median_ms": 3.317,
-        "stddev_ms": null,
-        "max_rss_kb": 11716,
-        "runs": 20
-      },
-      "grit": {
-        "median_ms": 3.276,
-        "stddev_ms": null,
-        "max_rss_kb": 11148,
-        "runs": 20
-      },
-      "error": null
-    },
-    {
-      "id": "status/clean@deep-tree",
-      "command": "status",
-      "case": "clean",
-      "repo": "deep-tree",
-      "area": "worktree",
-      "headline": false,
-      "description": "Clean worktree on deep-tree: grit status vs git status -s",
-      "git": {
-        "median_ms": 1057.876,
-        "stddev_ms": null,
-        "max_rss_kb": 39264,
-        "runs": 3
-      },
-      "grit": {
-        "median_ms": 1122.98,
-        "stddev_ms": null,
-        "max_rss_kb": 69956,
-        "runs": 3
-      },
-      "error": null
-    },
-    {
-      "id": "status/clean@small",
-      "command": "status",
-      "case": "clean",
-      "repo": "small",
-      "area": "worktree",
-      "headline": false,
-      "description": "Clean worktree on small synth: grit status vs git status -s",
-      "git": {
-        "median_ms": 2.227,
-        "stddev_ms": null,
-        "max_rss_kb": 7156,
-        "runs": 20
-      },
-      "grit": {
-        "median_ms": 4.356,
-        "stddev_ms": null,
-        "max_rss_kb": 15816,
-        "runs": 20
-      },
-      "error": null
-    },
-    {
-      "id": "status/clean@synth-100k",
-      "command": "status",
-      "case": "clean",
-      "repo": "synth-100k",
-      "area": "worktree",
-      "headline": false,
-      "description": "Clean worktree: grit status vs git status -s",
-      "git": {
-        "median_ms": 55.022,
-        "stddev_ms": null,
-        "max_rss_kb": 29664,
-        "runs": 15
-      },
-      "grit": {
-        "median_ms": 151.215,
-        "stddev_ms": null,
-        "max_rss_kb": 36720,
-        "runs": 15
-      },
-      "error": null
-    },
-    {
-      "id": "status/dirty@deep-tree",
-      "command": "status",
-      "case": "dirty",
-      "repo": "deep-tree",
-      "area": "worktree",
-      "headline": false,
-      "description": "Dirty worktree on deep-tree: grit status vs git status -s",
-      "git": {
-        "median_ms": 1084.25,
-        "stddev_ms": null,
-        "max_rss_kb": 40284,
-        "runs": 3
-      },
-      "grit": {
-        "median_ms": 1110.306,
-        "stddev_ms": null,
-        "max_rss_kb": 69460,
-        "runs": 3
-      },
-      "error": null
-    },
-    {
-      "id": "status/dirty@small",
-      "command": "status",
-      "case": "dirty",
-      "repo": "small",
-      "area": "worktree",
-      "headline": false,
-      "description": "Dirty worktree on small synth: grit status vs git status -s",
-      "git": {
-        "median_ms": 2.219,
-        "stddev_ms": null,
-        "max_rss_kb": 7224,
-        "runs": 20
-      },
-      "grit": {
-        "median_ms": 3.482,
-        "stddev_ms": null,
-        "max_rss_kb": 15052,
-        "runs": 20
-      },
-      "error": null
-    },
-    {
-      "id": "status/dirty@synth-100k",
-      "command": "status",
-      "case": "dirty",
-      "repo": "synth-100k",
-      "area": "worktree",
-      "headline": false,
-      "description": "Dirty worktree (~1% modified): grit status vs git status -s",
-      "git": {
-        "median_ms": 85.82,
-        "stddev_ms": null,
-        "max_rss_kb": 29584,
-        "runs": 13
-      },
-      "grit": {
-        "median_ms": 156.27,
-        "stddev_ms": null,
-        "max_rss_kb": 37272,
-        "runs": 13
-      },
-      "error": null
-    },
-    {
-      "id": "status/paths@synth-100k",
-      "command": "status",
-      "case": "paths",
-      "repo": "synth-100k",
-      "area": "worktree",
-      "headline": false,
-      "description": "Path-limited status: grit status -- <dir> vs git status -s -- <dir>",
-      "git": {
-        "median_ms": 42.671,
-        "stddev_ms": null,
-        "max_rss_kb": 29600,
-        "runs": 20
-      },
-      "grit": {
-        "median_ms": 74.68,
-        "stddev_ms": null,
-        "max_rss_kb": 37224,
-        "runs": 20
-      },
-      "error": null
-    },
-    {
-      "id": "status/renamed@synth-10k",
-      "command": "status",
-      "case": "renamed",
-      "repo": "synth-10k",
-      "area": "worktree",
-      "headline": false,
-      "description": "Status with staged rename: grit status vs git status -s after git mv",
-      "git": {
-        "median_ms": 7.149,
-        "stddev_ms": null,
-        "max_rss_kb": 9340,
-        "runs": 20
-      },
-      "grit": {
-        "median_ms": 17.45,
-        "stddev_ms": null,
-        "max_rss_kb": 18000,
-        "runs": 20
-      },
-      "error": null
-    },
-    {
-      "id": "switch/branch@synth-100k",
-      "command": "switch",
-      "case": "branch",
-      "repo": "synth-100k",
-      "area": "branching",
-      "headline": false,
-      "description": "Switch branch on 100k-file synthetic vs git switch",
-      "git": {
-        "median_ms": 137.191,
-        "stddev_ms": null,
-        "max_rss_kb": 36708,
-        "runs": 13
-      },
-      "grit": {
-        "median_ms": 99.176,
-        "stddev_ms": null,
-        "max_rss_kb": 41304,
-        "runs": 13
-      },
-      "error": null
-    },
-    {
-      "id": "tag/create@many-refs",
-      "command": "tag",
-      "case": "create",
-      "repo": "many-refs",
-      "area": "branching",
-      "headline": false,
-      "description": "Create lightweight tag vs git tag",
-      "git": {
-        "median_ms": 2.23,
-        "stddev_ms": null,
-        "max_rss_kb": 7468,
-        "runs": 20
-      },
-      "grit": {
-        "median_ms": 28.623,
-        "stddev_ms": null,
-        "max_rss_kb": 23900,
-        "runs": 20
-      },
-      "error": null
-    },
-    {
-      "id": "tag/list@many-refs",
-      "command": "tag",
-      "case": "list",
-      "repo": "many-refs",
-      "area": "branching",
-      "headline": false,
-      "description": "List tags vs git tag -l",
-      "git": {
-        "median_ms": 3.308,
-        "stddev_ms": null,
-        "max_rss_kb": 7948,
-        "runs": 20
-      },
-      "grit": {
-        "median_ms": 34.386,
-        "stddev_ms": null,
-        "max_rss_kb": 16196,
-        "runs": 20
-      },
-      "error": null
-    },
-    {
-      "id": "worktree/add@synth-10k",
-      "command": "worktree",
-      "case": "add",
-      "repo": "synth-10k",
-      "area": "branching",
-      "headline": false,
-      "git": null,
-      "grit": null,
-      "error": "grit worktree add failed on the first timed run: `grit worktree add <path>` creates a branch named after the directory (daily-linked-wt); the harness reset removes the worktree but not that branch, so every later run exits 1 with \"branch 'daily-linked-wt' already exists\" (git's side detaches HEAD and has no such conflict). Not substituted with a different command."
-    },
-    {
-      "id": "worktree/remove@synth-10k",
-      "command": "worktree",
-      "case": "remove",
-      "repo": "synth-10k",
-      "area": "branching",
-      "headline": false,
-      "description": "Remove linked worktree vs git worktree remove",
-      "git": {
-        "median_ms": 94.564,
-        "stddev_ms": null,
-        "max_rss_kb": 6452,
-        "runs": 17
-      },
-      "grit": {
-        "median_ms": 88.653,
-        "stddev_ms": null,
-        "max_rss_kb": 13120,
-        "runs": 17
-      },
-      "error": null
-    },
-    {
-      "id": "repack/full@git-git",
-      "command": "repack",
-      "case": "full",
-      "repo": "git-git",
-      "area": "maintenance",
-      "headline": false,
-      "git": null,
-      "grit": null,
-      "error": "grit gc repack failed: \"SHA-1 hash collision detected for object 38762cf7f55934b34d179ae6a4c80cadccbb7f0a\" (sha1dc false positive on a real git.git v2.47.0 pack object; the 2026-10-20 run instead hit a >14 min timeout). git side not recorded because the scenario aborts on the first grit failure."
-    },
-    {
-      "id": "push/incremental-http@git-git",
-      "command": "push",
-      "case": "incremental-http",
-      "repo": "git-git",
-      "area": "remote",
-      "headline": false,
-      "git": null,
-      "grit": null,
-      "error": "grit push over HTTP to the grit-http-server remote did not finish within the 1500 s per-scenario cap (grit push at 100% CPU for >15 min in the timed run); no result recorded for either tool."
-    },
-    {
-      "id": "fetch/incremental-http@git-git",
+      "id": "fetch/one-branch@git-git",
       "command": "fetch",
-      "case": "incremental-http",
+      "case": "one-branch",
       "repo": "git-git",
       "area": "remote",
-      "headline": false,
-      "description": "Incremental fetch over grit smart HTTP (git-git bare remote)",
+      "description": "Fetch one branch refspec vs git fetch origin main",
       "git": {
-        "median_ms": 81548.614,
+        "median_ms": 123.832,
         "stddev_ms": null,
-        "max_rss_kb": 146600,
-        "runs": 1
+        "max_rss_kb": 83780,
+        "runs": 20
       },
       "grit": {
-        "median_ms": 88779.051,
+        "median_ms": 15.567,
         "stddev_ms": null,
-        "max_rss_kb": 63080,
-        "runs": 1
+        "max_rss_kb": 27480,
+        "runs": 20
       },
       "error": null
     },
     {
-      "id": "clone/http@synth-10k",
-      "command": "clone",
-      "case": "http",
-      "repo": "synth-10k",
-      "area": "remote",
-      "headline": false,
-      "description": "Clone synth-10k over grit smart HTTP vs git clone",
+      "id": "fsck/full@big-blobs",
+      "command": "fsck",
+      "case": "full",
+      "repo": "big-blobs",
+      "area": "maintenance",
+      "description": "Full fsck on big-blobs fixture vs git fsck",
       "git": {
-        "median_ms": 1131.647,
+        "median_ms": 16835.774,
         "stddev_ms": null,
-        "max_rss_kb": 35704,
+        "max_rss_kb": 3545052,
         "runs": 3
       },
       "grit": {
-        "median_ms": 1441.478,
+        "median_ms": 9844.762,
         "stddev_ms": null,
-        "max_rss_kb": 56196,
+        "max_rss_kb": 6834508,
         "runs": 3
       },
       "error": null
@@ -2342,37 +1318,1211 @@
       "case": "full",
       "repo": "git-git",
       "area": "maintenance",
-      "headline": false,
-      "git": null,
-      "grit": null,
-      "error": "grit fsck exited 1 on git.git v2.47.0: reported sha1Collision for object ba9aaa145ccd24ef760cf31c74d8f7ca1a2e47b0 (pack object digest 38762cf7f55934b34d179ae6a4c80cadccbb7f0a) plus missingTaggerEntry for tag d6602ec5; 2026-10-20 run passed in ~29.8 s. git side not recorded because the scenario aborts on the first grit failure."
-    },
-    {
-      "id": "fsck/full@big-blobs",
-      "command": "fsck",
-      "case": "full",
-      "repo": "big-blobs",
-      "area": "maintenance",
-      "headline": false,
-      "description": "Full fsck on big-blobs fixture vs git fsck",
+      "description": "Full fsck on git.git worktree vs git fsck",
       "git": {
-        "median_ms": 17044.109,
+        "median_ms": 28685.343,
         "stddev_ms": null,
-        "max_rss_kb": 3545118,
+        "max_rss_kb": 588236,
         "runs": 3
       },
       "grit": {
-        "median_ms": 12555.975,
+        "median_ms": 27617.271,
         "stddev_ms": null,
-        "max_rss_kb": 6834004,
+        "max_rss_kb": 11098608,
+        "runs": 2
+      },
+      "error": null
+    },
+    {
+      "id": "gc/default@synth-10k",
+      "command": "gc",
+      "case": "default",
+      "repo": "synth-10k",
+      "area": "maintenance",
+      "description": "Full grit gc vs git gc on synth-10k with loose objects",
+      "git": {
+        "median_ms": 355.293,
+        "stddev_ms": null,
+        "max_rss_kb": 48124,
         "runs": 3
+      },
+      "grit": {
+        "median_ms": 993.124,
+        "stddev_ms": null,
+        "max_rss_kb": 220472,
+        "runs": 3
+      },
+      "error": null
+    },
+    {
+      "id": "gc/pack-refs@synth-10k",
+      "command": "gc",
+      "case": "pack-refs",
+      "repo": "synth-10k",
+      "area": "refs",
+      "description": "Pack loose tags via grit gc pack-refs vs git pack-refs",
+      "git": {
+        "median_ms": 2.21,
+        "stddev_ms": null,
+        "max_rss_kb": 6788,
+        "runs": 20
+      },
+      "grit": {
+        "median_ms": 4.364,
+        "stddev_ms": null,
+        "max_rss_kb": 14420,
+        "runs": 20
+      },
+      "error": null
+    },
+    {
+      "id": "history/reword@synth-10k",
+      "command": "history",
+      "case": "reword",
+      "repo": "synth-10k",
+      "area": "history",
+      "description": "History reword vs git history reword or scripted rebase",
+      "git": {
+        "median_ms": 6219.47,
+        "stddev_ms": null,
+        "max_rss_kb": 30948,
+        "runs": 3
+      },
+      "grit": {
+        "median_ms": 154.029,
+        "stddev_ms": null,
+        "max_rss_kb": 46480,
+        "runs": 3
+      },
+      "error": null
+    },
+    {
+      "id": "hooks/list@small",
+      "command": "hooks",
+      "case": "list",
+      "repo": "small",
+      "area": "other",
+      "description": "List hook scripts vs listing .git/hooks",
+      "git": {
+        "median_ms": 2.224,
+        "stddev_ms": null,
+        "max_rss_kb": 6224,
+        "runs": 20
+      },
+      "grit": {
+        "median_ms": 2.516,
+        "stddev_ms": null,
+        "max_rss_kb": 10888,
+        "runs": 20
+      },
+      "error": null
+    },
+    {
+      "id": "ignore/check-1000@synth-10k",
+      "command": "ignore",
+      "case": "check-1000",
+      "repo": "synth-10k",
+      "area": "other",
+      "description": "Check 1000 paths against ignore rules vs git check-ignore",
+      "git": {
+        "median_ms": 2.304,
+        "stddev_ms": null,
+        "max_rss_kb": 6560,
+        "runs": 20
+      },
+      "grit": {
+        "median_ms": 9.792,
+        "stddev_ms": null,
+        "max_rss_kb": 16092,
+        "runs": 20
+      },
+      "error": null
+    },
+    {
+      "id": "init/empty@small",
+      "command": "init",
+      "case": "empty",
+      "repo": "small",
+      "area": "worktree",
+      "description": "Initialize empty repo: grit init vs git init in an empty directory",
+      "git": {
+        "median_ms": 3.271,
+        "stddev_ms": null,
+        "max_rss_kb": 6728,
+        "runs": 20
+      },
+      "grit": {
+        "median_ms": 4.353,
+        "stddev_ms": null,
+        "max_rss_kb": 12764,
+        "runs": 20
+      },
+      "error": null
+    },
+    {
+      "id": "log/all@git-git",
+      "command": "log",
+      "case": "all",
+      "repo": "git-git",
+      "area": "history",
+      "description": "Full reachable history: grit log (paged) vs git log --oneline",
+      "git": {
+        "median_ms": 45.395,
+        "stddev_ms": null,
+        "max_rss_kb": 20368,
+        "runs": 20
+      },
+      "grit": {
+        "median_ms": 65.885,
+        "stddev_ms": null,
+        "max_rss_kb": 40440,
+        "runs": 20
+      },
+      "error": null
+    },
+    {
+      "id": "log/author@git-git",
+      "command": "log",
+      "case": "author",
+      "repo": "git-git",
+      "area": "history",
+      "description": "grit log --author=. -n 50 vs git log on git.git",
+      "git": {
+        "median_ms": 2.24,
+        "stddev_ms": null,
+        "max_rss_kb": 10376,
+        "runs": 20
+      },
+      "grit": {
+        "median_ms": 5.487,
+        "stddev_ms": null,
+        "max_rss_kb": 22268,
+        "runs": 20
+      },
+      "error": null
+    },
+    {
+      "id": "log/author-n50@deep-history",
+      "command": "log",
+      "case": "author-n50",
+      "repo": "deep-history",
+      "area": "history",
+      "description": "grit log --author=. -n 50 vs git log on deep-history (no commit-graph)",
+      "git": {
+        "median_ms": 2.217,
+        "stddev_ms": null,
+        "max_rss_kb": 8840,
+        "runs": 20
+      },
+      "grit": {
+        "median_ms": 4.357,
+        "stddev_ms": null,
+        "max_rss_kb": 18344,
+        "runs": 20
+      },
+      "error": null
+    },
+    {
+      "id": "log/author-n50@deep-history-cg",
+      "command": "log",
+      "case": "author-n50",
+      "repo": "deep-history-cg",
+      "area": "history",
+      "description": "grit log --author=. -n 50 vs git log on deep-history (commit-graph written)",
+      "git": {
+        "median_ms": 2.224,
+        "stddev_ms": null,
+        "max_rss_kb": 10256,
+        "runs": 20
+      },
+      "grit": {
+        "median_ms": 4.363,
+        "stddev_ms": null,
+        "max_rss_kb": 20768,
+        "runs": 20
+      },
+      "error": null
+    },
+    {
+      "id": "log/oneline-100@synth-100k",
+      "command": "log",
+      "case": "oneline-100",
+      "repo": "synth-100k",
+      "area": "history",
+      "description": "Last 100 commits: grit log --limit 100 vs git log --oneline -100",
+      "git": {
+        "median_ms": 2.842,
+        "stddev_ms": null,
+        "max_rss_kb": 11248,
+        "runs": 20
+      },
+      "grit": {
+        "median_ms": 4.382,
+        "stddev_ms": null,
+        "max_rss_kb": 21772,
+        "runs": 20
+      },
+      "error": null
+    },
+    {
+      "id": "log/path@git-git",
+      "command": "log",
+      "case": "path",
+      "repo": "git-git",
+      "area": "history",
+      "description": "History for one path: grit log -- <path> vs git log --oneline -- <path>",
+      "git": {
+        "median_ms": 333.654,
+        "stddev_ms": null,
+        "max_rss_kb": 256576,
+        "runs": 3
+      },
+      "grit": {
+        "median_ms": 2377.319,
+        "stddev_ms": null,
+        "max_rss_kb": 315812,
+        "runs": 3
+      },
+      "error": null
+    },
+    {
+      "id": "ls-remote/all@many-refs",
+      "command": "ls-remote",
+      "case": "all",
+      "repo": "many-refs",
+      "area": "remote",
+      "description": "List all refs on many-refs bare remote vs git ls-remote",
+      "git": {
+        "median_ms": 12.722,
+        "stddev_ms": null,
+        "max_rss_kb": 18464,
+        "runs": 20
+      },
+      "grit": {
+        "median_ms": 33.973,
+        "stddev_ms": null,
+        "max_rss_kb": 18212,
+        "runs": 20
+      },
+      "error": null
+    },
+    {
+      "id": "merge-base/branches@git-git",
+      "command": "merge-base",
+      "case": "branches",
+      "repo": "git-git",
+      "area": "history",
+      "description": "Merge base of two branches: grit merge-base <a> <b> vs git merge-base <a> <b>",
+      "git": {
+        "median_ms": 15.799,
+        "stddev_ms": null,
+        "max_rss_kb": 19296,
+        "runs": 20
+      },
+      "grit": {
+        "median_ms": 5.493,
+        "stddev_ms": null,
+        "max_rss_kb": 24568,
+        "runs": 20
+      },
+      "error": null
+    },
+    {
+      "id": "merge/clean@synth-100k",
+      "command": "merge",
+      "case": "clean",
+      "repo": "synth-100k",
+      "area": "branching",
+      "description": "Merge branch on 100k-file synthetic vs git merge",
+      "git": {
+        "median_ms": 285.075,
+        "stddev_ms": null,
+        "max_rss_kb": 45512,
+        "runs": 7
+      },
+      "grit": {
+        "median_ms": 192.031,
+        "stddev_ms": null,
+        "max_rss_kb": 54992,
+        "runs": 7
+      },
+      "error": null
+    },
+    {
+      "id": "mv/file@synth-10k",
+      "command": "mv",
+      "case": "file",
+      "repo": "synth-10k",
+      "area": "worktree",
+      "description": "Rename tracked file: grit mv <src> <dst> vs git mv <src> <dst>",
+      "git": {
+        "median_ms": 6.485,
+        "stddev_ms": null,
+        "max_rss_kb": 8508,
+        "runs": 20
+      },
+      "grit": {
+        "median_ms": 8.64,
+        "stddev_ms": null,
+        "max_rss_kb": 16036,
+        "runs": 20
+      },
+      "error": null
+    },
+    {
+      "id": "notes/add@synth-10k",
+      "command": "notes",
+      "case": "add",
+      "repo": "synth-10k",
+      "area": "history",
+      "description": "Add commit note vs git notes add",
+      "git": {
+        "median_ms": 2.221,
+        "stddev_ms": null,
+        "max_rss_kb": 7364,
+        "runs": 20
+      },
+      "grit": {
+        "median_ms": 4.377,
+        "stddev_ms": null,
+        "max_rss_kb": 16900,
+        "runs": 20
+      },
+      "error": null
+    },
+    {
+      "id": "notes/list@synth-10k",
+      "command": "notes",
+      "case": "list",
+      "repo": "synth-10k",
+      "area": "history",
+      "description": "List notes vs git notes list",
+      "git": {
+        "median_ms": 2.201,
+        "stddev_ms": null,
+        "max_rss_kb": 6680,
+        "runs": 20
+      },
+      "grit": {
+        "median_ms": 3.299,
+        "stddev_ms": null,
+        "max_rss_kb": 14408,
+        "runs": 20
+      },
+      "error": null
+    },
+    {
+      "id": "patch-id/commit@git-git",
+      "command": "patch-id",
+      "case": "commit",
+      "repo": "git-git",
+      "area": "history",
+      "description": "Stable patch-id for HEAD: grit patch-id HEAD vs git patch-id --stable HEAD",
+      "git": {
+        "median_ms": 2.615,
+        "stddev_ms": null,
+        "max_rss_kb": 13196,
+        "runs": 20
+      },
+      "grit": {
+        "median_ms": 4.475,
+        "stddev_ms": null,
+        "max_rss_kb": 17444,
+        "runs": 20
+      },
+      "error": null
+    },
+    {
+      "id": "pick/one@synth-100k",
+      "command": "pick",
+      "case": "one",
+      "repo": "synth-100k",
+      "area": "branching",
+      "description": "Cherry-pick one commit on 100k-file synthetic vs git cherry-pick",
+      "git": {
+        "median_ms": 198.037,
+        "stddev_ms": null,
+        "max_rss_kb": 38008,
+        "runs": 8
+      },
+      "grit": {
+        "median_ms": 187.454,
+        "stddev_ms": null,
+        "max_rss_kb": 60104,
+        "runs": 8
+      },
+      "error": null
+    },
+    {
+      "id": "pull/check@git-git",
+      "command": "pull",
+      "case": "check",
+      "repo": "git-git",
+      "area": "other",
+      "git": null,
+      "grit": null,
+      "error": "grit pull --check origin master took minutes per timed run at 100% CPU (a single run was still going after 6+ minutes; git side not recorded); I killed the scenario after ~12 minutes of the harness's warmup/timed runs instead of waiting out the cap. No result for either tool."
+    },
+    {
+      "id": "push/incremental-http@git-git",
+      "command": "push",
+      "case": "incremental-http",
+      "repo": "git-git",
+      "area": "remote",
+      "git": null,
+      "grit": null,
+      "error": "grit push over HTTP to the grit-http-server remote did not finish within the 600 s per-scenario cap (grit push at 100% CPU the whole time); no result recorded for either tool. Same symptom as 2026-10-20 and 2026-10-21 (there with a 1500 s cap)."
+    },
+    {
+      "id": "push/refspec@git-git",
+      "command": "push",
+      "case": "refspec",
+      "repo": "git-git",
+      "area": "other",
+      "git": null,
+      "grit": null,
+      "error": "harness correctness check failed before timing: `grit push origin HEAD:refs/heads/bench` was rejected (\"not a fast-forward - run `grit pull` first\"), so the scenario did not run on either tool. New scenario id (first appearance); looks like a fixture/prepare issue (stale refs/heads/bench on the bench remote). Not substituted."
+    },
+    {
+      "id": "reflog/list@synth-10k",
+      "command": "reflog",
+      "case": "list",
+      "repo": "synth-10k",
+      "area": "history",
+      "description": "Reflog for HEAD: grit reflog vs git reflog",
+      "git": {
+        "median_ms": 2.221,
+        "stddev_ms": null,
+        "max_rss_kb": 7366,
+        "runs": 20
+      },
+      "grit": {
+        "median_ms": 3.285,
+        "stddev_ms": null,
+        "max_rss_kb": 12932,
+        "runs": 20
       },
       "error": null,
       "rerun": {
         "samples": 4,
-        "first_pass_ratio": 0.75
+        "first_pass_ratio": 1.496
       }
+    },
+    {
+      "id": "remote/list@small",
+      "command": "remote",
+      "case": "list",
+      "repo": "small",
+      "area": "remote",
+      "description": "List remotes vs git remote",
+      "git": {
+        "median_ms": 2.229,
+        "stddev_ms": null,
+        "max_rss_kb": 6296,
+        "runs": 20
+      },
+      "grit": {
+        "median_ms": 3.318,
+        "stddev_ms": null,
+        "max_rss_kb": 12552,
+        "runs": 20
+      },
+      "error": null
+    },
+    {
+      "id": "repack/commit-graph@git-git",
+      "command": "repack",
+      "case": "commit-graph",
+      "repo": "git-git",
+      "area": "maintenance",
+      "description": "grit gc commit-graph vs git commit-graph write on git.git",
+      "git": {
+        "median_ms": 716.402,
+        "stddev_ms": null,
+        "max_rss_kb": 73724,
+        "runs": 3
+      },
+      "grit": {
+        "median_ms": 1398.24,
+        "stddev_ms": null,
+        "max_rss_kb": 107304,
+        "runs": 3
+      },
+      "error": null
+    },
+    {
+      "id": "repack/full@git-git",
+      "command": "repack",
+      "case": "full",
+      "repo": "git-git",
+      "area": "maintenance",
+      "git": null,
+      "grit": null,
+      "error": "grit gc/repack did not finish within the 600 s per-scenario cap (2026-10-21: failed fast with a false SHA-1 collision report on git.git pack data; 2026-10-20: >14 min timeout); no result recorded for either tool."
+    },
+    {
+      "id": "reset/hard@synth-10k",
+      "command": "reset",
+      "case": "hard",
+      "repo": "synth-10k",
+      "area": "worktree",
+      "description": "Hard reset dirty tree: grit reset --hard HEAD vs git reset --hard HEAD",
+      "git": {
+        "median_ms": 19.973,
+        "stddev_ms": null,
+        "max_rss_kb": 10760,
+        "runs": 20
+      },
+      "grit": {
+        "median_ms": 45.451,
+        "stddev_ms": null,
+        "max_rss_kb": 24868,
+        "runs": 20
+      },
+      "error": null
+    },
+    {
+      "id": "reset/mixed@synth-10k",
+      "command": "reset",
+      "case": "mixed",
+      "repo": "synth-10k",
+      "area": "worktree",
+      "description": "Mixed reset dirty tree: grit reset HEAD vs git reset --mixed HEAD",
+      "git": {
+        "median_ms": 9.283,
+        "stddev_ms": null,
+        "max_rss_kb": 9164,
+        "runs": 20
+      },
+      "grit": {
+        "median_ms": 48.483,
+        "stddev_ms": null,
+        "max_rss_kb": 20996,
+        "runs": 20
+      },
+      "error": null
+    },
+    {
+      "id": "resolve/change-id@git-git",
+      "command": "resolve",
+      "case": "change-id",
+      "repo": "git-git",
+      "area": "history",
+      "description": "Resolve change id prefix: grit resolve <cid> vs git log --all --format=%H",
+      "git": {
+        "median_ms": 1.122,
+        "stddev_ms": null,
+        "max_rss_kb": 5720,
+        "runs": 20
+      },
+      "grit": {
+        "median_ms": 1.129,
+        "stddev_ms": null,
+        "max_rss_kb": 5640,
+        "runs": 20
+      },
+      "error": null
+    },
+    {
+      "id": "resolve/head-n@git-git",
+      "command": "resolve",
+      "case": "head-n",
+      "repo": "git-git",
+      "area": "history",
+      "description": "Resolve HEAD: grit resolve HEAD vs git rev-parse HEAD",
+      "git": {
+        "median_ms": 2.202,
+        "stddev_ms": null,
+        "max_rss_kb": 6520,
+        "runs": 20
+      },
+      "grit": {
+        "median_ms": 3.302,
+        "stddev_ms": null,
+        "max_rss_kb": 14436,
+        "runs": 20
+      },
+      "error": null
+    },
+    {
+      "id": "restore/paths@synth-10k",
+      "command": "restore",
+      "case": "paths",
+      "repo": "synth-10k",
+      "area": "worktree",
+      "description": "Restore ~1% paths from index: grit restore -- <paths> vs git restore -- <paths>",
+      "git": {
+        "median_ms": 13.329,
+        "stddev_ms": null,
+        "max_rss_kb": 12356,
+        "runs": 20
+      },
+      "grit": {
+        "median_ms": 15.491,
+        "stddev_ms": null,
+        "max_rss_kb": 20888,
+        "runs": 20
+      },
+      "error": null
+    },
+    {
+      "id": "revert/one@synth-10k",
+      "command": "revert",
+      "case": "one",
+      "repo": "synth-10k",
+      "area": "branching",
+      "description": "Revert one commit vs git revert --no-edit",
+      "git": {
+        "median_ms": 115.996,
+        "stddev_ms": null,
+        "max_rss_kb": 9140,
+        "runs": 17
+      },
+      "grit": {
+        "median_ms": 65.852,
+        "stddev_ms": null,
+        "max_rss_kb": 25360,
+        "runs": 17
+      },
+      "error": null
+    },
+    {
+      "id": "revs/author-n50@deep-history",
+      "command": "revs",
+      "case": "author-n50",
+      "repo": "deep-history",
+      "area": "history",
+      "description": "rev-list -n 50 --author=. HEAD on deep-history (no commit-graph)",
+      "git": {
+        "median_ms": 2.228,
+        "stddev_ms": null,
+        "max_rss_kb": 8588,
+        "runs": 20
+      },
+      "grit": {
+        "median_ms": 4.377,
+        "stddev_ms": null,
+        "max_rss_kb": 17968,
+        "runs": 20
+      },
+      "error": null
+    },
+    {
+      "id": "revs/author-n50@deep-history-cg",
+      "command": "revs",
+      "case": "author-n50",
+      "repo": "deep-history-cg",
+      "area": "history",
+      "description": "rev-list -n 50 --author=. HEAD on deep-history (commit-graph written)",
+      "git": {
+        "median_ms": 2.238,
+        "stddev_ms": null,
+        "max_rss_kb": 10604,
+        "runs": 20
+      },
+      "grit": {
+        "median_ms": 4.375,
+        "stddev_ms": null,
+        "max_rss_kb": 20616,
+        "runs": 20
+      },
+      "error": null
+    },
+    {
+      "id": "revs/count-author@deep-history",
+      "command": "revs",
+      "case": "count-author",
+      "repo": "deep-history",
+      "area": "history",
+      "description": "rev-list --count --author=. HEAD on deep-history (no commit-graph)",
+      "git": {
+        "median_ms": 121.536,
+        "stddev_ms": null,
+        "max_rss_kb": 21116,
+        "runs": 5
+      },
+      "grit": {
+        "median_ms": 508.941,
+        "stddev_ms": null,
+        "max_rss_kb": 62660,
+        "runs": 5
+      },
+      "error": null
+    },
+    {
+      "id": "revs/count-author@deep-history-cg",
+      "command": "revs",
+      "case": "count-author",
+      "repo": "deep-history-cg",
+      "area": "history",
+      "description": "rev-list --count --author=. HEAD on deep-history (commit-graph written)",
+      "git": {
+        "median_ms": 134.042,
+        "stddev_ms": null,
+        "max_rss_kb": 24292,
+        "runs": 5
+      },
+      "grit": {
+        "median_ms": 550.682,
+        "stddev_ms": null,
+        "max_rss_kb": 67256,
+        "runs": 5
+      },
+      "error": null
+    },
+    {
+      "id": "revs/count@git-git",
+      "command": "revs",
+      "case": "count",
+      "repo": "git-git",
+      "area": "history",
+      "description": "Count commits at HEAD: grit revs --count HEAD vs git rev-list --count HEAD",
+      "git": {
+        "median_ms": 542.309,
+        "stddev_ms": null,
+        "max_rss_kb": 61212,
+        "runs": 3
+      },
+      "grit": {
+        "median_ms": 807.703,
+        "stddev_ms": null,
+        "max_rss_kb": 127372,
+        "runs": 3
+      },
+      "error": null
+    },
+    {
+      "id": "revs/count-since@deep-history",
+      "command": "revs",
+      "case": "count-since",
+      "repo": "deep-history",
+      "area": "history",
+      "description": "Bounded rev-list count with --since on deep-history vs grit rev-walk driver",
+      "git": {
+        "median_ms": 2.218,
+        "stddev_ms": null,
+        "max_rss_kb": 8236,
+        "runs": 20
+      },
+      "grit": {
+        "median_ms": 3.311,
+        "stddev_ms": null,
+        "max_rss_kb": 15140,
+        "runs": 20
+      },
+      "error": null
+    },
+    {
+      "id": "revs/left-right-count@deep-history",
+      "command": "revs",
+      "case": "left-right-count",
+      "repo": "deep-history",
+      "area": "history",
+      "description": "Symmetric-range left/right counts on deep-history",
+      "git": {
+        "median_ms": 3.284,
+        "stddev_ms": null,
+        "max_rss_kb": 8844,
+        "runs": 20
+      },
+      "grit": {
+        "median_ms": 8.686,
+        "stddev_ms": null,
+        "max_rss_kb": 17536,
+        "runs": 20
+      },
+      "error": null
+    },
+    {
+      "id": "rm/dir@synth-10k",
+      "command": "rm",
+      "case": "dir",
+      "repo": "synth-10k",
+      "area": "worktree",
+      "description": "Remove tracked directory: grit rm -r <dir> vs git rm -r <dir>",
+      "git": {
+        "median_ms": 11.91,
+        "stddev_ms": null,
+        "max_rss_kb": 9344,
+        "runs": 20
+      },
+      "grit": {
+        "median_ms": 29.166,
+        "stddev_ms": null,
+        "max_rss_kb": 20268,
+        "runs": 20
+      },
+      "error": null
+    },
+    {
+      "id": "shortlog/ahead@git-git",
+      "command": "shortlog",
+      "case": "ahead",
+      "repo": "git-git",
+      "area": "history",
+      "description": "Ahead-of-target commits: grit shortlog vs git log <target>..HEAD --oneline",
+      "git": {
+        "median_ms": 17.945,
+        "stddev_ms": null,
+        "max_rss_kb": 19426,
+        "runs": 20
+      },
+      "grit": {
+        "median_ms": 3.355,
+        "stddev_ms": null,
+        "max_rss_kb": 12814,
+        "runs": 20
+      },
+      "error": null,
+      "rerun": {
+        "samples": 4,
+        "first_pass_ratio": 0.188
+      }
+    },
+    {
+      "id": "show/head@big-blobs",
+      "command": "show",
+      "case": "head",
+      "repo": "big-blobs",
+      "area": "history",
+      "description": "Show HEAD on big-blobs: grit show vs git show",
+      "git": {
+        "median_ms": 2.226,
+        "stddev_ms": null,
+        "max_rss_kb": 7264,
+        "runs": 20
+      },
+      "grit": {
+        "median_ms": 4.359,
+        "stddev_ms": null,
+        "max_rss_kb": 16434,
+        "runs": 20
+      },
+      "error": null,
+      "rerun": {
+        "samples": 4,
+        "first_pass_ratio": 1.955
+      }
+    },
+    {
+      "id": "show/head@synth-10k",
+      "command": "show",
+      "case": "head",
+      "repo": "synth-10k",
+      "area": "history",
+      "description": "Show HEAD commit: grit show vs git show",
+      "git": {
+        "median_ms": 2.222,
+        "stddev_ms": null,
+        "max_rss_kb": 8364,
+        "runs": 20
+      },
+      "grit": {
+        "median_ms": 5.436,
+        "stddev_ms": null,
+        "max_rss_kb": 18824,
+        "runs": 20
+      },
+      "error": null
+    },
+    {
+      "id": "stash/list@synth-10k",
+      "command": "stash",
+      "case": "list",
+      "repo": "synth-10k",
+      "area": "branching",
+      "description": "List stash entries vs git stash list",
+      "git": {
+        "median_ms": 3.317,
+        "stddev_ms": null,
+        "max_rss_kb": 11792,
+        "runs": 20
+      },
+      "grit": {
+        "median_ms": 3.311,
+        "stddev_ms": null,
+        "max_rss_kb": 12756,
+        "runs": 20
+      },
+      "error": null
+    },
+    {
+      "id": "status/clean@deep-tree",
+      "command": "status",
+      "case": "clean",
+      "repo": "deep-tree",
+      "area": "worktree",
+      "description": "Clean worktree on deep-tree: grit status vs git status -s",
+      "git": {
+        "median_ms": 1156.962,
+        "stddev_ms": null,
+        "max_rss_kb": 39472,
+        "runs": 3
+      },
+      "grit": {
+        "median_ms": 1210.995,
+        "stddev_ms": null,
+        "max_rss_kb": 70264,
+        "runs": 3
+      },
+      "error": null
+    },
+    {
+      "id": "status/clean@small",
+      "command": "status",
+      "case": "clean",
+      "repo": "small",
+      "area": "worktree",
+      "description": "Clean worktree on small synth: grit status vs git status -s",
+      "git": {
+        "median_ms": 2.225,
+        "stddev_ms": null,
+        "max_rss_kb": 7136,
+        "runs": 20
+      },
+      "grit": {
+        "median_ms": 4.367,
+        "stddev_ms": null,
+        "max_rss_kb": 15640,
+        "runs": 20
+      },
+      "error": null
+    },
+    {
+      "id": "status/clean@synth-100k",
+      "command": "status",
+      "case": "clean",
+      "repo": "synth-100k",
+      "area": "worktree",
+      "description": "Clean worktree: grit status vs git status -s",
+      "git": {
+        "median_ms": 65.98,
+        "stddev_ms": null,
+        "max_rss_kb": 29540,
+        "runs": 20
+      },
+      "grit": {
+        "median_ms": 74.205,
+        "stddev_ms": null,
+        "max_rss_kb": 35304,
+        "runs": 20
+      },
+      "error": null
+    },
+    {
+      "id": "status/dirty@deep-tree",
+      "command": "status",
+      "case": "dirty",
+      "repo": "deep-tree",
+      "area": "worktree",
+      "description": "Dirty worktree on deep-tree: grit status vs git status -s",
+      "git": {
+        "median_ms": 1180.383,
+        "stddev_ms": null,
+        "max_rss_kb": 40288,
+        "runs": 3
+      },
+      "grit": {
+        "median_ms": 1199.627,
+        "stddev_ms": null,
+        "max_rss_kb": 70168,
+        "runs": 3
+      },
+      "error": null
+    },
+    {
+      "id": "status/dirty@small",
+      "command": "status",
+      "case": "dirty",
+      "repo": "small",
+      "area": "worktree",
+      "description": "Dirty worktree on small synth: grit status vs git status -s",
+      "git": {
+        "median_ms": 2.228,
+        "stddev_ms": null,
+        "max_rss_kb": 7250,
+        "runs": 20
+      },
+      "grit": {
+        "median_ms": 4.367,
+        "stddev_ms": null,
+        "max_rss_kb": 16380,
+        "runs": 20
+      },
+      "error": null,
+      "rerun": {
+        "samples": 4,
+        "first_pass_ratio": 1.969
+      }
+    },
+    {
+      "id": "status/dirty@synth-100k",
+      "command": "status",
+      "case": "dirty",
+      "repo": "synth-100k",
+      "area": "worktree",
+      "description": "Dirty worktree (~1% modified): grit status vs git status -s",
+      "git": {
+        "median_ms": 105.73,
+        "stddev_ms": null,
+        "max_rss_kb": 29516,
+        "runs": 17
+      },
+      "grit": {
+        "median_ms": 78.895,
+        "stddev_ms": null,
+        "max_rss_kb": 34920,
+        "runs": 17
+      },
+      "error": null
+    },
+    {
+      "id": "status/paths@synth-100k",
+      "command": "status",
+      "case": "paths",
+      "repo": "synth-100k",
+      "area": "worktree",
+      "description": "Path-limited status: grit status -- data/d0000 vs git status -s -- data/d0000",
+      "git": {
+        "median_ms": 47.542,
+        "stddev_ms": null,
+        "max_rss_kb": 29524,
+        "runs": 20
+      },
+      "grit": {
+        "median_ms": 67.664,
+        "stddev_ms": null,
+        "max_rss_kb": 35280,
+        "runs": 20
+      },
+      "error": null
+    },
+    {
+      "id": "status/renamed@synth-10k",
+      "command": "status",
+      "case": "renamed",
+      "repo": "synth-10k",
+      "area": "worktree",
+      "description": "Staged rename in status: grit status vs git status -s after git mv",
+      "git": {
+        "median_ms": 20.508,
+        "stddev_ms": null,
+        "max_rss_kb": 9432,
+        "runs": 20
+      },
+      "grit": {
+        "median_ms": 26.257,
+        "stddev_ms": null,
+        "max_rss_kb": 18496,
+        "runs": 20
+      },
+      "error": null
+    },
+    {
+      "id": "switch/branch@synth-100k",
+      "command": "switch",
+      "case": "branch",
+      "repo": "synth-100k",
+      "area": "branching",
+      "description": "Switch branch on 100k-file synthetic vs git switch",
+      "git": {
+        "median_ms": 155.581,
+        "stddev_ms": null,
+        "max_rss_kb": 36708,
+        "runs": 12
+      },
+      "grit": {
+        "median_ms": 102.517,
+        "stddev_ms": null,
+        "max_rss_kb": 41764,
+        "runs": 12
+      },
+      "error": null
+    },
+    {
+      "id": "tag/create@many-refs",
+      "command": "tag",
+      "case": "create",
+      "repo": "many-refs",
+      "area": "branching",
+      "description": "Create lightweight tag vs git tag",
+      "git": {
+        "median_ms": 2.213,
+        "stddev_ms": null,
+        "max_rss_kb": 7492,
+        "runs": 20
+      },
+      "grit": {
+        "median_ms": 4.361,
+        "stddev_ms": null,
+        "max_rss_kb": 15468,
+        "runs": 20
+      },
+      "error": null
+    },
+    {
+      "id": "tag/list@many-refs",
+      "command": "tag",
+      "case": "list",
+      "repo": "many-refs",
+      "area": "branching",
+      "description": "List tags vs git tag -l",
+      "git": {
+        "median_ms": 3.301,
+        "stddev_ms": null,
+        "max_rss_kb": 7876,
+        "runs": 20
+      },
+      "grit": {
+        "median_ms": 34.31,
+        "stddev_ms": null,
+        "max_rss_kb": 16556,
+        "runs": 20
+      },
+      "error": null
+    },
+    {
+      "id": "worktree/add@synth-10k",
+      "command": "worktree",
+      "case": "add",
+      "repo": "synth-10k",
+      "area": "branching",
+      "description": "Add linked worktree vs git worktree add",
+      "git": {
+        "median_ms": 126.863,
+        "stddev_ms": null,
+        "max_rss_kb": 15768,
+        "runs": 12
+      },
+      "grit": {
+        "median_ms": 143.666,
+        "stddev_ms": null,
+        "max_rss_kb": 38848,
+        "runs": 12
+      },
+      "error": null
+    },
+    {
+      "id": "worktree/remove@synth-10k",
+      "command": "worktree",
+      "case": "remove",
+      "repo": "synth-10k",
+      "area": "branching",
+      "description": "Remove linked worktree vs git worktree remove",
+      "git": {
+        "median_ms": 102.522,
+        "stddev_ms": null,
+        "max_rss_kb": 6456,
+        "runs": 16
+      },
+      "grit": {
+        "median_ms": 96.334,
+        "stddev_ms": null,
+        "max_rss_kb": 13084,
+        "runs": 16
+      },
+      "error": null
     }
   ],
-  "notes": "Run 2026-10-21 23:44 UTC to 2026-10-22 01:30 UTC (date field is the task day; most of the measuring ran after midnight UTC) on a 4-vCPU / 15 GB shared VM, so absolute timings are noisy; ratios are the useful signal. grit = main at the commit above (release build, 0.5.16); git = system git 2.43.0; baseline = v0.5.0 release binary (grit-x86_64-unknown-linux-gnu.tar.gz). GIT_CONFIG_GLOBAL/SYSTEM were isolated for all runs (the VM's global config enabled core.fsmonitor, commit signing and LFS filters, which would skew git); a minimal user.name/email config was used instead.\nHarness: `grit-bench daily` was run once per scenario (`--only <id>`, headline rows also with `--baseline-grit`), because a baseline failure aborts an all-in-one run. v0.5.0 cannot run the blame, stash and log (--limit) headline commands, so those three rows have baseline=null with baseline_note (not substituted); the same run retried without --baseline-grit. Runs per tool are in each row (`runs`, 3 to 20 timed runs after 1 warmup, policy default). stddev_ms is null everywhere: the daily runner reports medians only. max_rss_kb is the peak RSS of the timed process tree. The runner's capped-run poll interval is already 1 ms on main, so no quantisation workaround was needed and no repo code was touched (the unmodified grit and grit-bench release binaries built from main were used). Fixtures were pre-generated with `grit-bench fixtures prepare` (git.git cloned at v2.47.0); the deep-history fixtures were built on demand by their scenarios.\nScenario set: all executable ids in grit-bench's daily registry (100). The two `test/*@smoke-fixture` registry ids are harness self-tests that are not available outside smoke mode and are omitted. New since 2026-10-20: commit/paths@synth-10k, commit/staged@synth-100k, status/paths@synth-100k, status/renamed@synth-10k, resolve/change-id@git-git, log/json-100@git-git, log/author-n50 and revs/* rows on the deep-history fixtures.\nNoise re-runs: compared with daily/latest.json of 2026-10-20 (grit/git time ratio more than 20% worse, or peak-RSS ratio more than 30% worse). Re-ran each of these 3 more times (4 samples per tool; the reported median_ms and max_rss_kb are the median of the four per-sample medians/peaks; per-row `rerun` records the sample count and the first-pass grit/git ratio): diff/worktree@synth-10k, show/head@git-git, branch/delete@many-refs, bundle/create@synth-10k, commit/small@small, config/get@small, diff/staged@deep-tree, diff/worktree@big-blobs, diff/worktree@deep-tree, gc/default@synth-10k, repack/commit-graph@git-git, resolve/head-n@git-git, show/head@synth-10k, fsck/full@big-blobs. Outcome: config/get@small (2.44x -> 1.54x), resolve/head-n@git-git (2.79x -> 1.96x), commit/small@small (1.18x -> 1.15x) and diff/worktree@big-blobs (0.64x -> 0.68x) were mostly noise; show/head@git-git (6.5x), show/head@synth-10k (3.9x), diff/staged@deep-tree (4.2x), diff/worktree@deep-tree (4.7x), bundle/create@synth-10k (13x), gc/default@synth-10k (43.5x, yesterday 0.73x, grit also 4.6x git's peak RSS), repack/commit-graph@git-git (2.2x), branch/delete@many-refs (2.1x) and fsck/full@big-blobs (0.74x vs 0.52x yesterday) reproduced and look like real regressions or slowdowns versus yesterday's report.\nFailures: worktree/add@synth-10k (grit worktree add creates a branch named after the target dir; harness reset leaves the branch so later runs fail), repack/full@git-git and fsck/full@git-git (grit reports a SHA-1 collision on real git.git v2.47.0 pack data: new regression, both passed or merely timed out on 2026-10-20), push/incremental-http@git-git (grit push over HTTP did not finish within the 1500 s cap; the same row timed out yesterday). For the three that abort on the first grit failure the git side was not recorded.\nFirst attempt at the three *-http scenarios failed at setup because grit-http-server was not on PATH (only grit-cli and grit-utils had been built); I then built `grit-http-server` from the same main commit and re-ran them successfully (clone/http, fetch/incremental-http) with push/incremental-http hitting the cap.\nObservations: the headline fetch, pull and push rows show grit far faster than git (and than v0.5.0). I spot-checked fetch by hand on the scenario's fixture: after the harness prepare step `grit fetch origin` took 25 ms and moved refs/remotes/origin/master to the remote tip (100 new commits), so those numbers reflect real work. The 2026-10-20 worktree/add row recorded grit at 0.0 ms, which is consistent with this same run-time failure being recorded as zero."
+  "notes": "Run 2026-10-22 23:15 UTC to 2026-10-23 00:50 UTC (date field is the task day) on a 4-vCPU / 15 GB shared cloud VM, so absolute timings are noisy; ratios are the useful signal. grit = main at the commit above (release build, 0.5.16, built with rustc 1.99.0); git = system git 2.43.0; baseline = v0.5.0 release binary (grit-x86_64-unknown-linux-gnu.tar.gz, `grit 0.5.0`). GIT_CONFIG_GLOBAL/SYSTEM were isolated for all runs (the VM's global config enables core.fsmonitor, commit signing and rewrites URLs, which would skew git); a minimal user.name/email config was used instead. No repo code was touched; unmodified grit, grit-bench and grit-http-server release binaries from main were used.\nHarness: `grit-bench daily` was run once per scenario (`--only <id>`, always with `--baseline-grit`, which only applies to headline rows); if that invocation failed (a baseline failure aborts the run) it was retried once without the baseline. v0.5.0 cannot run the blame, stash, log (--limit/--json), pull/rebase and push/force-with-lease headline commands, so those rows have baseline=null with baseline_note (not substituted). Runs per tool are in each row (`runs`, 3 to 20 timed runs after warmup, policy default). stddev_ms is null everywhere: the daily runner reports medians only. max_rss_kb is the peak RSS of the timed process tree. Fixtures: git.git at v2.47.0, small, synth-10k and synth-100k were pre-generated with `grit-bench fixtures prepare` (stopped after those: the unrelated synth-l fixture generation was spinning for 10+ minutes and was killed, partial synth-l dir removed); many-refs, big-blobs, deep-tree and deep-history fixtures were built on demand by their scenarios. The repos block is unchanged from 2026-10-21 (same generators; file/ref counts re-checked with `grit-bench fixtures list`).\nScenario set: every executable id in grit-bench's daily registry that I could find (112 ids, excluding the `test/*` and `future/*` harness self-test ids). New since 2026-10-21: add/dry-run@synth-10k, add/patch-file@synth-10k, add/update@synth-100k, branch/rename@many-refs, commit/dry-run@synth-10k, fetch/deepen@git-git, fetch/dry-run@git-git, fetch/one-branch@git-git, pull/check@git-git, pull/rebase@synth-10k, push/force-with-lease@git-git, push/refspec@git-git. log/json-100, pull/rebase and push/force-with-lease also carry headline=true (grit-bench marks them headline) in addition to the 17 required headline scenarios.\nNoise re-runs: compared with daily/latest.json of 2026-10-21 (grit/git time ratio more than 20% worse, or peak-RSS ratio more than 30% worse). Re-ran each of these 3 more times (4 samples per tool; the reported median_ms and max_rss_kb are the median of the four per-sample medians/peaks; per-row `rerun` records the sample count and the first-pass grit/git ratio): add/modified@synth-10k (mem), diff/worktree@synth-10k (mem), push/incremental@git-git, diff/staged@deep-tree, diff/staged@synth-100k, reflog/list@synth-10k, shortlog/ahead@git-git, show/head@big-blobs, status/dirty@small. Outcome: all nine reproduced (none was noise): diff/staged@deep-tree is 12.7x git (4.2x yesterday), reflog/list@synth-10k 1.5x (1.0x yesterday), diff/staged@synth-100k 2.4x (1.95x), grit peak RSS is 1.8x to 2.8x git on add/modified and diff/worktree at synth-10k. Several rows that were flagged yesterday as regressions improved a lot today: gc/default@synth-10k is 2.8x git (43.5x yesterday), show/head@git-git 2.4x (6.5x), bundle/create@synth-10k 3.5x (13x), while diff/staged@deep-tree got worse (see above). fetch/pull/push headline rows still show grit far faster than git (and v0.5.0 takes 40 to 80 s on these); push/incremental@git-git has git at ~1.6 s versus grit at ~9 ms, which I did not independently verify beyond yesterday's fetch spot check, so treat that single row with caution.\nFailures (kept in the report with grit=null and an error): branch/rename@many-refs (harness prepare step exits 128 before any timing), pull/check@git-git (grit `pull --check` takes minutes per run at 100% CPU, scenario killed after ~12 min), push/incremental-http@git-git (grit push over HTTP did not finish within 600 s; same symptom as the last two days with the 1500 s cap; I lowered the per-scenario cap to 600 s on this run to fit the 2 h budget and did not retry timeouts), push/refspec@git-git (harness correctness check: push rejected as non-fast-forward before timing), repack/full@git-git (did not finish within 600 s; yesterday it failed with a false SHA-1 collision report). For all five, neither tool has a number. Observed side effect: during fetch/incremental-http the grit-http-server process grew to about 5 GB RSS. Fixed from yesterday: fsck/full@git-git and worktree/add@synth-10k now complete."
 }
