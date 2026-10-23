@@ -4,11 +4,12 @@
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::object_inspect::ResolvedRefName;
-use grit_lib::repo::Repository;
+use grit_lib::refs::ref_storage::RefStorageFormat;
+use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::revwalk::rev_parse_error::RevParseError;
 
 mod support;
-use support::{each_backend, git, git_interop_available};
+use support::{git, git_init_reftable_repo, require_reftable_git};
 
 fn git_rev_parse_ref(dir: &std::path::Path, abbrev: bool, spec: &str) -> Option<String> {
     let flag = if abbrev {
@@ -61,54 +62,66 @@ fn open_grit(wt: &std::path::Path) -> Repository {
     Repository::discover(Some(wt), &RepositoryOptions::empty()).expect("discover")
 }
 
+/// Shared Git parity matrix (uses system `git` in `wt` for oracle lines).
+fn exercise_resolve_ref_name_git_parity(wt: &std::path::Path) {
+    git(wt, &["commit", "--allow-empty", "-m", "seed"]);
+    let grit = open_grit(wt);
+
+    git(wt, &["branch", "topic"]);
+    git(wt, &["tag", "v1"]);
+    git(wt, &["remote", "add", "origin", wt.to_str().unwrap()]);
+    git(wt, &["fetch", "origin", "main:refs/remotes/origin/main"]);
+    git(wt, &["branch", "--set-upstream-to", "origin/main", "main"]);
+
+    assert_ref_names(&grit, wt, "HEAD");
+    assert_ref_names(&grit, wt, "main");
+    assert_ref_names(&grit, wt, "v1");
+    assert_ref_names(&grit, wt, "origin/main");
+    assert_ref_names(&grit, wt, "@{u}");
+
+    git(wt, &["symbolic-ref", "refs/heads/alias", "refs/heads/main"]);
+    git(wt, &["symbolic-ref", "HEAD", "refs/heads/alias"]);
+    assert_ref_names(&open_grit(wt), wt, "HEAD");
+
+    git(wt, &["symbolic-ref", "HEAD", "refs/heads/main"]);
+
+    git(wt, &["checkout", "-q", "topic"]);
+    git(wt, &["checkout", "-q", "main"]);
+    assert_ref_names(&open_grit(wt), wt, "@{-1}");
+
+    let head = git(wt, &["rev-parse", "HEAD"]).trim().to_string();
+    git(wt, &["checkout", "-q", &head]);
+    assert_ref_names(&open_grit(wt), wt, "HEAD");
+
+    git(wt, &["checkout", "-q", "main"]);
+    git(wt, &["branch", "x"]);
+    git(wt, &["tag", "x"]);
+    git(wt, &["branch", "heads/x"]);
+    assert_ref_names(&open_grit(wt), wt, "refs/heads/x");
+    assert_ref_names(&open_grit(wt), wt, "refs/tags/x");
+    assert_ref_names(&open_grit(wt), wt, "x");
+    assert_ref_names(&open_grit(wt), wt, "heads/x");
+
+    git(wt, &["config", "core.warnAmbiguousRefs", "FALSE"]);
+    assert_ref_names(&open_grit(wt), wt, "refs/tags/x");
+}
+
 #[test]
 fn resolve_ref_name_matches_git_on_both_backends() {
-    each_backend(|backend, test_repo| {
-        if !git_interop_available(backend) {
-            return;
-        }
-        let wt = test_repo.worktree();
-        git(wt, &["commit", "--allow-empty", "-m", "seed"]);
-        let grit = open_grit(wt);
+    let files_root = tempfile::tempdir().expect("tempdir");
+    let files_wt = files_root.path();
+    Repository::init(
+        files_wt,
+        &InitOptions::new()
+            .with_initial_branch("main".to_owned())
+            .with_ref_storage(RefStorageFormat::Files),
+    )
+    .expect("init files");
+    exercise_resolve_ref_name_git_parity(files_wt);
 
-        git(wt, &["branch", "topic"]);
-        git(wt, &["tag", "v1"]);
-        git(wt, &["remote", "add", "origin", wt.to_str().unwrap()]);
-        git(wt, &["fetch", "origin", "main:refs/remotes/origin/main"]);
-        git(wt, &["branch", "--set-upstream-to", "origin/main", "main"]);
-
-        assert_ref_names(&grit, wt, "HEAD");
-        assert_ref_names(&grit, wt, "main");
-        assert_ref_names(&grit, wt, "v1");
-        assert_ref_names(&grit, wt, "origin/main");
-        assert_ref_names(&grit, wt, "@{u}");
-
-        git(wt, &["symbolic-ref", "refs/heads/alias", "refs/heads/main"]);
-        git(wt, &["symbolic-ref", "HEAD", "refs/heads/alias"]);
-        assert_ref_names(&open_grit(wt), wt, "HEAD");
-
-        git(wt, &["symbolic-ref", "HEAD", "refs/heads/main"]);
-
-        git(wt, &["checkout", "-q", "topic"]);
-        git(wt, &["checkout", "-q", "main"]);
-        assert_ref_names(&open_grit(wt), wt, "@{-1}");
-
-        let head = git(wt, &["rev-parse", "HEAD"]).trim().to_string();
-        git(wt, &["checkout", "-q", &head]);
-        assert_ref_names(&open_grit(wt), wt, "HEAD");
-
-        git(wt, &["checkout", "-q", "main"]);
-        git(wt, &["branch", "x"]);
-        git(wt, &["tag", "x"]);
-        git(wt, &["branch", "heads/x"]);
-        assert_ref_names(&open_grit(wt), wt, "refs/heads/x");
-        assert_ref_names(&open_grit(wt), wt, "refs/tags/x");
-        assert_ref_names(&open_grit(wt), wt, "x");
-        assert_ref_names(&open_grit(wt), wt, "heads/x");
-
-        git(wt, &["config", "core.warnAmbiguousRefs", "FALSE"]);
-        assert_ref_names(&open_grit(wt), wt, "refs/tags/x");
-
-        let _ = backend;
-    });
+    if !require_reftable_git() {
+        return;
+    }
+    let reftable_root = git_init_reftable_repo("main");
+    exercise_resolve_ref_name_git_parity(reftable_root.path());
 }
