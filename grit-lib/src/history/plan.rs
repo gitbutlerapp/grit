@@ -1128,7 +1128,10 @@ fn replay_merge_descendant(
         commit_tree(repo, new_first_parent)?
     };
 
-    if old.tree != old_parent_tree && result_tree == new_parent_tree {
+    if old.tree != old_parent_tree
+        && result_tree == new_parent_tree
+        && new_first_parent == old_first_parent
+    {
         return match opts.empty {
             EmptyPolicy::Abort => Err(HistoryError::BecameEmpty { commit: old_oid }),
             EmptyPolicy::Drop => Ok(new_first_parent),
@@ -1315,7 +1318,7 @@ fn write_replacement_commit(
         commit_tree(repo, new_parent)?
     };
 
-    if old.tree != old_parent_tree && result_tree == new_parent_tree {
+    if old.tree != old_parent_tree && result_tree == new_parent_tree && new_parent == old_parent {
         return match opts.empty {
             EmptyPolicy::Abort => Err(HistoryError::BecameEmpty { commit: old_oid }),
             EmptyPolicy::Drop => Ok(new_parent),

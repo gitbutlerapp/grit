@@ -6021,6 +6021,7 @@ impl core::marker::UnsafeUnpin for grit_lib::index::IndexLock
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::index::IndexLock
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::index::IndexLock
 pub struct grit_lib::index::IndexParseContext
+pub grit_lib::index::IndexParseContext::skip_cache_tree: bool
 pub grit_lib::index::IndexParseContext::thread_policy: grit_lib::parallel::ThreadPolicy
 impl grit_lib::index::IndexParseContext
 pub fn grit_lib::index::IndexParseContext::from_policy(grit_lib::parallel::ThreadPolicy) -> Self
