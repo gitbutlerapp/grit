@@ -245,9 +245,23 @@ fn run_baseline_samples(
 }
 
 /// Execute headline scenarios and write a daily census JSON report.
+fn daily_run_limits(smoke: bool, scenario_id: &str) -> RunLimits {
+    let mut limits = RunLimits {
+        timeout: if smoke {
+            None
+        } else {
+            Some(std::time::Duration::from_secs(120))
+        },
+        ..RunLimits::default()
+    };
+    if scenario_id == "tag/contains@git-git" {
+        limits.timeout = Some(std::time::Duration::from_secs(600));
+    }
+    limits
+}
+
 pub fn run_daily(opts: DailyRunOptions, timestamp: OffsetDateTime) -> Result<DailyBenchReport> {
     pin_daily_scratch_root();
-    let limits = RunLimits::default();
     let setup = DailySetup {
         git: &opts.git,
         grit: &opts.grit,
@@ -279,6 +293,7 @@ pub fn run_daily(opts: DailyRunOptions, timestamp: OffsetDateTime) -> Result<Dai
         refresh_grit_http_server(&mut headline_ctx)
             .with_context(|| format!("refresh HTTP server for {}", plan.spec.id))?;
         let policy = policy_for_scenario(plan.spec.id, opts.smoke);
+        let limits = daily_run_limits(opts.smoke, plan.spec.id);
         let git_cmd = (plan.build_git)(&headline_ctx);
         let grit_cmd = (plan.build_grit)(&headline_ctx);
         let prepare_spec = (plan.prepare)(&headline_ctx);
