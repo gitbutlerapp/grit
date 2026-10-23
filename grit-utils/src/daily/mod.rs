@@ -1,6 +1,7 @@
 //! Daily performance census report schema, scenario registry, and direct-spawn runner.
 
 pub mod areas;
+pub mod compare;
 pub mod coverage;
 pub mod helpers;
 pub mod matrix_helpers;
