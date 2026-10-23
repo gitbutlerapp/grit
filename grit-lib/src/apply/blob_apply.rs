@@ -23,6 +23,17 @@ pub fn apply_patch_to_blob(
 ) -> std::result::Result<Vec<u8>, ApplyError> {
     if patch.is_deleted {
         let path = patch.effective_path().unwrap_or("<unknown>").to_string();
+        if opts.reverse {
+            return super::apply_hunks_to_blob(
+                base,
+                &patch.hunks,
+                &super::ApplyOptions { reverse: true },
+            )
+            .map_err(|e| match e {
+                ApplyError::PatchFailed { path, line } => ApplyError::PatchFailed { path, line },
+                other => other,
+            });
+        }
         let result = apply_hunks_to_blob(base, &patch.hunks, &path)?;
         if !result.is_empty() {
             return Err(ApplyError::Failed {

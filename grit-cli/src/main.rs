@@ -2651,6 +2651,9 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
                     }
                 }
             } else {
+                if dry_run {
+                    bail!("--dry-run requires --hunks or --lines");
+                }
                 emit(
                     &commands::restore::run(
                         &pathspecs,

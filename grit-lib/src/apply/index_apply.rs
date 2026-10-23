@@ -4,6 +4,7 @@ use super::blob_apply::{apply_patch_to_blob, BlobApplyOptions};
 use super::FilePatch;
 use crate::error::{ApplyError, Error};
 use crate::index::{Index, IndexEntry, MODE_REGULAR};
+use crate::merge_diff::read_blob_at_path;
 use crate::objects::{ObjectId, ObjectKind};
 use crate::repo::Repository;
 use std::collections::BTreeMap;
@@ -15,6 +16,8 @@ pub struct IndexApplyOptions {
     pub dry_run: bool,
     /// When true, reverse each patch before applying (`git apply --cached -R`).
     pub reverse: bool,
+    /// When reversing, compare results to this tree to drop index entries that match `HEAD`.
+    pub head_tree_oid: Option<ObjectId>,
 }
 
 /// Result of applying patches to the index.
@@ -158,7 +161,21 @@ fn plan_one_file_patch(
         })?;
 
     if patch.is_deleted {
-        let base_blob = read_preimage_blob(repo, index, patch, &target)?;
+        if opts.reverse {
+            let base_blob = read_preimage_blob(repo, index, patch, &target, opts)?;
+            let new_blob = apply_patch_to_blob(
+                &base_blob,
+                patch,
+                &BlobApplyOptions {
+                    reverse: true,
+                    ..BlobApplyOptions::default()
+                },
+            )?;
+            return finish_reverse_index_upsert(
+                repo, index, patch, &target, opts, fn_table, outcome, new_blob,
+            );
+        }
+        let base_blob = read_preimage_blob(repo, index, patch, &target, opts)?;
         apply_patch_to_blob(
             &base_blob,
             patch,
@@ -187,7 +204,7 @@ fn plan_one_file_patch(
         });
     }
 
-    let base_blob = read_preimage_blob(repo, index, patch, &target)?;
+    let base_blob = read_preimage_blob(repo, index, patch, &target, opts)?;
     let new_blob = apply_patch_to_blob(
         &base_blob,
         patch,
@@ -196,6 +213,11 @@ fn plan_one_file_patch(
             ..BlobApplyOptions::default()
         },
     )?;
+    if opts.reverse {
+        return finish_reverse_index_upsert(
+            repo, index, patch, &target, opts, fn_table, outcome, new_blob,
+        );
+    }
     let mode = resolve_mode(index, patch, &target)?;
     let oid = hash_blob(repo, &new_blob)?;
 
@@ -249,6 +271,7 @@ fn read_preimage_blob(
     index: &Index,
     patch: &FilePatch,
     target: &str,
+    opts: &IndexApplyOptions,
 ) -> std::result::Result<Vec<u8>, ApplyError> {
     if patch.is_new {
         return Ok(Vec::new());
@@ -260,18 +283,78 @@ fn read_preimage_blob(
     if path == "/dev/null" {
         return Ok(Vec::new());
     }
-    let entry = index
-        .get(path.as_bytes(), 0)
-        .ok_or_else(|| ApplyError::NotInIndex {
-            path: path.to_string(),
-        })?;
-    repo.odb()
-        .read(&entry.oid)
-        .map(|o| o.data)
-        .map_err(|e| ApplyError::Failed {
-            path: path.to_string(),
-            message: e.to_string(),
-        })
+    if let Some(entry) = index.get(path.as_bytes(), 0) {
+        return repo
+            .odb()
+            .read(&entry.oid)
+            .map(|o| o.data)
+            .map_err(|e| ApplyError::Failed {
+                path: path.to_string(),
+                message: e.to_string(),
+            });
+    }
+    if opts.reverse {
+        return Ok(Vec::new());
+    }
+    Err(ApplyError::NotInIndex {
+        path: path.to_string(),
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn finish_reverse_index_upsert(
+    repo: &Repository,
+    index: &Index,
+    patch: &FilePatch,
+    target: &str,
+    opts: &IndexApplyOptions,
+    fn_table: &mut BTreeMap<String, FnState>,
+    outcome: &mut IndexApplyOutcome,
+    new_blob: Vec<u8>,
+) -> std::result::Result<Vec<PlannedChange>, ApplyError> {
+    if should_drop_index_entry_on_reverse(repo, target, opts, &new_blob) {
+        if index.get(target.as_bytes(), 0).is_some()
+            || fn_table.get(target).copied() == Some(FnState::Active)
+        {
+            fn_table.insert(target.to_string(), FnState::Deleted);
+            outcome.push_removed(target.to_string());
+            return Ok(vec![PlannedChange::Remove {
+                path: target.to_string(),
+            }]);
+        }
+        return Ok(Vec::new());
+    }
+    let mode = resolve_mode(index, patch, target)?;
+    let oid = hash_blob(repo, &new_blob)?;
+    let existed = index.get(target.as_bytes(), 0).is_some()
+        || fn_table.get(target).copied() == Some(FnState::Active);
+    if existed {
+        outcome.push_modified(target.to_string());
+    } else {
+        outcome.push_added(target.to_string());
+    }
+    fn_table.insert(target.to_string(), FnState::Active);
+    Ok(vec![PlannedChange::Upsert {
+        path: target.to_string(),
+        oid,
+        mode,
+        blob: new_blob,
+    }])
+}
+
+fn should_drop_index_entry_on_reverse(
+    repo: &Repository,
+    path: &str,
+    opts: &IndexApplyOptions,
+    new_blob: &[u8],
+) -> bool {
+    if !new_blob.is_empty() {
+        return false;
+    }
+    let Some(tree) = opts.head_tree_oid else {
+        return true;
+    };
+    read_blob_at_path(repo.odb(), &tree, path).is_none()
 }
 
 fn resolve_mode(

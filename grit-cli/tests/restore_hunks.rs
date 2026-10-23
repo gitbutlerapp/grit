@@ -55,3 +55,21 @@ fn restore_hunks_json() {
     assert_eq!(out["restored_hunks"]["f.txt"], serde_json::json!([id]));
     assert_eq!(out["restored"], serde_json::json!(["f.txt"]));
 }
+
+#[test]
+fn restore_dry_run_without_hunks_or_lines_rejected() {
+    let grit = env!("CARGO_BIN_EXE_grit");
+    let dir = tempfile::TempDir::new().expect("tempdir");
+    let root = dir.path();
+    assert!(run_grit(grit, root, &["init"]).status.success());
+    fs::write(root.join("f.txt"), b"one\n").expect("write");
+    assert!(run_grit(grit, root, &["add", "f.txt"]).status.success());
+    assert!(run_grit(grit, root, &["commit", "-m", "init"])
+        .status
+        .success());
+    fs::write(root.join("f.txt"), b"two\n").expect("write");
+
+    let restore = run_grit(grit, root, &["restore", "--dry-run", "--", "f.txt"]);
+    assert!(!restore.status.success());
+    assert_eq!(fs::read_to_string(root.join("f.txt")).unwrap(), "two\n");
+}
