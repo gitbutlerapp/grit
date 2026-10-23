@@ -3,7 +3,7 @@ title: Agent guide
 summary: Run grit from scripts and autonomous agents — JSON output, exit codes, non-interactive use, credentials, and where to read the docs.
 ---
 
-This page is for programs and agents that drive [`grit`](../install/) in automation. It describes **existing** CLI behavior only. Machine-readable **v1 JSON Schemas** for each command's `--json` success object are published at `/schemas/<command>/v1.json` (see the [JSON schemas](../schemas/) index). Field-level tables on each command page remain the human-oriented reference; this guide covers the shared contract.
+This page is for programs and agents that drive [`grit`](../install/) in automation. It describes **existing** CLI behavior only. Machine-readable **v1 JSON Schemas** for each command's `--json` success object are published at `/schemas/<command>/v1.json` (see the [JSON schemas](../schemas/) index). Field-level tables on each command page remain the human-oriented reference; this guide covers the shared contract. Cross-command flag rules (limits, dry-run, messages, pathspecs) are summarized in [CLI conventions](../cli-conventions/).
 
 Examples below were captured on 2026-10-08 with `grit` built from this repository (`cargo build --release -p grit-cli`), in a temporary repository on branch `main`, unless noted.
 

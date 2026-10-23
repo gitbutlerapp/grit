@@ -9,6 +9,8 @@ mod branch_list_args;
 mod clap_value_args;
 #[cfg(test)]
 mod cli_command;
+#[cfg(test)]
+mod cli_contract;
 mod cli_messages;
 #[cfg(test)]
 mod cli_test_stack;

@@ -3,7 +3,7 @@ title: Scripting with grit
 summary: Use --json and --filter to build scripts on top of grit.
 ---
 
-With `--json`, a command prints exactly one JSON value on stdout, so you can pipe it straight into other tools. The shape of each command's outcome is documented on its command page and in the committed v1 JSON Schemas under [`/schemas/`](../schemas/). `--filter` runs a [jq](https://jqlang.org) expression over that value without needing `jq` installed. When a filter produces several values, they come back as one JSON array:
+With `--json`, a command prints exactly one JSON value on stdout, so you can pipe it straight into other tools. The shape of each command's outcome is documented on its command page and in the committed v1 JSON Schemas under [`/schemas/`](../schemas/). Shared flag rules (`-n` as limit, long-only `--dry-run` on mutations, message and pathspec groups) are documented in [CLI conventions](../cli-conventions/). `--filter` runs a [jq](https://jqlang.org) expression over that value without needing `jq` installed. When a filter produces several values, they come back as one JSON array:
 
 ```console
 $ grit status --json --filter '{branch, clean}'

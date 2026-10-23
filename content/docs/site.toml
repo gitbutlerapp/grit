@@ -48,6 +48,11 @@ slug = "scripting"
 label = "Scripting"
 
 [[section.page]]
+file = "cli-conventions.md"
+slug = "cli-conventions"
+label = "CLI conventions"
+
+[[section.page]]
 file = "agents.md"
 slug = "agents"
 label = "Agent guide"
