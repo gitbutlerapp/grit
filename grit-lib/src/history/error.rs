@@ -32,6 +32,10 @@ pub enum HistoryError {
     #[error("nothing to fixup: no staged changes")]
     NothingStaged,
 
+    /// Hunk id or line-range selection failed before planning changed refs.
+    #[error(transparent)]
+    HunkSelect(#[from] crate::porcelain::hunk_select::HunkSelectError),
+
     /// Applying staged changes onto the target would make that commit empty.
     #[error("fixup makes commit {commit} empty")]
     FixupMakesTargetEmpty {

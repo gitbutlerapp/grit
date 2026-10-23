@@ -10,16 +10,18 @@ use std::sync::Arc;
 
 use grit_lib::change_id::{change_id, set_change_id, ChangeId, ChangeIdError, ChangeIdGenerator};
 use grit_lib::config::environment::{Environment, RepositoryOptions};
+use grit_lib::diff::hunk_id::{hunk_ids_with_duplicate_peers, DiffSide};
 use grit_lib::index::write_tree::write_tree_from_index;
 use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
 use grit_lib::objects::{parse_commit, serialize_commit, CommitData, ObjectId, ObjectKind};
+use grit_lib::porcelain::hunk_select::{unstaged_file_diffs, HunkSelection};
 use grit_lib::refs::{resolve_ref, write_ref};
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
-    absorb, apply_absorb_rewrite, apply_rewrite, drop as history_drop, fixup, move_commit,
-    rebase_onto, reword, split, squash, AbsorbOptions, ApplyOptions, EmptyPolicy, FixupOptions,
-    Placement, RebaseOntoOptions, RefScope, RewriteOptions, SplitOptions, SquashMessage,
-    SquashOptions,
+    absorb, apply_absorb_rewrite, apply_fixup_hunk_selection, apply_rewrite, drop as history_drop,
+    fixup, move_commit, rebase_onto, reword, split, squash, AbsorbOptions, ApplyOptions,
+    EmptyPolicy, FixupOptions, Placement, RebaseOntoOptions, RefScope, RewriteOptions,
+    SplitOptions, SquashMessage, SquashOptions,
 };
 
 use support::{commit_file, git, git_fsck_strict, git_rev_parse, HistoryRepo};
@@ -233,6 +235,8 @@ fn history_change_ids_survive_every_rewrite() {
             message: None,
             empty: EmptyPolicy::Drop,
             rewrite: rewrite_opts(2),
+            selection: None,
+            pathspecs: Vec::new(),
         },
     )
     .expect("fixup");
@@ -532,5 +536,66 @@ fn change_ids_disabled_adds_nothing() {
             .any(|l| l.starts_with("change-id ") || l.starts_with("gitbutler-change-id ")),
         "unexpected change id header: {raw}"
     );
+    git_fsck_strict(wt);
+}
+
+#[test]
+fn fixup_hunks_preserves_change_id() {
+    let repo = HistoryRepo::init();
+    let wt = repo.worktree();
+    let grit = open_grit(wt);
+    let tree = write_tree_blob(&grit, "pick.txt", b"base\n");
+    let pick1 = grit_commit_with_id(
+        &grit,
+        tree,
+        &[],
+        "pick1\n",
+        Some("pppppppppppppppppppppppppppppppp"),
+        &[],
+    );
+    let pick2 = grit_commit_with_id(
+        &grit,
+        tree,
+        &[pick1],
+        "pick2\n",
+        Some("qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq"),
+        &[],
+    );
+    write_ref(grit.git_dir(), "refs/heads/main", &pick2).expect("ref");
+    git(wt, &["reset", "--hard", &pick2.to_hex()]);
+    std::fs::write(wt.join("pick.txt"), b"base\nextra\n").expect("write");
+    let files = unstaged_file_diffs(&grit, &[]).expect("diff");
+    let (file, peer) = &files[0];
+    let ids = hunk_ids_with_duplicate_peers(DiffSide::Unstaged, &file.path, &file.hunks, peer);
+    let selection = HunkSelection {
+        ids: vec![ids[0].clone()],
+        ranges: Vec::new(),
+    };
+    let plan = fixup(
+        &grit,
+        pick1,
+        &FixupOptions {
+            message: None,
+            empty: EmptyPolicy::Drop,
+            rewrite: rewrite_opts(1),
+            selection: Some(selection.clone()),
+            pathspecs: Vec::new(),
+        },
+    )
+    .expect("fixup hunks");
+    let new_pick1 = replacement_id(&plan, pick1);
+    apply_fixup_hunk_selection(
+        &grit,
+        &plan,
+        &ApplyOptions {
+            identity: "Rewriter <r@grit.test>".into(),
+            reflog_message: "fixup hunks".into(),
+            record_operation: None,
+        },
+        &selection,
+        &[],
+    )
+    .expect("apply fixup hunks");
+    assert_change_id_on_oid(wt, &new_pick1, "pppppppppppppppppppppppppppppppp");
     git_fsck_strict(wt);
 }
