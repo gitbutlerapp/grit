@@ -5,8 +5,13 @@
 //! doubles as the home base: running `grit` with no arguments shows you where you
 //! are, what's changed, and what to do next.
 
+<<<<<<< New base: fix(rebase): address --exec review and maintainer steering
 mod branch_list_args;
 mod clap_value_args;
+||||||| Common ancestor
+=======
+mod cli_command;
+>>>>>>> Current commit: fix(cli): build clap command tree on large-stack thread in tests
 mod cli_messages;
 #[cfg(test)]
 mod cli_command;
@@ -3079,10 +3084,20 @@ mod tests {
     }
 
     fn cli_supports_markdown() -> bool {
+<<<<<<< New base: fix(rebase): address --exec review and maintainer steering
         with_cli_root(|root| {
             root.get_arguments()
                 .any(|arg| arg.get_id() == "markdown" || arg.get_long() == Some("markdown"))
         })
+||||||| Common ancestor
+        Cli::command()
+            .get_arguments()
+            .any(|arg| arg.get_id() == "markdown" || arg.get_long() == Some("markdown"))
+=======
+        crate::cli_command::build_cli_command()
+            .get_arguments()
+            .any(|arg| arg.get_id() == "markdown" || arg.get_long() == Some("markdown"))
+>>>>>>> Current commit: fix(cli): build clap command tree on large-stack thread in tests
     }
 
     fn top_level_keys(value: &Value) -> HashSet<String> {
@@ -3187,6 +3202,7 @@ mod tests {
     /// Every command page uses the documented section order.
     #[test]
     fn command_pages_follow_template() {
+<<<<<<< New base: fix(rebase): address --exec review and maintainer steering
         with_cli_root(|root| {
             let dir = commands_dir();
             let mut problems = Vec::new();
@@ -3202,6 +3218,21 @@ mod tests {
                 };
                 let (_, body) = split_front_matter(&text);
                 problems.extend(validate_page_headings(name, &h2_headings(body)));
+||||||| Common ancestor
+        let dir = commands_dir();
+        let mut problems = Vec::new();
+        for command in Cli::command().get_subcommands() {
+            let name = command.get_name();
+            if name == "help" {
+                continue;
+=======
+        let dir = commands_dir();
+        let mut problems = Vec::new();
+        for command in crate::cli_command::build_cli_command().get_subcommands() {
+            let name = command.get_name();
+            if name == "help" {
+                continue;
+>>>>>>> Current commit: fix(cli): build clap command tree on large-stack thread in tests
             }
             assert!(problems.is_empty(), "{}", problems.join("\n"));
         });
@@ -3256,6 +3287,7 @@ Example:
     /// JSON examples in the JSON output section must parse, and document top-level keys.
     #[test]
     fn json_examples_parse() {
+<<<<<<< New base: fix(rebase): address --exec review and maintainer steering
         with_cli_root(|root| {
             let dir = commands_dir();
             let mut problems = Vec::new();
@@ -3288,6 +3320,47 @@ Example:
                     continue;
                 }
                 if blocks.is_empty() {
+||||||| Common ancestor
+        let dir = commands_dir();
+        let mut problems = Vec::new();
+        for command in Cli::command().get_subcommands() {
+            let name = command.get_name();
+            if name == "help" {
+                continue;
+            }
+            let path = dir.join(format!("{name}.md"));
+            let Ok(text) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            let (_, body) = split_front_matter(&text);
+            let Some(section) = section_body(body, "JSON output") else {
+                problems.push(format!("{name}.md: no JSON output section"));
+                continue;
+            };
+            let blocks = fenced_json_blocks(&section);
+            if NO_JSON_COMMANDS.contains(&name) {
+                if !blocks.is_empty() {
+=======
+        let dir = commands_dir();
+        let mut problems = Vec::new();
+        for command in crate::cli_command::build_cli_command().get_subcommands() {
+            let name = command.get_name();
+            if name == "help" {
+                continue;
+            }
+            let path = dir.join(format!("{name}.md"));
+            let Ok(text) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            let (_, body) = split_front_matter(&text);
+            let Some(section) = section_body(body, "JSON output") else {
+                problems.push(format!("{name}.md: no JSON output section"));
+                continue;
+            };
+            let blocks = fenced_json_blocks(&section);
+            if NO_JSON_COMMANDS.contains(&name) {
+                if !blocks.is_empty() {
+>>>>>>> Current commit: fix(cli): build clap command tree on large-stack thread in tests
                     problems.push(format!(
                         "{name}.md: JSON output section needs a ```json example"
                     ));
@@ -3339,6 +3412,7 @@ The keys are `initialized`, `path`, `bare`, and `branch`.
     /// `--markdown` is documented only when clap exposes a `markdown` flag.
     #[test]
     fn markdown_output_only_when_supported() {
+<<<<<<< New base: fix(rebase): address --exec review and maintainer steering
         with_cli_root(|root| {
             let dir = commands_dir();
             let global_markdown = cli_supports_markdown();
@@ -3360,6 +3434,47 @@ The keys are `initialized`, `path`, `bare`, and `branch`.
                         "{name}.md documents --markdown but the command has no markdown flag"
                     ));
                 }
+||||||| Common ancestor
+        let dir = commands_dir();
+        let global_markdown = cli_supports_markdown();
+        let mut problems = Vec::new();
+        for command in Cli::command().get_subcommands() {
+            let name = command.get_name();
+            if name == "help" {
+                continue;
+            }
+            let path = dir.join(format!("{name}.md"));
+            let Ok(text) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            let (_, body) = split_front_matter(&text);
+            let mentions_markdown = page_mentions_markdown(body);
+            let supported = global_markdown || command_supports_markdown(command);
+            if mentions_markdown && !supported {
+                problems.push(format!(
+                    "{name}.md documents --markdown but the command has no markdown flag"
+                ));
+=======
+        let dir = commands_dir();
+        let global_markdown = cli_supports_markdown();
+        let mut problems = Vec::new();
+        for command in crate::cli_command::build_cli_command().get_subcommands() {
+            let name = command.get_name();
+            if name == "help" {
+                continue;
+            }
+            let path = dir.join(format!("{name}.md"));
+            let Ok(text) = std::fs::read_to_string(&path) else {
+                continue;
+            };
+            let (_, body) = split_front_matter(&text);
+            let mentions_markdown = page_mentions_markdown(body);
+            let supported = global_markdown || command_supports_markdown(command);
+            if mentions_markdown && !supported {
+                problems.push(format!(
+                    "{name}.md documents --markdown but the command has no markdown flag"
+                ));
+>>>>>>> Current commit: fix(cli): build clap command tree on large-stack thread in tests
             }
             assert!(problems.is_empty(), "{}", problems.join("\n"));
         });
@@ -3410,6 +3525,7 @@ The keys are `initialized`, `path`, `bare`, and `branch`.
             cli_has_path(sub, tail)
         }
 
+<<<<<<< New base: fix(rebase): address --exec review and maintainer steering
         with_cli_root(|root| {
             let mut problems = Vec::new();
             for (area, path) in LIBRARY_AREAS {
@@ -3419,6 +3535,25 @@ The keys are `initialized`, `path`, `bare`, and `branch`.
                         path.join(" ")
                     ));
                 }
+||||||| Common ancestor
+        let root = Cli::command();
+        let mut problems = Vec::new();
+        for (area, path) in LIBRARY_AREAS {
+            if !cli_has_path(&root, path) {
+                problems.push(format!(
+                    "library area `{area}` has no CLI path `{}`",
+                    path.join(" ")
+                ));
+=======
+        let root = crate::cli_command::build_cli_command();
+        let mut problems = Vec::new();
+        for (area, path) in LIBRARY_AREAS {
+            if !cli_has_path(&root, path) {
+                problems.push(format!(
+                    "library area `{area}` has no CLI path `{}`",
+                    path.join(" ")
+                ));
+>>>>>>> Current commit: fix(cli): build clap command tree on large-stack thread in tests
             }
             assert!(problems.is_empty(), "{}", problems.join("\n"));
         });
@@ -3429,12 +3564,46 @@ The keys are `initialized`, `path`, `bare`, and `branch`.
     /// subcommands. Positional arguments are named freely in the synopsis. Run `python3 scripts/docs.py` after editing the pages.
     #[test]
     fn every_command_is_documented() {
+<<<<<<< New base: fix(rebase): address --exec review and maintainer steering
         with_cli_root(|root| {
             let pages = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../content/docs/commands");
             let mut problems = Vec::new();
             for command in root.get_subcommands() {
                 let name = command.get_name();
                 if name == "help" {
+||||||| Common ancestor
+        let pages = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../content/docs/commands");
+        let mut problems = Vec::new();
+        for command in Cli::command().get_subcommands() {
+            let name = command.get_name();
+            if name == "help" {
+                continue;
+            }
+            let path = pages.join(format!("{name}.md"));
+            let Ok(page) = std::fs::read_to_string(&path) else {
+                problems.push(format!("missing page {}", path.display()));
+                continue;
+            };
+            for arg in command.get_arguments() {
+                let id = arg.get_id().as_str();
+                if GLOBAL_OPTIONS.contains(&id) {
+=======
+        let pages = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../content/docs/commands");
+        let mut problems = Vec::new();
+        for command in crate::cli_command::build_cli_command().get_subcommands() {
+            let name = command.get_name();
+            if name == "help" {
+                continue;
+            }
+            let path = pages.join(format!("{name}.md"));
+            let Ok(page) = std::fs::read_to_string(&path) else {
+                problems.push(format!("missing page {}", path.display()));
+                continue;
+            };
+            for arg in command.get_arguments() {
+                let id = arg.get_id().as_str();
+                if GLOBAL_OPTIONS.contains(&id) {
+>>>>>>> Current commit: fix(cli): build clap command tree on large-stack thread in tests
                     continue;
                 }
                 let path = pages.join(format!("{name}.md"));
@@ -3520,6 +3689,7 @@ The keys are `initialized`, `path`, `bare`, and `branch`.
     #[test]
     fn every_command_has_output_snapshots() {
         use crate::json_schema::discover_snapshot_stems;
+<<<<<<< New base: fix(rebase): address --exec review and maintainer steering
         with_cli_root(move |root| {
             let dir = snapshot_dir();
             let stems = discover_snapshot_stems(&dir);
@@ -3534,6 +3704,45 @@ The keys are `initialized`, `path`, `bare`, and `branch`.
                         "snapshot `{stem}` must include human, json, and markdown sections"
                     ));
                 }
+||||||| Common ancestor
+        let dir = snapshot_dir();
+        let stems = discover_snapshot_stems(&dir);
+        let mut problems = Vec::new();
+        for stem in &stems {
+            let Some(payload) = read_snapshot_payload(stem) else {
+                problems.push(format!("snapshot `{stem}` is unreadable"));
+                continue;
+            };
+            if !snapshot_has_three_modes(stem, &payload) {
+                problems.push(format!(
+                    "snapshot `{stem}` must include human, json, and markdown sections"
+                ));
+            }
+        }
+        for command in Cli::command().get_subcommands() {
+            let name = command.get_name();
+            if OUTPUT_SNAPSHOT_EXEMPT.contains(&name) {
+                continue;
+=======
+        let dir = snapshot_dir();
+        let stems = discover_snapshot_stems(&dir);
+        let mut problems = Vec::new();
+        for stem in &stems {
+            let Some(payload) = read_snapshot_payload(stem) else {
+                problems.push(format!("snapshot `{stem}` is unreadable"));
+                continue;
+            };
+            if !snapshot_has_three_modes(stem, &payload) {
+                problems.push(format!(
+                    "snapshot `{stem}` must include human, json, and markdown sections"
+                ));
+            }
+        }
+        for command in crate::cli_command::build_cli_command().get_subcommands() {
+            let name = command.get_name();
+            if OUTPUT_SNAPSHOT_EXEMPT.contains(&name) {
+                continue;
+>>>>>>> Current commit: fix(cli): build clap command tree on large-stack thread in tests
             }
             for command in root.get_subcommands() {
                 let name = command.get_name();
@@ -3615,6 +3824,7 @@ The keys are `initialized`, `path`, `bare`, and `branch`.
     /// JSON field tables document exactly the top-level schema properties; Markdown sections link schemas.
     #[test]
     fn json_field_tables_match_schemas() {
+<<<<<<< New base: fix(rebase): address --exec review and maintainer steering
         with_cli_root(|root| {
             let dir = commands_dir();
             let mut problems = Vec::new();
@@ -3622,6 +3832,81 @@ The keys are `initialized`, `path`, `bare`, and `branch`.
                 let name = command.get_name();
                 if name == "help" || NO_JSON_COMMANDS.contains(&name) {
                     continue;
+||||||| Common ancestor
+        let dir = commands_dir();
+        let mut problems = Vec::new();
+        for command in Cli::command().get_subcommands() {
+            let name = command.get_name();
+            if name == "help" || NO_JSON_COMMANDS.contains(&name) {
+                continue;
+            }
+            let path = dir.join(format!("{name}.md"));
+            let Ok(text) = std::fs::read_to_string(&path) else {
+                problems.push(format!("missing page {}", path.display()));
+                continue;
+            };
+            let (_, body) = split_front_matter(&text);
+            let Some(json_section) = section_body(body, "JSON output") else {
+                problems.push(format!("{name}.md: no JSON output section"));
+                continue;
+            };
+            if !json_section.contains("Schema:") && !json_section.contains("/schemas/") {
+                problems.push(format!(
+                    "{name}.md: JSON output section must link the v1 schema under /schemas/"
+                ));
+            }
+            let table_keys = field_table_top_level_keys(&json_section);
+            let schema_keys = schema_keys_for_command(name);
+            if table_keys != schema_keys {
+                let missing: Vec<_> = schema_keys.difference(&table_keys).collect();
+                let extra: Vec<_> = table_keys.difference(&schema_keys).collect();
+                if !missing.is_empty() {
+                    problems.push(format!(
+                        "{name}.md: field table missing schema keys: {missing:?}"
+                    ));
+                }
+                if !extra.is_empty() {
+                    problems.push(format!(
+                        "{name}.md: field table documents keys not in schema: {extra:?}"
+                    ));
+=======
+        let dir = commands_dir();
+        let mut problems = Vec::new();
+        for command in crate::cli_command::build_cli_command().get_subcommands() {
+            let name = command.get_name();
+            if name == "help" || NO_JSON_COMMANDS.contains(&name) {
+                continue;
+            }
+            let path = dir.join(format!("{name}.md"));
+            let Ok(text) = std::fs::read_to_string(&path) else {
+                problems.push(format!("missing page {}", path.display()));
+                continue;
+            };
+            let (_, body) = split_front_matter(&text);
+            let Some(json_section) = section_body(body, "JSON output") else {
+                problems.push(format!("{name}.md: no JSON output section"));
+                continue;
+            };
+            if !json_section.contains("Schema:") && !json_section.contains("/schemas/") {
+                problems.push(format!(
+                    "{name}.md: JSON output section must link the v1 schema under /schemas/"
+                ));
+            }
+            let table_keys = field_table_top_level_keys(&json_section);
+            let schema_keys = schema_keys_for_command(name);
+            if table_keys != schema_keys {
+                let missing: Vec<_> = schema_keys.difference(&table_keys).collect();
+                let extra: Vec<_> = table_keys.difference(&schema_keys).collect();
+                if !missing.is_empty() {
+                    problems.push(format!(
+                        "{name}.md: field table missing schema keys: {missing:?}"
+                    ));
+                }
+                if !extra.is_empty() {
+                    problems.push(format!(
+                        "{name}.md: field table documents keys not in schema: {extra:?}"
+                    ));
+>>>>>>> Current commit: fix(cli): build clap command tree on large-stack thread in tests
                 }
                 let path = dir.join(format!("{name}.md"));
                 let Ok(text) = std::fs::read_to_string(&path) else {
