@@ -5,11 +5,15 @@
  */
 import fs from "node:fs";
 import path from "node:path";
-import { REPO_ROOT } from "./repo";
+import { readRepoFile, REPO_ROOT } from "./repo";
 
 export const BENCHMARK_MARKER = "<!-- grit:benchmark-tables -->";
+export const DAILY_MATRIX_MARKER = "<!-- grit:daily-matrix -->";
 const SCHEMA_VERSION = 1;
+export const DAILY_BENCH_SCHEMA = "grit-daily-bench/1" as const;
 const SLOW_RATIO = 2.0;
+const DAILY_SLOW_RATIO = 2.0;
+const DAILY_MEMORY_SLOW_RATIO = 1.5;
 
 interface Scenario {
   id: string;
@@ -41,6 +45,17 @@ function ms(block: Record<string, unknown>, label: string, field: string): numbe
   return value;
 }
 
+function timingMs(block: Record<string, unknown>, label: string): number {
+  if ("mean_ms" in block) return ms(block, label, "mean_ms");
+  if ("median_ms" in block) return ms(block, label, "median_ms");
+  fail(`${label} missing mean_ms or median_ms`);
+}
+
+function timingStddev(block: Record<string, unknown>, label: string): number {
+  if ("stddev_ms" in block) return ms(block, label, "stddev_ms");
+  return 0;
+}
+
 function isCampaignBaseline(rel: string): boolean {
   return rel.endsWith("campaign-before.json") || rel.endsWith("campaign-after.json");
 }
@@ -54,6 +69,14 @@ function isHashSuiteBaseline(rel: string): boolean {
   return rel.endsWith("hash-before.json") || rel.endsWith("hash-after.json");
 }
 
+function isConflictsBaseline(rel: string): boolean {
+  return rel.endsWith("conflicts.json");
+}
+
+function isHotPathsBaseline(rel: string): boolean {
+  return rel.endsWith("hot-paths-after.json");
+}
+
 function isDashboardBaseline(rel: string): boolean {
   return rel.startsWith("grit-utils/baselines/dashboard/");
 }
@@ -62,11 +85,52 @@ function isDashboardPrimary(rel: string): boolean {
   return rel.endsWith("dashboard/current.json");
 }
 
+function isDailyBenchBaseline(rel: string): boolean {
+  return rel.includes("/baselines/daily/") && rel.endsWith(".json");
+}
+
+export interface DailyToolRun {
+  median_wall_ms: number;
+  peak_rss_bytes: number;
+  runs?: number;
+}
+
+export interface DailyScenarioResult {
+  id: string;
+  area: string;
+  headline?: boolean;
+  name?: string;
+  description: string;
+  git: DailyToolRun;
+  grit: DailyToolRun;
+  ratio: number;
+  pending?: boolean;
+}
+
+export interface DailyBenchReport {
+  schema: typeof DAILY_BENCH_SCHEMA;
+  generated_at: string;
+  machine: Record<string, unknown>;
+  tools: Record<string, unknown>;
+  scenarios: DailyScenarioResult[];
+}
+
+export interface MatrixScenarioRow {
+  id: string;
+  notes?: string;
+}
+
+export interface MatrixAreaSection {
+  area: string;
+  scenarios: MatrixScenarioRow[];
+}
+
 function loadBundle(baselines: string[]): Bundle {
   const scenarios: Scenario[] = [];
   const seen = new Map<string, { index: number; rel: string }>();
   let primary: Record<string, any> | undefined;
   for (const rel of baselines) {
+    if (isDailyBenchBaseline(rel)) continue;
     const file = path.resolve(REPO_ROOT, rel);
     if (!fs.existsSync(file)) fail(`missing ${rel}`);
     const report = JSON.parse(fs.readFileSync(file, "utf8"));
@@ -86,8 +150,8 @@ function loadBundle(baselines: string[]): Bundle {
       for (const key of ["id", "group", "fixture", "grit"]) if (!(key in raw)) fail(`${label} missing ${key}`);
       const gritOnly = (raw.driver ?? "cli") === "criterion";
       if (!gritOnly && !raw.git) fail(`${label} missing git`);
-      const gitMean = raw.git ? ms(raw.git, `${label} git`, "mean_ms") : null;
-      const gritMean = ms(raw.grit, `${label} grit`, "mean_ms");
+      const gitMean = raw.git ? timingMs(raw.git, `${label} git`) : null;
+      const gritMean = timingMs(raw.grit, `${label} grit`);
       const id = String(raw.id);
       const row: Scenario = {
         id,
@@ -95,7 +159,7 @@ function loadBundle(baselines: string[]): Bundle {
         fixture: String(raw.fixture),
         gitMean,
         gritMean,
-        gritStddev: ms(raw.grit, `${label} grit`, "stddev_ms"),
+        gritStddev: timingStddev(raw.grit, `${label} grit`),
         ratio: gitMean ? gritMean / gitMean : null,
       };
       if (seen.has(id)) {
@@ -134,6 +198,14 @@ function loadBundle(baselines: string[]): Bundle {
         if (isDashboardPrimary(rel)) {
           scenarios[prev.index] = row;
           seen.set(id, { index: prev.index, rel });
+          return;
+        }
+        if (isHotPathsBaseline(rel) && isConflictsBaseline(prev.rel)) {
+          scenarios[prev.index] = row;
+          seen.set(id, { index: prev.index, rel });
+          return;
+        }
+        if (isConflictsBaseline(rel) && isHotPathsBaseline(prev.rel)) {
           return;
         }
         fail(`duplicate scenario id ${id}`);
@@ -212,6 +284,190 @@ export function benchmarkMarkdown(baselines: string[]): string {
     for (const s of groups.get(name)!) {
       out.push(
         `| \`${s.id}\` | ${s.fixture} | ${s.gitMean === null ? "—" : formatMs(s.gitMean)} | ${formatMs(s.gritMean)} | ${formatRatio(s.ratio)} | ±${formatMs(s.gritStddev)} ms |`,
+      );
+    }
+  }
+  return out.join("\n") + "\n";
+}
+
+/** Repo-root-relative path to the committed daily census report from `site.toml` baselines. */
+export function findDailyBaseline(baselines: string[]): string {
+  const daily = baselines.filter(isDailyBenchBaseline);
+  if (!daily.length) fail("no grit-daily-bench baseline listed in site.toml");
+  const preferred = daily.find((rel) => rel.endsWith("/daily/latest.json"));
+  return preferred ?? daily[0]!;
+}
+
+function readDailyReport(rel: string): DailyBenchReport {
+  const file = path.resolve(REPO_ROOT, rel);
+  if (!fs.existsSync(file)) fail(`missing ${rel}`);
+  const report = JSON.parse(fs.readFileSync(file, "utf8")) as DailyBenchReport;
+  if (report.schema !== DAILY_BENCH_SCHEMA) {
+    fail(`${rel} has unsupported schema ${String((report as { schema?: unknown }).schema)}`);
+  }
+  if (!Array.isArray(report.scenarios)) fail(`${rel} missing scenarios`);
+  return report;
+}
+
+/** Load a `grit-daily-bench/1` report (typed). */
+export function loadDailyReport(rel: string): DailyBenchReport {
+  return readDailyReport(rel);
+}
+
+/** Parse functional areas and scenario ids from `grit-utils/MATRIX.md`. */
+export function parseMatrixAreas(markdown: string): MatrixAreaSection[] {
+  const sections: MatrixAreaSection[] = [];
+  let current: MatrixAreaSection | undefined;
+  for (const line of markdown.split("\n")) {
+    const heading = /^## ([^#].*)$/.exec(line.trim());
+    if (heading) {
+      const title = heading[1]!.trim();
+      if (title === "Exemptions" || title === "Gaps" || title.startsWith("How to read")) {
+        current = undefined;
+        continue;
+      }
+      current = { area: title, scenarios: [] };
+      sections.push(current);
+      continue;
+    }
+    if (!current) continue;
+    const trimmed = line.trim();
+    if (!trimmed.startsWith("|") || trimmed.startsWith("| ---")) continue;
+    const cells = trimmed
+      .slice(1)
+      .split("|")
+      .map((c) => c.trim());
+    const idCell = cells[0] ?? "";
+    const inner = idCell.startsWith("`") && idCell.endsWith("`") ? idCell.slice(1, -1) : "";
+    if (inner.includes("/") && inner.includes("@")) {
+      current.scenarios.push({ id: inner, notes: cells[1] });
+    }
+  }
+  return sections;
+}
+
+function formatRss(bytes: number): string {
+  if (bytes <= 0) return "—";
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
+  return `${Math.round(bytes / 1024)} KiB`;
+}
+
+function emphasizeRatio(ratio: number | null, slow: number): string {
+  if (ratio === null || !Number.isFinite(ratio) || ratio <= 0) return "—";
+  const text = `${ratio.toFixed(2)}×`;
+  return ratio > slow ? `**${text}**` : text;
+}
+
+function isMeasuredDailyResult(result: DailyScenarioResult): boolean {
+  if (result.pending) return false;
+  return result.ratio > 0 && result.git.median_wall_ms > 0 && result.grit.median_wall_ms > 0;
+}
+
+function scenarioExemption(
+  row: MatrixScenarioRow,
+  result: DailyScenarioResult | undefined,
+): string | undefined {
+  if (result?.pending) return "Pending (not timed)";
+  if (result && !isMeasuredDailyResult(result)) {
+    return "Not in committed daily baseline";
+  }
+  if (!result) {
+    if (row.notes?.includes("GAP:") || row.notes?.toLowerCase().includes("pending")) {
+      return row.notes;
+    }
+    return "Not in committed daily baseline";
+  }
+  return undefined;
+}
+
+/** Fail when a MATRIX.md row lacks both measured ratios and an exemption note. */
+export function assertDailyMatrixCoverage(areas: MatrixAreaSection[], report: DailyBenchReport): void {
+  const byId = new Map(report.scenarios.map((s) => [s.id, s]));
+  const problems: string[] = [];
+  for (const section of areas) {
+    for (const row of section.scenarios) {
+      const result = byId.get(row.id);
+      const exemption = scenarioExemption(row, result);
+      if (exemption) continue;
+      if (!result || !isMeasuredDailyResult(result)) problems.push(row.id);
+    }
+  }
+  if (problems.length) {
+    fail(`daily matrix rows without ratio or exemption: ${problems.join(", ")}`);
+  }
+}
+
+/** Daily census table grouped by MATRIX.md functional areas. */
+export function dailyMatrixMarkdown(dailyRel: string, matrixRel = "grit-utils/MATRIX.md"): string {
+  const report = readDailyReport(dailyRel);
+  const matrixMd = readRepoFile(matrixRel);
+  const areas = parseMatrixAreas(matrixMd);
+  assertDailyMatrixCoverage(areas, report);
+  const byId = new Map(report.scenarios.map((s) => [s.id, s]));
+  const gitVersion = String(report.tools.git ?? "?");
+  const gritVersion = String(report.tools.grit ?? "?");
+  const cpu = String(report.machine.cpu_model ?? "?");
+  const os = `${String(report.machine.os ?? "?")} (${String(report.machine.kernel ?? "?")})`;
+  const recorded = report.generated_at.replace("T", " ").replace(/Z$/, "");
+
+  const out = [
+    "| | |",
+    "| --- | --- |",
+    `| Git | ${gitVersion} |`,
+    `| Grit | ${gritVersion} |`,
+    `| CPU | ${cpu} |`,
+    `| OS | ${os} |`,
+    `| Recorded | ${recorded} |`,
+    "",
+    "## Summary by area",
+    "",
+    "| Area | Scenarios | Median Grit / Git (time) | Worst Grit / Git (time) | Median memory ratio |",
+    "| --- | ---: | ---: | ---: | ---: |",
+  ];
+
+  for (const section of areas) {
+    const timeRatios: number[] = [];
+    const memRatios: number[] = [];
+    for (const row of section.scenarios) {
+      const result = byId.get(row.id);
+      const exemption = scenarioExemption(row, result);
+      if (exemption || !result || result.pending) continue;
+      if (result.ratio > 0) timeRatios.push(result.ratio);
+      const gitRss = result.git.peak_rss_bytes;
+      const gritRss = result.grit.peak_rss_bytes;
+      if (gitRss > 0 && gritRss > 0) memRatios.push(gritRss / gitRss);
+    }
+    const medTime = timeRatios.length ? emphasizeRatio(median(timeRatios), DAILY_SLOW_RATIO) : "—";
+    const worstTime = timeRatios.length ? emphasizeRatio(Math.max(...timeRatios), DAILY_SLOW_RATIO) : "—";
+    const medMem = memRatios.length ? emphasizeRatio(median(memRatios), DAILY_MEMORY_SLOW_RATIO) : "—";
+    out.push(`| ${section.area} | ${section.scenarios.length} | ${medTime} | ${worstTime} | ${medMem} |`);
+  }
+
+  for (const section of areas) {
+    out.push(
+      "",
+      `### ${section.area}`,
+      "",
+      "| Scenario | Git median (ms) | Grit median (ms) | Time | Git peak RSS | Grit peak RSS | Memory | Notes |",
+      "| --- | ---: | ---: | ---: | ---: | ---: | ---: | --- |",
+    );
+    for (const row of section.scenarios) {
+      const result = byId.get(row.id);
+      const exemption = scenarioExemption(row, result);
+      const headline = result?.headline === true;
+      const idCell = headline ? `**${row.id}**` : `\`${row.id}\``;
+      if (exemption) {
+        out.push(`| ${idCell} | — | — | — | — | — | — | ${exemption} |`);
+        continue;
+      }
+      const gitMs = result!.git.median_wall_ms;
+      const gritMs = result!.grit.median_wall_ms;
+      const memRatio =
+        result!.git.peak_rss_bytes > 0 && result!.grit.peak_rss_bytes > 0
+          ? result!.grit.peak_rss_bytes / result!.git.peak_rss_bytes
+          : null;
+      out.push(
+        `| ${idCell} | ${formatMs(gitMs)} | ${formatMs(gritMs)} | ${emphasizeRatio(result!.ratio, DAILY_SLOW_RATIO)} | ${formatRss(result!.git.peak_rss_bytes)} | ${formatRss(result!.grit.peak_rss_bytes)} | ${emphasizeRatio(memRatio, DAILY_MEMORY_SLOW_RATIO)} | |`,
       );
     }
   }
