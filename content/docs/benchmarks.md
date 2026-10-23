@@ -225,6 +225,30 @@ A clean `grit pick` / `grit revert` of a commit touching 2000 paths spent most o
 ./target/release/grit-bench hot-paths --sizes 10000,100000 --format json --output grit-utils/baselines/hot-paths-after.json
 ```
 
+## Tags on many refs (2026-10-23)
+
+On the many-refs fixture (11 668 packed refs, 3 333 of them tags, half annotated with loose tag objects), `grit tag` spent almost all of its time classifying tags. Every tag ref cost an object-header read, and every annotated tag cost a second header read plus a full read of the tag object to peel it. That meant thousands of loose-object inflates, whose zlib setup alone was a fifth of the run.
+
+- **Listing from peel lines.** `packed-refs` written with the `peeled` or `fully-peeled` trait already records each annotated tag's peeled object, which is how Git avoids those reads. [`list_tags`](rustdoc:grit_lib::porcelain::tag::list_tags) now trusts those lines when the packed record matches the ref's current value, and only checks the peeled object's type, through the commit-graph or a pack header. Loose refs that shadow a packed record, and files without a peel trait, still peel through the objects. Lookups are made in name order, so they follow a cursor through the file instead of a binary search per tag. `--json` output is byte-identical.
+- **Creating through the repository's ref store.** `create_tag` checked for an existing tag, and wrote the new one, through helpers that each opened a fresh ref store and so re-read and re-indexed `packed-refs`. The existence check, the write and the CLI's `HEAD` lookup now share the repository's store and its cached view. The packed-refs line index is built in one `memchr` pass.
+
+`grit-bench daily` rows (20 runs per side, release build), grit before → after in one sitting against system `git 2.43.0`, committed in **`daily-tag-many-refs-before.json`** and **`daily-tag-many-refs-after.json`**. The daily harness reports medians in steps of about 1 ms, so hyperfine means (60–150 runs) are given for the create rows:
+
+| Scenario | Git ms | Grit ms before → after | Grit ÷ Git before → after |
+| --- | ---: | ---: | ---: |
+| `tag/list@many-refs` | 3.29 | 32.76 → **7.60** | 9.95× → **2.30×** |
+| `tag/create@many-refs` (hyperfine) | 1.1 | 3.4 → **2.9** | — |
+| `branch/create@many-refs` (hyperfine) | — | 3.2 → 3.2 | — |
+
+Branch list, branch delete, `ls-remote` and `log` decorations on the same fixture are unchanged within noise. Heap peaks (valgrind massif) are unchanged: 773 KiB for tag create, 901 → 920 KiB for tag list. Peak RSS moves by a few hundred KiB between any two builds, because of binary layout and mapped `packed-refs` pages. The remaining gap to Git is mostly process start-up (`grit --version` takes 1.7 ms against Git's 0.8 ms), which is tracked under the binary-diet follow-up in **Methodology** below.
+
+```bash
+cargo build --release -p grit-cli -p grit-utils
+for id in tag/list@many-refs tag/create@many-refs branch/create@many-refs; do
+  ./target/release/grit-bench daily --only "$id" --min-runs 20 --format json --output "/tmp/$(echo "$id" | tr '/@' '__').json"
+done
+```
+
 ## Performance plan close-out (2026-10-21)
 
 After the memory and libification wave (fair single-process `grit log --limit`, mapped pack index / commit-graph / MIDX, packed-refs seek, repository path cache, LTO release profile, merge tree cache, pick/revert/merge pass reduction, status/diff scan memory, add without full index copies), the factory re-ran the **cooking dashboard** matrix on **`grit 0.5.15`** (`756aa953`) vs system **`git 2.43.0`**. Committed baselines: **`suite-after-LH.json`**, **`hot-paths-after.json`**, **`commit-after-LH.json`**, and **`dashboard/current.json`**. **`grit-bench compare`** against the pre-plan dashboard snapshot at **`grit 0.5.14`** shows **no overlapping 10k scenario regressed more than 5%** on Grit median wall time.
