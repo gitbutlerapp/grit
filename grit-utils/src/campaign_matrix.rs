@@ -1251,6 +1251,7 @@ mod tests {
             },
             merge_commit: "merge".into(),
             conflict_path_count: 10,
+            conflict_main_tip: "conflict-main".into(),
         }
     }
 

@@ -9,9 +9,9 @@ use serde::{Deserialize, Serialize};
 use crate::fixture::{remove_dir_robust, scratch_dir};
 use crate::hot_path_fixture::{
     assert_pick_merge_sibling_topology, commit_main_diverge, extend_history, list_tracked_files,
-    meta_path, populate_tree, rev_parse, run_git,
-    setup_pick_merge_fixture_in, setup_pick_series_fixture, setup_pick_series_fixture_in,
-    touch_paths_for_size, HotPathMeta, HotPathRepoSpec,
+    meta_path, populate_tree, rev_parse, run_git, setup_pick_merge_fixture_in,
+    setup_pick_series_fixture, setup_pick_series_fixture_in, touch_paths_for_size, HotPathMeta,
+    HotPathRepoSpec,
 };
 
 /// Topic branch for campaign conflict rows (distinct from `campaign-topic`).
@@ -26,6 +26,10 @@ pub struct ConflictsMeta {
     pub merge_commit: String,
     /// Number of paths edited on both sides for `merge-conflict-continue`.
     pub conflict_path_count: usize,
+    /// When set, `merge-conflict-continue` resets here instead of [`HotPathMeta::main_tip`]
+    /// (campaign fixtures keep a clean `main_tip` for merge-no-ff / pick-range).
+    #[serde(default)]
+    pub conflict_main_tip: String,
 }
 
 pub fn conflicts_meta_path(repo: &Path) -> PathBuf {
@@ -97,6 +101,7 @@ pub fn setup_conflicts_clean_fixture_in(
         base,
         merge_commit: String::new(),
         conflict_path_count: 0,
+        conflict_main_tip: String::new(),
     };
     persist_conflicts_meta(dir, &meta)?;
     Ok((dir.to_path_buf(), meta))
@@ -172,6 +177,7 @@ pub fn setup_conflicts_merge_fixture_in(
         base,
         merge_commit: String::new(),
         conflict_path_count: overlap,
+        conflict_main_tip: String::new(),
     };
     persist_conflicts_meta(dir, &meta)?;
     Ok((dir.to_path_buf(), meta))
@@ -225,6 +231,7 @@ pub fn setup_conflicts_pick_range_fixture(
         base,
         merge_commit: String::new(),
         conflict_path_count: 0,
+        conflict_main_tip: String::new(),
     };
     persist_conflicts_meta(&dir, &meta)?;
     Ok((dir, meta))
@@ -240,16 +247,22 @@ pub fn setup_conflicts_pick_range_fixture_in(
         base,
         merge_commit: String::new(),
         conflict_path_count: 0,
+        conflict_main_tip: String::new(),
     };
     persist_conflicts_meta(dir, &meta)?;
     Ok((dir.to_path_buf(), meta))
 }
 
-fn prepare_conflicts_to_main_tip(git: &Path, repo: &Path) -> Result<()> {
+fn prepare_conflicts_reset_main(git: &Path, repo: &Path, tip: &str) -> Result<()> {
     let meta = load_conflicts_meta(repo)?;
     run_git(git, repo, &["checkout", "-q", &meta.base.main_branch])?;
-    run_git(git, repo, &["reset", "-q", "--hard", &meta.base.main_tip])?;
+    run_git(git, repo, &["reset", "-q", "--hard", tip])?;
     Ok(())
+}
+
+fn prepare_conflicts_to_main_tip(git: &Path, repo: &Path) -> Result<()> {
+    let meta = load_conflicts_meta(repo)?;
+    prepare_conflicts_reset_main(git, repo, &meta.base.main_tip)
 }
 
 pub fn prepare_conflicts_merge_no_ff(git: &Path, repo: &Path) -> Result<()> {
@@ -257,7 +270,13 @@ pub fn prepare_conflicts_merge_no_ff(git: &Path, repo: &Path) -> Result<()> {
 }
 
 pub fn prepare_conflicts_merge_conflict_continue(git: &Path, repo: &Path) -> Result<()> {
-    prepare_conflicts_to_main_tip(git, repo)
+    let meta = load_conflicts_meta(repo)?;
+    let tip = if meta.conflict_main_tip.is_empty() {
+        meta.base.main_tip.as_str()
+    } else {
+        meta.conflict_main_tip.as_str()
+    };
+    prepare_conflicts_reset_main(git, repo, tip)
 }
 
 pub fn prepare_conflicts_pick_range(git: &Path, repo: &Path) -> Result<()> {

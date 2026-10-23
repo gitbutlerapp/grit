@@ -333,6 +333,12 @@ fn campaign_conflicts_meta_valid(git: &Path, repo: &Path, meta: &ConflictsMeta) 
     if meta.merge_commit.is_empty() || meta.conflict_path_count == 0 {
         return Ok(false);
     }
+    if meta.conflict_main_tip.is_empty() || rev_parse(git, repo, &meta.conflict_main_tip).is_err() {
+        return Ok(false);
+    }
+    if meta.conflict_main_tip == meta.base.main_tip {
+        return Ok(false);
+    }
     if meta.base.topic_branch != BENCH_CONFLICTS_TOPIC {
         return Ok(false);
     }
@@ -396,7 +402,6 @@ pub fn ensure_campaign_conflicts(git: &Path, repo: &Path) -> Result<ConflictsMet
     let file_count = files.len();
     let touch = touch_paths_for_size(file_count).min(file_count);
     let overlap = conflict_overlap_for_size(file_count).min(touch).max(1);
-    let targets: Vec<PathBuf> = files.iter().take(touch).cloned().collect();
 
     run_git_auth(
         git,
@@ -424,41 +429,29 @@ pub fn ensure_campaign_conflicts(git: &Path, repo: &Path) -> Result<ConflictsMet
 
     run_git_auth(git, repo, &["checkout", "-f", &main_branch])?;
     run_git_auth(git, repo, &["reset", "--hard", &base_commit])?;
-    let conflict_targets: Vec<PathBuf> = targets.iter().take(overlap).cloned().collect();
-    touch_files_for_bench(repo, &conflict_targets, "main-conflict")?;
-    run_git_auth(git, repo, &["add", "-A"])?;
-    run_git_auth(git, repo, &["commit", "-qm", "main conflict overlap"])?;
     let main_tip = commit_main_diverge(git, repo, &files)?;
 
-    let mut merge_cmd = Command::new(git);
-    merge_cmd
-        .args([
-            "merge",
-            "--no-ff",
-            "-q",
-            "--no-edit",
-            BENCH_CONFLICTS_TOPIC,
-        ])
-        .current_dir(repo)
-        .env("GIT_AUTHOR_NAME", "Bench")
-        .env("GIT_AUTHOR_EMAIL", "b@example.com")
-        .env("GIT_COMMITTER_NAME", "Bench")
-        .env("GIT_COMMITTER_EMAIL", "b@example.com");
-    git_env(&mut merge_cmd);
-    let merge_out = merge_cmd.output().context("git merge for merge_commit")?;
-    if !merge_out.status.success() {
-        run_git_auth(git, repo, &["checkout", "--theirs", "."])?;
-        run_git_auth(git, repo, &["add", "-A"])?;
-        run_git_auth(
-            git,
-            repo,
-            &["commit", "--no-edit", "-qm", "bench conflicts merge"],
-        )?;
-    }
+    run_git_auth(git, repo, &["reset", "--hard", &base_commit])?;
+    let series_overlap_paths: Vec<PathBuf> = (0..overlap)
+        .map(|i| files[i % files.len()].clone())
+        .collect();
+    touch_files_for_bench(repo, &series_overlap_paths, "main-conflict")?;
+    run_git_auth(git, repo, &["add", "-A"])?;
+    run_git_auth(git, repo, &["commit", "-qm", "main conflict overlap"])?;
+    let conflict_main_tip = commit_main_diverge(git, repo, &files)?;
+
+    run_git_auth(git, repo, &["checkout", "-f", &main_branch])?;
+    run_git_auth(git, repo, &["reset", "--hard", &main_tip])?;
+    run_git_auth(
+        git,
+        repo,
+        &["merge", "--no-ff", "-q", "--no-edit", BENCH_CONFLICTS_TOPIC],
+    )
+    .context("clean merge for revert-mainline merge_commit")?;
     let merge_commit = rev_parse(git, repo, "HEAD")?;
     anyhow::ensure!(
         merge_commit != main_tip,
-        "expected merge commit after --no-ff merge"
+        "expected merge commit after clean --no-ff merge"
     );
     run_git_auth(git, repo, &["reset", "--hard", &main_tip])?;
 
@@ -479,6 +472,7 @@ pub fn ensure_campaign_conflicts(git: &Path, repo: &Path) -> Result<ConflictsMet
         base,
         merge_commit,
         conflict_path_count: overlap,
+        conflict_main_tip,
     };
     persist_conflicts_meta_campaign(repo, &meta)?;
     restore_campaign_conflicts_worktree(git, repo, &meta)?;
@@ -504,6 +498,7 @@ mod tests {
     use super::*;
     use crate::binary::resolve_binary;
     use crate::real_repo_fixture::run_git;
+    use std::path::Path;
     use tempfile::TempDir;
 
     fn init_repo_with_files(git: &Path, dir: &Path, n: usize) -> Result<()> {
@@ -602,8 +597,88 @@ mod tests {
         assert!(!meta.merge_commit.is_empty());
         assert!(meta.conflict_path_count > 0);
         assert_eq!(meta.base.topic_branch, BENCH_CONFLICTS_TOPIC);
+        assert_ne!(meta.conflict_main_tip, meta.base.main_tip);
         let head = rev_parse(&git, &dir, "HEAD")?;
         assert_eq!(head, meta.base.main_tip);
+        Ok(())
+    }
+
+    fn git_in(repo: &Path, git: &Path, args: &[&str]) -> Result<()> {
+        let mut cmd = Command::new(git);
+        cmd.args(args).current_dir(repo);
+        git_env(&mut cmd);
+        let out = cmd
+            .output()
+            .with_context(|| format!("git {}", args.join(" ")))?;
+        anyhow::ensure!(
+            out.status.success(),
+            "git {} failed: {}",
+            args.join(" "),
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+        Ok(())
+    }
+
+    /// System git must succeed on clean rows and stop on the conflict merge (campaign matrix smoke).
+    #[test]
+    fn campaign_conflicts_git_matrix_rows_runnable() -> Result<()> {
+        use crate::conflicts_fixture::{
+            prepare_conflicts_merge_conflict_continue, prepare_conflicts_merge_no_ff,
+            prepare_conflicts_pick_range, prepare_conflicts_revert_mainline,
+            prepare_conflicts_revert_single,
+        };
+        use crate::conflicts_suite::campaign_conflicts_scenarios;
+
+        let git = resolve_binary("git", None)?;
+        let tmp = TempDir::new()?;
+        let dir = tmp.path().join("repo");
+        init_repo_with_files(&git, &dir, 120)?;
+        let meta = ensure_campaign_conflicts(&git, &dir)?;
+        let topic = meta.base.topic_branch.clone();
+        let scenarios =
+            campaign_conflicts_scenarios(Path::new("grit"), &git, &meta, "smoke", "campaign-smoke");
+        assert_eq!(scenarios.len(), 5);
+
+        prepare_conflicts_merge_no_ff(&git, &dir)?;
+        git_in(
+            &dir,
+            &git,
+            &["merge", "--no-ff", "-q", "--no-edit", topic.as_str()],
+        )?;
+
+        prepare_conflicts_pick_range(&git, &dir)?;
+        git_in(
+            &dir,
+            &git,
+            &[
+                "cherry-pick",
+                "--no-edit",
+                &format!("{}..{}", meta.base.base_commit, meta.base.pick_commit),
+            ],
+        )?;
+
+        prepare_conflicts_revert_single(&git, &dir)?;
+        git_in(&dir, &git, &["revert", "--no-edit", "HEAD"])?;
+
+        prepare_conflicts_revert_mainline(&git, &dir)?;
+        git_in(
+            &dir,
+            &git,
+            &["revert", "--no-edit", "-m", "1", meta.merge_commit.as_str()],
+        )?;
+
+        prepare_conflicts_merge_conflict_continue(&git, &dir)?;
+        let mut merge_cmd = Command::new(&git);
+        merge_cmd
+            .args(["merge", "--no-ff", topic.as_str()])
+            .current_dir(&dir);
+        git_env(&mut merge_cmd);
+        let merge_out = merge_cmd.output()?;
+        anyhow::ensure!(
+            !merge_out.status.success(),
+            "expected merge to stop on conflicts at conflict_main_tip"
+        );
+
         Ok(())
     }
 

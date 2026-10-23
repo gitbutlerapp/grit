@@ -136,7 +136,6 @@ fn merge_conflict_continue_script_exits_zero() {
     let touch = grit_utils::conflicts_fixture::conflicts_touch_paths(spec.file_count);
     let overlap = grit_utils::conflicts_fixture::conflict_overlap_for_size(spec.file_count);
     let dir = tempfile::tempdir().expect("tempdir");
-    std::env::set_var("GRIT_BENCH_CAMPAIGN_CWD", dir.path());
     grit_utils::conflicts_fixture::setup_conflicts_merge_fixture_in(
         &git,
         dir.path(),
@@ -175,5 +174,4 @@ fn merge_conflict_continue_script_exits_zero() {
         .status()
         .expect("continue");
     assert!(cont.success(), "merge --continue failed");
-    std::env::remove_var("GRIT_BENCH_CAMPAIGN_CWD");
 }
