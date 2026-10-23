@@ -14,9 +14,8 @@ use crate::apply::{
     IndexApplyOptions,
 };
 use crate::diff::diff_index_to_tree;
-use crate::diff::hunk_id::{hunk_ids_with_duplicate_peers, DiffSide, HunkId};
+use crate::diff::hunk_id::DiffSide;
 use crate::diff::structured::{StructuredHunk, StructuredLineKind};
-use crate::diff::{hunk_diff_bundle, DiffOptions};
 use crate::index::write_tree::write_tree_from_index;
 use crate::index::{Index, IndexEntry, MODE_REGULAR};
 use crate::merge_file::MergeFavor;
@@ -24,7 +23,9 @@ use crate::merge_trees::{
     merge_trees_three_way, TreeMergeConflictPresentation, WhitespaceMergeOptions,
 };
 use crate::objects::{parse_commit, parse_tree, CommitData, ObjectId, ObjectKind};
-use crate::porcelain::hunk_select::{resolve_selection, stage_hunks, HunkSelection};
+use crate::porcelain::hunk_select::{
+    remaining_unstaged_structured_hunks_for_path, resolve_selection, stage_hunks, HunkSelection,
+};
 use crate::porcelain::index_from_tree::index_from_tree;
 use crate::repo::Repository;
 use crate::state::resolve_head;
@@ -188,11 +189,14 @@ pub fn apply_fixup_hunk_selection(
     }
     match apply_fixup_rewrite(repo, plan, apply_opts, &paths) {
         Ok(applied) => {
-            restore_after_hunk_fixup_apply(repo, &snapshot)?;
+            if let Err(err) = restore_after_hunk_fixup_apply(repo, &snapshot) {
+                restore_full_hunk_fixup_snapshot(repo, &snapshot)?;
+                return Err(err);
+            }
             Ok(applied)
         }
         Err(err) => {
-            restore_index_bytes(repo, &snapshot.index_bytes)?;
+            restore_full_hunk_fixup_snapshot(repo, &snapshot)?;
             Err(err)
         }
     }
@@ -202,6 +206,7 @@ pub fn apply_fixup_hunk_selection(
 struct HunkFixupPathSnapshot {
     path: String,
     pre_index_blob: Vec<u8>,
+    pre_worktree_bytes: Option<Vec<u8>>,
     had_pre_staged: bool,
     /// Unstaged hunks on this path that are not part of the fixup selection.
     remaining_unstaged_hunks: Vec<StructuredHunk>,
@@ -231,10 +236,16 @@ fn capture_hunk_fixup_apply_snapshot(
         let pre_index_blob = index_blob_at_path(repo, &index, path);
         let had_pre_staged = pre_index_blob != pre_head_blob;
         let remaining_unstaged_hunks =
-            remaining_unstaged_hunks_for_path(repo, path, selection, pathspecs)?;
+            remaining_unstaged_structured_hunks_for_path(repo, path, selection, pathspecs)
+                .map_err(library_err)?;
+        let pre_worktree_bytes = repo.work_tree().as_ref().and_then(|wt| {
+            let abs = wt.join(path);
+            abs.is_file().then(|| fs::read(&abs).ok()).flatten()
+        });
         path_states.push(HunkFixupPathSnapshot {
             path: path.clone(),
             pre_index_blob,
+            pre_worktree_bytes,
             had_pre_staged,
             remaining_unstaged_hunks,
         });
@@ -252,34 +263,36 @@ fn restore_index_bytes(repo: &Repository, bytes: &[u8]) -> Result<(), HistoryErr
     })
 }
 
-fn remaining_unstaged_hunks_for_path(
+fn restore_full_hunk_fixup_snapshot(
     repo: &Repository,
-    path: &str,
-    selection: &HunkSelection,
-    pathspecs: &[String],
-) -> Result<Vec<StructuredHunk>, HistoryError> {
-    let opts = DiffOptions::from_config(repo.config().map_err(library_err)?.as_ref());
-    let bundle = hunk_diff_bundle(repo, pathspecs, opts).map_err(library_err)?;
-    let Some(file) = bundle.unstaged.iter().find(|f| f.path == path) else {
-        return Ok(Vec::new());
+    snapshot: &HunkFixupApplySnapshot,
+) -> Result<(), HistoryError> {
+    restore_index_bytes(repo, &snapshot.index_bytes)?;
+    let Some(worktree) = repo.work_tree() else {
+        return Ok(());
     };
-    if file.binary {
-        return Ok(Vec::new());
+    for path_state in &snapshot.paths {
+        let abs = worktree.join(&path_state.path);
+        match &path_state.pre_worktree_bytes {
+            Some(bytes) => {
+                if let Some(parent) = abs.parent() {
+                    fs::create_dir_all(parent).map_err(|e| HistoryError::WorktreeApply {
+                        message: e.to_string(),
+                    })?;
+                }
+                fs::write(&abs, bytes).map_err(|e| HistoryError::WorktreeApply {
+                    message: e.to_string(),
+                })?;
+            }
+            None if abs.exists() => {
+                fs::remove_file(&abs).map_err(|e| HistoryError::WorktreeApply {
+                    message: e.to_string(),
+                })?;
+            }
+            None => {}
+        }
     }
-    let peer = bundle
-        .peer_hunks
-        .get(path)
-        .map(|h| h.as_slice())
-        .unwrap_or(&[]);
-    let ids = hunk_ids_with_duplicate_peers(DiffSide::Unstaged, path, &file.hunks, peer);
-    let selected: std::collections::HashSet<&HunkId> = selection.ids.iter().collect();
-    Ok(file
-        .hunks
-        .iter()
-        .zip(ids.iter())
-        .filter(|(_, id)| !selected.contains(id))
-        .map(|(hunk, _)| hunk.clone())
-        .collect())
+    Ok(())
 }
 
 fn restore_after_hunk_fixup_apply(
@@ -577,4 +590,140 @@ pub fn staged_fixup_paths(repo: &Repository) -> Result<Vec<String>, HistoryError
     paths.sort();
     paths.dedup();
     Ok(paths)
+}
+
+#[cfg(test)]
+mod hunk_selection_restore_tests {
+    use super::*;
+    use crate::config::environment::RepositoryOptions;
+    use crate::diff::hunk_id::hunk_ids_with_duplicate_peers;
+    use crate::history::RefScope;
+    use crate::objects::ObjectId;
+    use crate::porcelain::hunk_select::{unstaged_file_diffs, LineRange};
+    use crate::repo::{init_repository, set_test_inject_index_write_fail_remaining};
+    use crate::RefStorageFormat;
+    use std::process::Command;
+
+    fn git(dir: &std::path::Path, args: &[&str]) {
+        let out = Command::new("git")
+            .current_dir(dir)
+            .args(args)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .output()
+            .expect("git");
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    fn two_hunk_edited_file() -> (String, String) {
+        let mut base = String::new();
+        for i in 0..24 {
+            base.push_str(&format!("line{i}\n"));
+        }
+        let mut edited = base.clone();
+        edited = edited.replacen("line5\n", "LINE5\n", 1);
+        edited = edited.replacen("line18\n", "LINE18\n", 1);
+        (base, edited)
+    }
+
+    fn committer() -> String {
+        "Fixup <f@grit.test> 1 +0000".into()
+    }
+
+    #[test]
+    fn restore_after_apply_failure_keeps_pre_call_index_and_worktree() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let wt = dir.path();
+        init_repository(wt, false, "main", None, RefStorageFormat::Files).expect("init");
+        let (base, edited) = two_hunk_edited_file();
+        fs::write(wt.join("f.txt"), &base).expect("write");
+        git(wt, &["add", "f.txt"]);
+        git(
+            wt,
+            &["commit", "-m", "init", "--author", "Fixup <f@grit.test>"],
+        );
+        git(wt, &["commit", "--allow-empty", "-m", "second"]);
+        let target = {
+            let out = Command::new("git")
+                .current_dir(wt)
+                .args(["rev-parse", "HEAD~1"])
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_CONFIG_SYSTEM", "/dev/null")
+                .output()
+                .expect("rev-parse");
+            ObjectId::from_hex(String::from_utf8_lossy(&out.stdout).trim()).expect("oid")
+        };
+        fs::write(wt.join("f.txt"), &edited).expect("edit");
+        let grit = Repository::discover(Some(wt), &RepositoryOptions::empty()).expect("discover");
+        let files = unstaged_file_diffs(&grit, &[]).expect("diff");
+        let ids = hunk_ids_with_duplicate_peers(
+            DiffSide::Unstaged,
+            &files[0].0.path,
+            &files[0].0.hunks,
+            &files[0].1,
+        );
+        stage_hunks(
+            &grit,
+            DiffSide::Unstaged,
+            &HunkSelection {
+                ids: vec![ids[0].clone()],
+                ranges: Vec::new(),
+            },
+            &[],
+            false,
+        )
+        .expect("stage line-5");
+        let selection = HunkSelection {
+            ids: Vec::new(),
+            ranges: vec![LineRange {
+                path: "f.txt".into(),
+                start: 19,
+                end: 19,
+            }],
+        };
+        let pre_index = fs::read(wt.join(".git/index")).expect("index");
+        let pre_worktree = fs::read(wt.join("f.txt")).expect("worktree");
+        let head_before = head_commit_oid(&grit).expect("head");
+        let opts = FixupOptions {
+            message: None,
+            empty: EmptyPolicy::Drop,
+            rewrite: RewriteOptions {
+                scope: RefScope::Head,
+                empty: EmptyPolicy::Drop,
+                committer: committer(),
+                preserve_committer: false,
+                sign: true,
+            },
+            selection: Some(selection.clone()),
+            pathspecs: Vec::new(),
+        };
+        let plan = fixup(&grit, target, &opts).expect("plan");
+        let paths = fixup_selection_paths(&grit, &selection, &[]).expect("paths");
+        let snapshot =
+            capture_hunk_fixup_apply_snapshot(&grit, &paths, &selection, &[]).expect("snap");
+        stage_hunks(&grit, DiffSide::Unstaged, &selection, &[], false).expect("stage line-18");
+        let apply_opts = ApplyOptions {
+            identity: "Fixup <f@grit.test>".into(),
+            reflog_message: "history fixup".into(),
+            record_operation: None,
+        };
+        apply_fixup_rewrite(&grit, &plan, &apply_opts, &paths).expect("apply rewrite");
+        set_test_inject_index_write_fail_remaining(1);
+        let err = restore_after_hunk_fixup_apply(&grit, &snapshot).expect_err("restore fails");
+        restore_full_hunk_fixup_snapshot(&grit, &snapshot).expect("rollback snapshot");
+        crate::repo::set_test_inject_index_write_fail(false);
+        assert!(matches!(err, HistoryError::WorktreeApply { .. }));
+        assert_ne!(
+            head_commit_oid(&grit).expect("head after"),
+            head_before,
+            "HEAD should move during apply before restore failed"
+        );
+        assert_eq!(fs::read(wt.join(".git/index")).expect("index"), pre_index);
+        assert_eq!(fs::read(wt.join("f.txt")).expect("worktree"), pre_worktree);
+        git(wt, &["fsck", "--strict"]);
+    }
 }

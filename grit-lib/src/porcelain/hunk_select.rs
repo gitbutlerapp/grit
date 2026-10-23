@@ -718,6 +718,116 @@ fn filter_hunk_by_intervals(
     Some(filtered)
 }
 
+fn filter_hunk_complement_by_intervals(
+    hunk: &StructuredHunk,
+    intervals: &[(usize, usize)],
+) -> Option<StructuredHunk> {
+    let mut new_cur = hunk.new_start;
+    let mut old_cur = hunk.old_start;
+    let mut out_lines = Vec::new();
+    let mut any_change = false;
+
+    for line in &hunk.lines {
+        match line.kind {
+            StructuredLineKind::Context => {
+                let new_n = line.new.unwrap_or(new_cur);
+                let old_n = line.old.unwrap_or(old_cur);
+                out_lines.push(line.clone());
+                new_cur = new_n.saturating_add(1);
+                old_cur = old_n.saturating_add(1);
+            }
+            StructuredLineKind::Del => {
+                let removal = new_cur;
+                let old_n = line.old.unwrap_or(old_cur);
+                if deletion_selected(removal, intervals) {
+                    let text: String = line.segments.iter().map(|s| s.text.as_str()).collect();
+                    out_lines.push(StructuredLine {
+                        kind: StructuredLineKind::Context,
+                        old: Some(old_n),
+                        new: Some(removal),
+                        segments: vec![StructuredSegment {
+                            text,
+                            emphasis: false,
+                        }],
+                        no_newline_at_eof: line.no_newline_at_eof,
+                    });
+                } else {
+                    out_lines.push(line.clone());
+                    any_change = true;
+                }
+                old_cur = old_n.saturating_add(1);
+            }
+            StructuredLineKind::Add => {
+                let new_n = line.new.unwrap_or(new_cur);
+                if !line_in_intervals(new_n, intervals) {
+                    out_lines.push(line.clone());
+                    any_change = true;
+                }
+                new_cur = new_n.saturating_add(1);
+            }
+        }
+    }
+
+    if !any_change {
+        return None;
+    }
+
+    let mut filtered = StructuredHunk {
+        old_start: hunk.old_start,
+        new_start: hunk.new_start,
+        old_lines: hunk.old_lines,
+        new_lines: hunk.new_lines,
+        context: hunk.context.clone(),
+        lines: out_lines,
+    };
+    recount_structured_hunk(&mut filtered);
+    Some(filtered)
+}
+
+/// Unstaged hunks left on `path` after `selection` (full hunks for id picks, line complement for ranges).
+pub(crate) fn remaining_unstaged_structured_hunks_for_path(
+    repo: &Repository,
+    path: &str,
+    selection: &HunkSelection,
+    pathspecs: &[String],
+) -> Result<Vec<StructuredHunk>, Error> {
+    let opts = DiffOptions::from_config(repo.config()?.as_ref());
+    let bundle = hunk_diff_bundle(repo, pathspecs, opts)?;
+    let Some(file) = bundle.unstaged.iter().find(|f| f.path == path) else {
+        return Ok(Vec::new());
+    };
+    if file.binary {
+        return Ok(Vec::new());
+    }
+    let peer = bundle
+        .peer_hunks
+        .get(path)
+        .map(|h| h.as_slice())
+        .unwrap_or(&[]);
+    let ids = hunk_ids_with_duplicate_peers(DiffSide::Unstaged, path, &file.hunks, peer);
+    let selected_ids: HashSet<&HunkId> = selection.ids.iter().collect();
+    let raw_intervals: Vec<(usize, usize)> = selection
+        .ranges
+        .iter()
+        .filter(|r| r.path == path)
+        .map(|r| (r.start, r.end))
+        .collect();
+    let intervals = merge_intervals(&raw_intervals);
+
+    let mut remaining = Vec::new();
+    for (hunk, id) in file.hunks.iter().zip(ids.iter()) {
+        if selected_ids.contains(id) {
+            continue;
+        }
+        if intervals.is_empty() {
+            remaining.push(hunk.clone());
+        } else if let Some(partial) = filter_hunk_complement_by_intervals(hunk, &intervals) {
+            remaining.push(partial);
+        }
+    }
+    Ok(remaining)
+}
+
 fn recount_structured_hunk(hunk: &mut StructuredHunk) {
     let mut old_start = None;
     let mut new_start = None;
