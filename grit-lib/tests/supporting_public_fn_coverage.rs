@@ -46,7 +46,7 @@ use grit_lib::diff::userdiff::{
     builtin_word_regex, matcher_for_path, matcher_for_path_parsed,
     word_regex_pattern_for_path_parsed,
 };
-use grit_lib::diff::ws::{whitespace_error_string, ws_blank_line};
+use grit_lib::diff::ws::{is_space_git, ws_blank_line};
 use grit_lib::objects::{HashAlgo, ObjectId};
 use grit_lib::parallel::{index_parallelism_from_config, ParallelOp, ThreadPolicy};
 use grit_lib::porcelain::checkout::{
@@ -300,7 +300,7 @@ fn protocol_transport_terminal_progress_ws_userdiff() {
     let _ = stderr_supports_color();
     let _ = ProgressPhase::ReceivingObjects.default_unit();
 
-    let _ = whitespace_error_string(1);
+    assert!(is_space_git(b'\t'));
     assert!(ws_blank_line("   \n"));
     let _ = builtin_word_regex("pascal");
     let _ = matcher_for_path(&config, &[], "foo.c");
