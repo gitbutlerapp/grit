@@ -661,9 +661,10 @@ impl PushPlanContext {
 
 /// Load the [`PushPlanContext`] for the remote a push would select.
 ///
-/// The remote is chosen with [`configured_remote_for_push`]. The context is best-effort: a
-/// remote without configured URL, or one whose refs cannot be listed, yields an empty context,
-/// and the push itself reports any connection failure.
+/// The remote is chosen with [`configured_remote_for_push`] and opened with
+/// [`open_push_destination`], so literal URLs and paths are listed like configured remotes.
+/// The context is best-effort: a remote without a URL, or one whose refs cannot be listed,
+/// yields an empty context, and the push itself reports any connection failure.
 ///
 /// # Errors
 ///
@@ -675,7 +676,7 @@ pub fn load_push_plan_context(
     http_factory: Option<&dyn HttpClientFactory>,
 ) -> PlanResult<PushPlanContext> {
     let remote = configured_remote_for_push(repo, config, remote_override)?;
-    let Ok(handle) = Remote::from_config(config, &remote) else {
+    let Ok(handle) = open_push_destination(config, &remote) else {
         return Ok(PushPlanContext::default());
     };
     let advertised = handle

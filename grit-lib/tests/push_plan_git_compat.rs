@@ -140,6 +140,34 @@ fn short_dst_matches_remote_tag() {
     compare_with_git(&fx.local, &["origin", "main:x"], &specs, &fx.bare);
 }
 
+#[test]
+fn literal_path_remote_context_guesses_short_dst_like_git() {
+    let fx = setup_feature_and_main();
+    git(&fx.local, &["checkout", "-q", "main"]);
+    git(&fx.local, &["push", "-q", "origin", "main"]);
+    git(&fx.bare, &["tag", "x"]);
+    let repo = open_repo(&fx.local);
+    let config = load_config(&repo);
+    let bare = fx.bare.to_str().expect("utf-8 path").to_owned();
+    let ctx = load_push_plan_context(&repo, &config, Some(&bare), None).expect("context");
+    let mut advertised = ctx.remote_ref_names.clone();
+    advertised.remove("HEAD");
+    assert_eq!(advertised, push_plan_context(&fx.bare).remote_ref_names);
+    let specs = plan_specs(
+        &repo,
+        &config,
+        PushRequest {
+            refspecs: vec!["main:x".into()],
+            remote: Some(bare.clone()),
+            ..Default::default()
+        },
+        &ctx,
+    );
+    assert_eq!(specs.len(), 1);
+    assert_eq!(specs[0].dst, "refs/tags/x");
+    compare_with_git(&fx.local, &[bare.as_str(), "main:x"], &specs, &fx.bare);
+}
+
 fn setup_main_and_private_with_negative_push_config(negative_first: bool) -> Fixture {
     let tmp = tempfile::tempdir().expect("tempdir");
     let local = tmp.path().join("local");
