@@ -154,4 +154,17 @@ cp "$RUN2" "${BASELINE_DIR}/second.json"
 "$BENCH" daily validate "${BASELINE_DIR}/latest.json"
 "$BENCH" daily validate "${BASELINE_DIR}/second.json"
 
+echo "Compare committed baselines (±${TOLERANCE} tolerance)"
+set +e
+"$BENCH" daily compare "${BASELINE_DIR}/latest.json" "${BASELINE_DIR}/second.json" \
+  --tolerance "${TOLERANCE}" --markdown \
+  2>&1 | tee "${BASELINE_DIR}/consecutive-compare.txt"
+compare_ec=${PIPESTATUS[0]}
+set -e
+echo "compare_exit=${compare_ec}" >> "${BASELINE_DIR}/consecutive-compare.txt"
+if [[ "$compare_ec" -ne 0 ]]; then
+  echo "Committed baseline pair failed daily compare (exit ${compare_ec})" >&2
+  exit 1
+fi
+
 echo "Committed daily baselines updated under ${BASELINE_DIR}/"

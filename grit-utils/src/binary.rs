@@ -11,7 +11,11 @@ use anyhow::{bail, Context, Result};
 /// harness changes working directory for hyperfine runs.
 pub fn resolve_binary(name: &str, user_path: Option<&Path>) -> Result<PathBuf> {
     if let Some(p) = user_path {
-        return canonicalize_executable(p);
+        let resolved = canonicalize_executable(p)?;
+        if name == "grit-http-server" {
+            reject_debug_http_server(&resolved)?;
+        }
+        return Ok(resolved);
     }
     if name == "grit" {
         if let Some(p) = workspace_executable("grit") {
@@ -28,6 +32,17 @@ pub fn resolve_binary(name: &str, user_path: Option<&Path>) -> Result<PathBuf> {
         );
     }
     find_on_path(name).with_context(|| format!("could not find `{name}` on PATH"))
+}
+
+fn reject_debug_http_server(path: &Path) -> Result<()> {
+    let text = path.to_string_lossy();
+    if text.contains("/target/debug/") || text.contains("\\target\\debug\\") {
+        bail!(
+            "refusing debug grit-http-server at {}; build and use target/release/grit-http-server for HTTP benches",
+            path.display()
+        );
+    }
+    Ok(())
 }
 
 /// Prefer `target/dist/<name>` (shipped profile), then `target/release/<name>`.

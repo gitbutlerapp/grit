@@ -285,6 +285,27 @@ mod tests {
     }
 
     #[test]
+    fn skips_time_ratio_when_either_git_median_not_above_20ms() {
+        let a = sample_report(vec![sample_row(
+            "status/clean@synth-10k",
+            25.0,
+            25.0,
+            1_000_000,
+            900_000,
+        )]);
+        let b = sample_report(vec![sample_row(
+            "status/clean@synth-10k",
+            19.0,
+            19.0,
+            1_000_000,
+            900_000,
+        )]);
+        let outcome = compare_daily_reports(&a, &b, 0.10);
+        assert!(outcome.is_success());
+        assert_eq!(outcome.skipped_sub_20ms_time, 1);
+    }
+
+    #[test]
     fn ignores_sub_20ms_time_drift() {
         let mut row_b = sample_row("status/clean@small", 10.0, 10.0, 500_000, 500_000);
         row_b.ratio = 2.0;

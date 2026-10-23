@@ -237,8 +237,18 @@ pub fn daily_low_memory_fixtures() -> bool {
         .is_ok_and(|v| !v.is_empty() && v != "0" && v != "false")
 }
 
-fn smoke_for_shape(_shape: RepoShape, smoke: bool) -> bool {
-    smoke
+fn low_memory_fixture_shape(shape: RepoShape) -> bool {
+    matches!(
+        shape,
+        RepoShape::BigBlobs | RepoShape::DeepTree | RepoShape::ManyRefs | RepoShape::ManyRefsLoose
+    )
+}
+
+fn smoke_for_shape(shape: RepoShape, smoke: bool) -> bool {
+    if smoke {
+        return true;
+    }
+    daily_low_memory_fixtures() && low_memory_fixture_shape(shape)
 }
 
 /// Describe fixture policy for daily report headers.
@@ -246,7 +256,7 @@ fn smoke_for_shape(_shape: RepoShape, smoke: bool) -> bool {
 pub fn daily_fixture_policy_note() -> Option<String> {
     if daily_low_memory_fixtures() {
         Some(
-            "GRIT_BENCH_DAILY_LOW_MEMORY is set but ignored for fixture tiers: scenarios keep full @repo ids (use --smoke or separate ids for smoke-sized shapes)".into(),
+            "GRIT_BENCH_DAILY_LOW_MEMORY: smoke-sized big-blobs, deep-tree, and many-refs fixtures only; all other @repo ids use full cache tiers".into(),
         )
     } else {
         Some("full-size fixture cache tiers for every @repo id in the daily matrix".into())
