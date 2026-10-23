@@ -9,9 +9,10 @@ use std::io::Write;
 use std::path::PathBuf;
 
 use anyhow::{bail, Context, Result};
+use grit_lib::config::environment::Environment;
 use grit_lib::config::{
-    canonical_key, set_config_value, unset_config_value, ConfigFile, ConfigLocation, ConfigScope,
-    ConfigSet,
+    canonical_key, precompose_config::locate_git_dir_from_environment, set_config_value,
+    unset_config_value, ConfigFile, ConfigLocation, ConfigScope, ConfigSet,
 };
 use grit_lib::error::ConfigError;
 use schemars::JsonSchema;
@@ -124,6 +125,7 @@ pub fn exit_code(outcome: &ConfigOutcome) -> i32 {
 /// Run `grit config`.
 #[allow(clippy::too_many_arguments)]
 pub fn run(
+    process_env: &Environment,
     global: bool,
     local: bool,
     file: Option<PathBuf>,
@@ -137,9 +139,8 @@ pub fn run(
         if key.is_some() || value.is_some() {
             bail!("--list does not take a key or value");
         }
-        let env = context::environment();
         let read_location = resolve_location(global, local, file, false)?;
-        return list_values(read_location, &env);
+        return list_values(read_location, process_env);
     }
 
     let Some(key) = key else {
@@ -147,30 +148,28 @@ pub fn run(
     };
 
     if default_repo_hot_path(global, local, file.as_ref(), mode) {
-        let env = context::environment();
         if unset {
             return hot_unset_in_repo(&key);
         }
         if let Some(value) = value {
             return hot_set_in_repo(&key, &value);
         }
-        return hot_get_in_repo(&env, &key);
+        return hot_get_in_repo(process_env, &key);
     }
 
     let write_location = resolve_location(global, local, file.clone(), true)?;
     let read_location = resolve_location(global, local, file, false)?;
-    let env = context::environment();
 
     if unset {
         if value.is_some() {
             bail!("--unset does not take a value");
         }
-        return unset_value(write_location, &env, &key);
+        return unset_value(write_location, process_env, &key);
     }
 
     match value {
-        Some(value) => set_value(write_location, &env, &key, &value),
-        None => get_value(read_location, &env, &key, mode),
+        Some(value) => set_value(write_location, process_env, &key, &value),
+        None => get_value(read_location, process_env, &key, mode),
     }
 }
 
@@ -184,10 +183,7 @@ fn default_repo_hot_path(
     !global && !local && file.is_none() && matches!(mode, OutputMode::Human)
 }
 
-fn hot_get_in_repo(
-    env: &grit_lib::config::environment::Environment,
-    key: &str,
-) -> Result<ConfigOutcome> {
+fn hot_get_in_repo(env: &Environment, key: &str) -> Result<ConfigOutcome> {
     let config = read_merged_config(env)?;
     match config.get(key) {
         Some(value) => Ok(ConfigOutcome::Get {
@@ -211,8 +207,7 @@ fn hot_get_in_repo(
 }
 
 fn hot_set_in_repo(key: &str, value: &str) -> Result<ConfigOutcome> {
-    let repo = context::discover()?;
-    let path = repo.git_dir().join("config");
+    let path = local_config_path_for_hot_write()?;
     let content = fs::read_to_string(&path).unwrap_or_default();
     let mut cfg = ConfigFile::parse(&path, &content, ConfigScope::Local)
         .with_context(|| format!("could not parse {}", path.display()))?;
@@ -227,8 +222,7 @@ fn hot_set_in_repo(key: &str, value: &str) -> Result<ConfigOutcome> {
 }
 
 fn hot_unset_in_repo(key: &str) -> Result<ConfigOutcome> {
-    let repo = context::discover()?;
-    let path = repo.git_dir().join("config");
+    let path = local_config_path_for_hot_write()?;
     let Ok(content) = fs::read_to_string(&path) else {
         bail!("key '{key}' is not set");
     };
@@ -247,30 +241,32 @@ fn hot_unset_in_repo(key: &str) -> Result<ConfigOutcome> {
     })
 }
 
-fn read_merged_config(env: &grit_lib::config::environment::Environment) -> Result<ConfigSet> {
-    if let Ok(repo) = context::discover() {
-        ConfigSet::load(env, Some(repo.git_dir()), true).context("could not load config")
+fn read_merged_config(env: &Environment) -> Result<ConfigSet> {
+    if let Some(git_dir) = locate_git_dir_from_environment(env) {
+        ConfigSet::load(env, Some(&git_dir), true).context("could not load config")
     } else {
         ConfigSet::load(env, None, true).context("could not load config")
     }
+}
+
+fn local_config_path_for_hot_write() -> Result<PathBuf> {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    let git_dir = grit_lib::config::precompose_config::locate_git_dir_from_cwd(cwd)
+        .context("not in a repository")?;
+    Ok(git_dir.join("config"))
 }
 
 /// Set `key` to `value` in the global config (used by `grit auth` to wire up the
 /// Windows credential helper).
 #[cfg(windows)]
 pub fn set_global(key: &str, value: &str) -> Result<()> {
-    set_value(
-        Some(ConfigLocation::Global),
-        &context::environment(),
-        key,
-        value,
-    )
-    .map(|_| ())
+    let env = context::environment();
+    set_value(Some(ConfigLocation::Global), &env, key, value).map(|_| ())
 }
 
 fn get_value(
     read_location: Option<ConfigLocation>,
-    env: &grit_lib::config::environment::Environment,
+    env: &Environment,
     key: &str,
     mode: OutputMode,
 ) -> Result<ConfigOutcome> {
@@ -320,10 +316,7 @@ fn get_value(
     })
 }
 
-fn list_values(
-    read_location: Option<ConfigLocation>,
-    env: &grit_lib::config::environment::Environment,
-) -> Result<ConfigOutcome> {
+fn list_values(read_location: Option<ConfigLocation>, env: &Environment) -> Result<ConfigOutcome> {
     let config = load_for_read(read_location, env)?;
     let entries = config
         .entries()
@@ -341,7 +334,7 @@ fn list_values(
 
 fn set_value(
     write_location: Option<ConfigLocation>,
-    env: &grit_lib::config::environment::Environment,
+    env: &Environment,
     key: &str,
     value: &str,
 ) -> Result<ConfigOutcome> {
@@ -359,7 +352,7 @@ fn set_value(
 
 fn unset_value(
     write_location: Option<ConfigLocation>,
-    env: &grit_lib::config::environment::Environment,
+    env: &Environment,
     key: &str,
 ) -> Result<ConfigOutcome> {
     let Some(location) = write_location else {
@@ -378,10 +371,7 @@ fn unset_value(
 }
 
 /// `None` means load the full merged cascade (system + global + local + command).
-fn load_for_read(
-    read_location: Option<ConfigLocation>,
-    env: &grit_lib::config::environment::Environment,
-) -> Result<ConfigSet> {
+fn load_for_read(read_location: Option<ConfigLocation>, env: &Environment) -> Result<ConfigSet> {
     if let Some(location) = read_location {
         let git_dir = optional_git_dir_for_read(&location)?;
         return location

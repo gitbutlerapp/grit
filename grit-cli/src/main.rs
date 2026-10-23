@@ -1771,7 +1771,7 @@ fn main() {
     let render_ctx = RenderContext {
         now: context::wall_clock_now(&env),
     };
-    if let Err(err) = dispatch(cli, &opts, &render_ctx) {
+    if let Err(err) = dispatch(cli, &opts, &render_ctx, &env) {
         let err = json_error::ensure_structured(err);
         output::emit_error(&err, &opts);
         let code = if err
@@ -1898,7 +1898,12 @@ fn emit_rebase_outcome(
     }
 }
 
-fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
+fn dispatch(
+    cli: Cli,
+    opts: &OutputOptions,
+    ctx: &RenderContext,
+    process_env: &grit_lib::config::environment::Environment,
+) -> Result<()> {
     match cli.command.unwrap_or(Command::Status {
         status: commands::status::StatusCliArgs::default(),
     }) {
@@ -3148,8 +3153,17 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             key,
             value,
         } => {
-            let outcome =
-                commands::config::run(global, local, file, list, unset, key, value, opts.mode)?;
+            let outcome = commands::config::run(
+                process_env,
+                global,
+                local,
+                file,
+                list,
+                unset,
+                key,
+                value,
+                opts.mode,
+            )?;
             let code = commands::config::exit_code(&outcome);
             emit(&outcome, opts, ctx)?;
             if code != 0 {
