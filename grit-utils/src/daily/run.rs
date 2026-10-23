@@ -75,6 +75,12 @@ fn policy_for_scenario(id: &str, smoke: bool) -> RunPolicy {
             policy.min_runs_per_tool = 8;
             policy.min_total_timed_duration = std::time::Duration::from_secs(15);
         }
+        "fetch/incremental@git-git" => {
+            policy.warmups_per_tool = 4;
+            policy.min_runs_per_tool = 12;
+            policy.max_runs_per_tool = 32;
+            policy.min_total_timed_duration = std::time::Duration::from_secs(25);
+        }
         id if id.starts_with("fetch/")
             || id.starts_with("push/")
             || id.starts_with("pull/")
