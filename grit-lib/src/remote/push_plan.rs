@@ -3,6 +3,10 @@
 //! [`resolve_push`] turns a [`PushRequest`] (CLI flags and positional refspecs)
 //! into a [`ResolvedPush`] of concrete [`PushRefSpec`] entries, matching Git's
 //! push refspec and remote-selection rules.
+//!
+//! A typical push classifies its positionals with [`resolve_push_invocation`], loads the remote's
+//! advertisement with [`load_push_plan_context`], plans with [`resolve_push`], and sends the
+//! result through the [`Remote`] returned by [`open_push_destination`].
 
 use std::collections::HashSet;
 use std::path::Path;
@@ -16,6 +20,7 @@ use crate::objects::{ObjectId, ObjectKind};
 use crate::push_report::PushRefResult;
 use crate::refs;
 use crate::refspec::{parse_push_refspec, RefspecItem};
+use crate::remote::{HttpClientFactory, Remote, RemoteError, RemoteRef};
 use crate::repo::Repository;
 use crate::rev_parse::{resolve_push_full_ref_for_branch, resolve_revision_for_verify};
 use crate::state::{resolve_head, HeadState};
@@ -97,6 +102,13 @@ pub struct PushPlanContext {
     /// Tips of `refs/heads/*` on the remote (reserved for push planning; follow-tags
     /// uses commit-graph ancestor queries instead of materializing reachable sets).
     pub remote_branch_tips: HashSet<ObjectId>,
+    /// Tip of every advertised ref, or `None` when the advertisement was not read.
+    ///
+    /// Pass it on as [`PushOptions::remote_ref_tips`](crate::transfer::PushOptions) so a local
+    /// push does not scan the remote's refs a second time. Only pass it to a push to the same
+    /// remote: [`load_push_plan_context`] and [`resolve_push`] select the same remote when given
+    /// the same override.
+    pub remote_tips: Option<Vec<ObjectId>>,
 }
 
 /// Errors while planning a push (typed; no stringly matching in callers).
@@ -571,16 +583,130 @@ pub fn configured_remote_for_push(
     Ok(DEFAULT_REMOTE.to_owned())
 }
 
+/// Remote and refspec strings after classifying `grit push [<remote>] [<refspec>...]`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct PushInvocation {
+    /// Remote name, URL or path; `None` selects the remote with [`configured_remote_for_push`].
+    pub remote: Option<String>,
+    /// Refspec strings for [`PushRequest::refspecs`].
+    pub refspecs: Vec<String>,
+}
+
+/// Classify push positionals into a remote and refspecs.
+///
+/// With `remote_flag` set, every positional is a refspec. Otherwise the first positional is the
+/// remote when it has a configured `remote.<name>.url` or looks like a literal URL or path
+/// (`scheme://`, `*.git`, `/abs/path`). A single other positional is a refspec pushed to the
+/// default remote; with more positionals the first one must name a remote.
+///
+/// # Errors
+///
+/// [`PushPlanError::UnknownRemote`] when several positionals are given and the first is neither a
+/// configured remote nor a literal URL or path.
+pub fn resolve_push_invocation(
+    config: &ConfigSet,
+    remote_flag: Option<&str>,
+    positionals: &[String],
+) -> PlanResult<PushInvocation> {
+    if let Some(remote) = remote_flag {
+        return Ok(PushInvocation {
+            remote: Some(remote.to_owned()),
+            refspecs: positionals.to_vec(),
+        });
+    }
+    let Some((first, rest)) = positionals.split_first() else {
+        return Ok(PushInvocation::default());
+    };
+    if has_remote_url(config, first) || looks_like_literal_remote(first) {
+        return Ok(PushInvocation {
+            remote: Some(first.clone()),
+            refspecs: rest.to_vec(),
+        });
+    }
+    if !rest.is_empty() {
+        return Err(PushPlanError::UnknownRemote(first.clone()));
+    }
+    Ok(PushInvocation {
+        remote: None,
+        refspecs: positionals.to_vec(),
+    })
+}
+
+/// Open the [`Remote`] a resolved push sends to ([`ResolvedPush::remote`]).
+///
+/// Literal URLs and paths (see [`resolve_push_invocation`]) become anonymous remotes; any other
+/// name is read from `remote.<name>.*` config.
+///
+/// # Errors
+///
+/// [`RemoteError::NoUrl`] when `name` has no configured URL, or a URL parse error.
+pub fn open_push_destination(config: &ConfigSet, name: &str) -> Result<Remote, RemoteError> {
+    if looks_like_literal_remote(name) {
+        Remote::from_url(name)
+    } else {
+        Remote::from_config(config, name)
+    }
+}
+
+impl PushPlanContext {
+    /// Build a context from a remote's ref advertisement (peeled `^{}` entries are skipped).
+    #[must_use]
+    pub fn from_advertised_refs(refs: impl IntoIterator<Item = RemoteRef>) -> Self {
+        let mut ctx = Self::default();
+        let mut tips = Vec::new();
+        for remote_ref in refs {
+            if remote_ref.peeled_tag().is_some() {
+                continue;
+            }
+            if remote_ref.name.starts_with("refs/heads/") {
+                ctx.remote_branch_tips.insert(remote_ref.oid);
+            }
+            tips.push(remote_ref.oid);
+            ctx.remote_ref_names.insert(remote_ref.name);
+        }
+        ctx.remote_tips = Some(tips);
+        ctx
+    }
+}
+
+/// Load the [`PushPlanContext`] for the remote a push would select.
+///
+/// The remote is chosen with [`configured_remote_for_push`], opened with
+/// [`open_push_destination`] (so literal URLs and paths are listed like configured remotes) and
+/// listed with [`Remote::list_push_refs`]. The context is best-effort: a remote without a URL, or one whose refs cannot be listed,
+/// yields an empty context, and the push itself reports any connection failure.
+///
+/// # Errors
+///
+/// Only errors from [`configured_remote_for_push`].
+pub fn load_push_plan_context(
+    repo: &Repository,
+    config: &ConfigSet,
+    remote_override: Option<&str>,
+    http_factory: Option<&dyn HttpClientFactory>,
+) -> PlanResult<PushPlanContext> {
+    let remote = configured_remote_for_push(repo, config, remote_override)?;
+    let Ok(handle) = open_push_destination(config, &remote) else {
+        return Ok(PushPlanContext::default());
+    };
+    let Ok(advertised) = handle.list_push_refs(repo, http_factory) else {
+        return Ok(PushPlanContext::default());
+    };
+    Ok(PushPlanContext::from_advertised_refs(advertised))
+}
+
 fn looks_like_literal_remote(name: &str) -> bool {
     name.contains("://") || name.ends_with(".git") || name.starts_with('/')
 }
 
-fn validate_remote(config: &ConfigSet, name: &str) -> PlanResult<()> {
-    if config
+fn has_remote_url(config: &ConfigSet, name: &str) -> bool {
+    config
         .get(&format!("remote.{name}.url"))
-        .filter(|u| !u.trim().is_empty())
-        .is_some()
-    {
+        .is_some_and(|u| !u.trim().is_empty())
+}
+
+fn validate_remote(config: &ConfigSet, name: &str) -> PlanResult<()> {
+    if has_remote_url(config, name) {
         Ok(())
     } else if name == DEFAULT_REMOTE || looks_like_literal_remote(name) {
         // Literal URL / path remotes are resolved by the transport layer.
@@ -1326,5 +1452,157 @@ mod tests {
         );
         assert!(!push_spec_excluded_by_negative(&item, &kept));
         assert!(push_spec_excluded_by_negative(&item, &dropped));
+    }
+
+    fn config_from(text: &str) -> ConfigSet {
+        let file = crate::config::ConfigFile::parse(
+            Path::new("config"),
+            text,
+            crate::config::ConfigScope::Local,
+        )
+        .expect("parse config");
+        let mut config = ConfigSet::new();
+        config.merge(&file);
+        config
+    }
+
+    fn strings(items: &[&str]) -> Vec<String> {
+        items.iter().map(|s| (*s).to_owned()).collect()
+    }
+
+    #[test]
+    fn push_invocation_remote_flag_keeps_every_positional_as_refspec() {
+        let config = ConfigSet::new();
+        let invocation =
+            resolve_push_invocation(&config, Some("upstream"), &strings(&["origin", "main"]))
+                .expect("invocation");
+        assert_eq!(
+            invocation,
+            PushInvocation {
+                remote: Some("upstream".into()),
+                refspecs: strings(&["origin", "main"]),
+            }
+        );
+    }
+
+    #[test]
+    fn push_invocation_without_positionals_uses_default_remote() {
+        let invocation = resolve_push_invocation(&ConfigSet::new(), None, &[]).expect("invocation");
+        assert_eq!(invocation, PushInvocation::default());
+    }
+
+    #[test]
+    fn push_invocation_first_positional_is_configured_remote() {
+        let config = config_from("[remote \"upstream\"]\n\turl = /tmp/u.git\n");
+        for positionals in [strings(&["upstream"]), strings(&["upstream", "a", "b:c"])] {
+            let invocation =
+                resolve_push_invocation(&config, None, &positionals).expect("invocation");
+            assert_eq!(invocation.remote.as_deref(), Some("upstream"));
+            assert_eq!(invocation.refspecs, positionals[1..]);
+        }
+    }
+
+    #[test]
+    fn push_invocation_first_positional_is_literal_url_or_path() {
+        let config = ConfigSet::new();
+        for remote in ["https://example.com/r", "../sibling.git", "/srv/repo"] {
+            let invocation = resolve_push_invocation(&config, None, &strings(&[remote, "main"]))
+                .expect("invocation");
+            assert_eq!(invocation.remote.as_deref(), Some(remote));
+            assert_eq!(invocation.refspecs, strings(&["main"]));
+        }
+    }
+
+    #[test]
+    fn push_invocation_single_unknown_positional_is_a_refspec() {
+        let config = config_from("[remote \"blank\"]\n\turl =   \n");
+        for token in ["main", "HEAD:refs/heads/x", "blank"] {
+            let invocation =
+                resolve_push_invocation(&config, None, &strings(&[token])).expect("invocation");
+            assert_eq!(invocation.remote, None, "{token}");
+            assert_eq!(invocation.refspecs, strings(&[token]));
+        }
+    }
+
+    #[test]
+    fn push_invocation_unknown_remote_before_refspecs_is_rejected() {
+        let err = resolve_push_invocation(&ConfigSet::new(), None, &strings(&["nosuch", "main"]))
+            .expect_err("unknown remote");
+        assert_eq!(err, PushPlanError::UnknownRemote("nosuch".into()));
+    }
+
+    #[test]
+    fn open_push_destination_reads_config_or_treats_literal_as_url() {
+        let config = config_from(
+            "[remote \"origin\"]\n\turl = /tmp/o.git\n[remote \"nourl\"]\n\tfetch = +refs/heads/*:refs/remotes/nourl/*\n",
+        );
+        let origin = open_push_destination(&config, "origin").expect("origin");
+        assert_eq!(origin.name.as_deref(), Some("origin"));
+        let literal = open_push_destination(&config, "/srv/other.git").expect("literal");
+        assert_eq!(literal.name, None);
+        assert!(matches!(
+            open_push_destination(&config, "nourl"),
+            Err(RemoteError::NoUrl)
+        ));
+    }
+
+    #[test]
+    fn plan_context_from_advertisement_skips_peeled_entries() {
+        let oid = |c: &str| ObjectId::from_hex(&c.repeat(40)).expect("oid");
+        let remote_ref = |name: &str, hex: &str| RemoteRef {
+            name: name.to_owned(),
+            oid: oid(hex),
+            symref_target: None,
+        };
+        let ctx = PushPlanContext::from_advertised_refs([
+            remote_ref("HEAD", "1"),
+            remote_ref("refs/heads/main", "1"),
+            remote_ref("refs/heads/topic", "2"),
+            remote_ref("refs/tags/v1", "3"),
+            remote_ref("refs/tags/v1^{}", "4"),
+        ]);
+        let mut names: Vec<_> = ctx.remote_ref_names.iter().map(String::as_str).collect();
+        names.sort_unstable();
+        assert_eq!(
+            names,
+            [
+                "HEAD",
+                "refs/heads/main",
+                "refs/heads/topic",
+                "refs/tags/v1"
+            ]
+        );
+        assert_eq!(ctx.remote_branch_tips, HashSet::from([oid("1"), oid("2")]));
+        assert_eq!(
+            ctx.remote_tips,
+            Some(vec![oid("1"), oid("1"), oid("2"), oid("3")])
+        );
+    }
+
+    #[test]
+    fn plan_context_from_empty_advertisement_knows_remote_has_no_tips() {
+        let ctx = PushPlanContext::from_advertised_refs([]);
+        assert_eq!(ctx.remote_tips, Some(Vec::new()));
+    }
+
+    #[test]
+    fn plan_context_is_empty_for_unconfigured_remote() {
+        let (_tmp, repo) = init_repo();
+        let ctx = load_push_plan_context(&repo, &ConfigSet::new(), Some("nosuch"), None)
+            .expect("context");
+        assert!(ctx.remote_ref_names.is_empty());
+        assert!(ctx.remote_branch_tips.is_empty());
+        assert_eq!(ctx.remote_tips, None);
+    }
+
+    #[test]
+    fn plan_context_for_missing_path_assumes_no_remote_objects() {
+        let (tmp, repo) = init_repo();
+        let missing = tmp.path().join("missing.git");
+        let missing = missing.to_str().expect("utf-8 path");
+        let ctx =
+            load_push_plan_context(&repo, &ConfigSet::new(), Some(missing), None).expect("context");
+        assert!(ctx.remote_ref_names.is_empty());
+        assert!(ctx.remote_tips.as_ref().is_none_or(Vec::is_empty));
     }
 }

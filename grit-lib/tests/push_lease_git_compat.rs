@@ -90,6 +90,7 @@ fn push_plan_context(bare: &Path) -> PushPlanContext {
     PushPlanContext {
         remote_ref_names,
         remote_branch_tips,
+        remote_tips: None,
     }
 }
 

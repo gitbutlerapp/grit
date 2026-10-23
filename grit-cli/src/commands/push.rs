@@ -2,17 +2,17 @@
 
 use anyhow::{Context, Result};
 use grit_lib::config::ConfigSet;
+use grit_lib::objects::ObjectId;
 use grit_lib::remote::push_plan::{
-    apply_set_upstream_after_push, configured_remote_for_push, parse_force_mode,
-    push_follow_tags_config, resolve_push, PushPlanContext, PushPlanError, PushPlanKind,
+    apply_set_upstream_after_push, load_push_plan_context, open_push_destination, parse_force_mode,
+    push_follow_tags_config, resolve_push, resolve_push_invocation, PushPlanError, PushPlanKind,
     PushRequest,
 };
 use grit_lib::remote::push_report::PushRefStatus;
 use grit_lib::remote::transfer::PushOptions;
-use grit_lib::remote::{DefaultHttpClientFactory, ListRefsOptions, Remote};
+use grit_lib::remote::DefaultHttpClientFactory;
 use schemars::JsonSchema;
 use serde::Serialize;
-use std::collections::HashSet;
 use std::io::Write;
 
 use crate::commands::auth;
@@ -151,6 +151,7 @@ struct PushWireOptions<'a> {
     dry_run: bool,
     atomic: bool,
     push_options: &'a [String],
+    remote_ref_tips: Option<Vec<ObjectId>>,
 }
 
 /// Positional `[<remote>] [<refspec>...]` plus flags.
@@ -172,17 +173,21 @@ pub fn run(
     let config = ConfigSet::load(&crate::context::environment(), Some(repo.git_dir()), true)
         .context("could not load config")?;
 
-    let (remote_override, refspecs) = split_positionals(&config, &repo, remote_flag, positionals)?;
+    let invocation = resolve_push_invocation(&config, remote_flag.as_deref(), positionals)
+        .map_err(plan_error)?;
 
-    let plan_ctx = load_remote_ref_names(&repo, &config, remote_override.as_deref())?;
+    let factory = DefaultHttpClientFactory;
+    let plan_ctx =
+        load_push_plan_context(&repo, &config, invocation.remote.as_deref(), Some(&factory))
+            .map_err(plan_error)?;
 
     let force_mode = parse_force_mode(&repo, force, force_with_lease).map_err(plan_error)?;
 
     let follow = follow_tags || push_follow_tags_config(&config);
 
     let push_request = PushRequest {
-        remote: remote_override,
-        refspecs,
+        remote: invocation.remote,
+        refspecs: invocation.refspecs,
         tags,
         delete: delete_refs.to_vec(),
         force: force_mode,
@@ -192,11 +197,11 @@ pub fn run(
 
     let plan = resolve_push(&repo, &config, &push_request, &plan_ctx).map_err(plan_error)?;
 
-    let factory = DefaultHttpClientFactory;
     let wire = PushWireOptions {
         dry_run,
         atomic,
         push_options,
+        remote_ref_tips: plan_ctx.remote_tips,
     };
     let report = match push_once(&repo, &config, &plan.remote, &plan.specs, &wire, &factory) {
         Ok(report) => report,
@@ -275,86 +280,6 @@ fn plan_error(err: PushPlanError) -> anyhow::Error {
     anyhow::Error::msg(err.to_string())
 }
 
-fn split_positionals(
-    config: &ConfigSet,
-    repo: &grit_lib::repo::Repository,
-    remote_flag: Option<String>,
-    positionals: &[String],
-) -> Result<(Option<String>, Vec<String>)> {
-    if let Some(remote) = remote_flag {
-        return Ok((Some(remote), positionals.to_vec()));
-    }
-    if positionals.is_empty() {
-        return Ok((None, Vec::new()));
-    }
-    if is_configured_remote(config, &positionals[0]) {
-        let remote = positionals[0].clone();
-        let specs = positionals[1..].to_vec();
-        return Ok((Some(remote), specs));
-    }
-    if looks_like_remote_name(&positionals[0]) {
-        return Ok((Some(positionals[0].clone()), positionals[1..].to_vec()));
-    }
-    if positionals.len() > 1
-        && !is_configured_remote(config, &positionals[0])
-        && !looks_like_remote_name(&positionals[0])
-    {
-        return Err(plan_error(PushPlanError::UnknownRemote(
-            positionals[0].clone(),
-        )));
-    }
-    let _ = repo;
-    Ok((None, positionals.to_vec()))
-}
-
-fn is_configured_remote(config: &ConfigSet, name: &str) -> bool {
-    config
-        .get(&format!("remote.{name}.url"))
-        .filter(|u| !u.trim().is_empty())
-        .is_some()
-}
-
-fn looks_like_remote_name(name: &str) -> bool {
-    name.contains("://") || name.ends_with(".git") || name.starts_with('/')
-}
-
-fn load_remote_ref_names(
-    repo: &grit_lib::repo::Repository,
-    config: &ConfigSet,
-    remote_override: Option<&str>,
-) -> Result<PushPlanContext> {
-    let remote = configured_remote_for_push(repo, config, remote_override).map_err(plan_error)?;
-    let Ok(remote_handle) = Remote::from_config(config, &remote) else {
-        return Ok(PushPlanContext::default());
-    };
-    let factory = DefaultHttpClientFactory;
-    let advertised = remote_handle
-        .list_refs(Some(repo), &ListRefsOptions::default(), Some(&factory))
-        .unwrap_or_default();
-    let remote_branch_tips: HashSet<_> = advertised
-        .iter()
-        .filter(|r| r.name.starts_with("refs/heads/") && r.peeled_tag().is_none())
-        .map(|r| r.oid)
-        .collect();
-    let remote_ref_names: HashSet<String> = advertised
-        .into_iter()
-        .filter(|r| r.peeled_tag().is_none())
-        .map(|r| r.name)
-        .collect();
-    Ok(PushPlanContext {
-        remote_ref_names,
-        remote_branch_tips,
-    })
-}
-
-fn open_remote_for_push(config: &ConfigSet, remote_name: &str) -> Result<Remote> {
-    if looks_like_remote_name(remote_name) {
-        Remote::from_url(remote_name).map_err(|e| anyhow::Error::msg(e.to_string()))
-    } else {
-        Remote::from_config(config, remote_name).map_err(|e| anyhow::Error::msg(e.to_string()))
-    }
-}
-
 fn push_once(
     repo: &grit_lib::repo::Repository,
     config: &ConfigSet,
@@ -363,7 +288,8 @@ fn push_once(
     wire: &PushWireOptions<'_>,
     factory: &DefaultHttpClientFactory,
 ) -> Result<grit_lib::remote::transfer::PushOutcome> {
-    open_remote_for_push(config, remote_name)?
+    open_push_destination(config, remote_name)
+        .map_err(|e| anyhow::Error::msg(e.to_string()))?
         .push(
             repo,
             specs,
@@ -371,6 +297,7 @@ fn push_once(
                 dry_run: wire.dry_run,
                 atomic: wire.atomic,
                 push_options: wire.push_options.to_vec(),
+                remote_ref_tips: wire.remote_ref_tips.clone(),
                 tracking_remote: Some(remote_name.to_owned()),
                 ..Default::default()
             },
