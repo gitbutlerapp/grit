@@ -1084,9 +1084,17 @@ enum Command {
             allow_hyphen_values = true
         )]
         message_file: Option<String>,
+        /// Predict whether the pick would succeed without changing refs, the index, or the worktree.
+        #[arg(
+            long = "check",
+            conflicts_with_all = ["continue_pick", "abort", "skip", "dry_run"]
+        )]
+        check: bool,
         /// List commits that would be picked without changing refs or the worktree.
-        #[arg(long = "dry-run")]
+        #[arg(long = "dry-run", conflicts_with = "check")]
         dry_run: bool,
+        #[command(flatten)]
+        replay_merge: commands::replay_merge_args::ReplayMergeArgs,
     },
     /// Undo commits with new inverse commits.
     Revert {
@@ -1129,9 +1137,17 @@ enum Command {
             allow_hyphen_values = true
         )]
         message_file: Option<String>,
+        /// Predict whether the revert would succeed without changing refs, the index, or the worktree.
+        #[arg(
+            long = "check",
+            conflicts_with_all = ["continue_revert", "abort", "skip", "dry_run"]
+        )]
+        check: bool,
         /// List commits that would be reverted without changing refs or the worktree.
-        #[arg(long = "dry-run")]
+        #[arg(long = "dry-run", conflicts_with = "check")]
         dry_run: bool,
+        #[command(flatten)]
+        replay_merge: commands::replay_merge_args::ReplayMergeArgs,
     },
     /// Rewrite commits without a sequencer (plan, then apply refs atomically).
     History {
@@ -2405,7 +2421,9 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             empty,
             message,
             message_file,
+            check,
             dry_run,
+            replay_merge,
         } => {
             let outcome = commands::pick::run(commands::pick::PickRunOptions {
                 commits,
@@ -2418,7 +2436,9 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
                 message,
                 message_file,
                 mainline,
+                check,
                 dry_run,
+                replay_merge,
             })?;
             emit(&outcome, opts, ctx)?;
             if matches!(
@@ -2439,7 +2459,9 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             empty,
             message,
             message_file,
+            check,
             dry_run,
+            replay_merge,
         } => {
             let outcome = commands::revert::run(&commands::revert::RevertRunOptions {
                 commits,
@@ -2451,7 +2473,9 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
                 empty,
                 message,
                 message_file,
+                check,
                 dry_run,
+                replay_merge,
             })?;
             if matches!(
                 outcome.result,

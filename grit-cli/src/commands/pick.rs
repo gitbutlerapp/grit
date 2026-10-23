@@ -1,8 +1,12 @@
 //! `grit pick` — cherry-pick one or more commits onto the current branch.
 
+use crate::commands::replay_merge_args::ReplayMergeArgs;
 use crate::context;
 use crate::markdown;
-use crate::operation_output::{render_conflicts_human, ConflictJson, OperationConflictBlock};
+use crate::operation_output::{
+    render_conflicts_human, render_pick_check_conflicts_human, render_pick_conflict_footer_human,
+    ConflictJson, OperationConflictBlock,
+};
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 use anyhow::{bail, Context, Result};
 use clap::ValueEnum;
@@ -16,9 +20,9 @@ use grit_lib::operation::{
 };
 use grit_lib::porcelain::replay::ReplayDirection;
 use grit_lib::porcelain::replay_sequence::{
-    abort_replay_sequence, commits_to_replay, continue_replay_sequence, skip_replay_step,
-    start_replay_sequence, ReplayEmptyPolicy, ReplayOptions, ReplaySequenceRequest,
-    SequenceOutcome,
+    abort_replay_sequence, commits_to_replay, continue_replay_sequence, predict_replay_sequence,
+    skip_replay_step, start_replay_sequence, ReplayEmptyPolicy, ReplayOptions,
+    ReplaySequenceRequest, SequenceOutcome, SequencePrediction,
 };
 use grit_lib::state::InProgressOperation;
 use schemars::JsonSchema;
@@ -31,6 +35,8 @@ use std::num::NonZeroU32;
 #[serde(rename_all = "snake_case")]
 pub enum PickResult {
     Picked,
+    /// Every step would apply cleanly (`grit pick --check` only).
+    Clean,
     Conflicts,
     Empty,
     Aborted,
@@ -74,6 +80,13 @@ pub struct PickOutcome {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(skip_serializing_if = "Option::is_none")]
     pub dry_run: Option<bool>,
+    /// Predicted result tree (full hex) when `result` is `clean` from `--check`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub oid: Option<String>,
+    /// True when this outcome is from `grit pick --check` (nothing was picked).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub check: bool,
 }
 
 /// How to handle an empty replay step (`--empty`).
@@ -108,6 +121,8 @@ pub struct PickRunOptions {
     pub message_file: Option<String>,
     pub mainline: Option<u32>,
     pub dry_run: bool,
+    pub check: bool,
+    pub replay_merge: ReplayMergeArgs,
 }
 
 impl HumanRender for PickOutcome {
@@ -136,23 +151,44 @@ impl HumanRender for PickOutcome {
                     outln!(w, "Dropped {} empty commit(s)", self.dropped.len());
                 }
             }
+            PickResult::Clean => {
+                if let Some(oid) = &self.oid {
+                    outln!(w, "Would pick cleanly (tree {oid})");
+                } else {
+                    outln!(w, "Would pick cleanly");
+                }
+            }
             PickResult::Conflicts => {
-                if let Some(conflicts) = &self.conflicts {
-                    render_conflicts_human(conflicts, w)?;
-                }
-                if let Some(steps) = &self.next_steps {
-                    eprintln!();
-                    for step in steps {
-                        eprintln!("→ {step}");
+                if self.check {
+                    if let Some(conflicts) = &self.conflicts {
+                        render_pick_check_conflicts_human(conflicts, w)?;
                     }
+                } else if let Some(conflicts) = &self.conflicts {
+                    render_conflicts_human(conflicts, w)?;
+                    render_pick_conflict_footer_human();
                 }
-                if let Some(alt) = &self.alternatives {
-                    let joined = alt.join(" or ");
-                    eprintln!("→ or {joined}");
+                if !self.check {
+                    if let Some(steps) = &self.next_steps {
+                        eprintln!();
+                        for step in steps {
+                            eprintln!("→ {step}");
+                        }
+                    }
+                    if let Some(alt) = &self.alternatives {
+                        let joined = alt.join(" or ");
+                        eprintln!("→ or {joined}");
+                    }
                 }
             }
             PickResult::Empty => {
-                if let Some(row) = self.commits.last() {
+                if self.check {
+                    if let Some(row) = self.commits.last() {
+                        let src = row.source.get(..7).unwrap_or(&row.source);
+                        outln!(w, "Would stop on an empty pick step ({src})");
+                    } else {
+                        outln!(w, "Would stop on an empty pick step");
+                    }
+                } else if let Some(row) = self.commits.last() {
                     let src = row.source.get(..7).unwrap_or(&row.source);
                     outln!(w, "Stopped on empty commit {src} — {}", row.subject);
                 }
@@ -202,6 +238,8 @@ pub fn run(opts: PickRunOptions) -> Result<PickOutcome> {
             next_steps: None,
             alternatives: None,
             dry_run: None,
+            oid: None,
+            check: false,
         });
     }
 
@@ -229,11 +267,6 @@ pub fn run(opts: PickRunOptions) -> Result<PickOutcome> {
         bail!("at least one commit or `--continue` / `--abort` / `--skip` is required");
     }
 
-    let message_override = read_optional_message(opts.message, opts.message_file)?;
-    if message_override.is_some() && opts.commits.len() != 1 {
-        bail!("--message and --message-file are only allowed when picking exactly one commit");
-    }
-
     let sources = commits_to_replay(&repo, &opts.commits).map_err(map_pick_committish_error)?;
     if opts.dry_run {
         return Ok(PickOutcome {
@@ -252,8 +285,21 @@ pub fn run(opts: PickRunOptions) -> Result<PickOutcome> {
             next_steps: None,
             alternatives: None,
             dry_run: Some(true),
+            oid: None,
+            check: false,
         });
     }
+    let favor = opts.replay_merge.favor();
+    let conflict_style = opts.replay_merge.conflict_style(&repo);
+    if opts.check {
+        return run_check(&repo, sources, &opts, favor, conflict_style);
+    }
+
+    let message_override = read_optional_message(opts.message, opts.message_file)?;
+    if message_override.is_some() && opts.commits.len() != 1 {
+        bail!("--message and --message-file are only allowed when picking exactly one commit");
+    }
+
     let mainline = opts
         .mainline
         .map(|n| {
@@ -268,7 +314,8 @@ pub fn run(opts: PickRunOptions) -> Result<PickOutcome> {
         empty: opts.empty.into(),
         message_override,
         mainline,
-        ..ReplayOptions::default()
+        favor,
+        conflict_style,
     };
     let req = ReplaySequenceRequest {
         commits: sources.clone(),
@@ -329,6 +376,8 @@ fn map_sequence_outcome(
                 next_steps: None,
                 alternatives: None,
                 dry_run: None,
+                oid: None,
+                check: false,
             }
         }
         SequenceOutcome::Conflicts {
@@ -346,6 +395,8 @@ fn map_sequence_outcome(
                 next_steps: Some(block.next_steps),
                 alternatives: block.alternatives,
                 dry_run: None,
+                oid: None,
+                check: false,
             }
         }
         SequenceOutcome::Empty {
@@ -372,8 +423,91 @@ fn map_sequence_outcome(
                     Some(alternatives)
                 },
                 dry_run: None,
+                oid: None,
+                check: false,
             }
         }
+    }
+}
+
+fn run_check(
+    repo: &grit_lib::repo::Repository,
+    sources: Vec<ObjectId>,
+    opts: &PickRunOptions,
+    favor: grit_lib::diff::merge_file::MergeFavor,
+    conflict_style: grit_lib::diff::merge_file::ConflictStyle,
+) -> Result<PickOutcome> {
+    let mainline = opts
+        .mainline
+        .map(|n| {
+            NonZeroU32::new(n).ok_or_else(|| {
+                anyhow::anyhow!("--mainline requires a positive parent number (1, 2, …)")
+            })
+        })
+        .transpose()?;
+    let replay_opts = ReplayOptions {
+        record_origin: opts.record_origin,
+        no_commit: opts.no_commit,
+        empty: opts.empty.into(),
+        message_override: None,
+        mainline,
+        favor,
+        conflict_style,
+    };
+    let prediction = predict_replay_sequence(
+        repo,
+        &ReplaySequenceRequest {
+            commits: sources,
+            direction: ReplayDirection::Pick,
+            committer: String::new(),
+            options: replay_opts,
+        },
+    )
+    .map_err(map_replay_error)?;
+    map_prediction_outcome(repo, prediction)
+}
+
+fn map_prediction_outcome(
+    repo: &grit_lib::repo::Repository,
+    prediction: SequencePrediction,
+) -> Result<PickOutcome> {
+    match prediction {
+        SequencePrediction::Clean { tree, dropped } => Ok(PickOutcome {
+            result: PickResult::Clean,
+            commits: Vec::new(),
+            dropped: dropped.iter().map(ObjectId::to_hex).collect(),
+            conflicts: None,
+            next_steps: None,
+            alternatives: None,
+            dry_run: None,
+            oid: Some(tree.to_hex()),
+            check: true,
+        }),
+        SequencePrediction::Conflicts { commit, conflicts } => {
+            let block = OperationConflictBlock::for_pick(&conflicts);
+            Ok(PickOutcome {
+                result: PickResult::Conflicts,
+                commits: vec![source_record(repo, commit, None)],
+                dropped: Vec::new(),
+                conflicts: Some(block.conflicts),
+                next_steps: None,
+                alternatives: None,
+                dry_run: None,
+                oid: None,
+                check: true,
+            })
+        }
+        SequencePrediction::Empty { commit } => Ok(PickOutcome {
+            result: PickResult::Empty,
+            commits: vec![source_record(repo, commit, None)],
+            dropped: Vec::new(),
+            conflicts: None,
+            next_steps: None,
+            alternatives: None,
+            dry_run: None,
+            oid: None,
+            check: true,
+        }),
     }
 }
 

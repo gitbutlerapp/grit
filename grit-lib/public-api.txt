@@ -12623,6 +12623,30 @@ impl core::marker::Unpin for grit_lib::porcelain::replay_sequence::SequenceOutco
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::replay_sequence::SequenceOutcome
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::replay_sequence::SequenceOutcome
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::replay_sequence::SequenceOutcome
+pub enum grit_lib::porcelain::replay_sequence::SequencePrediction
+pub grit_lib::porcelain::replay_sequence::SequencePrediction::Clean
+pub grit_lib::porcelain::replay_sequence::SequencePrediction::Clean::dropped: alloc::vec::Vec<grit_lib::objects::ObjectId>
+pub grit_lib::porcelain::replay_sequence::SequencePrediction::Clean::tree: grit_lib::objects::ObjectId
+pub grit_lib::porcelain::replay_sequence::SequencePrediction::Conflicts
+pub grit_lib::porcelain::replay_sequence::SequencePrediction::Conflicts::commit: grit_lib::objects::ObjectId
+pub grit_lib::porcelain::replay_sequence::SequencePrediction::Conflicts::conflicts: alloc::vec::Vec<grit_lib::operation::Conflict>
+pub grit_lib::porcelain::replay_sequence::SequencePrediction::Empty
+pub grit_lib::porcelain::replay_sequence::SequencePrediction::Empty::commit: grit_lib::objects::ObjectId
+impl core::clone::Clone for grit_lib::porcelain::replay_sequence::SequencePrediction
+pub fn grit_lib::porcelain::replay_sequence::SequencePrediction::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::replay_sequence::SequencePrediction
+impl core::cmp::PartialEq for grit_lib::porcelain::replay_sequence::SequencePrediction
+pub fn grit_lib::porcelain::replay_sequence::SequencePrediction::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::porcelain::replay_sequence::SequencePrediction
+pub fn grit_lib::porcelain::replay_sequence::SequencePrediction::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::porcelain::replay_sequence::SequencePrediction
+impl core::marker::Freeze for grit_lib::porcelain::replay_sequence::SequencePrediction
+impl core::marker::Send for grit_lib::porcelain::replay_sequence::SequencePrediction
+impl core::marker::Sync for grit_lib::porcelain::replay_sequence::SequencePrediction
+impl core::marker::Unpin for grit_lib::porcelain::replay_sequence::SequencePrediction
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::replay_sequence::SequencePrediction
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::replay_sequence::SequencePrediction
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::replay_sequence::SequencePrediction
 pub struct grit_lib::porcelain::replay_sequence::ReplayCreated
 pub grit_lib::porcelain::replay_sequence::ReplayCreated::change_id: core::option::Option<grit_lib::change_id::ChangeId>
 pub grit_lib::porcelain::replay_sequence::ReplayCreated::new_oid: grit_lib::objects::ObjectId
@@ -12682,6 +12706,7 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::replay_sequen
 pub fn grit_lib::porcelain::replay_sequence::abort_replay_sequence(&grit_lib::repo::Repository) -> grit_lib::error::Result<()>
 pub fn grit_lib::porcelain::replay_sequence::commits_to_replay(&grit_lib::repo::Repository, &[alloc::string::String]) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::ObjectId>>
 pub fn grit_lib::porcelain::replay_sequence::continue_replay_sequence(&grit_lib::repo::Repository, &str) -> grit_lib::error::Result<grit_lib::porcelain::replay_sequence::SequenceOutcome>
+pub fn grit_lib::porcelain::replay_sequence::predict_replay_sequence(&grit_lib::repo::Repository, &grit_lib::porcelain::replay_sequence::ReplaySequenceRequest) -> grit_lib::error::Result<grit_lib::porcelain::replay_sequence::SequencePrediction>
 pub fn grit_lib::porcelain::replay_sequence::skip_replay_step(&grit_lib::repo::Repository, &str) -> grit_lib::error::Result<grit_lib::porcelain::replay_sequence::SequenceOutcome>
 pub fn grit_lib::porcelain::replay_sequence::start_replay_sequence(&grit_lib::repo::Repository, &grit_lib::porcelain::replay_sequence::ReplaySequenceRequest) -> grit_lib::error::Result<grit_lib::porcelain::replay_sequence::SequenceOutcome>
 pub mod grit_lib::porcelain::reset
