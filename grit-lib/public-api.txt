@@ -3557,41 +3557,8 @@ pub fn grit_lib::diff::userdiff::matcher_for_path(&grit_lib::config::ConfigSet, 
 pub fn grit_lib::diff::userdiff::matcher_for_path_parsed(&grit_lib::config::ConfigSet, &[grit_lib::worktree::attributes::AttrRule], &grit_lib::worktree::attributes::MacroTable, &str, bool) -> core::result::Result<core::option::Option<grit_lib::diff::userdiff::FuncnameMatcher>, alloc::string::String>
 pub fn grit_lib::diff::userdiff::word_regex_pattern_for_path_parsed(&grit_lib::config::ConfigSet, &[grit_lib::worktree::attributes::AttrRule], &grit_lib::worktree::attributes::MacroTable, &str, bool) -> core::option::Option<(alloc::string::String, bool)>
 pub mod grit_lib::diff::ws
-pub enum grit_lib::diff::ws::WhitespaceRuleError
-pub grit_lib::diff::ws::WhitespaceRuleError::ConflictingTabAndIndentRules
-impl core::clone::Clone for grit_lib::diff::ws::WhitespaceRuleError
-pub fn grit_lib::diff::ws::WhitespaceRuleError::clone(&self) -> Self
-impl core::cmp::Eq for grit_lib::diff::ws::WhitespaceRuleError
-impl core::cmp::PartialEq for grit_lib::diff::ws::WhitespaceRuleError
-pub fn grit_lib::diff::ws::WhitespaceRuleError::eq(&self, &Self) -> bool
-impl core::fmt::Debug for grit_lib::diff::ws::WhitespaceRuleError
-pub fn grit_lib::diff::ws::WhitespaceRuleError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for grit_lib::diff::ws::WhitespaceRuleError
-impl core::marker::StructuralPartialEq for grit_lib::diff::ws::WhitespaceRuleError
-impl core::marker::Freeze for grit_lib::diff::ws::WhitespaceRuleError
-impl core::marker::Send for grit_lib::diff::ws::WhitespaceRuleError
-impl core::marker::Sync for grit_lib::diff::ws::WhitespaceRuleError
-impl core::marker::Unpin for grit_lib::diff::ws::WhitespaceRuleError
-impl core::marker::UnsafeUnpin for grit_lib::diff::ws::WhitespaceRuleError
-impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::ws::WhitespaceRuleError
-impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::ws::WhitespaceRuleError
-pub const grit_lib::diff::ws::WS_BLANK_AT_EOF: u32
-pub const grit_lib::diff::ws::WS_BLANK_AT_EOL: u32
-pub const grit_lib::diff::ws::WS_CR_AT_EOL: u32
-pub const grit_lib::diff::ws::WS_DEFAULT_RULE: u32
-pub const grit_lib::diff::ws::WS_INCOMPLETE_LINE: u32
-pub const grit_lib::diff::ws::WS_INDENT_WITH_NON_TAB: u32
-pub const grit_lib::diff::ws::WS_SPACE_BEFORE_TAB: u32
-pub const grit_lib::diff::ws::WS_TAB_IN_INDENT: u32
-pub const grit_lib::diff::ws::WS_TAB_WIDTH_MASK: u32
-pub const grit_lib::diff::ws::WS_TRAILING_SPACE: u32
 pub fn grit_lib::diff::ws::is_space_git(u8) -> bool
-pub fn grit_lib::diff::ws::parse_whitespace_rule(&str) -> core::result::Result<u32, grit_lib::diff::ws::WhitespaceRuleError>
-pub fn grit_lib::diff::ws::whitespace_error_string(u32) -> alloc::string::String
 pub fn grit_lib::diff::ws::ws_blank_line(&str) -> bool
-pub fn grit_lib::diff::ws::ws_check(&str, u32) -> u32
-pub fn grit_lib::diff::ws::ws_fix_copy_line(&str, u32) -> (alloc::string::String, bool)
-pub fn grit_lib::diff::ws::ws_tab_width(u32) -> usize
 #[non_exhaustive] pub enum grit_lib::diff::DiffAlgorithm
 pub grit_lib::diff::DiffAlgorithm::Histogram
 pub grit_lib::diff::DiffAlgorithm::Minimal

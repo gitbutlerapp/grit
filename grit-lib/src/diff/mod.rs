@@ -126,6 +126,6 @@ pub mod fmt_merge_msg {
     pub use crate::fmt_merge_msg::*;
 }
 pub mod ws {
-    //! Whitespace helpers for diff and apply.
+    //! ASCII whitespace helpers used by the diff engine.
     pub use crate::ws::*;
 }

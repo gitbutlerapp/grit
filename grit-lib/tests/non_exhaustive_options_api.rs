@@ -138,21 +138,3 @@ fn maintenance_constructors_run_on_empty_repo() {
     let stats = repack_all(&repo, &RepackOptions::with_dry_run(true)).expect("repack dry-run");
     assert!(stats.objects_packed.is_none());
 }
-
-#[test]
-fn diff_ws_parse_whitespace_rule_default() {
-    let rule = grit_lib::diff::ws::parse_whitespace_rule("").expect("parse");
-    assert_eq!(rule, grit_lib::diff::ws::WS_DEFAULT_RULE);
-}
-
-#[test]
-fn diff_ws_blank_at_eol_rule() {
-    let rule = grit_lib::diff::ws::parse_whitespace_rule("blank-at-eol").expect("parse");
-    assert_ne!(rule & grit_lib::diff::ws::WS_BLANK_AT_EOL, 0);
-}
-
-#[test]
-fn diff_ws_negated_blank_at_eol() {
-    let rule = grit_lib::diff::ws::parse_whitespace_rule("-blank-at-eol").expect("parse");
-    assert_eq!(rule & grit_lib::diff::ws::WS_BLANK_AT_EOL, 0);
-}
