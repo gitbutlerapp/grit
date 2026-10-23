@@ -1294,16 +1294,7 @@ fn checkout_tree_changes_with_progress(
     );
 
     if !apply.skip_bulk_checkout_fast_path {
-        let bulk_rules = if tree_changes_touch_gitattributes(attr_changes) {
-            let prospective_index = prospective_index_for_checkout(index_mut, attr_changes);
-            WorktreeRules::from_checkout_prospective_index(
-                repo,
-                &prospective_index,
-                config.clone(),
-            )?
-        } else {
-            WorktreeRules::from_parts_index_attributes_only(repo, index_mut, config.clone())?
-        };
+        let bulk_rules = checkout_worktree_rules(repo, index_mut, attr_changes, config.clone())?;
         let conv = bulk_rules.conversion().clone();
 
         if bulk_mod_delete_checkout_eligible(changes, &bulk_rules) {
@@ -1557,16 +1548,12 @@ fn checkout_tree_changes_with_progress(
                 continue;
             };
             if rules.is_none() {
-                rules = Some(if tree_changes_touch_gitattributes(attr_changes) {
-                    let prospective_index = prospective_index_for_checkout(index, attr_changes);
-                    WorktreeRules::from_checkout_prospective_index(
-                        repo,
-                        &prospective_index,
-                        config.clone(),
-                    )?
-                } else {
-                    WorktreeRules::from_parts_index_attributes_only(repo, index, config.clone())?
-                });
+                rules = Some(checkout_worktree_rules(
+                    repo,
+                    index,
+                    attr_changes,
+                    config.clone(),
+                )?);
             }
             let rules = rules.as_ref().ok_or_else(|| {
                 Error::PathError("internal error: missing checkout rules for write".into())
@@ -1747,6 +1734,17 @@ struct DelayedCheckoutTarget {
     mode: u32,
     oid: ObjectId,
     change: DiffEntry,
+}
+
+/// Attribute/conversion context for checkout smudge using the destination index view.
+fn checkout_worktree_rules(
+    repo: &Repository,
+    index: &Index,
+    attr_changes: &[DiffEntry],
+    config: std::sync::Arc<ConfigSet>,
+) -> Result<WorktreeRules> {
+    let prospective_index = prospective_index_for_checkout(index, attr_changes);
+    WorktreeRules::from_checkout_prospective_index(repo, &prospective_index, config)
 }
 
 pub(crate) fn tree_changes_touch_gitattributes(changes: &[DiffEntry]) -> bool {

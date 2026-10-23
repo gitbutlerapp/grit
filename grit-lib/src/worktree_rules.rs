@@ -268,14 +268,18 @@ impl AttributeState {
             return hit;
         }
         let mut rules = Vec::new();
-        let ga_rel = if dir.is_empty() {
-            PathBuf::from(".gitattributes")
+        let ga_stored = if dir.is_empty() {
+            ".gitattributes".to_owned()
         } else {
-            Path::new(dir).join(".gitattributes")
+            format!("{dir}/.gitattributes")
         };
-        let key = path_to_index_bytes(&ga_rel);
+        let key = crate::repo_relpath::storage_bytes(&ga_stored).into_owned();
         if !self.gitattributes_index_only {
-            let wt_ga = self.work_tree.join(&ga_rel);
+            let wt_ga = if dir.is_empty() {
+                self.work_tree.join(".gitattributes")
+            } else {
+                self.work_tree.join(dir).join(".gitattributes")
+            };
             if let Some(content) = read_worktree_gitattributes(&wt_ga) {
                 rules.extend(crlf::parse_gitattributes_content(&content));
                 self.dir_fragment
@@ -383,18 +387,6 @@ fn gitattributes_index_map(index: &Index) -> HashMap<Vec<u8>, ObjectId> {
 
 fn is_gitattributes_index_path(path: &[u8]) -> bool {
     path == b".gitattributes" || path.ends_with(b"/.gitattributes")
-}
-
-fn path_to_index_bytes(path: &Path) -> Vec<u8> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::ffi::OsStrExt;
-        path.as_os_str().as_bytes().to_vec()
-    }
-    #[cfg(not(unix))]
-    {
-        path.to_string_lossy().into_owned().into_bytes()
-    }
 }
 
 /// Hook for [`crate::ignore`] to record pattern-file reads (memoization tests).

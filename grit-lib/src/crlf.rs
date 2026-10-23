@@ -411,11 +411,12 @@ pub fn load_gitattributes_for_checkout(
         for comp in parent.components() {
             accum.push(comp);
             let ga_rel = accum.join(".gitattributes");
+            let ga_stored = ga_rel.to_string_lossy().replace('\\', "/");
             let wt_ga = work_tree.join(&ga_rel);
             if let Ok(content) = std::fs::read_to_string(&wt_ga) {
                 parse_gitattributes(&content, &mut rules);
             } else {
-                let key = path_to_index_bytes(&ga_rel);
+                let key = crate::repo_relpath::storage_bytes(&ga_stored).into_owned();
                 if let Some(entry) = index.get(&key, 0) {
                     if let Ok(obj) = odb.read(&entry.oid) {
                         if let Ok(content) = String::from_utf8(obj.data) {
@@ -500,18 +501,6 @@ fn lookup_tree_path(odb: &Odb, tree_oid: &ObjectId, rel_path: &str) -> Option<Ob
         current = entry.oid;
     }
     None
-}
-
-fn path_to_index_bytes(path: &Path) -> Vec<u8> {
-    #[cfg(unix)]
-    {
-        use std::os::unix::ffi::OsStrExt;
-        path.as_os_str().as_bytes().to_vec()
-    }
-    #[cfg(not(unix))]
-    {
-        path.to_string_lossy().as_bytes().to_vec()
-    }
 }
 
 fn parse_gitattributes(content: &str, rules: &mut Vec<AttrRule>) {
