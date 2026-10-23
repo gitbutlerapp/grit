@@ -1196,15 +1196,16 @@ pub fn print_stash_push_outcome(
         StashPushOutcome::Saved {
             oid,
             message,
-            dry_run: _,
+            dry_run,
             stashed_hunks: _,
             stashed_lines: _,
         } => {
             let short = short_hex(oid);
+            let verb = if *dry_run { "Would stash" } else { "Saved" };
             if message.is_empty() {
-                outln!(w, "- Saved working tree and index state · `{short}`");
+                outln!(w, "- {verb} working tree and index state · `{short}`");
             } else {
-                outln!(w, "- Saved **{message}** · `{short}`");
+                outln!(w, "- {verb} **{message}** · `{short}`");
             }
         }
     }

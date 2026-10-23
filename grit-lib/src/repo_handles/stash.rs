@@ -115,7 +115,7 @@ impl<'repo> RepositoryStash<'repo> {
             pathspecs: options.pathspecs.clone(),
             dry_run: options.dry_run,
         };
-        push_stash(self.repo, &inner)
+        push_stash(self.repo, &inner).map(|o| o.map(|r| r.oid))
     }
 
     /// Build a stash commit without updating `refs/stash`.

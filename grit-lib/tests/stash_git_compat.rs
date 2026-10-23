@@ -66,7 +66,8 @@ fn grit_stash_create_matches_git_list_show_pop_and_fsck() {
     let repo = open_grit(dir.path());
     let oid = push_stash(&repo, &stash_options(false, Some("custom msg")))
         .expect("push")
-        .expect("had changes");
+        .expect("had changes")
+        .oid;
 
     let clean = git_cmd(dir.path(), &["status", "--porcelain"]);
     assert!(
@@ -610,7 +611,8 @@ fn t3903_grit_stash_read_by_git_and_reverse() {
     let repo = open_grit(dir.path());
     let oid = push_stash(&repo, &stash_options(false, Some("grit msg")))
         .expect("push")
-        .expect("changes");
+        .expect("changes")
+        .oid;
     assert_fsck_strict(dir.path());
 
     let grit_show = git_cmd(
@@ -828,7 +830,8 @@ fn stash_push_u_tracked_file_replaced_by_untracked_dir_pop_refuses() {
     let repo = open_grit(dir.path());
     let stash_oid = push_stash(&repo, &stash_options(true, None))
         .expect("push")
-        .expect("stash oid");
+        .expect("stash oid")
+        .oid;
 
     let stash_obj = repo.odb().read(&stash_oid).expect("read stash");
     let stash_commit = parse_commit(&stash_obj.data).expect("parse stash");

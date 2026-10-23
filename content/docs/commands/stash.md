@@ -124,6 +124,9 @@ When there was nothing to save:
 | ----- | ---- | ------- |
 | `oid` | string | Full object id of the stash commit (success object only). |
 | `message` | string | Reflog message (for `-m`, `On <branch>: …`; otherwise Git-style `WIP on …`). |
+| `dry_run` | boolean | When `true`, nothing was written to refs, the index, or the worktree (partial stash preview only). Omitted when `false`. |
+| `stashed_hunks` | object | Map of repository-relative path → hunk id strings stashed (partial `--hunks` only; same shape as `grit add --json`). Omitted when empty. |
+| `stashed_lines` | object | Map of path → line range labels stashed (partial `--lines` only). Omitted when empty. |
 | `stashed` | boolean | Present and `false` only on the empty-worktree result. |
 
 ### `grit stash list`

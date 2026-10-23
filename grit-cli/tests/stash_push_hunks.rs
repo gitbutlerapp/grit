@@ -72,6 +72,17 @@ fn stash_push_hunks_json() {
         "message: {:?}",
         out["message"]
     );
+    let hunks = out["stashed_hunks"]
+        .as_object()
+        .expect("stashed_hunks object");
+    assert!(
+        hunks.get("f.txt").is_some_and(|v| {
+            v.as_array()
+                .is_some_and(|a| a.iter().any(|entry| entry.as_str() == Some(id)))
+        }),
+        "stashed_hunks: {:?}",
+        out["stashed_hunks"]
+    );
     let on_disk = fs::read_to_string(root.join("f.txt")).unwrap();
     assert!(on_disk.contains("LINE18"));
     assert!(!on_disk.contains("LINE5"));

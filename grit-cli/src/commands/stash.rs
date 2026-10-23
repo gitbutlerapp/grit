@@ -7,7 +7,9 @@ use anyhow::{Context, Result};
 use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::error::Error;
 use grit_lib::error::Error as LibError;
-use grit_lib::porcelain::hunk_select::{parse_hunk_id_list, HunkSelectError};
+use grit_lib::porcelain::hunk_select::{
+    parse_hunk_id_list, report_unstaged_hunk_selection, HunkSelectError,
+};
 use grit_lib::porcelain::stash::{
     apply_stash_entry, drop_stash, list_stashes, pop_stash_entry, push_stash, stash_diff,
     StashCreateOptions,
@@ -49,15 +51,22 @@ impl HumanRender for StashPushOutcome {
     fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         match self {
             Self::Nothing { .. } => outln!(w, "No local changes to save"),
-            Self::Saved { oid, message, .. } => {
+            Self::Saved {
+                oid,
+                message,
+                dry_run,
+                ..
+            } => {
                 let short = oid.get(..7).unwrap_or(oid.as_str());
-                if message.is_empty() {
-                    outln!(w, "Saved working directory and index state {short}");
+                let verb = if *dry_run {
+                    "Would stash"
                 } else {
-                    outln!(
-                        w,
-                        "Saved working directory and index state {message} {short}"
-                    );
+                    "Saved working directory and index state"
+                };
+                if message.is_empty() {
+                    outln!(w, "{verb} {short}");
+                } else {
+                    outln!(w, "{verb} {message} {short}");
                 }
             }
         }
@@ -287,70 +296,43 @@ pub fn run_push(
     if include_untracked && selection.is_some() {
         anyhow::bail!("--include-untracked cannot be used with --hunks or --lines");
     }
-    let stashed_hunks = selection
-        .as_ref()
-        .map(|s| {
-            let mut map = BTreeMap::new();
-            for id in &s.ids {
-                map.entry(String::new())
-                    .or_insert_with(Vec::new)
-                    .push(id.as_str().to_string());
-            }
-            map
-        })
-        .unwrap_or_default();
-    let stashed_lines = selection
-        .as_ref()
-        .map(|s| {
-            let mut map = BTreeMap::new();
-            for range in &s.ranges {
-                let label = if range.start == range.end {
-                    format!("{}", range.start)
-                } else {
-                    format!("{}-{}", range.start, range.end)
-                };
-                map.entry(range.path.clone())
-                    .or_insert_with(Vec::new)
-                    .push(label);
-            }
-            map
-        })
-        .unwrap_or_default();
+    let pathspecs: Vec<String> = Vec::new();
+    let (stashed_hunks, stashed_lines) = if let Some(ref sel) = selection {
+        let report =
+            report_unstaged_hunk_selection(&repo, sel, &pathspecs).map_err(anyhow::Error::new)?;
+        let hunks = report
+            .stashed_hunks
+            .into_iter()
+            .map(|(path, ids)| {
+                (
+                    path,
+                    ids.into_iter().map(|id| id.as_str().to_string()).collect(),
+                )
+            })
+            .collect();
+        (hunks, report.stashed_lines)
+    } else {
+        (BTreeMap::new(), BTreeMap::new())
+    };
     let options = StashCreateOptions {
-        message,
+        message: message.clone(),
         include_untracked,
         identity,
         selection: selection.take(),
-        pathspecs: Vec::new(),
+        pathspecs,
         dry_run,
     };
     let pushed = push_stash(&repo, &options).map_err(map_stash_error)?;
     Ok(match pushed {
-        Some(oid) => {
-            let reflog_message = if dry_run {
-                message_from_options(&options.message)
-            } else {
-                list_stashes(&repo)
-                    .map_err(map_stash_error)?
-                    .into_iter()
-                    .find(|e| e.oid == oid)
-                    .map(|e| e.message)
-                    .unwrap_or_default()
-            };
-            StashPushOutcome::Saved {
-                oid: oid.to_hex(),
-                message: reflog_message,
-                dry_run,
-                stashed_hunks,
-                stashed_lines,
-            }
-        }
+        Some(result) => StashPushOutcome::Saved {
+            oid: result.oid.to_hex(),
+            message: result.message,
+            dry_run,
+            stashed_hunks,
+            stashed_lines,
+        },
         None => StashPushOutcome::Nothing { stashed: false },
     })
-}
-
-fn message_from_options(message: &Option<String>) -> String {
-    message.clone().unwrap_or_default()
 }
 
 pub fn run_list() -> Result<StashListOutcome> {

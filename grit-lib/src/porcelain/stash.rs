@@ -737,7 +737,9 @@ fn build_stash_commit(
             &mut w_index,
             patches,
             &IndexApplyOptions {
-                dry_run: options.dry_run,
+                dry_run: false,
+                reverse: false,
+                head_tree_oid: None,
             },
         )
         .map_err(|e| Error::Message(e.to_string()))?;
@@ -813,6 +815,17 @@ pub fn store_stash(repo: &Repository, oid: ObjectId, message: &str, identity: &s
     )
 }
 
+/// Result of a successful [`push_stash`] (including dry-run previews).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StashPushResult {
+    /// The W commit object id (overlay-only when `dry_run` was set on options).
+    pub oid: ObjectId,
+    /// Reflog-style message that would be or was stored on `refs/stash`.
+    pub message: String,
+    /// Tree recorded on the W commit (overlay-only when `dry_run` was set).
+    pub w_tree: ObjectId,
+}
+
 /// Create a stash entry, store it, and reset the worktree and index to `HEAD`.
 ///
 /// Returns `None` when there is nothing to stash. Untracked paths included in
@@ -821,7 +834,10 @@ pub fn store_stash(repo: &Repository, oid: ObjectId, message: &str, identity: &s
 /// # Errors
 ///
 /// Same as [`create_stash`] and [`store_stash`], plus checkout failures.
-pub fn push_stash(repo: &Repository, options: &StashCreateOptions) -> Result<Option<ObjectId>> {
+pub fn push_stash(
+    repo: &Repository,
+    options: &StashCreateOptions,
+) -> Result<Option<StashPushResult>> {
     let work_tree = repo
         .work_tree()
         .ok_or_else(|| Error::PathError("cannot stash in a bare repository".into()))?;
@@ -829,8 +845,13 @@ pub fn push_stash(repo: &Repository, options: &StashCreateOptions) -> Result<Opt
     let Some(built) = build_stash_commit(repo, work_tree, options)? else {
         return Ok(None);
     };
+    let result = StashPushResult {
+        oid: built.w_commit,
+        message: built.message.clone(),
+        w_tree: built.w_tree,
+    };
     if options.dry_run {
-        return Ok(Some(built.w_commit));
+        return Ok(Some(result));
     }
     store_stash(repo, built.w_commit, &built.message, &options.identity)?;
     if let Some(ref patches) = built.partial_patches {
@@ -857,7 +878,7 @@ pub fn push_stash(repo: &Repository, options: &StashCreateOptions) -> Result<Opt
         let mut head_index = index_from_tree_with_worktree_stats(repo, &head_tree)?;
         repo.write_index(&mut head_index)?;
     }
-    Ok(Some(built.w_commit))
+    Ok(Some(result))
 }
 
 /// List stash entries from `refs/stash` reflog (newest first).
@@ -1805,7 +1826,7 @@ pub fn drop_stash_commit(git_dir: &Path, stash_oid: &ObjectId) -> Result<bool> {
 ///
 /// Propagates stash creation and checkout failures.
 pub fn push_operation_autostash(repo: &Repository, identity: &str) -> Result<Option<ObjectId>> {
-    push_stash(
+    Ok(push_stash(
         repo,
         &StashCreateOptions {
             message: Some("autostash".to_owned()),
@@ -1815,7 +1836,8 @@ pub fn push_operation_autostash(repo: &Repository, identity: &str) -> Result<Opt
             pathspecs: Vec::new(),
             dry_run: false,
         },
-    )
+    )?
+    .map(|r| r.oid))
 }
 
 /// Re-apply an operation autostash after a successful pull/merge/rebase integration.
@@ -2159,6 +2181,36 @@ mod hunk_push_tests {
     }
 
     #[test]
+    fn stash_push_hunks_dry_run_does_not_mutate_repo() {
+        let (tmp, repo, selection) = setup_two_hunk_repo();
+        let before = fs::read_to_string(tmp.path().join("f.txt")).unwrap();
+        let result = push_stash(
+            &repo,
+            &StashCreateOptions {
+                message: Some("preview".into()),
+                include_untracked: false,
+                identity: IDENT.into(),
+                selection: Some(selection),
+                pathspecs: Vec::new(),
+                dry_run: true,
+            },
+        )
+        .expect("push")
+        .expect("preview");
+        assert!(
+            result.message.contains("preview"),
+            "dry-run message uses reflog format: {}",
+            result.message
+        );
+        assert_eq!(list_stashes(&repo).expect("list").len(), 0);
+        assert_eq!(
+            fs::read_to_string(tmp.path().join("f.txt")).unwrap(),
+            before,
+            "dry-run must not change worktree"
+        );
+    }
+
+    #[test]
     fn stash_push_hunks_stashes_only_selected() {
         let (tmp, repo, selection) = setup_two_hunk_repo();
         let oid = push_stash(
@@ -2173,7 +2225,8 @@ mod hunk_push_tests {
             },
         )
         .expect("push")
-        .expect("oid");
+        .expect("oid")
+        .oid;
         let w_tree = stash_w_tree(&repo, &oid);
         let blob = tree_blob(&repo, &w_tree, "f.txt");
         let text = String::from_utf8_lossy(&blob);

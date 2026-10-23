@@ -4813,6 +4813,7 @@ pub grit_lib::error::Error::HashCollision
 pub grit_lib::error::Error::HashCollision::oid: grit_lib::objects::ObjectId
 pub grit_lib::error::Error::History(grit_lib::revwalk::history::HistoryError)
 pub grit_lib::error::Error::Hook(grit_lib::command_runner::hooks::HookError)
+pub grit_lib::error::Error::HunkSelection(grit_lib::porcelain::hunk_select::HunkSelectError)
 pub grit_lib::error::Error::IndexError(alloc::string::String)
 pub grit_lib::error::Error::IndexFsmonitorExtensionBadVersion(u32)
 pub grit_lib::error::Error::IndexFsmonitorExtensionEwahInvalid
@@ -4998,6 +4999,8 @@ impl core::convert::From<grit_lib::error::RefLockError> for grit_lib::error::Err
 pub fn grit_lib::error::Error::from(grit_lib::error::RefLockError) -> Self
 impl core::convert::From<grit_lib::porcelain::branch_error::BranchError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::porcelain::branch_error::BranchError) -> Self
+impl core::convert::From<grit_lib::porcelain::hunk_select::HunkSelectError> for grit_lib::error::Error
+pub fn grit_lib::error::Error::from(grit_lib::porcelain::hunk_select::HunkSelectError) -> Self
 impl core::convert::From<grit_lib::porcelain::tag::TagError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::porcelain::tag::TagError) -> Self
 impl core::convert::From<grit_lib::prelude::MidxError> for grit_lib::error::Error
@@ -11728,6 +11731,8 @@ impl core::convert::From<grit_lib::error::ApplyError> for grit_lib::porcelain::h
 pub fn grit_lib::porcelain::hunk_select::HunkSelectError::from(grit_lib::error::ApplyError) -> Self
 impl core::convert::From<grit_lib::error::Error> for grit_lib::porcelain::hunk_select::HunkSelectError
 pub fn grit_lib::porcelain::hunk_select::HunkSelectError::from(grit_lib::error::Error) -> Self
+impl core::convert::From<grit_lib::porcelain::hunk_select::HunkSelectError> for grit_lib::error::Error
+pub fn grit_lib::error::Error::from(grit_lib::porcelain::hunk_select::HunkSelectError) -> Self
 impl core::convert::From<grit_lib::porcelain::hunk_select::HunkSelectError> for grit_lib::porcelain::commit::CommitPatchError
 pub fn grit_lib::porcelain::commit::CommitPatchError::from(grit_lib::porcelain::hunk_select::HunkSelectError) -> Self
 impl core::convert::From<grit_lib::porcelain::hunk_select::HunkSelectError> for grit_lib::revwalk::history::HistoryError
@@ -11766,6 +11771,26 @@ impl core::marker::Unpin for grit_lib::porcelain::hunk_select::HunkSelection
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::hunk_select::HunkSelection
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::hunk_select::HunkSelection
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::hunk_select::HunkSelection
+pub struct grit_lib::porcelain::hunk_select::HunkSelectionReport
+pub grit_lib::porcelain::hunk_select::HunkSelectionReport::stashed_hunks: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::vec::Vec<grit_lib::diff::hunk_id::HunkId>>
+pub grit_lib::porcelain::hunk_select::HunkSelectionReport::stashed_lines: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::vec::Vec<alloc::string::String>>
+impl core::clone::Clone for grit_lib::porcelain::hunk_select::HunkSelectionReport
+pub fn grit_lib::porcelain::hunk_select::HunkSelectionReport::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::hunk_select::HunkSelectionReport
+impl core::cmp::PartialEq for grit_lib::porcelain::hunk_select::HunkSelectionReport
+pub fn grit_lib::porcelain::hunk_select::HunkSelectionReport::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::porcelain::hunk_select::HunkSelectionReport
+pub fn grit_lib::porcelain::hunk_select::HunkSelectionReport::default() -> Self
+impl core::fmt::Debug for grit_lib::porcelain::hunk_select::HunkSelectionReport
+pub fn grit_lib::porcelain::hunk_select::HunkSelectionReport::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::porcelain::hunk_select::HunkSelectionReport
+impl core::marker::Freeze for grit_lib::porcelain::hunk_select::HunkSelectionReport
+impl core::marker::Send for grit_lib::porcelain::hunk_select::HunkSelectionReport
+impl core::marker::Sync for grit_lib::porcelain::hunk_select::HunkSelectionReport
+impl core::marker::Unpin for grit_lib::porcelain::hunk_select::HunkSelectionReport
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::hunk_select::HunkSelectionReport
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::hunk_select::HunkSelectionReport
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::hunk_select::HunkSelectionReport
 pub struct grit_lib::porcelain::hunk_select::LineRange
 pub grit_lib::porcelain::hunk_select::LineRange::end: usize
 pub grit_lib::porcelain::hunk_select::LineRange::path: alloc::string::String
@@ -11830,8 +11855,30 @@ impl core::marker::Unpin for grit_lib::porcelain::hunk_select::StageHunksOutcome
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::hunk_select::StageHunksOutcome
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::hunk_select::StageHunksOutcome
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::hunk_select::StageHunksOutcome
+pub struct grit_lib::porcelain::hunk_select::WorktreeReverseApplyOptions
+pub grit_lib::porcelain::hunk_select::WorktreeReverseApplyOptions::dry_run: bool
+impl core::clone::Clone for grit_lib::porcelain::hunk_select::WorktreeReverseApplyOptions
+pub fn grit_lib::porcelain::hunk_select::WorktreeReverseApplyOptions::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::hunk_select::WorktreeReverseApplyOptions
+impl core::cmp::PartialEq for grit_lib::porcelain::hunk_select::WorktreeReverseApplyOptions
+pub fn grit_lib::porcelain::hunk_select::WorktreeReverseApplyOptions::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::porcelain::hunk_select::WorktreeReverseApplyOptions
+pub fn grit_lib::porcelain::hunk_select::WorktreeReverseApplyOptions::default() -> Self
+impl core::fmt::Debug for grit_lib::porcelain::hunk_select::WorktreeReverseApplyOptions
+pub fn grit_lib::porcelain::hunk_select::WorktreeReverseApplyOptions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::porcelain::hunk_select::WorktreeReverseApplyOptions
+impl core::marker::StructuralPartialEq for grit_lib::porcelain::hunk_select::WorktreeReverseApplyOptions
+impl core::marker::Freeze for grit_lib::porcelain::hunk_select::WorktreeReverseApplyOptions
+impl core::marker::Send for grit_lib::porcelain::hunk_select::WorktreeReverseApplyOptions
+impl core::marker::Sync for grit_lib::porcelain::hunk_select::WorktreeReverseApplyOptions
+impl core::marker::Unpin for grit_lib::porcelain::hunk_select::WorktreeReverseApplyOptions
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::hunk_select::WorktreeReverseApplyOptions
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::hunk_select::WorktreeReverseApplyOptions
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::hunk_select::WorktreeReverseApplyOptions
 pub fn grit_lib::porcelain::hunk_select::parse_hunk_id_list(&[alloc::string::String]) -> core::result::Result<grit_lib::porcelain::hunk_select::HunkSelection, grit_lib::porcelain::hunk_select::HunkSelectError>
+pub fn grit_lib::porcelain::hunk_select::report_unstaged_hunk_selection(&grit_lib::repo::Repository, &grit_lib::porcelain::hunk_select::HunkSelection, &[alloc::string::String]) -> core::result::Result<grit_lib::porcelain::hunk_select::HunkSelectionReport, grit_lib::porcelain::hunk_select::HunkSelectError>
 pub fn grit_lib::porcelain::hunk_select::resolve_selection(&grit_lib::repo::Repository, grit_lib::diff::hunk_id::DiffSide, &grit_lib::porcelain::hunk_select::HunkSelection, &[alloc::string::String]) -> core::result::Result<alloc::vec::Vec<grit_lib::apply::FilePatch>, grit_lib::porcelain::hunk_select::HunkSelectError>
+pub fn grit_lib::porcelain::hunk_select::reverse_apply_patches_to_worktree(&grit_lib::repo::Repository, &[grit_lib::apply::FilePatch], &grit_lib::porcelain::hunk_select::WorktreeReverseApplyOptions) -> core::result::Result<(), grit_lib::error::ApplyError>
 pub fn grit_lib::porcelain::hunk_select::restore_hunks(&grit_lib::repo::Repository, &grit_lib::porcelain::hunk_select::HunkSelection, &[alloc::string::String], bool, bool, bool) -> core::result::Result<grit_lib::porcelain::hunk_select::RestoreHunksOutcome, grit_lib::porcelain::hunk_select::HunkSelectError>
 pub fn grit_lib::porcelain::hunk_select::stage_hunks(&grit_lib::repo::Repository, grit_lib::diff::hunk_id::DiffSide, &grit_lib::porcelain::hunk_select::HunkSelection, &[alloc::string::String], bool) -> core::result::Result<grit_lib::porcelain::hunk_select::StageHunksOutcome, grit_lib::porcelain::hunk_select::HunkSelectError>
 pub fn grit_lib::porcelain::hunk_select::unstaged_file_diffs(&grit_lib::repo::Repository, &[alloc::string::String]) -> core::result::Result<alloc::vec::Vec<(grit_lib::diff::FileDiff, alloc::vec::Vec<grit_lib::diff::structured::StructuredHunk>)>, grit_lib::error::Error>
@@ -12944,9 +12991,12 @@ impl core::marker::UnsafeUnpin for grit_lib::stash::StashApplyOutcome
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::stash::StashApplyOutcome
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::stash::StashApplyOutcome
 pub struct grit_lib::porcelain::stash::StashCreateOptions
+pub grit_lib::porcelain::stash::StashCreateOptions::dry_run: bool
 pub grit_lib::porcelain::stash::StashCreateOptions::identity: alloc::string::String
 pub grit_lib::porcelain::stash::StashCreateOptions::include_untracked: bool
 pub grit_lib::porcelain::stash::StashCreateOptions::message: core::option::Option<alloc::string::String>
+pub grit_lib::porcelain::stash::StashCreateOptions::pathspecs: alloc::vec::Vec<alloc::string::String>
+pub grit_lib::porcelain::stash::StashCreateOptions::selection: core::option::Option<grit_lib::porcelain::hunk_select::HunkSelection>
 impl core::clone::Clone for grit_lib::stash::StashCreateOptions
 pub fn grit_lib::stash::StashCreateOptions::clone(&self) -> Self
 impl core::fmt::Debug for grit_lib::stash::StashCreateOptions
@@ -12977,6 +13027,24 @@ impl core::marker::Unpin for grit_lib::stash::StashEntry
 impl core::marker::UnsafeUnpin for grit_lib::stash::StashEntry
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::stash::StashEntry
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::stash::StashEntry
+pub struct grit_lib::porcelain::stash::StashPushResult
+pub grit_lib::porcelain::stash::StashPushResult::message: alloc::string::String
+pub grit_lib::porcelain::stash::StashPushResult::oid: grit_lib::objects::ObjectId
+impl core::clone::Clone for grit_lib::stash::StashPushResult
+pub fn grit_lib::stash::StashPushResult::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::stash::StashPushResult
+impl core::cmp::PartialEq for grit_lib::stash::StashPushResult
+pub fn grit_lib::stash::StashPushResult::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::stash::StashPushResult
+pub fn grit_lib::stash::StashPushResult::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::stash::StashPushResult
+impl core::marker::Freeze for grit_lib::stash::StashPushResult
+impl core::marker::Send for grit_lib::stash::StashPushResult
+impl core::marker::Sync for grit_lib::stash::StashPushResult
+impl core::marker::Unpin for grit_lib::stash::StashPushResult
+impl core::marker::UnsafeUnpin for grit_lib::stash::StashPushResult
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::stash::StashPushResult
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::stash::StashPushResult
 pub fn grit_lib::porcelain::stash::add_stage_entry(&mut grit_lib::index::Index, &[u8], &grit_lib::objects::ObjectId, u32, u16)
 pub fn grit_lib::porcelain::stash::apply_merge_autostash(&grit_lib::repo::Repository) -> grit_lib::error::Result<bool>
 pub fn grit_lib::porcelain::stash::apply_operation_autostash(&grit_lib::repo::Repository, &grit_lib::objects::ObjectId, &str) -> grit_lib::error::Result<bool>
@@ -12992,7 +13060,7 @@ pub fn grit_lib::porcelain::stash::list_stashes(&grit_lib::repo::Repository) -> 
 pub fn grit_lib::porcelain::stash::pop_stash(&grit_lib::repo::Repository, &std::path::Path, usize, bool, &str) -> grit_lib::error::Result<bool>
 pub fn grit_lib::porcelain::stash::pop_stash_entry(&grit_lib::repo::Repository, &std::path::Path, usize, bool, &str) -> grit_lib::error::Result<grit_lib::stash::StashApplyOutcome>
 pub fn grit_lib::porcelain::stash::push_operation_autostash(&grit_lib::repo::Repository, &str) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectId>>
-pub fn grit_lib::porcelain::stash::push_stash(&grit_lib::repo::Repository, &grit_lib::stash::StashCreateOptions) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectId>>
+pub fn grit_lib::porcelain::stash::push_stash(&grit_lib::repo::Repository, &grit_lib::stash::StashCreateOptions) -> grit_lib::error::Result<core::option::Option<grit_lib::stash::StashPushResult>>
 pub fn grit_lib::porcelain::stash::remove_empty_dirs(&std::path::Path, &std::path::Path, &grit_lib::config::environment::Environment)
 pub fn grit_lib::porcelain::stash::restore_operation_autostash(&grit_lib::repo::Repository, &grit_lib::objects::ObjectId, &str) -> grit_lib::error::Result<()>
 pub fn grit_lib::porcelain::stash::stash_diff(&grit_lib::repo::Repository, usize) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
@@ -13542,6 +13610,7 @@ pub grit_lib::prelude::Error::HashCollision
 pub grit_lib::prelude::Error::HashCollision::oid: grit_lib::objects::ObjectId
 pub grit_lib::prelude::Error::History(grit_lib::revwalk::history::HistoryError)
 pub grit_lib::prelude::Error::Hook(grit_lib::command_runner::hooks::HookError)
+pub grit_lib::prelude::Error::HunkSelection(grit_lib::porcelain::hunk_select::HunkSelectError)
 pub grit_lib::prelude::Error::IndexError(alloc::string::String)
 pub grit_lib::prelude::Error::IndexFsmonitorExtensionBadVersion(u32)
 pub grit_lib::prelude::Error::IndexFsmonitorExtensionEwahInvalid
@@ -13727,6 +13796,8 @@ impl core::convert::From<grit_lib::error::RefLockError> for grit_lib::error::Err
 pub fn grit_lib::error::Error::from(grit_lib::error::RefLockError) -> Self
 impl core::convert::From<grit_lib::porcelain::branch_error::BranchError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::porcelain::branch_error::BranchError) -> Self
+impl core::convert::From<grit_lib::porcelain::hunk_select::HunkSelectError> for grit_lib::error::Error
+pub fn grit_lib::error::Error::from(grit_lib::porcelain::hunk_select::HunkSelectError) -> Self
 impl core::convert::From<grit_lib::porcelain::tag::TagError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::porcelain::tag::TagError) -> Self
 impl core::convert::From<grit_lib::prelude::MidxError> for grit_lib::error::Error
@@ -19349,9 +19420,12 @@ impl core::marker::UnsafeUnpin for grit_lib::repo_handles::StashApplyOptions
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::repo_handles::StashApplyOptions
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::repo_handles::StashApplyOptions
 pub struct grit_lib::repo_handles::StashPushOptions
+pub grit_lib::repo_handles::StashPushOptions::dry_run: bool
 pub grit_lib::repo_handles::StashPushOptions::identity: alloc::string::String
 pub grit_lib::repo_handles::StashPushOptions::include_untracked: bool
 pub grit_lib::repo_handles::StashPushOptions::message: core::option::Option<alloc::string::String>
+pub grit_lib::repo_handles::StashPushOptions::pathspecs: alloc::vec::Vec<alloc::string::String>
+pub grit_lib::repo_handles::StashPushOptions::selection: core::option::Option<grit_lib::porcelain::hunk_select::HunkSelection>
 impl core::clone::Clone for grit_lib::repo_handles::StashPushOptions
 pub fn grit_lib::repo_handles::StashPushOptions::clone(&self) -> Self
 impl core::fmt::Debug for grit_lib::repo_handles::StashPushOptions
@@ -22069,9 +22143,12 @@ impl core::marker::UnsafeUnpin for grit_lib::stash::StashApplyOutcome
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::stash::StashApplyOutcome
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::stash::StashApplyOutcome
 pub struct grit_lib::stash::StashCreateOptions
+pub grit_lib::stash::StashCreateOptions::dry_run: bool
 pub grit_lib::stash::StashCreateOptions::identity: alloc::string::String
 pub grit_lib::stash::StashCreateOptions::include_untracked: bool
 pub grit_lib::stash::StashCreateOptions::message: core::option::Option<alloc::string::String>
+pub grit_lib::stash::StashCreateOptions::pathspecs: alloc::vec::Vec<alloc::string::String>
+pub grit_lib::stash::StashCreateOptions::selection: core::option::Option<grit_lib::porcelain::hunk_select::HunkSelection>
 impl core::clone::Clone for grit_lib::stash::StashCreateOptions
 pub fn grit_lib::stash::StashCreateOptions::clone(&self) -> Self
 impl core::fmt::Debug for grit_lib::stash::StashCreateOptions
@@ -22102,6 +22179,24 @@ impl core::marker::Unpin for grit_lib::stash::StashEntry
 impl core::marker::UnsafeUnpin for grit_lib::stash::StashEntry
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::stash::StashEntry
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::stash::StashEntry
+pub struct grit_lib::stash::StashPushResult
+pub grit_lib::stash::StashPushResult::message: alloc::string::String
+pub grit_lib::stash::StashPushResult::oid: grit_lib::objects::ObjectId
+impl core::clone::Clone for grit_lib::stash::StashPushResult
+pub fn grit_lib::stash::StashPushResult::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::stash::StashPushResult
+impl core::cmp::PartialEq for grit_lib::stash::StashPushResult
+pub fn grit_lib::stash::StashPushResult::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::stash::StashPushResult
+pub fn grit_lib::stash::StashPushResult::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::stash::StashPushResult
+impl core::marker::Freeze for grit_lib::stash::StashPushResult
+impl core::marker::Send for grit_lib::stash::StashPushResult
+impl core::marker::Sync for grit_lib::stash::StashPushResult
+impl core::marker::Unpin for grit_lib::stash::StashPushResult
+impl core::marker::UnsafeUnpin for grit_lib::stash::StashPushResult
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::stash::StashPushResult
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::stash::StashPushResult
 pub fn grit_lib::stash::add_stage_entry(&mut grit_lib::index::Index, &[u8], &grit_lib::objects::ObjectId, u32, u16)
 pub fn grit_lib::stash::apply_merge_autostash(&grit_lib::repo::Repository) -> grit_lib::error::Result<bool>
 pub fn grit_lib::stash::apply_operation_autostash(&grit_lib::repo::Repository, &grit_lib::objects::ObjectId, &str) -> grit_lib::error::Result<bool>
@@ -22117,7 +22212,7 @@ pub fn grit_lib::stash::list_stashes(&grit_lib::repo::Repository) -> grit_lib::e
 pub fn grit_lib::stash::pop_stash(&grit_lib::repo::Repository, &std::path::Path, usize, bool, &str) -> grit_lib::error::Result<bool>
 pub fn grit_lib::stash::pop_stash_entry(&grit_lib::repo::Repository, &std::path::Path, usize, bool, &str) -> grit_lib::error::Result<grit_lib::stash::StashApplyOutcome>
 pub fn grit_lib::stash::push_operation_autostash(&grit_lib::repo::Repository, &str) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectId>>
-pub fn grit_lib::stash::push_stash(&grit_lib::repo::Repository, &grit_lib::stash::StashCreateOptions) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectId>>
+pub fn grit_lib::stash::push_stash(&grit_lib::repo::Repository, &grit_lib::stash::StashCreateOptions) -> grit_lib::error::Result<core::option::Option<grit_lib::stash::StashPushResult>>
 pub fn grit_lib::stash::remove_empty_dirs(&std::path::Path, &std::path::Path, &grit_lib::config::environment::Environment)
 pub fn grit_lib::stash::restore_operation_autostash(&grit_lib::repo::Repository, &grit_lib::objects::ObjectId, &str) -> grit_lib::error::Result<()>
 pub fn grit_lib::stash::stash_diff(&grit_lib::repo::Repository, usize) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>

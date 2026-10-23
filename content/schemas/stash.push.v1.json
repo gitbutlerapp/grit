@@ -5,11 +5,32 @@
     {
       "description": "Local changes were saved to the stash.",
       "properties": {
+        "dry_run": {
+          "type": "boolean"
+        },
         "message": {
           "type": "string"
         },
         "oid": {
           "type": "string"
+        },
+        "stashed_hunks": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "type": "object"
+        },
+        "stashed_lines": {
+          "additionalProperties": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "type": "object"
         }
       },
       "required": [
