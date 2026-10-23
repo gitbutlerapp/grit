@@ -1325,8 +1325,8 @@ fn print_worktree_table(w: &mut dyn Write, worktrees: &[WorktreeRow]) -> anyhow:
         outln!(w, "No worktrees.");
         return Ok(());
     }
-    outln!(w, "| Path | Branch | HEAD |");
-    outln!(w, "| --- | --- | --- |");
+    outln!(w, "| Path | Branch | HEAD | Current | Locked | Prunable |");
+    outln!(w, "| --- | --- | --- | --- | --- | --- |");
     for wt in worktrees {
         let branch = wt
             .branch
@@ -1344,12 +1344,34 @@ fn print_worktree_table(w: &mut dyn Write, worktrees: &[WorktreeRow]) -> anyhow:
         } else {
             format!("`{}`", short_hex(&wt.head))
         };
+        let locked = if wt.locked {
+            wt.lock_reason
+                .as_deref()
+                .map(|r| format!("yes ({})", escape_table_cell(r)))
+                .unwrap_or_else(|| "yes".into())
+        } else {
+            "no".into()
+        };
+        let prunable = wt
+            .prunable_reason
+            .as_deref()
+            .map(escape_table_cell)
+            .unwrap_or_else(|| {
+                if wt.prunable {
+                    "yes".into()
+                } else {
+                    "no".into()
+                }
+            });
         outln!(
             w,
-            "| {} | {} | {} |",
+            "| {} | {} | {} | {} | {} | {} |",
             escape_table_cell(&wt.path),
             branch,
-            head
+            head,
+            if wt.is_current { "yes" } else { "no" },
+            locked,
+            prunable
         );
     }
     Ok(())
@@ -1577,6 +1599,8 @@ mod tests {
                 locked: false,
                 lock_reason: None,
                 prunable: false,
+                prunable_reason: None,
+                is_current: true,
             }],
         };
         let mut buf = Vec::new();

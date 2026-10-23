@@ -7,7 +7,7 @@ use grit_lib::repo_handles::LockWorktreeOptions;
 use grit_lib::state::HeadState;
 use grit_lib::worktree::{
     add_linked_worktree, list_worktrees, prune_linked_worktrees, remove_linked_worktree,
-    resolve_linked_worktree_add_path, AddLinkedWorktreeOptions,
+    resolve_linked_worktree_add_path, AddLinkedWorktreeOptions, PrunableReason,
 };
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -56,10 +56,12 @@ pub struct WorktreeRow {
     pub detached: bool,
     pub bare: bool,
     pub locked: bool,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    #[schemars(skip_serializing_if = "Option::is_none")]
     pub lock_reason: Option<String>,
     pub prunable: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub prunable_reason: Option<String>,
+    pub is_current: bool,
 }
 
 impl HumanRender for WorktreeOutcome {
@@ -78,9 +80,10 @@ impl HumanRender for WorktreeOutcome {
                                 String::new()
                             }
                         });
+                    let current = if wt.is_current { "*" } else { " " };
                     let lock = if wt.locked { " (locked)" } else { "" };
                     let prunable = if wt.prunable { " prunable" } else { "" };
-                    outln!(w, "  {}{branch}{lock}{prunable}", wt.path);
+                    outln!(w, "{current} {}{branch}{lock}{prunable}", wt.path);
                 }
             }
             WorktreeOutcome::Add { path, branch, .. } => {
@@ -238,6 +241,11 @@ fn map_row(entry: grit_lib::worktree::WorktreeEntry) -> WorktreeRow {
         locked: entry.is_locked,
         lock_reason: entry.lock_reason,
         prunable: entry.is_prunable,
+        prunable_reason: entry
+            .prunable_reason
+            .map(PrunableReason::porcelain_message)
+            .map(str::to_owned),
+        is_current: entry.is_current,
     }
 }
 

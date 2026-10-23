@@ -22,7 +22,7 @@ grit worktree prune
 
 ## Description
 
-Git linked worktrees share one object database but have separate working trees and `HEAD`. `grit worktree list` shows the main worktree first, then linked worktrees (same order as `git worktree list`). Detached checkouts are labeled `(detached HEAD)` in human output (same idea as `git worktree list`). Linked rows whose working tree directory is gone are marked `prunable`, matching `git worktree list`.
+Git linked worktrees share one object database but have separate working trees and `HEAD`. `grit worktree list` shows the main worktree first, then linked worktrees (same order as `git worktree list`). The current worktree is prefixed with `*` in human output. Detached checkouts are labeled `(detached HEAD)` in human output (same idea as `git worktree list`). Linked rows whose working tree directory is gone are marked `prunable`, matching `git worktree list --porcelain` reason text in JSON.
 
 Paths in human, `--json`, and `--markdown` output use normal absolute paths (no Windows `\\?\` verbatim prefix) with forward slashes, so scripts can pass them to `cd` or `grit worktree remove` unchanged.
 
@@ -114,7 +114,10 @@ List:
       "detached": false,
       "bare": false,
       "locked": false,
-      "prunable": false
+      "lock_reason": null,
+      "prunable": false,
+      "prunable_reason": null,
+      "is_current": true
     }
   ]
 }
@@ -123,12 +126,14 @@ List:
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
 | `action` | string | `list`, `add`, `remove`, `prune`, `lock`, or `unlock`. |
-| `worktrees` | array | For `list`, one row per worktree (each item includes `path`, `head`, `branch`, and related flags). |
+| `worktrees` | array | For `list`, one object per worktree (fields below). |
 | `path` | string | For `add` / `remove` / `lock` / `unlock`, absolute path to the working tree. |
 | `head` | string | For `add`, current commit oid checked out in the new worktree. |
 | `branch` | string or null | For `add`, branch checked out when not detached. |
 | `reason` | string or null | For `lock`, optional reason stored in the lock file. |
 | `pruned` | array | For `prune`, absolute paths whose registrations were removed. |
+
+Each object in `worktrees` (list action) includes `path`, `head`, `branch`, `detached`, `bare`, `locked`, `lock_reason` (always present, `null` when absent), `prunable`, optional `prunable_reason`, and `is_current`.
 
 Add:
 

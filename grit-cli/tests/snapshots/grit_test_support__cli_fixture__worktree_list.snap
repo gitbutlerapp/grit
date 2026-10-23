@@ -5,17 +5,17 @@ expression: payload
 {
   "human": {
     "exit": 0,
-    "stdout": "  [REPO] [main]\n  [REPO]/linked-wt [wt|branch]\n",
+    "stdout": "* [REPO] [main]\n  [REPO]/linked-wt [wt|branch]\n",
     "stderr": ""
   },
   "json": {
     "exit": 0,
-    "stdout": "{\"action\":\"list\",\"worktrees\":[{\"path\":\"[REPO]\",\"head\":\"83352a61f6715ec3f0a297c6d6150725154fb833\",\"branch\":\"main\",\"detached\":false,\"bare\":false,\"locked\":false,\"prunable\":false},{\"path\":\"[REPO]/linked-wt\",\"head\":\"83352a61f6715ec3f0a297c6d6150725154fb833\",\"branch\":\"wt|branch\",\"detached\":false,\"bare\":false,\"locked\":false,\"prunable\":false}]}\n",
+    "stdout": "{\"action\":\"list\",\"worktrees\":[{\"path\":\"[REPO]\",\"head\":\"83352a61f6715ec3f0a297c6d6150725154fb833\",\"branch\":\"main\",\"detached\":false,\"bare\":false,\"locked\":false,\"lock_reason\":null,\"prunable\":false,\"is_current\":true},{\"path\":\"[REPO]/linked-wt\",\"head\":\"83352a61f6715ec3f0a297c6d6150725154fb833\",\"branch\":\"wt|branch\",\"detached\":false,\"bare\":false,\"locked\":false,\"lock_reason\":null,\"prunable\":false,\"is_current\":false}]}\n",
     "stderr": ""
   },
   "markdown": {
     "exit": 0,
-    "stdout": "## Worktrees\n\n| Path | Branch | HEAD |\n| --- | --- | --- |\n| [REPO] | `main` | `83352a6` |\n| [REPO]/linked-wt | `wt\\|branch` | `83352a6` |\n",
+    "stdout": "## Worktrees\n\n| Path | Branch | HEAD | Current | Locked | Prunable |\n| --- | --- | --- | --- | --- | --- |\n| [REPO] | `main` | `83352a6` | yes | no | no |\n| [REPO]/linked-wt | `wt\\|branch` | `83352a6` | no | no | no |\n",
     "stderr": ""
   }
 }

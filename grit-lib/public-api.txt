@@ -23515,6 +23515,31 @@ impl core::marker::Unpin for grit_lib::worktree::worktree_rules::WorktreeRules
 impl core::marker::UnsafeUnpin for grit_lib::worktree::worktree_rules::WorktreeRules
 impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::worktree::worktree_rules::WorktreeRules
 impl !core::panic::unwind_safe::UnwindSafe for grit_lib::worktree::worktree_rules::WorktreeRules
+pub enum grit_lib::worktree::PrunableReason
+pub grit_lib::worktree::PrunableReason::AdminNotValidDirectory
+pub grit_lib::worktree::PrunableReason::ExplicitMarker
+pub grit_lib::worktree::PrunableReason::GitdirFileMissing
+pub grit_lib::worktree::PrunableReason::GitdirPointsElsewhere
+pub grit_lib::worktree::PrunableReason::InvalidGitdirFile
+pub grit_lib::worktree::PrunableReason::WorktreePathMissing
+impl grit_lib::worktree::PrunableReason
+pub fn grit_lib::worktree::PrunableReason::porcelain_message(self) -> &'static str
+impl core::clone::Clone for grit_lib::worktree::PrunableReason
+pub fn grit_lib::worktree::PrunableReason::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::worktree::PrunableReason
+impl core::cmp::PartialEq for grit_lib::worktree::PrunableReason
+pub fn grit_lib::worktree::PrunableReason::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::worktree::PrunableReason
+pub fn grit_lib::worktree::PrunableReason::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::worktree::PrunableReason
+impl core::marker::StructuralPartialEq for grit_lib::worktree::PrunableReason
+impl core::marker::Freeze for grit_lib::worktree::PrunableReason
+impl core::marker::Send for grit_lib::worktree::PrunableReason
+impl core::marker::Sync for grit_lib::worktree::PrunableReason
+impl core::marker::Unpin for grit_lib::worktree::PrunableReason
+impl core::marker::UnsafeUnpin for grit_lib::worktree::PrunableReason
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::worktree::PrunableReason
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::worktree::PrunableReason
 pub struct grit_lib::worktree::AddLinkedWorktreeOptions
 pub grit_lib::worktree::AddLinkedWorktreeOptions::branch: core::option::Option<alloc::string::String>
 pub grit_lib::worktree::AddLinkedWorktreeOptions::detach: bool
@@ -23556,10 +23581,12 @@ pub struct grit_lib::worktree::WorktreeEntry
 pub grit_lib::worktree::WorktreeEntry::admin_dir: std::path::PathBuf
 pub grit_lib::worktree::WorktreeEntry::head: grit_lib::state::HeadState
 pub grit_lib::worktree::WorktreeEntry::is_bare: bool
+pub grit_lib::worktree::WorktreeEntry::is_current: bool
 pub grit_lib::worktree::WorktreeEntry::is_locked: bool
 pub grit_lib::worktree::WorktreeEntry::is_prunable: bool
 pub grit_lib::worktree::WorktreeEntry::lock_reason: core::option::Option<alloc::string::String>
 pub grit_lib::worktree::WorktreeEntry::path: std::path::PathBuf
+pub grit_lib::worktree::WorktreeEntry::prunable_reason: core::option::Option<grit_lib::worktree::PrunableReason>
 impl core::clone::Clone for grit_lib::worktree::WorktreeEntry
 pub fn grit_lib::worktree::WorktreeEntry::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::worktree::WorktreeEntry

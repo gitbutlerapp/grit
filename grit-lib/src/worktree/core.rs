@@ -22,6 +22,38 @@ use crate::repo::{common_git_dir_for_config, Repository};
 use crate::rev_parse::resolve_revision;
 use crate::state::{resolve_head, HeadState};
 
+/// Why Git marks a linked worktree as `prunable` in `worktree list --porcelain`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrunableReason {
+    /// Admin path is not a directory (`not a valid directory`).
+    AdminNotValidDirectory,
+    /// `<admin>/gitdir` is missing (`gitdir file does not exist`).
+    GitdirFileMissing,
+    /// Resolved gitdir target is missing (`gitdir file points to non-existent location`).
+    GitdirPointsElsewhere,
+    /// Working tree root directory is missing while the gitdir file still exists.
+    WorktreePathMissing,
+    /// `<admin>/gitdir` is empty or unreadable (`invalid gitdir file`).
+    InvalidGitdirFile,
+    /// `<admin>/prunable` exists (grit/Git admin marker forcing prune eligibility).
+    ExplicitMarker,
+}
+
+impl PrunableReason {
+    /// Message text after `prunable` in `git worktree list --porcelain`.
+    #[must_use]
+    pub fn porcelain_message(self) -> &'static str {
+        match self {
+            Self::AdminNotValidDirectory => "not a valid directory",
+            Self::GitdirFileMissing => "gitdir file does not exist",
+            Self::GitdirPointsElsewhere => "gitdir file points to non-existent location",
+            Self::WorktreePathMissing => "gitdir file points to non-existent location",
+            Self::InvalidGitdirFile => "invalid gitdir file",
+            Self::ExplicitMarker => "gitdir file points to non-existent location",
+        }
+    }
+}
+
 /// One row returned by [`list_worktrees`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WorktreeEntry {
@@ -37,8 +69,12 @@ pub struct WorktreeEntry {
     pub lock_reason: Option<String>,
     /// Administrative directory: common git dir for main, else `worktrees/<id>/`.
     pub admin_dir: PathBuf,
-    /// True when the working tree directory is gone (Git `prunable` in `worktree list`).
+    /// True when [`Self::prunable_reason`] is set (Git `prunable` in `worktree list`).
     pub is_prunable: bool,
+    /// Typed prune reason when [`Self::is_prunable`] is true.
+    pub prunable_reason: Option<PrunableReason>,
+    /// True when this row is the worktree [`Repository`] was opened from.
+    pub is_current: bool,
 }
 
 /// Shared git directory for `git_dir` (follows `commondir` for linked worktrees).
@@ -200,6 +236,7 @@ fn branch_checked_out_error(branch: &str, worktree_path: &Path) -> Error {
 /// Order matches Git: main worktree first, then linked worktrees sorted by admin id.
 pub fn list_worktrees(repo: &Repository) -> Result<Vec<WorktreeEntry>> {
     let common = common_git_dir(repo.git_dir());
+    let current_admin = worktree_admin_dir(repo);
     let mut entries = Vec::new();
 
     let bare = is_bare_repository(&common);
@@ -225,6 +262,8 @@ pub fn list_worktrees(repo: &Repository) -> Result<Vec<WorktreeEntry>> {
         lock_reason: None,
         admin_dir: common.clone(),
         is_prunable: false,
+        prunable_reason: None,
+        is_current: admin_dirs_match(&common, &current_admin),
     });
 
     let worktrees_dir = common.join("worktrees");
@@ -245,7 +284,9 @@ pub fn list_worktrees(repo: &Repository) -> Result<Vec<WorktreeEntry>> {
         let wt_head = resolve_linked_head(&admin, &common);
         let wt_path = read_worktree_path(&admin)?;
         let (is_locked, lock_reason) = read_lock_state(&admin)?;
-        let is_prunable = worktree_entry_is_prunable(&admin, &wt_path, is_locked);
+        let prunable_reason = linked_worktree_prunable_reason(&admin, is_locked);
+        let is_prunable = prunable_reason.is_some();
+        let is_current = admin_dirs_match(&admin, &current_admin);
         entries.push(WorktreeEntry {
             path: wt_path,
             head: wt_head,
@@ -254,6 +295,8 @@ pub fn list_worktrees(repo: &Repository) -> Result<Vec<WorktreeEntry>> {
             lock_reason,
             admin_dir: admin,
             is_prunable,
+            prunable_reason,
+            is_current,
         });
     }
 
@@ -556,7 +599,7 @@ pub fn add_linked_worktree(
         )?;
         checkout_between_trees(&linked, None, &tree_oid)?;
 
-        linked_worktree_entry(&admin, &common)
+        linked_worktree_entry(&admin, &common, &worktree_admin_dir(repo))
     })();
 
     match finish {
@@ -596,11 +639,16 @@ pub fn prune_linked_worktrees(repo: &Repository) -> Result<Vec<PathBuf>> {
     Ok(pruned)
 }
 
-fn linked_worktree_entry(admin: &Path, common: &Path) -> Result<WorktreeEntry> {
+fn linked_worktree_entry(
+    admin: &Path,
+    common: &Path,
+    current_admin: &Path,
+) -> Result<WorktreeEntry> {
     let wt_path = read_worktree_path(admin)?;
     let wt_head = resolve_linked_head(admin, common);
     let (is_locked, lock_reason) = read_lock_state(admin)?;
-    let is_prunable = worktree_entry_is_prunable(admin, &wt_path, is_locked);
+    let prunable_reason = linked_worktree_prunable_reason(admin, is_locked);
+    let is_prunable = prunable_reason.is_some();
     Ok(WorktreeEntry {
         path: wt_path,
         head: wt_head,
@@ -609,17 +657,46 @@ fn linked_worktree_entry(admin: &Path, common: &Path) -> Result<WorktreeEntry> {
         lock_reason,
         admin_dir: admin.to_path_buf(),
         is_prunable,
+        prunable_reason,
+        is_current: admin_dirs_match(admin, current_admin),
     })
 }
 
-fn worktree_entry_is_prunable(admin: &Path, wt_path: &Path, is_locked: bool) -> bool {
+fn linked_worktree_prunable_reason(admin: &Path, is_locked: bool) -> Option<PrunableReason> {
     if is_locked {
-        return false;
+        return None;
+    }
+    if !admin.is_dir() {
+        return Some(PrunableReason::AdminNotValidDirectory);
+    }
+    let gitdir_file = admin.join("gitdir");
+    if !gitdir_file.is_file() {
+        return Some(PrunableReason::GitdirFileMissing);
+    }
+    let raw = fs::read_to_string(&gitdir_file).ok()?;
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Some(PrunableReason::InvalidGitdirFile);
+    }
+    let mut dotgit = PathBuf::from(trimmed);
+    if dotgit.is_relative() {
+        dotgit = admin.join(dotgit);
+    }
+    let dotgit = path_for_disk_compare(&dotgit);
+    if !dotgit.is_file() {
+        return Some(PrunableReason::GitdirPointsElsewhere);
+    }
+    let wt_path = dotgit
+        .parent()
+        .map(path_for_disk_compare)
+        .unwrap_or_else(|| dotgit.clone());
+    if !wt_path.exists() {
+        return Some(PrunableReason::WorktreePathMissing);
     }
     if admin.join("prunable").is_file() {
-        return true;
+        return Some(PrunableReason::ExplicitMarker);
     }
-    !wt_path.exists()
+    None
 }
 
 /// Resolve `path` for [`add_linked_worktree`].

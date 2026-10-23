@@ -6,6 +6,22 @@ use std::sync::atomic::{AtomicU32, Ordering};
 
 const GRIT: &str = env!("CARGO_BIN_EXE_grit");
 
+#[derive(serde::Deserialize)]
+struct WorktreeListJson {
+    action: String,
+    worktrees: Vec<WorktreeListRow>,
+}
+
+#[derive(serde::Deserialize)]
+struct WorktreeListRow {
+    path: String,
+    locked: bool,
+    lock_reason: Option<String>,
+    prunable: bool,
+    prunable_reason: Option<String>,
+    is_current: bool,
+}
+
 fn unique_tmp(tag: &str) -> PathBuf {
     static COUNTER: AtomicU32 = AtomicU32::new(0);
     let n = COUNTER.fetch_add(1, Ordering::SeqCst);
@@ -45,6 +61,83 @@ fn grit(dir: &Path, args: &[&str]) -> std::process::Output {
         .args(args)
         .output()
         .expect("spawn grit")
+}
+
+#[test]
+fn worktree_list_json_has_is_current_lock_reason_prunable() {
+    let dir = unique_tmp("list-json");
+    git(&dir, &["init", "-q", "-b", "main", "."]);
+    std::fs::write(dir.join("f"), b"1\n").unwrap();
+    git(&dir, &["add", "f"]);
+    git(&dir, &["commit", "-qm", "base"]);
+
+    let wt_lock = dir.join("linked-lock");
+    git(
+        &dir,
+        &["worktree", "add", wt_lock.to_str().unwrap(), "-b", "side"],
+    );
+    git(
+        &dir,
+        &[
+            "worktree",
+            "lock",
+            wt_lock.to_str().unwrap(),
+            "--reason",
+            "hold",
+        ],
+    );
+
+    let wt_gone = dir.join("linked-gone");
+    git(
+        &dir,
+        &["worktree", "add", wt_gone.to_str().unwrap(), "-b", "gone"],
+    );
+    std::fs::remove_dir_all(&wt_gone).unwrap();
+
+    let out = grit(&wt_lock, &["worktree", "list", "--json"]);
+    assert!(
+        out.status.success(),
+        "list json: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let parsed: WorktreeListJson =
+        serde_json::from_slice(&out.stdout).expect("parse worktree list json");
+    assert_eq!(parsed.action, "list");
+    assert_eq!(parsed.worktrees.len(), 3);
+
+    let current = parsed
+        .worktrees
+        .iter()
+        .filter(|w| w.is_current)
+        .collect::<Vec<_>>();
+    assert_eq!(current.len(), 1);
+    assert!(current[0].path.ends_with("linked-lock"));
+
+    let locked = parsed
+        .worktrees
+        .iter()
+        .find(|w| w.path.ends_with("linked-lock"))
+        .expect("locked row");
+    assert!(locked.locked);
+    assert_eq!(locked.lock_reason.as_deref(), Some("hold"));
+
+    let main_row = parsed
+        .worktrees
+        .iter()
+        .find(|w| w.path.ends_with("list-json"))
+        .or_else(|| parsed.worktrees.iter().find(|w| !w.locked && !w.prunable))
+        .expect("main row");
+    assert!(main_row.lock_reason.is_none());
+
+    let gone = parsed
+        .worktrees
+        .iter()
+        .find(|w| w.prunable)
+        .expect("prunable row");
+    assert_eq!(
+        gone.prunable_reason.as_deref(),
+        Some("gitdir file points to non-existent location")
+    );
 }
 
 #[test]

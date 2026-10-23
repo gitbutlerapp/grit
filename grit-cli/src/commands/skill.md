@@ -147,7 +147,7 @@ URLs can be `https://`, `ssh://`, `user@host:path`, `git://`, `file://` or a loc
 | Task | Command |
 | --- | --- |
 | Offline pack transfer | `grit bundle create`, `verify`, `list`, `unbundle` |
-| Extra working trees | `grit worktree list`, `add`, `remove`, `lock`, `unlock`, `prune` |
+| Extra working trees | `grit worktree list`, `add`, `remove`, `lock`, `unlock`, `prune` — list `--json` includes `is_current`, `lock_reason` (null when absent), and `prunable_reason` when prunable |
 
 ## Tags and config
 
