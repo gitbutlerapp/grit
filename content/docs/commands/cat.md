@@ -90,6 +90,30 @@ Schema: [v1](/schemas/cat/v1.json)
 
 Pass `--markdown` for a short summary and a fenced block (or table for trees) of the object contents. Binary blobs are summarized in Markdown; use `--json` for base64 payload.
 
+
+
+```text
+## Cat
+
+- **spec:** `HEAD:tracked.txt`
+- **oid:** `b641243fee370fbfe093daae08234ecc4b993d52`
+- **kind:** blob
+- **size:** 11
+
+Blob body follows in a `text` code fence when stdout is a file.
+```
+
+## Exit status
+
+| Code | Meaning |
+| ---: | --- |
+| `0` | Success ([`success`](../exit-codes/)). |
+| `1` | Command failed ([`failure`](../exit-codes/)). |
+| `2` | Invalid flags or arguments ([`usage`](../exit-codes/)). |
+
+See [Exit codes](../exit-codes/) for shared rules and structured `--json` `kind` values.
+
+
 ## See also
 
 - [`grit resolve`](resolve.md) — resolve specs to ids and types without printing contents

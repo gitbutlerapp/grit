@@ -207,6 +207,23 @@ Schema: [v1](/schemas/tag/v1.json)
 
 Markdown uses headings, bullet lists, and fenced blocks; pipe characters inside table cells are escaped. See the JSON output section for the stable field contract.
 
+
+
+```text
+No tags yet.
+```
+
+## Exit status
+
+| Code | Meaning |
+| ---: | --- |
+| `0` | Success, or `--verify` when every tag passes. |
+| `1` | `--verify` when any tag fails or is not annotated. |
+| `2` | Invalid flags ([`usage`](../exit-codes/)). |
+
+See [Exit codes](../exit-codes/).
+
+
 ## See also
 
 [grit push](../push/)

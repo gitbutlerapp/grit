@@ -81,6 +81,25 @@ Schema: [v1](/schemas/merge-base/v1.json)
 
 Pass [`--markdown`](../global-options/) for a short heading and bullet list of merge bases, or a sentence for `--is-ancestor`.
 
+
+
+```text
+# Merge bases
+
+- `062ca6e74f5603f4d09063c0f46cd07d8c96e019`
+```
+
+## Exit status
+
+| Code | Meaning |
+| ---: | --- |
+| `0` | Success, or `--is-ancestor` when the first commit is an ancestor of the second. |
+| `1` | `--is-ancestor` when not an ancestor, or other failure. |
+| `2` | Invalid flags ([`usage`](../exit-codes/)). |
+
+See [Exit codes](../exit-codes/).
+
+
 ## See also
 
 [grit revs](../revs/), [grit log](../log/), [grit diff](../diff/)

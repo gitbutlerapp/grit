@@ -113,10 +113,60 @@ Example (listing):
 {
   "commits": [
     {
-      "oid": "92501f188ae0815af09a0cef6e121eddda4113cf",
+      "oid": "83352a61f6715ec3f0a297c6d6150725154fb833",
+      "parents": [
+        "062ca6e74f5603f4d09063c0f46cd07d8c96e019"
+      ],
+      "author": {
+        "name": "Test",
+        "email": "test@example.com",
+        "date": "2023-11-14T22:13:20Z"
+      },
+      "committer": {
+        "name": "Test",
+        "email": "test@example.com",
+        "date": "2023-11-14T22:13:20Z"
+      },
       "subject": "second",
-      "change_id": "krrtwksqnwvkpkwuzwkwymqzwxywulrx",
-      "change_id_stored": false
+      "message": "second",
+      "refs": [
+        {
+          "name": "HEAD",
+          "kind": "head"
+        },
+        {
+          "name": "main",
+          "kind": "branch"
+        }
+      ],
+      "relative_date": "[TIME_AGO]",
+      "change_id": "xzyqzyyzswyupvtlsovyzultryuqzlvk",
+      "change_id_stored": true
+    },
+    {
+      "oid": "062ca6e74f5603f4d09063c0f46cd07d8c96e019",
+      "parents": [],
+      "author": {
+        "name": "Test",
+        "email": "test@example.com",
+        "date": "2023-11-14T22:13:20Z"
+      },
+      "committer": {
+        "name": "Test",
+        "email": "test@example.com",
+        "date": "2023-11-14T22:13:20Z"
+      },
+      "subject": "first",
+      "message": "first",
+      "refs": [
+        {
+          "name": "feature",
+          "kind": "branch"
+        }
+      ],
+      "relative_date": "[TIME_AGO]",
+      "change_id": "prkwwuwrytvxrwozplzrxmvozwutplkq",
+      "change_id_stored": true
     }
   ],
   "count": null,
@@ -130,7 +180,9 @@ Example (`--count`):
 ```json
 {
   "commits": [],
-  "count": 2
+  "count": 2,
+  "truncated": false,
+  "next": null
 }
 ```
 
@@ -140,6 +192,8 @@ Example (`--count --left-right`):
 {
   "commits": [],
   "count": null,
+  "truncated": false,
+  "next": null,
   "left_right": {
     "left": 3,
     "right": 5
@@ -152,6 +206,27 @@ Example (`--count --left-right`):
 Schema: [v1](/schemas/revs/v1.json)
 
 Pass [`--markdown`](../global-options/) for a heading and bullet list of oid/subject pairs, or a bold count when `--count` is used.
+
+
+
+
+```text
+# Commits
+
+- `83352a61f6715ec3f0a297c6d6150725154fb833` second
+- `062ca6e74f5603f4d09063c0f46cd07d8c96e019` first
+```
+
+## Exit status
+
+| Code | Meaning |
+| ---: | --- |
+| `0` | Success ([`success`](../exit-codes/)). |
+| `1` | Command failed ([`failure`](../exit-codes/)). |
+| `2` | Invalid flags or arguments ([`usage`](../exit-codes/)). |
+
+See [Exit codes](../exit-codes/) for shared rules and structured `--json` `kind` values.
+
 
 ## See also
 

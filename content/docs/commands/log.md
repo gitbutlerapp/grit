@@ -174,24 +174,60 @@ Example:
 {
   "commits": [
     {
-      "oid": "92501f188ae0815af09a0cef6e121eddda4113cf",
-      "subject": "second",
+      "oid": "83352a61f6715ec3f0a297c6d6150725154fb833",
+      "parents": [
+        "062ca6e74f5603f4d09063c0f46cd07d8c96e019"
+      ],
       "author": {
-        "name": "Ada Lovelace",
-        "email": "ada@example.com",
-        "date": "2026-10-07T14:54:02Z"
+        "name": "Test",
+        "email": "test@example.com",
+        "date": "2023-11-14T22:13:20Z"
       },
-      "relative_date": "2 days ago"
+      "committer": {
+        "name": "Test",
+        "email": "test@example.com",
+        "date": "2023-11-14T22:13:20Z"
+      },
+      "subject": "second",
+      "message": "second",
+      "refs": [
+        {
+          "name": "HEAD",
+          "kind": "head"
+        },
+        {
+          "name": "main",
+          "kind": "branch"
+        }
+      ],
+      "relative_date": "[TIME_AGO]",
+      "change_id": "xzyqzyyzswyupvtlsovyzultryuqzlvk",
+      "change_id_stored": true
     },
     {
-      "oid": "919c45f33de5e5c0bd05f8ffb089f697f4644976",
-      "subject": "initial",
+      "oid": "062ca6e74f5603f4d09063c0f46cd07d8c96e019",
+      "parents": [],
       "author": {
-        "name": "Ada Lovelace",
-        "email": "ada@example.com",
-        "date": "2026-10-05T09:12:00Z"
+        "name": "Test",
+        "email": "test@example.com",
+        "date": "2023-11-14T22:13:20Z"
       },
-      "relative_date": "4 days ago"
+      "committer": {
+        "name": "Test",
+        "email": "test@example.com",
+        "date": "2023-11-14T22:13:20Z"
+      },
+      "subject": "first",
+      "message": "first",
+      "refs": [
+        {
+          "name": "feature",
+          "kind": "branch"
+        }
+      ],
+      "relative_date": "[TIME_AGO]",
+      "change_id": "prkwwuwrytvxrwozplzrxmvozwutplkq",
+      "change_id_stored": true
     }
   ],
   "next": null,
@@ -210,6 +246,18 @@ Pass [`--markdown`](../global-options/) for a bullet list of commits (short oid,
 
 More history: run `grit log --cursor=lw1.R0x…`
 ```
+
+
+## Exit status
+
+| Code | Meaning |
+| ---: | --- |
+| `0` | Success ([`success`](../exit-codes/)). |
+| `1` | Command failed ([`failure`](../exit-codes/)). |
+| `2` | Invalid flags or arguments ([`usage`](../exit-codes/)). |
+
+See [Exit codes](../exit-codes/) for shared rules and structured `--json` `kind` values.
+
 
 ## See also
 

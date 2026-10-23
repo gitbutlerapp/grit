@@ -80,6 +80,31 @@ Pass `--markdown` for an agent-friendly summary with the same fields as JSON in 
 
 Schema: [v1](/schemas/repack/v1.json)
 
+
+
+
+```text
+## Repack
+
+- **dry_run:** true
+- **loose_before:** 9
+- **packs_before:** 0
+- **objects_packed:** 9
+- **removed_pack_files:** 0
+- **pruned_loose:** 0
+```
+
+## Exit status
+
+| Code | Meaning |
+| ---: | --- |
+| `0` | Success ([`success`](../exit-codes/)). |
+| `1` | Command failed ([`failure`](../exit-codes/)). |
+| `2` | Invalid flags or arguments ([`usage`](../exit-codes/)). |
+
+See [Exit codes](../exit-codes/) for shared rules and structured `--json` `kind` values.
+
+
 ## See also
 
 - [`grit gc`](gc.md) — repack plus unreachable loose-object prune

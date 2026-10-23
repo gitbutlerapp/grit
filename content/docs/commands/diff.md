@@ -153,27 +153,51 @@ Example:
 
 ```json
 {
+  "changed": true,
   "files": [
     {
-      "path": "main.rs",
-      "status": "modified",
+      "path": "staged.txt",
+      "status": "added",
+      "new_mode": "100644",
       "binary": false,
       "hunks": [
         {
-          "id": "a1b2c3d4e5f6",
-          "index": 0,
+          "old_start": 0,
+          "new_start": 1,
+          "old_lines": 0,
+          "new_lines": 1,
+          "lines": [
+            {
+              "kind": "add",
+              "new": 1,
+              "text": "staged contents"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "tracked.txt",
+      "status": "modified",
+      "old_mode": "100644",
+      "new_mode": "100644",
+      "binary": false,
+      "hunks": [
+        {
           "old_start": 1,
           "new_start": 1,
+          "old_lines": 1,
+          "new_lines": 1,
           "lines": [
             {
               "kind": "del",
               "old": 1,
-              "text": "fn main() {}"
+              "text": "tracked v2"
             },
             {
               "kind": "add",
               "new": 1,
-              "text": "fn main() {"
+              "text": "tracked modified"
             }
           ]
         }
@@ -210,6 +234,18 @@ Mode-only changes list modes and omit an empty fence:
 **old_mode:** `100644`
 **new_mode:** `100755`
 ```
+
+
+## Exit status
+
+| Code | Meaning |
+| ---: | --- |
+| `0` | No changes selected, or success without `--exit-code` / `--quiet`. |
+| `1` | Changes exist when `--exit-code` or `--quiet` is set ([`failure`](../exit-codes/)). |
+| `2` | Invalid flags or diff error while `--exit-code` / `--quiet` is set ([`usage`](../exit-codes/)). |
+
+See [Exit codes](../exit-codes/) for the full table.
+
 
 ## See also
 

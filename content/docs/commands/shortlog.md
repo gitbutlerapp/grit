@@ -60,10 +60,12 @@ Example:
 
 ```json
 {
-  "branch": "feature",
+  "branch": "main",
   "target": "main",
   "ahead": 0,
-  "commits": []
+  "commits": [],
+  "truncated": false,
+  "next": null
 }
 ```
 
@@ -80,6 +82,18 @@ Ahead of `main` by **2** commits.
 - `cf18394` Say hi (ada, 1 hour ago)
 - `9a1c2e0` Add a greeting test (ada, 2 hours ago)
 ```
+
+
+## Exit status
+
+| Code | Meaning |
+| ---: | --- |
+| `0` | Success ([`success`](../exit-codes/)). |
+| `1` | Command failed ([`failure`](../exit-codes/)). |
+| `2` | Invalid flags or arguments ([`usage`](../exit-codes/)). |
+
+See [Exit codes](../exit-codes/) for shared rules and structured `--json` `kind` values.
+
 
 ## See also
 

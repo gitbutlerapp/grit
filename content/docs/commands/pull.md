@@ -133,6 +133,26 @@ Schema: [v2](/schemas/pull/v2.json) · [v1](/schemas/pull/v1.json)
 
 Markdown uses headings, bullet lists, and fenced blocks; pipe characters inside table cells are escaped. See the JSON output section for the stable field contract.
 
+
+
+```text
+## Pull
+
+- Fast-forwarded **`origin/main`** → `d0f5bdf`
+```
+
+## Exit status
+
+| Code | Meaning |
+| ---: | --- |
+| `0` | Success (`up_to_date`, `fast_forward`, `merged`, `rebased`, `set_upstream`) or `--check` when fast-forward is possible. |
+| `1` | Conflicts, refused merge/rebase, `--check` when integration would be required, or `autostash_conflict`. |
+| `2` | Invalid flags ([`usage`](../exit-codes/)). |
+| `128` | `--ff-only` when history diverged ([`refused_not_ff`](../exit-codes/)). |
+
+See [Exit codes](../exit-codes/).
+
+
 ## See also
 
 [grit fetch](../fetch/), [grit merge](../merge/), [grit push](../push/)

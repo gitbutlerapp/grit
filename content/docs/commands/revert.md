@@ -128,6 +128,18 @@ Pass [`--markdown`](../global-options/) for a `Revert` heading and one bullet pe
 - `9244cbd` → `bbbca73` — Revert "third"
 ```
 
+
+## Exit status
+
+| Code | Meaning |
+| ---: | --- |
+| `0` | Revert completed or `--check` predicts success. |
+| `1` | Conflicts, empty revert, or other failure. |
+| `2` | Invalid flags ([`usage`](../exit-codes/)). |
+
+See [Exit codes](../exit-codes/).
+
+
 ## See also
 
 [grit pick](../pick/), [grit merge](../merge/)

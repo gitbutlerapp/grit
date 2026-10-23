@@ -96,6 +96,27 @@ Schema: [v1](/schemas/hooks/v1.json)
 
 `--markdown` renders a table of hooks for `list`, or a short summary for `run`.
 
+
+
+```text
+## Hooks
+
+| Name | Path | Executable | Source |
+| --- | --- | --- | --- |
+| `pre-commit` | `[REPO]/.git/hooks/pre-commit` | true | hooks_dir |
+```
+
+## Exit status
+
+| Code | Meaning |
+| ---: | --- |
+| `0` | `hooks list` or `hooks run` when the hook exits 0 (or the hook is missing). |
+| *varies* | `hooks run` returns the hook subprocess exit code ([`custom`](../exit-codes/)). |
+| `2` | Invalid flags ([`usage`](../exit-codes/)). |
+
+See [Exit codes](../exit-codes/).
+
+
 ## See also
 
 - [Library maintenance — hooks](../../library/maintenance.md)

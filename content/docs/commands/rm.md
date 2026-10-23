@@ -73,6 +73,18 @@ Pass [`--markdown`](../global-options/) for agent-friendly output:
   - `old.txt`
 ```
 
+
+## Exit status
+
+| Code | Meaning |
+| ---: | --- |
+| `0` | Success ([`success`](../exit-codes/)). |
+| `1` | Command failed ([`failure`](../exit-codes/)). |
+| `2` | Invalid flags or arguments ([`usage`](../exit-codes/)). |
+
+See [Exit codes](../exit-codes/) for shared rules and structured `--json` `kind` values.
+
+
 ## See also
 
 [grit add](../add/), [grit mv](../mv/), [grit status](../status/)

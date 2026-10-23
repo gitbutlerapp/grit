@@ -121,6 +121,26 @@ Schema: [v2](/schemas/pick/v2.json)
 
 Pass [`--markdown`](../global-options/) for a `Pick` heading, one bullet per replayed commit, and conflict next steps when stopped.
 
+
+
+
+```text
+## Pick
+
+- `d5d832b` → `d5d832b` — pick me
+```
+
+## Exit status
+
+| Code | Meaning |
+| ---: | --- |
+| `0` | Pick completed or `--check` predicts a clean replay. |
+| `1` | Conflicts, empty commit, or other failure. |
+| `2` | Invalid flags ([`usage`](../exit-codes/)). |
+
+See [Exit codes](../exit-codes/).
+
+
 ## See also
 
 [grit merge](../merge/), [grit revert](../revert/), [grit log](../log/)

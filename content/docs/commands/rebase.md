@@ -33,14 +33,6 @@ When there is nothing to replay, human output is `Already up to date` and `--jso
 
 Shared rewrite flags match [`grit history`](history.md): `--dry-run`, `--update-refs`, `--empty`, and `--keep-committer`.
 
-### Exit codes
-
-| Code | When |
-| --- | --- |
-| **0** | Rebase completed, `--dry-run` plan printed, `--abort` succeeded, or already up to date. |
-| **1** | Replay stopped on conflicts (`result: conflicts` in `--json`). |
-| **≠ 0** | Other errors (missing upstream, no session for `--continue`, unmerged index, …). |
-
 ## Options
 
 | Option | Description |
@@ -102,12 +94,9 @@ On conflict:
 
 ```json
 {
-  "result": "conflicts",
   "operation": "rebase",
-  "commit": "1a2b3c4d5e6f70819293a4b4c5d6e7f8091a2b3c4d",
-  "conflicts": [{ "path": "f.txt", "kind": "content" }],
-  "next_steps": ["grit diff", "grit add .", "grit rebase --continue"],
-  "alternatives": ["grit rebase --abort", "grit rebase --skip"]
+  "result": "up_to_date",
+  "check": true
 }
 ```
 
@@ -131,6 +120,26 @@ Exit code is **0** for `up_to_date` and `clean`, **1** for `conflicts`.
 Schema: [v1](/schemas/rebase/v1.json)
 
 Pass [`--markdown`](../global-options/) for a `## Rebase` heading (or `## History rebase` for the alias). On conflicts, lists paths, the stopped commit, and `next_steps` / `alternatives` like pick and revert.
+
+
+
+```text
+## Rebase check
+
+- Already up to date
+```
+
+## Exit status
+
+| Code | Meaning |
+| ---: | --- |
+| `0` | Rebase completed, `--check` predicts success, or `--dry-run`. |
+| `1` | Conflicts or other failure. |
+| `2` | Invalid flags ([`usage`](../exit-codes/)). |
+| *varies* | `--exec` command failure ([`custom`](../exit-codes/)). |
+
+See [Exit codes](../exit-codes/).
+
 
 ## See also
 

@@ -131,6 +131,31 @@ Pass `--markdown` for a summary with `ok`, a table of issues (including severity
 
 Schema: [v1](/schemas/fsck/v1.json)
 
+
+
+
+```text
+## Fsck
+
+- **ok:** true
+- **objects_checked:** 9
+
+### Dangling
+
+- `blob` `cc7c1250b368e807ba98143f3b0b47c3cd8b74fe`
+```
+
+## Exit status
+
+| Code | Meaning |
+| ---: | --- |
+| `0` | No error-severity issues (warnings alone are OK unless `--strict`). |
+| `1` | At least one error-severity issue ([`failure`](../exit-codes/)). |
+| `2` | Invalid flags ([`usage`](../exit-codes/)). |
+
+Unreachable objects alone do not fail the command. See [Exit codes](../exit-codes/).
+
+
 ## See also
 
 - [`grit gc`](gc.md)

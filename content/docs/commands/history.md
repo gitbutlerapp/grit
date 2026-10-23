@@ -294,6 +294,30 @@ Schema: [v1](/schemas/history.reword/v1.json)
 
 Pass [`--markdown`](../global-options/) for a heading such as `History squash` or `History reword` (matching `operation`), plus rewritten commits, ref updates, and optional `HEAD` movement.
 
+
+
+```text
+## History drop
+
+- Dry run (refs unchanged)
+- commit `e813550` → (dropped) — two
+- commit `ac49499` → `5973cf5` — three
+  - change id `nlwnxqt`
+- `refs/heads/main` `ac49499` → `5973cf5`
+- HEAD `ac49499` → `5973cf5`
+```
+
+## Exit status
+
+| Code | Meaning |
+| ---: | --- |
+| `0` | Success ([`success`](../exit-codes/)). |
+| `1` | Command failed ([`failure`](../exit-codes/)). |
+| `2` | Invalid flags or arguments ([`usage`](../exit-codes/)). |
+
+See [Exit codes](../exit-codes/) for shared rules and structured `--json` `kind` values.
+
+
 ## See also
 
 [Library guide: History rewrite](../library/history.md), [`grit log`](log.md), [`grit pick`](pick.md)

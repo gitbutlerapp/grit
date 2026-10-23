@@ -227,6 +227,18 @@ With `--amend`, the first bullet notes the amended branch tip:
 
 With `--dry-run`, output lists the paths that would be committed instead of a new OID.
 
+
+## Exit status
+
+| Code | Meaning |
+| ---: | --- |
+| `0` | Success ([`success`](../exit-codes/)). |
+| `1` | Command failed ([`failure`](../exit-codes/)). |
+| `2` | Invalid flags or arguments ([`usage`](../exit-codes/)). |
+
+See [Exit codes](../exit-codes/) for shared rules and structured `--json` `kind` values.
+
+
 ## See also
 
 [grit add](../add/), [grit status](../status/), [grit log](../log/), [grit config](../config/)

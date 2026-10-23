@@ -96,6 +96,25 @@ Schema: [v1](/schemas/auth/v1.json) · [auth.logout v1](/schemas/auth.logout/v1.
 
 Markdown uses headings, bullet lists, and fenced blocks; pipe characters inside table cells are escaped. See the JSON output section for the stable field contract.
 
+
+
+```text
+## Auth
+
+- Signed in to **`github.com`**
+```
+
+## Exit status
+
+| Code | Meaning |
+| ---: | --- |
+| `0` | Success ([`success`](../exit-codes/)). |
+| `1` | Command failed ([`failure`](../exit-codes/)). |
+| `2` | Invalid flags or arguments ([`usage`](../exit-codes/)). |
+
+See [Exit codes](../exit-codes/) for shared rules and structured `--json` `kind` values.
+
+
 ## See also
 
 [grit push](../push/), [grit config](../config/), [grit manager](../manager/)

@@ -106,14 +106,17 @@ Example:
 
 ```json
 {
-  "added": ["src/new.rs"],
-  "modified": ["README.md"],
+  "added": [],
+  "modified": [
+    "tracked.txt"
+  ],
   "removed": [],
   "intent_to_add": [],
   "dry_run": false,
-  "count": 2,
-  "staged": 2,
-  "staged_hunks": {}
+  "count": 1,
+  "staged": 1,
+  "staged_hunks": {},
+  "staged_lines": {}
 }
 ```
 
@@ -133,6 +136,18 @@ When there is nothing to stage and you ran `grit add` with no paths:
 ```text
 Nothing to stage — working tree clean.
 ```
+
+
+## Exit status
+
+| Code | Meaning |
+| ---: | --- |
+| `0` | Success ([`success`](../exit-codes/)). |
+| `1` | Command failed ([`failure`](../exit-codes/)). |
+| `2` | Invalid flags or arguments ([`usage`](../exit-codes/)). |
+
+See [Exit codes](../exit-codes/) for shared rules and structured `--json` `kind` values.
+
 
 ## See also
 

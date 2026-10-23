@@ -41,16 +41,6 @@ With `-u` / `--set-upstream-to`, writes `branch.<name>.remote` and `branch.<name
 
 Use `--dry-run` on any mutation to preview the JSON outcome without changing refs, config, or reflogs.
 
-### Exit codes
-
-| Code | Meaning |
-| --- | --- |
-| `0` | Success, including `--dry-run` previews. |
-| `1` | Branch not found, not fully merged, checked out elsewhere, invalid start point, upstream error, or other operational failure. |
-| `2` | Usage error (missing arguments, incompatible flags). |
-
-On failure with `--json`, stdout includes `error` and a stable `kind` (for example `branch_not_fully_merged`, `branch_not_found`, `branch_already_exists`).
-
 ## Options
 
 | Option | Description |
@@ -226,6 +216,27 @@ Pass [`--markdown`](../global-options/) for agent-friendly output.
 Schema: [v1](/schemas/branch/v1.json)
 
 Markdown lists branches in a table with upstream and worktree columns when present. Table cells escape `|` and internal newlines so commit subjects and paths stay on one row. See the JSON output section for the stable field contract.
+
+
+
+```text
+## Branches
+| Branch | Current | OID | Subject | Upstream | Worktree |
+| --- | --- | --- | --- | --- | --- |
+| `feature` |  | `062ca6e` | first |  |  |
+| `main` | yes | `83352a6` | second |  | [REPO] |
+```
+
+## Exit status
+
+| Code | Meaning |
+| ---: | --- |
+| `0` | Success, including `--dry-run` previews. |
+| `1` | Branch not found, not fully merged, checked out elsewhere, or other operational failure. |
+| `2` | Usage error (missing arguments, incompatible flags). |
+
+On failure with `--json`, stdout includes `error` and a stable `kind`. See [Exit codes](../exit-codes/).
+
 
 ## See also
 

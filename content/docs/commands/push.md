@@ -145,6 +145,25 @@ Schema: [v1](/schemas/push/v1.json)
 
 Markdown uses headings, bullet lists, and fenced blocks; pipe characters inside table cells are escaped. See the JSON output section for the stable field contract.
 
+
+
+
+```text
+## Push to `origin`
+- **`refs/heads/main`** · pushed `main` → `origin refs/heads/main`
+```
+
+## Exit status
+
+| Code | Meaning |
+| ---: | --- |
+| `0` | Success ([`success`](../exit-codes/)). |
+| `1` | Command failed ([`failure`](../exit-codes/)). |
+| `2` | Invalid flags or arguments ([`usage`](../exit-codes/)). |
+
+See [Exit codes](../exit-codes/) for shared rules and structured `--json` `kind` values.
+
+
 ## See also
 
 [grit pull](../pull/), [grit tag](../tag/), [grit auth](../auth/)

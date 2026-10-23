@@ -104,6 +104,28 @@ Schema: [v1](/schemas/ignore.check/v1.json)
 
 Pass `--markdown` for agent-friendly output with the same fields summarized in prose and lists.
 
+
+
+
+```text
+## Ignore check
+
+- **any_ignored:** true
+
+- `noise.log` ← `.gitignore:1` `*.log`
+```
+
+## Exit status
+
+| Code | Meaning |
+| ---: | --- |
+| `0` | At least one path is ignored (`ignore check`). |
+| `1` | No matching ignored paths. |
+| `2` | Invalid flags ([`usage`](../exit-codes/)). |
+
+See [Exit codes](../exit-codes/).
+
+
 ## See also
 
 - [`grit clean`](clean.md) — remove untracked files (optionally including ignored paths with `--ignored`).

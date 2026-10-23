@@ -91,6 +91,26 @@ Example (with `-f`):
 Schema: [v1](/schemas/clean/v1.json)
 Pass `--markdown` (see [Global options](../global-options/)) for a bullet list of paths under **Would remove** or **Removed**.
 
+
+
+
+```text
+## Would remove
+
+- `untracked.txt`
+```
+
+## Exit status
+
+| Code | Meaning |
+| ---: | --- |
+| `0` | Success ([`success`](../exit-codes/)). |
+| `1` | Command failed ([`failure`](../exit-codes/)). |
+| `2` | Invalid flags or arguments ([`usage`](../exit-codes/)). |
+
+See [Exit codes](../exit-codes/) for shared rules and structured `--json` `kind` values.
+
+
 ## See also
 
 [grit status](../status/), [grit add](../add/)

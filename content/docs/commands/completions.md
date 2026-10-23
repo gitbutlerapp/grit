@@ -59,6 +59,22 @@ There is no JSON form. `--json` and `--markdown` exit with an error; use the hum
 
 None. `--markdown` is rejected for the same reason as `--json`.
 
+```console
+$ grit completions bash --markdown
+**Error:** `grit completions` does not support --json or --markdown
+```
+
+## Exit status
+
+| Code | Meaning |
+| ---: | --- |
+| `0` | Success ([`success`](../exit-codes/)). |
+| `1` | Command failed ([`failure`](../exit-codes/)). |
+| `2` | Invalid flags or arguments ([`usage`](../exit-codes/)). |
+
+See [Exit codes](../exit-codes/) for shared rules and structured `--json` `kind` values.
+
+
 ## See also
 
 [Install grit](../install/), [grit update](../update/), [Global options](../global-options/)

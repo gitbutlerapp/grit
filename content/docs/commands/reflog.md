@@ -116,6 +116,25 @@ Schema: [v1](/schemas/reflog/v1.json) (list); subcommands use [delete v1](/schem
 
 List mode emits a bullet per entry with `REF@{n}`, abbreviated oid, **absolute** `date`, and message (human mode keeps relative dates). Delete and expire print short confirmation lines.
 
+
+
+
+```text
+- HEAD@{0} 83352a6 2023-11-14T22:13:20Z commit: second
+- HEAD@{1} 062ca6e 2023-11-14T22:13:20Z commit (initial): first
+```
+
+## Exit status
+
+| Code | Meaning |
+| ---: | --- |
+| `0` | Success ([`success`](../exit-codes/)). |
+| `1` | Command failed ([`failure`](../exit-codes/)). |
+| `2` | Invalid flags or arguments ([`usage`](../exit-codes/)). |
+
+See [Exit codes](../exit-codes/) for shared rules and structured `--json` `kind` values.
+
+
 ## See also
 
 [grit log](log.md), [grit gc](gc.md)

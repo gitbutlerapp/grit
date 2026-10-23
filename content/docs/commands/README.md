@@ -50,8 +50,9 @@ Closing fences stay untagged: ` ``` ` on its own line.
    - at least one fenced ` ```json ` block containing real `grit <cmd> --json` output;
    - a **markdown field table** (`| Field | … |`) whose rows are **exactly** the top-level properties of that command’s schema(s)—no extra rows, no missing keys (CI compares against `content/schemas/*.v1.json`).
    **Exception:** plumbing commands (`manager`, `upload-pack`, `receive-pack`) and [`completions`](completions.md) do not use fenced JSON; their JSON output section explains that stdout carries the wire protocol, credential stream, or completion script instead. Every other command follows the schema link + fenced JSON + field-table rule.
-6. **Markdown output** — **required** for every command that supports `--markdown` (including via global flags). Document real `--markdown` output, agent-oriented headings and bullets, and link the same v1 JSON Schema as the JSON output section so agents can rely on one contract.
-7. **See also** — links to related command pages.
+6. **Markdown output** — **required** for every command that supports `--markdown` (including via global flags). Document real `--markdown` output, agent-oriented headings and bullets, and link the same v1 JSON Schema as the JSON output section so agents can rely on one contract. Include at least one fenced `text`, `markdown`, `diff`, or `console` block with real `--markdown` output (not prose alone). **Exception:** [`manager`](manager.md), [`upload-pack`](upload-pack.md), and [`receive-pack`](receive-pack.md) have no Markdown output section (wire protocol / credential plumbing).
+7. **Exit status** — table of process exit codes for this command: shared `0` / `1` / `2` meanings from [Exit codes](../exit-codes/) plus command-specific codes (`diff --exit-code`, `merge --check`, `pull --ff-only`, `merge-base --is-ancestor`, `fsck`, `ignore check`, `hooks run` passthrough, `tag --verify`, bundle prerequisites, and similar).
+8. **See also** — links to related command pages.
 
 ## Commit JSON object (`CommitJson`)
 

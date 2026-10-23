@@ -114,6 +114,27 @@ Example:
 Schema: [v1](/schemas/restore/v1.json)
 Pass `--markdown` for agent-friendly bullet lists of restored and removed paths.
 
+
+
+
+```text
+## Restore
+
+### Restored
+- `tracked.txt`
+```
+
+## Exit status
+
+| Code | Meaning |
+| ---: | --- |
+| `0` | Success ([`success`](../exit-codes/)). |
+| `1` | Command failed ([`failure`](../exit-codes/)). |
+| `2` | Invalid flags or arguments ([`usage`](../exit-codes/)). |
+
+See [Exit codes](../exit-codes/) for shared rules and structured `--json` `kind` values.
+
+
 ## See also
 
 [grit add](../add/), [grit status](../status/)

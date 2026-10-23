@@ -127,44 +127,108 @@ Example:
 ```json
 {
   "kind": "branch",
-  "ref_name": "feature",
+  "ref_name": "main",
   "commit": {
-    "oid": "92501f188ae0815af09a0cef6e121eddda4113cf",
-    "parents": ["919c45f33de5e5c0bd05f8ffb089f697f4644976"],
+    "oid": "83352a61f6715ec3f0a297c6d6150725154fb833",
+    "parents": [
+      "062ca6e74f5603f4d09063c0f46cd07d8c96e019"
+    ],
     "author": {
-      "name": "Ada Lovelace",
-      "email": "ada@example.com",
-      "date": "2026-10-07T14:54:02Z"
+      "name": "Test",
+      "email": "test@example.com",
+      "date": "2023-11-14T22:13:20Z"
     },
     "committer": {
-      "name": "Ada Lovelace",
-      "email": "ada@example.com",
-      "date": "2026-10-07T14:54:02Z"
+      "name": "Test",
+      "email": "test@example.com",
+      "date": "2023-11-14T22:13:20Z"
     },
     "subject": "second",
-    "message": "second"
+    "message": "second",
+    "refs": [
+      {
+        "name": "HEAD",
+        "kind": "head"
+      },
+      {
+        "name": "main",
+        "kind": "branch"
+      }
+    ],
+    "relative_date": "[TIME_AGO]",
+    "change_id": "xzyqzyyzswyupvtlsovyzultryuqzlvk",
+    "change_id_stored": true
   },
   "files": [
     {
-      "path": "README.md",
-      "status": "modified",
+      "path": "second.txt",
+      "status": "added",
+      "new_mode": "100644",
       "binary": false,
-      "hunks": []
+      "hunks": [
+        {
+          "old_start": 0,
+          "new_start": 1,
+          "old_lines": 0,
+          "new_lines": 1,
+          "lines": [
+            {
+              "kind": "add",
+              "new": 1,
+              "text": "second file"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "path": "tracked.txt",
+      "status": "modified",
+      "old_mode": "100644",
+      "new_mode": "100644",
+      "binary": false,
+      "hunks": [
+        {
+          "old_start": 1,
+          "new_start": 1,
+          "old_lines": 1,
+          "new_lines": 1,
+          "lines": [
+            {
+              "kind": "del",
+              "old": 1,
+              "text": "tracked v1"
+            },
+            {
+              "kind": "add",
+              "new": 1,
+              "text": "tracked v2"
+            }
+          ]
+        }
+      ]
     }
   ],
   "stat": {
     "files": [
       {
-        "path": "README.md",
-        "status": "modified",
+        "path": "second.txt",
+        "status": "added",
         "insertions": 1,
         "deletions": 0,
         "binary": false
+      },
+      {
+        "path": "tracked.txt",
+        "status": "modified",
+        "insertions": 1,
+        "deletions": 1,
+        "binary": false
       }
     ],
-    "files_changed": 1,
-    "insertions": 1,
-    "deletions": 0
+    "files_changed": 2,
+    "insertions": 2,
+    "deletions": 1
   }
 }
 ```
@@ -191,6 +255,18 @@ Pass [`--markdown`](../global-options/) for headings, commit metadata, message b
 +added
 ~~~
 ```
+
+
+## Exit status
+
+| Code | Meaning |
+| ---: | --- |
+| `0` | Success ([`success`](../exit-codes/)). |
+| `1` | Command failed ([`failure`](../exit-codes/)). |
+| `2` | Invalid flags or arguments ([`usage`](../exit-codes/)). |
+
+See [Exit codes](../exit-codes/) for shared rules and structured `--json` `kind` values.
+
 
 ## See also
 

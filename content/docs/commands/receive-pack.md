@@ -54,6 +54,18 @@ $ git config remote.origin.receivepack 'grit receive-pack'
 
 None. `--json` has no effect, since stdout carries the Git protocol.
 
+
+## Exit status
+
+| Code | Meaning |
+| ---: | --- |
+| `0` | Success ([`success`](../exit-codes/)). |
+| `1` | Command failed ([`failure`](../exit-codes/)). |
+| `2` | Invalid flags or arguments ([`usage`](../exit-codes/)). |
+
+See [Exit codes](../exit-codes/) for shared rules and structured `--json` `kind` values.
+
+
 ## See also
 
 [grit upload-pack](../upload-pack/), [grit push](../push/)

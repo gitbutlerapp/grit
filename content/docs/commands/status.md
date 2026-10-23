@@ -195,25 +195,32 @@ Example:
 
 ```json
 {
-  "branch": "feature",
+  "branch": "main",
   "detached": false,
-  "head": "cf18394a62c3f845bd9c44927a5a55e014b2a99d",
-  "target": "origin/main",
-  "ahead": 2,
+  "head": "83352a61f6715ec3f0a297c6d6150725154fb833",
+  "target": "main",
+  "ahead": 0,
   "behind": 0,
-  "commits": [
-    { "oid": "cf18394a62c3f845bd9c44927a5a55e014b2a99d", "subject": "Say hi" },
-    { "oid": "9a1c2e0d4b6f8a1c3e5d7f9b0a2c4e6d8f0a1b3c", "subject": "Add a greeting test" }
-  ],
+  "upstream": null,
+  "commits": [],
   "staged": [
-    { "path": "notes.md", "status": "added" },
-    { "path": "renamed.txt", "status": "renamed", "old_path": "old.txt" }
+    {
+      "path": "staged.txt",
+      "status": "added"
+    }
   ],
   "unstaged": [
-    { "path": "main.rs", "status": "modified" }
+    {
+      "path": "tracked.txt",
+      "status": "modified"
+    }
   ],
-  "untracked": ["scratch.txt"],
-  "clean": false
+  "untracked": [
+    "untracked.txt"
+  ],
+  "clean": false,
+  "merging": false,
+  "stash_count": 0
 }
 ```
 
@@ -236,6 +243,18 @@ Changed (not staged)
 Untracked
 - `scratch.txt`
 ```
+
+
+## Exit status
+
+| Code | Meaning |
+| ---: | --- |
+| `0` | Success ([`success`](../exit-codes/)). |
+| `1` | Command failed ([`failure`](../exit-codes/)). |
+| `2` | Invalid flags or arguments ([`usage`](../exit-codes/)). |
+
+See [Exit codes](../exit-codes/) for shared rules and structured `--json` `kind` values.
+
 
 ## See also
 

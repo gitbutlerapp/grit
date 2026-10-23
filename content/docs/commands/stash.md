@@ -193,7 +193,8 @@ With `--patch`, a `patch` object with the same shape as [`grit diff`](../diff/) 
 {
   "index": 0,
   "conflicts": false,
-  "index_restored": false
+  "index_restored": false,
+  "dropped": true
 }
 ```
 
@@ -225,6 +226,25 @@ Pop adds `dropped` (whether the entry was removed):
 
 Schema: [v1](/schemas/stash/v1.json)
 With `--markdown`, list/apply/pop/drop use bullet lists; `show` renders the diffstat or patch like other diff commands.
+
+
+
+```text
+## Stash
+
+- Saved **On main: wip** · `690b7a6`
+```
+
+## Exit status
+
+| Code | Meaning |
+| ---: | --- |
+| `0` | Success ([`success`](../exit-codes/)). |
+| `1` | Command failed ([`failure`](../exit-codes/)). |
+| `2` | Invalid flags or arguments ([`usage`](../exit-codes/)). |
+
+See [Exit codes](../exit-codes/) for shared rules and structured `--json` `kind` values.
+
 
 ## See also
 

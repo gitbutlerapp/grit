@@ -137,6 +137,33 @@ Schema: [v1](/schemas/config/v1.json)
 
 Markdown uses headings, bullet lists, and fenced blocks; pipe characters inside table cells are escaped. See the JSON output section for the stable field contract.
 
+
+
+
+```text
+| Key | Value |
+| --- | --- |
+| `core.repositoryformatversion` | 0 |
+| `core.filemode` | true |
+| `core.bare` | false |
+| `core.logallrefupdates` | true |
+| `user.email` | snap@example.com |
+| `gc.auto` | 0 |
+| `maintenance.auto` | false |
+| `grit.testing.changeid` | content-hash |
+```
+
+## Exit status
+
+| Code | Meaning |
+| ---: | --- |
+| `0` | Success ([`success`](../exit-codes/)). |
+| `1` | Command failed ([`failure`](../exit-codes/)). |
+| `2` | Invalid flags or arguments ([`usage`](../exit-codes/)). |
+
+See [Exit codes](../exit-codes/) for shared rules and structured `--json` `kind` values.
+
+
 ## See also
 
 [grit auth](../auth/), [grit status](../status/)

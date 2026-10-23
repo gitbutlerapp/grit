@@ -36,14 +36,6 @@ When `<branch>` names a remote-tracking branch (for example `origin/feature`), G
 
 Updating the working tree uses parallel checkout when the change set is large enough; tune [`checkout.workers`](../../library/parallelism.md) and `checkout.thresholdForParallelism`, or pass global [`--threads`](../global-options.md) to cap or force worker count for this run.
 
-### Exit codes
-
-| Code | Meaning |
-| --- | --- |
-| `0` | Switch succeeded, or `--dry-run` completed without overwrite conflicts. |
-| `1` | Overwrite refusal, missing branch, or other operational failure. |
-| `2` | Usage error (missing required arguments). |
-
 ## Options
 
 | Option | Description |
@@ -167,6 +159,18 @@ Detached HEAD:
 ```text
 - HEAD detached at `9244cbd`
 ```
+
+
+## Exit status
+
+| Code | Meaning |
+| ---: | --- |
+| `0` | Success ([`success`](../exit-codes/)). |
+| `1` | Command failed ([`failure`](../exit-codes/)). |
+| `2` | Invalid flags or arguments ([`usage`](../exit-codes/)). |
+
+See [Exit codes](../exit-codes/) for shared rules and structured `--json` `kind` values.
+
 
 ## See also
 

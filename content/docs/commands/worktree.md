@@ -195,6 +195,18 @@ List shows a table of path, branch, and HEAD:
 
 Add and remove use short headings with the path and branch (or detached HEAD) and commit oid.
 
+
+## Exit status
+
+| Code | Meaning |
+| ---: | --- |
+| `0` | Success ([`success`](../exit-codes/)). |
+| `1` | Command failed ([`failure`](../exit-codes/)). |
+| `2` | Invalid flags or arguments ([`usage`](../exit-codes/)). |
+
+See [Exit codes](../exit-codes/) for shared rules and structured `--json` `kind` values.
+
+
 ## See also
 
 [grit switch](../switch/), [grit branch](../branch/)

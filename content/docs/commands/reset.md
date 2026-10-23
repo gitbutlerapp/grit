@@ -94,16 +94,18 @@ Example:
 
 ```json
 {
-  "mode": "mixed",
-  "target": "a1b2c3d4e5f6789012345678901234567890abcd",
-  "previous": "fedcba0987654321fedcba0987654321fedcba09",
-  "ref": "main",
+  "mode": "soft",
+  "target": "062ca6e74f5603f4d09063c0f46cd07d8c96e019",
+  "previous": "83352a61f6715ec3f0a297c6d6150725154fb833",
+  "ref": "refs/heads/main",
   "dry_run": false,
+  "would_overwrite": [],
+  "would_block": [],
   "orphaned_commits": [
     {
-      "oid": "fedcba0987654321fedcba0987654321fedcba09",
-      "change_id": "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
-      "subject": "WIP on topic"
+      "oid": "83352a61f6715ec3f0a297c6d6150725154fb833",
+      "change_id": "xzyqzyyzswyupvtlsovyzultryuqzlvk",
+      "subject": "second"
     }
   ],
   "orphaned_total": 1,
@@ -115,6 +117,30 @@ Example:
 
 Schema: [v1](/schemas/reset/v1.json)
 Pass `--markdown` for agent-friendly output: a short heading plus bullet list of ref, mode, target, previous, dry-run, and orphan summary.
+
+
+
+```text
+## Reset
+
+- **ref:** `refs/heads/main`
+- **mode:** `soft`
+- **target:** `062ca6e74f5603f4d09063c0f46cd07d8c96e019`
+- **previous:** `83352a61f6715ec3f0a297c6d6150725154fb833`
+- **dry_run:** `false`
+- **orphaned_total:** `1` (truncated: `false`)
+```
+
+## Exit status
+
+| Code | Meaning |
+| ---: | --- |
+| `0` | Success ([`success`](../exit-codes/)). |
+| `1` | Command failed ([`failure`](../exit-codes/)). |
+| `2` | Invalid flags or arguments ([`usage`](../exit-codes/)). |
+
+See [Exit codes](../exit-codes/) for shared rules and structured `--json` `kind` values.
+
 
 ## See also
 

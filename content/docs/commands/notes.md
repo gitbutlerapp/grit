@@ -92,6 +92,24 @@ Schema: [v1](/schemas/notes/v1.json)
 
 List actions render a heading with the notes ref and one bullet per note (short object id and body preview). Show wraps the note body in a fenced `text` block. Add and remove print a short confirmation line per action.
 
+
+
+```text
+## Notes (`refs/notes/commits`)
+- _(no notes)_
+```
+
+## Exit status
+
+| Code | Meaning |
+| ---: | --- |
+| `0` | Success ([`success`](../exit-codes/)). |
+| `1` | Command failed ([`failure`](../exit-codes/)). |
+| `2` | Invalid flags or arguments ([`usage`](../exit-codes/)). |
+
+See [Exit codes](../exit-codes/) for shared rules and structured `--json` `kind` values.
+
+
 ## See also
 
 [Library: Notes](../library/notes/), [`grit show`](show.md)

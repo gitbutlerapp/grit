@@ -111,6 +111,30 @@ Schema: [v1](/schemas/blame/v1.json)
 
 Markdown uses headings, bullet lists, and fenced blocks; pipe characters inside table cells are escaped. See the JSON output section for the stable field contract.
 
+
+
+
+```text
+## Blame: `tracked.txt`
+
+Revision `83352a61f6715ec3f0a297c6d6150725154fb833`
+
+| Line | Mark | Commit | Author | Date | Original | Content |
+| ---: | :---: | --- | --- | --- | ---: | --- |
+| 1 |  | `83352a6` | Test | [TIME_AGO] | 1 | tracked v2 |
+```
+
+## Exit status
+
+| Code | Meaning |
+| ---: | --- |
+| `0` | Success ([`success`](../exit-codes/)). |
+| `1` | Command failed ([`failure`](../exit-codes/)). |
+| `2` | Invalid flags or arguments ([`usage`](../exit-codes/)). |
+
+See [Exit codes](../exit-codes/) for shared rules and structured `--json` `kind` values.
+
+
 ## See also
 
 - [`grit log`](log.md) — commit history

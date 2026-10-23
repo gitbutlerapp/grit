@@ -148,6 +148,32 @@ Schema: [v1](/schemas/bundle.create/v1.json) · [bundle.list v1](/schemas/bundle
 Schema: [v1](/schemas/bundle.create/v1.json)
 Pass `--markdown` on any `grit bundle` subcommand for the same JSON document wrapped for agents (see [Global options](../global-options/)).
 
+
+
+```text
+## Bundle verify
+
+- **path:** `snap.bundle`
+- **ok:** true
+- **hash_algorithm:** sha1
+
+| Ref | OID |
+| --- | --- |
+| `HEAD` | `83352a61f6715ec3f0a297c6d6150725154fb833` |
+```
+
+## Exit status
+
+| Code | Meaning |
+| ---: | --- |
+| `0` | Success. |
+| `1` | Verify failure or other error. |
+| `2` | Invalid flags ([`usage`](../exit-codes/)). |
+| `128` | `unbundle` missing prerequisite commits ([`missing_prerequisite`](../exit-codes/)). |
+
+See [Exit codes](../exit-codes/).
+
+
 ## See also
 
 [grit fetch](../fetch/), [grit clone](../clone/), [grit remote](../remote/)

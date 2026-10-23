@@ -217,6 +217,19 @@ When the merge stops on conflicts (exit code 1), stdout still carries structured
 → fix conflicts, then `grit merge --continue`, or `grit merge --abort`
 ```
 
+
+## Exit status
+
+| Code | Meaning |
+| ---: | --- |
+| `0` | Merge completed, `--check` predicts success, or `--dry-run` preview. |
+| `1` | Conflicts (`result: conflicts`) or other failure ([`failure`](../exit-codes/)). |
+| `2` | Invalid flags ([`usage`](../exit-codes/)). |
+| `128` | `--ff-only` when not fast-forward ([`refused_not_ff`](../exit-codes/)). |
+
+See [Exit codes](../exit-codes/).
+
+
 ## See also
 
 [grit pull](../pull/), [grit pick](../pick/), [grit branch](../branch/)

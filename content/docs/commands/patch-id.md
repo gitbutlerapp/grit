@@ -61,6 +61,27 @@ Schema: [v1](/schemas/patch-id/v1.json)
 
 `--markdown` prints a table of patch IDs and commits.
 
+
+
+```text
+## Patch IDs
+
+| Patch ID | Commit |
+| --- | --- |
+| `db20cbf19404d5a762136b964e1df57a06af6104` | `83352a61f6715ec3f0a297c6d6150725154fb833` |
+```
+
+## Exit status
+
+| Code | Meaning |
+| ---: | --- |
+| `0` | Success ([`success`](../exit-codes/)). |
+| `1` | Command failed ([`failure`](../exit-codes/)). |
+| `2` | Invalid flags or arguments ([`usage`](../exit-codes/)). |
+
+See [Exit codes](../exit-codes/) for shared rules and structured `--json` `kind` values.
+
+
 ## See also
 
 - [Library maintenance — patch IDs](../../library/maintenance.md)

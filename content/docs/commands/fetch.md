@@ -151,21 +151,11 @@ Example:
 
 ```json
 {
+  "remote": "origin",
+  "updates": [],
+  "updated": 0,
   "dry_run": false,
-  "remotes": [
-    {
-      "remote": "origin",
-      "updates": [],
-      "updated": 0
-    },
-    {
-      "remote": "broken",
-      "updates": [],
-      "updated": 0,
-      "error": "could not connect to remote"
-    }
-  ],
-  "updated": 0
+  "rejected": false
 }
 ```
 
@@ -176,6 +166,24 @@ Pass [`--markdown`](../global-options/) for agent-friendly output.
 Schema: [v1](/schemas/fetch/v1.json)
 
 Markdown uses headings, bullet lists, and fenced blocks; pipe characters inside table cells are escaped. See the JSON output section for the stable field contract.
+
+
+
+
+```text
+Already up to date with `origin`.
+```
+
+## Exit status
+
+| Code | Meaning |
+| ---: | --- |
+| `0` | Success ([`success`](../exit-codes/)). |
+| `1` | Command failed ([`failure`](../exit-codes/)). |
+| `2` | Invalid flags or arguments ([`usage`](../exit-codes/)). |
+
+See [Exit codes](../exit-codes/) for shared rules and structured `--json` `kind` values.
+
 
 ## See also
 

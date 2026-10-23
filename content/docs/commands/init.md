@@ -105,6 +105,18 @@ Pass [`--markdown`](../global-options/) for a short prose summary:
 Initialized empty repository at `/home/ada/project/.git` (default branch `main`, ref-format `reftable`).
 ```
 
+
+## Exit status
+
+| Code | Meaning |
+| ---: | --- |
+| `0` | Success ([`success`](../exit-codes/)). |
+| `1` | Command failed ([`failure`](../exit-codes/)). |
+| `2` | Invalid flags or arguments ([`usage`](../exit-codes/)). |
+
+See [Exit codes](../exit-codes/) for shared rules and structured `--json` `kind` values.
+
+
 ## See also
 
 [grit clone](../clone/), [grit remote](../remote/)
