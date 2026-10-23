@@ -254,6 +254,10 @@ followup = "ROADMAP item 26"
 documented = "Deep blame on git.git remains above 1.1× without commit-graph/blame fast paths at scale"
 followup = "ROADMAP item 27"
 
+[scenario."blame-large-mid-churn-full"]
+documented = "Cargo-like mid-file hunk blame on ~3500 lines (#1505); target ≤3× git"
+followup = "GitHub issue #1505"
+
 [scenario."blame-large-tail-full"]
 documented = "Regression guard for full-file blame on multi-kB tail-churn history (#1219)"
 followup = "GitHub issue #1219"

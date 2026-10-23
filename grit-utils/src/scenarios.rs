@@ -8,12 +8,12 @@ use anyhow::{Context, Result};
 use crate::bench_env::isolated_env_prefix;
 use crate::binary::{grit_source_commit, tool_version};
 use crate::fixture::{
-    bench_work_dir, create_blame_deep_history_repo, create_blame_large_tail_churn_repo,
-    create_deep_leaf_dogfood_repo, create_dense_leaf_dogfood_repo, create_repo,
-    create_repo_with_history, dirty_repo, modify_files_for_diff, modify_rs_files_for_diff,
-    modify_txt_files_for_diff, prepare_add_iteration, prepare_commit_iteration,
-    prepare_dense_leaf_add_iteration, prepare_restore_iteration, scratch_dir, DeepLeafDogfoodSpec,
-    DenseLeafDogfoodSpec,
+    bench_work_dir, create_blame_deep_history_repo, create_blame_large_mid_churn_repo,
+    create_blame_large_tail_churn_repo, create_deep_leaf_dogfood_repo,
+    create_dense_leaf_dogfood_repo, create_repo, create_repo_with_history, dirty_repo,
+    modify_files_for_diff, modify_rs_files_for_diff, modify_txt_files_for_diff,
+    prepare_add_iteration, prepare_commit_iteration, prepare_dense_leaf_add_iteration,
+    prepare_restore_iteration, scratch_dir, DeepLeafDogfoodSpec, DenseLeafDogfoodSpec,
 };
 use crate::hot_path_fixture::{
     load_meta, prepare_merge, prepare_pick, prepare_pick_series, prepare_revert, prepare_switch,
@@ -975,6 +975,8 @@ pub fn run_commit_suite(
 const BLAME_LARGE_LINES: usize = 5_000;
 const BLAME_LARGE_COMMITS: usize = 150;
 const BLAME_LARGE_PATH: &str = "large.txt";
+const BLAME_MID_CHURN_LINES: usize = 3_500;
+const BLAME_MID_CHURN_COMMITS: usize = 30;
 
 /// `grit blame` vs `git blame --porcelain` on deep linear and large tail-churn fixtures.
 pub fn run_blame_suite(
@@ -1033,6 +1035,34 @@ pub fn run_blame_suite(
         },
         &large,
     )?);
+    let mid =
+        create_blame_large_mid_churn_repo(git, BLAME_MID_CHURN_LINES, BLAME_MID_CHURN_COMMITS)?;
+    scenarios.push(run_scenario(
+        hyperfine,
+        git,
+        grit,
+        cfg,
+        &Scenario {
+            id: "blame-large-mid-churn-full".into(),
+            group: "blame".into(),
+            fixture: format!("blame-mid-{BLAME_MID_CHURN_LINES}x{BLAME_MID_CHURN_COMMITS}"),
+            description: format!(
+                "full-file blame on {BLAME_MID_CHURN_LINES}-line file with {BLAME_MID_CHURN_COMMITS} mid-file hunk commits (#1505)"
+            ),
+            grit_argv: vec!["blame".into(), BLAME_LARGE_PATH.into()],
+            git_argv: vec![
+                "blame".into(),
+                "--porcelain".into(),
+                BLAME_LARGE_PATH.into(),
+            ],
+            driver: Driver::Cli,
+            prepare_kind: None,
+            grit_via_shell: false,
+            git_via_shell: false,
+        },
+        &mid,
+    )?);
+
     scenarios.push(run_scenario(
         hyperfine,
         git,

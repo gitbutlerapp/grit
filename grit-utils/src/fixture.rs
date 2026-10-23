@@ -527,6 +527,33 @@ pub fn modify_rs_files_for_diff(dir: &Path, count: usize) -> Result<()> {
     Ok(())
 }
 
+/// Large file with mid-file hunks spread across history (models `cargo` parser-style blame).
+pub fn create_blame_large_mid_churn_repo(
+    git: &Path,
+    line_count: usize,
+    commit_count: usize,
+) -> Result<PathBuf> {
+    let dir = scratch_dir();
+    remove_dir_robust(&dir);
+    fs::create_dir_all(&dir).context("create scratch dir")?;
+    run_git(git, &dir, &["init", "-q"])?;
+    let path = "large.txt";
+    let mut lines: Vec<String> = (0..line_count).map(|i| format!("line {i}\n")).collect();
+    fs::write(dir.join(path), lines.join(""))?;
+    run_git(git, &dir, &["add", path])?;
+    run_git(git, &dir, &["commit", "-qm", "init"])?;
+    for c in 1..commit_count {
+        let mid = 1000 + (c * 37) % line_count.saturating_sub(1000).max(1);
+        if let Some(slot) = lines.get_mut(mid) {
+            *slot = format!("edit {c} at {mid}\n");
+        }
+        fs::write(dir.join(path), lines.join(""))?;
+        run_git(git, &dir, &["add", path])?;
+        run_git(git, &dir, &["commit", "-qm", &format!("edit {c}")])?;
+    }
+    Ok(dir)
+}
+
 /// Large file with deep history where each commit only changes the last line (cargo-like churn).
 pub fn create_blame_large_tail_churn_repo(
     git: &Path,
