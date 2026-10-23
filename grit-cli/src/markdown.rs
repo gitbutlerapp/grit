@@ -683,9 +683,12 @@ pub fn print_merge_outcome(w: &mut dyn Write, outcome: &MergeOutcome) -> anyhow:
         }
     }
     if let Some(steps) = &outcome.next_steps {
-        outln!(w);
-        for step in steps {
-            outln!(w, "- `{step}`");
+        let already_rendered = matches!(outcome.result, MergeResult::Conflicts) && !outcome.check;
+        if !already_rendered {
+            outln!(w);
+            for step in steps {
+                outln!(w, "- `{step}`");
+            }
         }
     }
     Ok(())
