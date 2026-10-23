@@ -2067,22 +2067,6 @@ impl ConfigSet {
         matches!(self.get_i64("gc.autoPackLimit"), Some(Ok(0)))
     }
 
-    /// Whether pack-objects may use reachability bitmaps (`pack.useBitmaps`, default true).
-    #[must_use]
-    pub fn pack_use_bitmaps(&self) -> bool {
-        self.get_bool("pack.usebitmaps")
-            .and_then(|r| r.ok())
-            .unwrap_or(true)
-    }
-
-    /// Whether upload-pack may use bitmap enumeration (`uploadpack.allowBitmaps`, default true).
-    #[must_use]
-    pub fn uploadpack_allow_bitmaps(&self) -> bool {
-        self.get_bool("uploadpack.allowbitmaps")
-            .and_then(|r| r.ok())
-            .unwrap_or(true)
-    }
-
     /// [`crate::hash::Parallelism`] for pack indexing from merged config.
     ///
     /// # Errors

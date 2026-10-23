@@ -124,23 +124,6 @@ impl PackBuildOptions {
             ..Default::default()
         }
     }
-
-    /// Whether pack bitmaps may be used (`pack.useBitmaps`, default true).
-    #[must_use]
-    pub fn use_bitmaps_from_config(cfg: Option<&crate::config::ConfigSet>) -> bool {
-        cfg.map(crate::config::ConfigSet::pack_use_bitmaps)
-            .unwrap_or(true)
-    }
-
-    /// Upload-pack gating: `pack.useBitmaps` and `uploadpack.allowBitmaps`.
-    #[must_use]
-    pub fn use_bitmaps_for_upload_pack(cfg: Option<&crate::config::ConfigSet>) -> bool {
-        let pack_ok = Self::use_bitmaps_from_config(cfg);
-        let allow = cfg
-            .map(crate::config::ConfigSet::uploadpack_allow_bitmaps)
-            .unwrap_or(true);
-        pack_ok && allow
-    }
 }
 
 /// Extended options for [`PackObjects`].

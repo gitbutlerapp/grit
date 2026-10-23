@@ -2387,7 +2387,6 @@ pub fn grit_lib::config::ConfigSet::pack_object_window(&self) -> usize
 pub fn grit_lib::config::ConfigSet::pack_objects_zlib_level(&self) -> grit_lib::error::Result<i32>
 pub fn grit_lib::config::ConfigSet::pack_prefer_bitmap_tips(&self) -> alloc::vec::Vec<alloc::string::String>
 pub fn grit_lib::config::ConfigSet::pack_read_reverse_index_default(&self) -> bool
-pub fn grit_lib::config::ConfigSet::pack_use_bitmaps(&self) -> bool
 pub fn grit_lib::config::ConfigSet::pack_window_memory_bytes(&self) -> u64
 pub fn grit_lib::config::ConfigSet::pack_write_bitmap_hash_cache(&self) -> bool
 pub fn grit_lib::config::ConfigSet::pack_write_bitmap_lookup_table(&self) -> bool
@@ -2396,7 +2395,6 @@ pub fn grit_lib::config::ConfigSet::quote_path_fully(&self) -> bool
 pub fn grit_lib::config::ConfigSet::read_early_config(&grit_lib::config::environment::Environment, core::option::Option<&std::path::Path>, &str) -> grit_lib::error::Result<alloc::vec::Vec<alloc::string::String>>
 pub fn grit_lib::config::ConfigSet::try_pack_index_parallelism(&self) -> core::result::Result<grit_lib::parallel::Parallelism, grit_lib::error::ConfigError>
 pub fn grit_lib::config::ConfigSet::try_pack_index_parallelism_for_git_dir(&grit_lib::config::environment::Environment, core::option::Option<&std::path::Path>) -> grit_lib::error::Result<grit_lib::parallel::Parallelism>
-pub fn grit_lib::config::ConfigSet::uploadpack_allow_bitmaps(&self) -> bool
 impl core::clone::Clone for grit_lib::config::ConfigSet
 pub fn grit_lib::config::ConfigSet::clone(&self) -> Self
 impl core::default::Default for grit_lib::config::ConfigSet
@@ -9363,8 +9361,6 @@ impl grit_lib::objects::pack_objects::PackBuildOptions
 pub fn grit_lib::objects::pack_objects::PackBuildOptions::for_local_copy(core::option::Option<&grit_lib::config::ConfigSet>) -> Self
 pub fn grit_lib::objects::pack_objects::PackBuildOptions::for_local_push(core::option::Option<&grit_lib::config::ConfigSet>) -> Self
 pub fn grit_lib::objects::pack_objects::PackBuildOptions::for_repack_rewrite(core::option::Option<&grit_lib::config::ConfigSet>) -> Self
-pub fn grit_lib::objects::pack_objects::PackBuildOptions::use_bitmaps_for_upload_pack(core::option::Option<&grit_lib::config::ConfigSet>) -> bool
-pub fn grit_lib::objects::pack_objects::PackBuildOptions::use_bitmaps_from_config(core::option::Option<&grit_lib::config::ConfigSet>) -> bool
 pub fn grit_lib::objects::pack_objects::PackBuildOptions::window_and_depth_from_config(core::option::Option<&grit_lib::config::ConfigSet>) -> (usize, usize)
 impl core::clone::Clone for grit_lib::objects::pack_objects::PackBuildOptions
 pub fn grit_lib::objects::pack_objects::PackBuildOptions::clone(&self) -> Self
@@ -14087,7 +14083,6 @@ pub fn grit_lib::config::ConfigSet::pack_object_window(&self) -> usize
 pub fn grit_lib::config::ConfigSet::pack_objects_zlib_level(&self) -> grit_lib::error::Result<i32>
 pub fn grit_lib::config::ConfigSet::pack_prefer_bitmap_tips(&self) -> alloc::vec::Vec<alloc::string::String>
 pub fn grit_lib::config::ConfigSet::pack_read_reverse_index_default(&self) -> bool
-pub fn grit_lib::config::ConfigSet::pack_use_bitmaps(&self) -> bool
 pub fn grit_lib::config::ConfigSet::pack_window_memory_bytes(&self) -> u64
 pub fn grit_lib::config::ConfigSet::pack_write_bitmap_hash_cache(&self) -> bool
 pub fn grit_lib::config::ConfigSet::pack_write_bitmap_lookup_table(&self) -> bool
@@ -14096,7 +14091,6 @@ pub fn grit_lib::config::ConfigSet::quote_path_fully(&self) -> bool
 pub fn grit_lib::config::ConfigSet::read_early_config(&grit_lib::config::environment::Environment, core::option::Option<&std::path::Path>, &str) -> grit_lib::error::Result<alloc::vec::Vec<alloc::string::String>>
 pub fn grit_lib::config::ConfigSet::try_pack_index_parallelism(&self) -> core::result::Result<grit_lib::parallel::Parallelism, grit_lib::error::ConfigError>
 pub fn grit_lib::config::ConfigSet::try_pack_index_parallelism_for_git_dir(&grit_lib::config::environment::Environment, core::option::Option<&std::path::Path>) -> grit_lib::error::Result<grit_lib::parallel::Parallelism>
-pub fn grit_lib::config::ConfigSet::uploadpack_allow_bitmaps(&self) -> bool
 impl core::clone::Clone for grit_lib::config::ConfigSet
 pub fn grit_lib::config::ConfigSet::clone(&self) -> Self
 impl core::default::Default for grit_lib::config::ConfigSet
@@ -18078,8 +18072,6 @@ impl grit_lib::objects::pack_objects::PackBuildOptions
 pub fn grit_lib::objects::pack_objects::PackBuildOptions::for_local_copy(core::option::Option<&grit_lib::config::ConfigSet>) -> Self
 pub fn grit_lib::objects::pack_objects::PackBuildOptions::for_local_push(core::option::Option<&grit_lib::config::ConfigSet>) -> Self
 pub fn grit_lib::objects::pack_objects::PackBuildOptions::for_repack_rewrite(core::option::Option<&grit_lib::config::ConfigSet>) -> Self
-pub fn grit_lib::objects::pack_objects::PackBuildOptions::use_bitmaps_for_upload_pack(core::option::Option<&grit_lib::config::ConfigSet>) -> bool
-pub fn grit_lib::objects::pack_objects::PackBuildOptions::use_bitmaps_from_config(core::option::Option<&grit_lib::config::ConfigSet>) -> bool
 pub fn grit_lib::objects::pack_objects::PackBuildOptions::window_and_depth_from_config(core::option::Option<&grit_lib::config::ConfigSet>) -> (usize, usize)
 impl core::clone::Clone for grit_lib::objects::pack_objects::PackBuildOptions
 pub fn grit_lib::objects::pack_objects::PackBuildOptions::clone(&self) -> Self
