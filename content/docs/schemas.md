@@ -46,6 +46,7 @@ Plain command failures with `--json` validate against the shared [error schema](
 | `remote.add` | [v1](/schemas/remote.add/v1.json) |
 | `remote.refs` | [v1](/schemas/remote.refs/v1.json) |
 | `reflog` | [v1](/schemas/reflog/v1.json) |
+| `reflog.list` | [v1](/schemas/reflog.list/v1.json) |
 | `reflog.delete` | [v1](/schemas/reflog.delete/v1.json) |
 | `reflog.expire` | [v1](/schemas/reflog.expire/v1.json) |
 | `reset` | [v1](/schemas/reset/v1.json) |

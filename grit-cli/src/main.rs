@@ -147,6 +147,15 @@ enum ReflogAction {
         /// Expire unreachable entries older than this.
         #[arg(long = "expire-unreachable", value_name = "DATE")]
         expire_unreachable: Option<String>,
+        /// Report what would be pruned without rewriting reflog files.
+        #[arg(long = "dry-run")]
+        dry_run: bool,
+    },
+    /// List refs that currently have a reflog.
+    List {
+        /// Return at most this many ref names (sorted).
+        #[arg(short = 'n', long = "limit", value_name = "N")]
+        limit: Option<usize>,
     },
 }
 
@@ -1893,11 +1902,15 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
                 all,
                 expire,
                 expire_unreachable,
+                dry_run,
             }) => emit(
-                &commands::reflog::run_expire(all, expire, expire_unreachable)?,
+                &commands::reflog::run_expire(all, expire, expire_unreachable, dry_run)?,
                 opts,
                 ctx,
             ),
+            Some(ReflogAction::List { limit }) => {
+                emit(&commands::reflog::run_list_refs(limit)?, opts, ctx)
+            }
         },
         Command::Blame {
             file,

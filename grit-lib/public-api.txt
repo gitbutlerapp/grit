@@ -19089,6 +19089,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::repo_handles::Configu
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::repo_handles::ConfiguredRemote
 pub struct grit_lib::repo_handles::ExpireOptions
 pub grit_lib::repo_handles::ExpireOptions::all: bool
+pub grit_lib::repo_handles::ExpireOptions::dry_run: bool
 pub grit_lib::repo_handles::ExpireOptions::expire: core::option::Option<alloc::string::String>
 pub grit_lib::repo_handles::ExpireOptions::expire_unreachable: core::option::Option<alloc::string::String>
 pub grit_lib::repo_handles::ExpireOptions::now: i64
@@ -19208,8 +19209,28 @@ impl core::marker::Unpin for grit_lib::repo_handles::NotesWriteOptions
 impl core::marker::UnsafeUnpin for grit_lib::repo_handles::NotesWriteOptions
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::repo_handles::NotesWriteOptions
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::repo_handles::NotesWriteOptions
+pub struct grit_lib::repo_handles::RefExpireResult
+pub grit_lib::repo_handles::RefExpireResult::pruned: usize
+pub grit_lib::repo_handles::RefExpireResult::ref_name: alloc::string::String
+impl core::clone::Clone for grit_lib::repo_handles::RefExpireResult
+pub fn grit_lib::repo_handles::RefExpireResult::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::repo_handles::RefExpireResult
+impl core::cmp::PartialEq for grit_lib::repo_handles::RefExpireResult
+pub fn grit_lib::repo_handles::RefExpireResult::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::repo_handles::RefExpireResult
+pub fn grit_lib::repo_handles::RefExpireResult::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::repo_handles::RefExpireResult
+impl core::marker::Freeze for grit_lib::repo_handles::RefExpireResult
+impl core::marker::Send for grit_lib::repo_handles::RefExpireResult
+impl core::marker::Sync for grit_lib::repo_handles::RefExpireResult
+impl core::marker::Unpin for grit_lib::repo_handles::RefExpireResult
+impl core::marker::UnsafeUnpin for grit_lib::repo_handles::RefExpireResult
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::repo_handles::RefExpireResult
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::repo_handles::RefExpireResult
 pub struct grit_lib::repo_handles::ReflogExpireOutcome
+pub grit_lib::repo_handles::ReflogExpireOutcome::dry_run: bool
 pub grit_lib::repo_handles::ReflogExpireOutcome::entries_pruned: usize
+pub grit_lib::repo_handles::ReflogExpireOutcome::refs: alloc::vec::Vec<grit_lib::repo_handles::RefExpireResult>
 impl core::clone::Clone for grit_lib::repo_handles::ReflogExpireOutcome
 pub fn grit_lib::repo_handles::ReflogExpireOutcome::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::repo_handles::ReflogExpireOutcome

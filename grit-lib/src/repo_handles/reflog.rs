@@ -24,6 +24,17 @@ pub struct ExpireOptions {
     pub expire_unreachable: Option<String>,
     /// When true, process every ref under `refs/` that exists (Git `--all`); otherwise only refs with reflog files.
     pub all: bool,
+    /// When true, report what would be pruned without rewriting reflog files.
+    pub dry_run: bool,
+}
+
+/// Per-ref prune count from [`RepositoryReflogs::expire`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RefExpireResult {
+    /// Full ref name (for example `refs/heads/main` or `HEAD`).
+    pub ref_name: String,
+    /// Entries removed (or that would be removed when [`ExpireOptions::dry_run`] is set).
+    pub pruned: usize,
 }
 
 /// Summary returned by [`RepositoryReflogs::expire`].
@@ -31,6 +42,10 @@ pub struct ExpireOptions {
 pub struct ReflogExpireOutcome {
     /// Total reflog entries removed across all processed refs.
     pub entries_pruned: usize,
+    /// Mirrors [`ExpireOptions::dry_run`].
+    pub dry_run: bool,
+    /// One row per processed ref, in sorted ref-name order.
+    pub refs: Vec<RefExpireResult>,
 }
 
 /// One reflog line with its newest-first index (`0` is the latest entry).
@@ -147,12 +162,13 @@ impl<'repo> RepositoryReflogs<'repo> {
             .transpose()?;
         let params = ReflogExpireParams {
             stale_fix: false,
-            dry_run: false,
+            dry_run: options.dry_run,
             verbose: false,
         };
         let git_dir = self.repo.git_dir();
         let refnames = expire_target_refs(git_dir, options.all)?;
         let mut total = 0usize;
+        let mut refs = Vec::with_capacity(refnames.len());
         for refname in refnames {
             let ReflogExpireResult { pruned, .. } = expire_reflog_git(
                 self.repo,
@@ -167,9 +183,15 @@ impl<'repo> RepositoryReflogs<'repo> {
                 options.now,
             )?;
             total += pruned;
+            refs.push(RefExpireResult {
+                ref_name: refname,
+                pruned,
+            });
         }
         Ok(ReflogExpireOutcome {
             entries_pruned: total,
+            dry_run: options.dry_run,
+            refs,
         })
     }
 

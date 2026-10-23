@@ -1,0 +1,26 @@
+{
+  "$id": "https://grit-scm.com/schemas/reflog.list/v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Result of `grit reflog list`.",
+  "properties": {
+    "refs": {
+      "items": {
+        "properties": {
+          "ref": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "ref"
+        ],
+        "type": "object"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "refs"
+  ],
+  "title": "ReflogRefsListOutcome",
+  "type": "object"
+}

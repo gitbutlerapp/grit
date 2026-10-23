@@ -1175,6 +1175,7 @@ fn grit_expire_matches_git_expire_byte_for_byte_via_handle() {
                 expire: Some("1600000000".into()),
                 expire_unreachable: Some("never".into()),
                 all: false,
+                dry_run: false,
             })
             .expect("handle expire");
         git_expire(

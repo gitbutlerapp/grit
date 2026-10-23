@@ -98,7 +98,9 @@ fn build_schema_registry() -> Vec<SchemaRegistryEntry> {
         pick::PickOutcome,
         pull::PullOutcome,
         push::PushOutcome,
-        reflog::{ReflogDeleteOutcome, ReflogExpireOutcome, ReflogListOutcome},
+        reflog::{
+            ReflogDeleteOutcome, ReflogExpireOutcome, ReflogListOutcome, ReflogRefsListOutcome,
+        },
         remote::RemoteOutcome,
         repack::RepackOutcome,
         reset::ResetCliOutcome,
@@ -132,6 +134,7 @@ fn build_schema_registry() -> Vec<SchemaRegistryEntry> {
         entry::<RevsOutcome>("revs"),
         entry::<MergeBaseOutcome>("merge-base"),
         entry::<ReflogListOutcome>("reflog"),
+        entry::<ReflogRefsListOutcome>("reflog.list"),
         entry::<ReflogDeleteOutcome>("reflog.delete"),
         entry::<ReflogExpireOutcome>("reflog.expire"),
         entry::<BlameOutcome>("blame"),
@@ -252,6 +255,7 @@ pub fn schema_command_key(args: &[&str]) -> Option<String> {
             None => "reflog",
             Some("delete") => "reflog.delete",
             Some("expire") => "reflog.expire",
+            Some("list") => "reflog.list",
             _ => return None,
         },
         "stash" => match positional.get(1).copied() {

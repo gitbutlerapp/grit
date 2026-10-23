@@ -83,17 +83,63 @@ impl MarkdownRender for ReflogDeleteOutcome {
     }
 }
 
+/// Result of `grit reflog list` (refs that currently have a log).
+#[derive(Serialize, JsonSchema)]
+pub struct ReflogRefsListOutcome {
+    pub refs: Vec<ReflogRefRow>,
+}
+
+#[derive(Serialize, JsonSchema)]
+pub struct ReflogRefRow {
+    pub r#ref: String,
+}
+
+impl HumanRender for ReflogRefsListOutcome {
+    fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
+        for row in &self.refs {
+            outln!(w, "{}", row.r#ref);
+        }
+        Ok(())
+    }
+}
+
+impl MarkdownRender for ReflogRefsListOutcome {
+    fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
+        if self.refs.is_empty() {
+            outln!(w, "_No reflogs._");
+            return Ok(());
+        }
+        for row in &self.refs {
+            outln!(w, "- `{}`", row.r#ref);
+        }
+        Ok(())
+    }
+}
+
 /// Result of `grit reflog expire`.
 #[derive(Serialize, JsonSchema)]
 pub struct ReflogExpireOutcome {
     pub entries_pruned: usize,
+    pub dry_run: bool,
+    pub refs: Vec<ReflogExpireRefOutcome>,
+}
+
+#[derive(Serialize, JsonSchema)]
+pub struct ReflogExpireRefOutcome {
+    pub r#ref: String,
+    pub pruned: usize,
 }
 
 impl HumanRender for ReflogExpireOutcome {
     fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
+        let verb = if self.dry_run {
+            "Would prune"
+        } else {
+            "Pruned"
+        };
         outln!(
             w,
-            "Pruned {} reflog {}",
+            "{verb} {} reflog {}",
             self.entries_pruned,
             if self.entries_pruned == 1 {
                 "entry"
@@ -107,9 +153,14 @@ impl HumanRender for ReflogExpireOutcome {
 
 impl MarkdownRender for ReflogExpireOutcome {
     fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
+        let verb = if self.dry_run {
+            "Would prune"
+        } else {
+            "Pruned"
+        };
         outln!(
             w,
-            "Pruned **{}** reflog {}.",
+            "{verb} **{}** reflog {}.",
             self.entries_pruned,
             if self.entries_pruned == 1 {
                 "entry"
@@ -157,10 +208,28 @@ pub fn run_delete(specs: Vec<String>) -> Result<ReflogDeleteOutcome> {
     Ok(ReflogDeleteOutcome { deleted })
 }
 
+pub fn run_list_refs(limit: Option<usize>) -> Result<ReflogRefsListOutcome> {
+    let repo = context::discover()?;
+    let mut refs: Vec<ReflogRefRow> = repo
+        .reflogs()
+        .refs()
+        .context("reflog list failed")?
+        .into_iter()
+        .map(|name| ReflogRefRow {
+            r#ref: name.as_str().to_owned(),
+        })
+        .collect();
+    if let Some(n) = limit {
+        refs.truncate(n);
+    }
+    Ok(ReflogRefsListOutcome { refs })
+}
+
 pub fn run_expire(
     all: bool,
     expire: Option<String>,
     expire_unreachable: Option<String>,
+    dry_run: bool,
 ) -> Result<ReflogExpireOutcome> {
     let repo = context::discover()?;
     let env = repo.environment();
@@ -172,10 +241,20 @@ pub fn run_expire(
             expire,
             expire_unreachable,
             all,
+            dry_run,
         })
         .context("reflog expire failed")?;
     Ok(ReflogExpireOutcome {
         entries_pruned: outcome.entries_pruned,
+        dry_run: outcome.dry_run,
+        refs: outcome
+            .refs
+            .into_iter()
+            .map(|r| ReflogExpireRefOutcome {
+                r#ref: r.ref_name,
+                pruned: r.pruned,
+            })
+            .collect(),
     })
 }
 

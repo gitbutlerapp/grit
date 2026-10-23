@@ -68,9 +68,15 @@ fn repository_reflogs_public_methods() {
             expire: Some("now".into()),
             expire_unreachable: Some("never".into()),
             all: false,
+            dry_run: false,
         })
         .expect("expire");
     assert!(outcome.entries_pruned >= 1);
+    assert!(!outcome.dry_run);
+    assert!(outcome
+        .refs
+        .iter()
+        .any(|r| r.ref_name == refname && r.pruned >= 1));
 
     let _ = std::any::type_name::<RepositoryReflogs<'_>>();
 }
