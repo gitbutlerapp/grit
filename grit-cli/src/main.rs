@@ -2561,14 +2561,11 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<ExitS
                 );
                 match outcome {
                     Ok(out) => emit_success(&out, opts, ctx),
-                    Err(err) => {
-                        output::emit_error(&err, opts);
-                        Ok(finish_hunk_error(
-                            &err,
-                            opts,
-                            commands::add::hunks_exit_code(&err),
-                        ))
-                    }
+                    Err(err) => Ok(finish_hunk_error(
+                        &err,
+                        opts,
+                        commands::add::hunks_exit_code(&err),
+                    )),
                 }
             }
             HistoryAction::Rebase {
