@@ -380,6 +380,9 @@ fn porcelain_stash_tag_status_and_worktree() {
         message: Some("wip".into()),
         include_untracked: false,
         identity: identity.clone(),
+        selection: None,
+        pathspecs: Vec::new(),
+        dry_run: false,
     });
     let _ = repo.stash().pop(
         work_tree,

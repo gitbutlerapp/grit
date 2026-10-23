@@ -1020,6 +1020,10 @@ pub enum Error {
     #[error("cannot stash without a commit")]
     StashNoInitialCommit,
 
+    /// Partial [`push_stash`](crate::porcelain::stash::push_stash) hunk selection failed.
+    #[error(transparent)]
+    HunkSelection(#[from] crate::porcelain::hunk_select::HunkSelectError),
+
     /// HEAD does not resolve while applying a stash entry.
     #[error("missing HEAD while applying stash")]
     StashMissingHead,

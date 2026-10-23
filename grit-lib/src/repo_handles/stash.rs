@@ -4,6 +4,7 @@ use std::path::Path;
 
 use crate::error::Result;
 use crate::objects::ObjectId;
+use crate::porcelain::hunk_select::HunkSelection;
 use crate::porcelain::stash::{
     apply_stash_entry, create_stash, drop_stash, list_stashes, pop_stash, push_stash,
     StashCreateOptions, StashEntry,
@@ -19,6 +20,12 @@ pub struct StashPushOptions {
     pub include_untracked: bool,
     /// Full author/committer identity (`Name <email> timestamp tz`).
     pub identity: String,
+    /// When set, stash only these unstaged hunks (index unchanged on push).
+    pub selection: Option<HunkSelection>,
+    /// Pathspecs narrowing hunk resolution.
+    pub pathspecs: Vec<String>,
+    /// Preview without updating refs, index, or worktree.
+    pub dry_run: bool,
 }
 
 /// Options for [`RepositoryStash::apply`] and [`RepositoryStash::pop`].
@@ -91,6 +98,9 @@ impl<'repo> RepositoryStash<'repo> {
     ///     message: Some("wip".into()),
     ///     include_untracked: false,
     ///     identity: "User <u@example.com> 1000000000 +0000".into(),
+    ///     selection: None,
+    ///     pathspecs: Vec::new(),
+    ///     dry_run: false,
     /// };
     /// let _ = repo.stash().push(&opts)?;
     /// # Ok(())
@@ -101,6 +111,9 @@ impl<'repo> RepositoryStash<'repo> {
             message: options.message.clone(),
             include_untracked: options.include_untracked,
             identity: options.identity.clone(),
+            selection: options.selection.clone(),
+            pathspecs: options.pathspecs.clone(),
+            dry_run: options.dry_run,
         };
         push_stash(self.repo, &inner)
     }
@@ -115,6 +128,9 @@ impl<'repo> RepositoryStash<'repo> {
             message: options.message.clone(),
             include_untracked: options.include_untracked,
             identity: options.identity.clone(),
+            selection: options.selection.clone(),
+            pathspecs: options.pathspecs.clone(),
+            dry_run: options.dry_run,
         };
         create_stash(self.repo, &inner)
     }

@@ -479,6 +479,9 @@ pub fn bench_push_stash(fx: &HotPathsFixture) {
         message: None,
         include_untracked: false,
         identity: BENCH_IDENT.to_owned(),
+        selection: None,
+        pathspecs: Vec::new(),
+        dry_run: false,
     };
     let _ = push_stash(&fx.repo, &options).expect("push_stash");
 }

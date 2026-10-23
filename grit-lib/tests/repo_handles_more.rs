@@ -59,6 +59,9 @@ fn handle_stash_roundtrip_with_git() {
             message: Some("handle stash".into()),
             include_untracked: false,
             identity: IDENT.into(),
+            selection: None,
+            pathspecs: Vec::new(),
+            dry_run: false,
         })
         .expect("push")
         .expect("changes");

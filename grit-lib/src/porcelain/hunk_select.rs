@@ -6,7 +6,8 @@ use std::str::FromStr;
 use thiserror::Error;
 
 use crate::apply::{
-    apply_patch_to_index_and_write, FilePatch, Hunk, HunkLine, IndexApplyOptions, IndexApplyOutcome,
+    apply_hunks_to_blob, apply_patch_to_index_and_write, ApplyOptions, FilePatch, Hunk, HunkLine,
+    IndexApplyOptions, IndexApplyOutcome,
 };
 use crate::diff::hunk_id::{
     hunk_ids, hunk_ids_with_duplicate_peers, DiffSide, HunkId, HunkIdError,
@@ -19,8 +20,12 @@ use crate::diff::{
     unstaged_file_diffs_with_peer_hunks, DiffOptions, DiffStatus, DiffTarget, FileDiff,
 };
 use crate::error::{ApplyError, Error};
+use crate::index::{MODE_GITLINK, MODE_REGULAR};
+use crate::objects::ObjectKind;
+use crate::porcelain::checkout::{remove_empty_parent_dirs, write_smudged_blob_to_worktree};
 use crate::repo::Repository;
 use crate::worktree_rules::WorktreeRules;
+use std::fs;
 
 /// New-side line range for partial hunk staging (1-based, inclusive).
 ///
@@ -840,6 +845,138 @@ fn structured_hunk_to_apply_hunk(hunk: &StructuredHunk, first_body_line: usize) 
         first_body_line,
         lines,
     }
+}
+
+/// Options for [`reverse_apply_patches_to_worktree`].
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct WorktreeReverseApplyOptions {
+    /// When true, validate patches without writing the worktree or new blobs.
+    pub dry_run: bool,
+}
+
+/// Reverse-apply unstaged [`FilePatch`] rows onto the worktree (undo selected local edits).
+///
+/// Used after partial `stash push` so only the stashed hunks disappear from disk while the
+/// index and other unstaged edits stay put.
+///
+/// # Errors
+///
+/// [`ApplyError`] when a patch cannot be reversed on the worktree.
+pub fn reverse_apply_patches_to_worktree(
+    repo: &Repository,
+    patches: &[FilePatch],
+    opts: &WorktreeReverseApplyOptions,
+) -> std::result::Result<(), ApplyError> {
+    let work_tree = repo.work_tree().ok_or_else(|| ApplyError::Failed {
+        path: String::new(),
+        message: "worktree reverse apply requires a working tree".into(),
+    })?;
+    let index = repo.load_index().map_err(|e| ApplyError::Failed {
+        path: String::new(),
+        message: e.to_string(),
+    })?;
+    let config = repo.config().map_err(|e| ApplyError::Failed {
+        path: String::new(),
+        message: e.to_string(),
+    })?;
+    let rules = WorktreeRules::from_repository(repo, &index).map_err(|e| ApplyError::Failed {
+        path: String::new(),
+        message: e.to_string(),
+    })?;
+    for patch in patches {
+        if patch.involves_gitlink() {
+            let path = patch.effective_path().unwrap_or("<unknown>").to_string();
+            return Err(ApplyError::Failed {
+                path,
+                message: "submodule/gitlink patches are not supported".into(),
+            });
+        }
+        let path = patch
+            .target_path()
+            .map(str::to_string)
+            .or_else(|| patch.effective_path().map(str::to_string))
+            .ok_or_else(|| ApplyError::Failed {
+                path: String::new(),
+                message: "patch has no target path".into(),
+            })?;
+
+        if patch.is_deleted {
+            let Some(entry) = index.get(path.as_bytes(), 0) else {
+                return Err(ApplyError::NotInIndex { path: path.clone() });
+            };
+            if entry.mode == MODE_GITLINK {
+                continue;
+            }
+            if !opts.dry_run {
+                write_smudged_blob_to_worktree(
+                    repo, work_tree, &rules, &path, &entry.oid, entry.mode,
+                )
+                .map_err(|e| ApplyError::Failed {
+                    path: path.clone(),
+                    message: e.to_string(),
+                })?;
+            }
+            continue;
+        }
+
+        if patch.is_new {
+            if !opts.dry_run {
+                let abs = crate::repo_relpath::worktree_abs(work_tree, &path);
+                if let Ok(meta) = fs::symlink_metadata(&abs) {
+                    if meta.is_dir() {
+                        let _ = fs::remove_dir_all(&abs);
+                    } else {
+                        fs::remove_file(&abs).map_err(|e| ApplyError::Failed {
+                            path: path.clone(),
+                            message: e.to_string(),
+                        })?;
+                    }
+                    remove_empty_parent_dirs(work_tree, &abs);
+                }
+            }
+            continue;
+        }
+
+        let mode = index
+            .get(path.as_bytes(), 0)
+            .map(|e| e.mode)
+            .unwrap_or(MODE_REGULAR);
+        if mode == MODE_GITLINK {
+            continue;
+        }
+        let index_entry = index.get(path.as_bytes(), 0);
+        let base = read_worktree_side_bytes_for_diff(
+            repo.odb(),
+            work_tree,
+            &path,
+            mode,
+            config.as_ref(),
+            index_entry,
+            Some(&rules),
+        )
+        .map_err(|e| ApplyError::Failed {
+            path: path.clone(),
+            message: e.to_string(),
+        })?;
+        let new_clean = apply_hunks_to_blob(&base, &patch.hunks, &ApplyOptions { reverse: true })?;
+        if opts.dry_run {
+            continue;
+        }
+        let oid = repo
+            .odb()
+            .write(ObjectKind::Blob, &new_clean)
+            .map_err(|e| ApplyError::Failed {
+                path: path.clone(),
+                message: e.to_string(),
+            })?;
+        write_smudged_blob_to_worktree(repo, work_tree, &rules, &path, &oid, mode).map_err(
+            |e| ApplyError::Failed {
+                path: path.clone(),
+                message: e.to_string(),
+            },
+        )?;
+    }
+    Ok(())
 }
 
 /// Stage the hunks in `selection` on `side` (typically unstaged for `grit add --hunks`).
