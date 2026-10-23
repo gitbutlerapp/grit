@@ -2254,11 +2254,26 @@ fn worktree_against_tree_entries(
     base_tree: Option<&ObjectId>,
     diff_options: &DiffOptions,
 ) -> Result<Vec<DiffEntry>> {
-    let work_tree = repo.work_tree().context("grit diff needs a working tree")?;
     let mut index = repo
         .index_handle()
         .load()
         .context("could not load the index")?;
+    let rules_arc = std::sync::Arc::new(std::sync::Mutex::new(
+        WorktreeRules::from_repository(repo, &index).context("could not load worktree rules")?,
+    ));
+    worktree_against_tree_entries_with_index(repo, &mut index, &rules_arc, base_tree, diff_options)
+}
+
+/// Like [`worktree_against_tree_entries`], diffing with an index and worktree rules the caller
+/// already loaded.
+fn worktree_against_tree_entries_with_index(
+    repo: &grit_lib::repo::Repository,
+    index: &mut Index,
+    rules_arc: &std::sync::Arc<std::sync::Mutex<WorktreeRules>>,
+    base_tree: Option<&ObjectId>,
+    diff_options: &DiffOptions,
+) -> Result<Vec<DiffEntry>> {
+    let work_tree = repo.work_tree().context("grit diff needs a working tree")?;
     let config = repo.config().context("could not load config")?;
 
     let index_backed = base_tree
@@ -2266,14 +2281,11 @@ fn worktree_against_tree_entries(
         .map(|(left, right)| left == right)
         .unwrap_or(base_tree.is_none() && index.cache_tree_root.is_none())
         && grit_lib::index::write_tree::cache_tree_extension_valid(index.cache_tree.as_ref());
-    let diff_index_mtime = grit_lib::diff::index_mtime_for_diff(&index, None);
-    let rules_arc = std::sync::Arc::new(std::sync::Mutex::new(
-        WorktreeRules::from_repository(repo, &index).context("could not load worktree rules")?,
-    ));
+    let diff_index_mtime = grit_lib::diff::index_mtime_for_diff(index, None);
     let mut entries = if index_backed {
         let (entries, _) = diff_index_to_worktree_with_renames(
             repo,
-            &mut index,
+            index,
             work_tree,
             DiffIndexToWorktreeOptions {
                 repository_git_dir: Some(repo.git_dir().to_path_buf()),
@@ -2283,7 +2295,7 @@ fn worktree_against_tree_entries(
                 refresh_index_stat_in_pass: false,
                 for_status: true,
                 refresh_fsmonitor: fsmonitor_enabled(config.as_ref()),
-                worktree_rules: Some(std::sync::Arc::clone(&rules_arc)),
+                worktree_rules: Some(std::sync::Arc::clone(rules_arc)),
                 command_runner: Some(repo.command_runner()),
                 ..DiffIndexToWorktreeOptions::default()
             },
@@ -2292,15 +2304,13 @@ fn worktree_against_tree_entries(
         .context("could not diff the working tree")?;
         entries
     } else {
-        let worktree_rules =
-            grit_lib::worktree::worktree_rules::WorktreeRules::from_repository(repo, &index)
-                .context("could not load worktree rules")?;
+        let worktree_rules = rules_arc.lock().unwrap_or_else(|e| e.into_inner());
         let raw = grit_lib::diff::diff_tree_to_worktree_with_git_dir_and_rules(
             repo.odb(),
             base_tree,
             work_tree,
             repo.git_dir(),
-            &index,
+            index,
             Some(config.as_ref()),
             Some(&worktree_rules),
         )
@@ -2325,16 +2335,20 @@ fn worktree_against_tree(
     diff_options: &DiffOptions,
 ) -> Result<Vec<FileChange>> {
     let work_tree = repo.work_tree().context("grit diff needs a working tree")?;
-    // The entry diff holds its own copy of the index; finish it before loading this one
-    // so two copies are never alive at once.
-    let entries = worktree_against_tree_entries(repo, base_tree, diff_options)?;
-    let index = repo
+    let mut index = repo
         .index_handle()
         .load()
         .context("could not load the index")?;
     let rules_arc = std::sync::Arc::new(std::sync::Mutex::new(
         WorktreeRules::from_repository(repo, &index).context("could not load worktree rules")?,
     ));
+    let entries = worktree_against_tree_entries_with_index(
+        repo,
+        &mut index,
+        &rules_arc,
+        base_tree,
+        diff_options,
+    )?;
     let side = WorktreeDiffSide {
         work_tree,
         index: &index,
