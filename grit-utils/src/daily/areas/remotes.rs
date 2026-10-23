@@ -3,14 +3,15 @@
 use super::super::helpers::{headline_spec, matrix_spec, prepare_none, sh_devnull, sh_script};
 use super::super::plan::{DailyHeadlineContext, DailyHeadlinePlan, DailyPrepare};
 use super::super::remote_fixture::{
-    clone_bench_script, clone_bench_script_grit, setup_git_git_file_remote,
-    setup_git_git_grit_http_fetch_remote, setup_git_git_grit_http_push_remote,
-    setup_many_refs_file_remote, setup_synth10k_file_remote, setup_synth10k_grit_http_remote,
-    setup_synth10k_pull_rebase_remote, verify_clone_http, verify_clone_local, verify_fetch_deepen,
-    verify_fetch_dry_run, verify_fetch_incremental, verify_fetch_incremental_http,
-    verify_fetch_noop, verify_fetch_one_branch, verify_ls_remote_all, verify_pull_check,
-    verify_pull_fast_forward, verify_pull_rebase, verify_push_force_with_lease,
-    verify_push_incremental, verify_push_incremental_http, verify_push_refspec,
+    clone_bench_script, clone_bench_script_grit, clone_bench_script_grit_shallow,
+    clone_bench_script_shallow, setup_git_git_file_remote, setup_git_git_grit_http_fetch_remote,
+    setup_git_git_grit_http_push_remote, setup_many_refs_file_remote, setup_synth10k_file_remote,
+    setup_synth10k_grit_http_remote, setup_synth10k_pull_rebase_remote, verify_clone_http,
+    verify_clone_local, verify_clone_shallow, verify_fetch_deepen, verify_fetch_dry_run,
+    verify_fetch_incremental, verify_fetch_incremental_http, verify_fetch_noop,
+    verify_fetch_one_branch, verify_ls_remote_all, verify_pull_check, verify_pull_fast_forward,
+    verify_pull_rebase, verify_push_force_with_lease, verify_push_incremental,
+    verify_push_incremental_http, verify_push_refspec,
 };
 use super::super::runner::BenchArgv;
 use crate::shell::shell_quote;
@@ -280,6 +281,32 @@ fn clone_http_grit(ctx: &DailyHeadlineContext) -> BenchArgv {
     clone_local_grit(ctx)
 }
 
+fn clone_shallow_git(ctx: &DailyHeadlineContext) -> BenchArgv {
+    let Some(remote) = ctx.remote.as_ref() else {
+        return BenchArgv::new("false", Vec::<&str>::new());
+    };
+    sh_script(clone_bench_script_shallow(
+        &ctx.git,
+        &remote.remote_url,
+        &remote.meta.clone_dest,
+    ))
+}
+
+fn clone_shallow_grit(ctx: &DailyHeadlineContext) -> BenchArgv {
+    let Some(remote) = ctx.remote.as_ref() else {
+        return BenchArgv::new("false", Vec::<&str>::new());
+    };
+    sh_script(clone_bench_script_grit_shallow(
+        &ctx.grit,
+        &remote.remote_url,
+        &remote.meta.clone_dest,
+    ))
+}
+
+fn correctness_clone_shallow(ctx: &DailyHeadlineContext) -> anyhow::Result<()> {
+    verify_clone_shallow(ctx, &ctx.repo)
+}
+
 pub fn plans() -> Vec<DailyHeadlinePlan> {
     let mut out = headline_plans();
     out.extend(matrix_plans());
@@ -436,6 +463,15 @@ fn matrix_plans() -> Vec<DailyHeadlinePlan> {
             build_git: pull_check_git,
             build_grit: pull_check_grit,
             correctness: Some(correctness_pull_check),
+        },
+        DailyHeadlinePlan {
+            spec: matrix_spec("clone/shallow@git-git"),
+            pending: false,
+            setup: setup_git_git_file_remote,
+            prepare: prepare_network_clone,
+            build_git: clone_shallow_git,
+            build_grit: clone_shallow_grit,
+            correctness: Some(correctness_clone_shallow),
         },
     ]
 }

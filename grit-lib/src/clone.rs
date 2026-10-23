@@ -15,7 +15,7 @@ use crate::fetch::{fetch_operation_identity, Progress};
 use crate::objects::ObjectId;
 use crate::ref_storage::RefStorageFormat;
 use crate::refs;
-use crate::remote::{HttpClientFactory, ListRefsOptions, Remote, DEFAULT_REMOTE};
+use crate::remote::{fold_peeled_refs, HttpClientFactory, ListRefsOptions, Remote, DEFAULT_REMOTE};
 use crate::repo::{init_repository, Repository};
 use crate::transfer::{CloneReflog, FetchOptions, TagMode, TransferStats};
 use crate::transport_path::{
@@ -32,6 +32,9 @@ pub enum CloneError {
     /// [`cleanup_failed_clone`] on the path.
     #[error("destination '{0}' already exists and is not empty")]
     DestNotEmpty(String),
+    /// Named branch or tag from [`CloneOptions::branch`] was not advertised by the remote.
+    #[error("remote ref '{0}' not found")]
+    RemoteRefNotFound(String),
     /// Underlying library failure.
     #[error(transparent)]
     Library(#[from] Error),
@@ -50,6 +53,12 @@ impl CloneError {
         !matches!(self, Self::DestNotEmpty(_))
     }
 
+    /// Whether the failure is a missing `-b` / `--branch` ref (destination may be removed).
+    #[must_use]
+    pub fn is_remote_ref_not_found(&self) -> bool {
+        matches!(self, Self::RemoteRefNotFound(_))
+    }
+
     /// Whether the failure is a transport/read error (not an empty remote with no branches).
     #[must_use]
     pub fn is_remote_read_failure(&self) -> bool {
@@ -58,7 +67,7 @@ impl CloneError {
             Self::Remote(crate::remote::RemoteError::Library(e)) => {
                 matches!(e, Error::RemoteReadFailed)
             }
-            Self::DestNotEmpty(_) | Self::Remote(_) => false,
+            Self::DestNotEmpty(_) | Self::RemoteRefNotFound(_) | Self::Remote(_) => false,
         }
     }
 }
@@ -80,6 +89,8 @@ pub struct CloneOptions {
     /// Truncate fetched history to this many commits per ref tip
     /// (`git clone --depth N`). `Some(1)` matches a shallow clone.
     pub depth: Option<u32>,
+    /// Remote branch or tag to check out (`git clone -b` / `--branch`).
+    pub branch: Option<String>,
 }
 
 impl CloneOptions {
@@ -94,7 +105,48 @@ impl CloneOptions {
             initial_branch: "main".to_owned(),
             thread_policy: crate::parallel::ThreadPolicy::default(),
             depth: None,
+            branch: None,
         }
+    }
+}
+
+/// Initial checkout disposition after [`clone`] (before working-tree checkout).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CloneHead {
+    /// Checked out on a local branch that tracks the remote.
+    Branch(String),
+    /// Detached at a tag's peeled commit (`git clone -b <tag>`).
+    Detached {
+        /// Tag name from `-b` / `--branch`.
+        tag: String,
+        /// Peeled commit object id.
+        oid: ObjectId,
+    },
+}
+
+impl CloneHead {
+    /// Local branch name when [`CloneHead::Branch`]; `None` when detached.
+    #[must_use]
+    pub fn branch_name(&self) -> Option<&str> {
+        match self {
+            Self::Branch(name) => Some(name.as_str()),
+            Self::Detached { .. } => None,
+        }
+    }
+
+    /// Tag name when detached at a tag; `None` on a branch checkout.
+    #[must_use]
+    pub fn tag_name(&self) -> Option<&str> {
+        match self {
+            Self::Detached { tag, .. } => Some(tag.as_str()),
+            Self::Branch(_) => None,
+        }
+    }
+
+    /// Whether `HEAD` is detached (tag checkout).
+    #[must_use]
+    pub fn is_detached(&self) -> bool {
+        matches!(self, Self::Detached { .. })
     }
 }
 
@@ -116,8 +168,8 @@ pub struct CloneOutcome {
     pub url: String,
     /// Destination path.
     pub path: PathBuf,
-    /// Short name of the default branch that was created.
-    pub branch: String,
+    /// Branch checked out, or detached tag checkout.
+    pub head: CloneHead,
     /// Commit to check out on that branch.
     ///
     /// [`ObjectId::zero()`] when the remote default branch has no commits yet.
@@ -232,7 +284,12 @@ pub fn clone(
     let config = ConfigSet::load(&opts.environment, Some(repo.git_dir()), true)
         .map_err(CloneError::Library)?;
     let remote = Remote::from_config(&config, &opts.remote_name)?;
-    let fetch_refspec = clone_initial_fetch_refspec(&opts, &remote, &repo, http_factory)?;
+    let requested = match opts.branch.as_deref() {
+        Some(name) => resolve_requested_clone_ref(name, &remote, &repo, http_factory)?,
+        None => CloneRequestedRef::Default,
+    };
+    let fetch_refspec =
+        clone_initial_fetch_refspec(&opts, &requested, &remote, &repo, http_factory)?;
     set_local_config(
         &repo,
         &[(
@@ -270,56 +327,13 @@ pub fn clone(
     }
     let fetch_outcome = remote.fetch(&repo, fetch_opts, progress, http_factory)?;
 
-    let default = choose_clone_default_branch(
+    let (head, oid) = setup_clone_head(
         &repo,
+        &opts,
+        &requested,
         &fetch_outcome,
-        &opts.url,
-        &opts.remote_name,
-        &opts.initial_branch,
-    );
-
-    let tracking = format!("refs/remotes/{}/{default}", opts.remote_name);
-    let oid = refs::resolve_ref(repo.git_dir(), &tracking).unwrap_or(ObjectId::zero());
-    let branch_ref = format!("refs/heads/{default}");
-    let zero = ObjectId::zero();
-    if !oid.is_zero() {
-        refs::write_ref(repo.git_dir(), &branch_ref, &oid).map_err(CloneError::Library)?;
-        refs::append_reflog(
-            repo.git_dir(),
-            &branch_ref,
-            &zero,
-            &oid,
-            &identity,
-            &clone_message,
-            false,
-        )
-        .map_err(CloneError::Library)?;
-    }
-    refs::write_symbolic_ref(repo.git_dir(), "HEAD", &branch_ref).map_err(CloneError::Library)?;
-    if !oid.is_zero() {
-        refs::append_reflog(
-            repo.git_dir(),
-            "HEAD",
-            &zero,
-            &oid,
-            &identity,
-            &clone_message,
-            false,
-        )
-        .map_err(CloneError::Library)?;
-    }
-    set_local_config(
-        &repo,
-        &[
-            (
-                &format!("branch.{default}.remote"),
-                opts.remote_name.clone(),
-            ),
-            (
-                &format!("branch.{default}.merge"),
-                format!("refs/heads/{default}"),
-            ),
-        ],
+        &identity,
+        &clone_message,
     )?;
 
     let branches_with_commits = remote_branch_names_with_commits(&repo, &opts.remote_name);
@@ -333,7 +347,7 @@ pub fn clone(
     Ok(CloneOutcome {
         url: opts.url.clone(),
         path: opts.dest.clone(),
-        branch: default,
+        head,
         checkout_oid: oid,
         checkout,
         branches_with_commits,
@@ -378,31 +392,217 @@ fn classify_clone_checkout(
     CloneCheckout::EmptyRemote
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum CloneRequestedRef {
+    Default,
+    Branch(String),
+    Tag { name: String, peel: ObjectId },
+}
+
+fn resolve_requested_clone_ref(
+    name: &str,
+    remote: &Remote,
+    repo: &Repository,
+    http_factory: Option<&dyn HttpClientFactory>,
+) -> std::result::Result<CloneRequestedRef, CloneError> {
+    let refs = remote
+        .list_refs(
+            Some(repo),
+            &ListRefsOptions {
+                symrefs: true,
+                peel: true,
+                ..Default::default()
+            },
+            http_factory,
+        )
+        .map_err(CloneError::Remote)?;
+    let head_ref = format!("refs/heads/{name}");
+    if refs.iter().any(|r| r.name == head_ref) {
+        return Ok(CloneRequestedRef::Branch(name.to_owned()));
+    }
+    let tag_ref = format!("refs/tags/{name}");
+    let folded = fold_peeled_refs(&refs);
+    let Some(tag) = folded.iter().find(|r| r.name == tag_ref) else {
+        return Err(CloneError::RemoteRefNotFound(name.to_owned()));
+    };
+    let peel = tag.peeled.filter(|oid| !oid.is_zero()).unwrap_or(tag.oid);
+    if peel.is_zero() {
+        return Err(CloneError::RemoteRefNotFound(name.to_owned()));
+    }
+    Ok(CloneRequestedRef::Tag {
+        name: name.to_owned(),
+        peel,
+    })
+}
+
 /// Initial `remote.*.fetch` refspec and the refspec used for the first fetch.
 ///
-/// A depth-limited clone matches `git clone --depth`: only the remote's default
-/// branch is fetched (`--single-branch` behavior), not every `refs/heads/*` tip.
+/// A depth-limited clone matches `git clone --depth`: only one ref is fetched
+/// (`--single-branch` behavior), not every `refs/heads/*` tip.
 fn clone_initial_fetch_refspec(
     opts: &CloneOptions,
+    requested: &CloneRequestedRef,
     remote: &Remote,
     repo: &Repository,
     http_factory: Option<&dyn HttpClientFactory>,
 ) -> std::result::Result<String, CloneError> {
     if let Some(depth) = opts.depth.filter(|d| *d > 0) {
         let _ = depth;
-        let branch = advertised_default_branch_from_remote(
-            remote,
-            repo,
-            http_factory,
-            &opts.url,
-            &opts.initial_branch,
-        )?;
-        return Ok(format!(
-            "+refs/heads/{branch}:refs/remotes/{}/{}",
-            opts.remote_name, branch
-        ));
+        return match requested {
+            CloneRequestedRef::Tag { name, .. } => {
+                Ok(format!("+refs/tags/{name}:refs/tags/{name}"))
+            }
+            CloneRequestedRef::Branch(branch) => Ok(format!(
+                "+refs/heads/{branch}:refs/remotes/{}/{}",
+                opts.remote_name, branch
+            )),
+            CloneRequestedRef::Default => {
+                let branch = advertised_default_branch_from_remote(
+                    remote,
+                    repo,
+                    http_factory,
+                    &opts.url,
+                    &opts.initial_branch,
+                )?;
+                Ok(format!(
+                    "+refs/heads/{branch}:refs/remotes/{}/{}",
+                    opts.remote_name, branch
+                ))
+            }
+        };
     }
     Ok(format!("+refs/heads/*:refs/remotes/{}/*", opts.remote_name))
+}
+
+fn setup_clone_head(
+    repo: &Repository,
+    opts: &CloneOptions,
+    requested: &CloneRequestedRef,
+    fetch_outcome: &crate::transfer::FetchOutcome,
+    identity: &str,
+    clone_message: &str,
+) -> std::result::Result<(CloneHead, ObjectId), CloneError> {
+    let zero = ObjectId::zero();
+    match requested {
+        CloneRequestedRef::Tag { name, peel } => {
+            if !peel.is_zero() {
+                refs::write_ref(repo.git_dir(), "HEAD", peel).map_err(CloneError::Library)?;
+                refs::append_reflog(
+                    repo.git_dir(),
+                    "HEAD",
+                    &zero,
+                    peel,
+                    identity,
+                    clone_message,
+                    false,
+                )
+                .map_err(CloneError::Library)?;
+            }
+            Ok((
+                CloneHead::Detached {
+                    tag: name.clone(),
+                    oid: *peel,
+                },
+                *peel,
+            ))
+        }
+        CloneRequestedRef::Branch(branch) => {
+            let tracking = format!("refs/remotes/{}/{}", opts.remote_name, branch);
+            let oid = refs::resolve_ref(repo.git_dir(), &tracking).unwrap_or(ObjectId::zero());
+            let branch_ref = format!("refs/heads/{branch}");
+            if !oid.is_zero() {
+                refs::write_ref(repo.git_dir(), &branch_ref, &oid).map_err(CloneError::Library)?;
+                refs::append_reflog(
+                    repo.git_dir(),
+                    &branch_ref,
+                    &zero,
+                    &oid,
+                    identity,
+                    clone_message,
+                    false,
+                )
+                .map_err(CloneError::Library)?;
+            }
+            refs::write_symbolic_ref(repo.git_dir(), "HEAD", &branch_ref)
+                .map_err(CloneError::Library)?;
+            if !oid.is_zero() {
+                refs::append_reflog(
+                    repo.git_dir(),
+                    "HEAD",
+                    &zero,
+                    &oid,
+                    identity,
+                    clone_message,
+                    false,
+                )
+                .map_err(CloneError::Library)?;
+            }
+            set_local_config(
+                repo,
+                &[
+                    (&format!("branch.{branch}.remote"), opts.remote_name.clone()),
+                    (
+                        &format!("branch.{branch}.merge"),
+                        format!("refs/heads/{branch}"),
+                    ),
+                ],
+            )?;
+            Ok((CloneHead::Branch(branch.clone()), oid))
+        }
+        CloneRequestedRef::Default => {
+            let default = choose_clone_default_branch(
+                repo,
+                fetch_outcome,
+                &opts.url,
+                &opts.remote_name,
+                &opts.initial_branch,
+            );
+            let tracking = format!("refs/remotes/{}/{default}", opts.remote_name);
+            let oid = refs::resolve_ref(repo.git_dir(), &tracking).unwrap_or(ObjectId::zero());
+            let branch_ref = format!("refs/heads/{default}");
+            if !oid.is_zero() {
+                refs::write_ref(repo.git_dir(), &branch_ref, &oid).map_err(CloneError::Library)?;
+                refs::append_reflog(
+                    repo.git_dir(),
+                    &branch_ref,
+                    &zero,
+                    &oid,
+                    identity,
+                    clone_message,
+                    false,
+                )
+                .map_err(CloneError::Library)?;
+            }
+            refs::write_symbolic_ref(repo.git_dir(), "HEAD", &branch_ref)
+                .map_err(CloneError::Library)?;
+            if !oid.is_zero() {
+                refs::append_reflog(
+                    repo.git_dir(),
+                    "HEAD",
+                    &zero,
+                    &oid,
+                    identity,
+                    clone_message,
+                    false,
+                )
+                .map_err(CloneError::Library)?;
+            }
+            set_local_config(
+                repo,
+                &[
+                    (
+                        &format!("branch.{default}.remote"),
+                        opts.remote_name.clone(),
+                    ),
+                    (
+                        &format!("branch.{default}.merge"),
+                        format!("refs/heads/{default}"),
+                    ),
+                ],
+            )?;
+            Ok((CloneHead::Branch(default), oid))
+        }
+    }
 }
 
 fn advertised_default_branch_from_remote(
@@ -709,7 +909,7 @@ mod tests {
         )
         .expect("clone");
 
-        assert_eq!(outcome.branch, "trunk");
+        assert_eq!(outcome.head.branch_name(), Some("trunk"));
         assert!(outcome.checkout_oid.is_zero());
         assert_eq!(outcome.checkout, CloneCheckout::UnbornDefaultBranch);
         assert!(
@@ -752,7 +952,7 @@ mod tests {
         )
         .expect("clone empty bare");
 
-        assert_eq!(outcome.branch, "main");
+        assert_eq!(outcome.head.branch_name(), Some("main"));
         assert!(outcome.checkout_oid.is_zero());
         assert_eq!(outcome.checkout, CloneCheckout::EmptyRemote);
         assert!(outcome.branches_with_commits.is_empty());
@@ -826,6 +1026,253 @@ mod tests {
             derive_clone_dir(r"C:\scratch\a\origin.git").expect("name"),
             "origin"
         );
+    }
+
+    fn git_cmd(args: &[&str], cwd: &std::path::Path) {
+        use std::process::Command;
+        let out = Command::new("git")
+            .args(args)
+            .current_dir(cwd)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .output()
+            .expect("git");
+        assert!(
+            out.status.success(),
+            "git {:?}: {}",
+            args,
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    fn git_out(args: &[&str], cwd: &std::path::Path) -> String {
+        use std::process::Command;
+        let out = Command::new("git")
+            .args(args)
+            .current_dir(cwd)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .output()
+            .expect("git");
+        assert!(out.status.success(), "git {:?} failed", args);
+        String::from_utf8_lossy(&out.stdout).trim().to_string()
+    }
+
+    fn shallow_file_oids(path: &std::path::Path) -> Vec<String> {
+        let shallow = path.join(".git/shallow");
+        if !shallow.is_file() {
+            return Vec::new();
+        }
+        std::fs::read_to_string(shallow)
+            .expect("read shallow")
+            .lines()
+            .map(str::trim)
+            .filter(|l| !l.is_empty())
+            .map(str::to_owned)
+            .collect()
+    }
+
+    fn git_fsck_strict(work_tree: &std::path::Path) {
+        use std::process::Command;
+        let out = Command::new("git")
+            .args(["fsck", "--strict"])
+            .current_dir(work_tree)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .output()
+            .expect("git fsck");
+        assert!(
+            out.status.success(),
+            "git fsck --strict: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+
+    fn build_feature_upstream(bare: &std::path::Path) {
+        let wt = bare.with_extension("wt");
+        fs::create_dir_all(&wt).expect("mkdir");
+        git_cmd(&["init", "-q", "-b", "main", "."], &wt);
+        git_cmd(&["config", "user.email", "t@example.com"], &wt);
+        git_cmd(&["config", "user.name", "Test"], &wt);
+        for i in 1..=5 {
+            fs::write(wt.join("f"), format!("{i}\n")).expect("write");
+            git_cmd(&["add", "f"], &wt);
+            git_cmd(&["commit", "-q", "-m", &format!("c{i}")], &wt);
+        }
+        git_cmd(&["branch", "feature", "HEAD~2"], &wt);
+        git_cmd(&["tag", "v1", "HEAD~1"], &wt);
+        let url = format!("file://{}", bare.to_string_lossy());
+        git_cmd(&["clone", "-q", "--bare", ".", bare.to_str().unwrap()], &wt);
+    }
+
+    #[test]
+    fn clone_depth_n_writes_shallow_like_git() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let bare = tmp.path().join("remote.git");
+        build_feature_upstream(&bare);
+        let url = format!("file://{}", bare.to_string_lossy());
+
+        let grit_dest = tmp.path().join("grit");
+        clone(
+            CloneOptions {
+                depth: Some(3),
+                ..CloneOptions::new(url.clone(), grit_dest.clone())
+            },
+            &mut crate::fetch::NoProgress,
+            None,
+        )
+        .expect("grit shallow clone");
+
+        let git_dest = tmp.path().join("git");
+        git_cmd(
+            &[
+                "clone",
+                "-q",
+                "--depth",
+                "3",
+                url.as_str(),
+                git_dest.to_str().unwrap(),
+            ],
+            tmp.path(),
+        );
+
+        assert_eq!(
+            shallow_file_oids(&grit_dest),
+            shallow_file_oids(&git_dest),
+            "shallow boundary set must match git"
+        );
+        assert_eq!(
+            git_out(&["rev-list", "--count", "HEAD"], &grit_dest),
+            git_out(&["rev-list", "--count", "HEAD"], &git_dest)
+        );
+        git_fsck_strict(&grit_dest);
+        assert!(git_out(&["log", "--oneline"], &grit_dest).lines().count() >= 1);
+    }
+
+    #[test]
+    fn clone_branch_checks_out_named_branch() {
+        for depth in [None, Some(3u32)] {
+            let tmp = tempfile::tempdir().expect("tempdir");
+            let bare = tmp.path().join("remote.git");
+            build_feature_upstream(&bare);
+            let url = format!("file://{}", bare.to_string_lossy());
+
+            let grit_dest = tmp.path().join("grit");
+            clone(
+                CloneOptions {
+                    depth,
+                    branch: Some("feature".to_owned()),
+                    ..CloneOptions::new(url.clone(), grit_dest.clone())
+                },
+                &mut crate::fetch::NoProgress,
+                None,
+            )
+            .expect("grit clone -b feature");
+
+            let git_dest = tmp.path().join("git");
+            match depth {
+                None => git_cmd(
+                    &[
+                        "clone",
+                        "-q",
+                        "-b",
+                        "feature",
+                        url.as_str(),
+                        git_dest.to_str().unwrap(),
+                    ],
+                    tmp.path(),
+                ),
+                Some(d) => {
+                    let depth_s = d.to_string();
+                    git_cmd(
+                        &[
+                            "clone",
+                            "-q",
+                            "--depth",
+                            depth_s.as_str(),
+                            "-b",
+                            "feature",
+                            url.as_str(),
+                            git_dest.to_str().unwrap(),
+                        ],
+                        tmp.path(),
+                    );
+                }
+            }
+
+            assert_eq!(
+                fs::read_to_string(grit_dest.join(".git/HEAD"))
+                    .expect("HEAD")
+                    .trim(),
+                fs::read_to_string(git_dest.join(".git/HEAD"))
+                    .expect("HEAD")
+                    .trim()
+            );
+            assert_eq!(
+                git_out(&["config", "--get", "branch.feature.remote"], &grit_dest),
+                git_out(&["config", "--get", "branch.feature.remote"], &git_dest)
+            );
+            assert_eq!(
+                git_out(&["config", "--get", "branch.feature.merge"], &grit_dest),
+                git_out(&["config", "--get", "branch.feature.merge"], &git_dest)
+            );
+            assert_eq!(
+                git_out(&["config", "--get", "remote.origin.fetch"], &grit_dest),
+                git_out(&["config", "--get", "remote.origin.fetch"], &git_dest)
+            );
+            git_fsck_strict(&grit_dest);
+        }
+    }
+
+    #[test]
+    fn clone_tag_detaches_head() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let bare = tmp.path().join("remote.git");
+        build_feature_upstream(&bare);
+        let url = format!("file://{}", bare.to_string_lossy());
+        let tag_commit = git_out(&["rev-parse", "v1^{}"], &bare);
+
+        let grit_dest = tmp.path().join("grit");
+        let outcome = clone(
+            CloneOptions {
+                branch: Some("v1".to_owned()),
+                ..CloneOptions::new(url, grit_dest.clone())
+            },
+            &mut crate::fetch::NoProgress,
+            None,
+        )
+        .expect("clone tag");
+
+        assert!(outcome.head.is_detached());
+        assert_eq!(outcome.head.tag_name(), Some("v1"));
+        assert_eq!(git_out(&["rev-parse", "HEAD"], &grit_dest), tag_commit);
+        let head = fs::read_to_string(grit_dest.join(".git/HEAD")).expect("HEAD");
+        assert!(!head.starts_with("ref: "));
+        let config = fs::read_to_string(grit_dest.join(".git/config")).expect("config");
+        assert!(!config.contains("[branch "));
+        git_fsck_strict(&grit_dest);
+    }
+
+    #[test]
+    fn clone_missing_branch_is_typed_error() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let bare = tmp.path().join("remote.git");
+        build_feature_upstream(&bare);
+        let url = format!("file://{}", bare.to_string_lossy());
+        let dest = tmp.path().join("dest");
+        let err = clone(
+            CloneOptions {
+                branch: Some("no-such-ref".to_owned()),
+                ..CloneOptions::new(url, dest.clone())
+            },
+            &mut crate::fetch::NoProgress,
+            None,
+        )
+        .expect_err("missing ref");
+        assert!(matches!(err, CloneError::RemoteRefNotFound(_)));
+        assert!(err.should_cleanup_failed_clone());
+        cleanup_failed_clone(&dest, false);
+        assert!(!dest.exists());
     }
 
     #[test]

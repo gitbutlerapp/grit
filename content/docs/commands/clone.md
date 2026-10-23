@@ -8,7 +8,7 @@ order: 2
 ## Synopsis
 
 ```text
-grit clone <url> [<dir>] [--shallow]
+grit clone <url> [<dir>] [--depth <N>] [-b|--branch <NAME>] [--shallow]
 ```
 
 ## Description
@@ -40,7 +40,9 @@ When the remote has no commits yet (an empty bare repository), grit still create
 
 When the remote advertises a default branch that has no commits yet but other branches (or tags) were fetched, grit configures `HEAD` to that default branch without checking out files — the same situation as `git clone` when `HEAD` on the server points at an unborn branch. Human output prints a **warning** on stderr that the default branch has no commits, lists remote branches that do have commits, and may suggest `grit switch <branch>`. `--json` sets `"no_checkout_reason": "unborn_default_branch"` and `"branches_with_commits"` to those branch names; `"files"` stays `0` until you switch.
 
-Pass `--shallow` for the same result as `git clone --depth=1`: only the remote's default branch is fetched (single-branch), with a `.git/shallow` boundary at its tip. Other branches are not downloaded until you fetch them explicitly. Later [`grit fetch`](../fetch/) respects the shallow boundary.
+Pass `--depth <N>` for the same result as `git clone --depth`: only one ref is fetched (single-branch), with a `.git/shallow` boundary at its tip. Without `-b` / `--branch`, that ref is the remote's default branch. With `-b`, it is the named branch or tag (branches resolve under `refs/heads/` first, then `refs/tags/`). Tag checkouts detach `HEAD` at the peeled commit and do not create branch config. Other branches are not downloaded until you fetch them explicitly. Later [`grit fetch`](../fetch/) respects the shallow boundary.
+
+`--shallow` is a hidden alias for `--depth 1` and cannot be combined with `--depth`.
 
 You can also clone from a shallow repository (including one created with `git clone --depth`); grit copies the shallow boundary into the new repository so history matches the source.
 
@@ -60,7 +62,9 @@ Object ids in received packs use plain SHA-1 like Git, so repositories such as `
 | --- | --- |
 | `<url>` | The repository to clone: a URL or a local path. |
 | `<dir>` | The directory to clone into. Defaults to the repository's name. |
-| `--shallow` | Shallow clone of the default branch only (`git clone --depth=1`). |
+| `--depth <N>` | Shallow clone: fetch at most `N` commits on the selected ref (`git clone --depth`). |
+| `-b`, `--branch <NAME>` | Branch or tag to check out instead of the remote default. |
+| `--shallow` | Hidden alias for `--depth 1` (conflicts with `--depth`). |
 
 ## Examples
 
@@ -105,7 +109,19 @@ $ grit clone /srv/git/project.git
 Shallow clone (single commit of history on the default branch):
 
 ```console
-$ grit clone --shallow https://github.com/BurntSushi/ripgrep.git
+$ grit clone --depth 1 https://github.com/BurntSushi/ripgrep.git
+```
+
+Clone a specific branch with limited history:
+
+```console
+$ grit clone --depth 3 -b feature file:///srv/git/project.git
+```
+
+Clone and detach at a tag:
+
+```console
+$ grit clone -b v1.0.0 https://github.com/BurntSushi/ripgrep.git
 ```
 
 ## JSON output
@@ -118,7 +134,10 @@ Pass `--json` for stable, scripting-friendly output:
 | ----- | ---- | ------- |
 | `url` | string | The URL or path that was cloned. |
 | `path` | string | Directory the clone was created in. |
-| `branch` | string | Branch that was checked out. |
+| `branch` | string or null | Branch checked out; `null` when detached at a tag. |
+| `detached` | boolean | True when `HEAD` is detached (tag checkout). |
+| `tag` | string or omitted | Tag name when `-b` named a tag. |
+| `depth` | integer or omitted | Shallow depth when `--depth` or `--shallow` was used. |
 | `objects` | integer | Objects received in the fetch pack. |
 | `bytes` | integer | Size in bytes of the received pack. |
 | `branches` | integer | Remote branches fetched. |
@@ -138,6 +157,7 @@ Example (repository with commits):
   "url": "/srv/git/project.git",
   "path": "project",
   "branch": "main",
+  "detached": false,
   "objects": 42,
   "bytes": 8192,
   "branches": 1,

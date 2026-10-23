@@ -251,7 +251,7 @@ fn clone_from_bundle_matches_git_default_branch_when_head_not_first() {
     };
     let outcome = clone_repo(opts, &mut NoProgress, None).expect("grit clone from bundle");
 
-    assert_eq!(outcome.branch, git_branch);
+    assert_eq!(outcome.head.branch_name(), Some(git_branch.as_str()));
     assert_eq!(outcome.checkout_oid.to_hex(), git_head);
 }
 

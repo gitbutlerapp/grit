@@ -8,7 +8,7 @@ use anyhow::{Context, Result};
 use grit_lib::porcelain::checkout::checkout_between_trees_with_progress;
 use grit_lib::remote::clone::{
     cleanup_failed_clone, clone as clone_repo, derive_clone_dir, dest_preexisted_empty,
-    CloneCheckout, CloneError, CloneOptions, CloneOutcome as LibCloneOutcome,
+    CloneCheckout, CloneError, CloneHead, CloneOptions, CloneOutcome as LibCloneOutcome,
 };
 use grit_lib::remote::DefaultHttpClientFactory;
 use schemars::JsonSchema;
@@ -51,8 +51,16 @@ pub struct CloneOutcome {
     pub url: String,
     /// Destination directory.
     pub path: String,
-    /// Default branch checked out.
-    pub branch: String,
+    /// Branch checked out, or `null` when detached at a tag.
+    pub branch: Option<String>,
+    /// True when `HEAD` is detached (tag checkout).
+    pub detached: bool,
+    /// Tag name when `-b` named a tag; omitted on branch checkout.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub tag: Option<String>,
+    /// Shallow depth when `--depth` or `--shallow` was used.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub depth: Option<u32>,
     /// Objects received during the fetch.
     pub objects: u64,
     /// Pack bytes received during the fetch.
@@ -116,7 +124,7 @@ fn render_summary(o: &CloneOutcome, w: &mut dyn Write, color: bool) -> Result<()
         "{} Cloned into {} on {} in {}",
         paint(color, "32", "✓"),
         paint(color, BOLD, &o.path),
-        paint(color, BOLD, &o.branch),
+        paint(color, BOLD, &checkout_label(o)),
         paint(color, BOLD, &total),
     );
     outln!(w);
@@ -185,6 +193,14 @@ fn render_summary(o: &CloneOutcome, w: &mut dyn Write, color: bool) -> Result<()
         );
     }
     Ok(())
+}
+
+fn checkout_label(o: &CloneOutcome) -> String {
+    if o.detached {
+        format!("detached at {}", o.tag.as_deref().unwrap_or("tag"))
+    } else {
+        o.branch.clone().unwrap_or_else(|| "HEAD".to_owned())
+    }
 }
 
 fn plural(n: u64, one: &str, many: &str) -> String {
@@ -318,7 +334,22 @@ impl MarkdownRender for CloneOutcome {
         outln!(w, "## Clone complete");
         outln!(w);
         outln!(w, "- **path**: `{}`", self.path);
-        outln!(w, "- **branch**: `{}`", self.branch);
+        if self.detached {
+            outln!(
+                w,
+                "- **checkout**: detached at `{}`",
+                self.tag.as_deref().unwrap_or("tag")
+            );
+        } else {
+            outln!(
+                w,
+                "- **branch**: `{}`",
+                self.branch.as_deref().unwrap_or("HEAD")
+            );
+        }
+        if let Some(depth) = self.depth {
+            outln!(w, "- **depth**: {depth}");
+        }
         outln!(w, "- **url**: `{}`", self.url);
         outln!(w, "- **objects**: {}", self.objects);
         if let Some(t) = self.object_types {
@@ -372,7 +403,7 @@ fn emit_no_checkout_note(mode: OutputMode, outcome: &LibCloneOutcome) {
             }
         }
         CloneCheckout::UnbornDefaultBranch => {
-            let branch = &outcome.branch;
+            let branch = outcome.head.branch_name().unwrap_or("HEAD");
             if mode == OutputMode::Human {
                 eprintln!(
                     "warning: the remote default branch '{branch}' has no commits yet; no files were checked out."
@@ -408,9 +439,12 @@ fn emit_no_checkout_note(mode: OutputMode, outcome: &LibCloneOutcome) {
 pub fn run(
     url: &str,
     dir: Option<String>,
+    depth: Option<u32>,
+    branch: Option<String>,
     shallow: bool,
     mode: OutputMode,
 ) -> Result<CloneOutcome> {
+    let depth = depth.or_else(|| shallow.then_some(1));
     let dir = match dir {
         Some(d) => d,
         None => derive_clone_dir(url).map_err(|e| anyhow::anyhow!("{e}"))?,
@@ -433,7 +467,16 @@ pub fn run(
     } else {
         progress(mode, &format!("Cloning into '{dir}' ..."));
     }
-    match clone_into(url, &path, &dir, shallow, mode, started, &mut term_progress) {
+    match clone_into(
+        url,
+        &path,
+        &dir,
+        depth,
+        branch,
+        mode,
+        started,
+        &mut term_progress,
+    ) {
         Ok(outcome) => Ok(outcome),
         Err(err) => {
             let skip_cleanup = matches!(
@@ -448,11 +491,13 @@ pub fn run(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn clone_into(
     url: &str,
     path: &Path,
     dir: &str,
-    shallow: bool,
+    depth: Option<u32>,
+    branch: Option<String>,
     mode: OutputMode,
     started: Instant,
     term_progress: &mut TerminalProgress,
@@ -465,7 +510,8 @@ fn clone_into(
         remote_name: grit_lib::remote::DEFAULT_REMOTE.to_owned(),
         initial_branch: "main".to_owned(),
         thread_policy: crate::context::thread_policy_for_repo(),
-        depth: shallow.then_some(1),
+        depth,
+        branch,
     };
     let outcome = clone_repo(clone_opts, &mut *term_progress, Some(&factory))?;
 
@@ -500,10 +546,18 @@ fn clone_into(
     let records = term_progress.phases().to_vec();
     let elapsed = started.elapsed();
 
+    let (branch, detached, tag) = match &outcome.head {
+        CloneHead::Branch(name) => (Some(name.clone()), false, None),
+        CloneHead::Detached { tag, .. } => (None, true, Some(tag.clone())),
+    };
+
     Ok(CloneOutcome {
         url: url.to_owned(),
         path: dir.to_owned(),
-        branch: outcome.branch,
+        branch,
+        detached,
+        tag,
+        depth,
         objects: outcome.transfer.objects,
         bytes: outcome.transfer.bytes,
         branches: outcome.branches,
@@ -559,7 +613,10 @@ mod tests {
         CloneOutcome {
             url: "https://example.com/r.git".to_owned(),
             path: "r".to_owned(),
-            branch: "main".to_owned(),
+            branch: Some("main".to_owned()),
+            detached: false,
+            tag: None,
+            depth: None,
             objects: 1_234,
             bytes: 2 * 1024 * 1024,
             branches: 1,

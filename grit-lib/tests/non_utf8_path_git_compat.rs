@@ -250,6 +250,7 @@ fn non_utf8_tracked_status_diff_add_clone_and_restore() {
             initial_branch: "main".to_owned(),
             thread_policy: grit_lib::parallel::ThreadPolicy::default(),
             depth: None,
+            branch: None,
         },
         &mut NoProgress,
         None,

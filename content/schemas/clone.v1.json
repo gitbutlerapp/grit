@@ -70,8 +70,31 @@
   "description": "Result of `grit clone`.",
   "properties": {
     "branch": {
-      "description": "Default branch checked out.",
-      "type": "string"
+      "description": "Branch checked out, or null when detached at a tag.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "depth": {
+      "description": "Shallow depth when `--depth` or `--shallow` was used.",
+      "format": "uint32",
+      "minimum": 0.0,
+      "type": [
+        "integer",
+        "null"
+      ]
+    },
+    "detached": {
+      "description": "True when HEAD is detached (tag checkout).",
+      "type": "boolean"
+    },
+    "tag": {
+      "description": "Tag name when `-b` named a tag.",
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "branches": {
       "description": "Remote branches fetched.",
@@ -160,6 +183,7 @@
   "required": [
     "branch",
     "branches",
+    "detached",
     "bytes",
     "files",
     "objects",

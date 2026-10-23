@@ -327,3 +327,6 @@ ratio = 1.0
 documented = "grit pick base..topic (20 commits) on synthetic-10000: ~0.92× git median time; peak RSS ~1.24× git (dist hyperfine, git 2.43); factory acceptance ≤1.2× RSS still open (#2977)"
 followup = "GitHub issue #2977"
 
+[scenario."clone/shallow@git-git"]
+ratio = 1.2
+

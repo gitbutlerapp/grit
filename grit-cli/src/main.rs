@@ -571,8 +571,14 @@ enum Command {
         url: String,
         /// Directory to clone into (defaults to the repository name).
         dir: Option<String>,
-        /// Fetch only the tip commit on each branch (same as `git clone --depth=1`).
-        #[arg(long)]
+        /// Truncate fetched history to this many commits (`git clone --depth`).
+        #[arg(long, value_name = "N", conflicts_with = "shallow")]
+        depth: Option<u32>,
+        /// Branch or tag to check out instead of the remote default.
+        #[arg(short = 'b', long = "branch", value_name = "NAME")]
+        branch: Option<String>,
+        /// Shallow clone of the fetched ref (`git clone --depth=1`; hidden alias).
+        #[arg(long, hide = true, conflicts_with = "depth")]
         shallow: bool,
     },
     /// List remotes, or add one.
@@ -1795,8 +1801,14 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             bare,
             ref_format,
         } => emit(&commands::init::run(path, bare, ref_format)?, opts, ctx),
-        Command::Clone { url, dir, shallow } => emit(
-            &commands::clone::run(&url, dir, shallow, opts.mode)?,
+        Command::Clone {
+            url,
+            dir,
+            depth,
+            branch,
+            shallow,
+        } => emit(
+            &commands::clone::run(&url, dir, depth, branch, shallow, opts.mode)?,
             opts,
             ctx,
         ),

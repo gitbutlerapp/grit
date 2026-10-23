@@ -113,7 +113,7 @@ fn clone_empty_bare_trunk_over_git_daemon_v2() {
         None,
     )
     .expect("grit clone over git:// v2");
-    assert_eq!(outcome.branch, "trunk");
+    assert_eq!(outcome.head.branch_name(), Some("trunk"));
     assert!(outcome.checkout_oid.is_zero());
     let grit_head = std::fs::read_to_string(grit_dest.join(".git/HEAD")).expect("grit HEAD");
     assert_eq!(grit_head.trim(), "ref: refs/heads/trunk");

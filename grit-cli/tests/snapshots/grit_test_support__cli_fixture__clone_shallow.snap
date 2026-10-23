@@ -10,12 +10,12 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\"url\":\"[UPSTREAM]\",\"path\":\"cloned-shallow-json\",\"branch\":\"main\",\"objects\":5,\"bytes\":452,\"branches\":1,\"tags\":1,\"files\":2,\"object_types\":{\"commits\":1,\"trees\":1,\"blobs\":2,\"tags\":1},\"worktree_bytes\":23,\"seconds\":0,\"phases\":[{\"phase\":\"copying\",\"unit\":\"objects\",\"count\":5,\"seconds\":0},{\"phase\":\"checkout\",\"unit\":\"files\",\"count\":2,\"seconds\":0}]}\n",
+    "stdout": "{\"url\":\"[UPSTREAM]\",\"path\":\"cloned-shallow-json\",\"branch\":\"main\",\"detached\":false,\"depth\":1,\"objects\":5,\"bytes\":452,\"branches\":1,\"tags\":1,\"files\":2,\"object_types\":{\"commits\":1,\"trees\":1,\"blobs\":2,\"tags\":1},\"worktree_bytes\":23,\"seconds\":0,\"phases\":[{\"phase\":\"copying\",\"unit\":\"objects\",\"count\":5,\"seconds\":0},{\"phase\":\"checkout\",\"unit\":\"files\",\"count\":2,\"seconds\":0}]}\n",
     "stderr": ""
   },
   "markdown": {
     "exit": 0,
-    "stdout": "## Clone complete\n\n- **path**: `cloned-shallow-markdown`\n- **branch**: `main`\n- **url**: `[UPSTREAM]`\n- **objects**: 5\n- **object types**: 1 commits, 1 trees, 2 blobs, 1 tags\n- **bytes**: 452 ([SIZE])\n- **branches**: 1\n- **tags**: 1\n- **files**: 2\n- **worktree bytes**: 23 ([SIZE])\n- **elapsed**: [DURATION]\n\n| Phase | Count | Unit | Seconds |\n| --- | ---: | --- | ---: |\n| copying | 5 | objects | [SECONDS] |\n| checkout | 2 | files | [SECONDS] |\n",
+    "stdout": "## Clone complete\n\n- **path**: `cloned-shallow-markdown`\n- **branch**: `main`\n- **depth**: 1\n- **url**: `[UPSTREAM]`\n- **objects**: 5\n- **object types**: 1 commits, 1 trees, 2 blobs, 1 tags\n- **bytes**: 452 ([SIZE])\n- **branches**: 1\n- **tags**: 1\n- **files**: 2\n- **worktree bytes**: 23 ([SIZE])\n- **elapsed**: [DURATION]\n\n| Phase | Count | Unit | Seconds |\n| --- | ---: | --- | ---: |\n| copying | 5 | objects | [SECONDS] |\n| checkout | 2 | files | [SECONDS] |\n",
     "stderr": ""
   }
 }
