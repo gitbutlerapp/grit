@@ -895,6 +895,10 @@ pub enum Error {
     #[error("no commits yet on this branch")]
     UnbornHead,
 
+    /// `HEAD` could not be resolved to a branch, detached commit, or unborn branch.
+    #[error("HEAD is in an unknown state")]
+    InvalidHead,
+
     /// [`replay_commit`](crate::porcelain::replay::replay_commit) does not replay merge commits
     /// until callers can select a mainline parent explicitly.
     #[error("merge commit {oid}")]

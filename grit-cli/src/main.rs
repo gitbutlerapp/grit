@@ -1014,14 +1014,23 @@ enum Command {
         #[arg(value_name = "REV")]
         rev: Option<String>,
         /// Keep the index and worktree; move the branch tip only.
-        #[arg(long, conflicts_with_all = ["hard", "mixed"])]
+        #[arg(long, conflicts_with_all = ["hard", "mixed", "keep"])]
         soft: bool,
         /// Reset the index to the target commit; keep the worktree (default).
-        #[arg(long, conflicts_with_all = ["hard", "soft"])]
+        #[arg(long, conflicts_with_all = ["hard", "soft", "keep"])]
         mixed: bool,
         /// Reset the index and worktree to match the target commit.
-        #[arg(long, conflicts_with_all = ["soft", "mixed"])]
+        #[arg(long, conflicts_with_all = ["soft", "mixed", "keep"])]
         hard: bool,
+        /// Reset the tip and update differing paths while keeping unrelated local edits.
+        #[arg(long, conflicts_with_all = ["soft", "mixed", "hard"])]
+        keep: bool,
+        /// Preview the reset without updating refs, the index, or the worktree.
+        #[arg(long = "dry-run")]
+        dry_run: bool,
+        /// Maximum orphaned commits to list in `--json` output.
+        #[arg(short = 'n', long = "limit", value_name = "N")]
+        orphan_limit: Option<usize>,
     },
     /// Merge another branch into the current one.
     Merge {
@@ -2443,7 +2452,14 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             soft,
             mixed,
             hard,
-        } => emit(&commands::reset::run(rev, soft, mixed, hard)?, opts, ctx),
+            keep,
+            dry_run,
+            orphan_limit,
+        } => emit(
+            &commands::reset::run(rev, soft, mixed, hard, keep, dry_run, orphan_limit)?,
+            opts,
+            ctx,
+        ),
         Command::Merge {
             branch,
             abort,

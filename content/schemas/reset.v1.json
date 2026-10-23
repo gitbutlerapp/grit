@@ -2,20 +2,58 @@
   "$id": "https://grit-scm.com/schemas/reset/v1.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "definitions": {
+    "OrphanedCommitJson": {
+      "description": "One commit that would become unreachable after the reset.",
+      "properties": {
+        "change_id": {
+          "type": "string"
+        },
+        "oid": {
+          "type": "string"
+        },
+        "subject": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "change_id",
+        "oid",
+        "subject"
+      ],
+      "type": "object"
+    },
     "ResetCliMode": {
-      "description": "Reset mode in JSON (`soft`, `mixed`, or `hard`).",
+      "description": "Reset mode in JSON (`soft`, `mixed`, `hard`, or `keep`).",
       "enum": [
         "soft",
         "mixed",
-        "hard"
+        "hard",
+        "keep"
       ],
       "type": "string"
     }
   },
   "description": "CLI view of [`ResetOutcome`].",
   "properties": {
+    "dry_run": {
+      "type": "boolean"
+    },
     "mode": {
       "$ref": "#/definitions/ResetCliMode"
+    },
+    "orphaned_commits": {
+      "items": {
+        "$ref": "#/definitions/OrphanedCommitJson"
+      },
+      "type": "array"
+    },
+    "orphaned_total": {
+      "format": "uint",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "orphaned_truncated": {
+      "type": "boolean"
     },
     "previous": {
       "type": "string"
@@ -25,13 +63,31 @@
     },
     "target": {
       "type": "string"
+    },
+    "would_block": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "would_overwrite": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
     }
   },
   "required": [
+    "dry_run",
     "mode",
+    "orphaned_commits",
+    "orphaned_total",
+    "orphaned_truncated",
     "previous",
     "ref",
-    "target"
+    "target",
+    "would_block",
+    "would_overwrite"
   ],
   "title": "ResetCliOutcome",
   "type": "object"

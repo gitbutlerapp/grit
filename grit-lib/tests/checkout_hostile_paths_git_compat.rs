@@ -427,12 +427,12 @@ fn hostile_paths_rejected_on_clone_switch_reset_restore() {
 
         let reset_err = reset_to_commit(
             &repo,
-            &ResetOptions {
-                target: evil_commit_oid,
-                mode: ResetMode::Hard,
-                identity: "T <t@e.com>".into(),
-                message: "reset test".into(),
-            },
+            &ResetOptions::new(
+                evil_commit_oid,
+                ResetMode::Hard,
+                "T <t@e.com>",
+                "reset test",
+            ),
         )
         .unwrap_err();
         assert_invalid_path_component(reset_err);

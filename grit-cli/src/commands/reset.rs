@@ -3,7 +3,9 @@
 use anyhow::{Context, Result};
 use grit_lib::config::ConfigSet;
 use grit_lib::error::Error;
-use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions, ResetOutcome};
+use grit_lib::porcelain::reset::{
+    reset_to_commit, ResetMode, ResetOptions, ResetOutcome, DEFAULT_ORPHAN_LIMIT,
+};
 use grit_lib::revwalk::rev_parse::resolve_revision_as_commit_without_index_dwim;
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -12,13 +14,14 @@ use std::io::Write;
 use crate::context;
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 
-/// Reset mode in JSON (`soft`, `mixed`, or `hard`).
+/// Reset mode in JSON (`soft`, `mixed`, `hard`, or `keep`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum ResetCliMode {
     Soft,
     Mixed,
     Hard,
+    Keep,
 }
 
 impl From<ResetMode> for ResetCliMode {
@@ -27,8 +30,17 @@ impl From<ResetMode> for ResetCliMode {
             ResetMode::Soft => Self::Soft,
             ResetMode::Mixed => Self::Mixed,
             ResetMode::Hard => Self::Hard,
+            ResetMode::Keep => Self::Keep,
         }
     }
+}
+
+/// One commit that would become unreachable after the reset.
+#[derive(Serialize, JsonSchema)]
+pub struct OrphanedCommitJson {
+    pub oid: String,
+    pub change_id: String,
+    pub subject: String,
 }
 
 /// CLI view of [`ResetOutcome`].
@@ -38,6 +50,12 @@ pub struct ResetCliOutcome {
     pub target: String,
     pub previous: String,
     pub r#ref: String,
+    pub dry_run: bool,
+    pub would_overwrite: Vec<String>,
+    pub would_block: Vec<String>,
+    pub orphaned_commits: Vec<OrphanedCommitJson>,
+    pub orphaned_total: usize,
+    pub orphaned_truncated: bool,
 }
 
 impl From<ResetOutcome> for ResetCliOutcome {
@@ -47,19 +65,63 @@ impl From<ResetOutcome> for ResetCliOutcome {
             target: value.target.to_hex(),
             previous: value.previous.to_hex(),
             r#ref: value.ref_updated,
+            dry_run: value.dry_run,
+            would_overwrite: value.would_overwrite,
+            would_block: value.would_block,
+            orphaned_commits: value
+                .orphaned_commits
+                .into_iter()
+                .map(|c| OrphanedCommitJson {
+                    oid: c.oid.to_hex(),
+                    change_id: c.change_id,
+                    subject: c.subject,
+                })
+                .collect(),
+            orphaned_total: value.orphaned_total,
+            orphaned_truncated: value.orphaned_truncated,
         }
     }
 }
 
 impl HumanRender for ResetCliOutcome {
     fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        outln!(
-            w,
-            "Reset {} to {} ({})",
-            self.r#ref,
-            &self.target[..7.min(self.target.len())],
-            reset_mode_label(self.mode)
-        );
+        if self.dry_run {
+            outln!(
+                w,
+                "Would reset {} to {} ({})",
+                self.r#ref,
+                &self.target[..7.min(self.target.len())],
+                reset_mode_label(self.mode)
+            );
+            if !self.would_overwrite.is_empty() {
+                outln!(w, "Would discard local changes in:");
+                for path in &self.would_overwrite {
+                    outln!(w, "  {path}");
+                }
+            }
+            if !self.would_block.is_empty() {
+                outln!(w, "Would refuse — local changes on:");
+                for path in &self.would_block {
+                    outln!(w, "  {path}");
+                }
+            }
+        } else {
+            outln!(
+                w,
+                "Reset {} to {} ({})",
+                self.r#ref,
+                &self.target[..7.min(self.target.len())],
+                reset_mode_label(self.mode)
+            );
+        }
+        if self.orphaned_total > 0 {
+            outln!(
+                w,
+                "Warning: {}{} commit(s) would become unreachable",
+                self.orphaned_total,
+                if self.orphaned_truncated { "+" } else { "" }
+            );
+        }
         Ok(())
     }
 }
@@ -72,6 +134,15 @@ impl MarkdownRender for ResetCliOutcome {
         outln!(w, "- **mode:** `{}`", reset_mode_label(self.mode));
         outln!(w, "- **target:** `{}`", self.target);
         outln!(w, "- **previous:** `{}`", self.previous);
+        outln!(w, "- **dry_run:** `{}`", self.dry_run);
+        if self.orphaned_total > 0 {
+            outln!(
+                w,
+                "- **orphaned_total:** `{}` (truncated: `{}`)",
+                self.orphaned_total,
+                self.orphaned_truncated
+            );
+        }
         Ok(())
     }
 }
@@ -81,15 +152,26 @@ fn reset_mode_label(mode: ResetCliMode) -> &'static str {
         ResetCliMode::Soft => "soft",
         ResetCliMode::Mixed => "mixed",
         ResetCliMode::Hard => "hard",
+        ResetCliMode::Keep => "keep",
     }
 }
 
 /// `--mixed` is the default mode; the flag is accepted so Git habits keep working.
-pub fn run(rev: Option<String>, soft: bool, _mixed: bool, hard: bool) -> Result<ResetCliOutcome> {
+pub fn run(
+    rev: Option<String>,
+    soft: bool,
+    _mixed: bool,
+    hard: bool,
+    keep: bool,
+    dry_run: bool,
+    orphan_limit: Option<usize>,
+) -> Result<ResetCliOutcome> {
     let mode = if soft {
         ResetMode::Soft
     } else if hard {
         ResetMode::Hard
+    } else if keep {
+        ResetMode::Keep
     } else {
         ResetMode::Mixed
     };
@@ -106,16 +188,11 @@ pub fn run(rev: Option<String>, soft: bool, _mixed: bool, hard: bool) -> Result<
     let identity = context::reflog_identity(env, &config, now);
 
     let message = format!("reset: moving to {spec}");
-    let outcome = reset_to_commit(
-        &repo,
-        &ResetOptions {
-            target,
-            mode,
-            identity,
-            message,
-        },
-    )
-    .map_err(anyhow::Error::new)?;
+    let mut opts = ResetOptions::new(target, mode, identity, message);
+    opts.dry_run = dry_run;
+    opts.orphan_limit = orphan_limit.unwrap_or(DEFAULT_ORPHAN_LIMIT);
+
+    let outcome = reset_to_commit(&repo, &opts).map_err(anyhow::Error::new)?;
 
     Ok(outcome.into())
 }

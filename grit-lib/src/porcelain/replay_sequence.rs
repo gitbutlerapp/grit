@@ -1786,12 +1786,12 @@ fn hard_reset_branch(repo: &Repository, refname: &str, target: ObjectId) -> Resu
     let _ = refname;
     reset_to_commit(
         repo,
-        &ResetOptions {
+        &ResetOptions::new(
             target,
-            mode: ResetMode::Hard,
-            identity: "Grit <grit@local> 0 +0000".to_owned(),
-            message: "abort replay".to_owned(),
-        },
+            ResetMode::Hard,
+            "Grit <grit@local> 0 +0000",
+            "abort replay",
+        ),
     )?;
     let _ = short;
     Ok(())

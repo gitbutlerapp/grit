@@ -59,12 +59,7 @@ fn commit_many_files(repo: &Repository, count: usize) -> grit_lib::objects::Obje
 }
 
 fn reset_opts(target: grit_lib::objects::ObjectId, mode: ResetMode) -> ResetOptions {
-    ResetOptions {
-        target,
-        mode,
-        identity: "T <t@t> 0 +0000".into(),
-        message: "reset".into(),
-    }
+    ResetOptions::new(target, mode, "T <t@t> 0 +0000", "reset")
 }
 
 #[test]

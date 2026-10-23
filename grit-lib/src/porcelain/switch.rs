@@ -774,6 +774,17 @@ pub(crate) fn checkout_tree_transition_allow_local(
     checkout_tree_transition_allow_local_with_preserved(repo, from_tree, to_tree, &HashSet::new())
 }
 
+/// Like [`checkout_tree_transition_allow_local`], but local-overwrite paths become [`Error::WouldOverwrite`].
+pub(crate) fn checkout_tree_transition_allow_local_reset(
+    repo: &Repository,
+    from_tree: Option<&ObjectId>,
+    to_tree: &ObjectId,
+) -> Result<()> {
+    let prepared = prepare_tree_transition_allow_local(repo, from_tree, to_tree, &HashSet::new())
+        .map_err(map_switch_tree_transition_prepare_error)?;
+    checkout_prepared_tree_transition(repo, prepared)
+}
+
 /// Like [`checkout_tree_transition_allow_local`], but always keeps worktree bytes on `force_preserve_worktree`.
 pub(crate) fn checkout_tree_transition_allow_local_with_preserved(
     repo: &Repository,

@@ -375,12 +375,12 @@ pub fn bench_checkout_between_trees(repo: &Repository, from: &ObjectId, to: &Obj
 fn hard_reset_to_main(repo: &Repository, main_head_oid: ObjectId) {
     reset_to_commit(
         repo,
-        &ResetOptions {
-            target: main_head_oid,
-            mode: ResetMode::Hard,
-            identity: BENCH_IDENT.to_owned(),
-            message: "bench: reset to main".to_owned(),
-        },
+        &ResetOptions::new(
+            main_head_oid,
+            ResetMode::Hard,
+            BENCH_IDENT,
+            "bench: reset to main",
+        ),
     )
     .expect("hard reset to main");
 }

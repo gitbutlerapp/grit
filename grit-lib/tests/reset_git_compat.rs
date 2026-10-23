@@ -1,18 +1,28 @@
 //! Round-trip `grit reset` with system `git fsck` / `git status`.
 
+mod support;
+
+use std::path::Path;
+
+use grit_lib::error::Error;
 use grit_lib::index::write_tree::{write_tree_update_index, WriteTreeFlags};
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
 use grit_lib::repo::{InitOptions, Repository};
+use grit_lib::revwalk::rev_parse::resolve_revision_as_commit_without_index_dwim;
 use grit_lib::{objects, refs, RefStorageFormat};
 use grit_test_support::git_cmd;
+use support::{
+    assert_porcelain_v2_matches_git, git_status_porcelain_v2_lines, grit_status_porcelain_v2_lines,
+    open_grit_repo,
+};
 use tempfile::TempDir;
 
 fn identity() -> String {
     "T <t@t> 0 +0000".into()
 }
 
-fn commit_file(repo: &Repository, path: &str, contents: &str, parent: Option<ObjectId>) {
+fn commit_file(repo: &Repository, path: &str, contents: &str, parent: Option<ObjectId>) -> ObjectId {
     let wt = repo.work_tree().expect("wt");
     std::fs::write(wt.join(path), contents).expect("write");
     let mut index = repo.index_handle().load().expect("index");
@@ -51,8 +61,9 @@ fn commit_file(repo: &Repository, path: &str, contents: &str, parent: Option<Obj
             &objects::serialize_commit(&commit),
         )
         .expect("commit");
-    refs::write_ref(repo.git_dir(), "HEAD", &co).expect("head");
     refs::write_ref(repo.git_dir(), "refs/heads/main", &co).expect("branch");
+    refs::write_symbolic_ref(repo.git_dir(), "HEAD", "refs/heads/main").expect("symhead");
+    co
 }
 
 #[test]
@@ -65,23 +76,185 @@ fn mixed_reset_readable_by_git() {
             .with_ref_storage(RefStorageFormat::Files),
     )
     .expect("init");
-    let c1 = {
-        commit_file(&repo, "f", "1\n", None);
-        refs::resolve_ref(repo.git_dir(), "HEAD").expect("head")
-    };
+    let c1 = commit_file(&repo, "f", "1\n", None);
     commit_file(&repo, "f", "2\n", Some(c1));
 
     reset_to_commit(
         &repo,
-        &ResetOptions {
-            target: c1,
-            mode: ResetMode::Mixed,
-            identity: identity(),
-            message: "reset".into(),
-        },
+        &ResetOptions::new(c1, ResetMode::Mixed, identity(), "reset"),
     )
     .expect("reset");
 
     git_cmd(&["fsck"]).in_dir(dir.path()).suc();
     git_cmd(&["status", "--porcelain"]).in_dir(dir.path()).suc();
+}
+
+fn init_git_repo(root: &Path) {
+    git_cmd(&["init", "-b", "main"]).in_dir(root).suc();
+    git_cmd(&["config", "user.email", "t@t.com"])
+        .in_dir(root)
+        .suc();
+    git_cmd(&["config", "user.name", "T"]).in_dir(root).suc();
+}
+
+fn two_commit_history(root: &Path) -> ObjectId {
+    std::fs::write(root.join("a"), "v1\n").expect("write");
+    git_cmd(&["add", "a"]).in_dir(root).suc();
+    git_cmd(&["commit", "-m", "c1"]).in_dir(root).suc();
+    let c1_hex = git_cmd(&["rev-parse", "HEAD"])
+        .in_dir(root)
+        .suc()
+        .stdout
+        .trim()
+        .to_owned();
+    std::fs::write(root.join("a"), "v2\n").expect("write");
+    git_cmd(&["commit", "-am", "c2"]).in_dir(root).suc();
+    ObjectId::from_hex(&c1_hex).expect("c1 oid")
+}
+
+#[test]
+fn reset_keep_preserves_unrelated_local_changes_like_git() {
+    let dir = TempDir::new().expect("tempdir");
+    init_git_repo(dir.path());
+    two_commit_history(dir.path());
+    std::fs::write(dir.path().join("b"), "local\n").expect("local b");
+    git_cmd(&["reset", "--keep", "HEAD~1"])
+        .in_dir(dir.path())
+        .suc();
+    let git_lines = git_status_porcelain_v2_lines(dir.path());
+
+    let dir2 = TempDir::new().expect("tempdir2");
+    init_git_repo(dir2.path());
+    two_commit_history(dir2.path());
+    std::fs::write(dir2.path().join("b"), "local\n").expect("local b");
+    let repo = open_grit_repo(dir2.path());
+    let parent =
+        resolve_revision_as_commit_without_index_dwim(&repo, "HEAD~1").expect("parent");
+    reset_to_commit(
+        &repo,
+        &ResetOptions::new(parent, ResetMode::Keep, "T <t@t.com> 0 +0000", "reset"),
+    )
+    .expect("keep reset");
+    assert_porcelain_v2_matches_git(dir2.path(), &repo);
+    let grit_lines = grit_status_porcelain_v2_lines(&repo);
+    assert_eq!(grit_lines, git_lines);
+}
+
+#[test]
+fn reset_keep_refuses_when_changed_file_has_local_edits() {
+    let dir = TempDir::new().expect("tempdir");
+    init_git_repo(dir.path());
+    two_commit_history(dir.path());
+    std::fs::write(dir.path().join("a"), "edited\n").expect("edit a");
+    git_cmd(&["reset", "--keep", "HEAD~1"])
+        .in_dir(dir.path())
+        .with_status(128);
+
+    let dir2 = TempDir::new().expect("tempdir2");
+    init_git_repo(dir2.path());
+    two_commit_history(dir2.path());
+    std::fs::write(dir2.path().join("a"), "edited\n").expect("edit a");
+    let repo = open_grit_repo(dir2.path());
+    let head_before = refs::resolve_ref(repo.git_dir(), "HEAD").expect("head");
+    let parent =
+        resolve_revision_as_commit_without_index_dwim(&repo, "HEAD~1").expect("parent");
+    let err = reset_to_commit(
+        &repo,
+        &ResetOptions::new(
+            parent,
+            ResetMode::Keep,
+            "T <t@t.com> 0 +0000",
+            "reset",
+        ),
+    )
+    .expect_err("grit should refuse");
+    assert!(
+        matches!(err, Error::WouldOverwrite { .. }),
+        "expected WouldOverwrite, got {err:?}"
+    );
+    assert_eq!(
+        refs::resolve_ref(repo.git_dir(), "HEAD").expect("head"),
+        head_before
+    );
+    let git_lines = git_status_porcelain_v2_lines(dir.path());
+    let grit_lines = grit_status_porcelain_v2_lines(&repo);
+    assert_eq!(grit_lines, git_lines);
+}
+
+#[test]
+fn reset_dry_run_hard_lists_overwritten_paths_and_changes_nothing() {
+    let dir = TempDir::new().expect("tempdir");
+    let repo = Repository::init(
+        dir.path(),
+        &InitOptions::new()
+            .with_initial_branch("main".to_owned())
+            .with_ref_storage(RefStorageFormat::Files),
+    )
+    .expect("init");
+    let c1 = {
+        commit_file(&repo, "a", "1\n", None);
+        refs::resolve_ref(repo.git_dir(), "HEAD").expect("head")
+    };
+    commit_file(&repo, "a", "2\n", Some(c1));
+    let head_before = refs::resolve_ref(repo.git_dir(), "HEAD").expect("head");
+    let wt = repo.work_tree().expect("wt");
+    std::fs::write(wt.join("a"), "dirty\n").expect("dirty");
+
+    let mut opts = ResetOptions::new(c1, ResetMode::Hard, "T <t@t.com> 0 +0000", "reset");
+    opts.dry_run = true;
+    let outcome = reset_to_commit(&repo, &opts).expect("dry-run");
+    assert!(outcome.dry_run);
+    assert!(outcome.would_overwrite.iter().any(|p| p == "a"));
+    assert_eq!(
+        refs::resolve_ref(repo.git_dir(), "HEAD").expect("head"),
+        head_before
+    );
+    assert_eq!(std::fs::read(wt.join("a")).expect("disk"), b"dirty\n");
+}
+
+#[test]
+fn reset_orphaned_commits_excludes_commits_held_by_other_refs() {
+    let dir = TempDir::new().expect("tempdir");
+    let repo = Repository::init(
+        dir.path(),
+        &InitOptions::new()
+            .with_initial_branch("main".to_owned())
+            .with_ref_storage(RefStorageFormat::Files),
+    )
+    .expect("init");
+    let c1 = commit_file(&repo, "f", "1\n", None);
+    let c2 = commit_file(&repo, "f", "2\n", Some(c1));
+    let c3 = commit_file(&repo, "f", "3\n", Some(c2));
+    refs::write_ref(repo.git_dir(), "refs/heads/keep", &c2).expect("branch keep");
+
+    let outcome = reset_to_commit(
+        &repo,
+        &ResetOptions::new(c1, ResetMode::Mixed, "T <t@t.com> 0 +0000", "reset"),
+    )
+    .expect("reset");
+    assert_eq!(outcome.orphaned_total, 1);
+    assert_eq!(outcome.orphaned_commits.len(), 1);
+    assert_eq!(outcome.orphaned_commits[0].oid, c3);
+    let _ = c2;
+}
+
+#[test]
+fn reset_forward_has_no_orphan_walk() {
+    let dir = TempDir::new().expect("tempdir");
+    let repo = Repository::init(
+        dir.path(),
+        &InitOptions::new()
+            .with_initial_branch("main".to_owned())
+            .with_ref_storage(RefStorageFormat::Files),
+    )
+    .expect("init");
+    let c1 = commit_file(&repo, "f", "1\n", None);
+    let c2 = commit_file(&repo, "f", "2\n", Some(c1));
+    let outcome = reset_to_commit(
+        &repo,
+        &ResetOptions::new(c2, ResetMode::Mixed, "T <t@t.com> 0 +0000", "reset"),
+    )
+    .expect("reset");
+    assert_eq!(outcome.orphaned_total, 0);
+    assert!(outcome.orphaned_commits.is_empty());
 }

@@ -5,17 +5,17 @@ expression: payload
 {
   "human": {
     "exit": 0,
-    "stdout": "Reset refs/heads/main to 062ca6e (soft)\n",
+    "stdout": "Reset refs/heads/main to 062ca6e (soft)\nWarning: 1 commit(s) would become unreachable\n",
     "stderr": ""
   },
   "json": {
     "exit": 0,
-    "stdout": "{\"mode\":\"soft\",\"target\":\"062ca6e74f5603f4d09063c0f46cd07d8c96e019\",\"previous\":\"83352a61f6715ec3f0a297c6d6150725154fb833\",\"ref\":\"refs/heads/main\"}\n",
+    "stdout": "{\"mode\":\"soft\",\"target\":\"062ca6e74f5603f4d09063c0f46cd07d8c96e019\",\"previous\":\"83352a61f6715ec3f0a297c6d6150725154fb833\",\"ref\":\"refs/heads/main\",\"dry_run\":false,\"would_overwrite\":[],\"would_block\":[],\"orphaned_commits\":[{\"oid\":\"83352a61f6715ec3f0a297c6d6150725154fb833\",\"change_id\":\"xzyqzyyzswyupvtlsovyzultryuqzlvk\",\"subject\":\"second\"}],\"orphaned_total\":1,\"orphaned_truncated\":false}\n",
     "stderr": ""
   },
   "markdown": {
     "exit": 0,
-    "stdout": "## Reset\n\n- **ref:** `refs/heads/main`\n- **mode:** `soft`\n- **target:** `062ca6e74f5603f4d09063c0f46cd07d8c96e019`\n- **previous:** `83352a61f6715ec3f0a297c6d6150725154fb833`\n",
+    "stdout": "## Reset\n\n- **ref:** `refs/heads/main`\n- **mode:** `soft`\n- **target:** `062ca6e74f5603f4d09063c0f46cd07d8c96e019`\n- **previous:** `83352a61f6715ec3f0a297c6d6150725154fb833`\n- **dry_run:** `false`\n- **orphaned_total:** `1` (truncated: `false`)\n",
     "stderr": ""
   }
 }

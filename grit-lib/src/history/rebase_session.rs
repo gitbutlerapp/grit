@@ -760,12 +760,12 @@ fn hard_reset_branch(
     refs::write_symbolic_ref(repo.git_dir(), "HEAD", refname).map_err(map_lib)?;
     reset_to_commit(
         repo,
-        &ResetOptions {
+        &ResetOptions::new(
             target,
-            mode: ResetMode::Hard,
-            identity: identity.to_owned(),
-            message: "rebase (abort)".to_owned(),
-        },
+            ResetMode::Hard,
+            identity.to_owned(),
+            "rebase (abort)",
+        ),
     )
     .map_err(map_lib)?;
     Ok(())
