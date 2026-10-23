@@ -100,9 +100,7 @@ pub fn run_capped_argv_command_with(
     let start = Instant::now();
 
     if timeout.is_none() && max_rss_bytes.is_none() {
-        let status = child
-            .wait()
-            .context("wait for capped argv command")?;
+        let status = child.wait().context("wait for capped argv command")?;
         let peak_rss_bytes = children_rusage_peak_rss_bytes()?;
         return Ok(finish_capped_run(start, peak_rss_bytes, status));
     }
@@ -516,14 +514,8 @@ mod tests {
     #[test]
     fn trivial_argv_command_measures_well_under_fifty_ms() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let outcome = run_capped_argv_command(
-            Path::new("/bin/true"),
-            &[],
-            dir.path(),
-            None,
-            None,
-        )
-        .expect("monitored run");
+        let outcome = run_capped_argv_command(Path::new("/bin/true"), &[], dir.path(), None, None)
+            .expect("monitored run");
         assert_eq!(outcome.termination, TerminationKind::Success);
         assert!(
             outcome.wall_ms < 50.0,
