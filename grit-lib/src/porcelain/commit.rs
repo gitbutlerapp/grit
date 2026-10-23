@@ -25,7 +25,7 @@ use crate::objects::odb::Odb;
 use crate::objects::{parse_commit, serialize_commit, CommitData, ObjectId, ObjectKind};
 use crate::pathspec::{pathspec_is_exclude, ResolvedPathspecs};
 use crate::porcelain::add::{stage_on_index, StageMode, StageOptions};
-use crate::porcelain::index_from_tree::index_from_tree_with_worktree_stats;
+use crate::porcelain::index_from_tree::index_from_tree_with_seeded_worktree_stats;
 use crate::porcelain::pathspec_match::KnownPathspecChecker;
 use crate::progress::ProgressSink;
 use crate::refs::{
@@ -246,7 +246,7 @@ fn commit_paths_scope(
         return Err(Error::IndexUnmerged);
     }
     let mut commit_index = match parent_tree.as_ref() {
-        Some(tree) => index_from_tree_with_worktree_stats(repo, tree)?,
+        Some(tree) => index_from_tree_with_seeded_worktree_stats(repo, tree, &real_index)?,
         None => Index::new(),
     };
 
