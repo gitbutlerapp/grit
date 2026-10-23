@@ -574,6 +574,18 @@ enum Command {
         /// Fetch only the tip commit on each branch (same as `git clone --depth=1`).
         #[arg(long)]
         shallow: bool,
+        /// Fetch only the branch checked out (same as `git clone --single-branch`).
+        #[arg(long, overrides_with = "no_single_branch")]
+        single_branch: bool,
+        /// Fetch all branch tips even when `--shallow` is set (`git clone --no-single-branch`).
+        #[arg(long, overrides_with = "single_branch")]
+        no_single_branch: bool,
+        /// Do not fetch any tags from the remote.
+        #[arg(long)]
+        no_tags: bool,
+        /// Name for the remote (default `origin`).
+        #[arg(short = 'o', long, value_name = "NAME")]
+        origin: Option<String>,
     },
     /// List remotes, or add one.
     Remote {
@@ -1795,11 +1807,36 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             bare,
             ref_format,
         } => emit(&commands::init::run(path, bare, ref_format)?, opts, ctx),
-        Command::Clone { url, dir, shallow } => emit(
-            &commands::clone::run(&url, dir, shallow, opts.mode)?,
-            opts,
-            ctx,
-        ),
+        Command::Clone {
+            url,
+            dir,
+            shallow,
+            single_branch,
+            no_single_branch,
+            no_tags,
+            origin,
+        } => {
+            let single_branch = if single_branch {
+                Some(true)
+            } else if no_single_branch {
+                Some(false)
+            } else {
+                None
+            };
+            emit(
+                &commands::clone::run(commands::clone::CloneRunOptions {
+                    url,
+                    dir,
+                    shallow,
+                    single_branch,
+                    no_tags,
+                    origin,
+                    mode: opts.mode,
+                })?,
+                opts,
+                ctx,
+            )
+        }
         Command::Remote { action } => match action {
             None => emit(&commands::remote::run_list_or_add(None)?, opts, ctx),
             Some(RemoteAction::Add { name, url }) => emit(

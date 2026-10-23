@@ -16812,12 +16812,34 @@ impl core::marker::Unpin for grit_lib::remote::clone::CloneError
 impl core::marker::UnsafeUnpin for grit_lib::remote::clone::CloneError
 impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::clone::CloneError
 impl !core::panic::unwind_safe::UnwindSafe for grit_lib::remote::clone::CloneError
+pub enum grit_lib::remote::clone::CloneTags
+pub grit_lib::remote::clone::CloneTags::All
+pub grit_lib::remote::clone::CloneTags::Following
+pub grit_lib::remote::clone::CloneTags::None
+impl grit_lib::remote::clone::CloneTags
+pub const fn grit_lib::remote::clone::CloneTags::tag_mode(self) -> grit_lib::remote::transfer::TagMode
+impl core::marker::Copy for grit_lib::remote::clone::CloneTags
+impl core::clone::Clone for grit_lib::remote::clone::CloneTags
+impl core::cmp::Eq for grit_lib::remote::clone::CloneTags
+impl core::cmp::PartialEq for grit_lib::remote::clone::CloneTags
+impl core::fmt::Debug for grit_lib::remote::clone::CloneTags
+impl core::marker::StructuralPartialEq for grit_lib::remote::clone::CloneTags
+impl core::marker::Freeze for grit_lib::remote::clone::CloneTags
+impl core::marker::Send for grit_lib::remote::clone::CloneTags
+impl core::marker::Sync for grit_lib::remote::clone::CloneTags
+impl core::marker::Unpin for grit_lib::remote::clone::CloneTags
+impl core::marker::UnsafeUnpin for grit_lib::remote::clone::CloneTags
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::clone::CloneTags
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::clone::CloneTags
 pub struct grit_lib::remote::clone::CloneOptions
+pub grit_lib::remote::clone::CloneOptions::branch: core::option::Option<alloc::string::String>
 pub grit_lib::remote::clone::CloneOptions::depth: core::option::Option<u32>
 pub grit_lib::remote::clone::CloneOptions::dest: std::path::PathBuf
 pub grit_lib::remote::clone::CloneOptions::environment: grit_lib::config::environment::Environment
 pub grit_lib::remote::clone::CloneOptions::initial_branch: alloc::string::String
 pub grit_lib::remote::clone::CloneOptions::remote_name: alloc::string::String
+pub grit_lib::remote::clone::CloneOptions::single_branch: core::option::Option<bool>
+pub grit_lib::remote::clone::CloneOptions::tags: core::option::Option<grit_lib::remote::clone::CloneTags>
 pub grit_lib::remote::clone::CloneOptions::thread_policy: grit_lib::parallel::ThreadPolicy
 pub grit_lib::remote::clone::CloneOptions::url: alloc::string::String
 impl grit_lib::remote::clone::CloneOptions
@@ -16851,6 +16873,7 @@ impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::clone::Clone
 impl !core::panic::unwind_safe::UnwindSafe for grit_lib::remote::clone::CloneOutcome
 pub fn grit_lib::remote::clone::cleanup_failed_clone(&std::path::Path, bool)
 pub fn grit_lib::remote::clone::clone(grit_lib::remote::clone::CloneOptions, &mut dyn grit_lib::remote::fetch::Progress, core::option::Option<&dyn grit_lib::remote::HttpClientFactory>) -> core::result::Result<grit_lib::remote::clone::CloneOutcome, grit_lib::remote::clone::CloneError>
+pub fn grit_lib::remote::clone::clone_effective_single_branch(&grit_lib::remote::clone::CloneOptions) -> bool
 pub fn grit_lib::remote::clone::derive_clone_dir(&str) -> core::result::Result<alloc::string::String, grit_lib::remote::transport_path::NoDirectoryName>
 pub fn grit_lib::remote::clone::dest_preexisted_empty(&std::path::Path) -> bool
 pub mod grit_lib::remote::credentials
@@ -18890,6 +18913,7 @@ impl core::marker::UnsafeUnpin for grit_lib::remote::RemoteRef
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::RemoteRef
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::RemoteRef
 pub const grit_lib::remote::DEFAULT_REMOTE: &str
+pub fn grit_lib::remote::is_valid_remote_name(&str) -> bool
 pub trait grit_lib::remote::HttpClientFactory: core::marker::Send + core::marker::Sync
 pub fn grit_lib::remote::HttpClientFactory::create(&self, &grit_lib::config::ConfigSet) -> core::result::Result<alloc::boxed::Box<dyn grit_lib::remote::transport::http::HttpClient>, grit_lib::remote::RemoteError>
 impl grit_lib::remote::HttpClientFactory for grit_lib::remote::DefaultHttpClientFactory

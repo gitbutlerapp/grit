@@ -2,7 +2,6 @@
 
 use std::collections::{BTreeSet, HashSet};
 
-use crate::check_ref_format::{check_refname_format, RefNameOptions};
 use crate::config::{ConfigFile, ConfigScope, ConfigSet};
 use crate::error::Result;
 use crate::fetch::Progress;
@@ -79,7 +78,7 @@ impl<'repo> RepositoryRemotes<'repo> {
     /// - [`RemoteError::RemoteExists`] when any `remote.<name>.*` key is already configured.
     /// - [`RemoteError::Library`] when the config cannot be read, parsed, or written.
     pub fn add(&self, name: &str, url: &str) -> std::result::Result<(), RemoteError> {
-        if !is_valid_remote_name(name) {
+        if !crate::remote::is_valid_remote_name(name) {
             return Err(RemoteError::InvalidRemoteName(name.to_owned()));
         }
         if has_remote_section(self.repo.config()?.as_ref(), name) {
@@ -366,16 +365,6 @@ pub(crate) fn has_remote_section(config: &ConfigSet, name: &str) -> bool {
     })
 }
 
-/// Whether `name` can name a remote: its tracking refs `refs/remotes/<name>/…` must be valid.
-fn is_valid_remote_name(name: &str) -> bool {
-    !name.is_empty()
-        && check_refname_format(
-            &format!("refs/remotes/{name}/test"),
-            &RefNameOptions::default(),
-        )
-        .is_ok()
-}
-
 /// Collect remote subsection names that declare a `url` key.
 #[must_use]
 pub fn configured_remote_names(config: &ConfigSet) -> Vec<String> {
@@ -398,7 +387,7 @@ pub fn configured_remote_names(config: &ConfigSet) -> Vec<String> {
 mod tests {
     use super::{
         configured_remote_names, configured_remote_names_in_config_order, configured_remotes,
-        has_remote_section, is_valid_remote_name, remote_skip_fetch_all, ConfiguredRemote,
+        has_remote_section, remote_skip_fetch_all, ConfiguredRemote,
     };
     use crate::config::{ConfigFile, ConfigScope, ConfigSet};
     use crate::remote::RemoteError;
@@ -438,6 +427,7 @@ mod tests {
 
     #[test]
     fn remote_name_validation_follows_tracking_ref_rules() {
+        use crate::remote::is_valid_remote_name;
         for ok in ["origin", "team.prod", "a/b", "up-stream"] {
             assert!(is_valid_remote_name(ok), "{ok}");
         }

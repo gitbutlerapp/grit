@@ -48,6 +48,18 @@ type RemoteResult<T> = std::result::Result<T, RemoteError>;
 /// Default remote name when none is configured (`origin`, matching Git).
 pub const DEFAULT_REMOTE: &str = "origin";
 
+/// Whether `name` can name a remote: its tracking refs `refs/remotes/<name>/…` must be valid.
+#[must_use]
+pub fn is_valid_remote_name(name: &str) -> bool {
+    use crate::check_ref_format::{check_refname_format, RefNameOptions};
+    !name.is_empty()
+        && check_refname_format(
+            &format!("refs/remotes/{name}/test"),
+            &RefNameOptions::default(),
+        )
+        .is_ok()
+}
+
 /// Errors specific to remote URL resolution and dispatch.
 #[derive(Debug, Error)]
 pub enum RemoteError {

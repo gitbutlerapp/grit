@@ -1003,6 +1003,40 @@ fn clone_json_bundle_reports_transfer_stats() -> TestResult {
 }
 
 #[test]
+fn clone_json_reports_remote_single_branch_and_tag_fetch() -> TestResult {
+    let scratch = Scratch::new("clone-remote-opts")?;
+    let seed = scratch.child("seed");
+    let remote = scratch.child("remote.git");
+    let clone = scratch.child("clone");
+    fs::create_dir_all(&seed)?;
+
+    gs_ok(&seed, &["init", "."]);
+    write_file(&seed.join("README.md"), "seed\n");
+    gs_ok(&seed, &["commit", "seed commit"]);
+    gs_ok(&seed, &["tag", "v0"]);
+    gs_ok(scratch.path(), &["init", "--bare", &path_arg(&remote)]);
+    gs_ok(&seed, &["remote", "add", "origin", &path_arg(&remote)]);
+    gs_ok(&seed, &["push", "--tags"]);
+
+    let cloned = gs_json(
+        scratch.path(),
+        &[
+            "clone",
+            "--no-tags",
+            "-o",
+            "upstream",
+            &path_arg(&remote),
+            &path_arg(&clone),
+        ],
+    );
+    assert_eq!(cloned["remote"], "upstream");
+    assert_eq!(cloned["single_branch"], false);
+    assert_eq!(cloned["tag_fetch"], "none");
+    assert_eq!(cloned["tags"], 0);
+    Ok(())
+}
+
+#[test]
 fn clone_json_has_stats_fields() -> TestResult {
     let scratch = Scratch::new("clone-stats")?;
     let seed = scratch.child("seed");

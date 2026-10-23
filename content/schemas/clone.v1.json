@@ -136,10 +136,22 @@
       },
       "type": "array"
     },
+    "remote": {
+      "description": "Remote name configured for the source (`origin` by default).",
+      "type": "string"
+    },
     "seconds": {
       "description": "Wall-clock seconds for the whole clone.",
       "format": "double",
       "type": "number"
+    },
+    "single_branch": {
+      "description": "Whether only one branch was fetched (`git clone --single-branch` semantics).",
+      "type": "boolean"
+    },
+    "tag_fetch": {
+      "description": "Tag fetch mode used for the initial fetch: `all`, `following`, or `none`.",
+      "type": "string"
     },
     "tags": {
       "description": "Remote tags fetched.",
@@ -165,7 +177,10 @@
     "objects",
     "path",
     "phases",
+    "remote",
     "seconds",
+    "single_branch",
+    "tag_fetch",
     "tags",
     "url",
     "worktree_bytes"

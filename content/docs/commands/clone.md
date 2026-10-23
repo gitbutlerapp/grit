@@ -8,7 +8,7 @@ order: 2
 ## Synopsis
 
 ```text
-grit clone <url> [<dir>] [--shallow]
+grit clone <url> [<dir>] [--shallow] [--single-branch | --no-single-branch] [--no-tags] [-o <name>]
 ```
 
 ## Description
@@ -61,6 +61,10 @@ Object ids in received packs use plain SHA-1 like Git, so repositories such as `
 | `<url>` | The repository to clone: a URL or a local path. |
 | `<dir>` | The directory to clone into. Defaults to the repository's name. |
 | `--shallow` | Shallow clone of the default branch only (`git clone --depth=1`). |
+| `--single-branch` | Fetch only the branch that is checked out (`git clone --single-branch`). |
+| `--no-single-branch` | With `--shallow`, fetch every branch tip (`git clone --no-single-branch --depth=1`). |
+| `--no-tags` | Do not fetch tags; sets `remote.<name>.tagOpt=--no-tags` like Git. |
+| `-o`, `--origin <name>` | Name of the remote (default `origin`). |
 
 ## Examples
 
@@ -118,6 +122,9 @@ Pass `--json` for stable, scripting-friendly output:
 | ----- | ---- | ------- |
 | `url` | string | The URL or path that was cloned. |
 | `path` | string | Directory the clone was created in. |
+| `remote` | string | Remote name configured for the source (`origin` by default). |
+| `single_branch` | boolean | Whether only one branch was fetched. |
+| `tag_fetch` | string | Tag fetch mode for the initial fetch: `all`, `following`, or `none`. |
 | `branch` | string | Branch that was checked out. |
 | `objects` | integer | Objects received in the fetch pack. |
 | `bytes` | integer | Size in bytes of the received pack. |
