@@ -5466,6 +5466,27 @@ impl core::marker::Unpin for grit_lib::ident::ParsedSignatureTimes
 impl core::marker::UnsafeUnpin for grit_lib::ident::ParsedSignatureTimes
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::ident::ParsedSignatureTimes
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::ident::ParsedSignatureTimes
+pub struct grit_lib::ident::Signature
+pub grit_lib::ident::Signature::email: alloc::string::String
+pub grit_lib::ident::Signature::name: alloc::string::String
+pub grit_lib::ident::Signature::time: time::offset_date_time::OffsetDateTime
+impl grit_lib::ident::Signature
+pub fn grit_lib::ident::Signature::format_rfc3339(&self) -> core::option::Option<alloc::string::String>
+impl core::clone::Clone for grit_lib::ident::Signature
+pub fn grit_lib::ident::Signature::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::ident::Signature
+impl core::cmp::PartialEq for grit_lib::ident::Signature
+pub fn grit_lib::ident::Signature::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::ident::Signature
+pub fn grit_lib::ident::Signature::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::ident::Signature
+impl core::marker::Freeze for grit_lib::ident::Signature
+impl core::marker::Send for grit_lib::ident::Signature
+impl core::marker::Sync for grit_lib::ident::Signature
+impl core::marker::Unpin for grit_lib::ident::Signature
+impl core::marker::UnsafeUnpin for grit_lib::ident::Signature
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::ident::Signature
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::ident::Signature
 pub fn grit_lib::ident::author_identity_line(&grit_lib::ident::AuthorContact, core::option::Option<&str>, time::offset_date_time::OffsetDateTime) -> alloc::string::String
 pub fn grit_lib::ident::committer_timestamp_for_until_filter(&str) -> i64
 pub fn grit_lib::ident::committer_timestamp_for_until_filter_bytes(&[u8]) -> i64
@@ -5473,6 +5494,7 @@ pub fn grit_lib::ident::committer_unix_seconds_for_ordering(&str) -> i64
 pub fn grit_lib::ident::committer_unix_seconds_for_ordering_bytes(&[u8]) -> i64
 pub fn grit_lib::ident::fsck_commit_idents(&[u8], grit_lib::objects::HashAlgo) -> core::result::Result<(), alloc::string::String>
 pub fn grit_lib::ident::parse_author_arg(&str) -> core::result::Result<grit_lib::ident::AuthorContact, grit_lib::ident::AuthorArgError>
+pub fn grit_lib::ident::parse_signature(&str) -> core::option::Option<grit_lib::ident::Signature>
 pub fn grit_lib::ident::parse_signature_tail(&str) -> core::option::Option<grit_lib::ident::SignatureTail>
 pub fn grit_lib::ident::parse_signature_times(&str) -> core::option::Option<grit_lib::ident::ParsedSignatureTimes>
 pub fn grit_lib::ident::signature_timestamp_for_pretty(&str) -> grit_lib::ident::SignatureTimestamp
@@ -15614,6 +15636,8 @@ pub grit_lib::refs::reflog::ReflogEntry::identity: alloc::string::String
 pub grit_lib::refs::reflog::ReflogEntry::message: alloc::string::String
 pub grit_lib::refs::reflog::ReflogEntry::new_oid: grit_lib::objects::ObjectId
 pub grit_lib::refs::reflog::ReflogEntry::old_oid: grit_lib::objects::ObjectId
+impl grit_lib::refs::reflog::ReflogEntry
+pub fn grit_lib::refs::reflog::ReflogEntry::signature(&self) -> core::option::Option<grit_lib::ident::Signature>
 impl core::clone::Clone for grit_lib::refs::reflog::ReflogEntry
 pub fn grit_lib::refs::reflog::ReflogEntry::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::refs::reflog::ReflogEntry

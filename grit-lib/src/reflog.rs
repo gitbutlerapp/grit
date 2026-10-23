@@ -16,6 +16,7 @@ use std::path::{Path, PathBuf};
 use crate::config::ConfigSet;
 use crate::diff::zero_oid;
 use crate::error::{Error, Result};
+use crate::ident::Signature;
 use crate::merge_base;
 use crate::objects::{parse_commit, parse_tree, ObjectId, ObjectKind};
 use crate::refs::store::RefStore as _;
@@ -34,6 +35,16 @@ pub struct ReflogEntry {
     pub identity: String,
     /// The log message.
     pub message: String,
+}
+
+impl ReflogEntry {
+    /// Parsed committer identity and timestamp from [`Self::identity`].
+    ///
+    /// Returns [`None`] when the identity line is malformed (no sentinel timestamp).
+    #[must_use]
+    pub fn signature(&self) -> Option<Signature> {
+        crate::ident::parse_signature(&self.identity)
+    }
 }
 
 /// Return the filesystem path for a ref's reflog.

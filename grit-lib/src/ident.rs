@@ -16,7 +16,8 @@
 use crate::commit::assemble_identity;
 use crate::git_date::tm::date_overflows;
 use crate::objects::{HashAlgo, ObjectKind};
-use time::OffsetDateTime;
+use time::format_description::well_known::Rfc3339;
+use time::{OffsetDateTime, UtcOffset};
 
 /// Parsed timestamp from a signature line for display and filtering.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26,6 +27,25 @@ pub enum SignatureTimestamp {
     /// Unparsable, overflowing, or whitespace-only date field — Git uses a sentinel (epoch in
     /// headers, empty `%ad`, empty `%at` / `%ct` in format).
     Sentinel,
+}
+
+/// Parsed author or committer identity from a full header or reflog identity line.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Signature {
+    /// Display name (may be empty).
+    pub name: String,
+    /// Email address inside `<…>`.
+    pub email: String,
+    /// Timestamp with the recorded `±HHMM` offset preserved.
+    pub time: OffsetDateTime,
+}
+
+impl Signature {
+    /// Format [`Self::time`] as RFC 3339 (includes the original offset).
+    #[must_use]
+    pub fn format_rfc3339(&self) -> Option<String> {
+        self.time.format(&Rfc3339).ok()
+    }
 }
 
 /// Successful parse of the trailing `<unix> <+HHMM>` portion of a signature.
@@ -132,6 +152,40 @@ pub fn parse_signature_tail(ident: &str) -> Option<SignatureTail> {
         tz_offset_secs,
         tz_hhmm_range,
     }))
+}
+
+/// Parse `Name <email> <unix> <±HHMM>` into a [`Signature`].
+///
+/// Returns [`None`] when the date field is missing, malformed, overflowed, or non-numeric
+/// (no sentinel epoch is synthesized).
+#[must_use]
+pub fn parse_signature(ident: &str) -> Option<Signature> {
+    let ParsedSignatureTimes {
+        unix_seconds,
+        tz_offset_secs,
+        ..
+    } = match parse_signature_tail(ident)? {
+        SignatureTail::Valid(p) => p,
+        SignatureTail::Overflow | SignatureTail::NonNumeric => return None,
+    };
+    let (name, email) = parse_identity_name_email(ident)?;
+    let offset_secs = i32::try_from(tz_offset_secs).ok()?;
+    let offset = UtcOffset::from_whole_seconds(offset_secs).ok()?;
+    let utc = OffsetDateTime::from_unix_timestamp(unix_seconds).ok()?;
+    Some(Signature {
+        name,
+        email,
+        time: utc.to_offset(offset),
+    })
+}
+
+fn parse_identity_name_email(ident: &str) -> Option<(String, String)> {
+    let lt = ident.find('<')?;
+    let name = ident[..lt].trim_end().to_owned();
+    let rest = &ident[lt + 1..];
+    let gt = rest.find('>')?;
+    let email = rest[..gt].trim().to_owned();
+    Some((name, email))
 }
 
 /// Classify the date field for pretty-print / `%at` (t4212 whitespace commits).
@@ -328,5 +382,33 @@ mod tests {
             parse_author_arg("Bad\nInjected <x@y.example>"),
             Err(AuthorArgError::InvalidFormat)
         );
+    }
+
+    #[test]
+    fn parse_signature_preserves_positive_offset() {
+        let ident = "Ada Lovelace <ada@example.com> 1700000000 +0530";
+        let sig = parse_signature(ident).expect("parse");
+        assert_eq!(sig.name, "Ada Lovelace");
+        assert_eq!(sig.email, "ada@example.com");
+        assert_eq!(
+            sig.format_rfc3339().as_deref(),
+            Some("2023-11-15T03:43:20+05:30")
+        );
+    }
+
+    #[test]
+    fn parse_signature_preserves_negative_offset() {
+        let ident = "Ada Lovelace <ada@example.com> 1700000000 -0800";
+        let sig = parse_signature(ident).expect("parse");
+        assert_eq!(
+            sig.format_rfc3339().as_deref(),
+            Some("2023-11-14T14:13:20-08:00")
+        );
+    }
+
+    #[test]
+    fn parse_signature_malformed_identity_is_none() {
+        assert!(parse_signature("A <e@x> totally_bogus -0700").is_none());
+        assert!(parse_signature("not an identity").is_none());
     }
 }

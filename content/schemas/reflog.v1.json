@@ -2,8 +2,43 @@
   "$id": "https://grit-scm.com/schemas/reflog/v1.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "definitions": {
+    "Person": {
+      "description": "A parsed identity line (`Name <email> <epoch> <tz>`) for stable `--json` output.",
+      "properties": {
+        "date": {
+          "description": "Author or committer timestamp in RFC 3339.",
+          "type": "string"
+        },
+        "email": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "date",
+        "email",
+        "name"
+      ],
+      "type": "object"
+    },
     "ReflogListEntry": {
       "properties": {
+        "committer": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Person"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "date": {
+          "description": "RFC 3339 timestamp with the recorded zone offset.",
+          "type": "string"
+        },
         "index": {
           "format": "uint",
           "minimum": 0.0,
@@ -12,7 +47,14 @@
         "message": {
           "type": "string"
         },
+        "new_oid": {
+          "type": "string"
+        },
         "oid": {
+          "description": "Hex `new_oid` (unchanged v1 field).",
+          "type": "string"
+        },
+        "old_oid": {
           "type": "string"
         },
         "relative_date": {
@@ -20,9 +62,12 @@
         }
       },
       "required": [
+        "date",
         "index",
         "message",
+        "new_oid",
         "oid",
+        "old_oid",
         "relative_date"
       ],
       "type": "object"

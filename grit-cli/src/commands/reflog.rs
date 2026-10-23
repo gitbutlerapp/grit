@@ -4,14 +4,16 @@ use std::io::Write;
 
 use anyhow::{Context, Result};
 use grit_lib::error::Error;
+use grit_lib::ident::Signature;
 use grit_lib::refs::reflog::reflog_identity_timestamp;
 use grit_lib::refs::store::RefName;
+use grit_lib::repo::Repository;
 use grit_lib::repo_handles::{ExpireOptions, IndexedReflogEntry};
 use schemars::JsonSchema;
 use serde::Serialize;
 
 use crate::context;
-use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
+use crate::output::{outln, HumanRender, MarkdownRender, Person, RenderContext};
 
 /// Result of `grit reflog` (list/show).
 #[derive(Serialize, JsonSchema)]
@@ -23,15 +25,26 @@ pub struct ReflogListOutcome {
 #[derive(Serialize, JsonSchema)]
 pub struct ReflogListEntry {
     pub index: usize,
+    /// Hex `new_oid` (unchanged v1 field).
     pub oid: String,
+    pub old_oid: String,
+    pub new_oid: String,
+    /// RFC 3339 timestamp with the recorded zone offset.
+    pub date: String,
     pub relative_date: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub committer: Option<Person>,
     pub message: String,
+    /// Abbreviated `new_oid` for human/markdown lines (not in JSON).
+    #[serde(skip)]
+    pub abbreviated_oid: String,
 }
 
 impl HumanRender for ReflogListOutcome {
     fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         for entry in &self.entries {
-            let line = format_entry_line(&self.r#ref, entry);
+            let line = format_entry_line(&self.r#ref, entry, false);
             outln!(w, "{line}");
         }
         Ok(())
@@ -45,17 +58,22 @@ impl MarkdownRender for ReflogListOutcome {
             return Ok(());
         }
         for entry in &self.entries {
-            let line = format_entry_line(&self.r#ref, entry);
+            let line = format_entry_line(&self.r#ref, entry, true);
             outln!(w, "- {line}");
         }
         Ok(())
     }
 }
 
-fn format_entry_line(ref_name: &str, entry: &ReflogListEntry) -> String {
+fn format_entry_line(ref_name: &str, entry: &ReflogListEntry, absolute_date: bool) -> String {
+    let when = if absolute_date {
+        entry.date.as_str()
+    } else {
+        entry.relative_date.as_str()
+    };
     format!(
         "{ref_name}@{{{}}} {} {} {}",
-        entry.index, entry.oid, entry.relative_date, entry.message
+        entry.index, entry.abbreviated_oid, when, entry.message
     )
 }
 
@@ -132,7 +150,7 @@ pub fn run_show(r#ref: Option<String>, limit: Option<usize>) -> Result<ReflogLis
         .entries(&ref_name)
         .map_err(map_reflog_error)?
         .into_iter()
-        .map(|e| indexed_to_json(&e, now))
+        .map(|e| indexed_to_json(&repo, &e, now))
         .collect();
     if let Some(n) = limit {
         entries.truncate(n);
@@ -179,13 +197,36 @@ pub fn run_expire(
     })
 }
 
-fn indexed_to_json(entry: &IndexedReflogEntry, now: i64) -> ReflogListEntry {
+fn indexed_to_json(repo: &Repository, entry: &IndexedReflogEntry, now: i64) -> ReflogListEntry {
     let ts = reflog_identity_timestamp(&entry.entry.identity).unwrap_or(0);
+    let signature = entry.entry.signature();
+    let date = signature
+        .as_ref()
+        .and_then(Signature::format_rfc3339)
+        .unwrap_or_default();
+    let committer = signature.as_ref().map(person_from_signature);
+    let new_hex = entry.entry.new_oid.to_hex();
+    let abbreviated_oid =
+        grit_lib::object_inspect::abbreviate_for_display(repo, entry.entry.new_oid, true)
+            .unwrap_or_else(|_| new_hex.clone());
     ReflogListEntry {
         index: entry.index,
-        oid: entry.entry.new_oid.to_hex(),
+        oid: new_hex.clone(),
+        old_oid: entry.entry.old_oid.to_hex(),
+        new_oid: new_hex,
+        date,
         relative_date: context::relative_date_from(ts, now),
+        committer,
         message: entry.entry.message.clone(),
+        abbreviated_oid,
+    }
+}
+
+fn person_from_signature(sig: &Signature) -> Person {
+    Person {
+        name: sig.name.clone(),
+        email: sig.email.clone(),
+        date: sig.format_rfc3339().unwrap_or_default(),
     }
 }
 

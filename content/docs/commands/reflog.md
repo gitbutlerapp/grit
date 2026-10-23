@@ -66,8 +66,12 @@ List (`grit reflog [REF]`):
 | `ref` | string | Ref that was listed. |
 | `entries` | array | Newest-first entries. |
 | `entries[].index` | integer | Newest-first index (`0` is latest). |
-| `entries[].oid` | string | Hex object id stored as `new_oid` for that entry. |
+| `entries[].oid` | string | Hex object id stored as `new_oid` for that entry (v1 alias of `new_oid`). |
+| `entries[].old_oid` | string | Previous object id before the update. |
+| `entries[].new_oid` | string | Object id after the update (same as `oid`). |
+| `entries[].date` | string | Reflog committer time in RFC 3339 (original offset preserved). |
 | `entries[].relative_date` | string | Human-relative time from the entry identity. |
+| `entries[].committer` | object | `name`, `email`, and `date` (same shape as `log` / `blame`). |
 | `entries[].message` | string | Reflog message (may be empty). |
 
 ```json
@@ -77,7 +81,15 @@ List (`grit reflog [REF]`):
     {
       "index": 0,
       "oid": "b5ea30de417ac84c09b8cfc0acf5f2c39efc611f",
+      "old_oid": "72934dedd47ecaf7e340fd6c5ef46620187fb317",
+      "new_oid": "b5ea30de417ac84c09b8cfc0acf5f2c39efc611f",
+      "date": "2026-10-23T18:15:00Z",
       "relative_date": "2 minutes ago",
+      "committer": {
+        "name": "Example User",
+        "email": "user@example.com",
+        "date": "2026-10-23T18:15:00Z"
+      },
       "message": "commit: second"
     }
   ]
@@ -102,7 +114,7 @@ Pass [`--markdown`](../global-options/) for agent-friendly output.
 
 Schema: [v1](/schemas/reflog/v1.json) (list); subcommands use [delete v1](/schemas/reflog.delete/v1.json) and [expire v1](/schemas/reflog.expire/v1.json).
 
-List mode emits a bullet per entry with the same `REF@{n} oid relative-date message` fields. Delete and expire print short confirmation lines.
+List mode emits a bullet per entry with `REF@{n}`, abbreviated oid, **absolute** `date`, and message (human mode keeps relative dates). Delete and expire print short confirmation lines.
 
 ## See also
 
