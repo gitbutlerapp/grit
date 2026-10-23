@@ -5,11 +5,16 @@
 //! doubles as the home base: running `grit` with no arguments shows you where you
 //! are, what's changed, and what to do next.
 
+<<<<<<< New base: chore: cargo fmt exec.rs
 <<<<<<< New base: fix(rebase): address --exec review and maintainer steering
 mod branch_list_args;
 mod clap_value_args;
 ||||||| Common ancestor
 =======
+||||||| Common ancestor
+=======
+#[cfg(test)]
+>>>>>>> Current commit: fix(clippy): gate-clean cli_command and completion tests
 mod cli_command;
 >>>>>>> Current commit: fix(cli): build clap command tree on large-stack thread in tests
 mod cli_messages;
