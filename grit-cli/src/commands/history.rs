@@ -389,11 +389,11 @@ impl RebaseCliOutcome {
             refs: outcome.refs,
             head: outcome.head,
             dry_run: outcome.dry_run,
+            exec: outcome.exec,
             commit: None,
             conflicts: None,
             next_steps: None,
             alternatives: None,
-            exec: outcome.exec,
         }
     }
 
