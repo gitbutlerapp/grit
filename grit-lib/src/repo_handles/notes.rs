@@ -185,7 +185,7 @@ impl<'repo> RepositoryNotes<'repo> {
         read_blob_bytes(self.repo, &entry.oid).map(Some)
     }
 
-    /// Preview [`add`] without persisting blobs, trees, commits, or refs.
+    /// Preview [`Self::add`] without persisting blobs, trees, commits, or refs.
     ///
     /// Object writes are confined to the ODB in-memory overlay and discarded before return.
     ///
@@ -233,7 +233,7 @@ impl<'repo> RepositoryNotes<'repo> {
         })
     }
 
-    /// Preview [`remove`] on `object` without persisting blobs, trees, commits, or refs.
+    /// Preview [`Self::remove`] on `object` without persisting blobs, trees, commits, or refs.
     ///
     /// # Errors
     ///
