@@ -17,6 +17,7 @@ grit log [<REV>…] [-n <N>] [--cursor <token>]
   [-S <string>] [-G <pat>] [--pickaxe-regex]
   [-i] [--all-match] [--invert-grep] [-F] [--no-mailmap]
   [--all] [--branches[=<glob>]] [--tags[=<glob>]] [--remotes[=<glob>]]
+  [--pathspec-from-file <file|->] [--pathspec-file-nul]
   [-- <path>…]
 ```
 
@@ -44,10 +45,10 @@ With `--graph`, human output draws a commit graph in the left margin (ASCII by d
 | `<REV>…` | Tips and ranges to walk (default `HEAD`). |
 | `-n`, `--max-count <N>` | Stop after `N` commits. On the default walk, this is the page size (including when continuing with `--cursor`). With path filters, caps how many matching commits are returned; omit it to list all matches. A one-shot `-n` without `--cursor` and without paths lists `N` commits with no `next` cursor. `--limit` is a hidden alias for one release. |
 | `--cursor <token>` | Continue a paged walk using the opaque `next` cursor from a previous `--json` page (or the `→ more` line). The cursor encodes the original revision selection, date cutoffs, and walk queue—pass `--cursor` alone (optional `-n` for page size). Revision operands, date filters, and ref-set flags are rejected with `--cursor`. Cannot be combined with path operands. |
-| `--before <date>` | Alias for `--until` (date cutoff). Values starting with `lw1.` are still accepted as a deprecated continuation cursor (with a warning); use `--cursor` instead. |
+| `--before <date>` | Alias for `--until` (date cutoff on committer date). |
 | `--skip <N>` | Skip `N` commits after ordering (cursor walks do not support `--skip`). |
 | `--since`, `--after <date>` | Exclude commits older than this date (committer date). Accepts Git approxidate strings (for example `2024-01-01`, `1 week ago`, `yesterday`) as well as ISO/RFC forms. |
-| `--until`, `--before <date>` | Exclude commits newer than this date (unless `--before` is an `lw1.` cursor token). |
+| `--until`, `--before <date>` | Exclude commits newer than this date. |
 | `--first-parent` | Follow only the first parent at merges (disables cursor paging). |
 | `--merges` | Only merge commits (conflicts with `--no-merges`; disables cursor paging). |
 | `--no-merges` | Exclude merge commits (conflicts with `--merges`; disables cursor paging). |
@@ -83,6 +84,8 @@ With `--graph`, human output draws a commit graph in the left margin (ASCII by d
 | `--invert-grep` | Exclude commits that match the grep group. |
 | `-F`, `--fixed-strings` | Literal string patterns (no regex). |
 | `--no-mailmap` | Do not apply `.mailmap` for author/committer matching. |
+| `--pathspec-from-file <file\|->` | Read pathspecs from a file (`-` for stdin), in addition to argv paths after `--`. |
+| `--pathspec-file-nul` | `--pathspec-from-file` entries are NUL-separated. |
 | `<path>…` | After `--`, limit to commits that touch these paths (cwd-relative under the work tree, like `grit diff`; all matches unless `-n` is set). |
 
 ## Examples

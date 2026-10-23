@@ -8,7 +8,8 @@ order: 3
 ## Synopsis
 
 ```text
-grit show [<object>…] [--diff-merges first-parent|combined] [--stat | --numstat | --shortstat | --name-only | --name-status] [-U[n]] [-W] [-- <path>…]
+grit show [<object>…] [--diff-merges first-parent|combined] [--stat | --numstat | --shortstat | --name-only | --name-status] [-U[n]] [-W]
+  [--pathspec-from-file <file|->] [--pathspec-file-nul] [-- <path>…]
 ```
 
 ## Description
@@ -43,6 +44,8 @@ Use `--stat` (or other diff format flags below) instead of the default patch. Li
 | `-U`, `--unified <n>` | Lines of context around each change in patch mode (bare `-U` means 3). |
 | `-W`, `--function-context` | Expand hunks to enclosing function boundaries (patch mode). |
 | `-p`, `--patch` | Unified patch output (default when no other format flag is set). |
+| `--pathspec-from-file <file\|->` | Read pathspecs from a file (`-` for stdin), in addition to argv paths after `--`. |
+| `--pathspec-file-nul` | `--pathspec-from-file` entries are NUL-separated. |
 | `-- <path>…` | Limit the diff to these paths (pathspecs). |
 
 ## Examples

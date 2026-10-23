@@ -2135,14 +2135,8 @@ fn log_rejects_before_with_paths() -> TestResult {
     write_file(&repo.join("a.txt"), "x\n");
     gs_ok(&repo, &["commit", "one"]);
     let v = gs_json(&repo, &["log"]);
-    let next = v["next"].as_str().unwrap_or("lw1.fake");
-    let out = gs(&repo, &["log", &format!("--before={next}"), "--", "a.txt"]);
-    assert_ne!(out.status, Some(0));
-    assert!(
-        out.stderr.contains("path filters"),
-        "stderr: {}",
-        out.stderr
-    );
+    let out = gs(&repo, &["log", "--before=lw1.fake", "--", "a.txt"]);
+    assert_eq!(out.status, Some(2), "stderr: {}", out.stderr);
     Ok(())
 }
 

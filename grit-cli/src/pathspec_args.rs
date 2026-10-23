@@ -62,6 +62,20 @@ impl PathspecArgs {
 }
 
 impl TrailingPathspecArgs {
+    /// True when argv or `--pathspec-from-file` supplies at least one pathspec.
+    #[must_use]
+    pub fn has_any(&self) -> bool {
+        !self.paths.is_empty() || self.pathspec_from_file.is_some()
+    }
+
+    /// Pathspec tokens for rev walks (`RevWalkListOptions::paths`): argv plus file lines.
+    pub fn rev_walk_tokens(&self, repo: &Repository) -> Result<Vec<String>> {
+        if !self.has_any() {
+            return Ok(Vec::new());
+        }
+        Ok(self.resolve(repo)?.sources)
+    }
+
     /// Resolve argv and optional from-file pathspecs against `repo` and the process cwd.
     pub fn resolve(&self, repo: &Repository) -> Result<ResolvedPathspecs> {
         resolve_pathspec_args(

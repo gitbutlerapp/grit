@@ -9,6 +9,7 @@ use std::io::Write;
 use crate::commits_json::{fetch_limit_plus_one, truncate_oid_list, CommitJsonLoader};
 use crate::context;
 use crate::output::{outln, CommitJson, HumanRender, MarkdownRender, RenderContext};
+use crate::pathspec_args::TrailingPathspecArgs;
 use crate::rev_select::RevSelectArgs;
 
 /// Left/right counts for a symmetric range (`--left-right --count`).
@@ -92,7 +93,12 @@ impl MarkdownRender for RevsOutcome {
     }
 }
 
-pub fn run(rev: RevSelectArgs, count: bool, left_right: bool) -> Result<RevsOutcome> {
+pub fn run(
+    rev: RevSelectArgs,
+    pathspecs: TrailingPathspecArgs,
+    count: bool,
+    left_right: bool,
+) -> Result<RevsOutcome> {
     if rev.revs.is_empty()
         && !rev.all
         && rev.branches.is_none()
@@ -106,12 +112,8 @@ pub fn run(rev: RevSelectArgs, count: bool, left_right: bool) -> Result<RevsOutc
     }
     let repo = context::discover()?;
     let env = repo.environment();
-    let mut deprecated = None;
-    let mut warn = false;
-    let opts = rev.to_rev_walk_options(&repo, env, &[], &mut deprecated, &mut warn)?;
-    if deprecated.is_some() {
-        bail!("`grit revs` does not support log continuation cursors");
-    }
+    let walk_paths = pathspecs.rev_walk_tokens(&repo)?;
+    let opts = rev.to_rev_walk_options(&repo, env, &[], &walk_paths)?;
     let walk = repo.rev_walk();
     let token_refs = rev.rev_tokens(&[]);
     if count {

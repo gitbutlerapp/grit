@@ -602,6 +602,8 @@ enum Command {
     Log {
         #[command(flatten)]
         rev: rev_select::RevSelectArgs,
+        #[command(flatten)]
+        pathspecs: pathspec_args::TrailingPathspecArgs,
         /// Continue a paged walk using the opaque `next` token from a previous page.
         #[arg(long = "cursor", value_name = "TOKEN")]
         cursor: Option<String>,
@@ -630,6 +632,8 @@ enum Command {
     Revs {
         #[command(flatten)]
         rev: rev_select::RevSelectArgs,
+        #[command(flatten)]
+        pathspecs: pathspec_args::TrailingPathspecArgs,
         /// Print only the number of reachable commits.
         #[arg(long)]
         count: bool,
@@ -700,9 +704,8 @@ enum Command {
         /// One commit (that commit's patch), two commits (tree diff), or a range `A..B` / `A...B`.
         #[arg(value_name = "COMMIT")]
         commits: Vec<String>,
-        /// Limit the diff to these paths (after `--`, like `grit log`).
-        #[arg(value_name = "PATH", last = true, allow_hyphen_values = true)]
-        paths: Vec<String>,
+        #[command(flatten)]
+        pathspecs: pathspec_args::TrailingPathspecArgs,
         #[command(flatten)]
         format: diff_format::DiffFormatArgs,
         #[command(flatten)]
@@ -716,9 +719,8 @@ enum Command {
         /// Merge commit diffs: `combined` (default) or `first-parent`.
         #[arg(long = "diff-merges", value_name = "MODE", default_value = "combined")]
         diff_merges: String,
-        /// Limit the diff to these paths (after `--`).
-        #[arg(value_name = "PATH", last = true)]
-        paths: Vec<String>,
+        #[command(flatten)]
+        pathspecs: pathspec_args::TrailingPathspecArgs,
         #[command(flatten)]
         format: diff_format::DiffFormatArgs,
     },
@@ -1865,6 +1867,7 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
         },
         Command::Log {
             rev,
+            pathspecs,
             cursor,
             format,
             oneline,
@@ -1888,16 +1891,21 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
                 graph_unicode,
             };
             emit(
-                &commands::log::run(rev, cursor, format, display, opts.mode)?,
+                &commands::log::run(rev, pathspecs, cursor, format, display, opts.mode)?,
                 opts,
                 ctx,
             )
         }
         Command::Revs {
             rev,
+            pathspecs,
             count,
             left_right,
-        } => emit(&commands::revs::run(rev, count, left_right)?, opts, ctx),
+        } => emit(
+            &commands::revs::run(rev, pathspecs, count, left_right)?,
+            opts,
+            ctx,
+        ),
         Command::MergeBase {
             a,
             b,
@@ -1949,7 +1957,7 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             exit_code,
             quiet,
             commits,
-            paths,
+            pathspecs,
             format,
             line_format,
         } => {
@@ -1963,7 +1971,7 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
                 unstaged,
                 against,
                 commits,
-                paths,
+                pathspecs,
                 format,
                 line_format,
                 word_level_inline: matches!(opts.mode, crate::output::OutputMode::Human)
@@ -1995,7 +2003,7 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
         Command::Show {
             objects,
             diff_merges,
-            paths,
+            pathspecs,
             format,
         } => {
             let diff_merges =
@@ -2003,7 +2011,7 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             emit(
                 &commands::show::run(commands::show::ShowRunOptions {
                     objects,
-                    paths,
+                    pathspecs,
                     format,
                     word_level_inline: matches!(opts.mode, crate::output::OutputMode::Human)
                         && commands::diff::diff_word_level_inline_for_output(),

@@ -38,7 +38,7 @@ The target branch is the first that exists of: the `target.branch` config value,
 | Several commits at once | `grit show <A> <B>` (`--json` → `{ "objects": [ … ] }`) |
 | Blob or tree at a revision | `grit show <rev>:<path>` (same resolution as `grit cat`) |
 | A commit's message and diffstat only | `grit show [<commit-or-branch-or-tag>] --stat` |
-| Recent history, ten at a time | `grit log`, then `grit log --before <next>` using the `next` value |
+| Recent history, ten at a time | `grit log`, then `grit log --cursor <next>` using the `next` value from `--json` |
 | History with patches or file lists | `grit log -p`, `grit log --stat`, `grit log --name-status`, … (same format flags as `grit diff`) |
 | Commits on this branch not on the target | `grit shortlog` |
 | What happened to this branch recently | `grit reflog [REF] --json` (`old_oid`, `new_oid`, `date`, `committer`, plus `oid` / `relative_date`) |

@@ -15,6 +15,7 @@ grit revs <RANGE>... [-n <N>] [--count] [--left-right]
   [-S <string>] [-G <pat>] [--pickaxe-regex]
   [-i] [--all-match] [--invert-grep] [-F] [--no-mailmap]
   [--all] [--branches[=<glob>]] [--tags[=<glob>]] [--remotes[=<glob>]]
+  [--pathspec-from-file <file|->] [--pathspec-file-nul]
   [-- <PATH>...]
 ```
 
@@ -55,6 +56,8 @@ Author, committer, message, and pickaxe filters use the same rules as [`grit log
 | `--invert-grep` | Exclude commits that match the grep group. |
 | `-F`, `--fixed-strings` | Literal string patterns. |
 | `--no-mailmap` | Do not apply `.mailmap` for author/committer matching. |
+| `--pathspec-from-file <file\|->` | Read pathspecs from a file (`-` for stdin), in addition to argv paths after `--`. |
+| `--pathspec-file-nul` | `--pathspec-from-file` entries are NUL-separated. |
 | `-- <PATH>…` | Limit to commits touching these paths (cwd-relative under the work tree, like `grit diff`). |
 
 ## Examples

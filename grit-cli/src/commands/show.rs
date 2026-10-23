@@ -35,7 +35,7 @@ use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 /// Inputs for `grit show`.
 pub struct ShowRunOptions {
     pub objects: Vec<String>,
-    pub paths: Vec<String>,
+    pub pathspecs: crate::pathspec_args::TrailingPathspecArgs,
     pub format: DiffFormatArgs,
     pub word_level_inline: bool,
     pub diff_merges: DiffMerges,
@@ -316,8 +316,14 @@ fn show_commit(spec: &str, opts: &ShowRunOptions) -> Result<ShowOutcome> {
         change_id_stored: commit_json.change_id_stored,
     };
 
+    let paths = crate::commands::diff::resolve_cli_diff_pathspecs(
+        &repo,
+        &opts.pathspecs,
+        &opts.pathspecs.paths,
+        crate::commands::diff::DiffPathspecMode::Commit,
+    )?;
     let diff_opts = CommitDiffOptions {
-        paths: opts.paths.clone(),
+        paths: paths.clone(),
         format: opts.format,
         word_level_inline: opts.word_level_inline,
         diff_merges: opts.diff_merges,
@@ -329,7 +335,7 @@ fn show_commit(spec: &str, opts: &ShowRunOptions) -> Result<ShowOutcome> {
                 &repo,
                 &commit_oid,
                 CommitDiffOptions {
-                    paths: opts.paths.clone(),
+                    paths: paths.clone(),
                     format: {
                         let mut f = opts.format;
                         f.stat = true;

@@ -51,7 +51,7 @@ Commands classified with **takes paths** accept:
 - trailing `-- <paths>` arguments, plus
 - `--pathspec-from-file` and `--pathspec-file-nul` (Git-compatible path lists),
 
-shared via the same Rust argument group in the CLI. [`grit status`](../status/) already uses that group. [`grit log`](../log/) and [`grit revs`](../revs/) accept trailing path operands today but are tracked as exceptions until step 7 lands the full shared group; the same step applies to [`grit diff`](../diff/) and [`grit show`](../show/) for `--pathspec-from-file`.
+shared via the same Rust argument group in the CLI. [`grit status`](../status/), [`grit log`](../log/), [`grit revs`](../revs/), [`grit diff`](../diff/), and [`grit show`](../show/) use that group.
 
 ## Force (`-f`)
 

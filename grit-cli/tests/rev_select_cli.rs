@@ -158,9 +158,9 @@ fn log_before_after_date_aliases() -> TestResult {
 }
 
 #[test]
-fn log_before_cursor_deprecated_alias_warns() -> TestResult {
+fn log_before_cursor_rejected() -> TestResult {
     let dir = std::env::temp_dir().join(format!(
-        "grit-rev-select-cursor-warn-{}",
+        "grit-rev-select-cursor-reject-{}",
         std::process::id()
     ));
     let _ = fs::remove_dir_all(&dir);
@@ -168,11 +168,11 @@ fn log_before_cursor_deprecated_alias_warns() -> TestResult {
     let page1 = grit_json(&dir, &["log"]);
     let cursor = page1["next"].as_str().expect("next").to_owned();
     let out = grit_run(&dir, &["log", &format!("--before={cursor}")]);
-    assert!(out.status.success());
-    let stderr = String::from_utf8_lossy(&out.stderr);
-    assert!(
-        stderr.contains("deprecated") && stderr.contains("--cursor"),
-        "stderr: {stderr}"
+    assert_eq!(
+        out.status.code(),
+        Some(2),
+        "stderr: {}",
+        String::from_utf8_lossy(&out.stderr)
     );
     Ok(())
 }

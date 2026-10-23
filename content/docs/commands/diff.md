@@ -8,8 +8,10 @@ order: 3
 ## Synopsis
 
 ```text
-grit diff [--staged] [--unstaged] [--against <ref>] [<commit> [<commit>]] [-- <path>…]
-grit diff [--staged] [--unstaged] [--against <ref>] [<base>..<tip>] [-- <path>…]
+grit diff [--staged] [--unstaged] [--against <ref>] [<commit> [<commit>]]
+  [--pathspec-from-file <file|->] [--pathspec-file-nul] [-- <path>…]
+grit diff [--staged] [--unstaged] [--against <ref>] [<base>..<tip>]
+  [--pathspec-from-file <file|->] [--pathspec-file-nul] [-- <path>…]
 grit diff --no-index <path> <path>
 ```
 
@@ -62,6 +64,8 @@ Each file starts with its path (UTF-8 names print literally; C-quoted only when 
 | `--exit-code` | Exit with status 1 when there are changes and 0 when there are none; errors exit 2. |
 | `--quiet` | Print nothing and exit as with `--exit-code`. |
 | `<commit>` | One commit (that commit’s patch), two commits (tree diff), or a range `A..B` / `A...B`. Omit for uncommitted changes. |
+| `--pathspec-from-file <file\|->` | Read pathspecs from a file (`-` for stdin), in addition to argv paths after `--`. |
+| `--pathspec-file-nul` | `--pathspec-from-file` entries are NUL-separated. |
 | `<path>…` | After `--`, limit the diff to these paths (all forms above, including `--staged`). |
 
 ## Examples

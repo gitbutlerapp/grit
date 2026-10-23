@@ -1078,30 +1078,6 @@ const EXCEPTIONS: &[(&str, ContractRule, &str, &str)] = &[
         "worktree unlock has no `--dry-run` yet",
     ),
     (
-        "log",
-        ContractRule::Paths,
-        "s7 paths",
-        "log has trailing paths but not the shared pathspec-from-file group yet (step 7)",
-    ),
-    (
-        "revs",
-        ContractRule::Paths,
-        "s7 paths",
-        "revs has trailing paths but not the shared pathspec-from-file group yet (step 7)",
-    ),
-    (
-        "diff",
-        ContractRule::Paths,
-        "s7 paths",
-        "diff has trailing paths but not `--pathspec-from-file` yet (step 7)",
-    ),
-    (
-        "show",
-        ContractRule::Paths,
-        "s7 paths",
-        "show has trailing paths but not `--pathspec-from-file` yet (step 7)",
-    ),
-    (
         "ignore.check",
         ContractRule::Paths,
         "s7 paths",

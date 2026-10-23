@@ -14,9 +14,11 @@ use grit_lib::revwalk::{
     committer_cutoff_from_date, MergeFilter, RefSelection, RevWalkListOptions,
 };
 
-use crate::json_error::{invalid_commit_filter, invalid_pickaxe};
+use crate::json_error::{
+    invalid_commit_filter, invalid_pickaxe, StructuredCliError, StructuredJsonError,
+};
 
-const CURSOR_PREFIX: &str = "lw1.";
+const LOG_CURSOR_PREFIX: &str = "lw1.";
 
 /// Revision ranges, limits, dates, ref sets, and commit filters shared by history-list commands.
 #[derive(Debug, Args, Clone)]
@@ -45,7 +47,7 @@ pub struct RevSelectArgs {
     #[arg(long = "until", value_name = "DATE")]
     pub until: Option<String>,
 
-    /// Alias for `--until`, unless the value is an `lw1.` log cursor (deprecated).
+    /// Alias for `--until` (date cutoff).
     #[arg(long = "before", value_name = "DATE")]
     pub before: Option<String>,
 
@@ -139,10 +141,6 @@ pub struct RevSelectArgs {
     /// Treat `-S` as a BRE instead of a literal string (`--pickaxe-regex`).
     #[arg(long = "pickaxe-regex")]
     pub pickaxe_regex: bool,
-
-    /// Limit to commits that touch these paths.
-    #[arg(value_name = "PATH", last = true)]
-    pub paths: Vec<String>,
 }
 
 impl RevSelectArgs {
@@ -165,10 +163,7 @@ impl RevSelectArgs {
             || self.since.is_some()
             || self.after.is_some()
             || self.until.is_some()
-            || self
-                .before
-                .as_ref()
-                .is_some_and(|b| !b.starts_with(CURSOR_PREFIX))
+            || self.before.is_some()
             || self.all
             || self.branches.is_some()
             || self.tags.is_some()
@@ -176,16 +171,12 @@ impl RevSelectArgs {
     }
 
     /// Convert CLI flags into [`RevWalkListOptions`].
-    ///
-    /// When `before` carries a deprecated `lw1.` log cursor, it is returned in
-    /// `deprecated_cursor` instead of being parsed as a date.
     pub fn to_rev_walk_options(
         &self,
         repo: &Repository,
         env: &Environment,
         default_revs: &[&str],
-        deprecated_cursor: &mut Option<String>,
-        deprecated_cursor_warning: &mut bool,
+        walk_paths: &[String],
     ) -> Result<RevWalkListOptions> {
         if self.merges && self.no_merges {
             bail!("`--merges` and `--no-merges` cannot be used together");
@@ -201,16 +192,16 @@ impl RevSelectArgs {
             None => None,
         };
         if let Some(before) = self.before.as_deref() {
-            if before.starts_with(CURSOR_PREFIX) {
-                *deprecated_cursor = Some(before.to_owned());
-                *deprecated_cursor_warning = true;
-            } else {
-                let cutoff = parse_cutoff(before, now_sec).context("invalid --before date")?;
-                if until.is_some() {
-                    bail!("`--until` and `--before` cannot both set a date cutoff");
-                }
-                until = Some(cutoff);
+            if before.starts_with(LOG_CURSOR_PREFIX) {
+                return Err(rev_select_usage(
+                    "invalid --before date: log continuation cursors use `--cursor`, not `--before`",
+                ));
             }
+            let cutoff = parse_cutoff(before, now_sec).context("invalid --before date")?;
+            if until.is_some() {
+                bail!("`--until` and `--before` cannot both set a date cutoff");
+            }
+            until = Some(cutoff);
         }
 
         let commit_filter = self
@@ -227,7 +218,7 @@ impl RevSelectArgs {
             reverse: self.reverse,
             refs: ref_selections(self),
             first_parent: self.first_parent,
-            paths: self.paths.clone(),
+            paths: walk_paths.to_vec(),
             commit_filter,
             pickaxe,
             graph: false,
@@ -331,6 +322,21 @@ pub(crate) fn log_mailmap_enabled(repo: &Repository, no_mailmap: bool) -> bool {
 
 fn parse_cutoff(date: &str, now_sec: i64) -> Result<i64> {
     committer_cutoff_from_date(date, now_sec).map_err(|e| anyhow::anyhow!("{e}"))
+}
+
+fn rev_select_usage(message: impl Into<String>) -> anyhow::Error {
+    let human = message.into();
+    anyhow::Error::new(StructuredCliError {
+        payload: StructuredJsonError {
+            error: human.clone(),
+            kind: "usage",
+            conflicts: None,
+            commit: None,
+            would_overwrite: None,
+            oid: None,
+        },
+        human,
+    })
 }
 
 fn merge_filter(merges: bool, no_merges: bool) -> MergeFilter {

@@ -1,4 +1,4 @@
-//! `--pathspec-from-file` matches Git for add, rm, and restore.
+//! `--pathspec-from-file` matches Git for add, rm, restore, log, and diff.
 
 use std::fs;
 use std::io::Write;
@@ -279,4 +279,136 @@ fn add_nul_empty_record_fails_like_git() {
         ],
     );
     assert!(!grit_out.status.success());
+}
+
+fn commit_all(grit: &str, dir: &std::path::Path, message: &str) {
+    let null = null_config();
+    assert!(run_grit(grit, dir, &["add", "."]).status.success());
+    assert!(Command::new(grit)
+        .current_dir(dir)
+        .args(["commit", "-m", message])
+        .env("GIT_CONFIG_GLOBAL", &null)
+        .env("GIT_CONFIG_SYSTEM", &null)
+        .env("GIT_AUTHOR_NAME", "T")
+        .env("GIT_AUTHOR_EMAIL", "t@example.com")
+        .env("GIT_COMMITTER_NAME", "T")
+        .env("GIT_COMMITTER_EMAIL", "t@example.com")
+        .status()
+        .expect("commit")
+        .success());
+}
+
+fn pathspec_lines_from_file(path: &std::path::Path) -> Vec<String> {
+    fs::read_to_string(path)
+        .expect("read pathspec file")
+        .lines()
+        .filter(|line| !line.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+fn log_oids_git(dir: &std::path::Path, extra: &[&str]) -> Vec<String> {
+    let mut args = vec!["log", "--format=%H"];
+    args.extend_from_slice(extra);
+    let out = run_git(dir, &args);
+    assert!(
+        out.status.success(),
+        "git log failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter(|l| !l.is_empty())
+        .map(str::to_string)
+        .collect()
+}
+
+fn log_oids_grit(grit: &str, dir: &std::path::Path, extra: &[&str]) -> Vec<String> {
+    let mut args = vec!["log", "--json"];
+    args.extend_from_slice(extra);
+    let out = run_grit(grit, dir, &args);
+    assert!(
+        out.status.success(),
+        "grit log failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).expect("json");
+    v["commits"]
+        .as_array()
+        .expect("commits")
+        .iter()
+        .map(|c| c["oid"].as_str().expect("oid").to_string())
+        .collect()
+}
+
+#[test]
+fn log_pathspec_from_file_matches_git() {
+    let grit = env!("CARGO_BIN_EXE_grit");
+    let dir = tempfile::TempDir::new().expect("tempdir");
+    init_repo(grit, &dir);
+    commit_all(grit, dir.path(), "touch ab");
+    fs::write(dir.path().join("c.txt"), b"c2\n").expect("modify c");
+    commit_all(grit, dir.path(), "touch c only");
+
+    let list = dir.path().join("paths.txt");
+    fs::write(&list, b"a.txt\n").expect("write list");
+    let list_arg = list.to_str().unwrap();
+    let grit_oids = log_oids_grit(
+        grit,
+        dir.path(),
+        &["-n", "10", "--pathspec-from-file", list_arg],
+    );
+    let paths = pathspec_lines_from_file(&list);
+    let mut git_args = vec!["-n", "10", "--"];
+    git_args.extend(paths.iter().map(String::as_str));
+    let git = log_oids_git(dir.path(), &git_args);
+    assert_eq!(grit_oids, git);
+}
+
+#[test]
+fn diff_pathspec_from_file_matches_git() {
+    let grit = env!("CARGO_BIN_EXE_grit");
+    let dir = tempfile::TempDir::new().expect("tempdir");
+    init_repo(grit, &dir);
+    commit_all(grit, dir.path(), "touch ab");
+
+    let list = dir.path().join("paths.txt");
+    fs::write(&list, b"a.txt\n").expect("write list");
+    let list_arg = list.to_str().unwrap();
+
+    let paths = pathspec_lines_from_file(&list);
+    let mut git_args = vec!["diff", "--name-only", "HEAD~1", "--"];
+    git_args.extend(paths.iter().map(String::as_str));
+    let git_out = run_git(dir.path(), &git_args);
+    assert!(
+        git_out.status.success(),
+        "git diff: {}",
+        String::from_utf8_lossy(&git_out.stderr)
+    );
+    let git_names: Vec<String> = String::from_utf8_lossy(&git_out.stdout)
+        .lines()
+        .map(str::to_string)
+        .collect();
+
+    let grit_out = run_grit(
+        grit,
+        dir.path(),
+        &[
+            "diff",
+            "--name-only",
+            "HEAD~1",
+            "--pathspec-from-file",
+            list_arg,
+        ],
+    );
+    assert!(
+        grit_out.status.success(),
+        "grit diff: {}",
+        String::from_utf8_lossy(&grit_out.stderr)
+    );
+    let grit_names: Vec<String> = String::from_utf8_lossy(&grit_out.stdout)
+        .lines()
+        .map(str::to_string)
+        .collect();
+    assert_eq!(grit_names, git_names);
 }

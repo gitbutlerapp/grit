@@ -36,6 +36,7 @@ use crate::log_display::{
 };
 use crate::markdown;
 use crate::output::{outln, CommitJson, HumanRender, MarkdownRender, OutputMode, RenderContext};
+use crate::pathspec_args::TrailingPathspecArgs;
 use crate::rev_select::{self, RevSelectArgs};
 use crate::ui;
 
@@ -256,6 +257,7 @@ impl MarkdownRender for LogOutcome {
 
 pub fn run(
     rev: RevSelectArgs,
+    pathspecs: TrailingPathspecArgs,
     cursor: Option<String>,
     format: DiffFormatArgs,
     display: LogDisplayOptions,
@@ -285,21 +287,10 @@ pub fn run(
     }
     let repo = context::discover()?;
     let env = repo.environment();
-    let mut deprecated_cursor = None;
-    let mut deprecated_warning = false;
-    let opts = rev.to_rev_walk_options(
-        &repo,
-        env,
-        &["HEAD"],
-        &mut deprecated_cursor,
-        &mut deprecated_warning,
-    )?;
-    if deprecated_warning {
-        eprintln!(
-            "warning: passing a log cursor to `--before` is deprecated; use `--cursor` instead"
-        );
-    }
-    let continuation = cursor.or(deprecated_cursor);
+    let walk_paths = pathspecs.rev_walk_tokens(&repo)?;
+    let path_args = walk_paths.as_slice();
+    let opts = rev.to_rev_walk_options(&repo, env, &["HEAD"], path_args)?;
+    let continuation = cursor;
     if display.group_by.is_some() && continuation.is_some() {
         bail!("`grit log` cannot combine `--cursor` with `--group-by`");
     }
@@ -307,7 +298,7 @@ pub fn run(
         bail!("`grit log` cannot combine `--graph` with `--cursor`");
     }
     if let Some(token) = continuation.as_deref() {
-        if !rev.paths.is_empty() {
+        if pathspecs.has_any() {
             bail!(
                 "`grit log` cannot combine `--cursor` with path filters; drop the cursor or the paths"
             );
@@ -342,7 +333,7 @@ pub fn run(
             &page.commits,
             &mut OidHashMap::default(),
             format,
-            &rev.paths,
+            path_args,
             next,
             truncated,
             display,
@@ -360,7 +351,7 @@ pub fn run(
 
     let use_rev_walk = display.graph
         || display.group_by.is_some()
-        || !rev.paths.is_empty()
+        || pathspecs.has_any()
         || rev.max_count.is_some()
         || walk_opts
             .commit_filter
@@ -429,14 +420,14 @@ pub fn run(
             &oids,
             &mut parsed,
             format,
-            &rev.paths,
+            path_args,
             None,
             truncated,
             display,
             output_mode,
             None,
             LogGraphBuild {
-                parent_rewrite: graph_needs_parent_rewrite(&rev, &walk_opts),
+                parent_rewrite: graph_needs_parent_rewrite(pathspecs.has_any(), &walk_opts),
                 linkage: graph_linkage,
             },
         );
@@ -454,7 +445,7 @@ pub fn run(
         &page.commits,
         &mut OidHashMap::default(),
         format,
-        &rev.paths,
+        path_args,
         next,
         truncated,
         display,
@@ -471,10 +462,10 @@ struct LogGraphBuild {
 }
 
 fn graph_needs_parent_rewrite(
-    rev: &RevSelectArgs,
+    has_pathspecs: bool,
     walk: &grit_lib::revwalk::RevWalkListOptions,
 ) -> bool {
-    !rev.paths.is_empty() || walk.commit_filter.as_ref().is_some_and(|f| f.is_active())
+    has_pathspecs || walk.commit_filter.as_ref().is_some_and(|f| f.is_active())
 }
 
 fn resolve_current_branch(repo: &grit_lib::repo::Repository) -> Result<Option<String>> {
