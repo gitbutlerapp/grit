@@ -503,13 +503,17 @@ fn validate_commit_pathspecs(repo: &Repository, paths: &ResolvedPathspecs) -> Re
 ///
 /// Returns [`Error::Message`] when the cleaned body would be empty.
 pub fn normalize_commit_message(raw: &str) -> Result<String> {
-    let processed = process(raw.as_bytes(), &Mode::Default);
+    let normalized = raw.replace("\r\n", "\n").replace('\r', "\n");
+    let processed = process(normalized.as_bytes(), &Mode::Default);
     let message = String::from_utf8(processed)
         .map_err(|_| Error::Message("invalid commit message".into()))?;
     if message.is_empty() {
         return Err(Error::Message("empty commit message".into()));
     }
     let mut message = message;
+    while message.ends_with("\n\n") {
+        message.pop();
+    }
     if !message.ends_with('\n') {
         message.push('\n');
     }
@@ -2078,10 +2082,100 @@ mod tests {
         author_info_from_header_line(&parse_commit(&data).unwrap().author)
     }
 
+    fn git_head_commit_message(repo: &std::path::Path) -> String {
+        let out = std::process::Command::new("git")
+            .args(["cat-file", "commit", "HEAD"])
+            .current_dir(repo)
+            .output()
+            .expect("git cat-file commit");
+        assert!(out.status.success());
+        let bytes = out.stdout;
+        let mut i = 0usize;
+        while i < bytes.len() {
+            if i + 1 < bytes.len() && bytes[i] == b'\n' && bytes[i + 1] == b'\n' {
+                i += 2;
+                break;
+            }
+            i += 1;
+        }
+        String::from_utf8(bytes[i..].to_vec()).expect("utf-8 commit message")
+    }
+
     #[test]
     fn message_file_stripspace() {
-        let msg = normalize_commit_message("  subject  \n\n  body line  \n\n").unwrap();
-        assert_eq!(msg, "  subject\n\n  body line\n");
+        let raw = "  subject  \n\n  body line  \n\n";
+        let msg = normalize_commit_message(raw).unwrap();
+        let tmp = TempDir::new().unwrap();
+        let msg_path = tmp.path().join("msg.txt");
+        std::fs::write(&msg_path, raw).unwrap();
+        std::process::Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(tmp.path())
+            .status()
+            .unwrap();
+        std::process::Command::new("git")
+            .args(["config", "user.name", "T"])
+            .current_dir(tmp.path())
+            .status()
+            .unwrap();
+        std::process::Command::new("git")
+            .args(["config", "user.email", "t@e.com"])
+            .current_dir(tmp.path())
+            .status()
+            .unwrap();
+        std::fs::write(tmp.path().join("f"), "x\n").unwrap();
+        std::process::Command::new("git")
+            .args(["add", "f"])
+            .current_dir(tmp.path())
+            .status()
+            .unwrap();
+        std::process::Command::new("git")
+            .args(["commit", "-F"])
+            .arg(&msg_path)
+            .current_dir(tmp.path())
+            .status()
+            .unwrap();
+        let git_body = git_head_commit_message(tmp.path());
+        assert_eq!(msg, git_body);
+    }
+
+    #[test]
+    fn message_normalization_crlf_and_trailing_blanks_match_git_commit_f() {
+        let raw = "\r\n  title  \r\n\r\n  body  \r\n\r\n\r\n";
+        let grit_msg = normalize_commit_message(raw).unwrap();
+        let tmp = tempfile::TempDir::new().unwrap();
+        let msg_path = tmp.path().join("msg.txt");
+        std::fs::write(&msg_path, raw).unwrap();
+        let git_msg = std::process::Command::new("git")
+            .args(["init", "-q"])
+            .current_dir(tmp.path())
+            .status()
+            .unwrap();
+        assert!(git_msg.success());
+        std::process::Command::new("git")
+            .args(["config", "user.name", "T"])
+            .current_dir(tmp.path())
+            .status()
+            .unwrap();
+        std::process::Command::new("git")
+            .args(["config", "user.email", "t@e.com"])
+            .current_dir(tmp.path())
+            .status()
+            .unwrap();
+        std::fs::write(tmp.path().join("f"), "x\n").unwrap();
+        std::process::Command::new("git")
+            .args(["add", "f"])
+            .current_dir(tmp.path())
+            .status()
+            .unwrap();
+        std::process::Command::new("git")
+            .args(["commit", "-F"])
+            .arg(&msg_path)
+            .current_dir(tmp.path())
+            .status()
+            .unwrap();
+        let git_body = git_head_commit_message(tmp.path());
+        assert_eq!(grit_msg, git_body);
     }
 
     #[test]

@@ -281,11 +281,7 @@ fn merge_trees_for_direction(
 
 fn commit_message(req: &ReplayRequest, source: &CommitData) -> Result<String> {
     if let Some(msg) = &req.message_override {
-        let mut message = msg.trim().to_owned();
-        if !message.is_empty() && !message.ends_with('\n') {
-            message.push('\n');
-        }
-        return Ok(message);
+        return crate::porcelain::commit::normalize_commit_message(msg);
     }
     match req.direction {
         ReplayDirection::Pick => Ok(source.message.clone()),

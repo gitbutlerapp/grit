@@ -58,7 +58,8 @@ Tags are local until you publish them with [`grit push --tags`](../push/). Delet
 | `-n`, `--limit` | Maximum number of tags to print. |
 | `-d`, `--delete` | Delete the tag locally. |
 | `-m`, `--message` | Annotated tag message. |
-| `-F`, `--file` | Read the annotated tag message from a file (`-` reads stdin). |
+| `-F`, `--message-file` | Read the annotated tag message from a file (`-` reads stdin). |
+| `--file` | Hidden alias for `--message-file` (deprecated; emits a one-time warning). |
 | `-f`, `--force` | Replace an existing tag with the same name. |
 | `--dry-run` | Preview create or delete without updating refs. |
 | `-s`, `--sign` | Sign the tag object (implies annotated; honors `tag.gpgSign` when omitted). |

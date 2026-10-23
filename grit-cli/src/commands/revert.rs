@@ -3,6 +3,7 @@
 use crate::commands::replay_merge_args::ReplayMergeArgs;
 use crate::context;
 use crate::markdown;
+use crate::message_input::{read_message_input, MessageInputArgs};
 use crate::operation_output::{
     render_conflicts_human, render_revert_conflict_footer_human, ConflictJson,
     OperationConflictBlock,
@@ -239,8 +240,7 @@ pub struct RevertRunOptions {
     pub skip: bool,
     pub no_commit: bool,
     pub empty: ReplayEmptyPolicyArg,
-    pub message: Option<String>,
-    pub message_file: Option<String>,
+    pub message: MessageInputArgs,
     pub dry_run: bool,
     pub check: bool,
     #[allow(clippy::struct_field_names)]
@@ -286,8 +286,7 @@ pub fn run(opts: &RevertRunOptions) -> Result<RevertOutcome> {
         return run_check(&repo, sources, opts, favor, conflict_style);
     }
 
-    let message_override =
-        read_message_override(opts.message.as_deref(), opts.message_file.as_deref())?;
+    let message_override = read_message_input(&opts.message)?;
     let mainline = opts
         .mainline
         .map(|n| {
@@ -571,20 +570,6 @@ fn entry_from_record(
         subject: context::subject_line(&commit.message),
         change_id: record.change_id.as_ref().map(|id| id.as_str().to_owned()),
     })
-}
-
-fn read_message_override(
-    message: Option<&str>,
-    message_file: Option<&str>,
-) -> Result<Option<String>> {
-    match (message, message_file) {
-        (Some(_), Some(_)) => bail!("cannot use both --message and --message-file"),
-        (Some(text), None) => Ok(Some(text.to_owned())),
-        (None, Some(path)) => std::fs::read_to_string(path)
-            .map(Some)
-            .with_context(|| format!("could not read message file '{path}'")),
-        (None, None) => Ok(None),
-    }
 }
 
 fn map_revert_committish_error(err: Error) -> anyhow::Error {

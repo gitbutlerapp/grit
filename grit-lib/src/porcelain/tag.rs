@@ -14,7 +14,8 @@
 //! - Ref list sort/filter helpers live in [`crate::refs::listing`] (`compare_version_names`,
 //!   [`crate::refs::listing::pattern_matches_short_name`], [`creator_date`],
 //!   [`crate::refs::listing::epoch_from_identity`], [`crate::refs::listing::ref_query_options_for_repo`]).
-//! - The `-m`/`-F` message cleanup ([`strip_comments`]).
+//! - Tag message cleanup: [`strip_comments`] then [`crate::porcelain::commit::normalize_commit_message`]
+//!   via [`normalize_tag_message`].
 
 use crate::check_ref_format::validate_tag_short_name;
 use crate::commit_pretty::message_subject;
@@ -186,7 +187,7 @@ pub fn create_tag(repo: &Repository, req: &CreateTagRequest) -> Result<CreateTag
     };
 
     if let Some(ref raw) = req.message {
-        if strip_comments(raw).trim().is_empty() {
+        if normalize_tag_message(raw).is_err() {
             return Err(Error::Tag(TagError::EmptyMessage));
         }
     }
@@ -214,7 +215,7 @@ pub fn create_tag(repo: &Repository, req: &CreateTagRequest) -> Result<CreateTag
         let message = req
             .message
             .as_deref()
-            .map(strip_comments)
+            .map(|raw| normalize_tag_message(raw).unwrap_or_default())
             .unwrap_or_default();
         let write_tag_bytes = |bytes: &[u8]| -> Result<ObjectId> {
             if req.dry_run {
@@ -547,6 +548,17 @@ pub fn strip_comments(s: &str) -> String {
         last_blank = is_blank;
     }
     result.join("\n") + "\n"
+}
+
+/// Git tag `-m`/`-F` cleanup: drop `#` comment lines, then commit-style stripspace.
+///
+/// # Errors
+///
+/// Returns [`Error::Message`] when the body is empty after cleanup (same as
+/// [`crate::porcelain::commit::normalize_commit_message`]).
+pub fn normalize_tag_message(raw: &str) -> Result<String> {
+    let stripped = strip_comments(raw);
+    crate::porcelain::commit::normalize_commit_message(&stripped)
 }
 
 /// Whether `name` matches `pattern` (Git tag/branch list glob on the short name).

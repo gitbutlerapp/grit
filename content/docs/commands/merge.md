@@ -13,7 +13,7 @@ grit merge --check <branch>
 grit merge --dry-run <branch>
 grit merge --continue [-m <message>]
 grit merge --abort
-grit merge [--ff-only | --no-ff] [--squash | --no-commit] [-X ours|theirs] [--conflict diff3|zdiff3|merge] [--allow-unrelated-histories] [-m <message> | --message-file <path|->] <branch>
+grit merge [--ff-only | --no-ff] [--squash | --no-commit] [-X ours|theirs] [--conflict diff3|zdiff3|merge] [--allow-unrelated-histories] [-m <message> | -F / --message-file <path|->] <branch>
 ```
 
 ## Description
@@ -37,7 +37,7 @@ Local edits are allowed when they only touch paths the merge does not change, or
 - **`--squash`** — Apply the merged tree to the index and worktree, write a Git-compatible `SQUASH_MSG`, and do not update the branch ref or write `MERGE_HEAD`. Finish with [`grit commit`](../commit/) (which uses `SQUASH_MSG` as the default message when you omit `-m`).
 - **`--no-commit`** — Perform the merge but stop before committing: writes `MERGE_HEAD`, `ORIG_HEAD`, and `MERGE_MSG` (and `MERGE_MODE` when `--no-ff` applies). Finish with [`grit commit`](../commit/) or `grit merge --continue` (when implemented).
 
-`-m` / `--message-file` override the default merge commit message and the text stored in `MERGE_MSG` on conflicts or `--no-commit`.
+`-m` / `-F` / `--message-file` override the default merge commit message and the text stored in `MERGE_MSG` on conflicts or `--no-commit`.
 
 **`-X ours|theirs`** — When both sides edited the same region, prefer the current branch (`ours`) or the branch being merged (`theirs`) instead of leaving conflict markers. Matches Git's merge strategy options (union is not exposed).
 
@@ -60,7 +60,7 @@ Local edits are allowed when they only touch paths the merge does not change, or
 | `--squash` | Squash merged commits into the index; write `SQUASH_MSG` (no `MERGE_HEAD`). Mutually exclusive with `--no-commit`. |
 | `--no-commit` | Apply the merge but do not commit yet (Git-compatible merge state). Mutually exclusive with `--squash`. |
 | `-m`, `--message` | Merge commit / `MERGE_MSG` message (conflicts with `--message-file`). |
-| `--message-file` | Read the message from a path, or `-` for stdin (conflicts with `-m`). |
+| `-F`, `--message-file` | Read the message from a path, or `-` for stdin (conflicts with `-m`). |
 | `-X ours\|theirs` | Prefer one side on overlapping edits (same as Git `-X`). |
 | `--conflict` | Marker style: `merge`, `diff3`, or `zdiff3`. |
 | `--allow-unrelated-histories` | Merge with no common ancestor (empty-tree base). |

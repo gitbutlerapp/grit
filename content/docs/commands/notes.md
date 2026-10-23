@@ -11,7 +11,7 @@ order: 4
 grit notes [--ref REF]
 grit notes list [--ref REF]
 grit notes show <rev> [--ref REF]
-grit notes add <rev> -m <message> [--force] [--dry-run] [--ref REF]
+grit notes add <rev> (-m <message> | -F / --message-file <path|->) [--force] [--dry-run] [--ref REF]
 grit notes remove <rev>... [--dry-run] [--ref REF]
 ```
 
@@ -29,7 +29,8 @@ Notes update commits use your configured `user.name` / `user.email` (and optiona
 | --- | --- |
 | `--ref` | Notes namespace (`commits`, `refs/notes/commits`, …). Overrides `core.notesRef` / `GIT_NOTES_REF`. |
 | `-n`, `--limit <N>` | List at most `N` notes (`truncated` in JSON when more exist). |
-| `-m`, `--message` | Note text for `add` (required). |
+| `-m`, `--message` | Note text for `add` (conflicts with `--message-file`). |
+| `-F`, `--message-file` | Read note text from a file, or `-` for stdin (conflicts with `-m`). |
 | `--force` | Replace an existing note on `add`. |
 | `--dry-run` | Preview `add` or `remove` without writing objects, refs, or reflogs. |
 

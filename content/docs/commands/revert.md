@@ -35,7 +35,7 @@ Merge commits require `--mainline <n>` (1-based parent number, long option only)
 | `--no-commit` | Apply the revert to the index only; do not create a commit yet. |
 | `--empty stop\|keep\|drop` | When a step would not change the tree: stop (default), record an empty commit, or skip the step. |
 | `-m`, `--message` | Replace the revert message (**single commit only**). |
-| `--message-file` | Read the revert message from a file (**single commit only**). |
+| `-F`, `--message-file` | Read the revert message from a file, or `-` for stdin (**single commit only**). |
 | `--check` | Predict whether the revert would succeed without changing refs, the index, or the worktree. Exit **0** when every step would apply cleanly; exit **1** when a step would conflict or stop as empty (with `--empty stop`). Conflicts with `--continue`, `--abort`, `--skip`, and `--dry-run`. |
 | `--dry-run` | List commits that would be reverted without changing refs or the worktree. Conflicts with `--check`. |
 | `-X ours\|theirs` | Auto-resolve replay conflicts: keep the current branch side (`ours`) or the reverted change (`theirs`). |

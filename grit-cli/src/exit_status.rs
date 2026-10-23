@@ -88,6 +88,9 @@ impl ExitStatus {
         if commands::remote::is_remote_usage_error(err) {
             return Self::Usage;
         }
+        if crate::message_input::is_message_input_usage_error(err) {
+            return Self::Usage;
+        }
         if err
             .chain()
             .any(|cause| cause.downcast_ref::<HunkSelectError>().is_some())

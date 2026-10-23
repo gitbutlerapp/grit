@@ -1140,11 +1140,7 @@ fn replay_message(
     committer: &str,
 ) -> Result<String> {
     if let Some(msg) = &opts.message_override {
-        let mut message = msg.trim().to_owned();
-        if !message.is_empty() && !message.ends_with('\n') {
-            message.push('\n');
-        }
-        return Ok(message);
+        return crate::porcelain::commit::normalize_commit_message(msg);
     }
     match direction {
         ReplayDirection::Pick => {
