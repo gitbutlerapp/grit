@@ -38,6 +38,20 @@ fn git(root: &Path, args: &[&str]) -> String {
     String::from_utf8_lossy(&out.stdout).into_owned()
 }
 
+fn assert_no_replay_state(root: &Path) {
+    let git_dir = root.join(".git");
+    assert!(
+        !git_dir.join("sequencer").exists(),
+        "sequencer directory must not remain after a failed start with no progress"
+    );
+    for name in ["CHERRY_PICK_HEAD", "REVERT_HEAD", "MERGE_MSG"] {
+        assert!(
+            !git_dir.join(name).exists(),
+            "{name} must not remain after a failed start with no progress"
+        );
+    }
+}
+
 fn init_repo(root: &Path) {
     git(root, &["init", "-q", "-b", "main", "."]);
     git(root, &["config", "user.email", "t@example.com"]);
@@ -454,6 +468,7 @@ fn merge_source_without_mainline_errors() {
     let err =
         start_replay_sequence(&repo, &pick_req(vec![merge], ReplayOptions::default())).unwrap_err();
     assert!(matches!(err, grit_lib::error::Error::MergeCommit { .. }));
+    assert_no_replay_state(root.path());
 }
 
 #[test]

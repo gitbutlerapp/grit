@@ -280,6 +280,9 @@ pub fn start_replay_sequence(
         ));
     }
     let mut todo = build_todo_from_commits(repo, req.direction, &req.commits)?;
+    if let Some(first) = todo.first() {
+        validate_replay_step(repo, req.direction, head_oid, first, &req.options)?;
+    }
     write_sequence_bootstrap(repo, head_oid, &todo, req)?;
     run_sequence(
         repo,
@@ -592,6 +595,8 @@ fn run_sequence(
                         direction,
                         committer,
                     );
+                } else {
+                    clear_replay_state(repo.git_dir())?;
                 }
                 return Err(err);
             }
@@ -1607,6 +1612,25 @@ fn persist_sequence_checkpoint(
         committer,
         false,
     )
+}
+
+/// Fail fast on the first replay step before writing sequencer bootstrap state.
+fn validate_replay_step(
+    repo: &Repository,
+    direction: ReplayDirection,
+    head: ObjectId,
+    entry: &TodoEntry,
+    opts: &ReplayOptions,
+) -> Result<()> {
+    if direction == ReplayDirection::Pick && entry.oid == head {
+        return Err(Error::ReplaySourceAtHead);
+    }
+    let source_obj = repo.odb().read(&entry.oid)?;
+    let source = parse_commit(&source_obj.data)?;
+    if source.parents.len() > 1 && opts.mainline.is_none() {
+        return Err(Error::MergeCommit { oid: entry.oid });
+    }
+    Ok(())
 }
 
 fn write_sequence_bootstrap(
