@@ -363,6 +363,24 @@ fn config_error_path_display(path: &Path) -> String {
     path.display().to_string()
 }
 
+/// `fetch.negotiationAlgorithm` written without `= value` is rejected at parse time.
+fn reject_valueless_negotiation_algorithm(
+    key: &str,
+    value: Option<&str>,
+    path: &Path,
+    line: usize,
+) -> Result<()> {
+    if key != "fetch.negotiationalgorithm" || value.is_some() {
+        return Ok(());
+    }
+    Err(ConfigError::BadConfigVariable {
+        key: key.to_owned(),
+        file: config_error_path_display(path),
+        line,
+    }
+    .into())
+}
+
 /// State tracked while parsing a config file line-by-line.
 struct Parser {
     section: String,
@@ -859,19 +877,12 @@ impl ConfigFile {
                 // Check if there's an inline key=value after the section header
                 if let Some(remainder) = inline_remainder {
                     if let Some((key, value)) = parser.try_parse_entry(remainder) {
-                        if key == "fetch.negotiationalgorithm" && value.is_none() {
-                            let file_disp = config_error_path_display(path);
-                            return Err(Error::Message(format!(
-                                "{}\n{}",
-                                crate::diagnostics::error_line(
-                                    "missing value for 'fetch.negotiationalgorithm'"
-                                ),
-                                crate::diagnostics::fatal_line(&format!(
-                                    "bad config variable 'fetch.negotiationalgorithm' in file '{file_disp}' at line {}",
-                                    start_idx + 1
-                                ))
-                            )));
-                        }
+                        reject_valueless_negotiation_algorithm(
+                            &key,
+                            value.as_deref(),
+                            path,
+                            start_idx + 1,
+                        )?;
                         entries.push(ConfigEntry {
                             key,
                             value,
@@ -912,23 +923,12 @@ impl ConfigFile {
             }
 
             if let Some((key, value)) = parser.try_parse_entry(&logical_line) {
-                if key == "fetch.negotiationalgorithm" && value.is_none() {
-                    let file_disp = config_error_path_display(path);
-                    return Err(Error::Message(format!(
-                        "{}\n{}",
-                        crate::diagnostics::error_line(
-                            "missing value for 'fetch.negotiationalgorithm'"
-                        ),
-                        crate::diagnostics::fatal_line(
-                            &ConfigError::BadConfigVariable {
-                                key: "fetch.negotiationalgorithm".to_owned(),
-                                file: file_disp,
-                                line: start_idx + 1,
-                            }
-                            .to_string()
-                        )
-                    )));
-                }
+                reject_valueless_negotiation_algorithm(
+                    &key,
+                    value.as_deref(),
+                    path,
+                    start_idx + 1,
+                )?;
                 entries.push(ConfigEntry {
                     key,
                     value,
@@ -4614,6 +4614,42 @@ mod get_regexp_tests {
         let set = set_from_snippet("[user]\n\tname = x\n");
         let err = set.get_regexp("(").expect_err("unclosed group");
         assert!(err.contains("invalid key pattern"), "got: {err}");
+    }
+
+    #[test]
+    fn valueless_negotiation_algorithm_is_a_typed_config_error() {
+        use crate::error::{ConfigError, Error};
+
+        let path = Path::new("/repo/.git/config");
+        for (text, line) in [
+            (
+                "[core]\n\tbare = false\n[fetch]\n\tnegotiationAlgorithm\n",
+                4,
+            ),
+            ("[fetch] negotiationAlgorithm\n", 1),
+        ] {
+            let err = ConfigFile::parse(path, text, ConfigScope::Local).expect_err(text);
+            let Error::Config(config_err) = err else {
+                panic!("expected a config error for {text:?}, got {err:?}");
+            };
+            assert_eq!(
+                config_err,
+                ConfigError::BadConfigVariable {
+                    key: "fetch.negotiationalgorithm".to_owned(),
+                    file: ".git/config".to_owned(),
+                    line,
+                },
+                "{text:?}"
+            );
+        }
+
+        let ok = ConfigFile::parse(
+            path,
+            "[fetch]\n\tnegotiationAlgorithm = skipping\n",
+            ConfigScope::Local,
+        )
+        .expect("valued key parses");
+        assert_eq!(ok.entries[0].value.as_deref(), Some("skipping"));
     }
 }
 

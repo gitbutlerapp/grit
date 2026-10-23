@@ -3144,7 +3144,6 @@ fn try_open_at(options: &RepositoryOptions, dir: &Path) -> Result<Option<Discove
                 }));
             }
             Err(Error::NotARepository(_)) | Err(Error::Config(_)) => return Ok(None),
-            Err(Error::Message(ref msg)) if msg.contains("bad config") => return Ok(None),
             Err(e) => return Err(e),
         }
     }
