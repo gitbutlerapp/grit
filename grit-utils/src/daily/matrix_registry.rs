@@ -104,20 +104,6 @@ pub const MATRIX_SCENARIOS: &[ScenarioSpec] = &[
         description: "Stage first 25k new-side lines in a 50k-line file: grit add --lines vs git apply --cached",
     },
     ScenarioSpec {
-        id: "add/update@synth-100k",
-        area: Area::Worktree,
-        headline: false,
-        name: None,
-        description: "Stage tracked changes: grit add -u vs git add -u (after ~1% modified)",
-    },
-    ScenarioSpec {
-        id: "add/dry-run@synth-10k",
-        area: Area::Worktree,
-        headline: false,
-        name: None,
-        description: "Preview staging: grit add --dry-run vs git add -n -A",
-    },
-    ScenarioSpec {
         id: "add/modified@big-blobs",
         area: Area::Worktree,
         headline: false,
@@ -429,7 +415,7 @@ pub const MATRIX_SCENARIOS: &[ScenarioSpec] = &[
         description: "Tag list --sort=version vs git tag -l --sort=version:refname on git.git",
     },
     ScenarioSpec {
-        id: "branch/merged@many-refs",
+        id: "branch/merged-ref@many-refs",
         area: Area::Branching,
         headline: false,
         name: None,

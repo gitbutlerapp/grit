@@ -73,7 +73,7 @@ pub struct DailyHeadlineContext {
     pub tag_bench_name: Option<String>,
     /// Commit oid for `tag/contains@git-git` (`--contains` target).
     pub ref_query_contains: Option<String>,
-    /// Commit oid for `branch/merged@many-refs` (`--merged` target).
+    /// Commit oid for `branch/merged-ref@many-refs` (`--merged` target).
     pub ref_query_merged: Option<String>,
     /// Network transport state (bare remote, URL, HTTP servers).
     pub remote: Option<DailyRemoteState>,

@@ -192,7 +192,7 @@ pub fn plans() -> Vec<DailyHeadlinePlan> {
             correctness: None,
         },
         DailyHeadlinePlan {
-            spec: matrix_spec("branch/merged@many-refs"),
+            spec: matrix_spec("branch/merged-ref@many-refs"),
             pending: false,
             setup: setup_many_refs_merged,
             prepare: super::super::helpers::prepare_none,
