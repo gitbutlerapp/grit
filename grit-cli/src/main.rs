@@ -3111,8 +3111,12 @@ mod tests {
         "Options",
         "Examples",
         "JSON output",
+        "Exit status",
         "See also",
     ];
+
+    /// Plumbing commands with no `--markdown` section on their doc page.
+    const NO_MARKDOWN_SECTION_COMMANDS: &[&str] = &["manager", "upload-pack", "receive-pack"];
 
     /// Plumbing commands whose stdout is a wire protocol or credential stream,
     /// not a JSON outcome object.
@@ -3271,9 +3275,9 @@ mod tests {
         body.contains("## Markdown output") || body.contains("--markdown")
     }
 
-    /// Validate `##` heading order, allowing `Markdown output` only between JSON output and See also.
+    /// Validate `##` heading order, allowing `Markdown output` only between JSON output and Exit status.
     fn validate_page_headings(name: &str, headings: &[String]) -> Vec<String> {
-        let see_also_idx = TEMPLATE_HEADINGS.len() - 1;
+        const EXIT_STATUS_IDX: usize = 5;
         let mut problems = Vec::new();
         let mut template_idx = 0usize;
         let mut heading_idx = 0usize;
@@ -3286,15 +3290,15 @@ mod tests {
                 continue;
             }
             if heading == "Markdown output" {
-                if template_idx == see_also_idx {
+                if template_idx == EXIT_STATUS_IDX {
                     heading_idx += 1;
                     continue;
                 }
-                if template_idx > see_also_idx {
+                if template_idx > EXIT_STATUS_IDX {
                     problems.push(format!("{name}.md: unexpected ## Markdown output"));
                 } else {
                     problems.push(format!(
-                        "{name}.md: ## Markdown output must appear only after ## JSON output and before ## See also"
+                        "{name}.md: ## Markdown output must appear only after ## JSON output and before ## Exit status"
                     ));
                 }
                 heading_idx += 1;
@@ -3318,6 +3322,60 @@ mod tests {
             ));
         }
         problems
+    }
+
+    fn markdown_section_has_fenced_example(section: &str) -> bool {
+        const OPEN: &str = "```";
+        let mut rest = section;
+        while let Some(start) = rest.find(OPEN) {
+            let after = &rest[start + OPEN.len()..];
+            let lang_end = after.find('\n').unwrap_or(after.len());
+            let lang = after[..lang_end].trim();
+            if !lang.is_empty()
+                && lang != "json"
+                && (lang == "markdown"
+                    || lang == "text"
+                    || lang == "diff"
+                    || lang == "console"
+                    || lang.starts_with("diff"))
+            {
+                return true;
+            }
+            let Some(close) = after.find("```") else {
+                break;
+            };
+            rest = &after[close + 3..];
+        }
+        false
+    }
+
+    fn validate_json_example_against_schema(
+        name: &str,
+        block_index: usize,
+        schema_key: &str,
+        instance: &Value,
+    ) -> Option<String> {
+        use crate::json_schema::load_committed_schema;
+        let schema_value = load_committed_schema(schema_key);
+        let compiled = match jsonschema::validator_for(&schema_value) {
+            Ok(c) => c,
+            Err(e) => {
+                return Some(format!(
+                    "{name}.md: JSON example {block_index}: compile schema `{schema_key}`: {e}"
+                ));
+            }
+        };
+        if compiled.is_valid(instance) {
+            return None;
+        }
+        let msg = compiled
+            .iter_errors(instance)
+            .next()
+            .map(|e| e.to_string())
+            .unwrap_or_else(|| "invalid".into());
+        Some(format!(
+            "{name}.md: JSON example {block_index} does not match schema `{schema_key}`: {msg}"
+        ))
     }
 
     /// Every command page uses the documented section order.
@@ -3344,13 +3402,14 @@ mod tests {
     }
 
     #[test]
-    fn command_pages_follow_template_rejects_markdown_after_see_also() {
+    fn command_pages_follow_template_rejects_markdown_after_exit_status() {
         let headings = vec![
             "Synopsis".into(),
             "Description".into(),
             "Options".into(),
             "Examples".into(),
             "JSON output".into(),
+            "Exit status".into(),
             "See also".into(),
             "Markdown output".into(),
         ];
@@ -3361,6 +3420,21 @@ mod tests {
                 .any(|p| p.contains("unexpected ## Markdown output")),
             "{problems:?}"
         );
+    }
+
+    #[test]
+    fn command_pages_follow_template_allows_markdown_before_exit_status() {
+        let headings = vec![
+            "Synopsis".into(),
+            "Description".into(),
+            "Options".into(),
+            "Examples".into(),
+            "JSON output".into(),
+            "Markdown output".into(),
+            "Exit status".into(),
+            "See also".into(),
+        ];
+        assert!(validate_page_headings("commit", &headings).is_empty());
     }
 
     #[test]
@@ -3454,6 +3528,134 @@ Example:
                 }
             }
             assert!(problems.is_empty(), "{}", problems.join("\n"));
+        });
+    }
+
+    /// Fenced JSON in the JSON output section must validate against the mapped v1/v2 schema.
+    #[test]
+    fn json_examples_validate_against_schemas() {
+        use crate::json_schema::schema_key_for_doc_example;
+        with_cli_root(|root| {
+            let dir = commands_dir();
+            let mut problems = Vec::new();
+            for command in root.get_subcommands() {
+                let name = command.get_name();
+                if name == "help" || NO_JSON_COMMANDS.contains(&name) {
+                    continue;
+                }
+                let path = dir.join(format!("{name}.md"));
+                let Ok(text) = std::fs::read_to_string(&path) else {
+                    problems.push(format!("missing page {}", path.display()));
+                    continue;
+                };
+                let (_, body) = split_front_matter(&text);
+                let Some(section) = section_body(body, "JSON output") else {
+                    problems.push(format!("{name}.md: no JSON output section"));
+                    continue;
+                };
+                let mut pos = 0usize;
+                for (i, block) in fenced_json_blocks(&section).iter().enumerate() {
+                    let idx = section.find(block).unwrap_or(pos);
+                    let before = &section[..idx];
+                    pos = idx + block.len();
+                    let parsed: Value = serde_json::from_str(block).unwrap_or_else(|e| {
+                        problems.push(format!("{name}.md: JSON example {i} does not parse: {e}"));
+                        Value::Null
+                    });
+                    if parsed.is_null() {
+                        continue;
+                    }
+                    let Some(schema_key) = schema_key_for_doc_example(name, before, &parsed) else {
+                        problems.push(format!("{name}.md: JSON example {i} has no schema mapping"));
+                        continue;
+                    };
+                    if let Some(problem) =
+                        validate_json_example_against_schema(name, i, &schema_key, &parsed)
+                    {
+                        problems.push(problem);
+                    }
+                }
+            }
+            assert!(problems.is_empty(), "{}", problems.join("\n"));
+        });
+    }
+
+    /// Markdown output sections must include a fenced real `--markdown` example (not prose alone).
+    #[test]
+    fn markdown_section_has_real_example() {
+        with_cli_root(|root| {
+            let dir = commands_dir();
+            let mut problems = Vec::new();
+            for command in root.get_subcommands() {
+                let name = command.get_name();
+                if name == "help" {
+                    continue;
+                }
+                if NO_MARKDOWN_SECTION_COMMANDS.contains(&name) {
+                    let path = dir.join(format!("{name}.md"));
+                    let Ok(text) = std::fs::read_to_string(&path) else {
+                        continue;
+                    };
+                    let (_, body) = split_front_matter(&text);
+                    if section_body(body, "Markdown output").is_some() {
+                        problems.push(format!(
+                            "{name}.md: plumbing command must not have ## Markdown output"
+                        ));
+                    }
+                    continue;
+                }
+                if !page_requires_markdown(command) {
+                    continue;
+                }
+                let path = dir.join(format!("{name}.md"));
+                let Ok(text) = std::fs::read_to_string(&path) else {
+                    problems.push(format!("missing page {}", path.display()));
+                    continue;
+                };
+                let (_, body) = split_front_matter(&text);
+                let Some(section) = section_body(body, "Markdown output") else {
+                    problems.push(format!("{name}.md: missing ## Markdown output section"));
+                    continue;
+                };
+                if !markdown_section_has_fenced_example(&section) {
+                    problems.push(format!(
+                        "{name}.md: Markdown output needs a fenced example (text, markdown, diff, or console)"
+                    ));
+                }
+            }
+            assert!(problems.is_empty(), "{}", problems.join("\n"));
+        });
+    }
+
+    #[test]
+    fn markdown_section_has_real_example_only_plumbing_lacks_section() {
+        with_cli_root(|root| {
+            let dir = commands_dir();
+            let mut without_section = Vec::new();
+            for command in root.get_subcommands() {
+                let name = command.get_name();
+                if name == "help" {
+                    continue;
+                }
+                let path = dir.join(format!("{name}.md"));
+                let Ok(text) = std::fs::read_to_string(&path) else {
+                    continue;
+                };
+                let (_, body) = split_front_matter(&text);
+                if section_body(body, "Markdown output").is_none() {
+                    without_section.push(name.to_owned());
+                }
+            }
+            without_section.sort();
+            let mut expected: Vec<_> = NO_MARKDOWN_SECTION_COMMANDS
+                .iter()
+                .map(|s| s.to_string())
+                .collect();
+            expected.sort();
+            assert_eq!(
+                without_section, expected,
+                "only manager, upload-pack, and receive-pack omit ## Markdown output"
+            );
         });
     }
 
