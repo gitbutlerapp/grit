@@ -1,5 +1,7 @@
 //! v1 JSON Schema generation and registry for `--json` command outcomes.
 
+mod schema_compat;
+
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -41,27 +43,47 @@ pub fn schemas_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../content/schemas")
 }
 
+/// Per-command schema version: live `current` and older `frozen` contracts on disk.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CommandSchemaVersions {
+    /// Version regenerated from Rust types (`GRIT_UPDATE_SCHEMAS`, drift tests).
+    pub current: u32,
+    /// Older `$id` URLs kept byte-stable; never overwritten by update mode.
+    pub frozen: &'static [u32],
+}
+
+/// Returns the version table row for `command`.
+pub fn command_schema_versions(command: &str) -> CommandSchemaVersions {
+    match command {
+        "merge" | "pull" | "pick" => CommandSchemaVersions {
+            current: 2,
+            frozen: &[1],
+        },
+        _ => CommandSchemaVersions {
+            current: 1,
+            frozen: &[],
+        },
+    }
+}
+
+/// Stable `$id` URL for a command schema document at `version`.
+pub fn schema_id_for(command: &str, version: u32) -> String {
+    format!("https://grit-scm.com/schemas/{command}/v{version}.json")
+}
+
 /// Stable `$id` URL for a command's v1 schema document.
 pub fn schema_id(command: &str) -> String {
-    format!("https://grit-scm.com/schemas/{command}/v1.json")
+    schema_id_for(command, 1)
 }
 
-/// Stable `$id` URL for a command's v2 schema document.
-pub fn schema_id_v2(command: &str) -> String {
-    format!("https://grit-scm.com/schemas/{command}/v2.json")
+/// File name for a command schema at `version` under [`schemas_dir`].
+pub fn schema_file_name_for(command: &str, version: u32) -> String {
+    format!("{command}.v{version}.json")
 }
 
-/// Commands whose live `--json` shape is versioned separately from the frozen v1 contract.
-const SCHEMA_V2_COMMANDS: &[&str] = &["merge", "pull", "pick"];
-
-/// File name for a command schema under [`schemas_dir`].
+/// File name for a command's live schema document.
 pub fn schema_file_name(command: &str) -> String {
-    format!("{command}.v1.json")
-}
-
-/// File name for a v2 schema document.
-pub fn schema_file_name_v2(command: &str) -> String {
-    format!("{command}.v2.json")
+    schema_file_name_for(command, command_schema_versions(command).current)
 }
 
 fn build_schema_registry() -> Vec<SchemaRegistryEntry> {
@@ -322,40 +344,50 @@ pub fn schema_command_key(args: &[&str]) -> Option<String> {
     Some(key.to_owned())
 }
 
-/// Load the committed schema document for `command` (v1, or v2 when listed in [`SCHEMA_V2_COMMANDS`]).
+/// Load the committed live schema document for `command`.
 pub fn load_committed_schema(command: &str) -> serde_json::Value {
-    let path = if SCHEMA_V2_COMMANDS.contains(&command) {
-        schemas_dir().join(schema_file_name_v2(command))
-    } else {
-        schemas_dir().join(schema_file_name(command))
-    };
+    let versions = command_schema_versions(command);
+    load_committed_schema_version(command, versions.current)
+}
+
+/// Load a committed schema file for `command` at an explicit `version`.
+pub fn load_committed_schema_version(command: &str, version: u32) -> serde_json::Value {
+    let path = schemas_dir().join(schema_file_name_for(command, version));
     let text =
         fs::read_to_string(&path).unwrap_or_else(|e| panic!("read schema {}: {e}", path.display()));
     serde_json::from_str(&text).unwrap_or_else(|e| panic!("parse schema {}: {e}", path.display()))
 }
 
-/// Regenerate every schema file under [`schemas_dir`].
-pub fn write_all_schemas(dir: &Path) {
+/// Regenerate live schema files under [`schemas_dir`]. Frozen older versions are never written.
+///
+/// When `refuse_breaking` is true (CI update mode), refuses to overwrite the live file if the
+/// change would break the committed contract.
+pub fn write_all_schemas(dir: &Path, refuse_breaking: bool) {
     if let Err(e) = fs::create_dir_all(dir) {
         panic!("create schemas dir: {e}");
     }
     for entry in schema_registry() {
-        if SCHEMA_V2_COMMANDS.contains(&entry.command) {
-            let schema = (entry.schema)();
-            let json = root_schema_to_document_v2(entry.command, schema);
-            let path = dir.join(schema_file_name_v2(entry.command));
-            let text = match serde_json::to_string_pretty(&json) {
-                Ok(t) => t,
-                Err(e) => panic!("serialize schema: {e}"),
-            };
-            if let Err(e) = fs::write(&path, format!("{text}\n")) {
-                panic!("write schema {}: {e}", path.display());
-            }
-            continue;
-        }
+        let versions = command_schema_versions(entry.command);
         let schema = (entry.schema)();
-        let json = root_schema_to_document(entry.command, schema);
-        let path = dir.join(schema_file_name(entry.command));
+        let json = root_schema_to_document_versioned(entry.command, schema, versions.current);
+        let path = dir.join(schema_file_name_for(entry.command, versions.current));
+        if refuse_breaking && path.exists() {
+            let committed_text = fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("read schema {}: {e}", path.display()));
+            let committed: serde_json::Value = serde_json::from_str(&committed_text)
+                .unwrap_or_else(|e| panic!("parse schema {}: {e}", path.display()));
+            let breaking = schema_compat::breaking_changes(&committed, &json);
+            if !breaking.is_empty() {
+                panic!(
+                    "{}",
+                    schema_compat::format_breaking_changes(
+                        entry.command,
+                        versions.current,
+                        &breaking
+                    )
+                );
+            }
+        }
         let text = match serde_json::to_string_pretty(&json) {
             Ok(t) => t,
             Err(e) => panic!("serialize schema: {e}"),
@@ -366,10 +398,14 @@ pub fn write_all_schemas(dir: &Path) {
     }
 }
 
-fn root_schema_to_document_v2(command: &str, root: RootSchema) -> serde_json::Value {
+fn root_schema_to_document_versioned(
+    command: &str,
+    root: RootSchema,
+    version: u32,
+) -> serde_json::Value {
     let mut value = root_schema_to_document(command, root);
     if let Some(obj) = value.as_object_mut() {
-        obj.insert("$id".into(), schema_id_v2(command).into());
+        obj.insert("$id".into(), schema_id_for(command, version).into());
     }
     value
 }
@@ -384,7 +420,10 @@ fn root_schema_to_document(command: &str, root: RootSchema) -> serde_json::Value
             "$schema".into(),
             "https://json-schema.org/draft/2020-12/schema".into(),
         );
-        obj.insert("$id".into(), schema_id(command).into());
+        obj.insert(
+            "$id".into(),
+            schema_id_for(command, command_schema_versions(command).current).into(),
+        );
     }
     if command == "history.reword"
         || command == "history.drop"
@@ -751,32 +790,34 @@ mod tests {
 
     use super::*;
 
+    fn parse_schema_file_name(name: &str) -> Option<(String, u32)> {
+        let stem = name.strip_suffix(".json")?;
+        let (command, version_text) = stem.rsplit_once(".v")?;
+        let version = version_text.parse().ok()?;
+        Some((command.to_owned(), version))
+    }
+
+    fn generated_live_schema(entry: &SchemaRegistryEntry) -> Value {
+        let versions = command_schema_versions(entry.command);
+        let schema = (entry.schema)();
+        root_schema_to_document_versioned(entry.command, schema, versions.current)
+    }
+
     #[test]
     fn json_schemas_are_current() {
         let dir = schemas_dir();
-        if env::var("GRIT_UPDATE_SCHEMAS").as_deref() == Ok("1") {
-            write_all_schemas(&dir);
+        let update = env::var("GRIT_UPDATE_SCHEMAS").as_deref() == Ok("1");
+        if update {
+            write_all_schemas(&dir, true);
             return;
         }
         let tmp = tempfile::tempdir().expect("tempdir");
-        write_all_schemas(tmp.path());
+        write_all_schemas(tmp.path(), false);
         for entry in schema_registry() {
-            if SCHEMA_V2_COMMANDS.contains(&entry.command) {
-                let committed = dir.join(schema_file_name_v2(entry.command));
-                let generated = tmp.path().join(schema_file_name_v2(entry.command));
-                let committed_text = fs::read_to_string(&committed)
-                    .unwrap_or_else(|e| panic!("read {}: {e}", committed.display()));
-                let generated_text = fs::read_to_string(&generated)
-                    .unwrap_or_else(|e| panic!("read {}: {e}", generated.display()));
-                assert_eq!(
-                    committed_text, generated_text,
-                    "v2 schema drift for `{}`; run GRIT_UPDATE_SCHEMAS=1 cargo test json_schemas_are_current -p grit-cli",
-                    entry.command
-                );
-                continue;
-            }
-            let committed = dir.join(schema_file_name(entry.command));
-            let generated = tmp.path().join(schema_file_name(entry.command));
+            let versions = command_schema_versions(entry.command);
+            let file = schema_file_name_for(entry.command, versions.current);
+            let committed = dir.join(&file);
+            let generated = tmp.path().join(&file);
             let committed_text = fs::read_to_string(&committed)
                 .unwrap_or_else(|e| panic!("read {}: {e}", committed.display()));
             let generated_text = fs::read_to_string(&generated)
@@ -787,6 +828,85 @@ mod tests {
                 entry.command
             );
         }
+    }
+
+    #[test]
+    fn json_schema_backward_compatible() {
+        let dir = schemas_dir();
+        let mut generated_by_command: BTreeMap<&'static str, Value> = BTreeMap::new();
+        for entry in schema_registry() {
+            generated_by_command.insert(entry.command, generated_live_schema(entry));
+        }
+
+        let mut checked = 0usize;
+        for entry in fs::read_dir(&dir).unwrap_or_else(|e| panic!("read schemas dir: {e}")) {
+            let entry = entry.unwrap_or_else(|e| panic!("schemas dir entry: {e}"));
+            let name = entry.file_name();
+            let Some(name) = name.to_str() else {
+                continue;
+            };
+            let Some((command, version)) = parse_schema_file_name(name) else {
+                continue;
+            };
+            checked += 1;
+            let committed_text = fs::read_to_string(entry.path())
+                .unwrap_or_else(|e| panic!("read {}: {e}", entry.path().display()));
+            let committed: Value = serde_json::from_str(&committed_text)
+                .unwrap_or_else(|e| panic!("parse {}: {e}", entry.path().display()));
+            let versions = command_schema_versions(&command);
+            let reference = if version == versions.current {
+                generated_by_command
+                    .get(command.as_str())
+                    .unwrap_or_else(|| panic!("no registry entry for schema file `{command}`"))
+                    .clone()
+            } else {
+                assert!(
+                    versions.frozen.contains(&version),
+                    "unexpected schema version file `{name}`"
+                );
+                committed.clone()
+            };
+            let breaking = schema_compat::breaking_changes(&committed, &reference);
+            assert!(
+                breaking.is_empty(),
+                "{}",
+                schema_compat::format_breaking_changes(&command, version, &breaking)
+            );
+        }
+        assert_eq!(
+            checked, 90,
+            "expected 90 committed schema files under content/schemas"
+        );
+    }
+
+    #[test]
+    fn json_schema_backward_compatible_catches_status_field_removal() {
+        let committed = load_committed_schema_version("status", 1);
+        let mut generated = generated_live_schema(
+            schema_registry()
+                .iter()
+                .find(|e| e.command == "status")
+                .expect("status registry entry"),
+        );
+        let Some(props) = generated
+            .get_mut("properties")
+            .and_then(Value::as_object_mut)
+        else {
+            panic!("status schema missing properties");
+        };
+        props.remove("branch");
+        let breaking = schema_compat::breaking_changes(&committed, &generated);
+        let message = schema_compat::format_breaking_changes("status", 1, &breaking);
+        assert!(
+            breaking
+                .iter()
+                .any(|c| c.kind == "property_removed" && c.detail.contains("branch")),
+            "expected property_removed for branch, got {breaking:?}"
+        );
+        assert!(
+            message.contains("status") && message.contains("branch"),
+            "message should name command and field: {message}"
+        );
     }
 
     #[test]

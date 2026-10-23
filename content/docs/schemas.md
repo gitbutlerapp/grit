@@ -3,7 +3,9 @@ title: JSON schemas
 summary: Versioned v1 JSON Schemas for every grit command's --json success object.
 ---
 
-Every command that prints a JSON outcome object with `--json` has a matching **v1 JSON Schema** served at a stable URL. Additive changes stay on v1; breaking changes publish a new version while v1 remains at its `$id`. See the [Agent guide](../agents/#json-schema-versioning) for the versioning rules and how to regenerate files under `content/schemas/`.
+Every command that prints a JSON outcome object with `--json` has a versioned JSON Schema served at a stable URL (`https://grit-scm.com/schemas/<command>/vN.json`). Most commands are still on **v1**; `merge`, `pull`, and `pick` publish **v2** while **v1** remains frozen for older clients.
+
+See the [Agent guide](../agents/#json-schema-versioning) for additive vs breaking rules, the CI backward-compatibility gate, and how to regenerate live files under `content/schemas/` with `GRIT_UPDATE_SCHEMAS=1`.
 
 Plain command failures with `--json` validate against the shared [error schema](/schemas/error/v1.json).
 

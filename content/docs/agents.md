@@ -45,15 +45,25 @@ See [Scripting with grit](../scripting/) for more `--filter` patterns. Per-comma
 
 ## JSON schema versioning
 
-Each command path has a versioned schema file: `<command>.v1.json` (dotted paths for subcommands, such as `stash.list.v1.json`). **Additive changes stay on v1:** new optional JSON fields, new enum variants, or new properties documented with defaults are allowed without bumping the version. **Breaking changes require a new version:** removing a field, renaming a field, or changing a field's JSON type means publishing `<command>.v2.json` while keeping v1 available at its stable `$id` URL for older clients.
+Each command path has versioned schema files under `content/schemas/`: `<command>.vN.json` (dotted paths for subcommands, such as `stash.list.v1.json`). The live contract is whatever **`current`** version the per-command table in `grit-cli/src/json_schema.rs` lists; older **`frozen`** versions stay on disk at stable `$id` URLs and are never regenerated.
 
-Regenerate committed schemas after intentional contract changes with:
+**Additive on the live version (no bump):** new optional properties, new enum variants, new `definitions`, adding an `enum` to a former free-form string (for example structured `kind`), or widening nullability.
+
+**Breaking (requires publishing vN+1):** property removed or renamed, JSON type narrowed, a property newly required, enum variant removed, `additionalProperties: false` where extra keys were previously allowed, or nullability removed from a field.
+
+CI runs three gates:
+
+- `json_schemas_are_current` — generated live schemas match committed bytes (or run update mode below).
+- `json_schema_backward_compatible` — every committed schema file (90 total) stays backward compatible: live files vs freshly generated types; frozen older files are checked against themselves so they never drift silently.
+- `json_snapshots_match_schemas` — golden `--json` snapshots validate against the matching schema.
+
+Regenerate live schemas after intentional **additive** contract changes:
 
 ```bash
 GRIT_UPDATE_SCHEMAS=1 cargo test json_schemas_are_current -p grit-cli -- --nocapture
 ```
 
-CI runs `json_schemas_are_current` (drift check) and `json_snapshots_match_schemas` (golden `--json` snapshots validate against the matching schema).
+Update mode refuses to overwrite the live file when the diff would be **breaking**; the test output lists each breaking JSON path and tells you to publish `vN+1` (add `<command>.v{N+1}.json`, bump `current`, append `N` to `frozen`). Frozen files are never touched by update mode.
 
 ## Error object shape
 
