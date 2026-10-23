@@ -182,6 +182,10 @@ pub(crate) const INDEX_EXT_UNTRACKED: u32 = u32::from_be_bytes(*b"UNTR");
 /// Git index extension signature `FSMN` (fsmonitor).
 pub(crate) const INDEX_EXT_FSMONITOR: u32 = u32::from_be_bytes(*b"FSMN");
 /// Fsmonitor index extension header version 1 (u64 timestamp token).
+/// Index files at least this large verify their trailing checksum on a second thread while
+/// the entries parse; below it, spawning the thread costs more than the hash.
+const PARALLEL_TRAILER_VERIFY_MIN_BYTES: usize = 256 * 1024;
+
 const FSMONITOR_EXT_VERSION1: u32 = 1;
 /// Fsmonitor index extension header version 2 (NUL-terminated string token).
 const FSMONITOR_EXT_VERSION2: u32 = 2;
@@ -987,10 +991,10 @@ impl Index {
     ///
     /// Returns [`Error::IndexError`] if the file is present but corrupt.
     pub fn load(path: &Path) -> Result<Self> {
-        match fs::read(path) {
-            Ok(data) => {
+        match read_index_file(path) {
+            Ok((data, mtime)) => {
                 let mut idx = Self::parse(&data)?;
-                idx.source_mtime = index_file_mtime(path);
+                idx.source_mtime = Some(mtime);
                 Ok(idx)
             }
             Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(Self {
@@ -1006,8 +1010,11 @@ impl Index {
     /// After a successful return, [`Index::sparse_directories`] is cleared and every
     /// placeholder is replaced by the blob entries from the referenced tree.
     pub fn load_expand_sparse(path: &Path, odb: &Odb) -> Result<Self> {
-        let mut idx = match fs::read(path) {
-            Ok(data) => Self::parse_with_algo(&data, odb.hash_algo())?,
+        let mut idx = match read_index_file(path) {
+            Ok((data, mtime)) => Self {
+                source_mtime: Some(mtime),
+                ..Self::parse_with_algo(&data, odb.hash_algo())?
+            },
             Err(e) if e.kind() == io::ErrorKind::NotFound => Self {
                 sparse_directories: false,
                 hash_algo: odb.hash_algo(),
@@ -1015,7 +1022,6 @@ impl Index {
             },
             Err(e) => return Err(Error::Io(e)),
         };
-        idx.source_mtime = index_file_mtime(path);
         idx.expand_sparse_directory_placeholders(
             odb,
             crate::path_validate::ProtectOptions::default(),
@@ -1056,22 +1062,25 @@ impl Index {
         parse_context: IndexParseContext,
     ) -> Result<Self> {
         let algo = odb.hash_algo();
-        let mut idx = match fs::read(path) {
-            Ok(data) => Self::parse_with_algo_and_config(&data, algo, config, parse_context)
-                .or_else(|e| match e {
-                    Error::IndexError(msg) if msg == "file too short" => Ok(Self {
-                        hash_algo: algo,
-                        ..Self::new()
-                    }),
-                    other => Err(other),
-                })?,
+        let mut idx = match read_index_file(path) {
+            Ok((data, mtime)) => Self {
+                source_mtime: Some(mtime),
+                ..Self::parse_with_algo_and_config(&data, algo, config, parse_context).or_else(
+                    |e| match e {
+                        Error::IndexError(msg) if msg == "file too short" => Ok(Self {
+                            hash_algo: algo,
+                            ..Self::new()
+                        }),
+                        other => Err(other),
+                    },
+                )?
+            },
             Err(e) if e.kind() == io::ErrorKind::NotFound => Self {
                 hash_algo: algo,
                 ..Self::new()
             },
             Err(e) => return Err(Error::Io(e)),
         };
-        idx.source_mtime = index_file_mtime(path);
         let protect = config
             .map(crate::path_validate::ProtectOptions::from_config)
             .unwrap_or_default();
@@ -1264,12 +1273,6 @@ impl Index {
         config: Option<&ConfigSet>,
         parse_context: IndexParseContext,
     ) -> Result<Self> {
-        use crate::index_eoie_ieot::{
-            index_load_worker_count, parallel_index_load_allowed, parse_entries_parallel,
-            parse_entries_serial, parse_index_extensions, read_eoie_extension, read_ieot_extension,
-            ParsedIndexExtensions,
-        };
-
         const INDEX_HEADER_LEN: usize = 12;
 
         let hash_len = hash_algo.len();
@@ -1284,15 +1287,48 @@ impl Index {
                 "file too short for index header and checksum".to_owned(),
             ));
         }
-        if !checksum.iter().all(|&b| b == 0) {
-            verify_trailer(hash_algo, data).map_err(|e| {
-                Error::IndexError(format!(
-                    "{} checksum mismatch: {e}",
-                    hash_algo.name().to_uppercase()
-                ))
-            })?;
+        let trailer_error = |e: crate::hash::TrailerMismatch| {
+            Error::IndexError(format!(
+                "{} checksum mismatch: {e}",
+                hash_algo.name().to_uppercase()
+            ))
+        };
+        if checksum.iter().all(|&b| b == 0) {
+            return Self::parse_body(body, hash_algo, config, parse_context);
         }
+        let verify_in_parallel = data.len() >= PARALLEL_TRAILER_VERIFY_MIN_BYTES
+            && parse_context.thread_policy.threads_override != Some(1);
+        if !verify_in_parallel {
+            verify_trailer(hash_algo, data).map_err(trailer_error)?;
+            return Self::parse_body(body, hash_algo, config, parse_context);
+        }
+        // Hashing a large index costs about as much as parsing it; overlap the two and
+        // report a checksum mismatch ahead of any structural error, as the serial path does.
+        std::thread::scope(|scope| {
+            let verifier = scope.spawn(|| verify_trailer(hash_algo, data));
+            let parsed = Self::parse_body(body, hash_algo, config, parse_context);
+            verifier
+                .join()
+                .map_err(|_| Error::Message("index checksum worker thread panicked".to_owned()))?
+                .map_err(trailer_error)?;
+            parsed
+        })
+    }
 
+    /// Parse the index body (header, entries and extensions) without the trailing checksum.
+    fn parse_body(
+        body: &[u8],
+        hash_algo: HashAlgo,
+        config: Option<&ConfigSet>,
+        parse_context: IndexParseContext,
+    ) -> Result<Self> {
+        use crate::index_eoie_ieot::{
+            index_load_worker_count, parallel_index_load_allowed, parse_entries_parallel,
+            parse_entries_serial, parse_index_extensions, read_eoie_extension, read_ieot_extension,
+            ParsedIndexExtensions,
+        };
+
+        let hash_len = hash_algo.len();
         let magic = &body[..4];
         if magic != b"DIRC" {
             return Err(Error::IndexError("bad magic: expected DIRC".to_owned()));
@@ -4119,12 +4155,61 @@ pub fn entry_from_stat(
 #[must_use]
 pub fn index_file_mtime(path: &Path) -> Option<(u32, u32)> {
     let meta = fs::metadata(path).ok()?;
-    let ft = filetime::FileTime::from_last_modification_time(&meta);
+    Some(index_mtime_from_metadata(&meta))
+}
+
+fn index_mtime_from_metadata(meta: &fs::Metadata) -> (u32, u32) {
+    let ft = filetime::FileTime::from_last_modification_time(meta);
     let secs = ft.unix_seconds();
     if secs.is_negative() {
-        return Some((0, 0));
+        return (0, 0);
     }
-    Some((secs as u32, ft.nanoseconds()))
+    (secs as u32, ft.nanoseconds())
+}
+
+/// Index files at least this large are memory-mapped instead of copied into a buffer.
+const INDEX_MMAP_MIN_BYTES: u64 = 64 * 1024;
+
+/// Raw bytes of an on-disk index file.
+enum IndexFileBytes {
+    Owned(Vec<u8>),
+    Mapped(memmap2::Mmap),
+}
+
+impl std::ops::Deref for IndexFileBytes {
+    type Target = [u8];
+
+    fn deref(&self) -> &[u8] {
+        match self {
+            Self::Owned(bytes) => bytes,
+            Self::Mapped(map) => map,
+        }
+    }
+}
+
+/// Read an index file along with the mtime of the same open file.
+///
+/// Large files are mapped read-only: index writers replace the file by renaming a lock file
+/// over it, so a mapped inode is never truncated underneath the reader.
+fn read_index_file(path: &Path) -> io::Result<(IndexFileBytes, (u32, u32))> {
+    use std::io::Read;
+
+    let mut file = fs::File::open(path)?;
+    let meta = file.metadata()?;
+    let mtime = index_mtime_from_metadata(&meta);
+    let len = meta.len();
+    if meta.is_file() && len >= INDEX_MMAP_MIN_BYTES {
+        if let Ok(len) = usize::try_from(len) {
+            // SAFETY: the map is only read through `&[u8]`, its length comes from fstat on this
+            // same file, and index writers swap files with rename instead of rewriting in place.
+            if let Ok(map) = unsafe { memmap2::MmapOptions::new().len(len).map(&file) } {
+                return Ok((IndexFileBytes::Mapped(map), mtime));
+            }
+        }
+    }
+    let mut bytes = Vec::with_capacity(usize::try_from(len).unwrap_or(0));
+    file.read_to_end(&mut bytes)?;
+    Ok((IndexFileBytes::Owned(bytes), mtime))
 }
 
 fn max_stage0_entry_mtime(entries: &[IndexEntry]) -> (u32, u32) {
@@ -4513,6 +4598,23 @@ mod tests {
 
         let loaded = Index::load(&path).unwrap();
         assert_eq!(loaded.entries.len(), 0);
+    }
+
+    #[test]
+    fn read_index_file_maps_only_large_files() {
+        let dir = TempDir::new().unwrap();
+        let threshold = usize::try_from(INDEX_MMAP_MIN_BYTES).unwrap();
+        for (len, mapped) in [(0, false), (threshold - 1, false), (threshold, true)] {
+            let path = dir.path().join(format!("index-{len}"));
+            let contents: Vec<u8> = (0..len).map(|i| (i % 251) as u8).collect();
+            fs::write(&path, &contents).unwrap();
+            let (bytes, mtime) = read_index_file(&path).unwrap();
+            assert_eq!(matches!(bytes, IndexFileBytes::Mapped(_)), mapped, "{len}");
+            assert_eq!(&*bytes, contents.as_slice());
+            assert_eq!(Some(mtime), index_file_mtime(&path));
+        }
+        let missing = read_index_file(&dir.path().join("missing")).err().unwrap();
+        assert_eq!(missing.kind(), io::ErrorKind::NotFound);
     }
 
     #[test]
