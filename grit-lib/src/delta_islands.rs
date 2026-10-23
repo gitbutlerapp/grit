@@ -9,8 +9,8 @@
 //! of islands are preferred as bases.
 //!
 //! Islands are derived from the `pack.island` regexes (matched against full ref names,
-//! left-anchored) and the optional `pack.islandcore` name (whose objects are written
-//! first in the pack via layering).
+//! left-anchored). `pack.islandCore` (writing the core island's objects first) is not
+//! supported; it only affects object order within the pack, not which deltas are allowed.
 
 use crate::config::ConfigSet;
 use crate::objects::{parse_commit, parse_tag, parse_tree, ObjectId, ObjectKind};
@@ -34,12 +34,6 @@ impl IslandBitmap {
         let block = (i / 32) as usize;
         let mask = 1u32 << (i % 32);
         self.bits[block] |= mask;
-    }
-
-    fn get(&self, i: u32) -> bool {
-        let block = (i / 32) as usize;
-        let mask = 1u32 << (i % 32);
-        (self.bits[block] & mask) != 0
     }
 
     fn or(&mut self, other: &IslandBitmap) {
@@ -68,8 +62,6 @@ impl IslandBitmap {
 pub struct DeltaIslands {
     /// Per-object island membership.
     marks: HashMap<ObjectId, IslandBitmap>,
-    /// Island bit assigned to the core island (`pack.islandcore`), if any.
-    core_island_bit: Option<u32>,
     /// Whether any island was actually configured/loaded.
     active: bool,
 }
@@ -132,21 +124,6 @@ impl DeltaIslands {
         }
         0
     }
-
-    /// Whether `oid` belongs to the core island (used for `pack.islandcore` layering).
-    #[must_use]
-    pub fn is_core_object(&self, oid: &ObjectId) -> bool {
-        let Some(bit) = self.core_island_bit else {
-            return false;
-        };
-        self.marks.get(oid).is_some_and(|m| m.get(bit))
-    }
-
-    /// Whether a core island is configured (`pack.islandcore`).
-    #[must_use]
-    pub fn has_core(&self) -> bool {
-        self.core_island_bit.is_some()
-    }
 }
 
 /// Compile the left-anchored island regexes from `pack.island` config (in load order).
@@ -200,7 +177,6 @@ pub fn load_delta_islands(
     if regexes.is_empty() {
         return DeltaIslands::default();
     }
-    let core_name = cfg.get("pack.islandcore");
 
     // Collect refs and assign each to an island by name.
     let mut by_name: HashMap<String, RemoteIsland> = HashMap::new();
@@ -225,12 +201,6 @@ pub fn load_delta_islands(
         return DeltaIslands::default();
     }
 
-    // Resolve which island name is the core (looked up by name before dedup).
-    let core_hash = core_name
-        .as_deref()
-        .and_then(|n| by_name.get(n))
-        .map(|ri| ri.hash);
-
     // Deduplicate islands sharing the same hash (Git keeps the first occurrence). The
     // surviving order is the iteration order over the island list.
     let mut islands: Vec<RemoteIsland> = by_name.into_values().collect();
@@ -250,16 +220,12 @@ pub fn load_delta_islands(
 
     let mut islands_obj = DeltaIslands {
         marks: HashMap::new(),
-        core_island_bit: None,
         active: false,
     };
 
     // Mark each surviving island's ref tips with its bit.
     for (bit, isl) in deduped.iter().enumerate() {
         let bit = bit as u32;
-        if core_hash == Some(isl.hash) {
-            islands_obj.core_island_bit = Some(bit);
-        }
         for oid in &isl.oids {
             let marks = islands_obj
                 .marks

@@ -7484,10 +7484,8 @@ pub mod grit_lib::objects::delta_islands
 pub struct grit_lib::objects::delta_islands::DeltaIslands
 impl grit_lib::objects::delta_islands::DeltaIslands
 pub fn grit_lib::objects::delta_islands::DeltaIslands::delta_cmp(&self, &grit_lib::objects::ObjectId, &grit_lib::objects::ObjectId) -> i32
-pub fn grit_lib::objects::delta_islands::DeltaIslands::has_core(&self) -> bool
 pub fn grit_lib::objects::delta_islands::DeltaIslands::in_same_island(&self, &grit_lib::objects::ObjectId, &grit_lib::objects::ObjectId) -> bool
 pub fn grit_lib::objects::delta_islands::DeltaIslands::is_active(&self) -> bool
-pub fn grit_lib::objects::delta_islands::DeltaIslands::is_core_object(&self, &grit_lib::objects::ObjectId) -> bool
 impl core::default::Default for grit_lib::objects::delta_islands::DeltaIslands
 pub fn grit_lib::objects::delta_islands::DeltaIslands::default() -> Self
 impl core::fmt::Debug for grit_lib::objects::delta_islands::DeltaIslands
