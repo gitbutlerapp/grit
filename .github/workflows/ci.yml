@@ -55,10 +55,17 @@ jobs:
           shared-key: coverage
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
+      - name: Shed incremental artifacts before coverage links
+        run: |
+          rm -rf target/debug/incremental target/release/incremental 2>/dev/null || true
+          df -h /
+
       - name: Coverage (reftable interop requires Git >= 2.45)
         env:
           GRIT_REQUIRE_REFTABLE_GIT: "1"
           CARGO_BUILD_JOBS: "1"
+          CARGO_INCREMENTAL: "0"
+          CARGO_PROFILE_DEV_DEBUG: "0"
           # rust-lld has bus-error'd linking huge debug test binaries on ubuntu-latest.
           RUSTFLAGS: "-C link-arg=-fuse-ld=bfd"
         run: make coverage CARGO_BUILD_JOBS=1
@@ -290,6 +297,11 @@ jobs:
           shared-key: test-threaded
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
+      - name: Shed incremental artifacts before release test links
+        run: |
+          rm -rf target/debug/incremental target/release/incremental 2>/dev/null || true
+          df -h /
+
       - name: Release workspace tests with parallel Git config
         env:
           GRIT_REQUIRE_REFTABLE_GIT: "1"
@@ -364,12 +376,19 @@ jobs:
           shared-key: test
           save-if: ${{ github.ref == 'refs/heads/main' }}
 
+      - name: Shed incremental artifacts before workspace test links
+        run: |
+          rm -rf target/debug/incremental target/release/incremental 2>/dev/null || true
+          df -h /
+
       - name: Workspace tests (reftable interop requires Git >= 2.45)
         env:
           GRIT_REQUIRE_REFTABLE_GIT: "1"
           # Many grit-lib integration tests link a full grit-lib + http-ureq stack at once;
           # parallel lld links have bus-error'd on ubuntu-latest (signal 7).
           CARGO_BUILD_JOBS: "1"
+          CARGO_INCREMENTAL: "0"
+          CARGO_PROFILE_DEV_DEBUG: "0"
           RUSTFLAGS: "-C link-arg=-fuse-ld=bfd"
         run: cargo test --workspace -j 1
 
