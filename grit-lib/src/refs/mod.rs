@@ -1181,8 +1181,11 @@ fn packed_refs_data_line_starts(data: &[u8], hex_len: usize) -> (Vec<usize>, boo
     let mut in_order = true;
     let mut prev_name: &[u8] = &[];
     let mut start = 0usize;
-    while start < data.len() {
-        let end = memchr::memchr(b'\n', &data[start..]).map_or(data.len(), |p| start + p);
+    let ends = memchr::memchr_iter(b'\n', data).chain(std::iter::once(data.len()));
+    for end in ends {
+        if start >= data.len() {
+            break;
+        }
         let line = &data[start..end];
         if line.len() > hex_len + 1 && line[hex_len] == b' ' && !matches!(line[0], b'#' | b'^') {
             let name = &line[hex_len + 1..];
@@ -1380,6 +1383,9 @@ pub(crate) struct PackedRefPeels {
     /// Record start by name for unsorted files, where binary search is not exact.
     unsorted: Option<HashMap<Box<[u8]>, usize>>,
     peel_trait: PackedPeelTrait,
+    /// Record index just past the last hit in a sorted file, so lookups made in name order
+    /// (a ref listing) are answered without a binary search.
+    next: std::cell::Cell<usize>,
 }
 
 impl PackedRefPeels {
@@ -1397,6 +1403,7 @@ impl PackedRefPeels {
             view: None,
             unsorted: None,
             peel_trait: PackedPeelTrait::None,
+            next: std::cell::Cell::new(0),
         };
         if format != RefStorageFormat::Files {
             return Ok(empty);
@@ -1420,6 +1427,7 @@ impl PackedRefPeels {
             view: Some(view),
             unsorted,
             peel_trait,
+            next: std::cell::Cell::new(0),
         })
     }
 
@@ -1446,11 +1454,20 @@ impl PackedRefPeels {
         let view = self.view.as_ref()?;
         let start = match &self.unsorted {
             Some(map) => *map.get(refname.as_bytes())?,
-            None => view
-                .data_line_starts
-                .get(view.lower_bound(refname))
-                .copied()
-                .filter(|&start| view.record_cmp(start, refname).is_eq())?,
+            None => {
+                let hint = self.next.get();
+                let idx = match view.data_line_starts.get(hint) {
+                    Some(&start) if view.record_cmp(start, refname).is_eq() => hint,
+                    _ => view.lower_bound(refname),
+                };
+                let start = view
+                    .data_line_starts
+                    .get(idx)
+                    .copied()
+                    .filter(|&start| view.record_cmp(start, refname).is_eq())?;
+                self.next.set(idx + 1);
+                start
+            }
         };
         let hex = std::str::from_utf8(&view.data[start..start + view.hex_len]).ok()?;
         let packed_oid = ObjectId::from_hex(hex).ok()?;
@@ -5337,5 +5354,85 @@ mod packed_ref_peels_tests {
         .expect("packed-refs");
         let peels = PackedRefPeels::load(dir.path(), RefStorageFormat::Reftable).expect("load");
         assert_eq!(peels.peeled("refs/heads/main", &oid(1)), None);
+    }
+
+    #[test]
+    fn lookups_in_any_order_agree_with_a_fresh_snapshot() {
+        let records = [
+            ("refs/heads/main", oid(1), None),
+            ("refs/tags/a", oid(2), Some(oid(1))),
+            ("refs/tags/b", oid(1), None),
+            ("refs/tags/c", oid(3), Some(oid(4))),
+            ("refs/tags/d", oid(5), None),
+        ];
+        let text = body("# pack-refs with: peeled fully-peeled sorted \n", &records);
+        let (_dir, peels) = peels_for(&text);
+        let fresh = |name: &str, value: &ObjectId| peels_for(&text).1.peeled(name, value);
+        let queries = [
+            ("refs/tags/a", oid(2)),
+            ("refs/tags/b", oid(1)),
+            ("refs/tags/b", oid(1)),
+            ("refs/tags/bb", oid(1)),
+            ("refs/tags/c", oid(3)),
+            ("refs/tags/d", oid(9)),
+            ("refs/tags/d", oid(5)),
+            ("refs/heads/main", oid(1)),
+            ("refs/tags/c", oid(3)),
+            ("refs/tags/a", oid(2)),
+            ("refs/tags/zzz", oid(1)),
+            ("refs/tags/a", oid(2)),
+            ("refs/tags/b", oid(1)),
+        ];
+        for (name, value) in queries {
+            assert_eq!(
+                peels.peeled(name, &value),
+                fresh(name, &value),
+                "{name} {value}"
+            );
+        }
+        assert_eq!(peels.peeled("refs/tags/c", &oid(3)), Some(Some(oid(4))));
+        assert_eq!(peels.peeled("refs/tags/d", &oid(5)), Some(None));
+    }
+
+    /// Reference implementation of [`packed_refs_data_line_starts`], one line at a time.
+    fn naive_line_starts(data: &[u8], hex_len: usize) -> (Vec<usize>, bool) {
+        let mut out = Vec::new();
+        let mut in_order = true;
+        let mut prev: &[u8] = &[];
+        let mut start = 0;
+        for line in data.split(|&b| b == b'\n') {
+            if start >= data.len() {
+                break;
+            }
+            if line.len() > hex_len + 1 && line[hex_len] == b' ' && !matches!(line[0], b'#' | b'^')
+            {
+                let name = &line[hex_len + 1..];
+                in_order &= prev <= name;
+                prev = name;
+                out.push(start);
+            }
+            start += line.len() + 1;
+        }
+        (out, in_order)
+    }
+
+    #[test]
+    fn data_line_starts_match_a_line_by_line_scan() {
+        let hex = oid(1).to_hex();
+        let inputs = [
+            String::new(),
+            "\n".to_owned(),
+            format!("# pack-refs with: peeled \n{hex} refs/heads/a\n^{hex}\n{hex} refs/tags/b\n"),
+            format!("{hex} refs/heads/z\n{hex} refs/heads/a\n"),
+            format!("{hex} refs/heads/a\n\n{hex} refs/heads/b"),
+            format!("{hex}\n{hex} \n{hex} x\nshort\n#{hex} refs/heads/c\n"),
+        ];
+        for input in &inputs {
+            assert_eq!(
+                packed_refs_data_line_starts(input.as_bytes(), 40),
+                naive_line_starts(input.as_bytes(), 40),
+                "{input:?}"
+            );
+        }
     }
 }
