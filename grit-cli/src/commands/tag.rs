@@ -16,7 +16,7 @@ use grit_lib::refs::check_ref_format::validate_tag_short_name;
 use grit_lib::refs::resolve_ref;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::rev_parse::resolve_revision;
-use grit_lib::state::{resolve_head, HeadState};
+use grit_lib::state::{resolve_head_for_repository, HeadState};
 use grit_lib::tree_sha256::{
     parse_tree_sha256_tag_headers, MissingSubmodule, MissingSubmoduleReason, SignatureVerdict,
     TagVerifyOptions, TreeSha256Verdict,
@@ -437,7 +437,7 @@ fn create(repo: &Repository, name: &str, opts: &TagRunOptions) -> Result<TagOutc
     let target_oid = if let Some(rev) = rev {
         resolve_revision(repo, &rev).context("could not resolve tag target")?
     } else {
-        match resolve_head(repo.git_dir())? {
+        match resolve_head_for_repository(repo)? {
             HeadState::Branch { oid: Some(oid), .. } | HeadState::Detached { oid } => oid,
             HeadState::Branch { .. } => bail!("no commits yet to tag"),
             HeadState::Invalid => bail!("HEAD is in an unknown state"),

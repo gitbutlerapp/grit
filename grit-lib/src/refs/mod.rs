@@ -74,10 +74,9 @@ fn map_public_ref_store_error(err: Error, refname: &str) -> Error {
 }
 
 /// Loose-files checks shared by legacy [`write_ref_at_storage`] and RefStore-backed writes.
+///
+/// Only meaningful for the files backend; callers check the store format first.
 fn files_legacy_write_precheck(git_dir: &Path, refname: &str) -> Result<()> {
-    if open_ref_store(git_dir)?.format() != RefStorageFormat::Files {
-        return Ok(());
-    }
     let storage_dir = ref_storage_dir(git_dir, refname);
     let stor = crate::ref_namespace::storage_ref_name(refname);
     let path = storage_dir.join(stor);
