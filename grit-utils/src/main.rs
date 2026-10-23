@@ -6,6 +6,7 @@ use grit_utils::binary::{require_hyperfine, resolve_binary, tool_version};
 use grit_utils::bitmap_suite::{run_bitmaps_suite, BitmapRunConfig};
 use grit_utils::campaign_suite::{run_campaign_suite, CampaignOptions};
 use grit_utils::compare::compare_files;
+use grit_utils::conflicts_suite::run_conflicts_suite;
 use grit_utils::criterion_summary;
 use grit_utils::fixture::{remove_dir_robust, scratch_dir};
 use grit_utils::fixture::{DeepLeafDogfoodSpec, DenseLeafDogfoodSpec};
@@ -45,10 +46,12 @@ use grit_utils::scenarios::{
     run_add_suite, run_blame_suite, run_commit_suite, run_deep_leaf_worktree_suite,
     run_dense_leaf_worktree_suite, run_diff_suite, run_hot_path_suite, run_log_suite,
     run_merge_check_suite, run_merge_only_suite, run_prepare_add, run_prepare_commit,
-    run_prepare_dense_leaf_add, run_prepare_merge, run_prepare_pick, run_prepare_pick_series,
-    run_prepare_restore, run_prepare_revert, run_prepare_stash, run_prepare_switch,
-    run_prepare_switch_detach_tag, run_prepare_switch_wide, run_restore_suite, run_stash_suite,
-    run_status_suite, RunConfig,
+    run_prepare_conflicts_merge_conflict_continue, run_prepare_conflicts_merge_no_ff,
+    run_prepare_conflicts_pick_range, run_prepare_conflicts_revert_mainline,
+    run_prepare_conflicts_revert_single, run_prepare_dense_leaf_add, run_prepare_merge,
+    run_prepare_pick, run_prepare_pick_series, run_prepare_restore, run_prepare_revert,
+    run_prepare_stash, run_prepare_switch, run_prepare_switch_detach_tag, run_prepare_switch_wide,
+    run_restore_suite, run_stash_suite, run_status_suite, RunConfig,
 };
 use grit_utils::schema::BenchReport;
 use grit_utils::synth::{generate_synth_repo, SynthReport, SynthTier};
@@ -224,6 +227,11 @@ enum Cmd {
     /// In-memory merge check vs `git merge-tree --write-tree` (default: 10k synthetic fixture).
     MergeCheck {
         #[arg(long, value_delimiter = ',', default_values_t = vec![10_000])]
+        sizes: Vec<usize>,
+    },
+    /// Merge / pick / revert conflict workflows (default: 1k and 10k synthetic fixtures).
+    Conflicts {
+        #[arg(long, value_delimiter = ',', default_values_t = vec![1_000, 10_000])]
         sizes: Vec<usize>,
     },
     /// Run status (dirty + clean) and add benchmarks
@@ -421,6 +429,31 @@ enum Cmd {
     },
     #[command(hide = true)]
     PrepareRevert {
+        #[arg(long)]
+        git: PathBuf,
+    },
+    #[command(hide = true)]
+    PrepareConflictsMergeNoFf {
+        #[arg(long)]
+        git: PathBuf,
+    },
+    #[command(hide = true)]
+    PrepareConflictsMergeConflictContinue {
+        #[arg(long)]
+        git: PathBuf,
+    },
+    #[command(hide = true)]
+    PrepareConflictsPickRange {
+        #[arg(long)]
+        git: PathBuf,
+    },
+    #[command(hide = true)]
+    PrepareConflictsRevertSingle {
+        #[arg(long)]
+        git: PathBuf,
+    },
+    #[command(hide = true)]
+    PrepareConflictsRevertMainline {
         #[arg(long)]
         git: PathBuf,
     },
@@ -1393,6 +1426,26 @@ fn main() -> Result<()> {
             let git = resolve_binary("git", Some(git))?;
             return run_prepare_revert(&git);
         }
+        Cmd::PrepareConflictsMergeNoFf { git } => {
+            let git = resolve_binary("git", Some(git))?;
+            return run_prepare_conflicts_merge_no_ff(&git);
+        }
+        Cmd::PrepareConflictsMergeConflictContinue { git } => {
+            let git = resolve_binary("git", Some(git))?;
+            return run_prepare_conflicts_merge_conflict_continue(&git);
+        }
+        Cmd::PrepareConflictsPickRange { git } => {
+            let git = resolve_binary("git", Some(git))?;
+            return run_prepare_conflicts_pick_range(&git);
+        }
+        Cmd::PrepareConflictsRevertSingle { git } => {
+            let git = resolve_binary("git", Some(git))?;
+            return run_prepare_conflicts_revert_single(&git);
+        }
+        Cmd::PrepareConflictsRevertMainline { git } => {
+            let git = resolve_binary("git", Some(git))?;
+            return run_prepare_conflicts_revert_mainline(&git);
+        }
         Cmd::PrepareCommit { git } => {
             let git = resolve_binary("git", Some(git))?;
             return run_prepare_commit(&git);
@@ -2050,6 +2103,11 @@ fn main() -> Result<()> {
             let cfg = run_config(&cli, true);
             run_merge_only_suite(&hyperfine, &git, &grit, &cfg, sizes, false, timestamp)?
         }
+        Cmd::Conflicts { sizes } => {
+            eprintln!("Running merge/pick/revert conflict benchmarks...");
+            let cfg = run_config(&cli, true);
+            run_conflicts_suite(&hyperfine, &git, &grit, &cfg, sizes, timestamp)?
+        }
         Cmd::All { sizes } => {
             eprintln!("Running all benchmarks...");
             let cfg = run_config(&cli, false);
@@ -2073,6 +2131,11 @@ fn main() -> Result<()> {
         | Cmd::PrepareMerge { .. }
         | Cmd::PreparePickSeries { .. }
         | Cmd::PrepareRevert { .. }
+        | Cmd::PrepareConflictsMergeNoFf { .. }
+        | Cmd::PrepareConflictsMergeConflictContinue { .. }
+        | Cmd::PrepareConflictsPickRange { .. }
+        | Cmd::PrepareConflictsRevertSingle { .. }
+        | Cmd::PrepareConflictsRevertMainline { .. }
         | Cmd::PrepareCommit { .. }
         | Cmd::PrepareMaintenance { .. }
         | Cmd::PrepareHistoryRewrite { .. }

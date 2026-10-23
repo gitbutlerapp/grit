@@ -97,6 +97,11 @@ pub enum PrepareKind {
     CampaignStatusDirty,
     TagTreeSha256Digest,
     TagTreeSha256Signed,
+    ConflictsMergeNoFfReset,
+    ConflictsMergeConflictContinueReset,
+    ConflictsPickRangeReset,
+    ConflictsRevertSingleReset,
+    ConflictsRevertMainlineReset,
 }
 
 /// Hyperfine tuning for all scenarios in a run.
@@ -180,6 +185,13 @@ fn prepare_command(
         PrepareKind::CampaignStatusDirty => "prepare-campaign-status-dirty",
         PrepareKind::TagTreeSha256Digest => "prepare-tag-tree-sha256-digest",
         PrepareKind::TagTreeSha256Signed => "prepare-tag-tree-sha256-signed",
+        PrepareKind::ConflictsMergeNoFfReset => "prepare-conflicts-merge-no-ff",
+        PrepareKind::ConflictsMergeConflictContinueReset => {
+            "prepare-conflicts-merge-conflict-continue"
+        }
+        PrepareKind::ConflictsPickRangeReset => "prepare-conflicts-pick-range",
+        PrepareKind::ConflictsRevertSingleReset => "prepare-conflicts-revert-single",
+        PrepareKind::ConflictsRevertMainlineReset => "prepare-conflicts-revert-mainline",
     };
     let mut args = vec![
         sub.to_string(),
@@ -1360,6 +1372,26 @@ fn hot_path_spec(file_count: usize, fsmonitor: bool) -> HotPathRepoSpec {
 
 pub(crate) fn sh_script_internal(script: String) -> Vec<String> {
     sh_script(script)
+}
+
+pub fn run_prepare_conflicts_merge_no_ff(git: &Path) -> Result<()> {
+    crate::conflicts_fixture::prepare_conflicts_merge_no_ff(git, &bench_work_dir())
+}
+
+pub fn run_prepare_conflicts_merge_conflict_continue(git: &Path) -> Result<()> {
+    crate::conflicts_fixture::prepare_conflicts_merge_conflict_continue(git, &bench_work_dir())
+}
+
+pub fn run_prepare_conflicts_pick_range(git: &Path) -> Result<()> {
+    crate::conflicts_fixture::prepare_conflicts_pick_range(git, &bench_work_dir())
+}
+
+pub fn run_prepare_conflicts_revert_single(git: &Path) -> Result<()> {
+    crate::conflicts_fixture::prepare_conflicts_revert_single(git, &bench_work_dir())
+}
+
+pub fn run_prepare_conflicts_revert_mainline(git: &Path) -> Result<()> {
+    crate::conflicts_fixture::prepare_conflicts_revert_mainline(git, &bench_work_dir())
 }
 
 fn sh_script(script: String) -> Vec<String> {

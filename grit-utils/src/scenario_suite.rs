@@ -6,6 +6,7 @@ use anyhow::Result;
 use grit_lib::bench_fixture::synth::SynthTier;
 
 use crate::bitmap_suite::{run_bitmaps_suite, BitmapRunConfig};
+use crate::conflicts_suite::run_conflicts_suite;
 use crate::fixture::{DeepLeafDogfoodSpec, DenseLeafDogfoodSpec};
 use crate::fixture_registry::{self, FixtureKind};
 use crate::fsck_suite::run_fsck_suite;
@@ -97,6 +98,17 @@ fn hot_path_sizes(tier: SynthTier, smoke: bool) -> Vec<usize> {
         SynthTier::S => vec![1_000],
         SynthTier::M => vec![10_000],
         SynthTier::L => vec![10_000, 100_000],
+    }
+}
+
+fn conflicts_sizes(tier: SynthTier, smoke: bool) -> Vec<usize> {
+    if smoke {
+        return vec![200];
+    }
+    match tier {
+        SynthTier::S => vec![1_000],
+        SynthTier::M => vec![1_000, 10_000],
+        SynthTier::L => vec![1_000, 10_000],
     }
 }
 
@@ -266,6 +278,15 @@ pub fn run_scenario_suite(
         cfg,
         &hot_path_sizes(options.tier, options.smoke),
         false,
+        timestamp,
+    )?);
+
+    reports.push(run_conflicts_suite(
+        hyperfine,
+        git,
+        grit,
+        cfg,
+        &conflicts_sizes(options.tier, options.smoke),
         timestamp,
     )?);
 

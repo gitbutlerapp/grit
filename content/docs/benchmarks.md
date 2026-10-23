@@ -198,6 +198,16 @@ cargo bench -p grit-lib --bench hash
 ./scripts/bench-hash.sh
 ```
 
+## Merge, pick, revert conflict workflows (2026-10-23)
+
+The **`conflicts`** grit-bench group times full porcelain workflows on synthetic **1k** and **10k** file fixtures (reset to a fixed state each hyperfine iteration). Scenarios: clean **`merge --no-ff`**, **`merge` → `restore --theirs` → `add` → `--continue`** on overlapping edits, **`pick`** of twenty commits in one invocation vs `git cherry-pick base..topic`, and **`revert HEAD`** / **`revert --mainline 1`** on a recorded merge commit. In-memory **`merge --check`** stays in **`merge-check.json`** (library driver vs `git merge-tree --write-tree`).
+
+Committed baseline: **`grit-utils/baselines/conflicts.json`**. Factory VM medians vs **`git 2.43.0`** (2026-10-23): **`merge-no-ff`**, **`revert-single`**, and **`revert-mainline`** are at or below Git time at both tiers; **`pick-range-20`** is **~1.15×** at 10k files; **`merge-conflict-continue`** and **`pick-range-20`** at 1k remain above **1.0×** (tracked as speed follow-ups). At **10k** files, **`merge-conflict-continue`** is still **~5.5×** Git — dominated by grit-side restore/add on the wide conflict set, not by merge prediction.
+
+```bash
+./target/release/grit-bench conflicts --sizes 1000,10000 --format json --output grit-utils/baselines/conflicts.json
+```
+
 ## Pick, revert and merge apply path (2026-10-22)
 
 A clean `grit pick` / `grit revert` of a commit touching 2000 paths spent most of its time on work that grows with the number of touched paths, not on I/O:
