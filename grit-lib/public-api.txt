@@ -2188,7 +2188,6 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::config::mailmap::Mailmap
 pub fn grit_lib::config::mailmap::apply_mailmap_to_commit_or_tag_bytes(&[u8], &grit_lib::config::mailmap::MailmapTable) -> alloc::vec::Vec<u8>
 pub fn grit_lib::config::mailmap::load_mailmap(&grit_lib::repo::Repository) -> core::result::Result<alloc::vec::Vec<grit_lib::config::mailmap::MailmapEntry>, grit_lib::error::Error>
 pub fn grit_lib::config::mailmap::load_mailmap_into(&grit_lib::repo::Repository, &mut grit_lib::config::mailmap::MailmapTable) -> core::result::Result<(), grit_lib::error::Error>
-pub fn grit_lib::config::mailmap::load_mailmap_raw(&grit_lib::repo::Repository) -> core::result::Result<alloc::string::String, grit_lib::error::Error>
 pub fn grit_lib::config::mailmap::load_mailmap_table(&grit_lib::repo::Repository) -> core::result::Result<grit_lib::config::mailmap::MailmapTable, grit_lib::error::Error>
 pub fn grit_lib::config::mailmap::map_contact(core::option::Option<&str>, core::option::Option<&str>, &[grit_lib::config::mailmap::MailmapEntry]) -> (alloc::string::String, alloc::string::String)
 pub fn grit_lib::config::mailmap::map_contact_table(core::option::Option<&str>, core::option::Option<&str>, &grit_lib::config::mailmap::MailmapTable) -> (alloc::string::String, alloc::string::String)
@@ -2527,7 +2526,8 @@ pub grit_lib::diagnostics::Warning::IndexVersionConfigInvalid::fallback: u32
 pub grit_lib::diagnostics::Warning::IndexVersionEnvInvalid
 pub grit_lib::diagnostics::Warning::IndexVersionEnvInvalid::fallback: u32
 pub grit_lib::diagnostics::Warning::MailmapUnreadable
-pub grit_lib::diagnostics::Warning::MailmapUnreadable::detail: alloc::string::String
+pub grit_lib::diagnostics::Warning::MailmapUnreadable::kind: grit_lib::objects::ObjectKind
+pub grit_lib::diagnostics::Warning::MailmapUnreadable::spec: alloc::string::String
 pub grit_lib::diagnostics::Warning::MidxBitmapMissingReverseIndex
 pub grit_lib::diagnostics::Warning::MidxChecksumMismatch
 pub grit_lib::diagnostics::Warning::MidxChunkTableError
@@ -9826,6 +9826,8 @@ impl core::fmt::Debug for grit_lib::objects::ObjectKind
 pub fn grit_lib::objects::ObjectKind::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::fmt::Display for grit_lib::objects::ObjectKind
 pub fn grit_lib::objects::ObjectKind::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for grit_lib::objects::ObjectKind
+pub fn grit_lib::objects::ObjectKind::hash<__H: core::hash::Hasher>(&self, &mut __H)
 impl core::iter::traits::collect::FromIterator<grit_lib::objects::ObjectKind> for grit_lib::objects::index_pack::ObjectKindCounts
 pub fn grit_lib::objects::index_pack::ObjectKindCounts::from_iter<I: core::iter::traits::collect::IntoIterator<Item = grit_lib::objects::ObjectKind>>(I) -> Self
 impl core::marker::Copy for grit_lib::objects::ObjectKind
@@ -13833,6 +13835,8 @@ impl core::fmt::Debug for grit_lib::objects::ObjectKind
 pub fn grit_lib::objects::ObjectKind::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::fmt::Display for grit_lib::objects::ObjectKind
 pub fn grit_lib::objects::ObjectKind::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for grit_lib::objects::ObjectKind
+pub fn grit_lib::objects::ObjectKind::hash<__H: core::hash::Hasher>(&self, &mut __H)
 impl core::iter::traits::collect::FromIterator<grit_lib::objects::ObjectKind> for grit_lib::objects::index_pack::ObjectKindCounts
 pub fn grit_lib::objects::index_pack::ObjectKindCounts::from_iter<I: core::iter::traits::collect::IntoIterator<Item = grit_lib::objects::ObjectKind>>(I) -> Self
 impl core::marker::Copy for grit_lib::objects::ObjectKind
@@ -13904,7 +13908,8 @@ pub grit_lib::prelude::Warning::IndexVersionConfigInvalid::fallback: u32
 pub grit_lib::prelude::Warning::IndexVersionEnvInvalid
 pub grit_lib::prelude::Warning::IndexVersionEnvInvalid::fallback: u32
 pub grit_lib::prelude::Warning::MailmapUnreadable
-pub grit_lib::prelude::Warning::MailmapUnreadable::detail: alloc::string::String
+pub grit_lib::prelude::Warning::MailmapUnreadable::kind: grit_lib::objects::ObjectKind
+pub grit_lib::prelude::Warning::MailmapUnreadable::spec: alloc::string::String
 pub grit_lib::prelude::Warning::MidxBitmapMissingReverseIndex
 pub grit_lib::prelude::Warning::MidxChecksumMismatch
 pub grit_lib::prelude::Warning::MidxChunkTableError

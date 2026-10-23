@@ -158,10 +158,13 @@ pub enum Warning {
         /// Index version used after the invalid setting was ignored.
         fallback: u32,
     },
-    /// Mailmap blob/object could not be read as a blob.
+    /// `mailmap.blob` (or the bare-repository `HEAD:.mailmap` default) names an object that
+    /// is not a blob; it was skipped.
     MailmapUnreadable {
-        /// Additional human-readable detail for the failure.
-        detail: String,
+        /// The configured blob revision, as written.
+        spec: String,
+        /// Kind of the object the revision resolved to.
+        kind: crate::objects::ObjectKind,
     },
     /// A ref was updated but its reflog line could not be appended; the update stands.
     ReflogNotWritten {

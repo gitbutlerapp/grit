@@ -25,8 +25,7 @@ use grit_lib::config::gitmodules::gitdir::{
 };
 use grit_lib::config::gitmodules::{oids_from_copied_object_paths, verify_gitmodules_for_commit};
 use grit_lib::config::mailmap::{
-    apply_mailmap_to_commit_or_tag_bytes, load_mailmap_raw, map_contact, read_mailmap_blob,
-    MailmapTable,
+    apply_mailmap_to_commit_or_tag_bytes, map_contact, read_mailmap_blob, MailmapTable,
 };
 use grit_lib::config::ConfigSet;
 use grit_lib::config::{ConfigFile, ConfigScope};
@@ -403,7 +402,6 @@ fn mailmap_gitmodules_submodule_and_write_tree() {
     )
     .expect("mailmap");
     repo.reload_config().expect("reload");
-    let _ = load_mailmap_raw(&repo);
     let _ = read_mailmap_blob(&repo, "HEAD").ok();
     let table = MailmapTable::default();
     let _ = map_contact(Some("Old"), Some("old@example.com"), &[]);

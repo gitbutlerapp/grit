@@ -416,7 +416,7 @@ impl FromStr for ObjectId {
 }
 
 /// The four Git object types.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ObjectKind {
     /// A raw file snapshot.
     Blob,

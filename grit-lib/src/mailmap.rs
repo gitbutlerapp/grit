@@ -400,32 +400,61 @@ fn read_optional_mailmap_file(path: &Path, nofollow: bool) -> Result<String> {
 }
 
 /// Read mailmap text from a blob revision (for `mailmap.blob` / CLI `--mailmap-blob`).
+///
+/// # Errors
+///
+/// Returns [`Error::PathError`] when `spec` does not resolve, the object cannot be read,
+/// or it names an object that is not a blob.
 pub fn read_mailmap_blob(repo: &Repository, spec: &str) -> Result<String> {
     let oid = resolve_revision(repo, spec)
         .map_err(|e| Error::PathError(format!("resolving mailmap blob '{spec}': {e}")))?;
-    let obj = repo
-        .odb()
-        .read(&oid)
-        .map_err(|e| Error::PathError(format!("reading mailmap blob '{spec}': {e}")))?;
-    if obj.kind != ObjectKind::Blob {
-        return Err(Error::PathError(format!("mailmap is not a blob: {spec}")));
+    match read_blob_text(repo, &oid, spec)? {
+        BlobText::Text(text) => Ok(text),
+        BlobText::NotABlob(kind) => Err(Error::PathError(format!(
+            "mailmap blob '{spec}' is a {kind}, not a blob"
+        ))),
     }
-    Ok(String::from_utf8_lossy(&obj.data).into_owned())
 }
 
-fn try_read_mailmap_blob(repo: &Repository, spec: &str) -> Result<Option<String>> {
-    let oid = match resolve_revision(repo, spec) {
-        Ok(o) => o,
-        Err(_) => return Ok(None),
-    };
+/// Contents of the object a mailmap blob spec resolved to.
+enum BlobText {
+    Text(String),
+    NotABlob(ObjectKind),
+}
+
+fn read_blob_text(
+    repo: &Repository,
+    oid: &crate::objects::ObjectId,
+    spec: &str,
+) -> Result<BlobText> {
     let obj = repo
         .odb()
-        .read(&oid)
+        .read(oid)
         .map_err(|e| Error::PathError(format!("reading mailmap blob '{spec}': {e}")))?;
     if obj.kind != ObjectKind::Blob {
-        return Err(Error::PathError(format!("mailmap is not a blob: {spec}")));
+        return Ok(BlobText::NotABlob(obj.kind));
     }
-    Ok(Some(String::from_utf8_lossy(&obj.data).into_owned()))
+    Ok(BlobText::Text(
+        String::from_utf8_lossy(&obj.data).into_owned(),
+    ))
+}
+
+/// Read `mailmap.blob` the way Git's loader does: an unresolvable spec contributes nothing,
+/// and a non-blob object is reported as a warning rather than failing the load.
+fn read_configured_mailmap_blob(repo: &Repository, spec: &str) -> Result<Option<String>> {
+    let Ok(oid) = resolve_revision(repo, spec) else {
+        return Ok(None);
+    };
+    match read_blob_text(repo, &oid, spec)? {
+        BlobText::Text(text) => Ok(Some(text)),
+        BlobText::NotABlob(kind) => {
+            repo.warn(crate::diagnostics::Warning::MailmapUnreadable {
+                spec: spec.to_owned(),
+                kind,
+            });
+            Ok(None)
+        }
+    }
 }
 
 /// Load mailmap from the repository using Git's source order and merge rules.
@@ -453,19 +482,8 @@ pub fn load_mailmap_into(repo: &Repository, table: &mut MailmapTable) -> Result<
     }
 
     if let Some(ref blob) = mailmap_blob {
-        match try_read_mailmap_blob(repo, blob) {
-            Ok(Some(content)) => read_mailmap_string(table, &content),
-            Ok(None) => {}
-            Err(e) => {
-                // Git's `read_mailmap` ignores the aggregated error from `read_mailmap_blob`, but
-                // still emits `error("mailmap is not a blob: ...")` to stderr for wrong object types.
-                let msg = e.to_string();
-                if msg.contains("mailmap is not a blob") {
-                    repo.warn(crate::diagnostics::Warning::MailmapUnreadable { detail: msg });
-                } else {
-                    return Err(e);
-                }
-            }
+        if let Some(content) = read_configured_mailmap_blob(repo, blob)? {
+            read_mailmap_string(table, &content);
         }
     }
 
@@ -477,64 +495,6 @@ pub fn load_mailmap_into(repo: &Repository, table: &mut MailmapTable) -> Result<
     }
 
     Ok(())
-}
-
-/// Concatenated raw mailmap text (legacy); sources joined in Git load order.
-pub fn load_mailmap_raw(repo: &Repository) -> Result<String> {
-    let config = repo.config()?;
-    let mut mailmap_blob = config.get("mailmap.blob");
-    let is_bare = repo.work_tree().is_none();
-    if mailmap_blob.is_none() && is_bare {
-        mailmap_blob = Some("HEAD:.mailmap".to_string());
-    }
-
-    let base_dir = repo.work_tree().unwrap_or(repo.git_dir()).to_path_buf();
-
-    let mut out = String::new();
-
-    if let Some(wt) = repo.work_tree() {
-        let body = read_optional_mailmap_file(&wt.join(".mailmap"), true)?;
-        if !body.is_empty() {
-            out.push_str(&body);
-            if !out.ends_with('\n') {
-                out.push('\n');
-            }
-        }
-    }
-
-    if let Some(ref blob) = mailmap_blob {
-        match try_read_mailmap_blob(repo, blob) {
-            Ok(Some(content)) => {
-                if !content.is_empty() {
-                    out.push_str(&content);
-                    if !out.ends_with('\n') {
-                        out.push('\n');
-                    }
-                }
-            }
-            Ok(None) => {}
-            Err(e) => {
-                let msg = e.to_string();
-                if msg.contains("mailmap is not a blob") {
-                    repo.warn(crate::diagnostics::Warning::MailmapUnreadable { detail: msg });
-                } else {
-                    return Err(e);
-                }
-            }
-        }
-    }
-
-    if let Some(file) = config.get("mailmap.file") {
-        let body = read_optional_mailmap_file(&resolve_mailmap_path(&base_dir, &file), false)?;
-        if !body.is_empty() {
-            out.push_str(&body);
-            if !out.ends_with('\n') {
-                out.push('\n');
-            }
-        }
-    }
-
-    Ok(out)
 }
 
 /// Parsed mailmap for the repository (default `.mailmap` + config).
