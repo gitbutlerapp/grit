@@ -18,7 +18,7 @@ use grit_lib::diff::DiffMerges;
 use grit_lib::object_inspect::{
     format_tree_cat_file_p, tree_entry_cat_file_type, tree_entry_mode_cat_file_p,
 };
-use grit_lib::objects::{parse_tag, ObjectId, ObjectKind};
+use grit_lib::objects::{parse_tag, ObjectKind};
 use grit_lib::refs;
 use grit_lib::repo::Repository;
 use schemars::JsonSchema;
@@ -296,7 +296,10 @@ fn show_commit(spec: &str, opts: &ShowRunOptions) -> Result<ShowOutcome> {
 
     let resolved = grit_lib::revwalk::rev_parse::resolve_revision_without_index_dwim(&repo, spec)
         .with_context(|| format!("could not resolve '{spec}'"))?;
-    let commit_oid = peel_to_commit(&repo, resolved)?;
+    let commit_oid = repo
+        .odb()
+        .peel_to_commit(resolved)?
+        .with_context(|| format!("'{}' does not resolve to a commit", resolved.to_hex()))?;
 
     let now = context::wall_clock_now(repo.environment()).unix_timestamp();
     let commit_json = CommitJsonLoader::for_listed_commits().load_one(&repo, &commit_oid, now)?;
@@ -556,18 +559,6 @@ fn classify(
     }
 
     Ok((ShowKind::Commit, None, None))
-}
-
-/// Follow tag objects until reaching a commit.
-fn peel_to_commit(repo: &Repository, mut oid: ObjectId) -> Result<ObjectId> {
-    loop {
-        let object = repo.odb().read(&oid)?;
-        match object.kind {
-            ObjectKind::Commit => return Ok(oid),
-            ObjectKind::Tag => oid = parse_tag(&object.data)?.object,
-            _ => bail!("'{}' does not resolve to a commit", oid.to_hex()),
-        }
-    }
 }
 
 // --- Human rendering --------------------------------------------------------

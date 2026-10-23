@@ -6,8 +6,8 @@ use std::io::Write;
 use crate::bloom::{BloomBuildOutcome, BloomFilterSettings};
 use crate::commit_graph_file::CommitGraphChain;
 use crate::objects::{
-    oid_hash_map_from, oid_hash_set, parse_commit, HashAlgo, ObjectId, ObjectKind, OidHashMap,
-    OidHashSet,
+    oid_hash_map_from, oid_hash_set, parse_commit, tag_object_line_oid, HashAlgo, ObjectId,
+    ObjectKind, OidHashMap, OidHashSet,
 };
 use crate::odb::Odb;
 
@@ -511,15 +511,7 @@ fn walk_reachable_commits_from_tip_stack(
         };
         if obj.kind != ObjectKind::Commit {
             if obj.kind == ObjectKind::Tag {
-                if let Ok(text) = std::str::from_utf8(&obj.data) {
-                    for line in text.lines() {
-                        if let Some(rest) = line.strip_prefix("object ") {
-                            if let Ok(target) = ObjectId::from_hex(rest.trim()) {
-                                stack.push(target);
-                            }
-                        }
-                    }
-                }
+                stack.extend(tag_object_line_oid(&obj.data));
             }
             continue;
         }

@@ -8,7 +8,8 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::diff::bloom::BloomFilterSettings;
 use grit_lib::objects::commit_graph::CommitGraphChain;
 use grit_lib::objects::commit_graph::{
-    build_commit_graph_bytes, collect_reachable_commit_oids, count_referenced_commit_tips,
+    build_commit_graph_bytes, collect_reachable_commit_oids,
+    collect_reachable_commit_oids_for_repository, count_referenced_commit_tips,
     load_commit_graph_commit_info,
 };
 use grit_lib::objects::ObjectId;
@@ -241,4 +242,49 @@ fn build_includes_base_graph_hash_chunk() {
     )
     .expect("base chunk write");
     assert!(bytes.len() > 80);
+}
+
+#[test]
+fn reachable_commits_follow_tag_headers_not_tag_messages() {
+    let (dir, _) = linear_repo(2);
+    let stdout = |args: &[&str]| {
+        let out = Command::new("git")
+            .current_dir(dir.path())
+            .args(args)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .env("GIT_COMMITTER_NAME", "T")
+            .env("GIT_COMMITTER_EMAIL", "t@example.com")
+            .env("GIT_AUTHOR_NAME", "T")
+            .env("GIT_AUTHOR_EMAIL", "t@example.com")
+            .output()
+            .expect("git");
+        assert!(out.status.success(), "git {args:?}");
+        String::from_utf8(out.stdout).expect("utf8")
+    };
+    let tree = stdout(&["rev-parse", "HEAD^{tree}"]);
+    let unreachable = stdout(&["commit-tree", "-m", "unreachable", tree.trim()]);
+    git_cmd(
+        dir.path(),
+        &[
+            "tag",
+            "-a",
+            "-m",
+            &format!("subject\n\nobject {}", unreachable.trim()),
+            "v1",
+        ],
+    );
+    git_cmd(dir.path(), &["tag", "-a", "-m", "outer", "v1-outer", "v1"]);
+
+    let repo = Repository::discover(Some(dir.path()), &RepositoryOptions::empty()).expect("open");
+    let expected: std::collections::HashSet<ObjectId> = stdout(&["rev-list", "--all"])
+        .lines()
+        .map(|l| ObjectId::from_hex(l).expect("oid"))
+        .collect();
+    for got in [
+        collect_reachable_commit_oids(repo.git_dir(), repo.odb()).expect("collect"),
+        collect_reachable_commit_oids_for_repository(&repo).expect("collect"),
+    ] {
+        assert_eq!(got, expected);
+    }
 }
