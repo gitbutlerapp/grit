@@ -23,7 +23,7 @@ use crate::config::{parse_bool, ConfigSet};
 use crate::error::Result;
 use crate::objects::{parse_commit, CommitData, ObjectId, ObjectKind, OidHashMap, OidHashSet};
 use crate::odb::Odb;
-use crate::refs::PackedRefPeels;
+use crate::refs::{PackedPeel, PackedRefPeels};
 use crate::repo::Repository;
 use crate::state::{resolve_head, HeadState};
 
@@ -333,7 +333,21 @@ fn collect_decorations_impl(
         .unwrap_or(false);
     let rep_base = replace_ref_base();
 
-    let mut all_refs = crate::refs::list_refs(git_dir, "refs/")?;
+    let mut all_refs = match targets {
+        // Packed refs whose recorded peel already rules out every target are skipped while
+        // reading `packed-refs`; the loop below would drop them anyway.
+        Some(targets) => {
+            crate::refs::list_refs_filtering_packed(git_dir, "refs/", &|name, oid, peel| {
+                name.starts_with(&rep_base)
+                    || match peel {
+                        PackedPeel::Peeled(peeled) => targets.contains(&peeled),
+                        PackedPeel::NotTag => targets.contains(oid),
+                        PackedPeel::Unknown => true,
+                    }
+            })?
+        }
+        None => crate::refs::list_refs(git_dir, "refs/")?,
+    };
     all_refs.sort_by(|a, b| a.0.cmp(&b.0));
     let peeler = RefTipPeeler::new(repo, targets);
 
@@ -383,13 +397,13 @@ fn collect_decorations_impl(
         }
 
         if let Some(rest) = refname.strip_prefix("refs/heads/") {
+            let Some(hex) = peeler.commit_hex(&refname, &oid) else {
+                continue;
+            };
             let display = if full {
                 refname.clone()
             } else {
                 rest.to_owned()
-            };
-            let Some(hex) = peeler.commit_hex(&refname, &oid) else {
-                continue;
             };
             prepend_decoration(
                 map.entry(hex).or_default(),
@@ -403,13 +417,13 @@ fn collect_decorations_impl(
         }
 
         if let Some(rest) = refname.strip_prefix("refs/tags/") {
+            let Some(peeled) = peeler.commit_hex(&refname, &oid) else {
+                continue;
+            };
             let display = if full {
                 refname.clone()
             } else {
                 rest.to_owned()
-            };
-            let Some(peeled) = peeler.commit_hex(&refname, &oid) else {
-                continue;
             };
             prepend_decoration(
                 map.entry(peeled).or_default(),
@@ -423,13 +437,13 @@ fn collect_decorations_impl(
         }
 
         if let Some(rest) = refname.strip_prefix("refs/remotes/") {
+            let Some(peeled) = peeler.commit_hex(&refname, &oid) else {
+                continue;
+            };
             let display = if full {
                 refname.clone()
             } else {
                 rest.to_owned()
-            };
-            let Some(peeled) = peeler.commit_hex(&refname, &oid) else {
-                continue;
             };
             prepend_decoration(
                 map.entry(peeled).or_default(),
