@@ -2530,3 +2530,50 @@ fn revs_json_honors_commit_encoding_for_subject() -> TestResult {
     assert_eq!(v["commits"][0]["subject"].as_str(), Some("café subject"));
     Ok(())
 }
+
+#[test]
+fn blame_json_group_is_smaller_than_per_line() -> TestResult {
+    let scratch = Scratch::new("blame-group-json")?;
+    let seed = scratch.child("repo");
+    fs::create_dir_all(&seed)?;
+    gs_ok(&seed, &["init", "."]);
+    let mut body = String::new();
+    for i in 1..=500 {
+        body.push_str(&format!("line {i:04}\n"));
+    }
+    write_file(&seed.join("big.txt"), &body);
+    gs_ok(&seed, &["add", "big.txt"]);
+    gs_ok(&seed, &["commit", "add big file"]);
+    for chunk in 0..4 {
+        let start = chunk * 100 + 1;
+        let end = start + 99;
+        let mut edited = body.clone();
+        for n in start..=end {
+            edited = edited.replace(
+                &format!("line {n:04}\n"),
+                &format!("chunk{chunk} line {n:04}\n"),
+            );
+        }
+        write_file(&seed.join("big.txt"), &edited);
+        gs_ok(&seed, &["add", "big.txt"]);
+        gs_ok(&seed, &["commit", &format!("edit chunk {chunk}")]);
+        body = edited;
+    }
+
+    let per_line = gs_json(&seed, &["blame", "big.txt", "--json"]);
+    assert!(per_line.get("lines").is_some());
+    assert!(per_line.get("hunks").is_none());
+    assert_eq!(
+        per_line["lines"][0]["original_path"].as_str(),
+        Some("big.txt")
+    );
+
+    let grouped = gs_json(&seed, &["blame", "big.txt", "--json", "--group"]);
+    assert!(grouped.get("hunks").is_some());
+    assert!(grouped.get("lines").is_none());
+    assert!(
+        grouped.to_string().len() < per_line.to_string().len(),
+        "grouped JSON should be smaller than per-line"
+    );
+    Ok(())
+}

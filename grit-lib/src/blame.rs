@@ -893,6 +893,8 @@ pub struct BlameLine {
     pub orig_lineno: usize,
     /// Text of the line in the final file.
     pub content: String,
+    /// Path of the line in its originating commit (`git blame --porcelain` `filename`).
+    pub original_path: String,
     /// Source path when copy detection attributed the line from another file.
     pub source_file: Option<String>,
     /// Line attribution passed through an ignored revision.
@@ -901,6 +903,53 @@ pub struct BlameLine {
     pub unblamable: bool,
     /// Line content came from an external overlay rather than the blamed blob.
     pub external_contents: bool,
+}
+
+#[allow(clippy::too_many_arguments)]
+fn blame_line_at_path(
+    oid: ObjectId,
+    final_lineno: usize,
+    orig_lineno: usize,
+    content: String,
+    blame_path: &str,
+    source_file: Option<String>,
+    ignored: bool,
+    unblamable: bool,
+    external_contents: bool,
+) -> BlameLine {
+    let original_path = source_file.clone().unwrap_or_else(|| blame_path.to_owned());
+    BlameLine {
+        oid,
+        final_lineno,
+        orig_lineno,
+        content,
+        original_path,
+        source_file,
+        ignored,
+        unblamable,
+        external_contents,
+    }
+}
+
+fn blame_line_from_parent(
+    pb: &BlameLine,
+    final_lineno: usize,
+    content: String,
+    source_file: Option<String>,
+    ignored: bool,
+    unblamable: bool,
+) -> BlameLine {
+    BlameLine {
+        oid: pb.oid,
+        final_lineno,
+        orig_lineno: pb.orig_lineno,
+        content,
+        original_path: pb.original_path.clone(),
+        source_file,
+        ignored,
+        unblamable,
+        external_contents: false,
+    }
 }
 
 /// Resolve a file path through nested trees to get the blob OID + mode.
@@ -2112,16 +2161,17 @@ fn compute_blame_with_session(
             for t in pending.drain(..) {
                 let idx = t.current_idx;
                 let Some(cur_line) = cur_lines.get(idx).copied() else {
-                    result.push(BlameLine {
-                        oid: current_oid,
-                        final_lineno: t.final_lineno,
-                        orig_lineno: idx + 1,
-                        content: final_lines[t.final_lineno - 1].clone(),
-                        source_file: None,
-                        ignored: t.ignored,
-                        unblamable: true,
-                        external_contents: false,
-                    });
+                    result.push(blame_line_at_path(
+                        current_oid,
+                        t.final_lineno,
+                        idx + 1,
+                        final_lines[t.final_lineno - 1].clone(),
+                        &current_path,
+                        None,
+                        t.ignored,
+                        true,
+                        false,
+                    ));
                     continue;
                 };
 
@@ -2143,27 +2193,26 @@ fn compute_blame_with_session(
                 }
 
                 if let Some(pb) = picked {
-                    result.push(BlameLine {
-                        oid: pb.oid,
-                        final_lineno: t.final_lineno,
-                        orig_lineno: pb.orig_lineno,
-                        content: final_lines[t.final_lineno - 1].clone(),
-                        source_file: pb.source_file,
-                        ignored: true,
-                        unblamable: pb.unblamable,
-                        external_contents: false,
-                    });
+                    result.push(blame_line_from_parent(
+                        &pb,
+                        t.final_lineno,
+                        final_lines[t.final_lineno - 1].clone(),
+                        pb.source_file.clone(),
+                        true,
+                        pb.unblamable,
+                    ));
                 } else {
-                    result.push(BlameLine {
-                        oid: current_oid,
-                        final_lineno: t.final_lineno,
-                        orig_lineno: idx + 1,
-                        content: final_lines[t.final_lineno - 1].clone(),
-                        source_file: None,
-                        ignored: t.ignored,
-                        unblamable: true,
-                        external_contents: false,
-                    });
+                    result.push(blame_line_at_path(
+                        current_oid,
+                        t.final_lineno,
+                        idx + 1,
+                        final_lines[t.final_lineno - 1].clone(),
+                        &current_path,
+                        None,
+                        t.ignored,
+                        true,
+                        false,
+                    ));
                 }
             }
             if !deferred_queue.is_empty() {
@@ -2175,16 +2224,17 @@ fn compute_blame_with_session(
         if parents.is_empty() {
             // Root commit — attribute all remaining lines
             for t in pending.drain(..) {
-                result.push(BlameLine {
-                    oid: current_oid,
-                    final_lineno: t.final_lineno,
-                    orig_lineno: t.current_idx + 1,
-                    content: final_lines[t.final_lineno - 1].clone(),
-                    source_file: None,
-                    ignored: t.ignored,
-                    unblamable: false,
-                    external_contents: false,
-                });
+                result.push(blame_line_at_path(
+                    current_oid,
+                    t.final_lineno,
+                    t.current_idx + 1,
+                    final_lines[t.final_lineno - 1].clone(),
+                    &current_path,
+                    None,
+                    t.ignored,
+                    false,
+                    false,
+                ));
             }
             if !deferred_queue.is_empty() {
                 continue 'blame_loop;
@@ -2336,16 +2386,17 @@ fn compute_blame_with_session(
             if any_parent_has_path {
                 for t in remaining {
                     let idx = t.current_idx;
-                    attributed.push(BlameLine {
-                        oid: current_oid,
-                        final_lineno: t.final_lineno,
-                        orig_lineno: idx + 1,
-                        content: final_lines[t.final_lineno - 1].clone(),
-                        source_file: None,
-                        ignored: t.ignored,
-                        unblamable: false,
-                        external_contents: false,
-                    });
+                    attributed.push(blame_line_at_path(
+                        current_oid,
+                        t.final_lineno,
+                        idx + 1,
+                        final_lines[t.final_lineno - 1].clone(),
+                        &current_path,
+                        None,
+                        t.ignored,
+                        false,
+                        false,
+                    ));
                 }
 
                 for bl in attributed {
@@ -2505,30 +2556,26 @@ fn compute_blame_with_session(
                                 .and_then(|candidates| candidates.get(used_count))
                             {
                                 used.insert(used_key, used_count + 1);
-                                result.push(BlameLine {
-                                    oid: pb.oid,
-                                    final_lineno: t.final_lineno,
-                                    orig_lineno: pb.orig_lineno,
-                                    content: final_lines[t.final_lineno - 1].clone(),
-                                    source_file: pb
-                                        .source_file
-                                        .clone()
-                                        .or_else(|| Some(source_path.clone())),
-                                    ignored: pb.ignored || t.ignored,
-                                    unblamable: pb.unblamable,
-                                    external_contents: false,
-                                });
+                                result.push(blame_line_from_parent(
+                                    pb,
+                                    t.final_lineno,
+                                    final_lines[t.final_lineno - 1].clone(),
+                                    pb.source_file.clone().or_else(|| Some(source_path.clone())),
+                                    pb.ignored || t.ignored,
+                                    pb.unblamable,
+                                ));
                             } else {
-                                result.push(BlameLine {
-                                    oid: current_oid,
-                                    final_lineno: t.final_lineno,
-                                    orig_lineno: t.current_idx + 1,
-                                    content: final_lines[t.final_lineno - 1].clone(),
-                                    source_file: None,
-                                    ignored: t.ignored,
-                                    unblamable: false,
-                                    external_contents: false,
-                                });
+                                result.push(blame_line_at_path(
+                                    current_oid,
+                                    t.final_lineno,
+                                    t.current_idx + 1,
+                                    final_lines[t.final_lineno - 1].clone(),
+                                    &current_path,
+                                    None,
+                                    t.ignored,
+                                    false,
+                                    false,
+                                ));
                             }
                         }
                         if !deferred_queue.is_empty() {
@@ -2540,16 +2587,17 @@ fn compute_blame_with_session(
 
                 // No rename/copy source found — attribute to current commit.
                 for t in pending.drain(..) {
-                    result.push(BlameLine {
-                        oid: current_oid,
-                        final_lineno: t.final_lineno,
-                        orig_lineno: t.current_idx + 1,
-                        content: final_lines[t.final_lineno - 1].clone(),
-                        source_file: None,
-                        ignored: t.ignored,
-                        unblamable: false,
-                        external_contents: false,
-                    });
+                    result.push(blame_line_at_path(
+                        current_oid,
+                        t.final_lineno,
+                        t.current_idx + 1,
+                        final_lines[t.final_lineno - 1].clone(),
+                        &current_path,
+                        None,
+                        t.ignored,
+                        false,
+                        false,
+                    ));
                 }
                 if !deferred_queue.is_empty() {
                     continue 'blame_loop;
@@ -2560,16 +2608,17 @@ fn compute_blame_with_session(
                 // Ignored commit but file doesn't exist in parent.
                 // Attribute to current anyway (can't go further back).
                 for t in pending.drain(..) {
-                    result.push(BlameLine {
-                        oid: current_oid,
-                        final_lineno: t.final_lineno,
-                        orig_lineno: t.current_idx + 1,
-                        content: final_lines[t.final_lineno - 1].clone(),
-                        source_file: None,
-                        ignored: t.ignored,
-                        unblamable: true,
-                        external_contents: false,
-                    });
+                    result.push(blame_line_at_path(
+                        current_oid,
+                        t.final_lineno,
+                        t.current_idx + 1,
+                        final_lines[t.final_lineno - 1].clone(),
+                        &current_path,
+                        None,
+                        t.ignored,
+                        true,
+                        false,
+                    ));
                 }
                 if !deferred_queue.is_empty() {
                     continue 'blame_loop;
@@ -2701,16 +2750,17 @@ fn compute_blame_with_session(
                                         source_path: t.source_path.clone(),
                                     });
                                 } else {
-                                    result.push(BlameLine {
-                                        oid: current_oid,
-                                        final_lineno: t.final_lineno,
-                                        orig_lineno: t.current_idx + 1,
-                                        content: final_lines[t.final_lineno - 1].clone(),
-                                        source_file: None,
-                                        ignored: t.ignored,
-                                        unblamable: false,
-                                        external_contents: false,
-                                    });
+                                    result.push(blame_line_at_path(
+                                        current_oid,
+                                        t.final_lineno,
+                                        t.current_idx + 1,
+                                        final_lines[t.final_lineno - 1].clone(),
+                                        &current_path,
+                                        None,
+                                        t.ignored,
+                                        false,
+                                        false,
+                                    ));
                                 }
                                 continue;
                             }
@@ -2733,16 +2783,17 @@ fn compute_blame_with_session(
                                 .unwrap_or(false)
                                 && !is_ignored
                             {
-                                result.push(BlameLine {
-                                    oid: current_oid,
-                                    final_lineno: t.final_lineno,
-                                    orig_lineno: t.current_idx + 1,
-                                    content: final_lines[t.final_lineno - 1].clone(),
-                                    source_file: None,
-                                    ignored: t.ignored,
-                                    unblamable: false,
-                                    external_contents: false,
-                                });
+                                result.push(blame_line_at_path(
+                                    current_oid,
+                                    t.final_lineno,
+                                    t.current_idx + 1,
+                                    final_lines[t.final_lineno - 1].clone(),
+                                    &current_path,
+                                    None,
+                                    t.ignored,
+                                    false,
+                                    false,
+                                ));
                                 continue;
                             }
                             still_pending.push(TrackedLine {
@@ -2767,16 +2818,17 @@ fn compute_blame_with_session(
                                     source_path: t.source_path.clone(),
                                 });
                             } else {
-                                result.push(BlameLine {
-                                    oid: current_oid,
-                                    final_lineno: t.final_lineno,
-                                    orig_lineno: t.current_idx + 1,
-                                    content: final_lines[t.final_lineno - 1].clone(),
-                                    source_file: None,
-                                    ignored: t.ignored,
-                                    unblamable: true,
-                                    external_contents: false,
-                                });
+                                result.push(blame_line_at_path(
+                                    current_oid,
+                                    t.final_lineno,
+                                    t.current_idx + 1,
+                                    final_lines[t.final_lineno - 1].clone(),
+                                    &current_path,
+                                    None,
+                                    t.ignored,
+                                    true,
+                                    false,
+                                ));
                             }
                         } else {
                             if let Some((source_path, by_content, used)) =
@@ -2790,57 +2842,57 @@ fn compute_blame_with_session(
                                     .and_then(|candidates| candidates.get(used_count))
                                 {
                                     used.insert(used_key, used_count + 1);
-                                    result.push(BlameLine {
-                                        oid: pb.oid,
-                                        final_lineno: t.final_lineno,
-                                        orig_lineno: pb.orig_lineno,
-                                        content: final_lines[t.final_lineno - 1].clone(),
-                                        source_file: pb
-                                            .source_file
+                                    result.push(blame_line_from_parent(
+                                        pb,
+                                        t.final_lineno,
+                                        final_lines[t.final_lineno - 1].clone(),
+                                        pb.source_file
                                             .clone()
                                             .or_else(|| Some(source_path.clone())),
-                                        ignored: pb.ignored || t.ignored,
-                                        unblamable: pb.unblamable,
-                                        external_contents: false,
-                                    });
+                                        pb.ignored || t.ignored,
+                                        pb.unblamable,
+                                    ));
                                     continue;
                                 }
                             }
                             // Line was introduced in current commit
-                            result.push(BlameLine {
-                                oid: current_oid,
-                                final_lineno: t.final_lineno,
-                                orig_lineno: t.current_idx + 1,
-                                content: final_lines[t.final_lineno - 1].clone(),
-                                source_file: None,
-                                ignored: t.ignored,
-                                unblamable: false,
-                                external_contents: false,
-                            });
+                            result.push(blame_line_at_path(
+                                current_oid,
+                                t.final_lineno,
+                                t.current_idx + 1,
+                                final_lines[t.final_lineno - 1].clone(),
+                                &current_path,
+                                None,
+                                t.ignored,
+                                false,
+                                false,
+                            ));
                         }
                     } else if is_ignored {
-                        result.push(BlameLine {
-                            oid: current_oid,
-                            final_lineno: t.final_lineno,
-                            orig_lineno: t.current_idx + 1,
-                            content: final_lines[t.final_lineno - 1].clone(),
-                            source_file: None,
-                            ignored: t.ignored,
-                            unblamable: true,
-                            external_contents: false,
-                        });
+                        result.push(blame_line_at_path(
+                            current_oid,
+                            t.final_lineno,
+                            t.current_idx + 1,
+                            final_lines[t.final_lineno - 1].clone(),
+                            &current_path,
+                            None,
+                            t.ignored,
+                            true,
+                            false,
+                        ));
                     } else {
                         // Out of range — attribute to current
-                        result.push(BlameLine {
-                            oid: current_oid,
-                            final_lineno: t.final_lineno,
-                            orig_lineno: t.current_idx + 1,
-                            content: final_lines[t.final_lineno - 1].clone(),
-                            source_file: None,
-                            ignored: t.ignored,
-                            unblamable: false,
-                            external_contents: false,
-                        });
+                        result.push(blame_line_at_path(
+                            current_oid,
+                            t.final_lineno,
+                            t.current_idx + 1,
+                            final_lines[t.final_lineno - 1].clone(),
+                            &current_path,
+                            None,
+                            t.ignored,
+                            false,
+                            false,
+                        ));
                     }
                 }
 
@@ -3233,8 +3285,33 @@ pub struct BlameAttributedLine {
     pub original_line: usize,
     /// 1-based line number in the blamed revision's file.
     pub final_line: usize,
+    /// Path of the line in its originating commit (`git blame --porcelain` `filename`).
+    pub original_path: String,
     /// Line text in the blamed revision.
     pub content: String,
+    /// Line attribution passed through an ignored revision.
+    pub ignored: bool,
+    /// Line could not be blamed past an ignored revision.
+    pub unblamable: bool,
+}
+
+/// A contiguous run of blamed lines sharing commit, path, and original line sequence.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BlameHunk {
+    /// Commit that last modified every line in this hunk.
+    pub commit: ObjectId,
+    /// Path of the lines in their originating commit.
+    pub original_path: String,
+    /// 1-based starting line in the originating commit.
+    pub original_start: usize,
+    /// 1-based starting line in the blamed revision's file.
+    pub final_start: usize,
+    /// Number of consecutive final lines in this hunk.
+    pub count: usize,
+    /// Set when every line in the hunk passed through an ignored revision.
+    pub ignored: bool,
+    /// Set when every line in the hunk could not be blamed past an ignored revision.
+    pub unblamable: bool,
 }
 
 /// Metadata for a commit referenced by [`BlameResult::lines`].
@@ -3256,6 +3333,45 @@ pub struct BlameResult {
     pub lines: Vec<BlameAttributedLine>,
     /// Commit metadata keyed by object id for every line in `lines`.
     pub commits: HashMap<ObjectId, BlameCommitInfo>,
+}
+
+impl BlameResult {
+    /// Group consecutive lines into hunks matching `git blame --porcelain` group headers.
+    #[must_use]
+    pub fn hunks(&self) -> Vec<BlameHunk> {
+        if self.lines.is_empty() {
+            return Vec::new();
+        }
+        let mut out = Vec::new();
+        let mut start = 0usize;
+        for i in 1..=self.lines.len() {
+            let extend =
+                i < self.lines.len() && blame_lines_share_hunk(&self.lines[i - 1], &self.lines[i]);
+            if !extend {
+                let slice = &self.lines[start..i];
+                out.push(BlameHunk {
+                    commit: slice[0].commit,
+                    original_path: slice[0].original_path.clone(),
+                    original_start: slice[0].original_line,
+                    final_start: slice[0].final_line,
+                    count: slice.len(),
+                    ignored: slice[0].ignored,
+                    unblamable: slice[0].unblamable,
+                });
+                start = i;
+            }
+        }
+        out
+    }
+}
+
+fn blame_lines_share_hunk(prev: &BlameAttributedLine, next: &BlameAttributedLine) -> bool {
+    prev.commit == next.commit
+        && prev.original_path == next.original_path
+        && prev.ignored == next.ignored
+        && prev.unblamable == next.unblamable
+        && next.original_line == prev.original_line + 1
+        && next.final_line == prev.final_line + 1
 }
 
 /// Blame `path` at `options.start` (or `HEAD`) and return per-line attributions.
@@ -3309,7 +3425,10 @@ pub fn blame_file(repo: &Repository, path: &str, options: &BlameOptions) -> Resu
                     commit: line.oid,
                     original_line: line.orig_lineno,
                     final_line: line.final_lineno,
+                    original_path: line.original_path,
                     content: line.content,
+                    ignored: line.ignored,
+                    unblamable: line.unblamable,
                 })
                 .collect();
 
@@ -3509,6 +3628,53 @@ mod tests {
         let (affix, need) = partition_pending_by_affix(&old, &new, pending_mid);
         assert!(affix.is_empty());
         assert_eq!(need.len(), 1);
+    }
+
+    #[test]
+    fn blame_result_hunks_group_contiguous_runs() {
+        use crate::objects::ObjectId;
+
+        let c1 = ObjectId::from_hex("1111111111111111111111111111111111111111").unwrap();
+        let c2 = ObjectId::from_hex("2222222222222222222222222222222222222222").unwrap();
+        let result = BlameResult {
+            lines: vec![
+                BlameAttributedLine {
+                    commit: c1,
+                    original_line: 1,
+                    final_line: 1,
+                    original_path: "a.txt".to_owned(),
+                    content: "one".to_owned(),
+                    ignored: false,
+                    unblamable: false,
+                },
+                BlameAttributedLine {
+                    commit: c1,
+                    original_line: 2,
+                    final_line: 2,
+                    original_path: "a.txt".to_owned(),
+                    content: "two".to_owned(),
+                    ignored: false,
+                    unblamable: false,
+                },
+                BlameAttributedLine {
+                    commit: c2,
+                    original_line: 4,
+                    final_line: 3,
+                    original_path: "b.txt".to_owned(),
+                    content: "three".to_owned(),
+                    ignored: false,
+                    unblamable: false,
+                },
+            ],
+            commits: HashMap::new(),
+        };
+        let hunks = result.hunks();
+        assert_eq!(hunks.len(), 2);
+        assert_eq!(hunks[0].count, 2);
+        assert_eq!(hunks[0].original_start, 1);
+        assert_eq!(hunks[0].final_start, 1);
+        assert_eq!(hunks[1].count, 1);
+        assert_eq!(hunks[1].original_path, "b.txt");
     }
 
     #[test]

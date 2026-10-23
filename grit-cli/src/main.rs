@@ -657,6 +657,9 @@ enum Command {
         /// At merge commits, follow only the first parent (Git's `--first-parent`).
         #[arg(long = "first-parent")]
         first_parent: bool,
+        /// With `--json`, emit grouped `hunks[]` instead of per-line `lines[]`.
+        #[arg(long)]
+        group: bool,
     },
     /// Show changes as a diff. No argument: uncommitted changes; with a commit:
     /// the change that commit introduced; with two commits (or `A..B`) diff their trees.
@@ -1904,8 +1907,9 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             rev,
             line_range,
             first_parent,
+            group,
         } => emit(
-            &commands::blame::run(file, rev, line_range, first_parent, ctx.now)?,
+            &commands::blame::run(file, rev, line_range, first_parent, group, ctx.now)?,
             opts,
             ctx,
         ),

@@ -20,7 +20,10 @@ use crate::output::{outln, HumanRender, MarkdownRender, Person, RenderContext};
 pub struct BlameOutcome {
     pub file: String,
     pub rev: String,
-    pub lines: Vec<BlameLineJson>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lines: Option<Vec<BlameLineJson>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub hunks: Option<Vec<BlameHunkJson>>,
     pub commits: BTreeMap<String, BlameCommitJson>,
     #[serde(skip)]
     #[schemars(skip)]
@@ -31,8 +34,23 @@ pub struct BlameOutcome {
 pub struct BlameLineJson {
     pub commit: String,
     pub original_line: usize,
+    pub original_path: String,
     pub final_line: usize,
     pub content: String,
+}
+
+#[derive(Serialize, JsonSchema)]
+pub struct BlameHunkJson {
+    pub commit: String,
+    pub original_path: String,
+    pub original_start: usize,
+    pub final_start: usize,
+    pub count: usize,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub ignored: bool,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub unblamable: bool,
+    pub lines: Vec<String>,
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -72,7 +90,7 @@ impl MarkdownRender for BlameOutcome {
     fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         outln!(w, "## Blame: `{}`\n", self.file);
         outln!(w, "Revision `{}`\n", self.rev);
-        if self.lines.is_empty() {
+        if self.display_lines.is_empty() {
             outln!(w, "No lines to show.\n");
             return Ok(());
         }
@@ -111,6 +129,7 @@ pub fn run(
     rev: Option<String>,
     line_range: Option<String>,
     first_parent: bool,
+    group: bool,
     now: time::OffsetDateTime,
 ) -> Result<BlameOutcome> {
     let repo = context::discover()?;
@@ -148,6 +167,7 @@ pub fn run(
         normalized,
         start.to_hex(),
         result,
+        group,
         now.unix_timestamp(),
     ))
 }
@@ -173,7 +193,13 @@ fn parse_line_range(spec: &str) -> Result<RangeInclusive<usize>> {
     Ok(start..=end)
 }
 
-fn outcome_from_result(file: String, rev: String, result: BlameResult, now: i64) -> BlameOutcome {
+fn outcome_from_result(
+    file: String,
+    rev: String,
+    result: BlameResult,
+    group: bool,
+    now: i64,
+) -> BlameOutcome {
     let mut commits_json = BTreeMap::new();
     for (oid, info) in &result.commits {
         commits_json.insert(
@@ -187,7 +213,7 @@ fn outcome_from_result(file: String, rev: String, result: BlameResult, now: i64)
 
     let mut lines_json = Vec::with_capacity(result.lines.len());
     let mut display_lines = Vec::with_capacity(result.lines.len());
-    for line in result.lines {
+    for line in &result.lines {
         let commit_hex = line.commit.to_hex();
         let meta = result.commits.get(&line.commit);
         let (author_short, date) = meta
@@ -198,10 +224,11 @@ fn outcome_from_result(file: String, rev: String, result: BlameResult, now: i64)
             })
             .unwrap_or_else(|| ("unknown".to_owned(), "?".to_owned()));
 
-        let content = normalize_blame_line_content(line.content);
+        let content = normalize_blame_line_content(line.content.clone());
         lines_json.push(BlameLineJson {
             commit: commit_hex.clone(),
             original_line: line.original_line,
+            original_path: line.original_path.clone(),
             final_line: line.final_line,
             content: content.clone(),
         });
@@ -215,10 +242,39 @@ fn outcome_from_result(file: String, rev: String, result: BlameResult, now: i64)
         });
     }
 
+    let (lines, hunks) = if group {
+        let hunks_json = result
+            .hunks()
+            .into_iter()
+            .map(|hunk| {
+                let start = hunk.final_start.saturating_sub(1);
+                let end = start + hunk.count;
+                let hunk_lines: Vec<String> = result.lines[start..end]
+                    .iter()
+                    .map(|line| normalize_blame_line_content(line.content.clone()))
+                    .collect();
+                BlameHunkJson {
+                    commit: hunk.commit.to_hex(),
+                    original_path: hunk.original_path,
+                    original_start: hunk.original_start,
+                    final_start: hunk.final_start,
+                    count: hunk.count,
+                    ignored: hunk.ignored,
+                    unblamable: hunk.unblamable,
+                    lines: hunk_lines,
+                }
+            })
+            .collect();
+        (None, Some(hunks_json))
+    } else {
+        (Some(lines_json), None)
+    };
+
     BlameOutcome {
         file,
         rev,
-        lines: lines_json,
+        lines,
+        hunks,
         commits: commits_json,
         display_lines,
     }

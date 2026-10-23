@@ -386,7 +386,10 @@ pub struct grit_lib::blame::BlameAttributedLine
 pub grit_lib::blame::BlameAttributedLine::commit: grit_lib::objects::ObjectId
 pub grit_lib::blame::BlameAttributedLine::content: alloc::string::String
 pub grit_lib::blame::BlameAttributedLine::final_line: usize
+pub grit_lib::blame::BlameAttributedLine::ignored: bool
 pub grit_lib::blame::BlameAttributedLine::original_line: usize
+pub grit_lib::blame::BlameAttributedLine::original_path: alloc::string::String
+pub grit_lib::blame::BlameAttributedLine::unblamable: bool
 impl core::clone::Clone for grit_lib::blame::BlameAttributedLine
 pub fn grit_lib::blame::BlameAttributedLine::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::blame::BlameAttributedLine
@@ -421,6 +424,29 @@ impl core::marker::Unpin for grit_lib::blame::BlameCommitInfo
 impl core::marker::UnsafeUnpin for grit_lib::blame::BlameCommitInfo
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::blame::BlameCommitInfo
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::blame::BlameCommitInfo
+pub struct grit_lib::blame::BlameHunk
+pub grit_lib::blame::BlameHunk::commit: grit_lib::objects::ObjectId
+pub grit_lib::blame::BlameHunk::count: usize
+pub grit_lib::blame::BlameHunk::final_start: usize
+pub grit_lib::blame::BlameHunk::ignored: bool
+pub grit_lib::blame::BlameHunk::original_path: alloc::string::String
+pub grit_lib::blame::BlameHunk::original_start: usize
+pub grit_lib::blame::BlameHunk::unblamable: bool
+impl core::clone::Clone for grit_lib::blame::BlameHunk
+pub fn grit_lib::blame::BlameHunk::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::blame::BlameHunk
+impl core::cmp::PartialEq for grit_lib::blame::BlameHunk
+pub fn grit_lib::blame::BlameHunk::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::blame::BlameHunk
+pub fn grit_lib::blame::BlameHunk::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::blame::BlameHunk
+impl core::marker::Freeze for grit_lib::blame::BlameHunk
+impl core::marker::Send for grit_lib::blame::BlameHunk
+impl core::marker::Sync for grit_lib::blame::BlameHunk
+impl core::marker::Unpin for grit_lib::blame::BlameHunk
+impl core::marker::UnsafeUnpin for grit_lib::blame::BlameHunk
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::blame::BlameHunk
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::blame::BlameHunk
 pub struct grit_lib::blame::BlameLine
 pub grit_lib::blame::BlameLine::content: alloc::string::String
 pub grit_lib::blame::BlameLine::external_contents: bool
@@ -428,6 +454,7 @@ pub grit_lib::blame::BlameLine::final_lineno: usize
 pub grit_lib::blame::BlameLine::ignored: bool
 pub grit_lib::blame::BlameLine::oid: grit_lib::objects::ObjectId
 pub grit_lib::blame::BlameLine::orig_lineno: usize
+pub grit_lib::blame::BlameLine::original_path: alloc::string::String
 pub grit_lib::blame::BlameLine::source_file: core::option::Option<alloc::string::String>
 pub grit_lib::blame::BlameLine::unblamable: bool
 impl core::clone::Clone for grit_lib::blame::BlameLine
@@ -484,6 +511,8 @@ impl core::marker::Unpin for grit_lib::blame::BlameResult
 impl core::marker::UnsafeUnpin for grit_lib::blame::BlameResult
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::blame::BlameResult
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::blame::BlameResult
+impl grit_lib::blame::BlameResult
+pub fn grit_lib::blame::BlameResult::hunks(&self) -> alloc::vec::Vec<grit_lib::blame::BlameHunk>
 pub struct grit_lib::blame::BlameTextconvContext
 pub grit_lib::blame::BlameTextconvContext::attrs: grit_lib::worktree::crlf::GitAttributes
 pub grit_lib::blame::BlameTextconvContext::config: grit_lib::config::ConfigSet

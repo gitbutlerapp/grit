@@ -17,6 +17,54 @@
       ],
       "type": "object"
     },
+    "BlameHunkJson": {
+      "properties": {
+        "commit": {
+          "type": "string"
+        },
+        "count": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "final_start": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "ignored": {
+          "type": "boolean"
+        },
+        "lines": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "original_path": {
+          "type": "string"
+        },
+        "original_start": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "unblamable": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "commit",
+        "count",
+        "final_start",
+        "ignored",
+        "lines",
+        "original_path",
+        "original_start",
+        "unblamable"
+      ],
+      "type": "object"
+    },
     "BlameLineJson": {
       "properties": {
         "commit": {
@@ -34,13 +82,17 @@
           "format": "uint",
           "minimum": 0.0,
           "type": "integer"
+        },
+        "original_path": {
+          "type": "string"
         }
       },
       "required": [
         "commit",
         "content",
         "final_line",
-        "original_line"
+        "original_line",
+        "original_path"
       ],
       "type": "object"
     },
@@ -77,11 +129,23 @@
     "file": {
       "type": "string"
     },
+    "hunks": {
+      "items": {
+        "$ref": "#/definitions/BlameHunkJson"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
     "lines": {
       "items": {
         "$ref": "#/definitions/BlameLineJson"
       },
-      "type": "array"
+      "type": [
+        "array",
+        "null"
+      ]
     },
     "rev": {
       "type": "string"
@@ -90,7 +154,6 @@
   "required": [
     "commits",
     "file",
-    "lines",
     "rev"
   ],
   "title": "BlameOutcome",
