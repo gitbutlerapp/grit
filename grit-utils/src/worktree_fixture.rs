@@ -405,6 +405,7 @@ pub fn prepare_add_hunks_large(git: &Path) -> Result<()> {
     use grit_lib::repo::Repository;
 
     let repo = active_worktree_repo();
+    reset_worktree_clean(git, &repo)?;
     ensure_large_file_committed(git, &repo)?;
     modify_large_file_five_hundred_hunks(&repo)?;
     let grit_repo = Repository::discover(Some(&repo), &RepositoryOptions::default())?;
@@ -539,6 +540,7 @@ pub fn prepare_add_lines_large(git: &Path) -> Result<()> {
     use grit_lib::repo::Repository;
 
     let repo = active_worktree_repo();
+    reset_worktree_clean(git, &repo)?;
     ensure_large_file_committed(git, &repo)?;
     modify_large_file_five_hundred_hunks(&repo)?;
     let grit_repo = Repository::discover(Some(&repo), &RepositoryOptions::default())?;
