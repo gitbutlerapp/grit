@@ -10,7 +10,7 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\"result\":\"completed\",\"source\":\"d5d832bc3fc90ddb2a1be9f2fd480eb6c5fa859b\",\"oid\":\"d5d832bc3fc90ddb2a1be9f2fd480eb6c5fa859b\",\"subject\":\"pick me\",\"change_id\":\"voklnxqkuvvwxnmsmlvpwsopstkmwvnv\",\"commits\":[{\"source\":\"d5d832bc3fc90ddb2a1be9f2fd480eb6c5fa859b\",\"oid\":\"d5d832bc3fc90ddb2a1be9f2fd480eb6c5fa859b\",\"subject\":\"pick me\",\"change_id\":\"voklnxqkuvvwxnmsmlvpwsopstkmwvnv\"}],\"dropped\":[]}\n",
+    "stdout": "{\"result\":\"picked\",\"commits\":[{\"source\":\"d5d832bc3fc90ddb2a1be9f2fd480eb6c5fa859b\",\"oid\":\"d5d832bc3fc90ddb2a1be9f2fd480eb6c5fa859b\",\"change_id\":\"voklnxqkuvvwxnmsmlvpwsopstkmwvnv\",\"subject\":\"pick me\"}],\"dropped\":[]}\n",
     "stderr": ""
   },
   "markdown": {

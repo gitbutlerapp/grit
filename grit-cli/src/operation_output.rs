@@ -209,13 +209,6 @@ pub fn render_revert_conflict_footer_human() {
     );
 }
 
-/// Human hint after a paused pick sequence.
-pub fn render_pick_conflict_footer_human() {
-    eprintln!(
-        "\nPick stopped on conflicts; fix them and run `grit pick --continue`, or `grit pick --abort` / `grit pick --skip`."
-    );
-}
-
 /// Human hint after a paused rebase session.
 pub fn render_rebase_conflict_footer_human() {
     eprintln!(

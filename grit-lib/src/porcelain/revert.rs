@@ -154,9 +154,16 @@ pub fn merge_commit_message_for_revert(
     (title, body)
 }
 
-/// Extra body paragraph when reverting a merge commit with an explicit mainline parent.
-///
-/// Wording is Grit-specific (not Git's sequencer template).
+/// Extra body line when reverting a merge with `--mainline` (grit-specific wording).
+#[must_use]
+pub fn revert_mainline_extra_body(_reverted: ObjectId, mainline_parent: ObjectId) -> String {
+    format!(
+        "Mainline parent {} was used when building the revert tree.\n",
+        mainline_parent.to_hex()
+    )
+}
+
+/// Note appended when reverting a merge using an explicit mainline parent.
 #[must_use]
 pub fn merge_mainline_revert_note(source_oid: ObjectId, mainline_parent: ObjectId) -> String {
     format!(

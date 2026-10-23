@@ -96,9 +96,8 @@ pub(crate) fn paths_from_tree_diff(
     base: &ObjectId,
     other: &ObjectId,
 ) -> crate::error::Result<HashSet<Vec<u8>>> {
-    use crate::diff::{detect_renames, diff_trees, DiffStatus};
-    let mut entries = diff_trees(odb, Some(base), Some(other), "")?;
-    entries = detect_renames(odb, None, entries, 50);
+    use crate::diff::{diff_trees, DiffStatus};
+    let entries = diff_trees(odb, Some(base), Some(other), "")?;
     let mut out = HashSet::new();
     for e in entries {
         if e.status == DiffStatus::Unmerged {

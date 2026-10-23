@@ -8,6 +8,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 #[path = "merge_tree_cache.rs"]
 mod merge_tree_cache;
+pub(crate) use merge_tree_cache::MergeTreeCache;
 #[path = "merge_trees_walk.rs"]
 mod merge_trees_walk;
 
@@ -117,13 +118,38 @@ pub fn merge_trees_three_way(
     diff_algorithm: Option<&str>,
     presentation: TreeMergeConflictPresentation<'_>,
 ) -> crate::error::Result<TreeMergeOutput> {
+    merge_trees_three_way_cached(
+        repo,
+        &mut MergeTreeCache::default(),
+        base_tree,
+        ours_tree,
+        theirs_tree,
+        favor,
+        ws,
+        diff_algorithm,
+        presentation,
+    )
+}
+
+/// Like [`merge_trees_three_way`], reusing parsed-tree cache across calls (e.g. replay sequences).
+#[expect(clippy::too_many_arguments)]
+pub(crate) fn merge_trees_three_way_cached(
+    repo: &Repository,
+    cache: &mut MergeTreeCache,
+    base_tree: ObjectId,
+    ours_tree: ObjectId,
+    theirs_tree: ObjectId,
+    favor: MergeFavor,
+    ws: WhitespaceMergeOptions,
+    diff_algorithm: Option<&str>,
+    presentation: TreeMergeConflictPresentation<'_>,
+) -> crate::error::Result<TreeMergeOutput> {
     let odb = &repo.odb();
-    let mut cache = merge_tree_cache::MergeTreeCache::default();
     let mut touched =
         merge_trees_walk::collect_touched_merge_paths(odb, &base_tree, &ours_tree, &theirs_tree)?;
 
     let (mut base, mut ours, mut theirs) = merge_trees_walk::build_sparse_maps(
-        &mut cache,
+        cache,
         repo,
         base_tree,
         ours_tree,
@@ -148,7 +174,7 @@ pub fn merge_trees_three_way(
         presentation.df_directory_theirs_commit,
     ) {
         df_escapes = apply_df_file_directory_conflicts_trees(
-            &mut cache,
+            cache,
             repo,
             &base_tree,
             &ours_tree,
@@ -203,7 +229,7 @@ pub fn merge_trees_three_way(
     }
 
     let mut output = merge_trees_walk::three_way_on_touched_paths(
-        &mut cache,
+        cache,
         repo,
         base_tree,
         ours_tree,
@@ -245,7 +271,7 @@ pub fn merge_trees_three_way(
         }
     }
     output.result_tree = merge_trees_walk::finish_merge_result_tree(
-        &mut cache,
+        cache,
         odb,
         &output,
         base_tree,
