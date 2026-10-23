@@ -11,7 +11,7 @@ order: 4
 grit notes [--ref REF]
 grit notes list [--ref REF]
 grit notes show <rev> [--ref REF]
-grit notes add <rev> -m <message> [--force] [--ref REF]
+grit notes add <rev> (-m <message> | -F <file|->) [--force] [--ref REF]
 grit notes remove <rev>... [--ref REF]
 ```
 
@@ -28,7 +28,8 @@ Notes update commits use your configured `user.name` / `user.email` (and optiona
 | Option | Description |
 | --- | --- |
 | `--ref` | Notes namespace (`commits`, `refs/notes/commits`, …). Overrides `core.notesRef` / `GIT_NOTES_REF`. |
-| `-m`, `--message` | Note text for `add` (required). |
+| `-m`, `--message` | Note text for `add` (conflicts with `--message-file`). |
+| `-F`, `--message-file` | Read note text from a file, or `-` for stdin (conflicts with `-m`). |
 | `--force` | Replace an existing note on `add`. |
 
 Subcommands: `list`, `show`, `add`, `remove`.

@@ -2,8 +2,8 @@
 
 use crate::ident::{author_identity_line, parse_author_arg};
 use crate::objects::{parse_commit, ObjectId};
+use crate::porcelain::commit::normalize_commit_message;
 use crate::repo::Repository;
-use crate::stripspace::{process, Mode};
 
 use super::error::HistoryError;
 use super::plan::plan_rewrite;
@@ -25,17 +25,7 @@ pub struct RewordOptions {
 ///
 /// Returns [`HistoryError::EmptyMessage`] when the cleaned body would be empty.
 pub fn normalize_rewrite_message(raw: &str) -> Result<String, HistoryError> {
-    let trimmed = raw.trim();
-    let processed = process(trimmed.as_bytes(), &Mode::Default);
-    let message = String::from_utf8(processed).map_err(|_| HistoryError::EmptyMessage)?;
-    if message.is_empty() {
-        return Err(HistoryError::EmptyMessage);
-    }
-    let mut message = message;
-    if !message.ends_with('\n') {
-        message.push('\n');
-    }
-    Ok(message)
+    normalize_commit_message(raw).map_err(|_| HistoryError::EmptyMessage)
 }
 
 fn author_date_suffix_from_ident(ident: &str) -> Option<String> {

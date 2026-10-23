@@ -1,6 +1,6 @@
 //! `grit history` — stateless history rewrite helpers.
 
-use std::io::{self, Read, Write};
+use std::io::{self, Write};
 
 use anyhow::{bail, Context, Result};
 use clap::ValueEnum;
@@ -31,6 +31,7 @@ use crate::commands::merge_strategy::MergeStrategyArg;
 use crate::context;
 use crate::json_error;
 use crate::markdown;
+use crate::message_input::{parse_author_cli, read_message_input, AuthorArg, MessageInputArgs};
 use crate::operation_output::{
     render_conflicts_human, render_rebase_conflict_footer_human, ConflictJson,
     OperationConflictBlock,
@@ -691,13 +692,19 @@ pub fn run_drop(commit: &str, shared: &HistoryRewriteArgs) -> Result<HistoryRewr
 /// Rewrite `commit`'s message and/or author and replay descendants.
 pub fn run_reword(
     commit: &str,
-    message: Option<String>,
-    message_file: Option<String>,
-    author: Option<String>,
+    message: &MessageInputArgs,
+    author: &AuthorArg,
     shared: &HistoryRewriteArgs,
 ) -> Result<HistoryRewriteOutcome> {
-    let message = read_message(message, message_file)?;
-    let author = author.filter(|a| !a.trim().is_empty());
+    let message = read_message_input(message)?;
+    let author = author
+        .author
+        .as_deref()
+        .filter(|a| !a.trim().is_empty())
+        .map(str::to_owned);
+    if let Some(raw) = author.as_deref() {
+        parse_author_cli(raw)?;
+    }
     let has_author = author.is_some();
     if message.is_none() && !has_author {
         bail!("reword requires a new message (-m/--message or --message-file) or --author");
@@ -732,14 +739,13 @@ pub fn run_reword(
 /// Apply staged changes onto `commit` and replay descendants.
 pub fn run_fixup(
     commit: &str,
-    message: Option<String>,
-    message_file: Option<String>,
+    message: &MessageInputArgs,
     hunks: &[String],
     lines: &[String],
     pathspecs: &TrailingPathspecArgs,
     shared: &HistoryRewriteArgs,
 ) -> Result<HistoryRewriteOutcome> {
-    let message = read_message(message, message_file)?;
+    let message = read_message_input(message)?;
     let on_err = history_error("history fixup");
     let repo = context::discover()?;
     let commit_oid = resolve_commit(&repo, commit, "commit")?;
@@ -807,15 +813,14 @@ fn map_fixup_error(err: HistoryError) -> anyhow::Error {
 /// Squash a revision range into the oldest commit and replay descendants.
 pub fn run_squash(
     range: &[String],
-    message: Option<String>,
-    message_file: Option<String>,
+    message: &MessageInputArgs,
     combine: bool,
     shared: &HistoryRewriteArgs,
 ) -> Result<HistoryRewriteOutcome> {
     let message = if combine {
         SquashMessage::Combine
     } else {
-        read_message(message, message_file)?.map_or(SquashMessage::Oldest, SquashMessage::Custom)
+        read_message_input(message)?.map_or(SquashMessage::Oldest, SquashMessage::Custom)
     };
     let on_err = history_error("history squash");
     let range_refs: Vec<&str> = range.iter().map(String::as_str).collect();
@@ -849,14 +854,13 @@ pub fn run_squash(
 /// Split path-limited changes out of `commit` into a new parent commit and replay descendants.
 pub fn run_split(
     commit: &str,
-    message: Option<String>,
-    message_file: Option<String>,
+    message: &MessageInputArgs,
     rest_message: Option<String>,
     paths: &TrailingPathspecArgs,
     shared: &HistoryRewriteArgs,
 ) -> Result<HistoryRewriteOutcome> {
-    let Some(split_message) = read_message(message, message_file)? else {
-        bail!("a message is required for the new commit (-m/--message or --message-file)");
+    let Some(split_message) = read_message_input(message)? else {
+        bail!("a message is required for the new commit (-m/--message or -F / --message-file)");
     };
     let on_err = history_error("history split");
     let repo = context::discover()?;
@@ -1377,24 +1381,6 @@ pub fn run_absorb(base: Option<&str>, shared: &HistoryRewriteArgs) -> Result<His
         head: summary.head,
         dry_run: summary.dry_run,
     })
-}
-
-/// Message from `-m` or `--message-file` (`-` reads stdin); clap rejects passing both.
-fn read_message(message: Option<String>, message_file: Option<String>) -> Result<Option<String>> {
-    match (message, message_file) {
-        (Some(message), _) => Ok(Some(message)),
-        (None, None) => Ok(None),
-        (None, Some(path)) if path == "-" => {
-            let mut buf = String::new();
-            io::stdin()
-                .read_to_string(&mut buf)
-                .context("could not read message from stdin")?;
-            Ok(Some(buf))
-        }
-        (None, Some(path)) => std::fs::read_to_string(&path)
-            .map(Some)
-            .with_context(|| format!("could not read message file '{path}'")),
-    }
 }
 
 fn format_absorb_hunk_header(range: &HunkRangeOut) -> String {

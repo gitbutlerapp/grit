@@ -2,7 +2,9 @@
 
 use anyhow::{bail, Context, Result};
 use grit_lib::commit::{normalize_commit_date_override, parse_trailer_command_line_arg};
-use grit_lib::config::ident::{author_identity_line, parse_author_arg};
+use grit_lib::config::ident::author_identity_line;
+
+use crate::message_input::parse_author_cli;
 use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::error::Error;
 use grit_lib::objects::parse_commit;
@@ -370,7 +372,7 @@ fn build_commit_request(
     let author = if reset_author {
         String::new()
     } else if let Some(arg) = author_override.as_deref() {
-        let contact = parse_author_arg(arg).map_err(|e| anyhow::anyhow!("{e}"))?;
+        let contact = parse_author_cli(arg)?;
         let env_author_date = env.var(IdentRole::Author.env_date_key());
         let date_override = author_date.as_deref().or(env_author_date.as_deref());
         author_identity_line(&contact, date_override, now)

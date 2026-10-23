@@ -53,7 +53,9 @@ use crate::objects::{parse_commit, parse_tree, CommitData, ObjectId, ObjectKind}
 use crate::path_population::validate_tree_walk_entry;
 use crate::path_validate::ProtectOptions;
 use crate::porcelain::checkout;
-use crate::porcelain::commit::{stamp_change_id_on_new_commit, write_commit_object};
+use crate::porcelain::commit::{
+    normalize_commit_message, stamp_change_id_on_new_commit, write_commit_object,
+};
 use crate::porcelain::index_from_tree::{
     index_from_tree_with_worktree_stats, refresh_stage0_index_stats_from_worktree,
 };
@@ -724,14 +726,10 @@ fn should_take_fast_forward(options: &MergeOptions, ff_possible: bool) -> bool {
 
 fn merge_message_text(label: &str, override_message: Option<&str>) -> String {
     if let Some(msg) = override_message {
-        let trimmed = msg.trim();
-        if trimmed.is_empty() {
+        if msg.trim().is_empty() {
             return format!("Merge {label}\n");
         }
-        if msg.ends_with('\n') {
-            return msg.to_owned();
-        }
-        return format!("{trimmed}\n");
+        return normalize_commit_message(msg).unwrap_or_else(|_| format!("Merge {label}\n"));
     }
     format!("Merge {label}\n")
 }
@@ -945,20 +943,10 @@ fn resolve_continue_merge_message(
     override_message: Option<&str>,
 ) -> std::result::Result<String, ContinueMergeError> {
     if let Some(raw) = override_message {
-        let trimmed = raw.trim();
-        if trimmed.is_empty() {
+        if raw.trim().is_empty() {
             return Err(ContinueMergeError::EmptyMessage);
         }
-        let processed = stripspace_process(trimmed.as_bytes(), &StripspaceMode::Default);
-        let message = String::from_utf8(processed).map_err(|_| ContinueMergeError::EmptyMessage)?;
-        if message.is_empty() {
-            return Err(ContinueMergeError::EmptyMessage);
-        }
-        let mut message = message;
-        if !message.ends_with('\n') {
-            message.push('\n');
-        }
-        return Ok(message);
+        return normalize_commit_message(raw).map_err(|_| ContinueMergeError::EmptyMessage);
     }
 
     let Some(raw) = read_merge_msg(git_dir).map_err(ContinueMergeError::Repository)? else {

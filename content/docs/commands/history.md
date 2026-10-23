@@ -93,7 +93,7 @@ Provide `-m` / `--message-file` for the new parent commit and one or more paths 
 | `--before` | Place `<commit>` immediately before this revision (`move` only). |
 | `--after` | Place `<commit>` immediately after this revision (`move` only). |
 | `-m`, `--message` | New commit message (conflicts with `--message-file`). |
-| `--message-file` | Read the new message from a file, or `-` for stdin. |
+| `-F`, `--message-file` | Read the new message from a file, or `-` for stdin. |
 | `--author` | Replacement author ident (`Name <email>` or bare email). |
 | `--dry-run` | List ref updates without moving refs. |
 | `--update-refs` | `branches` (default) or `head`. |
@@ -106,7 +106,7 @@ Provide `-m` / `--message-file` for the new parent commit and one or more paths 
 | --- | --- |
 | `<commit>` | Commit to split (revision spec). |
 | `-m`, `--message` | Message for the new parent commit (conflicts with `--message-file`). |
-| `--message-file` | Read the new parent message from a file, or `-` for stdin. |
+| `-F`, `--message-file` | Read the new parent message from a file, or `-` for stdin. |
 | `--rest-message` | Replace the remaining commit’s message after the split. |
 | `PATH`… | Pathspecs after `--` limiting which changes move into the new parent (required). |
 | `--pathspec-from-file` | Read pathspecs from a file, or `-` for stdin (same as other commands). |
@@ -124,7 +124,7 @@ Provide `-m` / `--message-file` for the new parent commit and one or more paths 
 | --- | --- |
 | `<range>…` | One or more revision specs defining the commits to fold (required). |
 | `-m`, `--message` | Message for the squashed commit (conflicts with `--message-file` and `--combine`). |
-| `--message-file` | Read the squashed commit message from a file, or `-` for stdin. |
+| `-F`, `--message-file` | Read the squashed commit message from a file, or `-` for stdin. |
 | `--combine` | Combine messages from every commit in the range. |
 | `--dry-run` | List ref updates without moving refs. |
 | `--update-refs` | `branches` (default) or `head`. |

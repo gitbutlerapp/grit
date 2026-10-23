@@ -58,7 +58,7 @@ Local edits are allowed when they only touch paths the merge does not change, or
 | `--squash` | Squash merged commits into the index; write `SQUASH_MSG` (no `MERGE_HEAD`). Mutually exclusive with `--no-commit`. |
 | `--no-commit` | Apply the merge but do not commit yet (Git-compatible merge state). Mutually exclusive with `--squash`. |
 | `-m`, `--message` | Merge commit / `MERGE_MSG` message (conflicts with `--message-file`). |
-| `--message-file` | Read the message from a path, or `-` for stdin (conflicts with `-m`). |
+| `-F`, `--message-file` | Read the message from a path, or `-` for stdin (conflicts with `-m`). |
 | `-X ours\|theirs` | Prefer one side on overlapping edits (same as Git `-X`). |
 | `--conflict` | Marker style: `merge`, `diff3`, or `zdiff3`. |
 | `--allow-unrelated-histories` | Merge with no common ancestor (empty-tree base). |

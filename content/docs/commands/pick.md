@@ -43,7 +43,7 @@ Resolve conflicts, stage with [`grit add`](../add/), then run `grit pick --conti
 | `--no-commit` | Apply the patch to the index and worktree without committing. |
 | `--empty` | When a step would not change the tree: `stop` (default), `keep` (empty commit), or `drop`. |
 | `-m`, `--message` | Replace the message (only with exactly one commit). |
-| `--message-file` | Read the message from a file (only with exactly one commit). |
+| `-F`, `--message-file` | Read the message from a file, or `-` for stdin (only with exactly one commit). |
 | `--mainline` | Parent number when replaying a merge commit (library support; CLI wiring pending). |
 | `--check` | Predict whether the pick would succeed without changing refs, the index, or the worktree. Exit **0** when every step would apply cleanly; exit **1** when a step would conflict or stop as empty (with `--empty stop`). Conflicts with `--continue`, `--abort`, `--skip`, and `--dry-run`. |
 | `--dry-run` | Print the commits that would be replayed without changing refs or the worktree. Conflicts with `--check`. |

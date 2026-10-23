@@ -279,25 +279,10 @@ enum HistoryAction {
     Reword {
         /// Commit to reword (revision spec).
         commit: String,
-        /// New commit message.
-        #[arg(
-            short = 'm',
-            long = "message",
-            conflicts_with = "message_file",
-            allow_hyphen_values = true
-        )]
-        message: Option<String>,
-        /// Read the new message from a file (`-` for stdin).
-        #[arg(
-            long = "message-file",
-            value_name = "PATH|-",
-            conflicts_with = "message",
-            allow_hyphen_values = true
-        )]
-        message_file: Option<String>,
-        /// Replacement author ident (`Name <email>` or bare email).
-        #[arg(long = "author", allow_hyphen_values = true)]
-        author: Option<String>,
+        #[command(flatten)]
+        message: message_input::MessageInputArgs,
+        #[command(flatten)]
+        author: message_input::AuthorArg,
         #[command(flatten)]
         shared: commands::history::HistoryRewriteArgs,
     },
@@ -305,22 +290,8 @@ enum HistoryAction {
     Fixup {
         /// Commit to fix up (revision spec).
         commit: String,
-        /// Replace the target commit message.
-        #[arg(
-            short = 'm',
-            long = "message",
-            conflicts_with = "message_file",
-            allow_hyphen_values = true
-        )]
-        message: Option<String>,
-        /// Read the replacement message from a file (`-` for stdin).
-        #[arg(
-            long = "message-file",
-            value_name = "PATH|-",
-            conflicts_with = "message",
-            allow_hyphen_values = true
-        )]
-        message_file: Option<String>,
+        #[command(flatten)]
+        message: message_input::MessageInputArgs,
         /// Unstaged hunk ids to fold (`grit diff --unstaged --json`, comma-separated or repeated).
         #[arg(long = "hunks", value_name = "ID,...", action = clap::ArgAction::Append)]
         hunks: Vec<String>,
@@ -366,22 +337,8 @@ enum HistoryAction {
     Split {
         /// Commit to split (revision spec).
         commit: String,
-        /// Message for the new parent commit (the peeled-off changes).
-        #[arg(
-            short = 'm',
-            long = "message",
-            conflicts_with = "message_file",
-            allow_hyphen_values = true
-        )]
-        message: Option<String>,
-        /// Read the new parent message from a file (`-` for stdin).
-        #[arg(
-            long = "message-file",
-            value_name = "PATH|-",
-            conflicts_with = "message",
-            allow_hyphen_values = true
-        )]
-        message_file: Option<String>,
+        #[command(flatten)]
+        message: message_input::MessageInputArgs,
         /// Replace the remaining commit's message after the split.
         #[arg(long = "rest-message", allow_hyphen_values = true)]
         rest_message: Option<String>,
@@ -400,22 +357,8 @@ enum HistoryAction {
         /// Revision range (same syntax as `git rev-list`, for example `base..tip`).
         #[arg(required = true)]
         range: Vec<String>,
-        /// Message for the squashed commit (default: keep the oldest commit's message).
-        #[arg(
-            short = 'm',
-            long = "message",
-            conflicts_with_all = ["message_file", "combine"],
-            allow_hyphen_values = true
-        )]
-        message: Option<String>,
-        /// Read the squashed commit message from a file (`-` for stdin).
-        #[arg(
-            long = "message-file",
-            value_name = "PATH|-",
-            conflicts_with_all = ["message", "combine"],
-            allow_hyphen_values = true
-        )]
-        message_file: Option<String>,
+        #[command(flatten)]
+        message: message_input::MessageInputArgs,
         /// Build a combined autosquash-style message from every commit in the range.
         #[arg(long = "combine", conflicts_with_all = ["message", "message_file"])]
         combine: bool,
@@ -438,9 +381,8 @@ enum NotesAction {
     Add {
         /// Revision to attach the note to.
         rev: String,
-        /// Note text.
-        #[arg(short = 'm', long = "message", allow_hyphen_values = true)]
-        message: String,
+        #[command(flatten)]
+        message: message_input::MessageInputArgs,
         /// Replace an existing note.
         #[arg(long)]
         force: bool,
@@ -854,27 +796,17 @@ enum Command {
     /// Stage every change and record a new commit.
     Commit {
         /// Commit message (you can also pass it with -m).
-        #[arg(conflicts_with = "message_file", allow_hyphen_values = true)]
-        message: Option<String>,
-        /// Commit message.
         #[arg(
-            short = 'm',
-            long = "message",
-            conflicts_with_all = ["message", "message_file"],
+            id = "commit_message",
+            value_name = "MESSAGE",
+            conflicts_with = "message_file",
             allow_hyphen_values = true
         )]
-        message_flag: Option<String>,
-        /// Read the commit message from a file (`-` for stdin).
-        #[arg(
-            short = 'F',
-            long = "message-file",
-            conflicts_with_all = ["message", "message_flag"],
-            allow_hyphen_values = true
-        )]
-        message_file: Option<String>,
-        /// Author for this commit (`Name <email>`); committer is unchanged.
-        #[arg(long = "author", allow_hyphen_values = true)]
-        author_override: Option<String>,
+        commit_message: Option<String>,
+        #[command(flatten)]
+        message_input: message_input::MessageInputArgs,
+        #[command(flatten)]
+        author: message_input::AuthorArg,
         /// Override the author date (Git date formats, RFC 3339, `@epoch`, …).
         #[arg(long = "date")]
         author_date: Option<String>,
@@ -1104,21 +1036,8 @@ enum Command {
         /// When a pick step would not change the tree: stop (default), keep an empty commit, or drop the step.
         #[arg(long = "empty", value_enum, default_value_t = commands::pick::PickEmptyArg::Stop)]
         empty: commands::pick::PickEmptyArg,
-        /// Replace the pick message (single commit only).
-        #[arg(
-            short = 'm',
-            long = "message",
-            conflicts_with = "message_file",
-            allow_hyphen_values = true
-        )]
-        message: Option<String>,
-        /// Read the pick message from a file (single commit only).
-        #[arg(
-            long = "message-file",
-            conflicts_with = "message",
-            allow_hyphen_values = true
-        )]
-        message_file: Option<String>,
+        #[command(flatten)]
+        message: message_input::MessageInputArgs,
         /// Predict whether the pick would succeed without changing refs, the index, or the worktree.
         #[arg(
             long = "check",
@@ -1157,21 +1076,8 @@ enum Command {
         /// When a revert step would not change the tree: stop (default), keep an empty commit, or drop the step.
         #[arg(long = "empty", value_enum, default_value_t = commands::revert::ReplayEmptyPolicyArg::Stop)]
         empty: commands::revert::ReplayEmptyPolicyArg,
-        /// Replace the revert message (single commit only).
-        #[arg(
-            short = 'm',
-            long = "message",
-            conflicts_with = "message_file",
-            allow_hyphen_values = true
-        )]
-        message: Option<String>,
-        /// Read the revert message from a file (single commit only).
-        #[arg(
-            long = "message-file",
-            conflicts_with = "message",
-            allow_hyphen_values = true
-        )]
-        message_file: Option<String>,
+        #[command(flatten)]
+        message: message_input::MessageInputArgs,
         /// Predict whether the revert would succeed without changing refs, the index, or the worktree.
         #[arg(
             long = "check",
@@ -1409,23 +1315,17 @@ enum Command {
         /// Delete the named tag instead of creating it.
         #[arg(short = 'd', long = "delete")]
         delete: bool,
-        /// Annotated tag message (`-m` creates an annotated tag).
+        #[command(flatten)]
+        message: message_input::MessageInputArgs,
+        /// Deprecated alias for `--message-file`.
         #[arg(
-            short = 'm',
-            long = "message",
-            conflicts_with = "message_file",
-            allow_hyphen_values = true
-        )]
-        message: Option<String>,
-        /// Read the annotated tag message from a file (`-` reads stdin).
-        #[arg(
-            short = 'F',
             long = "file",
             value_name = "PATH|-",
-            conflicts_with = "message",
+            hide = true,
+            conflicts_with_all = ["message", "message_file"],
             allow_hyphen_values = true
         )]
-        message_file: Option<String>,
+        legacy_message_file: Option<String>,
         /// Object to tag (revision). Defaults to `HEAD`.
         #[arg(
             long = "object",
@@ -1628,7 +1528,21 @@ fn main() {
                     filter: extract_filter_flag(),
                 };
                 let message = clap_json_error_message(&err);
-                output::emit_error(&anyhow::anyhow!(message), &opts);
+                let payload = json_error::StructuredJsonError {
+                    error: message.clone(),
+                    kind: "usage",
+                    conflicts: None,
+                    commit: None,
+                    would_overwrite: None,
+                    oid: None,
+                };
+                output::emit_error(
+                    &anyhow::Error::new(json_error::StructuredCliError {
+                        payload,
+                        human: message,
+                    }),
+                    &opts,
+                );
                 std::process::exit(err.exit_code());
             }
             err.exit();
@@ -1680,6 +1594,7 @@ fn main() {
         {
             crate::json_error::INVALID_COMMIT_FILTER_EXIT
         } else if commands::branch::is_branch_usage_error(&err)
+            || message_input::is_message_input_usage_error(&err)
             || crate::json_error::structured_json_payload(&err)
                 .is_some_and(|payload| payload.kind == "usage")
         {
@@ -2151,10 +2066,9 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
         }
         Command::Cat { spec } => emit(&commands::cat::run(spec)?, opts, ctx),
         Command::Commit {
-            message,
-            message_flag,
-            message_file,
-            author_override,
+            commit_message,
+            message_input,
+            author,
             author_date,
             trailers,
             signoff,
@@ -2173,6 +2087,10 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             lines,
             paths,
         } => {
+            let message_flag = message_input.message.clone();
+            let message_file = message_input.message_file.clone();
+            let author_override = author.author.clone();
+            let message = commit_message;
             patch_selection::ensure_single_patch_mode(
                 patch_file.is_some(),
                 !hunks.is_empty(),
@@ -2321,11 +2239,14 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
                     rev,
                     message,
                     force,
-                }) => Add {
-                    rev,
-                    message,
-                    force,
-                },
+                }) => {
+                    let message = message_input::read_required_normalized_message(&message)?;
+                    Add {
+                        rev,
+                        message,
+                        force,
+                    }
+                }
                 Some(NotesAction::Remove { revs }) => Remove { revs },
             };
             emit(
@@ -2345,7 +2266,7 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             limit,
             delete,
             message,
-            message_file,
+            legacy_message_file,
             object,
             force,
             dry_run,
@@ -2365,12 +2286,15 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             } else {
                 None
             };
+            let message = message_input::merge_tag_legacy_file(message, legacy_message_file);
+            let message_flag = message.message.clone();
+            let message_file = message.message_file.clone();
             let outcome = commands::tag::run(commands::tag::TagRunOptions {
                 name,
                 target,
                 object,
                 delete,
-                message,
+                message: message_flag,
                 message_file,
                 force,
                 dry_run,
@@ -2492,7 +2416,6 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             no_commit,
             empty,
             message,
-            message_file,
             check,
             dry_run,
             replay_merge,
@@ -2506,7 +2429,6 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
                 no_commit,
                 empty,
                 message,
-                message_file,
                 mainline,
                 check,
                 dry_run,
@@ -2530,7 +2452,6 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             no_commit,
             empty,
             message,
-            message_file,
             check,
             dry_run,
             replay_merge,
@@ -2544,7 +2465,6 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
                 no_commit,
                 empty,
                 message,
-                message_file,
                 check,
                 dry_run,
                 replay_merge,
@@ -2575,31 +2495,23 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             HistoryAction::Reword {
                 commit,
                 message,
-                message_file,
                 author,
                 shared,
             } => emit(
-                &commands::history::run_reword(&commit, message, message_file, author, &shared)?,
+                &commands::history::run_reword(&commit, &message, &author, &shared)?,
                 opts,
                 ctx,
             ),
             HistoryAction::Fixup {
                 commit,
                 message,
-                message_file,
                 hunks,
                 lines,
                 pathspecs,
                 shared,
             } => {
                 let outcome = commands::history::run_fixup(
-                    &commit,
-                    message,
-                    message_file,
-                    &hunks,
-                    &lines,
-                    &pathspecs,
-                    &shared,
+                    &commit, &message, &hunks, &lines, &pathspecs, &shared,
                 );
                 match outcome {
                     Ok(out) => emit(&out, opts, ctx),
@@ -2642,30 +2554,21 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             HistoryAction::Squash {
                 range,
                 message,
-                message_file,
                 combine,
                 shared,
             } => emit(
-                &commands::history::run_squash(&range, message, message_file, combine, &shared)?,
+                &commands::history::run_squash(&range, &message, combine, &shared)?,
                 opts,
                 ctx,
             ),
             HistoryAction::Split {
                 commit,
                 message,
-                message_file,
                 rest_message,
                 paths,
                 shared,
             } => emit(
-                &commands::history::run_split(
-                    &commit,
-                    message,
-                    message_file,
-                    rest_message,
-                    &paths,
-                    &shared,
-                )?,
+                &commands::history::run_split(&commit, &message, rest_message, &paths, &shared)?,
                 opts,
                 ctx,
             ),

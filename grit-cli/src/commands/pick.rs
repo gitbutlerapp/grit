@@ -3,6 +3,7 @@
 use crate::commands::replay_merge_args::ReplayMergeArgs;
 use crate::context;
 use crate::markdown;
+use crate::message_input::{read_message_input, MessageInputArgs};
 use crate::operation_output::{
     render_conflicts_human, render_pick_check_conflicts_human, render_pick_conflict_footer_human,
     ConflictJson, OperationConflictBlock,
@@ -117,8 +118,7 @@ pub struct PickRunOptions {
     pub record_origin: bool,
     pub no_commit: bool,
     pub empty: PickEmptyArg,
-    pub message: Option<String>,
-    pub message_file: Option<String>,
+    pub message: MessageInputArgs,
     pub mainline: Option<u32>,
     pub dry_run: bool,
     pub check: bool,
@@ -295,7 +295,7 @@ pub fn run(opts: PickRunOptions) -> Result<PickOutcome> {
         return run_check(&repo, sources, &opts, favor, conflict_style);
     }
 
-    let message_override = read_optional_message(opts.message, opts.message_file)?;
+    let message_override = read_message_input(&opts.message)?;
     if message_override.is_some() && opts.commits.len() != 1 {
         bail!("--message and --message-file are only allowed when picking exactly one commit");
     }
@@ -330,26 +330,6 @@ pub fn run(opts: PickRunOptions) -> Result<PickOutcome> {
         outcome,
         PickResult::Picked,
     ))
-}
-
-fn read_optional_message(
-    message: Option<String>,
-    message_file: Option<String>,
-) -> Result<Option<String>> {
-    match (message, message_file) {
-        (Some(m), None) => Ok(if m.trim().is_empty() { None } else { Some(m) }),
-        (None, Some(path)) => {
-            let contents = std::fs::read_to_string(&path)
-                .with_context(|| format!("could not read message file '{path}'"))?;
-            Ok(if contents.trim().is_empty() {
-                None
-            } else {
-                Some(contents)
-            })
-        }
-        (Some(_), Some(_)) => unreachable!("clap conflicts message and message_file"),
-        (None, None) => Ok(None),
-    }
 }
 
 fn map_sequence_outcome(
