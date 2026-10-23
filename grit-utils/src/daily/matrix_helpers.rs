@@ -1144,6 +1144,10 @@ fn git_rev_parse(git: &Path, repo: &Path, spec: &str) -> Result<String> {
 /// Git-git worktree with a deep-history `--contains` target for tag ref queries.
 pub fn setup_git_git_ref_contains(setup: &DailySetup<'_>) -> Result<DailyHeadlineContext> {
     let mut ctx = super::helpers::setup_git_git_history(setup)?;
+    // Grit `--contains` ref filtering uses commit-graph generation for pruning; match git.git
+    // production repos that carry a reachable graph (see matrix description).
+    write_git_commit_graph_reachable(setup.git, &ctx.repo)?;
+    verify_git_commit_graph_in_repo(setup.git, &ctx.repo)?;
     // Use a tagged release so `--contains` matches real tags without scanning deep history.
     ctx.ref_query_contains = Some(git_rev_parse(setup.git, &ctx.repo, "v2.46.0^{commit}")?);
     Ok(ctx)
