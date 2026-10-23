@@ -24,8 +24,11 @@ fn tree_changes_for_clean_merge_with_snapshot(
     if from_tree == &to_tree {
         return Ok(Vec::new());
     }
+    // On very large indexes, index-hinted diffs scan every entry; tree-only diff is cheaper
+    // in peak RSS for small merges (typical cherry-pick on a wide worktree).
     let trust_index = snapshot.head_tree == Some(*from_tree)
-        && !snapshot.index.entries.iter().any(|e| e.stage() != 0);
+        && !snapshot.index.entries.iter().any(|e| e.stage() != 0)
+        && snapshot.index.entries.len() <= 4096;
     if trust_index {
         diff_trees_with_index(
             repo.odb(),
@@ -67,7 +70,7 @@ pub(crate) fn apply_clean_tree_merge_to_worktree(
         &tree_changes,
         &mut snapshot.index,
         CheckoutApplyOptions {
-            parallel_prepare_blobs: true,
+            parallel_prepare_blobs: tree_changes.len() > 16,
             defer_index_disk_write: true,
             ..CheckoutApplyOptions::default()
         },

@@ -1292,6 +1292,17 @@ fn ensure_worktree_clean_with_message(
     persist_index_stat_refresh: bool,
 ) -> Result<()> {
     let mut snapshot = load_worktree_snapshot(repo)?;
+    ensure_worktree_clean_from_snapshot(repo, &mut snapshot, message, persist_index_stat_refresh)?;
+    Ok(())
+}
+
+/// Refuse when staged or unstaged changes exist, reusing an already-loaded snapshot.
+pub(crate) fn ensure_worktree_clean_from_snapshot(
+    repo: &Repository,
+    snapshot: &mut WorktreeSnapshot,
+    message: &str,
+    persist_index_stat_refresh: bool,
+) -> Result<()> {
     let index_path = repo.index_path_for_env()?;
     let (staged, unstaged, index_changed) =
         local_change_diffs(repo, &mut snapshot.index, snapshot.head_tree)?;
@@ -1305,6 +1316,21 @@ fn ensure_worktree_clean_with_message(
         return Err(Error::Message(message.into()));
     }
     Ok(())
+}
+
+/// Cleanliness check for pick/revert with a reusable worktree snapshot when a work tree exists.
+pub(crate) fn prepare_worktree_for_pick(repo: &Repository) -> Result<Option<WorktreeSnapshot>> {
+    if repo.work_tree().is_none() {
+        return Ok(None);
+    }
+    let mut snapshot = load_worktree_snapshot(repo)?;
+    ensure_worktree_clean_from_snapshot(
+        repo,
+        &mut snapshot,
+        "you have uncommitted changes — commit them before picking",
+        false,
+    )?;
+    Ok(Some(snapshot))
 }
 
 /// Refuse when the index or worktree differs from HEAD (staged or unstaged changes).
