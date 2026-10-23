@@ -163,6 +163,60 @@ pub fn global_config_write_path(env: &Environment) -> Result<PathBuf> {
     })
 }
 
+/// Human-readable summary of a config write that `--dry-run` would perform.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfigWritePreview {
+    /// Config file that would be updated.
+    pub path: PathBuf,
+    /// Short description of the change.
+    pub summary: String,
+}
+
+fn ensure_worktree_write_allowed(location: &ConfigLocation, git_dir: Option<&Path>) -> Result<()> {
+    if !matches!(location, ConfigLocation::Worktree) {
+        return Ok(());
+    }
+    let Some(git_dir) = git_dir else {
+        return Err(Error::Config(ConfigError::Other(
+            "not in a git repository".into(),
+        )));
+    };
+    let common = crate::repo::common_git_dir_for_config(git_dir);
+    if !crate::repo::worktree_config_enabled(&common) {
+        return Err(Error::Config(ConfigError::WorktreeConfigNotEnabled));
+    }
+    Ok(())
+}
+
+fn open_location_config(
+    location: &ConfigLocation,
+    env: &Environment,
+    git_dir: Option<&Path>,
+) -> Result<(PathBuf, ConfigFile)> {
+    ensure_worktree_write_allowed(location, git_dir)?;
+    let path = location.write_path(env, git_dir)?;
+    let scope = location.file_scope();
+    let content = fs::read_to_string(&path).unwrap_or_default();
+    let cfg = ConfigFile::parse(&path, &content, scope)?;
+    Ok((path, cfg))
+}
+
+fn persist_config(
+    path: &Path,
+    cfg: &mut ConfigFile,
+    dry_run: bool,
+    summary: String,
+) -> Result<Option<ConfigWritePreview>> {
+    if dry_run {
+        return Ok(Some(ConfigWritePreview {
+            path: path.to_path_buf(),
+            summary,
+        }));
+    }
+    cfg.write()?;
+    Ok(None)
+}
+
 /// Set `key` to `value` in the config file for `location`.
 pub fn set_config_value(
     location: ConfigLocation,
@@ -170,14 +224,25 @@ pub fn set_config_value(
     git_dir: Option<&Path>,
     key: &str,
     value: &str,
-) -> Result<()> {
-    let path = location.write_path(env, git_dir)?;
-    let scope = location.file_scope();
-    let content = fs::read_to_string(&path).unwrap_or_default();
-    let mut cfg = ConfigFile::parse(&path, &content, scope)?;
+    dry_run: bool,
+) -> Result<Option<ConfigWritePreview>> {
+    let (path, mut cfg) = open_location_config(&location, env, git_dir)?;
     cfg.set(key, value)?;
-    cfg.write()?;
-    Ok(())
+    persist_config(&path, &mut cfg, dry_run, format!("set {key}={value}"))
+}
+
+/// Append `value` for `key` (multi-valued) in the config file for `location`.
+pub fn add_config_value(
+    location: ConfigLocation,
+    env: &Environment,
+    git_dir: Option<&Path>,
+    key: &str,
+    value: &str,
+    dry_run: bool,
+) -> Result<Option<ConfigWritePreview>> {
+    let (path, mut cfg) = open_location_config(&location, env, git_dir)?;
+    cfg.add_value(key, value)?;
+    persist_config(&path, &mut cfg, dry_run, format!("add {key}={value}"))
 }
 
 /// Remove `key` from the config file for `location`.
@@ -190,21 +255,88 @@ pub fn unset_config_value(
     env: &Environment,
     git_dir: Option<&Path>,
     key: &str,
-) -> Result<()> {
-    let path = location.write_path(env, git_dir)?;
-    let scope = location.file_scope();
-    let Ok(content) = fs::read_to_string(&path) else {
+    dry_run: bool,
+) -> Result<Option<ConfigWritePreview>> {
+    let (path, mut cfg) = open_location_config(&location, env, git_dir)?;
+    if !path.exists() {
         return Err(Error::Config(ConfigError::KeyNotSet {
             key: key.to_owned(),
         }));
-    };
-    let mut cfg = ConfigFile::parse(&path, &content, scope)?;
+    }
     let removed = cfg.unset(key)?;
     if removed == 0 {
         return Err(Error::Config(ConfigError::KeyNotSet {
             key: key.to_owned(),
         }));
     }
-    cfg.write()?;
-    Ok(())
+    persist_config(&path, &mut cfg, dry_run, format!("unset {key}"))
+}
+
+/// Remove every occurrence of `key` from the config file for `location`.
+pub fn unset_all_config_values(
+    location: ConfigLocation,
+    env: &Environment,
+    git_dir: Option<&Path>,
+    key: &str,
+    dry_run: bool,
+) -> Result<(usize, Option<ConfigWritePreview>)> {
+    let (path, mut cfg) = open_location_config(&location, env, git_dir)?;
+    let removed = cfg.unset_matching(key, None, false)?;
+    if removed == 0 {
+        return Err(Error::Config(ConfigError::KeyNotSet {
+            key: key.to_owned(),
+        }));
+    }
+    let preview = persist_config(
+        &path,
+        &mut cfg,
+        dry_run,
+        format!("unset-all {key} ({removed} values)"),
+    )?;
+    Ok((removed, preview))
+}
+
+/// Rename a section in the config file for `location`.
+pub fn rename_config_section(
+    location: ConfigLocation,
+    env: &Environment,
+    git_dir: Option<&Path>,
+    old_name: &str,
+    new_name: &str,
+    dry_run: bool,
+) -> Result<Option<ConfigWritePreview>> {
+    let (path, mut cfg) = open_location_config(&location, env, git_dir)?;
+    if !cfg.rename_section(old_name, new_name)? {
+        return Err(Error::Config(ConfigError::SectionNotFound {
+            section: old_name.to_owned(),
+        }));
+    }
+    persist_config(
+        &path,
+        &mut cfg,
+        dry_run,
+        format!("rename-section {old_name} -> {new_name}"),
+    )
+}
+
+/// Remove a section from the config file for `location`.
+pub fn remove_config_section(
+    location: ConfigLocation,
+    env: &Environment,
+    git_dir: Option<&Path>,
+    section: &str,
+    dry_run: bool,
+) -> Result<Option<ConfigWritePreview>> {
+    let (path, mut cfg) = open_location_config(&location, env, git_dir)?;
+    if !cfg.remove_section(section)? {
+        return Err(Error::Config(ConfigError::SectionNotFound {
+            section: section.to_owned(),
+        }));
+    }
+    persist_config(
+        &path,
+        &mut cfg,
+        dry_run,
+        format!("remove-section {section}"),
+    )
 }

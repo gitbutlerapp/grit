@@ -8,11 +8,18 @@ order: 4
 ## Synopsis
 
 ```text
-grit config [--global | --local | -f <path>] <key>
-grit config [--global | --local | -f <path>] <key> <value>
-grit config [--global | --local | -f <path>] --unset <key>
-grit config [--global | --local | -f <path>] --list
+grit config [<scope>] <key>
+grit config [<scope>] <key> <value>
+grit config [<scope>] --unset <key>
+grit config [<scope>] --unset-all <key>
+grit config [<scope>] --add <key> <value>
+grit config [<scope>] --all <key>
+grit config [<scope>] --list [<prefix>]
+grit config [<scope>] --rename-section OLD --rename-section-new NEW
+grit config [<scope>] --remove-section NAME
 ```
+
+`<scope>` is one of `--global`, `--local`, `--system`, `--worktree`, or `-f <path>` (mutually exclusive).
 
 ## Description
 
@@ -44,11 +51,22 @@ Keys are written as `section.name`, for example `user.email`.
 | --- | --- |
 | `<key>` | The setting to read, set or remove. |
 | `<value>` | The value to set. Omit it to read the current value. |
-| `--global` | Use your per-user config instead of the repository's. Mutually exclusive with `--local` and `-f`. |
+| `--global` | Use your per-user config instead of the repository's. |
 | `--local` | Read or write only this repository's config file. Default for writes; optional for reads. |
+| `--system` | Read or write the system config file (`GIT_CONFIG_SYSTEM` or `/etc/gitconfig`). |
+| `--worktree` | Read or write `config.worktree` (requires `extensions.worktreeConfig` in the common config). |
 | `-f`, `--file <path>` | Read or write only the given config file (no repository required). |
-| `-l`, `--list` | List every setting as `key=value`. |
-| `--unset` | Remove the setting. |
+| `-l`, `--list` | List settings as `key=value`. Optional `<prefix>` limits to canonical keys with that prefix. |
+| `--all` | Print every value for a multi-valued key (load order). |
+| `--add` | Append a value without replacing existing entries. |
+| `--unset` | Remove the last matching value for a key. |
+| `--unset-all` | Remove every value for a key. |
+| `--type bool\|int\|path` | Parse or canonicalize values like `git config --type`. |
+| `--default <value>` | When reading, use this value if the key is unset (before `--type` coercion). |
+| `--rename-section OLD` | Rename a section; requires `--rename-section-new NEW`. |
+| `--rename-section-new NEW` | New section name for `--rename-section`. |
+| `--remove-section NAME` | Delete a section and all of its keys. |
+| `--dry-run` | On writes, report what would change without modifying the config file. |
 
 ### Exit codes
 
@@ -121,13 +139,20 @@ Pass `--json` for stable, scripting-friendly output. The object's `action` field
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
-| `action` | string | `get`, `set`, `unset`, or `list`. |
+| `action` | string | `get`, `get_all`, `set`, `add`, `unset`, `unset_all`, `list`, `rename_section`, or `remove_section`. |
 | `key` | string | Configuration key for `get`, `set`, or `unset`. |
 | `value` | string or `null` | Value for `get` or `set`. `null` when `get` did not find the key (exit `1`). |
 | `scope` | string or `null` | For `get`, which layer won (`system`, `global`, `local`, `worktree`, `command`). |
 | `file` | string or `null` | For `get`, source path when file-backed. |
 | `line` | integer or `null` | For `get`, one-based line number in `file`. |
 | `entries` | array | For `list`, each entry with `key`, optional `value`, `scope`, and optional `file`. |
+| `values` | array | For `get_all`, each `{ value, scope, file?, line? }`. |
+| `dry_run` | boolean | Present on write actions when `--dry-run` was used. |
+| `preview` | string | Human summary of the pending change when `dry_run` is true. |
+| `removed` | integer | For `unset_all`, number of values removed. |
+| `old_name` | string | For `rename_section`, the previous section name. |
+| `new_name` | string | For `rename_section`, the new section name. |
+| `section` | string | For `remove_section`, the section that was removed. |
 
 Reading a value:
 

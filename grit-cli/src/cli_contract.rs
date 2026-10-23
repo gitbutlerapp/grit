@@ -508,6 +508,22 @@ const COMMAND_CONTRACTS: &[(&str, CommandContract)] = &[
         },
     ),
     (
+        "remote.remove",
+        CommandContract {
+            kind: CommandKind::Mutation,
+            takes_message: false,
+            takes_paths: false,
+        },
+    ),
+    (
+        "remote.show",
+        CommandContract {
+            kind: CommandKind::List,
+            takes_message: false,
+            takes_paths: false,
+        },
+    ),
+    (
         "remote.refs",
         CommandContract {
             kind: CommandKind::List,
@@ -754,12 +770,6 @@ enum ContractRule {
 /// Known violations tracked until a follow-up plan step lands.
 const EXCEPTIONS: &[(&str, ContractRule, &str, &str)] = &[
     (
-        "branch",
-        ContractRule::Limit,
-        "s4 limit",
-        "branch list uses `-n` / `--max-count` today; step 4 unifies on `--limit`",
-    ),
-    (
         "reflog",
         ContractRule::Limit,
         "inspection-extras",
@@ -772,28 +782,10 @@ const EXCEPTIONS: &[(&str, ContractRule, &str, &str)] = &[
         "shortlog caps in the library without a `-n` / `--limit` flag yet",
     ),
     (
-        "bundle.list",
-        ContractRule::Limit,
-        "s4 limit",
-        "bundle list has no `-n` / `--limit` yet",
-    ),
-    (
         "hooks",
         ContractRule::Limit,
         "s4 limit",
         "hooks list has no `-n` / `--limit` yet",
-    ),
-    (
-        "hooks.list",
-        ContractRule::Limit,
-        "s4 limit",
-        "hooks list has no `-n` / `--limit` yet",
-    ),
-    (
-        "notes",
-        ContractRule::Limit,
-        "s4 limit",
-        "notes list has no `-n` / `--limit` yet",
     ),
     (
         "notes.list",
@@ -874,12 +866,6 @@ const EXCEPTIONS: &[(&str, ContractRule, &str, &str)] = &[
         "notes add requires `-m` but has no `--message-file` yet",
     ),
     (
-        "merge",
-        ContractRule::DryRun,
-        "s5 dry-run",
-        "merge has `--check` but no `--dry-run` yet (step 5)",
-    ),
-    (
         "notes.add",
         ContractRule::DryRun,
         "s5 dry-run",
@@ -944,18 +930,6 @@ const EXCEPTIONS: &[(&str, ContractRule, &str, &str)] = &[
         ContractRule::DryRun,
         "workspace-extras",
         "init has no `--dry-run` yet",
-    ),
-    (
-        "config",
-        ContractRule::DryRun,
-        "workspace-extras",
-        "config set/unset has no `--dry-run` yet",
-    ),
-    (
-        "reset",
-        ContractRule::DryRun,
-        "workspace-extras",
-        "reset has no `--dry-run` yet",
     ),
     (
         "auth",

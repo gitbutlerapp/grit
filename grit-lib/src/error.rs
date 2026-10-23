@@ -181,6 +181,19 @@ pub enum ConfigError {
         key: String,
     },
 
+    /// Per-worktree config was requested but `extensions.worktreeConfig` is off.
+    #[error(
+        "worktree config is only allowed when extensions.worktreeConfig is enabled in the common config"
+    )]
+    WorktreeConfigNotEnabled,
+
+    /// `remove-section` or `rename-section` did not find the named section.
+    #[error("section '{section}' not found")]
+    SectionNotFound {
+        /// Section header name (e.g. `remote.origin`).
+        section: String,
+    },
+
     /// Inline `--comment` text must not span lines.
     #[error("no multi-line comment allowed")]
     MultilineCommentNotAllowed,

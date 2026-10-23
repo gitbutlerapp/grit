@@ -844,6 +844,8 @@ pub fn snapshot_command_args() -> &'static [(&'static str, &'static [&'static st
             "remote_set_url",
             &["remote", "set-url", "origin", "https://example.com/new.git"],
         ),
+        ("remote_remove", &["remote", "remove", "origin"]),
+        ("remote_show", &["remote", "show", "origin"]),
         (
             "bundle_create",
             &["bundle", "create", "snap.bundle", "HEAD"],
@@ -1062,8 +1064,8 @@ mod tests {
             );
         }
         assert_eq!(
-            checked, 92,
-            "expected 92 committed schema files under content/schemas"
+            checked, 95,
+            "expected 95 committed schema files under content/schemas"
         );
     }
 

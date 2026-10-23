@@ -175,7 +175,7 @@ URLs can be `https://`, `ssh://`, `user@host:path`, `git://`, `file://` or a loc
 
 - `grit tag` lists tags (default `--sort=version`). Filters: `-l/--list <pattern>` (repeatable), `--sort version|date|name`, `--reverse`, `--contains [REV]`, `--points-at <REV>`, `-n` / `--limit`. List `--json` includes `target_kind` and `annotation` (subject, message, tagger, date) on annotated tags; human output shows the subject beside the name.
 - `grit tag <name> [<target>]` creates a lightweight tag at `HEAD` or `<target>`. `-m` / `-F` create an annotated tag; `-f` replaces an existing tag; `--dry-run` previews create/delete. `grit tag -d <name>` deletes one. `grit tag --verify <name>…` checks annotated tag signatures and optional `tree-sha256` claims (exit 1 if any fail); `--no-signature` skips signature checks.
-- `grit config <key>` reads, `grit config <key> <value>` sets, `grit config --unset <key>` removes, `grit config --list` lists. Scope with `--global`, `--local`, or `-f <path>`. Missing keys exit **1**; `--json` returns `"value": null` with scope/file/line when set.
+- `grit config <key>` reads, `grit config <key> <value>` sets, `grit config --unset <key>` removes, `grit config --list [<prefix>]` lists. Scope with `--global`, `--local`, `--system`, `--worktree`, or `-f <path>`. Multi-value: `--add`, `--all`, `--unset-all`. Typed values: `--type bool|int|path`, `--default` on read. Sections: `--rename-section OLD` + `--rename-section-new NEW`, `--remove-section NAME`. Every write accepts `--dry-run`. Missing keys exit **1**; `--json` returns `"value": null` with scope/file/line when set.
 
 ## Staying non-interactive
 

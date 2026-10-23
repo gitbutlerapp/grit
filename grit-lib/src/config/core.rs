@@ -1906,6 +1906,26 @@ impl ConfigSet {
         }))
     }
 
+    /// Every value for `key` in load order, with origin metadata (Git `--get-all`).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Config`] when `key` is not a valid Git config key.
+    pub fn get_all_with_origin(&self, key: &str) -> Result<Vec<ConfigValueOrigin>> {
+        let canon = canonical_key(key)?;
+        Ok(self
+            .entries
+            .iter()
+            .filter(|e| e.key == canon)
+            .map(|e| ConfigValueOrigin {
+                value: e.value.clone().or_else(|| Some("true".to_owned())),
+                scope: e.scope,
+                file: config_entry_origin_file(e).map(Path::to_path_buf),
+                line: config_entry_origin_line(e),
+            })
+            .collect())
+    }
+
     /// Get all values for a key (multi-valued; in load order).
     #[must_use]
     pub fn get_all(&self, key: &str) -> Vec<String> {
@@ -4064,7 +4084,7 @@ fn global_config_paths(env: &Environment) -> Vec<PathBuf> {
 /// Honors `GIT_CONFIG_SYSTEM`. On Windows, falls back to Git for Windows'
 /// `etc/gitconfig` when `/etc/gitconfig` is absent (stock shells, not MSYS).
 #[must_use]
-pub(crate) fn system_config_path(env: &Environment) -> PathBuf {
+pub fn system_config_path(env: &Environment) -> PathBuf {
     if let Some(p) = env.git_config_system.as_deref() {
         return resolve_config_override_path(env, p);
     }

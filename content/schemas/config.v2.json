@@ -6,7 +6,6 @@
       "description": "One entry in a `list` outcome. `value` is `null` for a bare/valueless key.",
       "properties": {
         "file": {
-          "description": "Source file, when the entry is file-backed.",
           "type": [
             "string",
             "null"
@@ -16,7 +15,6 @@
           "type": "string"
         },
         "scope": {
-          "description": "Which config layer this entry came from (`system`, `global`, `local`, …).",
           "type": "string"
         },
         "value": {
@@ -28,6 +26,38 @@
       },
       "required": [
         "key",
+        "scope"
+      ],
+      "type": "object"
+    },
+    "ConfigValueWithOrigin": {
+      "description": "One value in a `get_all` outcome.",
+      "properties": {
+        "file": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "line": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "scope": {
+          "type": "string"
+        },
+        "value": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
         "scope"
       ],
       "type": "object"
@@ -83,6 +113,31 @@
       "properties": {
         "action": {
           "enum": [
+            "get_all"
+          ],
+          "type": "string"
+        },
+        "key": {
+          "type": "string"
+        },
+        "values": {
+          "items": {
+            "$ref": "#/definitions/ConfigValueWithOrigin"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "action",
+        "key",
+        "values"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "action": {
+          "enum": [
             "list"
           ],
           "type": "string"
@@ -108,8 +163,48 @@
           ],
           "type": "string"
         },
+        "dry_run": {
+          "type": "boolean"
+        },
         "key": {
           "type": "string"
+        },
+        "preview": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "value": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "key",
+        "value"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "action": {
+          "enum": [
+            "add"
+          ],
+          "type": "string"
+        },
+        "dry_run": {
+          "type": "boolean"
+        },
+        "key": {
+          "type": "string"
+        },
+        "preview": {
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "value": {
           "type": "string"
@@ -130,13 +225,113 @@
           ],
           "type": "string"
         },
+        "dry_run": {
+          "type": "boolean"
+        },
         "key": {
           "type": "string"
+        },
+        "preview": {
+          "type": [
+            "string",
+            "null"
+          ]
         }
       },
       "required": [
         "action",
         "key"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "action": {
+          "enum": [
+            "unset_all"
+          ],
+          "type": "string"
+        },
+        "dry_run": {
+          "type": "boolean"
+        },
+        "key": {
+          "type": "string"
+        },
+        "preview": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "removed": {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "action",
+        "key",
+        "removed"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "action": {
+          "enum": [
+            "rename_section"
+          ],
+          "type": "string"
+        },
+        "dry_run": {
+          "type": "boolean"
+        },
+        "new_name": {
+          "type": "string"
+        },
+        "old_name": {
+          "type": "string"
+        },
+        "preview": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "action",
+        "new_name",
+        "old_name"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "action": {
+          "enum": [
+            "remove_section"
+          ],
+          "type": "string"
+        },
+        "dry_run": {
+          "type": "boolean"
+        },
+        "preview": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "section": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "section"
       ],
       "type": "object"
     }

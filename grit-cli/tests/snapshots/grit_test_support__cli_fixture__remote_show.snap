@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "* remote origin\n  Fetch URL: [REPO]/origin.git\n  Push  URL: [REPO]/origin.git\n  HEAD branch: main\n  Remote branches:\n    (none)\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\"action\":\"show\",\"name\":\"origin\",\"fetch_url\":\"[REPO]/origin.git\",\"push_url\":\"[REPO]/origin.git\",\"head_branch\":\"main\",\"branches\":[],\"pull\":[]}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "## Remote `origin`\n\n| | |\n| --- | --- |\n| Fetch URL | [REPO]/origin.git |\n| Push URL | [REPO]/origin.git |\n| HEAD branch | `main` |\n\n### Remote branches\n\nNo remote branches.\n\n",
+    "stderr": ""
+  }
+}

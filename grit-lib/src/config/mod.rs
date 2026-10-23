@@ -15,11 +15,17 @@
 mod core;
 pub mod handle;
 mod location;
+mod typed;
 
 pub use core::*;
 pub use handle::ConfigHandle;
 pub use location::{
-    global_config_write_path, set_config_value, unset_config_value, ConfigLocation,
+    add_config_value, global_config_write_path, remove_config_section, rename_config_section,
+    set_config_value, unset_all_config_values, unset_config_value, ConfigLocation,
+    ConfigWritePreview,
+};
+pub use typed::{
+    canonicalize_config_write_value, parse_typed_value, ConfigValueType, TypedConfigValue,
 };
 
 pub mod dotfile {
