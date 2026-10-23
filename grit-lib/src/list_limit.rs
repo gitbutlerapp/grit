@@ -1,4 +1,12 @@
 //! Bounded list results shared by notes, hooks, bundle heads, and CLI list commands.
+//!
+//! ```rust
+//! use grit_lib::list_limit::Limited;
+//!
+//! let limited = Limited::from_vec(vec!["a", "b", "c"], Some(2));
+//! assert_eq!(limited.items, ["a", "b"]);
+//! assert!(limited.truncated);
+//! ```
 
 /// A list capped by an optional limit, with truncation when more items existed.
 #[derive(Debug, Clone, PartialEq, Eq)]
