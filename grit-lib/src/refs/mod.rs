@@ -65,11 +65,6 @@ fn map_public_ref_store_error(err: Error, refname: &str) -> Error {
         Error::RefStore(store::RefStoreError::SymrefLoop) => {
             Error::InvalidRef(format!("ref symlink too deep: {refname}"))
         }
-        Error::RefStore(store::RefStoreError::Corrupt(msg))
-            if msg.contains("not-a-ref") || msg.contains("reference broken") =>
-        {
-            Error::InvalidRef(format!("cannot update ref '{refname}': reference broken"))
-        }
         other => other,
     }
 }
@@ -1713,7 +1708,8 @@ fn write_ref_at_storage(
 ///
 /// # Errors
 ///
-/// Same as [`write_ref`], plus [`Error::Message`] when the CAS check fails under lock.
+/// Same as [`write_ref`], plus [`store::RefStoreError::ExpectedMismatch`] when the CAS check
+/// fails under lock.
 pub fn write_ref_cas(
     git_dir: &Path,
     refname: &str,
@@ -1733,7 +1729,8 @@ pub fn write_ref_cas(
 ///
 /// # Errors
 ///
-/// Same as [`delete_ref`], plus [`Error::Message`] when the CAS check fails.
+/// Same as [`delete_ref`], plus [`store::RefStoreError::ExpectedMismatch`] when the CAS check
+/// fails.
 pub fn delete_ref_cas(git_dir: &Path, refname: &str, expected_old: ObjectId) -> Result<()> {
     store_write_value(git_dir, refname, None, Expected::Oid(expected_old), None)
 }
@@ -2798,8 +2795,9 @@ fn test_inject_reflog_fail(_refname: &str) -> Result<()> {
 ///
 /// # Errors
 ///
-/// Returns [`Error::Message`] when `HEAD` does not point at `branch_ref`, when the
-/// CAS check fails, or when ref/reflog I/O fails.
+/// Returns [`Error::Message`] when `HEAD` does not point at `branch_ref`,
+/// [`store::RefStoreError::ExpectedMismatch`] (see [`verify_branch_commit_cas`]) when the
+/// CAS check fails, or an I/O error when ref/reflog writes fail.
 pub struct BranchCommitRefUpdate<'a> {
     /// Branch ref to update (e.g. `refs/heads/main`).
     pub branch_ref: &'a str,
@@ -2815,9 +2813,13 @@ pub struct BranchCommitRefUpdate<'a> {
 
 /// Compare expected and current branch tips for compare-and-swap ref updates.
 ///
+/// `None` means the branch is absent (unborn) on either side.
+///
 /// # Errors
 ///
-/// Returns an error when `current` does not match `expected`.
+/// Returns [`Error::RefStore`] with [`store::RefStoreError::ExpectedMismatch`] when
+/// `current` does not match `expected`; `expected` is [`Expected::Missing`] when the branch
+/// had to be absent, and `actual` is `None` when it was.
 pub fn verify_branch_commit_cas(
     expected: Option<ObjectId>,
     current: Option<ObjectId>,
@@ -2831,23 +2833,15 @@ fn verify_branch_cas(
     current: Option<ObjectId>,
     refname: &str,
 ) -> Result<()> {
-    match (expected, current) {
-        (Some(exp), Some(cur)) if exp == cur => Ok(()),
-        (None, None) => Ok(()),
-        (Some(exp), None) => Err(Error::Message(format!(
-            "ref transaction rejected: '{refname}' expected {} but found <absent>",
-            exp.to_hex()
-        ))),
-        (None, Some(cur)) => Err(Error::Message(format!(
-            "ref transaction rejected: '{refname}' expected <absent> but found {}",
-            cur.to_hex()
-        ))),
-        (Some(exp), Some(cur)) => Err(Error::Message(format!(
-            "ref transaction rejected: '{refname}' expected {} but found {}",
-            exp.to_hex(),
-            cur.to_hex()
-        ))),
+    if expected == current {
+        return Ok(());
     }
+    Err(store::RefStoreError::ExpectedMismatch {
+        name: refname.to_owned(),
+        expected: expected.map_or(Expected::Missing, Expected::Oid),
+        actual: current.map(StoreRawRef::Direct),
+    }
+    .into())
 }
 
 fn read_loose_or_packed_oid(git_dir: &Path, refname: &str) -> Result<Option<ObjectId>> {
@@ -3354,8 +3348,9 @@ pub fn update_branch_for_commit_with_config(
 ///
 /// # Errors
 ///
-/// Returns [`Error::Message`] when `HEAD` is symbolic (not detached), when the CAS check
-/// fails, or when ref/reflog I/O fails.
+/// Returns [`Error::Message`] when `HEAD` is symbolic (not detached),
+/// [`store::RefStoreError::ExpectedMismatch`] when the CAS check fails, or an I/O error
+/// when ref/reflog writes fail.
 pub(crate) fn update_detached_head_for_commit_with_config(
     git_dir: &Path,
     expected_old: Option<ObjectId>,
