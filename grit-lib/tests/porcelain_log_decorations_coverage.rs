@@ -190,3 +190,65 @@ fn packed_ref_peel_lines_decorate_like_loose_tags() -> grit_lib::error::Result<(
 
     Ok(())
 }
+
+/// Targeted decorations skip packed refs using peel lines only as far as the `packed-refs`
+/// header vouches for them; every header Git can write must decorate like loose refs.
+#[test]
+fn targeted_decorations_match_full_for_every_packed_refs_header() -> grit_lib::error::Result<()> {
+    let hist = HistoryRepo::init();
+    let wt = hist.worktree();
+    commit_file(wt, "a.txt", "a\n", "first");
+    let first = git(wt, &["rev-parse", "HEAD"]).trim().to_string();
+    git(wt, &["tag", "-a", "-m", "annotated", "v1"]);
+    git(wt, &["tag", "light"]);
+    commit_file(wt, "b.txt", "b\n", "second");
+    let second = git(wt, &["rev-parse", "HEAD"]).trim().to_string();
+    git(wt, &["branch", "topic", &first]);
+    let tag_object = git(wt, &["rev-parse", "v1"]).trim().to_string();
+    // A ref outside `refs/tags/` naming an annotated tag is only peel-covered by `fully-peeled`.
+    git(
+        wt,
+        &["update-ref", "refs/remotes/origin/names-a-tag", &tag_object],
+    );
+    git(wt, &["update-ref", "refs/remotes/origin/main", &second]);
+    git(
+        wt,
+        &["update-ref", &format!("refs/replace/{first}"), &second],
+    );
+
+    let repo = open_grit_repo(wt);
+    let loose = decoration_rows(&collect_decorations(&repo, false)?);
+    assert!(
+        loose
+            .iter()
+            .any(|(hex, items)| hex == &first
+                && items.iter().any(|(_, d)| d == "origin/names-a-tag")),
+        "{loose:?}"
+    );
+
+    git(wt, &["pack-refs", "--all"]);
+    let packed_path = repo.git_dir().join("packed-refs");
+    let packed = fs::read_to_string(&packed_path).expect("packed-refs");
+    let (header, records) = packed.split_once('\n').expect("header line");
+    assert!(header.contains("fully-peeled"), "{header}");
+    for header in [
+        header.to_owned(),
+        "# pack-refs with: peeled sorted ".to_owned(),
+        String::new(),
+    ] {
+        let body = if header.is_empty() {
+            records.to_owned()
+        } else {
+            format!("{header}\n{records}")
+        };
+        fs::write(&packed_path, body).map_err(grit_lib::error::Error::Io)?;
+        let repo = open_grit_repo(wt);
+        assert_eq!(
+            decoration_rows(&collect_decorations(&repo, false)?),
+            loose,
+            "header {header:?}"
+        );
+        assert_targeted_matches_full(&repo, wt);
+    }
+    Ok(())
+}

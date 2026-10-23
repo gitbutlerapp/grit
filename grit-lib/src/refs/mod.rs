@@ -270,8 +270,16 @@ fn store_write_value(
 }
 
 fn collect_resolved_refs(store: &dyn RefStore, prefix: &str) -> Result<Vec<(String, ObjectId)>> {
+    collect_resolved_ref_entries(store, |f| store.for_each_ref(prefix, f))
+}
+
+/// Resolve each entry `for_each` yields to an object id through `store`.
+fn collect_resolved_ref_entries(
+    store: &dyn RefStore,
+    for_each: impl FnOnce(&mut dyn FnMut(&RefEntry) -> ControlFlow<()>) -> Result<()>,
+) -> Result<Vec<(String, ObjectId)>> {
     let mut results = Vec::new();
-    store.for_each_ref(prefix, &mut |entry: &RefEntry| {
+    for_each(&mut |entry: &RefEntry| {
         let oid = entry
             .peeled
             .or_else(|| match &entry.value {
@@ -925,6 +933,8 @@ pub(crate) struct PackedRefsFileView {
     hex_len: usize,
     /// Starts of the well-formed records (`<hex id> <name>`) in file order.
     data_line_starts: Vec<usize>,
+    /// Which records the header promises a peel line for.
+    peel_trait: PackedPeelTrait,
 }
 
 impl PackedRefsFileView {
@@ -953,6 +963,7 @@ impl PackedRefsFileView {
                 sorted: false,
                 hex_len,
                 data_line_starts: Vec::new(),
+                peel_trait: PackedPeelTrait::None,
             });
         }
         if memchr::memchr(b'\r', &data).is_some() {
@@ -988,6 +999,7 @@ impl PackedRefsFileView {
             sorted: in_order && packed_refs_file_declares_sorted(text),
             hex_len,
             data_line_starts,
+            peel_trait: packed_refs_peel_trait(text),
             data,
         })
     }
@@ -1077,6 +1089,17 @@ impl PackedRefsFileView {
         path: &Path,
         prefix: Option<&str>,
     ) -> Result<HashMap<String, ObjectId>> {
+        self.map_for_prefix_filtered(path, prefix, None)
+    }
+
+    /// [`Self::map_for_prefix`], leaving out the records `keep` rejects. Rejected records are
+    /// still parsed strictly; they are only spared the allocation.
+    fn map_for_prefix_filtered(
+        &self,
+        path: &Path,
+        prefix: Option<&str>,
+        keep: Option<PackedRecordFilter<'_>>,
+    ) -> Result<HashMap<String, ObjectId>> {
         let prefix_trim = prefix.map(|p| p.trim_end_matches('/'));
         let range_prefix = prefix_trim.filter(|p| self.sorted && !p.is_empty() && *p != "refs");
         let (lo, hi) = match range_prefix {
@@ -1109,9 +1132,25 @@ impl PackedRefsFileView {
         // `from_bytes` validated the whole buffer as UTF-8 and both bounds follow a `\n`.
         let region = std::str::from_utf8(&self.data[begin..end])
             .map_err(|_| packed_refs_unexpected_line(path, "<invalid utf-8>"))?;
-        parse_packed_refs_region(path, region, prefix_trim)
+        parse_packed_refs_region(path, region, prefix_trim, keep, self.peel_trait)
     }
 }
+
+/// What a `packed-refs` record tells about the object its ref names, given the file's
+/// `peeled` / `fully-peeled` header traits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PackedPeel {
+    /// The ref names an annotated tag that peels to this object.
+    Peeled(ObjectId),
+    /// The ref is known not to name an annotated tag.
+    NotTag,
+    /// The file does not say; the object must be read to peel it.
+    Unknown,
+}
+
+/// Decides, from its storage name, object id and [`PackedPeel`], whether a `packed-refs`
+/// record is listed.
+pub(crate) type PackedRecordFilter<'a> = &'a dyn Fn(&str, &ObjectId, PackedPeel) -> bool;
 
 /// Strictly parse the `packed-refs` lines of `region`, keeping refs that match `prefix`.
 ///
@@ -1121,6 +1160,8 @@ fn parse_packed_refs_region(
     path: &Path,
     region: &str,
     prefix: Option<&str>,
+    keep: Option<PackedRecordFilter<'_>>,
+    peel_trait: PackedPeelTrait,
 ) -> Result<HashMap<String, ObjectId>> {
     let ref_opts = RefNameOptions {
         allow_onelevel: false,
@@ -1128,6 +1169,22 @@ fn parse_packed_refs_region(
         normalize: false,
     };
     let mut map = HashMap::new();
+    // With a filter, a record is decided once its peel line (if any) has been seen.
+    let mut pending: Option<(&str, ObjectId, Option<ObjectId>)> = None;
+    let flush = |map: &mut HashMap<String, ObjectId>,
+                 pending: &mut Option<(&str, ObjectId, Option<ObjectId>)>| {
+        let (Some(keep), Some((refname, oid, peeled))) = (keep, pending.take()) else {
+            return;
+        };
+        let peel = if peel_trait.covers(refname) {
+            peeled.map_or(PackedPeel::NotTag, PackedPeel::Peeled)
+        } else {
+            PackedPeel::Unknown
+        };
+        if keep(refname, &oid, peel) {
+            map.insert(refname.to_owned(), oid);
+        }
+    };
     let mut expect_peel = false;
     let mut lines = region.split('\n').peekable();
     while let Some(line) = lines.next() {
@@ -1138,20 +1195,30 @@ fn parse_packed_refs_region(
             break;
         }
         if line.starts_with('#') {
+            flush(&mut map, &mut pending);
             expect_peel = false;
             continue;
         }
-        if line.starts_with('^') {
+        if let Some(peel_hex) = line.strip_prefix('^') {
             parse_packed_ref_peel_line(path, line, expect_peel)?;
+            if let Some((_, _, peeled)) = pending.as_mut() {
+                *peeled = ObjectId::from_hex(peel_hex).ok();
+            }
             expect_peel = false;
             continue;
         }
+        flush(&mut map, &mut pending);
         let (refname, oid) = parse_packed_ref_data_line_borrowed(path, line, &ref_opts)?;
         if prefix.is_none_or(|p| ref_name_matches_list_prefix(refname, p)) {
-            map.insert(refname.to_owned(), oid);
+            if keep.is_some() {
+                pending = Some((refname, oid, None));
+            } else {
+                map.insert(refname.to_owned(), oid);
+            }
         }
         expect_peel = true;
     }
+    flush(&mut map, &mut pending);
     Ok(map)
 }
 
@@ -1343,6 +1410,15 @@ pub(crate) fn read_packed_refs_map_for_prefix(
     store: &Path,
     prefix: &str,
 ) -> Result<HashMap<String, ObjectId>> {
+    read_packed_refs_map_for_prefix_filtered(store, prefix, None)
+}
+
+/// [`read_packed_refs_map_for_prefix`], leaving out the records `keep` rejects.
+pub(crate) fn read_packed_refs_map_for_prefix_filtered(
+    store: &Path,
+    prefix: &str,
+    keep: Option<PackedRecordFilter<'_>>,
+) -> Result<HashMap<String, ObjectId>> {
     let Some(view) = read_packed_refs_file_view(store)? else {
         return Ok(HashMap::new());
     };
@@ -1352,7 +1428,7 @@ pub(crate) fn read_packed_refs_map_for_prefix(
     } else {
         Some(prefix)
     };
-    view.map_for_prefix(&packed_path, filter)
+    view.map_for_prefix_filtered(&packed_path, filter, keep)
 }
 
 /// What a `packed-refs` header promises about its `^` peel lines.
@@ -1364,6 +1440,17 @@ enum PackedPeelTrait {
     Tags,
     /// `fully-peeled`: every ref that names an annotated tag has a peel line.
     All,
+}
+
+impl PackedPeelTrait {
+    /// Whether a ref named `refname` without a peel line is known not to name an annotated tag.
+    fn covers(self, refname: &str) -> bool {
+        match self {
+            Self::None => false,
+            Self::Tags => refname.starts_with("refs/tags/"),
+            Self::All => true,
+        }
+    }
 }
 
 /// Read-only snapshot of the peel lines recorded in `packed-refs`.
@@ -1405,8 +1492,7 @@ impl PackedRefPeels {
         let Some(view) = read_packed_refs_file_view(&store)? else {
             return Ok(empty);
         };
-        let peel_trait =
-            std::str::from_utf8(&view.data).map_or(PackedPeelTrait::None, packed_refs_peel_trait);
+        let peel_trait = view.peel_trait;
         if peel_trait == PackedPeelTrait::None {
             return Ok(empty);
         }
@@ -1435,12 +1521,7 @@ impl PackedRefPeels {
     /// - `Some(None)`: the ref is known not to name an annotated tag.
     /// - `None`: `packed-refs` does not say; the caller must peel the object itself.
     pub(crate) fn peeled(&self, refname: &str, oid: &ObjectId) -> Option<Option<ObjectId>> {
-        let covered = match self.peel_trait {
-            PackedPeelTrait::None => false,
-            PackedPeelTrait::Tags => refname.starts_with("refs/tags/"),
-            PackedPeelTrait::All => true,
-        };
-        if !covered {
+        if !self.peel_trait.covers(refname) {
             return None;
         }
         let view = self.view.as_ref()?;
@@ -3670,6 +3751,36 @@ pub fn list_refs(git_dir: &Path, prefix: &str) -> Result<Vec<(String, ObjectId)>
     Ok(results)
 }
 
+/// [`list_refs`], except that `packed-refs` records `keep` rejects may be left out.
+///
+/// `keep` receives each packed record's name, object id and what the file records about
+/// peeling it, before anything is allocated for the record. Loose refs, and every ref of a
+/// reftable repository, are always listed, so `keep` only ever narrows the listing to a
+/// subset of [`list_refs`].
+///
+/// # Errors
+///
+/// Propagates ref-store open/read failures, like [`list_refs`].
+pub(crate) fn list_refs_filtering_packed(
+    git_dir: &Path,
+    prefix: &str,
+    keep: PackedRecordFilter<'_>,
+) -> Result<Vec<(String, ObjectId)>> {
+    let Some(store) = store::open_files_ref_store(git_dir)? else {
+        return list_refs(git_dir, prefix);
+    };
+    let prefix_norm = normalize_list_refs_prefix(git_dir, prefix);
+    let prefix = prefix_norm.as_str();
+    let mut results = collect_resolved_ref_entries(&store, |f| {
+        store.for_each_ref_filtered(prefix, Some(keep), f)
+    })?;
+    if crate::worktree_ref::is_linked_worktree_git_dir(git_dir) {
+        results.retain(|(name, _)| crate::worktree_ref::ref_visible_from_worktree(git_dir, name));
+    }
+    results.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(results)
+}
+
 /// Resolve a ref using Git DWIM rules (`expand_ref` / `repo_dwim_ref`).
 pub fn resolve_ref_dwim(git_dir: &Path, spec: &str) -> (usize, Option<ObjectId>) {
     crate::worktree_ref::resolve_ref_dwim(|candidate| resolve_ref(git_dir, candidate).ok(), spec)
@@ -4699,6 +4810,93 @@ mod packed_refs_parse_tests {
         let data = fs::read(&path).unwrap();
         assert!(matches!(
             parse_packed_refs_to_map(&path, &data),
+            Err(Error::PackedRefsUnexpectedLine { .. })
+        ));
+    }
+
+    #[test]
+    fn packed_record_filter_sees_trusted_peels_and_keeps_strictness() {
+        let dir = tempdir().unwrap();
+        let path = store::paths::packed_refs_path(dir.path());
+        let a = "1111111111111111111111111111111111111111";
+        let b = "2222222222222222222222222222222222222222";
+        let peel = "3333333333333333333333333333333333333333";
+        let body = |header: &str| {
+            format!(
+                "{header}{a} refs/heads/main\n\
+                 {b} refs/heads/tagged\n\
+                 ^{peel}\n\
+                 {a} refs/tags/light\n\
+                 {b} refs/tags/v1\n\
+                 ^{peel}\n"
+            )
+        };
+        let a: ObjectId = a.parse().unwrap();
+        let b: ObjectId = b.parse().unwrap();
+        let peel: ObjectId = peel.parse().unwrap();
+        let cases = [
+            (
+                "# pack-refs with: peeled fully-peeled sorted \n",
+                [
+                    PackedPeel::NotTag,
+                    PackedPeel::Peeled(peel),
+                    PackedPeel::NotTag,
+                    PackedPeel::Peeled(peel),
+                ],
+            ),
+            (
+                "# pack-refs with: peeled sorted \n",
+                [
+                    PackedPeel::Unknown,
+                    PackedPeel::Unknown,
+                    PackedPeel::NotTag,
+                    PackedPeel::Peeled(peel),
+                ],
+            ),
+            ("", [PackedPeel::Unknown; 4]),
+        ];
+        for (header, want) in cases {
+            let data = body(header).into_bytes();
+            let view = PackedRefsFileView::from_bytes(&path, data, HashAlgo::Sha1).unwrap();
+            let seen = std::cell::RefCell::new(Vec::new());
+            let keep = |name: &str, oid: &ObjectId, peel: PackedPeel| {
+                seen.borrow_mut().push((name.to_owned(), *oid, peel));
+                name.starts_with("refs/tags/")
+            };
+            let kept = view
+                .map_for_prefix_filtered(&path, Some("refs"), Some(&keep))
+                .unwrap();
+            assert_eq!(
+                seen.into_inner(),
+                vec![
+                    ("refs/heads/main".to_owned(), a, want[0]),
+                    ("refs/heads/tagged".to_owned(), b, want[1]),
+                    ("refs/tags/light".to_owned(), a, want[2]),
+                    ("refs/tags/v1".to_owned(), b, want[3]),
+                ],
+                "header {header:?}"
+            );
+            let mut kept: Vec<_> = kept.into_iter().collect();
+            kept.sort();
+            assert_eq!(
+                kept,
+                vec![
+                    ("refs/tags/light".to_owned(), a),
+                    ("refs/tags/v1".to_owned(), b)
+                ]
+            );
+            assert_eq!(
+                view.map_for_prefix_filtered(&path, Some("refs"), None)
+                    .unwrap(),
+                view.map_for_prefix(&path, Some("refs")).unwrap()
+            );
+        }
+
+        // A malformed record is an error even when the filter would drop it.
+        let bad = format!("# pack-refs with: peeled fully-peeled \n{a} refs/heads/bad..name\n");
+        let view = PackedRefsFileView::from_bytes(&path, bad.into_bytes(), HashAlgo::Sha1).unwrap();
+        assert!(matches!(
+            view.map_for_prefix_filtered(&path, None, Some(&|_: &str, _: &ObjectId, _| false)),
             Err(Error::PackedRefsUnexpectedLine { .. })
         ));
     }
