@@ -30,10 +30,22 @@
           "minimum": 0.0,
           "type": "integer"
         },
+        "ignored": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "original_line": {
           "format": "uint",
           "minimum": 0.0,
           "type": "integer"
+        },
+        "unblamable": {
+          "type": [
+            "boolean",
+            "null"
+          ]
         }
       },
       "required": [

@@ -1175,6 +1175,32 @@ pub enum Error {
     /// Annotated tag tree-sha256 header parsing failed.
     #[error(transparent)]
     TreeSha256Claim(#[from] crate::tree_sha256::TreeSha256ClaimError),
+
+    /// `grit blame --ignore-rev` did not resolve to a commit.
+    #[error("cannot find revision {rev} to ignore")]
+    BlameIgnoreRevUnknown {
+        /// Revision expression from `--ignore-rev`.
+        rev: String,
+    },
+
+    /// `--ignore-revs-file` could not be read.
+    #[error("could not open object name list: {path}")]
+    BlameIgnoreRevsFileOpen {
+        /// Path argument (before expansion).
+        path: String,
+        /// Underlying open error.
+        #[source]
+        source: std::io::Error,
+    },
+
+    /// A line in an ignore-revs file is not a full-length object id.
+    #[error("invalid object name: {rev}")]
+    BlameIgnoreRevsFileInvalidRev {
+        /// Path argument for the file.
+        path: String,
+        /// Offending line text after comment/trim handling.
+        rev: String,
+    },
 }
 
 impl Error {

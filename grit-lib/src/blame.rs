@@ -23,6 +23,10 @@ use std::ops::RangeInclusive;
 
 use similar::Algorithm as SimilarAlgorithm;
 
+#[path = "blame_ignore_revs.rs"]
+mod blame_ignore_revs;
+pub use blame_ignore_revs::{IgnoreRevs, IgnoreRevsSources};
+
 /// Diff algorithm used when mapping lines between blob revisions during blame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum BlameDiffAlgorithm {
@@ -3222,6 +3226,8 @@ pub struct BlameOptions {
     pub line_range: Option<RangeInclusive<usize>>,
     /// When true, follow only the first parent at merge commits (Git's `--first-parent`).
     pub first_parent_only: bool,
+    /// Commits to treat as transparent during the history walk.
+    pub ignore: IgnoreRevs,
 }
 
 /// One blamed line returned by [`blame_file`].
@@ -3235,6 +3241,10 @@ pub struct BlameAttributedLine {
     pub final_line: usize,
     /// Line text in the blamed revision.
     pub content: String,
+    /// Line attribution passed through an ignored revision.
+    pub ignored: bool,
+    /// Line could not be blamed past an ignored revision.
+    pub unblamable: bool,
 }
 
 /// Metadata for a commit referenced by [`BlameResult::lines`].
@@ -3280,7 +3290,7 @@ pub fn blame_file(repo: &Repository, path: &str, options: &BlameOptions) -> Resu
         .get_bool("diff.indentHeuristic")
         .and_then(|v| v.ok())
         .unwrap_or(false);
-    let ignore_revs = HashSet::new();
+    let ignore_revs: HashSet<ObjectId> = options.ignore.as_set().clone();
 
     let thread_policy = repo.thread_policy();
     let mut session = BlameSession::new(repo.odb(), None, false, &thread_policy);
@@ -3310,6 +3320,8 @@ pub fn blame_file(repo: &Repository, path: &str, options: &BlameOptions) -> Resu
                     original_line: line.orig_lineno,
                     final_line: line.final_lineno,
                     content: line.content,
+                    ignored: line.ignored,
+                    unblamable: line.unblamable,
                 })
                 .collect();
 

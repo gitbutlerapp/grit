@@ -5,7 +5,7 @@ use std::io::Write;
 use std::ops::RangeInclusive;
 
 use anyhow::{Context, Result};
-use grit_lib::blame::{blame_file, BlameOptions, BlameResult};
+use grit_lib::blame::{blame_file, BlameOptions, BlameResult, IgnoreRevs, IgnoreRevsSources};
 use grit_lib::objects::ObjectId;
 use grit_lib::revwalk::rev_parse::resolve_revision_as_commit;
 use schemars::JsonSchema;
@@ -33,6 +33,10 @@ pub struct BlameLineJson {
     pub original_line: usize,
     pub final_line: usize,
     pub content: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ignored: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub unblamable: Option<bool>,
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -49,15 +53,21 @@ struct BlameDisplayLine {
     content: String,
     author_short: String,
     date: String,
+    marker: char,
 }
 
 impl HumanRender for BlameOutcome {
     fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         for line in &self.display_lines {
             let short = short_oid(&line.commit.to_hex());
+            let prefix = if line.marker == ' ' {
+                String::new()
+            } else {
+                format!("{}", line.marker)
+            };
             outln!(
                 w,
-                "{short} ({author} {date} {final:>4}) {content}",
+                "{prefix}{short} ({author} {date} {final:>4}) {content}",
                 author = line.author_short,
                 date = line.date,
                 final = line.final_line,
@@ -76,15 +86,23 @@ impl MarkdownRender for BlameOutcome {
             outln!(w, "No lines to show.\n");
             return Ok(());
         }
-        outln!(w, "| Line | Commit | Author | Date | Original | Content |");
-        outln!(w, "| ---: | --- | --- | --- | ---: | --- |");
+        outln!(
+            w,
+            "| Line | Mark | Commit | Author | Date | Original | Content |"
+        );
+        outln!(w, "| ---: | :---: | --- | --- | --- | ---: | --- |");
         for line in &self.display_lines {
             let short = short_oid(&line.commit.to_hex());
             let content = markdown::escape_table_cell(&line.content);
+            let mark = match line.marker {
+                ' ' => String::new(),
+                c => c.to_string(),
+            };
             outln!(
                 w,
-                "| {} | `{}` | {} | {} | {} | {} |",
+                "| {} | {} | `{}` | {} | {} | {} | {} |",
                 line.final_line,
+                mark,
                 short,
                 line.author_short,
                 line.date,
@@ -101,6 +119,16 @@ fn short_oid(full: &str) -> String {
     full.chars().take(7).collect()
 }
 
+fn blame_line_marker(unblamable: bool, ignored: bool) -> char {
+    if unblamable {
+        '*'
+    } else if ignored {
+        '?'
+    } else {
+        ' '
+    }
+}
+
 /// Strip trailing line terminators from blamed line text for display and JSON.
 fn normalize_blame_line_content(content: String) -> String {
     content.trim_end_matches(['\n', '\r']).to_owned()
@@ -111,6 +139,8 @@ pub fn run(
     rev: Option<String>,
     line_range: Option<String>,
     first_parent: bool,
+    ignore_rev: Vec<String>,
+    ignore_revs_file: Vec<String>,
     now: time::OffsetDateTime,
 ) -> Result<BlameOutcome> {
     let repo = context::discover()?;
@@ -134,6 +164,15 @@ pub fn run(
         file.clone()
     };
 
+    let ignore = IgnoreRevs::load(
+        &repo,
+        &IgnoreRevsSources {
+            files: ignore_revs_file,
+            revs: ignore_rev,
+            use_config: true,
+        },
+    )?;
+
     let result = blame_file(
         &repo,
         &file,
@@ -141,6 +180,7 @@ pub fn run(
             start: Some(start),
             line_range: range,
             first_parent_only: first_parent,
+            ignore,
         },
     )?;
 
@@ -199,11 +239,14 @@ fn outcome_from_result(file: String, rev: String, result: BlameResult, now: i64)
             .unwrap_or_else(|| ("unknown".to_owned(), "?".to_owned()));
 
         let content = normalize_blame_line_content(line.content);
+        let marker = blame_line_marker(line.unblamable, line.ignored);
         lines_json.push(BlameLineJson {
             commit: commit_hex.clone(),
             original_line: line.original_line,
             final_line: line.final_line,
             content: content.clone(),
+            ignored: line.ignored.then_some(true),
+            unblamable: line.unblamable.then_some(true),
         });
         display_lines.push(BlameDisplayLine {
             commit: line.commit,
@@ -212,6 +255,7 @@ fn outcome_from_result(file: String, rev: String, result: BlameResult, now: i64)
             content,
             author_short,
             date,
+            marker,
         });
     }
 

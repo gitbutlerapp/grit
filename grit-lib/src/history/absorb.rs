@@ -532,6 +532,7 @@ fn blame_candidates(
             start: Some(head),
             line_range: Some(start..=end),
             first_parent_only: true,
+            ..Default::default()
         },
     )
     .map_err(|_| UnassignedReason::NoCandidate)?;
@@ -575,6 +576,7 @@ fn blame_candidates_for_pure_add(
                 start: Some(head),
                 line_range: Some(line..=line),
                 first_parent_only: true,
+                ..Default::default()
             },
         )
         .map_err(|_| UnassignedReason::NoCandidate)?;

@@ -434,11 +434,52 @@ pub fn run_fixture_cli_matrix(
                 fixture: fixture.label.clone(),
                 description: format!("blame {blame_path}"),
                 grit_argv: vec!["blame".into(), blame_path.clone()],
-                git_argv: vec!["blame".into(), "--porcelain".into(), blame_path],
+                git_argv: vec!["blame".into(), "--porcelain".into(), blame_path.clone()],
                 driver: Driver::Cli,
                 prepare_kind: None,
                 grit_via_shell: false,
                 git_via_shell: false,
+            },
+            &fixture.worktree,
+            !smoke,
+        )?);
+
+        let grit_q = shell_quote(&grit.to_string_lossy());
+        let ignore_script = format!(
+            r#"set -eu
+path={path}
+list=.grit-campaign-ignore-revs
+git log --format=%H -n 5 -- "$path" > "$list" || true
+exec {grit_q} blame --ignore-revs-file "$list" "$path"
+"#,
+            path = shell_quote(&blame_path),
+            grit_q = grit_q,
+        );
+        let git_ignore_script = format!(
+            r#"set -eu
+path={path}
+list=.grit-campaign-ignore-revs
+git log --format=%H -n 5 -- "$path" > "$list" || true
+exec git blame --porcelain --ignore-revs-file "$list" "$path"
+"#,
+            path = shell_quote(&blame_path),
+        );
+        out.push(run_matrix_scenario(
+            hyperfine,
+            git,
+            grit,
+            cfg,
+            &Scenario {
+                id: sid(fixture.id, "blame-ignore-revs"),
+                group: "blame".into(),
+                fixture: fixture.label.clone(),
+                description: format!("blame {blame_path} with ignore-revs-file"),
+                grit_argv: sh_script(format!("{ignore_script} grit")),
+                git_argv: sh_script(git_ignore_script),
+                driver: Driver::Cli,
+                prepare_kind: None,
+                grit_via_shell: true,
+                git_via_shell: true,
             },
             &fixture.worktree,
             !smoke,

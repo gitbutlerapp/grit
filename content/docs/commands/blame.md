@@ -8,7 +8,8 @@ order: 2
 ## Synopsis
 
 ```text
-grit blame [--rev <commit>] [-L START,END] [--first-parent] <file>
+grit blame [--rev <commit>] [-L START,END] [--first-parent]
+  [--ignore-rev <REV>]... [--ignore-revs-file <FILE>]... <file>
 ```
 
 ## Description
@@ -27,6 +28,10 @@ When a commit renamed or moved the file (including rename-and-edit in the same c
 | `-L START,END` | Limit output to an inclusive 1-based line range in the final file. Blame stops once every line in the range is attributed. |
 | `--lines` | Same as `-L` (long form). |
 | `--first-parent` | At merge commits, follow only the first parent when attributing lines. Default matches Git blame: all parents are considered. |
+| `--ignore-rev <REV>` | Treat this commit as transparent while walking history (repeatable). Unknown revisions are an error. |
+| `--ignore-revs-file <FILE>` | Read full-length commit oids to ignore, one per line (`#` comments, blank lines skipped). Repeatable; `""` clears entries loaded from config or earlier files. Missing files are an error. Relative paths are resolved from the repository root. Config `blame.ignoreRevsFile` (multi-valued) is applied before CLI files. |
+
+Human output prefixes ignored lines with `?` and lines that cannot be blamed past an ignored commit with `*` (same markers Git uses when `blame.markIgnoredLines` / `blame.markUnblamableLines` are enabled).
 
 ## Examples
 
@@ -65,6 +70,8 @@ Pass `--json` for stable, scripting-friendly output:
 | `lines[].original_line` | number | 1-based line number in the originating commit. |
 | `lines[].final_line` | number | 1-based line number in the blamed revision. |
 | `lines[].content` | string | Line text. |
+| `lines[].ignored` | boolean | Present and `true` when the line was attributed through an ignored revision. |
+| `lines[].unblamable` | boolean | Present and `true` when the line was added in an ignored revision and cannot be blamed further back. |
 | `commits` | object | Map of commit oid → metadata for every line. |
 | `commits.<oid>.author` | object | Author with `name`, `email`, and `date` (RFC 3339 — same shape as [`grit show`](../show/)). |
 | `commits.<oid>.summary` | string | First line of the commit message. |

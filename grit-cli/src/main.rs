@@ -657,6 +657,12 @@ enum Command {
         /// At merge commits, follow only the first parent (Git's `--first-parent`).
         #[arg(long = "first-parent")]
         first_parent: bool,
+        /// Ignore this revision when attributing lines (repeatable).
+        #[arg(long = "ignore-rev", value_name = "REV")]
+        ignore_rev: Vec<String>,
+        /// Read revision oids to ignore from a file (repeatable; `""` clears prior entries).
+        #[arg(long = "ignore-revs-file", value_name = "FILE")]
+        ignore_revs_file: Vec<String>,
     },
     /// Show changes as a diff. No argument: uncommitted changes; with a commit:
     /// the change that commit introduced; with two commits (or `A..B`) diff their trees.
@@ -1904,8 +1910,18 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
             rev,
             line_range,
             first_parent,
+            ignore_rev,
+            ignore_revs_file,
         } => emit(
-            &commands::blame::run(file, rev, line_range, first_parent, ctx.now)?,
+            &commands::blame::run(
+                file,
+                rev,
+                line_range,
+                first_parent,
+                ignore_rev,
+                ignore_revs_file,
+                ctx.now,
+            )?,
             opts,
             ctx,
         ),
