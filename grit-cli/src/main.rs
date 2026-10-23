@@ -5,6 +5,7 @@
 //! doubles as the home base: running `grit` with no arguments shows you where you
 //! are, what's changed, and what to do next.
 
+mod cli_command;
 mod cli_messages;
 mod commands;
 mod commits_json;
@@ -2441,7 +2442,7 @@ mod tests {
     }
 
     fn cli_supports_markdown() -> bool {
-        Cli::command()
+        crate::cli_command::build_cli_command()
             .get_arguments()
             .any(|arg| arg.get_id() == "markdown" || arg.get_long() == Some("markdown"))
     }
@@ -2550,7 +2551,7 @@ mod tests {
     fn command_pages_follow_template() {
         let dir = commands_dir();
         let mut problems = Vec::new();
-        for command in Cli::command().get_subcommands() {
+        for command in crate::cli_command::build_cli_command().get_subcommands() {
             let name = command.get_name();
             if name == "help" {
                 continue;
@@ -2617,7 +2618,7 @@ Example:
     fn json_examples_parse() {
         let dir = commands_dir();
         let mut problems = Vec::new();
-        for command in Cli::command().get_subcommands() {
+        for command in crate::cli_command::build_cli_command().get_subcommands() {
             let name = command.get_name();
             if name == "help" {
                 continue;
@@ -2699,7 +2700,7 @@ The keys are `initialized`, `path`, `bare`, and `branch`.
         let dir = commands_dir();
         let global_markdown = cli_supports_markdown();
         let mut problems = Vec::new();
-        for command in Cli::command().get_subcommands() {
+        for command in crate::cli_command::build_cli_command().get_subcommands() {
             let name = command.get_name();
             if name == "help" {
                 continue;
@@ -2765,7 +2766,7 @@ The keys are `initialized`, `path`, `bare`, and `branch`.
             cli_has_path(sub, tail)
         }
 
-        let root = Cli::command();
+        let root = crate::cli_command::build_cli_command();
         let mut problems = Vec::new();
         for (area, path) in LIBRARY_AREAS {
             if !cli_has_path(&root, path) {
@@ -2785,7 +2786,7 @@ The keys are `initialized`, `path`, `bare`, and `branch`.
     fn every_command_is_documented() {
         let pages = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../content/docs/commands");
         let mut problems = Vec::new();
-        for command in Cli::command().get_subcommands() {
+        for command in crate::cli_command::build_cli_command().get_subcommands() {
             let name = command.get_name();
             if name == "help" {
                 continue;
@@ -2886,7 +2887,7 @@ The keys are `initialized`, `path`, `bare`, and `branch`.
                 ));
             }
         }
-        for command in Cli::command().get_subcommands() {
+        for command in crate::cli_command::build_cli_command().get_subcommands() {
             let name = command.get_name();
             if OUTPUT_SNAPSHOT_EXEMPT.contains(&name) {
                 continue;
@@ -2967,7 +2968,7 @@ The keys are `initialized`, `path`, `bare`, and `branch`.
     fn json_field_tables_match_schemas() {
         let dir = commands_dir();
         let mut problems = Vec::new();
-        for command in Cli::command().get_subcommands() {
+        for command in crate::cli_command::build_cli_command().get_subcommands() {
             let name = command.get_name();
             if name == "help" || NO_JSON_COMMANDS.contains(&name) {
                 continue;

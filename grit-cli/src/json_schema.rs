@@ -441,7 +441,7 @@ pub fn expected_json_command_paths() -> Vec<String> {
     use clap::CommandFactory;
 
     let mut paths = vec!["status".to_owned()];
-    let root = crate::Cli::command();
+    let root = crate::cli_command::build_cli_command();
     for sub in root.get_subcommands().filter(|c| c.get_name() != "help") {
         collect_json_commands(sub, None, &mut paths);
     }

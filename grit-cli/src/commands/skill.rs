@@ -94,7 +94,8 @@ mod tests {
     #[test]
     fn skill_mentions_only_real_commands() {
         use clap::CommandFactory;
-        let cli = crate::Cli::command();
+
+        let cli = crate::cli_command::build_cli_command();
         let known: Vec<String> = cli
             .get_subcommands()
             .flat_map(|c| {

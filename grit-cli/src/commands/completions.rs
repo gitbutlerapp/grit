@@ -24,7 +24,12 @@ mod tests {
             .stack_size(COMPLETION_TEST_STACK)
             .spawn(move || {
                 let mut buf = Cursor::new(Vec::new());
-                generate(shell, &mut Cli::command(), "grit", &mut buf);
+                generate(
+                    shell,
+                    &mut crate::cli_command::build_cli_command(),
+                    "grit",
+                    &mut buf,
+                );
                 String::from_utf8(buf.into_inner()).expect("completion script is utf-8")
             })
             .expect("spawn completion generator thread")
