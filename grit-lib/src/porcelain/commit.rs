@@ -26,7 +26,7 @@ use crate::objects::{parse_commit, serialize_commit, CommitData, ObjectId, Objec
 use crate::pathspec::{pathspec_is_exclude, ResolvedPathspecs};
 use crate::porcelain::add::{stage_on_index, StageMode, StageOptions};
 use crate::porcelain::index_from_tree::index_from_tree_with_worktree_stats;
-use crate::porcelain::pathspec_match::ensure_pathspec_matches_known_in_repository;
+use crate::porcelain::pathspec_match::KnownPathspecChecker;
 use crate::progress::ProgressSink;
 use crate::refs::{
     update_branch_for_commit_with_config, update_detached_head_for_commit_with_config,
@@ -297,11 +297,12 @@ fn validate_commit_pathspecs(repo: &Repository, paths: &ResolvedPathspecs) -> Re
                 .map(|s| (s.as_str(), s.as_str()))
                 .collect()
         };
+    let mut checker = KnownPathspecChecker::new(repo);
     for (source, resolved) in pairs {
         if pathspec_is_exclude(source) {
             continue;
         }
-        ensure_pathspec_matches_known_in_repository(repo, source, resolved)?;
+        checker.ensure(source, resolved)?;
     }
     Ok(())
 }
@@ -1750,6 +1751,82 @@ mod tests {
         let index = repo.load_index().unwrap();
         assert!(index.get(b"tracked.txt", 0).is_none());
         assert!(index.get(b"new.txt", 0).is_some());
+    }
+
+    #[test]
+    fn scope_paths_nested_dirs_round_trip_with_git() {
+        use std::process::Command;
+
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let git = |args: &[&str]| -> String {
+            let out = Command::new("git")
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_AUTHOR_NAME", "Test")
+                .env("GIT_AUTHOR_EMAIL", "test@example.com")
+                .env("GIT_COMMITTER_NAME", "Test")
+                .env("GIT_COMMITTER_EMAIL", "test@example.com")
+                .current_dir(root)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                out.status.success(),
+                "git {args:?}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+            String::from_utf8(out.stdout).unwrap()
+        };
+        git(&["init", "-q", "-b", "main"]);
+        for (rel, body) in [
+            ("a/x.txt", "x1\n"),
+            ("a/y.txt", "y1\n"),
+            ("b/c/z.txt", "z1\n"),
+            ("b/w.txt", "w1\n"),
+            ("d/e.txt", "e1\n"),
+            ("top.txt", "t1\n"),
+        ] {
+            fs::create_dir_all(root.join(rel).parent().unwrap()).unwrap();
+            fs::write(root.join(rel), body).unwrap();
+        }
+        git(&["add", "-A"]);
+        git(&["commit", "-qm", "init"]);
+
+        fs::write(root.join("a/x.txt"), b"x2\n").unwrap();
+        fs::write(root.join("b/c/z.txt"), b"z2\n").unwrap();
+        fs::write(root.join("b/w.txt"), b"w2\n").unwrap();
+        fs::write(root.join("top.txt"), b"t2\n").unwrap();
+        git(&["add", "b/w.txt"]);
+
+        let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).unwrap();
+        let specs = vec!["a/x.txt".to_owned(), "b/c/z.txt".to_owned()];
+        commit_with_scope(
+            &repo,
+            &commit_req("partial"),
+            CommitScope::Paths(ResolvedPathspecs {
+                specs: specs.clone(),
+                sources: specs,
+                scoped: true,
+            }),
+            &mut NullProgress,
+        )
+        .unwrap();
+
+        git(&["fsck", "--strict", "--no-progress"]);
+        assert_eq!(
+            git(&["diff", "--name-only", "HEAD~1", "HEAD"]),
+            "a/x.txt\nb/c/z.txt\n"
+        );
+        assert_eq!(git(&["show", "HEAD:a/x.txt"]), "x2\n");
+        assert_eq!(git(&["show", "HEAD:b/c/z.txt"]), "z2\n");
+        assert_eq!(git(&["show", "HEAD:b/w.txt"]), "w1\n");
+        assert_eq!(
+            git(&["rev-parse", "HEAD:d"]),
+            git(&["rev-parse", "HEAD~1:d"])
+        );
+        assert_eq!(git(&["diff", "--cached", "--name-only"]), "b/w.txt\n");
+        assert_eq!(git(&["diff", "--name-only"]), "top.txt\n");
     }
 
     #[test]
