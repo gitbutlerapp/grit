@@ -14,9 +14,13 @@
 //! ```
 mod core;
 pub mod handle;
+mod location;
 
 pub use core::*;
 pub use handle::ConfigHandle;
+pub use location::{
+    global_config_write_path, set_config_value, unset_config_value, ConfigLocation,
+};
 
 pub mod dotfile {
     //! dotfile API (re-exported at this path).

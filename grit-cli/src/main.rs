@@ -1511,8 +1511,14 @@ enum Command {
     /// Read, set, or list configuration values.
     Config {
         /// Use the global (per-user) config file instead of this repository's.
-        #[arg(long)]
+        #[arg(long, conflicts_with_all = ["local", "file"])]
         global: bool,
+        /// Read or write only this repository's config file (`.git/config`).
+        #[arg(long, conflicts_with_all = ["global", "file"])]
+        local: bool,
+        /// Read or write only the given config file (no repository required).
+        #[arg(short = 'f', long = "file", value_name = "PATH", conflicts_with_all = ["global", "local"])]
+        file: Option<std::path::PathBuf>,
         /// List all configuration values.
         #[arg(short = 'l', long = "list")]
         list: bool,
@@ -2919,15 +2925,21 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
         Command::Completions { shell } => commands::completions::run(shell),
         Command::Config {
             global,
+            local,
+            file,
             list,
             unset,
             key,
             value,
-        } => emit(
-            &commands::config::run(global, list, unset, key, value)?,
-            opts,
-            ctx,
-        ),
+        } => {
+            let outcome = commands::config::run(global, local, file, list, unset, key, value)?;
+            let code = commands::config::exit_code(&outcome);
+            emit(&outcome, opts, ctx)?;
+            if code != 0 {
+                std::process::exit(code);
+            }
+            Ok(())
+        }
         // `manager` speaks Git's credential protocol on stdout; it has no JSON form.
         Command::Manager { operation } => commands::manager::run(&operation),
         // The server programs speak the Git wire protocol on stdout.

@@ -1,15 +1,15 @@
 //! `grit config` — read, set, and list configuration values.
 //!
 //! A deliberately small subset of `git config`: read a value, set one, list
-//! everything, or unset a key. By default it operates on the repository's local
-//! config (`.git/config`); `--global` reads from or writes to your per-user
-//! config (`~/.gitconfig`).
+//! everything, or unset a key. By default writes go to the repository's local
+//! config (`.git/config`); `--global` and `-f` select other files.
 
 use std::io::Write;
 use std::path::PathBuf;
 
 use anyhow::{bail, Context, Result};
-use grit_lib::config::{ConfigFile, ConfigScope, ConfigSet};
+use grit_lib::config::{set_config_value, unset_config_value, ConfigLocation, ConfigSet};
+use grit_lib::error::ConfigError;
 use schemars::JsonSchema;
 use serde::Serialize;
 
@@ -21,10 +21,23 @@ use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 #[derive(Serialize, JsonSchema)]
 #[serde(tag = "action", rename_all = "snake_case")]
 pub enum ConfigOutcome {
-    Get { key: String, value: String },
-    List { entries: Vec<ConfigEntry> },
-    Set { key: String, value: String },
-    Unset { key: String },
+    Get {
+        key: String,
+        value: Option<String>,
+        scope: Option<String>,
+        file: Option<String>,
+        line: Option<u64>,
+    },
+    List {
+        entries: Vec<ConfigEntry>,
+    },
+    Set {
+        key: String,
+        value: String,
+    },
+    Unset {
+        key: String,
+    },
 }
 
 /// One entry in a `list` outcome. `value` is `null` for a bare/valueless key.
@@ -43,8 +56,10 @@ pub struct ConfigEntry {
 impl HumanRender for ConfigOutcome {
     fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         match self {
-            // `get` prints just the value, matching `git config <key>`.
-            ConfigOutcome::Get { value, .. } => outln!(w, "{value}"),
+            ConfigOutcome::Get {
+                value: Some(value), ..
+            } => outln!(w, "{value}"),
+            ConfigOutcome::Get { value: None, .. } => {}
             ConfigOutcome::List { entries } => {
                 for entry in entries {
                     match &entry.value {
@@ -53,7 +68,6 @@ impl HumanRender for ConfigOutcome {
                     }
                 }
             }
-            // `set` / `unset` are silent in human mode (as before).
             ConfigOutcome::Set { .. } | ConfigOutcome::Unset { .. } => {}
         }
         Ok(())
@@ -63,8 +77,28 @@ impl HumanRender for ConfigOutcome {
 impl MarkdownRender for ConfigOutcome {
     fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         match self {
-            ConfigOutcome::Get { key, value } => {
-                outln!(w, "`{key}` = {value}");
+            ConfigOutcome::Get {
+                key,
+                value,
+                scope,
+                file,
+                line,
+            } => {
+                outln!(w, "# Config `{key}`");
+                outln!(w);
+                match value {
+                    Some(v) => outln!(w, "**Value:** `{v}`"),
+                    None => outln!(w, "**Value:** _not set_"),
+                }
+                if let Some(scope) = scope {
+                    outln!(w, "**Scope:** `{scope}`");
+                }
+                if let Some(file) = file {
+                    outln!(w, "**File:** `{file}`");
+                }
+                if let Some(line) = line {
+                    outln!(w, "**Line:** {line}");
+                }
             }
             ConfigOutcome::List { entries } => markdown::print_config_entries(w, entries)?,
             ConfigOutcome::Set { key, value } => outln!(w, "Set `{key}` = {value}."),
@@ -74,24 +108,33 @@ impl MarkdownRender for ConfigOutcome {
     }
 }
 
+/// Exit code for `get` when the key is missing (`1`); otherwise `0`.
+#[must_use]
+pub fn exit_code(outcome: &ConfigOutcome) -> i32 {
+    match outcome {
+        ConfigOutcome::Get { value: None, .. } => 1,
+        _ => 0,
+    }
+}
+
 /// Run `grit config`.
-///
-/// - `--list` prints every key/value pair.
-/// - a key with a value sets it.
-/// - a key with `--unset` removes it.
-/// - a key alone prints its current value.
 pub fn run(
     global: bool,
+    local: bool,
+    file: Option<PathBuf>,
     list: bool,
     unset: bool,
     key: Option<String>,
     value: Option<String>,
 ) -> Result<ConfigOutcome> {
+    let write_location = resolve_location(global, local, file.clone(), true)?;
+    let read_location = resolve_location(global, local, file, false)?;
+
     if list {
         if key.is_some() || value.is_some() {
             bail!("--list does not take a key or value");
         }
-        return list_values(global);
+        return list_values(read_location);
     }
 
     let Some(key) = key else {
@@ -102,12 +145,12 @@ pub fn run(
         if value.is_some() {
             bail!("--unset does not take a value");
         }
-        return unset_value(global, &key);
+        return unset_value(write_location, &key);
     }
 
     match value {
-        Some(value) => set_value(global, &key, &value),
-        None => get_value(global, &key),
+        Some(value) => set_value(write_location, &key, &value),
+        None => get_value(read_location, &key),
     }
 }
 
@@ -115,22 +158,34 @@ pub fn run(
 /// Windows credential helper).
 #[cfg(windows)]
 pub fn set_global(key: &str, value: &str) -> Result<()> {
-    set_value(true, key, value).map(|_| ())
+    set_value(Some(ConfigLocation::Global), key, value).map(|_| ())
 }
 
-fn get_value(global: bool, key: &str) -> Result<ConfigOutcome> {
-    let config = read_config(global)?;
-    match config.get(key) {
-        Some(value) => Ok(ConfigOutcome::Get {
+fn get_value(read_location: Option<ConfigLocation>, key: &str) -> Result<ConfigOutcome> {
+    let config = load_for_read(read_location)?;
+    let origin = config
+        .get_with_origin(key)
+        .with_context(|| format!("invalid config key {key}"))?;
+    Ok(match origin {
+        Some(o) => ConfigOutcome::Get {
             key: key.to_owned(),
-            value,
-        }),
-        None => bail!("key '{key}' is not set"),
-    }
+            value: o.value,
+            scope: Some(o.scope.to_string()),
+            file: o.file.as_ref().map(|p| p.display().to_string()),
+            line: Some(o.line as u64),
+        },
+        None => ConfigOutcome::Get {
+            key: key.to_owned(),
+            value: None,
+            scope: None,
+            file: None,
+            line: None,
+        },
+    })
 }
 
-fn list_values(global: bool) -> Result<ConfigOutcome> {
-    let config = read_config(global)?;
+fn list_values(read_location: Option<ConfigLocation>) -> Result<ConfigOutcome> {
+    let config = load_for_read(read_location)?;
     let entries = config
         .entries()
         .iter()
@@ -144,95 +199,79 @@ fn list_values(global: bool) -> Result<ConfigOutcome> {
     Ok(ConfigOutcome::List { entries })
 }
 
-fn set_value(global: bool, key: &str, value: &str) -> Result<ConfigOutcome> {
-    let (scope, path) = target_file(global)?;
-    let content = std::fs::read_to_string(&path).unwrap_or_default();
-    let mut cfg = ConfigFile::parse(&path, &content, scope)
-        .with_context(|| format!("could not parse {}", path.display()))?;
-    cfg.set(key, value)
+fn set_value(
+    write_location: Option<ConfigLocation>,
+    key: &str,
+    value: &str,
+) -> Result<ConfigOutcome> {
+    let Some(location) = write_location else {
+        bail!("internal error: write location missing");
+    };
+    let env = context::environment();
+    let git_dir = context::discover().ok().map(|r| r.git_dir().to_path_buf());
+    set_config_value(location, &env, git_dir.as_deref(), key, value)
         .with_context(|| format!("could not set {key}"))?;
-    cfg.write()
-        .with_context(|| format!("could not write {}", path.display()))?;
     Ok(ConfigOutcome::Set {
         key: key.to_owned(),
         value: value.to_owned(),
     })
 }
 
-fn unset_value(global: bool, key: &str) -> Result<ConfigOutcome> {
-    let (scope, path) = target_file(global)?;
-    let Ok(content) = std::fs::read_to_string(&path) else {
-        bail!("key '{key}' is not set");
+fn unset_value(write_location: Option<ConfigLocation>, key: &str) -> Result<ConfigOutcome> {
+    let Some(location) = write_location else {
+        bail!("internal error: write location missing");
     };
-    let mut cfg = ConfigFile::parse(&path, &content, scope)
-        .with_context(|| format!("could not parse {}", path.display()))?;
-    let removed = cfg
-        .unset(key)
-        .with_context(|| format!("could not unset {key}"))?;
-    if removed == 0 {
-        bail!("key '{key}' is not set");
-    }
-    cfg.write()
-        .with_context(|| format!("could not write {}", path.display()))?;
-    Ok(ConfigOutcome::Unset {
-        key: key.to_owned(),
-    })
-}
-
-/// Load config for a read. `--global` reads only the global file; otherwise we
-/// read the merged repo config (system + global + local), falling back to the
-/// global/system files when run outside a repository.
-fn read_config(global: bool) -> Result<ConfigSet> {
-    if global {
-        let mut set = ConfigSet::new();
-        if let Some(path) = global_config_path() {
-            if let Some(file) = ConfigFile::from_path(&path, ConfigScope::Global)
-                .with_context(|| format!("could not read {}", path.display()))?
-            {
-                set.merge(&file);
-            }
+    let env = context::environment();
+    let git_dir = context::discover().ok().map(|r| r.git_dir().to_path_buf());
+    match unset_config_value(location, &env, git_dir.as_deref(), key) {
+        Ok(()) => Ok(ConfigOutcome::Unset {
+            key: key.to_owned(),
+        }),
+        Err(grit_lib::error::Error::Config(ConfigError::KeyNotSet { .. })) => {
+            bail!("key '{key}' is not set");
         }
-        Ok(set)
-    } else if let Ok(repo) = context::discover() {
-        ConfigSet::load(&crate::context::environment(), Some(repo.git_dir()), true)
-            .context("could not load config")
-    } else {
-        ConfigSet::load(&crate::context::environment(), None, true).context("could not load config")
+        Err(e) => Err(e.into()),
     }
 }
 
-/// The scope and file path a write targets: the global file with `--global`,
-/// otherwise the current repository's local config.
-fn target_file(global: bool) -> Result<(ConfigScope, PathBuf)> {
+/// `None` means load the full merged cascade (system + global + local + command).
+fn load_for_read(read_location: Option<ConfigLocation>) -> Result<ConfigSet> {
+    let env = context::environment();
+    if let Some(location) = read_location {
+        let git_dir = context::discover().ok().map(|r| r.git_dir().to_path_buf());
+        return location
+            .load_single(&env, git_dir.as_deref())
+            .context("could not load config");
+    }
+    if let Ok(repo) = context::discover() {
+        ConfigSet::load(&env, Some(repo.git_dir()), true).context("could not load config")
+    } else {
+        ConfigSet::load(&env, None, true).context("could not load config")
+    }
+}
+
+fn resolve_location(
+    global: bool,
+    local: bool,
+    file: Option<PathBuf>,
+    for_write: bool,
+) -> Result<Option<ConfigLocation>> {
+    let flags = usize::from(global) + usize::from(local) + usize::from(file.is_some());
+    if flags > 1 {
+        bail!("--global, --local, and --file are mutually exclusive");
+    }
+    if let Some(path) = file {
+        return Ok(Some(ConfigLocation::File(path)));
+    }
     if global {
-        let path = global_config_path().context("could not determine your global config path")?;
-        Ok((ConfigScope::Global, path))
+        return Ok(Some(ConfigLocation::Global));
+    }
+    if local {
+        return Ok(Some(ConfigLocation::Local));
+    }
+    if for_write {
+        Ok(Some(ConfigLocation::Local))
     } else {
-        let repo = context::discover()?;
-        Ok((ConfigScope::Local, repo.git_dir().join("config")))
+        Ok(None)
     }
-}
-
-/// The global config file to write to.
-///
-/// We derive this from grit-lib's own global-config search list
-/// ([`grit_lib::config::global_config_paths_pub`]) so a write always lands in a file the loader
-/// will read back — crucial on Windows, where the home directory may resolve via
-/// `%USERPROFILE%` rather than `$HOME`. Following Git's writer preference, we use
-/// an existing `~/.gitconfig`, then an existing XDG `git/config`, otherwise the
-/// conventional `~/.gitconfig`.
-fn global_config_path() -> Option<PathBuf> {
-    let paths = grit_lib::config::global_config_paths_pub(&crate::context::environment());
-    // grit-lib returns `[XDG git/config, ~/.gitconfig]` (or a single
-    // `$GIT_CONFIG_GLOBAL`); the last entry is the conventional `~/.gitconfig`.
-    let dotgitconfig = paths.last().cloned();
-    if dotgitconfig.as_ref().is_some_and(|p| p.exists()) {
-        return dotgitconfig;
-    }
-    if let Some(xdg) = paths.first() {
-        if xdg.exists() {
-            return Some(xdg.clone());
-        }
-    }
-    dotgitconfig
 }

@@ -128,6 +128,20 @@ impl fmt::Display for ConfigScope {
     }
 }
 
+/// Origin metadata for the winning config value of a key.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfigValueOrigin {
+    /// String value, or `"true"` for a bare boolean key. Only `None` when the key is missing
+    /// (this struct is not used for missing keys — see [`ConfigSet::get_with_origin`]).
+    pub value: Option<String>,
+    /// Config layer that supplied the value.
+    pub scope: ConfigScope,
+    /// Source file when file-backed; absent for command-line overrides.
+    pub file: Option<PathBuf>,
+    /// One-based line number in `file`.
+    pub line: usize,
+}
+
 /// A single configuration entry with its origin metadata.
 #[derive(Debug, Clone)]
 pub struct ConfigEntry {
@@ -1853,6 +1867,21 @@ impl ConfigSet {
     pub fn get_last_entry(&self, key: &str) -> Option<ConfigEntry> {
         let canon = canonical_key(key).ok()?;
         self.entries.iter().rev().find(|e| e.key == canon).cloned()
+    }
+
+    /// Winning value for `key` plus scope, source file, and line (Git `--show-origin --show-scope`).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Config`] when `key` is not a valid Git config key.
+    pub fn get_with_origin(&self, key: &str) -> Result<Option<ConfigValueOrigin>> {
+        let _canon = canonical_key(key)?;
+        Ok(self.get_last_entry(key).map(|e| ConfigValueOrigin {
+            value: e.value.clone().or_else(|| Some("true".to_owned())),
+            scope: e.scope,
+            file: e.file.clone(),
+            line: e.line,
+        }))
     }
 
     /// Get all values for a key (multi-valued; in load order).
@@ -3971,7 +4000,7 @@ fn needs_sq_backslash_quote(ch: char) -> bool {
 }
 
 /// Resolve a config file path from `GIT_CONFIG*` overrides relative to [`Environment::cwd`].
-fn resolve_config_override_path(env: &Environment, path: &str) -> PathBuf {
+pub(crate) fn resolve_config_override_path(env: &Environment, path: &str) -> PathBuf {
     let p = Path::new(path);
     if p.is_absolute() {
         p.to_path_buf()

@@ -99,6 +99,13 @@ pub enum ConfigError {
         line: usize,
     },
 
+    /// `unset` or a scoped read/write was requested for a key that is not set in that file.
+    #[error("key '{key}' is not set")]
+    KeyNotSet {
+        /// Config key that was not present.
+        key: String,
+    },
+
     /// Integer config value could not be parsed or is out of range.
     #[error("bad numeric config value '{value}' for '{key}': {reason}")]
     BadNumericValue {
