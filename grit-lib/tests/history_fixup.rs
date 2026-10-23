@@ -12,7 +12,9 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::diff::hunk_id::{hunk_ids_with_duplicate_peers, DiffSide, HunkId};
 use grit_lib::diff::DiffStatus;
 use grit_lib::objects::{parse_commit, ObjectId};
-use grit_lib::porcelain::hunk_select::{unstaged_file_diffs, HunkSelectError, HunkSelection};
+use grit_lib::porcelain::hunk_select::{
+    unstaged_file_diffs, HunkSelectError, HunkSelection, LineRange,
+};
 use grit_lib::porcelain::status::{status, StatusOptions};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
@@ -753,6 +755,72 @@ fn fixup_hunks_preserves_preexisting_staged_on_same_path() {
     assert!(
         status_text.contains("f.txt") && status_text.contains('M'),
         "expected staged f.txt, got: {status_text}"
+    );
+    git(wt, &["fsck", "--strict"]);
+}
+
+#[test]
+fn fixup_lines_preserves_preexisting_staged_and_consumes_selected_line() {
+    let repo = HistoryRepo::init();
+    let wt = repo.worktree();
+    let (base, edited) = two_hunk_edited_file();
+    commit_file(wt, "f.txt", &base, "init");
+    commit_file(wt, "other.t", "x\n", "second");
+    let target = git_rev_parse(wt, "HEAD~1").expect("target");
+    fs::write(wt.join("f.txt"), &edited).expect("write");
+    let grit = open_grit(wt);
+    let ids = unstaged_hunk_ids(&grit);
+    assert!(ids.len() >= 2);
+    grit_lib::porcelain::hunk_select::stage_hunks(
+        &grit,
+        DiffSide::Unstaged,
+        &HunkSelection {
+            ids: vec![ids[0].clone()],
+            ranges: Vec::new(),
+        },
+        &[],
+        false,
+    )
+    .expect("stage line-5 hunk");
+    let selection = HunkSelection {
+        ids: Vec::new(),
+        ranges: vec![LineRange {
+            path: "f.txt".into(),
+            start: 19,
+            end: 19,
+        }],
+    };
+    plan_and_apply_hunks(
+        &grit,
+        wt,
+        target,
+        &fixup_opts_with_selection(RefScope::Head, EmptyPolicy::Drop, selection),
+    );
+    let parent = git_rev_parse(wt, "HEAD~1").expect("parent");
+    let fixed = parse_commit(&grit.odb().read(&parent).expect("read").data).expect("parse");
+    let blob = grit.odb().read(&fixed.tree).expect("tree");
+    let entries = grit_lib::objects::parse_tree(&blob.data).expect("parse tree");
+    let file = entries.iter().find(|e| e.name == b"f.txt").expect("file");
+    let blob = grit.odb().read(&file.oid).expect("blob");
+    let content = String::from_utf8_lossy(&blob.data);
+    assert!(content.contains("LINE18"));
+    assert!(!content.contains("line18"));
+    let staged_after = Command::new("git")
+        .current_dir(wt)
+        .args(["diff", "--cached", "f.txt"])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("diff cached after");
+    assert!(staged_after.status.success());
+    let staged_text = String::from_utf8_lossy(&staged_after.stdout);
+    assert!(
+        staged_text.contains("LINE5"),
+        "pre-existing staged line-5 edit must remain staged: {staged_text}"
+    );
+    assert!(
+        !staged_text.contains("LINE18"),
+        "consumed line-18 selection must not remain staged: {staged_text}"
     );
     git(wt, &["fsck", "--strict"]);
 }
