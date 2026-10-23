@@ -102,6 +102,12 @@
       },
       "type": "array"
     },
+    "dry_run": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
     "next_steps": {
       "items": {
         "type": "string"

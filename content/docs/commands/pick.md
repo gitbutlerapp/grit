@@ -43,6 +43,8 @@ Resolve conflicts, stage with [`grit add`](../add/), then run `grit pick --conti
 | `--empty` | When a step would not change the tree: `stop` (default), `keep` (empty commit), or `drop`. |
 | `-m`, `--message` | Replace the message (only with exactly one commit). |
 | `--message-file` | Read the message from a file (only with exactly one commit). |
+| `--mainline` | Parent number when replaying a merge commit (library support; CLI wiring pending). |
+| `--dry-run` | Print the commits that would be replayed without changing refs or the worktree. |
 
 ## Examples
 
@@ -86,6 +88,7 @@ Pass `--json` for stable, scripting-friendly output:
 | `conflicts` | array or null | Conflicted paths when `result` is `conflicts`. |
 | `next_steps` | array or null | Suggested commands when stopped (`conflicts` or `empty`). |
 | `alternatives` | array or null | `grit pick --abort` / `--skip` when a sequence is paused. |
+| `dry_run` | boolean or null | `true` when `--dry-run` was set (no refs or objects were updated). |
 
 Example (success):
 
@@ -111,10 +114,6 @@ On conflicts, exit code is **1** with `result: "conflicts"` and the same conflic
 Schema: [v2](/schemas/pick/v2.json)
 
 Pass [`--markdown`](../global-options/) for a `Pick` heading, one bullet per replayed commit, and conflict next steps when stopped.
-
-## Performance
-
-The **`pick-range-20`** grit-bench scenario (`grit pick base..topic` vs `git cherry-pick` on a 20-commit topic in the **synthetic-10000** fixture) tracks multi-commit replay on the daily matrix. The committed baseline (**`grit-utils/baselines/hot-paths-after.json`**) records a **known gap** of about **2.0×** Git median wall time and about **1.6×** peak RSS on the factory VM (release hyperfine, system Git **2.43**). The acceptance **goal** is unchanged: **≤ 1.0×** time and **≤ 1.2×** RSS. Closing the gap is tracked as follow-up work on **[GitHub issue #2977](https://github.com/gitbutlerapp/grit/issues/2977)** (shared replay merge/checkout path: index-hinted tree diffs, scoped checkout, lower peak RSS — not pick-only shortcuts). See [Benchmarks](../benchmarks.md#pick-range-20-known-gap).
 
 ## See also
 

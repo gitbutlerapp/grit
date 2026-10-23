@@ -17,8 +17,8 @@ use crate::diff::merge_trees::TreeMergeOutput;
 use crate::index::Index;
 
 pub use crate::state::{
-    operation_alternatives, operation_next_steps, status_operation, InProgressOperation, NextStep,
-    Operation,
+    operation_alternatives, operation_next_steps, operation_next_steps_empty, status_operation,
+    InProgressOperation, NextStep, Operation,
 };
 
 /// How a tree-merge conflict should be presented (content, add/add, modify/delete, …).
