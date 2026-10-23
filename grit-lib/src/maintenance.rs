@@ -285,16 +285,7 @@ pub struct FsckOptions {
     pub check_midx: bool,
 }
 
-/// Severity of one [`FsckIssue`].
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FsckSeverity {
-    /// Repository should be treated as broken.
-    Error,
-    /// Problem that may be acceptable depending on policy.
-    Warning,
-    /// Informational object-buffer diagnostic.
-    Info,
-}
+pub use crate::fsck::FsckSeverity;
 
 /// One fsck diagnostic (refs, objects, or MIDX).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1198,58 +1189,11 @@ fn fsck_issue_from_repo(issue: RepoFsckIssue, config: &ConfigSet, strict: bool) 
     if let RepoFsckIssue::BadRef(r) = issue {
         return fsck_issue_from_refs(r);
     }
-    let severity = repo_fsck::issue_severity(&issue, config, strict);
-    let msg_id = repo_fsck::issue_msg_id(&issue).to_owned();
-    let (path, detail) = match &issue {
-        RepoFsckIssue::CorruptLoose { oid, path } => {
-            (oid.to_hex(), format!("could not read {}", path.display()))
-        }
-        RepoFsckIssue::HashMismatch { oid, path } => (
-            oid.to_hex(),
-            format!("loose hash mismatch at {}", path.display()),
-        ),
-        RepoFsckIssue::BadObject { oid, error } => (oid.to_hex(), error.detail.clone()),
-        RepoFsckIssue::PackChecksum { pack } => (
-            pack.file_name()
-                .and_then(|s| s.to_str())
-                .unwrap_or("pack")
-                .to_owned(),
-            format!("pack checksum invalid for {}", pack.display()),
-        ),
-        RepoFsckIssue::IdxMismatch { pack } => (
-            pack.file_name()
-                .and_then(|s| s.to_str())
-                .unwrap_or("pack")
-                .to_owned(),
-            format!("index checksum mismatch for {}", pack.display()),
-        ),
-        RepoFsckIssue::MissingObject { oid, referrer } => (
-            oid.to_hex(),
-            repo_fsck::missing_object_detail(*oid, *referrer),
-        ),
-        RepoFsckIssue::BrokenLink {
-            tree,
-            name,
-            mode,
-            target,
-        } => (
-            tree.to_hex(),
-            format!("entry {name} mode {mode:o} -> {}", target.to_hex()),
-        ),
-        RepoFsckIssue::BadRef(_) => unreachable!(),
-        RepoFsckIssue::MidxInvalid { details } => {
-            ("multi-pack-index".to_owned(), details.join("; "))
-        }
-        RepoFsckIssue::CommitGraphInvalid { detail } => ("commit-graph".to_owned(), detail.clone()),
-    };
+    let (path, detail) = issue.line_subject_and_detail();
     FsckIssue {
-        severity: match severity {
-            repo_fsck::FsckSeverity::Error => FsckSeverity::Error,
-            repo_fsck::FsckSeverity::Warning => FsckSeverity::Warning,
-            repo_fsck::FsckSeverity::Info => FsckSeverity::Info,
-        },
+        severity: repo_fsck::issue_severity(&issue, config, strict),
         path,
-        msg_id,
+        msg_id: repo_fsck::issue_msg_id(&issue).to_owned(),
         detail,
     }
 }

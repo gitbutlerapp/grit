@@ -6281,6 +6281,10 @@ pub grit_lib::maintenance::repository_fsck::FsckIssue::MissingObject::oid: grit_
 pub grit_lib::maintenance::repository_fsck::FsckIssue::MissingObject::referrer: grit_lib::maintenance::repository_fsck::MissingObjectReferrer
 pub grit_lib::maintenance::repository_fsck::FsckIssue::PackChecksum
 pub grit_lib::maintenance::repository_fsck::FsckIssue::PackChecksum::pack: std::path::PathBuf
+impl grit_lib::maintenance::repository_fsck::FsckIssue
+pub fn grit_lib::maintenance::repository_fsck::FsckIssue::detail(&self) -> alloc::string::String
+pub fn grit_lib::maintenance::repository_fsck::FsckIssue::location(&self) -> core::option::Option<alloc::borrow::Cow<'_, str>>
+pub fn grit_lib::maintenance::repository_fsck::FsckIssue::oid(&self) -> core::option::Option<grit_lib::objects::ObjectId>
 impl core::clone::Clone for grit_lib::maintenance::repository_fsck::FsckIssue
 pub fn grit_lib::maintenance::repository_fsck::FsckIssue::clone(&self) -> Self
 impl core::fmt::Debug for grit_lib::maintenance::repository_fsck::FsckIssue
@@ -6388,22 +6392,22 @@ pub enum grit_lib::maintenance::FsckSeverity
 pub grit_lib::maintenance::FsckSeverity::Error
 pub grit_lib::maintenance::FsckSeverity::Info
 pub grit_lib::maintenance::FsckSeverity::Warning
-impl core::clone::Clone for grit_lib::maintenance::FsckSeverity
-pub fn grit_lib::maintenance::FsckSeverity::clone(&self) -> Self
-impl core::cmp::Eq for grit_lib::maintenance::FsckSeverity
-impl core::cmp::PartialEq for grit_lib::maintenance::FsckSeverity
-pub fn grit_lib::maintenance::FsckSeverity::eq(&self, &Self) -> bool
-impl core::fmt::Debug for grit_lib::maintenance::FsckSeverity
-pub fn grit_lib::maintenance::FsckSeverity::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for grit_lib::maintenance::FsckSeverity
-impl core::marker::StructuralPartialEq for grit_lib::maintenance::FsckSeverity
-impl core::marker::Freeze for grit_lib::maintenance::FsckSeverity
-impl core::marker::Send for grit_lib::maintenance::FsckSeverity
-impl core::marker::Sync for grit_lib::maintenance::FsckSeverity
-impl core::marker::Unpin for grit_lib::maintenance::FsckSeverity
-impl core::marker::UnsafeUnpin for grit_lib::maintenance::FsckSeverity
-impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::maintenance::FsckSeverity
-impl core::panic::unwind_safe::UnwindSafe for grit_lib::maintenance::FsckSeverity
+impl core::clone::Clone for grit_lib::maintenance::repository_fsck::FsckSeverity
+pub fn grit_lib::maintenance::repository_fsck::FsckSeverity::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::maintenance::repository_fsck::FsckSeverity
+impl core::cmp::PartialEq for grit_lib::maintenance::repository_fsck::FsckSeverity
+pub fn grit_lib::maintenance::repository_fsck::FsckSeverity::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::maintenance::repository_fsck::FsckSeverity
+pub fn grit_lib::maintenance::repository_fsck::FsckSeverity::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::maintenance::repository_fsck::FsckSeverity
+impl core::marker::StructuralPartialEq for grit_lib::maintenance::repository_fsck::FsckSeverity
+impl core::marker::Freeze for grit_lib::maintenance::repository_fsck::FsckSeverity
+impl core::marker::Send for grit_lib::maintenance::repository_fsck::FsckSeverity
+impl core::marker::Sync for grit_lib::maintenance::repository_fsck::FsckSeverity
+impl core::marker::Unpin for grit_lib::maintenance::repository_fsck::FsckSeverity
+impl core::marker::UnsafeUnpin for grit_lib::maintenance::repository_fsck::FsckSeverity
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::maintenance::repository_fsck::FsckSeverity
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::maintenance::repository_fsck::FsckSeverity
 #[non_exhaustive] pub struct grit_lib::maintenance::CommitGraphOptions
 pub grit_lib::maintenance::CommitGraphOptions::changed_paths: bool
 impl grit_lib::maintenance::CommitGraphOptions
@@ -6450,7 +6454,7 @@ pub struct grit_lib::maintenance::FsckIssue
 pub grit_lib::maintenance::FsckIssue::detail: alloc::string::String
 pub grit_lib::maintenance::FsckIssue::msg_id: alloc::string::String
 pub grit_lib::maintenance::FsckIssue::path: alloc::string::String
-pub grit_lib::maintenance::FsckIssue::severity: grit_lib::maintenance::FsckSeverity
+pub grit_lib::maintenance::FsckIssue::severity: grit_lib::maintenance::repository_fsck::FsckSeverity
 impl core::clone::Clone for grit_lib::maintenance::FsckIssue
 pub fn grit_lib::maintenance::FsckIssue::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::maintenance::FsckIssue

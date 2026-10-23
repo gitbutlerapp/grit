@@ -25,6 +25,7 @@
 
 mod roots;
 
+use std::borrow::Cow;
 use std::collections::{HashSet, VecDeque};
 use std::fs;
 use std::ops::ControlFlow;
@@ -344,50 +345,121 @@ pub fn format_fsck_line(issue: &FsckIssue, config: &ConfigSet, strict: bool) -> 
         FsckSeverity::Warning => "warning",
         FsckSeverity::Info => "info",
     };
-    let (path, detail) = issue_display_paths(issue);
+    let (path, detail) = issue.line_subject_and_detail();
     format!("{level}: {path}: {}: {detail}", issue_msg_id(issue))
 }
 
-fn issue_display_paths(issue: &FsckIssue) -> (String, String) {
-    match issue {
-        FsckIssue::CorruptLoose { oid, path } => {
-            (oid.to_hex(), format!("could not read {}", path.display()))
+impl FsckIssue {
+    /// Object the finding is about, when it concerns a single object.
+    ///
+    /// For [`FsckIssue::BrokenLink`] this is the tree holding the bad entry; for
+    /// [`FsckIssue::MissingObject`] it is the missing object itself.
+    ///
+    /// # Returns
+    ///
+    /// `None` for pack, ref, multi-pack-index and commit-graph findings.
+    #[must_use]
+    pub fn oid(&self) -> Option<ObjectId> {
+        match self {
+            Self::CorruptLoose { oid, .. }
+            | Self::HashMismatch { oid, .. }
+            | Self::BadObject { oid, .. }
+            | Self::MissingObject { oid, .. } => Some(*oid),
+            Self::BrokenLink { tree, .. } => Some(*tree),
+            Self::PackChecksum { .. }
+            | Self::IdxMismatch { .. }
+            | Self::BadRef(_)
+            | Self::MidxInvalid { .. }
+            | Self::CommitGraphInvalid { .. } => None,
         }
-        FsckIssue::HashMismatch { oid, path } => (
-            oid.to_hex(),
-            format!("loose hash mismatch at {}", path.display()),
-        ),
-        FsckIssue::BadObject { oid, error } => (oid.to_hex(), error.detail.clone()),
-        FsckIssue::PackChecksum { pack } => (
-            pack.file_name()
-                .and_then(|s| s.to_str())
-                .unwrap_or("pack")
-                .to_owned(),
-            format!("pack checksum invalid for {}", pack.display()),
-        ),
-        FsckIssue::IdxMismatch { pack } => (
-            pack.file_name()
-                .and_then(|s| s.to_str())
-                .unwrap_or("pack")
-                .to_owned(),
-            format!("index checksum mismatch for {}", pack.display()),
-        ),
-        FsckIssue::MissingObject { oid, referrer } => {
-            (oid.to_hex(), missing_object_detail(*oid, *referrer))
-        }
-        FsckIssue::BrokenLink {
-            tree,
-            name,
-            mode,
-            target,
-        } => (
-            tree.to_hex(),
-            format!("entry {name} mode {mode:o} -> {}", target.to_hex()),
-        ),
-        FsckIssue::BadRef(r) => (r.path.clone(), r.detail.clone()),
-        FsckIssue::MidxInvalid { details } => ("multi-pack-index".to_owned(), details.join("; ")),
-        FsckIssue::CommitGraphInvalid { detail } => ("commit-graph".to_owned(), detail.clone()),
     }
+
+    /// File, ref or repository structure the finding was reported against.
+    ///
+    /// # Returns
+    ///
+    /// The loose object or `.pack` path, the ref path for [`FsckIssue::BadRef`],
+    /// `multi-pack-index` or `commit-graph`; `None` for findings that only name
+    /// objects (see [`Self::oid`]).
+    #[must_use]
+    pub fn location(&self) -> Option<Cow<'_, str>> {
+        match self {
+            Self::CorruptLoose { path, .. }
+            | Self::HashMismatch { path, .. }
+            | Self::PackChecksum { pack: path }
+            | Self::IdxMismatch { pack: path } => Some(path.to_string_lossy()),
+            Self::BadRef(r) => Some(Cow::Borrowed(r.path.as_str())),
+            Self::MidxInvalid { .. } => Some(Cow::Borrowed("multi-pack-index")),
+            Self::CommitGraphInvalid { .. } => Some(Cow::Borrowed("commit-graph")),
+            Self::BadObject { .. } | Self::MissingObject { .. } | Self::BrokenLink { .. } => None,
+        }
+    }
+
+    /// Self-contained one-line description of the finding.
+    ///
+    /// Unlike the detail in [`format_fsck_line`], this names everything needed to
+    /// read it on its own (for example the tree of a broken link).
+    #[must_use]
+    pub fn detail(&self) -> String {
+        match self {
+            Self::BadObject { error, .. } if error.id == "sha1Collision" => {
+                format!("SHA-1 chosen-prefix collision: {}", error.detail)
+            }
+            Self::BrokenLink { tree, .. } => {
+                format!(
+                    "tree {} {}",
+                    tree.to_hex(),
+                    self.line_subject_and_detail().1
+                )
+            }
+            _ => self.line_subject_and_detail().1,
+        }
+    }
+
+    /// Subject and detail for a `level: subject: msgId: detail` line, where the
+    /// subject already names the object or file the detail is about.
+    pub(crate) fn line_subject_and_detail(&self) -> (String, String) {
+        match self {
+            Self::CorruptLoose { oid, path } => {
+                (oid.to_hex(), format!("could not read {}", path.display()))
+            }
+            Self::HashMismatch { oid, path } => (
+                oid.to_hex(),
+                format!("loose hash mismatch at {}", path.display()),
+            ),
+            Self::BadObject { oid, error } => (oid.to_hex(), error.detail.clone()),
+            Self::PackChecksum { pack } => (
+                pack_file_name(pack),
+                format!("pack checksum invalid for {}", pack.display()),
+            ),
+            Self::IdxMismatch { pack } => (
+                pack_file_name(pack),
+                format!("index checksum mismatch for {}", pack.display()),
+            ),
+            Self::MissingObject { oid, referrer } => {
+                (oid.to_hex(), missing_object_detail(*oid, *referrer))
+            }
+            Self::BrokenLink {
+                tree,
+                name,
+                mode,
+                target,
+            } => (
+                tree.to_hex(),
+                format!("entry {name} mode {mode:o} -> {}", target.to_hex()),
+            ),
+            Self::BadRef(r) => (r.path.clone(), r.detail.clone()),
+            Self::MidxInvalid { details } => ("multi-pack-index".to_owned(), details.join("; ")),
+            Self::CommitGraphInvalid { detail } => ("commit-graph".to_owned(), detail.clone()),
+        }
+    }
+}
+
+fn pack_file_name(pack: &Path) -> String {
+    pack.file_name()
+        .and_then(|s| s.to_str())
+        .unwrap_or("pack")
+        .to_owned()
 }
 
 /// Run repository fsck with optional progress and cancellation.
@@ -1538,6 +1610,171 @@ mod tests {
         let oid = ObjectId::from_hex("1212121212121212121212121212121212121212").unwrap();
         assert!(missing_object_detail(oid, MissingObjectReferrer::Index).contains("index"));
         assert!(missing_object_detail(oid, MissingObjectReferrer::Pack).contains("pack"));
+    }
+
+    #[test]
+    fn index_missing_object_detail_omits_zero_referrer() {
+        let oid = ObjectId::from_hex("abcd1234abcd1234abcd1234abcd1234abcd1234").unwrap();
+        let issue = FsckIssue::MissingObject {
+            oid,
+            referrer: MissingObjectReferrer::Index,
+        };
+        assert!(issue.detail().contains("staged in index"));
+
+        let pack = FsckIssue::MissingObject {
+            oid,
+            referrer: MissingObjectReferrer::Pack,
+        };
+        assert!(pack.detail().contains("missing from pack"));
+    }
+
+    #[test]
+    fn issue_oid_location_and_detail_per_variant() {
+        let oid = ObjectId::from_hex("1212121212121212121212121212121212121212").unwrap();
+        let other = ObjectId::from_hex("3434343434343434343434343434343434343434").unwrap();
+        let pack = PathBuf::from("/repo/objects/pack/pack-1.pack");
+        let cases: Vec<(FsckIssue, Option<ObjectId>, Option<&str>, String)> = vec![
+            (
+                FsckIssue::CorruptLoose {
+                    oid,
+                    path: PathBuf::from("/repo/objects/12/12"),
+                },
+                Some(oid),
+                Some("/repo/objects/12/12"),
+                "could not read /repo/objects/12/12".to_owned(),
+            ),
+            (
+                FsckIssue::HashMismatch {
+                    oid,
+                    path: PathBuf::from("/repo/objects/12/12"),
+                },
+                Some(oid),
+                Some("/repo/objects/12/12"),
+                "loose hash mismatch at /repo/objects/12/12".to_owned(),
+            ),
+            (
+                FsckIssue::BadObject {
+                    oid,
+                    error: FsckError::new("badTree", "malformed tree"),
+                },
+                Some(oid),
+                None,
+                "malformed tree".to_owned(),
+            ),
+            (
+                FsckIssue::BadObject {
+                    oid,
+                    error: FsckError::new("sha1Collision", "digest x"),
+                },
+                Some(oid),
+                None,
+                "SHA-1 chosen-prefix collision: digest x".to_owned(),
+            ),
+            (
+                FsckIssue::PackChecksum { pack: pack.clone() },
+                None,
+                Some("/repo/objects/pack/pack-1.pack"),
+                "pack checksum invalid for /repo/objects/pack/pack-1.pack".to_owned(),
+            ),
+            (
+                FsckIssue::IdxMismatch { pack: pack.clone() },
+                None,
+                Some("/repo/objects/pack/pack-1.pack"),
+                "index checksum mismatch for /repo/objects/pack/pack-1.pack".to_owned(),
+            ),
+            (
+                FsckIssue::MissingObject {
+                    oid: other,
+                    referrer: MissingObjectReferrer::Object(oid),
+                },
+                Some(other),
+                None,
+                missing_object_detail(other, MissingObjectReferrer::Object(oid)),
+            ),
+            (
+                FsckIssue::BrokenLink {
+                    tree: oid,
+                    name: "a.txt".to_owned(),
+                    mode: 0o100644,
+                    target: other,
+                },
+                Some(oid),
+                None,
+                format!(
+                    "tree {} entry a.txt mode 100644 -> {}",
+                    oid.to_hex(),
+                    other.to_hex()
+                ),
+            ),
+            (
+                FsckIssue::BadRef(crate::refs_fsck::RefsFsckIssue {
+                    severity: crate::refs_fsck::RefsFsckSeverity::Warning,
+                    path: "refs/heads/x".to_owned(),
+                    msg_id: "badRefName",
+                    detail: "bad name".to_owned(),
+                }),
+                None,
+                Some("refs/heads/x"),
+                "bad name".to_owned(),
+            ),
+            (
+                FsckIssue::MidxInvalid {
+                    details: vec!["a".to_owned(), "b".to_owned()],
+                },
+                None,
+                Some("multi-pack-index"),
+                "a; b".to_owned(),
+            ),
+            (
+                FsckIssue::CommitGraphInvalid {
+                    detail: "truncated".to_owned(),
+                },
+                None,
+                Some("commit-graph"),
+                "truncated".to_owned(),
+            ),
+        ];
+        for (issue, want_oid, want_location, want_detail) in cases {
+            assert_eq!(issue.oid(), want_oid, "{issue:?}");
+            assert_eq!(issue.location().as_deref(), want_location, "{issue:?}");
+            assert_eq!(issue.detail(), want_detail, "{issue:?}");
+        }
+    }
+
+    #[test]
+    fn fsck_line_subject_does_not_repeat_in_detail() {
+        let config = ConfigSet::default();
+        let oid = ObjectId::from_hex("1212121212121212121212121212121212121212").unwrap();
+        let other = ObjectId::from_hex("3434343434343434343434343434343434343434").unwrap();
+        let broken = FsckIssue::BrokenLink {
+            tree: oid,
+            name: "a.txt".to_owned(),
+            mode: 0o100644,
+            target: other,
+        };
+        assert_eq!(
+            format_fsck_line(&broken, &config, false),
+            format!(
+                "error: {}: brokenLink: entry a.txt mode 100644 -> {}",
+                oid.to_hex(),
+                other.to_hex()
+            )
+        );
+        let pack = FsckIssue::PackChecksum {
+            pack: PathBuf::from("/repo/objects/pack/pack-1.pack"),
+        };
+        assert_eq!(
+            format_fsck_line(&pack, &config, false),
+            "error: pack-1.pack: badPackChecksum: pack checksum invalid for /repo/objects/pack/pack-1.pack"
+        );
+        let collision = FsckIssue::BadObject {
+            oid,
+            error: FsckError::new("sha1Collision", "digest x"),
+        };
+        assert_eq!(
+            format_fsck_line(&collision, &config, false),
+            format!("warning: {}: sha1Collision: digest x", oid.to_hex())
+        );
     }
 
     #[test]
