@@ -52,12 +52,22 @@ pub(crate) fn apply_clean_tree_merge_to_worktree(
     from_tree: &ObjectId,
     merged: &TreeMergeOutput,
 ) -> Result<()> {
+    let mut snapshot = load_worktree_snapshot(repo)?;
+    apply_clean_tree_merge_to_worktree_with_snapshot(repo, from_tree, merged, &mut snapshot)
+}
+
+/// Like [`apply_clean_tree_merge_to_worktree`], but reuses a loaded worktree snapshot across steps.
+pub(crate) fn apply_clean_tree_merge_to_worktree_with_snapshot(
+    repo: &Repository,
+    from_tree: &ObjectId,
+    merged: &TreeMergeOutput,
+    snapshot: &mut WorktreeSnapshot,
+) -> Result<()> {
     let work_tree = repo
         .work_tree()
         .ok_or_else(|| Error::Message("this operation must be run in a work tree".into()))?;
-    let mut snapshot = load_worktree_snapshot(repo)?;
     let tree_changes =
-        tree_changes_for_clean_merge_with_snapshot(repo, from_tree, merged, &snapshot)?;
+        tree_changes_for_clean_merge_with_snapshot(repo, from_tree, merged, snapshot)?;
     let untracked =
         collect_untracked_for_tree_changes(repo, &mut snapshot.index, work_tree, &tree_changes)?;
     ensure_no_untracked_overwrite(&untracked, &tree_changes)?;
@@ -74,6 +84,7 @@ pub(crate) fn apply_clean_tree_merge_to_worktree(
         None,
     )?;
     finalize_clean_tree_merge_index(repo, &mut snapshot.index, merged)?;
+    snapshot.head_tree = Some(merged.result_tree);
     write_index_after_merge_checkout(repo, &mut snapshot.index)
 }
 

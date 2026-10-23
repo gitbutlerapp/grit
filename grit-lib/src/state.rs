@@ -225,6 +225,17 @@ pub fn primary_in_progress_operation(state: &WtStatusState) -> Option<InProgress
     None
 }
 
+/// Next steps when a pick/revert sequencer stopped on an empty commit (`--empty stop`).
+#[must_use]
+pub fn operation_next_steps_empty(kind: InProgressOperation) -> Vec<NextStep> {
+    match kind {
+        InProgressOperation::CherryPick | InProgressOperation::Revert => {
+            vec![NextStep::Skip(kind)]
+        }
+        other => operation_next_steps(other, false),
+    }
+}
+
 /// Ordered next steps for a paused operation given whether unmerged index entries remain.
 #[must_use]
 pub fn operation_next_steps(
@@ -301,6 +312,8 @@ pub fn status_operation(state: &WtStatusState, has_unmerged_conflicts: bool) -> 
         InProgressOperation::Merge
     } else if state.grit_rebase_in_progress {
         InProgressOperation::Rebase
+    } else if let Some(kind) = state.grit_replay_kind {
+        kind
     } else if state.cherry_pick_in_progress {
         InProgressOperation::CherryPick
     } else if state.revert_in_progress {
@@ -308,9 +321,14 @@ pub fn status_operation(state: &WtStatusState, has_unmerged_conflicts: bool) -> 
     } else {
         return None;
     };
+    let next_steps = if state.grit_replay_empty_stop && !has_unmerged_conflicts {
+        operation_next_steps_empty(kind)
+    } else {
+        operation_next_steps(kind, has_unmerged_conflicts)
+    };
     Some(Operation {
         kind,
-        next_steps: operation_next_steps(kind, has_unmerged_conflicts),
+        next_steps,
         alternatives: operation_alternatives(kind),
     })
 }
@@ -531,6 +549,10 @@ pub struct WtStatusState {
     pub detached_at: bool,
     /// Grit wrote `.git/sequencer/grit-opts` for this replay (show pick/revert operation hints).
     pub grit_replay_sequencer: bool,
+    /// When [`Self::grit_replay_sequencer`] is true, the persisted pick/revert kind from `grit-opts`.
+    pub grit_replay_kind: Option<InProgressOperation>,
+    /// Grit `--empty stop` pause without index conflicts (suggest `--skip`, not `--continue`).
+    pub grit_replay_empty_stop: bool,
     /// Grit wrote `.git/rebase-merge/grit-plan` for a resumable rebase session.
     pub grit_rebase_in_progress: bool,
 }
@@ -758,8 +780,60 @@ pub fn wt_status_get_state(
     }
 
     state.grit_replay_sequencer = git_dir.join("sequencer").join("grit-opts").is_file();
+    if state.grit_replay_sequencer {
+        if let Some((kind, empty_stop)) = read_grit_replay_status_hints(git_dir) {
+            state.grit_replay_kind = Some(kind);
+            state.grit_replay_empty_stop = empty_stop;
+            match kind {
+                InProgressOperation::CherryPick => {
+                    state.revert_in_progress = false;
+                    state.revert_head_oid = None;
+                    if !state.cherry_pick_in_progress {
+                        state.cherry_pick_in_progress = true;
+                    }
+                }
+                InProgressOperation::Revert => {
+                    state.cherry_pick_in_progress = false;
+                    state.cherry_pick_head_oid = None;
+                    if !state.revert_in_progress {
+                        state.revert_in_progress = true;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
 
     Ok(state)
+}
+
+fn read_grit_replay_status_hints(git_dir: &Path) -> Option<(InProgressOperation, bool)> {
+    let path = git_dir.join("sequencer").join("grit-opts");
+    let content = fs::read_to_string(&path).ok()?;
+    let mut direction = None;
+    let mut empty = "stop";
+    for line in content.lines() {
+        let line = line.trim();
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        match key.trim() {
+            "direction" => {
+                direction = Some(if value.trim() == "revert" {
+                    InProgressOperation::Revert
+                } else {
+                    InProgressOperation::CherryPick
+                });
+            }
+            "empty" => empty = value.trim(),
+            _ => {}
+        }
+    }
+    let kind = direction?;
+    let empty_stop = empty == "stop"
+        && (read_cherry_pick_head(git_dir).ok().flatten().is_some()
+            || read_revert_head(git_dir).ok().flatten().is_some());
+    Some((kind, empty_stop))
 }
 
 /// Whether a split commit is in progress during interactive rebase (`wt-status.c` `split_commit_in_progress`).

@@ -11,12 +11,16 @@ use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::config::ConfigSet;
 use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
+use grit_lib::operation::{
+    next_step_grit_commands, operation_alternatives, operation_next_steps_empty,
+};
 use grit_lib::porcelain::replay::ReplayDirection;
 use grit_lib::porcelain::replay_sequence::{
     abort_replay_sequence, commits_to_replay, continue_replay_sequence, skip_replay_step,
     start_replay_sequence, ReplayEmptyPolicy, ReplayOptions, ReplaySequenceRequest,
     SequenceOutcome,
 };
+use grit_lib::state::InProgressOperation;
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::io::Write;
@@ -351,59 +355,38 @@ fn map_sequence_outcome(
         } => {
             let mut commits = records_from_replay_created(repo, &created_so_far);
             commits.push(source_record(repo, current, None));
-            let block = OperationConflictBlock::for_pick(&[]);
+            let next_steps = next_step_grit_commands(&operation_next_steps_empty(
+                InProgressOperation::CherryPick,
+            ));
+            let alternatives =
+                next_step_grit_commands(&operation_alternatives(InProgressOperation::CherryPick));
             PickOutcome {
                 result: PickResult::Empty,
                 commits,
                 dropped: Vec::new(),
                 conflicts: None,
-                next_steps: Some(block.next_steps),
-                alternatives: block.alternatives,
+                next_steps: Some(next_steps),
+                alternatives: if alternatives.is_empty() {
+                    None
+                } else {
+                    Some(alternatives)
+                },
                 dry_run: None,
             }
         }
     }
 }
 
-fn records_before_stop(
-    repo: &grit_lib::repo::Repository,
-    sources: &[ObjectId],
-    stop_at: ObjectId,
-    created: &[ObjectId],
-) -> Vec<PickCommitRecord> {
-    let mut commits = Vec::new();
-    let mut created_iter = created.iter();
-    for &source in sources {
-        if source == stop_at {
-            break;
-        }
-        if let Some(&oid) = created_iter.next() {
-            commits.push(source_record(repo, source, Some(oid)));
-        }
-    }
-    commits
-}
-
 fn records_for_completed_from_replay(
     repo: &grit_lib::repo::Repository,
-    sources: &[ObjectId],
+    _sources: &[ObjectId],
     created: &[grit_lib::porcelain::replay_sequence::ReplayCreated],
     dropped: &[ObjectId],
 ) -> (Vec<PickCommitRecord>, Vec<String>) {
-    let dropped_set: std::collections::HashSet<_> = dropped.iter().copied().collect();
-    let mut created_iter = created.iter();
-    let mut commits = Vec::new();
-    for &source in sources {
-        if dropped_set.contains(&source) {
-            continue;
-        }
-        if let Some(record) = created_iter.next() {
-            commits.push(source_record(repo, record.source, Some(record.new_oid)));
-        } else {
-            commits.push(source_record(repo, source, None));
-        }
-    }
-    (commits, dropped.iter().map(ObjectId::to_hex).collect())
+    (
+        records_from_replay_created(repo, created),
+        dropped.iter().map(ObjectId::to_hex).collect(),
+    )
 }
 
 fn records_from_replay_created(

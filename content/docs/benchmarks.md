@@ -404,11 +404,11 @@ Recorded on the factory VM after stacking pick/merge/stash perf work on `origin/
 
 Two back-to-back hot-path after runs (`hot-paths-after-run1.json` vs `run2.json`) agree within **10% relative** on every scenario except `merge-100000` and `pick-100000` (~**13–14%** relative spread). The default `grit-bench compare` tolerance is an **absolute** 0.10 on the ratio, which is tighter than ±10% relative for large ratios (e.g. pick-series).
 
-### pick-range-20 (known gap)
+### pick-range-20 (RSS gap)
 
 **Scenario:** `grit pick base..topic` vs `git cherry-pick --no-edit base..topic` on the **pick-series** synthetic-**10000** fixture (20 commits on `topic`, one file touched per commit). Baseline: **`grit-utils/baselines/hot-paths-after.json`** (`pick-range-20`).
 
-**Committed baseline (factory VM, release hyperfine, Git 2.43):** grit median **~243 ms** vs git **~119 ms** (**~2.04×**); peak RSS **~1.57×** git. The scenario is on the **daily matrix** for regression tracking. **Acceptance goal** (unchanged): **≤ 1.0×** median time and **≤ 1.2×** peak RSS.
+**Committed baseline (factory VM, release hyperfine, Git 2.43):** grit median **~102 ms** vs git **~118 ms** (**~0.86×** time); peak RSS **~1.40×** git. Median time meets the **≤ 1.0×** goal; peak RSS remains above **≤ 1.2×** until shared replay/checkout work lands.
 
 **Follow-up:** [GitHub issue #2977](https://github.com/gitbutlerapp/grit/issues/2977) — cross-cutting replay/merge work (index-hinted tree diffs in replay merge, scoped checkout for changed paths only, reduce peak RSS by avoiding full tree/index copies per step). Benefits **revert**, **merge**, and **rebase**, not pick-only code.
 

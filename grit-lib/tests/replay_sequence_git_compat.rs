@@ -731,6 +731,55 @@ fn continue_after_range_conflict_pairs_all_created_sources() {
 }
 
 #[test]
+fn continue_honours_persisted_no_commit() {
+    let root = tempfile::tempdir().expect("tempdir");
+    init_repo(root.path());
+    commit_file(root.path(), "f", "base\n", "base");
+    git(root.path(), &["switch", "-c", "topic"]);
+    fs::write(root.path().join("f"), "topic\n").unwrap();
+    git(root.path(), &["commit", "-qam", "topic-f"]);
+    let pick = oid_from_rev(root.path(), "HEAD");
+    git(root.path(), &["switch", "main"]);
+    fs::write(root.path().join("f"), "main\n").unwrap();
+    git(root.path(), &["commit", "-qam", "main"]);
+    let start = oid_from_rev(root.path(), "HEAD");
+
+    let repo = open_repo(root.path());
+    let mut opts = ReplayOptions::default();
+    opts.no_commit = true;
+    let out = start_replay_sequence(&repo, &pick_req(vec![pick], opts)).expect("pick");
+    assert!(matches!(out, SequenceOutcome::Conflicts { .. }));
+    fs::write(root.path().join("f"), "resolved\n").unwrap();
+    git(root.path(), &["add", "f"]);
+    let done = continue_replay_sequence(&repo, IDENT).expect("continue");
+    assert!(matches!(done, SequenceOutcome::Completed { .. }));
+    assert_eq!(oid_from_rev(root.path(), "HEAD"), start);
+    git_fsck_strict(root.path());
+}
+
+#[test]
+fn commits_to_replay_empty_range_does_not_resolve_tip_alone() {
+    let root = tempfile::tempdir().expect("tempdir");
+    init_repo(root.path());
+    let tip = commit_file(root.path(), "a.txt", "a\n", "only");
+    let repo = open_repo(root.path());
+    let expanded =
+        commits_to_replay(&repo, &[format!("{}..{}", tip.to_hex(), tip.to_hex())]).expect("expand");
+    assert!(expanded.is_empty());
+    let req = pick_req(vec![], ReplayOptions::default());
+    let mut req_with_empty = req.clone();
+    req_with_empty.commits = expanded;
+    let out = start_replay_sequence(&repo, &req_with_empty).expect("start");
+    assert!(matches!(
+        out,
+        SequenceOutcome::Completed {
+            created,
+            dropped
+        } if created.is_empty() && dropped.is_empty()
+    ));
+}
+
+#[test]
 fn continued_commit_gets_new_change_id() {
     let root = tempfile::tempdir().expect("tempdir");
     init_repo(root.path());

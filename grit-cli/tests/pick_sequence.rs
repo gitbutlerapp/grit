@@ -286,6 +286,126 @@ fn pick_continue_json_reports_cherry_pick_source_without_x() {
 }
 
 #[test]
+fn pick_empty_stop_next_steps_suggest_skip() {
+    let dir = unique_tmp("pick-seq", "empty-skip-hint");
+    init_repo(&dir);
+    commit_file(&dir, "f.txt", "a\n", "base");
+    git(&dir, &["switch", "-c", "topic"]);
+    git(&dir, &["commit", "--allow-empty", "-qm", "empty"]);
+    let empty = git(&dir, &["rev-parse", "HEAD"]).trim().to_owned();
+    git(&dir, &["switch", "main"]);
+
+    let stop = grit(&dir, &["pick", &empty, "--json"]);
+    assert!(!stop.ok());
+    let stop_json: Value = serde_json::from_str(stop.stdout.trim()).unwrap();
+    validate_pick_schema(&stop_json);
+    assert_eq!(stop_json["result"], "empty");
+    let steps: Vec<_> = stop_json["next_steps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    assert!(steps.iter().any(|s| s.contains("pick --skip")));
+    assert!(!steps.iter().any(|s| s.contains("pick --continue")));
+}
+
+#[test]
+fn pick_first_clean_second_conflict_continue_json_lists_both_sources() {
+    let dir = unique_tmp("pick-seq", "partial-created");
+    init_repo(&dir);
+    commit_file(&dir, "shared.txt", "base\n", "base");
+    git(&dir, &["switch", "-c", "topic"]);
+    commit_file(&dir, "only.txt", "one\n", "t1 clean");
+    fs::write(dir.join("shared.txt"), "topic\n").unwrap();
+    git(&dir, &["add", "shared.txt"]);
+    git(&dir, &["commit", "-qm", "t2 conflict"]);
+    let c1 = git(&dir, &["rev-parse", "topic~1"]).trim().to_owned();
+    let c2 = git(&dir, &["rev-parse", "topic"]).trim().to_owned();
+    git(&dir, &["switch", "main"]);
+    fs::write(dir.join("shared.txt"), "main\n").unwrap();
+    git(&dir, &["add", "shared.txt"]);
+    git(&dir, &["commit", "-qm", "main"]);
+
+    assert!(!grit(&dir, &["pick", &c1, &c2]).ok());
+    fs::write(dir.join("shared.txt"), "resolved\n").unwrap();
+    git(&dir, &["add", "shared.txt"]);
+    let done = json_stdout(&["pick", "--continue", "--json"], &dir);
+    let rows = done["commits"].as_array().unwrap();
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0]["source"].as_str().unwrap(), c1);
+    assert_eq!(rows[1]["source"].as_str().unwrap(), c2);
+}
+
+#[test]
+fn pick_status_suggests_pick_not_revert_during_sequence() {
+    let dir = unique_tmp("pick-seq", "status-kind");
+    init_repo(&dir);
+    commit_file(&dir, "f.txt", "base\n", "base");
+    git(&dir, &["switch", "-c", "topic"]);
+    fs::write(dir.join("f.txt"), "topic\n").unwrap();
+    git(&dir, &["commit", "-qam", "topic"]);
+    let pick = git(&dir, &["rev-parse", "HEAD"]).trim().to_owned();
+    git(&dir, &["switch", "main"]);
+    fs::write(dir.join("f.txt"), "main\n").unwrap();
+    git(&dir, &["commit", "-qam", "main"]);
+
+    assert!(!grit(&dir, &["pick", &pick]).ok());
+    let status = json_stdout(&["status", "--json"], &dir);
+    let op = &status["operation"];
+    assert_eq!(op["kind"], "cherry-pick");
+    let steps: Vec<_> = op["next_steps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|v| v.as_str().unwrap())
+        .collect();
+    assert!(steps.iter().any(|s| s.contains("pick --continue")));
+    assert!(!steps.iter().any(|s| s.contains("revert --continue")));
+}
+
+#[test]
+fn pick_assigns_change_id_and_repick_generates_new_id() {
+    let dir = unique_tmp("pick-seq", "change-id");
+    init_repo(&dir);
+    commit_file(&dir, "f.txt", "a\n", "base");
+    git(&dir, &["switch", "-c", "topic"]);
+    commit_file(&dir, "side.txt", "b\n", "side");
+    let pick = git(&dir, &["rev-parse", "HEAD"]).trim().to_owned();
+    git(&dir, &["switch", "main"]);
+    commit_file(&dir, "main.txt", "c\n", "main");
+
+    let first = json_stdout(&["pick", &pick, "--json"], &dir);
+    let id1 = first["commits"][0]["change_id"]
+        .as_str()
+        .unwrap()
+        .to_owned();
+    git(&dir, &["switch", "-c", "topic2"]);
+    commit_file(&dir, "other.txt", "d\n", "other");
+    let pick2 = git(&dir, &["rev-parse", "HEAD"]).trim().to_owned();
+    git(&dir, &["switch", "main"]);
+    let second = json_stdout(&["pick", &pick2, "--json"], &dir);
+    let id2 = second["commits"][0]["change_id"].as_str().unwrap();
+    assert_ne!(id1, id2);
+}
+
+#[test]
+fn pick_continue_after_empty_stop_skip_completes() {
+    let dir = unique_tmp("pick-seq", "empty-skip-flow");
+    init_repo(&dir);
+    commit_file(&dir, "f.txt", "a\n", "base");
+    git(&dir, &["switch", "-c", "topic"]);
+    git(&dir, &["commit", "--allow-empty", "-qm", "empty"]);
+    let empty = git(&dir, &["rev-parse", "HEAD"]).trim().to_owned();
+    git(&dir, &["switch", "main"]);
+
+    assert!(!grit(&dir, &["pick", &empty]).ok());
+    let skipped = json_stdout(&["pick", "--skip", "--json"], &dir);
+    assert_eq!(skipped["result"], "skipped");
+    assert!(!dir.join(".git/sequencer").exists());
+}
+
+#[test]
 fn pick_message_requires_single_commit() {
     let dir = unique_tmp("pick-seq", "message");
     init_repo(&dir);
