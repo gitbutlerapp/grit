@@ -91,6 +91,45 @@ fn overlay_tree_on_index_from_head() {
 }
 
 #[test]
+fn overlay_tree_on_index_peels_nested_tags_and_rejects_blobs() {
+    let repo = HistoryRepo::init();
+    seed_multidir_repo(&repo);
+    let wt = repo.worktree();
+    git(wt, &["tag", "-a", "-m", "inner", "inner"]);
+    git(wt, &["tag", "-a", "-m", "outer", "outer", "inner"]);
+    let blob = git(wt, &["rev-parse", "HEAD:a/f0.txt"]);
+    git(wt, &["tag", "-a", "-m", "blob", "blob-tag", blob.trim()]);
+    fs::write(wt.join("a/f0.txt"), "dirty\n").expect("modify");
+    let grit = Repository::discover(Some(wt), &RepositoryOptions::empty()).expect("open");
+
+    let overlaid = |treeish: &str| {
+        let mut index = grit.index_handle().load().expect("load");
+        index.overlay_tree_on_index(&grit, treeish, b"").map(|()| {
+            index
+                .entries()
+                .iter()
+                .map(|e| {
+                    (
+                        e.path.clone(),
+                        e.oid,
+                        e.stage(),
+                        e.overlay_tree_skip_output(),
+                    )
+                })
+                .collect::<Vec<_>>()
+        })
+    };
+    assert_eq!(
+        overlaid("outer").expect("overlay nested tag"),
+        overlaid("HEAD").expect("overlay HEAD")
+    );
+    assert!(matches!(
+        overlaid("blob-tag"),
+        Err(grit_lib::error::Error::ObjectNotFound(_))
+    ));
+}
+
+#[test]
 fn load_expand_sparse_optional_and_collapse_roundtrip() {
     let repo = HistoryRepo::init();
     seed_multidir_repo(&repo);

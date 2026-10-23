@@ -15,7 +15,7 @@ use crate::config::ConfigSet;
 use crate::credentials::HelperCredentialProvider;
 use crate::error::Error;
 use crate::fetch::{fetch_remote, Progress};
-use crate::objects::{ObjectId, ObjectKind};
+use crate::objects::ObjectId;
 use crate::odb::Odb;
 use crate::push::push_remote;
 use crate::refs::listing::{
@@ -961,7 +961,7 @@ fn finalize_list_refs_output(
             let peeled = peel_map
                 .get(&e.name)
                 .copied()
-                .or_else(|| odb.and_then(|o| peel_tag(o, &e.oid)));
+                .or_else(|| odb.and_then(|o| o.peel_tag_target(e.oid).ok().flatten()));
             if let Some(p) = peeled {
                 let peel_name = format!("{}^{{}}", e.name);
                 if should_emit_peel_line(&peel_name, &opts.prefixes) {
@@ -1193,7 +1193,7 @@ fn list_refs_from_git_dir_with_scan_prefixes(
                                 .with_config_git_dir(git_dir.to_path_buf())
                         }),
                     };
-                    if let Some(peeled) = peel_tag(peel_odb, &oid) {
+                    if let Ok(Some(peeled)) = peel_odb.peel_tag_target(oid) {
                         entries.push(RemoteRef {
                             name: peel_name,
                             oid: peeled,
@@ -1210,21 +1210,6 @@ fn list_refs_from_git_dir_with_scan_prefixes(
         entries.truncate(limit);
     }
     Ok(entries)
-}
-
-fn peel_tag(odb: &Odb, oid: &ObjectId) -> Option<ObjectId> {
-    let info = odb.read_info(oid).ok()?;
-    if info.kind != ObjectKind::Tag {
-        return None;
-    }
-    let obj = odb.read(oid).ok()?;
-    let text = std::str::from_utf8(&obj.data).ok()?;
-    for line in text.lines() {
-        if let Some(target) = line.strip_prefix("object ") {
-            return target.trim().parse::<ObjectId>().ok();
-        }
-    }
-    None
 }
 
 #[cfg(test)]
