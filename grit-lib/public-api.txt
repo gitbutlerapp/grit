@@ -507,16 +507,34 @@ pub fn grit_lib::blame::read_object_for_blame(&grit_lib::objects::odb::Odb, &gri
 pub type grit_lib::blame::PromisorHydrateHook = fn(&grit_lib::repo::Repository, grit_lib::objects::ObjectId)
 pub mod grit_lib::bundle
 pub mod grit_lib::bundle::bundle_remote
+pub struct grit_lib::bundle::bundle_remote::BundleCreateOptions
+pub grit_lib::bundle::bundle_remote::BundleCreateOptions::all_refs: bool
+pub grit_lib::bundle::bundle_remote::BundleCreateOptions::rev_tokens: alloc::vec::Vec<alloc::string::String>
+impl grit_lib::bundle::bundle_remote::BundleCreateOptions
+pub fn grit_lib::bundle::bundle_remote::BundleCreateOptions::from_rev_tokens(alloc::vec::Vec<alloc::string::String>) -> Self
+impl core::clone::Clone for grit_lib::bundle::bundle_remote::BundleCreateOptions
+pub fn grit_lib::bundle::bundle_remote::BundleCreateOptions::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::bundle::bundle_remote::BundleCreateOptions
+impl core::cmp::PartialEq for grit_lib::bundle::bundle_remote::BundleCreateOptions
+pub fn grit_lib::bundle::bundle_remote::BundleCreateOptions::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::bundle::bundle_remote::BundleCreateOptions
+pub fn grit_lib::bundle::bundle_remote::BundleCreateOptions::default() -> Self
+impl core::fmt::Debug for grit_lib::bundle::bundle_remote::BundleCreateOptions
+pub fn grit_lib::bundle::bundle_remote::BundleCreateOptions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::bundle::bundle_remote::BundleCreateOptions
+impl core::marker::Freeze for grit_lib::bundle::bundle_remote::BundleCreateOptions
+impl core::marker::Send for grit_lib::bundle::bundle_remote::BundleCreateOptions
+impl core::marker::Sync for grit_lib::bundle::bundle_remote::BundleCreateOptions
+impl core::marker::Unpin for grit_lib::bundle::bundle_remote::BundleCreateOptions
+impl core::marker::UnsafeUnpin for grit_lib::bundle::bundle_remote::BundleCreateOptions
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::bundle::bundle_remote::BundleCreateOptions
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::bundle::bundle_remote::BundleCreateOptions
 pub fn grit_lib::bundle::bundle_remote::fetch_from_bundle(&std::path::Path, &std::path::Path, &grit_lib::remote::transfer::FetchOptions) -> grit_lib::error::Result<grit_lib::remote::transfer::FetchOutcome>
 pub fn grit_lib::bundle::bundle_remote::fetch_from_bundle_with_progress(&std::path::Path, &std::path::Path, &grit_lib::remote::transfer::FetchOptions, &mut dyn grit_lib::remote::fetch::Progress) -> grit_lib::error::Result<grit_lib::remote::transfer::FetchOutcome>
 pub fn grit_lib::bundle::bundle_remote::is_bundle_path(&std::path::Path) -> bool
 pub fn grit_lib::bundle::bundle_remote::split_revision_specs_for_bundle(&[alloc::string::String]) -> (alloc::vec::Vec<alloc::string::String>, alloc::vec::Vec<alloc::string::String>)
 pub fn grit_lib::bundle::bundle_remote::write_bundle_from_rev_specs(&grit_lib::repo::Repository, &std::path::Path, &[alloc::string::String]) -> grit_lib::error::Result<usize>
 pub fn grit_lib::bundle::bundle_remote::write_bundle_with_options(&grit_lib::repo::Repository, &std::path::Path, &grit_lib::bundle::bundle_remote::BundleCreateOptions) -> grit_lib::error::Result<usize>
-pub struct grit_lib::bundle::bundle_remote::BundleCreateOptions
-pub grit_lib::bundle::bundle_remote::BundleCreateOptions::from_rev_tokens(alloc::vec::Vec<alloc::string::String>) -> grit_lib::bundle::bundle_remote::BundleCreateOptions
-pub grit_lib::bundle::bundle_remote::BundleCreateOptions::all_refs: bool
-pub grit_lib::bundle::bundle_remote::BundleCreateOptions::rev_tokens: alloc::vec::Vec<alloc::string::String>
 #[non_exhaustive] pub enum grit_lib::bundle::BundleError
 pub grit_lib::bundle::BundleError::BadSignature
 pub grit_lib::bundle::BundleError::EmptyRefs
