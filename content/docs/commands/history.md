@@ -13,7 +13,7 @@ grit history move <commit> (--before <anchor> | --after <anchor>)
 grit history reword <commit> (-m <message> | --message-file <path|-> | --author <ident>)
 grit history reword <commit> --author <ident> [-m <message>]
 grit history drop|move|reword|fixup|squash|absorb|rebase … [--dry-run] [--update-refs=(branches|head)] [--empty=(drop|keep|abort)] [--keep-committer]
-grit history fixup <commit> [-m|--message-file]
+grit history fixup <commit> [-m|--message-file] [--hunks <id,…>] [--lines <path:start-end>] [-- <path>…]
 grit history squash <range>… [-m|--message-file|--combine]
 grit history absorb [--base <rev>]
 grit history rebase [<upstream>] [--onto <rev>]
@@ -180,6 +180,18 @@ Fixed up 2 commit(s)
   commit a1b2c3d → d4e5f60
   refs/heads/main f6a7b89 → c0ffee0
 ```
+
+Fold only selected **unstaged** hunks (same ids and `--lines` syntax as [`grit add`](add.md)) without staging the whole file first:
+
+```console
+$ grit diff --unstaged --json -- file.txt   # copy hunks[].id
+$ grit history fixup HEAD~1 --hunks abcdef012345 -- file.txt
+Fixed up 2 commit(s)
+  commit a1b2c3d → d4e5f60
+  refs/heads/main f6a7b89 → c0ffee0
+```
+
+Unknown or stale hunk ids exit **2** (same as `grit add --hunks`). Other unstaged hunks on the same paths stay in the worktree.
 
 Absorb staged fixes on a linear branch:
 

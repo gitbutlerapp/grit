@@ -43,6 +43,8 @@ fn apply_opts() -> ApplyOptions {
 
 fn fixup_opts() -> FixupOptions {
     FixupOptions {
+        selection: None,
+        pathspecs: Vec::new(),
         message: None,
         empty: EmptyPolicy::Drop,
         rewrite: rewrite_opts(),

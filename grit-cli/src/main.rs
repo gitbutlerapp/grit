@@ -306,6 +306,14 @@ enum HistoryAction {
             allow_hyphen_values = true
         )]
         message_file: Option<String>,
+        /// Unstaged hunk ids to fold (`grit diff --unstaged --json`, comma-separated or repeated).
+        #[arg(long = "hunks", value_name = "ID,...", action = clap::ArgAction::Append)]
+        hunks: Vec<String>,
+        /// Unstaged new-side line ranges to fold (`path:start-end` or `path:line`, comma-separated or repeated).
+        #[arg(long = "lines", value_name = "PATH:START-END", action = clap::ArgAction::Append)]
+        lines: Vec<String>,
+        #[command(flatten)]
+        pathspecs: crate::pathspec_args::TrailingPathspecArgs,
         #[command(flatten)]
         shared: commands::history::HistoryRewriteArgs,
     },
@@ -2411,12 +2419,33 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<()> {
                 commit,
                 message,
                 message_file,
+                hunks,
+                lines,
+                pathspecs,
                 shared,
-            } => emit(
-                &commands::history::run_fixup(&commit, message, message_file, &shared)?,
-                opts,
-                ctx,
-            ),
+            } => {
+                let outcome = commands::history::run_fixup(
+                    &commit,
+                    message,
+                    message_file,
+                    &hunks,
+                    &lines,
+                    &pathspecs,
+                    &shared,
+                );
+                match outcome {
+                    Ok(out) => emit(&out, opts, ctx),
+                    Err(err) => {
+                        let code = commands::add::hunks_exit_code(&err);
+                        if opts.mode == OutputMode::Json {
+                            output::emit_error(&err, opts);
+                        } else {
+                            eprintln!("error: {err:#}");
+                        }
+                        std::process::exit(code);
+                    }
+                }
+            }
             HistoryAction::Rebase {
                 upstream,
                 onto,

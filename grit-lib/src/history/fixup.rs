@@ -1,18 +1,24 @@
 //! Apply staged index changes onto a historical commit and replay descendants.
 
+use crate::apply::{apply_patch_to_index, IndexApplyOptions};
 use crate::diff::diff_index_to_tree;
+use crate::diff::hunk_id::DiffSide;
 use crate::index::write_tree::write_tree_from_index;
 use crate::merge_file::MergeFavor;
 use crate::merge_trees::{
     merge_trees_three_way, TreeMergeConflictPresentation, WhitespaceMergeOptions,
 };
 use crate::objects::{parse_commit, CommitData, ObjectId, ObjectKind};
+use crate::porcelain::hunk_select::{resolve_selection, stage_hunks, HunkSelection};
+use crate::porcelain::index_from_tree::index_from_tree;
 use crate::repo::Repository;
 use crate::state::resolve_head;
 
+use super::apply::apply_fixup_rewrite;
 use super::error::HistoryError;
 use super::plan::plan_rewrite;
 use super::reword::normalize_rewrite_message;
+use super::types::{AppliedRewrite, ApplyOptions};
 use super::types::{CommitEdit, EmptyPolicy, HistoryEdits, RewriteOptions, RewritePlan};
 
 /// Options for [`fixup`].
@@ -24,9 +30,16 @@ pub struct FixupOptions {
     pub empty: EmptyPolicy,
     /// Ref scope, committer, and replay empty policy (the `empty` field is overwritten from [`Self::empty`]).
     pub rewrite: RewriteOptions,
+    /// When set, fixup uses `HEAD`'s tree plus these unstaged hunks (in-memory index) instead of the full staged index.
+    pub selection: Option<HunkSelection>,
+    /// Pathspec filter when resolving [`Self::selection`].
+    pub pathspecs: Vec<String>,
 }
 
 /// Plan a fixup of `target`: merge staged index changes onto `target`'s tree and replay descendants.
+///
+/// When [`FixupOptions::selection`] is set, only the selected unstaged hunks are folded; the on-disk
+/// index is unchanged until [`apply_fixup_hunk_selection`].
 ///
 /// Writes new commit objects into the ODB; refs are updated only when the caller applies the plan.
 ///
@@ -45,14 +58,17 @@ pub fn fixup(
 
     let head_oid = head_commit_oid(repo)?;
     let head_tree = commit_tree(repo, head_oid)?;
-    let index = repo.load_index().map_err(library_err)?;
-    let staged =
-        diff_index_to_tree(repo.odb(), &index, Some(&head_tree), false).map_err(library_err)?;
-    if staged.is_empty() {
-        return Err(HistoryError::NothingStaged);
-    }
-
-    let index_tree = write_tree_from_index(repo.odb(), &index, "").map_err(library_err)?;
+    let index_tree = if let Some(selection) = &opts.selection {
+        index_tree_for_fixup_selection(repo, head_tree, selection, &opts.pathspecs)?
+    } else {
+        let index = repo.load_index().map_err(library_err)?;
+        let staged =
+            diff_index_to_tree(repo.odb(), &index, Some(&head_tree), false).map_err(library_err)?;
+        if staged.is_empty() {
+            return Err(HistoryError::NothingStaged);
+        }
+        write_tree_from_index(repo.odb(), &index, "").map_err(library_err)?
+    };
     let target_commit = load_commit(repo, target)?;
     let target_tree = target_commit.tree;
 
@@ -120,6 +136,66 @@ pub fn fixup(
     let mut rewrite_opts = opts.rewrite.clone();
     rewrite_opts.empty = opts.empty;
     plan_rewrite(repo, &edits, &rewrite_opts)
+}
+
+/// Repository-relative paths touched by a hunk selection (for [`apply_fixup_rewrite`]).
+///
+/// # Errors
+///
+/// Returns [`HistoryError::HunkSelect`] when ids or line ranges cannot be resolved.
+pub fn fixup_selection_paths(
+    repo: &Repository,
+    selection: &HunkSelection,
+    pathspecs: &[String],
+) -> Result<Vec<String>, HistoryError> {
+    let patches = resolve_selection(repo, DiffSide::Unstaged, selection, pathspecs)?;
+    let mut paths: Vec<String> = patches
+        .iter()
+        .filter_map(|p| p.effective_path().map(str::to_owned))
+        .collect();
+    paths.sort();
+    paths.dedup();
+    Ok(paths)
+}
+
+/// Apply a fixup plan built with [`FixupOptions::selection`]: stage selected hunks, then run [`apply_fixup_rewrite`].
+///
+/// # Errors
+///
+/// Same as [`apply_fixup_rewrite`], plus hunk resolution and staging failures.
+pub fn apply_fixup_hunk_selection(
+    repo: &Repository,
+    plan: &RewritePlan,
+    apply_opts: &ApplyOptions,
+    selection: &HunkSelection,
+    pathspecs: &[String],
+) -> Result<AppliedRewrite, HistoryError> {
+    let paths = fixup_selection_paths(repo, selection, pathspecs)?;
+    stage_hunks(repo, DiffSide::Unstaged, selection, pathspecs, false)?;
+    apply_fixup_rewrite(repo, plan, apply_opts, &paths)
+}
+
+fn index_tree_for_fixup_selection(
+    repo: &Repository,
+    head_tree: ObjectId,
+    selection: &HunkSelection,
+    pathspecs: &[String],
+) -> Result<ObjectId, HistoryError> {
+    let patches = resolve_selection(repo, DiffSide::Unstaged, selection, pathspecs)?;
+    if patches.is_empty() {
+        return Err(HistoryError::NothingStaged);
+    }
+    let mut index = index_from_tree(repo, &head_tree).map_err(library_err)?;
+    apply_patch_to_index(
+        repo,
+        &mut index,
+        &patches,
+        &IndexApplyOptions { dry_run: false },
+    )
+    .map_err(|e| HistoryError::Planning {
+        message: e.to_string(),
+    })?;
+    write_tree_from_index(repo.odb(), &index, "").map_err(library_err)
 }
 
 fn library_err(err: crate::error::Error) -> HistoryError {

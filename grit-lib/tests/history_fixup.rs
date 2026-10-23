@@ -5,16 +5,20 @@
 mod support;
 
 use std::fs;
+use std::process::Command;
+use std::str::FromStr;
 
 use grit_lib::config::environment::RepositoryOptions;
+use grit_lib::diff::hunk_id::{hunk_ids_with_duplicate_peers, DiffSide, HunkId};
 use grit_lib::diff::DiffStatus;
 use grit_lib::objects::{parse_commit, ObjectId};
+use grit_lib::porcelain::hunk_select::{unstaged_file_diffs, HunkSelectError, HunkSelection};
 use grit_lib::porcelain::status::{status, StatusOptions};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
-    apply_fixup_rewrite, fixup, staged_fixup_paths, ApplyOptions, EmptyPolicy, FixupOptions,
-    HistoryError, RefScope, RewriteOptions,
+    apply_fixup_hunk_selection, apply_fixup_rewrite, fixup, staged_fixup_paths, ApplyOptions,
+    EmptyPolicy, FixupOptions, HistoryError, RefScope, RewriteOptions,
 };
 
 use support::{
@@ -43,6 +47,8 @@ fn fixup_opts(scope: RefScope, empty: EmptyPolicy) -> FixupOptions {
             preserve_committer: false,
             sign: true,
         },
+        selection: None,
+        pathspecs: Vec::new(),
     }
 }
 
@@ -57,6 +63,8 @@ fn harness_fixup_opts(scope: RefScope, empty: EmptyPolicy) -> FixupOptions {
             preserve_committer: false,
             sign: true,
         },
+        selection: None,
+        pathspecs: Vec::new(),
     }
 }
 
@@ -544,4 +552,154 @@ fn history_fixup_matches_git_history_when_available() {
     git(wt2, &["add", "file.txt"]);
     git_history_fixup_or_legacy(wt2, "HEAD");
     assert_fixup_tip_matches_git_oracle(wt, wt2);
+}
+
+fn two_hunk_edited_file() -> (String, String) {
+    let mut base = String::new();
+    for i in 0..24 {
+        base.push_str(&format!("line{i}\n"));
+    }
+    let mut edited = base.clone();
+    edited = edited.replacen("line5\n", "LINE5\n", 1);
+    edited = edited.replacen("line18\n", "LINE18\n", 1);
+    (base, edited)
+}
+
+fn unstaged_hunk_ids(repo: &Repository) -> Vec<HunkId> {
+    let files = unstaged_file_diffs(repo, &[]).expect("diff");
+    assert_eq!(files.len(), 1);
+    let (file, peer) = &files[0];
+    hunk_ids_with_duplicate_peers(DiffSide::Unstaged, &file.path, &file.hunks, peer)
+}
+
+fn fixup_opts_with_selection(
+    scope: RefScope,
+    empty: EmptyPolicy,
+    selection: HunkSelection,
+) -> FixupOptions {
+    FixupOptions {
+        message: None,
+        empty,
+        rewrite: RewriteOptions {
+            scope,
+            empty,
+            committer: committer(1),
+            preserve_committer: false,
+            sign: true,
+        },
+        selection: Some(selection),
+        pathspecs: Vec::new(),
+    }
+}
+
+fn plan_and_apply_hunks(
+    grit: &Repository,
+    wt: &std::path::Path,
+    target: ObjectId,
+    opts: &FixupOptions,
+) {
+    let selection = opts.selection.clone().expect("selection");
+    let plan = fixup(grit, target, opts).expect("plan");
+    apply_fixup_hunk_selection(grit, &plan, &apply_opts(), &selection, &opts.pathspecs)
+        .expect("apply");
+    git_fsck_strict(wt);
+}
+
+#[test]
+fn fixup_hunks_folds_only_selected() {
+    let repo = HistoryRepo::init();
+    let wt = repo.worktree();
+    let (base, edited) = two_hunk_edited_file();
+    commit_file(wt, "f.txt", &base, "init");
+    commit_file(wt, "other.t", "x\n", "second");
+    let target = git_rev_parse(wt, "HEAD~1").expect("target");
+    fs::write(wt.join("f.txt"), &edited).expect("write");
+    let grit = open_grit(wt);
+    let ids = unstaged_hunk_ids(&grit);
+    assert!(ids.len() >= 2);
+    let selection = HunkSelection {
+        ids: vec![ids[0].clone()],
+        ranges: Vec::new(),
+    };
+    plan_and_apply_hunks(
+        &grit,
+        wt,
+        target,
+        &fixup_opts_with_selection(RefScope::Head, EmptyPolicy::Drop, selection),
+    );
+    let parent = git_rev_parse(wt, "HEAD~1").expect("parent");
+    let fixed = parse_commit(&grit.odb().read(&parent).expect("read").data).expect("parse");
+    let blob = grit.odb().read(&fixed.tree).expect("tree");
+    let entries = grit_lib::objects::parse_tree(&blob.data).expect("parse tree");
+    let file = entries.iter().find(|e| e.name == b"f.txt").expect("file");
+    let blob = grit.odb().read(&file.oid).expect("blob");
+    let content = String::from_utf8_lossy(&blob.data);
+    assert!(content.contains("LINE5"));
+    assert!(!content.contains("LINE18"));
+    git(wt, &["fsck", "--strict"]);
+    let log = Command::new("git")
+        .current_dir(wt)
+        .args(["log", "-p", "-1", &parent.to_hex()])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("log");
+    assert!(log.status.success());
+    let log_text = String::from_utf8_lossy(&log.stdout);
+    assert!(log_text.contains("LINE5"));
+    assert!(!log_text.contains("LINE18"));
+}
+
+#[test]
+fn fixup_hunks_leaves_other_unstaged() {
+    let repo = HistoryRepo::init();
+    let wt = repo.worktree();
+    let (base, edited) = two_hunk_edited_file();
+    commit_file(wt, "f.txt", &base, "init");
+    commit_file(wt, "other.t", "x\n", "second");
+    let target = git_rev_parse(wt, "HEAD~1").expect("target");
+    fs::write(wt.join("f.txt"), &edited).expect("write");
+    let grit = open_grit(wt);
+    let ids = unstaged_hunk_ids(&grit);
+    let selection = HunkSelection {
+        ids: vec![ids[0].clone()],
+        ranges: Vec::new(),
+    };
+    plan_and_apply_hunks(
+        &grit,
+        wt,
+        target,
+        &fixup_opts_with_selection(RefScope::Head, EmptyPolicy::Drop, selection),
+    );
+    let remaining = unstaged_hunk_ids(&grit);
+    assert_eq!(remaining.len(), 1);
+    assert_ne!(remaining[0], ids[0]);
+}
+
+#[test]
+fn fixup_hunks_stale_id_no_rewrite() {
+    let repo = HistoryRepo::init();
+    let wt = repo.worktree();
+    commit_file(wt, "f.txt", "one\n", "init");
+    let target = git_rev_parse(wt, "HEAD").expect("target");
+    commit_file(wt, "tail.t", "t\n", "tail");
+    fs::write(wt.join("f.txt"), "two\n").expect("write");
+    let grit = open_grit(wt);
+    let head_before = git_rev_parse(wt, "HEAD").expect("head");
+    let selection = HunkSelection {
+        ids: vec![HunkId::from_str("000000000001").expect("id")],
+        ranges: Vec::new(),
+    };
+    let err = fixup(
+        &grit,
+        target,
+        &fixup_opts_with_selection(RefScope::Head, EmptyPolicy::Drop, selection),
+    )
+    .expect_err("stale");
+    assert!(matches!(
+        err,
+        HistoryError::HunkSelect(HunkSelectError::StaleId { .. })
+    ));
+    assert_eq!(git_rev_parse(wt, "HEAD").expect("head"), head_before);
+    git_fsck_strict(wt);
 }
