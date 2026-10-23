@@ -4,6 +4,7 @@ mod support;
 
 use std::collections::HashMap;
 use std::fs;
+use std::process::Command;
 
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::objects::ObjectId;
@@ -15,8 +16,8 @@ use grit_lib::revwalk::merge_base::{
 };
 
 use support::{
-    build_commit_dag, commit_labeled_with_dates, git_merge_base, git_merge_base_is_ancestor,
-    git_rev_parse_verify, HistoryRepo,
+    build_commit_dag, commit_labeled_with_dates, git_commit_graph_write, git_merge_base,
+    git_merge_base_is_ancestor, git_rev_parse_verify, HistoryRepo,
 };
 
 fn open_grit(wt: &std::path::Path) -> Repository {
@@ -107,9 +108,43 @@ fn merge_base_identical_with_and_without_commit_graph() {
     let info_dir = wt.join(".git/objects/info");
     let _ = fs::remove_file(info_dir.join("commit-graph"));
     let _ = fs::remove_dir_all(info_dir.join("commit-graphs"));
-    let after_stale = merge_bases_first_vs_rest(&repo, g, &[h]).expect("stale graph");
+    let repo_after_delete = open_grit(wt);
+    let after_stale = merge_bases_first_vs_rest(&repo_after_delete, g, &[h]).expect("stale graph");
     assert_eq!(after_stale, without);
     assert_eq!(after_stale, git_merge_base(wt, &["G", "H"]));
+}
+
+#[test]
+fn merge_base_disconnected_histories_with_commit_graph_matches_git() {
+    let hist = HistoryRepo::init();
+    let wt = hist.worktree();
+    const SAME_DATE: &str = "1000 +0000";
+    let mut tip_a = commit_labeled_with_dates(wt, "a0", &[], SAME_DATE, SAME_DATE);
+    for i in 1..80 {
+        tip_a = commit_labeled_with_dates(wt, &format!("a{i}"), &[tip_a], SAME_DATE, SAME_DATE);
+    }
+    let mut tip_b = commit_labeled_with_dates(wt, "b0", &[], SAME_DATE, SAME_DATE);
+    for i in 1..80 {
+        tip_b = commit_labeled_with_dates(wt, &format!("b{i}"), &[tip_b], SAME_DATE, SAME_DATE);
+    }
+    git(wt, &["update-ref", "refs/heads/chain-a", &tip_a.to_hex()]);
+    git(wt, &["update-ref", "refs/heads/chain-b", &tip_b.to_hex()]);
+    git_commit_graph_write(wt);
+
+    let git_out = Command::new("git")
+        .current_dir(wt)
+        .args(["merge-base", "chain-a", "chain-b"])
+        .output()
+        .expect("git merge-base");
+    assert!(
+        !git_out.status.success(),
+        "git must exit non-zero when histories are disconnected"
+    );
+    assert!(git_out.stdout.is_empty());
+
+    let repo = open_grit(wt);
+    let grit_bases = merge_bases_first_vs_rest(&repo, tip_a, &[tip_b]).expect("merge-base");
+    assert!(grit_bases.is_empty());
 }
 
 fn git(wt: &std::path::Path, args: &[&str]) {

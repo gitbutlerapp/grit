@@ -126,6 +126,24 @@ fn commit_roundtrip_matches_git_bytes() {
 }
 
 #[test]
+fn read_commit_subject_line_honors_encoding_header() {
+    let mut raw = concat!(
+        "tree 4b825dc642cb6eb9a060e54bf8d69288fbee4904\n",
+        "author A <a@example.com> 1 +0000\n",
+        "committer C <c@example.com> 1 +0000\n",
+        "encoding ISO-8859-1\n",
+        "\n",
+    )
+    .as_bytes()
+    .to_vec();
+    raw.extend_from_slice(b"caf");
+    raw.push(0xe9);
+    raw.extend_from_slice(b" subject\n");
+    let subject = grit_lib::objects::read_commit_subject_line(&raw).expect("subject");
+    assert_eq!(subject, "café subject");
+}
+
+#[test]
 fn commit_encoding_and_gpgsig_continuation_roundtrip() {
     let raw = concat!(
         "tree 4b825dc642cb6eb9a060e54bf8d69288fbee4904\n",

@@ -21,6 +21,7 @@
 use std::fmt;
 use std::str::FromStr;
 
+use crate::commit_encoding;
 use crate::error::{Error, Result};
 
 /// A Git hash algorithm.
@@ -965,13 +966,16 @@ pub fn read_commit_subject_pretty(data: &[u8]) -> Result<String> {
     Ok(commit_subject_pretty(body))
 }
 
-/// First non-blank line of a commit object's message (header scan only).
+/// First line of the commit message (subject), honoring the `encoding` header.
+///
+/// Scans headers only; does not require a full [`parse_commit`] parse.
 ///
 /// # Errors
 ///
-/// Returns [`Error::CorruptObject`] when the commit headers are malformed.
+/// Returns [`Error::CorruptObject`] when commit headers are malformed.
 pub fn read_commit_subject_line(data: &[u8]) -> Result<String> {
     let mut pos = 0usize;
+    let mut encoding: Option<String> = None;
     while pos < data.len() {
         let line_start = pos;
         let mut line_end = pos;
@@ -982,13 +986,25 @@ pub fn read_commit_subject_line(data: &[u8]) -> Result<String> {
         let after_nl = line_end.saturating_add(1);
         if line.is_empty() {
             let body = data.get(after_nl..).unwrap_or_default();
-            let message = std::str::from_utf8(body).unwrap_or("");
+            let message = commit_encoding::decode_bytes(encoding.as_deref(), body);
             return Ok(message
                 .lines()
                 .find(|l| !l.trim().is_empty())
                 .map(str::trim)
                 .unwrap_or("(no subject)")
                 .to_owned());
+        }
+        if line.first() == Some(&b' ') {
+            pos = after_nl;
+            continue;
+        }
+        if let Some(rest) = line.strip_prefix(b"encoding ") {
+            encoding = Some(
+                std::str::from_utf8(rest)
+                    .map_err(|_| Error::CorruptObject("encoding is not UTF-8".to_owned()))?
+                    .trim()
+                    .to_owned(),
+            );
         }
         pos = after_nl;
     }

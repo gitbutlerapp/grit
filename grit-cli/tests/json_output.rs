@@ -2485,3 +2485,48 @@ fn schema_top_level_keys_are_stable() -> TestResult {
 
     Ok(())
 }
+
+#[test]
+fn revs_json_honors_commit_encoding_for_subject() -> TestResult {
+    let scratch = Scratch::new("revs-encoding-subject")?;
+    let repo = scratch.child("repo");
+    fs::create_dir_all(&repo)?;
+    gs_ok(&repo, &["init", "."]);
+    write_file(&repo.join("a.txt"), "one\n");
+    gs_ok(&repo, &["commit", "seed"]);
+
+    let tree = String::from_utf8(
+        Command::new("git")
+            .current_dir(&repo)
+            .args(["rev-parse", "HEAD^{tree}"])
+            .output()?
+            .stdout,
+    )?
+    .trim()
+    .to_owned();
+    let mut commit_bytes = format!(
+        "tree {tree}\nauthor T <t@example.com> 1700000000 +0000\ncommitter T <t@example.com> 1700000000 +0000\nencoding ISO-8859-1\n\n",
+    )
+    .into_bytes();
+    commit_bytes.extend_from_slice(b"caf");
+    commit_bytes.push(0xe9);
+    commit_bytes.extend_from_slice(b" subject\n");
+    let mut hash = Command::new("git")
+        .current_dir(&repo)
+        .args(["hash-object", "-t", "commit", "-w", "--stdin"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()?;
+    {
+        use std::io::Write;
+        hash.stdin.take().unwrap().write_all(&commit_bytes)?;
+    }
+    let hash = hash.wait_with_output()?;
+    assert!(hash.status.success());
+    let oid = String::from_utf8(hash.stdout)?.trim().to_string();
+    system_git_ok(&repo, &["update-ref", "refs/heads/main", &oid]);
+
+    let v = gs_json(&repo, &["revs", "HEAD", "--limit", "1"]);
+    assert_eq!(v["commits"][0]["subject"].as_str(), Some("café subject"));
+    Ok(())
+}
