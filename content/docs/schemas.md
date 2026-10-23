@@ -71,6 +71,7 @@ Plain command failures with `--json` validate against the shared [error schema](
 | `remote` | [v1](/schemas/remote/v1.json) |
 | `remote.add` | [v1](/schemas/remote.add/v1.json) |
 | `remote.refs` | [v1](/schemas/remote.refs/v1.json) |
+| `remote.set-url` | [v1](/schemas/remote.set-url/v1.json) |
 | `repack` | [v1](/schemas/repack/v1.json) |
 | `reset` | [v1](/schemas/reset/v1.json) |
 | `resolve` | [v1](/schemas/resolve/v1.json) |
