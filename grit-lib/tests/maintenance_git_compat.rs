@@ -1054,7 +1054,11 @@ fn gc_twice_on_single_pack_keeps_loose_count_zero() {
         Repository::discover(Some(grit_copy.path()), &RepositoryOptions::empty()).expect("open");
     let opts = GcOptions::with_reflog_policy(1_700_000_000, false);
     gc(&repo, &opts).expect("grit gc first");
-    gc(&repo, &opts).expect("grit gc second");
+    let second = gc(&repo, &opts).expect("grit gc second");
+    assert_eq!(
+        second.repack.objects_packed, None,
+        "second gc on a single-pack repo must skip repack like git gc"
+    );
     assert_eq!(git_pack_count(&grit_copy.path().join(".git")), 1);
     assert_eq!(git_loose_object_count(grit_copy.path()), 0);
     git_fsck(grit_copy.path(), true);
@@ -1108,11 +1112,7 @@ fn gc_drops_expired_unreachable_packed_commit_like_git() {
 
     let repo =
         Repository::discover(Some(grit_copy.path()), &RepositoryOptions::empty()).expect("open");
-    gc(
-        &repo,
-        &GcOptions::with_reflog_policy(1_761_000_000, false),
-    )
-    .expect("grit gc");
+    gc(&repo, &GcOptions::with_reflog_policy(1_761_000_000, false)).expect("grit gc");
     clear_pack_cache_after_disk_maintenance();
     git(git_copy.path(), &["gc", "--quiet"]);
 
@@ -1123,6 +1123,64 @@ fn gc_drops_expired_unreachable_packed_commit_like_git() {
     assert!(
         !cat_file_exists(git_copy.path(), &side_hex),
         "git gc must drop expired unreachable packed commit"
+    );
+    git_fsck(grit_copy.path(), true);
+}
+
+#[test]
+fn explicit_repack_on_single_pack_rebuilds_with_default_options() {
+    let dir = TempDir::new().expect("tempdir");
+    git(dir.path(), &["init", "-b", "main"]);
+    git(dir.path(), &["commit", "--allow-empty", "-m", "c1"]);
+    git(dir.path(), &["repack", "-a", "-d"]);
+    assert_eq!(git_pack_count(&dir.path().join(".git")), 1);
+    assert_eq!(git_loose_object_count(dir.path()), 0);
+
+    let grit_copy = TempDir::new().expect("grit");
+    duplicate_repo_tree(dir.path(), grit_copy.path());
+    let repo =
+        Repository::discover(Some(grit_copy.path()), &RepositoryOptions::empty()).expect("open");
+    let stats = repack_all(&repo, &RepackOptions::default()).expect("grit repack");
+    assert!(
+        stats.objects_packed.is_some_and(|n| n > 0),
+        "explicit grit repack must rebuild even on a single-pack repo (auto_skip defaults false)"
+    );
+    git_fsck(grit_copy.path(), true);
+}
+
+#[test]
+fn gc_with_write_bitmaps_on_single_pack_writes_bitmap_like_git() {
+    let dir = TempDir::new().expect("tempdir");
+    git(dir.path(), &["init", "-b", "main"]);
+    git(dir.path(), &["config", "repack.writeBitmaps", "true"]);
+    git(dir.path(), &["commit", "--allow-empty", "-m", "c1"]);
+    git(dir.path(), &["repack", "-a", "-d"]);
+    let git_dir = dir.path().join(".git");
+    assert_eq!(git_pack_count(&git_dir), 1);
+
+    let grit_copy = TempDir::new().expect("grit");
+    duplicate_repo_tree(dir.path(), grit_copy.path());
+    let git_copy = TempDir::new().expect("git");
+    duplicate_repo_tree(dir.path(), git_copy.path());
+
+    let repo =
+        Repository::discover(Some(grit_copy.path()), &RepositoryOptions::empty()).expect("open");
+    gc(&repo, &GcOptions::with_reflog_policy(1_700_000_000, false)).expect("grit gc");
+    git(git_copy.path(), &["gc", "--quiet"]);
+
+    fn pack_has_bitmap(git_dir: &Path) -> bool {
+        std::fs::read_dir(git_dir.join("objects/pack"))
+            .expect("pack dir")
+            .filter_map(|e| e.ok())
+            .any(|e| e.path().extension().is_some_and(|x| x == "bitmap"))
+    }
+    assert!(
+        pack_has_bitmap(&grit_copy.path().join(".git")),
+        "grit gc with repack.writeBitmaps must write a bitmap even on a single-pack repo"
+    );
+    assert!(
+        pack_has_bitmap(&git_copy.path().join(".git")),
+        "git gc fixture must write bitmap"
     );
     git_fsck(grit_copy.path(), true);
 }
@@ -1142,8 +1200,8 @@ fn gc_skips_repack_when_single_pack_and_no_loose() {
 
     let repo = Repository::discover(Some(dir.path()), &RepositoryOptions::empty()).expect("open");
     let stats = gc(&repo, &GcOptions::with_reflog_policy(1_700_000_000, false)).expect("grit gc");
-    assert!(
-        stats.repack.objects_packed.is_none() || stats.repack.objects_packed == Some(0),
+    assert_eq!(
+        stats.repack.objects_packed, None,
         "expected repack skip on single pack with no loose objects"
     );
     let pack_after = std::fs::read_dir(dir.path().join(".git/objects/pack"))
