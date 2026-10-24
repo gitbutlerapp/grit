@@ -1853,54 +1853,53 @@ fn apply_nav_step(
 
 /// Abbreviate an object ID to a unique prefix.
 ///
-/// The returned prefix is at least `min_len` and at most 40 hex characters.
+/// The returned prefix is the shortest one, at least `min_len` (clamped to 4..=the full
+/// hex length) hex characters long, that no other object in the object database shares.
+/// An id missing from the object database is cut to `min_len` characters.
+///
+/// Costs one [`Odb::lookup_prefix`](crate::odb::Odb::lookup_prefix) at `min_len`
+/// characters, however long the result turns out to be.
 ///
 /// # Errors
 ///
-/// Returns [`Error::ObjectNotFound`] when the target OID does not exist in the
-/// object database.
+/// Propagates object database lookup failures.
 pub fn abbreviate_object_id(repo: &Repository, oid: ObjectId, min_len: usize) -> Result<String> {
     abbreviate_object_id_with_prefix_cache(repo, oid, min_len, &mut HashMap::new())
 }
 
-/// Like [`abbreviate_object_id`] with memoized full-ODB prefix ambiguity checks.
+/// Like [`abbreviate_object_id`], remembering in `prefix_ambiguous` whether more than one
+/// object starts with each `min_len` prefix it looked up, so a known-unique prefix skips
+/// the lookup.
 pub(crate) fn abbreviate_object_id_with_prefix_cache(
     repo: &Repository,
     oid: ObjectId,
     min_len: usize,
     prefix_ambiguous: &mut HashMap<String, bool>,
 ) -> Result<String> {
-    let min_len = min_len.clamp(4, 40);
-    let target = oid.to_hex();
+    let hex_len = oid.algo().hex_len();
+    let min_len = min_len.clamp(4, hex_len);
+    let mut target = oid.to_hex();
 
     if !repo.odb().exists(&oid) {
-        return Ok(target[..min_len].to_owned());
+        target.truncate(min_len);
+        return Ok(target);
     }
 
-    for len in min_len..=40 {
-        let prefix = &target[..len];
-        if prefix_is_ambiguous_in_odb(repo, prefix, prefix_ambiguous)? {
-            continue;
-        }
-        return Ok(prefix.to_owned());
+    let short = &target[..min_len];
+    if prefix_ambiguous.get(short) == Some(&false) {
+        target.truncate(min_len);
+        return Ok(target);
     }
-
+    let mut candidates = Vec::new();
+    repo.odb().lookup_prefix(short, 0, &mut candidates)?;
+    prefix_ambiguous.insert(short.to_owned(), candidates.len() > 1);
+    let shared = candidates
+        .iter()
+        .filter(|other| **other != oid)
+        .map(|other| oid.common_prefix_nibbles(other))
+        .max();
+    target.truncate(shared.map_or(min_len, |n| (n + 1).clamp(min_len, hex_len)));
     Ok(target)
-}
-
-pub(crate) fn prefix_is_ambiguous_in_odb(
-    repo: &Repository,
-    prefix: &str,
-    cache: &mut HashMap<String, bool>,
-) -> Result<bool> {
-    if let Some(hit) = cache.get(prefix) {
-        return Ok(*hit);
-    }
-    let mut matches = Vec::new();
-    repo.odb().lookup_prefix(prefix, 2, &mut matches)?;
-    let amb = matches.len() > 1;
-    cache.insert(prefix.to_owned(), amb);
-    Ok(amb)
 }
 
 /// Render `path` relative to `cwd` with `/` separators.

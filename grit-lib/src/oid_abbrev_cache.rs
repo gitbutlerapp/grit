@@ -8,7 +8,7 @@ use crate::error::Result;
 use crate::objects::ObjectId;
 use crate::parallel::ThreadPolicy;
 use crate::repo::Repository;
-use crate::rev_parse::{abbreviate_object_id_with_prefix_cache, prefix_is_ambiguous_in_odb};
+use crate::rev_parse::abbreviate_object_id_with_prefix_cache;
 
 /// Memoized unique abbreviations using [`Repository::odb`] prefix lookup (pack/MIDX/loose).
 #[derive(Clone)]
@@ -116,18 +116,10 @@ impl OidAbbrevCache {
             }
         }
 
-        for (i, oid) in list.iter().enumerate() {
-            let hex = &hexes[i];
-            let mut len = lens[i].min(hex.len());
-            while len <= hex.len() {
-                let prefix = &hex[..len];
-                if !prefix_is_ambiguous_in_odb(repo, prefix, &mut self.prefix_ambiguous)? {
-                    break;
-                }
-                len += 1;
-            }
-            len = len.min(hex.len());
-            self.memo.insert(*oid, hex[..len].to_owned());
+        for (oid, len) in list.into_iter().zip(lens) {
+            let abbrev =
+                abbreviate_object_id_with_prefix_cache(repo, oid, len, &mut self.prefix_ambiguous)?;
+            self.memo.insert(oid, abbrev);
         }
         Ok(())
     }
