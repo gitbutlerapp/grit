@@ -4684,15 +4684,17 @@ fn diff_index_to_worktree_inner(
         .map(|r| r.conversion().clone())
         .unwrap_or_else(|| crlf::ConversionConfig::from_config(&config));
     let legacy_attrs = if rules_lock.is_none() {
-        Some(crlf::load_gitattributes(work_tree))
+        Some(crlf::load_gitattributes_parsed(work_tree))
     } else {
         None
     };
     let file_attrs_for = |path: &str| -> crlf::FileAttrs {
         if let Some(rules) = rules_lock.as_ref() {
             rules.file_attrs(path, false)
+        } else if let Some(parsed) = legacy_attrs.as_ref() {
+            crlf::file_attrs_from_gitattributes(&parsed.rules, &parsed.macros, path, false, &config)
         } else {
-            crlf::get_file_attrs(legacy_attrs.as_deref().unwrap_or(&[]), path, false, &config)
+            crlf::FileAttrs::default()
         }
     };
     let filter_fp = rules_lock.as_ref().map(|r| r.filter_process());
@@ -5910,15 +5912,17 @@ pub fn refresh_index_stat_content_verified_with_rules(
         .map(|r| r.conversion().clone())
         .unwrap_or_else(|| crlf::ConversionConfig::from_config(&config));
     let legacy_attrs = if rules_lock.is_none() {
-        Some(crlf::load_gitattributes(work_tree))
+        Some(crlf::load_gitattributes_parsed(work_tree))
     } else {
         None
     };
     let file_attrs_for = |path: &str| -> crlf::FileAttrs {
         if let Some(rules) = rules_lock.as_ref() {
             rules.file_attrs(path, false)
+        } else if let Some(parsed) = legacy_attrs.as_ref() {
+            crlf::file_attrs_from_gitattributes(&parsed.rules, &parsed.macros, path, false, &config)
         } else {
-            crlf::get_file_attrs(legacy_attrs.as_deref().unwrap_or(&[]), path, false, &config)
+            crlf::FileAttrs::default()
         }
     };
     let precompose_unicode = config
@@ -6656,15 +6660,17 @@ pub fn diff_tree_to_worktree_with_git_dir_and_rules(
         .map(|r| r.conversion().clone())
         .unwrap_or_else(|| crlf::ConversionConfig::from_config(&config));
     let legacy_attrs = if worktree_rules.is_none() {
-        Some(crlf::load_gitattributes(work_tree))
+        Some(crlf::load_gitattributes_parsed(work_tree))
     } else {
         None
     };
     let file_attrs_for = |path: &str| -> crlf::FileAttrs {
         if let Some(rules) = worktree_rules {
             rules.file_attrs(path, false)
+        } else if let Some(parsed) = legacy_attrs.as_ref() {
+            crlf::file_attrs_from_gitattributes(&parsed.rules, &parsed.macros, path, false, &config)
         } else {
-            crlf::get_file_attrs(legacy_attrs.as_deref().unwrap_or(&[]), path, false, &config)
+            crlf::FileAttrs::default()
         }
     };
     let filter_fp = worktree_rules.map(|r| r.filter_process());

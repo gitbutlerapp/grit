@@ -14,9 +14,15 @@
 //!   - `filter=<name>` (with `filter.<name>.clean` / `filter.<name>.smudge`)
 //!   - `ident` keyword expansion
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use crate::attributes::{
+    attr_rule_matches as git_attr_rule_matches, collect_attrs_for_path,
+    parse_gitattributes_file_content, parse_gitattributes_file_content_with_base, AttrValue,
+    MacroTable, ParsedGitAttributes, MAX_ATTR_FILE_BYTES,
+};
 use crate::command_runner::{system_command_runner, CommandRunner, CommandSpec, CommandStdin};
 use crate::config::ConfigSet;
 use crate::error::{FilterError, FilterPhase};
@@ -337,86 +343,100 @@ impl std::fmt::Debug for ConversionConfig {
     }
 }
 
-/// A parsed .gitattributes rule.
-#[derive(Debug, Clone)]
-pub struct AttrRule {
-    /// Glob text used for matching (trailing directory `/` stripped; see [`AttrRule::must_be_dir`]).
-    pattern: String,
-    /// When true, the source pattern ended with `/` and matches only directories (Git `PATTERN_FLAG_MUSTBEDIR`).
-    must_be_dir: bool,
-    /// When true, match only the path's final component (Git `PATTERN_FLAG_NODIR` / no `/` in the pattern body).
-    basename_only: bool,
-    attrs: Vec<(String, String)>, // (name, value) where value is "set"/"unset"/specific value
+pub use crate::attributes::AttrRule;
+
+fn merge_parsed_into(
+    merged: &mut ParsedGitAttributes,
+    mut parsed: ParsedGitAttributes,
+    take_macros: bool,
+) {
+    merged.rules.append(&mut parsed.rules);
+    if take_macros {
+        merged.macros.defs.extend(parsed.macros.defs.drain());
+    }
+    merged.warnings.append(&mut parsed.warnings);
+}
+
+fn merge_gitattributes_text(
+    merged: &mut ParsedGitAttributes,
+    content: &str,
+    display: &str,
+    attr_base: &str,
+) {
+    if content.len() > MAX_ATTR_FILE_BYTES {
+        return;
+    }
+    let parsed = if attr_base.is_empty() {
+        parse_gitattributes_file_content(content, display)
+    } else {
+        parse_gitattributes_file_content_with_base(content, display, attr_base)
+    };
+    merge_parsed_into(merged, parsed, attr_base.is_empty());
+}
+
+fn config_ignorecase(config: &ConfigSet) -> bool {
+    config
+        .get_bool("core.ignorecase")
+        .unwrap_or(Ok(false))
+        .unwrap_or(false)
+}
+
+/// Load root and `info/attributes` gitattributes from the worktree.
+#[must_use]
+pub fn load_gitattributes_parsed(work_tree: &Path) -> ParsedGitAttributes {
+    let mut merged = ParsedGitAttributes::default();
+    let root_attrs = work_tree.join(".gitattributes");
+    if let Ok(content) = std::fs::read_to_string(&root_attrs) {
+        merge_gitattributes_text(&mut merged, &content, ".gitattributes", "");
+    }
+    let info_attrs = work_tree.join(".git/info/attributes");
+    if let Ok(content) = std::fs::read_to_string(&info_attrs) {
+        merge_gitattributes_text(&mut merged, &content, "info/attributes", "");
+    }
+    merged
 }
 
 /// Load .gitattributes from the worktree root.
+#[must_use]
 pub fn load_gitattributes(work_tree: &Path) -> Vec<AttrRule> {
-    let mut rules = Vec::new();
-
-    let root_attrs = work_tree.join(".gitattributes");
-    if let Ok(content) = std::fs::read_to_string(&root_attrs) {
-        parse_gitattributes(&content, &mut rules);
-    }
-
-    let info_attrs = work_tree.join(".git/info/attributes");
-    if let Ok(content) = std::fs::read_to_string(&info_attrs) {
-        parse_gitattributes(&content, &mut rules);
-    }
-
-    rules
+    load_gitattributes_parsed(work_tree).rules
 }
 
-/// Parse gitattributes content into attribute rules.
+/// Parse gitattributes content into attribute rules (repository root scope).
 ///
 /// This is useful when attributes are sourced from non-worktree inputs
 /// (for example, tree objects selected by `--attr-source`).
 #[must_use]
 pub fn parse_gitattributes_content(content: &str) -> Vec<AttrRule> {
-    let mut rules = Vec::new();
-    parse_gitattributes(content, &mut rules);
-    rules
+    parse_gitattributes_file_content(content, ".gitattributes").rules
 }
 
-/// Load .gitattributes from the index (for use during checkout when
-/// the worktree file may not yet exist).
+/// Load `.gitattributes` from the index (stage 0 paths only).
+#[must_use]
 pub fn load_gitattributes_from_index(
     index: &crate::index::Index,
     odb: &crate::odb::Odb,
 ) -> Vec<AttrRule> {
-    let mut rules = Vec::new();
-
-    // Look for .gitattributes in the index (stage 0)
-    if let Some(entry) = index.get(b".gitattributes", 0) {
-        if let Ok(obj) = odb.read(&entry.oid) {
-            if let Ok(content) = String::from_utf8(obj.data) {
-                parse_gitattributes(&content, &mut rules);
-            }
-        }
-    }
-
-    rules
+    crate::attributes::load_gitattributes_from_index(index, odb, Path::new("."))
+        .map(|p| p.rules)
+        .unwrap_or_default()
 }
 
-/// Load `.gitattributes` rules that apply to `rel_path`, including root and
-/// nested `dir/.gitattributes` along parent directories (Git-consistent order:
-/// root first, then each ancestor directory; later rules win in [`get_file_attrs`]).
-///
-/// Reads from the working tree when present, otherwise from a stage-0 index entry.
-pub fn load_gitattributes_for_checkout(
+/// Load merged `.gitattributes` for `rel_path` (root, nested dirs, info; index fallback).
+#[must_use]
+pub fn load_gitattributes_for_checkout_parsed(
     work_tree: &Path,
     rel_path: &str,
     index: &crate::index::Index,
     odb: &crate::odb::Odb,
-) -> Vec<AttrRule> {
-    let mut rules = load_gitattributes(work_tree);
+) -> ParsedGitAttributes {
+    let mut merged = load_gitattributes_parsed(work_tree);
 
-    // Root `.gitattributes` may exist only in the index while the worktree file
-    // is missing (e.g. t0020 in-tree attributes after `rm -rf .gitattributes`).
     if !work_tree.join(".gitattributes").exists() {
         if let Some(entry) = index.get(b".gitattributes", 0) {
             if let Ok(obj) = odb.read(&entry.oid) {
                 if let Ok(content) = String::from_utf8(obj.data) {
-                    parse_gitattributes(&content, &mut rules);
+                    merge_gitattributes_text(&mut merged, &content, ".gitattributes", "");
                 }
             }
         }
@@ -429,15 +449,19 @@ pub fn load_gitattributes_for_checkout(
             accum.push(comp);
             let ga_rel = accum.join(".gitattributes");
             let ga_stored = ga_rel.to_string_lossy().replace('\\', "/");
+            let attr_base = Path::new(&ga_stored)
+                .parent()
+                .map(|p| p.to_string_lossy().replace('\\', "/"))
+                .unwrap_or_default();
             let wt_ga = work_tree.join(&ga_rel);
             if let Ok(content) = std::fs::read_to_string(&wt_ga) {
-                parse_gitattributes(&content, &mut rules);
+                merge_gitattributes_text(&mut merged, &content, &ga_stored, &attr_base);
             } else {
                 let key = crate::repo_relpath::storage_bytes(&ga_stored).into_owned();
                 if let Some(entry) = index.get(&key, 0) {
                     if let Ok(obj) = odb.read(&entry.oid) {
                         if let Ok(content) = String::from_utf8(obj.data) {
-                            parse_gitattributes(&content, &mut rules);
+                            merge_gitattributes_text(&mut merged, &content, &ga_stored, &attr_base);
                         }
                     }
                 }
@@ -445,7 +469,22 @@ pub fn load_gitattributes_for_checkout(
         }
     }
 
-    rules
+    merged
+}
+
+/// Load `.gitattributes` rules that apply to `rel_path`, including root and
+/// nested `dir/.gitattributes` along parent directories (Git-consistent order:
+/// root first, then each ancestor directory; later rules win in [`get_file_attrs`]).
+///
+/// Reads from the working tree when present, otherwise from a stage-0 index entry.
+#[must_use]
+pub fn load_gitattributes_for_checkout(
+    work_tree: &Path,
+    rel_path: &str,
+    index: &crate::index::Index,
+    odb: &crate::odb::Odb,
+) -> Vec<AttrRule> {
+    load_gitattributes_for_checkout_parsed(work_tree, rel_path, index, odb).rules
 }
 
 /// Load `.gitattributes` rules from `tree_oid` that can apply to `rel_path`.
@@ -460,8 +499,16 @@ pub fn load_gitattributes_for_tree_path(
     tree_oid: &ObjectId,
     rel_path: &str,
 ) -> Vec<AttrRule> {
-    let mut rules = Vec::new();
-    load_gitattributes_blob_from_tree(odb, tree_oid, ".gitattributes", &mut rules);
+    load_gitattributes_for_tree_path_parsed(odb, tree_oid, rel_path).rules
+}
+
+fn load_gitattributes_for_tree_path_parsed(
+    odb: &Odb,
+    tree_oid: &ObjectId,
+    rel_path: &str,
+) -> ParsedGitAttributes {
+    let mut merged = ParsedGitAttributes::default();
+    load_gitattributes_blob_from_tree(odb, tree_oid, ".gitattributes", &mut merged);
 
     let path = Path::new(rel_path);
     if let Some(parent) = path.parent() {
@@ -470,18 +517,18 @@ pub fn load_gitattributes_for_tree_path(
             accum.push(comp);
             let ga_rel = accum.join(".gitattributes");
             let ga_rel = ga_rel.to_string_lossy().replace('\\', "/");
-            load_gitattributes_blob_from_tree(odb, tree_oid, &ga_rel, &mut rules);
+            load_gitattributes_blob_from_tree(odb, tree_oid, &ga_rel, &mut merged);
         }
     }
 
-    rules
+    merged
 }
 
 fn load_gitattributes_blob_from_tree(
     odb: &Odb,
     tree_oid: &ObjectId,
     ga_path: &str,
-    rules: &mut Vec<AttrRule>,
+    merged: &mut ParsedGitAttributes,
 ) {
     let Some(oid) = lookup_tree_path(odb, tree_oid, ga_path) else {
         return;
@@ -491,9 +538,13 @@ fn load_gitattributes_blob_from_tree(
     };
     if obj.kind != ObjectKind::Blob {
         return;
-    }
+    };
     if let Ok(content) = String::from_utf8(obj.data) {
-        parse_gitattributes(&content, rules);
+        let attr_base = Path::new(ga_path)
+            .parent()
+            .map(|p| p.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_default();
+        merge_gitattributes_text(merged, &content, ga_path, &attr_base);
     }
 }
 
@@ -520,52 +571,6 @@ fn lookup_tree_path(odb: &Odb, tree_oid: &ObjectId, rel_path: &str) -> Option<Ob
     None
 }
 
-fn parse_gitattributes(content: &str, rules: &mut Vec<AttrRule>) {
-    for line in content.lines() {
-        let line = line.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-
-        let mut parts = line.split_whitespace();
-        let raw_pattern = match parts.next() {
-            Some(p) => p,
-            None => continue,
-        };
-
-        let mut pat = raw_pattern.to_owned();
-        let mut must_be_dir = false;
-        if pat.ends_with('/') && pat.len() > 1 {
-            pat.pop();
-            must_be_dir = true;
-        }
-        let basename_only = !pat.contains('/');
-
-        let mut attrs = Vec::new();
-        for part in parts {
-            if part == "binary" {
-                attrs.push(("text".to_owned(), "unset".to_owned()));
-                attrs.push(("diff".to_owned(), "unset".to_owned()));
-            } else if let Some(rest) = part.strip_prefix('-') {
-                attrs.push((rest.to_owned(), "unset".to_owned()));
-            } else if let Some((key, val)) = part.split_once('=') {
-                attrs.push((key.to_owned(), val.to_owned()));
-            } else {
-                attrs.push((part.to_owned(), "set".to_owned()));
-            }
-        }
-
-        if !attrs.is_empty() {
-            rules.push(AttrRule {
-                pattern: pat,
-                must_be_dir,
-                basename_only,
-                attrs,
-            });
-        }
-    }
-}
-
 fn config_bool_truthy(value: &str) -> bool {
     matches!(
         value.trim().to_ascii_lowercase().as_str(),
@@ -573,119 +578,148 @@ fn config_bool_truthy(value: &str) -> bool {
     )
 }
 
+fn attr_path_for_match(rel_path: &str, is_dir: bool) -> String {
+    if is_dir && !rel_path.is_empty() && !rel_path.ends_with('/') {
+        format!("{rel_path}/")
+    } else {
+        rel_path.to_owned()
+    }
+}
+
+/// Map merged gitattributes (Git `collect_attrs`) to CRLF/filter [`FileAttrs`].
+#[must_use]
+pub fn file_attrs_from_attr_map(map: &HashMap<String, AttrValue>, config: &ConfigSet) -> FileAttrs {
+    let mut fa = FileAttrs::default();
+    for (name, value) in map {
+        match name.as_str() {
+            "text" => {
+                fa.text = match value {
+                    AttrValue::Set => TextAttr::Set,
+                    AttrValue::Unset => TextAttr::Unset,
+                    AttrValue::Value(v) if v == "auto" => TextAttr::Auto,
+                    AttrValue::Clear | AttrValue::Value(_) => TextAttr::Unspecified,
+                };
+            }
+            "eol" => {
+                fa.eol = match value {
+                    AttrValue::Value(v) if v == "lf" => EolAttr::Lf,
+                    AttrValue::Value(v) if v == "crlf" => EolAttr::Crlf,
+                    _ => EolAttr::Unspecified,
+                };
+            }
+            "filter" => {
+                let driver = match value {
+                    AttrValue::Unset => {
+                        fa.filter_clean = None;
+                        fa.filter_smudge = None;
+                        fa.filter_process = None;
+                        fa.filter_driver_name = None;
+                        fa.filter_smudge_required = false;
+                        fa.filter_clean_required = false;
+                        continue;
+                    }
+                    AttrValue::Set => continue,
+                    AttrValue::Clear => continue,
+                    AttrValue::Value(d) => d.as_str(),
+                };
+                let clean_key = format!("filter.{driver}.clean");
+                let smudge_key = format!("filter.{driver}.smudge");
+                let process_key = format!("filter.{driver}.process");
+                let req_key = format!("filter.{driver}.required");
+                fa.filter_driver_name = Some(driver.to_owned());
+                fa.filter_process = config.get(&process_key).filter(|s| !s.is_empty());
+                if fa.filter_process.is_some() {
+                    fa.filter_clean = None;
+                    fa.filter_smudge = None;
+                } else {
+                    fa.filter_clean = config.get(&clean_key);
+                    fa.filter_smudge = config.get(&smudge_key);
+                }
+                let required = config
+                    .get(&req_key)
+                    .is_some_and(|v| config_bool_truthy(v.as_str()));
+                fa.filter_smudge_required = required;
+                fa.filter_clean_required = required;
+            }
+            "diff" => {
+                fa.diff_attr = match value {
+                    AttrValue::Unset => DiffAttr::Unset,
+                    AttrValue::Set => DiffAttr::Set,
+                    AttrValue::Value(v) if !v.is_empty() => DiffAttr::Driver(v.clone()),
+                    AttrValue::Clear => DiffAttr::Unspecified,
+                    _ => DiffAttr::Unspecified,
+                };
+            }
+            "ident" => {
+                fa.ident = matches!(value, AttrValue::Set);
+            }
+            "merge" => {
+                fa.merge = match value {
+                    AttrValue::Unset => MergeAttr::Unset,
+                    AttrValue::Set => MergeAttr::Unspecified,
+                    AttrValue::Value(v) => MergeAttr::Driver(v.clone()),
+                    AttrValue::Clear => MergeAttr::Unspecified,
+                };
+            }
+            "conflict-marker-size" => match value {
+                AttrValue::Unset | AttrValue::Clear => fa.conflict_marker_size = None,
+                AttrValue::Value(v) => fa.conflict_marker_size = Some(v.clone()),
+                AttrValue::Set => {}
+            },
+            "working-tree-encoding" => {
+                if let AttrValue::Value(v) = value {
+                    if !v.is_empty() {
+                        fa.working_tree_encoding = Some(v.clone());
+                    }
+                }
+            }
+            "crlf" => {
+                fa.crlf_legacy = match value {
+                    AttrValue::Unset => CrlfLegacyAttr::Unset,
+                    AttrValue::Value(v) if v == "input" => CrlfLegacyAttr::Input,
+                    AttrValue::Set => CrlfLegacyAttr::Crlf,
+                    AttrValue::Value(v) if v == "true" || v == "set" => CrlfLegacyAttr::Crlf,
+                    _ => CrlfLegacyAttr::Unspecified,
+                };
+            }
+            "whitespace" => match value {
+                AttrValue::Unset => fa.whitespace = Some("unset".to_owned()),
+                AttrValue::Set => fa.whitespace = Some("set".to_owned()),
+                AttrValue::Value(v) if !v.is_empty() => fa.whitespace = Some(v.clone()),
+                _ => {}
+            },
+            _ => {}
+        }
+    }
+    fa
+}
+
+/// Resolve [`FileAttrs`] using Git-compatible attribute matching and macro expansion.
+#[must_use]
+pub fn file_attrs_from_gitattributes(
+    rules: &[AttrRule],
+    macros: &MacroTable,
+    rel_path: &str,
+    is_dir: bool,
+    config: &ConfigSet,
+) -> FileAttrs {
+    let path = attr_path_for_match(rel_path, is_dir);
+    let map = collect_attrs_for_path(rules, macros, &path, config_ignorecase(config));
+    file_attrs_from_attr_map(&map, config)
+}
+
 /// Get file attributes for a given path from .gitattributes rules and config.
 ///
 /// `is_dir` should be true when `rel_path` names a directory (Git passes a trailing `/` for
 /// directory paths in some call sites; we accept either trailing `/` or this flag from tree walks).
+#[must_use]
 pub fn get_file_attrs(
     rules: &[AttrRule],
     rel_path: &str,
     is_dir: bool,
     config: &ConfigSet,
 ) -> FileAttrs {
-    let mut fa = FileAttrs::default();
-
-    // Walk rules; last match wins for each attribute.
-    for rule in rules {
-        if attr_rule_matches(rule, rel_path, is_dir) {
-            for (name, value) in &rule.attrs {
-                match name.as_str() {
-                    "text" => {
-                        fa.text = match value.as_str() {
-                            "set" => TextAttr::Set,
-                            "unset" => TextAttr::Unset,
-                            "auto" => TextAttr::Auto,
-                            _ => TextAttr::Unspecified,
-                        };
-                    }
-                    "eol" => {
-                        fa.eol = match value.as_str() {
-                            "lf" => EolAttr::Lf,
-                            "crlf" => EolAttr::Crlf,
-                            _ => EolAttr::Unspecified,
-                        };
-                    }
-                    "filter" => {
-                        if value == "unset" {
-                            fa.filter_clean = None;
-                            fa.filter_smudge = None;
-                            fa.filter_process = None;
-                            fa.filter_driver_name = None;
-                            fa.filter_smudge_required = false;
-                            fa.filter_clean_required = false;
-                        } else {
-                            let clean_key = format!("filter.{value}.clean");
-                            let smudge_key = format!("filter.{value}.smudge");
-                            let process_key = format!("filter.{value}.process");
-                            let req_key = format!("filter.{value}.required");
-                            fa.filter_driver_name = Some(value.clone());
-                            fa.filter_process = config.get(&process_key).filter(|s| !s.is_empty());
-                            if fa.filter_process.is_some() {
-                                fa.filter_clean = None;
-                                fa.filter_smudge = None;
-                            } else {
-                                fa.filter_clean = config.get(&clean_key);
-                                fa.filter_smudge = config.get(&smudge_key);
-                            }
-                            let required =
-                                config.get(&req_key).is_some_and(|v| config_bool_truthy(&v));
-                            fa.filter_smudge_required = required;
-                            fa.filter_clean_required = required;
-                        }
-                    }
-                    "diff" => {
-                        if value == "unset" {
-                            fa.diff_attr = DiffAttr::Unset;
-                        } else if value == "set" {
-                            fa.diff_attr = DiffAttr::Set;
-                        } else if !value.is_empty() {
-                            fa.diff_attr = DiffAttr::Driver(value.clone());
-                        }
-                    }
-                    "ident" => {
-                        fa.ident = value == "set";
-                    }
-                    "merge" => {
-                        fa.merge = match value.as_str() {
-                            "unset" => MergeAttr::Unset,
-                            "set" => MergeAttr::Unspecified,
-                            other => MergeAttr::Driver(other.to_string()),
-                        };
-                    }
-                    "conflict-marker-size" => {
-                        if value == "unset" {
-                            fa.conflict_marker_size = None;
-                        } else {
-                            fa.conflict_marker_size = Some(value.clone());
-                        }
-                    }
-                    "working-tree-encoding" => {
-                        if value != "unset" && !value.is_empty() {
-                            fa.working_tree_encoding = Some(value.clone());
-                        }
-                    }
-                    "crlf" => {
-                        fa.crlf_legacy = match value.as_str() {
-                            "unset" => CrlfLegacyAttr::Unset,
-                            "input" => CrlfLegacyAttr::Input,
-                            "set" => CrlfLegacyAttr::Crlf,
-                            _ => CrlfLegacyAttr::Unspecified,
-                        };
-                    }
-                    "whitespace" => {
-                        if value == "unset" {
-                            fa.whitespace = Some("unset".to_owned());
-                        } else if !value.is_empty() {
-                            fa.whitespace = Some(value.clone());
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
-    }
-
-    fa
+    file_attrs_from_gitattributes(rules, &MacroTable::default(), rel_path, is_dir, config)
 }
 
 /// Returns whether gitattribute `attr_name` is set (last matching rule wins), for arbitrary
@@ -719,61 +753,18 @@ pub fn path_gitattribute_value(
     is_dir: bool,
     attr_name: &str,
 ) -> Option<String> {
-    let mut last: Option<&str> = None;
-    for rule in rules {
-        if attr_rule_matches(rule, path, is_dir) {
-            for (name, value) in &rule.attrs {
-                if name == attr_name {
-                    last = Some(value.as_str());
-                }
-            }
-        }
-    }
-    last.map(str::to_string)
+    let match_path = attr_path_for_match(path, is_dir);
+    collect_attrs_for_path(rules, &MacroTable::default(), &match_path, false)
+        .get(attr_name)
+        .map(|v| v.display().to_string())
+        .filter(|s| s != "unspecified")
 }
 
 /// Whether `rule` matches `rel_path` given directory vs file context (Git `path_matches`).
 #[must_use]
 pub fn attr_rule_matches(rule: &AttrRule, rel_path: &str, is_dir: bool) -> bool {
-    let path_is_dir = is_dir || rel_path.ends_with('/');
-    if rule.must_be_dir && !path_is_dir {
-        return false;
-    }
-    let path_for_glob = rel_path.trim_end_matches('/');
-    if rule.basename_only {
-        let basename = path_for_glob.rsplit('/').next().unwrap_or(path_for_glob);
-        glob_matches(rule.pattern.as_str(), basename)
-    } else {
-        glob_matches(rule.pattern.as_str(), path_for_glob)
-    }
-}
-
-fn glob_matches(pattern: &str, text: &str) -> bool {
-    glob_match_bytes(pattern.as_bytes(), text.as_bytes())
-}
-
-fn glob_match_bytes(pat: &[u8], text: &[u8]) -> bool {
-    match (pat.first(), text.first()) {
-        (None, None) => true,
-        (Some(&b'*'), _) => {
-            let pat_rest = pat
-                .iter()
-                .position(|&b| b != b'*')
-                .map_or(&pat[pat.len()..], |i| &pat[i..]);
-            if pat_rest.is_empty() {
-                return true;
-            }
-            for i in 0..=text.len() {
-                if glob_match_bytes(pat_rest, &text[i..]) {
-                    return true;
-                }
-            }
-            false
-        }
-        (Some(&b'?'), Some(_)) => glob_match_bytes(&pat[1..], &text[1..]),
-        (Some(p), Some(t)) if p == t => glob_match_bytes(&pat[1..], &text[1..]),
-        _ => false,
-    }
+    let match_path = attr_path_for_match(rel_path, is_dir);
+    git_attr_rule_matches(rule, &match_path, false)
 }
 
 /// Returns true if the data looks binary (contains NUL bytes in the first 8000 bytes).
@@ -2386,8 +2377,6 @@ mod tests {
     fn attr_dir_only_pattern_does_not_match_same_named_file() {
         let rules = parse_gitattributes_content("dir-only-pattern/ text\n");
         let rule = &rules[0];
-        assert!(rule.must_be_dir);
-        assert!(rule.basename_only);
         assert!(!attr_rule_matches(rule, "parent/dir-only-pattern", false));
         assert!(attr_rule_matches(rule, "dir-only-pattern", true));
     }

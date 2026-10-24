@@ -13,6 +13,10 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use crate::attributes::{
+    parse_gitattributes_file_content, parse_gitattributes_file_content_with_base,
+    ParsedGitAttributes, MAX_ATTR_FILE_BYTES,
+};
 use crate::config::parse_path;
 use crate::config::ConfigSet;
 use crate::crlf::{self, AttrRule, ConversionConfig, FileAttrs};
@@ -96,11 +100,11 @@ struct AttributeState {
     /// When true, nested and root `.gitattributes` come only from [`Index`] blobs (checkout smudge).
     gitattributes_index_only: bool,
     /// Global + root `.gitattributes` (lowest precedence among file sources).
-    stack_prefix: Vec<AttrRule>,
+    stack_prefix: ParsedGitAttributes,
     /// `.git/info/attributes` — applied after all worktree `.gitattributes` along the path.
-    info_rules: Vec<AttrRule>,
-    dir_fragment: RefCell<HashMap<String, Vec<AttrRule>>>,
-    stack_without_info_by_dir: RefCell<HashMap<String, Vec<AttrRule>>>,
+    info_rules: ParsedGitAttributes,
+    dir_fragment: RefCell<HashMap<String, ParsedGitAttributes>>,
+    stack_without_info_by_dir: RefCell<HashMap<String, ParsedGitAttributes>>,
 }
 
 impl WorktreeRules {
@@ -227,25 +231,32 @@ impl WorktreeRules {
     #[must_use]
     pub fn attribute_rules_for_path(&self, rel_path: &str) -> Vec<AttrRule> {
         let parent = parent_dir_key(rel_path);
-        self.attrs.merged_for_dir(&parent)
+        self.attrs.merged_for_dir(&parent).rules
     }
 
     /// Resolved attributes for `rel_path` using this context's config snapshot.
     #[must_use]
     pub fn file_attrs(&self, rel_path: &str, is_dir: bool) -> FileAttrs {
-        let rules = self.attribute_rules_for_path(rel_path);
-        crlf::get_file_attrs(&rules, rel_path, is_dir, &self.config)
+        let parent = parent_dir_key(rel_path);
+        let parsed = self.attrs.merged_for_dir(&parent);
+        crlf::file_attrs_from_gitattributes(
+            &parsed.rules,
+            &parsed.macros,
+            rel_path,
+            is_dir,
+            &self.config,
+        )
     }
 }
 
 impl AttributeState {
-    fn merged_for_dir(&self, dir: &str) -> Vec<AttrRule> {
+    fn merged_for_dir(&self, dir: &str) -> ParsedGitAttributes {
         let mut merged = self.stack_without_info_for_dir(dir);
-        merged.extend_from_slice(&self.info_rules);
+        append_parsed(&mut merged, self.info_rules.clone(), true);
         merged
     }
 
-    fn stack_without_info_for_dir(&self, dir: &str) -> Vec<AttrRule> {
+    fn stack_without_info_for_dir(&self, dir: &str) -> ParsedGitAttributes {
         if let Some(hit) = self.stack_without_info_by_dir.borrow().get(dir).cloned() {
             return hit;
         }
@@ -253,9 +264,9 @@ impl AttributeState {
             self.stack_prefix.clone()
         } else {
             let parent = parent_of_dir(dir);
-            let mut rules = self.stack_without_info_for_dir(&parent);
-            rules.extend(self.load_dir_fragment(dir));
-            rules
+            let mut parsed = self.stack_without_info_for_dir(&parent);
+            append_parsed(&mut parsed, self.load_dir_fragment(dir), false);
+            parsed
         };
         self.stack_without_info_by_dir
             .borrow_mut()
@@ -263,11 +274,11 @@ impl AttributeState {
         stack
     }
 
-    fn load_dir_fragment(&self, dir: &str) -> Vec<AttrRule> {
+    fn load_dir_fragment(&self, dir: &str) -> ParsedGitAttributes {
         if let Some(hit) = self.dir_fragment.borrow().get(dir).cloned() {
             return hit;
         }
-        let mut rules = Vec::new();
+        let mut parsed = ParsedGitAttributes::default();
         let ga_stored = if dir.is_empty() {
             ".gitattributes".to_owned()
         } else {
@@ -281,25 +292,47 @@ impl AttributeState {
                 self.work_tree.join(dir).join(".gitattributes")
             };
             if let Some(content) = read_worktree_gitattributes(&wt_ga) {
-                rules.extend(crlf::parse_gitattributes_content(&content));
+                if content.len() <= MAX_ATTR_FILE_BYTES {
+                    let mut p =
+                        parse_gitattributes_file_content_with_base(&content, &ga_stored, dir);
+                    parsed.rules.append(&mut p.rules);
+                    parsed.warnings.append(&mut p.warnings);
+                }
                 self.dir_fragment
                     .borrow_mut()
-                    .insert(dir.to_owned(), rules.clone());
-                return rules;
+                    .insert(dir.to_owned(), parsed.clone());
+                return parsed;
             }
         }
         if let Some(oid) = self.gitattributes_index.get(&key) {
             if let Ok(obj) = self.odb.read(oid) {
                 if let Ok(content) = String::from_utf8(obj.data) {
-                    rules.extend(crlf::parse_gitattributes_content(&content));
+                    if content.len() <= MAX_ATTR_FILE_BYTES {
+                        let mut p =
+                            parse_gitattributes_file_content_with_base(&content, &ga_stored, dir);
+                        parsed.rules.append(&mut p.rules);
+                        parsed.warnings.append(&mut p.warnings);
+                    }
                 }
             }
         }
         self.dir_fragment
             .borrow_mut()
-            .insert(dir.to_owned(), rules.clone());
-        rules
+            .insert(dir.to_owned(), parsed.clone());
+        parsed
     }
+}
+
+fn append_parsed(
+    merged: &mut ParsedGitAttributes,
+    mut parsed: ParsedGitAttributes,
+    take_macros: bool,
+) {
+    merged.rules.append(&mut parsed.rules);
+    if take_macros {
+        merged.macros.defs.extend(parsed.macros.defs.drain());
+    }
+    merged.warnings.append(&mut parsed.warnings);
 }
 
 fn parent_dir_key(rel_path: &str) -> String {
@@ -325,37 +358,52 @@ fn load_attribute_stack_prefix_and_info(
     index: &Index,
     odb: &Odb,
     gitattributes_index_only: bool,
-) -> Result<(Vec<AttrRule>, Vec<AttrRule>)> {
-    let mut stack_prefix = Vec::new();
+) -> Result<(ParsedGitAttributes, ParsedGitAttributes)> {
+    let mut stack_prefix = ParsedGitAttributes::default();
     if let Some(g) = global_attributes_path(repo.environment(), config)? {
         if let Some(content) = read_worktree_gitattributes(&g) {
-            stack_prefix.extend(crlf::parse_gitattributes_content(&content));
+            if content.len() <= MAX_ATTR_FILE_BYTES {
+                let p = parse_gitattributes_file_content(&content, g.to_string_lossy().as_ref());
+                append_parsed(&mut stack_prefix, p, true);
+            }
         }
     }
     if gitattributes_index_only {
         if let Some(entry) = index.get(b".gitattributes", 0) {
             if let Ok(obj) = odb.read(&entry.oid) {
                 if let Ok(content) = String::from_utf8(obj.data) {
-                    stack_prefix.extend(crlf::parse_gitattributes_content(&content));
+                    if content.len() <= MAX_ATTR_FILE_BYTES {
+                        let p = parse_gitattributes_file_content(&content, ".gitattributes");
+                        append_parsed(&mut stack_prefix, p, true);
+                    }
                 }
             }
         }
     } else {
         let root_ga = work_tree.join(".gitattributes");
         if let Some(content) = read_worktree_gitattributes(&root_ga) {
-            stack_prefix.extend(crlf::parse_gitattributes_content(&content));
+            if content.len() <= MAX_ATTR_FILE_BYTES {
+                let p = parse_gitattributes_file_content(&content, ".gitattributes");
+                append_parsed(&mut stack_prefix, p, true);
+            }
         } else if let Some(entry) = index.get(b".gitattributes", 0) {
             if let Ok(obj) = odb.read(&entry.oid) {
                 if let Ok(content) = String::from_utf8(obj.data) {
-                    stack_prefix.extend(crlf::parse_gitattributes_content(&content));
+                    if content.len() <= MAX_ATTR_FILE_BYTES {
+                        let p = parse_gitattributes_file_content(&content, ".gitattributes");
+                        append_parsed(&mut stack_prefix, p, true);
+                    }
                 }
             }
         }
     }
-    let mut info_rules = Vec::new();
+    let mut info_rules = ParsedGitAttributes::default();
     let info = repo.git_dir().join("info/attributes");
     if let Some(content) = read_worktree_gitattributes(&info) {
-        info_rules.extend(crlf::parse_gitattributes_content(&content));
+        if content.len() <= MAX_ATTR_FILE_BYTES {
+            let p = parse_gitattributes_file_content(&content, "info/attributes");
+            append_parsed(&mut info_rules, p, true);
+        }
     }
     Ok((stack_prefix, info_rules))
 }

@@ -969,11 +969,12 @@ use std::io::{self, Write};
 use std::path::Path;
 use std::sync::Arc;
 
+use crate::attributes::{load_gitattributes_stack, MacroTable, ParsedGitAttributes};
 use crate::commit_graph_file::CommitGraphChain;
 use crate::config::ConfigSet;
 use crate::crlf::{
-    convert_to_worktree_eager, get_file_attrs, load_gitattributes, load_gitattributes_from_index,
-    ConversionConfig, GitAttributes,
+    convert_to_worktree_eager, file_attrs_from_gitattributes, load_gitattributes_from_index,
+    load_gitattributes_parsed, ConversionConfig, GitAttributes,
 };
 use crate::diff::{detect_renames, diff_trees, DiffEntry, DiffStatus};
 use crate::diff_rename_parallel::{diff_rename_parallel_options, parallel_map_indices};
@@ -1212,6 +1213,7 @@ pub struct BlameTextconvContext {
     conversion: ConversionConfig,
     /// Parsed `.gitattributes` rules for the repository.
     pub attrs: GitAttributes,
+    attr_macros: MacroTable,
     diff_attrs: Vec<DiffAttrRule>,
     filter_process: std::sync::Arc<crate::repo_caches::RepoCaches>,
 }
@@ -1221,12 +1223,15 @@ impl BlameTextconvContext {
     pub fn new(repo: &Repository) -> Self {
         let config = repo.config().map(|c| (*c).clone()).unwrap_or_default();
         let conversion = ConversionConfig::from_config(&config);
-        let attrs = load_attr_rules(repo);
+        let parsed = load_attr_parsed(repo);
+        let attrs = parsed.rules.clone();
+        let attr_macros = parsed.macros;
         let diff_attrs = load_diff_attr_rules(repo);
         Self {
             config,
             conversion,
             attrs,
+            attr_macros,
             diff_attrs,
             filter_process: std::sync::Arc::clone(repo.caches()),
         }
@@ -1250,19 +1255,33 @@ enum DiffAttrValue {
     Driver(String),
 }
 
-fn load_attr_rules(repo: &Repository) -> GitAttributes {
+fn load_attr_parsed(repo: &Repository) -> ParsedGitAttributes {
     if let Some(work_tree) = repo.work_tree() {
-        let rules = load_gitattributes(work_tree);
-        if !rules.is_empty() {
-            return rules;
+        if let Ok(p) = load_gitattributes_stack(repo, work_tree) {
+            if !p.rules.is_empty() {
+                return p;
+            }
+        }
+        let p = load_gitattributes_parsed(work_tree);
+        if !p.rules.is_empty() {
+            return p;
         }
     }
 
     if let Ok(index) = repo.load_index() {
-        return load_gitattributes_from_index(&index, repo.odb());
+        if let Some(wt) = repo.work_tree() {
+            if let Ok(p) = crate::attributes::load_gitattributes_from_index(&index, repo.odb(), wt)
+            {
+                return p;
+            }
+        }
+        return ParsedGitAttributes {
+            rules: load_gitattributes_from_index(&index, repo.odb()),
+            ..ParsedGitAttributes::default()
+        };
     }
 
-    Vec::new()
+    ParsedGitAttributes::default()
 }
 
 fn load_diff_attr_rules(repo: &Repository) -> Vec<DiffAttrRule> {
@@ -1449,7 +1468,8 @@ fn read_blob_content_for_blame(
         return Ok(String::from_utf8_lossy(&obj.data).into_owned());
     };
 
-    let attrs = get_file_attrs(&ctx.attrs, path, false, &ctx.config);
+    let attrs =
+        file_attrs_from_gitattributes(&ctx.attrs, &ctx.attr_macros, path, false, &ctx.config);
     let oid_hex = oid.to_string();
     let worktree_data = convert_to_worktree_eager(
         &obj.data,

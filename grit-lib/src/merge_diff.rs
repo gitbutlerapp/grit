@@ -16,7 +16,7 @@ use crate::command_runner::{
     CommandStdin, CommandStdio, ShellInvocation,
 };
 use crate::config::{parse_bool, ConfigSet};
-use crate::crlf::{get_file_attrs, load_gitattributes, DiffAttr, FileAttrs};
+use crate::crlf::{DiffAttr, FileAttrs};
 use crate::diff::{detect_renames, diff_trees, DiffStatus};
 use crate::objects::{parse_commit, parse_tree, ObjectId, ObjectKind};
 use crate::odb::Odb;
@@ -267,14 +267,14 @@ fn paths_in_tree_order(
 /// Load attributes for `path` using root `.gitattributes` and `info/attributes`.
 fn attrs_for_repo_path(git_dir: &Path, path: &str) -> FileAttrs {
     let work_tree = git_dir.parent().unwrap_or(git_dir);
-    let rules = load_gitattributes(work_tree);
+    let parsed = crate::crlf::load_gitattributes_parsed(work_tree);
     let config = ConfigSet::load(
         &crate::environment::Environment::empty(),
         Some(git_dir),
         true,
     )
     .unwrap_or_default();
-    get_file_attrs(&rules, path, false, &config)
+    crate::crlf::file_attrs_from_gitattributes(&parsed.rules, &parsed.macros, path, false, &config)
 }
 
 /// True if diff should treat this path as binary (NUL in blob or `-diff` / `diff=unset`).
@@ -610,11 +610,17 @@ pub fn convert_blob_to_worktree_for_path(
     )
     .unwrap_or_default();
     let conv = crate::crlf::ConversionConfig::from_config(&config);
-    let rules = match index {
-        Some(idx) => crate::crlf::load_gitattributes_for_checkout(work_tree, path, idx, odb),
-        None => crate::crlf::load_gitattributes(work_tree),
+    let parsed = match index {
+        Some(idx) => crate::crlf::load_gitattributes_for_checkout_parsed(work_tree, path, idx, odb),
+        None => crate::crlf::load_gitattributes_parsed(work_tree),
     };
-    let file_attrs = crate::crlf::get_file_attrs(&rules, path, false, &config);
+    let file_attrs = crate::crlf::file_attrs_from_gitattributes(
+        &parsed.rules,
+        &parsed.macros,
+        path,
+        false,
+        &config,
+    );
     crate::crlf::convert_to_worktree_eager(
         blob,
         path,
