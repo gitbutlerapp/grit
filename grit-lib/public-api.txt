@@ -8335,6 +8335,7 @@ pub grit_lib::objects::index_pack::IngestPackOptions::mark_promisor_pack: bool
 pub grit_lib::objects::index_pack::IngestPackOptions::merged_config: core::option::Option<grit_lib::config::ConfigSet>
 pub grit_lib::objects::index_pack::IngestPackOptions::skip_post_index_verify: bool
 pub grit_lib::objects::index_pack::IngestPackOptions::threads: core::option::Option<usize>
+pub grit_lib::objects::index_pack::IngestPackOptions::trusted_index_rows: core::option::Option<alloc::vec::Vec<(grit_lib::objects::ObjectId, u64, u32)>>
 impl core::clone::Clone for grit_lib::objects::index_pack::IngestPackOptions
 pub fn grit_lib::objects::index_pack::IngestPackOptions::clone(&self) -> Self
 impl core::default::Default for grit_lib::objects::index_pack::IngestPackOptions
@@ -12710,10 +12711,10 @@ pub enum grit_lib::porcelain::merge::ContinueMergeError
 pub grit_lib::porcelain::merge::ContinueMergeError::EmptyMessage
 pub grit_lib::porcelain::merge::ContinueMergeError::NoMergeInProgress
 pub grit_lib::porcelain::merge::ContinueMergeError::Repository(grit_lib::error::Error)
-pub grit_lib::porcelain::merge::ContinueMergeError::UnmergedPaths
-pub grit_lib::porcelain::merge::ContinueMergeError::UnmergedPaths::paths: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::porcelain::merge::ContinueMergeError::ResolvedNotStaged
 pub grit_lib::porcelain::merge::ContinueMergeError::ResolvedNotStaged::paths: alloc::vec::Vec<alloc::string::String>
+pub grit_lib::porcelain::merge::ContinueMergeError::UnmergedPaths
+pub grit_lib::porcelain::merge::ContinueMergeError::UnmergedPaths::paths: alloc::vec::Vec<alloc::string::String>
 impl core::convert::From<grit_lib::error::Error> for grit_lib::porcelain::merge::ContinueMergeError
 pub fn grit_lib::porcelain::merge::ContinueMergeError::from(grit_lib::error::Error) -> Self
 impl core::error::Error for grit_lib::porcelain::merge::ContinueMergeError
