@@ -3770,8 +3770,14 @@ mod tests {
         ];
         let diff = build_line_map(&old, &new, BlameDiffAlgorithm::Myers, true);
         let map = build_exact_relocate_line_map(&old, &new, &diff);
-        let (_, flags) =
-            build_line_map_with_changed_flags(&old, &new, BlameDiffAlgorithm::Myers, true, true);
+        let (_, flags) = build_line_map_with_changed_flags(
+            &old,
+            &new,
+            BlameDiffAlgorithm::Myers,
+            true,
+            true,
+            crate::diff::WhitespaceMode::default(),
+        );
         let stop = blame_stops_on_current_commit(&diff, &map, &flags);
         assert_eq!(diff[4], None);
         assert_eq!(

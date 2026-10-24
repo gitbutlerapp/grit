@@ -86,6 +86,7 @@ fn compute_blame_copy_into_existing_target_attributes_source_file() {
         &grafts,
         true,
         None,
+        grit_lib::diff::WhitespaceMode::default(),
         &policy,
     )
     .expect("compute_blame");
