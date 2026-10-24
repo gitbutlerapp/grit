@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "admin  1 token    all repositories (admin)\nbob    2 tokens   app (write), docs (read)\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\"database\":\"/srv/git/grit-serve.db\",\"users\":[{\"name\":\"admin\",\"admin\":true,\"tokens\":1,\"grants\":[]},{\"name\":\"bob\",\"admin\":false,\"tokens\":2,\"grants\":[{\"repository\":\"app\",\"access\":\"write\"},{\"repository\":\"docs\",\"access\":\"read\"}]}]}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "## Serve users\n\nDatabase: `/srv/git/grit-serve.db`\n\n| User | Tokens | Access |\n| --- | ---: | --- |\n| `admin` | 1 | all repositories (admin) |\n| `bob` | 2 | app (write), docs (read) |\n",
+    "stderr": ""
+  }
+}

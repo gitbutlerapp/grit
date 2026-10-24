@@ -135,6 +135,7 @@ fn build_schema_registry() -> Vec<SchemaRegistryEntry> {
         revert::RevertOutcome,
         revs::RevsOutcome,
         rm::RmOutcome,
+        serve_http::{ServeGrantOutcome, ServeUserOutcome, ServeUsersOutcome},
         shortlog::ShortlogOutcome,
         show::ShowRunResult,
         skill::SkillOutcome,
@@ -244,6 +245,10 @@ fn build_schema_registry() -> Vec<SchemaRegistryEntry> {
         entry::<WorktreeOutcome>("worktree.repair"),
         entry::<AuthOutcome>("auth"),
         entry::<LogoutOutcome>("auth.logout"),
+        entry::<ServeUserOutcome>("serve"),
+        entry::<ServeUserOutcome>("serve.add-user"),
+        entry::<ServeGrantOutcome>("serve.grant"),
+        entry::<ServeUsersOutcome>("serve.users"),
         entry::<UpdateOutcome>("update"),
         entry::<SkillOutcome>("skill"),
         entry::<ConfigOutcome>("config"),
@@ -338,6 +343,13 @@ pub fn schema_command_key(args: &[&str]) -> Option<String> {
         "auth" => match positional.get(1).copied() {
             Some("logout") => "auth.logout",
             None => "auth",
+            _ => return None,
+        },
+        "serve" => match positional.get(1).copied() {
+            None => "serve",
+            Some("add-user") => "serve.add-user",
+            Some("grant") => "serve.grant",
+            Some("users") => "serve.users",
             _ => return None,
         },
         "ignore" => match positional.get(1).copied() {
@@ -690,7 +702,7 @@ fn collect_json_commands(cmd: &clap::Command, prefix: Option<&str>, out: &mut Ve
     // Parent commands that run with no subcommand still emit JSON (remote list, stash push, auth login).
     if matches!(
         full.as_str(),
-        "remote" | "stash" | "auth" | "hooks" | "reflog" | "gc"
+        "remote" | "stash" | "auth" | "hooks" | "reflog" | "gc" | "serve"
     ) {
         out.push(full.clone());
     }
@@ -709,6 +721,7 @@ pub const SNAPSHOT_FILE_PREFIX: &str = "grit_test_support__cli_fixture__";
 pub const SNAPSHOT_JSON_SCHEMA_SKIP: &[&str] = &[
     "auth_render",
     "log_json_filter_commits_oid",
+    "serve_render",
     "update_render",
 ];
 

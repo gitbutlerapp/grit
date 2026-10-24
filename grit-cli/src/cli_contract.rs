@@ -620,6 +620,38 @@ const COMMAND_CONTRACTS: &[(&str, CommandContract)] = &[
         },
     ),
     (
+        "serve",
+        CommandContract {
+            kind: CommandKind::Mutation,
+            takes_message: false,
+            takes_paths: false,
+        },
+    ),
+    (
+        "serve.add-user",
+        CommandContract {
+            kind: CommandKind::Mutation,
+            takes_message: false,
+            takes_paths: false,
+        },
+    ),
+    (
+        "serve.grant",
+        CommandContract {
+            kind: CommandKind::Mutation,
+            takes_message: false,
+            takes_paths: false,
+        },
+    ),
+    (
+        "serve.users",
+        CommandContract {
+            kind: CommandKind::Query,
+            takes_message: false,
+            takes_paths: false,
+        },
+    ),
+    (
         "shortlog",
         CommandContract {
             kind: CommandKind::List,
@@ -882,6 +914,24 @@ const EXCEPTIONS: &[(&str, ContractRule, &str, &str)] = &[
         "auth sign-in has no `--dry-run` yet (step 6)",
     ),
     (
+        "serve",
+        ContractRule::DryRun,
+        "grit-serve",
+        "serve runs the server or creates the user database; no `--dry-run` yet",
+    ),
+    (
+        "serve.add-user",
+        ContractRule::DryRun,
+        "grit-serve",
+        "serve add-user has no `--dry-run` yet",
+    ),
+    (
+        "serve.grant",
+        ContractRule::DryRun,
+        "grit-serve",
+        "serve grant has no `--dry-run` yet",
+    ),
+    (
         "hooks.run",
         ContractRule::DryRun,
         "workspace-extras",
@@ -1019,7 +1069,7 @@ mod tests {
     fn parent_runs_without_subcommand(full: &str) -> bool {
         matches!(
             full,
-            "remote" | "stash" | "auth" | "hooks" | "reflog" | "gc" | "notes"
+            "remote" | "stash" | "auth" | "hooks" | "reflog" | "gc" | "notes" | "serve"
         )
     }
 

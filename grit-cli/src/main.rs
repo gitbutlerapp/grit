@@ -715,6 +715,32 @@ enum AuthAction {
     },
 }
 
+/// Subcommands of `grit serve`.
+#[derive(Debug, Subcommand)]
+enum ServeAction {
+    /// Add a user and print their new access token.
+    #[command(name = "add-user")]
+    AddUser {
+        /// User name: letters, digits, `.`, `_` or `-`.
+        name: String,
+        /// Make the user an admin, with read and write access to every repository.
+        #[arg(long)]
+        admin: bool,
+    },
+    /// Give a user read access to a repository (or write access with `--write`).
+    Grant {
+        /// The user to give access to.
+        user: String,
+        /// The repository name, with or without `.git`.
+        repository: String,
+        /// Allow pushing as well as fetching.
+        #[arg(long)]
+        write: bool,
+    },
+    /// List users, their tokens and their repository access.
+    Users,
+}
+
 /// Top-level `grit` commands.
 ///
 /// In the binary, each subcommand's arguments are built only when that subcommand is parsed,
@@ -2001,6 +2027,26 @@ enum Command {
     Manager {
         /// The credential operation: get, store, or erase.
         operation: String,
+    },
+    /// Serve repositories over HTTP, with a web view and token authentication.
+    Serve {
+        #[command(subcommand)]
+        action: Option<ServeAction>,
+        /// A repository, or a directory of repositories, to serve.
+        #[arg(long, global = true, value_name = "PATH", default_value = ".")]
+        root: std::path::PathBuf,
+        /// The user database (default: `grit-serve.db` in the root, or in its `.git`).
+        #[arg(long, global = true, value_name = "FILE")]
+        db: Option<std::path::PathBuf>,
+        /// Address to listen on.
+        #[arg(long, value_name = "HOST:PORT", default_value = "127.0.0.1:8080")]
+        bind: String,
+        /// Create the user database and its first admin user, print the admin's token, and exit.
+        #[arg(long)]
+        setup: bool,
+        /// Name of the admin user `--setup` creates (default `admin`).
+        #[arg(long, value_name = "NAME", requires = "setup")]
+        admin_name: Option<String>,
     },
     /// Serve a fetch or clone over stdin/stdout (run by ssh and grit-http-server).
     #[command(name = "upload-pack", hide = true)]
@@ -3893,6 +3939,49 @@ fn dispatch(
             commands::manager::run(&operation)?;
             Ok(ExitStatus::Success)
         }
+        Command::Serve {
+            action,
+            root,
+            db,
+            bind,
+            setup,
+            admin_name,
+        } => {
+            let db = db.as_deref();
+            match action {
+                Some(ServeAction::AddUser { name, admin }) => emit_success(
+                    &commands::serve_http::add_user(&root, db, &name, admin)?,
+                    opts,
+                    ctx,
+                ),
+                Some(ServeAction::Grant {
+                    user,
+                    repository,
+                    write,
+                }) => emit_success(
+                    &commands::serve_http::grant(&root, db, &user, &repository, write)?,
+                    opts,
+                    ctx,
+                ),
+                Some(ServeAction::Users) => {
+                    emit_success(&commands::serve_http::users(&root, db)?, opts, ctx)
+                }
+                None if setup => emit_success(
+                    &commands::serve_http::setup(
+                        &root,
+                        db,
+                        admin_name.as_deref().unwrap_or("admin"),
+                    )?,
+                    opts,
+                    ctx,
+                ),
+                // The running server logs to stderr; it has no stdout result.
+                None => {
+                    commands::serve_http::run(&root, db, &bind)?;
+                    Ok(ExitStatus::Success)
+                }
+            }
+        }
         // The server programs speak the Git wire protocol on stdout.
         Command::UploadPack { args } => {
             commands::serve::run(
@@ -3958,8 +4047,11 @@ mod tests {
     ];
 
     /// In-process render snapshots that satisfy coverage for a top-level command.
-    const RENDER_SNAPSHOT_FOR_COMMAND: &[(&str, &str)] =
-        &[("auth", "auth_render"), ("update", "update_render")];
+    const RENDER_SNAPSHOT_FOR_COMMAND: &[(&str, &str)] = &[
+        ("auth", "auth_render"),
+        ("serve", "serve_render"),
+        ("update", "update_render"),
+    ];
 
     fn commands_dir() -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../content/docs/commands")

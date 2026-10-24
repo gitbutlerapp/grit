@@ -6,7 +6,6 @@ autotests = false
 license = "MIT"
 description = "Git smart HTTP server powered by grit"
 repository = "https://github.com/gitbutlerapp/grit"
-publish = false
 
 [features]
 # Tests that start the system `git` or build heavy fixtures run only with this
@@ -16,11 +15,15 @@ full-tests = []
 [lints]
 workspace = true
 
+[lib]
+path = "src/lib.rs"
+
 [[bin]]
 name = "grit-http-server"
 path = "src/main.rs"
 
 [dependencies]
+grit-lib = { version = "0.5", path = "../grit-lib" }
 grit-protocol = { version = "0.5", path = "../grit-protocol" }
 axum = "0.8"
 tokio = { version = "1", features = ["full"] }
@@ -32,6 +35,12 @@ flate2.workspace = true
 futures-util = { version = "0.3", default-features = false }
 http-body-util = "0.1"
 tokio-util = { version = "0.7", features = ["io", "io-util"] }
+getrandom = "0.2"
+hex.workspace = true
+rusqlite = { version = "0.32", features = ["bundled"] }
+sha2.workspace = true
+thiserror.workspace = true
+time.workspace = true
 
 [dev-dependencies]
 tempfile.workspace = true

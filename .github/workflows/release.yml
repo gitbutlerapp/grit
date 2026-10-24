@@ -243,7 +243,7 @@ jobs:
         run: |
           version="${GITHUB_REF_NAME#v}"
           # Dependency order: each crate needs the one before it on the index.
-          for crate in grit-lib grit-protocol grit-cli; do
+          for crate in grit-lib grit-protocol grit-http-server grit-cli; do
             if curl -sfo /dev/null -A "grit-release (github.com/gitbutlerapp/grit)" \
                 "https://crates.io/api/v1/crates/$crate/$version"; then
               echo "$crate $version is already on crates.io"

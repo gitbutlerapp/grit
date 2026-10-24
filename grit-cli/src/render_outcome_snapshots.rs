@@ -8,6 +8,7 @@ use grit_test_support::CliFixture;
 use time::OffsetDateTime;
 
 use crate::commands::auth::{AuthOutcome, LogoutOutcome};
+use crate::commands::serve_http::{ServeGrantJson, ServeUserJson, ServeUsersOutcome};
 use crate::commands::update::UpdateOutcome;
 use crate::output::{render_to_string, HumanRender, MarkdownRender, OutputMode, RenderContext};
 use grit_test_support::ModeCapture;
@@ -116,4 +117,40 @@ fn update_render() {
     let markdown = render_to_string(&outcome, OutputMode::Markdown, &ctx).expect("markdown");
 
     CliFixture::snapshot_rendered_modes("update_render", snapshot_dir(), &human, &json, &markdown);
+}
+
+#[test]
+fn serve_render() {
+    let ctx = sample_ctx();
+    let outcome = ServeUsersOutcome {
+        database: "/srv/git/grit-serve.db".to_owned(),
+        users: vec![
+            ServeUserJson {
+                name: "admin".to_owned(),
+                admin: true,
+                tokens: 1,
+                grants: Vec::new(),
+            },
+            ServeUserJson {
+                name: "bob".to_owned(),
+                admin: false,
+                tokens: 2,
+                grants: vec![
+                    ServeGrantJson {
+                        repository: "app".to_owned(),
+                        access: "write".to_owned(),
+                    },
+                    ServeGrantJson {
+                        repository: "docs".to_owned(),
+                        access: "read".to_owned(),
+                    },
+                ],
+            },
+        ],
+    };
+    let human = render_to_string(&outcome, OutputMode::Human, &ctx).expect("human");
+    let json = render_to_string(&outcome, OutputMode::Json, &ctx).expect("json");
+    let markdown = render_to_string(&outcome, OutputMode::Markdown, &ctx).expect("markdown");
+
+    CliFixture::snapshot_rendered_modes("serve_render", snapshot_dir(), &human, &json, &markdown);
 }

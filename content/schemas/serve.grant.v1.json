@@ -1,0 +1,26 @@
+{
+  "$id": "https://grit-scm.com/schemas/serve.grant/v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Result of `grit serve grant`.",
+  "properties": {
+    "access": {
+      "description": "`read` or `write`.",
+      "type": "string"
+    },
+    "repository": {
+      "description": "The repository name, without `.git`.",
+      "type": "string"
+    },
+    "user": {
+      "description": "The user given access.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "access",
+    "repository",
+    "user"
+  ],
+  "title": "ServeGrantOutcome",
+  "type": "object"
+}

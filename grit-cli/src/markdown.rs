@@ -15,6 +15,7 @@ use crate::commands::history::{
 use crate::commands::merge::{MergeOutcome, MergeResult};
 use crate::commands::pick::PickOutcome;
 use crate::commands::revert::RevertOutcome;
+use crate::commands::serve_http::{ServeGrantOutcome, ServeUserOutcome, ServeUsersOutcome};
 use crate::commands::stash::{
     StashApplyOutcome, StashDropOutcome, StashPopOutcome, StashPushOutcome,
 };
@@ -1618,6 +1619,60 @@ pub fn print_logout_outcome(w: &mut dyn Write, outcome: &LogoutOutcome) -> anyho
 }
 
 /// Result of `grit update`.
+/// Result of `grit serve --setup` or `grit serve add-user`.
+pub fn print_serve_user_outcome(
+    w: &mut dyn Write,
+    outcome: &ServeUserOutcome,
+) -> anyhow::Result<()> {
+    outln!(w, "## Serve user");
+    outln!(w);
+    let role = if outcome.admin { "admin user" } else { "user" };
+    outln!(w, "- Created {role} **`{}`**", outcome.user);
+    outln!(w, "- Database: `{}`", outcome.database);
+    outln!(w, "- Token (shown once): `{}`", outcome.token);
+    Ok(())
+}
+
+/// Result of `grit serve grant`.
+pub fn print_serve_grant_outcome(
+    w: &mut dyn Write,
+    outcome: &ServeGrantOutcome,
+) -> anyhow::Result<()> {
+    outln!(w, "## Serve grant");
+    outln!(w);
+    outln!(
+        w,
+        "- **`{}`** has **{}** access to `{}`",
+        outcome.user,
+        outcome.access,
+        outcome.repository
+    );
+    Ok(())
+}
+
+/// Result of `grit serve users`.
+pub fn print_serve_users_outcome(
+    w: &mut dyn Write,
+    outcome: &ServeUsersOutcome,
+) -> anyhow::Result<()> {
+    outln!(w, "## Serve users");
+    outln!(w);
+    outln!(w, "Database: `{}`", outcome.database);
+    outln!(w);
+    outln!(w, "| User | Tokens | Access |");
+    outln!(w, "| --- | ---: | --- |");
+    for user in &outcome.users {
+        outln!(
+            w,
+            "| `{}` | {} | {} |",
+            user.name,
+            user.tokens,
+            escape_table_cell(&user.access_summary())
+        );
+    }
+    Ok(())
+}
+
 pub fn print_update_outcome(w: &mut dyn Write, outcome: &UpdateOutcome) -> anyhow::Result<()> {
     outln!(w, "## Update");
     outln!(w);

@@ -30,6 +30,8 @@ base64.workspace = true
 clap.workspace = true
 clap_complete.workspace = true
 grit-lib = { version = "0.5", path = "../grit-lib", features = ["http-ureq", "tracing"] }
+grit-http-server = { version = "0.5", path = "../grit-http-server" }
+grit-protocol = { version = "0.5", path = "../grit-protocol" }
 tracing-core = { version = "0.1", default-features = false }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["registry", "std"] }
 time.workspace = true

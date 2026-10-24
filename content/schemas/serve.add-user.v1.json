@@ -1,0 +1,31 @@
+{
+  "$id": "https://grit-scm.com/schemas/serve.add-user/v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Result of `grit serve --setup` and `grit serve add-user`: a new user and their token.",
+  "properties": {
+    "admin": {
+      "description": "Whether the user is an admin (read and write on every repository).",
+      "type": "boolean"
+    },
+    "database": {
+      "description": "The user database the user was added to.",
+      "type": "string"
+    },
+    "token": {
+      "description": "The user's access token. It is shown only once.",
+      "type": "string"
+    },
+    "user": {
+      "description": "The new user's name.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "admin",
+    "database",
+    "token",
+    "user"
+  ],
+  "title": "ServeUserOutcome",
+  "type": "object"
+}

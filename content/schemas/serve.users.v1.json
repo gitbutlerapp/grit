@@ -1,0 +1,77 @@
+{
+  "$id": "https://grit-scm.com/schemas/serve.users/v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "definitions": {
+    "ServeGrantJson": {
+      "description": "One repository grant in `grit serve users`.",
+      "properties": {
+        "access": {
+          "description": "`read` or `write`.",
+          "type": "string"
+        },
+        "repository": {
+          "description": "The repository name, without `.git`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "access",
+        "repository"
+      ],
+      "type": "object"
+    },
+    "ServeUserJson": {
+      "description": "One user in `grit serve users`.",
+      "properties": {
+        "admin": {
+          "description": "Admins read and write every repository.",
+          "type": "boolean"
+        },
+        "grants": {
+          "description": "Repository grants, sorted by repository.",
+          "items": {
+            "$ref": "#/definitions/ServeGrantJson"
+          },
+          "type": "array"
+        },
+        "name": {
+          "description": "User name.",
+          "type": "string"
+        },
+        "tokens": {
+          "description": "How many access tokens the user has.",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "admin",
+        "grants",
+        "name",
+        "tokens"
+      ],
+      "type": "object"
+    }
+  },
+  "description": "Result of `grit serve users`.",
+  "properties": {
+    "database": {
+      "description": "The user database read.",
+      "type": "string"
+    },
+    "users": {
+      "description": "Every user, sorted by name.",
+      "items": {
+        "$ref": "#/definitions/ServeUserJson"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "database",
+    "users"
+  ],
+  "title": "ServeUsersOutcome",
+  "type": "object"
+}
