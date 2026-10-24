@@ -28,12 +28,20 @@
     },
     "dry_run": {
       "type": "boolean"
+    },
+    "hooks_run": {
+      "description": "Hooks that ran after the switch (`post-checkout` when installed).",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
     }
   },
   "required": [
     "branch",
     "created",
-    "detached"
+    "detached",
+    "hooks_run"
   ],
   "title": "SwitchOutcome",
   "type": "object"
