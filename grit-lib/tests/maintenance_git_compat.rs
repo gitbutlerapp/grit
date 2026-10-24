@@ -1061,6 +1061,35 @@ fn gc_twice_on_single_pack_keeps_loose_count_zero() {
 }
 
 #[test]
+fn gc_skips_repack_when_single_pack_and_no_loose() {
+    let dir = TempDir::new().expect("tempdir");
+    git(dir.path(), &["init", "-b", "main"]);
+    git(dir.path(), &["commit", "--allow-empty", "-m", "c1"]);
+    git(dir.path(), &["repack", "-a", "-d"]);
+    let pack_before = std::fs::read_dir(dir.path().join(".git/objects/pack"))
+        .expect("pack dir")
+        .filter_map(|e| e.ok())
+        .find(|e| e.path().extension().is_some_and(|x| x == "pack"))
+        .expect("pack")
+        .path();
+
+    let repo = Repository::discover(Some(dir.path()), &RepositoryOptions::empty()).expect("open");
+    let stats = gc(&repo, &GcOptions::with_reflog_policy(1_700_000_000, false)).expect("grit gc");
+    assert!(
+        stats.repack.objects_packed.is_none() || stats.repack.objects_packed == Some(0),
+        "expected repack skip on single pack with no loose objects"
+    );
+    let pack_after = std::fs::read_dir(dir.path().join(".git/objects/pack"))
+        .expect("pack dir")
+        .filter_map(|e| e.ok())
+        .find(|e| e.path().extension().is_some_and(|x| x == "pack"))
+        .expect("pack")
+        .path();
+    assert_eq!(pack_before, pack_after, "gc must not rewrite the lone pack");
+    git_fsck(dir.path(), true);
+}
+
+#[test]
 fn gc_on_single_pack_with_no_loose_matches_git_gc_loose_count() {
     let dir = TempDir::new().expect("tempdir");
     git(dir.path(), &["init", "-b", "main"]);
