@@ -1,8 +1,10 @@
 //! Directory-oriented worktree stat reads for index comparison.
 //!
-//! Groups indexed blob paths by parent directory and uses one `read_dir` per directory,
-//! reusing `DirEntry` metadata for tracked files instead of a separate `symlink_metadata`
-//! per index path.
+//! Groups indexed blob paths by parent directory. On Windows each directory is listed once with
+//! `read_dir` and tracked files reuse the listing's `DirEntry` metadata, because a path stat
+//! opens a handle per file there. Elsewhere each tracked path gets one `lstat`, like Git's
+//! preload: listing a directory costs more than stat-ing its tracked files (hashed-directory
+//! `readdir` on ext4 dominates large directories).
 //!
 //! When [`WorktreeBlobScanOptions::preload_index`] is true and the tracked blob count is at
 //! least [`PARALLEL_STAT_MIN_ENTRIES`], stat collection preloads disk lookups in parallel by
@@ -20,14 +22,10 @@ use std::sync::Arc;
 
 type DirAbsFn = dyn Fn(&[u8]) -> PathBuf + Send + Sync;
 
-/// Minimum blob entries sharing a parent before `read_dir` amortizes separate stats.
-/// Deep trees often have one tracked file per leaf directory; one `read_dir` plus
-/// `DirEntry::metadata` per parent beats a full-path `symlink_metadata` per indexed file on
-/// large trees (issue #1231), including NTFS and deep Unix worktrees.
-#[cfg(windows)]
-const READ_DIR_AMORTIZE_MIN: usize = 1;
-#[cfg(not(windows))]
-const READ_DIR_AMORTIZE_MIN: usize = 2;
+/// Whether tracked files are stat-ed through one `read_dir` of their parent (see module docs).
+/// On NTFS, one listing per parent beats a path stat per indexed file even for single-file
+/// leaf directories (issue #1231).
+const LIST_PARENT_DIRECTORIES: bool = cfg!(windows);
 
 /// Test hook: incremented once per worktree metadata syscall used by directory scans.
 static WORKTREE_METADATA_PROBE: AtomicUsize = AtomicUsize::new(0);
@@ -746,7 +744,7 @@ where
         return Ok(());
     }
 
-    if entry_indices.len() < READ_DIR_AMORTIZE_MIN {
+    if !LIST_PARENT_DIRECTORIES {
         for &entry_index in entry_indices {
             let rel_path = entry_rel_path(index, entry_index)?;
             let target = file_abs(rel_path);
@@ -1020,9 +1018,8 @@ pub(crate) fn collect_blob_lookup_batches(
     let dir_abs_arc: Arc<DirAbsFn> = Arc::new(dir_abs);
     let file_abs_arc: Arc<DirAbsFn> = Arc::new(file_abs);
     let batches = if threads > 1 {
-        // Always partition parallel preload by directory groups so multi-file parents use
-        // one read_dir per directory (Git preload-index style). A flat per-file stat loop
-        // regresses deep leaf-dir layouts (~50k paths, few files per directory).
+        // Partition by directory groups so each parent is listed (Windows) or its symlinked
+        // ancestors are checked once per worker, never split across workers.
         preload_blob_lookups_parallel(
             index,
             plan,
@@ -1404,7 +1401,7 @@ mod tests {
     }
 
     #[test]
-    fn parallel_scan_uses_read_dir_for_multi_file_directories() {
+    fn parallel_scan_multi_file_directories_follow_platform_stat_strategy() {
         let tmp = TempDir::new().unwrap();
         let wt = tmp.path().to_path_buf();
         fs::create_dir_all(wt.join(".git/objects")).unwrap();
@@ -1456,10 +1453,17 @@ mod tests {
         )
         .unwrap();
         assert_eq!(seen, DIRS * FILES_PER_DIR);
+        #[cfg(windows)]
         assert!(
             worktree_read_dir_probe_count() >= DIRS,
             "parallel preload must read_dir each multi-file parent (got {} read_dirs)",
             worktree_read_dir_probe_count()
+        );
+        #[cfg(not(windows))]
+        assert_eq!(
+            worktree_read_dir_probe_count(),
+            0,
+            "Unix stats tracked paths directly instead of listing parents"
         );
         let tracked = DIRS * FILES_PER_DIR;
         assert!(
@@ -1537,7 +1541,7 @@ mod tests {
     }
 
     #[test]
-    fn dense_multi_file_dirs_one_read_dir_per_parent() {
+    fn dense_multi_file_dirs_list_each_parent_at_most_once() {
         let tmp = TempDir::new().unwrap();
         let wt = tmp.path().to_path_buf();
         fs::create_dir_all(wt.join(".git/objects")).unwrap();
@@ -1589,10 +1593,11 @@ mod tests {
         )
         .unwrap();
         assert_eq!(seen, DIRS * FILES_PER_DIR);
+        let expected_read_dirs = if LIST_PARENT_DIRECTORIES { DIRS } else { 0 };
         assert_eq!(
             worktree_read_dir_probe_count(),
-            DIRS,
-            "each dense parent directory must be read once"
+            expected_read_dirs,
+            "each dense parent directory is listed once on Windows and never elsewhere"
         );
         let tracked = DIRS * FILES_PER_DIR;
         assert!(
