@@ -831,11 +831,7 @@ pub(crate) fn build_pack_push_fast(
     // Remote ref tips advertised on the wire may point at commits this clone
     // never fetched. Treat missing hide roots like `pack_object_select`'s
     // `skip_missing` walk: they must not abort packing unrelated new refs.
-    let hide: Vec<ObjectId> = haves
-        .iter()
-        .copied()
-        .filter(|tip| odb.exists(tip))
-        .collect();
+    let hide = odb.present_oids(haves.iter().copied())?;
 
     let repo = crate::repo::Repository::open(local_git_dir, &RepositoryOptions::empty())?;
     let mut commit_set: HashSet<ObjectId> = HashSet::new();
@@ -1008,7 +1004,7 @@ fn copy_objects_for_local_fetch(
         if linked_loose > 0 {
             progress.inc(linked_loose as u64);
             refresh_local_odb_after_link(local_odb);
-            still_missing.retain(|oid| !local_odb.exists(oid));
+            still_missing = local_odb.missing_oids(still_missing)?;
         }
         progress.finish();
         if still_missing.is_empty() {
@@ -1097,7 +1093,7 @@ fn copy_objects_for_local_push(
             link_loose_objects_for_oids(&local_objects, &remote_objects, &still_missing)?;
         if linked_loose > 0 {
             refresh_local_odb_after_link(remote_odb);
-            still_missing.retain(|oid| !remote_odb.exists(oid));
+            still_missing = remote_odb.missing_oids(still_missing)?;
         }
         if still_missing.is_empty() {
             return Ok(());
@@ -1734,7 +1730,7 @@ pub fn fetch_local_with_progress(
         .map(|m| m.oid)
         .collect();
     let mut following_tag_wants =
-        crate::fetch::following_tag_wants_with_local_peel(&matched, &following_only, &local_odb);
+        crate::fetch::following_tag_wants_with_local_peel(&matched, &following_only, &local_odb)?;
     let shallow_request = opts.has_deepen_request() || !local_shallow.is_empty();
     if shallow_request {
         let peel_set = crate::fetch::following_peel_commit_set_for_shallow(
@@ -1742,7 +1738,7 @@ pub fn fetch_local_with_progress(
             &fetch_commit_oids,
             opts.absolute_depth_for_tags(),
             &tag_shallow,
-        );
+        )?;
         following_tag_wants.extend(
             crate::fetch::following_tag_wants_peel_among_fetched_commits(
                 &matched,
@@ -1761,11 +1757,7 @@ pub fn fetch_local_with_progress(
             .filter(|oid| !following_only.contains(oid) || following_tag_wants.contains(oid))
             .collect()
     } else {
-        matched_oids
-            .iter()
-            .copied()
-            .filter(|oid| !local_odb.exists(oid))
-            .collect()
+        local_odb.missing_oids(matched_oids.iter().copied())?
     };
 
     let shallow_wants: Vec<ObjectId> = matched
@@ -1847,9 +1839,9 @@ pub fn fetch_local_with_progress(
                     &fetch_commit_oids.iter().copied().collect::<Vec<_>>(),
                     depth,
                     &effective_shallow,
-                );
+                )?;
                 for m in &matched {
-                    if !m.is_tag || local_odb.exists(&m.oid) || wants.contains(&m.oid) {
+                    if !m.is_tag || wants.contains(&m.oid) || local_odb.contains(&m.oid)? {
                         continue;
                     }
                     let peel = remote_odb
@@ -1994,7 +1986,7 @@ pub fn fetch_local_with_progress(
                 });
                 continue;
             }
-            if m.dest_is_tag && !ref_target_exists(&local_odb, &remote_odb, m.oid) {
+            if m.dest_is_tag && !ref_target_exists(&local_odb, &remote_odb, m.oid)? {
                 updates.push(RefUpdate {
                     remote_ref: m.remote_ref.clone(),
                     local_ref: Some(local_ref.clone()),
@@ -2499,7 +2491,7 @@ fn decide_push(
             spec.dst
         )));
     };
-    if !local_odb.exists(&src) {
+    if !local_odb.contains(&src)? {
         return Err(Error::Message(format!(
             "source object {src} for '{}' is missing from the local object store",
             spec.dst
@@ -2875,7 +2867,7 @@ pub(crate) fn apply_tag_mode(
             .iter()
             .map(|(_, oid, peeled)| peeled.unwrap_or(*oid))
             .collect();
-        crate::fetch::reachable_commits(remote_odb, &roots, &targets, shallow_boundaries)
+        crate::fetch::reachable_commits(remote_odb, &roots, &targets, shallow_boundaries)?
     } else {
         HashSet::new()
     };
@@ -2911,15 +2903,16 @@ pub(crate) fn apply_tag_mode(
 
 /// Whether a tag ref's peeled target (or the oid itself for lightweight tags)
 /// exists in the local or remote object database.
-fn ref_target_exists(local_odb: &Odb, remote_odb: &Odb, tag_oid: ObjectId) -> bool {
-    let peel_odb = if local_odb.exists(&tag_oid) {
+fn ref_target_exists(local_odb: &Odb, remote_odb: &Odb, tag_oid: ObjectId) -> Result<bool> {
+    let peel_odb = if local_odb.contains(&tag_oid)? {
         local_odb
     } else {
         remote_odb
     };
-    peel_odb
-        .peel_tags(tag_oid)
-        .is_ok_and(|(peeled, _)| local_odb.exists(&peeled))
+    match peel_odb.peel_tags(tag_oid) {
+        Ok((peeled, _)) => local_odb.contains(&peeled),
+        Err(_) => Ok(false),
+    }
 }
 
 /// Classify a single ref update into an [`UpdateMode`].

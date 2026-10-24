@@ -1523,7 +1523,7 @@ fn prefetch_promisor_blobs_for_checkout(repo: &Repository, changes: &[DiffEntry]
         if mode != MODE_REGULAR && mode != MODE_EXECUTABLE && mode != MODE_SYMLINK {
             continue;
         }
-        if change.new_oid.is_zero() || odb.exists_stored(&change.new_oid) {
+        if change.new_oid.is_zero() || odb.try_exists_stored(&change.new_oid)? {
             continue;
         }
         oids.push(change.new_oid);

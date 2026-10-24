@@ -136,7 +136,7 @@ fn parent_commits(repo: &Repository, oid: ObjectId) -> crate::error::Result<Vec<
 
 fn parents_in_repo(repo: &Repository, oid: ObjectId) -> crate::error::Result<bool> {
     for p in parent_commits(repo, oid)? {
-        if !repo.odb().exists(&p) {
+        if !repo.odb().contains(&p)? {
             return Ok(false);
         }
     }

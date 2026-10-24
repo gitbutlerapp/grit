@@ -401,19 +401,21 @@ fn apply_commands_with_hooks(
         .commands
         .iter()
         .map(|c| {
-            match check_command(
-                repo,
-                lookup_odb.as_ref(),
-                c,
-                opts,
-                policy,
-                current_branch.as_deref(),
-            ) {
-                Some(reason) => c.refused(reason),
-                None => c.accepted(),
-            }
+            Ok(
+                match check_command(
+                    repo,
+                    lookup_odb.as_ref(),
+                    c,
+                    opts,
+                    policy,
+                    current_branch.as_deref(),
+                )? {
+                    Some(reason) => c.refused(reason),
+                    None => c.accepted(),
+                },
+            )
         })
-        .collect();
+        .collect::<Result<_>>()?;
 
     if request.caps.contains("atomic") && results.iter().any(|r| r.error.is_some()) {
         for r in results.iter_mut().filter(|r| r.error.is_none()) {
@@ -627,6 +629,11 @@ fn relay_hook_sideband(out: &mut Option<&mut dyn Write>, captured: &[u8]) -> Res
 }
 
 /// Decide whether one command may be applied. Returns the refusal reason.
+///
+/// # Errors
+///
+/// Propagates [`crate::odb::Odb::contains`] failures for the pushed object, so a
+/// backend outage is not reported as "missing necessary objects".
 fn check_command(
     repo: &Repository,
     lookup: Option<&crate::odb::Odb>,
@@ -634,42 +641,42 @@ fn check_command(
     opts: &ServeOptions,
     policy: &ReceivePolicy,
     current_branch: Option<&str>,
-) -> Option<&'static str> {
+) -> Result<Option<&'static str>> {
     if !cmd.refname.starts_with("refs/") || !crate::refs::is_valid_storable_ref_name(&cmd.refname) {
-        return Some("funny refname");
+        return Ok(Some("funny refname"));
     }
     if crate::hide_refs::ref_is_hidden(&cmd.refname, &cmd.refname, &opts.hidden_refs) {
-        return Some("deny updating a hidden ref");
+        return Ok(Some("deny updating a hidden ref"));
     }
     let current = crate::refs::resolve_ref(repo.git_dir(), &cmd.refname).ok();
     if current != cmd.old {
-        return Some("stale info");
+        return Ok(Some("stale info"));
     }
     let is_current_branch = current_branch == Some(cmd.refname.as_str());
 
     let Some(new) = cmd.new else {
         if policy.deny_deletes {
-            return Some("deletion prohibited");
+            return Ok(Some("deletion prohibited"));
         }
         if is_current_branch && policy.deny_current_branch {
-            return Some("deletion of the current branch prohibited");
+            return Ok(Some("deletion of the current branch prohibited"));
         }
-        return None;
+        return Ok(None);
     };
     let odb = lookup.unwrap_or(repo.odb());
-    if !odb.exists(&new) {
-        return Some("missing necessary objects");
+    if !odb.contains(&new)? {
+        return Ok(Some("missing necessary objects"));
     }
     if is_current_branch && policy.deny_current_branch {
-        return Some("branch is currently checked out");
+        return Ok(Some("branch is currently checked out"));
     }
     if let (Some(old), true) = (current, policy.deny_non_fast_forwards) {
         let fast_forward = crate::merge_base::is_ancestor(repo, old, new).unwrap_or(false);
         if !fast_forward {
-            return Some("non-fast-forward");
+            return Ok(Some("non-fast-forward"));
         }
     }
-    None
+    Ok(None)
 }
 
 /// Encode the status report as pkt-lines: the unpack result, one line per ref,

@@ -174,7 +174,7 @@ fn serve_v0(
                     )));
                 };
                 let oid = parse_oid(repo, hex.trim())?;
-                if !seen.insert(oid) || !repo.odb().exists(&oid) {
+                if !seen.insert(oid) || !repo.odb().contains(&oid)? {
                     continue;
                 }
                 common.push(oid);
@@ -665,10 +665,9 @@ fn fetch_v2(
 
     let sideband_all = caps.contains("sideband-all");
     let mut seen = HashSet::new();
-    let common: Vec<ObjectId> = haves
-        .into_iter()
-        .filter(|h| seen.insert(*h) && repo.odb().exists(h))
-        .collect();
+    let common = repo
+        .odb()
+        .present_oids(haves.into_iter().filter(|h| seen.insert(*h)))?;
 
     if !done {
         write_v2_fetch_line(output, "acknowledgments", sideband_all)?;

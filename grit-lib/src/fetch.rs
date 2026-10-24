@@ -1341,7 +1341,7 @@ pub fn fetch_remote(
         .map(|m| m.oid)
         .collect();
     let mut following_tag_wants =
-        following_tag_wants_with_local_peel(&matched, &following_only, &local_odb);
+        following_tag_wants_with_local_peel(&matched, &following_only, &local_odb)?;
 
     // The client's current shallow grafts (drives the wire `shallow <oid>` lines
     // and the "this is a shallow request" decisions in the negotiators).
@@ -1354,7 +1354,7 @@ pub fn fetch_remote(
             &fetch_commit_oids,
             opts.absolute_depth_for_tags(),
             &local_shallow_set,
-        );
+        )?;
         following_tag_wants.extend(following_tag_wants_peel_among_fetched_commits(
             &matched,
             &following_only,
@@ -1376,13 +1376,17 @@ pub fn fetch_remote(
         matched_oids
             .iter()
             .copied()
-            .filter(|oid| {
-                if following_only.contains(oid) {
-                    return following_tag_wants.contains(oid);
+            .filter_map(|oid| {
+                if following_only.contains(&oid) {
+                    return following_tag_wants.contains(&oid).then_some(Ok(oid));
                 }
-                !local_odb.exists(oid)
+                match local_odb.contains(&oid) {
+                    Ok(true) => None,
+                    Ok(false) => Some(Ok(oid)),
+                    Err(err) => Some(Err(err)),
+                }
             })
-            .collect()
+            .collect::<Result<_>>()?
     };
 
     // Shallow-boundary updates the server reports (`shallow`/`unshallow`), applied
@@ -1788,12 +1792,7 @@ fn fetch_remote_object_wants(
 
     let t_begin = std::time::Instant::now();
     let local_odb = open_odb(local_git_dir);
-    let wants: Vec<ObjectId> = opts
-        .object_wants
-        .iter()
-        .copied()
-        .filter(|oid| !local_odb.exists_stored(oid))
-        .collect();
+    let wants = local_odb.missing_stored_oids(opts.object_wants.iter().copied())?;
     if wants.is_empty() {
         return Ok(FetchOutcome {
             updates: Vec::new(),
@@ -2058,7 +2057,7 @@ pub(crate) fn following_tag_wants_with_local_peel(
     matched: &[crate::transfer::MatchedRef],
     following_only: &HashSet<ObjectId>,
     local_odb: &crate::odb::Odb,
-) -> HashSet<ObjectId> {
+) -> Result<HashSet<ObjectId>> {
     let mut wants = HashSet::new();
     for m in matched {
         if !m.is_tag || !following_only.contains(&m.oid) {
@@ -2067,11 +2066,11 @@ pub(crate) fn following_tag_wants_with_local_peel(
         let Some(peel) = m.advertised_peel else {
             continue;
         };
-        if local_odb.exists(&peel) && !local_odb.exists(&m.oid) {
+        if local_odb.contains(&peel)? && !local_odb.contains(&m.oid)? {
             wants.insert(m.oid);
         }
     }
-    wants
+    Ok(wants)
 }
 
 /// Commit OIDs reachable within an absolute shallow `depth` from each root,
@@ -2082,12 +2081,12 @@ pub(crate) fn shallow_fetched_commit_oids(
     roots: &[ObjectId],
     depth: u32,
     shallow_boundaries: &HashSet<ObjectId>,
-) -> HashSet<ObjectId> {
+) -> Result<HashSet<ObjectId>> {
     use crate::objects::{parse_commit, ObjectKind};
     use std::collections::{HashMap, VecDeque};
 
     if depth == 0 {
-        return HashSet::new();
+        return Ok(HashSet::new());
     }
     let max_depth = usize::try_from(depth).unwrap_or(usize::MAX);
     let mut best_depth: HashMap<ObjectId, usize> = HashMap::new();
@@ -2111,7 +2110,7 @@ pub(crate) fn shallow_fetched_commit_oids(
         if shallow_boundaries.contains(&oid) {
             continue;
         }
-        if !odb.exists(&oid) {
+        if !odb.contains(&oid)? {
             continue;
         }
         let Ok(obj) = odb.read(&oid) else {
@@ -2135,7 +2134,7 @@ pub(crate) fn shallow_fetched_commit_oids(
             }
         }
     }
-    out
+    Ok(out)
 }
 
 /// Commits whose peels count as "fetched" for shallow tag-following: branch tips
@@ -2145,11 +2144,11 @@ pub(crate) fn following_peel_commit_set_for_shallow(
     commit_tips: &HashSet<ObjectId>,
     depth: Option<u32>,
     shallow_boundaries: &HashSet<ObjectId>,
-) -> HashSet<ObjectId> {
+) -> Result<HashSet<ObjectId>> {
     let roots: Vec<ObjectId> = commit_tips.iter().copied().collect();
     match depth.filter(|d| *d > 0) {
         Some(d) => shallow_fetched_commit_oids(odb, &roots, d, shallow_boundaries),
-        None => commit_tips.clone(),
+        None => Ok(commit_tips.clone()),
     }
 }
 
@@ -2206,24 +2205,25 @@ pub(crate) fn retain_following_tags(
         })
         .collect();
     let targets: HashSet<ObjectId> = peeled_by_tag.values().copied().collect();
-    let commit_reach = reachable_commits(local_odb, &roots, &targets, shallow_boundaries);
+    let commit_reach = reachable_commits(local_odb, &roots, &targets, shallow_boundaries)?;
     let pack_reach = pack_delivered_reachable(local_odb, &roots, pack_oids)?;
-    matched.retain(|m| {
+    let mut keep = Vec::with_capacity(matched.len());
+    for m in matched.iter() {
         if !m.is_tag {
-            return true;
+            keep.push(true);
+            continue;
         }
         let peeled = peeled_by_tag.get(&m.oid).copied().unwrap_or(m.oid);
         let reachable = commit_reach.contains(&peeled) || pack_reach.contains(&peeled);
-        if !reachable {
-            return false;
-        }
-        // Lightweight tags store the peeled commit directly; no tag object is required.
-        if m.oid == peeled {
-            return true;
-        }
-        // Annotated tags need their tag object (new in this fetch or already local).
-        pack_oids.contains(&m.oid) || local_odb.exists(&m.oid)
-    });
+        // Lightweight tags store the peeled commit directly; annotated tags need their
+        // tag object (new in this fetch or already local).
+        keep.push(
+            reachable
+                && (m.oid == peeled || pack_oids.contains(&m.oid) || local_odb.contains(&m.oid)?),
+        );
+    }
+    let mut keep = keep.into_iter();
+    matched.retain(|_| keep.next().unwrap_or(false));
     Ok(())
 }
 
@@ -2329,13 +2329,13 @@ pub(crate) fn reachable_commits(
     roots: &[ObjectId],
     targets: &HashSet<ObjectId>,
     shallow_boundaries: &HashSet<ObjectId>,
-) -> HashSet<ObjectId> {
+) -> Result<HashSet<ObjectId>> {
     use crate::objects::{parse_commit, parse_tag, ObjectKind};
 
     let mut seen: HashSet<ObjectId> = HashSet::new();
     let mut remaining: HashSet<ObjectId> = targets.clone();
     if remaining.is_empty() {
-        return seen;
+        return Ok(seen);
     }
 
     // Read commit parents from the commit-graph file when present — an mmap-style
@@ -2353,7 +2353,7 @@ pub(crate) fn reachable_commits(
             continue;
         }
         if shallow_boundaries.contains(&oid) {
-            if odb.exists(&oid) {
+            if odb.contains(&oid)? {
                 seen.insert(oid);
                 remaining.remove(&oid);
             }
@@ -2389,7 +2389,7 @@ pub(crate) fn reachable_commits(
             ObjectKind::Tree | ObjectKind::Blob => {}
         }
     }
-    seen
+    Ok(seen)
 }
 
 #[cfg(test)]
@@ -2535,7 +2535,7 @@ mod fetch_advertised_ref_tests {
             advertised_peel: Some(commit),
             fetch_head: crate::fetch_request::FetchHeadPolicy::ForMerge,
         }];
-        let wants = following_tag_wants_with_local_peel(&matched, &following_only, &odb);
+        let wants = following_tag_wants_with_local_peel(&matched, &following_only, &odb).unwrap();
         assert!(wants.contains(&tag_obj));
     }
 
@@ -2578,10 +2578,10 @@ mod fetch_advertised_ref_tests {
         let parent = chain[1];
         let tips = HashSet::from([tip]);
         let tips_only =
-            following_peel_commit_set_for_shallow(&odb, &tips, Some(1), &HashSet::new());
+            following_peel_commit_set_for_shallow(&odb, &tips, Some(1), &HashSet::new()).unwrap();
         assert!(!tips_only.contains(&parent));
         let depth_two =
-            following_peel_commit_set_for_shallow(&odb, &tips, Some(2), &HashSet::new());
+            following_peel_commit_set_for_shallow(&odb, &tips, Some(2), &HashSet::new()).unwrap();
         assert!(depth_two.contains(&parent));
     }
 
@@ -2618,7 +2618,7 @@ mod fetch_advertised_ref_tests {
         let none = HashSet::new();
 
         let near = HashSet::from([chain[3]]);
-        let seen = reachable_commits(&odb, &[tip], &near, &none);
+        let seen = reachable_commits(&odb, &[tip], &near, &none).unwrap();
         assert!(seen.contains(&chain[3]), "reachable target is reported");
         assert!(
             !seen.contains(&chain[0]),
@@ -2629,7 +2629,7 @@ mod fetch_advertised_ref_tests {
             HashSet::from([
                 ObjectId::from_hex("1111111111111111111111111111111111111111").unwrap(),
             ]);
-        let seen = reachable_commits(&odb, &[tip], &unreachable, &none);
+        let seen = reachable_commits(&odb, &[tip], &unreachable, &none).unwrap();
         assert_eq!(
             seen,
             chain.iter().copied().collect::<HashSet<_>>(),
@@ -2637,7 +2637,9 @@ mod fetch_advertised_ref_tests {
         );
 
         assert!(
-            reachable_commits(&odb, &[tip], &HashSet::new(), &none).is_empty(),
+            reachable_commits(&odb, &[tip], &HashSet::new(), &none)
+                .unwrap()
+                .is_empty(),
             "no targets means no walk"
         );
     }

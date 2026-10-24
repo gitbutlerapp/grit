@@ -397,7 +397,7 @@ fn rebuild_directory_node(
 
         let gitlink = mode == MODE_GITLINK;
         let allow_missing = gitlink || flags.missing_ok || (slash.is_none() && row.intent_to_add());
-        if oid.is_zero() || (!allow_missing && !odb.exists(&oid)) {
+        if oid.is_zero() || (!allow_missing && !odb.contains(&oid)?) {
             return Err(Error::ObjectNotFound(format!(
                 "{mode:o} {} at {}",
                 oid.to_hex(),
@@ -464,7 +464,7 @@ fn store_tree_payload(
     let hashed = odb.hash(ObjectKind::Tree, payload)?;
     match flags.persistence {
         WriteTreePersistence::DryRun => Ok((hashed, false)),
-        WriteTreePersistence::Repair => Ok((hashed, !odb.exists(&hashed))),
+        WriteTreePersistence::Repair => Ok((hashed, !odb.contains(&hashed)?)),
         WriteTreePersistence::Write => {
             #[cfg(test)]
             odb.hot_path_metrics().record_tree_write();

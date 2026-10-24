@@ -312,7 +312,7 @@ fn strict_verify_packed_references_map(
                             odb,
                             allowed_missing,
                             allow_promisor_missing_references,
-                        ) {
+                        )? {
                             return Err(Error::CorruptObject(format!(
                                 "strict: missing object {} referenced by tree",
                                 e.oid.to_hex()
@@ -328,7 +328,7 @@ fn strict_verify_packed_references_map(
                         odb,
                         allowed_missing,
                         allow_promisor_missing_references,
-                    ) {
+                    )? {
                         return Err(Error::CorruptObject(format!(
                             "strict: missing tree {} referenced by commit",
                             c.tree.to_hex()
@@ -347,7 +347,7 @@ fn strict_verify_packed_references_map(
                             odb,
                             allowed_missing,
                             allow_promisor_missing_references,
-                        ) {
+                        )? {
                             return Err(Error::CorruptObject(format!(
                                 "strict: missing parent {} referenced by commit",
                                 p.to_hex()
@@ -363,7 +363,7 @@ fn strict_verify_packed_references_map(
                         odb,
                         allowed_missing,
                         allow_promisor_missing_references,
-                    ) {
+                    )? {
                         return Err(Error::CorruptObject(format!(
                             "strict: missing object {} referenced by tag",
                             t.object.to_hex()
@@ -383,19 +383,23 @@ fn strict_ref_resolves_map(
     odb: Option<&Odb>,
     allowed_missing: &HashSet<ObjectId>,
     allow_promisor_missing_references: bool,
-) -> bool {
-    pack.contains_key(oid)
-        || allowed_missing.contains(oid)
-        || odb.is_some_and(|o| o.exists(oid))
-        || allow_promisor_missing_references
+) -> Result<bool> {
+    if pack.contains_key(oid) || allowed_missing.contains(oid) || allow_promisor_missing_references
+    {
+        return Ok(true);
+    }
+    odb.map_or(Ok(false), |o| o.contains(oid))
 }
 
 fn strict_ref_resolves(
     oid: &ObjectId,
     pack: &std::collections::HashMap<ObjectId, (ObjectKind, Vec<u8>)>,
     odb: Option<&Odb>,
-) -> bool {
-    pack.contains_key(oid) || odb.is_some_and(|o| o.exists(oid))
+) -> Result<bool> {
+    if pack.contains_key(oid) {
+        return Ok(true);
+    }
+    odb.map_or(Ok(false), |o| o.contains(oid))
 }
 
 /// Verifies that references from commits, trees, and tags resolve to objects present in `pack`
@@ -403,6 +407,11 @@ fn strict_ref_resolves(
 ///
 /// Use [`None`] for `odb` when indexing or unpacking in a context with no repository (Git allows
 /// `index-pack --strict` outside a work tree when the pack is self-contained).
+///
+/// # Errors
+///
+/// [`Error::CorruptObject`] for a reference that resolves nowhere; [`Odb::contains`]
+/// failures propagate unchanged.
 pub fn strict_verify_packed_references(
     odb: Option<&Odb>,
     pack: &HashMap<ObjectId, (ObjectKind, Vec<u8>)>,
@@ -418,7 +427,7 @@ pub fn strict_verify_packed_references(
                     if e.mode == MODE_GITLINK {
                         continue;
                     }
-                    if !strict_ref_resolves(&e.oid, pack, odb) {
+                    if !strict_ref_resolves(&e.oid, pack, odb)? {
                         return Err(Error::CorruptObject(format!(
                             "strict: missing object {} referenced by tree",
                             e.oid.to_hex()
@@ -428,14 +437,14 @@ pub fn strict_verify_packed_references(
             }
             ObjectKind::Commit => {
                 let c = parse_commit(data)?;
-                if !strict_ref_resolves(&c.tree, pack, odb) {
+                if !strict_ref_resolves(&c.tree, pack, odb)? {
                     return Err(Error::CorruptObject(format!(
                         "strict: missing tree {} referenced by commit",
                         c.tree.to_hex()
                     )));
                 }
                 for p in &c.parents {
-                    if !strict_ref_resolves(p, pack, odb) {
+                    if !strict_ref_resolves(p, pack, odb)? {
                         return Err(Error::CorruptObject(format!(
                             "strict: missing parent {} referenced by commit",
                             p.to_hex()
@@ -445,7 +454,7 @@ pub fn strict_verify_packed_references(
             }
             ObjectKind::Tag => {
                 let t = parse_tag(data)?;
-                if !strict_ref_resolves(&t.object, pack, odb) {
+                if !strict_ref_resolves(&t.object, pack, odb)? {
                     return Err(Error::CorruptObject(format!(
                         "strict: missing object {} referenced by tag",
                         t.object.to_hex()

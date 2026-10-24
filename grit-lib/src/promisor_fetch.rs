@@ -102,10 +102,7 @@ pub fn fetch_promisor_objects(
     if unique.is_empty() {
         return Ok(());
     }
-    let missing: Vec<ObjectId> = unique
-        .into_iter()
-        .filter(|oid| !repo.odb().exists_stored(oid))
-        .collect();
+    let missing = repo.odb().missing_stored_oids(unique)?;
     if missing.is_empty() {
         return Ok(());
     }
@@ -223,7 +220,7 @@ pub(crate) fn resolve_promisor_read_miss(
     odb.reprepare_local_packs();
     odb.invalidate_packs();
 
-    if !odb.exists_stored(oid) {
+    if !odb.try_exists_stored(oid)? {
         return Err(Error::Message(format!(
             "promisor fetch completed but {} is still missing locally",
             oid.to_hex()

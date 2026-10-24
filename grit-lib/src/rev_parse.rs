@@ -1873,7 +1873,7 @@ pub(crate) fn abbreviate_object_id_with_prefix_cache(
     let min_len = min_len.clamp(4, 40);
     let target = oid.to_hex();
 
-    if !repo.odb().exists(&oid) {
+    if !repo.odb().contains(&oid)? {
         return Ok(target[..min_len].to_owned());
     }
 
@@ -2670,7 +2670,7 @@ fn try_resolve_at_minus(repo: &Repository, spec: &str) -> Result<Option<ObjectId
                         return Ok(Some(oid));
                     }
                     if let Ok(oid) = from_branch.parse::<ObjectId>() {
-                        if repo.odb().exists(&oid) {
+                        if repo.odb().contains(&oid)? {
                             return Ok(Some(oid));
                         }
                     }

@@ -9,6 +9,7 @@ use std::path::{Component, Path, PathBuf};
 
 use crate::check_ref_format::{check_refname_format, RefNameOptions};
 use crate::config::ConfigSet;
+use crate::error::Result;
 use crate::objects::ObjectId;
 use crate::odb::Odb;
 use crate::repo::Repository;
@@ -164,12 +165,17 @@ fn push_issue(
 }
 
 /// Run ref database checks (files backend + packed-refs). `strict` is `git refs verify --strict`.
+///
+/// # Errors
+///
+/// Returns [`crate::error::Error::Io`] when the ref store cannot be read, and propagates
+/// [`Odb::contains`] failures rather than reporting a ref as pointing to a missing object.
 pub fn refs_fsck(
     repo: &Repository,
     odb: &Odb,
     config: &ConfigSet,
     strict: bool,
-) -> io::Result<Vec<RefsFsckIssue>> {
+) -> Result<Vec<RefsFsckIssue>> {
     let mut issues = Vec::new();
     let common = canonical_git_dir(repo.git_dir());
 
@@ -210,7 +216,7 @@ fn fsck_worktree(
     config: &ConfigSet,
     strict: bool,
     issues: &mut Vec<RefsFsckIssue>,
-) -> io::Result<()> {
+) -> Result<()> {
     let refs_dir = git_dir.join("refs");
     if refs_dir.is_dir() {
         walk_refs_files(common_dir, &refs_dir, odb, config, strict, issues)?;
@@ -267,7 +273,7 @@ fn walk_refs_files(
     config: &ConfigSet,
     strict: bool,
     issues: &mut Vec<RefsFsckIssue>,
-) -> io::Result<()> {
+) -> Result<()> {
     for entry in fs::read_dir(dir)? {
         let entry = entry?;
         let path = entry.path();
@@ -299,7 +305,7 @@ fn fsck_root_refs(
     config: &ConfigSet,
     strict: bool,
     issues: &mut Vec<RefsFsckIssue>,
-) -> io::Result<()> {
+) -> Result<()> {
     let Ok(rd) = fs::read_dir(git_dir) else {
         return Ok(());
     };
@@ -339,7 +345,7 @@ fn verify_loose_ref(
     config: &ConfigSet,
     strict: bool,
     issues: &mut Vec<RefsFsckIssue>,
-) -> io::Result<()> {
+) -> Result<()> {
     check_ref_file_name(display_path, config, strict, issues);
 
     let meta = fs::symlink_metadata(path)?;
@@ -485,7 +491,7 @@ fn verify_loose_ref(
             display_path.to_owned(),
             format!("points to invalid object ID '{}'", oid.to_hex()),
         );
-    } else if !odb.exists(&oid) {
+    } else if !odb.contains(&oid)? {
         push_issue(
             issues,
             config,
@@ -657,12 +663,12 @@ fn fsck_packed_refs(
     config: &ConfigSet,
     strict: bool,
     issues: &mut Vec<RefsFsckIssue>,
-) -> io::Result<()> {
+) -> Result<()> {
     let path = crate::refs::store::paths::packed_refs_path(common_dir);
     let meta = match fs::symlink_metadata(&path) {
         Ok(m) => m,
         Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(()),
-        Err(e) => return Err(e),
+        Err(e) => return Err(e.into()),
     };
     if meta.is_symlink() {
         push_issue(

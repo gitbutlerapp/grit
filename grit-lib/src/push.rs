@@ -494,9 +494,12 @@ fn build_push_pack(
         return Ok(None);
     }
 
-    let mut haves: Vec<ObjectId> = adv.remote_refs.values().copied().collect();
-    haves.extend_from_slice(&adv.advertised_haves);
-    haves.retain(|oid| local_odb.exists(oid));
+    let haves = local_odb.present_oids(
+        adv.remote_refs
+            .values()
+            .chain(&adv.advertised_haves)
+            .copied(),
+    )?;
     let mut pack_opts = PackBuildOptions {
         thin: true,
         delta: true,
@@ -518,12 +521,7 @@ fn build_push_pack(
         // Negotiation `.have` lines name individual objects, not ref tips; using
         // them as hide roots makes the commit walk treat most of history as
         // visible and defeats the fast push path.
-        let hide_tips: Vec<ObjectId> = adv
-            .remote_refs
-            .values()
-            .copied()
-            .filter(|oid| local_odb.exists(oid))
-            .collect();
+        let hide_tips = local_odb.present_oids(adv.remote_refs.values().copied())?;
         return build_pack_push_fast(local_git_dir, local_odb, &wants, &hide_tips, &pack_opts)
             .map(Some);
     }
@@ -644,7 +642,7 @@ fn decide_push_wire(
             spec.dst
         )));
     };
-    if !local_odb.exists(&src) {
+    if !local_odb.contains(&src)? {
         return Err(Error::Message(format!(
             "source object {src} for '{}' is missing from the local object store",
             spec.dst
@@ -669,7 +667,7 @@ fn decide_push_wire(
         });
     };
 
-    if !spec.force && !local_odb.exists(&old) {
+    if !spec.force && !local_odb.contains(&old)? {
         return Ok(no_op(
             PushRefStatus::RejectFetchFirst,
             Some(old),
@@ -989,6 +987,66 @@ mod tests {
             }
         }
         out
+    }
+
+    fn flaky_push_odb(
+        dir: &Path,
+    ) -> (
+        crate::odb::Odb,
+        std::sync::Arc<crate::odb::store::flaky::FlakyStore>,
+    ) {
+        let flaky = crate::odb::store::flaky::FlakyStore::new();
+        let odb = crate::odb::OdbBuilder::files(dir.join("objects"))
+            .primary(flaky.clone())
+            .alternates(false)
+            .build();
+        (odb, flaky)
+    }
+
+    #[test]
+    fn push_pack_haves_fail_on_backend_error_instead_of_being_dropped() {
+        let dir = tempfile::tempdir().unwrap();
+        let (odb, flaky) = flaky_push_odb(dir.path());
+        let blob = odb.write(ObjectKind::Blob, b"to send").unwrap();
+        let remote_tip = odb.write(ObjectKind::Blob, b"remote has this").unwrap();
+        let plan = PushPlan {
+            decisions: vec![send_decision("refs/heads/main", blob)],
+            to_send: vec![0],
+        };
+        let mut adv = adv_state(false, true, false);
+        adv.remote_refs
+            .insert("refs/heads/main".to_owned(), remote_tip);
+        assert!(build_push_pack(&plan, dir.path(), &odb, &adv)
+            .unwrap()
+            .is_some());
+
+        flaky.fail_contains(true);
+        let err = build_push_pack(&plan, dir.path(), &odb, &adv).unwrap_err();
+        assert!(crate::odb::store::flaky::is_injected(&err), "{err:?}");
+    }
+
+    #[test]
+    fn push_source_check_fails_on_backend_error_instead_of_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let (odb, flaky) = flaky_push_odb(dir.path());
+        let src = odb.write(ObjectKind::Blob, b"source").unwrap();
+        let spec = PushRefSpec {
+            src: Some(src),
+            src_ref: None,
+            dst: "refs/heads/main".to_owned(),
+            force: false,
+            delete: false,
+            expected_old: None,
+            expect_absent: false,
+        };
+        let decision = decide_push_wire(&spec, &odb, dir.path(), &HashMap::new()).unwrap();
+        assert_eq!(decision.new_tip, Some(src));
+
+        flaky.fail_contains(true);
+        let err = decide_push_wire(&spec, &odb, dir.path(), &HashMap::new())
+            .err()
+            .unwrap();
+        assert!(crate::odb::store::flaky::is_injected(&err), "{err:?}");
     }
 
     fn send_decision(refname: &str, new_oid: ObjectId) -> PushDecision {

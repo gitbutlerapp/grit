@@ -124,7 +124,7 @@ pub(crate) fn resolve_want_ref(
 /// Validate `want` OIDs for a filtered fetch (object must exist in the ODB).
 pub(crate) fn validate_wants_filtered(repo: &Repository, wants: &[ObjectId]) -> Result<()> {
     for w in wants {
-        if !repo.odb().exists(w) {
+        if !repo.odb().contains(w)? {
             return Err(ServeError::NotOurRef(*w));
         }
     }

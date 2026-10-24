@@ -259,7 +259,7 @@ fn require_objects_exist(odb: &Odb, oids: &[ObjectId]) -> Result<()> {
         crate::pack::read_local_pack_indexes_cached(odb.objects_dir()).unwrap_or_default();
     for oid in oids {
         let packed = indexes.iter().any(|idx| idx.find_position(oid).is_some());
-        if !packed && !odb.exists(oid) {
+        if !packed && !odb.contains(oid)? {
             return Err(Error::ObjectNotFound(oid.to_hex()));
         }
     }

@@ -807,7 +807,7 @@ fn materialize_missing_index_blobs_for_overlay(repo: &Repository, index: &Index)
         .iter()
         .filter(|e| e.stage() == 0 && !e.intent_to_add())
     {
-        if odb.exists(&entry.oid) {
+        if odb.contains(&entry.oid)? {
             continue;
         }
         let rel = String::from_utf8_lossy(&entry.path);
