@@ -1332,13 +1332,19 @@ impl Repository {
             return Err(not_a_repository_at(&git_dir));
         }
 
-        if builder.objects_dir() != objects_dir.as_path() {
-            return Err(Error::PathError(format!(
-                "OdbBuilder objects dir '{}' does not match repository objects '{}'",
-                builder.objects_dir().display(),
-                objects_dir.display()
-            )));
+        // A custom primary ignores the builder's directory; otherwise both paths must name the
+        // same directory, resolved the way `git_dir` was (relative to the process cwd).
+        if !builder.has_custom_primary() {
+            let requested = builder.objects_dir().canonicalize().ok();
+            if requested.as_deref() != Some(objects_dir.as_path()) {
+                return Err(Error::PathError(format!(
+                    "OdbBuilder objects dir '{}' does not match repository objects '{}'",
+                    builder.objects_dir().display(),
+                    objects_dir.display()
+                )));
+            }
         }
+        let builder = builder.with_objects_dir(objects_dir);
 
         let work_tree = match work_tree {
             Some(p) => {

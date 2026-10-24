@@ -46,6 +46,12 @@ pub struct OdbBuilder {
 
 impl OdbBuilder {
     /// Default files-backed layout rooted at `objects_dir` (the repository's `objects/` tree).
+    ///
+    /// When the builder is passed to [`RepositoryBuilder::odb_builder`](crate::repo::RepositoryBuilder::odb_builder),
+    /// a relative `objects_dir` is resolved against the process working directory, like the
+    /// git directory handed to [`RepositoryBuilder::open`](crate::repo::RepositoryBuilder::open).
+    /// With a custom [`Self::primary`] the path is not checked and the repository's own
+    /// `objects/` directory is used for alternates.
     #[must_use]
     pub fn files(objects_dir: impl AsRef<Path>) -> Self {
         Self {
@@ -85,6 +91,17 @@ impl OdbBuilder {
     #[must_use]
     pub fn objects_dir(&self) -> &Path {
         &self.objects_dir
+    }
+
+    /// Whether [`Self::primary`] replaced the files-backed primary store.
+    pub(crate) fn has_custom_primary(&self) -> bool {
+        self.custom_primary.is_some()
+    }
+
+    /// Retarget the builder at `objects_dir` (the repository's resolved `objects/` directory).
+    pub(crate) fn with_objects_dir(mut self, objects_dir: PathBuf) -> Self {
+        self.objects_dir = objects_dir;
+        self
     }
 
     /// Construct an [`Odb`] handle (attach [`Odb::with_config_git_dir`] when opening a repository).

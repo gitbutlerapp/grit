@@ -45,7 +45,7 @@ let repo = RepositoryBuilder::new(RepositoryOptions::empty())
             .alternates(false),
     )
     .open(&git_dir, Some(dir.path()))?;
-let _blob = repo.odb.write(ObjectKind::Blob, b"hello")?;
+let _blob = repo.odb().write(ObjectKind::Blob, b"hello")?;
 # Ok::<(), grit_lib::error::Error>(())
 ```
 
