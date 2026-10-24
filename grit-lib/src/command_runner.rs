@@ -16,7 +16,7 @@
 //! ```
 
 use std::collections::VecDeque;
-use std::ffi::OsString;
+use std::ffi::{OsStr, OsString};
 use std::io::{self, Cursor, Read, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStderr, ChildStdin, ChildStdout, Command, ExitStatus, Stdio};
@@ -125,6 +125,11 @@ pub enum ShellInvocation {
 #[derive(Debug, Clone)]
 pub struct CommandSpec {
     /// Executable when not using [`Self::shell`], or `sh` for shell modes.
+    ///
+    /// [`SystemCommandRunner`] runs a bare `sh` the way Git does: `/bin/sh` on Unix, and on
+    /// Windows the `sh` of the Git for Windows install that owns `git` on the child's `PATH`
+    /// (then `sh` elsewhere on that `PATH`), so filters and helpers work when only Git's
+    /// `cmd` directory is on `PATH`.
     pub program: PathBuf,
     /// argv tail when not using shell `-c`.
     pub args: Vec<OsString>,
@@ -435,9 +440,14 @@ pub struct SystemCommandRunner;
 impl SystemCommandRunner {
     // hygiene: grit-lib subprocess execution is centralized here.
     fn build_command(spec: &CommandSpec) -> Command {
+        let program = if spec.program.as_os_str() == SHELL_NAME {
+            shell_program(&spec.env)
+        } else {
+            spec.program.clone()
+        };
         let mut cmd = match &spec.shell {
             None => {
-                let mut c = Command::new(&spec.program); // hygiene: centralized subprocess spawn
+                let mut c = Command::new(&program); // hygiene: centralized subprocess spawn
                 c.args(&spec.args);
                 c
             }
@@ -446,7 +456,7 @@ impl SystemCommandRunner {
                 argv0,
                 args,
             }) => {
-                let mut c = Command::new(&spec.program); // hygiene: centralized subprocess spawn
+                let mut c = Command::new(&program); // hygiene: centralized subprocess spawn
                 c.arg("-c").arg(script);
                 if let Some(name) = argv0 {
                     c.arg(name);
@@ -455,7 +465,7 @@ impl SystemCommandRunner {
                 c
             }
             Some(ShellInvocation::ScriptPath { script_path, args }) => {
-                let mut c = Command::new(&spec.program); // hygiene: centralized subprocess spawn
+                let mut c = Command::new(&program); // hygiene: centralized subprocess spawn
                 c.arg(script_path);
                 c.args(args);
                 c
@@ -500,6 +510,107 @@ fn apply_stdio(cmd: &mut Command, spec: &CommandSpec) {
         CommandStdio::Null => Stdio::null(),
         CommandStdio::Pipe => Stdio::piped(),
     });
+}
+
+/// [`CommandSpec::program`] value that stands for the platform shell.
+const SHELL_NAME: &str = "sh";
+
+/// `PATH` as a child spawned with `env` will see it: the last explicit `PATH` in
+/// [`CommandEnvironment::set`], else the process `PATH` when the child inherits it.
+pub(crate) fn child_path_var(env: &CommandEnvironment) -> Option<OsString> {
+    let is_path = |key: &OsString| {
+        if cfg!(windows) {
+            key.eq_ignore_ascii_case("PATH")
+        } else {
+            key == "PATH"
+        }
+    };
+    env.set
+        .iter()
+        .rev()
+        .find(|(k, _)| is_path(k))
+        .map(|(_, v)| v.clone())
+        .or_else(|| {
+            env.inherit_process
+                .then(|| std::env::var_os("PATH"))
+                .flatten()
+        })
+}
+
+/// Shell for `sh -c` commands (filters, hooks, helpers) spawned with `env`.
+///
+/// `/bin/sh` on Unix, as Git uses. Windows has no `/bin/sh`, so `sh` is resolved against
+/// the child's `PATH` with [`resolve_script_interpreter`].
+pub(crate) fn shell_program(env: &CommandEnvironment) -> PathBuf {
+    if cfg!(windows) {
+        resolve_script_interpreter(SHELL_NAME, child_path_var(env).as_deref())
+    } else {
+        PathBuf::from("/bin/sh")
+    }
+}
+
+/// First `dir/name` (or `dir/name.exe` on Windows) that is a file, for `dir` in `dirs`.
+fn find_program_in_dirs(name: &str, dirs: impl IntoIterator<Item = PathBuf>) -> Option<PathBuf> {
+    let suffix = std::env::consts::EXE_SUFFIX;
+    dirs.into_iter()
+        .filter(|dir| !dir.as_os_str().is_empty())
+        .find_map(|dir| {
+            let with_suffix = (!suffix.is_empty() && !name.ends_with(suffix))
+                .then(|| dir.join(format!("{name}{suffix}")));
+            with_suffix
+                .into_iter()
+                .chain(std::iter::once(dir.join(name)))
+                .find(|candidate| candidate.is_file())
+        })
+}
+
+/// [`find_program_in_dirs`] over the entries of a `PATH` value.
+fn find_program_in_path(name: &str, path_var: &OsStr) -> Option<PathBuf> {
+    find_program_in_dirs(name, std::env::split_paths(path_var))
+}
+
+/// Whether `dir` holds Windows' WSL launchers (`System32\bash.exe`, `WindowsApps\bash.exe`),
+/// which would run a script inside a Linux distribution instead of against this checkout.
+fn is_wsl_launcher_dir(dir: &Path) -> bool {
+    dir.file_name().and_then(|n| n.to_str()).is_some_and(|n| {
+        n.eq_ignore_ascii_case("System32") || n.eq_ignore_ascii_case("WindowsApps")
+    })
+}
+
+/// Resolve the interpreter `name` (`sh`, `bash`, …) for running a script or shell command.
+///
+/// Looks first in the Git for Windows tree that owns a `git` found on `path_var`
+/// (`<root>/usr/bin`, `<root>/bin`), as Git for Windows puts those ahead of `PATH` for the
+/// commands it runs, then on `path_var` itself, skipping the WSL launcher directories. Falls
+/// back to the bare name so the OS search applies.
+pub(crate) fn resolve_script_interpreter(name: &str, path_var: Option<&OsStr>) -> PathBuf {
+    let Some(path_var) = path_var else {
+        return PathBuf::from(name);
+    };
+    let in_git_tree = || {
+        let git = find_program_in_path("git", path_var)?;
+        let bin_dir = git.parent()?.to_path_buf();
+        let roots: Vec<PathBuf> = bin_dir
+            .ancestors()
+            .skip(1)
+            .take(2)
+            .map(Path::to_path_buf)
+            .collect();
+        find_program_in_dirs(
+            name,
+            roots
+                .iter()
+                .flat_map(|root| [root.join("usr").join("bin"), root.join("bin")]),
+        )
+    };
+    in_git_tree()
+        .or_else(|| {
+            find_program_in_dirs(
+                name,
+                std::env::split_paths(path_var).filter(|dir| !is_wsl_launcher_dir(dir)),
+            )
+        })
+        .unwrap_or_else(|| PathBuf::from(name))
 }
 
 impl CommandRunner for SystemCommandRunner {
@@ -704,6 +815,183 @@ mod tests {
     use super::*;
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
+
+    fn touch(path: &Path) {
+        std::fs::create_dir_all(path.parent().expect("parent")).expect("mkdir");
+        std::fs::write(path, b"").expect("write");
+    }
+
+    fn exe(name: &str) -> String {
+        format!("{name}{}", std::env::consts::EXE_SUFFIX)
+    }
+
+    #[test]
+    fn find_program_in_path_searches_entries_in_order() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let first = tmp.path().join("first");
+        let second = tmp.path().join("second");
+        std::fs::create_dir_all(&first).expect("mkdir");
+        touch(&second.join(exe("sh")));
+        touch(&tmp.path().join("third").join(exe("sh")));
+        let path_var = std::env::join_paths([
+            PathBuf::new(),
+            first,
+            second.clone(),
+            tmp.path().join("third"),
+        ])
+        .expect("join");
+
+        assert_eq!(
+            find_program_in_path("sh", &path_var),
+            Some(second.join(exe("sh")))
+        );
+        assert_eq!(find_program_in_path("bash", &path_var), None);
+        assert_eq!(find_program_in_path("sh", OsStr::new("")), None);
+    }
+
+    #[test]
+    fn resolve_script_interpreter_prefers_path() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let bin = tmp.path().join("bin");
+        touch(&bin.join(exe("bash")));
+        let path_var = bin.clone().into_os_string();
+        assert_eq!(
+            resolve_script_interpreter("bash", Some(&path_var)),
+            bin.join(exe("bash"))
+        );
+    }
+
+    #[test]
+    fn resolve_script_interpreter_finds_git_for_windows_shell() {
+        for git_dir in [&["cmd"][..], &["mingw64", "bin"][..]] {
+            let tmp = tempfile::tempdir().expect("tempdir");
+            let root = tmp.path().join("Git");
+            let git_bin = git_dir.iter().fold(root.clone(), |p, c| p.join(c));
+            touch(&git_bin.join(exe("git")));
+            touch(&root.join("usr").join("bin").join(exe("sh")));
+            let path_var = git_bin.into_os_string();
+            assert_eq!(
+                resolve_script_interpreter("sh", Some(&path_var)),
+                root.join("usr").join("bin").join(exe("sh")),
+                "git under {git_dir:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn resolve_script_interpreter_prefers_git_tree_over_earlier_path_entries() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let other = tmp.path().join("other-bin");
+        touch(&other.join(exe("bash")));
+        let root = tmp.path().join("Git");
+        touch(&root.join("cmd").join(exe("git")));
+        touch(&root.join("usr").join("bin").join(exe("bash")));
+        let path_var = std::env::join_paths([other, root.join("cmd")]).expect("join");
+        assert_eq!(
+            resolve_script_interpreter("bash", Some(&path_var)),
+            root.join("usr").join("bin").join(exe("bash"))
+        );
+    }
+
+    #[test]
+    fn resolve_script_interpreter_skips_wsl_launchers() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let system32 = tmp.path().join("Windows").join("System32");
+        let apps = tmp.path().join("WindowsApps");
+        let msys = tmp.path().join("msys64").join("usr").join("bin");
+        touch(&system32.join(exe("bash")));
+        touch(&apps.join(exe("bash")));
+        touch(&msys.join(exe("bash")));
+        let path_var =
+            std::env::join_paths([system32.clone(), apps.clone(), msys.clone()]).expect("join");
+        assert_eq!(
+            resolve_script_interpreter("bash", Some(&path_var)),
+            msys.join(exe("bash"))
+        );
+        let only_wsl = std::env::join_paths([system32, apps]).expect("join");
+        assert_eq!(
+            resolve_script_interpreter("bash", Some(&only_wsl)),
+            PathBuf::from("bash")
+        );
+    }
+
+    #[test]
+    fn resolve_script_interpreter_falls_back_to_bare_name() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let path_var = tmp.path().as_os_str().to_os_string();
+        assert_eq!(
+            resolve_script_interpreter("sh", Some(&path_var)),
+            PathBuf::from("sh")
+        );
+        assert_eq!(resolve_script_interpreter("sh", None), PathBuf::from("sh"));
+    }
+
+    #[test]
+    fn child_path_var_uses_last_explicit_path() {
+        let mut env = CommandEnvironment::default();
+        assert_eq!(child_path_var(&env), None);
+        env.set.push(("PATH".into(), "/first".into()));
+        env.set.push(("HOME".into(), "/home/u".into()));
+        env.set.push(("PATH".into(), "/second".into()));
+        assert_eq!(child_path_var(&env), Some(OsString::from("/second")));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn child_path_var_ignores_case_on_windows() {
+        let mut env = CommandEnvironment::default();
+        env.set.push(("Path".into(), r"C:\Git\cmd".into()));
+        assert_eq!(child_path_var(&env), Some(OsString::from(r"C:\Git\cmd")));
+    }
+
+    #[test]
+    fn child_path_var_falls_back_to_process_path_only_when_inheriting() {
+        let inherit = CommandEnvironment::inherit_process_only();
+        assert_eq!(child_path_var(&inherit), std::env::var_os("PATH"));
+        assert_eq!(child_path_var(&CommandEnvironment::default()), None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn shell_program_is_bin_sh_on_unix() {
+        let mut env = CommandEnvironment::default();
+        env.set.push(("PATH".into(), "/nonexistent".into()));
+        assert_eq!(shell_program(&env), PathBuf::from("/bin/sh"));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn shell_program_finds_git_for_windows_shell_from_cmd_dir() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path().join("Git");
+        touch(&root.join("cmd").join(exe("git")));
+        touch(&root.join("usr").join("bin").join(exe("sh")));
+        let mut env = CommandEnvironment::default();
+        env.set
+            .push(("Path".into(), root.join("cmd").into_os_string()));
+        assert_eq!(
+            shell_program(&env),
+            root.join("usr").join("bin").join(exe("sh"))
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn system_runner_runs_bare_sh_without_sh_on_path() {
+        let mut spec = CommandSpec::sh_dash_c_filter("printf ok");
+        spec.env = CommandEnvironment {
+            inherit_process: false,
+            set: vec![("PATH".into(), "/nonexistent".into())],
+            remove: Vec::new(),
+        };
+        let out = SystemCommandRunner
+            .spawn(&spec)
+            .expect("spawn")
+            .wait_with_output()
+            .expect("wait");
+        assert!(out.status.success);
+        assert_eq!(out.stdout, b"ok");
+    }
 
     #[cfg(unix)]
     #[test]

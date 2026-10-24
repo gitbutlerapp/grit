@@ -40,6 +40,8 @@ Long-running work (status, fetch, pack indexing) takes a `ProgressSink` (for exa
 
 `CommandRunner` is the only production path that spawns OS processes from the library (`SystemCommandRunner`). Hooks, smudge/clean filters, credential helpers, and signing helpers build a `CommandSpec` and call `spawn`.
 
+Shell commands use a `CommandSpec` whose program is `sh`. `SystemCommandRunner` runs that the way Git does: `/bin/sh` on Unix. On Windows it uses the `sh` of the Git for Windows install that owns the `git` on the child's `PATH` (`usr\bin`, then `bin`), then any `sh` on that `PATH`. Filters and helpers therefore work when only Git's `cmd` directory is on `PATH`.
+
 For tests, [`RecordingRunner`](rustdoc:grit_lib::command_runner::RecordingRunner) records specs and returns scripted exit codes. Install it on [`RepositoryOptions`](rustdoc:grit_lib::config::environment::RepositoryOptions) before [`Repository::open`](rustdoc:grit_lib::repo::Repository) or [`Repository::discover`](rustdoc:grit_lib::repo::Repository).
 
 ## Typed errors
