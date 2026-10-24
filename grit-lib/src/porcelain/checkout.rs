@@ -60,14 +60,14 @@ fn checkout_between_trees_slow(
     progress: &mut dyn ProgressSink,
 ) -> Result<()> {
     let changes = diff_trees(repo.odb(), from, to, "")?;
-    checkout_tree_changes_with_progress(
-        repo,
-        &changes,
-        progress,
-        None,
-        CheckoutApplyOptions::default(),
-        None,
-    )
+    let mut apply = CheckoutApplyOptions::default();
+    if let Some(tree) = to {
+        apply.checkout_result_tree = Some(*tree);
+        if from.is_none() {
+            apply.parallel_prepare_blobs = true;
+        }
+    }
+    checkout_tree_changes_with_progress(repo, &changes, progress, None, apply, None)
 }
 
 /// Apply the change from tree `from` to tree `to` onto the working tree and
@@ -795,6 +795,11 @@ fn checkout_commit_index_update(
     if let Some(tree) = checkout_result_tree {
         if index_mut.cache_tree.is_some() {
             index_mut.cache_tree_root = Some(tree);
+        } else {
+            let cache_tree = crate::write_tree::build_cache_tree_from_tree(repo.odb(), &tree)?;
+            if usize::try_from(cache_tree.entry_count).ok() == Some(index_mut.entries.len()) {
+                index_mut.set_cache_tree(cache_tree);
+            }
         }
     }
     index_mut.defer_untracked_cache_invalidation = false;
