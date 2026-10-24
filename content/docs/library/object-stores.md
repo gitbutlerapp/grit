@@ -49,7 +49,9 @@ let _blob = repo.odb.write(ObjectKind::Blob, b"hello")?;
 # Ok::<(), grit_lib::error::Error>(())
 ```
 
-Filesystem-only maintenance (`Odb::gc`, `Odb::write_commit_graph`, `Odb::pack_store`, pack install, MIDX write) returns `Error::UnsupportedObjectStore` when the primary is not the default files backend. Use `Odb::files_objects_dir` when you need the on-disk `objects/` path only for files-backed repos.
+Every object a porcelain operation creates goes to the primary store through [`WritableObjectStore::write`](rustdoc:grit_lib::objects::odb::store::WritableObjectStore::write): staging new and modified files ([`porcelain::add::stage`](rustdoc:grit_lib::porcelain::add::stage), [`stage_for_commit`](rustdoc:grit_lib::porcelain::add::stage_for_commit)), [`commit_worktree`](rustdoc:grit_lib::porcelain::commit::commit_worktree), stash, notes and annotated tags. Nothing is written under `objects/`. [`Repository::fsck`](rustdoc:grit_lib::repo::Repository::fsck) validates a custom primary by listing its objects with `ObjectStore::for_each_object`, re-hashing each one against its id and running the usual object checks; read or hash failures are reported as `FsckIssue::BadObject` because there is no loose file path to name.
+
+Filesystem-only maintenance returns `Error::UnsupportedObjectStore` when the primary is not the default files backend: `Odb::gc` and prune, repack, `Odb::write_commit_graph`, MIDX write, `Odb::pack_store` and pack install (index-pack), and `Odb::write_loose_zlib_prehashed`. Use `Odb::files_objects_dir` when you need the on-disk `objects/` path only for files-backed repos.
 
 ## Conformance tests
 

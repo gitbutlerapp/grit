@@ -766,6 +766,9 @@ fn verify_loose_objects(
     cancel: &dyn Cancel,
 ) -> Result<(usize, OidHashSet, OidHashMap<ValidatedObjectLinks>)> {
     let odb = repo.odb();
+    if !odb.uses_files_primary() {
+        return verify_custom_primary_objects(repo, config, strict, issues, progress, cancel);
+    }
     let algo = odb.hash_algo();
     let loose = odb.enumerate_local_loose_objects()?;
     let total = loose.len();
@@ -869,6 +872,102 @@ fn verify_loose_objects(
                 }
             },
         }
+    }
+    for pending in dot.finish_pending(odb)? {
+        push_dot_issue(issues, config, strict, pending);
+    }
+    progress.finish();
+    Ok((checked, validated, links))
+}
+
+/// Store validation for a custom primary ([`crate::odb::OdbBuilder::primary`]): every object
+/// the store lists is read back, re-hashed against its id and checked like a loose object.
+///
+/// Custom stores have no file paths, so read and hash failures surface as
+/// [`FsckIssue::BadObject`] instead of the path-based loose variants.
+fn verify_custom_primary_objects(
+    repo: &Repository,
+    config: &ConfigSet,
+    strict: bool,
+    issues: &mut Vec<FsckIssue>,
+    progress: &mut dyn ProgressSink,
+    cancel: &dyn Cancel,
+) -> Result<(usize, OidHashSet, OidHashMap<ValidatedObjectLinks>)> {
+    let odb = repo.odb();
+    let algo = odb.hash_algo();
+    let fsck_opts = FsckObjectOptions::new(algo);
+    let primary = odb.primary_writable()?;
+    let mut oids = Vec::new();
+    primary.for_each_object(&mut |oid| {
+        oids.push(*oid);
+        ControlFlow::Continue(())
+    })?;
+    progress.start(ProgressPhase::IndexingObjects, Some(oids.len() as u64));
+    let mut validated = oid_hash_set();
+    let mut links = oid_hash_map();
+    let mut dot = DotFsckTracker::default();
+    let mut checked = 0usize;
+    for oid in oids {
+        if checked.is_multiple_of(128) {
+            progress.set(checked as u64);
+            if cancel.is_cancelled() {
+                return Err(Error::Message("cancelled".into()));
+            }
+        }
+        checked += 1;
+        let obj = match primary.read(&oid) {
+            Ok(Some(obj)) => obj,
+            // Removed between enumeration and read; connectivity reports it if still needed.
+            Ok(None) => continue,
+            Err(err) => {
+                push_corrupt_parse(issues, config, strict, oid, err);
+                continue;
+            }
+        };
+        match algo.hash_object(obj.kind, &obj.data) {
+            Ok(actual) if actual == oid => {}
+            Ok(actual) => {
+                push_bad_object(
+                    issues,
+                    config,
+                    strict,
+                    oid,
+                    FsckError::new(
+                        "corruptObject",
+                        format!("stored content hashes to {}", actual.to_hex()),
+                    ),
+                );
+                continue;
+            }
+            Err(Error::HashCollision { oid: colliding }) => {
+                push_bad_object(
+                    issues,
+                    config,
+                    strict,
+                    oid,
+                    FsckError::new(
+                        "sha1Collision",
+                        format!(
+                            "SHA-1 collision detected while verifying stored object (digest {colliding})"
+                        ),
+                    ),
+                );
+                continue;
+            }
+            Err(err) => {
+                push_corrupt_parse(issues, config, strict, oid, err);
+                continue;
+            }
+        }
+        if let Err(err) = fsck_object(obj.kind, &obj.data, fsck_opts) {
+            let keep_links = object_fsck_allows_link_cache(&err, config, strict);
+            push_bad_object(issues, config, strict, oid, err);
+            if !keep_links {
+                continue;
+            }
+        }
+        record_validated_object(&mut validated, &mut links, oid, obj.kind, &obj.data, algo);
+        apply_dot_checks(&mut dot, issues, config, strict, &oid, obj.kind, &obj.data);
     }
     for pending in dot.finish_pending(odb)? {
         push_dot_issue(issues, config, strict, pending);
