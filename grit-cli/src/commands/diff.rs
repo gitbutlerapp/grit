@@ -421,25 +421,18 @@ fn filtered_worktree_file_changes(
 
 /// Uncommitted file list for default `grit diff` (no commit arguments).
 ///
-/// Patch and `--stat` / `--shortstat` with no path limit use HEAD↔worktree (full uncommitted
-/// tree, matching default patch file coverage). `--numstat`, `--name-only`, and `--name-status`
-/// match Git's index↔worktree scope; path-limited diffs always use index↔worktree.
+/// With no `--against`, compares HEAD's tree to the worktree (staged and unstaged together).
+/// Path-limited diffs compare the index to the worktree only, matching Git's scoped default.
 fn uncommitted_changes_for_default_diff(
     repo: &grit_lib::repo::Repository,
     against: Option<&str>,
     pathspecs: &[String],
-    format: DiffFormatArgs,
     diff_options: &DiffOptions,
 ) -> Result<Vec<FileChange>> {
     if against.is_some() {
         return filtered_worktree_file_changes(repo, against, pathspecs, diff_options);
     }
-    if pathspecs.is_empty()
-        && (format.detail() == DiffDetail::Patch
-            || format.patch_text
-            || format.human_stat_block()
-            || format.human_shortstat_only())
-    {
+    if pathspecs.is_empty() {
         return filtered_worktree_file_changes(repo, None, pathspecs, diff_options);
     }
     Ok(filter_file_changes(
@@ -856,7 +849,6 @@ fn run_patch_text(opts: DiffRunOptions) -> Result<DiffOutcome> {
                     &repo,
                     against_ref,
                     &worktree_pathspecs,
-                    format,
                     &diff_options,
                 )?,
                 &repo,
@@ -874,10 +866,7 @@ fn run_patch_text(opts: DiffRunOptions) -> Result<DiffOutcome> {
                     None => None,
                 }
             };
-            let entries = if against_ref.is_some()
-                || (worktree_pathspecs.is_empty()
-                    && (format.patch_text || format.detail() == DiffDetail::Patch))
-            {
+            let entries = if against_ref.is_some() || worktree_pathspecs.is_empty() {
                 filter_diff_entries(
                     worktree_against_tree_entries(&repo, base_tree.as_ref(), &diff_options)?,
                     &repo,
@@ -1114,7 +1103,6 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
                 &repo,
                 against_ref,
                 &worktree_pathspecs,
-                format,
                 &diff_options,
             )?;
             let outcome = match detail {

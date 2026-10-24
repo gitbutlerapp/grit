@@ -25,9 +25,9 @@ fn diff_name_only_matches_git_bytes() {
     std::fs::write(dir.path().join("f.txt"), b"b\n").expect("write");
     let git_out = std::process::Command::new("git")
         .current_dir(dir.path())
-        .args(["diff", "--name-only"])
+        .args(["diff", "HEAD", "--name-only"])
         .output()
-        .expect("git diff");
+        .expect("git diff HEAD");
     let grit_init = grit(dir.path(), &["init"]);
     assert!(grit_init.ok(), "{}", grit_init.dump("grit init"));
     let grit_out = grit(dir.path(), &["diff", "--name-only"]);
@@ -39,28 +39,8 @@ fn diff_name_only_matches_git_bytes() {
     );
 }
 
-/// Git sometimes prints `old => new` for rename numstat lines; grit uses the new path only.
-fn normalize_numstat_for_git_compat(s: &str) -> String {
-    let mut out = String::new();
-    for line in s.lines() {
-        if !out.is_empty() {
-            out.push('\n');
-        }
-        let mut parts = line.splitn(3, '\t');
-        let ins = parts.next().unwrap_or("");
-        let del = parts.next().unwrap_or("");
-        let path = parts.next().unwrap_or("");
-        let path = path.rsplit(" => ").next().unwrap_or(path);
-        out.push_str(&format!("{ins}\t{del}\t{path}"));
-    }
-    if s.ends_with('\n') {
-        out.push('\n');
-    }
-    out
-}
-
 #[test]
-fn diff_numstat_rename_matches_git_bytes() {
+fn diff_numstat_default_matches_against_head_after_rename() {
     let dir = tempfile::tempdir().expect("tempdir");
     let grit_init = grit(dir.path(), &["init"]);
     assert!(grit_init.ok(), "{}", grit_init.dump("grit init"));
@@ -70,15 +50,20 @@ fn diff_numstat_rename_matches_git_bytes() {
         grit(dir.path(), &["commit", "-m", "init"]).ok(),
         "grit commit"
     );
-    git(dir.path(), &["mv", "f.txt", "g.txt"]);
+    std::fs::rename(dir.path().join("f.txt"), dir.path().join("g.txt")).expect("rename");
     std::fs::write(dir.path().join("g.txt"), b"line\nextra\n").expect("write");
-    let git_out = git_cmd(&["diff", "--numstat"]).in_dir(dir.path()).exec();
-    let grit_out = grit(dir.path(), &["diff", "--numstat"]);
+    let default = grit(dir.path(), &["diff", "--numstat"]);
+    assert!(default.ok(), "{}", default.dump("default numstat"));
+    let against = grit(dir.path(), &["diff", "--against", "HEAD", "--numstat"]);
+    assert!(against.ok(), "{}", against.dump("against HEAD numstat"));
     assert_eq!(
-        normalize_numstat_for_git_compat(&git_out.stdout),
-        normalize_numstat_for_git_compat(&grit_out.stdout),
-        "{}",
-        grit_out.dump("grit diff --numstat rename")
+        default.stdout, against.stdout,
+        "default numstat should match --against HEAD"
+    );
+    assert!(
+        default.stdout.contains("g.txt"),
+        "rename target should appear: {:?}",
+        default.stdout
     );
 }
 
@@ -192,6 +177,37 @@ fn diff_commit_stat_same_files_as_commit_diff() {
     stat_paths.sort();
     assert_eq!(patch_paths, stat_paths);
     assert_eq!(patch_paths, ["f.txt"]);
+}
+
+/// Regression for issue #1655: default list formats must include staged and unstaged paths.
+#[test]
+fn diff_name_status_default_includes_staged_and_unstaged() {
+    let fx = CliFixture::new();
+    std::fs::write(fx.path().join("a.txt"), b"1\n").expect("write a");
+    std::fs::write(fx.path().join("b.txt"), b"1\n").expect("write b");
+    git(fx.path(), &["add", "."]);
+    git(fx.path(), &["commit", "-m", "init"]);
+    std::fs::write(fx.path().join("a.txt"), b"2\n").expect("edit a");
+    git(fx.path(), &["add", "a.txt"]);
+    std::fs::write(fx.path().join("b.txt"), b"2\n").expect("edit b unstaged");
+
+    let out = grit(fx.path(), &["diff", "--name-status"]);
+    assert!(out.ok(), "{}", out.dump("name-status"));
+    let mut paths: Vec<_> = out
+        .stdout
+        .lines()
+        .filter_map(|line| line.split('\t').nth(1))
+        .map(str::to_string)
+        .collect();
+    paths.sort();
+    assert_eq!(paths, ["a.txt", "b.txt"], "stdout={:?}", out.stdout);
+
+    let against = grit(fx.path(), &["diff", "--against", "HEAD", "--name-status"]);
+    assert!(against.ok(), "{}", against.dump("against HEAD"));
+    assert_eq!(
+        out.stdout, against.stdout,
+        "default should match --against HEAD"
+    );
 }
 
 #[test]
