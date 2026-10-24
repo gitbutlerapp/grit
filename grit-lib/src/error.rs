@@ -990,6 +990,10 @@ pub enum Error {
         message: String,
     },
 
+    /// Author or committer string on [`crate::porcelain::commit::CommitRequest`] is invalid.
+    #[error(transparent)]
+    InvalidIdentity(#[from] crate::ident::CommitIdentityError),
+
     /// User-facing message that should be printed verbatim (no extra prefix).
     ///
     /// Used for revision errors that must match Git's `fatal:` lines exactly.

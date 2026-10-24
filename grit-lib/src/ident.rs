@@ -327,6 +327,95 @@ pub fn author_identity_line(
     assemble_identity(&contact.name, &contact.email, date_override, now)
 }
 
+/// Failure to normalize a commit author or committer string.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum CommitIdentityError {
+    /// Newlines, carriage returns, or other C0 controls (except tab) in the input.
+    #[error("invalid identity: embedded control character")]
+    EmbeddedControl,
+    /// The string is not a contact form, bare email, or full header line with timestamp.
+    #[error("invalid identity: expected 'Name <email>', a bare email, or a full header line with timestamp")]
+    Unrecognized,
+    /// [`parse_author_arg`] failure for contact-style input.
+    #[error(transparent)]
+    Author(#[from] AuthorArgError),
+}
+
+fn identity_contains_embedded_control(raw: &str) -> bool {
+    raw.bytes()
+        .any(|b| b == b'\n' || b == b'\r' || (b < 0x20 && b != b'\t'))
+}
+
+/// Replace the `<unix> <±HHMM>` suffix on a full or contact-style identity line.
+#[must_use]
+pub fn replace_identity_date_suffix(identity: &str, date_suffix: &str) -> String {
+    let suffix = date_suffix.trim();
+    if let Some((name, email)) = parse_identity_name_email(identity) {
+        if email.is_empty() && !name.is_empty() && name.contains('@') {
+            return format!("{} {suffix}", name.trim());
+        }
+        if email.is_empty() {
+            return format!("{} {suffix}", identity.trim_end());
+        }
+        return format!("{} <{email}> {suffix}", name);
+    }
+    format!("{} {suffix}", identity.trim_end())
+}
+
+/// Normalize author/committer input for writing a commit object.
+///
+/// Accepts either a full Git header line (`Name <email> <unix> <±HHMM>`) or a contact
+/// form (`Name <email>` / bare email). Contact forms are expanded with `now` and an
+/// optional `date_override` suffix (same rules as [`author_identity_line`]).
+///
+/// # Errors
+///
+/// Returns [`CommitIdentityError`] when the string is empty, contains embedded controls,
+/// or cannot be interpreted as a valid identity.
+pub fn prepare_commit_identity_line(
+    raw: &str,
+    date_override: Option<&str>,
+    now: OffsetDateTime,
+) -> Result<String, CommitIdentityError> {
+    if identity_contains_embedded_control(raw) {
+        return Err(CommitIdentityError::EmbeddedControl);
+    }
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return Err(CommitIdentityError::Author(AuthorArgError::InvalidFormat));
+    }
+    if matches!(parse_signature_tail(trimmed), Some(SignatureTail::Valid(_))) {
+        let line = trimmed.to_owned();
+        return Ok(match date_override {
+            Some(suffix) => replace_identity_date_suffix(&line, suffix),
+            None => line,
+        });
+    }
+    let contact = parse_author_arg(trimmed)?;
+    Ok(author_identity_line(&contact, date_override, now))
+}
+
+/// Like [`prepare_commit_identity_line`], but preserves already-valid header bytes from an
+/// existing commit when `author_date` is not overridden.
+pub(crate) fn prepare_commit_author_from_parent(
+    parent_author: &str,
+    parent_author_raw: &[u8],
+    author_date: Option<&str>,
+    now: OffsetDateTime,
+) -> Result<(String, Vec<u8>), CommitIdentityError> {
+    if let Some(suffix) = author_date {
+        let line = prepare_commit_identity_line(parent_author, Some(suffix), now)?;
+        return Ok((line, Vec::new()));
+    }
+    if !parent_author_raw.is_empty() {
+        return Ok((parent_author.to_owned(), parent_author_raw.to_vec()));
+    }
+    Ok((
+        prepare_commit_identity_line(parent_author, None, now)?,
+        Vec::new(),
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -410,5 +499,39 @@ mod tests {
     fn parse_signature_malformed_identity_is_none() {
         assert!(parse_signature("A <e@x> totally_bogus -0700").is_none());
         assert!(parse_signature("not an identity").is_none());
+    }
+
+    #[test]
+    fn prepare_commit_identity_line_expands_contact_form() {
+        let now = OffsetDateTime::from_unix_timestamp(1_700_000_000).expect("epoch");
+        let line =
+            prepare_commit_identity_line("Doc <doc@example.com>", None, now).expect("prepare");
+        assert!(parse_signature(&line).is_some(), "full line: {line}");
+    }
+
+    #[test]
+    fn prepare_commit_identity_line_accepts_full_header() {
+        let ident = "Ada Lovelace <ada@example.com> 1700000000 +0530";
+        let now = OffsetDateTime::from_unix_timestamp(1).expect("epoch");
+        let line = prepare_commit_identity_line(ident, None, now).expect("prepare");
+        assert_eq!(line, ident);
+    }
+
+    #[test]
+    fn prepare_commit_identity_line_rejects_embedded_newline() {
+        let now = OffsetDateTime::from_unix_timestamp(1).expect("epoch");
+        assert_eq!(
+            prepare_commit_identity_line("Name <a@b>\nInjected", None, now),
+            Err(CommitIdentityError::EmbeddedControl)
+        );
+    }
+
+    #[test]
+    fn prepare_commit_identity_line_rejects_bare_name_without_email() {
+        let now = OffsetDateTime::from_unix_timestamp(1).expect("epoch");
+        assert!(matches!(
+            prepare_commit_identity_line("no email here", None, now),
+            Err(CommitIdentityError::Author(AuthorArgError::InvalidFormat))
+        ));
     }
 }

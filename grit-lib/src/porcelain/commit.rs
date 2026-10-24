@@ -21,7 +21,10 @@ use crate::diff::{
 use crate::error::ApplyError;
 use crate::error::{Error, Result};
 use crate::hooks::{run_commit_hook, CommitHookEnv, HookError, HookName, HookResult};
-use crate::ident::parse_signature_times;
+use crate::ident::{
+    fsck_commit_idents, parse_signature_times, prepare_commit_author_from_parent,
+    prepare_commit_identity_line,
+};
 use crate::index::Index;
 use crate::objects::odb::Odb;
 use crate::objects::{parse_commit, serialize_commit, CommitData, ObjectId, ObjectKind};
@@ -80,9 +83,9 @@ pub struct CommitAuthorInfo {
 pub struct CommitRequest {
     /// Commit message body (first line becomes the subject). A trailing newline is added when missing.
     pub message: String,
-    /// Author identity in Git header form: `Name <email> <unix-time> <tz>`.
+    /// Author identity: `Name <email>`, a bare email, or a full header line `Name <email> <unix> <±HHMM>`.
     pub author: String,
-    /// Committer identity in the same form as [`Self::author`].
+    /// Committer identity in the same forms as [`Self::author`].
     pub committer: String,
     /// When false (default), reject commits whose tree equals the parent's tree or is the empty tree on an unborn branch.
     pub allow_empty: bool,
@@ -583,17 +586,6 @@ fn author_info_from_header_line(line: &str) -> CommitAuthorInfo {
     }
 }
 
-fn apply_author_date_suffix(author: &str, date_suffix: &str) -> String {
-    let info = author_info_from_header_line(author);
-    if info.email.is_empty() && !info.name.is_empty() && info.name.contains('@') {
-        format!("{} {}", info.name.trim(), date_suffix.trim())
-    } else if info.email.is_empty() {
-        format!("{} {}", author.trim_end(), date_suffix.trim())
-    } else {
-        format!("{} <{}> {}", info.name, info.email, date_suffix.trim())
-    }
-}
-
 fn author_line_from_committer(
     committer: &str,
     author_date: Option<&str>,
@@ -888,24 +880,27 @@ fn finish_commit_dry_run(
         message.push('\n');
     }
     let config = repo.config()?;
+    let now = repo.identity_now();
+    let committer = prepare_commit_identity_line(&req.committer, None, now)?;
     let _message_with_trailers = enrich_commit_message(
         message,
         &req.trailers,
         req.signoff,
-        &req.committer,
+        &committer,
         config.as_ref(),
         repo.git_dir(),
     )?;
 
-    let (author, _author_raw) = dry_run_author_fields(
+    let (author, _author_raw) = resolve_author_for_commit(
         repo,
         req,
+        &committer,
         amend_author,
         amend_author_raw,
         reuse_author,
         reuse_author_raw,
         req_amend,
-    );
+    )?;
     let mut commit_parents = if req_amend {
         amend_parents
     } else {
@@ -934,50 +929,47 @@ fn finish_commit_dry_run(
     })
 }
 
-fn dry_run_author_fields(
+#[allow(clippy::too_many_arguments)]
+fn resolve_author_for_commit(
     repo: &Repository,
     req: &CommitRequest,
+    committer: &str,
     amend_author: Option<String>,
     amend_author_raw: Vec<u8>,
     reuse_author: Option<String>,
     reuse_author_raw: Vec<u8>,
     req_amend: bool,
-) -> (String, Vec<u8>) {
+) -> Result<(String, Vec<u8>)> {
     let now = repo.identity_now();
     if req.reset_author {
-        return (
-            author_line_from_committer(&req.committer, req.author_date.as_deref(), now),
+        return Ok((
+            author_line_from_committer(committer, req.author_date.as_deref(), now),
             Vec::new(),
-        );
+        ));
     }
     if !req.author.is_empty() {
-        let mut author = req.author.clone();
-        if let Some(ref date) = req.author_date {
-            author = apply_author_date_suffix(&author, date);
-        }
-        return (author, Vec::new());
+        let author = prepare_commit_identity_line(&req.author, req.author_date.as_deref(), now)?;
+        return Ok((author, Vec::new()));
     }
     if let Some(a) = reuse_author {
-        let mut author = a;
-        if !req.reset_author {
-            if let Some(ref date) = req.author_date {
-                author = apply_author_date_suffix(&author, date);
-            }
-        }
-        return (author, reuse_author_raw);
+        return Ok(prepare_commit_author_from_parent(
+            &a,
+            &reuse_author_raw,
+            req.author_date.as_deref(),
+            now,
+        )?);
     }
     if req_amend {
-        let mut author = amend_author.unwrap_or_default();
-        if let Some(ref date) = req.author_date {
-            author = apply_author_date_suffix(&author, date);
-        }
-        return (author, amend_author_raw);
+        let author = amend_author.unwrap_or_default();
+        return Ok(prepare_commit_author_from_parent(
+            &author,
+            &amend_author_raw,
+            req.author_date.as_deref(),
+            now,
+        )?);
     }
-    let mut author = req.author.clone();
-    if let Some(ref date) = req.author_date {
-        author = apply_author_date_suffix(&author, date);
-    }
-    (author, Vec::new())
+    let author = prepare_commit_identity_line(&req.author, req.author_date.as_deref(), now)?;
+    Ok((author, Vec::new()))
 }
 
 /// Removes a partial-commit hook index file on drop (Git `next-index-<pid>`).
@@ -1165,11 +1157,13 @@ fn create_commit_with_index(
         message.push('\n');
     }
     let config = repo.config()?;
+    let now = repo.identity_now();
+    let committer = prepare_commit_identity_line(&req.committer, None, now)?;
     message = enrich_commit_message(
         message,
         &req.trailers,
         req.signoff,
-        &req.committer,
+        &committer,
         config.as_ref(),
         repo.git_dir(),
     )?;
@@ -1195,30 +1189,16 @@ fn create_commit_with_index(
         message.push('\n');
     }
 
-    let (mut author, mut author_raw) = if req.reset_author {
-        (
-            author_line_from_committer(
-                &req.committer,
-                req.author_date.as_deref(),
-                repo.identity_now(),
-            ),
-            Vec::new(),
-        )
-    } else if !req.author.is_empty() {
-        (req.author.clone(), Vec::new())
-    } else if let Some(a) = reuse_author {
-        (a, reuse_author_raw)
-    } else if req.amend {
-        (amend_author.unwrap_or_default(), amend_author_raw)
-    } else {
-        (req.author.clone(), Vec::new())
-    };
-    if !req.reset_author {
-        if let Some(ref date) = req.author_date {
-            author = apply_author_date_suffix(&author, date);
-            author_raw = Vec::new();
-        }
-    }
+    let (author, author_raw) = resolve_author_for_commit(
+        repo,
+        req,
+        &committer,
+        amend_author,
+        amend_author_raw,
+        reuse_author,
+        reuse_author_raw,
+        req.amend,
+    )?;
     let mut commit_parents = if req.amend {
         amend_parents
     } else {
@@ -1236,7 +1216,7 @@ fn create_commit_with_index(
         tree,
         parents: commit_parents.clone(),
         author,
-        committer: req.committer.clone(),
+        committer: committer.clone(),
         author_raw,
         committer_raw: Vec::new(),
         encoding: None,
@@ -1257,6 +1237,8 @@ fn create_commit_with_index(
         }
     }
     let bytes = prepare_commit_bytes(repo, config.as_ref(), &commit_data, req.sign_override)?;
+    fsck_commit_idents(&bytes, repo.odb().hash_algo())
+        .map_err(|detail| Error::CorruptObject(format!("commit would fail fsck: {detail}")))?;
     let oid = repo.odb().write(ObjectKind::Commit, &bytes)?;
 
     let previous_tip = replaced_tip.or(parent);
@@ -1325,7 +1307,7 @@ fn create_commit_with_index(
             repo.git_dir(),
             expected_old,
             oid,
-            &req.committer,
+            &committer,
             &reflog_msg,
             config.as_ref(),
         )?;
@@ -1336,7 +1318,7 @@ fn create_commit_with_index(
                 branch_ref: &refname,
                 expected_old,
                 new_oid: oid,
-                identity: &req.committer,
+                identity: &committer,
                 reflog_message: &reflog_msg,
             },
             config.as_ref(),

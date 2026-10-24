@@ -2188,6 +2188,8 @@ pub fn grit_lib::ident::AuthorArgError::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::ident::AuthorArgError
 impl core::cmp::PartialEq for grit_lib::ident::AuthorArgError
 pub fn grit_lib::ident::AuthorArgError::eq(&self, &Self) -> bool
+impl core::convert::From<grit_lib::ident::AuthorArgError> for grit_lib::ident::CommitIdentityError
+pub fn grit_lib::ident::CommitIdentityError::from(grit_lib::ident::AuthorArgError) -> Self
 impl core::convert::From<grit_lib::ident::AuthorArgError> for grit_lib::revwalk::history::HistoryError
 pub fn grit_lib::revwalk::history::HistoryError::from(grit_lib::ident::AuthorArgError) -> Self
 impl core::error::Error for grit_lib::ident::AuthorArgError
@@ -2203,6 +2205,33 @@ impl core::marker::Unpin for grit_lib::ident::AuthorArgError
 impl core::marker::UnsafeUnpin for grit_lib::ident::AuthorArgError
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::ident::AuthorArgError
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::ident::AuthorArgError
+pub enum grit_lib::config::ident::CommitIdentityError
+pub grit_lib::config::ident::CommitIdentityError::Author(grit_lib::ident::AuthorArgError)
+pub grit_lib::config::ident::CommitIdentityError::EmbeddedControl
+pub grit_lib::config::ident::CommitIdentityError::Unrecognized
+impl core::clone::Clone for grit_lib::ident::CommitIdentityError
+pub fn grit_lib::ident::CommitIdentityError::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::ident::CommitIdentityError
+impl core::cmp::PartialEq for grit_lib::ident::CommitIdentityError
+pub fn grit_lib::ident::CommitIdentityError::eq(&self, &Self) -> bool
+impl core::convert::From<grit_lib::ident::AuthorArgError> for grit_lib::ident::CommitIdentityError
+pub fn grit_lib::ident::CommitIdentityError::from(grit_lib::ident::AuthorArgError) -> Self
+impl core::convert::From<grit_lib::ident::CommitIdentityError> for grit_lib::error::Error
+pub fn grit_lib::error::Error::from(grit_lib::ident::CommitIdentityError) -> Self
+impl core::error::Error for grit_lib::ident::CommitIdentityError
+pub fn grit_lib::ident::CommitIdentityError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Debug for grit_lib::ident::CommitIdentityError
+pub fn grit_lib::ident::CommitIdentityError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::ident::CommitIdentityError
+pub fn grit_lib::ident::CommitIdentityError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::ident::CommitIdentityError
+impl core::marker::Freeze for grit_lib::ident::CommitIdentityError
+impl core::marker::Send for grit_lib::ident::CommitIdentityError
+impl core::marker::Sync for grit_lib::ident::CommitIdentityError
+impl core::marker::Unpin for grit_lib::ident::CommitIdentityError
+impl core::marker::UnsafeUnpin for grit_lib::ident::CommitIdentityError
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::ident::CommitIdentityError
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::ident::CommitIdentityError
 pub enum grit_lib::config::ident::SignatureTail
 pub grit_lib::config::ident::SignatureTail::NonNumeric
 pub grit_lib::config::ident::SignatureTail::Overflow
@@ -2309,6 +2338,8 @@ pub fn grit_lib::config::ident::parse_author_arg(&str) -> core::result::Result<g
 pub fn grit_lib::config::ident::parse_signature(&str) -> core::option::Option<grit_lib::ident::Signature>
 pub fn grit_lib::config::ident::parse_signature_tail(&str) -> core::option::Option<grit_lib::ident::SignatureTail>
 pub fn grit_lib::config::ident::parse_signature_times(&str) -> core::option::Option<grit_lib::ident::ParsedSignatureTimes>
+pub fn grit_lib::config::ident::prepare_commit_identity_line(&str, core::option::Option<&str>, time::offset_date_time::OffsetDateTime) -> core::result::Result<alloc::string::String, grit_lib::ident::CommitIdentityError>
+pub fn grit_lib::config::ident::replace_identity_date_suffix(&str, &str) -> alloc::string::String
 pub fn grit_lib::config::ident::signature_timestamp_for_pretty(&str) -> grit_lib::ident::SignatureTimestamp
 pub fn grit_lib::config::ident::timestamp_for_at_ct(grit_lib::ident::SignatureTimestamp) -> core::option::Option<i64>
 pub mod grit_lib::config::ident_config
@@ -5226,6 +5257,7 @@ pub grit_lib::error::Error::IndexUnmerged
 pub grit_lib::error::Error::InitBareWithSeparateGitDir
 pub grit_lib::error::Error::InitObjectFormatChange
 pub grit_lib::error::Error::InvalidHead
+pub grit_lib::error::Error::InvalidIdentity(grit_lib::ident::CommitIdentityError)
 pub grit_lib::error::Error::InvalidNotesRef(alloc::string::String)
 pub grit_lib::error::Error::InvalidObjectId(alloc::string::String)
 pub grit_lib::error::Error::InvalidPath(alloc::string::String)
@@ -5433,6 +5465,8 @@ impl core::convert::From<grit_lib::error::PathspecFromFileParseError> for grit_l
 pub fn grit_lib::error::Error::from(grit_lib::error::PathspecFromFileParseError) -> Self
 impl core::convert::From<grit_lib::error::RefLockError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::error::RefLockError) -> Self
+impl core::convert::From<grit_lib::ident::CommitIdentityError> for grit_lib::error::Error
+pub fn grit_lib::error::Error::from(grit_lib::ident::CommitIdentityError) -> Self
 impl core::convert::From<grit_lib::porcelain::branch_error::BranchError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::porcelain::branch_error::BranchError) -> Self
 impl core::convert::From<grit_lib::porcelain::hunk_select::HunkSelectError> for grit_lib::error::Error
@@ -5814,6 +5848,8 @@ pub fn grit_lib::ident::AuthorArgError::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::ident::AuthorArgError
 impl core::cmp::PartialEq for grit_lib::ident::AuthorArgError
 pub fn grit_lib::ident::AuthorArgError::eq(&self, &Self) -> bool
+impl core::convert::From<grit_lib::ident::AuthorArgError> for grit_lib::ident::CommitIdentityError
+pub fn grit_lib::ident::CommitIdentityError::from(grit_lib::ident::AuthorArgError) -> Self
 impl core::convert::From<grit_lib::ident::AuthorArgError> for grit_lib::revwalk::history::HistoryError
 pub fn grit_lib::revwalk::history::HistoryError::from(grit_lib::ident::AuthorArgError) -> Self
 impl core::error::Error for grit_lib::ident::AuthorArgError
@@ -5829,6 +5865,33 @@ impl core::marker::Unpin for grit_lib::ident::AuthorArgError
 impl core::marker::UnsafeUnpin for grit_lib::ident::AuthorArgError
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::ident::AuthorArgError
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::ident::AuthorArgError
+pub enum grit_lib::ident::CommitIdentityError
+pub grit_lib::ident::CommitIdentityError::Author(grit_lib::ident::AuthorArgError)
+pub grit_lib::ident::CommitIdentityError::EmbeddedControl
+pub grit_lib::ident::CommitIdentityError::Unrecognized
+impl core::clone::Clone for grit_lib::ident::CommitIdentityError
+pub fn grit_lib::ident::CommitIdentityError::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::ident::CommitIdentityError
+impl core::cmp::PartialEq for grit_lib::ident::CommitIdentityError
+pub fn grit_lib::ident::CommitIdentityError::eq(&self, &Self) -> bool
+impl core::convert::From<grit_lib::ident::AuthorArgError> for grit_lib::ident::CommitIdentityError
+pub fn grit_lib::ident::CommitIdentityError::from(grit_lib::ident::AuthorArgError) -> Self
+impl core::convert::From<grit_lib::ident::CommitIdentityError> for grit_lib::error::Error
+pub fn grit_lib::error::Error::from(grit_lib::ident::CommitIdentityError) -> Self
+impl core::error::Error for grit_lib::ident::CommitIdentityError
+pub fn grit_lib::ident::CommitIdentityError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Debug for grit_lib::ident::CommitIdentityError
+pub fn grit_lib::ident::CommitIdentityError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::ident::CommitIdentityError
+pub fn grit_lib::ident::CommitIdentityError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::ident::CommitIdentityError
+impl core::marker::Freeze for grit_lib::ident::CommitIdentityError
+impl core::marker::Send for grit_lib::ident::CommitIdentityError
+impl core::marker::Sync for grit_lib::ident::CommitIdentityError
+impl core::marker::Unpin for grit_lib::ident::CommitIdentityError
+impl core::marker::UnsafeUnpin for grit_lib::ident::CommitIdentityError
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::ident::CommitIdentityError
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::ident::CommitIdentityError
 pub enum grit_lib::ident::SignatureTail
 pub grit_lib::ident::SignatureTail::NonNumeric
 pub grit_lib::ident::SignatureTail::Overflow
@@ -5935,6 +5998,8 @@ pub fn grit_lib::ident::parse_author_arg(&str) -> core::result::Result<grit_lib:
 pub fn grit_lib::ident::parse_signature(&str) -> core::option::Option<grit_lib::ident::Signature>
 pub fn grit_lib::ident::parse_signature_tail(&str) -> core::option::Option<grit_lib::ident::SignatureTail>
 pub fn grit_lib::ident::parse_signature_times(&str) -> core::option::Option<grit_lib::ident::ParsedSignatureTimes>
+pub fn grit_lib::ident::prepare_commit_identity_line(&str, core::option::Option<&str>, time::offset_date_time::OffsetDateTime) -> core::result::Result<alloc::string::String, grit_lib::ident::CommitIdentityError>
+pub fn grit_lib::ident::replace_identity_date_suffix(&str, &str) -> alloc::string::String
 pub fn grit_lib::ident::signature_timestamp_for_pretty(&str) -> grit_lib::ident::SignatureTimestamp
 pub fn grit_lib::ident::timestamp_for_at_ct(grit_lib::ident::SignatureTimestamp) -> core::option::Option<i64>
 pub mod grit_lib::index
@@ -14517,6 +14582,7 @@ pub grit_lib::prelude::Error::IndexUnmerged
 pub grit_lib::prelude::Error::InitBareWithSeparateGitDir
 pub grit_lib::prelude::Error::InitObjectFormatChange
 pub grit_lib::prelude::Error::InvalidHead
+pub grit_lib::prelude::Error::InvalidIdentity(grit_lib::ident::CommitIdentityError)
 pub grit_lib::prelude::Error::InvalidNotesRef(alloc::string::String)
 pub grit_lib::prelude::Error::InvalidObjectId(alloc::string::String)
 pub grit_lib::prelude::Error::InvalidPath(alloc::string::String)
@@ -14724,6 +14790,8 @@ impl core::convert::From<grit_lib::error::PathspecFromFileParseError> for grit_l
 pub fn grit_lib::error::Error::from(grit_lib::error::PathspecFromFileParseError) -> Self
 impl core::convert::From<grit_lib::error::RefLockError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::error::RefLockError) -> Self
+impl core::convert::From<grit_lib::ident::CommitIdentityError> for grit_lib::error::Error
+pub fn grit_lib::error::Error::from(grit_lib::ident::CommitIdentityError) -> Self
 impl core::convert::From<grit_lib::porcelain::branch_error::BranchError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::porcelain::branch_error::BranchError) -> Self
 impl core::convert::From<grit_lib::porcelain::hunk_select::HunkSelectError> for grit_lib::error::Error
@@ -18462,8 +18530,8 @@ pub enum grit_lib::remote::partial_clone::ObjectFilterSpec
 pub grit_lib::remote::partial_clone::ObjectFilterSpec::BlobLimit(u64)
 pub grit_lib::remote::partial_clone::ObjectFilterSpec::BlobNone
 impl grit_lib::remote::partial_clone::ObjectFilterSpec
+pub const fn grit_lib::remote::partial_clone::ObjectFilterSpec::blob_limit_bytes(&self) -> core::option::Option<u64>
 pub fn grit_lib::remote::partial_clone::ObjectFilterSpec::expand_for_protocol(&self) -> core::result::Result<alloc::string::String, grit_lib::remote::partial_clone::PartialCloneError>
-pub fn grit_lib::remote::partial_clone::ObjectFilterSpec::blob_limit_bytes(&self) -> core::option::Option<u64>
 pub fn grit_lib::remote::partial_clone::ObjectFilterSpec::from_blobs_cli(&str) -> core::result::Result<Self, grit_lib::remote::partial_clone::PartialCloneError>
 pub fn grit_lib::remote::partial_clone::ObjectFilterSpec::from_object_filter(&grit_lib::revwalk::rev_list::ObjectFilter) -> core::result::Result<Self, grit_lib::remote::partial_clone::PartialCloneError>
 pub fn grit_lib::remote::partial_clone::ObjectFilterSpec::parse(&str) -> core::result::Result<Self, grit_lib::remote::partial_clone::PartialCloneError>
