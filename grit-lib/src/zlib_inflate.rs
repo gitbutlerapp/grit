@@ -161,6 +161,67 @@ impl ZlibInflateScratch {
     ///
     /// Returns [`Error::CorruptObject`] when declared size does not match inflated output.
     /// Returns [`Error::Zlib`] for invalid or truncated zlib data.
+    /// Inflate exactly `expected_size` bytes and pass each produced slice to `update`.
+    ///
+    /// Uses a fixed stack buffer so large pack objects are not allocated whole in memory.
+    pub fn decompress_fixed_update(
+        &mut self,
+        bytes: &[u8],
+        pos: &mut usize,
+        expected_size: u64,
+        mut update: impl FnMut(&[u8]) -> Result<()>,
+    ) -> Result<()> {
+        let expected = usize::try_from(expected_size).map_err(|_| {
+            Error::CorruptObject(format!("pack object size overflow: {expected_size}"))
+        })?;
+        self.reset();
+        let input = &bytes[*pos..];
+        let mut in_off = 0usize;
+        let mut out_pos = 0usize;
+        let mut chunk = [0u8; READ_CHUNK];
+        loop {
+            let flush = if in_off >= input.len() {
+                FlushDecompress::Finish
+            } else {
+                FlushDecompress::None
+            };
+            let before_in = self.dec.total_in();
+            let before_out = self.dec.total_out();
+            let status = self
+                .dec
+                .decompress(&input[in_off..], &mut chunk, flush)
+                .map_err(|e| Error::Zlib(e.to_string()))?;
+            let consumed = (self.dec.total_in() - before_in) as usize;
+            let produced = (self.dec.total_out() - before_out) as usize;
+            in_off += consumed;
+            if produced > 0 {
+                update(&chunk[..produced])?;
+                out_pos += produced;
+            }
+            match status {
+                Status::StreamEnd => {
+                    if out_pos != expected {
+                        return Err(Error::CorruptObject(format!(
+                            "pack object size mismatch: expected {expected}, got {out_pos}"
+                        )));
+                    }
+                    *pos += in_off;
+                    return Ok(());
+                }
+                Status::Ok | Status::BufError => {
+                    if in_off >= input.len() && flush == FlushDecompress::Finish {
+                        return Err(Error::Zlib("unexpected end of zlib stream".to_owned()));
+                    }
+                    if consumed == 0 && produced == 0 {
+                        return Err(Error::CorruptObject(
+                            "zlib stream stalled before declared object size".to_owned(),
+                        ));
+                    }
+                }
+            }
+        }
+    }
+
     pub fn decompress_fixed(
         &mut self,
         bytes: &[u8],

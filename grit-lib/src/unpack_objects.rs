@@ -489,6 +489,7 @@ fn pack_is_thin_inner(data: &[u8], algo: HashAlgo) -> Result<bool> {
                 let zlib_offset = rd.pos;
                 let consumed = skip_zlib_at(data, zlib_offset, size)?;
                 rd.pos = zlib_offset + consumed;
+                let _ = obj_offset;
             }
             6 => {
                 let neg = rd.read_ofs_neg_offset()?;
@@ -519,93 +520,32 @@ fn pack_is_thin_inner(data: &[u8], algo: HashAlgo) -> Result<bool> {
     pack_is_thin_with_ofs_deltas(data, algo, ref_delta_bases)
 }
 
-/// Legacy path when the pack contains OFS deltas (must resolve chains to collect OIDs).
+/// Resolve delta chains only far enough to test ref-delta bases (no full pack materialization).
 fn pack_is_thin_with_ofs_deltas(
     data: &[u8],
-    algo: HashAlgo,
+    _algo: HashAlgo,
     ref_delta_bases: Vec<ObjectId>,
 ) -> Result<bool> {
-    let mut rd = PackReader::new(data);
-    if rd.read_exact(4)? != b"PACK" {
-        return Ok(false);
+    let tmp = tempfile::tempdir().map_err(|e| Error::Io(e))?;
+    let odb = Odb::new(tmp.path());
+    match crate::pack_index_build::build_pack_index_records(
+        data,
+        &odb,
+        crate::hash::Parallelism::resolve(Some(1)),
+        false,
+    ) {
+        Ok(records) => {
+            let in_pack: HashSet<ObjectId> = records.into_iter().map(|r| r.oid).collect();
+            Ok(ref_delta_bases.iter().any(|b| !in_pack.contains(b)))
+        }
+        Err(Error::CorruptObject(msg))
+            if msg.contains("delta base not available")
+                || msg.contains("could not be resolved for pack index") =>
+        {
+            Ok(true)
+        }
+        Err(e) => Err(e),
     }
-    let _version = rd.read_u32_be()?;
-    let nr_objects = rd.read_u32_be()? as usize;
-
-    let mut by_offset: HashMap<usize, (ObjectKind, Vec<u8>)> = HashMap::new();
-    let mut by_oid: HashMap<ObjectId, (ObjectKind, Vec<u8>)> = HashMap::new();
-    let mut pending: Vec<PendingDelta> = Vec::new();
-
-    for _ in 0..nr_objects {
-        let obj_offset = rd.pos;
-        let (type_code, size) = rd.read_type_size()?;
-        match type_code {
-            1..=4 => {
-                let kind = type_code_to_kind(type_code)?;
-                let obj_data = rd.decompress(size)?;
-                let oid = crate::hash::hash_object(algo, kind, &obj_data)?;
-                by_offset.insert(obj_offset, (kind, obj_data.clone()));
-                by_oid.insert(oid, (kind, obj_data));
-            }
-            6 => {
-                let neg = rd.read_ofs_neg_offset()?;
-                let base_offset = obj_offset.checked_sub(neg).ok_or_else(|| {
-                    Error::CorruptObject("ofs-delta base offset underflow".to_owned())
-                })?;
-                let delta_data = rd.decompress(size)?;
-                pending.push(PendingDelta {
-                    offset: obj_offset,
-                    base_oid: None,
-                    base_offset: Some(base_offset),
-                    delta_data,
-                });
-            }
-            7 => {
-                let base_bytes = rd.read_exact(algo.len())?;
-                let base_oid = ObjectId::from_bytes(base_bytes)?;
-                let delta_data = rd.decompress(size)?;
-                pending.push(PendingDelta {
-                    offset: obj_offset,
-                    base_oid: Some(base_oid),
-                    base_offset: None,
-                    delta_data,
-                });
-            }
-            _ => return Ok(false),
-        }
-    }
-
-    let mut remaining = pending;
-    loop {
-        if remaining.is_empty() {
-            break;
-        }
-        let before = remaining.len();
-        let mut still_pending: Vec<PendingDelta> = Vec::new();
-        for delta in remaining {
-            let base = if let Some(base_off) = delta.base_offset {
-                by_offset.get(&base_off).cloned()
-            } else if let Some(ref base_id) = delta.base_oid {
-                by_oid.get(base_id).cloned()
-            } else {
-                None
-            };
-            if let Some((base_kind, base_data)) = base {
-                let result = apply_delta(&base_data, &delta.delta_data)?;
-                let oid = crate::hash::hash_object(algo, base_kind, &result)?;
-                by_offset.insert(delta.offset, (base_kind, result.clone()));
-                by_oid.insert(oid, (base_kind, result));
-            } else {
-                still_pending.push(delta);
-            }
-        }
-        remaining = still_pending;
-        if remaining.len() == before {
-            break;
-        }
-    }
-
-    Ok(ref_delta_bases.iter().any(|b| !by_oid.contains_key(b)))
 }
 
 /// Parse a pack byte stream and return every resolved object (after delta resolution) keyed by OID.

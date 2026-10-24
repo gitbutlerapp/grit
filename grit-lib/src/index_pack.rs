@@ -16,7 +16,7 @@ use crate::odb::Odb;
 use crate::pack::{verify_pack_and_collect, write_v2_pack_index_with_trailer};
 use crate::pack_map::PackData;
 use crate::progress::ProgressSink;
-use crate::transfer::fix_thin_pack_path;
+use crate::transfer::{fix_thin_pack, ref_delta_bases_in_pack};
 use crate::unpack_objects::PackIndexRecord;
 
 pub use crate::pack_index_build::{
@@ -292,10 +292,7 @@ pub fn install_pack_path_with_progress(
     progress: Option<&mut dyn ProgressSink>,
 ) -> Result<IngestedPack> {
     odb.require_files_primary("index_pack")?;
-    let mut owned = pack_path.to_path_buf();
-    if opts.fix_thin {
-        owned = fix_thin_pack_path(&owned, odb)?;
-    }
+    let owned = pack_path.to_path_buf();
     let hb = odb.hash_algo().len();
     let meta = std::fs::metadata(&owned).map_err(Error::Io)?;
     let len = meta.len();
@@ -339,7 +336,7 @@ pub fn install_pack_path_with_progress(
             std::fs::copy(&owned, &stage_pack).map_err(Error::Io)?;
             let _ = std::fs::remove_file(&owned);
         }
-        let indexed = PackData::open(&stage_pack)?;
+        let mut indexed = PackData::open(&stage_pack)?;
         let parallelism = opts.index_parallelism(odb)?;
         record_resolved_ingest_threads(parallelism.threads().get());
         let sort_threads = parallelism.threads().get();
@@ -350,13 +347,31 @@ pub fn install_pack_path_with_progress(
                     "received pack checksum mismatch (download may be incomplete): {e}"
                 ))
             })?;
-            let records = crate::pack_index_build::build_pack_index_records_with_progress(
+            let mut records = crate::pack_index_build::build_pack_index_records_with_progress(
                 pack_bytes,
                 odb,
                 parallelism,
                 !opts.skip_post_index_verify,
                 progress,
             )?;
+            if opts.fix_thin {
+                let ref_bases = ref_delta_bases_in_pack(pack_bytes, odb.hash_algo())?;
+                if pack_needs_thin_fix(&records, &ref_bases) {
+                    drop(indexed);
+                    let fixed = fix_thin_pack(std::fs::read(&stage_pack).map_err(Error::Io)?, odb)?;
+                    std::fs::write(&stage_pack, &fixed).map_err(Error::Io)?;
+                    indexed = PackData::open(&stage_pack)?;
+                    let pack_bytes: &[u8] = indexed.deref();
+                    records = crate::pack_index_build::build_pack_index_records_with_progress(
+                        pack_bytes,
+                        odb,
+                        parallelism,
+                        !opts.skip_post_index_verify,
+                        None,
+                    )?;
+                }
+            }
+            let pack_bytes: &[u8] = indexed.deref();
             let trailer = pack_bytes[pack_bytes.len() - hb..].to_vec();
             (records, trailer)
         };
@@ -400,6 +415,14 @@ pub fn install_pack_path_with_progress(
     let ingested = install_result?;
     odb.invalidate_packs();
     Ok(ingested)
+}
+
+fn pack_needs_thin_fix(records: &[PackIndexRecord], ref_bases: &[ObjectId]) -> bool {
+    if ref_bases.is_empty() {
+        return false;
+    }
+    let in_pack: HashSet<ObjectId> = records.iter().map(|r| r.oid).collect();
+    ref_bases.iter().any(|base| !in_pack.contains(base))
 }
 
 fn cleanup_stale_install_stage(stage: &Path) {

@@ -1286,26 +1286,48 @@ fn collect_reachable_excluding_peer(
     })
 }
 
-/// Expand a thin pack by appending missing ref-delta bases from `odb`, matching
-/// `git index-pack --fix-thin`.
-/// Expand a thin on-disk pack, returning the path to the pack bytes to index.
-///
-/// When the pack is not thin, returns `pack_path` unchanged. Otherwise writes a
-/// fixed pack alongside the input and removes the thin temp file.
-pub(crate) fn fix_thin_pack_path(pack_path: &Path, odb: &Odb) -> Result<std::path::PathBuf> {
-    use crate::pack_map::PackData;
-    use std::ops::Deref;
+/// Collect base object ids referenced by `REF_DELTA` entries in `pack`.
+pub(crate) fn ref_delta_bases_in_pack(pack: &[u8], algo: HashAlgo) -> Result<Vec<ObjectId>> {
+    use crate::pack_zlib::skip_zlib_at;
+    use crate::unpack_objects::PackReader;
 
-    let mapped = PackData::open(pack_path)?;
-    if !crate::unpack_objects::pack_is_thin(mapped.deref(), odb.hash_algo()) {
-        return Ok(pack_path.to_path_buf());
+    let mut rd = PackReader::new(pack);
+    if rd.read_exact(4)? != b"PACK" {
+        return Ok(Vec::new());
     }
-    let data = std::fs::read(pack_path).map_err(Error::Io)?;
-    let fixed = fix_thin_pack(data, odb)?;
-    let out = pack_path.with_extension("fixed");
-    std::fs::write(&out, &fixed).map_err(Error::Io)?;
-    let _ = std::fs::remove_file(pack_path);
-    Ok(out)
+    let _version = rd.read_u32_be()?;
+    let nr_objects = rd.read_u32_be()? as usize;
+    let hb = algo.len();
+    let mut bases = Vec::new();
+    for _ in 0..nr_objects {
+        let (type_code, size) = rd.read_type_size()?;
+        match type_code {
+            1..=4 => {
+                let zlib_offset = rd.pos;
+                let consumed = skip_zlib_at(pack, zlib_offset, size)?;
+                rd.pos = zlib_offset + consumed;
+            }
+            6 => {
+                let neg = rd.read_ofs_neg_offset()?;
+                let _base_offset = rd
+                    .pos
+                    .checked_sub(neg)
+                    .ok_or_else(|| Error::CorruptObject("ofs-delta base underflow".to_owned()))?;
+                let zlib_offset = rd.pos;
+                let consumed = skip_zlib_at(pack, zlib_offset, size)?;
+                rd.pos = zlib_offset + consumed;
+            }
+            7 => {
+                let base_bytes = rd.read_exact(hb)?;
+                bases.push(ObjectId::from_bytes(base_bytes)?);
+                let zlib_offset = rd.pos;
+                let consumed = skip_zlib_at(pack, zlib_offset, size)?;
+                rd.pos = zlib_offset + consumed;
+            }
+            _ => return Ok(Vec::new()),
+        }
+    }
+    Ok(bases)
 }
 
 pub(crate) fn fix_thin_pack(mut pack: Vec<u8>, odb: &Odb) -> Result<Vec<u8>> {

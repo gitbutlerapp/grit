@@ -11,13 +11,11 @@ use crate::odb::Odb;
 use crate::pack_zlib::{decompress_zlib_at_index, skip_zlib_at_with_scratch};
 use crate::parallel::run_ordered_pool;
 use crate::progress::{ProgressPhase, ProgressSink};
-use crate::unpack_objects::{
-    apply_delta, decompress_zlib_at, type_code_to_kind, PackIndexRecord, PackReader,
-};
+use crate::unpack_objects::{apply_delta, type_code_to_kind, PackIndexRecord, PackReader};
 use crate::zlib_inflate::ZlibInflateScratch;
 use std::borrow::Cow;
 use std::collections::{HashMap, VecDeque};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 
@@ -153,8 +151,12 @@ struct WholeHashed {
 
 /// Hash oversized whole objects outside the parallel pool to cap per-thread memory.
 const LARGE_WHOLE_OBJECT: usize = 4 * 1024 * 1024;
+/// Soft cap on total uncompressed bytes being hashed by whole-object workers at once.
+const WHOLE_INFLIGHT_BYTES_PER_THREAD: usize = 8 * 1024 * 1024;
 /// Work-stealing step when resolving a batch of ready deltas.
 const DELTA_STEAL_CHUNK: usize = 4;
+/// Cap how many ready deltas are resolved at once so base inflation stays bounded.
+const DELTA_RESOLVE_BATCH: usize = 256;
 struct PackHeader {
     nr_objects: usize,
 }
@@ -294,7 +296,8 @@ fn scan_and_hash_wholes_serial(
             1..=4 => {
                 let kind = type_code_to_kind(type_code)?;
                 let zlib_offset = rd.pos;
-                let (data, consumed) = decompress_zlib_at(pack, zlib_offset, size)?;
+                let consumed =
+                    skip_zlib_at_with_scratch(&mut skip_scratch, pack, zlib_offset, size)?;
                 let pack_end = zlib_offset + consumed;
                 rd.pos = pack_end;
                 let work = WholeSlot {
@@ -304,13 +307,14 @@ fn scan_and_hash_wholes_serial(
                     kind,
                     uncompressed_size: size,
                 };
-                let item = hash_whole_slot_with_data(
+                let mut hash_scratch = ZlibInflateScratch::default();
+                let item = hash_one_whole_slot_with_scratch(
                     pack,
                     &work,
-                    &data,
                     algo,
                     state.ofs_base_refs,
                     state.oid_base_refs,
+                    &mut hash_scratch,
                 )?;
                 seed_in_pack_whole_base(state, &item);
                 apply_whole_hashed(state, item);
@@ -391,9 +395,23 @@ struct WholeHashQueue {
     jobs: Mutex<VecDeque<WholeHashJob>>,
     jobs_added: Condvar,
     scan_done: AtomicBool,
+    inflight_bytes: AtomicUsize,
+    inflight_limit: usize,
+    inflight_room: Condvar,
 }
 
 impl WholeHashQueue {
+    fn new(inflight_limit: usize) -> Self {
+        Self {
+            jobs: Mutex::new(VecDeque::new()),
+            jobs_added: Condvar::new(),
+            scan_done: AtomicBool::new(false),
+            inflight_bytes: AtomicUsize::new(0),
+            inflight_limit,
+            inflight_room: Condvar::new(),
+        }
+    }
+
     fn push(&self, job: WholeHashJob) {
         let mut guard = self.jobs.lock().unwrap_or_else(|e| e.into_inner());
         guard.push_back(job);
@@ -406,6 +424,32 @@ impl WholeHashQueue {
         let _guard = self.jobs.lock().unwrap_or_else(|e| e.into_inner());
         self.scan_done.store(true, Ordering::Release);
         self.jobs_added.notify_all();
+    }
+
+    fn acquire_inflight(&self, bytes: usize) {
+        if bytes == 0 {
+            return;
+        }
+        let mut guard = self.jobs.lock().unwrap_or_else(|e| e.into_inner());
+        loop {
+            let cur = self.inflight_bytes.load(Ordering::Relaxed);
+            if cur.saturating_add(bytes) <= self.inflight_limit {
+                self.inflight_bytes.fetch_add(bytes, Ordering::Relaxed);
+                return;
+            }
+            guard = self
+                .inflight_room
+                .wait(guard)
+                .unwrap_or_else(|e| e.into_inner());
+        }
+    }
+
+    fn release_inflight(&self, bytes: usize) {
+        if bytes == 0 {
+            return;
+        }
+        self.inflight_bytes.fetch_sub(bytes, Ordering::Relaxed);
+        self.inflight_room.notify_all();
     }
 }
 
@@ -422,13 +466,10 @@ fn scan_and_hash_whole_slots_overlapped(
     mut progress: Option<&mut PackIndexReporter<'_>>,
 ) -> Result<()> {
     let n_workers = threads.get();
+    let inflight_limit = n_workers.saturating_mul(WHOLE_INFLIGHT_BYTES_PER_THREAD);
     let ofs_base_refs = state.ofs_base_refs.clone();
     let oid_base_refs = state.oid_base_refs.clone();
-    let queue = Arc::new(WholeHashQueue {
-        jobs: Mutex::new(VecDeque::new()),
-        jobs_added: Condvar::new(),
-        scan_done: AtomicBool::new(false),
-    });
+    let queue = Arc::new(WholeHashQueue::new(inflight_limit));
     let first_error: Arc<Mutex<Option<Error>>> = Arc::new(Mutex::new(None));
     let hashed: Arc<Mutex<Vec<(usize, WholeHashed)>>> = Arc::new(Mutex::new(Vec::new()));
 
@@ -464,30 +505,22 @@ fn scan_and_hash_whole_slots_overlapped(
                                 .unwrap_or_else(|e| e.into_inner());
                         }
                     };
-                    if job.slot.uncompressed_size >= LARGE_WHOLE_OBJECT {
-                        match hash_one_whole_slot(
+                    let inflight = job.slot.uncompressed_size;
+                    queue.acquire_inflight(inflight);
+                    let hash_result = if job.slot.uncompressed_size >= LARGE_WHOLE_OBJECT {
+                        hash_one_whole_slot(pack, &job.slot, algo, &ofs_base_refs, &oid_base_refs)
+                    } else {
+                        hash_one_whole_slot_with_scratch(
                             pack,
                             &job.slot,
                             algo,
                             &ofs_base_refs,
                             &oid_base_refs,
-                        ) {
-                            Ok(item) => hashed
-                                .lock()
-                                .unwrap_or_else(|e| e.into_inner())
-                                .push((job.index, item)),
-                            Err(err) => record_whole_hash_error(&first_error, err),
-                        }
-                        continue;
-                    }
-                    match hash_one_whole_slot_with_scratch(
-                        pack,
-                        &job.slot,
-                        algo,
-                        &ofs_base_refs,
-                        &oid_base_refs,
-                        &mut zlib,
-                    ) {
+                            &mut zlib,
+                        )
+                    };
+                    queue.release_inflight(inflight);
+                    match hash_result {
                         Ok(item) => hashed
                             .lock()
                             .unwrap_or_else(|e| e.into_inner())
@@ -634,8 +667,8 @@ fn hash_one_whole_slot(
     ofs_base_refs: &HashMap<usize, u32>,
     oid_base_refs: &OidHashMap<u32>,
 ) -> Result<WholeHashed> {
-    let data = decompress_zlib_at_index(pack, work.zlib_offset, work.uncompressed_size)?;
-    hash_whole_slot_with_data(pack, work, &data, algo, ofs_base_refs, oid_base_refs)
+    let mut scratch = ZlibInflateScratch::default();
+    hash_one_whole_slot_with_scratch(pack, work, algo, ofs_base_refs, oid_base_refs, &mut scratch)
 }
 
 fn hash_one_whole_slot_with_scratch(
@@ -646,20 +679,36 @@ fn hash_one_whole_slot_with_scratch(
     oid_base_refs: &OidHashMap<u32>,
     scratch: &mut ZlibInflateScratch,
 ) -> Result<WholeHashed> {
-    let mut pos = work.zlib_offset;
-    let data = scratch.decompress_fixed(pack, &mut pos, work.uncompressed_size as u64)?;
-    hash_whole_slot_with_data(pack, work, &data, algo, ofs_base_refs, oid_base_refs)
+    let oid = hash_whole_slot_oid_from_pack(pack, work, algo, scratch)?;
+    hash_whole_slot_from_oid(pack, work, oid, algo, ofs_base_refs, oid_base_refs)
 }
 
-fn hash_whole_slot_with_data(
+fn hash_whole_slot_oid_from_pack(
     pack: &[u8],
     work: &WholeSlot,
-    data: &[u8],
+    algo: HashAlgo,
+    scratch: &mut ZlibInflateScratch,
+) -> Result<ObjectId> {
+    use crate::hash::ObjectHasher;
+    let len = u64::try_from(work.uncompressed_size).unwrap_or(u64::MAX);
+    let mut hasher = ObjectHasher::for_object(algo, work.kind, len);
+    let mut pos = work.zlib_offset;
+    scratch.decompress_fixed_update(pack, &mut pos, len, |chunk| {
+        hasher.update(chunk);
+        Ok(())
+    })?;
+    hasher.finalize()
+}
+
+fn hash_whole_slot_from_oid(
+    pack: &[u8],
+    work: &WholeSlot,
+    oid: ObjectId,
     algo: HashAlgo,
     ofs_base_refs: &HashMap<usize, u32>,
     oid_base_refs: &OidHashMap<u32>,
 ) -> Result<WholeHashed> {
-    let oid = hash_object(algo, work.kind, data)?;
+    let _ = algo;
     let retain_ofs = ofs_base_refs.get(&work.offset).copied().unwrap_or(0) > 0;
     let retain_oid = oid_base_refs.get(&oid).copied().unwrap_or(0) > 0;
     Ok(WholeHashed {
@@ -823,47 +872,6 @@ fn retain_owned_base_for_delta(
     }
 }
 
-fn materialize_index_base_in_pack(pack: &[u8], base: &mut IndexBase) -> Result<()> {
-    let BasePayload::InPack {
-        zlib_offset,
-        uncompressed_size,
-    } = &base.payload
-    else {
-        return Ok(());
-    };
-    let data = decompress_zlib_at_index(pack, *zlib_offset, *uncompressed_size)?;
-    base.payload = BasePayload::Owned(data);
-    Ok(())
-}
-
-fn materialize_bases_for_ready_deltas(
-    pack: &[u8],
-    ready: &[PendingIndexDelta],
-    ofs_bases: &mut HashMap<usize, IndexBase>,
-    oid_bases: &mut OidHashMap<IndexBase>,
-) -> Result<()> {
-    use std::collections::HashSet;
-    let mut seen_ofs = HashSet::new();
-    let mut seen_oid = HashSet::new();
-    for delta in ready {
-        if let Some(base_off) = delta.base_offset {
-            if seen_ofs.insert(base_off) {
-                if let Some(base) = ofs_bases.get_mut(&base_off) {
-                    materialize_index_base_in_pack(pack, base)?;
-                }
-            }
-        }
-        if let Some(ref base_id) = delta.base_oid {
-            if seen_oid.insert(*base_id) {
-                if let Some(base) = oid_bases.get_mut(base_id) {
-                    materialize_index_base_in_pack(pack, base)?;
-                }
-            }
-        }
-    }
-    Ok(())
-}
-
 fn base_inflated_bytes<'a>(pack: &'a [u8], base: &'a IndexBase) -> Result<Cow<'a, [u8]>> {
     match &base.payload {
         BasePayload::InPack {
@@ -920,62 +928,65 @@ fn resolve_pending_deltas_parallel(
 
         let ofs_out_refs = state.ofs_base_refs.clone();
         let oid_out_refs = state.oid_base_refs.clone();
-        let mut base_release: Vec<(Option<usize>, Option<ObjectId>)> = Vec::new();
-
-        materialize_bases_for_ready_deltas(pack, &ready, state.ofs_bases, state.oid_bases)?;
-
         let ready_count = u64::try_from(ready.len()).unwrap_or(u64::MAX);
-        let n_workers = threads.get().min(ready.len()).max(1);
-        let hashed = run_ordered_pool(&ready, n_workers, DELTA_STEAL_CHUNK, |delta| {
-            resolve_one_delta(
-                pack,
-                delta,
-                state.ofs_bases,
-                state.oid_bases,
-                state.odb,
-                algo,
-                &ofs_out_refs,
-                &oid_out_refs,
-            )
-        })?;
+        // Delta resolution inflates base and result bytes per worker; cap concurrency to
+        // bound peak RSS on large delta-heavy packs (whole-object hashing stays parallel).
+        let n_workers = threads.get().min(DELTA_RESOLVE_BATCH).min(2).max(1);
 
-        for item in hashed {
-            state.records.push(item.record);
-            if let Some(data) = item.owned_base {
-                retain_owned_base_for_delta(
-                    item.offset,
-                    item.oid,
-                    item.kind,
-                    data,
-                    state.ofs_base_refs,
-                    state.oid_base_refs,
+        for batch in ready.chunks(DELTA_RESOLVE_BATCH) {
+            let mut base_release: Vec<(Option<usize>, Option<ObjectId>)> = Vec::new();
+            let hashed = run_ordered_pool(batch, n_workers, DELTA_STEAL_CHUNK, |delta| {
+                resolve_one_delta(
+                    pack,
+                    delta,
                     state.ofs_bases,
                     state.oid_bases,
-                );
+                    state.odb,
+                    algo,
+                    &ofs_out_refs,
+                    &oid_out_refs,
+                )
+            })?;
+
+            for item in hashed {
+                state.records.push(item.record);
+                if let Some(data) = item.owned_base {
+                    retain_owned_base_for_delta(
+                        item.offset,
+                        item.oid,
+                        item.kind,
+                        data,
+                        state.ofs_base_refs,
+                        state.oid_base_refs,
+                        state.ofs_bases,
+                        state.oid_bases,
+                    );
+                }
+                base_release.push((item.base_offset, item.base_oid));
             }
-            base_release.push((item.base_offset, item.base_oid));
-        }
-        if let Some(r) = progress.as_mut() {
-            r.on_deltas_resolved(ready_count);
+
+            for (base_off, base_id) in base_release {
+                if let Some(base_off) = base_off {
+                    if let Some(n) = state.ofs_base_refs.get_mut(&base_off) {
+                        *n = n.saturating_sub(1);
+                        if *n == 0 {
+                            state.ofs_bases.remove(&base_off);
+                        }
+                    }
+                }
+                if let Some(base_id) = base_id {
+                    if let Some(n) = state.oid_base_refs.get_mut(&base_id) {
+                        *n = n.saturating_sub(1);
+                        if *n == 0 {
+                            state.oid_bases.remove(&base_id);
+                        }
+                    }
+                }
+            }
         }
 
-        for (base_off, base_id) in base_release {
-            if let Some(base_off) = base_off {
-                if let Some(n) = state.ofs_base_refs.get_mut(&base_off) {
-                    *n = n.saturating_sub(1);
-                    if *n == 0 {
-                        state.ofs_bases.remove(&base_off);
-                    }
-                }
-            }
-            if let Some(base_id) = base_id {
-                if let Some(n) = state.oid_base_refs.get_mut(&base_id) {
-                    *n = n.saturating_sub(1);
-                    if *n == 0 {
-                        state.oid_bases.remove(&base_id);
-                    }
-                }
-            }
+        if let Some(r) = progress.as_mut() {
+            r.on_deltas_resolved(ready_count);
         }
     }
     Ok(())
