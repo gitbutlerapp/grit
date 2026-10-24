@@ -6315,10 +6315,9 @@ fn read_regular_worktree_blob_bytes(
         filter_process,
         command_runner: None,
     };
-    Ok(
-        crate::crlf::convert_to_git_with_opts(&raw, rel_path, conv, file_attrs, opts)
-            .unwrap_or(raw),
-    )
+    Ok(crate::crlf::convert_to_git_with_opts(
+        &raw, rel_path, conv, file_attrs, opts,
+    )?)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -6358,10 +6357,9 @@ pub(crate) fn worktree_blob_bytes(
         filter_process,
         command_runner: None,
     };
-    Ok(
-        crate::crlf::convert_to_git_with_opts(&raw, rel_path, conv, file_attrs, opts)
-            .unwrap_or(raw),
-    )
+    Ok(crate::crlf::convert_to_git_with_opts(
+        &raw, rel_path, conv, file_attrs, opts,
+    )?)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -6394,6 +6392,12 @@ fn worktree_file_oid(
 }
 
 /// Hash normalized worktree bytes for a path (does not write to the object database).
+///
+/// # Errors
+///
+/// Returns [`Error::Io`] when the file cannot be read, and [`Error::Filter`] when a
+/// `filter.<driver>.required` clean filter fails or cannot be started; content is never
+/// stored or hashed unfiltered in that case.
 #[allow(clippy::too_many_arguments)]
 pub fn hash_worktree_file(
     odb: &Odb,
@@ -6419,6 +6423,12 @@ pub fn hash_worktree_file(
 }
 
 /// Read, normalize (CRLF/attributes), and store a worktree blob once.
+///
+/// # Errors
+///
+/// Returns [`Error::Io`] when the file cannot be read, and [`Error::Filter`] when a
+/// `filter.<driver>.required` clean filter fails or cannot be started; content is never
+/// stored or hashed unfiltered in that case.
 #[allow(clippy::too_many_arguments)]
 pub fn materialize_worktree_blob(
     odb: &Odb,

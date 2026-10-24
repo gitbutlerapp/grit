@@ -1422,6 +1422,15 @@ pub fn convert_to_git_with_opts(
     // 1. Run clean filter if configured (long-running `process` overrides clean command)
     if let Some(ref proc_cmd) = file_attrs.filter_process {
         let name = file_attrs.filter_driver_name.as_deref().unwrap_or_default();
+        if file_attrs.filter_clean_required {
+            start_required_process_filter(
+                filter_state,
+                proc_cmd,
+                name,
+                rel_path,
+                FilterPhase::Clean,
+            )?;
+        }
         match apply_process_clean(filter_state, proc_cmd, rel_path, &buf) {
             Ok(filtered) => buf = filtered,
             Err(e) => {
@@ -1442,20 +1451,15 @@ pub fn convert_to_git_with_opts(
         }
     } else {
         match file_attrs.filter_clean.as_ref() {
-            Some(clean_cmd) => {
-                buf = run_filter(runner, clean_cmd, &buf, rel_path).map_err(|e| {
+            Some(clean_cmd) => match run_filter_command(runner, clean_cmd, &buf, rel_path) {
+                Ok(filtered) => buf = filtered,
+                Err(e) if file_attrs.filter_clean_required => {
                     let name = file_attrs.filter_driver_name.as_deref().unwrap_or_default();
-                    if file_attrs.filter_clean_required {
-                        FilterError::ExternalFilterFailed {
-                            driver: name.to_owned(),
-                            path: rel_path.to_owned(),
-                            phase: FilterPhase::Clean,
-                        }
-                    } else {
-                        filter_detail(rel_path, format!("clean filter failed: {e}"))
-                    }
-                })?;
-            }
+                    return Err(e.into_required_error(name, rel_path, FilterPhase::Clean));
+                }
+                // Like Git, an optional filter that fails leaves the content unfiltered.
+                Err(_) => {}
+            },
             None => {
                 if file_attrs.filter_clean_required {
                     let name = file_attrs.filter_driver_name.as_deref().unwrap_or_default();
@@ -1478,8 +1482,13 @@ pub fn convert_to_git_with_opts(
         }
         // `CONV_WRITE_OBJECT` → validate BOM rules and die on error (Git `encode_to_git`).
         let writing_object = opts.check_safecrlf;
-        buf = decode_working_tree_bytes_to_utf8(&buf, rel_path, enc, writing_object)
-            .map_err(|e| filter_detail(rel_path, e.to_string()))?;
+        match decode_working_tree_bytes_to_utf8(&buf, rel_path, enc, writing_object) {
+            Ok(decoded) => buf = decoded,
+            Err(e) if writing_object => return Err(filter_detail(rel_path, e.to_string())),
+            // Reads for diff/status/hashing keep the bytes as they are when they cannot be
+            // re-encoded, as Git does without `CONV_WRITE_OBJECT`.
+            Err(_) => {}
+        }
         // Git `encode_to_git`: when writing to the object DB, verify the round trip for encodings
         // listed in `core.checkRoundtripEncoding` (default `SHIFT-JIS`); emit the GIT_TRACE line.
         if writing_object && encoding_needs_roundtrip_check(enc, conv) {
@@ -1753,6 +1762,15 @@ pub fn convert_to_worktree_with_runner(
     // 4. Smudge filter — process driver overrides shell smudge
     let driver = file_attrs.filter_driver_name.as_deref().unwrap_or("");
     if let Some(ref proc_cmd) = file_attrs.filter_process {
+        if file_attrs.filter_smudge_required {
+            start_required_process_filter(
+                filter_state,
+                proc_cmd,
+                driver,
+                rel_path,
+                FilterPhase::Smudge,
+            )?;
+        }
         let smudge_out = match apply_process_smudge(
             filter_state,
             proc_cmd,
@@ -1793,17 +1811,12 @@ pub fn convert_to_worktree_with_runner(
         buf = out;
     } else {
         match file_attrs.filter_smudge.as_ref() {
-            Some(smudge_cmd) => match run_filter(runner, smudge_cmd, &buf, rel_path) {
+            Some(smudge_cmd) => match run_filter_command(runner, smudge_cmd, &buf, rel_path) {
                 Ok(filtered) => buf = filtered,
-                Err(_e) => {
-                    if file_attrs.filter_smudge_required {
-                        return Err(external_filter_failed(
-                            rel_path,
-                            driver,
-                            FilterPhase::Smudge,
-                        ));
-                    }
+                Err(e) if file_attrs.filter_smudge_required => {
+                    return Err(e.into_required_error(driver, rel_path, FilterPhase::Smudge));
                 }
+                Err(_) => {}
             },
             None => {
                 if file_attrs.filter_smudge_required {
@@ -2114,20 +2127,99 @@ pub fn run_filter(
     data: &[u8],
     rel_path: &str,
 ) -> Result<Vec<u8>, FilterError> {
+    run_filter_command(runner, cmd, data, rel_path).map_err(|e| match e {
+        FilterRunError::Spawn { source, .. } | FilterRunError::Io(source) => {
+            filter_detail(rel_path, source.to_string())
+        }
+        FilterRunError::Exit(status) => FilterError::Failed { status },
+    })
+}
+
+/// How a one-shot clean/smudge command failed.
+#[derive(Debug)]
+enum FilterRunError {
+    /// `program` could not be spawned.
+    Spawn {
+        program: PathBuf,
+        source: std::io::Error,
+    },
+    /// Piping data to or from the running command failed.
+    Io(std::io::Error),
+    /// The command exited with this non-zero status.
+    Exit(i32),
+}
+
+impl FilterRunError {
+    /// The error for a failure of a `filter.<driver>.required` filter.
+    fn into_required_error(self, driver: &str, rel_path: &str, phase: FilterPhase) -> FilterError {
+        match self {
+            Self::Spawn { program, source } => {
+                filter_spawn_failed(driver, rel_path, phase, &program, &source)
+            }
+            Self::Io(_) | Self::Exit(_) => external_filter_failed(rel_path, driver, phase),
+        }
+    }
+}
+
+fn filter_spawn_failed(
+    driver: &str,
+    rel_path: &str,
+    phase: FilterPhase,
+    program: &Path,
+    source: &std::io::Error,
+) -> FilterError {
+    FilterError::ExternalFilterSpawnFailed {
+        driver: driver.to_owned(),
+        path: rel_path.to_owned(),
+        phase,
+        program: program.display().to_string(),
+        kind: source.kind(),
+        detail: source.to_string(),
+    }
+}
+
+fn run_filter_command(
+    runner: &dyn CommandRunner,
+    cmd: &str,
+    data: &[u8],
+    rel_path: &str,
+) -> Result<Vec<u8>, FilterRunError> {
     let expanded = expand_filter_command(cmd, rel_path);
     let mut spec = CommandSpec::sh_dash_c_filter(expanded);
     spec.stdin = CommandStdin::Pipe(data.to_vec());
     let output = runner
         .spawn(&spec)
-        .map_err(|e| filter_detail(rel_path, e.to_string()))?
+        .map_err(|source| FilterRunError::Spawn {
+            program: spec.program.clone(),
+            source,
+        })?
         .wait_with_output()
-        .map_err(|e| filter_detail(rel_path, e.to_string()))?;
+        .map_err(FilterRunError::Io)?;
     if !output.status.success {
-        return Err(FilterError::Failed {
-            status: output.status.code.unwrap_or(1),
-        });
+        return Err(FilterRunError::Exit(output.status.code.unwrap_or(1)));
     }
     Ok(output.stdout)
+}
+
+/// Start the long-running filter `proc_cmd` before a required filter uses it, so a spawn
+/// failure is reported with its cause instead of as a generic filter failure.
+fn start_required_process_filter(
+    filter_state: &FilterProcessState,
+    proc_cmd: &str,
+    driver: &str,
+    rel_path: &str,
+    phase: FilterPhase,
+) -> Result<(), FilterError> {
+    if filter_state.process_filter_is_disabled(proc_cmd) {
+        return Ok(());
+    }
+    match crate::filter_process::start_process_filter(filter_state, proc_cmd) {
+        Err(crate::filter_process::ProcessFilterStartError::Spawn(source)) => Err(
+            filter_spawn_failed(driver, rel_path, phase, Path::new("sh"), &source),
+        ),
+        // Handshake failures surface from the filter call itself, as before.
+        Err(crate::filter_process::ProcessFilterStartError::Other(_)) | Ok(()) => Ok(()),
+    }
 }
 
 // Re-export AttrRule type is internal, but we expose the vec through load_gitattributes.

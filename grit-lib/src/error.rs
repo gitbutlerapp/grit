@@ -266,6 +266,24 @@ pub enum FilterError {
         phase: FilterPhase,
     },
 
+    /// A required clean or smudge filter could not be started (for example, no shell to run
+    /// it), so the content was neither filtered nor stored unfiltered.
+    #[error("{path}: cannot start {phase} filter '{driver}' ({program}): {detail}")]
+    ExternalFilterSpawnFailed {
+        /// Filter driver name from `.gitattributes`.
+        driver: String,
+        /// Repository-relative path being filtered.
+        path: String,
+        /// Whether the clean or smudge filter was being started.
+        phase: FilterPhase,
+        /// Program grit tried to spawn (`sh` for shell-command filters).
+        program: String,
+        /// OS error kind from the failed spawn.
+        kind: std::io::ErrorKind,
+        /// OS error message from the failed spawn.
+        detail: String,
+    },
+
     /// Filter output did not round-trip (clean/smudge mismatch).
     #[error("{path}: {detail}")]
     NotFilteredProperly {

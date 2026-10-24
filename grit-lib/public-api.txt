@@ -5524,6 +5524,13 @@ pub grit_lib::error::FilterError::ExternalFilterFailed
 pub grit_lib::error::FilterError::ExternalFilterFailed::driver: alloc::string::String
 pub grit_lib::error::FilterError::ExternalFilterFailed::path: alloc::string::String
 pub grit_lib::error::FilterError::ExternalFilterFailed::phase: grit_lib::error::FilterPhase
+pub grit_lib::error::FilterError::ExternalFilterSpawnFailed
+pub grit_lib::error::FilterError::ExternalFilterSpawnFailed::detail: alloc::string::String
+pub grit_lib::error::FilterError::ExternalFilterSpawnFailed::driver: alloc::string::String
+pub grit_lib::error::FilterError::ExternalFilterSpawnFailed::kind: core::io::error::ErrorKind
+pub grit_lib::error::FilterError::ExternalFilterSpawnFailed::path: alloc::string::String
+pub grit_lib::error::FilterError::ExternalFilterSpawnFailed::phase: grit_lib::error::FilterPhase
+pub grit_lib::error::FilterError::ExternalFilterSpawnFailed::program: alloc::string::String
 pub grit_lib::error::FilterError::Failed
 pub grit_lib::error::FilterError::Failed::status: i32
 pub grit_lib::error::FilterError::InvalidWorkingTreeEncoding

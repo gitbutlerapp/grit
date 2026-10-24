@@ -326,7 +326,28 @@ fn handshake(stdout: &mut ChildStdout, stdin: &mut ChildStdin) -> std::io::Resul
     Ok(caps)
 }
 
-fn spawn_running(runner: &dyn CommandRunner, cmd: &str) -> std::io::Result<RunningFilter> {
+/// Why a long-running filter process could not be started.
+#[derive(Debug)]
+pub(crate) enum ProcessFilterStartError {
+    /// The OS could not spawn the filter command (for example, no shell to run it).
+    Spawn(std::io::Error),
+    /// The process started but the handshake failed, or the registry is unusable.
+    Other(String),
+}
+
+impl std::fmt::Display for ProcessFilterStartError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Spawn(e) => e.fmt(f),
+            Self::Other(detail) => f.write_str(detail),
+        }
+    }
+}
+
+fn spawn_running(
+    runner: &dyn CommandRunner,
+    cmd: &str,
+) -> Result<RunningFilter, ProcessFilterStartError> {
     let mut env = CommandEnvironment::inherit_process_only();
     env.remove.push("GIT_CONFIG_GLOBAL".into());
     let spec = CommandSpec {
@@ -343,15 +364,19 @@ fn spawn_running(runner: &dyn CommandRunner, cmd: &str) -> std::io::Result<Runni
         stdout: CommandStdio::Pipe,
         stderr: CommandStdio::Inherit,
     };
-    let running = runner.spawn(&spec)?;
-    let (child, stdin, stdout, _) = running
-        .into_system_parts()
-        .map_err(|_| std::io::Error::other("filter process is not backed by a live OS process"))?;
-    let mut stdin = stdin.ok_or_else(|| std::io::Error::other("filter process missing stdin"))?;
-    let mut stdout =
-        stdout.ok_or_else(|| std::io::Error::other("filter process missing stdout"))?;
+    let running = runner
+        .spawn(&spec)
+        .map_err(ProcessFilterStartError::Spawn)?;
+    let other = |e: std::io::Error| ProcessFilterStartError::Other(e.to_string());
+    let (child, stdin, stdout, _) = running.into_system_parts().map_err(|_| {
+        ProcessFilterStartError::Other("filter process is not backed by a live OS process".into())
+    })?;
+    let mut stdin = stdin
+        .ok_or_else(|| ProcessFilterStartError::Other("filter process missing stdin".into()))?;
+    let mut stdout = stdout
+        .ok_or_else(|| ProcessFilterStartError::Other("filter process missing stdout".into()))?;
 
-    let caps = handshake(&mut stdout, &mut stdin)?;
+    let caps = handshake(&mut stdout, &mut stdin).map_err(other)?;
 
     Ok(RunningFilter {
         child,
@@ -367,16 +392,23 @@ pub fn ensure_process_filter_started(state: &FilterProcessState, cmd: &str) -> R
 }
 
 fn ensure_started(state: &FilterProcessState, cmd: &str) -> Result<(), String> {
+    start_process_filter(state, cmd).map_err(|e| e.to_string())
+}
+
+/// Start the long-running filter for `cmd` unless it is already running.
+pub(crate) fn start_process_filter(
+    state: &FilterProcessState,
+    cmd: &str,
+) -> Result<(), ProcessFilterStartError> {
     let mut reg = state
         .registry()
         .lock()
-        .map_err(|_| "filter registry poisoned".to_string())?;
+        .map_err(|_| ProcessFilterStartError::Other("filter registry poisoned".into()))?;
     use std::collections::hash_map::Entry;
     match reg.entry(cmd.to_string()) {
         Entry::Occupied(_) => Ok(()),
         Entry::Vacant(v) => {
-            let rf =
-                spawn_running(state.command_runner.as_ref(), cmd).map_err(|e| e.to_string())?;
+            let rf = spawn_running(state.command_runner.as_ref(), cmd)?;
             v.insert(Arc::new(Mutex::new(rf)));
             Ok(())
         }
