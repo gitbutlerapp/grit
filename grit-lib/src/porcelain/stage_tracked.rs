@@ -66,6 +66,9 @@ impl StageTrackedSummary {
 /// Untracked files are not added. [`IndexEntry::skip_worktree`] entries are left unchanged; missing paths
 /// are not treated as deletions for those entries.
 ///
+/// The index is read and written while holding `index.lock`, so concurrent index writers are
+/// never overwritten with a stale copy.
+///
 /// # Parameters
 /// - `repo` — repository handle (object store and index paths).
 /// - `work_tree` — working tree root.
@@ -74,7 +77,9 @@ impl StageTrackedSummary {
 /// A [`StageTrackedSummary`] listing modified and removed index paths (sorted).
 ///
 /// # Errors
-/// I/O failures, object write failures, or a missing index when one is required.
+/// I/O failures (including [`std::io::ErrorKind::AlreadyExists`] when another process holds
+/// `index.lock` past the `core.filesRefLockTimeout` wait), object write failures, or a missing
+/// index when one is required.
 pub fn stage_tracked_modifications(
     repo: &Repository,
     work_tree: &Path,
@@ -93,8 +98,8 @@ pub fn stage_tracked_modifications_with_thresholds(
     thresholds: IndexStagingThresholds,
 ) -> Result<StageTrackedSummary> {
     let index_path = repo.index_path_for_env()?;
-    let mut index = match repo.load_index_at(&index_path) {
-        Ok(idx) => idx,
+    let (mut lock, mut index) = match repo.lock_and_load_index() {
+        Ok(locked) => locked,
         Err(Error::Io(e)) if e.kind() == std::io::ErrorKind::NotFound => {
             return Ok(StageTrackedSummary::default());
         }
@@ -114,7 +119,7 @@ pub fn stage_tracked_modifications_with_thresholds(
     }
     if summary.change_count() > 0 {
         index.ensure_canonical_order();
-        repo.write_index_at(&index_path, &mut index)?;
+        repo.write_locked_index(&mut lock, &mut index)?;
     }
 
     Ok(summary)

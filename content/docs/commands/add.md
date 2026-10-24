@@ -138,6 +138,8 @@ Nothing to stage — working tree clean.
 | `1` | Command failed ([`failure`](../exit-codes/)). |
 | `2` | Invalid flags or arguments ([`usage`](../exit-codes/)). |
 
+`grit add` reads and writes the index while holding `.git/index.lock`, so parallel `grit add` (or `git add`) runs in one repository never undo each other: every run that exits `0` has its paths in the index. A run that cannot get the lock within `core.filesRefLockTimeout` (default 100 ms; `-1` waits forever) exits `1` with an `index.lock` error and stages nothing, so a script can simply retry it. `grit rm` follows the same rule.
+
 See [Exit codes](../exit-codes/) for shared rules and structured `--json` `kind` values.
 
 ## See also

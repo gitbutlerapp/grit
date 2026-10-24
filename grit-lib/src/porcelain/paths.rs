@@ -133,6 +133,7 @@ pub fn remove_paths(repo: &Repository, opts: &RemoveOptions) -> Result<RemoveOut
     }
 
     let mut lock = repo.begin_index_update()?;
+    index = repo.load_index()?;
     let path_bytes: Vec<&[u8]> = to_remove.iter().map(|p| p.as_bytes()).collect();
     index.remove_paths(path_bytes);
     repo.commit_index_update(&mut lock, &mut index, !opts.cached)?;
