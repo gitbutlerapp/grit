@@ -132,6 +132,7 @@ fn partition_pending_by_affix(
                 current_idx: affix_parent_index(i, prefix, suffix, par.len(), new_len),
                 ignored: t.ignored,
                 source_path: t.source_path,
+                origin: t.origin,
             });
         } else {
             need_diff.push(t);
@@ -425,12 +426,32 @@ fn fill_exact_text_relocate(
             by_content_norm.entry(key).or_default().push(idx);
         }
     } else {
-        let mut by_content: HashMap<&str, Vec<usize>> = HashMap::new();
+        // Only unresolved child lines are looked up, and usually few are, so index just
+        // the parent lines sharing their text (a length check skips the rest unhashed).
+        let mut by_content: hashbrown::HashMap<&str, Vec<usize>> = map
+            .iter()
+            .zip(new)
+            .filter(|(slot, _)| slot.is_none())
+            .map(|(_, line)| (*line, Vec::new()))
+            .collect();
+        if by_content.is_empty() {
+            return;
+        }
+        let mut lens: Vec<usize> = by_content.keys().map(|line| line.len()).collect();
+        lens.sort_unstable();
+        lens.dedup();
         for (idx, line) in old.iter().enumerate() {
-            by_content.entry(*line).or_default().push(idx);
+            if lens.binary_search(&line.len()).is_ok() {
+                if let Some(indices) = by_content.get_mut(line) {
+                    indices.push(idx);
+                }
+            }
         }
         fill_exact_text_relocate_with_lookup(old, new, map, used_old, |line| {
-            by_content.get(line).map(Vec::as_slice)
+            by_content
+                .get(line)
+                .filter(|indices| !indices.is_empty())
+                .map(Vec::as_slice)
         });
         return;
     }
@@ -1161,48 +1182,117 @@ struct TrackedLine {
     current_idx: usize,
     ignored: bool,
     source_path: Option<String>,
+    /// Merge hand-off this line arrived through (`0` for the starting suspect). Lines of
+    /// different hand-offs can share a queued suspect but never compete for a parent line.
+    origin: u32,
 }
 
-/// Side-branch suspect scheduled by commit date (Git blame priority queue).
-struct DeferredBlameOrigin {
-    sort_date: i64,
-    seq: u64,
+/// A commit that still owns lines of the blamed file at `path`.
+struct BlameSuspect {
     oid: ObjectId,
     blob: ObjectId,
     mode: u32,
     path: String,
+    /// Lines of `blob`, carried along so the walk does not reload them.
+    lines: Option<Arc<BlobLines>>,
     pending: Vec<TrackedLine>,
 }
 
-impl PartialEq for DeferredBlameOrigin {
-    fn eq(&self, other: &Self) -> bool {
-        self.seq == other.seq && self.oid == other.oid
-    }
+/// Heap position of a queued suspect: newest committer date first, ties in queue order.
+#[derive(PartialEq, Eq)]
+struct SuspectSlot {
+    date: i64,
+    seq: u64,
+    oid: ObjectId,
+    path: String,
 }
 
-impl Eq for DeferredBlameOrigin {}
-
-impl Ord for DeferredBlameOrigin {
+impl Ord for SuspectSlot {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        match self.sort_date.cmp(&other.sort_date) {
-            std::cmp::Ordering::Equal => other.seq.cmp(&self.seq),
-            ord => ord,
-        }
+        self.date
+            .cmp(&other.date)
+            .then_with(|| other.seq.cmp(&self.seq))
     }
 }
 
-impl PartialOrd for DeferredBlameOrigin {
+impl PartialOrd for SuspectSlot {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
-fn blame_commit_sort_key(session: &BlameSession<'_>, oid: &ObjectId) -> i64 {
-    session
+/// Suspects waiting to pass blame to their parents, keyed by `(commit, path)`.
+///
+/// Lines handed to a suspect that is already queued join its pending set, so every commit
+/// is diffed against its parents once however many merge paths reach it. Processing in
+/// committer-date order makes those paths meet before the shared commit is popped.
+#[derive(Default)]
+struct SuspectQueue {
+    heap: BinaryHeap<SuspectSlot>,
+    entries: HashMap<(ObjectId, String), BlameSuspect>,
+    seq: u64,
+}
+
+impl SuspectQueue {
+    fn is_empty(&self) -> bool {
+        self.heap.is_empty()
+    }
+
+    /// Queue `suspect`, merging it into an already queued suspect for the same commit and path.
+    ///
+    /// `date` is only evaluated for a new queue entry.
+    fn push(&mut self, suspect: BlameSuspect, date: impl FnOnce() -> i64) {
+        let key = (suspect.oid, suspect.path);
+        if let Some(queued) = self.entries.get_mut(&key) {
+            queued.pending.extend(suspect.pending);
+            if queued.lines.is_none() {
+                queued.lines = suspect.lines;
+            }
+            return;
+        }
+        self.heap.push(SuspectSlot {
+            date: date(),
+            seq: self.seq,
+            oid: key.0,
+            path: key.1.clone(),
+        });
+        self.seq += 1;
+        self.entries.insert(
+            key.clone(),
+            BlameSuspect {
+                oid: key.0,
+                path: key.1,
+                ..suspect
+            },
+        );
+    }
+
+    /// Remove the newest suspect.
+    fn pop(&mut self) -> Option<BlameSuspect> {
+        let slot = self.heap.pop()?;
+        self.entries.remove(&(slot.oid, slot.path))
+    }
+}
+
+/// Committer date used to order suspects (commit-graph when available, else the commit header).
+fn blame_suspect_date(session: &mut BlameSession<'_>, oid: &ObjectId) -> i64 {
+    if let Some((_, date)) = session
         .commit_graph
         .as_ref()
-        .and_then(|cg| cg.graph_commit(oid).map(|(_, t)| t))
-        .unwrap_or(i64::MIN)
+        .and_then(|chain| chain.graph_commit(oid))
+    {
+        return date;
+    }
+    session
+        .pack
+        .read(session.odb, oid)
+        .ok()
+        .and_then(|obj| {
+            crate::objects::CommitRef::parse(&obj.data)
+                .ok()
+                .map(|c| c.committer_unix_seconds_for_ordering())
+        })
+        .unwrap_or(0)
 }
 
 /// Cached config and attributes for optional textconv during blame.
@@ -1604,6 +1694,9 @@ struct PairMapCacheValue {
     stop_blame_on_current: Arc<Vec<bool>>,
 }
 
+/// Number of cached blob versions above which unreferenced ones are dropped.
+const BLOB_LINES_CACHE_SOFT_LIMIT: usize = 64;
+
 /// Per-blame caches for blob lines, tree path resolution, and parent/child line maps.
 struct BlameSession<'a> {
     odb: &'a Odb,
@@ -1618,11 +1711,14 @@ struct BlameSession<'a> {
     path_entries: HashMap<PathCacheKey, Option<(ObjectId, u32)>>,
     commit_path_blob: HashMap<(ObjectId, String), Option<(ObjectId, u32)>>,
     pair_maps: HashMap<PairMapCacheKey, PairMapCacheValue>,
-    /// When set, lines were handed off from a merge parent ≥2; walk only first-parent links.
-    deferred_branch: bool,
+    /// Keep parent/child line maps for reuse. Only nested walks (ignored merges, copy
+    /// sources) diff a pair twice; a plain walk diffs each pair once.
+    cache_pair_maps: bool,
     identity_line_maps: HashMap<usize, Arc<Vec<Option<usize>>>>,
     pack: SessionPackReader,
     merge_line_stamps: Vec<LineUseStamp>,
+    #[cfg(test)]
+    diffed_pairs: Vec<(ObjectId, ObjectId)>,
 }
 
 impl<'a> BlameSession<'a> {
@@ -1648,10 +1744,12 @@ impl<'a> BlameSession<'a> {
             path_entries: HashMap::new(),
             commit_path_blob: HashMap::new(),
             pair_maps: HashMap::new(),
-            deferred_branch: false,
+            cache_pair_maps: false,
             identity_line_maps: HashMap::new(),
             pack: SessionPackReader::default(),
             merge_line_stamps: Vec::new(),
+            #[cfg(test)]
+            diffed_pairs: Vec::new(),
         }
     }
 
@@ -1680,8 +1778,13 @@ impl<'a> BlameSession<'a> {
         )
     }
 
-    fn merge_aware_blame(&self, first_parent_only: bool) -> bool {
-        !first_parent_only && !self.deferred_branch
+    /// Drop cached blob lines that no queued suspect holds once the cache outgrows
+    /// [`BLOB_LINES_CACHE_SOFT_LIMIT`], so a deep walk keeps only the versions it still needs.
+    fn prune_blob_lines(&mut self) {
+        if self.blob_lines.len() > BLOB_LINES_CACHE_SOFT_LIMIT {
+            self.blob_lines
+                .retain(|_, lines| Arc::strong_count(lines) > 1);
+        }
     }
 
     fn set_bloom_path(&mut self, path: &str) {
@@ -1802,6 +1905,8 @@ impl<'a> BlameSession<'a> {
         include_stop_blame: bool,
         child_focus: Option<&[usize]>,
     ) -> PairMapCacheValue {
+        #[cfg(test)]
+        self.diffed_pairs.push((parent_oid, child_oid));
         let ws = self.whitespace;
         let key = PairMapCacheKey {
             parent: parent_oid,
@@ -1816,7 +1921,7 @@ impl<'a> BlameSession<'a> {
             include_stop_blame,
             whitespace: ws,
         };
-        let cacheable = child_focus.is_none();
+        let cacheable = self.cache_pair_maps && child_focus.is_none();
         if cacheable {
             if let Some(maps) = self.pair_maps.get(&key) {
                 return maps.clone();
@@ -1992,6 +2097,7 @@ pub fn compute_blame(
 ) -> Result<Vec<BlameLine>> {
     let mut session = BlameSession::new(odb, textconv_ctx, use_textconv, thread_policy);
     session.whitespace = whitespace;
+    session.cache_pair_maps = !ignore_revs.is_empty() || copy_depth > 0;
     let revision_label = start_oid.to_hex();
     compute_blame_with_session(
         odb,
@@ -2139,6 +2245,7 @@ fn compute_blame_with_session(
                     current_idx: lineno - 1,
                     ignored: false,
                     source_path: None,
+                    origin: 0,
                 })
             })
             .collect(),
@@ -2148,6 +2255,7 @@ fn compute_blame_with_session(
                 current_idx: i,
                 ignored: false,
                 source_path: None,
+                origin: 0,
             })
             .collect(),
     };
@@ -2164,29 +2272,49 @@ fn compute_blame_with_session(
     let mut current_blob_oid = blob_oid;
     let mut current_blob_mode = blob_mode;
     let mut current_path = file_path.to_string();
-    let mut deferred_queue: BinaryHeap<DeferredBlameOrigin> = BinaryHeap::new();
-    let mut deferred_seq: u64 = 0;
+    let mut queue = SuspectQueue::default();
+    let mut next_origin: u32 = 0;
+    let merge_aware = !first_parent_only;
 
     session.set_bloom_path(&current_path);
-    session.deferred_branch = false;
     let mut walk_lines: Option<(ObjectId, Arc<BlobLines>)> =
         Some((current_blob_oid, Arc::clone(&start_lines)));
 
+    // Each iteration examines the suspect described by `current_*` and `pending`. Moving
+    // to a parent rewrites those in place; while other suspects are queued, the moved
+    // suspect goes back through the queue so commits are visited newest first and shared
+    // ancestors are reached once.
     'blame_loop: loop {
-        if pending.is_empty() {
-            if let Some(origin) = deferred_queue.pop() {
-                current_oid = origin.oid;
-                current_blob_oid = origin.blob;
-                current_blob_mode = origin.mode;
-                current_path = origin.path;
-                session.set_bloom_path(&current_path);
-                session.deferred_branch = true;
-                walk_lines = None;
-                pending = origin.pending;
-                continue;
+        if pending.is_empty() || !queue.is_empty() {
+            if !pending.is_empty() {
+                let lines = walk_lines
+                    .take()
+                    .and_then(|(oid, lines)| (oid == current_blob_oid).then_some(lines));
+                let oid = current_oid;
+                queue.push(
+                    BlameSuspect {
+                        oid,
+                        blob: current_blob_oid,
+                        mode: current_blob_mode,
+                        path: std::mem::take(&mut current_path),
+                        lines,
+                        pending: std::mem::take(&mut pending),
+                    },
+                    || blame_suspect_date(session, &oid),
+                );
             }
-            break;
+            let Some(next) = queue.pop() else {
+                break;
+            };
+            current_oid = next.oid;
+            current_blob_oid = next.blob;
+            current_blob_mode = next.mode;
+            current_path = next.path;
+            walk_lines = next.lines.map(|lines| (next.blob, lines));
+            pending = next.pending;
+            session.set_bloom_path(&current_path);
         }
+        session.prune_blob_lines();
 
         if !ignore_revs.contains(&current_oid) {
             let (new_oid, new_mode) = advance_across_unchanged_first_parents(
@@ -2216,8 +2344,7 @@ fn compute_blame_with_session(
             commit_parents_for_blame(odb, current_oid, grafts, &mut commit_cache, session)?;
         let is_ignored = ignore_revs.contains(&current_oid);
 
-        let merge_aware = session.merge_aware_blame(first_parent_only);
-        if (first_parent_only || session.deferred_branch) && parents.len() > 1 {
+        if first_parent_only && parents.len() > 1 {
             parents.truncate(1);
         }
 
@@ -2407,10 +2534,7 @@ fn compute_blame_with_session(
                     ));
                 }
             }
-            if !deferred_queue.is_empty() {
-                continue 'blame_loop;
-            }
-            break 'blame_loop;
+            continue 'blame_loop;
         }
 
         if parents.is_empty() {
@@ -2428,10 +2552,7 @@ fn compute_blame_with_session(
                     false,
                 ));
             }
-            if !deferred_queue.is_empty() {
-                continue 'blame_loop;
-            }
-            break 'blame_loop;
+            continue 'blame_loop;
         }
 
         // Merge commits (2+ parents): sequential `pass_blame_to_parent` order from git/blame.c —
@@ -2460,8 +2581,10 @@ fn compute_blame_with_session(
         }
 
         if merge_aware && !is_ignored && parents.len() >= 2 {
-            let cur_lines_arc =
-                session.load_blob_lines(current_blob_oid, &current_path, current_blob_mode)?;
+            let cur_lines_arc = match walk_lines.take() {
+                Some((oid, lines)) if oid == current_blob_oid => lines,
+                _ => session.load_blob_lines(current_blob_oid, &current_path, current_blob_mode)?,
+            };
             let line_count = cur_lines_arc.len();
 
             let mut parent_blobs: Vec<Option<(ObjectId, ObjectId, u32)>> =
@@ -2479,6 +2602,9 @@ fn compute_blame_with_session(
             }
 
             let mut remaining = std::mem::take(&mut pending);
+            // Stamps dedupe parent lines within one hand-off; grouping lets each group
+            // start a fresh stamp generation.
+            remaining.sort_by_key(|t| t.origin);
             let mut any_parent_has_path = false;
             for i in 0..parents.len() {
                 if remaining.is_empty() {
@@ -2495,9 +2621,13 @@ fn compute_blame_with_session(
                 if blob == current_blob_oid {
                     par_lines_vec[i] = Some(Arc::clone(&cur_lines_arc));
                     maps[i] = Some(session.identity_line_map(line_count));
-                    session.merge_line_stamps[i].begin_pass(line_count);
                     let mut next_remaining: Vec<TrackedLine> = Vec::new();
+                    let mut pass_origin = None;
                     for t in remaining {
+                        if pass_origin != Some(t.origin) {
+                            pass_origin = Some(t.origin);
+                            session.merge_line_stamps[i].begin_pass(line_count);
+                        }
                         if t.current_idx < line_count
                             && session.merge_line_stamps[i].is_unused(t.current_idx)
                         {
@@ -2507,6 +2637,7 @@ fn compute_blame_with_session(
                                 current_idx: t.current_idx,
                                 ignored: t.ignored,
                                 source_path: t.source_path.clone(),
+                                origin: t.origin,
                             });
                         } else {
                             next_remaining.push(t);
@@ -2547,8 +2678,12 @@ fn compute_blame_with_session(
                     ));
                 };
                 let parent_line_count = par_lines.len();
-                session.merge_line_stamps[i].begin_pass(parent_line_count);
+                let mut pass_origin = None;
                 for t in remaining {
+                    if pass_origin != Some(t.origin) {
+                        pass_origin = Some(t.origin);
+                        session.merge_line_stamps[i].begin_pass(parent_line_count);
+                    }
                     let idx = t.current_idx;
                     let cur_line = Some(cur_lines_arc.line(idx));
                     let m = map.get(idx).copied().flatten();
@@ -2564,6 +2699,7 @@ fn compute_blame_with_session(
                                 current_idx: p_idx,
                                 ignored: t.ignored,
                                 source_path: t.source_path.clone(),
+                                origin: t.origin,
                             });
                         } else {
                             next_remaining.push(t);
@@ -2602,16 +2738,22 @@ fn compute_blame_with_session(
                     let Some((p, blob, mode)) = parent_blobs[i] else {
                         continue;
                     };
-                    deferred_queue.push(DeferredBlameOrigin {
-                        sort_date: blame_commit_sort_key(session, &p),
-                        seq: deferred_seq,
-                        oid: p,
-                        blob,
-                        mode,
-                        path: current_path.clone(),
-                        pending: std::mem::take(&mut buckets[i]),
-                    });
-                    deferred_seq += 1;
+                    next_origin += 1;
+                    let mut handed_off = std::mem::take(&mut buckets[i]);
+                    for t in &mut handed_off {
+                        t.origin = next_origin;
+                    }
+                    queue.push(
+                        BlameSuspect {
+                            oid: p,
+                            blob,
+                            mode,
+                            path: current_path.clone(),
+                            lines: par_lines_vec[i].take(),
+                            pending: handed_off,
+                        },
+                        || blame_suspect_date(session, &p),
+                    );
                 }
 
                 if !buckets[0].is_empty() {
@@ -2621,10 +2763,8 @@ fn compute_blame_with_session(
                     current_oid = p;
                     current_blob_oid = blob;
                     current_blob_mode = mode;
-                    walk_lines = None;
+                    walk_lines = par_lines_vec[0].take().map(|lines| (blob, lines));
                     pending = std::mem::take(&mut buckets[0]);
-                } else if deferred_queue.is_empty() {
-                    break 'blame_loop;
                 }
                 continue;
             }
@@ -2777,10 +2917,7 @@ fn compute_blame_with_session(
                                 false,
                             ));
                         }
-                        if !deferred_queue.is_empty() {
-                            continue 'blame_loop;
-                        }
-                        break 'blame_loop;
+                        continue 'blame_loop;
                     }
                 }
 
@@ -2798,10 +2935,7 @@ fn compute_blame_with_session(
                         false,
                     ));
                 }
-                if !deferred_queue.is_empty() {
-                    continue 'blame_loop;
-                }
-                break 'blame_loop;
+                continue 'blame_loop;
             }
             None => {
                 // Ignored commit but file doesn't exist in parent.
@@ -2819,10 +2953,7 @@ fn compute_blame_with_session(
                         false,
                     ));
                 }
-                if !deferred_queue.is_empty() {
-                    continue 'blame_loop;
-                }
-                break 'blame_loop;
+                continue 'blame_loop;
             }
             Some((p_blob_oid, p_blob_mode)) if p_blob_oid == current_blob_oid => {
                 current_oid = fast_forward_same_blob(
@@ -2988,6 +3119,7 @@ fn compute_blame_with_session(
                                         current_idx: t.current_idx,
                                         ignored: true,
                                         source_path: t.source_path.clone(),
+                                        origin: t.origin,
                                     });
                                 } else {
                                     result.push(blame_line_at_path(
@@ -3035,6 +3167,7 @@ fn compute_blame_with_session(
                                         current_idx: parent_idx,
                                         ignored: t.ignored,
                                         source_path: t.source_path.clone(),
+                                        origin: t.origin,
                                     });
                                     continue;
                                 }
@@ -3056,6 +3189,7 @@ fn compute_blame_with_session(
                                 current_idx: parent_idx,
                                 ignored: carried_ignored,
                                 source_path: t.source_path.clone(),
+                                origin: t.origin,
                             });
                         } else if is_ignored {
                             // Best-effort pass-through through ignored revisions:
@@ -3071,6 +3205,7 @@ fn compute_blame_with_session(
                                     current_idx: t.current_idx,
                                     ignored: t.ignored,
                                     source_path: t.source_path.clone(),
+                                    origin: t.origin,
                                 });
                             } else {
                                 result.push(blame_line_at_path(
@@ -3095,6 +3230,7 @@ fn compute_blame_with_session(
                                     current_idx: parent_idx,
                                     ignored: t.ignored,
                                     source_path: t.source_path.clone(),
+                                    origin: t.origin,
                                 });
                                 continue;
                             }
@@ -3830,6 +3966,7 @@ pub fn blame_file(repo: &Repository, path: &str, options: &BlameOptions) -> Resu
         "HEAD".into()
     };
     let copy_depth = options.copy_detection.depth();
+    session.cache_pair_maps = !ignore_revs.is_empty() || copy_depth > 0;
     let (lines, commits) = repo.odb().with_pack_read_context(
         || -> Result<(Vec<BlameAttributedLine>, HashMap<ObjectId, BlameCommitInfo>)> {
             let raw = compute_blame_with_session(
@@ -4120,6 +4257,7 @@ mod tests {
             current_idx: 0,
             ignored: false,
             source_path: None,
+            origin: 0,
         }];
         let (affix, need) =
             partition_pending_by_affix(&old, &new, pending, crate::diff::WhitespaceMode::default());
@@ -4131,6 +4269,7 @@ mod tests {
             current_idx: 2,
             ignored: false,
             source_path: None,
+            origin: 0,
         }];
         let (affix, need) = partition_pending_by_affix(
             &old,
@@ -4253,6 +4392,101 @@ mod tests {
         )?;
         assert_eq!(result.lines.len(), 1);
         assert_eq!(result.lines[0].content, "hello");
+        Ok(())
+    }
+
+    fn write_file_commit(
+        repo: &Repository,
+        path: &str,
+        lines: &[String],
+        parents: &[ObjectId],
+        time: i64,
+    ) -> Result<ObjectId> {
+        use crate::objects::ObjectKind;
+        let content: String = lines.iter().map(|l| format!("{l}\n")).collect();
+        let blob = repo.odb().write(ObjectKind::Blob, content.as_bytes())?;
+        let mut tree_body = format!("100644 {path}\0").into_bytes();
+        tree_body.extend_from_slice(blob.as_bytes());
+        let tree = repo.odb().write(ObjectKind::Tree, &tree_body)?;
+        let mut body = format!("tree {tree}\n");
+        for parent in parents {
+            body.push_str(&format!("parent {parent}\n"));
+        }
+        body.push_str(&format!(
+            "author T <t@e.com> {time} +0000\ncommitter T <t@e.com> {time} +0000\n\nc{time}\n"
+        ));
+        repo.odb().write(ObjectKind::Commit, body.as_bytes())
+    }
+
+    /// Side branches that keep a mainline line's older text hand that line to the merge's
+    /// second parent, whose history runs back into the mainline. Every pair must still be
+    /// diffed once: suspects reaching the same commit are merged, not walked again.
+    #[test]
+    fn merge_ladder_diffs_each_parent_pair_once() -> Result<()> {
+        use crate::repo::init_repository;
+        use crate::RefStorageFormat;
+
+        let dir = tempfile::tempdir().map_err(crate::error::Error::Io)?;
+        let repo = init_repository(dir.path(), false, "main", None, RefStorageFormat::Files)?;
+        let path = "ladder.txt";
+        let base: Vec<String> = (1..=40).map(|i| format!("base {i}")).collect();
+        let root = write_file_commit(&repo, path, &base, &[], 1000)?;
+        let mut tip = root;
+        let mut tip_lines = base.clone();
+        let mut main_commits = Vec::new();
+        let mut side_commits = Vec::new();
+        for k in 1..=8_usize {
+            let t = 1000 + 10 * k as i64;
+            let mut main_lines = tip_lines.clone();
+            main_lines[k - 1] = format!("main {k}");
+            main_lines[9 + k] = format!("kept main {k}");
+            let main = write_file_commit(&repo, path, &main_lines, &[tip], t)?;
+            let mut side_lines = tip_lines.clone();
+            side_lines[19 + k] = format!("side {k}");
+            let side = write_file_commit(&repo, path, &side_lines, &[tip], t + 1)?;
+            // The merge keeps main's second edit but the side's (older) text of line `k`.
+            let mut merged = side_lines.clone();
+            merged[9 + k] = main_lines[9 + k].clone();
+            tip = write_file_commit(&repo, path, &merged, &[main, side], t + 2)?;
+            tip_lines = merged;
+            main_commits.push(main);
+            side_commits.push(side);
+        }
+
+        let thread_policy = repo.thread_policy();
+        let mut session = BlameSession::new(repo.odb(), None, false, &thread_policy);
+        let lines = compute_blame_with_session(
+            repo.odb(),
+            tip,
+            "tip",
+            path,
+            &HashSet::new(),
+            BlameDiffAlgorithm::Myers,
+            None,
+            false,
+            0,
+            false,
+            &HashMap::new(),
+            false,
+            None,
+            &mut session,
+        )?;
+
+        assert_eq!(lines.len(), 40);
+        for line in &lines {
+            let expected = match line.final_lineno {
+                n @ 11..=18 => main_commits[n - 11],
+                n @ 21..=28 => side_commits[n - 21],
+                _ => root,
+            };
+            assert_eq!(line.oid, expected, "line {}", line.final_lineno);
+        }
+        let unique: HashSet<_> = session.diffed_pairs.iter().collect();
+        assert_eq!(
+            unique.len(),
+            session.diffed_pairs.len(),
+            "a parent/child pair was diffed more than once"
+        );
         Ok(())
     }
 

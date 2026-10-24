@@ -1333,3 +1333,200 @@ fn blame_through_commits_missing_author_or_committer_matches_git_loose_and_packe
         "blame must not depend on whether objects are loose or packed"
     );
 }
+
+/// Write `lines` as the only file of a commit with `parents`, dated `time`, via plumbing.
+fn git_commit_lines(
+    dir: &Path,
+    file: &str,
+    lines: &[String],
+    parents: &[String],
+    time: i64,
+) -> String {
+    use std::io::Write;
+    use std::process::Stdio;
+
+    let pipe = |args: &[&str], input: &[u8], date: Option<i64>| -> String {
+        let mut cmd = Command::new("git");
+        cmd.current_dir(dir)
+            .args(args)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped());
+        git_env(&mut cmd);
+        if let Some(date) = date {
+            let stamp = format!("{date} +0000");
+            cmd.env("GIT_AUTHOR_DATE", &stamp)
+                .env("GIT_COMMITTER_DATE", &stamp);
+        }
+        let mut child = cmd.spawn().expect("spawn git");
+        child
+            .stdin
+            .take()
+            .expect("stdin")
+            .write_all(input)
+            .expect("write stdin");
+        let out = child.wait_with_output().expect("wait git");
+        assert!(
+            out.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).trim().to_owned()
+    };
+    let content: String = lines.iter().map(|l| format!("{l}\n")).collect();
+    let blob = pipe(&["hash-object", "-w", "--stdin"], content.as_bytes(), None);
+    let tree = pipe(
+        &["mktree"],
+        format!("100644 blob {blob}\t{file}\n").as_bytes(),
+        None,
+    );
+    let mut args = vec!["commit-tree".to_owned(), tree];
+    for parent in parents {
+        args.push("-p".to_owned());
+        args.push(parent.clone());
+    }
+    args.push("-m".to_owned());
+    args.push(format!("commit at {time}"));
+    let args: Vec<&str> = args.iter().map(String::as_str).collect();
+    pipe(&args, b"", Some(time))
+}
+
+/// Deterministic xorshift generator so the merge-heavy history is reproducible.
+struct Rng(u64);
+
+impl Rng {
+    fn next(&mut self, bound: usize) -> usize {
+        self.0 ^= self.0 << 13;
+        self.0 ^= self.0 >> 7;
+        self.0 ^= self.0 << 17;
+        (self.0 % bound as u64) as usize
+    }
+}
+
+/// Build a history with three long-lived branches that fork from each other's tips, edit
+/// (replace, insert, delete and move lines), and merge back and forth — diamond and
+/// criss-cross merges, merges that keep one side's older text, evil merges, and committer
+/// dates with clock skew. Returns the branch tips.
+///
+/// Every line text stays unique within a version, so the attribution depends only on how
+/// blame walks merges, not on how a diff pairs up repeated lines.
+fn build_merge_heavy_history(root: &Path, file: &str, seed: u64) -> Vec<String> {
+    git_run(root, &["init", "-q", "-b", "main"]);
+    let mut rng = Rng(seed);
+    let mut counter = 0usize;
+    let mut fresh = |rng: &mut Rng| {
+        counter += 1;
+        format!("line {counter} {}", rng.next(1000))
+    };
+    let base: Vec<String> = (0..30).map(|_| fresh(&mut rng)).collect();
+    let mut time = 1_600_000_000_i64;
+    let root_commit = git_commit_lines(root, file, &base, &[], time);
+    let mut tips: Vec<(String, Vec<String>)> = vec![(root_commit, base); 3];
+
+    for _ in 0..90 {
+        time += 60;
+        let date = match rng.next(8) {
+            0 => time - rng.next(3600) as i64,
+            1 => time - 60,
+            _ => time,
+        };
+        let b = rng.next(3);
+        match rng.next(10) {
+            0..=6 => {
+                let mut lines = tips[b].1.clone();
+                for _ in 0..1 + rng.next(3) {
+                    let len = lines.len().max(1);
+                    match rng.next(5) {
+                        0 | 1 if !lines.is_empty() => {
+                            let i = rng.next(len);
+                            lines[i] = fresh(&mut rng);
+                        }
+                        2 => {
+                            let i = rng.next(len + 1).min(lines.len());
+                            let line = fresh(&mut rng);
+                            lines.insert(i, line);
+                        }
+                        3 if lines.len() > 5 => {
+                            let line = lines.remove(rng.next(len));
+                            let i = rng.next(lines.len() + 1);
+                            if rng.next(2) == 0 {
+                                lines.insert(i, line);
+                            }
+                        }
+                        _ if !lines.is_empty() => {
+                            let i = rng.next(len);
+                            let line = lines.remove(i);
+                            lines.push(line);
+                        }
+                        _ => {}
+                    }
+                }
+                let oid = git_commit_lines(root, file, &lines, &[tips[b].0.clone()], date);
+                tips[b] = (oid, lines);
+            }
+            7 | 8 => {
+                let other = (b + 1 + rng.next(2)) % 3;
+                if tips[other].0 == tips[b].0 {
+                    continue;
+                }
+                let ours = &tips[b].1;
+                let theirs = &tips[other].1;
+                let mut lines = ours.clone();
+                let start = rng.next(theirs.len().max(1));
+                let end = (start + 1 + rng.next(8)).min(theirs.len());
+                for i in start..end {
+                    if lines.contains(&theirs[i]) {
+                        continue;
+                    }
+                    if i < lines.len() {
+                        lines[i] = theirs[i].clone();
+                    } else {
+                        lines.push(theirs[i].clone());
+                    }
+                }
+                if rng.next(4) == 0 && !lines.is_empty() {
+                    let i = rng.next(lines.len());
+                    lines[i] = fresh(&mut rng);
+                }
+                let parents = [tips[b].0.clone(), tips[other].0.clone()];
+                let oid = git_commit_lines(root, file, &lines, &parents, date);
+                tips[b] = (oid, lines);
+            }
+            _ => {
+                let other = (b + 1 + rng.next(2)) % 3;
+                tips[b] = tips[other].clone();
+            }
+        }
+    }
+    tips.into_iter().map(|(oid, _)| oid).collect()
+}
+
+fn assert_merge_heavy_history_matches_git(seed: u64) {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    let file = "merged.txt";
+    let tips = build_merge_heavy_history(root, file, seed);
+    let check = || {
+        let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
+        for tip in &tips {
+            assert_blame_matches(&repo, root, file, Some(tip), None);
+        }
+    };
+    check();
+    git_run(
+        root,
+        &["commit-graph", "write", "--reachable", "--changed-paths"],
+    );
+    check();
+}
+
+#[test]
+fn blame_merge_heavy_history_matches_git_with_and_without_commit_graph() {
+    for seed in [
+        0x9e37_79b9_7f4a_7c15,
+        0x2545_f491_4f6c_dd1d,
+        0x1234_5678_9abc_def1,
+    ] {
+        assert_merge_heavy_history_matches_git(seed);
+    }
+}
