@@ -16,6 +16,7 @@ use grit_lib::porcelain::add::{stage, StageMode, StageOptions};
 use grit_lib::porcelain::status::{
     collect_untracked_and_ignored, status, IgnoredMode, StatusOptions,
 };
+use grit_lib::progress::NeverCancel;
 use grit_lib::progress::NullProgress;
 use grit_lib::worktree::attributes::collect_attrs_for_path;
 use grit_lib::worktree::ignore::IgnoreMatcher;
@@ -216,15 +217,26 @@ fn bench_status_with_nested_gitattributes_l(c: &mut Criterion) {
     group.bench_function("plain_no_nested_attrs", |b| {
         b.iter(|| {
             black_box(
-                status(&fx.status_plain_l_repo, &opts, &mut NullProgress).expect("status plain L"),
+                status(
+                    &fx.status_plain_l_repo,
+                    &opts,
+                    &mut NullProgress,
+                    &NeverCancel,
+                )
+                .expect("status plain L"),
             );
         });
     });
     group.bench_function("nested_gitattributes", |b| {
         b.iter(|| {
             black_box(
-                status(&fx.status_nested_attr_repo, &opts, &mut NullProgress)
-                    .expect("status nested attrs L"),
+                status(
+                    &fx.status_nested_attr_repo,
+                    &opts,
+                    &mut NullProgress,
+                    &NeverCancel,
+                )
+                .expect("status nested attrs L"),
             );
         });
     });

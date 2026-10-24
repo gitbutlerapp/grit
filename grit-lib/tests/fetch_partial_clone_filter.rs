@@ -12,6 +12,7 @@ use grit_lib::maintenance::{fsck, FsckOptions};
 use grit_lib::objects::pack::clear_pack_cache;
 use grit_lib::objects::promisor::repo_treats_promisor_packs;
 use grit_lib::objects::ObjectId;
+use grit_lib::progress::NeverCancel;
 use grit_lib::remote::clone::{clone, CloneOptions};
 use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::partial_clone::ObjectFilterSpec;
@@ -122,6 +123,7 @@ fn grit_clone_filtered(url: &str, dest: &Path, filter: ObjectFilterSpec) -> Path
             ..CloneOptions::new(url, dest.to_path_buf())
         },
         &mut NoProgress,
+        &NeverCancel,
         None,
     )
     .expect("clone");
@@ -274,7 +276,7 @@ fn refetch_reapplies_stored_filter() {
         ..Default::default()
     };
     remote
-        .fetch(&repo, fetch_opts, &mut NoProgress, None)
+        .fetch(&repo, fetch_opts, &mut NoProgress, &NeverCancel, None)
         .expect("refetch");
     clear_pack_cache();
     let objects = git_dir.join("objects");

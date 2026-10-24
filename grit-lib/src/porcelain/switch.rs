@@ -184,7 +184,11 @@ pub fn resolve_switch_target(repo: &Repository, spec: &str) -> Result<SwitchMode
         return Ok(mode);
     }
 
-    Err(Error::Message(format!("no branch named '{spec}'")))
+    Err(Error::Branch(
+        crate::porcelain::branch_error::BranchError::NotFound {
+            name: spec.to_owned(),
+        },
+    ))
 }
 
 fn normalize_switch_spec(spec: &str) -> &str {
@@ -1037,7 +1041,7 @@ mod tests {
     use super::*;
     use crate::objects::{serialize_commit, serialize_tag, CommitData, ObjectKind, TagData};
     use crate::porcelain::status::{status, StatusOptions};
-    use crate::progress::NullProgress;
+    use crate::progress::{NeverCancel, NullProgress};
     use crate::repo::{init_repository, Repository};
     use crate::state::resolve_head;
     use crate::state::HeadState;
@@ -1364,7 +1368,13 @@ mod tests {
         .expect("switch");
 
         assert_eq!(std::fs::read(wt.join("f")).expect("disk"), b"precious\n");
-        let st = status(&repo, &StatusOptions::default(), &mut NullProgress).expect("status");
+        let st = status(
+            &repo,
+            &StatusOptions::default(),
+            &mut NullProgress,
+            &NeverCancel,
+        )
+        .expect("status");
         assert_eq!(st.unstaged.len(), 1);
     }
 

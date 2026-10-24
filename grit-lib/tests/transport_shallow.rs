@@ -24,6 +24,7 @@ use std::time::{Duration, Instant};
 
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::ObjectId;
+use grit_lib::progress::NeverCancel;
 use grit_lib::remote::fetch::{fetch_remote, NoProgress};
 use grit_lib::remote::transfer::{FetchDepth, FetchOptions};
 use grit_lib::remote::transport::{ConnectOptions, GitDaemonTransport, Service, Transport};
@@ -201,8 +202,14 @@ fn shallow_depth1_over_daemon(protocol_version: u8) {
         fetch_depth: FetchDepth::depth(1),
         ..Default::default()
     };
-    let outcome = fetch_remote(&local_git, &mut *conn, &mut opts, &mut NoProgress)
-        .expect("shallow depth=1 fetch over git daemon");
+    let outcome = fetch_remote(
+        &local_git,
+        &mut *conn,
+        &mut opts,
+        &mut NoProgress,
+        &NeverCancel,
+    )
+    .expect("shallow depth=1 fetch over git daemon");
 
     // The tip landed; its parent is absent (truncated history).
     let local_odb = open_odb(&local_git);
@@ -373,8 +380,14 @@ fn shallow_then_unshallow_over_git_daemon_v2() {
         fetch_depth: FetchDepth::depth(1),
         ..Default::default()
     };
-    fetch_remote(&local_git, &mut *conn, &mut shallow_opts, &mut NoProgress)
-        .expect("initial shallow fetch");
+    fetch_remote(
+        &local_git,
+        &mut *conn,
+        &mut shallow_opts,
+        &mut NoProgress,
+        &NeverCancel,
+    )
+    .expect("initial shallow fetch");
     drop(conn);
 
     let local_odb = open_odb(&local_git);
@@ -402,8 +415,14 @@ fn shallow_then_unshallow_over_git_daemon_v2() {
         fetch_depth: Some(FetchDepth::Unshallow),
         ..Default::default()
     };
-    let outcome = fetch_remote(&local_git, &mut *conn, &mut unshallow_opts, &mut NoProgress)
-        .expect("unshallow fetch");
+    let outcome = fetch_remote(
+        &local_git,
+        &mut *conn,
+        &mut unshallow_opts,
+        &mut NoProgress,
+        &NeverCancel,
+    )
+    .expect("unshallow fetch");
     drop(conn);
 
     // The full history is now present and the shallow file is gone.
@@ -497,6 +516,7 @@ fn git_daemon_shallow_depth_two_keeps_parent_tag() {
             ..CloneOptions::new(url, dest.clone())
         },
         &mut NoProgress,
+        &NeverCancel,
         None,
     )
     .expect("git:// depth-2 clone");

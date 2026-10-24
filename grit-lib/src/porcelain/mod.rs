@@ -31,7 +31,7 @@
 //! let dir = tempfile::tempdir()?;
 //! let repo = Repository::init(dir.path(), &InitOptions::default())?;
 //! let mut progress = NullProgress;
-//! let model = status::status(&repo, &StatusOptions::default(), &mut progress)?;
+//! let model = status::status(&repo, &StatusOptions::default(), &mut progress, &NeverCancel)?;
 //! assert!(model.staged.is_empty() && model.unstaged.is_empty());
 //! # Ok(())
 //! # }

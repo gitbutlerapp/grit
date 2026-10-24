@@ -23,6 +23,7 @@ use grit_lib::objects::{parse_commit, ObjectId};
 use grit_lib::porcelain::add::{stage, StageOptions};
 use grit_lib::porcelain::commit::{create_commit, CommitRequest, HookPolicy};
 use grit_lib::porcelain::status::{status, StatusOptions};
+use grit_lib::progress::NeverCancel;
 use grit_lib::progress::NullProgress;
 use grit_lib::remote::transfer::{fetch_local, FetchOptions, TagMode};
 use grit_lib::repo::{InitOptions, Repository};
@@ -188,7 +189,13 @@ fn run_repo_loop(fx: RepoFixture, ack: mpsc::Sender<()>) {
 
         let path = fx.root.join(format!("file-{i}.txt"));
         fs::write(&path, format!("content {i}\n")).expect("write");
-        status(&repo, &StatusOptions::default(), &mut NullProgress).expect("status");
+        status(
+            &repo,
+            &StatusOptions::default(),
+            &mut NullProgress,
+            &NeverCancel,
+        )
+        .expect("status");
         stage(&repo, &StageOptions::default(), &mut NullProgress).expect("stage");
         let ident = format!("{} <{}@example.com> 1 +0000", fx.author, fx.author);
         create_commit(
@@ -391,7 +398,13 @@ fn run_fetch_merge_notes_no_crosstalk_once(iter: usize) {
             rerere_enabled,
         };
         let repo = open_with_env(&fx);
-        status(&repo, &StatusOptions::default(), &mut NullProgress).expect("status");
+        status(
+            &repo,
+            &StatusOptions::default(),
+            &mut NullProgress,
+            &NeverCancel,
+        )
+        .expect("status");
         stage(&repo, &StageOptions::default(), &mut NullProgress).expect("stage");
         let ident = format!("{name} <{email}>");
         create_commit(

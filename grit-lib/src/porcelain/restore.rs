@@ -955,7 +955,7 @@ mod tests {
     use super::*;
     use crate::objects::{serialize_commit, CommitData, ObjectKind};
     use crate::porcelain::status::{status, StatusOptions};
-    use crate::progress::NullProgress;
+    use crate::progress::{NeverCancel, NullProgress};
     use crate::repo::{init_repository, Repository};
     use crate::write_tree::{write_tree_update_index, WriteTreeFlags};
     use crate::RefStorageFormat;
@@ -1032,7 +1032,13 @@ mod tests {
                 & 0o111,
             0
         );
-        let st = status(&repo, &StatusOptions::default(), &mut NullProgress).expect("status");
+        let st = status(
+            &repo,
+            &StatusOptions::default(),
+            &mut NullProgress,
+            &NeverCancel,
+        )
+        .expect("status");
         assert!(st.unstaged.is_empty(), "{st:?}");
     }
 }

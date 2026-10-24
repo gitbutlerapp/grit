@@ -5,6 +5,7 @@ mod unix {
     use grit_lib::porcelain::add::{stage, StageMode, StageOptions};
     use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
     use grit_lib::porcelain::status::{status, StatusOptions};
+    use grit_lib::progress::NeverCancel;
     use grit_lib::progress::NullProgress;
     use grit_lib::repo::Repository;
     use grit_test_support::git;
@@ -23,7 +24,13 @@ mod unix {
 
     fn grit_untracked(root: &Path) -> Vec<String> {
         let repo = Repository::discover(Some(root), &Default::default()).expect("open");
-        let model = status(&repo, &StatusOptions::default(), &mut NullProgress).expect("status");
+        let model = status(
+            &repo,
+            &StatusOptions::default(),
+            &mut NullProgress,
+            &NeverCancel,
+        )
+        .expect("status");
         model.untracked.clone()
     }
 

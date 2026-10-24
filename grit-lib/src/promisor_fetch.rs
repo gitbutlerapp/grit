@@ -137,7 +137,13 @@ pub fn fetch_promisor_objects(
 
     let _nest = PromisorLazyNestGuard::enter()?;
     let mut progress = NoProgress;
-    remote.fetch(repo, fetch_opts, &mut progress, http_factory)?;
+    remote.fetch(
+        repo,
+        fetch_opts,
+        &mut progress,
+        &crate::progress::NeverCancel,
+        http_factory,
+    )?;
     clear_pack_cache();
     repo.odb().invalidate_packs();
     Ok(())

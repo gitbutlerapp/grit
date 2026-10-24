@@ -5,6 +5,7 @@ use std::process::Command;
 
 use grit_lib::config::environment::Environment;
 use grit_lib::objects::pack::read_pack_index_no_verify;
+use grit_lib::progress::NeverCancel;
 use grit_lib::remote::clone::{clone as clone_repo, CloneOptions};
 use grit_lib::remote::fetch::NoProgress;
 
@@ -71,6 +72,7 @@ fn clone_local_repacked_source_links_pack_and_reports_index_stats() {
             ..CloneOptions::new(remote.to_string_lossy(), dest.clone())
         },
         &mut NoProgress,
+        &NeverCancel,
         None,
     )
     .expect("clone");

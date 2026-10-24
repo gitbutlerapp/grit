@@ -10,6 +10,7 @@ use grit_lib::index::Index;
 use grit_lib::porcelain::status::{
     collect_untracked_and_ignored, status, IgnoredMode, StatusOptions,
 };
+use grit_lib::progress::NeverCancel;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::unique_tmp;
@@ -49,7 +50,13 @@ fn backslash_escaped_literal_matches_git_check_ignore_and_status() {
         .expect("ignore_check");
     assert!(check[0].ignored, "grit must ignore foo bar like git");
 
-    let model = status(&repo, &StatusOptions::default(), &mut NullProgress).expect("status");
+    let model = status(
+        &repo,
+        &StatusOptions::default(),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("status");
     assert!(
         !model.untracked.iter().any(|p| p == "foo bar"),
         "status must not list ignored file, got {:?}",

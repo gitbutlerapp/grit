@@ -15,6 +15,7 @@ use grit_lib::index::untracked_cache::{
 };
 use grit_lib::porcelain::add::stage_for_commit;
 use grit_lib::porcelain::status::{status, StatusOptions, UntrackedMode};
+use grit_lib::progress::NeverCancel;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 
@@ -36,7 +37,7 @@ fn grit_untracked_paths(repo: &Repository) -> Vec<String> {
         untracked: UntrackedMode::All,
         ..StatusOptions::default()
     };
-    let model = status(repo, &opts, &mut NullProgress).expect("status");
+    let model = status(repo, &opts, &mut NullProgress, &NeverCancel).expect("status");
     model.untracked
 }
 
@@ -45,7 +46,7 @@ fn grit_untracked_paths_normal(repo: &Repository) -> Vec<String> {
         untracked: UntrackedMode::Normal,
         ..StatusOptions::default()
     };
-    let model = status(repo, &opts, &mut NullProgress).expect("status");
+    let model = status(repo, &opts, &mut NullProgress, &NeverCancel).expect("status");
     model.untracked
 }
 

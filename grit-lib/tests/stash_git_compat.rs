@@ -9,6 +9,7 @@ use grit_lib::porcelain::stash::{
     stash_branch, stash_diff, StashCreateOptions, StashDiffOptions,
 };
 use grit_lib::porcelain::status::{status, StatusOptions};
+use grit_lib::progress::NeverCancel;
 use grit_lib::progress::NullProgress;
 use std::process::Command;
 
@@ -1126,7 +1127,13 @@ fn stash_branch_creates_branch_at_base_and_restores_index() {
         "staged\n"
     );
     let mut progress = NullProgress;
-    let model = status(&repo, &StatusOptions::default(), &mut progress).expect("status");
+    let model = status(
+        &repo,
+        &StatusOptions::default(),
+        &mut progress,
+        &NeverCancel,
+    )
+    .expect("status");
     assert!(
         model.staged.iter().any(|e| e.path() == "staged.txt"),
         "index must restore staged.txt"

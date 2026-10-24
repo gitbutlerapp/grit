@@ -8,6 +8,7 @@ use std::process::Command;
 
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::config::{ConfigFile, ConfigScope};
+use grit_lib::progress::NeverCancel;
 use grit_lib::remote::clone::{clone, CloneOptions};
 use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::transfer::{FetchOptions, TagMode};
@@ -125,7 +126,7 @@ fn clone_uses_git_ssh_command() {
     let mut opts = CloneOptions::new(url, tmp.path().join("dest"));
     opts.environment = env_with_ssh_var("GIT_SSH_COMMAND", script.to_str().unwrap());
 
-    clone(opts, &mut NoProgress, None).expect("clone");
+    clone(opts, &mut NoProgress, &NeverCancel, None).expect("clone");
     let calls = std::fs::read_to_string(&log).expect("log");
     assert!(
         !calls.trim().is_empty(),
@@ -144,7 +145,7 @@ fn clone_uses_git_ssh_program() {
     let mut opts = CloneOptions::new(url, tmp.path().join("dest"));
     opts.environment = env_with_ssh_var("GIT_SSH", script.to_str().unwrap());
 
-    clone(opts, &mut NoProgress, None).expect("clone");
+    clone(opts, &mut NoProgress, &NeverCancel, None).expect("clone");
     let calls = std::fs::read_to_string(&log).expect("log");
     assert!(
         !calls.trim().is_empty(),
@@ -186,7 +187,13 @@ fn fetch_with_default_options_uses_repository_git_ssh_command() {
 
     let remote = Remote::from_config(&repo.config().unwrap(), "origin").unwrap();
     remote
-        .fetch(&repo, FetchOptions::default(), &mut NoProgress, None)
+        .fetch(
+            &repo,
+            FetchOptions::default(),
+            &mut NoProgress,
+            &NeverCancel,
+            None,
+        )
         .expect("fetch");
 
     let calls = std::fs::read_to_string(&log).expect("log");
@@ -241,6 +248,7 @@ fn fetch_honors_core_ssh_command_when_env_unset() {
                 ..Default::default()
             },
             &mut NoProgress,
+            &NeverCancel,
             None,
         )
         .expect("fetch");

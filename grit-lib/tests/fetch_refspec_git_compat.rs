@@ -6,6 +6,7 @@ use std::process::Command;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
+use grit_lib::progress::NeverCancel;
 use grit_lib::refs::resolve_ref;
 use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::transfer::{fetch_local, FetchOptions, TagMode};
@@ -235,6 +236,7 @@ fn named_remote_explicit_refspec_writes_fetch_head_via_remote_fetch() {
                 ..Default::default()
             },
             &mut NoProgress,
+            &NeverCancel,
             None,
         )
         .expect("Remote::fetch explicit main");

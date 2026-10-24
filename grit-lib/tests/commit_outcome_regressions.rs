@@ -7,6 +7,7 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::porcelain::add::{stage, stage_for_commit, StageOptions};
 use grit_lib::porcelain::commit::{commit_worktree, create_commit, CommitRequest, HookPolicy};
 use grit_lib::porcelain::status::{status, StatusOptions};
+use grit_lib::progress::NeverCancel;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
@@ -302,7 +303,13 @@ fn commit_worktree_stages_unrelated_untracked_warm_untr_cache() {
     large_index_fixture(root);
 
     let repo = open_repo(root);
-    status(&repo, &StatusOptions::default(), &mut NullProgress).expect("warm UNTR via status");
+    status(
+        &repo,
+        &StatusOptions::default(),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("warm UNTR via status");
     apply_unrelated_tracked_and_untracked(root);
 
     commit_worktree(&repo, &commit_worktree_req("both"), &mut NullProgress).expect("commit");

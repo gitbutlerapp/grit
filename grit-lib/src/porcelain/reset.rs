@@ -545,7 +545,7 @@ mod tests {
     use crate::index::Index;
     use crate::objects::{serialize_commit, CommitData, ObjectKind};
     use crate::porcelain::status::{status, StatusOptions};
-    use crate::progress::NullProgress;
+    use crate::progress::{NeverCancel, NullProgress};
     use crate::repo::{init_repository, Repository};
     use crate::write_tree::{write_tree_update_index, WriteTreeFlags};
     use crate::RefStorageFormat;
@@ -710,7 +710,13 @@ mod tests {
 
         reset_to_commit(&repo, &reset_opts(c1, ResetMode::Mixed)).expect("reset");
 
-        let st = status(&repo, &StatusOptions::default(), &mut NullProgress).expect("status");
+        let st = status(
+            &repo,
+            &StatusOptions::default(),
+            &mut NullProgress,
+            &NeverCancel,
+        )
+        .expect("status");
         assert!(st.staged.is_empty(), "index should match HEAD tree");
     }
 
@@ -727,7 +733,13 @@ mod tests {
         let index = repo.load_index().expect("index");
         assert!(index.get(b"a.txt", 0).expect("a").size > 0);
         assert!(index.get(b"b.txt", 0).expect("b").size > 0);
-        let st = status(&repo, &StatusOptions::default(), &mut NullProgress).expect("status");
+        let st = status(
+            &repo,
+            &StatusOptions::default(),
+            &mut NullProgress,
+            &NeverCancel,
+        )
+        .expect("status");
         assert!(st.unstaged.is_empty(), "worktree matches HEAD after reset");
         assert!(st.staged.is_empty());
     }
@@ -742,7 +754,13 @@ mod tests {
 
         reset_to_commit(&repo, &reset_opts(c1, ResetMode::Mixed)).expect("reset back");
 
-        let st = status(&repo, &StatusOptions::default(), &mut NullProgress).expect("status");
+        let st = status(
+            &repo,
+            &StatusOptions::default(),
+            &mut NullProgress,
+            &NeverCancel,
+        )
+        .expect("status");
         let unstaged: Vec<_> = st.unstaged.iter().map(|e| e.path()).collect();
         assert_eq!(unstaged, ["a.txt"]);
         let _ = c2;
@@ -776,7 +794,13 @@ mod tests {
             refs::resolve_ref(&repo.git_dir(), "refs/heads/main").expect("ref"),
             c1
         );
-        let st = status(&repo, &StatusOptions::default(), &mut NullProgress).expect("status");
+        let st = status(
+            &repo,
+            &StatusOptions::default(),
+            &mut NullProgress,
+            &NeverCancel,
+        )
+        .expect("status");
         assert!(st.staged.is_empty());
         assert!(st.unstaged.is_empty());
         let _ = c2;
@@ -832,7 +856,13 @@ mod tests {
             .read(&index.get(b"f", 0).expect("entry").oid)
             .expect("blob");
         assert_eq!(blob.data, b"clean\n");
-        let st = status(&repo, &StatusOptions::default(), &mut NullProgress).expect("status");
+        let st = status(
+            &repo,
+            &StatusOptions::default(),
+            &mut NullProgress,
+            &NeverCancel,
+        )
+        .expect("status");
         assert!(st.staged.is_empty());
         assert!(st.unstaged.is_empty());
     }
@@ -923,7 +953,13 @@ mod tests {
             0,
             "run.sh should be executable after hard reset"
         );
-        let st = status(&repo, &StatusOptions::default(), &mut NullProgress).expect("status");
+        let st = status(
+            &repo,
+            &StatusOptions::default(),
+            &mut NullProgress,
+            &NeverCancel,
+        )
+        .expect("status");
         assert!(st.staged.is_empty(), "{st:?}");
         assert!(st.unstaged.is_empty(), "{st:?}");
     }

@@ -1250,7 +1250,12 @@ fn ensure_empty_or_missing(path: &Path) -> Result<()> {
 }
 
 fn worktree_has_local_changes(repo: &Repository) -> Result<bool> {
-    let model = status(repo, &StatusOptions::default(), &mut NullProgress)?;
+    let model = status(
+        repo,
+        &StatusOptions::default(),
+        &mut NullProgress,
+        &crate::progress::NeverCancel,
+    )?;
     Ok(!model.staged.is_empty()
         || !model.unstaged.is_empty()
         || !model.conflicts.is_empty()

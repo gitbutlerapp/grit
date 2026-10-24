@@ -102,6 +102,7 @@ pub fn protocol_v2_response(data: &[u8]) {
         None,
         &mut shallow,
         &mut progress,
+        &crate::progress::NeverCancel,
         false,
     );
     if let Ok(s) = std::str::from_utf8(data) {

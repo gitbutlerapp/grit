@@ -317,7 +317,7 @@ mod tests {
     use crate::objects::parse_commit;
     use crate::objects::{serialize_commit, CommitData, ObjectKind};
     use crate::porcelain::status::{status, StatusOptions};
-    use crate::progress::NullProgress;
+    use crate::progress::{NeverCancel, NullProgress};
     use crate::refs::{resolve_ref, write_ref, write_symbolic_ref};
     use crate::repo::{InitOptions, Repository};
 
@@ -653,7 +653,13 @@ mod tests {
             fs::read(&stable_path).expect("stable.txt after restore"),
             stable_before
         );
-        let model = status(&repo, &StatusOptions::default(), &mut NullProgress).expect("status");
+        let model = status(
+            &repo,
+            &StatusOptions::default(),
+            &mut NullProgress,
+            &NeverCancel,
+        )
+        .expect("status");
         assert!(
             model.staged.is_empty() && model.unstaged.is_empty(),
             "worktree must be clean after exec rollback, staged={:?} unstaged={:?}",

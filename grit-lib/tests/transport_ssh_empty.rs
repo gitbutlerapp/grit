@@ -10,6 +10,7 @@ use std::process::Command;
 
 use grit_lib::objects::ObjectId;
 use grit_lib::prelude::Environment;
+use grit_lib::progress::NeverCancel;
 use grit_lib::remote::clone::{clone, CloneOptions};
 use grit_lib::remote::fetch::{fetch_remote, NoProgress};
 use grit_lib::remote::push::push_remote;
@@ -184,7 +185,8 @@ fn clone_empty_bare_over_ssh_succeeds() {
         std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("/")),
     );
 
-    let outcome = clone(opts, &mut NoProgress, None).expect("clone empty bare over ssh");
+    let outcome =
+        clone(opts, &mut NoProgress, &NeverCancel, None).expect("clone empty bare over ssh");
 
     assert!(outcome.branches_with_commits.is_empty());
     assert!(dest.join(".git").is_dir());

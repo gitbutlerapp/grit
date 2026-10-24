@@ -86,6 +86,12 @@ There is **no global thread pool** and **no environment reads** inside `grit_lib
 
 [`try_par_map_force`](https://docs.rs/grit-lib/latest/grit_lib/parallel/fn.try_par_map_force.html) skips batch thresholds (used for index-pack). Hash-specific helpers in [`grit_lib::objects::hash`](https://docs.rs/grit-lib/latest/grit_lib/hash/index.html) remain thin wrappers over these APIs.
 
+## Progress and cancellation
+
+Long-running library work reports through [`ProgressSink`](https://docs.rs/grit-lib/latest/grit_lib/progress/trait.ProgressSink.html) and accepts a separate [`Cancel`](https://docs.rs/grit-lib/latest/grit_lib/progress/trait.Cancel.html) signal. Call [`poll_cancel`](https://docs.rs/grit-lib/latest/grit_lib/progress/fn.poll_cancel.html) at loop boundaries (or rely on built-in checks in fetch pack demux and status scans); either the cancel handle or [`ProgressSink::should_cancel`](https://docs.rs/grit-lib/latest/grit_lib/progress/trait.ProgressSink.html#method.should_cancel) stops the operation with [`Error::Cancelled`](https://docs.rs/grit-lib/latest/grit_lib/error/enum.Error.html#variant.Cancelled). Pass [`NeverCancel`](https://docs.rs/grit-lib/latest/grit_lib/progress/struct.NeverCancel.html) when interruption is not needed.
+
+Network entry points that accept cancel today include [`fetch_remote`](https://docs.rs/grit-lib/latest/grit_lib/fetch/fn.fetch_remote.html), [`Remote::fetch`](https://docs.rs/grit-lib/latest/grit_lib/remote/struct.Remote.html#method.fetch), [`clone`](https://docs.rs/grit-lib/latest/grit_lib/remote/clone/fn.clone.html), [`pull`](https://docs.rs/grit-lib/latest/grit_lib/porcelain/pull/fn.pull.html), and [`status`](https://docs.rs/grit-lib/latest/grit_lib/porcelain/status/fn.status.html). Checkout, reset, switch, push, and history apply are still being threaded; embedders should pass cancel on the APIs that already take it.
+
 ## Tests
 
 - Policy unit tests live in `grit-lib/src/parallel/policy.rs`.

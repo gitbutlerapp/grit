@@ -22,7 +22,7 @@ mod tests {
     use crate::porcelain::checkout::checkout_between_trees;
     use crate::porcelain::commit::{create_commit, CommitRequest, HookPolicy};
     use crate::porcelain::status::{status, StatusOptions};
-    use crate::progress::NullProgress;
+    use crate::progress::{NeverCancel, NullProgress};
     use crate::ref_storage::RefStorageFormat;
     use crate::repo::{init_repository, init_repository_separate_git_dir, Repository};
     use crate::rev_list::{rev_list, RevListOptions};
@@ -52,7 +52,13 @@ mod tests {
         fs::write(root.join("README"), b"hello\n").unwrap();
 
         cascade_load_counters::measure(|| {
-            status(&repo, &StatusOptions::default(), &mut NullProgress).unwrap();
+            status(
+                &repo,
+                &StatusOptions::default(),
+                &mut NullProgress,
+                &NeverCancel,
+            )
+            .unwrap();
         });
         assert_at_most_config_loads("status", 1);
 
@@ -446,7 +452,12 @@ mod tests {
 
         let discovered = Repository::discover(Some(root.as_path()), &RepositoryOptions::empty())
             .expect("discover");
-        let result = status(&discovered, &StatusOptions::default(), &mut NullProgress);
+        let result = status(
+            &discovered,
+            &StatusOptions::default(),
+            &mut NullProgress,
+            &NeverCancel,
+        );
 
         if let Some(v) = prev_global {
             env::set_var("GIT_CONFIG_GLOBAL", v);

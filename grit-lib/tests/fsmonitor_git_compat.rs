@@ -7,6 +7,7 @@ use std::process::Command;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
 use grit_lib::objects::{HashAlgo, ObjectKind};
+use grit_lib::progress::NeverCancel;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
 
@@ -408,7 +409,7 @@ fn grit_status_v1_two_query_race_after_hook_modifies_during_first_query() {
     let mut opts = grit_lib::porcelain::status::StatusOptions::default();
     opts.fsmonitor_query_boundary = Some(boundary_first);
 
-    let first = grit_lib::porcelain::status::status(&grit_repo, &opts, &mut progress)
+    let first = grit_lib::porcelain::status::status(&grit_repo, &opts, &mut progress, &NeverCancel)
         .expect("first status");
     assert!(
         first.unstaged.is_empty(),
@@ -422,8 +423,9 @@ fn grit_status_v1_two_query_race_after_hook_modifies_during_first_query() {
     );
 
     opts.fsmonitor_query_boundary = Some(boundary_second);
-    let second = grit_lib::porcelain::status::status(&grit_repo, &opts, &mut progress)
-        .expect("second status");
+    let second =
+        grit_lib::porcelain::status::status(&grit_repo, &opts, &mut progress, &NeverCancel)
+            .expect("second status");
     assert!(
         second.unstaged.iter().any(|e| e.path() == "tracked.txt"),
         "second query must invalidate via v1 token window: {:?}",

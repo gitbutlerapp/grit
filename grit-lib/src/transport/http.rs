@@ -797,7 +797,13 @@ pub fn http_fetch(
     };
     let transport = SmartHttpTransport::new(client);
     let mut conn = transport.connect(repo_url, Service::UploadPack, &connect)?;
-    fetch_remote(local_git_dir, &mut *conn, opts, progress)
+    fetch_remote(
+        local_git_dir,
+        &mut *conn,
+        opts,
+        progress,
+        &crate::progress::NeverCancel,
+    )
 }
 
 #[cfg(test)]

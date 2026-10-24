@@ -17,7 +17,7 @@ use crate::error::{Error, Result};
 use crate::fetch::Progress;
 use crate::objects::HashAlgo;
 use crate::pack_stream_scan::PackStreamScanner;
-use crate::progress::{ProgressPhase, ProgressUnit, ReceivedObjects};
+use crate::progress::{poll_cancel, Cancel, ProgressPhase, ProgressUnit, ReceivedObjects};
 
 /// Where demuxed pack bytes are stored.
 pub enum PackReceiveTarget<'a> {
@@ -243,11 +243,20 @@ pub fn read_sideband_pack_to(
     r: &mut dyn Read,
     target: &mut PackReceiveTarget<'_>,
     progress: &mut dyn Progress,
+    cancel: &dyn Cancel,
 ) -> Result<()> {
     crate::trace::trace_span!("grit.pack.receive");
     let mut pending = Vec::new();
     let mut payload = Vec::with_capacity(65520);
-    read_sideband_pack_tail(r, target, progress, &mut pending, &mut false, &mut payload)?;
+    read_sideband_pack_tail(
+        r,
+        target,
+        progress,
+        cancel,
+        &mut pending,
+        &mut false,
+        &mut payload,
+    )?;
     Ok(())
 }
 
@@ -349,6 +358,7 @@ pub fn read_sideband_pack_tail(
     r: &mut dyn Read,
     target: &mut PackReceiveTarget<'_>,
     progress: &mut dyn Progress,
+    cancel: &dyn Cancel,
     pending: &mut Vec<u8>,
     seen_pack: &mut bool,
     payload_buf: &mut Vec<u8>,
@@ -357,6 +367,7 @@ pub fn read_sideband_pack_tail(
         r,
         target,
         progress,
+        cancel,
         pending,
         seen_pack,
         payload_buf,
@@ -368,6 +379,7 @@ fn read_sideband_pack_tail_buffered(
     r: &mut dyn Read,
     target: &mut PackReceiveTarget<'_>,
     progress: &mut dyn Progress,
+    cancel: &dyn Cancel,
     pending: &mut Vec<u8>,
     seen_pack: &mut bool,
     _payload_buf: &mut Vec<u8>,
@@ -380,6 +392,7 @@ fn read_sideband_pack_tail_buffered(
         .then(|| ObjectCounter::spawn(HashAlgo::Sha1))
         .flatten();
     loop {
+        poll_cancel(progress, cancel)?;
         while stream.available() < 4 {
             if !stream.refill(r)? {
                 if stream.available() == 0 {
@@ -738,6 +751,7 @@ impl TempPackReceive {
         &mut self,
         reader: &mut dyn Read,
         progress: &mut dyn Progress,
+        cancel: &dyn Cancel,
     ) -> Result<()> {
         let mut target = PackReceiveTarget::File(&mut self.file);
         let mut pending = Vec::new();
@@ -746,6 +760,7 @@ impl TempPackReceive {
             reader,
             &mut target,
             progress,
+            cancel,
             &mut pending,
             &mut seen,
             &mut self.sideband_payload,
@@ -848,7 +863,13 @@ mod tests {
         let mut target_buf = Vec::new();
         let mut target = PackReceiveTarget::Memory(&mut target_buf);
         let mut rec = ReceiveRecorder::default();
-        read_sideband_pack_to(&mut Cursor::new(stream), &mut target, &mut rec).expect("read");
+        read_sideband_pack_to(
+            &mut Cursor::new(stream),
+            &mut target,
+            &mut rec,
+            &crate::progress::NeverCancel,
+        )
+        .expect("read");
 
         assert!(rec.started);
         assert_eq!(rec.total, None);
@@ -909,6 +930,7 @@ mod tests {
             &mut Cursor::new(stream),
             &mut opt_target,
             &mut opt_rec,
+            &crate::progress::NeverCancel,
             &mut opt_pending,
             &mut opt_seen,
             &mut opt_scratch,
@@ -971,7 +993,13 @@ mod tests {
         let mut out = Vec::new();
         let mut target = PackReceiveTarget::Memory(&mut out);
         let mut rec = CountRecorder::default();
-        read_sideband_pack_to(&mut Cursor::new(wire), &mut target, &mut rec).expect("receive");
+        read_sideband_pack_to(
+            &mut Cursor::new(wire),
+            &mut target,
+            &mut rec,
+            &crate::progress::NeverCancel,
+        )
+        .expect("receive");
         assert_eq!(out, pack);
         // The counting thread runs behind the receive, so how far it got by
         // the last report varies; every report is consistent and ordered.
@@ -989,7 +1017,13 @@ mod tests {
         let mut out = Vec::new();
         let mut target = PackReceiveTarget::Memory(&mut out);
         let mut rec = ReceiveRecorder::default();
-        read_sideband_pack_to(&mut Cursor::new(wire), &mut target, &mut rec).expect("receive");
+        read_sideband_pack_to(
+            &mut Cursor::new(wire),
+            &mut target,
+            &mut rec,
+            &crate::progress::NeverCancel,
+        )
+        .expect("receive");
         assert_eq!(out.len(), 12);
     }
 
@@ -1007,6 +1041,7 @@ mod tests {
             &mut Cursor::new(stream),
             &mut target,
             &mut ReceiveRecorder::default(),
+            &crate::progress::NeverCancel,
             &mut pending,
             &mut seen,
             &mut scratch,
@@ -1087,7 +1122,11 @@ mod tests {
         stream.extend_from_slice(&sideband_pkt(3, b"network interrupted"));
         let mut rec = ReceiveRecorder::default();
         let err = recv
-            .read_sideband(&mut Cursor::new(stream), &mut rec)
+            .read_sideband(
+                &mut Cursor::new(stream),
+                &mut rec,
+                &crate::progress::NeverCancel,
+            )
             .expect_err("remote side-band error");
         assert!(matches!(err, Error::Message(_)));
         drop(recv);

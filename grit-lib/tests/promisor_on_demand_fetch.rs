@@ -18,6 +18,7 @@ use grit_lib::objects::pack::clear_pack_cache;
 use grit_lib::objects::promisor::{DefaultPromisorFetcher, PromisorFetcher};
 use grit_lib::objects::{parse_commit, ObjectId};
 use grit_lib::porcelain::checkout::checkout_between_trees;
+use grit_lib::progress::NeverCancel;
 use grit_lib::remote::clone::{clone, CloneOptions};
 use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::partial_clone::ObjectFilterSpec;
@@ -96,6 +97,7 @@ fn grit_blobless_clone(
             ..CloneOptions::new(url, dest.to_path_buf())
         },
         &mut NoProgress,
+        &NeverCancel,
         None,
     )
     .expect("clone");

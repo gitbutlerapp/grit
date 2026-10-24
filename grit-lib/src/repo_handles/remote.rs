@@ -251,7 +251,7 @@ impl<'repo> RepositoryRemotes<'repo> {
     /// let mut progress = NoProgress;
     /// let _out = repo
     ///     .remotes()
-    ///     .fetch(&remote, FetchOptions::default(), &mut progress, None)?;
+    ///     .fetch(&remote, FetchOptions::default(), &mut progress, &NeverCancel, None)?;
     /// # Ok(())
     /// # }
     /// ```
@@ -260,9 +260,10 @@ impl<'repo> RepositoryRemotes<'repo> {
         remote: &Remote,
         options: FetchOptions,
         progress: &mut dyn Progress,
+        cancel: &dyn crate::progress::Cancel,
         http_factory: Option<&dyn HttpClientFactory>,
     ) -> std::result::Result<FetchOutcome, RemoteError> {
-        remote.fetch(self.repo, options, progress, http_factory)
+        remote.fetch(self.repo, options, progress, cancel, http_factory)
     }
 
     /// Fetch from every configured remote in config load order, skipping
@@ -285,6 +286,7 @@ impl<'repo> RepositoryRemotes<'repo> {
         cli_prune: Option<bool>,
         cli_tags: Option<bool>,
         progress: &mut dyn Progress,
+        cancel: &dyn crate::progress::Cancel,
         http_factory: Option<&dyn HttpClientFactory>,
     ) -> Result<Vec<(String, std::result::Result<FetchOutcome, RemoteError>)>> {
         use crate::remote::transfer::{resolve_fetch_prune, resolve_fetch_tags};
@@ -313,7 +315,7 @@ impl<'repo> RepositoryRemotes<'repo> {
             };
             let outcome = self
                 .get(&name)
-                .and_then(|remote| self.fetch(&remote, opts, progress, http_factory));
+                .and_then(|remote| self.fetch(&remote, opts, progress, cancel, http_factory));
             results.push((name, outcome));
         }
         Ok(results)
@@ -340,7 +342,7 @@ impl<'repo> RepositoryRemotes<'repo> {
     /// let refs: Vec<PushRefSpec> = Vec::new();
     /// let _out = repo
     ///     .remotes()
-    ///     .push(&remote, &refs, PushOptions::default(), &mut progress, None)?;
+    ///     .push(&remote, &refs, PushOptions::default(), &mut progress, &NeverCancel, None)?;
     /// # Ok(())
     /// # }
     /// ```

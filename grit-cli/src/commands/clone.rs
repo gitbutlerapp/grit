@@ -20,7 +20,7 @@ use crate::progress::{
     format_bytes, format_duration, format_rate, group_digits, paint, phase_label, phase_palette,
     PhaseRecord, TerminalProgress, BOLD, DIM,
 };
-use grit_lib::progress::{ProgressPhase, ProgressUnit};
+use grit_lib::progress::{NeverCancel, ProgressPhase, ProgressUnit};
 
 /// Objects received, by type.
 #[derive(Serialize, JsonSchema, Clone, Copy)]
@@ -705,7 +705,12 @@ fn clone_into(
         checkout: !run.no_checkout,
     };
     let single_branch = clone_effective_single_branch(&clone_opts);
-    let outcome = clone_repo(clone_opts, &mut *term_progress, Some(&factory))?;
+    let outcome = clone_repo(
+        clone_opts,
+        &mut *term_progress,
+        &NeverCancel,
+        Some(&factory),
+    )?;
 
     let files = outcome.files;
     let worktree_bytes = outcome.worktree_bytes;

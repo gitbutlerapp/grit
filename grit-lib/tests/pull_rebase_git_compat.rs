@@ -4,6 +4,7 @@ use grit_lib::change_id::{change_id, resolved_change_id, ChangeIdPolicy};
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::objects::{parse_commit, ObjectId};
 use grit_lib::porcelain::pull::{pull, PullMode, PullOptions, PullResult};
+use grit_lib::progress::NeverCancel;
 use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::transfer::{FetchOptions, TagMode};
 use grit_lib::repo::Repository;
@@ -81,6 +82,7 @@ fn pull_rebase_grit(repo: &Repository) -> grit_lib::porcelain::pull::PullOutcome
             ..PullOptions::default()
         },
         &mut progress,
+        &NeverCancel,
         None,
     )
     .expect("grit pull --rebase")

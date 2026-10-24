@@ -11,6 +11,7 @@ use grit_lib::objects::prune_packed::{prune_packed_objects, PrunePackedOptions};
 use grit_lib::objects::HashAlgo;
 use grit_lib::porcelain::add::{stage, StageOptions};
 use grit_lib::porcelain::status::{status, StatusOptions};
+use grit_lib::progress::NeverCancel;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
@@ -98,8 +99,13 @@ fn sha256_stat_refresh_staging_patch_id_and_prune_packed() {
     .expect("open grit repo");
     assert_eq!(grit_repo.odb().hash_algo(), HashAlgo::Sha256);
 
-    let model = status(&grit_repo, &StatusOptions::default(), &mut NullProgress)
-        .expect("status after touch");
+    let model = status(
+        &grit_repo,
+        &StatusOptions::default(),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("status after touch");
     assert!(
         model.unstaged.is_empty() && model.staged.is_empty(),
         "grit status must be clean after stat refresh, got {model:?}"

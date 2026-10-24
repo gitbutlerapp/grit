@@ -20,6 +20,7 @@ use grit_lib::porcelain::staging::stage_worktree_changes;
 use grit_lib::porcelain::stash::{apply_stash, push_stash, StashCreateOptions, StashMode};
 use grit_lib::porcelain::status::{status, StatusOptions};
 use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
+use grit_lib::progress::NeverCancel;
 use grit_lib::progress::NullProgress;
 use grit_lib::refs;
 use grit_lib::repo::{InitOptions, Repository};
@@ -187,7 +188,7 @@ impl HotPathsFixture {
             ahead_behind: false,
             ..StatusOptions::default()
         };
-        let _ = status(&self.repo, &opts, &mut NullProgress).expect("status clean");
+        let _ = status(&self.repo, &opts, &mut NullProgress, &NeverCancel).expect("status clean");
     }
 
     pub fn bench_diff_worktree_clean(&self) {

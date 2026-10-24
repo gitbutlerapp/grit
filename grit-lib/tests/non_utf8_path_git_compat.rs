@@ -15,6 +15,7 @@ use grit_lib::porcelain::add::{stage, StageMode, StageOptions};
 use grit_lib::porcelain::checkout::checkout_between_trees;
 use grit_lib::porcelain::restore::{restore_paths, RestoreOptions, RestoreSource};
 use grit_lib::porcelain::status::{status, StatusOptions};
+use grit_lib::progress::NeverCancel;
 use grit_lib::progress::NullProgress;
 use grit_lib::remote::clone::{clone as clone_repo, CloneOptions};
 use grit_lib::remote::fetch::NoProgress;
@@ -214,7 +215,13 @@ fn non_utf8_tracked_status_diff_add_clone_and_restore() {
     std::fs::remove_file(r1.join("ok.txt")).expect("rm ok");
 
     let repo = open_repo(&r1);
-    let model = status(&repo, &StatusOptions::default(), &mut NullProgress).expect("status");
+    let model = status(
+        &repo,
+        &StatusOptions::default(),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("status");
     let unstaged_paths: Vec<_> = model.unstaged.iter().map(|e| e.path().to_owned()).collect();
     assert!(
         unstaged_paths.iter().any(|p| path_is_bad_name(p)),
@@ -246,6 +253,7 @@ fn non_utf8_tracked_status_diff_add_clone_and_restore() {
             ..CloneOptions::new(r1.to_string_lossy(), clone_dest.clone())
         },
         &mut NoProgress,
+        &NeverCancel,
         None,
     )
     .expect("grit clone");

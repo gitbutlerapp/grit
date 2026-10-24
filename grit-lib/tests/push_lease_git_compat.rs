@@ -9,6 +9,7 @@ use std::process::Command;
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::config::ConfigSet;
 use grit_lib::objects::ObjectId;
+use grit_lib::progress::NeverCancel;
 use grit_lib::refs::resolve_ref;
 use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::push_plan::{
@@ -160,6 +161,7 @@ fn grit_push_request(work: &Path, bare: &Path, request: PushRequest) -> PushOutc
                 ..Default::default()
             },
             &mut NoProgress,
+            &NeverCancel,
             None,
         )
         .expect("push")

@@ -7,6 +7,7 @@ use std::process::Command;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::porcelain::commit::HookPolicy;
 use grit_lib::porcelain::status::{status, IgnoredMode, StatusModel, StatusOptions, UntrackedMode};
+use grit_lib::progress::NeverCancel;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::RefStorageFormat;
@@ -54,7 +55,8 @@ fn run_status_pair(
     fs::write(repo.index_handle().path(), baseline_index).expect("restore index");
     let mut serial_opts = opts.clone();
     serial_opts.stat_parallel_threads = Some(1);
-    let serial = status(repo, &serial_opts, &mut NullProgress).expect("serial status");
+    let serial =
+        status(repo, &serial_opts, &mut NullProgress, &NeverCancel).expect("serial status");
     let serial_index = fs::read(repo.index_handle().path()).expect("serial index");
 
     fs::write(repo.index_handle().path(), baseline_index).expect("restore index");
@@ -67,8 +69,13 @@ fn run_status_pair(
     .with_thread_policy(forced_parallel_policy());
     let mut parallel_opts = opts.clone();
     parallel_opts.stat_parallel_threads = Some(4);
-    let parallel =
-        status(&parallel_repo, &parallel_opts, &mut NullProgress).expect("parallel status");
+    let parallel = status(
+        &parallel_repo,
+        &parallel_opts,
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("parallel status");
     let parallel_index = fs::read(parallel_repo.index_handle().path()).expect("parallel index");
 
     (serial, parallel, serial_index, parallel_index)

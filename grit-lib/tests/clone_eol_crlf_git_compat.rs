@@ -6,6 +6,7 @@ use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::index::Index;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::checkout::checkout_between_trees;
+use grit_lib::progress::NeverCancel;
 use grit_lib::remote::clone::{clone as clone_repo, CloneOptions};
 use grit_lib::remote::fetch::NoProgress;
 use grit_lib::repo::Repository;
@@ -64,7 +65,7 @@ fn grit_clone_and_checkout(source: &std::path::Path, dest: &std::path::Path) {
         environment: Environment::empty(),
         ..CloneOptions::new(source.to_string_lossy(), dest.to_path_buf())
     };
-    let outcome = clone_repo(opts, &mut NoProgress, None).expect("grit clone");
+    let outcome = clone_repo(opts, &mut NoProgress, &NeverCancel, None).expect("grit clone");
     let commit = outcome
         .repo
         .odb()

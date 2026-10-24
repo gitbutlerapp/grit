@@ -21,7 +21,7 @@ pub(crate) use trace_span;
 mod tests {
     use crate::environment::RepositoryOptions;
     use crate::porcelain::status::{status, StatusOptions};
-    use crate::progress::NullProgress;
+    use crate::progress::{NeverCancel, NullProgress};
     use crate::repo::{InitOptions, Repository};
     use crate::rev_list::RevListOptions;
     use std::sync::{Arc, Mutex};
@@ -79,7 +79,13 @@ mod tests {
 
             let opened =
                 Repository::discover(Some(dir.path()), &RepositoryOptions::default()).unwrap();
-            let _ = status(&opened, &StatusOptions::default(), &mut NullProgress).unwrap();
+            let _ = status(
+                &opened,
+                &StatusOptions::default(),
+                &mut NullProgress,
+                &NeverCancel,
+            )
+            .unwrap();
             let _ = opened
                 .rev_walk()
                 .walk("HEAD", &RevListOptions::default())

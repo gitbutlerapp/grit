@@ -5,6 +5,7 @@ use std::path::Path;
 use std::process::Command;
 
 use grit_lib::porcelain::status::{status, StatusOptions, UntrackedMode};
+use grit_lib::progress::NeverCancel;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::PARALLEL_STAT_MIN_ENTRIES;
@@ -102,7 +103,7 @@ fn run_status(
     opts.untracked = UntrackedMode::No;
     opts.ahead_behind = false;
     opts.stat_parallel_threads = Some(threads);
-    let model = status(repo, &opts, &mut NullProgress).expect("status");
+    let model = status(repo, &opts, &mut NullProgress, &NeverCancel).expect("status");
     let index_bytes = fs::read(repo.index_handle().path()).expect("index bytes");
     (model, index_bytes)
 }

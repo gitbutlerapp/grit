@@ -10,6 +10,7 @@ use grit_lib::porcelain::pull::{
     pull, resolve_pull_mode, PullError, PullMode, PullOptions, PullResult,
 };
 use grit_lib::porcelain::stash::list_stashes;
+use grit_lib::progress::NeverCancel;
 use grit_lib::refs::resolve_ref;
 use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::transfer::{FetchOptions, TagMode};
@@ -90,7 +91,7 @@ fn fetch_opts(env: &Environment) -> FetchOptions {
 
 fn pull_grit(repo: &Repository, options: &PullOptions) -> grit_lib::porcelain::pull::PullOutcome {
     let mut progress = NoProgress;
-    pull(repo, options, &mut progress, None).expect("grit pull")
+    pull(repo, options, &mut progress, &NeverCancel, None).expect("grit pull")
 }
 
 fn try_pull_grit(
@@ -98,7 +99,7 @@ fn try_pull_grit(
     options: &PullOptions,
 ) -> Result<grit_lib::porcelain::pull::PullOutcome, PullError> {
     let mut progress = NoProgress;
-    pull(repo, options, &mut progress, None)
+    pull(repo, options, &mut progress, &NeverCancel, None)
 }
 
 fn assert_fsck(dir: &Path) {

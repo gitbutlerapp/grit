@@ -775,7 +775,7 @@ fn verify_loose_objects(
     let mut dot = DotFsckTracker::default();
 
     if cancel.is_cancelled() {
-        return Err(Error::Message("cancelled".into()));
+        return Err(Error::Cancelled);
     }
     let results = match try_par_map::<_, _, String, _>(&loose, par_opts, total, |(oid, path)| {
         let read = Odb::read_loose_verify_oid(path, oid);
@@ -824,7 +824,7 @@ fn verify_loose_objects(
         if checked.is_multiple_of(128) {
             progress.set(checked as u64);
             if cancel.is_cancelled() {
-                return Err(Error::Message("cancelled".into()));
+                return Err(Error::Cancelled);
             }
         }
         match outcome {
@@ -1004,7 +1004,7 @@ fn verify_pack_objects(
     let mut dot = DotFsckTracker::default();
     for (i, idx_path) in packs.iter().enumerate() {
         if cancel.is_cancelled() {
-            return Err(Error::Message("cancelled".into()));
+            return Err(Error::Cancelled);
         }
         let pack_path = idx_path.with_extension("pack");
         let (prep, trailer_issue) = match prepare_pack_for_object_fsck(idx_path) {
@@ -1039,12 +1039,12 @@ fn verify_pack_objects(
         validated.reserve(object_count);
         links.reserve(object_count);
         if cancel.is_cancelled() {
-            return Err(Error::Message("cancelled".into()));
+            return Err(Error::Cancelled);
         }
         let outcomes = verify_pack_objects_offset_order(prep, odb, par_opts)?;
         for (n, outcome) in outcomes.into_iter().enumerate() {
             if n.is_multiple_of(128) && cancel.is_cancelled() {
-                return Err(Error::Message("cancelled".into()));
+                return Err(Error::Cancelled);
             }
             match outcome {
                 PackFsckObjectOutcome::Failed { oid, err } => {
@@ -1146,7 +1146,7 @@ fn walk_connectivity(
     let mut visited = 0u64;
     while let Some((oid, parent, root_kind)) = queue.pop_front() {
         if cancel.is_cancelled() {
-            return Err(Error::Message("cancelled".into()));
+            return Err(Error::Cancelled);
         }
         visited += 1;
         if visited.is_multiple_of(256) {

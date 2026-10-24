@@ -126,6 +126,15 @@ pub trait ProgressSink {
 
     /// Finish the current phase.
     fn finish(&mut self) {}
+
+    /// When `true`, the operation should stop at the next [`poll_cancel`] check.
+    ///
+    /// CLI progress sinks may set this when the user interrupts (Ctrl+C). Most
+    /// call sites rely on a separate [`Cancel`] argument instead; either signal
+    /// produces [`crate::error::Error::Cancelled`].
+    fn should_cancel(&self) -> bool {
+        false
+    }
 }
 
 /// Forwarding impl so a `&mut P` can be threaded into sub-operations that also
@@ -145,6 +154,9 @@ impl<T: ProgressSink + ?Sized> ProgressSink for &mut T {
     }
     fn finish(&mut self) {
         (**self).finish();
+    }
+    fn should_cancel(&self) -> bool {
+        (**self).should_cancel()
     }
 }
 
@@ -170,6 +182,50 @@ pub struct NeverCancel;
 impl Cancel for NeverCancel {
     fn is_cancelled(&self) -> bool {
         false
+    }
+}
+
+/// Shared flag for tests and embedders that flip cancellation mid-operation.
+#[derive(Debug, Clone)]
+pub struct FlagCancel(pub std::sync::Arc<std::sync::atomic::AtomicBool>);
+
+impl FlagCancel {
+    /// Create a cancel signal that starts unset.
+    #[must_use]
+    pub fn new() -> Self {
+        Self(std::sync::Arc::new(std::sync::atomic::AtomicBool::new(
+            false,
+        )))
+    }
+
+    /// Signal cancellation to every consumer polling this handle.
+    pub fn cancel(&self) {
+        self.0.store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+impl Default for FlagCancel {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Cancel for FlagCancel {
+    fn is_cancelled(&self) -> bool {
+        self.0.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+/// Returns [`crate::error::Error::Cancelled`] when `cancel` or `progress` request stop.
+#[inline]
+pub fn poll_cancel(
+    progress: &mut dyn ProgressSink,
+    cancel: &dyn Cancel,
+) -> crate::error::Result<()> {
+    if cancel.is_cancelled() || progress.should_cancel() {
+        Err(crate::error::Error::Cancelled)
+    } else {
+        Ok(())
     }
 }
 
@@ -253,6 +309,15 @@ mod tests {
     #[test]
     fn never_cancel_never_cancels() {
         assert!(!NeverCancel.is_cancelled());
+    }
+
+    #[test]
+    fn poll_cancel_returns_typed_error() {
+        let flag = FlagCancel::new();
+        flag.cancel();
+        let mut sink = NullProgress;
+        let err = poll_cancel(&mut sink, &flag).expect_err("cancelled");
+        assert!(matches!(err, crate::error::Error::Cancelled));
     }
 
     #[test]

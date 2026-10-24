@@ -3,6 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+use grit_lib::progress::NeverCancel;
 use grit_lib::remote::clone::{
     clone as clone_repo, clone_effective_single_branch, CloneError, CloneOptions, CloneTags,
 };
@@ -131,7 +132,7 @@ fn grit_clone_with(case: CloneCase, url: String, dest: PathBuf) {
         single_branch: case.single_branch,
         ..CloneOptions::new(url, dest)
     };
-    clone_repo(opts, &mut NoProgress, None).expect("grit clone");
+    clone_repo(opts, &mut NoProgress, &NeverCancel, None).expect("grit clone");
 }
 
 #[test]
@@ -216,6 +217,7 @@ fn clone_no_tags_sets_tagopt_and_fetches_no_tags() {
             ..CloneOptions::new(url, grit_dest.clone())
         },
         &mut NoProgress,
+        &NeverCancel,
         None,
     )
     .expect("grit clone --no-tags");
@@ -256,6 +258,7 @@ fn clone_origin_name_used_for_tracking_refs() {
             ..CloneOptions::new(url, dest.clone())
         },
         &mut NoProgress,
+        &NeverCancel,
         None,
     )
     .expect("clone with custom remote name");
@@ -298,6 +301,7 @@ fn clone_invalid_remote_on_nonempty_destination_preserves_files() {
             ..CloneOptions::new(bare.to_string_lossy(), dest.clone())
         },
         &mut NoProgress,
+        &NeverCancel,
         None,
     )
     .expect_err("nonempty destination must fail before remote-name validation matters");
@@ -388,6 +392,7 @@ fn clone_rejects_invalid_remote_name() {
             ..CloneOptions::new(bare.to_string_lossy(), tmp.path().join("dest"))
         },
         &mut NoProgress,
+        &NeverCancel,
         None,
     )
     .expect_err("invalid remote name");

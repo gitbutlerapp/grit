@@ -6,6 +6,7 @@ use std::process::Command;
 use grit_lib::config::environment::Environment;
 use grit_lib::objects::parse_commit;
 use grit_lib::porcelain::checkout::checkout_between_trees;
+use grit_lib::progress::NeverCancel;
 use grit_lib::remote::clone::{clone as clone_repo, CloneOptions};
 use grit_lib::remote::fetch::NoProgress;
 
@@ -93,6 +94,7 @@ fn clone_local_mixed_packed_tree_and_loose_blob() {
             ..CloneOptions::new(remote.to_string_lossy(), dest.clone())
         },
         &mut NoProgress,
+        &NeverCancel,
         None,
     )
     .expect("grit clone must succeed when blob stays loose");

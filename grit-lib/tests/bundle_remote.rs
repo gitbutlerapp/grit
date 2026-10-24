@@ -4,6 +4,7 @@ use std::path::Path;
 use std::process::Command;
 
 use grit_lib::config::environment::{Environment, RepositoryOptions};
+use grit_lib::progress::NeverCancel;
 use grit_lib::progress::{ProgressPhase, ProgressSink, ProgressUnit};
 use grit_lib::remote::clone::{clone as clone_repo, CloneOptions};
 use grit_lib::remote::fetch::{NoProgress, Progress};
@@ -85,6 +86,7 @@ fn fetch_from_git_bundle_matches_git_fetch() {
                 ..Default::default()
             },
             &mut progress,
+            &NeverCancel,
             None,
         )
         .expect("fetch bundle");
@@ -147,6 +149,7 @@ fn literal_bundle_fetch_writes_fetch_head() {
                 ..Default::default()
             },
             &mut NoProgress,
+            &NeverCancel,
             None,
         )
         .expect("anonymous bundle fetch");
@@ -249,7 +252,8 @@ fn clone_from_bundle_matches_git_default_branch_when_head_not_first() {
             grit_dest.path().to_path_buf(),
         )
     };
-    let outcome = clone_repo(opts, &mut NoProgress, None).expect("grit clone from bundle");
+    let outcome =
+        clone_repo(opts, &mut NoProgress, &NeverCancel, None).expect("grit clone from bundle");
 
     assert_eq!(outcome.head.branch_name(), Some(git_branch.as_str()));
     assert_eq!(outcome.checkout_oid.to_hex(), git_head);
@@ -277,7 +281,7 @@ fn clone_from_bundle_reports_transfer_stats() {
         environment: Environment::empty(),
         ..CloneOptions::new(bundle_path.to_str().unwrap(), dest.path().to_path_buf())
     };
-    let outcome = clone_repo(opts, &mut NoProgress, None).expect("clone from bundle");
+    let outcome = clone_repo(opts, &mut NoProgress, &NeverCancel, None).expect("clone from bundle");
 
     let count_out = Command::new("git")
         .args(["count-objects", "-v"])
@@ -332,7 +336,7 @@ fn clone_from_bundle_passes_git_fsck() {
         environment: Environment::empty(),
         ..CloneOptions::new(bundle_path.to_str().unwrap(), dest.path().to_path_buf())
     };
-    clone_repo(opts, &mut NoProgress, None).expect("clone from bundle");
+    clone_repo(opts, &mut NoProgress, &NeverCancel, None).expect("clone from bundle");
 
     assert!(git_in(dest.path(), &["fsck"]));
 }
@@ -417,7 +421,7 @@ fn bundle_clone_reports_progress() {
         ..CloneOptions::new(bundle_path.to_str().unwrap(), dest.path().to_path_buf())
     };
     let mut rec = PhaseRecorder::default();
-    clone_repo(opts, &mut rec, None).expect("clone from bundle");
+    clone_repo(opts, &mut rec, &NeverCancel, None).expect("clone from bundle");
 
     assert!(
         phase_started_and_finished(&rec, ProgressPhase::ReceivingObjects),

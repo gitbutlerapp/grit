@@ -1666,8 +1666,8 @@ pub(crate) fn unstaged_file_diffs_with_peer_hunks(
     Ok((files, peer_hunks))
 }
 
-/// Staged and unstaged file diffs for hunk id resolution (one staged scan per call).
-pub(crate) struct HunkDiffBundle {
+/// Staged and unstaged file diffs for hunk id assignment (one staged scan per call).
+pub struct HunkDiffBundle {
     /// Unstaged side file rows.
     pub unstaged: Vec<FileDiff>,
     /// Staged hunks on the same path (for peer-aware ids).
@@ -1675,7 +1675,7 @@ pub(crate) struct HunkDiffBundle {
 }
 
 /// Load unstaged diffs, staged peer hunks, and staged-side file rows in one pass.
-pub(crate) fn hunk_diff_bundle(
+pub fn hunk_diff_bundle(
     repo: &Repository,
     pathspecs: &[String],
     opts: DiffOptions,

@@ -269,7 +269,14 @@ fn grit_fetch_daemon(
         fetch_depth,
         ..Default::default()
     };
-    fetch_remote(&git_dir, &mut *conn, &mut opts, &mut NoProgress).expect("fetch_remote");
+    fetch_remote(
+        &git_dir,
+        &mut *conn,
+        &mut opts,
+        &mut NoProgress,
+        &NeverCancel,
+    )
+    .expect("fetch_remote");
 }
 
 fn init_shallow_client_from_daemon(tmp: &Path, url: &str, name: &str) -> PathBuf {

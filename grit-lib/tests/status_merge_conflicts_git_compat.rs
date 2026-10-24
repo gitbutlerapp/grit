@@ -2,6 +2,7 @@
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::porcelain::status::{status, ConflictKind, StatusOptions};
+use grit_lib::progress::NeverCancel;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::state::{InProgressOperation, NextStep};
@@ -42,7 +43,13 @@ fn status_lists_each_conflict_path_once_and_sets_merge_state() {
     let tmp = merge_conflict_repo();
     let root = tmp.path();
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open repo");
-    let model = status(&repo, &StatusOptions::default(), &mut NullProgress).expect("status");
+    let model = status(
+        &repo,
+        &StatusOptions::default(),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("status");
 
     assert!(
         model.state.merge_in_progress,

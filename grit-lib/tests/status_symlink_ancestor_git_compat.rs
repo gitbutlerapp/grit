@@ -11,6 +11,7 @@ mod unix {
 
     use grit_lib::config::environment::RepositoryOptions;
     use grit_lib::porcelain::status::{status, StatusOptions};
+    use grit_lib::progress::NeverCancel;
     use grit_lib::progress::NullProgress;
     use grit_lib::repo::Repository;
     use grit_test_support::git;
@@ -55,7 +56,13 @@ mod unix {
             &RepositoryOptions::empty().with_work_tree(root),
         )
         .expect("open grit repo");
-        let model = status(&repo, &StatusOptions::default(), &mut NullProgress).expect("status");
+        let model = status(
+            &repo,
+            &StatusOptions::default(),
+            &mut NullProgress,
+            &NeverCancel,
+        )
+        .expect("status");
         assert!(
             model
                 .unstaged

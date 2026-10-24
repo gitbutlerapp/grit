@@ -7,6 +7,7 @@ use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::status::{
     short_status_lines, status, status_options_from_config, Conflict, IgnoredMode, UntrackedMode,
 };
+use grit_lib::progress::NeverCancel;
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::branch_tracking::{
     status_ahead_behind_enabled, BranchStanding, Standing, StandingHeader, StandingOptions,
@@ -734,8 +735,8 @@ pub fn run(args: &StatusCliArgs) -> Result<StatusOutcome> {
     }
     status_opts.count_stash = true;
     let show_counts = !args.no_ahead_behind && status_ahead_behind_enabled(&config);
-    let model =
-        status(&repo, &status_opts, &mut NullProgress).context("could not compute status")?;
+    let model = status(&repo, &status_opts, &mut NullProgress, &NeverCancel)
+        .context("could not compute status")?;
 
     let operations = detect_in_progress(repo.git_dir());
     let merging = model.state.merge_in_progress;

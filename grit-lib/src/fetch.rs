@@ -24,7 +24,7 @@ type LsRefsAdvertised = (
     std::collections::HashMap<String, ObjectId>,
     Option<ObjectId>,
 );
-use crate::progress::ProgressSink;
+use crate::progress::{poll_cancel, Cancel, ProgressSink};
 use crate::transfer::{
     classify_update, open_odb, prune_tracking_refs, ref_excluded, validate_fetch_depth_local,
     validate_fetch_depth_server, FetchOptions, FetchOutcome, RefUpdate, UpdateMode,
@@ -149,8 +149,9 @@ fn read_sideband_pack(
     r: &mut dyn Read,
     target: &mut crate::pack_receive::PackReceiveTarget<'_>,
     progress: &mut dyn Progress,
+    cancel: &dyn Cancel,
 ) -> Result<()> {
-    crate::pack_receive::read_sideband_pack_to(r, target, progress)
+    crate::pack_receive::read_sideband_pack_to(r, target, progress, cancel)
 }
 
 /// New shallow boundaries the server reported during a fetch, captured from the
@@ -240,6 +241,7 @@ fn negotiate_pack(
     local_shallow: &[ObjectId],
     wire_filter: Option<&str>,
     progress: &mut dyn Progress,
+    cancel: &dyn Cancel,
     skip_local_haves: bool,
 ) -> Result<(Option<std::path::PathBuf>, ShallowUpdate)> {
     crate::trace::trace_span!("grit.fetch.negotiate");
@@ -384,6 +386,7 @@ fn negotiate_pack(
     let mut flushes: i32 = 0;
     if !skip_haves {
         while let Some(oid) = negotiator.next_have()? {
+            poll_cancel(progress, cancel)?;
             pkt_line::write_line_to_vec(&mut pending, &format!("have {}", oid.to_hex()))?;
             count += 1;
             if flush_at <= count {
@@ -442,7 +445,7 @@ fn negotiate_pack(
 
     let local_odb = open_odb(local_git_dir);
     let mut pack_receive = crate::pack_receive::TempPackReceive::create(local_odb.objects_dir())?;
-    pack_receive.read_sideband(conn.reader(), progress)?;
+    pack_receive.read_sideband(conn.reader(), progress, cancel)?;
     let pack_path = pack_receive.finish()?;
     Ok((pack_path, shallow_update))
 }
@@ -769,6 +772,7 @@ fn negotiate_pack_v2(
     deepen: &V2DeepenArgs,
     wire_filter: Option<&str>,
     progress: &mut dyn Progress,
+    cancel: &dyn Cancel,
     skip_local_haves: bool,
 ) -> Result<(Option<std::path::PathBuf>, ShallowUpdate)> {
     if wants.is_empty() {
@@ -813,6 +817,7 @@ fn negotiate_pack_v2(
             Some(&mut pack_receive),
             &mut shallow_update,
             progress,
+            cancel,
             sideband_all,
         )?;
         return Ok((pack_receive.finish()?, shallow_update));
@@ -842,6 +847,7 @@ fn negotiate_pack_v2(
                 Some(&mut pack_receive),
                 &mut shallow_update,
                 progress,
+                cancel,
                 sideband_all,
             )?;
         }
@@ -854,6 +860,7 @@ fn negotiate_pack_v2(
                 Some(&mut pack_receive),
                 &mut shallow_update,
                 progress,
+                cancel,
                 sideband_all,
             )?;
         }
@@ -881,6 +888,7 @@ fn negotiate_pack_v2(
                 Some(&mut pack_receive),
                 &mut shallow_update,
                 progress,
+                cancel,
                 sideband_all,
             )?;
         }
@@ -1114,6 +1122,7 @@ pub(crate) fn read_v2_fetch_pack_response(
     pack_sink: Option<&mut crate::pack_receive::TempPackReceive>,
     shallow_out: &mut ShallowUpdate,
     progress: &mut dyn Progress,
+    cancel: &dyn Cancel,
     sideband_all: bool,
 ) -> Result<()> {
     loop {
@@ -1159,10 +1168,10 @@ pub(crate) fn read_v2_fetch_pack_response(
                 // The `packfile` section body is side-band-64k framed; reuse the
                 // shared demuxer (channel 1 = pack, channel 2 = progress, 3 = err).
                 if let Some(sink) = pack_sink {
-                    sink.read_sideband(&mut *reader, progress)?;
+                    sink.read_sideband(&mut *reader, progress, cancel)?;
                 } else {
                     let mut target = crate::pack_receive::PackReceiveTarget::Memory(out);
-                    read_sideband_pack(&mut *reader, &mut target, progress)?;
+                    read_sideband_pack(&mut *reader, &mut target, progress, cancel)?;
                 }
                 return Ok(());
             }
@@ -1214,6 +1223,7 @@ pub fn fetch_remote(
     conn: &mut dyn Connection,
     opts: &mut FetchOptions,
     progress: &mut dyn Progress,
+    cancel: &dyn Cancel,
 ) -> Result<FetchOutcome> {
     use crate::net_trace::net_trace;
     // Wall-clock since fetch_remote entry, included in phase-boundary traces so
@@ -1236,7 +1246,7 @@ pub fn fetch_remote(
         }
     }
     if !opts.object_wants.is_empty() {
-        return fetch_remote_object_wants(local_git_dir, conn, opts, progress);
+        return fetch_remote_object_wants(local_git_dir, conn, opts, progress, cancel);
     }
     let local_odb = open_odb(local_git_dir);
 
@@ -1442,6 +1452,7 @@ pub fn fetch_remote(
                 &deepen,
                 wire_filter,
                 progress,
+                cancel,
                 false,
             )?
         } else {
@@ -1453,6 +1464,7 @@ pub fn fetch_remote(
                 &local_shallow,
                 wire_filter,
                 progress,
+                cancel,
                 false,
             )?
         };
@@ -1781,6 +1793,7 @@ fn fetch_remote_object_wants(
     conn: &mut dyn Connection,
     opts: &mut FetchOptions,
     progress: &mut dyn Progress,
+    cancel: &dyn Cancel,
 ) -> Result<FetchOutcome> {
     use crate::net_trace::net_trace;
 
@@ -1846,6 +1859,7 @@ fn fetch_remote_object_wants(
             &deepen,
             wire_filter,
             progress,
+            cancel,
             true,
         )?
     } else {
@@ -1857,6 +1871,7 @@ fn fetch_remote_object_wants(
             &local_shallow,
             wire_filter,
             progress,
+            cancel,
             true,
         )?
     };

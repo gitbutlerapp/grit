@@ -2,6 +2,7 @@
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::porcelain::status::{conflict_kind_from_stages, status, ConflictKind, StatusOptions};
+use grit_lib::progress::NeverCancel;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
@@ -48,7 +49,13 @@ fn xy_to_kind(xy: &str) -> ConflictKind {
 fn assert_kind_matches_git(root: &std::path::Path, path: &str) {
     let xy = git_porcelain_v2_xy(root, path);
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
-    let model = status(&repo, &StatusOptions::default(), &mut NullProgress).expect("status");
+    let model = status(
+        &repo,
+        &StatusOptions::default(),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("status");
     let detail = model
         .conflict_details
         .iter()

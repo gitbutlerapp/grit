@@ -8,6 +8,7 @@ use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::add::{stage, stage_for_commit, StageMode, StageOptions};
 use grit_lib::porcelain::commit::{create_commit, CommitRequest, HookPolicy};
 use grit_lib::porcelain::status::{status, StatusOptions};
+use grit_lib::progress::NeverCancel;
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
@@ -35,7 +36,13 @@ fn status_and_add_see_interior_untracked_on_indexed_chain() {
         &RepositoryOptions::empty().with_work_tree(root),
     )
     .expect("open");
-    let model = status(&repo, &StatusOptions::default(), &mut NullProgress).expect("status");
+    let model = status(
+        &repo,
+        &StatusOptions::default(),
+        &mut NullProgress,
+        &NeverCancel,
+    )
+    .expect("status");
     assert!(
         model.untracked.iter().any(|p| p == "a/b/untracked.txt"),
         "status must list interior untracked sibling, got {:?}",

@@ -13,6 +13,7 @@ use crate::progress::TerminalProgress;
 use anyhow::{Context, Result};
 use grit_lib::config::ConfigSet;
 use grit_lib::porcelain::pull::{pull, PullError, PullMode, PullOptions};
+use grit_lib::progress::NeverCancel;
 use grit_lib::remote::fetch_request::resolve_fetch_invocation;
 use grit_lib::remote::transfer::{resolve_fetch_prune, resolve_fetch_tags, FetchOptions};
 use grit_lib::remote::{DefaultHttpClientFactory, DEFAULT_REMOTE};
@@ -78,7 +79,7 @@ pub fn run(args: &PullRunArgs, mode: OutputMode) -> Result<PullOutcome> {
         TerminalProgress::new(mode)
     };
     let mut progress = progress;
-    let lib = match pull(&repo, &options, &mut progress, Some(&factory)) {
+    let lib = match pull(&repo, &options, &mut progress, &NeverCancel, Some(&factory)) {
         Ok(outcome) => outcome,
         Err(PullError::Remote(remote_err)) => {
             let url = config
@@ -86,7 +87,7 @@ pub fn run(args: &PullRunArgs, mode: OutputMode) -> Result<PullOutcome> {
                 .unwrap_or_default();
             let mapped = map_remote_error(remote_err);
             if auth::offer_reauth(&mapped, &url)? {
-                pull(&repo, &options, &mut progress, Some(&factory))?
+                pull(&repo, &options, &mut progress, &NeverCancel, Some(&factory))?
             } else {
                 return Err(mapped);
             }

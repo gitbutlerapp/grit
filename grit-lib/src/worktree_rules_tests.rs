@@ -16,7 +16,7 @@ mod tests {
     use crate::index::{entry_from_stat, MODE_REGULAR};
     use crate::porcelain::add::{stage, StageOptions};
     use crate::porcelain::status::{status, StatusOptions};
-    use crate::progress::NullProgress;
+    use crate::progress::{NeverCancel, NullProgress};
     use crate::repo::{init_repository, Repository};
     use crate::worktree_rules::file_load_counters;
     use crate::write_tree::write_tree_from_index;
@@ -54,7 +54,13 @@ mod tests {
         let repo = nested_attributes_fixture(tmp.path());
 
         file_load_counters::reset();
-        status(&repo, &StatusOptions::default(), &mut NullProgress).unwrap();
+        status(
+            &repo,
+            &StatusOptions::default(),
+            &mut NullProgress,
+            &NeverCancel,
+        )
+        .unwrap();
         assert!(
             file_load_counters::max_reads_per_file() <= 1,
             "status: each attributes/ignore file read at most once (max={})",
@@ -104,6 +110,7 @@ mod tests {
                 ..StatusOptions::default()
             },
             &mut NullProgress,
+            &NeverCancel,
         )
         .unwrap();
         assert!(

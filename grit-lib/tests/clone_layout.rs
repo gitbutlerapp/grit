@@ -6,6 +6,7 @@ use std::process::Command;
 use grit_lib::config::environment::Environment;
 use grit_lib::objects::pack::verify_pack_and_collect;
 use grit_lib::porcelain::checkout::checkout_between_trees;
+use grit_lib::progress::NeverCancel;
 use grit_lib::remote::clone::{clone as clone_repo, CloneOptions};
 use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::transfer::{fetch_local, CloneReflog, FetchOptions, TagMode};
@@ -284,6 +285,7 @@ fn library_clone_api_passes_fsck_and_status() {
             ..CloneOptions::new(upstream.path().to_string_lossy(), dest.path().to_path_buf())
         },
         &mut NoProgress,
+        &NeverCancel,
         None,
     )
     .expect("library clone");

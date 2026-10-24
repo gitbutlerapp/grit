@@ -2,6 +2,7 @@
 
 use anyhow::{Context, Result};
 use grit_lib::config::ConfigSet;
+use grit_lib::progress::NeverCancel;
 use grit_lib::refs::listing::{RefSort, SortKey};
 use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::fetch_request::resolve_remote_argument;
@@ -652,6 +653,7 @@ fn add_remote(repo: &Repository, name: &str, url: &str, fetch: bool) -> Result<R
                 &remote,
                 FetchOptions::default(),
                 &mut progress,
+                &NeverCancel,
                 Some(&factory),
             )
             .map_err(map_remote_error)?;
