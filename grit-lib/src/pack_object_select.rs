@@ -6,7 +6,9 @@ use std::sync::Arc;
 use crate::bitmap_walk::{BitmapWalkError, ReachabilityQuery, ReachableSet};
 use crate::environment::RepositoryOptions;
 use crate::error::Result;
-use crate::objects::{parse_commit, parse_tag, parse_tree, Object, ObjectId, ObjectKind};
+use crate::objects::{
+    oid_hash_set, parse_commit, parse_tag, parse_tree, Object, ObjectId, ObjectKind, OidHashSet,
+};
 use crate::odb::Odb;
 use crate::pack_bitmap::BitmapIndex;
 use crate::pack_name_hash::pack_name_hash;
@@ -281,23 +283,29 @@ fn collect_reachable_excluding_with_name_hashes(
     HashMap<ObjectId, u32>,
     HashMap<ObjectId, Object>,
 )> {
-    let mut visited: HashSet<ObjectId> = HashSet::new();
+    let mut visited: OidHashSet = oid_hash_set();
     let mut ordered: Vec<ObjectId> = Vec::new();
     let mut queue: VecDeque<(ObjectId, String)> = VecDeque::new();
     let mut blob_name_hashes: HashMap<ObjectId, u32> = HashMap::new();
     let mut walk_prefetch: HashMap<ObjectId, Object> = HashMap::new();
 
-    let enqueue = |oid: ObjectId,
-                   path: String,
-                   queue: &mut VecDeque<(ObjectId, String)>,
-                   visited: &mut HashSet<ObjectId>,
-                   ordered: &mut Vec<ObjectId>|
-     -> bool {
+    let record = |oid: ObjectId, visited: &mut OidHashSet, ordered: &mut Vec<ObjectId>| -> bool {
         if !visited.insert(oid) {
             return false;
         }
         if !exclude.contains(&oid) {
             ordered.push(oid);
+        }
+        true
+    };
+    let enqueue = |oid: ObjectId,
+                   path: String,
+                   queue: &mut VecDeque<(ObjectId, String)>,
+                   visited: &mut OidHashSet,
+                   ordered: &mut Vec<ObjectId>|
+     -> bool {
+        if !record(oid, visited, ordered) {
+            return false;
         }
         queue.push_back((oid, path));
         true
@@ -356,6 +364,7 @@ fn collect_reachable_excluding_with_name_hashes(
                     } else {
                         format!("{path}/{name}")
                     };
+                    let is_file = entry.mode & 0o170000 == 0o100000;
                     if entry.mode == 0o040000 {
                         enqueue(
                             entry.oid,
@@ -364,7 +373,13 @@ fn collect_reachable_excluding_with_name_hashes(
                             &mut visited,
                             &mut ordered,
                         );
-                    } else if entry.mode & 0o170000 == 0o100000 {
+                    } else if !prefetch_walk_objects && (is_file || entry.mode == 0o120000) {
+                        // Blobs have nothing to walk: record them from the tree entry
+                        // instead of reading each one back from the store.
+                        if record(entry.oid, &mut visited, &mut ordered) && is_file {
+                            blob_name_hashes.insert(entry.oid, pack_name_hash(&child_path));
+                        }
+                    } else if is_file {
                         if enqueue(
                             entry.oid,
                             child_path.clone(),
@@ -372,9 +387,7 @@ fn collect_reachable_excluding_with_name_hashes(
                             &mut visited,
                             &mut ordered,
                         ) {
-                            blob_name_hashes
-                                .entry(entry.oid)
-                                .or_insert_with(|| pack_name_hash(&child_path));
+                            blob_name_hashes.insert(entry.oid, pack_name_hash(&child_path));
                         }
                     } else {
                         enqueue(
