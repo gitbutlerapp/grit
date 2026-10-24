@@ -2218,21 +2218,10 @@ pub(crate) fn line_diff_ops_git_xdiff_compacted(
     new_lines: &[&str],
     indent_heuristic: bool,
 ) -> Vec<similar::DiffOp> {
-    use std::collections::HashMap;
-
-    let mut interner: HashMap<&str, u32> = HashMap::new();
-    let mut ids1 = Vec::with_capacity(old_lines.len());
-    for &line in old_lines {
-        let next = interner.len() as u32;
-        let id = *interner.entry(line).or_insert(next);
-        ids1.push(id);
-    }
-    let mut ids2 = Vec::with_capacity(new_lines.len());
-    for &line in new_lines {
-        let next = interner.len() as u32;
-        let id = *interner.entry(line).or_insert(next);
-        ids2.push(id);
-    }
+    let mut interner =
+        crate::line_interner::LineInterner::with_capacity(old_lines.len() + new_lines.len());
+    let ids1 = interner.intern_all(old_lines);
+    let ids2 = interner.intern_all(new_lines);
     line_diff_ops_git_xdiff_compacted_ids(
         &ids1,
         &ids2,
