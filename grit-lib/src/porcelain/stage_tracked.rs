@@ -510,7 +510,13 @@ fn refresh_unmerged_tracked_path(
         })
         .unwrap_or(0o100644);
     match symlink_metadata_for_staging(abs_path)? {
-        Some(_) => {
+        Some(meta) => {
+            if meta.is_file() {
+                let wt_bytes = fs::read(abs_path).map_err(Error::Io)?;
+                if crate::rerere::worktree_bytes_have_unresolved_conflict_markers(&wt_bytes) {
+                    return Ok(());
+                }
+            }
             index.remove(raw_path);
             if idx_mode == 0o160000 {
                 if let Some(oid) = read_submodule_head_oid(abs_path) {

@@ -542,7 +542,13 @@ fn stage_inner_on_index(
 
     if has_unmerged && (!opts.pathspecs.is_empty() || opts.mode == StageMode::Update) {
         let (modified, removed) = stage_unmerged_paths_matching_pathspecs(
-            repo, work_tree, &matches, index, &rules, dry_run,
+            repo,
+            work_tree,
+            &matches,
+            index,
+            &rules,
+            dry_run,
+            !opts.pathspecs.is_empty(),
         )?;
         outcome.modified.extend(modified);
         outcome.removed.extend(removed);
@@ -587,6 +593,7 @@ fn stage_unmerged_paths_matching_pathspecs(
     index: &mut Index,
     rules: &WorktreeRules,
     dry_run: bool,
+    explicit_pathspecs: bool,
 ) -> Result<(Vec<String>, Vec<String>)> {
     let mut unmerged: BTreeMap<Vec<u8>, ()> = BTreeMap::new();
     for entry in &index.entries {
@@ -615,6 +622,15 @@ fn stage_unmerged_paths_matching_pathspecs(
             }
             Err(e) => return Err(Error::Io(e)),
         };
+        if meta.is_file() {
+            let wt_bytes = fs::read(&abs).map_err(Error::Io)?;
+            if crate::rerere::worktree_bytes_have_unresolved_conflict_markers(&wt_bytes) {
+                if explicit_pathspecs {
+                    return Err(Error::IndexUnmerged);
+                }
+                continue;
+            }
+        }
         if dry_run {
             modified.push(rel.to_owned());
             continue;
@@ -1843,6 +1859,129 @@ mod tests {
             path: path_bytes,
             base_index_pos: 0,
         }
+    }
+
+    fn write_three_stage_conflict_index(
+        repo: &Repository,
+        index: &mut Index,
+        path: &str,
+        base: &[u8],
+        ours: &[u8],
+        theirs: &[u8],
+    ) {
+        let base_oid = repo.odb().write(ObjectKind::Blob, base).unwrap();
+        let ours_oid = repo.odb().write(ObjectKind::Blob, ours).unwrap();
+        let theirs_oid = repo.odb().write(ObjectKind::Blob, theirs).unwrap();
+        index
+            .entries
+            .push(conflict_index_entry(path, 1, base_oid, MODE_REGULAR));
+        index
+            .entries
+            .push(conflict_index_entry(path, 2, ours_oid, MODE_REGULAR));
+        index
+            .entries
+            .push(conflict_index_entry(path, 3, theirs_oid, MODE_REGULAR));
+    }
+
+    #[test]
+    fn explicit_add_rejects_unresolved_conflict_markers() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        let mut index = Index::new();
+        write_three_stage_conflict_index(&repo, &mut index, "f", b"base\n", b"ours\n", b"theirs\n");
+        write_index(&repo, &mut index);
+        fs::write(
+            root.join("f"),
+            b"base\n<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> side\n",
+        )
+        .unwrap();
+
+        let err = stage(
+            &repo,
+            &StageOptions {
+                pathspecs: vec!["f".to_owned()],
+                ..StageOptions::default()
+            },
+            &mut NullProgress,
+        )
+        .unwrap_err();
+        assert!(
+            matches!(err, Error::IndexUnmerged),
+            "explicit add must refuse marked file: {err}"
+        );
+
+        let index = repo.load_index().unwrap();
+        assert!(
+            index.has_unmerged_entries(),
+            "refusal must leave conflict stages intact"
+        );
+        assert!(index.get(b"f", 0).is_none());
+    }
+
+    #[test]
+    fn explicit_add_dry_run_rejects_unresolved_conflict_markers() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        let mut index = Index::new();
+        write_three_stage_conflict_index(&repo, &mut index, "f", b"base\n", b"ours\n", b"theirs\n");
+        write_index(&repo, &mut index);
+        fs::write(
+            root.join("f"),
+            b"base\n<<<<<<< HEAD\nours\n=======\ntheirs\n>>>>>>> side\n",
+        )
+        .unwrap();
+
+        let err = stage(
+            &repo,
+            &StageOptions {
+                pathspecs: vec!["f".to_owned()],
+                dry_run: true,
+                ..StageOptions::default()
+            },
+            &mut NullProgress,
+        )
+        .unwrap_err();
+        assert!(
+            matches!(err, Error::IndexUnmerged),
+            "dry-run explicit add must not claim success: {err}"
+        );
+    }
+
+    #[test]
+    fn explicit_add_modify_delete_rejects_unresolved_conflict_markers() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        let base = repo.odb().write(ObjectKind::Blob, b"base\n").unwrap();
+        let theirs = repo.odb().write(ObjectKind::Blob, b"base\nfeat\n").unwrap();
+        let mut index = Index::new();
+        index
+            .entries
+            .push(conflict_index_entry("f", 1, base, MODE_REGULAR));
+        index
+            .entries
+            .push(conflict_index_entry("f", 3, theirs, MODE_REGULAR));
+        write_index(&repo, &mut index);
+        fs::write(
+            root.join("f"),
+            b"base\n<<<<<<< HEAD\n=======\nfeat\n>>>>>>> side\n",
+        )
+        .unwrap();
+
+        let err = stage(
+            &repo,
+            &StageOptions {
+                pathspecs: vec!["f".to_owned()],
+                ..StageOptions::default()
+            },
+            &mut NullProgress,
+        )
+        .unwrap_err();
+        assert!(matches!(err, Error::IndexUnmerged), "{err}");
+        let index = repo.load_index().unwrap();
+        assert!(index.has_unmerged_entries());
     }
 
     #[test]

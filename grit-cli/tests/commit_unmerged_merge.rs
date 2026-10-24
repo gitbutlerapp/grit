@@ -139,26 +139,20 @@ fn commit_during_unresolved_merge_auto_stages_like_git_commit_a() -> TestResult 
     );
 
     let human = gs(root, ["commit", "-m", "oops"]);
-    assert_eq!(
+    assert_ne!(
         human.status,
         Some(0),
-        "grit commit auto-stages conflicted paths like git commit -a: {}",
+        "grit commit must refuse while conflict markers remain: {}",
         human.dump()
     );
     assert!(
-        !root.join(".git/MERGE_HEAD").exists(),
-        "merge commit should clear MERGE_HEAD"
+        human.stderr.contains("unmerged") || human.stderr.contains("unresolved"),
+        "expected merge conflict error: {}",
+        human.stderr
     );
-    let show = Command::new("git")
-        .current_dir(root)
-        .args(["show", "HEAD:f"])
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_SYSTEM", "/dev/null")
-        .output()?;
-    let body = String::from_utf8_lossy(&show.stdout);
     assert!(
-        body.contains("<<<<<<<"),
-        "auto-staged merge records worktree conflict markers: {body}"
+        root.join(".git/MERGE_HEAD").exists(),
+        "MERGE_HEAD must remain when commit is refused"
     );
     Ok(())
 }

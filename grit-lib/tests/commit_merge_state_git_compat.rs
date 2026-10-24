@@ -8,7 +8,10 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
 use grit_lib::objects::{parse_commit, ObjectId};
 use grit_lib::porcelain::add::stage_for_commit;
-use grit_lib::porcelain::commit::{create_commit, CommitRequest, HookPolicy};
+use grit_lib::porcelain::commit::{
+    commit_with_scope, create_commit, CommitRequest, CommitScope,
+};
+use grit_lib::porcelain::merge::{integrate_branch, IntegrateBranchOutcome};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
@@ -102,6 +105,76 @@ fn init_conflict_merge(root: &Path) -> Repository {
     assert!(!merge_out.status.success(), "expected merge conflict");
 
     Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open grit repo")
+}
+
+fn init_grit_conflict_merge(root: &Path) -> Repository {
+    git(root, &["init", "-q", "-b", "main", "."]);
+    git(root, &["config", "user.name", "T"]);
+    git(root, &["config", "user.email", "t@e.com"]);
+    git(root, &["config", "core.logAllRefUpdates", "true"]);
+
+    let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("repo");
+    std::fs::write(root.join("f"), b"base\n").unwrap();
+    git(root, &["add", "f"]);
+    git(root, &["commit", "-qm", "base"]);
+
+    git(root, &["checkout", "-qb", "side"]);
+    std::fs::write(root.join("f"), b"side\n").unwrap();
+    git(root, &["commit", "-qam", "side"]);
+    let side = ObjectId::from_hex(&git_out(root, &["rev-parse", "side"])).expect("side oid");
+
+    git(root, &["checkout", "-q", "main"]);
+    std::fs::write(root.join("f"), b"main\n").unwrap();
+    git(root, &["commit", "-qam", "main"]);
+    let main = ObjectId::from_hex(&git_out(root, &["rev-parse", "HEAD"])).expect("main oid");
+
+    let outcome = integrate_branch(&repo, "refs/heads/main", main, side, "side").expect("merge");
+    assert!(matches!(outcome, IntegrateBranchOutcome::Conflicts { .. }));
+    repo
+}
+
+#[test]
+fn commit_with_auto_stage_rejects_unresolved_conflict_markers() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    let repo = init_grit_conflict_merge(root);
+
+    assert!(
+        repo.index_handle()
+            .load()
+            .expect("index")
+            .has_unmerged_entries(),
+        "grit merge should leave unmerged index entries"
+    );
+    let body = fs::read_to_string(root.join("f")).expect("conflicted worktree");
+    assert!(
+        body.contains("<<<<<<<"),
+        "expected conflict markers in worktree: {body}"
+    );
+
+    let err = commit_with_scope(
+        &repo,
+        &commit_req("oops"),
+        CommitScope::AutoStage,
+        &mut NullProgress,
+    )
+    .unwrap_err();
+    assert!(
+        matches!(err, Error::IndexUnmerged),
+        "auto-stage commit must refuse while markers remain: {err}"
+    );
+
+    assert!(
+        repo.index_handle()
+            .load()
+            .expect("index")
+            .has_unmerged_entries(),
+        "refusal must not collapse unmerged stages"
+    );
+    assert!(
+        repo.git_dir().join("MERGE_HEAD").exists(),
+        "MERGE_HEAD must remain after refused commit"
+    );
 }
 
 #[test]
