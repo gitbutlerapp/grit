@@ -19,19 +19,22 @@ use std::path::{Path, PathBuf};
 
 use crate::config::ConfigSet;
 use crate::crlf::{self, ConversionConfig};
-use crate::diff::{diff_trees, format_mode, DiffEntry, DiffStatus};
+use crate::diff::{
+    diff_tree_path_change_count, diff_trees, format_mode, zero_oid, DiffEntry, DiffStatus,
+};
 use crate::error::{Error, Result};
 use crate::filter_process::{DelayedCheckoutError, DelayedProcessCheckout, FilterSmudgeMeta};
 use crate::index::{
     entry_from_metadata, entry_from_stat, Index, IndexEntry, MODE_EXECUTABLE, MODE_GITLINK,
-    MODE_REGULAR, MODE_SYMLINK,
+    MODE_REGULAR, MODE_SYMLINK, MODE_TREE,
 };
-use crate::objects::ObjectId;
+use crate::objects::{ObjectId, TreeEntry};
+use crate::odb::Odb;
 use crate::parallel::{try_par_map, ParallelHashError, ParallelOp};
 use crate::path_icase::paths_equal;
-use crate::path_population::validate_worktree_path;
+use crate::path_population::{validate_tree_walk_entry, validate_worktree_path};
 use crate::path_validate::ProtectOptions;
-use crate::progress::{NullProgress, ProgressPhase, ProgressSink};
+use crate::progress::{NullProgress, ProgressPhase, ProgressSink, ProgressUnit};
 use crate::repo::Repository;
 use crate::worktree_rules::WorktreeRules;
 
@@ -43,6 +46,140 @@ use checkout_parallel::{
 };
 
 const PARALLEL_PER_FILE_DELETE_MIN: usize = 32;
+const POPULATED_TREE_CHECKOUT_CHUNK: usize = 2048;
+
+/// One blob entry while walking a tree for populated checkout (no full diff list).
+struct PopulatedTreeBlob {
+    path: String,
+    mode: u32,
+    oid: ObjectId,
+}
+
+struct PopulatedTreeWalkFrame {
+    prefix: String,
+    entries: Vec<TreeEntry>,
+    index: usize,
+}
+
+struct PopulatedTreeWalk<'a> {
+    odb: &'a Odb,
+    stack: Vec<PopulatedTreeWalkFrame>,
+    protect: ProtectOptions,
+}
+
+impl<'a> PopulatedTreeWalk<'a> {
+    fn new(odb: &'a Odb, tree_oid: &ObjectId, protect: ProtectOptions) -> Result<Self> {
+        let entries = (*odb.cached_tree_entries(tree_oid)?).clone();
+        Ok(Self {
+            odb,
+            stack: vec![PopulatedTreeWalkFrame {
+                prefix: String::new(),
+                entries,
+                index: 0,
+            }],
+            protect,
+        })
+    }
+
+    fn next_blob(&mut self) -> Result<Option<PopulatedTreeBlob>> {
+        while let Some(frame) = self.stack.last_mut() {
+            if frame.index >= frame.entries.len() {
+                self.stack.pop();
+                continue;
+            }
+            let entry = frame.entries[frame.index].clone();
+            frame.index += 1;
+            let path = crate::repo_relpath::format_path_stored(&frame.prefix, &entry.name);
+            validate_tree_walk_entry(
+                frame.prefix.as_bytes(),
+                &entry.name,
+                entry.mode,
+                self.protect,
+            )?;
+            if entry.mode == MODE_TREE {
+                let entries = (*self.odb.cached_tree_entries(&entry.oid)?).clone();
+                self.stack.push(PopulatedTreeWalkFrame {
+                    prefix: path,
+                    entries,
+                    index: 0,
+                });
+                continue;
+            }
+            return Ok(Some(PopulatedTreeBlob {
+                path,
+                mode: entry.mode,
+                oid: entry.oid,
+            }));
+        }
+        Ok(None)
+    }
+
+    fn fill_chunk(&mut self, chunk: &mut Vec<PopulatedTreeBlob>) -> Result<bool> {
+        chunk.clear();
+        while chunk.len() < POPULATED_TREE_CHECKOUT_CHUNK {
+            match self.next_blob()? {
+                Some(blob) => chunk.push(blob),
+                None => break,
+            }
+        }
+        Ok(!chunk.is_empty())
+    }
+}
+
+fn tree_contains_dot_gitattributes(
+    odb: &Odb,
+    tree_oid: &ObjectId,
+    prefix: &str,
+    protect: ProtectOptions,
+) -> Result<bool> {
+    let entries = (*odb.cached_tree_entries(tree_oid)?).clone();
+    for entry in entries {
+        if entry.name == b".gitattributes" && entry.mode != MODE_TREE {
+            return Ok(true);
+        }
+        if entry.mode == MODE_TREE {
+            validate_tree_walk_entry(prefix.as_bytes(), &entry.name, entry.mode, protect)?;
+            let path = crate::repo_relpath::format_path_stored(prefix, &entry.name);
+            if tree_contains_dot_gitattributes(odb, &entry.oid, &path, protect)? {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
+/// Forwards `inc`/`set` to the inner sink but ignores `start`/`finish` (populated-tree chunks).
+struct ChunkProgressSink<'a>(&'a mut dyn ProgressSink);
+
+impl ProgressSink for ChunkProgressSink<'_> {
+    fn start(&mut self, _phase: ProgressPhase, _total: Option<u64>) {}
+
+    fn start_with_unit(&mut self, _phase: ProgressPhase, _unit: ProgressUnit, _total: Option<u64>) {
+    }
+
+    fn inc(&mut self, units: u64) {
+        self.0.inc(units);
+    }
+
+    fn set(&mut self, current: u64) {
+        self.0.set(current);
+    }
+
+    fn finish(&mut self) {}
+}
+
+fn populated_blob_to_added_diff(blob: &PopulatedTreeBlob) -> DiffEntry {
+    DiffEntry {
+        status: DiffStatus::Added,
+        old_path: None,
+        new_path: Some(blob.path.clone()),
+        old_mode: "000000".to_owned(),
+        new_mode: format_mode(blob.mode),
+        old_oid: zero_oid(),
+        new_oid: blob.oid,
+        score: None,
+    }
+}
 
 /// Populate a work tree and index from `tree_oid` (empty index or wholesale replace).
 fn checkout_populated_tree(
@@ -50,7 +187,96 @@ fn checkout_populated_tree(
     tree_oid: &ObjectId,
     progress: &mut dyn ProgressSink,
 ) -> Result<()> {
-    checkout_between_trees_slow(repo, None, Some(tree_oid), progress)
+    let work_tree = repo
+        .work_tree()
+        .ok_or_else(|| Error::PathError("cannot update a bare repository's working tree".into()))?;
+
+    let config = repo.config()?;
+    let protect = ProtectOptions::from_config(config.as_ref());
+    let ignorecase = config
+        .get_bool("core.ignorecase")
+        .and_then(|r| r.ok())
+        .unwrap_or(false);
+    let precompose = repo.pathspec_precompose_enabled();
+
+    let total = diff_tree_path_change_count(repo.odb(), None, Some(tree_oid), "")?;
+    progress.start(
+        ProgressPhase::CheckingOutFiles,
+        Some(u64::try_from(total).unwrap_or(u64::MAX)),
+    );
+
+    let mut loaded_index = repo.load_index()?;
+    let index_mut = &mut loaded_index;
+
+    let rules = if tree_contains_dot_gitattributes(repo.odb(), tree_oid, "", protect)? {
+        let mut prospective = Index::new();
+        for entry in crate::porcelain::merge::tree_to_index_entries(repo, tree_oid, "")? {
+            prospective.add_or_replace(entry);
+        }
+        prospective.sort();
+        WorktreeRules::from_checkout_prospective_index(repo, &prospective, config.clone())?
+    } else {
+        checkout_worktree_rules(repo, index_mut, &[], config.clone())?
+    };
+    let conv = rules.conversion().clone();
+
+    let mut walk = PopulatedTreeWalk::new(repo.odb(), tree_oid, protect)?;
+    let mut chunk = Vec::with_capacity(POPULATED_TREE_CHECKOUT_CHUNK);
+    let mut apply = CheckoutApplyOptions {
+        parallel_prepare_blobs: false,
+        checkout_result_tree: Some(*tree_oid),
+        ..CheckoutApplyOptions::default()
+    };
+    let mut deferred_index_flush = false;
+
+    while walk.fill_chunk(&mut chunk)? {
+        deferred_index_flush = chunk.len() == POPULATED_TREE_CHECKOUT_CHUNK;
+        apply.defer_index_disk_write = deferred_index_flush;
+        let changes: Vec<DiffEntry> = chunk.iter().map(populated_blob_to_added_diff).collect();
+        let mut chunk_progress = ChunkProgressSink(progress);
+        if bulk_write_checkout_eligible(&changes, &rules)
+            && tree_changes_are_all_additions(&changes)
+        {
+            checkout_bulk_added_tree_changes(
+                repo,
+                work_tree,
+                &changes,
+                index_mut,
+                &rules,
+                &config,
+                &conv,
+                apply.clone(),
+                precompose,
+                ignorecase,
+                &mut chunk_progress,
+            )?;
+        } else {
+            apply.skip_bulk_checkout_fast_path = true;
+            checkout_tree_changes_with_progress(
+                repo,
+                &changes,
+                &mut chunk_progress,
+                Some(index_mut),
+                apply.clone(),
+                None,
+            )?;
+            apply.skip_bulk_checkout_fast_path = false;
+        }
+    }
+
+    if deferred_index_flush {
+        index_mut.suppress_pre_write_index_housekeeping = true;
+        index_mut.skip_racy_smudge_on_write = true;
+        repo.write_index_with_post_index_change(index_mut, true, false)?;
+        index_mut.skip_racy_smudge_on_write = false;
+        index_mut.suppress_pre_write_index_housekeeping = false;
+        let index_path = repo.index_path_for_env()?;
+        crate::index::advance_index_file_mtime_past_entries(index_mut, &index_path, None)?;
+        index_mut.source_mtime = crate::index::index_file_mtime(&index_path);
+    }
+
+    progress.finish();
+    Ok(())
 }
 
 fn checkout_between_trees_slow(
