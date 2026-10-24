@@ -520,7 +520,6 @@ fn retain_status_diff_lookup(
                         ie,
                         index_mtime,
                         stat_policy,
-                        trust_filemode,
                     )
                 {
                     return false;

@@ -136,6 +136,16 @@ const WELL_KNOWN_EMPTY_TREE_LEGACY: [u8; 20] = [
     0x4b, 0x82, 0x5d, 0xc6, 0x42, 0xcb, 0x6e, 0xb9, 0xa0, 0x60, 0xe5, 0x4b, 0xf8, 0x99, 0xd6, 0x9f,
     0x7c, 0x69, 0x48, 0xd4,
 ];
+/// SHA-1 digest of the empty blob (`e69de29bb2d1d6434b8b29ae775ad8c2e48c5391`).
+const EMPTY_BLOB_SHA1: [u8; 20] = [
+    0xe6, 0x9d, 0xe2, 0x9b, 0xb2, 0xd1, 0xd6, 0x43, 0x4b, 0x8b, 0x29, 0xae, 0x77, 0x5a, 0xd8, 0xc2,
+    0xe4, 0x8c, 0x53, 0x91,
+];
+/// SHA-256 digest of the empty blob (`473a0f4c…303721813`).
+const EMPTY_BLOB_SHA256: [u8; 32] = [
+    0x47, 0x3a, 0x0f, 0x4c, 0x3b, 0xe8, 0xa9, 0x36, 0x81, 0xa2, 0x67, 0xe3, 0xb1, 0xe9, 0xa7, 0xdc,
+    0xda, 0x11, 0x85, 0x43, 0x6f, 0xe1, 0x41, 0xf7, 0x74, 0x91, 0x20, 0xa3, 0x03, 0x72, 0x18, 0x13,
+];
 
 /// A Git object identifier: a SHA-1 (20-byte) or SHA-256 (32-byte) digest.
 ///
@@ -217,6 +227,13 @@ impl ObjectId {
     #[must_use]
     pub fn is_zero(&self) -> bool {
         self.as_bytes().iter().all(|&b| b == 0)
+    }
+
+    /// Whether this OID is the empty blob for its hash algorithm (SHA-1 or SHA-256).
+    #[must_use]
+    pub(crate) fn is_empty_blob(&self) -> bool {
+        let bytes = self.as_bytes();
+        bytes == EMPTY_BLOB_SHA1 || bytes == EMPTY_BLOB_SHA256
     }
 
     /// Whether this OID is Git's well-known empty tree (canonical or legacy typo hash).
@@ -1351,6 +1368,18 @@ mod commit_parse_tests {
             ObjectId::empty_tree().to_hex(),
             "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
         );
+    }
+
+    #[test]
+    fn is_empty_blob_matches_both_hash_algorithms() {
+        for algo in [HashAlgo::Sha1, HashAlgo::Sha256] {
+            let oid = algo.hash_object(ObjectKind::Blob, b"").unwrap();
+            assert!(oid.is_empty_blob(), "{algo:?} empty blob {}", oid.to_hex());
+            let other = algo.hash_object(ObjectKind::Blob, b"x").unwrap();
+            assert!(!other.is_empty_blob());
+        }
+        assert!(!ObjectId::empty_tree().is_empty_blob());
+        assert!(!ObjectId::zero().is_empty_blob());
     }
 
     #[test]

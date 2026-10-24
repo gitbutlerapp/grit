@@ -4333,12 +4333,7 @@ fn push_index_blob_worktree_diff(
 
     if stat_same
         && (!trust_filemode || worktree_mode == ie.mode)
-        && index_entry_skips_worktree_content_hash_after_stat_match(
-            ie,
-            index_mtime,
-            stat_policy,
-            trust_filemode,
-        )
+        && index_entry_skips_worktree_content_hash_after_stat_match(ie, index_mtime, stat_policy)
     {
         return Ok(());
     }
@@ -4997,7 +4992,6 @@ fn diff_index_to_worktree_inner(
                             ie,
                             index_mtime,
                             stat_policy,
-                            trust_filemode,
                         )
                     {
                         return Ok(());
@@ -5049,7 +5043,6 @@ fn diff_index_to_worktree_inner(
                             ie,
                             index_mtime,
                             stat_policy,
-                            trust_filemode,
                         )
                     {
                         return Ok(());
@@ -5617,14 +5610,17 @@ pub(crate) fn index_stat_cache_trustworthy(index_mtime: Option<(u32, u32)>) -> b
 /// hashing may be skipped (Git `diff-files` / `update-index --refresh` style).
 ///
 /// Does not permit skipping worktree observation; fsmonitor-valid entries use a separate path.
+/// Independent of `core.filemode`: callers compare the executable bit separately.
+///
+/// A zero cached size is trusted only for the empty blob; any other blob with size zero was
+/// smudged by a racy index write and must be re-hashed (Git `ce_match_stat_basic`).
 #[must_use]
 pub(crate) fn index_entry_skips_worktree_content_hash_after_stat_match(
     ie: &IndexEntry,
     index_mtime: Option<(u32, u32)>,
     stat_policy: crate::index::StatMatchPolicy,
-    trust_filemode: bool,
 ) -> bool {
-    if !trust_filemode || ie.stat_cache_unset() || ie.size == 0 {
+    if ie.stat_cache_unset() || (ie.size == 0 && !ie.oid.is_empty_blob()) {
         return false;
     }
     if !index_stat_cache_trustworthy(index_mtime) {
@@ -12087,7 +12083,6 @@ mod smudge_racily_clean_tests {
                 &entry,
                 Some(index_mtime),
                 policy,
-                true
             )
         );
         entry.size = 0;
@@ -12098,10 +12093,73 @@ mod smudge_racily_clean_tests {
                 &entry,
                 Some(index_mtime),
                 policy,
-                true
             )
         );
         let _ = git_dir;
+    }
+
+    #[test]
+    fn content_hash_skip_trusts_empty_blob_but_not_smudged_size() {
+        use crate::index::StatMatchPolicy;
+        let td = tempfile::tempdir().expect("tempdir");
+        let wt = td.path();
+        let (_git_dir, odb) = minimal_repo(wt, "[core]\n\tfilemode = false\n");
+        let file_mtime = (1_700_000_000, 0);
+        let index_mtime = Some((file_mtime.0 + 1, 0));
+        let policy = StatMatchPolicy::from_config(None);
+
+        let empty = staged_entry_for_file(&odb, wt, "empty.txt", b"", file_mtime);
+        assert_eq!(empty.size, 0);
+        assert!(
+            super::index_entry_skips_worktree_content_hash_after_stat_match(
+                &empty,
+                index_mtime,
+                policy,
+            )
+        );
+
+        let smudged_oid = odb.hash(ObjectKind::Blob, b"abc\n").expect("hash");
+        let smudged = staged_entry_with_oid(wt, "smudged.txt", b"", smudged_oid, file_mtime);
+        assert_eq!(smudged.size, 0);
+        assert!(
+            !super::index_entry_skips_worktree_content_hash_after_stat_match(
+                &smudged,
+                index_mtime,
+                policy,
+            )
+        );
+    }
+
+    #[test]
+    fn status_diff_reports_smudged_entry_whose_file_became_empty() {
+        let td = tempfile::tempdir().expect("tempdir");
+        let wt = td.path();
+        let (git_dir, odb) = minimal_repo(wt, "[core]\n\tfilemode = false\n");
+        let oid = odb.write(ObjectKind::Blob, b"abc\n").expect("write blob");
+        let file_mtime = (1_700_000_000, 0);
+        let mut index = Index::new();
+        index.entries.push(staged_entry_with_oid(
+            wt,
+            "smudged.txt",
+            b"",
+            oid,
+            file_mtime,
+        ));
+        let (entries, _) = super::diff_index_to_worktree_with_options(
+            &odb,
+            &mut index,
+            wt,
+            super::DiffIndexToWorktreeOptions {
+                repository_git_dir: Some(git_dir),
+                index_mtime: Some((file_mtime.0 + 1, 0)),
+                for_status: true,
+                stat_parallel_threads: Some(1),
+                ..Default::default()
+            },
+        )
+        .expect("diff");
+        assert_eq!(entries.len(), 1, "{entries:?}");
+        assert_eq!(entries[0].status, DiffStatus::Modified);
     }
 
     #[test]

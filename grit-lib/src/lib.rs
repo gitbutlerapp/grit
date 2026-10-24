@@ -372,3 +372,5 @@ pub(crate) mod hot_path_test_metrics;
 mod object_write_regression;
 #[cfg(test)]
 mod repository_config_snapshot_tests;
+#[cfg(test)]
+mod status_clean_tree_regression;
