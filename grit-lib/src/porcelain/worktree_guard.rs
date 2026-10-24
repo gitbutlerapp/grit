@@ -2554,9 +2554,8 @@ mod tests {
         );
     }
 
-    #[test]
-    fn ensure_worktree_clean_for_pick_passes_on_fresh_commit() {
-        let (_dir, repo) = init_repo();
+    /// Commit `tracked.txt` as the root commit and write an index carrying its cache-tree.
+    fn commit_tracked_with_cache_tree(repo: &Repository) -> ObjectId {
         let wt = repo.work_tree().expect("wt");
         let mut index = repo.load_index().expect("index");
         let data = std::fs::read(wt.join("tracked.txt")).expect("read");
@@ -2573,7 +2572,6 @@ mod tests {
         .expect("entry");
         index.add_or_replace(entry);
         index.sort();
-        repo.write_index(&mut index).expect("write index");
         let tree = crate::write_tree::write_tree_update_index(
             &repo.odb(),
             &mut index,
@@ -2581,6 +2579,7 @@ mod tests {
             crate::write_tree::WriteTreeFlags::silent(),
         )
         .expect("tree");
+        repo.write_index(&mut index).expect("write index");
         let commit = crate::objects::CommitData {
             tree,
             parents: vec![],
@@ -2601,7 +2600,29 @@ mod tests {
             )
             .expect("commit");
         crate::refs::write_ref(&repo.git_dir(), "HEAD", &co).expect("head");
+        tree
+    }
+
+    #[test]
+    fn ensure_worktree_clean_for_pick_passes_on_fresh_commit() {
+        let (_dir, repo) = init_repo();
+        commit_tracked_with_cache_tree(&repo);
         ensure_worktree_clean_for_pick(&repo).expect("clean");
+    }
+
+    #[test]
+    fn prepare_worktree_for_pick_returns_snapshot_with_cache_tree() {
+        let (_dir, repo) = init_repo();
+        let tree = commit_tracked_with_cache_tree(&repo);
+        let snapshot = prepare_worktree_for_pick(&repo)
+            .expect("clean")
+            .expect("work tree snapshot");
+        assert_eq!(snapshot.head_tree, Some(tree));
+        assert_eq!(
+            snapshot.index.cache_tree_root,
+            Some(tree),
+            "the staged-change check needs the cache-tree to avoid flattening HEAD"
+        );
     }
 
     #[test]
