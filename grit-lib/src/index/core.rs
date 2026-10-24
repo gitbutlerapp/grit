@@ -17,7 +17,7 @@
 
 #[cfg(not(unix))]
 use std::borrow::Cow;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -2040,6 +2040,19 @@ impl Index {
 
     fn entry_matches(entry: &IndexEntry, path: &[u8], stage: u8) -> bool {
         entry.path == path && entry.stage() == stage
+    }
+
+    /// Map each stage-0 path to its first position in [`Self::entries`].
+    ///
+    /// Used to sort porcelain outcome path lists in index order without repeated linear scans.
+    pub(crate) fn stage0_path_positions(&self) -> HashMap<&[u8], usize> {
+        let mut map = HashMap::with_capacity(self.entries.len());
+        for (pos, entry) in self.entries.iter().enumerate() {
+            if entry.stage() == 0 {
+                map.entry(entry.path.as_slice()).or_insert(pos);
+            }
+        }
+        map
     }
 
     /// Index of `(path, stage)`; binary search when sorted, linear scan when not.

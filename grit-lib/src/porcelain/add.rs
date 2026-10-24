@@ -112,20 +112,12 @@ fn index_path_to_string(path: &[u8]) -> String {
         .unwrap_or_else(|_| String::from_utf8_lossy(path).into_owned())
 }
 
-fn index_position_for_path(index: &Index, path: &str) -> usize {
-    index
-        .entries
-        .iter()
-        .position(|e| e.stage() == 0 && index_path_to_string(&e.path) == path)
-        .unwrap_or(usize::MAX)
-}
-
 fn sort_outcome_paths_in_index_order(outcome: &mut StageOutcome, index: &Index) {
+    let positions = index.stage0_path_positions();
     let sort_paths = |paths: &mut Vec<String>| {
         paths.sort_by(|a, b| {
-            index_position_for_path(index, a)
-                .cmp(&index_position_for_path(index, b))
-                .then_with(|| a.as_str().cmp(b))
+            let pos = |p: &str| positions.get(p.as_bytes()).copied().unwrap_or(usize::MAX);
+            pos(a).cmp(&pos(b)).then_with(|| a.as_str().cmp(b))
         });
         paths.dedup();
     };
@@ -1569,6 +1561,45 @@ mod tests {
             .map(|e| String::from_utf8_lossy(&e.path).into_owned())
             .collect();
         assert_eq!(paths, ["a.txt", "d/x.txt", "z.txt"]);
+    }
+
+    #[test]
+    fn stage_outcome_sort_matches_index_order_many_paths() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        for a in 0..8_u8 {
+            for b in 0..8 {
+                let dir = root.join(format!("big/{a}/{b}"));
+                fs::create_dir_all(&dir).unwrap();
+                for f in 0..12_u8 {
+                    fs::write(dir.join(format!("f{f}.txt")), b"x\n").unwrap();
+                }
+            }
+        }
+        let expected_count = 8 * 8 * 12;
+        let outcome = stage(
+            &repo,
+            &StageOptions {
+                staging_thresholds: Some(IndexStagingThresholds {
+                    large_index_restage: 0,
+                    parallel_tracked_restage: 0,
+                }),
+                ..StageOptions::default()
+            },
+            &mut NullProgress,
+        )
+        .unwrap();
+        assert_eq!(outcome.added.len(), expected_count);
+
+        let index = repo.load_index().unwrap();
+        let index_order: Vec<String> = index
+            .entries
+            .iter()
+            .filter(|e| e.stage() == 0)
+            .map(|e| String::from_utf8_lossy(&e.path).into_owned())
+            .collect();
+        assert_eq!(outcome.added, index_order);
     }
 
     #[test]
