@@ -2042,7 +2042,7 @@ impl Index {
     }
 
     /// Index of `(path, stage)`; binary search when sorted, linear scan when not.
-    fn find_entry_pos(&self, path: &[u8], stage: u8) -> Option<usize> {
+    pub(crate) fn find_entry_pos(&self, path: &[u8], stage: u8) -> Option<usize> {
         if self.entries_sorted {
             return match self.entries.binary_search_by(|e| {
                 Self::cmp_paths(e.path.as_slice(), path).then_with(|| e.stage().cmp(&stage))
