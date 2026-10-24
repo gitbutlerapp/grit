@@ -10,7 +10,8 @@ use std::path::{Path, PathBuf};
 
 use filetime::{set_file_mtime, FileTime};
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::diff::DiffStatus;
+use grit_lib::diff::structured::StructuredLineKind;
+use grit_lib::diff::{DiffOptions, DiffStatus, DiffTarget};
 use grit_lib::porcelain::add::{stage, StageMode, StageOptions};
 use grit_lib::porcelain::commit::{commit_with_scope, CommitRequest, CommitScope};
 use grit_lib::porcelain::stage_tracked::{
@@ -399,4 +400,46 @@ fn parallel_deferred_restage_keeps_link_mode() {
         format!("120000 {new_blob} 0\tlink")
     );
     assert!(ls_files_stage(&grit, "d0/f0000.txt").starts_with("100644 "));
+}
+
+#[test]
+fn worktree_diff_of_edited_link_is_a_symlink_patch() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let src = source_repo(tmp.path(), 0);
+    let root = clone_without_symlinks(&src, tmp.path(), "grit", true);
+    fs::write(root.join("link"), "b.txt").expect("retarget link");
+
+    let repo = open(&root);
+    let mut opts = DiffOptions::default();
+    opts.word_level_inline = false;
+    let files = repo
+        .diff()
+        .files(&DiffTarget::WorktreeVsIndex, &[], &opts)
+        .expect("worktree diff");
+    assert_eq!(files.len(), 1, "{files:?}");
+    let file = &files[0];
+    assert_eq!(file.path, "link");
+    assert_eq!(file.status, DiffStatus::Modified);
+    assert_eq!(file.old_mode.as_deref(), Some("120000"));
+    assert_eq!(file.new_mode.as_deref(), Some("120000"));
+    let changed: Vec<(StructuredLineKind, String)> = file
+        .hunks
+        .iter()
+        .flat_map(|h| &h.lines)
+        .filter(|l| l.kind != StructuredLineKind::Context)
+        .map(|l| (l.kind, l.segments.iter().map(|s| s.text.as_str()).collect()))
+        .collect();
+    assert_eq!(
+        changed,
+        vec![
+            (StructuredLineKind::Del, LINK_TARGET.to_owned()),
+            (StructuredLineKind::Add, "b.txt".to_owned()),
+        ]
+    );
+
+    let git_diff = git(&root, &["diff", "--", "link"]);
+    assert!(
+        git_diff.contains("-a.txt\n") && git_diff.contains("+b.txt\n"),
+        "{git_diff}"
+    );
 }

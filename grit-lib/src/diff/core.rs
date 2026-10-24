@@ -6197,15 +6197,16 @@ fn invalidate_index_stat_cache(ie: &mut IndexEntry) {
 
 /// Read worktree content for diffing, honoring Git tree modes.
 ///
-/// For [`MODE_SYMLINK`] entries this returns the link target path bytes (via
-/// [`read_link`](std::fs::read_link)), not the contents of the followed file.
-/// Other modes use a plain [`read`](std::fs::read) of the path.
+/// For [`MODE_SYMLINK`] entries backed by a symlink on disk this returns the link target path
+/// bytes (via [`read_link`](std::fs::read_link)), not the contents of the followed file. A
+/// symlink entry checked out as a plain file (`core.symlinks=false`) already holds the target,
+/// so it is read like other modes, with a plain [`read`](std::fs::read) of the path.
 ///
 /// # Errors
 ///
 /// Returns [`std::io::Error`] when the path cannot be read.
 pub fn read_worktree_bytes_for_mode(path: &Path, mode: u32) -> std::io::Result<Vec<u8>> {
-    if mode == MODE_SYMLINK {
+    if mode == MODE_SYMLINK && fs::symlink_metadata(path)?.file_type().is_symlink() {
         let target = fs::read_link(path)?;
         return Ok(symlink_target_bytes(&target));
     }
@@ -6232,10 +6233,11 @@ pub fn read_worktree_side_bytes_for_diff(
 ) -> Result<Vec<u8>> {
     let file_path = crate::repo_relpath::worktree_abs(work_tree, rel_path);
     let rel_match = crate::repo_relpath::as_utf8_for_matching(rel_path);
-    if mode == MODE_SYMLINK {
-        return read_worktree_bytes_for_mode(&file_path, mode).map_err(Error::Io);
-    }
     let meta = fs::symlink_metadata(&file_path).map_err(Error::Io)?;
+    if mode == MODE_SYMLINK && meta.file_type().is_symlink() {
+        let target = fs::read_link(&file_path).map_err(Error::Io)?;
+        return Ok(symlink_target_bytes(&target));
+    }
     if let Some(rules) = worktree_rules {
         return worktree_blob_bytes(
             odb,
@@ -12700,6 +12702,15 @@ mod read_worktree_bytes_for_mode_tests {
         symlink("payload.txt", wt.join("link")).expect("symlink");
         let bytes =
             read_worktree_bytes_for_mode(&wt.join("link"), MODE_SYMLINK).expect("read link");
+        assert_eq!(bytes, b"payload.txt");
+    }
+
+    #[test]
+    fn symlink_mode_reads_plain_file_holding_the_target() {
+        let td = tempfile::tempdir().expect("tempdir");
+        let path = td.path().join("link");
+        fs::write(&path, b"payload.txt").expect("write");
+        let bytes = read_worktree_bytes_for_mode(&path, MODE_SYMLINK).expect("read plain link");
         assert_eq!(bytes, b"payload.txt");
     }
 
