@@ -233,7 +233,7 @@ pub(crate) fn search_windowed_blob_deltas(
     let segments = fixed_delta_segments(sorted.len(), opts.window);
     // Windowed search shares an index cache per segment; parallel segments contend on
     // merge mutexes and duplicate index work on medium packs (typical loose-object gc).
-    const MIN_BLOBS_FOR_PARALLEL_DELTA_SEARCH: usize = 512;
+    const MIN_BLOBS_FOR_PARALLEL_DELTA_SEARCH: usize = 4096;
     let workers = if sorted.len() < MIN_BLOBS_FOR_PARALLEL_DELTA_SEARCH {
         1
     } else {
@@ -714,7 +714,9 @@ pub(crate) fn serialize_pack_with_deltas(
 }
 
 /// Avoid thread-pool overhead on small repacks (typical loose-object gc).
-const MIN_ENTRIES_FOR_PARALLEL_PACK_WRITE: usize = 256;
+// Parallel pack preparation pays off on large packs; on ~600-object gc repacks the
+// thread pool and index sharing often lose to a single-threaded pass.
+const MIN_ENTRIES_FOR_PARALLEL_PACK_WRITE: usize = 2048;
 
 fn prepare_entries_parallel(
     odb: &Odb,

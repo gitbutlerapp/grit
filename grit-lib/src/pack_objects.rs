@@ -5,6 +5,7 @@
 
 use crate::environment::RepositoryOptions;
 
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::io::Write;
 use std::path::Path;
@@ -522,6 +523,21 @@ pub(crate) fn write_delta_pack_stream(
     })
 }
 
+fn planned_entry_payload<'a>(
+    odb: &'a Odb,
+    oid: ObjectId,
+    entry: &'a PlannedEntry,
+    plan_payloads: &'a OidHashMap<Arc<[u8]>>,
+) -> Result<Cow<'a, [u8]>> {
+    if !entry.data.is_empty() && entry.oid == oid {
+        return Ok(Cow::Borrowed(&entry.data));
+    }
+    if let Some(bytes) = plan_payloads.get(&oid) {
+        return Ok(Cow::Borrowed(bytes.as_ref()));
+    }
+    Ok(Cow::Owned(odb.read(&oid)?.data))
+}
+
 fn write_planned_entries(
     w: &mut dyn Write,
     odb: &Odb,
@@ -531,11 +547,7 @@ fn write_planned_entries(
     mut reuse: Option<&mut crate::pack_reuse::StreamingReuse>,
 ) -> Result<crate::pack_reuse::ReuseWriteStats> {
     let algo = odb.hash_algo();
-    let payloads: OidHashMap<&[u8]> = plan
-        .entries
-        .iter()
-        .map(|e| (e.oid, e.data.as_slice()))
-        .collect();
+    let plan_payloads = &plan.payloads;
     let mut oid_to_offset: OidHashMap<u64> = oid_hash_map();
     let mut delta_index_by_base: OidHashMap<DeltaIndex> = oid_hash_map();
     let mut body_written = 0u64;
@@ -550,8 +562,9 @@ fn write_planned_entries(
                     continue;
                 }
             }
+            let payload = planned_entry_payload(odb, entry.oid, entry, plan_payloads)?;
             let mut chunk = Vec::new();
-            write_whole_pack_object(&mut chunk, odb, entry.oid, entry.kind, &entry.data, opts)?;
+            write_whole_pack_object(&mut chunk, odb, entry.oid, entry.kind, &payload, opts)?;
             w.write_all(&chunk).map_err(Error::Io)?;
             body_written += chunk.len() as u64;
             oid_to_offset.insert(entry.oid, start);
@@ -592,31 +605,20 @@ fn write_planned_entries(
                 reuse.record_verbatim_zlib((zlib_end - zlib_start) as u64);
             }
         } else {
-            let target_data = entry.data.as_slice();
-            if target_data.is_empty() {
-                return Err(Error::CorruptObject(
-                    "delta entry missing payload".to_owned(),
-                ));
-            }
+            let target_data = planned_entry_payload(odb, entry.oid, entry, plan_payloads)?;
             let delta = if let Some(reused) = &entry.reused_delta {
                 reused.clone()
             } else {
-                let base_data: Vec<u8> = if let Some(d) = payloads.get(&base_oid) {
-                    d.to_vec()
+                let base_data = planned_entry_payload(odb, base_oid, entry, plan_payloads)?;
+                if target_data.starts_with(base_data.as_ref())
+                    && target_data.len() > base_data.len()
+                {
+                    encode_prefix_extension_delta(base_data.as_ref(), &target_data)?
                 } else {
-                    odb.read(&base_oid)?.data
-                };
-                if target_data.starts_with(&base_data) && target_data.len() > base_data.len() {
-                    encode_prefix_extension_delta(&base_data, target_data)?
-                } else {
-                    let base_ref = payloads
-                        .get(&base_oid)
-                        .copied()
-                        .unwrap_or(base_data.as_slice());
                     delta_index_by_base
                         .entry(base_oid)
-                        .or_insert_with(|| DeltaIndex::new(base_ref))
-                        .encode(target_data, 0)
+                        .or_insert_with(|| DeltaIndex::new(base_data.as_ref()))
+                        .encode(&target_data, 0)
                         .ok_or_else(|| {
                             Error::CorruptObject("failed to encode pack delta for object".into())
                         })?
