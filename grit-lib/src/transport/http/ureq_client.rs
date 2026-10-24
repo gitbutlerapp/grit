@@ -50,7 +50,7 @@ use base64::Engine;
 
 use crate::config::{self, parse_i64, ConfigSet};
 use crate::credentials::{self, Credential, CredentialProvider};
-use crate::error::{Error, Result};
+use crate::error::{Error, RemoteUnreadableReason, Result};
 use crate::protocol::client_git_protocol_header_from_config;
 use crate::transport_path::redact_url_for_display;
 
@@ -669,7 +669,7 @@ impl UreqHttpClient {
             }
             req.call()
         });
-        finish(result, &self.transport_timeouts)
+        finish(url, result, &self.transport_timeouts)
     }
 
     fn do_post_open(
@@ -706,7 +706,7 @@ impl UreqHttpClient {
         });
         match result {
             Ok(resp) => open_response_body(resp, &self.transport_timeouts),
-            Err(e) => Err(http_transport_error(&e)),
+            Err(e) => Err(http_transport_error(url, &e)),
         }
     }
 
@@ -744,7 +744,7 @@ impl UreqHttpClient {
             }
             req.send(body)
         });
-        finish(result, &self.transport_timeouts)
+        finish(url, result, &self.transport_timeouts)
     }
 
     fn with_auth_retry_post_stream(
@@ -999,12 +999,13 @@ fn retry_interrupted<T>(
 /// auth-retry logic inspect the status and `WWW-Authenticate` headers rather
 /// than treating them as hard errors). Only genuine transport failures are `Err`.
 fn finish(
+    url: &str,
     result: std::result::Result<ureq::http::Response<ureq::Body>, ureq::Error>,
     timeouts: &HttpTransportTimeouts,
 ) -> Result<RawResponse> {
     match result {
         Ok(resp) => read_response(resp, timeouts),
-        Err(e) => Err(http_transport_error(&e)),
+        Err(e) => Err(http_transport_error(url, &e)),
     }
 }
 
@@ -1082,13 +1083,19 @@ fn finalize_status(
     Ok((body, final_url))
 }
 
-fn http_transport_error(err: impl std::fmt::Display) -> Error {
-    let msg = credentials::redact_embedded_url_credentials(&err.to_string());
-    Error::Message(format!("http transport error: {msg}"))
+fn http_transport_error(url: &str, err: impl std::fmt::Display) -> Error {
+    let detail = credentials::redact_embedded_url_credentials(&err.to_string());
+    Error::remote_unreadable(
+        url_for_display(url),
+        RemoteUnreadableReason::Transport { detail },
+    )
 }
 
 fn http_status_error(url: &str, status: u16) -> Error {
-    Error::Message(format!("HTTP {status} from {}", url_for_display(url)))
+    Error::remote_unreadable(
+        url_for_display(url),
+        RemoteUnreadableReason::HttpStatus { status },
+    )
 }
 
 // ---------------------------------------------------------------------------

@@ -160,6 +160,21 @@ pub enum PullError {
     Repository(#[from] Error),
 }
 
+impl PullError {
+    /// Whether the remote could not be read at all ([`Error::RemoteUnreadable`]).
+    #[must_use]
+    pub fn is_remote_unreadable(&self) -> bool {
+        match self {
+            Self::Remote(e) => e.is_remote_unreadable(),
+            Self::Repository(e) => e.is_remote_unreadable(),
+            Self::DetachedHead
+            | Self::InvalidHead
+            | Self::NoUpstream { .. }
+            | Self::RebaseInteractive => false,
+        }
+    }
+}
+
 /// Resolve pull integration mode from config with optional CLI override.
 ///
 /// Precedence matches Git: explicit `--ff-only` / `--no-rebase` / `--rebase`, then

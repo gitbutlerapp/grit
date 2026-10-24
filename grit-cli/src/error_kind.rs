@@ -40,6 +40,8 @@ pub enum ErrorKind {
     BranchNoUpstream,
     /// Other branch operation failure.
     BranchError,
+    /// Clone, fetch, pull, push, or `remote refs` could not reach or read the remote (exit 128).
+    RemoteUnreadable,
 }
 
 impl ErrorKind {
@@ -83,6 +85,7 @@ impl ErrorKind {
             Self::BranchUpstreamNotTracking => "branch_upstream_not_tracking",
             Self::BranchNoUpstream => "branch_no_upstream",
             Self::BranchError => "branch_error",
+            Self::RemoteUnreadable => "remote_unreadable",
         }
     }
 
@@ -107,6 +110,7 @@ impl ErrorKind {
             Self::BranchUpstreamNotTracking,
             Self::BranchNoUpstream,
             Self::BranchError,
+            Self::RemoteUnreadable,
         ]
     }
 }

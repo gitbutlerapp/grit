@@ -32,7 +32,7 @@ use crate::command_runner::{
 };
 use std::time::Duration;
 
-use crate::error::{Error, Result};
+use crate::error::{Error, RemoteUnreadableReason, Result};
 use crate::objects::ObjectId;
 use crate::pkt_line;
 
@@ -206,24 +206,30 @@ pub(crate) fn connection_handshake_complete(conn: &dyn Connection) -> bool {
     }
 }
 
-fn verify_ssh_child_after_advertisement(child: &mut Child, adv: &Advertisement) -> Result<()> {
+fn verify_ssh_child_after_advertisement(
+    url: &str,
+    child: &mut Child,
+    adv: &Advertisement,
+) -> Result<()> {
     if remote_handshake_complete(adv) {
         return Ok(());
     }
+    let no_handshake = || {
+        Error::remote_unreadable(
+            crate::transport_path::redact_url_for_display(url),
+            RemoteUnreadableReason::NoHandshake,
+        )
+    };
     for _ in 0..50 {
         match child.try_wait() {
-            Ok(Some(status)) if status.success() => return Err(Error::RemoteReadFailed),
-            Ok(Some(_)) => return Err(Error::RemoteReadFailed),
+            Ok(Some(_)) => return Err(no_handshake()),
             Ok(None) => std::thread::sleep(Duration::from_millis(10)),
             Err(e) => {
                 return Err(Error::Message(format!("ssh wait failed: {e}")));
             }
         }
     }
-    if !remote_handshake_complete(adv) {
-        return Err(Error::RemoteReadFailed);
-    }
-    Ok(())
+    Err(no_handshake())
 }
 
 /// Read and parse a v0/v1 (or v2 preamble) ref advertisement from `reader`,
@@ -534,10 +540,12 @@ impl Transport for GitDaemonTransport {
         let addr = format!("{}:{}", parsed.host, parsed.port)
             .to_socket_addrs()
             .map_err(|e| {
-                Error::Message(format!(
-                    "could not resolve git://{}:{}: {e}",
-                    parsed.host, parsed.port
-                ))
+                Error::remote_unreadable(
+                    url,
+                    RemoteUnreadableReason::Transport {
+                        detail: e.to_string(),
+                    },
+                )
             })?
             .next()
             .ok_or_else(|| {
@@ -552,10 +560,12 @@ impl Transport for GitDaemonTransport {
             None => TcpStream::connect(addr),
         }
         .map_err(|e| {
-            Error::Message(format!(
-                "could not connect to git://{}:{}: {e}",
-                parsed.host, parsed.port
-            ))
+            Error::remote_unreadable(
+                url,
+                RemoteUnreadableReason::Transport {
+                    detail: e.to_string(),
+                },
+            )
         })?;
         if let Some(t) = self.io_timeout {
             let _ = stream.set_read_timeout(Some(t));
@@ -1259,7 +1269,7 @@ impl Transport for SshTransport {
             reader.ok_or_else(|| Error::Message("ssh child has no stdout".to_owned()))?;
 
         let adv = read_advertisement(&mut reader)?;
-        verify_ssh_child_after_advertisement(&mut child, &adv)?;
+        verify_ssh_child_after_advertisement(url, &mut child, &adv)?;
         crate::net_trace::net_trace!(
             opts.network_trace,
             opts.diagnostics.as_ref(),
@@ -1542,7 +1552,7 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn ssh_connect_failed_subprocess_empty_advertisement_is_remote_read_failed() {
+    fn ssh_connect_failed_subprocess_empty_advertisement_is_remote_unreadable() {
         use std::os::unix::fs::PermissionsExt;
 
         let dir = tempfile::tempdir().expect("tempdir");
@@ -1559,8 +1569,14 @@ mod tests {
             Err(e) => e,
         };
         assert!(
-            matches!(err, Error::RemoteReadFailed),
-            "expected RemoteReadFailed, got {err}"
+            matches!(
+                err,
+                Error::RemoteUnreadable {
+                    reason: RemoteUnreadableReason::NoHandshake,
+                    ..
+                }
+            ),
+            "expected NoHandshake, got {err}"
         );
     }
 

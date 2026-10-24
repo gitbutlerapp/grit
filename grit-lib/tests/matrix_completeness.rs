@@ -46,7 +46,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::mpsc;
 use std::time::{Duration, Instant};
 
-use grit_lib::error::{Error, Result as GritResult};
+use grit_lib::error::{Error, RemoteUnreadableReason, Result as GritResult};
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::ObjectId;
 use grit_lib::refs::resolve_ref;
@@ -653,7 +653,7 @@ fn push_http_propagates_discovery_transport_error_typed() {
 // ===========================================================================
 
 #[test]
-fn ssh_connect_refused_port_is_remote_read_failed_not_hang() {
+fn ssh_connect_refused_port_is_remote_unreadable_not_hang() {
     use grit_lib::config::environment::Environment;
     use std::ffi::OsString;
     use std::sync::Arc;
@@ -681,8 +681,14 @@ fn ssh_connect_refused_port_is_remote_read_failed_not_hang() {
         panic!("connecting ssh to a closed port must return Err (got Ok)");
     };
     assert!(
-        matches!(err, Error::RemoteReadFailed),
-        "expected RemoteReadFailed, got {err}"
+        matches!(
+            err,
+            Error::RemoteUnreadable {
+                reason: RemoteUnreadableReason::NoHandshake,
+                ..
+            }
+        ),
+        "expected RemoteUnreadable(NoHandshake), got {err}"
     );
 }
 
@@ -702,9 +708,18 @@ fn git_daemon_connect_refused_port_is_typed_error_not_hang() {
             .connect(&url, Service::UploadPack, &ConnectOptions::default())
             .err()
     });
+    let Some(err) = err else {
+        panic!("connecting to a closed port must return an Err (got Ok)");
+    };
     assert!(
-        err.is_some(),
-        "connecting to a closed port must return an Err (got Ok)"
+        matches!(
+            err,
+            Error::RemoteUnreadable {
+                reason: RemoteUnreadableReason::Transport { .. },
+                ..
+            }
+        ),
+        "expected RemoteUnreadable(Transport), got {err}"
     );
 }
 

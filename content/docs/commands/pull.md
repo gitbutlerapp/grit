@@ -149,6 +149,7 @@ Markdown uses headings, bullet lists, and fenced blocks; pipe characters inside 
 | `1` | Conflicts, refused merge/rebase, `--check` when integration would be required, or `autostash_conflict`. |
 | `2` | Invalid flags ([`usage`](../exit-codes/)). |
 | `128` | `--ff-only` when history diverged ([`refused_not_ff`](../exit-codes/)). |
+| `128` | The fetch could not reach or read the remote ([`remote_unreadable`](../exit-codes/)). |
 
 See [Exit codes](../exit-codes/).
 

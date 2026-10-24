@@ -59,6 +59,64 @@ impl std::fmt::Display for OverwriteReason {
     }
 }
 
+/// Why a remote could not be read or written ([`Error::RemoteUnreadable`]).
+///
+/// Every reason is a failure to talk to the remote at all, as opposed to the remote refusing
+/// an update. [`Self::Transport`] is the one usually worth retrying on a flaky network.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RemoteUnreadableReason {
+    /// A local path or `file://` URL does not name a Git repository.
+    RepositoryNotFound,
+    /// The connection failed or broke: name resolution, refused or reset connection, TLS, or
+    /// timeouts.
+    Transport {
+        /// Transport-level description of the failure, with URL credentials redacted.
+        detail: String,
+    },
+    /// A smart-HTTP server answered with an error status other than an authentication
+    /// challenge (those are [`Error::Auth`]).
+    HttpStatus {
+        /// HTTP status code (`>= 400`).
+        status: u16,
+    },
+    /// The transport ran, but the remote never completed the Git protocol handshake (for
+    /// example `ssh` exited before any ref advertisement).
+    NoHandshake,
+}
+
+impl RemoteUnreadableReason {
+    /// Stable snake-case name for machine-readable output (`repository_not_found`,
+    /// `transport`, `http_status`, `no_handshake`).
+    #[must_use]
+    pub fn slug(&self) -> &'static str {
+        match self {
+            Self::RepositoryNotFound => "repository_not_found",
+            Self::Transport { .. } => "transport",
+            Self::HttpStatus { .. } => "http_status",
+            Self::NoHandshake => "no_handshake",
+        }
+    }
+}
+
+fn remote_unreadable_message(url: Option<&str>, reason: &RemoteUnreadableReason) -> String {
+    let target = url.map_or_else(|| "the remote".to_owned(), |u| format!("'{u}'"));
+    match reason {
+        RemoteUnreadableReason::RepositoryNotFound => {
+            format!("could not find repository at {target}")
+        }
+        RemoteUnreadableReason::Transport { detail } => {
+            format!("could not reach {target}: {detail}")
+        }
+        RemoteUnreadableReason::HttpStatus { status } => match url {
+            Some(u) => format!("HTTP {status} from {u}"),
+            None => format!("HTTP {status} from the remote"),
+        },
+        RemoteUnreadableReason::NoHandshake => {
+            format!("could not read from {target}: no Git protocol response")
+        }
+    }
+}
+
 /// Configuration parse and validation failures.
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 #[non_exhaustive]
@@ -968,9 +1026,18 @@ pub enum Error {
         path: String,
     },
 
-    /// The remote transport failed before a valid ref advertisement (SSH down, missing repo, etc.).
-    #[error("could not read from remote repository")]
-    RemoteReadFailed,
+    /// The remote could not be read or written: a missing repository, a failed connection, an
+    /// HTTP error status, or no Git handshake.
+    ///
+    /// Use [`Error::is_remote_unreadable`] to test for it through wrapper errors.
+    #[error("{}", remote_unreadable_message(url.as_deref(), reason))]
+    RemoteUnreadable {
+        /// Remote URL or resolved local path, with credentials redacted. `None` when the
+        /// failing layer only had a connection, not the URL it was opened from.
+        url: Option<String>,
+        /// What went wrong.
+        reason: RemoteUnreadableReason,
+    },
 
     /// Explicit fetch refspec resolution failed (missing or ambiguous source).
     #[error("{0}")]
@@ -1361,6 +1428,22 @@ impl Error {
             paths,
             message,
         }
+    }
+
+    /// Build [`Error::RemoteUnreadable`] for `url`.
+    #[must_use]
+    pub fn remote_unreadable(url: impl Into<String>, reason: RemoteUnreadableReason) -> Self {
+        Self::RemoteUnreadable {
+            url: Some(url.into()),
+            reason,
+        }
+    }
+
+    /// Whether this is [`Error::RemoteUnreadable`]: the remote could not be read or written
+    /// at all (as opposed to a rejected update or an empty remote).
+    #[must_use]
+    pub fn is_remote_unreadable(&self) -> bool {
+        matches!(self, Self::RemoteUnreadable { .. })
     }
 
     /// Build [`Error::InvalidPathComponent`].

@@ -5299,7 +5299,9 @@ pub grit_lib::error::Error::ReflogIndexOutOfRange::refname: alloc::string::Strin
 pub grit_lib::error::Error::ReflogUnknownRef
 pub grit_lib::error::Error::ReflogUnknownRef::refname: alloc::string::String
 pub grit_lib::error::Error::Reftable(grit_lib::refs::reftable::ReftableError)
-pub grit_lib::error::Error::RemoteReadFailed
+pub grit_lib::error::Error::RemoteUnreadable
+pub grit_lib::error::Error::RemoteUnreadable::reason: grit_lib::error::RemoteUnreadableReason
+pub grit_lib::error::Error::RemoteUnreadable::url: core::option::Option<alloc::string::String>
 pub grit_lib::error::Error::RemovePathsRequired
 pub grit_lib::error::Error::ReplayAbortHeadMoved
 pub grit_lib::error::Error::ReplayContinueUnmerged
@@ -5366,6 +5368,8 @@ pub grit_lib::error::Error::Zlib(alloc::string::String)
 impl grit_lib::error::Error
 pub fn grit_lib::error::Error::git_stderr_message(&self) -> alloc::string::String
 pub fn grit_lib::error::Error::invalid_path_component(impl core::convert::Into<alloc::string::String>, grit_lib::path_validate::PathComponentError) -> Self
+pub fn grit_lib::error::Error::is_remote_unreadable(&self) -> bool
+pub fn grit_lib::error::Error::remote_unreadable(impl core::convert::Into<alloc::string::String>, grit_lib::error::RemoteUnreadableReason) -> Self
 pub fn grit_lib::error::Error::wants_fatal_prefix(&self) -> bool
 pub fn grit_lib::error::Error::would_overwrite(grit_lib::error::OverwriteReason, alloc::vec::Vec<alloc::string::String>) -> Self
 impl core::convert::From<core::io::error::Error> for grit_lib::error::Error
@@ -5708,6 +5712,30 @@ impl core::marker::Unpin for grit_lib::error::RefLockError
 impl core::marker::UnsafeUnpin for grit_lib::error::RefLockError
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::error::RefLockError
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::error::RefLockError
+pub enum grit_lib::error::RemoteUnreadableReason
+pub grit_lib::error::RemoteUnreadableReason::HttpStatus
+pub grit_lib::error::RemoteUnreadableReason::HttpStatus::status: u16
+pub grit_lib::error::RemoteUnreadableReason::NoHandshake
+pub grit_lib::error::RemoteUnreadableReason::RepositoryNotFound
+pub grit_lib::error::RemoteUnreadableReason::Transport
+pub grit_lib::error::RemoteUnreadableReason::Transport::detail: alloc::string::String
+impl grit_lib::error::RemoteUnreadableReason
+pub fn grit_lib::error::RemoteUnreadableReason::slug(&self) -> &'static str
+impl core::clone::Clone for grit_lib::error::RemoteUnreadableReason
+pub fn grit_lib::error::RemoteUnreadableReason::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::error::RemoteUnreadableReason
+impl core::cmp::PartialEq for grit_lib::error::RemoteUnreadableReason
+pub fn grit_lib::error::RemoteUnreadableReason::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::error::RemoteUnreadableReason
+pub fn grit_lib::error::RemoteUnreadableReason::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::error::RemoteUnreadableReason
+impl core::marker::Freeze for grit_lib::error::RemoteUnreadableReason
+impl core::marker::Send for grit_lib::error::RemoteUnreadableReason
+impl core::marker::Sync for grit_lib::error::RemoteUnreadableReason
+impl core::marker::Unpin for grit_lib::error::RemoteUnreadableReason
+impl core::marker::UnsafeUnpin for grit_lib::error::RemoteUnreadableReason
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::error::RemoteUnreadableReason
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::error::RemoteUnreadableReason
 pub enum grit_lib::error::SparseCheckoutWarning
 pub grit_lib::error::SparseCheckoutWarning::DisablingConePatternMatching
 pub grit_lib::error::SparseCheckoutWarning::RepeatedPattern
@@ -9800,9 +9828,9 @@ pub fn grit_lib::objects::pack_name_hash::pack_name_hash_v2(&[u8]) -> u32
 pub mod grit_lib::objects::pack_object_select
 pub struct grit_lib::objects::pack_object_select::PackEnumerateOptions<'a>
 pub grit_lib::objects::pack_object_select::PackEnumerateOptions::exclude_objects: core::option::Option<&'a std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>>
-pub grit_lib::objects::pack_object_select::PackEnumerateOptions::prefetch_walk_objects: bool
 pub grit_lib::objects::pack_object_select::PackEnumerateOptions::filter: core::option::Option<&'a grit_lib::revwalk::rev_list::ObjectFilter>
 pub grit_lib::objects::pack_object_select::PackEnumerateOptions::have_shallow_grafts: core::option::Option<&'a std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>>
+pub grit_lib::objects::pack_object_select::PackEnumerateOptions::prefetch_walk_objects: bool
 pub grit_lib::objects::pack_object_select::PackEnumerateOptions::shallow_grafts: &'a std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>
 pub grit_lib::objects::pack_object_select::PackEnumerateOptions::use_bitmaps: bool
 impl<'a> core::clone::Clone for grit_lib::objects::pack_object_select::PackEnumerateOptions<'a>
@@ -13012,6 +13040,8 @@ pub grit_lib::porcelain::pull::PullError::NoUpstream::branch: alloc::string::Str
 pub grit_lib::porcelain::pull::PullError::RebaseInteractive
 pub grit_lib::porcelain::pull::PullError::Remote(grit_lib::remote::RemoteError)
 pub grit_lib::porcelain::pull::PullError::Repository(grit_lib::error::Error)
+impl grit_lib::porcelain::pull::PullError
+pub fn grit_lib::porcelain::pull::PullError::is_remote_unreadable(&self) -> bool
 impl core::convert::From<grit_lib::error::Error> for grit_lib::porcelain::pull::PullError
 pub fn grit_lib::porcelain::pull::PullError::from(grit_lib::error::Error) -> Self
 impl core::convert::From<grit_lib::remote::RemoteError> for grit_lib::porcelain::pull::PullError
@@ -14598,7 +14628,9 @@ pub grit_lib::prelude::Error::ReflogIndexOutOfRange::refname: alloc::string::Str
 pub grit_lib::prelude::Error::ReflogUnknownRef
 pub grit_lib::prelude::Error::ReflogUnknownRef::refname: alloc::string::String
 pub grit_lib::prelude::Error::Reftable(grit_lib::refs::reftable::ReftableError)
-pub grit_lib::prelude::Error::RemoteReadFailed
+pub grit_lib::prelude::Error::RemoteUnreadable
+pub grit_lib::prelude::Error::RemoteUnreadable::reason: grit_lib::error::RemoteUnreadableReason
+pub grit_lib::prelude::Error::RemoteUnreadable::url: core::option::Option<alloc::string::String>
 pub grit_lib::prelude::Error::RemovePathsRequired
 pub grit_lib::prelude::Error::ReplayAbortHeadMoved
 pub grit_lib::prelude::Error::ReplayContinueUnmerged
@@ -14665,6 +14697,8 @@ pub grit_lib::prelude::Error::Zlib(alloc::string::String)
 impl grit_lib::error::Error
 pub fn grit_lib::error::Error::git_stderr_message(&self) -> alloc::string::String
 pub fn grit_lib::error::Error::invalid_path_component(impl core::convert::Into<alloc::string::String>, grit_lib::path_validate::PathComponentError) -> Self
+pub fn grit_lib::error::Error::is_remote_unreadable(&self) -> bool
+pub fn grit_lib::error::Error::remote_unreadable(impl core::convert::Into<alloc::string::String>, grit_lib::error::RemoteUnreadableReason) -> Self
 pub fn grit_lib::error::Error::wants_fatal_prefix(&self) -> bool
 pub fn grit_lib::error::Error::would_overwrite(grit_lib::error::OverwriteReason, alloc::vec::Vec<alloc::string::String>) -> Self
 impl core::convert::From<core::io::error::Error> for grit_lib::error::Error
@@ -17863,8 +17897,8 @@ pub grit_lib::remote::clone::CloneError::Library(grit_lib::error::Error)
 pub grit_lib::remote::clone::CloneError::Remote(grit_lib::remote::RemoteError)
 pub grit_lib::remote::clone::CloneError::RemoteRefNotFound(alloc::string::String)
 impl grit_lib::remote::clone::CloneError
-pub fn grit_lib::remote::clone::CloneError::is_remote_read_failure(&self) -> bool
 pub fn grit_lib::remote::clone::CloneError::is_remote_ref_not_found(&self) -> bool
+pub fn grit_lib::remote::clone::CloneError::is_remote_unreadable(&self) -> bool
 pub fn grit_lib::remote::clone::CloneError::should_cleanup_failed_clone(&self) -> bool
 impl core::convert::From<grit_lib::error::Error> for grit_lib::remote::clone::CloneError
 pub fn grit_lib::remote::clone::CloneError::from(grit_lib::error::Error) -> Self
@@ -19945,6 +19979,8 @@ pub grit_lib::remote::RemoteError::NoUrl
 pub grit_lib::remote::RemoteError::RemoteExists(alloc::string::String)
 pub grit_lib::remote::RemoteError::UnknownRemote(alloc::string::String)
 pub grit_lib::remote::RemoteError::UnsupportedScheme
+impl grit_lib::remote::RemoteError
+pub fn grit_lib::remote::RemoteError::is_remote_unreadable(&self) -> bool
 impl core::convert::From<grit_lib::error::Error> for grit_lib::remote::RemoteError
 pub fn grit_lib::remote::RemoteError::from(grit_lib::error::Error) -> Self
 impl core::convert::From<grit_lib::remote::RemoteError> for grit_lib::error::Error

@@ -12,7 +12,7 @@ Grit uses a small set of exit codes. Command-specific yes/no checks (for example
 | `success` | 0 | Command completed successfully (including some checks that answer “yes”). |
 | `failure` | 1 | Command failed, or a yes/no check answered “no” (`diff --exit-code`, `merge --check`, `pick --check`, `revert --check`, `pull --check`, `merge-base --is-ancestor`, `fsck`, `ignore check`, `tag --verify`, conflicts after `merge` / `pick` / `revert` / `rebase`, rejected `push`, and similar). With `--json`, stdout is usually `{"error":"…"}` or a full outcome object when the failure is part of the result (for example rejected push). |
 | `usage` | 2 | Invalid flags or arguments. With `--json`, stdout is still `{"error":"…"}` (clap usage errors and subcommand usage such as `grit branch`). Hunk selection mistakes (`add` / `commit` / `stash` / `restore` with unknown or stale `--hunks` ids) also exit 2. `grit diff --exit-code` / `--quiet` uses 2 when diff itself errors. |
-| `remote_unreadable` | 128 | Clone or fetch could not read the remote (transport / HTTP failure). |
+| `remote_unreadable` | 128 | `clone`, `fetch`, `pull`, `push`, or `remote refs` could not reach or read the remote: a missing repository path, a DNS, refused-connection, TLS, or timeout failure, an HTTP error status, or a transport that never spoke Git. With `--json`, stdout is `{"error":"…","kind":"remote_unreadable"}`. Rejected pushes and authentication failures are not in this class (they exit 1). |
 | `missing_prerequisite` | 128 | `grit bundle unbundle` when the repository lacks prerequisite commits. |
 | `refused_not_ff` | 128 | `grit merge --ff-only` when a fast-forward is not possible. |
 | `invalid_commit_filter` | 129 | Invalid `--author`, `--grep`, or pickaxe pattern on `grit log`, `grit revs`, or related commands (`kind`: `invalid_pattern`). |
@@ -40,3 +40,4 @@ These values appear in the `kind` field of structured `--json` errors ([error sc
 | `branch_upstream_not_tracking` | Upstream is not a tracking branch. |
 | `branch_no_upstream` | No upstream configured. |
 | `branch_error` | Other branch operation failure. |
+| `remote_unreadable` | The remote could not be reached or read (exit 128); see the exit status table above. |
