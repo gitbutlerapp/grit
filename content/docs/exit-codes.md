@@ -30,6 +30,7 @@ These values appear in the `kind` field of structured `--json` errors ([error sc
 | `invalid_pattern` | Invalid filter pattern (exit 129). |
 | `usage` | Subcommand usage mistake (exit 2), e.g. `grit branch` flag combinations. |
 | `incompatible_flags` | Flags that cannot be combined (often `--json` with human-only options). |
+| `index_locked` | Another process holds `.git/index.lock` (exit 1). The operation stopped before changing anything, so retrying later is safe; the lock file is left alone. |
 | `branch_already_exists` | Create branch when the name already exists. |
 | `branch_not_found` | Branch name not found. |
 | `branch_invalid_name` | Invalid branch name. |

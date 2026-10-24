@@ -71,6 +71,13 @@
           "type": "string"
         },
         {
+          "description": "Another process holds the index lock; nothing was changed, so retrying later is safe.",
+          "enum": [
+            "index_locked"
+          ],
+          "type": "string"
+        },
+        {
           "description": "Branch already exists on create.",
           "enum": [
             "branch_already_exists"
