@@ -10,7 +10,7 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\"added\":[],\"modified\":[\"tracked.txt\"],\"removed\":[],\"intent_to_add\":[],\"dry_run\":false,\"count\":1,\"staged\":1}\n",
+    "stdout": "{\"added\":[],\"modified\":[\"tracked.txt\"],\"removed\":[],\"intent_to_add\":[],\"dry_run\":false,\"count\":1,\"staged\":1,\"staged_hunks\":{},\"staged_lines\":{}}\n",
     "stderr": ""
   },
   "markdown": {

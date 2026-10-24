@@ -104,7 +104,9 @@ Pass `--json` for stable, scripting-friendly output.
   "intent_to_add": [],
   "dry_run": false,
   "count": 2,
-  "staged": 2
+  "staged": 2,
+  "staged_hunks": {},
+  "staged_lines": {}
 }
 ```
 
