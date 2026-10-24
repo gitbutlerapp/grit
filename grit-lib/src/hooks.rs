@@ -277,35 +277,34 @@ enum ResolvedHook {
 
 /// Resolve the hooks directory from config or fall back to `$GIT_DIR/hooks`.
 ///
+/// A relative `core.hooksPath` is taken relative to the directory hooks run in: the top of
+/// the work tree, or `$GIT_DIR` in a bare repository. It does not depend on the directory
+/// the repository was opened from.
+///
 /// Never carries a Windows `\\?\` prefix, so the path can be shown to users and handed to
 /// hook interpreters such as Git for Windows' `sh`.
 pub fn resolve_hooks_dir(repo: &Repository) -> PathBuf {
-    resolve_hooks_dir_for_config(
-        repo.environment(),
-        Some(repo.git_dir()),
-        repo.config().ok().as_deref(),
-    )
+    resolve_hooks_dir_for_config(repo, repo.config().ok().as_deref())
 }
 
-fn resolve_hooks_dir_for_config(
-    env: &crate::environment::Environment,
-    git_dir: Option<&Path>,
-    config: Option<&ConfigSet>,
-) -> PathBuf {
+fn resolve_hooks_dir_for_config(repo: &Repository, config: Option<&ConfigSet>) -> PathBuf {
     let dir = match config.and_then(|cfg| cfg.get("core.hooksPath")) {
         Some(hooks_path) => {
-            let p = PathBuf::from(parse_path(env, &hooks_path));
+            let p = PathBuf::from(parse_path(repo.environment(), &hooks_path));
             if p.is_absolute() {
                 p
             } else {
-                env.cwd.join(p)
+                hook_run_dir(repo).join(p)
             }
         }
-        None => git_dir
-            .map(|gd| crate::repo::common_git_dir_for_config(gd).join("hooks"))
-            .unwrap_or_else(|| PathBuf::from("hooks")),
+        None => crate::repo::common_git_dir_for_config(repo.git_dir()).join("hooks"),
     };
     path_without_verbatim_prefix(&dir).into_owned()
+}
+
+/// Directory hooks run in by default: the work tree top, or `$GIT_DIR` when bare.
+fn hook_run_dir(repo: &Repository) -> &Path {
+    repo.work_tree().unwrap_or(repo.git_dir())
 }
 
 fn hook_argv0(repo: &Repository, hooks_dir: &Path, hook_name: &str, cwd: &Path) -> PathBuf {
@@ -397,11 +396,9 @@ fn resolve_hook_sequence(
     for (_friendly, command) in tables.hooks_for_event(hook_name)? {
         seq.push(ResolvedHook::Configured { command });
     }
-    let hooks_dir =
-        resolve_hooks_dir_for_config(repo.environment(), Some(repo.git_dir()), Some(config));
+    let hooks_dir = resolve_hooks_dir_for_config(repo, Some(config));
     if let Some(path) = traditional_hook_candidate(repo, &hooks_dir, hook_name) {
-        let work_dir = repo.work_tree().unwrap_or(repo.git_dir());
-        let argv0 = hook_argv0(repo, &hooks_dir, hook_name, work_dir);
+        let argv0 = hook_argv0(repo, &hooks_dir, hook_name, hook_run_dir(repo));
         seq.push(ResolvedHook::Traditional { path, argv0 });
     }
     Ok(seq)
@@ -722,10 +719,7 @@ pub fn run_hook_opts(
 
     let work_dir: PathBuf = opts.cwd.map_or_else(
         || match repo {
-            Some(r) => r
-                .work_tree()
-                .map(|p| p.to_path_buf())
-                .unwrap_or_else(|| r.git_dir().to_path_buf()),
+            Some(r) => hook_run_dir(r).to_path_buf(),
             None => PathBuf::from("."),
         },
         Path::to_path_buf,
