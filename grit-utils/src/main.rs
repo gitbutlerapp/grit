@@ -44,11 +44,12 @@ use grit_utils::revwalk_suite::run_revwalk_suite;
 use grit_utils::scenario_suite::{self, ScenarioSuiteOptions};
 use grit_utils::scenarios::{
     run_add_suite, run_blame_suite, run_commit_suite, run_deep_leaf_worktree_suite,
-    run_dense_leaf_worktree_suite, run_diff_suite, run_hot_path_suite, run_log_suite,
-    run_merge_check_suite, run_merge_only_suite, run_prepare_add, run_prepare_commit,
-    run_prepare_conflicts_merge_conflict_continue, run_prepare_conflicts_merge_no_ff,
-    run_prepare_conflicts_pick_range, run_prepare_conflicts_revert_mainline,
-    run_prepare_conflicts_revert_single, run_prepare_dense_leaf_add, run_prepare_merge,
+    run_dense_leaf_worktree_suite, run_diff_suite, run_hot_path_suite,
+    run_initial_monorepo_add_suite, run_log_suite, run_merge_check_suite, run_merge_only_suite,
+    run_prepare_add, run_prepare_commit, run_prepare_conflicts_merge_conflict_continue,
+    run_prepare_conflicts_merge_no_ff, run_prepare_conflicts_pick_range,
+    run_prepare_conflicts_revert_mainline, run_prepare_conflicts_revert_single,
+    run_prepare_dense_leaf_add, run_prepare_initial_monorepo_add, run_prepare_merge,
     run_prepare_pick, run_prepare_pick_series, run_prepare_restore, run_prepare_revert,
     run_prepare_stash, run_prepare_switch, run_prepare_switch_detach_tag, run_prepare_switch_wide,
     run_restore_suite, run_stash_suite, run_status_suite, RunConfig,
@@ -118,6 +119,11 @@ enum Cmd {
     Add {
         #[arg(long, value_delimiter = ',', default_values_t = vec![100, 1_000, 10_000, 50_000])]
         sizes: Vec<usize>,
+    },
+    /// Initial `add` on untracked monorepo-shaped tree (#1674 layout)
+    AddInitial {
+        #[arg(long, default_value_t = 20_000)]
+        files: usize,
     },
     /// Benchmark `grit commit` (stage all + commit) at selected repo sizes
     Commit {
@@ -394,6 +400,11 @@ enum Cmd {
     },
     #[command(hide = true)]
     PrepareDenseLeafAdd {
+        #[arg(long)]
+        git: PathBuf,
+    },
+    #[command(hide = true)]
+    PrepareInitialMonorepoAdd {
         #[arg(long)]
         git: PathBuf,
     },
@@ -1410,6 +1421,10 @@ fn main() -> Result<()> {
             let git = resolve_binary("git", Some(git))?;
             return run_prepare_dense_leaf_add(&git);
         }
+        Cmd::PrepareInitialMonorepoAdd { git } => {
+            let git = resolve_binary("git", Some(git))?;
+            return run_prepare_initial_monorepo_add(&git);
+        }
         Cmd::PrepareSwitch { git } => {
             let git = resolve_binary("git", Some(git))?;
             return run_prepare_switch(&git);
@@ -1740,6 +1755,11 @@ fn main() -> Result<()> {
             eprintln!("Running add benchmarks...");
             let cfg = run_config(&cli, false);
             run_add_suite(&hyperfine, &git, &grit, &cfg, sizes, timestamp)?
+        }
+        Cmd::AddInitial { files } => {
+            eprintln!("Running initial monorepo add benchmark ({files} files)...");
+            let cfg = run_config(&cli, false);
+            run_initial_monorepo_add_suite(&hyperfine, &git, &grit, &cfg, *files, timestamp)?
         }
         Cmd::Commit { sizes } => {
             eprintln!("Running commit benchmarks...");
@@ -2136,6 +2156,7 @@ fn main() -> Result<()> {
         | Cmd::Drive { .. }
         | Cmd::PrepareAdd { .. }
         | Cmd::PrepareDenseLeafAdd { .. }
+        | Cmd::PrepareInitialMonorepoAdd { .. }
         | Cmd::PrepareSwitch { .. }
         | Cmd::PrepareSwitchWide { .. }
         | Cmd::PrepareSwitchDetachTag { .. }

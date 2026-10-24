@@ -123,6 +123,7 @@ baseline = [
   "grit-utils/baselines/refs-after-reftable.json",
   "grit-utils/baselines/ref-query-reachability.json",
   "grit-utils/baselines/parallel-after.json",
+  "grit-utils/baselines/add-initial-monorepo-20k.json",
   "grit-utils/baselines/revwalk-queries.json",
   "grit-utils/baselines/revision-selection.json",
   "grit-utils/baselines/resolve-cat.json",

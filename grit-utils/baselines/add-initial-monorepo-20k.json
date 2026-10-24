@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "timestamp": "2026-10-24T06:44:03.871447809Z",
+  "machine": {
+    "cpu_model": "Intel(R) Xeon(R) Processor",
+    "physical_cores": 4,
+    "logical_cores": 4,
+    "ram_bytes": 16780574720,
+    "os": "linux",
+    "kernel": "Linux 6.12.94+",
+    "scratch_filesystem": "ext4",
+    "rustc_version": "rustc 1.99.0 (b940084d7 2026-09-28)",
+    "cargo_profile": "release"
+  },
+  "tools": {
+    "git": "git version 2.43.0",
+    "grit": "grit 0.5.19",
+    "grit_commit": "9becd2af4f064fbc582323a6be1177a41f825d92"
+  },
+  "scenarios": [
+    {
+      "id": "add-initial-monorepo-20000",
+      "group": "add",
+      "fixture": "monorepo-untracked-20000",
+      "description": "initial stage-all on 20000 untracked files (20×20×10 monorepo layout, #1674)",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 878.8310865133334,
+        "median_ms": 872.2912911800001,
+        "stddev_ms": 12.63529362658071,
+        "min_ms": 870.8061201800001,
+        "max_ms": 893.39584818,
+        "runs_ms": [
+          893.39584818,
+          870.8061201800001,
+          872.2912911800001
+        ],
+        "peak_rss_bytes": 12275712
+      },
+      "grit": {
+        "mean_ms": 610.40753954,
+        "median_ms": 608.4325835400001,
+        "stddev_ms": 12.975471664373377,
+        "min_ms": 598.53276554,
+        "max_ms": 624.25726954,
+        "runs_ms": [
+          608.4325835400001,
+          598.53276554,
+          624.25726954
+        ],
+        "peak_rss_bytes": 49078272
+      },
+      "ratio": 0.6975107853214232
+    }
+  ]
+}

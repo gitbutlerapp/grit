@@ -10,10 +10,11 @@ use crate::binary::{report_grit_commit, tool_version};
 use crate::fixture::{
     bench_work_dir, create_blame_deep_history_repo, create_blame_large_mid_churn_repo,
     create_blame_large_tail_churn_repo, create_deep_leaf_dogfood_repo,
-    create_dense_leaf_dogfood_repo, create_repo, create_repo_with_history, dirty_repo,
-    modify_files_for_diff, modify_rs_files_for_diff, modify_txt_files_for_diff,
-    prepare_add_iteration, prepare_commit_iteration, prepare_dense_leaf_add_iteration,
-    prepare_restore_iteration, scratch_dir, DeepLeafDogfoodSpec, DenseLeafDogfoodSpec,
+    create_dense_leaf_dogfood_repo, create_repo, create_repo_with_history,
+    create_untracked_monorepo_repo, dirty_repo, modify_files_for_diff, modify_rs_files_for_diff,
+    modify_txt_files_for_diff, prepare_add_iteration, prepare_commit_iteration,
+    prepare_dense_leaf_add_iteration, prepare_initial_monorepo_add, prepare_restore_iteration,
+    scratch_dir, DeepLeafDogfoodSpec, DenseLeafDogfoodSpec,
 };
 use crate::hot_path_fixture::{
     load_meta, prepare_merge, prepare_pick, prepare_pick_series, prepare_revert, prepare_switch,
@@ -64,6 +65,7 @@ pub struct Scenario {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PrepareKind {
     AddIteration,
+    InitialMonorepoAdd,
     DenseLeafAddIteration,
     SwitchReset,
     SwitchWideReset,
@@ -152,6 +154,7 @@ fn prepare_command(
 ) -> String {
     let sub = match kind {
         PrepareKind::AddIteration => "prepare-add",
+        PrepareKind::InitialMonorepoAdd => "prepare-initial-monorepo-add",
         PrepareKind::DenseLeafAddIteration => "prepare-dense-leaf-add",
         PrepareKind::SwitchReset => "prepare-switch",
         PrepareKind::SwitchWideReset => "prepare-switch-wide",
@@ -978,6 +981,41 @@ pub fn run_add_suite(
     Ok(build_report(git, grit, timestamp, scenarios))
 }
 
+/// Initial stage-all on a fresh monorepo-shaped tree (#1674 dogfood layout).
+pub fn run_initial_monorepo_add_suite(
+    hyperfine: &Path,
+    git: &Path,
+    grit: &Path,
+    cfg: &RunConfig,
+    file_count: usize,
+    timestamp: time::OffsetDateTime,
+) -> Result<BenchReport> {
+    let repo = create_untracked_monorepo_repo(git, file_count)?;
+    prepare_initial_monorepo_add(&repo)?;
+    let scenario = run_scenario(
+        hyperfine,
+        git,
+        grit,
+        cfg,
+        &Scenario {
+            id: format!("add-initial-monorepo-{file_count}"),
+            group: "add".into(),
+            fixture: format!("monorepo-untracked-{file_count}"),
+            description: format!(
+                "initial stage-all on {file_count} untracked files (20×20×10 monorepo layout, #1674)"
+            ),
+            grit_argv: vec!["add".into()],
+            git_argv: vec!["add".into(), "-A".into()],
+            driver: Driver::Cli,
+            prepare_kind: Some(PrepareKind::InitialMonorepoAdd),
+            grit_via_shell: false,
+            git_via_shell: false,
+        },
+        &repo,
+    )?;
+    Ok(build_report(git, grit, timestamp, vec![scenario]))
+}
+
 /// `grit commit` (stage all + commit) vs `git add -A && git commit` at each file count.
 pub fn run_commit_suite(
     hyperfine: &Path,
@@ -1269,6 +1307,10 @@ pub(crate) fn build_report_with_fixtures(
 /// Shared prepare hook for `add` scenarios (invoked by hyperfine `--prepare`).
 pub fn run_prepare_add(git: &Path) -> Result<()> {
     prepare_add_iteration(&bench_work_dir(), git)
+}
+
+pub fn run_prepare_initial_monorepo_add(_git: &Path) -> Result<()> {
+    prepare_initial_monorepo_add(&bench_work_dir())
 }
 
 /// Hyperfine `--prepare` hook for dense-leaf add (reset index, re-dirty 100 `.txt` files).

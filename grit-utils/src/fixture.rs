@@ -297,6 +297,65 @@ pub fn prepare_add_iteration(dir: &Path, git: &Path) -> Result<()> {
     git_reset_head_unstaged(git, dir)
 }
 
+/// Write the dogfood monorepo tree from issue #1674 (`20×20×10` leaves, `.c` sources).
+pub fn populate_dogfood_monorepo_files(dir: &Path, file_count: usize) -> Result<()> {
+    let leaf_count = 20 * 20 * 10;
+    let per_leaf = file_count.div_ceil(leaf_count);
+    let mut created = 0usize;
+    for a in 0..20 {
+        for b in 0..20 {
+            for c in 0..10 {
+                let leaf = dir.join(format!("mod{a:02}/pkg{b:02}/sub{c}/src"));
+                fs::create_dir_all(&leaf).context("create monorepo leaf")?;
+                for f in 0..per_leaf {
+                    if created >= file_count {
+                        return Ok(());
+                    }
+                    let path = leaf.join(format!("file{f:03}.c"));
+                    fs::write(&path, format!("// {a} {b} {c} {f}\nint x = {created};\n"))
+                        .context("write monorepo source")?;
+                    created += 1;
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Initialized repo with many untracked files and no index (initial `grit add` / `git add -A`).
+pub fn create_untracked_monorepo_repo(init_with: &Path, file_count: usize) -> Result<PathBuf> {
+    let dir = scratch_dir();
+    remove_dir_robust(&dir);
+    fs::create_dir_all(&dir).context("create scratch dir")?;
+    populate_dogfood_monorepo_files(&dir, file_count)?;
+    run_git(init_with, &dir, &["init"])?;
+    Ok(dir)
+}
+
+/// Reset index and loose objects so the next add re-hashes every file (#1674 regression guard).
+pub fn prepare_initial_monorepo_add(dir: &Path) -> Result<()> {
+    let git_dir = dir.join(".git");
+    let index = git_dir.join("index");
+    if index.exists() {
+        fs::remove_file(index).context("remove index")?;
+    }
+    let objects = git_dir.join("objects");
+    if objects.is_dir() {
+        for entry in fs::read_dir(&objects).context("read objects dir")? {
+            let entry = entry.context("objects entry")?;
+            let path = entry.path();
+            if entry.file_type()?.is_dir() {
+                fs::remove_dir_all(&path).context("remove object subdir")?;
+            } else {
+                fs::remove_file(&path).context("remove object file")?;
+            }
+        }
+        fs::create_dir_all(objects.join("info")).context("recreate objects/info")?;
+        fs::create_dir_all(objects.join("pack")).context("recreate objects/pack")?;
+    }
+    Ok(())
+}
+
 /// Dogfood-style deep leaf worktree (issue #1017): CRLF `*.txt`, a large `.bin`, and tracked `.rs` files.
 #[derive(Debug, Clone, Copy)]
 pub struct DeepLeafDogfoodSpec {

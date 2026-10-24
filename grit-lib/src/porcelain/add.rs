@@ -5,7 +5,7 @@
 //! that full [`super::status::status`] requires.
 
 use std::borrow::Cow;
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::Path;
 
@@ -112,27 +112,33 @@ fn index_path_to_string(path: &[u8]) -> String {
         .unwrap_or_else(|_| String::from_utf8_lossy(path).into_owned())
 }
 
-fn index_position_for_path(index: &Index, path: &str) -> usize {
-    index
-        .entries
-        .iter()
-        .position(|e| e.stage() == 0 && index_path_to_string(&e.path) == path)
-        .unwrap_or(usize::MAX)
+fn stage0_path_index_positions(index: &Index) -> HashMap<String, usize> {
+    let mut positions = HashMap::with_capacity(index.entries.len());
+    for (pos, entry) in index.entries.iter().enumerate() {
+        if entry.stage() == 0 {
+            positions
+                .entry(index_path_to_string(&entry.path))
+                .or_insert(pos);
+        }
+    }
+    positions
+}
+
+fn sort_paths_by_index_order(paths: &mut Vec<String>, positions: &HashMap<String, usize>) {
+    paths.sort_by(|a, b| {
+        let pos_a = positions.get(a).copied().unwrap_or(usize::MAX);
+        let pos_b = positions.get(b).copied().unwrap_or(usize::MAX);
+        pos_a.cmp(&pos_b).then_with(|| a.as_str().cmp(b))
+    });
+    paths.dedup();
 }
 
 fn sort_outcome_paths_in_index_order(outcome: &mut StageOutcome, index: &Index) {
-    let sort_paths = |paths: &mut Vec<String>| {
-        paths.sort_by(|a, b| {
-            index_position_for_path(index, a)
-                .cmp(&index_position_for_path(index, b))
-                .then_with(|| a.as_str().cmp(b))
-        });
-        paths.dedup();
-    };
-    sort_paths(&mut outcome.added);
-    sort_paths(&mut outcome.modified);
-    sort_paths(&mut outcome.removed);
-    sort_paths(&mut outcome.intent_to_add);
+    let positions = stage0_path_index_positions(index);
+    sort_paths_by_index_order(&mut outcome.added, &positions);
+    sort_paths_by_index_order(&mut outcome.modified, &positions);
+    sort_paths_by_index_order(&mut outcome.removed, &positions);
+    sort_paths_by_index_order(&mut outcome.intent_to_add, &positions);
 }
 
 fn sort_outcome_paths_lexicographic(outcome: &mut StageOutcome) {
@@ -1547,6 +1553,45 @@ mod tests {
             }
         }
         Some(current.is_valid())
+    }
+
+    #[test]
+    fn sort_outcome_paths_follows_index_entry_order() {
+        let null = empty_blob_oid();
+        let mut index = Index::new();
+        for i in 0..1000 {
+            let path = format!(
+                "mod{:02}/pkg{:02}/sub{}/src/file{:03}.c",
+                i % 20,
+                (i / 20) % 20,
+                (i / 400) % 10,
+                i % 50
+            );
+            index.add_or_replace(conflict_index_entry(&path, 0, null, MODE_REGULAR));
+        }
+        index.sort();
+
+        let mut added: Vec<String> = index
+            .entries
+            .iter()
+            .filter(|e| e.stage() == 0)
+            .map(|e| index_path_to_string(&e.path))
+            .collect();
+        added.reverse();
+
+        let mut outcome = StageOutcome {
+            added,
+            ..StageOutcome::default()
+        };
+        sort_outcome_paths_in_index_order(&mut outcome, &index);
+
+        let expected: Vec<String> = index
+            .entries
+            .iter()
+            .filter(|e| e.stage() == 0)
+            .map(|e| index_path_to_string(&e.path))
+            .collect();
+        assert_eq!(outcome.added, expected);
     }
 
     #[test]
