@@ -104,6 +104,45 @@ fn log_patch_corpus_matches_git_default_algorithm() {
     assert_eq!(grit_out, git_out);
 }
 
+/// The default `commit …` header separates entries (merges included) like `git log -p`.
+#[test]
+fn log_patch_full_header_separates_entries_like_git() {
+    let dir = TempDir::new().expect("tempdir");
+    let root = dir.path();
+    init_corpus_repo(std::path::Path::new("git"), root);
+    git_in(root, &["checkout", "-q", "-b", "side", "HEAD~2"]);
+    std::fs::write(root.join("side.txt"), b"side\n").unwrap();
+    git_in(root, &["add", "side.txt"]);
+    git_in(root, &["commit", "-q", "-m", "side"]);
+    git_in(root, &["checkout", "-q", "main"]);
+    git_in(root, &["merge", "-q", "--no-edit", "side"]);
+
+    let git_out = git_in(root, &["log", "-p", "--no-color", "-4"]);
+    let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
+    let result = rev_list(
+        &repo,
+        &["HEAD".to_owned()],
+        &[],
+        &RevListOptions {
+            max_count: Some(4),
+            ..Default::default()
+        },
+    )
+    .expect("rev-list");
+    let config = repo.config().map(|c| (*c).clone()).unwrap_or_default();
+    let patch_opts = LogPatchOptions::git_default(&config);
+    let mut out = Cursor::new(Vec::new());
+    repo.odb()
+        .with_pack_read_context(|| {
+            write_commits_log_patch(&repo, &mut out, &result.commits, &patch_opts)
+        })
+        .expect("patch");
+    assert_eq!(
+        String::from_utf8_lossy(&out.into_inner()),
+        String::from_utf8_lossy(&git_out)
+    );
+}
+
 fn assert_last_log_patch_matches_git(dir: &std::path::Path) {
     let git_out = git_in(dir, &["log", "-p", "--no-color", "--format=%H", "-1"]);
     let repo = Repository::discover(Some(dir), &RepositoryOptions::empty()).expect("open");
