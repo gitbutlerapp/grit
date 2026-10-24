@@ -7512,15 +7512,24 @@ impl<'r> CommitGraph<'r> {
         self.author_time.get(&oid).copied().unwrap_or(0)
     }
 
-    fn fill_author_time_from_object(&mut self, oid: ObjectId) {
+    fn cache_identity_times_from_commit_object(&mut self, oid: ObjectId) {
         if let Ok(object) = self.repo.odb().read(&oid) {
             if object.kind == ObjectKind::Commit {
                 if let Ok(cref) = CommitRef::parse(&object.data) {
+                    self.committer_time
+                        .insert(oid, cref.committer_unix_seconds_for_ordering());
                     self.author_time
                         .insert(oid, cref.author_unix_seconds_for_ordering());
                 }
             }
         }
+    }
+
+    fn fill_author_time_from_object(&mut self, oid: ObjectId) {
+        if self.author_time.contains_key(&oid) {
+            return;
+        }
+        self.cache_identity_times_from_commit_object(oid);
     }
 
     fn sort_key(&mut self, oid: ObjectId, author: bool) -> i64 {
@@ -7563,8 +7572,11 @@ impl<'r> CommitGraph<'r> {
                 if let Some(tree) = chain.graph_commit_tree(&oid) {
                     self.commit_trees.insert(oid, tree);
                 }
-                self.committer_time.insert(oid, ctime);
                 self.parents.insert(oid, parents);
+                self.cache_identity_times_from_commit_object(oid);
+                if !self.committer_time.contains_key(&oid) {
+                    self.committer_time.insert(oid, ctime);
+                }
                 if !self.skip_subject_cache {
                     self.cache_commit_subject(oid)?;
                 }
@@ -7634,6 +7646,16 @@ impl<'r> CommitGraph<'r> {
             self.subjects.insert(oid, subject);
         }
         Ok(())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn cached_author_time(&self, oid: ObjectId) -> Option<i64> {
+        self.author_time.get(&oid).copied()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn cached_committer_time(&self, oid: ObjectId) -> Option<i64> {
+        self.committer_time.get(&oid).copied()
     }
 }
 
@@ -11657,6 +11679,16 @@ mod line_coverage_tests {
             raw_cref.committer_unix_seconds_for_ordering(),
             1_700_000_002,
             "non-UTF-8 committer line must preserve committer timestamp bytes"
+        );
+        assert_eq!(
+            graph2.cached_author_time(raw_oid),
+            Some(1_700_000_001),
+            "CommitGraph must cache author time from raw ident bytes"
+        );
+        assert_eq!(
+            graph2.cached_committer_time(raw_oid),
+            Some(1_700_000_002),
+            "CommitGraph must cache committer time from raw ident bytes"
         );
         Ok(())
     }

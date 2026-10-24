@@ -1,6 +1,8 @@
 //! v1 JSON Schema generation and registry for `--json` command outcomes.
 
-use std::collections::BTreeMap;
+mod schema_compat;
+
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
@@ -41,27 +43,122 @@ pub fn schemas_dir() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../content/schemas")
 }
 
+/// Published schema index at `content/docs/schemas.md`.
+pub fn schemas_index_path() -> PathBuf {
+    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../content/docs/schemas.md")
+}
+
+/// Every committed schema document: command path → version numbers present on disk.
+pub fn discover_committed_schema_documents() -> BTreeMap<String, BTreeSet<u32>> {
+    use std::collections::{BTreeMap, BTreeSet};
+
+    let mut out: BTreeMap<String, BTreeSet<u32>> = BTreeMap::new();
+    let dir = schemas_dir();
+    for entry in fs::read_dir(&dir).unwrap_or_else(|e| panic!("read schemas dir: {e}")) {
+        let entry = entry.unwrap_or_else(|e| panic!("schema dir entry: {e}"));
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        let Some((command, version)) = name.strip_suffix(".json").and_then(|stem| {
+            stem.rsplit_once(".v")
+                .and_then(|(cmd, ver)| ver.parse::<u32>().ok().map(|v| (cmd.to_owned(), v)))
+        }) else {
+            continue;
+        };
+        out.entry(command).or_default().insert(version);
+    }
+    out
+}
+
+/// Parse `/schemas/<command>/vN.json` links from the schema index table body.
+pub fn parse_schemas_index_links(markdown: &str) -> BTreeMap<String, BTreeSet<u32>> {
+    use std::collections::{BTreeMap, BTreeSet};
+
+    let mut out: BTreeMap<String, BTreeSet<u32>> = BTreeMap::new();
+    for line in markdown.lines() {
+        let Some(rest) = line.strip_prefix("| `") else {
+            continue;
+        };
+        let Some((command, links_cell)) = rest.split_once("` | ") else {
+            continue;
+        };
+        let links = links_cell.strip_suffix(" |").unwrap_or(links_cell);
+        for link in links.split(',') {
+            let Some(url) = link
+                .trim()
+                .strip_prefix('[')
+                .and_then(|s| s.split_once("]("))
+                .map(|(_, url)| url.trim_end_matches(')'))
+            else {
+                continue;
+            };
+            let Some(path) = url.strip_prefix("/schemas/") else {
+                continue;
+            };
+            let Some((cmd, ver)) = path.strip_suffix(".json").and_then(|p| {
+                p.rsplit_once("/v")
+                    .and_then(|(c, v)| v.parse::<u32>().ok().map(|n| (c.to_owned(), n)))
+            }) else {
+                continue;
+            };
+            assert_eq!(
+                cmd, command,
+                "schema index row `{command}` links to `/schemas/{cmd}/`"
+            );
+            out.entry(command.to_owned()).or_default().insert(ver);
+        }
+    }
+    out
+}
+
+/// Per-command schema version: live `current` and older `frozen` contracts on disk.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct CommandSchemaVersions {
+    /// Version regenerated from Rust types (`GRIT_UPDATE_SCHEMAS`, drift tests).
+    pub current: u32,
+    /// Older `$id` URLs kept byte-stable; never overwritten by update mode.
+    pub frozen: &'static [u32],
+}
+
+/// Returns the version table row for `command`.
+pub fn command_schema_versions(command: &str) -> CommandSchemaVersions {
+    match command {
+        "clone" => CommandSchemaVersions {
+            current: 3,
+            frozen: &[1, 2],
+        },
+        "config" | "merge" | "pull" | "pick" | "mv" | "worktree.prune" | "tag" | "remote"
+        | "remote.add" | "remote.set-url" | "remote.remove" | "remote.rename" | "remote.show"
+        | "remote.refs" => CommandSchemaVersions {
+            current: 2,
+            frozen: &[1],
+        },
+        _ => CommandSchemaVersions {
+            current: 1,
+            frozen: &[],
+        },
+    }
+}
+
+/// Stable `$id` URL for a command schema document at `version`.
+pub fn schema_id_for(command: &str, version: u32) -> String {
+    format!("https://grit-scm.com/schemas/{command}/v{version}.json")
+}
+
 /// Stable `$id` URL for a command's v1 schema document.
 pub fn schema_id(command: &str) -> String {
-    format!("https://grit-scm.com/schemas/{command}/v1.json")
+    schema_id_for(command, 1)
 }
 
-/// Stable `$id` URL for a command's v2 schema document.
-pub fn schema_id_v2(command: &str) -> String {
-    format!("https://grit-scm.com/schemas/{command}/v2.json")
+/// File name for a command schema at `version` under [`schemas_dir`].
+pub fn schema_file_name_for(command: &str, version: u32) -> String {
+    format!("{command}.v{version}.json")
 }
 
-/// Commands whose live `--json` shape is versioned separately from the frozen v1 contract.
-const SCHEMA_V2_COMMANDS: &[&str] = &["merge", "pull", "pick"];
-
-/// File name for a command schema under [`schemas_dir`].
+/// File name for a command's live schema document.
 pub fn schema_file_name(command: &str) -> String {
-    format!("{command}.v1.json")
-}
-
-/// File name for a v2 schema document.
-pub fn schema_file_name_v2(command: &str) -> String {
-    format!("{command}.v2.json")
+    schema_file_name_for(command, command_schema_versions(command).current)
 }
 
 fn build_schema_registry() -> Vec<SchemaRegistryEntry> {
@@ -98,7 +195,9 @@ fn build_schema_registry() -> Vec<SchemaRegistryEntry> {
         pick::PickOutcome,
         pull::PullOutcome,
         push::PushOutcome,
-        reflog::{ReflogDeleteOutcome, ReflogExpireOutcome, ReflogListOutcome},
+        reflog::{
+            ReflogDeleteOutcome, ReflogExpireOutcome, ReflogListOutcome, ReflogRefsListOutcome,
+        },
         remote::RemoteOutcome,
         repack::RepackOutcome,
         reset::ResetCliOutcome,
@@ -111,8 +210,8 @@ fn build_schema_registry() -> Vec<SchemaRegistryEntry> {
         show::ShowRunResult,
         skill::SkillOutcome,
         stash::{
-            StashApplyOutcome, StashDropOutcome, StashListOutcome, StashPopOutcome,
-            StashPushOutcome, StashShowOutcome,
+            StashApplyOutcome, StashBranchOutcome, StashClearOutcome, StashDropOutcome,
+            StashListOutcome, StashPopOutcome, StashPushOutcome, StashShowOutcome,
         },
         status::StatusOutcome,
         switch::SwitchOutcome,
@@ -127,11 +226,18 @@ fn build_schema_registry() -> Vec<SchemaRegistryEntry> {
         entry::<CloneOutcome>("clone"),
         entry::<RemoteOutcome>("remote"),
         entry::<RemoteOutcome>("remote.add"),
+        entry::<RemoteOutcome>("remote.set-url"),
+        entry::<RemoteOutcome>("remote.rename"),
         entry::<RemoteOutcome>("remote.refs"),
+        entry::<RemoteOutcome>("remote.remove"),
+        entry::<RemoteOutcome>("remote.show"),
+        entry::<RemoteOutcome>("remote.prune"),
+        entry::<RemoteOutcome>("remote.set-head"),
         entry::<LogOutcome>("log"),
         entry::<RevsOutcome>("revs"),
         entry::<MergeBaseOutcome>("merge-base"),
         entry::<ReflogListOutcome>("reflog"),
+        entry::<ReflogRefsListOutcome>("reflog.list"),
         entry::<ReflogDeleteOutcome>("reflog.delete"),
         entry::<ReflogExpireOutcome>("reflog.expire"),
         entry::<BlameOutcome>("blame"),
@@ -187,6 +293,8 @@ fn build_schema_registry() -> Vec<SchemaRegistryEntry> {
         entry::<StashApplyOutcome>("stash.apply"),
         entry::<StashPopOutcome>("stash.pop"),
         entry::<StashDropOutcome>("stash.drop"),
+        entry::<StashBranchOutcome>("stash.branch"),
+        entry::<StashClearOutcome>("stash.clear"),
         entry::<RestoreCliOutcome>("restore"),
         entry::<FetchOutcome>("fetch"),
         entry::<FetchAllOutcome>("fetch.all"),
@@ -203,6 +311,8 @@ fn build_schema_registry() -> Vec<SchemaRegistryEntry> {
         entry::<WorktreeOutcome>("worktree.prune"),
         entry::<WorktreeOutcome>("worktree.lock"),
         entry::<WorktreeOutcome>("worktree.unlock"),
+        entry::<WorktreeOutcome>("worktree.move"),
+        entry::<WorktreeOutcome>("worktree.repair"),
         entry::<AuthOutcome>("auth"),
         entry::<LogoutOutcome>("auth.logout"),
         entry::<UpdateOutcome>("update"),
@@ -232,6 +342,10 @@ fn schema_for_type<T: JsonSchema>() -> RootSchema {
     schema_for!(T)
 }
 
+fn args_has_flag(args: &[&str], flag: &str) -> bool {
+    args.iter().copied().any(|a| a == flag)
+}
+
 /// Resolve the schema registry key for a `grit` argv slice (no global flags).
 pub fn schema_command_key(args: &[&str]) -> Option<String> {
     let positional: Vec<&str> = args
@@ -245,13 +359,20 @@ pub fn schema_command_key(args: &[&str]) -> Option<String> {
     let key = match positional[0] {
         "remote" => match positional.get(1).copied() {
             Some("add") => "remote.add",
+            Some("set-url") => "remote.set-url",
+            Some("rename") => "remote.rename",
             Some("refs") => "remote.refs",
+            Some("remove") => "remote.remove",
+            Some("show") => "remote.show",
+            Some("prune") => "remote.prune",
+            Some("set-head") => "remote.set-head",
             _ => "remote",
         },
         "reflog" => match positional.get(1).copied() {
             None => "reflog",
             Some("delete") => "reflog.delete",
             Some("expire") => "reflog.expire",
+            Some("list") => "reflog.list",
             _ => return None,
         },
         "stash" => match positional.get(1).copied() {
@@ -267,6 +388,8 @@ pub fn schema_command_key(args: &[&str]) -> Option<String> {
             Some("apply") => "stash.apply",
             Some("pop") => "stash.pop",
             Some("drop") => "stash.drop",
+            Some("branch") => "stash.branch",
+            Some("clear") => "stash.clear",
             _ => return None,
         },
         "bundle" => match positional.get(1).copied() {
@@ -283,6 +406,8 @@ pub fn schema_command_key(args: &[&str]) -> Option<String> {
             Some("prune") => "worktree.prune",
             Some("lock") => "worktree.lock",
             Some("unlock") => "worktree.unlock",
+            Some("move") => "worktree.move",
+            Some("repair") => "worktree.repair",
             _ => return None,
         },
         "auth" => match positional.get(1).copied() {
@@ -294,6 +419,22 @@ pub fn schema_command_key(args: &[&str]) -> Option<String> {
             Some("check") => "ignore.check",
             _ => return None,
         },
+        "notes" => match positional.get(1).copied() {
+            None => "notes",
+            Some("list") => "notes.list",
+            Some("show") => "notes.show",
+            Some("add") => "notes.add",
+            Some("remove") => "notes.remove",
+            _ => return None,
+        },
+        "hooks" => match positional.get(1).copied() {
+            None => "hooks",
+            Some("list") => "hooks.list",
+            Some("run") => "hooks.run",
+            _ => return None,
+        },
+        "fetch" if args_has_flag(args, "--all") => "fetch.all",
+        "rebase" if args_has_flag(args, "--check") => "rebase.check",
         "gc" => match positional.get(1).copied() {
             None => "gc",
             Some("repack") => "gc.repack",
@@ -322,18 +463,160 @@ pub fn schema_command_key(args: &[&str]) -> Option<String> {
     Some(key.to_owned())
 }
 
-/// Load the committed schema document for `command` (v1, or v2 when listed in [`SCHEMA_V2_COMMANDS`]).
+/// Parse a `grit …` invocation from a command doc line (`$ grit …`, `` `grit …` ``, or a heading).
+pub fn parse_doc_grit_argv(line: &str) -> Option<Vec<String>> {
+    let trimmed = line.trim();
+    if trimmed.starts_with("<!--") {
+        return None;
+    }
+    let is_invocation = trimmed.starts_with("$ grit")
+        || trimmed.starts_with('#')
+        || (trimmed.starts_with('`') && trimmed.contains("grit "));
+    if !is_invocation {
+        return None;
+    }
+    let grit_start = trimmed.find("grit ")?;
+    let mut args: Vec<String> = Vec::new();
+    for word in trimmed[grit_start + 5..].split_whitespace() {
+        let cleaned = word.replace('`', "");
+        let clean = cleaned
+            .trim_end_matches(':')
+            .trim_end_matches(',')
+            .trim_end_matches('.');
+        if clean.is_empty() || clean.contains(['[', ']', '(', ')']) {
+            break;
+        }
+        args.push(clean.to_owned());
+    }
+    while args.last().is_some_and(|a| {
+        matches!(
+            a.as_str(),
+            "--json" | "--markdown" | "--filter" | "--quiet" | "--exit-code"
+        )
+    }) {
+        args.pop();
+    }
+    if args.is_empty() {
+        return None;
+    }
+    Some(args)
+}
+
+/// Resolve the schema registry key for a fenced JSON example on a command doc page.
+pub fn schema_key_for_doc_example(
+    page_command: &str,
+    text_before_example: &str,
+    instance: &serde_json::Value,
+) -> Option<String> {
+    if let Some(pos) = text_before_example.rfind("<!-- schema:") {
+        let tail = &text_before_example[pos..];
+        if let Some(end) = tail.find("-->") {
+            let inner = tail["<!-- schema:".len()..end].trim();
+            if !inner.is_empty() {
+                return Some(inner.to_owned());
+            }
+        }
+    }
+    if page_command == "worktree" {
+        if let Some(action) = instance.get("action").and_then(|v| v.as_str()) {
+            return Some(format!("worktree.{action}"));
+        }
+    }
+    if page_command == "history" {
+        if let Some(op) = instance.get("operation").and_then(|v| v.as_str()) {
+            return Some(format!("history.{op}"));
+        }
+    }
+    if page_command == "auth" && instance.get("logged_out").is_some() {
+        return Some("auth.logout".into());
+    }
+    if page_command == "ignore" {
+        return Some("ignore.check".into());
+    }
+    if page_command == "rebase" {
+        if instance.get("check").and_then(|v| v.as_bool()) == Some(true) {
+            return Some("rebase.check".into());
+        }
+    }
+    if page_command == "reflog" {
+        if instance.get("deleted").is_some() {
+            return Some("reflog.delete".into());
+        }
+        if instance.get("entries_pruned").is_some() || instance.get("dry_run").is_some() {
+            return Some("reflog.expire".into());
+        }
+        if instance.get("refs").is_some() && instance.get("entries").is_none() {
+            if instance
+                .get("refs")
+                .and_then(|r| r.as_array())
+                .is_some_and(|refs| refs.iter().all(|e| e.get("ref").is_some()))
+            {
+                return Some("reflog.list".into());
+            }
+        }
+    }
+    if page_command == "stash" {
+        if instance.is_array() {
+            return Some("stash.list".into());
+        }
+        if instance.get("cleared").is_some() {
+            return Some("stash.clear".into());
+        }
+        if instance.get("branch").is_some() {
+            return Some("stash.branch".into());
+        }
+        if instance.get("dropped").is_some() {
+            return Some("stash.pop".into());
+        }
+        if instance.get("index").is_some() && instance.get("conflicts").is_some() {
+            return Some("stash.apply".into());
+        }
+        if instance.get("stat").is_some() || instance.get("patch").is_some() {
+            return Some("stash.show".into());
+        }
+        if instance.get("stashed") == Some(&serde_json::Value::Bool(false)) {
+            return Some("stash".into());
+        }
+        if instance.get("dry_run").and_then(|v| v.as_bool()) == Some(true) {
+            return Some("stash".into());
+        }
+        if instance.get("oid").is_some() || instance.get("stashed_hunks").is_some() {
+            return Some("stash".into());
+        }
+    }
+    for line in text_before_example.lines().rev().take(40) {
+        if let Some(argv) = parse_doc_grit_argv(line) {
+            if argv.first().is_some_and(|c| c != page_command) && !line.contains("--json") {
+                continue;
+            }
+            if let Some(key) =
+                schema_command_key(&argv.iter().map(String::as_str).collect::<Vec<_>>())
+            {
+                return Some(key);
+            }
+        }
+    }
+    schema_command_key(&[page_command])
+}
+
+/// Load the committed live schema document for `command`.
 pub fn load_committed_schema(command: &str) -> serde_json::Value {
-    let path = if SCHEMA_V2_COMMANDS.contains(&command) {
-        schemas_dir().join(schema_file_name_v2(command))
-    } else {
-        schemas_dir().join(schema_file_name(command))
-    };
+    let versions = command_schema_versions(command);
+    load_committed_schema_version(command, versions.current)
+}
+
+/// Load a committed schema file for `command` at an explicit `version`.
+pub fn load_committed_schema_version(command: &str, version: u32) -> serde_json::Value {
+    let path = schemas_dir().join(schema_file_name_for(command, version));
     let text =
         fs::read_to_string(&path).unwrap_or_else(|e| panic!("read schema {}: {e}", path.display()));
     serde_json::from_str(&text).unwrap_or_else(|e| panic!("parse schema {}: {e}", path.display()))
 }
 
+/// Regenerate live schema files under [`schemas_dir`]. Frozen older versions are never written.
+///
+/// When `refuse_breaking` is true (CI update mode), refuses to overwrite the live file if the
+/// change would break the committed contract.
 /// `staged_hunks` / `staged_lines` are omitted on stdout when empty; keep them out of `required`.
 fn patch_add_outcome_optional_map_fields(doc: &mut serde_json::Value) {
     let Some(required) = doc.get_mut("required").and_then(|v| v.as_array_mut()) else {
@@ -342,31 +625,35 @@ fn patch_add_outcome_optional_map_fields(doc: &mut serde_json::Value) {
     required.retain(|field| field != "staged_hunks" && field != "staged_lines");
 }
 
-/// Regenerate every schema file under [`schemas_dir`].
-pub fn write_all_schemas(dir: &Path) {
+pub fn write_all_schemas(dir: &Path, refuse_breaking: bool) {
     if let Err(e) = fs::create_dir_all(dir) {
         panic!("create schemas dir: {e}");
     }
     for entry in schema_registry() {
-        if SCHEMA_V2_COMMANDS.contains(&entry.command) {
-            let schema = (entry.schema)();
-            let json = root_schema_to_document_v2(entry.command, schema);
-            let path = dir.join(schema_file_name_v2(entry.command));
-            let text = match serde_json::to_string_pretty(&json) {
-                Ok(t) => t,
-                Err(e) => panic!("serialize schema: {e}"),
-            };
-            if let Err(e) = fs::write(&path, format!("{text}\n")) {
-                panic!("write schema {}: {e}", path.display());
-            }
-            continue;
-        }
+        let versions = command_schema_versions(entry.command);
         let schema = (entry.schema)();
-        let mut json = root_schema_to_document(entry.command, schema);
+        let mut json = root_schema_to_document_versioned(entry.command, schema, versions.current);
         if entry.command == "add" {
             patch_add_outcome_optional_map_fields(&mut json);
         }
-        let path = dir.join(schema_file_name(entry.command));
+        let path = dir.join(schema_file_name_for(entry.command, versions.current));
+        if refuse_breaking && path.exists() {
+            let committed_text = fs::read_to_string(&path)
+                .unwrap_or_else(|e| panic!("read schema {}: {e}", path.display()));
+            let committed: serde_json::Value = serde_json::from_str(&committed_text)
+                .unwrap_or_else(|e| panic!("parse schema {}: {e}", path.display()));
+            let breaking = schema_compat::breaking_changes(&committed, &json);
+            if !breaking.is_empty() {
+                panic!(
+                    "{}",
+                    schema_compat::format_breaking_changes(
+                        entry.command,
+                        versions.current,
+                        &breaking
+                    )
+                );
+            }
+        }
         let text = match serde_json::to_string_pretty(&json) {
             Ok(t) => t,
             Err(e) => panic!("serialize schema: {e}"),
@@ -377,10 +664,14 @@ pub fn write_all_schemas(dir: &Path) {
     }
 }
 
-fn root_schema_to_document_v2(command: &str, root: RootSchema) -> serde_json::Value {
+fn root_schema_to_document_versioned(
+    command: &str,
+    root: RootSchema,
+    version: u32,
+) -> serde_json::Value {
     let mut value = root_schema_to_document(command, root);
     if let Some(obj) = value.as_object_mut() {
-        obj.insert("$id".into(), schema_id_v2(command).into());
+        obj.insert("$id".into(), schema_id_for(command, version).into());
     }
     value
 }
@@ -395,7 +686,16 @@ fn root_schema_to_document(command: &str, root: RootSchema) -> serde_json::Value
             "$schema".into(),
             "https://json-schema.org/draft/2020-12/schema".into(),
         );
-        obj.insert("$id".into(), schema_id(command).into());
+        obj.insert(
+            "$id".into(),
+            schema_id_for(command, command_schema_versions(command).current).into(),
+        );
+    }
+    if command.starts_with("worktree.") {
+        ensure_worktree_row_required_nullable_lock_reason(&mut value);
+    }
+    if command == "reflog" {
+        optional_property_string_type_only(&mut value, "ReflogListEntry", "action");
     }
     if command == "history.reword"
         || command == "history.drop"
@@ -414,15 +714,38 @@ fn root_schema_to_document(command: &str, root: RootSchema) -> serde_json::Value
     value
 }
 
-/// `schemars` omits `Option` fields from `required`; stable `--json` always emits `head`.
-fn ensure_required_nullable_head(schema: &mut serde_json::Value) {
+/// Optional JSON fields that use `skip_serializing_if` must not allow `"null"` in the schema.
+fn optional_property_string_type_only(
+    schema: &mut serde_json::Value,
+    definition: &str,
+    property: &str,
+) {
+    let Some(defs) = schema
+        .get_mut("definitions")
+        .and_then(|d| d.as_object_mut())
+    else {
+        return;
+    };
+    let Some(entry) = defs.get_mut(definition).and_then(|d| d.as_object_mut()) else {
+        return;
+    };
+    let Some(props) = entry.get_mut("properties").and_then(|p| p.as_object_mut()) else {
+        return;
+    };
+    let Some(prop) = props.get_mut(property).and_then(|p| p.as_object_mut()) else {
+        return;
+    };
+    prop.insert("type".into(), serde_json::Value::String("string".into()));
+}
+
+fn ensure_required_nullable_field(schema: &mut serde_json::Value, field: &str) {
     let Some(obj) = schema.as_object_mut() else {
         return;
     };
     let Some(props) = obj.get("properties").and_then(|p| p.as_object()) else {
         return;
     };
-    if !props.contains_key("head") {
+    if !props.contains_key(field) {
         return;
     }
     let required = obj
@@ -431,9 +754,36 @@ fn ensure_required_nullable_head(schema: &mut serde_json::Value) {
     let Some(arr) = required.as_array_mut() else {
         return;
     };
-    if !arr.iter().any(|v| v.as_str() == Some("head")) {
-        arr.push(serde_json::Value::String("head".into()));
+    if !arr.iter().any(|v| v.as_str() == Some(field)) {
+        arr.push(serde_json::Value::String(field.into()));
         arr.sort_by(|a, b| a.as_str().cmp(&b.as_str()));
+    }
+}
+
+/// `WorktreeRow.lock_reason` is always present in list JSON (null when absent).
+fn ensure_worktree_row_required_nullable_lock_reason(schema: &mut serde_json::Value) {
+    let Some(defs) = schema
+        .get_mut("definitions")
+        .and_then(|d| d.as_object_mut())
+    else {
+        return;
+    };
+    let Some(row) = defs.get_mut("WorktreeRow") else {
+        return;
+    };
+    ensure_required_nullable_field(row, "lock_reason");
+}
+
+/// `schemars` omits `Option` fields from `required`; stable `--json` always emits `head`.
+fn ensure_required_nullable_head(schema: &mut serde_json::Value) {
+    let Some(obj) = schema.as_object_mut() else {
+        return;
+    };
+    let Some(props) = obj.get("properties").and_then(|p| p.as_object()) else {
+        return;
+    };
+    if props.contains_key("head") {
+        ensure_required_nullable_field(schema, "head");
     }
 }
 
@@ -510,6 +860,22 @@ fn collect_json_commands(cmd: &clap::Command, prefix: Option<&str>, out: &mut Ve
 
 /// Insta snapshot file prefix under `grit-cli/tests/snapshots/`.
 pub const SNAPSHOT_FILE_PREFIX: &str = "grit_test_support__cli_fixture__";
+
+/// Snapshot stems skipped by [`json_snapshots_match_schemas`] and the reason why.
+pub const SNAPSHOT_JSON_SCHEMA_SKIP_REASONS: &[(&str, &str)] = &[
+    (
+        "auth_render",
+        "In-process auth render fixture; JSON bundles sign-in and logout envelopes.",
+    ),
+    (
+        "log_json_filter_commits_oid",
+        "`--json --filter` stdout is a filtered slice, not a full command outcome object.",
+    ),
+    (
+        "update_render",
+        "In-process update render fixture; not produced by a single argv invocation.",
+    ),
+];
 
 /// Snapshot stems whose `json.stdout` is not a single command outcome object (render
 /// fixtures, jq filter slices, and similar). Skipped by [`json_snapshots_match_schemas`] only;
@@ -629,7 +995,7 @@ pub fn snapshot_command_args() -> &'static [(&'static str, &'static [&'static st
             "history_reword",
             &["history", "reword", "HEAD~1", "-m", "reworded subject"],
         ),
-        ("history_drop", &["history", "drop", "HEAD~1"]),
+        ("history_drop", &["history", "drop", "HEAD~1", "--dry-run"]),
         (
             "history_squash",
             &["history", "squash", "HEAD~2..HEAD", "--update-refs", "head"],
@@ -649,6 +1015,11 @@ pub fn snapshot_command_args() -> &'static [(&'static str, &'static [&'static st
             "blame_tracked_line_range",
             &["blame", "tracked.txt", "-L", "1,2"],
         ),
+        ("blame_tracked_group", &["blame", "tracked.txt", "--group"]),
+        (
+            "blame_tracked_group_line_range",
+            &["blame", "tracked.txt", "-L", "1,2", "--group"],
+        ),
         ("branch_list", &["branch"]),
         ("branch_create", &["branch", "wip"]),
         ("branch_delete", &["branch", "-d", "delete-me"]),
@@ -656,7 +1027,10 @@ pub fn snapshot_command_args() -> &'static [(&'static str, &'static [&'static st
         ("tag_lightweight", &["tag", "v1.0"]),
         ("tag_annotated", &["tag", "-m", "release note", "v2.0"]),
         ("tag_delete", &["tag", "-d", "drop-me"]),
-        ("notes_list", &["notes"]),
+        ("notes", &["notes"]),
+        ("notes_list", &["notes", "list"]),
+        ("hooks", &["hooks"]),
+        ("stash", &["stash"]),
         ("notes_show", &["notes", "show", "HEAD"]),
         ("notes_add", &["notes", "add", "HEAD", "-m", "hello notes"]),
         ("notes_remove", &["notes", "remove", "HEAD"]),
@@ -668,6 +1042,21 @@ pub fn snapshot_command_args() -> &'static [(&'static str, &'static [&'static st
         (
             "remote_add",
             &["remote", "add", "upstream", "/tmp/upstream.git"],
+        ),
+        (
+            "remote_set_url",
+            &["remote", "set-url", "origin", "https://example.com/new.git"],
+        ),
+        ("remote_rename", &["remote", "rename", "origin", "upstream"]),
+        (
+            "remote_remove",
+            &["remote", "remove", "origin", "--dry-run"],
+        ),
+        ("remote_show", &["remote", "show", "origin", "--no-query"]),
+        ("remote_prune", &["remote", "prune", "origin", "--dry-run"]),
+        (
+            "remote_set_head",
+            &["remote", "set-head", "origin", "--auto", "--dry-run"],
         ),
         (
             "bundle_create",
@@ -724,6 +1113,9 @@ pub fn snapshot_command_args() -> &'static [(&'static str, &'static [&'static st
         ("stash_apply", &["stash", "apply"]),
         ("stash_pop", &["stash", "pop"]),
         ("stash_drop", &["stash", "drop"]),
+        ("stash_branch", &["stash", "branch", "from-stash"]),
+        ("stash_clear", &["stash", "clear", "--force"]),
+        ("stash_clear_preview", &["stash", "clear"]),
         ("ignore_check", &["ignore", "check", "noise.log"]),
         (
             "ignore_check_all",
@@ -744,10 +1136,56 @@ pub fn snapshot_command_args() -> &'static [(&'static str, &'static [&'static st
             &["worktree", "lock", "linked-wt", "--reason", "hold"],
         ),
         ("worktree_unlock", &["worktree", "unlock", "linked-wt"]),
+        (
+            "worktree_move",
+            &["worktree", "move", "linked-wt", "moved-wt"],
+        ),
+        ("worktree_repair", &["worktree", "repair", "moved-wt"]),
         ("hooks_list", &["hooks", "list"]),
         ("hooks_run", &["hooks", "run", "pre-commit"]),
         ("hooks_run_exit_17", &["hooks", "run", "pre-commit"]),
         ("patch_id", &["patch-id", "HEAD"]),
+        ("auth_logout", &["auth", "logout"]),
+        ("fetch_all", &["fetch", "--all"]),
+        (
+            "history_move",
+            &[
+                "history",
+                "move",
+                "HEAD~1",
+                "--before",
+                "HEAD~2",
+                "--dry-run",
+            ],
+        ),
+        ("history_fixup", &["history", "fixup", "HEAD~1"]),
+        ("history_absorb", &["history", "absorb", "--dry-run"]),
+        (
+            "history_rebase",
+            &["history", "rebase", "HEAD~2", "--dry-run"],
+        ),
+        (
+            "history_split",
+            &[
+                "history",
+                "split",
+                "HEAD~1",
+                "-m",
+                "split part",
+                "--",
+                "tracked.txt",
+            ],
+        ),
+        ("history_undo", &["history", "undo", "--dry-run"]),
+        ("rebase_check", &["rebase", "HEAD~2", "--check"]),
+        ("reflog_delete", &["reflog", "delete", "HEAD@{1}"]),
+        ("reflog_expire", &["reflog", "expire", "--expire", "now"]),
+        ("reflog_list", &["reflog", "list"]),
+        ("worktree_prune", &["worktree", "prune"]),
+        ("error_usage", &["branch", "--delete"]),
+        ("error_invalid_pattern", &["log", "--author", "["]),
+        ("error_would_overwrite", &["switch", "br"]),
+        ("error_conflict", &["history", "drop", "HEAD~1"]),
         ("auth_render", &[]),
         ("update_render", &[]),
     ]
@@ -755,6 +1193,7 @@ pub fn snapshot_command_args() -> &'static [(&'static str, &'static [&'static st
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
     use std::env;
     use std::fs;
 
@@ -762,32 +1201,50 @@ mod tests {
 
     use super::*;
 
+    fn parse_schema_file_name(name: &str) -> Option<(String, u32)> {
+        let stem = name.strip_suffix(".json")?;
+        let (command, version_text) = stem.rsplit_once(".v")?;
+        let version = version_text.parse().ok()?;
+        Some((command.to_owned(), version))
+    }
+
+    fn generated_live_schema(entry: &SchemaRegistryEntry) -> Value {
+        let versions = command_schema_versions(entry.command);
+        let schema = (entry.schema)();
+        let mut json = root_schema_to_document_versioned(entry.command, schema, versions.current);
+        if entry.command == "add" {
+            patch_add_outcome_optional_map_fields(&mut json);
+        }
+        json
+    }
+
+    #[test]
+    fn parse_doc_grit_argv_keeps_semantic_flags() {
+        let argv = super::parse_doc_grit_argv("$ grit fetch --all --json").expect("argv");
+        assert_eq!(argv, vec!["fetch", "--all"]);
+        assert_eq!(
+            super::schema_command_key(&["fetch", "--all"]),
+            Some("fetch.all".into())
+        );
+        let check = super::parse_doc_grit_argv("`grit rebase --check --json`:").expect("check");
+        assert_eq!(check, vec!["rebase", "--check"]);
+    }
+
     #[test]
     fn json_schemas_are_current() {
         let dir = schemas_dir();
-        if env::var("GRIT_UPDATE_SCHEMAS").as_deref() == Ok("1") {
-            write_all_schemas(&dir);
+        let update = env::var("GRIT_UPDATE_SCHEMAS").as_deref() == Ok("1");
+        if update {
+            write_all_schemas(&dir, true);
             return;
         }
         let tmp = tempfile::tempdir().expect("tempdir");
-        write_all_schemas(tmp.path());
+        write_all_schemas(tmp.path(), false);
         for entry in schema_registry() {
-            if SCHEMA_V2_COMMANDS.contains(&entry.command) {
-                let committed = dir.join(schema_file_name_v2(entry.command));
-                let generated = tmp.path().join(schema_file_name_v2(entry.command));
-                let committed_text = fs::read_to_string(&committed)
-                    .unwrap_or_else(|e| panic!("read {}: {e}", committed.display()));
-                let generated_text = fs::read_to_string(&generated)
-                    .unwrap_or_else(|e| panic!("read {}: {e}", generated.display()));
-                assert_eq!(
-                    committed_text, generated_text,
-                    "v2 schema drift for `{}`; run GRIT_UPDATE_SCHEMAS=1 cargo test json_schemas_are_current -p grit-cli",
-                    entry.command
-                );
-                continue;
-            }
-            let committed = dir.join(schema_file_name(entry.command));
-            let generated = tmp.path().join(schema_file_name(entry.command));
+            let versions = command_schema_versions(entry.command);
+            let file = schema_file_name_for(entry.command, versions.current);
+            let committed = dir.join(&file);
+            let generated = tmp.path().join(&file);
             let committed_text = fs::read_to_string(&committed)
                 .unwrap_or_else(|e| panic!("read {}: {e}", committed.display()));
             let generated_text = fs::read_to_string(&generated)
@@ -798,6 +1255,89 @@ mod tests {
                 entry.command
             );
         }
+    }
+
+    #[test]
+    fn json_schema_backward_compatible() {
+        let dir = schemas_dir();
+        let mut generated_by_command: BTreeMap<&'static str, Value> = BTreeMap::new();
+        for entry in schema_registry() {
+            generated_by_command.insert(entry.command, generated_live_schema(entry));
+        }
+
+        let mut checked = 0usize;
+        for entry in fs::read_dir(&dir).unwrap_or_else(|e| panic!("read schemas dir: {e}")) {
+            let entry = entry.unwrap_or_else(|e| panic!("schemas dir entry: {e}"));
+            let name = entry.file_name();
+            let Some(name) = name.to_str() else {
+                continue;
+            };
+            let Some((command, version)) = parse_schema_file_name(name) else {
+                continue;
+            };
+            checked += 1;
+            let committed_text = fs::read_to_string(entry.path())
+                .unwrap_or_else(|e| panic!("read {}: {e}", entry.path().display()));
+            let committed: Value = serde_json::from_str(&committed_text)
+                .unwrap_or_else(|e| panic!("parse {}: {e}", entry.path().display()));
+            let versions = command_schema_versions(&command);
+            let reference = if version == versions.current {
+                generated_by_command
+                    .get(command.as_str())
+                    .unwrap_or_else(|| panic!("no registry entry for schema file `{command}`"))
+                    .clone()
+            } else {
+                assert!(
+                    versions.frozen.contains(&version),
+                    "unexpected schema version file `{name}`"
+                );
+                committed.clone()
+            };
+            let breaking = schema_compat::breaking_changes(&committed, &reference);
+            assert!(
+                breaking.is_empty(),
+                "{}",
+                schema_compat::format_breaking_changes(&command, version, &breaking)
+            );
+        }
+        let expected_count: usize = discover_committed_schema_documents()
+            .values()
+            .map(|versions| versions.len())
+            .sum();
+        assert_eq!(
+            checked, expected_count,
+            "expected {expected_count} committed schema files under content/schemas"
+        );
+    }
+
+    #[test]
+    fn json_schema_backward_compatible_catches_status_field_removal() {
+        let committed = load_committed_schema_version("status", 1);
+        let mut generated = generated_live_schema(
+            schema_registry()
+                .iter()
+                .find(|e| e.command == "status")
+                .expect("status registry entry"),
+        );
+        let Some(props) = generated
+            .get_mut("properties")
+            .and_then(Value::as_object_mut)
+        else {
+            panic!("status schema missing properties");
+        };
+        props.remove("branch");
+        let breaking = schema_compat::breaking_changes(&committed, &generated);
+        let message = schema_compat::format_breaking_changes("status", 1, &breaking);
+        assert!(
+            breaking
+                .iter()
+                .any(|c| c.kind == "property_removed" && c.detail.contains("branch")),
+            "expected property_removed for branch, got {breaking:?}"
+        );
+        assert!(
+            message.contains("status") && message.contains("branch"),
+            "message should name command and field: {message}"
+        );
     }
 
     #[test]
@@ -848,6 +1388,166 @@ mod tests {
     fn snapshot_command_args_covers_all_snapshot_files() {
         let snapshot_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/snapshots");
         assert_snapshot_args_cover_disk(&snapshot_dir);
+    }
+
+    #[test]
+    fn snapshot_skip_entries_have_reasons() {
+        let skip: BTreeSet<_> = SNAPSHOT_JSON_SCHEMA_SKIP.iter().copied().collect();
+        let reasons: BTreeSet<_> = SNAPSHOT_JSON_SCHEMA_SKIP_REASONS
+            .iter()
+            .map(|(name, _)| *name)
+            .collect();
+        assert_eq!(
+            skip, reasons,
+            "SNAPSHOT_JSON_SCHEMA_SKIP must match SNAPSHOT_JSON_SCHEMA_SKIP_REASONS stems"
+        );
+        for (stem, reason) in SNAPSHOT_JSON_SCHEMA_SKIP_REASONS {
+            assert!(
+                !reason.is_empty(),
+                "snapshot `{stem}` needs a non-empty skip reason"
+            );
+        }
+    }
+
+    #[test]
+    fn schema_index_lists_every_schema() {
+        let index_text = fs::read_to_string(schemas_index_path())
+            .unwrap_or_else(|e| panic!("read schema index: {e}"));
+        let on_disk = discover_committed_schema_documents();
+        let indexed = parse_schemas_index_links(&index_text);
+        assert_eq!(
+            on_disk, indexed,
+            "schema index must list every committed schema document exactly"
+        );
+        let file_count: usize = on_disk.values().map(|v| v.len()).sum();
+        assert!(
+            file_count >= indexed.values().map(|v| v.len()).sum(),
+            "schema index must reference every on-disk schema file"
+        );
+    }
+
+    fn load_snapshot_json_stdout(name: &str, snapshot_dir: &Path) -> Value {
+        let path = snapshot_dir.join(format!("{SNAPSHOT_FILE_PREFIX}{name}.snap"));
+        let text = fs::read_to_string(&path)
+            .unwrap_or_else(|e| panic!("read snapshot {}: {e}", path.display()));
+        let json_body = text
+            .rsplit_once("\n---\n")
+            .map(|(_, body)| body)
+            .unwrap_or_else(|| panic!("snapshot {name} missing insta separator"));
+        let payload: Value = serde_json::from_str(json_body)
+            .unwrap_or_else(|e| panic!("parse snapshot {}: {e}", path.display()));
+        let stdout = payload["json"]["stdout"]
+            .as_str()
+            .unwrap_or_else(|| panic!("snapshot {name} missing json.stdout"));
+        serde_json::from_str(stdout.trim())
+            .unwrap_or_else(|e| panic!("parse json stdout in {name}: {e}"))
+    }
+
+    fn snapshot_validates_for_command(name: &str, args: &[&str], instance: &Value) -> bool {
+        let schema_key = if instance.get("error").is_some() {
+            "error".to_owned()
+        } else {
+            schema_command_key(args)
+                .unwrap_or_else(|| panic!("no schema key for snapshot {name} args {args:?}"))
+        };
+        let schema_value = load_committed_schema(&schema_key);
+        let compiled = match jsonschema::validator_for(&schema_value) {
+            Ok(v) => v,
+            Err(_) => return false,
+        };
+        compiled.is_valid(instance)
+    }
+
+    #[test]
+    fn every_schema_has_a_validated_snapshot() {
+        use std::collections::{BTreeMap, BTreeSet};
+
+        let snapshot_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/snapshots");
+        assert_snapshot_args_cover_disk(&snapshot_dir);
+
+        let mut covered: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        let mut error_kinds: BTreeSet<String> = BTreeSet::new();
+
+        for name in discover_snapshot_stems(&snapshot_dir) {
+            if name == "auth_render" {
+                let path = snapshot_dir.join(format!("{SNAPSHOT_FILE_PREFIX}{name}.snap"));
+                let text = fs::read_to_string(&path).unwrap();
+                let payload: Value =
+                    serde_json::from_str(text.rsplit_once("\n---\n").unwrap().1).unwrap();
+                for (section, command, args) in [
+                    ("sign_in", "auth", &["auth"][..]),
+                    ("logout", "auth.logout", &["auth", "logout"][..]),
+                ] {
+                    let stdout = payload[section]["json"]["stdout"].as_str().unwrap();
+                    let instance: Value = serde_json::from_str(stdout.trim()).unwrap();
+                    let schema_key = schema_command_key(args).unwrap();
+                    assert_eq!(schema_key, command);
+                    let schema_value = load_committed_schema(command);
+                    let compiled = jsonschema::validator_for(&schema_value).unwrap();
+                    assert!(compiled.is_valid(&instance));
+                    covered
+                        .entry(command.to_owned())
+                        .or_default()
+                        .push(format!("{name}:{section}"));
+                }
+                continue;
+            }
+            if name == "update_render" {
+                let instance = load_snapshot_json_stdout(&name, &snapshot_dir);
+                assert!(snapshot_validates_for_command(
+                    &name,
+                    &["update"],
+                    &instance
+                ));
+                covered
+                    .entry("update".into())
+                    .or_default()
+                    .push(name.clone());
+                continue;
+            }
+            if SNAPSHOT_JSON_SCHEMA_SKIP.contains(&name.as_str()) {
+                continue;
+            }
+            let args = snapshot_args_lookup(&name)
+                .unwrap_or_else(|| panic!("snapshot {name} missing from snapshot_command_args()"));
+            let instance = load_snapshot_json_stdout(&name, &snapshot_dir);
+            assert!(
+                snapshot_validates_for_command(&name, args, &instance),
+                "snapshot `{name}` JSON must validate against its schema"
+            );
+            let command = if instance.get("error").is_some() {
+                "error".to_owned()
+            } else {
+                schema_command_key(args)
+                    .unwrap_or_else(|| panic!("no schema key for snapshot {name} args {args:?}"))
+            };
+            covered.entry(command).or_default().push(name.clone());
+            if let Some(kind) = instance.get("kind").and_then(|k| k.as_str()) {
+                error_kinds.insert(kind.to_owned());
+            }
+        }
+
+        for entry in schema_registry() {
+            if entry.command == "error" {
+                continue;
+            }
+            assert!(
+                covered.contains_key(entry.command),
+                "schema registry command `{}` has no validated output snapshot (covered: {:?})",
+                entry.command,
+                covered.keys().collect::<Vec<_>>()
+            );
+        }
+        assert!(
+            covered.contains_key("error"),
+            "expected at least one snapshot validating against the error schema"
+        );
+        for kind in ["conflict", "would_overwrite", "usage", "invalid_pattern"] {
+            assert!(
+                error_kinds.contains(kind),
+                "missing structured error snapshot for kind `{kind}`"
+            );
+        }
     }
 
     #[test]

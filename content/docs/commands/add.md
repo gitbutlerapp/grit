@@ -78,6 +78,26 @@ $ grit add --lines f.txt:10-15 -- f.txt
 Staged 1 change.
 ```
 
+Grit computes blob object ids with the same plain SHA-1 digests as Git. SHAttered test vectors (for example blobs in the `git/git` history) stage and commit normally; grit does not reject them during ingestion.
+
+## JSON output
+
+Schema: [v1](/schemas/add/v1.json)
+
+Pass `--json` for stable, scripting-friendly output:
+
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `added` | array of strings | New paths staged (repository-relative). |
+| `modified` | array of strings | Modified tracked paths staged. |
+| `removed` | array of strings | Deleted paths staged for removal from the index. |
+| `intent_to_add` | array of strings | Paths recorded with intent-to-add (`-N` / `--intent-to-add`). |
+| `dry_run` | boolean | `true` when `--dry-run` was passed. |
+| `count` | number | Total paths touched (same as `staged`; kept for older scripts). |
+| `staged` | number | How many paths were staged. |
+| `staged_hunks` | object | When `--hunks` staged something: path → hunk id lists. Omitted when empty. |
+| `staged_lines` | object | When `--lines` staged something: path → `start-end` range strings. Omitted when empty. |
+
 Example:
 
 ```json
@@ -91,10 +111,6 @@ Example:
   "staged": 2
 }
 ```
-
-When `--hunks` or `--lines` staged something, `staged_hunks` or `staged_lines` maps path → ids or ranges appear on stdout; they are omitted when empty.
-
-Grit computes blob object ids with the same plain SHA-1 digests as Git. SHAttered test vectors (for example blobs in the `git/git` history) stage and commit normally; grit does not reject them during ingestion.
 
 ## Markdown output
 
@@ -110,6 +126,16 @@ When there is nothing to stage and you ran `grit add` with no paths:
 ```text
 Nothing to stage — working tree clean.
 ```
+
+## Exit status
+
+| Code | Meaning |
+| ---: | --- |
+| `0` | Success ([`success`](../exit-codes/)). |
+| `1` | Command failed ([`failure`](../exit-codes/)). |
+| `2` | Invalid flags or arguments ([`usage`](../exit-codes/)). |
+
+See [Exit codes](../exit-codes/) for shared rules and structured `--json` `kind` values.
 
 ## See also
 
