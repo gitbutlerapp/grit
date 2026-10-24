@@ -11233,6 +11233,9 @@ pub grit_lib::path_validate::PathComponentError::HfsDotGit
 pub grit_lib::path_validate::PathComponentError::NtfsBackslash
 pub grit_lib::path_validate::PathComponentError::NtfsDotGit
 pub grit_lib::path_validate::PathComponentError::NtfsDriveOrStream
+pub grit_lib::path_validate::PathComponentError::NtfsIllegalCharacter
+pub grit_lib::path_validate::PathComponentError::NtfsReservedDeviceName
+pub grit_lib::path_validate::PathComponentError::NtfsTrailingSpaceOrPeriod
 pub grit_lib::path_validate::PathComponentError::SymlinkedDotGitattributes
 pub grit_lib::path_validate::PathComponentError::SymlinkedDotGitignore
 pub grit_lib::path_validate::PathComponentError::SymlinkedDotGitmodules

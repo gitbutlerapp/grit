@@ -22,7 +22,7 @@ Object fsck always enables both flags via [`ProtectOptions::fsck`](https://docs.
 
 ## Validating components and paths
 
-[`validate_component`](https://docs.rs/grit-lib/latest/grit_lib/path_validate/fn.validate_component.html) checks a single tree/index segment (no `/` inside). Pass the Git mode and a [`PathValidationKind`](https://docs.rs/grit-lib/latest/grit_lib/path_validate/enum.PathValidationKind.html). Worktree population and checkout use **`Worktree`** (Git `verify_path` on this platform: NTFS drive/backslash-dotdot syntax only on Windows; symlink names reject **`.gitmodules`** only). Object fsck uses **`Fsck`** (all four symlink dot-files):
+[`validate_component`](https://docs.rs/grit-lib/latest/grit_lib/path_validate/fn.validate_component.html) checks a single tree/index segment (no `/` inside). Pass the Git mode and a [`PathValidationKind`](https://docs.rs/grit-lib/latest/grit_lib/path_validate/enum.PathValidationKind.html). Worktree population and checkout use **`Worktree`**. On Windows with `core.protectNTFS` (default), each segment is checked with Git’s `is_valid_win32_path` rules: forbidden characters (`:*?"<>|` and controls), trailing spaces or periods (except `.` and `..`), DOS device names (`CON`, `AUX`, `COM1`, …), plus NTFS drive prefixes and backslash-`.git` spellings. Symlink names reject **`.gitmodules`** on worktree; object fsck uses **`Fsck`** (all four symlink dot-files):
 
 ```rust
 use grit_lib::path_validate::{validate_component, EntryMode, PathValidationKind, ProtectOptions};
@@ -49,7 +49,7 @@ validate_component(
 
 ## Errors
 
-[`PathComponentError`](https://docs.rs/grit-lib/latest/grit_lib/path_validate/enum.PathComponentError.html) is a typed, non-exhaustive enum (empty, `.`, `..`, slash/NUL, ASCII and platform `.git` aliases, NTFS backslash/drive/stream spellings, and symlinked dot-files). Checkout and index population return [`Error::InvalidPathComponent`](https://docs.rs/grit-lib/latest/grit_lib/error/enum.Error.html#variant.InvalidPathComponent) with the full path and reason. User-facing `add`/`mv` path arguments use the same typed error; legacy [`Error::InvalidPath`](https://docs.rs/grit-lib/latest/grit_lib/error/enum.Error.html) remains for empty or escaping paths.
+[`PathComponentError`](https://docs.rs/grit-lib/latest/grit_lib/path_validate/enum.PathComponentError.html) is a typed, non-exhaustive enum (empty, `.`, `..`, slash/NUL, ASCII and platform `.git` aliases, NTFS backslash/drive/stream spellings, NTFS illegal characters, trailing space/period, reserved DOS device names, and symlinked dot-files). Checkout and index population return [`Error::InvalidPathComponent`](https://docs.rs/grit-lib/latest/grit_lib/error/enum.Error.html#variant.InvalidPathComponent) with the full path and reason. User-facing `add`/`mv` path arguments use the same typed error; legacy [`Error::InvalidPath`](https://docs.rs/grit-lib/latest/grit_lib/error/enum.Error.html) remains for empty or escaping paths.
 
 ## Related
 
