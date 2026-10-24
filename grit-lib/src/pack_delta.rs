@@ -933,6 +933,7 @@ fn write_prepared_pack(
     Ok(crate::pack_objects::SerializedDeltaPack {
         bytes: buf,
         index_rows,
+        staging_path: None,
     })
 }
 

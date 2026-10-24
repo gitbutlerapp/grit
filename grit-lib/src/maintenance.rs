@@ -36,7 +36,7 @@ use crate::gc::{
     PruneStats,
 };
 use crate::git_date::approx::approxidate_careful_at;
-use crate::index_pack::{install_pack_bytes, IngestPackOptions};
+use crate::index_pack::{install_pack_bytes, install_pack_path, IngestPackOptions};
 use crate::midx::{
     clear_pack_midx_state, write_multi_pack_index_with_options, MidxBitmapWriteOutcome,
     WriteMultiPackIndexOptions, WriteMultiPackIndexResult,
@@ -81,7 +81,8 @@ pub struct RepackOptions {
     pub keep_unreachable: bool,
     /// Worker threads for pack indexing (`None` reads `pack.threads` / CPU count).
     pub threads: Option<usize>,
-    /// Override pack-objects settings; `None` uses [`PackBuildOptions::for_local_copy`].
+    /// Override pack-objects settings; `None` picks [`PackBuildOptions::for_repack_rewrite`] when
+    /// consolidating existing packs and [`PackBuildOptions::for_local_copy`] for loose-only builds.
     pub pack_build: Option<PackBuildOptions>,
     /// Config/environment for ingest and pack threads (defaults to repo config).
     pub merged_config: Option<ConfigSet>,
@@ -748,19 +749,19 @@ fn repack_detail(repo: &Repository, opts: &RepackOptions) -> Result<RepackDetail
         .merged_config
         .clone()
         .or_else(|| repo.config().ok().map(|c| (*c).clone()));
-    let pack_opts = opts.pack_build.unwrap_or_else(|| {
-        if opts.incremental {
+    let mut pack_opts = opts.pack_build.unwrap_or_else(|| {
+        if opts.incremental || packs_before == 0 || opts.force_recompress {
             PackBuildOptions::for_local_copy(cfg.as_ref())
-        } else if packs_before > 0 && loose_before == 0 && !opts.force_recompress {
-            // Repack consolidated on-disk pack(s) with nothing loose: reuse pack bytes
-            // (Git `--window=0`), not a full delta search over every stored object.
-            PackBuildOptions::for_repack_rewrite(cfg.as_ref())
+        } else if loose_before > 0 {
+            PackBuildOptions::for_repack_with_loose(cfg.as_ref())
         } else {
-            // Loose objects and/or forced full recompression: delta consolidation like Git
-            // `repack -adf` on loose or `-f` on existing packs.
-            PackBuildOptions::for_local_copy(cfg.as_ref())
+            // Existing packs: reuse on-disk deltas (Git repack -ad without -f).
+            PackBuildOptions::for_repack_rewrite(cfg.as_ref())
         }
     });
+    if !opts.incremental && packs_before > 0 && loose_before == 0 {
+        pack_opts.stream_verbatim_single_pack = true;
+    }
 
     let run_incremental = opts.incremental;
 
@@ -797,17 +798,24 @@ fn repack_detail(repo: &Repository, opts: &RepackOptions) -> Result<RepackDetail
         SerializedDeltaPack {
             bytes: Vec::new(),
             index_rows: Vec::new(),
+            staging_path: None,
         }
     } else if run_incremental {
         SerializedDeltaPack {
             bytes: pack_loose_objects_incremental(odb, &pack_opts, opts.threads)?,
             index_rows: Vec::new(),
+            staging_path: None,
         }
     } else {
         build_repack_pack(odb, &roots, opts.keep_unreachable, &pack_opts, opts.threads)?
     };
-    let pack_bytes = built_pack.bytes;
-    if pack_bytes.is_empty() {
+    let pack_bytes_len = built_pack
+        .staging_path
+        .as_ref()
+        .and_then(|p| std::fs::metadata(p).ok())
+        .map(|m| m.len() as usize)
+        .unwrap_or_else(|| built_pack.bytes.len());
+    if pack_bytes_len == 0 {
         return Ok(RepackDetail {
             report,
             prune_packed_loose: 0,
@@ -819,7 +827,7 @@ fn repack_detail(repo: &Repository, opts: &RepackOptions) -> Result<RepackDetail
     let mut prune_packed_loose = 0usize;
     let mut unreachable_loose = PruneStats::default();
     let pack_trailer_len = 12 + odb.hash_algo().len();
-    if pack_bytes.len() > pack_trailer_len {
+    if pack_bytes_len > pack_trailer_len {
         clear_pack_midx_state(&pack_dir)?;
 
         let trusted_rows = (!built_pack.index_rows.is_empty()).then_some(built_pack.index_rows);
@@ -833,7 +841,11 @@ fn repack_detail(repo: &Repository, opts: &RepackOptions) -> Result<RepackDetail
             skip_post_index_verify: trusted_rows.is_some(),
             ..IngestPackOptions::default()
         };
-        let ingested = install_pack_bytes(pack_bytes, odb, &ingest_opts)?;
+        let ingested = if let Some(staging) = built_pack.staging_path.as_ref() {
+            install_pack_path(staging, odb, &ingest_opts)?
+        } else {
+            install_pack_bytes(built_pack.bytes, odb, &ingest_opts)?
+        };
         report.packs_written = 1;
         report.objects = ingested.object_ids.len();
 

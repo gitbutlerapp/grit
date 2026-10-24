@@ -1,5 +1,6 @@
 //! Repack/gc compatibility: grit maintenance vs system `git fsck`.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -14,7 +15,7 @@ use grit_lib::maintenance::{
 use grit_lib::objects::pack::{clear_pack_cache, test_pack_cache_guard};
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::porcelain::add::stage_for_commit;
-use grit_lib::porcelain::commit::{create_commit, CommitRequest, HookPolicy};
+use grit_lib::porcelain::commit::{create_commit, CommitRequest};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_test_support::git_fsck;
@@ -1065,23 +1066,21 @@ fn gc_twice_on_single_pack_keeps_loose_count_zero() {
 }
 
 #[test]
-fn explicit_repack_on_single_pack_rebuilds_with_default_options() {
+fn explicit_repack_rewrites_single_pack_with_no_loose() {
     let dir = TempDir::new().expect("tempdir");
     git(dir.path(), &["init", "-b", "main"]);
     git(dir.path(), &["commit", "--allow-empty", "-m", "c1"]);
     git(dir.path(), &["repack", "-a", "-d"]);
-    assert_eq!(git_pack_count(&dir.path().join(".git")), 1);
-    assert_eq!(git_loose_object_count(dir.path()), 0);
-
     let grit_copy = TempDir::new().expect("grit");
     duplicate_repo_tree(dir.path(), grit_copy.path());
     let repo =
         Repository::discover(Some(grit_copy.path()), &RepositoryOptions::empty()).expect("open");
-    let stats = repack_all(&repo, &RepackOptions::default()).expect("grit repack");
+    let stats = repack_all(&repo, &RepackOptions::default()).expect("repack");
     assert!(
         stats.objects_packed.is_some_and(|n| n > 0),
-        "explicit grit repack must rebuild even on a single-pack repo (auto_skip defaults false)"
+        "explicit repack must rewrite into a new pack even with one pack and no loose objects"
     );
+    assert_eq!(git_pack_count(&grit_copy.path().join(".git")), 1);
     git_fsck(grit_copy.path(), true);
 }
 
@@ -1234,6 +1233,256 @@ fn gc_with_write_bitmaps_on_single_pack_writes_bitmap_like_git() {
         pack_has_bitmap(&git_copy.path().join(".git")),
         "git gc fixture must write bitmap"
     );
+    git_fsck(grit_copy.path(), true);
+}
+
+#[test]
+fn full_gc_auto_skips_repack_but_explicit_repack_runs_on_single_pack() {
+    let dir = TempDir::new().expect("tempdir");
+    git(dir.path(), &["init", "-b", "main"]);
+    git(dir.path(), &["commit", "--allow-empty", "-m", "c1"]);
+    git(dir.path(), &["repack", "-a", "-d"]);
+
+    let grit_gc = TempDir::new().expect("gc copy");
+    duplicate_repo_tree(dir.path(), grit_gc.path());
+    let repo_gc =
+        Repository::discover(Some(grit_gc.path()), &RepositoryOptions::empty()).expect("open");
+    let gc_stats = gc(&repo_gc, &GcOptions::full_run(false, 1_700_000_000)).expect("gc");
+    assert!(
+        gc_stats.repack.objects_packed.is_none(),
+        "full grit gc must auto-skip repack on a single pack with no loose objects"
+    );
+
+    let grit_repack = TempDir::new().expect("repack copy");
+    duplicate_repo_tree(dir.path(), grit_repack.path());
+    let repo_repack =
+        Repository::discover(Some(grit_repack.path()), &RepositoryOptions::empty()).expect("open");
+    let repack_stats = repack_all(&repo_repack, &RepackOptions::default()).expect("repack");
+    assert!(
+        repack_stats.objects_packed.is_some_and(|n| n > 0),
+        "explicit repack must run even when full gc would skip"
+    );
+}
+
+#[test]
+fn repack_with_existing_pack_and_loose_uses_rewrite_not_full_delta_search() {
+    let _pack_guard = test_pack_cache_guard();
+    let dir = TempDir::new().expect("tempdir");
+    git(dir.path(), &["init", "-b", "main"]);
+    git(dir.path(), &["config", "gc.auto", "1"]);
+    std::fs::write(dir.path().join("blob"), b"v1\n").expect("write");
+    git(dir.path(), &["add", "blob"]);
+    git(dir.path(), &["commit", "-m", "c1"]);
+    git(dir.path(), &["repack", "-a", "-d"]);
+    std::fs::write(dir.path().join("blob"), b"v1\nextra\n").expect("write");
+    git(dir.path(), &["add", "blob"]);
+    git(dir.path(), &["commit", "-m", "c2"]);
+    assert!(
+        git_loose_object_count(dir.path()) > 0,
+        "fixture must have loose objects after second commit"
+    );
+    assert_eq!(git_pack_count(&dir.path().join(".git")), 1);
+
+    let grit_copy = TempDir::new().expect("grit");
+    duplicate_repo_tree(dir.path(), grit_copy.path());
+    let repo =
+        Repository::discover(Some(grit_copy.path()), &RepositoryOptions::empty()).expect("open");
+    let start = std::time::Instant::now();
+    let stats = repack_all(&repo, &RepackOptions::default()).expect("repack");
+    let elapsed = start.elapsed();
+    assert!(
+        stats.objects_packed.is_some_and(|n| n > 0),
+        "repack must consolidate loose objects into the pack"
+    );
+    assert_eq!(git_pack_count(&grit_copy.path().join(".git")), 1);
+    assert_eq!(git_loose_object_count(grit_copy.path()), 0);
+    assert!(
+        elapsed.as_secs() < 30,
+        "repack with existing pack + loose must use rewrite/reuse (took {:.2}s)",
+        elapsed.as_secs_f64()
+    );
+    git_fsck(grit_copy.path(), true);
+}
+
+/// Reachable packed delta whose base is not in the repack output set must not be copied verbatim.
+#[test]
+fn repack_materializes_delta_when_base_unreachable() {
+    let dir = repo_with_loose_only_edited_blob_history();
+    git(dir.path(), &["repack", "-a", "-d"]);
+
+    let pack_path = std::fs::read_dir(dir.path().join(".git/objects/pack"))
+        .expect("pack dir")
+        .filter_map(|e| e.ok())
+        .find(|e| e.path().extension().is_some_and(|x| x == "pack"))
+        .expect("pack")
+        .path();
+    let verify_before = Command::new("git")
+        .args(["verify-pack", "-v"])
+        .arg(&pack_path)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("verify-pack");
+    assert!(verify_before.status.success());
+    let verify_text = String::from_utf8_lossy(&verify_before.stdout);
+
+    let mut blob_oid = None;
+    for line in verify_text.lines() {
+        let fields: Vec<_> = line.split_whitespace().collect();
+        if fields.len() != 7 || fields[1] != "blob" {
+            continue;
+        }
+        let target = fields[0];
+        let base = fields[6];
+        let commits = Command::new("git")
+            .current_dir(dir.path())
+            .args(["rev-list", "--all"])
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .output()
+            .expect("rev-list all");
+        if !commits.status.success() {
+            continue;
+        }
+        let mut tree = String::new();
+        for commit in String::from_utf8_lossy(&commits.stdout).lines() {
+            let commit = commit.trim();
+            if commit.is_empty() {
+                continue;
+            }
+            let ls = Command::new("git")
+                .current_dir(dir.path())
+                .args(["ls-tree", "-r", commit])
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_CONFIG_SYSTEM", "/dev/null")
+                .output()
+                .expect("ls-tree");
+            if !ls.status.success() {
+                continue;
+            }
+            if String::from_utf8_lossy(&ls.stdout).contains(target) {
+                let tree_out = Command::new("git")
+                    .current_dir(dir.path())
+                    .args(["rev-parse", &format!("{commit}^{{tree}}")])
+                    .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                    .env("GIT_CONFIG_SYSTEM", "/dev/null")
+                    .output()
+                    .expect("tree");
+                if tree_out.status.success() {
+                    tree = String::from_utf8_lossy(&tree_out.stdout).trim().to_string();
+                    break;
+                }
+            }
+        }
+        if tree.is_empty() {
+            continue;
+        }
+        let orphan_tip = Command::new("git")
+            .current_dir(dir.path())
+            .args(["commit-tree", &tree, "-m", "orphan delta tip"])
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .output()
+            .expect("commit-tree");
+        assert!(orphan_tip.status.success());
+        let orphan_ref = String::from_utf8_lossy(&orphan_tip.stdout)
+            .trim()
+            .to_string();
+        git(dir.path(), &["update-ref", "refs/heads/main", &orphan_ref]);
+        git(
+            dir.path(),
+            &[
+                "reflog",
+                "expire",
+                "--expire=now",
+                "--expire-unreachable=now",
+                "--all",
+            ],
+        );
+        let reachable = Command::new("git")
+            .current_dir(dir.path())
+            .args(["rev-list", "--objects", "HEAD"])
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .output()
+            .expect("rev-list");
+        assert!(reachable.status.success());
+        let reachable_now: HashSet<String> = String::from_utf8_lossy(&reachable.stdout)
+            .lines()
+            .filter_map(|line| line.split_whitespace().next())
+            .map(str::to_string)
+            .collect();
+        if reachable_now.contains(target) && !reachable_now.contains(base) {
+            blob_oid = Some(target.to_string());
+            break;
+        }
+    }
+    let blob_oid = blob_oid.unwrap_or_else(|| {
+        panic!("no reachable delta with unreachable base in pack:\n{verify_text}")
+    });
+
+    let grit_copy = TempDir::new().expect("grit");
+    duplicate_repo_tree(dir.path(), grit_copy.path());
+    let expected_payload = Command::new("git")
+        .current_dir(grit_copy.path())
+        .args(["cat-file", "blob", &blob_oid])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("cat-file before")
+        .stdout;
+    let repo =
+        Repository::discover(Some(grit_copy.path()), &RepositoryOptions::empty()).expect("open");
+    let mut opts = RepackOptions::default();
+    opts.keep_unreachable = false;
+    repack_all(&repo, &opts).expect("grit repack");
+    clear_pack_cache_after_disk_maintenance();
+    let cat = Command::new("git")
+        .current_dir(grit_copy.path())
+        .args(["cat-file", "blob", &blob_oid])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("cat-file");
+    assert!(
+        cat.status.success(),
+        "blob must remain readable after repack"
+    );
+    assert_eq!(cat.stdout, expected_payload, "blob payload must round-trip");
+    git_fsck(grit_copy.path(), true);
+}
+
+#[test]
+fn gc_full_run_skips_repack_on_single_pack_with_no_loose() {
+    let dir = TempDir::new().expect("tempdir");
+    git(dir.path(), &["init", "-b", "main"]);
+    git(dir.path(), &["commit", "--allow-empty", "-m", "c1"]);
+    git(dir.path(), &["repack", "-a", "-d"]);
+    let grit_copy = TempDir::new().expect("grit");
+    duplicate_repo_tree(dir.path(), grit_copy.path());
+    let pack_dir = grit_copy.path().join(".git/objects/pack");
+    let pack_mtime_before = std::fs::read_dir(&pack_dir)
+        .expect("pack dir")
+        .filter_map(|e| e.ok())
+        .find(|e| e.path().extension().is_some_and(|x| x == "pack"))
+        .and_then(|e| e.metadata().ok().map(|m| m.modified().ok()))
+        .flatten()
+        .expect("pack mtime");
+    let repo =
+        Repository::discover(Some(grit_copy.path()), &RepositoryOptions::empty()).expect("open");
+    let stats = gc(&repo, &GcOptions::full_run(false, 1_700_000_000)).expect("grit gc");
+    assert!(
+        stats.repack.objects_packed.is_none(),
+        "single-pack gc with auto_skip must not rewrite the pack"
+    );
+    let pack_mtime_after = std::fs::read_dir(&pack_dir)
+        .expect("pack dir")
+        .filter_map(|e| e.ok())
+        .find(|e| e.path().extension().is_some_and(|x| x == "pack"))
+        .and_then(|e| e.metadata().ok().map(|m| m.modified().ok()))
+        .flatten()
+        .expect("pack mtime");
+    assert_eq!(pack_mtime_before, pack_mtime_after);
     git_fsck(grit_copy.path(), true);
 }
 
