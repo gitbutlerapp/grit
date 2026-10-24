@@ -429,6 +429,33 @@ impl<'repo> RevWalk<'repo> {
                 return Ok(list.len());
             }
         }
+        if !parsed.negative.is_empty()
+            && parsed.symmetric_left.is_none()
+            && options.paths.is_empty()
+            && options.refs.is_empty()
+            && options.skip == 0
+            && options.limit.is_none()
+            && !options.reverse
+            && options
+                .commit_filter
+                .as_ref()
+                .is_none_or(|f| !f.is_active())
+            && options.pickaxe.is_none()
+            && !options.graph
+        {
+            let (include, exclude) = resolve_log_walk_tips_and_hide(repo, tokens, options)?;
+            let (min_parents, max_parents) = merge_filter_to_parent_bounds(options.merges);
+            let filter = ReachableCountFilter {
+                min_parents,
+                max_parents,
+                first_parent_only: options.first_parent,
+                since: options.since,
+                until: options.until,
+            };
+            return count_commits_reachable_excluding_ancestors_of(
+                repo, &include, &exclude, filter,
+            );
+        }
         let opts = rev_list_options_from_walk(repo, options, &parsed, all_refs, true)?;
         let result = rev_list(repo, &positive, &parsed.negative, &opts)?;
         commit_count_from_result(result)

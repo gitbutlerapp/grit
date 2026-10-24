@@ -130,6 +130,35 @@ fn count_matches_git_rev_list_count() {
     assert_eq!(git_n, git_with);
 }
 
+fn linear_git_commits(worktree: &Path, count: usize) {
+    for i in 0..count {
+        fs::write(worktree.join("f"), format!("{i}")).expect("write");
+        git(worktree, &["add", "f"]);
+        git(worktree, &["commit", "-m", &format!("c{i}")]);
+    }
+}
+
+#[test]
+fn count_two_dot_range_is_bounded_not_full_history() {
+    let hist = HistoryRepo::init();
+    let wt = hist.worktree();
+    linear_git_commits(wt, 100);
+    let repo = open_grit(wt);
+    let opts = RevWalkListOptions::default();
+
+    let git_range = git_rev_list_count(wt, &["HEAD~20..HEAD"]);
+    let grit_range = grit_rev_list_count(&repo, &["HEAD~20..HEAD"], &opts);
+    let grit_full = grit_rev_list_count(&repo, &["HEAD"], &opts);
+
+    assert_eq!(git_range, 20);
+    assert_eq!(grit_range, git_range);
+    assert_ne!(
+        grit_range, grit_full,
+        "range count must not walk full history"
+    );
+    assert_eq!(grit_full, git_rev_list_count(wt, &["HEAD"]));
+}
+
 #[test]
 fn merge_bases_match_git_merge_base_all() {
     let hist = HistoryRepo::init();
