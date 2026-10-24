@@ -52,7 +52,23 @@ pub fn schema_id_v2(command: &str) -> String {
 }
 
 /// Commands whose live `--json` shape is versioned separately from the frozen v1 contract.
-const SCHEMA_V2_COMMANDS: &[&str] = &["merge", "pull", "pick"];
+const SCHEMA_V2_COMMANDS: &[&str] = &[
+    "clone",
+    "config",
+    "merge",
+    "mv",
+    "pick",
+    "pull",
+    "remote",
+    "remote.add",
+    "remote.refs",
+    "remote.remove",
+    "remote.rename",
+    "remote.set-url",
+    "remote.show",
+    "tag",
+    "worktree.prune",
+];
 
 /// File name for a command schema under [`schemas_dir`].
 pub fn schema_file_name(command: &str) -> String {
@@ -320,6 +336,141 @@ pub fn schema_command_key(args: &[&str]) -> Option<String> {
         cmd => cmd,
     };
     Some(key.to_owned())
+}
+
+/// Parse a `grit …` invocation from a command doc line (`$ grit …`, `` `grit …` ``, or a heading).
+pub fn parse_doc_grit_argv(line: &str) -> Option<Vec<String>> {
+    let trimmed = line.trim();
+    if trimmed.starts_with("<!--") {
+        return None;
+    }
+    let is_invocation = trimmed.starts_with("$ grit")
+        || trimmed.starts_with('#')
+        || (trimmed.starts_with('`') && trimmed.contains("grit "));
+    if !is_invocation {
+        return None;
+    }
+    let grit_start = trimmed.find("grit ")?;
+    let mut args: Vec<String> = Vec::new();
+    for word in trimmed[grit_start + 5..].split_whitespace() {
+        let cleaned = word.replace('`', "");
+        let clean = cleaned
+            .trim_end_matches(':')
+            .trim_end_matches(',')
+            .trim_end_matches('.');
+        if clean.is_empty() || clean.contains(['[', ']', '(', ')']) {
+            break;
+        }
+        args.push(clean.to_owned());
+    }
+    while args.last().is_some_and(|a| {
+        matches!(
+            a.as_str(),
+            "--json" | "--markdown" | "--filter" | "--quiet" | "--exit-code"
+        )
+    }) {
+        args.pop();
+    }
+    if args.is_empty() {
+        return None;
+    }
+    Some(args)
+}
+
+/// Resolve the schema registry key for a fenced JSON example on a command doc page.
+pub fn schema_key_for_doc_example(
+    page_command: &str,
+    text_before_example: &str,
+    instance: &serde_json::Value,
+) -> Option<String> {
+    if let Some(pos) = text_before_example.rfind("<!-- schema:") {
+        let tail = &text_before_example[pos..];
+        if let Some(end) = tail.find("-->") {
+            let inner = tail["<!-- schema:".len()..end].trim();
+            if !inner.is_empty() {
+                return Some(inner.to_owned());
+            }
+        }
+    }
+    if page_command == "worktree" {
+        if let Some(action) = instance.get("action").and_then(|v| v.as_str()) {
+            return Some(format!("worktree.{action}"));
+        }
+    }
+    if page_command == "history" {
+        if let Some(op) = instance.get("operation").and_then(|v| v.as_str()) {
+            return Some(format!("history.{op}"));
+        }
+    }
+    if page_command == "auth" && instance.get("logged_out").is_some() {
+        return Some("auth.logout".into());
+    }
+    if page_command == "ignore" {
+        return Some("ignore.check".into());
+    }
+    if page_command == "reflog" {
+        if instance.get("deleted").is_some() {
+            return Some("reflog.delete".into());
+        }
+        if instance.get("entries_pruned").is_some() {
+            return Some("reflog.expire".into());
+        }
+        if instance.get("refs").is_some() && instance.get("entries").is_none() {
+            return Some("reflog.list".into());
+        }
+    }
+    if page_command == "rebase" {
+        if instance.get("check").and_then(|v| v.as_bool()) == Some(true) {
+            return Some("rebase.check".into());
+        }
+    }
+    if page_command == "stash" {
+        if instance.is_array() {
+            return Some("stash.list".into());
+        }
+        if instance.get("cleared").is_some() {
+            return Some("stash.clear".into());
+        }
+        if instance.get("branch").is_some() && instance.get("base").is_some() {
+            return Some("stash.branch".into());
+        }
+        if instance.get("dropped").is_some() {
+            return Some("stash.pop".into());
+        }
+        if let Some(obj) = instance.as_object() {
+            if obj.len() == 1 && obj.contains_key("index") {
+                return Some("stash.drop".into());
+            }
+        }
+        if instance.get("index").is_some() && instance.get("conflicts").is_some() {
+            return Some("stash.apply".into());
+        }
+        if instance.get("stat").is_some() || instance.get("patch").is_some() {
+            return Some("stash.show".into());
+        }
+        if instance.get("stashed") == Some(&serde_json::Value::Bool(false)) {
+            return Some("stash".into());
+        }
+        if instance.get("dry_run").and_then(|v| v.as_bool()) == Some(true) {
+            return Some("stash".into());
+        }
+        if instance.get("oid").is_some() || instance.get("staged_hunks").is_some() {
+            return Some("stash".into());
+        }
+    }
+    for line in text_before_example.lines().rev().take(40) {
+        if let Some(argv) = parse_doc_grit_argv(line) {
+            if argv.first().is_some_and(|c| c != page_command) && !line.contains("--json") {
+                continue;
+            }
+            if let Some(key) =
+                schema_command_key(&argv.iter().map(String::as_str).collect::<Vec<_>>())
+            {
+                return Some(key);
+            }
+        }
+    }
+    schema_command_key(&[page_command])
 }
 
 /// Load the committed schema document for `command` (v1, or v2 when listed in [`SCHEMA_V2_COMMANDS`]).

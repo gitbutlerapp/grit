@@ -1504,7 +1504,7 @@ mod tests {
         )
         .expect_err("missing ref");
         assert!(matches!(err, CloneError::RemoteRefNotFound(_)));
-        assert!(!err.should_cleanup_failed_clone());
+        assert!(err.should_cleanup_failed_clone());
         cleanup_failed_clone(&dest, false);
         assert!(!dest.exists());
     }

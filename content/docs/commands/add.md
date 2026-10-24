@@ -78,7 +78,23 @@ $ grit add --lines f.txt:10-15 -- f.txt
 Staged 1 change.
 ```
 
-Example:
+## JSON output
+
+Schema: [v1](/schemas/add/v1.json)
+
+Pass `--json` for stable, scripting-friendly output.
+
+| Field | Type | Meaning |
+| ----- | ---- | ------- |
+| `added` | array | Newly staged paths. |
+| `modified` | array | Staged modifications. |
+| `removed` | array | Staged deletions. |
+| `intent_to_add` | array | Paths recorded with intent-to-add. |
+| `dry_run` | boolean | Whether the index was left unchanged. |
+| `count` | number | Total paths touched. |
+| `staged` | number | Same as `count` for successful staging. |
+| `staged_hunks` | object | Path → hunk ids when `--hunks` staged something (omitted when empty). |
+| `staged_lines` | object | Path → line ranges when `--lines` staged something (omitted when empty). |
 
 ```json
 {
@@ -98,7 +114,6 @@ Grit computes blob object ids with the same plain SHA-1 digests as Git. SHAttere
 
 ## Markdown output
 
-Schema: [v1](/schemas/add/v1.json)
 Pass [`--markdown`](../global-options/) for an `Add` heading and how many paths were staged:
 
 ```text
@@ -110,6 +125,16 @@ When there is nothing to stage and you ran `grit add` with no paths:
 ```text
 Nothing to stage — working tree clean.
 ```
+
+## Exit status
+
+| Code | Meaning |
+| ---: | --- |
+| `0` | Success ([`success`](../exit-codes/)). |
+| `1` | Command failed ([`failure`](../exit-codes/)). |
+| `2` | Invalid flags or arguments ([`usage`](../exit-codes/)). |
+
+See [Exit codes](../exit-codes/) for shared rules and structured `--json` `kind` values.
 
 ## See also
 
