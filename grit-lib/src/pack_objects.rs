@@ -20,7 +20,7 @@ use crate::hash::HashingWriter;
 use crate::objects::{
     empty_object_id_hash_set, oid_hash_map, oid_hash_map_from, oid_hash_map_with_capacity,
     oid_hash_set, oid_hash_set_from, parse_commit, parse_tag, HashAlgo, Object, ObjectId,
-    ObjectKind, OidHashMap, OidHashSet, TreeRefIter,
+    ObjectInfo, ObjectKind, OidHashMap, OidHashSet, TreeRefIter,
 };
 use crate::odb::Odb;
 use crate::parallel::{try_par_map_force, ParallelHashError};
@@ -102,6 +102,38 @@ impl PackBuildOptions {
             window: 0,
             max_depth,
             use_ofs_delta: true,
+            reuse_deltas: max_depth > 0,
+            reuse_objects: true,
+            use_bitmaps: true,
+            ..Default::default()
+        }
+    }
+
+    /// Pack settings for answering a fetch (upload-pack).
+    ///
+    /// Window and depth follow `pack.window` / `pack.depth`. Whole objects and deltas
+    /// already in the repository's packs are copied as they are, and the delta search
+    /// only covers blobs that are not already stored as a delta, as Git does when serving.
+    ///
+    /// # Parameters
+    /// - `cfg` — repository config, or `None` for Git's defaults.
+    /// - `thin` — build a thin pack; pass `true` only when the client negotiated
+    ///   `thin-pack` *and* holds objects (sent `have`s), since a thin pack against
+    ///   nothing gains nothing.
+    /// - `use_ofs_delta` — whether the client negotiated `ofs-delta`.
+    #[must_use]
+    pub fn for_serve(
+        cfg: Option<&crate::config::ConfigSet>,
+        thin: bool,
+        use_ofs_delta: bool,
+    ) -> Self {
+        let (window, max_depth) = Self::window_and_depth_from_config(cfg);
+        Self {
+            thin,
+            delta: true,
+            window,
+            max_depth,
+            use_ofs_delta,
             reuse_deltas: max_depth > 0,
             reuse_objects: true,
             use_bitmaps: true,
@@ -298,45 +330,35 @@ impl<'a> PackObjects<'a> {
         )?;
         let send = selection.send;
         self.fire(PackProgress::Enumerated { total: send.len() });
-        let bytes = if !opts.delta {
-            serialize_pack(self.source_odb, &send, &opts)?
-        } else {
-            let plan = plan_deltas(
-                self.source_odb,
-                &send,
-                &have_closure,
-                &opts,
-                &oid_hash_map_from(&selection.blob_name_hashes),
-                self.opts.search_threads,
-                selection.walk_prefetch,
-            )?;
-            self.fire(PackProgress::PlannedDeltas);
-            let delta_count = plan.entries.iter().filter(|e| e.base.is_some()).count() as u32;
-            let pack = crate::pack_delta::serialize_pack_with_deltas(
-                self.source_odb,
-                &plan.entries,
-                &plan.payloads,
-                &opts,
-                self.opts.write_threads,
-            )?;
-            w.write_all(&pack.bytes).map_err(Error::Io)?;
-            let count =
-                u32::from_be_bytes([pack.bytes[8], pack.bytes[9], pack.bytes[10], pack.bytes[11]]);
+        if !opts.delta {
+            let bytes = serialize_pack(self.source_odb, &send, &opts)?;
+            w.write_all(&bytes).map_err(Error::Io)?;
+            let count = u32::from_be_bytes([bytes[8], bytes[9], bytes[10], bytes[11]]);
             return Ok(PackStats {
                 object_count: count,
-                pack_bytes: pack.bytes.len() as u64,
-                delta_count,
+                pack_bytes: bytes.len() as u64,
                 ..Default::default()
             });
-        };
-        w.write_all(&bytes).map_err(Error::Io)?;
-        let count = u32::from_be_bytes([bytes[8], bytes[9], bytes[10], bytes[11]]);
-        Ok(PackStats {
-            object_count: count,
-            pack_bytes: bytes.len() as u64,
-            delta_count: 0,
-            ..Default::default()
-        })
+        }
+        let plan = plan_deltas(
+            self.source_odb,
+            &send,
+            &have_closure,
+            &opts,
+            &oid_hash_map_from(&selection.blob_name_hashes),
+            self.opts.search_threads,
+            selection.walk_prefetch,
+        )?;
+        self.fire(PackProgress::PlannedDeltas);
+        crate::pack_delta::write_pack_with_deltas(
+            self.source_odb,
+            &plan.entries,
+            &plan.payloads,
+            &opts,
+            self.opts.write_threads,
+            w,
+            None,
+        )
     }
 }
 
@@ -1094,21 +1116,7 @@ fn load_objects_for_plan(
                 blob_oids.push(oid);
             }
         }
-        let par = crate::pack_delta::pack_delta_search_parallel_options(odb, search_threads)?;
-        if par.threads.get() <= 1 || blob_oids.len() < 32 {
-            for oid in blob_oids {
-                objects.insert(oid, odb.read(&oid)?);
-            }
-        } else {
-            let pairs =
-                try_par_map_force(&blob_oids, par, |oid| odb.read(oid).map(|obj| (*oid, obj)))
-                    .map_err(|e| match e {
-                        ParallelHashError::Task(err) => err,
-                    })?;
-            for (oid, obj) in pairs {
-                objects.insert(oid, obj);
-            }
-        }
+        objects.extend(read_objects(odb, &blob_oids, search_threads)?);
     } else {
         for &oid in send {
             if objects.contains_key(&oid) {
@@ -1120,7 +1128,48 @@ fn load_objects_for_plan(
     Ok(objects)
 }
 
-fn objects_dir_has_local_packs(objects_dir: &Path) -> bool {
+/// Read `oids` from `odb`, on the delta-search workers when there are enough of them.
+fn read_objects(
+    odb: &Odb,
+    oids: &[ObjectId],
+    search_threads: Option<usize>,
+) -> Result<Vec<(ObjectId, Object)>> {
+    read_parallel(odb, oids, search_threads, |oid| {
+        odb.read(oid).map(|obj| (*oid, obj))
+    })
+}
+
+/// Kind and size of each of `oids`, without inflating payloads.
+fn read_object_infos(
+    odb: &Odb,
+    oids: &[ObjectId],
+    search_threads: Option<usize>,
+) -> Result<OidHashMap<ObjectInfo>> {
+    let infos = read_parallel(odb, oids, search_threads, |oid| {
+        odb.read_info(oid).map(|info| (*oid, info))
+    })?;
+    let mut out = oid_hash_map_with_capacity(infos.len());
+    out.extend(infos);
+    Ok(out)
+}
+
+fn read_parallel<T: Send>(
+    odb: &Odb,
+    oids: &[ObjectId],
+    search_threads: Option<usize>,
+    read: impl Fn(&ObjectId) -> Result<T> + Sync,
+) -> Result<Vec<T>> {
+    let par = crate::pack_delta::pack_delta_search_parallel_options(odb, search_threads)?;
+    if par.threads.get() <= 1 || oids.len() < 32 {
+        return oids.iter().map(read).collect();
+    }
+    try_par_map_force(oids, par, read).map_err(|e| match e {
+        ParallelHashError::Task(err) => err,
+    })
+}
+
+/// Whether `objects_dir/pack` holds at least one `.pack` file.
+pub(crate) fn objects_dir_has_local_packs(objects_dir: &Path) -> bool {
     let pack_dir = objects_dir.join("pack");
     if !pack_dir.is_dir() {
         return false;
@@ -1167,13 +1216,22 @@ pub(crate) fn plan_deltas(
     search_threads: Option<usize>,
     mut walk_prefetch: HashMap<ObjectId, Object>,
 ) -> Result<DeltaPlan> {
-    // Reuse-only repacks (`window == 0`) stream from disk at serialize time; avoid
-    // materializing every payload during planning.
-    let lazy_payloads = opts.window == 0 && !opts.thin && opts.reuse_deltas && opts.reuse_objects;
     let has_local_packs = objects_dir_has_local_packs(odb.objects_dir());
+    let reuse_on_disk = opts.reuse_deltas && odb.hash_algo() == HashAlgo::Sha1 && has_local_packs;
+    // Packed objects are copied verbatim (or keep their on-disk delta) at serialize
+    // time, so with on-disk reuse, and for reuse-only repacks, payloads stay on disk:
+    // only the blobs that enter the delta search below are loaded.
+    let lazy_payloads = reuse_on_disk
+        || (opts.window == 0 && !opts.thin && opts.reuse_deltas && opts.reuse_objects);
     let blob_only_planning =
         !lazy_payloads && opts.window > 0 && opts.delta && !opts.thin && !has_local_packs;
     let send_cap = send.len().max(1);
+    let infos: OidHashMap<ObjectInfo> = if lazy_payloads {
+        drop(std::mem::take(&mut walk_prefetch));
+        read_object_infos(odb, send, search_threads)?
+    } else {
+        oid_hash_map()
+    };
     let mut objects: OidHashMap<Object> = if lazy_payloads {
         oid_hash_map_with_capacity(send_cap)
     } else {
@@ -1202,7 +1260,7 @@ pub(crate) fn plan_deltas(
     > = HashMap::new();
 
     // On-disk delta reuse runs even with `--window=0` (no new deltas), matching Git pack-objects.
-    if opts.reuse_deltas && odb.hash_algo() == HashAlgo::Sha1 && has_local_packs {
+    if reuse_on_disk {
         let objects_dir = odb.objects_dir();
         let in_pack_std: HashSet<ObjectId> = in_pack.iter().copied().collect();
         let empty_resolved: HashMap<ObjectId, Object> = HashMap::new();
@@ -1213,13 +1271,11 @@ pub(crate) fn plan_deltas(
             &empty_resolved,
         )?;
         for (t, (base, size, pack_bytes, zlib_start, zlib_end)) in candidates {
-            if lazy_payloads {
-                if let Ok(info) = odb.read_info(&t) {
-                    if info.kind == ObjectKind::Blob && info.size == 0 {
-                        continue;
-                    }
-                }
-            } else if objects[&t].data.is_empty() {
+            let empty = match infos.get(&t) {
+                Some(info) => info.kind == ObjectKind::Blob && info.size == 0,
+                None => objects.get(&t).is_some_and(|obj| obj.data.is_empty()),
+            };
+            if empty {
                 continue;
             }
             if base != t && in_pack.contains(&base) && islands.in_same_island(&t, &base) {
@@ -1240,22 +1296,28 @@ pub(crate) fn plan_deltas(
 
     let mut delta_encodings: HashMap<ObjectId, Vec<u8>> = HashMap::new();
     if opts.window > 0 && opts.max_depth > 0 {
+        if lazy_payloads {
+            // Like Git, objects that keep their on-disk delta are neither targets nor
+            // bases of the search, so only the remaining blobs are read.
+            let search: Vec<ObjectId> = send
+                .iter()
+                .filter(|oid| !delta_to_base.contains_key(*oid))
+                .filter(|oid| {
+                    infos
+                        .get(*oid)
+                        .is_some_and(|info| info.kind == ObjectKind::Blob && info.size > 0)
+                })
+                .copied()
+                .collect();
+            objects.extend(read_objects(odb, &search, search_threads)?);
+        }
         // Without a readable pack directory, every pair is simply tried.
         let packed = if opts.reuse_deltas && has_local_packs {
-            let blobs: OidHashSet = if lazy_payloads {
-                send.iter()
-                    .filter_map(|oid| {
-                        let info = odb.read_info(oid).ok()?;
-                        (info.kind == ObjectKind::Blob && info.size > 0).then_some(*oid)
-                    })
-                    .collect()
-            } else {
-                objects
-                    .iter()
-                    .filter(|(_, obj)| obj.kind == ObjectKind::Blob && !obj.data.is_empty())
-                    .map(|(oid, _)| *oid)
-                    .collect()
-            };
+            let blobs: OidHashSet = objects
+                .iter()
+                .filter(|(_, obj)| obj.kind == ObjectKind::Blob && !obj.data.is_empty())
+                .map(|(oid, _)| *oid)
+                .collect();
             crate::pack::locate_packed_objects(odb.objects_dir(), &blobs).ok()
         } else {
             None
@@ -1386,9 +1448,31 @@ pub(crate) fn plan_deltas(
         delta_encodings.retain(|t, _| delta_to_base.contains_key(t));
     }
 
+    // Emit in the original discovery order so commits precede their trees/blobs.
+    // For OFS_DELTA the serializer needs each base to appear before its target;
+    // discovery order already places a larger base blob no earlier than a smaller
+    // one only by coincidence, so the serializer falls back to REF_DELTA whenever
+    // the base has not yet been written.
+    let mut entries: Vec<PlannedEntry> = Vec::with_capacity(send.len());
+    for &oid in send {
+        let kind = match (objects.get(&oid), infos.get(&oid)) {
+            (Some(obj), _) => obj.kind,
+            (None, Some(info)) => info.kind,
+            (None, None) => odb.read_info(&oid)?.kind,
+        };
+        entries.push(PlannedEntry {
+            oid,
+            kind,
+            data: Vec::new(),
+            base: delta_to_base.get(&oid).copied(),
+            reused_delta: delta_encodings.remove(&oid),
+            reused_delta_zlib: reused_zlib.remove(&oid),
+        });
+    }
+
     let mut payloads: OidHashMap<Arc<[u8]>> = oid_hash_map_with_capacity(objects.len().max(1));
-    for (oid, obj) in &objects {
-        payloads.insert(*oid, Arc::from(obj.data.as_slice()));
+    for (oid, obj) in objects.drain() {
+        payloads.insert(oid, Arc::from(obj.data));
     }
     if !lazy_payloads {
         let mut missing = Vec::new();
@@ -1408,46 +1492,9 @@ pub(crate) fn plan_deltas(
                 missing.push(oid);
             }
         }
-        if missing.is_empty() {
-            // All send payloads already loaded during planning.
-        } else if missing.len() < 32 {
-            for oid in missing {
-                let obj = odb.read(&oid)?;
-                payloads.insert(oid, Arc::from(obj.data.as_slice()));
-            }
-        } else {
-            let par = crate::pack_delta::pack_delta_search_parallel_options(odb, search_threads)?;
-            let pairs =
-                try_par_map_force(&missing, par, |oid| odb.read(oid).map(|obj| (*oid, obj)))
-                    .map_err(|e| match e {
-                        ParallelHashError::Task(err) => err,
-                    })?;
-            for (oid, obj) in pairs {
-                payloads.insert(oid, Arc::from(obj.data.as_slice()));
-            }
+        for (oid, obj) in read_objects(odb, &missing, search_threads)? {
+            payloads.insert(oid, Arc::from(obj.data));
         }
-    }
-
-    // Emit in the original discovery order so commits precede their trees/blobs.
-    // For OFS_DELTA the serializer needs each base to appear before its target;
-    // discovery order already places a larger base blob no earlier than a smaller
-    // one only by coincidence, so the serializer falls back to REF_DELTA whenever
-    // the base has not yet been written.
-    let mut entries: Vec<PlannedEntry> = Vec::with_capacity(send.len());
-    for &oid in send {
-        let kind = if let Some(obj) = objects.get(&oid) {
-            obj.kind
-        } else {
-            odb.read_info(&oid)?.kind
-        };
-        entries.push(PlannedEntry {
-            oid,
-            kind,
-            data: Vec::new(),
-            base: delta_to_base.get(&oid).copied(),
-            reused_delta: delta_encodings.get(&oid).cloned(),
-            reused_delta_zlib: reused_zlib.get(&oid).cloned(),
-        });
     }
 
     Ok(DeltaPlan { entries, payloads })
@@ -1502,4 +1549,110 @@ pub(crate) fn encode_ofs_delta_distance(buf: &mut Vec<u8>, mut ofs: u64) {
         dheader[pos] = 0x80 | ((ofs & 0x7f) as u8);
     }
     buf.extend_from_slice(&dheader[pos..]);
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+pub(crate) mod tests {
+    use super::*;
+    use crate::pack_object_select::{enumerate_pack_objects, PackEnumerateOptions};
+
+    /// Enumerate everything reachable from `main` in a git-packed fixture.
+    pub(crate) fn packed_selection(
+        commits: usize,
+    ) -> (
+        tempfile::TempDir,
+        Repository,
+        crate::pack_object_select::PackObjectSelection,
+    ) {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = grit_test_support::git_packed_history(tmp.path(), commits);
+        let tip = grit_test_support::git(&path, &["rev-parse", "main"]);
+        let tip = ObjectId::from_hex(tip.trim()).unwrap();
+        let repo = Repository::open(&path, &RepositoryOptions::empty()).unwrap();
+        let empty = HashSet::new();
+        let selection = enumerate_pack_objects(
+            repo.odb(),
+            &[tip],
+            &[],
+            &PackEnumerateOptions {
+                filter: None,
+                shallow_grafts: &empty,
+                have_shallow_grafts: Some(&empty),
+                use_bitmaps: false,
+                exclude_objects: None,
+            },
+        )
+        .unwrap();
+        (tmp, repo, selection)
+    }
+
+    #[test]
+    fn serve_plan_leaves_packed_payloads_on_disk() {
+        let (_tmp, repo, selection) = packed_selection(80);
+        assert!(
+            selection.walk_prefetch.is_empty(),
+            "a packed repository's walk keeps no object payloads"
+        );
+        let opts = PackBuildOptions::for_serve(None, false, true);
+        let plan = plan_deltas(
+            repo.odb(),
+            &selection.send,
+            &selection.have_closure,
+            &opts,
+            &oid_hash_map_from(&selection.blob_name_hashes),
+            None,
+            selection.walk_prefetch,
+        )
+        .unwrap();
+
+        let reused = plan
+            .entries
+            .iter()
+            .filter(|e| e.reused_delta_zlib.is_some())
+            .count();
+        let trees_and_blobs = plan
+            .entries
+            .iter()
+            .filter(|e| matches!(e.kind, ObjectKind::Tree | ObjectKind::Blob))
+            .count();
+        assert!(
+            reused * 2 > trees_and_blobs,
+            "most trees and blobs keep their on-disk delta ({reused} of {trees_and_blobs})"
+        );
+        for entry in &plan.entries {
+            if entry.reused_delta_zlib.is_some() || entry.kind != ObjectKind::Blob {
+                assert!(
+                    !plan.payloads.contains_key(&entry.oid),
+                    "{} {:?} was loaded although it is copied from the pack",
+                    entry.oid,
+                    entry.kind
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn serve_options_follow_pack_config() {
+        use crate::config::{ConfigFile, ConfigScope, ConfigSet};
+        let file = ConfigFile::parse(
+            Path::new(".git/config"),
+            "[pack]\n\twindow = 4\n\tdepth = 0\n",
+            ConfigScope::Local,
+        )
+        .unwrap();
+        let mut cfg = ConfigSet::new();
+        cfg.merge(&file);
+        let opts = PackBuildOptions::for_serve(Some(&cfg), true, false);
+        assert_eq!((opts.window, opts.max_depth), (4, 0));
+        assert!(opts.thin && !opts.use_ofs_delta && opts.delta);
+        assert!(!opts.reuse_deltas, "depth 0 stores every object whole");
+
+        let defaults = PackBuildOptions::for_serve(None, false, true);
+        assert_eq!(
+            (defaults.window, defaults.max_depth),
+            (10, crate::pack::DEFAULT_PACK_DEPTH)
+        );
+        assert!(defaults.reuse_deltas && defaults.reuse_objects && !defaults.thin);
+    }
 }

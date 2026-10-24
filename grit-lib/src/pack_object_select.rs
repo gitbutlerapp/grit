@@ -23,7 +23,8 @@ pub struct PackObjectSelection {
     pub have_closure: HashSet<ObjectId>,
     /// Git pack name-hash per blob (from bitmap cache or tree walk).
     pub blob_name_hashes: HashMap<ObjectId, u32>,
-    /// Objects already loaded during a tree walk (avoids rereading loose objects for pack build).
+    /// Commits, trees and tags already read during a tree walk (avoids rereading loose
+    /// objects for pack build). Blobs found in trees are never read by the walk.
     pub walk_prefetch: HashMap<ObjectId, Object>,
 }
 
@@ -188,12 +189,16 @@ fn walk_enumeration(
         let (send, blob_name_hashes) = rev_list_filtered_objects(odb, wants, haves, opts.filter)?;
         (send, blob_name_hashes, HashMap::new())
     } else {
+        // With local packs the delta planner copies packed objects at write time
+        // instead of reusing walked payloads, so holding them would only cost memory.
+        let keep_payloads = !crate::pack_objects::objects_dir_has_local_packs(odb.objects_dir());
         collect_reachable_excluding_with_name_hashes(
             odb,
             wants,
             &have_closure,
             false,
             opts.shallow_grafts,
+            keep_payloads,
         )?
     };
     Ok(PackObjectSelection {
@@ -219,6 +224,7 @@ pub(crate) fn reachable_closure_walk(
         stop,
         skip_missing,
         shallow_grafts,
+        false,
     )?
     .0;
     for oid in order {
@@ -263,6 +269,10 @@ fn rev_list_filtered_objects(
     Ok((ordered, HashMap::new()))
 }
 
+/// Walk objects reachable from `roots` in discovery order, with blob name hashes.
+///
+/// When `keep_payloads` is set, the commits, trees and tags read by the walk are
+/// returned as well so the pack builder does not read them again.
 #[allow(clippy::type_complexity)]
 fn collect_reachable_excluding_with_name_hashes(
     odb: &Odb,
@@ -270,6 +280,7 @@ fn collect_reachable_excluding_with_name_hashes(
     exclude: &HashSet<ObjectId>,
     skip_missing: bool,
     shallow_grafts: &HashSet<ObjectId>,
+    keep_payloads: bool,
 ) -> Result<(
     Vec<ObjectId>,
     HashMap<ObjectId, u32>,
@@ -348,26 +359,21 @@ fn collect_reachable_excluding_with_name_hashes(
                             &mut visited,
                             &mut ordered,
                         );
-                    } else if entry.mode & 0o170000 == 0o100000 {
-                        if enqueue(
-                            entry.oid,
-                            child_path.clone(),
-                            &mut queue,
-                            &mut visited,
-                            &mut ordered,
-                        ) {
-                            blob_name_hashes
-                                .entry(entry.oid)
-                                .or_insert_with(|| pack_name_hash(&child_path));
-                        }
-                    } else {
-                        enqueue(
-                            entry.oid,
-                            child_path,
-                            &mut queue,
-                            &mut visited,
-                            &mut ordered,
-                        );
+                        continue;
+                    }
+                    // Blobs and symlinks have no children: record them without
+                    // inflating their contents. The pack writer reads (or copies
+                    // verbatim) each one later and fails there if it is missing.
+                    if !visited.insert(entry.oid) {
+                        continue;
+                    }
+                    if !exclude.contains(&entry.oid) {
+                        ordered.push(entry.oid);
+                    }
+                    if entry.mode & 0o170000 == 0o100000 {
+                        blob_name_hashes
+                            .entry(entry.oid)
+                            .or_insert_with(|| pack_name_hash(&child_path));
                     }
                 }
             }
@@ -377,7 +383,9 @@ fn collect_reachable_excluding_with_name_hashes(
             }
             ObjectKind::Blob => {}
         }
-        walk_prefetch.insert(oid, obj);
+        if keep_payloads {
+            walk_prefetch.insert(oid, obj);
+        }
     }
 
     Ok((ordered, blob_name_hashes, walk_prefetch))
