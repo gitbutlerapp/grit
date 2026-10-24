@@ -87,6 +87,49 @@ fn for_local_copy_build_pack_reuse_bounded_on_repacked_fixture() {
     );
 }
 
+/// When `/tmp/cargo.mirror` exists, repack-rewrite pack build must stay within a CI budget.
+#[test]
+#[cfg_attr(debug_assertions, ignore = "release-only: cargo mirror perf budget")]
+fn cargo_mirror_for_repack_rewrite_build_time_when_fixture_present() {
+    let mirror = Path::new("/tmp/cargo.mirror");
+    if !mirror.join("objects/pack").is_dir() {
+        return;
+    }
+    let rev_out = Command::new("git")
+        .current_dir(mirror)
+        .args(["rev-parse", "refs/heads/master"])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("rev-parse");
+    let tip_hex = String::from_utf8_lossy(&rev_out.stdout);
+    let tip = ObjectId::from_hex(tip_hex.trim()).expect("tip");
+    let odb = open_odb(mirror);
+    let opts = PackBuildOptions::for_repack_rewrite(
+        grit_lib::config::ConfigSet::load(
+            &grit_lib::config::environment::Environment::empty(),
+            Some(mirror),
+            true,
+        )
+        .ok()
+        .as_ref(),
+    );
+
+    let t0 = Instant::now();
+    let pack = build_pack(&odb, &[tip], &[], &opts).expect("build_pack");
+    let elapsed = t0.elapsed().as_secs_f64();
+
+    assert!(
+        pack.len() > 50_000_000,
+        "expected compact cargo-mirror pack, got {} bytes",
+        pack.len()
+    );
+    assert!(
+        elapsed < 30.0,
+        "cargo-mirror for_repack_rewrite pack build took {elapsed:.2}s (budget 30s)"
+    );
+}
+
 /// When `/tmp/cargo.mirror` exists, full local-copy pack build must stay near grit main, not 8× slower.
 ///
 /// Budget is calibrated for release builds; debug builds can exceed it on large mirrors.

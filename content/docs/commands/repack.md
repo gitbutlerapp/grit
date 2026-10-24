@@ -15,7 +15,7 @@ grit repack --quiet
 
 ## Description
 
-Packs every object reachable from maintenance roots (refs, reflogs, and the index) into a single packfile (similar to `git repack -ad`), removes older pack files, and deletes loose objects that are already stored in the new pack. Unreachable objects that lived only in removed packs are written loose first so they are not dropped silently; when [`grit gc`](./gc.md) runs with `gc.pruneExpire`, recently written unreachable objects are kept for the grace window before loose pruning.
+Packs every object reachable from maintenance roots (refs, reflogs, and the index) into a single packfile (similar to `git repack -ad`), removes older pack files, and deletes loose objects that are already stored in the new pack. When pack files already exist, on-disk deltas are reused (Git `repack -ad` without `-f`) instead of recomputing the full delta window. Unreachable objects that lived only in removed packs are written loose first so they are not dropped silently; when [`grit gc`](./gc.md) runs with `gc.pruneExpire`, recently written unreachable objects are kept for the grace window before loose pruning.
 
 Use this when a repository has accumulated many loose objects after local commits. Clones and fetches already install packs; repack is mainly for long-lived worktrees built entirely with `grit commit`.
 

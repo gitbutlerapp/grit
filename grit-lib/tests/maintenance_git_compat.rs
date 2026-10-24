@@ -1054,7 +1054,11 @@ fn gc_twice_on_single_pack_keeps_loose_count_zero() {
         Repository::discover(Some(grit_copy.path()), &RepositoryOptions::empty()).expect("open");
     let opts = GcOptions::with_reflog_policy(1_700_000_000, false);
     gc(&repo, &opts).expect("grit gc first");
-    gc(&repo, &opts).expect("grit gc second");
+    let second = gc(&repo, &opts).expect("grit gc second");
+    assert_eq!(
+        second.repack.objects_packed, None,
+        "second gc on a single-pack repo must skip repack like git gc"
+    );
     assert_eq!(git_pack_count(&grit_copy.path().join(".git")), 1);
     assert_eq!(git_loose_object_count(grit_copy.path()), 0);
     git_fsck(grit_copy.path(), true);
@@ -1076,9 +1080,13 @@ fn gc_on_single_pack_with_no_loose_matches_git_gc_loose_count() {
 
     let repo =
         Repository::discover(Some(grit_copy.path()), &RepositoryOptions::empty()).expect("open");
-    gc(&repo, &GcOptions::with_reflog_policy(1_700_000_000, false)).expect("grit gc");
+    let stats = gc(&repo, &GcOptions::with_reflog_policy(1_700_000_000, false)).expect("grit gc");
     git(git_copy.path(), &["gc", "--quiet"]);
 
+    assert_eq!(
+        stats.repack.objects_packed, None,
+        "grit gc must skip repack on a single-pack repo with no loose objects"
+    );
     assert_eq!(
         git_loose_object_count(grit_copy.path()),
         git_loose_object_count(git_copy.path()),
