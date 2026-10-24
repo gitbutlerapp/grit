@@ -402,3 +402,99 @@ fn promisor_marker_excluded_from_contains_filtered() {
         "promisor-only visibility must be excluded when include_promisor=false"
     );
 }
+
+fn single_commit_pack_repo(root: &Path, tag: &str) -> (PathBuf, ObjectId) {
+    git_in(root, &["init", "-q", "-b", "main"]);
+    fs::write(root.join("a.txt"), format!("{tag}\n")).expect("write");
+    git_in(root, &["add", "a.txt"]);
+    git_in(root, &["commit", "-q", "-m", tag]);
+    git_in(root, &["repack", "-a", "-d", "-q"]);
+    (root.join(".git/objects"), git_rev_parse_blob(root, "HEAD"))
+}
+
+fn assert_same_object(grit: &Object, git: &Object) {
+    assert_eq!(grit.kind, git.kind);
+    assert_eq!(grit.data, git.data);
+}
+
+fn pack_count(objects: &Path) -> usize {
+    fs::read_dir(objects.join("pack"))
+        .expect("pack dir")
+        .filter_map(|e| e.ok())
+        .filter(|e| e.path().extension().is_some_and(|x| x == "pack"))
+        .count()
+}
+
+/// Repeated reads reuse the single local pack; a pack added mid-session must still be found and
+/// must end that reuse.
+#[test]
+fn reads_find_pack_added_during_read_session() {
+    clear_pack_cache();
+    let dir = TempDir::new().expect("tempdir");
+    let root = dir.path();
+    let (objects, first) = single_commit_pack_repo(root, "first");
+    let odb = Odb::new(&objects);
+    odb.with_pack_read_context(|| {
+        for _ in 0..3 {
+            assert_same_object(
+                &odb.read(&first).expect("read first"),
+                &git_cat_file(root, &first),
+            );
+        }
+
+        fs::write(root.join("b.txt"), "second\n").expect("write");
+        git_in(root, &["add", "b.txt"]);
+        git_in(root, &["commit", "-q", "-m", "second"]);
+        git_in(root, &["repack", "-d", "-q"]);
+        assert_eq!(pack_count(&objects), 2, "incremental repack adds a pack");
+        let second = git_rev_parse_blob(root, "HEAD");
+
+        assert_same_object(
+            &odb.read(&second).expect("read second"),
+            &git_cat_file(root, &second),
+        );
+        assert_same_object(
+            &odb.read(&first).expect("reread first"),
+            &git_cat_file(root, &first),
+        );
+        assert_same_object(
+            &odb.read(&second).expect("reread second"),
+            &git_cat_file(root, &second),
+        );
+    });
+}
+
+/// Alternating read sessions on two single-pack repositories on one thread never serve one
+/// repository's objects from the other's pack.
+#[test]
+fn single_pack_reuse_is_scoped_to_its_repository() {
+    clear_pack_cache();
+    let dir_a = TempDir::new().expect("tempdir a");
+    let dir_b = TempDir::new().expect("tempdir b");
+    let (objects_a, tip_a) = single_commit_pack_repo(dir_a.path(), "repo-a");
+    let (objects_b, tip_b) = single_commit_pack_repo(dir_b.path(), "repo-b");
+    let odb_a = Odb::new(&objects_a);
+    let odb_b = Odb::new(&objects_b);
+    for _ in 0..2 {
+        odb_a.with_pack_read_context(|| {
+            assert_same_object(
+                &odb_a.read(&tip_a).expect("a"),
+                &git_cat_file(dir_a.path(), &tip_a),
+            );
+            assert!(
+                odb_a.read(&tip_b).is_err(),
+                "repo B's commit is not in repo A"
+            );
+        });
+        odb_b.with_pack_read_context(|| {
+            assert_same_object(
+                &odb_b.read(&tip_b).expect("b"),
+                &git_cat_file(dir_b.path(), &tip_b),
+            );
+            assert!(
+                odb_b.read(&tip_a).is_err(),
+                "repo A's commit is not in repo B"
+            );
+        });
+    }
+}

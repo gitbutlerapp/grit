@@ -151,6 +151,85 @@ pub(crate) mod pack_cache {
         static THREAD_WARM_STORE: std::cell::Cell<usize> = const { std::cell::Cell::new(0) };
         static PACK_MONOTONIC_CURSOR: std::cell::RefCell<Option<(PathBuf, usize)>> =
             const { std::cell::RefCell::new(None) };
+        static SINGLE_READER_MEMO: std::cell::RefCell<Option<SingleReaderMemo>> =
+            const { std::cell::RefCell::new(None) };
+    }
+
+    /// The pack a [`super::SingleLocalPackReader`] last opened on this thread.
+    ///
+    /// Lets repeated opens (one per object read) skip re-deriving the same pack through the
+    /// path-keyed caches and the shared catalog.
+    struct SingleReaderMemo {
+        objects_dir: PathBuf,
+        pack_dir: PathBuf,
+        idx: Arc<PackIndex>,
+        pack_bytes: Arc<PackData>,
+        pack_id: u32,
+    }
+
+    fn forget_single_reader_memo() {
+        SINGLE_READER_MEMO.with(|cell| *cell.borrow_mut() = None);
+    }
+
+    /// Record the single local pack just opened for `objects_dir`.
+    pub(crate) fn remember_single_reader(
+        objects_dir: &Path,
+        idx: &Arc<PackIndex>,
+        pack_bytes: &Arc<PackData>,
+        pack_id: u32,
+    ) {
+        SINGLE_READER_MEMO.with(|cell| {
+            *cell.borrow_mut() = Some(SingleReaderMemo {
+                objects_dir: objects_dir.to_path_buf(),
+                pack_dir: objects_dir.join("pack"),
+                idx: Arc::clone(idx),
+                pack_bytes: Arc::clone(pack_bytes),
+                pack_id,
+            });
+        });
+    }
+
+    /// The single local pack previously opened for `objects_dir`, if this thread's trusted
+    /// pack listing still consists of exactly that pack.
+    ///
+    /// Returns `None` whenever the listing is untrusted (so the caller rechecks the pack
+    /// directory) or has changed since the pack was remembered.
+    pub(crate) fn single_reader_for(
+        objects_dir: &Path,
+    ) -> Option<(Arc<PackIndex>, Arc<PackData>, u32)> {
+        if !PACK_DIR_LISTING_TRUSTED.get() {
+            return None;
+        }
+        SINGLE_READER_MEMO.with(|memo| {
+            let memo = memo.borrow();
+            let memo = memo.as_ref()?;
+            if memo.objects_dir.as_os_str() != objects_dir.as_os_str() {
+                return None;
+            }
+            let listing_unchanged = PACK_DIR_INDEXES.with(|cell| {
+                cell.borrow().as_ref().is_some_and(|(dir, _, indexes)| {
+                    dir.as_os_str() == memo.pack_dir.as_os_str()
+                        && indexes.len() == 1
+                        && Arc::ptr_eq(&indexes[0], &memo.idx)
+                })
+            });
+            if !listing_unchanged {
+                return None;
+            }
+            let hit_current = PACK_HIT_INDEX.with(|cell| {
+                cell.borrow().as_ref().is_some_and(|(dir, idx)| {
+                    dir.as_os_str() == objects_dir.as_os_str() && Arc::ptr_eq(idx, &memo.idx)
+                })
+            });
+            if !hit_current {
+                return None;
+            }
+            Some((
+                Arc::clone(&memo.idx),
+                Arc::clone(&memo.pack_bytes),
+                memo.pack_id,
+            ))
+        })
     }
 
     fn store_thread_local_key(store: &crate::pack_store::PackStore) -> usize {
@@ -169,6 +248,7 @@ pub(crate) mod pack_cache {
         THREAD_WARM_STORE.set(0);
         super::clear_pack_read_info_cache();
         PACK_MONOTONIC_CURSOR.with(|cell| *cell.borrow_mut() = None);
+        forget_single_reader_memo();
     }
 
     pub(crate) fn try_read_object_via_single_pack_reader(
@@ -243,6 +323,7 @@ pub(crate) mod pack_cache {
         PACK_BYTES.with(|cell| {
             cell.borrow_mut().remove(pack_path);
         });
+        forget_single_reader_memo();
     }
 
     /// Drop thread-local indexes, hints, and directory listing tied to a replaced pack path.
@@ -291,6 +372,7 @@ pub(crate) mod pack_cache {
         PACK_IDS.with(|cell| cell.borrow_mut().clear());
         PACK_COUNT_VALIDATED.with(|cell| cell.borrow_mut().clear());
         PACK_HIT_INDEX.with(|cell| *cell.borrow_mut() = None);
+        forget_single_reader_memo();
         super::clear_pack_read_info_cache();
         let objects_dir = store.objects_dir();
         let pack_dir = objects_dir.join("pack");
@@ -336,6 +418,7 @@ pub(crate) mod pack_cache {
             cell.borrow_mut()
                 .insert(pack_path.to_path_buf(), Arc::clone(bytes));
         });
+        forget_single_reader_memo();
     }
 
     pub(crate) fn remember_pack_hit(objects_dir: &Path, idx: &Arc<PackIndex>) {
@@ -3774,6 +3857,20 @@ impl SingleLocalPackReader {
             return Ok(None);
         }
         pack_cache::sync_thread_local_with_store(&crate::pack_store::PackStore::active_for_reads());
+        let memo_eligible = allow_loose && commit_hint.is_none();
+        if memo_eligible {
+            if let Some((idx, pack_bytes, pack_id)) = pack_cache::single_reader_for(objects_dir) {
+                return Ok(Some(Self {
+                    idx,
+                    pack_bytes,
+                    pack_id,
+                    cursor: 0,
+                    info_cache: HashMap::new(),
+                    delta_scratch: None,
+                    commit_header_buf: Vec::new(),
+                }));
+            }
+        }
         let indexes = pack_indexes_for_lookup(objects_dir, PackLookupOptions::ALL_LOCAL_PACKS)?;
         let idx = match select_single_local_pack_index(&indexes, commit_hint)? {
             Some(idx) => idx,
@@ -3787,6 +3884,9 @@ impl SingleLocalPackReader {
         pack_cache::mark_pack_object_count_validated(&idx.pack_path);
         pack_cache::remember_pack_hit(objects_dir, &idx);
         let pack_id = pack_cache::pack_id_for(&idx.pack_path);
+        if memo_eligible && indexes.len() == 1 {
+            pack_cache::remember_single_reader(objects_dir, &idx, &pack_bytes, pack_id);
+        }
         Ok(Some(Self {
             idx,
             pack_bytes,
