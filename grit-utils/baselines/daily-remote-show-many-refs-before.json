@@ -1,0 +1,332 @@
+{
+  "schema": "grit-daily-bench/1",
+  "generated_at": "2026-10-24T16:53:18.406136916Z",
+  "machine": {
+    "cpu_model": "Intel(R) Xeon(R) Processor",
+    "physical_cores": 4,
+    "logical_cores": 4,
+    "ram_bytes": 16780574720,
+    "os": "linux",
+    "kernel": "Linux 6.12.94+",
+    "scratch_filesystem": "ext4",
+    "rustc_version": "rustc 1.99.0 (b940084d7 2026-09-28)",
+    "cargo_profile": "release"
+  },
+  "tools": {
+    "git": "git version 2.43.0",
+    "grit": "grit 0.5.19",
+    "grit_commit": "06dc992aa2d934060e7007b1f3134f4a6421b27a"
+  },
+  "scenarios": [
+    {
+      "id": "ls-remote/all@many-refs",
+      "area": "remotes",
+      "description": "List all refs on many-refs bare remote vs git ls-remote",
+      "git": {
+        "median_wall_ms": 16.834499,
+        "peak_rss_bytes": 27791360,
+        "runs": 20,
+        "samples_ms": [
+          16.778,
+          16.657,
+          17.868,
+          17.934,
+          17.59,
+          16.898,
+          15.817,
+          17.049,
+          17.949,
+          15.388,
+          17.593,
+          15.536,
+          16.521,
+          17.805,
+          16.692,
+          17.769,
+          16.416,
+          16.758,
+          15.764,
+          16.891
+        ],
+        "min_ms": 15.388419,
+        "max_ms": 17.948929999999997,
+        "stddev_ms": 0.820042430212606
+      },
+      "grit": {
+        "median_wall_ms": 15.32937,
+        "peak_rss_bytes": 17072128,
+        "runs": 20,
+        "samples_ms": [
+          17.274,
+          15.101,
+          15.473,
+          15.367,
+          15.248,
+          15.589,
+          15.204,
+          15.438,
+          14.355,
+          15.412,
+          16.196,
+          16.386,
+          16.231,
+          15.381,
+          15.136,
+          15.291,
+          15.174,
+          15.154,
+          14.405,
+          15.196
+        ],
+        "min_ms": 14.355395,
+        "max_ms": 17.273848,
+        "stddev_ms": 0.6596149088442358
+      },
+      "ratio": 0.9105925872816292,
+      "detail": {
+        "setup": "remote http://127.0.0.1:40683/remote.git served by git http-backend (git's own smart HTTP server)",
+        "commands": {
+          "git": "git ls-remote http://127.0.0.1:40683/remote.git",
+          "grit": "grit remote refs http://127.0.0.1:40683/remote.git"
+        },
+        "correctness": "before timing, git and grit were each run once and their results compared",
+        "phases": {
+          "git": [
+            {
+              "name": "run: git remote-http",
+              "ms": 14.638,
+              "count": 1,
+              "depth": 1
+            },
+            {
+              "name": "run: git-remote-http",
+              "ms": 13.16,
+              "count": 1,
+              "depth": 2
+            }
+          ]
+        },
+        "notes": "grit trace: traced run wrote no trace to /tmp/grit-daily-trace-407678-grit.txt"
+      }
+    },
+    {
+      "id": "remote/list@small",
+      "area": "remotes",
+      "description": "List remotes vs git remote",
+      "git": {
+        "median_wall_ms": 2.2147515,
+        "peak_rss_bytes": 6705152,
+        "runs": 20,
+        "samples_ms": [
+          2.214,
+          2.209,
+          2.263,
+          2.225,
+          2.2,
+          2.231,
+          2.205,
+          2.248,
+          2.23,
+          2.215,
+          2.298,
+          1.143,
+          1.173,
+          1.155,
+          2.22,
+          2.221,
+          2.192,
+          1.127,
+          1.174,
+          2.239
+        ],
+        "min_ms": 1.126765,
+        "max_ms": 2.2976300000000003,
+        "stddev_ms": 0.4773513464679868
+      },
+      "grit": {
+        "median_wall_ms": 2.2384364999999997,
+        "peak_rss_bytes": 10297344,
+        "runs": 20,
+        "samples_ms": [
+          3.321,
+          2.229,
+          2.234,
+          2.219,
+          2.233,
+          2.224,
+          2.28,
+          2.274,
+          2.301,
+          2.249,
+          2.27,
+          2.281,
+          2.215,
+          2.26,
+          2.291,
+          2.208,
+          2.238,
+          2.216,
+          2.239,
+          2.219
+        ],
+        "min_ms": 2.207952,
+        "max_ms": 3.320919,
+        "stddev_ms": 0.24190809215528636
+      },
+      "ratio": 1.0106942020357585,
+      "detail": {
+        "commands": {
+          "git": "git remote",
+          "grit": "grit remote"
+        },
+        "phases": {
+          "grit": [
+            {
+              "name": "grit.repository.open",
+              "ms": 1.14,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "grit.config.load",
+              "ms": 0.072,
+              "count": 2,
+              "depth": 0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "remote/remove@many-refs",
+      "area": "remotes",
+      "description": "Remove origin with 10k packed tracking refs vs git remote remove",
+      "git": {
+        "median_wall_ms": 837.7419940000001,
+        "peak_rss_bytes": 10117120,
+        "runs": 3,
+        "samples_ms": [
+          841.979,
+          837.742,
+          836.726
+        ],
+        "min_ms": 836.725669,
+        "max_ms": 841.979192,
+        "stddev_ms": 2.7864633291551124
+      },
+      "grit": {
+        "median_wall_ms": 29740.571471,
+        "peak_rss_bytes": 28729344,
+        "runs": 3,
+        "samples_ms": [
+          29431.357,
+          30652.082,
+          29740.571
+        ],
+        "min_ms": 29431.356585999998,
+        "max_ms": 30652.08166,
+        "stddev_ms": 634.6435188419678
+      },
+      "ratio": 35.500872206485084,
+      "detail": {
+        "setup": "remote http://127.0.0.1:45905/remote.git served by git http-backend (git's own smart HTTP server)",
+        "prepare": "set -eu\ngrit-bench prepare-daily-reset --git git\ncd /tmp/grit-bench-scratch/daily-remote-many-refs-ls/remote.git-campaign-push-client\ngit remote remove origin 2>/dev/null || true\ngit remote add origin 'http://127.0.0.1:45905/remote.git'\ngit fetch -q origin '+refs/heads/*:refs/remotes/origin/*'\ngit pack-refs '--all'\n",
+        "commands": {
+          "git": "git remote remove origin",
+          "grit": "grit remote remove origin"
+        },
+        "phases": {
+          "grit": [
+            {
+              "name": "grit.repository.open",
+              "ms": 0.391,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "grit.config.load",
+              "ms": 0.313,
+              "count": 3,
+              "depth": 0
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "remote/show@many-refs",
+      "area": "remotes",
+      "description": "Remote show on many-refs client vs git remote show origin",
+      "git": {
+        "median_wall_ms": 39.9703795,
+        "peak_rss_bytes": 31473664,
+        "runs": 6,
+        "samples_ms": [
+          38.892,
+          39.79,
+          38.225,
+          57.425,
+          40.285,
+          40.151
+        ],
+        "min_ms": 38.224576000000006,
+        "max_ms": 57.424746999999996,
+        "stddev_ms": 7.373040177362657
+      },
+      "grit": {
+        "median_wall_ms": 505.159868,
+        "peak_rss_bytes": 18612224,
+        "runs": 6,
+        "samples_ms": [
+          501.764,
+          506.632,
+          505.245,
+          512.726,
+          505.075,
+          500.377
+        ],
+        "min_ms": 500.377084,
+        "max_ms": 512.7263869999999,
+        "stddev_ms": 4.329386039895726
+      },
+      "ratio": 12.638355560271826,
+      "detail": {
+        "setup": "remote http://127.0.0.1:46881/remote.git served by git http-backend (git's own smart HTTP server)",
+        "commands": {
+          "git": "git remote show origin",
+          "grit": "grit remote show origin"
+        },
+        "phases": {
+          "git": [
+            {
+              "name": "run: git remote-http",
+              "ms": 36.736,
+              "count": 1,
+              "depth": 1
+            },
+            {
+              "name": "run: git-remote-http",
+              "ms": 35.023,
+              "count": 1,
+              "depth": 2
+            }
+          ],
+          "grit": [
+            {
+              "name": "grit.repository.open",
+              "ms": 0.357,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "grit.config.load",
+              "ms": 0.125,
+              "count": 2,
+              "depth": 0
+            }
+          ]
+        }
+      }
+    }
+  ]
+}
