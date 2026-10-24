@@ -26,6 +26,8 @@ $ grit config --global credential.helper libsecret     # Linux
 $ grit config --global credential.helper store         # a plain-text file, any system
 ```
 
+The helper is shared with Git and asked the same way: `grit` sends it the protocol and host (`protocol=https`, `host=github.com`), so one stored entry covers every repository on that host, and entries Git already saved, such as lines in `~/.git-credentials`, work as they are. Set `credential.useHttpPath` to keep a separate entry per repository; the helper then also gets the repository path (`path=owner/repo.git`).
+
 `grit auth logout` removes the saved GitHub token from your credential helper.
 
 `grit` signs in with its own GitHub OAuth app. To use a different one, set its client id in the `GRIT_GITHUB_CLIENT_ID` environment variable or the `grit.githubClientId` setting.

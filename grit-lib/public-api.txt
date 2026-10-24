@@ -18196,6 +18196,7 @@ pub grit_lib::remote::credentials::Credential::protocol: core::option::Option<al
 pub grit_lib::remote::credentials::Credential::url: core::option::Option<alloc::string::String>
 pub grit_lib::remote::credentials::Credential::username: core::option::Option<alloc::string::String>
 impl grit_lib::remote::credentials::Credential
+pub fn grit_lib::remote::credentials::Credential::from_url(&str, &grit_lib::config::ConfigSet) -> core::option::Option<Self>
 pub fn grit_lib::remote::credentials::Credential::is_complete(&self) -> bool
 pub fn grit_lib::remote::credentials::Credential::parse(&str) -> Self
 pub fn grit_lib::remote::credentials::Credential::parse_bytes(&[u8]) -> Self

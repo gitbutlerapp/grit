@@ -28,11 +28,12 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use grit_lib::config::ConfigSet;
 use grit_lib::error::{Error, Result as GritResult};
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::ObjectId;
 use grit_lib::refs::resolve_ref;
-use grit_lib::remote::credentials::{Credential, CredentialProvider};
+use grit_lib::remote::credentials::{Credential, CredentialProvider, HelperCredentialProvider};
 use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::push::push_http;
 use grit_lib::remote::push_report::PushRefStatus;
@@ -556,5 +557,150 @@ fn push_over_authed_http_succeeds_with_right_credentials_and_fails_typed_otherwi
     assert_eq!(
         remote_main.to_hex(),
         git(&bare, &["rev-parse", "refs/heads/main"]).trim()
+    );
+}
+
+/// The system `git-credential-store`, or `None` when Git does not ship it.
+fn system_credential_store() -> Option<PathBuf> {
+    let out = Command::new("git").arg("--exec-path").output().ok()?;
+    let store =
+        PathBuf::from(String::from_utf8_lossy(&out.stdout).trim()).join("git-credential-store");
+    store.is_file().then_some(store)
+}
+
+/// A host-level `git-credential-store` entry (no path, as `git credential
+/// approve` writes it) authenticates fetch and push to any repository on the
+/// host, and helpers receive only `protocol` and `host`.
+#[test]
+fn credential_store_host_entry_authenticates_fetch_and_push() {
+    if find_binary("grit-http-server").is_none() {
+        eprintln!("SKIP: `grit-http-server` binary not found (build it first)");
+        return;
+    }
+    if system_credential_store().is_none() {
+        eprintln!("SKIP: system git-credential-store not available");
+        return;
+    }
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let work = tmp.path().join("work");
+    std::fs::create_dir_all(&work).unwrap();
+    build_source(&work);
+    let root = tmp.path().join("srv");
+    let source = mirror_bare(&work, &root, "hw.git");
+    let push_target = make_bare_target(&root, "push.git");
+    let main_oid = rev_parse(&source, "refs/heads/main");
+
+    let Some((_guard, port)) = start_authed_server(&root) else {
+        eprintln!("SKIP: could not start authed grit-http-server");
+        return;
+    };
+    let host = format!("127.0.0.1:{port}");
+
+    // System git writes the store entry; grit has to read it.
+    let store_file = tmp.path().join("git-credentials");
+    let store_helper = format!("store --file {}", store_file.display());
+    let approve = Command::new("git")
+        .args(["-c", &format!("credential.helper={store_helper}")])
+        .args(["credential", "approve"])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .stdin(Stdio::piped())
+        .spawn()
+        .and_then(|mut child| {
+            use std::io::Write as _;
+            child.stdin.take().expect("stdin").write_all(
+                format!("protocol=http\nhost={host}\nusername={USER}\npassword={PASS}\n\n")
+                    .as_bytes(),
+            )?;
+            child.wait()
+        })
+        .expect("run git credential approve");
+    assert!(approve.success(), "git credential approve failed");
+    let stored = std::fs::read_to_string(&store_file).expect("store file");
+    assert_eq!(stored.lines().count(), 1, "one host-level entry: {stored}");
+
+    let helper_log = tmp.path().join("helper.log");
+    let mut config = ConfigSet::new();
+    config
+        .add_command_override(
+            "credential.helper",
+            &format!("!cat >>'{}'; :", helper_log.display()),
+        )
+        .unwrap();
+    config
+        .add_command_override("credential.helper", &store_helper)
+        .unwrap();
+    let client = || {
+        http_client_arc(
+            UreqHttpClient::from_config(&config)
+                .expect("client from config")
+                .with_credential_provider(Box::new(HelperCredentialProvider::new(config.clone()))),
+        )
+    };
+
+    let local = tmp.path().join("clone");
+    std::fs::create_dir_all(&local).unwrap();
+    git(&local, &["init", "-q", "-b", "main", "."]);
+    let local_git = local.join(".git");
+    let mut opts = FetchOptions {
+        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
+        tags: TagMode::All,
+        ..Default::default()
+    };
+    http_fetch(
+        client(),
+        &local_git,
+        &format!("http://{host}/hw.git"),
+        &mut opts,
+        &mut NoProgress,
+    )
+    .expect("fetch authenticated by the host-level store entry");
+    assert_eq!(
+        resolve_ref(&local_git, "refs/remotes/origin/main").expect("origin/main"),
+        main_oid
+    );
+
+    let spec = PushRefSpec {
+        src: Some(main_oid),
+        src_ref: None,
+        dst: "refs/heads/main".to_owned(),
+        force: false,
+        delete: false,
+        expected_old: None,
+        expect_absent: false,
+        ..Default::default()
+    };
+    let outcome = push_http(
+        client(),
+        &local_git,
+        &format!("http://{host}/push.git"),
+        std::slice::from_ref(&spec),
+        &PushOptions::default(),
+        &mut NoProgress,
+    )
+    .expect("push authenticated by the host-level store entry");
+    assert_eq!(outcome.results[0].status, PushRefStatus::Ok);
+    assert_eq!(
+        resolve_ref(&push_target, "refs/heads/main").expect("pushed main"),
+        main_oid
+    );
+
+    let log = std::fs::read_to_string(&helper_log).expect("helper log");
+    let get_request = format!("protocol=http\nhost={host}\n\n");
+    assert!(
+        log.starts_with(&get_request),
+        "helpers must get only protocol and host, got:\n{log}"
+    );
+    assert!(!log.contains("url="), "helpers must never get url=:\n{log}");
+    assert!(
+        !log.contains("path="),
+        "path needs credential.useHttpPath:\n{log}"
+    );
+
+    // Approving the working credential leaves the host-level entry as the only one.
+    assert_eq!(
+        std::fs::read_to_string(&store_file).expect("store file"),
+        stored
     );
 }
