@@ -941,6 +941,22 @@ fn resolve_credential_helper_executable(
 /// after any arguments from the configured helper string. Credential fields are
 /// written to stdin as `key=value` lines followed by a blank line; stdout is
 /// parsed back into a [`Credential`].
+/// The fields sent to a helper for `creds`.
+///
+/// Like Git, a credential that already has its protocol and host goes to
+/// helpers without `url`: the URL is only used to pick helpers. Helpers parse a
+/// `url` into protocol, host *and path*, so sending the request URL (say
+/// `…/repo.git/info/refs?service=…`) would make every host-wide stored
+/// credential miss.
+fn helper_request(creds: &Credential) -> std::borrow::Cow<'_, Credential> {
+    if creds.url.is_none() || creds.protocol.is_none() || creds.host.is_none() {
+        return std::borrow::Cow::Borrowed(creds);
+    }
+    let mut request = creds.clone();
+    request.url = None;
+    std::borrow::Cow::Owned(request)
+}
+
 fn invoke_helper(
     runner: &dyn CommandRunner,
     helper: &str,
@@ -955,7 +971,7 @@ fn invoke_helper(
         None => ("", &[][..]),
     };
 
-    let mut stdin_body = creds.serialize();
+    let mut stdin_body = helper_request(creds).serialize();
     stdin_body.push('\n');
     let stdin_bytes = stdin_body.into_bytes();
 
@@ -1268,6 +1284,30 @@ pub mod windows_store {
 mod tests {
     use super::*;
     use crate::command_runner::{RecordedResponse, RecordingRunner};
+
+    #[test]
+    fn helpers_get_decomposed_fields_without_the_request_url() {
+        let request = Credential {
+            protocol: Some("http".into()),
+            host: Some("127.0.0.1:8080".into()),
+            url: Some("http://127.0.0.1:8080/app.git/info/refs?service=git-upload-pack".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            helper_request(&request).serialize(),
+            "protocol=http\nhost=127.0.0.1:8080\n"
+        );
+
+        // A bare `url` is all a helper could go on, so it stays.
+        let url_only = Credential {
+            url: Some("https://example.com/".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            helper_request(&url_only).serialize(),
+            "url=https://example.com/\n"
+        );
+    }
 
     #[cfg(unix)]
     #[test]
