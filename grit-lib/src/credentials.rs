@@ -64,6 +64,11 @@ pub struct Credential {
     /// `password` field (the secret).
     pub password: Option<String>,
     /// `url` field — a full URL Git can decompose into the fields above.
+    ///
+    /// [`HelperCredentialProvider`] uses it to match `credential.<url>.*`
+    /// config (see [`target_url`](Credential::target_url)) and to fill a
+    /// missing protocol/host, but never writes it to a helper: helpers such as
+    /// `git-credential-store` would otherwise key the lookup on its path.
     pub url: Option<String>,
     /// Any additional `key=value` pairs, in wire order. Multi-valued keys such
     /// as `capability[]` may appear more than once.
@@ -89,6 +94,45 @@ impl Credential {
             cred.set(key, value);
         }
         cred
+    }
+
+    /// The credential Git requests for the repository at `url`.
+    ///
+    /// `protocol` and `host` (with any `:port`) come from `url`, and
+    /// [`url`](Credential::url) keeps `url` itself so `credential.<url>.*`
+    /// config still matches on the full repository path. For `http` and
+    /// `https` the `path` is only included when `credential.useHttpPath`
+    /// applies to `url`, so one host-level entry (as written by
+    /// `git-credential-store` or a keychain helper) serves every repository on
+    /// the host. Other protocols always carry the path. The path is
+    /// percent-decoded and has surrounding slashes removed, as in Git.
+    ///
+    /// Pass the repository URL (`https://host/owner/repo.git`), not a
+    /// smart-HTTP request URL with `/info/refs` and a query appended.
+    ///
+    /// # Returns
+    ///
+    /// `None` when `url` does not parse or has no host.
+    #[must_use]
+    pub fn from_url(url: &str, config: &ConfigSet) -> Option<Self> {
+        let parsed = url::Url::parse(url).ok()?;
+        let host = parsed.host_str().filter(|host| !host.is_empty())?;
+        let host = match parsed.port() {
+            Some(port) => format!("{host}:{port}"),
+            None => host.to_owned(),
+        };
+        let protocol = parsed.scheme();
+        let is_http = matches!(protocol, "http" | "https");
+        let path = (!is_http || use_http_path(config, Some(url)))
+            .then(|| percent_decode_lossy(parsed.path().trim_matches('/')))
+            .filter(|path| !path.is_empty());
+        Some(Credential {
+            protocol: Some(protocol.to_owned()),
+            host: Some(host),
+            path,
+            url: Some(url.to_owned()),
+            ..Default::default()
+        })
     }
 
     /// Parse from raw bytes (lossy UTF-8); convenience for helper stdout.
@@ -314,6 +358,25 @@ impl HelperCredentialProvider {
         credential_helpers(&self.config, target_url)
     }
 
+    /// The fields a helper receives for `cred`: an explicit
+    /// [`url`](Credential::url) fills a missing protocol/host/path the way
+    /// [`Credential::from_url`] does and is then dropped, because Git never
+    /// writes `url` to helpers.
+    fn helper_request(&self, cred: &Credential) -> Credential {
+        let mut request = cred.clone();
+        let Some(url) = request.url.take() else {
+            return request;
+        };
+        if request.protocol.is_none() && request.host.is_none() {
+            if let Some(from_url) = Credential::from_url(&url, &self.config) {
+                request.protocol = from_url.protocol;
+                request.host = from_url.host;
+                request.path = request.path.or(from_url.path);
+            }
+        }
+        request
+    }
+
     fn exec_path_candidates(&self) -> Vec<PathBuf> {
         credential_helper_exec_path_candidates(
             self.command_runner.as_ref(),
@@ -335,7 +398,7 @@ impl CredentialProvider for HelperCredentialProvider {
                 self.command_runner.as_ref(),
                 &helper,
                 "get",
-                &filled,
+                &self.helper_request(&filled),
                 &self.exec_path_candidates(),
             )?;
             if response.wants_quit() {
@@ -355,12 +418,13 @@ impl CredentialProvider for HelperCredentialProvider {
 
     fn approve(&self, cred: &Credential) -> Result<()> {
         let target_url = cred.target_url();
+        let request = self.helper_request(cred);
         for helper in self.helpers(target_url.as_deref()) {
             invoke_helper(
                 self.command_runner.as_ref(),
                 &helper,
                 "store",
-                cred,
+                &request,
                 &self.exec_path_candidates(),
             )?;
         }
@@ -369,12 +433,13 @@ impl CredentialProvider for HelperCredentialProvider {
 
     fn reject(&self, cred: &Credential) -> Result<()> {
         let target_url = cred.target_url();
+        let request = self.helper_request(cred);
         for helper in self.helpers(target_url.as_deref()) {
             invoke_helper(
                 self.command_runner.as_ref(),
                 &helper,
                 "erase",
-                cred,
+                &request,
                 &self.exec_path_candidates(),
             )?;
         }
@@ -1139,6 +1204,87 @@ mod tests {
         assert_eq!(
             cred.target_url().as_deref(),
             Some("https://github.com/o/r.git")
+        );
+    }
+
+    #[test]
+    fn from_url_omits_http_path_unless_use_http_path_applies() {
+        let plain = ConfigSet::new();
+        let cred = Credential::from_url("http://127.0.0.1:9418/hw.git", &plain).expect("cred");
+        assert_eq!(cred.protocol.as_deref(), Some("http"));
+        assert_eq!(cred.host.as_deref(), Some("127.0.0.1:9418"));
+        assert_eq!(cred.path, None);
+        assert_eq!(cred.url.as_deref(), Some("http://127.0.0.1:9418/hw.git"));
+
+        let mut scoped = ConfigSet::new();
+        scoped
+            .add_command_override("credential.https://example.com/team.useHttpPath", "true")
+            .unwrap();
+        let in_scope =
+            Credential::from_url("https://example.com/team/a%20b.git/", &scoped).expect("cred");
+        assert_eq!(in_scope.path.as_deref(), Some("team/a b.git"));
+        let out_of_scope =
+            Credential::from_url("https://example.com/other/repo.git", &scoped).expect("cred");
+        assert_eq!(out_of_scope.path, None);
+    }
+
+    #[test]
+    fn from_url_keeps_path_for_non_http_protocols_and_rejects_hostless_urls() {
+        let cfg = ConfigSet::new();
+        let cred = Credential::from_url("ftp://files.example/pub/repo.git", &cfg).expect("cred");
+        assert_eq!(cred.path.as_deref(), Some("pub/repo.git"));
+        assert_eq!(Credential::from_url("not a url", &cfg), None);
+        assert_eq!(Credential::from_url("file:///tmp/repo.git", &cfg), None);
+    }
+
+    #[test]
+    fn helper_request_drops_url_and_fills_missing_fields_from_it() {
+        let provider = HelperCredentialProvider::new(ConfigSet::new());
+        let decomposed =
+            Credential::from_url("http://127.0.0.1:9418/hw.git", &ConfigSet::new()).expect("cred");
+        assert_eq!(
+            provider.helper_request(&decomposed).serialize(),
+            "protocol=http\nhost=127.0.0.1:9418\n"
+        );
+
+        let url_only = Credential {
+            url: Some("https://example.com/o/r.git".into()),
+            username: Some("alice".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            provider.helper_request(&url_only).serialize(),
+            "protocol=https\nhost=example.com\nusername=alice\n"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn helpers_never_receive_the_url_key() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let log = tmp.path().join("helper.log");
+        let mut cfg = ConfigSet::new();
+        cfg.add_command_override(
+            "credential.http://127.0.0.1:9418/hw.git.helper",
+            &format!(
+                "!cat >>'{}'; echo username=u; echo password=p; :",
+                log.display()
+            ),
+        )
+        .unwrap();
+        let provider = HelperCredentialProvider::new(cfg.clone());
+        let input = Credential::from_url("http://127.0.0.1:9418/hw.git", &cfg).expect("cred");
+
+        let filled = provider
+            .fill(&input)
+            .expect("path-scoped helper still matches");
+        assert_eq!(filled.username.as_deref(), Some("u"));
+        provider.approve(&filled).expect("store");
+
+        assert_eq!(
+            std::fs::read_to_string(&log).expect("helper log"),
+            "protocol=http\nhost=127.0.0.1:9418\n\n\
+             protocol=http\nhost=127.0.0.1:9418\nusername=u\npassword=p\n\n"
         );
     }
 

@@ -584,31 +584,24 @@ fn build_proxy(config: &ConfigSet) -> Result<Option<ureq::Proxy>> {
     Ok(Some(proxy))
 }
 
-/// Decompose a request URL into a target [`Credential`].
+/// The target [`Credential`] for a smart-HTTP request URL.
 ///
-/// Git omits the path from HTTP credentials unless `credential.useHttpPath`
-/// applies. That lets a host-level token stored for `https://github.com` satisfy
-/// requests to any repository on that host, which is how helpers such as macOS
-/// `osxkeychain` are normally populated.
+/// Like Git, the credential describes the repository (the request URL without
+/// its query and `/info/refs` or service suffix), so `credential.<url>.*`
+/// config and `credential.useHttpPath` see the repository path that helpers
+/// such as `git-credential-store` key entries on.
 fn credential_for_url(url: &str, config: &ConfigSet) -> Option<Credential> {
-    let parsed = url::Url::parse(url).ok()?;
-    let protocol = parsed.scheme().to_string();
-    let host = parsed.host_str()?.to_string();
-    let host = if let Some(port) = parsed.port() {
-        format!("{host}:{port}")
-    } else {
-        host
-    };
-    let path = credentials::use_http_path(config, Some(url))
-        .then(|| parsed.path().trim_start_matches('/').to_string())
-        .filter(|path| !path.is_empty());
-    Some(Credential {
-        protocol: Some(protocol),
-        host: Some(host),
-        path,
-        url: Some(url.to_string()),
-        ..Default::default()
-    })
+    Credential::from_url(repo_url_from_request_url(url), config)
+}
+
+/// Strip the query and any `/info/refs`, `/git-upload-pack` or
+/// `/git-receive-pack` suffix from a smart-HTTP request URL.
+fn repo_url_from_request_url(url: &str) -> &str {
+    let without_query = url.split_once('?').map_or(url, |(base, _)| base);
+    ["/info/refs", "/git-upload-pack", "/git-receive-pack"]
+        .iter()
+        .find_map(|suffix| without_query.strip_suffix(suffix))
+        .unwrap_or(without_query)
 }
 
 /// Build the `Authorization: Basic …` header value for `cred`.
@@ -1533,6 +1526,30 @@ mod tests {
         assert_eq!(cred.protocol.as_deref(), Some("https"));
         assert_eq!(cred.host.as_deref(), Some("github.com"));
         assert_eq!(cred.path, None);
+        assert_eq!(
+            cred.url.as_deref(),
+            Some("https://github.com/owner/repo.git")
+        );
+    }
+
+    #[test]
+    fn credentials_describe_the_repository_for_every_smart_http_request() {
+        let mut cfg = ConfigSet::new();
+        cfg.add_command_override("credential.useHttpPath", "true")
+            .unwrap();
+        for request in [
+            "http://127.0.0.1:9418/hw.git/info/refs?service=git-upload-pack",
+            "http://127.0.0.1:9418/hw.git/info/refs?service=git-receive-pack",
+            "http://127.0.0.1:9418/hw.git/git-upload-pack",
+            "http://127.0.0.1:9418/hw.git/git-receive-pack",
+        ] {
+            let cred = credential_for_url(request, &cfg).expect("credential target");
+            assert_eq!(
+                cred.serialize(),
+                "protocol=http\nhost=127.0.0.1:9418\npath=hw.git\nurl=http://127.0.0.1:9418/hw.git\n",
+                "{request}"
+            );
+        }
     }
 
     #[test]
@@ -1546,7 +1563,7 @@ mod tests {
         )
         .expect("credential target");
 
-        assert_eq!(cred.path.as_deref(), Some("owner/repo.git/info/refs"));
+        assert_eq!(cred.path.as_deref(), Some("owner/repo.git"));
     }
 
     #[test]
@@ -1565,7 +1582,7 @@ mod tests {
         )
         .expect("credential target");
 
-        assert_eq!(matching.path.as_deref(), Some("owner/repo.git/info/refs"));
+        assert_eq!(matching.path.as_deref(), Some("owner/repo.git"));
         assert_eq!(other.path, None);
     }
 
