@@ -5406,10 +5406,7 @@ pub grit_lib::error::Error::UnsupportedObjectStore
 pub grit_lib::error::Error::UnsupportedObjectStore::operation: &'static str
 pub grit_lib::error::Error::UnsupportedRepositoryExtension(alloc::string::String)
 pub grit_lib::error::Error::UnsupportedRepositoryFormatVersion(u32)
-pub grit_lib::error::Error::WorktreePathRegistered
-pub grit_lib::error::Error::WorktreePathRegistered::path: alloc::string::String
-pub grit_lib::error::Error::WorktreePathRegisteredMissing
-pub grit_lib::error::Error::WorktreePathRegisteredMissing::path: alloc::string::String
+pub grit_lib::error::Error::Worktree(grit_lib::worktree::WorktreeError)
 pub grit_lib::error::Error::WouldOverwrite
 pub grit_lib::error::Error::WouldOverwrite::message: alloc::string::String
 pub grit_lib::error::Error::WouldOverwrite::paths: alloc::vec::Vec<alloc::string::String>
@@ -5494,6 +5491,8 @@ impl core::convert::From<grit_lib::revwalk::rev_parse_error::RevParseError> for 
 pub fn grit_lib::error::Error::from(grit_lib::revwalk::rev_parse_error::RevParseError) -> Self
 impl core::convert::From<grit_lib::tree_sha256::TreeSha256ClaimError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::tree_sha256::TreeSha256ClaimError) -> Self
+impl core::convert::From<grit_lib::worktree::WorktreeError> for grit_lib::error::Error
+pub fn grit_lib::error::Error::from(grit_lib::worktree::WorktreeError) -> Self
 impl core::error::Error for grit_lib::error::Error
 pub fn grit_lib::error::Error::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
 impl core::fmt::Debug for grit_lib::error::Error
@@ -14741,10 +14740,7 @@ pub grit_lib::prelude::Error::UnsupportedObjectStore
 pub grit_lib::prelude::Error::UnsupportedObjectStore::operation: &'static str
 pub grit_lib::prelude::Error::UnsupportedRepositoryExtension(alloc::string::String)
 pub grit_lib::prelude::Error::UnsupportedRepositoryFormatVersion(u32)
-pub grit_lib::prelude::Error::WorktreePathRegistered
-pub grit_lib::prelude::Error::WorktreePathRegistered::path: alloc::string::String
-pub grit_lib::prelude::Error::WorktreePathRegisteredMissing
-pub grit_lib::prelude::Error::WorktreePathRegisteredMissing::path: alloc::string::String
+pub grit_lib::prelude::Error::Worktree(grit_lib::worktree::WorktreeError)
 pub grit_lib::prelude::Error::WouldOverwrite
 pub grit_lib::prelude::Error::WouldOverwrite::message: alloc::string::String
 pub grit_lib::prelude::Error::WouldOverwrite::paths: alloc::vec::Vec<alloc::string::String>
@@ -14829,6 +14825,8 @@ impl core::convert::From<grit_lib::revwalk::rev_parse_error::RevParseError> for 
 pub fn grit_lib::error::Error::from(grit_lib::revwalk::rev_parse_error::RevParseError) -> Self
 impl core::convert::From<grit_lib::tree_sha256::TreeSha256ClaimError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::tree_sha256::TreeSha256ClaimError) -> Self
+impl core::convert::From<grit_lib::worktree::WorktreeError> for grit_lib::error::Error
+pub fn grit_lib::error::Error::from(grit_lib::worktree::WorktreeError) -> Self
 impl core::error::Error for grit_lib::error::Error
 pub fn grit_lib::error::Error::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
 impl core::fmt::Debug for grit_lib::error::Error
@@ -25549,6 +25547,90 @@ impl core::marker::Unpin for grit_lib::worktree::WorktreeBranch
 impl core::marker::UnsafeUnpin for grit_lib::worktree::WorktreeBranch
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::worktree::WorktreeBranch
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::worktree::WorktreeBranch
+#[non_exhaustive] pub enum grit_lib::worktree::WorktreeError
+pub grit_lib::worktree::WorktreeError::AlreadyLocked
+pub grit_lib::worktree::WorktreeError::AlreadyLocked::reason: core::option::Option<alloc::string::String>
+pub grit_lib::worktree::WorktreeError::BareRepository
+pub grit_lib::worktree::WorktreeError::BranchTipMismatch
+pub grit_lib::worktree::WorktreeError::BranchTipMismatch::branch: alloc::string::String
+pub grit_lib::worktree::WorktreeError::BrokenGitFile
+pub grit_lib::worktree::WorktreeError::BrokenGitFile::path: std::path::PathBuf
+pub grit_lib::worktree::WorktreeError::DotGitIsDirectory
+pub grit_lib::worktree::WorktreeError::DotGitIsDirectory::path: std::path::PathBuf
+pub grit_lib::worktree::WorktreeError::HasLocalChanges
+pub grit_lib::worktree::WorktreeError::HasSubmodules
+pub grit_lib::worktree::WorktreeError::InvalidAdminDir
+pub grit_lib::worktree::WorktreeError::InvalidAdminDir::path: std::path::PathBuf
+pub grit_lib::worktree::WorktreeError::LockHeld
+pub grit_lib::worktree::WorktreeError::LockHeld::path: std::path::PathBuf
+pub grit_lib::worktree::WorktreeError::Locked
+pub grit_lib::worktree::WorktreeError::Locked::reason: core::option::Option<alloc::string::String>
+pub grit_lib::worktree::WorktreeError::MainWorktree
+pub grit_lib::worktree::WorktreeError::MainWorktree::operation: grit_lib::worktree::WorktreeOperation
+pub grit_lib::worktree::WorktreeError::NoFileName
+pub grit_lib::worktree::WorktreeError::NoFileName::path: std::path::PathBuf
+pub grit_lib::worktree::WorktreeError::NonUtf8SubmodulePath
+pub grit_lib::worktree::WorktreeError::NonUtf8SubmodulePath::path: alloc::vec::Vec<u8>
+pub grit_lib::worktree::WorktreeError::NotADirectory
+pub grit_lib::worktree::WorktreeError::NotADirectory::path: std::path::PathBuf
+pub grit_lib::worktree::WorktreeError::NotLocked
+pub grit_lib::worktree::WorktreeError::NotRegistered
+pub grit_lib::worktree::WorktreeError::NotRegistered::path: std::path::PathBuf
+pub grit_lib::worktree::WorktreeError::PathExists
+pub grit_lib::worktree::WorktreeError::PathExists::path: std::path::PathBuf
+pub grit_lib::worktree::WorktreeError::PathExistsNotDirectory
+pub grit_lib::worktree::WorktreeError::PathExistsNotDirectory::path: std::path::PathBuf
+pub grit_lib::worktree::WorktreeError::PathNotFound
+pub grit_lib::worktree::WorktreeError::PathNotFound::path: std::path::PathBuf
+pub grit_lib::worktree::WorktreeError::PathRegistered
+pub grit_lib::worktree::WorktreeError::PathRegistered::path: std::path::PathBuf
+pub grit_lib::worktree::WorktreeError::PathRegisteredMissing
+pub grit_lib::worktree::WorktreeError::PathRegisteredMissing::path: std::path::PathBuf
+impl core::clone::Clone for grit_lib::worktree::WorktreeError
+pub fn grit_lib::worktree::WorktreeError::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::worktree::WorktreeError
+impl core::cmp::PartialEq for grit_lib::worktree::WorktreeError
+pub fn grit_lib::worktree::WorktreeError::eq(&self, &Self) -> bool
+impl core::convert::From<grit_lib::worktree::WorktreeError> for grit_lib::error::Error
+pub fn grit_lib::error::Error::from(grit_lib::worktree::WorktreeError) -> Self
+impl core::error::Error for grit_lib::worktree::WorktreeError
+impl core::fmt::Debug for grit_lib::worktree::WorktreeError
+pub fn grit_lib::worktree::WorktreeError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::worktree::WorktreeError
+pub fn grit_lib::worktree::WorktreeError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::worktree::WorktreeError
+impl core::marker::Freeze for grit_lib::worktree::WorktreeError
+impl core::marker::Send for grit_lib::worktree::WorktreeError
+impl core::marker::Sync for grit_lib::worktree::WorktreeError
+impl core::marker::Unpin for grit_lib::worktree::WorktreeError
+impl core::marker::UnsafeUnpin for grit_lib::worktree::WorktreeError
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::worktree::WorktreeError
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::worktree::WorktreeError
+pub enum grit_lib::worktree::WorktreeOperation
+pub grit_lib::worktree::WorktreeOperation::Lock
+pub grit_lib::worktree::WorktreeOperation::Move
+pub grit_lib::worktree::WorktreeOperation::Remove
+pub grit_lib::worktree::WorktreeOperation::Unlock
+impl grit_lib::worktree::WorktreeOperation
+pub fn grit_lib::worktree::WorktreeOperation::as_str(self) -> &'static str
+impl core::clone::Clone for grit_lib::worktree::WorktreeOperation
+pub fn grit_lib::worktree::WorktreeOperation::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::worktree::WorktreeOperation
+impl core::cmp::PartialEq for grit_lib::worktree::WorktreeOperation
+pub fn grit_lib::worktree::WorktreeOperation::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::worktree::WorktreeOperation
+pub fn grit_lib::worktree::WorktreeOperation::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::worktree::WorktreeOperation
+pub fn grit_lib::worktree::WorktreeOperation::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::worktree::WorktreeOperation
+impl core::marker::StructuralPartialEq for grit_lib::worktree::WorktreeOperation
+impl core::marker::Freeze for grit_lib::worktree::WorktreeOperation
+impl core::marker::Send for grit_lib::worktree::WorktreeOperation
+impl core::marker::Sync for grit_lib::worktree::WorktreeOperation
+impl core::marker::Unpin for grit_lib::worktree::WorktreeOperation
+impl core::marker::UnsafeUnpin for grit_lib::worktree::WorktreeOperation
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::worktree::WorktreeOperation
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::worktree::WorktreeOperation
 pub enum grit_lib::worktree::WorktreeRepairKind
 pub grit_lib::worktree::WorktreeRepairKind::GitFileAdminDir
 pub grit_lib::worktree::WorktreeRepairKind::GitFilePathStyle

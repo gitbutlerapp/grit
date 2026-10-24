@@ -5,8 +5,9 @@ use std::path::Path;
 use crate::error::Result;
 use crate::repo::Repository;
 use crate::worktree::{
-    add_linked_worktree, list_worktrees, move_linked_worktree, remove_linked_worktree,
-    repair_worktrees, AddLinkedWorktreeOptions, MoveWorktreeOptions, WorktreeEntry, WorktreeRepair,
+    add_linked_worktree, list_worktrees, lock_linked_worktree, move_linked_worktree,
+    remove_linked_worktree, repair_worktrees, unlock_linked_worktree, AddLinkedWorktreeOptions,
+    MoveWorktreeOptions, WorktreeEntry, WorktreeRepair,
 };
 
 pub use crate::worktree::LockWorktreeOptions;
@@ -90,11 +91,14 @@ impl<'repo> RepositoryWorktrees<'repo> {
         remove_linked_worktree(self.repo, path, force)
     }
 
-    /// Create or update the `locked` file for the worktree at `path`.
+    /// Create the `locked` file for the linked worktree at `path`.
     ///
     /// # Errors
     ///
-    /// Returns an error when `path` is not a registered worktree or is the main worktree.
+    /// Returns [`WorktreeError::NotRegistered`](crate::worktree::WorktreeError::NotRegistered),
+    /// [`WorktreeError::MainWorktree`](crate::worktree::WorktreeError::MainWorktree) or
+    /// [`WorktreeError::AlreadyLocked`](crate::worktree::WorktreeError::AlreadyLocked), or an
+    /// I/O error writing the file.
     ///
     /// # Examples
     ///
@@ -119,8 +123,10 @@ impl<'repo> RepositoryWorktrees<'repo> {
     ///
     /// # Errors
     ///
-    /// Returns an error when `path` is not a registered worktree, is the main worktree, or is
-    /// not locked.
+    /// Returns [`WorktreeError::NotRegistered`](crate::worktree::WorktreeError::NotRegistered),
+    /// [`WorktreeError::MainWorktree`](crate::worktree::WorktreeError::MainWorktree) or
+    /// [`WorktreeError::NotLocked`](crate::worktree::WorktreeError::NotLocked), or an I/O error
+    /// removing the file.
     pub fn unlock(&self, path: &Path) -> Result<()> {
         unlock_linked_worktree(self.repo, path)
     }
@@ -142,69 +148,4 @@ impl<'repo> RepositoryWorktrees<'repo> {
     pub fn repair(&self, paths: &[&Path], dry_run: bool) -> Result<Vec<WorktreeRepair>> {
         repair_worktrees(self.repo, paths, dry_run)
     }
-}
-
-/// Write `<admin>/locked` for the linked worktree at `path`.
-///
-/// # Errors
-///
-/// Fails when `path` is unknown, is the main worktree, or is already locked.
-pub fn lock_linked_worktree(repo: &Repository, path: &Path, reason: Option<&str>) -> Result<()> {
-    use crate::git_path::path_for_disk_compare;
-    use crate::worktree::common_git_dir;
-    use std::fs;
-
-    let common = common_git_dir(repo.git_dir());
-    let target = path_for_disk_compare(path);
-    let entry = list_worktrees(repo)?
-        .into_iter()
-        .find(|e| e.path == target)
-        .ok_or_else(|| {
-            crate::error::Error::Message(format!("'{target:?}' is not a registered worktree"))
-        })?;
-    if entry.admin_dir == common {
-        return Err(crate::error::Error::Message(
-            "cannot lock the main working tree".into(),
-        ));
-    }
-    if entry.is_locked {
-        return Err(crate::error::Error::Message(
-            entry
-                .lock_reason
-                .map(|r| format!("worktree is already locked: {r}"))
-                .unwrap_or_else(|| "worktree is already locked".into()),
-        ));
-    }
-    let body = reason.unwrap_or("");
-    fs::write(entry.admin_dir.join("locked"), body).map_err(crate::error::Error::Io)?;
-    Ok(())
-}
-
-/// Delete `<admin>/locked` for the linked worktree at `path`.
-///
-/// # Errors
-///
-/// Fails when `path` is unknown, is the main worktree, or is not locked.
-pub fn unlock_linked_worktree(repo: &Repository, path: &Path) -> Result<()> {
-    use crate::git_path::path_for_disk_compare;
-
-    let target = path_for_disk_compare(path);
-    let entry = list_worktrees(repo)?
-        .into_iter()
-        .find(|e| e.path == target)
-        .ok_or_else(|| {
-            crate::error::Error::Message(format!("'{target:?}' is not a registered worktree"))
-        })?;
-    if entry.admin_dir == crate::worktree::common_git_dir(repo.git_dir()) {
-        return Err(crate::error::Error::Message(
-            "cannot unlock the main working tree".into(),
-        ));
-    }
-    if !entry.is_locked {
-        return Err(crate::error::Error::Message(
-            "worktree is not locked".into(),
-        ));
-    }
-    std::fs::remove_file(entry.admin_dir.join("locked")).map_err(crate::error::Error::Io)?;
-    Ok(())
 }

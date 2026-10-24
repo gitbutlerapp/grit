@@ -10,7 +10,8 @@ use crate::index::{Index, MODE_GITLINK};
 use crate::lockfile::{LockError, LockFile, LockWait};
 use crate::repo::Repository;
 
-use super::core::{common_git_dir, list_worktrees, WorktreeEntry};
+use super::core::{common_git_dir, find_linked_worktree, list_worktrees, WorktreeEntry};
+use super::error::{WorktreeError, WorktreeOperation};
 
 /// Options for [`move_linked_worktree`].
 #[derive(Debug, Clone, Default)]
@@ -47,41 +48,31 @@ pub struct WorktreeRepair {
 ///
 /// # Errors
 ///
-/// Refuses the main worktree, locked worktrees (unless [`MoveWorktreeOptions::force`]),
-/// an existing destination, populated submodules, or cross-operation I/O failures.
+/// Returns [`WorktreeError::NotRegistered`] for an unknown `from`,
+/// [`WorktreeError::MainWorktree`] for the main worktree, [`WorktreeError::Locked`] unless
+/// [`MoveWorktreeOptions::force`] is set, [`WorktreeError::PathExists`] for an existing
+/// destination, [`WorktreeError::HasSubmodules`] for populated submodules, and I/O failures.
 pub fn move_linked_worktree(
     repo: &Repository,
     from: &Path,
     to: &Path,
     options: &MoveWorktreeOptions,
 ) -> Result<()> {
-    let common = common_git_dir(repo.git_dir());
-    let from_canon = path_for_disk_compare(from);
-    let entry = find_worktree_entry(repo, &from_canon)?;
-    if entry.admin_dir == common {
-        return Err(Error::Message("cannot move the main working tree".into()));
-    }
+    let entry = find_linked_worktree(repo, from, WorktreeOperation::Move)?;
     if entry.is_locked && !options.force {
-        return Err(Error::Message(
-            entry
-                .lock_reason
-                .map(|r| format!("worktree is locked: {r}"))
-                .unwrap_or_else(|| "worktree is locked".into()),
-        ));
+        return Err(WorktreeError::Locked {
+            reason: entry.lock_reason,
+        }
+        .into());
     }
 
     let dest = resolve_move_destination(&entry.path, to)?;
     if dest.exists() {
-        return Err(Error::Message(format!(
-            "'{}' already exists",
-            dest.display()
-        )));
+        return Err(WorktreeError::PathExists { path: dest }.into());
     }
 
     if worktree_has_blocking_submodules(&entry)? {
-        return Err(Error::Message(
-            "working trees containing submodules cannot be moved or removed".into(),
-        ));
+        return Err(WorktreeError::HasSubmodules.into());
     }
 
     if options.dry_run {
@@ -103,7 +94,9 @@ pub fn move_linked_worktree(
 ///
 /// # Errors
 ///
-/// Propagates I/O failures and returns [`Error::Message`] for invalid repair targets.
+/// Returns [`WorktreeError::PathNotFound`] or [`WorktreeError::NotADirectory`] for an invalid
+/// target, [`WorktreeError::DotGitIsDirectory`] or [`WorktreeError::BrokenGitFile`] when a
+/// target's `.git` cannot be traced to its registration, and I/O failures.
 pub fn repair_worktrees(
     repo: &Repository,
     paths: &[&Path],
@@ -126,27 +119,14 @@ pub fn repair_worktrees(
     for path in paths {
         let wt_path = path_for_disk_compare(path);
         if !wt_path.exists() {
-            return Err(Error::Message(format!(
-                "'{}' is not a valid path",
-                wt_path.display()
-            )));
+            return Err(WorktreeError::PathNotFound { path: wt_path }.into());
         }
         if !wt_path.is_dir() {
-            return Err(Error::Message(format!(
-                "'{}' is not a directory",
-                wt_path.display()
-            )));
+            return Err(WorktreeError::NotADirectory { path: wt_path }.into());
         }
         repair_worktree_at_path(repo, &wt_path, dry_run, &mut repairs)?;
     }
     Ok(repairs)
-}
-
-fn find_worktree_entry(repo: &Repository, path: &Path) -> Result<WorktreeEntry> {
-    list_worktrees(repo)?
-        .into_iter()
-        .find(|e| e.path == path)
-        .ok_or_else(|| Error::Message(format!("'{}' is not a registered worktree", path.display())))
 }
 
 /// Resolve the destination directory for [`move_linked_worktree`].
@@ -155,22 +135,23 @@ fn find_worktree_entry(repo: &Repository, path: &Path) -> Result<WorktreeEntry> 
 ///
 /// # Errors
 ///
-/// Returns [`Error::Message`] when `from` has no final path component or a parent is not a directory.
+/// Returns [`WorktreeError::NoFileName`] when `from` has no final path component and
+/// [`WorktreeError::NotADirectory`] when the destination's parent is not a directory.
 pub fn resolve_move_destination(from: &Path, to: &Path) -> Result<PathBuf> {
     let dest = if to.is_dir() {
-        let base = from
-            .file_name()
-            .ok_or_else(|| Error::Message("invalid worktree path".into()))?;
+        let base = from.file_name().ok_or_else(|| WorktreeError::NoFileName {
+            path: from.to_path_buf(),
+        })?;
         path_for_disk_compare(&to.join(base))
     } else {
         path_for_disk_compare(to)
     };
     if let Some(parent) = dest.parent() {
         if parent.exists() && !parent.is_dir() {
-            return Err(Error::Message(format!(
-                "'{}' is not a directory",
-                parent.display()
-            )));
+            return Err(WorktreeError::NotADirectory {
+                path: parent.to_path_buf(),
+            }
+            .into());
         }
     }
     Ok(dest)
@@ -331,8 +312,11 @@ fn worktree_has_blocking_submodules(entry: &WorktreeEntry) -> Result<bool> {
         if idx_entry.mode != MODE_GITLINK {
             continue;
         }
-        let name = std::str::from_utf8(&idx_entry.path)
-            .map_err(|_| Error::Message("invalid submodule path in index".into()))?;
+        let name = std::str::from_utf8(&idx_entry.path).map_err(|_| {
+            WorktreeError::NonUtf8SubmodulePath {
+                path: idx_entry.path.clone(),
+            }
+        })?;
         let sub_path = entry.path.join(name);
         if is_submodule_populated(&sub_path) {
             return Ok(true);
@@ -406,9 +390,7 @@ fn lock_path_for(path: &Path) -> PathBuf {
 fn map_lock_err(err: LockError) -> Error {
     match err {
         LockError::Io { source, .. } => Error::Io(source),
-        LockError::Held { path } => {
-            Error::Message(format!("could not acquire lock for '{}'", path.display()))
-        }
+        LockError::Held { path } => WorktreeError::LockHeld { path }.into(),
     }
 }
 
@@ -519,12 +501,11 @@ fn repair_worktree_at_path(
 ) -> Result<()> {
     let dotgit = wt_path.join(".git");
     if dotgit.is_dir() {
-        return Err(Error::Message(
-            "unable to locate repository; .git is not a file".into(),
-        ));
+        return Err(WorktreeError::DotGitIsDirectory { path: dotgit }.into());
     }
     let dotgit_content = fs::read_to_string(&dotgit).map_err(Error::Io)?;
-    let admin_dir = resolve_admin_from_gitfile(repo, &dotgit_content, wt_path)?;
+    let admin_dir = resolve_admin_from_gitfile(repo, &dotgit_content, wt_path)
+        .ok_or(WorktreeError::BrokenGitFile { path: dotgit })?;
     repair_worktree_links(wt_path, &admin_dir, dry_run, repairs)
 }
 
@@ -537,9 +518,7 @@ fn repair_worktree_links(
 ) -> Result<()> {
     let dotgit = wt_path.join(".git");
     if dotgit.is_dir() {
-        return Err(Error::Message(
-            "unable to locate repository; .git is not a file".into(),
-        ));
+        return Err(WorktreeError::DotGitIsDirectory { path: dotgit }.into());
     }
     let dotgit_content = fs::read_to_string(&dotgit).unwrap_or_default();
     let expected_admin = absolute_path_for_gitfile_stored_path(admin_dir);
@@ -589,18 +568,10 @@ fn gitdir_repair_kind(
     }
 }
 
-fn resolve_admin_from_gitfile(repo: &Repository, content: &str, wt_path: &Path) -> Result<PathBuf> {
-    if let Some(admin) = parse_gitfile_target(content, wt_path) {
-        if admin.join("commondir").is_file() || admin.join("HEAD").is_file() {
-            return Ok(admin);
-        }
-    }
-    if let Some(inferred) = infer_admin_from_gitfile_content(repo, content) {
-        return Ok(inferred);
-    }
-    Err(Error::Message(
-        "unable to locate repository; .git file broken".into(),
-    ))
+fn resolve_admin_from_gitfile(repo: &Repository, content: &str, wt_path: &Path) -> Option<PathBuf> {
+    parse_gitfile_target(content, wt_path)
+        .filter(|admin| admin.join("commondir").is_file() || admin.join("HEAD").is_file())
+        .or_else(|| infer_admin_from_gitfile_content(repo, content))
 }
 
 fn infer_admin_from_gitfile_content(repo: &Repository, content: &str) -> Option<PathBuf> {

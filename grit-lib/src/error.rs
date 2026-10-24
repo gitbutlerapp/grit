@@ -1109,21 +1109,9 @@ pub enum Error {
     #[error(transparent)]
     Tag(#[from] crate::porcelain::tag::TagError),
 
-    /// A linked worktree path is already registered under `.git/worktrees/`.
-    #[error(
-        "'{path}' is a missing but already registered worktree; use add with --force to override, or prune or remove to clear"
-    )]
-    WorktreePathRegisteredMissing {
-        /// Worktree path that is registered but missing on disk.
-        path: String,
-    },
-
-    /// A linked worktree path is already registered and its directory still exists.
-    #[error("'{path}' is already a registered worktree")]
-    WorktreePathRegistered {
-        /// Existing registered worktree directory.
-        path: String,
-    },
+    /// Linked worktree add/remove/move/lock/repair failure ([`crate::worktree::WorktreeError`]).
+    #[error(transparent)]
+    Worktree(#[from] crate::worktree::WorktreeError),
 
     /// Stash commit object has fewer parents or an invalid shape for apply/show.
     #[error("corrupt stash commit: {0}")]

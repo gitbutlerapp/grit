@@ -14,7 +14,6 @@ use crate::config::ConfigSet;
 use crate::environment::RepositoryOptions;
 use crate::error::{Error, Result};
 use crate::git_path::{absolute_path_for_gitfile_stored_path, path_for_disk_compare};
-use crate::objects::{parse_commit, ObjectKind};
 use crate::porcelain::branch::{resolve_create_tracking, TrackMode};
 use crate::porcelain::branch_error::BranchError;
 use crate::porcelain::checkout::checkout_between_trees;
@@ -27,6 +26,8 @@ use crate::refs;
 use crate::repo::{common_git_dir_for_config, Repository};
 use crate::rev_parse::resolve_revision;
 use crate::state::{resolve_head, HeadState};
+
+use super::error::{WorktreeError, WorktreeOperation};
 
 /// Why Git marks a linked worktree as `prunable` in `worktree list --porcelain`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -542,9 +543,7 @@ pub fn add_linked_worktree(
 ) -> Result<WorktreeEntry> {
     let common = common_git_dir(repo.git_dir());
     if is_bare_repository(&common) {
-        return Err(Error::Message(
-            "cannot add a worktree to a bare repository".into(),
-        ));
+        return Err(WorktreeError::BareRepository.into());
     }
 
     let wt_path = if opts.path.exists() {
@@ -556,13 +555,7 @@ pub fn add_linked_worktree(
     ensure_empty_or_missing(&wt_path)?;
 
     let (start_spec, start_oid) = resolve_worktree_start_commit(repo, opts)?;
-    let start_obj = repo.odb().read(&start_oid)?;
-    if start_obj.kind != ObjectKind::Commit {
-        return Err(Error::Message(format!(
-            "revision '{start_spec}' does not resolve to a commit"
-        )));
-    }
-    let tree_oid = parse_commit(&start_obj.data)?.tree;
+    let tree_oid = repo.odb().commit_tree(&start_oid)?;
 
     let plan = plan_worktree_head(repo, opts, &wt_path, &start_spec, start_oid)?;
     if let Some(ref branch_ref) = plan.head_ref {
@@ -757,10 +750,7 @@ fn resolve_worktree_start_commit(
 ) -> Result<(String, crate::objects::ObjectId)> {
     if let Some(WorktreeBranch::Existing(name)) = &opts.branch {
         if opts.start_point.is_none() {
-            validate_branch_short_name(name).map_err(|e| Error::Message(e.to_string()))?;
-            let branch_ref = format!("refs/heads/{name}");
-            let oid = refs::resolve_ref(repo.git_dir(), &branch_ref)
-                .map_err(|_| Error::Message(format!("no branch named '{name}'")))?;
+            let oid = resolve_existing_branch_tip(repo, name)?;
             return Ok((name.clone(), oid));
         }
     }
@@ -815,12 +805,13 @@ fn plan_worktree_head(
                 if let Some(branch_ref) = resolve_existing_branch(repo, start) {
                     let tip = refs::resolve_ref(repo.git_dir(), &branch_ref)?;
                     if tip != start_oid {
-                        return Err(Error::Message(format!(
-                            "branch '{}' does not match start commit",
-                            branch_ref
+                        return Err(WorktreeError::BranchTipMismatch {
+                            branch: branch_ref
                                 .strip_prefix("refs/heads/")
                                 .unwrap_or(&branch_ref)
-                        )));
+                                .to_owned(),
+                        }
+                        .into());
                     }
                     return Ok(WorktreeHeadPlan {
                         head_ref: Some(branch_ref),
@@ -835,7 +826,7 @@ fn plan_worktree_head(
                 });
             }
             let branch = worktree_path_basename(wt_path);
-            validate_branch_short_name(&branch).map_err(|e| Error::Message(e.to_string()))?;
+            validate_branch_name(&branch)?;
             Ok(WorktreeHeadPlan {
                 head_ref: Some(format!("refs/heads/{branch}")),
                 branch_write: Some(BranchWritePlan {
@@ -855,18 +846,34 @@ fn prepare_existing_branch(
     name: &str,
     start_oid: crate::objects::ObjectId,
 ) -> Result<String> {
-    validate_branch_short_name(name).map_err(|e| Error::Message(e.to_string()))?;
-    let branch_ref = format!("refs/heads/{name}");
-    if refs::resolve_ref(repo.git_dir(), &branch_ref).is_err() {
-        return Err(Error::Message(format!("no branch named '{name}'")));
-    }
-    let tip = refs::resolve_ref(repo.git_dir(), &branch_ref)?;
+    let tip = resolve_existing_branch_tip(repo, name)?;
     if tip != start_oid {
-        return Err(Error::Message(format!(
-            "branch '{name}' does not match start commit"
-        )));
+        return Err(WorktreeError::BranchTipMismatch {
+            branch: name.to_owned(),
+        }
+        .into());
     }
-    Ok(branch_ref)
+    Ok(format!("refs/heads/{name}"))
+}
+
+fn validate_branch_name(name: &str) -> Result<()> {
+    validate_branch_short_name(name).map_err(|reason| {
+        BranchError::InvalidName {
+            name: name.to_owned(),
+            reason: reason.to_string(),
+        }
+        .into()
+    })
+}
+
+fn resolve_existing_branch_tip(repo: &Repository, name: &str) -> Result<crate::objects::ObjectId> {
+    validate_branch_name(name)?;
+    refs::resolve_ref(repo.git_dir(), &format!("refs/heads/{name}")).map_err(|_| {
+        BranchError::NotFound {
+            name: name.to_owned(),
+        }
+        .into()
+    })
 }
 
 fn create_worktree_branch(
@@ -876,11 +883,14 @@ fn create_worktree_branch(
     start_oid: crate::objects::ObjectId,
     force_reset: bool,
 ) -> Result<String> {
-    validate_branch_short_name(name).map_err(|e| Error::Message(e.to_string()))?;
+    validate_branch_name(name)?;
     let branch_ref = format!("refs/heads/{name}");
     let existing = repo.references().read_existing(&branch_ref)?;
     if existing.is_some() && !force_reset {
-        return Err(Error::Message(format!("branch '{name}' already exists")));
+        return Err(BranchError::AlreadyExists {
+            name: name.to_owned(),
+        }
+        .into());
     }
     if let Some(existing_ref) = existing {
         ensure_branch_not_checked_out_in_any_worktree(repo, name)?;
@@ -990,7 +1000,7 @@ fn linked_worktree_prunable_reason_when_missing(admin: &Path) -> PrunableReason 
 ///
 /// # Errors
 ///
-/// Returns [`Error::Message`] when `path` has no final component.
+/// Returns [`WorktreeError::NoFileName`] when `path` has no final component.
 pub fn resolve_linked_worktree_add_path(path: &Path, relative_to: &Path) -> Result<PathBuf> {
     if path.exists() {
         return Ok(path_for_disk_compare(path));
@@ -1002,7 +1012,7 @@ pub fn resolve_linked_worktree_add_path(path: &Path, relative_to: &Path) -> Resu
     };
     if let Some(parent) = absolute.parent().filter(|p| p.exists()) {
         let Some(name) = absolute.file_name() else {
-            return Err(Error::Message("invalid worktree path".into()));
+            return Err(WorktreeError::NoFileName { path: absolute }.into());
         };
         let mut resolved = path_for_disk_compare(parent);
         resolved.push(name);
@@ -1033,7 +1043,9 @@ impl StaleWorktreeAdminBackup {
                 .unwrap_or_else(|| "wt".to_owned());
             let aside = admin
                 .parent()
-                .ok_or_else(|| Error::Message("invalid worktree admin path".into()))?
+                .ok_or_else(|| WorktreeError::InvalidAdminDir {
+                    path: admin.clone(),
+                })?
                 .join(format!(".{id}-stale-backup-{i}"));
             if aside.exists() {
                 fs::remove_dir_all(&aside).map_err(Error::Io)?;
@@ -1119,12 +1131,17 @@ fn plan_admin_dir_for_add(
         });
     }
 
-    let display = wt_path.display().to_string();
     if wt_path.exists() {
-        return Err(Error::WorktreePathRegistered { path: display });
+        return Err(WorktreeError::PathRegistered {
+            path: wt_path.to_path_buf(),
+        }
+        .into());
     }
     if !force {
-        return Err(Error::WorktreePathRegisteredMissing { path: display });
+        return Err(WorktreeError::PathRegisteredMissing {
+            path: wt_path.to_path_buf(),
+        }
+        .into());
     }
 
     let worktrees_dir = common.join("worktrees");
@@ -1160,30 +1177,16 @@ fn plan_admin_dir_for_add(
 ///
 /// # Errors
 ///
-/// Refuses to remove the main worktree, locked worktrees (unless `force`), or dirty
-/// trees (unless `force`).
+/// Returns [`WorktreeError::NotRegistered`] for an unknown `path`,
+/// [`WorktreeError::MainWorktree`] for the main worktree, and, unless `force` is set,
+/// [`WorktreeError::Locked`] or [`WorktreeError::HasLocalChanges`].
 pub fn remove_linked_worktree(repo: &Repository, path: &Path, force: bool) -> Result<()> {
-    let common = common_git_dir(repo.git_dir());
-    let target = path_for_disk_compare(path);
-    let entry = list_worktrees(repo)?
-        .into_iter()
-        .find(|e| e.path == target)
-        .ok_or_else(|| {
-            Error::Message(format!(
-                "'{}' is not a registered worktree",
-                target.display()
-            ))
-        })?;
-    if entry.admin_dir == common {
-        return Err(Error::Message("cannot remove the main working tree".into()));
-    }
+    let entry = find_linked_worktree(repo, path, WorktreeOperation::Remove)?;
     if entry.is_locked && !force {
-        return Err(Error::Message(
-            entry
-                .lock_reason
-                .map(|r| format!("worktree is locked: {r}"))
-                .unwrap_or_else(|| "worktree is locked".into()),
-        ));
+        return Err(WorktreeError::Locked {
+            reason: entry.lock_reason,
+        }
+        .into());
     }
 
     let linked = Repository::discover(
@@ -1191,9 +1194,7 @@ pub fn remove_linked_worktree(repo: &Repository, path: &Path, force: bool) -> Re
         &repo.linked_worktree_discover_options(),
     )?;
     if !force && worktree_has_local_changes(&linked)? {
-        return Err(Error::Message(
-            "worktree contains modified or untracked files; use -f or --force to remove".into(),
-        ));
+        return Err(WorktreeError::HasLocalChanges.into());
     }
 
     fs::remove_dir_all(&entry.admin_dir).map_err(Error::Io)?;
@@ -1201,6 +1202,62 @@ pub fn remove_linked_worktree(repo: &Repository, path: &Path, force: bool) -> Re
         fs::remove_dir_all(&entry.path).map_err(Error::Io)?;
     }
     Ok(())
+}
+
+/// The registered linked worktree whose root is `path`, for a mutation named by `operation`.
+///
+/// # Errors
+///
+/// [`WorktreeError::NotRegistered`] when no worktree is registered at `path`, and
+/// [`WorktreeError::MainWorktree`] when `path` is the main working tree.
+pub(crate) fn find_linked_worktree(
+    repo: &Repository,
+    path: &Path,
+    operation: WorktreeOperation,
+) -> Result<WorktreeEntry> {
+    let target = path_for_disk_compare(path);
+    let Some(entry) = list_worktrees(repo)?.into_iter().find(|e| e.path == target) else {
+        return Err(WorktreeError::NotRegistered { path: target }.into());
+    };
+    if entry.admin_dir == common_git_dir(repo.git_dir()) {
+        return Err(WorktreeError::MainWorktree { operation }.into());
+    }
+    Ok(entry)
+}
+
+/// Write `<admin>/locked` for the linked worktree at `path`.
+///
+/// # Errors
+///
+/// Fails as [`find_linked_worktree`] does, with [`WorktreeError::AlreadyLocked`] when the
+/// worktree is already locked, or with I/O errors writing the file.
+pub(crate) fn lock_linked_worktree(
+    repo: &Repository,
+    path: &Path,
+    reason: Option<&str>,
+) -> Result<()> {
+    let entry = find_linked_worktree(repo, path, WorktreeOperation::Lock)?;
+    if entry.is_locked {
+        return Err(WorktreeError::AlreadyLocked {
+            reason: entry.lock_reason,
+        }
+        .into());
+    }
+    write_admin_lock_file(&entry.admin_dir, reason)
+}
+
+/// Delete `<admin>/locked` for the linked worktree at `path`.
+///
+/// # Errors
+///
+/// Fails as [`find_linked_worktree`] does, with [`WorktreeError::NotLocked`] when the worktree
+/// is not locked, or with I/O errors removing the file.
+pub(crate) fn unlock_linked_worktree(repo: &Repository, path: &Path) -> Result<()> {
+    let entry = find_linked_worktree(repo, path, WorktreeOperation::Unlock)?;
+    if !entry.is_locked {
+        return Err(WorktreeError::NotLocked.into());
+    }
+    fs::remove_file(entry.admin_dir.join("locked")).map_err(Error::Io)
 }
 
 fn resolve_existing_branch(repo: &Repository, spec: &str) -> Option<String> {
@@ -1214,15 +1271,13 @@ fn resolve_existing_branch(repo: &Repository, spec: &str) -> Option<String> {
 }
 
 fn branch_checked_out_elsewhere(repo: &Repository, branch_ref: &str) -> Result<()> {
-    let resolved = branch_ref.to_owned();
     for wt in list_worktrees(repo)? {
         if let HeadState::Branch { refname, .. } = &wt.head {
-            if refname == &resolved {
-                return Err(Error::Message(format!(
-                    "branch '{}' is already checked out at '{}'",
-                    resolved.strip_prefix("refs/heads/").unwrap_or(&resolved),
-                    wt.path.display()
-                )));
+            if refname == branch_ref {
+                return Err(branch_checked_out_error(
+                    branch_ref.strip_prefix("refs/heads/").unwrap_or(branch_ref),
+                    &wt.path,
+                ));
             }
         }
     }
@@ -1234,17 +1289,17 @@ fn ensure_empty_or_missing(path: &Path) -> Result<()> {
         return Ok(());
     }
     if !path.is_dir() {
-        return Err(Error::Message(format!(
-            "'{}' already exists and is not a directory",
-            path.display()
-        )));
+        return Err(WorktreeError::PathExistsNotDirectory {
+            path: path.to_path_buf(),
+        }
+        .into());
     }
     let mut entries = fs::read_dir(path).map_err(Error::Io)?;
     if entries.next().is_some() {
-        return Err(Error::Message(format!(
-            "'{}' already exists",
-            path.display()
-        )));
+        return Err(WorktreeError::PathExists {
+            path: path.to_path_buf(),
+        }
+        .into());
     }
     Ok(())
 }
@@ -1504,7 +1559,16 @@ mod tests {
         let dir = tmp.path().join("occupied");
         fs::create_dir_all(&dir).unwrap();
         fs::write(dir.join("file"), b"x").unwrap();
-        assert!(ensure_empty_or_missing(&dir).is_err());
+        assert!(matches!(
+            ensure_empty_or_missing(&dir),
+            Err(Error::Worktree(WorktreeError::PathExists { path })) if path == dir
+        ));
+        assert!(matches!(
+            ensure_empty_or_missing(&dir.join("file")),
+            Err(Error::Worktree(
+                WorktreeError::PathExistsNotDirectory { .. }
+            ))
+        ));
         let missing = tmp.path().join("missing");
         assert!(ensure_empty_or_missing(&missing).is_ok());
     }
@@ -1534,7 +1598,10 @@ mod tests {
             },
         )
         .unwrap_err();
-        assert!(matches!(err, Error::Message(_)));
+        assert!(matches!(
+            err,
+            Error::Worktree(WorktreeError::BareRepository)
+        ));
     }
 
     #[test]
@@ -1703,7 +1770,7 @@ mod tests {
                 },
             )
             .unwrap_err(),
-            Error::WorktreePathRegisteredMissing { .. }
+            Error::Worktree(WorktreeError::PathRegisteredMissing { .. })
         ));
     }
 
@@ -1732,7 +1799,12 @@ mod tests {
         git(&["commit", "-qm", "init"]);
 
         let repo = Repository::discover(Some(main.as_path()), &RepositoryOptions::empty()).unwrap();
-        assert!(remove_linked_worktree(&repo, &main, false).is_err());
+        assert!(matches!(
+            remove_linked_worktree(&repo, &main, false),
+            Err(Error::Worktree(WorktreeError::MainWorktree {
+                operation: WorktreeOperation::Remove
+            }))
+        ));
 
         let linked = tmp.path().join("linked");
         add_linked_worktree(
@@ -1755,7 +1827,14 @@ mod tests {
             .map(|e| e.path())
             .expect("admin");
         fs::write(admin.join("locked"), "hold\n").unwrap();
-        assert!(remove_linked_worktree(&repo, &linked, false).is_err());
+        assert!(matches!(
+            remove_linked_worktree(&repo, &linked, false),
+            Err(Error::Worktree(WorktreeError::Locked { reason: Some(r) })) if r == "hold"
+        ));
         assert!(remove_linked_worktree(&repo, &linked, true).is_ok());
+        assert!(matches!(
+            remove_linked_worktree(&repo, &linked, false),
+            Err(Error::Worktree(WorktreeError::NotRegistered { .. }))
+        ));
     }
 }

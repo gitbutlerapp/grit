@@ -13,9 +13,11 @@
 //! # }
 //! ```
 mod core;
+mod error;
 mod move_repair;
 
 pub use core::*;
+pub use error::{WorktreeError, WorktreeOperation};
 pub use move_repair::{
     move_linked_worktree, repair_worktrees, resolve_move_destination, MoveWorktreeOptions,
     WorktreeRepair, WorktreeRepairKind,
