@@ -1,6 +1,6 @@
 ---
 title: grit auth
-summary: Sign in to GitHub or a grit serve host so pushes and fetches just work.
+summary: Sign in to GitHub or a grit serve host in the browser so pushes and fetches just work.
 group: Remotes
 order: 5
 ---
@@ -13,18 +13,25 @@ grit auth <url> [--token <token>]
 grit auth logout [<url>] [--dry-run]
 ```
 
+`grit login` is the same command.
+
 ## Description
 
 Signs you in to GitHub and saves the token, so that [`grit push`](../push/), [`grit fetch`](../fetch/) and [`grit clone`](../clone/) work with private repositories over HTTPS.
 
 `grit auth` uses GitHub's device flow. It prints a web address and a short code. Open `https://github.com/login/device` in your browser, enter the code and approve access. `grit` waits until you do, then saves the token with your credential helper. Every request goes straight to github.com.
 
-A credential helper has to be configured to store the token. On Windows, if none is set, `grit` uses its built-in one ([`grit manager`](../manager/)). Elsewhere, set one with [`grit config`](../config/):
+The token is saved with your credential helper. When no `credential.helper` is set, `grit` sets one in your global config first and tells you which:
+
+- on macOS, `osxkeychain` (the keychain);
+- on Linux, `libsecret` when it is installed;
+- on Windows, its built-in one ([`grit manager`](../manager/));
+- otherwise `store`, which keeps tokens in plain text in `~/.git-credentials`.
+
+To use a different one, set it yourself with [`grit config`](../config/) before signing in:
 
 ```console
-$ grit config --global credential.helper osxkeychain   # macOS
-$ grit config --global credential.helper libsecret     # Linux
-$ grit config --global credential.helper store         # a plain-text file, any system
+$ grit config --global credential.helper libsecret
 ```
 
 The helper is shared with Git and asked the same way: `grit` sends it the protocol and host (`protocol=https`, `host=github.com`), so one stored entry covers every repository on that host, and entries Git already saved, such as lines in `~/.git-credentials`, work as they are. Set `credential.useHttpPath` to keep a separate entry per repository; the helper then also gets the repository path (`path=owner/repo.git`).
@@ -37,7 +44,9 @@ The helper is shared with Git and asked the same way: `grit` sends it the protoc
 
 `grit auth <url>` signs in to a server run by [`grit serve`](../serve/) instead. The URL can be the server's address or any repository URL on it, such as `http://git.example.com:8080/app.git`; without a scheme it is taken as `https://`. A `github.com` URL signs in to GitHub as above.
 
-A `grit serve` host has no browser sign-in: its admin creates your token with `grit serve add-user`. `grit auth <url>` asks for the token without echoing it (or reads it from stdin, or takes `--token`), checks it with the server, and saves it with your credential helper for the server's scheme and host, under your user name on the server. After that, `grit` and `git` clone, fetch and push to every repository on the host without the token in the URL.
+It works like the GitHub sign-in. `grit` prints the server's sign-in page and a short code, and opens the page in your browser when it can. Sign in there with your email address and password (from the server's admin), check that the page shows the same code, and approve. `grit` then saves a new token with your credential helper for the server's scheme and host, under your email address. After that, `grit` and `git` clone, fetch and push to every repository on the host without asking.
+
+To store a token you already have instead, for example one an admin made with `grit serve token` for a CI job, pass `--token`: `grit` checks it with the server before saving it.
 
 `grit auth logout <url>` removes the token saved for that host.
 
@@ -46,7 +55,7 @@ A `grit serve` host has no browser sign-in: its admin creates your token with `g
 | Option | Description |
 | --- | --- |
 | `<url>` | Sign in to the `grit serve` host this URL names instead of GitHub. |
-| `--token <token>` | The access token for a `grit serve` host. Without it, `grit auth <url>` prompts for the token on a terminal and reads it from stdin otherwise. A token on the command line can end up in your shell history. |
+| `--token <token>` | Store this access token for a `grit serve` host (from `grit serve token`) instead of signing in in the browser. A token on the command line can end up in your shell history. |
 | `logout` | Remove the saved GitHub token. |
 | `logout <url>` | Remove the token saved for a `grit serve` host. |
 | `--dry-run` | On `logout`, report which stored credential would be erased without calling the helper. |
@@ -71,15 +80,31 @@ $ grit auth logout
 ✓ Signed out of GitHub — removed the stored token for github.com.
 ```
 
-Sign in to a `grit serve` host with the token its admin gave you, then clone without it:
+Sign in to a `grit serve` host in the browser, then clone without a password:
 
 ```console
-$ grit auth http://git.example.com:8080
-Token (from `grit serve add-user`):
-✓ Signed in to git.example.com:8080 as bob — token stored.
+$ grit login http://git.example.com:8080
+To sign in, open this page in your browser:
+
+    http://git.example.com:8080/.grit/authorize?code=K7MQ-3XZP
+
+and check that it shows the code:
+
+    K7MQ-3XZP
+
+(Opened it for you.)
+Waiting for you to approve… (press Ctrl-C to cancel)
+✓ Signed in to git.example.com:8080 as bob@example.com — token stored.
 $ grit clone http://git.example.com:8080/app.git
 $ grit auth logout http://git.example.com:8080
 ✓ Signed out of git.example.com:8080 — removed the stored token for git.example.com:8080.
+```
+
+Store a token made with `grit serve token`, for example on a CI machine:
+
+```console
+$ grit auth http://git.example.com:8080 --token "$GRIT_TOKEN"
+✓ Signed in to git.example.com:8080 as ci@example.com — token stored.
 ```
 
 ## JSON output
@@ -93,7 +118,7 @@ Pass `--json` for stable, scripting-friendly output:
 | `authenticated` | boolean | For sign-in, whether a token was stored. |
 | `logged_out` | boolean | For `logout`, whether a stored token was removed (or would be removed with `--dry-run`). |
 | `host` | string | Host the credential applies to: `github.com`, or a `grit serve` host with its port (`git.example.com:8080`). |
-| `user` | string or omitted | For sign-in to a `grit serve` host, the user the token belongs to. Omitted for GitHub. |
+| `user` | string or omitted | For sign-in to a `grit serve` host, the email address of the user the token belongs to. Omitted for GitHub. |
 | `dry_run` | boolean | On `logout`, `true` when `--dry-run` was used. |
 | `credential` | object or omitted | With `--dry-run`, describes the helper entry that would be removed (`protocol`, `host`, `username`; never includes a password). |
 
@@ -112,7 +137,7 @@ After signing in to a `grit serve` host:
 {
   "authenticated": true,
   "host": "git.example.com:8080",
-  "user": "bob"
+  "user": "bob@example.com"
 }
 ```
 
@@ -143,7 +168,7 @@ Markdown uses headings, bullet lists, and fenced blocks; pipe characters inside 
 - Signed in to **`github.com`**
 ```
 
-For a `grit serve` host the line names the user: ``- Signed in to **`git.example.com:8080`** as **`bob`**``.
+For a `grit serve` host the line names the user: ``- Signed in to **`git.example.com:8080`** as **`bob@example.com`**``.
 
 ## Exit status
 

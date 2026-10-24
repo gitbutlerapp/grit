@@ -1,7 +1,7 @@
 {
   "$id": "https://grit-scm.com/schemas/serve/v1.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "description": "Result of `grit serve --setup` and `grit serve add-user`: a new user and their token.",
+  "description": "Result of `grit serve --setup` and `grit serve add-user`: a new user.",
   "properties": {
     "admin": {
       "description": "Whether the user is an admin (read and write on every repository).",
@@ -11,19 +11,26 @@
       "description": "The user database the user was added to.",
       "type": "string"
     },
-    "token": {
-      "description": "The user's access token. It is shown only once.",
-      "type": "string"
+    "password": {
+      "description": "The temporary password generated for the user, shown only once. Absent when the password was typed in.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "temporary": {
+      "description": "Whether the user must choose a new password when they first sign in (true for a generated password).",
+      "type": "boolean"
     },
     "user": {
-      "description": "The new user's name.",
+      "description": "The new user's email address.",
       "type": "string"
     }
   },
   "required": [
     "admin",
     "database",
-    "token",
+    "temporary",
     "user"
   ],
   "title": "ServeUserOutcome",

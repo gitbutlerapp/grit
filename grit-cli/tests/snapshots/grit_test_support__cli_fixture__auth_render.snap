@@ -40,17 +40,17 @@ expression: payload
   "server_sign_in": {
     "human": {
       "exit": 0,
-      "stdout": "✓ Signed in to git.example.com:8080 as bob — token stored.\n",
+      "stdout": "✓ Signed in to git.example.com:8080 as bob@example.com — token stored.\n",
       "stderr": ""
     },
     "json": {
       "exit": 0,
-      "stdout": "{\"authenticated\":true,\"host\":\"git.example.com:8080\",\"user\":\"bob\"}\n",
+      "stdout": "{\"authenticated\":true,\"host\":\"git.example.com:8080\",\"user\":\"bob@example.com\"}\n",
       "stderr": ""
     },
     "markdown": {
       "exit": 0,
-      "stdout": "## Auth\n\n- Signed in to **`git.example.com:8080`** as **`bob`**\n",
+      "stdout": "## Auth\n\n- Signed in to **`git.example.com:8080`** as **`bob@example.com`**\n",
       "stderr": ""
     }
   },

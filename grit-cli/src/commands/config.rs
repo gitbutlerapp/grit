@@ -569,7 +569,7 @@ fn read_merged_config(env: &grit_lib::config::environment::Environment) -> Resul
     }
 }
 
-#[cfg(windows)]
+/// Set `key` to `value` in the global (per-user) config file.
 pub fn set_global(key: &str, value: &str) -> Result<()> {
     set_value(
         Some(ConfigLocation::Global),

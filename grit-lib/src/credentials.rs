@@ -495,7 +495,49 @@ impl HelperCredentialProvider {
             &self.probed_git_exec_path,
         )
     }
+
+    /// Whether the helper program for the bare helper name `name` (so
+    /// `git-credential-<name>`) is installed in Git's exec-path or on `PATH`.
+    #[must_use]
+    pub fn helper_installed(&self, name: &str) -> bool {
+        let program = format!("git-credential-{name}");
+        let on_path = crate::environment::Environment::empty()
+            .var_os("PATH")
+            .map(|path| std::env::split_paths(&path).collect::<Vec<_>>())
+            .unwrap_or_default();
+        self.exec_path_candidates()
+            .iter()
+            .chain(on_path.iter())
+            .any(|dir| credential_helper_executable_at(&dir.join(&program)).is_some())
+    }
+
+    /// The helper to configure when `credential.helper` is unset: the first of
+    /// [`SUGGESTED_HELPERS`] that is installed.
+    ///
+    /// That is the platform's secure store when it is available (the macOS
+    /// keychain, libsecret on Linux), otherwise `store`, which keeps
+    /// credentials in a plaintext file. `None` when none is installed.
+    #[must_use]
+    pub fn suggested_helper(&self) -> Option<&'static str> {
+        SUGGESTED_HELPERS
+            .iter()
+            .copied()
+            .find(|name| self.helper_installed(name))
+    }
 }
+
+/// Helper names [`HelperCredentialProvider::suggested_helper`] tries, best
+/// first: the platform's secure store, then the plaintext `store`.
+#[cfg(target_os = "macos")]
+pub const SUGGESTED_HELPERS: &[&str] = &["osxkeychain", "store"];
+/// Helper names [`HelperCredentialProvider::suggested_helper`] tries, best
+/// first: the platform's secure store, then the plaintext `store`.
+#[cfg(all(unix, not(target_os = "macos")))]
+pub const SUGGESTED_HELPERS: &[&str] = &["libsecret", "store"];
+/// Helper names [`HelperCredentialProvider::suggested_helper`] tries, best
+/// first: the platform's secure store, then the plaintext `store`.
+#[cfg(not(unix))]
+pub const SUGGESTED_HELPERS: &[&str] = &["manager", "store"];
 
 impl CredentialProvider for HelperCredentialProvider {
     fn fill(&self, input: &Credential) -> Result<Credential> {
@@ -1831,5 +1873,26 @@ mod tests {
             Some(mingw_bin.join("git-credential-manager")),
             "manager helper must resolve via mingw64/bin, searched {candidates:?}"
         );
+    }
+
+    #[test]
+    fn installed_helpers_are_found_in_the_exec_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let program = dir.path().join("git-credential-osxkeychain");
+        std::fs::write(&program, "#!/bin/sh\n").unwrap();
+        let provider = HelperCredentialProvider::new(ConfigSet::default());
+        provider
+            .probed_git_exec_path
+            .set(vec![dir.path().to_path_buf()])
+            .unwrap();
+        assert!(provider.helper_installed("osxkeychain"));
+        assert!(!provider.helper_installed("no-such-helper-anywhere"));
+        let suggested = provider.suggested_helper();
+        assert!(
+            suggested.is_none_or(|name| SUGGESTED_HELPERS.contains(&name)),
+            "{suggested:?}"
+        );
+        #[cfg(target_os = "macos")]
+        assert_eq!(suggested, Some("osxkeychain"));
     }
 }

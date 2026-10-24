@@ -70,6 +70,13 @@ opt-level = 3
 [profile.dev.package.sha1dc]
 opt-level = 3
 
+# Password hashing in `grit serve` tests is deliberately slow; unoptimized it takes seconds.
+[profile.dev.package.argon2]
+opt-level = 3
+
+[profile.dev.package.blake2]
+opt-level = 3
+
 # Release vs dist (factory step 2370).
 # `release`: workspace `--release` builds (including `cargo test --release`) without fat LTO.
 # `dist`: shipped `grit`, Release workflow, and grit-bench timings (fat LTO, size-tuned).

@@ -1,0 +1,21 @@
+{
+  "$id": "https://grit-scm.com/schemas/serve.token/v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Result of `grit serve token`: a new access token for a user.",
+  "properties": {
+    "token": {
+      "description": "The new access token. It is shown only once.",
+      "type": "string"
+    },
+    "user": {
+      "description": "The user's email address.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "token",
+    "user"
+  ],
+  "title": "ServeTokenOutcome",
+  "type": "object"
+}

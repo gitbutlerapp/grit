@@ -5,17 +5,17 @@ expression: payload
 {
   "human": {
     "exit": 0,
-    "stdout": "admin  1 token    all repositories (admin)\nbob    2 tokens   app (write), docs (read)\n",
+    "stdout": "admin@example.com  1 token    all repositories (admin)\nbob@example.com    2 tokens   app (write), docs (read)  (temporary password)\n",
     "stderr": ""
   },
   "json": {
     "exit": 0,
-    "stdout": "{\"database\":\"/srv/git/grit-serve.db\",\"users\":[{\"name\":\"admin\",\"admin\":true,\"tokens\":1,\"grants\":[]},{\"name\":\"bob\",\"admin\":false,\"tokens\":2,\"grants\":[{\"repository\":\"app\",\"access\":\"write\"},{\"repository\":\"docs\",\"access\":\"read\"}]}]}\n",
+    "stdout": "{\"database\":\"/srv/git/grit-serve.db\",\"users\":[{\"email\":\"admin@example.com\",\"admin\":true,\"temporary_password\":false,\"tokens\":1,\"grants\":[]},{\"email\":\"bob@example.com\",\"admin\":false,\"temporary_password\":true,\"tokens\":2,\"grants\":[{\"repository\":\"app\",\"access\":\"write\"},{\"repository\":\"docs\",\"access\":\"read\"}]}]}\n",
     "stderr": ""
   },
   "markdown": {
     "exit": 0,
-    "stdout": "## Serve users\n\nDatabase: `/srv/git/grit-serve.db`\n\n| User | Tokens | Access |\n| --- | ---: | --- |\n| `admin` | 1 | all repositories (admin) |\n| `bob` | 2 | app (write), docs (read) |\n",
+    "stdout": "## Serve users\n\nDatabase: `/srv/git/grit-serve.db`\n\n| User | Tokens | Access |\n| --- | ---: | --- |\n| `admin@example.com` | 1 | all repositories (admin) |\n| `bob@example.com` | 2 | app (write), docs (read) |\n",
     "stderr": ""
   }
 }

@@ -636,6 +636,14 @@ const COMMAND_CONTRACTS: &[(&str, CommandContract)] = &[
         },
     ),
     (
+        "serve.token",
+        CommandContract {
+            kind: CommandKind::Mutation,
+            takes_message: false,
+            takes_paths: false,
+        },
+    ),
+    (
         "serve.grant",
         CommandContract {
             kind: CommandKind::Mutation,
@@ -924,6 +932,12 @@ const EXCEPTIONS: &[(&str, ContractRule, &str, &str)] = &[
         ContractRule::DryRun,
         "grit-serve",
         "serve add-user has no `--dry-run` yet",
+    ),
+    (
+        "serve.token",
+        ContractRule::DryRun,
+        "grit-serve",
+        "serve token has no `--dry-run` yet",
     ),
     (
         "serve.grant",

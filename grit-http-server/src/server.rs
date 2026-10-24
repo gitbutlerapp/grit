@@ -3,23 +3,26 @@
 //! [`Server::bind`] opens the [`AuthStore`] and finds the repositories to
 //! serve; [`Server::run`] answers requests until the process stops.
 //!
-//! Every request must carry an access token from the store, either as the
-//! password of HTTP basic auth (what Git sends from a credential helper or a
+//! Git requests carry an access token from the store, either as the password
+//! of HTTP basic auth (what Git sends from a credential helper or a
 //! `https://user:token@host/…` URL) or as `Authorization: Bearer <token>`.
-//! Requests without a valid token get `401` and a basic-auth challenge, so Git
-//! and browsers prompt for credentials.
+//! Git requests without a valid token get `401` and a basic-auth challenge.
+//! People sign in to the web pages ([`crate::web`]) with their email address
+//! and password instead, and get tokens by approving a `grit auth <url>`
+//! sign-in there ([`crate::login`]).
 //!
 //! Routes, where `<repo>` is a repository name with or without `.git`:
 //!
 //! | Request | Needs | Answer |
 //! | --- | --- | --- |
-//! | `GET /` | a token | HTML list of the repositories the user can read |
-//! | `GET /.grit/user` | a token | JSON [`ServerIdentity`] of the token's user (what `grit auth <url>` checks) |
-//! | `GET /<repo>` | read | HTML page with the branches and recent commits |
+//! | `GET /.grit/user` | a token | JSON [`ServerIdentity`] of the token's user |
+//! | `POST /.grit/login` | nothing | JSON [`LoginStart`]: begin a command-line sign-in |
+//! | `POST /.grit/login/poll` | the device code | JSON [`LoginPoll`]: the token, once approved |
 //! | `GET /<repo>/info/refs?service=git-upload-pack` | read | fetch discovery (v0, v1, v2) |
 //! | `POST /<repo>/git-upload-pack` | read | fetch |
 //! | `GET /<repo>/info/refs?service=git-receive-pack` | write | push discovery |
 //! | `POST /<repo>/git-receive-pack` | write | push |
+//! | `/`, `/<repo>`, `/.grit/…` pages | a session | see [`crate::web`] |
 //!
 //! Repositories the user cannot read answer `404`, the same as missing ones.
 
@@ -27,29 +30,31 @@ use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+use std::time::Instant;
+
 use axum::{
     body::Body,
     extract::{Path as UrlPath, Query, State},
     http::{header, HeaderMap, Response, StatusCode},
-    response::{Html, IntoResponse},
-    routing::get,
-    Router,
+    response::IntoResponse,
+    routing::{get, post},
+    Json, Router,
 };
-use grit_lib::objects::{parse_commit, ObjectKind};
-use grit_lib::porcelain::branch::list_branches;
-use grit_lib::remote::grit_server_auth::{ServerIdentity, IDENTITY_PATH};
-use grit_lib::repo::Repository;
-use grit_lib::state::{resolve_head_for_repository, HeadState};
+use grit_lib::remote::grit_server_auth::{
+    LoginGrant, LoginPoll, LoginPollRequest, LoginStart, ServerIdentity, AUTHORIZE_PATH,
+    IDENTITY_PATH, LOGIN_PATH, LOGIN_POLL_PATH,
+};
 use grit_protocol::RepositoryOptions;
 
+use crate::login::{LoginError, PendingLogins, PollOutcome};
 use crate::smart_http::{self, Service};
-use crate::store::{normalize_repository_name, Access, AuthStore, StoreError, Token, User};
+use crate::store::{
+    normalize_repository_name, Access, AuthStore, HashedPassword, StoreError, Token, User,
+};
+use crate::web;
 
 /// File name of the database [`default_database_path`] picks.
 pub const DATABASE_FILE_NAME: &str = "grit-serve.db";
-
-/// How many commits the repository page lists.
-const RECENT_COMMITS: usize = 20;
 
 /// Errors from starting or running the server.
 #[derive(Debug, thiserror::Error)]
@@ -172,10 +177,13 @@ pub struct ServeConfig {
     pub repository_options: RepositoryOptions,
 }
 
-struct ServerState {
-    repositories: Repositories,
+pub(crate) struct ServerState {
+    pub(crate) repositories: Repositories,
     store: Mutex<AuthStore>,
-    options: RepositoryOptions,
+    logins: Mutex<PendingLogins>,
+    pub(crate) options: RepositoryOptions,
+    /// Checked when a sign-in names no user, so it takes as long as a real one.
+    pub(crate) stand_in_password: HashedPassword,
 }
 
 /// A bound, ready-to-run server.
@@ -204,12 +212,15 @@ impl Server {
         }
         let listener = std::net::TcpListener::bind(address)?;
         listener.set_nonblocking(true)?;
+        let stand_in_password = HashedPassword::new(Token::generate()?.secret())?;
         Ok(Self {
             listener,
             state: Arc::new(ServerState {
                 repositories: Repositories::at(&config.root),
                 store: Mutex::new(store),
+                logins: Mutex::new(PendingLogins::default()),
                 options: config.repository_options,
+                stand_in_password,
             }),
         })
     }
@@ -249,8 +260,25 @@ impl Server {
 
 fn router(state: Arc<ServerState>) -> Router {
     Router::new()
-        .route("/", get(index))
+        .route("/", get(web::index))
         .route(&format!("/{IDENTITY_PATH}"), get(identity))
+        .route(&format!("/{LOGIN_PATH}"), post(login_start))
+        .route(&format!("/{LOGIN_POLL_PATH}"), post(login_poll))
+        .route(
+            &format!("/{AUTHORIZE_PATH}"),
+            get(web::authorize_page).post(web::authorize_submit),
+        )
+        .route(
+            web::SIGNIN_PATH,
+            get(web::signin_page).post(web::signin_submit),
+        )
+        .route(web::SIGNOUT_PATH, post(web::signout))
+        .route(
+            web::PASSWORD_PATH,
+            get(web::password_page).post(web::password_submit),
+        )
+        .route(web::USERS_PATH, get(web::users_page).post(web::add_user))
+        .route(web::GRANTS_PATH, post(web::grant))
         .route("/{*path}", get(get_dispatch).post(post_dispatch))
         .with_state(state)
 }
@@ -272,7 +300,7 @@ fn not_found() -> Response<Body> {
     (StatusCode::NOT_FOUND, "repository not found\n").into_response()
 }
 
-fn store_failure(e: &StoreError) -> Response<Body> {
+pub(crate) fn store_failure(e: &StoreError) -> Response<Body> {
     (
         StatusCode::INTERNAL_SERVER_ERROR,
         format!("user database error: {e}\n"),
@@ -282,7 +310,7 @@ fn store_failure(e: &StoreError) -> Response<Body> {
 
 /// The token a request carries: the basic-auth password (or the user name
 /// when the password is empty), or a bearer token.
-fn presented_token(headers: &HeaderMap) -> Option<Token> {
+pub(crate) fn presented_token(headers: &HeaderMap) -> Option<Token> {
     use base64::Engine as _;
 
     let value = headers.get(header::AUTHORIZATION)?.to_str().ok()?;
@@ -303,8 +331,12 @@ fn presented_token(headers: &HeaderMap) -> Option<Token> {
 }
 
 impl ServerState {
-    fn lock_store(&self) -> std::sync::MutexGuard<'_, AuthStore> {
+    pub(crate) fn lock_store(&self) -> std::sync::MutexGuard<'_, AuthStore> {
         self.store.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    pub(crate) fn lock_logins(&self) -> std::sync::MutexGuard<'_, PendingLogins> {
+        self.logins.lock().unwrap_or_else(|e| e.into_inner())
     }
 
     fn authenticate(&self, headers: &HeaderMap) -> Result<User, Rejection> {
@@ -316,14 +348,23 @@ impl ServerState {
         }
     }
 
-    /// Resolve `name` for a request that needs `needed` access.
+    /// Resolve `name` for a Git request that needs `needed` access.
     fn authorize(
         &self,
         headers: &HeaderMap,
         name: &str,
         needed: Access,
     ) -> Result<Authorized, Rejection> {
-        let user = self.authenticate(headers)?;
+        self.authorize_user(self.authenticate(headers)?, name, needed)
+    }
+
+    /// Resolve `name` for `user`, who needs `needed` access.
+    pub(crate) fn authorize_user(
+        &self,
+        user: User,
+        name: &str,
+        needed: Access,
+    ) -> Result<Authorized, Rejection> {
         let name = normalize_repository_name(name).map_err(|_| Box::new(not_found()))?;
         let access = match self.lock_store().access(&user, name) {
             Ok(Some(access)) => access,
@@ -338,12 +379,12 @@ impl ServerState {
             return Err(Box::new(
                 (
                     StatusCode::FORBIDDEN,
-                    format!("{} has read-only access to {}\n", user.name, repo.name),
+                    format!("{} has read-only access to {}\n", user.email, repo.name),
                 )
                     .into_response(),
             ));
         }
-        Ok(Authorized { user, repo, access })
+        Ok(Authorized { repo, access })
     }
 }
 
@@ -351,10 +392,9 @@ impl ServerState {
 type Rejection = Box<Response<Body>>;
 
 /// A request [`ServerState::authorize`] let through.
-struct Authorized {
-    user: User,
-    repo: ServedRepository,
-    access: Access,
+pub(crate) struct Authorized {
+    pub(crate) repo: ServedRepository,
+    pub(crate) access: Access,
 }
 
 fn needed_access(service: Service) -> Access {
@@ -371,7 +411,7 @@ async fn get_dispatch(
     headers: HeaderMap,
 ) -> Response<Body> {
     let Some(name) = path.strip_suffix("/info/refs") else {
-        return repository_page(&state, path.trim_end_matches('/'), &headers).await;
+        return web::repository_page(&state, path.trim_end_matches('/'), &headers).await;
     };
     let Some(service) = query.service.as_deref().and_then(Service::from_query) else {
         return (StatusCode::FORBIDDEN, "only smart HTTP is supported\n").into_response();
@@ -409,242 +449,56 @@ async fn post_dispatch(
     .await
 }
 
-/// `http://<Host>` for clone URLs on the pages.
-fn base_url(headers: &HeaderMap) -> String {
-    let host = headers
-        .get(header::HOST)
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("localhost");
-    format!("http://{host}")
-}
-
 /// The token's user as JSON, so a client can check a token before storing it.
 async fn identity(State(state): State<Arc<ServerState>>, headers: HeaderMap) -> Response<Body> {
     let user = match state.authenticate(&headers) {
         Ok(user) => user,
         Err(resp) => return *resp,
     };
-    axum::Json(ServerIdentity {
-        name: user.name,
+    Json(ServerIdentity {
+        email: user.email,
         admin: user.admin,
     })
     .into_response()
 }
 
-async fn index(State(state): State<Arc<ServerState>>, headers: HeaderMap) -> Response<Body> {
-    let user = match state.authenticate(&headers) {
-        Ok(user) => user,
-        Err(resp) => return *resp,
+/// Begin a command-line sign-in.
+async fn login_start(State(state): State<Arc<ServerState>>) -> Response<Body> {
+    let started: Result<LoginStart, LoginError> = state.lock_logins().start(Instant::now());
+    match started {
+        Ok(login) => Json(login).into_response(),
+        Err(e @ LoginError::TooMany) => {
+            (StatusCode::SERVICE_UNAVAILABLE, format!("{e}\n")).into_response()
+        }
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, format!("{e}\n")).into_response(),
+    }
+}
+
+/// Answer a command-line poll; once the user approved, create their token.
+async fn login_poll(
+    State(state): State<Arc<ServerState>>,
+    Json(request): Json<LoginPollRequest>,
+) -> Response<Body> {
+    let outcome = state
+        .lock_logins()
+        .poll(&request.device_code, Instant::now());
+    if let Some(answer) = outcome.without_grant() {
+        return Json(answer).into_response();
+    }
+    let PollOutcome::Approved(user) = outcome else {
+        return Json(LoginPoll::Expired).into_response();
     };
-    let base = base_url(&headers);
-    let mut rows = String::new();
-    {
-        let store = state.lock_store();
-        for repo in state.repositories.list() {
-            let access = match store.access(&user, &repo.name) {
-                Ok(Some(access)) => access,
-                Ok(None) => continue,
-                Err(e) => return store_failure(&e),
-            };
-            let name = escape_html(&repo.name);
-            rows.push_str(&format!(
-                "<tr><td><a href=\"/{name}\">{name}</a></td><td><span class=\"badge\">{}</span></td>\
-                 <td><code>git clone {}/{name}.git</code></td></tr>\n",
-                access.as_str(),
-                escape_html(&base),
-            ));
-        }
-    }
-    if rows.is_empty() {
-        rows.push_str("<tr><td colspan=\"3\">No repositories you can read.</td></tr>\n");
-    }
-    page(
-        "Repositories",
-        &user,
-        &format!(
-            "<h1>Repositories</h1>\n<table>\n<tr><th>Name</th><th>Access</th><th>Clone</th></tr>\n{rows}</table>\n"
-        ),
-    )
-}
-
-/// What the repository page shows, read off the request thread.
-struct RepositorySummary {
-    head: Option<String>,
-    branches: Vec<(String, String, bool)>,
-    commits: Vec<CommitLine>,
-}
-
-struct CommitLine {
-    oid: String,
-    subject: String,
-    author: String,
-    date: String,
-}
-
-async fn repository_page(state: &ServerState, name: &str, headers: &HeaderMap) -> Response<Body> {
-    let Authorized { user, repo, access } = match state.authorize(headers, name, Access::Read) {
-        Ok(found) => found,
-        Err(resp) => return *resp,
+    let token = match Token::generate() {
+        Ok(token) => token,
+        Err(e) => return store_failure(&e),
     };
-    let path = repo.path.clone();
-    let options = state.options.clone();
-    let summary = match tokio::task::spawn_blocking(move || summarize(&path, &options)).await {
-        Ok(Ok(summary)) => summary,
-        Ok(Err(e)) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                format!("cannot read repository: {e}\n"),
-            )
-                .into_response()
-        }
-        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, format!("{e}\n")).into_response(),
-    };
-
-    let title = escape_html(&repo.name);
-    let mut body = format!(
-        "<p><a href=\"/\">Repositories</a></p>\n<h1>{title} <span class=\"badge\">{}</span></h1>\n\
-         <pre>git clone {}/{title}.git</pre>\n",
-        access.as_str(),
-        escape_html(&base_url(headers)),
-    );
-    body.push_str("<h2>Branches</h2>\n");
-    if summary.branches.is_empty() {
-        body.push_str("<p>No branches yet. Push one to get started.</p>\n");
-    } else {
-        body.push_str("<table>\n");
-        for (branch, oid, current) in &summary.branches {
-            let marker = if *current {
-                " <span class=\"badge\">HEAD</span>"
-            } else {
-                ""
-            };
-            body.push_str(&format!(
-                "<tr><td>{}{marker}</td><td><code>{oid}</code></td></tr>\n",
-                escape_html(branch)
-            ));
-        }
-        body.push_str("</table>\n");
+    if let Err(e) = state.lock_store().add_token(&user, &token) {
+        return store_failure(&e);
     }
-    if let Some(head) = &summary.head {
-        body.push_str(&format!(
-            "<h2>Recent commits on {}</h2>\n",
-            escape_html(head)
-        ));
-        body.push_str("<table>\n");
-        for commit in &summary.commits {
-            body.push_str(&format!(
-                "<tr><td><code>{}</code></td><td>{}</td><td>{}</td><td>{}</td></tr>\n",
-                commit.oid,
-                escape_html(&commit.subject),
-                escape_html(&commit.author),
-                commit.date,
-            ));
-        }
-        body.push_str("</table>\n");
-    }
-    page(&repo.name, &user, &body)
-}
-
-fn short_hex(oid: &grit_lib::objects::ObjectId) -> String {
-    let hex = oid.to_hex();
-    hex.get(..7).unwrap_or(&hex).to_owned()
-}
-
-/// Read the branches and the first-parent history of `HEAD`.
-fn summarize(
-    path: &Path,
-    options: &RepositoryOptions,
-) -> grit_lib::error::Result<RepositorySummary> {
-    let repo = Repository::open(path, &options.clone().for_serving())?;
-    let branches = list_branches(&repo)?
-        .branches
-        .into_iter()
-        .map(|b| (b.name, short_hex(&b.oid), b.current))
-        .collect();
-    let (head, mut next) = match resolve_head_for_repository(&repo)? {
-        HeadState::Branch {
-            short_name, oid, ..
-        } => (Some(short_name), oid),
-        HeadState::Detached { oid } => (Some("HEAD".to_owned()), Some(oid)),
-        HeadState::Invalid => (None, None),
-    };
-    let mut commits = Vec::new();
-    while let Some(oid) = next.take() {
-        if commits.len() == RECENT_COMMITS {
-            break;
-        }
-        let object = repo.odb().read(&oid)?;
-        if object.kind != ObjectKind::Commit {
-            break;
-        }
-        let commit = parse_commit(&object.data)?;
-        let (author, date) = split_signature(&commit.author);
-        commits.push(CommitLine {
-            oid: short_hex(&oid),
-            subject: commit.message.lines().next().unwrap_or_default().to_owned(),
-            author,
-            date,
-        });
-        next = commit.parents.first().copied();
-    }
-    Ok(RepositorySummary {
-        head: head.filter(|_| !commits.is_empty()),
-        branches,
-        commits,
-    })
-}
-
-/// Split `Name <email> 1712345678 +0200` into the name and a `YYYY-MM-DD` date.
-fn split_signature(signature: &str) -> (String, String) {
-    let (name, rest) = signature.split_once(" <").unwrap_or((signature, ""));
-    let date = rest
-        .rsplit_once("> ")
-        .and_then(|(_, when)| when.split_whitespace().next())
-        .and_then(|seconds| seconds.parse::<i64>().ok())
-        .and_then(|seconds| time::OffsetDateTime::from_unix_timestamp(seconds).ok())
-        .map(|when| when.date().to_string())
-        .unwrap_or_default();
-    (name.to_owned(), date)
-}
-
-fn escape_html(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    for c in text.chars() {
-        match c {
-            '&' => out.push_str("&amp;"),
-            '<' => out.push_str("&lt;"),
-            '>' => out.push_str("&gt;"),
-            '"' => out.push_str("&quot;"),
-            '\'' => out.push_str("&#39;"),
-            _ => out.push(c),
-        }
-    }
-    out
-}
-
-const STYLE: &str = "
-:root { color-scheme: light dark; --fg: #1f2328; --muted: #59636e; --line: #d1d9e0; --bg: #ffffff; --chip: #eef1f4; }
-@media (prefers-color-scheme: dark) { :root { --fg: #e6edf3; --muted: #9198a1; --line: #3d444d; --bg: #0d1117; --chip: #212830; } }
-body { font: 15px/1.5 system-ui, sans-serif; color: var(--fg); background: var(--bg); max-width: 960px; margin: 0 auto; padding: 16px; }
-header { display: flex; justify-content: space-between; color: var(--muted); border-bottom: 1px solid var(--line); padding-bottom: 8px; }
-a { color: inherit; }
-table { border-collapse: collapse; width: 100%; }
-td, th { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
-pre, code { font: 13px ui-monospace, monospace; }
-pre { background: var(--chip); padding: 8px 12px; overflow-x: auto; }
-.badge { font-size: 12px; background: var(--chip); border-radius: 10px; padding: 1px 8px; color: var(--muted); }
-";
-
-fn page(title: &str, user: &User, body: &str) -> Response<Body> {
-    let role = if user.admin { " (admin)" } else { "" };
-    Html(format!(
-        "<!doctype html>\n<html lang=\"en\">\n<head>\n<meta charset=\"utf-8\">\n\
-         <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\n\
-         <title>{} · grit</title>\n<style>{STYLE}</style>\n</head>\n<body>\n\
-         <header><strong>grit serve</strong><span>{}{role}</span></header>\n{body}</body>\n</html>\n",
-        escape_html(title),
-        escape_html(&user.name),
-    ))
+    Json(LoginPoll::Authorized(LoginGrant {
+        email: user.email,
+        token: token.secret().to_owned(),
+    }))
     .into_response()
 }
 
@@ -679,23 +533,6 @@ mod tests {
         assert_eq!(token_of(format!("Basic {}", encode(":"))), None);
         assert_eq!(token_of("Digest abc".to_owned()), None);
         assert!(presented_token(&HeaderMap::new()).is_none());
-    }
-
-    #[test]
-    fn signatures_split_into_name_and_date() {
-        assert_eq!(
-            split_signature("A U Thor <a@example.com> 1112911993 +0200"),
-            ("A U Thor".to_owned(), "2005-04-07".to_owned())
-        );
-        assert_eq!(split_signature("odd"), ("odd".to_owned(), String::new()));
-    }
-
-    #[test]
-    fn html_is_escaped() {
-        assert_eq!(
-            escape_html("<a href=\"x\">&'</a>"),
-            "&lt;a href=&quot;x&quot;&gt;&amp;&#39;&lt;/a&gt;"
-        );
     }
 
     #[test]

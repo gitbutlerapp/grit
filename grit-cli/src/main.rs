@@ -721,18 +721,23 @@ enum AuthAction {
 /// Subcommands of `grit serve`.
 #[derive(Debug, Subcommand)]
 enum ServeAction {
-    /// Add a user and print their new access token.
+    /// Add a user. Prompts for their password, or generates a temporary one.
     #[command(name = "add-user")]
     AddUser {
-        /// User name: letters, digits, `.`, `_` or `-`.
-        name: String,
+        /// The user's email address, which is also their user name.
+        email: String,
         /// Make the user an admin, with read and write access to every repository.
         #[arg(long)]
         admin: bool,
     },
+    /// Create an access token for a user, for scripts and CI that cannot sign in in a browser.
+    Token {
+        /// The user's email address.
+        email: String,
+    },
     /// Give a user read access to a repository (or write access with `--write`).
     Grant {
-        /// The user to give access to.
+        /// The email address of the user to give access to.
         user: String,
         /// The repository name, with or without `.git`.
         repository: String,
@@ -1841,13 +1846,13 @@ enum Command {
         #[command(subcommand)]
         action: WorktreeAction,
     },
-    /// Sign in to GitHub (device flow), or to a `grit serve` host, and store a token for push/fetch.
-    #[command(args_conflicts_with_subcommands = true)]
+    /// Sign in to GitHub or a `grit serve` host in the browser, and store a token for push/fetch.
+    #[command(args_conflicts_with_subcommands = true, visible_alias = "login")]
     Auth {
         /// A `grit serve` host (or one of its repository URLs) to sign in to instead of GitHub.
         #[arg(value_name = "URL")]
         url: Option<String>,
-        /// The access token for a `grit serve` host. Without it, `grit auth <url>` prompts for it (or reads stdin).
+        /// Store this access token for a `grit serve` host (from `grit serve token`) instead of signing in in the browser.
         #[arg(long, value_name = "TOKEN", requires = "url")]
         token: Option<String>,
         #[command(subcommand)]
@@ -2038,7 +2043,7 @@ enum Command {
         /// The credential operation: get, store, or erase.
         operation: String,
     },
-    /// Serve repositories over HTTP, with a web view and token authentication.
+    /// Serve repositories over HTTP, with a web view where people sign in with email and password.
     Serve {
         #[command(subcommand)]
         action: Option<ServeAction>,
@@ -2051,12 +2056,12 @@ enum Command {
         /// Address to listen on.
         #[arg(long, value_name = "HOST:PORT", default_value = "127.0.0.1:8080")]
         bind: String,
-        /// Create the user database and its first admin user, print the admin's token, and exit.
+        /// Create the user database and its first admin user, then exit. Prompts for a password (or generates one).
         #[arg(long)]
         setup: bool,
-        /// Name of the admin user `--setup` creates (default `admin`).
-        #[arg(long, value_name = "NAME", requires = "setup")]
-        admin_name: Option<String>,
+        /// Email address of the admin `--setup` creates (asked for when omitted).
+        #[arg(long, value_name = "EMAIL", requires = "setup")]
+        email: Option<String>,
     },
     /// Serve a fetch or clone over stdin/stdout (run by ssh and grit-http-server).
     #[command(name = "upload-pack", hide = true)]
@@ -3884,15 +3889,15 @@ fn dispatch(
                         .as_deref()
                         .map(commands::auth::grit_server)
                         .transpose()?;
-                    let outcome = match server.flatten() {
-                        Some(server) => {
-                            let token = commands::auth::read_token(token)?;
-                            commands::auth::run_server(&server, &token)?
+                    let outcome = match (server.flatten(), token) {
+                        (Some(server), Some(token)) => {
+                            commands::auth::run_server_token(&server, &token)?
                         }
-                        None if token.is_some() => {
+                        (Some(server), None) => commands::auth::run_server_login(&server)?,
+                        (None, Some(_)) => {
                             anyhow::bail!("--token is for `grit serve` hosts; GitHub signs in with the browser")
                         }
-                        None => commands::auth::run()?,
+                        (None, None) => commands::auth::run()?,
                     };
                     emit_success(&outcome, opts, ctx)
                 }
@@ -3981,15 +3986,21 @@ fn dispatch(
             db,
             bind,
             setup,
-            admin_name,
+            email,
         } => {
             let db = db.as_deref();
             match action {
-                Some(ServeAction::AddUser { name, admin }) => emit_success(
-                    &commands::serve_http::add_user(&root, db, &name, admin)?,
-                    opts,
-                    ctx,
-                ),
+                Some(ServeAction::AddUser { email, admin }) => {
+                    let password = commands::serve_http::read_new_password(&email)?;
+                    emit_success(
+                        &commands::serve_http::add_user(&root, db, &email, admin, password)?,
+                        opts,
+                        ctx,
+                    )
+                }
+                Some(ServeAction::Token { email }) => {
+                    emit_success(&commands::serve_http::token(&root, db, &email)?, opts, ctx)
+                }
                 Some(ServeAction::Grant {
                     user,
                     repository,
@@ -4002,15 +4013,15 @@ fn dispatch(
                 Some(ServeAction::Users) => {
                     emit_success(&commands::serve_http::users(&root, db)?, opts, ctx)
                 }
-                None if setup => emit_success(
-                    &commands::serve_http::setup(
-                        &root,
-                        db,
-                        admin_name.as_deref().unwrap_or("admin"),
-                    )?,
-                    opts,
-                    ctx,
-                ),
+                None if setup => {
+                    let email = commands::serve_http::read_admin_email(email)?;
+                    let password = commands::serve_http::read_new_password(&email)?;
+                    emit_success(
+                        &commands::serve_http::setup(&root, db, &email, password)?,
+                        opts,
+                        ctx,
+                    )
+                }
                 // The running server logs to stderr; it has no stdout result.
                 None => {
                     commands::serve_http::run(&root, db, &bind)?;

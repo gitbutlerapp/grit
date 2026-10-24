@@ -84,7 +84,7 @@ fn auth_render() {
     let server_sign_in = AuthOutcome {
         authenticated: true,
         host: "git.example.com:8080".to_owned(),
-        user: Some("bob".to_owned()),
+        user: Some("bob@example.com".to_owned()),
     };
     let server_logout = LogoutOutcome {
         logged_out: true,
@@ -142,14 +142,16 @@ fn serve_render() {
         database: "/srv/git/grit-serve.db".to_owned(),
         users: vec![
             ServeUserJson {
-                name: "admin".to_owned(),
+                email: "admin@example.com".to_owned(),
                 admin: true,
+                temporary_password: false,
                 tokens: 1,
                 grants: Vec::new(),
             },
             ServeUserJson {
-                name: "bob".to_owned(),
+                email: "bob@example.com".to_owned(),
                 admin: false,
+                temporary_password: true,
                 tokens: 2,
                 grants: vec![
                     ServeGrantJson {

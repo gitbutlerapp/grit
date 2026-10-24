@@ -1,6 +1,7 @@
 //! End-to-end `grit serve` behaviour: the system `git` client fetching and
 //! pushing through [`grit_http_server::server::Server`] with tokens from the
-//! [`grit_http_server::store::AuthStore`], plus the HTML pages.
+//! [`grit_http_server::store::AuthStore`], the web pages with password
+//! sign-in, and the browser-approved command-line sign-in.
 
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpStream};
@@ -8,8 +9,12 @@ use std::path::Path;
 use std::process::{Command, Output};
 
 use grit_http_server::server::{ServeConfig, Server, ServerError};
-use grit_http_server::store::{Access, AuthStore, Token};
+use grit_http_server::store::{Access, AuthStore, HashedPassword, Token};
 
+const ADMIN_EMAIL: &str = "admin@example.com";
+const ADMIN_PASSWORD: &str = "admin password";
+const READER_EMAIL: &str = "reader@example.com";
+const READER_PASSWORD: &str = "reader password";
 const ADMIN_TOKEN: &str = "grit_admin_token";
 const READER_TOKEN: &str = "grit_reader_token";
 const OUTSIDER_TOKEN: &str = "grit_outsider_token";
@@ -65,7 +70,8 @@ fn rev_parse(dir: &Path, rev: &str) -> String {
 }
 
 /// A root with a bare `project.git` holding one commit on `main`, and a database
-/// with an admin, a read-only `reader` and an `outsider` with no grants.
+/// with an admin, a read-only reader and an outsider with no grants, each with
+/// a token.
 fn fixture(root: &Path) -> std::path::PathBuf {
     let seed = root.join("seed");
     std::fs::create_dir(&seed).expect("mkdir seed");
@@ -83,17 +89,30 @@ fn fixture(root: &Path) -> std::path::PathBuf {
 
     let database = root.join("serve.db");
     let mut store = AuthStore::open(&database).expect("open store");
-    store
-        .setup("admin", &Token::from_secret(ADMIN_TOKEN))
+    let password = |p: &str| HashedPassword::new(p).expect("hash password");
+    let admin = store
+        .setup(ADMIN_EMAIL, &password(ADMIN_PASSWORD), false)
         .expect("setup");
-    let reader = store.add_user("reader", false).expect("add reader");
+    store
+        .add_token(&admin, &Token::from_secret(ADMIN_TOKEN))
+        .expect("admin token");
+    let reader = store
+        .add_user(READER_EMAIL, false, &password(READER_PASSWORD), false)
+        .expect("add reader");
     store
         .add_token(&reader, &Token::from_secret(READER_TOKEN))
         .expect("reader token");
     store
         .grant(&reader, "project", Access::Read)
         .expect("grant reader");
-    let outsider = store.add_user("outsider", false).expect("add outsider");
+    let outsider = store
+        .add_user(
+            "outsider@example.com",
+            false,
+            &password("outsider password"),
+            false,
+        )
+        .expect("add outsider");
     store
         .add_token(&outsider, &Token::from_secret(OUTSIDER_TOKEN))
         .expect("outsider token");
@@ -122,22 +141,106 @@ fn url(addr: SocketAddr, token: Option<&str>, repo: &str) -> String {
     }
 }
 
-/// A plain HTTP/1.0 GET returning the status line and body.
-fn http_get(addr: SocketAddr, path: &str, token: Option<&str>) -> (String, String) {
+/// An HTTP response: status line, headers and body.
+struct Reply {
+    status: String,
+    head: String,
+    body: String,
+}
+
+impl Reply {
+    fn header(&self, name: &str) -> Option<&str> {
+        self.head.lines().find_map(|line| {
+            let (key, value) = line.split_once(':')?;
+            key.eq_ignore_ascii_case(name).then(|| value.trim())
+        })
+    }
+
+    /// The session cookie a sign-in set, as a `Cookie` header value.
+    fn session_cookie(&self) -> String {
+        let set = self.header("set-cookie").expect("Set-Cookie header");
+        set.split(';').next().expect("cookie pair").to_owned()
+    }
+
+    /// The CSRF value of the first form on the page.
+    fn csrf(&self) -> String {
+        let (_, rest) = self
+            .body
+            .split_once("name=\"csrf\" value=\"")
+            .unwrap_or_else(|| panic!("no csrf in {}", self.body));
+        rest.split('"').next().unwrap_or_default().to_owned()
+    }
+}
+
+/// A plain HTTP/1.0 request.
+fn http(addr: SocketAddr, method: &str, path: &str, headers: &[String], body: &str) -> Reply {
     let mut stream = TcpStream::connect(addr).expect("connect");
-    let auth = token
-        .map(|t| format!("Authorization: Bearer {t}\r\n"))
-        .unwrap_or_default();
-    write!(
-        stream,
-        "GET {path} HTTP/1.0\r\nHost: {addr}\r\n{auth}Connection: close\r\n\r\n"
-    )
-    .expect("write request");
+    let mut request = format!("{method} {path} HTTP/1.0\r\nHost: {addr}\r\nConnection: close\r\n");
+    for header in headers {
+        request.push_str(header);
+        request.push_str("\r\n");
+    }
+    if method == "POST" {
+        request.push_str(&format!(
+            "Content-Type: application/x-www-form-urlencoded\r\nContent-Length: {}\r\n",
+            body.len()
+        ));
+    }
+    request.push_str("\r\n");
+    request.push_str(body);
+    stream.write_all(request.as_bytes()).expect("write request");
     let mut response = String::new();
     stream.read_to_string(&mut response).expect("read response");
     let (head, body) = response.split_once("\r\n\r\n").unwrap_or((&response, ""));
-    let status = head.lines().next().unwrap_or_default().to_owned();
-    (status, body.to_owned())
+    let (status, head) = head.split_once("\r\n").unwrap_or((head, ""));
+    Reply {
+        status: status.to_owned(),
+        head: head.to_owned(),
+        body: body.to_owned(),
+    }
+}
+
+/// A GET with an optional bearer token, returning the status line and body.
+fn http_get(addr: SocketAddr, path: &str, token: Option<&str>) -> (String, String) {
+    let headers: Vec<String> = token
+        .map(|t| format!("Authorization: Bearer {t}"))
+        .into_iter()
+        .collect();
+    let reply = http(addr, "GET", path, &headers, "");
+    (reply.status, reply.body)
+}
+
+/// Percent-encode a form value.
+fn form_value(value: &str) -> String {
+    value
+        .bytes()
+        .map(|b| {
+            if b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_' | b'.') {
+                char::from(b).to_string()
+            } else {
+                format!("%{b:02X}")
+            }
+        })
+        .collect()
+}
+
+fn form(fields: &[(&str, &str)]) -> String {
+    fields
+        .iter()
+        .map(|(k, v)| format!("{k}={}", form_value(v)))
+        .collect::<Vec<_>>()
+        .join("&")
+}
+
+/// Sign in through the form and return the `Cookie` header for the session.
+fn sign_in(addr: SocketAddr, email: &str, password: &str) -> Reply {
+    http(
+        addr,
+        "POST",
+        "/.grit/signin",
+        &[],
+        &form(&[("email", email), ("password", password), ("next", "/")]),
+    )
 }
 
 #[test]
@@ -228,8 +331,12 @@ fn pages_list_readable_repositories() {
     let database = fixture(root);
     let addr = start(&root.join("repos"), &database);
 
-    let (status, _) = http_get(addr, "/", None);
-    assert!(status.contains("401"), "{status}");
+    let anonymous = http(addr, "GET", "/project", &[], "");
+    assert!(anonymous.status.contains("303"), "{}", anonymous.status);
+    assert_eq!(
+        anonymous.header("location"),
+        Some("/.grit/signin?next=/project")
+    );
 
     let (status, body) = http_get(addr, "/", Some(READER_TOKEN));
     assert!(status.contains("200"), "{status}");
@@ -265,7 +372,7 @@ fn the_identity_endpoint_names_the_token_user() {
     assert!(status.contains("401"), "{status}");
     let (status, body) = http_get(addr, "/.grit/user", Some(READER_TOKEN));
     assert!(status.contains("200"), "{status}");
-    assert_eq!(body, r#"{"name":"reader","admin":false}"#);
+    assert_eq!(body, r#"{"email":"reader@example.com","admin":false}"#);
 
     // The client side: a 401 challenge, then basic auth with the token.
     let server = ServerUrl::parse(&format!("http://{addr}/project.git")).expect("server url");
@@ -274,10 +381,313 @@ fn the_identity_endpoint_names_the_token_user() {
         fetch_identity(&http, &server)
     };
     let admin = signed_in(ADMIN_TOKEN).expect("admin identity");
-    assert_eq!((admin.name.as_str(), admin.admin), ("admin", true));
+    assert_eq!((admin.email.as_str(), admin.admin), (ADMIN_EMAIL, true));
     assert!(matches!(
         signed_in("grit_wrong"),
         Err(ServerAuthError::TokenRejected)
+    ));
+}
+
+#[test]
+fn people_sign_in_with_email_and_password() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    let database = fixture(root);
+    let addr = start(&root.join("repos"), &database);
+
+    let page = http(addr, "GET", "/.grit/signin?next=/project", &[], "");
+    assert!(page.status.contains("200"), "{}", page.status);
+    assert!(
+        page.body.contains("name=\"next\" value=\"/project\""),
+        "{}",
+        page.body
+    );
+
+    let wrong = sign_in(addr, READER_EMAIL, "not it at all");
+    assert!(wrong.status.contains("401"), "{}", wrong.status);
+    assert!(
+        wrong.body.contains("Wrong email or password."),
+        "{}",
+        wrong.body
+    );
+    assert!(wrong.header("set-cookie").is_none());
+    let nobody = sign_in(addr, "nobody@example.com", READER_PASSWORD);
+    assert!(nobody.status.contains("401"), "{}", nobody.status);
+
+    let signed_in = sign_in(addr, "Reader@Example.com", READER_PASSWORD);
+    assert!(signed_in.status.contains("303"), "{}", signed_in.status);
+    assert_eq!(signed_in.header("location"), Some("/"));
+    let set_cookie = signed_in.header("set-cookie").unwrap_or_default();
+    assert!(set_cookie.contains("HttpOnly"), "{set_cookie}");
+    let cookie = format!("Cookie: {}", signed_in.session_cookie());
+
+    let home = http(addr, "GET", "/", &[cookie.clone()], "");
+    assert!(home.status.contains("200"), "{}", home.status);
+    assert!(home.body.contains("href=\"/project\""), "{}", home.body);
+    assert!(home.body.contains(READER_EMAIL), "{}", home.body);
+    assert!(
+        !home.body.contains("/.grit/users"),
+        "no admin link for readers"
+    );
+    let users = http(addr, "GET", "/.grit/users", &[cookie.clone()], "");
+    assert!(users.status.contains("403"), "{}", users.status);
+
+    // Forms need the session's CSRF value.
+    let forged = http(
+        addr,
+        "POST",
+        "/.grit/signout",
+        &[cookie.clone()],
+        "csrf=nope",
+    );
+    assert!(forged.status.contains("303"));
+    assert!(http(addr, "GET", "/", &[cookie.clone()], "")
+        .status
+        .contains("200"));
+    let out = http(
+        addr,
+        "POST",
+        "/.grit/signout",
+        &[cookie.clone()],
+        &form(&[("csrf", &home.csrf())]),
+    );
+    assert!(out.status.contains("303"), "{}", out.status);
+    let after = http(addr, "GET", "/", &[cookie], "");
+    assert!(after.status.contains("303"), "signed out: {}", after.status);
+}
+
+#[test]
+fn admins_add_users_who_then_choose_a_password() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    let database = fixture(root);
+    let addr = start(&root.join("repos"), &database);
+
+    let admin = format!(
+        "Cookie: {}",
+        sign_in(addr, ADMIN_EMAIL, ADMIN_PASSWORD).session_cookie()
+    );
+    let users = http(addr, "GET", "/.grit/users", &[admin.clone()], "");
+    assert!(users.status.contains("200"), "{}", users.status);
+    assert!(users.body.contains(READER_EMAIL), "{}", users.body);
+    let csrf = users.csrf();
+
+    let added = http(
+        addr,
+        "POST",
+        "/.grit/users",
+        &[admin.clone()],
+        &form(&[("csrf", &csrf), ("email", "carol@example.com")]),
+    );
+    assert!(added.status.contains("200"), "{}", added.status);
+    let password = added
+        .body
+        .split_once("Password: ")
+        .and_then(|(_, rest)| rest.split('<').next())
+        .unwrap_or_else(|| panic!("no password in {}", added.body))
+        .trim()
+        .to_owned();
+    assert_eq!(password.len(), 19, "{password}");
+    assert!(added.body.contains("temporary password"), "{}", added.body);
+
+    let dup = http(
+        addr,
+        "POST",
+        "/.grit/users",
+        &[admin.clone()],
+        &form(&[("csrf", &csrf), ("email", "carol@example.com")]),
+    );
+    assert!(dup.body.contains("already exists"), "{}", dup.body);
+    let granted = http(
+        addr,
+        "POST",
+        "/.grit/grants",
+        &[admin],
+        &form(&[
+            ("csrf", &csrf),
+            ("email", "carol@example.com"),
+            ("repository", "project"),
+            ("access", "write"),
+        ]),
+    );
+    assert!(
+        granted
+            .body
+            .contains("carol@example.com now has write access to project"),
+        "{}",
+        granted.body
+    );
+
+    // Carol's first sign-in goes to the password page, and pages wait for it.
+    let first = sign_in(addr, "carol@example.com", &password);
+    assert_eq!(first.header("location"), Some("/.grit/password?next=/"));
+    let carol = format!("Cookie: {}", first.session_cookie());
+    let held = http(addr, "GET", "/project", &[carol.clone()], "");
+    assert_eq!(
+        held.header("location"),
+        Some("/.grit/password?next=/project")
+    );
+
+    let form_page = http(
+        addr,
+        "GET",
+        "/.grit/password?next=/project",
+        &[carol.clone()],
+        "",
+    );
+    assert!(
+        !form_page.body.contains("name=\"current\""),
+        "{}",
+        form_page.body
+    );
+    let csrf = form_page.csrf();
+    let mismatch = http(
+        addr,
+        "POST",
+        "/.grit/password",
+        &[carol.clone()],
+        &form(&[
+            ("csrf", &csrf),
+            ("new", "carol's own"),
+            ("confirm", "different"),
+        ]),
+    );
+    assert!(
+        mismatch.body.contains("The two passwords differ."),
+        "{}",
+        mismatch.body
+    );
+    let short = http(
+        addr,
+        "POST",
+        "/.grit/password",
+        &[carol.clone()],
+        &form(&[("csrf", &csrf), ("new", "short"), ("confirm", "short")]),
+    );
+    assert!(
+        short.body.contains("at least 8 characters"),
+        "{}",
+        short.body
+    );
+    let changed = http(
+        addr,
+        "POST",
+        "/.grit/password",
+        &[carol.clone()],
+        &form(&[
+            ("csrf", &csrf),
+            ("next", "/project"),
+            ("new", "carol's own password"),
+            ("confirm", "carol's own password"),
+        ]),
+    );
+    assert_eq!(changed.header("location"), Some("/project"));
+    let page = http(addr, "GET", "/project", &[carol], "");
+    assert!(page.status.contains("200"), "{}", page.status);
+    assert!(page.body.contains(">write<"), "{}", page.body);
+
+    assert!(sign_in(addr, "carol@example.com", &password)
+        .status
+        .contains("401"));
+    assert_eq!(
+        sign_in(addr, "carol@example.com", "carol's own password").header("location"),
+        Some("/")
+    );
+}
+
+#[test]
+fn the_command_line_signs_in_through_the_browser() {
+    use grit_lib::remote::github_auth::SystemPollClock;
+    use grit_lib::remote::grit_server_auth::{LoginFlow, ServerAuthError, ServerUrl};
+    use grit_lib::remote::http_client::UreqHttpClient;
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    let database = fixture(root);
+    let addr = start(&root.join("repos"), &database);
+    let server = ServerUrl::parse(&format!("http://{addr}/project.git")).expect("server url");
+    let http_client = UreqHttpClient::new();
+    let flow = LoginFlow::new(&http_client, &server);
+
+    let login = flow.start().expect("start login");
+    let authorize = server.authorize_url(&login.user_code);
+    let path = authorize
+        .split_once(&addr.to_string())
+        .map(|(_, path)| path.to_owned())
+        .expect("authorize path");
+
+    // Not signed in: the page sends the browser to sign in first, then back.
+    let anonymous = http(addr, "GET", &path, &[], "");
+    let location = anonymous.header("location").unwrap_or_default().to_owned();
+    assert!(
+        location.starts_with("/.grit/signin?next=/.grit/authorize"),
+        "{location}"
+    );
+
+    let cookie = format!(
+        "Cookie: {}",
+        sign_in(addr, READER_EMAIL, READER_PASSWORD).session_cookie()
+    );
+    let page = http(addr, "GET", &path, &[cookie.clone()], "");
+    assert!(page.body.contains(&login.user_code), "{}", page.body);
+    assert!(page.body.contains(READER_EMAIL), "{}", page.body);
+    let approved = http(
+        addr,
+        "POST",
+        "/.grit/authorize",
+        &[cookie.clone()],
+        &form(&[
+            ("csrf", &page.csrf()),
+            ("code", &login.user_code),
+            ("decision", "approve"),
+        ]),
+    );
+    assert!(approved.body.contains("Signed in"), "{}", approved.body);
+
+    let grant = flow
+        .wait(&login, &mut SystemPollClock)
+        .expect("approved login");
+    assert_eq!(grant.email, READER_EMAIL);
+    assert!(grant.token.starts_with(Token::PREFIX));
+
+    // The token works for Git, and the login cannot be collected twice.
+    git(
+        root,
+        &[
+            "clone",
+            "-q",
+            &url(addr, Some(&grant.token), "project.git"),
+            "via-login",
+        ],
+    );
+    assert!(matches!(
+        flow.wait(&login, &mut SystemPollClock),
+        Err(ServerAuthError::LoginExpired)
+    ));
+
+    // A declined login reports so.
+    let declined = flow.start().expect("start login");
+    let page = http(
+        addr,
+        "GET",
+        &format!("/.grit/authorize?code={}", declined.user_code),
+        &[cookie.clone()],
+        "",
+    );
+    http(
+        addr,
+        "POST",
+        "/.grit/authorize",
+        &[cookie],
+        &form(&[
+            ("csrf", &page.csrf()),
+            ("code", &declined.user_code),
+            ("decision", "deny"),
+        ]),
+    );
+    assert!(matches!(
+        flow.wait(&declined, &mut SystemPollClock),
+        Err(ServerAuthError::LoginDenied)
     ));
 }
 

@@ -15,7 +15,9 @@ use crate::commands::history::{
 use crate::commands::merge::{MergeOutcome, MergeResult};
 use crate::commands::pick::PickOutcome;
 use crate::commands::revert::RevertOutcome;
-use crate::commands::serve_http::{ServeGrantOutcome, ServeUserOutcome, ServeUsersOutcome};
+use crate::commands::serve_http::{
+    ServeGrantOutcome, ServeTokenOutcome, ServeUserOutcome, ServeUsersOutcome,
+};
 use crate::commands::stash::{
     StashApplyOutcome, StashDropOutcome, StashPopOutcome, StashPushOutcome,
 };
@@ -1632,6 +1634,23 @@ pub fn print_serve_user_outcome(
     let role = if outcome.admin { "admin user" } else { "user" };
     outln!(w, "- Created {role} **`{}`**", outcome.user);
     outln!(w, "- Database: `{}`", outcome.database);
+    if let Some(password) = &outcome.password {
+        outln!(
+            w,
+            "- Temporary password (shown once, changed at first sign-in): `{password}`"
+        );
+    }
+    Ok(())
+}
+
+/// Result of `grit serve token`.
+pub fn print_serve_token_outcome(
+    w: &mut dyn Write,
+    outcome: &ServeTokenOutcome,
+) -> anyhow::Result<()> {
+    outln!(w, "## Serve token");
+    outln!(w);
+    outln!(w, "- User: **`{}`**", outcome.user);
     outln!(w, "- Token (shown once): `{}`", outcome.token);
     Ok(())
 }
@@ -1668,7 +1687,7 @@ pub fn print_serve_users_outcome(
         outln!(
             w,
             "| `{}` | {} | {} |",
-            user.name,
+            user.email,
             user.tokens,
             escape_table_cell(&user.access_summary())
         );
