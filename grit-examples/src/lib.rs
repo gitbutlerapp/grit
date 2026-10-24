@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{bail, Context, Result};
 use grit_lib::index::{Index, IndexEntry, MODE_EXECUTABLE, MODE_REGULAR};
-use grit_lib::objects::{parse_commit, parse_tree, ObjectId, ObjectKind};
+use grit_lib::objects::{parse_tree, ObjectId, ObjectKind};
 use grit_lib::repo::Repository;
 
 pub mod counting_ref_store;
@@ -26,11 +26,7 @@ pub fn head_oid(repo: &Repository) -> Result<ObjectId> {
 
 /// Return the object id of a commit's tree.
 pub fn commit_tree(repo: &Repository, commit_oid: ObjectId) -> Result<ObjectId> {
-    let object = repo.odb().read(&commit_oid)?;
-    if object.kind != ObjectKind::Commit {
-        bail!("{commit_oid} is not a commit");
-    }
-    Ok(parse_commit(&object.data)?.tree)
+    Ok(repo.objects().commit_tree(&commit_oid)?)
 }
 
 /// Flatten a tree into index entries, recursively descending subtrees.

@@ -4,7 +4,6 @@
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::diff::{diff_index_to_worktree, unified_diff, DiffEntry, DiffStatus};
-use grit_lib::objects::{parse_commit, ObjectId};
 use grit_lib::repo::Repository;
 use grit_lib::state::resolve_head;
 use std::path::{Path, PathBuf};
@@ -25,11 +24,6 @@ fn open_repo(root: &Path) -> Result<Repository, grit_lib::error::Error> {
         opts = opts.with_work_tree(wt);
     }
     Repository::open(&git_dir, &opts)
-}
-
-fn tree_oid(repo: &Repository, commit: &ObjectId) -> Result<ObjectId, grit_lib::error::Error> {
-    let obj = repo.odb().read(commit)?;
-    Ok(parse_commit(&obj.data)?.tree)
 }
 
 fn print_name_status(entries: &[DiffEntry]) {
@@ -59,15 +53,14 @@ fn main() -> Result<(), grit_lib::error::Error> {
         .oid()
         .cloned()
         .ok_or_else(|| grit_lib::error::Error::Message("HEAD has no commit".into()))?;
-    let new_obj = repo.odb().read(&new_commit)?;
-    let new_commit_data = parse_commit(&new_obj.data)?;
+    let new_commit_data = repo.objects().read_commit(&new_commit)?;
     let parent = new_commit_data
         .parents
         .first()
         .copied()
         .ok_or_else(|| grit_lib::error::Error::Message("need a commit with a parent".into()))?;
 
-    let old_tree = tree_oid(&repo, &parent)?;
+    let old_tree = repo.objects().commit_tree(&parent)?;
     let new_tree = new_commit_data.tree;
 
     let tree_changes = repo.diff().tree_to_tree(Some(&old_tree), Some(&new_tree))?;

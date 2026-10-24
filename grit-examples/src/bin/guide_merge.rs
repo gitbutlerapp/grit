@@ -7,7 +7,7 @@ use grit_lib::diff::merge_file::MergeFavor;
 use grit_lib::diff::merge_trees::{
     merge_trees_three_way, TreeMergeConflictPresentation, WhitespaceMergeOptions,
 };
-use grit_lib::objects::{parse_commit, ObjectId};
+use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::merge_base::merge_bases_first_vs_rest;
 use std::path::{Path, PathBuf};
@@ -30,11 +30,6 @@ fn open_repo(root: &Path) -> Result<Repository, grit_lib::error::Error> {
     Repository::open(&git_dir, &opts)
 }
 
-fn tree_of(repo: &Repository, commit: &ObjectId) -> Result<ObjectId, grit_lib::error::Error> {
-    let obj = repo.objects().read(commit)?;
-    Ok(parse_commit(&obj.data)?.tree)
-}
-
 fn main() -> Result<(), grit_lib::error::Error> {
     let root = std::env::args()
         .nth(1)
@@ -50,9 +45,9 @@ fn main() -> Result<(), grit_lib::error::Error> {
         .next()
         .ok_or_else(|| grit_lib::error::Error::Message("no merge base".into()))?;
 
-    let base_tree = tree_of(&repo, &base)?;
-    let ours_tree = tree_of(&repo, &ours)?;
-    let theirs_tree = tree_of(&repo, &theirs)?;
+    let base_tree = repo.objects().commit_tree(&base)?;
+    let ours_tree = repo.objects().commit_tree(&ours)?;
+    let theirs_tree = repo.objects().commit_tree(&theirs)?;
 
     let merged = merge_trees_three_way(
         &repo,

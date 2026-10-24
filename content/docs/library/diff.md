@@ -13,7 +13,7 @@ Diffing in grit-lib centers on the [`diff`](rustdoc:grit_lib::diff) domain modul
 
 `diff_trees` compares two tree objects recursively and returns changed paths. Pass `None` for either side to diff against an empty tree. `diff_trees_show_tree_entries` can emit tree objects themselves (Git’s `diff-tree -t` behavior).
 
-Commit-to-commit diffs resolve each commit’s tree with `parse_commit`, then call `diff_trees` on the parent and child trees.
+Commit-to-commit diffs resolve each commit’s tree with [`Odb::commit_tree`](rustdoc:grit_lib::objects::odb::Odb::commit_tree), then call `diff_trees` on the parent and child trees.
 
 ## Index-to-worktree
 
