@@ -17,7 +17,7 @@ mod map;
 mod policy;
 mod pool;
 
-pub(crate) use pool::run_ordered_pool;
+pub(crate) use pool::{run_ordered_batches, run_ordered_pool};
 
 pub use map::{
     par_map, parallel_worthwhile, try_par_map, try_par_map_force, try_par_map_with_local,
@@ -182,6 +182,106 @@ mod tests {
         })
         .unwrap_err();
         assert_eq!(err, ParallelHashError::Task("boom"));
+    }
+
+    #[test]
+    fn ordered_batches_consume_in_item_order_with_worker_state() {
+        let items: Vec<usize> = (0..1000).collect();
+        let inits = AtomicUsize::new(0);
+        let mut seen = Vec::new();
+        let mut batch_lens = Vec::new();
+        run_ordered_batches(
+            &items,
+            7,
+            4,
+            || {
+                inits.fetch_add(1, Ordering::Relaxed);
+                0usize
+            },
+            |mapped: &mut usize, &x| -> Result<usize, ()> {
+                *mapped += 1;
+                Ok(x * 3)
+            },
+            |batch, results| {
+                assert_eq!(batch.len(), results.len());
+                batch_lens.push(batch.len());
+                seen.extend(results);
+                Ok(())
+            },
+        )
+        .expect("batches");
+        assert_eq!(seen, items.iter().map(|x| x * 3).collect::<Vec<_>>());
+        assert_eq!(batch_lens.iter().sum::<usize>(), items.len());
+        assert!(batch_lens[..batch_lens.len() - 1].iter().all(|&n| n == 7));
+        assert_eq!(
+            inits.load(Ordering::Relaxed),
+            4,
+            "init runs once per worker"
+        );
+    }
+
+    #[test]
+    fn ordered_batches_surface_map_and_consume_errors() {
+        let items: Vec<i32> = (0..500).collect();
+        let err = run_ordered_batches(
+            &items,
+            10,
+            3,
+            || (),
+            |_, &x| if x == 250 { Err("map") } else { Ok(x) },
+            |_, _| Ok(()),
+        )
+        .unwrap_err();
+        assert_eq!(err, "map");
+
+        let mut consumed = 0;
+        let err = run_ordered_batches(
+            &items,
+            10,
+            3,
+            || (),
+            |_, &x| Ok::<_, &str>(x),
+            |_, _| {
+                consumed += 1;
+                if consumed == 2 {
+                    Err("consume")
+                } else {
+                    Ok(())
+                }
+            },
+        )
+        .unwrap_err();
+        assert_eq!(err, "consume");
+        assert_eq!(consumed, 2, "no batch is consumed after an error");
+
+        run_ordered_batches(
+            &[] as &[i32],
+            10,
+            3,
+            || (),
+            |_, &x| Ok::<_, ()>(x),
+            |_, _| panic!("nothing to consume"),
+        )
+        .expect("empty input");
+    }
+
+    #[test]
+    fn ordered_batches_resume_worker_panics() {
+        let items: Vec<i32> = (0..200).collect();
+        let outcome = std::panic::catch_unwind(|| {
+            run_ordered_batches(
+                &items,
+                5,
+                4,
+                || (),
+                |_, &x| -> Result<i32, ()> {
+                    assert!(x != 120, "worker boom");
+                    Ok(x)
+                },
+                |_, _| Ok(()),
+            )
+        });
+        assert!(outcome.is_err());
     }
 
     #[test]

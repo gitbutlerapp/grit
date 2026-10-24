@@ -229,9 +229,9 @@ impl<'a, W: Write + ?Sized + 'a> Write for SidebandChannel1Writer<'a, W> {
                 self.pending.extend_from_slice(&buf[..take]);
                 offset += take;
             }
-            while self.pending.len() >= MAX_PAYLOAD {
-                let chunk: Vec<u8> = self.pending.drain(..MAX_PAYLOAD).collect();
-                write_sideband_packet(self.inner, 1, &chunk)?;
+            if self.pending.len() == MAX_PAYLOAD {
+                write_sideband_packet(self.inner, 1, &self.pending)?;
+                self.pending.clear();
             }
         }
         while offset + MAX_PAYLOAD <= buf.len() {
@@ -288,4 +288,35 @@ pub fn decode_sideband_primary(mut input: &[u8]) -> io::Result<Vec<u8>> {
         }
     }
     Ok(out)
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+
+    use super::*;
+
+    #[test]
+    fn sideband_writer_emits_full_frames_across_uneven_writes() {
+        let payload: Vec<u8> = (0..200_000u32).map(|i| (i % 251) as u8).collect();
+        let mut framed = Vec::new();
+        let mut writer = SidebandChannel1Writer::new(&mut framed);
+        for piece in payload.chunks(4093).flat_map(|c| c.chunks(1000)) {
+            writer.write_all(piece).expect("write");
+        }
+        writer.write_all(&payload[..0]).expect("empty write");
+        writer.finish().expect("finish");
+
+        let mut frames = Vec::new();
+        let mut rest = framed.as_slice();
+        while !rest.is_empty() {
+            let len = parse_hex_len(&rest[..4]).expect("len");
+            assert_eq!(rest[4], 1, "band 1");
+            frames.push(len - 5);
+            rest = &rest[len..];
+        }
+        assert!(frames[..frames.len() - 1].iter().all(|&n| n == 65515));
+        assert_eq!(frames.iter().sum::<usize>(), payload.len());
+        assert_eq!(decode_sideband_primary(&framed).expect("decode"), payload);
+    }
 }

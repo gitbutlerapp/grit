@@ -4,7 +4,7 @@ use std::cell::UnsafeCell;
 use std::mem::MaybeUninit;
 use std::panic::{catch_unwind, resume_unwind, AssertUnwindSafe};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{mpsc, Arc, Condvar, Mutex};
 
 /// Items claimed per atomic work-stealing step (contiguous index range).
 pub(crate) const DEFAULT_CHUNK: usize = 16;
@@ -278,4 +278,134 @@ where
         }
     };
     Ok(slots.into_vec())
+}
+
+/// Hand-off state between [`run_ordered_batches`] workers and its consumer.
+struct BatchGate {
+    /// Batches already passed to the consumer.
+    consumed: usize,
+    /// Set when the consumer finished early or a worker panicked.
+    stop: bool,
+}
+
+/// Stops the other workers when a worker unwinds, so the consumer is not left waiting.
+struct StopOnPanic<'a> {
+    gate: &'a Mutex<BatchGate>,
+    wake: &'a Condvar,
+}
+
+impl Drop for StopOnPanic<'_> {
+    fn drop(&mut self) {
+        if std::thread::panicking() {
+            self.gate.lock().unwrap_or_else(|e| e.into_inner()).stop = true;
+            self.wake.notify_all();
+        }
+    }
+}
+
+/// Map `items` in consecutive batches on `n_workers` long-lived worker threads and
+/// pass each batch's results to `consume` on the calling thread, in item order.
+///
+/// Each worker calls `init()` once on its own thread and reuses the state for every
+/// batch it maps, so per-thread caches survive across batches. Workers run at most
+/// `2 * n_workers` batches ahead of `consume`, which bounds memory to a few batches
+/// of results while keeping every worker busy.
+///
+/// # Errors
+///
+/// Returns the first error received from `f` or returned by `consume`; remaining
+/// batches are abandoned. A worker panic is resumed on the calling thread.
+pub(crate) fn run_ordered_batches<T, R, E, S, Init, F, C>(
+    items: &[T],
+    batch: usize,
+    n_workers: usize,
+    init: Init,
+    f: F,
+    mut consume: C,
+) -> Result<(), E>
+where
+    T: Sync,
+    R: Send,
+    E: Send,
+    Init: Fn() -> S + Sync,
+    F: Fn(&mut S, &T) -> Result<R, E> + Sync,
+    C: FnMut(&[T], Vec<R>) -> Result<(), E>,
+{
+    let batch = batch.max(1);
+    let n_batches = items.len().div_ceil(batch);
+    let ahead = 2 * n_workers.max(1);
+    let batch_items = |k: usize| &items[k * batch..((k + 1) * batch).min(items.len())];
+    let next = AtomicUsize::new(0);
+    let gate = Mutex::new(BatchGate {
+        consumed: 0,
+        stop: false,
+    });
+    let wake = Condvar::new();
+    let (tx, rx) = mpsc::channel::<(usize, Result<Vec<R>, E>)>();
+
+    std::thread::scope(|scope| {
+        for _ in 0..n_workers.max(1) {
+            let tx = tx.clone();
+            let (next, gate, wake, init, f) = (&next, &gate, &wake, &init, &f);
+            scope.spawn(move || {
+                let _stop_on_panic = StopOnPanic { gate, wake };
+                let mut state = init();
+                loop {
+                    let k = next.fetch_add(1, Ordering::AcqRel);
+                    if k >= n_batches {
+                        return;
+                    }
+                    {
+                        let mut g = gate.lock().unwrap_or_else(|e| e.into_inner());
+                        while !g.stop && k >= g.consumed + ahead {
+                            g = wake.wait(g).unwrap_or_else(|e| e.into_inner());
+                        }
+                        if g.stop {
+                            return;
+                        }
+                    }
+                    let result = batch_items(k)
+                        .iter()
+                        .map(|item| f(&mut state, item))
+                        .collect::<Result<Vec<R>, E>>();
+                    let failed = result.is_err();
+                    if tx.send((k, result)).is_err() || failed {
+                        return;
+                    }
+                }
+            });
+        }
+        drop(tx);
+
+        let mut ready: std::collections::BTreeMap<usize, Vec<R>> = Default::default();
+        let mut outcome = Ok(());
+        let mut want = 0;
+        while want < n_batches {
+            if let Some(results) = ready.remove(&want) {
+                if let Err(e) = consume(batch_items(want), results) {
+                    outcome = Err(e);
+                    break;
+                }
+                want += 1;
+                gate.lock().unwrap_or_else(|e| e.into_inner()).consumed = want;
+                wake.notify_all();
+                continue;
+            }
+            match rx.recv() {
+                Ok((k, Ok(results))) => {
+                    ready.insert(k, results);
+                }
+                Ok((_, Err(e))) => {
+                    outcome = Err(e);
+                    break;
+                }
+                // Every worker exited without delivering `want`: one panicked, and the
+                // scope resumes that panic when it joins.
+                Err(_) => break,
+            }
+        }
+        gate.lock().unwrap_or_else(|e| e.into_inner()).stop = true;
+        wake.notify_all();
+        outcome
+    })
 }

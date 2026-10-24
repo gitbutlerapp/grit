@@ -1496,6 +1496,12 @@ impl Odb {
         self.with_pack_store_for(&self.objects_dir, f)
     }
 
+    /// Install the pack read context of [`Self::with_pack_read_context`] on the current
+    /// thread until the returned guard drops (for long-lived worker threads).
+    pub(crate) fn pack_read_context_guard(&self) -> crate::pack_store::PackReadContextGuard {
+        crate::pack_store::PackReadContextGuard::install(self.pack_store_for(&self.objects_dir))
+    }
+
     /// Open a reader over the single local pack for a long object walk.
     ///
     /// Returns `None` unless [`Self::with_pack_read_context`] is active for this database,
