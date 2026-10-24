@@ -3315,9 +3315,7 @@ fn list_untracked_worktree_files_for_rename(
     index: &Index,
     rules: &WorktreeRules,
 ) -> Result<Vec<String>> {
-    let work_tree = repo
-        .work_tree()
-        .ok_or_else(|| Error::NotARepository("bare repository".into()))?;
+    let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
     let mut out = Vec::new();
     walk_untracked_worktree_files(repo, index, work_tree, "", rules, &mut out)?;
     out.sort();

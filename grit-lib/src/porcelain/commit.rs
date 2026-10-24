@@ -504,14 +504,14 @@ fn validate_commit_pathspecs(repo: &Repository, paths: &ResolvedPathspecs) -> Re
 ///
 /// # Errors
 ///
-/// Returns [`Error::Message`] when the cleaned body would be empty.
+/// Returns [`Error::EmptyCommitMessage`] when the cleaned body would be empty.
 pub fn normalize_commit_message(raw: &str) -> Result<String> {
     let normalized = raw.replace("\r\n", "\n").replace('\r', "\n");
     let processed = process(normalized.as_bytes(), &Mode::Default);
     let message = String::from_utf8(processed)
         .map_err(|_| Error::Message("invalid commit message".into()))?;
     if message.is_empty() {
-        return Err(Error::Message("empty commit message".into()));
+        return Err(Error::EmptyCommitMessage);
     }
     let mut message = message;
     while message.ends_with("\n\n") {
@@ -803,9 +803,7 @@ impl Drop for MemOverlayGuard<'_> {
 
 fn materialize_missing_index_blobs_for_overlay(repo: &Repository, index: &Index) -> Result<()> {
     let odb = repo.odb();
-    let work_tree = repo
-        .work_tree()
-        .ok_or_else(|| Error::Message("this operation must be run in a work tree".into()))?;
+    let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
     let rules = WorktreeRules::from_repository(repo, index)?;
     for entry in index
         .entries
@@ -879,10 +877,10 @@ fn finish_commit_dry_run(
     } else if req_amend {
         amend_default_message.unwrap_or_default()
     } else {
-        return Err(Error::Message("empty commit message".into()));
+        return Err(Error::EmptyCommitMessage);
     };
     if message.trim().is_empty() {
-        return Err(Error::Message("empty commit message".into()));
+        return Err(Error::EmptyCommitMessage);
     }
     if !message.ends_with('\n') {
         message.push('\n');
@@ -1156,10 +1154,10 @@ fn create_commit_with_index(
     } else if let Some(pending) = pending_commit_message(repo)? {
         pending
     } else {
-        return Err(Error::Message("empty commit message".into()));
+        return Err(Error::EmptyCommitMessage);
     };
     if message.trim().is_empty() {
-        return Err(Error::Message("empty commit message".into()));
+        return Err(Error::EmptyCommitMessage);
     }
     if !message.ends_with('\n') {
         message.push('\n');
@@ -1189,7 +1187,7 @@ fn create_commit_with_index(
     }
     message = fs::read_to_string(&editmsg_path).map_err(Error::Io)?;
     if message.trim().is_empty() {
-        return Err(Error::Message("empty commit message".into()));
+        return Err(Error::EmptyCommitMessage);
     }
     if !message.ends_with('\n') {
         message.push('\n');

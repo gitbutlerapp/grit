@@ -41,9 +41,7 @@ pub struct WorktreeSnapshot {
 ///
 /// Returns errors from index I/O, ODB reads, or when the repository has no work tree.
 pub fn load_worktree_snapshot(repo: &Repository) -> Result<WorktreeSnapshot> {
-    let _work_tree = repo
-        .work_tree()
-        .ok_or_else(|| Error::Message("this operation must be run in a work tree".into()))?;
+    let _work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
 
     let head = resolve_head(repo.git_dir())?;
     let head_tree = head_tree_from_head_commit(repo, head.oid())?;
@@ -56,9 +54,7 @@ pub fn load_worktree_snapshot(repo: &Repository) -> Result<WorktreeSnapshot> {
 /// The cache-tree extension is kept: the staged-change check walks it instead of flattening
 /// the whole `HEAD` tree, and index writes after a checkout carry it forward.
 pub(crate) fn load_worktree_index(repo: &Repository) -> Result<Index> {
-    let _work_tree = repo
-        .work_tree()
-        .ok_or_else(|| Error::Message("this operation must be run in a work tree".into()))?;
+    let _work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
     let index_path = repo.index_path_for_env()?;
     let mut index = repo.load_index_at(&index_path)?;
     if index.has_sparse_directory_placeholders() {
@@ -95,9 +91,7 @@ pub(crate) fn local_change_diffs(
     index: &mut Index,
     head_tree: Option<ObjectId>,
 ) -> Result<(Vec<DiffEntry>, Vec<DiffEntry>, bool)> {
-    let work_tree = repo
-        .work_tree()
-        .ok_or_else(|| Error::Message("this operation must be run in a work tree".into()))?;
+    let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
     let index_path = repo.index_path_for_env()?;
     let index_mtime = index_file_mtime(&index_path);
     let config = ConfigSet::load(repo.environment(), Some(repo.git_dir()), true)
@@ -155,9 +149,7 @@ pub(crate) fn local_change_diffs_for_tree_changes(
     let head_by_path = head_tree_sides_from_changes(tree_changes);
     let staged = staged_diff_for_tree_switch_paths(index, &head_by_path, path_filter.as_ref())?;
 
-    let work_tree = repo
-        .work_tree()
-        .ok_or_else(|| Error::Message("this operation must be run in a work tree".into()))?;
+    let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
     let index_path = repo.index_path_for_env()?;
     let index_mtime = index_mtime_for_diff(index, index_file_mtime(&index_path));
     let stat_policy = StatMatchPolicy::from_config(repo.config().ok().as_deref());
@@ -301,9 +293,7 @@ fn worktree_clean_for_switch_paths(
     };
     use std::sync::atomic::{AtomicBool, Ordering};
 
-    let work_tree = repo
-        .work_tree()
-        .ok_or_else(|| Error::Message("this operation must be run in a work tree".into()))?;
+    let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
     let config = repo.config().ok();
     let precompose_unicode = config
         .as_ref()
@@ -1413,9 +1403,7 @@ pub fn prepare_tree_switch(
     } else {
         diff_trees(repo.odb(), from_tree, Some(to_tree), "")?
     };
-    let work_tree = repo
-        .work_tree()
-        .ok_or_else(|| Error::Message("this operation must be run in a work tree".into()))?;
+    let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
     let untracked =
         collect_untracked_for_tree_changes(repo, &mut snapshot.index, work_tree, &tree_changes)?;
     Ok(TreeSwitchPlan {
@@ -1522,9 +1510,7 @@ pub(crate) fn prepare_tree_checkout_with_changes(
     tree_changes: &[DiffEntry],
 ) -> Result<()> {
     let mut snapshot = load_worktree_snapshot(repo)?;
-    let work_tree = repo
-        .work_tree()
-        .ok_or_else(|| Error::Message("this operation must be run in a work tree".into()))?;
+    let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
     let untracked =
         collect_untracked_for_tree_changes(repo, &mut snapshot.index, work_tree, tree_changes)?;
     ensure_no_untracked_overwrite(&untracked, tree_changes)

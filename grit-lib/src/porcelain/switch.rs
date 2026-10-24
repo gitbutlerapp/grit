@@ -598,11 +598,9 @@ fn plan_allow_local_tree_transition_core(
             &tree_changes,
             None,
         )?;
-    let work_tree = repo.work_tree().ok_or_else(|| {
-        TreeTransitionPrepareError::Failed(Error::Message(
-            "this operation must be run in a work tree".into(),
-        ))
-    })?;
+    let work_tree = repo
+        .work_tree()
+        .ok_or(TreeTransitionPrepareError::Failed(Error::RequiresWorkTree))?;
     let (local_blocked_paths, preserve_worktree_paths) =
         match ensure_local_changes_compatible_with_switch(
             work_tree,
@@ -824,11 +822,9 @@ pub(crate) fn verify_tree_transition_allow_local(
             None,
         )
         .map_err(TreeTransitionVerifyError::Failed)?;
-    let work_tree = repo.work_tree().ok_or_else(|| {
-        TreeTransitionVerifyError::Failed(Error::Message(
-            "this operation must be run in a work tree".into(),
-        ))
-    })?;
+    let work_tree = repo
+        .work_tree()
+        .ok_or(TreeTransitionVerifyError::Failed(Error::RequiresWorkTree))?;
     ensure_local_changes_compatible_with_switch(
         work_tree,
         &prepared.index,

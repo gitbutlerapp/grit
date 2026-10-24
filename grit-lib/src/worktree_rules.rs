@@ -140,7 +140,7 @@ impl WorktreeRules {
     ) -> Result<Self> {
         let work_tree = repo
             .work_tree()
-            .ok_or_else(|| Error::Message("this operation must be run in a work tree".into()))?
+            .ok_or(Error::RequiresWorkTree)?
             .to_path_buf();
         let conversion = ConversionConfig::from_config_with_runner(&config, repo.command_runner());
         let ignore = RefCell::new(IgnoreMatcher::from_repository(repo)?);

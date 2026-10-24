@@ -87,6 +87,13 @@ pub enum RevParseError {
         name: String,
     },
 
+    /// Parent/ancestor navigation (`~`, `^`, …) ran past the first root commit.
+    #[error("revision '{spec}' is out of range")]
+    RevisionOutOfRange {
+        /// Full user revision spec that could not be resolved.
+        spec: String,
+    },
+
     /// Path in `rev:path` lies outside the work tree.
     #[error("'{path}' is outside repository at '{work_tree}'")]
     OutsideRepository {

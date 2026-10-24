@@ -3787,6 +3787,29 @@ pub fn blame_file(repo: &Repository, path: &str, options: &BlameOptions) -> Resu
     let mut session = BlameSession::new(repo.odb(), None, false, &thread_policy);
     session.whitespace = options.whitespace;
     session.commit_graph = repo.caches().commit_graph_chain(repo.odb().objects_dir());
+    let revision_label = if options.start.is_some() {
+        start_oid.to_hex()
+    } else {
+        "HEAD".into()
+    };
+    let start_commit = get_blame_commit(
+        repo.odb(),
+        start_oid,
+        &mut BlameCommitCache::default(),
+        session.commit_graph.as_deref(),
+    )?;
+    if session
+        .resolve_path_in_tree(start_commit.tree, &file_path)?
+        .is_none()
+    {
+        return Err(
+            crate::revwalk::rev_parse_error::RevParseError::PathNotInRevision {
+                path: file_path,
+                revision: revision_label,
+            }
+            .into(),
+        );
+    }
     let copy_depth = options.copy_detection.depth();
     let (lines, commits) = repo.odb().with_pack_read_context(
         || -> Result<(Vec<BlameAttributedLine>, HashMap<ObjectId, BlameCommitInfo>)> {

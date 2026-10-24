@@ -1429,7 +1429,7 @@ fn resolve_revision_impl(
     for step in nav_steps {
         oid = apply_nav_step(repo, &nav_cache, oid, step).map_err(|e| {
             if matches!(e, Error::ObjectNotFound(_)) {
-                RevParseError::AmbiguousArgument {
+                RevParseError::RevisionOutOfRange {
                     spec: spec.to_owned(),
                 }
                 .into()

@@ -477,7 +477,7 @@ fn squash_commit_does_not_reuse_squash_msg_on_following_commit() {
     git(tmp.path(), &["add", "follow.txt"]);
     let err = create_commit(&repo, &empty_commit_req(), &mut NullProgress).expect_err("no msg");
     assert!(
-        matches!(err, Error::Message(ref m) if m.contains("empty commit message")),
+        matches!(err, Error::EmptyCommitMessage),
         "unexpected: {err:?}"
     );
     assert_ne!(squash_msg.trim(), "");

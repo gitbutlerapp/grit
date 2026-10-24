@@ -1888,9 +1888,9 @@ pub fn status(
     _progress: &mut dyn ProgressSink,
 ) -> Result<StatusModel> {
     crate::trace::trace_span!("grit.status.scan");
-    let work_tree = repo.work_tree().ok_or_else(|| {
-        crate::error::Error::Message("this operation must be run in a work tree".into())
-    })?;
+    let work_tree = repo
+        .work_tree()
+        .ok_or(crate::error::Error::RequiresWorkTree)?;
 
     let head = crate::state::resolve_head(repo.git_dir())?;
     let state = crate::state::wt_status_get_state(repo.git_dir(), &head, true)?;

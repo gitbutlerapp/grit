@@ -284,9 +284,7 @@ fn stage_inner_on_index(
     let dry_run = opts.dry_run;
     let persist_index = write_index && !dry_run;
     let dry_run_list_only = dry_run && write_index;
-    let work_tree = repo
-        .work_tree()
-        .ok_or_else(|| Error::Message("this operation must be run in a work tree".into()))?;
+    let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
 
     let index_path = repo.index_path();
     let index_mtime = index_file_mtime(&index_path);

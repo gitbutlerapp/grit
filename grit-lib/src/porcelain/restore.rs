@@ -91,9 +91,7 @@ pub struct RestoreOutcome {
 /// or [`Error::RestoreConflictNotUnmerged`] when the index shape does not allow
 /// the requested checkout. Other failures are I/O or object-store errors.
 pub fn restore_paths(repo: &Repository, opts: &RestoreOptions) -> Result<RestoreOutcome> {
-    let work_tree = repo
-        .work_tree()
-        .ok_or_else(|| Error::Message("this operation must be run in a work tree".into()))?;
+    let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
 
     if opts.pathspecs.is_empty() {
         return Err(Error::Message("you must specify path(s) to restore".into()));

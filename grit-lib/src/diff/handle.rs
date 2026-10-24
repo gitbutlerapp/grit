@@ -85,7 +85,7 @@ impl<'repo> Diff<'repo> {
         let work_tree = self
             .repo
             .work_tree()
-            .ok_or_else(|| crate::error::Error::NotARepository("bare repository".into()))?;
+            .ok_or(crate::error::Error::RequiresWorkTree)?;
         diff_index_to_worktree(
             self.repo.odb(),
             index,

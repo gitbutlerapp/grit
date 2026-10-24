@@ -65,9 +65,7 @@ pub(crate) fn apply_clean_tree_merge_to_worktree_with_snapshot(
     merged: &TreeMergeOutput,
     snapshot: &mut WorktreeSnapshot,
 ) -> Result<()> {
-    let work_tree = repo
-        .work_tree()
-        .ok_or_else(|| Error::Message("this operation must be run in a work tree".into()))?;
+    let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
     let tree_changes =
         tree_changes_for_clean_merge_with_snapshot(repo, from_tree, merged, snapshot)?;
     let untracked =

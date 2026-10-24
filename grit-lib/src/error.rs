@@ -889,6 +889,10 @@ pub enum Error {
     #[error("this operation must be run in a work tree")]
     RequiresWorkTree,
 
+    /// A commit was requested with an empty message body after normalization.
+    #[error("empty commit message")]
+    EmptyCommitMessage,
+
     /// [`crate::porcelain::paths::remove_paths`] was called with no pathspecs.
     #[error("you must specify path(s) to remove")]
     RemovePathsRequired,

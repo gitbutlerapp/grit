@@ -5200,6 +5200,7 @@ pub grit_lib::error::Error::DeltaChainTooDeep::limit: usize
 pub grit_lib::error::Error::DetachedHead
 pub grit_lib::error::Error::DiffPath(grit_lib::error::DiffPathError)
 pub grit_lib::error::Error::DubiousOwnership(alloc::string::String)
+pub grit_lib::error::Error::EmptyCommitMessage
 pub grit_lib::error::Error::FetchDeepenRelativeUnsupported
 pub grit_lib::error::Error::FetchIntoCheckedOutBranch
 pub grit_lib::error::Error::FetchIntoCheckedOutBranch::branch: alloc::string::String
@@ -14611,6 +14612,7 @@ pub grit_lib::prelude::Error::RemovePathsRequired
 pub grit_lib::prelude::Error::ReplayAbortHeadMoved
 pub grit_lib::prelude::Error::ReplayContinueUnmerged
 pub grit_lib::prelude::Error::ReplaySourceAtHead
+pub grit_lib::prelude::Error::EmptyCommitMessage
 pub grit_lib::prelude::Error::RequiresWorkTree
 pub grit_lib::prelude::Error::RestoreConflictMissingOurs
 pub grit_lib::prelude::Error::RestoreConflictMissingOurs::path: alloc::string::String
@@ -23378,6 +23380,8 @@ pub grit_lib::revwalk::rev_parse_error::RevParseError::HeadNotBranch
 pub grit_lib::revwalk::rev_parse_error::RevParseError::InternalDescribeRegex
 pub grit_lib::revwalk::rev_parse_error::RevParseError::InvalidObjectName
 pub grit_lib::revwalk::rev_parse_error::RevParseError::InvalidObjectName::name: alloc::string::String
+pub grit_lib::revwalk::rev_parse_error::RevParseError::RevisionOutOfRange
+pub grit_lib::revwalk::rev_parse_error::RevParseError::RevisionOutOfRange::spec: alloc::string::String
 pub grit_lib::revwalk::rev_parse_error::RevParseError::NoPushRemote
 pub grit_lib::revwalk::rev_parse_error::RevParseError::NoPushTrackingRef
 pub grit_lib::revwalk::rev_parse_error::RevParseError::NoPushTrackingRef::branch: alloc::string::String

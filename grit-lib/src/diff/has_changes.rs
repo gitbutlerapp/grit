@@ -236,9 +236,7 @@ fn worktree_has_changes(
     pathspecs: &[String],
     opts: &DiffOptions,
 ) -> Result<bool> {
-    let work_tree = repo
-        .work_tree()
-        .ok_or_else(|| Error::NotARepository("bare repository".into()))?;
+    let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
     let config = repo.config()?;
     let index_mtime = index_mtime_for_diff(index, None);
     let rules_arc = Arc::new(std::sync::Mutex::new(WorktreeRules::from_repository(

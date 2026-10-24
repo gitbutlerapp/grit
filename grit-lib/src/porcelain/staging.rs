@@ -32,7 +32,7 @@ use crate::unicode_normalization::resolve_worktree_path_for_staging;
 pub fn stage_worktree_changes(repo: &Repository, pathspecs: &[String]) -> Result<usize> {
     let work_tree = repo
         .work_tree()
-        .ok_or_else(|| crate::error::Error::Message("not a work tree".into()))?;
+        .ok_or(crate::error::Error::RequiresWorkTree)?;
 
     let index_path = repo.index_path();
     let index_mtime = index_file_mtime(&index_path);
