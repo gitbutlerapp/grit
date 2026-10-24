@@ -501,9 +501,23 @@ impl Environment {
     }
 
     /// Variables exported to hook/filter subprocesses (no process inheritance).
+    ///
+    /// Typed fields are authoritative for the variables they model (clearing
+    /// [`Self::git_dir`] removes `GIT_DIR` even when the original snapshot had it). Every other
+    /// variable captured by [`Self::from_vars`] (`PATH`, `SystemRoot`, `LANG`, …) is passed
+    /// through unchanged, as Git does for hooks, so child processes can find their tools.
     #[must_use]
     pub fn subprocess_environment(&self) -> Vec<(OsString, OsString)> {
-        let mut set = Vec::new();
+        let mut passthrough: Vec<(&String, &OsString)> = self
+            .captured_vars
+            .iter()
+            .filter(|(k, _)| !is_typed_environment_var(k))
+            .collect();
+        passthrough.sort_unstable_by(|a, b| a.0.cmp(b.0));
+        let mut set: Vec<(OsString, OsString)> = passthrough
+            .into_iter()
+            .map(|(k, v)| (OsString::from(k), v.clone()))
+            .collect();
         subprocess_push_str(&mut set, "GIT_DIR", self.git_dir.as_deref());
         subprocess_push_str(&mut set, "GIT_WORK_TREE", self.git_work_tree.as_deref());
         subprocess_push_str(
@@ -596,6 +610,36 @@ impl Environment {
             "GIT_TEST_NO_WRITE_REV_INDEX",
             self.git_test_no_write_rev_index.as_deref(),
         );
+        subprocess_push_str(
+            &mut set,
+            "GIT_TEST_REFTABLE_AUTOCOMPACTION",
+            self.git_test_reftable_autocompaction.as_deref(),
+        );
+        subprocess_push_str(&mut set, "GIT_AUTHOR_NAME", self.git_author_name.as_deref());
+        subprocess_push_str(
+            &mut set,
+            "GIT_AUTHOR_EMAIL",
+            self.git_author_email.as_deref(),
+        );
+        subprocess_push_str(&mut set, "GIT_AUTHOR_DATE", self.git_author_date.as_deref());
+        subprocess_push_str(
+            &mut set,
+            "GIT_COMMITTER_NAME",
+            self.git_committer_name.as_deref(),
+        );
+        subprocess_push_str(
+            &mut set,
+            "GIT_COMMITTER_EMAIL",
+            self.git_committer_email.as_deref(),
+        );
+        subprocess_push_str(
+            &mut set,
+            "GIT_COMMITTER_DATE",
+            self.git_committer_date.as_deref(),
+        );
+        subprocess_push_str(&mut set, "TZ", self.tz.as_deref());
+        subprocess_push_str(&mut set, "USER", self.user.as_deref());
+        subprocess_push_str(&mut set, "USERNAME", self.username.as_deref());
         subprocess_push_str(&mut set, "ProgramFiles", self.program_files.as_deref());
         subprocess_push_str(
             &mut set,
@@ -684,6 +728,60 @@ fn utc_offset_from_tz_hhmm(tz: TzHhmm) -> Option<UtcOffset> {
     let minutes = (abs % 100) as i32;
     let seconds = sign * (hours * 3600 + minutes * 60);
     UtcOffset::from_whole_seconds(seconds).ok()
+}
+
+/// Variables [`Environment::from_vars`] parses into typed fields; keep in sync with it.
+const TYPED_ENVIRONMENT_VARS: &[&str] = &[
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_CEILING_DIRECTORIES",
+    "GIT_INDEX_FILE",
+    "GIT_NAMESPACE",
+    "GIT_REPLACE_REF_BASE",
+    "GIT_NO_REPLACE_OBJECTS",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_PREFIX",
+    "GIT_CONFIG_NOSYSTEM",
+    "GIT_CONFIG_SYSTEM",
+    "GIT_CONFIG_GLOBAL",
+    "GIT_CONFIG",
+    "GIT_CONFIG_PARAMETERS",
+    "GIT_CONFIG_COUNT",
+    "HOME",
+    "XDG_CONFIG_HOME",
+    "USERPROFILE",
+    "HOMEDRIVE",
+    "HOMEPATH",
+    "GIT_INSTALL_ROOT",
+    "GIT_EXEC_PATH",
+    "PWD",
+    "GIT_TEST_ASSUME_DIFFERENT_OWNER",
+    "GRIT_DEBUG_SAFE_DIR",
+    "GIT_TRACE_SETUP",
+    "GIT_TRACE2_PERF",
+    "GRIT_INVOCATION_CWD",
+    "SUDO_UID",
+    "GIT_TEST_UTF8_NFD_TO_NFC",
+    "GIT_TEST_NO_WRITE_REV_INDEX",
+    "GIT_TEST_REFTABLE_AUTOCOMPACTION",
+    "GIT_AUTHOR_NAME",
+    "GIT_AUTHOR_EMAIL",
+    "GIT_AUTHOR_DATE",
+    "GIT_COMMITTER_NAME",
+    "GIT_COMMITTER_EMAIL",
+    "GIT_COMMITTER_DATE",
+    "TZ",
+    "USER",
+    "USERNAME",
+    "ProgramFiles",
+    "ProgramFiles(x86)",
+];
+
+fn is_typed_environment_var(key: &str) -> bool {
+    TYPED_ENVIRONMENT_VARS.contains(&key)
+        || key.starts_with("GIT_CONFIG_KEY_")
+        || key.starts_with("GIT_CONFIG_VALUE_")
 }
 
 fn subprocess_push_str(out: &mut Vec<(OsString, OsString)>, key: &str, val: Option<&str>) {
@@ -858,6 +956,42 @@ mod tests {
         assert!(!env.is_fetch_options_default());
         env.captured_vars.clear();
         assert!(env.is_fetch_options_default());
+    }
+
+    #[test]
+    fn subprocess_environment_passes_through_untyped_vars() {
+        let vars = [
+            ("PATH", "/opt/tools/bin:/usr/bin"),
+            ("SystemRoot", r"C:\Windows"),
+            ("GIT_AUTHOR_NAME", "Ada"),
+            ("GIT_DIR", "/stale/.git"),
+            ("GIT_CONFIG_COUNT", "1"),
+            ("GIT_CONFIG_KEY_0", "user.name"),
+            ("GIT_CONFIG_VALUE_0", "Ada"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (OsString::from(k), OsString::from(v)));
+        let mut env = Environment::from_vars(vars, PathBuf::from("/tmp"));
+        env.git_dir = None;
+        env.git_config_pairs[0].1 = "Grace".to_owned();
+
+        let set = env.subprocess_environment();
+        let get = |key: &str| -> Vec<&OsString> {
+            set.iter()
+                .filter(|(k, _)| k == key)
+                .map(|(_, v)| v)
+                .collect()
+        };
+        assert_eq!(get("PATH"), vec!["/opt/tools/bin:/usr/bin"]);
+        assert_eq!(get("SystemRoot"), vec![r"C:\Windows"]);
+        assert_eq!(get("GIT_AUTHOR_NAME"), vec!["Ada"]);
+        assert!(get("GIT_DIR").is_empty(), "cleared typed field must win");
+        assert_eq!(get("GIT_CONFIG_VALUE_0"), vec!["Grace"]);
+    }
+
+    #[test]
+    fn subprocess_environment_of_empty_snapshot_is_empty() {
+        assert!(Environment::empty().subprocess_environment().is_empty());
     }
 
     #[test]
