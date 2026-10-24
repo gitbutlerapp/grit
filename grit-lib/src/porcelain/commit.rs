@@ -989,6 +989,21 @@ impl Drop for TempHookIndexFile {
     }
 }
 
+/// Write a merge-continue (or other) commit from a caller-owned index.
+///
+/// The index must have no unmerged stages; it is written back with the new cache-tree.
+pub(crate) fn create_commit_with_loaded_index(
+    repo: &Repository,
+    index: &mut Index,
+    req: &CommitRequest,
+    progress: &mut dyn ProgressSink,
+) -> Result<CommitOutcome> {
+    if index.has_unmerged_entries() {
+        return Err(Error::IndexUnmerged);
+    }
+    create_commit_with_index(repo, index, req, progress, None)
+}
+
 fn create_commit_with_index(
     repo: &Repository,
     index: &mut Index,

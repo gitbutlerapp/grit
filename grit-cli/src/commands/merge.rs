@@ -18,8 +18,8 @@ use grit_lib::objects::ObjectId;
 use grit_lib::operation::{Conflict, ConflictKind};
 use grit_lib::porcelain::merge::{
     abort_branch_merge, continue_merge, integrate_branch_with, plan_branch_merge, predict_merge,
-    ContinueMergeError, ContinueOptions, FastForwardPolicy, IntegrateBranchOutcome,
-    MergeCommitMode, MergeConflictDetail, MergeConflictKind, MergeDryRunPlan, MergeOptions,
+    ContinueOptions, FastForwardPolicy, IntegrateBranchOutcome,
+    MergeCommitMode, MergeConflictDetail, MergeDryRunPlan, MergeOptions,
     MergePrediction, MergePredictionOptions,
 };
 use grit_lib::progress::NullProgress;
@@ -613,16 +613,6 @@ fn run_continue(repo: &Repository, message: Option<&str>) -> Result<MergeOutcome
     let mut progress = NullProgress;
     match continue_merge(repo, &options, &mut progress) {
         Ok(outcome) => Ok(MergeOutcome::merged(&label, outcome.oid, outcome.change_id)),
-        Err(ContinueMergeError::UnmergedPaths { paths }) => {
-            let details = paths
-                .into_iter()
-                .map(|path| MergeConflictDetail {
-                    path,
-                    kind: MergeConflictKind::Content,
-                })
-                .collect();
-            Ok(MergeOutcome::conflicts(&label, details))
-        }
         Err(err) => Err(anyhow::Error::new(err)),
     }
 }

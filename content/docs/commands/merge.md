@@ -23,7 +23,7 @@ Brings the commits from `<branch>` into the current branch:
 - If the current branch already has everything, nothing changes.
 - If the current branch has no commits of its own since they diverged, it's moved forward to `<branch>` (a fast-forward). No new commit is made.
 - Otherwise both sides are merged. When there are no overlapping edits, a merge commit is recorded with the message `Merge <branch>`. That commit gets a new `change-id` header like [`grit commit`](../commit/). When `commit.gpgsign` is enabled, that merge commit is signed like [`grit commit`](../commit/).
-- When the same lines were changed on both sides, `grit merge` stops with conflicts: it updates the index and working tree, writes conflict markers around each conflicting hunk, records merge-in-progress state (`MERGE_HEAD`, `ORIG_HEAD`, `MERGE_MSG`), and leaves the branch ref unchanged. Fix conflicts, stage resolved paths, then run `grit merge --continue` to create the two-parent merge commit (message from `MERGE_MSG` with comment lines stripped, or `-m` to override). [`grit commit`](../commit/) can also finish a resolved merge for Git compatibility. Run `grit merge --abort` to discard the in-progress merge and restore the pre-merge branch, index, and working tree.
+- When the same lines were changed on both sides, `grit merge` stops with conflicts: it updates the index and working tree, writes conflict markers around each conflicting hunk, records merge-in-progress state (`MERGE_HEAD`, `ORIG_HEAD`, `MERGE_MSG`), and leaves the branch ref unchanged. Fix conflicts, then run `grit merge --continue` to create the two-parent merge commit (message from `MERGE_MSG` with comment lines stripped, or `-m` to override). When `commit.autoStage` is true (the default), `--continue` stages resolved paths from the work tree the same way [`grit commit`](../commit/) does, so you do not need `grit add` after editing away conflict markers. With `commit.autoStage=false`, stage resolved paths with `grit add` before `--continue`. [`grit commit`](../commit/) can also finish a resolved merge. Run `grit merge --abort` to discard the in-progress merge and restore the pre-merge branch, index, and working tree.
 - After a merge with `--no-commit` (when supported), run `grit merge --continue` to record the merge commit without re-running the three-way merge.
 
 `<branch>` can be a local branch or a remote-tracking branch such as `origin/main`. Local branches are looked up first.
@@ -52,7 +52,7 @@ Local edits are allowed when they only touch paths the merge does not change, or
 | `<branch>` | The branch to merge into the current one. |
 | `--check` | Predict whether the merge would succeed without changing refs, the index, or the working tree. Exit **0** when it would fast-forward, already be up to date, or merge cleanly; exit **1** when it would conflict. Other failures use the usual error exit. |
 | `--dry-run` | Report the planned merge outcome (up to date, fast-forward, merge commit with parents, or conflicts) without changing refs, the index, or the working tree. Exit **0** unless the merge would be refused (for example `--ff-only` when a fast-forward is not possible, exit **128**). Conflicts are reported in the JSON but do not fail the command. Mutually exclusive with `--check`. |
-| `--continue` | Finish an in-progress merge after conflicts are resolved (or after `--no-commit`). Conflicts with `<branch>`, `--check`, and `--abort`. |
+| `--continue` | Finish an in-progress merge after conflicts are resolved (or after `--no-commit`). Auto-stages resolved paths when `commit.autoStage` is true (default). Conflicts with `<branch>`, `--check`, and `--abort`. |
 | `-m`, `--message` | Commit message for `--continue` only (overrides `MERGE_MSG`). |
 | `--abort` | Cancel an in-progress merge and restore the state recorded in `ORIG_HEAD`. |
 | `--ff-only` | Refuse when a fast-forward is not possible (exit code 128). Mutually exclusive with `--no-ff`. |
@@ -102,7 +102,7 @@ CONFLICT (modify_delete): f deleted on the current branch and modified in feat; 
 Automatic merge failed; fix conflicts and run `grit merge --continue`, or run `grit merge --abort`.
 ```
 
-After resolving markers and staging:
+After resolving markers (staging is optional when `commit.autoStage` is true):
 
 ```console
 $ grit merge --continue

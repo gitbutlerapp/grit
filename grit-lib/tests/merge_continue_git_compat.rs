@@ -77,6 +77,37 @@ fn init_conflict_merge(root: &Path) -> Repository {
     Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open grit repo")
 }
 
+fn init_grit_two_file_conflict_merge(root: &Path) -> Repository {
+    git(root, &["init", "-q", "-b", "main", "."]);
+    git(root, &["config", "user.name", "T"]);
+    git(root, &["config", "user.email", "t@e.com"]);
+    git(root, &["config", "core.logAllRefUpdates", "true"]);
+
+    let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("repo");
+    std::fs::write(root.join("a.txt"), b"1\n2\n3\n").unwrap();
+    std::fs::write(root.join("b.txt"), b"keep\n").unwrap();
+    git(root, &["add", "."]);
+    git(root, &["commit", "-qm", "base"]);
+
+    git(root, &["checkout", "-qb", "topic"]);
+    std::fs::write(root.join("a.txt"), b"1\ntopic\n3\n").unwrap();
+    std::fs::write(root.join("b.txt"), b"tb\n").unwrap();
+    git(root, &["commit", "-qam", "topic"]);
+    let topic: ObjectId = git_out(root, &["rev-parse", "topic"])
+        .parse()
+        .expect("topic");
+
+    git(root, &["checkout", "-q", "main"]);
+    std::fs::write(root.join("a.txt"), b"1\nmain\n3\n").unwrap();
+    std::fs::write(root.join("b.txt"), b"mb\n").unwrap();
+    git(root, &["commit", "-qam", "main"]);
+    let main: ObjectId = git_out(root, &["rev-parse", "HEAD"]).parse().expect("main");
+
+    let outcome = integrate_branch(&repo, "refs/heads/main", main, topic, "topic").expect("merge");
+    assert!(matches!(outcome, IntegrateBranchOutcome::Conflicts { .. }));
+    repo
+}
+
 fn init_grit_conflict_merge(root: &Path) -> Repository {
     git(root, &["init", "-q", "-b", "main", "."]);
     git(root, &["config", "user.name", "T"]);
@@ -182,6 +213,28 @@ fn grit_conflict_then_git_commit_no_edit() {
     let parts: Vec<&str> = parents_line.split_whitespace().collect();
     assert_eq!(parts[1], main_before.to_hex());
     assert_eq!(parts[2], side_tip.to_hex());
+}
+
+#[test]
+fn continue_after_edit_without_add_auto_stages_resolved_paths() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    let repo = init_grit_two_file_conflict_merge(root);
+
+    std::fs::write(root.join("a.txt"), b"1\nboth\n3\n").unwrap();
+    std::fs::write(root.join("b.txt"), b"resolved\n").unwrap();
+
+    let topic_tip = ObjectId::from_hex(&git_out(root, &["rev-parse", "topic"])).expect("topic");
+    let main_before = ObjectId::from_hex(&git_out(root, &["rev-parse", "HEAD"])).expect("main");
+
+    continue_merge(&repo, &continue_options(None), &mut NullProgress).expect("continue");
+
+    assert!(!repo.git_dir().join("MERGE_HEAD").exists());
+    let parents_line = git_out(root, &["rev-list", "--parents", "-1", "HEAD"]);
+    let parts: Vec<&str> = parents_line.split_whitespace().collect();
+    assert_eq!(parts.len(), 3, "merge commit: {parents_line}");
+    assert_eq!(parts[1], main_before.to_hex());
+    assert_eq!(parts[2], topic_tip.to_hex());
 }
 
 #[test]

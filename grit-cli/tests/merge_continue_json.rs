@@ -65,16 +65,14 @@ fn merge_continue_json() {
 
     let (code, v) = grit_json(repo, &["merge", "--continue"]);
     assert_ne!(code, 0);
-    assert_eq!(v["result"], "conflicts");
-    assert_eq!(v["branch"], "side");
-    let conflicts = v["conflicts"].as_array().expect("conflicts array");
     assert!(
-        conflicts.iter().any(|c| c["path"].as_str() == Some("f")),
-        "expected conflict on f: {v}"
+        v["error"]
+            .as_str()
+            .is_some_and(|e| e.contains("unmerged") || e.contains("f")),
+        "expected continue to refuse unresolved merge: {v}"
     );
 
     fs::write(repo.join("f"), "resolved\n").unwrap();
-    system_git_ok(repo, &["add", "f"]);
 
     let (code, v) = grit_json(repo, &["merge", "--continue"]);
     assert_eq!(code, 0);

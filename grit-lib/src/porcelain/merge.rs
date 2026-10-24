@@ -74,7 +74,10 @@ use crate::state::{clear_merge_state, read_merge_heads, read_merge_msg, read_ori
 use crate::stripspace::{process as stripspace_process, Mode as StripspaceMode};
 use thiserror::Error;
 
-use crate::porcelain::commit::{create_commit, CommitRequest};
+use crate::porcelain::add::stage_for_commit_on_index;
+use crate::porcelain::commit::{
+    create_commit_with_loaded_index, default_commit_scope_from_config, CommitRequest, CommitScope,
+};
 use crate::worktree_rules::WorktreeRules;
 use crate::write_tree::write_tree_from_index;
 
@@ -960,6 +963,14 @@ pub enum ContinueMergeError {
         /// Repository-relative paths still in conflict stages.
         paths: Vec<String>,
     },
+    /// Work tree content is resolved but the index still has conflict stages (`commit.autoStage=false`).
+    #[error(
+        "resolved in the work tree but not staged: {paths:?} — run `grit add` on those paths first"
+    )]
+    ResolvedNotStaged {
+        /// Repository-relative paths cleared of conflict markers but not staged.
+        paths: Vec<String>,
+    },
     /// The resolved message would be empty after cleanup.
     #[error("empty commit message")]
     EmptyMessage,
@@ -989,11 +1000,23 @@ pub fn continue_merge(
         return Err(ContinueMergeError::NoMergeInProgress);
     }
 
-    let index = repo.load_index().map_err(ContinueMergeError::Repository)?;
+    let config = repo.config().map_err(ContinueMergeError::Repository)?;
+    let auto_stage = default_commit_scope_from_config(config.as_ref()) == CommitScope::AutoStage;
+
+    let mut index = repo.load_index().map_err(ContinueMergeError::Repository)?;
+    if auto_stage {
+        stage_for_commit_on_index(repo, &mut index, progress, false)
+            .map_err(ContinueMergeError::Repository)?;
+    }
     if index.has_unmerged_entries() {
-        return Err(ContinueMergeError::UnmergedPaths {
-            paths: unmerged_index_paths(&index),
-        });
+        let paths = unmerged_index_paths(&index);
+        if !auto_stage {
+            let resolved = resolved_not_staged_paths(repo, &index, &paths);
+            if !resolved.is_empty() {
+                return Err(ContinueMergeError::ResolvedNotStaged { paths: resolved });
+            }
+        }
+        return Err(ContinueMergeError::UnmergedPaths { paths });
     }
 
     let message = resolve_continue_merge_message(repo.git_dir(), options.message.as_deref())?;
@@ -1004,7 +1027,8 @@ pub fn continue_merge(
         allow_empty: false,
         ..Default::default()
     };
-    let outcome = create_commit(repo, &req, progress).map_err(ContinueMergeError::Repository)?;
+    let outcome = create_commit_with_loaded_index(repo, &mut index, &req, progress)
+        .map_err(ContinueMergeError::Repository)?;
     Ok(ContinueOutcome {
         oid: outcome.oid,
         change_id: outcome.change_id,
@@ -1047,6 +1071,44 @@ fn unmerged_index_paths(index: &Index) -> Vec<String> {
     paths.sort();
     paths.dedup();
     paths
+}
+
+fn resolved_not_staged_paths(repo: &Repository, index: &Index, unmerged: &[String]) -> Vec<String> {
+    let work_tree = match repo.work_tree() {
+        Some(wt) => wt,
+        None => return Vec::new(),
+    };
+    let Ok(rules) = WorktreeRules::from_repository(repo, index) else {
+        return Vec::new();
+    };
+    let mut resolved = Vec::new();
+    for path in unmerged {
+        let raw_path = path.as_bytes();
+        let abs = work_tree.join(path);
+        let Ok(meta) = std::fs::symlink_metadata(&abs) else {
+            continue;
+        };
+        let idx_mode = index
+            .entries
+            .iter()
+            .find(|e| e.path == raw_path && e.stage() != 0)
+            .map(|e| e.mode)
+            .unwrap_or(0o100644);
+        if !crate::rerere::worktree_metadata_needs_conflict_marker_inspection(&meta, idx_mode) {
+            continue;
+        }
+        let Ok(wt_bytes) = std::fs::read(&abs) else {
+            continue;
+        };
+        let marker_size = rules
+            .file_attrs(path, false)
+            .effective_conflict_marker_size();
+        if !crate::rerere::worktree_bytes_have_unresolved_conflict_markers(&wt_bytes, marker_size) {
+            resolved.push(path.clone());
+        }
+    }
+    resolved.sort();
+    resolved
 }
 
 /// Abort an in-progress merge, restoring index and worktree to [`read_orig_head`].
