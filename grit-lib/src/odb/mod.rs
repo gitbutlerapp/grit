@@ -1096,6 +1096,15 @@ impl Odb {
         Ok(indexes.first().map(|idx| idx.idx_path.clone()))
     }
 
+    /// Parsed indexes of the packs in this database's own `objects/pack/` (cached, no alternates).
+    ///
+    /// # Errors
+    ///
+    /// Propagates pack directory listing and index parse failures.
+    pub(crate) fn local_pack_indexes(&self) -> Result<Vec<Arc<pack::PackIndex>>> {
+        pack::read_local_pack_indexes_cached(self.objects_dir())
+    }
+
     /// Drop cached pack listings, parsed indexes, pack bytes, delta bases, and MIDX layers.
     ///
     /// Call after in-process repack, garbage collection, or [`crate::index_pack::install_pack_bytes`]

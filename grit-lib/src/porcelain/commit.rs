@@ -3137,10 +3137,7 @@ mod tests {
     }
 
     fn loose_object_count(repo: &Repository) -> usize {
-        use crate::objects::odb::store::loose::enumerate_loose_objects;
-        enumerate_loose_objects(repo.odb().objects_dir(), repo.odb().hash_algo())
-            .map(|v| v.len())
-            .unwrap_or(0)
+        repo.odb().count_loose_objects().unwrap_or(0)
     }
 
     #[test]
