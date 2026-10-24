@@ -613,8 +613,6 @@ fn decide_push_wire(
     }
 
     if spec.delete {
-        // Deleting a ref the remote does not have is a no-op success; otherwise
-        // send the delete command (null new OID) and let the server confirm.
         return Ok(match remote_current {
             Some(_) => PushDecision {
                 result: PushRefResult {
@@ -630,7 +628,13 @@ fn decide_push_wire(
                 new_tip: None,
                 send: true,
             },
-            None => no_op(PushRefStatus::UpToDate, None, None, true, None),
+            None => no_op(
+                PushRefStatus::RejectRemoteRefMissing,
+                None,
+                None,
+                true,
+                Some("remote ref does not exist".to_owned()),
+            ),
         });
     }
 

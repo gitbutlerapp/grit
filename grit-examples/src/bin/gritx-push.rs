@@ -199,6 +199,9 @@ fn status_display(status: &PushRefStatus, message: Option<&str>) -> (&'static st
         PushRefStatus::RejectFetchFirst => "  [rejected] (fetch first)".to_owned(),
         PushRefStatus::RejectNeedsForce => "  [rejected] (needs force)".to_owned(),
         PushRefStatus::RejectStale => "  [rejected] (stale info)".to_owned(),
+        PushRefStatus::RejectRemoteRefMissing => {
+            "  [rejected] (remote ref does not exist)".to_owned()
+        }
         PushRefStatus::AtomicPushFailed => "  [rejected] (atomic push failed)".to_owned(),
         PushRefStatus::RemoteRejected => {
             format!("  [remote rejected] ({})", message.unwrap_or("declined"))

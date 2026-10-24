@@ -12,6 +12,7 @@
 //!   * forced non-fast-forward                -> `Ok` (forced), ref moves
 //!   * deletion                               -> `Ok`, no pack streamed, ref gone
 //!   * up-to-date (re-push same tip)          -> `UpToDate` no-op (no wire round)
+//!   * delete absent ref                      -> `RejectRemoteRefMissing` (client gate)
 //!   * force-with-lease (expected_old) ok     -> `Ok`, ref moves
 //!   * force-with-lease (expected_old) stale  -> client `RejectStale`, ref intact
 //!   * expect-absent lease on existing ref    -> client `RejectStale`, ref intact
@@ -524,15 +525,17 @@ fn run_push_matrix(label: &str, bare: &Path, graph: &Graph, push: &Pusher<'_>) {
     );
     fsck_clean(bare, &format!("{label} deletion"));
 
-    // --- 7. Deleting an absent ref is an UpToDate no-op ------------------------
+    // --- 7. Deleting an absent ref is rejected (matches `git push --delete`) ---
     let out = push(
         &[deletion("refs/heads/never-existed")],
         &PushOptions::default(),
     );
+    let r = result_for(&out, "refs/heads/never-existed");
     assert_eq!(
-        result_for(&out, "refs/heads/never-existed").status,
-        PushRefStatus::UpToDate,
-        "[{label}] deleting a non-existent ref is a no-op success"
+        r.status,
+        PushRefStatus::RejectRemoteRefMissing,
+        "[{label}] deleting a non-existent ref must fail, got {:?}",
+        r.message
     );
 
     // --- 8. Force-with-lease: stale expectation is client-rejected ------------

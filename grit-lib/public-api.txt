@@ -18264,6 +18264,7 @@ pub grit_lib::remote::push_report::PushRefStatus::RejectAlreadyExists
 pub grit_lib::remote::push_report::PushRefStatus::RejectFetchFirst
 pub grit_lib::remote::push_report::PushRefStatus::RejectNeedsForce
 pub grit_lib::remote::push_report::PushRefStatus::RejectNonFastForward
+pub grit_lib::remote::push_report::PushRefStatus::RejectRemoteRefMissing
 pub grit_lib::remote::push_report::PushRefStatus::RejectStale
 pub grit_lib::remote::push_report::PushRefStatus::RemoteRejected
 pub grit_lib::remote::push_report::PushRefStatus::UpToDate

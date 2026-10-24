@@ -675,6 +675,9 @@ pub fn resolve_push_delete_ref(
     if remote_ref_names.contains(&branch) {
         return branch;
     }
+    if crate::refs::resolve_ref(git_dir, &tag).is_ok() {
+        return tag;
+    }
     if remote_ref_names.contains(&tag) {
         return tag;
     }
@@ -2418,9 +2421,14 @@ fn decide_push(
     }
 
     if spec.delete {
-        let (status, action, apply) = match remote_current {
-            Some(_) => (PushRefStatus::Ok, PushAction::Delete, true),
-            None => (PushRefStatus::UpToDate, PushAction::None, false),
+        let (status, action, apply, message) = match remote_current {
+            Some(_) => (PushRefStatus::Ok, PushAction::Delete, true, None),
+            None => (
+                PushRefStatus::RejectRemoteRefMissing,
+                PushAction::None,
+                false,
+                Some("remote ref does not exist".to_owned()),
+            ),
         };
         return Ok(PushDecision {
             result: PushRefResult {
@@ -2431,7 +2439,7 @@ fn decide_push(
                 forced: false,
                 deletion: true,
                 status,
-                message: None,
+                message,
             },
             action,
             apply,

@@ -128,6 +128,8 @@ impl HumanRender for PushOutcome {
                             w,
                             "  rejected {target}: stale remote ref — run `grit fetch` and try again"
                         );
+                    } else if detail == "remote_ref_missing" {
+                        outln!(w, "  rejected {target}: remote ref does not exist");
                     } else {
                         outln!(w, "  rejected {target}: {detail}");
                     }
@@ -242,6 +244,10 @@ pub fn run(
                 PushRefStatus::RejectStale => {
                     rejected = true;
                     Some("stale".to_owned())
+                }
+                PushRefStatus::RejectRemoteRefMissing => {
+                    rejected = true;
+                    Some("remote_ref_missing".to_owned())
                 }
                 _ => {
                     rejected = true;

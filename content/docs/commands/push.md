@@ -99,6 +99,13 @@ $ grit push --force-with-lease
   rejected origin refs/heads/main: stale remote ref — run `grit fetch` and try again
 ```
 
+When the delete target is not on the remote:
+
+```console
+$ grit push origin --delete no-such-branch
+  rejected origin refs/heads/no-such-branch: remote ref does not exist
+```
+
 ## JSON output
 
 Schema: [v1](/schemas/push/v1.json)
@@ -111,7 +118,7 @@ Pass `--json` for stable, scripting-friendly output:
 | `kind` | string | `branch`, `tags`, `delete`, or `refspecs`. |
 | `branch` | string or null | Short branch name when `kind` is `branch`. |
 | `dry_run` | boolean | `true` when `--dry-run` was used (no refs or objects written). |
-| `results` | array | Per-ref outcomes; each object has `ref`, `status` (`ok`, `up_to_date`, or `rejected`), optional `reason` (`stale` for a failed lease), `old_oid`, `new_oid`, `src`, and `forced`. |
+| `results` | array | Per-ref outcomes; each object has `ref`, `status` (`ok`, `up_to_date`, or `rejected`), optional `reason` (`stale` for a failed lease, `remote_ref_missing` when `--delete` targets a ref absent on the remote), `old_oid`, `new_oid`, `src`, and `forced`. |
 | `rejected` | boolean | `true` if any ref was rejected (exit status is also `1`). |
 | `upstream_set` | array of strings | Branch short names whose upstream config was written (`-u` only; omitted when empty). |
 

@@ -33,6 +33,9 @@ pub enum PushRefStatus {
     RejectStale,
     /// The remote `receive-pack` declined the update (`!`, `[remote rejected] (<reason>)`).
     RemoteRejected,
+    /// Client-side rejection: a delete was requested but the ref is absent on the remote
+    /// (`!`, `[rejected] (remote ref does not exist)`).
+    RejectRemoteRefMissing,
     /// Part of an atomic push that failed because another ref was rejected
     /// (`!`, `[rejected] (atomic push failed)`).
     AtomicPushFailed,
@@ -149,6 +152,11 @@ fn describe(result: &PushRefResult) -> (char, String, Option<String>) {
             '!',
             "[rejected]".to_owned(),
             Some("atomic push failed".to_owned()),
+        ),
+        PushRefStatus::RejectRemoteRefMissing => (
+            '!',
+            "[rejected]".to_owned(),
+            Some("remote ref does not exist".to_owned()),
         ),
     }
 }
