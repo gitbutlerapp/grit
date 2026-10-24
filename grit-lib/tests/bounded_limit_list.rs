@@ -265,6 +265,83 @@ fn write_tied_skewed_history_commits(
 }
 
 #[test]
+fn unlimited_range_does_not_read_history_below_excluded_tip() {
+    let dir = tempdir().expect("tempdir");
+    let repo = open_bare(dir.path()).expect("repo");
+    // Nothing below `base` exists, so walking either side's full closure fails.
+    let missing: grit_lib::objects::ObjectId = "0000000000000000000000000000000000000001"
+        .parse()
+        .expect("oid");
+    let base = write_commit(repo.odb(), &[missing], "base", 100, 100).expect("base");
+    let mut range = Vec::new();
+    let mut parent = base;
+    for i in 0..20 {
+        let when = 200 + i * 10;
+        parent = write_commit(repo.odb(), &[parent], &format!("c{i}"), when, when).expect("c");
+        range.push(parent);
+    }
+    range.reverse();
+    let tip_hex = range[0].to_hex();
+    let base_hex = base.to_hex();
+
+    let listed = rev_list(
+        &repo,
+        std::slice::from_ref(&tip_hex),
+        std::slice::from_ref(&base_hex),
+        &RevListOptions::default(),
+    )
+    .expect("unlimited A..B stays above the excluded tip");
+    assert_eq!(listed.commits, range);
+
+    let spec = format!("{base_hex}..{tip_hex}");
+    let walked = repo
+        .rev_walk()
+        .rev_list_result(&[spec.as_str()], &RevWalkListOptions::default())
+        .expect("RevWalk::rev_list_result A..B");
+    assert_eq!(walked.commits, range);
+    assert_eq!(support::git_rev_list(dir.path(), &[&spec]), range);
+}
+
+#[test]
+fn unlimited_ranges_match_git_on_tied_and_skewed_history() {
+    let dir = tempdir().expect("tempdir");
+    let repo = open_bare(dir.path()).expect("repo");
+    let commits = write_tied_skewed_history_commits(repo.odb(), 900);
+    let hex = |i: usize| commits[i].to_hex();
+    let tip = commits.len() - 1;
+    let cases: [(&[usize], &[usize]); 5] = [
+        (&[tip], &[tip - 20]),
+        (&[tip], &[tip - 400]),
+        (&[tip], &[0]),
+        (&[tip, tip - 300], &[tip - 150, tip - 500]),
+        (&[tip - 10], &[tip]),
+    ];
+    for (positive, negative) in cases {
+        let positive: Vec<String> = positive.iter().map(|&i| hex(i)).collect();
+        let negative: Vec<String> = negative.iter().map(|&i| hex(i)).collect();
+        let mut git_args: Vec<String> = positive.clone();
+        git_args.extend(negative.iter().map(|n| format!("^{n}")));
+        for reverse in [false, true] {
+            let mut args: Vec<&str> = git_args.iter().map(String::as_str).collect();
+            if reverse {
+                args.push("--reverse");
+            }
+            let expected = support::git_rev_list(dir.path(), &args);
+            let opts = RevListOptions {
+                reverse,
+                path_graph_reorder: false,
+                use_commit_graph: true,
+                ..Default::default()
+            };
+            let actual = rev_list(&repo, &positive, &negative, &opts)
+                .expect("rev-list")
+                .commits;
+            assert_eq!(actual, expected, "rev-list {args:?} differs from git");
+        }
+    }
+}
+
+#[test]
 fn date_order_ranges_keep_children_before_parents_like_git() {
     let dir = tempdir().expect("tempdir");
     let repo = open_bare(dir.path()).expect("repo");
