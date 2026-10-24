@@ -146,8 +146,16 @@ fn median_grit_add(root: &std::path::Path, grit: &std::path::Path, paths: &[Stri
         let mut cmd = Command::new(grit);
         cmd.arg("add").current_dir(root);
         cmd.args(paths);
-        let st = cmd.stdout(null()).stderr(null()).status().expect("grit add");
-        assert!(st.success());
+        let out = cmd
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .output()
+            .expect("grit add");
+        assert!(
+            out.status.success(),
+            "grit add failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
         samples.push(t0.elapsed());
     }
     median(samples)
