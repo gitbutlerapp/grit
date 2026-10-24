@@ -1098,7 +1098,7 @@ fn verify_tag_deep_nested_missing_submodule_path_from_root() {
 
     fs::remove_dir_all(root.join("inner/mid/leaf")).expect("remove leaf checkout");
 
-    let err = repo
+    let verification = repo
         .verify_tag(
             tag_oid,
             &TagVerifyOptions {
@@ -1106,14 +1106,18 @@ fn verify_tag_deep_nested_missing_submodule_path_from_root() {
                 gpg: gpg_config(&repo),
             },
         )
-        .unwrap_err();
-    match err {
-        Error::TreeSha256MissingSubmodules(list) => {
-            assert_eq!(list.len(), 1);
-            assert_eq!(list[0].path, "inner/mid/leaf");
-        }
-        other => panic!("expected missing submodule error, got {other:?}"),
-    }
+        .expect("verify reports missing submodules in the result");
+    assert!(
+        verification.tree_sha256.is_none(),
+        "{:?}",
+        verification.tree_sha256
+    );
+    let missing: Vec<&str> = verification
+        .missing_submodules
+        .iter()
+        .map(|m| m.path.as_str())
+        .collect();
+    assert_eq!(missing, ["inner/mid/leaf"]);
 }
 
 #[test]
