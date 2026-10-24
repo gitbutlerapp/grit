@@ -19,6 +19,8 @@ The server side of fetch and clone. It speaks the Git wire protocol on stdin and
 
 It supports Git protocol versions 0, 1 and 2, chosen by the client through the `GIT_PROTOCOL` environment variable. Refs matching `uploadpack.hideRefs` or `transfer.hideRefs` are not shown to clients.
 
+The pack is streamed to the client while it is produced, so the first bytes arrive after object enumeration rather than after the whole pack is built, and server memory stays bounded instead of growing with the pack. Objects already stored in the repository's packs are copied from them: whole objects byte for byte, and deltas whose base is also being sent with their base offset rewritten. Serving a clone of a packed repository therefore costs about as much as copying its pack. Only objects that are not already deltified go through the delta search, which follows `pack.window` and `pack.depth`.
+
 Shallow and deepen requests (`deepen`, `deepen-since`, `deepen-not`, `deepen-relative`, client `shallow` lines) are honored in protocol v0/v1 and in v2 `fetch` (including the `shallow-info` section and sideband-all framing). Partial-clone filters (`filter blob:none`, `blob:limit=<n>`, `tree:<depth>`, and combinations) follow `uploadpack.allowFilter` and `uploadpackfilter.*` policy. Protocol v2 `want-ref` is available when `uploadpack.allowRefInWant` is set. Optional `want` rules follow `uploadpack.allowTipSha1InWant` and `uploadpack.allowReachableSha1InWant`.
 
 ## Options
