@@ -985,20 +985,25 @@ impl PackedRefsFileView {
                 .unwrap_or("<invalid utf-8>");
             return Err(packed_refs_unterminated_line(path, tail));
         }
-        let text = std::str::from_utf8(&data)
+        // Only the header (the leading comment lines) is decoded up front; scans and lookups
+        // check the encoding of the lines they parse.
+        let text = std::str::from_utf8(&data[..packed_refs_leading_comments_end(&data)])
             .map_err(|_| packed_refs_unexpected_line(path, "<invalid utf-8>"))?;
         // Ranged scans never reach the end of a sorted file, so check the last line up front, as
         // Git does: past the header, it must be long enough to hold an object id.
-        let body_start = if text.starts_with('#') {
-            text.find('\n').map_or(text.len(), |nl| nl + 1)
+        let body_start = if data.starts_with(b"#") {
+            memchr::memchr(b'\n', &data).map_or(data.len(), |nl| nl + 1)
         } else {
             0
         };
-        let body = &text[body_start..];
-        if let Some(rest) = body.strip_suffix('\n') {
-            let last_line = rest.rfind('\n').map_or(rest, |nl| &rest[nl + 1..]);
+        let body = &data[body_start..];
+        if let Some(rest) = body.strip_suffix(b"\n") {
+            let last_line = memchr::memrchr(b'\n', rest).map_or(rest, |nl| &rest[nl + 1..]);
             if last_line.len() < hex_len + 1 {
-                return Err(packed_refs_unexpected_line(path, last_line));
+                return Err(packed_refs_unexpected_line(
+                    path,
+                    String::from_utf8_lossy(last_line),
+                ));
             }
         }
         let (data_line_starts, in_order) = packed_refs_data_line_starts(&data, hex_len);
@@ -1136,7 +1141,7 @@ impl PackedRefsFileView {
             .get(hi)
             .copied()
             .unwrap_or(self.data.len());
-        // `from_bytes` validated the whole buffer as UTF-8 and both bounds follow a `\n`.
+        // Both bounds are line starts or the end of the file, so the region is whole lines.
         let region = std::str::from_utf8(&self.data[begin..end])
             .map_err(|_| packed_refs_unexpected_line(path, "<invalid utf-8>"))?;
         parse_packed_refs_region(path, region, prefix_trim, keep, self.peel_trait)
@@ -1251,23 +1256,28 @@ fn read_packed_refs_file_view(store: &Path) -> Result<Option<PackedRefsFileView>
 /// Starts of the lines shaped like a record (`hex_len` bytes, a space, a non-empty name), and
 /// whether their names are in nondecreasing order. Other lines are left for the strict parse.
 fn packed_refs_data_line_starts(data: &[u8], hex_len: usize) -> (Vec<usize>, bool) {
-    let mut out = Vec::new();
+    // A record takes at least an id, a space, one name byte and a newline, so this bounds the
+    // record count and the index never regrows.
+    let mut out = Vec::with_capacity(data.len() / (hex_len + 3) + 1);
     let mut in_order = true;
     let mut prev_name: &[u8] = &[];
     let mut start = 0usize;
-    let ends = memchr::memchr_iter(b'\n', data).chain(std::iter::once(data.len()));
-    for end in ends {
-        if start >= data.len() {
-            break;
+    while let Some(rest) = data.get(start..).filter(|rest| !rest.is_empty()) {
+        // A peel line (`^`, an id, a newline) needs no search: any line starting inside it
+        // ends at that newline, too short to be a record.
+        if rest[0] == b'^' && rest.get(hex_len + 1) == Some(&b'\n') {
+            start += hex_len + 2;
+            continue;
         }
-        let line = &data[start..end];
+        let end = memchr::memchr(b'\n', rest).unwrap_or(rest.len());
+        let line = &rest[..end];
         if line.len() > hex_len + 1 && line[hex_len] == b' ' && !matches!(line[0], b'#' | b'^') {
             let name = &line[hex_len + 1..];
             in_order &= prev_name <= name;
             prev_name = name;
             out.push(start);
         }
-        start = end + 1;
+        start += end + 1;
     }
     (out, in_order)
 }
@@ -1309,6 +1319,18 @@ pub(crate) fn parse_packed_refs_to_map(
     data: &[u8],
 ) -> Result<HashMap<String, ObjectId>> {
     parse_packed_refs_to_map_with_prefix(path, data, None)
+}
+
+/// Offset just past the comment lines (`#...\n`) at the start of `data`.
+fn packed_refs_leading_comments_end(data: &[u8]) -> usize {
+    let mut end = 0;
+    while data.get(end) == Some(&b'#') {
+        match memchr::memchr(b'\n', &data[end..]) {
+            Some(nl) => end += nl + 1,
+            None => return data.len(),
+        }
+    }
+    end
 }
 
 /// Whether the `packed-refs` header comment lists Git's `sorted` trait (`pack-refs --all`).
@@ -5010,6 +5032,41 @@ mod packed_refs_parse_tests {
     }
 
     #[test]
+    fn non_utf8_record_only_breaks_reads_that_cover_it() {
+        let dir = tempdir().unwrap();
+        let path = store::paths::packed_refs_path(dir.path());
+        let oid = "1111111111111111111111111111111111111111";
+        let mut body =
+            format!("# pack-refs with: peeled fully-peeled sorted \n{oid} refs/heads/main\n")
+                .into_bytes();
+        body.extend_from_slice(format!("{oid} refs/tags/v1\n{oid} refs/tags/").as_bytes());
+        body.extend_from_slice(b"\xff\n");
+        let view = PackedRefsFileView::from_bytes(&path, body, HashAlgo::Sha1).unwrap();
+        assert!(view.sorted);
+        for name in ["refs/heads/main", "refs/tags/v1"] {
+            assert_eq!(
+                view.lookup_oid(&path, name).unwrap(),
+                Some(oid.parse().unwrap())
+            );
+        }
+        assert_eq!(view.lookup_oid(&path, "refs/tags/v2").unwrap(), None);
+        let heads = view.map_for_prefix(&path, Some("refs/heads")).unwrap();
+        assert_eq!(heads.keys().collect::<Vec<_>>(), ["refs/heads/main"]);
+        assert!(matches!(
+            view.map_for_prefix(&path, Some("refs/tags")),
+            Err(Error::PackedRefsUnexpectedLine { .. })
+        ));
+        assert!(view.map_for_prefix(&path, None).is_err());
+
+        let mut bad_header = b"# pack-refs with: \xff sorted \n".to_vec();
+        bad_header.extend_from_slice(format!("{oid} refs/heads/main\n").as_bytes());
+        assert!(matches!(
+            PackedRefsFileView::from_bytes(&path, bad_header, HashAlgo::Sha1),
+            Err(Error::PackedRefsUnexpectedLine { .. })
+        ));
+    }
+
+    #[test]
     fn scan_of_file_without_ref_lines_still_validates_it() {
         let dir = tempdir().unwrap();
         let path = store::paths::packed_refs_path(dir.path());
@@ -5649,6 +5706,11 @@ mod packed_ref_peels_tests {
             format!("{hex} refs/heads/z\n{hex} refs/heads/a\n"),
             format!("{hex} refs/heads/a\n\n{hex} refs/heads/b"),
             format!("{hex}\n{hex} \n{hex} x\nshort\n#{hex} refs/heads/c\n"),
+            format!("{hex} refs/tags/a\n^{hex}\n^{hex}\n{hex} refs/tags/b\n^{hex}"),
+            format!("^ab\n{}\n{hex} refs/heads/a\n", "x".repeat(37)),
+            format!("^\n{hex} refs/heads/a\n^{hex}x\n{hex} refs/heads/b\n"),
+            format!("^{hex}\n"),
+            format!("^{}", &hex[1..]),
         ];
         for input in &inputs {
             assert_eq!(
@@ -5656,6 +5718,30 @@ mod packed_ref_peels_tests {
                 naive_line_starts(input.as_bytes(), 40),
                 "{input:?}"
             );
+        }
+    }
+
+    #[test]
+    fn data_line_starts_match_a_line_by_line_scan_on_random_bytes() {
+        let alphabet = b"^\n #ab";
+        let mut state = 0x2545_f491_4f6c_dd1du64;
+        for len in 0..400 {
+            let input: Vec<u8> = (0..len % 97)
+                .map(|_| {
+                    state ^= state << 13;
+                    state ^= state >> 7;
+                    state ^= state << 17;
+                    alphabet[(state % alphabet.len() as u64) as usize]
+                })
+                .collect();
+            for hex_len in [1, 2, 3] {
+                assert_eq!(
+                    packed_refs_data_line_starts(&input, hex_len),
+                    naive_line_starts(&input, hex_len),
+                    "{:?} hex_len={hex_len}",
+                    String::from_utf8_lossy(&input)
+                );
+            }
         }
     }
 }

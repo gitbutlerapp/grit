@@ -599,6 +599,33 @@ fn sha1_packed_refs_fifty_byte_last_record_matches_git() {
     }
 }
 
+/// Git does not require ref names to be UTF-8. A tag whose name is not only breaks the grit
+/// reads that cover it; branches and lookups elsewhere in a sorted file match git.
+#[test]
+fn non_utf8_packed_tag_leaves_branches_readable_like_git() {
+    let repo = files_repo();
+    let wt = wt_path(&repo);
+    let git_dir = git_dir(&repo);
+    let mut content = sorted_packed_refs_with_branches_and_tags(&repo).into_bytes();
+    let head = git(wt, &["rev-parse", "HEAD"]);
+    content.extend_from_slice(format!("{} refs/tags/", head.trim()).as_bytes());
+    content.extend_from_slice(b"\xff\n");
+    fs::write(git_dir.join("packed-refs"), &content).expect("write packed-refs");
+
+    assert_ref_listing_parity(wt, &git_dir, "refs/heads/");
+    for name in ["refs/heads/topic", "refs/tags/t1"] {
+        assert_eq!(
+            resolve_ref(&git_dir, name).expect("resolve").to_hex(),
+            git(wt, &["rev-parse", name]).trim(),
+            "{name}"
+        );
+    }
+    let repo = Repository::open(&git_dir, &RepositoryOptions::empty().with_work_tree(wt))
+        .expect("open repo");
+    assert_eq!(list_branches(&repo).expect("branches").branches.len(), 2);
+    assert!(list_refs(&git_dir, "refs/tags/").is_err());
+}
+
 /// A corrupt line between records of the listed range is reported, never skipped. (System git
 /// mis-compares such a line during its binary search and can silently omit the record before
 /// it, so this deliberately does not assert parity.)
