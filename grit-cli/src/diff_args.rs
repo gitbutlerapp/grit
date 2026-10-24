@@ -110,7 +110,7 @@ fn locate_porcelain_diff_command(args: &[String]) -> Option<usize> {
             i = skip_global_flag(args, i);
             continue;
         }
-        if matches!(token, "diff" | "show" | "log") {
+        if matches!(token, "add" | "diff" | "show" | "log") {
             return Some(i);
         }
         return None;
@@ -242,5 +242,20 @@ mod tests {
         ];
         let out = normalize_diff_argv(args);
         assert_eq!(out[4], "-M=5");
+    }
+
+    #[test]
+    fn normalize_attached_unified_after_add() {
+        let args = vec![
+            "grit".into(),
+            "add".into(),
+            "--hunks".into(),
+            "abc".into(),
+            "-U0".into(),
+            "--".into(),
+            "f.txt".into(),
+        ];
+        let out = normalize_diff_argv(args);
+        assert_eq!(out[4], "-U=0");
     }
 }
