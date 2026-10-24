@@ -1,21 +1,22 @@
 ---
 source: grit-test-support/src/cli_fixture.rs
+assertion_line: 384
 expression: payload
 ---
 {
   "human": {
     "exit": 0,
-    "stdout": "prune: removed 0 unreachable loose objects (9 kept, [DURATION]).\n",
+    "stdout": "prune: removed 0 unreachable loose objects (8 kept, [DURATION]).\n",
     "stderr": "Pruning unreachable loose objects…\n"
   },
   "json": {
     "exit": 0,
-    "stdout": "{\"dry_run\":false,\"tasks\":[{\"task\":\"prune\",\"duration_ms\": 0,\"pruned\":0,\"kept\":9}]}\n",
+    "stdout": "{\"dry_run\":false,\"tasks\":[{\"task\":\"prune\",\"duration_ms\": 0,\"pruned\":0,\"kept\":8}]}\n",
     "stderr": ""
   },
   "markdown": {
     "exit": 0,
-    "stdout": "## Garbage collection\n\n- **dry_run:** false\n\n### Tasks\n\n#### prune\n\n- **duration_ms:** 0\n- **pruned:** 0\n- **kept:** 9\n\n",
+    "stdout": "## Garbage collection\n\n- **dry_run:** false\n\n### Tasks\n\n#### prune\n\n- **duration_ms:** 0\n- **pruned:** 0\n- **kept:** 8\n\n",
     "stderr": ""
   }
 }

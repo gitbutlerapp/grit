@@ -1,21 +1,22 @@
 ---
 source: grit-test-support/src/cli_fixture.rs
+assertion_line: 384
 expression: payload
 ---
 {
   "human": {
     "exit": 0,
-    "stdout": "Checked 9 objects.\n\nUnreachable objects (1):\n  blob cc7c1250b368e807ba98143f3b0b47c3cd8b74fe\n",
+    "stdout": "Checked 8 objects.\nNo integrity problems found.\n",
     "stderr": ""
   },
   "json": {
     "exit": 0,
-    "stdout": "{\"ok\":true,\"objects_checked\":9,\"issues\":[],\"dangling\":[{\"kind\":\"blob\",\"oid\":\"cc7c1250b368e807ba98143f3b0b47c3cd8b74fe\"}]}\n",
+    "stdout": "{\"ok\":true,\"objects_checked\":8,\"issues\":[],\"dangling\":[]}\n",
     "stderr": ""
   },
   "markdown": {
     "exit": 0,
-    "stdout": "## Fsck\n\n- **ok:** true\n- **objects_checked:** 9\n\n### Dangling\n\n- `blob` `cc7c1250b368e807ba98143f3b0b47c3cd8b74fe`\n",
+    "stdout": "## Fsck\n\n- **ok:** true\n- **objects_checked:** 8\n\nNo issues reported.\n",
     "stderr": ""
   }
 }

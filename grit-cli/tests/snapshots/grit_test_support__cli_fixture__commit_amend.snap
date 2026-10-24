@@ -1,5 +1,6 @@
 ---
 source: grit-test-support/src/cli_fixture.rs
+assertion_line: 384
 expression: payload
 ---
 {
@@ -10,7 +11,7 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\"oid\":\"a76917662fd9273c0dae7f9cd3b2855b138b7c38\",\"branch\":\"main\",\"subject\":\"third (amended)\",\"changes\":3,\"amended\":true,\"dry_run\":false,\"scope\":\"auto_stage\",\"files\":[{\"path\":\"staged.txt\",\"status\":\"A\"},{\"path\":\"tracked.txt\",\"status\":\"M\"},{\"path\":\"untracked.txt\",\"status\":\"A\"}],\"change_id\":\"xpwskqqvntzxwyvprokvsuqultwlpsql\",\"parents\":[\"83352a61f6715ec3f0a297c6d6150725154fb833\"],\"author\":{\"name\":\"Test\",\"email\":\"test@example.com\",\"date\":\"1700000000 +0000\"},\"hooks_run\":[]}\n",
+    "stdout": "{\"oid\":\"a76917662fd9273c0dae7f9cd3b2855b138b7c38\",\"branch\":\"main\",\"subject\":\"third (amended)\",\"changes\":3,\"amended\":true,\"dry_run\":false,\"scope\":\"auto_stage\",\"files\":[{\"path\":\"staged.txt\",\"status\":\"A\"},{\"path\":\"tracked.txt\",\"status\":\"M\"},{\"path\":\"untracked.txt\",\"status\":\"A\"}],\"change_id\":\"xpwskqqvntzxwyvprokvsuqultwlpsql\",\"parents\":[\"83352a61f6715ec3f0a297c6d6150725154fb833\"],\"author\":{\"name\":\"Test\",\"email\":\"test@example.com\",\"date\":\"2023-11-14T22:13:20Z\"},\"hooks_run\":[]}\n",
     "stderr": ""
   },
   "markdown": {
