@@ -114,7 +114,9 @@ fn build_schema_registry() -> Vec<SchemaRegistryEntry> {
         pick::PickOutcome,
         pull::PullOutcome,
         push::PushOutcome,
-        reflog::{ReflogDeleteOutcome, ReflogExpireOutcome, ReflogListOutcome},
+        reflog::{
+            ReflogDeleteOutcome, ReflogExpireOutcome, ReflogListOutcome, ReflogRefsListOutcome,
+        },
         remote::RemoteOutcome,
         repack::RepackOutcome,
         reset::ResetCliOutcome,
@@ -127,8 +129,8 @@ fn build_schema_registry() -> Vec<SchemaRegistryEntry> {
         show::ShowRunResult,
         skill::SkillOutcome,
         stash::{
-            StashApplyOutcome, StashDropOutcome, StashListOutcome, StashPopOutcome,
-            StashPushOutcome, StashShowOutcome,
+            StashApplyOutcome, StashBranchOutcome, StashClearOutcome, StashDropOutcome,
+            StashListOutcome, StashPopOutcome, StashPushOutcome, StashShowOutcome,
         },
         status::StatusOutcome,
         switch::SwitchOutcome,
@@ -144,10 +146,17 @@ fn build_schema_registry() -> Vec<SchemaRegistryEntry> {
         entry::<RemoteOutcome>("remote"),
         entry::<RemoteOutcome>("remote.add"),
         entry::<RemoteOutcome>("remote.refs"),
+        entry::<RemoteOutcome>("remote.remove"),
+        entry::<RemoteOutcome>("remote.rename"),
+        entry::<RemoteOutcome>("remote.set-url"),
+        entry::<RemoteOutcome>("remote.show"),
+        entry::<RemoteOutcome>("remote.prune"),
+        entry::<RemoteOutcome>("remote.set-head"),
         entry::<LogOutcome>("log"),
         entry::<RevsOutcome>("revs"),
         entry::<MergeBaseOutcome>("merge-base"),
         entry::<ReflogListOutcome>("reflog"),
+        entry::<ReflogRefsListOutcome>("reflog.list"),
         entry::<ReflogDeleteOutcome>("reflog.delete"),
         entry::<ReflogExpireOutcome>("reflog.expire"),
         entry::<BlameOutcome>("blame"),
@@ -203,6 +212,8 @@ fn build_schema_registry() -> Vec<SchemaRegistryEntry> {
         entry::<StashApplyOutcome>("stash.apply"),
         entry::<StashPopOutcome>("stash.pop"),
         entry::<StashDropOutcome>("stash.drop"),
+        entry::<StashBranchOutcome>("stash.branch"),
+        entry::<StashClearOutcome>("stash.clear"),
         entry::<RestoreCliOutcome>("restore"),
         entry::<FetchOutcome>("fetch"),
         entry::<FetchAllOutcome>("fetch.all"),
@@ -219,6 +230,8 @@ fn build_schema_registry() -> Vec<SchemaRegistryEntry> {
         entry::<WorktreeOutcome>("worktree.prune"),
         entry::<WorktreeOutcome>("worktree.lock"),
         entry::<WorktreeOutcome>("worktree.unlock"),
+        entry::<WorktreeOutcome>("worktree.move"),
+        entry::<WorktreeOutcome>("worktree.repair"),
         entry::<AuthOutcome>("auth"),
         entry::<LogoutOutcome>("auth.logout"),
         entry::<UpdateOutcome>("update"),
@@ -262,10 +275,17 @@ pub fn schema_command_key(args: &[&str]) -> Option<String> {
         "remote" => match positional.get(1).copied() {
             Some("add") => "remote.add",
             Some("refs") => "remote.refs",
+            Some("remove") => "remote.remove",
+            Some("rename") => "remote.rename",
+            Some("set-url") => "remote.set-url",
+            Some("show") => "remote.show",
+            Some("prune") => "remote.prune",
+            Some("set-head") => "remote.set-head",
             _ => "remote",
         },
         "reflog" => match positional.get(1).copied() {
             None => "reflog",
+            Some("list") => "reflog.list",
             Some("delete") => "reflog.delete",
             Some("expire") => "reflog.expire",
             _ => return None,
@@ -283,6 +303,8 @@ pub fn schema_command_key(args: &[&str]) -> Option<String> {
             Some("apply") => "stash.apply",
             Some("pop") => "stash.pop",
             Some("drop") => "stash.drop",
+            Some("branch") => "stash.branch",
+            Some("clear") => "stash.clear",
             _ => return None,
         },
         "bundle" => match positional.get(1).copied() {
@@ -299,6 +321,8 @@ pub fn schema_command_key(args: &[&str]) -> Option<String> {
             Some("prune") => "worktree.prune",
             Some("lock") => "worktree.lock",
             Some("unlock") => "worktree.unlock",
+            Some("move") => "worktree.move",
+            Some("repair") => "worktree.repair",
             _ => return None,
         },
         "auth" => match positional.get(1).copied() {
@@ -331,7 +355,20 @@ pub fn schema_command_key(args: &[&str]) -> Option<String> {
             Some("undo") => "history.undo",
             _ => return None,
         },
-        "rebase" => "rebase",
+        "rebase" => {
+            if args.iter().any(|a| *a == "--check") {
+                "rebase.check"
+            } else {
+                "rebase"
+            }
+        }
+        "fetch" => {
+            if args.iter().any(|a| *a == "--all") {
+                "fetch.all"
+            } else {
+                "fetch"
+            }
+        }
         cmd if NO_JSON_COMMANDS.contains(&cmd) => return None,
         cmd => cmd,
     };
@@ -732,7 +769,6 @@ fn snapshot_args_lookup(name: &str) -> Option<&'static [&'static str]> {
         .find_map(|(stem, args)| (*stem == name).then_some(*args))
 }
 
-/// Map snapshot stem to grit argv used to produce it (for schema validation).
 pub fn snapshot_command_args() -> &'static [(&'static str, &'static [&'static str])] {
     &[
         ("skill", &["skill"]),
@@ -780,7 +816,7 @@ pub fn snapshot_command_args() -> &'static [(&'static str, &'static [&'static st
             "history_reword",
             &["history", "reword", "HEAD~1", "-m", "reworded subject"],
         ),
-        ("history_drop", &["history", "drop", "HEAD~1"]),
+        ("history_drop", &["history", "drop", "HEAD~1", "--dry-run"]),
         (
             "history_squash",
             &["history", "squash", "HEAD~2..HEAD", "--update-refs", "head"],
@@ -800,6 +836,11 @@ pub fn snapshot_command_args() -> &'static [(&'static str, &'static [&'static st
             "blame_tracked_line_range",
             &["blame", "tracked.txt", "-L", "1,2"],
         ),
+        ("blame_tracked_group", &["blame", "tracked.txt", "--group"]),
+        (
+            "blame_tracked_group_line_range",
+            &["blame", "tracked.txt", "-L", "1,2", "--group"],
+        ),
         ("branch_list", &["branch"]),
         ("branch_create", &["branch", "wip"]),
         ("branch_delete", &["branch", "-d", "delete-me"]),
@@ -807,7 +848,10 @@ pub fn snapshot_command_args() -> &'static [(&'static str, &'static [&'static st
         ("tag_lightweight", &["tag", "v1.0"]),
         ("tag_annotated", &["tag", "-m", "release note", "v2.0"]),
         ("tag_delete", &["tag", "-d", "drop-me"]),
-        ("notes_list", &["notes"]),
+        ("notes", &["notes"]),
+        ("notes_list", &["notes", "list"]),
+        ("hooks", &["hooks"]),
+        ("stash", &["stash"]),
         ("notes_show", &["notes", "show", "HEAD"]),
         ("notes_add", &["notes", "add", "HEAD", "-m", "hello notes"]),
         ("notes_remove", &["notes", "remove", "HEAD"]),
@@ -820,6 +864,21 @@ pub fn snapshot_command_args() -> &'static [(&'static str, &'static [&'static st
             "remote_add",
             &["remote", "add", "upstream", "/tmp/upstream.git"],
         ),
+        (
+            "remote_set_url",
+            &["remote", "set-url", "origin", "https://example.com/new.git"],
+        ),
+        ("remote_rename", &["remote", "rename", "origin", "upstream"]),
+        (
+            "remote_remove",
+            &["remote", "remove", "origin", "--dry-run"],
+        ),
+        ("remote_prune", &["remote", "prune", "origin", "--dry-run"]),
+        (
+            "remote_set_head",
+            &["remote", "set-head", "origin", "--auto", "--dry-run"],
+        ),
+        ("remote_show", &["remote", "show", "origin", "--no-query"]),
         (
             "bundle_create",
             &["bundle", "create", "snap.bundle", "HEAD"],
@@ -875,6 +934,9 @@ pub fn snapshot_command_args() -> &'static [(&'static str, &'static [&'static st
         ("stash_apply", &["stash", "apply"]),
         ("stash_pop", &["stash", "pop"]),
         ("stash_drop", &["stash", "drop"]),
+        ("stash_branch", &["stash", "branch", "from-stash"]),
+        ("stash_clear", &["stash", "clear", "--force"]),
+        ("stash_clear_preview", &["stash", "clear"]),
         ("ignore_check", &["ignore", "check", "noise.log"]),
         (
             "ignore_check_all",
@@ -895,10 +957,56 @@ pub fn snapshot_command_args() -> &'static [(&'static str, &'static [&'static st
             &["worktree", "lock", "linked-wt", "--reason", "hold"],
         ),
         ("worktree_unlock", &["worktree", "unlock", "linked-wt"]),
+        (
+            "worktree_move",
+            &["worktree", "move", "linked-wt", "moved-wt"],
+        ),
+        ("worktree_repair", &["worktree", "repair", "moved-wt"]),
         ("hooks_list", &["hooks", "list"]),
         ("hooks_run", &["hooks", "run", "pre-commit"]),
         ("hooks_run_exit_17", &["hooks", "run", "pre-commit"]),
         ("patch_id", &["patch-id", "HEAD"]),
+        ("auth_logout", &["auth", "logout"]),
+        ("fetch_all", &["fetch", "--all"]),
+        (
+            "history_move",
+            &[
+                "history",
+                "move",
+                "HEAD~1",
+                "--before",
+                "HEAD~2",
+                "--dry-run",
+            ],
+        ),
+        ("history_fixup", &["history", "fixup", "HEAD~1"]),
+        ("history_absorb", &["history", "absorb", "--dry-run"]),
+        (
+            "history_rebase",
+            &["history", "rebase", "HEAD~2", "--dry-run"],
+        ),
+        (
+            "history_split",
+            &[
+                "history",
+                "split",
+                "HEAD~1",
+                "-m",
+                "split part",
+                "--",
+                "tracked.txt",
+            ],
+        ),
+        ("history_undo", &["history", "undo", "--dry-run"]),
+        ("rebase_check", &["rebase", "HEAD~2", "--check"]),
+        ("reflog_delete", &["reflog", "delete", "HEAD@{1}"]),
+        ("reflog_expire", &["reflog", "expire", "--expire", "now"]),
+        ("reflog_list", &["reflog", "list"]),
+        ("worktree_prune", &["worktree", "prune"]),
+        ("error_usage", &["branch", "--delete"]),
+        ("error_invalid_pattern", &["log", "--author", "["]),
+        ("error_would_overwrite", &["switch", "br"]),
+        ("error_conflict", &["history", "drop", "HEAD~1"]),
         ("auth_render", &[]),
         ("update_render", &[]),
     ]

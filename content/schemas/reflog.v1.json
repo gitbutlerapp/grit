@@ -27,7 +27,10 @@
       "properties": {
         "action": {
           "description": "Best-effort action prefix from the message (before the first `\": \"`).",
-          "type": "string"
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "committer": {
           "anyOf": [

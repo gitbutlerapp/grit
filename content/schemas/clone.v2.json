@@ -83,6 +83,10 @@
   },
   "description": "Result of `grit clone`.",
   "properties": {
+    "bare": {
+      "description": "Whether the clone destination is a bare repository.",
+      "type": "boolean"
+    },
     "blobs": {
       "anyOf": [
         {
@@ -222,6 +226,7 @@
     }
   },
   "required": [
+    "bare",
     "branches",
     "bytes",
     "detached",

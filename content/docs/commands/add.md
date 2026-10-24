@@ -114,6 +114,8 @@ Grit computes blob object ids with the same plain SHA-1 digests as Git. SHAttere
 
 ## Markdown output
 
+Schema: [v1](/schemas/add/v1.json)
+
 Pass [`--markdown`](../global-options/) for an `Add` heading and how many paths were staged:
 
 ```text
