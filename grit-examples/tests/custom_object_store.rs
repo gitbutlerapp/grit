@@ -109,6 +109,44 @@ fn packfile_kv_recovers_from_torn_length_prefix() -> grit_lib::error::Result<()>
     Ok(())
 }
 
+fn run_memory_primary(tmpdir: &std::path::Path) -> String {
+    let output = Command::new(env!("CARGO_BIN_EXE_memory_primary"))
+        .env("TMPDIR", tmpdir)
+        .output()
+        .expect("run memory_primary");
+    assert!(
+        output.status.success(),
+        "memory_primary: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).into_owned()
+}
+
+#[test]
+fn memory_primary_example_writes_to_memory_only() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let stdout = run_memory_primary(tmp.path());
+    assert!(
+        stdout.contains("blob=b6fc4c620b67d95f953a5c1c1230aaab5db5a1b0"),
+        "{stdout}"
+    );
+    assert!(stdout.contains("in_memory=true"), "{stdout}");
+    assert!(stdout.contains("on_disk=false"), "{stdout}");
+}
+
+/// macOS puts the default temp dir under `/var`, a symlink to `/private/var`.
+#[cfg(unix)]
+#[test]
+fn memory_primary_example_runs_under_symlinked_tmpdir() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let real = tmp.path().join("private-tmp");
+    std::fs::create_dir(&real).expect("mkdir");
+    let link = tmp.path().join("tmp-link");
+    std::os::unix::fs::symlink(&real, &link).expect("symlink");
+    let stdout = run_memory_primary(&link);
+    assert!(stdout.contains("in_memory=true"), "{stdout}");
+}
+
 #[test]
 fn custom_object_store_example_exports_git_clean_repo() -> grit_lib::error::Result<()> {
     let dir = tempfile::tempdir().map_err(grit_lib::error::Error::Io)?;

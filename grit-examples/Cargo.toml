@@ -56,6 +56,10 @@ name = "custom_ref_store"
 path = "src/bin/custom_ref_store.rs"
 
 [[bin]]
+name = "memory_primary"
+path = "src/bin/memory_primary.rs"
+
+[[bin]]
 name = "guide_index"
 path = "src/bin/guide_index.rs"
 
