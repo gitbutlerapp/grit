@@ -132,8 +132,20 @@ struct PackHeader {
 
 /// Build index records for `pack`, using up to `parallelism` worker threads.
 ///
+/// Returns one record per object slot, in no particular order. Every delta is applied
+/// exactly once; besides the records, memory is bounded by the delta chain each worker
+/// is walking (capped per worker, with older ancestors rebuilt from the pack on demand),
+/// not by the number of deltas in the pack. Ref-delta bases missing from the pack are
+/// read from `odb` (thin packs).
+///
 /// When `verify_trailer` is false, skips the full-pack SHA-1 trailer check during
 /// the object scan (used when the caller already validated the stream on the wire).
+///
+/// # Errors
+///
+/// Returns [`Error::CorruptObject`] for a malformed pack, a bad trailer (when
+/// `verify_trailer`), or deltas whose bases are in neither the pack nor `odb`
+/// (the message then contains `could not be resolved for pack index`).
 pub fn build_pack_index_records(
     pack: &[u8],
     odb: &Odb,

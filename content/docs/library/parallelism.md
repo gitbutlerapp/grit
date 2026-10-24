@@ -77,7 +77,7 @@ Parallelism must not change Git-compatible **results**, only latency:
 - [`try_par_map`](https://docs.rs/grit-lib/latest/grit_lib/parallel/fn.try_par_map.html) / [`par_map`](https://docs.rs/grit-lib/latest/grit_lib/parallel/fn.par_map.html) return outputs **in input order** even when workers finish out of order.
 - Pack writing (`PackWrite`) emits the same bytes as the serial writer (header order follows the pack plan).
 - Windowed delta search (`PackDeltaSearch`) partitions work by fixed segments so the chosen delta base for each object is independent of thread count.
-- Index-pack builds the same object ids and offsets as the serial path; only scheduling differs.
+- Index-pack builds the same object ids and offsets as the serial path; only scheduling differs. Each worker resolves the whole delta tree under one base at a time, depth-first, so memory follows the deepest chain (capped per worker) rather than the number of deltas, and adding threads adds only one chain's worth of memory each.
 - Checkout records the same index entries and file contents; parallel creation is ordered before post-processing.
 
 There is **no global thread pool** and **no environment reads** inside `grit_lib::parallel`; pass policy explicitly (via [`RepositoryOptions::thread_policy`](https://docs.rs/grit-lib/latest/grit_lib/environment/struct.RepositoryOptions.html) or a local [`ThreadPolicy`](https://docs.rs/grit-lib/latest/grit_lib/parallel/struct.ThreadPolicy.html)).

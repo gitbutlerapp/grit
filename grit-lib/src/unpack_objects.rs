@@ -584,11 +584,15 @@ pub struct PackIndexRecord {
     pub kind: ObjectKind,
 }
 
-/// Build index records by walking `data` once with bounded retention for delta bases.
-///
-/// Does not copy the pack buffer, retain every inflated object, or duplicate payloads
-/// across lookup maps — only offsets still referenced by unresolved deltas are kept.
 /// Build index records using the repository's default parallelism (`pack.threads` when unset).
+///
+/// Does not copy the pack buffer or retain inflated objects beyond the delta chain each
+/// worker is walking; see [`crate::objects::index_pack::build_pack_index_records`].
+///
+/// # Errors
+///
+/// Returns [`Error::CorruptObject`] for a malformed pack or a delta whose base is in
+/// neither the pack nor `odb`.
 pub fn pack_index_records_from_bytes(data: &[u8], odb: &Odb) -> Result<Vec<PackIndexRecord>> {
     pack_index_records_with_threads(
         data,
