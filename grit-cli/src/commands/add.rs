@@ -334,6 +334,15 @@ fn map_apply_error(err: grit_lib::error::ApplyError) -> anyhow::Error {
 
 fn map_add_error(err: LibError) -> anyhow::Error {
     match err {
+        LibError::UnmergedConflictMarkers { paths } => {
+            let mut msg = String::new();
+            for path in paths {
+                msg.push_str(&path);
+                msg.push_str(": conflict markers remain; not staged\n");
+            }
+            msg.pop();
+            anyhow::anyhow!("{msg}")
+        }
         LibError::PathspecIgnored { paths } => {
             let mut msg =
                 String::from("the following paths are ignored by one of your ignore files:\n");

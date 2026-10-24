@@ -653,6 +653,13 @@ pub enum Error {
     #[error("index contains unmerged entries")]
     IndexUnmerged,
 
+    /// Explicit [`crate::porcelain::add::stage`] refused paths that still contain conflict markers.
+    #[error("unmerged paths still have conflict markers")]
+    UnmergedConflictMarkers {
+        /// Repository-relative paths that were not staged because markers remain.
+        paths: Vec<String>,
+    },
+
     /// A file path is a prefix of another index path at the same tree level.
     #[error(
         "index path prefix conflict between '{}' and '{}'",

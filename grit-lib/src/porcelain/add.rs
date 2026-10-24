@@ -540,18 +540,14 @@ fn stage_inner_on_index(
         )?;
     }
 
+    let mut conflict_marker_rejects = Vec::new();
     if has_unmerged && (!opts.pathspecs.is_empty() || opts.mode == StageMode::Update) {
-        let (modified, removed) = stage_unmerged_paths_matching_pathspecs(
-            repo,
-            work_tree,
-            &matches,
-            index,
-            &rules,
-            dry_run,
-            !opts.pathspecs.is_empty(),
+        let (modified, removed, rejects) = stage_unmerged_paths_matching_pathspecs(
+            repo, work_tree, &matches, index, &rules, dry_run,
         )?;
         outcome.modified.extend(modified);
         outcome.removed.extend(removed);
+        conflict_marker_rejects.extend(rejects);
     }
 
     if opts.executable_hint != StageExecutableHint::None && !opts.pathspecs.is_empty() {
@@ -579,6 +575,14 @@ fn stage_inner_on_index(
         }
     }
 
+    if !conflict_marker_rejects.is_empty() {
+        conflict_marker_rejects.sort_unstable();
+        conflict_marker_rejects.dedup();
+        return Err(Error::UnmergedConflictMarkers {
+            paths: conflict_marker_rejects,
+        });
+    }
+
     Ok(outcome)
 }
 
@@ -593,8 +597,7 @@ fn stage_unmerged_paths_matching_pathspecs(
     index: &mut Index,
     rules: &WorktreeRules,
     dry_run: bool,
-    explicit_pathspecs: bool,
-) -> Result<(Vec<String>, Vec<String>)> {
+) -> Result<(Vec<String>, Vec<String>, Vec<String>)> {
     let mut unmerged: BTreeMap<Vec<u8>, ()> = BTreeMap::new();
     for entry in &index.entries {
         if entry.stage() != 0 {
@@ -603,6 +606,7 @@ fn stage_unmerged_paths_matching_pathspecs(
     }
     let mut modified = Vec::new();
     let mut removed = Vec::new();
+    let mut rejects = Vec::new();
     for raw_path in unmerged.keys() {
         let rel = match std::str::from_utf8(raw_path) {
             Ok(s) => s,
@@ -636,9 +640,7 @@ fn stage_unmerged_paths_matching_pathspecs(
                 &wt_bytes,
                 marker_size,
             ) {
-                if explicit_pathspecs {
-                    return Err(Error::IndexUnmerged);
-                }
+                rejects.push(rel.to_owned());
                 continue;
             }
         }
@@ -664,7 +666,7 @@ fn stage_unmerged_paths_matching_pathspecs(
         mark_fsmonitor_staged(index, rel);
         modified.push(rel.to_owned());
     }
-    Ok((modified, removed))
+    Ok((modified, removed, rejects))
 }
 
 fn worktree_path_is_missing(err: &std::io::Error) -> bool {
@@ -1934,9 +1936,12 @@ mod tests {
         )
         .unwrap_err();
         assert!(
-            matches!(err, Error::IndexUnmerged),
+            matches!(err, Error::UnmergedConflictMarkers { .. }),
             "explicit add must refuse marked file: {err}"
         );
+        if let Error::UnmergedConflictMarkers { paths } = err {
+            assert_eq!(paths, vec!["f".to_owned()]);
+        }
 
         let index = repo.load_index().unwrap();
         assert!(
@@ -1971,7 +1976,7 @@ mod tests {
         )
         .unwrap_err();
         assert!(
-            matches!(err, Error::IndexUnmerged),
+            matches!(err, Error::UnmergedConflictMarkers { .. }),
             "dry-run explicit add must not claim success: {err}"
         );
     }
@@ -1997,7 +2002,7 @@ mod tests {
         )
         .unwrap_err();
         assert!(
-            matches!(err, Error::IndexUnmerged),
+            matches!(err, Error::UnmergedConflictMarkers { .. }),
             "must honor conflict-marker-size=10: {err}"
         );
         assert!(repo.load_index().unwrap().has_unmerged_entries());
@@ -2024,7 +2029,10 @@ mod tests {
             &mut NullProgress,
         )
         .unwrap_err();
-        assert!(matches!(err, Error::IndexUnmerged), "{err}");
+        assert!(
+            matches!(err, Error::UnmergedConflictMarkers { .. }),
+            "{err}"
+        );
     }
 
     #[test]
@@ -2057,8 +2065,73 @@ mod tests {
             &mut NullProgress,
         )
         .unwrap_err();
-        assert!(matches!(err, Error::IndexUnmerged), "{err}");
+        assert!(
+            matches!(err, Error::UnmergedConflictMarkers { .. }),
+            "{err}"
+        );
         let index = repo.load_index().unwrap();
+        assert!(index.has_unmerged_entries());
+    }
+
+    #[test]
+    fn broad_add_stages_resolved_unmerged_paths_and_rejects_marked_siblings() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        let c_oid = repo.odb().write(ObjectKind::Blob, b"new\n").unwrap();
+        let mut index = Index::new();
+        write_three_stage_conflict_index(
+            &repo,
+            &mut index,
+            "a.txt",
+            b"1\n2\n3\n",
+            b"1\n2\n3\nmain\n",
+            b"1\n2\n3\ntopic\n",
+        );
+        write_three_stage_conflict_index(
+            &repo,
+            &mut index,
+            "b.txt",
+            b"1\n2\n3\n",
+            b"1\n2\n3\nmain\n",
+            b"1\n2\n3\ntopic\n",
+        );
+        index
+            .entries
+            .push(conflict_index_entry("c.txt", 0, c_oid, MODE_REGULAR));
+        write_index(&repo, &mut index);
+        fs::write(root.join("a.txt"), b"1\n2\n3\nok\n").unwrap();
+        fs::write(
+            root.join("b.txt"),
+            b"1\n2\n3\n<<<<<<< HEAD\nmain\n=======\ntopic\n>>>>>>> side\n",
+        )
+        .unwrap();
+        fs::write(root.join("c.txt"), b"changed\n").unwrap();
+
+        let err = stage(
+            &repo,
+            &StageOptions {
+                pathspecs: vec![".".to_owned()],
+                ..StageOptions::default()
+            },
+            &mut NullProgress,
+        )
+        .unwrap_err();
+        let Error::UnmergedConflictMarkers { paths } = err else {
+            panic!("expected marker rejection, got {err}");
+        };
+        assert_eq!(paths, vec!["b.txt".to_owned()]);
+
+        let index = repo.load_index().unwrap();
+        assert!(
+            index.get(b"a.txt", 0).is_some(),
+            "resolved a.txt must be staged"
+        );
+        assert!(
+            index.get(b"c.txt", 0).is_some(),
+            "unrelated c.txt must be staged"
+        );
+        assert!(index.get(b"b.txt", 0).is_none(), "b.txt must stay unmerged");
         assert!(index.has_unmerged_entries());
     }
 
