@@ -54,6 +54,7 @@ pub fn schema_id_v2(command: &str) -> String {
 /// Commands whose live `--json` shape is versioned separately from the frozen v1 contract.
 const SCHEMA_V2_COMMANDS: &[&str] = &[
     "add",
+    "commit",
     "config",
     "merge",
     "mv",
@@ -66,6 +67,7 @@ const SCHEMA_V2_COMMANDS: &[&str] = &[
     "remote.rename",
     "remote.set-url",
     "remote.show",
+    "switch",
     "tag",
     "worktree.prune",
 ];
@@ -613,21 +615,24 @@ fn root_schema_to_document(command: &str, root: RootSchema) -> serde_json::Value
         || command == "rebase"
         || command == "history.undo"
     {
-        ensure_required_nullable_head(&mut value);
+        ensure_required_nullable(&mut value, "head");
+    }
+    if command == "commit" || command == "switch" {
+        ensure_required_nullable(&mut value, "branch");
     }
     canonicalize_json(&mut value);
     value
 }
 
-/// `schemars` omits `Option` fields from `required`; stable `--json` always emits `head`.
-fn ensure_required_nullable_head(schema: &mut serde_json::Value) {
+/// `schemars` omits `Option` fields from `required`; stable `--json` always emits `field`.
+fn ensure_required_nullable(schema: &mut serde_json::Value, field: &str) {
     let Some(obj) = schema.as_object_mut() else {
         return;
     };
     let Some(props) = obj.get("properties").and_then(|p| p.as_object()) else {
         return;
     };
-    if !props.contains_key("head") {
+    if !props.contains_key(field) {
         return;
     }
     let required = obj
@@ -636,8 +641,8 @@ fn ensure_required_nullable_head(schema: &mut serde_json::Value) {
     let Some(arr) = required.as_array_mut() else {
         return;
     };
-    if !arr.iter().any(|v| v.as_str() == Some("head")) {
-        arr.push(serde_json::Value::String("head".into()));
+    if !arr.iter().any(|v| v.as_str() == Some(field)) {
+        arr.push(serde_json::Value::String(field.into()));
         arr.sort_by(|a, b| a.as_str().cmp(&b.as_str()));
     }
 }

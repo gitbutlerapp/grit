@@ -541,7 +541,7 @@ pub fn print_commit_outcome(w: &mut dyn Write, outcome: &CommitOutcome) -> anyho
         outln!(
             w,
             "- **Dry run** — would commit on **`{}`**",
-            outcome.branch
+            outcome.branch_label()
         );
         outln!(w, "- **Subject:** {}", outcome.subject);
         outln!(w, "- **Files:** {}", outcome.files.len());
@@ -553,14 +553,14 @@ pub fn print_commit_outcome(w: &mut dyn Write, outcome: &CommitOutcome) -> anyho
         outln!(
             w,
             "- Amended **`{}`** at `{short}` — {}",
-            outcome.branch,
+            outcome.branch_label(),
             outcome.subject
         );
     } else {
         outln!(
             w,
             "- **`{}`** · `{short}` — {}",
-            outcome.branch,
+            outcome.branch_label(),
             outcome.subject
         );
     }
@@ -1164,25 +1164,20 @@ pub fn print_switch_outcome(w: &mut dyn Write, outcome: &SwitchOutcome) -> anyho
     outln!(w, "## Switch");
     outln!(w);
     if outcome.dry_run {
-        let target = if outcome.detached {
-            outcome.commit.as_deref().map(short_hex).unwrap_or("HEAD")
-        } else {
-            outcome.branch.as_str()
-        };
         outln!(
             w,
-            "- Would switch to **`{target}`** ({} path(s) would change)",
+            "- Would switch to **`{}`** ({} path(s) would change)",
+            outcome.target_label(),
             outcome.changed_paths.unwrap_or(0)
         );
         return Ok(());
     }
-    if outcome.detached {
-        let short = outcome.commit.as_deref().map(short_hex).unwrap_or("HEAD");
-        outln!(w, "- HEAD detached at `{short}`");
-    } else if outcome.created {
-        outln!(w, "- Created and switched to **`{}`**", outcome.branch);
-    } else {
-        outln!(w, "- Switched to **`{}`**", outcome.branch);
+    match outcome.branch.as_deref() {
+        None => outln!(w, "- HEAD detached at `{}`", outcome.target_label()),
+        Some(branch) if outcome.created => {
+            outln!(w, "- Created and switched to **`{branch}`**")
+        }
+        Some(branch) => outln!(w, "- Switched to **`{branch}`**"),
     }
     Ok(())
 }

@@ -658,8 +658,9 @@ fn enrich_commit_message(
 pub struct CommitOutcome {
     /// OID of the new commit object written to the object database.
     pub oid: ObjectId,
-    /// Short branch name (e.g. `main`), or `detached HEAD` when not on a branch.
-    pub branch: String,
+    /// Short name of the branch the commit advanced (e.g. `main`), or `None` when `HEAD` is
+    /// detached and only `HEAD` moved.
+    pub branch: Option<String>,
     /// Parent commit OID, or `None` for the root commit on an unborn branch.
     pub parent: Option<ObjectId>,
     /// Every parent OID stored in the new commit object (empty only before the first commit is written).
@@ -674,6 +675,14 @@ pub struct CommitOutcome {
     pub change_id: Option<ChangeId>,
     /// Path-level changes vs the parent tree (`git diff --name-status` between parent and new tree).
     pub files: Vec<CommitFile>,
+}
+
+impl CommitOutcome {
+    /// Whether the commit was made on a detached `HEAD` ([`Self::branch`] is `None`).
+    #[must_use]
+    pub fn is_detached(&self) -> bool {
+        self.branch.is_none()
+    }
 }
 
 /// Write a commit from the current index and advance the checked-out branch.
@@ -851,7 +860,7 @@ fn finish_commit_dry_run(
     repo: &Repository,
     index: &mut Index,
     req: &CommitRequest,
-    short_name: String,
+    short_name: Option<String>,
     parent: Option<ObjectId>,
     parent_tree: Option<ObjectId>,
     merge_heads: Vec<ObjectId>,
@@ -1020,18 +1029,13 @@ fn create_commit_with_index(
     persist_index: Option<&mut Index>,
 ) -> Result<CommitOutcome> {
     let head = resolve_head_for_repository(repo)?;
-    let (refname, short_name, mut parent, head_detached) = match head {
+    let (refname, short_name, mut parent) = match head {
         HeadState::Branch {
             refname,
             short_name,
             oid,
-        } => (refname, short_name, oid, false),
-        HeadState::Detached { oid } => (
-            "HEAD".to_owned(),
-            "detached HEAD".to_owned(),
-            Some(oid),
-            true,
-        ),
+        } => (refname, Some(short_name), oid),
+        HeadState::Detached { oid } => ("HEAD".to_owned(), None, Some(oid)),
         HeadState::Invalid => {
             return Err(Error::Message("HEAD is in an unknown state".into()));
         }
@@ -1329,7 +1333,7 @@ fn create_commit_with_index(
         diff_tree_path_change_count(repo.odb(), parent_tree.as_ref(), Some(&tree), "")?
     };
 
-    if head_detached {
+    if short_name.is_none() {
         update_detached_head_for_commit_on_store(
             repo.refs(),
             expected_old,
@@ -1626,7 +1630,8 @@ mod tests {
 
         let outcome = create_commit(&repo, &commit_req("initial"), &mut NullProgress).unwrap();
         assert!(outcome.parent.is_none());
-        assert_eq!(outcome.branch, "main");
+        assert_eq!(outcome.branch.as_deref(), Some("main"));
+        assert!(!outcome.is_detached());
         assert_eq!(outcome.changes, 1);
         assert_eq!(
             resolve_ref(&repo.git_dir(), "refs/heads/main").unwrap(),
@@ -1685,7 +1690,8 @@ mod tests {
         fs::write(root.join("b.txt"), b"2\n").unwrap();
         stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
         let second = create_commit(&repo, &commit_req("second"), &mut NullProgress).unwrap();
-        assert_eq!(second.branch, "detached HEAD");
+        assert_eq!(second.branch, None);
+        assert!(second.is_detached());
         assert_eq!(second.parent, Some(first.oid));
         let head = fs::read_to_string(repo.git_dir().join("HEAD")).unwrap();
         assert_eq!(head.trim(), second.oid.to_hex());

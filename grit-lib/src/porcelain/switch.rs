@@ -74,18 +74,41 @@ pub struct SwitchOptions {
 /// Result of [`switch_repository`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SwitchOutcome {
-    /// Short branch name when attached; empty when detached.
-    pub branch: String,
+    /// Short name of the branch `HEAD` is on after the switch, or `None` when `HEAD` is detached.
+    pub branch: Option<String>,
     /// True when [`SwitchMode::Create`] created a new branch ref.
     pub created: bool,
-    /// True when `HEAD` is detached after the switch.
-    pub detached: bool,
     /// Commit `HEAD` resolves to after the switch.
     pub commit: ObjectId,
     /// When true, nothing was written to refs, the index, or the worktree.
     pub dry_run: bool,
     /// Paths that would differ after checkout; meaningful when [`Self::dry_run`] is true.
     pub changed_paths: usize,
+}
+
+impl SwitchOutcome {
+    /// Whether `HEAD` is detached after the switch ([`Self::branch`] is `None`).
+    #[must_use]
+    pub fn is_detached(&self) -> bool {
+        self.branch.is_none()
+    }
+
+    fn new(
+        branch_label: &str,
+        created: bool,
+        detached: bool,
+        commit: ObjectId,
+        dry_run: bool,
+        changed_paths: usize,
+    ) -> Self {
+        Self {
+            branch: (!detached).then(|| branch_label.to_owned()),
+            created,
+            commit,
+            dry_run,
+            changed_paths,
+        }
+    }
 }
 
 pub(crate) struct PreparedSwitch {
@@ -303,14 +326,14 @@ pub fn switch_repository(repo: &Repository, opts: &SwitchOptions) -> Result<Swit
 
     if !detached && is_already_on_branch(repo, &branch_ref, target_oid)? {
         if opts.dry_run {
-            return Ok(SwitchOutcome {
-                branch: branch_label,
+            return Ok(SwitchOutcome::new(
+                &branch_label,
                 created,
                 detached,
-                commit: target_oid,
-                dry_run: true,
-                changed_paths: 0,
-            });
+                target_oid,
+                true,
+                0,
+            ));
         }
         let head_before = resolve_head_for_repository(repo)?;
         if let Some(from_label) = checkout_reflog_from_label(&head_before) {
@@ -320,24 +343,24 @@ pub fn switch_repository(repo: &Repository, opts: &SwitchOptions) -> Result<Swit
                 .unwrap_or_else(crate::diff::zero_oid);
             append_head_checkout_reflog(repo, old_oid, target_oid, &from_label, &branch_label)?;
         }
-        return Ok(SwitchOutcome {
-            branch: branch_label,
+        return Ok(SwitchOutcome::new(
+            &branch_label,
             created,
             detached,
-            commit: target_oid,
-            dry_run: false,
-            changed_paths: 0,
-        });
+            target_oid,
+            false,
+            0,
+        ));
     }
     if detached && is_already_detached_at(repo, target_oid)? {
-        return Ok(SwitchOutcome {
-            branch: branch_label,
+        return Ok(SwitchOutcome::new(
+            &branch_label,
             created,
             detached,
-            commit: target_oid,
-            dry_run: opts.dry_run,
-            changed_paths: 0,
-        });
+            target_oid,
+            opts.dry_run,
+            0,
+        ));
     }
 
     switch_to_target(
@@ -396,14 +419,14 @@ fn switch_to_target(
     let prepared = prepare_tree_switch_allow_local_with_snapshot(repo, &target_tree, snapshot)?;
     let changed_paths = count_unique_tree_change_paths(&prepared.plan.tree_changes);
     if dry_run {
-        return Ok(SwitchOutcome {
-            branch: branch_label.to_owned(),
+        return Ok(SwitchOutcome::new(
+            branch_label,
             created,
             detached,
-            commit: target_oid,
-            dry_run: true,
+            target_oid,
+            true,
             changed_paths,
-        });
+        ));
     }
     checkout_prepared_tree_transition(repo, prepared)?;
 
@@ -439,14 +462,14 @@ fn switch_to_target(
         }
     }
 
-    Ok(SwitchOutcome {
-        branch: branch_label.to_owned(),
+    Ok(SwitchOutcome::new(
+        branch_label,
         created,
         detached,
-        commit: target_oid,
-        dry_run: false,
-        changed_paths: 0,
-    })
+        target_oid,
+        false,
+        0,
+    ))
 }
 
 fn count_unique_tree_change_paths(tree_changes: &[DiffEntry]) -> usize {
@@ -1502,6 +1525,53 @@ mod tests {
 
         let head = resolve_head_for_repository(&repo).expect("head");
         assert!(matches!(head, HeadState::Detached { oid } if oid == tip));
+    }
+
+    #[test]
+    fn switch_outcome_branch_is_none_only_when_detached() {
+        let (_dir, repo) = init_repo();
+        let tip = commit_on_branch(&repo, "main", "f", "x\n", None);
+
+        let detached = switch_repository(
+            &repo,
+            &SwitchOptions {
+                mode: SwitchMode::Detached {
+                    commit: tip,
+                    reflog_to_label: "main".into(),
+                },
+                dry_run: false,
+            },
+        )
+        .expect("detach");
+        assert_eq!(detached.branch, None);
+        assert!(detached.is_detached());
+        assert_eq!(detached.commit, tip);
+
+        let preview = switch_repository(
+            &repo,
+            &SwitchOptions {
+                mode: SwitchMode::Existing {
+                    branch: "main".into(),
+                    oid: tip,
+                },
+                dry_run: true,
+            },
+        )
+        .expect("preview");
+        assert_eq!(preview.branch.as_deref(), Some("main"));
+        assert!(!preview.is_detached());
+
+        let attached = switch_repository(
+            &repo,
+            &SwitchOptions {
+                mode: resolve_create_branch(&repo, "topic", None).expect("create mode"),
+                dry_run: false,
+            },
+        )
+        .expect("create");
+        assert_eq!(attached.branch.as_deref(), Some("topic"));
+        assert!(attached.created);
+        assert!(!attached.is_detached());
     }
 
     #[test]

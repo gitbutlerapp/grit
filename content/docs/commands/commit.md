@@ -53,7 +53,7 @@ When `commit.gpgsign` is true (or `commit.gpgSign`), `grit commit` signs the new
 
 `grit commit` fails when there's nothing to commit (except when amending with an unchanged tree, or when you pass `--allow-empty`), when no message is provided (for a normal commit), and when the index still has **unmerged** paths after staging (for example when a merge conflict is not fully resolved in the working tree). Auto-staging does **not** treat a conflicted file as resolved while Git-style conflict markers (`<<<<<<<`, `=======`, `>>>>>>>`) remain in the worktree copy — edit the file to remove them, then run `grit commit` again. Validation failures such as a missing message, empty message, or nothing-to-commit leave the index and working tree unchanged.
 
-On a **detached HEAD** (for example after [`grit switch --detach`](../switch/)), `grit commit` records a new commit and moves `HEAD` to it without updating any branch — the same as `git commit` in that state. Use [`grit switch -c <name>`](../switch/) afterward to name the branch if you want to keep the work. A failed commit (missing message, nothing to commit) does not advance `HEAD` or stage your working tree on detached HEAD, the same as on a branch.
+On a **detached HEAD** (for example after [`grit switch --detach`](../switch/)), `grit commit` records a new commit and moves `HEAD` to it without updating any branch — the same as `git commit` in that state. Use [`grit switch -c <name>`](../switch/) afterward to name the branch if you want to keep the work. With `--json`, a detached-HEAD commit reports `"branch": null` and `"detached": true`. A failed commit (missing message, nothing to commit) does not advance `HEAD` or stage your working tree on detached HEAD, the same as on a branch.
 
 With `--allow-empty`, grit records a new commit whose tree matches the parent even when the working tree is clean (staging still runs first, the same as any other commit). Use this to mark a point in history (for example to trigger CI) without changing files. The resulting commit is valid for Git the same way as `git commit --allow-empty`.
 
@@ -151,14 +151,15 @@ $ grit commit --staged -m "index only"
 
 ## JSON output
 
-Schema: [v1](/schemas/commit/v1.json)
+Schema: [v2](/schemas/commit/v2.json) · [v1](/schemas/commit/v1.json)
 
 Pass `--json` for stable, scripting-friendly output:
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
 | `oid` | string or omitted | Full commit object id; omitted when `dry_run` is true |
-| `branch` | string | Short branch name (e.g. `main`) |
+| `branch` | string or null | Short name of the branch the commit advanced (e.g. `main`); `null` on a detached `HEAD` |
+| `detached` | boolean | `true` when the commit was made on a detached `HEAD` (only `HEAD` moved) |
 | `subject` | string | First line of the commit message |
 | `changes` | number | Path changes vs the parent commit tree |
 | `amended` | boolean | `true` when `--amend` was used |
@@ -177,6 +178,7 @@ Example:
 {
   "oid": "92501f188ae0815af09a0cef6e121eddda4113cf",
   "branch": "main",
+  "detached": false,
   "subject": "second",
   "changes": 1,
   "amended": false,
@@ -210,7 +212,7 @@ $ printf '%s\n' "Subject line" "" "Body." | grit commit --staged -F -
 
 ## Markdown output
 
-Schema: [v1](/schemas/commit/v1.json)
+Schema: [v2](/schemas/commit/v2.json) · [v1](/schemas/commit/v1.json)
 Pass [`--markdown`](../global-options/) for a `Commit` heading, branch and commit summary, and change count:
 
 ```text

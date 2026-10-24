@@ -72,7 +72,7 @@ fn grit_commit_on_detached_head_matches_git() {
 
     let repo = open_grit(root.path());
     let outcome = commit_worktree(&repo, &commit_req("detached"), &mut NullProgress).unwrap();
-    assert_eq!(outcome.branch, "detached HEAD");
+    assert_eq!(outcome.branch, None);
 
     let grit_head = outcome.oid.to_hex();
     let git_head = git(root.path(), &["rev-parse", "HEAD"]);

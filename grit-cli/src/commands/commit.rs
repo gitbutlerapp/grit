@@ -70,7 +70,9 @@ pub struct CommitFileOutcome {
 pub struct CommitOutcome {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub oid: Option<String>,
-    pub branch: String,
+    /// Branch the commit advanced, or JSON `null` on a detached `HEAD`.
+    pub branch: Option<String>,
+    pub detached: bool,
     pub subject: String,
     pub changes: usize,
     pub amended: bool,
@@ -82,6 +84,13 @@ pub struct CommitOutcome {
     pub parents: Vec<String>,
     pub author: CommitAuthorOutcome,
     pub hooks_run: Vec<String>,
+}
+
+impl CommitOutcome {
+    /// The branch name, or `detached HEAD`, for human and Markdown output.
+    pub fn branch_label(&self) -> &str {
+        self.branch.as_deref().unwrap_or("detached HEAD")
+    }
 }
 
 impl HumanRender for CommitOutcome {
@@ -109,7 +118,7 @@ impl HumanRender for CommitOutcome {
         outln!(
             w,
             "[{} {}] {}",
-            self.branch,
+            self.branch_label(),
             self.oid.as_deref().unwrap_or("").get(..7).unwrap_or(""),
             self.subject
         );
@@ -480,6 +489,7 @@ fn finish_commit_outcome(
         } else {
             Some(outcome.oid.to_hex())
         },
+        detached: outcome.is_detached(),
         branch: outcome.branch,
         subject,
         changes: outcome.changes,

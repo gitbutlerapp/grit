@@ -21,7 +21,8 @@ fn is_false(value: &bool) -> bool {
 /// Result of `grit switch`.
 #[derive(Serialize, JsonSchema)]
 pub struct SwitchOutcome {
-    pub branch: String,
+    /// Branch `HEAD` is on after the switch, or JSON `null` when detached.
+    pub branch: Option<String>,
     pub created: bool,
     pub detached: bool,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -41,33 +42,33 @@ impl HumanRender for SwitchOutcome {
             outln!(
                 w,
                 "Would switch to {} ({} path(s) would change)",
-                if self.branch.is_empty() {
-                    self.commit
-                        .as_deref()
-                        .map(|c| &c[..7.min(c.len())])
-                        .unwrap_or("HEAD")
-                } else {
-                    self.branch.as_str()
-                },
+                self.target_label(),
                 self.changed_paths.unwrap_or(0)
             );
             return Ok(());
         }
-        if self.detached {
-            let short = self
-                .commit
-                .as_deref()
-                .map(|c| &c[..7.min(c.len())])
-                .unwrap_or("HEAD");
-            outln!(w, "HEAD detached at {short}");
+        let Some(branch) = self.branch.as_deref() else {
+            outln!(w, "HEAD detached at {}", self.target_label());
             return Ok(());
-        }
+        };
         if self.created {
-            outln!(w, "Created and switched to branch {}", self.branch);
+            outln!(w, "Created and switched to branch {branch}");
         } else {
-            outln!(w, "Switched to branch {}", self.branch);
+            outln!(w, "Switched to branch {branch}");
         }
         Ok(())
+    }
+}
+
+impl SwitchOutcome {
+    /// The branch name, or the short detached commit, for human and Markdown output.
+    pub fn target_label(&self) -> &str {
+        self.branch.as_deref().unwrap_or_else(|| {
+            self.commit
+                .as_deref()
+                .map(|c| &c[..7.min(c.len())])
+                .unwrap_or("HEAD")
+        })
     }
 }
 
@@ -111,15 +112,12 @@ pub fn run(
     let outcome = switch_repository(&repo, &SwitchOptions { mode, dry_run })
         .map_err(json_error::map_lib_error)?;
 
+    let detached = outcome.is_detached();
     Ok(SwitchOutcome {
         branch: outcome.branch,
         created: outcome.created,
-        detached: outcome.detached,
-        commit: if outcome.detached {
-            Some(outcome.commit.to_hex())
-        } else {
-            None
-        },
+        detached,
+        commit: detached.then(|| outcome.commit.to_hex()),
         dry_run: outcome.dry_run,
         changed_paths: outcome.dry_run.then_some(outcome.changed_paths),
     })

@@ -2531,6 +2531,7 @@ fn schema_top_level_keys_are_stable() -> TestResult {
             "branch",
             "change_id",
             "changes",
+            "detached",
             "dry_run",
             "files",
             "hooks_run",

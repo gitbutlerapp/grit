@@ -12388,7 +12388,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::commit::Co
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::commit::CommitFile
 pub struct grit_lib::porcelain::commit::CommitOutcome
 pub grit_lib::porcelain::commit::CommitOutcome::author: grit_lib::porcelain::commit::CommitAuthorInfo
-pub grit_lib::porcelain::commit::CommitOutcome::branch: alloc::string::String
+pub grit_lib::porcelain::commit::CommitOutcome::branch: core::option::Option<alloc::string::String>
 pub grit_lib::porcelain::commit::CommitOutcome::change_id: core::option::Option<grit_lib::change_id::ChangeId>
 pub grit_lib::porcelain::commit::CommitOutcome::changes: usize
 pub grit_lib::porcelain::commit::CommitOutcome::files: alloc::vec::Vec<grit_lib::porcelain::commit::CommitFile>
@@ -12396,6 +12396,8 @@ pub grit_lib::porcelain::commit::CommitOutcome::hooks_run: alloc::vec::Vec<grit_
 pub grit_lib::porcelain::commit::CommitOutcome::oid: grit_lib::objects::ObjectId
 pub grit_lib::porcelain::commit::CommitOutcome::parent: core::option::Option<grit_lib::objects::ObjectId>
 pub grit_lib::porcelain::commit::CommitOutcome::parents: alloc::vec::Vec<grit_lib::objects::ObjectId>
+impl grit_lib::porcelain::commit::CommitOutcome
+pub fn grit_lib::porcelain::commit::CommitOutcome::is_detached(&self) -> bool
 impl core::clone::Clone for grit_lib::porcelain::commit::CommitOutcome
 pub fn grit_lib::porcelain::commit::CommitOutcome::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::porcelain::commit::CommitOutcome
@@ -14358,12 +14360,13 @@ impl core::marker::UnsafeUnpin for grit_lib::porcelain::switch::SwitchOptions
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::switch::SwitchOptions
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::switch::SwitchOptions
 pub struct grit_lib::porcelain::switch::SwitchOutcome
-pub grit_lib::porcelain::switch::SwitchOutcome::branch: alloc::string::String
+pub grit_lib::porcelain::switch::SwitchOutcome::branch: core::option::Option<alloc::string::String>
 pub grit_lib::porcelain::switch::SwitchOutcome::changed_paths: usize
 pub grit_lib::porcelain::switch::SwitchOutcome::commit: grit_lib::objects::ObjectId
 pub grit_lib::porcelain::switch::SwitchOutcome::created: bool
-pub grit_lib::porcelain::switch::SwitchOutcome::detached: bool
 pub grit_lib::porcelain::switch::SwitchOutcome::dry_run: bool
+impl grit_lib::porcelain::switch::SwitchOutcome
+pub fn grit_lib::porcelain::switch::SwitchOutcome::is_detached(&self) -> bool
 impl core::clone::Clone for grit_lib::porcelain::switch::SwitchOutcome
 pub fn grit_lib::porcelain::switch::SwitchOutcome::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::porcelain::switch::SwitchOutcome

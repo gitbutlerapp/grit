@@ -1,0 +1,138 @@
+{
+  "$id": "https://grit-scm.com/schemas/commit/v2.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "definitions": {
+    "CommitAuthorOutcome": {
+      "description": "Author recorded on the new commit (`--json` / `--markdown`).",
+      "properties": {
+        "date": {
+          "description": "Author timestamp in RFC 3339 (same shape as log/show).",
+          "type": "string"
+        },
+        "email": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "date",
+        "email",
+        "name"
+      ],
+      "type": "object"
+    },
+    "CommitFileOutcome": {
+      "description": "One path that would be or was included in the commit (`--json`).",
+      "properties": {
+        "old_path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "path": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "status"
+      ],
+      "type": "object"
+    },
+    "CommitScopeJson": {
+      "description": "JSON scope label for [`CommitOutcome::scope`].",
+      "enum": [
+        "auto_stage",
+        "staged",
+        "paths",
+        "patch"
+      ],
+      "type": "string"
+    }
+  },
+  "description": "Result of `grit commit`.",
+  "properties": {
+    "amended": {
+      "type": "boolean"
+    },
+    "author": {
+      "$ref": "#/definitions/CommitAuthorOutcome"
+    },
+    "branch": {
+      "description": "Branch the commit advanced, or JSON `null` on a detached `HEAD`.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "change_id": {
+      "description": "Stored `change-id` header on the new commit, or JSON `null` when absent or dry-run.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "changes": {
+      "format": "uint",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "detached": {
+      "type": "boolean"
+    },
+    "dry_run": {
+      "type": "boolean"
+    },
+    "files": {
+      "items": {
+        "$ref": "#/definitions/CommitFileOutcome"
+      },
+      "type": "array"
+    },
+    "hooks_run": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "oid": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "parents": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "scope": {
+      "$ref": "#/definitions/CommitScopeJson"
+    },
+    "subject": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "amended",
+    "author",
+    "branch",
+    "changes",
+    "detached",
+    "dry_run",
+    "files",
+    "hooks_run",
+    "parents",
+    "scope",
+    "subject"
+  ],
+  "title": "CommitOutcome",
+  "type": "object"
+}

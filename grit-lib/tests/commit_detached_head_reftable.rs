@@ -65,7 +65,7 @@ fn grit_commit_on_detached_reftable_head_advances_head() {
     std::fs::write(wt.join("b.txt"), b"b\n").unwrap();
     let outcome = commit_worktree(&repo, &commit_req("detached"), &mut NullProgress)
         .expect("detached commit");
-    assert_eq!(outcome.branch, "detached HEAD");
+    assert_eq!(outcome.branch, None);
     assert_ne!(outcome.oid, main_tip);
 
     match resolve_head(repo.git_dir()).expect("head") {
@@ -113,7 +113,7 @@ fn grit_amend_on_detached_reftable_head() {
     let mut amend = commit_req("amended");
     amend.amend = true;
     let outcome = commit_worktree(&repo, &amend, &mut NullProgress).expect("amend detached");
-    assert_eq!(outcome.branch, "detached HEAD");
+    assert_eq!(outcome.branch, None);
     match resolve_head(repo.git_dir()).expect("head") {
         HeadState::Detached { oid } => assert_eq!(oid, outcome.oid),
         other => panic!("expected detached HEAD, got {other:?}"),

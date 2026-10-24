@@ -85,15 +85,15 @@ error: untracked file 'new.txt' would be overwritten — move or remove it first
 
 ## JSON output
 
-Schema: [v1](/schemas/switch/v1.json)
+Schema: [v2](/schemas/switch/v2.json) · [v1](/schemas/switch/v1.json)
 
 Pass `--json` for stable, scripting-friendly output:
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
-| `branch` | string | Short branch name when attached; empty when detached. |
+| `branch` | string or null | Short branch name `HEAD` is on after the switch; `null` when detached. |
 | `created` | boolean | `true` when `-c` or remote DWIM created the branch. |
-| `detached` | boolean | `true` when `--detach` was used. |
+| `detached` | boolean | `true` when `HEAD` is detached after the switch (`branch` is `null`). |
 | `commit` | string or null | Full hex oid when `detached` is true; omitted when attached. |
 | `dry_run` | boolean | `true` when `--dry-run` was used (omitted when false). |
 | `changed_paths` | integer or null | With `--dry-run`, count of paths that would differ after checkout. |
@@ -124,7 +124,7 @@ Example (detached):
 
 ```json
 {
-  "branch": "",
+  "branch": null,
   "created": false,
   "detached": true,
   "commit": "a1b2c3d4e5f6789012345678901234567890abcd"
@@ -135,7 +135,7 @@ On overwrite refusal with `--json`, stdout is a single object with `kind` `would
 
 ## Markdown output
 
-Schema: [v1](/schemas/switch/v1.json)
+Schema: [v2](/schemas/switch/v2.json) · [v1](/schemas/switch/v1.json)
 Pass [`--markdown`](../global-options/) for a `Switch` heading and one summary line:
 
 ```text

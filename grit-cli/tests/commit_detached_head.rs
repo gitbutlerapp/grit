@@ -150,6 +150,43 @@ fn commit_on_detached_head_advances_head_and_git_fsck() -> TestResult {
 }
 
 #[test]
+fn detached_head_is_null_branch_in_commit_and_switch_json() -> TestResult {
+    let scratch = Scratch::new("1798-json")?;
+    let root = scratch.path();
+    gs(root, ["init"]);
+    fs::write(root.join("a.txt"), b"a\n")?;
+    let first = gs(root, ["--json", "commit", "-m", "one"]);
+    assert_eq!(first.status, Some(0), "{}", first.dump());
+    let first: serde_json::Value = serde_json::from_str(&first.stdout)?;
+    assert_eq!(first["branch"], "main");
+    assert_eq!(first["detached"], false);
+    let tip = head_oid(root);
+
+    let switched = gs(root, ["--json", "switch", "--detach", "HEAD"]);
+    assert_eq!(switched.status, Some(0), "{}", switched.dump());
+    let switched: serde_json::Value = serde_json::from_str(&switched.stdout)?;
+    assert!(switched["branch"].is_null(), "{switched}");
+    assert_eq!(switched["detached"], true);
+    assert_eq!(switched["commit"], tip.as_str());
+
+    fs::write(root.join("b.txt"), b"b\n")?;
+    let committed = gs(root, ["--json", "commit", "-m", "two"]);
+    assert_eq!(committed.status, Some(0), "{}", committed.dump());
+    let committed: serde_json::Value = serde_json::from_str(&committed.stdout)?;
+    assert!(committed["branch"].is_null(), "{committed}");
+    assert_eq!(committed["detached"], true);
+
+    let markdown = gs(root, ["--markdown", "switch", "main"]);
+    assert_eq!(markdown.status, Some(0), "{}", markdown.dump());
+    assert!(
+        markdown.stdout.contains("Switched to **`main`**"),
+        "{}",
+        markdown.dump()
+    );
+    Ok(())
+}
+
+#[test]
 fn failed_commit_on_detached_head_does_not_mutate_head() -> TestResult {
     let scratch = Scratch::new("956-fail")?;
     let root = scratch.path();
