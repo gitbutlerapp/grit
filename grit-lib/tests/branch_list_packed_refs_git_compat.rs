@@ -41,6 +41,28 @@ fn git(dir: &Path, args: &[&str]) {
     git_out(dir, args);
 }
 
+/// Insert `entry` (a ref line plus any `^` peel line) into a sorted `packed-refs` file.
+fn insert_packed_ref(packed_refs: &Path, refname: &str, entry: &str) {
+    let text = std::fs::read_to_string(packed_refs).expect("read packed-refs");
+    let mut out = String::with_capacity(text.len() + entry.len());
+    let mut inserted = false;
+    for line in text.split_inclusive('\n') {
+        let name = line
+            .split_once(' ')
+            .filter(|_| !line.starts_with('#') && !line.starts_with('^'))
+            .map(|(_, name)| name.trim_end());
+        if !inserted && name.is_some_and(|name| name > refname) {
+            out.push_str(entry);
+            inserted = true;
+        }
+        out.push_str(line);
+    }
+    if !inserted {
+        out.push_str(entry);
+    }
+    std::fs::write(packed_refs, out).expect("write packed-refs");
+}
+
 fn commit(dir: &Path, msg: &str) -> String {
     std::fs::write(dir.join("f"), msg.as_bytes()).expect("write");
     git(dir, &["add", "f"]);
@@ -214,12 +236,17 @@ fn branch_at_annotated_tag_is_peeled_for_filters_like_git() {
     let target = git_out(&clone, &["rev-parse", "refs/tags/v005^{commit}"])
         .trim()
         .to_owned();
-    // `git update-ref` refuses non-commits under `refs/heads/`, but Git reads such refs.
-    std::fs::write(clone.join(".git/refs/heads/at-tag"), format!("{tag}\n")).unwrap();
-    git(&clone, &["pack-refs", "--all"]);
-    assert!(std::fs::read_to_string(clone.join(".git/packed-refs"))
-        .unwrap()
-        .contains(&format!("{tag} refs/heads/at-tag\n^{target}\n")));
+    // Git refuses to write non-commits under `refs/heads/` (newer `git pack-refs` included),
+    // but reads such refs, so add the peeled entry to the sorted `packed-refs` directly.
+    insert_packed_ref(
+        &clone.join(".git/packed-refs"),
+        "refs/heads/at-tag",
+        &format!("{tag} refs/heads/at-tag\n^{target}\n"),
+    );
+    assert_eq!(
+        git_out(&clone, &["rev-parse", "refs/heads/at-tag"]).trim(),
+        tag
+    );
     let repo = open(&clone);
     let target: ObjectId = target.parse().unwrap();
 
