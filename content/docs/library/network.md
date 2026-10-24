@@ -18,6 +18,8 @@ Parse a literal URL with [`RemoteUrl::try_from`](rustdoc:grit_lib::remote::Remot
 
 Local paths resolve through [`resolve_local_remote_git_dir`](rustdoc:grit_lib::remote::transport_path::resolve_local_remote_git_dir) from the repository root, not the process cwd.
 
+A local or `file://` fetch or push copies the same objects the wire protocol would: those reachable from the requested refs that the receiver lacks. Other branches, hidden refs, excluded tags and unreachable leftovers stay behind even when they share a pack with what was asked for. When a source pack holds only objects the transfer must send, grit hard-links it instead of rebuilding it, and it builds a pack for the rest. The send set comes from the source's reachability bitmap when it has one. The one exception is a clone from a plain path (not a `file://` URL): like `git clone --local`, it links the source's packfiles as they are, unreachable objects included ([`FetchOptions::link_source_objects`](rustdoc:grit_lib::remote::transfer::FetchOptions::link_source_objects)).
+
 To turn a user's repository argument (a configured name, a URL, an scp-style `host:path`, or a path) into a `Remote`, call [`resolve_remote_argument`](rustdoc:grit_lib::remote::fetch_request::resolve_remote_argument). A configured name wins. A name with a config section but no URL fails with `RemoteError::NoUrl`, and anything else fails with [`RemoteError::UnknownRemote`](rustdoc:grit_lib::remote::RemoteError). `grit fetch`, `grit pull` and `grit remote refs` all resolve their argument this way.
 
 ## Managing remotes
