@@ -136,6 +136,18 @@ fn kind_from_git(s: &str) -> ObjectKind {
     }
 }
 
+/// Kind of the object an annotated tag points at directly, from the tag's `type` header.
+///
+/// `%(*objecttype)` is not used: newer Git peels it through nested tags.
+fn git_tag_target_kind(root: &std::path::Path, tag_oid: &str) -> ObjectKind {
+    let body = git(root, &["cat-file", "tag", tag_oid]);
+    let kind = body
+        .lines()
+        .find_map(|line| line.strip_prefix("type "))
+        .expect("tag type header");
+    kind_from_git(kind)
+}
+
 /// Every listed tag's kind, peeled id and target kind, checked against `git for-each-ref`.
 fn assert_tags_classified_like_git(root: &std::path::Path) {
     let repo = open(root);
@@ -145,7 +157,7 @@ fn assert_tags_classified_like_git(root: &std::path::Path) {
         &[
             "for-each-ref",
             "--sort=refname",
-            "--format=%(refname:short) %(objectname) %(objecttype) %(*objecttype)",
+            "--format=%(refname:short) %(objectname) %(objecttype)",
             "refs/tags/",
         ],
     );
@@ -153,13 +165,16 @@ fn assert_tags_classified_like_git(root: &std::path::Path) {
     assert_eq!(tags.len(), rows.len(), "tag count");
     for (tag, row) in tags.iter().zip(rows) {
         let fields: Vec<&str> = row.split(' ').collect();
-        let (name, git_oid, git_type, git_target_type) =
-            (fields[0], fields[1], fields[2], fields[3]);
+        let (name, git_oid, git_type) = (fields[0], fields[1], fields[2]);
         assert_eq!(tag.name, name);
         assert_eq!(tag.oid, oid(git_oid), "{name}");
         if git_type == "tag" {
             assert_eq!(tag.kind, TagKind::Annotated, "{name}");
-            assert_eq!(tag.target_kind, kind_from_git(git_target_type), "{name}");
+            assert_eq!(
+                tag.target_kind,
+                git_tag_target_kind(root, git_oid),
+                "{name}"
+            );
             let fully_peeled = oid(&git(root, &["rev-parse", &format!("{git_oid}^{{}}")]));
             assert_eq!(tag.peeled, Some(fully_peeled), "{name}");
             assert!(tag.annotation.is_some(), "{name}");
