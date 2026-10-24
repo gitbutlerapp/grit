@@ -211,6 +211,60 @@ fn reset_dry_run_hard_lists_overwritten_paths_and_changes_nothing() {
 }
 
 #[test]
+fn reset_orphaned_commits_main_only_git_init() {
+    let dir = TempDir::new().expect("tempdir");
+    init_git_repo(dir.path());
+    std::fs::write(dir.path().join("f.txt"), "1").expect("write");
+    git_cmd(&["add", "-A"]).in_dir(dir.path()).suc();
+    git_cmd(&["commit", "-m", "c1"]).in_dir(dir.path()).suc();
+    let c1_hex = git_cmd(&["rev-parse", "HEAD"])
+        .in_dir(dir.path())
+        .suc()
+        .stdout
+        .trim()
+        .to_owned();
+    for v in ["2", "3"] {
+        std::fs::write(dir.path().join("f.txt"), v).expect("write");
+        git_cmd(&["add", "-A"]).in_dir(dir.path()).suc();
+        git_cmd(&["commit", "-m", &format!("c{v}")])
+            .in_dir(dir.path())
+            .suc();
+    }
+    let c2_hex = git_cmd(&["rev-parse", "HEAD~1"])
+        .in_dir(dir.path())
+        .suc()
+        .stdout
+        .trim()
+        .to_owned();
+    let c3_hex = git_cmd(&["rev-parse", "HEAD"])
+        .in_dir(dir.path())
+        .suc()
+        .stdout
+        .trim()
+        .to_owned();
+
+    let repo = open_grit_repo(dir.path());
+    let c1 = resolve_revision_as_commit_without_index_dwim(&repo, "HEAD~2").expect("c1");
+    assert_eq!(c1, ObjectId::from_hex(&c1_hex).expect("c1 hex"));
+
+    let mut opts = ResetOptions::new(c1, ResetMode::Hard, "T <t@t.com> 0 +0000", "reset");
+    opts.dry_run = true;
+    let preview = reset_to_commit(&repo, &opts).expect("dry-run reset");
+    assert_eq!(preview.orphaned_total, 2, "c2 and c3 should orphan");
+    assert_eq!(preview.orphaned_commits.len(), 2);
+    assert_eq!(
+        preview.orphaned_commits[0].oid,
+        ObjectId::from_hex(&c3_hex).expect("c3")
+    );
+    assert_eq!(
+        preview.orphaned_commits[1].oid,
+        ObjectId::from_hex(&c2_hex).expect("c2")
+    );
+    assert_eq!(preview.orphaned_commits[0].subject, "c3");
+    assert_eq!(preview.orphaned_commits[1].subject, "c2");
+}
+
+#[test]
 fn reset_orphaned_commits_excludes_commits_held_by_other_refs() {
     let dir = TempDir::new().expect("tempdir");
     let repo = Repository::init(

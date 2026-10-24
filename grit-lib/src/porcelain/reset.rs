@@ -4,6 +4,7 @@ use crate::change_id::resolved_change_id;
 use crate::config::ConfigSet;
 use crate::diff::DiffEntry;
 use crate::error::{Error, Result};
+use crate::git_path::path_for_disk_compare;
 use crate::merge_base::{
     is_ancestor, walk_commits_reachable_excluding_ancestors_of, ReachableWalkLimit,
 };
@@ -344,20 +345,19 @@ fn worktree_is_reset_moving_head(repo: &Repository, head: &HeadState, wt: &Workt
     let Some(repo_wt) = repo.work_tree() else {
         return false;
     };
-    if wt.path != repo_wt {
+    if path_for_disk_compare(&wt.path) != path_for_disk_compare(repo_wt) {
         return false;
     }
-    match (head, &wt.head) {
-        (
-            HeadState::Branch { refname, oid, .. },
-            HeadState::Branch {
-                refname: wt_ref,
-                oid: wt_oid,
-                ..
-            },
-        ) => refname == wt_ref && oid == wt_oid,
-        (HeadState::Detached { oid }, HeadState::Detached { oid: wt_oid }) => oid == wt_oid,
-        _ => false,
+    match head {
+        HeadState::Branch { refname, .. } => matches!(
+            &wt.head,
+            HeadState::Branch { refname: wt_ref, .. } if wt_ref == refname
+        ),
+        HeadState::Detached { oid } => matches!(
+            &wt.head,
+            HeadState::Detached { oid: wt_oid } if wt_oid == oid
+        ),
+        HeadState::Invalid => false,
     }
 }
 
