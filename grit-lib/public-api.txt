@@ -15534,6 +15534,7 @@ impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::repo::Repository
 impl !core::panic::unwind_safe::UnwindSafe for grit_lib::repo::Repository
 pub struct grit_lib::prelude::RepositoryBuilder
 impl grit_lib::repo::RepositoryBuilder
+pub fn grit_lib::repo::RepositoryBuilder::initial_branch(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn grit_lib::repo::RepositoryBuilder::new(grit_lib::config::environment::RepositoryOptions) -> Self
 pub fn grit_lib::repo::RepositoryBuilder::odb_builder(self, grit_lib::objects::odb::builder::OdbBuilder) -> Self
 pub fn grit_lib::repo::RepositoryBuilder::open(self, &std::path::Path, core::option::Option<&std::path::Path>) -> grit_lib::error::Result<grit_lib::repo::Repository>
@@ -17147,6 +17148,32 @@ pub fn grit_lib::refs::shorten::peel_symref_to_terminal_ref(&grit_lib::repo::Rep
 pub fn grit_lib::refs::shorten::shorten_unambiguous(&grit_lib::repo::Repository, &str, bool) -> grit_lib::error::Result<alloc::string::String>
 pub fn grit_lib::refs::shorten::warn_ambiguous_refs_from_config(&grit_lib::repo::Repository) -> bool
 pub mod grit_lib::refs::store
+pub mod grit_lib::refs::store::backend
+pub struct grit_lib::refs::store::backend::RefBatchState
+pub grit_lib::refs::store::backend::RefBatchState::reflogs: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>>
+pub grit_lib::refs::store::backend::RefBatchState::refs: alloc::collections::btree::map::BTreeMap<alloc::string::String, grit_lib::refs::store::RawRef>
+impl grit_lib::refs::store::backend::RefBatchState
+pub fn grit_lib::refs::store::backend::RefBatchState::snapshot(&self) -> Self
+impl core::clone::Clone for grit_lib::refs::store::backend::RefBatchState
+pub fn grit_lib::refs::store::backend::RefBatchState::clone(&self) -> Self
+impl core::default::Default for grit_lib::refs::store::backend::RefBatchState
+pub fn grit_lib::refs::store::backend::RefBatchState::default() -> Self
+impl core::fmt::Debug for grit_lib::refs::store::backend::RefBatchState
+pub fn grit_lib::refs::store::backend::RefBatchState::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::refs::store::backend::RefBatchState
+impl core::marker::Send for grit_lib::refs::store::backend::RefBatchState
+impl core::marker::Sync for grit_lib::refs::store::backend::RefBatchState
+impl core::marker::Unpin for grit_lib::refs::store::backend::RefBatchState
+impl core::marker::UnsafeUnpin for grit_lib::refs::store::backend::RefBatchState
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::refs::store::backend::RefBatchState
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::store::backend::RefBatchState
+pub fn grit_lib::refs::store::backend::apply_transaction(&mut grit_lib::refs::store::backend::RefBatchState, &grit_lib::refs::store::RefTransaction) -> core::result::Result<(), grit_lib::refs::store::RefStoreError>
+pub fn grit_lib::refs::store::backend::check_transaction(&grit_lib::refs::store::backend::RefBatchState, &grit_lib::refs::store::RefTransaction) -> core::result::Result<(), grit_lib::refs::store::RefStoreError>
+pub fn grit_lib::refs::store::backend::expected_matches(core::option::Option<&grit_lib::refs::store::RawRef>, &grit_lib::refs::store::Expected) -> bool
+pub fn grit_lib::refs::store::backend::resolve_symbolic(&alloc::collections::btree::map::BTreeMap<alloc::string::String, grit_lib::refs::store::RawRef>, &str) -> core::result::Result<grit_lib::objects::ObjectId, grit_lib::refs::store::RefStoreError>
+pub fn grit_lib::refs::store::backend::validate_storable_refname(&str) -> core::result::Result<(), grit_lib::refs::store::RefStoreError>
+pub fn grit_lib::refs::store::backend::validate_transaction_names(&grit_lib::refs::store::RefTransaction) -> core::result::Result<(), grit_lib::refs::store::RefStoreError>
+pub fn grit_lib::refs::store::backend::verify_create_conflicts(&alloc::collections::btree::map::BTreeMap<alloc::string::String, grit_lib::refs::store::RawRef>, &[grit_lib::refs::store::RefUpdate]) -> core::result::Result<(), grit_lib::refs::RefnameUnavailable>
 pub mod grit_lib::refs::store::paths
 pub const grit_lib::refs::store::paths::LOGS_REFS_BISECT: &str
 pub const grit_lib::refs::store::paths::LOGS_REFS_HEADS_MAIN: &str
@@ -17203,6 +17230,7 @@ impl core::marker::UnsafeUnpin for grit_lib::refs::store::RawRef
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::refs::store::RawRef
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::store::RawRef
 #[non_exhaustive] pub enum grit_lib::refs::store::RefStorageFormat
+pub grit_lib::refs::store::RefStorageFormat::Custom(&'static str)
 pub grit_lib::refs::store::RefStorageFormat::Files
 pub grit_lib::refs::store::RefStorageFormat::Memory
 pub grit_lib::refs::store::RefStorageFormat::Reftable
@@ -17225,6 +17253,7 @@ impl core::marker::UnsafeUnpin for grit_lib::refs::store::RefStorageFormat
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::refs::store::RefStorageFormat
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::store::RefStorageFormat
 #[non_exhaustive] pub enum grit_lib::refs::store::RefStoreError
+pub grit_lib::refs::store::RefStoreError::Backend(grit_lib::refs::store::BackendError)
 pub grit_lib::refs::store::RefStoreError::Corrupt(alloc::string::String)
 pub grit_lib::refs::store::RefStoreError::DuplicateUpdate
 pub grit_lib::refs::store::RefStoreError::DuplicateUpdate::name: alloc::string::String
@@ -17241,6 +17270,8 @@ pub grit_lib::refs::store::RefStoreError::NameUnavailable::reason: grit_lib::ref
 pub grit_lib::refs::store::RefStoreError::NotFound
 pub grit_lib::refs::store::RefStoreError::NotFound::name: alloc::string::String
 pub grit_lib::refs::store::RefStoreError::SymrefLoop
+impl grit_lib::refs::store::RefStoreError
+pub fn grit_lib::refs::store::RefStoreError::backend(impl core::error::Error + core::marker::Send + core::marker::Sync + 'static) -> Self
 impl core::clone::Clone for grit_lib::refs::store::RefStoreError
 pub fn grit_lib::refs::store::RefStoreError::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::refs::store::RefStoreError
@@ -17248,9 +17279,12 @@ impl core::cmp::PartialEq for grit_lib::refs::store::RefStoreError
 pub fn grit_lib::refs::store::RefStoreError::eq(&self, &Self) -> bool
 impl core::convert::From<grit_lib::refs::RefnameUnavailable> for grit_lib::refs::store::RefStoreError
 pub fn grit_lib::refs::store::RefStoreError::from(grit_lib::refs::RefnameUnavailable) -> Self
+impl core::convert::From<grit_lib::refs::store::BackendError> for grit_lib::refs::store::RefStoreError
+pub fn grit_lib::refs::store::RefStoreError::from(grit_lib::refs::store::BackendError) -> Self
 impl core::convert::From<grit_lib::refs::store::RefStoreError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::refs::store::RefStoreError) -> Self
 impl core::error::Error for grit_lib::refs::store::RefStoreError
+pub fn grit_lib::refs::store::RefStoreError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
 impl core::fmt::Debug for grit_lib::refs::store::RefStoreError
 pub fn grit_lib::refs::store::RefStoreError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::fmt::Display for grit_lib::refs::store::RefStoreError
@@ -17261,8 +17295,33 @@ impl core::marker::Send for grit_lib::refs::store::RefStoreError
 impl core::marker::Sync for grit_lib::refs::store::RefStoreError
 impl core::marker::Unpin for grit_lib::refs::store::RefStoreError
 impl core::marker::UnsafeUnpin for grit_lib::refs::store::RefStoreError
-impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::refs::store::RefStoreError
-impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::store::RefStoreError
+impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::refs::store::RefStoreError
+impl !core::panic::unwind_safe::UnwindSafe for grit_lib::refs::store::RefStoreError
+pub struct grit_lib::refs::store::BackendError(_)
+impl grit_lib::refs::store::BackendError
+pub fn grit_lib::refs::store::BackendError::downcast_ref<E: core::error::Error + 'static>(&self) -> core::option::Option<&E>
+pub fn grit_lib::refs::store::BackendError::get_ref(&self) -> &(dyn core::error::Error + core::marker::Send + core::marker::Sync + 'static)
+pub fn grit_lib::refs::store::BackendError::new(impl core::error::Error + core::marker::Send + core::marker::Sync + 'static) -> Self
+impl core::clone::Clone for grit_lib::refs::store::BackendError
+pub fn grit_lib::refs::store::BackendError::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::refs::store::BackendError
+impl core::cmp::PartialEq for grit_lib::refs::store::BackendError
+pub fn grit_lib::refs::store::BackendError::eq(&self, &Self) -> bool
+impl core::convert::From<grit_lib::refs::store::BackendError> for grit_lib::refs::store::RefStoreError
+pub fn grit_lib::refs::store::RefStoreError::from(grit_lib::refs::store::BackendError) -> Self
+impl core::error::Error for grit_lib::refs::store::BackendError
+pub fn grit_lib::refs::store::BackendError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Debug for grit_lib::refs::store::BackendError
+pub fn grit_lib::refs::store::BackendError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::refs::store::BackendError
+pub fn grit_lib::refs::store::BackendError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::refs::store::BackendError
+impl core::marker::Send for grit_lib::refs::store::BackendError
+impl core::marker::Sync for grit_lib::refs::store::BackendError
+impl core::marker::Unpin for grit_lib::refs::store::BackendError
+impl core::marker::UnsafeUnpin for grit_lib::refs::store::BackendError
+impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::refs::store::BackendError
+impl !core::panic::unwind_safe::UnwindSafe for grit_lib::refs::store::BackendError
 pub struct grit_lib::refs::store::FilesRefStore
 impl grit_lib::refs::store::FilesRefStore
 pub fn grit_lib::refs::store::FilesRefStore::from_git_dir(impl core::convert::Into<std::path::PathBuf>) -> grit_lib::error::Result<Self>
@@ -17419,6 +17478,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::refs::store::RefReflo
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::store::RefReflogRename
 pub struct grit_lib::refs::store::RefTransaction
 impl grit_lib::refs::store::RefTransaction
+pub fn grit_lib::refs::store::RefTransaction::case_only_renames(&self) -> &[grit_lib::refs::store::RefCaseOnlyRename]
 pub fn grit_lib::refs::store::RefTransaction::into_parts(self) -> (alloc::vec::Vec<grit_lib::refs::store::RefUpdate>, alloc::vec::Vec<grit_lib::refs::store::RefReflogRename>, alloc::vec::Vec<grit_lib::refs::store::RefCaseOnlyRename>)
 pub fn grit_lib::refs::store::RefTransaction::into_updates(self) -> alloc::vec::Vec<grit_lib::refs::store::RefUpdate>
 pub fn grit_lib::refs::store::RefTransaction::new() -> Self
@@ -20380,6 +20440,7 @@ impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::repo::Repository
 impl !core::panic::unwind_safe::UnwindSafe for grit_lib::repo::Repository
 pub struct grit_lib::repo::RepositoryBuilder
 impl grit_lib::repo::RepositoryBuilder
+pub fn grit_lib::repo::RepositoryBuilder::initial_branch(self, impl core::convert::Into<alloc::string::String>) -> Self
 pub fn grit_lib::repo::RepositoryBuilder::new(grit_lib::config::environment::RepositoryOptions) -> Self
 pub fn grit_lib::repo::RepositoryBuilder::odb_builder(self, grit_lib::objects::odb::builder::OdbBuilder) -> Self
 pub fn grit_lib::repo::RepositoryBuilder::open(self, &std::path::Path, core::option::Option<&std::path::Path>) -> grit_lib::error::Result<grit_lib::repo::Repository>
