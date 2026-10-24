@@ -12641,6 +12641,8 @@ pub grit_lib::porcelain::merge::ContinueMergeError::NoMergeInProgress
 pub grit_lib::porcelain::merge::ContinueMergeError::Repository(grit_lib::error::Error)
 pub grit_lib::porcelain::merge::ContinueMergeError::UnmergedPaths
 pub grit_lib::porcelain::merge::ContinueMergeError::UnmergedPaths::paths: alloc::vec::Vec<alloc::string::String>
+pub grit_lib::porcelain::merge::ContinueMergeError::ResolvedNotStaged
+pub grit_lib::porcelain::merge::ContinueMergeError::ResolvedNotStaged::paths: alloc::vec::Vec<alloc::string::String>
 impl core::convert::From<grit_lib::error::Error> for grit_lib::porcelain::merge::ContinueMergeError
 pub fn grit_lib::porcelain::merge::ContinueMergeError::from(grit_lib::error::Error) -> Self
 impl core::error::Error for grit_lib::porcelain::merge::ContinueMergeError
