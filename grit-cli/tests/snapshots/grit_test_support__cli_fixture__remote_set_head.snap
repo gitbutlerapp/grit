@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "[dry-run] Set remote origin HEAD → refs/remotes/origin/main\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\"action\":\"set_head\",\"name\":\"origin\",\"target\":\"refs/remotes/origin/main\",\"previous_target\":null,\"dry_run\":true}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "## Set HEAD for `origin` (dry-run)\n\nTarget: `refs/remotes/origin/main`.\n\n",
+    "stderr": ""
+  }
+}

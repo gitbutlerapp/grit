@@ -10,7 +10,7 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\"action\":\"add\",\"name\":\"upstream\",\"url\":\"[REPO]/upstream.git\"}\n",
+    "stdout": "{\"action\":\"add\",\"name\":\"upstream\",\"url\":\"[REPO]/upstream.git\",\"fetched\":false}\n",
     "stderr": ""
   },
   "markdown": {

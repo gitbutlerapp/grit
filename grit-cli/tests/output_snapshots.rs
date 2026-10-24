@@ -560,6 +560,30 @@ fn snapshot_remote_show() {
 }
 
 #[test]
+fn snapshot_remote_prune() {
+    let upstream = CliFixture::new().with_upstream();
+    let fixture = upstream.seed();
+    fixture.run_ok(&["fetch", "origin", "feature"]);
+    grit_test_support::git(upstream.upstream_path(), &["branch", "-D", "feature"]);
+    fixture.snapshot_all_modes(
+        "remote_prune",
+        &["remote", "prune", "origin", "--dry-run"],
+        snapshot_dir(),
+    );
+}
+
+#[test]
+fn snapshot_remote_set_head() {
+    let upstream = CliFixture::new().with_upstream();
+    let fixture = upstream.seed();
+    fixture.snapshot_all_modes(
+        "remote_set_head",
+        &["remote", "set-head", "origin", "--auto", "--dry-run"],
+        snapshot_dir(),
+    );
+}
+
+#[test]
 fn snapshot_bundle_create() {
     let fixture = CliFixture::new();
     fixture.snapshot_all_modes(

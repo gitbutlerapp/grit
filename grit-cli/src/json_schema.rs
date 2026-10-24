@@ -124,7 +124,9 @@ pub struct CommandSchemaVersions {
 /// Returns the version table row for `command`.
 pub fn command_schema_versions(command: &str) -> CommandSchemaVersions {
     match command {
-        "clone" | "config" | "merge" | "pull" | "pick" | "mv" | "worktree.prune" => {
+        "clone" | "config" | "merge" | "pull" | "pick" | "mv" | "remote" | "remote.add"
+        | "remote.set-url" | "remote.refs" | "remote.remove" | "remote.show" | "worktree.prune"
+        => {
             CommandSchemaVersions {
                 current: 2,
                 frozen: &[1],
@@ -223,6 +225,8 @@ fn build_schema_registry() -> Vec<SchemaRegistryEntry> {
         entry::<RemoteOutcome>("remote.set-url"),
         entry::<RemoteOutcome>("remote.refs"),
         entry::<RemoteOutcome>("remote.remove"),
+        entry::<RemoteOutcome>("remote.prune"),
+        entry::<RemoteOutcome>("remote.set-head"),
         entry::<RemoteOutcome>("remote.show"),
         entry::<LogOutcome>("log"),
         entry::<RevsOutcome>("revs"),
@@ -350,6 +354,8 @@ pub fn schema_command_key(args: &[&str]) -> Option<String> {
             Some("set-url") => "remote.set-url",
             Some("refs") => "remote.refs",
             Some("remove") => "remote.remove",
+            Some("prune") => "remote.prune",
+            Some("set-head") => "remote.set-head",
             Some("show") => "remote.show",
             _ => "remote",
         },
@@ -1005,6 +1011,14 @@ pub fn snapshot_command_args() -> &'static [(&'static str, &'static [&'static st
             "remote_remove",
             &["remote", "remove", "origin", "--dry-run"],
         ),
+        (
+            "remote_prune",
+            &["remote", "prune", "origin", "--dry-run"],
+        ),
+        (
+            "remote_set_head",
+            &["remote", "set-head", "origin", "--auto", "--dry-run"],
+        ),
         ("remote_show", &["remote", "show", "origin", "--no-query"]),
         (
             "bundle_create",
@@ -1239,8 +1253,8 @@ mod tests {
             );
         }
         assert_eq!(
-            checked, 97,
-            "expected 97 committed schema files under content/schemas"
+            checked, 107,
+            "expected 107 committed schema files under content/schemas"
         );
     }
 
@@ -1354,7 +1368,7 @@ mod tests {
             "schema index must list every committed schema document exactly"
         );
         let file_count: usize = on_disk.values().map(|v| v.len()).sum();
-        assert_eq!(file_count, 97, "expected 97 schema files indexed");
+        assert_eq!(file_count, 107, "expected 107 schema files indexed");
     }
 
     fn load_snapshot_json_stdout(name: &str, snapshot_dir: &Path) -> Value {

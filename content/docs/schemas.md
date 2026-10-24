@@ -3,7 +3,7 @@ title: JSON schemas
 summary: Versioned v1 JSON Schemas for every grit command's --json success object.
 ---
 
-Every command that prints a JSON outcome object with `--json` has a versioned JSON Schema served at a stable URL (`https://grit-scm.com/schemas/<command>/vN.json`). Most commands are still on **v1**; `clone`, `config`, `merge`, `mv`, `pull`, `pick`, and `worktree.prune` publish **v2** while **v1** remains frozen for older clients.
+Every command that prints a JSON outcome object with `--json` has a versioned JSON Schema served at a stable URL (`https://grit-scm.com/schemas/<command>/vN.json`). Most commands are still on **v1**; `clone`, `config`, `merge`, `mv`, `pull`, `pick`, `remote` (and several `remote.*` subcommands), and `worktree.prune` publish **v2** while **v1** remains frozen for older clients.
 
 See the [Agent guide](../agents/#json-schema-versioning) for additive vs breaking rules, the CI backward-compatibility gate, and how to regenerate live files under `content/schemas/` with `GRIT_UPDATE_SCHEMAS=1`.
 
@@ -74,12 +74,14 @@ Plain command failures with `--json` validate against the shared [error schema](
 | `reflog` | [v1](/schemas/reflog/v1.json) |
 | `reflog.delete` | [v1](/schemas/reflog.delete/v1.json) |
 | `reflog.expire` | [v1](/schemas/reflog.expire/v1.json) |
-| `remote` | [v1](/schemas/remote/v1.json) |
-| `remote.add` | [v1](/schemas/remote.add/v1.json) |
-| `remote.refs` | [v1](/schemas/remote.refs/v1.json) |
-| `remote.remove` | [v1](/schemas/remote.remove/v1.json) |
-| `remote.set-url` | [v1](/schemas/remote.set-url/v1.json) |
-| `remote.show` | [v1](/schemas/remote.show/v1.json) |
+| `remote` | [v2](/schemas/remote/v2.json), [v1](/schemas/remote/v1.json) |
+| `remote.add` | [v2](/schemas/remote.add/v2.json), [v1](/schemas/remote.add/v1.json) |
+| `remote.prune` | [v1](/schemas/remote.prune/v1.json) |
+| `remote.refs` | [v2](/schemas/remote.refs/v2.json), [v1](/schemas/remote.refs/v1.json) |
+| `remote.remove` | [v2](/schemas/remote.remove/v2.json), [v1](/schemas/remote.remove/v1.json) |
+| `remote.set-head` | [v1](/schemas/remote.set-head/v1.json) |
+| `remote.set-url` | [v2](/schemas/remote.set-url/v2.json), [v1](/schemas/remote.set-url/v1.json) |
+| `remote.show` | [v2](/schemas/remote.show/v2.json), [v1](/schemas/remote.show/v1.json) |
 | `repack` | [v1](/schemas/repack/v1.json) |
 | `reset` | [v1](/schemas/reset/v1.json) |
 | `resolve` | [v1](/schemas/resolve/v1.json) |

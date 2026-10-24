@@ -132,6 +132,97 @@ fn remote_add_rejects_duplicate_and_invalid_names() {
 }
 
 #[test]
+fn remote_add_fetch_populates_tracking_refs() {
+    let tmp = tempfile::tempdir().unwrap();
+    let upstream = tmp.path().join("upstream");
+    init_repo(&upstream);
+    let clone = tmp.path().join("clone");
+    std::fs::create_dir_all(&clone).unwrap();
+    git(&clone, &["init", "-q", "-b", "main", "."]);
+    git(
+        &clone,
+        &[
+            "-c",
+            "user.name=T",
+            "-c",
+            "user.email=t@example.com",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "-m",
+            "local",
+        ],
+    );
+
+    let out = grit(
+        &clone,
+        &[
+            "remote",
+            "add",
+            "origin",
+            upstream.to_str().unwrap(),
+            "--fetch",
+            "--json",
+        ],
+    );
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let json: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(json["action"], "add");
+    assert_eq!(json["fetched"], true);
+    assert!(
+        clone.join(".git/refs/remotes/origin/main").exists()
+            || git(&clone, &["rev-parse", "refs/remotes/origin/main"]).len() == 40
+    );
+}
+
+#[test]
+fn remote_prune_and_set_head_json() {
+    let tmp = tempfile::tempdir().unwrap();
+    let upstream = tmp.path().join("upstream");
+    init_repo(&upstream);
+    git(&upstream, &["branch", "topic"]);
+    let clone = tmp.path().join("clone");
+    git(
+        tmp.path(),
+        &[
+            "clone",
+            "-q",
+            upstream.to_str().unwrap(),
+            clone.to_str().unwrap(),
+        ],
+    );
+    git(&clone, &["fetch", "origin", "topic"]);
+    git(&upstream, &["branch", "-D", "topic"]);
+
+    let prune = grit(&clone, &["remote", "prune", "origin", "--json"]);
+    assert!(prune.status.success());
+    let prune_json: serde_json::Value = serde_json::from_slice(&prune.stdout).unwrap();
+    assert_eq!(prune_json["action"], "prune");
+    assert!(prune_json["refs_pruned"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|v| v.as_str().unwrap().ends_with("/topic")));
+
+    let set_head = grit(
+        &clone,
+        &["remote", "set-head", "origin", "--auto", "--json"],
+    );
+    assert!(
+        set_head.status.success(),
+        "{}",
+        String::from_utf8_lossy(&set_head.stderr)
+    );
+    let head_json: serde_json::Value = serde_json::from_slice(&set_head.stdout).unwrap();
+    assert_eq!(head_json["action"], "set_head");
+    assert!(head_json["target"].as_str().unwrap().ends_with("/main"));
+}
+
+#[test]
 fn unknown_remote_is_reported_by_fetch_and_remote_refs() {
     let tmp = tempfile::tempdir().unwrap();
     init_repo(tmp.path());

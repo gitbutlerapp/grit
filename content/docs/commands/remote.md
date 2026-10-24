@@ -9,9 +9,11 @@ order: 1
 
 ```text
 grit remote [-v]
-grit remote add <name> <url>
+grit remote add <name> <url> [--fetch]
 grit remote set-url <name> <url> [--push] [--dry-run]
 grit remote remove <name> [--dry-run]
+grit remote prune <name> [--dry-run]
+grit remote set-head <name> (--auto | <branch> | --delete) [--dry-run]
 grit remote show <name> [--no-query] [-n N]
 grit remote refs <remote-or-url> [--heads] [--tags] [--sort name|version] [--reverse] [-n N] [<prefix>…]
 ```
@@ -20,7 +22,11 @@ grit remote refs <remote-or-url> [--heads] [--tags] [--sort name|version] [--rev
 
 A remote is another copy of the repository that you fetch from and push to, usually on a server. With no arguments, `grit remote` lists your remotes and their URLs, sorted by name. Like `git remote`, the list includes a remote that has config but no URL, shown as `(no url)`.
 
-`grit remote add` adds a remote. It writes `remote.<name>.url` and the fetch refspec `+refs/heads/*:refs/remotes/<name>/*` to the repository's shared config, also when run from a linked worktree. It fails if a remote with that name is already configured, or if the name could not be used in a ref such as `refs/remotes/<name>/main` (for example names with spaces, `..` or `:`). [`grit fetch`](../fetch/) then stores the remote's branches as remote-tracking branches named `<name>/<branch>`, such as `origin/main`. [`grit clone`](../clone/) adds a remote called `origin` for you.
+`grit remote add` adds a remote. It writes `remote.<name>.url` and the fetch refspec `+refs/heads/*:refs/remotes/<name>/*` to the repository's shared config, also when run from a linked worktree. It fails if a remote with that name is already configured, or if the name could not be used in a ref such as `refs/remotes/<name>/main` (for example names with spaces, `..` or `:`). With `--fetch` (long only; `-f` means force elsewhere in grit), it runs [`grit fetch`](../fetch/) for that remote immediately after adding it. [`grit fetch`](../fetch/) stores the remote's branches as remote-tracking branches named `<name>/<branch>`, such as `origin/main`. [`grit clone`](../clone/) adds a remote called `origin` for you.
+
+`grit remote prune` deletes stale remote-tracking refs for one remote without fetching: it lists refs on the remote, compares them to local tracking refs under that remote's fetch refspecs (same rules as `git fetch --prune`), and removes refs whose upstream branch is gone. `refs/remotes/<name>/HEAD` is never pruned. `--dry-run` lists refs that would be removed without deleting them.
+
+`grit remote set-head` updates or deletes the `refs/remotes/<name>/HEAD` symref. `--auto` queries the remote default branch and points HEAD at `refs/remotes/<name>/<branch>` when that tracking ref exists locally. A branch argument sets HEAD to that branch. `--delete` removes the symref. `--dry-run` reports the change without updating refs.
 
 `-v` / `--verbose` lists fetch and push URLs on separate lines (`name url (fetch)` and `name url (push)`), like `git remote -v`. With `--json`, each remote also includes `fetch_url` and `push_url` after `url.*.insteadOf` / `pushInsteadOf` rewrites, plus `refspecs`.
 
@@ -38,6 +44,11 @@ A remote is another copy of the repository that you fetch from and push to, usua
 | --- | --- |
 | `-v`, `--verbose` | With no subcommand, show fetch and push URLs (like `git remote -v`). |
 | `add <name> <url>` | Add a remote called `<name>` at `<url>`. Fails if a remote with that name exists or the name is not valid in a ref. |
+| `--fetch` | With `add`, fetch from the new remote after writing config. |
+| `prune <name>` | Delete stale remote-tracking refs for `<name>`. `--dry-run` previews without deleting. |
+| `set-head <name> …` | Set or delete `refs/remotes/<name>/HEAD` (`--auto`, a branch name, or `--delete`). |
+| `--auto` | With `set-head`, follow the remote `HEAD` symref. |
+| `--delete` | With `set-head`, remove the local HEAD symref. |
 | `set-url <name> <url>` | Set the fetch URL for `<name>`. Use `--push` for `pushurl`. |
 | `--push` | With `set-url`, update push URL(s) instead of fetch. |
 | `remove <name>` | Remove remote `<name>` and its tracking refs. `--dry-run` previews without writing. |
@@ -90,10 +101,14 @@ Pass `--json` for stable, scripting-friendly output:
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
-| `action` | string | `list`, `add`, `set_url`, `remove`, `show`, or `refs`. |
+| `action` | string | `list`, `add`, `set_url`, `remove`, `prune`, `set_head`, `show`, or `refs`. |
 | `remotes` | array | For `list`, each remote with `name` and `url`; with `-v`, also `fetch_url`, `push_url`, and `refspecs`. |
 | `name` | string | For `add`, `set_url`, `remove`, or `show`, the remote name. |
 | `url` | string | For `add` or `set_url`, the remote URL or path. |
+| `fetched` | boolean | For `add`, whether a fetch ran after adding (`--fetch`). |
+| `refs_pruned` | array | For `prune`, full ref names deleted or that would be deleted. |
+| `target` | string or null | For `set_head`, new symref target, or null when deleted. |
+| `previous_target` | string or null | For `set_head`, symref target before the update, if any. |
 | `kind` | string | For `set_url`, `fetch` or `push`. |
 | `old_url` | string or null | For `set_url`, previous URL for that kind, if any. |
 | `refs_deleted` | array | For `remove`, deleted remote-tracking ref names. |
@@ -126,7 +141,8 @@ Adding a remote:
 {
   "action": "add",
   "name": "origin",
-  "url": "https://github.com/ada/project.git"
+  "url": "https://github.com/ada/project.git",
+  "fetched": false
 }
 ```
 
@@ -149,13 +165,26 @@ Showing a remote:
 }
 ```
 
-Adding a remote:
+Pruning stale tracking refs:
 
 ```json
 {
-  "action": "add",
+  "action": "prune",
   "name": "origin",
-  "url": "https://github.com/ada/project.git"
+  "refs_pruned": ["refs/remotes/origin/topic"],
+  "dry_run": false
+}
+```
+
+Setting remote HEAD:
+
+```json
+{
+  "action": "set_head",
+  "name": "origin",
+  "target": "refs/remotes/origin/main",
+  "previous_target": null,
+  "dry_run": false
 }
 ```
 

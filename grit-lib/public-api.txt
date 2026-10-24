@@ -20470,6 +20470,42 @@ impl core::marker::Unpin for grit_lib::repo_handles::RemoveOptions
 impl core::marker::UnsafeUnpin for grit_lib::repo_handles::RemoveOptions
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::repo_handles::RemoveOptions
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::repo_handles::RemoveOptions
+pub enum grit_lib::repo_handles::SetHead
+pub grit_lib::repo_handles::SetHead::Auto
+pub grit_lib::repo_handles::SetHead::Branch(alloc::string::String)
+pub grit_lib::repo_handles::SetHead::Delete
+impl core::clone::Clone for grit_lib::repo_handles::SetHead
+pub fn grit_lib::repo_handles::SetHead::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::repo_handles::SetHead
+impl core::cmp::PartialEq for grit_lib::repo_handles::SetHead
+pub fn grit_lib::repo_handles::SetHead::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::repo_handles::SetHead
+pub fn grit_lib::repo_handles::SetHead::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::repo_handles::SetHead
+impl core::marker::Send for grit_lib::repo_handles::SetHead
+impl core::marker::Sync for grit_lib::repo_handles::SetHead
+impl core::marker::Unpin for grit_lib::repo_handles::SetHead
+impl core::marker::UnsafeUnpin for grit_lib::repo_handles::SetHead
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::repo_handles::SetHead
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::repo_handles::SetHead
+pub struct grit_lib::repo_handles::SetHeadOutcome
+pub grit_lib::repo_handles::SetHeadOutcome::dry_run: bool
+pub grit_lib::repo_handles::SetHeadOutcome::previous_target: core::option::Option<alloc::string::String>
+pub grit_lib::repo_handles::SetHeadOutcome::target: core::option::Option<alloc::string::String>
+impl core::clone::Clone for grit_lib::repo_handles::SetHeadOutcome
+pub fn grit_lib::repo_handles::SetHeadOutcome::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::repo_handles::SetHeadOutcome
+impl core::cmp::PartialEq for grit_lib::repo_handles::SetHeadOutcome
+pub fn grit_lib::repo_handles::SetHeadOutcome::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::repo_handles::SetHeadOutcome
+pub fn grit_lib::repo_handles::SetHeadOutcome::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::repo_handles::SetHeadOutcome
+impl core::marker::Send for grit_lib::repo_handles::SetHeadOutcome
+impl core::marker::Sync for grit_lib::repo_handles::SetHeadOutcome
+impl core::marker::Unpin for grit_lib::repo_handles::SetHeadOutcome
+impl core::marker::UnsafeUnpin for grit_lib::repo_handles::SetHeadOutcome
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::repo_handles::SetHeadOutcome
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::repo_handles::SetHeadOutcome
 pub struct grit_lib::repo_handles::RepositoryBundles<'repo>
 impl<'repo> grit_lib::repo_handles::RepositoryBundles<'repo>
 pub fn grit_lib::repo_handles::RepositoryBundles<'repo>::create(&self, &grit_lib::bundle::BundleSpec, &std::path::Path) -> core::result::Result<(), grit_lib::bundle::BundleError>
@@ -20565,7 +20601,9 @@ pub fn grit_lib::repo_handles::RepositoryRemotes<'repo>::inspect(&self, &str, &g
 pub fn grit_lib::repo_handles::RepositoryRemotes<'repo>::list(&self) -> grit_lib::error::Result<alloc::vec::Vec<alloc::string::String>>
 pub fn grit_lib::repo_handles::RepositoryRemotes<'repo>::ls_remote(&self, &grit_lib::remote::Remote, &grit_lib::remote::ListRefsOptions, core::option::Option<&dyn grit_lib::remote::HttpClientFactory>) -> core::result::Result<alloc::vec::Vec<grit_lib::remote::RemoteRef>, grit_lib::remote::RemoteError>
 pub fn grit_lib::repo_handles::RepositoryRemotes<'repo>::push(&self, &grit_lib::remote::Remote, &[grit_lib::remote::transfer::PushRefSpec], grit_lib::remote::transfer::PushOptions, &mut dyn grit_lib::remote::fetch::Progress, core::option::Option<&dyn grit_lib::remote::HttpClientFactory>) -> core::result::Result<grit_lib::remote::transfer::PushOutcome, grit_lib::remote::RemoteError>
+pub fn grit_lib::repo_handles::RepositoryRemotes<'repo>::prune(&self, &str, bool, core::option::Option<&dyn grit_lib::remote::HttpClientFactory>) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, grit_lib::remote::RemoteError>
 pub fn grit_lib::repo_handles::RepositoryRemotes<'repo>::remove(&self, &str, grit_lib::repo_handles::RemoveOptions) -> core::result::Result<grit_lib::repo_handles::RemoteRemoval, grit_lib::remote::RemoteError>
+pub fn grit_lib::repo_handles::RepositoryRemotes<'repo>::set_head(&self, &str, grit_lib::repo_handles::SetHead, bool, core::option::Option<&dyn grit_lib::remote::HttpClientFactory>) -> core::result::Result<grit_lib::repo_handles::SetHeadOutcome, grit_lib::remote::RemoteError>
 pub fn grit_lib::repo_handles::RepositoryRemotes<'repo>::repository(&self) -> &'repo grit_lib::repo::Repository
 pub fn grit_lib::repo_handles::RepositoryRemotes<'repo>::set_url(&self, &str, &str, grit_lib::repo_handles::RemoteUrlKind, bool) -> core::result::Result<grit_lib::repo_handles::UrlChange, grit_lib::remote::RemoteError>
 impl<'repo> core::clone::Clone for grit_lib::repo_handles::RepositoryRemotes<'repo>

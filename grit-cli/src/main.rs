@@ -103,6 +103,9 @@ enum RemoteAction {
         name: String,
         /// The remote's URL or path.
         url: String,
+        /// Fetch from the remote after adding it.
+        #[arg(long)]
+        fetch: bool,
     },
     /// Set the fetch or push URL for an existing remote.
     SetUrl {
@@ -122,6 +125,30 @@ enum RemoteAction {
         /// Remote name to remove.
         name: String,
         /// Report changes without writing config or refs.
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Delete stale remote-tracking refs without fetching.
+    Prune {
+        /// Configured remote name.
+        name: String,
+        /// Report refs that would be pruned without deleting them.
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Set or delete `refs/remotes/<name>/HEAD`.
+    SetHead {
+        /// Configured remote name.
+        name: String,
+        /// Short branch name (sets HEAD to `refs/remotes/<name>/<branch>`).
+        branch: Option<String>,
+        /// Query the remote and set HEAD from its default branch.
+        #[arg(long, conflicts_with_all = ["branch", "delete"])]
+        auto: bool,
+        /// Delete the local HEAD symref.
+        #[arg(long, conflicts_with_all = ["branch", "auto"])]
+        delete: bool,
+        /// Show what would change without updating refs.
         #[arg(long)]
         dry_run: bool,
     },
@@ -2129,8 +2156,8 @@ fn dispatch(
                 opts,
                 ctx,
             ),
-            Some(RemoteAction::Add { name, url }) => emit_success(
-                &commands::remote::run_list_or_add(Some((name, url)), false)?,
+            Some(RemoteAction::Add { name, url, fetch }) => emit_success(
+                &commands::remote::run_list_or_add(Some((name, url, fetch)), false)?,
                 opts,
                 ctx,
             ),
@@ -2146,6 +2173,35 @@ fn dispatch(
             ),
             Some(RemoteAction::Remove { name, dry_run }) => {
                 emit_success(&commands::remote::run_remove(&name, dry_run)?, opts, ctx)
+            }
+            Some(RemoteAction::Prune { name, dry_run }) => {
+                emit_success(&commands::remote::run_prune(&name, dry_run)?, opts, ctx)
+            }
+            Some(RemoteAction::SetHead {
+                name,
+                branch,
+                auto,
+                delete,
+                dry_run,
+            }) => {
+                use grit_lib::repo_handles::SetHead;
+                let mode = if delete {
+                    SetHead::Delete
+                } else if auto {
+                    SetHead::Auto
+                } else if let Some(branch) = branch {
+                    SetHead::Branch(branch)
+                } else {
+                    return Err(anyhow::anyhow!(
+                        "set-head requires --auto, --delete, or a branch name"
+                    )
+                    .context(commands::remote::RemoteUsageError));
+                };
+                emit_success(
+                    &commands::remote::run_set_head(&name, mode, dry_run)?,
+                    opts,
+                    ctx,
+                )
             }
             Some(RemoteAction::Show {
                 name,

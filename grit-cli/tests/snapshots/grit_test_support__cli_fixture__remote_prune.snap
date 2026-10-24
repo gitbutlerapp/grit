@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "[dry-run] Pruned refs/remotes/origin/feature\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\"action\":\"prune\",\"name\":\"origin\",\"refs_pruned\":[\"refs/remotes/origin/feature\"],\"dry_run\":true}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "## Prune `origin` (dry-run)\n\n- `refs/remotes/origin/feature`\n\n",
+    "stderr": ""
+  }
+}

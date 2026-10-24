@@ -42,7 +42,7 @@ pub use remote::has_remote_section;
 pub use remote::{
     configured_remote_names, configured_remote_names_in_config_order, configured_remotes,
     remote_skip_fetch_all, ConfiguredRemote, RemoteRemoval, RemoteUrlKind, RemoveOptions,
-    RepositoryRemotes, UrlChange,
+    RepositoryRemotes, SetHead, SetHeadOutcome, UrlChange,
 };
 pub use stash::{RepositoryStash, StashApplyOptions, StashPushOptions};
 pub use worktree::{LockWorktreeOptions, RepositoryWorktrees};

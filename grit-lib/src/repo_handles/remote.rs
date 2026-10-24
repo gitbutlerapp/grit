@@ -13,6 +13,7 @@ use crate::remote::{
     RemoteRef, RemoteSummary, DEFAULT_REMOTE,
 };
 use crate::repo::Repository;
+use crate::transfer::tracking_refs_gone_on_remote;
 use crate::transfer::{FetchOptions, FetchOutcome, PushOptions, PushOutcome, PushRefSpec};
 use crate::url_rewrite;
 
@@ -373,6 +374,146 @@ impl<'repo> RepositoryRemotes<'repo> {
         inspect_remote(self.repo, name, options, http_factory)
     }
 
+    /// Delete stale remote-tracking refs for `name` without fetching.
+    ///
+    /// Contacts the remote (same transports as [`Self::fetch`]), compares advertised refs to
+    /// local tracking refs using the same rules as `git fetch --prune`, and deletes refs whose
+    /// upstream branch is gone. `refs/remotes/<name>/HEAD` is never removed.
+    ///
+    /// Returns the full ref names deleted, or that would be deleted when `dry_run` is true.
+    ///
+    /// # Errors
+    ///
+    /// - [`RemoteError::UnknownRemote`] when `name` is not configured.
+    /// - Propagates transport and ref-update failures as [`RemoteError::Library`].
+    pub fn prune(
+        &self,
+        name: &str,
+        dry_run: bool,
+        http_factory: Option<&dyn HttpClientFactory>,
+    ) -> std::result::Result<Vec<String>, RemoteError> {
+        let config = self.repo.config().map_err(RemoteError::Library)?;
+        if !has_remote_section(config.as_ref(), name) {
+            return Err(RemoteError::UnknownRemote(name.to_owned()));
+        }
+        let specs = load_remote_fetch_specs(config.as_ref(), name)?;
+        let remote = Remote::from_config(config.as_ref(), name)?;
+        let advertised = self.ls_remote(
+            &remote,
+            &ListRefsOptions {
+                symrefs: true,
+                ..Default::default()
+            },
+            http_factory,
+        )?;
+        let remote_pairs: Vec<(String, crate::objects::ObjectId)> =
+            advertised.iter().map(|r| (r.name.clone(), r.oid)).collect();
+        let stale = tracking_refs_gone_on_remote(self.repo.git_dir(), &specs, &remote_pairs)
+            .map_err(RemoteError::Library)?;
+        let mut refs: Vec<String> = stale.into_iter().map(|(name, _)| name).collect();
+        refs.sort_unstable();
+        if dry_run || refs.is_empty() {
+            return Ok(refs);
+        }
+        let delete_flags = RefUpdateFlags {
+            no_deref: true,
+            ..RefUpdateFlags::default()
+        };
+        let updates: Vec<RefUpdate> = refs
+            .iter()
+            .map(|refname| RefUpdate {
+                name: refname.clone(),
+                new_value: None,
+                expected: Expected::Any,
+                reflog: None,
+                flags: delete_flags,
+            })
+            .collect();
+        commit_ref_updates_on_store(self.repo.refs(), &updates, &[])?;
+        Ok(refs)
+    }
+
+    /// Set or delete `refs/remotes/<name>/HEAD`.
+    ///
+    /// [`SetHead::Auto`] queries the remote default branch; [`SetHead::Branch`] sets the symref
+    /// to `refs/remotes/<name>/<branch>`. Both require the target tracking ref to exist locally,
+    /// matching `git remote set-head`. [`SetHead::Delete`] removes the symref.
+    ///
+    /// # Errors
+    ///
+    /// - [`RemoteError::UnknownRemote`] when `name` is not configured.
+    /// - [`RemoteError::Library`] when the target ref is missing or ref updates fail.
+    pub fn set_head(
+        &self,
+        name: &str,
+        mode: SetHead,
+        dry_run: bool,
+        http_factory: Option<&dyn HttpClientFactory>,
+    ) -> std::result::Result<SetHeadOutcome, RemoteError> {
+        let config = self.repo.config().map_err(RemoteError::Library)?;
+        if !has_remote_section(config.as_ref(), name) {
+            return Err(RemoteError::UnknownRemote(name.to_owned()));
+        }
+        let head_ref = format!("refs/remotes/{name}/HEAD");
+        let git_dir = self.repo.git_dir();
+        let previous_target =
+            crate::refs::read_symbolic_ref(git_dir, &head_ref).map_err(RemoteError::Library)?;
+
+        let target = match mode {
+            SetHead::Delete => {
+                if !dry_run && crate::refs::resolve_ref(git_dir, &head_ref).is_ok() {
+                    crate::refs::delete_ref(git_dir, &head_ref).map_err(RemoteError::Library)?;
+                }
+                return Ok(SetHeadOutcome {
+                    target: None,
+                    previous_target,
+                    dry_run,
+                });
+            }
+            SetHead::Branch(branch) => {
+                let branch = branch.trim().to_owned();
+                if branch.is_empty() {
+                    return Err(RemoteError::Library(crate::error::Error::Message(
+                        "branch name required".to_owned(),
+                    )));
+                }
+                format!("refs/remotes/{name}/{branch}")
+            }
+            SetHead::Auto => {
+                let remote = Remote::from_config(config.as_ref(), name)?;
+                let advertised = self.ls_remote(
+                    &remote,
+                    &ListRefsOptions {
+                        symrefs: true,
+                        ..Default::default()
+                    },
+                    http_factory,
+                )?;
+                let branch = head_branch_from_advertisement(&advertised).ok_or_else(|| {
+                    RemoteError::Library(crate::error::Error::Message(
+                        "remote HEAD is not a symref".to_owned(),
+                    ))
+                })?;
+                format!("refs/remotes/{name}/{branch}")
+            }
+        };
+
+        if crate::refs::resolve_ref(git_dir, &target).is_err() {
+            return Err(RemoteError::Library(crate::error::Error::Message(format!(
+                "Not a valid ref: {target}"
+            ))));
+        }
+        if !dry_run {
+            crate::refs::write_symbolic_ref(git_dir, &head_ref, &target)
+                .map_err(RemoteError::Library)?;
+        }
+        Ok(SetHeadOutcome {
+            target: Some(target),
+            previous_target,
+            dry_run,
+        })
+    }
+
     /// Remove remote `name`: drop its config section, remote-tracking refs, and branch upstream keys.
     ///
     /// Tracking refs another remote's fetch refspec also maps to are kept, matching `git remote remove`.
@@ -473,6 +614,35 @@ impl<'repo> RepositoryRemotes<'repo> {
             dry_run: false,
         })
     }
+}
+
+/// How [`RepositoryRemotes::set_head`] updates `refs/remotes/<name>/HEAD`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SetHead {
+    /// Query the remote and follow its `HEAD` symref.
+    Auto,
+    /// Point at `refs/remotes/<name>/<branch>` (short branch name).
+    Branch(String),
+    /// Delete the local symref.
+    Delete,
+}
+
+/// Result of [`RepositoryRemotes::set_head`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SetHeadOutcome {
+    /// New symref target, or `None` when deleted.
+    pub target: Option<String>,
+    /// Previous symref target before the update, if any.
+    pub previous_target: Option<String>,
+    /// Whether ref updates were skipped.
+    pub dry_run: bool,
+}
+
+fn head_branch_from_advertisement(refs: &[RemoteRef]) -> Option<String> {
+    refs.iter()
+        .find(|r| r.name == "HEAD")
+        .and_then(|r| r.symref_target.as_ref())
+        .map(|t| t.strip_prefix("refs/heads/").unwrap_or(t).to_owned())
 }
 
 /// Options for [`RepositoryRemotes::remove`].

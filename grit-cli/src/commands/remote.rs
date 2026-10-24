@@ -2,14 +2,16 @@
 
 use anyhow::{Context, Result};
 use grit_lib::config::ConfigSet;
+use grit_lib::remote::fetch::NoProgress;
 use grit_lib::refs::listing::{RefSort, SortKey};
 use grit_lib::remote::fetch_request::resolve_remote_argument;
+use grit_lib::remote::transfer::FetchOptions;
 use grit_lib::remote::{
     fold_peeled_refs, DefaultHttpClientFactory, InspectOptions, ListRefsOptions,
     RemoteBranchStateKind, RemoteError, RemoteRef, RemoteSummary,
 };
 use grit_lib::repo::Repository;
-use grit_lib::repo_handles::{RemoteUrlKind, RemoveOptions, UrlChange};
+use grit_lib::repo_handles::{RemoteUrlKind, RemoveOptions, SetHead, SetHeadOutcome, UrlChange};
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::io::Write;
@@ -33,6 +35,7 @@ pub enum RemoteOutcome {
     Add {
         name: String,
         url: String,
+        fetched: bool,
     },
     SetUrl {
         name: String,
@@ -56,6 +59,17 @@ pub enum RemoteOutcome {
     Show {
         #[serde(flatten)]
         summary: RemoteShowJson,
+    },
+    Prune {
+        name: String,
+        refs_pruned: Vec<String>,
+        dry_run: bool,
+    },
+    SetHead {
+        name: String,
+        target: Option<String>,
+        previous_target: Option<String>,
+        dry_run: bool,
     },
 }
 
@@ -171,7 +185,12 @@ impl HumanRender for RemoteOutcome {
                     }
                 }
             }
-            RemoteOutcome::Add { name, url } => outln!(w, "Added remote {name} → {url}"),
+            RemoteOutcome::Add { name, url, fetched } => {
+                outln!(w, "Added remote {name} → {url}");
+                if *fetched {
+                    outln!(w, "Fetched from {name}");
+                }
+            }
             RemoteOutcome::SetUrl {
                 name,
                 kind,
@@ -214,6 +233,32 @@ impl HumanRender for RemoteOutcome {
                 }
             }
             RemoteOutcome::Show { summary } => render_show_human(w, summary)?,
+            RemoteOutcome::Prune {
+                name,
+                refs_pruned,
+                dry_run,
+            } => {
+                let prefix = if *dry_run { "[dry-run] " } else { "" };
+                if refs_pruned.is_empty() {
+                    outln!(w, "{prefix}Nothing to prune for {name}");
+                } else {
+                    for r in refs_pruned {
+                        outln!(w, "{prefix}Pruned {r}");
+                    }
+                }
+            }
+            RemoteOutcome::SetHead {
+                name,
+                target,
+                previous_target: _,
+                dry_run,
+            } => {
+                let prefix = if *dry_run { "[dry-run] " } else { "" };
+                match target {
+                    Some(t) => outln!(w, "{prefix}Set remote {name} HEAD → {t}"),
+                    None => outln!(w, "{prefix}Deleted remote {name} HEAD symref"),
+                }
+            }
         }
         Ok(())
     }
@@ -226,7 +271,12 @@ impl MarkdownRender for RemoteOutcome {
                 remotes,
                 verbose_lines: _,
             } => markdown::print_remote_list(w, remotes)?,
-            RemoteOutcome::Add { name, url } => outln!(w, "Added remote `{name}` → {url}."),
+            RemoteOutcome::Add { name, url, fetched } => {
+                outln!(w, "Added remote `{name}` → {url}.");
+                if *fetched {
+                    outln!(w, "\nFetched from `{name}`.\n");
+                }
+            }
             RemoteOutcome::SetUrl {
                 name,
                 kind,
@@ -270,6 +320,38 @@ impl MarkdownRender for RemoteOutcome {
                 }
             }
             RemoteOutcome::Show { summary } => render_show_markdown(w, summary)?,
+            RemoteOutcome::Prune {
+                name,
+                refs_pruned,
+                dry_run,
+            } => {
+                let dry = if *dry_run { " (dry-run)" } else { "" };
+                outln!(w, "## Prune `{name}`{dry}\n");
+                if refs_pruned.is_empty() {
+                    outln!(w, "Nothing to prune.\n");
+                } else {
+                    for r in refs_pruned {
+                        outln!(w, "- `{r}`");
+                    }
+                    outln!(w);
+                }
+            }
+            RemoteOutcome::SetHead {
+                name,
+                target,
+                previous_target,
+                dry_run,
+            } => {
+                let dry = if *dry_run { " (dry-run)" } else { "" };
+                outln!(w, "## Set HEAD for `{name}`{dry}\n");
+                if let Some(prev) = previous_target {
+                    outln!(w, "Previous: `{prev}`\n");
+                }
+                match target {
+                    Some(t) => outln!(w, "Target: `{t}`.\n"),
+                    None => outln!(w, "Deleted symref.\n"),
+                }
+            }
             RemoteOutcome::Refs { refs, .. } => {
                 outln!(w, "## Remote refs\n");
                 if refs.is_empty() {
@@ -307,12 +389,15 @@ impl MarkdownRender for RemoteOutcome {
     }
 }
 
-/// `Some((name, url))` adds a remote; `None` lists them.
-pub fn run_list_or_add(add: Option<(String, String)>, verbose: bool) -> Result<RemoteOutcome> {
+/// `Some((name, url, fetch))` adds a remote; `None` lists them.
+pub fn run_list_or_add(
+    add: Option<(String, String, bool)>,
+    verbose: bool,
+) -> Result<RemoteOutcome> {
     let repo = context::discover()?;
     match add {
         None => list(&repo, verbose),
-        Some((name, url)) => add_remote(&repo, &name, &url),
+        Some((name, url, fetch)) => add_remote(&repo, &name, &url, fetch),
     }
 }
 
@@ -508,12 +593,64 @@ fn list(repo: &Repository, verbose: bool) -> Result<RemoteOutcome> {
     })
 }
 
-fn add_remote(repo: &Repository, name: &str, url: &str) -> Result<RemoteOutcome> {
+fn add_remote(repo: &Repository, name: &str, url: &str, fetch: bool) -> Result<RemoteOutcome> {
     repo.remotes().add(name, url).map_err(map_remote_error)?;
+    if fetch {
+        let factory = DefaultHttpClientFactory;
+        let remote = repo.remotes().get(name).map_err(map_remote_error)?;
+        let mut progress = NoProgress;
+        repo.remotes()
+            .fetch(&remote, FetchOptions::default(), &mut progress, Some(&factory))
+            .map_err(map_remote_error)?;
+    }
     Ok(RemoteOutcome::Add {
         name: name.to_owned(),
         url: url.to_owned(),
+        fetched: fetch,
     })
+}
+
+pub fn run_prune(name: &str, dry_run: bool) -> Result<RemoteOutcome> {
+    let factory = DefaultHttpClientFactory;
+    let repo = context::discover()?;
+    let refs = repo
+        .remotes()
+        .prune(name, dry_run, Some(&factory))
+        .map_err(|e| match e {
+            RemoteError::UnknownRemote(_) => {
+                anyhow::Error::from(RemoteUsageError).context(map_remote_error(e))
+            }
+            other => map_remote_error(other),
+        })?;
+    Ok(RemoteOutcome::Prune {
+        name: name.to_owned(),
+        refs_pruned: refs,
+        dry_run,
+    })
+}
+
+pub fn run_set_head(name: &str, mode: SetHead, dry_run: bool) -> Result<RemoteOutcome> {
+    let factory = DefaultHttpClientFactory;
+    let repo = context::discover()?;
+    let outcome = repo
+        .remotes()
+        .set_head(name, mode, dry_run, Some(&factory))
+        .map_err(|e| match e {
+            RemoteError::UnknownRemote(_) => {
+                anyhow::Error::from(RemoteUsageError).context(map_remote_error(e))
+            }
+            other => map_remote_error(other),
+        })?;
+    Ok(map_set_head_outcome(name, outcome))
+}
+
+fn map_set_head_outcome(name: &str, outcome: SetHeadOutcome) -> RemoteOutcome {
+    RemoteOutcome::SetHead {
+        name: name.to_owned(),
+        target: outcome.target,
+        previous_target: outcome.previous_target,
+        dry_run: outcome.dry_run,
+    }
 }
 
 /// Marker for usage errors (exit 2) from remote commands.

@@ -508,6 +508,22 @@ const COMMAND_CONTRACTS: &[(&str, CommandContract)] = &[
         },
     ),
     (
+        "remote.prune",
+        CommandContract {
+            kind: CommandKind::Mutation,
+            takes_message: false,
+            takes_paths: false,
+        },
+    ),
+    (
+        "remote.set-head",
+        CommandContract {
+            kind: CommandKind::Mutation,
+            takes_message: false,
+            takes_paths: false,
+        },
+    ),
+    (
         "remote.show",
         CommandContract {
             kind: CommandKind::List,

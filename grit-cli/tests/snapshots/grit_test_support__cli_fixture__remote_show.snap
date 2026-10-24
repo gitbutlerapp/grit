@@ -5,17 +5,17 @@ expression: payload
 {
   "human": {
     "exit": 0,
-    "stdout": "* remote origin\n  Fetch URL: /tmp/.tmpGfXuyk\n  Push  URL: /tmp/.tmpGfXuyk\n  Remote branches:\n    feature tracked\n    main tracked\n  Local branches configured for pull:\n    main merges with remote main\n",
+    "stdout": "* remote origin\n  Fetch URL: /tmp/.tmpZhaZnz\n  Push  URL: /tmp/.tmpZhaZnz\n  Remote branches:\n    feature tracked\n    main tracked\n  Local branches configured for pull:\n    main merges with remote main\n",
     "stderr": ""
   },
   "json": {
     "exit": 0,
-    "stdout": "{\"action\":\"show\",\"name\":\"origin\",\"fetch_url\":\"/tmp/.tmpGfXuyk\",\"push_url\":\"/tmp/.tmpGfXuyk\",\"branches\":[{\"name\":\"feature\",\"state\":\"tracked\"},{\"name\":\"main\",\"state\":\"tracked\"}],\"pull\":[{\"local\":\"main\",\"merges\":\"refs/heads/main\"}]}\n",
+    "stdout": "{\"action\":\"show\",\"name\":\"origin\",\"fetch_url\":\"/tmp/.tmpZhaZnz\",\"push_url\":\"/tmp/.tmpZhaZnz\",\"branches\":[{\"name\":\"feature\",\"state\":\"tracked\"},{\"name\":\"main\",\"state\":\"tracked\"}],\"pull\":[{\"local\":\"main\",\"merges\":\"refs/heads/main\"}]}\n",
     "stderr": ""
   },
   "markdown": {
     "exit": 0,
-    "stdout": "## Remote `origin`\n\n| | |\n| --- | --- |\n| Fetch URL | /tmp/.tmpGfXuyk |\n| Push URL | /tmp/.tmpGfXuyk |\n\n### Remote branches\n\n| Branch | State |\n| --- | --- |\n| `feature` | tracked |\n| `main` | tracked |\n\n### Pull configuration\n\n| Local branch | Merges |\n| --- | --- |\n| `main` | `refs/heads/main` |\n\n",
+    "stdout": "## Remote `origin`\n\n| | |\n| --- | --- |\n| Fetch URL | /tmp/.tmpZhaZnz |\n| Push URL | /tmp/.tmpZhaZnz |\n\n### Remote branches\n\n| Branch | State |\n| --- | --- |\n| `feature` | tracked |\n| `main` | tracked |\n\n### Pull configuration\n\n| Local branch | Merges |\n| --- | --- |\n| `main` | `refs/heads/main` |\n\n",
     "stderr": ""
   }
 }
