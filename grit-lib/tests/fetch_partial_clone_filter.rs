@@ -120,6 +120,7 @@ fn grit_clone_filtered(url: &str, dest: &Path, filter: ObjectFilterSpec) -> Path
             url: url.to_owned(),
             dest: dest.to_path_buf(),
             filter: Some(filter),
+            checkout: false,
             ..CloneOptions::new(url, dest.to_path_buf())
         },
         &mut NoProgress,
@@ -435,6 +436,7 @@ mod http_v2 {
                 url: url.clone(),
                 dest: dest.path().to_path_buf(),
                 filter: Some(ObjectFilterSpec::BlobNone),
+                checkout: false,
                 ..CloneOptions::new(&url, dest.path().to_path_buf())
             },
             &mut NoProgress,
