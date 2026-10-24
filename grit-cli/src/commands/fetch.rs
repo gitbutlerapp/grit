@@ -152,7 +152,9 @@ impl From<UpdateMode> for FetchUpdateStatus {
             UpdateMode::FastForward => Self::FastForward,
             UpdateMode::Forced => Self::Forced,
             UpdateMode::DeletedMissing => Self::Pruned,
-            UpdateMode::NonFastForwardRejected | UpdateMode::TagUpdateRejected => Self::Rejected,
+            UpdateMode::NonFastForwardRejected
+            | UpdateMode::TagUpdateRejected
+            | UpdateMode::RefLockRejected => Self::Rejected,
             UpdateMode::UpToDate | UpdateMode::NoChangeNeeded | UpdateMode::Unborn => {
                 Self::UpToDate
             }
@@ -450,6 +452,9 @@ fn rejection_reason(mode: UpdateMode, note: &Option<String>) -> Option<String> {
             Some("tag already exists locally and did not move".to_owned())
         }
         UpdateMode::SourceObjectNotFound => Some("source ref not found on the remote".to_owned()),
+        UpdateMode::RefLockRejected => note
+            .clone()
+            .or_else(|| Some("unable to update local ref".to_owned())),
         _ => note.clone(),
     }
 }

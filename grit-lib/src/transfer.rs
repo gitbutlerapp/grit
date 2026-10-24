@@ -58,6 +58,8 @@ pub enum UpdateMode {
     Unborn,
     /// A prune/delete was requested but the local ref was already missing.
     DeletedMissing,
+    /// The local tracking ref could not be created or updated (namespace conflict, lock, …).
+    RefLockRejected,
 }
 
 impl UpdateMode {
@@ -79,7 +81,10 @@ impl UpdateMode {
     pub fn is_rejected(self) -> bool {
         matches!(
             self,
-            Self::NonFastForwardRejected | Self::TagUpdateRejected | Self::SourceObjectNotFound
+            Self::NonFastForwardRejected
+                | Self::TagUpdateRejected
+                | Self::SourceObjectNotFound
+                | Self::RefLockRejected
         )
     }
 
@@ -2018,7 +2023,17 @@ pub fn fetch_local_with_progress(
         }
     }
     if !opts.dry_run && !store_batch.is_empty() {
-        crate::refs::commit_ref_store_batch(local_git_dir, &store_batch)?;
+        apply_fetch_ref_updates(
+            local_git_dir,
+            &store_batch,
+            &mut updates,
+            FetchRefRejectHint {
+                prune: opts.prune,
+                positive: &positive,
+                remote_refs: &remote_refs,
+                remote_name: opts.remote_name.as_deref(),
+            },
+        )?;
     }
 
     crate::fetch::finish_initial_remote_fetch_layout(
@@ -2979,6 +2994,130 @@ pub fn tracking_refs_gone_on_remote(
         }
     }
     Ok(pruned.into_iter().collect())
+}
+
+/// Optional prune hint when a fetch ref write is rejected.
+pub(crate) struct FetchRefRejectHint<'a> {
+    /// Whether this fetch runs with `--prune` (no stale-ref hints when true).
+    pub prune: bool,
+    /// Positive refspecs for the fetch (stale tracking detection).
+    pub positive: &'a [RefspecItem],
+    /// Advertised remote refs at fetch time.
+    pub remote_refs: &'a [(String, ObjectId)],
+    /// Remote nickname (`origin`, …) for hint text.
+    pub remote_name: Option<&'a str>,
+}
+
+fn fetch_ref_store_error_rejectable(err: &Error) -> bool {
+    matches!(
+        err,
+        Error::RefStore(crate::refs::store::RefStoreError::NameUnavailable { .. })
+            | Error::RefStore(crate::refs::store::RefStoreError::LockHeld { .. })
+    )
+}
+
+fn blocking_ref_from_unavailable(reason: &crate::refs::RefnameUnavailable) -> Option<&str> {
+    match reason {
+        crate::refs::RefnameUnavailable::AncestorExists { blocking, .. }
+        | crate::refs::RefnameUnavailable::DescendantExists { blocking, .. } => Some(blocking),
+        crate::refs::RefnameUnavailable::SameBatch { .. } => None,
+    }
+}
+
+fn append_fetch_prune_hint(
+    note: &mut String,
+    stale_tracking: &HashSet<String>,
+    blocking: &str,
+    remote_name: Option<&str>,
+) {
+    if stale_tracking.contains(blocking) {
+        let remote = remote_name.unwrap_or("origin");
+        note.push_str(&format!(
+            " — stale remote-tracking ref; try `grit fetch --prune` or `grit remote prune {remote}`"
+        ));
+    }
+}
+
+fn mark_fetch_ref_update_rejected(
+    updates: &mut [RefUpdate],
+    local_ref: &str,
+    err: &Error,
+    stale_tracking: &HashSet<String>,
+    hint: &FetchRefRejectHint<'_>,
+) {
+    let Some(update) = updates
+        .iter_mut()
+        .find(|u| u.local_ref.as_deref() == Some(local_ref))
+    else {
+        return;
+    };
+    update.mode = UpdateMode::RefLockRejected;
+    let mut note = match err {
+        Error::RefStore(crate::refs::store::RefStoreError::NameUnavailable { reason }) => {
+            let mut text = reason.lock_message_suffix();
+            if let Some(blocking) = blocking_ref_from_unavailable(reason) {
+                append_fetch_prune_hint(&mut text, stale_tracking, blocking, hint.remote_name);
+            }
+            text
+        }
+        Error::RefStore(crate::refs::store::RefStoreError::LockHeld { name }) => {
+            format!("ref '{name}' is locked")
+        }
+        _ => err.to_string(),
+    };
+    if note.is_empty() {
+        note = "unable to update local ref".to_owned();
+    }
+    update.note = Some(note);
+}
+
+/// Commit tracking-ref writes from a fetch, applying every ref that can be updated.
+///
+/// Uses one batch transaction when the full batch validates; otherwise falls back to
+/// per-ref commits and records lock or namespace failures on the matching
+/// [`RefUpdate`] rows instead of aborting the whole fetch.
+///
+/// # Errors
+///
+/// Propagates non-rejectable ref-store and I/O errors from the fallback path.
+pub(crate) fn apply_fetch_ref_updates(
+    local_git_dir: &Path,
+    store_batch: &[crate::refs::store::RefUpdate],
+    updates: &mut [RefUpdate],
+    hint: FetchRefRejectHint<'_>,
+) -> Result<()> {
+    if store_batch.is_empty() {
+        return Ok(());
+    }
+    if crate::refs::commit_ref_store_batch(local_git_dir, store_batch).is_ok() {
+        return Ok(());
+    }
+
+    let stale_tracking: HashSet<String> = if hint.prune {
+        HashSet::new()
+    } else {
+        tracking_refs_gone_on_remote(local_git_dir, hint.positive, hint.remote_refs)?
+            .into_iter()
+            .map(|(name, _)| name)
+            .collect()
+    };
+
+    for store_update in store_batch {
+        match crate::refs::commit_store_update(local_git_dir, store_update.clone()) {
+            Ok(()) => {}
+            Err(err) if fetch_ref_store_error_rejectable(&err) => {
+                mark_fetch_ref_update_rejected(
+                    updates,
+                    &store_update.name,
+                    &err,
+                    &stale_tracking,
+                    &hint,
+                );
+            }
+            Err(err) => return Err(err),
+        }
+    }
+    Ok(())
 }
 
 /// Delete local tracking refs whose remote counterpart no longer exists.

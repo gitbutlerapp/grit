@@ -478,7 +478,17 @@ fn complete_bundle_fetch(
     }
 
     if !opts.dry_run && !store_batch.is_empty() {
-        crate::refs::commit_ref_store_batch(local_git_dir, &store_batch)?;
+        crate::transfer::apply_fetch_ref_updates(
+            local_git_dir,
+            &store_batch,
+            &mut updates,
+            crate::transfer::FetchRefRejectHint {
+                prune: opts.prune,
+                positive: &positive,
+                remote_refs,
+                remote_name: opts.remote_name.as_deref(),
+            },
+        )?;
     }
 
     crate::fetch::finish_initial_remote_fetch_layout(

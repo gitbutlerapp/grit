@@ -19173,6 +19173,7 @@ pub grit_lib::remote::transfer::UpdateMode::Forced
 pub grit_lib::remote::transfer::UpdateMode::New
 pub grit_lib::remote::transfer::UpdateMode::NoChangeNeeded
 pub grit_lib::remote::transfer::UpdateMode::NonFastForwardRejected
+pub grit_lib::remote::transfer::UpdateMode::RefLockRejected
 pub grit_lib::remote::transfer::UpdateMode::SourceObjectNotFound
 pub grit_lib::remote::transfer::UpdateMode::TagUpdateRejected
 pub grit_lib::remote::transfer::UpdateMode::Unborn

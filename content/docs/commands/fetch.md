@@ -21,7 +21,7 @@ Each `<refspec>` selects what to fetch (`main`, `refs/heads/x:refs/heads/y`, `+r
 
 When the source is a **literal path or URL** (not a configured remote), grit does not update `refs/remotes/origin/*` unless you pass refspecs with destinations. [`FETCH_HEAD`](https://git-scm.com/docs/git-fetch#_discussion) is updated for explicit refspecs.
 
-Human output lists each local ref with its remote source and old → new oids. Pruned refs show `deleted`; rejected updates are listed and exit **1** (same as [`grit push`](../push/) rejections).
+Human output lists each local ref with its remote source and old → new oids. Pruned refs show `deleted`; rejected updates are listed and exit **1** (same as [`grit push`](../push/) rejections). When a stale remote-tracking ref blocks another update (for example `origin/gone/x` still exists locally but the remote now has `gone`), grit still applies every ref it can and reports the blocked ref as rejected; the `reason` field suggests `grit fetch --prune` or `grit remote prune <remote>` when pruning would remove the stale ref.
 
 Tag policy follows Git: default is follow-tags (reachable annotated tags), `--tags` fetches every remote tag, `--no-tags` disables automatic tags. `remote.<name>.tagOpt` (`--tags` / `--no-tags`) applies when the CLI does not override it.
 
