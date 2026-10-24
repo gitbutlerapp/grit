@@ -92,11 +92,29 @@
         "null"
       ]
     },
+    "blobs": {
+      "description": "Partial-clone blob filter when `--blobs` was used: `\"none\"` or a byte limit.",
+      "oneOf": [
+        {
+          "const": "none",
+          "type": "string"
+        },
+        {
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      ]
+    },
     "bytes": {
       "description": "Pack bytes received during the fetch.",
       "format": "uint64",
       "minimum": 0.0,
       "type": "integer"
+    },
+    "partial": {
+      "description": "True when `--blobs` configured a promisor partial clone.",
+      "type": "boolean"
     },
     "depth": {
       "description": "Shallow depth when `--depth` or `--shallow` was used.",

@@ -698,6 +698,9 @@ enum Command {
         /// Name for the remote (default `origin`).
         #[arg(short = 'o', long, value_name = "NAME")]
         origin: Option<String>,
+        /// Partial clone: omit blobs (`none`) or blobs at/above a size (`1k`, `512`, …).
+        #[arg(long, value_name = "none|SIZE")]
+        blobs: Option<String>,
     },
     /// List remotes, or add one.
     Remote {
@@ -2031,6 +2034,7 @@ fn dispatch(
             no_single_branch,
             no_tags,
             origin,
+            blobs,
         } => {
             let single_branch = if single_branch {
                 Some(true)
@@ -2049,6 +2053,7 @@ fn dispatch(
                     single_branch,
                     no_tags,
                     origin,
+                    blobs,
                     mode: opts.mode,
                 })?,
                 opts,

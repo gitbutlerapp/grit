@@ -18198,6 +18198,8 @@ pub grit_lib::remote::partial_clone::ObjectFilterSpec::BlobLimit(u64)
 pub grit_lib::remote::partial_clone::ObjectFilterSpec::BlobNone
 impl grit_lib::remote::partial_clone::ObjectFilterSpec
 pub fn grit_lib::remote::partial_clone::ObjectFilterSpec::expand_for_protocol(&self) -> core::result::Result<alloc::string::String, grit_lib::remote::partial_clone::PartialCloneError>
+pub fn grit_lib::remote::partial_clone::ObjectFilterSpec::blob_limit_bytes(&self) -> core::option::Option<u64>
+pub fn grit_lib::remote::partial_clone::ObjectFilterSpec::from_blobs_cli(&str) -> core::result::Result<Self, grit_lib::remote::partial_clone::PartialCloneError>
 pub fn grit_lib::remote::partial_clone::ObjectFilterSpec::from_object_filter(&grit_lib::revwalk::rev_list::ObjectFilter) -> core::result::Result<Self, grit_lib::remote::partial_clone::PartialCloneError>
 pub fn grit_lib::remote::partial_clone::ObjectFilterSpec::parse(&str) -> core::result::Result<Self, grit_lib::remote::partial_clone::PartialCloneError>
 pub fn grit_lib::remote::partial_clone::ObjectFilterSpec::to_config_value(&self) -> alloc::string::String

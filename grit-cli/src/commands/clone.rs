@@ -11,6 +11,7 @@ use grit_lib::remote::clone::{
     dest_preexisted_empty, CloneCheckout, CloneError, CloneHead, CloneOptions,
     CloneOutcome as LibCloneOutcome, CloneTags,
 };
+use grit_lib::remote::partial_clone::ObjectFilterSpec;
 use grit_lib::remote::DefaultHttpClientFactory;
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -46,6 +47,46 @@ pub struct ClonePhase {
     pub seconds: f64,
 }
 
+/// Usage mistakes specific to `grit clone` (exit code 2).
+#[derive(Debug)]
+pub struct CloneUsageError;
+
+impl std::fmt::Display for CloneUsageError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("invalid clone arguments")
+    }
+}
+
+impl std::error::Error for CloneUsageError {}
+
+/// JSON value for `--blobs`: the string `"none"` or a byte limit.
+#[derive(Clone, Copy, Debug, JsonSchema)]
+pub enum CloneBlobsJson {
+    None,
+    Limit(u64),
+}
+
+impl CloneBlobsJson {
+    fn from_spec(spec: &ObjectFilterSpec) -> Self {
+        match spec {
+            ObjectFilterSpec::BlobNone => Self::None,
+            ObjectFilterSpec::BlobLimit(n) => Self::Limit(*n),
+        }
+    }
+}
+
+impl Serialize for CloneBlobsJson {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: serde::Serializer,
+    {
+        match self {
+            Self::None => serializer.serialize_str("none"),
+            Self::Limit(n) => serializer.serialize_u64(*n),
+        }
+    }
+}
+
 /// Options for [`run`].
 pub struct CloneRunOptions {
     pub url: String,
@@ -56,6 +97,7 @@ pub struct CloneRunOptions {
     pub single_branch: Option<bool>,
     pub no_tags: bool,
     pub origin: Option<String>,
+    pub blobs: Option<String>,
     pub mode: OutputMode,
 }
 
@@ -81,6 +123,12 @@ pub struct CloneOutcome {
     /// Shallow depth when `--depth` or `--shallow` was used.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub depth: Option<u32>,
+    /// Partial-clone blob filter when `--blobs` was used (`"none"` or a byte limit).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub blobs: Option<CloneBlobsJson>,
+    /// True when `--blobs` configured a promisor partial clone.
+    #[serde(skip_serializing_if = "CloneOutcome::partial_not_set")]
+    pub partial: bool,
     /// Objects received during the fetch.
     pub objects: u64,
     /// Pack bytes received during the fetch.
@@ -112,6 +160,12 @@ pub struct CloneOutcome {
     #[serde(skip)]
     #[schemars(skip)]
     records: Vec<PhaseRecord>,
+}
+
+impl CloneOutcome {
+    fn partial_not_set(partial: &bool) -> bool {
+        !*partial
+    }
 }
 
 impl HumanRender for CloneOutcome {
@@ -147,6 +201,13 @@ fn render_summary(o: &CloneOutcome, w: &mut dyn Write, color: bool) -> Result<()
         paint(color, BOLD, &checkout_label(o)),
         paint(color, BOLD, &total),
     );
+    if o.partial {
+        outln!(
+            w,
+            "  {}  blobless clone; blobs are fetched on demand",
+            paint(color, DIM, "partial")
+        );
+    }
     outln!(w);
 
     if !o.records.is_empty() {
@@ -370,6 +431,18 @@ impl MarkdownRender for CloneOutcome {
         if let Some(depth) = self.depth {
             outln!(w, "- **depth**: {depth}");
         }
+        if self.partial {
+            outln!(
+                w,
+                "- **partial**: blobless clone; blobs are fetched on demand"
+            );
+            if let Some(blobs) = self.blobs {
+                match blobs {
+                    CloneBlobsJson::None => outln!(w, "- **blobs**: none"),
+                    CloneBlobsJson::Limit(n) => outln!(w, "- **blobs**: {n} bytes"),
+                }
+            }
+        }
         outln!(w, "- **url**: `{}`", self.url);
         outln!(w, "- **objects**: {}", self.objects);
         if let Some(t) = self.object_types {
@@ -480,9 +553,21 @@ fn effective_tag_fetch_mode(opts: &CloneRunOptions) -> CloneTags {
     })
 }
 
+fn parse_blobs_filter(raw: Option<&str>) -> Result<Option<ObjectFilterSpec>> {
+    let Some(raw) = raw else {
+        return Ok(None);
+    };
+    ObjectFilterSpec::from_blobs_cli(raw)
+        .map(Some)
+        .map_err(|e| {
+            anyhow::Error::from(CloneUsageError).context(format!("invalid --blobs value: {e}"))
+        })
+}
+
 pub fn run(mut opts: CloneRunOptions) -> Result<CloneOutcome> {
     let url = &opts.url;
     let mode = opts.mode;
+    let filter = parse_blobs_filter(opts.blobs.as_deref())?;
     opts.depth = opts.depth.or_else(|| opts.shallow.then_some(1));
     if matches!(opts.depth, Some(0)) {
         return Err(anyhow::anyhow!("depth 0 is not a positive number"));
@@ -509,7 +594,14 @@ pub fn run(mut opts: CloneRunOptions) -> Result<CloneOutcome> {
     } else {
         progress(mode, &format!("Cloning into '{dir}' ..."));
     }
-    match clone_into(&opts, &path, &dir, started, &mut term_progress) {
+    match clone_into(
+        &opts,
+        filter.as_ref(),
+        &path,
+        &dir,
+        started,
+        &mut term_progress,
+    ) {
         Ok(outcome) => Ok(outcome),
         Err(err) => {
             let skip_cleanup = matches!(
@@ -526,6 +618,7 @@ pub fn run(mut opts: CloneRunOptions) -> Result<CloneOutcome> {
 
 fn clone_into(
     run: &CloneRunOptions,
+    filter: Option<&ObjectFilterSpec>,
     path: &Path,
     dir: &str,
     started: Instant,
@@ -546,7 +639,7 @@ fn clone_into(
         thread_policy: crate::context::thread_policy_for_repo(),
         depth: run.depth,
         branch: run.branch.clone(),
-        filter: None,
+        filter: filter.copied(),
         single_branch: run.single_branch,
         tags: resolved_clone_tags(run),
         promisor_fetcher: Some(std::sync::Arc::new(
@@ -602,6 +695,8 @@ fn clone_into(
         detached,
         tag,
         depth: run.depth,
+        blobs: filter.map(CloneBlobsJson::from_spec),
+        partial: filter.is_some(),
         objects: outcome.transfer.objects,
         bytes: outcome.transfer.bytes,
         branches: outcome.branches,
@@ -664,6 +759,8 @@ mod tests {
             detached: false,
             tag: None,
             depth: None,
+            blobs: None,
+            partial: false,
             objects: 1_234,
             bytes: 2 * 1024 * 1024,
             branches: 1,

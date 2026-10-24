@@ -85,6 +85,13 @@ impl ExitStatus {
         {
             return Self::Usage;
         }
+        if err.chain().any(|cause| {
+            cause
+                .downcast_ref::<commands::clone::CloneUsageError>()
+                .is_some()
+        }) {
+            return Self::Usage;
+        }
         if commands::remote::is_remote_usage_error(err) {
             return Self::Usage;
         }

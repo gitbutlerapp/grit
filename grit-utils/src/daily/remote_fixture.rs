@@ -254,6 +254,17 @@ pub fn setup_synth10k_pull_rebase_remote(setup: &DailySetup<'_>) -> Result<Daily
     })
 }
 
+pub fn setup_git_git_file_remote_blobless(setup: &DailySetup<'_>) -> Result<DailyHeadlineContext> {
+    let ctx = setup_git_git_file_remote(setup)?;
+    let remote = ctx.remote.as_ref().context("remote state")?;
+    run_git(
+        setup.git,
+        &remote.bare,
+        &["config", "uploadpack.allowFilter", "true"],
+    )?;
+    Ok(ctx)
+}
+
 pub fn setup_git_git_file_remote(setup: &DailySetup<'_>) -> Result<DailyHeadlineContext> {
     with_remote_scratch("git-git", |scratch| {
         let bare = scratch.join("remote.git");
@@ -962,6 +973,80 @@ pub fn verify_clone_shallow_http(ctx: &DailyHeadlineContext, cwd: &Path) -> Resu
     verify_clone_shallow(ctx, cwd)
 }
 
+fn count_missing_objects(git: &Path, repo: &Path) -> Result<u64> {
+    let out = Command::new(git)
+        .args(["rev-list", "--objects", "--missing=print", "HEAD"])
+        .current_dir(repo)
+        .output()
+        .context("git rev-list --missing")?;
+    if !out.status.success() {
+        bail!(
+            "rev-list failed: {}",
+            String::from_utf8_lossy(&out.stderr).trim()
+        );
+    }
+    Ok(String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter(|line| line.starts_with('?'))
+        .count() as u64)
+}
+
+fn verify_blobless_clone_tree(git: &Path, dest: &Path, default_branch: &str) -> Result<()> {
+    run_git(git, dest, &["fsck", "--no-dangling"])?;
+    let head_tree = tree_oid(git, dest, "HEAD")?;
+    let branch_tree = tree_oid(git, dest, &format!("refs/heads/{default_branch}"))?;
+    if head_tree != branch_tree {
+        bail!("HEAD tree {head_tree} != branch tip tree {branch_tree}");
+    }
+    Ok(())
+}
+
+pub fn verify_clone_blobless(ctx: &DailyHeadlineContext, cwd: &Path) -> Result<()> {
+    let remote = remote_state(ctx)?;
+    let dest = remote.meta.clone_dest.clone();
+    let dest_name = dest
+        .file_name()
+        .and_then(|s| s.to_str())
+        .context("clone dest name")?;
+    run_git(
+        &ctx.git,
+        &remote.bare,
+        &["config", "uploadpack.allowFilter", "true"],
+    )?;
+    prepare_network_clone(&remote.bare)?;
+    run_git(
+        &ctx.git,
+        cwd,
+        &[
+            "clone",
+            "-q",
+            "--filter=blob:none",
+            remote.remote_url.as_str(),
+            dest_name,
+        ],
+    )?;
+    verify_blobless_clone_tree(&ctx.git, &dest, &remote.meta.default_branch)?;
+    let git_missing = count_missing_objects(&ctx.git, &dest)?;
+    prepare_network_clone(&remote.bare)?;
+    run_grit(
+        &ctx.grit,
+        cwd,
+        &[
+            "clone",
+            "--blobs",
+            "none",
+            remote.remote_url.as_str(),
+            dest_name,
+        ],
+    )?;
+    verify_blobless_clone_tree(&ctx.git, &dest, &remote.meta.default_branch)?;
+    let grit_missing = count_missing_objects(&ctx.git, &dest)?;
+    if git_missing != grit_missing {
+        bail!("missing blob count git {git_missing} != grit {grit_missing}");
+    }
+    Ok(())
+}
+
 pub fn verify_fetch_incremental_http(ctx: &DailyHeadlineContext, cwd: &Path) -> Result<()> {
     let remote = remote_state(ctx)?;
     configure_client_remote(&ctx.git, cwd, remote)?;
@@ -1122,6 +1207,22 @@ pub fn clone_bench_script_shallow(tool: &Path, url: &str, dest: &Path) -> String
     let dest_q = shell_quote(&dest.to_string_lossy());
     let dest_name = dest.file_name().and_then(|s| s.to_str()).unwrap_or("clone");
     format!("rm -rf {dest_q} && {tool_q} clone -q --depth 1 {url_q} {dest_name}")
+}
+
+pub fn clone_blobless_bench_script_git(tool: &Path, url: &str, dest: &Path) -> String {
+    let tool_q = shell_quote(&tool.to_string_lossy());
+    let url_q = shell_quote(url);
+    let dest_q = shell_quote(&dest.to_string_lossy());
+    let dest_name = dest.file_name().and_then(|s| s.to_str()).unwrap_or("clone");
+    format!("rm -rf {dest_q} && {tool_q} clone -q --filter=blob:none {url_q} {dest_name}")
+}
+
+pub fn clone_blobless_bench_script_grit(tool: &Path, url: &str, dest: &Path) -> String {
+    let tool_q = shell_quote(&tool.to_string_lossy());
+    let url_q = shell_quote(url);
+    let dest_q = shell_quote(&dest.to_string_lossy());
+    let dest_name = dest.file_name().and_then(|s| s.to_str()).unwrap_or("clone");
+    format!("rm -rf {dest_q} && {tool_q} clone --blobs none {url_q} {dest_name}")
 }
 
 pub fn clone_bench_script_grit_shallow(tool: &Path, url: &str, dest: &Path) -> String {

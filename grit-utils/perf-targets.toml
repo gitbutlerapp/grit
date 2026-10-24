@@ -333,3 +333,6 @@ followup = "GitHub issue #2977"
 [scenario."clone/shallow@git-git"]
 ratio = 1.2
 
+[scenario."clone/blobless@git-git"]
+ratio = 1.2
+

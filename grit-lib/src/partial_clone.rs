@@ -83,6 +83,30 @@ impl ObjectFilterSpec {
         expand_object_filter_for_protocol(&self.to_wire_spec())
             .map_err(PartialCloneError::InvalidFilter)
     }
+
+    /// Parse `grit clone --blobs` values: `none` or a size with optional `k`/`m`/`g` suffix.
+    ///
+    /// Sizes map to `blob:limit=<n>` (same grammar as Git `--filter=blob:limit=…`).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`PartialCloneError::InvalidFilter`] when `value` is not `none` or a valid limit.
+    pub fn from_blobs_cli(value: &str) -> std::result::Result<Self, PartialCloneError> {
+        let trimmed = value.trim();
+        if trimmed.eq_ignore_ascii_case("none") {
+            return Ok(Self::BlobNone);
+        }
+        Self::parse(&format!("blob:limit={trimmed}"))
+    }
+
+    /// Byte limit when this spec is [`Self::BlobLimit`]; `None` for [`Self::BlobNone`].
+    #[must_use]
+    pub const fn blob_limit_bytes(&self) -> Option<u64> {
+        match self {
+            Self::BlobNone => None,
+            Self::BlobLimit(n) => Some(*n),
+        }
+    }
 }
 
 /// Writes Git partial-clone configuration for `remote` after a filtered fetch/clone.
@@ -179,6 +203,19 @@ pub fn fetch_requires_upload_pack(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn from_blobs_cli_none_and_suffixes() {
+        assert_eq!(
+            ObjectFilterSpec::from_blobs_cli("none").expect("none"),
+            ObjectFilterSpec::BlobNone
+        );
+        assert_eq!(
+            ObjectFilterSpec::from_blobs_cli("1k").expect("1k"),
+            ObjectFilterSpec::BlobLimit(1024)
+        );
+        assert!(ObjectFilterSpec::from_blobs_cli("not-a-size").is_err());
+    }
 
     #[test]
     fn parse_blob_none_and_limit() {

@@ -8,7 +8,7 @@ order: 2
 ## Synopsis
 
 ```text
-grit clone <url> [<dir>] [--depth <N>] [-b|--branch <NAME>] [--shallow] [--single-branch | --no-single-branch] [--no-tags] [-o <name>]
+grit clone <url> [<dir>] [--depth <N>] [-b|--branch <NAME>] [--blobs <none|SIZE>] [--shallow] [--single-branch | --no-single-branch] [--no-tags] [-o <name>]
 ```
 
 ## Description
@@ -44,6 +44,14 @@ Pass `--depth <N>` for the same result as `git clone --depth`: only one ref is f
 
 `--shallow` is a hidden alias for `--depth 1` and cannot be combined with `--depth`.
 
+### Partial clone (`--blobs`)
+
+`--blobs none` creates a **blobless** (promisor) clone: commits and trees are present locally, but blob objects are omitted from the initial fetch and fetched on demand later (same idea as `git clone --filter=blob:none`). Grit writes Git-compatible promisor configuration (`remote.<name>.partialclonefilter`, `extensions.partialclone`, and related keys) so the system `git` command can lazy-fetch missing blobs through the same remote.
+
+`--blobs <SIZE>` omits blobs whose inflated size is at or above the limit. `<SIZE>` accepts the same suffixes as Git's `blob:limit` filter (`512`, `1k`, `2m`, …). Smaller blobs stay in the first pack, which keeps checkouts working when only large assets are skipped.
+
+Partial clone trades disk and bandwidth on the first fetch for extra round-trips when something needs blob bytes (for example `git log -p` or reading a large file). It works with `--depth`, `-b` / `--branch`, and the other clone options. The server must allow filter requests (`uploadpack.allowFilter` on bare repos served over smart HTTP or `file://`).
+
 You can also clone from a shallow repository (including one created with `git clone --depth`); grit copies the shallow boundary into the new repository so history matches the source.
 
 Working-tree materialization after fetch uses the same parallel checkout path as [`grit switch`](../switch/). Configure [`checkout.workers`](../../library/parallelism.md) and `checkout.thresholdForParallelism` in the repository config, or pass global [`--threads`](../global-options.md) to override worker count for this process.
@@ -61,6 +69,7 @@ Working-tree materialization after fetch uses the same parallel checkout path as
 | `--no-single-branch` | With `--depth`, fetch every branch tip (`git clone --no-single-branch --depth=1`). |
 | `--no-tags` | Do not fetch tags; sets `remote.<name>.tagOpt=--no-tags` like Git. |
 | `-o`, `--origin <name>` | Name of the remote (default `origin`). |
+| `--blobs <none\|SIZE>` | Partial clone: omit all blobs (`none`) or blobs at/above `<SIZE>` (`1k`, `512`, …). |
 
 ## Examples
 
@@ -137,6 +146,8 @@ Pass `--json` for stable, scripting-friendly output:
 | `detached` | boolean | True when `HEAD` is detached (tag checkout). |
 | `tag` | string or omitted | Tag name when `-b` named a tag. |
 | `depth` | integer or omitted | Shallow depth when `--depth` or `--shallow` was used. |
+| `blobs` | string or integer or omitted | `"none"` or a byte limit when `--blobs` was used. |
+| `partial` | boolean or omitted | `true` when `--blobs` configured a promisor partial clone. |
 | `objects` | integer | Objects received in the fetch pack. |
 | `bytes` | integer | Size in bytes of the received pack. |
 | `branches` | integer | Remote branches fetched. |
