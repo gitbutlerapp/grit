@@ -53,6 +53,7 @@ fn exit_codes_page_matches_enum() {
         "branch_upstream_not_tracking",
         "branch_no_upstream",
         "branch_error",
+        "revision_not_found",
     ] {
         assert!(
             text.contains(&format!("`{slug}`")),
@@ -107,4 +108,9 @@ fn exit_status_for_every_error_kind_cli() {
     assert_ne!(code, 0);
     let v: Value = serde_json::from_str(stdout.trim()).expect("branch_already_exists");
     assert_eq!(v["kind"].as_str(), Some("branch_already_exists"));
+
+    let (code, stdout) = grit(root.path(), &["merge", "nonexistent", "--json"]);
+    assert_eq!(code, 1, "revision_not_found");
+    let v: Value = serde_json::from_str(stdout.trim()).expect("revision_not_found");
+    assert_eq!(v["kind"].as_str(), Some("revision_not_found"));
 }

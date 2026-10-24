@@ -1,6 +1,6 @@
 ---
 title: grit merge
-summary: Merge another branch into the current one.
+summary: Merge another branch, tag or commit into the current one.
 group: Branches and tags
 order: 3
 ---
@@ -8,25 +8,25 @@ order: 3
 ## Synopsis
 
 ```text
-grit merge <branch>
-grit merge --check <branch>
-grit merge --dry-run <branch>
+grit merge <rev>
+grit merge --check <rev>
+grit merge --dry-run <rev>
 grit merge --continue [-m <message>]
 grit merge --abort
-grit merge [--ff-only | --no-ff] [--squash | --no-commit] [-X ours|theirs] [--conflict diff3|zdiff3|merge] [--allow-unrelated-histories] [-m <message> | -F / --message-file <path|->] <branch>
+grit merge [--ff-only | --no-ff] [--squash | --no-commit] [-X ours|theirs] [--conflict diff3|zdiff3|merge] [--allow-unrelated-histories] [-m <message> | -F / --message-file <path|->] <rev>
 ```
 
 ## Description
 
-Brings the commits from `<branch>` into the current branch:
+Brings the commits from `<rev>` into the current branch:
 
 - If the current branch already has everything, nothing changes.
-- If the current branch has no commits of its own since they diverged, it's moved forward to `<branch>` (a fast-forward). No new commit is made.
-- Otherwise both sides are merged. When there are no overlapping edits, a merge commit is recorded with the message `Merge <branch>`. That commit gets a new `change-id` header like [`grit commit`](../commit/). When `commit.gpgsign` is enabled, that merge commit is signed like [`grit commit`](../commit/).
+- If the current branch has no commits of its own since they diverged, it's moved forward to `<rev>` (a fast-forward). No new commit is made.
+- Otherwise both sides are merged. When there are no overlapping edits, a merge commit is recorded with the message `Merge <rev>`, using `<rev>` as you typed it. That commit gets a new `change-id` header like [`grit commit`](../commit/). When `commit.gpgsign` is enabled, that merge commit is signed like [`grit commit`](../commit/).
 - When the same lines were changed on both sides, `grit merge` stops with conflicts: it updates the index and working tree, writes conflict markers around each conflicting hunk, records merge-in-progress state (`MERGE_HEAD`, `ORIG_HEAD`, `MERGE_MSG`), and leaves the branch ref unchanged. Fix conflicts, then run `grit merge --continue` to create the two-parent merge commit (message from `MERGE_MSG` with comment lines stripped, or `-m` to override). When `commit.autoStage` is true (the default), `--continue` stages resolved paths from the work tree the same way [`grit commit`](../commit/) does, so you do not need `grit add` after editing away conflict markers. With `commit.autoStage=false`, stage resolved paths with `grit add` before `--continue`. [`grit commit`](../commit/) can also finish a resolved merge. Run `grit merge --abort` to discard the in-progress merge and restore the pre-merge branch, index, and working tree.
 - After a merge with `--no-commit` (when supported), run `grit merge --continue` to record the merge commit without re-running the three-way merge.
 
-`<branch>` can be a local branch or a remote-tracking branch such as `origin/main`. Local branches are looked up first.
+`<rev>` can be any branch, tag or commit: a local branch, a remote-tracking branch such as `origin/main`, a tag such as `v1.2` (annotated tags merge the commit they point at), a full or abbreviated commit id, or a revision expression such as `topic~2`, `origin/main^` or `ORIG_HEAD`. A name is looked up as a local branch first, then a remote-tracking branch, then a tag, then as a revision. Ranges (`a..b`) and trees or blobs are refused.
 
 Local edits are allowed when they only touch paths the merge does not change, or when a changed path already matches the post-merge tree in the index (same scoped rule as [`grit switch`](../switch/)). Grit refuses when your changes would be overwritten by files the merge updates, when an untracked file would be replaced by a path the merge would check out, on a branch with no commits, or with a detached HEAD; the branch and file are left unchanged.
 
@@ -49,10 +49,10 @@ Local edits are allowed when they only touch paths the merge does not change, or
 
 | Option | Description |
 | --- | --- |
-| `<branch>` | The branch to merge into the current one. |
+| `<rev>` | The branch, tag or commit to merge into the current one. |
 | `--check` | Predict whether the merge would succeed without changing refs, the index, or the working tree. Exit **0** when it would fast-forward, already be up to date, or merge cleanly; exit **1** when it would conflict. Other failures use the usual error exit. |
 | `--dry-run` | Report the planned merge outcome (up to date, fast-forward, merge commit with parents, or conflicts) without changing refs, the index, or the working tree. Exit **0** unless the merge would be refused (for example `--ff-only` when a fast-forward is not possible, exit **128**). Conflicts are reported in the JSON but do not fail the command. Mutually exclusive with `--check`. |
-| `--continue` | Finish an in-progress merge after conflicts are resolved (or after `--no-commit`). Auto-stages resolved paths when `commit.autoStage` is true (default). Conflicts with `<branch>`, `--check`, and `--abort`. |
+| `--continue` | Finish an in-progress merge after conflicts are resolved (or after `--no-commit`). Auto-stages resolved paths when `commit.autoStage` is true (default). Conflicts with `<rev>`, `--check`, and `--abort`. |
 | `-m`, `--message` | Commit message for `--continue` only (overrides `MERGE_MSG`). |
 | `--abort` | Cancel an in-progress merge and restore the state recorded in `ORIG_HEAD`. |
 | `--ff-only` | Refuse when a fast-forward is not possible (exit code 128). Mutually exclusive with `--no-ff`. |
@@ -76,6 +76,12 @@ Merged origin/main into the current branch (acd1d4b)
 
 $ grit merge --no-ff topic
 Merged topic into the current branch (1a2b3c4)
+
+$ grit merge v1.2
+Merged v1.2 into the current branch (15d4bf9)
+
+$ grit merge a79778433f24ac0955d38d912c13644b0920de68
+Merged a79778433f24ac0955d38d912c13644b0920de68 into the current branch (e3ca27d)
 
 $ grit merge --squash topic
 Squash merge applied from topic — run `grit commit` to record the squashed commit
@@ -116,6 +122,13 @@ $ grit merge --abort
 Merge aborted.
 ```
 
+When nothing has that name:
+
+```console
+$ grit merge nonexist
+error: no branch, tag or commit named 'nonexist'
+```
+
 When an untracked file would be overwritten:
 
 ```console
@@ -143,7 +156,7 @@ Pass `--json` for stable, scripting-friendly output:
 | `result` | string | `up_to_date`, `fast_forward`, `clean` (`--check` only), `merged`, `squashed`, `stopped`, `conflicts`, `refused_not_ff`, `aborted`, or `set_upstream`. |
 | `check` | boolean | `true` when this outcome is from `--check` (nothing was merged). Omitted for real merges. |
 | `dry_run` | boolean | `true` when this outcome is from `--dry-run` (nothing was merged). Omitted for real merges. |
-| `branch` | string | The branch that was merged in (or set as upstream). |
+| `branch` | string | The branch, tag or commit that was merged in, exactly as given on the command line (or the branch set as upstream). |
 | `oid` | string or null | Resulting commit after a real merge or fast-forward; for `--check` with `result: clean`, the predicted merge tree OID. Omitted for `--dry-run` when a new merge commit would be created. |
 | `parents` | array or null | For `--dry-run` with `result: merged`, the two parent commit ids of the merge commit that would be recorded. |
 | `change_id` | string or null | Stored `change-id` on `oid` when present (merge commit or fast-forward tip). |
@@ -202,6 +215,8 @@ When the merge stops on conflicts (exit code 1), stdout is still a single JSON o
 }
 ```
 
+When `<rev>` names nothing, the command exits **1** with `{"error":"no branch, tag or commit named 'nonexist'","kind":"revision_not_found"}` on stdout (see [`revision_not_found`](../exit-codes/)).
+
 ## Markdown output
 
 Schema: [v2](/schemas/merge/v2.json) · [v1](/schemas/merge/v1.json)
@@ -227,7 +242,7 @@ When the merge stops on conflicts (exit code 1), stdout still carries structured
 | Code | Meaning |
 | ---: | --- |
 | `0` | Merge completed, `--check` predicts success, or `--dry-run` preview. |
-| `1` | Conflicts (`result: conflicts`) or other failure ([`failure`](../exit-codes/)). |
+| `1` | Conflicts (`result: conflicts`), `<rev>` names nothing (`kind: revision_not_found`), or other failure ([`failure`](../exit-codes/)). |
 | `2` | Invalid flags ([`usage`](../exit-codes/)). |
 | `128` | `--ff-only` when not fast-forward ([`refused_not_ff`](../exit-codes/)). |
 

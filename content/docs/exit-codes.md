@@ -40,3 +40,4 @@ These values appear in the `kind` field of structured `--json` errors ([error sc
 | `branch_upstream_not_tracking` | Upstream is not a tracking branch. |
 | `branch_no_upstream` | No upstream configured. |
 | `branch_error` | Other branch operation failure. |
+| `revision_not_found` | A branch, tag, commit id or revision expression names nothing (for example `grit merge nonexistent`). |
