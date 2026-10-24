@@ -5,7 +5,13 @@ summary: Repository ref handles, transactions, backend selection, and path-based
 
 References name commits and other objects. Prefer `Repository::references` (`References`) for resolve/list/update on the repository’s ref backend. Call `Repository::refs` to borrow the cached `RefStore` trait object, or `with_ref_store` to inject a custom backend (for example `MemoryRefStore` or the `custom_ref_store` example below).
 
-Path-based helpers in [`refs`](rustdoc:grit_lib::refs) (`resolve_ref`, `list_refs`, `write_ref`, …) still work on a git directory; they open the same backend via `open_ref_store`. Rev-parse and porcelain on a `Repository` always go through the handle's store.
+Path-based helpers in [`refs`](rustdoc:grit_lib::refs) (`resolve_ref`, `list_refs`, `write_ref`, …) still work on a git directory; they open the on-disk backend via `open_ref_store`, so they never see an injected store. Rev-parse and porcelain on a `Repository` always go through the handle's store.
+
+## Injected stores and porcelain
+
+Every porcelain operation that moves a ref writes through `Repository::refs`: commit, switch, branch, tag, merge ([`integrate_branch`](rustdoc:grit_lib::porcelain::merge::integrate_branch)), reset, stash, pick, revert and rebase. Each one reads `HEAD` with [`resolve_head_for_repository`](rustdoc:grit_lib::state::resolve_head_for_repository), updates refs and `HEAD` in the store, and appends reflog entries there. With an injected store such as `MemoryRefStore`, nothing is written to `.git/HEAD`, `.git/refs`, `.git/logs` or `packed-refs`. The index, objects and operation-state files (`MERGE_HEAD`, `ORIG_HEAD`, `rebase-merge/`, sequencer state) stay in the git directory.
+
+To advance a checked-out branch from your own code, use [`update_branch_for_commit_on_store`](rustdoc:grit_lib::refs::update_branch_for_commit_on_store). It checks that `HEAD` points at the branch, compares the tip with the expected old commit, then moves the branch and appends the branch and `HEAD` reflog entries allowed by `core.logAllRefUpdates`. On the files backend, the branch lock is held while the reflogs are appended. On every other backend, the branch update and its reflog entries commit as one transaction.
 
 ## Backend selection
 
@@ -23,7 +29,7 @@ Batch ref updates use [`RefTransaction`](rustdoc:grit_lib::refs::store::RefTrans
 
 ## Resolving HEAD and symbolic refs
 
-`resolve_head` reads `HEAD` and returns a `HeadState`. `resolve_ref` (or `RefStore::resolve` on the repository store) follows symbolic refs with cycle detection. `read_ref_file` returns a `Ref` without resolving the full chain.
+`resolve_head` reads `HEAD` from a git directory and returns a `HeadState`; `resolve_head_for_repository` reads it through the repository's store (an empty injected store gives `HeadState::Invalid`). `resolve_ref` (or `RefStore::resolve` on the repository store) follows symbolic refs with cycle detection. `read_ref_file` returns a `Ref` without resolving the full chain.
 
 On every backend, a missing ref fails with [`RefStoreError::NotFound`](rustdoc:grit_lib::refs::store::RefStoreError::NotFound) inside `Error::RefStore`, naming the ref that is absent. For a dangling symbolic ref (an unborn branch behind `HEAD`, say) that is the target, not the name you asked for. `delete_ref` on a missing ref fails the same way. Match on the variant rather than the message:
 
