@@ -6,6 +6,7 @@
 pub mod receive_pack;
 pub mod upload_pack;
 
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use grit_lib::config::environment::Environment;
@@ -101,7 +102,7 @@ pub(crate) fn run_receive_pack(
     repo_path: &Path,
     stateless_rpc: bool,
     advertise_refs: bool,
-    input: &[u8],
+    input: &mut dyn Read,
     repository_options: &RepositoryOptions,
 ) -> Result<Vec<u8>> {
     let repo = Repository::open(repo_path, &repository_options.clone().for_serving())?;
@@ -117,7 +118,7 @@ pub(crate) fn run_receive_pack(
     };
     let policy = ReceivePolicy::from_config(&config);
     let mut output = Vec::new();
-    serve::receive_pack(&repo, &mut &*input, &mut output, &opts, &policy)?;
+    serve::receive_pack(&repo, input, &mut output, &opts, &policy)?;
     Ok(output)
 }
 
