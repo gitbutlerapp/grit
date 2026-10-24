@@ -3,6 +3,12 @@
 //! Behavior matches [git-scm.com line-range documentation](https://git-scm.com/docs/git-blame#Documentation/git-blame.txt--Lltstartgtltendgt):
 //! numeric endpoints, `/search/` (POSIX basic regex), relative `,+N` / `,-N` tails,
 //! and `:symbol` spans using the same funcname rules as diff hunk headers.
+//!
+//! ```rust
+//! use grit_lib::line_range::split_content_lines;
+//!
+//! assert_eq!(split_content_lines("a\nb\n"), ["a", "b"]);
+//! ```
 
 use std::ops::RangeInclusive;
 

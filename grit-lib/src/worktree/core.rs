@@ -506,7 +506,8 @@ pub struct AddLinkedWorktreeOptions {
     pub track: bool,
 }
 
-/// Options for locking during [`add_linked_worktree`] or [`RepositoryWorktrees::lock`].
+/// Options for locking during [`add_linked_worktree`] or
+/// [`RepositoryWorktrees::lock`](crate::repo_handles::RepositoryWorktrees::lock).
 #[derive(Debug, Clone, Default)]
 pub struct LockWorktreeOptions {
     /// Optional reason stored in the `locked` file (shown by `git worktree list`).
