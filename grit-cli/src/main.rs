@@ -990,6 +990,9 @@ enum Command {
         /// Stage only new-side line ranges from `grit diff --json` (`path:start-end`, repeatable).
         #[arg(long = "lines", value_name = "PATH:START-END", action = clap::ArgAction::Append)]
         lines: Vec<String>,
+        /// Unified context lines when resolving `--hunks` / `--lines` (match `grit diff -U`; default 3).
+        #[arg(short = 'U', long = "unified", value_name = "N")]
+        unified_context: Option<usize>,
     },
     /// Remove tracked paths from the working tree and index.
     Rm {
@@ -2660,7 +2663,11 @@ fn dispatch(
             patch_file,
             hunks,
             lines,
+            unified_context,
         } => {
+            if unified_context.is_some() && hunks.is_empty() && lines.is_empty() {
+                bail!("-U / --unified requires --hunks or --lines");
+            }
             if let Some(file) = patch_file {
                 if !hunks.is_empty() || !lines.is_empty() {
                     bail!("--patch-file cannot be used with --hunks or --lines");
@@ -2696,7 +2703,8 @@ fn dispatch(
                 if intent_to_add {
                     bail!("--hunks and --lines cannot be used with --intent-to-add");
                 }
-                match commands::add::run_hunks(&pathspecs, &hunks, &lines, None, dry_run) {
+                match commands::add::run_hunks(&pathspecs, &hunks, &lines, unified_context, dry_run)
+                {
                     Ok(outcome) => emit_success(&outcome, opts, ctx),
                     Err(err) => Ok(finish_hunk_error(
                         &err,
