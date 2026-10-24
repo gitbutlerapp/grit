@@ -1,5 +1,7 @@
 //! Apply parsed unified-diff hunks to a single blob (no worktree or index I/O).
 
+use std::borrow::Cow;
+
 use super::{Hunk, HunkLine};
 use crate::error::ApplyError;
 
@@ -11,38 +13,35 @@ pub struct ApplyOptions {
 }
 
 /// One logical line in the working blob (bytes include `\n` when the source line had one).
+///
+/// Untouched rows borrow from the original blob; only rows written by a hunk are owned.
 #[derive(Debug, Clone)]
-struct LineRecord {
-    raw: Vec<u8>,
+struct LineRecord<'a> {
+    raw: Cow<'a, [u8]>,
     /// Set when an earlier hunk replaced this row (later hunks must not match through it).
     consumed: bool,
 }
 
 /// Mutable line-split view of blob bytes while hunks are applied in order.
 #[derive(Debug, Clone)]
-struct WorkingBlob {
-    rows: Vec<LineRecord>,
+struct WorkingBlob<'a> {
+    rows: Vec<LineRecord<'a>>,
 }
 
-impl WorkingBlob {
-    fn decode(data: &[u8]) -> Self {
-        if data.is_empty() {
-            return Self { rows: Vec::new() };
-        }
-        let mut rows = Vec::new();
+impl<'a> WorkingBlob<'a> {
+    fn decode(data: &'a [u8]) -> Self {
+        let mut rows = Vec::with_capacity(memchr::memchr_iter(b'\n', data).count() + 1);
         let mut start = 0usize;
-        for (i, &b) in data.iter().enumerate() {
-            if b == b'\n' {
-                rows.push(LineRecord {
-                    raw: data[start..=i].to_vec(),
-                    consumed: false,
-                });
-                start = i + 1;
-            }
+        for i in memchr::memchr_iter(b'\n', data) {
+            rows.push(LineRecord {
+                raw: Cow::Borrowed(&data[start..=i]),
+                consumed: false,
+            });
+            start = i + 1;
         }
         if start < data.len() {
             rows.push(LineRecord {
-                raw: data[start..].to_vec(),
+                raw: Cow::Borrowed(&data[start..]),
                 consumed: false,
             });
         }
@@ -50,7 +49,7 @@ impl WorkingBlob {
     }
 
     fn encode(&self) -> Vec<u8> {
-        let mut out = Vec::new();
+        let mut out = Vec::with_capacity(self.rows.iter().map(|row| row.raw.len()).sum());
         for row in &self.rows {
             out.extend_from_slice(&row.raw);
         }
@@ -365,7 +364,7 @@ fn rows_equal_pattern(
         if row.consumed {
             return false;
         }
-        if row.raw != *expected {
+        if row.raw.as_ref() != expected.as_slice() {
             return false;
         }
     }
@@ -377,13 +376,9 @@ fn splice_edit(working: &mut WorkingBlob, at: usize, edit: &LineEdit) {
         .match_rows
         .len()
         .min(working.rows.len().saturating_sub(at));
-    let new_rows: Vec<LineRecord> = edit
-        .replace_rows
-        .iter()
-        .map(|raw| LineRecord {
-            raw: raw.clone(),
-            consumed: true,
-        })
-        .collect();
+    let new_rows = edit.replace_rows.iter().map(|raw| LineRecord {
+        raw: Cow::Owned(raw.clone()),
+        consumed: true,
+    });
     working.rows.splice(at..at + remove, new_rows);
 }
