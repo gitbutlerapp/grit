@@ -47,7 +47,7 @@ fn copy_reachable(remote: &Odb, local: &Odb, root: ObjectId) -> grit_lib::error:
     let mut stack = vec![root];
 
     while let Some(oid) = stack.pop() {
-        if !seen.insert(oid) || local.exists(&oid) {
+        if !seen.insert(oid) || local.contains(&oid)? {
             continue;
         }
 

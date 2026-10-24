@@ -9,6 +9,8 @@
 
 mod composite;
 mod files;
+#[cfg(test)]
+pub(crate) mod flaky;
 pub mod loose;
 mod midx;
 mod packs;

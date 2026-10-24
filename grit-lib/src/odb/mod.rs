@@ -142,6 +142,16 @@ fn exists_materialized_in_objects_dir(objects_dir: &Path, oid: &ObjectId) -> boo
     store::local_object_materialized(objects_dir, oid)
 }
 
+/// The oids from `oids` for which `keep` answers `Ok(true)`, stopping at the first error.
+fn filter_oids(
+    oids: impl IntoIterator<Item = ObjectId>,
+    mut keep: impl FnMut(&ObjectId) -> Result<bool>,
+) -> Result<Vec<ObjectId>> {
+    oids.into_iter()
+        .filter_map(|oid| keep(&oid).map(|k| k.then_some(oid)).transpose())
+        .collect()
+}
+
 fn objects_dir_has_pack_index_files(objects_dir: &Path) -> bool {
     let pack_dir = objects_dir.join("pack");
     let Ok(entries) = fs::read_dir(pack_dir) else {
@@ -1358,45 +1368,50 @@ impl Odb {
     /// non-promisor pack.
     ///
     /// The empty tree object is treated as present without a loose file (matches Git).
+    ///
+    /// A failing custom primary store counts as "absent"; decision paths inside the
+    /// crate use the fallible form, which propagates the backend error.
     #[must_use]
     pub fn exists_local(&self, oid: &ObjectId) -> bool {
+        self.try_exists_local(oid).unwrap_or(false)
+    }
+
+    /// Fallible [`Self::exists_local`]: errors from a custom primary store propagate.
+    pub(crate) fn try_exists_local(&self, oid: &ObjectId) -> Result<bool> {
         if self.is_empty_tree(oid) {
-            return true;
+            return Ok(true);
         }
-        if self.custom_primary.is_some() {
-            return self
-                .primary_writable()
-                .ok()
-                .and_then(|primary| primary.contains(oid).ok())
-                .unwrap_or(false);
+        if let Some(primary) = &self.custom_primary {
+            return primary.contains(oid);
         }
-        self.with_pack_store_for(&self.objects_dir, || {
+        Ok(self.with_pack_store_for(&self.objects_dir, || {
             exists_materialized_in_objects_dir(&self.objects_dir, oid)
-        })
+        }))
     }
 
     /// Whether `oid` is stored locally in loose storage or any pack (including promisor).
     ///
     /// Unlike [`Self::exists_local`], objects present only in promisor-marked packs count
     /// as stored. Does not trigger lazy fetch or consult alternates.
+    ///
+    /// A failing custom primary store counts as "absent"; decision paths inside the
+    /// crate use the fallible form, which propagates the backend error.
     #[must_use]
     pub fn exists_stored(&self, oid: &ObjectId) -> bool {
-        if oid.is_canonical_empty_tree() {
-            return true;
+        self.try_exists_stored(oid).unwrap_or(false)
+    }
+
+    /// Fallible [`Self::exists_stored`]: errors from a custom primary store propagate.
+    pub(crate) fn try_exists_stored(&self, oid: &ObjectId) -> Result<bool> {
+        if oid.is_canonical_empty_tree() || self.overlay_read(oid).is_some() {
+            return Ok(true);
         }
-        if self.overlay_read(oid).is_some() {
-            return true;
+        if let Some(primary) = &self.custom_primary {
+            return primary.contains(oid);
         }
-        if self.custom_primary.is_some() {
-            return self
-                .primary_writable()
-                .ok()
-                .and_then(|primary| primary.contains(oid).ok())
-                .unwrap_or(false);
-        }
-        self.with_pack_store_for(&self.objects_dir, || {
+        Ok(self.with_pack_store_for(&self.objects_dir, || {
             store::local_object_stored(&self.objects_dir, oid)
-        })
+        }))
     }
 
     /// Whether `oid` is stored on disk in this repository's object store (loose or
@@ -1406,14 +1421,12 @@ impl Odb {
     /// Use this when deciding whether a peer already holds an object for incremental
     /// local transfer; [`Self::exists`] and [`Self::exists_local`] treat the empty
     /// tree as present even when no object file exists.
+    ///
+    /// A failing custom primary store counts as "absent".
     #[must_use]
     pub fn exists_materialized_local(&self, oid: &ObjectId) -> bool {
-        if self.custom_primary.is_some() {
-            return self
-                .primary_writable()
-                .ok()
-                .and_then(|primary| primary.contains(oid).ok())
-                .unwrap_or(false);
+        if let Some(primary) = &self.custom_primary {
+            return primary.contains(oid).unwrap_or(false);
         }
         self.with_pack_store_for(&self.objects_dir, || {
             exists_materialized_in_objects_dir(&self.objects_dir, oid)
@@ -1449,37 +1462,90 @@ impl Odb {
         })
     }
 
-    /// Check whether an object exists in the loose store or any pack file.
-    #[must_use]
-    pub fn exists(&self, oid: &ObjectId) -> bool {
+    /// Whether `oid` is in this database: the primary store, any extra read source
+    /// ([`OdbBuilder::push_read_source`]) or an alternate object directory.
+    ///
+    /// The canonical empty tree is always present. Sources are probed in order and the
+    /// first one that has the object answers `Ok(true)`, so a failing source does not
+    /// hide an object another source holds.
+    ///
+    /// # Errors
+    ///
+    /// When no source has the object and at least one of them failed (for example an
+    /// [`Error::Io`] from a network- or database-backed store), returns the first
+    /// failure instead of reporting the object as missing.
+    pub fn contains(&self, oid: &ObjectId) -> Result<bool> {
         #[cfg(test)]
         self.exists_probe.fetch_add(1, Ordering::Relaxed);
-        if self.is_empty_tree(oid) {
-            return true;
+        if self.is_empty_tree(oid) || self.overlay_read(oid).is_some() {
+            return Ok(true);
         }
-        if self.overlay_read(oid).is_some() {
-            return true;
-        }
-        if self
-            .primary_writable()
-            .ok()
-            .and_then(|primary| primary.contains(oid).ok())
-            == Some(true)
-        {
-            return true;
-        }
-        for src in &self.extra_read_sources {
-            if src.contains(oid).ok() == Some(true) {
-                return true;
+        let mut first_err = None;
+        let mut found = |probe: Result<bool>| match probe {
+            Ok(present) => present,
+            Err(err) => {
+                first_err.get_or_insert(err);
+                false
             }
+        };
+        if found(self.primary_writable().and_then(|p| p.contains(oid)))
+            || self
+                .extra_read_sources
+                .iter()
+                .any(|s| found(s.contains(oid)))
+            || (self.alternate_object_lookup_needed()
+                && found(self.sources().and_then(|s| s.contains(oid))))
+        {
+            return Ok(true);
         }
-        if !self.alternate_object_lookup_needed() {
-            return false;
-        }
-        self.sources()
-            .ok()
-            .and_then(|sources| sources.contains(oid).ok())
-            == Some(true)
+        first_err.map_or(Ok(false), Err)
+    }
+
+    /// The oids from `oids` that [`Self::contains`] reports present, in input order.
+    ///
+    /// # Errors
+    ///
+    /// Propagates the first [`Self::contains`] failure.
+    pub(crate) fn present_oids(
+        &self,
+        oids: impl IntoIterator<Item = ObjectId>,
+    ) -> Result<Vec<ObjectId>> {
+        filter_oids(oids, |oid| self.contains(oid))
+    }
+
+    /// The oids from `oids` that [`Self::contains`] reports missing, in input order.
+    ///
+    /// # Errors
+    ///
+    /// Propagates the first [`Self::contains`] failure.
+    pub(crate) fn missing_oids(
+        &self,
+        oids: impl IntoIterator<Item = ObjectId>,
+    ) -> Result<Vec<ObjectId>> {
+        filter_oids(oids, |oid| self.contains(oid).map(|has| !has))
+    }
+
+    /// The oids from `oids` that are not stored locally per [`Self::exists_stored`]
+    /// (alternates are not consulted), in input order.
+    ///
+    /// # Errors
+    ///
+    /// Propagates the first failure of a custom primary store.
+    pub(crate) fn missing_stored_oids(
+        &self,
+        oids: impl IntoIterator<Item = ObjectId>,
+    ) -> Result<Vec<ObjectId>> {
+        filter_oids(oids, |oid| self.try_exists_stored(oid).map(|has| !has))
+    }
+
+    /// Infallible [`Self::contains`]: a source that fails counts as not having `oid`.
+    ///
+    /// Use only for advisory probes. Where "missing" changes what happens next (what to
+    /// fetch or send, whether a ref is broken), call [`Self::contains`] so a backend
+    /// outage surfaces as an error rather than as a missing object.
+    #[must_use]
+    pub fn exists(&self, oid: &ObjectId) -> bool {
+        self.contains(oid).unwrap_or(false)
     }
 
     /// Run `f` with this [`Odb`]'s [`PackStore`] for `objects_dir` (primary or alternate).
@@ -3469,6 +3535,167 @@ mod tests {
         std::fs::create_dir_all(&primary_objects).unwrap();
         let primary_odb = Odb::new(&primary_objects).with_env_alternate_dirs(vec![alt_objects]);
         assert!(primary_odb.exists(&oid));
+    }
+
+    fn flaky_odb(objects: &Path) -> (Odb, Arc<store::flaky::FlakyStore>) {
+        let flaky = store::flaky::FlakyStore::new();
+        let odb = OdbBuilder::files(objects)
+            .primary(flaky.clone())
+            .alternates(false)
+            .build();
+        (odb, flaky)
+    }
+
+    #[test]
+    fn contains_reports_primary_failure_instead_of_missing() {
+        let dir = TempDir::new().unwrap();
+        let (odb, flaky) = flaky_odb(dir.path());
+        let oid = odb.write(ObjectKind::Blob, b"stored").unwrap();
+        assert!(odb.contains(&oid).unwrap());
+
+        flaky.fail_all(true);
+        assert!(store::flaky::is_injected(&odb.read(&oid).unwrap_err()));
+        assert!(store::flaky::is_injected(&odb.contains(&oid).unwrap_err()));
+        assert!(
+            !odb.exists(&oid),
+            "exists() keeps treating failures as absent"
+        );
+        assert!(odb.contains(&odb.empty_tree_oid().unwrap()).unwrap());
+
+        let try_local = odb.try_exists_local(&oid).unwrap_err();
+        assert!(store::flaky::is_injected(&try_local));
+        assert!(!odb.exists_local(&oid));
+        let try_stored = odb.try_exists_stored(&oid).unwrap_err();
+        assert!(store::flaky::is_injected(&try_stored));
+        assert!(!odb.exists_stored(&oid));
+    }
+
+    #[test]
+    fn contains_reports_extra_read_source_failure() {
+        let dir = TempDir::new().unwrap();
+        let flaky = store::flaky::FlakyStore::new();
+        let odb = OdbBuilder::files(dir.path())
+            .push_read_source(flaky.clone())
+            .alternates(false)
+            .build();
+        let local = odb.write(ObjectKind::Blob, b"in primary").unwrap();
+        let absent = HashAlgo::Sha1
+            .hash_object(ObjectKind::Blob, b"nowhere")
+            .unwrap();
+        assert!(!odb.contains(&absent).unwrap());
+
+        flaky.fail_contains(true);
+        assert!(
+            odb.contains(&local).unwrap(),
+            "primary hit wins over a failing source"
+        );
+        assert!(store::flaky::is_injected(
+            &odb.contains(&absent).unwrap_err()
+        ));
+        assert!(!odb.exists(&absent));
+    }
+
+    #[test]
+    fn contains_finds_object_in_extra_source_when_primary_fails() {
+        let dir = TempDir::new().unwrap();
+        let extra = Arc::new(store::MemoryStore::new(HashAlgo::Sha1));
+        let flaky = store::flaky::FlakyStore::new();
+        let odb = OdbBuilder::files(dir.path())
+            .primary(flaky.clone())
+            .push_read_source(extra.clone())
+            .alternates(false)
+            .build();
+        let oid = extra
+            .write(ObjectKind::Blob, b"extra", WriteOptions::default())
+            .unwrap();
+        flaky.fail_contains(true);
+        assert!(odb.contains(&oid).unwrap());
+        assert!(odb.exists(&oid));
+    }
+
+    #[test]
+    fn contains_reports_alternate_failure() {
+        let primary = TempDir::new().unwrap();
+        let alternate = TempDir::new().unwrap();
+        let alt_objects = alternate.path().join("objects");
+        std::fs::create_dir_all(&alt_objects).unwrap();
+        let primary_objects = primary.path().join("objects");
+        std::fs::create_dir_all(&primary_objects).unwrap();
+        let odb = Odb::new(&primary_objects).with_env_alternate_dirs(vec![alt_objects]);
+        let local = odb.write(ObjectKind::Blob, b"local").unwrap();
+        let absent = HashAlgo::Sha1
+            .hash_object(ObjectKind::Blob, b"nowhere")
+            .unwrap();
+
+        // Files alternates skip unreadable packs, so stand a failing store in for the
+        // composite the alternate directories resolve to.
+        let flaky = store::flaky::FlakyStore::new();
+        odb.sources().unwrap();
+        odb.alternate_sources_cache.write().unwrap().sources = Some(Arc::new(CompositeStore::new(
+            vec![flaky.clone()],
+            HashAlgo::Sha1,
+        )));
+        assert!(!odb.contains(&absent).unwrap());
+
+        flaky.fail_contains(true);
+        assert!(odb.contains(&local).unwrap());
+        assert!(store::flaky::is_injected(
+            &odb.contains(&absent).unwrap_err()
+        ));
+        assert!(!odb.exists(&absent));
+    }
+
+    #[test]
+    fn contains_on_files_backend_covers_present_absent_empty_tree_and_alternate() {
+        let primary = TempDir::new().unwrap();
+        let alternate = TempDir::new().unwrap();
+        let alt_objects = alternate.path().join("objects");
+        std::fs::create_dir_all(&alt_objects).unwrap();
+        let alt_oid = Odb::new(&alt_objects)
+            .write(ObjectKind::Blob, b"alternate")
+            .unwrap();
+        let primary_objects = primary.path().join("objects");
+        std::fs::create_dir_all(&primary_objects).unwrap();
+        let odb = Odb::new(&primary_objects).with_env_alternate_dirs(vec![alt_objects]);
+        let present = odb.write(ObjectKind::Blob, b"present").unwrap();
+        let absent = HashAlgo::Sha1
+            .hash_object(ObjectKind::Blob, b"absent")
+            .unwrap();
+
+        assert!(odb.contains(&present).unwrap());
+        assert!(odb.contains(&odb.empty_tree_oid().unwrap()).unwrap());
+        assert!(odb.contains(&alt_oid).unwrap());
+        assert!(!odb.contains(&absent).unwrap());
+        assert_eq!(
+            odb.present_oids([present, absent, alt_oid]).unwrap(),
+            vec![present, alt_oid]
+        );
+        assert_eq!(
+            odb.missing_oids([present, absent, alt_oid]).unwrap(),
+            vec![absent]
+        );
+        assert_eq!(
+            odb.missing_stored_oids([present, absent, alt_oid]).unwrap(),
+            vec![absent, alt_oid],
+            "stored ignores alternates"
+        );
+    }
+
+    #[test]
+    fn oid_filters_propagate_backend_failure() {
+        let dir = TempDir::new().unwrap();
+        let (odb, flaky) = flaky_odb(dir.path());
+        let oid = odb.write(ObjectKind::Blob, b"x").unwrap();
+        flaky.fail_contains(true);
+        assert!(store::flaky::is_injected(
+            &odb.present_oids([oid]).unwrap_err()
+        ));
+        assert!(store::flaky::is_injected(
+            &odb.missing_oids([oid]).unwrap_err()
+        ));
+        assert!(store::flaky::is_injected(
+            &odb.missing_stored_oids([oid]).unwrap_err()
+        ));
     }
 
     #[test]

@@ -41,7 +41,7 @@ fn objects_read_write_contains_match_git_cat_file() {
         .objects()
         .write(ObjectKind::Blob, b"handle-roundtrip\n")
         .expect("write blob");
-    assert!(repo.objects().contains(&oid));
+    assert!(repo.objects().contains(&oid).unwrap());
 
     assert_git_fsck_strict(wt);
 

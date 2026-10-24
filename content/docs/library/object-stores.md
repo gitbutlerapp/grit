@@ -23,6 +23,10 @@ For a given [`Odb`](rustdoc:grit_lib::objects::odb::Odb) handle:
 3. Extra read sources from `OdbBuilder::push_read_source`
 4. Alternate object directories when `OdbBuilder::alternates` is true (`info/alternates`, environment alternates, submodule object dirs)
 
+## Backend failures
+
+An error from your store's `read`, `read_info` or `contains` (a dropped connection, a locked database) reaches the caller as that error, not as a missing object. To test for an object, call [`Odb::contains`](rustdoc:grit_lib::objects::odb::Odb::contains): it returns `Ok(true)` as soon as any source in the lookup order has the object, and an error only when none has it and at least one source failed. Fetch and push negotiation, write-tree, ref checks and rev-parse all use it, so an outage stops the operation with a retryable error instead of re-sending objects or reporting broken refs. [`Odb::exists`](rustdoc:grit_lib::objects::odb::Odb::exists) is the infallible form: it treats a failing source as not having the object, so keep it for hints where a wrong answer is harmless.
+
 ## Building a custom repository
 
 ```rust

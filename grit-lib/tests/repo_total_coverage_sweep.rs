@@ -46,7 +46,7 @@ fn repository_handles_and_discovery_sweep() -> grit_lib::error::Result<()> {
     let _ = discovered.verify_safe_for_clone_source();
 
     let blob = repo.odb().write(ObjectKind::Blob, b"data\n")?;
-    assert!(repo.objects().contains(&blob));
+    assert!(repo.objects().contains(&blob).unwrap());
 
     Ok(())
 }

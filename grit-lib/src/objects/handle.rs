@@ -26,6 +26,11 @@ impl<'repo> Objects<'repo> {
 
     /// Returns whether `oid` is present in this repository's object database.
     ///
+    /// # Errors
+    ///
+    /// Propagates a backend failure when no object source has `oid` (see
+    /// [`crate::odb::Odb::contains`]) instead of reporting it as missing.
+    ///
     /// # Examples
     ///
     /// ```
@@ -35,13 +40,13 @@ impl<'repo> Objects<'repo> {
     /// let dir = std::env::temp_dir().join("grit-objects-handle-doc");
     /// let repo = Repository::init(&dir, &InitOptions::default())?;
     /// let oid = repo.objects().write(ObjectKind::Blob, b"hello")?;
-    /// assert!(repo.objects().contains(&oid));
+    /// assert!(repo.objects().contains(&oid)?);
     /// # Ok(())
     /// # }
     /// ```
     #[inline]
-    pub fn contains(&self, oid: &ObjectId) -> bool {
-        self.repo.odb().exists(oid)
+    pub fn contains(&self, oid: &ObjectId) -> Result<bool> {
+        self.repo.odb().contains(oid)
     }
 
     /// Read the object named `oid`.
