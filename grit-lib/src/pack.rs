@@ -18,44 +18,20 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::io;
-use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::SystemTime;
 
-/// Resolve a pack index row position from a pack byte offset (`.rev` first, then sorted table).
+/// Resolve a pack index row position from a pack byte offset.
+///
+/// Uses the offset table cached on `idx` (built once per index), so callers resolving
+/// every `OFS_DELTA` base in a pack pay `O(log n)` per lookup.
+///
+/// # Errors
+///
+/// Returns an error when the index offset table is corrupt.
 pub fn find_position_by_pack_offset(idx: &PackIndex, offset: u64) -> Result<Option<usize>> {
-    if let Some(pos) = find_position_by_pack_offset_rev(idx, offset)? {
-        return Ok(Some(pos));
-    }
     idx.find_position_by_offset_sorted(offset)
-}
-
-fn find_position_by_pack_offset_rev(idx: &PackIndex, offset: u64) -> Result<Option<usize>> {
-    use crate::pack_rev::{rev_path_for_index, try_rev_positions_in_pack_order};
-    use std::cmp::Ordering;
-    let rev_path = rev_path_for_index(&idx.idx_path);
-    let data = PackData::open_with_min_len(&rev_path, 12).ok();
-    let Some(data) = data else {
-        return Ok(None);
-    };
-    let positions = try_rev_positions_in_pack_order(data.deref(), idx.len());
-    let Some(positions) = positions else {
-        return Ok(None);
-    };
-    let mut lo = 0usize;
-    let mut hi = positions.len();
-    while lo < hi {
-        let mid = lo + (hi - lo) / 2;
-        let idx_pos = positions[mid] as usize;
-        let off = idx.offset_at(idx_pos)?;
-        match off.cmp(&offset) {
-            Ordering::Less => lo = mid + 1,
-            Ordering::Greater => hi = mid,
-            Ordering::Equal => return Ok(Some(idx_pos)),
-        }
-    }
-    Ok(None)
 }
 
 /// Basic information about local packs.
