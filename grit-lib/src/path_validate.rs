@@ -133,6 +133,15 @@ pub enum PathComponentError {
     /// DOS drive prefix or NTFS alternate-data-stream syntax in the component.
     #[error("path component uses a forbidden NTFS drive or stream prefix")]
     NtfsDriveOrStream,
+    /// Character forbidden on NTFS (`:*?"<>|` or a control character).
+    #[error("path component contains a forbidden NTFS character")]
+    NtfsIllegalCharacter,
+    /// Trailing space or period on a component (except `.` and `..`).
+    #[error("path component ends with a space or period")]
+    NtfsTrailingSpaceOrPeriod,
+    /// DOS device name (`CON`, `AUX`, `COM1`, …) in the component.
+    #[error("path component contains a reserved DOS device name")]
+    NtfsReservedDeviceName,
     /// Symlink whose name matches `.gitmodules` (HFS or NTFS spelling).
     #[error("symbolic link must not be named .gitmodules")]
     SymlinkedDotGitmodules,
@@ -204,6 +213,7 @@ pub fn validate_component(
         if has_dos_drive_prefix_bytes(name) {
             return Err(PathComponentError::NtfsDriveOrStream);
         }
+        validate_win32_path_segment(name)?;
         if let Ok(name_str) = std::str::from_utf8(name) {
             if scan_ntfs_backslash_dot_special(name_str, ntfs_backslash_dotdot_tail) {
                 return Err(PathComponentError::NtfsBackslash);
@@ -440,6 +450,147 @@ fn has_dos_drive_prefix_bytes(name: &[u8]) -> bool {
     name.len() >= 2 && name[0].is_ascii_alphabetic() && name[1] == b':'
 }
 
+/// Git `is_valid_win32_path` rules for one `/`- or `\`-delimited segment.
+///
+/// Callers pass a single tree/index component (no unescaped `/`). Used when
+/// `core.protectNTFS` is enabled on Windows (`verify_path` → `is_valid_path`).
+fn validate_win32_path_segment(path: &[u8]) -> Result<(), PathComponentError> {
+    if path.is_empty() {
+        return Ok(());
+    }
+    let mut i = 0usize;
+    let mut periods = 0usize;
+    let mut preceding_space_or_period = false;
+
+    check_win32_reserved_device_name(path, &mut i, &mut preceding_space_or_period)?;
+
+    while i < path.len() {
+        let c = path[i];
+        match c {
+            b'/' | b'\\' => {
+                if preceding_space_or_period && (i != periods || periods > 2) {
+                    return Err(PathComponentError::NtfsTrailingSpaceOrPeriod);
+                }
+                i += 1;
+                periods = 0;
+                preceding_space_or_period = false;
+                check_win32_reserved_device_name(path, &mut i, &mut preceding_space_or_period)?;
+            }
+            b'.' => {
+                periods += 1;
+                preceding_space_or_period = true;
+                i += 1;
+            }
+            b' ' => {
+                preceding_space_or_period = true;
+                i += 1;
+            }
+            b':' | b'<' | b'>' | b'"' | b'|' | b'?' | b'*' => {
+                return Err(PathComponentError::NtfsIllegalCharacter);
+            }
+            _ => {
+                if c > 0 && c < 0x20 {
+                    return Err(PathComponentError::NtfsIllegalCharacter);
+                }
+                preceding_space_or_period = false;
+                i += 1;
+            }
+        }
+    }
+
+    if preceding_space_or_period && (i != periods || periods > 2) {
+        return Err(PathComponentError::NtfsTrailingSpaceOrPeriod);
+    }
+    Ok(())
+}
+
+fn check_win32_reserved_device_name(
+    path: &[u8],
+    i: &mut usize,
+    preceding_space_or_period: &mut bool,
+) -> Result<(), PathComponentError> {
+    let start = *i;
+    let Some(prefix_len) = win32_reserved_device_prefix_len(path, start) else {
+        return Ok(());
+    };
+
+    let mut pos = start + prefix_len;
+    if path.get(pos) == Some(&b' ') {
+        *preceding_space_or_period = true;
+        while path.get(pos) == Some(&b' ') {
+            pos += 1;
+        }
+    }
+
+    let next = path.get(pos).copied().unwrap_or(0);
+    if next != 0 && next != b'.' && next != b':' && next != b'/' && next != b'\\' {
+        return Ok(());
+    }
+
+    Err(PathComponentError::NtfsReservedDeviceName)
+}
+
+fn win32_byte_eq(actual: u8, expected: u8) -> bool {
+    actual.eq_ignore_ascii_case(&expected)
+}
+
+fn win32_reserved_device_prefix_len(path: &[u8], start: usize) -> Option<usize> {
+    let b = |off: usize| path.get(start + off).copied().unwrap_or(0);
+
+    match b(0).to_ascii_lowercase() {
+        b'a' => {
+            if win32_byte_eq(b(1), b'u') && win32_byte_eq(b(2), b'x') {
+                return Some(3);
+            }
+        }
+        b'c' => {
+            if !win32_byte_eq(b(1), b'o') {
+                return None;
+            }
+            match b(2).to_ascii_lowercase() {
+                b'm' => {
+                    if (b'1'..=b'9').contains(&b(3)) {
+                        return Some(4);
+                    }
+                }
+                b'n' => {
+                    if win32_byte_eq(b(3), b'i')
+                        && win32_byte_eq(b(4), b'n')
+                        && b(5) == b'$'
+                    {
+                        return Some(6);
+                    }
+                    if win32_byte_eq(b(3), b'o')
+                        && win32_byte_eq(b(4), b'u')
+                        && win32_byte_eq(b(5), b't')
+                        && b(6) == b'$'
+                    {
+                        return Some(7);
+                    }
+                    return Some(3);
+                }
+                _ => {}
+            }
+        }
+        b'l' => {
+            if win32_byte_eq(b(1), b'p')
+                && win32_byte_eq(b(2), b't')
+                && b(3).is_ascii_digit()
+            {
+                return Some(4);
+            }
+        }
+        b'n' => {
+            if win32_byte_eq(b(1), b'u') && win32_byte_eq(b(2), b'l') {
+                return Some(3);
+            }
+        }
+        b'p' if win32_byte_eq(b(1), b'r') && win32_byte_eq(b(2), b'n') => return Some(3),
+        _ => {}
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -661,5 +812,64 @@ mod tests {
         let audit = audit_tree_entry_name(b".git", FSCK);
         assert!(audit.dotgit);
         assert_eq!(audit.first_error().unwrap_err(), PathComponentError::DotGit);
+    }
+
+    /// Git `is_valid_win32_path` segment rules (issue #1699); runs on every host.
+    #[test]
+    fn issue_1699_win32_path_segment_matrix() {
+        let illegal_char = |name: &[u8]| {
+            assert_eq!(
+                validate_win32_path_segment(name).unwrap_err(),
+                PathComponentError::NtfsIllegalCharacter,
+                "{name:?}"
+            );
+        };
+        let trailing = |name: &[u8]| {
+            assert_eq!(
+                validate_win32_path_segment(name).unwrap_err(),
+                PathComponentError::NtfsTrailingSpaceOrPeriod,
+                "{name:?}"
+            );
+        };
+        let reserved = |name: &[u8]| {
+            assert_eq!(
+                validate_win32_path_segment(name).unwrap_err(),
+                PathComponentError::NtfsReservedDeviceName,
+                "{name:?}"
+            );
+        };
+
+        illegal_char(b".gitmodules::$DATA");
+        illegal_char(b"hidden.txt:payload");
+        illegal_char(b"evil:stream");
+        trailing(b"README.");
+        trailing(b"sp ");
+        reserved(b"aux.txt");
+        reserved(b"AUX");
+        reserved(b"com1");
+        reserved(b"CONIN$");
+        reserved(b"lpt9");
+
+        assert!(validate_win32_path_segment(b"README.md").is_ok());
+        assert!(validate_win32_path_segment(b".gitmodules").is_ok());
+        assert!(validate_win32_path_segment(b"hidden.txt").is_ok());
+    }
+
+    #[test]
+    fn issue_1699_validate_component_on_windows() {
+        if !cfg!(windows) {
+            return;
+        }
+        let opts = FSCK;
+        let err = |name: &[u8]| validate_component(name, BLOB, opts, WT_KIND).unwrap_err();
+        assert_eq!(
+            err(b".gitmodules::$DATA"),
+            PathComponentError::NtfsIllegalCharacter
+        );
+        assert_eq!(
+            err(b"README."),
+            PathComponentError::NtfsTrailingSpaceOrPeriod
+        );
+        assert_eq!(err(b"aux.txt"), PathComponentError::NtfsReservedDeviceName);
     }
 }

@@ -147,6 +147,26 @@ fn hostile_case_metas() -> &'static [HostileCaseMeta] {
             label: "symlink gitmodules",
             upstream_config: "",
         },
+        HostileCaseMeta {
+            label: "gitmodules ads",
+            upstream_config: "",
+        },
+        HostileCaseMeta {
+            label: "colon stream",
+            upstream_config: "",
+        },
+        HostileCaseMeta {
+            label: "trailing dot file",
+            upstream_config: "",
+        },
+        HostileCaseMeta {
+            label: "trailing space file",
+            upstream_config: "",
+        },
+        HostileCaseMeta {
+            label: "aux device",
+            upstream_config: "",
+        },
     ]
 }
 
@@ -173,6 +193,11 @@ fn hostile_tree_body(
         "ntfs backslash" => tree_entry("100644", br"a\..\x", blob_hex),
         "ntfs backslash dotgit config" => tree_entry("100644", b".git\\config", blob_hex),
         "symlink gitmodules" => tree_entry("120000", b".gitmodules", symlink_target_hex),
+        "gitmodules ads" => tree_entry("100644", b".gitmodules::$DATA", blob_hex),
+        "colon stream" => tree_entry("100644", b"hidden.txt:payload", blob_hex),
+        "trailing dot file" => tree_entry("100644", b"README.", blob_hex),
+        "trailing space file" => tree_entry("100644", b"sp ", blob_hex),
+        "aux device" => tree_entry("100644", b"aux.txt", blob_hex),
         other => panic!("unknown hostile case {other}"),
     }
 }
@@ -359,7 +384,16 @@ fn hostile_paths_rejected_on_clone_switch_reset_restore() {
     fs::create_dir_all(upstream.parent().unwrap()).expect("parent dir");
 
     for case in hostile_case_metas() {
-        if case.label == "ntfs backslash" && !cfg!(windows) {
+        let windows_only = matches!(
+            case.label,
+            "ntfs backslash"
+                | "gitmodules ads"
+                | "colon stream"
+                | "trailing dot file"
+                | "trailing space file"
+                | "aux device"
+        );
+        if windows_only && !cfg!(windows) {
             continue;
         }
         fs::remove_dir_all(&upstream).ok();
