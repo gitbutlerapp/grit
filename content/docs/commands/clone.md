@@ -155,6 +155,9 @@ Example (repository with commits):
 {
   "url": "/srv/git/project.git",
   "path": "project",
+  "remote": "origin",
+  "single_branch": false,
+  "tag_fetch": "following",
   "branch": "main",
   "detached": false,
   "objects": 42,
@@ -183,6 +186,9 @@ Empty remote (no branch tips yet):
 {
   "url": "/tmp/origin.git",
   "path": "project",
+  "remote": "origin",
+  "single_branch": false,
+  "tag_fetch": "following",
   "branch": "main",
   "detached": false,
   "objects": 0,
@@ -204,6 +210,9 @@ Unborn remote default branch (`HEAD` on the server points at a branch with no co
 {
   "url": "/tmp/remote.git",
   "path": "clone2",
+  "remote": "origin",
+  "single_branch": false,
+  "tag_fetch": "following",
   "branch": "master",
   "detached": false,
   "objects": 3,
