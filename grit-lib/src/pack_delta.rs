@@ -9,6 +9,7 @@
 //! (delta bytes + deflate per planned entry) and a serial emission stage (headers,
 //! OFS vs REF selection, trailer).
 
+use std::borrow::Cow;
 use std::collections::{HashMap, VecDeque};
 use std::io::Write;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -69,12 +70,16 @@ pub(crate) struct SendOrderDeltaInput<'a> {
     pub hash_len: usize,
 }
 
+/// Uncompressed delta bytes chosen during search, keyed by delta target oid.
+pub(crate) type DeltaEncodings = HashMap<ObjectId, Vec<u8>>;
+
 /// Try consecutive blob deltas in discovery order so bases precede targets in the pack stream.
 ///
 /// Each blob is tried against the last `window` blobs that share its name hash, newest first.
 pub(crate) fn extend_send_order_blob_deltas(
     input: SendOrderDeltaInput<'_>,
     delta_to_base: &mut OidHashMap<ObjectId>,
+    encodings: &mut DeltaEncodings,
 ) {
     let SendOrderDeltaInput {
         send,
@@ -99,10 +104,12 @@ pub(crate) fn extend_send_order_blob_deltas(
             recent.push_back(oid);
         };
     for &oid in send {
-        let obj = &objects[&oid];
+        let Some(obj) = objects.get(&oid) else {
+            continue;
+        };
         if obj.kind != ObjectKind::Blob || obj.data.is_empty() {
             continue;
-        }
+        };
         let path_key = blob_name_hashes.get(&oid).copied().unwrap_or(0);
         if skip_targets.contains(&oid) || delta_to_base.contains_key(&oid) {
             remember(&mut recent_same_path, path_key, oid);
@@ -111,6 +118,7 @@ pub(crate) fn extend_send_order_blob_deltas(
         let max_size = obj.data.len().saturating_div(2).saturating_sub(hash_len);
         if max_size > 0 {
             let mut best_base = None;
+            let mut best_encoding: Option<Vec<u8>> = None;
             let mut best_len = max_size.saturating_add(1);
             if let Some(candidates) = recent_same_path.get(&path_key) {
                 for &base in candidates.iter().rev() {
@@ -131,12 +139,16 @@ pub(crate) fn extend_send_order_blob_deltas(
                         if delta.len() <= max_size && delta.len() < best_len {
                             best_len = delta.len();
                             best_base = Some(base);
+                            best_encoding = Some(delta);
                         }
                     }
                 }
             }
             if let Some(base) = best_base {
                 delta_to_base.insert(oid, base);
+                if let Some(bytes) = best_encoding {
+                    encodings.insert(oid, bytes);
+                }
             }
         }
         remember(&mut recent_same_path, path_key, oid);
@@ -175,7 +187,7 @@ pub(crate) fn search_windowed_blob_deltas(
     odb: &Odb,
     input: DeltaSearchInput<'_>,
     search_threads: Option<usize>,
-) -> Result<OidHashMap<ObjectId>> {
+) -> Result<(OidHashMap<ObjectId>, DeltaEncodings)> {
     let DeltaSearchInput {
         objects,
         blob_name_hashes,
@@ -187,7 +199,7 @@ pub(crate) fn search_windowed_blob_deltas(
         opts,
     } = input;
     if opts.window == 0 || opts.max_depth == 0 {
-        return Ok(oid_hash_map());
+        return Ok((oid_hash_map(), HashMap::new()));
     }
 
     let cfg = pack_config(odb)?;
@@ -210,16 +222,12 @@ pub(crate) fn search_windowed_blob_deltas(
     sorted.sort_by(|a, b| type_size_sort(a, b, objects, blob_name_hashes));
 
     if sorted.is_empty() {
-        return Ok(oid_hash_map());
+        return Ok((oid_hash_map(), HashMap::new()));
     }
 
     let par = pack_delta_search_parallel_options(odb, search_threads)?;
     let segments = fixed_delta_segments(sorted.len(), opts.window);
-    let workers = if sorted.len() <= 250 {
-        1
-    } else {
-        par.threads.get().min(segments.len()).max(1)
-    };
+    let workers = par.threads.get().min(segments.len()).max(1);
     let sorted = Arc::new(sorted);
 
     let segment_params = SegmentSearchParams {
@@ -232,6 +240,7 @@ pub(crate) fn search_windowed_blob_deltas(
 
     if workers <= 1 {
         let mut out = oid_hash_map();
+        let mut encodings = HashMap::new();
         for (start, end) in &segments {
             let warmup = segment_warmup(&sorted, *start, opts.window);
             find_deltas_in_segment(
@@ -241,19 +250,22 @@ pub(crate) fn search_windowed_blob_deltas(
                 islands,
                 segment_params,
                 &mut out,
+                &mut encodings,
                 warmup_delta_edges,
             );
         }
-        return Ok(out);
+        return Ok((out, encodings));
     }
 
     let next_segment = Arc::new(AtomicUsize::new(0));
     let segments = Arc::new(segments);
     let merged: Arc<Mutex<OidHashMap<ObjectId>>> = Arc::new(Mutex::new(oid_hash_map()));
+    let merged_enc: Arc<Mutex<DeltaEncodings>> = Arc::new(Mutex::new(HashMap::new()));
 
     thread::scope(|scope| {
         for _ in 0..workers {
             let merged = Arc::clone(&merged);
+            let merged_enc = Arc::clone(&merged_enc);
             let sorted = Arc::clone(&sorted);
             let next_segment = Arc::clone(&next_segment);
             let segments = Arc::clone(&segments);
@@ -265,6 +277,7 @@ pub(crate) fn search_windowed_blob_deltas(
                 let (start, end) = segments[seg_idx];
                 let warmup = segment_warmup(&sorted, start, opts.window);
                 let mut local = oid_hash_map();
+                let mut local_enc = HashMap::new();
                 find_deltas_in_segment(
                     &sorted[start..end],
                     &warmup,
@@ -272,10 +285,14 @@ pub(crate) fn search_windowed_blob_deltas(
                     islands,
                     segment_params,
                     &mut local,
+                    &mut local_enc,
                     warmup_delta_edges,
                 );
                 if let Ok(mut guard) = merged.lock() {
                     guard.extend(local);
+                }
+                if let Ok(mut guard) = merged_enc.lock() {
+                    guard.extend(local_enc);
                 }
             });
         }
@@ -285,7 +302,11 @@ pub(crate) fn search_windowed_blob_deltas(
         .ok()
         .and_then(|m| m.into_inner().ok())
         .unwrap_or_default();
-    Ok(merged)
+    let encodings = Arc::try_unwrap(merged_enc)
+        .ok()
+        .and_then(|m| m.into_inner().ok())
+        .unwrap_or_default();
+    Ok((merged, encodings))
 }
 
 fn type_size_sort(
@@ -322,9 +343,6 @@ fn fixed_delta_segments(n: usize, window: usize) -> Vec<(usize, usize)> {
     if n == 0 {
         return Vec::new();
     }
-    if n <= 250 {
-        return vec![(0, n)];
-    }
     let chunk = (2 * window).max(1);
     if n <= chunk {
         return vec![(0, n)];
@@ -345,6 +363,7 @@ struct WindowSlot<'a> {
     depth: usize,
     base: Option<ObjectId>,
     delta_size: Option<usize>,
+    delta_encoding: Option<Vec<u8>>,
 }
 
 impl<'a> WindowSlot<'a> {
@@ -354,6 +373,7 @@ impl<'a> WindowSlot<'a> {
         depth: 0,
         base: None,
         delta_size: None,
+        delta_encoding: None,
     };
 
     /// Empty the slot, dropping its cached delta index; returns the memory released.
@@ -374,6 +394,7 @@ impl<'a> WindowSlot<'a> {
         self.depth = 0;
         self.base = None;
         self.delta_size = None;
+        self.delta_encoding = None;
     }
 }
 
@@ -395,6 +416,7 @@ fn delta_chain_depth(edges: &OidHashMap<ObjectId>, oid: ObjectId) -> usize {
     depth
 }
 
+#[allow(clippy::too_many_arguments)]
 fn find_deltas_in_segment(
     list: &[ObjectId],
     warmup: &[ObjectId],
@@ -402,6 +424,7 @@ fn find_deltas_in_segment(
     islands: &DeltaIslands,
     params: SegmentSearchParams<'_>,
     out: &mut OidHashMap<ObjectId>,
+    encodings: &mut DeltaEncodings,
     prior_edges: &OidHashMap<ObjectId>,
 ) {
     if list.is_empty() {
@@ -489,8 +512,14 @@ fn find_deltas_in_segment(
 
         if let Some(base_oid) = array[idx].base {
             if max_depth <= array[idx].depth {
+                if let Some(bytes) = array[idx].delta_encoding.take() {
+                    encodings.insert(entry_oid, bytes);
+                }
                 out.insert(entry_oid, base_oid);
                 continue;
+            }
+            if let Some(bytes) = array[idx].delta_encoding.take() {
+                encodings.insert(entry_oid, bytes);
             }
             out.insert(entry_oid, base_oid);
             if let Some(best_idx) = best_base {
@@ -597,6 +626,7 @@ fn try_delta_pair(
         trg.base = Some(src_oid);
         trg.depth = src_depth + 1;
         trg.delta_size = Some(delta.len());
+        trg.delta_encoding = Some(delta);
         return 1;
     }
 
@@ -617,6 +647,7 @@ fn try_delta_pair(
     trg.base = Some(src_oid);
     trg.depth = src_depth + 1;
     trg.delta_size = Some(delta.len());
+    trg.delta_encoding = Some(delta);
     1
 }
 
@@ -660,26 +691,26 @@ fn pack_config(odb: &Odb) -> Result<ConfigSet> {
 pub(crate) fn serialize_pack_with_deltas(
     odb: &Odb,
     entries: &[PlannedEntry],
+    plan_payloads: &OidHashMap<Arc<[u8]>>,
     opts: &PackBuildOptions,
     write_threads: Option<usize>,
 ) -> Result<Vec<u8>> {
     let par_opts = pack_write_parallel_options(odb, write_threads)?;
-    let prepared = prepare_entries_parallel(odb, entries, opts, &par_opts)?;
+    let prepared = prepare_entries_parallel(odb, entries, plan_payloads, opts, &par_opts)?;
     write_prepared_pack(odb, entries, &prepared, opts)
 }
 
 fn prepare_entries_parallel(
     odb: &Odb,
     entries: &[PlannedEntry],
+    plan_payloads: &OidHashMap<Arc<[u8]>>,
     opts: &PackBuildOptions,
     par_opts: &ParallelOptions,
 ) -> Result<Vec<PreparedEntry>> {
-    let payloads: HashMap<ObjectId, &[u8]> =
-        entries.iter().map(|e| (e.oid, e.data.as_slice())).collect();
-    let delta_indices = Arc::new(build_delta_indices(odb, entries, &payloads)?);
+    let delta_indices = Arc::new(build_delta_indices(odb, entries, plan_payloads)?);
 
     let prepare = |entry: &PlannedEntry| -> Result<PreparedEntry> {
-        prepare_one_entry(odb, entry, &payloads, &delta_indices, opts)
+        prepare_one_entry(odb, entry, plan_payloads, &delta_indices, opts)
     };
 
     if par_opts.threads.get() <= 1 {
@@ -694,7 +725,7 @@ fn prepare_entries_parallel(
 fn build_delta_indices(
     odb: &Odb,
     entries: &[PlannedEntry],
-    payloads: &HashMap<ObjectId, &[u8]>,
+    plan_payloads: &OidHashMap<Arc<[u8]>>,
 ) -> Result<HashMap<ObjectId, Arc<DeltaIndex>>> {
     let mut map: HashMap<ObjectId, Arc<DeltaIndex>> = HashMap::new();
     for entry in entries {
@@ -704,41 +735,49 @@ fn build_delta_indices(
         if entry.reused_delta_zlib.is_some() || entry.reused_delta.is_some() {
             continue;
         }
-        let base_data: Vec<u8> = if let Some(d) = payloads.get(&base_oid) {
-            (*d).to_vec()
-        } else {
-            odb.read(&base_oid)?.data
-        };
-        if entry.data.starts_with(&base_data) && entry.data.len() > base_data.len() {
+        let base_data = object_payload(odb, base_oid, entry, plan_payloads)?;
+        let target_data = object_payload(odb, entry.oid, entry, plan_payloads)?;
+        if target_data.starts_with(base_data.as_ref()) && target_data.len() > base_data.len() {
             continue;
         }
-        map.entry(base_oid).or_insert_with(|| {
-            let base_ref = payloads
-                .get(&base_oid)
-                .copied()
-                .unwrap_or(base_data.as_slice());
-            Arc::new(DeltaIndex::new(base_ref))
-        });
+        map.entry(base_oid)
+            .or_insert_with(|| Arc::new(DeltaIndex::new(base_data.as_ref())));
     }
     Ok(map)
+}
+
+fn object_payload<'a>(
+    odb: &'a Odb,
+    oid: ObjectId,
+    entry: &'a PlannedEntry,
+    plan_payloads: &'a OidHashMap<Arc<[u8]>>,
+) -> Result<Cow<'a, [u8]>> {
+    if !entry.data.is_empty() && entry.oid == oid {
+        return Ok(Cow::Borrowed(&entry.data));
+    }
+    if let Some(bytes) = plan_payloads.get(&oid) {
+        return Ok(Cow::Borrowed(bytes.as_ref()));
+    }
+    Ok(Cow::Owned(odb.read(&oid)?.data))
 }
 
 fn prepare_one_entry(
     odb: &Odb,
     entry: &PlannedEntry,
-    payloads: &HashMap<ObjectId, &[u8]>,
+    plan_payloads: &OidHashMap<Arc<[u8]>>,
     delta_indices: &HashMap<ObjectId, Arc<DeltaIndex>>,
     opts: &PackBuildOptions,
 ) -> Result<PreparedEntry> {
     match entry.base {
-        None => prepare_whole(odb, entry, opts),
-        Some(base_oid) => prepare_delta(odb, entry, base_oid, payloads, delta_indices, opts),
+        None => prepare_whole(odb, entry, plan_payloads, opts),
+        Some(base_oid) => prepare_delta(odb, entry, base_oid, plan_payloads, delta_indices, opts),
     }
 }
 
 fn prepare_whole(
     odb: &Odb,
     entry: &PlannedEntry,
+    plan_payloads: &OidHashMap<Arc<[u8]>>,
     opts: &PackBuildOptions,
 ) -> Result<PreparedEntry> {
     if opts.reuse_objects && odb.hash_algo() == HashAlgo::Sha1 {
@@ -750,11 +789,7 @@ fn prepare_whole(
             });
         }
     }
-    let payload = if entry.data.is_empty() {
-        odb.read(&entry.oid)?.data
-    } else {
-        entry.data.clone()
-    };
+    let payload = object_payload(odb, entry.oid, entry, plan_payloads)?.into_owned();
     let zlib = zlib_compress(&payload)?;
     Ok(PreparedEntry {
         body: PreparedBody::Zlib(zlib),
@@ -767,7 +802,7 @@ fn prepare_delta(
     odb: &Odb,
     entry: &PlannedEntry,
     base_oid: ObjectId,
-    payloads: &HashMap<ObjectId, &[u8]>,
+    plan_payloads: &OidHashMap<Arc<[u8]>>,
     delta_indices: &HashMap<ObjectId, Arc<DeltaIndex>>,
     _opts: &PackBuildOptions,
 ) -> Result<PreparedEntry> {
@@ -785,18 +820,10 @@ fn prepare_delta(
     let delta = if let Some(reused) = &entry.reused_delta {
         reused.clone()
     } else {
-        let target_data = if entry.data.is_empty() {
-            odb.read(&entry.oid)?.data
-        } else {
-            entry.data.clone()
-        };
-        let base_data: Vec<u8> = if let Some(d) = payloads.get(&base_oid) {
-            d.to_vec()
-        } else {
-            odb.read(&base_oid)?.data
-        };
-        if target_data.starts_with(&base_data) && target_data.len() > base_data.len() {
-            encode_prefix_extension_delta(&base_data, &target_data)?
+        let target_data = object_payload(odb, entry.oid, entry, plan_payloads)?;
+        let base_data = object_payload(odb, base_oid, entry, plan_payloads)?;
+        if target_data.starts_with(base_data.as_ref()) && target_data.len() > base_data.len() {
+            encode_prefix_extension_delta(base_data.as_ref(), &target_data)?
         } else {
             let index = delta_indices
                 .get(&base_oid)
@@ -933,6 +960,7 @@ mod tests {
                 Some(threads),
             )
             .expect("search")
+            .0
         };
         let _ = run(1);
         let t1 = Instant::now();
@@ -974,6 +1002,7 @@ mod tests {
         let mut prior = oid_hash_map();
         prior.insert(base_oid, grand_oid);
         let mut out = oid_hash_map();
+        let mut encodings = HashMap::new();
         find_deltas_in_segment(
             &list,
             &warmup,
@@ -987,9 +1016,11 @@ mod tests {
                 packed: None,
             },
             &mut out,
+            &mut encodings,
             &prior,
         );
         assert_eq!(out.get(&target_oid), Some(&base_oid));
+        assert!(encodings.contains_key(&target_oid));
     }
 
     fn similar_blobs(count: u8) -> (Vec<ObjectId>, OidHashMap<Object>) {
@@ -1039,6 +1070,7 @@ mod tests {
         let (base, target) = (oids[0], oids[1]);
         let run = |packed: Option<&OidHashMap<PackedSlot>>| {
             let mut out = oid_hash_map();
+            let mut encodings = HashMap::new();
             find_deltas_in_segment(
                 &[base, target],
                 &[],
@@ -1052,6 +1084,7 @@ mod tests {
                     packed,
                 },
                 &mut out,
+                &mut encodings,
                 &oid_hash_map(),
             );
             out
@@ -1082,6 +1115,7 @@ mod tests {
         let skip = oid_hash_set();
         let run = |window: usize, packed: Option<&OidHashMap<PackedSlot>>| {
             let mut edges = oid_hash_map();
+            let mut encodings = HashMap::new();
             extend_send_order_blob_deltas(
                 SendOrderDeltaInput {
                     send: &oids,
@@ -1094,7 +1128,9 @@ mod tests {
                     hash_len: 20,
                 },
                 &mut edges,
+                &mut encodings,
             );
+            let _ = encodings;
             edges
         };
         let edges = run(1, None);
@@ -1134,7 +1170,9 @@ mod tests {
             min_total_bytes: None,
             signed_entry_threshold: None,
         };
-        let got = prepare_entries_parallel(&odb, &[entry], &opts, &par).expect("prepare");
+        let payloads = oid_hash_map();
+        let got =
+            prepare_entries_parallel(&odb, &[entry], &payloads, &opts, &par).expect("prepare");
         assert_eq!(got.len(), 1);
     }
 }
