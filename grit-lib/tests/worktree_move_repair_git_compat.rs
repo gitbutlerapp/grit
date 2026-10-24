@@ -277,3 +277,86 @@ fn user_path(path: &Path) -> String {
         &grit_lib::config::git_path::path_for_disk_compare(path),
     )
 }
+
+#[cfg(unix)]
+fn paths_on_different_devices(a: &Path, b: &Path) -> bool {
+    use std::os::unix::fs::MetadataExt;
+    let parent_a = a.parent().filter(|p| p.exists()).unwrap_or(a);
+    let parent_b = b.parent().filter(|p| p.exists()).unwrap_or(b);
+    let Ok(ma) = std::fs::metadata(parent_a) else {
+        return false;
+    };
+    let Ok(mb) = std::fs::metadata(parent_b) else {
+        return false;
+    };
+    ma.dev() != mb.dev()
+}
+
+/// Cross-device rename uses copy+remove; symlinks must stay symlinks (including dangling).
+#[test]
+#[cfg(unix)]
+fn worktree_move_cross_device_preserves_tracked_and_dangling_symlinks() {
+    let alt_root = PathBuf::from("/dev/shm");
+    if !alt_root.is_dir() {
+        return;
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let dest_parent = alt_root.join(format!(
+        "grit-wt-move-{}-{}",
+        std::process::id(),
+        tmp.path()
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "wt".into())
+    ));
+    if !paths_on_different_devices(tmp.path(), &dest_parent) {
+        let _ = std::fs::remove_dir_all(&dest_parent);
+        return;
+    }
+    std::fs::create_dir_all(&dest_parent).unwrap();
+
+    let main = tmp.path().join("main");
+    let repo = seed_repo(&main);
+    let linked = tmp.path().join("linked");
+    add_linked(&repo, linked.clone(), "linked");
+
+    std::os::unix::fs::symlink("tracked.txt", linked.join("tracked-link")).unwrap();
+    git(&linked, &["add", "tracked-link"]);
+    git(&linked, &["commit", "-qm", "symlink"]);
+    std::os::unix::fs::symlink("missing-target", linked.join("dangling-link")).unwrap();
+
+    let dest = dest_parent.join("moved-wt");
+    move_linked_worktree(&repo, &linked, &dest, &MoveWorktreeOptions::default())
+        .expect("cross-device move");
+
+    assert!(dest.join("tracked-link").is_symlink());
+    assert!(dest.join("dangling-link").is_symlink());
+    assert_eq!(
+        std::fs::read_link(dest.join("tracked-link")).unwrap(),
+        PathBuf::from("tracked.txt")
+    );
+    assert_eq!(
+        std::fs::read_link(dest.join("dangling-link")).unwrap(),
+        PathBuf::from("missing-target")
+    );
+
+    let status = Command::new("git")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .args(["status", "--porcelain"])
+        .current_dir(&dest)
+        .output()
+        .expect("git status");
+    assert!(
+        status.status.success(),
+        "git status: {}",
+        String::from_utf8_lossy(&status.stderr)
+    );
+    let porcelain = String::from_utf8_lossy(&status.stdout);
+    assert!(
+        !porcelain.contains("tracked-link"),
+        "tracked symlink must not show as modified: {porcelain}"
+    );
+    git_fsck(&main);
+    let _ = std::fs::remove_dir_all(&dest_parent);
+}

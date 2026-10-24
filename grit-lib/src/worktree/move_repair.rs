@@ -183,9 +183,16 @@ fn rename_worktree_directory(from: &Path, to: &Path) -> Result<()> {
     match fs::rename(from, to) {
         Ok(()) => Ok(()),
         Err(err) if err.kind() == std::io::ErrorKind::CrossesDevices => {
-            copy_dir_all(from, to)?;
-            fs::remove_dir_all(from).map_err(Error::Io)?;
-            Ok(())
+            match copy_dir_all(from, to) {
+                Ok(()) => {
+                    fs::remove_dir_all(from).map_err(Error::Io)?;
+                    Ok(())
+                }
+                Err(copy_err) => {
+                    let _ = fs::remove_dir_all(to);
+                    Err(copy_err)
+                }
+            }
         }
         Err(err) => Err(Error::Io(err)),
     }
@@ -195,12 +202,46 @@ fn copy_dir_all(from: &Path, to: &Path) -> Result<()> {
     fs::create_dir_all(to).map_err(Error::Io)?;
     for entry in fs::read_dir(from).map_err(Error::Io)? {
         let entry = entry.map_err(Error::Io)?;
-        let ty = entry.file_type().map_err(Error::Io)?;
+        let src = entry.path();
         let dest = to.join(entry.file_name());
-        if ty.is_dir() {
-            copy_dir_all(&entry.path(), &dest)?;
+        copy_tree_entry(&src, &dest)?;
+    }
+    Ok(())
+}
+
+fn copy_tree_entry(from: &Path, to: &Path) -> Result<()> {
+    let meta = fs::symlink_metadata(from).map_err(Error::Io)?;
+    let file_type = meta.file_type();
+    if file_type.is_dir() {
+        copy_dir_all(from, to)?;
+    } else if file_type.is_symlink() {
+        let target = fs::read_link(from).map_err(Error::Io)?;
+        create_symlink(&target, to)?;
+    } else {
+        if let Some(parent) = to.parent() {
+            fs::create_dir_all(parent).map_err(Error::Io)?;
+        }
+        fs::copy(from, to).map_err(Error::Io)?;
+    }
+    Ok(())
+}
+
+fn create_symlink(target: &Path, link_path: &Path) -> Result<()> {
+    if let Some(parent) = link_path.parent() {
+        fs::create_dir_all(parent).map_err(Error::Io)?;
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::symlink;
+        symlink(target, link_path).map_err(Error::Io)?;
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::{symlink_dir, symlink_file};
+        if target.is_dir() {
+            symlink_dir(target, link_path).map_err(Error::Io)?;
         } else {
-            fs::copy(entry.path(), &dest).map_err(Error::Io)?;
+            symlink_file(target, link_path).map_err(Error::Io)?;
         }
     }
     Ok(())

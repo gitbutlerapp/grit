@@ -1,7 +1,10 @@
 //! `grit worktree` — list, add, remove, lock, and unlock linked worktrees.
 
 use anyhow::{bail, Context, Result};
-use grit_lib::config::git_path::{path_for_disk_compare, user_display_path};
+use grit_lib::config::git_path::{
+    absolute_path_for_gitfile_stored_path, path_for_disk_compare, path_lexical_for_disk_compare,
+    user_display_path,
+};
 use grit_lib::refs::check_ref_format::validate_branch_short_name;
 use grit_lib::repo_handles::LockWorktreeOptions;
 use grit_lib::state::HeadState;
@@ -290,18 +293,19 @@ pub fn run_lock(path: PathBuf, reason: Option<String>) -> Result<WorktreeOutcome
 pub fn run_move(from: PathBuf, to: PathBuf, force: bool, dry_run: bool) -> Result<WorktreeOutcome> {
     let repo = context::discover()?;
     let from_canon = path_for_disk_compare(&from);
-    let dest = resolve_move_destination(&from_canon, &path_for_disk_compare(&to))
-        .map_err(anyhow::Error::new)?;
+    let to_abs = std::path::absolute(&to).unwrap_or(to);
+    let to_lexical = path_lexical_for_disk_compare(&to_abs);
+    let dest = resolve_move_destination(&from_canon, &to_lexical).map_err(anyhow::Error::new)?;
     move_linked_worktree(
         &repo,
         &from_canon,
-        &dest,
+        &to_lexical,
         &MoveWorktreeOptions { force, dry_run },
     )
     .map_err(anyhow::Error::new)?;
     Ok(WorktreeOutcome::Move {
-        from: user_display_path(&from_canon),
-        to: user_display_path(&dest),
+        from: absolute_path_for_gitfile_stored_path(&from_canon),
+        to: absolute_path_for_gitfile_stored_path(&dest),
         dry_run,
     })
 }
