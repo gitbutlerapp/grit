@@ -6,7 +6,9 @@ use std::sync::Arc;
 use crate::bitmap_walk::{BitmapWalkError, ReachabilityQuery, ReachableSet};
 use crate::environment::RepositoryOptions;
 use crate::error::Result;
-use crate::objects::{parse_commit, parse_tag, parse_tree, Object, ObjectId, ObjectKind};
+use crate::objects::{
+    oid_hash_set, parse_commit, parse_tag, Object, ObjectId, ObjectKind, OidHashSet, TreeRefIter,
+};
 use crate::odb::Odb;
 use crate::pack_bitmap::BitmapIndex;
 use crate::pack_name_hash::pack_name_hash;
@@ -286,7 +288,8 @@ fn collect_reachable_excluding_with_name_hashes(
     HashMap<ObjectId, u32>,
     HashMap<ObjectId, Object>,
 )> {
-    let mut visited: HashSet<ObjectId> = HashSet::new();
+    let oid_len = odb.hash_algo().len();
+    let mut visited: OidHashSet = oid_hash_set();
     let mut ordered: Vec<ObjectId> = Vec::new();
     let mut queue: VecDeque<(ObjectId, String)> = VecDeque::new();
     let mut blob_name_hashes: HashMap<ObjectId, u32> = HashMap::new();
@@ -295,7 +298,7 @@ fn collect_reachable_excluding_with_name_hashes(
     let enqueue = |oid: ObjectId,
                    path: String,
                    queue: &mut VecDeque<(ObjectId, String)>,
-                   visited: &mut HashSet<ObjectId>,
+                   visited: &mut OidHashSet,
                    ordered: &mut Vec<ObjectId>|
      -> bool {
         if !visited.insert(oid) {
@@ -341,39 +344,31 @@ fn collect_reachable_excluding_with_name_hashes(
                 );
             }
             ObjectKind::Tree => {
-                for entry in parse_tree(&obj.data)? {
-                    if entry.mode == 0o160000 {
-                        continue;
-                    }
-                    let name = String::from_utf8_lossy(&entry.name);
-                    let child_path = if path.is_empty() {
-                        name.into_owned()
-                    } else {
-                        format!("{path}/{name}")
-                    };
-                    if entry.mode == 0o040000 {
-                        enqueue(
-                            entry.oid,
-                            child_path,
-                            &mut queue,
-                            &mut visited,
-                            &mut ordered,
-                        );
-                        continue;
-                    }
-                    // Blobs and symlinks have no children: record them without
-                    // inflating their contents. The pack writer reads (or copies
-                    // verbatim) each one later and fails there if it is missing.
-                    if !visited.insert(entry.oid) {
+                for entry in TreeRefIter::with_oid_len(&obj.data, oid_len) {
+                    let entry = entry?;
+                    if entry.mode == 0o160000 || !visited.insert(entry.oid) {
                         continue;
                     }
                     if !exclude.contains(&entry.oid) {
                         ordered.push(entry.oid);
                     }
-                    if entry.mode & 0o170000 == 0o100000 {
-                        blob_name_hashes
-                            .entry(entry.oid)
-                            .or_insert_with(|| pack_name_hash(&child_path));
+                    // Blobs and symlinks have no children: record them without
+                    // inflating their contents. The pack writer reads (or copies
+                    // verbatim) each one later and fails there if it is missing.
+                    let is_tree = entry.mode == 0o040000;
+                    if !is_tree && entry.mode & 0o170000 != 0o100000 {
+                        continue;
+                    }
+                    let name = String::from_utf8_lossy(entry.name);
+                    let child_path = if path.is_empty() {
+                        name.into_owned()
+                    } else {
+                        format!("{path}/{name}")
+                    };
+                    if is_tree {
+                        queue.push_back((entry.oid, child_path));
+                    } else {
+                        blob_name_hashes.insert(entry.oid, pack_name_hash(&child_path));
                     }
                 }
             }
