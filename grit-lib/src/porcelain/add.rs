@@ -25,14 +25,15 @@ use crate::objects::ObjectId;
 use crate::odb::BULK_NEW_LOOSE_WRITE;
 use crate::path_icase::{paths_equal, worktree_path_for_index_entry, Stage0IcasePathMap};
 use crate::path_validate::{validate_path, EntryMode, PathValidationKind, ProtectOptions};
-use crate::pathspec::{has_glob_chars, pathspec_is_exclude, sorted_paths_match_pathspec};
+use crate::pathspec::{
+    exact_literal_pathspec_set, has_glob_chars, pathspec_is_exclude, sorted_paths_match_pathspec,
+    PathspecListMatcher,
+};
 use crate::porcelain::bulk_index::IndexStagingThresholds;
 use crate::porcelain::index_mode::{
     apply_executable_hint_to_index, staged_mode_with_hint, StageExecutableHint,
 };
-use crate::porcelain::pathspec_match::{
-    pathspec_matches_known_in_repository, sorted_head_tree_paths,
-};
+use crate::porcelain::pathspec_match::KnownPathspecChecker;
 use crate::porcelain::stage_tracked::{
     replay_deferred_untracked_invalidations, stage_tracked_modifications_in_index_with_rules,
 };
@@ -228,25 +229,58 @@ pub fn stage(
 }
 
 fn uses_tracked_scan_fast_path(opts: &StageOptions) -> bool {
-    !opts.dry_run && !opts.intent_to_add && matches!(opts.mode, StageMode::All | StageMode::Update)
+    if opts.dry_run || opts.intent_to_add {
+        return false;
+    }
+    if !matches!(opts.mode, StageMode::All | StageMode::Update) {
+        return false;
+    }
+    if opts.pathspecs.is_empty() {
+        return true;
+    }
+    if opts.pathspecs.iter().all(|s| s == "." || s == "./") {
+        return true;
+    }
+    pathspecs_allow_tracked_scan(&opts.pathspecs)
 }
 
-fn index_paths_matching_pathspecs(
-    repo: &Repository,
+fn pathspecs_allow_tracked_scan(pathspecs: &[String]) -> bool {
+    pathspecs
+        .iter()
+        .all(|s| !has_glob_chars(s) && !s.starts_with(':') && !pathspec_is_exclude(s))
+}
+
+fn normalized_staging_pathspecs(pathspecs: &[String]) -> Cow<'_, [String]> {
+    if pathspecs.iter().all(|s| s == "." || s == "./") {
+        Cow::Owned(Vec::new())
+    } else {
+        Cow::Borrowed(pathspecs)
+    }
+}
+
+fn restricted_index_paths_for_pathspecs(
     index: &Index,
     pathspecs: &[String],
+    ctx: crate::pathspec::PathspecMatchContext,
 ) -> BTreeSet<String> {
-    let mut paths = BTreeSet::new();
-    for ie in &index.entries {
-        if ie.stage() != 0 {
-            continue;
-        }
-        let path = index_path_to_string(&ie.path);
-        if repo.paths_match_pathspecs(&path, pathspecs) {
-            paths.insert(path);
+    if let Some(exact) = exact_literal_pathspec_set(pathspecs, ctx) {
+        if exact.iter().all(|p| {
+            index
+                .get(p.as_bytes(), 0)
+                .is_some_and(|e| e.mode != MODE_TREE)
+        }) {
+            return exact;
         }
     }
-    paths
+    let matcher = PathspecListMatcher::new(pathspecs, ctx);
+    index
+        .entries
+        .iter()
+        .filter(|e| e.stage() == 0)
+        .filter_map(|e| std::str::from_utf8(&e.path).ok())
+        .filter(|p| matcher.matches(p))
+        .map(str::to_owned)
+        .collect()
 }
 
 fn stage_via_worktree_diff(
@@ -318,15 +352,18 @@ fn stage_inner_on_index(
         .unwrap_or(false);
     let mut icase_map = Stage0IcasePathMap::from_index(index, ignorecase);
 
+    let staging_pathspecs = normalized_staging_pathspecs(&opts.pathspecs);
+    let pathspec_ctx = repo.pathspec_match_context();
+    let pathspec_matcher = PathspecListMatcher::new(staging_pathspecs.as_ref(), pathspec_ctx);
     let staging_thresholds = opts.staging_thresholds.unwrap_or_default();
     let use_tracked_scan = tracked_scan && !index.entries.is_empty() && !opts.dry_run;
-    let restrict_to_paths = if opts.pathspecs.is_empty() {
+    let restrict_to_paths = if staging_pathspecs.is_empty() {
         None
     } else {
-        Some(Arc::new(index_paths_matching_pathspecs(
-            repo,
+        Some(Arc::new(restricted_index_paths_for_pathspecs(
             index,
-            &opts.pathspecs,
+            staging_pathspecs.as_ref(),
+            pathspec_ctx,
         )))
     };
     let mut tracked_scan_summary = None;
@@ -451,8 +488,7 @@ fn stage_inner_on_index(
         }
     }
 
-    let matches =
-        |path: &str| opts.pathspecs.is_empty() || repo.paths_match_pathspecs(path, &opts.pathspecs);
+    let matches = |path: &str| staging_pathspecs.is_empty() || pathspec_matcher.matches(path);
 
     if opts.intent_to_add {
         let mut outcome = stage_intent_to_add_paths(
@@ -1189,6 +1225,41 @@ fn validate_worktree_paths_for_staging(rules: &WorktreeRules, paths: &[String]) 
     Ok(())
 }
 
+/// Stage-0 paths with a conflict still present at stages 1–3, sorted for pathspec matching.
+fn unmerged_index_paths(index: &Index) -> Vec<String> {
+    if !index.has_unmerged_entries() {
+        return Vec::new();
+    }
+    let mut paths: Vec<String> = index
+        .entries
+        .iter()
+        .filter(|e| e.stage() != 0)
+        .filter_map(|e| std::str::from_utf8(&e.path).ok().map(str::to_owned))
+        .collect();
+    paths.sort_unstable();
+    paths.dedup();
+    paths
+}
+
+/// Whether `resolved` names an unmerged index row (stages 1–3), without scanning stage 0.
+fn pathspec_matches_unmerged_index_entries(
+    index: &Index,
+    unmerged_sorted: &[String],
+    resolved: &str,
+    ctx: crate::pathspec::PathspecMatchContext,
+) -> bool {
+    if exact_literal_pathspec_set(&[resolved.to_owned()], ctx).is_some() {
+        let path_bytes = resolved.as_bytes();
+        if (1..=3).any(|stage| index.get(path_bytes, stage).is_some()) {
+            return true;
+        }
+    }
+    if unmerged_sorted.is_empty() {
+        return false;
+    }
+    sorted_paths_match_pathspec(resolved, unmerged_sorted, ctx)
+}
+
 fn validate_pathspecs(
     repo: &Repository,
     index: &Index,
@@ -1208,22 +1279,27 @@ fn validate_pathspecs(
         return Ok(());
     }
     let ctx = repo.pathspec_match_context();
-    let known = sorted_stageable_paths(index, unstaged, untracked);
-    // Walking HEAD's tree is only needed for a pathspec that matches nothing else.
-    let mut head_paths: Option<Vec<String>> = None;
+    let unmerged_paths = unmerged_index_paths(index);
+    let mut checker = KnownPathspecChecker::new(repo);
     let mut ignored_paths = Vec::new();
     for (label, resolved) in positive {
-        if sorted_paths_match_pathspec(resolved, &known, ctx) {
+        if unstaged.iter().any(|e| {
+            let one = [e.path()];
+            sorted_paths_match_pathspec(resolved, &one, ctx)
+        }) || untracked.iter().any(|p| {
+            let one = [p.as_str()];
+            sorted_paths_match_pathspec(resolved, &one, ctx)
+        }) {
             continue;
         }
-        if head_paths.is_none() {
-            head_paths = Some(sorted_head_tree_paths(repo)?);
-        }
-        let head = head_paths.as_deref().unwrap_or_default();
-        if sorted_paths_match_pathspec(resolved, head, ctx) {
-            continue;
-        }
-        if !pathspec_matches_known_in_repository(repo, resolved)? {
+        let matches_repo = checker.matches(resolved)?
+            || pathspec_matches_unmerged_index_entries(
+                index,
+                &unmerged_paths,
+                resolved,
+                ctx,
+            );
+        if !matches_repo {
             return Err(Error::Message(format!(
                 "pathspec '{label}' did not match any files"
             )));
@@ -1460,27 +1536,6 @@ fn pathspec_sources(opts: &StageOptions) -> Vec<String> {
     } else {
         opts.pathspec_sources.clone()
     }
-}
-
-/// Index (all stages), unstaged and untracked paths in byte order, borrowed where possible.
-fn sorted_stageable_paths<'a>(
-    index: &'a Index,
-    unstaged: &'a [DiffEntry],
-    untracked: &'a [String],
-) -> Vec<Cow<'a, str>> {
-    let mut paths: Vec<Cow<'a, str>> =
-        Vec::with_capacity(index.entries.len() + unstaged.len() + untracked.len());
-    paths.extend(
-        index
-            .entries
-            .iter()
-            .map(|e| String::from_utf8_lossy(&e.path)),
-    );
-    paths.extend(unstaged.iter().map(|e| Cow::Borrowed(e.path())));
-    paths.extend(untracked.iter().map(|p| Cow::Borrowed(p.as_str())));
-    paths.sort_unstable();
-    paths.dedup();
-    paths
 }
 
 fn stage_gitlink_at(
