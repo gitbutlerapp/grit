@@ -750,9 +750,7 @@ fn repack_detail(repo: &Repository, opts: &RepackOptions) -> Result<RepackDetail
         .clone()
         .or_else(|| repo.config().ok().map(|c| (*c).clone()));
     let mut pack_opts = opts.pack_build.unwrap_or_else(|| {
-        if opts.incremental || packs_before == 0 {
-            PackBuildOptions::for_local_copy(cfg.as_ref())
-        } else if opts.force_recompress {
+        if opts.incremental || packs_before == 0 || opts.force_recompress {
             PackBuildOptions::for_local_copy(cfg.as_ref())
         } else {
             // Existing packs: reuse on-disk deltas (Git repack -ad without -f).
