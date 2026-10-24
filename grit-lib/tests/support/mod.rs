@@ -8,7 +8,6 @@ mod index_ext_harness;
 mod index_harness;
 mod merge_harness;
 mod refs_harness;
-mod refstore_conformance;
 mod revparse_oracle;
 mod revparse_seed;
 mod revwalk_fixtures;
@@ -46,7 +45,6 @@ pub use merge_harness::{
     GitUnmergedRow,
 };
 pub use refs_harness::*;
-pub use refstore_conformance::*;
 pub use revparse_oracle::*;
 pub use revparse_seed::*;
 pub use revwalk_fixtures::{

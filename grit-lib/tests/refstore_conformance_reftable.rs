@@ -3,14 +3,12 @@
 use std::sync::Arc;
 
 use grit_lib::refs::store::{RefStore, ReftableRefStore};
-
-mod support;
+use grit_test_support::refstore_conformance::run_suite;
 
 #[test]
 fn reftable_refstore_passes_conformance_suite() {
-    let factory = Arc::new(|| {
+    run_suite(|| {
         let store = ReftableRefStore::open_ephemeral().expect("open reftable store");
         Arc::new(store) as Arc<dyn RefStore>
     });
-    support::run_refstore_conformance(factory);
 }
