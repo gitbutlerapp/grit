@@ -22,8 +22,8 @@ fn commit_req(message: &str) -> CommitRequest {
     let id = ident();
     CommitRequest {
         message: message.to_owned(),
-        author: id.clone(),
-        committer: id,
+        author: Some(id.parse().expect("signature")),
+        committer: Some(id.parse().expect("signature")),
         allow_empty: false,
         sign_override: None,
         amend: false,

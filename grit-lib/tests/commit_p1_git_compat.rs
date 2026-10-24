@@ -20,8 +20,8 @@ fn commit_req(message: &str) -> CommitRequest {
     let id = ident();
     CommitRequest {
         message: message.to_owned(),
-        author: id.clone(),
-        committer: id,
+        author: Some(id.parse().expect("signature")),
+        committer: Some(id.parse().expect("signature")),
         ..Default::default()
     }
 }
@@ -103,7 +103,11 @@ fn grit_commit_signoff_and_trailer_body_matches_git() {
     let repo = init_repo(grit_root);
     stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
     let mut req = commit_req("subject\n");
-    req.author = "P1 <p1@example.com> 1700000000 +0000".to_owned();
+    req.author = Some(
+        "P1 <p1@example.com> 1700000000 +0000"
+            .parse()
+            .expect("signature"),
+    );
     req.committer = req.author.clone();
     req.signoff = true;
     req.trailers = vec![("Acked-by".to_owned(), "Alice".to_owned())];
@@ -172,7 +176,7 @@ fn grit_commit_amend_reuse_message_matches_git() {
     stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
     let mut req = commit_req("");
     req.amend = true;
-    req.author = String::new();
+    req.author = None;
     req.reuse_message_from = Some(source_oid);
     req.hooks = grit_lib::porcelain::commit::HookPolicy::SkipVerify;
     create_commit(&repo, &req, &mut NullProgress).unwrap();
@@ -194,7 +198,11 @@ fn grit_commit_date_and_author_match_git_log() {
     std::fs::write(root.join("f"), b"x\n").unwrap();
     stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
     let mut req = commit_req("dated commit\n");
-    req.author = "Author Person <author@example.com> 1 +0000".to_owned();
+    req.author = Some(
+        "Author Person <author@example.com> 1 +0000"
+            .parse()
+            .expect("signature"),
+    );
     req.author_date = Some("946684800 +0000".to_owned());
     create_commit(&repo, &req, &mut NullProgress).unwrap();
 
@@ -213,13 +221,17 @@ fn grit_commit_reuse_message_matches_git_c() {
     std::fs::write(root.join("f"), b"1\n").unwrap();
     stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
     let mut first = commit_req("original subject\n\nbody\n");
-    first.author = "Orig Author <orig@example.com> 123 +0000".to_owned();
+    first.author = Some(
+        "Orig Author <orig@example.com> 123 +0000"
+            .parse()
+            .expect("signature"),
+    );
     let first_out = create_commit(&repo, &first, &mut NullProgress).unwrap();
 
     std::fs::write(root.join("f"), b"2\n").unwrap();
     stage(&repo, &StageOptions::default(), &mut NullProgress).unwrap();
     let mut req = commit_req("");
-    req.author = String::new();
+    req.author = None;
     req.reuse_message_from = Some(first_out.oid);
     create_commit(&repo, &req, &mut NullProgress).unwrap();
 

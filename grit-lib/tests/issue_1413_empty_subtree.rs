@@ -57,7 +57,9 @@ fn drop_opts(seq: i64) -> RewriteOptions {
     RewriteOptions {
         scope: RefScope::Branches,
         empty: EmptyPolicy::Drop,
-        committer: format!("Tester <t@grit.test> {seq} +0000"),
+        committer: format!("Tester <t@grit.test> {seq} +0000")
+            .parse()
+            .expect("signature"),
         preserve_committer: false,
         sign: true,
     }

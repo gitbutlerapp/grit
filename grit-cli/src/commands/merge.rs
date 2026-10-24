@@ -599,15 +599,11 @@ fn merge_continue_label(git_dir: &std::path::Path) -> String {
 
 fn run_continue(repo: &Repository, message: Option<&str>) -> Result<MergeOutcome> {
     let label = merge_continue_label(repo.git_dir());
-    let config = repo.config().context("could not load config")?;
-    let env = repo.environment();
-    let now = context::wall_clock_now(env);
-    let author = context::identity(env, config.as_ref(), IdentRole::Author, now)?;
-    let committer = context::identity(env, config.as_ref(), IdentRole::Committer, now)?;
+    let now = context::wall_clock_now(repo.environment());
     let options = ContinueOptions {
         message: message.map(str::to_owned),
-        author,
-        committer,
+        author: Some(context::signature(repo, IdentRole::Author, now)?),
+        committer: Some(context::signature(repo, IdentRole::Committer, now)?),
     };
     let mut progress = NullProgress;
     match continue_merge(repo, &options, &mut progress) {

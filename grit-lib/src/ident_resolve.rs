@@ -12,6 +12,7 @@ use crate::commit::assemble_identity;
 #[cfg(unix)]
 use crate::commit_encoding::decode_bytes;
 use crate::config::ConfigSet;
+use crate::ident::{parse_signature, Signature};
 use crate::ident_config::{env_user_name, ident_default_name};
 
 /// Environment access used for identity resolution.
@@ -125,6 +126,17 @@ pub enum IdentityError {
         /// Rejected name.
         name: String,
     },
+    /// The role's date override (`GIT_AUTHOR_DATE` / `GIT_COMMITTER_DATE`) is not a date Git accepts.
+    #[error("invalid date '{date}'")]
+    InvalidDate {
+        /// The rejected override value.
+        date: String,
+        /// Identity role being resolved.
+        role: IdentRole,
+    },
+    /// The resolved name or email cannot be written into an identity line.
+    #[error(transparent)]
+    InvalidSignature(#[from] crate::ident::SignatureError),
 }
 
 /// Read a `GIT_*_NAME` variable like Git's `getenv`: unset vs set, preserving explicit empty.
@@ -289,6 +301,45 @@ pub fn resolve_identity_with<E: IdentityEnv>(
         .var(role.env_date_key())
         .filter(|d| !d.trim().is_empty());
     Ok(assemble_identity(&name, &email, date.as_deref(), now))
+}
+
+/// Resolve the identity for `role` as a typed [`Signature`] when creating a commit, tag, stash,
+/// or notes commit.
+///
+/// Resolution is the same as [`resolve_identity_with`]; the date override must also be a date
+/// Git accepts, and the name and email must be writable into an object.
+///
+/// # Parameters
+///
+/// - `env`: environment supplying `GIT_*` identity and date variables.
+/// - `config`: configuration supplying `user.*`, `author.*` and `committer.*`.
+/// - `role`: whether to resolve the author or the committer.
+/// - `now`: timestamp (with its UTC offset) used when no date override is set.
+///
+/// # Errors
+///
+/// The [`resolve_identity_with`] errors, plus [`IdentityError::InvalidDate`] for an unparsable
+/// date override and [`IdentityError::InvalidSignature`] for a name or email holding `<`, `>`,
+/// or a control character.
+pub fn resolve_signature_with<E: IdentityEnv>(
+    env: &E,
+    config: &ConfigSet,
+    role: IdentRole,
+    now: OffsetDateTime,
+) -> Result<Signature, IdentityError> {
+    let name = resolve_name_with(env, config, role)?;
+    let email = resolve_email_with(env, config, role)?;
+    let date = env
+        .var(role.env_date_key())
+        .filter(|d| !d.trim().is_empty());
+    let line = assemble_identity(&name, &email, date.as_deref(), now);
+    let time = parse_signature(&line)
+        .ok_or_else(|| IdentityError::InvalidDate {
+            date: date.unwrap_or_default(),
+            role,
+        })?
+        .time;
+    Ok(Signature::new(name, email, time)?)
 }
 
 /// Best-effort committer identity line (`Name <email> <epoch> <offset>`) for reflog entries.
@@ -506,6 +557,55 @@ mod tests {
             IdentityError::MissingConfiguredEmail {
                 role: IdentRole::Author
             }
+        );
+    }
+
+    #[test]
+    fn signature_matches_identity_line_and_honours_role_date() {
+        let env = vars(&[
+            ("GIT_COMMITTER_NAME", "C O Mitter"),
+            ("GIT_COMMITTER_EMAIL", "committer@example.com"),
+            ("GIT_COMMITTER_DATE", "@1234567890 +0100"),
+        ]);
+        let config = ConfigSet::default();
+        let sig = resolve_signature_with(&env, &config, IdentRole::Committer, fixed_now())
+            .expect("signature");
+        assert_eq!(sig.name, "C O Mitter");
+        assert_eq!(sig.email, "committer@example.com");
+        assert_eq!(
+            sig.header_line(),
+            resolve_identity_with(&env, &config, IdentRole::Committer, fixed_now()).expect("line")
+        );
+    }
+
+    #[test]
+    fn signature_rejects_unparsable_date_and_unwritable_email() {
+        let env = vars(&[
+            ("GIT_AUTHOR_NAME", "A U Thor"),
+            ("GIT_AUTHOR_EMAIL", "author@example.com"),
+            ("GIT_AUTHOR_DATE", "not a date"),
+        ]);
+        assert_eq!(
+            resolve_signature_with(&env, &ConfigSet::default(), IdentRole::Author, fixed_now()),
+            Err(IdentityError::InvalidDate {
+                date: "not a date".to_owned(),
+                role: IdentRole::Author,
+            })
+        );
+        let env = vars(&[
+            ("GIT_AUTHOR_NAME", "A U Thor"),
+            ("GIT_AUTHOR_EMAIL", "a@b> x"),
+        ]);
+        assert!(matches!(
+            resolve_signature_with(&env, &ConfigSet::default(), IdentRole::Author, fixed_now()),
+            Err(IdentityError::InvalidSignature(_))
+        ));
+        let env = vars(&[("USER", "alice"), ("GIT_AUTHOR_NAME", "Alice")]);
+        assert_eq!(
+            resolve_signature_with(&env, &ConfigSet::default(), IdentRole::Author, fixed_now()),
+            Err(IdentityError::MissingConfiguredEmail {
+                role: IdentRole::Author
+            })
         );
     }
 

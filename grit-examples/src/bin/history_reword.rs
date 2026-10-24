@@ -39,7 +39,7 @@ fn main() -> Result<(), grit_lib::error::Error> {
         &RewriteOptions {
             scope: RefScope::Head,
             empty: EmptyPolicy::Drop,
-            committer: "History Guide <guide@grit.test> 1 +0000".into(),
+            committer: "History Guide <guide@grit.test> 1 +0000".parse()?,
             preserve_committer: false,
             sign: true,
         },

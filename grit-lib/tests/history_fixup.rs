@@ -45,7 +45,7 @@ fn fixup_opts(scope: RefScope, empty: EmptyPolicy) -> FixupOptions {
         rewrite: RewriteOptions {
             scope,
             empty,
-            committer: committer(1),
+            committer: committer(1).parse().expect("signature"),
             preserve_committer: false,
             sign: true,
         },
@@ -61,7 +61,7 @@ fn harness_fixup_opts(scope: RefScope, empty: EmptyPolicy) -> FixupOptions {
         rewrite: RewriteOptions {
             scope,
             empty,
-            committer: harness_committer_line(),
+            committer: harness_committer_line().parse().expect("signature"),
             preserve_committer: false,
             sign: true,
         },
@@ -585,7 +585,7 @@ fn fixup_opts_with_selection(
         rewrite: RewriteOptions {
             scope,
             empty,
-            committer: committer(1),
+            committer: committer(1).parse().expect("signature"),
             preserve_committer: false,
             sign: true,
         },

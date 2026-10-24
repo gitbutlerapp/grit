@@ -115,7 +115,7 @@ fn plan_reword(
         &RewriteOptions {
             scope: RefScope::Branches,
             empty: EmptyPolicy::Drop,
-            committer: committer(1),
+            committer: committer(1).parse().expect("signature"),
             preserve_committer: false,
             sign: true,
         },
@@ -151,7 +151,7 @@ fn plan_reword_with_tree(
         &RewriteOptions {
             scope: RefScope::Branches,
             empty: EmptyPolicy::Drop,
-            committer: committer(1),
+            committer: committer(1).parse().expect("signature"),
             preserve_committer: false,
             sign: true,
         },
@@ -246,7 +246,7 @@ fn apply_rewrite_refuses_when_head_moved_since_plan() {
             &RewriteOptions {
                 scope: RefScope::Head,
                 empty: EmptyPolicy::Drop,
-                committer: committer(1),
+                committer: committer(1).parse().expect("signature"),
                 preserve_committer: false,
                 sign: true,
             },
@@ -374,7 +374,7 @@ fn apply_rewrite_bare_repository() {
         &RewriteOptions {
             scope: RefScope::Head,
             empty: EmptyPolicy::Drop,
-            committer: committer(2),
+            committer: committer(2).parse().expect("signature"),
             preserve_committer: false,
             sign: true,
         },

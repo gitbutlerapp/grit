@@ -35,7 +35,7 @@ fn rebase_opts(scope: RefScope, empty: EmptyPolicy, skip: bool) -> RebaseOntoOpt
         rewrite: RewriteOptions {
             scope,
             empty,
-            committer: PINNED_COMMITTER.into(),
+            committer: PINNED_COMMITTER.parse().expect("signature"),
             preserve_committer: false,
             sign: true,
         },

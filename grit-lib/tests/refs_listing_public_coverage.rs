@@ -89,8 +89,8 @@ fn references_query_peels_annotated_tags() {
         &repo,
         &CommitRequest {
             message: "c".into(),
-            author: ident.clone(),
-            committer: ident,
+            author: Some(ident.parse().expect("signature")),
+            committer: Some(ident.parse().expect("signature")),
             allow_empty: true,
             sign_override: None,
             amend: false,
@@ -180,8 +180,8 @@ fn references_query_lightweight_commit_tag_has_no_peel() {
         &repo,
         &CommitRequest {
             message: "c".into(),
-            author: ident.clone(),
-            committer: ident,
+            author: Some(ident.parse().expect("signature")),
+            committer: Some(ident.parse().expect("signature")),
             allow_empty: true,
             sign_override: None,
             amend: false,
@@ -234,8 +234,8 @@ fn overlapping_namespaces_deduplicate_by_full_name() {
         &repo,
         &CommitRequest {
             message: "c".into(),
-            author: ident.clone(),
-            committer: ident,
+            author: Some(ident.parse().expect("signature")),
+            committer: Some(ident.parse().expect("signature")),
             allow_empty: true,
             sign_override: None,
             amend: false,
@@ -317,8 +317,8 @@ fn date_sort_keeps_refs_with_missing_objects() {
         &repo,
         &CommitRequest {
             message: "c".into(),
-            author: ident.clone(),
-            committer: ident,
+            author: Some(ident.parse().expect("signature")),
+            committer: Some(ident.parse().expect("signature")),
             allow_empty: true,
             sign_override: None,
             amend: false,

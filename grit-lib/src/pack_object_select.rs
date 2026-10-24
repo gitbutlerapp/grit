@@ -423,8 +423,8 @@ mod tests {
             &repo,
             &CommitRequest {
                 message: "init".into(),
-                author: ident.clone(),
-                committer: ident,
+                author: Some(ident.parse().expect("signature")),
+                committer: Some(ident.parse().expect("signature")),
                 allow_empty: false,
                 sign_override: None,
                 amend: false,

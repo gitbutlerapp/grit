@@ -478,7 +478,7 @@ pub fn bench_push_stash(fx: &HotPathsFixture) {
     let options = StashPushOptions {
         message: None,
         include_untracked: false,
-        identity: BENCH_IDENT.to_owned(),
+        identity: BENCH_IDENT.parse().expect("signature"),
         selection: None,
         pathspecs: Vec::new(),
         dry_run: false,

@@ -431,8 +431,8 @@ fn commit_graph_write_injected_ref_store_head_when_disk_unborn() {
         &repo,
         &CommitRequest {
             message: "one".into(),
-            author: ident.clone(),
-            committer: ident,
+            author: Some(ident.parse().expect("signature")),
+            committer: Some(ident.parse().expect("signature")),
             allow_empty: false,
             sign_override: None,
             amend: false,

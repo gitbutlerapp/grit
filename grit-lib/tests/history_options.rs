@@ -118,7 +118,7 @@ fn drop_keep_empty_keeps_replayed_empty_commit() {
         &RewriteOptions {
             scope: RefScope::Head,
             empty: EmptyPolicy::Keep,
-            committer: committer(1),
+            committer: committer(1).parse().expect("signature"),
             preserve_committer: false,
             sign: true,
         },
@@ -153,7 +153,7 @@ fn squash_empty_abort_at_head_fast_path() {
             rewrite: RewriteOptions {
                 scope: RefScope::Head,
                 empty: EmptyPolicy::Abort,
-                committer: committer(3),
+                committer: committer(3).parse().expect("signature"),
                 preserve_committer: false,
                 sign: true,
             },
@@ -188,7 +188,7 @@ fn squash_keep_committer_at_head_fast_path() {
             rewrite: RewriteOptions {
                 scope: RefScope::Head,
                 empty: EmptyPolicy::Drop,
-                committer: committer(1800),
+                committer: committer(1800).parse().expect("signature"),
                 preserve_committer: true,
                 sign: true,
             },
@@ -230,7 +230,7 @@ fn squash_empty_abort_returns_became_empty() {
             rewrite: RewriteOptions {
                 scope: RefScope::Head,
                 empty: EmptyPolicy::Abort,
-                committer: committer(2),
+                committer: committer(2).parse().expect("signature"),
                 preserve_committer: false,
                 sign: true,
             },
@@ -256,7 +256,7 @@ fn reword_keep_committer_preserves_committer_line() {
         &RewriteOptions {
             scope: RefScope::Head,
             empty: EmptyPolicy::Drop,
-            committer: committer(99),
+            committer: committer(99).parse().expect("signature"),
             preserve_committer: true,
             sign: true,
         },

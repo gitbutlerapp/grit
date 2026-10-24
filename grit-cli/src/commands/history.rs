@@ -595,12 +595,8 @@ impl Rewrite {
         let env = repo.environment();
         let config =
             ConfigSet::load(env, Some(repo.git_dir()), true).context("could not load config")?;
-        let committer = context::identity(
-            env,
-            &config,
-            IdentRole::Committer,
-            context::wall_clock_now(env),
-        )?;
+        let committer =
+            context::signature(&repo, IdentRole::Committer, context::wall_clock_now(env))?;
         Ok(Self {
             repo,
             config,

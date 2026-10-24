@@ -587,6 +587,53 @@ impl Repository {
         )
     }
 
+    /// Resolve the author or committer identity Git would record for a new commit, tag, stash,
+    /// or notes commit made through this handle.
+    ///
+    /// Reads the handle's [`Environment`] (`GIT_AUTHOR_*` / `GIT_COMMITTER_*`, including the
+    /// `*_DATE` overrides) and configuration (`author.*`, `committer.*`, `user.*`); see
+    /// [`resolve_signature_with`](crate::config::ident_resolve::resolve_signature_with).
+    ///
+    /// # Parameters
+    ///
+    /// - `role`: author or committer.
+    /// - `now`: timestamp recorded when no date override is set; usually [`Self::identity_now`].
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Identity`] when no usable name, email, or date is configured, and config load
+    /// failures.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use grit_lib::config::ident_resolve::IdentRole;
+    /// use grit_lib::repo::{InitOptions, Repository};
+    /// # fn main() -> grit_lib::error::Result<()> {
+    /// let dir = tempfile::tempdir()?;
+    /// let repo = Repository::init(dir.path(), &InitOptions::default())?;
+    /// match repo.identity(IdentRole::Author, repo.identity_now()) {
+    ///     Ok(author) => assert!(!author.email.is_empty()),
+    ///     Err(grit_lib::error::Error::Identity(_)) => {} // nothing configured
+    ///     Err(other) => return Err(other),
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn identity(
+        &self,
+        role: crate::config::ident_resolve::IdentRole,
+        now: time::OffsetDateTime,
+    ) -> Result<crate::ident::Signature> {
+        let config = self.config()?;
+        Ok(crate::config::ident_resolve::resolve_signature_with(
+            self.environment(),
+            &config,
+            role,
+            now,
+        )?)
+    }
+
     /// Subprocess runner used for hooks, filters, and helpers.
     #[must_use]
     pub fn command_runner(&self) -> Arc<dyn CommandRunner> {

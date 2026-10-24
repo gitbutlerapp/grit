@@ -27,7 +27,7 @@ fn rewrite_opts() -> RewriteOptions {
     RewriteOptions {
         scope: RefScope::Head,
         empty: EmptyPolicy::Drop,
-        committer: "Absorb <a@grit.test> 1 +0000".into(),
+        committer: "Absorb <a@grit.test> 1 +0000".parse().expect("signature"),
         preserve_committer: false,
         sign: true,
     }

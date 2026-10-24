@@ -49,7 +49,7 @@ fn reword_changes_only_message_and_replays_descendants() {
         &RewriteOptions {
             scope: RefScope::Branches,
             empty: EmptyPolicy::Drop,
-            committer: committer(1),
+            committer: committer(1).parse().expect("signature"),
             preserve_committer: false,
             sign: true,
         },
@@ -84,7 +84,7 @@ fn rewrite_opts(seq: i64) -> RewriteOptions {
     RewriteOptions {
         scope: RefScope::Branches,
         empty: EmptyPolicy::Drop,
-        committer: committer(seq),
+        committer: committer(seq).parse().expect("signature"),
         preserve_committer: false,
         sign: true,
     }
@@ -262,7 +262,7 @@ fn reword_rejects_empty_message() {
         &RewriteOptions {
             scope: RefScope::Head,
             empty: EmptyPolicy::Drop,
-            committer: committer(1),
+            committer: committer(1).parse().expect("signature"),
             preserve_committer: false,
             sign: true,
         },
@@ -311,7 +311,7 @@ fn reword_in_bare_repository() {
         &RewriteOptions {
             scope: RefScope::Head,
             empty: EmptyPolicy::Drop,
-            committer: committer(2),
+            committer: committer(2).parse().expect("signature"),
             preserve_committer: false,
             sign: true,
         },
@@ -377,7 +377,7 @@ fn reword_root_replays_merge_with_merge_only_tree_content() {
         &RewriteOptions {
             scope: RefScope::Branches,
             empty: EmptyPolicy::Drop,
-            committer: committer(10),
+            committer: committer(10).parse().expect("signature"),
             preserve_committer: false,
             sign: true,
         },

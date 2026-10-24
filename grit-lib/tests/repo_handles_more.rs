@@ -58,7 +58,7 @@ fn handle_stash_roundtrip_with_git() {
         .push(&StashPushOptions {
             message: Some("handle stash".into()),
             include_untracked: false,
-            identity: IDENT.into(),
+            identity: IDENT.parse().expect("signature"),
             selection: None,
             pathspecs: Vec::new(),
             dry_run: false,
@@ -127,7 +127,7 @@ fn handle_notes_roundtrip_with_git() {
             b"grit handle note\n",
             &NotesWriteOptions {
                 message: "add".into(),
-                committer: IDENT.into(),
+                committer: IDENT.parse().expect("signature"),
                 author: None,
             },
             false,
@@ -470,7 +470,7 @@ fn handle_notes_add_rejects_invalid_existing_notes_ref() {
             b"note\n",
             &NotesWriteOptions {
                 message: "add".into(),
-                committer: IDENT.into(),
+                committer: IDENT.parse().expect("signature"),
                 author: None,
             },
             false,

@@ -328,8 +328,8 @@ fn commit_one_file(repo: &Repository, dir: &Path) -> grit_lib::error::Result<Com
         repo,
         &CommitRequest {
             message: "msg".into(),
-            author: ident.clone(),
-            committer: ident,
+            author: Some(ident.parse().expect("signature")),
+            committer: Some(ident.parse().expect("signature")),
             ..Default::default()
         },
         &mut NullProgress,

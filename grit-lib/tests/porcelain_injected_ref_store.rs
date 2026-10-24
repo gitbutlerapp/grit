@@ -66,8 +66,8 @@ fn commit_all(repo: &Repository, message: &str) -> ObjectId {
         repo,
         &CommitRequest {
             message: message.into(),
-            author: IDENT_TS.into(),
-            committer: IDENT_TS.into(),
+            author: Some(IDENT_TS.parse().expect("signature")),
+            committer: Some(IDENT_TS.parse().expect("signature")),
             ..Default::default()
         },
         CommitScope::Staged,
@@ -206,7 +206,7 @@ fn battery(repo: &Repository, wt: &Path) -> BatteryResult {
         .push(&StashPushOptions {
             message: None,
             include_untracked: false,
-            identity: IDENT_TS.into(),
+            identity: IDENT_TS.parse().expect("signature"),
             selection: None,
             pathspecs: Vec::new(),
             dry_run: false,

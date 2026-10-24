@@ -26,7 +26,9 @@ fn rewrite_opts() -> RewriteOptions {
     RewriteOptions {
         scope: RefScope::Branches,
         empty: EmptyPolicy::Drop,
-        committer: "Undo Tester <undo@grit.test> 1 +0000".into(),
+        committer: "Undo Tester <undo@grit.test> 1 +0000"
+            .parse()
+            .expect("signature"),
         preserve_committer: false,
         sign: false,
     }

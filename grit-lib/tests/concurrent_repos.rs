@@ -17,6 +17,7 @@ use grit_lib::diff::merge_trees::{
     merge_trees_three_way, TreeMergeConflictPresentation, WhitespaceMergeOptions,
 };
 use grit_lib::diff::rerere::{repo_rerere, RerereAutoupdate, RerereEventKind};
+use grit_lib::ident::Signature;
 use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
 use grit_lib::notes::{write_notes_commit, NotesTreeEntry};
 use grit_lib::objects::{parse_commit, ObjectId};
@@ -195,8 +196,8 @@ fn run_repo_loop(fx: RepoFixture, ack: mpsc::Sender<()>) {
             &repo,
             &CommitRequest {
                 message: format!("commit {i}"),
-                author: ident.clone(),
-                committer: ident,
+                author: Some(ident.parse().expect("signature")),
+                committer: Some(ident.parse().expect("signature")),
                 allow_empty: false,
                 sign_override: None,
                 amend: false,
@@ -393,13 +394,13 @@ fn run_fetch_merge_notes_no_crosstalk_once(iter: usize) {
         let repo = open_with_env(&fx);
         status(&repo, &StatusOptions::default(), &mut NullProgress).expect("status");
         stage(&repo, &StageOptions::default(), &mut NullProgress).expect("stage");
-        let ident = format!("{name} <{email}>");
+        let ident = Signature::new(name, email, repo.identity_now()).expect("signature");
         create_commit(
             &repo,
             &CommitRequest {
                 message: "seed".into(),
-                author: ident.clone(),
-                committer: ident,
+                author: Some(ident.clone()),
+                committer: Some(ident),
                 allow_empty: false,
                 sign_override: None,
                 amend: false,

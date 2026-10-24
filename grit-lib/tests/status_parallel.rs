@@ -333,8 +333,8 @@ fn large_index_stat_refresh_parallel_matches_serial() {
     .expect("stage");
     let req = grit_lib::porcelain::commit::CommitRequest {
         message: "seed".into(),
-        author: "T <t@e.com> 1 +0000".into(),
-        committer: "T <t@e.com> 1 +0000".into(),
+        author: Some("T <t@e.com> 1 +0000".parse().expect("signature")),
+        committer: Some("T <t@e.com> 1 +0000".parse().expect("signature")),
         allow_empty: false,
         sign_override: None,
         amend: false,

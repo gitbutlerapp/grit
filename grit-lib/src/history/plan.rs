@@ -295,6 +295,7 @@ fn plan_rewrite_with_order_impl(
     seed: Option<(HashMap<ObjectId, ObjectId>, Vec<RewrittenCommit>)>,
     scoped_refs_override: Option<Vec<(String, ObjectId)>>,
 ) -> Result<ResumablePlanOutcome, HistoryError> {
+    let committer_line = opts.committer.header_line();
     if edits.is_empty() {
         return Ok(ResumablePlanOutcome::Complete(RewritePlan {
             commits: Vec::new(),
@@ -445,7 +446,7 @@ fn plan_rewrite_with_order_impl(
                     insert.tree,
                     &parents,
                     &insert.author,
-                    &opts.committer,
+                    &committer_line,
                     &insert.message,
                     &[],
                 )?)
@@ -502,7 +503,7 @@ fn plan_rewrite_with_order_impl(
                     let committer = if opts.preserve_committer {
                         old.committer.as_str()
                     } else {
-                        opts.committer.as_str()
+                        committer_line.as_str()
                     };
                     let oid = write_replacement_commit(
                         repo,
@@ -541,7 +542,7 @@ fn plan_rewrite_with_order_impl(
                             old_oid,
                             &parent_list,
                             &old.author,
-                            &opts.committer,
+                            &committer_line,
                             &old.message,
                             merge_favor,
                             opts,
@@ -574,7 +575,7 @@ fn plan_rewrite_with_order_impl(
                     let committer = if opts.preserve_committer {
                         old.committer.as_str()
                     } else {
-                        opts.committer.as_str()
+                        committer_line.as_str()
                     };
                     let oid = if let Some(explicit_tree) = *tree {
                         write_replacement_commit(
@@ -665,6 +666,7 @@ pub fn plan_replay_linear_segment(
     replay_order: &[ObjectId],
     opts: &RewriteOptions,
 ) -> Result<RewritePlan, HistoryError> {
+    let committer_line = opts.committer.header_line();
     if replay_order.is_empty() {
         return Ok(RewritePlan {
             commits: Vec::new(),
@@ -722,7 +724,7 @@ pub fn plan_replay_linear_segment(
             old_oid,
             &parent_list,
             &old.author,
-            &opts.committer,
+            &committer_line,
             &old.message,
             MergeFavor::default(),
             opts,
@@ -1069,6 +1071,7 @@ fn replay_descendant(
     merge_favor: MergeFavor,
     opts: &RewriteOptions,
 ) -> Result<ObjectId, HistoryError> {
+    let committer_line = opts.committer.header_line();
     let (_, new_parent) = replay_parent_pair(repo, old, mapping, extra_parent)?;
     replay_edited_commit(
         repo,
@@ -1077,7 +1080,7 @@ fn replay_descendant(
         old_oid,
         &[new_parent],
         &old.author,
-        &opts.committer,
+        &committer_line,
         &old.message,
         merge_favor,
         opts,
@@ -1096,6 +1099,7 @@ fn replay_merge_descendant(
     opts: &RewriteOptions,
     parent_list_override: Option<&[ObjectId]>,
 ) -> Result<ObjectId, HistoryError> {
+    let committer_line = opts.committer.header_line();
     let parent_list = parent_list_override
         .map(<[_]>::to_vec)
         .unwrap_or_else(|| mapped_merge_parents(old, mapping, extra_parent));
@@ -1104,7 +1108,7 @@ fn replay_merge_descendant(
     let committer = if opts.preserve_committer {
         old.committer.as_str()
     } else {
-        opts.committer.as_str()
+        committer_line.as_str()
     };
 
     let empty = empty_tree_oid(repo)?;
@@ -1708,10 +1712,11 @@ pub fn plan_fold_range_at_head(
     if oldest_commit.parents.is_empty() {
         return Err(HistoryError::RootCommit { commit: oldest });
     }
+    let committer_line = opts.committer.header_line();
     let committer = if opts.preserve_committer {
         oldest_commit.committer.as_str()
     } else {
-        opts.committer.as_str()
+        committer_line.as_str()
     };
     let new_oid = write_replacement_commit(
         repo,
@@ -1804,7 +1809,7 @@ mod merge_call_tests {
         let opts = RewriteOptions {
             scope: RefScope::Branches,
             empty: EmptyPolicy::Drop,
-            committer: ident(0),
+            committer: ident(0).parse().expect("signature"),
             preserve_committer: false,
             sign: false,
         };
@@ -1842,7 +1847,7 @@ mod merge_call_tests {
             &RewriteOptions {
                 scope: RefScope::Branches,
                 empty: EmptyPolicy::Drop,
-                committer: ident(2),
+                committer: ident(2).parse().expect("signature"),
                 preserve_committer: false,
                 sign: true,
             },

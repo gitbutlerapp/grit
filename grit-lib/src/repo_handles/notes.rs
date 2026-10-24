@@ -1,6 +1,7 @@
 //! Git notes scoped to a [`Repository`](crate::repo::Repository) and a [`NotesRef`](crate::notes::NotesRef).
 
 use crate::error::Result;
+use crate::ident::Signature;
 use crate::list_limit::{fetch_plus_one, Limited};
 use crate::notes::{
     note_object_name, preview_notes_commit, read_blob_bytes, read_notes_snapshot, read_notes_tree,
@@ -11,15 +12,27 @@ use crate::objects::{ObjectId, ObjectKind};
 use crate::porcelain::merge::MemOverlayGuard;
 use crate::repo::Repository;
 
-/// Author/committer lines and commit message for a notes ref update.
+/// Author, committer, and commit message for a notes ref update.
 #[derive(Debug, Clone)]
 pub struct NotesWriteOptions {
     /// First line and body of the notes commit (trailing newline optional).
     pub message: String,
-    /// Full committer identity (`Name <email> timestamp tz`).
-    pub committer: String,
-    /// Full author identity; defaults to `committer` when `None`.
-    pub author: Option<String>,
+    /// Committer of the notes commit (for example from [`Repository::identity`]).
+    pub committer: Signature,
+    /// Author of the notes commit; defaults to [`Self::committer`] when `None`.
+    pub author: Option<Signature>,
+}
+
+impl NotesWriteOptions {
+    /// Validated `(author, committer)` header lines for the notes commit.
+    fn header_lines(&self) -> Result<(String, String)> {
+        let committer = &self.committer;
+        let author = self.author.as_ref().unwrap_or(committer);
+        for signature in [author, committer] {
+            signature.validate()?;
+        }
+        Ok((author.header_line(), committer.header_line()))
+    }
 }
 
 /// One `(annotated object, note blob)` pair from a notes tree.
@@ -218,10 +231,11 @@ impl<'repo> RepositoryNotes<'repo> {
         let _overlay = MemOverlayGuard::enter(self.repo.odb());
         let blob = self.repo.odb().write(ObjectKind::Blob, content)?;
         upsert_note_entry(&mut entries, &hex, blob);
+        let (author, committer) = options.header_lines()?;
         let commit = NotesCommit {
             message: &options.message,
-            author: options.author.as_deref().unwrap_or(&options.committer),
-            committer: &options.committer,
+            author: &author,
+            committer: &committer,
         };
         let notes_ref_tip_after = preview_notes_commit(self.repo, tip, &entries, &commit)?;
         Ok(NoteAddPlan {
@@ -256,10 +270,11 @@ impl<'repo> RepositoryNotes<'repo> {
             });
         }
         let _overlay = MemOverlayGuard::enter(self.repo.odb());
+        let (author, committer) = options.header_lines()?;
         let commit = NotesCommit {
             message: &options.message,
-            author: options.author.as_deref().unwrap_or(&options.committer),
-            committer: &options.committer,
+            author: &author,
+            committer: &committer,
         };
         let notes_ref_tip_after = preview_notes_commit(self.repo, tip, &entries, &commit)?;
         Ok(NoteRemovePlan {
@@ -299,7 +314,7 @@ impl<'repo> RepositoryNotes<'repo> {
     /// # let object = ObjectId::zero();
     /// let opts = NotesWriteOptions {
     ///     message: "add note".into(),
-    ///     committer: "User <u@example.com> 1000000000 +0000".into(),
+    ///     committer: "User <u@example.com> 1000000000 +0000".parse()?,
     ///     author: None,
     /// };
     /// repo.notes().add(&NotesRef::commits(), &object, b"text\n", &opts, false)?;
@@ -325,14 +340,15 @@ impl<'repo> RepositoryNotes<'repo> {
         }
         let blob = self.repo.odb().write(ObjectKind::Blob, content)?;
         upsert_note_entry(&mut entries, &hex, blob);
+        let (author, committer) = options.header_lines()?;
         write_notes_commit_idents(
             self.repo,
             notes_ref.as_str(),
             tip,
             &entries,
             &options.message,
-            options.author.as_deref().unwrap_or(&options.committer),
-            &options.committer,
+            &author,
+            &committer,
         )?;
         Ok(if exists {
             NoteAddOutcome::Replaced
@@ -381,14 +397,15 @@ impl<'repo> RepositoryNotes<'repo> {
         if removed.is_empty() {
             return Ok(removed);
         }
+        let (author, committer) = options.header_lines()?;
         write_notes_commit_idents(
             self.repo,
             notes_ref.as_str(),
             tip,
             &entries,
             &options.message,
-            options.author.as_deref().unwrap_or(&options.committer),
-            &options.committer,
+            &author,
+            &committer,
         )?;
         Ok(removed)
     }

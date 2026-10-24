@@ -34,7 +34,7 @@ fn rebase_opts() -> RebaseOntoOptions {
         rewrite: RewriteOptions {
             scope: RefScope::Head,
             empty: EmptyPolicy::Drop,
-            committer: COMMITTER.into(),
+            committer: COMMITTER.parse().expect("signature"),
             preserve_committer: false,
             sign: false,
         },

@@ -2,7 +2,6 @@
 
 use anyhow::{bail, Context, Result};
 use grit_lib::commit::{normalize_commit_date_override, parse_trailer_command_line_arg};
-use grit_lib::config::ident::author_identity_line;
 
 use crate::message_input::parse_author_cli;
 use grit_lib::config::ident_resolve::IdentRole;
@@ -387,21 +386,27 @@ fn build_commit_request(
     }
     let message_text = message.as_deref().unwrap_or("");
 
-    let config = repo.config().context("could not load config")?;
     let env = repo.environment();
     let now = crate::context::wall_clock_now(env);
-    let committer = context::identity(env, config.as_ref(), IdentRole::Committer, now)?;
+    let committer = Some(context::signature(repo, IdentRole::Committer, now)?);
     let author = if reset_author {
-        String::new()
+        None
     } else if let Some(arg) = author_override.as_deref() {
         let contact = parse_author_cli(arg)?;
-        let env_author_date = env.var(IdentRole::Author.env_date_key());
-        let date_override = author_date.as_deref().or(env_author_date.as_deref());
-        author_identity_line(&contact, date_override, now)
+        // `--date` reaches the library as `CommitRequest::author_date`, which replaces this time.
+        let env_author_date = author_date
+            .is_none()
+            .then(|| env.var(IdentRole::Author.env_date_key()))
+            .flatten();
+        Some(
+            contact
+                .signature(env_author_date.as_deref(), now)
+                .with_context(|| format!("invalid --author '{arg}'"))?,
+        )
     } else if amend || reuse_message_from.is_some() {
-        String::new()
+        None
     } else {
-        context::identity(env, config.as_ref(), IdentRole::Author, now)?
+        Some(context::signature(repo, IdentRole::Author, now)?)
     };
 
     let parsed_author_date = author_date.as_deref().map(parse_trailer_date).transpose()?;

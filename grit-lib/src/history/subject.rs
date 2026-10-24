@@ -120,7 +120,7 @@ mod tests {
         RewriteOptions {
             scope: RefScope::Head,
             empty: EmptyPolicy::Drop,
-            committer: committer(3),
+            committer: committer(3).parse().expect("signature"),
             preserve_committer: false,
             sign: false,
         }

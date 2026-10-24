@@ -72,8 +72,8 @@ fn commit_req(message: &str) -> CommitRequest {
     let id = ident();
     CommitRequest {
         message: message.to_owned(),
-        author: id.clone(),
-        committer: id,
+        author: Some(id.parse().expect("signature")),
+        committer: Some(id.parse().expect("signature")),
         allow_empty: false,
         sign_override: None,
         amend: false,
@@ -521,7 +521,7 @@ fn rewritten_commit_records_change_id_on_reword() {
         &RewriteOptions {
             scope: RefScope::Head,
             empty: EmptyPolicy::Drop,
-            committer: ident(),
+            committer: ident().parse().expect("signature"),
             preserve_committer: false,
             sign: false,
         },
@@ -578,7 +578,7 @@ fn squash_fold_preserves_oldest_change_id() {
             rewrite: RewriteOptions {
                 scope: RefScope::Head,
                 empty: EmptyPolicy::Drop,
-                committer: ident(),
+                committer: ident().parse().expect("signature"),
                 preserve_committer: false,
                 sign: false,
             },
@@ -629,7 +629,7 @@ fn reword_preserves_derived_change_id_for_headerless_git_commit() {
         &RewriteOptions {
             scope: RefScope::Head,
             empty: EmptyPolicy::Drop,
-            committer: ident(),
+            committer: ident().parse().expect("signature"),
             preserve_committer: false,
             sign: false,
         },

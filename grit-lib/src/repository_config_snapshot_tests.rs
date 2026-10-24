@@ -70,8 +70,8 @@ mod tests {
         stage(&repo3, &StageOptions::default(), &mut NullProgress).unwrap();
         let req = CommitRequest {
             message: "c".into(),
-            author: ident(),
-            committer: ident(),
+            author: Some(ident().parse().expect("signature")),
+            committer: Some(ident().parse().expect("signature")),
             allow_empty: false,
             sign_override: None,
             amend: false,

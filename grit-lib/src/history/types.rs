@@ -3,6 +3,7 @@
 use std::collections::BTreeMap;
 
 use crate::change_id::ChangeId;
+use crate::ident::Signature;
 use crate::objects::ObjectId;
 
 /// Description of a new commit to insert immediately before an existing one.
@@ -93,8 +94,10 @@ pub struct RewriteOptions {
     pub scope: RefScope,
     /// How to handle commits that become empty during replay.
     pub empty: EmptyPolicy,
-    /// Committer ident for every newly written commit (must include explicit time; no hidden clock).
-    pub committer: String,
+    /// Committer for every newly written commit (for example from
+    /// [`Repository::identity`](crate::repo::Repository::identity); no hidden clock).
+    #[serde(with = "signature_header_line")]
+    pub committer: Signature,
     /// When `true`, replayed commits keep the source committer line instead of [`Self::committer`].
     pub preserve_committer: bool,
     /// When `true`, honor [`commit.gpgsign`](crate::config::ConfigSet) and sign replacement commits
@@ -321,5 +324,26 @@ mod tests {
         assert_eq!(detached.head_change(), Some((oid(1), oid(11))));
         let dropped = make_plan(&[(1, None)], &[], Some(1), true);
         assert_eq!(dropped.head_change(), Some((oid(1), oid(1))));
+    }
+}
+
+/// Persist a [`Signature`] as its header line, the same text earlier plan files stored.
+mod signature_header_line {
+    use serde::{Deserialize, Deserializer, Serializer};
+
+    use crate::ident::Signature;
+
+    pub(super) fn serialize<S: Serializer>(
+        signature: &Signature,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        serializer.serialize_str(&signature.header_line())
+    }
+
+    pub(super) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Signature, D::Error> {
+        let line = String::deserialize(deserializer)?;
+        line.parse().map_err(serde::de::Error::custom)
     }
 }

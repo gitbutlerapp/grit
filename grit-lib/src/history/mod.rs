@@ -35,7 +35,7 @@
 //! let opts = RewriteOptions {
 //!     scope: RefScope::Branches,
 //!     empty: EmptyPolicy::Drop,
-//!     committer: "Rewriter <r@example.com> 1 +0000".into(),
+//!     committer: "Rewriter <r@example.com> 1 +0000".parse()?,
 //!     preserve_committer: false,
 //!     sign: true,
 //! };

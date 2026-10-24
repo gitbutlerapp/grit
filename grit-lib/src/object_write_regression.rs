@@ -249,8 +249,8 @@ fn create_commit_one_change_writes_only_changed_path_trees() {
         &repo,
         &CommitRequest {
             message: "initial".into(),
-            author: ident.clone(),
-            committer: ident.clone(),
+            author: Some(ident.parse().expect("signature")),
+            committer: Some(ident.parse().expect("signature")),
             allow_empty: false,
             sign_override: None,
             amend: false,
@@ -284,8 +284,8 @@ fn create_commit_one_change_writes_only_changed_path_trees() {
         &repo,
         &CommitRequest {
             message: "second".into(),
-            author: ident.clone(),
-            committer: ident,
+            author: Some(ident.parse().expect("signature")),
+            committer: Some(ident.parse().expect("signature")),
             allow_empty: false,
             sign_override: None,
             amend: false,
@@ -409,8 +409,8 @@ fn pack_signature_not_restatted_per_object() {
         &repo,
         &CommitRequest {
             message: "initial".into(),
-            author: ident.clone(),
-            committer: ident.clone(),
+            author: Some(ident.parse().expect("signature")),
+            committer: Some(ident.parse().expect("signature")),
             allow_empty: false,
             sign_override: None,
             amend: false,
@@ -483,8 +483,8 @@ fn pack_signature_not_restatted_per_object() {
         &repo,
         &CommitRequest {
             message: "packed follow-up".into(),
-            author: ident.clone(),
-            committer: ident,
+            author: Some(ident.parse().expect("signature")),
+            committer: Some(ident.parse().expect("signature")),
             allow_empty: false,
             sign_override: None,
             amend: false,

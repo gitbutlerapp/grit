@@ -112,8 +112,8 @@ fn one_commit(repo: &Repository) -> ObjectId {
         repo,
         &CommitRequest {
             message: "c1".into(),
-            author: ident.clone(),
-            committer: ident,
+            author: Some(ident.parse().expect("signature")),
+            committer: Some(ident.parse().expect("signature")),
             allow_empty: false,
             sign_override: None,
             amend: false,
@@ -374,8 +374,8 @@ fn fsck_passes_on_deltified_pack_after_many_commits() {
             &repo,
             &CommitRequest {
                 message: format!("commit {i}"),
-                author: ident.clone(),
-                committer: ident,
+                author: Some(ident.parse().expect("signature")),
+                committer: Some(ident.parse().expect("signature")),
                 allow_empty: false,
                 sign_override: None,
                 amend: false,
@@ -427,8 +427,8 @@ fn fsck_reports_corrupt_deltified_object_and_still_checks_pack() {
             &repo,
             &CommitRequest {
                 message: format!("commit {i}"),
-                author: ident.clone(),
-                committer: ident,
+                author: Some(ident.parse().expect("signature")),
+                committer: Some(ident.parse().expect("signature")),
                 allow_empty: false,
                 sign_override: None,
                 amend: false,
@@ -1335,8 +1335,8 @@ fn fsck_commit_with_multibyte_name_at_byte_six() {
         &repo,
         &CommitRequest {
             message: "one".into(),
-            author: ident.clone(),
-            committer: ident,
+            author: Some(ident.parse().expect("signature")),
+            committer: Some(ident.parse().expect("signature")),
             allow_empty: false,
             sign_override: None,
             amend: false,

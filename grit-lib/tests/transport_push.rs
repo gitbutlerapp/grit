@@ -495,8 +495,8 @@ fn push_new_branch_without_local_copy_of_advanced_remote_main() {
             repo,
             &CommitRequest {
                 message: message.to_owned(),
-                author: ident.clone(),
-                committer: ident,
+                author: Some(ident.parse().expect("signature")),
+                committer: Some(ident.parse().expect("signature")),
                 allow_empty: false,
                 sign_override: None,
                 amend: false,

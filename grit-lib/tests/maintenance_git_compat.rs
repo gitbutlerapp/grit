@@ -108,8 +108,8 @@ fn many_grit_commits_from(repo: &Repository, start: usize, n: usize) {
             repo,
             &CommitRequest {
                 message: format!("m {idx}"),
-                author: ident.clone(),
-                committer: ident.clone(),
+                author: Some(ident.parse().expect("signature")),
+                committer: Some(ident.parse().expect("signature")),
                 allow_empty: false,
                 sign_override: None,
                 amend: false,
@@ -1471,8 +1471,8 @@ fn incremental_repack_with_bitmap_midx_readable_by_git() {
         &repo,
         &CommitRequest {
             message: "base".into(),
-            author: ident.clone(),
-            committer: ident.clone(),
+            author: Some(ident.parse().expect("signature")),
+            committer: Some(ident.parse().expect("signature")),
             allow_empty: false,
             sign_override: None,
             amend: false,
@@ -1494,8 +1494,8 @@ fn incremental_repack_with_bitmap_midx_readable_by_git() {
         &repo,
         &CommitRequest {
             message: "child".into(),
-            author: ident.clone(),
-            committer: ident.clone(),
+            author: Some(ident.parse().expect("signature")),
+            committer: Some(ident.parse().expect("signature")),
             allow_empty: false,
             sign_override: None,
             amend: false,

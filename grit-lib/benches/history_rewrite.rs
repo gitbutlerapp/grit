@@ -132,7 +132,7 @@ fn bench_history_rewrite(c: &mut Criterion) {
                 &RewriteOptions {
                     scope: RefScope::Branches,
                     empty: EmptyPolicy::Drop,
-                    committer: "Bench <b@grit.test> 9 +0000".into(),
+                    committer: "Bench <b@grit.test> 9 +0000".parse().expect("signature"),
                     preserve_committer: false,
                     sign: true,
                 },

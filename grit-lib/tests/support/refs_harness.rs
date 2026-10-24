@@ -242,8 +242,8 @@ fn grit_empty_commit_with_message(worktree: &Path, message: &str) -> ObjectId {
         &repo,
         &CommitRequest {
             message: message.to_owned(),
-            author: ident.clone(),
-            committer: ident,
+            author: Some(ident.parse().expect("signature")),
+            committer: Some(ident.parse().expect("signature")),
             allow_empty: true,
             sign_override: None,
             amend: false,

@@ -21,8 +21,8 @@ fn continue_options(message: Option<&str>) -> ContinueOptions {
     let id = ident();
     ContinueOptions {
         message: message.map(str::to_owned),
-        author: id.clone(),
-        committer: id,
+        author: Some(id.parse().expect("signature")),
+        committer: Some(id.parse().expect("signature")),
     }
 }
 

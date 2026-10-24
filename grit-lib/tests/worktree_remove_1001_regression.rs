@@ -29,8 +29,16 @@ use grit_test_support::git;
 fn commit_request(message: &str) -> CommitRequest {
     CommitRequest {
         message: message.to_owned(),
-        author: "Test <t@example.com> 1000000000 +0000".into(),
-        committer: "Test <t@example.com> 1000000000 +0000".into(),
+        author: Some(
+            "Test <t@example.com> 1000000000 +0000"
+                .parse()
+                .expect("signature"),
+        ),
+        committer: Some(
+            "Test <t@example.com> 1000000000 +0000"
+                .parse()
+                .expect("signature"),
+        ),
         allow_empty: false,
         sign_override: None,
         amend: false,

@@ -144,7 +144,7 @@ fn move_commit_before_and_after() {
     let opts = RewriteOptions {
         scope: RefScope::Branches,
         empty: EmptyPolicy::Drop,
-        committer: committer(1),
+        committer: committer(1).parse().expect("signature"),
         preserve_committer: false,
         sign: true,
     };
@@ -186,7 +186,7 @@ fn move_commit_to_top_and_bottom_of_segment() {
     let opts = RewriteOptions {
         scope: RefScope::Branches,
         empty: EmptyPolicy::Drop,
-        committer: committer(1),
+        committer: committer(1).parse().expect("signature"),
         preserve_committer: false,
         sign: true,
     };
@@ -215,7 +215,7 @@ fn move_noop_errors() {
     let opts = RewriteOptions {
         scope: RefScope::Head,
         empty: EmptyPolicy::Drop,
-        committer: committer(1),
+        committer: committer(1).parse().expect("signature"),
         preserve_committer: false,
         sign: true,
     };
@@ -243,7 +243,7 @@ fn move_with_ancient_merge_on_first_parent_chain() {
     let opts = RewriteOptions {
         scope: RefScope::Head,
         empty: EmptyPolicy::Drop,
-        committer: committer(1),
+        committer: committer(1).parse().expect("signature"),
         preserve_committer: false,
         sign: true,
     };
@@ -276,7 +276,7 @@ fn move_with_forked_topic_branch_succeeds() {
     let opts = RewriteOptions {
         scope: RefScope::Branches,
         empty: EmptyPolicy::Drop,
-        committer: committer(1),
+        committer: committer(1).parse().expect("signature"),
         preserve_committer: false,
         sign: true,
     };
@@ -319,7 +319,7 @@ fn move_across_merge_rejected() {
     let opts = RewriteOptions {
         scope: RefScope::Head,
         empty: EmptyPolicy::Drop,
-        committer: committer(1),
+        committer: committer(1).parse().expect("signature"),
         preserve_committer: false,
         sign: true,
     };
@@ -348,7 +348,7 @@ fn move_conflict_changes_nothing() {
     let opts = RewriteOptions {
         scope: RefScope::Head,
         empty: EmptyPolicy::Drop,
-        committer: committer(1),
+        committer: committer(1).parse().expect("signature"),
         preserve_committer: false,
         sign: true,
     };
@@ -378,7 +378,7 @@ fn move_maps_branch_in_segment() {
     let opts = RewriteOptions {
         scope: RefScope::Branches,
         empty: EmptyPolicy::Drop,
-        committer: committer(1),
+        committer: committer(1).parse().expect("signature"),
         preserve_committer: false,
         sign: true,
     };
@@ -415,7 +415,7 @@ fn history_move_matches_git_rebase_reorder() {
     let opts = RewriteOptions {
         scope: RefScope::Branches,
         empty: EmptyPolicy::Drop,
-        committer: PINNED_COMMITTER.into(),
+        committer: PINNED_COMMITTER.parse().expect("signature"),
         preserve_committer: false,
         sign: true,
     };

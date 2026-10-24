@@ -469,7 +469,7 @@ mod tests {
             &RewriteOptions {
                 scope: RefScope::Head,
                 empty: EmptyPolicy::Drop,
-                committer: "T <t@t> 1 +0000".into(),
+                committer: "T <t@t> 1 +0000".parse().expect("signature"),
                 preserve_committer: false,
                 sign: false,
             },

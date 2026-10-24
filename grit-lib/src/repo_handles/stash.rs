@@ -72,6 +72,7 @@ impl<'repo> RepositoryStash<'repo> {
     ///
     /// ```
     /// # use grit_lib::repo::Repository;
+    /// # use grit_lib::config::ident_resolve::IdentRole;
     /// # use grit_lib::stash::{StashMode, StashPushOptions};
     /// # use std::path::Path;
     /// # fn demo() -> grit_lib::error::Result<()> {
@@ -79,7 +80,7 @@ impl<'repo> RepositoryStash<'repo> {
     /// let opts = StashPushOptions {
     ///     message: Some("wip".into()),
     ///     include_untracked: false,
-    ///     identity: "User <u@example.com> 1000000000 +0000".into(),
+    ///     identity: repo.identity(IdentRole::Committer, repo.identity_now())?,
     ///     selection: None,
     ///     pathspecs: Vec::new(),
     ///     dry_run: false,

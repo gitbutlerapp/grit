@@ -34,7 +34,7 @@ fn squash_opts(scope: RefScope) -> SquashOptions {
         rewrite: RewriteOptions {
             scope,
             empty: EmptyPolicy::Drop,
-            committer: committer(1),
+            committer: committer(1).parse().expect("signature"),
             preserve_committer: false,
             sign: true,
         },

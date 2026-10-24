@@ -53,7 +53,7 @@ fn seed_commit(root: &std::path::Path, path: &str, content: &str, msg: &str) -> 
 fn write_opts(message: &str) -> NotesWriteOptions {
     NotesWriteOptions {
         message: message.into(),
-        committer: IDENT.into(),
+        committer: IDENT.parse().expect("signature"),
         author: None,
     }
 }
@@ -468,8 +468,8 @@ fn notes_on_reftable_repository_use_the_ref_store() {
         &repo,
         &CommitRequest {
             message: "init".into(),
-            author: IDENT.into(),
-            committer: IDENT.into(),
+            author: Some(IDENT.parse().expect("signature")),
+            committer: Some(IDENT.parse().expect("signature")),
             allow_empty: true,
             sign_override: None,
             amend: false,

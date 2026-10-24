@@ -869,8 +869,16 @@ mod tests {
     fn commit(repo: &Repository, message: &str) -> ObjectId {
         let req = CommitRequest {
             message: message.into(),
-            author: "T <t@example.com> 1700000000 +0000".into(),
-            committer: "T <t@example.com> 1700000000 +0000".into(),
+            author: Some(
+                "T <t@example.com> 1700000000 +0000"
+                    .parse()
+                    .expect("signature"),
+            ),
+            committer: Some(
+                "T <t@example.com> 1700000000 +0000"
+                    .parse()
+                    .expect("signature"),
+            ),
             allow_empty: true,
             sign_override: None,
             amend: false,

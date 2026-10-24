@@ -9,7 +9,7 @@
 use crate::branch_tracking::resolve_pull_integration_base;
 use crate::change_id::{logical_change_id_for_commit, ChangeId};
 use crate::config::environment::Environment;
-use crate::config::ident_resolve::{resolve_identity_with, IdentRole};
+use crate::config::ident_resolve::IdentRole;
 use crate::config::parse_git_config_maybe_bool;
 use crate::config::ConfigSet;
 use crate::error::Error;
@@ -684,14 +684,9 @@ fn rebase_fetched_upstream(
             )))
         })?;
 
-    let config = repo.config().map_err(PullError::Repository)?;
-    let committer = resolve_identity_with(
-        repo.environment(),
-        config.as_ref(),
-        IdentRole::Committer,
-        repo.identity_now(),
-    )
-    .map_err(|e| PullError::Repository(Error::Message(e.to_string())))?;
+    let committer = repo
+        .identity(IdentRole::Committer, repo.identity_now())
+        .map_err(PullError::Repository)?;
 
     let mut rebase_opts = RebaseOntoOptions::new(RewriteOptions {
         scope: RefScope::Head,

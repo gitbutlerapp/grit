@@ -73,7 +73,7 @@ fn rewrite_opts(committer: &str, sign: bool) -> RewriteOptions {
     RewriteOptions {
         scope: RefScope::Branches,
         empty: EmptyPolicy::Drop,
-        committer: committer.to_owned(),
+        committer: committer.parse().expect("signature"),
         preserve_committer: false,
         sign,
     }
@@ -113,8 +113,8 @@ fn signed_tip_via_grit(root: &Path, gpgsign: bool) -> ObjectId {
         &repo,
         &CommitRequest {
             message: "signed subject\n".to_owned(),
-            author: ident.clone(),
-            committer: ident,
+            author: Some(ident.parse().expect("signature")),
+            committer: Some(ident.parse().expect("signature")),
             allow_empty: false,
             sign_override: None,
             amend: false,

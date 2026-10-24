@@ -88,8 +88,8 @@ fn noop_tracked_restage_preserves_cache_tree_at_campaign_scale() {
 fn commit_worktree_req(message: &str, allow_empty: bool) -> CommitRequest {
     CommitRequest {
         message: message.to_owned(),
-        author: ident(),
-        committer: ident(),
+        author: Some(ident().parse().expect("signature")),
+        committer: Some(ident().parse().expect("signature")),
         allow_empty,
         sign_override: None,
         amend: false,

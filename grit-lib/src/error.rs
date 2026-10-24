@@ -1019,9 +1019,14 @@ pub enum Error {
         message: String,
     },
 
-    /// Author or committer string on [`crate::porcelain::commit::CommitRequest`] is invalid.
+    /// Author or committer on [`crate::porcelain::commit::CommitRequest`] is invalid.
     #[error(transparent)]
     InvalidIdentity(#[from] crate::ident::CommitIdentityError),
+
+    /// No usable author or committer identity is configured
+    /// ([`crate::repo::Repository::identity`]).
+    #[error(transparent)]
+    Identity(#[from] crate::config::ident_resolve::IdentityError),
 
     /// User-facing message that should be printed verbatim (no extra prefix).
     ///

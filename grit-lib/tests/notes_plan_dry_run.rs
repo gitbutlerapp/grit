@@ -41,7 +41,9 @@ fn init_with_commit() -> (TempDir, grit_lib::objects::ObjectId) {
 fn write_opts() -> NotesWriteOptions {
     NotesWriteOptions {
         message: "add note".into(),
-        committer: "Test <t@example.com> 1700000000 +0000".into(),
+        committer: "Test <t@example.com> 1700000000 +0000"
+            .parse()
+            .expect("signature"),
         author: None,
     }
 }

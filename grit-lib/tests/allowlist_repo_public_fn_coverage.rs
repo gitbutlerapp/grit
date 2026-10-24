@@ -93,8 +93,8 @@ fn seed_main_commit(repo: &Repository, dir: &Path) -> ObjectId {
         repo,
         &CommitRequest {
             message: "seed".into(),
-            author: ident.clone(),
-            committer: ident,
+            author: Some(ident.parse().expect("signature")),
+            committer: Some(ident.parse().expect("signature")),
             allow_empty: false,
             sign_override: None,
             amend: false,
@@ -393,7 +393,7 @@ fn porcelain_stash_tag_status_and_worktree() {
     let _ = repo.stash().push(&StashPushOptions {
         message: Some("wip".into()),
         include_untracked: false,
-        identity: identity.clone(),
+        identity: identity.parse().expect("signature"),
         selection: None,
         pathspecs: Vec::new(),
         dry_run: false,

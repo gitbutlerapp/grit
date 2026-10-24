@@ -139,7 +139,7 @@ fn bench_history_plan_rebase(c: &mut Criterion) {
     let opts = RebaseOntoOptions::new(RewriteOptions {
         scope: RefScope::Head,
         empty: EmptyPolicy::Drop,
-        committer: "Bench <b@grit.test> 2 +0000".into(),
+        committer: "Bench <b@grit.test> 2 +0000".parse().expect("signature"),
         preserve_committer: false,
         sign: false,
     });

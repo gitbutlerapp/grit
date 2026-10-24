@@ -308,8 +308,8 @@ fn list_and_delete_on_reftable_backend() {
         &repo,
         &CommitRequest {
             message: "one".into(),
-            author: ident.into(),
-            committer: ident.into(),
+            author: Some(ident.parse().expect("signature")),
+            committer: Some(ident.parse().expect("signature")),
             allow_empty: true,
             sign_override: None,
             amend: false,

@@ -46,7 +46,9 @@ fn stash_opts(mode: StashMode, include_untracked: bool) -> StashPushOptions {
     StashPushOptions {
         message: None,
         include_untracked,
-        identity: "Test <t@example.com> 1000000000 +0000".to_owned(),
+        identity: "Test <t@example.com> 1000000000 +0000"
+            .parse()
+            .expect("signature"),
         selection: None,
         pathspecs: Vec::new(),
         dry_run: false,

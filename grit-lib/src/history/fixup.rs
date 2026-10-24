@@ -653,7 +653,7 @@ mod hunk_selection_restore_tests {
             rewrite: RewriteOptions {
                 scope: RefScope::Head,
                 empty: EmptyPolicy::Drop,
-                committer: committer(),
+                committer: committer().parse().expect("signature"),
                 preserve_committer: false,
                 sign: true,
             },

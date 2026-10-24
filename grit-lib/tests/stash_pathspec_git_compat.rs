@@ -30,7 +30,7 @@ fn stash_opts(include_untracked: bool, pathspecs: Vec<String>) -> StashPushOptio
     StashPushOptions {
         message: Some("pathspec".into()),
         include_untracked,
-        identity: IDENTITY.into(),
+        identity: IDENTITY.parse().expect("signature"),
         selection: None,
         pathspecs,
         dry_run: false,

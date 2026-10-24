@@ -122,8 +122,8 @@ fn create_commit_bytes_match_git_with_explicit_environment_identity() {
         &repo,
         &CommitRequest {
             message: "subject".to_owned(),
-            author,
-            committer,
+            author: Some(author.parse().expect("signature")),
+            committer: Some(committer.parse().expect("signature")),
             allow_empty: false,
             sign_override: None,
             amend: false,

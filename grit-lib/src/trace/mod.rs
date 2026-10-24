@@ -64,8 +64,16 @@ mod tests {
             let repo = Repository::init(dir.path(), &InitOptions::default()).unwrap();
             let req = crate::porcelain::commit::CommitRequest {
                 message: "trace test".into(),
-                author: "T <t@example.com>".into(),
-                committer: "T <t@example.com>".into(),
+                author: Some(
+                    "T <t@example.com> 1700000000 +0000"
+                        .parse()
+                        .expect("signature"),
+                ),
+                committer: Some(
+                    "T <t@example.com> 1700000000 +0000"
+                        .parse()
+                        .expect("signature"),
+                ),
                 allow_empty: true,
                 sign_override: None,
                 amend: false,

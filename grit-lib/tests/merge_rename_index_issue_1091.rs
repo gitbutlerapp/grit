@@ -19,8 +19,8 @@ fn commit_req(message: &str) -> CommitRequest {
     let ident = "T <t@e.com> 1700000000 +0000".to_owned();
     CommitRequest {
         message: message.to_owned(),
-        author: ident.clone(),
-        committer: ident,
+        author: Some(ident.parse().expect("signature")),
+        committer: Some(ident.parse().expect("signature")),
         allow_empty: false,
         sign_override: None,
         amend: false,

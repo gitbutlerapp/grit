@@ -379,10 +379,8 @@ pub fn run_push(args: StashPushRunArgs<'_>) -> Result<StashPushOutcome> {
         pathspec_args,
     } = args;
     let repo = context::discover()?;
-    let env = context::environment();
-    let config = repo.config().context("could not load config")?;
-    let now = context::wall_clock_now(&env);
-    let identity = context::identity(&env, &config, IdentRole::Committer, now)?;
+    let now = context::wall_clock_now(repo.environment());
+    let identity = context::signature(&repo, IdentRole::Committer, now)?;
     let mut selection = if hunks.is_empty() && lines.is_empty() {
         None
     } else {

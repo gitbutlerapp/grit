@@ -57,8 +57,8 @@ fn empty_commit_req() -> CommitRequest {
     let id = commit_ident();
     CommitRequest {
         message: String::new(),
-        author: id.clone(),
-        committer: id,
+        author: Some(id.parse().expect("signature")),
+        committer: Some(id.parse().expect("signature")),
         ..Default::default()
     }
 }

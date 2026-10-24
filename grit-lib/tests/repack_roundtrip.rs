@@ -62,8 +62,8 @@ fn many_commits(repo: &Repository, n: usize) {
             repo,
             &CommitRequest {
                 message: format!("c{i}"),
-                author: ident.clone(),
-                committer: ident.clone(),
+                author: Some(ident.parse().expect("signature")),
+                committer: Some(ident.parse().expect("signature")),
                 allow_empty: false,
                 sign_override: None,
                 amend: false,

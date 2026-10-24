@@ -51,7 +51,7 @@ fn main() -> Result<(), grit_lib::error::Error> {
         b"library guide note\n",
         &NotesWriteOptions {
             message: "add note".into(),
-            committer: IDENT.into(),
+            committer: IDENT.parse()?,
             author: None,
         },
         false,

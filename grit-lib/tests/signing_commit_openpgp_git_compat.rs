@@ -127,8 +127,8 @@ fn create_commit_openpgp_uses_committer_default_without_signingkey() {
         &repo,
         &CommitRequest {
             message: "openpgp default key".to_owned(),
-            author: ident.clone(),
-            committer: ident,
+            author: Some(ident.parse().expect("signature")),
+            committer: Some(ident.parse().expect("signature")),
             allow_empty: false,
             sign_override: None,
             amend: false,

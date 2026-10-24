@@ -337,8 +337,8 @@ fn stage_and_auto_stage_commit_write_through_custom_primary() {
 
     let req = CommitRequest {
         message: "first".into(),
-        author: "T <t@example.com> 1 +0000".into(),
-        committer: "T <t@example.com> 1 +0000".into(),
+        author: Some("T <t@example.com> 1 +0000".parse().expect("signature")),
+        committer: Some("T <t@example.com> 1 +0000".parse().expect("signature")),
         ..Default::default()
     };
     let first = commit_with_scope(&repo, &req, CommitScope::Staged, &mut NullProgress)

@@ -155,7 +155,9 @@ fn rewrite_opts(seq: i64) -> RewriteOptions {
     RewriteOptions {
         scope: RefScope::Branches,
         empty: EmptyPolicy::Drop,
-        committer: format!("Rewriter <r@grit.test> {seq} +0000"),
+        committer: format!("Rewriter <r@grit.test> {seq} +0000")
+            .parse()
+            .expect("signature"),
         preserve_committer: false,
         sign: true,
     }

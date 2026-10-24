@@ -868,7 +868,7 @@ mod tests {
         let opts = RebaseOntoOptions::new(RewriteOptions {
             scope: RefScope::Head,
             empty: crate::revwalk::history::EmptyPolicy::Drop,
-            committer: id.clone(),
+            committer: id.parse().expect("signature"),
             preserve_committer: false,
             sign: false,
         });
@@ -974,7 +974,7 @@ mod tests {
         let opts = RebaseOntoOptions::new(RewriteOptions {
             scope: RefScope::Head,
             empty: crate::revwalk::history::EmptyPolicy::Drop,
-            committer: id.clone(),
+            committer: id.parse().expect("signature"),
             preserve_committer: false,
             sign: false,
         });
@@ -1015,7 +1015,7 @@ mod tests {
         let opts = RebaseOntoOptions::new(RewriteOptions {
             scope: RefScope::Head,
             empty: crate::revwalk::history::EmptyPolicy::Drop,
-            committer: id.clone(),
+            committer: id.parse().expect("signature"),
             preserve_committer: false,
             sign: false,
         });

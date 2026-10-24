@@ -2197,12 +2197,15 @@ pub grit_lib::config::ident::SignatureError::BeforeEpoch
 pub grit_lib::config::ident::SignatureError::ForbiddenCharacter
 pub grit_lib::config::ident::SignatureError::ForbiddenCharacter::ch: char
 pub grit_lib::config::ident::SignatureError::ForbiddenCharacter::field: grit_lib::ident::SignatureField
+pub grit_lib::config::ident::SignatureError::Malformed
 pub grit_lib::config::ident::SignatureError::SubMinuteOffset
 impl core::clone::Clone for grit_lib::ident::SignatureError
 pub fn grit_lib::ident::SignatureError::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::ident::SignatureError
 impl core::cmp::PartialEq for grit_lib::ident::SignatureError
 pub fn grit_lib::ident::SignatureError::eq(&self, &Self) -> bool
+impl core::convert::From<grit_lib::ident::SignatureError> for grit_lib::config::ident_resolve::IdentityError
+pub fn grit_lib::config::ident_resolve::IdentityError::from(grit_lib::ident::SignatureError) -> Self
 impl core::convert::From<grit_lib::ident::SignatureError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::ident::SignatureError) -> Self
 impl core::error::Error for grit_lib::ident::SignatureError
@@ -2280,6 +2283,8 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::ident::SignatureTimestam
 pub struct grit_lib::config::ident::AuthorContact
 pub grit_lib::config::ident::AuthorContact::email: alloc::string::String
 pub grit_lib::config::ident::AuthorContact::name: alloc::string::String
+impl grit_lib::ident::AuthorContact
+pub fn grit_lib::ident::AuthorContact::signature(&self, core::option::Option<&str>, time::offset_date_time::OffsetDateTime) -> core::result::Result<grit_lib::ident::Signature, grit_lib::ident::SignatureError>
 impl core::clone::Clone for grit_lib::ident::AuthorContact
 pub fn grit_lib::ident::AuthorContact::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::ident::AuthorContact
@@ -2331,6 +2336,9 @@ pub fn grit_lib::ident::Signature::eq(&self, &Self) -> bool
 impl core::fmt::Debug for grit_lib::ident::Signature
 pub fn grit_lib::ident::Signature::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for grit_lib::ident::Signature
+impl core::str::traits::FromStr for grit_lib::ident::Signature
+pub type grit_lib::ident::Signature::Err = grit_lib::ident::SignatureError
+pub fn grit_lib::ident::Signature::from_str(&str) -> core::result::Result<Self, Self::Err>
 impl core::marker::Freeze for grit_lib::ident::Signature
 impl core::marker::Send for grit_lib::ident::Signature
 impl core::marker::Sync for grit_lib::ident::Signature
@@ -2401,8 +2409,12 @@ pub grit_lib::config::ident_resolve::IdentityError::AutoDetectionDisabled::role:
 pub grit_lib::config::ident_resolve::IdentityError::EmptyName
 pub grit_lib::config::ident_resolve::IdentityError::EmptyName::email: alloc::string::String
 pub grit_lib::config::ident_resolve::IdentityError::EmptyName::role: grit_lib::config::ident_resolve::IdentRole
+pub grit_lib::config::ident_resolve::IdentityError::InvalidDate
+pub grit_lib::config::ident_resolve::IdentityError::InvalidDate::date: alloc::string::String
+pub grit_lib::config::ident_resolve::IdentityError::InvalidDate::role: grit_lib::config::ident_resolve::IdentRole
 pub grit_lib::config::ident_resolve::IdentityError::InvalidName
 pub grit_lib::config::ident_resolve::IdentityError::InvalidName::name: alloc::string::String
+pub grit_lib::config::ident_resolve::IdentityError::InvalidSignature(grit_lib::ident::SignatureError)
 pub grit_lib::config::ident_resolve::IdentityError::MissingConfiguredEmail
 pub grit_lib::config::ident_resolve::IdentityError::MissingConfiguredEmail::role: grit_lib::config::ident_resolve::IdentRole
 impl core::clone::Clone for grit_lib::config::ident_resolve::IdentityError
@@ -2410,7 +2422,12 @@ pub fn grit_lib::config::ident_resolve::IdentityError::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::config::ident_resolve::IdentityError
 impl core::cmp::PartialEq for grit_lib::config::ident_resolve::IdentityError
 pub fn grit_lib::config::ident_resolve::IdentityError::eq(&self, &Self) -> bool
+impl core::convert::From<grit_lib::config::ident_resolve::IdentityError> for grit_lib::error::Error
+pub fn grit_lib::error::Error::from(grit_lib::config::ident_resolve::IdentityError) -> Self
+impl core::convert::From<grit_lib::ident::SignatureError> for grit_lib::config::ident_resolve::IdentityError
+pub fn grit_lib::config::ident_resolve::IdentityError::from(grit_lib::ident::SignatureError) -> Self
 impl core::error::Error for grit_lib::config::ident_resolve::IdentityError
+pub fn grit_lib::config::ident_resolve::IdentityError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
 impl core::fmt::Debug for grit_lib::config::ident_resolve::IdentityError
 pub fn grit_lib::config::ident_resolve::IdentityError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::fmt::Display for grit_lib::config::ident_resolve::IdentityError
@@ -2434,6 +2451,7 @@ pub fn grit_lib::config::ident_resolve::resolve_email_with<E: grit_lib::config::
 pub fn grit_lib::config::ident_resolve::resolve_identity_with<E: grit_lib::config::ident_resolve::IdentityEnv>(&E, &grit_lib::config::ConfigSet, grit_lib::config::ident_resolve::IdentRole, time::offset_date_time::OffsetDateTime) -> core::result::Result<alloc::string::String, grit_lib::config::ident_resolve::IdentityError>
 pub fn grit_lib::config::ident_resolve::resolve_loose_committer_identity_with<E: grit_lib::config::ident_resolve::IdentityEnv>(&E, &grit_lib::config::ConfigSet, time::offset_date_time::OffsetDateTime) -> alloc::string::String
 pub fn grit_lib::config::ident_resolve::resolve_name_with<E: grit_lib::config::ident_resolve::IdentityEnv>(&E, &grit_lib::config::ConfigSet, grit_lib::config::ident_resolve::IdentRole) -> core::result::Result<alloc::string::String, grit_lib::config::ident_resolve::IdentityError>
+pub fn grit_lib::config::ident_resolve::resolve_signature_with<E: grit_lib::config::ident_resolve::IdentityEnv>(&E, &grit_lib::config::ConfigSet, grit_lib::config::ident_resolve::IdentRole, time::offset_date_time::OffsetDateTime) -> core::result::Result<grit_lib::ident::Signature, grit_lib::config::ident_resolve::IdentityError>
 pub mod grit_lib::config::init_filesystem
 pub struct grit_lib::config::init_filesystem::InitFilesystemConfigOptions
 pub grit_lib::config::init_filesystem::InitFilesystemConfigOptions::force_precompose_probe: bool
@@ -5248,6 +5266,7 @@ pub grit_lib::error::Error::HashCollision::oid: grit_lib::objects::ObjectId
 pub grit_lib::error::Error::History(grit_lib::revwalk::history::HistoryError)
 pub grit_lib::error::Error::Hook(grit_lib::command_runner::hooks::HookError)
 pub grit_lib::error::Error::HunkSelection(grit_lib::porcelain::hunk_select::HunkSelectError)
+pub grit_lib::error::Error::Identity(grit_lib::config::ident_resolve::IdentityError)
 pub grit_lib::error::Error::IndexError(alloc::string::String)
 pub grit_lib::error::Error::IndexFsmonitorExtensionBadVersion(u32)
 pub grit_lib::error::Error::IndexFsmonitorExtensionEwahInvalid
@@ -5430,6 +5449,8 @@ impl core::convert::From<core::io::error::Error> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(core::io::error::Error) -> Self
 impl core::convert::From<grit_lib::command_runner::hooks::HookError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::command_runner::hooks::HookError) -> Self
+impl core::convert::From<grit_lib::config::ident_resolve::IdentityError> for grit_lib::error::Error
+pub fn grit_lib::error::Error::from(grit_lib::config::ident_resolve::IdentityError) -> Self
 impl core::convert::From<grit_lib::diff::NoIndexError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::diff::NoIndexError) -> Self
 impl core::convert::From<grit_lib::diff::pickaxe::PickaxeError> for grit_lib::error::Error
@@ -5914,12 +5935,15 @@ pub grit_lib::ident::SignatureError::BeforeEpoch
 pub grit_lib::ident::SignatureError::ForbiddenCharacter
 pub grit_lib::ident::SignatureError::ForbiddenCharacter::ch: char
 pub grit_lib::ident::SignatureError::ForbiddenCharacter::field: grit_lib::ident::SignatureField
+pub grit_lib::ident::SignatureError::Malformed
 pub grit_lib::ident::SignatureError::SubMinuteOffset
 impl core::clone::Clone for grit_lib::ident::SignatureError
 pub fn grit_lib::ident::SignatureError::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::ident::SignatureError
 impl core::cmp::PartialEq for grit_lib::ident::SignatureError
 pub fn grit_lib::ident::SignatureError::eq(&self, &Self) -> bool
+impl core::convert::From<grit_lib::ident::SignatureError> for grit_lib::config::ident_resolve::IdentityError
+pub fn grit_lib::config::ident_resolve::IdentityError::from(grit_lib::ident::SignatureError) -> Self
 impl core::convert::From<grit_lib::ident::SignatureError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::ident::SignatureError) -> Self
 impl core::error::Error for grit_lib::ident::SignatureError
@@ -5997,6 +6021,8 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::ident::SignatureTimestam
 pub struct grit_lib::ident::AuthorContact
 pub grit_lib::ident::AuthorContact::email: alloc::string::String
 pub grit_lib::ident::AuthorContact::name: alloc::string::String
+impl grit_lib::ident::AuthorContact
+pub fn grit_lib::ident::AuthorContact::signature(&self, core::option::Option<&str>, time::offset_date_time::OffsetDateTime) -> core::result::Result<grit_lib::ident::Signature, grit_lib::ident::SignatureError>
 impl core::clone::Clone for grit_lib::ident::AuthorContact
 pub fn grit_lib::ident::AuthorContact::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::ident::AuthorContact
@@ -6048,6 +6074,9 @@ pub fn grit_lib::ident::Signature::eq(&self, &Self) -> bool
 impl core::fmt::Debug for grit_lib::ident::Signature
 pub fn grit_lib::ident::Signature::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::StructuralPartialEq for grit_lib::ident::Signature
+impl core::str::traits::FromStr for grit_lib::ident::Signature
+pub type grit_lib::ident::Signature::Err = grit_lib::ident::SignatureError
+pub fn grit_lib::ident::Signature::from_str(&str) -> core::result::Result<Self, Self::Err>
 impl core::marker::Freeze for grit_lib::ident::Signature
 impl core::marker::Send for grit_lib::ident::Signature
 impl core::marker::Sync for grit_lib::ident::Signature
@@ -12437,9 +12466,9 @@ pub struct grit_lib::porcelain::commit::CommitRequest
 pub grit_lib::porcelain::commit::CommitRequest::allow_empty: bool
 pub grit_lib::porcelain::commit::CommitRequest::amend: bool
 pub grit_lib::porcelain::commit::CommitRequest::assume_worktree_synced: bool
-pub grit_lib::porcelain::commit::CommitRequest::author: alloc::string::String
+pub grit_lib::porcelain::commit::CommitRequest::author: core::option::Option<grit_lib::ident::Signature>
 pub grit_lib::porcelain::commit::CommitRequest::author_date: core::option::Option<alloc::string::String>
-pub grit_lib::porcelain::commit::CommitRequest::committer: alloc::string::String
+pub grit_lib::porcelain::commit::CommitRequest::committer: core::option::Option<grit_lib::ident::Signature>
 pub grit_lib::porcelain::commit::CommitRequest::dry_run: bool
 pub grit_lib::porcelain::commit::CommitRequest::hooks: grit_lib::porcelain::commit::HookPolicy
 pub grit_lib::porcelain::commit::CommitRequest::message: alloc::string::String
@@ -12963,8 +12992,8 @@ impl core::marker::UnsafeUnpin for grit_lib::porcelain::merge::MergePrediction
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::merge::MergePrediction
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::merge::MergePrediction
 pub struct grit_lib::porcelain::merge::ContinueOptions
-pub grit_lib::porcelain::merge::ContinueOptions::author: alloc::string::String
-pub grit_lib::porcelain::merge::ContinueOptions::committer: alloc::string::String
+pub grit_lib::porcelain::merge::ContinueOptions::author: core::option::Option<grit_lib::ident::Signature>
+pub grit_lib::porcelain::merge::ContinueOptions::committer: core::option::Option<grit_lib::ident::Signature>
 pub grit_lib::porcelain::merge::ContinueOptions::message: core::option::Option<alloc::string::String>
 impl core::clone::Clone for grit_lib::porcelain::merge::ContinueOptions
 pub fn grit_lib::porcelain::merge::ContinueOptions::clone(&self) -> Self
@@ -13950,7 +13979,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::stash::StashPreview
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::stash::StashPreview
 pub struct grit_lib::porcelain::stash::StashPushOptions
 pub grit_lib::porcelain::stash::StashPushOptions::dry_run: bool
-pub grit_lib::porcelain::stash::StashPushOptions::identity: alloc::string::String
+pub grit_lib::porcelain::stash::StashPushOptions::identity: grit_lib::ident::Signature
 pub grit_lib::porcelain::stash::StashPushOptions::include_untracked: bool
 pub grit_lib::porcelain::stash::StashPushOptions::message: core::option::Option<alloc::string::String>
 pub grit_lib::porcelain::stash::StashPushOptions::mode: grit_lib::stash::StashMode
@@ -14613,6 +14642,7 @@ pub grit_lib::prelude::Error::HashCollision::oid: grit_lib::objects::ObjectId
 pub grit_lib::prelude::Error::History(grit_lib::revwalk::history::HistoryError)
 pub grit_lib::prelude::Error::Hook(grit_lib::command_runner::hooks::HookError)
 pub grit_lib::prelude::Error::HunkSelection(grit_lib::porcelain::hunk_select::HunkSelectError)
+pub grit_lib::prelude::Error::Identity(grit_lib::config::ident_resolve::IdentityError)
 pub grit_lib::prelude::Error::IndexError(alloc::string::String)
 pub grit_lib::prelude::Error::IndexFsmonitorExtensionBadVersion(u32)
 pub grit_lib::prelude::Error::IndexFsmonitorExtensionEwahInvalid
@@ -14795,6 +14825,8 @@ impl core::convert::From<core::io::error::Error> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(core::io::error::Error) -> Self
 impl core::convert::From<grit_lib::command_runner::hooks::HookError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::command_runner::hooks::HookError) -> Self
+impl core::convert::From<grit_lib::config::ident_resolve::IdentityError> for grit_lib::error::Error
+pub fn grit_lib::error::Error::from(grit_lib::config::ident_resolve::IdentityError) -> Self
 impl core::convert::From<grit_lib::diff::NoIndexError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::diff::NoIndexError) -> Self
 impl core::convert::From<grit_lib::diff::pickaxe::PickaxeError> for grit_lib::error::Error
@@ -15600,6 +15632,7 @@ pub fn grit_lib::repo::Repository::environment(&self) -> &grit_lib::config::envi
 pub fn grit_lib::repo::Repository::fsck(&self, &grit_lib::maintenance::repository_fsck::FsckOptions, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<grit_lib::maintenance::repository_fsck::FsckReport>
 pub fn grit_lib::repo::Repository::git_dir(&self) -> &std::path::Path
 pub fn grit_lib::repo::Repository::hooks(&self) -> grit_lib::repo_handles::RepositoryHooks<'_>
+pub fn grit_lib::repo::Repository::identity(&self, grit_lib::config::ident_resolve::IdentRole, time::offset_date_time::OffsetDateTime) -> grit_lib::error::Result<grit_lib::ident::Signature>
 pub fn grit_lib::repo::Repository::identity_now(&self) -> time::offset_date_time::OffsetDateTime
 pub fn grit_lib::repo::Repository::index_handle(&self) -> grit_lib::index::handle::IndexHandle<'_>
 pub fn grit_lib::repo::Repository::init(&std::path::Path, &grit_lib::repo::InitOptions) -> grit_lib::error::Result<Self>
@@ -20443,6 +20476,7 @@ pub fn grit_lib::repo::Repository::environment(&self) -> &grit_lib::config::envi
 pub fn grit_lib::repo::Repository::fsck(&self, &grit_lib::maintenance::repository_fsck::FsckOptions, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<grit_lib::maintenance::repository_fsck::FsckReport>
 pub fn grit_lib::repo::Repository::git_dir(&self) -> &std::path::Path
 pub fn grit_lib::repo::Repository::hooks(&self) -> grit_lib::repo_handles::RepositoryHooks<'_>
+pub fn grit_lib::repo::Repository::identity(&self, grit_lib::config::ident_resolve::IdentRole, time::offset_date_time::OffsetDateTime) -> grit_lib::error::Result<grit_lib::ident::Signature>
 pub fn grit_lib::repo::Repository::identity_now(&self) -> time::offset_date_time::OffsetDateTime
 pub fn grit_lib::repo::Repository::index_handle(&self) -> grit_lib::index::handle::IndexHandle<'_>
 pub fn grit_lib::repo::Repository::init(&std::path::Path, &grit_lib::repo::InitOptions) -> grit_lib::error::Result<Self>
@@ -20844,8 +20878,8 @@ impl core::marker::UnsafeUnpin for grit_lib::repo_handles::NoteRemovePlan
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::repo_handles::NoteRemovePlan
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::repo_handles::NoteRemovePlan
 pub struct grit_lib::repo_handles::NotesWriteOptions
-pub grit_lib::repo_handles::NotesWriteOptions::author: core::option::Option<alloc::string::String>
-pub grit_lib::repo_handles::NotesWriteOptions::committer: alloc::string::String
+pub grit_lib::repo_handles::NotesWriteOptions::author: core::option::Option<grit_lib::ident::Signature>
+pub grit_lib::repo_handles::NotesWriteOptions::committer: grit_lib::ident::Signature
 pub grit_lib::repo_handles::NotesWriteOptions::message: alloc::string::String
 impl core::clone::Clone for grit_lib::repo_handles::NotesWriteOptions
 pub fn grit_lib::repo_handles::NotesWriteOptions::clone(&self) -> Self
@@ -22398,7 +22432,7 @@ impl core::marker::UnsafeUnpin for grit_lib::revwalk::history::RewordOptions
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::history::RewordOptions
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::history::RewordOptions
 pub struct grit_lib::revwalk::history::RewriteOptions
-pub grit_lib::revwalk::history::RewriteOptions::committer: alloc::string::String
+pub grit_lib::revwalk::history::RewriteOptions::committer: grit_lib::ident::Signature
 pub grit_lib::revwalk::history::RewriteOptions::empty: grit_lib::revwalk::history::EmptyPolicy
 pub grit_lib::revwalk::history::RewriteOptions::preserve_committer: bool
 pub grit_lib::revwalk::history::RewriteOptions::scope: grit_lib::revwalk::history::RefScope
@@ -24178,7 +24212,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::stash::StashPreview
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::stash::StashPreview
 pub struct grit_lib::stash::StashPushOptions
 pub grit_lib::stash::StashPushOptions::dry_run: bool
-pub grit_lib::stash::StashPushOptions::identity: alloc::string::String
+pub grit_lib::stash::StashPushOptions::identity: grit_lib::ident::Signature
 pub grit_lib::stash::StashPushOptions::include_untracked: bool
 pub grit_lib::stash::StashPushOptions::message: core::option::Option<alloc::string::String>
 pub grit_lib::stash::StashPushOptions::mode: grit_lib::stash::StashMode

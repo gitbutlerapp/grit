@@ -35,10 +35,8 @@ use crate::config::ConfigSet;
 use crate::diagnostics::Warning;
 use crate::diff::diff_trees;
 use crate::error::{Error, Result};
-use crate::ident::parse_signature_times;
-use crate::ident_resolve::{
-    resolve_identity_with, resolve_loose_committer_identity_with, IdentRole,
-};
+use crate::ident::{parse_signature_times, Signature};
+use crate::ident_resolve::{resolve_loose_committer_identity_with, IdentRole};
 use crate::index::{Index, IndexEntry};
 use crate::merge_base::{
     is_ancestor, merge_bases_first_vs_rest, walk_commits_reachable_excluding_ancestors_of,
@@ -712,8 +710,8 @@ pub fn integrate_branch_with(
     let commit_preflight = if matches!(options.commit, MergeCommitMode::Commit) {
         let config = repo.config()?;
         Some(MergeCommitPreflight {
-            author: strict_commit_identity(repo, config.as_ref(), IdentRole::Author)?,
-            committer: strict_commit_identity(repo, config.as_ref(), IdentRole::Committer)?,
+            author: strict_commit_identity(repo, IdentRole::Author)?,
+            committer: strict_commit_identity(repo, IdentRole::Committer)?,
             config,
         })
     } else {
@@ -936,10 +934,11 @@ fn stored_change_id_for_commit(repo: &Repository, oid: ObjectId) -> Result<Optio
 pub struct ContinueOptions {
     /// When set, replaces the message from `MERGE_MSG` (comment lines stripped).
     pub message: Option<String>,
-    /// Author identity in Git header form: `Name <email> <unix-time> <tz>`.
-    pub author: String,
-    /// Committer identity in the same form as [`Self::author`].
-    pub committer: String,
+    /// Author of the merge commit; `None` uses the repository's author identity
+    /// ([`Repository::identity`]).
+    pub author: Option<Signature>,
+    /// Committer of the merge commit; `None` uses the repository's committer identity.
+    pub committer: Option<Signature>,
 }
 
 /// Result of [`continue_merge`].
@@ -1283,13 +1282,8 @@ fn record_merge_in_progress(
     Ok(())
 }
 
-fn strict_commit_identity(
-    repo: &Repository,
-    config: &ConfigSet,
-    role: IdentRole,
-) -> Result<String> {
-    resolve_identity_with(repo.environment(), config, role, repo.identity_now())
-        .map_err(|e| Error::Message(e.to_string()))
+fn strict_commit_identity(repo: &Repository, role: IdentRole) -> Result<String> {
+    Ok(repo.identity(role, repo.identity_now())?.header_line())
 }
 
 fn move_branch(

@@ -90,8 +90,8 @@ fn create_commit_nothing_to_commit_without_second_stat_refresh() {
         &repo,
         &CommitRequest {
             message: "noop".into(),
-            author: ident.clone(),
-            committer: ident,
+            author: Some(ident.parse().expect("signature")),
+            committer: Some(ident.parse().expect("signature")),
             allow_empty: false,
             sign_override: None,
             amend: false,
@@ -155,8 +155,8 @@ fn grit_commit_on_deep_tree_leaves_clean_tree_for_git() {
         &repo,
         &CommitRequest {
             message: "t".into(),
-            author: ident.clone(),
-            committer: ident,
+            author: Some(ident.parse().expect("signature")),
+            committer: Some(ident.parse().expect("signature")),
             allow_empty: false,
             sign_override: None,
             amend: false,
@@ -327,8 +327,8 @@ fn commit_staged_after_single_edit_avoids_full_tree_stat_refresh() {
     let ident = "Test <t@example.com> 1 +0000".to_string();
     let req = CommitRequest {
         message: "t".into(),
-        author: ident.clone(),
-        committer: ident,
+        author: Some(ident.parse().expect("signature")),
+        committer: Some(ident.parse().expect("signature")),
         hooks: HookPolicy::SkipVerify,
         ..Default::default()
     };
@@ -366,8 +366,8 @@ fn commit_worktree_allow_empty_clean_tree_single_staging_pass() {
     let ident = "Test <t@example.com> 1 +0000".to_string();
     let mut req = CommitRequest {
         message: "empty".into(),
-        author: ident.clone(),
-        committer: ident,
+        author: Some(ident.parse().expect("signature")),
+        committer: Some(ident.parse().expect("signature")),
         allow_empty: true,
         sign_override: None,
         amend: false,

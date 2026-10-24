@@ -182,7 +182,7 @@ fn plan_rewrite_rewords_and_replays_linear_descendants() {
         &RewriteOptions {
             scope: RefScope::Branches,
             empty: EmptyPolicy::Drop,
-            committer: committer(2),
+            committer: committer(2).parse().expect("signature"),
             preserve_committer: false,
             sign: true,
         },
@@ -253,7 +253,7 @@ fn plan_rewrite_preserves_encoding_when_message_unchanged() {
         &RewriteOptions {
             scope: RefScope::Branches,
             empty: EmptyPolicy::Drop,
-            committer: committer(9),
+            committer: committer(9).parse().expect("signature"),
             preserve_committer: false,
             sign: true,
         },
@@ -309,7 +309,7 @@ fn plan_rewrite_implicit_tree_replay_preserves_ancestor_tree_change() {
         &RewriteOptions {
             scope: RefScope::Branches,
             empty: EmptyPolicy::Drop,
-            committer: committer(20),
+            committer: committer(20).parse().expect("signature"),
             preserve_committer: false,
             sign: true,
         },
@@ -353,7 +353,7 @@ fn plan_rewrite_insert_before_root_succeeds() {
         &RewriteOptions {
             scope: RefScope::Branches,
             empty: EmptyPolicy::Drop,
-            committer: committer(21),
+            committer: committer(21).parse().expect("signature"),
             preserve_committer: false,
             sign: true,
         },
@@ -394,7 +394,7 @@ fn plan_rewrite_insert_before_merge_is_rejected() {
         &RewriteOptions {
             scope: RefScope::Head,
             empty: EmptyPolicy::Drop,
-            committer: committer(23),
+            committer: committer(23).parse().expect("signature"),
             preserve_committer: false,
             sign: true,
         },
@@ -438,7 +438,7 @@ fn plan_rewrite_non_commit_tip_returns_planning_error() {
         &RewriteOptions {
             scope: RefScope::Head,
             empty: EmptyPolicy::Drop,
-            committer: ident,
+            committer: ident.parse().expect("signature"),
             preserve_committer: false,
             sign: true,
         },
@@ -510,7 +510,7 @@ fn plan_rewrite_strips_gpgsig_and_gpgsig_sha256() {
             &RewriteOptions {
                 scope: RefScope::Head,
                 empty: EmptyPolicy::Drop,
-                committer: committer(22),
+                committer: committer(22).parse().expect("signature"),
                 preserve_committer: false,
                 sign: true,
             },
@@ -563,7 +563,7 @@ fn plan_rewrite_keeps_all_merge_parents_on_implicit_tree_reword() {
         &RewriteOptions {
             scope: RefScope::Head,
             empty: EmptyPolicy::Drop,
-            committer: committer(23),
+            committer: committer(23).parse().expect("signature"),
             preserve_committer: false,
             sign: true,
         },
@@ -602,7 +602,7 @@ fn plan_rewrite_skips_merge_when_parent_tree_unchanged() {
         &RewriteOptions {
             scope: RefScope::Branches,
             empty: EmptyPolicy::Drop,
-            committer: committer(3),
+            committer: committer(3).parse().expect("signature"),
             preserve_committer: false,
             sign: true,
         },
@@ -636,7 +636,7 @@ fn plan_rewrite_updates_all_descendant_branches() {
         &RewriteOptions {
             scope: RefScope::Branches,
             empty: EmptyPolicy::Drop,
-            committer: committer(4),
+            committer: committer(4).parse().expect("signature"),
             preserve_committer: false,
             sign: true,
         },
@@ -677,7 +677,7 @@ fn plan_rewrite_head_scope_updates_only_head() {
         &RewriteOptions {
             scope: RefScope::Head,
             empty: EmptyPolicy::Drop,
-            committer: committer(5),
+            committer: committer(5).parse().expect("signature"),
             preserve_committer: false,
             sign: true,
         },
@@ -714,7 +714,7 @@ fn plan_rewrite_replays_merge_descendants() {
         &RewriteOptions {
             scope: RefScope::Branches,
             empty: EmptyPolicy::Drop,
-            committer: committer(6),
+            committer: committer(6).parse().expect("signature"),
             preserve_committer: false,
             sign: true,
         },
@@ -789,7 +789,7 @@ fn plan_rewrite_reports_conflict_with_paths() {
         &RewriteOptions {
             scope: RefScope::Head,
             empty: EmptyPolicy::Abort,
-            committer: ident,
+            committer: ident.parse().expect("signature"),
             preserve_committer: false,
             sign: true,
         },
@@ -837,7 +837,7 @@ fn plan_rewrite_empty_policy_drop_keep_abort() {
         &RewriteOptions {
             scope: RefScope::Head,
             empty: EmptyPolicy::Drop,
-            committer: committer(8),
+            committer: committer(8).parse().expect("signature"),
             preserve_committer: false,
             sign: true,
         },
@@ -872,7 +872,7 @@ fn plan_rewrite_empty_policy_drop_keep_abort() {
         &RewriteOptions {
             scope: RefScope::Head,
             empty: EmptyPolicy::Abort,
-            committer: committer(9),
+            committer: committer(9).parse().expect("signature"),
             preserve_committer: false,
             sign: true,
         },
@@ -889,7 +889,7 @@ fn plan_rewrite_empty_policy_drop_keep_abort() {
         &RewriteOptions {
             scope: RefScope::Head,
             empty: EmptyPolicy::Keep,
-            committer: committer(10),
+            committer: committer(10).parse().expect("signature"),
             preserve_committer: false,
             sign: true,
         },
@@ -934,7 +934,7 @@ fn plan_rewrite_rejects_branch_checked_out_in_other_worktree() {
         &RewriteOptions {
             scope: RefScope::Branches,
             empty: EmptyPolicy::Drop,
-            committer: committer(11),
+            committer: committer(11).parse().expect("signature"),
             preserve_committer: false,
             sign: true,
         },
@@ -970,7 +970,7 @@ fn plan_rewrite_detached_head() {
         &RewriteOptions {
             scope: RefScope::Branches,
             empty: EmptyPolicy::Drop,
-            committer: committer(12),
+            committer: committer(12).parse().expect("signature"),
             preserve_committer: false,
             sign: true,
         },
@@ -1004,7 +1004,7 @@ fn plan_rewrite_leaves_refs_index_worktree_untouched() {
         &RewriteOptions {
             scope: RefScope::Head,
             empty: EmptyPolicy::Drop,
-            committer: committer(13),
+            committer: committer(13).parse().expect("signature"),
             preserve_committer: false,
             sign: true,
         },
@@ -1040,7 +1040,7 @@ fn plan_rewrite_surfaces_missing_object_as_library_error() {
         &RewriteOptions {
             scope: RefScope::Branches,
             empty: EmptyPolicy::Drop,
-            committer: committer(30),
+            committer: committer(30).parse().expect("signature"),
             preserve_committer: false,
             sign: true,
         },
@@ -1088,7 +1088,7 @@ fn plan_rewrite_parent_only_replay_matches_git_commit_tree() {
         &RewriteOptions {
             scope: RefScope::Head,
             empty: EmptyPolicy::Drop,
-            committer: committer_line.clone(),
+            committer: committer_line.parse().expect("signature"),
             preserve_committer: false,
             sign: true,
         },
@@ -1172,7 +1172,7 @@ fn history_public_api_coverage_smoke() {
     let _opts = RewriteOptions {
         scope: RefScope::Branches,
         empty: EmptyPolicy::Abort,
-        committer: committer(0),
+        committer: committer(0).parse().expect("signature"),
         preserve_committer: false,
         sign: true,
     };

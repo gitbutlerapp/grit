@@ -38,7 +38,7 @@ fn main() -> Result<(), grit_lib::error::Error> {
     let pushed = repo.stash().push(&StashPushOptions {
         message: Some("library guide stash".into()),
         include_untracked: false,
-        identity: IDENT.into(),
+        identity: IDENT.parse()?,
         selection: None,
         pathspecs: Vec::new(),
         dry_run: false,

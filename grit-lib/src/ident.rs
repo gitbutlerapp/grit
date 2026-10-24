@@ -168,6 +168,28 @@ pub enum SignatureError {
     /// The UTC offset is not a whole number of minutes.
     #[error("signature UTC offset is not a whole number of minutes")]
     SubMinuteOffset,
+    /// The text is not a `Name <email> <unix-seconds> <±HHMM>` identity line.
+    #[error("not an identity line of the form 'Name <email> <unix-seconds> <+HHMM>'")]
+    Malformed,
+}
+
+impl std::str::FromStr for Signature {
+    type Err = SignatureError;
+
+    /// Parse a full header identity line (`Name <email> <unix-seconds> <±HHMM>`).
+    ///
+    /// # Errors
+    ///
+    /// [`SignatureError::Malformed`] when the line does not have exactly one `<email>` or has a
+    /// missing, non-numeric, or overflowing date; otherwise the [`Signature::validate`] errors.
+    fn from_str(line: &str) -> Result<Self, Self::Err> {
+        if line.matches('<').count() != 1 || line.matches('>').count() != 1 {
+            return Err(SignatureError::Malformed);
+        }
+        let signature = parse_signature(line).ok_or(SignatureError::Malformed)?;
+        signature.validate()?;
+        Ok(signature)
+    }
 }
 
 /// Successful parse of the trailing `<unix> <+HHMM>` portion of a signature.
@@ -384,6 +406,32 @@ pub struct AuthorContact {
     pub name: String,
     /// Email address inside `<…>`.
     pub email: String,
+}
+
+impl AuthorContact {
+    /// Stamp this contact with a timestamp, giving a [`Signature`].
+    ///
+    /// # Parameters
+    ///
+    /// - `date_override`: a `GIT_AUTHOR_DATE`-style date (`@<unix>`, `<unix> <±HHMM>`, ISO 8601,
+    ///   RFC 2822, …); when `None`, `now` is used.
+    /// - `now`: the current time; its UTC offset is used for `@<unix>` overrides.
+    ///
+    /// # Errors
+    ///
+    /// [`SignatureError::Malformed`] when `date_override` is not a date Git accepts, and the
+    /// [`Signature::validate`] errors for the name and email.
+    pub fn signature(
+        &self,
+        date_override: Option<&str>,
+        now: OffsetDateTime,
+    ) -> Result<Signature, SignatureError> {
+        let line = author_identity_line(self, date_override, now);
+        let time = parse_signature(&line)
+            .ok_or(SignatureError::Malformed)?
+            .time;
+        Signature::new(self.name.clone(), self.email.clone(), time)
+    }
 }
 
 /// Failure to parse [`parse_author_arg`].
@@ -625,6 +673,55 @@ mod tests {
         assert_eq!(
             sig.format_rfc3339().as_deref(),
             Some("2023-11-14T14:13:20-08:00")
+        );
+    }
+
+    #[test]
+    fn signature_from_str_round_trips_header_line() {
+        let line = "Ada Lovelace <ada@example.com> 1700000000 +0530";
+        let sig: Signature = line.parse().expect("parse");
+        assert_eq!(sig.name, "Ada Lovelace");
+        assert_eq!(sig.header_line(), line);
+    }
+
+    #[test]
+    fn signature_from_str_rejects_contact_and_injected_lines() {
+        for line in [
+            "Ada <ada@example.com>",
+            "A <a@b> <c@d> 1 +0000",
+            "Name <a@b>\nInjected: x 1 +0000",
+            "A <e@x> totally_bogus -0700",
+        ] {
+            assert_eq!(
+                line.parse::<Signature>(),
+                Err(SignatureError::Malformed),
+                "{line:?}"
+            );
+        }
+        assert!(matches!(
+            "Bad\u{1} <a@b> 1 +0000".parse::<Signature>(),
+            Err(SignatureError::ForbiddenCharacter { .. })
+        ));
+    }
+
+    #[test]
+    fn author_contact_signature_applies_date_override() {
+        let now = OffsetDateTime::from_unix_timestamp(1_700_000_000).expect("epoch");
+        let contact = parse_author_arg("Doc <doc@example.com>").expect("contact");
+        assert_eq!(
+            contact.signature(None, now).expect("now").header_line(),
+            "Doc <doc@example.com> 1700000000 +0000"
+        );
+        assert_eq!(
+            contact
+                .signature(Some("1234567890 -0800"), now)
+                .expect("override")
+                .header_line(),
+            "Doc <doc@example.com> 1234567890 -0800"
+        );
+        assert_eq!(
+            contact.signature(Some("not a date"), now),
+            Err(SignatureError::Malformed)
         );
     }
 

@@ -8,6 +8,7 @@ use grit_lib::config::ident_resolve::{
     resolve_name_with, IdentRole, IdentityError,
 };
 use grit_lib::config::ConfigSet;
+use grit_lib::ident::Signature;
 use grit_lib::objects::{parse_commit, CommitData, ObjectId, ObjectKind};
 use grit_lib::parallel::ThreadPolicy;
 use grit_lib::repo::Repository;
@@ -232,6 +233,15 @@ pub fn identity(
     now: OffsetDateTime,
 ) -> Result<String> {
     resolve_identity_with(env, config, role, now).map_err(identity_error)
+}
+
+/// The author or committer `repo` records on a new commit, stash, or notes commit
+/// ([`Repository::identity`]), with setup advice when no identity is configured.
+pub fn signature(repo: &Repository, role: IdentRole, now: OffsetDateTime) -> Result<Signature> {
+    repo.identity(role, now).map_err(|err| match err {
+        grit_lib::error::Error::Identity(err) => identity_error(err),
+        other => other.into(),
+    })
 }
 
 /// Reflog identity for the committer (`Name <email>`), failing when unset like [`identity`].

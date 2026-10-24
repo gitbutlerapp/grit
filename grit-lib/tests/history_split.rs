@@ -47,7 +47,7 @@ fn split_plan(
         &RewriteOptions {
             scope: RefScope::Branches,
             empty: EmptyPolicy::Drop,
-            committer: committer_line.to_string(),
+            committer: committer_line.parse().expect("signature"),
             preserve_committer: false,
             sign: true,
         },
@@ -147,7 +147,7 @@ fn split_keep_committer_preserves_source_committer_line() {
         &RewriteOptions {
             scope: RefScope::Branches,
             empty: EmptyPolicy::Drop,
-            committer: committer(999),
+            committer: committer(999).parse().expect("signature"),
             preserve_committer: true,
             sign: true,
         },
@@ -189,7 +189,7 @@ fn split_rejects_all_or_nothing_selection() {
         &RewriteOptions {
             scope: RefScope::Branches,
             empty: EmptyPolicy::Drop,
-            committer: committer(3),
+            committer: committer(3).parse().expect("signature"),
             preserve_committer: false,
             sign: true,
         },
@@ -206,7 +206,7 @@ fn split_rejects_all_or_nothing_selection() {
         &RewriteOptions {
             scope: RefScope::Branches,
             empty: EmptyPolicy::Drop,
-            committer: committer(4),
+            committer: committer(4).parse().expect("signature"),
             preserve_committer: false,
             sign: true,
         },
@@ -234,7 +234,7 @@ fn split_rejects_merge_commit() {
         &RewriteOptions {
             scope: RefScope::Branches,
             empty: EmptyPolicy::Drop,
-            committer: committer(5),
+            committer: committer(5).parse().expect("signature"),
             preserve_committer: false,
             sign: true,
         },
@@ -330,7 +330,7 @@ fn split_in_bare_repository() {
         &RewriteOptions {
             scope: RefScope::Head,
             empty: EmptyPolicy::Drop,
-            committer: committer(2),
+            committer: committer(2).parse().expect("signature"),
             preserve_committer: false,
             sign: true,
         },

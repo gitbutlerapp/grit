@@ -35,7 +35,7 @@ fn opts(seq: i64) -> RewriteOptions {
     RewriteOptions {
         scope: RefScope::Branches,
         empty: EmptyPolicy::Drop,
-        committer: committer(seq),
+        committer: committer(seq).parse().expect("signature"),
         preserve_committer: false,
         sign: true,
     }
@@ -306,7 +306,7 @@ fn history_drop_matches_git_rebase_drop() {
         &RewriteOptions {
             scope: RefScope::Head,
             empty: EmptyPolicy::Drop,
-            committer: replay_committer,
+            committer: replay_committer.parse().expect("signature"),
             preserve_committer: false,
             sign: true,
         },
@@ -378,7 +378,7 @@ fn history_drop_matches_git_history_when_available() {
         &RewriteOptions {
             scope: RefScope::Head,
             empty: EmptyPolicy::Drop,
-            committer: committer(8),
+            committer: committer(8).parse().expect("signature"),
             preserve_committer: false,
             sign: true,
         },

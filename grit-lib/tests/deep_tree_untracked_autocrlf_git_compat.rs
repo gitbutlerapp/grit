@@ -126,8 +126,8 @@ fn full_tree_add_and_commit_store_lf_with_autocrlf() {
         &repo,
         &CommitRequest {
             message: "edit".into(),
-            author: ident.clone(),
-            committer: ident,
+            author: Some(ident.parse().expect("signature")),
+            committer: Some(ident.parse().expect("signature")),
             allow_empty: false,
             sign_override: None,
             amend: false,
