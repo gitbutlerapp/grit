@@ -1280,6 +1280,7 @@ impl Transport for SshTransport {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::process::Command;
 
     #[test]
     fn parse_git_url_defaults_and_ports() {
@@ -1371,6 +1372,61 @@ mod tests {
             .any(|c| c == "fetch=shallow wait-for-done filter"));
         assert!(adv.capabilities.iter().any(|c| c == "object-format=sha1"));
         assert!(adv.head_symref.is_none());
+    }
+
+    #[test]
+    fn read_advertisement_system_git_empty_bare_upload_pack() {
+        if Command::new("git").arg("--version").output().is_err() {
+            eprintln!("SKIP: no system git");
+            return;
+        }
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let bare = tmp.path().join("empty.git");
+        let init = Command::new("git")
+            .args(["init", "-q", "--bare", "-b", "main"])
+            .arg(&bare)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .status()
+            .expect("git init");
+        assert!(init.success(), "git init --bare failed");
+
+        let out = Command::new("git")
+            .args([
+                "-C",
+                bare.to_str().expect("utf8 path"),
+                "upload-pack",
+                "--advertise-refs",
+                ".",
+            ])
+            .output()
+            .expect("git upload-pack --advertise-refs");
+        assert!(
+            out.status.success(),
+            "upload-pack advertise failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert!(
+            !out.stdout.is_empty(),
+            "empty bare repo must still advertise capabilities"
+        );
+
+        let mut cur = std::io::Cursor::new(out.stdout);
+        let adv = read_advertisement(&mut cur).expect("parse git upload-pack advertisement");
+        assert!(
+            remote_handshake_complete(&adv),
+            "capabilities must be present on an empty repository"
+        );
+        assert!(
+            !adv.capabilities.is_empty(),
+            "expected capability tokens, got {:?}",
+            adv.capabilities
+        );
+        assert!(
+            adv.refs.is_empty(),
+            "empty bare must not advertise fetchable refs, got {:?}",
+            adv.refs
+        );
     }
 
     #[test]
