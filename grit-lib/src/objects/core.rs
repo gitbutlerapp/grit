@@ -791,8 +791,10 @@ pub fn parse_tree_with_oid_len(data: &[u8], oid_len: usize) -> Result<Vec<TreeEn
 
 /// Build the raw bytes of a tree object from a slice of entries.
 ///
-/// Entries **must** already be sorted in Git tree order (see [`tree_entry_cmp`])
-/// before calling this function.
+/// Entries **must** already be sorted in Git tree order (see [`tree_entry_cmp`]),
+/// with unique, valid names and modes; nothing here checks that. To write a tree
+/// from entries in any order with validation, use
+/// [`Objects::write_tree`](crate::objects::Objects::write_tree).
 #[must_use]
 pub fn serialize_tree(entries: &[TreeEntry]) -> Vec<u8> {
     let mut out = Vec::new();
@@ -915,6 +917,10 @@ pub(crate) fn find_tree_entry_by_name_dir_or_file_in_data(
 }
 
 /// Parsed representation of a commit object.
+///
+/// This is the read-side shape (it round-trips stored bytes exactly). To create a
+/// new commit, build a [`NewCommit`](crate::objects::NewCommit) and pass it to
+/// [`Objects::write_commit`](crate::objects::Objects::write_commit).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommitData {
     /// The tree this commit points to.
@@ -1303,7 +1309,9 @@ pub fn serialize_tag(t: &TagData) -> Vec<u8> {
 /// Serialize a [`CommitData`] into the raw bytes suitable for storage.
 ///
 /// The caller is responsible for supplying a correctly-formatted `author` and
-/// `committer` string (including timestamp and timezone).
+/// `committer` string (including timestamp and timezone). To create a commit from
+/// typed identities instead, use [`Objects::write_commit`](crate::objects::Objects::write_commit)
+/// with a [`NewCommit`](crate::objects::NewCommit).
 ///
 /// The message body is written exactly as given: `git commit` and `git commit-tree -m`
 /// supply a trailing LF; `git commit-tree` reading from stdin or `-F` does not add one.

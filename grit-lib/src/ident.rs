@@ -13,7 +13,7 @@
 //! # }
 //! ```
 
-use crate::commit::assemble_identity;
+use crate::commit::{assemble_identity, format_git_timestamp};
 use crate::git_date::tm::date_overflows;
 use crate::objects::{HashAlgo, ObjectKind};
 use time::format_description::well_known::Rfc3339;
@@ -41,11 +41,133 @@ pub struct Signature {
 }
 
 impl Signature {
+    /// Build a signature for writing into a commit or tag.
+    ///
+    /// # Parameters
+    ///
+    /// - `name`: display name (may be empty).
+    /// - `email`: address written inside `<…>` (may be empty).
+    /// - `time`: timestamp; its UTC offset becomes the `±HHMM` field.
+    ///
+    /// # Errors
+    ///
+    /// See [`Self::validate`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use grit_lib::ident::Signature;
+    /// use time::{OffsetDateTime, UtcOffset};
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let time = OffsetDateTime::from_unix_timestamp(1_700_000_000)?
+    ///     .to_offset(UtcOffset::from_hms(-8, 0, 0)?);
+    /// let sig = Signature::new("Ada Lovelace", "ada@example.com", time)?;
+    /// assert_eq!(sig.header_line(), "Ada Lovelace <ada@example.com> 1700000000 -0800");
+    /// assert!(Signature::new("Ada <x>", "ada@example.com", time).is_err());
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn new(
+        name: impl Into<String>,
+        email: impl Into<String>,
+        time: OffsetDateTime,
+    ) -> Result<Self, SignatureError> {
+        let signature = Self {
+            name: name.into(),
+            email: email.into(),
+            time,
+        };
+        signature.validate()?;
+        Ok(signature)
+    }
+
+    /// Check that [`Self::header_line`] yields an identity line `git fsck` accepts.
+    ///
+    /// # Errors
+    ///
+    /// - [`SignatureError::ForbiddenCharacter`] when the name or email contains `<`, `>`,
+    ///   or a control character other than tab.
+    /// - [`SignatureError::BeforeEpoch`] when the time is before 1970-01-01 UTC.
+    /// - [`SignatureError::SubMinuteOffset`] when the UTC offset has a seconds component,
+    ///   which the `±HHMM` field cannot represent.
+    pub fn validate(&self) -> Result<(), SignatureError> {
+        for (field, value) in [
+            (SignatureField::Name, &self.name),
+            (SignatureField::Email, &self.email),
+        ] {
+            if let Some(ch) = value
+                .chars()
+                .find(|&c| c == '<' || c == '>' || (c.is_ascii_control() && c != '\t'))
+            {
+                return Err(SignatureError::ForbiddenCharacter { field, ch });
+            }
+        }
+        if self.time.unix_timestamp() < 0 {
+            return Err(SignatureError::BeforeEpoch);
+        }
+        if self.time.offset().seconds_past_minute() != 0 {
+            return Err(SignatureError::SubMinuteOffset);
+        }
+        Ok(())
+    }
+
+    /// Render as a header payload: `Name <email> <unix-seconds> <±HHMM>`.
+    ///
+    /// The result is what follows `author ` / `committer ` / `tagger ` in an object.
+    /// It is only fsck-clean when [`Self::validate`] succeeds.
+    #[must_use]
+    pub fn header_line(&self) -> String {
+        format!(
+            "{} <{}> {}",
+            self.name,
+            self.email,
+            format_git_timestamp(self.time)
+        )
+    }
+
     /// Format [`Self::time`] as RFC 3339 (includes the original offset).
     #[must_use]
     pub fn format_rfc3339(&self) -> Option<String> {
         self.time.format(&Rfc3339).ok()
     }
+}
+
+/// Which part of a [`Signature`] a [`SignatureError`] refers to.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SignatureField {
+    /// [`Signature::name`].
+    Name,
+    /// [`Signature::email`].
+    Email,
+}
+
+impl std::fmt::Display for SignatureField {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Name => "name",
+            Self::Email => "email",
+        })
+    }
+}
+
+/// Why a [`Signature`] cannot be written into an object (see [`Signature::validate`]).
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum SignatureError {
+    /// The name or email contains a character that would break the identity line.
+    #[error("signature {field} contains forbidden character {ch:?}")]
+    ForbiddenCharacter {
+        /// Field holding the character.
+        field: SignatureField,
+        /// The first forbidden character.
+        ch: char,
+    },
+    /// Git timestamps are unsigned seconds since the Unix epoch.
+    #[error("signature time is before the Unix epoch")]
+    BeforeEpoch,
+    /// The UTC offset is not a whole number of minutes.
+    #[error("signature UTC offset is not a whole number of minutes")]
+    SubMinuteOffset,
 }
 
 /// Successful parse of the trailing `<unix> <+HHMM>` portion of a signature.

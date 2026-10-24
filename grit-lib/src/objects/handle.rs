@@ -1,6 +1,13 @@
 //! Repository-scoped object database access via [`Objects`].
-use crate::error::Result;
-use crate::objects::{CommitData, Object, ObjectId, ObjectInfo, ObjectKind};
+use crate::change_id::{set_change_id, ChangeIdPolicy};
+use crate::error::{Error, Result};
+use crate::fsck_standalone::{fsck_object, FsckObjectOptions};
+use crate::objects::write::canonical_tree_entries;
+use crate::objects::{
+    serialize_commit, serialize_tree, CommitData, NewCommit, Object, ObjectId, ObjectInfo,
+    ObjectKind, TreeEntry,
+};
+use crate::porcelain::commit::stamp_change_id_on_new_commit;
 use crate::repo::Repository;
 
 /// Read and write Git objects through a [`Repository`] handle.
@@ -130,17 +137,134 @@ impl<'repo> Objects<'repo> {
         self.repo.odb().hash(kind, data)
     }
 
-    /// Store a loose object and return its id.
+    /// Validate and store an object, returning its id.
+    ///
+    /// Tree, commit and tag payloads must pass the same checks as `git hash-object -t <kind>`
+    /// (without `--literally`): sorted, duplicate-free tree entries with allowed modes and
+    /// names, and well-formed `tree`/`parent`/`author`/`committer`/`tagger` headers. Blobs
+    /// are stored as given. To build trees and commits from typed values instead of raw
+    /// bytes, use [`Self::write_tree`] and [`Self::write_commit`].
     ///
     /// # Errors
     ///
-    /// Propagates zlib or filesystem errors from the ODB.
+    /// - [`crate::error::Error::InvalidObject`] when the payload would fail `git fsck`;
+    ///   nothing is written.
+    /// - [`crate::error::Error::HashCollision`] and zlib or filesystem errors from the ODB.
     ///
     /// # Examples
     ///
     /// See also the [`guide_objects`](https://grit-scm.com/docs/library/objects/) example program.
-    #[inline]
     pub fn write(&self, kind: ObjectKind, data: &[u8]) -> Result<ObjectId> {
+        fsck_object(
+            kind,
+            data,
+            FsckObjectOptions::new(self.repo.odb().hash_algo()),
+        )
+        .map_err(|check| Error::InvalidObject { kind, check })?;
         self.repo.odb().write(kind, data)
+    }
+
+    /// Store `data` as an object of `kind` without validating its structure.
+    ///
+    /// The equivalent of `git hash-object --literally`: use it only to reproduce or test
+    /// corrupt objects. Repositories containing such objects fail `git fsck`.
+    ///
+    /// # Errors
+    ///
+    /// [`crate::error::Error::HashCollision`] and zlib or filesystem errors from the ODB.
+    #[inline]
+    pub fn write_literally(&self, kind: ObjectKind, data: &[u8]) -> Result<ObjectId> {
+        self.repo.odb().write(kind, data)
+    }
+
+    /// Write a tree object from `entries`, given in any order.
+    ///
+    /// Entries are sorted into Git's tree order. Entry objects are not required to exist
+    /// (as with `git mktree --missing`), so trees can be built bottom-up or point at
+    /// objects a partial clone has not fetched.
+    ///
+    /// # Errors
+    ///
+    /// - [`crate::error::Error::InvalidTreeEntry`] when an entry has an empty, `.`, `..`,
+    ///   `.git`-alias or slash/NUL-containing name, a mode other than `100644`, `100755`,
+    ///   `120000`, `40000` or `160000`, the null object id, an object id of the wrong hash
+    ///   algorithm, or a name used by another entry.
+    /// - The errors of [`Self::write`].
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # fn main() -> grit_lib::error::Result<()> {
+    /// use grit_lib::objects::{ObjectKind, TreeEntry};
+    /// use grit_lib::repo::{InitOptions, Repository};
+    /// let dir = tempfile::tempdir()?;
+    /// let repo = Repository::init(dir.path(), &InitOptions::new().with_bare(true))?;
+    /// let blob = repo.objects().write(ObjectKind::Blob, b"hello\n")?;
+    /// let entry = |name: &str| TreeEntry { mode: 0o100644, name: name.into(), oid: blob };
+    /// let tree = repo.objects().write_tree([entry("b"), entry("a")])?;
+    /// let names: Vec<_> = grit_lib::objects::parse_tree(&repo.objects().read(&tree)?.data)?
+    ///     .into_iter()
+    ///     .map(|e| e.name)
+    ///     .collect();
+    /// assert_eq!(names, [b"a".to_vec(), b"b".to_vec()]);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn write_tree(&self, entries: impl IntoIterator<Item = TreeEntry>) -> Result<ObjectId> {
+        let entries = canonical_tree_entries(entries, self.repo.odb().hash_algo())?;
+        self.write(ObjectKind::Tree, &serialize_tree(&entries))
+    }
+
+    /// Write the commit described by `commit` and return its id.
+    ///
+    /// The tree must exist and be a tree, and every parent must exist and be a commit
+    /// (the checks `git commit-tree` makes). When `grit.changeIds` is enabled (the
+    /// default) and no id was set with [`NewCommit::with_change_id`], the commit gets a
+    /// fresh `change-id` header. The commit is not signed and no ref is updated; use
+    /// [`crate::porcelain::commit::create_commit`] to commit the index onto a branch.
+    ///
+    /// # Errors
+    ///
+    /// - [`crate::error::Error::InvalidSignature`] when the author or committer has a
+    ///   `<`, `>` or control character in its name or email, a time before the Unix
+    ///   epoch, or a UTC offset with a seconds component.
+    /// - [`crate::error::Error::ObjectNotFound`] when the tree or a parent is missing, and
+    ///   [`crate::error::Error::UnexpectedObjectKind`] when one has the wrong kind.
+    /// - Config loading errors from [`Repository::config`] (read for `grit.changeIds`).
+    /// - The errors of [`Self::write`].
+    ///
+    /// # Examples
+    ///
+    /// See [`NewCommit`].
+    pub fn write_commit(&self, commit: &NewCommit) -> Result<ObjectId> {
+        for signature in commit.signatures() {
+            signature.validate()?;
+        }
+        let (tree, parents) = commit.tree_and_parents();
+        self.expect_kind(tree, ObjectKind::Tree)?;
+        for parent in parents {
+            self.expect_kind(parent, ObjectKind::Commit)?;
+        }
+        let mut data = commit.to_commit_data();
+        match commit.change_id() {
+            Some(id) => set_change_id(&mut data, id),
+            None => {
+                let policy = ChangeIdPolicy::from_config(self.repo.config()?.as_ref());
+                stamp_change_id_on_new_commit(self.repo, &policy, &mut data)?;
+            }
+        }
+        self.write(ObjectKind::Commit, &serialize_commit(&data))
+    }
+
+    fn expect_kind(&self, oid: &ObjectId, expected: ObjectKind) -> Result<()> {
+        let actual = self.read_info(oid)?.kind;
+        if actual != expected {
+            return Err(Error::UnexpectedObjectKind {
+                oid: *oid,
+                expected,
+                actual,
+            });
+        }
+        Ok(())
     }
 }

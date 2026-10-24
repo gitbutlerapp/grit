@@ -667,7 +667,8 @@ fn is_null_oid_bytes(raw: &[u8]) -> bool {
     raw.iter().all(|&b| b == 0)
 }
 
-fn mode_allowed(mode: u32) -> bool {
+/// Tree entry modes `git fsck` accepts without a `badFilemode` report.
+pub(crate) fn tree_entry_mode_allowed(mode: u32) -> bool {
     matches!(mode, 0o100644 | 0o100755 | 0o120000 | 0o040000 | 0o160000)
 }
 
@@ -692,7 +693,7 @@ fn decode_tree_for_fsck(
             .ok()
             .and_then(|s| u32::from_str_radix(s, 8).ok())
             .ok_or_else(bad)?;
-        if !mode_allowed(mode) {
+        if !tree_entry_mode_allowed(mode) {
             problems.disallowed_mode = true;
         }
         pos += sp + 1;

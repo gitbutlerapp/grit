@@ -2368,6 +2368,10 @@ impl Odb {
     ///
     /// If the object already exists it is not overwritten (Git behaviour).
     ///
+    /// The payload is stored as given, without fsck checks; callers that build tree,
+    /// commit or tag bytes themselves should go through
+    /// [`Objects::write`](crate::objects::Objects::write) instead.
+    ///
     /// # Errors
     ///
     /// - [`Error::Io`] — could not create the directory or write the file.

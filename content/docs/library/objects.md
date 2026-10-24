@@ -7,7 +7,13 @@ Git stores four object kinds grit-lib exposes as [`ObjectKind`](rustdoc:grit_lib
 
 ## Writing
 
-[`Objects::write`](rustdoc:grit_lib::objects::handle::Objects) (or [`Odb::write`](rustdoc:grit_lib::objects::odb::Odb)) takes a kind and payload bytes, stores a loose object under `objects/`, and returns the id. Tree and commit bodies must already be in Git’s text format; use [`parse_tree`](rustdoc:grit_lib::objects::parse_tree) and [`parse_commit`](rustdoc:grit_lib::objects::parse_commit) when reading them back.
+[`Objects::write`](rustdoc:grit_lib::objects::handle::Objects::write) takes a kind and payload bytes, stores a loose object under `objects/`, and returns the id. Tree, commit and tag payloads are checked first with the same rules as `git hash-object -t <kind>`: an unsorted tree, a duplicate entry, or an identity line without a timestamp fails with `InvalidObject` on [`Error`](rustdoc:grit_lib::error::Error), which carries Git's fsck message id (`treeNotSorted`, `missingSpaceBeforeDate`, …), and nothing is written. [`Objects::write_literally`](rustdoc:grit_lib::objects::handle::Objects::write_literally) skips the checks, like `git hash-object --literally`; it exists to reproduce corrupt objects in tests. [`Odb::write`](rustdoc:grit_lib::objects::odb::Odb::write) is the unchecked internal path the engine uses for objects it has built itself. Use [`parse_tree`](rustdoc:grit_lib::objects::parse_tree) and [`parse_commit`](rustdoc:grit_lib::objects::parse_commit) when reading objects back.
+
+## Building trees and commits
+
+A program that creates history without an index or work tree (a bare-repository tool, a changelog bot) should not assemble object bytes by hand. [`Objects::write_tree`](rustdoc:grit_lib::objects::handle::Objects::write_tree) takes [`TreeEntry`](rustdoc:grit_lib::objects::TreeEntry) values in any order, sorts them into Git's tree order, and refuses entries `git fsck` would reject with a typed [`TreeEntryError`](rustdoc:grit_lib::objects::TreeEntryError): an empty, `.`, `..` or `.git` name, a `/` or NUL in a name, a mode other than `100644`, `100755`, `120000`, `40000` or `160000`, the null id, an id of the other hash algorithm, or a name used twice (a file and a directory with the same name count). Entry objects need not exist yet, as with `git mktree --missing`.
+
+[`Objects::write_commit`](rustdoc:grit_lib::objects::handle::Objects::write_commit) takes a [`NewCommit`](rustdoc:grit_lib::objects::NewCommit): a tree, parents, message, and author and committer as typed [`Signature`](rustdoc:grit_lib::ident::Signature) values. [`Signature::new`](rustdoc:grit_lib::ident::Signature::new) takes a name, an email and an `OffsetDateTime` and rejects `<`, `>` and control characters, times before 1970 and offsets with a seconds part ([`SignatureError`](rustdoc:grit_lib::ident::SignatureError)), so the header line always has Git's `Name <email> <unix> <±HHMM>` shape. `write_commit` checks that the tree is a tree and each parent is a commit, as `git commit-tree` does. It adds a trailing newline to the message when missing. When `grit.changeIds` is on (the default) the commit gets a fresh `change-id` header; call [`NewCommit::with_change_id`](rustdoc:grit_lib::objects::NewCommit::with_change_id) to keep the id of a change you are rewriting. The commit is not signed and no ref moves. To commit the index onto the current branch, use `create_commit` in [`porcelain::commit`](rustdoc:grit_lib::porcelain::commit) instead.
 
 For hot paths that only need headers (tree, parents, identities) or a borrowed message body, prefer [`CommitRef::parse`](rustdoc:grit_lib::objects::CommitRef::parse). It borrows from the object bytes and decodes author, committer, and message on demand via [`CommitRef::author`](rustdoc:grit_lib::objects::CommitRef::author), [`CommitRef::committer`](rustdoc:grit_lib::objects::CommitRef::committer), and [`CommitRef::message`](rustdoc:grit_lib::objects::CommitRef::message). [`parse_commit`](rustdoc:grit_lib::objects::parse_commit) is `CommitRef::parse(data)?.to_owned()` for callers that need an owning [`CommitData`](rustdoc:grit_lib::objects::CommitData).
 
@@ -72,7 +78,7 @@ When building new pack deltas (as opposed to reusing on-disk zlib), grit-lib ind
 
 ## Example
 
-This example initializes a repository, writes a blob, tree, and commit, verifies structure in memory, and prints the commit id:
+This example initializes a repository, writes a blob, then a tree and commit through the typed API, verifies structure in memory, and prints the commit id:
 
 <!-- include: grit-examples/src/bin/guide_objects.rs -->
 

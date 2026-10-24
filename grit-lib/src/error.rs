@@ -600,6 +600,24 @@ pub enum Error {
     #[error("corrupt object: {0}")]
     CorruptObject(String),
 
+    /// [`crate::objects::Objects::write`] refused a payload that `git fsck` would reject;
+    /// nothing was written.
+    #[error("refusing to write invalid {kind} object: {}", .check.report_line())]
+    InvalidObject {
+        /// Kind the payload was meant to be stored as.
+        kind: crate::objects::ObjectKind,
+        /// The first fsck rule the payload breaks (`check.id` is Git's fsck message id).
+        check: crate::fsck_standalone::FsckError,
+    },
+
+    /// [`crate::objects::Objects::write_tree`] refused an entry.
+    #[error(transparent)]
+    InvalidTreeEntry(#[from] crate::objects::TreeEntryError),
+
+    /// A [`crate::ident::Signature`] cannot be written as an author, committer or tagger line.
+    #[error(transparent)]
+    InvalidSignature(#[from] crate::ident::SignatureError),
+
     /// An object exists but has a different kind than the operation requires, such as a
     /// tree or blob where a commit was expected.
     #[error("object {oid} is a {actual}, not a {expected}")]
