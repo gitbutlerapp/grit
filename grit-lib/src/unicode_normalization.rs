@@ -9,6 +9,8 @@ use std::fs::{self, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+use crate::repo_relpath::worktree_abs;
+
 /// Return true if `s` contains any non-ASCII UTF-8 byte.
 #[must_use]
 pub fn has_non_ascii_utf8(s: &str) -> bool {
@@ -110,7 +112,7 @@ pub fn resolve_worktree_path_for_staging(
         }
     };
 
-    let abs = work_tree.join(rel);
+    let abs = worktree_abs(work_tree, rel);
     if fs::symlink_metadata(&abs).is_ok() {
         return WorktreePathForStaging {
             abs,
@@ -157,7 +159,7 @@ pub fn resolve_worktree_path_for_staging(
         }
         let Some(name) = found else {
             return WorktreePathForStaging {
-                abs: work_tree.join(rel),
+                abs: worktree_abs(work_tree, rel),
                 index_relpath: index_rel(rel),
             };
         };
