@@ -153,6 +153,10 @@ pub enum RefStorageFormat {
     Files,
     /// On-disk reftable stack (`extensions.refStorage = reftable`).
     Reftable,
+    /// A backend outside grit-lib, identified by a short name (for example `"sqlite"`).
+    ///
+    /// Library code treats it like [`Self::Memory`]: no files-backend shortcuts apply.
+    Custom(&'static str),
 }
 
 impl std::fmt::Display for RefStorageFormat {
@@ -161,6 +165,7 @@ impl std::fmt::Display for RefStorageFormat {
             Self::Memory => f.write_str("memory"),
             Self::Files => f.write_str("files"),
             Self::Reftable => f.write_str("reftable"),
+            Self::Custom(name) => f.write_str(name),
         }
     }
 }

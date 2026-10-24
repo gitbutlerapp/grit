@@ -67,6 +67,12 @@ impl RefTransaction {
         &self.reflog_renames
     }
 
+    /// Case-only ref renames bundled with this transaction.
+    #[must_use]
+    pub fn case_only_renames(&self) -> &[RefCaseOnlyRename] {
+        &self.case_only_renames
+    }
+
     /// Append a branch reflog rename to this transaction.
     #[must_use]
     pub fn with_reflog_rename(mut self, rename: RefReflogRename) -> Self {

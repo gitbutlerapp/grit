@@ -19,14 +19,14 @@ use crate::reftable::{
 use crate::repo::init_repository;
 
 use super::apply::{apply_reflog_rename, RefBatchState};
+use super::backend::{check_transaction_updates, validate_transaction_names};
 use super::error::RefStoreError;
 use super::semantics::{
-    apply_update_to_map, format_reflog_identity, reflog_new_oid_before, reflog_old_oid_before,
-    reftable_write_target, simulate_batch_apply,
+    apply_update_to_map, deref_reflog_target, format_reflog_identity, reflog_new_oid_before,
+    reflog_old_oid_before, reftable_write_target,
 };
 use super::transaction::RefTransaction;
 use super::types::RefReflogRename;
-use super::validation::verify_create_conflicts;
 use super::{
     Expected, PreparedRefTransaction, RawRef, RefEntry, RefStorageFormat, RefStore, RefUpdate,
 };
@@ -385,14 +385,25 @@ fn build_reftable_updates_for_stack(
         let new_oid = reflog_new_oid_before(&trial, refs, update);
         let (_, log_refname) = reftable_storage_location(git_dir, &update.name);
         if let Some(log) = update.reflog.as_ref() {
-            let log = log_record_from_update(git_dir, &log_refname, old_oid, new_oid, log)
-                .map_err(|e| RefStoreError::Corrupt(e.to_string()))?;
-            log_updates.push(ReftableTransactionUpdate {
-                refname: log_refname,
-                value: None,
-                log: Some(log),
-                expected_old: None,
-            });
+            let mut log_refnames = vec![log_refname];
+            if let Some(target_name) = deref_reflog_target(&trial, update) {
+                let (target_store, target_storage) =
+                    reftable_storage_location(git_dir, &target_name);
+                let (update_store, _) = reftable_storage_location(git_dir, &update.name);
+                if target_store == update_store {
+                    log_refnames.push(target_storage);
+                }
+            }
+            for refname in log_refnames {
+                let record = log_record_from_update(git_dir, &refname, old_oid, new_oid, log)
+                    .map_err(|e| RefStoreError::Corrupt(e.to_string()))?;
+                log_updates.push(ReftableTransactionUpdate {
+                    refname,
+                    value: None,
+                    log: Some(record),
+                    expected_old: None,
+                });
+            }
         }
         if value.is_some() {
             let expected_old = match &update.expected {
@@ -513,6 +524,7 @@ impl RefStore for ReftableRefStore {
         txn: RefTransaction,
     ) -> StoreResult<Box<dyn PreparedRefTransaction + Send + '_>> {
         RefTransaction::validate_no_duplicates(txn.updates())?;
+        validate_transaction_names(&txn)?;
         let (updates, reflog_renames, _case_only_renames) = txn.into_parts();
         let mut guard_state = self.prepared.lock().unwrap_or_else(|e| e.into_inner());
         if guard_state.is_some() {
@@ -538,8 +550,12 @@ impl RefStore for ReftableRefStore {
             stack.reload_table_names();
             let refs = Self::merged_refs_from_locked_stack(&self.git_dir, &stack)
                 .map_err(|e| RefStoreError::Corrupt(e.to_string()))?;
-            verify_create_conflicts(&refs, &group)?;
-            simulate_batch_apply(&refs, &group)?;
+            let snapshot = RefBatchState {
+                refs,
+                reflogs: BTreeMap::new(),
+            };
+            check_transaction_updates(&snapshot, &group)?;
+            let refs = snapshot.refs;
             let rt_updates = build_reftable_updates_for_stack(&self.git_dir, &refs, &group)?;
             let opts = read_write_options(&store_git_dir);
             stacks.push(LockedStackBatch {

@@ -21,6 +21,7 @@ use super::apply::{
     apply_case_only_ref_rename, apply_reflog_rename, apply_update, ref_lock_names_for_updates,
     simulate_batch_apply, symref_deref_delete_changed_targets, RefBatchState,
 };
+use super::backend::validate_transaction_names;
 use super::error::RefStoreError;
 use super::routing::{resolve_common_dir, route_ref_storage_with_namespace, RefStorageRoute};
 use super::transaction::expected_matches;
@@ -1093,19 +1094,8 @@ impl RefStore for FilesRefStore {
         txn: RefTransaction,
     ) -> StoreResult<Box<dyn PreparedRefTransaction + Send + '_>> {
         RefTransaction::validate_no_duplicates(txn.updates())?;
+        validate_transaction_names(&txn)?;
         let (updates, reflog_renames, case_only_renames) = txn.into_parts();
-
-        for update in &updates {
-            validate_storable_refname(&update.name)?;
-        }
-        for rename in &reflog_renames {
-            validate_storable_refname(&rename.from)?;
-            validate_storable_refname(&rename.to)?;
-        }
-        for rename in &case_only_renames {
-            validate_storable_refname(&rename.from)?;
-            validate_storable_refname(&rename.to)?;
-        }
 
         let mut prepared_guard = self.prepared.lock().unwrap_or_else(|e| e.into_inner());
         if prepared_guard.is_some() {

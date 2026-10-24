@@ -1,5 +1,8 @@
 //! Errors for [`super::RefStore`] operations.
 
+use std::fmt;
+use std::sync::Arc;
+
 use crate::refs::RefnameUnavailable;
 
 use super::{Expected, RawRef};
@@ -61,6 +64,12 @@ pub enum RefStoreError {
         /// The rejected ref name.
         name: String,
     },
+
+    /// A custom backend's own storage failed (database, network, …).
+    ///
+    /// Built-in backends never return this; their I/O failures stay typed elsewhere.
+    #[error(transparent)]
+    Backend(BackendError),
 }
 
 impl RefStoreError {
@@ -68,6 +77,69 @@ impl RefStoreError {
         Self::NotFound {
             name: name.to_owned(),
         }
+    }
+
+    /// Wrap a custom backend's storage error as [`Self::Backend`].
+    pub fn backend(err: impl std::error::Error + Send + Sync + 'static) -> Self {
+        Self::Backend(BackendError::new(err))
+    }
+}
+
+/// A custom ref backend's storage error, carried by [`RefStoreError::Backend`].
+///
+/// Cheap to clone (the error is shared). Two values are equal only when they share the same
+/// underlying error. Use [`Self::downcast_ref`] to recover the backend's concrete type.
+#[derive(Clone)]
+pub struct BackendError(Arc<dyn std::error::Error + Send + Sync + 'static>);
+
+impl BackendError {
+    /// Wrap `err`.
+    pub fn new(err: impl std::error::Error + Send + Sync + 'static) -> Self {
+        Self(Arc::new(err))
+    }
+
+    /// Borrow the wrapped error.
+    #[must_use]
+    pub fn get_ref(&self) -> &(dyn std::error::Error + Send + Sync + 'static) {
+        self.0.as_ref()
+    }
+
+    /// The wrapped error as `E`, when it has that type.
+    #[must_use]
+    pub fn downcast_ref<E: std::error::Error + 'static>(&self) -> Option<&E> {
+        self.0.downcast_ref::<E>()
+    }
+}
+
+impl fmt::Debug for BackendError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Debug::fmt(&self.0, f)
+    }
+}
+
+impl fmt::Display for BackendError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        fmt::Display::fmt(&self.0, f)
+    }
+}
+
+impl std::error::Error for BackendError {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.0.source()
+    }
+}
+
+impl PartialEq for BackendError {
+    fn eq(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0)
+    }
+}
+
+impl Eq for BackendError {}
+
+impl From<BackendError> for RefStoreError {
+    fn from(err: BackendError) -> Self {
+        Self::Backend(err)
     }
 }
 

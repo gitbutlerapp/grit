@@ -1,44 +1,15 @@
 //! Shared ref-update semantics for in-memory and reftable [`super::RefStore`] backends.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 
 use crate::diff::zero_oid;
 use crate::objects::ObjectId;
 use crate::refs::SYMREF_MAXDEPTH;
 
-use super::apply::check_storage_write;
-use super::apply::RefBatchState;
 use super::error::RefStoreError;
-use super::transaction::expected_matches;
 use super::{RawRef, RefUpdate, RefUpdateFlags};
 
 type StoreResult<T> = std::result::Result<T, RefStoreError>;
-
-/// Validate CAS expectations and apply updates to an in-memory ref map (prepare simulation).
-pub fn simulate_batch_apply(
-    refs: &BTreeMap<String, RawRef>,
-    updates: &[RefUpdate],
-) -> StoreResult<()> {
-    let mut trial = refs.clone();
-    let mut storage_writes = HashMap::new();
-    for update in updates {
-        let actual = trial.get(&update.name);
-        if !expected_matches(actual, &update.expected) {
-            return Err(RefStoreError::ExpectedMismatch {
-                name: update.name.clone(),
-                expected: update.expected.clone(),
-                actual: actual.cloned(),
-            });
-        }
-        let batch_view = RefBatchState {
-            refs: trial.clone(),
-            reflogs: BTreeMap::new(),
-        };
-        check_storage_write(&mut storage_writes, &batch_view, update)?;
-        apply_update_to_map(&mut trial, refs, update)?;
-    }
-    Ok(())
-}
 
 pub(crate) fn apply_update_to_map(
     trial: &mut BTreeMap<String, RawRef>,
@@ -97,6 +68,18 @@ fn should_deref_symref(refs: &BTreeMap<String, RawRef>, update: &RefUpdate) -> b
 fn should_deref_symref_update(refs: &BTreeMap<String, RawRef>, update: &RefUpdate) -> bool {
     should_deref_symref(refs, update)
         && matches!(update.new_value.as_ref(), Some(RawRef::Direct(_)))
+}
+
+/// The ref a direct-value update writes through a symbolic ref, which also gets the
+/// update's reflog line; `None` when `update` does not dereference.
+pub(crate) fn deref_reflog_target(
+    refs: &BTreeMap<String, RawRef>,
+    update: &RefUpdate,
+) -> Option<String> {
+    if update.flags.log_only || !should_deref_symref_update(refs, update) {
+        return None;
+    }
+    symref_peel_write_target(refs, &update.name).ok()
 }
 
 fn symref_peel_write_target(

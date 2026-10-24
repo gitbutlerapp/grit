@@ -7,6 +7,7 @@ use crate::objects::ObjectId;
 use crate::reflog::ReflogEntry;
 use crate::refs::SYMREF_MAXDEPTH;
 
+use super::backend::resolve_symbolic;
 use super::error::RefStoreError;
 use super::semantics::format_reflog_identity;
 use super::transaction::expected_matches;
@@ -390,25 +391,7 @@ fn oid_for_reflog_value(
     match value {
         RawRef::Direct(oid) => Ok(*oid),
         RawRef::Symbolic(_target) if flags.no_deref => Ok(zero_oid()),
-        RawRef::Symbolic(target) => resolve_map(&state.refs, target, 0),
-    }
-}
-
-/// Resolve `name` through symbolic refs in `refs`.
-pub fn resolve_map(
-    refs: &BTreeMap<String, RawRef>,
-    name: &str,
-    depth: usize,
-) -> StoreResult<ObjectId> {
-    if depth >= SYMREF_MAXDEPTH {
-        return Err(RefStoreError::SymrefLoop);
-    }
-    let Some(value) = refs.get(name) else {
-        return Err(RefStoreError::not_found(name));
-    };
-    match value {
-        RawRef::Direct(oid) => Ok(*oid),
-        RawRef::Symbolic(target) => resolve_map(refs, target, depth + 1),
+        RawRef::Symbolic(target) => resolve_symbolic(&state.refs, target),
     }
 }
 

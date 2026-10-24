@@ -2323,7 +2323,8 @@ fn ref_store_error_refname(err: &Error) -> Option<String> {
             } => refname.clone(),
         },
         crate::refs::store::RefStoreError::SymrefLoop
-        | crate::refs::store::RefStoreError::Corrupt(_) => return None,
+        | crate::refs::store::RefStoreError::Corrupt(_)
+        | crate::refs::store::RefStoreError::Backend(_) => return None,
     })
 }
 

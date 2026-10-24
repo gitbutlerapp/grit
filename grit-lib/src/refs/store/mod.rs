@@ -4,8 +4,12 @@
 //! locking, raw reads, iteration, and reflog helpers). [`MemoryRefStore`] is an
 //! embeddable in-memory implementation used by tests and callers that keep refs
 //! outside a repository directory.
+//!
+//! To write your own backend, build `prepare` and `commit` on the [`backend`] helpers and
+//! check it with the `grit_test_support::refstore_conformance` suite.
 
 mod apply;
+pub mod backend;
 mod error;
 mod files;
 mod memory;
@@ -18,7 +22,7 @@ mod transaction;
 mod types;
 mod validation;
 
-pub use error::RefStoreError;
+pub use error::{BackendError, RefStoreError};
 pub use files::{FilesRefStore, FilesRefStoreConfig};
 pub use memory::MemoryRefStore;
 pub use open::open_ref_store;
@@ -41,8 +45,17 @@ use crate::refs::SYMREF_MAXDEPTH;
 type StoreResult<T> = std::result::Result<T, RefStoreError>;
 
 /// Committable ref update batch returned from [`RefStore::prepare`].
+///
+/// The value owns the locks `prepare` took. Exactly one of three things releases them:
+/// [`Self::commit`], [`Self::abort`], or dropping the value. Implementations must release
+/// their locks in `Drop` when neither method ran (callers bail out with `?` between prepare
+/// and commit), leaving stored refs unchanged, so the next `prepare` does not fail with
+/// [`RefStoreError::LockHeld`].
 pub trait PreparedRefTransaction: Send {
     /// Apply queued updates and release locks.
+    ///
+    /// Every update becomes visible to readers, or (on error) none does where the backend
+    /// can guarantee it.
     ///
     /// # Errors
     ///
@@ -58,8 +71,20 @@ pub trait PreparedRefTransaction: Send {
 }
 
 /// Reference storage backend (loose/packed files, reftable, or in-memory).
+///
+/// # Implementing a backend
+///
+/// Refs are full names (`HEAD`, `refs/heads/main`, …) mapped to a [`RawRef`]. Reads never
+/// resolve symbolic refs except in [`Self::resolve`] and [`RefEntry::peeled`]. Writes only go
+/// through [`Self::prepare`]; see its documentation for the checks it must make. The
+/// [`backend`] module implements those checks and the commit semantics, and the
+/// `grit_test_support::refstore_conformance` suite verifies a store agrees with the built-in
+/// backends. Report failures of your own storage as [`RefStoreError::Backend`] (or
+/// [`crate::error::Error::RefStore`] wrapping it from the `Result` methods).
 pub trait RefStore: Send + Sync + Debug {
     /// Which on-disk or logical format this store uses.
+    ///
+    /// Custom backends return [`RefStorageFormat::Custom`].
     fn format(&self) -> RefStorageFormat;
 
     /// Read the stored value for `name` without resolving symbolic targets.
@@ -89,8 +114,23 @@ pub trait RefStore: Send + Sync + Debug {
 
     /// Validate `txn`, take locks, and return a committable batch.
     ///
-    /// All compare-and-swap and directory/file availability checks run before
-    /// returning; calling [`PreparedRefTransaction::commit`] applies the batch atomically.
+    /// Every check runs here, before anything is written, and a failure leaves the store
+    /// unchanged and unlocked. A store must:
+    ///
+    /// 1. While another prepared transaction holds the lock, fail with
+    ///    [`RefStoreError::LockHeld`] (do not wait indefinitely).
+    /// 2. Reject names Git refuses to store with [`RefStoreError::InvalidRefName`].
+    /// 3. Reject a created ref whose name is a directory prefix of a stored ref or of
+    ///    another ref in the batch, or the other way round (`a` vs `a/b`), with
+    ///    [`RefStoreError::NameUnavailable`]. Deletes in the same batch do not free a name.
+    /// 4. Check each [`RefUpdate::expected`] against the state left by the earlier updates
+    ///    in the batch ([`RefStoreError::ExpectedMismatch`]). For a direct-value update
+    ///    through a symbolic ref, an [`Expected::Oid`] is compared with the resolved id.
+    /// 5. Reject two updates that write the same stored ref, including through symbolic
+    ///    refs, with [`RefStoreError::DuplicateUpdate`].
+    ///
+    /// [`backend::check_transaction`] performs steps 2–5 and [`backend::apply_transaction`]
+    /// defines what [`PreparedRefTransaction::commit`] stores, including reflog lines.
     fn prepare(
         &self,
         txn: RefTransaction,
@@ -142,10 +182,10 @@ fn resolve_via_raw<S: RefStore + ?Sized>(
     if depth >= SYMREF_MAXDEPTH {
         return Err(RefStoreError::SymrefLoop);
     }
-    match store
-        .read_raw(name)
-        .map_err(|err| RefStoreError::Corrupt(err.to_string()))?
-    {
+    match store.read_raw(name).map_err(|err| match err {
+        crate::error::Error::RefStore(err) => err,
+        other => RefStoreError::Corrupt(other.to_string()),
+    })? {
         None => Err(RefStoreError::not_found(name)),
         Some(RawRef::Direct(oid)) => Ok(oid),
         Some(RawRef::Symbolic(target)) => resolve_via_raw(store, &target, depth + 1),

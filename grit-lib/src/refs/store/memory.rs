@@ -8,15 +8,10 @@ use crate::error::Result;
 type StoreResult<T> = std::result::Result<T, RefStoreError>;
 use crate::reflog::ReflogEntry;
 
-use super::apply::{
-    apply_case_only_ref_rename, apply_reflog_rename, apply_update, resolve_map,
-    simulate_batch_apply, RefBatchState,
-};
+use super::backend::{apply_transaction, check_transaction, resolve_symbolic, RefBatchState};
 use super::error::RefStoreError;
 use super::transaction::RefTransaction;
-use super::types::{RefCaseOnlyRename, RefReflogRename};
-use super::validation::verify_create_conflicts;
-use super::{PreparedRefTransaction, RawRef, RefEntry, RefStorageFormat, RefStore, RefUpdate};
+use super::{PreparedRefTransaction, RawRef, RefEntry, RefStorageFormat, RefStore};
 
 #[derive(Debug, Clone)]
 struct MemoryRefStoreInner {
@@ -24,21 +19,16 @@ struct MemoryRefStoreInner {
     prepared: Option<PreparedBatch>,
 }
 
-impl MemoryRefStoreInner {
-    fn snapshot_for_apply(&self) -> RefBatchState {
-        self.state.snapshot()
-    }
-}
-
 #[derive(Debug, Clone)]
 struct PreparedBatch {
     lock_name: String,
-    updates: Vec<RefUpdate>,
-    reflog_renames: Vec<RefReflogRename>,
-    case_only_renames: Vec<RefCaseOnlyRename>,
+    txn: RefTransaction,
 }
 
 /// Fully in-memory ref database with transactional updates.
+///
+/// Built only on the public [`super::backend`] helpers, so it doubles as a reference for
+/// custom backends.
 #[derive(Debug)]
 pub struct MemoryRefStore {
     inner: Mutex<MemoryRefStoreInner>,
@@ -101,7 +91,7 @@ impl RefStore for MemoryRefStore {
             }
             let peeled = match &value {
                 RawRef::Direct(_) => None,
-                RawRef::Symbolic(_) => resolve_map(&inner.state.refs, name, 0).ok(),
+                RawRef::Symbolic(_) => resolve_symbolic(&inner.state.refs, name).ok(),
             };
             let entry = RefEntry {
                 name: name.clone(),
@@ -119,8 +109,6 @@ impl RefStore for MemoryRefStore {
         &self,
         txn: RefTransaction,
     ) -> StoreResult<Box<dyn PreparedRefTransaction + Send + '_>> {
-        RefTransaction::validate_no_duplicates(txn.updates())?;
-        let (updates, reflog_renames, case_only_renames) = txn.into_parts();
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(active) = &inner.prepared {
             return Err(RefStoreError::LockHeld {
@@ -128,21 +116,16 @@ impl RefStore for MemoryRefStore {
             });
         }
 
-        verify_create_conflicts(&inner.state.refs, &updates)?;
-        simulate_batch_apply(&inner.state, &updates, &reflog_renames, &case_only_renames)?;
+        check_transaction(&inner.state, &txn)?;
 
-        let lock_name = updates
+        let lock_name = txn
+            .updates()
             .first()
             .map(|u| u.name.clone())
-            .or_else(|| reflog_renames.first().map(|r| r.from.clone()))
-            .or_else(|| case_only_renames.first().map(|r| r.from.clone()))
+            .or_else(|| txn.reflog_renames().first().map(|r| r.from.clone()))
+            .or_else(|| txn.case_only_renames().first().map(|r| r.from.clone()))
             .unwrap_or_else(|| "refs".to_owned());
-        inner.prepared = Some(PreparedBatch {
-            lock_name,
-            updates,
-            reflog_renames,
-            case_only_renames,
-        });
+        inner.prepared = Some(PreparedBatch { lock_name, txn });
 
         Ok(Box::new(MemoryPrepared {
             store: self,
@@ -221,16 +204,8 @@ impl PreparedRefTransaction for MemoryPrepared<'_> {
         let Some(batch) = inner.prepared.take() else {
             return Ok(());
         };
-        let mut trial = inner.snapshot_for_apply();
-        for update in &batch.updates {
-            apply_update(&mut trial, update)?;
-        }
-        for rename in &batch.case_only_renames {
-            apply_case_only_ref_rename(&mut trial, rename)?;
-        }
-        for rename in &batch.reflog_renames {
-            apply_reflog_rename(&mut trial, rename)?;
-        }
+        let mut trial = inner.state.snapshot();
+        apply_transaction(&mut trial, &batch.txn)?;
         inner.state = trial;
         self.committed = true;
         Ok(())
@@ -249,9 +224,8 @@ impl Drop for MemoryPrepared<'_> {
         if self.committed {
             return;
         }
-        if let Ok(mut inner) = self.store.inner.lock() {
-            inner.prepared = None;
-        }
+        let mut inner = self.store.inner.lock().unwrap_or_else(|e| e.into_inner());
+        inner.prepared = None;
     }
 }
 
