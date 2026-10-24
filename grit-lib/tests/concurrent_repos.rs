@@ -519,7 +519,6 @@ fn run_fetch_merge_notes_no_crosstalk_once(iter: usize) {
             &[],
             cfg.as_ref(),
             RunHookOptions::default(),
-            None,
         )
         .expect("configured hook");
         run_hook_opts(
@@ -528,7 +527,6 @@ fn run_fetch_merge_notes_no_crosstalk_once(iter: usize) {
             &[],
             cfg.as_ref(),
             RunHookOptions::default(),
-            None,
         )
         .expect("traditional hook scan");
         write_notes_commit(

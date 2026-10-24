@@ -139,8 +139,44 @@
             "branch_error"
           ],
           "type": "string"
+        },
+        {
+          "description": "A hook exited non-zero (`hook.name`, `hook.status`, `hook.stdout`, `hook.stderr`).",
+          "enum": [
+            "hook_failed"
+          ],
+          "type": "string"
         }
       ]
+    },
+    "HookFailureJson": {
+      "description": "A hook that exited non-zero, when `kind == \"hook_failed\"`.",
+      "properties": {
+        "name": {
+          "description": "Hook event name (`pre-commit`, `commit-msg`, …).",
+          "type": "string"
+        },
+        "status": {
+          "description": "The hook's exit code.",
+          "format": "int32",
+          "type": "integer"
+        },
+        "stderr": {
+          "description": "What the hook wrote to stderr (lossy UTF-8).",
+          "type": "string"
+        },
+        "stdout": {
+          "description": "What the hook wrote to stdout (lossy UTF-8).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "status",
+        "stderr",
+        "stdout"
+      ],
+      "type": "object"
     },
     "StructuredJsonError": {
       "description": "JSON object emitted on stdout for structured command failures.",
@@ -165,6 +201,17 @@
         "error": {
           "description": "Short, stable summary for scripts.",
           "type": "string"
+        },
+        "hook": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/HookFailureJson"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The failing hook and what it wrote, when `kind == \"hook_failed\"`."
         },
         "kind": {
           "allOf": [

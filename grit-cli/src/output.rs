@@ -15,6 +15,7 @@
 //! * progress / prompts / diagnostics go to **stderr** and never pollute stdout.
 
 use anyhow::{bail, Result};
+use grit_lib::command_runner::hooks::HookError;
 use grit_lib::diff::{DiffEntry, DiffStatus};
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -170,8 +171,17 @@ pub fn emit_error(err: &anyhow::Error, opts: &OutputOptions) {
         return;
     }
     let human = human_error_message(err);
+    let hook_output = match crate::json_error::hook_failure_from_chain(err) {
+        Some(HookError::Failed { output, .. }) => Some(output),
+        _ => None,
+    };
     match opts.mode {
         OutputMode::Human => {
+            if let Some(output) = hook_output {
+                let mut stderr = std::io::stderr().lock();
+                let _ = stdio::io_result(stderr.write_all(&output.stdout));
+                let _ = stdio::io_result(stderr.write_all(&output.stderr));
+            }
             if human.starts_with("fatal:") || human.starts_with("error:") {
                 eprintln!("{human}");
             } else {
@@ -179,7 +189,16 @@ pub fn emit_error(err: &anyhow::Error, opts: &OutputOptions) {
             }
         }
         OutputMode::Markdown => {
-            println!("**Error:** {human}");
+            let stdout = std::io::stdout();
+            let mut lock = stdout.lock();
+            let _ = stdio::io_result(writeln!(lock, "**Error:** {human}"));
+            if let Some(output) = hook_output {
+                let _ = crate::markdown::render_hook_output(
+                    &mut lock,
+                    &String::from_utf8_lossy(&output.stdout),
+                    &String::from_utf8_lossy(&output.stderr),
+                );
+            }
         }
         OutputMode::Json => {
             let payload = if let Some(structured) = structured_json_payload(err) {

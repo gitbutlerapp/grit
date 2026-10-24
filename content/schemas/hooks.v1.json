@@ -73,13 +73,23 @@
         },
         "name": {
           "type": "string"
+        },
+        "stderr": {
+          "description": "What the hook wrote to stderr (lossy UTF-8). Empty in human mode.",
+          "type": "string"
+        },
+        "stdout": {
+          "description": "What the hook wrote to stdout (lossy UTF-8). Empty in human mode, where the hook writes to the terminal directly.",
+          "type": "string"
         }
       },
       "required": [
         "action",
         "executed",
         "exit_code",
-        "name"
+        "name",
+        "stderr",
+        "stdout"
       ],
       "type": "object"
     }

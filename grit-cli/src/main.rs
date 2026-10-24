@@ -51,6 +51,7 @@ use clap::{Parser, Subcommand};
 use clap_complete::Shell;
 
 use exit_status::ExitStatus;
+use grit_lib::command_runner::hooks::HookStdio;
 use output::{emit, OutputMode, OutputOptions, RenderContext};
 
 fn parse_init_object_format(value: &str) -> Result<grit_lib::objects::HashAlgo, String> {
@@ -2115,6 +2116,7 @@ fn run() -> Result<ExitStatus, anyhow::Error> {
                     commit: None,
                     would_overwrite: None,
                     oid: None,
+                    hook: None,
                 };
                 output::emit_error(
                     &anyhow::Error::new(json_error::StructuredCliError {
@@ -2144,6 +2146,12 @@ fn run() -> Result<ExitStatus, anyhow::Error> {
         filter: cli.filter.clone(),
     };
     context::set_thread_policy(cli.threads);
+    // Humans see hook output live; `--json` / `--markdown` capture it into the result instead.
+    context::set_hook_stdio(if opts.mode == OutputMode::Human {
+        HookStdio::Inherit
+    } else {
+        HookStdio::Capture
+    });
     if let Err(err) = opts.validate() {
         if opts.mode == OutputMode::Json {
             output::emit_error(&err, &opts);

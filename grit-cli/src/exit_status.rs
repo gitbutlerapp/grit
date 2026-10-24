@@ -319,6 +319,7 @@ mod tests {
         hash_collision, incompatible_output_flags, invalid_commit_filter, invalid_pickaxe,
         operation_conflict, would_overwrite_error,
     };
+    use grit_lib::command_runner::hooks::{HookError, HookOutput};
     use grit_lib::error::OverwriteReason;
     use grit_lib::objects::ObjectId;
     use grit_lib::porcelain::branch::BranchError;
@@ -350,6 +351,18 @@ mod tests {
             (
                 ErrorKind::IncompatibleFlags,
                 incompatible_output_flags("bad combo", ErrorKind::IncompatibleFlags),
+                ExitStatus::Failure,
+            ),
+            (
+                ErrorKind::HookFailed,
+                anyhow::Error::new(grit_lib::error::Error::Hook(HookError::Failed {
+                    hook_name: "pre-commit".into(),
+                    status: 1,
+                    output: HookOutput {
+                        stdout: b"out\n".to_vec(),
+                        stderr: b"err\n".to_vec(),
+                    },
+                })),
                 ExitStatus::Failure,
             ),
         ];

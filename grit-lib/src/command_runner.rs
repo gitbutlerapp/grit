@@ -86,6 +86,8 @@ pub enum CommandStdio {
     Null,
     /// Returned when pipe.
     Pipe,
+    /// Connect the stream to this process's stderr (hooks write their stdout there, as in Git).
+    ParentStderr,
 }
 
 /// Stdin source for the child.
@@ -490,16 +492,17 @@ fn apply_stdio(cmd: &mut Command, spec: &CommandSpec) {
         CommandStdin::Null => Stdio::null(),
         CommandStdin::Pipe(_) => Stdio::piped(),
     });
-    cmd.stdout(match spec.stdout {
+    cmd.stdout(child_stdio(spec.stdout));
+    cmd.stderr(child_stdio(spec.stderr));
+}
+
+fn child_stdio(mode: CommandStdio) -> Stdio {
+    match mode {
         CommandStdio::Inherit => Stdio::inherit(),
         CommandStdio::Null => Stdio::null(),
         CommandStdio::Pipe => Stdio::piped(),
-    });
-    cmd.stderr(match spec.stderr {
-        CommandStdio::Inherit => Stdio::inherit(),
-        CommandStdio::Null => Stdio::null(),
-        CommandStdio::Pipe => Stdio::piped(),
-    });
+        CommandStdio::ParentStderr => std::io::stderr().into(),
+    }
 }
 
 impl CommandRunner for SystemCommandRunner {

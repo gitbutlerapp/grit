@@ -59,7 +59,22 @@ With `--allow-empty`, grit records a new commit whose tree matches the parent ev
 
 When a merge is in progress (`MERGE_HEAD` is present) and every conflict is resolved in the index, `grit commit` records a **merge commit** with two parents (your branch tip and the merged tip) and clears merge state the same way Git does after `git commit`.
 
-`pre-commit` and `commit-msg` hooks run before the commit object is written when they are installed (config `hook.*` entries or scripts under the hooks directory). Pass `--no-verify` to skip both; `post-commit` still runs afterward, matching Git. A `pre-commit` or `commit-msg` hook that exits non-zero or cannot be started aborts the commit, and the error names the hook and the OS error. `post-commit` never changes the result: the commit is already written, so a non-zero exit is ignored, and a hook that cannot be started prints a warning on stderr (`hook_not_run`). Dry-run skips all hooks. See [`grit hooks`](hooks.md).
+`pre-commit` and `commit-msg` hooks run before the commit object is written when they are installed (config `hook.*` entries or scripts under the hooks directory). Pass `--no-verify` to skip both; `post-commit` still runs afterward, matching Git. A `pre-commit` or `commit-msg` hook that exits non-zero or cannot be started aborts the commit, and the error names the hook and its exit status (or the OS error). In human mode the hook's output appears on stderr as it runs, followed by the error. With `--json` the failure is a structured error with `kind: "hook_failed"` and a `hook` object carrying `name`, `status`, and the hook's captured `stdout` and `stderr`; `--markdown` prints the error followed by the captured output in `text` blocks. `post-commit` never changes the result: the commit is already written, so a non-zero exit is ignored, and a hook that cannot be started prints a warning on stderr (`hook_not_run`). Dry-run skips all hooks. See [`grit hooks`](hooks.md).
+
+For a `pre-commit` hook that prints a line on each stream and exits 1, `grit commit --json` prints (exit status 1):
+
+```json
+{
+  "error": "hook pre-commit failed with exit status 1",
+  "kind": "hook_failed",
+  "hook": {
+    "name": "pre-commit",
+    "status": 1,
+    "stdout": "stdout from hook\n",
+    "stderr": "lint failed: bad stuff\n"
+  }
+}
+```
 
 ### Change ids
 

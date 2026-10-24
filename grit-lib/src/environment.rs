@@ -826,6 +826,8 @@ pub struct RepositoryOptions {
     pub open_for_serving: bool,
     /// Optional on-demand fetcher for partial-clone promisor objects.
     pub promisor_fetcher: Option<std::sync::Arc<dyn crate::promisor_fetch::PromisorFetcher>>,
+    /// Where hook subprocesses write their output (captured by default).
+    pub hook_stdio: crate::hooks::HookStdio,
 }
 
 impl std::fmt::Debug for RepositoryOptions {
@@ -854,6 +856,7 @@ impl Default for RepositoryOptions {
             validate_repository_format: true,
             open_for_serving: false,
             promisor_fetcher: None,
+            hook_stdio: crate::hooks::HookStdio::default(),
         }
     }
 }
@@ -913,6 +916,15 @@ impl RepositoryOptions {
     #[must_use]
     pub fn with_diagnostics(mut self, diagnostics: DiagnosticsHandle) -> Self {
         self.diagnostics = diagnostics;
+        self
+    }
+
+    /// Choose whether hooks run by repositories opened with these options have their output
+    /// captured ([`HookStdio::Capture`](crate::command_runner::hooks::HookStdio::Capture), the default) or
+    /// write straight to this process's stderr.
+    #[must_use]
+    pub fn with_hook_stdio(mut self, hook_stdio: crate::hooks::HookStdio) -> Self {
+        self.hook_stdio = hook_stdio;
         self
     }
 

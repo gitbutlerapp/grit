@@ -441,16 +441,16 @@ fn apply_commands_with_hooks(
 
     let all_cmds: Vec<&Command> = request.commands.iter().collect();
     let pre_stdin = commands_stdin(&all_cmds, algo);
-    let (pre_result, pre_out) = run_hook_in_git_dir(
+    let pre_result = run_hook_in_git_dir(
         repo,
         "pre-receive",
         &[],
         Some(pre_stdin.as_bytes()),
         &pre_hook_env,
     );
-    relay_hook_sideband(&mut sideband_out, &pre_out)?;
+    relay_hook_sideband(&mut sideband_out, &pre_result)?;
     hook_records.push(hook_record("pre-receive", &pre_result));
-    if matches!(pre_result, HookResult::Failed(_)) {
+    if !pre_result.is_ok() {
         for r in results.iter_mut().filter(|r| r.error.is_none()) {
             r.error = Some("pre-receive hook declined".to_owned());
         }
@@ -474,11 +474,10 @@ fn apply_commands_with_hooks(
         let old_hex = cmd.old.map(|o| o.to_hex()).unwrap_or_else(|| zero.clone());
         let new_hex = cmd.new.map(|o| o.to_hex()).unwrap_or(zero.clone());
         let args = [cmd.refname.as_str(), old_hex.as_str(), new_hex.as_str()];
-        let (update_result, update_out) =
-            run_hook_in_git_dir(repo, "update", &args, None, update_hook_env);
-        relay_hook_sideband(&mut sideband_out, &update_out)?;
+        let update_result = run_hook_in_git_dir(repo, "update", &args, None, update_hook_env);
+        relay_hook_sideband(&mut sideband_out, &update_result)?;
         hook_records.push(hook_record("update", &update_result));
-        if matches!(update_result, HookResult::Failed(_)) {
+        if !update_result.is_ok() {
             result.error = Some("hook declined".to_owned());
         }
     }
@@ -526,28 +525,28 @@ fn apply_commands_with_hooks(
         .collect();
     if !successful.is_empty() {
         let post_stdin = commands_stdin(&successful, algo);
-        let (post_result, post_out) = run_hook_in_git_dir(
+        let post_result = run_hook_in_git_dir(
             repo,
             "post-receive",
             &[],
             Some(post_stdin.as_bytes()),
             &post_receive_env,
         );
-        relay_hook_sideband(&mut sideband_out, &post_out)?;
+        relay_hook_sideband(&mut sideband_out, &post_result)?;
         hook_records.push(hook_record("post-receive", &post_result));
 
         let mut post_update_args: Vec<&str> = Vec::new();
         for result in results.iter().filter(|r| r.error.is_none()) {
             post_update_args.push(result.refname.as_str());
         }
-        let (pu_result, pu_out) = run_hook_in_git_dir(
+        let pu_result = run_hook_in_git_dir(
             repo,
             "post-update",
             &post_update_args,
             None,
             update_hook_env,
         );
-        relay_hook_sideband(&mut sideband_out, &pu_out)?;
+        relay_hook_sideband(&mut sideband_out, &pu_result)?;
         hook_records.push(hook_record("post-update", &pu_result));
     }
 
@@ -558,11 +557,7 @@ fn hook_record(name: &str, result: &HookResult) -> HookRunRecord {
     HookRunRecord {
         name: name.to_owned(),
         ran: result.was_executed(),
-        exit_code: match result {
-            HookResult::Failed(code) => Some(*code),
-            HookResult::Success => Some(0),
-            HookResult::NotFound => None,
-        },
+        exit_code: result.status(),
     }
 }
 
@@ -613,14 +608,16 @@ fn receive_command_store_update(cmd: &Command) -> crate::refs::store::RefUpdate 
     }
 }
 
-fn relay_hook_sideband(out: &mut Option<&mut dyn Write>, captured: &[u8]) -> Result<()> {
-    let Some(w) = out.as_mut() else {
+/// Relay what a hook wrote (stdout, then stderr) to the client on sideband 2.
+fn relay_hook_sideband(out: &mut Option<&mut dyn Write>, result: &HookResult) -> Result<()> {
+    let (Some(w), Some(output)) = (out.as_mut(), result.output()) else {
         return Ok(());
     };
-    if captured.is_empty() {
-        return Ok(());
-    }
-    for chunk in captured.chunks(65515) {
+    for chunk in output
+        .stdout
+        .chunks(65515)
+        .chain(output.stderr.chunks(65515))
+    {
         crate::pkt_line::write_sideband_packet(*w, 2, chunk).map_err(ServeError::Io)?;
     }
     Ok(())

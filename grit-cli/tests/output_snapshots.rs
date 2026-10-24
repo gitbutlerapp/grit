@@ -1031,7 +1031,11 @@ fn snapshot_hooks_run_propagates_exit_code() {
     let snapshot_dir = snapshot_dir();
     let fixture = CliFixture::new();
     let hook = fixture.path().join(".git/hooks/pre-commit");
-    std::fs::write(&hook, "#!/bin/sh\nexit 17\n").expect("write hook");
+    std::fs::write(
+        &hook,
+        "#!/bin/sh\necho to-stdout\necho to-stderr >&2\nexit 17\n",
+    )
+    .expect("write hook");
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;

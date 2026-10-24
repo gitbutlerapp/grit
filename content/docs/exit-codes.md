@@ -40,3 +40,4 @@ These values appear in the `kind` field of structured `--json` errors ([error sc
 | `branch_upstream_not_tracking` | Upstream is not a tracking branch. |
 | `branch_no_upstream` | No upstream configured. |
 | `branch_error` | Other branch operation failure. |
+| `hook_failed` | A hook such as `pre-commit` exited non-zero (`hook.name`, `hook.status`, and the hook's captured `hook.stdout` / `hook.stderr`). |

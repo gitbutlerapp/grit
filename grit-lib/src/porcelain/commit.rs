@@ -21,7 +21,7 @@ use crate::diff::{
 };
 use crate::error::ApplyError;
 use crate::error::{Error, Result};
-use crate::hooks::{run_commit_hook, CommitHookEnv, HookError, HookName, HookResult};
+use crate::hooks::{run_commit_hook, CommitHookEnv, HookError, HookName};
 use crate::ident::{
     fsck_commit_idents, parse_signature_times, prepare_commit_author_from_parent,
     prepare_commit_identity_line,
@@ -541,14 +541,7 @@ fn run_commit_hook_recorded(
     stdin_data: Option<&[u8]>,
     commit_env: &CommitHookEnv<'_>,
 ) -> std::result::Result<bool, HookError> {
-    match run_commit_hook(repo, hook.as_str(), args, stdin_data, commit_env)? {
-        HookResult::Success => Ok(true),
-        HookResult::NotFound => Ok(false),
-        HookResult::Failed(status) => Err(HookError::Failed {
-            hook_name: hook.as_str().to_owned(),
-            status,
-        }),
-    }
+    run_commit_hook(repo, hook.as_str(), args, stdin_data, commit_env)?.check(hook.as_str())
 }
 
 /// Run `post-commit` after the commit is written; returns whether a hook ran.
@@ -557,8 +550,7 @@ fn run_commit_hook_recorded(
 /// hook that cannot be run is reported as [`Warning::HookNotRun`].
 fn run_post_commit_hook_recorded(repo: &Repository, commit_env: &CommitHookEnv<'_>) -> bool {
     match run_commit_hook(repo, HookName::PostCommit.as_str(), &[], None, commit_env) {
-        Ok(HookResult::Success | HookResult::Failed(_)) => true,
-        Ok(HookResult::NotFound) => false,
+        Ok(result) => result.was_executed(),
         Err(err) => {
             let mut detail = err.to_string();
             let mut cause = std::error::Error::source(&err);

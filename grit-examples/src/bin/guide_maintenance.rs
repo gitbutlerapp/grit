@@ -65,7 +65,7 @@ fn main() -> Result<(), grit_lib::error::Error> {
     }
 
     let hook_result = run_hook(&repo, "pre-commit", &[], None)?;
-    let ran = hook_result.was_executed() && matches!(hook_result, HookResult::Success);
+    let ran = matches!(hook_result, HookResult::Success { .. });
     println!("pre_commit_ran={ran}");
 
     Ok(())

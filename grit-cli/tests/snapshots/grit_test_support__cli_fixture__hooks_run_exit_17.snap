@@ -6,16 +6,16 @@ expression: payload
   "human": {
     "exit": 17,
     "stdout": "",
-    "stderr": ""
+    "stderr": "to-stdout\nto-stderr\n"
   },
   "json": {
     "exit": 17,
-    "stdout": "{\"action\":\"run\",\"name\":\"pre-commit\",\"exit_code\":17,\"executed\":true}\n",
+    "stdout": "{\"action\":\"run\",\"name\":\"pre-commit\",\"exit_code\":17,\"executed\":true,\"stdout\":\"to-stdout\\n\",\"stderr\":\"to-stderr\\n\"}\n",
     "stderr": ""
   },
   "markdown": {
     "exit": 17,
-    "stdout": "## Hook run\n\n- **name:** `pre-commit`\n- **executed:** true\n- **exit_code:** 17\n",
+    "stdout": "## Hook run\n\n- **name:** `pre-commit`\n- **executed:** true\n- **exit_code:** 17\n\n**Hook stdout:**\n\n```text\nto-stdout\n```\n\n**Hook stderr:**\n\n```text\nto-stderr\n```\n",
     "stderr": ""
   }
 }

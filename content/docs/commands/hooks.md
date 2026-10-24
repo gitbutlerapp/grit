@@ -19,6 +19,8 @@ Discovers traditional hook scripts in the resolved hooks directory (`core.hooksP
 
 `grit hooks run` executes every hook registered for the event (config hooks first, then the script in the hooks directory) through the repository [`CommandRunner`](../../library/maintenance.md). The process exits with the hook's status when a hook ran and returned non-zero.
 
+What a hook prints depends on the output mode. In human mode the hook writes straight to the terminal as it runs, with its stdout sent to stderr (every hook except `pre-push`, as in Git), so stdout stays free for grit's own output. With `--json` or `--markdown`, grit captures both streams and puts them in the result instead (`stdout` and `stderr` below), and nothing reaches the terminal.
+
 Hooks run with the invoking environment (including `PATH`), from the top of the work tree. A script the OS will not execute directly runs through `sh`: `/bin/sh` on Unix, while on Windows a script's `#!` line names its interpreter (`#!/bin/sh` → `sh`, `#!/usr/bin/env bash` → `bash`), looked up first in the Git for Windows install that owns the `git` on `PATH` (`usr\bin`, `bin`), then on `PATH`, skipping the WSL launchers in `System32` and `WindowsApps`. Hook paths, in `list` output and on the hook's command line, never carry the Windows `\\?\` prefix.
 
 When a hook cannot be started at all (for example, its interpreter is missing), the command fails with an error naming the hook, the program it tried to start and the OS error, instead of reporting an exit status:
@@ -78,6 +80,8 @@ Schema: [v1](/schemas/hooks/v1.json). Subcommands: [hooks.list](/schemas/hooks.l
 | `name` | string | For `run`: hook basename. |
 | `exit_code` | number | For `run`: subprocess exit code (`0` when the hook was missing). |
 | `executed` | boolean | For `run`: whether any hook script ran. |
+| `stdout` | string | For `run`: what the hooks wrote to stdout (lossy UTF-8; empty when no hook ran). |
+| `stderr` | string | For `run`: what the hooks wrote to stderr (lossy UTF-8; empty when no hook ran). |
 
 Example list:
 
@@ -95,14 +99,16 @@ Example list:
 }
 ```
 
-Example run:
+Example run of a `pre-commit` hook that prints a line on each stream and exits 17:
 
 ```json
 {
   "action": "run",
   "name": "pre-commit",
-  "exit_code": 0,
-  "executed": true
+  "exit_code": 17,
+  "executed": true,
+  "stdout": "to-stdout\n",
+  "stderr": "to-stderr\n"
 }
 ```
 
@@ -110,9 +116,7 @@ Example run:
 
 Schema: [v1](/schemas/hooks/v1.json)
 
-`--markdown` renders a table of hooks for `list`, or a short summary for `run`.
-
-
+`--markdown` renders a table of hooks for `list`, or a short summary for `run` followed by the hook's captured output under **Hook stdout:** and **Hook stderr:** headings, each in a `text` code block (a stream the hook left empty is omitted).
 
 ```text
 ## Hooks

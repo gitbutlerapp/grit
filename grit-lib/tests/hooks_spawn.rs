@@ -65,7 +65,6 @@ fn process_environment(cwd: &Path) -> Environment {
 
 fn run_captured(repo: &Repository, hook: &str) -> (Result<HookResult, HookError>, String) {
     let config = repo.config().expect("config");
-    let mut captured = Vec::new();
     let result = run_hook_opts(
         Some(repo),
         hook,
@@ -75,9 +74,16 @@ fn run_captured(repo: &Repository, hook: &str) -> (Result<HookResult, HookError>
             stdout_to_stderr: true,
             ..RunHookOptions::default()
         },
-        Some(&mut captured),
     );
-    (result, String::from_utf8_lossy(&captured).into_owned())
+    let output = match &result {
+        Ok(r) => r.output().map_or_else(String::new, |o| {
+            let mut all = String::from_utf8_lossy(&o.stdout).into_owned();
+            all.push_str(&String::from_utf8_lossy(&o.stderr));
+            all
+        }),
+        Err(_) => String::new(),
+    };
+    (result, output)
 }
 
 /// Fails the first spawns with queued errors, then succeeds; records every spec.
@@ -139,7 +145,7 @@ fn script_hook_exit_status_and_output_are_reported() {
 
     let (result, output) = run_captured(&repo, "pre-commit");
     assert!(
-        matches!(result, Ok(HookResult::Failed(3))),
+        matches!(result, Ok(HookResult::Failed { status: 3, .. })),
         "{result:?}, output: {output}"
     );
     assert!(output.contains("hello-from-hook"), "output: {output}");
@@ -154,7 +160,7 @@ fn script_hook_exiting_zero_succeeds_and_commit_hook_passes() {
 
     let (result, output) = run_captured(&repo, "pre-commit");
     assert!(
-        matches!(result, Ok(HookResult::Success)),
+        matches!(result, Ok(HookResult::Success { .. })),
         "{result:?}, output: {output}"
     );
     run_commit_hook_checked(&repo, "pre-commit", &[], None, &CommitHookEnv::default())
@@ -170,7 +176,7 @@ fn script_hook_without_shebang_runs_through_the_shell() {
 
     let (result, output) = run_captured(&repo, "commit-msg");
     assert!(
-        matches!(result, Ok(HookResult::Failed(4))),
+        matches!(result, Ok(HookResult::Failed { status: 4, .. })),
         "{result:?}, output: {output}"
     );
     assert!(output.contains("plain-script"), "output: {output}");
@@ -185,7 +191,10 @@ fn script_refused_by_the_os_is_retried_through_sh() {
     let repo = open(tmp.path(), Environment::empty(), Some(runner.clone()));
 
     let (result, _) = run_captured(&repo, "pre-commit");
-    assert!(matches!(result, Ok(HookResult::Success)), "{result:?}");
+    assert!(
+        matches!(result, Ok(HookResult::Success { .. })),
+        "{result:?}"
+    );
 
     let specs = runner.specs();
     assert_eq!(specs.len(), 2, "direct spawn, then the shell retry");
@@ -297,7 +306,7 @@ fn hook_sees_path_from_the_repository_environment() {
 
     let (result, output) = run_captured(&repo, "pre-commit");
     assert!(
-        matches!(result, Ok(HookResult::Failed(7))),
+        matches!(result, Ok(HookResult::Failed { status: 7, .. })),
         "tool on the snapshot PATH must be found: {result:?}, output: {output}"
     );
 }

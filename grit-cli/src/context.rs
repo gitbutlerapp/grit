@@ -2,6 +2,7 @@
 
 use anyhow::{bail, Context, Result};
 use grit_lib::change_id::resolved_change_id;
+use grit_lib::command_runner::hooks::HookStdio;
 use grit_lib::config::environment::Environment;
 use grit_lib::config::ident_resolve::{
     resolve_email_with, resolve_identity_with, resolve_loose_committer_identity_with,
@@ -25,6 +26,18 @@ pub fn set_thread_policy(threads: Option<usize>) {
 /// Thread policy for [`grit_lib::config::environment::RepositoryOptions`] (global `--threads` when set).
 pub fn thread_policy_for_repo() -> ThreadPolicy {
     THREAD_POLICY.get().copied().unwrap_or_default()
+}
+
+static HOOK_STDIO: OnceLock<HookStdio> = OnceLock::new();
+
+/// Choose how hooks run by subsequent repository opens in this process report their output.
+pub fn set_hook_stdio(stdio: HookStdio) {
+    let _ = HOOK_STDIO.set(stdio);
+}
+
+/// Hook output mode for [`grit_lib::config::environment::RepositoryOptions`] (captured unless set).
+pub fn hook_stdio_for_repo() -> HookStdio {
+    HOOK_STDIO.get().copied().unwrap_or_default()
 }
 
 use crate::diagnostics;

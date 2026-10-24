@@ -237,6 +237,7 @@ pub fn repository_options(
     let mut options = grit_lib::config::environment::RepositoryOptions::default();
     options.environment = crate::context::environment();
     options.thread_policy = crate::context::thread_policy_for_repo();
+    options.hook_stdio = crate::context::hook_stdio_for_repo();
     options.diagnostics = sink.clone();
     options.network_trace = network_trace;
     options.reference_unix_time = std::time::SystemTime::now()

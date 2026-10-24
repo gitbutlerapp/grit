@@ -40,6 +40,8 @@ pub enum ErrorKind {
     BranchNoUpstream,
     /// Other branch operation failure.
     BranchError,
+    /// A hook exited non-zero (`hook.name`, `hook.status`, `hook.stdout`, `hook.stderr`).
+    HookFailed,
 }
 
 impl ErrorKind {
@@ -83,6 +85,7 @@ impl ErrorKind {
             Self::BranchUpstreamNotTracking => "branch_upstream_not_tracking",
             Self::BranchNoUpstream => "branch_no_upstream",
             Self::BranchError => "branch_error",
+            Self::HookFailed => "hook_failed",
         }
     }
 
@@ -107,6 +110,7 @@ impl ErrorKind {
             Self::BranchUpstreamNotTracking,
             Self::BranchNoUpstream,
             Self::BranchError,
+            Self::HookFailed,
         ]
     }
 }

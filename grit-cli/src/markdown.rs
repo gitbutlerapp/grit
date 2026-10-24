@@ -193,14 +193,36 @@ fn print_file_diff_metadata(w: &mut dyn Write, file: &FileDiff) -> anyhow::Resul
 /// Pick a fence delimiter longer than any run of backticks appearing in `body`.
 #[must_use]
 pub fn diff_code_fence(body: &str) -> (String, String) {
+    code_fence(body, "diff")
+}
+
+/// Opening (with `lang`) and closing fence longer than any run of backticks in `body`.
+fn code_fence(body: &str, lang: &str) -> (String, String) {
     let mut ticks = 3usize;
     loop {
         let marker = "`".repeat(ticks);
         if !body.contains(&marker) {
-            return (format!("{marker}diff"), marker);
+            return (format!("{marker}{lang}"), marker);
         }
         ticks += 1;
     }
+}
+
+/// Render captured hook output as labelled `text` code blocks; empty streams are skipped.
+pub fn render_hook_output(w: &mut dyn Write, stdout: &str, stderr: &str) -> anyhow::Result<()> {
+    for (label, body) in [("stdout", stdout), ("stderr", stderr)] {
+        if body.is_empty() {
+            continue;
+        }
+        let body = body.strip_suffix('\n').unwrap_or(body);
+        let (open, close) = code_fence(body, "text");
+        outln!(w, "\n**Hook {label}:**\n");
+        outln!(w, "{open}");
+        stdio::io_result(writeln!(w, "{body}"))
+            .map_err(|e| anyhow::anyhow!("writing output: {e}"))?;
+        outln!(w, "{close}");
+    }
+    Ok(())
 }
 
 fn print_fenced_diff(w: &mut dyn Write, body: &str) -> anyhow::Result<()> {

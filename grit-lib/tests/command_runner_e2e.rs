@@ -55,7 +55,6 @@ fn system_hook_receives_stdin_on_pre_push() {
             stdin_data: Some(stdin_data),
             ..RunHookOptions::default()
         },
-        None,
     )
     .expect("run hook");
     assert!(result.is_ok());

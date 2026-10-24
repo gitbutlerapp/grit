@@ -10,7 +10,7 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\"action\":\"run\",\"name\":\"pre-commit\",\"exit_code\":0,\"executed\":true}\n",
+    "stdout": "{\"action\":\"run\",\"name\":\"pre-commit\",\"exit_code\":0,\"executed\":true,\"stdout\":\"\",\"stderr\":\"\"}\n",
     "stderr": ""
   },
   "markdown": {
