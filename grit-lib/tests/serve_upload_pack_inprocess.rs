@@ -178,3 +178,64 @@ fn upload_pack_v1_and_v2_entry_points() {
     .expect("v2 fetch");
     assert!(v2_fetch.len() > 20);
 }
+
+/// Serving a full clone of a repository packed by system git copies its deltas,
+/// streams a pack git accepts (`index-pack --strict`, `fsck --full`), and stays
+/// close to the source pack's size.
+#[test]
+fn upload_pack_serves_git_packed_history_with_its_deltas() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let src = grit_test_support::git_packed_history(tmp.path(), 120);
+    let tip = grit_test_support::git(&src, &["rev-parse", "main"]);
+    let tip = ObjectId::from_hex(tip.trim()).expect("tip");
+    let source_pack_len: u64 = std::fs::read_dir(src.join("objects/pack"))
+        .expect("pack dir")
+        .map(|e| e.expect("entry").path())
+        .filter(|p| p.extension().is_some_and(|e| e == "pack"))
+        .map(|p| std::fs::metadata(p).expect("pack metadata").len())
+        .sum();
+
+    let repo = Repository::open(&src, &RepositoryOptions::empty()).expect("open");
+    let caps = "multi_ack_detailed side-band-64k no-progress ofs-delta";
+    let mut body = pkt_line(&format!("want {} {caps}\n", tip.to_hex()));
+    body.extend_from_slice(b"0000");
+    body.extend_from_slice(&pkt_line("done\n"));
+    let mut response = Vec::new();
+    upload_pack(
+        &repo,
+        &mut Cursor::new(body),
+        &mut response,
+        &ServeOptions {
+            protocol: ProtocolVersion::V0,
+            advertise_refs: false,
+            stateless_rpc: true,
+            agent: "grit-cov".to_owned(),
+            hidden_refs: Vec::new(),
+        },
+    )
+    .expect("fetch");
+    assert!(response.starts_with(b"0008NAK\n"));
+    let pack = grit_lib::remote::pkt_line::decode_sideband_primary(&response).expect("sideband");
+    assert!(pack.starts_with(b"PACK"));
+    assert!(
+        (pack.len() as u64) < source_pack_len * 11 / 10,
+        "served pack ({} bytes) reuses the source deltas ({source_pack_len} bytes)",
+        pack.len()
+    );
+
+    let dst = tmp.path().join("clone.git");
+    let dst_arg = dst.to_string_lossy().into_owned();
+    grit_test_support::git(tmp.path(), &["init", "-q", "--bare", &dst_arg]);
+    grit_test_support::git_cmd(&["index-pack", "--strict", "--stdin"])
+        .in_dir(&dst)
+        .stdin(pack)
+        .suc();
+    grit_test_support::git(&dst, &["update-ref", "refs/heads/main", &tip.to_hex()]);
+    grit_test_support::git(&dst, &["fsck", "--full", "--strict"]);
+    let count = |dir: &std::path::Path| {
+        grit_test_support::git(dir, &["rev-list", "--objects", "main"])
+            .lines()
+            .count()
+    };
+    assert_eq!(count(&dst), count(&src));
+}
