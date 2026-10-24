@@ -17,7 +17,10 @@ use crate::commit_graph_file::{BloomPrecheck, BloomWalkStatsHandle, CommitGraphC
 use crate::config::ConfigSet;
 use crate::diff::zero_oid;
 use crate::error::{Error, Result};
-use crate::ident::{committer_unix_seconds_for_ordering, parse_signature_times};
+use crate::ident::{
+    committer_unix_seconds_for_ordering, committer_unix_seconds_for_ordering_bytes,
+    parse_signature_times,
+};
 use crate::ignore::{parse_sparse_patterns_from_blob, path_in_sparse_checkout};
 use crate::index::{CacheTreeNode, Index, MODE_GITLINK, MODE_TREE};
 use crate::merge_base::{
@@ -4940,6 +4943,8 @@ struct DenseBloomCtx<'a> {
 #[derive(Default)]
 struct DenseWalkCache {
     literal_tree_diff: HashMap<(ObjectId, ObjectId, u64), bool>,
+    /// Parsed tree entries shared across lookups in one dense walk (no session ODB cache).
+    parsed_trees: HashMap<ObjectId, Arc<[TreeEntry]>>,
     component_child: HashMap<(ObjectId, Arc<str>, bool), CachedTreeChild>,
     /// FIFO eviction order; stale keys are skipped when popping (O(1) insert, no scan on hit).
     component_evict_order: VecDeque<(ObjectId, Arc<str>, bool)>,
@@ -5013,8 +5018,8 @@ impl DenseWalkCache {
         }
         self.component_misses += 1;
         self.tree_reads += 1;
-        let entries = read_parsed_tree(repo, tree)?;
-        let resolved = match tree_entry_by_name(&entries, component, as_tree) {
+        let entries = read_parsed_tree(repo, tree, Some(self))?;
+        let resolved = match tree_entry_by_name(entries.as_ref(), component, as_tree) {
             Some(entry) => CachedTreeChild::Found {
                 oid: entry.oid,
                 mode: entry.mode,
@@ -5056,12 +5061,8 @@ fn record_literal_tree_diff(
     path: &str,
     differs: bool,
 ) {
-    while cache.literal_tree_diff.len() >= LITERAL_TREE_DIFF_CAP {
-        if let Some(key) = cache.literal_tree_diff.keys().next().copied() {
-            cache.literal_tree_diff.remove(&key);
-        } else {
-            break;
-        }
+    if cache.literal_tree_diff.len() >= LITERAL_TREE_DIFF_CAP {
+        cache.literal_tree_diff.clear();
     }
     cache
         .literal_tree_diff
@@ -5425,14 +5426,27 @@ fn pathspec_entry_is_relevant(path: &str, is_tree: bool, pathspecs: &[String]) -
     false
 }
 
-fn read_parsed_tree(repo: &Repository, tree_oid: ObjectId) -> Result<Vec<TreeEntry>> {
+fn read_parsed_tree(
+    repo: &Repository,
+    tree_oid: ObjectId,
+    mut walk_cache: Option<&mut DenseWalkCache>,
+) -> Result<Arc<[TreeEntry]>> {
+    if let Some(cache) = walk_cache.as_deref_mut() {
+        if let Some(entries) = cache.parsed_trees.get(&tree_oid) {
+            return Ok(Arc::clone(entries));
+        }
+    }
     let object = repo.odb().read(&tree_oid)?;
     if object.kind != ObjectKind::Tree {
         return Err(Error::CorruptObject(format!(
             "object {tree_oid} is not a tree"
         )));
     }
-    parse_tree(&object.data)
+    let entries: Arc<[TreeEntry]> = parse_tree(&object.data)?.into();
+    if let Some(cache) = walk_cache.as_deref_mut() {
+        cache.parsed_trees.insert(tree_oid, Arc::clone(&entries));
+    }
+    Ok(entries)
 }
 
 fn tree_entry_by_name<'a>(
@@ -5533,7 +5547,7 @@ fn trees_differ_for_pathspecs_optional(
     new_tree: Option<ObjectId>,
     prefix: &str,
     pathspecs: &[String],
-    cache: Option<&mut DenseWalkCache>,
+    mut cache: Option<&mut DenseWalkCache>,
 ) -> Result<bool> {
     if prefix.is_empty() && pathspecs.len() == 1 {
         if let Some(literal) = normalized_plain_literal_treesame_path(repo, &pathspecs[0]) {
@@ -5550,14 +5564,20 @@ fn trees_differ_for_pathspecs_optional(
         (Some(a), Some(b)) if a == b => Ok(false),
         (old_o, new_o) => {
             let old_entries = match old_o {
-                Some(oid) => read_parsed_tree(repo, oid)?,
-                None => Vec::new(),
+                Some(oid) => read_parsed_tree(repo, oid, cache.as_deref_mut())?,
+                None => Arc::from([] as [TreeEntry; 0]),
             };
             let new_entries = match new_o {
-                Some(oid) => read_parsed_tree(repo, oid)?,
-                None => Vec::new(),
+                Some(oid) => read_parsed_tree(repo, oid, cache.as_deref_mut())?,
+                None => Arc::from([] as [TreeEntry; 0]),
             };
-            trees_differ_tree_entries(repo, &old_entries, &new_entries, prefix, pathspecs)
+            trees_differ_tree_entries(
+                repo,
+                old_entries.as_ref(),
+                new_entries.as_ref(),
+                prefix,
+                pathspecs,
+            )
         }
     }
 }
@@ -7564,10 +7584,18 @@ impl<'r> CommitGraph<'r> {
             if self.first_parent_only && parents.len() > 1 {
                 parents.truncate(1);
             }
-            self.committer_time
-                .insert(oid, committer_unix_seconds_for_ordering(&commit.committer));
-            self.author_time
-                .insert(oid, committer_unix_seconds_for_ordering(&commit.author));
+            let committer_ts = if commit.committer_raw.is_empty() {
+                committer_unix_seconds_for_ordering(&commit.committer)
+            } else {
+                committer_unix_seconds_for_ordering_bytes(&commit.committer_raw)
+            };
+            let author_ts = if commit.author_raw.is_empty() {
+                committer_unix_seconds_for_ordering(&commit.author)
+            } else {
+                committer_unix_seconds_for_ordering_bytes(&commit.author_raw)
+            };
+            self.committer_time.insert(oid, committer_ts);
+            self.author_time.insert(oid, author_ts);
             self.commit_trees.insert(oid, commit.tree);
             self.parents.insert(oid, parents);
             if let Some(retained) = self.retained.as_mut() {
@@ -11603,6 +11631,32 @@ mod line_coverage_tests {
             cref.author_unix_seconds_for_ordering(),
             1,
             "ISO-8859-1 author name must not zero author date ordering"
+        );
+        assert_eq!(
+            cref.committer_unix_seconds_for_ordering(),
+            1,
+            "committer date ordering must match author for this commit"
+        );
+
+        let mut raw_body = format!("tree {empty_tree}\nauthor Lat").into_bytes();
+        raw_body.push(0xED);
+        raw_body.extend_from_slice(b"n <e@x> 1700000001 +0000\ncommitter Lat");
+        raw_body.push(0xED);
+        raw_body.extend_from_slice(b"n <e@x> 1700000002 +0000\n\nraw ident\n");
+        let raw_oid = repo.odb().write(ObjectKind::Commit, &raw_body)?;
+        let mut graph2 = CommitGraph::new(&repo, false);
+        graph2.parents_of(raw_oid)?;
+        let raw_obj = repo.odb().read(&raw_oid)?;
+        let raw_cref = CommitRef::parse(&raw_obj.data)?;
+        assert_eq!(
+            raw_cref.author_unix_seconds_for_ordering(),
+            1_700_000_001,
+            "non-UTF-8 author line must preserve author timestamp bytes"
+        );
+        assert_eq!(
+            raw_cref.committer_unix_seconds_for_ordering(),
+            1_700_000_002,
+            "non-UTF-8 committer line must preserve committer timestamp bytes"
         );
         Ok(())
     }
