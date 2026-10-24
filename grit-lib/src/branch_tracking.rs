@@ -16,7 +16,7 @@ use crate::refspec::{parse_fetch_refspec, RefspecItem};
 use crate::repo::Repository;
 use crate::rev_parse::abbreviate_ref_name;
 use crate::rev_parse::{peel_to_commit_for_merge_base, resolve_revision_for_range_end};
-use crate::state::{resolve_head, HeadState, InProgressOperation};
+use crate::state::{resolve_head, HeadState, InProgressOperation, WtStatusState};
 use crate::transfer::PushRefSpec;
 use crate::transfer::{match_positive, ref_excluded};
 
@@ -720,26 +720,48 @@ pub struct BranchStanding {
 }
 
 /// Status header after branch standing and in-progress operation overrides.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum StatusHeader {
     /// Normal branch vs target/upstream summary.
     Branch(StandingHeader),
     /// A merge is in progress (`MERGE_HEAD` exists).
     MergeInProgress,
-    /// Another in-progress operation (rebase, cherry-pick, …).
+    /// A rebase is in progress, started by grit or by `git` (`rebase-merge/` or `rebase-apply/`).
+    ///
+    /// `HEAD` is detached while the rebase replays; the branch being rebased comes from the
+    /// rebase state's `head-name`.
+    RebaseInProgress {
+        /// Short name of the branch being rebased; `None` when the rebase started detached.
+        branch: Option<String>,
+        /// Abbreviated commit (or ref) the branch is rebased onto, when recorded.
+        onto: Option<String>,
+    },
+    /// Another in-progress operation (cherry-pick, revert, bisect, …).
     OtherInProgress,
 }
 
 impl StatusHeader {
     /// Choose the header line, preferring merge/rebase overrides over branch standing.
+    ///
+    /// # Parameters
+    ///
+    /// - `standing`: branch comparison used when no operation is in progress.
+    /// - `state`: in-progress state from [`wt_status_get_state`](crate::state::wt_status_get_state).
+    /// - `operations`: sentinels from [`detect_in_progress`](crate::state::detect_in_progress).
     #[must_use]
     pub fn resolve(
         standing: &BranchStanding,
-        merge_in_progress: bool,
+        state: &WtStatusState,
         operations: &[InProgressOperation],
     ) -> Self {
-        if merge_in_progress || operations.contains(&InProgressOperation::Merge) {
+        if state.merge_in_progress || operations.contains(&InProgressOperation::Merge) {
             return Self::MergeInProgress;
+        }
+        if state.rebase_in_progress || state.rebase_interactive_in_progress {
+            return Self::RebaseInProgress {
+                branch: state.rebase_branch.clone(),
+                onto: state.rebase_onto.clone(),
+            };
         }
         if !operations.is_empty() {
             return Self::OtherInProgress;

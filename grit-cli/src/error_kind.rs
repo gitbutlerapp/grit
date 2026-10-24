@@ -14,6 +14,8 @@ pub enum ErrorKind {
     HashCollision,
     /// Checkout or switch would overwrite local or untracked files.
     WouldOverwrite,
+    /// Refused because a merge, rebase, pick or revert is paused (finish or abort it first).
+    OperationInProgress,
     /// Invalid `--author`, `--grep`, pickaxe, or similar filter pattern.
     InvalidPattern,
     /// Invalid command arguments for a specific subcommand (exit code 2).
@@ -70,6 +72,7 @@ impl ErrorKind {
             Self::Conflict => "conflict",
             Self::HashCollision => "hash_collision",
             Self::WouldOverwrite => "would_overwrite",
+            Self::OperationInProgress => "operation_in_progress",
             Self::InvalidPattern => "invalid_pattern",
             Self::Usage => "usage",
             Self::IncompatibleFlags => "incompatible_flags",
@@ -94,6 +97,7 @@ impl ErrorKind {
             Self::Conflict,
             Self::HashCollision,
             Self::WouldOverwrite,
+            Self::OperationInProgress,
             Self::InvalidPattern,
             Self::Usage,
             Self::IncompatibleFlags,

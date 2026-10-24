@@ -26,6 +26,8 @@ Local edits are allowed when they only touch paths that are the same on both sid
 
 Use `--dry-run` to run the same overwrite checks and report how many paths would change without updating `HEAD`, the index, the worktree, or reflogs. Agents can preflight a switch with `--json --dry-run` before mutating the tree.
 
+Switching is refused while a merge, rebase, pick, revert or `am` is paused, whether grit or `git` started it: those operations finish by committing onto the current `HEAD`, so moving it would land their result on the wrong branch. The error names the command that finishes or cancels the operation. `--dry-run` is refused too. A bisect does not block a switch.
+
 A local branch can only be checked out in one worktree at a time (including linked worktrees created with `git worktree add`). Switching to a branch that is already checked out elsewhere fails.
 
 With `-c`, creates the branch at the current commit (or at `<start-point>` when you pass one), then switches to it.
@@ -74,6 +76,13 @@ When local changes would conflict with the destination branch:
 ```console
 $ grit switch other
 error: you have uncommitted changes — commit them before switching
+```
+
+While a rebase that `git` started is stopped on a conflict:
+
+```console
+$ grit switch main
+error: cannot switch branches while an interactive rebase is in progress; finish it with `git rebase --continue` or cancel it with `grit rebase --abort`
 ```
 
 When an untracked file would be overwritten:
@@ -132,6 +141,8 @@ Example (detached):
 ```
 
 On overwrite refusal with `--json`, stdout is a single object with `kind` `would_overwrite` and `would_overwrite.reason` (`local_changes` or `untracked`) plus a sorted `paths` array. See the [error schema](/schemas/error/v1.json).
+
+While a merge, rebase, pick or revert is paused, the refusal is `{"error": "interactive rebase in progress", "kind": "operation_in_progress"}` (the `error` names the paused operation).
 
 ## Markdown output
 

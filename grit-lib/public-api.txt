@@ -5330,6 +5330,7 @@ pub grit_lib::error::Error::ObjectNotFound(alloc::string::String)
 pub grit_lib::error::Error::OdbObjectsDirMismatch
 pub grit_lib::error::Error::OdbObjectsDirMismatch::builder: std::path::PathBuf
 pub grit_lib::error::Error::OdbObjectsDirMismatch::repository: std::path::PathBuf
+pub grit_lib::error::Error::OperationInProgress(grit_lib::state::InProgressOperation)
 pub grit_lib::error::Error::PackedRefsUnexpectedLine
 pub grit_lib::error::Error::PackedRefsUnexpectedLine::line: alloc::string::String
 pub grit_lib::error::Error::PackedRefsUnexpectedLine::path: alloc::string::String
@@ -11134,10 +11135,13 @@ pub enum grit_lib::operation::NextStep
 pub grit_lib::operation::NextStep::Abort(grit_lib::state::InProgressOperation)
 pub grit_lib::operation::NextStep::Commit
 pub grit_lib::operation::NextStep::Continue(grit_lib::state::InProgressOperation)
+pub grit_lib::operation::NextStep::ContinueWithGit(grit_lib::state::InProgressOperation)
 pub grit_lib::operation::NextStep::ResolveConflicts
 pub grit_lib::operation::NextStep::Skip(grit_lib::state::InProgressOperation)
 pub grit_lib::operation::NextStep::StageResolved
 impl grit_lib::state::NextStep
+pub fn grit_lib::state::NextStep::command(&self) -> core::option::Option<alloc::string::String>
+pub fn grit_lib::state::NextStep::git_command(&self) -> core::option::Option<alloc::string::String>
 pub fn grit_lib::state::NextStep::grit_command(&self) -> core::option::Option<alloc::string::String>
 impl core::clone::Clone for grit_lib::state::NextStep
 pub fn grit_lib::state::NextStep::clone(&self) -> Self
@@ -14774,6 +14778,7 @@ pub grit_lib::prelude::Error::ObjectNotFound(alloc::string::String)
 pub grit_lib::prelude::Error::OdbObjectsDirMismatch
 pub grit_lib::prelude::Error::OdbObjectsDirMismatch::builder: std::path::PathBuf
 pub grit_lib::prelude::Error::OdbObjectsDirMismatch::repository: std::path::PathBuf
+pub grit_lib::prelude::Error::OperationInProgress(grit_lib::state::InProgressOperation)
 pub grit_lib::prelude::Error::PackedRefsUnexpectedLine
 pub grit_lib::prelude::Error::PackedRefsUnexpectedLine::line: alloc::string::String
 pub grit_lib::prelude::Error::PackedRefsUnexpectedLine::path: alloc::string::String
@@ -16145,10 +16150,13 @@ pub enum grit_lib::refs::branch_tracking::StatusHeader
 pub grit_lib::refs::branch_tracking::StatusHeader::Branch(grit_lib::refs::branch_tracking::StandingHeader)
 pub grit_lib::refs::branch_tracking::StatusHeader::MergeInProgress
 pub grit_lib::refs::branch_tracking::StatusHeader::OtherInProgress
+pub grit_lib::refs::branch_tracking::StatusHeader::RebaseInProgress
+pub grit_lib::refs::branch_tracking::StatusHeader::RebaseInProgress::branch: core::option::Option<alloc::string::String>
+pub grit_lib::refs::branch_tracking::StatusHeader::RebaseInProgress::onto: core::option::Option<alloc::string::String>
 impl grit_lib::refs::branch_tracking::StatusHeader
 pub fn grit_lib::refs::branch_tracking::StatusHeader::primary_comparison_name(&grit_lib::refs::branch_tracking::BranchStanding) -> core::option::Option<&str>
 pub fn grit_lib::refs::branch_tracking::StatusHeader::pull_integration_ref(&grit_lib::refs::branch_tracking::BranchStanding) -> core::option::Option<&str>
-pub fn grit_lib::refs::branch_tracking::StatusHeader::resolve(&grit_lib::refs::branch_tracking::BranchStanding, bool, &[grit_lib::state::InProgressOperation]) -> Self
+pub fn grit_lib::refs::branch_tracking::StatusHeader::resolve(&grit_lib::refs::branch_tracking::BranchStanding, &grit_lib::state::WtStatusState, &[grit_lib::state::InProgressOperation]) -> Self
 impl core::clone::Clone for grit_lib::refs::branch_tracking::StatusHeader
 pub fn grit_lib::refs::branch_tracking::StatusHeader::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::refs::branch_tracking::StatusHeader
@@ -16156,7 +16164,6 @@ impl core::cmp::PartialEq for grit_lib::refs::branch_tracking::StatusHeader
 pub fn grit_lib::refs::branch_tracking::StatusHeader::eq(&self, &Self) -> bool
 impl core::fmt::Debug for grit_lib::refs::branch_tracking::StatusHeader
 pub fn grit_lib::refs::branch_tracking::StatusHeader::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for grit_lib::refs::branch_tracking::StatusHeader
 impl core::marker::StructuralPartialEq for grit_lib::refs::branch_tracking::StatusHeader
 impl core::marker::Freeze for grit_lib::refs::branch_tracking::StatusHeader
 impl core::marker::Send for grit_lib::refs::branch_tracking::StatusHeader
@@ -22126,6 +22133,7 @@ impl core::marker::UnsafeUnpin for grit_lib::revwalk::history::RebasePlan
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::history::RebasePlan
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::history::RebasePlan
 #[non_exhaustive] pub enum grit_lib::revwalk::history::RebaseSessionError
+pub grit_lib::revwalk::history::RebaseSessionError::ForeignRebaseInProgress
 pub grit_lib::revwalk::history::RebaseSessionError::History(grit_lib::revwalk::history::HistoryError)
 pub grit_lib::revwalk::history::RebaseSessionError::Library(grit_lib::error::Error)
 pub grit_lib::revwalk::history::RebaseSessionError::NoRebaseInProgress
@@ -24497,10 +24505,13 @@ pub enum grit_lib::state::NextStep
 pub grit_lib::state::NextStep::Abort(grit_lib::state::InProgressOperation)
 pub grit_lib::state::NextStep::Commit
 pub grit_lib::state::NextStep::Continue(grit_lib::state::InProgressOperation)
+pub grit_lib::state::NextStep::ContinueWithGit(grit_lib::state::InProgressOperation)
 pub grit_lib::state::NextStep::ResolveConflicts
 pub grit_lib::state::NextStep::Skip(grit_lib::state::InProgressOperation)
 pub grit_lib::state::NextStep::StageResolved
 impl grit_lib::state::NextStep
+pub fn grit_lib::state::NextStep::command(&self) -> core::option::Option<alloc::string::String>
+pub fn grit_lib::state::NextStep::git_command(&self) -> core::option::Option<alloc::string::String>
 pub fn grit_lib::state::NextStep::grit_command(&self) -> core::option::Option<alloc::string::String>
 impl core::clone::Clone for grit_lib::state::NextStep
 pub fn grit_lib::state::NextStep::clone(&self) -> Self
@@ -24589,6 +24600,7 @@ pub fn grit_lib::state::detect_in_progress(&std::path::Path) -> alloc::vec::Vec<
 pub fn grit_lib::state::finish_merge_state(&grit_lib::repo::Repository) -> grit_lib::error::Result<bool>
 pub fn grit_lib::state::merge_completion_sentinels() -> &'static [&'static str]
 pub fn grit_lib::state::operation_alternatives(grit_lib::state::InProgressOperation) -> alloc::vec::Vec<grit_lib::state::NextStep>
+pub fn grit_lib::state::operation_blocking_switch(&std::path::Path) -> grit_lib::error::Result<core::option::Option<grit_lib::state::InProgressOperation>>
 pub fn grit_lib::state::operation_next_steps(grit_lib::state::InProgressOperation, bool) -> alloc::vec::Vec<grit_lib::state::NextStep>
 pub fn grit_lib::state::operation_next_steps_empty(grit_lib::state::InProgressOperation) -> alloc::vec::Vec<grit_lib::state::NextStep>
 pub fn grit_lib::state::primary_in_progress_operation(&grit_lib::state::WtStatusState) -> core::option::Option<grit_lib::state::InProgressOperation>

@@ -50,6 +50,13 @@
           "type": "string"
         },
         {
+          "description": "Refused because a merge, rebase, pick or revert is paused (finish or abort it first).",
+          "enum": [
+            "operation_in_progress"
+          ],
+          "type": "string"
+        },
+        {
           "description": "Invalid `--author`, `--grep`, pickaxe, or similar filter pattern.",
           "enum": [
             "invalid_pattern"

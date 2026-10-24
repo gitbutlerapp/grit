@@ -242,7 +242,16 @@ pub fn resolve_revision_spec(repo: &Repository, spec: &str) -> Result<ObjectId> 
 }
 
 /// Perform a branch switch or detached checkout.
+///
+/// # Errors
+///
+/// Returns [`Error::OperationInProgress`] (also for [`SwitchOptions::dry_run`]) while a merge,
+/// rebase, am, cherry-pick or revert is paused, whichever tool started it; overwrite refusals
+/// and ref/object failures otherwise.
 pub fn switch_repository(repo: &Repository, opts: &SwitchOptions) -> Result<SwitchOutcome> {
+    if let Some(op) = crate::state::operation_blocking_switch(repo.git_dir())? {
+        return Err(Error::OperationInProgress(op));
+    }
     let (
         target_oid,
         branch_ref,

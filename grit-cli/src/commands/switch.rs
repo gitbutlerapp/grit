@@ -1,10 +1,12 @@
 //! `grit switch` — move to another branch, remote branch, or detached commit.
 
 use anyhow::{bail, Result};
+use grit_lib::error::Error as LibError;
 use grit_lib::porcelain::switch::{
     resolve_create_branch, resolve_revision_spec, resolve_switch_target, switch_repository,
     SwitchMode, SwitchOptions,
 };
+use grit_lib::state::{status_operation, wt_status_get_state, HeadState};
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::io::Write;
@@ -108,8 +110,16 @@ pub fn run(
         resolve_switch_target(&repo, &spec).map_err(anyhow::Error::new)?
     };
 
-    let outcome = switch_repository(&repo, &SwitchOptions { mode, dry_run })
-        .map_err(json_error::map_lib_error)?;
+    let outcome =
+        switch_repository(&repo, &SwitchOptions { mode, dry_run }).map_err(|err| match err {
+            LibError::OperationInProgress(kind) => {
+                let operation = wt_status_get_state(repo.git_dir(), &HeadState::Invalid, false)
+                    .ok()
+                    .and_then(|state| status_operation(&state, false));
+                json_error::operation_in_progress("switch branches", kind, operation.as_ref())
+            }
+            other => json_error::map_lib_error(other),
+        })?;
 
     Ok(SwitchOutcome {
         branch: outcome.branch,

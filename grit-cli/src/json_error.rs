@@ -6,6 +6,7 @@ use std::fmt;
 use anyhow::Error;
 use grit_lib::error::{Error as LibError, OverwriteReason};
 use grit_lib::objects::ObjectId;
+use grit_lib::state::{InProgressOperation, NextStep, Operation};
 use schemars::JsonSchema;
 use serde::Serialize;
 
@@ -126,6 +127,48 @@ pub fn would_overwrite_error(
                 reason: reason_str,
                 paths,
             }),
+            oid: None,
+        },
+        human,
+    })
+}
+
+/// Build a structured CLI error for a command refused while `kind` is paused.
+///
+/// `operation` supplies the finish / cancel commands named in the message, when grit knows them.
+pub fn operation_in_progress(
+    action: &str,
+    kind: InProgressOperation,
+    operation: Option<&Operation>,
+) -> Error {
+    let description = kind.description();
+    let article = if description.starts_with(['a', 'e', 'i', 'o', 'u']) {
+        "an"
+    } else {
+        "a"
+    };
+    let mut human = format!("cannot {action} while {article} {description} is in progress");
+    if let Some(op) = operation {
+        let finish = op.next_steps.iter().rev().find_map(NextStep::command);
+        let cancel = op.alternatives.iter().find_map(NextStep::command);
+        match (finish, cancel) {
+            (Some(finish), Some(cancel)) => {
+                human.push_str(&format!(
+                    "; finish it with `{finish}` or cancel it with `{cancel}`"
+                ));
+            }
+            (Some(cmd), None) => human.push_str(&format!("; finish it with `{cmd}`")),
+            (None, Some(cmd)) => human.push_str(&format!("; cancel it with `{cmd}`")),
+            (None, None) => {}
+        }
+    }
+    Error::new(StructuredCliError {
+        payload: StructuredJsonError {
+            error: format!("{description} in progress"),
+            kind: ErrorKind::OperationInProgress,
+            conflicts: None,
+            commit: None,
+            would_overwrite: None,
             oid: None,
         },
         human,

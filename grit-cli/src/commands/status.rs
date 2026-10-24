@@ -43,7 +43,8 @@ pub struct ConflictJson {
 pub struct OperationJson {
     /// Stable operation id (for example `merge`).
     pub kind: String,
-    /// Suggested follow-up commands, in order.
+    /// Suggested follow-up commands, in order. A `git …` command appears only for an
+    /// operation `git` started that grit cannot resume (for example `git rebase --continue`).
     pub next_steps: Vec<String>,
     /// Mutually exclusive options (for example cancel the merge).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -54,7 +55,8 @@ pub struct OperationJson {
 /// Result of `grit status`.
 #[derive(Serialize, JsonSchema)]
 pub struct StatusOutcome {
-    /// Current branch (short name), or `null` when detached / invalid.
+    /// Current branch (short name), or `null` when detached / invalid. While a rebase is in
+    /// progress, the branch being rebased (`null` when the rebase started detached).
     pub branch: Option<String>,
     pub detached: bool,
     /// HEAD commit (full oid), or `null` on an unborn / invalid HEAD.
@@ -143,15 +145,11 @@ fn conflict_json(c: &Conflict) -> ConflictJson {
 fn operation_json(op: &grit_lib::state::Operation) -> OperationJson {
     OperationJson {
         kind: in_progress_label(op.kind),
-        next_steps: op
-            .next_steps
-            .iter()
-            .filter_map(NextStep::grit_command)
-            .collect(),
+        next_steps: op.next_steps.iter().filter_map(NextStep::command).collect(),
         alternatives: op
             .alternatives
             .iter()
-            .filter_map(NextStep::grit_command)
+            .filter_map(NextStep::command)
             .collect(),
     }
 }
@@ -277,7 +275,7 @@ impl StatusOutcome {
         let branch = self.branch.as_deref().unwrap_or_default();
         let base = self.header_comparison_name();
         let now = ctx.now.unix_timestamp();
-        match self.header {
+        match &self.header {
             StatusHeader::Branch(StandingHeader::Compared(Standing::Ahead)) => {
                 outln!(
                     w,
@@ -343,6 +341,14 @@ impl StatusOutcome {
                 outln!(w, "On {branch}  ·  merging — resolve conflicts");
                 outln!(w);
             }
+            StatusHeader::RebaseInProgress { branch, onto } => {
+                let branch = branch.as_deref().unwrap_or("detached HEAD");
+                match onto {
+                    Some(onto) => outln!(w, "Rebasing {branch} onto {onto}"),
+                    None => outln!(w, "Rebasing {branch}"),
+                }
+                outln!(w);
+            }
             StatusHeader::OtherInProgress => {
                 outln!(w, "On {branch}  ·  operation in progress");
                 outln!(w);
@@ -399,22 +405,29 @@ impl StatusOutcome {
         let sequential: Vec<_> = self
             .next_steps
             .iter()
-            .filter_map(NextStep::grit_command)
+            .filter_map(NextStep::command)
             .collect();
         if !sequential.is_empty() {
             outln!(w, "→ {}", sequential.join("  ·  "));
             if let Some(alt) = self
                 .alternative_steps
                 .iter()
-                .filter_map(NextStep::grit_command)
+                .filter_map(NextStep::command)
                 .next()
             {
                 outln!(w, "or {alt}");
             }
             return Ok(());
         }
-        if !self.conflicts.is_empty() {
+        if !self.conflicts.is_empty() && self.merging {
             outln!(w, "→ resolve conflicts, then grit merge --continue");
+            return Ok(());
+        }
+        if !self.conflicts.is_empty() {
+            outln!(
+                w,
+                "→ resolve conflicts, then grit add <file> to mark them resolved"
+            );
             return Ok(());
         }
         if self.merging {
@@ -462,22 +475,29 @@ impl StatusOutcome {
         let sequential: Vec<_> = self
             .next_steps
             .iter()
-            .filter_map(NextStep::grit_command)
+            .filter_map(NextStep::command)
             .collect();
         if !sequential.is_empty() {
             outln!(w, "→ `{}`", sequential.join("`  ·  `"));
             if let Some(alt) = self
                 .alternative_steps
                 .iter()
-                .filter_map(NextStep::grit_command)
+                .filter_map(NextStep::command)
                 .next()
             {
                 outln!(w, "or `{alt}`");
             }
             return Ok(());
         }
-        if !self.conflicts.is_empty() {
+        if !self.conflicts.is_empty() && self.merging {
             outln!(w, "→ resolve conflicts, then grit merge --continue");
+            return Ok(());
+        }
+        if !self.conflicts.is_empty() {
+            outln!(
+                w,
+                "→ resolve conflicts, then grit add `PATH` to mark them resolved"
+            );
             return Ok(());
         }
         if self.merging {
@@ -503,7 +523,7 @@ impl StatusOutcome {
     fn render_markdown_header(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
         let branch = self.branch.as_deref().unwrap_or_default();
         let base = self.header_comparison_name();
-        match self.header {
+        match &self.header {
             StatusHeader::Branch(StandingHeader::Compared(Standing::Ahead)) => {
                 outln!(
                     w,
@@ -565,6 +585,16 @@ impl StatusOutcome {
             }
             StatusHeader::MergeInProgress => {
                 outln!(w, "On **`{branch}`** · merging — resolve conflicts");
+                outln!(w);
+            }
+            StatusHeader::RebaseInProgress { branch, onto } => {
+                let branch = branch
+                    .as_deref()
+                    .map_or_else(|| "detached HEAD".to_owned(), |b| format!("**`{b}`**"));
+                match onto {
+                    Some(onto) => outln!(w, "Rebasing {branch} onto `{onto}`"),
+                    None => outln!(w, "Rebasing {branch}"),
+                }
                 outln!(w);
             }
             StatusHeader::OtherInProgress => {
@@ -757,7 +787,11 @@ pub fn run(args: &StatusCliArgs) -> Result<StatusOutcome> {
         },
     )
     .context("could not resolve branch standing")?;
-    let header = StatusHeader::resolve(&standing, merging, &operations);
+    let header = StatusHeader::resolve(&standing, &model.state, &operations);
+    let branch = match &header {
+        StatusHeader::RebaseInProgress { branch, .. } => branch.clone(),
+        _ => standing.branch.clone(),
+    };
     let now = context::wall_clock_now(repo.environment()).unix_timestamp();
     let newest_ahead = standing
         .target
@@ -790,7 +824,7 @@ pub fn run(args: &StatusCliArgs) -> Result<StatusOutcome> {
 
     let standing_for_outcome = standing.clone();
     Ok(StatusOutcome {
-        branch: standing.branch,
+        branch,
         detached: matches!(model.head, HeadState::Detached { .. }),
         head: model.head.oid().map(ObjectId::to_hex),
         target: standing.target.as_ref().map(|t| t.name.clone()),

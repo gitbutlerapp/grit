@@ -140,9 +140,36 @@ pub enum NextStep {
     Continue(InProgressOperation),
     /// Skip the current sequencer step.
     Skip(InProgressOperation),
+    /// Advance an operation that `git` started and only `git` can resume (for example a
+    /// rebase without grit's plan).
+    ContinueWithGit(InProgressOperation),
 }
 
 impl NextStep {
+    /// Render the suggested invocation: the [`Self::grit_command`] when grit implements the
+    /// step, otherwise the [`Self::git_command`] for operations only `git` can finish.
+    #[must_use]
+    pub fn command(&self) -> Option<String> {
+        self.grit_command().or_else(|| self.git_command())
+    }
+
+    /// Render the `git` invocation for [`Self::ContinueWithGit`]; `None` for every other step.
+    #[must_use]
+    pub fn git_command(&self) -> Option<String> {
+        let Self::ContinueWithGit(kind) = self else {
+            return None;
+        };
+        let verb = match kind {
+            InProgressOperation::Merge => "merge",
+            InProgressOperation::Rebase | InProgressOperation::RebaseInteractive => "rebase",
+            InProgressOperation::CherryPick => "cherry-pick",
+            InProgressOperation::Revert => "revert",
+            InProgressOperation::Am => "am",
+            InProgressOperation::Bisect => return None,
+        };
+        Some(format!("git {verb} --continue"))
+    }
+
     /// Render a non-interactive `grit` invocation for this step, when one exists.
     #[must_use]
     pub fn grit_command(&self) -> Option<String> {
@@ -165,13 +192,12 @@ impl NextStep {
             Self::Continue(InProgressOperation::Rebase) => {
                 Some("grit rebase --continue".to_owned())
             }
-            Self::Abort(InProgressOperation::Rebase) => Some("grit rebase --abort".to_owned()),
+            Self::Abort(InProgressOperation::Rebase | InProgressOperation::RebaseInteractive) => {
+                Some("grit rebase --abort".to_owned())
+            }
             Self::Skip(InProgressOperation::Rebase) => Some("grit rebase --skip".to_owned()),
-            Self::Abort(
-                InProgressOperation::RebaseInteractive
-                | InProgressOperation::Am
-                | InProgressOperation::Bisect,
-            )
+            Self::ContinueWithGit(_)
+            | Self::Abort(InProgressOperation::Am | InProgressOperation::Bisect)
             | Self::Continue(
                 InProgressOperation::RebaseInteractive
                 | InProgressOperation::Am
@@ -304,10 +330,31 @@ pub fn operation_alternatives(kind: InProgressOperation) -> Vec<NextStep> {
 /// [`Operation`] guidance for [`StatusModel`](crate::porcelain::status::StatusModel).
 ///
 /// Merge, cherry-pick, revert, and grit rebase sessions expose continue/abort/skip hints when
-/// grit implements the matching commands. Other in-progress states detected via [`WtStatusState`]
-/// omit `operation` until grit implements them.
+/// grit implements the matching commands. A rebase that `git` started suggests
+/// [`NextStep::ContinueWithGit`] (grit can abort it but not resume git's todo list). Other
+/// in-progress states detected via [`WtStatusState`] omit `operation` until grit implements them.
 #[must_use]
 pub fn status_operation(state: &WtStatusState, has_unmerged_conflicts: bool) -> Option<Operation> {
+    let foreign_rebase = !state.merge_in_progress
+        && !state.grit_rebase_in_progress
+        && (state.rebase_in_progress || state.rebase_interactive_in_progress);
+    if foreign_rebase {
+        let kind = if state.rebase_interactive_in_progress {
+            InProgressOperation::RebaseInteractive
+        } else {
+            InProgressOperation::Rebase
+        };
+        let mut next_steps = Vec::new();
+        if has_unmerged_conflicts {
+            next_steps.extend([NextStep::ResolveConflicts, NextStep::StageResolved]);
+        }
+        next_steps.push(NextStep::ContinueWithGit(kind));
+        return Some(Operation {
+            kind,
+            next_steps,
+            alternatives: vec![NextStep::Abort(kind)],
+        });
+    }
     let kind = if state.merge_in_progress {
         InProgressOperation::Merge
     } else if state.grit_rebase_in_progress {
@@ -533,6 +580,24 @@ pub fn detect_in_progress(git_dir: &Path) -> Vec<InProgressOperation> {
     }
 
     ops
+}
+
+/// The paused operation that must finish before `HEAD` may move to another branch or commit.
+///
+/// Merge, rebase (grit's or git's), am, cherry-pick and revert all keep state that refers to
+/// the current `HEAD`; moving it would make their continue step commit onto the wrong branch.
+/// A bisect does not block a switch.
+///
+/// # Parameters
+///
+/// - `git_dir` — the (per-worktree) git directory.
+///
+/// # Errors
+///
+/// Returns [`Error::Io`] when an operation sentinel cannot be read.
+pub fn operation_blocking_switch(git_dir: &Path) -> Result<Option<InProgressOperation>> {
+    let state = wt_status_get_state(git_dir, &HeadState::Invalid, false)?;
+    Ok(primary_in_progress_operation(&state).filter(|op| *op != InProgressOperation::Bisect))
 }
 
 /// Snapshot of repository state used by `git status` long-format output (`wt-status.c`).
@@ -1113,6 +1178,75 @@ mod head_state_tests {
         assert_eq!(
             resolve_head_for_repository(&repo).unwrap(),
             HeadState::Invalid
+        );
+    }
+}
+
+#[cfg(test)]
+mod switch_guard_tests {
+    #![allow(clippy::unwrap_used)]
+
+    use super::{operation_blocking_switch, InProgressOperation};
+    use std::fs;
+    use tempfile::TempDir;
+
+    fn blocking(setup: impl FnOnce(&std::path::Path)) -> Option<InProgressOperation> {
+        let tmp = TempDir::new().unwrap();
+        let git = tmp.path().join(".git");
+        fs::create_dir_all(&git).unwrap();
+        setup(&git);
+        operation_blocking_switch(&git).unwrap()
+    }
+
+    #[test]
+    fn clean_and_bisect_do_not_block_switch() {
+        assert_eq!(blocking(|_| {}), None);
+        assert_eq!(
+            blocking(|git| fs::write(git.join("BISECT_LOG"), "").unwrap()),
+            None
+        );
+    }
+
+    #[test]
+    fn paused_operations_block_switch() {
+        let oid = "1111111111111111111111111111111111111111\n";
+        assert_eq!(
+            blocking(|git| fs::write(git.join("MERGE_HEAD"), oid).unwrap()),
+            Some(InProgressOperation::Merge)
+        );
+        assert_eq!(
+            blocking(|git| {
+                fs::create_dir_all(git.join("rebase-merge")).unwrap();
+                fs::write(git.join("rebase-merge/interactive"), "").unwrap();
+            }),
+            Some(InProgressOperation::RebaseInteractive)
+        );
+        assert_eq!(
+            blocking(|git| {
+                fs::create_dir_all(git.join("rebase-merge")).unwrap();
+                fs::write(git.join("rebase-merge/interactive"), "").unwrap();
+                fs::write(git.join("rebase-merge/grit-plan"), "{}").unwrap();
+            }),
+            Some(InProgressOperation::Rebase)
+        );
+        assert_eq!(
+            blocking(|git| fs::create_dir_all(git.join("rebase-apply")).unwrap()),
+            Some(InProgressOperation::Rebase)
+        );
+        assert_eq!(
+            blocking(|git| {
+                fs::create_dir_all(git.join("rebase-apply")).unwrap();
+                fs::write(git.join("rebase-apply/applying"), "").unwrap();
+            }),
+            Some(InProgressOperation::Am)
+        );
+        assert_eq!(
+            blocking(|git| fs::write(git.join("CHERRY_PICK_HEAD"), oid).unwrap()),
+            Some(InProgressOperation::CherryPick)
+        );
+        assert_eq!(
+            blocking(|git| fs::write(git.join("REVERT_HEAD"), oid).unwrap()),
+            Some(InProgressOperation::Revert)
         );
     }
 }

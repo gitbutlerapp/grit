@@ -27,6 +27,7 @@ These values appear in the `kind` field of structured `--json` errors ([error sc
 | `conflict` | Merge, pick, rebase, or similar would introduce conflicts (`conflicts`, optional `commit`). |
 | `hash_collision` | Refusing to store content that triggers SHA-1 collision detection (`oid`). |
 | `would_overwrite` | Checkout / switch would overwrite local or untracked files (`would_overwrite.reason`, `would_overwrite.paths`). |
+| `operation_in_progress` | `grit switch` refused while a merge, rebase, pick or revert is paused (grit's or one `git` started); finish or abort it first. |
 | `invalid_pattern` | Invalid filter pattern (exit 129). |
 | `usage` | Subcommand usage mistake (exit 2), e.g. `grit branch` flag combinations. |
 | `incompatible_flags` | Flags that cannot be combined (often `--json` with human-only options). |

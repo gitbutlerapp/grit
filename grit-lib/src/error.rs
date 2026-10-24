@@ -1080,6 +1080,11 @@ pub enum Error {
     #[error("no cherry-pick or revert in progress")]
     NoReplayInProgress,
 
+    /// The command would move `HEAD` while a paused operation still depends on it
+    /// (see [`operation_blocking_switch`](crate::state::operation_blocking_switch)).
+    #[error("{} in progress", .0.description())]
+    OperationInProgress(crate::state::InProgressOperation),
+
     /// A local branch is checked out as `HEAD` in a linked or main worktree.
     #[error("branch '{branch}' is already checked out in '{worktree_path}'")]
     BranchCheckedOutInWorktree {

@@ -161,7 +161,7 @@
           "type": "string"
         },
         "next_steps": {
-          "description": "Suggested follow-up commands, in order.",
+          "description": "Suggested follow-up commands, in order. A `git …` command appears only for an operation `git` started that grit cannot resume (for example `git rebase --continue`).",
           "items": {
             "type": "string"
           },
@@ -248,7 +248,7 @@
       ]
     },
     "branch": {
-      "description": "Current branch (short name), or `null` when detached / invalid.",
+      "description": "Current branch (short name), or `null` when detached / invalid. While a rebase is in progress, the branch being rebased (`null` when the rebase started detached).",
       "type": [
         "string",
         "null"

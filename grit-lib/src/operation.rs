@@ -301,6 +301,41 @@ mod tests {
         ];
         for (step, expected) in cases {
             assert_eq!(step.grit_command().as_deref(), Some(*expected), "{step:?}");
+            assert_eq!(step.command().as_deref(), Some(*expected), "{step:?}");
+            assert_eq!(step.git_command(), None, "{step:?}");
         }
+    }
+
+    #[test]
+    fn continue_with_git_renders_only_a_git_command() {
+        use crate::state::InProgressOperation;
+
+        let cases: &[(InProgressOperation, Option<&str>)] = &[
+            (InProgressOperation::Merge, Some("git merge --continue")),
+            (InProgressOperation::Rebase, Some("git rebase --continue")),
+            (
+                InProgressOperation::RebaseInteractive,
+                Some("git rebase --continue"),
+            ),
+            (
+                InProgressOperation::CherryPick,
+                Some("git cherry-pick --continue"),
+            ),
+            (InProgressOperation::Revert, Some("git revert --continue")),
+            (InProgressOperation::Am, Some("git am --continue")),
+            (InProgressOperation::Bisect, None),
+        ];
+        for (kind, expected) in cases {
+            let step = NextStep::ContinueWithGit(*kind);
+            assert_eq!(step.grit_command(), None, "{step:?}");
+            assert_eq!(step.git_command().as_deref(), *expected, "{step:?}");
+            assert_eq!(step.command().as_deref(), *expected, "{step:?}");
+        }
+        assert_eq!(
+            NextStep::Abort(InProgressOperation::RebaseInteractive)
+                .command()
+                .as_deref(),
+            Some("grit rebase --abort")
+        );
     }
 }
