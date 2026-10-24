@@ -9848,6 +9848,7 @@ pub fn grit_lib::objects::pack_name_hash::pack_name_hash_v2(&[u8]) -> u32
 pub mod grit_lib::objects::pack_object_select
 pub struct grit_lib::objects::pack_object_select::PackEnumerateOptions<'a>
 pub grit_lib::objects::pack_object_select::PackEnumerateOptions::exclude_objects: core::option::Option<&'a std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>>
+pub grit_lib::objects::pack_object_select::PackEnumerateOptions::prefetch_walk_objects: bool
 pub grit_lib::objects::pack_object_select::PackEnumerateOptions::filter: core::option::Option<&'a grit_lib::revwalk::rev_list::ObjectFilter>
 pub grit_lib::objects::pack_object_select::PackEnumerateOptions::have_shallow_grafts: core::option::Option<&'a std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>>
 pub grit_lib::objects::pack_object_select::PackEnumerateOptions::shallow_grafts: &'a std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>
