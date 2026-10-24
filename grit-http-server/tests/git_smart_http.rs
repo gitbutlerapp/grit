@@ -209,6 +209,98 @@ fn system_git_clone_fetch_v0_v2_and_push_over_grit_http_server() {
     assert!(git_ok(&clone_dir, &["fsck"]));
 }
 
+/// Deterministic incompressible bytes, so the pushed pack is as large as the blob.
+fn pseudo_random_bytes(len: usize, mut seed: u64) -> Vec<u8> {
+    let mut out = Vec::with_capacity(len + 8);
+    while out.len() < len {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        out.extend_from_slice(&seed.to_le_bytes());
+    }
+    out.truncate(len);
+    out
+}
+
+/// Push one commit holding a single random blob of each size, then check the
+/// served repository with the system `git`.
+fn push_large_blobs_over_grit_http_server(sizes: &[usize], extra_push_args: &[&str]) {
+    let server_bin = require_binary("grit-http-server");
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path().join("srv");
+    std::fs::create_dir_all(&root).unwrap();
+    let bare = root.join("project.git");
+    git(
+        tmp.path(),
+        &["init", "-q", "--bare", bare.to_str().expect("utf8 path")],
+    );
+
+    let work = tmp.path().join("work");
+    std::fs::create_dir_all(&work).unwrap();
+    git(&work, &["init", "-q", "-b", "main", "."]);
+
+    let port = require_port();
+    let child = spawn_server(&server_bin, &root, port, None);
+    let _guard = ServerGuard(child);
+    assert!(
+        wait_ready(port),
+        "grit-http-server did not become ready on port {port}"
+    );
+    let url = format!("http://127.0.0.1:{port}/project.git");
+
+    for (i, &size) in sizes.iter().enumerate() {
+        std::fs::write(
+            work.join("blob"),
+            pseudo_random_bytes(size, 0x9e37_79b9 + i as u64),
+        )
+        .unwrap();
+        git(&work, &["add", "blob"]);
+        git(
+            &work,
+            &["commit", "-q", "-m", &format!("blob of {size} bytes")],
+        );
+        let refspec = format!("HEAD:refs/heads/b{size}");
+        let mut args = extra_push_args.to_vec();
+        args.extend(["push", "-q", url.as_str(), refspec.as_str()]);
+        let out = git_output(&work, &args);
+        assert!(
+            out.status.success(),
+            "push of a {size}-byte blob failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        assert_eq!(
+            rev_parse(&bare, &format!("refs/heads/b{size}")),
+            rev_parse(&work, "HEAD"),
+            "served branch must point at the pushed commit"
+        );
+    }
+
+    let fsck = git_output(&bare, &["fsck", "--full", "--strict"]);
+    assert!(
+        fsck.status.success(),
+        "git fsck on the served repo failed: {}",
+        String::from_utf8_lossy(&fsck.stderr)
+    );
+}
+
+#[test]
+fn push_larger_than_axum_default_body_limit_succeeds() {
+    push_large_blobs_over_grit_http_server(&[1_500_000, 3_000_000], &[]);
+}
+
+#[test]
+fn push_larger_than_fetch_request_cap_succeeds() {
+    push_large_blobs_over_grit_http_server(&[40 * 1024 * 1024], &[]);
+}
+
+#[test]
+fn large_push_with_content_length_body_succeeds() {
+    // A post buffer bigger than the pack makes git send one sized body instead
+    // of a chunked stream.
+    push_large_blobs_over_grit_http_server(&[3_000_000], &["-c", "http.postBuffer=67108864"]);
+}
+
 #[test]
 fn global_receive_deny_non_fast_forward_rejects_force_push() {
     let server_bin = require_binary("grit-http-server");

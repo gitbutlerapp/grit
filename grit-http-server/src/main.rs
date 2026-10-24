@@ -6,13 +6,14 @@
 //!   POST /:repo/git-upload-pack
 //!   POST /:repo/git-receive-pack
 
+use std::io::Read;
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use anyhow::Result;
 use axum::{
-    body::Bytes,
-    extract::{Path, Query, State},
+    body::{Body, Bytes},
+    extract::{Path, Query, Request, State},
     http::{header, HeaderMap, StatusCode},
     response::{IntoResponse, Response},
     routing::get,
@@ -184,11 +185,37 @@ fn protocol_version_from_headers(headers: &HeaderMap) -> Option<u8> {
     None
 }
 
-/// Maximum smart-HTTP POST body size after decompression (or for identity bodies).
+/// Maximum `POST /git-upload-pack` body size, both as sent and after decompression.
 ///
-/// Legitimate v2 fetch requests (thousands of `want` lines) stay well under this; it blocks
-/// gzip decompression bombs that expand far beyond the compressed size Axum accepts.
-const SMART_HTTP_MAX_DECODED_BODY: usize = 32 * 1024 * 1024;
+/// Legitimate fetch requests (thousands of `want`/`have` lines) stay well under this; it
+/// blocks gzip decompression bombs. Push bodies carry the whole pack, so they are streamed
+/// instead and only limited by the repository's `receive.maxInputSize`, like
+/// `git http-backend`.
+const MAX_FETCH_REQUEST_BODY: usize = 32 * 1024 * 1024;
+
+/// The `Content-Encoding` of a smart-HTTP request body.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BodyEncoding {
+    Identity,
+    Gzip,
+}
+
+/// Parse `Content-Encoding`; Git sends either none or `gzip`.
+fn body_encoding(headers: &HeaderMap) -> Result<BodyEncoding, Box<Response>> {
+    let encoding = headers
+        .get(header::CONTENT_ENCODING)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("");
+    if encoding.eq_ignore_ascii_case("gzip") {
+        return Ok(BodyEncoding::Gzip);
+    }
+    if encoding.is_empty() || encoding.eq_ignore_ascii_case("identity") {
+        return Ok(BodyEncoding::Identity);
+    }
+    Err(Box::new(
+        (StatusCode::BAD_REQUEST, "unsupported Content-Encoding").into_response(),
+    ))
+}
 
 enum GzipDecodeError {
     Invalid,
@@ -216,30 +243,69 @@ fn payload_too_large() -> Box<Response> {
     Box::new((StatusCode::PAYLOAD_TOO_LARGE, "request body too large").into_response())
 }
 
-/// Decode a smart-HTTP POST body (Git may send `Content-Encoding: gzip`).
-fn decode_smart_http_body(headers: &HeaderMap, body: &[u8]) -> Result<Vec<u8>, Box<Response>> {
-    let encoding = headers
-        .get(header::CONTENT_ENCODING)
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("");
-    if encoding.eq_ignore_ascii_case("gzip") {
-        return read_gzip_with_limit(body, SMART_HTTP_MAX_DECODED_BODY).map_err(|e| match e {
-            GzipDecodeError::Invalid => {
-                Box::new((StatusCode::BAD_REQUEST, "invalid gzip request body").into_response())
-            }
-            GzipDecodeError::TooLarge => payload_too_large(),
-        });
+/// Decode a buffered fetch request body (Git may send `Content-Encoding: gzip`).
+fn decode_fetch_request_body(headers: &HeaderMap, body: &[u8]) -> Result<Vec<u8>, Box<Response>> {
+    match body_encoding(headers)? {
+        BodyEncoding::Gzip => {
+            read_gzip_with_limit(body, MAX_FETCH_REQUEST_BODY).map_err(|e| match e {
+                GzipDecodeError::Invalid => {
+                    Box::new((StatusCode::BAD_REQUEST, "invalid gzip request body").into_response())
+                }
+                GzipDecodeError::TooLarge => payload_too_large(),
+            })
+        }
+        BodyEncoding::Identity if body.len() > MAX_FETCH_REQUEST_BODY => Err(payload_too_large()),
+        BodyEncoding::Identity => Ok(body.to_vec()),
     }
-    if !encoding.is_empty() && !encoding.eq_ignore_ascii_case("identity") {
-        return Err(Box::new(
-            (StatusCode::BAD_REQUEST, "unsupported Content-Encoding").into_response(),
-        ));
-    }
-    if body.len() > SMART_HTTP_MAX_DECODED_BODY {
-        return Err(payload_too_large());
-    }
-    Ok(body.to_vec())
 }
+
+/// Buffer a fetch request body, refusing anything over [`MAX_FETCH_REQUEST_BODY`].
+async fn read_fetch_request_body(body: Body) -> Result<Bytes, Box<Response>> {
+    axum::body::to_bytes(body, MAX_FETCH_REQUEST_BODY)
+        .await
+        .map_err(|e| {
+            let inner = e.into_inner();
+            let too_large =
+                std::iter::successors(Some(&*inner as &(dyn std::error::Error + 'static)), |e| {
+                    e.source()
+                })
+                .any(|e| e.is::<http_body_util::LengthLimitError>());
+            if too_large {
+                payload_too_large()
+            } else {
+                Box::new((StatusCode::BAD_REQUEST, "could not read request body").into_response())
+            }
+        })
+}
+
+/// Turn a request body into a blocking reader of its raw bytes, without buffering it.
+///
+/// Must be called from the async runtime; the returned reader must then be used from a
+/// blocking thread (`spawn_blocking`), where each read waits for the next body chunk.
+fn streaming_body_reader(body: Body) -> impl Read + Send + 'static {
+    use futures_util::TryStreamExt as _;
+
+    let stream = body.into_data_stream().map_err(std::io::Error::other);
+    std::io::BufReader::with_capacity(
+        STREAM_READ_BUFFER,
+        tokio_util::io::SyncIoBridge::new(tokio_util::io::StreamReader::new(stream)),
+    )
+}
+
+/// Undo the body's `Content-Encoding` on a streaming reader.
+///
+/// Call this on the blocking thread: the gzip decoder reads its header as soon as it is
+/// created, which would block the async runtime.
+fn decoded_reader<'a>(raw: impl Read + 'a, encoding: BodyEncoding) -> Box<dyn Read + 'a> {
+    match encoding {
+        BodyEncoding::Identity => Box::new(raw),
+        BodyEncoding::Gzip => Box::new(flate2::read::GzDecoder::new(raw)),
+    }
+}
+
+/// Read-ahead for streamed request bodies, so pkt-line sized reads do not each wait
+/// on the runtime.
+const STREAM_READ_BUFFER: usize = 64 * 1024;
 
 fn no_cache_headers(builder: axum::http::response::Builder) -> axum::http::response::Builder {
     builder
@@ -327,14 +393,18 @@ async fn upload_pack_rpc(
     Path(repo): Path<String>,
     protocol_version: Option<u8>,
     headers: HeaderMap,
-    body: Bytes,
+    body: Body,
 ) -> Response {
     let repo_path = match state.repo_path(&repo) {
         Ok(p) => p,
         Err(e) => return *e,
     };
 
-    let request = match decode_smart_http_body(&headers, &body) {
+    let body = match read_fetch_request_body(body).await {
+        Ok(b) => b,
+        Err(resp) => return *resp,
+    };
+    let request = match decode_fetch_request_body(&headers, &body) {
         Ok(b) => b,
         Err(resp) => return *resp,
     };
@@ -370,20 +440,25 @@ async fn receive_pack_rpc(
     State(state): State<Arc<AppState>>,
     Path(repo): Path<String>,
     headers: HeaderMap,
-    body: Bytes,
+    body: Body,
 ) -> Response {
     let repo_path = match state.repo_path(&repo) {
         Ok(p) => p,
         Err(e) => return *e,
     };
 
-    let request = match decode_smart_http_body(&headers, &body) {
-        Ok(b) => b,
+    let encoding = match body_encoding(&headers) {
+        Ok(e) => e,
         Err(resp) => return *resp,
     };
+    let raw = streaming_body_reader(body);
     let repository_options = state.repository_options.clone();
     match tokio::task::spawn_blocking(move || {
-        grit_protocol::receive_pack::stateless_rpc(&repo_path, &request, &repository_options)
+        grit_protocol::receive_pack::stateless_rpc_from_reader(
+            &repo_path,
+            &mut decoded_reader(raw, encoding),
+            &repository_options,
+        )
     })
     .await
     {
@@ -464,13 +539,16 @@ async fn info_refs_dispatch(
     }
 }
 
-// Dispatch POST requests to upload-pack or receive-pack
+// Dispatch POST requests to upload-pack or receive-pack. The body is taken raw
+// (not as `Bytes`) so each service decides how to read it: buffered and capped
+// for fetch requests, streamed without a cap for pushes.
 async fn rpc_dispatch(
     state: State<Arc<AppState>>,
     Path(full_path): Path<String>,
-    headers: HeaderMap,
-    body: Bytes,
+    request: Request,
 ) -> Response {
+    let (parts, body) = request.into_parts();
+    let headers = parts.headers;
     state.log_request_headers(&headers);
     if let Err(resp) = state.check_auth(&headers) {
         return *resp;
@@ -526,7 +604,7 @@ mod body_tests {
         let plain = b"0012command=fetch\n";
         let gzip = gzip_bytes(plain);
         let headers = gzip_content_encoding_header();
-        let out = match decode_smart_http_body(&headers, &gzip) {
+        let out = match decode_fetch_request_body(&headers, &gzip) {
             Ok(v) => v,
             Err(_) => panic!("decode gzip body"),
         };
@@ -535,10 +613,10 @@ mod body_tests {
 
     #[test]
     fn gzip_decoded_body_over_limit_returns_payload_too_large() {
-        let plain = vec![0u8; SMART_HTTP_MAX_DECODED_BODY + 1];
+        let plain = vec![0u8; MAX_FETCH_REQUEST_BODY + 1];
         let gzip = gzip_bytes(&plain);
         let headers = gzip_content_encoding_header();
-        match decode_smart_http_body(&headers, &gzip) {
+        match decode_fetch_request_body(&headers, &gzip) {
             Err(resp) => assert_eq!(resp.status(), StatusCode::PAYLOAD_TOO_LARGE),
             Ok(_) => panic!("oversized gzip must fail"),
         }
@@ -546,11 +624,77 @@ mod body_tests {
 
     #[test]
     fn identity_body_over_limit_returns_payload_too_large() {
-        let body = vec![0u8; SMART_HTTP_MAX_DECODED_BODY + 1];
+        let body = vec![0u8; MAX_FETCH_REQUEST_BODY + 1];
         let headers = HeaderMap::new();
-        match decode_smart_http_body(&headers, &body) {
+        match decode_fetch_request_body(&headers, &body) {
             Err(resp) => assert_eq!(resp.status(), StatusCode::PAYLOAD_TOO_LARGE),
             Ok(_) => panic!("oversized body must fail"),
         }
+    }
+
+    #[test]
+    fn unknown_content_encoding_is_rejected() {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::CONTENT_ENCODING, HeaderValue::from_static("br"));
+        match body_encoding(&headers) {
+            Err(resp) => assert_eq!(resp.status(), StatusCode::BAD_REQUEST),
+            Ok(e) => panic!("br must be rejected, got {e:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn fetch_request_body_over_limit_returns_payload_too_large() {
+        let body = Body::from(vec![0u8; MAX_FETCH_REQUEST_BODY + 1]);
+        match read_fetch_request_body(body).await {
+            Err(resp) => assert_eq!(resp.status(), StatusCode::PAYLOAD_TOO_LARGE),
+            Ok(_) => panic!("oversized fetch request must fail"),
+        }
+    }
+
+    /// A body of many chunks, larger than the fetch cap, as hyper delivers a push.
+    fn chunked_body(chunks: Vec<Vec<u8>>) -> Body {
+        let stream = futures_util::stream::iter(
+            chunks
+                .into_iter()
+                .map(|c| Ok::<_, std::io::Error>(Bytes::from(c))),
+        );
+        Body::from_stream(stream)
+    }
+
+    async fn read_streamed(body: Body, encoding: BodyEncoding) -> Vec<u8> {
+        let raw = streaming_body_reader(body);
+        let read = tokio::task::spawn_blocking(move || {
+            let mut out = Vec::new();
+            decoded_reader(raw, encoding)
+                .read_to_end(&mut out)
+                .map(|_| out)
+        });
+        match read.await {
+            Ok(Ok(out)) => out,
+            Ok(Err(e)) => panic!("read streamed body: {e}"),
+            Err(e) => panic!("join: {e}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn streamed_identity_body_is_not_capped() {
+        let chunk: Vec<u8> = (0..=255u8).cycle().take(1024 * 1024).collect();
+        let chunks = vec![chunk.clone(); MAX_FETCH_REQUEST_BODY / chunk.len() + 2];
+        let expected = chunks.concat();
+        let out = read_streamed(chunked_body(chunks), BodyEncoding::Identity).await;
+        assert_eq!(out.len(), expected.len());
+        assert!(out == expected, "streamed bytes must match the body");
+    }
+
+    #[tokio::test]
+    async fn streamed_gzip_body_is_decoded() {
+        let plain: Vec<u8> = (0..3_000_000u32).map(|i| (i % 251) as u8).collect();
+        let gzip = gzip_bytes(&plain);
+        let chunks = gzip.chunks(4096).map(<[u8]>::to_vec).collect();
+        let out = read_streamed(chunked_body(chunks), BodyEncoding::Gzip).await;
+        assert!(
+            out == plain,
+            "gzip push body must decode to the original bytes"
+        );
     }
 }

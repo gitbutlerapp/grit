@@ -23,6 +23,9 @@ clap.workspace = true
 serde = { version = "1", features = ["derive"] }
 base64.workspace = true
 flate2.workspace = true
+futures-util = { version = "0.3", default-features = false }
+http-body-util = "0.1"
+tokio-util = { version = "0.7", features = ["io", "io-util"] }
 
 [dev-dependencies]
 tempfile.workspace = true

@@ -25,6 +25,9 @@ Every ref update is checked before it's applied, and the client is told which up
 | `receive.denyDeletes` | Refuse to delete refs. |
 | `receive.denyCurrentBranch` | Refuse to update the branch checked out in a non-bare repository. On by default; set it to `ignore` or `warn` to allow it. |
 | `receive.hideRefs`, `transfer.hideRefs` | Hide refs from pushing clients and refuse updates to them. |
+| `receive.maxInputSize` | Refuse pushes whose pack is larger than this many bytes. Unlimited by default. |
+
+There is no other limit on push size. `grit-http-server` streams a push body straight into receive-pack instead of buffering it, so a push of any size works over smart HTTP, as with `git http-backend`. Fetch requests, which are small, are capped at 32 MiB (after gzip decoding).
 
 Pushes that ask for an atomic update are applied all or nothing. Server-side hooks are not supported yet.
 
