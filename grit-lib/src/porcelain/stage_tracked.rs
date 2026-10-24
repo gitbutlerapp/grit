@@ -680,9 +680,10 @@ fn refresh_present_tracked_path(
     let idx_intent_to_add = idx_e.intent_to_add();
     let idx_oid = idx_e.oid;
 
-    if idx_mode == 0o160000 {
+    if idx_mode == 0o160000 && stat.is_dir {
         return refresh_gitlink(repo, index, raw_path, abs_path, idx_e);
     }
+    // Gitlink in the index but a non-directory in the work tree (e.g. regular file): stage as blob below.
 
     if stat.is_dir {
         if abs_path.join(".git").exists() {
@@ -1734,6 +1735,28 @@ mod tests {
         let staged = index.get(b"sub", 0).expect("stage-0 gitlink");
         assert_eq!(staged.mode, MODE_GITLINK);
         assert_eq!(staged.oid, theirs_oid);
+    }
+
+    #[test]
+    fn gitlink_replaced_by_regular_file_stages_blob() {
+        let (_dir, repo) = init_repo();
+        let wt = repo.work_tree().unwrap();
+        let gitlink_oid = repo.odb().write(ObjectKind::Commit, b"tree 0000000000000000000000000000000000000000\nauthor t <t@t> 0 +0000\ncommitter t <t@t> 0 +0000\n\nsub\n").unwrap();
+        let mut index = Index::new();
+        index
+            .entries
+            .push(conflict_index_entry("sub", 0, gitlink_oid, MODE_GITLINK));
+        repo.write_index(&mut index).unwrap();
+
+        fs::write(wt.join("sub"), b"plain file\n").unwrap();
+
+        let summary = stage_tracked_modifications(&repo, wt).unwrap();
+        assert_eq!(summary.modified, vec![b"sub".to_vec()]);
+
+        let index = repo.load_index().unwrap();
+        let staged = index.get(b"sub", 0).expect("stage-0 blob");
+        assert_eq!(staged.mode, MODE_REGULAR);
+        assert_ne!(staged.oid, gitlink_oid);
     }
 
     #[test]
