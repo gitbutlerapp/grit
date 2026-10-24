@@ -406,6 +406,9 @@ pub fn run(
     {
         let env = context::environment();
         if unset {
+            if value.is_some() {
+                bail!("--unset does not take a value");
+            }
             return hot_unset_in_repo(&key, dry_run);
         }
         if let Some(value) = value {
