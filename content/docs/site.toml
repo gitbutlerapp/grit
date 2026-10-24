@@ -142,5 +142,6 @@ baseline = [
   "grit-utils/baselines/dashboard/git-dot-git-worktree-status.json",
   "grit-utils/baselines/daily-common-paths.json",
   "grit-utils/baselines/daily-workspace-extras.json",
+  "grit-utils/baselines/daily-delete-heavy-after.json",
   "grit-utils/baselines/daily/latest.json",
 ]

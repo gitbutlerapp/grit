@@ -219,6 +219,40 @@ Committed baseline: **`grit-utils/baselines/conflicts.json`**. Factory VM median
 ./target/release/grit-bench conflicts --sizes 1000,10000 --format json --output grit-utils/baselines/conflicts.json
 ```
 
+## Delete-heavy switch and hard reset (2026-10-24)
+
+On Windows with real-time antivirus, deleting about 2000 files with `grit switch` or `grit reset --hard` took several seconds where Git took half a second (issue #1754). The cost was per-file work that opens files, which antivirus scanning makes expensive, rather than the deletes themselves:
+
+- **`reset --hard` diffed the whole worktree for nothing.** Planning a hard reset ran a full index-to-worktree diff to list the edits it would discard, then threw the list away unless `--dry-run` was set. That diff stat'ed every tracked file and read every racily clean one, including the files about to be deleted. It now runs only for dry runs.
+- **`reset --hard` stat'ed each file about three times.** Paths leaving the index were stat'ed and removed one by one, and every unchanged entry went through a per-path up-to-date check that stat'ed it, possibly hashed it, and stat'ed it again. Now tree-diff deletions go through the tree-diff checkout (whole directories removed at once), unchanged entries get one directory-batched stat pass, and only stat-dirty or racily clean entries are content-checked, in parallel.
+- **`switch` hashed racily clean files one at a time.** Right after a checkout, the files it wrote share the index's timestamp second, so switching away has to compare their content (Git does the same). The guard re-stat'ed each one and hashed them serially. It now reuses the directory scan's stat and hashes them on the index-refresh thread pool.
+
+The hard-reset rework also fixed a correctness hole: raciness of unchanged entries was judged against the index written halfway through the reset, so a same-size edit made within the index's timestamp second could survive `reset --hard` and be recorded as clean.
+
+Syscalls on the issue's synthetic tree (480 directories of 100 files, the target commit deletes 20 directories), run straight after the reverse checkout so the deleted files are racily clean, counted with `strace -f`:
+
+| Command | Git | Grit before | Grit after |
+| --- | ---: | ---: | ---: |
+| `reset --hard`: stat calls | 46 133 | 146 883 | **46 341** |
+| `reset --hard`: files opened | 0 | 2 000 | **0** |
+| `switch`: stat calls | 54 650 | 6 342 | **4 347** |
+| `switch`: racy files read | 2 000 | 2 000 (1 thread) | 2 000 (pool) |
+
+`grit-bench daily` rows on the same shape (the fixture is packed, each run goes to the delete-heavy commit and back), same VM sitting, system `git 2.43.0`, committed in **`daily-delete-heavy-before.json`** and **`daily-delete-heavy-after.json`**:
+
+| Scenario | Git ms (before / after run) | Grit ms before → after | Grit ÷ Git before → after | Grit peak RSS before → after |
+| --- | ---: | ---: | ---: | ---: |
+| `reset/hard-delete-heavy@wide-48k` | 308.7 / 315.7 | 533.0 → **288.5** | 1.73× → **0.91×** | 63 → **49** MB |
+| `switch/delete-heavy@wide-48k` | 162.1 / 177.4 | 134.2 → 141.3 | 0.83× → 0.80× | 33 → 33 MB |
+
+On Linux, opening a file is cheap, so the switch row only moves within noise. The win there is on platforms where each open is slow, and it can't be timed on this VM.
+
+```bash
+cargo build --release -p grit-cli -p grit-utils
+./target/release/grit-bench daily --only switch/delete-heavy@wide-48k,reset/hard-delete-heavy@wide-48k \
+  --min-runs 10 --output grit-utils/baselines/daily-delete-heavy-after.json
+```
+
 ## Pick keeps the cache-tree (2026-10-24)
 
 The daily census flagged `pick/one@synth-100k` going from 0.95× to 1.22× Git. The replay sequencer had started loading the index without its cache-tree extension to save memory. Without a cache-tree, the check that the index matches `HEAD` flattens the whole `HEAD` tree into a map, which costs more time and more memory than the extension it skipped. The index was also parsed a second time for the first replay step, and the index written after the pick lost its cache-tree. Pick and revert now keep the cache-tree, and the snapshot from the cleanliness check feeds the first step.
