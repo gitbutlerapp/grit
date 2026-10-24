@@ -24,6 +24,43 @@ use support::{
     git_fsck_strict, git_interop_available, git_show_ref, git_update_ref, loose_ref_path, Backend,
 };
 
+/// Point `HEAD` straight at `oid` without dereferencing it (Git's `update-ref --no-deref`).
+fn detach_head_in_store(git_dir: &Path, oid: ObjectId) {
+    use grit_lib::refs::store::{Expected, RawRef, RefTransaction, RefUpdate, RefUpdateFlags};
+    let store = open_ref_store(git_dir).expect("open ref store");
+    let txn = RefTransaction::new()
+        .update(RefUpdate {
+            name: "HEAD".to_owned(),
+            new_value: Some(RawRef::Direct(oid)),
+            expected: Expected::Any,
+            reflog: None,
+            flags: RefUpdateFlags {
+                no_deref: true,
+                ..RefUpdateFlags::default()
+            },
+        })
+        .expect("txn");
+    store
+        .prepare(txn)
+        .expect("prepare")
+        .commit()
+        .expect("commit");
+}
+
+/// `git symbolic-ref -q HEAD`, or `None` when `HEAD` is detached.
+fn git_symbolic_head(worktree: &Path) -> Option<String> {
+    let out = std::process::Command::new("git")
+        .current_dir(worktree)
+        .args(["symbolic-ref", "-q", "HEAD"])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("git symbolic-ref");
+    out.status
+        .success()
+        .then(|| String::from_utf8_lossy(&out.stdout).trim().to_owned())
+}
+
 fn assert_direct_ref_stored(git_dir: &Path, backend: Backend, refname: &str, oid: &ObjectId) {
     match backend {
         Backend::Files => {
@@ -166,20 +203,24 @@ fn t1401_head_detached_vs_symbolic_both_backends() {
 
         match backend {
             Backend::Files => write_ref(&git_dir, "HEAD", &oid).expect("detach HEAD"),
-            Backend::Reftable => {
-                fs::write(git_dir.join("HEAD"), format!("{oid}\n")).expect("detach HEAD file");
-            }
+            Backend::Reftable => detach_head_in_store(&git_dir, oid),
         }
         assert!(read_head(&git_dir).unwrap().is_none());
         assert_eq!(resolve_ref(&git_dir, "HEAD").unwrap(), oid);
+        if git_interop_available(backend) {
+            assert_eq!(
+                git(repo.worktree(), &["rev-parse", "HEAD"]).trim(),
+                oid.to_hex()
+            );
+            assert!(git_symbolic_head(repo.worktree()).is_none());
+        }
 
-        match backend {
-            Backend::Files => {
-                write_symbolic_ref(&git_dir, "HEAD", "refs/heads/main").expect("reattach HEAD");
-            }
-            Backend::Reftable => {
-                fs::write(git_dir.join("HEAD"), "ref: refs/heads/main\n").expect("reattach HEAD");
-            }
+        write_symbolic_ref(&git_dir, "HEAD", "refs/heads/main").expect("reattach HEAD");
+        if git_interop_available(backend) {
+            assert_eq!(
+                git_symbolic_head(repo.worktree()).as_deref(),
+                Some("refs/heads/main")
+            );
         }
         assert_eq!(
             read_head(&git_dir).unwrap().as_deref(),

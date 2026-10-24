@@ -4131,6 +4131,9 @@ fn write_fresh_git_directory(
         }
     }
     fs::write(git_dir.join("config"), config_content)?;
+    if ref_storage.is_reftable() {
+        crate::refs::write_symbolic_ref(git_dir, "HEAD", &format!("refs/heads/{initial_branch}"))?;
+    }
 
     // Merge `config` from the template on top of the default (matches `git clone --template`).
     if let Some(tmpl) = template_dir {

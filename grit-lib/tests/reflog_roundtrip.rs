@@ -616,11 +616,15 @@ fn log_all_ref_updates_modes_match_git() {
     ];
 
     for mode in modes {
-        each_backend_git_oracle(|_, repo| {
+        each_backend_git_oracle(|backend, repo| {
+            let (version, extensions) = match backend {
+                Backend::Files => (0, ""),
+                Backend::Reftable => (1, "[extensions]\n\trefStorage = reftable\n"),
+            };
             write_repo_config(
                 repo.worktree(),
                 &format!(
-                    "[core]\n\trepositoryformatversion = 0\n\tbare = false\n\tlogAllRefUpdates = {}\n",
+                    "[core]\n\trepositoryformatversion = {version}\n\tbare = false\n\tlogAllRefUpdates = {}\n{extensions}",
                     mode.key
                 ),
             );

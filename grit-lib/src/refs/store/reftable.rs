@@ -118,11 +118,14 @@ impl ReftableRefStore {
         // Match [`MemoryRefStore`]: conformance seeds start from an empty namespace.
         let txn = RefTransaction::new()
             .update(RefUpdate {
-                name: "refs/heads/main".to_owned(),
+                name: "HEAD".to_owned(),
                 new_value: None,
                 expected: Expected::Any,
                 reflog: None,
-                flags: super::RefUpdateFlags::default(),
+                flags: super::RefUpdateFlags {
+                    no_deref: true,
+                    ..super::RefUpdateFlags::default()
+                },
             })
             .map_err(|e| Error::Message(e.to_string()))?;
         store
@@ -319,6 +322,9 @@ fn read_reflog_entries_from_stack(git_dir: &Path, refname: &str) -> Result<Vec<R
     Ok(entries)
 }
 
+/// `HEAD` file content Git writes in reftable repositories, where `HEAD` lives in the stack.
+const REFTABLE_HEAD_STUB: &str = "ref: refs/heads/.invalid\n";
+
 fn head_file_is_reftable_invalid_stub(git_dir: &Path) -> Result<bool> {
     let head_path = git_dir.join("HEAD");
     let content = match fs::read_to_string(&head_path) {
@@ -340,12 +346,16 @@ fn read_head_from_reftable_stack(git_dir: &Path) -> Result<Option<RawRef>> {
         .and_then(|rec| record_to_raw(&rec)))
 }
 
-/// Read HEAD for a reftable repo: on-disk stub may point at `.invalid` while the symref lives in the stack.
+/// Read HEAD for a reftable repo from the stack, where Git keeps it.
+///
+/// Falls back to the `HEAD` file for repositories whose stack has no `HEAD` record
+/// (older grit wrote it only to the file).
 fn read_head_raw(git_dir: &Path) -> Result<Option<RawRef>> {
+    if let Some(raw) = read_head_from_reftable_stack(git_dir)? {
+        return Ok(Some(raw));
+    }
     if head_file_is_reftable_invalid_stub(git_dir)? {
-        if let Some(raw) = read_head_from_reftable_stack(git_dir)? {
-            return Ok(Some(raw));
-        }
+        return Ok(None);
     }
     read_head_file_raw(git_dir)
 }
@@ -368,28 +378,15 @@ fn read_head_file_raw(git_dir: &Path) -> Result<Option<RawRef>> {
     Err(Error::InvalidRef(format!("invalid HEAD: {content}")))
 }
 
+/// Keep the `HEAD` file as Git's reftable stub once `HEAD` is written to the stack.
 fn apply_head_file_side_effect(git_dir: &Path, update: &RefUpdate) -> Result<()> {
     if update.name != "HEAD" || update.flags.log_only {
         return Ok(());
     }
-    let head_path = git_dir.join("HEAD");
-    match &update.new_value {
-        Some(RawRef::Symbolic(target)) => {
-            fs::write(head_path, format!("ref: {target}\n")).map_err(Error::Io)?;
-        }
-        Some(RawRef::Direct(oid)) => {
-            let current = read_head_file_raw(git_dir)?;
-            let deref_sym = matches!(current, Some(RawRef::Symbolic(_))) && !update.flags.no_deref;
-            if !deref_sym {
-                fs::write(head_path, format!("{oid}\n")).map_err(Error::Io)?;
-            }
-        }
-        None if update.flags.no_deref => {
-            fs::write(head_path, "ref: refs/heads/.invalid\n").map_err(Error::Io)?;
-        }
-        None => {}
+    if head_file_is_reftable_invalid_stub(git_dir)? {
+        return Ok(());
     }
-    Ok(())
+    fs::write(git_dir.join("HEAD"), REFTABLE_HEAD_STUB).map_err(Error::Io)
 }
 
 fn empty_reflog_markers_path(git_dir: &Path) -> PathBuf {
@@ -488,10 +485,7 @@ fn build_reftable_updates_for_stack(
 
     for update in updates {
         let target = reftable_write_target(&trial, git_dir, update)?;
-        let mut value = target.value.clone();
-        if update.name == "HEAD" {
-            value = head_stack_value(git_dir, update, value);
-        }
+        let value = target.value.clone();
         let old_oid = reflog_old_oid_before(&trial, refs, update);
         let new_oid = reflog_new_oid_before(&trial, refs, update);
         let (_, log_refname) = reftable_storage_location(git_dir, &update.name);
@@ -538,29 +532,6 @@ fn build_reftable_updates_for_stack(
     }
     out.extend(log_updates);
     Ok(out)
-}
-
-fn head_stack_value(
-    git_dir: &Path,
-    update: &RefUpdate,
-    value: Option<RefValue>,
-) -> Option<RefValue> {
-    if update.name != "HEAD" {
-        return value;
-    }
-    match &update.new_value {
-        Some(RawRef::Symbolic(_)) => None,
-        Some(RawRef::Direct(_)) => {
-            let current = read_head_file_raw(git_dir).ok().flatten();
-            if matches!(current, Some(RawRef::Symbolic(_))) && !update.flags.no_deref {
-                value
-            } else {
-                None
-            }
-        }
-        None if update.flags.no_deref => None,
-        None => value,
-    }
 }
 
 impl RefStore for ReftableRefStore {

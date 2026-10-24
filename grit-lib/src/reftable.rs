@@ -4214,10 +4214,8 @@ mod tests {
             stack.table_names.len()
         );
 
-        let subset = ReftableStack::subset_stack(
-            stack.reftable_dir.clone(),
-            vec![stack.table_names[0].clone()],
-        );
+        let (_newest, older) = stack.table_names.split_last().expect("tables");
+        let subset = ReftableStack::subset_stack(stack.reftable_dir.clone(), older.to_vec());
         let refs = subset.read_refs().expect("subset read");
         let names: Vec<&str> = refs.iter().map(|r| r.name.as_str()).collect();
         assert!(names.iter().any(|n| *n == "refs/heads/only-in-first-table"));
@@ -4226,7 +4224,16 @@ mod tests {
             .any(|n| *n == "refs/heads/only-in-second-table"));
 
         let full = stack.read_refs().expect("full read");
-        assert_eq!(full.len(), 2);
+        let mut full_names: Vec<&str> = full.iter().map(|r| r.name.as_str()).collect();
+        full_names.sort_unstable();
+        assert_eq!(
+            full_names,
+            [
+                "HEAD",
+                "refs/heads/only-in-first-table",
+                "refs/heads/only-in-second-table"
+            ]
+        );
     }
 
     #[test]
