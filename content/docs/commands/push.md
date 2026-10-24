@@ -157,13 +157,7 @@ Example:
 }
 ```
 
-When the `pre-push` hook fails, stdout is a single error object and the exit status is `1`:
-
-```json
-{
-  "error": "hook pre-push failed with exit status 1"
-}
-```
+When the `pre-push` hook fails, the push exits **1** with `{"error":"hook pre-push failed with exit status 1"}` on stdout and nothing is sent.
 
 ## Markdown output
 
