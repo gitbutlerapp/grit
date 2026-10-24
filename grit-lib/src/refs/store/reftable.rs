@@ -512,7 +512,7 @@ impl RefStore for ReftableRefStore {
         &self,
         txn: RefTransaction,
     ) -> StoreResult<Box<dyn PreparedRefTransaction + Send + '_>> {
-        RefTransaction::validate_no_duplicates(txn.updates())?;
+        txn.validate()?;
         let (updates, reflog_renames, _case_only_renames) = txn.into_parts();
         let mut guard_state = self.prepared.lock().unwrap_or_else(|e| e.into_inner());
         if guard_state.is_some() {

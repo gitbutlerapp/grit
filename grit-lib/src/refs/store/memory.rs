@@ -119,7 +119,7 @@ impl RefStore for MemoryRefStore {
         &self,
         txn: RefTransaction,
     ) -> StoreResult<Box<dyn PreparedRefTransaction + Send + '_>> {
-        RefTransaction::validate_no_duplicates(txn.updates())?;
+        txn.validate()?;
         let (updates, reflog_renames, case_only_renames) = txn.into_parts();
         let mut inner = self.inner.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(active) = &inner.prepared {

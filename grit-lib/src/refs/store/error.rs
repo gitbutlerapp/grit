@@ -56,9 +56,23 @@ pub enum RefStoreError {
     Corrupt(String),
 
     /// Ref name is not safe to store (traversal, illegal component, etc.).
+    ///
+    /// Every backend checks update names and both sides of reflog and case-only renames
+    /// in [`super::RefStore::prepare`], before taking locks.
     #[error("refusing to update ref with bad name '{name}'")]
     InvalidRefName {
         /// The rejected ref name.
+        name: String,
+    },
+
+    /// An update would store the all-zero (null) object id as a direct ref value.
+    ///
+    /// The null id names no object, so Git treats such a ref as broken. Delete a ref with
+    /// `new_value: None` instead. Reflog-only updates
+    /// ([`super::RefUpdateFlags::log_only`]) may still carry the null id.
+    #[error("refusing to point ref '{name}' at the null object id")]
+    NullOid {
+        /// The ref the update targeted.
         name: String,
     },
 }

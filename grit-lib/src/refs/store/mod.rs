@@ -91,6 +91,16 @@ pub trait RefStore: Send + Sync + Debug {
     ///
     /// All compare-and-swap and directory/file availability checks run before
     /// returning; calling [`PreparedRefTransaction::commit`] applies the batch atomically.
+    ///
+    /// # Errors
+    ///
+    /// Every backend rejects the same malformed batches before taking locks:
+    /// [`RefStoreError::InvalidRefName`] when an update name or either side of a reflog or
+    /// case-only rename is not safe to store, and [`RefStoreError::NullOid`] when an update
+    /// (other than a reflog-only one) would store the null object id. Otherwise returns
+    /// [`RefStoreError::LockHeld`], [`RefStoreError::ExpectedMismatch`],
+    /// [`RefStoreError::NameUnavailable`] or [`RefStoreError::DuplicateUpdate`] (two
+    /// updates reaching the same ref through symbolic refs) as the batch requires.
     fn prepare(
         &self,
         txn: RefTransaction,

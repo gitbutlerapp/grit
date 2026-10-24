@@ -1,9 +1,8 @@
 //! [`RefTransaction`] builder and validation.
 
-use std::collections::HashSet;
-
 use super::error::RefStoreError;
 use super::types::{Expected, RawRef, RefCaseOnlyRename, RefReflogRename, RefUpdate};
+use super::validation::validate_storable_refname;
 
 /// Batch of ref updates prepared for [`super::RefStore::prepare`].
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -87,14 +86,28 @@ impl RefTransaction {
         (self.updates, self.reflog_renames, self.case_only_renames)
     }
 
-    pub(crate) fn validate_no_duplicates(updates: &[RefUpdate]) -> Result<(), RefStoreError> {
-        let mut seen = HashSet::new();
-        for update in updates {
-            if !seen.insert(&update.name) {
-                return Err(RefStoreError::DuplicateUpdate {
+    /// Backend-independent checks every [`super::RefStore::prepare`] runs before taking locks.
+    ///
+    /// Duplicate names cannot reach here because [`Self::push_update`] rejects them.
+    pub(crate) fn validate(&self) -> Result<(), RefStoreError> {
+        for update in &self.updates {
+            validate_storable_refname(&update.name)?;
+            if !update.flags.log_only
+                && matches!(&update.new_value, Some(RawRef::Direct(oid)) if oid.is_zero())
+            {
+                return Err(RefStoreError::NullOid {
                     name: update.name.clone(),
                 });
             }
+        }
+        let renames = self
+            .reflog_renames
+            .iter()
+            .map(|r| (&r.from, &r.to))
+            .chain(self.case_only_renames.iter().map(|r| (&r.from, &r.to)));
+        for (from, to) in renames {
+            validate_storable_refname(from)?;
+            validate_storable_refname(to)?;
         }
         Ok(())
     }
@@ -148,6 +161,121 @@ mod tests {
             err,
             RefStoreError::DuplicateUpdate { name } if name == "refs/heads/a"
         ));
+    }
+
+    fn direct(name: &str, value: ObjectId) -> RefUpdate {
+        RefUpdate {
+            name: name.to_owned(),
+            new_value: Some(RawRef::Direct(value)),
+            expected: Expected::Any,
+            reflog: None,
+            flags: Default::default(),
+        }
+    }
+
+    fn sample_log() -> super::super::ReflogUpdate {
+        super::super::ReflogUpdate {
+            identity: "A <a@example.com>".to_owned(),
+            message: "rename".to_owned(),
+            time: time::OffsetDateTime::UNIX_EPOCH,
+            old_oid: None,
+            new_oid: None,
+        }
+    }
+
+    #[test]
+    fn validate_rejects_unsafe_update_names() {
+        for name in [
+            "",
+            "heads/x",
+            "refs/heads/../x",
+            "refs/heads/a b",
+            "refs/heads/x/",
+        ] {
+            let err = RefTransaction::new()
+                .update(direct(name, oid(1)))
+                .unwrap()
+                .validate()
+                .unwrap_err();
+            assert_eq!(
+                err,
+                RefStoreError::InvalidRefName {
+                    name: name.to_owned()
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn validate_rejects_unsafe_rename_sides() {
+        let reflog = RefTransaction::new().with_reflog_rename(RefReflogRename {
+            from: "refs/heads/ok".to_owned(),
+            to: "refs/heads/x.lock".to_owned(),
+            append: sample_log(),
+        });
+        assert_eq!(
+            reflog.validate().unwrap_err(),
+            RefStoreError::InvalidRefName {
+                name: "refs/heads/x.lock".to_owned()
+            }
+        );
+        let case_only = RefTransaction::new().with_case_only_rename(RefCaseOnlyRename {
+            from: "refs/heads//x".to_owned(),
+            to: "refs/heads/X".to_owned(),
+        });
+        assert_eq!(
+            case_only.validate().unwrap_err(),
+            RefStoreError::InvalidRefName {
+                name: "refs/heads//x".to_owned()
+            }
+        );
+    }
+
+    #[test]
+    fn validate_rejects_null_oid_unless_log_only() {
+        let err = RefTransaction::new()
+            .update(direct("refs/heads/z", ObjectId::zero()))
+            .unwrap()
+            .validate()
+            .unwrap_err();
+        assert_eq!(
+            err,
+            RefStoreError::NullOid {
+                name: "refs/heads/z".to_owned()
+            }
+        );
+
+        let mut log_only = direct("HEAD", ObjectId::zero());
+        log_only.flags.log_only = true;
+        assert!(RefTransaction::new()
+            .update(log_only)
+            .unwrap()
+            .validate()
+            .is_ok());
+    }
+
+    #[test]
+    fn validate_accepts_pseudorefs_symrefs_and_deletes() {
+        let txn = RefTransaction::new()
+            .update(direct("ORIG_HEAD", oid(1)))
+            .unwrap()
+            .update(RefUpdate {
+                name: "HEAD".to_owned(),
+                new_value: Some(RawRef::Symbolic("refs/heads/main".to_owned())),
+                expected: Expected::Any,
+                reflog: None,
+                flags: Default::default(),
+            })
+            .unwrap()
+            .update(RefUpdate {
+                name: "refs/heads/gone".to_owned(),
+                new_value: None,
+                expected: Expected::Any,
+                reflog: None,
+                flags: Default::default(),
+            })
+            .unwrap();
+        assert!(txn.validate().is_ok());
     }
 
     #[test]

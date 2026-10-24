@@ -7,8 +7,8 @@ use std::thread;
 use grit_lib::objects::ObjectId;
 use grit_lib::refs::reflog::ReflogEntry;
 use grit_lib::refs::store::{
-    Expected, RawRef, RefStore, RefStoreError, RefTransaction, RefUpdate, RefUpdateFlags,
-    ReflogUpdate,
+    Expected, RawRef, RefCaseOnlyRename, RefReflogRename, RefStore, RefStoreError, RefTransaction,
+    RefUpdate, RefUpdateFlags, ReflogUpdate,
 };
 
 type StoreFactory = Arc<dyn Fn() -> Arc<dyn RefStore> + Send + Sync>;
@@ -96,6 +96,173 @@ pub fn run_refstore_conformance(factory: StoreFactory) {
     abort_leaves_state_unchanged(&factory);
     concurrent_prepare_lock_held(&factory);
     reflog_roundtrip(&factory);
+    unsafe_names_rejected_at_prepare(&factory);
+    unsafe_rename_names_rejected_at_prepare(&factory);
+    null_oid_rejected_at_prepare(&factory);
+    pseudoref_and_log_only_null_oid_accepted(&factory);
+}
+
+const UNSAFE_NAMES: &[&str] = &[
+    "refs/heads/../x",
+    "refs/heads/a b",
+    "refs/heads/x.lock",
+    "refs/heads/x/",
+    "refs/heads//x",
+    "",
+    "heads/x",
+    "refs/heads/../../config",
+];
+
+fn all_ref_names(store: &dyn RefStore) -> Vec<String> {
+    let mut names = Vec::new();
+    store
+        .for_each_ref("", &mut |entry| {
+            names.push(entry.name.clone());
+            ControlFlow::Continue(())
+        })
+        .expect("iterate refs");
+    names
+}
+
+fn unsafe_names_rejected_at_prepare(factory: &StoreFactory) {
+    let store = factory();
+    seed_direct(store.as_ref(), "refs/heads/main", oid(1));
+    for &name in UNSAFE_NAMES {
+        let txn = RefTransaction::new()
+            .update(update(name, Some(RawRef::Direct(oid(2))), Expected::Any))
+            .expect("txn");
+        let err = prepare_err(store.as_ref(), txn);
+        assert_eq!(
+            err,
+            RefStoreError::InvalidRefName {
+                name: name.to_owned()
+            },
+            "{name:?}"
+        );
+    }
+
+    let batch = RefTransaction::new()
+        .update(update(
+            "refs/heads/ok",
+            Some(RawRef::Direct(oid(3))),
+            Expected::Missing,
+        ))
+        .expect("ok")
+        .update(update(
+            "refs/heads/a b",
+            Some(RawRef::Direct(oid(3))),
+            Expected::Any,
+        ))
+        .expect("bad");
+    assert!(matches!(
+        prepare_err(store.as_ref(), batch),
+        RefStoreError::InvalidRefName { .. }
+    ));
+    assert_eq!(all_ref_names(store.as_ref()), vec!["refs/heads/main"]);
+
+    // A rejected prepare must not leave a lock behind.
+    let txn = RefTransaction::new()
+        .update(update(
+            "refs/heads/main",
+            Some(RawRef::Direct(oid(4))),
+            Expected::Oid(oid(1)),
+        ))
+        .expect("txn");
+    store
+        .prepare(txn)
+        .expect("prepare after rejection")
+        .commit()
+        .expect("commit");
+}
+
+fn unsafe_rename_names_rejected_at_prepare(factory: &StoreFactory) {
+    let store = factory();
+    seed_direct(store.as_ref(), "refs/heads/topic", oid(1));
+    let reflog_rename = RefTransaction::new().with_reflog_rename(RefReflogRename {
+        from: "refs/heads/topic".to_owned(),
+        to: "refs/heads/../escape".to_owned(),
+        append: sample_log(),
+    });
+    assert_eq!(
+        prepare_err(store.as_ref(), reflog_rename),
+        RefStoreError::InvalidRefName {
+            name: "refs/heads/../escape".to_owned()
+        }
+    );
+    let case_only = RefTransaction::new().with_case_only_rename(RefCaseOnlyRename {
+        from: "refs/heads/topic".to_owned(),
+        to: "refs/heads/Topic.lock".to_owned(),
+    });
+    assert_eq!(
+        prepare_err(store.as_ref(), case_only),
+        RefStoreError::InvalidRefName {
+            name: "refs/heads/Topic.lock".to_owned()
+        }
+    );
+    assert_eq!(all_ref_names(store.as_ref()), vec!["refs/heads/topic"]);
+}
+
+fn null_oid_rejected_at_prepare(factory: &StoreFactory) {
+    let store = factory();
+    seed_direct(store.as_ref(), "refs/heads/main", oid(1));
+    seed_symref(store.as_ref(), "HEAD", "refs/heads/main");
+    for name in ["refs/heads/z", "refs/heads/main", "HEAD"] {
+        let txn = RefTransaction::new()
+            .update(update(
+                name,
+                Some(RawRef::Direct(ObjectId::zero())),
+                Expected::Any,
+            ))
+            .expect("txn");
+        assert_eq!(
+            prepare_err(store.as_ref(), txn),
+            RefStoreError::NullOid {
+                name: name.to_owned()
+            },
+            "{name}"
+        );
+    }
+    assert_eq!(
+        store.read_raw("refs/heads/main").expect("main"),
+        Some(RawRef::Direct(oid(1)))
+    );
+    assert_eq!(store.read_raw("refs/heads/z").expect("z"), None);
+}
+
+fn pseudoref_and_log_only_null_oid_accepted(factory: &StoreFactory) {
+    let store = factory();
+    seed_direct(store.as_ref(), "refs/heads/main", oid(1));
+    seed_symref(store.as_ref(), "HEAD", "refs/heads/main");
+    seed_direct(store.as_ref(), "ORIG_HEAD", oid(2));
+    assert_eq!(
+        store.read_raw("ORIG_HEAD").expect("orig head"),
+        Some(RawRef::Direct(oid(2)))
+    );
+
+    let mut log_only = update(
+        "HEAD",
+        Some(RawRef::Direct(ObjectId::zero())),
+        Expected::Any,
+    );
+    log_only.reflog = Some(sample_log());
+    log_only.flags = RefUpdateFlags {
+        log_only: true,
+        no_deref: true,
+    };
+    let txn = RefTransaction::new().update(log_only).expect("txn");
+    store
+        .prepare(txn)
+        .expect("log-only null oid prepares")
+        .commit()
+        .expect("commit");
+    assert_eq!(
+        store.read_raw("HEAD").expect("head"),
+        Some(RawRef::Symbolic("refs/heads/main".to_owned()))
+    );
+    assert_eq!(
+        store.read_raw("refs/heads/main").expect("main"),
+        Some(RawRef::Direct(oid(1)))
+    );
 }
 
 fn cas_success(factory: &StoreFactory) {

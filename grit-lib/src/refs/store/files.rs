@@ -1092,20 +1092,8 @@ impl RefStore for FilesRefStore {
         &self,
         txn: RefTransaction,
     ) -> StoreResult<Box<dyn PreparedRefTransaction + Send + '_>> {
-        RefTransaction::validate_no_duplicates(txn.updates())?;
+        txn.validate()?;
         let (updates, reflog_renames, case_only_renames) = txn.into_parts();
-
-        for update in &updates {
-            validate_storable_refname(&update.name)?;
-        }
-        for rename in &reflog_renames {
-            validate_storable_refname(&rename.from)?;
-            validate_storable_refname(&rename.to)?;
-        }
-        for rename in &case_only_renames {
-            validate_storable_refname(&rename.from)?;
-            validate_storable_refname(&rename.to)?;
-        }
 
         let mut prepared_guard = self.prepared.lock().unwrap_or_else(|e| e.into_inner());
         if prepared_guard.is_some() {
