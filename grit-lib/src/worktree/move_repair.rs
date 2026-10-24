@@ -238,10 +238,10 @@ fn create_symlink(source_meta: &fs::Metadata, target: &Path, link_path: &Path) -
     }
     #[cfg(windows)]
     {
-        use std::os::windows::fs::{symlink_dir, symlink_file};
-        // Preserve the source reparse-point kind (directory vs file). `target.is_dir()` follows
-        // relative targets from the process cwd and is false for dangling directory links.
-        if source_meta.is_dir() {
+        use std::os::windows::fs::{symlink_dir, symlink_file, FileTypeExt};
+        // Preserve the source reparse-point kind. `Metadata::is_dir()` is false for every symlink
+        // on Windows; `FileTypeExt::is_symlink_dir()` reads the reparse-point kind directly.
+        if source_meta.file_type().is_symlink_dir() {
             symlink_dir(target, link_path).map_err(Error::Io)?;
         } else {
             symlink_file(target, link_path).map_err(Error::Io)?;
@@ -253,7 +253,7 @@ fn create_symlink(source_meta: &fs::Metadata, target: &Path, link_path: &Path) -
 #[cfg(all(test, windows))]
 mod windows_symlink_copy_tests {
     use super::*;
-    use std::os::windows::fs::symlink_dir;
+    use std::os::windows::fs::{symlink_dir, FileTypeExt};
 
     #[test]
     fn copy_tree_entry_preserves_dangling_directory_symlink_kind() {
@@ -269,7 +269,7 @@ mod windows_symlink_copy_tests {
         let meta = fs::symlink_metadata(&dest_link).expect("dest meta");
         assert!(meta.file_type().is_symlink());
         assert!(
-            meta.is_dir(),
+            meta.file_type().is_symlink_dir(),
             "directory reparse point must stay a directory link"
         );
         assert_eq!(
@@ -292,7 +292,7 @@ mod windows_symlink_copy_tests {
         let meta = fs::symlink_metadata(&dest_link).expect("dest meta");
         assert!(meta.file_type().is_symlink());
         assert!(
-            meta.is_dir(),
+            meta.file_type().is_symlink_dir(),
             "relative directory link must not become a file link"
         );
         assert_eq!(
