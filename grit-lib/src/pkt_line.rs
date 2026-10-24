@@ -118,35 +118,6 @@ pub fn read_until_flush_or_delim(r: &mut impl Read) -> io::Result<(Vec<String>, 
     }
 }
 
-/// Read data pkt-lines until a flush packet, matching Git's command argument sections.
-///
-/// A delimiter or response-end packet is treated as a protocol violation and reported with
-/// `err_not_flush` (for example: `"expected flush after ls-refs arguments"`).
-pub fn read_data_lines_until_flush(
-    r: &mut impl Read,
-    err_not_flush: &str,
-) -> io::Result<Vec<String>> {
-    let mut lines = Vec::new();
-    loop {
-        match read_packet(r)? {
-            None => {
-                return Err(io::Error::new(
-                    io::ErrorKind::UnexpectedEof,
-                    err_not_flush.to_string(),
-                ));
-            }
-            Some(Packet::Flush) => return Ok(lines),
-            Some(Packet::Delim) | Some(Packet::ResponseEnd) => {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidData,
-                    err_not_flush.to_string(),
-                ));
-            }
-            Some(Packet::Data(s)) => lines.push(s),
-        }
-    }
-}
-
 /// Write one sideband pkt-line on `band`.
 pub fn write_sideband_packet(
     w: &mut (impl Write + ?Sized),
@@ -168,26 +139,6 @@ pub fn write_sideband_channel1_64k(w: &mut impl Write, payload: &[u8]) -> io::Re
         write!(w, "{len:04x}")?;
         w.write_all(&[1u8])?;
         w.write_all(chunk)?;
-    }
-    Ok(())
-}
-
-/// Stream `reader` on sideband channel 1 with 64k chunking (avoids loading whole packs).
-pub fn write_sideband_channel1_64k_reader(
-    w: &mut impl Write,
-    mut reader: impl Read,
-) -> io::Result<()> {
-    const MAX_PAYLOAD: usize = 65515;
-    let mut buf = [0u8; MAX_PAYLOAD];
-    loop {
-        let n = reader.read(&mut buf)?;
-        if n == 0 {
-            break;
-        }
-        let len = 4 + 1 + n;
-        write!(w, "{len:04x}")?;
-        w.write_all(&[1u8])?;
-        w.write_all(&buf[..n])?;
     }
     Ok(())
 }
@@ -255,37 +206,4 @@ pub fn parse_hex_len(prefix: &[u8]) -> io::Result<usize> {
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("{e}")))?;
     usize::from_str_radix(s, 16)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, format!("invalid length: {e}")))
-}
-
-/// Decode a sideband pkt-line stream into the raw primary (band 1) payload.
-pub fn decode_sideband_primary(mut input: &[u8]) -> io::Result<Vec<u8>> {
-    let mut out = Vec::new();
-    while !input.is_empty() {
-        if input.len() < 4 {
-            break;
-        }
-        let len = parse_hex_len(&input[..4])?;
-        input = &input[4..];
-        if len == 0 {
-            break;
-        }
-        if len <= 4 || input.len() < len - 4 {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "truncated sideband packet",
-            ));
-        }
-        let payload_len = len - 4;
-        let payload = &input[..payload_len];
-        input = &input[payload_len..];
-        if payload.is_empty() {
-            continue;
-        }
-        let band = payload[0];
-        let data = &payload[1..];
-        if band == 1 {
-            out.extend_from_slice(data);
-        }
-    }
-    Ok(out)
 }

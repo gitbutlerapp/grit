@@ -2711,22 +2711,6 @@ pub fn apply_index_file_mode(abs_path: &Path, mode: u32) -> Result<()> {
     Ok(())
 }
 
-/// Ensure each component of `rel_path`'s parent exists as a real directory.
-///
-/// Replaces a parent path that is a symlink or regular file (e.g. `D` → `untracked` or `D` as a
-/// file) so `mkdir -p` can create `D/A` during checkout (`t2080` force checkout cases).
-pub fn prepare_parent_dirs_for_checkout(work_tree: &Path, rel_path: &str) -> Result<()> {
-    let mut cache = LeadingDirCache::new();
-    cache.ensure_parents(work_tree, rel_path)?;
-    let abs_path = crate::repo_relpath::worktree_abs(work_tree, rel_path);
-    if let Some(parent) = abs_path.parent() {
-        fs::create_dir_all(parent).map_err(|e| {
-            Error::PathError(format!("creating parent directories for '{rel_path}': {e}"))
-        })?;
-    }
-    Ok(())
-}
-
 /// Write data to a working tree file, handling symlinks and executable bits.
 pub(crate) fn write_to_worktree_cached(
     work_tree: &Path,
@@ -2817,107 +2801,6 @@ fn remove_empty_parent_dirs_batch(work_tree: &Path, deleted_paths: &[PathBuf]) {
         }
         let _ = fs::remove_dir(&dir);
     }
-}
-
-/// Check if a pathspec contains glob characters.
-pub fn is_glob_pattern(spec: &str) -> bool {
-    spec.contains('*') || spec.contains('?') || spec.contains('[')
-}
-
-/// Match a path against a simple glob pattern.
-/// Supports `*` (any chars except `/`), `?` (any single char except `/`),
-/// and character classes `[abc]`.
-pub fn glob_matches(pattern: &str, path: &str) -> bool {
-    glob_matches_inner(pattern.as_bytes(), path.as_bytes())
-}
-
-fn glob_matches_inner(pattern: &[u8], path: &[u8]) -> bool {
-    let mut pi = 0; // pattern index
-    let mut si = 0; // string index
-    let mut star_pi = usize::MAX;
-    let mut star_si = 0;
-
-    while si < path.len() {
-        if pi < pattern.len() && pattern[pi] == b'?' {
-            pi += 1;
-            si += 1;
-        } else if pi < pattern.len() && pattern[pi] == b'*' {
-            if pi + 1 < pattern.len() && pattern[pi + 1] == b'*' {
-                // "**" matches everything including '/'
-                // For simplicity, try matching rest of pattern at every position
-                let rest = &pattern[pi + 2..];
-                // Skip optional '/' after **
-                let rest = if !rest.is_empty() && rest[0] == b'/' {
-                    &rest[1..]
-                } else {
-                    rest
-                };
-                for i in si..=path.len() {
-                    if glob_matches_inner(rest, &path[i..]) {
-                        return true;
-                    }
-                }
-                return false;
-            }
-            star_pi = pi;
-            star_si = si;
-            pi += 1;
-        } else if pi < pattern.len() && pattern[pi] == b'[' {
-            // Character class
-            pi += 1;
-            let negate = pi < pattern.len() && (pattern[pi] == b'!' || pattern[pi] == b'^');
-            if negate {
-                pi += 1;
-            }
-            let mut found = false;
-            let ch = path[si];
-            while pi < pattern.len() && pattern[pi] != b']' {
-                if pi + 2 < pattern.len() && pattern[pi + 1] == b'-' {
-                    if ch >= pattern[pi] && ch <= pattern[pi + 2] {
-                        found = true;
-                    }
-                    pi += 3;
-                } else {
-                    if ch == pattern[pi] {
-                        found = true;
-                    }
-                    pi += 1;
-                }
-            }
-            if pi < pattern.len() {
-                pi += 1;
-            } // skip ']'
-            if found == negate {
-                // Mismatch in character class
-                if star_pi != usize::MAX {
-                    pi = star_pi + 1;
-                    star_si += 1;
-                    si = star_si;
-                } else {
-                    return false;
-                }
-            } else {
-                si += 1;
-            }
-        } else if pi < pattern.len() && pattern[pi] == path[si] {
-            pi += 1;
-            si += 1;
-        } else if star_pi != usize::MAX {
-            // Backtrack: '*' matches one more character (including '/')
-            pi = star_pi + 1;
-            star_si += 1;
-            si = star_si;
-        } else {
-            return false;
-        }
-    }
-
-    // Consume trailing '*' or '**' in pattern
-    while pi < pattern.len() && pattern[pi] == b'*' {
-        pi += 1;
-    }
-
-    pi == pattern.len()
 }
 
 #[cfg(test)]

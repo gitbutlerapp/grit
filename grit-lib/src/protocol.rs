@@ -180,15 +180,6 @@ pub fn try_effective_client_protocol_version_from_inputs(
     Ok(2)
 }
 
-/// Select the effective client-side protocol version.
-///
-/// Unknown values are treated as `2`, matching legacy CLI behavior. Prefer
-/// [`try_effective_client_protocol_version_from_inputs`] when invalid config must be rejected.
-#[must_use]
-pub fn effective_client_protocol_version_from_inputs(inputs: &ClientProtocolVersionInputs) -> u8 {
-    try_effective_client_protocol_version_from_inputs(inputs).unwrap_or(2)
-}
-
 /// Effective client-side protocol version from `protocol.version` in `config` only.
 ///
 /// Does not read process environment; callers that honor `GIT_TEST_PROTOCOL_VERSION` must
@@ -222,56 +213,6 @@ pub fn client_git_protocol_header_from_config(config: &ConfigSet) -> Result<Opti
     Ok(client_git_protocol_header_value(
         try_effective_client_protocol_version_from_config(config)?,
     ))
-}
-
-/// Server-side protocol version: highest `version=N` from `GIT_PROTOCOL`, or `0` if unset.
-#[must_use]
-pub fn server_protocol_version_from_git_protocol(raw: Option<&str>) -> u8 {
-    let Some(raw) = raw else {
-        return 0;
-    };
-    let mut best = 0u8;
-    for part in raw.split(':') {
-        let Some(rest) = part.strip_prefix("version=") else {
-            continue;
-        };
-        let v = rest.parse::<u8>().unwrap_or(0);
-        if v > best {
-            best = v;
-        }
-    }
-    best
-}
-
-fn strip_protocol_version_entries(s: &str) -> String {
-    s.split(':')
-        .filter(|p| !p.trim_start().starts_with("version="))
-        .filter(|p| !p.is_empty())
-        .collect::<Vec<_>>()
-        .join(":")
-}
-
-/// Merge a requested client protocol version into an existing `GIT_PROTOCOL` value.
-///
-/// Existing `version=N` entries are removed before appending the requested version.
-/// Returns [`None`] when `client_wants` is `0`.
-#[must_use]
-pub fn merged_git_protocol_value(client_wants: u8, existing: Option<&str>) -> Option<String> {
-    if client_wants == 0 {
-        return None;
-    }
-    let entry = format!("version={client_wants}");
-    Some(match existing {
-        Some(e) if !e.is_empty() => {
-            let base = strip_protocol_version_entries(e.trim());
-            if base.is_empty() {
-                entry
-            } else {
-                format!("{base}:{entry}")
-            }
-        }
-        _ => entry,
-    })
 }
 
 #[cfg(test)]

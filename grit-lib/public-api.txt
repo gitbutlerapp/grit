@@ -1460,18 +1460,14 @@ pub fn grit_lib::command_runner::run_sh_dash_c(&dyn grit_lib::command_runner::Co
 pub fn grit_lib::command_runner::system_command_runner() -> alloc::rcs::arc::Arc<dyn grit_lib::command_runner::CommandRunner>
 pub mod grit_lib::commit
 pub mod grit_lib::commit::encoding
-pub fn grit_lib::commit::encoding::commit_message_unicode_for_display(core::option::Option<&str>, &str, core::option::Option<&[u8]>) -> alloc::string::String
 pub fn grit_lib::commit::encoding::decode_bytes(core::option::Option<&str>, &[u8]) -> alloc::string::String
-pub fn grit_lib::commit::encoding::decode_rfc2047_mailbox_from_line(&str) -> alloc::string::String
 pub fn grit_lib::commit::encoding::encode_header_text(&str, &str) -> core::option::Option<alloc::vec::Vec<u8>>
 pub fn grit_lib::commit::encoding::encode_unicode(&str, &str) -> core::option::Option<alloc::vec::Vec<u8>>
 pub fn grit_lib::commit::encoding::ensure_body_trailing_newline(alloc::vec::Vec<u8>) -> alloc::vec::Vec<u8>
 pub fn grit_lib::commit::encoding::finalize_stored_commit_message(alloc::string::String, core::option::Option<&str>) -> (alloc::string::String, core::option::Option<alloc::string::String>, core::option::Option<alloc::vec::Vec<u8>>)
 pub fn grit_lib::commit::encoding::find_invalid_utf8(&[u8]) -> core::option::Option<usize>
 pub fn grit_lib::commit::encoding::identity_raw_for_serialized_commit(&core::option::Option<alloc::string::String>, &str, &str) -> (alloc::vec::Vec<u8>, alloc::vec::Vec<u8>)
-pub fn grit_lib::commit::encoding::is_known_encoding(&str) -> bool
 pub fn grit_lib::commit::encoding::is_strict_utf8(&[u8]) -> bool
-pub fn grit_lib::commit::encoding::reencode_utf8_to_label(&str, &str) -> core::option::Option<alloc::vec::Vec<u8>>
 pub fn grit_lib::commit::encoding::resolve(&str) -> core::option::Option<&'static encoding_rs::Encoding>
 pub mod grit_lib::commit::signing
 pub enum grit_lib::commit::signing::GpgFormat
@@ -1714,34 +1710,11 @@ pub fn grit_lib::commit::trailers::interpret::process_trailers(&str, &grit_lib::
 pub fn grit_lib::commit::trailers::interpret::trailer_if_exists_from_str(&str) -> core::option::Option<grit_lib::commit::trailers::interpret::TrailerIfExists>
 pub fn grit_lib::commit::trailers::interpret::trailer_if_missing_from_str(&str) -> core::option::Option<grit_lib::commit::trailers::interpret::TrailerIfMissing>
 pub fn grit_lib::commit::trailers::interpret::trailer_where_from_str(&str) -> core::option::Option<grit_lib::commit::trailers::interpret::TrailerWhere>
-pub struct grit_lib::commit::trailers::TrailerOpts
-pub grit_lib::commit::trailers::TrailerOpts::filter_keys: alloc::vec::Vec<alloc::string::String>
-pub grit_lib::commit::trailers::TrailerOpts::key_value_separator: alloc::string::String
-pub grit_lib::commit::trailers::TrailerOpts::keyonly: bool
-pub grit_lib::commit::trailers::TrailerOpts::only_trailers: bool
-pub grit_lib::commit::trailers::TrailerOpts::separator: alloc::string::String
-pub grit_lib::commit::trailers::TrailerOpts::unfold: bool
-pub grit_lib::commit::trailers::TrailerOpts::valueonly: bool
-impl core::clone::Clone for grit_lib::commit::trailers::TrailerOpts
-pub fn grit_lib::commit::trailers::TrailerOpts::clone(&self) -> Self
-impl core::default::Default for grit_lib::commit::trailers::TrailerOpts
-pub fn grit_lib::commit::trailers::TrailerOpts::default() -> Self
-impl core::fmt::Debug for grit_lib::commit::trailers::TrailerOpts
-pub fn grit_lib::commit::trailers::TrailerOpts::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Freeze for grit_lib::commit::trailers::TrailerOpts
-impl core::marker::Send for grit_lib::commit::trailers::TrailerOpts
-impl core::marker::Sync for grit_lib::commit::trailers::TrailerOpts
-impl core::marker::Unpin for grit_lib::commit::trailers::TrailerOpts
-impl core::marker::UnsafeUnpin for grit_lib::commit::trailers::TrailerOpts
-impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::commit::trailers::TrailerOpts
-impl core::panic::unwind_safe::UnwindSafe for grit_lib::commit::trailers::TrailerOpts
 pub fn grit_lib::commit::trailers::append_cherry_picked_from_line(&mut alloc::string::String, &str, &grit_lib::config::ConfigSet)
 pub fn grit_lib::commit::trailers::append_signoff_trailer(&mut alloc::string::String, &str, &grit_lib::config::ConfigSet)
 pub fn grit_lib::commit::trailers::append_signoff_trailer_with_dedup(&mut alloc::string::String, &str, &grit_lib::config::ConfigSet, bool)
 pub fn grit_lib::commit::trailers::finalize_cherry_pick_message(&str, bool, bool, &str, &str, &grit_lib::config::ConfigSet, &str) -> alloc::string::String
 pub fn grit_lib::commit::trailers::format_signoff_line(&str, &str) -> alloc::string::String
-pub fn grit_lib::commit::trailers::format_trailers(&str, &grit_lib::commit::trailers::TrailerOpts) -> alloc::string::String
-pub fn grit_lib::commit::trailers::message_ends_with_trailer(&str, &grit_lib::config::ConfigSet) -> bool
 pub struct grit_lib::commit::TrailerArgParseError
 impl core::clone::Clone for grit_lib::commit::TrailerArgParseError
 pub fn grit_lib::commit::TrailerArgParseError::clone(&self) -> Self
@@ -1965,14 +1938,12 @@ impl core::marker::Unpin for grit_lib::config::git_date::show::DateMode
 impl core::marker::UnsafeUnpin for grit_lib::config::git_date::show::DateMode
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::config::git_date::show::DateMode
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::config::git_date::show::DateMode
-pub fn grit_lib::config::git_date::show::date_mode_release(&mut grit_lib::config::git_date::show::DateMode)
 pub fn grit_lib::config::git_date::show::parse_date_format(&str) -> core::result::Result<grit_lib::config::git_date::show::DateMode, &'static str>
 pub fn grit_lib::config::git_date::show::show_date(u64, grit_lib::config::git_date::tm::TzHhmm, &mut grit_lib::config::git_date::show::DateMode) -> alloc::string::String
 pub fn grit_lib::config::git_date::show::show_date_relative(u64, i64) -> alloc::string::String
 pub fn grit_lib::config::git_date::show::strbuf_addftime(&libc::unix::linux_like::tm, grit_lib::config::git_date::tm::TzHhmm, &str, bool) -> alloc::string::String
 pub mod grit_lib::config::git_date::tm
 pub const grit_lib::config::git_date::tm::TIMESTAMP_MAX: u64
-pub fn grit_lib::config::git_date::tm::atoi_bytes(&[u8]) -> i32
 pub fn grit_lib::config::git_date::tm::date_overflows(u64) -> bool
 pub fn grit_lib::config::git_date::tm::empty_tm() -> libc::unix::linux_like::tm
 pub fn grit_lib::config::git_date::tm::gm_time_t(u64, grit_lib::config::git_date::tm::TzHhmm) -> core::option::Option<u64>
@@ -2014,18 +1985,7 @@ impl core::marker::Unpin for grit_lib::config::git_date::DateSpecError
 impl core::marker::UnsafeUnpin for grit_lib::config::git_date::DateSpecError
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::config::git_date::DateSpecError
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::config::git_date::DateSpecError
-pub enum grit_lib::config::git_date::TestToolDateResult
-pub grit_lib::config::git_date::TestToolDateResult::Exit(i32)
-pub grit_lib::config::git_date::TestToolDateResult::Output(alloc::vec::Vec<alloc::string::String>)
-impl core::marker::Freeze for grit_lib::config::git_date::TestToolDateResult
-impl core::marker::Send for grit_lib::config::git_date::TestToolDateResult
-impl core::marker::Sync for grit_lib::config::git_date::TestToolDateResult
-impl core::marker::Unpin for grit_lib::config::git_date::TestToolDateResult
-impl core::marker::UnsafeUnpin for grit_lib::config::git_date::TestToolDateResult
-impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::config::git_date::TestToolDateResult
-impl core::panic::unwind_safe::UnwindSafe for grit_lib::config::git_date::TestToolDateResult
 pub fn grit_lib::config::git_date::parse_date_cutoff(&str, i64) -> core::result::Result<i64, grit_lib::config::git_date::DateSpecError>
-pub fn grit_lib::config::git_date::test_tool_date(&grit_lib::config::environment::Environment, &[alloc::string::String]) -> core::result::Result<grit_lib::config::git_date::TestToolDateResult, alloc::string::String>
 pub mod grit_lib::config::git_path
 pub enum grit_lib::config::git_path::GitPathError
 pub grit_lib::config::git_path::GitPathError::EscapesRoot
@@ -2050,7 +2010,6 @@ pub fn grit_lib::config::git_path::absolute_path_for_gitfile_stored_path(&std::p
 pub fn grit_lib::config::git_path::abspath_part_inside_repo(&str, &std::path::Path) -> core::option::Option<alloc::string::String>
 pub fn grit_lib::config::git_path::cleanup_path(&str) -> &str
 pub fn grit_lib::config::git_path::git_path_relative_component(&str) -> &str
-pub fn grit_lib::config::git_path::is_absolute_path_unix(&str) -> bool
 pub fn grit_lib::config::git_path::is_common_git_path(&str) -> bool
 pub fn grit_lib::config::git_path::longest_ancestor_length(&str, &str) -> core::result::Result<i32, grit_lib::config::git_path::GitPathError>
 pub fn grit_lib::config::git_path::normalize_path_copy(&str) -> core::result::Result<alloc::string::String, grit_lib::config::git_path::GitPathError>
@@ -2059,11 +2018,8 @@ pub fn grit_lib::config::git_path::path_for_error_message(&std::path::Path) -> a
 pub fn grit_lib::config::git_path::path_lexical_for_disk_compare(&std::path::Path) -> std::path::PathBuf
 pub fn grit_lib::config::git_path::path_to_git_slash(&std::path::Path) -> alloc::string::String
 pub fn grit_lib::config::git_path::prefix_path_gently(&str, &str, &std::path::Path) -> core::option::Option<alloc::string::String>
-pub fn grit_lib::config::git_path::real_path_resolving(&str) -> std::path::PathBuf
 pub fn grit_lib::config::git_path::relative_path<'a>(&'a str, &'a str, &'a mut alloc::string::String) -> core::option::Option<&'a str>
 pub fn grit_lib::config::git_path::relative_path_for_display(&std::path::Path, &std::path::Path) -> core::option::Option<alloc::string::String>
-pub fn grit_lib::config::git_path::relative_url(&str, &str, core::option::Option<&str>) -> core::result::Result<alloc::string::String, grit_lib::config::git_path::GitPathError>
-pub fn grit_lib::config::git_path::strip_path_suffix(&str, &str) -> core::option::Option<alloc::string::String>
 pub fn grit_lib::config::git_path::strip_verbatim_path_prefix_str(&str) -> alloc::borrow::Cow<'_, str>
 pub fn grit_lib::config::git_path::strip_worktree_prefix(&std::path::Path, &std::path::Path) -> core::option::Option<alloc::string::String>
 pub fn grit_lib::config::git_path::user_display_path(&std::path::Path) -> alloc::string::String
@@ -2343,7 +2299,6 @@ pub fn grit_lib::config::ident::replace_identity_date_suffix(&str, &str) -> allo
 pub fn grit_lib::config::ident::signature_timestamp_for_pretty(&str) -> grit_lib::ident::SignatureTimestamp
 pub fn grit_lib::config::ident::timestamp_for_at_ct(grit_lib::ident::SignatureTimestamp) -> core::option::Option<i64>
 pub mod grit_lib::config::ident_config
-pub fn grit_lib::config::ident_config::current_uid() -> u32
 pub fn grit_lib::config::ident_config::ident_default_name(&grit_lib::config::ConfigSet, &impl grit_lib::config::ident_resolve::IdentityEnv) -> alloc::string::String
 pub mod grit_lib::config::ident_resolve
 pub enum grit_lib::config::ident_resolve::GitIdentityNameEnv
@@ -2500,11 +2455,8 @@ pub fn grit_lib::config::precompose_config::argv_precompose_enabled(core::option
 pub fn grit_lib::config::precompose_config::effective_core_precomposeunicode(core::option::Option<&std::path::Path>) -> bool
 pub fn grit_lib::config::precompose_config::effective_core_precomposeunicode_with_config(core::option::Option<&std::path::Path>, core::option::Option<&grit_lib::config::ConfigSet>) -> bool
 pub fn grit_lib::config::precompose_config::filesystem_nfd_nfc_aliases(&std::path::Path) -> bool
-pub fn grit_lib::config::precompose_config::index_relpath_from_worktree(&str, &std::path::Path) -> alloc::string::String
-pub fn grit_lib::config::precompose_config::locate_git_dir_from_cwd(std::path::PathBuf) -> core::option::Option<std::path::PathBuf>
 pub fn grit_lib::config::precompose_config::locate_git_dir_from_environment(&grit_lib::config::environment::Environment) -> core::option::Option<std::path::PathBuf>
 pub fn grit_lib::config::precompose_config::pathspec_precompose_enabled() -> bool
-pub fn grit_lib::config::precompose_config::read_core_precomposeunicode(&std::path::Path) -> core::option::Option<bool>
 pub enum grit_lib::config::ConfigIncludeOrigin
 pub grit_lib::config::ConfigIncludeOrigin::Blob
 pub grit_lib::config::ConfigIncludeOrigin::CommandLine
@@ -3041,10 +2993,7 @@ pub fn grit_lib::diagnostics::NullDiagnostics::trace(&self, grit_lib::diagnostic
 pub fn grit_lib::diagnostics::NullDiagnostics::warn(&self, grit_lib::diagnostics::Warning)
 pub fn grit_lib::diagnostics::error_line(&str) -> alloc::string::String
 pub fn grit_lib::diagnostics::fatal_line(&str) -> alloc::string::String
-pub fn grit_lib::diagnostics::hint_line(&str) -> alloc::string::String
-pub fn grit_lib::diagnostics::trace_network(&grit_lib::diagnostics::DiagnosticsHandle, bool, alloc::string::String)
 pub fn grit_lib::diagnostics::warn(&grit_lib::diagnostics::DiagnosticsHandle, grit_lib::diagnostics::Warning)
-pub fn grit_lib::diagnostics::warn_optional(core::option::Option<&dyn grit_lib::diagnostics::DiagnosticSink>, grit_lib::diagnostics::Warning)
 pub fn grit_lib::diagnostics::warning_line(&str) -> alloc::string::String
 pub type grit_lib::diagnostics::DiagnosticsHandle = alloc::rcs::arc::Arc<(dyn grit_lib::diagnostics::DiagnosticSink + core::marker::Send + core::marker::Sync)>
 pub mod grit_lib::diff
@@ -3966,13 +3915,8 @@ impl core::marker::Unpin for grit_lib::diff::userdiff::FuncnameMatcher
 impl core::marker::UnsafeUnpin for grit_lib::diff::userdiff::FuncnameMatcher
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::userdiff::FuncnameMatcher
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::userdiff::FuncnameMatcher
-pub const grit_lib::diff::userdiff::GIT_WORD_REGEX_DEFAULT_SUFFIX: &str
-pub const grit_lib::diff::userdiff::GIT_WORD_REGEX_FALLBACK: &str
-pub fn grit_lib::diff::userdiff::builtin_word_regex(&str) -> core::option::Option<(&'static str, bool)>
 pub fn grit_lib::diff::userdiff::matcher_for_driver(&grit_lib::config::ConfigSet, &str) -> core::result::Result<core::option::Option<grit_lib::diff::userdiff::FuncnameMatcher>, alloc::string::String>
-pub fn grit_lib::diff::userdiff::matcher_for_path(&grit_lib::config::ConfigSet, &[grit_lib::worktree::attributes::AttrRule], &str) -> core::result::Result<core::option::Option<grit_lib::diff::userdiff::FuncnameMatcher>, alloc::string::String>
 pub fn grit_lib::diff::userdiff::matcher_for_path_parsed(&grit_lib::config::ConfigSet, &[grit_lib::worktree::attributes::AttrRule], &grit_lib::worktree::attributes::MacroTable, &str, bool) -> core::result::Result<core::option::Option<grit_lib::diff::userdiff::FuncnameMatcher>, alloc::string::String>
-pub fn grit_lib::diff::userdiff::word_regex_pattern_for_path_parsed(&grit_lib::config::ConfigSet, &[grit_lib::worktree::attributes::AttrRule], &grit_lib::worktree::attributes::MacroTable, &str, bool) -> core::option::Option<(alloc::string::String, bool)>
 pub mod grit_lib::diff::ws
 pub fn grit_lib::diff::ws::is_space_git(u8) -> bool
 pub fn grit_lib::diff::ws::ws_blank_line(&str) -> bool
@@ -11559,7 +11503,6 @@ pub fn grit_lib::pathspec::resolve_pathspec_with_argv_precompose(&str, &std::pat
 pub fn grit_lib::pathspec::simple_length(&str) -> usize
 pub fn grit_lib::pathspec::validate_attr_pathspecs(&[alloc::string::String]) -> core::result::Result<(), alloc::string::String>
 pub fn grit_lib::pathspec::validate_global_pathspec_flags() -> core::result::Result<(), alloc::string::String>
-pub fn grit_lib::pathspec::wildmatch_flags_icase_glob(bool, bool) -> u32
 pub mod grit_lib::porcelain
 pub mod grit_lib::porcelain::add
 pub enum grit_lib::porcelain::add::StageMode
@@ -11994,9 +11937,6 @@ pub fn grit_lib::porcelain::checkout::checkout_between_trees_with_progress(&grit
 pub fn grit_lib::porcelain::checkout::checkout_hard_to_tree_from_head_tree(&grit_lib::repo::Repository, &grit_lib::objects::ObjectId, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<()>
 pub fn grit_lib::porcelain::checkout::checkout_tree_changes(&grit_lib::repo::Repository, &[grit_lib::diff::DiffEntry]) -> grit_lib::error::Result<()>
 pub fn grit_lib::porcelain::checkout::checkout_tree_changes_with_index(&grit_lib::repo::Repository, &[grit_lib::diff::DiffEntry], &mut grit_lib::index::Index) -> grit_lib::error::Result<()>
-pub fn grit_lib::porcelain::checkout::glob_matches(&str, &str) -> bool
-pub fn grit_lib::porcelain::checkout::is_glob_pattern(&str) -> bool
-pub fn grit_lib::porcelain::checkout::prepare_parent_dirs_for_checkout(&std::path::Path, &str) -> grit_lib::error::Result<()>
 pub fn grit_lib::porcelain::checkout::remove_empty_parent_dirs(&std::path::Path, &std::path::Path)
 pub mod grit_lib::porcelain::checkout_reflog
 pub fn grit_lib::porcelain::checkout_reflog::append_head_checkout_reflog(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, grit_lib::objects::ObjectId, &str, &str) -> grit_lib::error::Result<()>
@@ -14403,18 +14343,14 @@ impl core::marker::Unpin for grit_lib::porcelain::tag::TagSummary
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::tag::TagSummary
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::tag::TagSummary
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::tag::TagSummary
-pub fn grit_lib::porcelain::tag::compare_version(&str, &str) -> core::cmp::Ordering
 pub fn grit_lib::porcelain::tag::create_tag(&grit_lib::repo::Repository, &grit_lib::porcelain::tag::CreateTagRequest) -> grit_lib::error::Result<grit_lib::porcelain::tag::CreateTagOutcome>
 pub fn grit_lib::porcelain::tag::creator_date(&grit_lib::repo::Repository, &grit_lib::objects::ObjectId) -> i64
 pub fn grit_lib::porcelain::tag::delete_tag(&grit_lib::repo::Repository, &str, bool) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
-pub fn grit_lib::porcelain::tag::glob_matches(&str, &str) -> bool
 pub fn grit_lib::porcelain::tag::list_tags(&grit_lib::repo::Repository, &grit_lib::refs::listing::RefQuery) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::porcelain::tag::TagSummary>>
 pub fn grit_lib::porcelain::tag::list_tags_with_detail(&grit_lib::repo::Repository, &grit_lib::refs::listing::RefQuery, grit_lib::porcelain::tag::TagDetail) -> grit_lib::error::Result<grit_lib::porcelain::tag::TagList>
 pub fn grit_lib::porcelain::tag::normalize_tag_message(&str) -> grit_lib::error::Result<alloc::string::String>
-pub fn grit_lib::porcelain::tag::parse_epoch_from_ident(&str) -> i64
 pub fn grit_lib::porcelain::tag::strip_comments(&str) -> alloc::string::String
 pub fn grit_lib::porcelain::tag::tag_ref_metadata(&grit_lib::repo::Repository, &grit_lib::objects::ObjectId) -> (grit_lib::porcelain::tag::TagKind, core::option::Option<grit_lib::objects::ObjectId>)
-pub fn grit_lib::porcelain::tag::version_segments(&str) -> alloc::vec::Vec<&str>
 pub type grit_lib::porcelain::tag::TagInfo = grit_lib::porcelain::tag::TagSummary
 pub mod grit_lib::porcelain::terminal
 pub fn grit_lib::porcelain::terminal::ansi_supported() -> bool
@@ -16599,8 +16535,6 @@ pub fn grit_lib::refs::ref_namespace::ref_storage_prefix_default() -> core::opti
 pub fn grit_lib::refs::ref_namespace::storage_ref_name(&str) -> alloc::string::String
 pub fn grit_lib::refs::ref_namespace::storage_ref_name_env(&grit_lib::config::environment::Environment, &str) -> alloc::string::String
 pub fn grit_lib::refs::ref_namespace::storage_ref_name_with_prefix(core::option::Option<&str>, &str) -> alloc::string::String
-pub fn grit_lib::refs::ref_namespace::strip_namespace_prefix(&str) -> alloc::string::String
-pub fn grit_lib::refs::ref_namespace::strip_namespace_prefix_env(&grit_lib::config::environment::Environment, &str) -> alloc::string::String
 pub mod grit_lib::refs::ref_storage
 #[non_exhaustive] pub enum grit_lib::refs::ref_storage::RefStorageFormat
 pub grit_lib::refs::ref_storage::RefStorageFormat::Files
@@ -18558,9 +18492,7 @@ impl<'a, W> !core::panic::unwind_safe::UnwindSafe for grit_lib::remote::pkt_line
 pub const grit_lib::remote::pkt_line::DELIM: &str
 pub const grit_lib::remote::pkt_line::FLUSH: &str
 pub const grit_lib::remote::pkt_line::RESPONSE_END: &str
-pub fn grit_lib::remote::pkt_line::decode_sideband_primary(&[u8]) -> core::io::error::Result<alloc::vec::Vec<u8>>
 pub fn grit_lib::remote::pkt_line::parse_hex_len(&[u8]) -> core::io::error::Result<usize>
-pub fn grit_lib::remote::pkt_line::read_data_lines_until_flush(&mut impl alloc::io::read::Read, &str) -> core::io::error::Result<alloc::vec::Vec<alloc::string::String>>
 pub fn grit_lib::remote::pkt_line::read_packet(&mut impl alloc::io::read::Read) -> core::io::error::Result<core::option::Option<grit_lib::remote::pkt_line::Packet>>
 pub fn grit_lib::remote::pkt_line::read_until_flush_or_delim(&mut impl alloc::io::read::Read) -> core::io::error::Result<(alloc::vec::Vec<alloc::string::String>, core::option::Option<grit_lib::remote::pkt_line::Packet>)>
 pub fn grit_lib::remote::pkt_line::write_delim(&mut impl core::io::write::Write) -> core::io::error::Result<()>
@@ -18569,7 +18501,6 @@ pub fn grit_lib::remote::pkt_line::write_line(&mut impl core::io::write::Write, 
 pub fn grit_lib::remote::pkt_line::write_line_to_vec(&mut alloc::vec::Vec<u8>, &str) -> core::io::error::Result<()>
 pub fn grit_lib::remote::pkt_line::write_packet_raw(&mut impl core::io::write::Write, &[u8]) -> core::io::error::Result<()>
 pub fn grit_lib::remote::pkt_line::write_sideband_channel1_64k(&mut impl core::io::write::Write, &[u8]) -> core::io::error::Result<()>
-pub fn grit_lib::remote::pkt_line::write_sideband_channel1_64k_reader(&mut impl core::io::write::Write, impl alloc::io::read::Read) -> core::io::error::Result<()>
 pub fn grit_lib::remote::pkt_line::write_sideband_packet(&mut impl core::io::write::Write + ?core::marker::Sized, u8, &[u8]) -> core::io::error::Result<()>
 pub mod grit_lib::remote::protocol
 pub enum grit_lib::remote::protocol::ProtocolError
@@ -18636,11 +18567,8 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::protocol::Protoc
 pub fn grit_lib::remote::protocol::check_protocol_allowed_with(&str, &grit_lib::remote::protocol::ProtocolPolicyInputs) -> core::result::Result<(), grit_lib::remote::protocol::ProtocolError>
 pub fn grit_lib::remote::protocol::client_git_protocol_header_from_config(&grit_lib::config::ConfigSet) -> core::result::Result<core::option::Option<alloc::string::String>, grit_lib::error::Error>
 pub fn grit_lib::remote::protocol::client_git_protocol_header_value(u8) -> core::option::Option<alloc::string::String>
-pub fn grit_lib::remote::protocol::effective_client_protocol_version_from_inputs(&grit_lib::remote::protocol::ClientProtocolVersionInputs) -> u8
-pub fn grit_lib::remote::protocol::merged_git_protocol_value(u8, core::option::Option<&str>) -> core::option::Option<alloc::string::String>
 pub fn grit_lib::remote::protocol::parse_protocol_version_digit(&str) -> core::option::Option<u8>
 pub fn grit_lib::remote::protocol::protocol_from_user(core::option::Option<&str>) -> bool
-pub fn grit_lib::remote::protocol::server_protocol_version_from_git_protocol(core::option::Option<&str>) -> u8
 pub fn grit_lib::remote::protocol::try_effective_client_protocol_version_from_config(&grit_lib::config::ConfigSet) -> core::result::Result<u8, grit_lib::error::Error>
 pub fn grit_lib::remote::protocol::try_effective_client_protocol_version_from_inputs(&grit_lib::remote::protocol::ClientProtocolVersionInputs) -> core::result::Result<u8, grit_lib::error::Error>
 pub fn grit_lib::remote::protocol::try_protocol_version_from_config_value(&str) -> core::result::Result<u8, grit_lib::error::Error>
@@ -19904,7 +19832,6 @@ impl core::marker::UnsafeUnpin for grit_lib::remote::transport_path::NoDirectory
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::transport_path::NoDirectoryName
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::transport_path::NoDirectoryName
 pub fn grit_lib::remote::transport_path::absolute_local_clone_source_url(&std::path::Path) -> alloc::string::String
-pub fn grit_lib::remote::transport_path::check_local_url_path_not_option_like(&str) -> core::result::Result<(), grit_lib::remote::transport_path::TransportPathError>
 pub fn grit_lib::remote::transport_path::configured_remote_base(&std::path::Path, core::option::Option<&std::path::Path>) -> std::path::PathBuf
 pub fn grit_lib::remote::transport_path::file_url_to_local_path(&str) -> core::result::Result<alloc::string::String, grit_lib::error::Error>
 pub fn grit_lib::remote::transport_path::git_url_basename(&str, bool, bool) -> core::result::Result<alloc::string::String, grit_lib::remote::transport_path::NoDirectoryName>
@@ -24992,7 +24919,6 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::worktree::crlf::FileAttr
 pub fn grit_lib::worktree::crlf::attr_rule_matches(&grit_lib::worktree::attributes::AttrRule, &str, bool) -> bool
 pub fn grit_lib::worktree::crlf::clean_uses_autocrlf_index_guard(&grit_lib::worktree::crlf::FileAttrs, &grit_lib::worktree::crlf::ConversionConfig) -> bool
 pub fn grit_lib::worktree::crlf::collapse_ident(&[u8]) -> alloc::vec::Vec<u8>
-pub fn grit_lib::worktree::crlf::convert_attr_ascii_for_ls_files(&[grit_lib::worktree::attributes::AttrRule], &str, &grit_lib::config::ConfigSet) -> alloc::string::String
 pub fn grit_lib::worktree::crlf::convert_to_git(&[u8], &str, &grit_lib::worktree::crlf::ConversionConfig, &grit_lib::worktree::crlf::FileAttrs) -> core::result::Result<alloc::vec::Vec<u8>, grit_lib::error::FilterError>
 pub fn grit_lib::worktree::crlf::convert_to_git_with_opts(&[u8], &str, &grit_lib::worktree::crlf::ConversionConfig, &grit_lib::worktree::crlf::FileAttrs, grit_lib::worktree::crlf::ConvertToGitOpts<'_>) -> core::result::Result<alloc::vec::Vec<u8>, grit_lib::error::FilterError>
 pub fn grit_lib::worktree::crlf::convert_to_worktree(&[u8], &str, &grit_lib::worktree::crlf::ConversionConfig, &grit_lib::worktree::crlf::FileAttrs, core::option::Option<&str>, core::option::Option<&grit_lib::filter_process::FilterSmudgeMeta>, core::option::Option<&mut grit_lib::filter_process::DelayedProcessCheckout>, core::option::Option<&grit_lib::filter_process::FilterProcessState>) -> core::result::Result<core::option::Option<alloc::vec::Vec<u8>>, grit_lib::error::FilterError>
@@ -25013,12 +24939,10 @@ pub fn grit_lib::worktree::crlf::lf_to_crlf(&[u8]) -> alloc::vec::Vec<u8>
 pub fn grit_lib::worktree::crlf::load_gitattributes(&std::path::Path) -> alloc::vec::Vec<grit_lib::worktree::attributes::AttrRule>
 pub fn grit_lib::worktree::crlf::load_gitattributes_for_checkout(&std::path::Path, &str, &grit_lib::index::Index, &grit_lib::objects::odb::Odb) -> alloc::vec::Vec<grit_lib::worktree::attributes::AttrRule>
 pub fn grit_lib::worktree::crlf::load_gitattributes_for_checkout_parsed(&std::path::Path, &str, &grit_lib::index::Index, &grit_lib::objects::odb::Odb) -> grit_lib::worktree::attributes::ParsedGitAttributes
-pub fn grit_lib::worktree::crlf::load_gitattributes_for_tree_path(&grit_lib::objects::odb::Odb, &grit_lib::objects::ObjectId, &str) -> alloc::vec::Vec<grit_lib::worktree::attributes::AttrRule>
 pub fn grit_lib::worktree::crlf::load_gitattributes_from_index(&grit_lib::index::Index, &grit_lib::objects::odb::Odb) -> alloc::vec::Vec<grit_lib::worktree::attributes::AttrRule>
 pub fn grit_lib::worktree::crlf::load_gitattributes_parsed(&std::path::Path) -> grit_lib::worktree::attributes::ParsedGitAttributes
 pub fn grit_lib::worktree::crlf::parse_gitattributes_content(&str) -> alloc::vec::Vec<grit_lib::worktree::attributes::AttrRule>
 pub fn grit_lib::worktree::crlf::path_gitattribute_value(&[grit_lib::worktree::attributes::AttrRule], &str, bool, &str) -> core::option::Option<alloc::string::String>
-pub fn grit_lib::worktree::crlf::path_has_gitattribute(&[grit_lib::worktree::attributes::AttrRule], &str, bool, &str) -> bool
 pub fn grit_lib::worktree::crlf::run_filter(&dyn grit_lib::command_runner::CommandRunner, &str, &[u8], &str) -> core::result::Result<alloc::vec::Vec<u8>, grit_lib::error::FilterError>
 pub fn grit_lib::worktree::crlf::should_convert_to_crlf(&grit_lib::worktree::crlf::ConversionConfig, &grit_lib::worktree::crlf::FileAttrs, &[u8]) -> bool
 pub type grit_lib::worktree::crlf::GitAttributes = alloc::vec::Vec<grit_lib::worktree::attributes::AttrRule>
@@ -25361,7 +25285,6 @@ pub fn grit_lib::worktree::pathspec::resolve_pathspec_with_argv_precompose(&str,
 pub fn grit_lib::worktree::pathspec::simple_length(&str) -> usize
 pub fn grit_lib::worktree::pathspec::validate_attr_pathspecs(&[alloc::string::String]) -> core::result::Result<(), alloc::string::String>
 pub fn grit_lib::worktree::pathspec::validate_global_pathspec_flags() -> core::result::Result<(), alloc::string::String>
-pub fn grit_lib::worktree::pathspec::wildmatch_flags_icase_glob(bool, bool) -> u32
 pub mod grit_lib::worktree::wildmatch
 pub const grit_lib::worktree::wildmatch::WM_CASEFOLD: u32
 pub const grit_lib::worktree::wildmatch::WM_PATHNAME: u32

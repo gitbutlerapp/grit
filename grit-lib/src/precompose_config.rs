@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use crate::config::parse_config_parameters;
 use crate::environment::Environment;
-use crate::unicode_normalization::{precompose_utf8_path, probe_filesystem_normalizes_nfd_to_nfc};
+use crate::unicode_normalization::probe_filesystem_normalizes_nfd_to_nfc;
 
 fn parse_ceiling_directories_paths(env: &Environment) -> Vec<PathBuf> {
     let Some(raw) = env.git_ceiling_directories.as_deref() else {
@@ -96,15 +96,8 @@ fn probe_git_dir_at(dir: &Path) -> Option<PathBuf> {
     None
 }
 
-/// Walk parents from `cwd` for `.git`, honouring `GIT_CEILING_DIRECTORIES` like Git discovery.
-pub fn locate_git_dir_from_cwd(cwd: PathBuf) -> Option<PathBuf> {
-    locate_git_dir_from_environment(&Environment {
-        cwd: cwd.clone(),
-        ..Environment::empty()
-    })
-}
-
-/// Like [`locate_git_dir_from_cwd`] but honours discovery variables in `environment`.
+/// Walk parents of the discovery directory in `environment` for `.git`, honouring
+/// `GIT_DIR`, `GIT_CEILING_DIRECTORIES` and the other discovery variables like Git.
 pub fn locate_git_dir_from_environment(environment: &Environment) -> Option<PathBuf> {
     if let Some(dir) = environment.git_dir.as_deref() {
         let cwd = environment.discovery_cwd();
@@ -163,39 +156,6 @@ pub fn locate_git_dir_from_environment(environment: &Environment) -> Option<Path
         dir_buf.truncate(new_len);
     }
     None
-}
-
-/// Parse `.git/config` only (no global/system cascade). `None` when the key is absent.
-#[must_use]
-pub fn read_core_precomposeunicode(git_dir: &Path) -> Option<bool> {
-    let path = git_dir.join("config");
-    let Ok(text) = fs::read_to_string(&path) else {
-        return None;
-    };
-    let mut in_core = false;
-    let mut last: Option<bool> = None;
-    for line in text.lines() {
-        let t = line.trim();
-        if t.starts_with('[') {
-            in_core = t.eq_ignore_ascii_case("[core]");
-            continue;
-        }
-        if !in_core {
-            continue;
-        }
-        let Some((k, v)) = t.split_once('=') else {
-            continue;
-        };
-        if !k.trim().eq_ignore_ascii_case("precomposeunicode") {
-            continue;
-        }
-        let v = v.trim();
-        last = Some(matches!(
-            v.to_ascii_lowercase().as_str(),
-            "true" | "yes" | "on" | "1"
-        ));
-    }
-    last
 }
 
 /// `git -c core.precomposeunicode=…` overrides local config (last token wins).
@@ -283,15 +243,4 @@ pub fn argv_precompose_enabled(git_dir: Option<&Path>) -> bool {
 #[must_use]
 pub fn pathspec_precompose_enabled() -> bool {
     false
-}
-
-/// Normalize a repository-relative worktree path for index and tree storage when
-/// `core.precomposeunicode` is enabled (NFC per path segment).
-#[must_use]
-pub fn index_relpath_from_worktree(rel_fs: &str, git_dir: &Path) -> String {
-    if effective_core_precomposeunicode(Some(git_dir)) {
-        precompose_utf8_path(rel_fs).into_owned()
-    } else {
-        rel_fs.to_owned()
-    }
 }

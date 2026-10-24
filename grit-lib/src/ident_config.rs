@@ -3,19 +3,6 @@
 use crate::config::ConfigSet;
 use crate::ident_resolve::IdentityEnv;
 
-/// The real user id of the calling process (Unix `getuid`); `0` elsewhere.
-#[must_use]
-pub fn current_uid() -> u32 {
-    #[cfg(unix)]
-    {
-        nix::unistd::getuid().as_raw()
-    }
-    #[cfg(not(unix))]
-    {
-        0
-    }
-}
-
 /// Git `ident_default_name()` for this merged config: `user.name` if that key was ever set
 /// (including to `""`), otherwise the passwd short name (Unix) or `USER` / `"unknown"`.
 #[must_use]

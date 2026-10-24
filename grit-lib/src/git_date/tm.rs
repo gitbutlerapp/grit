@@ -278,39 +278,6 @@ pub fn parse_timestamp_prefix(s: &[u8]) -> (u64, usize) {
     (n, i)
 }
 
-/// C `atoi` on a byte slice (optional leading sign for digits).
-pub fn atoi_bytes(s: &[u8]) -> i32 {
-    let s = trim_ascii_ws(s);
-    if s.is_empty() {
-        return 0;
-    }
-    let neg = s[0] == b'-';
-    let start = if s[0] == b'+' || s[0] == b'-' { 1 } else { 0 };
-    let mut v: i32 = 0;
-    let mut i = start;
-    while i < s.len() && s[i].is_ascii_digit() {
-        v = v.saturating_mul(10).saturating_add((s[i] - b'0') as i32);
-        i += 1;
-    }
-    if neg {
-        -v
-    } else {
-        v
-    }
-}
-
-fn trim_ascii_ws(s: &[u8]) -> &[u8] {
-    let mut a = 0;
-    let mut b = s.len();
-    while a < b && (s[a] == b' ' || s[a] == b'\t') {
-        a += 1;
-    }
-    while b > a && (s[b - 1] == b' ' || s[b - 1] == b'\t') {
-        b -= 1;
-    }
-    &s[a..b]
-}
-
 /// `empty_tm` function.
 pub fn empty_tm() -> tm {
     unsafe { std::mem::zeroed() }

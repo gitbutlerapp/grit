@@ -116,18 +116,3 @@ pub fn logical_ref_name_from_storage_env(env: &Environment, storage: &str) -> Op
     let p = ref_storage_prefix(env)?;
     storage.strip_prefix(&p).map(str::to_owned)
 }
-
-/// Strip the active namespace prefix from `refname` when present (for advertisements / display).
-#[must_use]
-pub fn strip_namespace_prefix(refname: &str) -> String {
-    strip_namespace_prefix_env(&Environment::empty(), refname)
-}
-
-/// Like [`strip_namespace_prefix`] with an explicit environment.
-#[must_use]
-pub fn strip_namespace_prefix_env(env: &Environment, refname: &str) -> String {
-    match ref_storage_prefix(env) {
-        Some(p) if refname.starts_with(&p) => refname[p.len()..].to_owned(),
-        _ => refname.to_owned(),
-    }
-}

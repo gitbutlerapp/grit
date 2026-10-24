@@ -11,7 +11,6 @@
 
 use crate::attributes::{collect_attrs_for_path, AttrValue, MacroTable};
 use crate::config::ConfigSet;
-use crate::crlf::{get_file_attrs, AttrRule, DiffAttr};
 use regex::{Regex, RegexBuilder};
 use std::collections::BTreeMap;
 use std::sync::{Arc, OnceLock};
@@ -159,196 +158,6 @@ const BUILTIN_PATTERN_DEFS: &[(&str, &str, bool)] = &[
     ),
 ];
 
-/// POSIX extended word-regex fragments from Git's `userdiff.c` `PATTERNS`/`IPATTERN` macros
-/// (driver-specific part before the `|[^[:space:]]` suffix Git appends at runtime).
-///
-/// When `ignore_case` is true, the regex should be compiled with `case_insensitive(true)` like
-/// Git's `REG_ICASE` for `IPATTERN` drivers.
-const BUILTIN_WORD_REGEX: &[(&str, &str, bool)] = &[
-    (
-        "ada",
-        "[a-zA-Z][a-zA-Z0-9_]*\
-         |[-+]?[0-9][0-9#_.aAbBcCdDeEfF]*([eE][+-]?[0-9_]+)?\
-         |=>|\\.\\.|\\*\\*|:=|/=|>=|<=|<<|>>|<>",
-        true,
-    ),
-    (
-        "bash",
-        "[a-zA-Z_][a-zA-Z0-9_]*\
-         |\\$[a-zA-Z0-9_]+|\\$\\{\
-         |\\|\\||&&|<<|>>\
-         |==|!=|<=|>=|[-+*/%&|^]=\
-         |:=|:-|:\\+|:\\?|##|%%|\\^\\^|,,\
-         |[-a-zA-Z0-9_]+\
-         |\\(|\\)|\\{|\\}|\\[|\\]",
-        false,
-    ),
-    (
-        "bibtex",
-        "[={}\"]|[^={}\" \t]+",
-        false,
-    ),
-    (
-        "cpp",
-        "[a-zA-Z_][a-zA-Z0-9_]*\
-         |[0-9][0-9.]*([Ee][-+]?[0-9]+)?[fFlLuU]*\
-         |0[xXbB][0-9a-fA-F]+[lLuU]*\
-         |\\.[0-9][0-9]*([Ee][-+]?[0-9]+)?[fFlL]?\
-         |[-+*/<>%&^|=!]=|--|\\+\\+|<<=?|>>=?|&&|\\|\\||::|->\\*?|\\.\\*|<=>",
-        false,
-    ),
-    (
-        "csharp",
-        "[a-zA-Z_][a-zA-Z0-9_]*\
-         |[-+0-9.e]+[fFlL]?|0[xXbB]?[0-9a-fA-F]+[lL]?\
-         |[-+*/<>%&^|=!]=|--|\\+\\+|<<=?|>>=?|&&|\\|\\||::|->",
-        false,
-    ),
-    (
-        "css",
-        "-?[_a-zA-Z][-_a-zA-Z0-9]*\
-         |-?[0-9]+|\\#[0-9a-fA-F]+",
-        true,
-    ),
-    (
-        "dts",
-        "[a-zA-Z0-9,._+?#-]+\
-         |[-+*/%&^|!~]|>>|<<|&&|\\|\\|",
-        false,
-    ),
-    (
-        "elixir",
-        "[@:]?[a-zA-Z0-9@_?!]+\
-         |[-+]?0[xob][0-9a-fA-F]+\
-         |[-+]?[0-9][0-9_.]*([eE][-+]?[0-9_]+)?\
-         |:?(\\+\\+|--|\\.\\.|~~~|<>|\\^\\^\\^|<?\\|>|<<<?|>?>>|<<?~|~>?>|<~>|<=|>=|===?|!==?|=~|&&&?|\\|\\|\\|?|=>|<-|\\\\\\\\|->)\
-         |:?%[A-Za-z0-9_.]\\{\\}?",
-        false,
-    ),
-    (
-        "fortran",
-        "[a-zA-Z][a-zA-Z0-9_]*\
-         |\\.([Ee][Qq]|[Nn][Ee]|[Gg][TtEe]|[Ll][TtEe]|[Tt][Rr][Uu][Ee]|[Ff][Aa][Ll][Ss][Ee]|[Aa][Nn][Dd]|[Oo][Rr]|[Nn]?[Ee][Qq][Vv]|[Nn][Oo][Tt])\\.\
-         |[-+]?[0-9.]+([AaIiDdEeFfLlTtXx][Ss]?[-+]?[0-9.]*)?(_[a-zA-Z0-9][a-zA-Z0-9_]*)?\
-         |//|\\*\\*|::|[/<>=]=",
-        true,
-    ),
-    ("fountain", "[^ \t-]+", true),
-    (
-        "golang",
-        "[a-zA-Z_][a-zA-Z0-9_]*\
-         |[-+0-9.eE]+i?|0[xX]?[0-9a-fA-F]+i?\
-         |[-+*/<>%&^|=!:]=|--|\\+\\+|<<=?|>>=?|&\\^=?|&&|\\|\\||<-|\\.{3}",
-        false,
-    ),
-    ("html", "[^<>= \t]+", false),
-    ("ini", "[^ \t]+", false),
-    (
-        "java",
-        "[a-zA-Z_][a-zA-Z0-9_]*\
-         |[-+0-9.e]+[fFlL]?|0[xXbB]?[0-9a-fA-F]+[lL]?\
-         |[-+*/<>%&^|=!]=\
-         |--|\\+\\+|<<=?|>>>?=?|&&|\\|\\|",
-        false,
-    ),
-    (
-        "kotlin",
-        "[a-zA-Z_][a-zA-Z0-9_]*\
-         |0[xXbB][0-9a-fA-F_]+[lLuU]*\
-         |[0-9][0-9_]*([.][0-9_]*)?([Ee][-+]?[0-9]+)?[fFlLuU]*\
-         |[.][0-9][0-9_]*([Ee][-+]?[0-9]+)?[fFlLuU]?\
-         |[-+*/<>%&^|=!]==?|--|\\+\\+|<<=|>>=|&&|\\|\\||->|\\.\\*|!!|[?:.][.:]",
-        false,
-    ),
-    ("markdown", "[^<>= \t]+", false),
-    (
-        "matlab",
-        "[a-zA-Z_][a-zA-Z0-9_]*|[-+0-9.e]+|[=~<>]=|\\.[*/\\^']|\\|\\||&&",
-        false,
-    ),
-    (
-        "objc",
-        "[a-zA-Z_][a-zA-Z0-9_]*\
-         |[-+0-9.e]+[fFlL]?|0[xXbB]?[0-9a-fA-F]+[lL]?\
-         |[-+*/<>%&^|=!]=|--|\\+\\+|<<=?|>>=?|&&|\\|\\||::|->",
-        false,
-    ),
-    (
-        "pascal",
-        "[a-zA-Z_][a-zA-Z0-9_]*\
-         |[-+0-9.e]+|0[xXbB]?[0-9a-fA-F]+\
-         |<>|<=|>=|:=|\\.\\.",
-        false,
-    ),
-    (
-        "perl",
-        "[[:alpha:]_'][[:alnum:]_']*\
-         |0[xb]?[0-9a-fA-F_]*\
-         |[0-9a-fA-F_]+(\\.[0-9a-fA-F_]+)?([eE][-+]?[0-9_]+)?\
-         |=>|-[rwxoRWXOezsfdlpSugkbctTBMAC>]|~~|::\
-         |&&=|\\|\\|=|//=|\\*\\*=\
-         |&&|\\|\\||//|\\+\\+|--|\\*\\*|\\.\\.\\.?\
-         |[-+*/%.^&<>=!|]=\
-         |=~|!~\
-         |<<|<>|<=>|>>",
-        false,
-    ),
-    (
-        "php",
-        "[a-zA-Z_][a-zA-Z0-9_]*\
-         |[-+0-9.e]+|0[xXbB]?[0-9a-fA-F]+\
-         |[-+*/<>%&^|=!.]=|--|\\+\\+|<<=?|>>=?|===|&&|\\|\\||::|->",
-        false,
-    ),
-    (
-        "python",
-        "[a-zA-Z_][a-zA-Z0-9_]*\
-         |[-+0-9.e]+[jJlL]?|0[xX]?[0-9a-fA-F]+[lL]?\
-         |[-+*/<>%&^|=!]=|//=?|<<=?|>>=?|\\*\\*=?",
-        false,
-    ),
-    ("r", "[^ \t]+", false),
-    (
-        "ruby",
-        "(@|@@|\\$)?[a-zA-Z_][a-zA-Z0-9_]*\
-         |[-+0-9.e]+|0[xXbB]?[0-9a-fA-F]+|\\?(\\\\C-)?(\\\\M-)?.\
-         |//=?|[-+*/<>%&^|=!]=|<<=?|>>=?|===|\\.{1,3}|::|[!=]~",
-        false,
-    ),
-    (
-        "rust",
-        "[a-zA-Z_][a-zA-Z0-9_]*\
-         |[0-9][0-9_a-fA-Fiosuxz]*(\\.([0-9]*[eE][+-]?)?[0-9_fF]*)?\
-         |[-+*\\/<>%&^|=!:]=|<<=?|>>=?|&&|\\|\\||->|=>|\\.{2}=|\\.{3}|::",
-        false,
-    ),
-    (
-        "scheme",
-        "\\|([^\\\\]*)\\||([^][)(}{[ \t])+",
-        false,
-    ),
-    (
-        "tex",
-        "\\\\[a-zA-Z@]+|\\\\.|([a-zA-Z0-9]|[^\\x01-\\x7f])+",
-        false,
-    ),
-];
-
-/// Default word-regex suffix Git appends for built-in drivers (`userdiff.c` `PATTERNS` macro).
-pub const GIT_WORD_REGEX_DEFAULT_SUFFIX: &str = "|[^[:space:]]|[\\xc0-\\xff][\\x80-\\xbf]+";
-
-/// Built-in extended word regex when no driver matches (Git `userdiff` "default" driver).
-pub const GIT_WORD_REGEX_FALLBACK: &str = "[^[:space:]]|[\\xc0-\\xff][\\x80-\\xbf]+";
-
-/// Returns the driver-specific word-regex pattern fragment plus whether it uses `REG_ICASE`.
-#[must_use]
-pub fn builtin_word_regex(driver: &str) -> Option<(&'static str, bool)> {
-    BUILTIN_WORD_REGEX
-        .iter()
-        .find(|(name, _, _)| *name == driver)
-        .map(|(_, pat, ic)| (*pat, *ic))
-}
-
 #[derive(Debug, Clone)]
 struct FuncRule {
     matcher: RuleMatcher,
@@ -416,22 +225,9 @@ impl FuncnameMatcher {
     }
 }
 
-/// Resolve a function-name matcher for `rel_path` from attributes + config.
+/// Resolve a function-name matcher for `rel_path` from parsed `.gitattributes` rules + config.
 ///
 /// Returns `Ok(None)` when no diff driver is configured for the path.
-pub fn matcher_for_path(
-    config: &ConfigSet,
-    rules: &[AttrRule],
-    rel_path: &str,
-) -> Result<Option<FuncnameMatcher>, String> {
-    let attrs = get_file_attrs(rules, rel_path, false, config);
-    let DiffAttr::Driver(ref driver) = attrs.diff_attr else {
-        return Ok(None);
-    };
-    matcher_for_driver(config, driver)
-}
-
-/// Like [`matcher_for_path`] but uses parsed `.gitattributes` rules.
 pub fn matcher_for_path_parsed(
     config: &ConfigSet,
     rules: &[crate::attributes::AttrRule],
@@ -444,53 +240,6 @@ pub fn matcher_for_path_parsed(
         return Ok(None);
     };
     matcher_for_driver(config, driver.as_str())
-}
-
-/// Effective word-diff regular expression for `rel_path` (Git `diff.wordRegex` + driver + builtins).
-///
-/// Returns `None` when Git would use no `word_regex` (`regcomp`): tokenization is maximal runs of
-/// non-whitespace (`find_word_boundaries` fallback in `diff.c`).
-///
-/// Otherwise returns the full extended-regex pattern and whether Git compiles it with `REG_ICASE`.
-#[must_use]
-pub fn word_regex_pattern_for_path_parsed(
-    config: &ConfigSet,
-    rules: &[crate::attributes::AttrRule],
-    macros: &MacroTable,
-    rel_path: &str,
-    ignore_case_attrs: bool,
-) -> Option<(String, bool)> {
-    let map = collect_attrs_for_path(rules, macros, rel_path, ignore_case_attrs);
-    let driver = match map.get("diff") {
-        Some(AttrValue::Value(d)) => Some(d.as_str()),
-        _ => None,
-    };
-
-    if let Some(d) = driver {
-        for key in [format!("diff.{d}.wordregex"), format!("diff.{d}.wordRegex")] {
-            if let Some(raw) = config.get(&key) {
-                if !raw.is_empty() {
-                    return Some((raw, false));
-                }
-            }
-        }
-    }
-
-    for key in ["diff.wordregex", "diff.wordRegex"] {
-        if let Some(raw) = config.get(key) {
-            if !raw.is_empty() {
-                return Some((raw, false));
-            }
-        }
-    }
-
-    if let Some(d) = driver {
-        if let Some((frag, ic)) = builtin_word_regex(d) {
-            return Some((format!("{frag}{GIT_WORD_REGEX_DEFAULT_SUFFIX}"), ic));
-        }
-    }
-
-    None
 }
 
 /// Resolve a function-name matcher for a named diff driver.

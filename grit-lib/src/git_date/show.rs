@@ -156,11 +156,6 @@ fn parse_date_type(s: &str) -> Result<(DateModeType, &str), &'static str> {
     Err("unknown date format")
 }
 
-/// `date_mode_release` function.
-pub fn date_mode_release(mode: &mut DateMode) {
-    mode.strftime_fmt = None;
-}
-
 /// `show_date_relative` function.
 pub fn show_date_relative(time: u64, now_sec: i64) -> String {
     let now = now_sec as i128;

@@ -31,9 +31,8 @@ use crate::objects::{parse_tag, serialize_tag, ObjectId, ObjectKind, TagData};
 use crate::parallel::ParallelOp;
 use crate::refs;
 use crate::refs::listing::{
-    compare_version_names, creator_date as listing_creator_date, epoch_from_identity,
-    pattern_matches_short_name, query_refs, ref_query_options_for_repo, RefListing, RefNamespace,
-    RefQuery, RefQueryError,
+    creator_date as listing_creator_date, epoch_from_identity, query_refs,
+    ref_query_options_for_repo, RefListing, RefNamespace, RefQuery, RefQueryError,
 };
 use crate::refs::PackedRefPeels;
 use crate::repo::Repository;
@@ -657,29 +656,6 @@ pub fn creator_date(repo: &Repository, oid: &ObjectId) -> i64 {
     listing_creator_date(repo.odb(), oid).unwrap_or(0)
 }
 
-/// Extract the epoch timestamp from a Git identity string.
-///
-/// Format: `Name <email> <epoch> <offset>`
-#[must_use]
-pub fn parse_epoch_from_ident(ident: &str) -> i64 {
-    epoch_from_identity(ident)
-}
-
-/// Compare two ref names using Git `version:refname` ordering (no configured suffix list).
-#[must_use]
-pub fn compare_version(a: &str, b: &str) -> std::cmp::Ordering {
-    compare_version_names(a, b, &[])
-}
-
-/// Split a version string into segments at `.` and `-` boundaries.
-///
-/// Deprecated: prefer [`compare_version_names`] from [`crate::refs::listing`].
-#[must_use]
-#[deprecated(note = "use grit_lib::refs::listing::compare_version_names instead")]
-pub fn version_segments(s: &str) -> Vec<&str> {
-    s.split(['.', '-']).filter(|seg| !seg.is_empty()).collect()
-}
-
 /// Strip `#comment` lines from a message and normalize whitespace.
 ///
 /// Also: strip trailing whitespace from each line, collapse multiple blank lines
@@ -725,12 +701,6 @@ pub fn strip_comments(s: &str) -> String {
 pub fn normalize_tag_message(raw: &str) -> Result<String> {
     let stripped = strip_comments(raw);
     crate::porcelain::commit::normalize_commit_message(&stripped)
-}
-
-/// Whether `name` matches `pattern` (Git tag/branch list glob on the short name).
-#[must_use]
-pub fn glob_matches(pattern: &str, name: &str) -> bool {
-    pattern_matches_short_name(name, pattern, false)
 }
 
 #[cfg(test)]

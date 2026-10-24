@@ -36,7 +36,7 @@ use grit_lib::refs::store::paths::{logs_refs_dir_path, logs_refs_subdir_path};
 use grit_lib::refs::{ref_update_flags, verify_branch_commit_cas};
 use grit_lib::remote::clone::{cleanup_failed_clone, derive_clone_dir};
 use grit_lib::remote::pkt_line::{
-    read_data_lines_until_flush, read_until_flush_or_delim, write_flush, write_line_to_vec, Packet,
+    read_until_flush_or_delim, write_flush, write_line_to_vec, Packet,
 };
 use grit_lib::remote::transport::http::{
     discover_upload_pack, discover_upload_pack_exact, discover_upload_pack_for_list_refs,
@@ -174,10 +174,6 @@ fn pkt_line_promisor_and_ref_helpers() {
     let (self_lines, self_term) = read_until_flush_or_delim(&mut c).expect("read");
     assert_eq!(self_lines, vec!["line".to_owned()]);
     assert_eq!(self_term, Some(Packet::Flush));
-    let mut c2 = Cursor::new(&pkt);
-    let self_flush_lines =
-        read_data_lines_until_flush(&mut c2, "expected flush after self pkt-line").expect("data");
-    assert_eq!(self_flush_lines, self_lines);
 
     let dir = tempdir().expect("tempdir");
     init_repo(dir.path());
@@ -240,12 +236,6 @@ fn pkt_line_promisor_and_ref_helpers() {
             .any(|line| line.contains(&head_hex) && line.contains("HEAD")),
         "git ref pkt-lines must advertise HEAD at {head_hex}: {git_ref_lines:?}"
     );
-
-    let mut advert2 = Cursor::new(git_advert.stdout.as_slice());
-    let git_data_lines =
-        read_data_lines_until_flush(&mut advert2, "expected flush after git ref advertisement")
-            .expect("read git pkt-lines until flush");
-    assert_eq!(git_data_lines, git_ref_lines);
 
     let mut fetch_request = Vec::new();
     write_line_to_vec(

@@ -1688,17 +1688,6 @@ pub fn matches_pathspec_for_object(
     }
 }
 
-/// Returns wildmatch flags for `:(icase)` / `:(glob)`-style patterns when those
-/// appear as explicit magic (not used by default CLI pathspecs).
-#[must_use]
-pub fn wildmatch_flags_icase_glob(icase: bool, glob: bool) -> u32 {
-    let mut f = if glob { WM_PATHNAME } else { 0 };
-    if icase {
-        f |= WM_CASEFOLD;
-    }
-    f
-}
-
 /// Resolved path lies outside the repository work tree (Git `prefix_path_gently` failure).
 #[derive(Debug, Clone)]
 pub struct PathOutsideRepository {

@@ -279,23 +279,6 @@ fn local_git_dir_from_filesystem_path(path: &Path) -> PathBuf {
     }
 }
 
-/// Rejects repository path strings that could be mistaken for options when passed to a shell.
-///
-/// Git dies with `strange pathname '%s' blocked` when the parsed local path starts with `-`.
-/// Absolute paths like `/tmp/-repo.git` are allowed because the path string begins with `/`.
-pub fn check_local_url_path_not_option_like(url: &str) -> Result<(), TransportPathError> {
-    let path = url
-        .strip_prefix("file://")
-        .unwrap_or(url)
-        .split('?')
-        .next()
-        .unwrap_or("");
-    if looks_like_command_line_option(path) {
-        return Err(TransportPathError::OptionLikePath(path.to_owned()));
-    }
-    Ok(())
-}
-
 /// Error returned by [`git_url_basename`] when no directory name can be derived from a URL.
 #[derive(Clone, Debug, Error, PartialEq, Eq)]
 #[error("No directory name could be guessed.\nPlease specify a directory on the command line")]

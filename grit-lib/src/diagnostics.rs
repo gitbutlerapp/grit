@@ -25,12 +25,6 @@ pub fn warning_line(body: &str) -> String {
     ["warning", ": ", body].concat()
 }
 
-/// Prefix a body with Git's `hint: ` diagnostic marker.
-#[must_use]
-pub fn hint_line(body: &str) -> String {
-    ["hint", ": ", body].concat()
-}
-
 /// Prefix a body with Git's `error: ` diagnostic marker.
 #[must_use]
 pub fn error_line(body: &str) -> String {
@@ -332,23 +326,9 @@ impl DiagnosticSink for CollectingDiagnostics {
 /// Shared handle used when threading diagnostics through load paths.
 pub type DiagnosticsHandle = Arc<dyn DiagnosticSink + Send + Sync>;
 
-/// Emit `warning` when `sink` is `Some`, otherwise discard.
-pub fn warn_optional(sink: Option<&dyn DiagnosticSink>, warning: Warning) {
-    if let Some(s) = sink {
-        s.warn(warning);
-    }
-}
-
 /// Emit `warning` through `handle`.
 pub fn warn(handle: &DiagnosticsHandle, warning: Warning) {
     handle.warn(warning);
-}
-
-/// Emit a network trace when `handle` is set and `enabled` is true.
-pub fn trace_network(handle: &DiagnosticsHandle, enabled: bool, message: String) {
-    if enabled {
-        handle.trace(Trace::Network { message });
-    }
 }
 
 #[cfg(test)]

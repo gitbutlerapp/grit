@@ -29,8 +29,6 @@ use crate::error::{FilterError, FilterPhase};
 use crate::filter_process::{
     apply_process_clean, apply_process_smudge, FilterProcessState, FilterSmudgeMeta,
 };
-use crate::objects::{parse_tree, ObjectId, ObjectKind};
-use crate::odb::Odb;
 use encoding_rs::UTF_8;
 
 /// Working-tree encoding conversion failure (Git `reencode_string_len` returning NULL).
@@ -487,90 +485,6 @@ pub fn load_gitattributes_for_checkout(
     load_gitattributes_for_checkout_parsed(work_tree, rel_path, index, odb).rules
 }
 
-/// Load `.gitattributes` rules from `tree_oid` that can apply to `rel_path`.
-///
-/// `odb` supplies tree and blob objects, `tree_oid` is the root tree to read, and `rel_path` is the
-/// repository-relative path being matched.
-///
-/// Returns rules in root-to-leaf order. Missing, non-blob, or invalid UTF-8 `.gitattributes` entries
-/// are ignored, matching the best-effort behavior of the worktree loader.
-pub fn load_gitattributes_for_tree_path(
-    odb: &Odb,
-    tree_oid: &ObjectId,
-    rel_path: &str,
-) -> Vec<AttrRule> {
-    load_gitattributes_for_tree_path_parsed(odb, tree_oid, rel_path).rules
-}
-
-fn load_gitattributes_for_tree_path_parsed(
-    odb: &Odb,
-    tree_oid: &ObjectId,
-    rel_path: &str,
-) -> ParsedGitAttributes {
-    let mut merged = ParsedGitAttributes::default();
-    load_gitattributes_blob_from_tree(odb, tree_oid, ".gitattributes", &mut merged);
-
-    let path = Path::new(rel_path);
-    if let Some(parent) = path.parent() {
-        let mut accum = PathBuf::new();
-        for comp in parent.components() {
-            accum.push(comp);
-            let ga_rel = accum.join(".gitattributes");
-            let ga_rel = ga_rel.to_string_lossy().replace('\\', "/");
-            load_gitattributes_blob_from_tree(odb, tree_oid, &ga_rel, &mut merged);
-        }
-    }
-
-    merged
-}
-
-fn load_gitattributes_blob_from_tree(
-    odb: &Odb,
-    tree_oid: &ObjectId,
-    ga_path: &str,
-    merged: &mut ParsedGitAttributes,
-) {
-    let Some(oid) = lookup_tree_path(odb, tree_oid, ga_path) else {
-        return;
-    };
-    let Ok(obj) = odb.read(&oid) else {
-        return;
-    };
-    if obj.kind != ObjectKind::Blob {
-        return;
-    };
-    if let Ok(content) = String::from_utf8(obj.data) {
-        let attr_base = Path::new(ga_path)
-            .parent()
-            .map(|p| p.to_string_lossy().replace('\\', "/"))
-            .unwrap_or_default();
-        merge_gitattributes_text(merged, &content, ga_path, &attr_base);
-    }
-}
-
-fn lookup_tree_path(odb: &Odb, tree_oid: &ObjectId, rel_path: &str) -> Option<ObjectId> {
-    let mut current = *tree_oid;
-    let mut parts = rel_path.split('/').peekable();
-    while let Some(part) = parts.next() {
-        let obj = odb.read(&current).ok()?;
-        if obj.kind != ObjectKind::Tree {
-            return None;
-        }
-        let entries = parse_tree(&obj.data).ok()?;
-        let entry = entries
-            .iter()
-            .find(|entry| String::from_utf8_lossy(&entry.name) == part)?;
-        if parts.peek().is_none() {
-            return Some(entry.oid);
-        }
-        if entry.mode != 0o040000 {
-            return None;
-        }
-        current = entry.oid;
-    }
-    None
-}
-
 fn config_bool_truthy(value: &str) -> bool {
     matches!(
         value.trim().to_ascii_lowercase().as_str(),
@@ -720,23 +634,6 @@ pub fn get_file_attrs(
     config: &ConfigSet,
 ) -> FileAttrs {
     file_attrs_from_gitattributes(rules, &MacroTable::default(), rel_path, is_dir, config)
-}
-
-/// Returns whether gitattribute `attr_name` is set (last matching rule wins), for arbitrary
-/// attribute names used by pathspec `:(attr:...)`.
-///
-/// `is_dir` is whether `path` refers to a directory (see [`get_file_attrs`]).
-#[must_use]
-pub fn path_has_gitattribute(
-    rules: &[AttrRule],
-    path: &str,
-    is_dir: bool,
-    attr_name: &str,
-) -> bool {
-    matches!(
-        path_gitattribute_value(rules, path, is_dir, attr_name).as_deref(),
-        Some(value) if value != "unset"
-    )
 }
 
 /// Return the final value assigned to `attr_name` for `path`.
@@ -944,70 +841,6 @@ pub fn gather_convert_stats_ascii(data: &[u8]) -> &'static str {
         CONVERT_STAT_BITS_TXT_CRLF => "crlf",
         x if x == (CONVERT_STAT_BITS_TXT_LF | CONVERT_STAT_BITS_TXT_CRLF) => "mixed",
         _ => "none",
-    }
-}
-
-/// Git `convert.c` `get_convert_attr_ascii` — ASCII summary of EOL-related attributes for
-/// `git ls-files --eol` (matches `attr_action` after attribute merge, before clean/smudge).
-#[must_use]
-pub fn convert_attr_ascii_for_ls_files(
-    rules: &[AttrRule],
-    rel_path: &str,
-    config: &ConfigSet,
-) -> String {
-    let fa = get_file_attrs(rules, rel_path, false, config);
-    // Mirror `git_path_check_crlf` for `text` then legacy `crlf` (Git checks `text` first).
-    let mut action = match fa.text {
-        TextAttr::Set => 1,   // CRLF_TEXT
-        TextAttr::Unset => 2, // CRLF_BINARY
-        TextAttr::Auto => 5,  // CRLF_AUTO
-        TextAttr::Unspecified => 0,
-    };
-    if action == 0 {
-        action = match fa.crlf_legacy {
-            CrlfLegacyAttr::Crlf => 1,
-            CrlfLegacyAttr::Unset => 2,
-            CrlfLegacyAttr::Input => 3, // CRLF_TEXT_INPUT
-            CrlfLegacyAttr::Unspecified => 0,
-        };
-    }
-    if action == 2 {
-        return "-text".to_string();
-    }
-    // Bare `eol=lf` / `eol=crlf` without `text` still implies text mode (`convert_attrs`).
-    if action == 0 {
-        if fa.eol == EolAttr::Unspecified {
-            return String::new();
-        }
-        action = 1; // CRLF_TEXT
-    }
-
-    // Merge `eol=` like `convert_attrs` (only when not already binary).
-    if fa.eol == EolAttr::Lf {
-        if action == 5 {
-            action = 7; // CRLF_AUTO_INPUT
-        } else {
-            action = 3; // CRLF_TEXT_INPUT
-        }
-    } else if fa.eol == EolAttr::Crlf {
-        if action == 5 {
-            action = 6; // CRLF_AUTO_CRLF
-        } else {
-            action = 4; // CRLF_TEXT_CRLF
-        }
-    }
-
-    // `attr_action` snapshot (Git assigns before splitting bare `text` / applying autocrlf).
-    let attr_action = action;
-
-    match attr_action {
-        1 => "text".to_string(),
-        3 => "text eol=lf".to_string(),
-        4 => "text eol=crlf".to_string(),
-        5 => "text=auto".to_string(),
-        6 => "text=auto eol=crlf".to_string(),
-        7 => "text=auto eol=lf".to_string(),
-        _ => String::new(),
     }
 }
 

@@ -1,6 +1,5 @@
-//! Git-compatible path normalization and helpers for `test-tool path-utils`.
-//! Logic matches `git/path.c` (`normalize_path_copy`, `longest_ancestor_length`,
-//! `relative_path`, `strip_path_suffix`) and `git/remote.c` (`relative_url`).
+//! Git-compatible path normalization (`normalize_path_copy`, `longest_ancestor_length`,
+//! `relative_path`) plus display and comparison helpers for repository paths.
 
 use std::borrow::Cow;
 use std::fs;
@@ -83,45 +82,6 @@ pub fn normalize_path_copy(src: &str) -> Result<String, GitPathError> {
         out.push('/');
     }
     Ok(out)
-}
-
-fn chomp_trailing_dir_sep(path: &[u8], mut len: usize) -> usize {
-    while len > 0 && is_dir_sep(path[len - 1]) {
-        len -= 1;
-    }
-    len
-}
-
-/// Git's `stripped_path_suffix_offset` / `strip_path_suffix`.
-pub fn strip_path_suffix(path: &str, suffix: &str) -> Option<String> {
-    let path = path.as_bytes();
-    let suffix = suffix.as_bytes();
-    let mut path_len = path.len();
-    let mut suffix_len = suffix.len();
-
-    while suffix_len > 0 {
-        if path_len == 0 {
-            return None;
-        }
-        if is_dir_sep(path[path_len - 1]) {
-            if !is_dir_sep(suffix[suffix_len - 1]) {
-                return None;
-            }
-            path_len = chomp_trailing_dir_sep(path, path_len);
-            suffix_len = chomp_trailing_dir_sep(suffix, suffix_len);
-        } else if path[path_len - 1] != suffix[suffix_len - 1] {
-            return None;
-        } else {
-            path_len -= 1;
-            suffix_len -= 1;
-        }
-    }
-
-    if path_len > 0 && !is_dir_sep(path[path_len - 1]) {
-        return None;
-    }
-    let off = chomp_trailing_dir_sep(path, path_len);
-    Some(String::from_utf8_lossy(&path[..off]).into_owned())
 }
 
 /// Git's `longest_ancestor_length` - normalizes `path` and each colon-separated prefix.
@@ -248,110 +208,6 @@ pub fn relative_path<'a>(in_path: &'a str, prefix: &'a str, sb: &'a mut String) 
     sb.push_str(in_suffix);
 
     Some(sb.as_str())
-}
-
-fn find_last_dir_sep(path: &str) -> Option<usize> {
-    path.rfind('/')
-}
-
-fn chop_last_dir(remoteurl: &mut String, is_relative: bool) -> Result<bool, GitPathError> {
-    if let Some(pos) = find_last_dir_sep(remoteurl.as_str()) {
-        remoteurl.truncate(pos);
-        return Ok(false);
-    }
-    if let Some(pos) = remoteurl.rfind(':') {
-        remoteurl.truncate(pos);
-        return Ok(true);
-    }
-    if is_relative || remoteurl == "." {
-        return Err(GitPathError::InvalidRelativeUrl);
-    }
-    *remoteurl = ".".to_string();
-    Ok(false)
-}
-
-fn url_is_local_not_ssh(url: &str) -> bool {
-    crate::transport_path::url_is_local_not_ssh(url)
-}
-
-fn starts_with_dot_slash_native(s: &str) -> bool {
-    s.starts_with("./")
-}
-
-fn starts_with_dot_dot_slash_native(s: &str) -> bool {
-    s.starts_with("../")
-}
-
-fn ends_with_slash(url: &str) -> bool {
-    url.ends_with('/')
-}
-
-/// Git's `relative_url` from `remote.c` (POSIX; no DOS drive handling).
-pub fn relative_url(
-    remote_url: &str,
-    url: &str,
-    up_path: Option<&str>,
-) -> Result<String, GitPathError> {
-    if !url_is_local_not_ssh(url) || url.starts_with('/') {
-        return Ok(url.to_string());
-    }
-
-    let mut remoteurl = remote_url.to_string();
-    let len = remoteurl.len();
-    if len == 0 {
-        return Err(GitPathError::InvalidRelativeUrl);
-    }
-    if remoteurl.ends_with('/') {
-        remoteurl.truncate(len - 1);
-    }
-
-    let is_relative = if !url_is_local_not_ssh(&remoteurl) || remoteurl.starts_with('/') {
-        false
-    } else {
-        if !starts_with_dot_slash_native(&remoteurl)
-            && !starts_with_dot_dot_slash_native(&remoteurl)
-        {
-            remoteurl = format!("./{remoteurl}");
-        }
-        true
-    };
-
-    let mut url_rest = url;
-    let mut colonsep = false;
-    while !url_rest.is_empty() {
-        if starts_with_dot_dot_slash_native(url_rest) {
-            url_rest = &url_rest[3..];
-            let seg = chop_last_dir(&mut remoteurl, is_relative)?;
-            colonsep |= seg;
-        } else if starts_with_dot_slash_native(url_rest) {
-            url_rest = &url_rest[2..];
-        } else {
-            break;
-        }
-    }
-
-    let sep = if colonsep { ":" } else { "/" };
-    let mut combined = format!("{remoteurl}{sep}{url_rest}");
-    if ends_with_slash(url) && combined.ends_with('/') {
-        combined.pop();
-    }
-
-    let out = if starts_with_dot_slash_native(&combined) {
-        combined[2..].to_string()
-    } else {
-        combined
-    };
-
-    match up_path {
-        Some(up) if is_relative => Ok(format!("{up}{out}")),
-        _ => Ok(out),
-    }
-}
-
-/// Whether `path` is an absolute Unix-style path.
-#[must_use]
-pub fn is_absolute_path_unix(path: &str) -> bool {
-    path.starts_with('/')
 }
 
 /// Git's `cleanup_path` from `path.c`: strip a single leading `./` and any
@@ -599,61 +455,6 @@ fn key_has_prefix_node(key: &[u8], node: &[u8]) -> bool {
 pub fn is_common_git_path(rel: &str) -> bool {
     let stripped = rel.strip_suffix(".lock").unwrap_or(rel);
     matches!(trie_find_common(stripped.as_bytes()), Some(true))
-}
-
-/// Like Git's `strbuf_realpath` / `test-tool path-utils real_path`: resolve symlinks by
-/// walking path components (so symlink targets are interpreted at each step), then if the
-/// leaf is missing, resolve the longest existing prefix and append the remainder.
-#[must_use]
-pub fn real_path_resolving(path: &str) -> PathBuf {
-    let abs = if path.starts_with('/') {
-        path.to_string()
-    } else {
-        let cwd = crate::environment::Environment::empty().cwd.clone();
-        let joined = format!("{}/{}", cwd.display(), path);
-        normalize_path_copy(&joined).unwrap_or(joined)
-    };
-    let p = Path::new(&abs);
-    if let Ok(c) = p.canonicalize() {
-        return c;
-    }
-    let mut cur = PathBuf::from("/");
-    for part in abs.trim_start_matches('/').split('/') {
-        if part.is_empty() {
-            continue;
-        }
-        cur.push(part);
-        if let Ok(c) = cur.canonicalize() {
-            cur = c;
-        } else if let Ok(target) = std::fs::read_link(&cur) {
-            cur.pop();
-            cur.push(target);
-            if let Ok(c) = cur.canonicalize() {
-                cur = c;
-            }
-        }
-    }
-    if cur.exists() {
-        return cur;
-    }
-    let mut base = cur.clone();
-    let mut missing = Vec::new();
-    while !base.as_os_str().is_empty() && !base.exists() {
-        missing.push(base.file_name().unwrap_or_default().to_owned());
-        if !base.pop() {
-            break;
-        }
-    }
-    if base.as_os_str().is_empty() {
-        base = PathBuf::from("/");
-    }
-    let Ok(mut resolved) = base.canonicalize() else {
-        return cur;
-    };
-    while let Some(name) = missing.pop() {
-        resolved.push(name);
-    }
-    resolved
 }
 
 /// Git `setup.c` `abspath_part_inside_repo` (POSIX).
