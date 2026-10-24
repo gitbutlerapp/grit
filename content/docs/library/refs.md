@@ -21,6 +21,26 @@ On-disk layout is chosen once from **repository-local** config (`extensions.refS
 
 Loose ref updates, `packed-refs`, the index, config, commit-graph, and reftable `tables.list` all use Git-style lock files created exclusively (`O_CREAT|O_EXCL`). [`LockFile`](rustdoc:grit_lib::lockfile::LockFile) centralizes acquisition, optional jittered exponential backoff, staged writes, and atomic rename. Backoff budgets come from repository config: `core.filesRefLockTimeout` (milliseconds, default 100; `0` fail-fast, `-1` retry indefinitely), `core.packedRefsTimeout` (milliseconds, default 1000 ms), and `reftable.lockTimeout` (milliseconds, default 1000 ms). Dropping a [`LockFile`](rustdoc:grit_lib::lockfile::LockFile) without [`commit`](rustdoc:grit_lib::lockfile::LockFile::commit) removes only the lock file this handle created.
 
+When `.git/index.lock` or a loose ref lock is still held after the budget, operations such as [`stage`](rustdoc:grit_lib::porcelain::add::stage), [`IndexLock::acquire`](rustdoc:grit_lib::index::IndexLock::acquire) and [`write_ref`](rustdoc:grit_lib::refs::write_ref) return [`Error::LockHeld`](rustdoc:grit_lib::error::Error::LockHeld) with the lock `path` and nothing changed. With `core.lockfilePid` enabled, the owner writes its pid next to the lock (`index~pid.lock`), and `holder` carries it as a [`LockHolder`](rustdoc:grit_lib::lockfile::LockHolder): `running: false` means the lock is stale and safe to delete. Any [`LockError`](rustdoc:grit_lib::lockfile::LockError) converts into the same variant with `?`.
+
+```rust
+use grit_lib::error::Error;
+use grit_lib::lockfile::LockHolder;
+
+fn explain(err: &Error) -> Option<String> {
+    let Error::LockHeld { path, holder } = err else {
+        return None;
+    };
+    Some(match holder {
+        Some(LockHolder { running: false, pid }) => {
+            format!("{} is stale (process {pid} exited); remove it", path.display())
+        }
+        Some(LockHolder { pid, .. }) => format!("process {pid} holds {}", path.display()),
+        None => format!("another process holds {}", path.display()),
+    })
+}
+```
+
 Reftable failures are typed as [`ReftableError`](rustdoc:grit_lib::refs::reftable::ReftableError) inside `Error::Reftable`: `Locked` when another writer holds `tables.list.lock`, `ExpectedMismatch` when a compare-and-swap update finds a different value, and corruption variants such as `BadMagic`, `FooterChecksumMismatch` or `Truncated` (which names the [`ReftableField`](rustdoc:grit_lib::refs::reftable::ReftableField) that was cut short). Through a [`ReftableRefStore`](rustdoc:grit_lib::refs::store::ReftableRefStore) transaction, a held lock surfaces as `RefStoreError::LockHeld` and a compare-and-swap failure as `RefStoreError::ExpectedMismatch`, the same variants the files backend returns.
 
 ## Transactions

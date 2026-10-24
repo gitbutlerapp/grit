@@ -409,14 +409,95 @@ fn backoff_delay(lock_path: &Path, attempt: u32, jitter: &dyn LockJitter) -> Dur
     Duration::from_millis(base_ms.saturating_add(jitter_ms))
 }
 
-/// Map [`LockError::Held`] to a ref-update `AlreadyExists` I/O error (legacy call sites).
-pub fn lock_held_as_ref_present(err: LockError) -> io::Error {
-    match err {
-        LockError::Held { path } => io::Error::new(
-            io::ErrorKind::AlreadyExists,
-            format!("ref lock present: {}", path.display()),
-        ),
-        LockError::Io { source, .. } => source,
+/// Process recorded as the owner of a lock file.
+///
+/// With `core.lockfilePid` enabled, the lock owner writes `pid <n>` to a sidecar named after
+/// the lock (`index.lock` → `index~pid.lock`). Git and grit share this layout.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LockHolder {
+    /// Process id read from the sidecar.
+    pub pid: u64,
+    /// Whether a process with [`Self::pid`] exists right now.
+    ///
+    /// `false` means the lock is stale. `true` is only a hint: the id may have been reused by
+    /// an unrelated process.
+    pub running: bool,
+}
+
+impl LockHolder {
+    /// Read the holder recorded for `lock_path` and probe whether it is still running.
+    ///
+    /// `lock_path` is the lock file itself (for example `.git/index.lock`).
+    ///
+    /// Returns `None` when no pid sidecar exists or it does not contain a process id.
+    #[must_use]
+    pub fn read(lock_path: &Path) -> Option<Self> {
+        let pid = read_lock_pid(&pid_path_for_lock(lock_path))?;
+        Some(Self {
+            pid,
+            running: is_process_running(pid),
+        })
+    }
+}
+
+/// Path of the pid sidecar for `lock_path` (`name.lock` → `name~pid.lock`).
+pub(crate) fn pid_path_for_lock(lock_path: &Path) -> PathBuf {
+    let file_name = lock_path
+        .file_name()
+        .map(|s| s.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "index.lock".to_owned());
+    let base = file_name.strip_suffix(".lock").unwrap_or(&file_name);
+    lock_path.with_file_name(format!("{base}~pid.lock"))
+}
+
+fn read_lock_pid(pid_path: &Path) -> Option<u64> {
+    let raw = fs::read_to_string(pid_path).ok()?;
+    let trimmed = raw.trim();
+    trimmed
+        .strip_prefix("pid ")
+        .unwrap_or(trimmed)
+        .trim()
+        .parse::<u64>()
+        .ok()
+}
+
+fn is_process_running(pid: u64) -> bool {
+    if pid == 0 || pid > i32::MAX as u64 {
+        return false;
+    }
+    #[cfg(windows)]
+    {
+        use windows_sys::Win32::Foundation::CloseHandle;
+        use windows_sys::Win32::System::Threading::{
+            OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+        };
+        // SAFETY: `OpenProcess` is called with a numeric pid and a read-only access mask.
+        unsafe {
+            let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid as u32);
+            if handle.is_null() {
+                return false;
+            }
+            CloseHandle(handle);
+            true
+        }
+    }
+    #[cfg(all(unix, target_os = "linux"))]
+    {
+        Path::new(&format!("/proc/{pid}")).exists()
+    }
+    #[cfg(all(unix, not(target_os = "linux")))]
+    {
+        use rustix::io::Errno;
+        use rustix::process::{test_kill_process, Pid};
+        let Some(pid) = Pid::from_raw(pid as i32) else {
+            return false;
+        };
+        match test_kill_process(pid) {
+            Ok(()) => true,
+            Err(Errno::SRCH) => false,
+            Err(Errno::PERM) => true,
+            Err(_) => false,
+        }
     }
 }
 
@@ -507,6 +588,62 @@ mod tests {
         assert!(lock_path.is_file());
         assert_eq!(fs::read_to_string(&lock_path).unwrap(), "foreign");
         assert!(!clock.sleeps().is_empty());
+    }
+
+    #[test]
+    fn pid_sidecar_path_replaces_lock_suffix() {
+        assert_eq!(
+            pid_path_for_lock(Path::new("/r/.git/index.lock")),
+            Path::new("/r/.git/index~pid.lock")
+        );
+        assert_eq!(
+            pid_path_for_lock(Path::new("/r/.git/refs/heads/main.lock")),
+            Path::new("/r/.git/refs/heads/main~pid.lock")
+        );
+        assert_eq!(
+            pid_path_for_lock(Path::new("/r/odd")),
+            Path::new("/r/odd~pid.lock")
+        );
+    }
+
+    #[test]
+    fn held_converts_to_typed_error_with_holder() {
+        let dir = tempfile::tempdir().unwrap();
+        let lock_path = dir.path().join("index.lock");
+        fs::write(&lock_path, b"").unwrap();
+        fs::write(
+            dir.path().join("index~pid.lock"),
+            format!("pid {}\n", std::process::id()),
+        )
+        .unwrap();
+        let err = LockFile::acquire(&lock_path, LockWait::Immediately)
+            .err()
+            .expect("held");
+        match crate::error::Error::from(err) {
+            crate::error::Error::LockHeld { path, holder } => {
+                assert_eq!(path, lock_path);
+                assert_eq!(
+                    holder,
+                    Some(LockHolder {
+                        pid: u64::from(std::process::id()),
+                        running: true,
+                    })
+                );
+            }
+            other => panic!("expected LockHeld, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn io_failure_converts_to_io_error() {
+        let err = LockError::Io {
+            path: PathBuf::from("x.lock"),
+            source: io::Error::from(io::ErrorKind::PermissionDenied),
+        };
+        assert!(matches!(
+            crate::error::Error::from(err),
+            crate::error::Error::Io(e) if e.kind() == io::ErrorKind::PermissionDenied
+        ));
     }
 
     #[test]

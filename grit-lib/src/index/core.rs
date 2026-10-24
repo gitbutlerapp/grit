@@ -25,6 +25,7 @@ use crate::hash::verify_trailer;
 
 use crate::config::ConfigSet;
 use crate::error::{Error, Result};
+use crate::lockfile::pid_path_for_lock;
 use crate::objects::{parse_tree, HashAlgo, ObjectId, ObjectKind, TreeEntry};
 use crate::odb::Odb;
 use crate::repo::Repository;
@@ -1551,29 +1552,10 @@ impl Index {
         let pid_path = pid_path_for_lock(&tmp_path);
         let lockfile_pid_enabled = lockfile_pid_enabled(path, config);
 
-        use crate::lockfile::{LockError, LockFile, LockWait};
+        use crate::lockfile::{LockFile, LockWait};
         let wait = LockWait::files_ref_lock(config);
-        let (tmp_path, mut lock_file) = LockFile::acquire(&tmp_path, wait)
-            .map_err(|err| match err {
-                LockError::Held { .. } => {
-                    let message = build_lock_exists_message(
-                        &tmp_path,
-                        &pid_path,
-                        &io::Error::from(io::ErrorKind::AlreadyExists),
-                    );
-                    Error::Io(io::Error::new(io::ErrorKind::AlreadyExists, message))
-                }
-                LockError::Io { source, .. } => Error::Io(source),
-            })?
-            .into_open_file()
-            .map_err(|err| match err {
-                LockError::Io { source, .. } => Error::Io(source),
-                LockError::Held { path } => {
-                    Error::Io(crate::lockfile::lock_held_as_ref_present(LockError::Held {
-                        path,
-                    }))
-                }
-            })?;
+        let (tmp_path, mut lock_file) =
+            LockFile::acquire(&tmp_path, wait).and_then(LockFile::into_open_file)?;
 
         let mut wrote_pid_file = false;
         if lockfile_pid_enabled {
@@ -3578,19 +3560,6 @@ fn lockfile_pid_enabled(index_path: &Path, config: Option<&ConfigSet>) -> bool {
         .unwrap_or(false)
 }
 
-fn pid_path_for_lock(lock_path: &Path) -> std::path::PathBuf {
-    let file_name = lock_path
-        .file_name()
-        .map(|s| s.to_string_lossy().to_string())
-        .unwrap_or_else(|| "index.lock".to_owned());
-    let pid_name = if let Some(base) = file_name.strip_suffix(".lock") {
-        format!("{base}~pid.lock")
-    } else {
-        format!("{file_name}~pid.lock")
-    };
-    lock_path.with_file_name(pid_name)
-}
-
 fn write_lock_pid_file(pid_path: &Path) -> io::Result<()> {
     use std::io::Write as _;
     let mut file = fs::OpenOptions::new()
@@ -3646,35 +3615,18 @@ impl IndexLock {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::Io`] with `AlreadyExists` when the lock file is present.
+    /// Returns [`Error::LockHeld`] (with the pid sidecar's [`LockHolder`](crate::lockfile::LockHolder)
+    /// when one was written) when `index.lock` already exists after the
+    /// `core.filesRefLockTimeout` budget, or [`Error::Io`] for other filesystem failures.
     pub fn acquire(index_path: &Path, config: Option<&ConfigSet>) -> Result<Self> {
         let lock_path = index_path.with_extension("lock");
         let pid_path = pid_path_for_lock(&lock_path);
         let lockfile_pid_enabled = lockfile_pid_enabled(index_path, config);
 
-        use crate::lockfile::{LockError, LockFile, LockWait};
+        use crate::lockfile::{LockFile, LockWait};
         let wait = LockWait::files_ref_lock(config);
-        let (lock_path, file) = LockFile::acquire(&lock_path, wait)
-            .map_err(|err| match err {
-                LockError::Held { .. } => {
-                    let message = build_lock_exists_message(
-                        &lock_path,
-                        &pid_path,
-                        &io::Error::from(io::ErrorKind::AlreadyExists),
-                    );
-                    Error::Io(io::Error::new(io::ErrorKind::AlreadyExists, message))
-                }
-                LockError::Io { source, .. } => Error::Io(source),
-            })?
-            .into_open_file()
-            .map_err(|err| match err {
-                LockError::Io { source, .. } => Error::Io(source),
-                LockError::Held { path } => {
-                    Error::Io(crate::lockfile::lock_held_as_ref_present(LockError::Held {
-                        path,
-                    }))
-                }
-            })?;
+        let (lock_path, file) =
+            LockFile::acquire(&lock_path, wait).and_then(LockFile::into_open_file)?;
 
         let mut wrote_pid = false;
         if lockfile_pid_enabled {
@@ -3704,86 +3656,6 @@ impl Drop for IndexLock {
         let _ = fs::remove_file(&self.lock_path);
         if self.wrote_pid {
             let _ = fs::remove_file(&self.pid_path);
-        }
-    }
-}
-
-/// Detail lines Git prints when the index lock file already exists (used by stash and similar).
-pub fn format_index_lock_blocked_detail(index_path: &Path) -> String {
-    let lock_path = index_path.with_extension("lock");
-    let pid_path = pid_path_for_lock(&lock_path);
-    let err = io::Error::new(io::ErrorKind::AlreadyExists, "File exists");
-    build_lock_exists_message(&lock_path, &pid_path, &err)
-}
-
-fn build_lock_exists_message(lock_path: &Path, pid_path: &Path, err: &io::Error) -> String {
-    let mut msg = format!("Unable to create '{}': {}.\n\n", lock_path.display(), err);
-
-    if let Some(pid) = read_lock_pid(pid_path) {
-        if is_process_running(pid) {
-            msg.push_str(&format!(
-                "Lock is held by process {pid}; if no git process is running, the lock file may be stale (PIDs can be reused)"
-            ));
-        } else {
-            msg.push_str(&format!(
-                "Lock was held by process {pid}, which is no longer running; the lock file appears to be stale"
-            ));
-        }
-    } else {
-        msg.push_str(
-            "Another git process seems to be running in this repository, or the lock file may be stale",
-        );
-    }
-
-    msg
-}
-
-fn read_lock_pid(pid_path: &Path) -> Option<u64> {
-    let raw = fs::read_to_string(pid_path).ok()?;
-    let trimmed = raw.trim();
-    if let Some(v) = trimmed.strip_prefix("pid ") {
-        return v.trim().parse::<u64>().ok();
-    }
-    trimmed.parse::<u64>().ok()
-}
-
-fn is_process_running(pid: u64) -> bool {
-    if pid == 0 || pid > i32::MAX as u64 {
-        return false;
-    }
-    #[cfg(windows)]
-    {
-        use windows_sys::Win32::Foundation::CloseHandle;
-        use windows_sys::Win32::System::Threading::{
-            OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
-        };
-        // SAFETY: `OpenProcess` is called with a numeric pid and a read-only access mask.
-        unsafe {
-            let handle = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid as u32);
-            if handle.is_null() {
-                return false;
-            }
-            CloseHandle(handle);
-            true
-        }
-    }
-    #[cfg(all(unix, target_os = "linux"))]
-    {
-        let proc_path = std::path::PathBuf::from(format!("/proc/{pid}"));
-        proc_path.exists()
-    }
-    #[cfg(all(unix, not(target_os = "linux")))]
-    {
-        use rustix::io::Errno;
-        use rustix::process::{test_kill_process, Pid};
-        let Some(pid) = Pid::from_raw(pid as i32) else {
-            return false;
-        };
-        match test_kill_process(pid) {
-            Ok(()) => true,
-            Err(Errno::SRCH) => false,
-            Err(Errno::PERM) => true,
-            Err(_) => false,
         }
     }
 }

@@ -1805,29 +1805,14 @@ fn write_ref_at_storage(
     }
     let content = format!("{oid}\n");
     // Write via lock file for atomicity (`O_CREAT|O_EXCL`), with optional backoff
-    // per `core.filesRefLockTimeout`. Callers (e.g. fetch) map a held lock to
-    // "cannot lock ref … File exists." and skip that ref while updating the rest.
+    // per `core.filesRefLockTimeout`. A held lock surfaces as `Error::LockHeld`.
     let lock = lock_path_for_ref(&path);
-    use crate::lockfile::{LockError, LockFile, LockWait};
+    use crate::lockfile::{LockFile, LockWait};
     use std::io::Write as _;
     let wait = LockWait::files_ref_lock_for_git_dir(git_dir);
-    let mut lock = LockFile::acquire(&lock, wait).map_err(|err| match err {
-        LockError::Held { path } => {
-            Error::Io(crate::lockfile::lock_held_as_ref_present(LockError::Held {
-                path,
-            }))
-        }
-        LockError::Io { source, .. } => Error::Io(source),
-    })?;
+    let mut lock = LockFile::acquire(&lock, wait)?;
     lock.write_all(content.as_bytes()).map_err(Error::Io)?;
-    lock.commit_to(&path).map_err(|err| match err {
-        LockError::Io { source, .. } => Error::Io(source),
-        LockError::Held { path } => {
-            Error::Io(crate::lockfile::lock_held_as_ref_present(LockError::Held {
-                path,
-            }))
-        }
-    })?;
+    lock.commit_to(&path)?;
     Ok(())
 }
 
@@ -1884,8 +1869,7 @@ pub(crate) fn prune_loose_ref_cas(
     let lock_path = lock_path_for_ref(&path);
     use crate::lockfile::{LockFile, LockWait};
     let wait = LockWait::files_ref_lock_for_git_dir(git_dir);
-    let _lock = LockFile::acquire(&lock_path, wait)
-        .map_err(|err| Error::Io(crate::lockfile::lock_held_as_ref_present(err)))?;
+    let _lock = LockFile::acquire(&lock_path, wait)?;
     let outcome = (|| -> Result<bool> {
         if !path.is_file() {
             return Ok(true);
@@ -2212,10 +2196,7 @@ pub fn delete_ref(git_dir: &Path, refname: &str) -> Result<()> {
     let path = storage_dir.join(&stor);
     let lock = lock_path_for_ref(&path);
     if fs::symlink_metadata(&lock).is_ok() {
-        return Err(Error::Io(io::Error::new(
-            io::ErrorKind::AlreadyExists,
-            format!("ref lock present: {}", lock.display()),
-        )));
+        return Err(Error::from(crate::lockfile::LockError::Held { path: lock }));
     }
 
     // Remove the packed-refs entry *first* (acquiring the packed-refs lock). Git deletes the
@@ -3229,16 +3210,9 @@ impl BranchCommitRefLock {
         }
 
         let lock_path = lock_path_for_ref(&path);
-        use crate::lockfile::{LockError, LockFile, LockWait};
+        use crate::lockfile::{LockFile, LockWait};
         let wait = LockWait::files_ref_lock_for_git_dir(git_dir);
-        let lock = LockFile::acquire(&lock_path, wait).map_err(|err| match err {
-            LockError::Held { path } => {
-                Error::Io(crate::lockfile::lock_held_as_ref_present(LockError::Held {
-                    path,
-                }))
-            }
-            LockError::Io { source, .. } => Error::Io(source),
-        })?;
+        let lock = LockFile::acquire(&lock_path, wait)?;
 
         let current = read_loose_or_packed_oid(git_dir, branch_ref)?;
         verify_branch_cas(expected_old, current, branch_ref)?;
@@ -3370,21 +3344,13 @@ fn finish_branch_commit_ref_lock_files(
     let stor = crate::ref_namespace::storage_ref_name(update.branch_ref);
     let path = storage_dir.join(&stor);
     let content = format!("{}\n", update.new_oid);
-    use crate::lockfile::LockError;
     use std::io::Write as _;
     let mut file_lock = lock
         .lock
         .take()
         .ok_or_else(|| Error::Message("branch ref lock already released".into()))?;
     file_lock.write_all(content.as_bytes()).map_err(Error::Io)?;
-    file_lock.commit_to(&path).map_err(|err| match err {
-        LockError::Io { source, .. } => Error::Io(source),
-        LockError::Held { path } => {
-            Error::Io(crate::lockfile::lock_held_as_ref_present(LockError::Held {
-                path,
-            }))
-        }
-    })?;
+    file_lock.commit_to(&path)?;
     Ok(())
 }
 

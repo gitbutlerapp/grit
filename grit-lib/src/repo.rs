@@ -1876,11 +1876,10 @@ impl Repository {
     fn opportunistic_index_write_skippable(err: &crate::error::Error) -> bool {
         use crate::error::Error;
         match err {
+            Error::LockHeld { .. } => true,
             Error::Io(e) => matches!(
                 e.kind(),
-                std::io::ErrorKind::AlreadyExists
-                    | std::io::ErrorKind::PermissionDenied
-                    | std::io::ErrorKind::ReadOnlyFilesystem
+                std::io::ErrorKind::PermissionDenied | std::io::ErrorKind::ReadOnlyFilesystem
             ),
             _ => false,
         }

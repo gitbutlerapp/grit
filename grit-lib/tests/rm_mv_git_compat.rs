@@ -105,7 +105,10 @@ fn rm_leaves_worktree_when_index_lock_held() {
         },
     )
     .expect_err("rm with index.lock");
-    assert!(matches!(err, grit_lib::error::Error::Io(_)));
+    assert!(
+        matches!(&err, grit_lib::error::Error::LockHeld { path, .. } if path.ends_with(".git/index.lock")),
+        "expected index lock failure, got {err:?}"
+    );
 
     assert!(repo_dir.join("a").is_file());
     assert!(
@@ -125,7 +128,10 @@ fn mv_leaves_worktree_when_index_lock_held() {
     let repo = grit_repo(repo_dir);
     let _lock = hold_index_lock(&repo);
     let err = move_path(&repo, "a", "b", false).expect_err("mv with index.lock");
-    assert!(matches!(err, grit_lib::error::Error::Io(_)));
+    assert!(
+        matches!(&err, grit_lib::error::Error::LockHeld { path, .. } if path.ends_with(".git/index.lock")),
+        "expected index lock failure, got {err:?}"
+    );
 
     assert!(repo_dir.join("a").is_file());
     assert!(!repo_dir.join("b").exists());
@@ -388,7 +394,10 @@ fn mv_refused_when_index_lock_held_externally() {
     let repo = grit_repo(repo_dir);
     let index_before = repo.index_handle().load().expect("index before");
     let err = move_path(&repo, "tracked", "moved", false).expect_err("mv with held lock");
-    assert!(matches!(err, grit_lib::error::Error::Io(_)));
+    assert!(
+        matches!(&err, grit_lib::error::Error::LockHeld { path, .. } if path.ends_with(".git/index.lock")),
+        "expected index lock failure, got {err:?}"
+    );
     assert!(repo_dir.join("tracked").is_file());
     assert!(!repo_dir.join("moved").exists());
     assert!(git_porcelain(repo_dir).is_empty());
@@ -439,7 +448,7 @@ fn mv_force_refused_when_index_lock_held_externally() {
     let index_before = repo.index_handle().load().expect("index before");
     let err = move_path(&repo, "source", "destination", true).expect_err("force mv with lock");
     assert!(
-        matches!(err, grit_lib::error::Error::Io(_)),
+        matches!(&err, grit_lib::error::Error::LockHeld { path, .. } if path.ends_with(".git/index.lock")),
         "expected index lock failure, got {err:?}"
     );
     assert!(repo_dir.join("source").is_file());

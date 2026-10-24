@@ -74,10 +74,8 @@ fn lockfile_contention_held_forever_preserves_foreign_lock() {
 
     let err = write_ref(&git_dir, "refs/heads/blocked", &base).expect_err("budget exhausted");
     assert!(
-        matches!(
-            &err,
-            Error::Io(e) if e.kind() == std::io::ErrorKind::AlreadyExists
-        ) || matches!(&err, Error::RefStore(RefStoreError::LockHeld { .. })),
+        matches!(&err, Error::LockHeld { path, holder: None } if *path == lock_path)
+            || matches!(&err, Error::RefStore(RefStoreError::LockHeld { name }) if name == "refs/heads/blocked"),
         "unexpected error: {err:?}"
     );
     assert_eq!(

@@ -5275,6 +5275,9 @@ pub grit_lib::error::Error::InvalidRefStorageFormat::value: alloc::string::Strin
 pub grit_lib::error::Error::InvalidSignature(grit_lib::ident::SignatureError)
 pub grit_lib::error::Error::InvalidTreeEntry(grit_lib::objects::TreeEntryError)
 pub grit_lib::error::Error::Io(core::io::error::Error)
+pub grit_lib::error::Error::LockHeld
+pub grit_lib::error::Error::LockHeld::holder: core::option::Option<grit_lib::lockfile::LockHolder>
+pub grit_lib::error::Error::LockHeld::path: std::path::PathBuf
 pub grit_lib::error::Error::LooseHashMismatch
 pub grit_lib::error::Error::LooseHashMismatch::path: alloc::string::String
 pub grit_lib::error::Error::LooseHashMismatch::real_oid: alloc::string::String
@@ -5478,6 +5481,8 @@ impl core::convert::From<grit_lib::ident::CommitIdentityError> for grit_lib::err
 pub fn grit_lib::error::Error::from(grit_lib::ident::CommitIdentityError) -> Self
 impl core::convert::From<grit_lib::ident::SignatureError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::ident::SignatureError) -> Self
+impl core::convert::From<grit_lib::lockfile::LockError> for grit_lib::error::Error
+pub fn grit_lib::error::Error::from(grit_lib::lockfile::LockError) -> Self
 impl core::convert::From<grit_lib::objects::TreeEntryError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::objects::TreeEntryError) -> Self
 impl core::convert::From<grit_lib::porcelain::branch_error::BranchError> for grit_lib::error::Error
@@ -6679,7 +6684,6 @@ pub const grit_lib::index::MODE_SYMLINK: u32
 pub const grit_lib::index::MODE_TREE: u32
 pub fn grit_lib::index::entry_from_metadata(&std::fs::Metadata, &[u8], grit_lib::objects::ObjectId, u32) -> grit_lib::index::IndexEntry
 pub fn grit_lib::index::entry_from_stat(&std::path::Path, &[u8], grit_lib::objects::ObjectId, u32) -> grit_lib::error::Result<grit_lib::index::IndexEntry>
-pub fn grit_lib::index::format_index_lock_blocked_detail(&std::path::Path) -> alloc::string::String
 pub fn grit_lib::index::get_index_format_from_env() -> core::option::Option<u32>
 pub fn grit_lib::index::index_entries_stat_equivalent(&grit_lib::index::IndexEntry, &grit_lib::index::IndexEntry, grit_lib::index::StatMatchPolicy) -> bool
 pub fn grit_lib::index::index_file_mtime(&std::path::Path) -> core::option::Option<(u32, u32)>
@@ -6761,6 +6765,8 @@ pub grit_lib::lockfile::LockError::Held::path: std::path::PathBuf
 pub grit_lib::lockfile::LockError::Io
 pub grit_lib::lockfile::LockError::Io::path: std::path::PathBuf
 pub grit_lib::lockfile::LockError::Io::source: core::io::error::Error
+impl core::convert::From<grit_lib::lockfile::LockError> for grit_lib::error::Error
+pub fn grit_lib::error::Error::from(grit_lib::lockfile::LockError) -> Self
 impl core::error::Error for grit_lib::lockfile::LockError
 pub fn grit_lib::lockfile::LockError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
 impl core::fmt::Debug for grit_lib::lockfile::LockError
@@ -6826,6 +6832,27 @@ impl core::marker::Unpin for grit_lib::lockfile::LockFile
 impl core::marker::UnsafeUnpin for grit_lib::lockfile::LockFile
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::lockfile::LockFile
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::lockfile::LockFile
+pub struct grit_lib::lockfile::LockHolder
+pub grit_lib::lockfile::LockHolder::pid: u64
+pub grit_lib::lockfile::LockHolder::running: bool
+impl grit_lib::lockfile::LockHolder
+pub fn grit_lib::lockfile::LockHolder::read(&std::path::Path) -> core::option::Option<Self>
+impl core::clone::Clone for grit_lib::lockfile::LockHolder
+pub fn grit_lib::lockfile::LockHolder::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::lockfile::LockHolder
+impl core::cmp::PartialEq for grit_lib::lockfile::LockHolder
+pub fn grit_lib::lockfile::LockHolder::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::lockfile::LockHolder
+pub fn grit_lib::lockfile::LockHolder::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::lockfile::LockHolder
+impl core::marker::StructuralPartialEq for grit_lib::lockfile::LockHolder
+impl core::marker::Freeze for grit_lib::lockfile::LockHolder
+impl core::marker::Send for grit_lib::lockfile::LockHolder
+impl core::marker::Sync for grit_lib::lockfile::LockHolder
+impl core::marker::Unpin for grit_lib::lockfile::LockHolder
+impl core::marker::UnsafeUnpin for grit_lib::lockfile::LockHolder
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::lockfile::LockHolder
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::lockfile::LockHolder
 pub struct grit_lib::lockfile::SystemLockClock
 impl core::clone::Clone for grit_lib::lockfile::SystemLockClock
 pub fn grit_lib::lockfile::SystemLockClock::clone(&self) -> Self
@@ -6871,7 +6898,6 @@ pub trait grit_lib::lockfile::LockJitter: core::marker::Send + core::marker::Syn
 pub fn grit_lib::lockfile::LockJitter::fraction(&self, &std::path::Path, u32) -> f64
 impl grit_lib::lockfile::LockJitter for grit_lib::lockfile::SystemLockJitter
 pub fn grit_lib::lockfile::SystemLockJitter::fraction(&self, &std::path::Path, u32) -> f64
-pub fn grit_lib::lockfile::lock_held_as_ref_present(grit_lib::lockfile::LockError) -> core::io::error::Error
 pub mod grit_lib::maintenance
 pub mod grit_lib::maintenance::fsck
 pub struct grit_lib::maintenance::fsck::FsckError
@@ -14715,6 +14741,9 @@ pub grit_lib::prelude::Error::InvalidRefStorageFormat::value: alloc::string::Str
 pub grit_lib::prelude::Error::InvalidSignature(grit_lib::ident::SignatureError)
 pub grit_lib::prelude::Error::InvalidTreeEntry(grit_lib::objects::TreeEntryError)
 pub grit_lib::prelude::Error::Io(core::io::error::Error)
+pub grit_lib::prelude::Error::LockHeld
+pub grit_lib::prelude::Error::LockHeld::holder: core::option::Option<grit_lib::lockfile::LockHolder>
+pub grit_lib::prelude::Error::LockHeld::path: std::path::PathBuf
 pub grit_lib::prelude::Error::LooseHashMismatch
 pub grit_lib::prelude::Error::LooseHashMismatch::path: alloc::string::String
 pub grit_lib::prelude::Error::LooseHashMismatch::real_oid: alloc::string::String
@@ -14918,6 +14947,8 @@ impl core::convert::From<grit_lib::ident::CommitIdentityError> for grit_lib::err
 pub fn grit_lib::error::Error::from(grit_lib::ident::CommitIdentityError) -> Self
 impl core::convert::From<grit_lib::ident::SignatureError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::ident::SignatureError) -> Self
+impl core::convert::From<grit_lib::lockfile::LockError> for grit_lib::error::Error
+pub fn grit_lib::error::Error::from(grit_lib::lockfile::LockError) -> Self
 impl core::convert::From<grit_lib::objects::TreeEntryError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::objects::TreeEntryError) -> Self
 impl core::convert::From<grit_lib::porcelain::branch_error::BranchError> for grit_lib::error::Error

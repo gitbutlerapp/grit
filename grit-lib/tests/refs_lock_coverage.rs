@@ -4,7 +4,9 @@
 
 use std::fs;
 
+use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
+use grit_lib::refs::store::RefStoreError;
 use grit_lib::refs::{
     delete_ref, delete_ref_cas, lock_path_for_ref, read_raw_ref,
     verify_refname_available_for_create, write_ref, RawRefLookup,
@@ -53,8 +55,33 @@ fn write_ref_fails_when_lock_file_exists() {
     let ref_path = git_dir.join("refs/heads/locked");
     fs::create_dir_all(ref_path.parent().unwrap()).expect("parent");
     fs::write(&ref_path, format!("{}\n", oid(1).to_hex())).expect("seed");
-    fs::write(lock_path_for_ref(&ref_path), b"held").expect("lock");
-    assert!(write_ref(&git_dir, "refs/heads/locked", &oid(2)).is_err());
+    let lock_path = lock_path_for_ref(&ref_path);
+    fs::write(&lock_path, b"held").expect("lock");
+    let is_lock_held = |err: &Error| match err {
+        Error::LockHeld { path, .. } => *path == lock_path,
+        Error::RefStore(RefStoreError::LockHeld { name }) => name == "refs/heads/locked",
+        _ => false,
+    };
+    let err = write_ref(&git_dir, "refs/heads/locked", &oid(2)).expect_err("lock held");
+    assert!(
+        is_lock_held(&err),
+        "expected a typed lock error, got {err:?}"
+    );
+    let err = delete_ref_cas(&git_dir, "refs/heads/locked", oid(1)).expect_err("lock held");
+    assert!(
+        is_lock_held(&err),
+        "expected a typed lock error, got {err:?}"
+    );
+    let err = delete_ref(&git_dir, "refs/heads/locked").expect_err("lock held");
+    assert!(
+        is_lock_held(&err),
+        "expected a typed lock error, got {err:?}"
+    );
+    assert_eq!(fs::read(&lock_path).expect("foreign lock kept"), b"held");
+    assert_eq!(
+        fs::read_to_string(&ref_path).expect("ref unchanged"),
+        format!("{}\n", oid(1).to_hex())
+    );
 }
 
 #[test]

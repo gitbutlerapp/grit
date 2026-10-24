@@ -653,6 +653,19 @@ pub enum Error {
     #[error("I/O error: {0}")]
     Io(#[from] std::io::Error),
 
+    /// A lock file (for example `.git/index.lock` or `refs/heads/main.lock`) already exists, so
+    /// another process is updating the same file or a crashed one left the lock behind.
+    ///
+    /// Nothing was changed. Retry once the other process finishes, or delete `path` when no
+    /// process owns it (a `holder` with `running: false` means the lock is stale).
+    #[error("lock file {} already exists", path.display())]
+    LockHeld {
+        /// The lock file that could not be created.
+        path: std::path::PathBuf,
+        /// Owner recorded in the lock's pid sidecar (`core.lockfilePid`), when one was written.
+        holder: Option<crate::lockfile::LockHolder>,
+    },
+
     /// A zlib compression or decompression failure.
     #[error("zlib error: {0}")]
     Zlib(String),
@@ -1432,6 +1445,21 @@ impl Error {
             Error::WouldOverwrite { message, .. } => message.clone(),
             e if e.wants_fatal_prefix() => crate::diagnostics::fatal_line(&e.to_string()),
             other => other.to_string(),
+        }
+    }
+}
+
+impl From<crate::lockfile::LockError> for Error {
+    /// [`LockError::Held`](crate::lockfile::LockError::Held) becomes [`Error::LockHeld`] with the
+    /// recorded [`LockHolder`](crate::lockfile::LockHolder), and I/O failures become [`Error::Io`].
+    fn from(err: crate::lockfile::LockError) -> Self {
+        use crate::lockfile::{LockError, LockHolder};
+        match err {
+            LockError::Held { path } => Self::LockHeld {
+                holder: LockHolder::read(&path),
+                path,
+            },
+            LockError::Io { source, .. } => Self::Io(source),
         }
     }
 }

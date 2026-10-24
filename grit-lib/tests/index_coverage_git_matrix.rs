@@ -8,9 +8,8 @@ use std::process::Command;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::index::write_tree::{write_tree_update_index, WriteTreeFlags};
 use grit_lib::index::{
-    entry_from_metadata, format_index_lock_blocked_detail, index_entries_stat_equivalent,
-    munge_index_size, normalize_mode, worktree_path_from_index_rel, Index, IndexEntry,
-    StatMatchPolicy, MODE_REGULAR,
+    entry_from_metadata, index_entries_stat_equivalent, munge_index_size, normalize_mode,
+    worktree_path_from_index_rel, Index, IndexEntry, IndexLock, StatMatchPolicy, MODE_REGULAR,
 };
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
@@ -166,11 +165,19 @@ fn load_expand_sparse_optional_and_collapse_roundtrip() {
 }
 
 #[test]
-fn index_lock_blocked_detail_mentions_path() {
+fn index_lock_held_reports_lock_path() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let path = tmp.path().join("index");
-    let detail = format_index_lock_blocked_detail(&path);
-    assert!(detail.contains("index"));
+    let lock_path = tmp.path().join("index.lock");
+    fs::write(&lock_path, b"").expect("touch lock");
+    match IndexLock::acquire(&path, None) {
+        Err(grit_lib::error::Error::LockHeld { path, holder }) => {
+            assert_eq!(path, lock_path);
+            assert_eq!(holder, None);
+        }
+        Err(other) => panic!("expected LockHeld, got {other:?}"),
+        Ok(_) => panic!("expected LockHeld"),
+    }
 }
 
 #[test]
