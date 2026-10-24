@@ -1318,7 +1318,7 @@ fn pack_index_build_errors_and_thin_pack_with_odb_base() {
     let records = pack_index_records_with_threads(&thin, &odb, Parallelism::resolve(Some(4)))
         .expect("thin index");
     assert!(!records.is_empty());
-    install_pack_bytes(
+    let installed = install_pack_bytes(
         thin,
         &odb,
         &IngestPackOptions {
@@ -1328,6 +1328,19 @@ fn pack_index_build_errors_and_thin_pack_with_odb_base() {
         },
     )
     .expect("fix thin install");
+    let verified = grit_test_support::git_verify_pack(repo.path(), &installed.pack_path);
+    assert!(
+        verified.ok,
+        "git verify-pack on fixed thin pack: {}",
+        verified.output
+    );
+    let trailer = std::fs::read(&installed.pack_path).expect("read fixed pack");
+    let trailer = ObjectId::from_bytes(&trailer[trailer.len() - 20..]).expect("trailer");
+    assert_eq!(
+        installed.pack_path.file_name().and_then(|n| n.to_str()),
+        Some(format!("pack-{}.pack", trailer.to_hex()).as_str()),
+        "fixed thin pack is named after its own checksum"
+    );
 }
 
 /// Manual RSS harness: `GRIT_PACK_IDX=/path/to.idx cargo test --release rss_harness_verify_pack_only -- --ignored --exact`
