@@ -194,7 +194,7 @@ SSH remotes do not use the GitHub device-flow token; they can still block on SSH
 
 | Resource | URL / path | Use |
 | --- | --- | --- |
-| **Agent skill** | [`grit skill`](../skill/) | A `SKILL.md` for coding agents, printed by the installed binary: `grit skill > .agents/skills/grit/SKILL.md`. |
+| **Agent skill** | [`grit skill`](../skill/) | A `SKILL.md` for coding agents, printed by the installed binary: `grit skill > .agents/skills/grit/SKILL.md`. Includes CI-tested **Recipes** (precise commit, merge conflicts, rebase + lease push, fetch PR, shallow clone) and links to [CLI conventions](../cli-conventions/). |
 | **llms.txt** | [grit-scm.com/llms.txt](https://grit-scm.com/llms.txt) | Curated index of every docs page (llmstxt.org format). |
 | **llms-full.txt** | [grit-scm.com/llms-full.txt](https://grit-scm.com/llms-full.txt) | Full text of all docs Markdown twins in site order. |
 | **Markdown twin** | Same URL as HTML but `index.md` instead of `index.html` (e.g. [status/index.md](https://grit-scm.com/docs/status/index.md)) | One page per command or guide; linked from HTML as "Markdown". |

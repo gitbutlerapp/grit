@@ -13,7 +13,7 @@ grit skill
 
 ## Description
 
-Prints a `SKILL.md` file for coding agents that explains how to use `grit`: the JSON output contract, the everyday commands, how `grit commit` differs from `git commit`, how to stay non-interactive, and what to do with `git` instead. It uses the [Agent Skills](https://agentskills.io) format, with `name` and `description` front matter, so agents that load skills pick it up when a task involves version control.
+Prints a `SKILL.md` file for coding agents that explains how to use `grit`: the JSON output contract, [CLI conventions](../cli-conventions/) and [exit codes](../exit-codes/), everyday commands, copy-paste **Recipes** (CI-tested command sequences), how `grit commit` differs from `git commit`, how to stay non-interactive, and what to do with `git` instead. It uses the [Agent Skills](https://agentskills.io) format, with `name` and `description` front matter, so agents that load skills pick it up when a task involves version control.
 
 The skill is built into the binary and names the version that printed it, so regenerate it after [`grit update`](../update/) to keep it current.
 

@@ -60,6 +60,7 @@ pub fn run() -> Result<SkillOutcome> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashSet;
 
     #[test]
     fn skill_has_front_matter_and_version() {
@@ -117,5 +118,153 @@ mod tests {
             missing.is_empty(),
             "unknown commands in skill.md: {missing:?}"
         );
+    }
+
+    /// Every flag the skill documents on a grit command path must exist on that clap command.
+    #[test]
+    fn skill_mentions_only_real_flags() {
+        use clap::CommandFactory;
+
+        let root = with_cli_root_for_tests(crate::cli_command::build_cli_command);
+        let mut missing = Vec::new();
+        for invocation in skill_grit_invocations(SKILL) {
+            if invocation.contains('|') || invocation.contains('<') || invocation.contains('>') {
+                continue;
+            }
+            let Some((path, args)) = parse_skill_invocation(&root, &invocation) else {
+                continue;
+            };
+            let Some(cmd) = resolve_command_path(&root, &path) else {
+                missing.push(format!("{invocation} (unknown path {path:?})"));
+                continue;
+            };
+            let allowed = allowed_flags(&root, cmd);
+            for flag in args {
+                if !allowed.contains(&flag) {
+                    missing.push(format!("{invocation} (unknown flag {flag})"));
+                }
+            }
+        }
+        assert!(
+            missing.is_empty(),
+            "unknown flags in skill.md:\n{missing:#?}"
+        );
+    }
+
+    fn with_cli_root_for_tests(
+        build: impl FnOnce() -> clap::Command + Send + 'static,
+    ) -> clap::Command {
+        const STACK: usize = 16 * 1024 * 1024;
+        std::thread::Builder::new()
+            .stack_size(STACK)
+            .spawn(move || build())
+            .expect("spawn cli root builder")
+            .join()
+            .expect("join cli root builder")
+    }
+
+    fn skill_grit_invocations(skill: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        for (i, _) in skill.match_indices("`grit ") {
+            let rest = &skill[i + 1..];
+            let end = rest.find('`').unwrap_or(rest.len());
+            let mut s = rest[..end].to_owned();
+            while s.ends_with('*') || s.ends_with(')') || s.ends_with(',') {
+                s.pop();
+            }
+            out.push(s);
+        }
+        for line in skill.lines() {
+            let trimmed = line.trim();
+            if let Some(rest) = trimmed.strip_prefix("$ grit ") {
+                out.push(format!("grit {rest}"));
+            }
+        }
+        out
+    }
+
+    fn parse_skill_invocation(
+        root: &clap::Command,
+        line: &str,
+    ) -> Option<(Vec<String>, Vec<String>)> {
+        let tokens = shell_words::split(line).ok()?;
+        if tokens.first()?.as_str() != "grit" {
+            return None;
+        }
+        let mut rest = tokens.into_iter().skip(1).peekable();
+        let mut path = Vec::new();
+        let mut cmd = root;
+        while let Some(tok) = rest.peek() {
+            if tok.starts_with('-') || tok == "--" {
+                break;
+            }
+            let Some(sub) = cmd.get_subcommands().find(|c| {
+                c.get_name() == tok.as_str() || c.get_all_aliases().any(|a| a == tok.as_str())
+            }) else {
+                break;
+            };
+            path.push(sub.get_name().to_owned());
+            cmd = sub;
+            rest.next();
+        }
+        let mut flags = Vec::new();
+        let mut after_paths = false;
+        for tok in rest {
+            if tok == "--" {
+                after_paths = true;
+                continue;
+            }
+            if after_paths || !tok.starts_with('-') {
+                continue;
+            }
+            if tok.starts_with("--") {
+                let (name, _) = tok.split_once('=').unwrap_or((&tok, ""));
+                flags.push(name.to_owned());
+            } else {
+                for ch in tok.chars().skip(1) {
+                    flags.push(format!("-{ch}"));
+                }
+            }
+        }
+        Some((path, flags))
+    }
+
+    fn resolve_command_path<'a>(
+        root: &'a clap::Command,
+        path: &[String],
+    ) -> Option<&'a clap::Command> {
+        let mut cmd = root;
+        for segment in path {
+            cmd = cmd
+                .get_subcommands()
+                .find(|c| c.get_name() == segment.as_str())?;
+        }
+        Some(cmd)
+    }
+
+    fn allowed_flags(root: &clap::Command, leaf: &clap::Command) -> HashSet<String> {
+        let mut out = HashSet::new();
+        collect_flags(root, &mut out);
+        collect_flags(leaf, &mut out);
+        out
+    }
+
+    fn collect_flags(cmd: &clap::Command, out: &mut HashSet<String>) {
+        for arg in cmd.get_arguments() {
+            if arg.is_hide_set() {
+                continue;
+            }
+            if let Some(s) = arg.get_short() {
+                out.insert(format!("-{s}"));
+            }
+            if let Some(l) = arg.get_long() {
+                out.insert(format!("--{l}"));
+            }
+            if let Some(aliases) = arg.get_aliases() {
+                for alias in aliases {
+                    out.insert(format!("--{alias}"));
+                }
+            }
+        }
     }
 }
