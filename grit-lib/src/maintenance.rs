@@ -81,7 +81,8 @@ pub struct RepackOptions {
     pub keep_unreachable: bool,
     /// Worker threads for pack indexing (`None` reads `pack.threads` / CPU count).
     pub threads: Option<usize>,
-    /// Override pack-objects settings; `None` uses [`PackBuildOptions::for_local_copy`].
+    /// Override pack-objects settings; `None` picks [`PackBuildOptions::for_repack_rewrite`] when
+    /// consolidating existing packs and [`PackBuildOptions::for_local_copy`] for loose-only builds.
     pub pack_build: Option<PackBuildOptions>,
     /// Config/environment for ingest and pack threads (defaults to repo config).
     pub merged_config: Option<ConfigSet>,
@@ -748,19 +749,19 @@ fn repack_detail(repo: &Repository, opts: &RepackOptions) -> Result<RepackDetail
         .merged_config
         .clone()
         .or_else(|| repo.config().ok().map(|c| (*c).clone()));
-    let pack_opts = opts.pack_build.unwrap_or_else(|| {
-        if opts.incremental {
+    let mut pack_opts = opts.pack_build.unwrap_or_else(|| {
+        if opts.incremental || packs_before == 0 {
             PackBuildOptions::for_local_copy(cfg.as_ref())
-        } else if packs_before > 0 && loose_before == 0 && !opts.force_recompress {
-            // Repack consolidated on-disk pack(s) with nothing loose: reuse pack bytes
-            // (Git `--window=0`), not a full delta search over every stored object.
-            PackBuildOptions::for_repack_rewrite(cfg.as_ref())
+        } else if opts.force_recompress {
+            PackBuildOptions::for_local_copy(cfg.as_ref())
         } else {
-            // Loose objects and/or forced full recompression: delta consolidation like Git
-            // `repack -adf` on loose or `-f` on existing packs.
-            PackBuildOptions::for_local_copy(cfg.as_ref())
+            // Existing packs: reuse on-disk deltas (Git repack -ad without -f).
+            PackBuildOptions::for_repack_rewrite(cfg.as_ref())
         }
     });
+    if !opts.incremental && packs_before > 0 && loose_before == 0 {
+        pack_opts.stream_verbatim_single_pack = true;
+    }
 
     let run_incremental = opts.incremental;
 

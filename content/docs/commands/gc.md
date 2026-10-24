@@ -26,7 +26,7 @@ Bare **`grit gc`** runs, in order:
 
 1. **pack-refs** — merge loose refs into `packed-refs` (or compact reftable).
 2. **reflog-expire** — apply `gc.reflogExpire*` rules using the current time.
-3. **repack** — consolidate reachable and retained unreachable objects into pack files, removing redundant loose objects and merging multiple packs when present. **Skips** rebuilding when the repository already has a single pack and no loose objects (typical after clone), unless repack side effects are requested (for example `repack.writeBitmaps`). When repack runs, existing on-disk deltas are reused for pack-only repositories unless loose objects need new deltas. Writes a `.bitmap` when `repack.writeBitmaps` is true or the repository is bare. Explicit [`grit repack`](repack.md) does not use this skip (`auto_skip` stays false).
+3. **repack** — consolidate reachable and retained unreachable objects into pack files, removing redundant loose objects and merging multiple packs when present. **Skips** rebuilding when Git would (`gc.auto` loose count and `gc.autoPackLimit`, typically a single pack with no loose objects after clone), unless repack side effects are requested (for example `repack.writeBitmaps`). When repack runs on existing packs, grit reuses on-disk pack bytes and deltas (window `0`) instead of a full delta search. Writes a `.bitmap` when `repack.writeBitmaps` is true or the repository is bare. Explicit [`grit repack`](repack.md) always runs a rewrite (`auto_skip` stays false).
 4. **prune** — delete unreachable loose objects older than `gc.pruneExpire` (default `2.weeks.ago`).
 5. **commit-graph** — write `objects/info/commit-graph` with changed-path Bloom filters.
 

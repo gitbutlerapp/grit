@@ -1238,6 +1238,60 @@ fn gc_with_write_bitmaps_on_single_pack_writes_bitmap_like_git() {
 }
 
 #[test]
+fn repack_auto_skip_on_single_pack_with_no_loose() {
+    let dir = TempDir::new().expect("tempdir");
+    git(dir.path(), &["init", "-b", "main"]);
+    git(dir.path(), &["commit", "--allow-empty", "-m", "c1"]);
+    git(dir.path(), &["repack", "-a", "-d"]);
+    let grit_copy = TempDir::new().expect("grit");
+    duplicate_repo_tree(dir.path(), grit_copy.path());
+    let repo =
+        Repository::discover(Some(grit_copy.path()), &RepositoryOptions::empty()).expect("open");
+    let mut opts = RepackOptions::default();
+    opts.auto_skip = true;
+    let stats = repack_all(&repo, &opts).expect("repack");
+    assert!(
+        stats.objects_packed.is_none(),
+        "auto_skip repack must not rewrite a single pack with no loose objects"
+    );
+    assert_eq!(git_pack_count(&grit_copy.path().join(".git")), 1);
+}
+
+#[test]
+fn gc_full_run_skips_repack_on_single_pack_with_no_loose() {
+    let dir = TempDir::new().expect("tempdir");
+    git(dir.path(), &["init", "-b", "main"]);
+    git(dir.path(), &["commit", "--allow-empty", "-m", "c1"]);
+    git(dir.path(), &["repack", "-a", "-d"]);
+    let grit_copy = TempDir::new().expect("grit");
+    duplicate_repo_tree(dir.path(), grit_copy.path());
+    let pack_dir = grit_copy.path().join(".git/objects/pack");
+    let pack_mtime_before = std::fs::read_dir(&pack_dir)
+        .expect("pack dir")
+        .filter_map(|e| e.ok())
+        .find(|e| e.path().extension().is_some_and(|x| x == "pack"))
+        .and_then(|e| e.metadata().ok().map(|m| m.modified().ok()))
+        .flatten()
+        .expect("pack mtime");
+    let repo =
+        Repository::discover(Some(grit_copy.path()), &RepositoryOptions::empty()).expect("open");
+    let stats = gc(&repo, &GcOptions::full_run(false, 1_700_000_000)).expect("grit gc");
+    assert!(
+        stats.repack.objects_packed.is_none(),
+        "single-pack gc with auto_skip must not rewrite the pack"
+    );
+    let pack_mtime_after = std::fs::read_dir(&pack_dir)
+        .expect("pack dir")
+        .filter_map(|e| e.ok())
+        .find(|e| e.path().extension().is_some_and(|x| x == "pack"))
+        .and_then(|e| e.metadata().ok().map(|m| m.modified().ok()))
+        .flatten()
+        .expect("pack mtime");
+    assert_eq!(pack_mtime_before, pack_mtime_after);
+    git_fsck(grit_copy.path(), true);
+}
+
+#[test]
 fn gc_on_single_pack_with_no_loose_matches_git_gc_loose_count() {
     let dir = TempDir::new().expect("tempdir");
     git(dir.path(), &["init", "-b", "main"]);
