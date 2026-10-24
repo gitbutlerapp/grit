@@ -5,16 +5,18 @@
 //! must be reported as [`HookError::Spawn`] rather than a made-up exit status.
 
 use grit_lib::command_runner::hooks::{
-    resolve_hooks_dir, run_commit_hook_checked, run_hook_opts, CommitHookEnv, HookError, HookName,
-    HookResult, RunHookOptions,
+    resolve_hooks_dir, run_commit_hook_checked, run_hook_opts, run_post_checkout, run_post_merge,
+    run_post_rewrite, CommitHookEnv, HookError, HookName, HookResult, RewriteKind, RunHookOptions,
 };
 use grit_lib::command_runner::{
     CommandExit, CommandRunner, CommandSpec, RunningCommand, ShellInvocation,
 };
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::diagnostics::{CollectingDiagnostics, Warning};
+use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::add::{stage, StageOptions};
 use grit_lib::porcelain::commit::{create_commit, CommitOutcome, CommitRequest};
+use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_lib::state::resolve_head;
@@ -388,5 +390,109 @@ fn commit_with_unstartable_post_commit_hook_succeeds_with_warning() {
         }
         _ => false,
     });
+    assert!(warned, "warnings: {:?}", diagnostics.warnings());
+}
+
+fn commit_with_git(dir: &Path, path: &str, contents: &str) -> ObjectId {
+    std::fs::write(dir.join(path), contents).expect("write");
+    for args in [
+        &["add", path][..],
+        &[
+            "-c",
+            "user.name=T",
+            "-c",
+            "user.email=t@t",
+            "-c",
+            "core.hooksPath=/dev/null",
+            "commit",
+            "-qm",
+            path,
+        ][..],
+    ] {
+        let status = Command::new("git")
+            .args(args)
+            .current_dir(dir)
+            .status()
+            .expect("git");
+        assert!(status.success(), "git {args:?}");
+    }
+    let out = Command::new("git")
+        .args(["rev-parse", "HEAD"])
+        .current_dir(dir)
+        .output()
+        .expect("rev-parse");
+    ObjectId::from_hex(String::from_utf8_lossy(&out.stdout).trim()).expect("oid")
+}
+
+#[test]
+fn post_operation_hooks_receive_git_arguments() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    git_init(tmp.path());
+    let old = commit_with_git(tmp.path(), "a.txt", "a\n");
+    let new = commit_with_git(tmp.path(), "b.txt", "b\n");
+    for hook in ["post-checkout", "post-merge", "post-rewrite"] {
+        write_hook(tmp.path(), hook, "exit 0\n");
+    }
+    let runner = FailingRunner::failing_with([]);
+    let repo = open(tmp.path(), Environment::empty(), Some(runner.clone()));
+
+    assert!(run_post_checkout(&repo, Some(old), new, true));
+    assert!(run_post_checkout(&repo, None, new, false));
+    assert!(run_post_merge(&repo, true));
+    assert!(run_post_rewrite(&repo, RewriteKind::Amend, &[(old, new)]));
+    assert!(
+        !run_post_rewrite(&repo, RewriteKind::Rebase, &[]),
+        "an empty rewrite list runs nothing"
+    );
+
+    let args: Vec<Vec<OsString>> = runner.specs().into_iter().map(|s| s.args).collect();
+    let os = |items: &[&str]| items.iter().map(OsString::from).collect::<Vec<_>>();
+    assert_eq!(
+        args,
+        vec![
+            os(&[&old.to_hex(), &new.to_hex(), "1"]),
+            os(&[&"0".repeat(40), &new.to_hex(), "0"]),
+            os(&["1"]),
+            os(&["amend"]),
+        ]
+    );
+}
+
+#[test]
+fn switch_with_unstartable_post_checkout_hook_succeeds_with_warning() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    git_init(tmp.path());
+    let first = commit_with_git(tmp.path(), "a.txt", "a\n");
+    commit_with_git(tmp.path(), "b.txt", "b\n");
+    write_hook(tmp.path(), "post-checkout", "exit 0\n");
+    let runner = FailingRunner::failing_with([io::Error::from(io::ErrorKind::NotFound)]);
+    let diagnostics = Arc::new(CollectingDiagnostics::new());
+    let opts = RepositoryOptions::with_environment(Environment::empty())
+        .with_work_tree(tmp.path())
+        .with_command_runner(runner.clone())
+        .with_diagnostics(diagnostics.clone());
+    let repo = Repository::open(&tmp.path().join(".git"), &opts).expect("open repo");
+
+    let outcome = switch_repository(
+        &repo,
+        &SwitchOptions {
+            mode: SwitchMode::Detached {
+                commit: first,
+                reflog_to_label: "HEAD~1".into(),
+            },
+            dry_run: false,
+            hooks: grit_lib::PostOperationHooks::Run,
+        },
+    )
+    .expect("post-checkout runs after the switch and must not fail it");
+    assert!(outcome.hooks_run.is_empty());
+    assert_eq!(runner.specs().len(), 1, "post-checkout was attempted");
+    assert_eq!(
+        resolve_head(repo.git_dir()).expect("head").oid(),
+        Some(&first)
+    );
+    let warned = diagnostics.warnings().into_iter().any(
+        |w| matches!(w, Warning::HookNotRun { hook_name, .. } if hook_name == "post-checkout"),
+    );
     assert!(warned, "warnings: {:?}", diagnostics.warnings());
 }

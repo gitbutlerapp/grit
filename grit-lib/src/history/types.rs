@@ -327,6 +327,27 @@ mod tests {
     }
 
     #[test]
+    fn rewritten_pairs_skip_dropped_unchanged_and_reused_rows() {
+        let mut plan = make_plan(
+            &[
+                (1, Some(11)),
+                (2, None),
+                (3, Some(3)),
+                (4, Some(14)),
+                (5, Some(15)),
+            ],
+            &[],
+            None,
+            false,
+        );
+        plan.commits[4].reused = true;
+        assert_eq!(
+            plan.rewritten_pairs(),
+            vec![(oid(1), oid(11)), (oid(4), oid(14))]
+        );
+    }
+
+    #[test]
     fn head_change_is_none_when_head_commit_stays() {
         let plan = make_plan(&[(1, Some(11))], &[(1, 11)], Some(1), false);
         assert_eq!(plan.head_change(), None);

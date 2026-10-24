@@ -1243,6 +1243,35 @@ mod tests {
     }
 
     #[test]
+    fn post_rewrite_stdin_is_one_old_new_line_per_pair() {
+        let a = ObjectId::from_hex("1111111111111111111111111111111111111111").expect("a");
+        let b = ObjectId::from_hex("2222222222222222222222222222222222222222").expect("b");
+        assert_eq!(post_rewrite_stdin(&[]), b"");
+        assert_eq!(
+            post_rewrite_stdin(&[(a, b), (b, a)]),
+            format!(
+                "{} {}\n{} {}\n",
+                a.to_hex(),
+                b.to_hex(),
+                b.to_hex(),
+                a.to_hex()
+            )
+            .into_bytes()
+        );
+    }
+
+    #[test]
+    fn post_operation_names_and_flags() {
+        assert_eq!(HookName::PostCheckout.as_str(), "post-checkout");
+        assert_eq!(HookName::PostMerge.as_str(), "post-merge");
+        assert_eq!(HookName::PostRewrite.as_str(), "post-rewrite");
+        assert_eq!(RewriteKind::Amend.as_str(), "amend");
+        assert_eq!(RewriteKind::Rebase.as_str(), "rebase");
+        assert!(PostOperationHooks::default().enabled());
+        assert!(!PostOperationHooks::Skip.enabled());
+    }
+
+    #[test]
     fn shebang_interpreter_takes_the_interpreter_basename() {
         assert_eq!(
             shebang_interpreter(b"#!/bin/sh\nexit 0\n").as_deref(),
