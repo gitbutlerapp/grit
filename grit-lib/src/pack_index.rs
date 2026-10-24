@@ -386,12 +386,8 @@ impl PackIndex {
         })
     }
 
-    /// Index row position for a pack byte offset via a sorted offset table.
-    ///
-    /// Builds and caches `(offset, position)` pairs on first use. Callers that
-    /// have a `.rev` sidecar should try that first (see `pack::find_position_by_pack_offset`).
-    #[must_use]
     /// Copy with promisor/cruft sidecar flags refreshed from disk markers.
+    #[must_use]
     pub(crate) fn with_sidecar_flags(&self, is_promisor: bool, is_cruft: bool) -> Self {
         let mut next = self.clone();
         next.is_promisor = is_promisor;
@@ -399,7 +395,14 @@ impl PackIndex {
         next
     }
 
-    /// `find_position_by_offset_sorted` method.
+    /// Index row position for a pack byte offset via a sorted offset table.
+    ///
+    /// Builds and caches `(offset, position)` pairs on first use, so later calls
+    /// cost one binary search.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the index has a malformed large-offset entry.
     pub fn find_position_by_offset_sorted(&self, offset: u64) -> Result<Option<usize>> {
         self.with_sorted_offsets(|pairs| {
             pairs
