@@ -18,8 +18,9 @@ use std::io::Write;
 use crate::commands::auth;
 use crate::context;
 use crate::markdown;
-use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
-use grit_lib::remote::fetch::NoProgress;
+use crate::output::{outln, HumanRender, MarkdownRender, OutputMode, RenderContext};
+use crate::progress::TerminalProgress;
+use crate::quiet_args::QuietArgs;
 
 /// Result of `grit push`: the per-ref outcomes for the remote.
 #[derive(Serialize, JsonSchema)]
@@ -170,6 +171,8 @@ pub fn run(
     atomic: bool,
     push_options: &[String],
     follow_tags: bool,
+    quiet: &QuietArgs,
+    mode: OutputMode,
 ) -> Result<PushOutcome> {
     let repo = context::discover()?;
     let config = ConfigSet::load(&crate::context::environment(), Some(repo.git_dir()), true)
@@ -205,14 +208,31 @@ pub fn run(
         push_options,
         remote_ref_tips: plan_ctx.remote_tips,
     };
-    let report = match push_once(&repo, &config, &plan.remote, &plan.specs, &wire, &factory) {
+    let mut progress = quiet.progress(mode);
+    let report = match push_once(
+        &repo,
+        &config,
+        &plan.remote,
+        &plan.specs,
+        &wire,
+        &factory,
+        &mut progress,
+    ) {
         Ok(report) => report,
         Err(err) => {
             let url = config
                 .get(&format!("remote.{}.url", plan.remote))
                 .unwrap_or_default();
             if auth::offer_reauth(&err, &url)? {
-                push_once(&repo, &config, &plan.remote, &plan.specs, &wire, &factory)?
+                push_once(
+                    &repo,
+                    &config,
+                    &plan.remote,
+                    &plan.specs,
+                    &wire,
+                    &factory,
+                    &mut progress,
+                )?
             } else {
                 return Err(err);
             }
@@ -293,6 +313,7 @@ fn push_once(
     specs: &[grit_lib::remote::transfer::PushRefSpec],
     wire: &PushWireOptions<'_>,
     factory: &DefaultHttpClientFactory,
+    progress: &mut TerminalProgress,
 ) -> Result<grit_lib::remote::transfer::PushOutcome> {
     open_push_destination(config, remote_name)
         .map_err(|e| anyhow::Error::msg(e.to_string()))?
@@ -307,7 +328,7 @@ fn push_once(
                 tracking_remote: Some(remote_name.to_owned()),
                 ..Default::default()
             },
-            &mut NoProgress,
+            progress,
             Some(factory),
         )
         .map_err(|e| anyhow::Error::msg(e.to_string()))

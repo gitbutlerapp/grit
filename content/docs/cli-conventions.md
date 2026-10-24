@@ -72,4 +72,4 @@ Adding a command requires a new row in `COMMAND_CONTRACTS` inside `grit-cli/src/
 
 - [Scripting with grit](../scripting/) — `--json`, exit codes, and stdout discipline.
 - [Agent guide](../agents/) — non-interactive use and schema links.
-- [Global options](../global-options/) — `--json`, `--markdown`, `--filter`, and `--threads`.
+- [Global options](../global-options/) — `--json`, `--markdown`, `--filter`, `--threads`, and the repository options `-C`, `-c`, `--git-dir`, `--work-tree`.

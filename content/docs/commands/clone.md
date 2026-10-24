@@ -8,7 +8,7 @@ order: 2
 ## Synopsis
 
 ```text
-grit clone <url> [<dir>] [--depth <N>] [-b|--branch <NAME>] [--blobs <none|SIZE>] [--shallow] [--single-branch | --no-single-branch] [--no-tags] [-o <name>] [--bare] [--no-checkout]
+grit clone <url> [<dir>] [--depth <N>] [-b|--branch <NAME>] [--blobs <none|SIZE>] [--shallow] [--single-branch | --no-single-branch] [--no-tags] [-o <name>] [--bare] [--no-checkout] [-q|--quiet]
 ```
 
 ## Description
@@ -74,6 +74,7 @@ Working-tree materialization after fetch uses the same parallel checkout path as
 | `--blobs <none\|SIZE>` | Partial clone: omit all blobs (`none`) or blobs at/above `<SIZE>` (`1k`, `512`, …). |
 | `--bare` | Bare repository; no working tree (`git clone --bare`). |
 | `--no-checkout` | Fetch refs but do not check out files (`git clone --no-checkout`). |
+| `-q`, `--quiet` | No progress, no `Cloning into` line and no human summary. Warnings (such as an empty remote) still go to stderr; `--json` and `--markdown` output is unchanged. |
 
 ## Examples
 

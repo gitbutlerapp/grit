@@ -9,7 +9,6 @@ use crate::commands::fetch::map_remote_error;
 use crate::commands::fetch_args::FetchArgs;
 use crate::context;
 use crate::output::OutputMode;
-use crate::progress::TerminalProgress;
 use anyhow::{Context, Result};
 use grit_lib::config::ConfigSet;
 use grit_lib::porcelain::pull::{pull, PullError, PullMode, PullOptions};
@@ -72,12 +71,7 @@ pub fn run(args: &PullRunArgs, mode: OutputMode) -> Result<PullOutcome> {
     };
     let remote_name = invocation.remote;
     let factory = DefaultHttpClientFactory;
-    let progress = if args.fetch.quiet {
-        TerminalProgress::quiet(mode)
-    } else {
-        TerminalProgress::new(mode)
-    };
-    let mut progress = progress;
+    let mut progress = args.fetch.quiet.progress(mode);
     let lib = match pull(&repo, &options, &mut progress, Some(&factory)) {
         Ok(outcome) => outcome,
         Err(PullError::Remote(remote_err)) => {

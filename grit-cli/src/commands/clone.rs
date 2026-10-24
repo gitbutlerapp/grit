@@ -139,6 +139,7 @@ pub struct CloneRunOptions {
     pub bare: bool,
     pub no_checkout: bool,
     pub blobs: Option<String>,
+    pub quiet: crate::quiet_args::QuietArgs,
     pub mode: OutputMode,
 }
 
@@ -636,7 +637,7 @@ pub fn run(mut opts: CloneRunOptions) -> Result<CloneOutcome> {
     let started = Instant::now();
 
     // A clone always ends with a checkout, so the overall bar can size it.
-    let mut term_progress = TerminalProgress::new(mode).with_overall(true);
+    let mut term_progress = opts.quiet.progress(mode).with_overall(true);
     if term_progress.is_drawing() {
         let color = term_progress.uses_color();
         eprintln!(
@@ -646,7 +647,7 @@ pub fn run(mut opts: CloneRunOptions) -> Result<CloneOutcome> {
             paint(color, DIM, "→"),
             paint(color, BOLD, &dir)
         );
-    } else {
+    } else if !opts.quiet.quiet {
         progress(mode, &format!("Cloning into '{dir}' ..."));
     }
     match clone_into(

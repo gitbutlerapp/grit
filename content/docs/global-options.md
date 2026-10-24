@@ -16,6 +16,30 @@ These options work on any command (and on `grit` itself when you pass no subcomm
 
 Running `grit` with no command is the same as [`grit status`](../status/).
 
+## Repository and config options
+
+These go **before** the command name (`grit -C repo status`, not `grit status -C repo`), as in Git, so they never collide with a command's own short flags.
+
+| Option | Description |
+| --- | --- |
+| `-C <DIR>` | Run as if `grit` was started in `<DIR>`. Repeatable: each one is relative to the previous (`-C a -C b` is `a/b`). An empty `<DIR>` (`-C ""`) changes nothing. A directory that does not exist fails with exit `1`. |
+| `-c <KEY=VALUE>` | Set a config value for this invocation only, without touching any config file. Repeatable; a later `-c` wins over an earlier one, over `GIT_CONFIG_COUNT` pairs and over every config file. A bare `<KEY>` with no `=` means `true`, and `<KEY>=` sets the empty string. An invalid key is a usage error (exit `2`). |
+| `--git-dir <PATH>` | Use this repository directory instead of discovering one. Same as `GIT_DIR`. Without `--work-tree`, the current directory is the work tree (unless the repository is bare or sets `core.worktree`). |
+| `--work-tree <PATH>` | Use this directory as the top of the work tree. Same as `GIT_WORK_TREE`. |
+
+`-C` is applied first, so a relative `--git-dir` or `--work-tree` is resolved from the new directory. The overrides are exported to everything `grit` starts, using the same `GIT_DIR`, `GIT_WORK_TREE` and `GIT_CONFIG_PARAMETERS` encoding Git uses, so hooks that run `git` see the same repository and config.
+
+```console
+$ grit -C services/api status --json --filter .branch
+"main"
+$ grit -c user.name="CI Bot" -c user.email=ci@example.com commit -m "Update lockfile"
+[main 3f9c2ab] Update lockfile
+1 change committed
+$ grit --git-dir /srv/site.git --work-tree /var/www/site status
+```
+
+Library embedders get the same behavior from [`Environment::with_git_dir`](rustdoc:grit_lib::config::environment::Environment), [`Environment::with_work_tree`](rustdoc:grit_lib::config::environment::Environment) and [`Environment::push_config_override`](rustdoc:grit_lib::config::environment::Environment) with a parsed [`ConfigOverride`](rustdoc:grit_lib::config::environment::ConfigOverride).
+
 ## Environment variables
 
 The `grit` CLI snapshots the process environment into [`Environment`](../library/repository/) when opening a repository. Library embedders should construct an [`Environment`](../library/repository/) explicitly instead of relying on these variables.

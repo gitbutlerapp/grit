@@ -33,9 +33,8 @@ pub struct FetchArgs {
     /// Report ref updates without writing refs or objects.
     #[arg(long = "dry-run")]
     pub dry_run: bool,
-    /// Suppress progress and human output.
-    #[arg(short = 'q', long = "quiet")]
-    pub quiet: bool,
+    #[command(flatten)]
+    pub quiet: crate::quiet_args::QuietArgs,
     /// Fetch only the recent history of each branch (same as `git fetch --depth`).
     #[arg(long = "depth", value_name = "N", conflicts_with_all = ["deepen", "unshallow"])]
     pub depth: Option<u32>,

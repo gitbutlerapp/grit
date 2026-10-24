@@ -18,6 +18,7 @@ grit push -u [--set-upstream]
 grit push --atomic
 grit push -o <option> [--push-option <option>]
 grit push --follow-tags
+grit push -q [--quiet]
 grit push --remote <name>   # hidden alias for one release
 ```
 
@@ -43,6 +44,8 @@ With `--delete`, deletes remote branches or tags (short names map like Git).
 
 `--follow-tags` pushes annotated tags that point to commits reachable from the refs being pushed (lightweight tags and unreachable annotated tags are skipped). The config key `push.followTags` enables the same behavior by default.
 
+On an interactive terminal (human output), messages the remote sends while it processes the push, such as hook output, are shown on stderr as `remote: …` lines. `-q` / `--quiet` hides them and the human summary, so a successful push prints nothing; a rejected push is still reported and exits `1`. `--json` and `--markdown` output is unchanged.
+
 For GitHub over HTTPS, if a push fails because you aren't signed in, `grit` offers to run [`grit auth`](../auth/) and then tries again.
 
 ## Options
@@ -61,6 +64,7 @@ For GitHub over HTTPS, if a push fails because you aren't signed in, `grit` offe
 | `--atomic` | All ref updates succeed or none are applied. |
 | `-o`, `--push-option` | Server-side push option (repeatable; smart HTTP only). |
 | `--follow-tags` | Push annotated tags reachable from the commits being pushed. |
+| `-q`, `--quiet` | Suppress remote messages and the human summary of a successful push. |
 | `--remote` | Hidden alias for the remote name (prefer the positional `<remote>`). |
 
 ## Examples

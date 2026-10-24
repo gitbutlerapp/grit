@@ -24,6 +24,7 @@ mod diff_format;
 mod diff_render;
 mod error_kind;
 mod exit_status;
+mod global_args;
 mod grit_trace;
 mod json_error;
 mod json_filter;
@@ -39,6 +40,7 @@ mod output;
 mod patch_selection;
 mod pathspec_args;
 mod progress;
+mod quiet_args;
 mod ref_name_messages;
 mod rev_select;
 mod revision_errors;
@@ -89,6 +91,8 @@ pub(crate) struct Cli {
     /// Worker threads for parallel library work (`0` = auto, `1` = serial).
     #[arg(long, global = true, value_name = "N")]
     threads: Option<usize>,
+    #[command(flatten)]
+    repo: global_args::GlobalRepoArgs,
     #[command(subcommand)]
     command: Option<Command>,
 }
@@ -773,6 +777,8 @@ enum Command {
         /// Do not check out the default branch (`git clone --no-checkout`).
         #[arg(long = "no-checkout")]
         no_checkout: bool,
+        #[command(flatten)]
+        quiet: quiet_args::QuietArgs,
     },
     /// List remotes, or add one.
     Remote {
@@ -1644,6 +1650,8 @@ enum Command {
         /// Push annotated tags reachable from the commits being pushed.
         #[arg(long = "follow-tags")]
         follow_tags: bool,
+        #[command(flatten)]
+        quiet: quiet_args::QuietArgs,
         /// Remote name (when not using `--remote`).
         #[arg(value_name = "REMOTE")]
         remote_name: Option<String>,
@@ -2011,7 +2019,7 @@ fn tag_verify_subarg_takes_value(arg: &str) -> bool {
 
 /// Route verify tag names to `verify_names` by inserting `--` before bare arguments.
 fn normalize_tag_verify_argv(mut args: Vec<String>) -> Vec<String> {
-    let Some(tag_idx) = args.iter().position(|a| a == "tag") else {
+    let Some(tag_idx) = diff_args::subcommand_index(&args).filter(|&i| args[i] == "tag") else {
         return args;
     };
     let sub = &args[tag_idx + 1..];
@@ -2153,6 +2161,10 @@ fn run() -> Result<ExitStatus, anyhow::Error> {
         return Ok(ExitStatus::Failure);
     }
     if let Err(err) = reject_non_human_plumbing(&cli, &opts) {
+        output::emit_error(&err, &opts);
+        return Ok(ExitStatus::Failure);
+    }
+    if let Err(err) = cli.repo.apply() {
         output::emit_error(&err, &opts);
         return Ok(ExitStatus::Failure);
     }
@@ -2334,6 +2346,7 @@ fn dispatch(
             blobs,
             bare,
             no_checkout,
+            quiet,
         } => {
             let single_branch = if single_branch {
                 Some(true)
@@ -2342,24 +2355,26 @@ fn dispatch(
             } else {
                 None
             };
-            emit_success(
-                &commands::clone::run(commands::clone::CloneRunOptions {
-                    url,
-                    dir,
-                    depth,
-                    branch,
-                    shallow,
-                    single_branch,
-                    no_tags,
-                    origin,
-                    blobs,
-                    bare,
-                    no_checkout,
-                    mode: opts.mode,
-                })?,
-                opts,
-                ctx,
-            )
+            let show_outcome = quiet.shows_outcome(opts.mode);
+            let outcome = commands::clone::run(commands::clone::CloneRunOptions {
+                url,
+                dir,
+                depth,
+                branch,
+                shallow,
+                single_branch,
+                no_tags,
+                origin,
+                blobs,
+                bare,
+                no_checkout,
+                quiet,
+                mode: opts.mode,
+            })?;
+            if show_outcome {
+                emit_success(&outcome, opts, ctx)?;
+            }
+            Ok(ExitStatus::Success)
         }
         Command::Remote { verbose, action } => match action {
             None => emit_success(
@@ -3594,7 +3609,7 @@ fn dispatch(
         }
         Command::Fetch { fetch } => {
             let outcome = commands::fetch::run(&fetch, opts.mode)?;
-            if !(fetch.quiet && opts.mode == OutputMode::Human) {
+            if fetch.quiet.shows_outcome(opts.mode) {
                 match &outcome {
                     commands::fetch::FetchRunOutcome::One(one) => {
                         emit_success(one, opts, ctx)?;
@@ -3623,7 +3638,7 @@ fn dispatch(
                 check,
             };
             let outcome = commands::pull::run(&args, opts.mode)?;
-            if !(args.fetch.quiet && opts.mode == OutputMode::Human) {
+            if args.fetch.quiet.shows_outcome(opts.mode) {
                 emit_success(&outcome, opts, ctx)?;
             }
             Ok(ExitStatus::from_pull(&outcome))
@@ -3659,6 +3674,7 @@ fn dispatch(
             atomic,
             push_option,
             follow_tags,
+            quiet,
             remote_name,
             refspecs,
         } => {
@@ -3679,8 +3695,12 @@ fn dispatch(
                 atomic,
                 &push_option,
                 follow_tags,
+                &quiet,
+                opts.mode,
             )?;
-            emit_success(&outcome, opts, ctx)?;
+            if outcome.rejected || quiet.shows_outcome(opts.mode) {
+                emit_success(&outcome, opts, ctx)?;
+            }
             // The outcome (per-ref results) is reported in both modes; a rejected
             // push is still a failure, so mirror Git and exit non-zero.
             Ok(ExitStatus::from_push_rejected(outcome.rejected))
@@ -4834,5 +4854,61 @@ The keys are `initialized`, `path`, `bare`, `branch`, `object_format`, and optio
                 "missing"
             ]
         );
+    }
+
+    #[test]
+    fn normalize_tag_verify_argv_skips_leading_repo_globals() {
+        let args: Vec<String> = [
+            "grit", "-C", "tag", "-c", "a.b=tag", "tag", "--verify", "v1",
+        ]
+        .map(String::from)
+        .to_vec();
+        assert_eq!(
+            super::normalize_tag_verify_argv(args),
+            vec!["grit", "-C", "tag", "-c", "a.b=tag", "tag", "--verify", "--", "v1"]
+        );
+    }
+
+    #[test]
+    fn repo_globals_parse_before_the_subcommand_only() {
+        crate::cli_test_stack::run(|| {
+            let cli = <super::Cli as clap::Parser>::try_parse_from([
+                "grit",
+                "-C",
+                "a",
+                "-Cb",
+                "-c",
+                "user.name=CI",
+                "-ccore.bare",
+                "--git-dir",
+                "x/.git",
+                "--work-tree=y",
+                "status",
+            ])
+            .unwrap();
+            assert_eq!(cli.repo.dirs, [PathBuf::from("a"), PathBuf::from("b")]);
+            let config: Vec<_> = cli
+                .repo
+                .config
+                .iter()
+                .map(|o| (o.key(), o.value()))
+                .collect();
+            assert_eq!(config, [("user.name", Some("CI")), ("core.bare", None)]);
+            assert_eq!(cli.repo.git_dir, Some(PathBuf::from("x/.git")));
+            assert_eq!(cli.repo.work_tree, Some(PathBuf::from("y")));
+
+            assert!(
+                <super::Cli as clap::Parser>::try_parse_from(["grit", "status", "-C", "a"])
+                    .is_err()
+            );
+            let bad = <super::Cli as clap::Parser>::try_parse_from([
+                "grit",
+                "-c",
+                "nosection=x",
+                "status",
+            ])
+            .unwrap_err();
+            assert_eq!(bad.kind(), clap::error::ErrorKind::ValueValidation);
+        });
     }
 }

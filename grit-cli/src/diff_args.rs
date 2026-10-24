@@ -103,19 +103,7 @@ pub fn normalize_diff_argv(mut args: Vec<String>) -> Vec<String> {
 }
 
 fn locate_porcelain_diff_command(args: &[String]) -> Option<usize> {
-    let mut i = 1;
-    while i < args.len() {
-        let token = args[i].as_str();
-        if is_leading_global_flag(token) {
-            i = skip_global_flag(args, i);
-            continue;
-        }
-        if matches!(token, "add" | "diff" | "show" | "log") {
-            return Some(i);
-        }
-        return None;
-    }
-    None
+    subcommand_index(args).filter(|&i| matches!(args[i].as_str(), "add" | "diff" | "show" | "log"))
 }
 
 fn rewrite_attached_unified(token: &str) -> Option<String> {
@@ -129,28 +117,45 @@ fn rewrite_attached_unified(token: &str) -> Option<String> {
     Some(format!("-U={rest}"))
 }
 
+/// Leading global flags that take the next argv word as their value.
+const VALUE_GLOBAL_FLAGS: &[&str] = &[
+    "--filter",
+    "--threads",
+    "-C",
+    "-c",
+    "--git-dir",
+    "--work-tree",
+];
+
 fn is_leading_global_flag(token: &str) -> bool {
     matches!(
         token,
-        "--json"
-            | "--markdown"
-            | "--filter"
-            | "--threads"
-            | "-v"
-            | "-V"
-            | "--version"
-            | "-h"
-            | "--help"
-    ) || token.starts_with("--filter=")
-        || token.starts_with("--threads=")
+        "--json" | "--markdown" | "-v" | "-V" | "--version" | "-h" | "--help"
+    ) || VALUE_GLOBAL_FLAGS.iter().any(|flag| {
+        token == *flag
+            || token
+                .strip_prefix(flag)
+                .is_some_and(|rest| !flag.starts_with("--") || rest.starts_with('='))
+    })
 }
 
 fn skip_global_flag(args: &[String], i: usize) -> usize {
-    let token = args[i].as_str();
-    if (token == "--filter" || token == "--threads") && i + 1 < args.len() {
+    if VALUE_GLOBAL_FLAGS.contains(&args[i].as_str()) && i + 1 < args.len() {
         return i + 2;
     }
     i + 1
+}
+
+/// Index of the subcommand word in `args` (after `argv[0]` and any leading global flags).
+pub fn subcommand_index(args: &[String]) -> Option<usize> {
+    let mut i = 1;
+    while i < args.len() {
+        if !is_leading_global_flag(&args[i]) {
+            return Some(i);
+        }
+        i = skip_global_flag(args, i);
+    }
+    None
 }
 
 fn rewrite_attached_find_renames(token: &str) -> Option<String> {
