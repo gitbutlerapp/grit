@@ -26,7 +26,7 @@ use crate::ident::{
     fsck_commit_idents, parse_signature_times, prepare_commit_author_from_parent,
     prepare_commit_identity_line,
 };
-use crate::index::Index;
+use crate::index::{Index, IndexLock};
 use crate::objects::odb::Odb;
 use crate::objects::{parse_commit, serialize_commit, CommitData, ObjectId, ObjectKind};
 use crate::pathspec::{pathspec_is_exclude, ResolvedPathspecs};
@@ -85,6 +85,10 @@ pub struct CommitAuthorInfo {
 #[derive(Debug, Clone, Default)]
 pub struct CommitRequest {
     /// Commit message body (first line becomes the subject). A trailing newline is added when missing.
+    ///
+    /// The message is also written to `.git/COMMIT_EDITMSG` for the `commit-msg` hook. The file is
+    /// read back only when that hook ran, so concurrent committers sharing the file never record
+    /// each other's message.
     pub message: String,
     /// Author identity: `Name <email>`, a bare email, or a full header line `Name <email> <unix> <±HHMM>`.
     pub author: String,
@@ -308,8 +312,10 @@ pub fn commit_with_scope(
         }
         CommitScope::Paths(paths) => commit_paths_scope(repo, req, &paths, progress),
         CommitScope::Patch { input, pathspecs } => {
-            commit_with_patch(repo, req, input, &pathspecs, progress)
-                .map_err(|e| Error::Message(e.to_string()))
+            commit_with_patch(repo, req, input, &pathspecs, progress).map_err(|e| match e {
+                CommitPatchError::Commit(err) => err,
+                other => Error::Message(other.to_string()),
+            })
         }
     }
 }
@@ -365,6 +371,7 @@ fn commit_patch_scope(
         }
     };
 
+    let head = resolve_head_for_repository(repo).map_err(CommitPatchError::Commit)?;
     let mut index = repo.load_index().map_err(CommitPatchError::Commit)?;
     if index.has_unmerged_entries() {
         return Err(Error::IndexUnmerged.into());
@@ -390,7 +397,7 @@ fn commit_patch_scope(
 
     let mut req = req.clone();
     req.assume_worktree_synced = true;
-    create_commit_with_index(repo, &mut index, &req, progress, None)
+    create_commit_with_index(repo, head, &mut index, &req, progress, None)
         .map_err(CommitPatchError::Commit)
 }
 
@@ -433,10 +440,15 @@ fn commit_paths_scope(
     }
     validate_commit_pathspecs(repo, paths)?;
 
+    // Lock before reading HEAD and the index so nothing visible (objects, ref, reflog) is written
+    // when another process holds it, and so nobody can commit or change the index under us.
+    let index_lock = (!req.dry_run)
+        .then(|| repo.begin_index_update())
+        .transpose()?;
     let head = resolve_head_for_repository(repo)?;
-    let parent_tree = match head {
+    let parent_tree = match &head {
         HeadState::Branch { oid: Some(p), .. } | HeadState::Detached { oid: p } => {
-            Some(commit_tree_oid(repo, &p)?)
+            Some(commit_tree_oid(repo, p)?)
         }
         HeadState::Branch { oid: None, .. } => None,
         HeadState::Invalid => {
@@ -466,22 +478,32 @@ fn commit_paths_scope(
     };
 
     let staged_commit = stage_on_index(repo, &mut commit_index, &stage_opts, progress)?;
-    if !req.dry_run {
-        let _staged_real = stage_on_index(repo, &mut real_index, &stage_opts, progress)?;
-    }
+    let real_index = match index_lock {
+        Some(lock) => {
+            stage_on_index(repo, &mut real_index, &stage_opts, progress)?;
+            Some(LockedIndex {
+                index: real_index,
+                lock,
+            })
+        }
+        None => None,
+    };
 
     let mut req = req.clone();
     req.assume_worktree_synced = true;
     req.skip_pre_commit_tree_match = false;
     req.staged_change_count = Some(staged_commit.total().max(1));
 
-    create_commit_with_index(
-        repo,
-        &mut commit_index,
-        &req,
-        progress,
-        Some(&mut real_index),
-    )
+    create_commit_with_index(repo, head, &mut commit_index, &req, progress, real_index)
+}
+
+/// The repository index of a partial commit, with the lock taken before the commit started.
+///
+/// It is written through the lock only after the ref moved; dropping it unwritten releases the
+/// lock and leaves the on-disk index untouched.
+struct LockedIndex {
+    index: Index,
+    lock: IndexLock,
 }
 
 fn validate_commit_pathspecs(repo: &Repository, paths: &ResolvedPathspecs) -> Result<()> {
@@ -700,8 +722,9 @@ pub fn create_commit(
     req: &CommitRequest,
     progress: &mut dyn ProgressSink,
 ) -> Result<CommitOutcome> {
+    let head = resolve_head_for_repository(repo)?;
     let mut index = repo.load_index()?;
-    create_commit_with_index(repo, &mut index, req, progress, None)
+    create_commit_with_index(repo, head, &mut index, req, progress, None)
 }
 
 /// Stage every worktree change and record a commit using a single in-memory index (issue #1064).
@@ -716,6 +739,7 @@ pub fn commit_worktree(
     req: &CommitRequest,
     progress: &mut dyn ProgressSink,
 ) -> Result<CommitOutcome> {
+    let head = resolve_head_for_repository(repo)?;
     let mut index = repo.load_index()?;
     let staged =
         crate::porcelain::add::stage_for_commit_on_index(repo, &mut index, progress, req.dry_run)?;
@@ -726,7 +750,7 @@ pub fn commit_worktree(
     if req.assume_worktree_synced && req.skip_pre_commit_tree_match {
         req.staged_change_count = Some(staged.total());
     }
-    create_commit_with_index(repo, &mut index, &req, progress, None)
+    create_commit_with_index(repo, head, &mut index, &req, progress, None)
 }
 
 fn commit_files_from_diff_entries(entries: &[DiffEntry]) -> Vec<CommitFile> {
@@ -1009,17 +1033,23 @@ pub(crate) fn create_commit_with_loaded_index(
     if index.has_unmerged_entries() {
         return Err(Error::IndexUnmerged);
     }
-    create_commit_with_index(repo, index, req, progress, None)
+    let head = resolve_head_for_repository(repo)?;
+    create_commit_with_index(repo, head, index, req, progress, None)
 }
 
+/// Record a commit of `index` on top of `head`.
+///
+/// `head` must be read before the content `index` was built from: the branch update then
+/// compares against that same tip, so a commit landed by another process in between makes this
+/// one fail instead of silently reverting it.
 fn create_commit_with_index(
     repo: &Repository,
+    head: HeadState,
     index: &mut Index,
     req: &CommitRequest,
     _progress: &mut dyn ProgressSink,
-    persist_index: Option<&mut Index>,
+    persist_index: Option<LockedIndex>,
 ) -> Result<CommitOutcome> {
-    let head = resolve_head_for_repository(repo)?;
     let (refname, short_name, mut parent, head_detached) = match head {
         HeadState::Branch {
             refname,
@@ -1211,13 +1241,15 @@ fn create_commit_with_index(
         )?
     {
         hooks_run.push(HookName::CommitMsg);
-    }
-    message = fs::read_to_string(&editmsg_path).map_err(Error::Io)?;
-    if message.trim().is_empty() {
-        return Err(Error::EmptyCommitMessage);
-    }
-    if !message.ends_with('\n') {
-        message.push('\n');
+        // COMMIT_EDITMSG is shared by every committer in the repository, so it is only
+        // read back when a hook may have edited it; otherwise the in-memory message wins.
+        message = fs::read_to_string(&editmsg_path).map_err(Error::Io)?;
+        if message.trim().is_empty() {
+            return Err(Error::EmptyCommitMessage);
+        }
+        if !message.ends_with('\n') {
+            message.push('\n');
+        }
     }
 
     let (author, author_raw) = resolve_author_for_commit(
@@ -1357,15 +1389,19 @@ fn create_commit_with_index(
     }
     clear_squash_commit_state(repo.git_dir())?;
 
-    if let Some(persist) = persist_index {
+    if let Some(LockedIndex {
+        index: mut persist,
+        mut lock,
+    }) = persist_index
+    {
         if !req.assume_worktree_synced {
             if let Some(work_tree) = repo.work_tree() {
-                let rules = WorktreeRules::from_repository(repo, persist).ok();
+                let rules = WorktreeRules::from_repository(repo, &persist).ok();
                 let rules_arc = rules.map(|r| Arc::new(Mutex::new(r)));
                 let _ = refresh_index_stat_content_verified_with_rules(
                     repo.odb(),
                     repo.git_dir(),
-                    persist,
+                    &mut persist,
                     work_tree,
                     None,
                     Some(config.as_ref()),
@@ -1374,7 +1410,7 @@ fn create_commit_with_index(
                 )?;
             }
         }
-        repo.write_index(persist)?;
+        repo.write_index_with_lock(&mut lock, &mut persist)?;
     }
 
     let post_commit_env = CommitHookEnv {
@@ -2087,6 +2123,223 @@ mod tests {
         )
         .unwrap_err();
         assert!(matches!(err, Error::PartialCommitDuringMerge));
+    }
+
+    fn system_git(root: &Path, args: &[&str]) -> String {
+        let out = Command::new("git")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_AUTHOR_NAME", "Test")
+            .env("GIT_AUTHOR_EMAIL", "test@example.com")
+            .env("GIT_COMMITTER_NAME", "Test")
+            .env("GIT_COMMITTER_EMAIL", "test@example.com")
+            .current_dir(root)
+            .args(args)
+            .output()
+            .unwrap();
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8(out.stdout).unwrap()
+    }
+
+    /// `git init` + one commit of `f1.txt`, then `f1.txt` modified in the worktree (issue #1789).
+    fn git_repo_with_modified_file(root: &Path) -> Repository {
+        system_git(root, &["init", "-q", "-b", "main"]);
+        fs::write(root.join("f1.txt"), b"a\n").unwrap();
+        system_git(root, &["add", "."]);
+        system_git(root, &["commit", "-qm", "init"]);
+        fs::write(root.join("f1.txt"), b"a\nb\n").unwrap();
+        Repository::discover(Some(root), &RepositoryOptions::empty()).unwrap()
+    }
+
+    fn f1_paths() -> ResolvedPathspecs {
+        ResolvedPathspecs {
+            specs: vec!["f1.txt".into()],
+            sources: vec!["f1.txt".into()],
+            scoped: true,
+        }
+    }
+
+    /// Run `scope` while a foreign `index.lock` exists and check nothing became visible.
+    ///
+    /// `objects_untouched` additionally requires that no loose object was written; scopes that
+    /// hash content before writing the index may leave unreferenced blobs.
+    fn assert_commit_refused_by_foreign_lock(
+        root: &Path,
+        repo: &Repository,
+        scope: CommitScope,
+        objects_untouched: bool,
+    ) {
+        let lock_path = repo.git_dir().join("index.lock");
+        fs::write(&lock_path, b"foreign\n").unwrap();
+        let before = repo_snapshot(repo);
+        let tip_before = resolve_ref(&repo.git_dir(), "refs/heads/main").unwrap();
+
+        let err = commit_with_scope(repo, &commit_req("x"), scope, &mut NullProgress).unwrap_err();
+        match &err {
+            Error::IndexLocked {
+                lock_path: reported,
+                holder,
+            } => {
+                assert_eq!(reported, &lock_path);
+                assert_eq!(*holder, None);
+            }
+            other => panic!("expected Error::IndexLocked, got {other:?}"),
+        }
+        assert!(err.to_string().contains("index.lock"), "{err}");
+
+        let (index, head, reflog, _editmsg, objects) = repo_snapshot(repo);
+        assert_eq!(index, before.0, "index bytes must be unchanged");
+        assert_eq!(head, before.1, "HEAD must be unchanged");
+        assert_eq!(reflog, before.2, "no reflog entry may be written");
+        if objects_untouched {
+            assert_eq!(objects, before.4, "no objects may be written");
+        }
+        assert_eq!(
+            resolve_ref(&repo.git_dir(), "refs/heads/main").unwrap(),
+            tip_before
+        );
+        assert_eq!(
+            fs::read(&lock_path).unwrap(),
+            b"foreign\n",
+            "someone else's lock must be left alone"
+        );
+        let leftovers: Vec<_> = fs::read_dir(repo.git_dir())
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().starts_with("next-index-"))
+            .collect();
+        assert!(leftovers.is_empty(), "temporary hook index left behind");
+
+        fs::remove_file(&lock_path).unwrap();
+        assert_eq!(system_git(root, &["status", "--porcelain"]), " M f1.txt\n");
+        system_git(root, &["fsck", "--strict", "--no-progress"]);
+    }
+
+    #[test]
+    fn scope_paths_with_held_index_lock_creates_nothing() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = git_repo_with_modified_file(root);
+        assert_commit_refused_by_foreign_lock(root, &repo, CommitScope::Paths(f1_paths()), true);
+
+        let outcome = commit_with_scope(
+            &repo,
+            &commit_req("x"),
+            CommitScope::Paths(f1_paths()),
+            &mut NullProgress,
+        )
+        .unwrap();
+        assert!(!repo.git_dir().join("index.lock").exists());
+        assert_eq!(
+            system_git(root, &["rev-parse", "HEAD"]).trim(),
+            outcome.oid.to_hex()
+        );
+        assert_eq!(system_git(root, &["status", "--porcelain"]), "");
+        system_git(root, &["fsck", "--strict", "--no-progress"]);
+    }
+
+    #[test]
+    fn scope_staged_and_auto_stage_with_held_index_lock_create_nothing() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = git_repo_with_modified_file(root);
+        assert_commit_refused_by_foreign_lock(root, &repo, CommitScope::AutoStage, false);
+
+        system_git(root, &["add", "f1.txt"]);
+        let lock_path = repo.git_dir().join("index.lock");
+        fs::write(&lock_path, b"foreign\n").unwrap();
+        let tip_before = resolve_ref(&repo.git_dir(), "refs/heads/main").unwrap();
+        let err = commit_with_scope(
+            &repo,
+            &commit_req("x"),
+            CommitScope::Staged,
+            &mut NullProgress,
+        )
+        .unwrap_err();
+        assert!(matches!(err, Error::IndexLocked { .. }), "{err:?}");
+        assert_eq!(
+            resolve_ref(&repo.git_dir(), "refs/heads/main").unwrap(),
+            tip_before
+        );
+        assert_eq!(fs::read(&lock_path).unwrap(), b"foreign\n");
+    }
+
+    #[test]
+    fn scope_patch_with_held_index_lock_creates_nothing() {
+        use crate::diff::hunk_id::{hunk_ids_with_duplicate_peers, DiffSide};
+        use crate::diff::{unstaged_file_diffs_with_peer_hunks, DiffOptions};
+        use crate::porcelain::hunk_select::HunkSelection;
+
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = git_repo_with_modified_file(root);
+        let (files, peers) =
+            unstaged_file_diffs_with_peer_hunks(&repo, &[], DiffOptions::default()).unwrap();
+        let ids = hunk_ids_with_duplicate_peers(
+            DiffSide::Unstaged,
+            "f1.txt",
+            &files[0].hunks,
+            peers.get("f1.txt").map(|v| v.as_slice()).unwrap_or(&[]),
+        );
+        let scope = CommitScope::Patch {
+            input: CommitPatchInput::Hunks(HunkSelection {
+                ids: vec![ids[0].clone()],
+                ranges: Vec::new(),
+            }),
+            pathspecs: Vec::new(),
+        };
+        assert_commit_refused_by_foreign_lock(root, &repo, scope, false);
+    }
+
+    #[test]
+    fn scope_paths_split_index_round_trips_with_git() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        system_git(root, &["init", "-q", "-b", "main"]);
+        system_git(root, &["config", "core.splitIndex", "true"]);
+        system_git(root, &["config", "splitIndex.maxPercentChange", "100"]);
+        for name in ["a.txt", "b.txt", "c.txt"] {
+            fs::write(root.join(name), b"1\n").unwrap();
+        }
+        system_git(root, &["add", "."]);
+        system_git(root, &["commit", "-qm", "init"]);
+        fs::write(root.join("a.txt"), b"2\n").unwrap();
+        fs::write(root.join("b.txt"), b"2\n").unwrap();
+        system_git(root, &["add", "b.txt"]);
+
+        let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).unwrap();
+        let specs = vec!["a.txt".to_owned()];
+        commit_with_scope(
+            &repo,
+            &commit_req("partial"),
+            CommitScope::Paths(ResolvedPathspecs {
+                specs: specs.clone(),
+                sources: specs,
+                scoped: true,
+            }),
+            &mut NullProgress,
+        )
+        .unwrap();
+
+        assert!(!repo.git_dir().join("index.lock").exists());
+        assert!(
+            system_git(root, &["ls-files", "--debug"]).contains("a.txt"),
+            "git must read the split index"
+        );
+        assert_eq!(system_git(root, &["status", "--porcelain"]), "M  b.txt\n");
+        assert_eq!(system_git(root, &["show", "HEAD:a.txt"]), "2\n");
+        assert_eq!(system_git(root, &["show", "HEAD:b.txt"]), "1\n");
+        system_git(root, &["fsck", "--strict", "--no-progress"]);
+        let shared: Vec<_> = fs::read_dir(repo.git_dir())
+            .unwrap()
+            .flatten()
+            .filter(|e| e.file_name().to_string_lossy().starts_with("sharedindex."))
+            .collect();
+        assert!(!shared.is_empty(), "index must stay split");
     }
 
     fn author_info_from_commit(repo: &Repository, oid: ObjectId) -> CommitAuthorInfo {

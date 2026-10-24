@@ -238,6 +238,17 @@ With `--dry-run`, output lists the paths that would be committed instead of a ne
 
 See [Exit codes](../exit-codes/) for shared rules and structured `--json` `kind` values.
 
+When another process holds `.git/index.lock`, `grit commit` exits `1` with `kind` `index_locked` under `--json`, and the message names the lock file (and its owning process, when `core.lockfilePid` recorded one). Every scope, including `-- paths`, checks the lock before it creates the commit, so on this error no commit was recorded and `HEAD`, the branch, the reflog and the index are unchanged. It is safe to retry once the other process finishes. grit never removes a lock it did not create.
+
+```console
+$ grit commit -m "fix" -- f1.txt
+error: cannot lock the index: '/work/repo/.git/index.lock' already exists. Another process may be writing the index, or a crashed process left the lock behind; remove it only if no other process is running.
+$ grit commit -m "fix" --json -- f1.txt
+{"error":"cannot lock the index: '/work/repo/.git/index.lock' already exists. Another process may be writing the index, or a crashed process left the lock behind; remove it only if no other process is running.","kind":"index_locked"}
+```
+
+Several `grit commit` processes can run in one checkout at once, for example parallel jobs each committing their own `-- paths`. The index lock serializes them: each one either records a commit with its own message and only its own paths, or fails with `index_locked` and changes nothing. The message always comes from `-m`, `-F` or the positional argument; `.git/COMMIT_EDITMSG` is read back only after a `commit-msg` hook ran, so one process never records another's message. A commit is built on the `HEAD` it read first: if another tool moves the branch before the commit lands, `grit commit` fails with `ref 'refs/heads/<branch>' did not match expected state` (exit `1`) instead of recording a commit that would undo the other change.
+
 
 ## See also
 

@@ -43,6 +43,7 @@ fn exit_codes_page_matches_enum() {
         "would_overwrite",
         "invalid_pattern",
         "incompatible_flags",
+        "index_locked",
         "branch_already_exists",
         "branch_not_found",
         "branch_invalid_name",
@@ -107,4 +108,13 @@ fn exit_status_for_every_error_kind_cli() {
     assert_ne!(code, 0);
     let v: Value = serde_json::from_str(stdout.trim()).expect("branch_already_exists");
     assert_eq!(v["kind"].as_str(), Some("branch_already_exists"));
+
+    fs::write(root.path().join("a.txt"), "b").expect("write");
+    let lock = root.path().join(".git/index.lock");
+    fs::write(&lock, "").expect("foreign lock");
+    let (code, stdout) = grit(root.path(), &["commit", "-m", "x", "--json", "--", "a.txt"]);
+    fs::remove_file(&lock).expect("remove lock");
+    assert_eq!(code, 1, "index_locked");
+    let v: Value = serde_json::from_str(stdout.trim()).expect("index_locked");
+    assert_eq!(v["kind"].as_str(), Some("index_locked"));
 }

@@ -5252,6 +5252,9 @@ pub grit_lib::error::Error::IndexError(alloc::string::String)
 pub grit_lib::error::Error::IndexFsmonitorExtensionBadVersion(u32)
 pub grit_lib::error::Error::IndexFsmonitorExtensionEwahInvalid
 pub grit_lib::error::Error::IndexFsmonitorExtensionTruncated
+pub grit_lib::error::Error::IndexLocked
+pub grit_lib::error::Error::IndexLocked::holder: core::option::Option<grit_lib::error::LockHolder>
+pub grit_lib::error::Error::IndexLocked::lock_path: std::path::PathBuf
 pub grit_lib::error::Error::IndexPathPrefixConflict
 pub grit_lib::error::Error::IndexPathPrefixConflict::directory: std::path::PathBuf
 pub grit_lib::error::Error::IndexPathPrefixConflict::file: std::path::PathBuf
@@ -5796,6 +5799,25 @@ impl core::marker::Unpin for grit_lib::error::SparseCheckoutWarning
 impl core::marker::UnsafeUnpin for grit_lib::error::SparseCheckoutWarning
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::error::SparseCheckoutWarning
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::error::SparseCheckoutWarning
+pub struct grit_lib::error::LockHolder
+pub grit_lib::error::LockHolder::pid: u64
+pub grit_lib::error::LockHolder::running: bool
+impl core::clone::Clone for grit_lib::error::LockHolder
+pub fn grit_lib::error::LockHolder::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::error::LockHolder
+impl core::cmp::PartialEq for grit_lib::error::LockHolder
+pub fn grit_lib::error::LockHolder::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::error::LockHolder
+pub fn grit_lib::error::LockHolder::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::error::LockHolder
+impl core::marker::StructuralPartialEq for grit_lib::error::LockHolder
+impl core::marker::Freeze for grit_lib::error::LockHolder
+impl core::marker::Send for grit_lib::error::LockHolder
+impl core::marker::Sync for grit_lib::error::LockHolder
+impl core::marker::Unpin for grit_lib::error::LockHolder
+impl core::marker::UnsafeUnpin for grit_lib::error::LockHolder
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::error::LockHolder
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::error::LockHolder
 pub type grit_lib::error::Result<T> = core::result::Result<T, grit_lib::error::Error>
 pub mod grit_lib::fsmonitor
 pub struct grit_lib::fsmonitor::FsmonitorQueryBoundary(pub u64)
@@ -14692,6 +14714,9 @@ pub grit_lib::prelude::Error::IndexError(alloc::string::String)
 pub grit_lib::prelude::Error::IndexFsmonitorExtensionBadVersion(u32)
 pub grit_lib::prelude::Error::IndexFsmonitorExtensionEwahInvalid
 pub grit_lib::prelude::Error::IndexFsmonitorExtensionTruncated
+pub grit_lib::prelude::Error::IndexLocked
+pub grit_lib::prelude::Error::IndexLocked::holder: core::option::Option<grit_lib::error::LockHolder>
+pub grit_lib::prelude::Error::IndexLocked::lock_path: std::path::PathBuf
 pub grit_lib::prelude::Error::IndexPathPrefixConflict
 pub grit_lib::prelude::Error::IndexPathPrefixConflict::directory: std::path::PathBuf
 pub grit_lib::prelude::Error::IndexPathPrefixConflict::file: std::path::PathBuf

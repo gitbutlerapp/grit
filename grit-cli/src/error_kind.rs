@@ -20,6 +20,8 @@ pub enum ErrorKind {
     Usage,
     /// Incompatible flag combination (often with `--json` / `--markdown`).
     IncompatibleFlags,
+    /// Another process holds the index lock; nothing was changed, so retrying later is safe.
+    IndexLocked,
     /// Branch already exists on create.
     BranchAlreadyExists,
     /// Named branch does not exist.
@@ -73,6 +75,7 @@ impl ErrorKind {
             Self::InvalidPattern => "invalid_pattern",
             Self::Usage => "usage",
             Self::IncompatibleFlags => "incompatible_flags",
+            Self::IndexLocked => "index_locked",
             Self::BranchAlreadyExists => "branch_already_exists",
             Self::BranchNotFound => "branch_not_found",
             Self::BranchInvalidName => "branch_invalid_name",
@@ -97,6 +100,7 @@ impl ErrorKind {
             Self::InvalidPattern,
             Self::Usage,
             Self::IncompatibleFlags,
+            Self::IndexLocked,
             Self::BranchAlreadyExists,
             Self::BranchNotFound,
             Self::BranchInvalidName,
