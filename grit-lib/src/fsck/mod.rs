@@ -467,12 +467,16 @@ fn pack_file_name(pack: &Path) -> String {
 /// # Errors
 ///
 /// Propagates object-store, ref, or index I/O failures that abort the run.
+/// Returns [`crate::error::Error::UnsupportedObjectStore`] (operation `"fsck"`) when the
+/// repository uses a custom primary object store, since fsck verifies the on-disk
+/// loose objects and packs.
 pub fn fsck(
     repo: &Repository,
     options: &FsckOptions,
     progress: &mut dyn ProgressSink,
     cancel: &dyn Cancel,
 ) -> Result<FsckReport> {
+    repo.odb().require_files_primary("fsck")?;
     let config = repo.config()?;
     let odb = repo.odb();
     if !options.connectivity_only {

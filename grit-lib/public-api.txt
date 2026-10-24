@@ -698,6 +698,8 @@ pub grit_lib::bundle::BundleError::ObjectFormatMismatch::bundle_name: &'static s
 pub grit_lib::bundle::BundleError::ObjectFormatMismatch::repo_name: &'static str
 pub grit_lib::bundle::BundleError::PrerequisitesNotConnected
 pub grit_lib::bundle::BundleError::UnsupportedCapability(alloc::string::String)
+pub grit_lib::bundle::BundleError::UnsupportedObjectStore
+pub grit_lib::bundle::BundleError::UnsupportedObjectStore::operation: &'static str
 pub grit_lib::bundle::BundleError::UnsupportedVersion
 impl core::clone::Clone for grit_lib::bundle::BundleError
 pub fn grit_lib::bundle::BundleError::clone(&self) -> Self

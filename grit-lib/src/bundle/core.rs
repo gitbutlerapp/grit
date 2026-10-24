@@ -176,6 +176,13 @@ pub enum BundleError {
     /// The pack stream did not start where expected.
     #[error("bundle pack stream missing or invalid")]
     MissingPack,
+    /// The repository uses a custom [`OdbBuilder::primary`](crate::odb::OdbBuilder::primary)
+    /// store; ingesting the pack needs the files-backed `objects/` directory.
+    #[error("{operation} requires the files-backed object store; it is not supported with a custom primary")]
+    UnsupportedObjectStore {
+        /// Refused bundle operation (`"unbundle"`).
+        operation: &'static str,
+    },
     /// Underlying I/O failure.
     #[error("{0}")]
     Io(String),
@@ -336,7 +343,9 @@ impl Bundle {
     ///
     /// # Errors
     ///
-    /// Returns [`BundleError`] or ingest failures wrapped as [`BundleError::Io`].
+    /// Returns [`BundleError`] or ingest failures wrapped as [`BundleError::Io`], and
+    /// [`BundleError::UnsupportedObjectStore`] before reading the pack when `repo` uses a
+    /// custom primary object store.
     pub fn unbundle(
         &self,
         repo: &Repository,
@@ -350,6 +359,11 @@ impl Bundle {
         repo: &Repository,
         progress: &mut dyn ProgressSink,
     ) -> std::result::Result<UnbundleOutcome, BundleError> {
+        if !repo.odb().uses_files_primary() {
+            return Err(BundleError::UnsupportedObjectStore {
+                operation: "unbundle",
+            });
+        }
         if self.header.object_format != repo.odb().hash_algo() {
             return Err(BundleError::ObjectFormatMismatch {
                 bundle_name: self.header.object_format.name(),

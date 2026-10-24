@@ -376,7 +376,11 @@ impl Remote {
     ///
     /// # Errors
     ///
-    /// Returns [`RemoteError`] or transport errors on failure.
+    /// Returns [`RemoteError`] or transport errors on failure, and
+    /// [`Error::UnsupportedObjectStore`] (operation `"fetch"`) before contacting the remote
+    /// when `repo` uses a custom [`OdbBuilder::primary`](crate::odb::OdbBuilder::primary)
+    /// store: received objects are installed under the on-disk `objects/` directory, which
+    /// that repository does not read.
     pub fn fetch(
         &self,
         repo: &Repository,
@@ -384,6 +388,7 @@ impl Remote {
         progress: &mut dyn Progress,
         http_factory: Option<&dyn HttpClientFactory>,
     ) -> RemoteResult<FetchOutcome> {
+        repo.odb().require_files_primary("fetch")?;
         if opts.configured_refspecs.is_empty() {
             opts.configured_refspecs = self.fetch_refspecs.clone();
         }
@@ -420,7 +425,10 @@ impl Remote {
     ///
     /// # Errors
     ///
-    /// Returns [`RemoteError`] or transport errors on failure.
+    /// Returns [`RemoteError`] or transport errors on failure, and
+    /// [`Error::UnsupportedObjectStore`] (operation `"push"`) before contacting the remote
+    /// when `repo` uses a custom [`OdbBuilder::primary`](crate::odb::OdbBuilder::primary)
+    /// store: the pack is built from the on-disk `objects/` directory.
     pub fn push(
         &self,
         repo: &Repository,
@@ -429,6 +437,7 @@ impl Remote {
         progress: &mut dyn Progress,
         http_factory: Option<&dyn HttpClientFactory>,
     ) -> RemoteResult<PushOutcome> {
+        repo.odb().require_files_primary("push")?;
         if opts.tracking_remote.is_none() {
             opts.tracking_remote = self.name.clone();
         }

@@ -58,9 +58,22 @@ impl OdbBuilder {
 
     /// Replace the default [`super::store::FilesSource`] primary with a custom store.
     ///
-    /// Writes and primary reads go through this backend; filesystem-only maintenance
-    /// ([`Odb::gc`], [`Odb::write_commit_graph`], pack helpers) returns
-    /// [`Error::UnsupportedObjectStore`].
+    /// Writes and primary reads go through this backend, including commits, staging
+    /// ([`crate::porcelain::add::stage`]), merges, stash, notes, and bundle creation.
+    ///
+    /// Operations that still need the on-disk `objects/` directory refuse up front with
+    /// [`Error::UnsupportedObjectStore`] (its `operation` names the refused call) and leave
+    /// refs and `objects/` untouched:
+    ///
+    /// - `"fetch"`: [`Remote::fetch`](crate::remote::Remote::fetch) and everything built on it
+    ///   ([`RepositoryRemotes::fetch`](crate::repo_handles::RepositoryRemotes::fetch),
+    ///   `fetch_all`, pull, promisor lazy fetch), for every transport including bundles
+    /// - `"push"`: [`Remote::push`](crate::remote::Remote::push) and
+    ///   [`RepositoryRemotes::push`](crate::repo_handles::RepositoryRemotes::push)
+    /// - `"unbundle"`: [`Bundle::unbundle`](crate::bundle::Bundle::unbundle), reported as
+    ///   [`BundleError::UnsupportedObjectStore`](crate::bundle::BundleError::UnsupportedObjectStore)
+    /// - `"fsck"`: [`Repository::fsck`](crate::repo::Repository::fsck)
+    /// - maintenance: [`Odb::gc`], [`Odb::write_commit_graph`], repack, MIDX, and pack helpers
     #[must_use]
     pub fn primary(mut self, store: Arc<dyn WritableObjectStore>) -> Self {
         self.custom_primary = Some(store);

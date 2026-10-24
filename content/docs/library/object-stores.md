@@ -49,7 +49,22 @@ let _blob = repo.odb.write(ObjectKind::Blob, b"hello")?;
 # Ok::<(), grit_lib::error::Error>(())
 ```
 
-Filesystem-only maintenance (`Odb::gc`, `Odb::write_commit_graph`, `Odb::pack_store`, pack install, MIDX write) returns `Error::UnsupportedObjectStore` when the primary is not the default files backend. Use `Odb::files_objects_dir` when you need the on-disk `objects/` path only for files-backed repos.
+## What works with a custom primary
+
+Object reads and writes go through your store, so commits, staging (`porcelain::add::stage` and auto-staging commits), log, diff, merge, stash, notes and bundle creation all work.
+
+Some operations still install or verify packs under the on-disk `objects/` directory. With a custom primary they fail up front with [`Error::UnsupportedObjectStore`](rustdoc:grit_lib::error::Error::UnsupportedObjectStore), before they touch refs, the remote or `objects/`. The `operation` field names the refused call:
+
+| `operation` | Refused API |
+| ----------- | ----------- |
+| `fetch` | [`Remote::fetch`](rustdoc:grit_lib::remote::Remote::fetch), `repo.remotes().fetch` / `fetch_all`, pull, promisor lazy fetch (every transport, bundles included) |
+| `push` | [`Remote::push`](rustdoc:grit_lib::remote::Remote::push), `repo.remotes().push` |
+| `fsck` | [`Repository::fsck`](rustdoc:grit_lib::repo::Repository::fsck) |
+| `gc`, `commit-graph write`, `repack`, `midx write`, `prune` | Filesystem maintenance (`Odb::gc`, `Odb::write_commit_graph`, `Odb::pack_store`, pack install, MIDX write) |
+
+`repo.bundles().unbundle` reports the same refusal as [`BundleError::UnsupportedObjectStore`](rustdoc:grit_lib::bundle::BundleError::UnsupportedObjectStore) with operation `unbundle`.
+
+To exchange objects with Git from a custom store today, export them as loose objects (as the examples below do) or fetch and push from a files-backed repository. Use `Odb::files_objects_dir` when you need the on-disk `objects/` path only for files-backed repos.
 
 ## Conformance tests
 

@@ -1277,11 +1277,12 @@ pub enum Error {
     #[error(transparent)]
     History(#[from] crate::history::HistoryError),
 
-    /// An [`ObjectStore`](crate::odb::store::ObjectStore) backend does not implement the
-    /// requested operation (for example filesystem-only helpers on an in-memory store).
-    #[error("object store does not support: {operation}")]
+    /// The operation needs the files-backed `objects/` directory, but the repository's
+    /// [`Odb`](crate::odb::Odb) uses a custom [`OdbBuilder::primary`](crate::odb::OdbBuilder::primary)
+    /// store. Nothing was written; use a files-backed repository for this operation.
+    #[error("{operation} requires the files-backed object store; it is not supported with a custom primary")]
     UnsupportedObjectStore {
-        /// Object-store operation that the backend does not implement.
+        /// Operation that was refused (for example `"fetch"`, `"push"`, `"fsck"`, `"gc"`).
         operation: &'static str,
     },
 
