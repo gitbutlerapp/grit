@@ -25,7 +25,7 @@ fn diff_name_only_matches_git_bytes() {
     std::fs::write(dir.path().join("f.txt"), b"b\n").expect("write");
     let git_out = std::process::Command::new("git")
         .current_dir(dir.path())
-        .args(["diff", "--name-only"])
+        .args(["diff", "HEAD", "--name-only"])
         .output()
         .expect("git diff");
     let grit_init = grit(dir.path(), &["init"]);
@@ -37,6 +37,48 @@ fn diff_name_only_matches_git_bytes() {
         "{}",
         grit_out.dump("grit diff --name-only")
     );
+}
+
+#[test]
+fn diff_uncommitted_format_flags_show_staged_and_unstaged() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let grit_init = grit(dir.path(), &["init"]);
+    assert!(grit_init.ok(), "{}", grit_init.dump("grit init"));
+    std::fs::write(dir.path().join("a.txt"), b"a1\n").expect("write");
+    std::fs::write(dir.path().join("b.txt"), b"b1\n").expect("write");
+    assert!(grit(dir.path(), &["add", "a.txt", "b.txt"]).ok(), "grit add");
+    assert!(
+        grit(dir.path(), &["commit", "-m", "init"]).ok(),
+        "grit commit"
+    );
+
+    // Modify and stage a.txt
+    std::fs::write(dir.path().join("a.txt"), b"a2\n").expect("write");
+    assert!(grit(dir.path(), &["add", "a.txt"]).ok(), "grit add a.txt");
+
+    // Modify b.txt without staging
+    std::fs::write(dir.path().join("b.txt"), b"b2\n").expect("write");
+
+    // --name-only lists both staged and unstaged files
+    let name_only = grit(dir.path(), &["diff", "--name-only"]);
+    assert!(name_only.ok(), "{}", name_only.dump("diff --name-only"));
+    let mut names: Vec<_> = name_only.stdout.lines().collect();
+    names.sort();
+    assert_eq!(names, ["a.txt", "b.txt"]);
+
+    // --name-status lists both staged and unstaged files with M status
+    let name_status = grit(dir.path(), &["diff", "--name-status"]);
+    assert!(name_status.ok(), "{}", name_status.dump("diff --name-status"));
+    let mut statuses: Vec<_> = name_status.stdout.lines().collect();
+    statuses.sort();
+    assert_eq!(statuses, ["M\ta.txt", "M\tb.txt"]);
+
+    // --numstat lists both files
+    let numstat = grit(dir.path(), &["diff", "--numstat"]);
+    assert!(numstat.ok(), "{}", numstat.dump("diff --numstat"));
+    let mut numstat_lines: Vec<_> = numstat.stdout.lines().collect();
+    numstat_lines.sort();
+    assert_eq!(numstat_lines, ["1\t1\ta.txt", "1\t1\tb.txt"]);
 }
 
 /// Git sometimes prints `old => new` for rename numstat lines; grit uses the new path only.
