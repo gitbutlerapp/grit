@@ -142,7 +142,7 @@ pub(crate) fn build_sparse_maps(
     let mut base = BTreeMap::new();
     let mut ours = BTreeMap::new();
     let mut theirs = BTreeMap::new();
-    let empty_tree = odb.write(crate::objects::ObjectKind::Tree, &[])?;
+    let empty_tree = odb.empty_tree_oid()?;
     let touched = PathPrefixIndex::new(paths);
     fill_sparse_maps_walk(
         cache,
@@ -643,7 +643,7 @@ pub(crate) fn finish_merge_result_tree(
             stage0.insert(e.path.clone(), e);
         }
     }
-    let empty_tree = odb.write(crate::objects::ObjectKind::Tree, &[])?;
+    let empty_tree = odb.empty_tree_oid()?;
     let touched = PathPrefixIndex::new(&output.touched_paths);
     compose_merged_tree_oid(
         cache,

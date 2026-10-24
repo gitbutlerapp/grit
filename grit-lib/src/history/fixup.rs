@@ -478,7 +478,7 @@ fn commit_tree(repo: &Repository, commit: ObjectId) -> Result<ObjectId, HistoryE
 }
 
 fn empty_tree_oid(repo: &Repository) -> Result<ObjectId, HistoryError> {
-    repo.odb().write(ObjectKind::Tree, &[]).map_err(library_err)
+    repo.odb().empty_tree_oid().map_err(library_err)
 }
 
 fn first_parent_tree(repo: &Repository, commit: &CommitData) -> Result<ObjectId, HistoryError> {

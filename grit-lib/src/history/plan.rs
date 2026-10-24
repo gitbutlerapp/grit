@@ -1426,7 +1426,7 @@ fn replay_parent_pair(
 }
 
 fn empty_tree_oid(repo: &Repository) -> Result<ObjectId, HistoryError> {
-    repo.odb().write(ObjectKind::Tree, &[]).map_err(library_err)
+    repo.odb().empty_tree_oid().map_err(library_err)
 }
 
 fn compute_replayed_tree(

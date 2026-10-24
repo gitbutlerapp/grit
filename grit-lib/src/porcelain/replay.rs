@@ -309,5 +309,5 @@ fn commit_tree(repo: &Repository, commit_oid: &ObjectId) -> Result<ObjectId> {
 }
 
 fn empty_tree(repo: &Repository) -> Result<ObjectId> {
-    repo.odb().write(ObjectKind::Tree, &[])
+    repo.odb().empty_tree_oid()
 }

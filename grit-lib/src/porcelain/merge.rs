@@ -1161,7 +1161,7 @@ fn commit_tree(repo: &Repository, commit_oid: &ObjectId) -> Result<ObjectId> {
 }
 
 fn empty_tree_oid(repo: &Repository) -> Result<ObjectId> {
-    repo.odb().write(ObjectKind::Tree, &[])
+    repo.odb().empty_tree_oid()
 }
 
 fn conflict_path_set(merged: &TreeMergeOutput) -> BTreeSet<Vec<u8>> {

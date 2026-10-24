@@ -2018,6 +2018,17 @@ impl Odb {
         hash_object_data_with(self.hash_algo(), kind, data)
     }
 
+    /// Object id of the empty tree for this store's hash algorithm.
+    ///
+    /// Hashes the canonical empty tree payload only; nothing is written to disk.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::HashCollision`] when sha1dc detects a chosen-prefix collision.
+    pub fn empty_tree_oid(&self) -> Result<ObjectId> {
+        self.hash(ObjectKind::Tree, b"")
+    }
+
     /// Write an object to the loose store and return its [`ObjectId`].
     ///
     /// If the object already exists it is not overwritten (Git behaviour).

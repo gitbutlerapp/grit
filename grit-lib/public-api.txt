@@ -9021,6 +9021,7 @@ pub fn grit_lib::objects::odb::Odb::config_git_dir(&self) -> core::option::Optio
 pub fn grit_lib::objects::odb::Odb::count_loose_objects(&self) -> grit_lib::error::Result<usize>
 pub fn grit_lib::objects::odb::Odb::disable_mem_overlay(&self)
 pub fn grit_lib::objects::odb::Odb::enable_mem_overlay(&self)
+pub fn grit_lib::objects::odb::Odb::empty_tree_oid(&self) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::objects::odb::Odb::ensure_all_loose_prefix_dirs(&self) -> grit_lib::error::Result<()>
 pub fn grit_lib::objects::odb::Odb::enumerate_local_loose_objects(&self) -> grit_lib::error::Result<alloc::vec::Vec<(grit_lib::objects::ObjectId, std::path::PathBuf)>>
 pub fn grit_lib::objects::odb::Odb::env_alternate_dirs_from_var(&grit_lib::config::environment::Environment, core::option::Option<&std::path::Path>) -> alloc::vec::Vec<std::path::PathBuf>
@@ -10236,6 +10237,7 @@ pub fn grit_lib::objects::ObjectId::as_bytes(&self) -> &[u8]
 pub fn grit_lib::objects::ObjectId::from_bytes(&[u8]) -> grit_lib::error::Result<Self>
 pub fn grit_lib::objects::ObjectId::from_hex(&str) -> grit_lib::error::Result<Self>
 pub fn grit_lib::objects::ObjectId::from_hex_ascii(&[u8]) -> grit_lib::error::Result<Self>
+pub const fn grit_lib::objects::ObjectId::empty_tree() -> Self
 pub fn grit_lib::objects::ObjectId::is_full_hex(&str) -> bool
 pub const fn grit_lib::objects::ObjectId::is_hex_len(usize) -> bool
 pub const fn grit_lib::objects::ObjectId::is_loose_suffix_len(usize) -> bool
@@ -14823,6 +14825,7 @@ pub fn grit_lib::objects::ObjectId::as_bytes(&self) -> &[u8]
 pub fn grit_lib::objects::ObjectId::from_bytes(&[u8]) -> grit_lib::error::Result<Self>
 pub fn grit_lib::objects::ObjectId::from_hex(&str) -> grit_lib::error::Result<Self>
 pub fn grit_lib::objects::ObjectId::from_hex_ascii(&[u8]) -> grit_lib::error::Result<Self>
+pub const fn grit_lib::objects::ObjectId::empty_tree() -> Self
 pub fn grit_lib::objects::ObjectId::is_full_hex(&str) -> bool
 pub const fn grit_lib::objects::ObjectId::is_hex_len(usize) -> bool
 pub const fn grit_lib::objects::ObjectId::is_loose_suffix_len(usize) -> bool
@@ -14887,6 +14890,7 @@ pub fn grit_lib::objects::odb::Odb::config_git_dir(&self) -> core::option::Optio
 pub fn grit_lib::objects::odb::Odb::count_loose_objects(&self) -> grit_lib::error::Result<usize>
 pub fn grit_lib::objects::odb::Odb::disable_mem_overlay(&self)
 pub fn grit_lib::objects::odb::Odb::enable_mem_overlay(&self)
+pub fn grit_lib::objects::odb::Odb::empty_tree_oid(&self) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::objects::odb::Odb::ensure_all_loose_prefix_dirs(&self) -> grit_lib::error::Result<()>
 pub fn grit_lib::objects::odb::Odb::enumerate_local_loose_objects(&self) -> grit_lib::error::Result<alloc::vec::Vec<(grit_lib::objects::ObjectId, std::path::PathBuf)>>
 pub fn grit_lib::objects::odb::Odb::env_alternate_dirs_from_var(&grit_lib::config::environment::Environment, core::option::Option<&std::path::Path>) -> alloc::vec::Vec<std::path::PathBuf>

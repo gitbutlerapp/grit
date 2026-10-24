@@ -234,6 +234,22 @@ impl ObjectId {
             && self.as_bytes() == WELL_KNOWN_EMPTY_TREE_CANON
     }
 
+    /// Canonical SHA-1 empty tree object id (`4b825dc642cb6eb9a060e54bf8d69288fbee4904`).
+    ///
+    /// Returns the well-known digest without writing a loose object. On SHA-256
+    /// repositories use [`Odb::empty_tree_oid`](crate::odb::Odb::empty_tree_oid)
+    /// instead.
+    #[must_use]
+    pub const fn empty_tree() -> Self {
+        let mut bytes = [0u8; MAX_OID_LEN];
+        let mut i = 0;
+        while i < WELL_KNOWN_EMPTY_TREE_CANON.len() {
+            bytes[i] = WELL_KNOWN_EMPTY_TREE_CANON[i];
+            i += 1;
+        }
+        Self { bytes, len: 20 }
+    }
+
     /// Append `/<xx>/<rest-of-hex>` for this OID under `path` without heap hex strings.
     pub(crate) fn push_loose_relative(&self, path: &mut std::path::PathBuf) {
         const HEX: &[u8; 16] = b"0123456789abcdef";

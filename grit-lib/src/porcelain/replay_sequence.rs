@@ -1092,7 +1092,7 @@ fn merge_trees_for_replay(
     source_oid: ObjectId,
 ) -> Result<(ObjectId, ObjectId, ObjectId)> {
     let parent_tree = |parent: &ObjectId| commit_tree(repo, parent);
-    let empty = || repo.odb().write(ObjectKind::Tree, &[]);
+    let empty = || repo.odb().empty_tree_oid();
     match direction {
         ReplayDirection::Pick => {
             let base = if source.parents.is_empty() {
