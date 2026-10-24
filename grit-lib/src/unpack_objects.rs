@@ -869,21 +869,25 @@ impl<'a> PackReader<'a> {
     }
 }
 
-/// Decompress a zlib stream at `offset` in `pack` without advancing a [`PackReader`].
-pub(crate) fn decompress_zlib_at(
+/// Decompress a zlib stream at `offset` in `pack` into `out` (cleared first; capacity reused).
+pub(crate) fn decompress_zlib_at_into(
     pack: &[u8],
     offset: usize,
     expected_size: usize,
-) -> Result<(Vec<u8>, usize)> {
+    out: &mut Vec<u8>,
+) -> Result<usize> {
+    out.clear();
+    if out.capacity() < expected_size {
+        out.reserve(expected_size - out.capacity());
+    }
     let slice = pack.get(offset..).ok_or_else(|| {
         Error::CorruptObject(format!(
             "pack stream truncated: need zlib at offset {offset}"
         ))
     })?;
     let mut decoder = ZlibDecoder::new(slice);
-    let mut out = Vec::with_capacity(expected_size);
     decoder
-        .read_to_end(&mut out)
+        .read_to_end(out)
         .map_err(|e| Error::Zlib(e.to_string()))?;
     if out.len() != expected_size {
         return Err(Error::CorruptObject(format!(
@@ -892,7 +896,17 @@ pub(crate) fn decompress_zlib_at(
             expected_size
         )));
     }
-    let consumed = decoder.total_in() as usize;
+    Ok(decoder.total_in() as usize)
+}
+
+/// Decompress a zlib stream at `offset` in `pack` without advancing a [`PackReader`].
+pub(crate) fn decompress_zlib_at(
+    pack: &[u8],
+    offset: usize,
+    expected_size: usize,
+) -> Result<(Vec<u8>, usize)> {
+    let mut out = Vec::new();
+    let consumed = decompress_zlib_at_into(pack, offset, expected_size, &mut out)?;
     Ok((out, consumed))
 }
 

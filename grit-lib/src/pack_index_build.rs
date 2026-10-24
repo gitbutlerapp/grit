@@ -8,12 +8,12 @@ use crate::error::{Error, Result};
 use crate::hash::{hash_object, Parallelism};
 use crate::objects::{oid_hash_map, HashAlgo, ObjectId, ObjectKind, OidHashMap};
 use crate::odb::Odb;
-use crate::pack_zlib::{decompress_zlib_at_index, skip_zlib_at_with_scratch};
-use crate::parallel::run_ordered_pool;
+use crate::pack_zlib::skip_zlib_at_with_scratch;
 use crate::progress::{ProgressPhase, ProgressSink};
-use crate::unpack_objects::{apply_delta, type_code_to_kind, PackIndexRecord, PackReader};
+use crate::unpack_objects::{
+    apply_delta, apply_delta_into, type_code_to_kind, PackIndexRecord, PackReader,
+};
 use crate::zlib_inflate::ZlibInflateScratch;
-use std::borrow::Cow;
 use std::collections::{HashMap, VecDeque};
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
@@ -96,6 +96,9 @@ impl<'a> PackIndexReporter<'a> {
     }
 }
 
+/// Maximum ofs/ref delta chain depth when re-inflating from the pack.
+const MAX_DELTA_CHAIN_DEPTH: usize = 3000;
+
 #[derive(Clone)]
 enum BasePayload {
     /// Re-inflate from the pack when a dependent delta is resolved.
@@ -103,8 +106,13 @@ enum BasePayload {
         zlib_offset: usize,
         uncompressed_size: usize,
     },
-    /// Bytes from the ODB when a ref-delta base is not in this pack.
-    Owned(Vec<u8>),
+    /// Resolved delta still in the pack; re-apply from compressed bytes when needed.
+    DeltaInPack {
+        zlib_offset: usize,
+        uncompressed_size: usize,
+        base_offset: Option<usize>,
+        base_oid: Option<ObjectId>,
+    },
 }
 
 #[derive(Clone)]
@@ -146,17 +154,16 @@ struct WholeHashed {
     kind: ObjectKind,
     zlib_offset: usize,
     uncompressed_size: usize,
-    retain_payload: bool,
 }
 
 /// Hash oversized whole objects outside the parallel pool to cap per-thread memory.
 const LARGE_WHOLE_OBJECT: usize = 4 * 1024 * 1024;
 /// Soft cap on total uncompressed bytes being hashed by whole-object workers at once.
 const WHOLE_INFLIGHT_BYTES_PER_THREAD: usize = 8 * 1024 * 1024;
-/// Work-stealing step when resolving a batch of ready deltas.
-const DELTA_STEAL_CHUNK: usize = 4;
-/// Cap how many ready deltas are resolved at once so base inflation stays bounded.
-const DELTA_RESOLVE_BATCH: usize = 256;
+/// How many ready deltas to gather before starting another dependency round.
+const DELTA_RESOLVE_ROUND_CHUNK: usize = 4096;
+/// Reused delta buffers may grow to the largest object; trim excess capacity periodically.
+const DELTA_SCRATCH_CAP: usize = 2 * 1024 * 1024;
 struct PackHeader {
     nr_objects: usize,
 }
@@ -288,6 +295,7 @@ fn scan_and_hash_wholes_serial(
     rd.read_exact(4)?;
     rd.read_u32_be()?;
     rd.read_u32_be()?;
+    let mut whole_items: Vec<WholeHashed> = Vec::new();
 
     for _ in 0..header.nr_objects {
         let obj_offset = rd.pos;
@@ -316,8 +324,7 @@ fn scan_and_hash_wholes_serial(
                     state.oid_base_refs,
                     &mut hash_scratch,
                 )?;
-                seed_in_pack_whole_base(state, &item);
-                apply_whole_hashed(state, item);
+                whole_items.push(item);
             }
             6 => {
                 push_ofs_delta(
@@ -354,36 +361,15 @@ fn scan_and_hash_wholes_serial(
         }
     }
 
+    for item in whole_items {
+        apply_whole_hashed(state, item);
+    }
+
     let consumed = rd.pos;
     if verify_trailer {
         verify_pack_trailer(pack, consumed, state.odb.hash_algo())?;
     }
-    drop_in_pack_bases_without_delta_refs(state);
     Ok(())
-}
-
-/// Drop whole-object pack base entries that no pending delta references.
-fn drop_in_pack_bases_without_delta_refs(state: &mut IndexBuildState<'_>) {
-    state
-        .ofs_bases
-        .retain(|off, _| state.ofs_base_refs.get(off).copied().unwrap_or(0) > 0);
-    state
-        .oid_bases
-        .retain(|id, _| state.oid_base_refs.get(id).copied().unwrap_or(0) > 0);
-}
-
-/// Register pack offsets for every hashed whole so later ofs-deltas can resolve bases.
-fn seed_in_pack_whole_base(state: &mut IndexBuildState<'_>, item: &WholeHashed) {
-    let payload = BasePayload::InPack {
-        zlib_offset: item.zlib_offset,
-        uncompressed_size: item.uncompressed_size,
-    };
-    let base = IndexBase {
-        kind: item.kind,
-        payload,
-    };
-    state.ofs_bases.insert(item.offset, base.clone());
-    state.oid_bases.insert(item.oid, base);
 }
 
 struct WholeHashJob {
@@ -634,10 +620,8 @@ fn scan_and_hash_whole_slots_overlapped(
         .unwrap_or_else(|e| e.into_inner());
     hashed.sort_unstable_by_key(|(index, _)| *index);
     for (_, item) in hashed {
-        seed_in_pack_whole_base(state, &item);
         apply_whole_hashed(state, item);
     }
-    drop_in_pack_bases_without_delta_refs(state);
     Ok(())
 }
 
@@ -651,7 +635,9 @@ fn record_whole_hash_error(first_error: &Mutex<Option<Error>>, err: Error) {
 
 fn apply_whole_hashed(state: &mut IndexBuildState<'_>, item: WholeHashed) {
     state.records.push(item.record);
-    if item.retain_payload {
+    let retain_ofs = state.ofs_base_refs.get(&item.offset).copied().unwrap_or(0) > 0;
+    let retain_oid = state.oid_base_refs.get(&item.oid).copied().unwrap_or(0) > 0;
+    if retain_ofs || retain_oid {
         retain_pack_base_for_whole(
             item.offset,
             item.oid,
@@ -711,12 +697,10 @@ fn hash_whole_slot_from_oid(
     work: &WholeSlot,
     oid: ObjectId,
     algo: HashAlgo,
-    ofs_base_refs: &HashMap<usize, u32>,
-    oid_base_refs: &OidHashMap<u32>,
+    _ofs_base_refs: &HashMap<usize, u32>,
+    _oid_base_refs: &OidHashMap<u32>,
 ) -> Result<WholeHashed> {
     let _ = algo;
-    let retain_ofs = ofs_base_refs.get(&work.offset).copied().unwrap_or(0) > 0;
-    let retain_oid = oid_base_refs.get(&oid).copied().unwrap_or(0) > 0;
     Ok(WholeHashed {
         record: PackIndexRecord {
             oid,
@@ -729,7 +713,6 @@ fn hash_whole_slot_from_oid(
         kind: work.kind,
         zlib_offset: work.zlib_offset,
         uncompressed_size: work.uncompressed_size,
-        retain_payload: retain_ofs || retain_oid,
     })
 }
 
@@ -849,17 +832,25 @@ fn retain_pack_base_for_whole(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn retain_owned_base_for_delta(
+fn retain_delta_pack_base_for_delta(
     offset: usize,
     oid: ObjectId,
     kind: ObjectKind,
-    data: Vec<u8>,
+    zlib_offset: usize,
+    uncompressed_size: usize,
+    base_offset: Option<usize>,
+    base_oid: Option<ObjectId>,
     ofs_base_refs: &HashMap<usize, u32>,
     oid_base_refs: &OidHashMap<u32>,
     ofs_bases: &mut HashMap<usize, IndexBase>,
     oid_bases: &mut OidHashMap<IndexBase>,
 ) {
-    let payload = BasePayload::Owned(data);
+    let payload = BasePayload::DeltaInPack {
+        zlib_offset,
+        uncompressed_size,
+        base_offset,
+        base_oid,
+    };
     let retain_ofs = ofs_base_refs.get(&offset).copied().unwrap_or(0) > 0;
     let retain_oid = oid_base_refs.get(&oid).copied().unwrap_or(0) > 0;
     let base = IndexBase { kind, payload };
@@ -878,17 +869,72 @@ fn retain_owned_base_for_delta(
     }
 }
 
-fn base_inflated_bytes<'a>(pack: &'a [u8], base: &'a IndexBase) -> Result<Cow<'a, [u8]>> {
+/// Inflate a pack index base into `data`, using `op` for delta opcode scratch.
+#[allow(clippy::too_many_arguments)]
+fn inflate_index_base(
+    pack: &[u8],
+    base: &IndexBase,
+    ofs_bases: &HashMap<usize, IndexBase>,
+    oid_bases: &OidHashMap<IndexBase>,
+    odb: &Odb,
+    op: &mut Vec<u8>,
+    data: &mut Vec<u8>,
+    depth: usize,
+) -> Result<ObjectKind> {
+    if depth > MAX_DELTA_CHAIN_DEPTH {
+        return Err(Error::CorruptObject(
+            "delta chain too deep for pack index".to_owned(),
+        ));
+    }
     match &base.payload {
         BasePayload::InPack {
             zlib_offset,
             uncompressed_size,
-        } => Ok(Cow::Owned(decompress_zlib_at_index(
-            pack,
-            *zlib_offset,
-            *uncompressed_size,
-        )?)),
-        BasePayload::Owned(data) => Ok(Cow::Borrowed(data.as_slice())),
+        } => {
+            data.clear();
+            crate::pack_zlib::decompress_zlib_at_index_into(
+                pack,
+                *zlib_offset,
+                *uncompressed_size,
+                data,
+            )?;
+            Ok(base.kind)
+        }
+        BasePayload::DeltaInPack {
+            zlib_offset,
+            uncompressed_size,
+            base_offset,
+            base_oid,
+        } => {
+            crate::pack_zlib::decompress_zlib_at_index_into(
+                pack,
+                *zlib_offset,
+                *uncompressed_size,
+                op,
+            )?;
+            let ops = op.clone();
+            let base_kind = if let Some(base_off) = base_offset {
+                let Some(inner) = ofs_bases.get(base_off) else {
+                    return Err(Error::CorruptObject("delta base not available".to_owned()));
+                };
+                inflate_index_base(pack, inner, ofs_bases, oid_bases, odb, op, data, depth + 1)?
+            } else if let Some(ref base_id) = base_oid {
+                if let Some(inner) = oid_bases.get(base_id) {
+                    inflate_index_base(pack, inner, ofs_bases, oid_bases, odb, op, data, depth + 1)?
+                } else if let Ok(obj) = odb.read(base_id) {
+                    data.clear();
+                    data.extend_from_slice(&obj.data);
+                    obj.kind
+                } else {
+                    return Err(Error::CorruptObject("delta base not available".to_owned()));
+                }
+            } else {
+                return Err(Error::CorruptObject("delta base not available".to_owned()));
+            };
+            let patched = apply_delta(data, &ops)?;
+            *data = patched;
+            Ok(base_kind)
+        }
     }
 }
 
@@ -897,9 +943,27 @@ struct DeltaHashed {
     offset: usize,
     oid: ObjectId,
     kind: ObjectKind,
-    owned_base: Option<Vec<u8>>,
+    zlib_offset: usize,
+    uncompressed_size: usize,
+    retain: bool,
     base_offset: Option<usize>,
     base_oid: Option<ObjectId>,
+}
+
+struct DeltaResolveScratch {
+    delta: Vec<u8>,
+    base: Vec<u8>,
+    result: Vec<u8>,
+}
+
+impl DeltaResolveScratch {
+    fn release_excess(&mut self) {
+        for buf in [&mut self.delta, &mut self.base, &mut self.result] {
+            if buf.capacity() > DELTA_SCRATCH_CAP {
+                buf.shrink_to_fit();
+            }
+        }
+    }
 }
 
 fn resolve_pending_deltas_parallel(
@@ -935,14 +999,16 @@ fn resolve_pending_deltas_parallel(
         let ofs_out_refs = state.ofs_base_refs.clone();
         let oid_out_refs = state.oid_base_refs.clone();
         let ready_count = u64::try_from(ready.len()).unwrap_or(u64::MAX);
-        // Delta resolution inflates base and result bytes per worker; cap concurrency to
-        // bound peak RSS on large delta-heavy packs (whole-object hashing stays parallel).
-        let n_workers = threads.get().min(DELTA_RESOLVE_BATCH).clamp(1, 2);
-
-        for batch in ready.chunks(DELTA_RESOLVE_BATCH) {
-            let mut base_release: Vec<(Option<usize>, Option<ObjectId>)> = Vec::new();
-            let hashed = run_ordered_pool(batch, n_workers, DELTA_STEAL_CHUNK, |delta| {
-                resolve_one_delta(
+        let _ = threads;
+        let mut scratch = DeltaResolveScratch {
+            delta: Vec::new(),
+            base: Vec::new(),
+            result: Vec::new(),
+        };
+        for batch in ready.chunks(DELTA_RESOLVE_ROUND_CHUNK) {
+            for delta in batch {
+                let item = resolve_one_delta(
+                    &mut scratch,
                     pack,
                     delta,
                     state.ofs_bases,
@@ -951,41 +1017,31 @@ fn resolve_pending_deltas_parallel(
                     algo,
                     &ofs_out_refs,
                     &oid_out_refs,
-                )
-            })?;
-
-            for item in hashed {
+                )?;
                 state.records.push(item.record);
-                if let Some(data) = item.owned_base {
-                    retain_owned_base_for_delta(
+                if item.retain {
+                    retain_delta_pack_base_for_delta(
                         item.offset,
                         item.oid,
                         item.kind,
-                        data,
+                        item.zlib_offset,
+                        item.uncompressed_size,
+                        item.base_offset,
+                        item.base_oid,
                         state.ofs_base_refs,
                         state.oid_base_refs,
                         state.ofs_bases,
                         state.oid_bases,
                     );
                 }
-                base_release.push((item.base_offset, item.base_oid));
-            }
-
-            for (base_off, base_id) in base_release {
-                if let Some(base_off) = base_off {
+                if let Some(base_off) = item.base_offset {
                     if let Some(n) = state.ofs_base_refs.get_mut(&base_off) {
                         *n = n.saturating_sub(1);
-                        if *n == 0 {
-                            state.ofs_bases.remove(&base_off);
-                        }
                     }
                 }
-                if let Some(base_id) = base_id {
+                if let Some(base_id) = item.base_oid {
                     if let Some(n) = state.oid_base_refs.get_mut(&base_id) {
                         *n = n.saturating_sub(1);
-                        if *n == 0 {
-                            state.oid_bases.remove(&base_id);
-                        }
                     }
                 }
             }
@@ -1018,6 +1074,7 @@ fn delta_base_ready(
 
 #[allow(clippy::too_many_arguments)]
 fn resolve_one_delta(
+    scratch: &mut DeltaResolveScratch,
     pack: &[u8],
     delta: &PendingIndexDelta,
     ofs_bases: &HashMap<usize, IndexBase>,
@@ -1027,31 +1084,55 @@ fn resolve_one_delta(
     ofs_out_refs: &HashMap<usize, u32>,
     oid_out_refs: &OidHashMap<u32>,
 ) -> Result<DeltaHashed> {
-    let delta_data = decompress_zlib_at_index(pack, delta.zlib_offset, delta.uncompressed_size)?;
-    let base: Option<(ObjectKind, Cow<'_, [u8]>)> = if let Some(base_off) = delta.base_offset {
-        match ofs_bases.get(&base_off) {
-            Some(b) => Some((b.kind, base_inflated_bytes(pack, b)?)),
-            None => None,
-        }
+    crate::pack_zlib::decompress_zlib_at_index_into(
+        pack,
+        delta.zlib_offset,
+        delta.uncompressed_size,
+        &mut scratch.delta,
+    )?;
+    let base_kind = if let Some(base_off) = delta.base_offset {
+        let Some(b) = ofs_bases.get(&base_off) else {
+            return Err(Error::CorruptObject("delta base not available".to_owned()));
+        };
+        inflate_index_base(
+            pack,
+            b,
+            ofs_bases,
+            oid_bases,
+            odb,
+            &mut scratch.result,
+            &mut scratch.base,
+            0,
+        )?
     } else if let Some(ref base_id) = delta.base_oid {
         if let Some(b) = oid_bases.get(base_id) {
-            Some((b.kind, base_inflated_bytes(pack, b)?))
+            inflate_index_base(
+                pack,
+                b,
+                ofs_bases,
+                oid_bases,
+                odb,
+                &mut scratch.result,
+                &mut scratch.base,
+                0,
+            )?
         } else if let Ok(obj) = odb.read(base_id) {
-            Some((obj.kind, Cow::Owned(obj.data)))
+            scratch.base.clear();
+            scratch.base.extend_from_slice(&obj.data);
+            obj.kind
         } else {
-            None
+            return Err(Error::CorruptObject("delta base not available".to_owned()));
         }
     } else {
-        None
-    };
-    let Some((base_kind, base_data)) = base else {
         return Err(Error::CorruptObject("delta base not available".to_owned()));
     };
-    let result = apply_delta(base_data.as_ref(), &delta_data)?;
-    let oid = hash_object(algo, base_kind, &result)?;
+    apply_delta_into(&mut scratch.result, &scratch.base, &scratch.delta)?;
+    let oid = hash_object(algo, base_kind, &scratch.result)?;
     let retain_ofs = ofs_out_refs.get(&delta.offset).copied().unwrap_or(0) > 0;
     let retain_oid = oid_out_refs.get(&oid).copied().unwrap_or(0) > 0;
     let retain = retain_ofs || retain_oid;
+    scratch.result.clear();
+    scratch.release_excess();
     Ok(DeltaHashed {
         record: PackIndexRecord {
             oid,
@@ -1062,7 +1143,9 @@ fn resolve_one_delta(
         offset: delta.offset,
         oid,
         kind: base_kind,
-        owned_base: retain.then_some(result),
+        zlib_offset: delta.zlib_offset,
+        uncompressed_size: delta.uncompressed_size,
+        retain,
         base_offset: delta.base_offset,
         base_oid: delta.base_oid,
     })

@@ -5,7 +5,7 @@ use std::io::Read;
 use flate2::read::ZlibDecoder;
 
 use crate::error::{Error, Result};
-use crate::unpack_objects::decompress_zlib_at;
+use crate::unpack_objects::decompress_zlib_at_into;
 use crate::zlib_inflate::ZlibInflateScratch;
 
 const SKIP_BUF_LEN: usize = 64 * 1024;
@@ -74,13 +74,14 @@ pub(crate) fn skip_zlib_at_with_scratch(
     Ok(pos - offset)
 }
 
-/// Decompress a zlib stream at `offset` for parallel index-pack workers.
-pub(crate) fn decompress_zlib_at_index(
+/// Like [`decompress_zlib_at`], reusing `out` storage for parallel index-pack workers.
+pub(crate) fn decompress_zlib_at_index_into(
     pack: &[u8],
     offset: usize,
     expected_size: usize,
-) -> Result<Vec<u8>> {
-    decompress_zlib_at(pack, offset, expected_size).map(|(data, _)| data)
+    out: &mut Vec<u8>,
+) -> Result<()> {
+    decompress_zlib_at_into(pack, offset, expected_size, out).map(|_| ())
 }
 
 #[cfg(test)]
