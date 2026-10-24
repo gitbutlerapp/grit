@@ -1,6 +1,6 @@
 //! [`RepositoryRemotes::inspect`](crate::repo_handles::RepositoryRemotes::inspect) types and logic.
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 
 use crate::branch_tracking::remote_tracking_ref_for_remote_ref;
 use crate::config::ConfigSet;
@@ -236,15 +236,60 @@ fn local_tracked_head_short_names(
     names.into_iter().collect()
 }
 
+/// Resolvable local refs under the wildcard destinations of the fetch refspecs.
+///
+/// Listing each destination prefix once keeps the tracked check linear in the ref count:
+/// resolving every remote branch separately re-reads `packed-refs` per branch.
+struct LocalTrackingRefs {
+    prefixes: Vec<String>,
+    names: HashSet<String>,
+}
+
+impl LocalTrackingRefs {
+    fn load(git_dir: &std::path::Path, refspecs: &FetchRefspecs) -> Result<Self> {
+        let mut prefixes: Vec<String> = refspecs
+            .positive
+            .iter()
+            .filter_map(|item| item.dst.as_deref())
+            .filter_map(|dst| dst.find('*').map(|star| dst[..star].to_owned()))
+            .collect();
+        prefixes.sort();
+        prefixes.dedup();
+        let mut names = HashSet::new();
+        for prefix in &prefixes {
+            names.extend(
+                refs::list_refs(git_dir, prefix)?
+                    .into_iter()
+                    .map(|(name, _)| name),
+            );
+        }
+        Ok(Self { prefixes, names })
+    }
+
+    /// Whether `tracking` resolves locally, consulting the ref store only for refs outside
+    /// the listed prefixes.
+    fn resolves(&self, git_dir: &std::path::Path, tracking: &str) -> bool {
+        if self
+            .prefixes
+            .iter()
+            .any(|p| tracking.starts_with(p.as_str()))
+        {
+            return self.names.contains(tracking);
+        }
+        refs::resolve_ref(git_dir, tracking).is_ok()
+    }
+}
+
 fn remote_head_is_tracked(
     git_dir: &std::path::Path,
+    local: &LocalTrackingRefs,
     config: &ConfigSet,
     remote_name: &str,
     head_short: &str,
 ) -> bool {
     let remote_ref = format!("refs/heads/{head_short}");
     remote_tracking_ref_for_remote_ref(config, remote_name, &remote_ref)
-        .is_some_and(|tracking| refs::resolve_ref(git_dir, &tracking).is_ok())
+        .is_some_and(|tracking| local.resolves(git_dir, &tracking))
 }
 
 fn remote_head_branch_names(
@@ -285,9 +330,10 @@ fn branch_states_from_query(
         .filter_map(|(full, _)| head_short_name_for_tracking_ref(refspecs, remote_name, &full))
         .collect();
 
+    let local = LocalTrackingRefs::load(git_dir, refspecs)?;
     let mut by_name: BTreeMap<String, RemoteBranchStateKind> = BTreeMap::new();
     for name in &remote_heads {
-        let state = if remote_head_is_tracked(git_dir, config, remote_name, name) {
+        let state = if remote_head_is_tracked(git_dir, &local, config, remote_name, name) {
             RemoteBranchStateKind::Tracked
         } else {
             RemoteBranchStateKind::New

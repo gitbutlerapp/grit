@@ -190,6 +190,76 @@ fn inspect_tracked_uses_fetch_refspec_destination() {
 }
 
 #[test]
+fn inspect_packed_loose_and_exact_refspec_states_like_git() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let upstream = tmp.path().join("upstream");
+    std::fs::create_dir_all(&upstream).expect("upstream");
+    git(&upstream, &["init", "-q", "-b", "main"]);
+    git(&upstream, &["commit", "--allow-empty", "-q", "-m", "init"]);
+    for branch in ["packed1", "packed2", "loose1", "gone", "dropped", "solo"] {
+        git(&upstream, &["branch", branch]);
+    }
+    git(
+        tmp.path(),
+        &["clone", "-q", upstream.to_str().unwrap(), "client"],
+    );
+    let client = tmp.path().join("client");
+    git(
+        &client,
+        &[
+            "config",
+            "--replace-all",
+            "remote.origin.fetch",
+            "+refs/heads/solo:refs/solo-track",
+        ],
+    );
+    git(
+        &client,
+        &[
+            "config",
+            "--add",
+            "remote.origin.fetch",
+            "+refs/heads/*:refs/remotes/origin/*",
+        ],
+    );
+    git(&client, &["fetch", "-q", "origin"]);
+    git(&client, &["pack-refs", "--all"]);
+    git(
+        &client,
+        &["update-ref", "refs/remotes/origin/loose1", "HEAD"],
+    );
+    git(
+        &client,
+        &["update-ref", "-d", "refs/remotes/origin/dropped"],
+    );
+    git(&upstream, &["branch", "-D", "gone"]);
+    git(&upstream, &["branch", "fresh"]);
+
+    let git_text = git(&client, &["remote", "show", "origin"]);
+    let expected = parse_git_remote_show(&git_text);
+    let repo = open_repo(&client);
+    let summary = repo
+        .remotes()
+        .inspect("origin", &InspectOptions::default(), None)
+        .expect("inspect");
+    assert_eq!(grit_branch_set(&summary), expected.branches, "{git_text}");
+
+    let state_of = |name: &str| {
+        summary
+            .branches
+            .iter()
+            .find(|b| b.name == name)
+            .map(|b| b.state)
+    };
+    assert_eq!(state_of("packed1"), Some(RemoteBranchStateKind::Tracked));
+    assert_eq!(state_of("loose1"), Some(RemoteBranchStateKind::Tracked));
+    assert_eq!(state_of("solo"), Some(RemoteBranchStateKind::Tracked));
+    assert_eq!(state_of("dropped"), Some(RemoteBranchStateKind::New));
+    assert_eq!(state_of("fresh"), Some(RemoteBranchStateKind::New));
+    assert_eq!(state_of("gone"), Some(RemoteBranchStateKind::Stale));
+}
+
+#[test]
 fn inspect_no_query_uses_local_refs() {
     let (_tmp, _upstream, clone) = scenario_clone_then_upstream_changes();
     let repo = open_repo(&clone);
