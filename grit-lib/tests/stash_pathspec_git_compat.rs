@@ -2,11 +2,8 @@
 
 use grit_lib::error::Error;
 use grit_lib::objects::{parse_commit, ObjectId};
-use grit_lib::porcelain::stash::{
-    apply_stash_entry, pop_stash_entry, push_stash, StashApplyOptions, StashCreateOptions,
-    StashMode,
-};
 use grit_lib::repo::Repository;
+use grit_lib::stash::{StashApplyOptions, StashMode, StashPushOptions};
 use grit_test_support::git;
 
 const IDENTITY: &str = "Test <t@example.com> 1000000000 +0000";
@@ -29,8 +26,8 @@ fn open_grit(root: &std::path::Path) -> Repository {
     .expect("discover")
 }
 
-fn stash_opts(include_untracked: bool, pathspecs: Vec<String>) -> StashCreateOptions {
-    StashCreateOptions {
+fn stash_opts(include_untracked: bool, pathspecs: Vec<String>) -> StashPushOptions {
+    StashPushOptions {
         message: Some("pathspec".into()),
         include_untracked,
         identity: IDENTITY.into(),
@@ -98,7 +95,9 @@ fn setup_ab_fixture() -> (tempfile::TempDir, tempfile::TempDir) {
 fn stash_push_paths_saves_only_matching_and_keeps_others() {
     let (_base, grit_dir) = setup_ab_fixture();
     let repo = open_grit(grit_dir.path());
-    let pushed = push_stash(&repo, &stash_opts(false, vec!["a.txt".into()]))
+    let pushed = repo
+        .stash()
+        .push(&stash_opts(false, vec!["a.txt".into()]))
         .expect("push")
         .expect("some");
     assert_eq!(worktree_status(grit_dir.path()).trim(), "M  b.txt");
@@ -123,7 +122,8 @@ fn stash_push_paths_with_untracked() {
     std::fs::write(dir.path().join("keep.txt"), "k\n").expect("other untracked");
 
     let repo = open_grit(dir.path());
-    push_stash(&repo, &stash_opts(true, vec!["u.txt".into()]))
+    repo.stash()
+        .push(&stash_opts(true, vec!["u.txt".into()]))
         .expect("push")
         .expect("some");
 
@@ -146,7 +146,8 @@ fn stash_push_paths_newly_staged_file_removed_from_index_and_worktree() {
     git_cmd(dir.path(), &["add", "added"]);
 
     let repo = open_grit(dir.path());
-    push_stash(&repo, &stash_opts(false, vec!["added".into()]))
+    repo.stash()
+        .push(&stash_opts(false, vec!["added".into()]))
         .expect("push")
         .expect("some");
 
@@ -171,8 +172,10 @@ fn stash_push_untracked_pathspec_no_match_is_typed_error() {
     git_cmd(dir.path(), &["commit", "-qm", "init"]);
 
     let repo = open_grit(dir.path());
-    let err =
-        push_stash(&repo, &stash_opts(true, vec!["missing".into()])).expect_err("no match with -u");
+    let err = repo
+        .stash()
+        .push(&stash_opts(true, vec!["missing".into()]))
+        .expect_err("no match with -u");
     assert!(matches!(err, Error::PathspecNoMatch { .. }));
 }
 
@@ -185,8 +188,10 @@ fn stash_push_paths_no_match_is_typed_error() {
     git_cmd(dir.path(), &["commit", "-qm", "init"]);
 
     let repo = open_grit(dir.path());
-    let err =
-        push_stash(&repo, &stash_opts(false, vec!["missing.txt".into()])).expect_err("no match");
+    let err = repo
+        .stash()
+        .push(&stash_opts(false, vec!["missing.txt".into()]))
+        .expect_err("no match");
     assert!(matches!(err, Error::PathspecNoMatch { .. }));
 }
 
@@ -195,7 +200,9 @@ fn grit_path_stash_matches_git_path_stash() {
     let (base, grit_dir) = setup_ab_fixture();
     let repo = open_grit(grit_dir.path());
 
-    let grit_push = push_stash(&repo, &stash_opts(false, vec!["a.txt".into()]))
+    let grit_push = repo
+        .stash()
+        .push(&stash_opts(false, vec!["a.txt".into()]))
         .expect("grit push")
         .expect("oid");
 
@@ -253,7 +260,8 @@ fn stash_apply_index_restores_staged_state() {
     std::fs::write(base.path().join("s.txt"), "staged\n").expect("modify");
     git_cmd(base.path(), &["add", "s.txt"]);
     let repo = open_grit(base.path());
-    push_stash(&repo, &stash_opts(false, Vec::new()))
+    repo.stash()
+        .push(&stash_opts(false, Vec::new()))
         .expect("push")
         .expect("some");
 
@@ -271,15 +279,15 @@ fn stash_apply_index_restores_staged_state() {
         git_cmd(dest, &["reset", "--hard", &head]);
     }
 
-    apply_stash_entry(
-        &open_grit(grit_dir.path()),
-        grit_dir.path(),
-        0,
-        &StashApplyOptions {
-            restore_index: true,
-        },
-    )
-    .expect("apply");
+    (open_grit(grit_dir.path()))
+        .stash()
+        .apply(
+            0,
+            &StashApplyOptions {
+                restore_index: true,
+            },
+        )
+        .expect("apply");
     git_cmd(git_dir.path(), &["stash", "apply", "--index", "stash@{0}"]);
 
     assert_eq!(
@@ -311,16 +319,15 @@ fn stash_pop_index_conflict_keeps_entry() {
     let before_idx = git_cmd(dir.path(), &["diff-index", "--cached", "HEAD"]);
 
     let repo = open_grit(dir.path());
-    let err = pop_stash_entry(
-        &repo,
-        dir.path(),
-        0,
-        &StashApplyOptions {
-            restore_index: true,
-        },
-        IDENTITY,
-    )
-    .expect_err("index conflict");
+    let err = repo
+        .stash()
+        .pop(
+            0,
+            &StashApplyOptions {
+                restore_index: true,
+            },
+        )
+        .expect_err("index conflict");
     assert!(
         matches!(err, Error::StashIndexConflict),
         "expected index conflict, got {err:?}"
@@ -348,7 +355,8 @@ fn git_stash_apply_index_on_grit_stash() {
     git_cmd(dir.path(), &["add", "y.txt"]);
 
     let repo = open_grit(dir.path());
-    push_stash(&repo, &stash_opts(false, Vec::new()))
+    repo.stash()
+        .push(&stash_opts(false, Vec::new()))
         .expect("push")
         .expect("some");
     git_cmd(dir.path(), &["reset", "--hard", "HEAD"]);
@@ -386,15 +394,15 @@ fn grit_apply_index_on_git_stash() {
         git_cmd(dest, &["reset", "--hard", "HEAD"]);
     }
 
-    apply_stash_entry(
-        &open_grit(grit_dir.path()),
-        grit_dir.path(),
-        0,
-        &StashApplyOptions {
-            restore_index: true,
-        },
-    )
-    .expect("apply");
+    (open_grit(grit_dir.path()))
+        .stash()
+        .apply(
+            0,
+            &StashApplyOptions {
+                restore_index: true,
+            },
+        )
+        .expect("apply");
     git_cmd(git_dir.path(), &["stash", "apply", "--index", "stash@{0}"]);
     assert_eq!(
         ls_files_stage(grit_dir.path()),

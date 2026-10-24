@@ -11,9 +11,8 @@ use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::transfer::{FetchOptions, PushOptions, PushRefSpec};
 use grit_lib::remote::ListRefsOptions;
 use grit_lib::repo::Repository;
-use grit_lib::repo_handles::{
-    LockWorktreeOptions, NotesWriteOptions, StashApplyOptions, StashPushOptions,
-};
+use grit_lib::repo_handles::{LockWorktreeOptions, NotesWriteOptions};
+use grit_lib::stash::{StashApplyOptions, StashMode, StashPushOptions};
 use grit_lib::worktree::WorktreeBranch;
 use grit_test_support::git;
 
@@ -63,7 +62,7 @@ fn handle_stash_roundtrip_with_git() {
             selection: None,
             pathspecs: Vec::new(),
             dry_run: false,
-            mode: grit_lib::porcelain::stash::StashMode::default(),
+            mode: StashMode::default(),
         })
         .expect("push")
         .expect("changes");
@@ -94,15 +93,13 @@ fn git_stash_applies_via_handle() {
     let conflicts = repo
         .stash()
         .apply(
-            dir.path(),
+            0,
             &StashApplyOptions {
-                index: 0,
                 restore_index: true,
-                identity: IDENT.into(),
             },
         )
         .expect("apply");
-    assert!(!conflicts);
+    assert!(!conflicts.has_conflicts());
     assert_eq!(
         std::fs::read_to_string(dir.path().join("a")).unwrap(),
         "2\n"

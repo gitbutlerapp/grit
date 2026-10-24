@@ -24,7 +24,7 @@ use grit_lib::refs::store::{
     Expected, MemoryRefStore, RawRef, RefStore, RefTransaction, RefUpdate, RefUpdateFlags,
 };
 use grit_lib::repo::{InitOptions, Repository};
-use grit_lib::repo_handles::{StashApplyOptions, StashPushOptions};
+use grit_lib::stash::{StashApplyOptions, StashPushOptions};
 use grit_lib::state::{resolve_head_for_repository, HeadState};
 use grit_lib::RefStorageFormat;
 
@@ -213,21 +213,16 @@ fn battery(repo: &Repository, wt: &Path) -> BatteryResult {
             mode: Default::default(),
         })
         .expect("stash push")
-        .expect("stash created");
+        .expect("stash created")
+        .oid;
     assert_eq!(fs::read_to_string(wt.join("a.txt")).expect("read"), "hi\n");
     assert_eq!(repo.rev_walk().resolve("refs/stash").expect("stash"), stash);
     assert!(
         !repo
             .stash()
-            .pop(
-                wt,
-                &StashApplyOptions {
-                    index: 0,
-                    restore_index: false,
-                    identity: IDENT_TS.into(),
-                },
-            )
-            .expect("stash pop"),
+            .pop(0, &StashApplyOptions::default())
+            .expect("stash pop")
+            .has_conflicts(),
         "pop must apply without conflicts"
     );
     assert_eq!(

@@ -2,8 +2,8 @@
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::stash::{preview_stash, push_stash, StashCreateOptions, StashMode};
 use grit_lib::repo::Repository;
+use grit_lib::stash::{StashMode, StashPushOptions};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -42,8 +42,8 @@ fn open_grit(root: &Path) -> Repository {
     .expect("open grit repo")
 }
 
-fn stash_opts(mode: StashMode, include_untracked: bool) -> StashCreateOptions {
-    StashCreateOptions {
+fn stash_opts(mode: StashMode, include_untracked: bool) -> StashPushOptions {
+    StashPushOptions {
         message: None,
         include_untracked,
         identity: "Test <t@example.com> 1000000000 +0000".to_owned(),
@@ -134,7 +134,8 @@ fn stash_staged_only_matches_git_trees() {
     setup_staged_fixture(&git_root);
 
     let repo = open_grit(&grit_root);
-    push_stash(&repo, &stash_opts(StashMode::StagedOnly, false))
+    repo.stash()
+        .push(&stash_opts(StashMode::StagedOnly, false))
         .expect("push")
         .expect("had staged changes");
     git_cmd(&git_root, &["stash", "push", "--staged"]);
@@ -168,7 +169,8 @@ fn stash_keep_index_leaves_index_and_worktree_like_git() {
     setup_keep_index_fixture(&git_root);
 
     let repo = open_grit(&grit_root);
-    push_stash(&repo, &stash_opts(StashMode::KeepIndex, false))
+    repo.stash()
+        .push(&stash_opts(StashMode::KeepIndex, false))
         .expect("push")
         .expect("had changes");
     git_cmd(&git_root, &["stash", "push", "--keep-index"]);
@@ -200,7 +202,8 @@ fn stash_keep_index_pop_matches_git() {
     setup_keep_index_fixture(&git_root);
 
     let repo = open_grit(&grit_root);
-    push_stash(&repo, &stash_opts(StashMode::KeepIndex, false))
+    repo.stash()
+        .push(&stash_opts(StashMode::KeepIndex, false))
         .expect("push")
         .expect("had changes");
     git_cmd(&git_root, &["stash", "push", "--keep-index"]);
@@ -226,7 +229,9 @@ fn stash_dry_run_writes_no_objects_or_refs() {
 
     let mut opts = stash_opts(StashMode::All, false);
     opts.dry_run = true;
-    let preview = preview_stash(&repo, &opts)
+    let preview = repo
+        .stash()
+        .preview(&opts)
         .expect("preview")
         .expect("would stash");
     assert!(
@@ -261,7 +266,7 @@ fn stash_staged_with_pathspec_matches_git() {
     let repo = open_grit(&grit_root);
     let mut opts = stash_opts(StashMode::StagedOnly, false);
     opts.pathspecs = vec!["a".to_owned()];
-    push_stash(&repo, &opts).expect("push").expect("changes");
+    repo.stash().push(&opts).expect("push").expect("changes");
     git_cmd(&git_root, &["stash", "push", "--staged", "--", "a"]);
 
     assert_eq!(
@@ -290,7 +295,8 @@ fn stash_staged_deletion_restores_head_like_git() {
     }
 
     let repo = open_grit(&grit_root);
-    push_stash(&repo, &stash_opts(StashMode::StagedOnly, false))
+    repo.stash()
+        .push(&stash_opts(StashMode::StagedOnly, false))
         .expect("push")
         .expect("changes");
     git_cmd(&git_root, &["stash", "push", "--staged"]);
@@ -318,7 +324,9 @@ fn stash_staged_rejects_untracked_combo() {
     std::fs::write(dir.path().join("u.txt"), "u\n").expect("untracked");
 
     let repo = open_grit(dir.path());
-    let err = push_stash(&repo, &stash_opts(StashMode::StagedOnly, true))
+    let err = repo
+        .stash()
+        .push(&stash_opts(StashMode::StagedOnly, true))
         .expect_err("staged + untracked");
     assert!(
         err.to_string().contains("include-untracked"),

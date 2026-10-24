@@ -4,7 +4,7 @@
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::repo::Repository;
-use grit_lib::repo_handles::StashPushOptions;
+use grit_lib::stash::{StashMode, StashPushOptions};
 use std::path::{Path, PathBuf};
 
 const IDENT: &str = "Library Guide <guide@grit-scm.com> 1735689600 +0000";
@@ -42,7 +42,7 @@ fn main() -> Result<(), grit_lib::error::Error> {
         selection: None,
         pathspecs: Vec::new(),
         dry_run: false,
-        mode: grit_lib::porcelain::stash::StashMode::default(),
+        mode: StashMode::default(),
     })?;
     println!("stash_pushed={}", pushed.is_some());
 

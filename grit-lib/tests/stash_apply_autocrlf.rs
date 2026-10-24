@@ -3,8 +3,8 @@
 //! Issue #1305: apply/pop must smudge restored bytes (tracked and `-u` untracked).
 
 use grit_lib::config::environment::{Environment, RepositoryOptions};
-use grit_lib::porcelain::stash::{apply_stash, pop_stash, push_stash, StashCreateOptions};
 use grit_lib::repo::Repository;
+use grit_lib::stash::{StashApplyOptions, StashPushOptions};
 use grit_test_support::{git, git_cmd as git_shell};
 
 fn git_cmd(repo: &std::path::Path, args: &[&str]) -> String {
@@ -18,8 +18,8 @@ fn init_repo(root: &std::path::Path) {
     git_cmd(root, &["config", "core.autocrlf", "true"]);
 }
 
-fn stash_options() -> StashCreateOptions {
-    StashCreateOptions {
+fn stash_options() -> StashPushOptions {
+    StashPushOptions {
         message: None,
         include_untracked: false,
         identity: "T <t@e.com> 1000000000 +0000".to_owned(),
@@ -30,8 +30,8 @@ fn stash_options() -> StashCreateOptions {
     }
 }
 
-fn stash_options_untracked() -> StashCreateOptions {
-    StashCreateOptions {
+fn stash_options_untracked() -> StashPushOptions {
+    StashPushOptions {
         message: None,
         include_untracked: true,
         identity: "T <t@e.com> 1000000000 +0000".to_owned(),
@@ -142,7 +142,8 @@ fn apply_stash_succeeds_on_clean_tree_with_autocrlf() {
 
     std::fs::write(dir.path().join("a.txt"), b"one\ntwo\nthree\nfour\n").expect("modify");
     let repo = open_grit(dir.path());
-    push_stash(&repo, &stash_options())
+    repo.stash()
+        .push(&stash_options())
         .expect("push")
         .expect("had changes");
 
@@ -163,14 +164,10 @@ fn apply_stash_succeeds_on_clean_tree_with_autocrlf() {
         .then_some(())
         .expect("cp failed");
     let grit_repo = open_grit(grit_dir.path());
-    apply_stash(
-        &grit_repo,
-        grit_dir.path(),
-        &stash_oid,
-        false,
-        "T <t@e.com> 0 +0000",
-    )
-    .expect("apply must not treat CRLF smudge as local changes");
+    grit_repo
+        .stash()
+        .apply_commit(&stash_oid, &StashApplyOptions::default())
+        .expect("apply must not treat CRLF smudge as local changes");
 
     let git_dir = tempfile::tempdir().expect("git copy");
     std::process::Command::new("cp")
@@ -208,13 +205,16 @@ fn pop_stash_succeeds_on_clean_tree_with_autocrlf() {
 
     std::fs::write(dir.path().join("a.txt"), b"one\ntwo\nthree\nfour\n").expect("modify");
     let repo = open_grit(dir.path());
-    push_stash(&repo, &stash_options())
+    repo.stash()
+        .push(&stash_options())
         .expect("push")
         .expect("had changes");
 
     ensure_crlf_worktree_lf_index(dir.path());
 
-    pop_stash(&repo, dir.path(), 0, false, "T <t@e.com> 0 +0000").expect("pop");
+    repo.stash()
+        .pop(0, &StashApplyOptions::default())
+        .expect("pop");
 
     let list = git_cmd(dir.path(), &["stash", "list"]);
     assert!(
@@ -241,14 +241,16 @@ fn apply_stash_succeeds_with_system_inherited_autocrlf_only() {
 
     std::fs::write(dir.path().join("a.txt"), b"one\ntwo\nthree\nfour\n").expect("modify");
     let repo = open_grit_inherited_autocrlf(dir.path(), &system_cfg);
-    push_stash(&repo, &stash_options())
+    repo.stash()
+        .push(&stash_options())
         .expect("push")
         .expect("had changes");
 
     ensure_crlf_worktree_lf_index_with_system(dir.path(), &system_cfg);
 
     let stash_oid = grit_lib::refs::resolve_ref(repo.git_dir(), "refs/stash").expect("stash ref");
-    apply_stash(&repo, dir.path(), &stash_oid, false, "T <t@e.com> 0 +0000")
+    repo.stash()
+        .apply_commit(&stash_oid, &StashApplyOptions::default())
         .expect("apply must honor inherited system autocrlf when comparing worktree to index");
 
     let porcelain = git_with_system_config(dir.path(), &system_cfg, &["status", "--porcelain"]);
@@ -271,13 +273,15 @@ fn pop_stash_succeeds_with_system_inherited_autocrlf_only() {
 
     std::fs::write(dir.path().join("a.txt"), b"one\ntwo\nthree\nfour\n").expect("modify");
     let repo = open_grit_inherited_autocrlf(dir.path(), &system_cfg);
-    push_stash(&repo, &stash_options())
+    repo.stash()
+        .push(&stash_options())
         .expect("push")
         .expect("had changes");
 
     ensure_crlf_worktree_lf_index_with_system(dir.path(), &system_cfg);
 
-    pop_stash(&repo, dir.path(), 0, false, "T <t@e.com> 0 +0000")
+    repo.stash()
+        .pop(0, &StashApplyOptions::default())
         .expect("pop must honor inherited system autocrlf when comparing worktree to index");
 
     let list = git_with_system_config(dir.path(), &system_cfg, &["stash", "list"]);
@@ -299,13 +303,16 @@ fn pop_stash_writes_crlf_worktree_bytes_for_tracked_and_untracked() {
     std::fs::write(dir.path().join("u.txt"), b"x\r\ny\r\n").expect("untracked");
 
     let repo = open_grit(dir.path());
-    push_stash(&repo, &stash_options_untracked())
+    repo.stash()
+        .push(&stash_options_untracked())
         .expect("push")
         .expect("had changes");
 
     ensure_stash_reset_f_txt_crlf_clean(dir.path());
 
-    pop_stash(&repo, dir.path(), 0, false, "T <t@e.com> 0 +0000").expect("pop");
+    repo.stash()
+        .pop(0, &StashApplyOptions::default())
+        .expect("pop");
 
     assert_worktree_bytes(&dir.path().join("f.txt"), b"a\r\nb\r\nc\r\n");
     assert_worktree_bytes(&dir.path().join("u.txt"), b"x\r\ny\r\n");
@@ -328,7 +335,8 @@ fn apply_stash_writes_crlf_worktree_bytes_matching_git_stash_apply() {
     std::fs::write(dir.path().join("u.txt"), b"x\r\ny\r\n").expect("untracked");
 
     let repo = open_grit(dir.path());
-    push_stash(&repo, &stash_options_untracked())
+    repo.stash()
+        .push(&stash_options_untracked())
         .expect("push")
         .expect("had changes");
 
@@ -349,14 +357,10 @@ fn apply_stash_writes_crlf_worktree_bytes_matching_git_stash_apply() {
         .then_some(())
         .expect("cp failed");
     let grit_repo = open_grit(grit_dir.path());
-    apply_stash(
-        &grit_repo,
-        grit_dir.path(),
-        &stash_oid,
-        false,
-        "T <t@e.com> 0 +0000",
-    )
-    .expect("apply");
+    grit_repo
+        .stash()
+        .apply_commit(&stash_oid, &StashApplyOptions::default())
+        .expect("apply");
 
     let git_dir = tempfile::tempdir().expect("git copy");
     std::process::Command::new("cp")

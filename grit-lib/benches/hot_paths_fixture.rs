@@ -17,12 +17,12 @@ use grit_lib::objects::{serialize_commit, CommitData, ObjectId, ObjectKind};
 use grit_lib::porcelain::checkout::checkout_between_trees;
 use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
 use grit_lib::porcelain::staging::stage_worktree_changes;
-use grit_lib::porcelain::stash::{apply_stash, push_stash, StashCreateOptions, StashMode};
 use grit_lib::porcelain::status::{status, StatusOptions};
 use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
 use grit_lib::progress::NullProgress;
 use grit_lib::refs;
 use grit_lib::repo::{InitOptions, Repository};
+use grit_lib::stash::{StashApplyOptions, StashMode, StashPushOptions};
 use tempfile::TempDir;
 
 const BENCH_IDENT: &str = "Bench <bench@grit-scm.test> 1700000000 +0000";
@@ -475,7 +475,7 @@ fn write_tree_commit(
 
 pub fn bench_push_stash(fx: &HotPathsFixture) {
     fx.modify_worktree_files(50);
-    let options = StashCreateOptions {
+    let options = StashPushOptions {
         message: None,
         include_untracked: false,
         identity: BENCH_IDENT.to_owned(),
@@ -484,19 +484,16 @@ pub fn bench_push_stash(fx: &HotPathsFixture) {
         dry_run: false,
         mode: StashMode::default(),
     };
-    let _ = push_stash(&fx.repo, &options).expect("push_stash");
+    let _ = fx.repo.stash().push(&options).expect("push_stash");
 }
 
 pub fn bench_apply_stash(fx: &HotPathsFixture, stash_oid: &ObjectId) {
     let wt = fx.repo.work_tree().expect("work tree");
-    let _ = apply_stash(
-        &fx.repo,
-        wt,
-        stash_oid,
-        false,
-        "Bench <bench@example.com> 0 +0000",
-    )
-    .expect("apply_stash");
+    let _ = fx
+        .repo
+        .stash()
+        .apply_commit(&stash_oid, &StashApplyOptions::default())
+        .expect("apply_stash");
 }
 
 pub fn bench_pick_path(fx: &HotPathsFixture, path_count: usize) {

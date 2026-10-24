@@ -49,7 +49,7 @@ Larger subsystems use [`repo_handles`](rustdoc:grit_lib::repo_handles):
 | --- | --- | --- |
 | `Repository::remotes` | `RepositoryRemotes` | List/get remotes, `ls-remote`, fetch, push |
 | `Repository::worktrees` | `RepositoryWorktrees` | List/add/remove/lock/unlock linked worktrees |
-| `Repository::stash` | `RepositoryStash` | Stash list/push/apply/pop/drop |
+| `Repository::stash` | `RepositoryStash` | Stash list/push/apply/pop/drop/branch/clear (the one stash API) |
 | `Repository::notes` | `RepositoryNotes` | Notes list/read/add/remove via `NotesRef` |
 | `Repository::bundles` | `RepositoryBundles` | Bundle create/verify/list-heads/unbundle |
 

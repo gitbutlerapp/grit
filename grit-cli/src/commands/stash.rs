@@ -11,11 +11,7 @@ use grit_lib::error::Error as LibError;
 use grit_lib::porcelain::hunk_select::{
     parse_hunk_id_list, report_unstaged_hunk_selection, HunkSelectError,
 };
-use grit_lib::porcelain::stash::{
-    apply_stash_entry, clear_stashes, drop_stash, list_stashes, pop_stash_entry, preview_stash,
-    push_stash, stash_branch, stash_diff, StashApplyOptions, StashCreateOptions, StashDiffOptions,
-    StashMode,
-};
+use grit_lib::stash::{StashApplyOptions, StashDiffOptions, StashMode, StashPushOptions};
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -424,7 +420,7 @@ pub fn run_push(args: StashPushRunArgs<'_>) -> Result<StashPushOutcome> {
         (BTreeMap::new(), BTreeMap::new())
     };
     let push_paths = pathspecs.clone();
-    let options = StashCreateOptions {
+    let options = StashPushOptions {
         message: message.clone(),
         include_untracked,
         identity,
@@ -434,7 +430,7 @@ pub fn run_push(args: StashPushRunArgs<'_>) -> Result<StashPushOutcome> {
         mode,
     };
     if dry_run {
-        let preview = preview_stash(&repo, &options).map_err(map_stash_error)?;
+        let preview = repo.stash().preview(&options).map_err(map_stash_error)?;
         return Ok(match preview {
             Some(p) => {
                 let mut paths = p.paths;
@@ -455,7 +451,7 @@ pub fn run_push(args: StashPushRunArgs<'_>) -> Result<StashPushOutcome> {
             None => StashPushOutcome::Nothing { stashed: false },
         });
     }
-    let pushed = push_stash(&repo, &options).map_err(map_stash_error)?;
+    let pushed = repo.stash().push(&options).map_err(map_stash_error)?;
     Ok(match pushed {
         Some(result) => StashPushOutcome::Saved {
             oid: result.oid.to_hex(),
@@ -472,7 +468,7 @@ pub fn run_push(args: StashPushRunArgs<'_>) -> Result<StashPushOutcome> {
 
 pub fn run_list() -> Result<StashListOutcome> {
     let repo = context::discover()?;
-    let entries = list_stashes(&repo).map_err(map_stash_error)?;
+    let entries = repo.stash().list().map_err(map_stash_error)?;
     Ok(StashListOutcome(
         entries
             .into_iter()
@@ -493,8 +489,11 @@ pub fn run_show(
     let repo = context::discover()?;
     let n = parse_stash_index(index.as_deref())?;
     let diff_options = StashDiffOptions { include_untracked };
+    let entries = repo
+        .stash()
+        .diff(n, &diff_options)
+        .map_err(map_stash_error)?;
     if patch {
-        let entries = stash_diff(&repo, n, &diff_options).map_err(map_stash_error)?;
         let patch = diff::outcome_from_tree_entries(&repo, entries)?;
         return Ok(StashShowOutcome {
             index: n,
@@ -503,7 +502,6 @@ pub fn run_show(
             patch: Some(patch),
         });
     }
-    let entries = stash_diff(&repo, n, &diff_options).map_err(map_stash_error)?;
     let full = diff::outcome_from_tree_entries(&repo, entries)?;
     let stat = diff_render::diffstat_from_files(&full.files);
     Ok(StashShowOutcome {
@@ -568,16 +566,10 @@ impl MarkdownRender for StashBranchOutcome {
 
 pub fn run_branch(index: Option<String>, name: &str) -> Result<StashBranchOutcome> {
     let repo = context::discover()?;
-    let work_tree = repo
-        .work_tree()
+    repo.work_tree()
         .context("grit stash branch needs a working tree")?;
-    let _ = work_tree;
     let n = parse_stash_index(index.as_deref())?;
-    let env = context::environment();
-    let config = repo.config().context("could not load config")?;
-    let now = context::wall_clock_now(&env);
-    let identity = context::reflog_identity(&env, &config, now);
-    let outcome = stash_branch(&repo, name, n, &identity).map_err(map_stash_error)?;
+    let outcome = repo.stash().branch(name, n).map_err(map_stash_error)?;
     Ok(StashBranchOutcome {
         branch: outcome.branch,
         base: outcome.base.to_hex(),
@@ -660,7 +652,7 @@ impl MarkdownRender for StashClearOutcome {
 
 pub fn run_clear(force: bool, dry_run: bool) -> Result<StashClearOutcome> {
     let repo = context::discover()?;
-    let count = list_stashes(&repo).map_err(map_stash_error)?.len();
+    let count = repo.stash().list().map_err(map_stash_error)?.len();
     if !force {
         return Ok(StashClearOutcome {
             cleared: count,
@@ -673,7 +665,7 @@ pub fn run_clear(force: bool, dry_run: bool) -> Result<StashClearOutcome> {
             dry_run: true,
         });
     }
-    let cleared = clear_stashes(&repo).map_err(map_stash_error)?;
+    let cleared = repo.stash().clear().map_err(map_stash_error)?;
     Ok(StashClearOutcome {
         cleared,
         dry_run: false,
@@ -682,11 +674,12 @@ pub fn run_clear(force: bool, dry_run: bool) -> Result<StashClearOutcome> {
 
 pub fn run_apply(index: Option<String>, restore_index: bool) -> Result<StashApplyOutcome> {
     let repo = context::discover()?;
-    let work_tree = repo
-        .work_tree()
+    repo.work_tree()
         .context("grit stash apply needs a working tree")?;
     let n = parse_stash_index(index.as_deref())?;
-    let applied = apply_stash_entry(&repo, work_tree, n, &StashApplyOptions { restore_index })
+    let applied = repo
+        .stash()
+        .apply(n, &StashApplyOptions { restore_index })
         .map_err(map_stash_error)?;
     Ok(StashApplyOutcome {
         index: n,
@@ -698,22 +691,13 @@ pub fn run_apply(index: Option<String>, restore_index: bool) -> Result<StashAppl
 
 pub fn run_pop(index: Option<String>, restore_index: bool) -> Result<StashPopOutcome> {
     let repo = context::discover()?;
-    let work_tree = repo
-        .work_tree()
+    repo.work_tree()
         .context("grit stash pop needs a working tree")?;
     let n = parse_stash_index(index.as_deref())?;
-    let env = context::environment();
-    let config = repo.config().context("could not load config")?;
-    let now = context::wall_clock_now(&env);
-    let identity = context::reflog_identity(&env, &config, now);
-    let popped = pop_stash_entry(
-        &repo,
-        work_tree,
-        n,
-        &StashApplyOptions { restore_index },
-        &identity,
-    )
-    .map_err(map_stash_error)?;
+    let popped = repo
+        .stash()
+        .pop(n, &StashApplyOptions { restore_index })
+        .map_err(map_stash_error)?;
     let conflicts = popped.has_conflicts();
     Ok(StashPopOutcome {
         index: n,
@@ -727,11 +711,7 @@ pub fn run_pop(index: Option<String>, restore_index: bool) -> Result<StashPopOut
 pub fn run_drop(index: Option<String>) -> Result<StashDropOutcome> {
     let repo = context::discover()?;
     let n = parse_stash_index(index.as_deref())?;
-    let env = context::environment();
-    let config = repo.config().context("could not load config")?;
-    let now = context::wall_clock_now(&env);
-    let identity = context::reflog_identity(&env, &config, now);
-    drop_stash(&repo, n, &identity).map_err(map_stash_error)?;
+    repo.stash().drop(n).map_err(map_stash_error)?;
     Ok(StashDropOutcome { index: n })
 }
 

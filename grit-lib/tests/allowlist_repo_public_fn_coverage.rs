@@ -70,7 +70,7 @@ use grit_lib::remote::transfer::{build_pack, FetchOptions, PackBuildOptions, Tag
 use grit_lib::repo::caches::RepoCaches;
 use grit_lib::repo::ensure_core_bare;
 use grit_lib::repo::{InitOptions, Repository};
-use grit_lib::repo_handles::{StashApplyOptions, StashPushOptions};
+use grit_lib::stash::{StashApplyOptions, StashPushOptions};
 use grit_lib::state::{read_merge_msg, resolve_head, split_commit_in_progress};
 use grit_lib::RefStorageFormat;
 use tempfile::tempdir;
@@ -399,14 +399,7 @@ fn porcelain_stash_tag_status_and_worktree() {
         dry_run: false,
         mode: grit_lib::porcelain::stash::StashMode::default(),
     });
-    let _ = repo.stash().pop(
-        work_tree,
-        &StashApplyOptions {
-            index: 0,
-            restore_index: false,
-            identity: identity.clone(),
-        },
-    );
+    let _ = repo.stash().pop(0, &StashApplyOptions::default());
     let _ = rerere_forget_path(&repo, "tracked.txt");
 }
 

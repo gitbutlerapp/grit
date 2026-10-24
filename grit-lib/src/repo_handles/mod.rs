@@ -46,5 +46,5 @@ pub use remote::{
     RepositoryRemotes, SetHead, SetHeadOutcome, UrlChange,
 };
 pub use remote_rename::RemoteRename;
-pub use stash::{RepositoryStash, StashApplyOptions, StashPushOptions};
+pub use stash::RepositoryStash;
 pub use worktree::{LockWorktreeOptions, RepositoryWorktrees};

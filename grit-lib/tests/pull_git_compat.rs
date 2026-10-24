@@ -9,7 +9,6 @@ use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::pull::{
     pull, resolve_pull_mode, PullError, PullMode, PullOptions, PullResult,
 };
-use grit_lib::porcelain::stash::list_stashes;
 use grit_lib::refs::resolve_ref;
 use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::transfer::{FetchOptions, TagMode};
@@ -559,7 +558,7 @@ fn pull_autostash_restored_when_fetch_fails() {
     write_file(&grit_dir, "u", "untracked\n");
     let repo = open(&grit_dir);
     assert!(
-        list_stashes(&repo).expect("list stashes").is_empty(),
+        repo.stash().list().expect("list stashes").is_empty(),
         "pre-pull stash list must be empty"
     );
     let err = try_pull_grit(
@@ -583,7 +582,8 @@ fn pull_autostash_restored_when_fetch_fails() {
         "untracked\n"
     );
     assert!(
-        list_stashes(&repo)
+        repo.stash()
+            .list()
             .expect("list stashes after abort")
             .is_empty(),
         "operation autostash must be dropped after conflict-free restore"

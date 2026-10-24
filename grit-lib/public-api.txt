@@ -13951,28 +13951,6 @@ impl core::marker::Unpin for grit_lib::stash::StashBranchOutcome
 impl core::marker::UnsafeUnpin for grit_lib::stash::StashBranchOutcome
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::stash::StashBranchOutcome
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::stash::StashBranchOutcome
-pub struct grit_lib::porcelain::stash::StashCreateOptions
-pub grit_lib::porcelain::stash::StashCreateOptions::dry_run: bool
-pub grit_lib::porcelain::stash::StashCreateOptions::identity: alloc::string::String
-pub grit_lib::porcelain::stash::StashCreateOptions::include_untracked: bool
-pub grit_lib::porcelain::stash::StashCreateOptions::message: core::option::Option<alloc::string::String>
-pub grit_lib::porcelain::stash::StashCreateOptions::mode: grit_lib::stash::StashMode
-pub grit_lib::porcelain::stash::StashCreateOptions::pathspecs: alloc::vec::Vec<alloc::string::String>
-pub grit_lib::porcelain::stash::StashCreateOptions::selection: core::option::Option<grit_lib::porcelain::hunk_select::HunkSelection>
-impl grit_lib::stash::StashCreateOptions
-pub fn grit_lib::stash::StashCreateOptions::validate(&self) -> grit_lib::error::Result<()>
-pub fn grit_lib::stash::StashCreateOptions::validate_staged_worktree(&self, &grit_lib::repo::Repository, &std::path::Path, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<()>
-impl core::clone::Clone for grit_lib::stash::StashCreateOptions
-pub fn grit_lib::stash::StashCreateOptions::clone(&self) -> Self
-impl core::fmt::Debug for grit_lib::stash::StashCreateOptions
-pub fn grit_lib::stash::StashCreateOptions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Freeze for grit_lib::stash::StashCreateOptions
-impl core::marker::Send for grit_lib::stash::StashCreateOptions
-impl core::marker::Sync for grit_lib::stash::StashCreateOptions
-impl core::marker::Unpin for grit_lib::stash::StashCreateOptions
-impl core::marker::UnsafeUnpin for grit_lib::stash::StashCreateOptions
-impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::stash::StashCreateOptions
-impl core::panic::unwind_safe::UnwindSafe for grit_lib::stash::StashCreateOptions
 pub struct grit_lib::porcelain::stash::StashDiffOptions
 pub grit_lib::porcelain::stash::StashDiffOptions::include_untracked: bool
 impl core::clone::Clone for grit_lib::stash::StashDiffOptions
@@ -14030,6 +14008,28 @@ impl core::marker::Unpin for grit_lib::stash::StashPreview
 impl core::marker::UnsafeUnpin for grit_lib::stash::StashPreview
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::stash::StashPreview
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::stash::StashPreview
+pub struct grit_lib::porcelain::stash::StashPushOptions
+pub grit_lib::porcelain::stash::StashPushOptions::dry_run: bool
+pub grit_lib::porcelain::stash::StashPushOptions::identity: alloc::string::String
+pub grit_lib::porcelain::stash::StashPushOptions::include_untracked: bool
+pub grit_lib::porcelain::stash::StashPushOptions::message: core::option::Option<alloc::string::String>
+pub grit_lib::porcelain::stash::StashPushOptions::mode: grit_lib::stash::StashMode
+pub grit_lib::porcelain::stash::StashPushOptions::pathspecs: alloc::vec::Vec<alloc::string::String>
+pub grit_lib::porcelain::stash::StashPushOptions::selection: core::option::Option<grit_lib::porcelain::hunk_select::HunkSelection>
+impl grit_lib::stash::StashPushOptions
+pub fn grit_lib::stash::StashPushOptions::validate(&self) -> grit_lib::error::Result<()>
+pub fn grit_lib::stash::StashPushOptions::validate_staged_worktree(&self, &grit_lib::repo::Repository, &std::path::Path, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<()>
+impl core::clone::Clone for grit_lib::stash::StashPushOptions
+pub fn grit_lib::stash::StashPushOptions::clone(&self) -> Self
+impl core::fmt::Debug for grit_lib::stash::StashPushOptions
+pub fn grit_lib::stash::StashPushOptions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::stash::StashPushOptions
+impl core::marker::Send for grit_lib::stash::StashPushOptions
+impl core::marker::Sync for grit_lib::stash::StashPushOptions
+impl core::marker::Unpin for grit_lib::stash::StashPushOptions
+impl core::marker::UnsafeUnpin for grit_lib::stash::StashPushOptions
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::stash::StashPushOptions
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::stash::StashPushOptions
 pub struct grit_lib::porcelain::stash::StashPushResult
 pub grit_lib::porcelain::stash::StashPushResult::message: alloc::string::String
 pub grit_lib::porcelain::stash::StashPushResult::oid: grit_lib::objects::ObjectId
@@ -14050,29 +14050,11 @@ impl core::marker::UnsafeUnpin for grit_lib::stash::StashPushResult
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::stash::StashPushResult
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::stash::StashPushResult
 pub fn grit_lib::porcelain::stash::add_stage_entry(&mut grit_lib::index::Index, &[u8], &grit_lib::objects::ObjectId, u32, u16)
-pub fn grit_lib::porcelain::stash::apply_merge_autostash(&grit_lib::repo::Repository) -> grit_lib::error::Result<bool>
-pub fn grit_lib::porcelain::stash::apply_operation_autostash(&grit_lib::repo::Repository, &grit_lib::objects::ObjectId, &str) -> grit_lib::error::Result<bool>
-pub fn grit_lib::porcelain::stash::apply_stash(&grit_lib::repo::Repository, &std::path::Path, &grit_lib::objects::ObjectId, bool, &str) -> grit_lib::error::Result<bool>
-pub fn grit_lib::porcelain::stash::apply_stash_entry(&grit_lib::repo::Repository, &std::path::Path, usize, &grit_lib::stash::StashApplyOptions) -> grit_lib::error::Result<grit_lib::stash::StashApplyOutcome>
 pub fn grit_lib::porcelain::stash::check_stash_apply_would_overwrite_local_changes(&grit_lib::repo::Repository, &std::path::Path, &grit_lib::objects::CommitData) -> grit_lib::error::Result<()>
-pub fn grit_lib::porcelain::stash::clear_stashes(&grit_lib::repo::Repository) -> grit_lib::error::Result<usize>
-pub fn grit_lib::porcelain::stash::create_stash(&grit_lib::repo::Repository, &grit_lib::stash::StashCreateOptions) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectId>>
-pub fn grit_lib::porcelain::stash::drop_stash(&grit_lib::repo::Repository, usize, &str) -> grit_lib::error::Result<()>
-pub fn grit_lib::porcelain::stash::drop_stash_commit(&grit_lib::repo::Repository, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<bool>
 pub fn grit_lib::porcelain::stash::flat_tree_lookup<'a>(&'a [grit_lib::stash::FlatTreeEntry], &str) -> core::option::Option<&'a grit_lib::stash::FlatTreeEntry>
 pub fn grit_lib::porcelain::stash::flatten_tree_full(&grit_lib::objects::odb::Odb, &grit_lib::objects::ObjectId, &str, grit_lib::path_validate::ProtectOptions) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::stash::FlatTreeEntry>>
-pub fn grit_lib::porcelain::stash::list_stashes(&grit_lib::repo::Repository) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::stash::StashEntry>>
-pub fn grit_lib::porcelain::stash::pop_stash(&grit_lib::repo::Repository, &std::path::Path, usize, bool, &str) -> grit_lib::error::Result<bool>
-pub fn grit_lib::porcelain::stash::pop_stash_entry(&grit_lib::repo::Repository, &std::path::Path, usize, &grit_lib::stash::StashApplyOptions, &str) -> grit_lib::error::Result<grit_lib::stash::StashApplyOutcome>
-pub fn grit_lib::porcelain::stash::preview_stash(&grit_lib::repo::Repository, &grit_lib::stash::StashCreateOptions) -> grit_lib::error::Result<core::option::Option<grit_lib::stash::StashPreview>>
-pub fn grit_lib::porcelain::stash::push_operation_autostash(&grit_lib::repo::Repository, &str) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectId>>
-pub fn grit_lib::porcelain::stash::push_stash(&grit_lib::repo::Repository, &grit_lib::stash::StashCreateOptions) -> grit_lib::error::Result<core::option::Option<grit_lib::stash::StashPushResult>>
 pub fn grit_lib::porcelain::stash::remove_empty_dirs(&std::path::Path, &std::path::Path, &grit_lib::config::environment::Environment)
-pub fn grit_lib::porcelain::stash::restore_operation_autostash(&grit_lib::repo::Repository, &grit_lib::objects::ObjectId, &str) -> grit_lib::error::Result<()>
-pub fn grit_lib::porcelain::stash::stash_branch(&grit_lib::repo::Repository, &str, usize, &str) -> grit_lib::error::Result<grit_lib::stash::StashBranchOutcome>
-pub fn grit_lib::porcelain::stash::stash_diff(&grit_lib::repo::Repository, usize, &grit_lib::stash::StashDiffOptions) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
 pub fn grit_lib::porcelain::stash::stash_worktree_change_paths(&grit_lib::repo::Repository, &grit_lib::objects::CommitData) -> grit_lib::error::Result<alloc::collections::btree::set::BTreeSet<alloc::string::String>>
-pub fn grit_lib::porcelain::stash::store_stash(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, &str, &str) -> grit_lib::error::Result<()>
 pub fn grit_lib::porcelain::stash::worktree_bytes_for_index_mode(&std::path::Path, u32) -> core::io::error::Result<alloc::vec::Vec<u8>>
 pub fn grit_lib::porcelain::stash::write_regular_file_replacing_symlink(&std::path::Path, &[u8]) -> core::io::error::Result<()>
 pub mod grit_lib::porcelain::status
@@ -21247,12 +21229,17 @@ impl<'repo> !core::panic::unwind_safe::RefUnwindSafe for grit_lib::repo_handles:
 impl<'repo> !core::panic::unwind_safe::UnwindSafe for grit_lib::repo_handles::RepositoryRemotes<'repo>
 pub struct grit_lib::repo_handles::RepositoryStash<'repo>
 impl<'repo> grit_lib::repo_handles::RepositoryStash<'repo>
-pub fn grit_lib::repo_handles::RepositoryStash<'repo>::apply(&self, &std::path::Path, &grit_lib::repo_handles::StashApplyOptions) -> grit_lib::error::Result<bool>
-pub fn grit_lib::repo_handles::RepositoryStash<'repo>::create(&self, &grit_lib::repo_handles::StashPushOptions) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectId>>
-pub fn grit_lib::repo_handles::RepositoryStash<'repo>::drop(&self, usize, &str) -> grit_lib::error::Result<()>
+pub fn grit_lib::repo_handles::RepositoryStash<'repo>::apply(&self, usize, &grit_lib::stash::StashApplyOptions) -> grit_lib::error::Result<grit_lib::stash::StashApplyOutcome>
+pub fn grit_lib::repo_handles::RepositoryStash<'repo>::apply_commit(&self, &grit_lib::objects::ObjectId, &grit_lib::stash::StashApplyOptions) -> grit_lib::error::Result<grit_lib::stash::StashApplyOutcome>
+pub fn grit_lib::repo_handles::RepositoryStash<'repo>::branch(&self, &str, usize) -> grit_lib::error::Result<grit_lib::stash::StashBranchOutcome>
+pub fn grit_lib::repo_handles::RepositoryStash<'repo>::clear(&self) -> grit_lib::error::Result<usize>
+pub fn grit_lib::repo_handles::RepositoryStash<'repo>::create(&self, &grit_lib::stash::StashPushOptions) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectId>>
+pub fn grit_lib::repo_handles::RepositoryStash<'repo>::diff(&self, usize, &grit_lib::stash::StashDiffOptions) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
+pub fn grit_lib::repo_handles::RepositoryStash<'repo>::drop(&self, usize) -> grit_lib::error::Result<()>
 pub fn grit_lib::repo_handles::RepositoryStash<'repo>::list(&self) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::stash::StashEntry>>
-pub fn grit_lib::repo_handles::RepositoryStash<'repo>::pop(&self, &std::path::Path, &grit_lib::repo_handles::StashApplyOptions) -> grit_lib::error::Result<bool>
-pub fn grit_lib::repo_handles::RepositoryStash<'repo>::push(&self, &grit_lib::repo_handles::StashPushOptions) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectId>>
+pub fn grit_lib::repo_handles::RepositoryStash<'repo>::pop(&self, usize, &grit_lib::stash::StashApplyOptions) -> grit_lib::error::Result<grit_lib::stash::StashApplyOutcome>
+pub fn grit_lib::repo_handles::RepositoryStash<'repo>::preview(&self, &grit_lib::stash::StashPushOptions) -> grit_lib::error::Result<core::option::Option<grit_lib::stash::StashPreview>>
+pub fn grit_lib::repo_handles::RepositoryStash<'repo>::push(&self, &grit_lib::stash::StashPushOptions) -> grit_lib::error::Result<core::option::Option<grit_lib::stash::StashPushResult>>
 pub fn grit_lib::repo_handles::RepositoryStash<'repo>::repository(&self) -> &'repo grit_lib::repo::Repository
 impl<'repo> core::clone::Clone for grit_lib::repo_handles::RepositoryStash<'repo>
 pub fn grit_lib::repo_handles::RepositoryStash<'repo>::clone(&self) -> Self
@@ -21307,40 +21294,6 @@ impl core::marker::Unpin for grit_lib::repo_handles::SetHeadOutcome
 impl core::marker::UnsafeUnpin for grit_lib::repo_handles::SetHeadOutcome
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::repo_handles::SetHeadOutcome
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::repo_handles::SetHeadOutcome
-pub struct grit_lib::repo_handles::StashApplyOptions
-pub grit_lib::repo_handles::StashApplyOptions::identity: alloc::string::String
-pub grit_lib::repo_handles::StashApplyOptions::index: usize
-pub grit_lib::repo_handles::StashApplyOptions::restore_index: bool
-impl core::clone::Clone for grit_lib::repo_handles::StashApplyOptions
-pub fn grit_lib::repo_handles::StashApplyOptions::clone(&self) -> Self
-impl core::fmt::Debug for grit_lib::repo_handles::StashApplyOptions
-pub fn grit_lib::repo_handles::StashApplyOptions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Freeze for grit_lib::repo_handles::StashApplyOptions
-impl core::marker::Send for grit_lib::repo_handles::StashApplyOptions
-impl core::marker::Sync for grit_lib::repo_handles::StashApplyOptions
-impl core::marker::Unpin for grit_lib::repo_handles::StashApplyOptions
-impl core::marker::UnsafeUnpin for grit_lib::repo_handles::StashApplyOptions
-impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::repo_handles::StashApplyOptions
-impl core::panic::unwind_safe::UnwindSafe for grit_lib::repo_handles::StashApplyOptions
-pub struct grit_lib::repo_handles::StashPushOptions
-pub grit_lib::repo_handles::StashPushOptions::dry_run: bool
-pub grit_lib::repo_handles::StashPushOptions::identity: alloc::string::String
-pub grit_lib::repo_handles::StashPushOptions::include_untracked: bool
-pub grit_lib::repo_handles::StashPushOptions::message: core::option::Option<alloc::string::String>
-pub grit_lib::repo_handles::StashPushOptions::mode: grit_lib::stash::StashMode
-pub grit_lib::repo_handles::StashPushOptions::pathspecs: alloc::vec::Vec<alloc::string::String>
-pub grit_lib::repo_handles::StashPushOptions::selection: core::option::Option<grit_lib::porcelain::hunk_select::HunkSelection>
-impl core::clone::Clone for grit_lib::repo_handles::StashPushOptions
-pub fn grit_lib::repo_handles::StashPushOptions::clone(&self) -> Self
-impl core::fmt::Debug for grit_lib::repo_handles::StashPushOptions
-pub fn grit_lib::repo_handles::StashPushOptions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Freeze for grit_lib::repo_handles::StashPushOptions
-impl core::marker::Send for grit_lib::repo_handles::StashPushOptions
-impl core::marker::Sync for grit_lib::repo_handles::StashPushOptions
-impl core::marker::Unpin for grit_lib::repo_handles::StashPushOptions
-impl core::marker::UnsafeUnpin for grit_lib::repo_handles::StashPushOptions
-impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::repo_handles::StashPushOptions
-impl core::panic::unwind_safe::UnwindSafe for grit_lib::repo_handles::StashPushOptions
 pub struct grit_lib::repo_handles::UrlChange
 pub grit_lib::repo_handles::UrlChange::new: alloc::string::String
 pub grit_lib::repo_handles::UrlChange::old: core::option::Option<alloc::string::String>
@@ -24226,28 +24179,6 @@ impl core::marker::Unpin for grit_lib::stash::StashBranchOutcome
 impl core::marker::UnsafeUnpin for grit_lib::stash::StashBranchOutcome
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::stash::StashBranchOutcome
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::stash::StashBranchOutcome
-pub struct grit_lib::stash::StashCreateOptions
-pub grit_lib::stash::StashCreateOptions::dry_run: bool
-pub grit_lib::stash::StashCreateOptions::identity: alloc::string::String
-pub grit_lib::stash::StashCreateOptions::include_untracked: bool
-pub grit_lib::stash::StashCreateOptions::message: core::option::Option<alloc::string::String>
-pub grit_lib::stash::StashCreateOptions::mode: grit_lib::stash::StashMode
-pub grit_lib::stash::StashCreateOptions::pathspecs: alloc::vec::Vec<alloc::string::String>
-pub grit_lib::stash::StashCreateOptions::selection: core::option::Option<grit_lib::porcelain::hunk_select::HunkSelection>
-impl grit_lib::stash::StashCreateOptions
-pub fn grit_lib::stash::StashCreateOptions::validate(&self) -> grit_lib::error::Result<()>
-pub fn grit_lib::stash::StashCreateOptions::validate_staged_worktree(&self, &grit_lib::repo::Repository, &std::path::Path, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<()>
-impl core::clone::Clone for grit_lib::stash::StashCreateOptions
-pub fn grit_lib::stash::StashCreateOptions::clone(&self) -> Self
-impl core::fmt::Debug for grit_lib::stash::StashCreateOptions
-pub fn grit_lib::stash::StashCreateOptions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Freeze for grit_lib::stash::StashCreateOptions
-impl core::marker::Send for grit_lib::stash::StashCreateOptions
-impl core::marker::Sync for grit_lib::stash::StashCreateOptions
-impl core::marker::Unpin for grit_lib::stash::StashCreateOptions
-impl core::marker::UnsafeUnpin for grit_lib::stash::StashCreateOptions
-impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::stash::StashCreateOptions
-impl core::panic::unwind_safe::UnwindSafe for grit_lib::stash::StashCreateOptions
 pub struct grit_lib::stash::StashDiffOptions
 pub grit_lib::stash::StashDiffOptions::include_untracked: bool
 impl core::clone::Clone for grit_lib::stash::StashDiffOptions
@@ -24305,6 +24236,28 @@ impl core::marker::Unpin for grit_lib::stash::StashPreview
 impl core::marker::UnsafeUnpin for grit_lib::stash::StashPreview
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::stash::StashPreview
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::stash::StashPreview
+pub struct grit_lib::stash::StashPushOptions
+pub grit_lib::stash::StashPushOptions::dry_run: bool
+pub grit_lib::stash::StashPushOptions::identity: alloc::string::String
+pub grit_lib::stash::StashPushOptions::include_untracked: bool
+pub grit_lib::stash::StashPushOptions::message: core::option::Option<alloc::string::String>
+pub grit_lib::stash::StashPushOptions::mode: grit_lib::stash::StashMode
+pub grit_lib::stash::StashPushOptions::pathspecs: alloc::vec::Vec<alloc::string::String>
+pub grit_lib::stash::StashPushOptions::selection: core::option::Option<grit_lib::porcelain::hunk_select::HunkSelection>
+impl grit_lib::stash::StashPushOptions
+pub fn grit_lib::stash::StashPushOptions::validate(&self) -> grit_lib::error::Result<()>
+pub fn grit_lib::stash::StashPushOptions::validate_staged_worktree(&self, &grit_lib::repo::Repository, &std::path::Path, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<()>
+impl core::clone::Clone for grit_lib::stash::StashPushOptions
+pub fn grit_lib::stash::StashPushOptions::clone(&self) -> Self
+impl core::fmt::Debug for grit_lib::stash::StashPushOptions
+pub fn grit_lib::stash::StashPushOptions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::stash::StashPushOptions
+impl core::marker::Send for grit_lib::stash::StashPushOptions
+impl core::marker::Sync for grit_lib::stash::StashPushOptions
+impl core::marker::Unpin for grit_lib::stash::StashPushOptions
+impl core::marker::UnsafeUnpin for grit_lib::stash::StashPushOptions
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::stash::StashPushOptions
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::stash::StashPushOptions
 pub struct grit_lib::stash::StashPushResult
 pub grit_lib::stash::StashPushResult::message: alloc::string::String
 pub grit_lib::stash::StashPushResult::oid: grit_lib::objects::ObjectId
@@ -24325,29 +24278,11 @@ impl core::marker::UnsafeUnpin for grit_lib::stash::StashPushResult
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::stash::StashPushResult
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::stash::StashPushResult
 pub fn grit_lib::stash::add_stage_entry(&mut grit_lib::index::Index, &[u8], &grit_lib::objects::ObjectId, u32, u16)
-pub fn grit_lib::stash::apply_merge_autostash(&grit_lib::repo::Repository) -> grit_lib::error::Result<bool>
-pub fn grit_lib::stash::apply_operation_autostash(&grit_lib::repo::Repository, &grit_lib::objects::ObjectId, &str) -> grit_lib::error::Result<bool>
-pub fn grit_lib::stash::apply_stash(&grit_lib::repo::Repository, &std::path::Path, &grit_lib::objects::ObjectId, bool, &str) -> grit_lib::error::Result<bool>
-pub fn grit_lib::stash::apply_stash_entry(&grit_lib::repo::Repository, &std::path::Path, usize, &grit_lib::stash::StashApplyOptions) -> grit_lib::error::Result<grit_lib::stash::StashApplyOutcome>
 pub fn grit_lib::stash::check_stash_apply_would_overwrite_local_changes(&grit_lib::repo::Repository, &std::path::Path, &grit_lib::objects::CommitData) -> grit_lib::error::Result<()>
-pub fn grit_lib::stash::clear_stashes(&grit_lib::repo::Repository) -> grit_lib::error::Result<usize>
-pub fn grit_lib::stash::create_stash(&grit_lib::repo::Repository, &grit_lib::stash::StashCreateOptions) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectId>>
-pub fn grit_lib::stash::drop_stash(&grit_lib::repo::Repository, usize, &str) -> grit_lib::error::Result<()>
-pub fn grit_lib::stash::drop_stash_commit(&grit_lib::repo::Repository, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<bool>
 pub fn grit_lib::stash::flat_tree_lookup<'a>(&'a [grit_lib::stash::FlatTreeEntry], &str) -> core::option::Option<&'a grit_lib::stash::FlatTreeEntry>
 pub fn grit_lib::stash::flatten_tree_full(&grit_lib::objects::odb::Odb, &grit_lib::objects::ObjectId, &str, grit_lib::path_validate::ProtectOptions) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::stash::FlatTreeEntry>>
-pub fn grit_lib::stash::list_stashes(&grit_lib::repo::Repository) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::stash::StashEntry>>
-pub fn grit_lib::stash::pop_stash(&grit_lib::repo::Repository, &std::path::Path, usize, bool, &str) -> grit_lib::error::Result<bool>
-pub fn grit_lib::stash::pop_stash_entry(&grit_lib::repo::Repository, &std::path::Path, usize, &grit_lib::stash::StashApplyOptions, &str) -> grit_lib::error::Result<grit_lib::stash::StashApplyOutcome>
-pub fn grit_lib::stash::preview_stash(&grit_lib::repo::Repository, &grit_lib::stash::StashCreateOptions) -> grit_lib::error::Result<core::option::Option<grit_lib::stash::StashPreview>>
-pub fn grit_lib::stash::push_operation_autostash(&grit_lib::repo::Repository, &str) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectId>>
-pub fn grit_lib::stash::push_stash(&grit_lib::repo::Repository, &grit_lib::stash::StashCreateOptions) -> grit_lib::error::Result<core::option::Option<grit_lib::stash::StashPushResult>>
 pub fn grit_lib::stash::remove_empty_dirs(&std::path::Path, &std::path::Path, &grit_lib::config::environment::Environment)
-pub fn grit_lib::stash::restore_operation_autostash(&grit_lib::repo::Repository, &grit_lib::objects::ObjectId, &str) -> grit_lib::error::Result<()>
-pub fn grit_lib::stash::stash_branch(&grit_lib::repo::Repository, &str, usize, &str) -> grit_lib::error::Result<grit_lib::stash::StashBranchOutcome>
-pub fn grit_lib::stash::stash_diff(&grit_lib::repo::Repository, usize, &grit_lib::stash::StashDiffOptions) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::diff::DiffEntry>>
 pub fn grit_lib::stash::stash_worktree_change_paths(&grit_lib::repo::Repository, &grit_lib::objects::CommitData) -> grit_lib::error::Result<alloc::collections::btree::set::BTreeSet<alloc::string::String>>
-pub fn grit_lib::stash::store_stash(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, &str, &str) -> grit_lib::error::Result<()>
 pub fn grit_lib::stash::worktree_bytes_for_index_mode(&std::path::Path, u32) -> core::io::error::Result<alloc::vec::Vec<u8>>
 pub fn grit_lib::stash::write_regular_file_replacing_symlink(&std::path::Path, &[u8]) -> core::io::error::Result<()>
 pub mod grit_lib::state

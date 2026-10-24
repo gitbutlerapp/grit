@@ -9,7 +9,6 @@ use grit_lib::diff::merge_trees::{
 };
 use grit_lib::objects::{serialize_commit, CommitData, ObjectId, ObjectKind};
 use grit_lib::porcelain::checkout::checkout_between_trees;
-use grit_lib::porcelain::stash::apply_stash;
 use grit_lib::refs;
 use grit_lib::repo::Repository;
 use grit_test_support::git;
@@ -200,14 +199,10 @@ fn grit_stash_apply_at_3k_matches_git_without_index() {
     )
     .expect("grit open");
     let stash_oid = ObjectId::from_hex(&stash_oid_hex).expect("stash oid");
-    apply_stash(
-        &grit_repo,
-        grit_dir.path(),
-        &stash_oid,
-        false,
-        "Test <t@example.com> 0 +0000",
-    )
-    .expect("stash apply");
+    grit_repo
+        .stash()
+        .apply_commit(&stash_oid, &Default::default())
+        .expect("stash apply");
 
     let git_dir = tempfile::tempdir().expect("git copy");
     copy_repo(base.path(), git_dir.path());

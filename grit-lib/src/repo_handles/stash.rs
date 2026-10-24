@@ -1,47 +1,23 @@
 //! Stash stack operations scoped to a [`Repository`](crate::repo::Repository).
+//!
+//! [`RepositoryStash`] (from [`Repository::stash`](crate::repo::Repository::stash)) is the one
+//! public stash API; option and result types live in [`crate::stash`].
 
-use std::path::Path;
-
+use crate::diff::DiffEntry;
 use crate::error::Result;
 use crate::objects::ObjectId;
-use crate::porcelain::hunk_select::HunkSelection;
 use crate::porcelain::stash::{
-    apply_stash_entry, create_stash, drop_stash, list_stashes, pop_stash, push_stash,
-    StashApplyOptions as StashEntryApplyOptions, StashCreateOptions, StashEntry, StashMode,
+    apply_stash_entry, apply_stash_oid, clear_stashes, create_stash, drop_stash, list_stashes,
+    pop_stash_entry, preview_stash, push_stash, stash_branch, stash_diff, StashApplyOptions,
+    StashApplyOutcome, StashBranchOutcome, StashDiffOptions, StashEntry, StashPreview,
+    StashPushOptions, StashPushResult,
 };
 use crate::repo::Repository;
 
-/// Options for [`RepositoryStash::push`].
-#[derive(Debug, Clone)]
-pub struct StashPushOptions {
-    /// Reflog/stash message override.
-    pub message: Option<String>,
-    /// Include untracked files as a third parent on the stash commit.
-    pub include_untracked: bool,
-    /// Full author/committer identity (`Name <email> timestamp tz`).
-    pub identity: String,
-    /// When set, stash only these unstaged hunks (index unchanged on push).
-    pub selection: Option<HunkSelection>,
-    /// Pathspecs narrowing hunk resolution.
-    pub pathspecs: Vec<String>,
-    /// Preview without updating refs, index, or worktree.
-    pub dry_run: bool,
-    /// Push mode (`--staged`, `--keep-index`, or default).
-    pub mode: StashMode,
-}
-
-/// Options for [`RepositoryStash::apply`] and [`RepositoryStash::pop`].
-#[derive(Debug, Clone)]
-pub struct StashApplyOptions {
-    /// Index in newest-first order (`0` is `stash@{0}`).
-    pub index: usize,
-    /// When true, restore the stashed index; otherwise keep the current index at touched paths.
-    pub restore_index: bool,
-    /// Reflog identity for drop-after-pop.
-    pub identity: String,
-}
-
-/// Stash list/create/apply/pop/drop for one open repository.
+/// Stash list/push/apply/pop/drop for one open repository.
+///
+/// Entries are addressed by their newest-first index (`0` is `stash@{0}`). Operations that touch
+/// the worktree return [`crate::error::Error::StashBareRepository`] on a bare repository.
 #[derive(Debug, Copy, Clone)]
 pub struct RepositoryStash<'repo> {
     repo: &'repo Repository,
@@ -80,19 +56,23 @@ impl<'repo> RepositoryStash<'repo> {
         list_stashes(self.repo)
     }
 
-    /// Create a stash commit and update `refs/stash`, resetting the worktree to `HEAD`.
+    /// Save local changes as a new `stash@{0}` and reset the saved paths to `HEAD`.
     ///
-    /// Returns `None` when there is nothing to stash.
+    /// Returns `None` when there is nothing to stash. Untracked paths included in the stash
+    /// are removed from the worktree.
     ///
     /// # Errors
     ///
-    /// Propagates stash build, ref, and checkout failures.
+    /// - [`crate::error::Error::StashOptionConflict`] when [`StashPushOptions::dry_run`] is set
+    ///   (use [`Self::preview`]).
+    /// - [`crate::error::Error::StashNoInitialCommit`] before the first commit.
+    /// - Stash build, ref, and checkout failures.
     ///
     /// # Examples
     ///
     /// ```
     /// # use grit_lib::repo::Repository;
-    /// # use grit_lib::repo_handles::StashPushOptions;
+    /// # use grit_lib::stash::{StashMode, StashPushOptions};
     /// # use std::path::Path;
     /// # fn demo() -> grit_lib::error::Result<()> {
     /// let repo = Repository::discover(Some(Path::new(".")), &grit_lib::config::environment::RepositoryOptions::empty())?;
@@ -109,79 +89,111 @@ impl<'repo> RepositoryStash<'repo> {
     /// # Ok(())
     /// # }
     /// ```
-    pub fn push(&self, options: &StashPushOptions) -> Result<Option<ObjectId>> {
-        let inner = StashCreateOptions {
-            message: options.message.clone(),
-            include_untracked: options.include_untracked,
-            identity: options.identity.clone(),
-            selection: options.selection.clone(),
-            pathspecs: options.pathspecs.clone(),
-            dry_run: options.dry_run,
-            mode: options.mode,
-        };
-        push_stash(self.repo, &inner).map(|o| o.map(|r| r.oid))
+    pub fn push(&self, options: &StashPushOptions) -> Result<Option<StashPushResult>> {
+        push_stash(self.repo, options)
     }
 
-    /// Build a stash commit without updating `refs/stash`.
+    /// Report which paths [`Self::push`] would save, without writing objects, refs, or files.
+    ///
+    /// Returns `None` when there is nothing to stash.
     ///
     /// # Errors
     ///
-    /// Same as [`create_stash`].
+    /// Same validation and read failures as [`Self::push`].
+    pub fn preview(&self, options: &StashPushOptions) -> Result<Option<StashPreview>> {
+        preview_stash(self.repo, options)
+    }
+
+    /// Build a stash commit without updating `refs/stash` or touching the worktree.
+    ///
+    /// Returns `None` when there is nothing to stash.
+    ///
+    /// # Errors
+    ///
+    /// Same build failures as [`Self::push`].
     pub fn create(&self, options: &StashPushOptions) -> Result<Option<ObjectId>> {
-        let inner = StashCreateOptions {
-            message: options.message.clone(),
-            include_untracked: options.include_untracked,
-            identity: options.identity.clone(),
-            selection: options.selection.clone(),
-            pathspecs: options.pathspecs.clone(),
-            dry_run: options.dry_run,
-            mode: options.mode,
-        };
-        create_stash(self.repo, &inner)
+        create_stash(self.repo, options)
     }
 
-    /// Apply `stash@{options.index}` without dropping it.
+    /// Apply `stash@{index}` without dropping it.
     ///
-    /// Returns `true` when merge conflicts occurred.
+    /// # Returns
+    ///
+    /// The conflicted paths; [`StashApplyOutcome::has_conflicts`] is false on a clean apply.
     ///
     /// # Errors
     ///
-    /// Propagates apply failures.
-    pub fn apply(&self, work_tree: &Path, options: &StashApplyOptions) -> Result<bool> {
-        Ok(apply_stash_entry(
-            self.repo,
-            work_tree,
-            options.index,
-            &StashEntryApplyOptions {
-                restore_index: options.restore_index,
-            },
-        )?
-        .has_conflicts())
+    /// [`crate::error::Error::StashNotFound`] when `index` is out of range, plus the
+    /// [`Self::apply_commit`] errors.
+    pub fn apply(&self, index: usize, options: &StashApplyOptions) -> Result<StashApplyOutcome> {
+        apply_stash_entry(self.repo, index, options)
     }
 
-    /// Apply `stash@{options.index}` and drop it when there are no conflicts.
-    ///
-    /// Returns `true` when conflicts occurred (entry is kept).
+    /// Apply any stash-shaped commit (for example one from [`Self::create`]) without touching
+    /// `refs/stash`.
     ///
     /// # Errors
     ///
-    /// Propagates apply and drop failures.
-    pub fn pop(&self, work_tree: &Path, options: &StashApplyOptions) -> Result<bool> {
-        pop_stash(
-            self.repo,
-            work_tree,
-            options.index,
-            options.restore_index,
-            &options.identity,
-        )
+    /// [`crate::error::Error::CorruptStash`] for a malformed stash commit, plus local-change,
+    /// untracked-overwrite, and index write failures.
+    pub fn apply_commit(
+        &self,
+        stash: &ObjectId,
+        options: &StashApplyOptions,
+    ) -> Result<StashApplyOutcome> {
+        apply_stash_oid(self.repo, stash, options)
     }
 
-    /// Remove `stash@{index}` from the reflog.
+    /// Apply `stash@{index}` and drop it when it applied without conflicts.
+    ///
+    /// # Returns
+    ///
+    /// The conflicted paths. When [`StashApplyOutcome::has_conflicts`] is true the entry is kept.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Self::apply`] and [`Self::drop`].
+    pub fn pop(&self, index: usize, options: &StashApplyOptions) -> Result<StashApplyOutcome> {
+        pop_stash_entry(self.repo, index, options)
+    }
+
+    /// Remove `stash@{index}`, moving `refs/stash` to the next entry (or deleting it).
     ///
     /// # Errors
     ///
     /// Returns [`crate::error::Error::StashNotFound`] when `index` is out of range.
-    pub fn drop(&self, index: usize, identity: &str) -> Result<()> {
-        drop_stash(self.repo, index, identity)
+    pub fn drop(&self, index: usize) -> Result<()> {
+        drop_stash(self.repo, index)
+    }
+
+    /// Remove every stash entry, returning how many were removed.
+    ///
+    /// # Errors
+    ///
+    /// Propagates ref store and reflog delete failures.
+    pub fn clear(&self) -> Result<usize> {
+        clear_stashes(self.repo)
+    }
+
+    /// Tree diff of `stash@{index}` against the commit it was made on (`git stash show`).
+    ///
+    /// # Errors
+    ///
+    /// [`crate::error::Error::StashNotFound`] or [`crate::error::Error::CorruptStash`] when the
+    /// entry is missing or malformed.
+    pub fn diff(&self, index: usize, options: &StashDiffOptions) -> Result<Vec<DiffEntry>> {
+        stash_diff(self.repo, index, options)
+    }
+
+    /// Create branch `name` at the commit `stash@{index}` was made on, switch to it, apply the
+    /// stash with its index, and drop the entry when that applied cleanly.
+    ///
+    /// # Errors
+    ///
+    /// [`crate::porcelain::branch_error::BranchError::AlreadyExists`] when `name` is taken,
+    /// [`crate::error::Error::StashNotFound`] when `index` is out of range, and switch or apply
+    /// failures otherwise.
+    pub fn branch(&self, name: &str, index: usize) -> Result<StashBranchOutcome> {
+        stash_branch(self.repo, name, index)
     }
 }

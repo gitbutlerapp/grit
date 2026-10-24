@@ -374,9 +374,9 @@ where
         && !options.check
         && !fetch_dry_run;
 
-    let identity = checkout_reflog_identity(repo);
     let stash_oid = if autostash {
-        push_operation_autostash(repo, &identity).map_err(PullError::Repository)?
+        push_operation_autostash(repo, &checkout_reflog_identity(repo))
+            .map_err(PullError::Repository)?
     } else {
         None
     };
@@ -441,22 +441,22 @@ where
 
     match core {
         Err(err) => {
-            restore_autostash_after_abort(repo, stash_oid.as_ref(), &identity);
+            restore_autostash_after_abort(repo, stash_oid.as_ref());
             Err(err)
         }
         Ok(outcome) => {
             if fetch_dry_run {
-                restore_autostash_after_abort(repo, stash_oid.as_ref(), &identity);
+                restore_autostash_after_abort(repo, stash_oid.as_ref());
                 return Ok(outcome);
             }
             if matches!(
                 outcome.result,
                 PullResult::Conflicts | PullResult::RefusedNotFf
             ) {
-                restore_autostash_after_abort(repo, stash_oid.as_ref(), &identity);
+                restore_autostash_after_abort(repo, stash_oid.as_ref());
                 return Ok(outcome);
             }
-            apply_autostash_after_pull(repo, stash_oid.as_ref(), &identity, Ok(outcome))
+            apply_autostash_after_pull(repo, stash_oid.as_ref(), Ok(outcome))
         }
     }
 }
@@ -474,17 +474,16 @@ fn pull_fetch_refspecs(options: &PullOptions) -> (bool, Vec<String>) {
     (explicit, refspecs)
 }
 
-fn restore_autostash_after_abort(repo: &Repository, stash_oid: Option<&ObjectId>, identity: &str) {
+fn restore_autostash_after_abort(repo: &Repository, stash_oid: Option<&ObjectId>) {
     let Some(stash_oid) = stash_oid else {
         return;
     };
-    let _ = restore_operation_autostash(repo, stash_oid, identity);
+    let _ = restore_operation_autostash(repo, stash_oid);
 }
 
 fn apply_autostash_after_pull(
     repo: &Repository,
     stash_oid: Option<&ObjectId>,
-    identity: &str,
     outcome: std::result::Result<PullOutcome, PullError>,
 ) -> std::result::Result<PullOutcome, PullError> {
     let mut outcome = outcome?;
@@ -502,7 +501,7 @@ fn apply_autostash_after_pull(
         return Ok(outcome);
     }
     if let Some(stash_oid) = stash_oid {
-        if apply_operation_autostash(repo, stash_oid, identity).map_err(PullError::Repository)? {
+        if apply_operation_autostash(repo, stash_oid).map_err(PullError::Repository)? {
             outcome.result = PullResult::AutostashConflict;
         }
     }
