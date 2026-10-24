@@ -913,11 +913,8 @@ fn restage_deferred_jobs(
             if prep.oid == idx_e.oid && (mode_for_index == idx_e.mode || !trust_filemode) {
                 continue;
             }
-            repo.odb().write_loose_zlib_prehashed(
-                &prep.oid,
-                &prep.zlib_store,
-                BULK_TRACKED_RESTAGE_LOOSE_WRITE,
-            )?;
+            prep.payload
+                .store(repo.odb(), &prep.oid, BULK_TRACKED_RESTAGE_LOOSE_WRITE)?;
         }
     }
     if !replacements.is_empty() {

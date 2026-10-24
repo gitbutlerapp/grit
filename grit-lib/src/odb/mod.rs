@@ -2379,11 +2379,16 @@ impl Odb {
     /// Create all 256 loose-object prefix directories (`objects/xx/`).
     ///
     /// Bulk `git add`-style staging calls this once before parallel loose writes.
+    /// A no-op when the primary is a custom store (see [`OdbBuilder::primary`]), which
+    /// receives those writes through [`WritableObjectStore::write`] instead.
     ///
     /// # Errors
     ///
     /// Returns [`Error::Io`] if a directory cannot be created.
     pub fn ensure_all_loose_prefix_dirs(&self) -> Result<()> {
+        if !self.uses_files_primary() {
+            return Ok(());
+        }
         self.local_loose()?.ensure_all_loose_prefix_dirs()
     }
 
@@ -2448,9 +2453,13 @@ impl Odb {
     /// valid canonical store form (`"<kind> <len>\\0<payload>"`). Hashing and
     /// compression are skipped; use after parallel batch preparation.
     ///
+    /// Loose encoding only exists for the files-backed primary; with a custom primary,
+    /// write the uncompressed content through [`Self::write_with_options`] instead.
+    ///
     /// # Errors
     ///
-    /// Same as [`Self::write`].
+    /// Same as [`Self::write`], plus [`Error::UnsupportedObjectStore`] when the primary is
+    /// a custom store.
     pub fn write_loose_zlib_prehashed(
         &self,
         oid: &ObjectId,

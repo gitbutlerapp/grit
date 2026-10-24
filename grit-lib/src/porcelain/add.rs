@@ -3306,4 +3306,58 @@ mod tests {
             assert!(pos_a < pos_b);
         }
     }
+
+    #[test]
+    fn bulk_stage_and_parallel_restage_write_through_custom_primary() {
+        use crate::odb::store::{MemoryStore, ObjectStore};
+        use crate::odb::OdbBuilder;
+        use std::sync::Arc;
+
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        init_repo(root);
+        let git = root.join(".git");
+        let store = Arc::new(MemoryStore::new(crate::objects::HashAlgo::Sha1));
+        let repo = crate::repo::RepositoryBuilder::new(RepositoryOptions::empty())
+            .odb_builder(
+                OdbBuilder::files(git.join("objects"))
+                    .primary(store.clone())
+                    .alternates(false),
+            )
+            .open(&git, Some(root))
+            .unwrap();
+        let bulk = StageOptions {
+            staging_thresholds: Some(IndexStagingThresholds {
+                large_index_restage: 0,
+                parallel_tracked_restage: 0,
+            }),
+            ..StageOptions::default()
+        };
+        let paths: Vec<String> = (0..40).map(|i| format!("f{i:02}.txt")).collect();
+        for path in &paths {
+            fs::write(root.join(path), b"v1\n").unwrap();
+        }
+        assert_eq!(
+            stage(&repo, &bulk, &mut NullProgress).unwrap().added.len(),
+            paths.len()
+        );
+
+        for (i, path) in paths.iter().enumerate() {
+            fs::write(root.join(path), format!("version two of {i}\n")).unwrap();
+        }
+        let restaged = stage(&repo, &bulk, &mut NullProgress).unwrap();
+        assert_eq!(restaged.modified.len(), paths.len());
+
+        let index = repo.load_index().unwrap();
+        for (i, path) in paths.iter().enumerate() {
+            let oid = index.get(path.as_bytes(), 0).unwrap().oid;
+            let obj = store.read(&oid).unwrap().expect("blob in custom primary");
+            assert_eq!(obj.data, format!("version two of {i}\n").into_bytes());
+        }
+        assert_eq!(
+            fs::read_dir(git.join("objects")).unwrap().count(),
+            0,
+            "no loose shards under objects/"
+        );
+    }
 }

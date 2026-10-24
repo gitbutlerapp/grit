@@ -29,15 +29,42 @@ pub(crate) struct WorktreeBlobReadInput {
     pub cached_meta: Option<fs::Metadata>,
 }
 
-/// Worktree blob after parallel read, hash, and zlib compression.
+/// Blob content prepared for the repository's primary object store.
+pub(crate) enum PreparedBlobPayload {
+    /// Zlib-compressed canonical store bytes for [`Odb::write_loose_zlib_prehashed`]
+    /// (files-backed primary).
+    Zlib(Vec<u8>),
+    /// Normalized blob content for a custom primary, which owns its own encoding.
+    Raw(Vec<u8>),
+}
+
+impl PreparedBlobPayload {
+    /// Write this payload as blob `oid` through the primary store.
+    ///
+    /// # Errors
+    ///
+    /// Propagates write failures from the loose store or the custom primary.
+    pub(crate) fn store(&self, odb: &Odb, oid: &ObjectId, options: WriteOptions) -> Result<()> {
+        match self {
+            Self::Zlib(zlib_store) => odb.write_loose_zlib_prehashed(oid, zlib_store, options)?,
+            Self::Raw(data) => {
+                let written = odb.write_with_options(ObjectKind::Blob, data, options)?;
+                debug_assert_eq!(written, *oid);
+                written
+            }
+        };
+        Ok(())
+    }
+}
+
+/// Worktree blob after parallel read, hash, and payload preparation.
 pub(crate) struct PreparedWorktreeBlob {
     /// Index path spelling used for staging.
     pub index_relpath: String,
     /// Object id of the normalized blob (computed in the parallel phase).
     pub oid: ObjectId,
-    /// Zlib-compressed canonical store bytes for [`Odb::write_loose_zlib_prehashed`].
-    #[allow(dead_code)]
-    pub zlib_store: Vec<u8>,
+    /// Bytes to hand to the primary store (see [`PreparedBlobPayload::store`]).
+    pub payload: PreparedBlobPayload,
     /// Worktree metadata captured during the read pass.
     pub meta: fs::Metadata,
     /// Git mode derived from `meta`.
@@ -46,10 +73,43 @@ pub(crate) struct PreparedWorktreeBlob {
 
 struct PrepareBlobContext {
     algo: HashAlgo,
-    compression: flate2::Compression,
+    /// Loose zlib level, or `None` when the primary is a custom store (no loose encoding).
+    compression: Option<flate2::Compression>,
+}
+
+impl PrepareBlobContext {
+    fn new(odb: &Odb) -> Result<Self> {
+        let compression = if odb.uses_files_primary() {
+            Some(odb.loose_compression()?)
+        } else {
+            None
+        };
+        Ok(Self {
+            algo: odb.hash_algo(),
+            compression,
+        })
+    }
+
+    /// Hash `data` and encode it for the primary store.
+    fn prepare(&self, data: Vec<u8>) -> Result<(ObjectId, PreparedBlobPayload)> {
+        let oid = hash_object(self.algo, ObjectKind::Blob, &data)?;
+        let payload = match self.compression {
+            Some(compression) => {
+                let store_bytes = odb::blob_store_bytes(&data);
+                PreparedBlobPayload::Zlib(odb::zlib_compress_loose_store_from_bytes(
+                    &store_bytes,
+                    compression,
+                )?)
+            }
+            None => PreparedBlobPayload::Raw(data),
+        };
+        Ok((oid, payload))
+    }
 }
 
 /// Read, CRLF-filter, hash, and compress many worktree blobs in parallel (input order preserved).
+///
+/// On a custom primary the blobs are hashed but not compressed (see [`PreparedBlobPayload`]).
 ///
 /// # Errors
 ///
@@ -64,10 +124,7 @@ pub(crate) fn prepare_worktree_blobs_parallel(
     if items.is_empty() {
         return Ok(Vec::new());
     }
-    let ctx = PrepareBlobContext {
-        algo: odb.hash_algo(),
-        compression: odb.loose_compression()?,
-    };
+    let ctx = PrepareBlobContext::new(odb)?;
     let total_bytes = items.len().saturating_mul(4096);
     let threads = parallelism.threads();
     let prepared = try_par_hash_with(items, threads, total_bytes, |item| {
@@ -85,14 +142,12 @@ pub(crate) fn prepare_worktree_blobs_parallel(
             item.index_entry.as_ref(),
             filter_process,
         )?;
-        let store_bytes = odb::blob_store_bytes(&data);
-        let oid = hash_object(ctx.algo, ObjectKind::Blob, &data)?;
-        let zlib_store = odb::zlib_compress_loose_store_from_bytes(&store_bytes, ctx.compression)?;
+        let (oid, payload) = ctx.prepare(data)?;
         let mode = mode_from_metadata(&meta);
         Ok(PreparedWorktreeBlob {
             index_relpath: item.index_relpath.clone(),
             oid,
-            zlib_store,
+            payload,
             meta,
             mode,
         })
@@ -103,13 +158,14 @@ pub(crate) fn prepare_worktree_blobs_parallel(
     Ok(prepared)
 }
 
-/// Like [`prepare_worktree_blobs_parallel`], but writes each blob to the loose store in the same worker pass.
+/// Like [`prepare_worktree_blobs_parallel`], but writes each blob through the primary store
+/// in the same worker pass.
 ///
 /// Avoids a second parallel wave over the same inputs during bulk `git add` restage.
 ///
 /// # Errors
 ///
-/// Propagates I/O, conversion, hashing, compression, or loose-write failures from any worker.
+/// Propagates I/O, conversion, hashing, compression, or object-write failures from any worker.
 pub(crate) fn prepare_and_store_worktree_blobs_parallel(
     odb: &Odb,
     items: &[WorktreeBlobReadInput],
@@ -121,10 +177,7 @@ pub(crate) fn prepare_and_store_worktree_blobs_parallel(
     if items.is_empty() {
         return Ok(Vec::new());
     }
-    let ctx = PrepareBlobContext {
-        algo: odb.hash_algo(),
-        compression: odb.loose_compression()?,
-    };
+    let ctx = PrepareBlobContext::new(odb)?;
     let threads = parallelism.threads();
     let map_item = |item: &WorktreeBlobReadInput| -> Result<PreparedWorktreeBlob> {
         let meta = match &item.cached_meta {
@@ -141,22 +194,19 @@ pub(crate) fn prepare_and_store_worktree_blobs_parallel(
             item.index_entry.as_ref(),
             filter_process,
         )?;
-        let store_bytes = odb::blob_store_bytes(&data);
-        let oid = hash_object(ctx.algo, ObjectKind::Blob, &data)?;
-        let zlib_store = odb::zlib_compress_loose_store_from_bytes(&store_bytes, ctx.compression)?;
-        odb.write_loose_zlib_prehashed(&oid, &zlib_store, write_opts)
-            .map_err(|e| match e {
-                Error::Io(source) => Error::LooseObjectWrite {
-                    path: item.index_relpath.clone(),
-                    source,
-                },
-                other => other,
-            })?;
+        let (oid, payload) = ctx.prepare(data)?;
+        payload.store(odb, &oid, write_opts).map_err(|e| match e {
+            Error::Io(source) => Error::LooseObjectWrite {
+                path: item.index_relpath.clone(),
+                source,
+            },
+            other => other,
+        })?;
         let mode = mode_from_metadata(&meta);
         Ok(PreparedWorktreeBlob {
             index_relpath: item.index_relpath.clone(),
             oid,
-            zlib_store,
+            payload,
             meta,
             mode,
         })
