@@ -1,7 +1,11 @@
-//! Issue #1682: `grit add <many literal paths>` on a large index must not scale with full index size.
+//! Issue #1682: `grit add <many literal paths>` must not scale linearly with pathspec count on large indexes.
 //!
-//! `GRIT_ADD_PERF=1 cargo test -p grit-lib --test add_many_pathspec_perf_git_compat --release -- --test-threads=1`
+//! ```bash
+//! cargo build --release -p grit-cli
+//! GRIT_ADD_PERF=1 cargo test -p grit-lib --test add_many_pathspec_perf_git_compat --release -- --test-threads=1
+//! ```
 
+use std::io::Write;
 use std::process::{Command, Stdio};
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -12,7 +16,12 @@ static PERF_SERIAL: Mutex<()> = Mutex::new(());
 
 const FILES_PER_LEAF: usize = 20;
 const LITERAL_PATHS: usize = 98;
-const WARM_RUNS: usize = 4;
+const WARM_RUNS: usize = 5;
+/// Matches the issue #1682 reproduction script (`git ls-files | wc -l` → 48,020).
+const TARGET_TRACKED: usize = 48_020;
+
+/// Grit time for 98 paths must not grow this many times vs 1 path on the same fixture.
+const MAX_GRIT_PATH_COUNT_SCALING: f64 = 4.0;
 
 #[cfg(windows)]
 const MAX_GIT_RATIO: f64 = 4.0;
@@ -53,7 +62,7 @@ fn median(mut samples: Vec<Duration>) -> Duration {
     }
 }
 
-fn build_deep_fixture(root: &std::path::Path) -> Vec<String> {
+fn build_issue_fixture(root: &std::path::Path) -> Vec<String> {
     git(root, &["init", "-q", "-b", "main", "."]);
     git(root, &["config", "user.email", "t@example.com"]);
     git(root, &["config", "user.name", "Test"]);
@@ -66,7 +75,7 @@ fn build_deep_fixture(root: &std::path::Path) -> Vec<String> {
                     let p = format!("d{a}/e{b}/f{c}/g{d}");
                     std::fs::create_dir_all(root.join(&p)).expect("mkdir");
                     for i in 0..FILES_PER_LEAF {
-                        if n >= 8_000 {
+                        if n >= TARGET_TRACKED {
                             break 'outer;
                         }
                         let rel = format!("{p}/file{i}.txt");
@@ -88,14 +97,7 @@ fn pick_changed_paths(all: &[String], count: usize) -> Vec<String> {
     all.iter().step_by(step).take(count).cloned().collect()
 }
 
-fn time_literal_add(
-    root: &std::path::Path,
-    grit: &std::path::Path,
-    paths: &[String],
-    runs: usize,
-) -> (Duration, Duration) {
-    let root_s = root.to_str().expect("utf-8");
-    let null = || Stdio::null();
+fn dirty_paths(root: &std::path::Path, paths: &[String]) {
     for path in paths {
         std::fs::OpenOptions::new()
             .append(true)
@@ -104,24 +106,11 @@ fn time_literal_add(
             .write_all(b"change\n")
             .expect("append");
     }
-    for _ in 0..runs {
-        let st = Command::new("git")
-            .args(["-C", root_s, "reset", "-q"])
-            .stdout(null())
-            .stderr(null())
-            .status()
-            .expect("git reset");
-        assert!(st.success());
-        let mut cmd = Command::new("git");
-        cmd.args(["-C", root_s, "add"]);
-        cmd.args(paths);
-        let st = cmd
-            .stdout(null())
-            .stderr(null())
-            .status()
-            .expect("git add warm");
-        assert!(st.success());
-    }
+}
+
+fn median_grit_add(root: &std::path::Path, grit: &std::path::Path, paths: &[String], runs: usize) -> Duration {
+    let root_s = root.to_str().expect("utf-8");
+    let null = || Stdio::null();
     for _ in 0..runs {
         let st = Command::new("git")
             .args(["-C", root_s, "reset", "-q"])
@@ -133,14 +122,55 @@ fn time_literal_add(
         let mut cmd = Command::new(grit);
         cmd.arg("add").current_dir(root);
         cmd.args(paths);
-        let st = cmd
+        let out = cmd
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .output()
+            .expect("grit add warm");
+        assert!(
+            out.status.success(),
+            "grit add warm failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    }
+    let mut samples = Vec::new();
+    for _ in 0..runs {
+        let st = Command::new("git")
+            .args(["-C", root_s, "reset", "-q"])
             .stdout(null())
             .stderr(null())
             .status()
-            .expect("grit add warm");
+            .expect("git reset");
+        assert!(st.success());
+        let t0 = Instant::now();
+        let mut cmd = Command::new(grit);
+        cmd.arg("add").current_dir(root);
+        cmd.args(paths);
+        let st = cmd.stdout(null()).stderr(null()).status().expect("grit add");
+        assert!(st.success());
+        samples.push(t0.elapsed());
+    }
+    median(samples)
+}
+
+fn median_git_add(root: &std::path::Path, paths: &[String], runs: usize) -> Duration {
+    let root_s = root.to_str().expect("utf-8");
+    let null = || Stdio::null();
+    for _ in 0..runs {
+        let st = Command::new("git")
+            .args(["-C", root_s, "reset", "-q"])
+            .stdout(null())
+            .stderr(null())
+            .status()
+            .expect("git reset");
+        assert!(st.success());
+        let mut cmd = Command::new("git");
+        cmd.args(["-C", root_s, "add"]);
+        cmd.args(paths);
+        let st = cmd.stdout(null()).stderr(null()).status().expect("git add warm");
         assert!(st.success());
     }
-    let mut git_samples = Vec::new();
+    let mut samples = Vec::new();
     for _ in 0..runs {
         let st = Command::new("git")
             .args(["-C", root_s, "reset", "-q"])
@@ -155,33 +185,10 @@ fn time_literal_add(
         cmd.args(paths);
         let st = cmd.stdout(null()).stderr(null()).status().expect("git add");
         assert!(st.success());
-        git_samples.push(t0.elapsed());
+        samples.push(t0.elapsed());
     }
-    let mut grit_samples = Vec::new();
-    for _ in 0..runs {
-        let st = Command::new("git")
-            .args(["-C", root_s, "reset", "-q"])
-            .stdout(null())
-            .stderr(null())
-            .status()
-            .expect("git reset");
-        assert!(st.success());
-        let t0 = Instant::now();
-        let mut cmd = Command::new(grit);
-        cmd.arg("add").current_dir(root);
-        cmd.args(paths);
-        let st = cmd
-            .stdout(null())
-            .stderr(null())
-            .status()
-            .expect("grit add");
-        assert!(st.success());
-        grit_samples.push(t0.elapsed());
-    }
-    (median(git_samples), median(grit_samples))
+    median(samples)
 }
-
-use std::io::Write;
 
 #[test]
 fn add_many_literal_pathspecs_matches_git_and_scales() {
@@ -196,22 +203,44 @@ fn add_many_literal_pathspecs_matches_git_and_scales() {
     let grit = grit_binary();
     let tmp = tempfile::tempdir().expect("tempdir");
     let root = tmp.path();
-    let all = build_deep_fixture(root);
+    let all = build_issue_fixture(root);
     assert!(
-        all.len() >= 5_000,
-        "fixture should have thousands of tracked paths, got {}",
+        all.len() >= TARGET_TRACKED - 500,
+        "fixture should match issue #1682 scale (~{TARGET_TRACKED} paths), got {}",
         all.len()
     );
     let changed = pick_changed_paths(&all, LITERAL_PATHS);
     assert_eq!(changed.len(), LITERAL_PATHS);
 
-    let (git_med, grit_med) = time_literal_add(root, &grit, &changed, WARM_RUNS);
-    let ratio = grit_med.as_secs_f64() / git_med.as_secs_f64().max(1e-9);
+    // Overhead check (#1682): one dirty file, many literal pathspecs — must not rescan the index per spec.
+    dirty_paths(root, std::slice::from_ref(&changed[0]));
+    let grit_one_spec = median_grit_add(root, &grit, &changed[..1], WARM_RUNS);
+    let grit_many_specs = median_grit_add(root, &grit, &changed, WARM_RUNS);
+    let overhead_scaling =
+        grit_many_specs.as_secs_f64() / grit_one_spec.as_secs_f64().max(1e-9);
     eprintln!(
-        "add {LITERAL_PATHS} literal paths: git {git_med:?}, grit {grit_med:?}, ratio {ratio:.2}×"
+        "48k overhead (1 dirty file, 1 vs {LITERAL_PATHS} pathspecs): \
+         grit {grit_one_spec:?} vs {grit_many_specs:?}, scaling {overhead_scaling:.2}×"
     );
     assert!(
-        ratio < MAX_GIT_RATIO,
-        "many-path add should stay within {MAX_GIT_RATIO}× system git (got {ratio:.2}×)"
+        overhead_scaling < MAX_GRIT_PATH_COUNT_SCALING,
+        "pathspec validation must not scan the full index per spec \
+         (1 vs {LITERAL_PATHS} specs: {overhead_scaling:.2}×, limit {MAX_GRIT_PATH_COUNT_SCALING}×)"
+    );
+
+    // Throughput check: stage every modified file listed in 98 pathspecs.
+    for path in &changed {
+        std::fs::write(root.join(path), b"changed2\n").expect("re-dirty");
+    }
+    let grit_many = median_grit_add(root, &grit, &changed, WARM_RUNS);
+    let git_many = median_git_add(root, &changed, WARM_RUNS);
+    let git_ratio = grit_many.as_secs_f64() / git_many.as_secs_f64().max(1e-9);
+    eprintln!(
+        "48k fixture ({LITERAL_PATHS} dirty files): grit {grit_many:?}, git {git_many:?}, \
+         grit/git {git_ratio:.2}×"
+    );
+    assert!(
+        git_ratio < MAX_GIT_RATIO,
+        "many-path add should stay within {MAX_GIT_RATIO}× system git (got {git_ratio:.2}×)"
     );
 }

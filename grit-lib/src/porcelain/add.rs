@@ -1289,8 +1289,7 @@ fn validate_pathspecs(
         }) || untracked.iter().any(|p| {
             let one = [p.as_str()];
             sorted_paths_match_pathspec(resolved, &one, ctx)
-        }) || pathspec_matches_index_at_any_stage(index, resolved, ctx)
-        {
+        }) {
             continue;
         }
         let matches_repo = checker.matches(resolved)?
