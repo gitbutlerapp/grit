@@ -245,22 +245,19 @@ impl ResolvedPathspecs {
             }
         }
 
-        let mut specs = Vec::with_capacity(sources.len());
-        for sel in &sources {
-            let resolved = resolve_pathspec_in_worktree_with_git_dir(
-                sel,
-                sel,
-                work_tree,
-                prefix.as_deref(),
-                Some(repo.git_dir()),
-            )
-            .map_err(|outside| PathspecResolveError::OutsideRepository {
-                elt: outside.elt,
-                path: outside.path,
-                work_tree: outside.work_tree.display().to_string(),
-            })?;
-            specs.push(resolved);
-        }
+        let argv_precompose = repo.pathspec_precompose_enabled();
+        let specs = sources
+            .iter()
+            .map(|sel| {
+                resolve_pathspec_in_worktree_with_argv_precompose(
+                    sel,
+                    sel,
+                    work_tree,
+                    prefix.as_deref(),
+                    argv_precompose,
+                )
+            })
+            .collect::<Result<Vec<_>, _>>()?;
 
         Ok(Self {
             specs,
@@ -1722,6 +1719,16 @@ impl std::fmt::Display for PathOutsideRepository {
     }
 }
 
+impl From<PathOutsideRepository> for PathspecResolveError {
+    fn from(outside: PathOutsideRepository) -> Self {
+        Self::OutsideRepository {
+            elt: outside.elt,
+            path: outside.path,
+            work_tree: outside.work_tree.display().to_string(),
+        }
+    }
+}
+
 /// Resolve a magic pathspec relative to a current-directory prefix.
 ///
 /// This keeps the `cwd` prefix case-sensitive (via an internal `prefix:` magic
@@ -2066,25 +2073,11 @@ pub fn resolve_pathspec_in_worktree(
     resolve_pathspec_in_worktree_with_argv_precompose(elt, pathspec, work_tree, prefix, false)
 }
 
-/// Like [`resolve_pathspec_in_worktree`], applying Git argv NFC normalization when enabled for `git_dir`.
-pub fn resolve_pathspec_in_worktree_with_git_dir(
-    elt: &str,
-    pathspec: &str,
-    work_tree: &Path,
-    prefix: Option<&str>,
-    git_dir: Option<&Path>,
-) -> Result<String, PathOutsideRepository> {
-    let argv_precompose = argv_precompose_enabled(git_dir);
-    resolve_pathspec_in_worktree_with_argv_precompose(
-        elt,
-        pathspec,
-        work_tree,
-        prefix,
-        argv_precompose,
-    )
-}
-
-fn resolve_pathspec_in_worktree_with_argv_precompose(
+/// Like [`resolve_pathspec_in_worktree`], NFC-normalizing `pathspec` when `argv_precompose` is set.
+///
+/// Callers holding a [`Repository`] should use [`Repository::resolve_worktree_pathspec`], which
+/// computes `argv_precompose` once per handle instead of reloading config per pathspec.
+pub(crate) fn resolve_pathspec_in_worktree_with_argv_precompose(
     elt: &str,
     pathspec: &str,
     work_tree: &Path,

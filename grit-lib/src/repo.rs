@@ -1021,6 +1021,38 @@ impl Repository {
             .pathspec_precompose_enabled(self.environment.as_ref(), &self.git_dir)
     }
 
+    /// Resolve one argv pathspec against this repository's work tree.
+    ///
+    /// `prefix` is the work-tree-relative directory the pathspec was typed in (`None` at the
+    /// root). Magic pathspecs pass through; plain paths are joined with `prefix`, normalized, and
+    /// NFC-normalized when `core.precomposeunicode` is on and the filesystem aliases NFD/NFC
+    /// spellings. That decision is computed once per handle, so resolving many pathspecs costs no
+    /// config reload or filesystem probe per path.
+    ///
+    /// # Errors
+    ///
+    /// [`crate::pathspec::PathspecResolveError::NeedsWorkTree`] for a bare repository, and
+    /// [`crate::pathspec::PathspecResolveError::OutsideRepository`] when `pathspec` resolves
+    /// outside the work tree.
+    pub fn resolve_worktree_pathspec(
+        &self,
+        pathspec: &str,
+        prefix: Option<&str>,
+    ) -> std::result::Result<String, crate::pathspec::PathspecResolveError> {
+        let work_tree = self
+            .work_tree()
+            .ok_or(crate::pathspec::PathspecResolveError::NeedsWorkTree)?;
+        Ok(
+            crate::pathspec::resolve_pathspec_in_worktree_with_argv_precompose(
+                pathspec,
+                pathspec,
+                work_tree,
+                prefix,
+                self.pathspec_precompose_enabled(),
+            )?,
+        )
+    }
+
     #[must_use]
     pub(crate) fn pathspec_match_context(&self) -> crate::pathspec::PathspecMatchContext {
         crate::pathspec::pathspec_match_context_with_precompose(self.pathspec_precompose_enabled())
@@ -1070,17 +1102,12 @@ impl Repository {
         let prefix = self.pathspec_cwd_prefix();
         let cwd_for_implicit = prefix.map(str::to_owned);
         let mut resolved = Vec::with_capacity(paths.len());
-        if let Some(wt) = self.work_tree() {
+        if self.work_tree().is_some() {
             for pathspec in paths {
                 let prefix = Self::pathspec_argv_prefix(self, pathspec);
-                let spec = crate::pathspec::resolve_pathspec_in_worktree_with_git_dir(
-                    pathspec,
-                    pathspec,
-                    wt,
-                    prefix,
-                    Some(self.git_dir()),
-                )
-                .map_err(|e| Error::PathError(e.to_string()))?;
+                let spec = self
+                    .resolve_worktree_pathspec(pathspec, prefix)
+                    .map_err(|e| Error::PathError(e.to_string()))?;
                 resolved.push(spec);
             }
         } else {

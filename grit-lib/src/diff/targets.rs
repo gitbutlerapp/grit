@@ -36,7 +36,7 @@ use crate::revwalk::rev_parse::{
 };
 use crate::state::resolve_head;
 use crate::worktree::fsmonitor::fsmonitor_enabled;
-use crate::worktree::pathspec::{resolve_pathspec, resolve_pathspec_in_worktree_with_git_dir};
+use crate::worktree::pathspec::resolve_pathspec;
 use crate::worktree::worktree_rules::WorktreeRules;
 
 /// What to compare when producing a structured file diff list.
@@ -737,16 +737,7 @@ fn token_is_known_worktree_pathspec(
     cwd_prefix: Option<&str>,
     token: &str,
 ) -> bool {
-    let Some(work_tree) = repo.work_tree() else {
-        return false;
-    };
-    let Ok(resolved) = resolve_pathspec_in_worktree_with_git_dir(
-        token,
-        token,
-        work_tree,
-        cwd_prefix,
-        Some(repo.git_dir()),
-    ) else {
+    let Ok(resolved) = repo.resolve_worktree_pathspec(token, cwd_prefix) else {
         return false;
     };
     pathspec_matches_known_in_repository(repo, &resolved).unwrap_or(false)
@@ -798,19 +789,16 @@ fn resolve_worktree_diff_pathspecs(
     if raw_paths.is_empty() {
         return Ok(Vec::new());
     }
-    let work_tree = repo.work_tree().ok_or_else(|| {
-        ResolveDiffArgumentsError::Message("grit diff needs a working tree".into())
-    })?;
+    if repo.work_tree().is_none() {
+        return Err(ResolveDiffArgumentsError::Message(
+            "grit diff needs a working tree".into(),
+        ));
+    }
     let mut specs = Vec::with_capacity(raw_paths.len());
     for pathspec in raw_paths {
-        let resolved = resolve_pathspec_in_worktree_with_git_dir(
-            pathspec,
-            pathspec,
-            work_tree,
-            cwd_prefix,
-            Some(repo.git_dir()),
-        )
-        .map_err(|e| ResolveDiffArgumentsError::Message(e.to_string()))?;
+        let resolved = repo
+            .resolve_worktree_pathspec(pathspec, cwd_prefix)
+            .map_err(|e| ResolveDiffArgumentsError::Message(e.to_string()))?;
         ensure_pathspec_matches_known_in_repository(repo, pathspec, &resolved)
             .map_err(|e| ResolveDiffArgumentsError::Message(e.to_string()))?;
         specs.push(resolved);
@@ -829,15 +817,10 @@ fn resolve_commit_diff_pathspecs(
     let root = pathspec_resolution_root(repo);
     let mut specs = Vec::with_capacity(raw_paths.len());
     for pathspec in raw_paths {
-        if let Some(work_tree) = repo.work_tree() {
-            let resolved = resolve_pathspec_in_worktree_with_git_dir(
-                pathspec,
-                pathspec,
-                work_tree,
-                cwd_prefix,
-                Some(repo.git_dir()),
-            )
-            .map_err(|e| ResolveDiffArgumentsError::Message(e.to_string()))?;
+        if repo.work_tree().is_some() {
+            let resolved = repo
+                .resolve_worktree_pathspec(pathspec, cwd_prefix)
+                .map_err(|e| ResolveDiffArgumentsError::Message(e.to_string()))?;
             specs.push(resolved);
         } else {
             specs.push(resolve_pathspec(pathspec, root, cwd_prefix));

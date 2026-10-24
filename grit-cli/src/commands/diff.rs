@@ -42,9 +42,7 @@ use grit_lib::revwalk::rev_parse::{
 };
 use grit_lib::state::resolve_head;
 use grit_lib::worktree::fsmonitor::fsmonitor_enabled;
-use grit_lib::worktree::pathspec::{
-    pathdiff, resolve_pathspec, resolve_pathspec_in_worktree_with_git_dir,
-};
+use grit_lib::worktree::pathspec::{pathdiff, resolve_pathspec};
 use grit_lib::worktree::worktree_rules::WorktreeRules;
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -1710,13 +1708,7 @@ fn token_is_known_worktree_pathspec(repo: &grit_lib::repo::Repository, token: &s
         return false;
     };
     let prefix = pathdiff(&cwd, work_tree);
-    let Ok(resolved) = resolve_pathspec_in_worktree_with_git_dir(
-        token,
-        token,
-        work_tree,
-        prefix.as_deref(),
-        Some(repo.git_dir()),
-    ) else {
+    let Ok(resolved) = repo.resolve_worktree_pathspec(token, prefix.as_deref()) else {
         return false;
     };
     pathspec_matches_known_in_repository(repo, &resolved).unwrap_or(false)
@@ -1812,18 +1804,13 @@ fn resolve_worktree_diff_pathspecs(
     if raw_paths.is_empty() {
         return Ok(Vec::new());
     }
-    let work_tree = repo.work_tree().context("grit diff needs a working tree")?;
+    repo.work_tree().context("grit diff needs a working tree")?;
     let prefix = pathspec_prefix_for_repo(repo)?;
     let mut specs = Vec::with_capacity(raw_paths.len());
     for pathspec in raw_paths {
-        let resolved = resolve_pathspec_in_worktree_with_git_dir(
-            pathspec,
-            pathspec,
-            work_tree,
-            prefix.as_deref(),
-            Some(repo.git_dir()),
-        )
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+        let resolved = repo
+            .resolve_worktree_pathspec(pathspec, prefix.as_deref())
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
         ensure_pathspec_matches_known_in_repository(repo, pathspec, &resolved)
             .map_err(|e| anyhow::anyhow!("{e}"))?;
         specs.push(resolved);
@@ -1844,15 +1831,10 @@ pub(crate) fn resolve_commit_diff_pathspecs(
     let prefix = pathspec_prefix_for_repo(repo)?;
     let mut specs = Vec::with_capacity(raw_paths.len());
     for pathspec in raw_paths {
-        if let Some(work_tree) = repo.work_tree() {
-            let resolved = resolve_pathspec_in_worktree_with_git_dir(
-                pathspec,
-                pathspec,
-                work_tree,
-                prefix.as_deref(),
-                Some(repo.git_dir()),
-            )
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        if repo.work_tree().is_some() {
+            let resolved = repo
+                .resolve_worktree_pathspec(pathspec, prefix.as_deref())
+                .map_err(|e| anyhow::anyhow!("{e}"))?;
             specs.push(resolved);
         } else {
             specs.push(resolve_pathspec(pathspec, root, prefix.as_deref()));
@@ -1902,14 +1884,9 @@ fn single_worktree_pathspec(
     let work_tree = repo.work_tree().context("grit diff needs a working tree")?;
     let cwd = std::env::current_dir().context("could not read the current directory")?;
     let prefix = pathdiff(&cwd, work_tree);
-    let resolved = resolve_pathspec_in_worktree_with_git_dir(
-        pathspec,
-        pathspec,
-        work_tree,
-        prefix.as_deref(),
-        Some(repo.git_dir()),
-    )
-    .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let resolved = repo
+        .resolve_worktree_pathspec(pathspec, prefix.as_deref())
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
     ensure_pathspec_matches_known_in_repository(repo, pathspec, &resolved)
         .map_err(|e| anyhow::anyhow!("{e}"))?;
     Ok(vec![resolved])

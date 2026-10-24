@@ -5716,6 +5716,8 @@ impl core::cmp::PartialEq for grit_lib::error::PathspecResolveError
 pub fn grit_lib::error::PathspecResolveError::eq(&self, &Self) -> bool
 impl core::convert::From<grit_lib::error::PathspecFromFileParseError> for grit_lib::error::PathspecResolveError
 pub fn grit_lib::error::PathspecResolveError::from(grit_lib::error::PathspecFromFileParseError) -> Self
+impl core::convert::From<grit_lib::pathspec::PathOutsideRepository> for grit_lib::error::PathspecResolveError
+pub fn grit_lib::error::PathspecResolveError::from(grit_lib::pathspec::PathOutsideRepository) -> Self
 impl core::error::Error for grit_lib::error::PathspecResolveError
 pub fn grit_lib::error::PathspecResolveError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
 impl core::fmt::Debug for grit_lib::error::PathspecResolveError
@@ -11419,6 +11421,8 @@ impl core::cmp::PartialEq for grit_lib::error::PathspecResolveError
 pub fn grit_lib::error::PathspecResolveError::eq(&self, &Self) -> bool
 impl core::convert::From<grit_lib::error::PathspecFromFileParseError> for grit_lib::error::PathspecResolveError
 pub fn grit_lib::error::PathspecResolveError::from(grit_lib::error::PathspecFromFileParseError) -> Self
+impl core::convert::From<grit_lib::pathspec::PathOutsideRepository> for grit_lib::error::PathspecResolveError
+pub fn grit_lib::error::PathspecResolveError::from(grit_lib::pathspec::PathOutsideRepository) -> Self
 impl core::error::Error for grit_lib::error::PathspecResolveError
 pub fn grit_lib::error::PathspecResolveError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
 impl core::fmt::Debug for grit_lib::error::PathspecResolveError
@@ -11439,6 +11443,8 @@ pub grit_lib::pathspec::PathOutsideRepository::path: alloc::string::String
 pub grit_lib::pathspec::PathOutsideRepository::work_tree: std::path::PathBuf
 impl core::clone::Clone for grit_lib::pathspec::PathOutsideRepository
 pub fn grit_lib::pathspec::PathOutsideRepository::clone(&self) -> Self
+impl core::convert::From<grit_lib::pathspec::PathOutsideRepository> for grit_lib::error::PathspecResolveError
+pub fn grit_lib::error::PathspecResolveError::from(grit_lib::pathspec::PathOutsideRepository) -> Self
 impl core::fmt::Debug for grit_lib::pathspec::PathOutsideRepository
 pub fn grit_lib::pathspec::PathOutsideRepository::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::fmt::Display for grit_lib::pathspec::PathOutsideRepository
@@ -11554,7 +11560,6 @@ pub fn grit_lib::pathspec::precompose_argv_pathspec(&str) -> alloc::borrow::Cow<
 pub fn grit_lib::pathspec::resolve_magic_pathspec(&str, &str) -> core::option::Option<alloc::string::String>
 pub fn grit_lib::pathspec::resolve_pathspec(&str, &std::path::Path, core::option::Option<&str>) -> alloc::string::String
 pub fn grit_lib::pathspec::resolve_pathspec_in_worktree(&str, &str, &std::path::Path, core::option::Option<&str>) -> core::result::Result<alloc::string::String, grit_lib::pathspec::PathOutsideRepository>
-pub fn grit_lib::pathspec::resolve_pathspec_in_worktree_with_git_dir(&str, &str, &std::path::Path, core::option::Option<&str>, core::option::Option<&std::path::Path>) -> core::result::Result<alloc::string::String, grit_lib::pathspec::PathOutsideRepository>
 pub fn grit_lib::pathspec::resolve_pathspec_with_argv_precompose(&str, &std::path::Path, core::option::Option<&str>, bool) -> alloc::string::String
 pub fn grit_lib::pathspec::simple_length(&str) -> usize
 pub fn grit_lib::pathspec::validate_attr_pathspecs(&[alloc::string::String]) -> core::result::Result<(), alloc::string::String>
@@ -15496,6 +15501,7 @@ pub fn grit_lib::repo::Repository::reload_config(&self) -> grit_lib::error::Resu
 pub fn grit_lib::repo::Repository::remotes(&self) -> grit_lib::repo_handles::RepositoryRemotes<'_>
 pub fn grit_lib::repo::Repository::repack(&self, &grit_lib::maintenance::RepackOptions) -> grit_lib::error::Result<grit_lib::maintenance::RepackReport>
 pub fn grit_lib::repo::Repository::resolve_rev_walk_pathspecs(&self, &[alloc::string::String]) -> grit_lib::error::Result<alloc::vec::Vec<alloc::string::String>>
+pub fn grit_lib::repo::Repository::resolve_worktree_pathspec(&self, &str, core::option::Option<&str>) -> core::result::Result<alloc::string::String, grit_lib::error::PathspecResolveError>
 pub fn grit_lib::repo::Repository::rev_walk(&self) -> grit_lib::revwalk::handle::RevWalk<'_>
 pub fn grit_lib::repo::Repository::set_diagnostics(&mut self, grit_lib::diagnostics::DiagnosticsHandle)
 pub fn grit_lib::repo::Repository::set_network_trace(&mut self, bool)
@@ -20342,6 +20348,7 @@ pub fn grit_lib::repo::Repository::reload_config(&self) -> grit_lib::error::Resu
 pub fn grit_lib::repo::Repository::remotes(&self) -> grit_lib::repo_handles::RepositoryRemotes<'_>
 pub fn grit_lib::repo::Repository::repack(&self, &grit_lib::maintenance::RepackOptions) -> grit_lib::error::Result<grit_lib::maintenance::RepackReport>
 pub fn grit_lib::repo::Repository::resolve_rev_walk_pathspecs(&self, &[alloc::string::String]) -> grit_lib::error::Result<alloc::vec::Vec<alloc::string::String>>
+pub fn grit_lib::repo::Repository::resolve_worktree_pathspec(&self, &str, core::option::Option<&str>) -> core::result::Result<alloc::string::String, grit_lib::error::PathspecResolveError>
 pub fn grit_lib::repo::Repository::rev_walk(&self) -> grit_lib::revwalk::handle::RevWalk<'_>
 pub fn grit_lib::repo::Repository::set_diagnostics(&mut self, grit_lib::diagnostics::DiagnosticsHandle)
 pub fn grit_lib::repo::Repository::set_network_trace(&mut self, bool)
@@ -25221,6 +25228,8 @@ impl core::cmp::PartialEq for grit_lib::error::PathspecResolveError
 pub fn grit_lib::error::PathspecResolveError::eq(&self, &Self) -> bool
 impl core::convert::From<grit_lib::error::PathspecFromFileParseError> for grit_lib::error::PathspecResolveError
 pub fn grit_lib::error::PathspecResolveError::from(grit_lib::error::PathspecFromFileParseError) -> Self
+impl core::convert::From<grit_lib::pathspec::PathOutsideRepository> for grit_lib::error::PathspecResolveError
+pub fn grit_lib::error::PathspecResolveError::from(grit_lib::pathspec::PathOutsideRepository) -> Self
 impl core::error::Error for grit_lib::error::PathspecResolveError
 pub fn grit_lib::error::PathspecResolveError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
 impl core::fmt::Debug for grit_lib::error::PathspecResolveError
@@ -25241,6 +25250,8 @@ pub grit_lib::worktree::pathspec::PathOutsideRepository::path: alloc::string::St
 pub grit_lib::worktree::pathspec::PathOutsideRepository::work_tree: std::path::PathBuf
 impl core::clone::Clone for grit_lib::pathspec::PathOutsideRepository
 pub fn grit_lib::pathspec::PathOutsideRepository::clone(&self) -> Self
+impl core::convert::From<grit_lib::pathspec::PathOutsideRepository> for grit_lib::error::PathspecResolveError
+pub fn grit_lib::error::PathspecResolveError::from(grit_lib::pathspec::PathOutsideRepository) -> Self
 impl core::fmt::Debug for grit_lib::pathspec::PathOutsideRepository
 pub fn grit_lib::pathspec::PathOutsideRepository::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::fmt::Display for grit_lib::pathspec::PathOutsideRepository
@@ -25356,7 +25367,6 @@ pub fn grit_lib::worktree::pathspec::precompose_argv_pathspec(&str) -> alloc::bo
 pub fn grit_lib::worktree::pathspec::resolve_magic_pathspec(&str, &str) -> core::option::Option<alloc::string::String>
 pub fn grit_lib::worktree::pathspec::resolve_pathspec(&str, &std::path::Path, core::option::Option<&str>) -> alloc::string::String
 pub fn grit_lib::worktree::pathspec::resolve_pathspec_in_worktree(&str, &str, &std::path::Path, core::option::Option<&str>) -> core::result::Result<alloc::string::String, grit_lib::pathspec::PathOutsideRepository>
-pub fn grit_lib::worktree::pathspec::resolve_pathspec_in_worktree_with_git_dir(&str, &str, &std::path::Path, core::option::Option<&str>, core::option::Option<&std::path::Path>) -> core::result::Result<alloc::string::String, grit_lib::pathspec::PathOutsideRepository>
 pub fn grit_lib::worktree::pathspec::resolve_pathspec_with_argv_precompose(&str, &std::path::Path, core::option::Option<&str>, bool) -> alloc::string::String
 pub fn grit_lib::worktree::pathspec::simple_length(&str) -> usize
 pub fn grit_lib::worktree::pathspec::validate_attr_pathspecs(&[alloc::string::String]) -> core::result::Result<(), alloc::string::String>
