@@ -48,7 +48,7 @@ Reflog helpers live in [`reflog`](rustdoc:grit_lib::refs::reflog) and on [`RefSt
 
 [`porcelain::branch`](rustdoc:grit_lib::porcelain::branch) and [`porcelain::tag`](rustdoc:grit_lib::porcelain::tag) are what `grit branch` and `grit tag` call. [`list_branches`](rustdoc:grit_lib::porcelain::branch::list_branches) returns every local branch sorted by name, with the one `HEAD` is attached to marked as current. [`list_tags`](rustdoc:grit_lib::porcelain::tag::list_tags) takes a [`RefQuery`](rustdoc:grit_lib::refs::listing::RefQuery) (patterns, sort, limit, `--contains`, `--points-at`) and returns complete [`TagSummary`](rustdoc:grit_lib::porcelain::tag::TagSummary) rows. Call [`list_tags_with_detail`](rustdoc:grit_lib::porcelain::tag::list_tags_with_detail) with [`TagDetail::Names`](rustdoc:grit_lib::porcelain::tag::TagDetail::Names) for names without tag-object reads, [`TagDetail::Kind`](rustdoc:grit_lib::porcelain::tag::TagDetail::Kind) for packed-peel classification, or [`TagDetail::Annotation`](rustdoc:grit_lib::porcelain::tag::TagDetail::Annotation) for annotation messages and taggers.
 
-[`delete_branch`](rustdoc:grit_lib::porcelain::branch::delete_branch) refuses the current branch and branches checked out in another worktree. With [`DeleteMode::Safe`](rustdoc:grit_lib::porcelain::branch::DeleteMode::Safe) it also requires the branch tip to be reachable from the branch's upstream, or from `HEAD` when there is no upstream (the same rule as `git branch -d`). Each refusal is a typed error: `BranchNotFound`, `CannotDeleteCurrentBranch`, `BranchCheckedOutInWorktree` or `BranchNotMerged`. [`delete_tag`](rustdoc:grit_lib::porcelain::tag::delete_tag) returns the object the tag pointed at, or `TagNotFound`. Both deletes run on the repository's ref store (so an injected store is honoured), compare-and-swap against the commit they checked, and remove the ref's reflog.
+[`delete_branch`](rustdoc:grit_lib::porcelain::branch::delete_branch) refuses the current branch and branches checked out in another worktree. With [`DeleteMode::Safe`](rustdoc:grit_lib::porcelain::branch_error::DeleteMode::Safe) it also requires the branch tip to be reachable from the branch's upstream, or from `HEAD` when there is no upstream (the same rule as `git branch -d`). Each refusal is a typed error: `BranchNotFound`, `CannotDeleteCurrentBranch`, `BranchCheckedOutInWorktree` or `BranchNotMerged`. [`delete_tag`](rustdoc:grit_lib::porcelain::tag::delete_tag) returns the object the tag pointed at, or `TagNotFound`. Both deletes run on the repository's ref store (so an injected store is honoured), compare-and-swap against the commit they checked, and remove the ref's reflog.
 
 ```rust
 use grit_lib::error::Error;
@@ -78,6 +78,36 @@ if let Some(base) = comparison_base(&repo, "main")? {
     }
 }
 ```
+
+## Writing a ref backend
+
+A custom [`RefStore`](rustdoc:grit_lib::refs::store::RefStore) (a database, a network service, an in-process map) does not have to re-derive Git's ref-update rules. [`refs::store::backend`](rustdoc:grit_lib::refs::store::backend) has the helpers the built-in stores use:
+
+| Helper | What it does |
+| ------ | ------------ |
+| [`check_transaction`](rustdoc:grit_lib::refs::store::backend::check_transaction) | Every check `prepare` must make: ref names, directory/file conflicts (`a` vs `a/b`), compare-and-swap through symbolic refs, two updates writing the same ref |
+| [`apply_transaction`](rustdoc:grit_lib::refs::store::backend::apply_transaction) | The refs and reflogs a commit stores, including the reflog line on both a symbolic ref and its target |
+| [`RefBatchState`](rustdoc:grit_lib::refs::store::backend::RefBatchState) | The ref and reflog maps both helpers work on |
+| [`resolve_symbolic`](rustdoc:grit_lib::refs::store::backend::resolve_symbolic) | Follow symbolic refs inside a `RefBatchState` (for `RefEntry::peeled`) |
+| [`validate_storable_refname`](rustdoc:grit_lib::refs::store::backend::validate_storable_refname), [`verify_create_conflicts`](rustdoc:grit_lib::refs::store::backend::verify_create_conflicts), [`expected_matches`](rustdoc:grit_lib::refs::store::backend::expected_matches) | The individual checks, for stores that only load part of their refs |
+
+The usual shape: in `prepare`, take your lock, load the refs the transaction touches into a `RefBatchState`, call `check_transaction`, and return a prepared value that owns the lock. In `commit`, run `apply_transaction` on a copy and persist the difference. The prepared value must release its lock in `Drop` too, because callers bail out with `?` between prepare and commit. `MemoryRefStore` is written exactly this way. Report your own storage failures as [`RefStoreError::Backend`](rustdoc:grit_lib::refs::store::RefStoreError::Backend) (`RefStoreError::backend(err)` keeps the error downcastable) and return [`RefStorageFormat::Custom`](rustdoc:grit_lib::refs::store::RefStorageFormat::Custom) from `format()`.
+
+Check the store with the conformance suite every built-in backend runs, `grit_test_support::refstore_conformance` (see [`grit-lib/tests/refstore_custom_backend.rs`](https://github.com/gitbutlerapp/grit/blob/main/grit-lib/tests/refstore_custom_backend.rs) for a complete map-backed store):
+
+```rust
+use std::sync::Arc;
+
+use grit_lib::refs::store::RefStore;
+use grit_test_support::refstore_conformance::run_suite;
+
+#[test]
+fn my_store_conforms() {
+    run_suite(|| Arc::new(MyStore::default()) as Arc<dyn RefStore>);
+}
+```
+
+To open a repository on your store, pass it to [`RepositoryBuilder::ref_store`](rustdoc:grit_lib::repo::RepositoryBuilder::ref_store). The git directory then needs no `HEAD` or `refs/`, and [`RepositoryBuilder::initial_branch`](rustdoc:grit_lib::repo::RepositoryBuilder::initial_branch) points `HEAD` at an unborn branch when the store has none. See [Object stores](object-stores.md) for opening with no git directory at all.
 
 ## Examples
 
