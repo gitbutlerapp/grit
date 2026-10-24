@@ -21,10 +21,7 @@ use grit_lib::porcelain::replay_sequence::{
     start_replay_sequence, ReplayCreated, ReplayEmptyPolicy, ReplayOptions, ReplaySequenceRequest,
     SequenceOutcome, SequencePrediction,
 };
-use grit_lib::porcelain::revert::{committer_timestamp, revision_range_apply_order};
-use grit_lib::revwalk::parse_rev_walk_tokens;
-use grit_lib::revwalk::rev_list::resolve_revision_specs_to_commits;
-use grit_lib::revwalk::rev_parse::resolve_revision_as_commit;
+use grit_lib::porcelain::revert::commits_to_revert;
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::io::Write;
@@ -274,7 +271,10 @@ pub fn run(opts: &RevertRunOptions) -> Result<RevertOutcome> {
         return map_sequence_outcome(&repo, outcome);
     }
 
-    let sources = resolve_revert_commits(&repo, &opts.commits)?;
+    if opts.commits.is_empty() {
+        bail!("at least one commit is required unless using --continue, --abort, or --skip");
+    }
+    let sources = commits_to_revert(&repo, &opts.commits).map_err(map_revert_committish_error)?;
     if opts.dry_run {
         return Ok(RevertOutcome::dry_run(sources));
     }
@@ -403,57 +403,6 @@ fn map_prediction_outcome(prediction: SequencePrediction) -> Result<RevertOutcom
             check: true,
         }),
     }
-}
-
-fn resolve_revert_commits(
-    repo: &grit_lib::repo::Repository,
-    tokens: &[String],
-) -> Result<Vec<ObjectId>> {
-    if tokens.is_empty() {
-        bail!("at least one commit is required unless using --continue, --abort, or --skip");
-    }
-    let refs: Vec<&str> = tokens.iter().map(String::as_str).collect();
-    let parsed = parse_rev_walk_tokens(repo, &refs).map_err(anyhow::Error::new)?;
-    let include = resolve_revision_specs_to_commits(repo, &parsed.positive)
-        .map_err(map_revert_committish_error)?;
-    let exclude = resolve_revision_specs_to_commits(repo, &parsed.negative)
-        .map_err(map_revert_committish_error)?;
-    let range_syntax = tokens
-        .iter()
-        .any(|t| t.contains("..") || t.contains("...") || t.starts_with('^'))
-        || !exclude.is_empty()
-        || parsed.symmetric_left.is_some();
-    if range_syntax {
-        return revision_range_apply_order(repo, &include, &exclude).map_err(anyhow::Error::new);
-    }
-    if tokens.len() > 1 {
-        return tokens
-            .iter()
-            .map(|token| {
-                resolve_revision_as_commit(repo, token).map_err(map_revert_committish_error)
-            })
-            .collect::<Result<Vec<_>>>();
-    }
-    let commits: Vec<ObjectId> = tokens
-        .iter()
-        .map(|token| resolve_revision_as_commit(repo, token).map_err(map_revert_committish_error))
-        .collect::<Result<_>>()?;
-    order_commits_newest_first(repo, &commits)
-}
-
-fn order_commits_newest_first(
-    repo: &grit_lib::repo::Repository,
-    commits: &[ObjectId],
-) -> Result<Vec<ObjectId>> {
-    let mut dated: Vec<(i64, ObjectId)> = commits
-        .iter()
-        .map(|oid| {
-            let commit = context::read_commit(repo, oid)?;
-            Ok((committer_timestamp(&commit.committer), *oid))
-        })
-        .collect::<Result<Vec<_>>>()?;
-    dated.sort_by_key(|(ts, oid)| (std::cmp::Reverse(*ts), *oid));
-    Ok(dated.into_iter().map(|(_, oid)| oid).collect())
 }
 
 fn map_sequence_outcome(

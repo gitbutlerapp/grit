@@ -1,9 +1,9 @@
-//! Range revert apply order matches system `git revert` under committer-date skew.
+//! Revert commit selection and range apply order match system `git` under committer-date skew.
 
 use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::porcelain::revert::revision_range_apply_order;
+use grit_lib::porcelain::revert::{commits_to_revert, revision_range_apply_order};
 use grit_lib::repo::Repository;
 
 fn init_repo(root: &std::path::Path) {
@@ -181,4 +181,100 @@ fn merged_side_branch_includes_side_commit_like_git_rev_list() {
     assert_eq!(grit_order, git_order);
 
     let _ = root_oid;
+}
+
+fn git(root: &std::path::Path, args: &[&str]) {
+    let status = Command::new("git")
+        .args(args)
+        .current_dir(root)
+        .status()
+        .unwrap();
+    assert!(status.success(), "git {args:?}");
+}
+
+fn git_rev_list_topo(root: &std::path::Path, specs: &[&str]) -> Vec<grit_lib::objects::ObjectId> {
+    let out = Command::new("git")
+        .arg("rev-list")
+        .arg("--topo-order")
+        .args(specs)
+        .current_dir(root)
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "git rev-list {specs:?}");
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .map(|l| l.parse().expect("oid"))
+        .collect()
+}
+
+fn open(root: &std::path::Path) -> Repository {
+    Repository::open(
+        &root.join(".git"),
+        &RepositoryOptions::empty().with_work_tree(root),
+    )
+    .expect("open")
+}
+
+fn specs(list: &[&str]) -> Vec<String> {
+    list.iter().map(|s| (*s).to_owned()).collect()
+}
+
+/// `base` - c1 - c2 - c3 on `main` with skewed committer dates, plus `side` forked at `base`.
+fn linear_with_side(root: &std::path::Path) -> [grit_lib::objects::ObjectId; 4] {
+    init_repo(root);
+    commit_with_dates(root, "f", "0\n", "base", "@1000 +0000");
+    let base = oid_at(root, "HEAD");
+    git(root, &["branch", "side"]);
+    commit_with_dates(root, "f", "1\n", "c1", "@1300 +0000");
+    let c1 = oid_at(root, "HEAD");
+    commit_with_dates(root, "f", "2\n", "c2", "@1100 +0000");
+    let c2 = oid_at(root, "HEAD");
+    commit_with_dates(root, "f", "3\n", "c3", "@1200 +0000");
+    let c3 = oid_at(root, "HEAD");
+    git(root, &["checkout", "-q", "side"]);
+    commit_with_dates(root, "s", "s\n", "s1", "@1250 +0000");
+    git(root, &["checkout", "-q", "main"]);
+    [base, c1, c2, c3]
+}
+
+#[test]
+fn commits_to_revert_range_spellings_match_git_rev_list() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let [base, ..] = linear_with_side(root.path());
+    let repo = open(root.path());
+    let base_hex = base.to_hex();
+    let range = format!("{base_hex}..HEAD");
+    let exclude = format!("^{base_hex}");
+    let cases: [&[&str]; 5] = [
+        &[&range],
+        &[&exclude, "HEAD"],
+        &["HEAD", &exclude],
+        &["HEAD~2..HEAD~1", "HEAD"],
+        &["main...side"],
+    ];
+    for case in cases {
+        let grit = commits_to_revert(&repo, &specs(case)).expect("commits_to_revert");
+        assert_eq!(grit, git_rev_list_topo(root.path(), case), "specs {case:?}");
+    }
+}
+
+#[test]
+fn commits_to_revert_plain_specs_keep_argument_order() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let [_, c1, c2, c3] = linear_with_side(root.path());
+    let repo = open(root.path());
+    let got = commits_to_revert(&repo, &specs(&[&c1.to_hex(), "HEAD", "HEAD~1"]))
+        .expect("commits_to_revert");
+    assert_eq!(got, vec![c1, c3, c2]);
+    let single = commits_to_revert(&repo, &specs(&["main"])).expect("single");
+    assert_eq!(single, vec![c3]);
+}
+
+#[test]
+fn commits_to_revert_rejects_non_commit_spec() {
+    let root = tempfile::tempdir().expect("tempdir");
+    linear_with_side(root.path());
+    let repo = open(root.path());
+    assert!(commits_to_revert(&repo, &specs(&["HEAD", "HEAD^{tree}"])).is_err());
+    assert!(commits_to_revert(&repo, &specs(&["no-such-branch"])).is_err());
 }

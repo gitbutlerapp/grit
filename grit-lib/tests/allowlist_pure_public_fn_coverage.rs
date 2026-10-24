@@ -25,12 +25,12 @@ use grit_lib::lockfile::{LockFile, LockWait, SystemLockJitter};
 use grit_lib::objects::hash::try_par_hash_with_force;
 use grit_lib::objects::pack_receive::copy_reader_to_writer;
 use grit_lib::objects::promisor_remote::parse_advertisement;
-use grit_lib::objects::{CommitData, HashAlgo, ObjectId, ObjectKind};
+use grit_lib::objects::{CommitData, HashAlgo, ObjectId};
 use grit_lib::porcelain::log::{
     collect_decorations, collect_decorations_inner, current_branch_decoration_index,
     normalize_glob_ref, peel_to_commit_hex, DecorationFilter,
 };
-use grit_lib::porcelain::revert::{committer_timestamp, revision_set_newest_first};
+use grit_lib::porcelain::revert::commits_to_revert;
 use grit_lib::refs::ref_exclusions::RefExclusions;
 use grit_lib::refs::store::paths::{logs_refs_dir_path, logs_refs_subdir_path};
 use grit_lib::refs::{ref_update_flags, verify_branch_commit_cas};
@@ -441,9 +441,7 @@ fn porcelain_log_revert_and_submodule_diff_helpers() {
     let _ = submodule_commit_subject_line(&c);
     let _ = read_submodule_head_for_checkout(dir.path());
 
-    assert_eq!(committer_timestamp("N <e@x> 42 +0000"), 42);
-    let tip = repo.odb().write(ObjectKind::Blob, b"x").expect("blob");
-    let _ = revision_set_newest_first(&repo, &[tip], &[]);
+    assert!(commits_to_revert(&repo, &[]).expect("no specs").is_empty());
 
     let index = repo.index_handle().load().expect("index");
     let _ = builtin_objectmode_index(&index, "README.md");

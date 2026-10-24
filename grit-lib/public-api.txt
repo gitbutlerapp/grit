@@ -13514,12 +13514,11 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::restore::Rest
 pub fn grit_lib::porcelain::restore::conflict_style_from_config(&grit_lib::repo::Repository) -> grit_lib::diff::merge_file::ConflictStyle
 pub fn grit_lib::porcelain::restore::restore_paths(&grit_lib::repo::Repository, &grit_lib::porcelain::restore::RestoreOptions) -> grit_lib::error::Result<grit_lib::porcelain::restore::RestoreOutcome>
 pub mod grit_lib::porcelain::revert
-pub fn grit_lib::porcelain::revert::committer_timestamp(&str) -> i64
+pub fn grit_lib::porcelain::revert::commits_to_revert(&grit_lib::repo::Repository, &[alloc::string::String]) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::ObjectId>>
 pub fn grit_lib::porcelain::revert::merge_commit_message_for_revert(&grit_lib::objects::CommitData, grit_lib::objects::ObjectId, bool, char, core::option::Option<grit_lib::objects::ObjectId>) -> (alloc::string::String, alloc::string::String)
 pub fn grit_lib::porcelain::revert::merge_mainline_revert_note(grit_lib::objects::ObjectId, grit_lib::objects::ObjectId) -> alloc::string::String
 pub fn grit_lib::porcelain::revert::revert_mainline_extra_body(grit_lib::objects::ObjectId, grit_lib::objects::ObjectId) -> alloc::string::String
 pub fn grit_lib::porcelain::revert::revision_range_apply_order(&grit_lib::repo::Repository, &[grit_lib::objects::ObjectId], &[grit_lib::objects::ObjectId]) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::ObjectId>>
-pub fn grit_lib::porcelain::revert::revision_set_newest_first(&grit_lib::repo::Repository, &[grit_lib::objects::ObjectId], &[grit_lib::objects::ObjectId]) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::ObjectId>>
 pub mod grit_lib::porcelain::stage_tracked
 pub struct grit_lib::porcelain::stage_tracked::IndexStagingThresholds
 pub grit_lib::porcelain::stage_tracked::IndexStagingThresholds::large_index_restage: usize

@@ -8,20 +8,61 @@
 //!
 //! # What this module owns
 //!
-//! - [`revision_set_newest_first`] — order the commits of a revert revision set
-//!   (`<include> --not <exclude>`) newest-first, the order `git revert` replays a
+//! - [`commits_to_revert`] — expand revert revision arguments into the commits
+//!   to revert, in the order they are applied.
+//! - [`revision_range_apply_order`] — order the commits of a revert revision set
+//!   (`<include> --not <exclude>`) tip-first, the order `git revert` replays a
 //!   range in.
 //! - [`merge_commit_message_for_revert`] — build the `Revert "..."` /
 //!   `Reapply "..."` subject and the `This reverts commit ...` body for the
 //!   revert commit message (plain or `--reference` form).
 
-use std::collections::HashSet;
-
 use crate::commit_pretty::format_reference_line;
 use crate::error::Result;
-use crate::objects::{parse_commit, CommitData, ObjectId};
+use crate::objects::{CommitData, ObjectId};
 use crate::repo::Repository;
-use crate::rev_list::{rev_list, OrderingMode, RevListOptions};
+use crate::rev_list::{resolve_revision_specs_to_commits, rev_list, OrderingMode, RevListOptions};
+use crate::rev_parse::resolve_revision_as_commit;
+use crate::revwalk::parse_rev_walk_tokens;
+
+/// Expand revert revision arguments into the commits to revert, in apply order.
+///
+/// When any spec uses range syntax (`A..B`, `A...B`, `^X`), all specs together
+/// form one revision set (`git rev-list <specs>`), reverted tip-first via
+/// [`revision_range_apply_order`]. Otherwise each spec names one commit and the
+/// commits are reverted in argument order. An empty `specs` yields no commits.
+///
+/// # Parameters
+///
+/// - `repo` — repository the specs are resolved in.
+/// - `specs` — revision arguments as given by the user.
+///
+/// # Returns
+///
+/// Commit ids in the order the revert sequence applies them.
+///
+/// # Errors
+///
+/// Rev-parse errors when a spec does not resolve to a commit (for example a tree-ish),
+/// and rev-list or object read errors while walking a range.
+pub fn commits_to_revert(repo: &Repository, specs: &[String]) -> Result<Vec<ObjectId>> {
+    let tokens: Vec<&str> = specs.iter().map(String::as_str).collect();
+    let parsed = parse_rev_walk_tokens(repo, &tokens)?;
+    let include = resolve_revision_specs_to_commits(repo, &parsed.positive)?;
+    let exclude = resolve_revision_specs_to_commits(repo, &parsed.negative)?;
+    let range_syntax = tokens
+        .iter()
+        .any(|t| t.contains("..") || t.starts_with('^'))
+        || !exclude.is_empty()
+        || parsed.symmetric_left.is_some();
+    if range_syntax {
+        return revision_range_apply_order(repo, &include, &exclude);
+    }
+    tokens
+        .iter()
+        .map(|spec| resolve_revision_as_commit(repo, spec))
+        .collect()
+}
 
 /// Commits reachable from `include` but not from `exclude`, in revert apply order.
 ///
@@ -44,63 +85,6 @@ pub fn revision_range_apply_order(
         ..RevListOptions::default()
     };
     Ok(rev_list(repo, &positive, &negative, &opts)?.commits)
-}
-
-/// Commits reachable from `include` tips but not from `exclude` tips, newest-first.
-///
-/// Prefer [`revision_range_apply_order`] for revision ranges; this helper remains for
-/// callers that intentionally collect a wider reachable set sorted by committer date.
-///
-/// # Errors
-///
-/// Returns an error if an included commit cannot be read or parsed.
-pub fn revision_set_newest_first(
-    repo: &Repository,
-    include: &[ObjectId],
-    exclude: &[ObjectId],
-) -> Result<Vec<ObjectId>> {
-    // Closure of all ancestors of the excluded tips (these commits are NOT reverted).
-    let mut excluded: HashSet<ObjectId> = HashSet::new();
-    let mut stack: Vec<ObjectId> = exclude.to_vec();
-    while let Some(oid) = stack.pop() {
-        if !excluded.insert(oid) {
-            continue;
-        }
-        if let Ok(obj) = repo.odb().read(&oid) {
-            if let Ok(commit) = parse_commit(&obj.data) {
-                stack.extend(commit.parents.iter().copied());
-            }
-        }
-    }
-
-    // Closure of ancestors of the included tips, minus the excluded set.
-    let mut seen: HashSet<ObjectId> = HashSet::new();
-    let mut collected: Vec<(i64, ObjectId)> = Vec::new();
-    let mut stack: Vec<ObjectId> = include.to_vec();
-    while let Some(oid) = stack.pop() {
-        if excluded.contains(&oid) || !seen.insert(oid) {
-            continue;
-        }
-        let obj = repo.odb().read(&oid)?;
-        let commit = parse_commit(&obj.data)?;
-        let ts = committer_timestamp(&commit.committer);
-        collected.push((ts, oid));
-        stack.extend(commit.parents.iter().copied());
-    }
-
-    // Newest first: descending committer timestamp (stable on ties).
-    collected.sort_by_key(|a| std::cmp::Reverse(a.0));
-    Ok(collected.into_iter().map(|(_, oid)| oid).collect())
-}
-
-/// Parse the unix timestamp from an ident string (`Name <email> <ts> <tz>`).
-#[must_use]
-pub fn committer_timestamp(ident: &str) -> i64 {
-    ident
-        .rsplit(' ')
-        .nth(1)
-        .and_then(|s| s.parse::<i64>().ok())
-        .unwrap_or(0)
 }
 
 /// Build the revert commit-message subject and body for `commit`.
