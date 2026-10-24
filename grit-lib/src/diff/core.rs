@@ -51,26 +51,29 @@ use super::unified_emit::{
 /// Comparison keys for every line of `side`, which must be [`LineSide::from_text`] of `text`.
 ///
 /// Without whitespace normalization a key is the raw line including its `\n` (the same bytes as
-/// [`line_diff_token`]), so it borrows from `text` instead of allocating per line.
+/// `line_diff_token`), borrowed from `text`. Under `-w`/`-b`/`--ignore-space-at-eol` the keys
+/// are normalized line bodies, kept in `normalized` so the returned slices can borrow them.
 fn line_compare_keys<'a>(
     text: &'a str,
-    side: &LineSide,
+    side: &LineSide<'a>,
     ws: super::WhitespaceMode,
-) -> Vec<Cow<'a, str>> {
+    normalized: &'a mut Vec<Cow<'a, str>>,
+) -> Vec<&'a str> {
     if ws.normalizes_line_compare() {
         // Git -w/-b compare normalized bodies only; EOF newline is whitespace.
-        return side
-            .lines
-            .iter()
-            .map(|line| Cow::Owned(ws.normalize_line_for_compare(&line.body).into_owned()))
-            .collect();
+        normalized.extend(
+            side.lines
+                .iter()
+                .map(|line| ws.normalize_line_for_compare(line.body)),
+        );
+        return normalized.iter().map(Cow::as_ref).collect();
     }
     let mut keys = Vec::with_capacity(side.len());
     let mut rest = text;
     while !rest.is_empty() {
         let end = memchr::memchr(b'\n', rest.as_bytes()).map_or(rest.len(), |nl| nl + 1);
         let (line, tail) = rest.split_at(end);
-        keys.push(Cow::Borrowed(line));
+        keys.push(line);
         rest = tail;
     }
     debug_assert_eq!(keys.len(), side.len());
@@ -105,10 +108,9 @@ pub(crate) fn histogram_compacted_line_ops(
     let new_lines: Vec<&str> = after.lines.iter().map(|l| l.body).collect();
     let old_len = old_lines.len();
     let new_len = new_lines.len();
-    let old_compare_owned = line_compare_keys(old_content, &before, ws);
-    let new_compare_owned = line_compare_keys(new_content, &after, ws);
-    let old_compare: Vec<&str> = old_compare_owned.iter().map(Cow::as_ref).collect();
-    let new_compare: Vec<&str> = new_compare_owned.iter().map(Cow::as_ref).collect();
+    let (mut old_normalized, mut new_normalized) = (Vec::new(), Vec::new());
+    let old_compare = line_compare_keys(old_content, &before, ws, &mut old_normalized);
+    let new_compare = line_compare_keys(new_content, &after, ws, &mut new_normalized);
 
     let (changed1, changed2) = git_xdiff::histogram_changed_flags(&old_compare, &new_compare);
 
@@ -386,10 +388,9 @@ where
     }
     let old_refs: Vec<&str> = before.lines.iter().map(|l| l.body).collect();
     let new_refs: Vec<&str> = after.lines.iter().map(|l| l.body).collect();
-    let old_compare_owned = line_compare_keys(old_content, &before, ws);
-    let new_compare_owned = line_compare_keys(new_content, &after, ws);
-    let old_compare: Vec<&str> = old_compare_owned.iter().map(Cow::as_ref).collect();
-    let new_compare: Vec<&str> = new_compare_owned.iter().map(Cow::as_ref).collect();
+    let (mut old_normalized, mut new_normalized) = (Vec::new(), Vec::new());
+    let old_compare = line_compare_keys(old_content, &before, ws, &mut old_normalized);
+    let new_compare = line_compare_keys(new_content, &after, ws, &mut new_normalized);
     let ops = git_xdiff_compacted_line_ops(
         &old_compare,
         &new_compare,
@@ -444,10 +445,9 @@ where
     }
     let old_refs: Vec<&str> = before.lines.iter().map(|l| l.body).collect();
     let new_refs: Vec<&str> = after.lines.iter().map(|l| l.body).collect();
-    let old_compare_owned = line_compare_keys(old_content, &before, ws);
-    let new_compare_owned = line_compare_keys(new_content, &after, ws);
-    let old_compare: Vec<&str> = old_compare_owned.iter().map(Cow::as_ref).collect();
-    let new_compare: Vec<&str> = new_compare_owned.iter().map(Cow::as_ref).collect();
+    let (mut old_normalized, mut new_normalized) = (Vec::new(), Vec::new());
+    let old_compare = line_compare_keys(old_content, &before, ws, &mut old_normalized);
+    let new_compare = line_compare_keys(new_content, &after, ws, &mut new_normalized);
     let (changed1, changed2) = git_xdiff::patience_changed_flags(&old_compare, &new_compare);
     let raw = changed_flags_to_ops(&changed1, &changed2, old_refs.len(), new_refs.len());
     let ops = if ws.normalizes_line_compare() {
@@ -666,12 +666,10 @@ fn git_patience_unified_body_raw(
     }
     let old_refs: Vec<&str> = before.lines.iter().map(|l| l.body).collect();
     let new_refs: Vec<&str> = after.lines.iter().map(|l| l.body).collect();
-    let old_compare_owned =
-        line_compare_keys(old_content, &before, super::WhitespaceMode::default());
-    let new_compare_owned =
-        line_compare_keys(new_content, &after, super::WhitespaceMode::default());
-    let old_compare: Vec<&str> = old_compare_owned.iter().map(Cow::as_ref).collect();
-    let new_compare: Vec<&str> = new_compare_owned.iter().map(Cow::as_ref).collect();
+    let ws = super::WhitespaceMode::default();
+    let (mut old_normalized, mut new_normalized) = (Vec::new(), Vec::new());
+    let old_compare = line_compare_keys(old_content, &before, ws, &mut old_normalized);
+    let new_compare = line_compare_keys(new_content, &after, ws, &mut new_normalized);
     let (changed1, changed2) = git_xdiff::patience_changed_flags(&old_compare, &new_compare);
     let raw = changed_flags_to_ops(&changed1, &changed2, old_refs.len(), new_refs.len());
     let ops = diff_indent_heuristic::apply_change_compact_to_ops(
@@ -2054,9 +2052,9 @@ mod git_xdiff {
 }
 
 /// Myers changed-line masks for a line slice, honoring [`super::WhitespaceMode`] like Git `xdl_fall_back_diff`.
-pub(crate) fn myers_rediff_changed_masks_for_region(
-    old_lines: &[&str],
-    new_lines: &[&str],
+pub(crate) fn myers_rediff_changed_masks_for_region<'a>(
+    old_lines: &[&'a str],
+    new_lines: &[&'a str],
     ws: super::WhitespaceMode,
 ) -> (Vec<bool>, Vec<bool>) {
     use crate::line_interner::LineInterner;
@@ -2064,18 +2062,18 @@ pub(crate) fn myers_rediff_changed_masks_for_region(
     if old_lines.is_empty() && new_lines.is_empty() {
         return (Vec::new(), Vec::new());
     }
-    let mut interner = LineInterner::with_capacity(old_lines.len() + new_lines.len());
-    let (ids1, ids2) = if ws.normalizes_line_compare() {
-        (
-            interner.intern_all_normalized(old_lines, |line| ws.normalize_line_for_compare(line)),
-            interner.intern_all_normalized(new_lines, |line| ws.normalize_line_for_compare(line)),
-        )
-    } else {
-        (
-            interner.intern_all(old_lines),
-            interner.intern_all(new_lines),
-        )
+    let normalize = |lines: &[&'a str]| -> Vec<Cow<'a, str>> {
+        lines
+            .iter()
+            .map(|line| ws.normalize_line_for_compare(line))
+            .collect()
     };
+    let (old_normalized, new_normalized) = (normalize(old_lines), normalize(new_lines));
+    let old_keys: Vec<&str> = old_normalized.iter().map(Cow::as_ref).collect();
+    let new_keys: Vec<&str> = new_normalized.iter().map(Cow::as_ref).collect();
+    let mut interner = LineInterner::with_capacity(old_keys.len() + new_keys.len());
+    let ids1 = interner.intern_all(&old_keys);
+    let ids2 = interner.intern_all(&new_keys);
     git_xdiff::changed_flags(&ids1, &ids2, false)
 }
 
@@ -11300,11 +11298,14 @@ mod line_compare_key_tests {
         ];
         for text in texts {
             let side = LineSide::from_text(text);
-            let keys = line_compare_keys(text, &side, WhitespaceMode::default());
+            let mut normalized = Vec::new();
+            let keys = line_compare_keys(text, &side, WhitespaceMode::default(), &mut normalized);
             let expected: Vec<String> = side.lines.iter().map(line_diff_token).collect();
             assert_eq!(keys, expected, "text {text:?}");
+            let source = text.as_bytes().as_ptr_range();
             assert!(
-                keys.iter().all(|key| matches!(key, Cow::Borrowed(_))),
+                keys.iter()
+                    .all(|key| source.contains(&key.as_ptr()) || key.is_empty()),
                 "text {text:?}"
             );
         }
@@ -11318,7 +11319,8 @@ mod line_compare_key_tests {
             ignore_all_space: true,
             ..WhitespaceMode::default()
         };
-        let keys = line_compare_keys(text, &side, ws);
+        let mut normalized = Vec::new();
+        let keys = line_compare_keys(text, &side, ws, &mut normalized);
         assert_eq!(keys, vec!["ab", "ab"]);
     }
 

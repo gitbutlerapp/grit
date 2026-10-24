@@ -1,6 +1,5 @@
 //! Fast line interning for xdiff-style Myers pipelines.
 
-use std::borrow::Cow;
 use std::hash::BuildHasher;
 
 use hashbrown::hash_table::Entry;
@@ -9,25 +8,25 @@ use hashbrown::{DefaultHashBuilder, HashTable};
 /// Intern line text to dense `u32` ids (equal id iff equal line bytes).
 ///
 /// Ids are assigned in first-seen order starting at zero, so `0..n` covers every id handed out.
-/// Borrowed lines are stored without copying; only normalized keys are owned. The hash table
-/// holds 4-byte ids and resolves them through `lines`, which keeps it small enough to stay in
-/// cache for files with hundreds of thousands of lines.
+/// Lines are borrowed, never copied. The hash table holds 4-byte ids and resolves them through
+/// `lines`, which keeps it small enough to stay in cache for files with hundreds of thousands of
+/// lines.
 #[derive(Default)]
 pub struct LineInterner<'a> {
-    lines: Vec<Cow<'a, str>>,
+    lines: Vec<&'a str>,
     table: HashTable<u32>,
     hasher: DefaultHashBuilder,
 }
 
 impl<'a> LineInterner<'a> {
-    /// Interner with room for `lines` distinct lines before it has to grow.
+    /// Interner with room for `lines` distinct lines before its table has to grow.
     ///
     /// Pass the total line count of every side that will be interned: growing the table between
     /// sides rehashes every line seen so far.
     #[must_use]
     pub fn with_capacity(lines: usize) -> Self {
         Self {
-            lines: Vec::with_capacity(lines),
+            lines: Vec::new(),
             table: HashTable::with_capacity(lines),
             hasher: DefaultHashBuilder::default(),
         }
@@ -35,17 +34,17 @@ impl<'a> LineInterner<'a> {
 
     /// Return the id for `line`, inserting when unseen.
     #[must_use]
-    pub fn intern(&mut self, line: Cow<'a, str>) -> u32 {
+    pub fn intern(&mut self, line: &'a str) -> u32 {
         let Self {
             lines,
             table,
             hasher,
         } = self;
-        let hash = hasher.hash_one(line.as_ref());
+        let hash = hasher.hash_one(line);
         let entry = table.entry(
             hash,
             |&id| lines[id as usize] == line,
-            |&id| hasher.hash_one(lines[id as usize].as_ref()),
+            |&id| hasher.hash_one(lines[id as usize]),
         );
         match entry {
             Entry::Occupied(found) => *found.get(),
@@ -60,29 +59,13 @@ impl<'a> LineInterner<'a> {
 
     /// Intern every line in `lines`.
     pub fn intern_all(&mut self, lines: &[&'a str]) -> Vec<u32> {
-        lines
-            .iter()
-            .map(|line| self.intern(Cow::Borrowed(*line)))
-            .collect()
-    }
-
-    /// Intern normalized keys for diff comparison while preserving display via original line slices.
-    pub fn intern_all_normalized(
-        &mut self,
-        lines: &[&'a str],
-        normalize: impl Fn(&'a str) -> Cow<'a, str>,
-    ) -> Vec<u32> {
-        lines
-            .iter()
-            .map(|line| self.intern(normalize(line)))
-            .collect()
+        lines.iter().map(|line| self.intern(line)).collect()
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::LineInterner;
-    use std::borrow::Cow;
 
     #[test]
     fn intern_many_unique_lines_is_linear() {
@@ -90,11 +73,10 @@ mod tests {
         let lines: Vec<String> = (0..n).map(|i| format!("unique line {i}\n")).collect();
         let mut interner = LineInterner::default();
         for (i, line) in lines.iter().enumerate() {
-            let id = interner.intern(Cow::Borrowed(line.as_str()));
-            assert_eq!(id as usize, i);
+            assert_eq!(interner.intern(line) as usize, i);
         }
         for (i, line) in lines.iter().enumerate() {
-            assert_eq!(interner.intern(Cow::Borrowed(line.as_str())) as usize, i);
+            assert_eq!(interner.intern(line) as usize, i);
         }
     }
 
@@ -107,15 +89,5 @@ mod tests {
         let ids2 = interner.intern_all(&new);
         assert_eq!(ids1, vec![0, 1, 0]);
         assert_eq!(ids2, vec![1, 2, 3]);
-    }
-
-    #[test]
-    fn normalized_keys_merge_lines_that_differ_only_after_normalizing() {
-        let lines = ["a b\n", "a  b\n", "ab\n"];
-        let mut interner = LineInterner::default();
-        let ids = interner.intern_all_normalized(&lines, |line| {
-            Cow::Owned(line.split_whitespace().collect::<Vec<_>>().join(" "))
-        });
-        assert_eq!(ids, vec![0, 0, 1]);
     }
 }

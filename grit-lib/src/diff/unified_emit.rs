@@ -146,7 +146,7 @@ pub struct UnifiedEmitOptions {
 /// Write one patch line (`-`, `+`, or ` `) including Git's no-newline marker when needed.
 pub fn write_patch_line(out: &mut String, prefix: char, line: &SourceLine) {
     out.push(prefix);
-    out.push_str(&line.body);
+    out.push_str(line.body);
     out.push('\n');
     if line.ending == LineEnding::Missing {
         out.push_str("\\ No newline at end of file\n");
@@ -187,7 +187,7 @@ pub fn emit_unified_body_from_edits(
         if i < 0 || i as usize >= before.lines.len() {
             return "";
         }
-        &before.lines[i as usize].body
+        before.lines[i as usize].body
     };
     let next_hunk = |start: usize| -> Option<(usize, usize)> {
         let mut scr = start;
