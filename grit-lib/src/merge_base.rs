@@ -1532,14 +1532,27 @@ fn first_parent_chain_relation(
     FirstParentRelation::Unrelated
 }
 
-fn commit_rank_for_walk(cache: &mut CommitGraphCache<'_>, oid: ObjectId) -> u64 {
-    if let Some(graph) = &cache.graph {
-        let rank = graph.commit_generation_for_walk(&oid);
-        if rank != UNRANKED_COMMIT {
-            return rank;
-        }
+/// Commit-graph generation when present (`None` if the commit is outside the graph).
+fn commit_graph_rank(cache: &CommitGraphCache<'_>, oid: ObjectId) -> Option<u64> {
+    let graph = cache.graph.as_ref()?;
+    let rank = graph.commit_generation_for_walk(&oid);
+    if rank == UNRANKED_COMMIT {
+        None
+    } else {
+        Some(rank)
     }
-    UNRANKED_COMMIT
+}
+
+fn commit_rank_for_walk(cache: &mut CommitGraphCache<'_>, oid: ObjectId) -> u64 {
+    if let Some(rank) = commit_graph_rank(cache, oid) {
+        return rank;
+    }
+    // Without commit-graph generations, Git orders by committer date (newest first).
+    // Map unix seconds into `[1, LEGACY_RANK_CAP]` for heap ordering only (not pruning).
+    match cache.commit_time(oid) {
+        Ok(t) if t > 0 => (t as u64).clamp(1, LEGACY_RANK_CAP),
+        _ => 0,
+    }
 }
 
 /// Commit is reachable from the left tips of a [`SidePaint`].
@@ -2217,6 +2230,12 @@ impl TipIndexBitset {
         changed
     }
 
+    fn from_index(tip_count: usize, index: usize) -> Self {
+        let mut set = Self::with_capacity(tip_count);
+        set.set(index);
+        set
+    }
+
     fn iter_indices(&self) -> impl Iterator<Item = usize> + '_ {
         self.words.iter().enumerate().flat_map(|(word_idx, word)| {
             let base = word_idx * 64;
@@ -2228,6 +2247,85 @@ impl TipIndexBitset {
                 }
             })
         })
+    }
+}
+
+/// Generation/date-ordered queue for [`RefContainsBatch::run`].
+///
+/// Each commit is popped at most once; tip bitsets merge at enqueue time like [`PaintWalk`].
+struct RefContainsWalk {
+    tip_count: usize,
+    pending: OidHashMap<TipIndexBitset>,
+    queued: OidHashSet,
+    popped: OidHashSet,
+    heap: BinaryHeap<PaintKey>,
+    seq: u64,
+}
+
+impl RefContainsWalk {
+    fn new(tip_count: usize) -> Self {
+        Self {
+            tip_count,
+            pending: oid_hash_map(),
+            queued: oid_hash_set(),
+            popped: oid_hash_set(),
+            heap: BinaryHeap::new(),
+            seq: 0,
+        }
+    }
+
+    fn seed(
+        &mut self,
+        cache: &mut CommitGraphCache<'_>,
+        tip_index: usize,
+        oid: ObjectId,
+    ) -> Result<()> {
+        self.enqueue(
+            cache,
+            oid,
+            TipIndexBitset::from_index(self.tip_count, tip_index),
+        )
+    }
+
+    fn enqueue(
+        &mut self,
+        cache: &mut CommitGraphCache<'_>,
+        oid: ObjectId,
+        bits: TipIndexBitset,
+    ) -> Result<()> {
+        let entry = self
+            .pending
+            .entry(oid)
+            .or_insert_with(|| TipIndexBitset::with_capacity(self.tip_count));
+        if !entry.or_assign(&bits) {
+            return Ok(());
+        }
+        if self.popped.contains(&oid) {
+            // A new tip reached this commit after an earlier pop (skewed dates / merge order).
+            // Re-queue like [`PaintWalk::mark`] repaint so all active tips walk past here.
+            self.popped.remove(&oid);
+            self.queued.remove(&oid);
+        }
+        if self.queued.insert(oid) {
+            let rank = commit_rank_for_walk(cache, oid);
+            let committed_at = cache.commit_time(oid)?;
+            self.heap.push(PaintKey {
+                rank,
+                committed_at,
+                seq: std::cmp::Reverse(self.seq),
+                oid,
+            });
+            self.seq += 1;
+        }
+        Ok(())
+    }
+
+    fn pop(&mut self) -> Option<(ObjectId, TipIndexBitset)> {
+        let node = self.heap.pop()?;
+        self.queued.remove(&node.oid);
+        self.popped.insert(node.oid);
+        let bits = self.pending.remove(&node.oid)?;
+        Some((node.oid, bits))
     }
 }
 
@@ -2304,19 +2402,14 @@ impl<'repo> RefContainsBatch<'repo> {
             .chain(no_contains_targets.iter())
             .copied()
             .collect();
-        let min_target_gen = min_ranked_generation(&mut self.graph, &filter_targets);
+        let min_target_gen = min_ranked_generation(&self.graph, &filter_targets);
         let need_contains = !contains_targets.is_empty();
         let need_no_contains = !no_contains_targets.is_empty();
 
         let tip_count = self.tips.len();
-        let mut reach: OidHashMap<TipIndexBitset> = oid_hash_map();
-        let mut stack: Vec<ObjectId> = self.tips.clone();
-
+        let mut walk = RefContainsWalk::new(tip_count);
         for (i, &tip) in self.tips.iter().enumerate() {
-            reach
-                .entry(tip)
-                .or_insert_with(|| TipIndexBitset::with_capacity(tip_count))
-                .set(i);
+            walk.seed(&mut self.graph, i, tip)?;
         }
 
         let tip_still_active = |state: &RefContainsTipState| -> bool {
@@ -2324,10 +2417,7 @@ impl<'repo> RefContainsBatch<'repo> {
                 || (need_no_contains && !state.no_contains_match)
         };
 
-        while let Some(oid) = stack.pop() {
-            let Some(indices_set) = reach.remove(&oid) else {
-                continue;
-            };
+        while let Some((oid, indices_set)) = walk.pop() {
             if indices_set.is_empty() {
                 continue;
             }
@@ -2357,15 +2447,10 @@ impl<'repo> RefContainsBatch<'repo> {
             }
 
             for parent in self.graph.parents_of(oid)? {
-                if should_prune_ref_filter_parent(&mut self.graph, parent, min_target_gen) {
+                if should_prune_ref_filter_parent(&self.graph, parent, min_target_gen) {
                     continue;
                 }
-                let entry = reach
-                    .entry(parent)
-                    .or_insert_with(|| TipIndexBitset::with_capacity(tip_count));
-                if entry.or_assign(&active) {
-                    stack.push(parent);
-                }
+                walk.enqueue(&mut self.graph, parent, active.clone())?;
             }
         }
         Ok(())
@@ -2384,28 +2469,27 @@ impl<'repo> RefContainsBatch<'repo> {
     }
 }
 
-fn min_ranked_generation(graph: &mut CommitGraphCache<'_>, targets: &[ObjectId]) -> Option<u64> {
+fn min_ranked_generation(graph: &CommitGraphCache<'_>, targets: &[ObjectId]) -> Option<u64> {
     let mut min_gen: Option<u64> = None;
     for &target in targets {
-        let gen = commit_rank_for_walk(graph, target);
-        if gen == UNRANKED_COMMIT {
-            return None;
-        }
+        let gen = commit_graph_rank(graph, target)?;
         min_gen = Some(min_gen.map_or(gen, |m| m.min(gen)));
     }
     min_gen
 }
 
 fn should_prune_ref_filter_parent(
-    graph: &mut CommitGraphCache<'_>,
+    graph: &CommitGraphCache<'_>,
     parent: ObjectId,
     min_target_gen: Option<u64>,
 ) -> bool {
     let Some(min_gen) = min_target_gen else {
         return false;
     };
-    let p_gen = commit_rank_for_walk(graph, parent);
-    p_gen != UNRANKED_COMMIT && p_gen < min_gen
+    let Some(p_gen) = commit_graph_rank(graph, parent) else {
+        return false;
+    };
+    p_gen < min_gen
 }
 
 /// Branch tips that are merged into any of `bases` (ancestors of a base commit).
