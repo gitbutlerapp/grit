@@ -25,6 +25,8 @@
 //!   recursive list (or path-keyed map) of [`IndexEntry`] values; the shared
 //!   building block the three transforms above (and most of the CLI merge code)
 //!   are written against.
+//! - [`resolve_merge_source`] — turn a merge argument (branch, tag, object id or any
+//!   revision expression) into the commit to merge.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
@@ -70,6 +72,7 @@ use crate::progress::ProgressSink;
 use crate::refs;
 use crate::refs::store::{Expected, RawRef, RefUpdate, RefUpdateFlags};
 use crate::repo::Repository;
+use crate::rev_parse_error::RevParseError;
 use crate::state::{clear_merge_state, read_merge_heads, read_merge_msg, read_orig_head};
 use crate::stripspace::{process as stripspace_process, Mode as StripspaceMode};
 use thiserror::Error;
@@ -500,6 +503,97 @@ pub fn plan_branch_merge(
             "'{label}' has no common history with the current branch"
         ))),
     }
+}
+
+/// What kind of name a merge source was given by ([`resolve_merge_source`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MergeSourceKind {
+    /// A local branch (`refs/heads/<name>`).
+    LocalBranch,
+    /// A remote-tracking branch (`refs/remotes/<name>`).
+    RemoteBranch,
+    /// A tag (`refs/tags/<name>`), lightweight or annotated.
+    Tag,
+    /// Any other revision expression: an object id, `HEAD~2`, `ORIG_HEAD`, `v1.0^`, a full
+    /// refname, and so on.
+    Commit,
+}
+
+/// The commit a merge brings in, and how its name was resolved ([`resolve_merge_source`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct MergeSource {
+    /// The commit to merge (annotated tags already peeled).
+    pub oid: ObjectId,
+    /// Which namespace matched the spec.
+    pub kind: MergeSourceKind,
+}
+
+/// Resolve the argument of a merge (`spec`) to the commit it names.
+///
+/// Branch names win over other meanings: `refs/heads/<spec>` is tried first, then
+/// `refs/remotes/<spec>`, then `refs/tags/<spec>`. Anything else goes through the revision
+/// parser, so object ids (full or abbreviated), `ORIG_HEAD`, `topic~3` and `origin/main^2`
+/// all work. Annotated tags are peeled to the commit they name. Range expressions (`a..b`)
+/// do not name a single commit and are reported as not found.
+///
+/// # Parameters
+///
+/// - `repo`: repository to resolve in.
+/// - `spec`: the merge argument as the user wrote it.
+///
+/// # Returns
+///
+/// The commit and the [`MergeSourceKind`] of the name that matched.
+///
+/// # Errors
+///
+/// - [`Error::RevisionNotFound`] when `spec` names nothing.
+/// - [`Error::UnexpectedObjectKind`] when `spec` names (or a tag peels to) a tree or blob.
+/// - Object database errors (missing or corrupt objects behind a ref) are propagated.
+pub fn resolve_merge_source(repo: &Repository, spec: &str) -> Result<MergeSource> {
+    let named = [
+        ("refs/heads/", MergeSourceKind::LocalBranch),
+        ("refs/remotes/", MergeSourceKind::RemoteBranch),
+        ("refs/tags/", MergeSourceKind::Tag),
+    ]
+    .into_iter()
+    .find_map(|(prefix, kind)| {
+        refs::resolve_ref(repo.git_dir(), &format!("{prefix}{spec}"))
+            .ok()
+            .map(|oid| (oid, kind))
+    });
+    // A full-length hex id parses without an object lookup, so a missing object only shows up
+    // when peeling; that is still "names nothing", unlike a ref pointing at a missing object.
+    let not_found = |err: Error| match err {
+        Error::ObjectNotFound(_)
+        | Error::RevParse(
+            RevParseError::InvalidObjectName { .. }
+            | RevParseError::RevisionOutOfRange { .. }
+            | RevParseError::AmbiguousArgument { .. }
+            | RevParseError::NoSuchBranch { .. },
+        ) => Error::RevisionNotFound(spec.to_owned()),
+        other => other,
+    };
+    let (peeled, actual, kind) = match named {
+        Some((oid, kind)) => {
+            let (peeled, actual) = repo.odb().peel_tags(oid)?;
+            (peeled, actual, kind)
+        }
+        None => {
+            let oid = crate::rev_parse::resolve_revision_without_index_dwim(repo, spec)
+                .map_err(not_found)?;
+            let (peeled, actual) = repo.odb().peel_tags(oid).map_err(not_found)?;
+            (peeled, actual, MergeSourceKind::Commit)
+        }
+    };
+    if actual != ObjectKind::Commit {
+        return Err(Error::UnexpectedObjectKind {
+            oid: peeled,
+            expected: ObjectKind::Commit,
+            actual,
+        });
+    }
+    Ok(MergeSource { oid: peeled, kind })
 }
 
 /// Enable the ODB mem overlay for the scope of a [`predict_merge`] call without disturbing
