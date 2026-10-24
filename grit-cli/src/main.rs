@@ -1324,10 +1324,11 @@ enum Command {
         #[arg(short = 'n', long = "limit", value_name = "N")]
         orphan_limit: Option<usize>,
     },
-    /// Merge another branch into the current one.
+    /// Merge another branch, tag or commit into the current branch.
     Merge {
-        /// Branch to merge in.
+        /// Branch, tag or commit to merge (any revision, e.g. `v1.2`, a commit id, `topic~2`).
         #[arg(
+            value_name = "REV",
             required_unless_present_any = ["abort", "continue_merge"],
             conflicts_with = "continue_merge"
         )]

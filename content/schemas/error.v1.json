@@ -146,6 +146,13 @@
             "branch_error"
           ],
           "type": "string"
+        },
+        {
+          "description": "A branch, tag, commit id or revision expression names nothing.",
+          "enum": [
+            "revision_not_found"
+          ],
+          "type": "string"
         }
       ]
     },

@@ -147,11 +147,28 @@ pub fn index_locked(human: String) -> Error {
     })
 }
 
+/// Build a structured CLI error for a revision that names nothing.
+pub fn revision_not_found(spec: &str) -> Error {
+    let human = format!("no branch, tag or commit named '{spec}'");
+    Error::new(StructuredCliError {
+        payload: StructuredJsonError {
+            error: human.clone(),
+            kind: ErrorKind::RevisionNotFound,
+            conflicts: None,
+            commit: None,
+            would_overwrite: None,
+            oid: None,
+        },
+        human,
+    })
+}
+
 /// Map a library error to `anyhow`, using structured JSON for typed failures.
 pub fn map_lib_error(err: LibError) -> Error {
     match err {
         LibError::HashCollision { oid } => hash_collision(oid),
         locked @ LibError::IndexLocked { .. } => index_locked(locked.to_string()),
+        LibError::RevisionNotFound(spec) => revision_not_found(&spec),
         LibError::WouldOverwrite {
             reason,
             paths,

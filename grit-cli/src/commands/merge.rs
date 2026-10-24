@@ -1,4 +1,4 @@
-//! `grit merge` — merge another branch into the current one.
+//! `grit merge` — merge another branch, tag or commit into the current branch.
 //!
 //! Fast-forwards when possible; otherwise performs a real three-way merge and
 //! records a merge commit. Conflicts leave merge-in-progress state with conflict
@@ -18,18 +18,18 @@ use grit_lib::objects::ObjectId;
 use grit_lib::operation::{Conflict, ConflictKind};
 use grit_lib::porcelain::merge::{
     abort_branch_merge, continue_merge, integrate_branch_with, plan_branch_merge, predict_merge,
-    ContinueOptions, FastForwardPolicy, IntegrateBranchOutcome, MergeCommitMode,
-    MergeConflictDetail, MergeDryRunPlan, MergeOptions, MergePrediction, MergePredictionOptions,
+    resolve_merge_source, ContinueOptions, FastForwardPolicy, IntegrateBranchOutcome,
+    MergeCommitMode, MergeConflictDetail, MergeDryRunPlan, MergeOptions, MergePrediction,
+    MergePredictionOptions,
 };
 use grit_lib::progress::NullProgress;
-use grit_lib::refs;
 use grit_lib::repo::Repository;
 use grit_lib::state::{read_merge_msg, resolve_head, HeadState};
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::io::Write;
 
-/// CLI flags for `grit merge` beyond the branch name and `--abort`.
+/// CLI flags for `grit merge` beyond the revision and `--abort`.
 #[derive(Debug, Clone, Default)]
 pub struct MergeRunOptions {
     pub ff_only: bool,
@@ -542,7 +542,9 @@ pub fn run(
         HeadState::Invalid => bail!("HEAD is in an unknown state"),
     };
 
-    let other_oid = resolve_branch(&repo, branch)?;
+    let other_oid = resolve_merge_source(&repo, branch)
+        .map_err(crate::json_error::map_lib_error)?
+        .oid;
     let merge_options = build_merge_options(&options)?;
     if dry_run {
         return dry_run_merge(&repo, head_oid, other_oid, branch, &merge_options);
@@ -722,20 +724,6 @@ fn map_integrate_outcome(outcome: IntegrateBranchOutcome, label: &str) -> MergeO
             MergeOutcome::conflicts(label, details)
         }
     }
-}
-
-/// Resolve a branch name to a commit, trying local then remote-tracking refs.
-fn resolve_branch(repo: &Repository, name: &str) -> Result<ObjectId> {
-    for candidate in [
-        format!("refs/heads/{name}"),
-        format!("refs/remotes/{name}"),
-        name.to_owned(),
-    ] {
-        if let Ok(oid) = refs::resolve_ref(repo.git_dir(), &candidate) {
-            return Ok(oid);
-        }
-    }
-    bail!("no branch named '{name}'")
 }
 
 #[cfg(test)]
