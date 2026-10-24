@@ -188,6 +188,8 @@ For `https://github.com` remotes, sign in once with [`grit auth`](../auth/). Gri
 
 Sign out with `grit auth logout`. You need a credential helper configured (for example `grit config --global credential.helper store` on Linux — see the [`grit auth`](../auth/) page).
 
+The same helpers serve any HTTPS host, not only GitHub. In CI, a host-level line such as `https://ci:TOKEN@git.example.com` in the store file (`~/.git-credentials`) authenticates `grit clone`, `fetch` and `push` for every repository on that host, exactly as it does for Git.
+
 SSH remotes do not use the GitHub device-flow token; they can still block on SSH prompts (see the SSH row above).
 
 ## Documentation for agents
