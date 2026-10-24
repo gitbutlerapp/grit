@@ -7,7 +7,7 @@ use grit_lib::diff::{DiffEntry, DiffStatus};
 use crate::commands::add::AddOutcome;
 use crate::commands::auth::{AuthOutcome, LogoutOutcome};
 use crate::commands::commit::CommitOutcome;
-use crate::commands::diff::{file_diff_status_label, FileDiff, Hunk, Line, LineKind, Segment};
+use crate::commands::diff::{FileDiff, Hunk, Line, LineKind, Segment, file_diff_status_label};
 use crate::commands::history::{
     HeadPair, HistoryAbsorbOutcome, HistoryRewriteOutcome, RebaseCheckOutcome, RebaseCheckResult,
     RefPair, RewrittenPair,
@@ -22,7 +22,7 @@ use crate::commands::switch::SwitchOutcome;
 use crate::commands::update::UpdateOutcome;
 use crate::commands::worktree::{WorktreeOutcome, WorktreeRow};
 use crate::context::{self, CommitSummary};
-use crate::output::{outln, RenderContext};
+use crate::output::{RenderContext, outln};
 use crate::stdio;
 use crate::ui::{self, PathDisplayOptions};
 
@@ -211,10 +211,31 @@ fn print_fenced_diff(w: &mut dyn Write, body: &str) -> anyhow::Result<()> {
     Ok(())
 }
 
+/// Git-style extended header lines (`rename from`/`rename to`, `old mode`/`new mode`)
+/// for a file whose path or mode changed. Empty for a plain content change.
+fn extended_header_lines(file: &FileDiff) -> Vec<String> {
+    let mut lines = Vec::new();
+    if let Some(old_path) = file.old_path.as_deref() {
+        lines.push(format!("rename from {old_path}"));
+        lines.push(format!("rename to {}", file.path));
+    }
+    if let (Some(old_mode), Some(new_mode)) = (file.old_mode.as_deref(), file.new_mode.as_deref()) {
+        if old_mode != new_mode {
+            lines.push(format!("old mode {old_mode}"));
+            lines.push(format!("new mode {new_mode}"));
+        }
+    }
+    lines
+}
+
 fn render_file_patch(file: &FileDiff) -> String {
     let mut out = String::new();
-    for hunk in file.hunks.as_deref().into_iter().flatten() {
-        if !out.is_empty() {
+    for line in extended_header_lines(file) {
+        out.push_str(&line);
+        out.push('\n');
+    }
+    for (i, hunk) in file.hunks.as_deref().unwrap_or_default().iter().enumerate() {
+        if i > 0 {
             out.push('\n');
         }
         out.push_str(&render_hunk_header(hunk));
@@ -1686,5 +1707,43 @@ mod tests {
             row.contains("`wt\\|branch`"),
             "branch cell should escape pipe delimiters: {row}"
         );
+    }
+
+    fn hunkless_file(
+        path: &str,
+        old_path: Option<&str>,
+        old_mode: Option<&str>,
+        new_mode: Option<&str>,
+    ) -> crate::commands::diff::FileDiff {
+        crate::commands::diff::FileDiff {
+            path: path.to_owned(),
+            old_path: old_path.map(str::to_owned),
+            status: crate::output::ChangeStatus::Modified,
+            old_mode: old_mode.map(str::to_owned),
+            new_mode: new_mode.map(str::to_owned),
+            old_encoding_lossy: false,
+            new_encoding_lossy: false,
+            binary: false,
+            content_changed: false,
+            similarity: None,
+            stat: None,
+            combined_status: None,
+            hunks: Some(Vec::new()),
+        }
+    }
+
+    #[test]
+    fn hunkless_rename_and_mode_change_emit_extended_headers() {
+        let file = hunkless_file("h.txt", Some("g.txt"), Some("100644"), Some("100755"));
+        assert_eq!(
+            super::render_file_patch(&file),
+            "rename from g.txt\nrename to h.txt\nold mode 100644\nnew mode 100755"
+        );
+    }
+
+    #[test]
+    fn hunkless_file_without_mode_or_path_change_has_empty_body() {
+        let file = hunkless_file("f.txt", None, Some("100644"), Some("100644"));
+        assert_eq!(super::render_file_patch(&file), "");
     }
 }
