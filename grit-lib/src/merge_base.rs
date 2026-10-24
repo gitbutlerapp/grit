@@ -19,7 +19,7 @@ use crate::reflog::read_reflog;
 use crate::repo::Repository;
 use crate::rev_parse::{
     peel_to_commit_for_merge_base, resolve_revision, resolve_upstream_symbolic_name,
-    upstream_suffix_info,
+    try_peel_to_commit_for_merge_base, upstream_suffix_info,
 };
 use crate::shallow::load_shallow_boundaries;
 
@@ -1577,7 +1577,9 @@ impl SidePaint {
         let mut walk = PaintWalk::default();
         for (tips, side) in [(left, PAINT_LEFT), (right, PAINT_RIGHT)] {
             for &tip in tips {
-                let tip = peel_to_commit_for_merge_base(cache.repo, tip).unwrap_or(tip);
+                let Some(tip) = try_peel_to_commit_for_merge_base(cache.repo, tip)? else {
+                    continue;
+                };
                 walk.mark(cache, tip, side)?;
             }
         }

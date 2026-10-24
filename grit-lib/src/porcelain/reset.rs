@@ -17,6 +17,7 @@ use crate::porcelain::switch::{
 use crate::porcelain::worktree_guard::{load_worktree_snapshot, local_change_diffs};
 use crate::refs::{self, append_reflog};
 use crate::repo::Repository;
+use crate::rev_parse::try_peel_to_commit_for_merge_base;
 use crate::state::{resolve_head, HeadState};
 use crate::worktree::{list_worktrees, WorktreeEntry};
 
@@ -320,24 +321,38 @@ fn orphan_hide_tips(
         if moving_branch == Some(refname.as_str()) {
             continue;
         }
-        hide.push(oid);
+        orphan_hide_push_peeled_commit(repo, &mut hide, oid)?;
     }
     if let Ok(oid) = refs::resolve_ref(git_dir, "refs/stash") {
-        hide.push(oid);
+        orphan_hide_push_peeled_commit(repo, &mut hide, oid)?;
     }
     for wt in list_worktrees(repo)? {
         if worktree_is_reset_moving_head(repo, head, &wt) {
             continue;
         }
         match &wt.head {
-            HeadState::Detached { oid } => hide.push(*oid),
-            HeadState::Branch { oid: Some(oid), .. } => hide.push(*oid),
+            HeadState::Detached { oid } => orphan_hide_push_peeled_commit(repo, &mut hide, *oid)?,
+            HeadState::Branch { oid: Some(oid), .. } => {
+                orphan_hide_push_peeled_commit(repo, &mut hide, *oid)?;
+            }
             HeadState::Branch { .. } | HeadState::Invalid => {}
         }
     }
     hide.sort_unstable();
     hide.dedup();
     Ok(hide)
+}
+
+/// Add a ref or peeled tip to the orphan hide set when it names a commit.
+fn orphan_hide_push_peeled_commit(
+    repo: &Repository,
+    hide: &mut Vec<ObjectId>,
+    oid: ObjectId,
+) -> Result<()> {
+    if let Some(commit) = try_peel_to_commit_for_merge_base(repo, oid)? {
+        hide.push(commit);
+    }
+    Ok(())
 }
 
 /// True when this listed worktree is the one whose HEAD ref/file is being moved by the reset.
@@ -1050,6 +1065,46 @@ mod tests {
             "tip still held by refs/heads/hold"
         );
         let _ = c3;
+    }
+
+    #[test]
+    fn reset_orphan_walk_ignores_tag_peeled_to_blob() {
+        use crate::objects::{serialize_tag, TagData};
+
+        let (_dir, repo) = init_repo();
+        let c1 = commit_file(&repo, "f", "1\n", None);
+        let c2 = commit_file(&repo, "f", "2\n", Some(c1));
+        let blob = repo.odb().write(ObjectKind::Blob, b"pubkey").expect("blob");
+        let tag_bytes = serialize_tag(&TagData {
+            object: blob,
+            object_type: "blob".into(),
+            tag: "keytag".into(),
+            tagger: Some("T <t@t> 0 +0000".into()),
+            message: "key\n".into(),
+            extra_headers: Vec::new(),
+        });
+        let tag_oid = repo.odb().write(ObjectKind::Tag, &tag_bytes).expect("tag");
+        refs::write_ref(&repo.git_dir(), "refs/tags/keytag", &tag_oid).expect("tag ref");
+
+        for mode in [ResetMode::Soft, ResetMode::Mixed, ResetMode::Hard] {
+            refs::write_ref(&repo.git_dir(), "refs/heads/main", &c2).expect("restore tip");
+            refs::write_symbolic_ref(&repo.git_dir(), "HEAD", "refs/heads/main").expect("symhead");
+            reset_to_commit(&repo, &reset_opts(c1, mode)).expect("reset");
+            assert_eq!(
+                refs::resolve_ref(&repo.git_dir(), "refs/heads/main").expect("ref"),
+                c1,
+                "{mode:?}"
+            );
+        }
+
+        let mut opts = reset_opts(c1, ResetMode::Mixed);
+        opts.dry_run = true;
+        refs::write_ref(&repo.git_dir(), "refs/heads/main", &c2).expect("restore tip");
+        preview_reset(&repo, &opts).expect("dry-run preview");
+        assert_eq!(
+            refs::resolve_ref(&repo.git_dir(), "refs/heads/main").expect("ref"),
+            c2
+        );
     }
 
     #[test]
