@@ -233,7 +233,7 @@ pub fn ensure_branch_not_checked_out_in_any_worktree(
 fn branch_checked_out_error(branch: &str, worktree_path: &Path) -> Error {
     Error::BranchCheckedOutInWorktree {
         branch: branch.to_owned(),
-        worktree_path: worktree_path.display().to_string(),
+        worktree_path: crate::git_path::path_for_error_message(worktree_path),
     }
 }
 

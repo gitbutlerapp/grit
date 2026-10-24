@@ -858,7 +858,10 @@ pub fn map_branch_error(err: Error) -> anyhow::Error {
             })
         }
         Error::BranchCheckedOutInWorktree { worktree_path, .. } => {
-            let human = format!("branch is checked out in '{worktree_path}'");
+            let worktree = grit_lib::config::git_path::path_for_error_message(
+                std::path::Path::new(&worktree_path),
+            );
+            let human = format!("branch is checked out in '{worktree}'");
             anyhow::Error::new(StructuredCliError {
                 payload: StructuredJsonError {
                     error: human.clone(),

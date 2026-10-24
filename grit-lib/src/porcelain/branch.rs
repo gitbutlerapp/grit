@@ -1,6 +1,7 @@
 //! Local branches: create one without switching `HEAD`, list them, delete one, rename one, and configure upstream.
 
 use std::fs;
+use std::path::Path;
 
 use crate::branch_tracking::{
     remote_tracking_ref_is_mapped, upstream_branch, upstream_config_for_branch_ref,
@@ -9,6 +10,7 @@ use crate::branch_tracking::{
 use crate::check_ref_format::validate_branch_short_name;
 use crate::config::{parse_git_config_maybe_bool, ConfigFile, ConfigScope, ConfigSet};
 use crate::error::{Error, Result};
+use crate::git_path::path_for_error_message;
 use crate::merge_base::is_ancestor;
 use crate::objects::ObjectId;
 use crate::porcelain::checkout_reflog::{
@@ -752,13 +754,9 @@ fn ensure_branch_checked_out(repo: &Repository, name: &str) -> Result<()> {
 }
 
 fn checked_out_error(repo: &Repository, name: &str) -> Result<Error> {
-    let path = repo
-        .work_tree()
-        .map(|p| p.display().to_string())
-        .unwrap_or_else(|| repo.git_dir().display().to_string());
-    Err(Error::Branch(BranchError::CheckedOut {
+    let _ = repo;
+    Err(Error::Branch(BranchError::CurrentlyCheckedOut {
         name: name.to_owned(),
-        worktree: path,
     }))
 }
 
@@ -767,7 +765,7 @@ fn map_checked_out_err(err: Error, name: &str) -> Error {
         Error::BranchCheckedOutInWorktree { worktree_path, .. } => {
             Error::Branch(BranchError::CheckedOut {
                 name: name.to_owned(),
-                worktree: worktree_path,
+                worktree: path_for_error_message(Path::new(&worktree_path)),
             })
         }
         other => other,
@@ -943,10 +941,33 @@ mod tests {
         assert!(
             matches!(
                 &err,
-                Error::Branch(BranchError::CheckedOut { name, .. }) if name == &current
+                Error::Branch(BranchError::CurrentlyCheckedOut { name }) if name == &current
             ),
             "{err:?}"
         );
+        assert!(
+            err.to_string()
+                .contains("cannot delete the currently checked-out branch"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn checked_out_in_other_worktree_strips_verbatim_path() {
+        let err = map_checked_out_err(
+            Error::BranchCheckedOutInWorktree {
+                branch: "side".into(),
+                worktree_path: r"\\?\C:\Users\tmp\repo".into(),
+            },
+            "side",
+        );
+        match err {
+            Error::Branch(BranchError::CheckedOut { worktree, .. }) => {
+                assert!(!worktree.contains(r"\\?\"));
+                assert_eq!(worktree, "C:/Users/tmp/repo");
+            }
+            other => panic!("{other:?}"),
+        }
     }
 
     #[test]

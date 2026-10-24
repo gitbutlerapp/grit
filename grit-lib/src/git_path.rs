@@ -727,6 +727,12 @@ pub fn user_display_path(path: &Path) -> String {
     strip_verbatim_path_prefix_str(&path.display().to_string()).replace('\\', "/")
 }
 
+/// User-facing path for error messages (alias of [`user_display_path`]).
+#[must_use]
+pub fn path_for_error_message(path: &Path) -> String {
+    user_display_path(path)
+}
+
 /// Absolute path for Git worktree gitfiles (linked `.git` `gitdir:` lines and `gitdir` files).
 ///
 /// Resolves symlinks via [`std::fs::canonicalize`] when possible, strips Windows `\\?\`
@@ -1049,6 +1055,13 @@ mod git_path_component_tests {
             user_display_path(Path::new(r"\\?\C:\tmp\p\.git")),
             "C:/tmp/p/.git"
         );
+    }
+
+    #[test]
+    fn path_for_error_message_strips_verbatim_prefix() {
+        let msg = path_for_error_message(Path::new(r"\\?\C:\Users\tmp\r"));
+        assert!(!msg.contains(r"\\?\"));
+        assert_eq!(msg, "C:/Users/tmp/r");
     }
 
     #[test]

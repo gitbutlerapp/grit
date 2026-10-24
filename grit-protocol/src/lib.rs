@@ -9,6 +9,7 @@ pub mod upload_pack;
 use std::path::{Path, PathBuf};
 
 use grit_lib::config::environment::Environment;
+use grit_lib::config::git_path::path_for_error_message;
 use grit_lib::config::ConfigSet;
 
 pub use grit_lib::config::environment::RepositoryOptions;
@@ -69,7 +70,7 @@ pub fn validate_repo_path(path: &Path) -> Result<PathBuf> {
     if dot_git.join("HEAD").is_file() {
         return Ok(path.to_path_buf());
     }
-    Err(Error::NotARepository(path.display().to_string()))
+    Err(Error::NotARepository(path_for_error_message(path)))
 }
 
 pub(crate) fn run_upload_pack(

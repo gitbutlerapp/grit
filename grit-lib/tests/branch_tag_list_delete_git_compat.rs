@@ -239,7 +239,7 @@ fn delete_branch_refuses_checked_out_branches() {
     assert!(
         matches!(
             &err,
-            Error::Branch(BranchError::CheckedOut { name, .. }) if name == "main"
+            Error::Branch(BranchError::CurrentlyCheckedOut { name }) if name == "main"
         ),
         "{err:?}"
     );

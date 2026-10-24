@@ -992,7 +992,7 @@ fn ensure_branches_not_checked_out_elsewhere(
         {
             return Err(HistoryError::BranchCheckedOutElsewhere {
                 name: name.clone(),
-                worktree: found.worktree_path.display().to_string(),
+                worktree: crate::git_path::path_for_error_message(&found.worktree_path),
             });
         }
     }

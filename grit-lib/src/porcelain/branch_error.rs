@@ -40,7 +40,14 @@ pub enum BranchError {
         base: String,
     },
 
-    /// The branch is checked out in a worktree (including the current branch on `HEAD`).
+    /// Deleting the branch that is currently checked out in this repository.
+    #[error("cannot delete the currently checked-out branch '{name}'")]
+    CurrentlyCheckedOut {
+        /// Short branch name.
+        name: String,
+    },
+
+    /// The branch is checked out in another worktree.
     #[error("branch '{name}' is already checked out in '{worktree}'")]
     CheckedOut {
         /// Short branch name.

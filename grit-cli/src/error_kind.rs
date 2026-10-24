@@ -51,7 +51,9 @@ impl ErrorKind {
             BranchError::NotFound { .. } => Self::BranchNotFound,
             BranchError::InvalidName { .. } => Self::BranchInvalidName,
             BranchError::NotFullyMerged { .. } => Self::BranchNotFullyMerged,
-            BranchError::CheckedOut { .. } => Self::BranchCheckedOut,
+            BranchError::CurrentlyCheckedOut { .. } | BranchError::CheckedOut { .. } => {
+                Self::BranchCheckedOut
+            }
             BranchError::NoCommits => Self::BranchNoCommits,
             BranchError::InvalidStartPoint { .. } => Self::BranchInvalidStartPoint,
             BranchError::UpstreamNotTracking { .. } => Self::BranchUpstreamNotTracking,
