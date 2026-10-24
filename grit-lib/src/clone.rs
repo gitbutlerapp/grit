@@ -70,18 +70,14 @@ impl CloneError {
         matches!(self, Self::RemoteRefNotFound(_))
     }
 
-    /// Whether the failure is a transport/read error (not an empty remote with no branches).
+    /// Whether the source could not be read at all ([`Error::RemoteUnreadable`]), as opposed to
+    /// an empty remote with no branches or a local failure.
     #[must_use]
-    pub fn is_remote_read_failure(&self) -> bool {
+    pub fn is_remote_unreadable(&self) -> bool {
         match self {
-            Self::Library(e) => matches!(e, Error::RemoteReadFailed),
-            Self::Remote(crate::remote::RemoteError::Library(e)) => {
-                matches!(e, Error::RemoteReadFailed)
-            }
-            Self::DestNotEmpty(_)
-            | Self::RemoteRefNotFound(_)
-            | Self::InvalidCloneDepth
-            | Self::Remote(_) => false,
+            Self::Library(e) => e.is_remote_unreadable(),
+            Self::Remote(e) => e.is_remote_unreadable(),
+            Self::DestNotEmpty(_) | Self::RemoteRefNotFound(_) | Self::InvalidCloneDepth => false,
         }
     }
 }

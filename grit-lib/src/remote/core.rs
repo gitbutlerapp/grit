@@ -90,6 +90,14 @@ pub enum RemoteError {
     Library(#[from] Error),
 }
 
+impl RemoteError {
+    /// Whether the remote could not be read or written at all ([`Error::RemoteUnreadable`]).
+    #[must_use]
+    pub fn is_remote_unreadable(&self) -> bool {
+        matches!(self, Self::Library(e) if e.is_remote_unreadable())
+    }
+}
+
 impl From<RemoteError> for Error {
     fn from(e: RemoteError) -> Self {
         match e {
@@ -689,7 +697,9 @@ fn local_git_dir_from_url(
     work_tree: Option<&Path>,
 ) -> RemoteResult<PathBuf> {
     let s = url.to_url_string();
-    Ok(resolve_local_remote_git_dir(&s, git_dir, work_tree))
+    let remote_git = resolve_local_remote_git_dir(&s, git_dir, work_tree);
+    crate::transfer::ensure_local_remote_repository(&remote_git)?;
+    Ok(remote_git)
 }
 
 fn ssh_transport(
