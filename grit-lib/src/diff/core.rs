@@ -5032,16 +5032,20 @@ fn diff_index_to_worktree_inner(
                         });
                     }
                 } else {
-                    // The scan's lstat already proves an unchanged, non-racy entry clean; only
+                    // The scan's lstat already proves an unchanged, non-racy entry clean, and the
+                    // stat refresh above may have just verified a racy entry by content; only
                     // re-stat paths that `push_index_blob_worktree_diff` has to inspect.
+                    let same_file_type = (stat.git_mode == crate::index::MODE_SYMLINK)
+                        == (ie.mode == crate::index::MODE_SYMLINK);
                     if !stat.is_dir
-                        && stat_matches_blob_stat(ie, &stat, stat_policy)
                         && (!trust_filemode || stat.git_mode == ie.mode)
-                        && index_entry_skips_worktree_content_hash_after_stat_match(
-                            ie,
-                            index_mtime,
-                            stat_policy,
-                        )
+                        && ((stat_refresh_verified[entry_index] && same_file_type)
+                            || (stat_matches_blob_stat(ie, &stat, stat_policy)
+                                && index_entry_skips_worktree_content_hash_after_stat_match(
+                                    ie,
+                                    index_mtime,
+                                    stat_policy,
+                                )))
                     {
                         return Ok(());
                     }

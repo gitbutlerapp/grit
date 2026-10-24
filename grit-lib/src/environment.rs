@@ -667,6 +667,12 @@ pub fn wall_clock_unix_timestamp_nanos() -> u64 {
     u64::try_from(OffsetDateTime::now_utc().unix_timestamp_nanos()).unwrap_or(u64::MAX)
 }
 
+/// Whole seconds since the Unix epoch from the process wall clock.
+#[must_use]
+pub(crate) fn wall_clock_unix_timestamp_seconds() -> i64 {
+    OffsetDateTime::now_utc().unix_timestamp()
+}
+
 /// Map a Unix timestamp through an optional `TZ`-style string (or the process default offset).
 #[must_use]
 pub fn offset_from_epoch_and_tz(epoch: i64, tz: Option<&str>) -> OffsetDateTime {

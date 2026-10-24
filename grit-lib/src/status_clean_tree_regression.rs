@@ -140,6 +140,97 @@ fn parallel_status_trusts_stat_with_filemode_true() {
     assert_clean_without_content_reads(PARALLEL_STAT_MIN_ENTRIES + 24, true, 4);
 }
 
+/// Pin every tracked file and the index to the same second so all entries are racily clean.
+fn make_index_racy(root: &Path, files: usize) {
+    for i in 0..files {
+        let abs = root.join(format!("d{}/s{}/f{i:04}.txt", i % 7, i % 3));
+        set_file_mtime(&abs, FileTime::from_unix_time(OLD_MTIME, 0)).expect("mtime");
+    }
+    set_file_mtime(
+        root.join(".git/index"),
+        FileTime::from_unix_time(OLD_MTIME, 500_000_000),
+    )
+    .expect("index mtime");
+}
+
+#[test]
+fn status_rewrites_racy_index_once_then_trusts_stat() {
+    const FILES: usize = 64;
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    git_committed_repo(root, FILES, true);
+    make_index_racy(root, FILES);
+
+    let repo = open(root);
+    let (unstaged, first_reads) = status_counting_reads(&repo, 1);
+    assert!(unstaged.is_empty(), "{unstaged:?}");
+    let non_empty = (0..FILES).filter(|i| i % 8 != 0).count();
+    assert!(
+        (non_empty..=FILES).contains(&first_reads),
+        "racy entries must be verified by content exactly once ({first_reads} reads)"
+    );
+    let index_mtime = fs::metadata(root.join(".git/index"))
+        .and_then(|m| m.modified())
+        .expect("index mtime");
+    assert!(
+        FileTime::from_system_time(index_mtime).unix_seconds() > OLD_MTIME,
+        "status must persist the index so its entries stop being racy"
+    );
+
+    let (unstaged, second_reads) = status_counting_reads(&repo, 1);
+    assert!(unstaged.is_empty(), "{unstaged:?}");
+    assert_eq!(second_reads, 0, "second status must trust stat data");
+    assert_eq!(git_status_porcelain(root), "");
+    git_in(root, &["fsck", "--no-progress"]);
+}
+
+#[test]
+fn status_skips_index_rewrite_within_the_second_of_racy_entries() {
+    const FILES: usize = 16;
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    git_committed_repo(root, FILES, true);
+    make_index_racy(root, FILES);
+    let index_path = root.join(".git/index");
+    let before = fs::metadata(&index_path).and_then(|m| m.modified());
+
+    let repo = open(root);
+    let options = StatusOptions {
+        untracked: UntrackedMode::No,
+        now_unix_seconds: Some(OLD_MTIME),
+        ..StatusOptions::default()
+    };
+    let model = status(&repo, &options, &mut NullProgress).expect("status");
+    assert!(model.unstaged.is_empty());
+    assert_eq!(
+        fs::metadata(&index_path).and_then(|m| m.modified()).ok(),
+        before.ok(),
+        "a rewrite in the same second as the racy entries cannot clear them"
+    );
+}
+
+#[test]
+fn racy_same_size_edit_stays_modified_after_status_rewrites_index() {
+    const FILES: usize = 16;
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    git_committed_repo(root, FILES, true);
+    git_in(root, &["config", "core.trustctime", "false"]);
+    let rel = "d1/s1/f0001.txt";
+    let abs = root.join(rel);
+    let mut bytes = fs::read(&abs).expect("read");
+    bytes[0] = b'X';
+    fs::write(&abs, &bytes).expect("write");
+    make_index_racy(root, FILES);
+
+    let repo = open(root);
+    for run in 0..2 {
+        let (unstaged, _) = status_counting_reads(&repo, 1);
+        assert_eq!(unstaged, vec![rel.to_owned()], "run {run}");
+    }
+    assert_eq!(git_status_porcelain(root), format!(" M {rel}\n"));
+}
+
 #[test]
 fn untracked_walk_matches_git_around_submodules_and_tracked_dirs() {
     let tmp = tempfile::tempdir().expect("tempdir");

@@ -98,6 +98,10 @@ pub struct StatusOptions {
     /// Hook protocol v1 query boundary for fsmonitor refresh (deterministic tests).
     #[doc(hidden)]
     pub fsmonitor_query_boundary: Option<crate::fsmonitor::FsmonitorQueryBoundary>,
+    /// Current Unix time in seconds, used to decide whether rewriting an index with racy
+    /// entries would clear them (deterministic tests). `None` reads the system clock.
+    #[doc(hidden)]
+    pub now_unix_seconds: Option<i64>,
     /// When `true`, count entries on `refs/stash` (reads the stash reflog).
     pub count_stash: bool,
 }
@@ -148,6 +152,7 @@ impl Default for StatusOptions {
             ahead_behind: true,
             stat_parallel_threads: None,
             fsmonitor_query_boundary: None,
+            now_unix_seconds: None,
             count_stash: false,
         }
     }
@@ -1970,6 +1975,19 @@ pub fn status(
 
     // Unstaged: worktree vs index, narrowed before rename detection.
     let diff_index_mtime = crate::diff::index_mtime_for_diff(&index, index_mtime);
+    // Rewrite the index when it has racy entries that a rewrite now would clear: the refresh
+    // pass below verifies them by content, and a newer index mtime lets later runs trust stat
+    // data instead of re-hashing the same files every time. Unlike Git, skip the rewrite while
+    // the clock is still in the second of the newest racy entry, where it cannot help.
+    let stat_policy = crate::index::StatMatchPolicy::from_config(repo_config.as_deref());
+    let now_unix_seconds = opts
+        .now_unix_seconds
+        .unwrap_or_else(crate::environment::wall_clock_unix_timestamp_seconds);
+    let rewrite_clears_racy_entries = index.entries.iter().any(|e| {
+        e.mode != crate::index::MODE_GITLINK
+            && crate::diff::entry_is_racy_with_policy(e, diff_index_mtime, stat_policy)
+            && i64::from(e.mtime_sec) < now_unix_seconds
+    });
     let (unstaged_raw, index_stat_refresh_changed) =
         crate::diff::diff_index_to_worktree_with_options(
             repo.odb(),
@@ -1990,7 +2008,7 @@ pub fn status(
                 ..Default::default()
             },
         )?;
-    let mut persist_index = index_stat_refresh_changed;
+    let mut persist_index = index_stat_refresh_changed || rewrite_clears_racy_entries;
     let mut unstaged: Vec<DiffEntry> = unstaged_raw
         .into_iter()
         .filter(|e| status_diff_entry_matches_pathspec(e, &opts.pathspecs))
@@ -2050,8 +2068,15 @@ pub fn status(
             (untracked, ignored)
         };
 
-    if persist_index && repo.try_write_index_at(&index_path, &mut index)? {
-        index.source_mtime = crate::index::index_file_mtime(&index_path);
+    if persist_index {
+        // The refresh pass already re-hashed every racily clean entry and invalidated the
+        // ones whose content changed, so the write must not hash them a second time.
+        index.skip_racy_smudge_on_write = true;
+        let written = repo.try_write_index_at(&index_path, &mut index);
+        index.skip_racy_smudge_on_write = false;
+        if written? {
+            index.source_mtime = crate::index::index_file_mtime(&index_path);
+        }
     }
 
     let stash_count = if opts.count_stash {
