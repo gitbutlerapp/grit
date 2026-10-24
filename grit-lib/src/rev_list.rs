@@ -3816,6 +3816,21 @@ fn graph_order_topo_sort(
     Ok(out)
 }
 
+/// Topological order (newest first) for a bounded commit set, matching `rev-list --topo-order`.
+pub(crate) fn topo_order_commit_subset(
+    repo: &Repository,
+    commits: &[ObjectId],
+    use_commit_graph: bool,
+) -> Result<Vec<ObjectId>> {
+    if commits.is_empty() {
+        return Ok(Vec::new());
+    }
+    let selected: HashSet<ObjectId> = commits.iter().copied().collect();
+    let discovery_order: Vec<ObjectId> = commits.to_vec();
+    let mut graph = CommitGraph::with_commit_graph(repo, false, use_commit_graph);
+    graph_order_topo_sort(&mut graph, &selected, &discovery_order)
+}
+
 fn reorder_adjacent_merge_parent_blocks(
     graph: &mut CommitGraph<'_>,
     ordered: &mut [ObjectId],

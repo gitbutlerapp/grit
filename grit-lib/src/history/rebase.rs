@@ -6,12 +6,14 @@ use std::collections::{HashMap, HashSet};
 use std::cell::Cell;
 
 use crate::diff::diff_trees;
-use crate::merge_base::{is_ancestor, merge_bases_first_vs_rest};
+use crate::merge_base::{
+    commits_reachable_excluding_ancestors_of, is_ancestor, merge_bases_first_vs_rest,
+};
 use crate::merge_file::MergeFavor;
 use crate::objects::{parse_commit, ObjectId};
 use crate::patch_ids::{compute_patch_id, PatchIdMode};
 use crate::repo::Repository;
-use crate::revwalk::rev_list::{rev_list, OrderingMode, RevListOptions};
+use crate::revwalk::rev_list::topo_order_commit_subset;
 
 use super::error::HistoryError;
 use super::plan::{
@@ -179,10 +181,18 @@ pub fn plan_rebase(
         request.upstream,
         request.onto,
         request.branch_tip,
+        &range,
     )? {
         return Ok(RebasePlan::UpToDate);
     }
-    match rebase_onto_impl(repo, fork, effective_onto, &[request.branch_tip], opts) {
+    match rebase_onto_impl(
+        repo,
+        fork,
+        effective_onto,
+        &[request.branch_tip],
+        opts,
+        Some(&range),
+    ) {
         Ok(plan) => Ok(RebasePlan::Plan(plan)),
         Err(HistoryError::Conflict { commit, paths }) => Ok(RebasePlan::Conflict { commit, paths }),
         Err(other) => Err(other),
@@ -209,7 +219,7 @@ pub fn rebase_onto(
     tips: &[ObjectId],
     opts: &RebaseOntoOptions,
 ) -> Result<RewritePlan, HistoryError> {
-    rebase_onto_impl(repo, upstream, onto, tips, opts)
+    rebase_onto_impl(repo, upstream, onto, tips, opts, None)
 }
 
 pub(crate) fn rebase_fork(
@@ -259,11 +269,11 @@ fn is_rebase_up_to_date(
     upstream: ObjectId,
     onto: Option<ObjectId>,
     branch_tip: ObjectId,
+    range: &[ObjectId],
 ) -> Result<bool, HistoryError> {
     if branch_tip == effective_onto {
         return Ok(true);
     }
-    let range = commits_in_rebase_range(repo, fork, &[branch_tip])?;
     if range.is_empty() {
         return Ok(true);
     }
@@ -286,6 +296,7 @@ pub(crate) fn build_rebase_rewrite_inputs(
     onto: ObjectId,
     tips: &[ObjectId],
     opts: &RebaseOntoOptions,
+    range: Option<&[ObjectId]>,
 ) -> Result<(HistoryEdits, Vec<ObjectId>, Vec<ObjectId>), HistoryError> {
     if tips.is_empty() {
         return Err(HistoryError::Planning {
@@ -305,7 +316,10 @@ pub(crate) fn build_rebase_rewrite_inputs(
         }
     }
 
-    let range = commits_in_rebase_range(repo, fork, tips)?;
+    let range = match range {
+        Some(precomputed) => precomputed.to_vec(),
+        None => commits_in_rebase_range(repo, fork, tips)?,
+    };
     if range.is_empty() {
         return Ok((HistoryEdits::new(), Vec::new(), range));
     }
@@ -357,8 +371,10 @@ fn rebase_onto_impl(
     onto: ObjectId,
     tips: &[ObjectId],
     opts: &RebaseOntoOptions,
+    range: Option<&[ObjectId]>,
 ) -> Result<RewritePlan, HistoryError> {
-    let (edits, replay_order, range) = build_rebase_rewrite_inputs(repo, fork, onto, tips, opts)?;
+    let (edits, replay_order, range) =
+        build_rebase_rewrite_inputs(repo, fork, onto, tips, opts, range)?;
     if range.is_empty() {
         return Ok(RewritePlan {
             commits: Vec::new(),
@@ -401,12 +417,13 @@ pub(crate) fn plan_rebase_resumable(
         request.upstream,
         request.onto,
         request.branch_tip,
+        &range,
     )? {
         return Ok(Err(RebasePlan::UpToDate));
     }
     let tips = [request.branch_tip];
     let (edits, replay_order, range) =
-        build_rebase_rewrite_inputs(repo, fork, effective_onto, &tips, opts)?;
+        build_rebase_rewrite_inputs(repo, fork, effective_onto, &tips, opts, Some(&range))?;
     if range.is_empty() {
         return Ok(Err(RebasePlan::UpToDate));
     }
@@ -500,26 +517,19 @@ fn commits_in_rebase_range(
     fork: ObjectId,
     tips: &[ObjectId],
 ) -> Result<Vec<ObjectId>, HistoryError> {
-    let positive: Vec<String> = tips.iter().map(ObjectId::to_hex).collect();
-    let negative = vec![fork.to_hex()];
-    let walk_opts = RevListOptions {
-        ordering: OrderingMode::Topo,
-        reverse: false,
-        use_commit_graph: true,
-        full_history: true,
-        ..RevListOptions::default()
-    };
-    let walk = rev_list(repo, &positive, &negative, &walk_opts).map_err(library_err)?;
-    let mut commits = walk.commits;
+    let mut commits =
+        commits_reachable_excluding_ancestors_of(repo, tips, &[fork], None).map_err(library_err)?;
     commits.retain(|oid| *oid != fork);
+    let set: HashSet<ObjectId> = commits.iter().copied().collect();
     for &tip in tips {
-        if tip != fork && !commits.contains(&tip) {
+        if tip != fork && !set.contains(&tip) {
             commits.push(tip);
         }
     }
-    // Topological oldest-first (rev-list topo with reverse=false is newest-first).
-    commits.reverse();
-    Ok(commits)
+    let mut topo = topo_order_commit_subset(repo, &commits, true).map_err(library_err)?;
+    // Topological oldest-first (topo_order_commit_subset is newest-first).
+    topo.reverse();
+    Ok(topo)
 }
 
 fn paths_changed_by_commit(
@@ -588,20 +598,13 @@ fn patch_ids_in_fork_to_onto(
     if fork == onto {
         return Ok(HashMap::new());
     }
-    let positive = vec![onto.to_hex()];
-    let negative = vec![fork.to_hex()];
-    let walk_opts = RevListOptions {
-        ordering: OrderingMode::Topo,
-        reverse: false,
-        use_commit_graph: true,
-        full_history: true,
-        ..RevListOptions::default()
-    };
-    let walk = rev_list(repo, &positive, &negative, &walk_opts).map_err(library_err)?;
+    let mut commits = commits_reachable_excluding_ancestors_of(repo, &[onto], &[fork], None)
+        .map_err(library_err)?;
+    commits.retain(|oid| *oid != fork);
+    let mut commits = topo_order_commit_subset(repo, &commits, true).map_err(library_err)?;
+    commits.reverse();
     let algo = repo.odb().hash_algo();
     let mut by_patch: HashMap<ObjectId, ObjectId> = HashMap::new();
-    let mut commits = walk.commits;
-    commits.reverse();
     for oid in commits {
         if !range_paths.is_empty() && !commit_touches_any_path(repo, oid, range_paths)? {
             continue;
@@ -765,6 +768,49 @@ mod tests {
         assert!(
             calls <= 4,
             "expected patch-id work proportional to fork..onto overlap, got {calls} calls"
+        );
+    }
+
+    #[test]
+    fn rebase_range_enumeration_is_bounded_on_deep_linear_history() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = Repository::init(
+            dir.path(),
+            &crate::repo::InitOptions::new()
+                .with_initial_branch("main".to_owned())
+                .with_ref_storage(crate::RefStorageFormat::Files),
+        )
+        .expect("init");
+        let id = ident(1);
+        let fork_tree = blob_tree(&repo, "base.txt", b"base\n").expect("fork tree");
+        let fork = write_commit(&repo, fork_tree, &[], "fork", &id).expect("fork");
+        let mut parent = fork;
+        for i in 0..400 {
+            let path = format!("deep/{i}.txt");
+            let tree = blob_tree(&repo, &path, format!("v{i}\n").as_bytes()).expect("deep tree");
+            parent = write_commit(&repo, tree, &[parent], "deep", &id).expect("deep commit");
+        }
+        let onto = parent;
+        let mut tip = fork;
+        for i in 0..20 {
+            let path = format!("feat/{i}.txt");
+            let tree = blob_tree(&repo, &path, format!("f{i}\n").as_bytes()).expect("feat tree");
+            tip = write_commit(&repo, tree, &[tip], "feat", &id).expect("feat commit");
+        }
+        let started = std::time::Instant::now();
+        let range = commits_in_rebase_range(&repo, fork, &[tip]).expect("range");
+        let elapsed = started.elapsed();
+        assert_eq!(range.len(), 20, "expected 20 commits in fork..tip");
+        assert!(
+            elapsed.as_millis() < 500,
+            "rebase range walk took {elapsed:?}, expected bounded time"
+        );
+        let check_started = std::time::Instant::now();
+        let _map = applied_by_patch(&repo, fork, onto, &range).expect("patch scan");
+        let check_elapsed = check_started.elapsed();
+        assert!(
+            check_elapsed.as_millis() < 500,
+            "fork..onto patch scan took {check_elapsed:?}, expected bounded time"
         );
     }
 
