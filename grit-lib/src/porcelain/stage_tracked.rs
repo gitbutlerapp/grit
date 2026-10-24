@@ -660,6 +660,12 @@ struct DeferredRestageContext<'a> {
     ignorecase: bool,
 }
 
+const S_IFMT: u32 = 0o170000;
+
+fn git_entry_type(mode: u32) -> u32 {
+    mode & S_IFMT
+}
+
 fn refresh_present_tracked_path(
     ctx: PresentRefreshCtx<'_>,
     stat: BlobDiskStat,
@@ -705,17 +711,22 @@ fn refresh_present_tracked_path(
     }
 
     let wt_mode = stat.git_mode;
+    let type_changed = git_entry_type(wt_mode) != git_entry_type(idx_mode);
     let stat_same = stat
         .fields
         .matches_index_entry(idx_e, crate::index::StatMatchPolicy::default());
     let racy = entry_is_racy(idx_e, index_mtime);
     if !idx_intent_to_add && idx_e.size != 0 && stat_same && !racy {
-        if wt_mode == idx_mode || !trust_filemode {
+        if !type_changed && (wt_mode == idx_mode || !trust_filemode) {
             return Ok(false);
         }
-        let entry = entry_from_stat(abs_path, raw_path, idx_oid, wt_mode)?;
-        index.stage_file(entry);
-        return Ok(true);
+        if type_changed {
+            // Fall through: blob ↔ symlink (etc.) must restage even when core.filemode=false.
+        } else {
+            let entry = entry_from_stat(abs_path, raw_path, idx_oid, wt_mode)?;
+            index.stage_file(entry);
+            return Ok(true);
+        }
     }
 
     let oid = match std::str::from_utf8(raw_path) {
@@ -742,7 +753,11 @@ fn refresh_present_tracked_path(
                 filter_fp,
             )?;
             if !idx_intent_to_add && staged_oid == idx_oid {
-                let mode_for_index = if trust_filemode { wt_mode } else { idx_mode };
+                let mode_for_index = if trust_filemode || type_changed {
+                    wt_mode
+                } else {
+                    idx_mode
+                };
                 if mode_for_index == idx_mode || !trust_filemode {
                     let entry = entry_from_stat(abs_path, raw_path, staged_oid, mode_for_index)?;
                     if entry.ctime_sec != idx_e.ctime_sec
@@ -778,13 +793,20 @@ fn refresh_present_tracked_path(
         Err(_) => {
             let meta = fs::symlink_metadata(abs_path).map_err(Error::Io)?;
             let oid = read_worktree_blob_oid_raw(repo, abs_path, &meta)?;
-            if !idx_intent_to_add && idx_oid == oid && (wt_mode == idx_mode || !trust_filemode) {
+            if !idx_intent_to_add
+                && idx_oid == oid
+                && (wt_mode == idx_mode || (!trust_filemode && !type_changed))
+            {
                 return Ok(false);
             }
             oid
         }
     };
-    let mode_for_index = if trust_filemode { wt_mode } else { idx_mode };
+    let mode_for_index = if trust_filemode || type_changed {
+        wt_mode
+    } else {
+        idx_mode
+    };
     let entry = entry_from_stat(abs_path, raw_path, oid, mode_for_index)?;
     index.stage_file(entry);
     Ok(true)
