@@ -2658,8 +2658,13 @@ fn compute_blame_with_session(
                 let line_map = maps.line_map.as_slice();
                 let stop_blame_on_current = maps.stop_blame_on_current.as_slice();
                 let mut inserted_copy_source: Option<CopySourceBlameCache> = None;
-                if copy_depth >= 3 {
+                if copy_depth >= 1 {
                     let cur_line_refs = BlameSession::line_refs(cur_lines_arc.as_ref());
+                    let only_removed_in_child = if copy_depth >= 3 {
+                        None
+                    } else {
+                        Some(&commit.tree)
+                    };
                     if let Some((source_path, source_blame)) = find_copy_source_blame(
                         odb,
                         parent_oid,
@@ -2672,6 +2677,7 @@ fn compute_blame_with_session(
                         use_textconv,
                         copy_depth - 1,
                         false,
+                        only_removed_in_child,
                         first_parent_only,
                         grafts,
                         indent_heuristic,
@@ -2919,6 +2925,7 @@ fn find_copy_source_blame(
     use_textconv: bool,
     copy_depth: usize,
     include_current_path: bool,
+    only_removed_in_child: Option<&ObjectId>,
     first_parent_only: bool,
     grafts: &HashMap<ObjectId, Vec<ObjectId>>,
     indent_heuristic: bool,
@@ -2931,6 +2938,11 @@ fn find_copy_source_blame(
     for (path, oid, mode) in entries {
         if (!include_current_path && path == exclude_path) || !is_regular_mode(mode) {
             continue;
+        }
+        if let Some(child_tree) = only_removed_in_child {
+            if session.resolve_path_in_tree(*child_tree, &path)?.is_some() {
+                continue;
+            }
         }
         candidates.push((path, oid, mode));
     }
@@ -3217,6 +3229,54 @@ fn commit_parents_for_blame(
     )
 }
 
+/// Copy detection depth for blame, matching Git's repeated `-C` flag.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum CopyDetection {
+    /// No copy detection (default).
+    #[default]
+    Off,
+    /// `-C` once: copies from files removed in the same commit.
+    FromModifiedFiles,
+    /// `-C -C`: also search existing parent files when the blamed path is new in the commit.
+    FromCreatingCommit,
+    /// `-C -C -C`: search all parent files for copies (including appended lines).
+    FromAnyCommit,
+}
+
+impl CopyDetection {
+    /// Number of `-C` flags this level represents (`0` when [`CopyDetection::Off`]).
+    #[must_use]
+    pub const fn count(self) -> usize {
+        match self {
+            Self::Off => 0,
+            Self::FromModifiedFiles => 1,
+            Self::FromCreatingCommit => 2,
+            Self::FromAnyCommit => 3,
+        }
+    }
+
+    /// Build from a CLI `-C` repetition count (Git allows at most three).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`LibError::Message`] when `count` is greater than three.
+    pub fn from_count(count: usize) -> Result<Self> {
+        match count {
+            0 => Ok(Self::Off),
+            1 => Ok(Self::FromModifiedFiles),
+            2 => Ok(Self::FromCreatingCommit),
+            3 => Ok(Self::FromAnyCommit),
+            _ => Err(LibError::Message(
+                "blame copy detection: at most three -C flags are supported".into(),
+            )),
+        }
+    }
+
+    const fn depth(self) -> usize {
+        self.count()
+    }
+}
+
 /// Options for [`blame_file`].
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct BlameOptions {
@@ -3228,6 +3288,8 @@ pub struct BlameOptions {
     pub first_parent_only: bool,
     /// Commits to treat as transparent during the history walk.
     pub ignore: IgnoreRevs,
+    /// Copy detection depth (Git `-C`, `-C -C`, `-C -C -C`).
+    pub copy_detection: CopyDetection,
 }
 
 /// One blamed line returned by [`blame_file`].
@@ -3241,6 +3303,8 @@ pub struct BlameAttributedLine {
     pub final_line: usize,
     /// Line text in the blamed revision.
     pub content: String,
+    /// Source path when copy detection attributed the line from another file.
+    pub original_path: Option<String>,
     /// Line attribution passed through an ignored revision.
     pub ignored: bool,
     /// Line could not be blamed past an ignored revision.
@@ -3295,6 +3359,7 @@ pub fn blame_file(repo: &Repository, path: &str, options: &BlameOptions) -> Resu
     let thread_policy = repo.thread_policy();
     let mut session = BlameSession::new(repo.odb(), None, false, &thread_policy);
     session.commit_graph = repo.caches().commit_graph_chain(repo.odb().objects_dir());
+    let copy_depth = options.copy_detection.depth();
     let (lines, commits) = repo.odb().with_pack_read_context(
         || -> Result<(Vec<BlameAttributedLine>, HashMap<ObjectId, BlameCommitInfo>)> {
             let raw = compute_blame_with_session(
@@ -3305,7 +3370,7 @@ pub fn blame_file(repo: &Repository, path: &str, options: &BlameOptions) -> Resu
                 diff_algorithm,
                 None,
                 false,
-                0,
+                copy_depth,
                 options.first_parent_only,
                 &grafts,
                 indent_heuristic,
@@ -3320,6 +3385,7 @@ pub fn blame_file(repo: &Repository, path: &str, options: &BlameOptions) -> Resu
                     original_line: line.orig_lineno,
                     final_line: line.final_lineno,
                     content: line.content,
+                    original_path: line.source_file,
                     ignored: line.ignored,
                     unblamable: line.unblamable,
                 })
@@ -3587,6 +3653,22 @@ mod tests {
         )?;
         assert_eq!(result.lines.len(), 1);
         assert_eq!(result.lines[0].content, "hello");
+        Ok(())
+    }
+
+    #[test]
+    fn copy_detection_from_count_maps_git_levels() -> Result<()> {
+        assert_eq!(CopyDetection::from_count(0)?, CopyDetection::Off);
+        assert_eq!(
+            CopyDetection::from_count(1)?,
+            CopyDetection::FromModifiedFiles
+        );
+        assert_eq!(
+            CopyDetection::from_count(2)?,
+            CopyDetection::FromCreatingCommit
+        );
+        assert_eq!(CopyDetection::from_count(3)?, CopyDetection::FromAnyCommit);
+        assert!(CopyDetection::from_count(4).is_err());
         Ok(())
     }
 

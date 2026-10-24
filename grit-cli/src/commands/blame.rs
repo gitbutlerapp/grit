@@ -5,7 +5,9 @@ use std::io::Write;
 use std::ops::RangeInclusive;
 
 use anyhow::{Context, Result};
-use grit_lib::blame::{blame_file, BlameOptions, BlameResult, IgnoreRevs, IgnoreRevsSources};
+use grit_lib::blame::{
+    blame_file, BlameOptions, BlameResult, CopyDetection, IgnoreRevs, IgnoreRevsSources,
+};
 use grit_lib::objects::ObjectId;
 use grit_lib::revwalk::rev_parse::resolve_revision_as_commit;
 use schemars::JsonSchema;
@@ -37,6 +39,8 @@ pub struct BlameLineJson {
     pub ignored: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub unblamable: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub original_path: Option<String>,
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -134,6 +138,7 @@ fn normalize_blame_line_content(content: String) -> String {
     content.trim_end_matches(['\n', '\r']).to_owned()
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn run(
     file: String,
     rev: Option<String>,
@@ -141,6 +146,7 @@ pub fn run(
     first_parent: bool,
     ignore_rev: Vec<String>,
     ignore_revs_file: Vec<String>,
+    copy_detection: u8,
     now: time::OffsetDateTime,
 ) -> Result<BlameOutcome> {
     let repo = context::discover()?;
@@ -173,6 +179,9 @@ pub fn run(
         },
     )?;
 
+    let copy_detection =
+        CopyDetection::from_count(copy_detection as usize).map_err(|e| anyhow::anyhow!("{e}"))?;
+
     let result = blame_file(
         &repo,
         &file,
@@ -181,6 +190,7 @@ pub fn run(
             line_range: range,
             first_parent_only: first_parent,
             ignore,
+            copy_detection,
         },
     )?;
 
@@ -247,6 +257,7 @@ fn outcome_from_result(file: String, rev: String, result: BlameResult, now: i64)
             content: content.clone(),
             ignored: line.ignored.then_some(true),
             unblamable: line.unblamable.then_some(true),
+            original_path: line.original_path.clone(),
         });
         display_lines.push(BlameDisplayLine {
             commit: line.commit,

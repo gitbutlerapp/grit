@@ -382,12 +382,39 @@ impl core::marker::Unpin for grit_lib::blame::BlameDiffAlgorithm
 impl core::marker::UnsafeUnpin for grit_lib::blame::BlameDiffAlgorithm
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::blame::BlameDiffAlgorithm
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::blame::BlameDiffAlgorithm
+pub enum grit_lib::blame::CopyDetection
+pub grit_lib::blame::CopyDetection::FromAnyCommit
+pub grit_lib::blame::CopyDetection::FromCreatingCommit
+pub grit_lib::blame::CopyDetection::FromModifiedFiles
+pub grit_lib::blame::CopyDetection::Off
+impl grit_lib::blame::CopyDetection
+pub const fn grit_lib::blame::CopyDetection::count(self) -> usize
+pub fn grit_lib::blame::CopyDetection::from_count(usize) -> grit_lib::error::Result<Self>
+impl core::clone::Clone for grit_lib::blame::CopyDetection
+pub fn grit_lib::blame::CopyDetection::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::blame::CopyDetection
+impl core::cmp::PartialEq for grit_lib::blame::CopyDetection
+pub fn grit_lib::blame::CopyDetection::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::blame::CopyDetection
+pub fn grit_lib::blame::CopyDetection::default() -> Self
+impl core::fmt::Debug for grit_lib::blame::CopyDetection
+pub fn grit_lib::blame::CopyDetection::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::blame::CopyDetection
+impl core::marker::StructuralPartialEq for grit_lib::blame::CopyDetection
+impl core::marker::Freeze for grit_lib::blame::CopyDetection
+impl core::marker::Send for grit_lib::blame::CopyDetection
+impl core::marker::Sync for grit_lib::blame::CopyDetection
+impl core::marker::Unpin for grit_lib::blame::CopyDetection
+impl core::marker::UnsafeUnpin for grit_lib::blame::CopyDetection
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::blame::CopyDetection
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::blame::CopyDetection
 pub struct grit_lib::blame::BlameAttributedLine
 pub grit_lib::blame::BlameAttributedLine::commit: grit_lib::objects::ObjectId
 pub grit_lib::blame::BlameAttributedLine::content: alloc::string::String
 pub grit_lib::blame::BlameAttributedLine::final_line: usize
 pub grit_lib::blame::BlameAttributedLine::ignored: bool
 pub grit_lib::blame::BlameAttributedLine::original_line: usize
+pub grit_lib::blame::BlameAttributedLine::original_path: core::option::Option<alloc::string::String>
 pub grit_lib::blame::BlameAttributedLine::unblamable: bool
 impl core::clone::Clone for grit_lib::blame::BlameAttributedLine
 pub fn grit_lib::blame::BlameAttributedLine::clone(&self) -> Self
@@ -448,6 +475,7 @@ impl core::marker::UnsafeUnpin for grit_lib::blame::BlameLine
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::blame::BlameLine
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::blame::BlameLine
 pub struct grit_lib::blame::BlameOptions
+pub grit_lib::blame::BlameOptions::copy_detection: grit_lib::blame::CopyDetection
 pub grit_lib::blame::BlameOptions::first_parent_only: bool
 pub grit_lib::blame::BlameOptions::ignore: grit_lib::blame::IgnoreRevs
 pub grit_lib::blame::BlameOptions::line_range: core::option::Option<core::ops::range::RangeInclusive<usize>>

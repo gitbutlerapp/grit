@@ -41,6 +41,12 @@
           "minimum": 0.0,
           "type": "integer"
         },
+        "original_path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "unblamable": {
           "type": [
             "boolean",

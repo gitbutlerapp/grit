@@ -755,6 +755,9 @@ enum Command {
         /// Read revision oids to ignore from a file (repeatable; `""` clears prior entries).
         #[arg(long = "ignore-revs-file", value_name = "FILE")]
         ignore_revs_file: Vec<String>,
+        /// Detect line copies from other files (repeat up to three times for deeper search).
+        #[arg(short = 'C', action = clap::ArgAction::Count)]
+        copy_detection: u8,
     },
     /// Show changes as a diff. No argument: uncommitted changes; with a commit:
     /// the change that commit introduced; with two commits (or `A..B`) diff their trees.
@@ -2122,6 +2125,7 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<ExitS
             first_parent,
             ignore_rev,
             ignore_revs_file,
+            copy_detection,
         } => emit_success(
             &commands::blame::run(
                 file,
@@ -2130,6 +2134,7 @@ fn dispatch(cli: Cli, opts: &OutputOptions, ctx: &RenderContext) -> Result<ExitS
                 first_parent,
                 ignore_rev,
                 ignore_revs_file,
+                copy_detection,
                 ctx.now,
             )?,
             opts,
