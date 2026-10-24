@@ -859,8 +859,8 @@ fn run_patch_text(opts: DiffRunOptions) -> Result<DiffOutcome> {
                 }
             };
             let entries = if against_ref.is_some()
-                || (worktree_pathspecs.is_empty()
-                    && (format.patch_text || format.detail() == DiffDetail::Patch))
+                || format.patch_text
+                || format.detail() == DiffDetail::Patch
             {
                 filter_diff_entries(
                     worktree_against_tree_entries(&repo, base_tree.as_ref(), &diff_options)?,
