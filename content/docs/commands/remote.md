@@ -278,6 +278,7 @@ Remote refs
 | `0` | Success ([`success`](../exit-codes/)). |
 | `1` | Command failed ([`failure`](../exit-codes/)). |
 | `2` | Invalid flags or arguments ([`usage`](../exit-codes/)). |
+| `128` | `remote refs` could not reach or read the remote ([`remote_unreadable`](../exit-codes/)). |
 
 See [Exit codes](../exit-codes/) for shared rules and structured `--json` `kind` values.
 

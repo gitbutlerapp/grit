@@ -2,7 +2,6 @@
 
 use anyhow::Error;
 use grit_lib::porcelain::hunk_select::HunkSelectError;
-use grit_lib::remote::clone::CloneError;
 
 use crate::commands;
 use crate::commands::blame::BlameUsageError;
@@ -24,7 +23,7 @@ pub enum ExitStatus {
     Failure,
     /// Usage / invalid arguments (2).
     Usage,
-    /// Remote unreadable or clone transport failure (128).
+    /// Clone, fetch, pull, push, or `remote refs` could not reach or read the remote (128).
     RemoteUnreadable,
     /// Bundle unbundle missing prerequisite commits (128).
     MissingPrerequisite,
@@ -67,12 +66,6 @@ impl ExitStatus {
     pub fn for_error(err: &Error) -> Self {
         if err.downcast_ref::<MissingPrerequisites>().is_some() {
             return Self::from_i32(commands::bundle::MISSING_PREREQUISITE_EXIT);
-        }
-        if err
-            .downcast_ref::<CloneError>()
-            .is_some_and(CloneError::is_remote_read_failure)
-        {
-            return Self::RemoteUnreadable;
         }
         if err
             .chain()
@@ -125,6 +118,7 @@ impl ExitStatus {
         match kind {
             ErrorKind::InvalidPattern => Self::InvalidCommitFilter,
             ErrorKind::Usage => Self::Usage,
+            ErrorKind::RemoteUnreadable => Self::RemoteUnreadable,
             _ => Self::Failure,
         }
     }
@@ -366,6 +360,30 @@ mod tests {
         };
         let err = invalid_commit_filter(filter_err);
         assert_eq!(ExitStatus::for_error(&err), ExitStatus::InvalidCommitFilter);
+
+        let unreadable = || {
+            grit_lib::error::Error::remote_unreadable(
+                "/nope.git",
+                grit_lib::error::RemoteUnreadableReason::RepositoryNotFound,
+            )
+        };
+        for err in [
+            anyhow::Error::new(unreadable()),
+            commands::fetch::map_remote_error(grit_lib::remote::RemoteError::Library(unreadable())),
+            anyhow::Error::new(grit_lib::remote::clone::CloneError::Library(unreadable())),
+            anyhow::Error::new(grit_lib::porcelain::pull::PullError::Remote(
+                grit_lib::remote::RemoteError::Library(unreadable()),
+            )),
+        ] {
+            let payload = crate::json_error::structured_json_payload(&err).expect("payload");
+            assert_eq!(payload.kind, ErrorKind::RemoteUnreadable);
+            assert_eq!(payload.error, "could not find repository at '/nope.git'");
+            assert_eq!(ExitStatus::for_error(&err), ExitStatus::RemoteUnreadable);
+        }
+        let auth = commands::fetch::map_remote_error(grit_lib::remote::RemoteError::Library(
+            grit_lib::error::Error::Auth("denied".into()),
+        ));
+        assert_eq!(ExitStatus::for_error(&auth), ExitStatus::Failure);
 
         let pickaxe_err = grit_lib::diff::PickaxeError::InvalidPattern {
             pattern: "x".into(),

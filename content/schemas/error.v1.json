@@ -139,6 +139,13 @@
             "branch_error"
           ],
           "type": "string"
+        },
+        {
+          "description": "Clone, fetch, pull, push, or `remote refs` could not reach or read the remote (exit 128).",
+          "enum": [
+            "remote_unreadable"
+          ],
+          "type": "string"
         }
       ]
     },

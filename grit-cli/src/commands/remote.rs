@@ -536,7 +536,7 @@ pub fn run_refs(
     let remote = resolve_remote_argument(&config, remote_or_url).map_err(map_remote_error)?;
     let raw = remote
         .list_refs(repo.as_ref(), &opts, Some(&factory))
-        .map_err(|e| anyhow::Error::msg(e.to_string()))?;
+        .map_err(map_remote_error)?;
     let (refs, lines) = match mode {
         OutputMode::Human => (Vec::new(), remote_ref_lines(&raw)),
         _ => map_remote_refs(&raw),

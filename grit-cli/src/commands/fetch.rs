@@ -501,6 +501,7 @@ pub(crate) fn map_remote_error(err: RemoteError) -> anyhow::Error {
         RemoteError::Library(grit_lib::error::Error::HashCollision { oid }) => {
             crate::json_error::map_lib_error(grit_lib::error::Error::HashCollision { oid })
         }
+        RemoteError::Library(lib) if lib.is_remote_unreadable() => anyhow::Error::new(lib),
         RemoteError::Library(lib) => anyhow::Error::msg(RemoteError::Library(lib).to_string()),
         RemoteError::UnknownRemote(name) => anyhow::anyhow!(
             "unknown remote '{name}' (not configured — pass a URL or path, or use `grit remote add`)"

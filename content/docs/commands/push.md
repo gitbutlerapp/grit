@@ -167,6 +167,7 @@ Markdown uses headings, bullet lists, and fenced blocks; pipe characters inside 
 | `0` | Success ([`success`](../exit-codes/)). |
 | `1` | Command failed ([`failure`](../exit-codes/)). |
 | `2` | Invalid flags or arguments ([`usage`](../exit-codes/)). |
+| `128` | Could not reach or read the remote: missing repository, DNS or connection failure, HTTP error status ([`remote_unreadable`](../exit-codes/)). |
 
 See [Exit codes](../exit-codes/) for shared rules and structured `--json` `kind` values.
 

@@ -48,6 +48,19 @@ To plan a push the way `grit push` does, start from its positionals: [`resolve_p
 
 [`pull`](rustdoc:grit_lib::porcelain::pull::pull) is the high-level fetch-and-integrate operation. Build [`PullOptions`](rustdoc:grit_lib::porcelain::pull::PullOptions) (including shared [`FetchOptions`](rustdoc:grit_lib::remote::transfer::FetchOptions), explicit refspec/`FETCH_HEAD` integration, [`resolve_pull_autostash`](rustdoc:grit_lib::porcelain::pull::resolve_pull_autostash), and dry-run `--check` via [`PullCheck`](rustdoc:grit_lib::porcelain::pull::PullCheck)), pass a progress sink and HTTP client factory, and receive a typed [`PullOutcome`](rustdoc:grit_lib::porcelain::pull::PullOutcome). It maps `branch.<name>.merge` through the remote's fetch refspecs, uses [`resolve_pull_integration_base`](rustdoc:grit_lib::refs::branch_tracking::resolve_pull_integration_base) after explicit fetches, skips the fetch for a local `remote = .` upstream, and fast-forwards, merges, or adopts the upstream on an unborn branch. Failures are typed as [`PullError`](rustdoc:grit_lib::porcelain::pull::PullError); `grit pull` only builds options, invokes this API, and renders the outcome.
 
+## Unreachable remotes
+
+When the remote cannot be talked to at all, every operation (`list_refs`, `fetch`, `push`, [`clone`](rustdoc:grit_lib::remote::clone::clone), [`pull`](rustdoc:grit_lib::porcelain::pull::pull)) and every transport fails with the same [`Error::RemoteUnreadable`](rustdoc:grit_lib::error::Error::RemoteUnreadable). It carries the redacted URL or resolved path and a [`RemoteUnreadableReason`](rustdoc:grit_lib::error::RemoteUnreadableReason):
+
+| Reason | When |
+| --- | --- |
+| `RepositoryNotFound` | A local path or `file://` URL that is missing or not a Git directory. Listing refs never treats it as an empty remote. |
+| `Transport { detail }` | DNS, refused or reset connection, TLS, or timeout (HTTP and `git://`). Usually worth a retry. |
+| `HttpStatus { status }` | A smart-HTTP error status such as 403, 404 or 5xx. A `401` challenge stays [`Error::Auth`](rustdoc:grit_lib::error::Error::Auth). |
+| `NoHandshake` | The transport ran but never spoke Git, for example `ssh` failed to connect. |
+
+Wrapper errors answer the same question without unwrapping: [`Error::is_remote_unreadable`](rustdoc:grit_lib::error::Error::is_remote_unreadable), [`RemoteError::is_remote_unreadable`](rustdoc:grit_lib::remote::RemoteError::is_remote_unreadable), [`CloneError::is_remote_unreadable`](rustdoc:grit_lib::remote::clone::CloneError::is_remote_unreadable) and [`PullError::is_remote_unreadable`](rustdoc:grit_lib::porcelain::pull::PullError::is_remote_unreadable). The `grit` CLI maps all of them to exit code 128 and `kind: remote_unreadable` ([Exit codes](../exit-codes.md)).
+
 HTTP remotes need an [`HttpClient`](rustdoc:grit_lib::remote::transport::http::HttpClient). Implement [`HttpClientFactory`](rustdoc:grit_lib::remote::HttpClientFactory) or, with the `http-ureq` feature, pass `None` to use the default ureq-backed factory (`UreqHttpClient` + [`HelperCredentialProvider`](rustdoc:grit_lib::remote::credentials::HelperCredentialProvider)). The `grit` binary on macOS enables `http-ureq-native-tls` (Secure Transport) for HTTPS throughput; other platforms use rustls unless you opt into `http-ureq-native-tls` when depending on `grit-lib`.
 
 ## Credentials and progress

@@ -293,7 +293,7 @@ Markdown uses headings, bullet lists, and fenced blocks; pipe characters inside 
 | `0` | Clone succeeded (including empty remote with no checkout). |
 | `1` | Destination not empty, checkout failure, or other error. |
 | `2` | Invalid flags ([`usage`](../exit-codes/)). |
-| `128` | Remote unreadable ([`remote_unreadable`](../exit-codes/)). |
+| `128` | Could not reach or read the source: missing path, DNS or connection failure, HTTP error status ([`remote_unreadable`](../exit-codes/)). |
 
 See [Exit codes](../exit-codes/).
 
