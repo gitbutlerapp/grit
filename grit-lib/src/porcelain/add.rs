@@ -1289,7 +1289,8 @@ fn validate_pathspecs(
         }) || untracked.iter().any(|p| {
             let one = [p.as_str()];
             sorted_paths_match_pathspec(resolved, &one, ctx)
-        }) {
+        }) || pathspec_matches_index_at_any_stage(index, resolved, ctx)
+        {
             continue;
         }
         let matches_repo = checker.matches(resolved)?
@@ -2177,6 +2178,33 @@ mod tests {
             "refusal must leave conflict stages intact"
         );
         assert!(index.get(b"f", 0).is_none());
+    }
+
+    #[test]
+    fn validate_pathspec_matches_unmerged_index_without_stage_zero() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        let mut index = Index::new();
+        write_three_stage_conflict_index(&repo, &mut index, "f", b"base\n", b"ours\n", b"theirs\n");
+        write_index(&repo, &mut index);
+
+        let result = stage(
+            &repo,
+            &StageOptions {
+                pathspecs: vec!["f".to_owned()],
+                mode: StageMode::Update,
+                ..StageOptions::default()
+            },
+            &mut NullProgress,
+        );
+        assert!(
+            !matches!(
+                &result,
+                Err(Error::Message(msg)) if msg.contains("did not match any files")
+            ),
+            "pathspec validation must see unmerged index stages: {result:?}"
+        );
     }
 
     #[test]
