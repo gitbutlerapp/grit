@@ -371,6 +371,7 @@ fn commit_patch_scope(
         }
     };
 
+    let head = resolve_head_for_repository(repo).map_err(CommitPatchError::Commit)?;
     let mut index = repo.load_index().map_err(CommitPatchError::Commit)?;
     if index.has_unmerged_entries() {
         return Err(Error::IndexUnmerged.into());
@@ -396,7 +397,7 @@ fn commit_patch_scope(
 
     let mut req = req.clone();
     req.assume_worktree_synced = true;
-    create_commit_with_index(repo, &mut index, &req, progress, None)
+    create_commit_with_index(repo, head, &mut index, &req, progress, None)
         .map_err(CommitPatchError::Commit)
 }
 
@@ -439,10 +440,15 @@ fn commit_paths_scope(
     }
     validate_commit_pathspecs(repo, paths)?;
 
+    // Lock before reading HEAD and the index so nothing visible (objects, ref, reflog) is written
+    // when another process holds it, and so nobody can commit or change the index under us.
+    let index_lock = (!req.dry_run)
+        .then(|| repo.begin_index_update())
+        .transpose()?;
     let head = resolve_head_for_repository(repo)?;
-    let parent_tree = match head {
+    let parent_tree = match &head {
         HeadState::Branch { oid: Some(p), .. } | HeadState::Detached { oid: p } => {
-            Some(commit_tree_oid(repo, &p)?)
+            Some(commit_tree_oid(repo, p)?)
         }
         HeadState::Branch { oid: None, .. } => None,
         HeadState::Invalid => {
@@ -450,11 +456,6 @@ fn commit_paths_scope(
         }
     };
 
-    // Lock before reading the index so nothing visible (objects, ref, reflog) is written when
-    // another process holds it, and so nobody can change the index under the commit.
-    let index_lock = (!req.dry_run)
-        .then(|| repo.begin_index_update())
-        .transpose()?;
     let mut real_index = repo.load_index()?;
     if real_index.has_unmerged_entries() {
         return Err(Error::IndexUnmerged);
@@ -493,7 +494,7 @@ fn commit_paths_scope(
     req.skip_pre_commit_tree_match = false;
     req.staged_change_count = Some(staged_commit.total().max(1));
 
-    create_commit_with_index(repo, &mut commit_index, &req, progress, real_index)
+    create_commit_with_index(repo, head, &mut commit_index, &req, progress, real_index)
 }
 
 /// The repository index of a partial commit, with the lock taken before the commit started.
@@ -721,8 +722,9 @@ pub fn create_commit(
     req: &CommitRequest,
     progress: &mut dyn ProgressSink,
 ) -> Result<CommitOutcome> {
+    let head = resolve_head_for_repository(repo)?;
     let mut index = repo.load_index()?;
-    create_commit_with_index(repo, &mut index, req, progress, None)
+    create_commit_with_index(repo, head, &mut index, req, progress, None)
 }
 
 /// Stage every worktree change and record a commit using a single in-memory index (issue #1064).
@@ -737,6 +739,7 @@ pub fn commit_worktree(
     req: &CommitRequest,
     progress: &mut dyn ProgressSink,
 ) -> Result<CommitOutcome> {
+    let head = resolve_head_for_repository(repo)?;
     let mut index = repo.load_index()?;
     let staged =
         crate::porcelain::add::stage_for_commit_on_index(repo, &mut index, progress, req.dry_run)?;
@@ -747,7 +750,7 @@ pub fn commit_worktree(
     if req.assume_worktree_synced && req.skip_pre_commit_tree_match {
         req.staged_change_count = Some(staged.total());
     }
-    create_commit_with_index(repo, &mut index, &req, progress, None)
+    create_commit_with_index(repo, head, &mut index, &req, progress, None)
 }
 
 fn commit_files_from_diff_entries(entries: &[DiffEntry]) -> Vec<CommitFile> {
@@ -1030,17 +1033,23 @@ pub(crate) fn create_commit_with_loaded_index(
     if index.has_unmerged_entries() {
         return Err(Error::IndexUnmerged);
     }
-    create_commit_with_index(repo, index, req, progress, None)
+    let head = resolve_head_for_repository(repo)?;
+    create_commit_with_index(repo, head, index, req, progress, None)
 }
 
+/// Record a commit of `index` on top of `head`.
+///
+/// `head` must be read before the content `index` was built from: the branch update then
+/// compares against that same tip, so a commit landed by another process in between makes this
+/// one fail instead of silently reverting it.
 fn create_commit_with_index(
     repo: &Repository,
+    head: HeadState,
     index: &mut Index,
     req: &CommitRequest,
     _progress: &mut dyn ProgressSink,
     persist_index: Option<LockedIndex>,
 ) -> Result<CommitOutcome> {
-    let head = resolve_head_for_repository(repo)?;
     let (refname, short_name, mut parent, head_detached) = match head {
         HeadState::Branch {
             refname,
