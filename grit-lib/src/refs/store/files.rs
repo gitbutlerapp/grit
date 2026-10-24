@@ -214,6 +214,14 @@ impl FilesRefStore {
         file.map_for_prefix_filtered(&path, prefix, keep)
     }
 
+    /// The common dir's `packed-refs` view this store reads through, refreshed when the file
+    /// changed (`None` without a `packed-refs`). The copy shares the file's bytes and index.
+    pub(crate) fn packed_refs_view(&self) -> Result<Option<crate::refs::PackedRefsFileView>> {
+        self.refresh_packed_cache_if_stale()?;
+        let guard = self.packed_cache.lock().unwrap_or_else(|e| e.into_inner());
+        Ok(guard.file.clone())
+    }
+
     fn lookup_packed_oid(&self, storage_name: &str) -> Result<Option<ObjectId>> {
         self.refresh_packed_cache_if_stale()?;
         let guard = self.packed_cache.lock().unwrap_or_else(|e| e.into_inner());
@@ -1316,6 +1324,10 @@ impl RefStore for FilesRefStore {
             }
         }
         Ok(())
+    }
+
+    fn as_files(&self) -> Option<&FilesRefStore> {
+        Some(self)
     }
 }
 

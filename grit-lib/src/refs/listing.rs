@@ -650,7 +650,7 @@ fn finish_query(
         let to_peel = collected.iter().filter(|c| c.peeled.is_none()).count();
         let packed = repo
             .filter(|_| to_peel >= PACKED_PEELS_MIN_REFS)
-            .and_then(|r| PackedRefPeels::load(r.git_dir(), r.refs().format()).ok());
+            .and_then(|r| PackedRefPeels::for_store(r.refs(), r.git_dir()).ok());
         for entry in &mut collected {
             fill_peeled(odb, packed.as_ref(), entry);
         }

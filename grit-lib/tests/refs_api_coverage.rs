@@ -164,3 +164,18 @@ fn pack_remote_tracking_refs_for_clone_smoke() {
     write_ref(&git_dir, "refs/remotes/origin/main", &oid(4)).expect("remote tracking");
     pack_remote_tracking_refs_for_clone(&git_dir, "origin").expect("pack remote");
 }
+
+#[test]
+fn ref_store_as_files_names_only_the_files_backend() {
+    use grit_lib::refs::store::{FilesRefStore, MemoryRefStore, RefStore, ReftableRefStore};
+
+    let dir = tempdir().expect("tempdir");
+    let files = FilesRefStore::from_git_dir(dir.path()).expect("files store");
+    let dyn_files: &dyn RefStore = &files;
+    let backend = dyn_files.as_files().expect("files backend");
+    assert!(std::ptr::eq(backend, &files));
+
+    assert!(MemoryRefStore::new().as_files().is_none());
+    let reftable = ReftableRefStore::open_ephemeral().expect("reftable store");
+    assert!(reftable.as_files().is_none());
+}

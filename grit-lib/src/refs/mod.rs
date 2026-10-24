@@ -932,8 +932,8 @@ pub(crate) struct PackedRefsFileView {
     sorted: bool,
     /// Hex length of the repository's object ids; the refname starts one byte after it.
     hex_len: usize,
-    /// Starts of the well-formed records (`<hex id> <name>`) in file order.
-    data_line_starts: Vec<usize>,
+    /// Starts of the well-formed records (`<hex id> <name>`) in file order, shared by clones.
+    data_line_starts: std::sync::Arc<Vec<usize>>,
     /// Which records the header promises a peel line for.
     peel_trait: PackedPeelTrait,
 }
@@ -963,7 +963,7 @@ impl PackedRefsFileView {
                 data,
                 sorted: false,
                 hex_len,
-                data_line_starts: Vec::new(),
+                data_line_starts: Default::default(),
                 peel_trait: PackedPeelTrait::None,
             });
         }
@@ -999,7 +999,7 @@ impl PackedRefsFileView {
         Ok(Self {
             sorted: in_order && packed_refs_file_declares_sorted(text),
             hex_len,
-            data_line_starts,
+            data_line_starts: std::sync::Arc::new(data_line_starts),
             peel_trait: packed_refs_peel_trait(text),
             data,
         })
@@ -1487,22 +1487,41 @@ impl PackedRefPeels {
     /// Returns [`Error::Io`] when `packed-refs` exists but cannot be read, or
     /// [`Error::PackedRefsUnexpectedLine`] when it is malformed.
     pub(crate) fn load(git_dir: &Path, format: RefStorageFormat) -> Result<Self> {
+        if format != RefStorageFormat::Files {
+            return Ok(Self::from_view(None));
+        }
+        let store = common_dir(git_dir).unwrap_or_else(|| git_dir.to_path_buf());
+        Ok(Self::from_view(read_packed_refs_file_view(&store)?))
+    }
+
+    /// [`Self::load`] for the refs of `store`, the ref store opened for `git_dir`.
+    ///
+    /// A files backend hands over the `packed-refs` view it already holds (a listing just
+    /// read it), so the file is neither mapped nor indexed a second time.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Self::load`].
+    pub(crate) fn for_store(store: &dyn store::RefStore, git_dir: &Path) -> Result<Self> {
+        match store.as_files() {
+            Some(files) => Ok(Self::from_view(files.packed_refs_view()?)),
+            None => Self::load(git_dir, store.format()),
+        }
+    }
+
+    fn from_view(view: Option<PackedRefsFileView>) -> Self {
         let empty = Self {
             view: None,
             unsorted: None,
             peel_trait: PackedPeelTrait::None,
             next: std::cell::Cell::new(0),
         };
-        if format != RefStorageFormat::Files {
-            return Ok(empty);
-        }
-        let store = common_dir(git_dir).unwrap_or_else(|| git_dir.to_path_buf());
-        let Some(view) = read_packed_refs_file_view(&store)? else {
-            return Ok(empty);
+        let Some(view) = view else {
+            return empty;
         };
         let peel_trait = view.peel_trait;
         if peel_trait == PackedPeelTrait::None {
-            return Ok(empty);
+            return empty;
         }
         let unsorted = (!view.sorted).then(|| {
             view.data_line_starts
@@ -1510,12 +1529,12 @@ impl PackedRefPeels {
                 .map(|&start| (Box::<[u8]>::from(view.record_name(start)), start))
                 .collect()
         });
-        Ok(Self {
+        Self {
             view: Some(view),
             unsorted,
             peel_trait,
             next: std::cell::Cell::new(0),
-        })
+        }
     }
 
     /// Peeled value of `refname` when `packed-refs` vouches for it.
@@ -5601,6 +5620,64 @@ mod packed_ref_peels_tests {
         }
         assert_eq!(peels.peeled("refs/tags/c", &oid(3)), Some(Some(oid(4))));
         assert_eq!(peels.peeled("refs/tags/d", &oid(5)), Some(None));
+    }
+
+    #[test]
+    fn store_snapshot_reuses_the_files_store_view_and_follows_rewrites() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = store::paths::packed_refs_path(dir.path());
+        let header = "# pack-refs with: peeled fully-peeled sorted \n";
+        let records = [
+            ("refs/heads/main", oid(1), None),
+            ("refs/tags/v1", oid(2), Some(oid(1))),
+            ("refs/tags/v2", oid(3), None),
+        ];
+        fs::write(&path, body(header, &records)).expect("packed-refs");
+        let files = store::FilesRefStore::from_git_dir(dir.path()).expect("files store");
+
+        let peels = PackedRefPeels::for_store(&files, dir.path()).expect("for_store");
+        let loaded = PackedRefPeels::load(dir.path(), RefStorageFormat::Files).expect("load");
+        for (name, value, _) in records {
+            assert_eq!(
+                peels.peeled(name, &value),
+                loaded.peeled(name, &value),
+                "{name}"
+            );
+        }
+        assert_eq!(peels.peeled("refs/tags/v1", &oid(2)), Some(Some(oid(1))));
+        let cached = files
+            .packed_refs_view()
+            .expect("view")
+            .expect("packed-refs");
+        let shared = peels.view.as_ref().expect("snapshot view");
+        assert!(std::sync::Arc::ptr_eq(&cached.data, &shared.data));
+        assert!(std::sync::Arc::ptr_eq(
+            &cached.data_line_starts,
+            &shared.data_line_starts
+        ));
+
+        let rewritten = [
+            ("refs/heads/main", oid(1), None),
+            ("refs/tags/v1", oid(4), Some(oid(5))),
+            ("refs/tags/v2", oid(3), None),
+            ("refs/tags/v3", oid(6), Some(oid(1))),
+        ];
+        fs::write(&path, body(header, &rewritten)).expect("rewrite packed-refs");
+        let peels = PackedRefPeels::for_store(&files, dir.path()).expect("for_store");
+        assert_eq!(peels.peeled("refs/tags/v1", &oid(2)), None);
+        assert_eq!(peels.peeled("refs/tags/v1", &oid(4)), Some(Some(oid(5))));
+        assert_eq!(peels.peeled("refs/tags/v3", &oid(6)), Some(Some(oid(1))));
+
+        let memory = store::MemoryRefStore::new();
+        let fallback = PackedRefPeels::for_store(&memory, dir.path()).expect("fallback");
+        let direct = PackedRefPeels::load(dir.path(), memory.format()).expect("load");
+        for (name, value, _) in rewritten {
+            assert_eq!(
+                fallback.peeled(name, &value),
+                direct.peeled(name, &value),
+                "{name}"
+            );
+        }
     }
 
     /// Reference implementation of [`packed_refs_data_line_starts`], one line at a time.

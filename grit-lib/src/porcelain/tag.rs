@@ -542,7 +542,7 @@ impl<'a> TagClassifier<'a> {
     fn new(repo: &'a Repository) -> Self {
         // A malformed `packed-refs` only loses the shortcut; classification falls back to
         // the objects.
-        let packed = PackedRefPeels::load(repo.git_dir(), repo.refs().format()).ok();
+        let packed = PackedRefPeels::for_store(repo.refs(), repo.git_dir()).ok();
         Self {
             repo,
             packed,

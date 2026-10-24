@@ -118,6 +118,15 @@ pub trait RefStore: Send + Sync + Debug {
 
     /// Invoke `f` for each ref name that has a reflog, in sorted order.
     fn for_each_reflog_ref(&self, f: &mut dyn FnMut(&str) -> ControlFlow<()>) -> Result<()>;
+
+    /// The files backend behind this store, when it is one.
+    ///
+    /// Lets callers reuse state the files backend keeps between calls (such as its
+    /// `packed-refs` snapshot) instead of reading the same files again. Other backends,
+    /// including injected ones, return `None`.
+    fn as_files(&self) -> Option<&FilesRefStore> {
+        None
+    }
 }
 
 /// Resolve `name` through `store`, following symbolic refs.
