@@ -219,6 +219,28 @@ Committed baseline: **`grit-utils/baselines/conflicts.json`**. Factory VM median
 ./target/release/grit-bench conflicts --sizes 1000,10000 --format json --output grit-utils/baselines/conflicts.json
 ```
 
+## Full-history walks use the commit-graph (2026-10-24)
+
+Listing every commit with a valid commit-graph took as long as walking without one ([#1745](https://github.com/gitbutlerapp/grit/issues/1745)). The walk took parents and dates from the graph, but still inflated every commit object to cache its subject line, and looked each commit up in the graph three times. Commits found in the graph are no longer read during the walk. Callers that print subjects read them for the listed commits only. Each commit now costs one graph lookup.
+
+[`rev_list`](rustdoc:grit_lib::revwalk::rev_list::rev_list) on upstream `git/git` (82 563 commits, commit-graph from `git gc`), in process, release build, `origin/main` → this change, against system `git 2.43.0`:
+
+| Walk | Git ms | Grit ms with graph, before → after | Grit ms without graph |
+| --- | ---: | ---: | ---: |
+| default order | 71–106 | 760–860 → **105** | 740 |
+| `--topo-order` | 90–126 | 750–760 → **102** | 705 |
+| `--first-parent` | 20–30 | 176 → **23** | 167 |
+
+Git's times include process start-up. Criterion `history` groups on the 10k-commit synthetic fixture, `--baseline main`: `revwalk_default`, `revwalk_topo` and `revwalk_date_order` with a graph are **−80 to −82%**, `revwalk/log_limit` and `revwalk/limit_near_full_history` are **−81 to −89%**, and the no-graph rows are within the run-to-run drift of an A/A run on main (±4%). `grit revs HEAD` on `git/git` drops from **1.73 to 1.00 s**. Its peak RSS stays at **283 MB**, because it builds every row (full message included) before rendering. `git log` with subjects takes 0.70 s and 66 MB.
+
+The `revwalk` suite gained `revs-list-deep-no-graph` and `revs-list-deep-commit-graph` (every commit id from `HEAD`, library walk, vs `git rev-list HEAD`) in **`revwalk-queries.json`**:
+
+```bash
+cargo build --release -p grit-cli -p grit-utils
+./target/release/grit-bench revwalk --format json --output grit-utils/baselines/revwalk-queries.json
+cargo bench -p grit-lib --bench history -- 'revwalk_(default|topo|date_order)/'
+```
+
 ## Pick keeps the cache-tree (2026-10-24)
 
 The daily census flagged `pick/one@synth-100k` going from 0.95× to 1.22× Git. The replay sequencer had started loading the index without its cache-tree extension to save memory. Without a cache-tree, the check that the index matches `HEAD` flattens the whole `HEAD` tree into a map, which costs more time and more memory than the extension it skipped. The index was also parsed a second time for the first replay step, and the index written after the pick lost its cache-tree. Pick and revert now keep the cache-tree, and the snapshot from the cleanliness check feeds the first step.

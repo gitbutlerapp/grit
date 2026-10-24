@@ -1374,9 +1374,14 @@ impl CommitGraphChain {
     /// (no object decompression). Returns `None` when `oid` is not in the graph.
     pub fn graph_commit(&self, oid: &ObjectId) -> Option<(Vec<ObjectId>, i64)> {
         let (layer_idx, lex) = self.find_commit(oid)?;
-        let (_, _, commit_time) = self.layers[layer_idx].cdat_record(lex)?;
-        let parents = self.parent_global_positions(oid)?;
-        let oids = parents
+        self.graph_commit_at(layer_idx, lex)
+    }
+
+    fn graph_commit_at(&self, layer_idx: usize, lex: u32) -> Option<(Vec<ObjectId>, i64)> {
+        let layer = &self.layers[layer_idx];
+        let (_, _, commit_time) = layer.cdat_record(lex)?;
+        let oids = layer
+            .parent_global_positions(lex)?
             .into_iter()
             .filter_map(|pos| self.oid_at_global_position(pos))
             .collect();
@@ -1391,8 +1396,9 @@ impl CommitGraphChain {
 
     /// Tree and parent OIDs for blame when `oid` is indexed in the chain.
     pub(crate) fn graph_commit_meta(&self, oid: &ObjectId) -> Option<(ObjectId, Vec<ObjectId>)> {
-        let tree = self.graph_commit_tree(oid)?;
-        let (parents, _) = self.graph_commit(oid)?;
+        let (layer_idx, lex) = self.find_commit(oid)?;
+        let tree = self.layers[layer_idx].cdat_root_tree(lex)?;
+        let (parents, _) = self.graph_commit_at(layer_idx, lex)?;
         Some((tree, parents))
     }
 

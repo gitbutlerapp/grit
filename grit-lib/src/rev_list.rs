@@ -567,7 +567,8 @@ pub struct RevListOptions {
     /// Exclude index blobs and valid cache-tree nodes as object roots (`--not --indexed-objects`).
     pub exclude_indexed_objects: bool,
     /// When true, read parent links and committer dates from the on-disk commit-graph
-    /// when a commit is present in the file (Git commit-graph walk acceleration).
+    /// when a commit is present in the file (Git commit-graph walk acceleration): walks
+    /// that only need commit ids and ordering never read those commit objects.
     /// Defaults to `true`; [`rev_list`] disables this when `core.commitGraph` is off.
     pub use_commit_graph: bool,
     /// When true with pathspecs, consult commit-graph Bloom filters (matches `core.commitGraph`).
@@ -7614,12 +7615,8 @@ impl<'r> CommitGraph<'r> {
                 if self.first_parent_only && parents.len() > 1 {
                     parents.truncate(1);
                 }
-                if let Some(tree) = chain.graph_commit_tree(&oid) {
-                    self.commit_trees.insert(oid, tree);
-                }
                 self.committer_time.insert(oid, ctime);
                 self.parents.insert(oid, parents);
-                self.cache_commit_subject(oid)?;
                 return Ok(());
             }
         }
