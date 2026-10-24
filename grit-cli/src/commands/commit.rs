@@ -20,7 +20,7 @@ use std::io::{self, Read, Write};
 
 use crate::context::{self, subject_line};
 use crate::markdown;
-use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
+use crate::output::{outln, HumanRender, MarkdownRender, Person, RenderContext};
 use crate::pathspec_args::TrailingPathspecArgs;
 
 /// JSON scope label for [`CommitOutcome::scope`].
@@ -38,7 +38,20 @@ pub enum CommitScopeJson {
 pub struct CommitAuthorOutcome {
     pub name: String,
     pub email: String,
+    /// Author timestamp in RFC 3339 (same shape as log/show).
     pub date: String,
+}
+
+fn author_outcome_json(
+    author: &grit_lib::porcelain::commit::CommitAuthorInfo,
+) -> CommitAuthorOutcome {
+    let line = format!("{} <{}> {}", author.name, author.email, author.date);
+    let person = Person::from_identity_line(&line);
+    CommitAuthorOutcome {
+        name: person.name,
+        email: person.email,
+        date: person.date,
+    }
 }
 
 /// One path that would be or was included in the commit (`--json`).
@@ -474,11 +487,7 @@ fn finish_commit_outcome(
         files,
         change_id: outcome.change_id.as_ref().map(|id| id.as_str().to_owned()),
         parents: outcome.parents.iter().map(|p| p.to_hex()).collect(),
-        author: CommitAuthorOutcome {
-            name: outcome.author.name,
-            email: outcome.author.email,
-            date: outcome.author.date,
-        },
+        author: author_outcome_json(&outcome.author),
         hooks_run: outcome
             .hooks_run
             .iter()

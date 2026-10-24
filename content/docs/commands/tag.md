@@ -103,14 +103,14 @@ tag v0.2 (92501f1…): ok
 
 ## JSON output
 
-Schema: [v1](/schemas/tag/v1.json)
+Schema: [v2](/schemas/tag/v2.json) ([v1](/schemas/tag/v1.json) frozen)
 
 Pass `--json` for stable, scripting-friendly output. The object's `action` field says what happened:
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
 | `action` | string | `list`, `create`, `delete`, or `verify`. |
-| `tags` | array | For `list`, each tag with `name`, `oid`, `kind`, `target_kind`, optional `peeled`, and optional `annotation` (`subject`, `message`, `tagger`, `date`). |
+| `tags` | array | For `list`, each tag with `name`, `oid`, `kind`, `target_kind`, optional `peeled`, and optional `annotation` (`subject`, `message`, `tagger` with `name`, `email`, `date` in RFC 3339). |
 | `truncated` | boolean | For `list`: `true` when more tags matched than returned (`-n` / `--limit`). |
 | `name` | string | For `create` or `delete`, the tag name. |
 | `oid` | string | For `create`, full id the tag ref points at (tag object or commit). |
@@ -143,8 +143,11 @@ Listing tags:
       "annotation": {
         "subject": "First release",
         "message": "First release\n",
-        "tagger": { "name": "Alex", "email": "alex@example.com" },
-        "date": 1700000000
+        "tagger": {
+          "name": "Alex",
+          "email": "alex@example.com",
+          "date": "2023-11-14T22:13:20Z"
+        }
       }
     }
   ]
@@ -204,7 +207,7 @@ Verifying tags:
 
 Pass [`--markdown`](../global-options/) for agent-friendly output.
 
-Schema: [v1](/schemas/tag/v1.json)
+Schema: [v2](/schemas/tag/v2.json) ([v1](/schemas/tag/v1.json) frozen)
 
 Markdown uses headings, bullet lists, and fenced blocks; pipe characters inside table cells are escaped. See the JSON output section for the stable field contract.
 

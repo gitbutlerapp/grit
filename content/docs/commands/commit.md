@@ -168,7 +168,7 @@ Pass `--json` for stable, scripting-friendly output:
 | `files` | array | Path-level changes (`path`, `status`, optional `old_path` for renames) |
 | `change_id` | string or null | Stored `change-id` header on the new commit, or null when absent or dry-run (see [Change ids](../library/change-ids/)) |
 | `parents` | array of strings | Parent commit OIDs that would be stored |
-| `author` | object | `name`, `email`, and `date` recorded on the commit |
+| `author` | object | `name`, `email`, and `date` (RFC 3339, same shape as [`grit log`](../log/) / [`grit show`](../show/)) |
 | `hooks_run` | array of strings | Hook names that ran (`pre-commit`, `commit-msg`); empty on dry-run |
 
 Example:
@@ -188,7 +188,7 @@ Example:
   "author": {
     "name": "Your Name",
     "email": "you@example.com",
-    "date": "1700000000 +0000"
+    "date": "2023-11-14T22:13:20Z"
   },
   "hooks_run": ["pre-commit", "post-commit"]
 }

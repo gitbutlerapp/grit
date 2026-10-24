@@ -124,7 +124,7 @@ pub struct CommandSchemaVersions {
 /// Returns the version table row for `command`.
 pub fn command_schema_versions(command: &str) -> CommandSchemaVersions {
     match command {
-        "config" | "merge" | "pull" | "pick" | "mv" => CommandSchemaVersions {
+        "config" | "merge" | "pull" | "pick" | "mv" | "tag" => CommandSchemaVersions {
             current: 2,
             frozen: &[1],
         },
@@ -1062,8 +1062,8 @@ mod tests {
             );
         }
         assert_eq!(
-            checked, 92,
-            "expected 92 committed schema files under content/schemas"
+            checked, 96,
+            "expected 96 committed schema files under content/schemas"
         );
     }
 

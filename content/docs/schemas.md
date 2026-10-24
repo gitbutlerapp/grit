@@ -106,7 +106,7 @@ Plain command failures with `--json` validate against the shared [error schema](
 | `stash.show` | [v1](/schemas/stash.show/v1.json) |
 | `status` | [v1](/schemas/status/v1.json) |
 | `switch` | [v1](/schemas/switch/v1.json) |
-| `tag` | [v1](/schemas/tag/v1.json) |
+| `tag` | [v2](/schemas/tag/v2.json) ([v1](/schemas/tag/v1.json) frozen) |
 | `update` | [v1](/schemas/update/v1.json) |
 | `worktree.add` | [v1](/schemas/worktree.add/v1.json) |
 | `worktree.list` | [v1](/schemas/worktree.list/v1.json) |

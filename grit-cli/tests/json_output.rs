@@ -2073,6 +2073,45 @@ fn log_show_blame_json_author_objects_match() -> TestResult {
 }
 
 #[test]
+fn json_identity_dates_use_rfc3339_across_commit_tag_log_show() -> TestResult {
+    let scratch = Scratch::new("json-date-rfc3339")?;
+    let repo = scratch.child("repo");
+    fs::create_dir_all(&repo)?;
+    gs_ok(&repo, &["init", "."]);
+    write_file(&repo.join("f.txt"), "x\n");
+    gs_ok(&repo, &["commit", "one"]);
+    write_file(&repo.join("f.txt"), "y\n");
+
+    let commit_out = gs_json(&repo, &["commit", "-m", "two"]);
+    let log = gs_json(&repo, &["log", "-n", "1"]);
+    let show = gs_json(&repo, &["show", "HEAD"]);
+    let commit_author = &commit_out["author"];
+    let log_author = &log["commits"][0]["author"];
+    let show_author = &show["commit"]["author"];
+    assert_eq!(commit_author, log_author);
+    assert_eq!(commit_author, show_author);
+    assert!(commit_author["date"]
+        .as_str()
+        .is_some_and(|d| d.contains('T') && !d.contains(" +0000")));
+
+    gs_ok(&repo, &["tag", "-m", "msg", "v1"]);
+    let tag_list = gs_json(&repo, &["tag"]);
+    let show_tag = gs_json(&repo, &["show", "v1"]);
+    let list_tagger = tag_list["tags"]
+        .as_array()
+        .and_then(|tags| tags.iter().find(|t| t["name"] == "v1"))
+        .and_then(|t| t.get("annotation"))
+        .and_then(|a| a.get("tagger"))
+        .expect("tag list tagger");
+    let show_tagger = &show_tag["tag"]["tagger"];
+    assert_eq!(list_tagger, show_tagger);
+    assert!(list_tagger["date"]
+        .as_str()
+        .is_some_and(|d| d.contains('T')));
+    Ok(())
+}
+
+#[test]
 fn log_json_includes_author_and_rfc3339_date() -> TestResult {
     let scratch = Scratch::new("log-fields")?;
     let repo = scratch.child("repo");

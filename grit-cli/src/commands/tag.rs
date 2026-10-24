@@ -2,7 +2,7 @@
 
 use crate::context;
 use crate::markdown;
-use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
+use crate::output::{outln, HumanRender, MarkdownRender, Person, RenderContext};
 use crate::ref_name_messages::tag_short_name_error_message;
 use anyhow::{bail, Context, Result};
 use grit_lib::commit::signing::{should_sign_tag, GpgConfig, TrustLevel};
@@ -204,21 +204,12 @@ impl std::fmt::Display for TagRefKind {
     }
 }
 
-/// Identity fields in JSON tag annotations.
-#[derive(Serialize, JsonSchema)]
-pub struct TagIdentEntry {
-    pub name: String,
-    pub email: String,
-}
-
 /// Annotated tag metadata in list JSON.
 #[derive(Serialize, JsonSchema)]
 pub struct TagAnnotationEntry {
     pub subject: String,
     pub message: String,
-    pub tagger: TagIdentEntry,
-    /// Tagger Unix timestamp.
-    pub date: i64,
+    pub tagger: Person,
 }
 
 /// One tag in a `list` outcome.
@@ -650,11 +641,7 @@ fn annotation_entry(a: TagAnnotation) -> TagAnnotationEntry {
     TagAnnotationEntry {
         subject: a.subject,
         message: a.message,
-        tagger: TagIdentEntry {
-            name: a.tagger.name,
-            email: a.tagger.email,
-        },
-        date: a.date,
+        tagger: Person::from_identity_line(&a.tagger_ident),
     }
 }
 

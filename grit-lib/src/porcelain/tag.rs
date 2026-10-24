@@ -90,6 +90,8 @@ pub struct TagAnnotation {
     pub message: String,
     /// Tagger identity (name and email).
     pub tagger: Ident,
+    /// Raw tagger line from the tag object (`Name <email> <epoch> <tz>`).
+    pub tagger_ident: String,
     /// Tagger date as Unix seconds (`taggerdate:unix`).
     pub date: i64,
 }
@@ -429,6 +431,7 @@ fn tag_annotation_from_data(tag: &TagData) -> Option<TagAnnotation> {
         subject: message_subject(&tag.message),
         message: tag.message.clone(),
         tagger,
+        tagger_ident: tagger_line.to_owned(),
         date,
     })
 }

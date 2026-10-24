@@ -66,6 +66,47 @@
         "oid"
       ],
       "type": "object"
+    },
+    "RemoteShowBranchJson": {
+      "description": "One branch row in a `show` JSON outcome.",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "state": {
+          "$ref": "#/definitions/RemoteShowBranchStateJson"
+        }
+      },
+      "required": [
+        "name",
+        "state"
+      ],
+      "type": "object"
+    },
+    "RemoteShowBranchStateJson": {
+      "description": "Branch tracking state in JSON (`tracked` / `new` / `stale`).",
+      "enum": [
+        "tracked",
+        "new",
+        "stale"
+      ],
+      "type": "string"
+    },
+    "RemoteShowPullJson": {
+      "description": "One pull-config row in a `show` JSON outcome.",
+      "properties": {
+        "local": {
+          "type": "string"
+        },
+        "merges": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "local",
+        "merges"
+      ],
+      "type": "object"
     }
   },
   "description": "Result of `grit remote`, tagged by `action` (`list` / `add` / `refs`).",
@@ -203,6 +244,53 @@
       "required": [
         "action",
         "refs"
+      ],
+      "type": "object"
+    },
+    {
+      "description": "JSON view of [`RemoteSummary`] for `grit remote show --json`.",
+      "properties": {
+        "action": {
+          "enum": [
+            "show"
+          ],
+          "type": "string"
+        },
+        "branches": {
+          "items": {
+            "$ref": "#/definitions/RemoteShowBranchJson"
+          },
+          "type": "array"
+        },
+        "fetch_url": {
+          "type": "string"
+        },
+        "head_branch": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "pull": {
+          "items": {
+            "$ref": "#/definitions/RemoteShowPullJson"
+          },
+          "type": "array"
+        },
+        "push_url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "branches",
+        "fetch_url",
+        "name",
+        "pull",
+        "push_url"
       ],
       "type": "object"
     }

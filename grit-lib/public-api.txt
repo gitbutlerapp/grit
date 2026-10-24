@@ -13901,6 +13901,7 @@ pub grit_lib::porcelain::tag::TagAnnotation::date: i64
 pub grit_lib::porcelain::tag::TagAnnotation::message: alloc::string::String
 pub grit_lib::porcelain::tag::TagAnnotation::subject: alloc::string::String
 pub grit_lib::porcelain::tag::TagAnnotation::tagger: grit_lib::porcelain::tag::Ident
+pub grit_lib::porcelain::tag::TagAnnotation::tagger_ident: alloc::string::String
 impl core::clone::Clone for grit_lib::porcelain::tag::TagAnnotation
 pub fn grit_lib::porcelain::tag::TagAnnotation::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::porcelain::tag::TagAnnotation
