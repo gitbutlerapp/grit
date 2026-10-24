@@ -165,12 +165,14 @@ impl StreamingReuse {
             return Ok(None);
         };
         let pack_bytes = self.pack.pack_bytes.as_ref();
-        let mut offset_map: HashMap<u64, u64> = self.source_to_output.clone();
-        for (base_oid, out_off) in oid_to_offset {
-            if let Some(src) = self.pack.idx.find_offset(base_oid)? {
-                offset_map.entry(src).or_insert(*out_off);
-            }
-        }
+        let (idx, source_to_output) = (&self.pack.idx, &self.source_to_output);
+        let base_output_offset = |base_offset: u64| {
+            source_to_output.get(&base_offset).copied().or_else(|| {
+                let row = find_position_by_pack_offset(idx, base_offset).ok()??;
+                let base_oid = ObjectId::from_bytes(idx.oid_at(row)).ok()?;
+                oid_to_offset.get(&base_oid).copied()
+            })
+        };
         let hb = self.pack.idx.hash_bytes();
         let written = match write_one_reused(
             w,
@@ -180,7 +182,7 @@ impl StreamingReuse {
             entry_off,
             hb,
             opts,
-            &offset_map,
+            &base_output_offset,
             out_offset,
             in_pack_base,
         ) {
@@ -479,7 +481,7 @@ fn write_one_reused(
     entry_off: u64,
     _hb: usize,
     opts: &PackBuildOptions,
-    offset_map: &HashMap<u64, u64>,
+    base_output_offset: &dyn Fn(u64) -> Option<u64>,
     pack_offset: u64,
     in_pack_base: Option<u64>,
 ) -> Result<u64> {
@@ -510,7 +512,7 @@ fn write_one_reused(
                     "expected ofs-delta dependency".to_owned(),
                 ));
             };
-            if let Some(new_base) = offset_map.get(&base_offset).copied().or(in_pack_base) {
+            if let Some(new_base) = base_output_offset(base_offset).or(in_pack_base) {
                 let dist = pack_offset
                     .checked_sub(new_base)
                     .ok_or_else(|| Error::CorruptObject("ofs-delta fixup underflow".to_owned()))?;
