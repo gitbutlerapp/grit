@@ -300,8 +300,8 @@ fn read_reflog_entries_from_stack(git_dir: &Path, refname: &str) -> Result<Vec<R
     for log in logs {
         let tz_sign = if log.tz_offset >= 0 { '+' } else { '-' };
         let tz_abs = log.tz_offset.unsigned_abs();
-        let tz_hours = tz_abs / 60;
-        let tz_mins = tz_abs % 60;
+        let tz_hours = tz_abs / 100;
+        let tz_mins = tz_abs % 100;
         let identity = format!(
             "{} <{}> {} {}{:02}{:02}",
             log.name, log.email, log.time_seconds, tz_sign, tz_hours, tz_mins
