@@ -8,7 +8,7 @@ Repository maintenance helpers live in [`maintenance`](rustdoc:grit_lib::mainten
 - [`Repository::write_commit_graph`](rustdoc:grit_lib::repo::Repository) — atomic monolithic `objects/info/commit-graph` with optional changed-path Bloom filters ([`CommitGraphOptions`](rustdoc:grit_lib::maintenance::CommitGraphOptions), [`CommitGraphWriteReport`](rustdoc:grit_lib::maintenance::CommitGraphWriteReport)).
 - [`Repository::write_midx`](rustdoc:grit_lib::repo::Repository) — write `multi-pack-index` ([`MidxOptions`](rustdoc:grit_lib::maintenance::MidxOptions), [`MidxWriteReport`](rustdoc:grit_lib::maintenance::MidxWriteReport)).
 - [`References::pack`](rustdoc:grit_lib::refs::handle::References) — pack loose refs into `packed-refs` or compact reftable stacks ([`PackRefsOptions`](rustdoc:grit_lib::maintenance::PackRefsOptions)).
-- [`repack_all`](rustdoc:grit_lib::maintenance::repack_all), [`gc`](rustdoc:grit_lib::maintenance::gc), and [`fsck`](rustdoc:grit_lib::maintenance::fsck) orchestrate repack, prune, and validation.
+- [`repack_all`](rustdoc:grit_lib::maintenance::repack_all) and [`gc`](rustdoc:grit_lib::maintenance::gc) orchestrate repack and prune; [`repository_fsck::fsck`](rustdoc:grit_lib::maintenance::repository_fsck::fsck) validates the result.
 
 Maintenance APIs split into **repository fsck**, **object validation**, and **hook execution**:
 

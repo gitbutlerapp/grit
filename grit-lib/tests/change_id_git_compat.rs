@@ -5,9 +5,10 @@ use std::process::Command;
 
 use grit_lib::change_id::{set_change_id, ChangeId};
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::maintenance::{fsck, FsckOptions};
+use grit_lib::maintenance::repository_fsck::{fsck, FsckOptions};
 use grit_lib::objects::{parse_commit, serialize_commit, CommitData, ObjectKind};
 use grit_lib::porcelain::commit::prepare_commit_bytes;
+use grit_lib::progress::{NeverCancel, NullProgress};
 use grit_lib::repo::Repository;
 use grit_test_support::git;
 
@@ -98,7 +99,10 @@ fn change_id_header_passes_git_and_grit_fsck() {
         "git cat-file should show change-id header"
     );
 
-    fsck(&repo, &FsckOptions::default()).expect("grit fsck");
+    let opts = FsckOptions::full_repository(true).with_check_dangling(false);
+    let report = fsck(&repo, &opts, &mut NullProgress, &NeverCancel).expect("grit fsck");
+    let config = repo.config().expect("config");
+    assert!(report.ok(&config, &opts), "{:?}", report.issues);
     let parsed = parse_commit(&repo.odb().read(&oid).expect("read").data).expect("parse");
     assert!(grit_lib::change_id::change_id(&parsed).is_some());
 }

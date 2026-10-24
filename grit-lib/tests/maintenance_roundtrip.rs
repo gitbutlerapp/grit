@@ -7,11 +7,11 @@ use std::path::Path;
 use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::maintenance::{
-    fsck, write_commit_graph, CommitGraphOptions, FsckOptions, MidxOptions, PackRefsOptions,
-};
+use grit_lib::maintenance::repository_fsck::{fsck, FsckIssue, FsckOptions};
+use grit_lib::maintenance::{write_commit_graph, CommitGraphOptions, MidxOptions, PackRefsOptions};
 use grit_lib::objects::commit_graph::CommitGraphChain;
 use grit_lib::objects::ObjectId;
+use grit_lib::progress::{NeverCancel, NullProgress};
 use grit_lib::repo::Repository;
 
 use support::{git_init_reftable_repo, git_refs_verify, require_reftable_git};
@@ -234,8 +234,22 @@ fn midx_git_verify_clean() {
         .expect("write midx");
     assert!(report.path.is_file());
     assert!(report.pack_count >= 1);
-    let report_fsck = fsck(&repo, &FsckOptions::midx_only(true)).expect("grit fsck midx");
-    assert!(report_fsck.ok, "{:?}", report_fsck.issues);
+    let fsck_opts = FsckOptions::connectivity_and_refs(true);
+    let report_fsck =
+        fsck(&repo, &fsck_opts, &mut NullProgress, &NeverCancel).expect("grit fsck midx");
+    assert!(
+        !report_fsck
+            .issues
+            .iter()
+            .any(|i| matches!(i, FsckIssue::MidxInvalid { .. })),
+        "{:?}",
+        report_fsck.issues
+    );
+    assert!(
+        report_fsck.ok(&repo.config().expect("config"), &fsck_opts),
+        "{:?}",
+        report_fsck.issues
+    );
     let out = Command::new("git")
         .current_dir(dir.path())
         .args(["multi-pack-index", "verify", "--object-dir", ".git/objects"])

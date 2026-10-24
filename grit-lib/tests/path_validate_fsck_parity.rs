@@ -1,9 +1,10 @@
 //! Crafted tree objects: grit fsck vs system `git fsck` on hostile entry names.
 
 use grit_lib::maintenance::fsck::{fsck_object, FsckObjectOptions};
-use grit_lib::maintenance::{fsck, FsckOptions};
+use grit_lib::maintenance::repository_fsck::{fsck, issue_msg_id, FsckOptions};
 use grit_lib::objects::{HashAlgo, ObjectKind};
 use grit_lib::path_validate::{validate_path, EntryMode, PathValidationKind, ProtectOptions};
+use grit_lib::progress::{NeverCancel, NullProgress};
 use grit_lib::repo::{InitOptions, Repository};
 use grit_test_support::{
     git_fsck, git_hash_object_literally, write_loose_object, HashAlgo as FixtureAlgo, RepoFixture,
@@ -111,12 +112,13 @@ fn grit_repo_fsck_rejects(body: &[u8]) -> bool {
         body,
     )
     .expect("write tree");
-    let report = fsck(&repo, &FsckOptions::objects_and_refs(true)).expect("fsck");
-    !report.ok
+    let opts = FsckOptions::full_repository(true).with_check_dangling(false);
+    let report = fsck(&repo, &opts, &mut NullProgress, &NeverCancel).expect("fsck");
+    !report.ok(&repo.config().expect("config"), &opts)
         && report.issues.iter().any(|i| {
             PATH_FSCK_IDS
                 .iter()
-                .any(|id| i.msg_id.eq_ignore_ascii_case(id))
+                .any(|id| issue_msg_id(i).eq_ignore_ascii_case(id))
         })
 }
 

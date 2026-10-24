@@ -1680,6 +1680,19 @@ mod tests {
     }
 
     #[test]
+    fn bad_ref_line_matches_refs_verify_line() {
+        let refs = RefsFsckIssue {
+            severity: crate::refs_fsck::RefsFsckSeverity::Error,
+            path: "refs/heads/main".to_owned(),
+            msg_id: "badSymref",
+            detail: "symref target missing".to_owned(),
+        };
+        let line = format_fsck_line(&FsckIssue::BadRef(refs.clone()), &ConfigSet::new(), false);
+        assert!(line.contains("badSymref"));
+        assert_eq!(line, crate::refs_fsck::format_refs_fsck_line(&refs));
+    }
+
+    #[test]
     fn issue_oid_location_and_detail_per_variant() {
         let oid = ObjectId::from_hex("1212121212121212121212121212121212121212").unwrap();
         let other = ObjectId::from_hex("3434343434343434343434343434343434343434").unwrap();

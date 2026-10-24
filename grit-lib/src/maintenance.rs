@@ -53,14 +53,11 @@ use crate::pack_objects::{
     build_pack_with_write_threads_full, PackBuildOptions, SerializedDeltaPack,
 };
 use crate::pack_rev::write_pack_rev_sidecar_for_index_path;
-use crate::progress::{NeverCancel, NullProgress};
 use crate::prune_packed::{prune_packed_objects, PrunePackedOptions};
 use crate::reflog::{
     expire_reflog_git, list_reflog_refs, load_gc_reflog_expire_config, ReflogExpireParams,
 };
-use crate::refs_fsck::{RefsFsckIssue, RefsFsckSeverity};
 use crate::repo::Repository;
-use repo_fsck::FsckIssue as RepoFsckIssue;
 use time::OffsetDateTime;
 
 /// Options for [`repack_all()`].
@@ -310,59 +307,6 @@ pub struct PackRefsReport {
     pub refs_pruned: usize,
 }
 
-/// Options for [`fsck()`].
-#[derive(Debug, Clone, Copy, Default)]
-#[non_exhaustive]
-pub struct FsckOptions {
-    /// Treat ref-fsck warnings as errors (Git `--strict` for references).
-    pub strict: bool,
-    /// Validate reachable object graph and object headers.
-    pub check_objects: bool,
-    /// Run [`refs_fsck()`](crate::refs_fsck::refs_fsck).
-    pub check_refs: bool,
-    /// Run [`verify_midx`](crate::midx::verify_midx) when a multi-pack-index is present.
-    pub check_midx: bool,
-}
-
-pub use crate::fsck::FsckSeverity;
-
-/// One fsck diagnostic (refs, objects, or MIDX).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct FsckIssue {
-    /// Whether this issue should fail the overall fsck run.
-    pub severity: FsckSeverity,
-    /// Ref name, object id hex, or `multi-pack-index`.
-    pub path: String,
-    /// CamelCase message id (Git fsck vocabulary where applicable).
-    pub msg_id: String,
-    /// Human-readable detail after the message id.
-    pub detail: String,
-}
-
-/// Aggregate fsck result.
-#[derive(Debug, Clone, PartialEq, Eq)]
-#[non_exhaustive]
-pub struct FsckReport {
-    /// True when no [`FsckSeverity::Error`] issues were recorded.
-    pub ok: bool,
-    /// All recorded fsck findings in discovery order.
-    pub issues: Vec<FsckIssue>,
-}
-
-/// Format one issue like Git fsck / refs verify (`level: path: msgId: detail`).
-#[must_use]
-pub fn format_fsck_line(issue: &FsckIssue) -> String {
-    let level = match issue.severity {
-        FsckSeverity::Error => "error",
-        FsckSeverity::Warning => "warning",
-        FsckSeverity::Info => "info",
-    };
-    format!(
-        "{}: {}: {}: {}",
-        level, issue.path, issue.msg_id, issue.detail
-    )
-}
-
 /// Options for [`gc()`].
 #[derive(Debug, Clone)]
 #[non_exhaustive]
@@ -449,41 +393,6 @@ impl PruneOptions {
         Self {
             older_than,
             ..Self::default()
-        }
-    }
-}
-
-impl FsckOptions {
-    /// Check objects, refs, and MIDX with optional strict ref policy.
-    #[must_use]
-    pub fn full_repository(strict: bool) -> Self {
-        Self {
-            strict,
-            check_objects: true,
-            check_refs: true,
-            check_midx: true,
-        }
-    }
-
-    /// Check objects and refs without validating MIDX.
-    #[must_use]
-    pub fn objects_and_refs(strict: bool) -> Self {
-        Self {
-            strict,
-            check_objects: true,
-            check_refs: true,
-            check_midx: false,
-        }
-    }
-
-    /// Validate only the multi-pack-index when present.
-    #[must_use]
-    pub fn midx_only(strict: bool) -> Self {
-        Self {
-            strict,
-            check_objects: false,
-            check_refs: false,
-            check_midx: true,
         }
     }
 }
@@ -990,29 +899,6 @@ fn apply_gc_prune_policy_to_repack(repack: &mut RepackOptions, policy: &GcLooseP
     }
 }
 
-/// Check ref integrity, reachable object graph, and optional MIDX.
-pub fn fsck(repo: &Repository, opts: &FsckOptions) -> Result<FsckReport> {
-    let config = repo.config()?;
-    let inner_opts = repo_fsck::FsckOptions {
-        connectivity_only: !opts.check_objects,
-        check_connectivity: opts.check_objects,
-        check_dangling: false,
-        strict: opts.strict,
-    };
-    let inner = repo_fsck::fsck(repo, &inner_opts, &mut NullProgress, &NeverCancel)?;
-    let mut issues = Vec::new();
-    for issue in inner.issues {
-        match &issue {
-            RepoFsckIssue::BadRef(_) if !opts.check_refs => continue,
-            RepoFsckIssue::MidxInvalid { .. } if !opts.check_midx => continue,
-            _ => {}
-        }
-        issues.push(fsck_issue_from_repo(issue, &config, opts.strict));
-    }
-    let ok = !issues.iter().any(|i| i.severity == FsckSeverity::Error);
-    Ok(FsckReport { ok, issues })
-}
-
 fn gc_repack_writes_bitmap(repo: &Repository, config: &ConfigSet) -> bool {
     if let Some(Ok(v)) = config.get_bool("repack.writeBitmaps") {
         return v;
@@ -1281,31 +1167,6 @@ fn expire_reflogs_for_gc(repo: &Repository, dry_run: bool, now: i64) -> Result<u
     Ok(total)
 }
 
-fn fsck_issue_from_refs(issue: RefsFsckIssue) -> FsckIssue {
-    FsckIssue {
-        severity: match issue.severity {
-            RefsFsckSeverity::Error => FsckSeverity::Error,
-            RefsFsckSeverity::Warning => FsckSeverity::Warning,
-        },
-        path: issue.path,
-        msg_id: issue.msg_id.to_owned(),
-        detail: issue.detail,
-    }
-}
-
-fn fsck_issue_from_repo(issue: RepoFsckIssue, config: &ConfigSet, strict: bool) -> FsckIssue {
-    if let RepoFsckIssue::BadRef(r) = issue {
-        return fsck_issue_from_refs(r);
-    }
-    let (path, detail) = issue.line_subject_and_detail();
-    FsckIssue {
-        severity: repo_fsck::issue_severity(&issue, config, strict),
-        path,
-        msg_id: repo_fsck::issue_msg_id(&issue).to_owned(),
-        detail,
-    }
-}
-
 fn count_loose_objects(odb: &Odb) -> Result<usize> {
     Ok(odb.enumerate_local_loose_objects()?.len())
 }
@@ -1550,7 +1411,7 @@ mod tests {
     use crate::config::{ConfigFile, ConfigScope, ConfigSet};
     use crate::porcelain::add::stage_for_commit;
     use crate::porcelain::commit::{create_commit, CommitRequest, HookPolicy};
-    use crate::progress::NullProgress;
+    use crate::progress::{NeverCancel, NullProgress};
     use crate::repo::InitOptions;
     use tempfile::TempDir;
 
@@ -1607,6 +1468,16 @@ mod tests {
         assert!(status.success(), "git {args:?}");
     }
 
+    fn assert_fsck_clean(repo: &Repository) {
+        let opts = repo_fsck::FsckOptions::full_repository(true).with_check_dangling(false);
+        let report = repo_fsck::fsck(repo, &opts, &mut NullProgress, &NeverCancel).expect("fsck");
+        assert!(
+            report.ok(&repo.config().expect("config"), &opts),
+            "{:?}",
+            report.issues
+        );
+    }
+
     #[test]
     fn fsck_clean_repo_ok() {
         let dir = TempDir::new().unwrap();
@@ -1631,17 +1502,7 @@ mod tests {
             &mut NullProgress,
         )
         .expect("commit");
-        let report = fsck(
-            &repo,
-            &FsckOptions {
-                strict: true,
-                check_objects: true,
-                check_refs: true,
-                check_midx: true,
-            },
-        )
-        .expect("fsck");
-        assert!(report.ok, "{:?}", report.issues);
+        assert_fsck_clean(&repo);
     }
 
     #[test]
@@ -1738,17 +1599,7 @@ mod tests {
             "expected a MIDX or pack bitmap sidecar after incremental repack with write_bitmap"
         );
 
-        let report = fsck(
-            &repo,
-            &FsckOptions {
-                strict: true,
-                check_objects: true,
-                check_refs: true,
-                check_midx: true,
-            },
-        )
-        .expect("fsck");
-        assert!(report.ok, "{:?}", report.issues);
+        assert_fsck_clean(&repo);
     }
 
     #[test]
@@ -1819,27 +1670,6 @@ mod tests {
         assert!(
             count_pack_files(&pack_dir) >= 2,
             "incremental repack should add a pack, not replace the base"
-        );
-    }
-
-    #[test]
-    fn refs_fsck_line_roundtrip() {
-        let issue = FsckIssue {
-            severity: FsckSeverity::Error,
-            path: "refs/heads/main".to_owned(),
-            msg_id: "badSymref".to_owned(),
-            detail: "symref target missing".to_owned(),
-        };
-        assert!(format_fsck_line(&issue).contains("badSymref"));
-        let refs = RefsFsckIssue {
-            severity: RefsFsckSeverity::Error,
-            path: issue.path.clone(),
-            msg_id: "badSymref",
-            detail: issue.detail.clone(),
-        };
-        assert_eq!(
-            format_fsck_line(&issue),
-            crate::refs_fsck::format_refs_fsck_line(&refs)
         );
     }
 

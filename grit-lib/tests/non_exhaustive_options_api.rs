@@ -2,7 +2,9 @@
 
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::diagnostics::NullDiagnostics;
-use grit_lib::maintenance::{fsck, repack_all, FsckOptions, GcOptions, RepackOptions};
+use grit_lib::maintenance::repository_fsck::{fsck, FsckOptions};
+use grit_lib::maintenance::{repack_all, GcOptions, RepackOptions};
+use grit_lib::progress::{NeverCancel, NullProgress};
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::RefStorageFormat;
 use std::sync::Arc;
@@ -89,15 +91,16 @@ fn gc_options_with_reflog_policy() {
 fn fsck_options_full_repository() {
     let opts = FsckOptions::full_repository(true);
     assert!(opts.strict);
-    assert!(opts.check_objects && opts.check_refs && opts.check_midx);
+    assert!(!opts.connectivity_only && opts.check_connectivity && opts.check_dangling);
+    assert!(!opts.with_check_dangling(false).check_dangling);
 }
 
 #[test]
-fn fsck_options_objects_and_refs() {
-    let opts = FsckOptions::objects_and_refs(false);
+fn fsck_options_connectivity_and_refs() {
+    let opts = FsckOptions::connectivity_and_refs(false);
     assert!(!opts.strict);
-    assert!(opts.check_objects && opts.check_refs);
-    assert!(!opts.check_midx);
+    assert!(opts.connectivity_only && opts.check_connectivity);
+    assert!(!opts.check_dangling);
 }
 
 #[test]
@@ -133,8 +136,9 @@ fn repository_options_for_serving() {
 fn maintenance_constructors_run_on_empty_repo() {
     let tmp = TempDir::new().expect("tempdir");
     let repo = Repository::init(tmp.path(), &InitOptions::new()).expect("init");
-    let report = fsck(&repo, &FsckOptions::full_repository(false)).expect("fsck");
-    assert!(report.ok);
+    let opts = FsckOptions::full_repository(false);
+    let report = fsck(&repo, &opts, &mut NullProgress, &NeverCancel).expect("fsck");
+    assert!(report.ok(&repo.config().expect("config"), &opts));
     let stats = repack_all(&repo, &RepackOptions::with_dry_run(true)).expect("repack dry-run");
     assert!(stats.objects_packed.is_none());
 }

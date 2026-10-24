@@ -8,10 +8,11 @@ use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::config::ConfigSet;
-use grit_lib::maintenance::{fsck, FsckOptions};
+use grit_lib::maintenance::repository_fsck::{fsck, FsckOptions, FsckReport};
 use grit_lib::objects::pack::clear_pack_cache;
 use grit_lib::objects::promisor::repo_treats_promisor_packs;
 use grit_lib::objects::ObjectId;
+use grit_lib::progress::{NeverCancel, NullProgress};
 use grit_lib::remote::clone::{clone, CloneOptions};
 use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::partial_clone::ObjectFilterSpec;
@@ -284,6 +285,14 @@ fn refetch_reapplies_stored_filter() {
     );
 }
 
+/// Object store, connectivity and refs, like `git fsck --no-dangling`.
+fn grit_fsck(repo: &Repository) -> (FsckReport, bool) {
+    let opts = FsckOptions::full_repository(false).with_check_dangling(false);
+    let report = fsck(repo, &opts, &mut NullProgress, &NeverCancel).expect("grit fsck");
+    let ok = report.ok(&repo.config().expect("config"), &opts);
+    (report, ok)
+}
+
 #[test]
 fn fsck_accepts_promised_missing_blobs() {
     let (_layout, bare) = setup_filtering_bare();
@@ -300,8 +309,8 @@ fn fsck_accepts_promised_missing_blobs() {
         &git_dir,
         &repo.config().expect("cfg")
     ));
-    let report = fsck(&repo, &FsckOptions::default()).expect("grit fsck");
-    assert!(report.ok);
+    let (report, ok) = grit_fsck(&repo);
+    assert!(ok, "{:?}", report.issues);
 
     let git_fsck = Command::new("git")
         .current_dir(dest.path())
@@ -345,9 +354,9 @@ fn fsck_accepts_promised_missing_blobs_in_index_after_reset() {
             .any(|e| repo.odb().read(&e.oid).is_err()),
         "missing promisor blobs must not be materialized locally"
     );
-    let report = fsck(&repo, &FsckOptions::default()).expect("grit fsck");
+    let (report, ok) = grit_fsck(&repo);
     assert!(
-        report.ok,
+        ok,
         "promised index blobs must not fail fsck: {:?}",
         report.issues
     );

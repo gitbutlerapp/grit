@@ -7,19 +7,32 @@ use filetime::FileTime;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
 use grit_lib::index::Index;
+use grit_lib::maintenance::repository_fsck::{self, issue_msg_id, FsckOptions, FsckReport};
 use grit_lib::maintenance::{
-    fsck as repo_fsck, gc, prune_loose_objects, repack_all, FsckOptions, GcOptions, PruneOptions,
-    RepackOptions,
+    gc, prune_loose_objects, repack_all, GcOptions, PruneOptions, RepackOptions,
 };
 use grit_lib::objects::pack::{clear_pack_cache, test_pack_cache_guard};
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::porcelain::add::stage_for_commit;
 use grit_lib::porcelain::commit::{create_commit, CommitRequest, HookPolicy};
-use grit_lib::progress::NullProgress;
+use grit_lib::progress::{NeverCancel, NullProgress};
 use grit_lib::repo::{InitOptions, Repository};
 use grit_test_support::git_fsck;
 use tempfile::TempDir;
 use time::OffsetDateTime;
+
+/// Run grit fsck and report whether it passed under `opts`.
+fn repo_fsck(repo: &Repository, opts: &FsckOptions) -> (FsckReport, bool) {
+    let report =
+        repository_fsck::fsck(repo, opts, &mut NullProgress, &NeverCancel).expect("grit fsck");
+    let ok = report.ok(&repo.config().expect("config"), opts);
+    (report, ok)
+}
+
+/// Object store, connectivity and refs, without the dangling-object scan.
+fn objects_and_refs(strict: bool) -> FsckOptions {
+    FsckOptions::full_repository(strict).with_check_dangling(false)
+}
 
 fn duplicate_repo_tree(src: &Path, dst: &Path) {
     std::fs::create_dir_all(dst).expect("create dst");
@@ -148,8 +161,8 @@ fn repack_after_many_commits_single_pack_and_git_fsck_clean() {
         git_outcome.msg_ids
     );
 
-    let report = repo_fsck(&repo, &FsckOptions::full_repository(true)).expect("grit fsck");
-    assert!(report.ok, "{:?}", report.issues);
+    let (report, ok) = repo_fsck(&repo, &objects_and_refs(true));
+    assert!(ok, "{:?}", report.issues);
 }
 
 #[test]
@@ -237,8 +250,8 @@ fn gc_preserves_staged_only_blob() {
         "gc must not delete index-only blob"
     );
     git_fsck(dir.path(), true);
-    let report = repo_fsck(&repo, &FsckOptions::full_repository(true)).expect("fsck");
-    assert!(report.ok, "{:?}", report.issues);
+    let (report, ok) = repo_fsck(&repo, &objects_and_refs(true));
+    assert!(ok, "{:?}", report.issues);
 }
 
 #[test]
@@ -265,15 +278,15 @@ fn fsck_skips_object_checks_when_check_objects_disabled() {
         .expect("loose path");
     std::fs::remove_file(loose.1).expect("remove blob");
 
-    let mut opts = FsckOptions::default();
-    opts.strict = false;
-    opts.check_objects = false;
-    opts.check_refs = false;
-    opts.check_midx = false;
-    let report = repo_fsck(&repo, &opts).expect("fsck");
-    assert!(report.ok, "{:?}", report.issues);
+    let mut opts = FsckOptions::connectivity_and_refs(false);
+    opts.check_connectivity = false;
+    let (report, ok) = repo_fsck(&repo, &opts);
+    assert!(ok, "{:?}", report.issues);
     assert!(
-        !report.issues.iter().any(|i| i.msg_id == "missingObject"),
+        !report
+            .issues
+            .iter()
+            .any(|i| issue_msg_id(i) == "missingObject"),
         "{:?}",
         report.issues
     );
@@ -303,13 +316,16 @@ fn fsck_reports_missing_index_blob_after_corruption() {
         .expect("loose path");
     std::fs::remove_file(loose.1).expect("remove blob");
 
-    let report = repo_fsck(&repo, &FsckOptions::objects_and_refs(true)).expect("fsck");
+    let (report, ok) = repo_fsck(&repo, &objects_and_refs(true));
     assert!(
-        !report.ok,
+        !ok,
         "fsck must not report clean when index references a missing blob"
     );
     assert!(
-        report.issues.iter().any(|i| i.msg_id == "missingObject"),
+        report
+            .issues
+            .iter()
+            .any(|i| issue_msg_id(i) == "missingObject"),
         "{:?}",
         report.issues
     );
@@ -1435,9 +1451,9 @@ fn index_gitlink_absent_commit_does_not_break_repack_or_fsck() {
     clear_pack_cache_after_disk_maintenance();
     git(dir.path(), &["fsck", "--strict"]);
 
-    let report = repo_fsck(&repo, &FsckOptions::objects_and_refs(true)).expect("grit fsck");
+    let (report, ok) = repo_fsck(&repo, &objects_and_refs(true));
     assert!(
-        report.ok,
+        ok,
         "gitlink to absent submodule commit must not fail fsck: {:?}",
         report.issues
     );
