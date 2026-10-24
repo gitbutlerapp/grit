@@ -171,19 +171,28 @@ pub fn verify_tag(
             found: obj.kind,
         });
     }
-    let raw = obj.data;
-    let headers = parse_tree_sha256_tag_headers(&raw)?;
+    let headers = parse_tree_sha256_tag_headers(&obj.data)?;
+    verify_tag_data(repo, &obj.data, &headers, options)
+}
+
+/// Verify an already-read annotated tag object whose headers were parsed by
+/// [`parse_tree_sha256_tag_headers`].
+pub(crate) fn verify_tag_data(
+    repo: &Repository,
+    raw: &[u8],
+    headers: &TreeSha256TagHeaders,
+    options: &TagVerifyOptions,
+) -> Result<TagVerification> {
     let min_trust = options.gpg.min_trust_level;
 
     thread::scope(|scope| {
-        let raw_for_sig = raw.clone();
-        let gpg = options.gpg.clone();
+        let gpg = &options.gpg;
         let check_signature = options.check_signature;
         let sig_handle = scope.spawn(move || -> Result<SignatureVerdict> {
             if !check_signature {
                 return Ok(SignatureVerdict::NotChecked);
             }
-            let check = signing::verify_tag(&gpg, &raw_for_sig)?;
+            let check = signing::verify_tag(gpg, raw)?;
             Ok(signature_verdict_from_check(&check, min_trust))
         });
 

@@ -8,20 +8,18 @@ use anyhow::{bail, Context, Result};
 use grit_lib::commit::signing::{should_sign_tag, GpgConfig, TrustLevel};
 use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::error::Error;
-use grit_lib::objects::ObjectKind;
 use grit_lib::porcelain::tag::{
-    create_tag, delete_tag, list_tags_with_detail, CreateTagRequest, TagAnnotation, TagDetail,
-    TagError, TagKind, TagList, TagSummary,
+    create_tag, delete_tag, list_tags_with_detail, verify_tag_by_name, CreateTagRequest,
+    TagAnnotation, TagDetail, TagError, TagKind, TagList, TagSummary,
 };
 use grit_lib::refs::check_ref_format::validate_tag_short_name;
 use grit_lib::refs::listing::{RefQuery, RefSort, SortKey};
-use grit_lib::refs::resolve_ref;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::rev_parse::resolve_revision;
 use grit_lib::state::{resolve_head_for_repository, HeadState};
 use grit_lib::tree_sha256::{
-    parse_tree_sha256_tag_headers, MissingSubmodule, MissingSubmoduleReason, SignatureVerdict,
-    TagVerifyOptions, TreeSha256Options, TreeSha256Verdict,
+    MissingSubmodule, MissingSubmoduleReason, SignatureVerdict, TagVerifyOptions,
+    TreeSha256Options, TreeSha256Verdict,
 };
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -505,50 +503,29 @@ fn verify_one_tag(
     name: &str,
     options: &TagVerifyOptions,
 ) -> Result<TagVerifyEntry> {
-    if let Err(err) = validate_tag_short_name(name) {
-        bail!(tag_short_name_error_message(name, &err));
-    }
-    let tag_ref = format!("refs/tags/{name}");
-    let tag_oid = resolve_ref(repo.git_dir(), &tag_ref).map_err(|_| {
-        map_tag_error(Error::Tag(TagError::NotFound {
-            name: name.to_owned(),
-        }))
-    })?;
-    let obj = repo
-        .odb()
-        .read(&tag_oid)
-        .context("could not read tag object")?;
-    if obj.kind != ObjectKind::Tag {
-        bail!("tag '{name}' is lightweight (not an annotated tag object)");
-    }
-    let headers =
-        parse_tree_sha256_tag_headers(&obj.data).context("could not parse tag headers")?;
-    let target = headers.target.to_hex();
-
     let started = Instant::now();
-    let verification = repo.verify_tag(tag_oid, options);
-    let elapsed = timing_json(started.elapsed());
-
-    match verification {
-        Ok(report) => {
-            let ok = report.is_ok();
-            Ok(TagVerifyEntry {
-                name: name.to_owned(),
-                oid: tag_oid.to_hex(),
-                target,
-                ok,
-                signature: signature_json(&report.signature),
-                tree_sha256: report.tree_sha256.as_ref().map(tree_sha256_json),
-                not_verifiable_submodules: report
-                    .missing_submodules
-                    .iter()
-                    .map(not_verifiable_json)
-                    .collect(),
-                elapsed,
-            })
+    let verified = verify_tag_by_name(repo, name, options).map_err(|err| match err {
+        Error::Tag(TagError::InvalidName { detail }) => {
+            anyhow::anyhow!(tag_short_name_error_message(name, &detail))
         }
-        Err(err) => Err(map_tag_error(err)),
-    }
+        other => map_tag_error(other),
+    })?;
+    let elapsed = timing_json(started.elapsed());
+    let report = &verified.verification;
+    Ok(TagVerifyEntry {
+        name: verified.name.clone(),
+        oid: verified.oid.to_hex(),
+        target: verified.target.to_hex(),
+        ok: report.is_ok(),
+        signature: signature_json(&report.signature),
+        tree_sha256: report.tree_sha256.as_ref().map(tree_sha256_json),
+        not_verifiable_submodules: report
+            .missing_submodules
+            .iter()
+            .map(not_verifiable_json)
+            .collect(),
+        elapsed,
+    })
 }
 
 fn tag_list_requested(
@@ -956,6 +933,9 @@ fn map_tag_error(err: Error) -> anyhow::Error {
             TagError::InvalidName { detail } => anyhow::anyhow!("invalid tag name: {detail}"),
             TagError::NotFound { name } => anyhow::anyhow!("no tag named '{name}'"),
             TagError::EmptyMessage => anyhow::anyhow!("tag message cannot be empty"),
+            TagError::Lightweight { name } => {
+                anyhow::anyhow!("tag '{name}' is lightweight (not an annotated tag object)")
+            }
         },
         other => anyhow::Error::msg(other.to_string()),
     }

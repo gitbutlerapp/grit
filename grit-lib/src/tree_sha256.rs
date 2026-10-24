@@ -17,6 +17,7 @@ pub const TREE_SHA256_EXCLUDED_HEADER: &str = "tree-sha256-excluded";
 
 mod tag_verify;
 
+pub(crate) use tag_verify::verify_tag_data;
 pub use tag_verify::{
     parse_tree_sha256_tag_headers, verify_tag, SignatureVerdict, TagVerification, TagVerifyOptions,
     TreeSha256TagHeaders, TreeSha256Verdict,

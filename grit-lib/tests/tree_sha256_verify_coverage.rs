@@ -4,6 +4,7 @@
 
 use grit_lib::commit::signing::GpgConfig;
 use grit_lib::config::environment::RepositoryOptions;
+use grit_lib::porcelain::tag::{verify_tag_by_name, TagError, VerifiedTag};
 use grit_lib::repo::Repository;
 use grit_lib::tree_sha256::{
     parse_tree_sha256_tag_headers, verify_tag, SignatureVerdict, TagVerification, TagVerifyOptions,
@@ -55,4 +56,31 @@ fn public_tag_verify_types() {
         },
     );
     let _ = Repository::discover(Some(dir.path()), &RepositoryOptions::empty());
+}
+
+#[test]
+fn public_verify_tag_by_name() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = Repository::init(dir.path(), &grit_lib::repo::InitOptions::default()).unwrap();
+    let options = TagVerifyOptions {
+        check_signature: false,
+        gpg: GpgConfig::from_config(&grit_lib::config::ConfigSet::default()).unwrap(),
+    };
+    let err = verify_tag_by_name(&repo, "missing", &options).unwrap_err();
+    assert!(matches!(
+        err,
+        grit_lib::error::Error::Tag(TagError::NotFound { .. })
+    ));
+    let lightweight = TagError::Lightweight { name: "v1".into() };
+    assert_eq!(lightweight.to_string(), "tag 'v1' is lightweight");
+    let _ = VerifiedTag {
+        name: "v1".into(),
+        oid: "0000000000000000000000000000000000000001".parse().unwrap(),
+        target: "0000000000000000000000000000000000000002".parse().unwrap(),
+        verification: TagVerification {
+            signature: SignatureVerdict::NotChecked,
+            tree_sha256: None,
+            missing_submodules: vec![],
+        },
+    };
 }

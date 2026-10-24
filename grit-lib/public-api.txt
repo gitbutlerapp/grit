@@ -14325,6 +14325,8 @@ pub grit_lib::porcelain::tag::TagError::AlreadyExists::name: alloc::string::Stri
 pub grit_lib::porcelain::tag::TagError::EmptyMessage
 pub grit_lib::porcelain::tag::TagError::InvalidName
 pub grit_lib::porcelain::tag::TagError::InvalidName::detail: alloc::string::String
+pub grit_lib::porcelain::tag::TagError::Lightweight
+pub grit_lib::porcelain::tag::TagError::Lightweight::name: alloc::string::String
 pub grit_lib::porcelain::tag::TagError::NotFound
 pub grit_lib::porcelain::tag::TagError::NotFound::name: alloc::string::String
 impl core::clone::Clone for grit_lib::porcelain::tag::TagError
@@ -14486,6 +14488,26 @@ impl core::marker::Unpin for grit_lib::porcelain::tag::TagSummary
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::tag::TagSummary
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::tag::TagSummary
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::tag::TagSummary
+pub struct grit_lib::porcelain::tag::VerifiedTag
+pub grit_lib::porcelain::tag::VerifiedTag::name: alloc::string::String
+pub grit_lib::porcelain::tag::VerifiedTag::oid: grit_lib::objects::ObjectId
+pub grit_lib::porcelain::tag::VerifiedTag::target: grit_lib::objects::ObjectId
+pub grit_lib::porcelain::tag::VerifiedTag::verification: grit_lib::tree_sha256::TagVerification
+impl core::clone::Clone for grit_lib::porcelain::tag::VerifiedTag
+pub fn grit_lib::porcelain::tag::VerifiedTag::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::tag::VerifiedTag
+impl core::cmp::PartialEq for grit_lib::porcelain::tag::VerifiedTag
+pub fn grit_lib::porcelain::tag::VerifiedTag::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::porcelain::tag::VerifiedTag
+pub fn grit_lib::porcelain::tag::VerifiedTag::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::porcelain::tag::VerifiedTag
+impl core::marker::Freeze for grit_lib::porcelain::tag::VerifiedTag
+impl core::marker::Send for grit_lib::porcelain::tag::VerifiedTag
+impl core::marker::Sync for grit_lib::porcelain::tag::VerifiedTag
+impl core::marker::Unpin for grit_lib::porcelain::tag::VerifiedTag
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::tag::VerifiedTag
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::tag::VerifiedTag
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::tag::VerifiedTag
 pub fn grit_lib::porcelain::tag::compare_version(&str, &str) -> core::cmp::Ordering
 pub fn grit_lib::porcelain::tag::create_tag(&grit_lib::repo::Repository, &grit_lib::porcelain::tag::CreateTagRequest) -> grit_lib::error::Result<grit_lib::porcelain::tag::CreateTagOutcome>
 pub fn grit_lib::porcelain::tag::creator_date(&grit_lib::repo::Repository, &grit_lib::objects::ObjectId) -> i64
@@ -14497,6 +14519,7 @@ pub fn grit_lib::porcelain::tag::normalize_tag_message(&str) -> grit_lib::error:
 pub fn grit_lib::porcelain::tag::parse_epoch_from_ident(&str) -> i64
 pub fn grit_lib::porcelain::tag::strip_comments(&str) -> alloc::string::String
 pub fn grit_lib::porcelain::tag::tag_ref_metadata(&grit_lib::repo::Repository, &grit_lib::objects::ObjectId) -> (grit_lib::porcelain::tag::TagKind, core::option::Option<grit_lib::objects::ObjectId>)
+pub fn grit_lib::porcelain::tag::verify_tag_by_name(&grit_lib::repo::Repository, &str, &grit_lib::tree_sha256::TagVerifyOptions) -> grit_lib::error::Result<grit_lib::porcelain::tag::VerifiedTag>
 pub fn grit_lib::porcelain::tag::version_segments(&str) -> alloc::vec::Vec<&str>
 pub type grit_lib::porcelain::tag::TagInfo = grit_lib::porcelain::tag::TagSummary
 pub mod grit_lib::porcelain::terminal

@@ -1,15 +1,16 @@
-//! Tag creation, listing, deletion and the list filter/sort helpers.
+//! Tag creation, listing, deletion, verification and the list filter/sort helpers.
 //!
 //! The `grit tag` command parses argv, resolves identity, and formats output;
 //! what lives here is presentation-free tag logic: creating lightweight and
-//! annotated tags ([`create_tag`]), listing ([`list_tags`]) and deleting
-//! ([`delete_tag`]) tag refs, filter/sort predicates, and `-m`/`-F` message
-//! cleanup ([`strip_comments`]).
+//! annotated tags ([`create_tag`]), listing ([`list_tags`]), deleting
+//! ([`delete_tag`]) and verifying ([`verify_tag_by_name`]) tag refs, filter/sort
+//! predicates, and `-m`/`-F` message cleanup ([`strip_comments`]).
 //!
 //! # What this module owns
 //!
 //! - Tag creation ([`create_tag`], [`CreateTagRequest`], [`TagKind`]), listing
-//!   ([`list_tags`], [`TagSummary`], [`tag_ref_metadata`]) and deletion ([`delete_tag`]).
+//!   ([`list_tags`], [`TagSummary`], [`tag_ref_metadata`]), deletion ([`delete_tag`])
+//!   and verification by name ([`verify_tag_by_name`], [`VerifiedTag`]).
 //! - Ref list reachability filters (`--contains`, `--merged`, `--points-at`) live in [`crate::refs::listing`].
 //! - Ref list sort/filter helpers live in [`crate::refs::listing`] (`compare_version_names`,
 //!   [`crate::refs::listing::pattern_matches_short_name`], [`creator_date`],
@@ -38,7 +39,10 @@ use crate::refs::listing::{
 use crate::refs::PackedRefPeels;
 use crate::repo::Repository;
 use crate::signing::{should_sign_tag, sign_serialized_tag, GpgConfig};
-use crate::tree_sha256::{TagTreeSha256Outcome, TreeSha256Claim, TreeSha256Options};
+use crate::tree_sha256::{
+    parse_tree_sha256_tag_headers, verify_tag_data, TagTreeSha256Outcome, TagVerification,
+    TagVerifyOptions, TreeSha256Claim, TreeSha256Options,
+};
 use std::time::Instant;
 
 const TAGS_PREFIX: &str = "refs/tags/";
@@ -67,6 +71,13 @@ pub enum TagError {
     /// `-m` / `-F` input was empty after comment stripping and whitespace cleanup.
     #[error("tag message cannot be empty")]
     EmptyMessage,
+    /// `refs/tags/<name>` points directly at a non-tag object, so there is no
+    /// annotated tag object to verify.
+    #[error("tag '{name}' is lightweight")]
+    Lightweight {
+        /// Short tag name.
+        name: String,
+    },
 }
 
 /// Whether a `refs/tags/*` ref is lightweight or an annotated tag object.
@@ -647,6 +658,65 @@ pub fn delete_tag(repo: &Repository, name: &str, dry_run: bool) -> Result<Object
     Ok(oid)
 }
 
+/// Result of [`verify_tag_by_name`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VerifiedTag {
+    /// Short tag name (without `refs/tags/`).
+    pub name: String,
+    /// Id of the annotated tag object stored at `refs/tags/<name>`.
+    pub oid: ObjectId,
+    /// Object named by the tag's `object` header.
+    pub target: ObjectId,
+    /// Signature and `tree-sha256` verdicts.
+    pub verification: TagVerification,
+}
+
+/// Verify the annotated tag at `refs/tags/<name>`.
+///
+/// Resolves the tag through the repository's ref store, reads the tag object once,
+/// and runs the same signature and `tree-sha256` checks as
+/// [`Repository::verify_tag`].
+///
+/// # Errors
+///
+/// Returns [`TagError::InvalidName`] when `name` fails tag-name checks,
+/// [`TagError::NotFound`] when the tag ref does not exist, and
+/// [`TagError::Lightweight`] when the ref points at a non-tag object. Propagates
+/// ref-store, object-read, tag-header parse and signing errors.
+pub fn verify_tag_by_name(
+    repo: &Repository,
+    name: &str,
+    options: &TagVerifyOptions,
+) -> Result<VerifiedTag> {
+    validate_tag_short_name(name).map_err(|e| {
+        Error::Tag(TagError::InvalidName {
+            detail: e.to_string(),
+        })
+    })?;
+    let oid = repo
+        .references()
+        .resolve_if_exists(&format!("{TAGS_PREFIX}{name}"))?
+        .ok_or_else(|| {
+            Error::Tag(TagError::NotFound {
+                name: name.to_owned(),
+            })
+        })?;
+    let obj = repo.odb().read(&oid)?;
+    if obj.kind != ObjectKind::Tag {
+        return Err(Error::Tag(TagError::Lightweight {
+            name: name.to_owned(),
+        }));
+    }
+    let headers = parse_tree_sha256_tag_headers(&obj.data)?;
+    let verification = verify_tag_data(repo, &obj.data, &headers, options)?;
+    Ok(VerifiedTag {
+        name: name.to_owned(),
+        oid,
+        target: headers.target,
+        verification,
+    })
+}
+
 /// Extract the "creator date" for a tag object.
 ///
 /// For annotated tags, this is the tagger date.  For lightweight tags
@@ -926,5 +996,61 @@ mod tests {
         )
         .unwrap_err();
         assert!(matches!(err, Error::Tag(TagError::EmptyMessage)));
+    }
+
+    fn unchecked_verify_options() -> TagVerifyOptions {
+        TagVerifyOptions {
+            check_signature: false,
+            gpg: GpgConfig::from_config(&crate::config::ConfigSet::default()).unwrap(),
+        }
+    }
+
+    #[test]
+    fn verify_tag_by_name_reports_tag_oid_and_target() {
+        let (_tmp, repo, commit) = repo_with_commit();
+        let annotated = tag(&repo, "v1", commit, Some("release"));
+
+        let verified = verify_tag_by_name(&repo, "v1", &unchecked_verify_options()).unwrap();
+
+        assert_eq!(verified.name, "v1");
+        assert_eq!(verified.oid, annotated);
+        assert_eq!(verified.target, commit);
+        assert_eq!(
+            verified.verification,
+            repo.verify_tag(annotated, &unchecked_verify_options())
+                .unwrap()
+        );
+        assert!(verified.verification.is_ok());
+    }
+
+    #[test]
+    fn verify_tag_by_name_lightweight_is_typed() {
+        let (_tmp, repo, commit) = repo_with_commit();
+        tag(&repo, "light", commit, None);
+        let err = verify_tag_by_name(&repo, "light", &unchecked_verify_options()).unwrap_err();
+        assert!(
+            matches!(&err, Error::Tag(TagError::Lightweight { name }) if name == "light"),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn verify_tag_by_name_missing_is_typed() {
+        let (_tmp, repo, _) = repo_with_commit();
+        let err = verify_tag_by_name(&repo, "nope", &unchecked_verify_options()).unwrap_err();
+        assert!(
+            matches!(&err, Error::Tag(TagError::NotFound { name }) if name == "nope"),
+            "{err:?}"
+        );
+    }
+
+    #[test]
+    fn verify_tag_by_name_invalid_name_is_typed() {
+        let (_tmp, repo, _) = repo_with_commit();
+        let err = verify_tag_by_name(&repo, "bad..tag", &unchecked_verify_options()).unwrap_err();
+        assert!(
+            matches!(err, Error::Tag(TagError::InvalidName { .. })),
+            "{err:?}"
+        );
     }
 }
