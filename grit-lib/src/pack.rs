@@ -18,45 +18,9 @@ use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fs;
 use std::io;
-use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::SystemTime;
-
-/// Resolve a pack index row position from a pack byte offset (`.rev` first, then sorted table).
-pub fn find_position_by_pack_offset(idx: &PackIndex, offset: u64) -> Result<Option<usize>> {
-    if let Some(pos) = find_position_by_pack_offset_rev(idx, offset)? {
-        return Ok(Some(pos));
-    }
-    idx.find_position_by_offset_sorted(offset)
-}
-
-fn find_position_by_pack_offset_rev(idx: &PackIndex, offset: u64) -> Result<Option<usize>> {
-    use crate::pack_rev::{rev_path_for_index, try_rev_positions_in_pack_order};
-    use std::cmp::Ordering;
-    let rev_path = rev_path_for_index(&idx.idx_path);
-    let data = PackData::open_with_min_len(&rev_path, 12).ok();
-    let Some(data) = data else {
-        return Ok(None);
-    };
-    let positions = try_rev_positions_in_pack_order(data.deref(), idx.len());
-    let Some(positions) = positions else {
-        return Ok(None);
-    };
-    let mut lo = 0usize;
-    let mut hi = positions.len();
-    while lo < hi {
-        let mid = lo + (hi - lo) / 2;
-        let idx_pos = positions[mid] as usize;
-        let off = idx.offset_at(idx_pos)?;
-        match off.cmp(&offset) {
-            Ordering::Less => lo = mid + 1,
-            Ordering::Greater => hi = mid,
-            Ordering::Equal => return Ok(Some(idx_pos)),
-        }
-    }
-    Ok(None)
-}
 
 /// Basic information about local packs.
 #[derive(Debug, Clone, Default)]
@@ -2764,7 +2728,7 @@ fn rescue_in_pack_base(
     objects_dir: Option<&Path>,
     state: &mut DeltaChainState,
 ) -> Result<Option<(ObjectKind, Vec<u8>)>> {
-    let Some(pos) = find_position_by_pack_offset(idx, base_offset)? else {
+    let Some(pos) = idx.find_position_by_offset_sorted(base_offset)? else {
         return Ok(None);
     };
     let entry_oid = idx.oid_at(pos);
@@ -4399,7 +4363,7 @@ fn parse_in_pack_delta_reuse_candidate(
         }
         PackedType::OfsDelta => {
             let base_off = parse_ofs_delta_base(pack_bytes, &mut p, entry_offset)?;
-            let Some(pos) = find_position_by_pack_offset(idx, base_off)? else {
+            let Some(pos) = idx.find_position_by_offset_sorted(base_off)? else {
                 return Ok(None);
             };
             let base_oid_bytes = idx.oid_at(pos);
@@ -4455,7 +4419,7 @@ fn parse_in_pack_delta_reuse_zlib(
         }
         PackedType::OfsDelta => {
             let base_off = parse_ofs_delta_base(pack_bytes, &mut p, entry_offset)?;
-            let Some(pos) = find_position_by_pack_offset(idx, base_off)? else {
+            let Some(pos) = idx.find_position_by_offset_sorted(base_off)? else {
                 return Ok(None);
             };
             let base_oid_bytes = idx.oid_at(pos);
@@ -4748,7 +4712,8 @@ pub fn packed_delta_base_oid(objects_dir: &Path, oid: &ObjectId) -> Result<Optio
             }
             PackedType::OfsDelta => {
                 let base_off = parse_ofs_delta_base(&pack_bytes, &mut p, entry_offset)?;
-                return Ok(find_position_by_pack_offset(idx, base_off)?
+                return Ok(idx
+                    .find_position_by_offset_sorted(base_off)?
                     .and_then(|pos| ObjectId::from_bytes(idx.oid_at(pos)).ok()));
             }
             _ => continue,

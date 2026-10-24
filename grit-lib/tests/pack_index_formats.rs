@@ -853,3 +853,58 @@ fn warmed_pack_cache_revalidates_after_same_path_replacement() {
     let via_packs = read_object_from_packs(&objects, &oid_b).expect("read via warmed store");
     assert_eq!(via_packs.data, b"after-repack-content");
 }
+
+/// Offset lookups must agree with `git show-index` whether the offset table is
+/// decoded from git's `.rev` sidecar or rebuilt from the index (missing or corrupt
+/// sidecar), and must report offsets inside an object as absent.
+#[test]
+fn offset_lookup_matches_git_with_valid_corrupt_and_missing_rev() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let repo = grit_test_support::git_packed_history(tmp.path(), 60);
+    let pack_dir = repo.join("objects/pack");
+    let idx_path = std::fs::read_dir(&pack_dir)
+        .expect("pack dir")
+        .map(|e| e.expect("entry").path())
+        .find(|p| p.extension().is_some_and(|e| e == "idx"))
+        .expect("idx");
+    let rev_path = idx_path.with_extension("rev");
+    assert!(rev_path.is_file(), "git wrote a reverse index");
+    let oracle = git_show_index_lines(&idx_path, false);
+    let mut offsets: Vec<u64> = oracle.iter().map(|(_, off, _)| *off).collect();
+    offsets.sort_unstable();
+
+    let check = |label: &str| {
+        let idx = read_pack_index(&idx_path).expect("read idx");
+        for (hex, offset, _) in &oracle {
+            let row = idx
+                .find_position_by_offset_sorted(*offset)
+                .expect("lookup")
+                .unwrap_or_else(|| panic!("{label}: no row at offset {offset}"));
+            assert_eq!(
+                ObjectId::from_bytes(idx.oid_at(row)).expect("oid").to_hex(),
+                *hex,
+                "{label}: offset {offset}"
+            );
+        }
+        for pair in offsets.windows(2) {
+            if pair[1] > pair[0] + 1 {
+                assert_eq!(
+                    idx.find_position_by_offset_sorted(pair[0] + 1)
+                        .expect("lookup"),
+                    None,
+                    "{label}: offset inside an object"
+                );
+            }
+        }
+    };
+
+    check("valid .rev");
+    let mut rev = std::fs::read(&rev_path).expect("read rev");
+    let mid = 12 + (rev.len() - 12) / 2;
+    rev[mid] ^= 0x01;
+    std::fs::remove_file(&rev_path).expect("remove read-only rev");
+    std::fs::write(&rev_path, &rev).expect("corrupt rev");
+    check("corrupt .rev");
+    std::fs::remove_file(&rev_path).expect("remove rev");
+    check("no .rev");
+}

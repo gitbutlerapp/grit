@@ -66,6 +66,8 @@ For batch reads (`cat-file --batch`, `--batch-all-objects`), wrap the loop in [`
 
 When iterating a pack in offset order (unordered `--batch-all-objects`), prefer [`read_object_from_pack_at_offset`](rustdoc:grit_lib::objects::pack) with the entry offset from [`PackIndex`](rustdoc:grit_lib::objects::pack::PackIndex) so the read path does not repeat index lookup by OID.
 
+The reverse direction, from a pack offset to the object stored there (resolving an `OFS_DELTA` base, for example), is [`PackIndex::find_position_by_offset_sorted`](rustdoc:grit_lib::objects::pack::PackIndex::find_position_by_offset_sorted). Each index decodes its offset table once, from Git's `.rev` reverse index when the pack has a valid one and by sorting the index rows otherwise, and clones of the index share it, so every later lookup is a binary search.
+
 ## Pack deltas (encoding)
 
 When building new pack deltas (as opposed to reusing on-disk zlib), grit-lib indexes the base blob with [`DeltaIndex`](rustdoc:grit_lib::objects::delta_encode::DeltaIndex) and encodes targets with a rolling fingerprint matcher. Reuse one index across many targets in a pack-objects window; `encode` on that index accepts an optional `max_size` cap (zero means no limit). An empty target yields a valid delta (header varints only). [`encode_delta`](rustdoc:grit_lib::objects::delta_encode::encode_delta) is a convenience wrapper for one-off base/target pairs.

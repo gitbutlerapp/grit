@@ -365,17 +365,49 @@ impl PackIndex {
 
     /// Run `f` over `(pack offset, index row)` pairs sorted by offset, building and
     /// caching the table on first use.
+    ///
+    /// The table is decoded from the `.rev` sidecar when one is present and valid
+    /// (checksummed once, no sort), and otherwise built by sorting the index rows.
     fn with_sorted_offsets<R>(&self, f: impl FnOnce(&[(u64, u32)]) -> R) -> Result<R> {
         let mut guard = self.offset_lookup.lock().unwrap_or_else(|e| e.into_inner());
         if let Some(pairs) = guard.as_deref() {
             return Ok(f(pairs));
         }
-        let mut pairs: Vec<(u64, u32)> = Vec::with_capacity(self.len());
-        for i in 0..self.len() {
-            pairs.push((self.offset_at(i)?, i as u32));
-        }
-        pairs.sort_unstable_by_key(|p| p.0);
+        let pairs = match self.sorted_offsets_from_rev()? {
+            Some(pairs) => pairs,
+            None => {
+                let mut pairs: Vec<(u64, u32)> = Vec::with_capacity(self.len());
+                for i in 0..self.len() {
+                    pairs.push((self.offset_at(i)?, i as u32));
+                }
+                pairs.sort_unstable_by_key(|p| p.0);
+                pairs
+            }
+        };
         Ok(f(guard.insert(pairs)))
+    }
+
+    /// Offset-sorted `(pack offset, index row)` pairs from the `.rev` sidecar.
+    ///
+    /// Returns `None` when there is no sidecar, it fails validation, or its order
+    /// does not match the offsets in this index.
+    fn sorted_offsets_from_rev(&self) -> Result<Option<Vec<(u64, u32)>>> {
+        let rev_path = crate::pack_rev::rev_path_for_index(&self.idx_path);
+        let Ok(data) = PackData::open_with_min_len(&rev_path, 12) else {
+            return Ok(None);
+        };
+        let Some(rows) = crate::pack_rev::try_rev_positions_in_pack_order(&data, self.len()) else {
+            return Ok(None);
+        };
+        let mut pairs: Vec<(u64, u32)> = Vec::with_capacity(rows.len());
+        for row in rows {
+            let offset = self.offset_at(row as usize)?;
+            if pairs.last().is_some_and(|&(prev, _)| prev >= offset) {
+                return Ok(None);
+            }
+            pairs.push((offset, row));
+        }
+        Ok(Some(pairs))
     }
 
     /// CRC32 for the index row at `entry_offset`, if any.
@@ -386,12 +418,8 @@ impl PackIndex {
         })
     }
 
-    /// Index row position for a pack byte offset via a sorted offset table.
-    ///
-    /// Builds and caches `(offset, position)` pairs on first use. Callers that
-    /// have a `.rev` sidecar should try that first (see `pack::find_position_by_pack_offset`).
-    #[must_use]
     /// Copy with promisor/cruft sidecar flags refreshed from disk markers.
+    #[must_use]
     pub(crate) fn with_sidecar_flags(&self, is_promisor: bool, is_cruft: bool) -> Self {
         let mut next = self.clone();
         next.is_promisor = is_promisor;
@@ -399,7 +427,16 @@ impl PackIndex {
         next
     }
 
-    /// `find_position_by_offset_sorted` method.
+    /// Index row position of the object stored at pack byte `offset`.
+    ///
+    /// Uses an offset-sorted table that is built once per index (from the `.rev`
+    /// sidecar when present) and shared by clones, so each lookup is a binary search.
+    ///
+    /// Returns `Ok(None)` when no object starts at `offset`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::CorruptObject`] when the index has a malformed large-offset entry.
     pub fn find_position_by_offset_sorted(&self, offset: u64) -> Result<Option<usize>> {
         self.with_sorted_offsets(|pairs| {
             pairs

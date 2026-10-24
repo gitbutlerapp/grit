@@ -16,9 +16,9 @@ use crate::ewah_bitmap::Bitmap;
 use crate::midx::{read_midx_btmp_ranges, read_midx_pack_idx_names, read_midx_preferred_idx_name};
 use crate::objects::{oid_hash_map_from, ObjectId};
 use crate::pack::{
-    find_position_by_pack_offset, pack_entry_raw_end, pack_entry_zlib_start,
-    parse_pack_object_header, read_local_pack_indexes_cached, read_pack_bytes_cached,
-    read_packed_delta_dependency, PackedDeltaDependency, PackedType,
+    pack_entry_raw_end, pack_entry_zlib_start, parse_pack_object_header,
+    read_local_pack_indexes_cached, read_pack_bytes_cached, read_packed_delta_dependency,
+    PackedDeltaDependency, PackedType,
 };
 use crate::pack_index::PackIndex;
 use crate::pack_map::PackData;
@@ -445,7 +445,7 @@ fn delta_base_oid(
     Ok(Some(match dep {
         PackedDeltaDependency::RefBase { base_oid } => base_oid,
         PackedDeltaDependency::OfsBase { base_offset } => {
-            let Some(row) = find_position_by_pack_offset(idx, base_offset)? else {
+            let Some(row) = idx.find_position_by_offset_sorted(base_offset)? else {
                 return Ok(None);
             };
             ObjectId::from_bytes(idx.oid_at(row))?
@@ -568,9 +568,12 @@ fn write_ref_delta_from_ofs(
     let base_oid = match dep {
         PackedDeltaDependency::RefBase { base_oid } => base_oid,
         PackedDeltaDependency::OfsBase { base_offset } => {
-            let row = find_position_by_pack_offset(&pack.idx, base_offset)?.ok_or_else(|| {
-                Error::CorruptObject("ofs delta base missing from index".to_owned())
-            })?;
+            let row = pack
+                .idx
+                .find_position_by_offset_sorted(base_offset)?
+                .ok_or_else(|| {
+                    Error::CorruptObject("ofs delta base missing from index".to_owned())
+                })?;
             ObjectId::from_bytes(pack.idx.oid_at(row))?
         }
     };

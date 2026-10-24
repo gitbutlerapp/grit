@@ -406,6 +406,60 @@ pub fn git(dir: &Path, args: &[&str]) -> String {
     git_cmd(args).in_dir(dir).suc().stdout
 }
 
+/// Create `dir/history.git`: a bare repository whose history is fully packed by
+/// system `git`, the shape a server usually serves.
+///
+/// `commits` revisions each edit a few slowly growing files (at the root and in a
+/// subdirectory) on `main`, so the single pack holds `OFS_DELTA` chains for blobs and
+/// trees. The pack is written with a `.rev` reverse index. Returns the bare
+/// repository path. Panics when `git` fails.
+#[must_use]
+pub fn git_packed_history(dir: &Path, commits: usize) -> PathBuf {
+    let repo = dir.join("history.git");
+    let repo_arg = repo.to_string_lossy().into_owned();
+    git(dir, &["init", "-q", "--bare", "-b", "main", &repo_arg]);
+    let mut stream = String::new();
+    let mut files: Vec<String> = vec![String::new(); 3];
+    for n in 0..commits {
+        for (i, body) in files.iter_mut().enumerate() {
+            body.push_str(&format!("file {i} line {n}: {}\n", "x".repeat(40 + n % 7)));
+        }
+        let message = format!("commit {n}\n");
+        stream.push_str(&format!(
+            "commit refs/heads/main\ncommitter T <t@example.com> {} +0000\ndata {}\n{message}",
+            1_000_000_000 + n,
+            message.len()
+        ));
+        for (i, body) in files.iter().enumerate() {
+            let path = if i == 2 {
+                "src/lib.txt".to_owned()
+            } else {
+                format!("file{i}.txt")
+            };
+            stream.push_str(&format!(
+                "M 100644 inline {path}\ndata {}\n{body}",
+                body.len()
+            ));
+        }
+        stream.push('\n');
+    }
+    git_cmd(&["fast-import", "--quiet"])
+        .in_dir(&repo)
+        .stdin(stream)
+        .suc();
+    git(
+        &repo,
+        &[
+            "-c",
+            "pack.writeReverseIndex=true",
+            "repack",
+            "-adq",
+            "--depth=50",
+        ],
+    );
+    repo
+}
+
 /// Run `grit` and return captured output without asserting success.
 ///
 /// `dir` is the working directory and `args` are the command-line arguments.

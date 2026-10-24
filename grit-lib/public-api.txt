@@ -9803,7 +9803,6 @@ pub fn grit_lib::objects::pack::collect_packed_delta_reuse_for_send(&std::path::
 pub fn grit_lib::objects::pack::compute_fanout_from_entries(&[grit_lib::objects::pack::PackIndexEntry]) -> [u32; 256]
 pub fn grit_lib::objects::pack::compute_fanout_from_oid_slices(&[&[u8]]) -> [u32; 256]
 pub fn grit_lib::objects::pack::configure_delta_base_cache_from_config(core::option::Option<&grit_lib::config::ConfigSet>)
-pub fn grit_lib::objects::pack::find_position_by_pack_offset(&grit_lib::objects::pack::PackIndex, u64) -> grit_lib::error::Result<core::option::Option<usize>>
 pub fn grit_lib::objects::pack::hash_object_bytes(grit_lib::objects::ObjectKind, &[u8], usize) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
 pub fn grit_lib::objects::pack::max_verify_pack_delta_depth(&[grit_lib::objects::pack::VerifyObjectRecord]) -> u64
 pub fn grit_lib::objects::pack::oid_bytes_to_hex(&[u8]) -> alloc::string::String
