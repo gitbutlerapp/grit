@@ -6,14 +6,15 @@ use grit_lib::refs::check_ref_format::validate_branch_short_name;
 use grit_lib::repo_handles::LockWorktreeOptions;
 use grit_lib::state::HeadState;
 use grit_lib::worktree::{
-    add_linked_worktree, list_worktrees, prune_linked_worktrees, remove_linked_worktree,
-    resolve_linked_worktree_add_path, AddLinkedWorktreeOptions, PrunableReason,
-    PruneWorktreesOptions, WorktreeBranch,
+    add_linked_worktree, list_worktrees, move_linked_worktree, prune_linked_worktrees,
+    remove_linked_worktree, resolve_linked_worktree_add_path, resolve_move_destination,
+    AddLinkedWorktreeOptions, MoveWorktreeOptions, PrunableReason, PruneWorktreesOptions,
+    WorktreeBranch, WorktreeRepairKind,
 };
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::io::Write;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::context;
 use crate::markdown;
@@ -50,6 +51,21 @@ pub enum WorktreeOutcome {
     Unlock {
         path: String,
     },
+    Move {
+        from: String,
+        to: String,
+        dry_run: bool,
+    },
+    Repair {
+        repairs: Vec<WorktreeRepairRow>,
+        dry_run: bool,
+    },
+}
+
+#[derive(Serialize, JsonSchema)]
+pub struct WorktreeRepairRow {
+    pub path: String,
+    pub kind: String,
 }
 
 #[derive(Serialize, JsonSchema)]
@@ -125,6 +141,26 @@ impl HumanRender for WorktreeOutcome {
                 }
             }
             WorktreeOutcome::Unlock { path } => outln!(w, "Unlocked worktree {path}"),
+            WorktreeOutcome::Move { from, to, dry_run } => {
+                if *dry_run {
+                    outln!(w, "Would move worktree {from} -> {to}");
+                } else {
+                    outln!(w, "Moved worktree {from} -> {to}");
+                }
+            }
+            WorktreeOutcome::Repair { repairs, dry_run } => {
+                if repairs.is_empty() {
+                    outln!(w, "No worktree links to repair");
+                } else if *dry_run {
+                    for r in repairs {
+                        outln!(w, "Would repair {} ({})", r.path, r.kind);
+                    }
+                } else {
+                    for r in repairs {
+                        outln!(w, "Repaired {} ({})", r.path, r.kind);
+                    }
+                }
+            }
         }
         Ok(())
     }
@@ -249,6 +285,54 @@ pub fn run_lock(path: PathBuf, reason: Option<String>) -> Result<WorktreeOutcome
         path: canonical.display().to_string(),
         reason,
     })
+}
+
+pub fn run_move(from: PathBuf, to: PathBuf, force: bool, dry_run: bool) -> Result<WorktreeOutcome> {
+    let repo = context::discover()?;
+    let from_canon = path_for_disk_compare(&from);
+    let dest = resolve_move_destination(&from_canon, &path_for_disk_compare(&to))
+        .map_err(anyhow::Error::new)?;
+    move_linked_worktree(
+        &repo,
+        &from_canon,
+        &dest,
+        &MoveWorktreeOptions { force, dry_run },
+    )
+    .map_err(anyhow::Error::new)?;
+    Ok(WorktreeOutcome::Move {
+        from: user_display_path(&from_canon),
+        to: user_display_path(&dest),
+        dry_run,
+    })
+}
+
+pub fn run_repair(paths: Vec<PathBuf>, dry_run: bool) -> Result<WorktreeOutcome> {
+    let repo = context::discover()?;
+    let canon_paths: Vec<PathBuf> = paths.iter().map(|p| path_for_disk_compare(p)).collect();
+    let path_refs: Vec<&Path> = canon_paths.iter().map(|p| p.as_path()).collect();
+    let repairs = repo
+        .worktrees()
+        .repair(&path_refs, dry_run)
+        .map_err(anyhow::Error::new)?;
+    Ok(WorktreeOutcome::Repair {
+        repairs: repairs
+            .into_iter()
+            .map(|r| WorktreeRepairRow {
+                path: user_display_path(&r.path),
+                kind: repair_kind_label(r.kind).to_owned(),
+            })
+            .collect(),
+        dry_run,
+    })
+}
+
+fn repair_kind_label(kind: WorktreeRepairKind) -> &'static str {
+    match kind {
+        WorktreeRepairKind::GitFileAdminDir => "git_file_admin_dir",
+        WorktreeRepairKind::GitdirWorktreePath => "gitdir_worktree_path",
+        WorktreeRepairKind::GitFilePathStyle => "git_file_path_style",
+        WorktreeRepairKind::GitdirPathStyle => "gitdir_path_style",
+    }
 }
 
 pub fn run_unlock(path: PathBuf) -> Result<WorktreeOutcome> {

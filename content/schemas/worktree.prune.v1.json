@@ -2,6 +2,21 @@
   "$id": "https://grit-scm.com/schemas/worktree.prune/v1.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "definitions": {
+    "WorktreeRepairRow": {
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "path"
+      ],
+      "type": "object"
+    },
     "WorktreeRow": {
       "properties": {
         "bare": {
@@ -186,6 +201,57 @@
       "required": [
         "action",
         "path"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "action": {
+          "enum": [
+            "move"
+          ],
+          "type": "string"
+        },
+        "dry_run": {
+          "type": "boolean"
+        },
+        "from": {
+          "type": "string"
+        },
+        "to": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "dry_run",
+        "from",
+        "to"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "action": {
+          "enum": [
+            "repair"
+          ],
+          "type": "string"
+        },
+        "dry_run": {
+          "type": "boolean"
+        },
+        "repairs": {
+          "items": {
+            "$ref": "#/definitions/WorktreeRepairRow"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "action",
+        "dry_run",
+        "repairs"
       ],
       "type": "object"
     }

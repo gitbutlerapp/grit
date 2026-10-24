@@ -1349,6 +1349,30 @@ pub fn print_worktree_outcome(w: &mut dyn Write, outcome: &WorktreeOutcome) -> a
             outln!(w);
             outln!(w, "- Unlocked **`{path}`**");
         }
+        WorktreeOutcome::Move { from, to, dry_run } => {
+            outln!(w, "## Worktree move");
+            outln!(w);
+            if *dry_run {
+                outln!(w, "- Would move **`{from}`** → **`{to}`**");
+            } else {
+                outln!(w, "- Moved **`{from}`** → **`{to}`**");
+            }
+        }
+        WorktreeOutcome::Repair { repairs, dry_run } => {
+            outln!(w, "## Worktree repair");
+            outln!(w);
+            if repairs.is_empty() {
+                outln!(w, "No worktree links to repair.");
+            } else {
+                for r in repairs {
+                    if *dry_run {
+                        outln!(w, "- Would repair **`{}`** · `{}`", r.path, r.kind);
+                    } else {
+                        outln!(w, "- Repaired **`{}`** · `{}`", r.path, r.kind);
+                    }
+                }
+            }
+        }
     }
     Ok(())
 }

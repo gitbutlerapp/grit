@@ -13,8 +13,13 @@
 //! # }
 //! ```
 mod core;
+mod move_repair;
 
 pub use core::*;
+pub use move_repair::{
+    move_linked_worktree, repair_worktrees, resolve_move_destination, MoveWorktreeOptions,
+    WorktreeRepair, WorktreeRepairKind,
+};
 
 pub mod attributes {
     //! attributes API (re-exported at this path).

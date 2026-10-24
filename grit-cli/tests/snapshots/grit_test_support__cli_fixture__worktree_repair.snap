@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "Repaired [REPO]/moved-wt (gitdir_worktree_path)\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\"action\":\"repair\",\"repairs\":[{\"path\":\"[REPO]/moved-wt\",\"kind\":\"gitdir_worktree_path\"}],\"dry_run\":false}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "## Worktree repair\n\n- Repaired **`[REPO]/moved-wt`** · `gitdir_worktree_path`\n",
+    "stderr": ""
+  }
+}

@@ -20742,7 +20742,9 @@ impl<'repo> grit_lib::repo_handles::RepositoryWorktrees<'repo>
 pub fn grit_lib::repo_handles::RepositoryWorktrees<'repo>::add(&self, &grit_lib::worktree::AddLinkedWorktreeOptions) -> grit_lib::error::Result<grit_lib::worktree::WorktreeEntry>
 pub fn grit_lib::repo_handles::RepositoryWorktrees<'repo>::list(&self) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::worktree::WorktreeEntry>>
 pub fn grit_lib::repo_handles::RepositoryWorktrees<'repo>::lock(&self, &std::path::Path, &grit_lib::worktree::LockWorktreeOptions) -> grit_lib::error::Result<()>
+pub fn grit_lib::repo_handles::RepositoryWorktrees<'repo>::move_linked(&self, &std::path::Path, &std::path::Path, &grit_lib::worktree::MoveWorktreeOptions) -> grit_lib::error::Result<()>
 pub fn grit_lib::repo_handles::RepositoryWorktrees<'repo>::remove(&self, &std::path::Path, bool) -> grit_lib::error::Result<()>
+pub fn grit_lib::repo_handles::RepositoryWorktrees<'repo>::repair(&self, &[&std::path::Path], bool) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::worktree::WorktreeRepair>>
 pub fn grit_lib::repo_handles::RepositoryWorktrees<'repo>::repository(&self) -> &'repo grit_lib::repo::Repository
 pub fn grit_lib::repo_handles::RepositoryWorktrees<'repo>::unlock(&self, &std::path::Path) -> grit_lib::error::Result<()>
 impl<'repo> core::clone::Clone for grit_lib::repo_handles::RepositoryWorktrees<'repo>
@@ -25224,7 +25226,43 @@ pub fn grit_lib::worktree::ensure_branch_not_checked_out_in_any_worktree(&grit_l
 pub fn grit_lib::worktree::find_worktree_with_branch_checked_out(&grit_lib::repo::Repository, &str, core::option::Option<&std::path::Path>) -> grit_lib::error::Result<core::option::Option<grit_lib::worktree::BranchWorktreeCheckout>>
 pub fn grit_lib::worktree::is_bare_repository(&std::path::Path) -> bool
 pub fn grit_lib::worktree::list_worktrees(&grit_lib::repo::Repository) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::worktree::WorktreeEntry>>
+pub fn grit_lib::worktree::move_linked_worktree(&grit_lib::repo::Repository, &std::path::Path, &std::path::Path, &grit_lib::worktree::MoveWorktreeOptions) -> grit_lib::error::Result<()>
+pub struct grit_lib::worktree::MoveWorktreeOptions
+pub grit_lib::worktree::MoveWorktreeOptions::dry_run: bool
+pub grit_lib::worktree::MoveWorktreeOptions::force: bool
+impl core::clone::Clone for grit_lib::worktree::MoveWorktreeOptions
+pub fn grit_lib::worktree::MoveWorktreeOptions::clone(&self) -> Self
+impl core::default::Default for grit_lib::worktree::MoveWorktreeOptions
+pub fn grit_lib::worktree::MoveWorktreeOptions::default() -> Self
+impl core::fmt::Debug for grit_lib::worktree::MoveWorktreeOptions
+pub fn grit_lib::worktree::MoveWorktreeOptions::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 pub fn grit_lib::worktree::prune_linked_worktrees(&grit_lib::repo::Repository, &grit_lib::worktree::PruneWorktreesOptions) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::worktree::PrunedWorktreeEntry>>
+pub fn grit_lib::worktree::repair_worktrees(&grit_lib::repo::Repository, &[&std::path::Path], bool) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::worktree::WorktreeRepair>>
+pub fn grit_lib::worktree::resolve_move_destination(&std::path::Path, &std::path::Path) -> grit_lib::error::Result<std::path::PathBuf>
+pub struct grit_lib::worktree::WorktreeRepair
+pub grit_lib::worktree::WorktreeRepair::kind: grit_lib::worktree::WorktreeRepairKind
+pub grit_lib::worktree::WorktreeRepair::path: std::path::PathBuf
+impl core::clone::Clone for grit_lib::worktree::WorktreeRepair
+pub fn grit_lib::worktree::WorktreeRepair::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::worktree::WorktreeRepair
+impl core::cmp::PartialEq for grit_lib::worktree::WorktreeRepair
+pub fn grit_lib::worktree::WorktreeRepair::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::worktree::WorktreeRepair
+pub fn grit_lib::worktree::WorktreeRepair::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+pub enum grit_lib::worktree::WorktreeRepairKind
+pub grit_lib::worktree::WorktreeRepairKind::GitFileAdminDir
+pub grit_lib::worktree::WorktreeRepairKind::GitFilePathStyle
+pub grit_lib::worktree::WorktreeRepairKind::GitdirPathStyle
+pub grit_lib::worktree::WorktreeRepairKind::GitdirWorktreePath
+impl core::clone::Copy for grit_lib::worktree::WorktreeRepairKind
+impl core::clone::Clone for grit_lib::worktree::WorktreeRepairKind
+pub fn grit_lib::worktree::WorktreeRepairKind::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::worktree::WorktreeRepairKind
+impl core::cmp::PartialEq for grit_lib::worktree::WorktreeRepairKind
+pub fn grit_lib::worktree::WorktreeRepairKind::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::worktree::WorktreeRepairKind
+pub fn grit_lib::worktree::WorktreeRepairKind::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::worktree::WorktreeRepairKind
 pub fn grit_lib::worktree::read_worktree_path(&std::path::Path) -> grit_lib::error::Result<std::path::PathBuf>
 pub fn grit_lib::worktree::registered_worktree_count(&std::path::Path) -> usize
 pub fn grit_lib::worktree::remove_linked_worktree(&grit_lib::repo::Repository, &std::path::Path, bool) -> grit_lib::error::Result<()>

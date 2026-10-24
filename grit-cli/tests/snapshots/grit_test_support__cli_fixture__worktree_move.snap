@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "Moved worktree [REPO]/linked-wt -> moved-wt\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\"action\":\"move\",\"from\":\"[REPO]/linked-wt\",\"to\":\"moved-wt\",\"dry_run\":false}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "## Worktree move\n\n- Moved **`[REPO]/linked-wt`** → **`moved-wt`**\n",
+    "stderr": ""
+  }
+}

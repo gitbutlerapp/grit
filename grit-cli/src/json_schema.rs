@@ -304,6 +304,8 @@ fn build_schema_registry() -> Vec<SchemaRegistryEntry> {
         entry::<WorktreeOutcome>("worktree.prune"),
         entry::<WorktreeOutcome>("worktree.lock"),
         entry::<WorktreeOutcome>("worktree.unlock"),
+        entry::<WorktreeOutcome>("worktree.move"),
+        entry::<WorktreeOutcome>("worktree.repair"),
         entry::<AuthOutcome>("auth"),
         entry::<LogoutOutcome>("auth.logout"),
         entry::<UpdateOutcome>("update"),
@@ -394,6 +396,8 @@ pub fn schema_command_key(args: &[&str]) -> Option<String> {
             Some("prune") => "worktree.prune",
             Some("lock") => "worktree.lock",
             Some("unlock") => "worktree.unlock",
+            Some("move") => "worktree.move",
+            Some("repair") => "worktree.repair",
             _ => return None,
         },
         "auth" => match positional.get(1).copied() {
@@ -1105,6 +1109,11 @@ pub fn snapshot_command_args() -> &'static [(&'static str, &'static [&'static st
             &["worktree", "lock", "linked-wt", "--reason", "hold"],
         ),
         ("worktree_unlock", &["worktree", "unlock", "linked-wt"]),
+        (
+            "worktree_move",
+            &["worktree", "move", "linked-wt", "moved-wt"],
+        ),
+        ("worktree_repair", &["worktree", "repair", "moved-wt"]),
         ("hooks_list", &["hooks", "list"]),
         ("hooks_run", &["hooks", "run", "pre-commit"]),
         ("hooks_run_exit_17", &["hooks", "run", "pre-commit"]),
@@ -1261,8 +1270,8 @@ mod tests {
             );
         }
         assert_eq!(
-            checked, 100,
-            "expected 100 committed schema files under content/schemas"
+            checked, 102,
+            "expected 102 committed schema files under content/schemas"
         );
     }
 
@@ -1376,7 +1385,7 @@ mod tests {
             "schema index must list every committed schema document exactly"
         );
         let file_count: usize = on_disk.values().map(|v| v.len()).sum();
-        assert_eq!(file_count, 100, "expected 100 schema files indexed");
+        assert_eq!(file_count, 102, "expected 102 schema files indexed");
     }
 
     fn load_snapshot_json_stdout(name: &str, snapshot_dir: &Path) -> Value {

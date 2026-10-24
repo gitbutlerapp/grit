@@ -21,6 +21,8 @@ grit worktree remove <path>
 grit worktree remove -f <path>
 grit worktree lock <path> [--reason <text>]
 grit worktree unlock <path>
+grit worktree move <worktree> <new-path> [-f] [--dry-run]
+grit worktree repair [<path>…] [--dry-run]
 grit worktree prune
 ```
 
@@ -41,6 +43,10 @@ If `<path>` is already registered but its directory was deleted manually, grit r
 `grit worktree lock` writes a `locked` file under the worktree admin directory (same on-disk format as `git worktree lock`). Locked worktrees are skipped by `prune` and refused by `remove` unless `-f`.
 
 `grit worktree unlock` removes that lock file.
+
+`grit worktree move` relocates a linked worktree and rewrites the worktree `.git` gitfile and admin `gitdir` file atomically (same on-disk layout as `git worktree move`). The main worktree cannot be moved. Locked worktrees require `-f` / `--force` (Git requires `-f` twice; grit uses one force flag). Populated submodules block the move, matching Git.
+
+`grit worktree repair` fixes broken `.git` / `gitdir` links after a manual directory move. With no paths, grit repairs every registered linked worktree from the open repository.
 
 ## Options
 
@@ -89,6 +95,22 @@ No flags.
 | --- | --- |
 | `--dry-run` | Report prunable worktrees without removing registrations. |
 
+### `move`
+
+| Option | Description |
+| --- | --- |
+| `<worktree>` | Path to the linked worktree to move. |
+| `<new-path>` | Destination (must not exist; if it is an existing directory, the worktree basename is appended). |
+| `-f`, `--force` | Move even when the worktree is locked. |
+| `--dry-run` | Preview the move without renaming or rewriting link files. |
+
+### `repair`
+
+| Option | Description |
+| --- | --- |
+| `[<path>…]` | Linked worktree roots to repair (default: all linked worktrees). |
+| `--dry-run` | List repairs without writing files. |
+
 ## Examples
 
 ```console
@@ -108,9 +130,9 @@ Pruned worktree /tmp/old-wt
 
 ## JSON output
 
-Schema: [v1](/schemas/worktree.list/v1.json) · [worktree.add v1](/schemas/worktree.add/v1.json) · [worktree.remove v1](/schemas/worktree.remove/v1.json) · [worktree.prune v2](/schemas/worktree.prune/v2.json) · [worktree.lock v1](/schemas/worktree.lock/v1.json) · [worktree.unlock v1](/schemas/worktree.unlock/v1.json)
+Schema: [v1](/schemas/worktree.list/v1.json) · [worktree.add v1](/schemas/worktree.add/v1.json) · [worktree.remove v1](/schemas/worktree.remove/v1.json) · [worktree.prune v2](/schemas/worktree.prune/v2.json) · [worktree.lock v1](/schemas/worktree.lock/v1.json) · [worktree.unlock v1](/schemas/worktree.unlock/v1.json) · [worktree.move v1](/schemas/worktree.move/v1.json) · [worktree.repair v1](/schemas/worktree.repair/v1.json)
 
-Pass `--json` on any subcommand. The top-level `action` is `list`, `add`, `remove`, `prune`, `lock`, or `unlock`.
+Pass `--json` on any subcommand. The top-level `action` is `list`, `add`, `remove`, `prune`, `lock`, `unlock`, `move`, or `repair`.
 
 List:
 
@@ -136,9 +158,12 @@ List:
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
-| `action` | string | `list`, `add`, `remove`, `prune`, `lock`, or `unlock`. |
+| `action` | string | `list`, `add`, `remove`, `prune`, `lock`, `unlock`, `move`, or `repair`. |
 | `worktrees` | array | For `list`, one object per worktree (fields below). |
 | `path` | string | For `add` / `remove` / `lock` / `unlock`, absolute path to the working tree. |
+| `from` | string | For `move`, previous worktree path. |
+| `to` | string | For `move`, new worktree path. |
+| `repairs` | array | For `repair`, objects with `path` and `kind` for each link rewritten. |
 | `head` | string | For `add`, current commit oid checked out in the new worktree. |
 | `branch` | string or null | For `add`, branch checked out when not detached. |
 | `locked` | boolean | For `add`, whether the worktree was created locked. |
@@ -205,11 +230,39 @@ Unlock:
 }
 ```
 
+Move:
+
+```json
+{
+  "action": "move",
+  "from": "/tmp/linked",
+  "to": "/tmp/moved",
+  "dry_run": false
+}
+```
+
+Repair:
+
+```json
+{
+  "action": "repair",
+  "repairs": [
+    {
+      "path": "/tmp/moved",
+      "kind": "gitdir_worktree_path"
+    }
+  ],
+  "dry_run": false
+}
+```
+
+Repair `kind` values: `git_file_admin_dir`, `gitdir_worktree_path`, `git_file_path_style`, `gitdir_path_style`.
+
 ## Markdown output
 
 Pass [`--markdown`](../global-options/) for structured output.
 
-Schema: [worktree.list v1](/schemas/worktree.list/v1.json) · [worktree.add v1](/schemas/worktree.add/v1.json) · [worktree.remove v1](/schemas/worktree.remove/v1.json) · [worktree.prune v2](/schemas/worktree.prune/v2.json) · [worktree.lock v1](/schemas/worktree.lock/v1.json) · [worktree.unlock v1](/schemas/worktree.unlock/v1.json)
+Schema: [worktree.list v1](/schemas/worktree.list/v1.json) · [worktree.add v1](/schemas/worktree.add/v1.json) · [worktree.remove v1](/schemas/worktree.remove/v1.json) · [worktree.prune v2](/schemas/worktree.prune/v2.json) · [worktree.lock v1](/schemas/worktree.lock/v1.json) · [worktree.unlock v1](/schemas/worktree.unlock/v1.json) · [worktree.move v1](/schemas/worktree.move/v1.json) · [worktree.repair v1](/schemas/worktree.repair/v1.json)
 
 List shows a table of path, branch, and HEAD:
 

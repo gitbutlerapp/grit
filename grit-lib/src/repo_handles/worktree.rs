@@ -5,8 +5,8 @@ use std::path::Path;
 use crate::error::Result;
 use crate::repo::Repository;
 use crate::worktree::{
-    add_linked_worktree, list_worktrees, remove_linked_worktree, AddLinkedWorktreeOptions,
-    WorktreeEntry,
+    add_linked_worktree, list_worktrees, move_linked_worktree, remove_linked_worktree,
+    repair_worktrees, AddLinkedWorktreeOptions, MoveWorktreeOptions, WorktreeEntry, WorktreeRepair,
 };
 
 pub use crate::worktree::LockWorktreeOptions;
@@ -123,6 +123,24 @@ impl<'repo> RepositoryWorktrees<'repo> {
     /// not locked.
     pub fn unlock(&self, path: &Path) -> Result<()> {
         unlock_linked_worktree(self.repo, path)
+    }
+
+    /// Move a linked worktree to `to` and rewrite admin `gitdir` / worktree `.git` links.
+    ///
+    /// # Errors
+    ///
+    /// Propagates [`move_linked_worktree`] failures.
+    pub fn move_linked(&self, from: &Path, to: &Path, options: &MoveWorktreeOptions) -> Result<()> {
+        move_linked_worktree(self.repo, from, to, options)
+    }
+
+    /// Repair `.git` / `gitdir` links for linked worktrees.
+    ///
+    /// # Errors
+    ///
+    /// Propagates [`repair_worktrees`] failures.
+    pub fn repair(&self, paths: &[&Path], dry_run: bool) -> Result<Vec<WorktreeRepair>> {
+        repair_worktrees(self.repo, paths, dry_run)
     }
 }
 

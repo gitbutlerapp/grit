@@ -291,3 +291,79 @@ fn worktree_remove_clean_crlf_with_system_autocrlf() {
     );
     assert!(!wt.exists(), "linked worktree directory should be gone");
 }
+
+#[derive(serde::Deserialize)]
+struct WorktreeMoveJson {
+    action: String,
+    from: String,
+    to: String,
+    dry_run: bool,
+}
+
+#[derive(serde::Deserialize)]
+struct WorktreeRepairJson {
+    action: String,
+    dry_run: bool,
+    repairs: Vec<WorktreeRepairRowJson>,
+}
+
+#[derive(serde::Deserialize)]
+struct WorktreeRepairRowJson {
+    path: String,
+    kind: String,
+}
+
+#[test]
+fn worktree_move_and_repair_json_schema() {
+    let dir = unique_tmp("move-repair-json");
+    git(&dir, &["init", "-q", "-b", "main", "."]);
+    std::fs::write(dir.join("f"), b"1\n").unwrap();
+    git(&dir, &["add", "f"]);
+    git(&dir, &["commit", "-qm", "base"]);
+
+    let wt = dir.join("linked");
+    git(
+        &dir,
+        &["worktree", "add", wt.to_str().unwrap(), "-b", "side"],
+    );
+    let dest = dir.join("moved");
+    let out = grit(
+        &dir,
+        &[
+            "worktree",
+            "move",
+            wt.to_str().unwrap(),
+            dest.to_str().unwrap(),
+            "--json",
+        ],
+    );
+    assert!(
+        out.status.success(),
+        "move json: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let body: WorktreeMoveJson = serde_json::from_slice(&out.stdout).expect("move json parse");
+    assert_eq!(body.action, "move");
+    assert!(!body.dry_run);
+    assert!(body.to.contains("moved"));
+
+    std::fs::rename(&dest, dir.join("renamed")).unwrap();
+    let out = grit(
+        &dir,
+        &[
+            "worktree",
+            "repair",
+            dir.join("renamed").to_str().unwrap(),
+            "--json",
+        ],
+    );
+    assert!(
+        out.status.success(),
+        "repair json: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let body: WorktreeRepairJson = serde_json::from_slice(&out.stdout).expect("repair json parse");
+    assert_eq!(body.action, "repair");
+    assert!(!body.repairs.is_empty());
+    assert!(body.repairs[0].kind.contains("git"));
+}

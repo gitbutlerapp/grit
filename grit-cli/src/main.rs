@@ -574,6 +574,28 @@ enum WorktreeAction {
         /// Path to the linked worktree.
         path: std::path::PathBuf,
     },
+    /// Move a linked worktree to a new directory.
+    Move {
+        /// Current worktree path.
+        worktree: std::path::PathBuf,
+        /// New path for the working tree.
+        new_path: std::path::PathBuf,
+        /// Allow move when the worktree is locked.
+        #[arg(short, long)]
+        force: bool,
+        /// Preview the move without changing disk state.
+        #[arg(long)]
+        dry_run: bool,
+    },
+    /// Fix `.git` / `gitdir` links after a manual directory move.
+    Repair {
+        /// Linked worktree roots to repair (default: all registered linked worktrees).
+        #[arg(value_name = "PATH")]
+        paths: Vec<std::path::PathBuf>,
+        /// Report repairs without writing files.
+        #[arg(long)]
+        dry_run: bool,
+    },
 }
 
 /// Subcommands of `grit bundle`.
@@ -2814,6 +2836,19 @@ fn dispatch(
             }
             WorktreeAction::Unlock { path } => {
                 emit_success(&commands::worktree::run_unlock(path)?, opts, ctx)
+            }
+            WorktreeAction::Move {
+                worktree,
+                new_path,
+                force,
+                dry_run,
+            } => emit_success(
+                &commands::worktree::run_move(worktree, new_path, force, dry_run)?,
+                opts,
+                ctx,
+            ),
+            WorktreeAction::Repair { paths, dry_run } => {
+                emit_success(&commands::worktree::run_repair(paths, dry_run)?, opts, ctx)
             }
         },
         Command::Switch {

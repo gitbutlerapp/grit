@@ -779,6 +779,22 @@ const COMMAND_CONTRACTS: &[(&str, CommandContract)] = &[
             takes_paths: false,
         },
     ),
+    (
+        "worktree.move",
+        CommandContract {
+            kind: CommandKind::Mutation,
+            takes_message: false,
+            takes_paths: false,
+        },
+    ),
+    (
+        "worktree.repair",
+        CommandContract {
+            kind: CommandKind::Mutation,
+            takes_message: false,
+            takes_paths: false,
+        },
+    ),
 ];
 
 /// Convention rule checked against the clap tree.

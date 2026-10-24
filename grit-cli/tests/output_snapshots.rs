@@ -911,6 +911,37 @@ fn snapshot_worktree_unlock() {
 }
 
 #[test]
+fn snapshot_worktree_move() {
+    snapshot_fresh(
+        "worktree_move",
+        &["worktree", "move", LINKED_WT, "moved-wt"],
+        |fixture| {
+            fixture
+                .run(&["worktree", "add", LINKED_WT, "-b", "wt-move"])
+                .expect_success("worktree add");
+        },
+    );
+}
+
+#[test]
+fn snapshot_worktree_repair() {
+    snapshot_fresh(
+        "worktree_repair",
+        &["worktree", "repair", "moved-wt"],
+        |fixture| {
+            fixture
+                .run(&["worktree", "add", LINKED_WT, "-b", "wt-repair"])
+                .expect_success("worktree add");
+            std::fs::rename(
+                fixture.path().join(LINKED_WT),
+                fixture.path().join("moved-wt"),
+            )
+            .expect("rename worktree");
+        },
+    );
+}
+
+#[test]
 fn snapshot_hooks() {
     snapshot_fresh("hooks", &["hooks"], |fixture| {
         let hook = fixture.path().join(".git/hooks/pre-commit");
