@@ -1267,10 +1267,13 @@ fn commit_worktree_reverse(
     let rules = WorktreeRules::from_repository(repo, &index).map_err(HunkSelectError::from)?;
     let mut dir_cache = LeadingDirCache::new();
     for plan in planned {
+        // The restored content only lives in the worktree, so it is hashed (for `ident` and
+        // filter metadata) but not stored.
         let oid = repo
             .odb()
-            .write(ObjectKind::Blob, &plan.clean_bytes)
-            .map_err(|e| HunkSelectError::Repository(e.to_string()))?;
+            .hash_algo()
+            .hash_object(ObjectKind::Blob, &plan.clean_bytes)
+            .map_err(HunkSelectError::from)?;
         let worktree_bytes = smudge_bytes_for_worktree_path(
             repo,
             &rules,
