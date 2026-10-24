@@ -55,6 +55,8 @@ When `commit.gpgsign` is true (or `commit.gpgSign`), `grit commit` signs the new
 
 On a **detached HEAD** (for example after [`grit switch --detach`](../switch/)), `grit commit` records a new commit and moves `HEAD` to it without updating any branch — the same as `git commit` in that state. Use [`grit switch -c <name>`](../switch/) afterward to name the branch if you want to keep the work. A failed commit (missing message, nothing to commit) does not advance `HEAD` or stage your working tree on detached HEAD, the same as on a branch.
 
+Auto-staging records the modes Git would. With `core.symlinks=false` (common on Windows, where Git and Grit check symlinks out as plain files holding the link target), a symlink stays a symlink (`120000`): an untouched link is not part of the commit, and editing the file stages the new link target. With `core.filemode=false`, a tracked file keeps the executable bit the index already has.
+
 With `--allow-empty`, grit records a new commit whose tree matches the parent even when the working tree is clean (staging still runs first, the same as any other commit). Use this to mark a point in history (for example to trigger CI) without changing files. The resulting commit is valid for Git the same way as `git commit --allow-empty`.
 
 When a merge is in progress (`MERGE_HEAD` is present) and every conflict is resolved in the index, `grit commit` records a **merge commit** with two parents (your branch tip and the merged tip) and clears merge state the same way Git does after `git commit`.

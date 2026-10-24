@@ -65,6 +65,8 @@ Rename detection is on by default (Git’s `status.renames` / `diff.renames`; di
 
 Like Git, `grit status` compares each tracked file's size and timestamps with what the index recorded, and reads a file only when they differ. A clean tree costs one file-system lookup per tracked file, whatever the file sizes or `core.filemode`. Files written in the same second as the index (right after `git clone`, a commit or a checkout) cannot be trusted by timestamp alone: status reads them once and saves the refreshed index, so later runs skip them. Like `git status`, it may therefore rewrite `.git/index`; only the cached file information changes, never what is staged.
 
+Mode changes the checkout cannot express are not reported: with `core.filemode=false` the executable bit is ignored, and with `core.symlinks=false` a symlink checked out as a plain file holding its target is compared by content, so it shows up only when the target text changes.
+
 See also the [global options](../global-options/).
 
 ## Examples

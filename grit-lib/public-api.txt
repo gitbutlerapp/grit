@@ -6672,6 +6672,31 @@ impl core::marker::Unpin for grit_lib::index::StatMatchPolicy
 impl core::marker::UnsafeUnpin for grit_lib::index::StatMatchPolicy
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::index::StatMatchPolicy
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::index::StatMatchPolicy
+pub struct grit_lib::index::WorktreeModePolicy
+pub grit_lib::index::WorktreeModePolicy::has_symlinks: bool
+pub grit_lib::index::WorktreeModePolicy::trust_filemode: bool
+impl grit_lib::index::WorktreeModePolicy
+pub fn grit_lib::index::WorktreeModePolicy::from_config(&grit_lib::config::ConfigSet) -> Self
+pub fn grit_lib::index::WorktreeModePolicy::index_mode_for_worktree(self, u32, core::option::Option<u32>) -> u32
+pub fn grit_lib::index::WorktreeModePolicy::worktree_mode_matches(self, u32, u32) -> bool
+impl core::clone::Clone for grit_lib::index::WorktreeModePolicy
+pub fn grit_lib::index::WorktreeModePolicy::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::index::WorktreeModePolicy
+impl core::cmp::PartialEq for grit_lib::index::WorktreeModePolicy
+pub fn grit_lib::index::WorktreeModePolicy::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::index::WorktreeModePolicy
+pub fn grit_lib::index::WorktreeModePolicy::default() -> Self
+impl core::fmt::Debug for grit_lib::index::WorktreeModePolicy
+pub fn grit_lib::index::WorktreeModePolicy::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::index::WorktreeModePolicy
+impl core::marker::StructuralPartialEq for grit_lib::index::WorktreeModePolicy
+impl core::marker::Freeze for grit_lib::index::WorktreeModePolicy
+impl core::marker::Send for grit_lib::index::WorktreeModePolicy
+impl core::marker::Sync for grit_lib::index::WorktreeModePolicy
+impl core::marker::Unpin for grit_lib::index::WorktreeModePolicy
+impl core::marker::UnsafeUnpin for grit_lib::index::WorktreeModePolicy
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::index::WorktreeModePolicy
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::index::WorktreeModePolicy
 pub const grit_lib::index::MODE_EXECUTABLE: u32
 pub const grit_lib::index::MODE_GITLINK: u32
 pub const grit_lib::index::MODE_REGULAR: u32
