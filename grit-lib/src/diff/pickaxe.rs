@@ -232,6 +232,15 @@ fn blob_occurrence_count(
     if mode == "000000" || *oid == ObjectId::zero() {
         return Ok(0);
     }
+    if mode == "160000" {
+        let (bytes, _) = blob_side(odb, mode, oid)?;
+        return Ok(count_occurrences(
+            bytes.data.as_slice(),
+            needle,
+            ignore_case,
+            ere,
+        ));
+    }
     if let Some(cache) = cache {
         if ere.is_none() && !ignore_case {
             if let Some(&count) = cache.get(oid) {

@@ -252,6 +252,44 @@ fn pickaxe_merge_default_skipped_matches_git() {
 }
 
 #[test]
+fn pickaxe_s_gitlink_with_max_count_matches_git() {
+    let repo = HistoryRepo::init();
+    let worktree = repo.worktree();
+    std::fs::write(worktree.join("f"), "a\n").expect("write f");
+    git(worktree, &["add", "f"]);
+    git(
+        worktree,
+        &[
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            "160000,1111111111111111111111111111111111111111,lib",
+        ],
+    );
+    git(worktree, &["commit", "-m", "one"]);
+    std::fs::write(worktree.join("f"), "b\n").expect("write f");
+    git(worktree, &["add", "f"]);
+    git(
+        worktree,
+        &[
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            "160000,2222222222222222222222222222222222222222,lib",
+        ],
+    );
+    git(worktree, &["commit", "-m", "two"]);
+    let git_oids = git_log_pickaxe(worktree, &["-S", "anything", "-n", "10"]);
+    let grit_oids = grit_pickaxe_log(
+        worktree,
+        Pickaxe::occurrences("anything").into_shared(),
+        Some(10),
+        Vec::new(),
+    );
+    assert_eq!(git_oids, grit_oids);
+}
+
+#[test]
 fn pickaxe_with_paths_and_max_count_matches_git() {
     let repo = HistoryRepo::init();
     let worktree = repo.worktree();
