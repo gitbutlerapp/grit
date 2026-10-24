@@ -2378,12 +2378,16 @@ impl Odb {
 
     /// Create all 256 loose-object prefix directories (`objects/xx/`).
     ///
-    /// Bulk `git add`-style staging calls this once before parallel loose writes.
+    /// Bulk `git add`-style staging calls this once before parallel loose writes. A no-op for
+    /// custom primaries, which receive those writes instead of `objects/`.
     ///
     /// # Errors
     ///
     /// Returns [`Error::Io`] if a directory cannot be created.
     pub fn ensure_all_loose_prefix_dirs(&self) -> Result<()> {
+        if self.custom_primary.is_some() {
+            return Ok(());
+        }
         self.local_loose()?.ensure_all_loose_prefix_dirs()
     }
 
@@ -2448,9 +2452,13 @@ impl Odb {
     /// valid canonical store form (`"<kind> <len>\\0<payload>"`). Hashing and
     /// compression are skipped; use after parallel batch preparation.
     ///
+    /// With a custom primary the bytes are inflated and stored through
+    /// [`WritableObjectStore::write`] instead, so staging works on any backend.
+    ///
     /// # Errors
     ///
-    /// Same as [`Self::write`].
+    /// Same as [`Self::write`]; [`Error::Zlib`] or [`Error::CorruptObject`] when a custom
+    /// primary receives bytes that do not inflate to a valid object.
     pub fn write_loose_zlib_prehashed(
         &self,
         oid: &ObjectId,
@@ -2458,9 +2466,9 @@ impl Odb {
         options: WriteOptions,
     ) -> Result<ObjectId> {
         if self.custom_primary.is_some() {
-            return Err(Error::UnsupportedObjectStore {
-                operation: "write_loose_zlib_prehashed",
-            });
+            let raw = decompress_zlib_loose_bytes(zlib_store)?;
+            let obj = parse_object_bytes(&raw)?;
+            return self.write_with_options(obj.kind, &obj.data, options);
         }
         let primary = self.primary()?;
         if let Some(existing) = primary.try_finish_duplicate_write(oid, options)? {
@@ -3110,6 +3118,45 @@ mod tests {
             fs::read(odb2.object_path(&oid2)).unwrap(),
             fs::read(odb.object_path(&oid_normal)).unwrap()
         );
+    }
+
+    #[test]
+    fn write_loose_zlib_prehashed_routes_to_custom_primary() {
+        use crate::objects::HashAlgo;
+        use std::sync::Arc;
+
+        let dir = TempDir::new().unwrap();
+        let objects = dir.path().join("objects");
+        fs::create_dir_all(&objects).unwrap();
+        let store = Arc::new(MemoryStore::new(HashAlgo::Sha1));
+        let odb = OdbBuilder::files(&objects)
+            .primary(store.clone())
+            .alternates(false)
+            .build();
+        let data = b"staged through a custom primary";
+        let oid = hash::hash_object(HashAlgo::Sha1, ObjectKind::Blob, data).unwrap();
+        let zlib = zlib_compress_loose_store_from_bytes(
+            &super::blob_store_bytes(data),
+            Compression::fast(),
+        )
+        .unwrap();
+
+        odb.ensure_all_loose_prefix_dirs().unwrap();
+        let written = odb
+            .write_loose_zlib_prehashed(&oid, &zlib, WriteOptions::default())
+            .unwrap();
+        assert_eq!(written, oid);
+        assert!(store.contains(&oid).unwrap());
+        assert_eq!(odb.read(&oid).unwrap().data, data);
+        assert_eq!(
+            fs::read_dir(&objects).unwrap().count(),
+            0,
+            "no loose shard directories or files beside a custom primary"
+        );
+
+        assert!(odb
+            .write_loose_zlib_prehashed(&oid, b"not zlib", WriteOptions::default())
+            .is_err());
     }
 
     /// Re-writing an object that already exists as a loose file must not replace it; Git
