@@ -24,8 +24,8 @@ use crate::merge_base::{
     commits_reachable_excluding_ancestors_of_cutoffs, ReachableWalkCommitterCutoffs,
 };
 use crate::objects::{
-    oid_hash_map, oid_hash_set, parse_commit, parse_tag, parse_tree, CommitData, ObjectId,
-    ObjectKind, OidHashMap, OidHashSet, TreeEntry, TreeRefIter,
+    oid_hash_map, oid_hash_set, parse_commit, parse_tag, CommitData, CommitRef,
+    ObjectId, ObjectKind, OidHashMap, OidHashSet, TreeEntry, TreeRefIter,
 };
 use crate::odb::store::ObjectStore;
 use crate::pack_bitmap::BitmapIndex;
@@ -1055,6 +1055,9 @@ pub fn rev_list(
         && !options.full_history
         && !options.ancestry_path
         && !options.simplify_merges;
+    if use_dense_path_limit {
+        graph.set_skip_subject_cache(true);
+    }
 
     let mut traversal_missing = Vec::new();
     let mut traversal_missing_seen = HashSet::new();
@@ -4947,7 +4950,7 @@ struct DenseWalkCache {
     tree_read_buf: Vec<u8>,
 }
 
-const LITERAL_TREE_DIFF_CAP: usize = 4096;
+const LITERAL_TREE_DIFF_CAP: usize = 256 * 1024;
 const COMPONENT_CACHE_MAX_ENTRIES: usize = 512 * 1024;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -5010,8 +5013,8 @@ impl DenseWalkCache {
         }
         self.component_misses += 1;
         self.tree_reads += 1;
-        let entries = read_parsed_tree(repo, tree)?;
-        let resolved = match tree_entry_by_name(&entries, component, as_tree) {
+        let entries = repo.odb().cached_tree_entries(&tree)?;
+        let resolved = match tree_entry_by_name(entries.as_slice(), component, as_tree) {
             Some(entry) => CachedTreeChild::Found {
                 oid: entry.oid,
                 mode: entry.mode,
@@ -5053,8 +5056,12 @@ fn record_literal_tree_diff(
     path: &str,
     differs: bool,
 ) {
-    if cache.literal_tree_diff.len() >= LITERAL_TREE_DIFF_CAP {
-        cache.literal_tree_diff.clear();
+    while cache.literal_tree_diff.len() >= LITERAL_TREE_DIFF_CAP {
+        if let Some(key) = cache.literal_tree_diff.keys().next().copied() {
+            cache.literal_tree_diff.remove(&key);
+        } else {
+            break;
+        }
     }
     cache
         .literal_tree_diff
@@ -5419,13 +5426,7 @@ fn pathspec_entry_is_relevant(path: &str, is_tree: bool, pathspecs: &[String]) -
 }
 
 fn read_parsed_tree(repo: &Repository, tree_oid: ObjectId) -> Result<Vec<TreeEntry>> {
-    let object = repo.odb().read(&tree_oid)?;
-    if object.kind != ObjectKind::Tree {
-        return Err(Error::CorruptObject(format!(
-            "object {tree_oid} is not a tree"
-        )));
-    }
-    parse_tree(&object.data)
+    Ok(repo.odb().cached_tree_entries(&tree_oid)?.as_ref().clone())
 }
 
 fn tree_entry_by_name<'a>(
@@ -7363,6 +7364,8 @@ pub(crate) struct CommitGraph<'r> {
     shallow_boundaries: OidHashSet,
     graft_parents: OidHashMap<Vec<ObjectId>>,
     subjects: HashMap<ObjectId, String>,
+    /// When set, [`Self::populate`] skips subject strings (dense path-limited walks).
+    skip_subject_cache: bool,
     /// Parsed commits kept for the caller once [`Self::retain_parsed_commits`] is called.
     retained: Option<OidHashMap<CommitData>>,
 }
@@ -7402,8 +7405,13 @@ impl<'r> CommitGraph<'r> {
             shallow_boundaries,
             graft_parents,
             subjects: HashMap::new(),
+            skip_subject_cache: false,
             retained: None,
         }
+    }
+
+    pub(crate) fn set_skip_subject_cache(&mut self, skip: bool) {
+        self.skip_subject_cache = skip;
     }
 
     /// Keep every commit object parsed from here on, for [`Self::take_retained_commits`].
@@ -7479,9 +7487,13 @@ impl<'r> CommitGraph<'r> {
     }
 
     fn fill_author_time_from_object(&mut self, oid: ObjectId) {
-        if let Ok(commit) = load_commit(self.repo, oid) {
-            self.author_time
-                .insert(oid, committer_unix_seconds_for_ordering(&commit.author));
+        if let Ok(object) = self.repo.odb().read(&oid) {
+            if object.kind == ObjectKind::Commit {
+                if let Ok(cref) = CommitRef::parse(&object.data) {
+                    self.author_time
+                        .insert(oid, cref.author_unix_seconds_for_ordering());
+                }
+            }
         }
     }
 
@@ -7527,7 +7539,9 @@ impl<'r> CommitGraph<'r> {
                 }
                 self.committer_time.insert(oid, ctime);
                 self.parents.insert(oid, parents);
-                self.cache_commit_subject(oid)?;
+                if !self.skip_subject_cache {
+                    self.cache_commit_subject(oid)?;
+                }
                 return Ok(());
             }
         }
@@ -7556,11 +7570,17 @@ impl<'r> CommitGraph<'r> {
             return Ok(());
         }
 
-        let mut commit = load_commit(self.repo, oid)?;
+        let object = self.repo.odb().read(&oid)?;
+        if object.kind != ObjectKind::Commit {
+            return Err(rev_list_unexpected_kind(oid, "commit"));
+        }
+        #[cfg(test)]
+        self.repo.odb().hot_path_metrics().record_commit_parse();
+        let cref = CommitRef::parse(&object.data)?;
         let mut parents = if self.shallow_boundaries.contains(&oid) {
             Vec::new()
         } else {
-            std::mem::take(&mut commit.parents)
+            cref.parents().to_vec()
         };
         if let Some(graft_parents) = self.graft_parents.get(&oid) {
             parents = graft_parents.clone();
@@ -7569,24 +7589,18 @@ impl<'r> CommitGraph<'r> {
             parents.truncate(1);
         }
         self.committer_time
-            .insert(oid, committer_unix_seconds_for_ordering(&commit.committer));
+            .insert(oid, cref.committer_unix_seconds_for_ordering());
         self.author_time
-            .insert(oid, committer_unix_seconds_for_ordering(&commit.author));
-        self.commit_trees.insert(oid, commit.tree);
+            .insert(oid, cref.author_unix_seconds_for_ordering());
+        self.commit_trees.insert(oid, cref.tree());
         self.parents.insert(oid, parents);
-        self.subjects
-            .insert(oid, subject_line_from_commit_message(&commit.message));
+        if !self.skip_subject_cache {
+            let subject = crate::objects::read_commit_subject_line(&object.data)
+                .unwrap_or_else(|_| "(no subject)".to_owned());
+            self.subjects.insert(oid, subject);
+        }
         Ok(())
     }
-}
-
-fn subject_line_from_commit_message(message: &str) -> String {
-    message
-        .lines()
-        .find(|line| !line.trim().is_empty())
-        .map(str::trim)
-        .unwrap_or("(no subject)")
-        .to_owned()
 }
 
 /// Load shallow boundary commit OIDs from `.git/shallow`.

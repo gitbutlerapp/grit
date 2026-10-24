@@ -245,7 +245,7 @@ impl SessionTreeEntries {
     /// kept. A parsed entry costs roughly 80 bytes, so this holds a few MiB: enough
     /// for the trees a diff of neighbouring commits revisits, without growing with
     /// history size.
-    const ENTRY_BUDGET: usize = 1 << 16;
+    const ENTRY_BUDGET: usize = 1 << 20;
 
     fn insert(&mut self, oid: ObjectId, tree: Arc<Vec<crate::objects::TreeEntry>>) {
         if tree.len() > Self::ENTRY_BUDGET {
