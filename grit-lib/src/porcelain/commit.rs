@@ -85,6 +85,10 @@ pub struct CommitAuthorInfo {
 #[derive(Debug, Clone, Default)]
 pub struct CommitRequest {
     /// Commit message body (first line becomes the subject). A trailing newline is added when missing.
+    ///
+    /// The message is also written to `.git/COMMIT_EDITMSG` for the `commit-msg` hook. The file is
+    /// read back only when that hook ran, so concurrent committers sharing the file never record
+    /// each other's message.
     pub message: String,
     /// Author identity: `Name <email>`, a bare email, or a full header line `Name <email> <unix> <±HHMM>`.
     pub author: String,
@@ -1228,13 +1232,15 @@ fn create_commit_with_index(
         )?
     {
         hooks_run.push(HookName::CommitMsg);
-    }
-    message = fs::read_to_string(&editmsg_path).map_err(Error::Io)?;
-    if message.trim().is_empty() {
-        return Err(Error::EmptyCommitMessage);
-    }
-    if !message.ends_with('\n') {
-        message.push('\n');
+        // COMMIT_EDITMSG is shared by every committer in the repository, so it is only
+        // read back when a hook may have edited it; otherwise the in-memory message wins.
+        message = fs::read_to_string(&editmsg_path).map_err(Error::Io)?;
+        if message.trim().is_empty() {
+            return Err(Error::EmptyCommitMessage);
+        }
+        if !message.ends_with('\n') {
+            message.push('\n');
+        }
     }
 
     let (author, author_raw) = resolve_author_for_commit(
