@@ -380,7 +380,7 @@ fn complete_bundle_fetch(
     )?;
 
     if opts.tags == TagMode::Following {
-        crate::fetch::retain_following_tags(local_odb, &mut matched, &pack_oids, &local_shallow)?;
+        crate::fetch::retain_following_tags(local_odb, &mut matched, &pack_oids, &local_shallow);
     }
 
     let local_repo = if opts.dry_run {

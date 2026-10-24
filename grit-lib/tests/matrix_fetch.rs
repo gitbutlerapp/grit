@@ -1297,6 +1297,134 @@ fn matrix_incremental_following_with_tags_already_local() {
     );
 }
 
+/// `build_source_work` plus tags on every kind of object: tags on a tree and a
+/// blob of `main`, a tag of a tag, a tree and a blob that only the `side`
+/// branch reaches, and a blob no commit reaches.
+///
+/// No annotated tag on a tree or blob of `main`: `grit upload-pack` (the http
+/// drivers' server) only sends `include-tag` objects for tags on commits.
+fn build_source_with_object_tags(dir: &Path) {
+    build_source_work(dir);
+    git(dir, &["tag", "light-c1", "main~1"]);
+    git(dir, &["tag", "tree-main", "main^{tree}"]);
+    git(dir, &["tag", "blob-main", "main:a.txt"]);
+    git(dir, &["tag", "-a", "v1-nested", "-m", "tag of a tag", "v1"]);
+
+    git(dir, &["checkout", "-q", "side"]);
+    std::fs::write(dir.join("side.txt"), "side only\n").unwrap();
+    git(dir, &["add", "side.txt"]);
+    git(dir, &["commit", "-q", "-m", "side2"]);
+    git(dir, &["tag", "tree-side", "side^{tree}"]);
+    git(
+        dir,
+        &["tag", "-a", "blob-side", "-m", "blob", "side:side.txt"],
+    );
+    git(dir, &["checkout", "-q", "main"]);
+
+    std::fs::write(dir.join("loose.txt"), "in no commit\n").unwrap();
+    let loose = git(dir, &["hash-object", "-w", "loose.txt"]);
+    std::fs::remove_file(dir.join("loose.txt")).unwrap();
+    git(dir, &["tag", "blob-loose", loose.trim()]);
+}
+
+// ===========================================================================
+// 9c. `Following` keeps exactly the tags system `git fetch` follows when tags
+//     point at commits, trees, blobs and other tags, both on a fresh fetch
+//     (targets delivered in the pack) and on an incremental fetch where new
+//     tags point at objects the local repo already has.
+// ===========================================================================
+#[test]
+fn matrix_following_matches_git_for_tree_blob_and_side_tags() {
+    let h = Harness::new();
+    let ran = for_each_driver(
+        &h,
+        &|w| build_source_with_object_tags(w),
+        &|driver, fetch, served, local_git| {
+            let local_root = local_git.parent().unwrap();
+            let refspec = "+refs/heads/main:refs/remotes/origin/main";
+            let mut opts = FetchOptions {
+                refspecs: vec![refspec.to_owned()],
+                tags: TagMode::Following,
+                ..Default::default()
+            };
+            let git_local = h
+                .path()
+                .join(format!("git-object-tags-{}", driver.name.replace('/', "-")));
+            init_local(&git_local);
+            let served_str = served.to_str().unwrap();
+
+            fetch(local_git, &mut opts)
+                .unwrap_or_else(|e| panic!("[{}] fresh fetch failed: {e}", driver.name));
+            git(&git_local, &["fetch", "-q", served_str, refspec]);
+            let tags = git(local_root, &["for-each-ref", "refs/tags"]);
+            assert_eq!(
+                tags,
+                git(&git_local, &["for-each-ref", "refs/tags"]),
+                "[{}] fresh fetch: grit and git must follow the same tags",
+                driver.name
+            );
+            for kept in ["v1", "light-c1", "tree-main", "blob-main", "v1-nested"] {
+                assert!(
+                    tags.contains(&format!("refs/tags/{kept}\n")),
+                    "[{}] {kept} must be followed:\n{tags}",
+                    driver.name
+                );
+            }
+            for dropped in ["vside", "tree-side", "blob-side", "blob-loose"] {
+                assert!(
+                    !tags.contains(&format!("refs/tags/{dropped}\n")),
+                    "[{}] {dropped} must not be followed:\n{tags}",
+                    driver.name
+                );
+            }
+            fsck_clean(local_root);
+
+            // New tags on objects both clients already have, plus a new commit
+            // so the fetch still transfers a pack. Lightweight only: over http
+            // v0/v1 the client does not see advertised peels, so it never wants
+            // an annotated tag on a commit it already has.
+            let work = h.path().join(format!(
+                "object-tags-work-{}",
+                driver.name.replace('/', "-")
+            ));
+            git_clone_nonbare(served, &work);
+            git(&work, &["tag", "late-c1", "main~1"]);
+            git(&work, &["tag", "late-blob", "main~1:a.txt"]);
+            git(&work, &["commit", "-q", "--allow-empty", "-m", "c3"]);
+            git(
+                &work,
+                &["push", "-q", "origin", "main", "late-c1", "late-blob"],
+            );
+
+            fetch(local_git, &mut opts)
+                .unwrap_or_else(|e| panic!("[{}] incremental fetch failed: {e}", driver.name));
+            git(&git_local, &["fetch", "-q", served_str, refspec]);
+            let tags = git(local_root, &["for-each-ref", "refs/tags"]);
+            assert_eq!(
+                tags,
+                git(&git_local, &["for-each-ref", "refs/tags"]),
+                "[{}] incremental fetch: grit and git must follow the same tags",
+                driver.name
+            );
+            assert!(
+                tags.contains("refs/tags/late-c1\n"),
+                "[{}] a new tag on a local, reachable commit must be followed:\n{tags}",
+                driver.name
+            );
+            assert!(
+                tags.contains("refs/tags/late-blob\n"),
+                "[{}] a new tag on a blob already present locally must be followed:\n{tags}",
+                driver.name
+            );
+            fsck_clean(local_root);
+        },
+    );
+    assert!(
+        ran > 0,
+        "no transport driver was available for the object-tags Following test"
+    );
+}
+
 /// Clone `bare` into a non-bare work tree `dst` with an `origin` remote, so a
 /// test can make a new commit and `push` it back to the served bare repo.
 fn git_clone_nonbare(bare: &Path, dst: &Path) {

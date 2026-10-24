@@ -23,7 +23,7 @@ When the source is a **literal path or URL** (not a configured remote), grit doe
 
 Human output lists each local ref with its remote source and old → new oids. Pruned refs show `deleted`; rejected updates are listed and exit **1** (same as [`grit push`](../push/) rejections). When a stale remote-tracking ref blocks another update (for example `origin/gone/x` still exists locally but the remote now has `gone`), grit still applies every ref it can and reports the blocked ref as rejected; the `reason` field suggests `grit fetch --prune` or `grit remote prune <remote>` when pruning would remove the stale ref.
 
-Tag policy follows Git: default is follow-tags (reachable annotated tags), `--tags` fetches every remote tag, `--no-tags` disables automatic tags. `remote.<name>.tagOpt` (`--tags` / `--no-tags`) applies when the CLI does not override it.
+Tag policy follows Git: by default grit follows tags, fetching every tag (lightweight or annotated) that points into the fetched history. That includes tags on commits, trees and blobs that arrive with the fetch, tags on commits you already have that the fetched refs reach, and tags on trees or blobs you already have. `--tags` fetches every remote tag, and `--no-tags` disables automatic tags. Tag following costs milliseconds even on large repositories. `remote.<name>.tagOpt` (`--tags` / `--no-tags`) applies when the CLI does not override it.
 
 `--dry-run` negotiates and reports updates without writing refs, objects, or `FETCH_HEAD`. Human output ends with **Would fetch N update(s) from …** when anything would change, or **Already up to date with …** when nothing would.
 

@@ -120,8 +120,15 @@ pub struct RefUpdate {
 pub enum TagMode {
     /// Do not fetch any tags automatically.
     None,
-    /// Fetch tags that point at commits reachable from the refs being fetched
-    /// (same idea as `git fetch --follow-tags`; not what `git clone` does).
+    /// Fetch tags that point into the history being fetched (Git's default
+    /// tag-following for `git fetch`; not what `git clone` does).
+    ///
+    /// A tag is kept when the object it peels to arrives with this fetch, when
+    /// it is a commit already present locally and reachable from the fetched
+    /// refs, or when it is a tree or blob already present locally (as Git
+    /// does). Annotated tags also need their tag object. Deciding this reads no
+    /// objects for delivered targets and walks only commits for local ones, so
+    /// it stays cheap on large histories.
     ///
     /// Tags the local repository already has at the advertised value are not
     /// considered again, so they do not appear in [`FetchOutcome::updates`].
@@ -1904,7 +1911,7 @@ pub fn fetch_local_with_progress(
 
     if opts.tags == TagMode::Following {
         let boundaries = crate::shallow::load_shallow_boundaries(local_git_dir);
-        crate::fetch::retain_following_tags(&local_odb, &mut matched, &pack_oids, &boundaries)?;
+        crate::fetch::retain_following_tags(&local_odb, &mut matched, &pack_oids, &boundaries);
     }
 
     // 4. Classify and apply ref updates. Ancestry checks use the local repo
