@@ -727,15 +727,19 @@ pub fn register_cli_snapshot_filters(settings: &mut insta::Settings, fixture: &C
     register_cli_snapshot_filters_for(settings, &[fixture]);
 }
 
-/// Like [`register_cli_snapshot_filters`], but redact every fixture path (for
-/// `snapshot_fresh_all_modes`, where human/json/markdown use separate repos).
-pub fn register_cli_snapshot_filters_for(settings: &mut insta::Settings, fixtures: &[&CliFixture]) {
+fn register_fixture_path_filters(settings: &mut insta::Settings, fixtures: &[&CliFixture]) {
     register_common_cli_snapshot_filters(settings);
 
     for fixture in fixtures {
         redact_path(settings, fixture.path(), "[REPO]");
         redact_path(settings, fixture.home_root(), "[HOME]");
     }
+}
+
+/// Like [`register_cli_snapshot_filters`], but redact every fixture path (for
+/// `snapshot_fresh_all_modes`, where human/json/markdown use separate repos).
+pub fn register_cli_snapshot_filters_for(settings: &mut insta::Settings, fixtures: &[&CliFixture]) {
+    register_fixture_path_filters(settings, fixtures);
     // After fixture paths are `[REPO]` / `[HOME]`, redact leftover `tempfile` paths
     // (remote show fetch URLs, etc.).
     settings.add_filter(r"/tmp/\.tmp[A-Za-z0-9]+", "[TMPDIR]");
@@ -748,11 +752,12 @@ pub fn register_network_snapshot_filters(
     upstream: &Path,
     extra_paths: &[&Path],
 ) {
-    register_cli_snapshot_filters(settings, fixture);
+    register_fixture_path_filters(settings, &[fixture]);
     redact_path(settings, upstream, "[UPSTREAM]");
     for path in extra_paths {
         redact_path(settings, path, "[WORKTREE]");
     }
+    settings.add_filter(r"/tmp/\.tmp[A-Za-z0-9]+", "[TMPDIR]");
 
     settings.add_filter(r#""bytes": \d+"#, r#""bytes": "[BYTES]""#);
     settings.add_filter(r" \([\d.]+ (?:KiB|MiB|B)\)", " ([SIZE])");
