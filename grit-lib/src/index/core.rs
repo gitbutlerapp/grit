@@ -1555,14 +1555,7 @@ impl Index {
         let wait = LockWait::files_ref_lock(config);
         let (tmp_path, mut lock_file) = LockFile::acquire(&tmp_path, wait)
             .map_err(|err| match err {
-                LockError::Held { .. } => {
-                    let message = build_lock_exists_message(
-                        &tmp_path,
-                        &pid_path,
-                        &io::Error::from(io::ErrorKind::AlreadyExists),
-                    );
-                    Error::Io(io::Error::new(io::ErrorKind::AlreadyExists, message))
-                }
+                LockError::Held { .. } => index_locked_error(&tmp_path),
                 LockError::Io { source, .. } => Error::Io(source),
             })?
             .into_open_file()
@@ -3646,7 +3639,8 @@ impl IndexLock {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::Io`] with `AlreadyExists` when the lock file is present.
+    /// Returns [`Error::IndexLocked`] when the lock file is still present after the
+    /// `core.filesRefLockTimeout` wait, and [`Error::Io`] when it cannot be created.
     pub fn acquire(index_path: &Path, config: Option<&ConfigSet>) -> Result<Self> {
         let lock_path = index_path.with_extension("lock");
         let pid_path = pid_path_for_lock(&lock_path);
@@ -3656,14 +3650,7 @@ impl IndexLock {
         let wait = LockWait::files_ref_lock(config);
         let (lock_path, file) = LockFile::acquire(&lock_path, wait)
             .map_err(|err| match err {
-                LockError::Held { .. } => {
-                    let message = build_lock_exists_message(
-                        &lock_path,
-                        &pid_path,
-                        &io::Error::from(io::ErrorKind::AlreadyExists),
-                    );
-                    Error::Io(io::Error::new(io::ErrorKind::AlreadyExists, message))
-                }
+                LockError::Held { .. } => index_locked_error(&lock_path),
                 LockError::Io { source, .. } => Error::Io(source),
             })?
             .into_open_file()
@@ -3708,34 +3695,24 @@ impl Drop for IndexLock {
     }
 }
 
-/// Detail lines Git prints when the index lock file already exists (used by stash and similar).
+/// Human-readable explanation of a held lock for the index at `index_path`.
+///
+/// Same text as the [`Error::IndexLocked`] returned when that lock blocks a write, including
+/// whether the process recorded in the pid sidecar is still running.
 pub fn format_index_lock_blocked_detail(index_path: &Path) -> String {
-    let lock_path = index_path.with_extension("lock");
-    let pid_path = pid_path_for_lock(&lock_path);
-    let err = io::Error::new(io::ErrorKind::AlreadyExists, "File exists");
-    build_lock_exists_message(&lock_path, &pid_path, &err)
+    index_locked_error(&index_path.with_extension("lock")).to_string()
 }
 
-fn build_lock_exists_message(lock_path: &Path, pid_path: &Path, err: &io::Error) -> String {
-    let mut msg = format!("Unable to create '{}': {}.\n\n", lock_path.display(), err);
-
-    if let Some(pid) = read_lock_pid(pid_path) {
-        if is_process_running(pid) {
-            msg.push_str(&format!(
-                "Lock is held by process {pid}; if no git process is running, the lock file may be stale (PIDs can be reused)"
-            ));
-        } else {
-            msg.push_str(&format!(
-                "Lock was held by process {pid}, which is no longer running; the lock file appears to be stale"
-            ));
-        }
-    } else {
-        msg.push_str(
-            "Another git process seems to be running in this repository, or the lock file may be stale",
-        );
+/// [`Error::IndexLocked`] for an existing `lock_path`, reading its pid sidecar when present.
+fn index_locked_error(lock_path: &Path) -> Error {
+    let holder = read_lock_pid(&pid_path_for_lock(lock_path)).map(|pid| crate::error::LockHolder {
+        pid,
+        running: is_process_running(pid),
+    });
+    Error::IndexLocked {
+        lock_path: lock_path.to_path_buf(),
+        holder,
     }
-
-    msg
 }
 
 fn read_lock_pid(pid_path: &Path) -> Option<u64> {
@@ -5395,10 +5372,52 @@ mod tests {
         let mut idx = Index::new();
         idx.add_or_replace(make_entry("tracked.txt"));
         let lock = IndexLock::acquire(&path, None).unwrap();
-        assert!(IndexLock::acquire(&path, None).is_err());
+        assert!(matches!(
+            IndexLock::acquire(&path, None),
+            Err(Error::IndexLocked { .. })
+        ));
         drop(lock);
         idx.write(&path).unwrap(); // idx is mut in each test scope
         assert_eq!(Index::load(&path).unwrap().entries.len(), 1);
+    }
+
+    #[test]
+    fn held_index_lock_is_a_typed_error_naming_the_holder() {
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("index");
+        let lock_path = dir.path().join("index.lock");
+        fs::write(&lock_path, b"foreign").unwrap();
+        fs::write(
+            dir.path().join("index~pid.lock"),
+            format!("pid {}\n", std::process::id()),
+        )
+        .unwrap();
+
+        let Err(acquire_err) = IndexLock::acquire(&path, None) else {
+            panic!("lock must be refused");
+        };
+        let write_err = Index::new().write(&path).unwrap_err();
+        for err in [acquire_err, write_err] {
+            match &err {
+                Error::IndexLocked {
+                    lock_path: p,
+                    holder,
+                } => {
+                    assert_eq!(p, &lock_path);
+                    assert_eq!(
+                        *holder,
+                        Some(crate::error::LockHolder {
+                            pid: u64::from(std::process::id()),
+                            running: true,
+                        })
+                    );
+                }
+                other => panic!("expected IndexLocked, got {other:?}"),
+            }
+            assert_eq!(err.to_string(), format_index_lock_blocked_detail(&path));
+        }
+        assert_eq!(fs::read(&lock_path).unwrap(), b"foreign");
+        assert!(!path.exists());
     }
 
     #[test]

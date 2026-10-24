@@ -132,10 +132,26 @@ pub fn would_overwrite_error(
     })
 }
 
+/// Build a structured CLI error for [`LibError::IndexLocked`] (`human` is the library message).
+pub fn index_locked(human: String) -> Error {
+    Error::new(StructuredCliError {
+        payload: StructuredJsonError {
+            error: human.clone(),
+            kind: ErrorKind::IndexLocked,
+            conflicts: None,
+            commit: None,
+            would_overwrite: None,
+            oid: None,
+        },
+        human,
+    })
+}
+
 /// Map a library error to `anyhow`, using structured JSON for typed failures.
 pub fn map_lib_error(err: LibError) -> Error {
     match err {
         LibError::HashCollision { oid } => hash_collision(oid),
+        locked @ LibError::IndexLocked { .. } => index_locked(locked.to_string()),
         LibError::WouldOverwrite {
             reason,
             paths,
@@ -198,6 +214,15 @@ pub fn ensure_structured(err: Error) -> Error {
     }
     if let Some(structured) = would_overwrite_from_chain(&err) {
         return structured;
+    }
+    if let Some(locked) = err
+        .chain()
+        .find_map(|cause| match cause.downcast_ref::<LibError>() {
+            Some(locked @ LibError::IndexLocked { .. }) => Some(locked.to_string()),
+            _ => None,
+        })
+    {
+        return index_locked(locked);
     }
     err
 }
