@@ -18,9 +18,9 @@ pub use cli_fixture::{
 };
 pub use objects::{
     git_cat_file_batch_check, git_commit_graph_verify, git_fsck, git_hash_object_literally,
-    git_midx_verify, git_supports_sha256, git_verify_pack, hash_loose_object, loose_object_path,
-    write_loose_object, BatchCheckOutcome, FsckOutcome, GitToolOutcome, HashAlgo, ObjectKind,
-    PackBuilder, RepoFixture,
+    git_index_pack_stdin, git_midx_verify, git_supports_sha256, git_verify_pack, hash_loose_object,
+    loose_object_path, write_loose_object, BatchCheckOutcome, FsckOutcome, GitToolOutcome,
+    HashAlgo, ObjectKind, PackBuilder, RepoFixture,
 };
 pub use parallel::{
     forced_parallel_options, forced_parallel_policy, forced_parallelism, heavy_disk_serial_guard,

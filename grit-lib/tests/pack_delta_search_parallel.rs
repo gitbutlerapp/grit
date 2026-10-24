@@ -6,6 +6,7 @@ use std::process::Command;
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::pack_objects::{build_pack_with_parallel_threads, PackBuildOptions};
 use grit_lib::objects::ObjectId;
+use grit_test_support::git_index_pack_stdin;
 
 const GIT_ENV: &[(&str, &str)] = &[
     ("GIT_CONFIG_GLOBAL", "/dev/null"),
@@ -42,31 +43,9 @@ fn open_odb(dir: &Path) -> Odb {
     Odb::new(git_dir.join("objects").as_path()).with_config_git_dir(git_dir)
 }
 
-fn git_validate_pack(pack: &[u8]) {
-    let mut child = Command::new("git")
-        .args(["index-pack", "--stdin", "--strict"])
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::piped())
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_SYSTEM", "/dev/null")
-        .spawn()
-        .expect("spawn index-pack");
-    {
-        use std::io::Write;
-        child
-            .stdin
-            .take()
-            .expect("stdin")
-            .write_all(pack)
-            .expect("write pack");
-    }
-    let out = child.wait_with_output().expect("wait");
-    assert!(
-        out.status.success(),
-        "git index-pack: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
+fn git_validate_pack(pack: &[u8], odb: &Odb) {
+    let out = git_index_pack_stdin(pack, odb.objects_dir(), &["--strict"]);
+    assert!(out.ok, "git index-pack: {}", out.output);
 }
 
 fn assert_identical_search_and_pack(
@@ -77,7 +56,7 @@ fn assert_identical_search_and_pack(
 ) {
     let baseline = build_pack_with_parallel_threads(odb, &[tip], &[], opts, Some(1), Some(1))
         .unwrap_or_else(|e| panic!("{label} baseline: {e}"));
-    git_validate_pack(&baseline);
+    git_validate_pack(&baseline, odb);
 
     for threads in [2_usize, 4, 8] {
         let pack = build_pack_with_parallel_threads(odb, &[tip], &[], opts, Some(threads), Some(1))
@@ -131,7 +110,7 @@ fn delta_search_near_git_pack_objects_size_on_fixture() {
     };
     let ours = build_pack_with_parallel_threads(&odb, &[tip], &[], &opts, Some(4), Some(1))
         .expect("grit pack");
-    git_validate_pack(&ours);
+    git_validate_pack(&ours, &odb);
 
     let git_size = {
         use std::io::Write as _;

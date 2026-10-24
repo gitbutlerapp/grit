@@ -7,6 +7,7 @@ use grit_lib::objects::odb::Odb;
 use grit_lib::objects::pack_objects::{build_pack_with_write_threads, PackBuildOptions};
 use grit_lib::objects::{HashAlgo, ObjectId};
 use grit_lib::remote::transfer::build_pack;
+use grit_test_support::git_index_pack_stdin;
 
 const GIT_ENV: &[(&str, &str)] = &[
     ("GIT_CONFIG_GLOBAL", "/dev/null"),
@@ -52,44 +53,17 @@ fn open_odb(dir: &Path) -> Odb {
     Odb::new(git_dir.join("objects").as_path()).with_config_git_dir(git_dir)
 }
 
-fn git_validate_pack(pack: &[u8], algo: HashAlgo, fix_thin: bool) {
-    if algo == HashAlgo::Sha256 {
+fn git_validate_pack(pack: &[u8], odb: &Odb, fix_thin: bool) {
+    if odb.hash_algo() == HashAlgo::Sha256 {
         assert!(
-            git_index_and_fsck_ok(pack, algo),
+            git_index_and_fsck_ok(pack, HashAlgo::Sha256),
             "sha256 pack must index-pack and fsck clean"
         );
         return;
     }
-    let mut args = vec!["index-pack", "--stdin"];
-    if fix_thin {
-        args.push("--fix-thin");
-    } else {
-        args.push("--strict");
-    }
-    let mut child = Command::new("git")
-        .args(&args)
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::piped())
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_SYSTEM", "/dev/null")
-        .spawn()
-        .expect("spawn index-pack");
-    {
-        use std::io::Write;
-        child
-            .stdin
-            .take()
-            .expect("stdin")
-            .write_all(pack)
-            .expect("write pack");
-    }
-    let out = child.wait_with_output().expect("wait");
-    assert!(
-        out.status.success(),
-        "git index-pack: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
+    let mode = if fix_thin { "--fix-thin" } else { "--strict" };
+    let out = git_index_pack_stdin(pack, odb.objects_dir(), &[mode]);
+    assert!(out.ok, "git index-pack: {}", out.output);
 }
 
 fn git_index_and_fsck_ok(pack: &[u8], algo: HashAlgo) -> bool {
@@ -135,7 +109,7 @@ fn assert_byte_identical_threads(
 ) {
     let baseline = build_pack_with_write_threads(odb, wants, haves, opts, Some(1))
         .unwrap_or_else(|e| panic!("{label} baseline threads=1: {e}"));
-    git_validate_pack(&baseline, odb.hash_algo(), fix_thin);
+    git_validate_pack(&baseline, odb, fix_thin);
     for threads in [2_usize, 4, 8] {
         let pack = build_pack_with_write_threads(odb, wants, haves, opts, Some(threads))
             .unwrap_or_else(|e| panic!("{label} threads={threads}: {e}"));
