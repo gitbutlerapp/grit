@@ -61,6 +61,10 @@ When the current branch has a configured upstream (`branch.<name>.remote` and `b
 
 Rename detection is on by default (Git’s `status.renames` / `diff.renames`; disable with `status.renames=false`). Human output shows renames as `old → new`; `--json` adds `old_path` on rename and copy entries.
 
+### How changes are detected
+
+Like Git, `grit status` compares each tracked file's size and timestamps with what the index recorded, and reads a file only when they differ. A clean tree costs one file-system lookup per tracked file, whatever the file sizes or `core.filemode`. Files written in the same second as the index (right after `git clone`, a commit or a checkout) cannot be trusted by timestamp alone: status reads them once and saves the refreshed index, so later runs skip them. Like `git status`, it may therefore rewrite `.git/index`; only the cached file information changes, never what is staged.
+
 See also the [global options](../global-options/).
 
 ## Examples

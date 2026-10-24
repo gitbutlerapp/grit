@@ -219,6 +219,31 @@ Committed baseline: **`grit-utils/baselines/conflicts.json`**. Factory VM median
 ./target/release/grit-bench conflicts --sizes 1000,10000 --format json --output grit-utils/baselines/conflicts.json
 ```
 
+## Clean-tree status (2026-10-24)
+
+Dogfooding on Windows (issue #1702) found `grit status` re-reading tracked files on clean trees and running 3.5–5× slower than Git on rust-lang/cargo and git.git. Four causes, all in `grit-lib`:
+
+- After a stat match, the content-hash skip refused to trust the index when `core.filemode=false` (the Windows default) or when the cached size was zero. Serial scans (fewer than 1000 tracked files, `--threads 1`, `core.preloadIndex=false`) therefore re-hashed every file. Zero size is now trusted only for the empty blob, as in Git.
+- `status` never rewrote an index whose entries were racily clean (index written in the same second as the files, as after `git clone` or `git commit`), so every run re-hashed them. It now persists the index once, as Git does, and hashes each racy file only once.
+- The untracked walk paid three path probes per directory (`is_dir`, `.git`, `.gitignore`), and the symlinked-ancestor check ran as a serial pre-pass before the parallel stat workers. On Windows each path stat opens a handle. Probes now come from the directory listing or run inside the workers, and Windows uses a single attribute query for them.
+- Outside Windows, tracked files are stat-ed by path like Git's preload instead of listing their directories: ext4 hashed `readdir` dominated large directories.
+
+Same Linux VM sitting, release builds, system `git 2.43.0`, clean trees with `GIT_CONFIG_GLOBAL` empty. `git status --porcelain` → `grit status --json`, median ms over 25 runs; grit is `origin/main` before → after:
+
+| Repository | Tracked files | Git | Grit before → after | Tracked part (`-uno` / `--untracked no`): Git, Grit before → after | Peak RSS Git, Grit before → after |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| rust-lang/cargo | 3,078 | 10.5 | 23.5 → **17.3** | 3.2, 8.2 → **6.4** | 6, 15 → 15 MiB |
+| git/git | 4,857 | 6.6 | 23.0 → **9.6** | 3.3, 18.7 → **5.2** | 6, 16 → 15 MiB |
+| synthetic depth-7 tree | 48,750 | 54.9 | 59.7 → **48.2** | 18.0, 33.3 → **26.6** | 17, 23 → 23 MiB |
+| 60 × 4 MB binaries, `core.filemode=false` | 60 | 1.3 | 358.1 → **2.4** | 1.3, 353.1 → **2.2** | 4, 20 → 13 MiB |
+| 200 × 1 MB text, `core.filemode=false` | 200 | 1.3 | 377.0 → **2.6** | 1.3, 381.3 → **2.4** | 4, 14 → 13 MiB |
+
+`grit-bench status` (synthetic 1k/10k/50k, committed as `status-clean-tree-before.json` → `status-clean-tree-after.json`): `status-clean-1000` 7.0 → 3.9 ms and `status-dirty-1000` 6.9 → 4.1 ms; the 10k rows no longer alternate with a ~33 ms racy re-hash mode; 50k rows are unchanged within noise.
+
+```bash
+./target/release/grit-bench --format json --output grit-utils/baselines/status-clean-tree-after.json status --sizes 1000,10000,50000
+```
+
 ## Pick keeps the cache-tree (2026-10-24)
 
 The daily census flagged `pick/one@synth-100k` going from 0.95× to 1.22× Git. The replay sequencer had started loading the index without its cache-tree extension to save memory. Without a cache-tree, the check that the index matches `HEAD` flattens the whole `HEAD` tree into a map, which costs more time and more memory than the extension it skipped. The index was also parsed a second time for the first replay step, and the index written after the pick lost its cache-tree. Pick and revert now keep the cache-tree, and the snapshot from the cleanliness check feeds the first step.
