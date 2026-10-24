@@ -1700,6 +1700,56 @@ mod tests {
     }
 
     #[test]
+    fn precomposed_repo_stages_many_literal_paths_and_nfd_spellings() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        let mut index = Index::new();
+        let mut tracked = Vec::new();
+        for i in 0..2_000 {
+            let rel = format!("d{}/e{}/f{}/file{i}.txt", i % 7, (i / 7) % 7, (i / 49) % 7);
+            stage_file_in_index(&repo, &mut index, &rel, format!("{i}\n").as_bytes());
+            tracked.push(rel);
+        }
+        stage_file_in_index(&repo, &mut index, "caf\u{e9}/menu.txt", b"old\n");
+        write_index(&repo, &mut index);
+
+        let mut changed: Vec<String> = tracked.iter().step_by(40).cloned().collect();
+        for rel in &changed {
+            fs::write(root.join(rel), b"changed\n").unwrap();
+        }
+        fs::write(root.join("caf\u{e9}/menu.txt"), b"new\n").unwrap();
+
+        let fresh = Repository::open(
+            &root.join(".git"),
+            &RepositoryOptions::empty().with_work_tree(root),
+        )
+        .unwrap();
+        fresh.force_pathspec_precompose_for_test();
+        let mut pathspecs = changed.clone();
+        pathspecs.push("cafe\u{301}/menu.txt".to_owned());
+        pathspecs.push(tracked[1].clone());
+        let opts = StageOptions {
+            pathspecs,
+            ..StageOptions::default()
+        };
+        let outcome = stage(&fresh, &opts, &mut NullProgress).unwrap();
+
+        changed.push("caf\u{e9}/menu.txt".to_owned());
+        changed.sort();
+        let mut modified = outcome.modified.clone();
+        modified.sort();
+        assert_eq!(modified, changed);
+        assert!(outcome.added.is_empty() && outcome.removed.is_empty());
+        let index = fresh.load_index().unwrap();
+        let changed_oid = fresh.odb().write(ObjectKind::Blob, b"changed\n").unwrap();
+        for rel in changed.iter().filter(|p| p.starts_with('d')) {
+            assert_eq!(index.get(rel.as_bytes(), 0).unwrap().oid, changed_oid);
+        }
+        assert_eq!(index.entries.len(), tracked.len() + 1);
+    }
+
+    #[test]
     fn bulk_empty_index_stage_writes_sorted_index() {
         let tmp = TempDir::new().unwrap();
         let root = tmp.path();

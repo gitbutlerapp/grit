@@ -499,6 +499,15 @@ impl RepoCaches {
         })
     }
 
+    #[cfg(test)]
+    pub(crate) fn force_pathspec_precompose_for_test(&self) {
+        let _ = self.pathspec_precompose.set(true);
+        assert!(
+            self.pathspec_precompose.get() == Some(&true),
+            "force before the first pathspec query"
+        );
+    }
+
     /// Ref storage backend from repository-local config (one parse per handle until invalidation).
     ///
     /// # Errors

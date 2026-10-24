@@ -17,6 +17,8 @@ See also the [Repository](../repository/) and [Objects](../objects/) pages for o
 
 The `grit add` command is a thin wrapper around this API.
 
+`StageOptions::pathspecs` are work-tree-relative. To turn command-line arguments into that form, use [`ResolvedPathspecs::resolve`](rustdoc:grit_lib::pathspec::ResolvedPathspecs) for a whole argument list (plus `--pathspec-from-file` input), or [`Repository::resolve_worktree_pathspec`](rustdoc:grit_lib::repo::Repository::resolve_worktree_pathspec) for one argument. Both apply the current-directory prefix and, on filesystems that alias NFD/NFC spellings (macOS with `core.precomposeunicode`), NFC-normalize the path. That decision is cached on the `Repository`, so passing hundreds of literal paths costs no config reload per path, and literal pathspecs are matched against the index with hash lookups on every platform.
+
 ## Writing a tree from the index
 
 [`write_tree_from_index`](rustdoc:grit_lib::index::write_tree::write_tree_from_index) builds a tree object from stage-0 entries (respecting the optional path prefix). It returns the root [`ObjectId`](rustdoc:grit_lib::objects::ObjectId). When the index cache-tree extension is valid, grit reuses cached subtree oids for speed; otherwise it walks entries and writes new tree objects through [`Odb`](rustdoc:grit_lib::objects::odb::Odb).

@@ -1110,12 +1110,26 @@ pub(crate) fn sorted_paths_match_pathspec<S: AsRef<str>>(
     sorted_paths: &[S],
     ctx: PathspecMatchContext,
 ) -> bool {
+    let list = [spec.to_owned()];
+    let matches_linearly = |p: &S| matches_pathspec_list_with_context(p.as_ref(), &list, ctx);
     if !is_plain_literal_pathspec(spec, ctx) {
-        let specs = [spec.to_owned()];
-        return sorted_paths
-            .iter()
-            .any(|p| matches_pathspec_list_with_context(p.as_ref(), &specs, ctx));
+        return sorted_paths.iter().any(matches_linearly);
     }
+    let spec_nfc = literal_spec_for_lookup(spec, ctx);
+    if sorted_literal_lookup(&spec_nfc, sorted_paths) {
+        return true;
+    }
+    // A hit on the NFC spelling is always a match; a path stored in another normalization form
+    // can only match through a non-ASCII segment, so a miss rechecks just those paths.
+    ctx.precompose_paths
+        && sorted_paths
+            .iter()
+            .filter(|p| !p.as_ref().is_ascii())
+            .any(matches_linearly)
+}
+
+/// Binary-search `sorted_paths` for the plain literal `spec` (exact path or directory prefix).
+fn sorted_literal_lookup<S: AsRef<str>>(spec: &str, sorted_paths: &[S]) -> bool {
     let has_path_with_prefix = |prefix: &str| {
         let at = sorted_paths.partition_point(|p| p.as_ref() < prefix);
         sorted_paths
@@ -1132,14 +1146,26 @@ pub(crate) fn sorted_paths_match_pathspec<S: AsRef<str>>(
     has_path_with_prefix(&format!("{spec}/"))
 }
 
+/// The spelling of a plain literal `spec` that [`matches_pathspec_with_context`] compares paths
+/// against: NFC when the context precomposes paths, else `spec` itself.
+fn literal_spec_for_lookup(spec: &str, ctx: PathspecMatchContext) -> Cow<'_, str> {
+    if ctx.precompose_paths {
+        precompose_utf8_path(spec)
+    } else {
+        Cow::Borrowed(spec)
+    }
+}
+
 /// Repository-relative paths when every spec is a plain literal file path (no trailing `/`).
 ///
 /// Used to narrow index/worktree diffs to a small path set without scanning the full index.
+/// Returns `None` when `ctx` precomposes paths: another normalization form of a spec could also
+/// match, and only a scan of the candidate paths can find it.
 pub(crate) fn exact_literal_pathspec_set(
     specs: &[String],
     ctx: PathspecMatchContext,
 ) -> Option<std::collections::BTreeSet<String>> {
-    if specs.is_empty() {
+    if specs.is_empty() || ctx.precompose_paths {
         return None;
     }
     if !specs
@@ -1153,9 +1179,11 @@ pub(crate) fn exact_literal_pathspec_set(
 
 /// Whether `spec` matches exactly the path `spec` and everything under directory `spec`
 /// (no magic, no wildcards, no `./`, and no context that changes trailing-`/` handling).
+///
+/// With [`PathspecMatchContext::precompose_paths`], "the path `spec`" means equality after NFC
+/// normalization of both sides; see [`literal_spec_for_lookup`].
 fn is_plain_literal_pathspec(spec: &str, ctx: PathspecMatchContext) -> bool {
-    !ctx.precompose_paths
-        && !ctx.is_directory
+    !ctx.is_directory
         && !ctx.is_git_submodule
         && !spec.is_empty()
         && spec != "."
@@ -1175,15 +1203,15 @@ fn is_plain_literal_pathspec(spec: &str, ctx: PathspecMatchContext) -> bool {
 pub(crate) struct PathspecListMatcher<'a> {
     specs: &'a [String],
     ctx: PathspecMatchContext,
-    literals: Option<LiteralPathspecSet<'a>>,
+    literals: Option<LiteralPathspecSet>,
 }
 
-/// Plain literal pathspecs split by how they match.
-struct LiteralPathspecSet<'a> {
+/// Plain literal pathspecs split by how they match, spelled as [`literal_spec_for_lookup`] does.
+struct LiteralPathspecSet {
     /// Specs without a trailing `/`: they match the path itself.
-    exact: HashSet<&'a str>,
+    exact: HashSet<String>,
     /// Directories whose contents match: every spec, with one trailing `/` removed.
-    dirs: HashSet<&'a str>,
+    dirs: HashSet<String>,
 }
 
 impl<'a> PathspecListMatcher<'a> {
@@ -1197,13 +1225,14 @@ impl<'a> PathspecListMatcher<'a> {
                 dirs: HashSet::with_capacity(specs.len()),
             };
             for spec in specs {
+                let spec = literal_spec_for_lookup(spec, ctx);
                 match spec.strip_suffix('/') {
                     Some(dir) => {
-                        set.dirs.insert(dir);
+                        set.dirs.insert(dir.to_owned());
                     }
                     None => {
-                        set.exact.insert(spec.as_str());
-                        set.dirs.insert(spec.as_str());
+                        set.exact.insert(spec.to_string());
+                        set.dirs.insert(spec.into_owned());
                     }
                 }
             }
@@ -1221,6 +1250,8 @@ impl<'a> PathspecListMatcher<'a> {
         let Some(set) = &self.literals else {
             return matches_pathspec_list_with_context(path, self.specs, self.ctx);
         };
+        let path = literal_spec_for_lookup(path, self.ctx);
+        let path = path.as_ref();
         if set.exact.contains(path) {
             return true;
         }
@@ -2179,9 +2210,17 @@ mod tree_entry_pathspec_tests {
             "dir-sub",
             "f[o][o]",
             "z",
+            "caf\u{e9}/menu",
+            "cafe\u{301}/old",
+            "\u{212a}.txt",
         ];
         paths.sort_unstable();
         let specs = [
+            "caf\u{e9}",
+            "cafe\u{301}/",
+            "cafe\u{301}/old",
+            "K.txt",
+            "\u{212a}.txt",
             "a",
             "a/",
             "a/b",
@@ -2262,6 +2301,9 @@ mod tree_entry_pathspec_tests {
             "z",
             "zz/a",
             "é/x",
+            "e\u{301}/y",
+            "\u{212a}.txt",
+            "K.txt",
             "",
         ];
         let lists: &[&[&str]] = &[
@@ -2273,6 +2315,9 @@ mod tree_entry_pathspec_tests {
             &["a/b/", "a/bc", "dir", "zz"],
             &["dir/su", "dir-sub", "f[o][o]"],
             &["é", "a-"],
+            &["e\u{301}", "z"],
+            &["e\u{301}/y", "K.txt"],
+            &["\u{212a}.txt"],
             &["a", "*.txt"],
             &["dir", ":!dir/sub"],
             &[":!a"],
@@ -2316,6 +2361,28 @@ mod tree_entry_pathspec_tests {
         let exclude = vec!["a/b".to_owned(), ":!a/b/c".to_owned()];
         assert!(PathspecListMatcher::new(&exclude, ctx).literals.is_none());
         assert!(PathspecListMatcher::new(&[], ctx).literals.is_none());
+    }
+
+    #[test]
+    fn precomposed_literal_specs_keep_fast_lookups() {
+        let ctx = PathspecMatchContext {
+            precompose_paths: true,
+            ..PathspecMatchContext::default()
+        };
+        let specs: Vec<String> = (0..100).map(|i| format!("d{i}/file.txt")).collect();
+        let matcher = PathspecListMatcher::new(&specs, ctx);
+        assert!(
+            matcher.literals.is_some(),
+            "core.precomposeunicode must not force a per-spec scan of every path"
+        );
+        assert!(matcher.matches("d42/file.txt"));
+        assert!(!matcher.matches("d42/other.txt"));
+        let nfd = vec!["cafe\u{301}".to_owned()];
+        let matcher = PathspecListMatcher::new(&nfd, ctx);
+        assert!(matcher.literals.is_some());
+        assert!(matcher.matches("caf\u{e9}/menu"));
+        assert!(matcher.matches("cafe\u{301}/menu"));
+        assert!(exact_literal_pathspec_set(&specs, ctx).is_none());
     }
 
     #[test]

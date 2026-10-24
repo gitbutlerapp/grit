@@ -1021,6 +1021,13 @@ impl Repository {
             .pathspec_precompose_enabled(self.environment.as_ref(), &self.git_dir)
     }
 
+    /// Pretend the work tree aliases NFD/NFC spellings, as APFS and HFS+ do, so unit tests on
+    /// other filesystems exercise the precomposed pathspec matching macOS users get.
+    #[cfg(test)]
+    pub(crate) fn force_pathspec_precompose_for_test(&self) {
+        self.caches.force_pathspec_precompose_for_test();
+    }
+
     /// Resolve one argv pathspec against this repository's work tree.
     ///
     /// `prefix` is the work-tree-relative directory the pathspec was typed in (`None` at the
