@@ -330,9 +330,7 @@ impl Repository {
                         }));
                     }
                     Some(RawRef::Symbolic(target)) if self.resolve_ref_oid(&target).is_err() => {
-                        return Err(RevParseError::InvalidObjectName {
-                            name: "HEAD".to_owned(),
-                        });
+                        return Ok(None);
                     }
                     Some(RawRef::Symbolic(_)) | None => {}
                 }
