@@ -4,7 +4,7 @@
 //! and mode match the index (and are not racy relative to the index file mtime) are trusted without
 //! re-reading file contents — Git's `ie_match_stat` fast path.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -27,9 +27,9 @@ use crate::unicode_normalization::resolve_worktree_path_for_staging;
 use crate::worktree_batch::{prepare_and_store_worktree_blobs_parallel, WorktreeBlobReadInput};
 use crate::worktree_rules::WorktreeRules;
 use crate::worktree_scan::{
-    collect_blob_lookup_batches, group_blob_entries_by_dir, stat_scan_thread_count,
-    visit_blob_lookup_batches, BlobDiskLookup, BlobDiskStat, BlobScanSparseMode,
-    WorktreeBlobScanOptions,
+    collect_blob_lookup_batches, group_blob_entries_by_dir, group_blob_entries_by_dir_for_paths,
+    stat_scan_thread_count, visit_blob_lookup_batches, BlobDiskLookup, BlobDiskStat,
+    BlobScanSparseMode, WorktreeBlobScanOptions,
 };
 
 /// Above this index size, defer parallel blob restage and multi-thread stat preload to cap RSS.
@@ -165,11 +165,14 @@ pub fn stage_tracked_modifications_in_index_with_thresholds(
 ) -> Result<StageTrackedSummary> {
     let mut rules = WorktreeRules::from_repository(repo, index)?;
     stage_tracked_modifications_in_index_with_rules(
-        repo, work_tree, index_path, index, &mut rules, thresholds,
+        repo, work_tree, index_path, index, &mut rules, thresholds, None,
     )
 }
 
 /// Like [`stage_tracked_modifications_in_index`], reusing an already-built [`WorktreeRules`].
+///
+/// When `restrict_to_paths` is set, only those stage-0 index paths are stat-scanned (explicit
+/// `grit add` pathspecs on large trees).
 pub(crate) fn stage_tracked_modifications_in_index_with_rules(
     repo: &Repository,
     work_tree: &Path,
@@ -177,6 +180,7 @@ pub(crate) fn stage_tracked_modifications_in_index_with_rules(
     index: &mut Index,
     rules: &mut WorktreeRules,
     thresholds: IndexStagingThresholds,
+    restrict_to_paths: Option<&BTreeSet<String>>,
 ) -> Result<StageTrackedSummary> {
     let entry_count_at_start = index.entries.len();
     let bulk_untr_defer = entry_count_at_start >= thresholds.large_index_restage;
@@ -196,6 +200,7 @@ pub(crate) fn stage_tracked_modifications_in_index_with_rules(
         bulk_untr_defer,
         parallel_restage,
         rules,
+        restrict_to_paths,
     );
     if bulk_untr_defer {
         index.defer_untracked_cache_invalidation = false;
@@ -230,6 +235,7 @@ pub fn replay_deferred_untracked_invalidations(index: &mut Index, summary: &Stag
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn stage_tracked_modifications_in_index_body(
     repo: &Repository,
     work_tree: &Path,
@@ -238,6 +244,7 @@ fn stage_tracked_modifications_in_index_body(
     bulk_untr_defer: bool,
     parallel_restage: bool,
     rules: &mut WorktreeRules,
+    restrict_to_paths: Option<&BTreeSet<String>>,
 ) -> Result<StageTrackedSummary> {
     let index_mtime = index_file_mtime(index_path);
     let precompose_unicode = effective_core_precomposeunicode_with_config(
@@ -318,7 +325,11 @@ fn stage_tracked_modifications_in_index_body(
         )?;
         honor_fsmonitor = refresh.honor_valid_bits;
     }
-    let blob_dirs = group_blob_entries_by_dir(index, honor_fsmonitor);
+    let blob_dirs = if let Some(paths) = restrict_to_paths.filter(|p| !p.is_empty()) {
+        group_blob_entries_by_dir_for_paths(index, paths)
+    } else {
+        group_blob_entries_by_dir(index, honor_fsmonitor)
+    };
     let work_tree_owned = work_tree.to_path_buf();
     let dir_abs = move |dir: &[u8]| {
         if dir.is_empty() {

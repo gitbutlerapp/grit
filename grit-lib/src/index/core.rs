@@ -4386,6 +4386,13 @@ impl From<&fs::Metadata> for IndexStatFields {
 }
 
 impl IndexStatFields {
+    /// Whether munged size and whole-second mtime match the index row (Git quick stat check).
+    #[must_use]
+    #[cfg_attr(not(windows), allow(dead_code))]
+    pub(crate) fn mtime_and_size_match_index(&self, ie: &IndexEntry) -> bool {
+        self.size == ie.size && self.mtime_sec == ie.mtime_sec
+    }
+
     /// Whether cached stat fields match a stage-0 index row (Git `ie_match_stat`).
     #[must_use]
     pub(crate) fn matches_index_entry(&self, ie: &IndexEntry, policy: StatMatchPolicy) -> bool {

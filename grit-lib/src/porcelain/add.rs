@@ -8,6 +8,7 @@ use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::fs;
 use std::path::Path;
+use std::sync::Arc;
 
 use crate::diff::{
     empty_blob_oid, is_unregistered_embedded_git_repo, materialize_worktree_blob,
@@ -229,14 +230,32 @@ pub fn stage(
     opts: &StageOptions,
     progress: &mut dyn ProgressSink,
 ) -> Result<StageOutcome> {
-    if opts.pathspecs.is_empty()
-        && opts.mode == StageMode::All
-        && !opts.dry_run
-        && !opts.intent_to_add
-    {
+    if uses_tracked_scan_fast_path(opts) {
         return stage_with_tracked_scan(repo, opts, progress);
     }
     stage_via_worktree_diff(repo, opts, progress)
+}
+
+fn uses_tracked_scan_fast_path(opts: &StageOptions) -> bool {
+    !opts.dry_run && !opts.intent_to_add && matches!(opts.mode, StageMode::All | StageMode::Update)
+}
+
+fn index_paths_matching_pathspecs(
+    repo: &Repository,
+    index: &Index,
+    pathspecs: &[String],
+) -> BTreeSet<String> {
+    let mut paths = BTreeSet::new();
+    for ie in &index.entries {
+        if ie.stage() != 0 {
+            continue;
+        }
+        let path = index_path_to_string(&ie.path);
+        if repo.paths_match_pathspecs(&path, pathspecs) {
+            paths.insert(path);
+        }
+    }
+    paths
 }
 
 fn stage_via_worktree_diff(
@@ -312,6 +331,16 @@ fn stage_inner_on_index(
 
     let staging_thresholds = opts.staging_thresholds.unwrap_or_default();
     let use_tracked_scan = tracked_scan && !index.entries.is_empty() && !opts.dry_run;
+    let restrict_to_paths = if opts.pathspecs.is_empty() {
+        None
+    } else {
+        let matched = index_paths_matching_pathspecs(repo, index, &opts.pathspecs);
+        if matched.is_empty() {
+            None
+        } else {
+            Some(Arc::new(matched))
+        }
+    };
     let mut tracked_scan_summary = None;
     let (unstaged, staging_stats) = if index.entries.is_empty() {
         (Vec::new(), std::collections::BTreeMap::new())
@@ -324,6 +353,7 @@ fn stage_inner_on_index(
             index,
             &mut rules_guard,
             staging_thresholds,
+            restrict_to_paths.as_deref(),
         )?;
         tracked_scan_summary = Some(summary);
         (Vec::new(), std::collections::BTreeMap::new())
@@ -335,6 +365,7 @@ fn stage_inner_on_index(
             worktree_rules: Some(std::sync::Arc::clone(&rules_arc)),
             thread_policy: Some(repo.thread_policy()),
             hash_blobs_without_write: opts.dry_run,
+            restrict_to_paths: restrict_to_paths.clone(),
             ..DiffIndexToWorktreeOptions::default()
         };
         if dry_run && write_index {

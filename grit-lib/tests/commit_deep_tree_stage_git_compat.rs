@@ -5,7 +5,9 @@ use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::porcelain::add::{stage, stage_for_commit, StageMode, StageOptions};
-use grit_lib::porcelain::commit::{commit_worktree, create_commit, CommitRequest, HookPolicy};
+use grit_lib::porcelain::commit::{
+    commit_with_scope, commit_worktree, create_commit, CommitRequest, CommitScope, HookPolicy,
+};
 use grit_lib::porcelain::status::{status, StatusOptions};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
@@ -242,6 +244,102 @@ fn stage_for_commit_ignorecase_tracked_scan_updates_case_only_spelling() {
     assert!(
         index.get(b"b00/d00/f0.txt", 0).is_none(),
         "old spelling must not remain as a duplicate stage-0 entry"
+    );
+}
+
+#[test]
+fn add_update_mode_clean_tree_uses_tracked_scan_probe_budget() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    init_repo(root);
+    write_deep_tree(root, 25, 25, 7);
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "base"]);
+
+    let repo = open_repo(root);
+    let _probe = reset_worktree_metadata_probe(root);
+    let outcome = stage(
+        &repo,
+        &StageOptions {
+            mode: StageMode::Update,
+            ..StageOptions::default()
+        },
+        &mut NullProgress,
+    )
+    .expect("add -u noop");
+    assert_eq!(outcome.total(), 0);
+
+    let tracked = git(root, &["ls-files"]).lines().count();
+    let meta_calls = worktree_metadata_probe_count();
+    assert!(
+        meta_calls <= tracked + 500,
+        "add -u on clean deep tree must use tracked scan, not full diff (metadata {meta_calls}, tracked {tracked})"
+    );
+}
+
+#[test]
+fn add_explicit_paths_limits_worktree_stat_probes() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    init_repo(root);
+    write_deep_tree(root, 25, 25, 7);
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "base"]);
+
+    let edited = "b00/d00/f0.txt";
+    fs::write(root.join(edited), "edited\n").expect("edit");
+    let repo = open_repo(root);
+
+    let _probe = reset_worktree_metadata_probe(root);
+    let outcome = stage(
+        &repo,
+        &StageOptions {
+            pathspecs: vec![edited.to_owned()],
+            pathspec_sources: vec![edited.to_owned()],
+            ..StageOptions::default()
+        },
+        &mut NullProgress,
+    )
+    .expect("add one path");
+    assert_eq!(outcome.modified.len(), 1);
+
+    let meta_calls = worktree_metadata_probe_count();
+    assert!(
+        meta_calls <= 8,
+        "explicit add should stat only the named path (metadata probes {meta_calls})"
+    );
+}
+
+#[test]
+#[test]
+fn commit_staged_after_single_edit_avoids_full_tree_stat_refresh() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    init_repo(root);
+    write_deep_tree(root, 25, 25, 7);
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "base"]);
+
+    fs::write(root.join("b00/d00/f0.txt"), "edited\n").expect("edit");
+    let repo = open_repo(root);
+    stage_for_commit(&repo, &mut NullProgress).expect("stage");
+
+    let tracked = git(root, &["ls-files"]).lines().count();
+    let ident = "Test <t@example.com> 1 +0000".to_string();
+    let req = CommitRequest {
+        message: "t".into(),
+        author: ident.clone(),
+        committer: ident,
+        hooks: HookPolicy::SkipVerify,
+        ..Default::default()
+    };
+
+    let _probe = reset_worktree_metadata_probe(root);
+    commit_with_scope(&repo, &req, CommitScope::Staged, &mut NullProgress).expect("commit staged");
+    let meta_calls = worktree_metadata_probe_count();
+    assert!(
+        meta_calls <= 500,
+        "commit --staged should not rescan every tracked path (metadata {meta_calls}, tracked {tracked})"
     );
 }
 

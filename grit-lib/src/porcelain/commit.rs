@@ -294,7 +294,12 @@ pub fn commit_with_scope(
 ) -> Result<CommitOutcome> {
     match scope {
         CommitScope::AutoStage => commit_worktree(repo, req, progress),
-        CommitScope::Staged => create_commit(repo, req, progress),
+        CommitScope::Staged => {
+            let mut req = req.clone();
+            // Index stats were refreshed when paths were staged; skip full-tree refresh (#1622).
+            req.assume_worktree_synced = true;
+            create_commit(repo, &req, progress)
+        }
         CommitScope::Paths(paths) => commit_paths_scope(repo, req, &paths, progress),
         CommitScope::Patch { input, pathspecs } => {
             commit_with_patch(repo, req, input, &pathspecs, progress)

@@ -170,6 +170,11 @@ fn align_lookup_stat_with_index_path_windows(
     if crate::diff::stat_matches_blob_stat(ie, &stat, stat_policy) {
         return BlobDiskLookup::Present(stat);
     }
+    // NTFS read_dir metadata can disagree with the index on ctime/inode while mtime+size still
+    // match; avoid a second path stat in that case (#1622).
+    if stat.fields.mtime_and_size_match_index(ie) {
+        return BlobDiskLookup::Present(stat);
+    }
     match symlink_metadata_path(target_abs) {
         Ok(meta) => {
             let path_stat = BlobDiskStat::from_metadata(&meta);
