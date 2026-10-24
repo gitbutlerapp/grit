@@ -344,6 +344,96 @@ pub fn pick_100k_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
     pick_bench_from_meta(ctx)
 }
 
+/// Tracked directories and files per directory in the delete-heavy wide fixture
+/// (production / smoke), and how many leading directories `bench-b` deletes.
+fn delete_heavy_wide_shape(smoke: bool) -> (usize, usize, usize) {
+    if smoke {
+        (48, 100, 2)
+    } else {
+        (480, 100, 20)
+    }
+}
+
+/// Wide tree (480 directories of 100 small files) where `bench-b` deletes the first 20
+/// top-level directories, the shape from issue #1754. `bench-a` keeps every file.
+pub fn setup_delete_heavy_wide(setup: &DailySetup<'_>) -> Result<DailyHeadlineContext> {
+    use crate::hot_path_fixture::{meta_path, populate_tree, rev_parse, HotPathMeta};
+
+    with_scratch("delete-heavy-wide", |_scratch| {
+        let (dirs, files_per_dir, deleted) = delete_heavy_wide_shape(setup.smoke);
+        let repo = crate::fixture::scratch_dir();
+        crate::fixture::remove_dir_robust(&repo);
+        std::fs::create_dir_all(&repo)?;
+        run_git(setup.git, &repo, &["init", "-q"])?;
+        // A detached auto-gc after the big commit would repack under the timed runs.
+        run_git(setup.git, &repo, &["config", "gc.auto", "0"])?;
+        populate_tree(&repo, dirs * files_per_dir, dirs)?;
+        run_git(setup.git, &repo, &["add", "-A"])?;
+        run_git(setup.git, &repo, &["commit", "-q", "-m", "wide tree"])?;
+        run_git(setup.git, &repo, &["branch", "-q", "bench-a"])?;
+        run_git(setup.git, &repo, &["checkout", "-q", "-b", "bench-b"])?;
+        let doomed: Vec<String> = (0..deleted).map(|d| format!("d{d:04}")).collect();
+        let mut rm = vec!["rm", "-rq"];
+        rm.extend(doomed.iter().map(String::as_str));
+        run_git(setup.git, &repo, &rm)?;
+        run_git(
+            setup.git,
+            &repo,
+            &["commit", "-q", "-m", "delete leading dirs"],
+        )?;
+        run_git(setup.git, &repo, &["checkout", "-q", "bench-a"])?;
+        run_git(setup.git, &repo, &["gc", "-q"])?;
+        let base_commit = rev_parse(setup.git, &repo, "bench-a")?;
+        let meta = HotPathMeta {
+            branch_a: "bench-a".into(),
+            branch_b: "bench-b".into(),
+            main_branch: "bench-a".into(),
+            topic_branch: "bench-b".into(),
+            base_commit: base_commit.clone(),
+            main_tip: base_commit,
+            pick_commit: String::new(),
+            pick_series_commits: Vec::new(),
+            wide: true,
+            wide_branch_b: None,
+        };
+        std::fs::write(meta_path(&repo), serde_json::to_string_pretty(&meta)?)?;
+        let mut headline = ctx(repo, setup);
+        headline.hot_path_meta = Some(meta);
+        Ok(headline)
+    })
+}
+
+/// Switch to the delete-heavy branch and back, so the return trip deletes files the first
+/// trip just wrote (racily clean entries).
+pub fn switch_delete_heavy_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
+    switch_bench_from_meta(ctx)
+}
+
+/// `reset --hard` to the delete-heavy branch and back to the full tree.
+pub fn reset_hard_delete_heavy_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
+    let Some(meta) = ctx.hot_path_meta.as_ref() else {
+        return noop_bench();
+    };
+    let script = |program: &Path, quiet: bool| {
+        let hops: Vec<Vec<String>> = [&meta.branch_b, &meta.base_commit]
+            .into_iter()
+            .map(|target| {
+                let mut argv = vec!["reset".to_string()];
+                if quiet {
+                    argv.push("-q".into());
+                }
+                argv.extend(["--hard".to_string(), target.clone()]);
+                argv
+            })
+            .collect();
+        crate::scenarios::chain_shell(program, &hops)
+    };
+    (
+        sh_script(script(&ctx.grit, false)),
+        sh_script(script(&ctx.git, true)),
+    )
+}
+
 fn switch_bench_from_meta(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
     let Some(meta) = ctx.hot_path_meta.as_ref() else {
         return noop_bench();

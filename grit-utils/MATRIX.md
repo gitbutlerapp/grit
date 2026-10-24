@@ -63,6 +63,7 @@ Overview of **grit-lib** coverage, **`grit` commands**, common workflows, and **
 | `init/empty@small` | Initialize empty repo: grit init vs git init in an empty directory |
 | `mv/file@synth-10k` | Rename tracked file: grit mv <src> <dst> vs git mv <src> <dst> |
 | `reset/hard@synth-10k` | Hard reset dirty tree: grit reset --hard HEAD vs git reset --hard HEAD |
+| `reset/hard-delete-heavy@wide-48k` | Hard reset to a commit deleting 2000 files in 20 dirs of a 48k-file tree and back: grit reset --hard vs git reset --hard |
 | `reset/keep@synth-10k` | Reset branch with unrelated local edits: grit reset --keep HEAD~1 vs git reset --keep HEAD~1 |
 | `reset/mixed@synth-10k` | Mixed reset dirty tree: grit reset HEAD vs git reset --mixed HEAD |
 | `restore/hunks@large-file` | Discard half of 500 hunks in a 50k-line file: grit restore --hunks vs git apply -R |
@@ -162,6 +163,7 @@ Overview of **grit-lib** coverage, **`grit` commands**, common workflows, and **
 | `revert/one@synth-10k` | Revert one commit vs git revert --no-edit |
 | `stash/list@synth-10k` | List stash entries vs git stash list |
 | `switch/branch@synth-100k` | Switch branch on 100k-file synthetic vs git switch |
+| `switch/delete-heavy@wide-48k` | Switch to a branch deleting 2000 files in 20 dirs of a 48k-file tree and back: grit switch vs git switch |
 | `tag/contains@git-git` | Tag --contains ref query vs git tag -l on git.git (commit-graph) |
 | `tag/create@many-refs` | Create lightweight tag vs git tag |
 | `tag/contains@git-git` | Tag --contains ref query vs git tag -l on git.git (commit-graph) |

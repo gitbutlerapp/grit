@@ -174,6 +174,13 @@ pub const MATRIX_SCENARIOS: &[ScenarioSpec] = &[
         description: "Hard reset dirty tree: grit reset --hard HEAD vs git reset --hard HEAD",
     },
     ScenarioSpec {
+        id: "reset/hard-delete-heavy@wide-48k",
+        area: Area::Worktree,
+        headline: false,
+        name: None,
+        description: "Hard reset to a commit deleting 2000 files in 20 dirs of a 48k-file tree and back: grit reset --hard vs git reset --hard",
+    },
+    ScenarioSpec {
         id: "reset/mixed@synth-10k",
         area: Area::Worktree,
         headline: false,
@@ -441,6 +448,13 @@ pub const MATRIX_SCENARIOS: &[ScenarioSpec] = &[
         headline: false,
         name: None,
         description: "Switch branch on 100k-file synthetic vs git switch",
+    },
+    ScenarioSpec {
+        id: "switch/delete-heavy@wide-48k",
+        area: Area::Branching,
+        headline: false,
+        name: None,
+        description: "Switch to a branch deleting 2000 files in 20 dirs of a 48k-file tree and back: grit switch vs git switch",
     },
     ScenarioSpec {
         id: "branch/create@many-refs",

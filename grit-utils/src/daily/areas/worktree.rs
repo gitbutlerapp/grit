@@ -258,6 +258,15 @@ pub fn plans() -> Vec<DailyHeadlinePlan> {
         correctness: None,
     });
     plans.push(DailyHeadlinePlan {
+        spec: scenario_spec("reset/hard-delete-heavy@wide-48k"),
+        pending: false,
+        setup: super::super::matrix_helpers::setup_delete_heavy_wide,
+        prepare: prepare_switch_reset,
+        build_git: |c| super::super::matrix_helpers::reset_hard_delete_heavy_bench(c).1,
+        build_grit: |c| super::super::matrix_helpers::reset_hard_delete_heavy_bench(c).0,
+        correctness: None,
+    });
+    plans.push(DailyHeadlinePlan {
         spec: scenario_spec("reset/mixed@synth-10k"),
         pending: false,
         setup: setup_synth10k,
