@@ -384,6 +384,7 @@ pub fn prepare_add_hunks_large(git: &Path) -> Result<()> {
 
     let repo = active_worktree_repo();
     ensure_large_file_committed(git, &repo)?;
+    unstage_large_file(git, &repo)?;
     modify_large_file_five_hundred_hunks(&repo)?;
     let grit_repo = Repository::discover(Some(&repo), &RepositoryOptions::default())?;
     let pathspec = vec![LARGE_HUNKS_FILE.to_string()];
@@ -448,6 +449,12 @@ fn ensure_large_file_committed(git: &Path, repo: &Path) -> Result<()> {
     run_git(git, repo, &["add", LARGE_HUNKS_FILE])?;
     run_git(git, repo, &["commit", "-qm", "add large file"])?;
     Ok(())
+}
+
+/// Drop staged changes to `large.txt` left by a previous iteration or scenario, so every
+/// run selects from the full unstaged diff.
+fn unstage_large_file(git: &Path, repo: &Path) -> Result<()> {
+    run_git(git, repo, &["reset", "-q", "--", LARGE_HUNKS_FILE])
 }
 
 fn modify_large_file_five_hundred_hunks(repo: &Path) -> Result<()> {
@@ -519,6 +526,7 @@ pub fn prepare_add_lines_large(git: &Path) -> Result<()> {
 
     let repo = active_worktree_repo();
     ensure_large_file_committed(git, &repo)?;
+    unstage_large_file(git, &repo)?;
     modify_large_file_five_hundred_hunks(&repo)?;
     let grit_repo = Repository::discover(Some(&repo), &RepositoryOptions::default())?;
     let pathspec = vec![LARGE_HUNKS_FILE.to_string()];
