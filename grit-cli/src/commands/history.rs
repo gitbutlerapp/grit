@@ -1117,7 +1117,12 @@ pub fn run_rebase(opts: &RebaseRunOptions<'_>) -> Result<RebaseRunOutcome> {
     let on_err = history_error("rebase");
     let repo = context::discover()?;
     if opts.abort {
-        abort_rebase(&repo, &reflog_identity(&repo)?).map_err(map_rebase_session_error)?;
+        abort_rebase(&repo, &reflog_identity(&repo)?).map_err(|err| match err {
+            RebaseSessionError::ForeignRebaseInProgress => anyhow::anyhow!(
+                "this rebase was started by git and cannot be restored by grit; cancel it with `git rebase --abort`"
+            ),
+            other => map_rebase_session_error(other),
+        })?;
         return Ok(RebaseRunOutcome::Rebase(RebaseCliOutcome::aborted()));
     }
 
@@ -1268,6 +1273,9 @@ fn map_rebase_session_error(err: RebaseSessionError) -> anyhow::Error {
         RebaseSessionError::RebaseAlreadyInProgress => {
             anyhow::anyhow!("rebase is already in progress")
         }
+        RebaseSessionError::ForeignRebaseInProgress => anyhow::anyhow!(
+            "this rebase was started by git; finish it with `git rebase --continue` or `git rebase --skip`, or cancel it with `grit rebase --abort`"
+        ),
         RebaseSessionError::UnmergedPaths => {
             anyhow::anyhow!("cannot continue: unmerged paths remain in the index")
         }

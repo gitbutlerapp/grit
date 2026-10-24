@@ -23,6 +23,10 @@ When `<upstream>` is omitted, grit uses `@{upstream}` of the current branch. If 
 
 When replay stops on conflicts, grit writes Git-compatible `.git/rebase-merge/` state (including `grit-plan`), leaves conflict markers in the worktree, and exits **1**. The branch tip recorded in `orig-head` is unchanged until you `--continue`, `--skip`, or `--abort`. Resume with the same conflict model as [`grit pick`](pick.md) and [`grit revert`](revert.md): inspect (`grit diff`), resolve, stage (`grit add`), then `grit rebase --continue`, or use `--skip` / `--abort`.
 
+The stopped state is complete enough for `git` to take over: `git rebase --continue`, `--skip` and `--abort` all work on a rebase grit started (grit writes `author-script`, `stopped-sha` and the current pick in `done`, as git does).
+
+A rebase that `git` started (`.git/rebase-merge/` or `.git/rebase-apply/` without `grit-plan`) blocks `grit rebase <upstream>` and [`grit switch`](switch.md). `grit rebase --abort` cancels it: `HEAD` is re-attached to the rebased branch at `orig-head`, the index and worktree are reset, and git's state directory is removed. When git recorded an autostash, grit leaves the rebase alone and asks you to run `git rebase --abort`. `grit rebase --continue` and `--skip` refuse with a pointer to `git rebase --continue` / `--skip`, since only git can resume its own todo list.
+
 `--check` predicts success or conflicts without touching refs, the index, or the worktree (exit **1** when conflicts are predicted, like [`grit merge --check`](merge.md)). It does not start a rebase session.
 
 `-X ours` and `-X theirs` auto-resolve replay conflicts the way `git rebase -X` does. During replay, **ours** is the onto (upstream) side and **theirs** is the commit being replayed — the opposite of everyday merge wording where “ours” is your checked-out branch.
@@ -40,7 +44,7 @@ Shared rewrite flags match [`grit history`](history.md): `--dry-run`, `--update-
 | `<upstream>` | Exclude commits reachable from this revision (default: `@{upstream}`). |
 | `--onto` | Replay onto this revision instead of `<upstream>`. |
 | `--continue` | Finish the current commit after resolving conflicts, then replay the rest. |
-| `--abort` | Cancel the rebase and restore the branch to `orig-head`. |
+| `--abort` | Cancel the rebase and restore the branch to `orig-head`. Also cancels a rebase that `git` started. |
 | `--skip` | Skip the current commit and replay the rest. |
 | `--dry-run` | List ref updates without moving refs (no session). |
 | `--update-refs` | `branches` (default) or `head`. |

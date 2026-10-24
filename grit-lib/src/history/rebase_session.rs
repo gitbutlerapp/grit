@@ -9,8 +9,7 @@ use serde::{Deserialize, Serialize};
 use crate::lockfile::{LockFile, LockWait};
 use crate::objects::ObjectId;
 use crate::operation::conflicts_from_tree_merge;
-use crate::porcelain::checkout::checkout_between_trees;
-use crate::porcelain::index_from_tree::index_from_tree_with_worktree_stats;
+use crate::porcelain::checkout::checkout_hard_to_tree_from_head_tree;
 use crate::porcelain::merge::apply_conflict_merge_worktree;
 use crate::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
 use crate::refs;
@@ -78,6 +77,14 @@ pub enum RebaseSessionError {
     #[error("rebase is already in progress")]
     RebaseAlreadyInProgress,
 
+    /// A rebase that another tool (normally `git`) started is in progress: its state directory
+    /// exists without grit's plan, so only that tool can continue or skip it.
+    ///
+    /// [`abort_rebase`] also returns this when it cannot restore the rebase safely (an
+    /// autostash is recorded, or `orig-head` is unreadable).
+    #[error("a rebase started by git is in progress")]
+    ForeignRebaseInProgress,
+
     /// The index still has unmerged entries.
     #[error("cannot continue: unmerged paths remain in the index")]
     UnmergedPaths,
@@ -107,13 +114,14 @@ pub enum RebaseSessionError {
 ///
 /// # Errors
 ///
-/// Returns [`RebaseSessionError`] when another rebase is active, `HEAD` is not on a branch,
-/// or planning/apply fails.
+/// Returns [`RebaseSessionError::RebaseAlreadyInProgress`] when grit or `git` already has a
+/// rebase in progress, [`RebaseSessionError::NotOnBranch`] when `HEAD` is not on a branch,
+/// and planning/apply failures otherwise.
 pub fn start_rebase(
     repo: &Repository,
     opts: &StartRebaseOptions,
 ) -> Result<RebaseOutcome, RebaseSessionError> {
-    if rebase_session_active(repo.git_dir())? {
+    if active_rebase(repo.git_dir()).is_some() {
         return Err(RebaseSessionError::RebaseAlreadyInProgress);
     }
     let (head_ref, orig_head) = branch_head(repo)?;
@@ -156,7 +164,9 @@ pub fn start_rebase(
 ///
 /// # Errors
 ///
-/// Returns [`RebaseSessionError::UnmergedPaths`] when the index still records conflicts.
+/// Returns [`RebaseSessionError::UnmergedPaths`] when the index still records conflicts,
+/// [`RebaseSessionError::ForeignRebaseInProgress`] when `git` started the rebase, and
+/// [`RebaseSessionError::NoRebaseInProgress`] when no rebase is in progress.
 pub fn continue_rebase(
     repo: &Repository,
     opts: &StartRebaseOptions,
@@ -207,6 +217,12 @@ pub fn continue_rebase(
 }
 
 /// Skip the current todo commit and replay the rest.
+///
+/// # Errors
+///
+/// Returns [`RebaseSessionError::ForeignRebaseInProgress`] when `git` started the rebase,
+/// [`RebaseSessionError::NoRebaseInProgress`] when no rebase is in progress, and
+/// planning/apply failures otherwise.
 pub fn skip_rebase(
     repo: &Repository,
     opts: &StartRebaseOptions,
@@ -245,14 +261,83 @@ pub fn skip_rebase(
 }
 
 /// Cancel the in-progress rebase and restore the branch to `orig-head`.
+///
+/// Also cancels a rebase that `git` started (`rebase-merge/` or `rebase-apply/` without grit's
+/// plan): `HEAD` is re-attached to the rebased branch (or detached, when the rebase started
+/// detached), the index and worktree are reset to `orig-head`, and the state directory is
+/// removed.
+///
+/// # Errors
+///
+/// Returns [`RebaseSessionError::NoRebaseInProgress`] when no rebase is in progress, and
+/// [`RebaseSessionError::ForeignRebaseInProgress`] when a git-started rebase recorded an
+/// autostash or has no readable `orig-head` (finish those with `git rebase --abort`).
 pub fn abort_rebase(repo: &Repository, identity: &str) -> Result<(), RebaseSessionError> {
-    let state = load_persisted_state(repo.git_dir())?;
-    let orig_head = state.orig_head;
-    hard_reset_branch(repo, &state.head_ref, orig_head, identity)?;
-    refs::write_symbolic_ref_on_store(repo.refs(), repo.git_dir(), "HEAD", &state.head_ref)
-        .map_err(map_lib)?;
-    clear_rebase_state(repo.git_dir())?;
+    match active_rebase(repo.git_dir()) {
+        None => Err(RebaseSessionError::NoRebaseInProgress),
+        Some(ActiveRebase::Foreign(dir)) => abort_foreign_rebase(repo, &dir, identity),
+        Some(ActiveRebase::Grit) => {
+            let state = load_persisted_state(repo.git_dir())?;
+            hard_reset_branch(repo, &state.head_ref, state.orig_head, identity)?;
+            clear_rebase_state(repo.git_dir())?;
+            Ok(())
+        }
+    }
+}
+
+fn abort_foreign_rebase(
+    repo: &Repository,
+    state_dir: &Path,
+    identity: &str,
+) -> Result<(), RebaseSessionError> {
+    if state_dir.join("autostash").exists() {
+        return Err(RebaseSessionError::ForeignRebaseInProgress);
+    }
+    let orig_head = first_line(&state_dir.join("orig-head"))
+        .and_then(|hex| ObjectId::from_hex(&hex).ok())
+        .ok_or(RebaseSessionError::ForeignRebaseInProgress)?;
+    match first_line(&state_dir.join("head-name")).filter(|name| name.starts_with("refs/")) {
+        Some(head_ref) => hard_reset_branch(repo, &head_ref, orig_head, identity)?,
+        None => hard_reset_head(repo, orig_head, identity)?,
+    }
+    for name in ["REBASE_HEAD", "AUTO_MERGE", "MERGE_MSG"] {
+        remove_if_exists(&repo.git_dir().join(name))?;
+    }
+    fs::remove_dir_all(state_dir).map_err(map_lib)?;
     Ok(())
+}
+
+/// Which tool owns the rebase state under the git directory.
+enum ActiveRebase {
+    /// `rebase-merge/grit-plan` exists.
+    Grit,
+    /// `rebase-merge/` or `rebase-apply/` (not an `am`) without grit's plan.
+    Foreign(std::path::PathBuf),
+}
+
+fn active_rebase(git_dir: &Path) -> Option<ActiveRebase> {
+    let merge = git_dir.join("rebase-merge");
+    if merge.join("grit-plan").is_file() {
+        return Some(ActiveRebase::Grit);
+    }
+    if merge.is_dir() {
+        return Some(ActiveRebase::Foreign(merge));
+    }
+    let apply = git_dir.join("rebase-apply");
+    (apply.is_dir() && !apply.join("applying").exists()).then_some(ActiveRebase::Foreign(apply))
+}
+
+fn first_line(path: &Path) -> Option<String> {
+    let raw = fs::read_to_string(path).ok()?;
+    let line = raw.lines().next()?.trim();
+    (!line.is_empty()).then(|| line.to_owned())
+}
+
+fn remove_if_exists(path: &Path) -> Result<(), RebaseSessionError> {
+    match fs::remove_file(path) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(map_lib(e)),
+        _ => Ok(()),
+    }
 }
 
 // --- persisted session ---
@@ -475,6 +560,11 @@ struct LoadedState {
 }
 
 fn load_persisted_state(git_dir: &Path) -> Result<LoadedState, RebaseSessionError> {
+    match active_rebase(git_dir) {
+        None => return Err(RebaseSessionError::NoRebaseInProgress),
+        Some(ActiveRebase::Foreign(_)) => return Err(RebaseSessionError::ForeignRebaseInProgress),
+        Some(ActiveRebase::Grit) => {}
+    }
     let path = git_dir.join("rebase-merge").join("grit-plan");
     let raw = fs::read_to_string(&path).map_err(|_| RebaseSessionError::NoRebaseInProgress)?;
     let parsed: PersistedRebaseState =
@@ -673,12 +763,21 @@ fn write_git_rebase_merge_files(
         todo_lines(repo, &todo_remaining)?,
     )
     .map_err(map_lib)?;
-    fs::write(dir.join("done"), todo_lines(repo, done)?).map_err(map_lib)?;
+    // Git lists the stopped pick as the last `done` line and resumes from `stopped-sha`,
+    // committing the staged resolution with `message` and `author-script`.
+    let done_with_current: Vec<ObjectId> = done.iter().chain([current]).copied().collect();
+    fs::write(dir.join("done"), todo_lines(repo, &done_with_current)?).map_err(map_lib)?;
     let msgnum = done.len() + 1;
     let end = done.len() + remaining.len();
     fs::write(dir.join("msgnum"), format!("{msgnum}\n")).map_err(map_lib)?;
     fs::write(dir.join("end"), format!("{end}\n")).map_err(map_lib)?;
-    fs::write(dir.join("message"), load_commit(repo, *current)?.message).map_err(map_lib)?;
+    fs::write(dir.join("stopped-sha"), format!("{}\n", current.to_hex())).map_err(map_lib)?;
+    let commit = load_commit(repo, *current)?;
+    match author_script(&commit.author) {
+        Some(script) => fs::write(dir.join("author-script"), script).map_err(map_lib)?,
+        None => remove_if_exists(&dir.join("author-script"))?,
+    }
+    fs::write(dir.join("message"), commit.message).map_err(map_lib)?;
     fs::write(
         repo.git_dir().join("ORIG_HEAD"),
         format!("{}\n", orig_head.to_hex()),
@@ -697,8 +796,22 @@ fn todo_lines(repo: &Repository, commits: &[ObjectId]) -> Result<String, RebaseS
     Ok(out)
 }
 
-fn rebase_session_active(git_dir: &Path) -> Result<bool, RebaseSessionError> {
-    Ok(git_dir.join("rebase-merge").join("grit-plan").is_file())
+/// `rebase-merge/author-script` body for a commit's `author` header: shell assignments of
+/// `GIT_AUTHOR_NAME`, `GIT_AUTHOR_EMAIL` and `GIT_AUTHOR_DATE` (`@<seconds> <offset>`), each
+/// value single-quoted. `None` when the header has no `<email>`.
+fn author_script(author: &str) -> Option<String> {
+    let lt = author.find('<')?;
+    let gt = lt + author[lt..].find('>')?;
+    let name = author[..lt].trim_end();
+    let email = &author[lt + 1..gt];
+    let date = format!("@{}", author[gt + 1..].trim());
+    let quote = crate::transport::sq_quote_shell_arg;
+    Some(format!(
+        "GIT_AUTHOR_NAME={}\nGIT_AUTHOR_EMAIL={}\nGIT_AUTHOR_DATE={}\n",
+        quote(name),
+        quote(email),
+        quote(&date)
+    ))
 }
 
 fn clear_rebase_state(git_dir: &Path) -> Result<(), RebaseSessionError> {
@@ -752,9 +865,9 @@ fn reset_index_worktree_to_head(
     head_oid: ObjectId,
 ) -> Result<(), RebaseSessionError> {
     let head_tree = commit_tree(repo, head_oid)?;
-    let mut index = index_from_tree_with_worktree_stats(repo, &head_tree).map_err(map_lib)?;
-    repo.write_index(&mut index).map_err(map_lib)?;
-    checkout_between_trees(repo, None, &head_tree).map_err(map_lib)?;
+    // Paths tracked before the move but absent from `head_oid` must go too; leaving them as
+    // untracked files makes `git rebase --skip/--abort` refuse to overwrite them later.
+    checkout_hard_to_tree_from_head_tree(repo, &head_tree, &head_tree).map_err(map_lib)?;
     Ok(())
 }
 
@@ -766,6 +879,14 @@ fn hard_reset_branch(
 ) -> Result<(), RebaseSessionError> {
     refs::write_symbolic_ref_on_store(repo.refs(), repo.git_dir(), "HEAD", refname)
         .map_err(map_lib)?;
+    hard_reset_head(repo, target, identity)
+}
+
+fn hard_reset_head(
+    repo: &Repository,
+    target: ObjectId,
+    identity: &str,
+) -> Result<(), RebaseSessionError> {
     reset_to_commit(
         repo,
         &ResetOptions::new(
@@ -791,4 +912,26 @@ fn replan_rewrite_options(state: &LoadedState) -> RewriteOptions {
 
 fn map_json(err: serde_json::Error) -> RebaseSessionError {
     RebaseSessionError::Library(crate::error::Error::Message(err.to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::author_script;
+
+    #[test]
+    fn author_script_quotes_values_and_prefixes_date() {
+        assert_eq!(
+            author_script("A U Thor <a@example.com> 1700000000 -0130").as_deref(),
+            Some(
+                "GIT_AUTHOR_NAME='A U Thor'\nGIT_AUTHOR_EMAIL='a@example.com'\nGIT_AUTHOR_DATE='@1700000000 -0130'\n"
+            )
+        );
+        assert_eq!(
+            author_script("O'Brien <o@example.com> 1 +0000").as_deref(),
+            Some(
+                "GIT_AUTHOR_NAME='O'\\''Brien'\nGIT_AUTHOR_EMAIL='o@example.com'\nGIT_AUTHOR_DATE='@1 +0000'\n"
+            )
+        );
+        assert_eq!(author_script("no email here 1 +0000"), None);
+    }
 }
