@@ -82,9 +82,9 @@ fn grit_log_pages_oneline(grit: &Path, pages: usize) -> String {
     format!(
         "before=\"\"; for _ in $(seq 1 {pages}); do \
          if [ -z \"$before\" ]; then page=$({grit_q} log) || exit $?; \
-         else page=$({grit_q} log --before=\"$before\") || exit $?; fi; \
+         else page=$({grit_q} log --cursor=\"$before\") || exit $?; fi; \
          printf '%s\\n' \"$page\" | awk '!/^→/ && !/^$/ {{print}}' >/dev/null; \
-         before=$(printf '%s\\n' \"$page\" | sed -n 's/^→ more: grit log --before=//p'); \
+         before=$(printf '%s\\n' \"$page\" | sed -n 's/^→ more: grit log --cursor=//p'); \
          if [ -z \"$before\" ]; then break; fi; done"
     )
 }
