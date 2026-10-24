@@ -606,9 +606,7 @@ impl<'repo> RepositoryRemotes<'repo> {
                 flags: delete_flags,
             })
             .collect();
-        if !updates.is_empty() {
-            commit_ref_updates_on_store(self.repo.refs(), &updates, &[])?;
-        }
+        crate::refs::commit_owned_ref_updates_on_store(self.repo.refs(), updates)?;
 
         if !file.remove_section(&format!("remote.{name}"))? {
             return Err(RemoteError::Library(crate::error::Error::Message(format!(

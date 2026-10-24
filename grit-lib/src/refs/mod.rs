@@ -231,31 +231,60 @@ pub fn commit_ref_batch_on_store(
     if updates.is_empty() && reflog_renames.is_empty() && case_only_renames.is_empty() {
         return Ok(());
     }
+    commit_owned_ref_batch_on_store(
+        store,
+        updates.to_vec(),
+        reflog_renames.to_vec(),
+        case_only_renames.to_vec(),
+    )
+}
+
+/// [`commit_ref_updates_on_store`] taking ownership of `updates`, so a large batch is not copied.
+///
+/// # Errors
+///
+/// Same as [`commit_ref_updates_on_store`].
+pub(crate) fn commit_owned_ref_updates_on_store(
+    store: &dyn RefStore,
+    updates: Vec<RefUpdate>,
+) -> Result<()> {
+    if updates.is_empty() {
+        return Ok(());
+    }
+    commit_owned_ref_batch_on_store(store, updates, Vec::new(), Vec::new())
+}
+
+fn commit_owned_ref_batch_on_store(
+    store: &dyn RefStore,
+    updates: Vec<RefUpdate>,
+    reflog_renames: Vec<RefReflogRename>,
+    case_only_renames: Vec<RefCaseOnlyRename>,
+) -> Result<()> {
     let label = updates
         .first()
-        .map(|u| u.name.as_str())
-        .or_else(|| reflog_renames.first().map(|r| r.from.as_str()))
-        .or_else(|| case_only_renames.first().map(|r| r.from.as_str()))
-        .unwrap_or("refs");
-    let mut txn = RefTransaction::new();
-    for update in updates {
-        let name = update.name.clone();
-        txn = txn
-            .update(update.clone())
-            .map_err(|e| map_public_ref_store_error(Error::from(e), &name))?;
-    }
+        .map(|u| u.name.clone())
+        .or_else(|| reflog_renames.first().map(|r| r.from.clone()))
+        .or_else(|| case_only_renames.first().map(|r| r.from.clone()))
+        .unwrap_or_else(|| "refs".to_owned());
+    let mut txn = RefTransaction::from_updates(updates).map_err(|e| {
+        let name = match &e {
+            store::RefStoreError::DuplicateUpdate { name } => name.clone(),
+            _ => label.clone(),
+        };
+        map_public_ref_store_error(Error::from(e), &name)
+    })?;
     for rename in reflog_renames {
-        txn = txn.with_reflog_rename(rename.clone());
+        txn = txn.with_reflog_rename(rename);
     }
     for rename in case_only_renames {
-        txn = txn.with_case_only_rename(rename.clone());
+        txn = txn.with_case_only_rename(rename);
     }
     let prepared = store
         .prepare(txn)
-        .map_err(|e| map_public_ref_store_error(Error::from(e), label))?;
+        .map_err(|e| map_public_ref_store_error(Error::from(e), &label))?;
     prepared
         .commit()
-        .map_err(|e| map_public_ref_store_error(Error::from(e), label))
+        .map_err(|e| map_public_ref_store_error(Error::from(e), &label))
 }
 
 fn store_write_value(
@@ -2146,8 +2175,15 @@ fn dir_tree_has_files(dir: &Path) -> bool {
 
 /// Walk upward from `ref_path`'s parent, removing empty directories until `refs/`.
 pub(crate) fn prune_empty_loose_ref_parents(storage_dir: &Path, ref_path: &Path) {
+    if let Some(dir) = ref_path.parent() {
+        prune_empty_ref_dirs(storage_dir, dir);
+    }
+}
+
+/// Remove `dir` and then its parents while they hold no files, stopping at `refs/`.
+pub(crate) fn prune_empty_ref_dirs(storage_dir: &Path, dir: &Path) {
     let refs_root = storage_dir.join("refs");
-    let mut current = ref_path.parent();
+    let mut current = Some(dir);
     while let Some(dir) = current {
         if dir == refs_root.as_path() || !dir.starts_with(&refs_root) {
             break;
@@ -2270,14 +2306,44 @@ pub fn delete_ref(git_dir: &Path, refname: &str) -> Result<()> {
 
 /// Remove a single entry from the packed-refs file, rewriting it.
 pub(crate) fn remove_packed_ref(git_dir: &Path, refname: &str) -> Result<()> {
-    remove_packed_ref_inner(git_dir, refname, false)
+    remove_packed_refs_inner(git_dir, &|name| name == refname, &|_| false, false).map(drop)
 }
 
 pub(crate) fn remove_packed_ref_under_lock(git_dir: &Path, refname: &str) -> Result<()> {
-    remove_packed_ref_inner(git_dir, refname, true)
+    remove_packed_refs_inner(git_dir, &|name| name == refname, &|_| false, true).map(drop)
 }
 
-fn remove_packed_ref_inner(git_dir: &Path, refname: &str, lock_already_held: bool) -> Result<()> {
+/// Remove every record named in `refnames` from `git_dir`'s packed-refs in a single rewrite,
+/// with the caller already holding `packed-refs.lock`.
+///
+/// Returns the object ids of the removed records whose storage names are in `report`.
+///
+/// # Errors
+///
+/// Fails without touching the file when it does not parse, or when writing the replacement fails.
+pub(crate) fn remove_packed_refs_under_lock(
+    git_dir: &Path,
+    refnames: &HashSet<String>,
+    report: &HashSet<String>,
+) -> Result<HashMap<String, ObjectId>> {
+    if refnames.is_empty() {
+        return Ok(HashMap::new());
+    }
+    remove_packed_refs_inner(
+        git_dir,
+        &|name| refnames.contains(name),
+        &|name| report.contains(name),
+        true,
+    )
+}
+
+fn remove_packed_refs_inner(
+    git_dir: &Path,
+    remove: &dyn Fn(&str) -> bool,
+    report: &dyn Fn(&str) -> bool,
+    lock_already_held: bool,
+) -> Result<HashMap<String, ObjectId>> {
+    let mut removed = HashMap::new();
     let packed_path = store::paths::packed_refs_path(git_dir);
     let content = match fs::read(&packed_path) {
         Ok(c) => c,
@@ -2286,7 +2352,7 @@ fn remove_packed_ref_inner(git_dir: &Path, refname: &str, lock_already_held: boo
                 || e.kind() == io::ErrorKind::NotADirectory
                 || e.raw_os_error() == Some(libc::ENOTDIR) =>
         {
-            return Ok(());
+            return Ok(removed);
         }
         Err(e) => return Err(Error::Io(e)),
     };
@@ -2296,7 +2362,7 @@ fn remove_packed_ref_inner(git_dir: &Path, refname: &str, lock_already_held: boo
     let content = String::from_utf8(content)
         .map_err(|_| packed_refs_unexpected_line(&packed_path, "<invalid utf-8>"))?;
 
-    let mut out = String::new();
+    let mut out = String::with_capacity(content.len());
     let mut skip_peeled = false;
     let mut changed = false;
     // Write a fresh header (don't preserve old comment lines — real git
@@ -2328,11 +2394,15 @@ fn remove_packed_ref_inner(git_dir: &Path, refname: &str, lock_already_held: boo
             header_written = true;
         }
 
-        // Check if this line matches the ref to remove
         let mut parts = line.splitn(2, ' ');
-        let _hash = parts.next().unwrap_or("");
+        let hash = parts.next().unwrap_or("");
         let name = parts.next().unwrap_or("").trim();
-        if name == refname {
+        if remove(name) {
+            if report(name) {
+                if let Ok(oid) = ObjectId::from_hex(hash) {
+                    removed.insert(name.to_owned(), oid);
+                }
+            }
             changed = true;
             skip_peeled = true;
             continue;
@@ -2383,7 +2453,7 @@ fn remove_packed_ref_inner(git_dir: &Path, refname: &str, lock_already_held: boo
         write_result?;
     }
 
-    Ok(())
+    Ok(removed)
 }
 
 /// Read the symbolic ref target of `HEAD`.

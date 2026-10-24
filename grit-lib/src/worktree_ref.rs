@@ -76,6 +76,16 @@ pub fn parse_worktree_ref(maybe: &str) -> (RefWorktreeType, Cow<'_, str>, Option
 #[must_use]
 pub fn resolve_ref_storage(git_dir: &Path, refname: &str) -> (PathBuf, String) {
     let common = common_dir(git_dir).unwrap_or_else(|| git_dir.to_path_buf());
+    resolve_ref_storage_in(git_dir, common, refname)
+}
+
+/// [`resolve_ref_storage`] with the shared directory `common` already resolved, so no
+/// `commondir` lookup happens per ref.
+pub(crate) fn resolve_ref_storage_in(
+    git_dir: &Path,
+    common: PathBuf,
+    refname: &str,
+) -> (PathBuf, String) {
     let (kind, bare, wt_id) = parse_worktree_ref(refname);
     match kind {
         RefWorktreeType::Main => (common, bare.into_owned()),
