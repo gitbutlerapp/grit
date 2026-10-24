@@ -14,7 +14,7 @@ use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::objects::{HashAlgo, ObjectId};
 use grit_lib::refs::resolve_ref;
 use grit_lib::remote::serve::{
-    receive_pack, ProtocolVersion, ReceiveOutcome, ReceivePolicy, ServeOptions,
+    receive_pack, ProtocolVersion, ReceiveOutcome, ReceivePolicy, RefUpdateRefusal, ServeOptions,
 };
 use grit_lib::repo::Repository;
 
@@ -218,8 +218,8 @@ fn pre_receive_reject_leaves_main_object_store_clean() {
     let (outcome, _) = serve_push(&repo, &body);
     assert_eq!(outcome.updates.len(), 1);
     assert_eq!(
-        outcome.updates[0].error.as_deref(),
-        Some("pre-receive hook declined")
+        outcome.updates[0].error,
+        Some(RefUpdateRefusal::PreReceiveHookDeclined)
     );
     assert!(resolve_ref(&bare, "refs/heads/main").is_err());
     assert_eq!(count_pack_files(&bare.join("objects")), packs_before);
@@ -273,7 +273,10 @@ fn update_reject_only_blocks_one_ref() {
 
     let (outcome, _) = serve_push(&repo, &body);
     assert!(outcome.updates[0].error.is_none());
-    assert_eq!(outcome.updates[1].error.as_deref(), Some("hook declined"));
+    assert_eq!(
+        outcome.updates[1].error,
+        Some(RefUpdateRefusal::UpdateHookDeclined)
+    );
     assert_eq!(resolve_ref(&bare, "refs/heads/main").unwrap(), main);
     assert!(resolve_ref(&bare, "refs/heads/block").is_err());
 }
@@ -315,7 +318,10 @@ fn all_update_rejects_skip_post_receive_and_post_update() {
     let body = push_body(None, oid, "refs/heads/main", &pack);
 
     let (outcome, _) = serve_push(&repo, &body);
-    assert_eq!(outcome.updates[0].error.as_deref(), Some("hook declined"));
+    assert_eq!(
+        outcome.updates[0].error,
+        Some(RefUpdateRefusal::UpdateHookDeclined)
+    );
     assert!(
         outcome
             .hooks

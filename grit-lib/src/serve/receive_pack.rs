@@ -1,23 +1,25 @@
 //! Accepting pushes (`receive-pack`).
 
 use std::collections::HashSet;
-use std::io::{Read, Write};
+use std::io::{BufReader, BufWriter, Read, Write};
 
 use super::{
     advertised_refs, check_object_format, head_info, parse_oid, read_packet, write_flush,
     write_line, Packet, ProtocolVersion, Result, ServeError, ServeOptions,
 };
 use crate::config::ConfigSet;
-use crate::hash::verify_trailer;
 use crate::hooks::{run_hook_in_git_dir, HookResult};
-use crate::index_pack::{ingest_received_pack, IngestPackOptions};
+use crate::index_pack::{install_pack_path, IngestPackOptions};
 use crate::objects::pack_stream_scan::{PackStreamScanError, PackStreamScanner};
-use crate::objects::HashAlgo;
 use crate::objects::ObjectId;
+use crate::odb::Odb;
 use crate::receive_pack::{max_input_size_from_config, should_use_unpack_objects};
 use crate::receive_quarantine::ReceiveQuarantine;
 use crate::repo::Repository;
 use crate::unpack_objects::{unpack_objects, UnpackOptions};
+
+/// Bytes read from the client per call while spooling a pushed pack.
+const SPOOL_CHUNK: usize = 256 * 1024;
 
 /// Capabilities offered in the receive-pack advertisement, before the
 /// per-repository ones.
@@ -85,6 +87,93 @@ impl ReceivePolicy {
     }
 }
 
+/// One `<old> <new> <ref>` update requested by a pushing client.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RefCommand {
+    /// Full name of the ref to change, such as `refs/heads/main`.
+    pub refname: String,
+    /// Value the client expects the ref to have now; `None` to create it.
+    pub old: Option<ObjectId>,
+    /// Value the client asks for; `None` to delete the ref.
+    pub new: Option<ObjectId>,
+}
+
+impl RefCommand {
+    fn refused(&self, reason: RefUpdateRefusal) -> RefUpdateResult {
+        RefUpdateResult {
+            refname: self.refname.clone(),
+            old: self.old,
+            new: self.new,
+            error: Some(reason),
+        }
+    }
+
+    fn accepted(&self) -> RefUpdateResult {
+        RefUpdateResult {
+            refname: self.refname.clone(),
+            old: self.old,
+            new: self.new,
+            error: None,
+        }
+    }
+}
+
+/// Why the server refused one ref update.
+///
+/// The [`Display`](std::fmt::Display) text is the reason sent to the client on
+/// the update's `ng <ref> <reason>` status line, which Git clients show next to
+/// the rejected ref.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+#[non_exhaustive]
+pub enum RefUpdateRefusal {
+    /// The ref name is outside `refs/` or not a valid ref name.
+    #[error("funny refname")]
+    InvalidRefName,
+    /// The ref is hidden by `receive.hideRefs` / `transfer.hideRefs`.
+    #[error("deny updating a hidden ref")]
+    HiddenRef,
+    /// The ref no longer has the value the client expected.
+    #[error("stale info")]
+    StaleInfo,
+    /// Deletions are refused (`receive.denyDeletes`).
+    #[error("deletion prohibited")]
+    DeletionProhibited,
+    /// The update would delete the checked-out branch
+    /// (`receive.denyCurrentBranch`).
+    #[error("deletion of the current branch prohibited")]
+    CurrentBranchDeletion,
+    /// The update would move the checked-out branch
+    /// (`receive.denyCurrentBranch`).
+    #[error("branch is currently checked out")]
+    CurrentBranch,
+    /// The new value is not in the repository or the pushed pack.
+    #[error("missing necessary objects")]
+    MissingObjects,
+    /// The update would discard commits (`receive.denyNonFastForwards`).
+    #[error("non-fast-forward")]
+    NonFastForward,
+    /// The pushed pack could not be stored; see
+    /// [`ReceiveOutcome::unpack_error`].
+    #[error("unpacker error")]
+    UnpackerError,
+    /// Another update in an `atomic` push was refused, so this one was not
+    /// applied either.
+    #[error("atomic transaction failed")]
+    AtomicTransactionFailed,
+    /// The `pre-receive` hook script exited non-zero.
+    #[error("pre-receive hook declined")]
+    PreReceiveHookDeclined,
+    /// The `update` hook script exited non-zero for this ref.
+    #[error("hook declined")]
+    UpdateHookDeclined,
+    /// A [`ReceiveHook`] refused the update with this reason.
+    #[error("{0}")]
+    Policy(String),
+    /// Writing the ref failed after every check passed.
+    #[error("failed to update ref: {0}")]
+    RefStore(String),
+}
+
 /// The result of one requested ref update.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RefUpdateResult {
@@ -95,7 +184,108 @@ pub struct RefUpdateResult {
     /// Value the client asked for; `None` for a delete.
     pub new: Option<ObjectId>,
     /// Why the update was refused, or `None` when it was applied.
-    pub error: Option<String>,
+    pub error: Option<RefUpdateRefusal>,
+}
+
+/// Why a pushed pack could not be stored.
+///
+/// The [`Display`](std::fmt::Display) text is sent to the client on the
+/// `unpack <reason>` status line. Every requested update is then refused with
+/// [`RefUpdateRefusal::UnpackerError`].
+#[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
+pub enum UnpackError {
+    /// The client stopped sending before the pack was complete.
+    #[error("unexpected end of pack stream")]
+    Truncated,
+    /// The pack is larger than `receive.maxInputSize`.
+    #[error("pack exceeds maximum input size of {limit} bytes")]
+    TooLarge {
+        /// The configured limit in bytes.
+        limit: u64,
+    },
+    /// The stream is not a well-formed pack.
+    #[error(transparent)]
+    Malformed(#[from] PackStreamScanError),
+    /// The pack arrived but its objects could not be stored (bad checksum,
+    /// corrupt object, failed connectivity check, ...).
+    #[error(transparent)]
+    Ingest(Box<crate::error::Error>),
+    /// Reading the client stream or writing the spooled pack failed.
+    #[error(transparent)]
+    Io(#[from] std::io::Error),
+}
+
+impl From<crate::error::Error> for UnpackError {
+    fn from(err: crate::error::Error) -> Self {
+        Self::Ingest(Box::new(err))
+    }
+}
+
+/// In-process checks an embedding server runs on every push.
+///
+/// These run in addition to [`ReceivePolicy`] and the repository's hook scripts,
+/// so a server can refuse updates from Rust code without installing a script.
+/// Both methods default to accepting; implement the ones you need. A closure
+/// `Fn(&RefCommand, &Odb) -> Result<(), RefUpdateRefusal>` implements the
+/// per-ref [`Self::update`] check, and `()` accepts everything.
+///
+/// Refusals are usually [`RefUpdateRefusal::Policy`] with a reason the client
+/// will see.
+pub trait ReceiveHook {
+    /// Inspect the whole push before any ref changes, like a `pre-receive` hook.
+    ///
+    /// Runs before the `pre-receive` script, while the pushed objects are still
+    /// in quarantine.
+    ///
+    /// # Parameters
+    ///
+    /// - `commands`: the updates that passed the built-in checks, in request
+    ///   order.
+    /// - `odb`: an object database that sees the repository's objects and the
+    ///   quarantined pushed ones.
+    ///
+    /// # Errors
+    ///
+    /// Returning a refusal refuses every update in `commands` with it.
+    fn pre_receive(
+        &self,
+        commands: &[RefCommand],
+        odb: &Odb,
+    ) -> std::result::Result<(), RefUpdateRefusal> {
+        let _ = (commands, odb);
+        Ok(())
+    }
+
+    /// Inspect one update, like an `update` hook.
+    ///
+    /// Runs before the `update` script for the same ref, after the pushed
+    /// objects were moved into the repository.
+    ///
+    /// # Parameters
+    ///
+    /// - `command`: the update to check.
+    /// - `odb`: the repository's object database, including the pushed objects.
+    ///
+    /// # Errors
+    ///
+    /// Returning a refusal refuses this update only (or the whole push when the
+    /// client asked for an `atomic` push).
+    fn update(&self, command: &RefCommand, odb: &Odb) -> std::result::Result<(), RefUpdateRefusal> {
+        let _ = (command, odb);
+        Ok(())
+    }
+}
+
+impl ReceiveHook for () {}
+
+impl<F> ReceiveHook for F
+where
+    F: Fn(&RefCommand, &Odb) -> std::result::Result<(), RefUpdateRefusal>,
+{
+    fn update(&self, command: &RefCommand, odb: &Odb) -> std::result::Result<(), RefUpdateRefusal> {
+        self(command, odb)
+    }
 }
 
 /// One server-side hook invocation during receive-pack.
@@ -110,10 +300,10 @@ pub struct HookRunRecord {
 }
 
 /// What a push session did.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Default)]
 pub struct ReceiveOutcome {
     /// Why the pushed pack could not be stored, when it could not.
-    pub unpack_error: Option<String>,
+    pub unpack_error: Option<UnpackError>,
     /// One entry per ref update the client requested, in request order.
     pub updates: Vec<RefUpdateResult>,
     /// Hook runs performed for this push, in execution order.
@@ -125,14 +315,38 @@ pub struct ReceiveOutcome {
 /// Serve one push session: advertise refs, read the ref updates and pack, store
 /// the objects, apply the updates, and report the result to the client.
 ///
-/// Objects from the pushed pack are stored via [`unpack_objects`] for small
-/// packs (below `receive.unpacklimit`) and [`crate::index_pack::ingest_received_pack`]
-/// otherwise, matching Git receive-pack. Updates are checked against `policy` and
+/// The same as [`receive_pack_with_hook`] with no in-process [`ReceiveHook`].
+///
+/// # Errors
+///
+/// See [`receive_pack_with_hook`].
+pub fn receive_pack(
+    repo: &Repository,
+    input: &mut dyn Read,
+    output: &mut dyn Write,
+    opts: &ServeOptions,
+    policy: &ReceivePolicy,
+) -> Result<ReceiveOutcome> {
+    receive_pack_with_hook(repo, input, output, opts, policy, &())
+}
+
+/// Serve one push session, running `hook` alongside the hook scripts.
+///
+/// The pushed pack is streamed into a temp file inside a quarantine object
+/// directory, so memory use does not grow with the pack size. Its objects are
+/// then stored via [`unpack_objects`] for packs with fewer objects than
+/// `receive.unpacklimit` and installed as a pack with an index otherwise,
+/// matching Git receive-pack. Updates are checked against `policy` and
 /// against the value the client expected each ref to have; with the `atomic`
 /// capability either every update is applied or none is. Server-side hooks run
 /// through the repository [`CommandRunner`](crate::command_runner::CommandRunner)
 /// (`pre-receive`, `update`, `post-receive`, `post-update`) with push options and
-/// quarantined object ingestion matching Git receive-pack.
+/// quarantined object ingestion matching Git receive-pack. `hook` runs just
+/// before the matching script: [`ReceiveHook::pre_receive`] before
+/// `pre-receive` and [`ReceiveHook::update`] before each `update`.
+///
+/// The pack is read only up to its trailing checksum, never to end of input:
+/// a push client keeps its side open until it has read the status report.
 ///
 /// # Parameters
 ///
@@ -142,22 +356,27 @@ pub struct ReceiveOutcome {
 /// - `opts`: framing, protocol version, agent string, and hidden refs. Protocol
 ///   v2 is not defined for pushes, so it is served as v0.
 /// - `policy`: which updates to refuse.
+/// - `hook`: in-process checks; pass `&()` for none.
 ///
 /// # Returns
 ///
-/// What was stored and which updates were applied. Refused updates are reported
-/// to the client and in the outcome; they are not errors.
+/// What was stored and which updates were applied. A pack that could not be
+/// stored ([`ReceiveOutcome::unpack_error`]) and refused updates
+/// ([`RefUpdateResult::error`]) are reported to the client and in the outcome;
+/// they are not errors.
 ///
 /// # Errors
 ///
-/// Returns [`ServeError::Protocol`] for a malformed command list and I/O errors
-/// from the streams.
-pub fn receive_pack(
+/// Returns [`ServeError::Protocol`] for a malformed command list, and I/O or
+/// repository errors from writing the response, creating the quarantine, or
+/// moving the received objects into the repository.
+pub fn receive_pack_with_hook(
     repo: &Repository,
     input: &mut dyn Read,
     output: &mut dyn Write,
     opts: &ServeOptions,
     policy: &ReceivePolicy,
+    hook: &dyn ReceiveHook,
 ) -> Result<ReceiveOutcome> {
     if opts.advertise_refs || !opts.stateless_rpc {
         if opts.protocol == ProtocolVersion::V1 {
@@ -187,18 +406,14 @@ pub fn receive_pack(
         None
     };
 
-    let unpack_error = if needs_pack {
-        let Some(q) = quarantine.as_ref() else {
-            return Err(ServeError::Protocol("pack push requires quarantine".into()));
-        };
-        match read_push_pack(input, repo.odb().hash_algo(), max_input) {
-            Ok(pack) => ingest_pushed_pack(&q.odb(), &pack, cfg.as_ref(), max_input)
+    let unpack_error = match quarantine.as_ref() {
+        Some(q) => {
+            let odb = q.odb();
+            spool_push_pack(input, &odb, max_input)
+                .and_then(|pack| ingest_spooled_pack(&odb, pack, cfg.as_ref()))
                 .err()
-                .map(|e| e.to_string()),
-            Err(msg) => Some(msg),
         }
-    } else {
-        None
+        None => None,
     };
 
     let mut hook_records = Vec::new();
@@ -206,7 +421,7 @@ pub fn receive_pack(
         request
             .commands
             .iter()
-            .map(|c| c.refused("unpacker error"))
+            .map(|c| c.refused(RefUpdateRefusal::UnpackerError))
             .collect()
     } else {
         apply_commands_with_hooks(
@@ -214,6 +429,7 @@ pub fn receive_pack(
             &request,
             opts,
             policy,
+            hook,
             quarantine.as_mut(),
             sideband.then_some(&mut *output),
             &mut hook_records,
@@ -221,7 +437,7 @@ pub fn receive_pack(
     };
 
     if request.caps.contains("report-status") || request.caps.contains("report-status-v2") {
-        let report = build_report(unpack_error.as_deref(), &updates)?;
+        let report = build_report(unpack_error.as_ref(), &updates)?;
         if sideband {
             crate::pkt_line::write_sideband_channel1_64k(&mut &mut *output, &report)?;
             write_flush(output)?;
@@ -280,36 +496,9 @@ fn write_advertisement(
     write_flush(output)
 }
 
-/// One `<old> <new> <ref>` line from the client.
-struct Command {
-    old: Option<ObjectId>,
-    new: Option<ObjectId>,
-    refname: String,
-}
-
-impl Command {
-    fn refused(&self, reason: &str) -> RefUpdateResult {
-        RefUpdateResult {
-            refname: self.refname.clone(),
-            old: self.old,
-            new: self.new,
-            error: Some(reason.to_owned()),
-        }
-    }
-
-    fn accepted(&self) -> RefUpdateResult {
-        RefUpdateResult {
-            refname: self.refname.clone(),
-            old: self.old,
-            new: self.new,
-            error: None,
-        }
-    }
-}
-
 /// The command list of a push.
 struct PushRequest {
-    commands: Vec<Command>,
+    commands: Vec<RefCommand>,
     caps: HashSet<String>,
     push_options: Vec<String>,
 }
@@ -340,7 +529,7 @@ fn read_commands(repo: &Repository, input: &mut dyn Read) -> Result<Option<PushR
                 };
                 let old = parse_oid(repo, old)?;
                 let new = parse_oid(repo, new)?;
-                commands.push(Command {
+                commands.push(RefCommand {
                     old: (!old.is_zero()).then_some(old),
                     new: (!new.is_zero()).then_some(new),
                     refname: refname.to_owned(),
@@ -382,11 +571,13 @@ fn read_commands(repo: &Repository, input: &mut dyn Read) -> Result<Option<PushR
 }
 
 /// Validate, run hooks, migrate quarantine objects, and apply ref updates.
+#[allow(clippy::too_many_arguments)]
 fn apply_commands_with_hooks(
     repo: &Repository,
     request: &PushRequest,
     opts: &ServeOptions,
     policy: &ReceivePolicy,
+    hook: &dyn ReceiveHook,
     quarantine: Option<&mut ReceiveQuarantine>,
     mut sideband_out: Option<&mut dyn Write>,
     hook_records: &mut Vec<HookRunRecord>,
@@ -415,11 +606,25 @@ fn apply_commands_with_hooks(
         })
         .collect();
 
-    if request.caps.contains("atomic") && results.iter().any(|r| r.error.is_some()) {
-        for r in results.iter_mut().filter(|r| r.error.is_none()) {
-            r.error = Some("atomic transaction failed".to_owned());
-        }
+    let atomic = request.caps.contains("atomic");
+    if atomic && results.iter().any(|r| r.error.is_some()) {
+        refuse_remaining(&mut results, &RefUpdateRefusal::AtomicTransactionFailed);
         return Ok(results);
+    }
+
+    let accepted: Vec<RefCommand> = request
+        .commands
+        .iter()
+        .zip(&results)
+        .filter(|(_, r)| r.error.is_none())
+        .map(|(c, _)| c.clone())
+        .collect();
+    if !accepted.is_empty() {
+        if let Err(refusal) = hook.pre_receive(&accepted, lookup_odb.as_ref().unwrap_or(repo.odb()))
+        {
+            refuse_remaining(&mut results, &refusal);
+            return Ok(results);
+        }
     }
 
     let algo = repo.odb().hash_algo();
@@ -439,7 +644,7 @@ fn apply_commands_with_hooks(
         .map(|(k, v)| (k.as_str(), v.as_str()))
         .collect();
 
-    let all_cmds: Vec<&Command> = request.commands.iter().collect();
+    let all_cmds: Vec<&RefCommand> = request.commands.iter().collect();
     let pre_stdin = commands_stdin(&all_cmds, algo);
     let (pre_result, pre_out) = run_hook_in_git_dir(
         repo,
@@ -451,9 +656,7 @@ fn apply_commands_with_hooks(
     relay_hook_sideband(&mut sideband_out, &pre_out)?;
     hook_records.push(hook_record("pre-receive", &pre_result));
     if matches!(pre_result, HookResult::Failed(_)) {
-        for r in results.iter_mut().filter(|r| r.error.is_none()) {
-            r.error = Some("pre-receive hook declined".to_owned());
-        }
+        refuse_remaining(&mut results, &RefUpdateRefusal::PreReceiveHookDeclined);
         return Ok(results);
     }
 
@@ -470,6 +673,10 @@ fn apply_commands_with_hooks(
         if result.error.is_some() {
             continue;
         }
+        if let Err(refusal) = hook.update(cmd, repo.odb()) {
+            result.error = Some(refusal);
+            continue;
+        }
         let zero = null_oid_hex(algo);
         let old_hex = cmd.old.map(|o| o.to_hex()).unwrap_or_else(|| zero.clone());
         let new_hex = cmd.new.map(|o| o.to_hex()).unwrap_or(zero.clone());
@@ -479,14 +686,12 @@ fn apply_commands_with_hooks(
         relay_hook_sideband(&mut sideband_out, &update_out)?;
         hook_records.push(hook_record("update", &update_result));
         if matches!(update_result, HookResult::Failed(_)) {
-            result.error = Some("hook declined".to_owned());
+            result.error = Some(RefUpdateRefusal::UpdateHookDeclined);
         }
     }
 
-    if request.caps.contains("atomic") && results.iter().any(|r| r.error.is_some()) {
-        for r in results.iter_mut().filter(|r| r.error.is_none()) {
-            r.error = Some("atomic transaction failed".to_owned());
-        }
+    if atomic && results.iter().any(|r| r.error.is_some()) {
+        refuse_remaining(&mut results, &RefUpdateRefusal::AtomicTransactionFailed);
         return Ok(results);
     }
 
@@ -499,25 +704,25 @@ fn apply_commands_with_hooks(
         .map(|(idx, (cmd, _))| (idx, receive_command_store_update(cmd)))
         .collect();
 
-    if request.caps.contains("atomic") {
+    if atomic {
         let batch: Vec<_> = pending.iter().map(|(_, u)| u.clone()).collect();
         if let Err(e) = crate::refs::commit_ref_store_batch(repo.git_dir(), &batch) {
-            let msg = format!("failed to update ref: {e}");
+            let refusal = RefUpdateRefusal::RefStore(e.to_string());
             for (idx, _) in pending {
                 if results[idx].error.is_none() {
-                    results[idx].error = Some(msg.clone());
+                    results[idx].error = Some(refusal.clone());
                 }
             }
         }
     } else {
         for (idx, update) in pending {
             if let Err(e) = crate::refs::commit_store_update(repo.git_dir(), update) {
-                results[idx].error = Some(format!("failed to update ref: {e}"));
+                results[idx].error = Some(RefUpdateRefusal::RefStore(e.to_string()));
             }
         }
     }
 
-    let successful: Vec<&Command> = request
+    let successful: Vec<&RefCommand> = request
         .commands
         .iter()
         .zip(results.iter())
@@ -554,6 +759,13 @@ fn apply_commands_with_hooks(
     Ok(results)
 }
 
+/// Refuse every update that has not been refused yet.
+fn refuse_remaining(results: &mut [RefUpdateResult], reason: &RefUpdateRefusal) {
+    for r in results.iter_mut().filter(|r| r.error.is_none()) {
+        r.error = Some(reason.clone());
+    }
+}
+
 fn hook_record(name: &str, result: &HookResult) -> HookRunRecord {
     HookRunRecord {
         name: name.to_owned(),
@@ -577,7 +789,7 @@ fn push_option_env_owned(options: &[String]) -> Vec<(String, String)> {
     pairs
 }
 
-fn commands_stdin(commands: &[&Command], algo: crate::objects::HashAlgo) -> String {
+fn commands_stdin(commands: &[&RefCommand], algo: crate::objects::HashAlgo) -> String {
     let zero = null_oid_hex(algo);
     commands
         .iter()
@@ -596,7 +808,7 @@ fn null_oid_hex(algo: crate::objects::HashAlgo) -> String {
     ObjectId::null(algo).to_hex()
 }
 
-fn receive_command_store_update(cmd: &Command) -> crate::refs::store::RefUpdate {
+fn receive_command_store_update(cmd: &RefCommand) -> crate::refs::store::RefUpdate {
     let mut flags = crate::refs::store::RefUpdateFlags::default();
     if cmd.refname == "HEAD" {
         flags.no_deref = true;
@@ -629,44 +841,44 @@ fn relay_hook_sideband(out: &mut Option<&mut dyn Write>, captured: &[u8]) -> Res
 /// Decide whether one command may be applied. Returns the refusal reason.
 fn check_command(
     repo: &Repository,
-    lookup: Option<&crate::odb::Odb>,
-    cmd: &Command,
+    lookup: Option<&Odb>,
+    cmd: &RefCommand,
     opts: &ServeOptions,
     policy: &ReceivePolicy,
     current_branch: Option<&str>,
-) -> Option<&'static str> {
+) -> Option<RefUpdateRefusal> {
     if !cmd.refname.starts_with("refs/") || !crate::refs::is_valid_storable_ref_name(&cmd.refname) {
-        return Some("funny refname");
+        return Some(RefUpdateRefusal::InvalidRefName);
     }
     if crate::hide_refs::ref_is_hidden(&cmd.refname, &cmd.refname, &opts.hidden_refs) {
-        return Some("deny updating a hidden ref");
+        return Some(RefUpdateRefusal::HiddenRef);
     }
     let current = crate::refs::resolve_ref(repo.git_dir(), &cmd.refname).ok();
     if current != cmd.old {
-        return Some("stale info");
+        return Some(RefUpdateRefusal::StaleInfo);
     }
     let is_current_branch = current_branch == Some(cmd.refname.as_str());
 
     let Some(new) = cmd.new else {
         if policy.deny_deletes {
-            return Some("deletion prohibited");
+            return Some(RefUpdateRefusal::DeletionProhibited);
         }
         if is_current_branch && policy.deny_current_branch {
-            return Some("deletion of the current branch prohibited");
+            return Some(RefUpdateRefusal::CurrentBranchDeletion);
         }
         return None;
     };
     let odb = lookup.unwrap_or(repo.odb());
     if !odb.exists(&new) {
-        return Some("missing necessary objects");
+        return Some(RefUpdateRefusal::MissingObjects);
     }
     if is_current_branch && policy.deny_current_branch {
-        return Some("branch is currently checked out");
+        return Some(RefUpdateRefusal::CurrentBranch);
     }
     if let (Some(old), true) = (current, policy.deny_non_fast_forwards) {
         let fast_forward = crate::merge_base::is_ancestor(repo, old, new).unwrap_or(false);
         if !fast_forward {
-            return Some("non-fast-forward");
+            return Some(RefUpdateRefusal::NonFastForward);
         }
     }
     None
@@ -674,18 +886,21 @@ fn check_command(
 
 /// Encode the status report as pkt-lines: the unpack result, one line per ref,
 /// and a closing flush.
-fn build_report(unpack_error: Option<&str>, updates: &[RefUpdateResult]) -> Result<Vec<u8>> {
+fn build_report(
+    unpack_error: Option<&UnpackError>,
+    updates: &[RefUpdateResult],
+) -> Result<Vec<u8>> {
     let mut report = Vec::new();
     match unpack_error {
         None => write_line(&mut report, "unpack ok")?,
-        Some(e) => write_line(&mut report, &format!("unpack {}", one_line(e)))?,
+        Some(e) => write_line(&mut report, &format!("unpack {}", one_line(&e.to_string())))?,
     }
     for u in updates {
         match &u.error {
             None => write_line(&mut report, &format!("ok {}", u.refname))?,
             Some(reason) => write_line(
                 &mut report,
-                &format!("ng {} {}", u.refname, one_line(reason)),
+                &format!("ng {} {}", u.refname, one_line(&reason.to_string())),
             )?,
         }
     }
@@ -698,109 +913,120 @@ fn one_line(msg: &str) -> String {
     msg.lines().next().unwrap_or_default().trim().to_owned()
 }
 
-/// Read exactly one packfile from the push stream.
+/// A pushed pack written to a temp file in the quarantine's `pack/` directory.
+struct SpooledPack {
+    file: tempfile::NamedTempFile,
+    /// The 12-byte pack header (signature, version, object count).
+    header: [u8; 12],
+}
+
+/// Stream exactly one packfile from the push stream into a temp file.
 ///
-/// The push client keeps its write half open until the report-status is read,
-/// so this must not block on stdin EOF (issue #1656).
-fn read_push_pack(
+/// The pack's end is found by scanning its entries as they arrive, and nothing
+/// past the trailing checksum is requested: the push client keeps its write
+/// half open until it has read the status report, so waiting for end of input
+/// would hang (issue #1656). The checksum itself is verified when the pack is
+/// stored.
+fn spool_push_pack(
     input: &mut dyn Read,
-    hash: HashAlgo,
+    odb: &Odb,
     max_bytes: Option<u64>,
-) -> std::result::Result<Vec<u8>, String> {
-    let hash_len = hash.len();
+) -> std::result::Result<SpooledPack, UnpackError> {
+    let hash = odb.hash_algo();
+    let mut file = tempfile::Builder::new()
+        .prefix("tmp_pack_")
+        .tempfile_in(odb.objects_dir().join("pack"))?;
     let mut scanner = PackStreamScanner::new(hash);
-    let mut buf = Vec::new();
-    let mut fed_offset = 0usize;
-    let mut chunk = [0u8; 64 * 1024];
-
+    let mut header = [0u8; 12];
+    let mut chunk = vec![0u8; SPOOL_CHUNK];
+    let mut written = 0u64;
+    let mut pack_len: Option<u64> = None;
+    let mut out = BufWriter::with_capacity(SPOOL_CHUNK, file.as_file_mut());
     loop {
-        if scanner.is_complete() {
-            let pack_len = scanner
-                .pack_body_byte_len()
-                .checked_add(u64::try_from(hash_len).unwrap_or(u64::MAX))
-                .ok_or_else(|| "pack size overflow".to_owned())?;
-            if let Some(limit) = max_bytes {
-                if pack_len > limit {
-                    return Err("pack exceeds maximum input size".to_owned());
-                }
-            }
-            let pack_len =
-                usize::try_from(pack_len).map_err(|_| "pack size overflow".to_string())?;
-            while buf.len() < pack_len {
-                let n = input.read(&mut chunk).map_err(|e| e.to_string())?;
-                if n == 0 {
-                    break;
-                }
-                if let Some(limit) = max_bytes {
-                    let next = buf.len().saturating_add(n);
-                    if next as u64 > limit {
-                        return Err("pack exceeds maximum input size".to_owned());
-                    }
-                }
-                buf.extend_from_slice(&chunk[..n]);
-            }
-            if buf.len() < pack_len {
-                return Err("truncated pack stream".to_owned());
-            }
-            buf.truncate(pack_len);
-            verify_trailer(hash, &buf).map_err(|e| e.to_string())?;
-            return Ok(buf);
-        }
-
-        if fed_offset >= buf.len() {
-            let n = input.read(&mut chunk).map_err(|e| e.to_string())?;
-            if n == 0 {
-                return Err("unexpected end of pack stream".to_owned());
-            }
-            if let Some(limit) = max_bytes {
-                let next = buf.len().saturating_add(n);
-                if next as u64 > limit {
-                    return Err("pack exceeds maximum input size".to_owned());
-                }
-            }
-            buf.extend_from_slice(&chunk[..n]);
-        }
-
-        scanner
-            .feed(&buf[fed_offset..])
-            .map_err(|e: PackStreamScanError| e.to_string())?;
-        fed_offset = if scanner.is_complete() {
-            usize::try_from(scanner.pack_body_byte_len()).unwrap_or(buf.len())
-        } else {
-            buf.len()
+        let want = match pack_len {
+            Some(len) if written >= len => break,
+            Some(len) => usize::try_from(len - written).map_or(chunk.len(), |n| n.min(chunk.len())),
+            None => chunk.len(),
         };
+        let n = read_some(input, &mut chunk[..want])?;
+        if n == 0 {
+            return Err(UnpackError::Truncated);
+        }
+        let mut data = &chunk[..n];
+        if pack_len.is_none() {
+            scanner.feed(data)?;
+            if scanner.is_complete() {
+                let len = scanner
+                    .pack_body_byte_len()
+                    .saturating_add(hash.len() as u64);
+                let keep = usize::try_from(len.saturating_sub(written)).map_or(n, |k| k.min(n));
+                data = &data[..keep];
+                pack_len = Some(len);
+            }
+        }
+        if let Some(limit) = max_bytes {
+            let total = pack_len.unwrap_or(written.saturating_add(data.len() as u64));
+            if total > limit {
+                return Err(UnpackError::TooLarge { limit });
+            }
+        }
+        if let Some(missing) = usize::try_from(written)
+            .ok()
+            .and_then(|start| header.get_mut(start..))
+        {
+            let take = missing.len().min(data.len());
+            missing[..take].copy_from_slice(&data[..take]);
+        }
+        out.write_all(data)?;
+        written += data.len() as u64;
+    }
+    out.flush()?;
+    drop(out);
+    Ok(SpooledPack { file, header })
+}
+
+/// `Read::read`, retrying when interrupted by a signal.
+fn read_some(input: &mut dyn Read, buf: &mut [u8]) -> std::io::Result<usize> {
+    loop {
+        match input.read(buf) {
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            other => return other,
+        }
     }
 }
 
-/// Store a pushed pack using unpack-objects or index-pack, per Git limits.
-fn ingest_pushed_pack(
-    odb: &crate::odb::Odb,
-    pack: &[u8],
+/// Store a spooled push pack: explode small packs into loose objects, index and
+/// install larger ones, per `receive.unpacklimit`.
+fn ingest_spooled_pack(
+    odb: &Odb,
+    pack: SpooledPack,
     cfg: &ConfigSet,
-    max_input: Option<u64>,
-) -> Result<()> {
-    if should_use_unpack_objects(pack, cfg) {
-        let mut cursor = std::io::Cursor::new(pack);
+) -> std::result::Result<(), UnpackError> {
+    if should_use_unpack_objects(&pack.header, cfg) {
+        let mut reader = BufReader::with_capacity(SPOOL_CHUNK, pack.file.reopen()?);
         unpack_objects(
-            &mut cursor,
+            &mut reader,
             odb,
             &UnpackOptions {
                 quiet: true,
                 strict: true,
-                max_input_bytes: max_input,
                 ..UnpackOptions::default()
             },
         )?;
-    } else {
-        ingest_received_pack(
-            pack.to_vec(),
-            odb,
-            &IngestPackOptions {
-                fix_thin: true,
-                ..Default::default()
-            },
-        )?;
+        return Ok(());
     }
+    let path = pack.file.into_temp_path();
+    install_pack_path(
+        &path,
+        odb,
+        &IngestPackOptions {
+            fix_thin: true,
+            // Indexing hashes every object and the trailer is checked while
+            // installing, so a second full read of the pack proves nothing.
+            skip_post_index_verify: true,
+            ..Default::default()
+        },
+    )?;
     Ok(())
 }
 
@@ -823,13 +1049,167 @@ mod tests {
                 refname: "refs/heads/topic".into(),
                 old: Some(oid),
                 new: None,
-                error: Some("deletion prohibited".into()),
+                error: Some(RefUpdateRefusal::DeletionProhibited),
             },
         ];
         let report = build_report(None, &updates).unwrap_or_default();
         assert_eq!(
             String::from_utf8_lossy(&report),
             "000eunpack ok\n0017ok refs/heads/main\n002cng refs/heads/topic deletion prohibited\n0000"
+        );
+    }
+
+    #[test]
+    fn report_renders_typed_unpack_error_and_refusal() {
+        let updates = vec![RefUpdateResult {
+            refname: "refs/heads/main".into(),
+            old: None,
+            new: None,
+            error: Some(RefUpdateRefusal::UnpackerError),
+        }];
+        let report = build_report(Some(&UnpackError::Truncated), &updates).unwrap_or_default();
+        assert_eq!(
+            String::from_utf8_lossy(&report),
+            "0029unpack unexpected end of pack stream\n0026ng refs/heads/main unpacker error\n0000"
+        );
+    }
+
+    #[test]
+    fn refusals_render_the_reasons_git_clients_expect() {
+        let cases = [
+            (RefUpdateRefusal::InvalidRefName, "funny refname"),
+            (RefUpdateRefusal::HiddenRef, "deny updating a hidden ref"),
+            (RefUpdateRefusal::StaleInfo, "stale info"),
+            (RefUpdateRefusal::DeletionProhibited, "deletion prohibited"),
+            (
+                RefUpdateRefusal::CurrentBranchDeletion,
+                "deletion of the current branch prohibited",
+            ),
+            (
+                RefUpdateRefusal::CurrentBranch,
+                "branch is currently checked out",
+            ),
+            (
+                RefUpdateRefusal::MissingObjects,
+                "missing necessary objects",
+            ),
+            (RefUpdateRefusal::NonFastForward, "non-fast-forward"),
+            (RefUpdateRefusal::UnpackerError, "unpacker error"),
+            (
+                RefUpdateRefusal::AtomicTransactionFailed,
+                "atomic transaction failed",
+            ),
+            (
+                RefUpdateRefusal::PreReceiveHookDeclined,
+                "pre-receive hook declined",
+            ),
+            (RefUpdateRefusal::UpdateHookDeclined, "hook declined"),
+            (RefUpdateRefusal::Policy("frozen".into()), "frozen"),
+            (
+                RefUpdateRefusal::RefStore("locked".into()),
+                "failed to update ref: locked",
+            ),
+        ];
+        for (refusal, wire) in cases {
+            assert_eq!(refusal.to_string(), wire);
+        }
+    }
+
+    /// Serves `data`, then fails any further read: reading past the pack would
+    /// block forever on a real push connection.
+    struct NoReadPastEnd<'a> {
+        data: &'a [u8],
+    }
+
+    impl Read for NoReadPastEnd<'_> {
+        fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+            if self.data.is_empty() {
+                return Err(std::io::Error::other("read past the end of the pack"));
+            }
+            let n = buf.len().min(self.data.len());
+            buf[..n].copy_from_slice(&self.data[..n]);
+            self.data = &self.data[n..];
+            Ok(n)
+        }
+    }
+
+    fn sample_pack() -> Vec<u8> {
+        use grit_test_support::objects::{HashAlgo as FixtureAlgo, ObjectKind as PK, PackBuilder};
+        let mut pb = PackBuilder::new(FixtureAlgo::Sha1);
+        let mut seed = 0x2545_f491_u32;
+        // Incompressible, so the pack spans several spool chunks.
+        let big: Vec<u8> = (0..(SPOOL_CHUNK * 3))
+            .map(|_| {
+                seed ^= seed << 13;
+                seed ^= seed >> 17;
+                seed ^= seed << 5;
+                seed as u8
+            })
+            .collect();
+        pb.add_full(PK::Blob, &big);
+        pb.add_full(PK::Blob, b"small\n");
+        pb.build().bytes
+    }
+
+    fn test_odb(dir: &std::path::Path) -> Odb {
+        let objects = dir.join("objects");
+        std::fs::create_dir_all(objects.join("pack")).unwrap_or_default();
+        Odb::new(&objects)
+    }
+
+    #[test]
+    fn spool_stops_at_the_trailer_without_reading_further() {
+        let tmp = tempfile::tempdir().unwrap_or_else(|e| panic!("{e}"));
+        let odb = test_odb(tmp.path());
+        let pack = sample_pack();
+        let mut input = NoReadPastEnd { data: &pack };
+        let spooled = spool_push_pack(&mut input, &odb, None).unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(std::fs::read(spooled.file.path()).unwrap_or_default(), pack);
+        assert_eq!(&spooled.header[..], &pack[..12]);
+    }
+
+    #[test]
+    fn spool_keeps_only_the_pack_when_more_bytes_follow() {
+        let tmp = tempfile::tempdir().unwrap_or_else(|e| panic!("{e}"));
+        let odb = test_odb(tmp.path());
+        let pack = sample_pack();
+        let mut stream = pack.clone();
+        stream.extend_from_slice(b"trailing junk");
+        let spooled =
+            spool_push_pack(&mut stream.as_slice(), &odb, None).unwrap_or_else(|e| panic!("{e}"));
+        assert_eq!(std::fs::read(spooled.file.path()).unwrap_or_default(), pack);
+    }
+
+    #[test]
+    fn spool_reports_typed_errors() {
+        let tmp = tempfile::tempdir().unwrap_or_else(|e| panic!("{e}"));
+        let odb = test_odb(tmp.path());
+        let pack = sample_pack();
+
+        let truncated = &pack[..pack.len() - 5];
+        assert!(matches!(
+            spool_push_pack(&mut &truncated[..], &odb, None),
+            Err(UnpackError::Truncated)
+        ));
+
+        let limit = (pack.len() - 1) as u64;
+        assert!(matches!(
+            spool_push_pack(&mut pack.as_slice(), &odb, Some(limit)),
+            Err(UnpackError::TooLarge { limit: l }) if l == limit
+        ));
+        assert!(spool_push_pack(&mut pack.as_slice(), &odb, Some(pack.len() as u64)).is_ok());
+
+        assert!(matches!(
+            spool_push_pack(&mut &b"JUNK\0\0\0\x02\0\0\0\x01"[..], &odb, None),
+            Err(UnpackError::Malformed(PackStreamScanError::BadSignature))
+        ));
+
+        let leftovers: Vec<_> = std::fs::read_dir(odb.objects_dir().join("pack"))
+            .map(|rd| rd.filter_map(|e| e.ok()).collect())
+            .unwrap_or_default();
+        assert!(
+            leftovers.is_empty(),
+            "failed spools must not leave temp files"
         );
     }
 

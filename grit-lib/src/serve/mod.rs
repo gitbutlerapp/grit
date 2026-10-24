@@ -6,6 +6,12 @@
 //! plain byte streams, so the same code serves a duplex connection (ssh, a
 //! local pipe) and the stateless request/response exchanges of smart HTTP.
 //!
+//! A push server decides what to accept with a [`ReceivePolicy`] (the
+//! `receive.*` settings), the repository's hook scripts, and optionally an
+//! in-process [`ReceiveHook`] passed to [`receive_pack_with_hook`]. Refusals
+//! come back typed, as [`RefUpdateRefusal`] per ref and [`UnpackError`] for the
+//! pack.
+//!
 //! The functions take an already-opened [`Repository`] and explicit options; they
 //! never read the process environment or print to the terminal. Callers are
 //! expected to map `GIT_PROTOCOL` to a [`ProtocolVersion`] and to load
@@ -21,7 +27,8 @@ pub(crate) use shallow_upload::{
 };
 
 pub use receive_pack::{
-    receive_pack, HookRunRecord, ReceiveOutcome, ReceivePolicy, RefUpdateResult,
+    receive_pack, receive_pack_with_hook, HookRunRecord, ReceiveHook, ReceiveOutcome,
+    ReceivePolicy, RefCommand, RefUpdateRefusal, RefUpdateResult, UnpackError,
 };
 pub use upload_pack::upload_pack;
 
