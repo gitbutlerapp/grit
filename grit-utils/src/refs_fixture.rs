@@ -311,7 +311,7 @@ fn clear_dir_contents(dir: &Path) -> Result<()> {
     Ok(())
 }
 
-fn copy_tree_into(source: &Path, dest: &Path) -> Result<()> {
+pub(crate) fn copy_tree_into(source: &Path, dest: &Path) -> Result<()> {
     for entry in fs::read_dir(source)? {
         let entry = entry?;
         let name = entry.file_name();

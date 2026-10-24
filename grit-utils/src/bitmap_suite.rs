@@ -228,7 +228,32 @@ pub fn run_bitmaps_suite(
     let caps = serve_clone_caps();
     let grit_failure = probe_serve_clone_failure(bench_exe, &repo, &serve_scenario, caps)?;
 
-    let scenarios = vec![
+    // The same history without the bitmap: enumeration walks objects and the pack
+    // reuses on-disk deltas through the `.rev` reverse index (issue #1744).
+    let no_bitmaps = if repo_override.is_none() {
+        let no_bitmaps_repo = crate::real_repo_fixture::ensure_git_git_no_bitmaps(git)?;
+        let no_bitmaps_req = no_bitmaps_repo.join(SERVE_CLONE_REQUEST_FILE);
+        let grit_inner = shell_command(bench_exe, &drive_argv("serve-clone", &no_bitmaps_repo));
+        let scenario = Scenario {
+            id: "serve-clone-no-bitmaps-git.git".into(),
+            group: "bitmaps".into(),
+            fixture: "git.git".into(),
+            description: "upload-pack --stateless-rpc full ref closure without a pack bitmap"
+                .into(),
+            grit_argv: vec![sh_redirect_stdin(&grit_inner, &no_bitmaps_req)],
+            git_argv: vec![sh_redirect_stdin(&git_serve_inner, &no_bitmaps_req)],
+            driver: Driver::Lib,
+            prepare_kind: None,
+            grit_via_shell: true,
+            git_via_shell: true,
+        };
+        let failure = probe_serve_clone_failure(bench_exe, &no_bitmaps_repo, &scenario, caps)?;
+        Some((no_bitmaps_repo, scenario, failure))
+    } else {
+        None
+    };
+
+    let mut scenarios = vec![
         run_scenario(
             hyperfine,
             bench_exe,
@@ -285,6 +310,17 @@ pub fn run_bitmaps_suite(
             grit_failure,
         )?,
     ];
+    if let Some((no_bitmaps_repo, scenario, failure)) = no_bitmaps {
+        scenarios.push(run_scenario(
+            hyperfine,
+            bench_exe,
+            git,
+            cfg,
+            &scenario,
+            &no_bitmaps_repo,
+            failure,
+        )?);
+    }
 
     Ok(BenchReport {
         schema_version: SCHEMA_VERSION,

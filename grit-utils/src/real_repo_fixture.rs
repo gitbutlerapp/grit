@@ -21,6 +21,7 @@ pub const DEFAULT_GIT_GIT_TAG: &str = "v2.47.0";
 pub const DEFAULT_LINUX_TAG: &str = "v6.12";
 
 const BITMAP_READY: &str = ".grit-bench-bitmaps-ready";
+const NO_BITMAPS_READY: &str = ".grit-bench-no-bitmaps-ready";
 const WORKTREE_READY: &str = ".grit-bench-worktree-ready";
 
 /// Scratch root shared by real-repo fixtures (same as ODB cache unless overridden).
@@ -248,6 +249,42 @@ pub fn ensure_git_git_bitmaps(git: &Path) -> Result<PathBuf> {
     run_git(git, &dest, &["commit-graph", "write", "--reachable"])?;
     ensure_serve_clone_request(&dest)?;
     fs::write(dest.join(BITMAP_READY), tag.as_bytes()).context("write bitmap ready marker")?;
+    Ok(dest)
+}
+
+/// Path to the pinned `git.git` fixture copy without pack bitmaps.
+pub fn git_git_no_bitmaps_cache_path() -> PathBuf {
+    std::env::var("GRIT_BENCH_NO_BITMAPS_REPO")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| scratch_root().join("git.git-no-bitmaps"))
+}
+
+/// Ensure a copy of the [`ensure_git_git_bitmaps`] fixture with its pack bitmap
+/// removed: one Git-written pack with a `.rev` reverse index, like a server that
+/// never wrote bitmaps. Serving it exercises delta reuse without bitmap reuse.
+pub fn ensure_git_git_no_bitmaps(git: &Path) -> Result<PathBuf> {
+    let src = ensure_git_git_bitmaps(git)?;
+    let dest = git_git_no_bitmaps_cache_path();
+    let tag = pinned_git_git_tag();
+    if stored_marker(&dest, NO_BITMAPS_READY)?.as_deref() == Some(tag.as_str()) {
+        return Ok(dest);
+    }
+    if dest.exists() {
+        remove_dir_robust(&dest);
+    }
+    fs::create_dir_all(&dest)?;
+    crate::refs_fixture::copy_tree_into(&src, &dest)
+        .with_context(|| format!("copy {} to {}", src.display(), dest.display()))?;
+    let _ = fs::remove_file(dest.join(BITMAP_READY));
+    for entry in fs::read_dir(dest.join("objects/pack"))? {
+        let path = entry?.path();
+        if path.extension().is_some_and(|ext| ext == "bitmap") {
+            fs::remove_file(&path)?;
+        }
+    }
+    ensure_serve_clone_request(&dest)?;
+    fs::write(dest.join(NO_BITMAPS_READY), tag.as_bytes())
+        .context("write no-bitmaps ready marker")?;
     Ok(dest)
 }
 
