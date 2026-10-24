@@ -217,6 +217,8 @@ pub struct Odb {
     hash_algo_cache: Arc<OnceLock<HashAlgo>>,
     /// Zlib level for loose-object writes, resolved from config and cached.
     loose_zlib_cache: Arc<OnceLock<Compression>>,
+    /// Zlib level for pack-objects output, resolved from config and cached.
+    pack_zlib_cache: Arc<OnceLock<Compression>>,
     /// Shared with [`crate::repo::Repository`] so config is loaded once per open handle.
     shared_config_state: Option<crate::repo::RepositoryConfigSnapshot>,
     /// One-time sync of `core.deltaBaseCacheLimit` into the process-wide pack delta-base LRU.
@@ -390,6 +392,7 @@ impl Odb {
             midx_packs_validated: Arc::new(OnceLock::new()),
             hash_algo_cache: Arc::new(OnceLock::new()),
             loose_zlib_cache: Arc::new(OnceLock::new()),
+            pack_zlib_cache: Arc::new(OnceLock::new()),
             shared_config_state: None,
             delta_base_cache_sync: Arc::new(OnceLock::new()),
             shared_environment: None,
@@ -441,6 +444,7 @@ impl Odb {
             midx_packs_validated: Arc::new(OnceLock::new()),
             hash_algo_cache: Arc::new(OnceLock::new()),
             loose_zlib_cache: Arc::new(OnceLock::new()),
+            pack_zlib_cache: Arc::new(OnceLock::new()),
             shared_config_state: None,
             delta_base_cache_sync: Arc::new(OnceLock::new()),
             shared_environment: None,
@@ -1011,6 +1015,29 @@ impl Odb {
         let level = self.resolve_loose_zlib_level()?;
         let compression = Compression::new(level);
         let _ = self.loose_zlib_cache.set(compression);
+        Ok(compression)
+    }
+
+    fn resolve_pack_zlib_level(&self) -> Result<i32> {
+        if self.config_git_dir.is_none() && self.objects_dir.parent().is_none() {
+            return Ok(6);
+        }
+        let cfg = self.load_config_cascade()?;
+        cfg.pack_objects_zlib_level()
+    }
+
+    /// Zlib compression for pack-objects ([`ConfigSet::pack_objects_zlib_level`]).
+    ///
+    /// # Errors
+    ///
+    /// Returns errors from loading the config cascade or from invalid compression settings.
+    pub(crate) fn pack_compression(&self) -> Result<Compression> {
+        if let Some(cached) = self.pack_zlib_cache.get() {
+            return Ok(*cached);
+        }
+        let level = self.resolve_pack_zlib_level()?;
+        let compression = crate::pack_zlib::flate2_compression_for_pack_level(level);
+        let _ = self.pack_zlib_cache.set(compression);
         Ok(compression)
     }
 

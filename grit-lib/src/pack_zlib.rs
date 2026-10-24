@@ -3,6 +3,7 @@
 use std::io::Read;
 
 use flate2::read::ZlibDecoder;
+use flate2::Compression;
 
 use crate::error::{Error, Result};
 use crate::unpack_objects::decompress_zlib_at;
@@ -83,10 +84,31 @@ pub(crate) fn decompress_zlib_at_index(
     decompress_zlib_at(pack, offset, expected_size).map(|(data, _)| data)
 }
 
+/// Map Git pack zlib level (`pack.compression` / `core.compression`) to flate2.
+///
+/// Level `0` is stored (no compression), not zlib level 1 (`Compression::fast()`).
+pub(crate) fn flate2_compression_for_pack_level(level: i32) -> Compression {
+    match level {
+        0 => Compression::none(),
+        -1 => Compression::default(),
+        1..=9 => Compression::new(level as u32),
+        _ => Compression::default(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::unpack_objects::decompress_zlib_at;
+    use flate2::write::ZlibEncoder;
+    use std::io::Write;
+
+    fn zlib_compress_pack_payload(data: &[u8], level: i32) -> Result<Vec<u8>> {
+        let mut enc = ZlibEncoder::new(Vec::new(), flate2_compression_for_pack_level(level));
+        enc.write_all(data)
+            .map_err(|e| Error::Zlib(e.to_string()))?;
+        enc.finish().map_err(|e| Error::Zlib(e.to_string()))
+    }
 
     #[test]
     fn skip_zlib_at_with_scratch_matches_skip_zlib_at() {
@@ -107,6 +129,30 @@ mod tests {
             .expect("scratch skip");
         let direct = skip_zlib_at(&pack, offset, plain.len()).expect("direct skip");
         assert_eq!(skipped, direct);
+    }
+
+    #[test]
+    fn pack_compression_level_zero_is_stored_not_fast() {
+        let plain = b"commit 120\0tree abc\n";
+        let stored = zlib_compress_pack_payload(plain, 0).expect("level 0");
+        let fast = {
+            let mut enc = ZlibEncoder::new(Vec::new(), Compression::fast());
+            enc.write_all(plain).unwrap();
+            enc.finish().unwrap()
+        };
+        assert_ne!(
+            stored, fast,
+            "pack.compression=0 must not map to Compression::fast() (level 1)"
+        );
+        let default_level = {
+            let mut enc = ZlibEncoder::new(Vec::new(), Compression::default());
+            enc.write_all(plain).unwrap();
+            enc.finish().unwrap()
+        };
+        assert_ne!(
+            stored, default_level,
+            "pack.compression=0 must differ from default deflate (level 6)"
+        );
     }
 
     #[test]
