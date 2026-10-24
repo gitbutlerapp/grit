@@ -126,8 +126,14 @@ pub enum SignatureTail {
 /// Parse the date/time tail like [`parse_signature_times`], but preserve overflow vs non-numeric.
 #[must_use]
 pub fn parse_signature_tail(ident: &str) -> Option<SignatureTail> {
-    let bytes = ident.as_bytes();
-    let gt = ident.rfind('>')?;
+    parse_signature_tail_bytes(ident.as_bytes())
+}
+
+/// Byte-oriented tail parse: identity lines may contain non-UTF-8 names while the
+/// `<unix> <±HHMM>` suffix stays ASCII (Git encoding headers).
+#[must_use]
+pub(crate) fn parse_signature_tail_bytes(bytes: &[u8]) -> Option<SignatureTail> {
+    let gt = bytes.iter().rposition(|&b| b == b'>')?;
     let mut i = skip_fsck_date_leading_ws(bytes, gt + 1);
     if i >= bytes.len() || !bytes[i].is_ascii_digit() {
         return Some(SignatureTail::NonNumeric);
@@ -140,7 +146,7 @@ pub fn parse_signature_tail(ident: &str) -> Option<SignatureTail> {
     if i + 5 > bytes.len() {
         return None;
     }
-    let tz_slice = ident.get(i..i + 5)?;
+    let tz_slice = std::str::from_utf8(&bytes[i..i + 5]).ok()?;
     let tz_offset_secs = parse_tz_hhmm_offset(tz_slice)?;
     let tz_hhmm_range = i..i + 5;
     if raw == u128::MAX || raw > u64::MAX as u128 || date_overflows(raw as u64) {
@@ -190,9 +196,17 @@ fn parse_identity_name_email(ident: &str) -> Option<(String, String)> {
 
 /// Classify the date field for pretty-print / `%at` (t4212 whitespace commits).
 pub fn signature_timestamp_for_pretty(ident: &str) -> SignatureTimestamp {
-    match parse_signature_times(ident) {
-        Some(p) => SignatureTimestamp::Valid(p.unix_seconds),
-        None => SignatureTimestamp::Sentinel,
+    signature_timestamp_for_pretty_bytes(ident.as_bytes())
+}
+
+/// Like [`signature_timestamp_for_pretty`] on raw identity bytes (non-UTF-8 names allowed).
+#[must_use]
+pub(crate) fn signature_timestamp_for_pretty_bytes(bytes: &[u8]) -> SignatureTimestamp {
+    match parse_signature_tail_bytes(bytes) {
+        Some(SignatureTail::Valid(p)) => SignatureTimestamp::Valid(p.unix_seconds),
+        Some(SignatureTail::Overflow | SignatureTail::NonNumeric) | None => {
+            SignatureTimestamp::Sentinel
+        }
     }
 }
 
@@ -240,19 +254,19 @@ pub fn committer_unix_seconds_for_ordering(ident: &str) -> i64 {
 /// Like [`committer_unix_seconds_for_ordering`] on raw identity bytes (ASCII commit headers).
 #[must_use]
 pub fn committer_unix_seconds_for_ordering_bytes(ident: &[u8]) -> i64 {
-    let Ok(ident) = std::str::from_utf8(ident) else {
-        return 0;
-    };
-    committer_unix_seconds_for_ordering(ident)
+    match signature_timestamp_for_pretty_bytes(ident) {
+        SignatureTimestamp::Valid(ts) => ts,
+        SignatureTimestamp::Sentinel => 0,
+    }
 }
 
 /// Like [`committer_timestamp_for_until_filter`] on raw identity bytes (ASCII commit headers).
 #[must_use]
 pub fn committer_timestamp_for_until_filter_bytes(ident: &[u8]) -> i64 {
-    let Ok(ident) = std::str::from_utf8(ident) else {
-        return 0;
-    };
-    committer_timestamp_for_until_filter(ident)
+    match signature_timestamp_for_pretty_bytes(ident) {
+        SignatureTimestamp::Valid(ts) => ts,
+        SignatureTimestamp::Sentinel => 0,
+    }
 }
 
 /// Name and email from a `git commit --author`-style argument (`Name <email>` or bare email).
@@ -410,5 +424,18 @@ mod tests {
     fn parse_signature_malformed_identity_is_none() {
         assert!(parse_signature("A <e@x> totally_bogus -0700").is_none());
         assert!(parse_signature("not an identity").is_none());
+    }
+
+    #[test]
+    fn ordering_timestamp_from_non_utf8_identity_bytes() {
+        let ident = b"Lat\xEDn Dev <e@x> 1700000000 +0000";
+        assert_eq!(
+            committer_unix_seconds_for_ordering_bytes(ident),
+            1_700_000_000
+        );
+        assert_eq!(
+            committer_timestamp_for_until_filter_bytes(ident),
+            1_700_000_000
+        );
     }
 }

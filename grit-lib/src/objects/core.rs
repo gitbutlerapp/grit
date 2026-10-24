@@ -861,12 +861,12 @@ fn parse_tree_mode_octal(bytes: &[u8]) -> Option<u32> {
 /// # Errors
 ///
 /// [`Error::CorruptObject`] when an entry scanned before the stop point is malformed.
-pub(crate) fn find_tree_entry_by_name_in_data(
+pub(crate) fn find_tree_child_in_data(
     data: &[u8],
     oid_len: usize,
     name: &[u8],
     name_is_tree: bool,
-) -> Result<Option<TreeEntry>> {
+) -> Result<Option<(u32, ObjectId)>> {
     let mut pos = 0usize;
     while pos < data.len() {
         let rest = &data[pos..];
@@ -884,11 +884,10 @@ pub(crate) fn find_tree_entry_by_name_in_data(
             return Err(Error::CorruptObject("tree entry truncated SHA".to_owned()));
         }
         if entry_name == name {
-            return Ok(Some(TreeEntry {
+            return Ok(Some((
                 mode,
-                name: entry_name.to_vec(),
-                oid: ObjectId::from_bytes(&rest[oid_start..oid_end])?,
-            }));
+                ObjectId::from_bytes(&rest[oid_start..oid_end])?,
+            )));
         }
         if tree_entry_cmp(entry_name, mode == 0o040000, name, name_is_tree)
             == std::cmp::Ordering::Greater
@@ -900,18 +899,49 @@ pub(crate) fn find_tree_entry_by_name_in_data(
     Ok(None)
 }
 
+pub(crate) fn find_tree_entry_by_name_in_data(
+    data: &[u8],
+    oid_len: usize,
+    name: &[u8],
+    name_is_tree: bool,
+) -> Result<Option<TreeEntry>> {
+    Ok(
+        find_tree_child_in_data(data, oid_len, name, name_is_tree)?.map(|(mode, oid)| TreeEntry {
+            mode,
+            name: name.to_vec(),
+            oid,
+        }),
+    )
+}
+
 /// Like [`find_tree_entry_by_name_in_data`], trying directory ordering first then file.
+pub(crate) fn find_tree_child_by_name_dir_or_file_in_data(
+    data: &[u8],
+    oid_len: usize,
+    name: &[u8],
+) -> Result<Option<(u32, ObjectId)>> {
+    if let Some((mode, oid)) = find_tree_child_in_data(data, oid_len, name, true)? {
+        if mode == 0o040000 {
+            return Ok(Some((mode, oid)));
+        }
+    }
+    find_tree_child_in_data(data, oid_len, name, false)
+}
+
 pub(crate) fn find_tree_entry_by_name_dir_or_file_in_data(
     data: &[u8],
     oid_len: usize,
     name: &[u8],
 ) -> Result<Option<TreeEntry>> {
-    if let Some(entry) = find_tree_entry_by_name_in_data(data, oid_len, name, true)? {
-        if entry.mode == 0o040000 {
-            return Ok(Some(entry));
-        }
-    }
-    find_tree_entry_by_name_in_data(data, oid_len, name, false)
+    Ok(
+        find_tree_child_by_name_dir_or_file_in_data(data, oid_len, name)?.map(|(mode, oid)| {
+            TreeEntry {
+                mode,
+                name: name.to_vec(),
+                oid,
+            }
+        }),
+    )
 }
 
 /// Parsed representation of a commit object.
