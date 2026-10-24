@@ -564,6 +564,10 @@ fn load_shared_entries(
 }
 
 /// Write split index to `path` under `git_dir`, updating `index` base positions and `split_link`.
+///
+/// When `lock` is `Some`, the index file is written into that already-held lock and committed
+/// over `path`; otherwise a fresh lock on `path` is taken for the write.
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn write_index_file_split(
     path: &Path,
     git_dir: &Path,
@@ -572,6 +576,7 @@ pub(crate) fn write_index_file_split(
     request: WriteSplitIndexRequest,
     skip_hash: bool,
     thread_policy: crate::parallel::ThreadPolicy,
+    mut lock: Option<&mut crate::index::IndexLock>,
 ) -> Result<()> {
     // Mirror upstream `write_locked_index`: under GIT_TEST_CHECK_CACHE_TREE, verify the cache-tree
     // against the index before persisting. A duplicate-entry tree (t4058) produces a cache-tree
@@ -590,7 +595,13 @@ pub(crate) fn write_index_file_split(
         for e in &mut index.entries {
             e.base_index_pos = 0;
         }
-        index.write_to_path_with_config_and_policy(path, skip_hash, Some(cfg), thread_policy)?;
+        index.write_to_path_with_config_and_lock_policy(
+            path,
+            skip_hash,
+            Some(cfg),
+            lock.take(),
+            thread_policy,
+        )?;
         adjust_shared_perm_file(path, shared_repo).map_err(Error::Io)?;
         return Ok(());
     }
@@ -609,7 +620,13 @@ pub(crate) fn write_index_file_split(
         for e in &mut index.entries {
             e.base_index_pos = 0;
         }
-        index.write_to_path_with_config_and_policy(path, skip_hash, Some(cfg), thread_policy)?;
+        index.write_to_path_with_config_and_lock_policy(
+            path,
+            skip_hash,
+            Some(cfg),
+            lock.take(),
+            thread_policy,
+        )?;
         adjust_shared_perm_file(path, shared_repo).map_err(Error::Io)?;
         return Ok(());
     }
@@ -694,10 +711,11 @@ pub(crate) fn write_index_file_split(
                 for e in &mut index.entries {
                     e.base_index_pos = 0;
                 }
-                index.write_to_path_with_config_and_policy(
+                index.write_to_path_with_config_and_lock_policy(
                     path,
                     skip_hash,
                     Some(cfg),
+                    lock.take(),
                     thread_policy,
                 )?;
                 adjust_shared_perm_file(path, shared_repo).map_err(Error::Io)?;
@@ -728,10 +746,11 @@ pub(crate) fn write_index_file_split(
                 for ent in &mut index.entries {
                     ent.base_index_pos = 0;
                 }
-                index.write_to_path_with_config_and_policy(
+                index.write_to_path_with_config_and_lock_policy(
                     path,
                     skip_hash,
                     Some(cfg),
+                    lock.take(),
                     thread_policy,
                 )?;
                 adjust_shared_perm_file(path, shared_repo).map_err(Error::Io)?;
@@ -842,7 +861,13 @@ pub(crate) fn write_index_file_split(
         suppress_pre_write_index_housekeeping: index.suppress_pre_write_index_housekeeping,
     };
 
-    out_index.write_to_path_with_config_and_policy(path, skip_hash, Some(cfg), thread_policy)?;
+    out_index.write_to_path_with_config_and_lock_policy(
+        path,
+        skip_hash,
+        Some(cfg),
+        lock.take(),
+        thread_policy,
+    )?;
     adjust_shared_perm_file(path, shared_repo).map_err(Error::Io)?;
 
     for e in &mut index.entries {

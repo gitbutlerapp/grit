@@ -18,8 +18,8 @@ use crate::error::{Error, Result};
 use crate::hash::Parallelism;
 use crate::ignore::IgnoreMatcher;
 use crate::index::{
-    entry_from_metadata, index_file_mtime, index_path_outcome_key, Index, IndexEntry, MODE_GITLINK,
-    MODE_REGULAR, MODE_TREE,
+    entry_from_metadata, index_file_mtime, index_path_outcome_key, Index, IndexEntry, IndexLock,
+    MODE_GITLINK, MODE_REGULAR, MODE_TREE,
 };
 use crate::objects::ObjectId;
 use crate::odb::BULK_NEW_LOOSE_WRITE;
@@ -191,7 +191,7 @@ pub(crate) fn stage_for_commit_on_index(
         ..StageOptions::default()
     };
     // Tracked-scan staging writes blobs; use the diff-only path when previewing.
-    stage_inner_on_index(repo, &opts, progress, !dry_run, index, false)
+    stage_inner_on_index(repo, &opts, progress, !dry_run, index, false, None)
 }
 
 /// Stage paths into a caller-owned index without writing it to disk.
@@ -203,18 +203,23 @@ pub fn stage_on_index(
     opts: &StageOptions,
     progress: &mut dyn ProgressSink,
 ) -> Result<StageOutcome> {
-    stage_inner_on_index(repo, opts, progress, false, index, false)
+    stage_inner_on_index(repo, opts, progress, false, index, false, None)
 }
 
 /// Stage paths matching `opts` into the index.
 ///
-/// Loads the index, compares it to the work tree once, hashes only changed or new
-/// blobs, removes deleted paths, and invalidates cache-tree / untracked-cache entries
-/// for touched paths via [`Index::stage_file`] / [`Index::remove`].
+/// Takes `index.lock`, loads the index while holding it, compares it to the work tree
+/// once, hashes only changed or new blobs, removes deleted paths, and invalidates
+/// cache-tree / untracked-cache entries for touched paths via [`Index::stage_file`] /
+/// [`Index::remove`]. Concurrent callers are serialized by the lock, so an `Ok` result
+/// means the staged paths are in the index even when other processes stage at the same
+/// time. A dry run reads the index without locking.
 ///
 /// # Errors
 ///
-/// Returns [`Error::Message`] when an explicit pathspec matches nothing,
+/// Returns [`Error::Io`] with [`std::io::ErrorKind::AlreadyExists`] when another process
+/// still holds `index.lock` after the `core.filesRefLockTimeout` wait (nothing is staged;
+/// the caller may retry), [`Error::Message`] when an explicit pathspec matches nothing,
 /// [`Error::PathspecIgnored`] when a path exists but is excluded by ignore rules,
 /// or I/O / object-store failures while reading the work tree.
 pub fn stage(
@@ -313,21 +318,37 @@ fn stage_inner(
     progress: &mut dyn ProgressSink,
     tracked_scan: bool,
 ) -> Result<StageOutcome> {
-    let mut index = repo.load_index()?;
-    stage_inner_on_index(repo, opts, progress, tracked_scan, &mut index, true)
+    if opts.dry_run {
+        let mut index = repo.load_index()?;
+        return stage_inner_on_index(repo, opts, progress, tracked_scan, &mut index, true, None);
+    }
+    let (mut lock, mut index) = repo.lock_and_load_index()?;
+    stage_inner_on_index(
+        repo,
+        opts,
+        progress,
+        tracked_scan,
+        &mut index,
+        true,
+        Some(&mut lock),
+    )
 }
 
+/// Shared staging engine.
+///
+/// `on_disk` selects the on-disk `add` semantics (a dry run only lists paths). The index is
+/// persisted only through `lock`, which the caller must have taken before loading `index`.
 fn stage_inner_on_index(
     repo: &Repository,
     opts: &StageOptions,
     _progress: &mut dyn ProgressSink,
     tracked_scan: bool,
     index: &mut Index,
-    write_index: bool,
+    on_disk: bool,
+    lock: Option<&mut IndexLock>,
 ) -> Result<StageOutcome> {
     let dry_run = opts.dry_run;
-    let persist_index = write_index && !dry_run;
-    let dry_run_list_only = dry_run && write_index;
+    let dry_run_list_only = dry_run && on_disk;
     let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
 
     let index_path = repo.index_path();
@@ -393,7 +414,7 @@ fn stage_inner_on_index(
             restrict_to_paths: restrict_to_paths.clone(),
             ..DiffIndexToWorktreeOptions::default()
         };
-        if dry_run && write_index {
+        if dry_run_list_only {
             let (unstaged, _) = crate::diff::diff_index_to_worktree_with_options(
                 repo.odb(),
                 index,
@@ -499,8 +520,8 @@ fn stage_inner_on_index(
         } else if outcome.total() > 0 {
             sort_outcome_paths_in_index_order(&mut outcome, index);
             index.ensure_canonical_order();
-            if persist_index {
-                repo.write_index(index)?;
+            if let Some(lock) = lock {
+                repo.write_locked_index(lock, index)?;
             }
         }
         return Ok(outcome);
@@ -625,8 +646,8 @@ fn stage_inner_on_index(
             replay_deferred_untracked_invalidations(index, summary);
         }
         index.ensure_canonical_order();
-        if persist_index {
-            repo.write_index(index)?;
+        if let Some(lock) = lock {
+            repo.write_locked_index(lock, index)?;
         }
     }
 

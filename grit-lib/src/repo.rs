@@ -1995,6 +1995,72 @@ impl Repository {
         updated_workdir: bool,
         updated_skipworktree: bool,
     ) -> Result<()> {
+        self.write_index_file(
+            path,
+            index,
+            split,
+            updated_workdir,
+            updated_skipworktree,
+            None,
+        )
+    }
+
+    /// Lock the index selected by `GIT_INDEX_FILE` (or `$GIT_DIR/index`), then load it.
+    ///
+    /// Read-modify-write commands must load the index only after the lock is held: an index
+    /// read before locking can be replaced by a concurrent writer, and writing the stale copy
+    /// back would silently drop that writer's update. Persist with
+    /// [`Self::write_locked_index`]; dropping the lock without writing leaves the index as is.
+    ///
+    /// Returns the held lock and the index read under it.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::Io`] with [`std::io::ErrorKind::AlreadyExists`] when another process
+    /// still holds the lock after the `core.filesRefLockTimeout` wait, and propagates index
+    /// read and parse failures (including [`std::io::ErrorKind::NotFound`] when there is no
+    /// index file yet).
+    pub(crate) fn lock_and_load_index(&self) -> Result<(crate::index::IndexLock, Index)> {
+        let path = self.index_path_for_env()?;
+        let cfg = self.config()?;
+        let lock = crate::index::IndexLock::acquire(&path, Some(cfg.as_ref()))?;
+        let index = self.load_index_at(&path)?;
+        Ok((lock, index))
+    }
+
+    /// Write `index` through a lock from [`Self::lock_and_load_index`] and release it.
+    ///
+    /// Same housekeeping, split-index handling and `post-index-change` hook as
+    /// [`Self::write_index`], but the bytes go into the held lock instead of a new one.
+    ///
+    /// # Errors
+    ///
+    /// Propagates index finalization, serialization, and I/O failures.
+    pub(crate) fn write_locked_index(
+        &self,
+        lock: &mut crate::index::IndexLock,
+        index: &mut Index,
+    ) -> Result<()> {
+        let path = lock.index_path.clone();
+        self.write_index_file(
+            &path,
+            index,
+            WriteSplitIndexRequest::default(),
+            false,
+            false,
+            Some(lock),
+        )
+    }
+
+    fn write_index_file(
+        &self,
+        path: &std::path::Path,
+        index: &mut Index,
+        split: WriteSplitIndexRequest,
+        updated_workdir: bool,
+        updated_skipworktree: bool,
+        lock: Option<&mut crate::index::IndexLock>,
+    ) -> Result<()> {
         crate::trace::trace_span!("grit.index.write");
         test_inject_index_write_fail()?;
         // The on-disk index format (entry OID width and trailing checksum) is
@@ -2034,6 +2100,7 @@ impl Repository {
             split,
             skip_hash,
             self.thread_policy(),
+            lock,
         )?;
         // Git `write_locked_index`: `post-index-change` after a successful index write (t1800).
         let updated_workdir_arg = if updated_workdir { "1" } else { "0" };
