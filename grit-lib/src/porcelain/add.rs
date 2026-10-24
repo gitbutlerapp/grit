@@ -14,7 +14,7 @@ use crate::diff::{
     mode_from_metadata, read_submodule_head_oid, DiffEntry, DiffIndexToWorktreeOptions, DiffStatus,
 };
 use crate::error::{Error, Result};
-use crate::hash::{try_par_hash_with, ParallelHashError, Parallelism};
+use crate::hash::Parallelism;
 use crate::ignore::IgnoreMatcher;
 use crate::index::{
     entry_from_metadata, index_file_mtime, Index, IndexEntry, MODE_GITLINK, MODE_REGULAR, MODE_TREE,
@@ -41,7 +41,7 @@ use crate::porcelain::status::{
 use crate::progress::ProgressSink;
 use crate::repo::Repository;
 use crate::unicode_normalization::resolve_worktree_path_for_staging;
-use crate::worktree_batch::{prepare_worktree_blobs_parallel, WorktreeBlobReadInput};
+use crate::worktree_batch::{prepare_and_store_worktree_blobs_parallel, WorktreeBlobReadInput};
 use crate::worktree_rules::WorktreeRules;
 
 /// What paths [`stage`] should update (`git add` vs `git add -u`).
@@ -965,10 +965,10 @@ fn stage_untracked_paths_parallel(
             continue;
         }
         let resolved = resolve_worktree_path_for_staging(work_tree, path, precompose_unicode);
-        if fs::symlink_metadata(&resolved.abs)
-            .ok()
-            .is_some_and(|meta| crate::read_dir_kind::metadata_is_git_ignored_special(&meta))
-        {
+        let Ok(meta) = fs::symlink_metadata(&resolved.abs) else {
+            continue;
+        };
+        if crate::read_dir_kind::metadata_is_git_ignored_special(&meta) {
             continue;
         }
         if is_unregistered_embedded_git_repo(index, &resolved.index_relpath, &resolved.abs) {
@@ -981,40 +981,31 @@ fn stage_untracked_paths_parallel(
             index_relpath: resolved.index_relpath,
             index_entry: None,
             file_attrs,
-            cached_meta: None,
+            cached_meta: Some(meta),
         });
     }
 
-    let prepared = prepare_worktree_blobs_parallel(
-        repo.odb(),
-        &batch_inputs,
-        rules.conversion(),
-        parallelism,
-        Some(rules.filter_process()),
-    )?;
-
-    if !dry_run && !prepared.is_empty() {
+    if !dry_run && !batch_inputs.is_empty() {
         repo.odb().ensure_all_loose_prefix_dirs()?;
     }
-    let write_opts = BULK_NEW_LOOSE_WRITE;
-    let write_bytes: usize = prepared.iter().map(|p| p.zlib_store.len()).sum();
-    let threads = parallelism.threads();
-    if !dry_run {
-        let _written: Vec<ObjectId> = try_par_hash_with(&prepared, threads, write_bytes, |prep| {
-            repo.odb()
-                .write_loose_zlib_prehashed(&prep.oid, &prep.zlib_store, write_opts)
-                .map_err(|e| match e {
-                    Error::Io(source) => Error::LooseObjectWrite {
-                        path: prep.index_relpath.clone(),
-                        source,
-                    },
-                    other => other,
-                })
-        })
-        .map_err(|e: ParallelHashError<Error>| match e {
-            ParallelHashError::Task(err) => err,
-        })?;
-    }
+    let prepared = if dry_run {
+        crate::worktree_batch::prepare_worktree_blobs_parallel(
+            repo.odb(),
+            &batch_inputs,
+            rules.conversion(),
+            parallelism,
+            Some(rules.filter_process()),
+        )?
+    } else {
+        prepare_and_store_worktree_blobs_parallel(
+            repo.odb(),
+            &batch_inputs,
+            rules.conversion(),
+            parallelism,
+            Some(rules.filter_process()),
+            BULK_NEW_LOOSE_WRITE,
+        )?
+    };
 
     let skip_per_path_cache_invalidate =
         index.cache_tree.is_none() && index.untracked_cache.is_none();
@@ -1042,13 +1033,19 @@ fn stage_untracked_paths_parallel(
         outcome.added.push(prep.index_relpath);
     }
     let staged_batch_count = batch_entries.len();
-    for entry in batch_entries {
-        if !dry_run {
+    if !dry_run {
+        for entry in &batch_entries {
             if let Ok(rel) = std::str::from_utf8(&entry.path) {
                 mark_fsmonitor_staged(index, rel);
             }
         }
-        index.add_or_replace(entry);
+    }
+    if staged_batch_count >= 64 {
+        index.replace_stage0_entries_batch(batch_entries);
+    } else {
+        for entry in batch_entries {
+            index.add_or_replace(entry);
+        }
     }
     if !dry_run && staged_batch_count > 0 && index.fsmonitor_last_update.is_some() {
         index.fsmonitor_validity_changed();

@@ -120,6 +120,41 @@ fn assert_serial_parallel_index_match(sha256: bool) {
     );
 }
 
+/// Issue #1651: bulk first-time add on an empty index with `core.preloadIndex=false`.
+#[test]
+fn bulk_untracked_add_empty_index_preload_off_serial_parallel_match() {
+    const N: usize = 5_000;
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    write_wide_tree(root, N);
+    pin_all_file_mtrees(root, N);
+
+    fn disable_preload_index(repo: &Repository) {
+        let path = repo.git_dir().join("config");
+        let mut cfg = fs::read_to_string(&path).expect("read config");
+        cfg.push_str("\n[core]\n\tpreloadIndex = false\n");
+        fs::write(path, cfg).expect("write config");
+    }
+
+    let repo_serial = init_grit_repo(root, false, Some(1));
+    disable_preload_index(&repo_serial);
+    let serial_index = stage_all(&repo_serial);
+
+    reset_staging_area(&repo_serial);
+    let parallel_threads = std::thread::available_parallelism()
+        .map(|n| n.get().max(2))
+        .unwrap_or(2);
+    let repo_parallel = init_grit_repo(root, false, Some(parallel_threads));
+    disable_preload_index(&repo_parallel);
+    let parallel_index = stage_all(&repo_parallel);
+
+    assert_eq!(
+        serial_index, parallel_index,
+        "serial and parallel bulk add must match with preloadIndex=false"
+    );
+    assert!(git_fsck_ok(root));
+}
+
 #[test]
 fn parallel_add_index_matches_serial_sha1() {
     assert_serial_parallel_index_match(false);

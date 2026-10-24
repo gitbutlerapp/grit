@@ -110,7 +110,7 @@ impl LooseStore {
             .parent()
             .ok_or_else(|| Error::PathError("object path has no parent".to_owned()))?;
         let zlib = zlib_compress_store_bytes(store_bytes, self.compression)?;
-        publish_zlib_loose_object(&path, prefix_dir, oid, &zlib)?;
+        publish_zlib_loose_object(&path, prefix_dir, oid, &zlib, false)?;
         Ok(*oid)
     }
 
@@ -128,14 +128,22 @@ impl LooseStore {
         if oid.algo() != self.hash_algo {
             return Err(Error::InvalidObjectId(oid.to_hex()));
         }
-        if let Some(existing) = self.try_finish_if_loose_present(oid, options)? {
-            return Ok(existing);
+        if !options.trust_new_loose {
+            if let Some(existing) = self.try_finish_if_loose_present(oid, options)? {
+                return Ok(existing);
+            }
         }
         let path = self.object_path(oid);
         let prefix_dir = path
             .parent()
             .ok_or_else(|| Error::PathError("object path has no parent".to_owned()))?;
-        publish_zlib_loose_object(&path, prefix_dir, oid, zlib_store)?;
+        publish_zlib_loose_object(
+            &path,
+            prefix_dir,
+            oid,
+            zlib_store,
+            options.loose_prefix_dirs_ready,
+        )?;
         Ok(*oid)
     }
 
@@ -561,8 +569,11 @@ fn publish_zlib_loose_object(
     prefix_dir: &Path,
     oid: &ObjectId,
     zlib_store: &[u8],
+    prefix_dir_ready: bool,
 ) -> Result<()> {
-    fs::create_dir_all(prefix_dir).map_err(Error::Io)?;
+    if !prefix_dir_ready {
+        fs::create_dir_all(prefix_dir).map_err(Error::Io)?;
+    }
     let tmp_path = oid.loose_tmp_path_in_prefix(prefix_dir);
     if let Err(e) = fs::write(&tmp_path, zlib_store) {
         let _ = fs::remove_file(&tmp_path);

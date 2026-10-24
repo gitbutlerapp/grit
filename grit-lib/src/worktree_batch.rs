@@ -36,6 +36,7 @@ pub(crate) struct PreparedWorktreeBlob {
     /// Object id of the normalized blob (computed in the parallel phase).
     pub oid: ObjectId,
     /// Zlib-compressed canonical store bytes for [`Odb::write_loose_zlib_prehashed`].
+    #[allow(dead_code)]
     pub zlib_store: Vec<u8>,
     /// Worktree metadata captured during the read pass.
     pub meta: fs::Metadata,

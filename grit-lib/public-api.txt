@@ -9458,6 +9458,7 @@ pub struct grit_lib::objects::odb::WriteOptions
 pub grit_lib::objects::odb::WriteOptions::assume_loose_only_existence: bool
 pub grit_lib::objects::odb::WriteOptions::silent: bool
 pub grit_lib::objects::odb::WriteOptions::trust_new_loose: bool
+pub grit_lib::objects::odb::WriteOptions::loose_prefix_dirs_ready: bool
 impl core::clone::Clone for grit_lib::objects::odb::WriteOptions
 pub fn grit_lib::objects::odb::WriteOptions::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::objects::odb::WriteOptions

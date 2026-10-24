@@ -108,10 +108,10 @@ impl ThreadPolicy {
         let preload = core_preload_index(config);
         let threads = match op {
             ParallelOp::IndexRefresh | ParallelOp::IndexLoad => {
-                if !preload {
-                    NonZeroUsize::MIN
-                } else {
+                if self.threads_override.is_some() || preload {
                     resolve_index_threads(config, self.threads_override)
+                } else {
+                    NonZeroUsize::MIN
                 }
             }
             ParallelOp::DiffRename | ParallelOp::DiffContent => {
@@ -442,6 +442,21 @@ mod tests {
         let policy = ThreadPolicy::default();
         let opts = policy.resolve(ParallelOp::IndexRefresh, &cfg);
         assert_eq!(opts.threads, NonZeroUsize::MIN);
+    }
+
+    #[test]
+    fn thread_override_enables_index_refresh_when_preload_off() {
+        let cfg = config_from("[core]\n\tpreloadIndex = false\n[index]\n\tthreads = 2\n");
+        let policy = ThreadPolicy::with_threads_override(Some(6));
+        let opts = policy.resolve(ParallelOp::IndexRefresh, &cfg);
+        assert_eq!(
+            opts.threads.get(),
+            6.min(
+                std::thread::available_parallelism()
+                    .map(|n| n.get())
+                    .unwrap_or(1)
+            )
+        );
     }
 
     #[test]

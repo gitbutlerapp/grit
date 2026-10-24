@@ -107,11 +107,11 @@ impl FilesSource {
         oid: &ObjectId,
         options: WriteOptions,
     ) -> Result<Option<ObjectId>> {
-        if let Some(existing) = self.loose.try_finish_if_loose_present(oid, options)? {
-            return Ok(Some(existing));
-        }
         if options.trust_new_loose {
             return Ok(None);
+        }
+        if let Some(existing) = self.loose.try_finish_if_loose_present(oid, options)? {
+            return Ok(Some(existing));
         }
         if options.assume_loose_only_existence && self.exists_local_materialized(oid) {
             if self.freshen(oid)? {
