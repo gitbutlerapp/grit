@@ -9,12 +9,12 @@ use crate::bench_env::isolated_env_prefix;
 use crate::binary::{report_grit_commit, tool_version};
 use crate::fixture::{
     bench_work_dir, create_blame_deep_history_repo, create_blame_large_mid_churn_repo,
-    create_blame_large_tail_churn_repo, create_deep_leaf_dogfood_repo,
-    create_dense_leaf_dogfood_repo, create_repo, create_repo_with_history,
-    create_untracked_monorepo_repo, dirty_repo, modify_files_for_diff, modify_rs_files_for_diff,
-    modify_txt_files_for_diff, prepare_add_iteration, prepare_commit_iteration,
-    prepare_dense_leaf_add_iteration, prepare_initial_monorepo_add, prepare_restore_iteration,
-    scratch_dir, DeepLeafDogfoodSpec, DenseLeafDogfoodSpec,
+    create_blame_large_tail_churn_repo, create_blame_merge_heavy_repo,
+    create_deep_leaf_dogfood_repo, create_dense_leaf_dogfood_repo, create_repo,
+    create_repo_with_history, create_untracked_monorepo_repo, dirty_repo, modify_files_for_diff,
+    modify_rs_files_for_diff, modify_txt_files_for_diff, prepare_add_iteration,
+    prepare_commit_iteration, prepare_dense_leaf_add_iteration, prepare_initial_monorepo_add,
+    prepare_restore_iteration, scratch_dir, DeepLeafDogfoodSpec, DenseLeafDogfoodSpec,
 };
 use crate::hot_path_fixture::{
     load_meta, prepare_merge, prepare_pick, prepare_pick_series, prepare_revert, prepare_switch,
@@ -1067,8 +1067,12 @@ const BLAME_LARGE_COMMITS: usize = 150;
 const BLAME_LARGE_PATH: &str = "large.txt";
 const BLAME_MID_CHURN_LINES: usize = 3_500;
 const BLAME_MID_CHURN_COMMITS: usize = 30;
+const BLAME_MERGE_LINES: usize = 3_000;
+const BLAME_MERGE_TOPICS: usize = 150;
+const BLAME_MERGE_PATH: &str = "merged.txt";
 
-/// `grit blame` vs `git blame --porcelain` on deep linear and large tail-churn fixtures.
+/// `grit blame` vs `git blame --porcelain` on deep linear, large tail-churn, mid-churn and
+/// merge-heavy fixtures.
 pub fn run_blame_suite(
     hyperfine: &Path,
     git: &Path,
@@ -1183,6 +1187,33 @@ pub fn run_blame_suite(
             git_via_shell: false,
         },
         &large,
+    )?);
+
+    let merges = create_blame_merge_heavy_repo(git, BLAME_MERGE_LINES, BLAME_MERGE_TOPICS)?;
+    scenarios.push(run_scenario(
+        hyperfine,
+        git,
+        grit,
+        cfg,
+        &Scenario {
+            id: "blame-merge-heavy-full".into(),
+            group: "blame".into(),
+            fixture: format!("blame-merges-{BLAME_MERGE_LINES}x{BLAME_MERGE_TOPICS}"),
+            description: format!(
+                "full-file blame on a {BLAME_MERGE_LINES}-line file through {BLAME_MERGE_TOPICS} topic merges with lagging forks and back-merges (#1752)"
+            ),
+            grit_argv: vec!["blame".into(), BLAME_MERGE_PATH.into()],
+            git_argv: vec![
+                "blame".into(),
+                "--porcelain".into(),
+                BLAME_MERGE_PATH.into(),
+            ],
+            driver: Driver::Cli,
+            prepare_kind: None,
+            grit_via_shell: false,
+            git_via_shell: false,
+        },
+        &merges,
     )?);
 
     Ok(build_report(git, grit, timestamp, scenarios))

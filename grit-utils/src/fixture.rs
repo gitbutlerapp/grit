@@ -639,6 +639,71 @@ pub fn create_blame_large_tail_churn_repo(
     Ok(dir)
 }
 
+/// Merge-heavy history for one large file, shaped like `git.git`'s `Makefile`: topic
+/// branches fork from mainline commits a few merges back, sometimes merge the mainline
+/// back in, and land with `--no-ff` merges while the mainline keeps editing.
+///
+/// Topics and the mainline edit disjoint, well separated line slots, so every merge is
+/// clean and the fixture builds with plain porcelain commands.
+pub fn create_blame_merge_heavy_repo(
+    git: &Path,
+    line_count: usize,
+    topic_count: usize,
+) -> Result<PathBuf> {
+    const SLOT_SPACING: usize = 20;
+    let dir = scratch_dir();
+    remove_dir_robust(&dir);
+    fs::create_dir_all(&dir).context("create scratch dir")?;
+    run_git(git, &dir, &["init", "-q", "-b", "main"])?;
+    let path = "merged.txt";
+    let file = dir.join(path);
+    let initial: String = (0..line_count).map(|i| format!("line {i}\n")).collect();
+    fs::write(&file, initial)?;
+    run_git(git, &dir, &["add", path])?;
+    run_git(git, &dir, &["commit", "-qm", "init"])?;
+    let slots = (line_count / SLOT_SPACING / 2).max(1);
+    let edit_slot = |slot: usize, label: &str| -> Result<()> {
+        let text = fs::read_to_string(&file)?;
+        let mut lines: Vec<String> = text.lines().map(str::to_owned).collect();
+        let start = (slot * SLOT_SPACING).min(lines.len().saturating_sub(3));
+        for (offset, line) in lines.iter_mut().skip(start).take(3).enumerate() {
+            *line = format!("{label} {offset}");
+        }
+        let mut out = lines.join("\n");
+        out.push('\n');
+        fs::write(&file, out)?;
+        run_git(git, &dir, &["commit", "-qam", label])
+    };
+    for t in 0..topic_count {
+        let topic = format!("topic-{t}");
+        let lag = format!("main~{}", t % 4);
+        let base = if t >= 4 { lag.as_str() } else { "main" };
+        run_git(git, &dir, &["checkout", "-q", "-b", &topic, base])?;
+        let slot = (t * 7) % slots;
+        edit_slot(2 * slot, &format!("topic {t} first"))?;
+        edit_slot(2 * ((slot + 3) % slots), &format!("topic {t} second"))?;
+        if t % 3 == 0 {
+            run_git(git, &dir, &["merge", "-q", "--no-edit", "main"])?;
+        }
+        run_git(git, &dir, &["checkout", "-q", "main"])?;
+        edit_slot(2 * ((t * 11) % slots) + 1, &format!("main {t}"))?;
+        run_git(
+            git,
+            &dir,
+            &[
+                "merge",
+                "-q",
+                "--no-ff",
+                "-m",
+                &format!("merge {topic}"),
+                &topic,
+            ],
+        )?;
+        run_git(git, &dir, &["branch", "-q", "-D", &topic])?;
+    }
+    Ok(dir)
+}
+
 /// Repository with many sequential edits to a single tracked file (for blame benches).
 pub fn create_blame_deep_history_repo(git: &Path, commit_count: usize) -> Result<PathBuf> {
     let dir = scratch_dir();
