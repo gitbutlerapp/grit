@@ -2948,6 +2948,20 @@ impl Index {
         Some(&mut self.entries[pos])
     }
 
+    /// Index positions of stage-0 entries, keyed by path bytes.
+    ///
+    /// Used when ordering path lists to match on-disk index order without repeated linear scans.
+    pub(crate) fn stage0_path_positions(&self) -> std::collections::HashMap<Vec<u8>, usize> {
+        let stage0_count = self.entries.iter().filter(|e| e.stage() == 0).count();
+        let mut positions = std::collections::HashMap::with_capacity(stage0_count);
+        for (pos, entry) in self.entries.iter().enumerate() {
+            if entry.stage() == 0 {
+                positions.entry(entry.path.clone()).or_insert(pos);
+            }
+        }
+        positions
+    }
+
     /// Merge tree contents from `treeish` into this index as virtual stage-1 entries, matching
     /// Git's `overlay_tree_on_index` used by `git ls-files --with-tree`.
     ///
