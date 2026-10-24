@@ -5223,6 +5223,8 @@ pub grit_lib::error::Error::IndexPathPrefixConflict
 pub grit_lib::error::Error::IndexPathPrefixConflict::directory: std::path::PathBuf
 pub grit_lib::error::Error::IndexPathPrefixConflict::file: std::path::PathBuf
 pub grit_lib::error::Error::IndexUnmerged
+pub grit_lib::error::Error::UnmergedConflictMarkers
+pub grit_lib::error::Error::UnmergedConflictMarkers::paths: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::error::Error::InitBareWithSeparateGitDir
 pub grit_lib::error::Error::InitObjectFormatChange
 pub grit_lib::error::Error::InvalidHead
@@ -14503,6 +14505,8 @@ pub grit_lib::prelude::Error::IndexPathPrefixConflict
 pub grit_lib::prelude::Error::IndexPathPrefixConflict::directory: std::path::PathBuf
 pub grit_lib::prelude::Error::IndexPathPrefixConflict::file: std::path::PathBuf
 pub grit_lib::prelude::Error::IndexUnmerged
+pub grit_lib::prelude::Error::UnmergedConflictMarkers
+pub grit_lib::prelude::Error::UnmergedConflictMarkers::paths: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::prelude::Error::InitBareWithSeparateGitDir
 pub grit_lib::prelude::Error::InitObjectFormatChange
 pub grit_lib::prelude::Error::InvalidHead
