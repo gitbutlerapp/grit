@@ -216,7 +216,7 @@ fn copy_tree_entry(from: &Path, to: &Path) -> Result<()> {
         copy_dir_all(from, to)?;
     } else if file_type.is_symlink() {
         let target = fs::read_link(from).map_err(Error::Io)?;
-        create_symlink(&target, to)?;
+        create_symlink(&meta, &target, to)?;
     } else {
         if let Some(parent) = to.parent() {
             fs::create_dir_all(parent).map_err(Error::Io)?;
@@ -226,25 +226,80 @@ fn copy_tree_entry(from: &Path, to: &Path) -> Result<()> {
     Ok(())
 }
 
-fn create_symlink(target: &Path, link_path: &Path) -> Result<()> {
+fn create_symlink(source_meta: &fs::Metadata, target: &Path, link_path: &Path) -> Result<()> {
     if let Some(parent) = link_path.parent() {
         fs::create_dir_all(parent).map_err(Error::Io)?;
     }
     #[cfg(unix)]
     {
+        let _ = source_meta;
         use std::os::unix::fs::symlink;
         symlink(target, link_path).map_err(Error::Io)?;
     }
     #[cfg(windows)]
     {
         use std::os::windows::fs::{symlink_dir, symlink_file};
-        if target.is_dir() {
+        // Preserve the source reparse-point kind (directory vs file). `target.is_dir()` follows
+        // relative targets from the process cwd and is false for dangling directory links.
+        if source_meta.is_dir() {
             symlink_dir(target, link_path).map_err(Error::Io)?;
         } else {
             symlink_file(target, link_path).map_err(Error::Io)?;
         }
     }
     Ok(())
+}
+
+#[cfg(all(test, windows))]
+mod windows_symlink_copy_tests {
+    use super::*;
+    use std::os::windows::fs::symlink_dir;
+
+    #[test]
+    fn copy_tree_entry_preserves_dangling_directory_symlink_kind() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let src_root = tmp.path().join("src");
+        fs::create_dir_all(&src_root).expect("srcdir");
+        let src_link = src_root.join("dirlink");
+        symlink_dir("missing-directory", &src_link).expect("symlink_dir");
+
+        let dest_link = tmp.path().join("dst").join("dirlink");
+        copy_tree_entry(&src_link, &dest_link).expect("copy");
+
+        let meta = fs::symlink_metadata(&dest_link).expect("dest meta");
+        assert!(meta.file_type().is_symlink());
+        assert!(
+            meta.is_dir(),
+            "directory reparse point must stay a directory link"
+        );
+        assert_eq!(
+            fs::read_link(&dest_link).expect("readlink"),
+            PathBuf::from("missing-directory")
+        );
+    }
+
+    #[test]
+    fn copy_tree_entry_preserves_relative_directory_symlink_kind() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let src_root = tmp.path().join("src");
+        fs::create_dir_all(&src_root).expect("srcdir");
+        let src_link = src_root.join("dirlink");
+        symlink_dir("relative\\child", &src_link).expect("symlink_dir");
+
+        let dest_link = tmp.path().join("dst").join("dirlink");
+        copy_tree_entry(&src_link, &dest_link).expect("copy");
+
+        let meta = fs::symlink_metadata(&dest_link).expect("dest meta");
+        assert!(meta.file_type().is_symlink());
+        assert!(
+            meta.is_dir(),
+            "relative directory link must not become a file link"
+        );
+        assert_eq!(
+            fs::read_link(&dest_link).expect("readlink"),
+            PathBuf::from("relative\\child")
+        );
+    }
 }
 
 fn worktree_has_blocking_submodules(entry: &WorktreeEntry) -> Result<bool> {
