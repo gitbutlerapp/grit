@@ -6,7 +6,7 @@ use anyhow::{Context, Result};
 
 use crate::binary::{grit_source_commit, tool_version};
 use crate::bitmap_fixture::{
-    bitmap_isolated_env, ensure_bitmaps_git_repo, ensure_bitmaps_grit_repo,
+    bitmap_isolated_env, ensure_bitmaps_git_repo, ensure_bitmaps_grit_repo, ensure_no_bitmap_twin,
 };
 use crate::capped_run::{TerminationKind, EXIT_MEMORY_CAP, EXIT_TIMEOUT};
 use crate::machine::{collect_machine_info, format_timestamp};
@@ -228,6 +228,28 @@ pub fn run_bitmaps_suite(
     let caps = serve_clone_caps();
     let grit_failure = probe_serve_clone_failure(bench_exe, &repo, &serve_scenario, caps)?;
 
+    let nobitmap_repo = ensure_no_bitmap_twin(git, &repo)?;
+    let nobitmap_req = nobitmap_repo.join(SERVE_CLONE_REQUEST_FILE);
+    let nobitmap_scenario = Scenario {
+        id: "serve-clone-nobitmap-git.git".into(),
+        group: "bitmaps".into(),
+        fixture: "git.git (no bitmap)".into(),
+        description:
+            "upload-pack --stateless-rpc full clone of a single git-written pack without bitmaps"
+                .into(),
+        grit_argv: vec![sh_redirect_stdin(
+            &shell_command(bench_exe, &drive_argv("serve-clone", &nobitmap_repo)),
+            &nobitmap_req,
+        )],
+        git_argv: vec![sh_redirect_stdin(&git_serve_inner, &nobitmap_req)],
+        driver: Driver::Lib,
+        prepare_kind: None,
+        grit_via_shell: true,
+        git_via_shell: true,
+    };
+    let nobitmap_failure =
+        probe_serve_clone_failure(bench_exe, &nobitmap_repo, &nobitmap_scenario, caps)?;
+
     let scenarios = vec![
         run_scenario(
             hyperfine,
@@ -283,6 +305,15 @@ pub fn run_bitmaps_suite(
             &serve_scenario,
             &repo,
             grit_failure,
+        )?,
+        run_scenario(
+            hyperfine,
+            bench_exe,
+            git,
+            cfg,
+            &nobitmap_scenario,
+            &nobitmap_repo,
+            nobitmap_failure,
         )?,
     ];
 

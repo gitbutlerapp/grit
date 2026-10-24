@@ -128,6 +128,53 @@ pub fn ensure_bitmaps_grit_repo(git: &Path) -> Result<PathBuf> {
     Ok(dest)
 }
 
+const NO_BITMAP_READY_MARKER: &str = ".grit-bench-nobitmap-ready";
+
+/// Twin of the bitmap fixture `src` without reachability bitmaps or a multi-pack-index.
+///
+/// Objects are hard-linked from `src` (`clone --mirror --local`), so the twin serves the
+/// same single git-written pack and refs; only bitmap-accelerated enumeration and
+/// verbatim reuse are unavailable. Rebuilt when `src` is re-prepared.
+pub fn ensure_no_bitmap_twin(git: &Path, src: &Path) -> Result<PathBuf> {
+    let name = src
+        .file_name()
+        .and_then(|s| s.to_str())
+        .ok_or_else(|| anyhow::anyhow!("invalid bitmap fixture path {}", src.display()))?;
+    let dest = src.with_file_name(format!("{name}-nobitmap"));
+    let src_marker = fs::read_dir(src.join("objects/pack"))
+        .context("list bitmap fixture packs")?
+        .filter_map(|e| e.ok())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| n.ends_with(".pack"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    if fs::read_to_string(dest.join(NO_BITMAP_READY_MARKER)).ok() == Some(src_marker.clone()) {
+        return Ok(dest);
+    }
+    if dest.exists() {
+        remove_dir_robust(&dest);
+    }
+    let parent = dest.parent().unwrap_or(Path::new("/tmp"));
+    let src_arg = src.display().to_string();
+    let dest_arg = dest.display().to_string();
+    run_git(
+        git,
+        parent,
+        &["clone", "--mirror", "--local", "-q", &src_arg, &dest_arg],
+    )?;
+    let pack_dir = dest.join("objects/pack");
+    for entry in fs::read_dir(&pack_dir).context("list twin packs")? {
+        let path = entry?.path();
+        let file = path.file_name().and_then(|s| s.to_str()).unwrap_or("");
+        if file.ends_with(".bitmap") || file.starts_with("multi-pack-index") {
+            fs::remove_file(&path).with_context(|| format!("remove {}", path.display()))?;
+        }
+    }
+    ensure_serve_clone_request(&dest)?;
+    fs::write(dest.join(NO_BITMAP_READY_MARKER), src_marker).context("write nobitmap marker")?;
+    Ok(dest)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
