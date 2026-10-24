@@ -89,8 +89,25 @@ fn git_pack_objects(repo: &Path, tips: &[ObjectId], haves: &[ObjectId]) -> Vec<u
     out.stdout
 }
 
-fn git_index_pack_stdin_fix_thin(pack: &[u8]) {
+/// Complete a thin pack in a fresh repository that holds only `have`'s history from `src`.
+///
+/// Returns how many external bases `index-pack --fix-thin` appended to the pack.
+fn git_index_pack_stdin_fix_thin(src: &Path, have: ObjectId, pack: &[u8]) -> usize {
+    let receiver = tempfile::tempdir().expect("receiver");
+    git(src, &["branch", "-f", "thin-have", &have.to_hex()]);
+    git(receiver.path(), &["init", "-q", "--bare", "."]);
+    git(
+        receiver.path(),
+        &[
+            "fetch",
+            "-q",
+            src.to_str().unwrap(),
+            "refs/heads/thin-have:refs/heads/have",
+        ],
+    );
+    let in_pack_before = in_pack_count(receiver.path());
     let mut child = Command::new("git")
+        .current_dir(receiver.path())
         .args(["index-pack", "--fix-thin", "--stdin"])
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
@@ -106,6 +123,17 @@ fn git_index_pack_stdin_fix_thin(pack: &[u8]) {
         "index-pack --fix-thin: {}",
         String::from_utf8_lossy(&out.stderr)
     );
+    git(receiver.path(), &["fsck", "--strict"]);
+    let header_count = u32::from_be_bytes([pack[8], pack[9], pack[10], pack[11]]) as usize;
+    in_pack_count(receiver.path()) - in_pack_before - header_count
+}
+
+fn in_pack_count(repo: &Path) -> usize {
+    git(repo, &["count-objects", "-v"])
+        .lines()
+        .find_map(|l| l.strip_prefix("in-pack: "))
+        .and_then(|n| n.trim().parse().ok())
+        .expect("in-pack count")
 }
 
 fn git_index_pack_strict(_repo: &Path, pack: &[u8]) {
@@ -200,7 +228,7 @@ fn pack_objects_thin_pack_fixes_with_git_index_pack() {
         .expect("thin");
         buf
     };
-    git_index_pack_stdin_fix_thin(&thin);
+    git_index_pack_stdin_fix_thin(dir.path(), have, &thin);
     let map = pack_bytes_to_object_map(&thin, &odb).expect("resolve");
     assert!(map.contains_key(&tip));
 }
@@ -263,7 +291,32 @@ fn reuse_only_write_to_streams_same_bytes_as_build_pack() {
 
 #[test]
 fn reuse_only_thin_pack_keeps_deltas_against_have_bases() {
-    let (dir, tip, have) = build_deep_history_repo(40);
+    // Git stores the shorter, newer blob as a delta against the older one, so the
+    // tip's blob has an on-disk base that only the have side holds.
+    let dir = tempfile::tempdir().expect("tmpdir");
+    git(dir.path(), &["init", "-q", "-b", "main", "."]);
+    let mut state = 7u64;
+    let mut lines: Vec<String> = (0..3000)
+        .map(|_| {
+            (0..48)
+                .map(|_| {
+                    state = state
+                        .wrapping_mul(6364136223846793005)
+                        .wrapping_add(1442695040888963407);
+                    char::from(b'a' + ((state >> 33) % 26) as u8)
+                })
+                .collect()
+        })
+        .collect();
+    std::fs::write(dir.path().join("big.txt"), lines.join("\n")).unwrap();
+    git(dir.path(), &["add", "big.txt"]);
+    git(dir.path(), &["commit", "-q", "-m", "big"]);
+    let have = rev_parse(dir.path(), "HEAD");
+    lines.remove(1500);
+    std::fs::write(dir.path().join("big.txt"), lines.join("\n")).unwrap();
+    git(dir.path(), &["commit", "-q", "-am", "drop a line"]);
+    let tip = rev_parse(dir.path(), "HEAD");
+    git(dir.path(), &["repack", "-adfq"]);
     let odb = open_odb(dir.path());
     let opts = PackBuildOptions {
         thin: true,
@@ -276,7 +329,11 @@ fn reuse_only_thin_pack_keeps_deltas_against_have_bases() {
         .write_to(&mut thin)
         .expect("thin reuse-only pack");
     assert!(stats.delta_count > 0, "thin pack should reuse deltas");
-    git_index_pack_stdin_fix_thin(&thin);
+    let appended = git_index_pack_stdin_fix_thin(dir.path(), have, &thin);
+    assert!(
+        appended > 0,
+        "reused deltas should name bases only the receiver has"
+    );
     let map = pack_bytes_to_object_map(&thin, &odb).expect("resolve");
     assert!(map.contains_key(&tip));
 }
