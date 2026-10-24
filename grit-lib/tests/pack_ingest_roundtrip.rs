@@ -1439,6 +1439,65 @@ fn pack_index_build_sha256_delta_pack_threads() {
     assert_eq!(grit_rev, git_rev);
 }
 
+/// Longest delta chain `git verify-pack -v` reports for the pack at `idx_path`.
+fn git_max_chain_length(dir: &Path, idx_path: &Path) -> usize {
+    let idx = idx_path.to_str().expect("utf-8 idx path");
+    git(dir, &["verify-pack", "-v", idx])
+        .lines()
+        .filter_map(|line| line.strip_prefix("chain length = "))
+        .filter_map(|rest| rest.split(':').next()?.trim().parse().ok())
+        .max()
+        .unwrap_or(0)
+}
+
+/// Long, branching delta chains from an aggressive `git repack` (many files edited across
+/// many commits) must index byte-identically to `git index-pack` with any thread count.
+#[test]
+fn deep_branching_delta_chains_index_like_git() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let dir = tmp.path();
+    init_repo(dir, false);
+    let mut files: Vec<Vec<String>> = (0..3)
+        .map(|f| {
+            (0..300)
+                .map(|i| format!("file {f} line {i:04} with enough text to delta well\n"))
+                .collect()
+        })
+        .collect();
+    for rev in 0..60 {
+        for (f, lines) in files.iter_mut().enumerate() {
+            let at = (rev * 7 + f * 13) % lines.len();
+            lines[at] = format!("file {f} line {at:04} edited in revision {rev}\n");
+            if rev % 4 == f {
+                lines.push(format!("file {f} appended in revision {rev}\n"));
+            }
+            std::fs::write(dir.join(format!("f{f}.txt")), lines.concat()).expect("write");
+        }
+        git_run(dir, &["add", "-A"]);
+        git_run(dir, &["commit", "-q", "-m", &format!("r{rev}")]);
+    }
+    git_run(dir, &["repack", "-adf", "-q", "--depth=50", "--window=250"]);
+    let pack_dir = dir.join(".git/objects/pack");
+    let idx_path = std::fs::read_dir(&pack_dir)
+        .expect("pack dir")
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .find(|p| p.extension().is_some_and(|x| x == "idx"))
+        .expect("idx file");
+    let depth = git_max_chain_length(dir, &idx_path);
+    assert!(depth >= 10, "fixture should have deep chains, got {depth}");
+
+    let pack = read_pack_from_repo(&dir.join(".git"));
+    let (git_idx, git_rev, pack_on_disk) = git_index_pack_rev(&pack, HashAlgo::Sha1);
+    let odb_dir = tempfile::tempdir().expect("odb");
+    let odb = Odb::new(odb_dir.path());
+    for threads in [1_usize, 2, 4] {
+        let (grit_idx, grit_rev) = grit_idx_rev_bytes(&pack_on_disk, &odb, threads, false);
+        assert_eq!(grit_idx, git_idx, "threads={threads}: idx mismatch");
+        assert_eq!(grit_rev, git_rev, "threads={threads}: rev mismatch");
+    }
+}
+
 #[test]
 fn read_pack_bytes_cached_serves_installed_delta_pack() {
     let fx = shared_pack(PackShape::GitDelta, HashAlgo::Sha1).expect("fixture");
