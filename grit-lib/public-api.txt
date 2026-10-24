@@ -23436,7 +23436,6 @@ pub fn grit_lib::revwalk::rev_list::shallow_grafts_for_upload_pack_target_depth(
 pub fn grit_lib::revwalk::rev_list::split_revision_token(&str) -> (alloc::vec::Vec<alloc::string::String>, alloc::vec::Vec<alloc::string::String>)
 pub fn grit_lib::revwalk::rev_list::split_symmetric_diff(&str) -> core::option::Option<(alloc::string::String, alloc::string::String)>
 pub fn grit_lib::revwalk::rev_list::tag_targets(&std::path::Path) -> grit_lib::error::Result<std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>>
-pub fn grit_lib::revwalk::rev_list::trace_combine_filter_append(&str)
 pub fn grit_lib::revwalk::rev_list::url_encode_object_filter_subspec(&str) -> alloc::string::String
 pub mod grit_lib::revwalk::rev_list_error
 #[non_exhaustive] pub enum grit_lib::revwalk::rev_list_error::RevListError
@@ -25123,7 +25122,6 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::worktree::attributes:
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::worktree::attributes::AttrRule
 pub struct grit_lib::worktree::crlf::ConversionConfig
 pub grit_lib::worktree::crlf::ConversionConfig::autocrlf: grit_lib::worktree::crlf::AutoCrlf
-pub grit_lib::worktree::crlf::ConversionConfig::check_roundtrip_encoding: core::option::Option<alloc::string::String>
 pub grit_lib::worktree::crlf::ConversionConfig::command_runner: alloc::rcs::arc::Arc<dyn grit_lib::command_runner::CommandRunner>
 pub grit_lib::worktree::crlf::ConversionConfig::eol: grit_lib::worktree::crlf::CoreEol
 pub grit_lib::worktree::crlf::ConversionConfig::safecrlf: grit_lib::worktree::crlf::SafeCrlf

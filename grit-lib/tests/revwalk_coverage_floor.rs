@@ -6,8 +6,8 @@ use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::revwalk::rev_list::{
-    expand_object_filter_for_protocol, merge_bases, rev_list, trace_combine_filter_append,
-    ObjectFilter, OrderingMode, OutputMode, RevListOptions,
+    expand_object_filter_for_protocol, merge_bases, rev_list, ObjectFilter, OrderingMode,
+    OutputMode, RevListOptions,
 };
 use grit_lib::revwalk::RevWalk;
 use std::collections::HashSet;
@@ -90,7 +90,6 @@ fn revwalk_floor_cartesian_sweep() -> grit_lib::error::Result<()> {
     let (merge, tip, side) = seed_merged_history(&repo, 1100)?;
     repo.odb().write_commit_graph()?;
 
-    trace_combine_filter_append("blob:limit=1k");
     let _ = expand_object_filter_for_protocol("tree:0").map_err(grit_lib::error::Error::Message)?;
     let _ =
         expand_object_filter_for_protocol("blob:none").map_err(grit_lib::error::Error::Message)?;

@@ -265,9 +265,6 @@ pub struct ConversionConfig {
     pub eol: CoreEol,
     /// `safecrlf` field.
     pub safecrlf: SafeCrlf,
-    /// `core.checkRoundtripEncoding` — comma/space separated encodings whose UTF-8 round trip is
-    /// verified when writing to the object DB. `None` keeps Git's default (`SHIFT-JIS`).
-    pub check_roundtrip_encoding: Option<String>,
     /// Subprocess runner for clean/smudge filters and iconv helpers.
     pub command_runner: Arc<dyn CommandRunner>,
 }
@@ -304,15 +301,10 @@ impl ConversionConfig {
             None => SafeCrlf::Warn,
         };
 
-        let check_roundtrip_encoding = config
-            .get("core.checkRoundtripEncoding")
-            .filter(|s| !s.is_empty());
-
         ConversionConfig {
             autocrlf,
             eol,
             safecrlf,
-            check_roundtrip_encoding,
             command_runner: system_command_runner(),
         }
     }
@@ -335,7 +327,6 @@ impl std::fmt::Debug for ConversionConfig {
             .field("autocrlf", &self.autocrlf)
             .field("eol", &self.eol)
             .field("safecrlf", &self.safecrlf)
-            .field("check_roundtrip_encoding", &self.check_roundtrip_encoding)
             .field("command_runner", &"<CommandRunner>")
             .finish()
     }
@@ -1061,46 +1052,6 @@ fn validate_utf_bom(
     Ok(())
 }
 
-/// Git `convert.c` `check_roundtrip`: whether `enc_name` appears as a whole, comma/space-delimited
-/// token in `core.checkRoundtripEncoding` (default `SHIFT-JIS`), case-insensitively.
-fn encoding_needs_roundtrip_check(enc_name: &str, conv: &ConversionConfig) -> bool {
-    let list = conv
-        .check_roundtrip_encoding
-        .as_deref()
-        .unwrap_or("SHIFT-JIS");
-    let target = enc_name.to_ascii_lowercase();
-    list.split([',', ' ', '\t'])
-        .map(str::trim)
-        .filter(|tok| !tok.is_empty())
-        .any(|tok| tok.eq_ignore_ascii_case(&target))
-}
-
-/// Git `trace_printf("Checking roundtrip encoding for %s...\n", enc)`.
-fn trace_roundtrip_encoding(enc_name: &str) {
-    use std::io::Write;
-    let Some(trace_val) = crate::environment::Environment::empty().var("GIT_TRACE") else {
-        return;
-    };
-    if trace_val.is_empty() || trace_val == "0" || trace_val.eq_ignore_ascii_case("false") {
-        return;
-    }
-    let line = format!("Checking roundtrip encoding for {enc_name}...\n");
-    match trace_val.as_str() {
-        "1" | "true" | "2" => {
-            let _ = std::io::stderr().write_all(line.as_bytes());
-        }
-        path_dest => {
-            if let Ok(mut f) = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(path_dest)
-            {
-                let _ = f.write_all(line.as_bytes());
-            }
-        }
-    }
-}
-
 /// Decode raw working-tree bytes (`enc_label`) into UTF-8 for the object DB (Git `encode_to_git`).
 ///
 /// When `validate` is true (writing to the object DB), enforce Git's UTF BOM rules and surface the
@@ -1480,11 +1431,6 @@ pub fn convert_to_git_with_opts(
         let writing_object = opts.check_safecrlf;
         buf = decode_working_tree_bytes_to_utf8(&buf, rel_path, enc, writing_object)
             .map_err(|e| filter_detail(rel_path, e.to_string()))?;
-        // Git `encode_to_git`: when writing to the object DB, verify the round trip for encodings
-        // listed in `core.checkRoundtripEncoding` (default `SHIFT-JIS`); emit the GIT_TRACE line.
-        if writing_object && encoding_needs_roundtrip_check(enc, conv) {
-            trace_roundtrip_encoding(enc);
-        }
     }
 
     // 3. Determine if we should do CRLF→LF conversion
@@ -2176,7 +2122,6 @@ mod tests {
             autocrlf: AutoCrlf::True,
             eol: CoreEol::Lf,
             safecrlf: SafeCrlf::False,
-            check_roundtrip_encoding: None,
             command_runner: system_command_runner(),
         };
         let attrs = FileAttrs::default();
@@ -2192,7 +2137,6 @@ mod tests {
             autocrlf: AutoCrlf::True,
             eol: CoreEol::Lf,
             safecrlf: SafeCrlf::False,
-            check_roundtrip_encoding: None,
             command_runner: system_command_runner(),
         };
         let attrs = FileAttrs::default();

@@ -8,7 +8,6 @@
 use std::cmp::{Ordering, Reverse};
 use std::collections::{BTreeSet, BinaryHeap, HashMap, HashSet, VecDeque};
 use std::fs;
-use std::io::Write;
 use std::path::Path;
 use std::sync::Arc;
 
@@ -388,31 +387,6 @@ pub fn url_encode_object_filter_subspec(raw: &str) -> String {
         }
     }
     out
-}
-
-/// Emit `Add to combine filter-spec: …` when `GIT_TRACE` is enabled (Git `list-objects-filter-options.c`).
-pub fn trace_combine_filter_append(encoded_segment: &str) {
-    let Some(trace_val) = crate::environment::Environment::empty().var("GIT_TRACE") else {
-        return;
-    };
-    if trace_val.is_empty() || trace_val == "0" || trace_val.eq_ignore_ascii_case("false") {
-        return;
-    }
-    let line = format!("Add to combine filter-spec: {encoded_segment}\n");
-    match trace_val.as_str() {
-        "1" | "true" | "2" => {
-            let _ = std::io::stderr().write_all(line.as_bytes());
-        }
-        path => {
-            if let Ok(mut f) = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(path)
-            {
-                let _ = f.write_all(line.as_bytes());
-            }
-        }
-    }
 }
 
 /// Simple URL percent-decoding.
@@ -8736,35 +8710,6 @@ fn walk_needs_top_tree_omit_set(filter: Option<&ObjectFilter>, collect_omits: bo
     collect_omits && matches!(filter, Some(ObjectFilter::TreeDepth(_)))
 }
 
-fn trace_skip_tree_contents(prefix: &str) {
-    let Some(trace_val) = crate::environment::Environment::empty().var("GIT_TRACE") else {
-        return;
-    };
-    if trace_val.is_empty() || trace_val == "0" || trace_val.eq_ignore_ascii_case("false") {
-        return;
-    }
-    let path = if prefix.is_empty() {
-        String::new()
-    } else {
-        format!("{prefix}/")
-    };
-    let line = format!("Skipping contents of tree {path}...\n");
-    match trace_val.as_str() {
-        "1" | "true" | "2" => {
-            let _ = std::io::stderr().write_all(line.as_bytes());
-        }
-        path_dest => {
-            if let Ok(mut f) = std::fs::OpenOptions::new()
-                .create(true)
-                .append(true)
-                .open(path_dest)
-            {
-                let _ = f.write_all(line.as_bytes());
-            }
-        }
-    }
-}
-
 fn tree_depth_begin_tree(
     tree_oid: ObjectId,
     depth: u64,
@@ -9116,10 +9061,6 @@ fn collect_tree_objects_filtered(
         }
     } else if bits.mark_seen {
         omitted.push(tree_oid);
-    }
-
-    if bits.skip_tree {
-        trace_skip_tree_contents(prefix);
     }
 
     if skip_trees_for_type_filter && depth == 0 && !explicit_root {
@@ -9923,7 +9864,6 @@ mod tests {
         assert!(ObjectFilter::parse("combine:tree:+1").is_err());
         let merged = ObjectFilter::BlobNone.merge_with(ObjectFilter::TreeDepth(1));
         assert!(matches!(merged, ObjectFilter::Combine(_)));
-        trace_combine_filter_append("blob%3Anone");
     }
 
     #[test]
@@ -10125,9 +10065,6 @@ mod tests {
         );
         let encoded = url_encode_object_filter_subspec("blob:none+tree:2");
         assert!(encoded.contains("%2b") || encoded.contains('%'));
-        std::env::set_var("GIT_TRACE", "1");
-        trace_combine_filter_append("blob%3Anone");
-        std::env::remove_var("GIT_TRACE");
     }
 
     #[test]
