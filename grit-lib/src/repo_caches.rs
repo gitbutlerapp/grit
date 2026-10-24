@@ -558,6 +558,19 @@ impl RepoCaches {
         Ok(store)
     }
 
+    /// Make `store` the ref store [`Self::open_ref_store`] returns for `git_dir`.
+    pub(crate) fn install_ref_store(
+        &self,
+        git_dir: &Path,
+        store: Arc<dyn crate::refs::store::RefStore>,
+    ) {
+        let key = git_dir
+            .canonicalize()
+            .unwrap_or_else(|_| git_dir.to_path_buf());
+        let mut guard = self.ref_stores.lock().unwrap_or_else(|e| e.into_inner());
+        guard.insert(key, store);
+    }
+
     /// Filter-process registry and disabled-driver set for this repository.
     #[must_use]
     pub fn filters(&self) -> &FilterProcessState {
