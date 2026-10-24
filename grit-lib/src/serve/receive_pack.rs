@@ -34,7 +34,8 @@ const CAPABILITIES: &[&str] = &[
 /// Which ref updates the server refuses.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ReceivePolicy {
-    /// Refuse updates that would discard commits (`receive.denyNonFastForwards`).
+    /// Refuse branch (`refs/heads/*`) updates that would discard commits
+    /// (`receive.denyNonFastForwards`). Other refs are not checked.
     pub deny_non_fast_forwards: bool,
     /// Refuse ref deletions (`receive.denyDeletes`).
     pub deny_deletes: bool,
@@ -664,12 +665,30 @@ fn check_command(
         return Some("branch is currently checked out");
     }
     if let (Some(old), true) = (current, policy.deny_non_fast_forwards) {
-        let fast_forward = crate::merge_base::is_ancestor(repo, old, new).unwrap_or(false);
-        if !fast_forward {
-            return Some("non-fast-forward");
+        if cmd.refname.starts_with("refs/heads/") {
+            return check_fast_forward(odb, old, new);
         }
     }
     None
+}
+
+/// Refusal reason when moving a branch from `old` to `new` would discard history.
+///
+/// `odb` must see the pushed objects (the receive quarantine) as well as the
+/// repository's own.
+fn check_fast_forward(odb: &crate::odb::Odb, old: ObjectId, new: ObjectId) -> Option<&'static str> {
+    let is_commit = |oid: &ObjectId| {
+        odb.read_info(oid)
+            .is_ok_and(|info| info.kind == crate::objects::ObjectKind::Commit)
+    };
+    if !is_commit(&old) || !is_commit(&new) {
+        return Some("bad ref");
+    }
+    match crate::merge_base::is_ancestor_odb_walk(odb, old, new) {
+        Ok(true) => None,
+        Ok(false) => Some("non-fast-forward"),
+        Err(_) => Some("unable to verify fast-forward"),
+    }
 }
 
 /// Encode the status report as pkt-lines: the unpack result, one line per ref,
