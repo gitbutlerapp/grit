@@ -769,12 +769,7 @@ struct ResponsePackInput<'a> {
 fn build_response_pack(input: ResponsePackInput<'_>) -> Result<Vec<u8>> {
     let mut pack_wants = input.wants.to_vec();
     if input.caps.contains("include-tag") {
-        pack_wants.extend(included_tags(
-            input.repo,
-            input.refs,
-            input.wants,
-            input.common,
-        )?);
+        pack_wants.extend(included_tags(&input)?);
     }
     pack_wants.sort();
     pack_wants.dedup();
@@ -804,15 +799,14 @@ fn build_response_pack(input: ResponsePackInput<'_>) -> Result<Vec<u8>> {
 /// Annotated tags the client did not ask for but whose target commit is being
 /// sent, so the client can follow tags without a second request.
 ///
-/// Only tags that peel to commits are considered.
-fn included_tags(
-    repo: &Repository,
-    refs: &[AdvertisedRef],
-    wants: &[ObjectId],
-    common: &[ObjectId],
-) -> Result<Vec<ObjectId>> {
-    let want_set: HashSet<ObjectId> = wants.iter().copied().collect();
-    let candidates: Vec<&AdvertisedRef> = refs
+/// Only tags that peel to commits are considered. Both walks honor the shallow
+/// grafts of their side, so a shallow fetch only picks up tags on the commits
+/// it actually sends.
+fn included_tags(input: &ResponsePackInput<'_>) -> Result<Vec<ObjectId>> {
+    let repo = input.repo;
+    let want_set: HashSet<ObjectId> = input.wants.iter().copied().collect();
+    let candidates: Vec<&AdvertisedRef> = input
+        .refs
         .iter()
         .filter(|r| r.name.starts_with("refs/tags/") && r.peeled.is_some())
         .filter(|r| !want_set.contains(&r.oid))
@@ -820,8 +814,8 @@ fn included_tags(
     if candidates.is_empty() {
         return Ok(Vec::new());
     }
-    let have_commits = commit_closure(repo, common, &HashSet::new())?;
-    let sent_commits = commit_closure(repo, wants, &have_commits)?;
+    let have_commits = commit_closure(repo, input.common, &HashSet::new(), input.have_shallow)?;
+    let sent_commits = commit_closure(repo, input.wants, &have_commits, input.source_shallow)?;
     Ok(candidates
         .into_iter()
         .filter(|r| r.peeled.is_some_and(|p| sent_commits.contains(&p)))
@@ -830,10 +824,12 @@ fn included_tags(
 }
 
 /// Commits reachable from `tips` (peeling tags), not descending into `stop`.
+/// Commits in `grafts` are included but their parents are not walked.
 fn commit_closure(
     repo: &Repository,
     tips: &[ObjectId],
     stop: &HashSet<ObjectId>,
+    grafts: &HashSet<ObjectId>,
 ) -> Result<HashSet<ObjectId>> {
     let mut seen = HashSet::new();
     let mut queue: VecDeque<ObjectId> = VecDeque::new();
@@ -854,6 +850,9 @@ fn commit_closure(
             seen.remove(&oid);
             continue;
         }
+        if grafts.contains(&oid) {
+            continue;
+        }
         let commit = crate::objects::parse_commit(&obj.data)?;
         queue.extend(commit.parents);
     }
@@ -868,5 +867,151 @@ fn write_pack(output: &mut dyn Write, pack: &[u8], sideband: bool) -> Result<()>
     } else {
         output.write_all(pack)?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+#[allow(clippy::unwrap_used, clippy::expect_used)]
+mod tests {
+    use super::*;
+    use crate::config::environment::RepositoryOptions;
+    use crate::repo::InitOptions;
+
+    /// Bare repository with `n` linear commits (oldest first) and an annotated
+    /// tag `refs/tags/t<i>` on every commit index in `tagged`.
+    struct Fixture {
+        _dir: tempfile::TempDir,
+        repo: Repository,
+        commits: Vec<ObjectId>,
+        tags: Vec<AdvertisedRef>,
+    }
+
+    fn fixture(n: usize, tagged: &[usize]) -> Fixture {
+        let dir = tempfile::tempdir().unwrap();
+        Repository::init(dir.path(), &InitOptions::new().with_bare(true)).unwrap();
+        let repo = Repository::open(dir.path(), &RepositoryOptions::empty()).unwrap();
+        let tree = repo
+            .odb()
+            .write_loose_materialize(ObjectKind::Tree, b"")
+            .unwrap();
+        let mut commits: Vec<ObjectId> = Vec::new();
+        for i in 0..n {
+            let parent = commits
+                .last()
+                .map(|p| format!("parent {p}\n"))
+                .unwrap_or_default();
+            let body = format!(
+                "tree {tree}\n{parent}author T <t@x> {i} +0000\ncommitter T <t@x> {i} +0000\n\nc{i}\n"
+            );
+            commits.push(
+                repo.odb()
+                    .write_loose_materialize(ObjectKind::Commit, body.as_bytes())
+                    .unwrap(),
+            );
+        }
+        let tags = tagged
+            .iter()
+            .map(|&i| {
+                let body = format!(
+                    "object {}\ntype commit\ntag t{i}\ntagger T <t@x> 0 +0000\n\nt\n",
+                    commits[i]
+                );
+                AdvertisedRef {
+                    name: format!("refs/tags/t{i}"),
+                    oid: repo
+                        .odb()
+                        .write_loose_materialize(ObjectKind::Tag, body.as_bytes())
+                        .unwrap(),
+                    peeled: Some(commits[i]),
+                }
+            })
+            .collect();
+        Fixture {
+            _dir: dir,
+            repo,
+            commits,
+            tags,
+        }
+    }
+
+    fn depth_request(depth: u32) -> ShallowRequest {
+        ShallowRequest {
+            depth: Some(depth),
+            ..ShallowRequest::default()
+        }
+    }
+
+    #[test]
+    fn shallow_response_for_tag_wants_names_only_commits() {
+        let fx = fixture(5, &[1, 4]);
+        let tip = fx.commits[4];
+        let wants = [tip, fx.tags[0].oid, fx.tags[1].oid];
+        let resp = compute_shallow_response(&fx.repo, &wants, &depth_request(1)).unwrap();
+        let mut shallow = resp.shallow.clone();
+        shallow.sort();
+        let mut expected = vec![fx.commits[1], tip];
+        expected.sort();
+        assert_eq!(shallow, expected);
+        for oid in &resp.pack_shallow_grafts {
+            assert_eq!(
+                fx.repo.odb().read_info(oid).unwrap().kind,
+                ObjectKind::Commit
+            );
+        }
+    }
+
+    #[test]
+    fn shallow_response_ignores_wants_that_are_not_commits() {
+        let fx = fixture(2, &[]);
+        let tree = fx
+            .repo
+            .odb()
+            .write_loose_materialize(ObjectKind::Tree, b"")
+            .unwrap();
+        let resp =
+            compute_shallow_response(&fx.repo, &[fx.commits[1], tree], &depth_request(1)).unwrap();
+        assert_eq!(resp.shallow, vec![fx.commits[1]]);
+    }
+
+    #[test]
+    fn included_tags_stop_at_the_shallow_boundary() {
+        let fx = fixture(6, &[1, 3, 5]);
+        let tip = fx.commits[5];
+        let resp = compute_shallow_response(&fx.repo, &[tip], &depth_request(3)).unwrap();
+        let caps = HashSet::from(["include-tag".to_owned()]);
+        let tags = included_tags(&ResponsePackInput {
+            repo: &fx.repo,
+            refs: &fx.tags,
+            wants: &[tip],
+            common: &[],
+            caps: &caps,
+            filter: None,
+            have_shallow: &HashSet::new(),
+            source_shallow: &resp.pack_shallow_grafts,
+        })
+        .unwrap();
+        let mut expected = vec![fx.tags[1].oid, fx.tags[2].oid];
+        expected.sort();
+        let mut tags = tags;
+        tags.sort();
+        assert_eq!(tags, expected, "t1 lies beyond the depth-3 cut");
+    }
+
+    #[test]
+    fn included_tags_skip_history_the_client_already_has() {
+        let fx = fixture(6, &[1, 3, 5]);
+        let caps = HashSet::from(["include-tag".to_owned()]);
+        let tags = included_tags(&ResponsePackInput {
+            repo: &fx.repo,
+            refs: &fx.tags,
+            wants: &[fx.commits[5]],
+            common: &[fx.commits[3]],
+            caps: &caps,
+            filter: None,
+            have_shallow: &HashSet::new(),
+            source_shallow: &HashSet::new(),
+        })
+        .unwrap();
+        assert_eq!(tags, vec![fx.tags[2].oid]);
     }
 }

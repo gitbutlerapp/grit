@@ -156,7 +156,7 @@ pub(crate) fn relative_deepen_depth_for_request(
     let client_set: HashSet<ObjectId> = client_shallow.iter().copied().collect();
     let mut best_depth: HashMap<ObjectId, usize> = HashMap::new();
     let mut q: std::collections::VecDeque<(ObjectId, usize)> = std::collections::VecDeque::new();
-    for &w in wants {
+    for w in crate::rev_list::peel_to_commit_tips(repo, wants) {
         best_depth.insert(w, 1);
         q.push_back((w, 1));
     }

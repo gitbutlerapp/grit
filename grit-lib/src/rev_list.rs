@@ -7962,7 +7962,8 @@ pub fn shallow_boundary_oids(git_dir: &Path) -> HashSet<ObjectId> {
 ///
 /// Matches Git `get_shallow_commits` with infinite depth and no client-advertised shallows: walk
 /// from wanted tips, stop parent traversal at `.git/shallow` entries, and return those boundary
-/// commits (for protocol v2 `shallow-info` and `pack-objects --shallow`).
+/// commits (for protocol v2 `shallow-info` and `pack-objects --shallow`). Annotated tag wants are
+/// walked from the commit they name.
 #[must_use]
 pub fn shallow_borders_reachable_from_wants(
     repo: &Repository,
@@ -7975,7 +7976,7 @@ pub fn shallow_borders_reachable_from_wants(
     let mut out: Vec<ObjectId> = Vec::new();
     let mut seen_out = HashSet::new();
     let mut visited = HashSet::new();
-    let mut q: VecDeque<ObjectId> = wants.iter().copied().collect();
+    let mut q: VecDeque<ObjectId> = peel_to_commit_tips(repo, wants).into();
     while let Some(oid) = q.pop_front() {
         if !visited.insert(oid) {
             continue;
@@ -8003,7 +8004,9 @@ pub fn shallow_borders_reachable_from_wants(
 ///
 /// # Parameters
 ///
-/// - `wants` — wanted commit OIDs (usually remote `HEAD` / ref tips).
+/// - `wants` — wanted OIDs (usually remote `HEAD` / ref tips). Annotated tags are peeled to the
+///   commit they name; wants that do not peel to a commit are ignored, so only commits are ever
+///   returned.
 /// - `client_shallow` — OIDs the client advertised with `shallow <oid>` before `deepen`.
 /// - `deepen` — positive integer from the `deepen` pkt-line (`deepen 2` → `2`).
 #[must_use]
@@ -8013,9 +8016,11 @@ pub fn shallow_grafts_for_upload_pack_deepen(
     client_shallow: &[ObjectId],
     deepen: usize,
 ) -> Vec<ObjectId> {
+    let wants = peel_to_commit_tips(repo, wants);
     if deepen == 0 || wants.is_empty() {
         return Vec::new();
     }
+    let wants = wants.as_slice();
 
     let server_shallow = shallow_boundary_oids(repo.git_dir());
     let client_set: HashSet<ObjectId> = client_shallow.iter().copied().collect();
@@ -8037,6 +8042,8 @@ pub fn shallow_grafts_for_upload_pack_deepen(
 
 /// Shallow borders when the client sent `deepen-relative` and the caller already computed
 /// the absolute target depth (Git `get_shallow_commits` after `deepen_relative` adjustment).
+///
+/// Wants are peeled like in [`shallow_grafts_for_upload_pack_deepen`].
 #[must_use]
 pub fn shallow_grafts_for_upload_pack_target_depth(
     repo: &Repository,
@@ -8044,13 +8051,31 @@ pub fn shallow_grafts_for_upload_pack_target_depth(
     client_shallow: &[ObjectId],
     target_depth: usize,
 ) -> Vec<ObjectId> {
+    let wants = peel_to_commit_tips(repo, wants);
     if target_depth == 0 || wants.is_empty() {
         return Vec::new();
     }
     let server_shallow = shallow_boundary_oids(repo.git_dir());
     let client_set: HashSet<ObjectId> = client_shallow.iter().copied().collect();
-    let included_depths = commits_within_parent_depth(repo, wants, target_depth, &server_shallow);
+    let included_depths = commits_within_parent_depth(repo, &wants, target_depth, &server_shallow);
     border_commits_for_depth_fetch(repo, &included_depths, target_depth, &client_set)
+}
+
+/// Peel `wants` through annotated tags and keep the distinct commits, in order.
+///
+/// Depth counting and shallow borders are defined on commits only: a tag want
+/// counts from the commit it names, and a want that names a tree or blob (or is
+/// missing) has no history to cut.
+pub(crate) fn peel_to_commit_tips(repo: &Repository, wants: &[ObjectId]) -> Vec<ObjectId> {
+    let mut seen = HashSet::with_capacity(wants.len());
+    wants
+        .iter()
+        .filter_map(|w| match repo.odb().peel_tags(*w) {
+            Ok((oid, ObjectKind::Commit)) => Some(oid),
+            _ => None,
+        })
+        .filter(|oid| seen.insert(*oid))
+        .collect()
 }
 
 fn commit_parent_ids(repo: &Repository, oid: ObjectId) -> Vec<ObjectId> {
@@ -8191,7 +8216,8 @@ fn border_commits_not_in_client_shallow(
 /// Shallow boundary commits for `upload-pack` when the client uses `deepen-since` and/or
 /// `deepen-not` (Git runs `rev-list --max-age=…` / `--not` and derives border commits).
 ///
-/// Returns OIDs to advertise as `shallow` lines and pass to `pack-objects --shallow`.
+/// Returns commit OIDs to advertise as `shallow` lines and pass to `pack-objects --shallow`.
+/// Wants are peeled like in [`shallow_grafts_for_upload_pack_deepen`].
 pub fn shallow_grafts_for_upload_pack_rev_list(
     repo: &Repository,
     wants: &[ObjectId],
@@ -8199,6 +8225,7 @@ pub fn shallow_grafts_for_upload_pack_rev_list(
     deepen_since: Option<i64>,
     deepen_not: &[ObjectId],
 ) -> Result<Vec<ObjectId>> {
+    let wants = peel_to_commit_tips(repo, wants);
     if wants.is_empty() || (deepen_since.is_none() && deepen_not.is_empty()) {
         return Ok(Vec::new());
     }

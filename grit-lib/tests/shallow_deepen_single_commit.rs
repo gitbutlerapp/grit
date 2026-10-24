@@ -102,3 +102,32 @@ fn single_commit_shallow_borders_match_git_clone_depth() {
         "git clone --depth 5 must not write .git/shallow when history is complete"
     );
 }
+
+#[test]
+fn deepen_with_annotated_tag_want_borders_the_tagged_commit() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let (repo, tip) = init_single_commit_bare(dir.path());
+    let tag_body = format!(
+        "object {}\ntype commit\ntag v1\ntagger T <t@x> 1 +0000\n\nv1\n",
+        tip.to_hex()
+    );
+    let tag = repo
+        .odb()
+        .write_loose_materialize(ObjectKind::Tag, tag_body.as_bytes())
+        .expect("tag");
+
+    assert_eq!(
+        shallow_grafts_for_upload_pack_deepen(&repo, &[tag], &[], 1),
+        vec![tip],
+        "a tag want is counted from the commit it names"
+    );
+    assert_eq!(
+        shallow_grafts_for_upload_pack_deepen(&repo, &[tip, tag], &[], 1),
+        vec![tip]
+    );
+    let tree = ObjectId::from_hex("4b825dc642cb6eb9a060e54bf8d69288fbee4904").expect("empty tree");
+    assert!(
+        shallow_grafts_for_upload_pack_deepen(&repo, &[tree], &[], 1).is_empty(),
+        "a non-commit want has no history to cut"
+    );
+}
