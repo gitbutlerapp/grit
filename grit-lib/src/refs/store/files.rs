@@ -107,6 +107,11 @@ impl FilesRefStore {
         }
     }
 
+    /// Git directory this store reads `HEAD` and per-worktree refs from.
+    pub(crate) fn git_dir(&self) -> &Path {
+        &self.git_dir
+    }
+
     /// Convenience constructor for a simple repository directory.
     pub fn from_git_dir(git_dir: impl Into<PathBuf>) -> Result<Self> {
         let git_dir: PathBuf = git_dir.into();

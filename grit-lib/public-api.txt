@@ -13886,7 +13886,7 @@ pub fn grit_lib::porcelain::stash::check_stash_apply_would_overwrite_local_chang
 pub fn grit_lib::porcelain::stash::clear_stashes(&grit_lib::repo::Repository) -> grit_lib::error::Result<usize>
 pub fn grit_lib::porcelain::stash::create_stash(&grit_lib::repo::Repository, &grit_lib::stash::StashCreateOptions) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectId>>
 pub fn grit_lib::porcelain::stash::drop_stash(&grit_lib::repo::Repository, usize, &str) -> grit_lib::error::Result<()>
-pub fn grit_lib::porcelain::stash::drop_stash_commit(&std::path::Path, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<bool>
+pub fn grit_lib::porcelain::stash::drop_stash_commit(&grit_lib::repo::Repository, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<bool>
 pub fn grit_lib::porcelain::stash::flat_tree_lookup<'a>(&'a [grit_lib::stash::FlatTreeEntry], &str) -> core::option::Option<&'a grit_lib::stash::FlatTreeEntry>
 pub fn grit_lib::porcelain::stash::flatten_tree_full(&grit_lib::objects::odb::Odb, &grit_lib::objects::ObjectId, &str, grit_lib::path_validate::ProtectOptions) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::stash::FlatTreeEntry>>
 pub fn grit_lib::porcelain::stash::list_stashes(&grit_lib::repo::Repository) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::stash::StashEntry>>
@@ -17822,6 +17822,7 @@ pub fn grit_lib::refs::should_autocreate_reflog(&std::path::Path, &str) -> bool
 pub fn grit_lib::refs::should_autocreate_reflog_for_mode(&str, grit_lib::refs::LogRefsConfig) -> bool
 pub fn grit_lib::refs::should_autocreate_reflog_with_config(&grit_lib::config::ConfigSet, &std::path::Path, &str) -> bool
 pub fn grit_lib::refs::update_branch_for_commit(&std::path::Path, &grit_lib::refs::BranchCommitRefUpdate<'_>) -> grit_lib::error::Result<()>
+pub fn grit_lib::refs::update_branch_for_commit_on_store(&dyn grit_lib::refs::store::RefStore, &grit_lib::refs::BranchCommitRefUpdate<'_>, &grit_lib::config::ConfigSet) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::update_branch_for_commit_with_config(&std::path::Path, &grit_lib::refs::BranchCommitRefUpdate<'_>, &grit_lib::config::ConfigSet) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::update_direct_ref_on_store(&dyn grit_lib::refs::store::RefStore, &std::path::Path, &str, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::verify_branch_commit_cas(core::option::Option<grit_lib::objects::ObjectId>, core::option::Option<grit_lib::objects::ObjectId>, &str) -> grit_lib::error::Result<()>
@@ -24129,7 +24130,7 @@ pub fn grit_lib::stash::check_stash_apply_would_overwrite_local_changes(&grit_li
 pub fn grit_lib::stash::clear_stashes(&grit_lib::repo::Repository) -> grit_lib::error::Result<usize>
 pub fn grit_lib::stash::create_stash(&grit_lib::repo::Repository, &grit_lib::stash::StashCreateOptions) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectId>>
 pub fn grit_lib::stash::drop_stash(&grit_lib::repo::Repository, usize, &str) -> grit_lib::error::Result<()>
-pub fn grit_lib::stash::drop_stash_commit(&std::path::Path, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<bool>
+pub fn grit_lib::stash::drop_stash_commit(&grit_lib::repo::Repository, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<bool>
 pub fn grit_lib::stash::flat_tree_lookup<'a>(&'a [grit_lib::stash::FlatTreeEntry], &str) -> core::option::Option<&'a grit_lib::stash::FlatTreeEntry>
 pub fn grit_lib::stash::flatten_tree_full(&grit_lib::objects::odb::Odb, &grit_lib::objects::ObjectId, &str, grit_lib::path_validate::ProtectOptions) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::stash::FlatTreeEntry>>
 pub fn grit_lib::stash::list_stashes(&grit_lib::repo::Repository) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::stash::StashEntry>>

@@ -6,7 +6,7 @@ use crate::index::MODE_TREE;
 use crate::objects::{parse_commit, parse_tree, ObjectId};
 use crate::pathspec::{has_glob_chars, pathspec_is_exclude, sorted_paths_match_pathspec};
 use crate::repo::Repository;
-use crate::state::resolve_head;
+use crate::state::resolve_head_for_repository;
 use crate::unicode_normalization::resolve_worktree_path_for_staging;
 use std::collections::HashSet;
 
@@ -157,7 +157,7 @@ fn known_paths(repo: &Repository) -> Result<Vec<String>> {
 ///
 /// Propagates failures resolving `HEAD` or reading its commit and trees.
 pub(crate) fn sorted_head_tree_paths(repo: &Repository) -> Result<Vec<String>> {
-    let head = resolve_head(repo.git_dir())?;
+    let head = resolve_head_for_repository(repo)?;
     let Some(head_oid) = head.oid() else {
         return Ok(Vec::new());
     };

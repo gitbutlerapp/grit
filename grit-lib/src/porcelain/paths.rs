@@ -16,7 +16,7 @@ use crate::path_validate::{validate_path, EntryMode, PathValidationKind, Protect
 use crate::pathspec::pathspec_is_exclude;
 use crate::porcelain::checkout::remove_empty_parent_dirs;
 use crate::repo::Repository;
-use crate::state::{resolve_head, HeadState};
+use crate::state::{resolve_head_for_repository, HeadState};
 
 /// Options for [`remove_paths`].
 #[derive(Debug, Clone, Default)]
@@ -544,7 +544,7 @@ fn infer_remove_recursive(repo: &Repository, sources: &[String], specs: &[String
 }
 
 fn resolve_head_tree(repo: &Repository) -> Result<Option<ObjectId>> {
-    match resolve_head(repo.git_dir())? {
+    match resolve_head_for_repository(repo)? {
         HeadState::Branch { oid: Some(oid), .. } | HeadState::Detached { oid } => {
             let obj = repo.odb().read(&oid)?;
             let commit = parse_commit(&obj.data)?;

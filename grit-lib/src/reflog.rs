@@ -554,12 +554,25 @@ pub fn delete_reflog_entries(git_dir: &Path, refname: &str, indices: &[usize]) -
 
 /// Like [`delete_reflog_entries`], but reconnects surviving `old_oid` values after
 /// a gap (Git stash drop / `EXPIRE_REFLOGS_REWRITE`).
+///
+/// Opens the ref store for `git_dir` and rewrites the reflog through it.
 pub fn delete_reflog_entries_rechain(
     git_dir: &Path,
     refname: &str,
     indices: &[usize],
 ) -> Result<()> {
-    let mut entries = read_reflog(git_dir, refname)?;
+    let store = crate::refs::store::open_ref_store(git_dir)?;
+    delete_reflog_entries_rechain_on_store(store.as_ref(), refname, indices)
+}
+
+/// [`delete_reflog_entries_rechain`] through an already-selected ref store (for example
+/// [`crate::repo::Repository::refs`], which may be an injected store).
+pub(crate) fn delete_reflog_entries_rechain_on_store(
+    store: &dyn crate::refs::store::RefStore,
+    refname: &str,
+    indices: &[usize],
+) -> Result<()> {
+    let mut entries = read_reflog_on_store(store, refname)?;
     if entries.is_empty() {
         return Ok(());
     }
@@ -582,15 +595,24 @@ pub fn delete_reflog_entries_rechain(
     for i in 1..kept.len() {
         kept[i].old_oid = kept[i - 1].new_oid;
     }
-    if crate::refs::store::open_ref_store(git_dir)?.format()
-        == crate::refs::store::RefStorageFormat::Reftable
-    {
-        return crate::reftable::reftable_replace_reflog(git_dir, refname, &kept);
-    }
-    let path = reflog_path(git_dir, refname);
-    let lines: String = kept.iter().map(format_reflog_entry).collect();
-    fs::write(&path, lines)?;
-    Ok(())
+    store.replace_reflog(refname, kept)
+}
+
+/// Read every reflog entry for `refname` from `store`, oldest first; empty when it has none.
+///
+/// # Errors
+///
+/// Propagates backend read and parse failures.
+pub(crate) fn read_reflog_on_store(
+    store: &dyn crate::refs::store::RefStore,
+    refname: &str,
+) -> Result<Vec<ReflogEntry>> {
+    let mut entries = Vec::new();
+    store.for_each_reflog_entry(refname, false, &mut |entry| {
+        entries.push(entry.clone());
+        std::ops::ControlFlow::Continue(())
+    })?;
+    Ok(entries)
 }
 
 /// Expire (prune) reflog entries older than a given timestamp (Unix seconds).

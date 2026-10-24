@@ -2,7 +2,7 @@
 //!
 //! [`replay_commit`] performs a three-way merge, updates the working tree and
 //! index on success, writes a new commit, and advances the checked-out branch
-//! through [`crate::refs::update_branch_for_commit_with_config`]. On conflict or
+//! through [`crate::refs::update_branch_for_commit_on_store`]. On conflict or
 //! when the replay would be a no-op (`Empty`, `AlreadyApplied`), nothing in the
 //! worktree, index, or refs is changed.
 
@@ -22,11 +22,11 @@ use crate::porcelain::revert::merge_commit_message_for_revert;
 use crate::porcelain::tree_merge_checkout::apply_clean_tree_merge_to_worktree;
 use crate::porcelain::worktree_guard::ensure_worktree_clean_for_pick;
 use crate::refs::{
-    resolve_ref, should_autocreate_reflog_with_config, update_branch_for_commit_with_config,
-    BranchCommitRefLock, BranchCommitRefUpdate,
+    should_autocreate_reflog_with_config, update_branch_for_commit_on_store, BranchCommitRefLock,
+    BranchCommitRefUpdate,
 };
 use crate::repo::Repository;
-use crate::state::{resolve_head, HeadState};
+use crate::state::{resolve_head_for_repository, HeadState};
 
 /// Whether [`replay_commit`] applies a commit's patch or its inverse.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -93,7 +93,7 @@ pub enum ReplayOutcome {
 pub fn replay_commit(repo: &Repository, req: &ReplayRequest) -> Result<ReplayOutcome> {
     ensure_worktree_clean_for_pick(repo)?;
 
-    let (refname, head_oid) = match resolve_head(repo.git_dir())? {
+    let (refname, head_oid) = match resolve_head_for_repository(repo)? {
         HeadState::Branch {
             refname,
             oid: Some(oid),
@@ -189,18 +189,15 @@ pub fn replay_commit(repo: &Repository, req: &ReplayRequest) -> Result<ReplayOut
 
     let index_snapshot = fs::read(repo.index_path()).ok();
 
-    if crate::refs::store::open_ref_store(repo.git_dir())?.format()
-        != crate::refs::store::RefStorageFormat::Files
-    {
-        let current = resolve_ref(repo.git_dir(), &refname).ok();
-        crate::refs::verify_branch_commit_cas(Some(head_oid), current, &refname)?;
+    if let Some(files) = repo.refs().as_files() {
+        let git_dir = files.git_dir();
+        let mut branch_ref_lock = BranchCommitRefLock::acquire(git_dir, &refname, Some(head_oid))?;
+        branch_ref_lock.write_reflogs(git_dir, &ref_update, &head_oid, config.as_ref())?;
 
         apply_clean_tree_merge_to_worktree(repo, &head_tree, &merged)?;
 
-        if let Err(err) =
-            update_branch_for_commit_with_config(repo.git_dir(), &ref_update, config.as_ref())
-        {
-            undo_prepared_branch_commit_reflogs(repo.git_dir(), &refname, config.as_ref());
+        if let Err(err) = branch_ref_lock.finish_ref_commit(git_dir, &ref_update) {
+            undo_prepared_branch_commit_reflogs(git_dir, &refname, config.as_ref());
             restore_worktree_after_failed_ref_commit(
                 repo,
                 &head_tree,
@@ -210,14 +207,14 @@ pub fn replay_commit(repo: &Repository, req: &ReplayRequest) -> Result<ReplayOut
             return Err(err);
         }
     } else {
-        let mut branch_ref_lock =
-            BranchCommitRefLock::acquire(repo.git_dir(), &refname, Some(head_oid))?;
-        branch_ref_lock.write_reflogs(repo.git_dir(), &ref_update, &head_oid, config.as_ref())?;
+        let current = repo.references().resolve_if_exists(&refname).ok().flatten();
+        crate::refs::verify_branch_commit_cas(Some(head_oid), current, &refname)?;
 
         apply_clean_tree_merge_to_worktree(repo, &head_tree, &merged)?;
 
-        if let Err(err) = branch_ref_lock.finish_ref_commit(repo.git_dir(), &ref_update) {
-            undo_prepared_branch_commit_reflogs(repo.git_dir(), &refname, config.as_ref());
+        // Branch and reflog updates commit as one transaction here, so a failure leaves no
+        // reflog lines to undo.
+        if let Err(err) = update_branch_for_commit_on_store(repo.refs(), &ref_update, &config) {
             restore_worktree_after_failed_ref_commit(
                 repo,
                 &head_tree,

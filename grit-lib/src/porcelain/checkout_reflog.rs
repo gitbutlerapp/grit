@@ -8,11 +8,11 @@ use crate::objects::ObjectId;
 use crate::refs::handle::ExistingRef;
 use crate::refs::store::{Expected, RawRef, RefUpdate, RefUpdateFlags, ReflogUpdate};
 use crate::refs::{
-    self, append_reflog_with_config, commit_ref_update_on_store, create_ref_with_reflog_on_store,
-    delete_ref,
+    append_reflog_on_store, commit_ref_update_on_store, create_ref_with_reflog_on_store,
+    delete_ref_on_store, update_direct_ref_on_store, write_symbolic_ref_on_store,
 };
 use crate::repo::Repository;
-use crate::state::{resolve_head, HeadState};
+use crate::state::{resolve_head_for_repository, HeadState};
 
 /// Committer identity line for reflog updates (`Name <email> epoch tz`).
 pub fn checkout_reflog_identity(repo: &Repository) -> String {
@@ -69,15 +69,15 @@ pub fn append_head_checkout_reflog(
         ConfigSet::load(repo.environment(), Some(repo.git_dir()), true).unwrap_or_default();
     let identity = checkout_reflog_identity(repo);
     let message = format!("checkout: moving from {from_label} to {to_label}");
-    append_reflog_with_config(
-        repo.git_dir(),
+    append_reflog_on_store(
+        repo.refs(),
         "HEAD",
         &old_oid,
         &new_oid,
         &identity,
         &message,
         false,
-        Some(&config),
+        &config,
     )
 }
 
@@ -117,7 +117,7 @@ pub(crate) fn reset_branch_ref_with_reflog(
         ConfigSet::load(repo.environment(), Some(repo.git_dir()), true).unwrap_or_default();
     let reflog =
         if crate::refs::should_autocreate_reflog_with_config(&config, repo.git_dir(), branch_ref)
-            || crate::reflog::reflog_exists(repo.git_dir(), branch_ref)
+            || repo.refs().reflog_exists(branch_ref)?
         {
             Some(ReflogUpdate {
                 identity,
@@ -148,15 +148,21 @@ pub(crate) fn reset_branch_ref_with_reflog(
     )
 }
 
+fn write_head(repo: &Repository, value: &RawRef) -> Result<()> {
+    match value {
+        RawRef::Symbolic(target) => {
+            write_symbolic_ref_on_store(repo.refs(), repo.git_dir(), "HEAD", target)
+        }
+        RawRef::Direct(oid) => update_direct_ref_on_store(repo.refs(), repo.git_dir(), "HEAD", oid),
+    }
+}
+
 fn restore_head(repo: &Repository, head_before: &HeadState) -> Result<()> {
     match head_before {
-        HeadState::Branch { refname, .. } => {
-            refs::write_symbolic_ref(repo.git_dir(), "HEAD", refname)?;
-        }
-        HeadState::Detached { oid } => refs::write_ref(repo.git_dir(), "HEAD", oid)?,
-        HeadState::Invalid => {}
+        HeadState::Branch { refname, .. } => write_head(repo, &RawRef::Symbolic(refname.clone())),
+        HeadState::Detached { oid } => write_head(repo, &RawRef::Direct(*oid)),
+        HeadState::Invalid => Ok(()),
     }
-    Ok(())
 }
 
 /// Create branch (if needed), move `HEAD`, append checkout reflog; roll back branch on failure.
@@ -176,15 +182,14 @@ pub fn finish_switch_ref_updates(
         create_branch_ref_with_reflog(repo, &refname, oid, &source)?;
     }
 
-    let head_result = if detached {
-        refs::write_ref(repo.git_dir(), "HEAD", &target_oid)
+    let head_after = if detached {
+        RawRef::Direct(target_oid)
     } else {
-        refs::write_symbolic_ref(repo.git_dir(), "HEAD", branch_ref)
+        RawRef::Symbolic(branch_ref.to_owned())
     };
-
-    if let Err(err) = head_result {
+    if let Err(err) = write_head(repo, &head_after) {
         if let Some(refname) = created_branch {
-            let _ = delete_ref(repo.git_dir(), &refname);
+            let _ = delete_ref_on_store(repo.refs(), &refname);
         }
         return Err(err);
     }
@@ -197,7 +202,7 @@ pub fn finish_switch_ref_updates(
     if let Err(err) = append_head_checkout_reflog(repo, old_oid, target_oid, from_label, to_label) {
         let _ = restore_head(repo, head_before);
         if let Some(refname) = created_branch {
-            let _ = delete_ref(repo.git_dir(), &refname);
+            let _ = delete_ref_on_store(repo.refs(), &refname);
         }
         return Err(err);
     }
@@ -210,7 +215,7 @@ pub fn is_already_on_branch(
     branch_ref: &str,
     target_oid: ObjectId,
 ) -> Result<bool> {
-    let head = resolve_head(repo.git_dir())?;
+    let head = resolve_head_for_repository(repo)?;
     Ok(matches!(
         head,
         HeadState::Branch {
@@ -223,7 +228,7 @@ pub fn is_already_on_branch(
 
 /// Whether detached `HEAD` already points at `target_oid`.
 pub fn is_already_detached_at(repo: &Repository, target_oid: ObjectId) -> Result<bool> {
-    let head = resolve_head(repo.git_dir())?;
+    let head = resolve_head_for_repository(repo)?;
     Ok(matches!(
         head,
         HeadState::Detached { oid } if oid == target_oid

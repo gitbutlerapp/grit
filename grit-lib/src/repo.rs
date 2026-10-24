@@ -834,6 +834,18 @@ impl Repository {
         self.ref_store.as_ref()
     }
 
+    /// Whether [`Self::refs`] is an on-disk files or reftable backend, so `HEAD` and refs can
+    /// also be read from the git directory. False for injected stores such as
+    /// [`crate::refs::store::MemoryRefStore`].
+    #[must_use]
+    pub(crate) fn refs_on_disk(&self) -> bool {
+        use crate::refs::store::RefStorageFormat;
+        matches!(
+            self.ref_store.format(),
+            RefStorageFormat::Files | RefStorageFormat::Reftable
+        )
+    }
+
     /// Object read/write handle for this repository.
     #[inline]
     #[must_use]

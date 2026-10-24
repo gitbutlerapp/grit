@@ -29,7 +29,7 @@ use crate::repo::Repository;
 use crate::rev_parse::expand_at_minus_to_branch_name;
 
 use crate::rev_parse::{peel_to_commit_for_merge_base, resolve_revision};
-use crate::state::resolve_head;
+use crate::state::resolve_head_for_repository;
 
 /// Resolved switch target after DWIM and revision parsing.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -117,12 +117,12 @@ pub fn resolve_create_branch(
     validate_branch_short_name(branch)
         .map_err(|e| Error::Message(format!("invalid branch name '{branch}': {e}")))?;
     let branch_ref = format!("refs/heads/{branch}");
-    if refs::resolve_ref(repo.git_dir(), &branch_ref).is_ok() {
+    if repo.resolve_ref_oid(&branch_ref).is_ok() {
         return Err(Error::Message(format!("branch '{branch}' already exists")));
     }
     let start_oid = match start_point {
         Some(spec) => resolve_revision_spec(repo, spec)?,
-        None => resolve_head(repo.git_dir())?
+        None => resolve_head_for_repository(repo)?
             .oid()
             .copied()
             .ok_or_else(|| Error::Message("no commits yet to create a branch from".into()))?,
@@ -139,11 +139,11 @@ pub fn resolve_create_branch(
 pub fn resolve_switch_target(repo: &Repository, spec: &str) -> Result<SwitchMode> {
     let spec = normalize_switch_spec(spec);
     if let Ok(Some(branch)) = expand_at_minus_to_branch_name(repo, spec) {
-        let oid = refs::resolve_ref(repo.git_dir(), &format!("refs/heads/{branch}"))?;
+        let oid = repo.resolve_ref_oid(&format!("refs/heads/{branch}"))?;
         return Ok(SwitchMode::Existing { branch, oid });
     }
 
-    if let Ok(oid) = refs::resolve_ref(repo.git_dir(), &format!("refs/heads/{spec}")) {
+    if let Ok(oid) = repo.resolve_ref_oid(&format!("refs/heads/{spec}")) {
         return Ok(SwitchMode::Existing {
             branch: spec.to_owned(),
             oid,
@@ -154,12 +154,12 @@ pub fn resolve_switch_target(repo: &Repository, spec: &str) -> Result<SwitchMode
         format!("refs/remotes/{spec}"),
         format!("refs/remotes/origin/{spec}"),
     ] {
-        if let Ok(oid) = refs::resolve_ref(repo.git_dir(), &candidate) {
+        if let Ok(oid) = repo.resolve_ref_oid(&candidate) {
             let short = spec.strip_prefix("origin/").unwrap_or(spec).to_owned();
             validate_branch_short_name(&short)
                 .map_err(|e| Error::Message(format!("invalid branch name '{short}': {e}")))?;
             let local = format!("refs/heads/{short}");
-            if let Ok(local_oid) = refs::resolve_ref(repo.git_dir(), &local) {
+            if let Ok(local_oid) = repo.resolve_ref_oid(&local) {
                 return Ok(SwitchMode::Existing {
                     branch: short,
                     oid: local_oid,
@@ -207,7 +207,7 @@ fn resolve_unique_dwim_switch(repo: &Repository, spec: &str) -> Result<Option<Sw
     let mut hits: Vec<(String, ObjectId)> = Vec::new();
     for rule in DWIM_RULES {
         let candidate = rule.replace("{0}", spec);
-        if let Ok(oid) = refs::resolve_ref(repo.git_dir(), &candidate) {
+        if let Ok(oid) = repo.resolve_ref_oid(&candidate) {
             hits.push((candidate, oid));
         }
     }
@@ -312,7 +312,7 @@ pub fn switch_repository(repo: &Repository, opts: &SwitchOptions) -> Result<Swit
                 changed_paths: 0,
             });
         }
-        let head_before = resolve_head(repo.git_dir())?;
+        let head_before = resolve_head_for_repository(repo)?;
         if let Some(from_label) = checkout_reflog_from_label(&head_before) {
             let old_oid = head_before
                 .oid()
@@ -367,7 +367,7 @@ fn switch_to_target(
     reflog_to_label: &str,
     dry_run: bool,
 ) -> Result<SwitchOutcome> {
-    let head_before = resolve_head(repo.git_dir())?;
+    let head_before = resolve_head_for_repository(repo)?;
     let head_oid = head_before.oid().copied();
     let (target_tree, head_tree) = match head_oid {
         None => (commit_tree(repo, &target_oid)?, None),
@@ -423,9 +423,9 @@ fn switch_to_target(
             repo, &refname, oid, &source,
         )?;
         if detached {
-            refs::write_ref(repo.git_dir(), "HEAD", &target_oid)?;
+            refs::update_direct_ref_on_store(repo.refs(), repo.git_dir(), "HEAD", &target_oid)?;
         } else {
-            refs::write_symbolic_ref(repo.git_dir(), "HEAD", branch_ref)?;
+            refs::write_symbolic_ref_on_store(repo.refs(), repo.git_dir(), "HEAD", branch_ref)?;
         }
     }
 
@@ -1036,7 +1036,7 @@ mod tests {
     use crate::porcelain::status::{status, StatusOptions};
     use crate::progress::NullProgress;
     use crate::repo::{init_repository, Repository};
-    use crate::state::resolve_head;
+    use crate::state::resolve_head_for_repository;
     use crate::state::HeadState;
     use crate::write_tree::{write_tree_update_index, WriteTreeFlags};
     use crate::RefStorageFormat;
@@ -1168,7 +1168,7 @@ mod tests {
         refs::write_symbolic_ref(repo.git_dir(), "HEAD", "refs/heads/main").expect("head");
 
         std::fs::write(wt.join("d/f0.txt"), "LOCAL EDIT\n").expect("unstaged edit");
-        let head_before = resolve_head(repo.git_dir()).expect("head");
+        let head_before = resolve_head_for_repository(&repo).expect("head");
 
         let err = switch_repository(
             &repo,
@@ -1189,7 +1189,7 @@ mod tests {
             }
         ));
 
-        let head_after = resolve_head(repo.git_dir()).expect("head");
+        let head_after = resolve_head_for_repository(&repo).expect("head");
         assert_eq!(head_before, head_after);
         assert_eq!(
             std::fs::read_to_string(wt.join("d/f0.txt")).expect("read"),
@@ -1496,7 +1496,7 @@ mod tests {
         )
         .expect("detach at annotated tag");
 
-        let head = resolve_head(repo.git_dir()).expect("head");
+        let head = resolve_head_for_repository(&repo).expect("head");
         assert!(matches!(head, HeadState::Detached { oid } if oid == tip));
     }
 

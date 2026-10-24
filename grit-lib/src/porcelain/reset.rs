@@ -15,10 +15,10 @@ use crate::porcelain::switch::{
     checkout_tree_transition_allow_local_reset, keep_style_transition_would_block_paths_for_preview,
 };
 use crate::porcelain::worktree_guard::{load_worktree_snapshot, local_change_diffs};
-use crate::refs::{self, append_reflog};
+use crate::refs;
 use crate::repo::Repository;
 use crate::rev_parse::try_peel_to_commit_for_merge_base;
-use crate::state::{resolve_head, HeadState};
+use crate::state::{resolve_head_for_repository, HeadState};
 use crate::worktree::{list_worktrees, WorktreeEntry};
 
 /// Default cap on [`ResetOptions::orphan_limit`] and orphaned commit listings.
@@ -196,8 +196,13 @@ pub fn reset_to_commit(repo: &Repository, opts: &ResetOptions) -> Result<ResetOu
                 refname.clone()
             }
             HeadState::Detached { .. } => {
-                refs::write_ref(repo.git_dir(), "HEAD", &opts.target)?;
-                write_head_reflog(repo, previous, opts.target, opts)?;
+                refs::update_direct_ref_on_store(
+                    repo.refs(),
+                    repo.git_dir(),
+                    "HEAD",
+                    &opts.target,
+                )?;
+                append_reset_reflogs(repo, &["HEAD"], previous, opts.target, opts)?;
                 "HEAD".to_owned()
             }
             HeadState::Invalid => return Err(Error::InvalidHead),
@@ -224,7 +229,7 @@ fn plan_reset(
     repo: &Repository,
     opts: &ResetOptions,
 ) -> Result<(ObjectId, HeadState, ResetPreview)> {
-    let head = resolve_head(repo.git_dir())?;
+    let head = resolve_head_for_repository(repo)?;
     let previous = head.oid().copied().ok_or(Error::UnbornHead)?;
 
     ensure_reset_worktree_mode(repo, opts.mode)?;
@@ -311,19 +316,18 @@ fn orphan_hide_tips(
     target: ObjectId,
     _previous: ObjectId,
 ) -> Result<Vec<ObjectId>> {
-    let git_dir = repo.git_dir();
     let moving_branch = match head {
         HeadState::Branch { refname, .. } => Some(refname.as_str()),
         _ => None,
     };
     let mut hide = vec![target];
-    for (refname, oid) in refs::list_refs(git_dir, "refs/")? {
+    for (refname, oid) in refs::list_refs_for_repository(repo, "refs/")? {
         if moving_branch == Some(refname.as_str()) {
             continue;
         }
         orphan_hide_push_peeled_commit(repo, &mut hide, oid)?;
     }
-    if let Ok(oid) = refs::resolve_ref(git_dir, "refs/stash") {
+    if let Ok(oid) = repo.resolve_ref_oid("refs/stash") {
         orphan_hide_push_peeled_commit(repo, &mut hide, oid)?;
     }
     for wt in list_worktrees(repo)? {
@@ -494,62 +498,33 @@ fn update_moving_ref(
     new: ObjectId,
     opts: &ResetOptions,
 ) -> Result<()> {
-    refs::write_ref(repo.git_dir(), refname, &new)?;
-    write_branch_and_head_reflogs(repo, refname, old, new, opts)
+    refs::update_direct_ref_on_store(repo.refs(), repo.git_dir(), refname, &new)?;
+    append_reset_reflogs(repo, &[refname, "HEAD"], old, new, opts)
 }
 
-fn write_branch_and_head_reflogs(
+/// Append `old -> new` to each of `names`' reflogs where `core.logAllRefUpdates` logs it.
+fn append_reset_reflogs(
     repo: &Repository,
-    refname: &str,
+    names: &[&str],
     old: ObjectId,
     new: ObjectId,
     opts: &ResetOptions,
 ) -> Result<()> {
     let config =
         ConfigSet::load(repo.environment(), Some(repo.git_dir()), true).unwrap_or_default();
-    if refs::should_autocreate_reflog_with_config(&config, repo.git_dir(), refname) {
-        append_reflog(
-            repo.git_dir(),
-            refname,
-            &old,
-            &new,
-            &opts.identity,
-            &opts.message,
-            false,
-        )?;
-    }
-    if refs::should_autocreate_reflog_with_config(&config, repo.git_dir(), "HEAD") {
-        append_reflog(
-            repo.git_dir(),
-            "HEAD",
-            &old,
-            &new,
-            &opts.identity,
-            &opts.message,
-            false,
-        )?;
-    }
-    Ok(())
-}
-
-fn write_head_reflog(
-    repo: &Repository,
-    old: ObjectId,
-    new: ObjectId,
-    opts: &ResetOptions,
-) -> Result<()> {
-    let config =
-        ConfigSet::load(repo.environment(), Some(repo.git_dir()), true).unwrap_or_default();
-    if refs::should_autocreate_reflog_with_config(&config, repo.git_dir(), "HEAD") {
-        append_reflog(
-            repo.git_dir(),
-            "HEAD",
-            &old,
-            &new,
-            &opts.identity,
-            &opts.message,
-            false,
-        )?;
+    for name in names {
+        if refs::should_autocreate_reflog_with_config(&config, repo.git_dir(), name) {
+            refs::append_reflog_on_store(
+                repo.refs(),
+                name,
+                &old,
+                &new,
+                &opts.identity,
+                &opts.message,
+                false,
+                &config,
+            )?;
+        }
     }
     Ok(())
 }

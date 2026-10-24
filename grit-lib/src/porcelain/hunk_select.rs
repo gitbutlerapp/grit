@@ -35,7 +35,7 @@ use crate::porcelain::checkout::{
     write_to_worktree_cached, LeadingDirCache,
 };
 use crate::repo::Repository;
-use crate::state::{resolve_head, HeadState};
+use crate::state::{resolve_head_for_repository, HeadState};
 use crate::worktree_rules::WorktreeRules;
 
 /// New-side line range for partial hunk staging (1-based, inclusive).
@@ -1298,7 +1298,9 @@ fn commit_worktree_reverse(
 }
 
 fn head_tree_oid(repo: &Repository) -> std::result::Result<Option<ObjectId>, HunkSelectError> {
-    match resolve_head(repo.git_dir()).map_err(|e| HunkSelectError::Repository(e.to_string()))? {
+    match resolve_head_for_repository(repo)
+        .map_err(|e| HunkSelectError::Repository(e.to_string()))?
+    {
         HeadState::Branch { oid: Some(oid), .. } | HeadState::Detached { oid } => {
             let obj = repo
                 .odb()

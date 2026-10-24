@@ -1892,7 +1892,7 @@ pub fn status(
         .work_tree()
         .ok_or(crate::error::Error::RequiresWorkTree)?;
 
-    let head = crate::state::resolve_head(repo.git_dir())?;
+    let head = crate::state::resolve_head_for_repository(repo)?;
     let state = crate::state::wt_status_get_state(repo.git_dir(), &head, true)?;
     let repo_config = repo.config().ok();
 
@@ -2029,10 +2029,13 @@ pub fn status(
         index.source_mtime = crate::index::index_file_mtime(&index_path);
     }
 
-    let stash_count = if opts.count_stash {
-        crate::reflog::reflog_entry_count(repo.git_dir(), "refs/stash").unwrap_or(0)
-    } else {
-        0
+    let stash_count = match opts.count_stash {
+        false => 0,
+        true if repo.refs_on_disk() => {
+            crate::reflog::reflog_entry_count(repo.git_dir(), "refs/stash").unwrap_or(0)
+        }
+        true => crate::reflog::read_reflog_on_store(repo.refs(), "refs/stash")
+            .map_or(0, |entries| entries.len()),
     };
 
     let operation = status_operation(&state, !conflicts.is_empty());

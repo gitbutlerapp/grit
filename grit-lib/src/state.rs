@@ -362,9 +362,55 @@ pub fn resolve_head(git_dir: &Path) -> Result<HeadState> {
     resolve_head_impl(git_dir, None)
 }
 
-/// Resolve `HEAD` using the repository's cached ref store (avoids re-reading local `config`).
+/// Resolve `HEAD` through the repository's ref store.
+///
+/// Files and reftable repositories read the on-disk `HEAD` (symlinks and the reftable
+/// `.invalid` stub included) and resolve branch tips through the cached store. Any other store,
+/// such as one installed with [`Repository::with_ref_store`], is the only source of `HEAD`:
+/// nothing under the git directory is consulted.
+///
+/// # Errors
+///
+/// Propagates ref store read and resolution failures.
 pub fn resolve_head_for_repository(repo: &crate::repo::Repository) -> Result<HeadState> {
-    resolve_head_impl(repo.git_dir(), Some(repo))
+    use crate::refs::store::RawRef;
+    if repo.refs_on_disk() {
+        return resolve_head_impl(repo.git_dir(), Some(repo));
+    }
+    match repo.refs().read_raw("HEAD")? {
+        None => Ok(HeadState::Invalid),
+        Some(RawRef::Direct(oid)) => Ok(HeadState::Detached { oid }),
+        Some(RawRef::Symbolic(refname)) => {
+            symbolic_head_state(refname, |name| repo.references().resolve_if_exists(name))
+        }
+    }
+}
+
+/// [`HeadState`] for `HEAD` pointing symbolically at `refname`.
+///
+/// A missing `refs/heads/*` target is an unborn branch; any other unresolvable or malformed
+/// target is [`HeadState::Invalid`] (Git's `refs_resolve_ref_unsafe` yields no target there).
+fn symbolic_head_state(
+    refname: String,
+    resolve_named: impl Fn(&str) -> Result<Option<ObjectId>>,
+) -> Result<HeadState> {
+    if check_refname_format(&refname, &RefNameOptions::default()).is_err() {
+        return Ok(HeadState::Invalid);
+    }
+    let oid = match resolve_named(&refname)? {
+        Some(oid) => Some(oid),
+        None if refname.starts_with("refs/heads/") => None,
+        None => return Ok(HeadState::Invalid),
+    };
+    let short_name = refname
+        .strip_prefix("refs/heads/")
+        .unwrap_or(&refname)
+        .to_owned();
+    Ok(HeadState::Branch {
+        refname,
+        short_name,
+        oid,
+    })
 }
 
 fn resolve_head_impl(git_dir: &Path, repo: Option<&crate::repo::Repository>) -> Result<HeadState> {
@@ -420,29 +466,7 @@ fn resolve_head_impl(git_dir: &Path, repo: Option<&crate::repo::Repository>) -> 
         } else {
             refname.to_owned()
         };
-        if check_refname_format(&refname, &RefNameOptions::default()).is_err() {
-            return Ok(HeadState::Invalid);
-        }
-        let short_name = refname
-            .strip_prefix("refs/heads/")
-            .unwrap_or(&refname)
-            .to_owned();
-
-        // Resolve the branch tip via the shared refs backend (worktrees, packed-refs).
-        // Missing `refs/heads/*` => unborn branch (`None`). A symref to a non-branch
-        // target that cannot be resolved (e.g. HEAD -> `.broken`) is invalid, matching
-        // Git `refs_resolve_ref_unsafe` returning no target for `worktree list`.
-        let oid = match resolve_named(&refname)? {
-            Some(oid) => Some(oid),
-            None if refname.starts_with("refs/heads/") => None,
-            None => return Ok(HeadState::Invalid),
-        };
-
-        Ok(HeadState::Branch {
-            refname,
-            short_name,
-            oid,
-        })
+        symbolic_head_state(refname, resolve_named)
     } else {
         // Detached HEAD — should be a hex OID
         match ObjectId::from_hex(trimmed) {

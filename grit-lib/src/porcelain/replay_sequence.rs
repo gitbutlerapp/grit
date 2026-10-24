@@ -35,13 +35,13 @@ use crate::porcelain::tree_merge_checkout::{
 use crate::porcelain::worktree_guard::{
     load_worktree_snapshot, prepare_worktree_for_pick, WorktreeSnapshot,
 };
-use crate::refs::{update_branch_for_commit_with_config, BranchCommitRefUpdate};
+use crate::refs::{update_branch_for_commit_on_store, BranchCommitRefUpdate};
 use crate::repo::Repository;
 use crate::rev_list::{rev_list, OrderingMode, RevListOptions};
 use crate::rev_parse::{resolve_revision_as_commit, try_parse_double_dot_log_range};
 use crate::state::{
-    read_cherry_pick_head, read_merge_msg, read_orig_head, read_revert_head, resolve_head,
-    HeadState,
+    read_cherry_pick_head, read_merge_msg, read_orig_head, read_revert_head,
+    resolve_head_for_repository, HeadState,
 };
 use crate::stripspace::{process as stripspace_process, Mode as StripspaceMode};
 use crate::write_tree::{write_tree_update_index, WriteTreeFlags};
@@ -500,7 +500,7 @@ fn replay_in_progress(git_dir: &Path) -> Result<bool> {
 }
 
 fn branch_head(repo: &Repository) -> Result<(String, ObjectId)> {
-    match resolve_head(repo.git_dir())? {
+    match resolve_head_for_repository(repo)? {
         HeadState::Branch {
             refname,
             oid: Some(oid),
@@ -1282,7 +1282,7 @@ fn write_replay_commit_with_head_tree(
         identity: committer,
         reflog_message: &reflog_msg,
     };
-    update_branch_for_commit_with_config(repo.git_dir(), &ref_update, config)?;
+    update_branch_for_commit_on_store(repo.refs(), &ref_update, config)?;
     Ok(new_oid)
 }
 
@@ -1446,7 +1446,11 @@ fn load_active_replay(repo: &Repository) -> Result<ActiveReplay> {
     };
     let abort_safety = read_sequencer_abort_safety(git_dir)
         .or_else(|| read_orig_head(git_dir).ok().flatten())
-        .or_else(|| resolve_head(git_dir).ok().and_then(|h| h.oid().copied()))
+        .or_else(|| {
+            resolve_head_for_repository(repo)
+                .ok()
+                .and_then(|h| h.oid().copied())
+        })
         .ok_or(Error::NoReplayInProgress)?;
     let (direction, opts) = load_persisted_options(git_dir, &todo)?;
     Ok(ActiveReplay {

@@ -39,8 +39,14 @@ pub use shorten::{
 };
 
 mod domain_reexports;
+mod on_store;
 pub use domain_reexports::*;
 pub use handle::References;
+pub use on_store::update_branch_for_commit_on_store;
+pub(crate) use on_store::{
+    append_reflog_on_store, delete_ref_on_store, update_detached_head_for_commit_on_store,
+    write_symbolic_ref_on_store,
+};
 
 /// In-process ref-transaction and loose-object prune helpers.
 pub mod gc {
@@ -3382,7 +3388,7 @@ fn finish_branch_commit_ref_lock_files(
     Ok(())
 }
 
-fn update_branch_for_commit_files(
+pub(crate) fn update_branch_for_commit_files(
     git_dir: &Path,
     update: &BranchCommitRefUpdate<'_>,
     reflog_old: &ObjectId,
@@ -3392,54 +3398,10 @@ fn update_branch_for_commit_files(
     lock.commit(git_dir, update, reflog_old, config)
 }
 
-fn update_branch_for_commit_reftable(
-    git_dir: &Path,
-    update: &BranchCommitRefUpdate<'_>,
-    reflog_old: &ObjectId,
-) -> Result<()> {
-    let current = resolve_ref(git_dir, update.branch_ref).ok();
-    verify_branch_cas(update.expected_old, current, update.branch_ref)?;
-
-    let mut updates = Vec::new();
-    let branch_log = if should_autocreate_reflog(git_dir, update.branch_ref) {
-        Some(crate::reftable::reftable_log_record_for_commit(
-            git_dir,
-            update.branch_ref,
-            reflog_old,
-            &update.new_oid,
-            update.identity,
-            update.reflog_message,
-        )?)
-    } else {
-        None
-    };
-    updates.push(crate::reftable::ReftableTransactionUpdate {
-        refname: update.branch_ref.to_owned(),
-        value: Some(crate::reftable::RefValue::Val1(update.new_oid)),
-        log: branch_log,
-        expected_old: update.expected_old,
-    });
-
-    if should_autocreate_reflog(git_dir, "HEAD") {
-        updates.push(crate::reftable::ReftableTransactionUpdate {
-            refname: "HEAD".to_owned(),
-            value: None,
-            log: Some(crate::reftable::reftable_log_record_for_commit(
-                git_dir,
-                "HEAD",
-                reflog_old,
-                &update.new_oid,
-                update.identity,
-                update.reflog_message,
-            )?),
-            expected_old: None,
-        });
-    }
-
-    crate::reftable::reftable_write_transaction(git_dir, updates)
-}
-
 /// Apply [`BranchCommitRefUpdate`]: branch CAS, ref write, branch + `HEAD` reflogs.
+///
+/// Opens the ref store for `git_dir`; prefer [`update_branch_for_commit_on_store`] with
+/// [`crate::repo::Repository::refs`] when a repository handle is available.
 pub fn update_branch_for_commit(git_dir: &Path, update: &BranchCommitRefUpdate<'_>) -> Result<()> {
     let config = ConfigSet::load(
         &crate::environment::Environment::empty(),
@@ -3451,39 +3413,19 @@ pub fn update_branch_for_commit(git_dir: &Path, update: &BranchCommitRefUpdate<'
 }
 
 /// Like [`update_branch_for_commit`], using a repository config snapshot for reflog policy.
+///
+/// Opens the ref store for `git_dir`; see [`update_branch_for_commit_on_store`].
 pub fn update_branch_for_commit_with_config(
     git_dir: &Path,
     update: &BranchCommitRefUpdate<'_>,
     config: &ConfigSet,
 ) -> Result<()> {
-    let head_target = read_head(git_dir)?;
-    if head_target.as_deref() != Some(update.branch_ref) {
-        return Err(Error::Message(format!(
-            "HEAD does not point at branch '{}'",
-            update.branch_ref
-        )));
-    }
-
-    let reflog_old = update.expected_old.unwrap_or_else(crate::diff::zero_oid);
-
-    if open_ref_store(git_dir)?.format() != RefStorageFormat::Files {
-        return update_branch_for_commit_reftable(git_dir, update, &reflog_old);
-    }
-
-    update_branch_for_commit_files(git_dir, update, &reflog_old, config)
+    update_branch_for_commit_on_store(open_ref_store(git_dir)?.as_ref(), update, config)
 }
 
-/// Advance detached `HEAD` to a new commit with CAS and optional `HEAD` reflog.
-///
-/// Uses the ref store (files or reftable) so detached tips stored only in `.git/HEAD`
-/// participate in CAS the same way as branch updates.
-///
-/// # Errors
-///
-/// Returns [`Error::Message`] when `HEAD` is symbolic (not detached),
-/// [`store::RefStoreError::ExpectedMismatch`] when the CAS check fails, or an I/O error
-/// when ref/reflog writes fail.
-pub(crate) fn update_detached_head_for_commit_with_config(
+/// Files-backend body of [`update_detached_head_for_commit_on_store`]; the caller has checked
+/// that `HEAD` is detached.
+pub(crate) fn update_detached_head_for_commit_files(
     git_dir: &Path,
     expected_old: Option<ObjectId>,
     new_oid: ObjectId,
@@ -3491,11 +3433,6 @@ pub(crate) fn update_detached_head_for_commit_with_config(
     reflog_message: &str,
     config: &ConfigSet,
 ) -> Result<()> {
-    if read_head(git_dir)?.is_some() {
-        return Err(Error::Message(
-            "HEAD points at a branch; use update_branch_for_commit".into(),
-        ));
-    }
     let current = resolve_ref(git_dir, "HEAD").ok();
     verify_branch_cas(expected_old, current, "HEAD")?;
     let reflog_old = expected_old.unwrap_or_else(crate::diff::zero_oid);

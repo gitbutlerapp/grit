@@ -2,7 +2,7 @@
 //!
 //! [`create_commit`] performs incremental cache-tree write-tree, writes the commit
 //! object, persists the index with a valid cache-tree, then updates the branch and `HEAD`
-//! reflogs through [`crate::refs::update_branch_for_commit`].
+//! reflogs through [`crate::refs::update_branch_for_commit_on_store`].
 
 use crate::apply::{apply_patch_to_index, FilePatch, IndexApplyOptions};
 use crate::change_id::{change_id, set_change_id, ChangeId, ChangeIdPolicy};
@@ -37,14 +37,16 @@ use crate::porcelain::index_from_tree::index_from_tree_with_seeded_worktree_stat
 use crate::porcelain::pathspec_match::KnownPathspecChecker;
 use crate::progress::ProgressSink;
 use crate::refs::{
-    update_branch_for_commit_with_config, update_detached_head_for_commit_with_config,
+    update_branch_for_commit_on_store, update_detached_head_for_commit_on_store,
     BranchCommitRefUpdate,
 };
 use crate::repo::Repository;
 use crate::signing::{
     extra_headers_without_commit_signatures, should_sign_commit, sign_serialized_commit, GpgConfig,
 };
-use crate::state::{finish_merge_state, read_merge_heads, read_merge_msg, resolve_head, HeadState};
+use crate::state::{
+    finish_merge_state, read_merge_heads, read_merge_msg, resolve_head_for_repository, HeadState,
+};
 use crate::stripspace::{process, Mode};
 use crate::worktree_rules::WorktreeRules;
 use crate::write_tree::{
@@ -430,7 +432,7 @@ fn commit_paths_scope(
     }
     validate_commit_pathspecs(repo, paths)?;
 
-    let head = resolve_head(repo.git_dir())?;
+    let head = resolve_head_for_repository(repo)?;
     let parent_tree = match head {
         HeadState::Branch { oid: Some(p), .. } | HeadState::Detached { oid: p } => {
             Some(commit_tree_oid(repo, &p)?)
@@ -667,7 +669,7 @@ pub struct CommitOutcome {
 ///
 /// Loads the index from disk, builds the commit tree with an incremental cache-tree
 /// write-tree, writes the commit object, writes the index back with an updated cache-tree,
-/// then atomically updates the branch ref and reflogs (see [`crate::refs::update_branch_for_commit_with_config`]).
+/// then atomically updates the branch ref and reflogs (see [`crate::refs::update_branch_for_commit_on_store`]).
 ///
 /// # Parameters
 ///
@@ -681,7 +683,7 @@ pub struct CommitOutcome {
 /// - [`Error::NothingToCommit`] when the new tree is empty (unborn branch) or matches the parent tree and [`CommitRequest::allow_empty`] is false (not applied when amending).
 /// - [`Error::IndexUnmerged`] when the index has conflict stages.
 /// - Index write or diff failures before the branch is updated; the branch tip is not advanced.
-/// - Ref/reflog failures from [`crate::refs::update_branch_for_commit_with_config`]; the branch tip is not left advanced without reflogs when logging is enabled.
+/// - Ref/reflog failures from [`crate::refs::update_branch_for_commit_on_store`]; the branch tip is not left advanced without reflogs when logging is enabled.
 pub fn create_commit(
     repo: &Repository,
     req: &CommitRequest,
@@ -1006,7 +1008,7 @@ fn create_commit_with_index(
     _progress: &mut dyn ProgressSink,
     persist_index: Option<&mut Index>,
 ) -> Result<CommitOutcome> {
-    let head = resolve_head(repo.git_dir())?;
+    let head = resolve_head_for_repository(repo)?;
     let (refname, short_name, mut parent, head_detached) = match head {
         HeadState::Branch {
             refname,
@@ -1271,11 +1273,7 @@ fn create_commit_with_index(
     };
 
     let expected_old = previous_tip.or_else(|| {
-        if crate::refs::resolve_ref(repo.git_dir(), &refname).is_ok() {
-            Some(reflog_old)
-        } else {
-            None
-        }
+        matches!(repo.references().resolve_if_exists(&refname), Ok(Some(_))).then_some(reflog_old)
     });
 
     if !partial_commit {
@@ -1321,8 +1319,8 @@ fn create_commit_with_index(
     };
 
     if head_detached {
-        update_detached_head_for_commit_with_config(
-            repo.git_dir(),
+        update_detached_head_for_commit_on_store(
+            repo.refs(),
             expected_old,
             oid,
             &committer,
@@ -1330,8 +1328,8 @@ fn create_commit_with_index(
             config.as_ref(),
         )?;
     } else {
-        update_branch_for_commit_with_config(
-            repo.git_dir(),
+        update_branch_for_commit_on_store(
+            repo.refs(),
             &BranchCommitRefUpdate {
                 branch_ref: &refname,
                 expected_old,

@@ -25,7 +25,7 @@ use crate::porcelain::checkout::{
 };
 use crate::porcelain::stash::{flat_tree_lookup, flatten_tree_full, FlatTreeEntry};
 use crate::repo::Repository;
-use crate::state::{resolve_head, HeadState};
+use crate::state::{resolve_head_for_repository, HeadState};
 use crate::worktree_rules::WorktreeRules;
 
 /// Unmerged index side to check out into the worktree (`git restore --ours|--theirs`).
@@ -465,7 +465,7 @@ fn pathspecs_select_all_tracked(pathspecs: &[String]) -> bool {
 }
 
 fn resolve_head_tree(repo: &Repository) -> Result<Option<ObjectId>> {
-    match resolve_head(repo.git_dir())? {
+    match resolve_head_for_repository(repo)? {
         HeadState::Branch { oid: Some(oid), .. } | HeadState::Detached { oid } => {
             let obj = repo.odb().read(&oid)?;
             let commit = parse_commit(&obj.data)?;

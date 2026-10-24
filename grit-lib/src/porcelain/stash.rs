@@ -56,11 +56,10 @@ use crate::porcelain::status::{
 };
 use crate::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
 use crate::porcelain::worktree_guard::untracked_would_be_overwritten_by_tree_changes;
-use crate::reflog::{delete_reflog_entries_rechain, read_reflog, truncate_last_reflog_line};
-use crate::refs::store::open_ref_store;
-use crate::refs::{self, append_reflog, delete_ref, write_ref};
+use crate::reflog::{delete_reflog_entries_rechain_on_store, read_reflog_on_store};
+use crate::refs::{append_reflog_on_store, delete_ref_on_store, update_direct_ref_on_store};
 use crate::repo::Repository;
-use crate::state::{resolve_head, HeadState};
+use crate::state::{resolve_head_for_repository, HeadState};
 use crate::worktree_rules::WorktreeRules;
 use crate::write_tree::{is_empty_tree_oid, write_tree_update_index, WriteTreeFlags};
 
@@ -937,7 +936,7 @@ pub fn preview_stash(
     let work_tree = repo
         .work_tree()
         .ok_or_else(|| Error::PathError("cannot stash in a bare repository".into()))?;
-    let head = resolve_head(repo.git_dir())?;
+    let head = resolve_head_for_repository(repo)?;
     let head_oid = head_commit_oid(&head)?;
     let head_tree = repo.odb().commit_tree(&head_oid)?;
 
@@ -1226,7 +1225,7 @@ fn build_stash_commit(
     options: &StashCreateOptions,
 ) -> Result<Option<BuiltStash>> {
     options.validate()?;
-    let head = resolve_head(repo.git_dir())?;
+    let head = resolve_head_for_repository(repo)?;
     let head_oid = head_commit_oid(&head)?;
     let head_tree = repo.odb().commit_tree(&head_oid)?;
     options.validate_staged_worktree(repo, work_tree, &head_tree)?;
@@ -1387,16 +1386,19 @@ pub fn create_stash(repo: &Repository, options: &StashCreateOptions) -> Result<O
 ///
 /// Propagates ref and reflog update failures.
 pub fn store_stash(repo: &Repository, oid: ObjectId, message: &str, identity: &str) -> Result<()> {
-    let old_oid = refs::resolve_ref(repo.git_dir(), "refs/stash").unwrap_or(ObjectId::zero());
-    refs::write_ref(repo.git_dir(), "refs/stash", &oid)?;
-    append_reflog(
-        repo.git_dir(),
-        "refs/stash",
+    let old_oid = repo
+        .resolve_ref_oid(STASH_REF)
+        .unwrap_or_else(|_| ObjectId::zero());
+    update_direct_ref_on_store(repo.refs(), repo.git_dir(), STASH_REF, &oid)?;
+    append_reflog_on_store(
+        repo.refs(),
+        STASH_REF,
         &old_oid,
         &oid,
         identity,
         message,
         true,
+        repo.config()?.as_ref(),
     )
 }
 
@@ -1449,7 +1451,7 @@ pub fn push_stash(
         )
         .map_err(|e| Error::Message(e.to_string()))?;
     } else {
-        let head = resolve_head(repo.git_dir())?;
+        let head = resolve_head_for_repository(repo)?;
         let head_oid = head_commit_oid(&head)?;
         let head_tree = repo.odb().commit_tree(&head_oid)?;
         if !built.untracked_paths.is_empty() {
@@ -1494,7 +1496,7 @@ pub fn push_stash(
 ///
 /// Propagates reflog read failures.
 pub fn list_stashes(repo: &Repository) -> Result<Vec<StashEntry>> {
-    let entries = read_reflog(repo.git_dir(), "refs/stash")?;
+    let entries = read_reflog_on_store(repo.refs(), STASH_REF)?;
     Ok(entries
         .into_iter()
         .rev()
@@ -1524,17 +1526,18 @@ pub(crate) fn stash_oid_at(repo: &Repository, n: usize) -> Result<ObjectId> {
 ///
 /// Returns [`Error::StashNotFound`] when `n` is out of range.
 pub fn drop_stash(repo: &Repository, n: usize, identity: &str) -> Result<()> {
-    let entries = read_reflog(repo.git_dir(), "refs/stash")?;
+    let store = repo.refs();
+    let entries = read_reflog_on_store(store, STASH_REF)?;
     if n >= entries.len() {
         return Err(Error::StashNotFound { n });
     }
     let _ = identity;
-    delete_reflog_entries_rechain(repo.git_dir(), "refs/stash", &[n])?;
-    let remaining = read_reflog(repo.git_dir(), "refs/stash")?;
+    delete_reflog_entries_rechain_on_store(store, STASH_REF, &[n])?;
+    let remaining = read_reflog_on_store(store, STASH_REF)?;
     if let Some(top_entry) = remaining.last() {
-        refs::write_ref(repo.git_dir(), "refs/stash", &top_entry.new_oid)?;
+        update_direct_ref_on_store(store, repo.git_dir(), STASH_REF, &top_entry.new_oid)?;
     } else {
-        refs::delete_ref(repo.git_dir(), "refs/stash")?;
+        delete_ref_on_store(store, STASH_REF)?;
     }
     Ok(())
 }
@@ -1656,7 +1659,7 @@ pub fn stash_branch(
     validate_branch_short_name(name)
         .map_err(|e| Error::Message(format!("invalid branch name '{name}': {e}")))?;
     let branch_ref = format!("refs/heads/{name}");
-    if refs::resolve_ref(repo.git_dir(), &branch_ref).is_ok() {
+    if repo.resolve_ref_oid(&branch_ref).is_ok() {
         return Err(BranchError::AlreadyExists {
             name: name.to_owned(),
         }
@@ -1713,17 +1716,17 @@ pub fn stash_branch(
 ///
 /// Propagates ref store and reflog delete failures.
 pub fn clear_stashes(repo: &Repository) -> Result<usize> {
-    let entries = read_reflog(repo.git_dir(), STASH_REF)?;
-    let count = entries.len();
-    let has_ref = refs::resolve_ref(repo.git_dir(), STASH_REF).is_ok();
+    let store = repo.refs();
+    let count = read_reflog_on_store(store, STASH_REF)?.len();
+    let has_ref = repo.resolve_ref_oid(STASH_REF).is_ok();
     if count == 0 && !has_ref {
         return Ok(0);
     }
     if count > 0 {
-        open_ref_store(repo.git_dir())?.delete_reflog(STASH_REF)?;
+        store.delete_reflog(STASH_REF)?;
     }
     if has_ref {
-        delete_ref(repo.git_dir(), STASH_REF)?;
+        delete_ref_on_store(store, STASH_REF)?;
     }
     Ok(count)
 }
@@ -2133,7 +2136,7 @@ fn apply_stash_commit(
     let idx_tree = repo.odb().commit_tree(index_commit_oid)?;
     let idx_tree_entries = flatten_tree_full_for_repo(repo, &idx_tree, "")?;
     // Determine if HEAD has moved since the stash was created
-    let current_head = resolve_head(repo.git_dir())?;
+    let current_head = resolve_head_for_repository(repo)?;
     let current_head_oid = current_head.oid().copied();
     let head_moved = current_head_oid.as_ref() != Some(head_at_stash);
 
@@ -2559,24 +2562,19 @@ const STASH_REF: &str = "refs/stash";
 /// # Errors
 ///
 /// Propagates ref and reflog update failures.
-pub fn drop_stash_commit(git_dir: &Path, stash_oid: &ObjectId) -> Result<bool> {
-    let entries = read_reflog(git_dir, STASH_REF)?;
-    if entries.is_empty() {
+pub fn drop_stash_commit(repo: &Repository, stash_oid: &ObjectId) -> Result<bool> {
+    let store = repo.refs();
+    let mut entries = read_reflog_on_store(store, STASH_REF)?;
+    if entries.last().is_none_or(|tip| tip.new_oid != *stash_oid) {
         return Ok(false);
     }
-    let Some(tip) = entries.last() else {
-        return Ok(false);
-    };
-    if tip.new_oid != *stash_oid {
-        return Ok(false);
-    }
-    if entries.len() == 1 {
-        truncate_last_reflog_line(git_dir, STASH_REF)?;
-        delete_ref(git_dir, STASH_REF)?;
-    } else {
-        let prev = entries[entries.len() - 2].new_oid;
-        truncate_last_reflog_line(git_dir, STASH_REF)?;
-        write_ref(git_dir, STASH_REF, &prev)?;
+    entries.pop();
+    match entries.last().map(|entry| entry.new_oid) {
+        None => delete_ref_on_store(store, STASH_REF)?,
+        Some(prev) => {
+            store.replace_reflog(STASH_REF, entries)?;
+            update_direct_ref_on_store(store, repo.git_dir(), STASH_REF, &prev)?;
+        }
     }
     Ok(true)
 }
@@ -2623,7 +2621,7 @@ pub fn apply_operation_autostash(
         .ok_or_else(|| Error::Message("cannot apply autostash in a bare repository".into()))?;
     let conflicts = apply_stash(repo, work_tree, stash_oid, false, identity)?;
     if !conflicts {
-        let _ = drop_stash_commit(repo.git_dir(), stash_oid)?;
+        let _ = drop_stash_commit(repo, stash_oid)?;
     }
     Ok(conflicts)
 }
@@ -2643,7 +2641,7 @@ pub fn restore_operation_autostash(
         .ok_or_else(|| Error::Message("cannot restore autostash in a bare repository".into()))?;
     let conflicts = apply_stash(repo, work_tree, stash_oid, false, identity)?;
     if !conflicts {
-        let _ = drop_stash_commit(repo.git_dir(), stash_oid)?;
+        let _ = drop_stash_commit(repo, stash_oid)?;
     }
     Ok(())
 }
@@ -2675,7 +2673,7 @@ pub fn apply_merge_autostash(repo: &Repository) -> Result<bool> {
     let conflicts = apply_stash(repo, work_tree, &stash_oid, false, "")?;
     let _ = fs::remove_file(&path);
     if !conflicts {
-        let _ = drop_stash_commit(repo.git_dir(), &stash_oid)?;
+        let _ = drop_stash_commit(repo, &stash_oid)?;
     }
     Ok(conflicts)
 }
@@ -2687,6 +2685,7 @@ mod coverage_tests {
     use super::*;
     use crate::environment::RepositoryOptions;
     use crate::index::{entry_from_stat, MODE_REGULAR};
+    use crate::refs;
     use std::fs;
     use std::path::Path;
     use tempfile::TempDir;

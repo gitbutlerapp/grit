@@ -132,7 +132,7 @@ mod tests {
     use crate::porcelain::add::{stage, StageOptions};
     use crate::porcelain::commit::{create_commit, CommitRequest};
     use crate::progress::NullProgress;
-    use crate::state::resolve_head;
+    use crate::state::resolve_head_for_repository;
     use crate::write_tree::cache_tree_fully_valid;
     use std::fs;
     use tempfile::TempDir;
@@ -223,7 +223,7 @@ mod tests {
             &mut NullProgress,
         )
         .expect("commit");
-        let head = resolve_head(repo.git_dir()).expect("head");
+        let head = resolve_head_for_repository(&repo).expect("head");
         let commit = repo.odb().read(head.oid().expect("oid")).expect("read");
         let tree = crate::objects::parse_commit(&commit.data)
             .expect("parse")

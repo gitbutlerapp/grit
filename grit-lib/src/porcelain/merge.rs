@@ -1348,15 +1348,15 @@ pub(crate) fn update_checked_out_branch(
     let old = expected_old.unwrap_or_else(crate::diff::zero_oid);
     for name in [branch_ref, "HEAD"] {
         let autocreate = refs::should_autocreate_reflog_with_config(&config, repo.git_dir(), name);
-        if let Err(err) = refs::append_reflog_with_config(
-            repo.git_dir(),
+        if let Err(err) = refs::append_reflog_on_store(
+            repo.refs(),
             name,
             &old,
             &new,
             &identity,
             reason,
             autocreate,
-            Some(&config),
+            &config,
         ) {
             repo.diagnostics().warn(Warning::ReflogNotWritten {
                 refname: name.to_owned(),

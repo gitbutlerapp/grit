@@ -260,7 +260,12 @@ pub fn list_worktrees(repo: &Repository) -> Result<Vec<WorktreeEntry>> {
         path_for_disk_compare(common.parent().unwrap_or(&common))
     };
 
-    let main_head = resolve_head(&common).unwrap_or(HeadState::Invalid);
+    let main_head = if opened_from_linked || repo.refs_on_disk() {
+        resolve_head(&common)
+    } else {
+        crate::state::resolve_head_for_repository(repo)
+    }
+    .unwrap_or(HeadState::Invalid);
     entries.push(WorktreeEntry {
         path: main_path,
         head: main_head,

@@ -17,14 +17,14 @@ use crate::porcelain::checkout_reflog::{
     branch_create_reflog_source_label, checkout_reflog_identity, create_branch_ref_with_reflog,
     reset_branch_ref_with_reflog,
 };
-use crate::ref_storage::RefStorageFormat;
 use crate::refs;
 use crate::refs::store::{
-    Expected, RawRef, RefCaseOnlyRename, RefReflogRename, RefUpdate, RefUpdateFlags, ReflogUpdate,
+    Expected, RawRef, RefCaseOnlyRename, RefReflogRename, RefStorageFormat, RefUpdate,
+    RefUpdateFlags, ReflogUpdate,
 };
 use crate::repo::Repository;
 use crate::rev_parse::peel_to_commit_for_merge_base;
-use crate::state::{resolve_head, resolve_head_for_repository, HeadState};
+use crate::state::{resolve_head_for_repository, HeadState};
 use crate::worktree::{
     admin_dirs_match, ensure_branch_not_checked_out_in_any_worktree, list_worktrees,
     worktree_admin_dir,
@@ -398,9 +398,7 @@ pub fn rename_branch(repo: &Repository, opts: &RenameBranchOptions) -> Result<Re
 
     if let Some(existing) = old_existing {
         let reflog_rename = branch_rename_reflog_update(repo, &old_ref, &new_ref, existing.oid);
-        if case_only_same_branch
-            && RefStorageFormat::detect(repo.git_dir())? == RefStorageFormat::Files
-        {
+        if case_only_same_branch && repo.refs().format() == RefStorageFormat::Files {
             refs::commit_ref_batch_on_store(
                 repo.refs(),
                 &[],
@@ -696,7 +694,7 @@ fn resolve_create_start(
     let (oid, label) = match start {
         Some(point) => (point.oid, point.label.clone()),
         None => {
-            let head = resolve_head(repo.git_dir())?;
+            let head = resolve_head_for_repository(repo)?;
             let oid = head
                 .oid()
                 .copied()

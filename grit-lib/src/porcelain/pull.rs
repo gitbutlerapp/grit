@@ -35,7 +35,7 @@ use crate::revwalk::history::{
     apply_rewrite, rebase_onto, ApplyOptions, EmptyPolicy, HistoryError, RebaseOntoOptions,
     RefScope, RewriteOptions,
 };
-use crate::state::{resolve_head, HeadState};
+use crate::state::{resolve_head_for_repository, HeadState};
 use thiserror::Error;
 
 const INITIAL_PULL_REFLOG: &str = "initial pull";
@@ -241,7 +241,7 @@ impl PullOptions {
         environment: Environment,
         cli_mode: Option<PullMode>,
     ) -> std::result::Result<Self, PullError> {
-        let short_name = match resolve_head(repo.git_dir()).map_err(PullError::Repository)? {
+        let short_name = match resolve_head_for_repository(repo).map_err(PullError::Repository)? {
             HeadState::Branch { short_name, .. } => short_name,
             HeadState::Detached { .. } => return Err(PullError::DetachedHead),
             HeadState::Invalid => return Err(PullError::InvalidHead),
@@ -333,7 +333,7 @@ pub fn pull<P>(
 where
     P: Progress,
 {
-    let (refname, short_name, head_oid) = match resolve_head(repo.git_dir())? {
+    let (refname, short_name, head_oid) = match resolve_head_for_repository(repo)? {
         HeadState::Branch {
             refname,
             short_name,

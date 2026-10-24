@@ -25,7 +25,7 @@ use crate::objects::{parse_commit, CommitData, ObjectId, ObjectKind, OidHashMap,
 use crate::odb::Odb;
 use crate::refs::{PackedPeel, PackedRefPeels};
 use crate::repo::Repository;
-use crate::state::{resolve_head, HeadState};
+use crate::state::{resolve_head_for_repository, HeadState};
 
 /// Decoration category for `git log --decorate` colouring (`color.decorate.*`).
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash)]
@@ -323,7 +323,7 @@ fn collect_decorations_impl(
     let mut map: DecorationMap = HashMap::new();
     let git_dir = &repo.git_dir();
 
-    let head = resolve_head(git_dir)?;
+    let head = resolve_head_for_repository(repo)?;
     let hide_remote_update_noise = repo
         .config()
         .unwrap_or_else(|_| std::sync::Arc::new(ConfigSet::new()))
@@ -334,6 +334,7 @@ fn collect_decorations_impl(
     let rep_base = replace_ref_base();
 
     let mut all_refs = match targets {
+        _ if !repo.refs_on_disk() => crate::refs::list_refs_for_repository(repo, "refs/")?,
         // Packed refs whose recorded peel already rules out every target are skipped while
         // reading `packed-refs`; the loop below would drop them anyway.
         Some(targets) => {

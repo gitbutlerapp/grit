@@ -15,7 +15,7 @@ use crate::porcelain::merge::apply_conflict_merge_worktree;
 use crate::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
 use crate::refs;
 use crate::repo::Repository;
-use crate::state::{resolve_head, HeadState};
+use crate::state::{resolve_head_for_repository, HeadState};
 use crate::write_tree::{write_tree_update_index, WriteTreeFlags};
 
 use super::apply::apply_rewrite;
@@ -249,7 +249,8 @@ pub fn abort_rebase(repo: &Repository, identity: &str) -> Result<(), RebaseSessi
     let state = load_persisted_state(repo.git_dir())?;
     let orig_head = state.orig_head;
     hard_reset_branch(repo, &state.head_ref, orig_head, identity)?;
-    refs::write_symbolic_ref(repo.git_dir(), "HEAD", &state.head_ref).map_err(map_lib)?;
+    refs::write_symbolic_ref_on_store(repo.refs(), repo.git_dir(), "HEAD", &state.head_ref)
+        .map_err(map_lib)?;
     clear_rebase_state(repo.git_dir())?;
     Ok(())
 }
@@ -578,7 +579,13 @@ fn install_stopped_rebase(
     )?;
     write_persisted_state(repo.git_dir(), &persisted)?;
 
-    refs::write_ref(repo.git_dir(), "HEAD", &conflict.replayed_parent).map_err(map_lib)?;
+    refs::update_direct_ref_on_store(
+        repo.refs(),
+        repo.git_dir(),
+        "HEAD",
+        &conflict.replayed_parent,
+    )
+    .map_err(map_lib)?;
     reset_index_worktree_to_head(repo, conflict.replayed_parent)?;
     let ours_tree = commit_tree(repo, conflict.replayed_parent)?;
     apply_conflict_merge_worktree(repo, &ours_tree, &conflict.merge).map_err(map_lib)?;
@@ -613,8 +620,9 @@ fn advance_after_plan(
                 }
             }
             let mut applied = apply_rewrite(repo, &plan, apply)?;
-            refs::write_symbolic_ref(repo.git_dir(), "HEAD", &prev.head_ref).map_err(map_lib)?;
-            let branch_tip = refs::resolve_ref(repo.git_dir(), &prev.head_ref).map_err(map_lib)?;
+            refs::write_symbolic_ref_on_store(repo.refs(), repo.git_dir(), "HEAD", &prev.head_ref)
+                .map_err(map_lib)?;
+            let branch_tip = repo.resolve_ref_oid(&prev.head_ref).map_err(map_lib)?;
             reset_index_worktree_to_head(repo, branch_tip)?;
             applied.head = branch_tip;
             clear_rebase_state(repo.git_dir())?;
@@ -708,7 +716,7 @@ fn clear_rebase_state(git_dir: &Path) -> Result<(), RebaseSessionError> {
 }
 
 fn branch_head(repo: &Repository) -> Result<(String, ObjectId), RebaseSessionError> {
-    match resolve_head(repo.git_dir()).map_err(map_lib)? {
+    match resolve_head_for_repository(repo).map_err(map_lib)? {
         HeadState::Branch {
             refname,
             oid: Some(oid),
@@ -721,7 +729,7 @@ fn branch_head(repo: &Repository) -> Result<(String, ObjectId), RebaseSessionErr
 }
 
 fn resolve_head_oid(repo: &Repository) -> Result<ObjectId, RebaseSessionError> {
-    resolve_head(repo.git_dir())
+    resolve_head_for_repository(repo)
         .map_err(map_lib)?
         .oid()
         .copied()
@@ -756,7 +764,8 @@ fn hard_reset_branch(
     target: ObjectId,
     identity: &str,
 ) -> Result<(), RebaseSessionError> {
-    refs::write_symbolic_ref(repo.git_dir(), "HEAD", refname).map_err(map_lib)?;
+    refs::write_symbolic_ref_on_store(repo.refs(), repo.git_dir(), "HEAD", refname)
+        .map_err(map_lib)?;
     reset_to_commit(
         repo,
         &ResetOptions::new(

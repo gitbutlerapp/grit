@@ -24,7 +24,7 @@ use crate::parallel::{try_par_map, ParallelHashError, ParallelOp};
 use crate::porcelain::checkout::tree_changes_touch_gitattributes;
 use crate::porcelain::status::{collect_untracked_and_ignored_with_cache, IgnoredMode};
 use crate::repo::Repository;
-use crate::state::resolve_head;
+use crate::state::resolve_head_for_repository;
 use crate::worktree_rules::WorktreeRules;
 
 /// Loaded index and HEAD tree for worktree mutation guards.
@@ -43,7 +43,7 @@ pub struct WorktreeSnapshot {
 pub fn load_worktree_snapshot(repo: &Repository) -> Result<WorktreeSnapshot> {
     let _work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
 
-    let head = resolve_head(repo.git_dir())?;
+    let head = resolve_head_for_repository(repo)?;
     let head_tree = head_tree_from_head_commit(repo, head.oid())?;
     let index = load_worktree_index(repo)?;
     Ok(WorktreeSnapshot { index, head_tree })
