@@ -12,7 +12,13 @@
 import fs from "node:fs";
 import path from "node:path";
 import { parse as parseToml } from "smol-toml";
-import { BENCHMARK_MARKER, benchmarkMarkdown } from "./bench";
+import {
+  BENCHMARK_MARKER,
+  benchmarkMarkdown,
+  DAILY_MATRIX_MARKER,
+  dailyMatrixMarkdown,
+  findDailyBaseline,
+} from "./bench";
 import { docsContentDir, readRepoFile, SITE_URL } from "./repo";
 import { parseDoc, type TocItem } from "./markdown";
 import { apiMapMarkdown, expandRustdocLinks } from "./rustdoc";
@@ -193,6 +199,12 @@ function spliceGenerated(slug: string, body: string, baselines: string[]): strin
   if (slug === "benchmarks") {
     if (!body.includes(BENCHMARK_MARKER)) throw new Error(`benchmarks page must contain ${BENCHMARK_MARKER}`);
     return body.replace(BENCHMARK_MARKER, benchmarkMarkdown(baselines));
+  }
+  if (slug === "performance-overview") {
+    if (!body.includes(DAILY_MATRIX_MARKER)) {
+      throw new Error(`performance overview page must contain ${DAILY_MATRIX_MARKER}`);
+    }
+    return body.replace(DAILY_MATRIX_MARKER, dailyMatrixMarkdown(findDailyBaseline(baselines)));
   }
   if (slug === API_MAP_SLUG) {
     if (!body.includes(API_MAP_MARKER)) throw new Error(`API map page must contain ${API_MAP_MARKER}`);

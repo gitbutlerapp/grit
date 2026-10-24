@@ -1,0 +1,33 @@
+{
+  "schema": "grit-daily-bench/1",
+  "generated_at": "2026-10-20T12:00:00Z",
+  "machine": {
+    "cpu_model": "Test CPU",
+    "os": "linux",
+    "kernel": "test"
+  },
+  "tools": {
+    "git": "git version 2.43.0",
+    "grit": "grit 0.5.14"
+  },
+  "scenarios": [
+    {
+      "id": "status/clean@synth-10k",
+      "area": "worktree",
+      "headline": true,
+      "description": "Clean worktree status",
+      "git": { "median_wall_ms": 10.0, "peak_rss_bytes": 8000000 },
+      "grit": { "median_wall_ms": 20.0, "peak_rss_bytes": 9000000 },
+      "ratio": 2.0
+    },
+    {
+      "id": "log/author@git-git",
+      "area": "revwalk",
+      "description": "GAP: grit log has no --author",
+      "git": { "median_wall_ms": 0.0, "peak_rss_bytes": 0 },
+      "grit": { "median_wall_ms": 0.0, "peak_rss_bytes": 0 },
+      "ratio": 0.0,
+      "pending": true
+    }
+  ]
+}
