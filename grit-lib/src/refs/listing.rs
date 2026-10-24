@@ -434,7 +434,14 @@ where
             creator_date: 0,
         });
     }
-    finish_query(collected.into_values().collect(), query, options, odb, None)
+    finish_query(
+        collected.into_values().collect(),
+        query,
+        options,
+        odb,
+        None,
+        PeelTips::Always,
+    )
 }
 
 /// Collect refs from `store` under each namespace in `query`, then filter, sort, and limit.
@@ -457,7 +464,24 @@ pub fn query_listings_on_store(
             ControlFlow::Continue(())
         })?;
     }
-    finish_query(dedup_collected(collected), query, options, odb, None)
+    finish_query(
+        dedup_collected(collected),
+        query,
+        options,
+        odb,
+        None,
+        PeelTips::Always,
+    )
+}
+
+/// Whether [`finish_query`] fills [`RefListing::peeled`] for refs the store did not peel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum PeelTips {
+    /// Peel every listed ref (reads each tip's object header unless `packed-refs` says).
+    Always,
+    /// Peel only when a reachability or `points_at` filter needs it; otherwise listings carry
+    /// whatever peel the ref store reported.
+    WhenFiltering,
 }
 
 /// Query refs on `repo` (respects linked-worktree visibility and injected ref stores).
@@ -469,6 +493,21 @@ pub fn query_refs(
     repo: &Repository,
     query: &RefQuery,
     options: &RefQueryOptions,
+) -> QueryResult<Vec<RefListing>> {
+    query_refs_peeling(repo, query, options, PeelTips::Always)
+}
+
+/// [`query_refs`] for callers that do not read [`RefListing::peeled`], which spares an
+/// object read per listed ref when no filter needs peeled tips.
+///
+/// # Errors
+///
+/// Same as [`query_refs`].
+pub(crate) fn query_refs_peeling(
+    repo: &Repository,
+    query: &RefQuery,
+    options: &RefQueryOptions,
+    peel: PeelTips,
 ) -> QueryResult<Vec<RefListing>> {
     let git_dir = repo.git_dir();
     let store = repo.refs();
@@ -493,6 +532,7 @@ pub fn query_refs(
         options,
         Some(repo.odb()),
         Some(repo),
+        peel,
     )
 }
 
@@ -602,8 +642,10 @@ fn finish_query(
     options: &RefQueryOptions,
     odb: Option<&Odb>,
     repo: Option<&Repository>,
+    peel: PeelTips,
 ) -> QueryResult<Vec<RefListing>> {
-    if let Some(odb) = odb {
+    let peel = peel == PeelTips::Always || query_has_reachability(query);
+    if let Some(odb) = odb.filter(|_| peel) {
         // A malformed `packed-refs` only loses the shortcut; peeling falls back to the objects.
         let to_peel = collected.iter().filter(|c| c.peeled.is_none()).count();
         let packed = repo
@@ -809,5 +851,93 @@ mod tests {
             "refs/tags/v1*"
         ));
         assert!(!pattern_matches_ls_remote_refname("refs/tags/v1^{}", "v1"));
+    }
+
+    #[test]
+    fn peel_tips_skips_peeling_only_without_filters() {
+        use crate::objects::{serialize_commit, serialize_tag, CommitData, ObjectKind, TagData};
+
+        let dir = tempfile::tempdir().unwrap();
+        let repo = crate::repo::init_repository(
+            dir.path(),
+            false,
+            "main",
+            None,
+            crate::RefStorageFormat::Files,
+        )
+        .unwrap();
+        let tree = repo.odb().write(ObjectKind::Tree, b"").unwrap();
+        let commit = repo
+            .odb()
+            .write(
+                ObjectKind::Commit,
+                &serialize_commit(&CommitData {
+                    tree,
+                    parents: Vec::new(),
+                    author: "T <t@example.com> 1 +0000".into(),
+                    committer: "T <t@example.com> 1 +0000".into(),
+                    author_raw: Vec::new(),
+                    committer_raw: Vec::new(),
+                    encoding: None,
+                    message: "m\n".into(),
+                    raw_message: None,
+                    extra_headers: Vec::new(),
+                }),
+            )
+            .unwrap();
+        let tag = repo
+            .odb()
+            .write(
+                ObjectKind::Tag,
+                &serialize_tag(&TagData {
+                    object: commit,
+                    object_type: "commit".into(),
+                    tag: "t".into(),
+                    tagger: Some("T <t@example.com> 1 +0000".into()),
+                    extra_headers: Vec::new(),
+                    message: "t\n".into(),
+                }),
+            )
+            .unwrap();
+        crate::refs::write_ref(repo.git_dir(), "refs/heads/main", &commit).unwrap();
+        crate::refs::write_ref(repo.git_dir(), "refs/heads/tagged", &tag).unwrap();
+
+        let options = RefQueryOptions::default();
+        let peeled = |query: &RefQuery, peel: PeelTips| -> Vec<(String, Option<ObjectId>)> {
+            query_refs_peeling(&repo, query, &options, peel)
+                .unwrap()
+                .into_iter()
+                .map(|l| (l.short_name, l.peeled))
+                .collect()
+        };
+        let all = RefQuery::default();
+        let both_peeled = vec![
+            ("main".to_owned(), None),
+            ("tagged".to_owned(), Some(commit)),
+        ];
+        assert_eq!(peeled(&all, PeelTips::Always), both_peeled);
+        assert_eq!(
+            query_refs(&repo, &all, &options)
+                .unwrap()
+                .into_iter()
+                .map(|l| (l.short_name, l.peeled))
+                .collect::<Vec<_>>(),
+            both_peeled
+        );
+        assert_eq!(
+            peeled(&all, PeelTips::WhenFiltering),
+            vec![("main".to_owned(), None), ("tagged".to_owned(), None)]
+        );
+
+        let points_at = RefQuery {
+            points_at: vec![commit],
+            ..RefQuery::default()
+        };
+        assert_eq!(peeled(&points_at, PeelTips::WhenFiltering), both_peeled);
+        let contains = RefQuery {
+            contains: vec![commit],
+            ..RefQuery::default()
+        };
+        assert_eq!(peeled(&contains, PeelTips::WhenFiltering), both_peeled);
     }
 }

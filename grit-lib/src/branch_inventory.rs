@@ -9,7 +9,8 @@ use crate::error::{Error, Result};
 use crate::objects::{read_commit_subject_pretty, ObjectId, ObjectKind};
 use crate::parallel::{try_par_map, ParallelHashError, ParallelOp};
 use crate::refs::listing::{
-    query_refs, RefKind, RefNamespace, RefQuery, RefQueryError, RefQueryOptions, SortKey,
+    query_refs_peeling, PeelTips, RefKind, RefNamespace, RefQuery, RefQueryError, RefQueryOptions,
+    SortKey,
 };
 use crate::repo::Repository;
 use crate::rev_parse::abbreviate_ref_name;
@@ -120,10 +121,11 @@ pub fn list_branches(
     if detail == BranchDetail::Names && matches!(query.refs.sort.key, SortKey::Date) {
         return Err(Error::BranchListNamesDateSort);
     }
-    let listings = query_refs(
+    let listings = query_refs_peeling(
         repo,
         &ref_query_for_branch_list(query),
         &ref_query_options(repo)?,
+        PeelTips::WhenFiltering,
     )
     .map_err(ref_query_error)?;
 
@@ -278,6 +280,9 @@ fn load_commit_metadata(
     repo: &Repository,
     oids: &[ObjectId],
 ) -> Result<Vec<(Option<String>, Option<OffsetDateTime>)>> {
+    if let [oid] = oids {
+        return Ok(vec![read_commit_meta(repo, oid)?]);
+    }
     if oids.is_empty() {
         return Ok(Vec::new());
     }
