@@ -699,8 +699,6 @@ pub fn register_common_cli_snapshot_filters(settings: &mut insta::Settings) {
     settings.add_filter(r#"\{\\"duration_ms\\": ?\d+"#, r#"{\"duration_ms\": 0"#);
     settings.add_filter(r"- \*\*duration_ms:\*\* \d+", "- **duration_ms:** 0");
     settings.add_filter(r"pack-[0-9a-f]{20,}\.pack", "pack-[HASH].pack");
-    // Ephemeral paths from `tempfile` (remote show fetch URLs, etc.).
-    settings.add_filter(r"/tmp/\.tmp[A-Za-z0-9]+", "[TMPDIR]");
     for (pattern, replacement) in CRATE_VERSION_SNAPSHOT_FILTERS {
         settings.add_filter(pattern, *replacement);
     }
@@ -738,6 +736,9 @@ pub fn register_cli_snapshot_filters_for(settings: &mut insta::Settings, fixture
         redact_path(settings, fixture.path(), "[REPO]");
         redact_path(settings, fixture.home_root(), "[HOME]");
     }
+    // After fixture paths are `[REPO]` / `[HOME]`, redact leftover `tempfile` paths
+    // (remote show fetch URLs, etc.).
+    settings.add_filter(r"/tmp/\.tmp[A-Za-z0-9]+", "[TMPDIR]");
 }
 
 /// Insta redactions for network CLI snapshots (transfer stats and temp paths).
