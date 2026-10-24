@@ -200,18 +200,26 @@ pub(crate) fn local_change_diffs_for_tree_changes(
             .filter(|path| !added_tree_path_missing_on_disk(work_tree, &added_tree_paths, path))
             .collect()
     };
-    if staged.is_empty()
-        && !touched_paths_include_gitlinks(index, path_filter.as_ref())
-        && (paths_for_stat.is_empty()
-            || worktree_clean_for_switch_paths(
-                repo,
-                index,
-                &paths_for_stat,
-                index_mtime,
-                stat_policy,
-            )?)
-    {
-        return Ok((staged, Vec::new(), false));
+    let mut restrict_unstaged_to: Option<Arc<BTreeSet<String>>> = None;
+    if staged.is_empty() && !touched_paths_include_gitlinks(index, path_filter.as_ref()) {
+        if paths_for_stat.is_empty() {
+            return Ok((staged, Vec::new(), false));
+        }
+        match switch_worktree_clean_for_paths(
+            repo,
+            index,
+            &paths_for_stat,
+            index_mtime,
+            stat_policy,
+        )? {
+            SwitchWorktreeClean::Clean => return Ok((staged, Vec::new(), false)),
+            SwitchWorktreeClean::StatDirty(dirty) => {
+                if dirty.is_empty() {
+                    return Ok((staged, Vec::new(), false));
+                }
+                restrict_unstaged_to = Some(Arc::new(dirty));
+            }
+        }
     }
 
     let config = repo.config().ok();
@@ -226,15 +234,9 @@ pub(crate) fn local_change_diffs_for_tree_changes(
         }
         None => None,
     };
-    let stat_parallel_threads = (path_count >= 32).then(|| {
-        repo.thread_policy()
-            .resolve(
-                crate::parallel::ParallelOp::IndexRefresh,
-                config.as_deref().unwrap_or(&ConfigSet::new()),
-            )
-            .threads
-            .get()
-    });
+    let stat_parallel_threads =
+        switch_prepare_stat_parallel_threads(repo, config.as_deref(), path_count);
+    let restrict_for_diff = restrict_unstaged_to.unwrap_or_else(|| Arc::clone(&path_filter));
     let (mut unstaged, index_changed) = diff_index_to_worktree_with_options(
         repo.odb(),
         index,
@@ -250,7 +252,7 @@ pub(crate) fn local_change_diffs_for_tree_changes(
             config,
             worktree_rules,
             command_runner: Some(repo.command_runner()),
-            restrict_to_paths: Some(path_filter),
+            restrict_to_paths: Some(restrict_for_diff),
             ..Default::default()
         },
     )?;
@@ -281,25 +283,29 @@ fn touched_paths_include_gitlinks(index: &Index, paths: &BTreeSet<String>) -> bo
     })
 }
 
+enum SwitchWorktreeClean {
+    Clean,
+    StatDirty(BTreeSet<String>),
+}
+
 /// Whether indexed blobs under `paths` match the worktree for switch (stat-only, plus content when racy).
-fn worktree_clean_for_switch_paths(
+fn switch_worktree_clean_for_paths(
     repo: &Repository,
     index: &Index,
     paths: &BTreeSet<String>,
     index_mtime: Option<(u32, u32)>,
     stat_policy: StatMatchPolicy,
-) -> Result<bool> {
+) -> Result<SwitchWorktreeClean> {
     use crate::crlf;
     use crate::diff::index_entry_worktree_abs;
     use crate::diff::stat_matches_with_policy;
     use crate::index::MODE_GITLINK;
-    use crate::parallel::ParallelOp;
     use crate::worktree_scan::{
         collect_blob_lookup_batches, for_each_blob_by_directory,
         group_blob_entries_by_dir_for_paths, visit_blob_lookup_batches, BlobDiskLookup,
         BlobScanSparseMode, WorktreeBlobScanOptions,
     };
-    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::Mutex;
 
     let work_tree = repo
         .work_tree()
@@ -319,6 +325,12 @@ fn worktree_clean_for_switch_paths(
                 && entry_is_racy_with_policy(ie, index_mtime, stat_policy)
         })
     });
+    let dirty_paths: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
+    let note_dirty = |path: &str| {
+        if let Ok(mut guard) = dirty_paths.lock() {
+            guard.insert(path.to_owned());
+        }
+    };
     let mut stat_clean = true;
     if paths.len() < SWITCH_TREE_DIFF_STAT_SKIP_MIN {
         for path in paths {
@@ -333,11 +345,13 @@ fn worktree_clean_for_switch_paths(
                 Ok(m) => m,
                 Err(_) => {
                     stat_clean = false;
+                    note_dirty(path);
                     break;
                 }
             };
             if !meta.is_dir() {
                 stat_clean = false;
+                note_dirty(path);
                 break;
             }
         }
@@ -376,12 +390,17 @@ fn worktree_clean_for_switch_paths(
                         return Ok(());
                     }
                     let ie = &index.entries[entry_index];
+                    let path = String::from_utf8_lossy(&ie.path);
                     match lookup {
-                        BlobDiskLookup::Missing => stat_clean = false,
+                        BlobDiskLookup::Missing => {
+                            stat_clean = false;
+                            note_dirty(&path);
+                        }
                         BlobDiskLookup::Io(e) => return Err(Error::Io(e)),
                         BlobDiskLookup::Present(stat) => {
                             if !crate::diff::stat_matches_blob_stat(ie, &stat, stat_policy) {
                                 stat_clean = false;
+                                note_dirty(&path);
                             }
                         }
                     }
@@ -392,21 +411,14 @@ fn worktree_clean_for_switch_paths(
     } else {
         let blob_dirs = group_blob_entries_by_dir_for_paths(index, paths);
         if blob_dirs.is_empty() {
-            return Ok(true);
+            return Ok(SwitchWorktreeClean::Clean);
         }
         let preload_index = config
             .as_ref()
             .and_then(|c| c.get_bool("core.preloadIndex").and_then(|r| r.ok()))
             .unwrap_or(true);
-        let stat_parallel_threads = Some(
-            repo.thread_policy()
-                .resolve(
-                    ParallelOp::IndexRefresh,
-                    config.as_deref().unwrap_or(&ConfigSet::new()),
-                )
-                .threads
-                .get(),
-        );
+        let stat_parallel_threads =
+            switch_prepare_stat_parallel_threads(repo, config.as_deref(), paths.len());
         let blob_scan = WorktreeBlobScanOptions {
             preload_index,
             stat_parallel_threads,
@@ -433,7 +445,6 @@ fn worktree_clean_for_switch_paths(
                 ignorecase,
             )
         };
-        let matches = AtomicBool::new(true);
         let guard_batches = collect_blob_lookup_batches(
             index,
             &blob_dirs,
@@ -448,16 +459,18 @@ fn worktree_clean_for_switch_paths(
             BlobScanSparseMode::WorktreeGuard { stat_policy },
         )?;
         visit_blob_lookup_batches(guard_batches, |entry_index, lookup| {
-            if !matches.load(Ordering::Relaxed) {
+            if !stat_clean {
                 return Ok(());
             }
             let ie = &index.entries[entry_index];
             if !indexed_path_needs_worktree_stat_check(ie) {
                 return Ok(());
             }
+            let path = String::from_utf8_lossy(&ie.path);
             match lookup {
                 BlobDiskLookup::Missing => {
-                    matches.store(false, Ordering::Relaxed);
+                    stat_clean = false;
+                    note_dirty(&path);
                 }
                 BlobDiskLookup::Io(e) => return Err(Error::Io(e)),
                 BlobDiskLookup::Present(stat) => {
@@ -472,19 +485,20 @@ fn worktree_clean_for_switch_paths(
                         !crate::diff::stat_matches_blob_stat(ie, &stat, stat_policy)
                     };
                     if mismatch {
-                        matches.store(false, Ordering::Relaxed);
+                        stat_clean = false;
+                        note_dirty(&path);
                     }
                 }
             }
             Ok(())
         })?;
-        stat_clean = matches.load(Ordering::Relaxed);
     }
     if !stat_clean {
-        return Ok(false);
+        let dirty = dirty_paths.into_inner().unwrap_or_else(|e| e.into_inner());
+        return Ok(SwitchWorktreeClean::StatDirty(dirty));
     }
     if !needs_racy_content {
-        return Ok(true);
+        return Ok(SwitchWorktreeClean::Clean);
     }
     let cfg = config.unwrap_or_else(|| Arc::new(ConfigSet::new()));
     let conv = crlf::ConversionConfig::from_config(cfg.as_ref());
@@ -503,10 +517,16 @@ fn worktree_clean_for_switch_paths(
         let abs = index_entry_worktree_abs(work_tree, path, precompose_unicode, ignorecase);
         let meta = match fs::symlink_metadata(&abs) {
             Ok(m) => m,
-            Err(_) => return Ok(false),
+            Err(_) => {
+                let mut dirty = BTreeSet::new();
+                dirty.insert(path.clone());
+                return Ok(SwitchWorktreeClean::StatDirty(dirty));
+            }
         };
         if !stat_matches_with_policy(ie, &meta, stat_policy) {
-            return Ok(false);
+            let mut dirty = BTreeSet::new();
+            dirty.insert(path.clone());
+            return Ok(SwitchWorktreeClean::StatDirty(dirty));
         }
         let attrs = rules.file_attrs(path, false);
         let content_ok = hash_worktree_file(
@@ -521,10 +541,12 @@ fn worktree_clean_for_switch_paths(
         )
         .is_ok_and(|oid| oid == ie.oid);
         if !content_ok {
-            return Ok(false);
+            let mut dirty = BTreeSet::new();
+            dirty.insert(path.clone());
+            return Ok(SwitchWorktreeClean::StatDirty(dirty));
         }
     }
-    Ok(true)
+    Ok(SwitchWorktreeClean::Clean)
 }
 
 fn indexed_path_needs_worktree_stat_check(ie: &IndexEntry) -> bool {
@@ -792,6 +814,62 @@ pub(crate) fn untracked_scan_paths_for_added_tree_changes(
 const WHOLESALE_FAST_UNTRACKED_SCAN_MIN: usize = 32;
 const SWITCH_TREE_DIFF_STAT_SKIP_MIN: usize = 128;
 
+/// Stat preload threads for switch prepare (local-change checks). On Windows, parallel
+/// metadata probes on thousands of freshly checked-out paths amplify Defender cold-scan
+/// variance (issue #1613); keep the scan serial unless the caller caps threads explicitly.
+fn switch_prepare_stat_parallel_threads(
+    repo: &Repository,
+    config: Option<&ConfigSet>,
+    path_count: usize,
+) -> Option<usize> {
+    if path_count < 32 {
+        return None;
+    }
+    #[cfg(windows)]
+    {
+        let _ = (repo, config);
+        return Some(1);
+    }
+    #[cfg(not(windows))]
+    {
+        Some(
+            repo.thread_policy()
+                .resolve(
+                    crate::parallel::ParallelOp::IndexRefresh,
+                    config.unwrap_or(&ConfigSet::new()),
+                )
+                .threads
+                .get(),
+        )
+    }
+}
+
+/// True when a scheduled delete path can contain other scheduled deletes and must be descended.
+fn scheduled_delete_skip_file_type_probe(index: &Index, rel: &str) -> bool {
+    use crate::index::{MODE_EXECUTABLE, MODE_REGULAR, MODE_SYMLINK};
+    index.get(rel.as_bytes(), 0).is_some_and(|e| {
+        e.stage() == 0
+            && matches!(e.mode, MODE_REGULAR | MODE_EXECUTABLE | MODE_SYMLINK)
+    })
+}
+
+fn delete_scheduled_path_needs_directory_descent(
+    rel: &str,
+    delete_paths: &HashSet<String>,
+    ignorecase: bool,
+) -> bool {
+    if ignorecase {
+        delete_paths.iter().any(|del| {
+            del.len() > rel.len()
+                && del.as_bytes().get(rel.len()) == Some(&b'/')
+                && del[..rel.len()].eq_ignore_ascii_case(rel)
+        })
+    } else {
+        let prefix = format!("{rel}/");
+        delete_paths.iter().any(|del| del.starts_with(&prefix))
+    }
+}
+
 fn delete_paths_from_tree_changes(tree_changes: &[DiffEntry]) -> HashSet<String> {
     tree_changes
         .iter()
@@ -1010,11 +1088,15 @@ fn scan_wholesale_delete_root(
             rel_buf.push_str(&name);
             let rel = rel_buf.as_str();
             if index_aligned && delete_path_scheduled_for_removal(rel, delete_paths, ignorecase) {
-                // Scheduled file deletes need no scan work. Only directory paths in the delete
-                // set require descending to discover blocking special files.
-                let scheduled_dir = delete_paths.contains(rel)
-                    || (ignorecase && delete_paths.iter().any(|del| del.eq_ignore_ascii_case(rel)));
-                if scheduled_dir {
+                // Indexed file deletes need no file_type (issue #1613). Directory deletes and
+                // directory prefixes still need a probe to descend for blocking special files.
+                let skip_probe = scheduled_delete_skip_file_type_probe(index, rel);
+                if !skip_probe
+                    && (delete_scheduled_path_needs_directory_descent(rel, delete_paths, ignorecase)
+                        || delete_paths.contains(rel)
+                        || (ignorecase
+                            && delete_paths.iter().any(|del| del.eq_ignore_ascii_case(rel))))
+                {
                     let is_dir = entry.file_type().map(|t| t.is_dir()).unwrap_or(false);
                     if is_dir {
                         stack.push(entry.path());
