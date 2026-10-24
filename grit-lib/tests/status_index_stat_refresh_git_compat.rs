@@ -693,3 +693,73 @@ fn worktree_guard_with_git_index_file_stat_refresh_does_not_rewrite_default_inde
         "worktree guard stat refresh with GIT_INDEX_FILE must not rewrite default index"
     );
 }
+
+/// Racily clean git indexes (index mtime equals entry mtimes) with large blobs must stay clean
+/// without re-reading every byte on repeated status runs (issue #1702).
+#[test]
+fn status_on_racy_git_index_with_large_blobs_persists_and_warms() {
+    if cfg!(coverage) || std::env::var_os("CARGO_LLVM_COV").is_some() {
+        eprintln!("SKIP: timing oracle under llvm-cov instrumentation");
+        return;
+    }
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let repo_root = tmp.path();
+    git(repo_root, &["init", "-q", "-b", "main", "."]);
+    git(repo_root, &["config", "user.email", "t@example.com"]);
+    git(repo_root, &["config", "user.name", "Test"]);
+
+    const FILE_COUNT: usize = 48;
+    const PAYLOAD_LEN: usize = 256 * 1024;
+    let payload: Vec<u8> = (0..PAYLOAD_LEN).map(|i| (i % 251) as u8).collect();
+    for i in 0..FILE_COUNT {
+        let name = format!("f{i:02}.bin");
+        fs::write(repo_root.join(&name), &payload).expect("write blob");
+    }
+    git(repo_root, &["add", "-A"]);
+    git(repo_root, &["commit", "-qm", "big"]);
+
+    let index_path = repo_root.join(".git/index");
+    let index_mtime = fs::metadata(&index_path)
+        .expect("index metadata")
+        .modified()
+        .expect("index mtime");
+    let pinned = filetime::FileTime::from_system_time(index_mtime);
+    for path in git(repo_root, &["ls-files", "-z"])
+        .split('\0')
+        .filter(|p| !p.is_empty())
+    {
+        filetime::set_file_mtime(repo_root.join(path), pinned).expect("pin worktree mtime");
+    }
+    filetime::set_file_mtime(&index_path, pinned).expect("pin index mtime");
+
+    let grit_repo = Repository::open(
+        &repo_root.join(".git"),
+        &RepositoryOptions::empty().with_work_tree(repo_root),
+    )
+    .expect("open grit repo");
+
+    let first_start = Instant::now();
+    let model = status(&grit_repo, &StatusOptions::default(), &mut NullProgress)
+        .expect("first status on racy large index");
+    let first_elapsed = first_start.elapsed();
+    assert!(
+        model.unstaged.is_empty(),
+        "racy git index with large blobs must be clean in grit status"
+    );
+
+    let second_start = Instant::now();
+    let _second =
+        status(&grit_repo, &StatusOptions::default(), &mut NullProgress).expect("second status");
+    let second_elapsed = second_start.elapsed();
+
+    assert!(
+        second_elapsed <= first_elapsed,
+        "warm status must not re-verify every large blob (first {first_elapsed:?}, second {second_elapsed:?})"
+    );
+    if first_elapsed > Duration::from_millis(80) {
+        assert!(
+            second_elapsed * 3 + Duration::from_millis(5) < first_elapsed,
+            "second status should avoid full content re-read on warm index (first {first_elapsed:?}, second {second_elapsed:?})"
+        );
+    }
+}

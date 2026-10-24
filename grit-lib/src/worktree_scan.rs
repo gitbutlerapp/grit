@@ -497,6 +497,10 @@ fn retain_status_diff_lookup(
             let stat_matches = crate::diff::stat_matches_blob_stat(ie, stat, stat_policy);
             let worktree_mode = stat.git_mode;
             let racy = crate::diff::entry_is_racy_with_policy(ie, index_mtime, stat_policy);
+            let skip_racy_stat_match = for_status
+                && stat_matches
+                && racy
+                && index_mtime.is_some_and(|(sec, _)| sec != 0);
             if refresh_index_stat_in_pass {
                 let skip_refresh_for_status_diff = for_status
                     && !stat_matches
@@ -508,15 +512,16 @@ fn retain_status_diff_lookup(
                 }
             }
             if parallel_blob_work {
-                if stat_matches
-                    && !racy
-                    && (!trust_filemode || worktree_mode == ie.mode)
-                    && crate::diff::index_entry_skips_worktree_content_hash_after_stat_match(
-                        ie,
-                        index_mtime,
-                        stat_policy,
-                        trust_filemode,
-                    )
+                if (skip_racy_stat_match
+                    || (stat_matches
+                        && !racy
+                        && (!trust_filemode || worktree_mode == ie.mode)
+                        && crate::diff::index_entry_skips_worktree_content_hash_after_stat_match(
+                            ie,
+                            index_mtime,
+                            stat_policy,
+                            trust_filemode,
+                        )))
                 {
                     return false;
                 }

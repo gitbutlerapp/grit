@@ -4938,13 +4938,21 @@ fn diff_index_to_worktree_inner(
                         && !stat_matches
                         && worktree_size != ie_ref.size
                         && !ie_ref.stat_cache_unset();
-                    let skip_refresh_clean_status = options.for_status
+                    let racy = entry_is_racy_with_policy(ie_ref, index_mtime, stat_policy);
+                    let skip_refresh_clean_status = options.for_status && stat_matches && !racy;
+                    let skip_refresh_racy_stat_match = options.for_status
                         && stat_matches
-                        && !entry_is_racy_with_policy(ie_ref, index_mtime, stat_policy);
-                    if skip_refresh_clean_status && index_stat_cache_trustworthy(index_mtime) {
+                        && racy
+                        && index_stat_cache_trustworthy(index_mtime);
+                    if (skip_refresh_clean_status || skip_refresh_racy_stat_match)
+                        && index_stat_cache_trustworthy(index_mtime)
+                    {
                         stat_refresh_verified[entry_index] = true;
                     }
-                    if !skip_refresh_for_status_diff && !skip_refresh_clean_status {
+                    if !skip_refresh_for_status_diff
+                        && !skip_refresh_clean_status
+                        && !skip_refresh_racy_stat_match
+                    {
                         let path_owned = path_str_ref.to_owned();
                         let path_bytes = index.entries[entry_index].path.as_slice();
                         let file_path = index_entry_worktree_abs_bytes(
@@ -6127,7 +6135,7 @@ fn refresh_index_blob_stat_from_metadata(
     if index_entry_stat_matches(ie, &refreshed, stat_policy) {
         return BlobStatRefreshOutcome {
             index_changed: false,
-            content_verified: false,
+            content_verified: true,
         };
     }
     ie.ctime_sec = refreshed.ctime_sec;
@@ -12463,6 +12471,40 @@ mod smudge_racily_clean_tests {
         );
         assert!(!smudged);
         assert_eq!(index.entries[0].size, entry.size);
+    }
+
+    #[test]
+    fn status_diff_persists_racy_clean_entries_without_stat_field_changes() {
+        let td = tempfile::tempdir().expect("tempdir");
+        let wt = td.path();
+        let index_mtime = setup_index_mtime(wt);
+        let (git_dir, odb) = minimal_repo(wt, "[core]\n");
+        let bytes = b"racy clean payload\n";
+
+        let mut index = Index::new();
+        index.source_mtime = Some(index_mtime);
+        let entry = staged_entry_for_file(&odb, wt, "f.txt", bytes, index_mtime);
+        index.entries.push(entry.clone());
+        assert!(entry_is_racy(&entry, Some(index_mtime)));
+
+        let (entries, index_changed) = super::diff_index_to_worktree_with_options(
+            &odb,
+            &mut index,
+            wt,
+            super::DiffIndexToWorktreeOptions {
+                repository_git_dir: Some(git_dir),
+                index_mtime: Some(index_mtime),
+                refresh_index_stat_in_pass: true,
+                for_status: true,
+                ..Default::default()
+            },
+        )
+        .expect("status diff");
+        assert!(entries.is_empty(), "unexpected unstaged: {entries:?}");
+        assert!(
+            !index_changed,
+            "matching stat on a racy entry must skip refresh without rewriting the index"
+        );
     }
 
     #[test]
