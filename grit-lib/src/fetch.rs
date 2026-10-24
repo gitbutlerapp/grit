@@ -527,9 +527,11 @@ fn refspec_ref_prefixes(refspecs: &[String], always_tags: bool) -> Vec<String> {
         if src.starts_with("refs/") {
             push_unique_prefix(&mut out, src);
         } else {
-            push_unique_prefix(&mut out, &format!("refs/heads/{src}"));
-            // Git DWIM: bare names may live directly under `refs/` (pull refs, etc.).
-            push_unique_prefix(&mut out, &format!("refs/{src}"));
+            // A short name resolves through every ref lookup rule, so ask for each
+            // namespace it may live in (bare `refs/` covers pull refs and the like).
+            for namespace in ["refs/heads/", "refs/", "refs/tags/", "refs/remotes/"] {
+                push_unique_prefix(&mut out, &format!("{namespace}{src}"));
+            }
         }
     }
     out
