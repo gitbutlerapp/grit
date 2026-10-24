@@ -1,6 +1,5 @@
 ---
 source: grit-test-support/src/cli_fixture.rs
-assertion_line: 537
 expression: payload
 ---
 {
@@ -11,7 +10,7 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\"url\":\"[UPSTREAM]\",\"path\":\"cloned-json\",\"branch\":\"main\",\"objects\":8,\"bytes\":665,\"branches\":2,\"tags\":1,\"files\":2,\"object_types\":{\"commits\":2,\"trees\":2,\"blobs\":3,\"tags\":1},\"worktree_bytes\":23,\"seconds\":0,\"phases\":[{\"phase\":\"copying\",\"unit\":\"objects\",\"count\":8,\"seconds\":0},{\"phase\":\"checkout\",\"unit\":\"files\",\"count\":2,\"seconds\":0}]}\n",
+    "stdout": "{\"url\":\"[UPSTREAM]\",\"path\":\"cloned-json\",\"remote\":\"origin\",\"single_branch\":false,\"tag_fetch\":\"all\",\"branch\":\"main\",\"detached\":false,\"objects\":8,\"bytes\":665,\"branches\":2,\"tags\":1,\"files\":2,\"object_types\":{\"commits\":2,\"trees\":2,\"blobs\":3,\"tags\":1},\"worktree_bytes\":23,\"seconds\":0,\"phases\":[{\"phase\":\"copying\",\"unit\":\"objects\",\"count\":8,\"seconds\":0},{\"phase\":\"checkout\",\"unit\":\"files\",\"count\":2,\"seconds\":0}],\"bare\":false}\n",
     "stderr": ""
   },
   "markdown": {
