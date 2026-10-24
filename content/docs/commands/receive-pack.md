@@ -21,7 +21,7 @@ Every ref update is checked before it's applied, and the client is told which up
 
 | Setting | Effect |
 | --- | --- |
-| `receive.denyNonFastForwards` | Refuse updates that would discard commits from a branch. |
+| `receive.denyNonFastForwards` | Refuse updates that would discard commits from a branch (`refs/heads/*`). Fast-forwards are accepted, and other refs, such as tags, are not checked. |
 | `receive.denyDeletes` | Refuse to delete refs. |
 | `receive.denyCurrentBranch` | Refuse to update the branch checked out in a non-bare repository. On by default; set it to `ignore` or `warn` to allow it. |
 | `receive.hideRefs`, `transfer.hideRefs` | Hide refs from pushing clients and refuse updates to them. |
