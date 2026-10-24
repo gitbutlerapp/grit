@@ -910,6 +910,19 @@ pub fn pathspec_has_top(spec: &str) -> bool {
     combine_magic(elem_magic).top
 }
 
+/// True if `spec` carries `:(attr:...)` magic, so matching it needs `.gitattributes` rules.
+///
+/// Such specs only match through the attribute-aware entry points:
+/// [`crate::repo::Repository::paths_match_pathspecs`], which loads the repository's attributes
+/// itself, or [`matches_pathspec_list_for_object`] with caller-supplied rules.
+#[must_use]
+pub fn pathspec_has_attr_magic(spec: &str) -> bool {
+    // Attr magic only exists in long form; skip the allocating parse for every other spec.
+    spec.starts_with(":(")
+        && spec.contains("attr:")
+        && !parse_element_magic(spec).0.attr_requirements.is_empty()
+}
+
 fn pathspec_match_one_positive(path: &str, magic: PathspecMagic, raw_pattern: &str) -> bool {
     if magic.literal && magic.glob {
         return false;
@@ -1059,12 +1072,20 @@ pub fn extend_pathspec_list_implicit_cwd(
 /// Git `match_pathspec` semantics over a pathspec list: OR of positive specs minus OR of exclude
 /// specs. If every element is exclude-only, Git implicitly prepends `.` (match all); this
 /// function does the same.
+///
+/// No `.gitattributes` rules are available here, so a positive `:(attr:...)` spec never matches
+/// and an exclude `:(exclude,attr:...)` spec never excludes. Use
+/// [`crate::repo::Repository::paths_match_pathspecs`] or [`matches_pathspec_list_for_object`]
+/// when specs may carry attr magic (see [`pathspec_has_attr_magic`]).
 #[must_use]
 pub fn matches_pathspec_list(path: &str, specs: &[String]) -> bool {
     matches_pathspec_list_with_context(path, specs, PathspecMatchContext::default())
 }
 
 /// Like [`matches_pathspec_list`], but uses `ctx` for non-magic pathspec elements (trailing `/`).
+///
+/// Like [`matches_pathspec_list`], this does not evaluate `:(attr:...)` magic: positive attr specs
+/// never match and attr excludes never exclude.
 #[must_use]
 pub fn matches_pathspec_list_with_context(
     path: &str,
@@ -1474,6 +1495,10 @@ pub struct PathspecMatchContext {
 /// For pathspecs ending in `/`, a path equal to the prefix matches only when
 /// [`PathspecMatchContext`] indicates a directory or submodule; see
 /// [`matches_pathspec_with_context`].
+///
+/// `:(attr:...)` requirements are not evaluated here (only the pattern part is matched); use
+/// [`matches_pathspec_for_object`] or [`crate::repo::Repository::paths_match_pathspecs`] for
+/// specs where [`pathspec_has_attr_magic`] is true.
 #[must_use]
 pub fn matches_pathspec(spec: &str, path: &str) -> bool {
     matches_pathspec_with_context(spec, path, PathspecMatchContext::default())

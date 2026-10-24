@@ -49,35 +49,22 @@ fn filter_entries(
     repo: &crate::repo::Repository,
     entries: Vec<DiffEntry>,
     pathspecs: &[String],
-) -> Vec<DiffEntry> {
+) -> Result<Vec<DiffEntry>> {
     if pathspecs.is_empty() {
-        return entries;
+        return Ok(entries);
     }
-    entries
-        .into_iter()
-        .filter(|e| entry_matches_pathspecs(repo, e, pathspecs))
-        .collect()
-}
-
-fn entry_matches_pathspecs(
-    repo: &crate::repo::Repository,
-    entry: &DiffEntry,
-    pathspecs: &[String],
-) -> bool {
-    let path = entry
-        .new_path
-        .as_deref()
-        .or(entry.old_path.as_deref())
-        .unwrap_or("");
-    if repo.paths_match_pathspecs(path, pathspecs) {
-        return true;
-    }
-    if let Some(old) = entry.old_path.as_deref() {
-        if old != path && repo.paths_match_pathspecs(old, pathspecs) {
-            return true;
+    let mut kept = Vec::with_capacity(entries.len());
+    for entry in entries {
+        let path = entry
+            .new_path
+            .as_deref()
+            .or(entry.old_path.as_deref())
+            .unwrap_or("");
+        if repo.change_matches_pathspecs(path, entry.old_path.as_deref(), pathspecs)? {
+            kept.push(entry);
         }
     }
-    false
+    Ok(kept)
 }
 
 fn parent_tree_for_commit(
@@ -162,7 +149,7 @@ fn diff_one_commit(
     if rename_threshold(&opts.diff_options) >= 100 {
         entries.sort_by(|a, b| a.path().cmp(b.path()));
     }
-    entries = filter_entries(diff.repository(), entries, pathspecs);
+    entries = filter_entries(diff.repository(), entries, pathspecs)?;
     let mut output = build_file_diffs(
         odb,
         entries,

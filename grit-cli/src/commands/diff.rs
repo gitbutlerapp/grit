@@ -414,7 +414,7 @@ fn filtered_worktree_file_changes(
     } else {
         worktree_changes(repo, diff_options)?
     };
-    Ok(filter_file_changes(raw, repo, pathspecs))
+    filter_file_changes(raw, repo, pathspecs)
 }
 
 /// Uncommitted file list for default `grit diff` (no commit arguments).
@@ -795,7 +795,7 @@ fn run_patch_text(opts: DiffRunOptions) -> Result<DiffOutcome> {
             staged_entries(&repo, &diff_options)?,
             &repo,
             &worktree_pathspecs,
-        );
+        )?;
         let changes = staged_changes_from_entries(&repo, entries.clone())?;
         return patch_text_outcome(&repo, entries, Some(changes), diff_options, format, quiet);
     }
@@ -813,7 +813,7 @@ fn run_patch_text(opts: DiffRunOptions) -> Result<DiffOutcome> {
             unstaged_entries(&repo, &diff_options)?,
             &repo,
             &worktree_pathspecs,
-        );
+        )?;
         let changes = unstaged_changes_from_entries(&repo, entries.clone())?;
         return patch_text_outcome(&repo, entries, Some(changes), diff_options, format, quiet);
     }
@@ -841,7 +841,7 @@ fn run_patch_text(opts: DiffRunOptions) -> Result<DiffOutcome> {
                 )?,
                 &repo,
                 &worktree_pathspecs,
-            );
+            )?;
             let base_tree = if let Some(spec) = against_ref {
                 Some(context::commit_tree(
                     &repo,
@@ -858,7 +858,7 @@ fn run_patch_text(opts: DiffRunOptions) -> Result<DiffOutcome> {
                 worktree_against_tree_entries(&repo, base_tree.as_ref(), &diff_options)?,
                 &repo,
                 &worktree_pathspecs,
-            );
+            )?;
             patch_text_outcome(&repo, entries, Some(changes), diff_options, format, quiet)
         }
         1 => {
@@ -875,20 +875,23 @@ fn run_patch_text(opts: DiffRunOptions) -> Result<DiffOutcome> {
                     )?,
                     &repo,
                     &commit_pathspecs,
-                );
+                )?;
                 patch_text_outcome(&repo, entries, None, diff_options, format, quiet)
             } else if let Ok(oid) = resolve_diff_commit(&repo, spec) {
                 let entries = filter_diff_entries(
                     commit_entries(&repo, &oid, &diff_options, &config, &thread_policy)?,
                     &repo,
                     &commit_pathspecs,
-                );
+                )?;
                 patch_text_outcome(&repo, entries, None, diff_options, format, quiet)
             } else if path_args.is_empty() {
                 let pathspecs = single_worktree_pathspec(&repo, spec)?;
                 let changes = single_argument_path_unstaged_diff(&repo, spec, &diff_options)?;
-                let entries =
-                    filter_diff_entries(unstaged_entries(&repo, &diff_options)?, &repo, &pathspecs);
+                let entries = filter_diff_entries(
+                    unstaged_entries(&repo, &diff_options)?,
+                    &repo,
+                    &pathspecs,
+                )?;
                 patch_text_outcome(&repo, entries, Some(changes), diff_options, format, quiet)
             } else {
                 resolve_diff_commit(&repo, spec)?;
@@ -915,7 +918,7 @@ fn run_patch_text(opts: DiffRunOptions) -> Result<DiffOutcome> {
                         )?,
                         &repo,
                         &pathspecs,
-                    );
+                    )?;
                     return patch_text_outcome(&repo, entries, None, diff_options, format, quiet);
                 }
                 match resolve_diff_commit(&repo, &commits[1]) {
@@ -931,7 +934,7 @@ fn run_patch_text(opts: DiffRunOptions) -> Result<DiffOutcome> {
                 tree_commit_entries(&repo, &base, &tip, &diff_options, &config, &thread_policy)?,
                 &repo,
                 &commit_pathspecs,
-            );
+            )?;
             patch_text_outcome(&repo, entries, None, diff_options, format, quiet)
         }
         _ => unreachable!("checked above"),
@@ -979,7 +982,7 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
             staged_entries(&repo, &diff_options)?,
             &repo,
             &worktree_pathspecs,
-        );
+        )?;
         let outcome = match detail {
             DiffDetail::Stat | DiffDetail::NameOnly | DiffDetail::NameStatus => {
                 outcome_from_entries(&repo, entries, detail, diff_options, format)?
@@ -1028,7 +1031,7 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
             unstaged_entries_in_index(&repo, &mut index, &diff_options)?,
             &repo,
             &worktree_pathspecs,
-        );
+        )?;
         let outcome = match detail {
             DiffDetail::Stat => outcome_stat_from_changes(
                 unstaged_changes_from_entries(&repo, entries)?,
@@ -1127,7 +1130,7 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
                     )?,
                     &repo,
                     &commit_pathspecs,
-                );
+                )?;
                 return Ok(finish_outcome(
                     &repo,
                     format,
@@ -1138,7 +1141,7 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
                     commit_entries(&repo, &oid, &diff_options, &config, &thread_policy)?,
                     &repo,
                     &commit_pathspecs,
-                );
+                )?;
                 return Ok(finish_outcome(
                     &repo,
                     format,
@@ -1171,7 +1174,7 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
                         )?,
                         &repo,
                         &pathspecs,
-                    );
+                    )?;
                     return Ok(finish_outcome(
                         &repo,
                         format,
@@ -1191,7 +1194,7 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
                 tree_commit_entries(&repo, &base, &tip, &diff_options, &config, &thread_policy)?,
                 &repo,
                 &commit_pathspecs,
-            );
+            )?;
             return Ok(finish_outcome(
                 &repo,
                 format,
@@ -1206,7 +1209,7 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
         &path_args,
         DiffPathspecMode::Worktree,
     )?;
-    let filtered = filter_file_changes(changes, &repo, &worktree_pathspecs);
+    let filtered = filter_file_changes(changes, &repo, &worktree_pathspecs)?;
     let outcome = match detail {
         DiffDetail::Patch => outcome_from_changes(
             filtered,
@@ -1586,7 +1589,9 @@ fn peer_unstaged_changes_for_hunk_ids<'a>(
     let Ok(entries) = unstaged_entries(repo, diff_options) else {
         return Vec::new();
     };
-    let entries = filter_diff_entries(entries, repo, pathspecs);
+    let Ok(entries) = filter_diff_entries(entries, repo, pathspecs) else {
+        return Vec::new();
+    };
     let entries = filter_entries_to_primary_paths(entries, &primary);
     unstaged_file_changes_for_entries(repo, entries).unwrap_or_default()
 }
@@ -1606,7 +1611,9 @@ fn peer_staged_changes_for_hunk_ids<'a>(
     let Ok(entries) = staged_entries(repo, diff_options) else {
         return Vec::new();
     };
-    let entries = filter_diff_entries(entries, repo, pathspecs);
+    let Ok(entries) = filter_diff_entries(entries, repo, pathspecs) else {
+        return Vec::new();
+    };
     let entries = filter_entries_to_primary_paths(entries, &primary);
     staged_file_changes_for_entries(repo, entries).unwrap_or_default()
 }
@@ -1843,38 +1850,21 @@ pub(crate) fn resolve_commit_diff_pathspecs(
     Ok(specs)
 }
 
-fn file_change_matches_pathspecs(
-    repo: &grit_lib::repo::Repository,
-    path: &str,
-    old_path: Option<&str>,
-    specs: &[String],
-) -> bool {
-    if specs.is_empty() {
-        return true;
-    }
-    if repo.paths_match_pathspecs(path, specs) {
-        return true;
-    }
-    if let Some(op) = old_path {
-        if op != path && repo.paths_match_pathspecs(op, specs) {
-            return true;
-        }
-    }
-    false
-}
-
 fn filter_file_changes(
     changes: Vec<FileChange>,
     repo: &grit_lib::repo::Repository,
     specs: &[String],
-) -> Vec<FileChange> {
+) -> Result<Vec<FileChange>> {
     if specs.is_empty() {
-        return changes;
+        return Ok(changes);
     }
-    changes
-        .into_iter()
-        .filter(|c| file_change_matches_pathspecs(repo, &c.path, c.old_path.as_deref(), specs))
-        .collect()
+    let mut kept = Vec::with_capacity(changes.len());
+    for change in changes {
+        if repo.change_matches_pathspecs(&change.path, change.old_path.as_deref(), specs)? {
+            kept.push(change);
+        }
+    }
+    Ok(kept)
 }
 
 fn single_worktree_pathspec(
@@ -1899,11 +1889,7 @@ fn single_argument_path_unstaged_diff(
     diff_options: &DiffOptions,
 ) -> Result<Vec<FileChange>> {
     let specs = single_worktree_pathspec(repo, pathspec)?;
-    let all = unstaged_changes(repo, diff_options)?;
-    Ok(all
-        .into_iter()
-        .filter(|c| repo.paths_match_pathspecs(&c.path, &specs))
-        .collect())
+    filter_file_changes(unstaged_changes(repo, diff_options)?, repo, &specs)
 }
 
 /// Unstaged diff entries: index vs working tree (no blob loading).
@@ -2004,21 +1990,22 @@ fn filter_diff_entries(
     entries: Vec<DiffEntry>,
     repo: &grit_lib::repo::Repository,
     specs: &[String],
-) -> Vec<DiffEntry> {
+) -> Result<Vec<DiffEntry>> {
     if specs.is_empty() {
-        return entries;
+        return Ok(entries);
     }
-    entries
-        .into_iter()
-        .filter(|e| {
-            let path = e
-                .new_path
-                .as_deref()
-                .or(e.old_path.as_deref())
-                .unwrap_or("");
-            file_change_matches_pathspecs(repo, path, e.old_path.as_deref(), specs)
-        })
-        .collect()
+    let mut kept = Vec::with_capacity(entries.len());
+    for entry in entries {
+        let path = entry
+            .new_path
+            .as_deref()
+            .or(entry.old_path.as_deref())
+            .unwrap_or("");
+        if repo.change_matches_pathspecs(path, entry.old_path.as_deref(), specs)? {
+            kept.push(entry);
+        }
+    }
+    Ok(kept)
 }
 
 fn outcome_stat_from_changes(

@@ -346,7 +346,7 @@ pub(crate) fn collect_tree_structured_for_target(
                 worktree_changes(repo, head_tree.as_ref(), rename_threshold)?,
                 repo,
                 pathspecs,
-            );
+            )?;
             tree_structured_from_worktree_changes(
                 repo,
                 changes,
@@ -360,7 +360,7 @@ pub(crate) fn collect_tree_structured_for_target(
                 worktree_changes(repo, Some(tree), rename_threshold)?,
                 repo,
                 pathspecs,
-            );
+            )?;
             tree_structured_from_worktree_changes(
                 repo,
                 changes,
@@ -375,7 +375,7 @@ pub(crate) fn collect_tree_structured_for_target(
                 staged_changes(repo, rename_threshold, restrict)?,
                 repo,
                 pathspecs,
-            );
+            )?;
             tree_structured_from_worktree_changes(
                 repo,
                 changes,
@@ -386,7 +386,7 @@ pub(crate) fn collect_tree_structured_for_target(
         }
         DiffTarget::WorktreeVsIndex => {
             let changes =
-                filter_file_changes(unstaged_changes(repo, rename_threshold)?, repo, pathspecs);
+                filter_file_changes(unstaged_changes(repo, rename_threshold)?, repo, pathspecs)?;
             tree_structured_from_worktree_changes(
                 repo,
                 changes,
@@ -397,7 +397,7 @@ pub(crate) fn collect_tree_structured_for_target(
         }
         DiffTarget::Commit(oid) => {
             let items = commit_changes(repo, oid, &config, &thread_policy, opts, rename_threshold)?;
-            filter_tree_diff(items, repo, pathspecs)
+            filter_tree_diff(items, repo, pathspecs)?
         }
         DiffTarget::Trees { old, new } => {
             let items = if let Some(base) = old {
@@ -413,7 +413,7 @@ pub(crate) fn collect_tree_structured_for_target(
             } else {
                 commit_changes(repo, new, &config, &thread_policy, opts, rename_threshold)?
             };
-            filter_tree_diff(items, repo, pathspecs)
+            filter_tree_diff(items, repo, pathspecs)?
         }
     };
     Ok(items
@@ -465,7 +465,7 @@ pub(crate) fn collect_files_for_target(
                 worktree_changes(repo, head_tree.as_ref(), rename_threshold)?,
                 repo,
                 pathspecs,
-            );
+            )?;
             file_diffs_from_worktree_changes(changes, &config, &thread_policy, opts.clone())?
         }
         DiffTarget::WorktreeVsTree(tree) => {
@@ -473,7 +473,7 @@ pub(crate) fn collect_files_for_target(
                 worktree_changes(repo, Some(tree), rename_threshold)?,
                 repo,
                 pathspecs,
-            );
+            )?;
             file_diffs_from_worktree_changes(changes, &config, &thread_policy, opts.clone())?
         }
         DiffTarget::IndexVsHead => {
@@ -482,12 +482,12 @@ pub(crate) fn collect_files_for_target(
                 staged_changes(repo, rename_threshold, restrict)?,
                 repo,
                 pathspecs,
-            );
+            )?;
             file_diffs_from_worktree_changes(changes, &config, &thread_policy, opts.clone())?
         }
         DiffTarget::WorktreeVsIndex => {
             let changes =
-                filter_file_changes(unstaged_changes(repo, rename_threshold)?, repo, pathspecs);
+                filter_file_changes(unstaged_changes(repo, rename_threshold)?, repo, pathspecs)?;
             file_diffs_from_worktree_changes(changes, &config, &thread_policy, opts.clone())?
         }
         DiffTarget::Commit(oid) => {
@@ -499,7 +499,7 @@ pub(crate) fn collect_files_for_target(
                 opts.clone(),
                 rename_threshold,
             )?;
-            filter_and_map_tree_structured(items, repo, pathspecs, opts)
+            filter_and_map_tree_structured(items, repo, pathspecs, opts)?
         }
         DiffTarget::Trees { old, new } => {
             let items = if let Some(base) = old {
@@ -522,7 +522,7 @@ pub(crate) fn collect_files_for_target(
                     rename_threshold,
                 )?
             };
-            filter_and_map_tree_structured(items, repo, pathspecs, opts)
+            filter_and_map_tree_structured(items, repo, pathspecs, opts)?
         }
     };
     Ok(files)
@@ -533,12 +533,12 @@ fn filter_and_map_tree_structured(
     repo: &Repository,
     pathspecs: &[String],
     opts: DiffOptions,
-) -> Vec<FileDiff> {
-    filter_tree_diff(items, repo, pathspecs)
+) -> Result<Vec<FileDiff>> {
+    Ok(filter_tree_diff(items, repo, pathspecs)?
         .into_iter()
         .map(file_diff_from_tree_structured)
         .filter(|f| include_file_in_diff(f, &opts))
-        .collect()
+        .collect())
 }
 
 fn file_diff_from_tree_structured(t: TreeDiffStructured) -> FileDiff {
@@ -829,61 +829,51 @@ fn resolve_commit_diff_pathspecs(
     Ok(specs)
 }
 
-fn file_change_matches_pathspecs(
-    repo: &Repository,
-    path: &str,
-    old_path: Option<&str>,
-    specs: &[String],
-) -> bool {
-    if specs.is_empty() {
-        return true;
-    }
-    if repo.paths_match_pathspecs(path, specs) {
-        return true;
-    }
-    if let Some(op) = old_path {
-        if op != path && repo.paths_match_pathspecs(op, specs) {
-            return true;
-        }
-    }
-    false
-}
-
 fn filter_file_changes(
     changes: Vec<FileChange>,
     repo: &Repository,
     specs: &[String],
-) -> Vec<FileChange> {
+) -> Result<Vec<FileChange>> {
     if specs.is_empty() {
-        return changes;
+        return Ok(changes);
     }
-    changes
-        .into_iter()
-        .filter(|c| file_change_matches_pathspecs(repo, &c.path, c.old_path.as_deref(), specs))
-        .collect()
+    let mut kept = Vec::with_capacity(changes.len());
+    for change in changes {
+        if repo.change_matches_pathspecs(&change.path, change.old_path.as_deref(), specs)? {
+            kept.push(change);
+        }
+    }
+    Ok(kept)
+}
+
+fn diff_entry_matches_pathspecs(
+    repo: &Repository,
+    entry: &DiffEntry,
+    specs: &[String],
+) -> Result<bool> {
+    let path = entry
+        .new_path
+        .as_deref()
+        .or(entry.old_path.as_deref())
+        .unwrap_or("");
+    repo.change_matches_pathspecs(path, entry.old_path.as_deref(), specs)
 }
 
 fn filter_tree_diff(
     items: Vec<TreeDiffStructured>,
     repo: &Repository,
     specs: &[String],
-) -> Vec<TreeDiffStructured> {
+) -> Result<Vec<TreeDiffStructured>> {
     if specs.is_empty() {
-        return items;
+        return Ok(items);
     }
-    items
-        .into_iter()
-        .filter(|t| {
-            let e = &t.entry;
-            let path = e
-                .new_path
-                .as_deref()
-                .or(e.old_path.as_deref())
-                .unwrap_or("");
-            let old_path = e.old_path.as_deref();
-            file_change_matches_pathspecs(repo, path, old_path, specs)
-        })
-        .collect()
+    let mut kept = Vec::with_capacity(items.len());
+    for item in items {
+        if diff_entry_matches_pathspecs(repo, &item.entry, specs)? {
+            kept.push(item);
+        }
+    }
+    Ok(kept)
 }
 
 fn pathspec_restrict_set(pathspecs: &[String]) -> Option<Arc<BTreeSet<String>>> {
@@ -1264,15 +1254,13 @@ pub(crate) fn collect_diff_entries_for_patch_target(
         }
     };
     if !pathspecs.is_empty() {
-        entries.retain(|e| {
-            let path = e
-                .new_path
-                .as_deref()
-                .or(e.old_path.as_deref())
-                .unwrap_or("");
-            let old_path = e.old_path.as_deref();
-            file_change_matches_pathspecs(repo, path, old_path, pathspecs)
-        });
+        let mut kept = Vec::with_capacity(entries.len());
+        for entry in entries {
+            if diff_entry_matches_pathspecs(repo, &entry, pathspecs)? {
+                kept.push(entry);
+            }
+        }
+        entries = kept;
     }
     Ok(entries)
 }
@@ -1490,7 +1478,7 @@ pub(crate) fn unstaged_raw_changes_with_peer_hunks(
     let unstaged = if let Some(paths) = restrict {
         unstaged_changes_inner(repo, rename_threshold, Some(paths))?
     } else {
-        filter_file_changes(unstaged_changes(repo, rename_threshold)?, repo, pathspecs)
+        filter_file_changes(unstaged_changes(repo, rename_threshold)?, repo, pathspecs)?
     };
     Ok((unstaged, peer_hunks))
 }
@@ -1613,7 +1601,7 @@ fn staged_peer_hunks_for_pathspecs(
         staged_changes(repo, rename_threshold, None)?,
         repo,
         pathspecs,
-    );
+    )?;
     Ok(staged
         .iter()
         .map(|fc| {
@@ -1636,7 +1624,7 @@ pub(crate) fn unstaged_file_diffs_with_peer_hunks(
         staged_changes(repo, rename_threshold, None)?,
         repo,
         pathspecs,
-    );
+    )?;
     let peer_hunks: std::collections::HashMap<String, Vec<StructuredHunk>> = staged
         .iter()
         .map(|fc| {
@@ -1644,7 +1632,7 @@ pub(crate) fn unstaged_file_diffs_with_peer_hunks(
             (fc.path.clone(), structured.hunks)
         })
         .collect();
-    let unstaged = filter_file_changes(unstaged_changes(repo, rename_threshold)?, repo, pathspecs);
+    let unstaged = filter_file_changes(unstaged_changes(repo, rename_threshold)?, repo, pathspecs)?;
     let files = file_diffs_from_worktree_changes(unstaged, &config, &thread_policy, opts)?;
     Ok((files, peer_hunks))
 }
@@ -1672,7 +1660,7 @@ pub(crate) fn hunk_diff_bundle(
         staged_changes(repo, rename_threshold, None)?,
         repo,
         pathspecs,
-    );
+    )?;
     let staged_files = if staged_fc.is_empty() {
         Vec::new()
     } else {
@@ -1683,7 +1671,7 @@ pub(crate) fn hunk_diff_bundle(
         .map(|f| (f.path.clone(), f.hunks.clone()))
         .collect();
     let unstaged_fc =
-        filter_file_changes(unstaged_changes(repo, rename_threshold)?, repo, pathspecs);
+        filter_file_changes(unstaged_changes(repo, rename_threshold)?, repo, pathspecs)?;
     let unstaged = file_diffs_from_worktree_changes(unstaged_fc, &config, &thread_policy, opts)?;
     Ok(HunkDiffBundle {
         unstaged,

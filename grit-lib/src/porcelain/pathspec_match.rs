@@ -4,7 +4,9 @@ use crate::error::{Error, Result};
 use crate::git_path::pathspec_traverses_symlink_dir;
 use crate::index::MODE_TREE;
 use crate::objects::{parse_commit, parse_tree, ObjectId};
-use crate::pathspec::{has_glob_chars, pathspec_is_exclude, sorted_paths_match_pathspec};
+use crate::pathspec::{
+    has_glob_chars, pathspec_has_attr_magic, pathspec_is_exclude, sorted_paths_match_pathspec,
+};
 use crate::repo::Repository;
 use crate::state::resolve_head_for_repository;
 use crate::unicode_normalization::resolve_worktree_path_for_staging;
@@ -98,6 +100,14 @@ impl<'r> KnownPathspecChecker<'r> {
             self.known = Some(known_paths(self.repo)?);
         }
         let known = self.known.as_deref().unwrap_or_default();
+        if pathspec_has_attr_magic(resolved) {
+            let specs = [resolved.to_owned()];
+            let attrs = self.repo.pathspec_attributes()?;
+            return Ok(known.iter().any(|path| {
+                self.repo
+                    .paths_match_pathspecs_with_attributes(path, &specs, &attrs)
+            }));
+        }
         Ok(sorted_paths_match_pathspec(
             resolved,
             known,
@@ -304,6 +314,24 @@ mod tests {
         let err = checker.ensure("nope", "nope").expect_err("unknown path");
         assert!(matches!(err, Error::PathspecNoMatch { spec } if spec == "nope"));
         assert!(!checker.matches("*.rs").expect("glob miss"));
+    }
+
+    #[test]
+    fn checker_evaluates_attr_pathspecs_against_gitattributes() {
+        let dir = TempDir::new().expect("tempdir");
+        fs::create_dir_all(dir.path().join("src")).expect("mkdir");
+        fs::write(dir.path().join(".gitattributes"), "*.rs diff=rust\n").expect("write");
+        let repo = repo_with_commit(&dir, &["src/a.rs", "b.txt"]);
+        let mut checker = KnownPathspecChecker::new(&repo);
+        checker
+            .ensure(":(attr:diff=rust)", ":(attr:diff=rust)")
+            .expect("rust file is known");
+        assert!(checker.matches(":(attr:diff=rust)src").expect("check"));
+        assert!(!checker.matches(":(attr:diff=rust)b.txt").expect("check"));
+        let err = checker
+            .ensure(":(attr:diff=go)", ":(attr:diff=go)")
+            .expect_err("no go files");
+        assert!(matches!(err, Error::PathspecNoMatch { .. }));
     }
 
     #[test]

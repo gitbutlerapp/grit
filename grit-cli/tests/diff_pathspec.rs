@@ -226,6 +226,60 @@ fn diff_two_refs_bare_repository() {
     assert!(stdout.contains("old.txt"), "stdout={stdout}");
 }
 
+fn json_paths(stdout: &str) -> Vec<String> {
+    let v: serde_json::Value = serde_json::from_str(stdout).expect("json");
+    v["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|f| f["path"].as_str().map(str::to_owned))
+        .collect()
+}
+
+#[test]
+fn diff_json_attr_pathspec_matches_git() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir.path();
+    assert_eq!(git(root, &["init", "-q", "-b", "main"]).0, 0);
+    std::fs::create_dir_all(root.join("src/sub")).unwrap();
+    std::fs::write(
+        root.join(".gitattributes"),
+        "src/**/*.rs diff=rust linguist-generated\n",
+    )
+    .unwrap();
+    std::fs::write(root.join("src/sub/a.rs"), "a\n").unwrap();
+    std::fs::write(root.join("README.md"), "r\n").unwrap();
+    assert_eq!(git(root, &["add", "."]).0, 0);
+    let (code, _, err) = git(
+        root,
+        &[
+            "-c",
+            "user.name=T",
+            "-c",
+            "user.email=t@e.com",
+            "commit",
+            "-qm",
+            "init",
+        ],
+    );
+    assert_eq!(code, 0, "git commit: {err}");
+    std::fs::write(root.join("src/sub/a.rs"), "a2\n").unwrap();
+    std::fs::write(root.join("README.md"), "r2\n").unwrap();
+
+    for (spec, expected) in [
+        (":(attr:diff=rust)", vec!["src/sub/a.rs"]),
+        (":(exclude,attr:diff=rust)", vec!["README.md"]),
+    ] {
+        let (g_code, g_out, g_err) = git(root, &["diff", "--name-only", "--", spec]);
+        assert_eq!(g_code, 0, "git stderr={g_err}");
+        assert_eq!(g_out.lines().collect::<Vec<_>>(), expected, "git {spec}");
+
+        let (code, stdout, stderr) = grit(root, &["diff", "--json", "--", spec]);
+        assert_eq!(code, 0, "stderr={stderr}");
+        assert_eq!(json_paths(&stdout), expected, "grit {spec}");
+    }
+}
+
 #[test]
 fn diff_revision_then_bare_path_without_double_dash() {
     let dir = tempfile::tempdir().expect("tempdir");

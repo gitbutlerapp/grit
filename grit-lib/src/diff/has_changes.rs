@@ -33,20 +33,12 @@ fn opts_need_content_compare(opts: &DiffOptions) -> bool {
 }
 
 /// Returns whether `pathspecs` selects this diff entry (empty means all paths).
-fn entry_matches_pathspecs(repo: &Repository, entry: &DiffEntry, pathspecs: &[String]) -> bool {
-    if pathspecs.is_empty() {
-        return true;
-    }
-    let path = entry.path();
-    if repo.paths_match_pathspecs(path, pathspecs) {
-        return true;
-    }
-    if let Some(old) = entry.old_path.as_deref() {
-        if old != path && repo.paths_match_pathspecs(old, pathspecs) {
-            return true;
-        }
-    }
-    false
+fn entry_matches_pathspecs(
+    repo: &Repository,
+    entry: &DiffEntry,
+    pathspecs: &[String],
+) -> Result<bool> {
+    repo.change_matches_pathspecs(entry.path(), entry.old_path.as_deref(), pathspecs)
 }
 
 fn trust_filemode(config: &ConfigSet) -> bool {
@@ -277,7 +269,7 @@ fn worktree_has_changes(
         )?;
         for entry in &entries {
             WORKTREE_HAS_CHANGES_ENTRIES_SCANNED.fetch_add(1, Ordering::SeqCst);
-            if !entry_matches_pathspecs(repo, entry, pathspecs) {
+            if !entry_matches_pathspecs(repo, entry, pathspecs)? {
                 continue;
             }
             if worktree_index_entry_has_changes(
@@ -312,7 +304,7 @@ fn worktree_has_changes(
         &repo.thread_policy(),
     )?;
     for entry in entries {
-        if !entry_matches_pathspecs(repo, &entry, pathspecs) {
+        if !entry_matches_pathspecs(repo, &entry, pathspecs)? {
             continue;
         }
         if tree_entry_has_changes(repo.odb(), &entry, trust_filemode(config.as_ref()), opts)? {
@@ -336,7 +328,7 @@ fn staged_has_changes(repo: &Repository, pathspecs: &[String], opts: &DiffOption
         &repo.thread_policy(),
     )?;
     for entry in entries.drain(..) {
-        if !entry_matches_pathspecs(repo, &entry, pathspecs) {
+        if !entry_matches_pathspecs(repo, &entry, pathspecs)? {
             continue;
         }
         if tree_entry_has_changes(repo.odb(), &entry, trust_filemode(config.as_ref()), opts)? {
@@ -375,7 +367,7 @@ fn commit_trees_has_changes(
         &repo.thread_policy(),
     )?;
     for entry in entries.drain(..) {
-        if !entry_matches_pathspecs(repo, &entry, pathspecs) {
+        if !entry_matches_pathspecs(repo, &entry, pathspecs)? {
             continue;
         }
         if tree_entry_has_changes(repo.odb(), &entry, trust_filemode(config.as_ref()), opts)? {
@@ -435,7 +427,7 @@ impl<'repo> super::handle::Diff<'repo> {
                     &repo.thread_policy(),
                 )?;
                 for entry in entries.drain(..) {
-                    if !entry_matches_pathspecs(repo, &entry, pathspecs) {
+                    if !entry_matches_pathspecs(repo, &entry, pathspecs)? {
                         continue;
                     }
                     if tree_entry_has_changes(
@@ -464,7 +456,7 @@ impl<'repo> super::handle::Diff<'repo> {
                         &repo.thread_policy(),
                     )?;
                     for entry in entries.drain(..) {
-                        if !entry_matches_pathspecs(repo, &entry, pathspecs) {
+                        if !entry_matches_pathspecs(repo, &entry, pathspecs)? {
                             continue;
                         }
                         if tree_entry_has_changes(

@@ -1670,7 +1670,7 @@ pub fn status_path_matches(path: &str, pathspecs: &[String]) -> bool {
 fn pathspecs_use_attr_magic(pathspecs: &[String]) -> bool {
     pathspecs
         .iter()
-        .any(|spec| spec.starts_with(":(attr:") || spec.contains(",attr:"))
+        .any(|spec| crate::pathspec::pathspec_has_attr_magic(spec))
 }
 
 /// Pathspec match that also honors `:(attr:...)` magic against worktree contents.

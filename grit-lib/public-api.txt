@@ -11717,6 +11717,7 @@ pub fn grit_lib::pathspec::path_allowed_by_pathspec_list(&[alloc::string::String
 pub fn grit_lib::pathspec::pathdiff(&std::path::Path, &std::path::Path) -> core::option::Option<alloc::string::String>
 pub fn grit_lib::pathspec::pathspec_contributes_match(&str, &str) -> bool
 pub fn grit_lib::pathspec::pathspec_exclude_matches(&str, &str) -> bool
+pub fn grit_lib::pathspec::pathspec_has_attr_magic(&str) -> bool
 pub fn grit_lib::pathspec::pathspec_has_top(&str) -> bool
 pub fn grit_lib::pathspec::pathspec_is_exclude(&str) -> bool
 pub fn grit_lib::pathspec::pathspec_match_context_with_precompose(bool) -> grit_lib::pathspec::PathspecMatchContext
@@ -15663,6 +15664,7 @@ pub struct grit_lib::prelude::Repository
 impl grit_lib::repo::Repository
 pub fn grit_lib::repo::Repository::bundles(&self) -> grit_lib::repo_handles::RepositoryBundles<'_>
 pub fn grit_lib::repo::Repository::change_id_generator(&self) -> alloc::rcs::arc::Arc<dyn grit_lib::change_id::ChangeIdGenerator>
+pub fn grit_lib::repo::Repository::change_matches_pathspecs(&self, &str, core::option::Option<&str>, &[alloc::string::String]) -> grit_lib::error::Result<bool>
 pub fn grit_lib::repo::Repository::command_runner(&self) -> alloc::rcs::arc::Arc<dyn grit_lib::command_runner::CommandRunner>
 pub fn grit_lib::repo::Repository::common_git_dir(&self) -> &std::path::Path
 pub fn grit_lib::repo::Repository::config(&self) -> grit_lib::error::Result<alloc::rcs::arc::Arc<grit_lib::config::ConfigSet>>
@@ -15687,7 +15689,7 @@ pub fn grit_lib::repo::Repository::objects(&self) -> grit_lib::objects::handle::
 pub fn grit_lib::repo::Repository::odb(&self) -> &grit_lib::objects::odb::Odb
 pub fn grit_lib::repo::Repository::open(&std::path::Path, &grit_lib::config::environment::RepositoryOptions) -> grit_lib::error::Result<Self>
 pub fn grit_lib::repo::Repository::patch_id(&self, &grit_lib::objects::ObjectId, grit_lib::diff::patch_ids::PatchIdMode) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectId>>
-pub fn grit_lib::repo::Repository::paths_match_pathspecs(&self, &str, &[alloc::string::String]) -> bool
+pub fn grit_lib::repo::Repository::paths_match_pathspecs(&self, &str, &[alloc::string::String]) -> grit_lib::error::Result<bool>
 pub fn grit_lib::repo::Repository::pathspec_argv_prefix<'a>(&'a self, &str) -> core::option::Option<&'a str>
 pub fn grit_lib::repo::Repository::pathspec_cwd_prefix(&self) -> core::option::Option<&str>
 pub fn grit_lib::repo::Repository::prefetch_promised(&self, &[grit_lib::objects::ObjectId]) -> grit_lib::error::Result<()>
@@ -20506,6 +20508,7 @@ pub struct grit_lib::repo::Repository
 impl grit_lib::repo::Repository
 pub fn grit_lib::repo::Repository::bundles(&self) -> grit_lib::repo_handles::RepositoryBundles<'_>
 pub fn grit_lib::repo::Repository::change_id_generator(&self) -> alloc::rcs::arc::Arc<dyn grit_lib::change_id::ChangeIdGenerator>
+pub fn grit_lib::repo::Repository::change_matches_pathspecs(&self, &str, core::option::Option<&str>, &[alloc::string::String]) -> grit_lib::error::Result<bool>
 pub fn grit_lib::repo::Repository::command_runner(&self) -> alloc::rcs::arc::Arc<dyn grit_lib::command_runner::CommandRunner>
 pub fn grit_lib::repo::Repository::common_git_dir(&self) -> &std::path::Path
 pub fn grit_lib::repo::Repository::config(&self) -> grit_lib::error::Result<alloc::rcs::arc::Arc<grit_lib::config::ConfigSet>>
@@ -20530,7 +20533,7 @@ pub fn grit_lib::repo::Repository::objects(&self) -> grit_lib::objects::handle::
 pub fn grit_lib::repo::Repository::odb(&self) -> &grit_lib::objects::odb::Odb
 pub fn grit_lib::repo::Repository::open(&std::path::Path, &grit_lib::config::environment::RepositoryOptions) -> grit_lib::error::Result<Self>
 pub fn grit_lib::repo::Repository::patch_id(&self, &grit_lib::objects::ObjectId, grit_lib::diff::patch_ids::PatchIdMode) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::ObjectId>>
-pub fn grit_lib::repo::Repository::paths_match_pathspecs(&self, &str, &[alloc::string::String]) -> bool
+pub fn grit_lib::repo::Repository::paths_match_pathspecs(&self, &str, &[alloc::string::String]) -> grit_lib::error::Result<bool>
 pub fn grit_lib::repo::Repository::pathspec_argv_prefix<'a>(&'a self, &str) -> core::option::Option<&'a str>
 pub fn grit_lib::repo::Repository::pathspec_cwd_prefix(&self) -> core::option::Option<&str>
 pub fn grit_lib::repo::Repository::prefetch_promised(&self, &[grit_lib::objects::ObjectId]) -> grit_lib::error::Result<()>
@@ -25547,6 +25550,7 @@ pub fn grit_lib::worktree::pathspec::path_allowed_by_pathspec_list(&[alloc::stri
 pub fn grit_lib::worktree::pathspec::pathdiff(&std::path::Path, &std::path::Path) -> core::option::Option<alloc::string::String>
 pub fn grit_lib::worktree::pathspec::pathspec_contributes_match(&str, &str) -> bool
 pub fn grit_lib::worktree::pathspec::pathspec_exclude_matches(&str, &str) -> bool
+pub fn grit_lib::worktree::pathspec::pathspec_has_attr_magic(&str) -> bool
 pub fn grit_lib::worktree::pathspec::pathspec_has_top(&str) -> bool
 pub fn grit_lib::worktree::pathspec::pathspec_is_exclude(&str) -> bool
 pub fn grit_lib::worktree::pathspec::pathspec_match_context_with_precompose(bool) -> grit_lib::pathspec::PathspecMatchContext

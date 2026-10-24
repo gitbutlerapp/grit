@@ -394,6 +394,15 @@ impl RepoCaches {
         repo: &Repository,
         work_tree: &Path,
     ) -> Result<ParsedGitAttributes> {
+        Ok((*self.gitattributes_stack_shared(repo, work_tree)?).clone())
+    }
+
+    /// [`Self::load_gitattributes_stack`] without copying the cached rules (per-path callers).
+    pub(crate) fn gitattributes_stack_shared(
+        &self,
+        repo: &Repository,
+        work_tree: &Path,
+    ) -> Result<Arc<ParsedGitAttributes>> {
         let key = (repo.git_dir().to_path_buf(), work_tree.to_path_buf());
         {
             let cache = self
@@ -402,12 +411,12 @@ impl RepoCaches {
                 .map_err(|e| Error::Message(format!("attr stack cache lock poisoned: {e}")))?;
             if let Some(entry) = cache.get(&key) {
                 if attr_stamps_valid(entry) {
-                    return Ok((*entry.parsed).clone());
+                    return Ok(Arc::clone(&entry.parsed));
                 }
             }
         }
         let (file_stamps, dir_stamps) = collect_stack_stamps(repo, work_tree)?;
-        let parsed = load_gitattributes_stack_uncached(repo, work_tree)?;
+        let parsed = Arc::new(load_gitattributes_stack_uncached(repo, work_tree)?);
         let mut cache = self
             .attr_stack
             .lock()
@@ -417,7 +426,7 @@ impl RepoCaches {
             AttrStackCacheEntry {
                 file_stamps,
                 dir_stamps,
-                parsed: Arc::new(parsed.clone()),
+                parsed: Arc::clone(&parsed),
             },
         );
         Ok(parsed)
@@ -429,6 +438,14 @@ impl RepoCaches {
     ///
     /// Propagates attribute load and I/O errors.
     pub fn load_gitattributes_bare(&self, repo: &Repository) -> Result<ParsedGitAttributes> {
+        Ok((*self.gitattributes_bare_shared(repo)?).clone())
+    }
+
+    /// [`Self::load_gitattributes_bare`] without copying the cached rules (per-path callers).
+    pub(crate) fn gitattributes_bare_shared(
+        &self,
+        repo: &Repository,
+    ) -> Result<Arc<ParsedGitAttributes>> {
         let key = repo.git_dir().to_path_buf();
         {
             let cache = self
@@ -437,7 +454,7 @@ impl RepoCaches {
                 .map_err(|e| Error::Message(format!("attr bare cache lock poisoned: {e}")))?;
             if let Some(entry) = cache.get(&key) {
                 if attr_stamps_valid(entry) {
-                    return Ok((*entry.parsed).clone());
+                    return Ok(Arc::clone(&entry.parsed));
                 }
             }
         }
@@ -447,7 +464,7 @@ impl RepoCaches {
         }
         let info = repo.git_dir().join("info/attributes");
         file_stamps.push((info.clone(), attr_file_stamp(&info)));
-        let parsed = load_gitattributes_bare_uncached(repo)?;
+        let parsed = Arc::new(load_gitattributes_bare_uncached(repo)?);
         let mut cache = self
             .attr_bare
             .lock()
@@ -457,7 +474,7 @@ impl RepoCaches {
             AttrStackCacheEntry {
                 file_stamps,
                 dir_stamps: Vec::new(),
-                parsed: Arc::new(parsed.clone()),
+                parsed: Arc::clone(&parsed),
             },
         );
         Ok(parsed)
