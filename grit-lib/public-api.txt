@@ -9997,6 +9997,7 @@ pub grit_lib::objects::pack_objects::PackBuildOptions::reuse_deltas: bool
 pub grit_lib::objects::pack_objects::PackBuildOptions::reuse_objects: bool
 pub grit_lib::objects::pack_objects::PackBuildOptions::thin: bool
 pub grit_lib::objects::pack_objects::PackBuildOptions::use_bitmaps: bool
+pub grit_lib::objects::pack_objects::PackBuildOptions::stream_verbatim_single_pack: bool
 pub grit_lib::objects::pack_objects::PackBuildOptions::use_ofs_delta: bool
 pub grit_lib::objects::pack_objects::PackBuildOptions::window: usize
 impl grit_lib::objects::pack_objects::PackBuildOptions

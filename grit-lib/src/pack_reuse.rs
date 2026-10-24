@@ -71,9 +71,11 @@ impl ReuseWriteStats {
 pub struct StreamingReuse {
     pack: BitmappedPack,
     reuse_bits: Bitmap,
-    index: Arc<crate::pack_bitmap::BitmapIndex>,
+    index: Option<Arc<crate::pack_bitmap::BitmapIndex>>,
     source_to_output: HashMap<u64, u64>,
     stats: ReuseWriteStats,
+    /// When set, any object present in [`Self::pack`] may be copied verbatim (repack rewrite).
+    reuse_all_in_pack: bool,
 }
 
 impl StreamingReuse {
@@ -106,14 +108,27 @@ impl StreamingReuse {
         Self {
             pack,
             reuse_bits,
-            index: Arc::clone(send_set.bitmap_index()),
+            index: Some(Arc::clone(send_set.bitmap_index())),
             source_to_output: HashMap::new(),
             stats: ReuseWriteStats::default(),
+            reuse_all_in_pack: false,
         }
     }
 
     fn marks_reuse(&self, oid: &ObjectId) -> bool {
-        let Some(pos) = self.index.position_of(oid) else {
+        if self.reuse_all_in_pack {
+            return self
+                .pack
+                .idx
+                .find_offset(oid)
+                .ok()
+                .flatten()
+                .is_some();
+        }
+        let Some(index) = &self.index else {
+            return false;
+        };
+        let Some(pos) = index.position_of(oid) else {
             return false;
         };
         self.reuse_bits.get(pos as usize)
@@ -165,11 +180,17 @@ impl StreamingReuse {
             return Ok(None);
         };
         let pack_bytes = self.pack.pack_bytes.as_ref();
-        let mut offset_map: HashMap<u64, u64> = self.source_to_output.clone();
-        for (base_oid, out_off) in oid_to_offset {
-            if let Some(src) = self.pack.idx.find_offset(base_oid)? {
-                offset_map.entry(src).or_insert(*out_off);
-            }
+        let hash_bytes = self.pack.idx.oid_at(0).len();
+        if !delta_base_in_output_set(
+            &self.pack.idx,
+            pack_bytes,
+            entry_off,
+            hash_bytes,
+            &self.source_to_output,
+            oid_to_offset,
+            in_pack_base,
+        ) {
+            return Ok(None);
         }
         let hb = self.pack.idx.hash_bytes();
         let written = match write_one_reused(
@@ -180,7 +201,8 @@ impl StreamingReuse {
             entry_off,
             hb,
             opts,
-            &offset_map,
+            &self.source_to_output,
+            oid_to_offset,
             out_offset,
             in_pack_base,
         ) {
@@ -190,6 +212,110 @@ impl StreamingReuse {
         self.source_to_output.insert(entry_off, out_offset);
         Ok(Some(written))
     }
+}
+
+fn delta_base_in_output_set(
+    idx: &PackIndex,
+    pack_bytes: &[u8],
+    entry_off: u64,
+    hash_bytes: usize,
+    source_to_output: &HashMap<u64, u64>,
+    oid_to_offset: &crate::objects::OidHashMap<u64>,
+    in_pack_base: Option<u64>,
+) -> bool {
+    let Some(dep) = read_packed_delta_dependency(pack_bytes, entry_off, hash_bytes).ok().flatten()
+    else {
+        return false;
+    };
+    match dep {
+        PackedDeltaDependency::RefBase { base_oid } => oid_to_offset.contains_key(&base_oid),
+        PackedDeltaDependency::OfsBase { base_offset } => {
+            if source_to_output.contains_key(&base_offset) {
+                return true;
+            }
+            if in_pack_base.is_some() {
+                return true;
+            }
+            let Some(row) = find_position_by_pack_offset(idx, base_offset).ok().flatten() else {
+                return false;
+            };
+            let Ok(base_oid) = ObjectId::from_bytes(idx.oid_at(row)) else {
+                return false;
+            };
+            oid_to_offset.contains_key(&base_oid)
+        }
+    }
+}
+
+fn remapped_ofs_base(
+    idx: &PackIndex,
+    source_to_output: &HashMap<u64, u64>,
+    oid_to_offset: &crate::objects::OidHashMap<u64>,
+    base_offset: u64,
+    in_pack_base: Option<u64>,
+) -> Option<u64> {
+    source_to_output
+        .get(&base_offset)
+        .copied()
+        .or(in_pack_base)
+        .or_else(|| {
+            find_position_by_pack_offset(idx, base_offset)
+                .ok()
+                .flatten()
+                .and_then(|row| ObjectId::from_bytes(idx.oid_at(row)).ok())
+                .and_then(|base_oid| oid_to_offset.get(&base_oid).copied())
+        })
+}
+
+/// Streaming verbatim reuse for maintenance repack (`window == 0`), when objects live in one pack.
+pub fn try_streaming_reuse_for_repack(
+    odb: &crate::odb::Odb,
+    send: &[ObjectId],
+) -> Result<Option<StreamingReuse>> {
+    if odb.hash_algo() != crate::objects::HashAlgo::Sha1 {
+        return Ok(None);
+    }
+    let objects_dir = odb.objects_dir();
+    let indexes = read_local_pack_indexes_cached(objects_dir)?;
+    if indexes.is_empty() {
+        return Ok(None);
+    }
+    let mut best: Option<(usize, Arc<PackIndex>)> = None;
+    for idx in indexes {
+        let hits = send
+            .iter()
+            .filter(|oid| idx.find_offset(oid).ok().flatten().is_some())
+            .count();
+        if hits == 0 {
+            continue;
+        }
+        if best.as_ref().is_none_or(|(c, _)| hits > *c) {
+            best = Some((hits, idx));
+        }
+    }
+    let Some((hits, idx)) = best else {
+        return Ok(None);
+    };
+    if hits != send.len() {
+        // Streaming reuse only when every object is already in the source pack (zero-loose
+        // rewrite). Loose objects must take the planned zlib-reuse path instead.
+        return Ok(None);
+    }
+    let pack_bytes = read_pack_bytes_cached(&idx.pack_path)?;
+    let pack = BitmappedPack {
+        idx,
+        pack_bytes,
+        bitmap_pos: 0,
+        bitmap_nr: 0,
+    };
+    Ok(Some(StreamingReuse {
+        pack,
+        reuse_bits: Bitmap::new(),
+        index: None,
+        source_to_output: HashMap::new(),
+        stats: ReuseWriteStats::default(),
+        reuse_all_in_pack: true,
+    }))
 }
 
 /// Write a PACK stream to `w` using bitmap reachability and verbatim reuse when possible.
@@ -479,7 +605,8 @@ fn write_one_reused(
     entry_off: u64,
     _hb: usize,
     opts: &PackBuildOptions,
-    offset_map: &HashMap<u64, u64>,
+    source_to_output: &HashMap<u64, u64>,
+    oid_to_offset: &crate::objects::OidHashMap<u64>,
     pack_offset: u64,
     in_pack_base: Option<u64>,
 ) -> Result<u64> {
@@ -510,7 +637,13 @@ fn write_one_reused(
                     "expected ofs-delta dependency".to_owned(),
                 ));
             };
-            if let Some(new_base) = offset_map.get(&base_offset).copied().or(in_pack_base) {
+            if let Some(new_base) = remapped_ofs_base(
+                &pack.idx,
+                source_to_output,
+                oid_to_offset,
+                base_offset,
+                in_pack_base,
+            ) {
                 let dist = pack_offset
                     .checked_sub(new_base)
                     .ok_or_else(|| Error::CorruptObject("ofs-delta fixup underflow".to_owned()))?;
@@ -540,6 +673,21 @@ fn write_one_reused(
             Ok(n)
         }
         PackedType::RefDelta => {
+            let Some(dep) = read_packed_delta_dependency(pack_bytes, entry_off, hash_bytes)? else {
+                return Err(Error::CorruptObject(
+                    "ref-delta missing dependency for reuse".to_owned(),
+                ));
+            };
+            let PackedDeltaDependency::RefBase { base_oid } = dep else {
+                return Err(Error::CorruptObject(
+                    "expected ref-delta dependency".to_owned(),
+                ));
+            };
+            if !oid_to_offset.contains_key(&base_oid) {
+                return Err(Error::CorruptObject(
+                    "ref-delta base missing from output pack".to_owned(),
+                ));
+            }
             w.write_all(slice).map_err(Error::Io)?;
             stats.note_verbatim_slice(slice.len() as u64);
             Ok(slice.len() as u64)
