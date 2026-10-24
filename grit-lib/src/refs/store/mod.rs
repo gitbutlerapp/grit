@@ -58,6 +58,14 @@ pub trait PreparedRefTransaction: Send {
 }
 
 /// Reference storage backend (loose/packed files, reftable, or in-memory).
+///
+/// # Re-entrant callbacks
+///
+/// The callbacks passed to [`Self::for_each_ref`], [`Self::for_each_reflog_entry`] and
+/// [`Self::for_each_reflog_ref`] may call back into the same store, both to read (resolve a
+/// symref, read each listed ref's reflog) and to write. The set of names to visit is fixed when
+/// the walk starts, so a write made from the callback may not be seen by the walk in progress.
+/// Implementations must not hold internal locks while a callback runs.
 pub trait RefStore: Send + Sync + Debug {
     /// Which on-disk or logical format this store uses.
     fn format(&self) -> RefStorageFormat;
@@ -81,6 +89,8 @@ pub trait RefStore: Send + Sync + Debug {
     }
 
     /// Invoke `f` for each ref whose name starts with `prefix`, in sorted name order.
+    ///
+    /// `f` may call back into the store; see [re-entrant callbacks](Self#re-entrant-callbacks).
     fn for_each_ref(
         &self,
         prefix: &str,
@@ -100,6 +110,8 @@ pub trait RefStore: Send + Sync + Debug {
     fn reflog_exists(&self, name: &str) -> Result<bool>;
 
     /// Iterate reflog entries for `name` (oldest first unless `reverse`).
+    ///
+    /// `f` may call back into the store; see [re-entrant callbacks](Self#re-entrant-callbacks).
     fn for_each_reflog_entry(
         &self,
         name: &str,
@@ -117,6 +129,8 @@ pub trait RefStore: Send + Sync + Debug {
     fn replace_reflog(&self, name: &str, entries: Vec<ReflogEntry>) -> Result<()>;
 
     /// Invoke `f` for each ref name that has a reflog, in sorted order.
+    ///
+    /// `f` may call back into the store; see [re-entrant callbacks](Self#re-entrant-callbacks).
     fn for_each_reflog_ref(&self, f: &mut dyn FnMut(&str) -> ControlFlow<()>) -> Result<()>;
 
     /// The files backend behind this store, when it is one.

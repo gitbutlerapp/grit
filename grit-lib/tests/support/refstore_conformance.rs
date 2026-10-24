@@ -96,6 +96,7 @@ pub fn run_refstore_conformance(factory: StoreFactory) {
     abort_leaves_state_unchanged(&factory);
     concurrent_prepare_lock_held(&factory);
     reflog_roundtrip(&factory);
+    reentrant_callbacks(&factory);
 }
 
 fn cas_success(factory: &StoreFactory) {
@@ -722,4 +723,126 @@ fn reflog_roundtrip(factory: &StoreFactory) {
         })
         .expect("list");
     assert_eq!(reflog_refs, vec!["refs/heads/rr"]);
+}
+
+/// Iteration callbacks may read and write the store they are iterating; a backend that holds
+/// a lock across the callback deadlocks, so the body runs on a thread with a deadline.
+fn reentrant_callbacks(factory: &StoreFactory) {
+    let store = factory();
+    let (done_tx, done_rx) = std::sync::mpsc::channel();
+    let worker = thread::spawn(move || {
+        reentrant_callbacks_body(store.as_ref());
+        let _ = done_tx.send(());
+    });
+    match done_rx.recv_timeout(std::time::Duration::from_secs(30)) {
+        Ok(()) => worker.join().expect("worker"),
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+            if let Err(panic) = worker.join() {
+                std::panic::resume_unwind(panic);
+            }
+        }
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+            panic!(
+                "{:?}: callback re-entering the store deadlocked",
+                factory().format()
+            )
+        }
+    }
+}
+
+fn reentrant_callbacks_body(store: &dyn RefStore) {
+    seed_direct(store, "refs/heads/main", oid(1));
+    seed_symref(store, "refs/heads/alias", "refs/heads/main");
+    let log = |byte: u8| ReflogEntry {
+        old_oid: oid(0),
+        new_oid: oid(byte),
+        identity: "A <a@a.com> 1 +0000".to_owned(),
+        message: format!("m{byte}"),
+    };
+    store
+        .replace_reflog("refs/heads/main", vec![log(1)])
+        .expect("main log");
+    store
+        .replace_reflog("refs/heads/other", vec![log(2)])
+        .expect("other log");
+
+    let mut resolved = Vec::new();
+    store
+        .for_each_ref("refs/heads/", &mut |entry| {
+            assert_eq!(
+                store.read_raw(&entry.name).expect("read_raw"),
+                Some(entry.value.clone())
+            );
+            let mut nested = 0usize;
+            store
+                .for_each_ref("refs/heads/", &mut |_| {
+                    nested += 1;
+                    ControlFlow::Continue(())
+                })
+                .expect("nested for_each_ref");
+            assert!(nested >= 2, "nested walk saw {nested} refs");
+            resolved.push((
+                entry.name.clone(),
+                store.resolve(&entry.name).expect("resolve"),
+            ));
+            ControlFlow::Continue(())
+        })
+        .expect("for_each_ref");
+    assert_eq!(
+        resolved,
+        vec![
+            ("refs/heads/alias".to_owned(), oid(1)),
+            ("refs/heads/main".to_owned(), oid(1)),
+        ]
+    );
+
+    let mut dump = Vec::new();
+    store
+        .for_each_reflog_ref(&mut |name| {
+            store
+                .for_each_reflog_entry(name, false, &mut |entry| {
+                    dump.push((name.to_owned(), entry.new_oid));
+                    ControlFlow::Continue(())
+                })
+                .expect("for_each_reflog_entry");
+            ControlFlow::Continue(())
+        })
+        .expect("for_each_reflog_ref");
+    assert_eq!(
+        dump,
+        vec![
+            ("refs/heads/main".to_owned(), oid(1)),
+            ("refs/heads/other".to_owned(), oid(2)),
+        ]
+    );
+
+    let mut first = true;
+    store
+        .for_each_ref("refs/heads/", &mut |_| {
+            if first {
+                first = false;
+                seed_direct(store, "refs/tags/from-callback", oid(3));
+                store
+                    .replace_reflog("refs/heads/main", vec![log(1), log(4)])
+                    .expect("replace_reflog from callback");
+            }
+            ControlFlow::Continue(())
+        })
+        .expect("for_each_ref with writes");
+    assert_eq!(
+        store.read_raw("refs/tags/from-callback").expect("read"),
+        Some(RawRef::Direct(oid(3)))
+    );
+
+    let mut reflog_len = 0usize;
+    store
+        .for_each_reflog_entry("refs/heads/main", true, &mut |_| {
+            store
+                .replace_reflog("refs/heads/main", vec![log(5)])
+                .expect("replace_reflog during reflog walk");
+            reflog_len += 1;
+            ControlFlow::Continue(())
+        })
+        .expect("for_each_reflog_entry with writes");
+    assert_eq!(reflog_len, 2);
 }

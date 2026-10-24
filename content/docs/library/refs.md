@@ -88,6 +88,8 @@ if let Some(base) = comparison_base(&repo, "main")? {
 
 <!-- include: grit-examples/src/bin/custom_ref_store.rs -->
 
+Library code calls back into the store from iteration callbacks (for example, it reads each listed ref's reflog inside `for_each_reflog_ref`), so a custom backend must not hold an internal lock while it runs a `for_each_ref`, `for_each_reflog_entry` or `for_each_reflog_ref` callback. Collect what you need, or clone an `Arc` of the current state, and release the lock first. See [`RefStore`](rustdoc:grit_lib::refs::store::RefStore) for the full contract.
+
 ```bash
 cargo run --bin guide_refs /path/to/repo
 cargo run --bin custom_ref_store
