@@ -46,6 +46,10 @@ pub struct OdbBuilder {
 
 impl OdbBuilder {
     /// Default files-backed layout rooted at `objects_dir` (the repository's `objects/` tree).
+    ///
+    /// When passed to [`RepositoryBuilder::odb_builder`](crate::repo::RepositoryBuilder::odb_builder),
+    /// any spelling of the repository's `objects/` directory is accepted: a path through
+    /// symlinks, or a relative path (resolved against the environment's current directory).
     #[must_use]
     pub fn files(objects_dir: impl AsRef<Path>) -> Self {
         Self {
@@ -85,6 +89,10 @@ impl OdbBuilder {
     #[must_use]
     pub fn objects_dir(&self) -> &Path {
         &self.objects_dir
+    }
+
+    pub(crate) fn set_objects_dir(&mut self, objects_dir: PathBuf) {
+        self.objects_dir = objects_dir;
     }
 
     /// Construct an [`Odb`] handle (attach [`Odb::with_config_git_dir`] when opening a repository).

@@ -5321,6 +5321,9 @@ pub grit_lib::error::Error::NothingToCommit
 pub grit_lib::error::Error::ObjectHeaderTooLong
 pub grit_lib::error::Error::ObjectHeaderTooLong::oid: alloc::string::String
 pub grit_lib::error::Error::ObjectNotFound(alloc::string::String)
+pub grit_lib::error::Error::OdbObjectsDirMismatch
+pub grit_lib::error::Error::OdbObjectsDirMismatch::builder: std::path::PathBuf
+pub grit_lib::error::Error::OdbObjectsDirMismatch::repository: std::path::PathBuf
 pub grit_lib::error::Error::PackedRefsUnexpectedLine
 pub grit_lib::error::Error::PackedRefsUnexpectedLine::line: alloc::string::String
 pub grit_lib::error::Error::PackedRefsUnexpectedLine::path: alloc::string::String
@@ -9847,9 +9850,9 @@ pub fn grit_lib::objects::pack_name_hash::pack_name_hash_v2(&[u8]) -> u32
 pub mod grit_lib::objects::pack_object_select
 pub struct grit_lib::objects::pack_object_select::PackEnumerateOptions<'a>
 pub grit_lib::objects::pack_object_select::PackEnumerateOptions::exclude_objects: core::option::Option<&'a std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>>
-pub grit_lib::objects::pack_object_select::PackEnumerateOptions::prefetch_walk_objects: bool
 pub grit_lib::objects::pack_object_select::PackEnumerateOptions::filter: core::option::Option<&'a grit_lib::revwalk::rev_list::ObjectFilter>
 pub grit_lib::objects::pack_object_select::PackEnumerateOptions::have_shallow_grafts: core::option::Option<&'a std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>>
+pub grit_lib::objects::pack_object_select::PackEnumerateOptions::prefetch_walk_objects: bool
 pub grit_lib::objects::pack_object_select::PackEnumerateOptions::shallow_grafts: &'a std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>
 pub grit_lib::objects::pack_object_select::PackEnumerateOptions::use_bitmaps: bool
 impl<'a> core::clone::Clone for grit_lib::objects::pack_object_select::PackEnumerateOptions<'a>
@@ -14573,6 +14576,9 @@ pub grit_lib::prelude::Error::NothingToCommit
 pub grit_lib::prelude::Error::ObjectHeaderTooLong
 pub grit_lib::prelude::Error::ObjectHeaderTooLong::oid: alloc::string::String
 pub grit_lib::prelude::Error::ObjectNotFound(alloc::string::String)
+pub grit_lib::prelude::Error::OdbObjectsDirMismatch
+pub grit_lib::prelude::Error::OdbObjectsDirMismatch::builder: std::path::PathBuf
+pub grit_lib::prelude::Error::OdbObjectsDirMismatch::repository: std::path::PathBuf
 pub grit_lib::prelude::Error::PackedRefsUnexpectedLine
 pub grit_lib::prelude::Error::PackedRefsUnexpectedLine::line: alloc::string::String
 pub grit_lib::prelude::Error::PackedRefsUnexpectedLine::path: alloc::string::String

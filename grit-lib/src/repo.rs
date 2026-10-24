@@ -233,6 +233,11 @@ impl RepositoryBuilder {
     }
 
     /// Use a preconfigured [`crate::odb::OdbBuilder`] for the object store.
+    ///
+    /// The builder's objects directory may be any path naming the repository's `objects/`
+    /// directory (through symlinks, or relative to the environment's current directory);
+    /// [`Self::open`] replaces it with the canonical path, so [`crate::odb::Odb::objects_dir`]
+    /// agrees with [`Repository::git_dir`].
     pub fn odb_builder(mut self, builder: crate::odb::OdbBuilder) -> Self {
         self.odb_builder = Some(builder);
         self
@@ -246,9 +251,15 @@ impl RepositoryBuilder {
 
     /// Open `git_dir` with optional `work_tree`, applying builder overrides.
     ///
+    /// With an [`Self::odb_builder`], relative `git_dir`, `work_tree` and objects paths are
+    /// resolved against the environment's current directory
+    /// ([`crate::environment::Environment::discovery_cwd`]), and paths through symlinks are
+    /// accepted.
+    ///
     /// # Errors
     ///
-    /// Same as [`Repository::open`].
+    /// Same as [`Repository::open`], plus [`Error::OdbObjectsDirMismatch`] when the
+    /// [`Self::odb_builder`] names a directory other than the repository's `objects/`.
     pub fn open(self, git_dir: &Path, work_tree: Option<&Path>) -> Result<Repository> {
         let mut options = self.options;
         if let Some(wt) = work_tree {
@@ -1304,14 +1315,16 @@ impl Repository {
     fn open_with_odb_internal(
         options: &RepositoryOptions,
         git_dir: &Path,
-        builder: crate::odb::OdbBuilder,
+        mut builder: crate::odb::OdbBuilder,
     ) -> Result<Self> {
         let work_tree = options.work_tree.as_deref();
-        let git_dir = git_dir
+        let environment = Arc::new(options.environment.clone());
+        let cwd = environment.discovery_cwd();
+        let git_dir = cwd
+            .join(git_dir)
             .canonicalize()
             .map_err(|_| not_a_repository_at(git_dir))?;
 
-        let environment = Arc::new(options.environment.clone());
         let command_runner = Arc::clone(&options.command_runner);
         let change_id_generator = Arc::clone(&options.change_id_generator);
 
@@ -1332,22 +1345,19 @@ impl Repository {
             return Err(not_a_repository_at(&git_dir));
         }
 
-        if builder.objects_dir() != objects_dir.as_path() {
-            return Err(Error::PathError(format!(
-                "OdbBuilder objects dir '{}' does not match repository objects '{}'",
-                builder.objects_dir().display(),
-                objects_dir.display()
-            )));
+        let builder_objects = cwd.join(builder.objects_dir());
+        let builder_objects = builder_objects.canonicalize().unwrap_or(builder_objects);
+        if builder_objects != objects_dir {
+            return Err(Error::OdbObjectsDirMismatch {
+                builder: builder_objects,
+                repository: objects_dir,
+            });
         }
+        builder.set_objects_dir(objects_dir);
 
         let work_tree = match work_tree {
             Some(p) => {
-                let cwd = environment.discovery_cwd();
-                let mut resolved = if p.is_absolute() {
-                    p.to_path_buf()
-                } else {
-                    cwd.join(p)
-                };
+                let mut resolved = cwd.join(p);
                 if resolved.exists() {
                     resolved = resolved
                         .canonicalize()

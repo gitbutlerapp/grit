@@ -1273,6 +1273,21 @@ pub enum Error {
         operation: &'static str,
     },
 
+    /// [`RepositoryBuilder::open`](crate::repo::RepositoryBuilder::open) was given an
+    /// [`OdbBuilder`](crate::odb::OdbBuilder) rooted somewhere other than the repository's
+    /// `objects/` directory.
+    #[error(
+        "object database {} is not the repository's objects directory {}",
+        builder.display(),
+        repository.display()
+    )]
+    OdbObjectsDirMismatch {
+        /// The builder's objects directory, canonicalized when it exists.
+        builder: std::path::PathBuf,
+        /// The repository's canonical objects directory.
+        repository: std::path::PathBuf,
+    },
+
     /// Parsing a [`crate::tree_sha256::TreeSha256`] from hex failed (expected 64 hex digits).
     #[error("invalid tree-sha256 hex")]
     TreeSha256InvalidHex,

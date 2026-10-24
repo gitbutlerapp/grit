@@ -87,6 +87,146 @@ fn memory_repo() -> (tempfile::TempDir, Repository, Arc<MemoryStore>) {
     (dir, repo, store)
 }
 
+/// `tmp/real` holds an initialized repository and `tmp/link` is a symlink to it, like macOS
+/// `/var` -> `/private/var`.
+#[cfg(unix)]
+fn symlinked_repo() -> (tempfile::TempDir, std::path::PathBuf, std::path::PathBuf) {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let real = tmp.path().join("real");
+    fs::create_dir(&real).expect("mkdir real");
+    Repository::init(&real, &InitOptions::default()).expect("init");
+    let link = tmp.path().join("link");
+    std::os::unix::fs::symlink(&real, &link).expect("symlink");
+    (tmp, real, link)
+}
+
+#[cfg(unix)]
+fn open_with_memory_primary(
+    options: RepositoryOptions,
+    git_dir: &Path,
+    work_tree: &Path,
+    objects: &Path,
+) -> grit_lib::error::Result<Repository> {
+    let store = Arc::new(MemoryStore::new(grit_lib::objects::HashAlgo::Sha1));
+    RepositoryBuilder::new(options)
+        .odb_builder(OdbBuilder::files(objects).primary(store).alternates(false))
+        .open(git_dir, Some(work_tree))
+}
+
+#[cfg(unix)]
+fn assert_blob_round_trip(repo: &Repository) {
+    let oid = repo.odb().write(ObjectKind::Blob, b"hello").expect("write");
+    let obj = repo.odb().read(&oid).expect("read");
+    assert_eq!(obj.data, b"hello");
+}
+
+#[cfg(unix)]
+#[test]
+fn custom_primary_accepts_objects_dir_through_symlink() {
+    let (_tmp, real, link) = symlinked_repo();
+    let git_dir = link.join(".git");
+    let repo = open_with_memory_primary(
+        RepositoryOptions::empty(),
+        &git_dir,
+        &link,
+        &git_dir.join("objects"),
+    )
+    .expect("open through symlink");
+    let canonical_objects = real.join(".git/objects").canonicalize().expect("canon");
+    assert_eq!(repo.odb().objects_dir(), canonical_objects);
+    assert_eq!(repo.odb().objects_dir(), repo.git_dir().join("objects"));
+    assert_blob_round_trip(&repo);
+}
+
+#[cfg(unix)]
+#[test]
+fn custom_primary_accepts_mixed_symlink_and_real_paths() {
+    let (_tmp, real, link) = symlinked_repo();
+    let repo = open_with_memory_primary(
+        RepositoryOptions::empty(),
+        &link.join(".git"),
+        &link,
+        &real.join(".git/objects"),
+    )
+    .expect("git dir via symlink, objects via real path");
+    assert_blob_round_trip(&repo);
+
+    let repo = open_with_memory_primary(
+        RepositoryOptions::empty(),
+        &real.join(".git"),
+        &real,
+        &link.join(".git/objects"),
+    )
+    .expect("git dir via real path, objects via symlink");
+    assert_blob_round_trip(&repo);
+}
+
+#[cfg(unix)]
+#[test]
+fn custom_primary_resolves_relative_paths_against_discovery_cwd() {
+    let (_tmp, real, link) = symlinked_repo();
+    let mut environment = grit_lib::config::environment::Environment::empty();
+    environment.cwd = link.clone();
+    let repo = open_with_memory_primary(
+        RepositoryOptions::with_environment(environment),
+        Path::new(".git"),
+        Path::new("."),
+        Path::new(".git/objects"),
+    )
+    .expect("relative paths resolve against the environment cwd");
+    let canonical_real = real.canonicalize().expect("canon");
+    assert_eq!(repo.git_dir(), canonical_real.join(".git"));
+    assert_eq!(
+        repo.odb().objects_dir(),
+        canonical_real.join(".git/objects")
+    );
+    assert_blob_round_trip(&repo);
+}
+
+#[cfg(unix)]
+#[test]
+fn custom_primary_rejects_a_different_objects_dir() {
+    let (tmp, _real, link) = symlinked_repo();
+    let other = tmp.path().join("other");
+    fs::create_dir_all(other.join("objects")).expect("mkdir other");
+    let err = open_with_memory_primary(
+        RepositoryOptions::empty(),
+        &link.join(".git"),
+        &link,
+        &other.join("objects"),
+    )
+    .err()
+    .expect("different objects dir must be rejected");
+    match err {
+        Error::OdbObjectsDirMismatch {
+            builder,
+            repository,
+        } => {
+            assert_eq!(
+                builder,
+                other.join("objects").canonicalize().expect("canon")
+            );
+            assert_eq!(repository, repository.canonicalize().expect("canon"));
+            assert_ne!(builder, repository);
+        }
+        other => panic!("unexpected error: {other:?}"),
+    }
+
+    let missing = tmp.path().join("missing/objects");
+    let err = open_with_memory_primary(
+        RepositoryOptions::empty(),
+        &link.join(".git"),
+        &link,
+        &missing,
+    )
+    .err()
+    .expect("missing objects dir must be rejected");
+    assert!(
+        matches!(err, Error::OdbObjectsDirMismatch { ref builder, .. } if builder == &missing),
+        "unexpected error: {err:?}"
+    );
+}
+
 #[test]
 fn memory_primary_revwalk_diff_without_loose_objects() {
     let (_dir, repo, _store) = memory_repo();
