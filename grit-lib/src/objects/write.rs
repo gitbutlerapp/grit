@@ -7,7 +7,7 @@
 use std::collections::HashSet;
 
 use crate::change_id::ChangeId;
-use crate::fsck_standalone::tree_entry_mode_allowed;
+use crate::fsck_standalone::{tree_entry_mode_allowed, MAX_TREE_ENTRY_LEN};
 use crate::ident::Signature;
 use crate::objects::{tree_entry_cmp, CommitData, HashAlgo, ObjectId, TreeEntry};
 use crate::path_validate::{audit_tree_entry_name, PathComponentError, ProtectOptions};
@@ -28,6 +28,17 @@ pub enum TreeEntryError {
         name: Vec<u8>,
         /// Which path-component rule the name breaks.
         reason: PathComponentError,
+    },
+    /// The name is longer than the 4096 bytes `git fsck --strict` accepts.
+    #[error(
+        "tree entry name of {} bytes exceeds the {max}-byte limit",
+        .name.len()
+    )]
+    NameTooLong {
+        /// Entry name.
+        name: Vec<u8>,
+        /// Longest accepted name, in bytes.
+        max: usize,
     },
     /// The mode is not one of `100644`, `100755`, `120000`, `40000` or `160000`.
     #[error("tree entry '{}' has unsupported mode {mode:o}", String::from_utf8_lossy(.name))]
@@ -68,6 +79,9 @@ pub enum TreeEntryError {
 
 /// Validate `entries` for `algo` and return them in canonical Git tree order.
 ///
+/// The checks cover every rule `git fsck --strict` applies to a tree, so the
+/// serialized result needs no second fsck pass.
+///
 /// # Errors
 ///
 /// The first [`TreeEntryError`] found, checking each entry in input order and
@@ -98,6 +112,12 @@ fn validate_tree_entry(entry: &TreeEntry, algo: HashAlgo) -> Result<(), TreeEntr
             name: entry.name.clone(),
             reason,
         })?;
+    if entry.name.len() > MAX_TREE_ENTRY_LEN {
+        return Err(TreeEntryError::NameTooLong {
+            name: entry.name.clone(),
+            max: MAX_TREE_ENTRY_LEN,
+        });
+    }
     if !tree_entry_mode_allowed(entry.mode) {
         return Err(TreeEntryError::InvalidMode {
             name: entry.name.clone(),
@@ -299,7 +319,14 @@ mod tests {
 
     #[test]
     fn rejects_bad_names_modes_and_ids() {
-        let cases: [(TreeEntry, TreeEntryError); 6] = [
+        let cases: [(TreeEntry, TreeEntryError); 7] = [
+            (
+                entry(0o100644, &[b'x'; MAX_TREE_ENTRY_LEN + 1], 1),
+                TreeEntryError::NameTooLong {
+                    name: vec![b'x'; MAX_TREE_ENTRY_LEN + 1],
+                    max: MAX_TREE_ENTRY_LEN,
+                },
+            ),
             (
                 entry(0o100644, b"", 1),
                 TreeEntryError::InvalidName {

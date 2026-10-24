@@ -443,4 +443,24 @@ fn signature_new_rejects_header_breaking_input() {
         err,
         Error::InvalidSignature(SignatureError::BeforeEpoch)
     ));
+    let message = Signature::new("A\nB", "a@example.com", t)
+        .expect_err("newline")
+        .to_string();
+    assert!(message.contains("name"), "{message}");
+    assert_eq!(SignatureField::Email.to_string(), "email");
+}
+
+#[test]
+fn typed_errors_render_entry_names() {
+    let dup = TreeEntryError::DuplicateName {
+        name: b"same".to_vec(),
+    };
+    assert!(Error::from(dup).to_string().contains("'same'"));
+    let dir = tempfile::tempdir().expect("tempdir");
+    let repo = init_bare(dir.path(), HashAlgo::Sha1);
+    let err = repo
+        .objects()
+        .write(ObjectKind::Tree, b"100644 a")
+        .expect_err("truncated tree");
+    assert!(err.to_string().contains("badTree"), "{err}");
 }

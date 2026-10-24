@@ -460,13 +460,14 @@ fn skip_tag_gpgsig_headers(data: &[u8], mut i: usize) -> Result<usize, FsckError
     Ok(i)
 }
 
-const MAX_TREE_ENTRY_LEN: usize = 4096;
+/// Longest tree entry name `git fsck` accepts without a `largePathname` report.
+pub(crate) const MAX_TREE_ENTRY_LEN: usize = 4096;
 const MODE_TREE: u32 = 0o040000;
 
 /// One decoded row from a tree object's on-disk encoding.
-struct ParsedTreeEntry {
+struct ParsedTreeEntry<'a> {
     mode: u32,
-    name: Vec<u8>,
+    name: &'a [u8],
 }
 
 /// Collects semantic tree problems discovered after parsing.
@@ -545,7 +546,7 @@ impl TreeProblemSet {
 }
 
 /// Git compares tree names with an implicit terminator: blobs end with NUL, trees with `/`.
-fn sort_key_byte(entry: &ParsedTreeEntry, index: usize) -> u8 {
+fn sort_key_byte(entry: &ParsedTreeEntry<'_>, index: usize) -> u8 {
     if index < entry.name.len() {
         entry.name[index]
     } else if entry.mode == MODE_TREE {
@@ -557,13 +558,13 @@ fn sort_key_byte(entry: &ParsedTreeEntry, index: usize) -> u8 {
 
 /// Tracks file basenames that can collide with a later directory entry (prefix rules).
 #[derive(Default)]
-struct FileBeforeDirTracker {
-    pending: Vec<Vec<u8>>,
+struct FileBeforeDirTracker<'a> {
+    pending: Vec<&'a [u8]>,
 }
 
-impl FileBeforeDirTracker {
+impl<'a> FileBeforeDirTracker<'a> {
     /// Returns `true` when the pair implies a duplicate path (file vs directory alias).
-    fn on_ordered_pair(&mut self, left: &ParsedTreeEntry, right: &ParsedTreeEntry) -> bool {
+    fn on_ordered_pair(&mut self, left: &ParsedTreeEntry<'a>, right: &ParsedTreeEntry<'a>) -> bool {
         let shared = left.name.len().min(right.name.len());
         if left.name[..shared] != right.name[..shared] {
             return false;
@@ -574,14 +575,14 @@ impl FileBeforeDirTracker {
             return true;
         }
         if left_key == 0 && (1..b'/').contains(&right_key) {
-            self.pending.push(left.name.clone());
+            self.pending.push(left.name);
             return false;
         }
         if right_key != b'/' || !(1..b'/').contains(&left_key) {
             return false;
         }
         while let Some(file_name) = self.pending.pop() {
-            if !right.name.starts_with(&file_name) {
+            if !right.name.starts_with(file_name) {
                 continue;
             }
             let prefix_len = file_name.len();
@@ -605,7 +606,7 @@ enum PairOrder {
     Decreasing,
 }
 
-fn pair_order(left: &ParsedTreeEntry, right: &ParsedTreeEntry) -> PairOrder {
+fn pair_order(left: &ParsedTreeEntry<'_>, right: &ParsedTreeEntry<'_>) -> PairOrder {
     let shared = left.name.len().min(right.name.len());
     match left.name[..shared].cmp(&right.name[..shared]) {
         std::cmp::Ordering::Less => return PairOrder::Increasing,
@@ -624,7 +625,7 @@ fn pair_order(left: &ParsedTreeEntry, right: &ParsedTreeEntry) -> PairOrder {
     }
 }
 
-fn audit_canonical_order(entries: &[ParsedTreeEntry]) -> (bool, bool) {
+fn audit_canonical_order(entries: &[ParsedTreeEntry<'_>]) -> (bool, bool) {
     let mut wrong_order = false;
     let mut duplicate = false;
     let mut tracker = FileBeforeDirTracker::default();
@@ -644,8 +645,8 @@ fn audit_canonical_order(entries: &[ParsedTreeEntry]) -> (bool, bool) {
     (wrong_order, duplicate)
 }
 
-fn note_entry_shape(entry: &ParsedTreeEntry, problems: &mut TreeProblemSet) {
-    let audit = audit_tree_entry_name(&entry.name, ProtectOptions::fsck());
+fn note_entry_shape(entry: &ParsedTreeEntry<'_>, problems: &mut TreeProblemSet) {
+    let audit = audit_tree_entry_name(entry.name, ProtectOptions::fsck());
     if audit.dot {
         problems.dot_name = true;
     }
@@ -675,7 +676,7 @@ pub(crate) fn tree_entry_mode_allowed(mode: u32) -> bool {
 fn decode_tree_for_fsck(
     data: &[u8],
     oid_len: usize,
-) -> Result<(Vec<ParsedTreeEntry>, TreeProblemSet), FsckError> {
+) -> Result<(Vec<ParsedTreeEntry<'_>>, TreeProblemSet), FsckError> {
     let bad = || FsckError::new("badTree", "tree object bytes are not a valid tree encoding");
     let mut pos = 0usize;
     let mut entries = Vec::new();
@@ -702,7 +703,7 @@ fn decode_tree_for_fsck(
         if nul == 0 {
             return Err(bad());
         }
-        let name = data[pos..pos + nul].to_vec();
+        let name = &data[pos..pos + nul];
         pos += nul + 1;
 
         if pos + oid_len > data.len() {

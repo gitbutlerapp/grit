@@ -797,15 +797,35 @@ pub fn parse_tree_with_oid_len(data: &[u8], oid_len: usize) -> Result<Vec<TreeEn
 /// [`Objects::write_tree`](crate::objects::Objects::write_tree).
 #[must_use]
 pub fn serialize_tree(entries: &[TreeEntry]) -> Vec<u8> {
-    let mut out = Vec::new();
+    let len = entries
+        .iter()
+        .map(|e| 8 + e.name.len() + e.oid.as_bytes().len())
+        .sum();
+    let mut out = Vec::with_capacity(len);
     for e in entries {
-        out.extend_from_slice(e.mode_str().as_bytes());
+        push_tree_mode(&mut out, e.mode);
         out.push(b' ');
         out.extend_from_slice(&e.name);
         out.push(0);
         out.extend_from_slice(e.oid.as_bytes());
     }
     out
+}
+
+/// Append `mode` in octal without leading zeros, as [`TreeEntry::mode_str`] formats it.
+fn push_tree_mode(out: &mut Vec<u8>, mode: u32) {
+    let mut digits = [0u8; 11];
+    let mut start = digits.len();
+    let mut rest = mode;
+    loop {
+        start -= 1;
+        digits[start] = b'0' + (rest & 7) as u8;
+        rest >>= 3;
+        if rest == 0 {
+            break;
+        }
+    }
+    out.extend_from_slice(&digits[start..]);
 }
 
 /// Git's tree-entry sort comparator.
@@ -1359,6 +1379,29 @@ mod commit_parse_tests {
             ObjectId::empty_tree().to_hex(),
             "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
         );
+    }
+
+    #[test]
+    fn serialize_tree_mode_matches_mode_str() {
+        for mode in [
+            0,
+            0o7,
+            0o100644,
+            0o100755,
+            0o120000,
+            0o040000,
+            0o160000,
+            u32::MAX,
+        ] {
+            let mut out = Vec::new();
+            push_tree_mode(&mut out, mode);
+            let entry = TreeEntry {
+                mode,
+                name: Vec::new(),
+                oid: ObjectId::empty_tree(),
+            };
+            assert_eq!(out, entry.mode_str().into_bytes(), "mode {mode:o}");
+        }
     }
 
     #[test]

@@ -188,8 +188,8 @@ impl<'repo> Objects<'repo> {
     /// - [`crate::error::Error::InvalidTreeEntry`] when an entry has an empty, `.`, `..`,
     ///   `.git`-alias or slash/NUL-containing name, a mode other than `100644`, `100755`,
     ///   `120000`, `40000` or `160000`, the null object id, an object id of the wrong hash
-    ///   algorithm, or a name used by another entry.
-    /// - The errors of [`Self::write`].
+    ///   algorithm, a name over 4096 bytes, or a name used by another entry.
+    /// - [`crate::error::Error::HashCollision`] and zlib or filesystem errors from the ODB.
     ///
     /// # Examples
     ///
@@ -211,8 +211,13 @@ impl<'repo> Objects<'repo> {
     /// # }
     /// ```
     pub fn write_tree(&self, entries: impl IntoIterator<Item = TreeEntry>) -> Result<ObjectId> {
-        let entries = canonical_tree_entries(entries, self.repo.odb().hash_algo())?;
-        self.write(ObjectKind::Tree, &serialize_tree(&entries))
+        let algo = self.repo.odb().hash_algo();
+        let data = serialize_tree(&canonical_tree_entries(entries, algo)?);
+        debug_assert!(
+            fsck_object(ObjectKind::Tree, &data, FsckObjectOptions::new(algo)).is_ok(),
+            "canonical_tree_entries let through a tree fsck rejects"
+        );
+        self.repo.odb().write(ObjectKind::Tree, &data)
     }
 
     /// Write the commit described by `commit` and return its id.

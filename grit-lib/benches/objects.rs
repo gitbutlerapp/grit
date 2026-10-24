@@ -282,6 +282,30 @@ fn bench_tree_iter(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_validated_tree_write(c: &mut Criterion) {
+    let fx = s7::HistoryBenchFixtures::global();
+    let objects = fx.repo.objects();
+    let data = fx
+        .repo
+        .odb()
+        .read(&fx.wide_tree)
+        .expect("read wide tree")
+        .data;
+    let entries = parse_tree(&data).expect("parse");
+    let mut group = c.benchmark_group("tree_write_10k");
+    group.throughput(Throughput::Elements(entries.len() as u64));
+    group.bench_function("write_literally", |b| {
+        b.iter(|| black_box(objects.write_literally(ObjectKind::Tree, black_box(&data))))
+    });
+    group.bench_function("write_fsck_checked", |b| {
+        b.iter(|| black_box(objects.write(ObjectKind::Tree, black_box(&data))))
+    });
+    group.bench_function("write_tree_entries", |b| {
+        b.iter(|| black_box(objects.write_tree(black_box(entries.clone()))))
+    });
+    group.finish();
+}
+
 fn bench_delta_apply(c: &mut Criterion) {
     let fx = ObjectBenchFixtures::global();
     let mut group = c.benchmark_group("delta_apply");
@@ -309,6 +333,7 @@ criterion_group!(
     bench_idx_lookup,
     bench_exists_local_10k_oids_packed,
     bench_tree_iter,
+    bench_validated_tree_write,
     bench_delta_apply
 );
 criterion_main!(objects);
