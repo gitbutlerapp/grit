@@ -12,10 +12,10 @@ use crate::config::environment::Environment;
 use crate::config::ident_resolve::{resolve_identity_with, IdentRole};
 use crate::config::parse_git_config_maybe_bool;
 use crate::config::ConfigSet;
-use crate::error::{Error, Result};
+use crate::error::Error;
 use crate::fetch_request::resolve_remote_argument;
 use crate::merge_base::{count_symmetric_ahead_behind, is_ancestor, merge_bases_first_vs_rest};
-use crate::objects::{parse_commit, ObjectId};
+use crate::objects::ObjectId;
 use crate::porcelain::checkout::checkout_between_trees;
 use crate::porcelain::checkout_reflog::checkout_reflog_identity;
 use crate::porcelain::merge::{
@@ -588,7 +588,7 @@ fn adopt_unborn_upstream(
     upstream_oid: ObjectId,
 ) -> std::result::Result<PullOutcome, PullError> {
     ensure_branch_tip(repo, refname, None)?;
-    let upstream_tree = commit_tree(repo, &upstream_oid)?;
+    let upstream_tree = repo.odb().commit_tree(&upstream_oid)?;
     prepare_tree_checkout(repo, None, &upstream_tree).map_err(PullError::Repository)?;
     checkout_between_trees(repo, None, &upstream_tree).map_err(PullError::Repository)?;
     update_checked_out_branch(repo, refname, None, upstream_oid, INITIAL_PULL_REFLOG)?;
@@ -829,12 +829,6 @@ fn map_integrate_outcome(outcome: IntegrateBranchOutcome, label: &str) -> PullOu
             unreachable!("pull does not use squash or no-commit merge modes")
         }
     }
-}
-
-fn commit_tree(repo: &Repository, oid: &ObjectId) -> Result<ObjectId> {
-    let obj = repo.odb().read(oid)?;
-    let commit = parse_commit(&obj.data)?;
-    Ok(commit.tree)
 }
 
 #[cfg(test)]

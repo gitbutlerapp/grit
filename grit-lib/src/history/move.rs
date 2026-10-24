@@ -1,7 +1,7 @@
 //! Reorder one commit on the first-parent chain of `HEAD`.
 
 use crate::error::Error;
-use crate::objects::{parse_commit, ObjectId, ObjectKind};
+use crate::objects::ObjectId;
 use crate::repo::Repository;
 use crate::state::resolve_head;
 
@@ -17,14 +17,7 @@ fn library_err(err: Error) -> HistoryError {
 }
 
 fn commit_parents(repo: &Repository, oid: ObjectId) -> Result<Vec<ObjectId>, HistoryError> {
-    let raw = repo.odb().read(&oid).map_err(library_err)?;
-    if raw.kind != ObjectKind::Commit {
-        return Err(library_err(Error::CorruptObject(format!(
-            "expected commit, got {}",
-            raw.kind.as_str()
-        ))));
-    }
-    Ok(parse_commit(&raw.data).map_err(library_err)?.parents)
+    Ok(repo.odb().read_commit(&oid).map_err(library_err)?.parents)
 }
 
 /// Where to place a moved commit relative to an anchor on the first-parent chain.

@@ -18,7 +18,7 @@ use crate::merge_file::MergeFavor;
 use crate::merge_trees::{
     merge_trees_three_way, TreeMergeConflictPresentation, WhitespaceMergeOptions,
 };
-use crate::objects::{parse_commit, parse_tree, CommitData, ObjectId, ObjectKind};
+use crate::objects::{parse_tree, CommitData, ObjectId, ObjectKind};
 use crate::porcelain::hunk_select::{
     diff_options_for_hunk_select, resolve_selection, stage_hunks, HunkSelection,
 };
@@ -476,17 +476,11 @@ fn head_commit_oid(repo: &Repository) -> Result<ObjectId, HistoryError> {
 }
 
 fn load_commit(repo: &Repository, oid: ObjectId) -> Result<CommitData, HistoryError> {
-    let raw = repo.odb().read(&oid).map_err(library_err)?;
-    if raw.kind != ObjectKind::Commit {
-        return Err(HistoryError::Planning {
-            message: format!("{oid} is not a commit object"),
-        });
-    }
-    parse_commit(&raw.data).map_err(library_err)
+    repo.odb().read_commit(&oid).map_err(library_err)
 }
 
 fn commit_tree(repo: &Repository, commit: ObjectId) -> Result<ObjectId, HistoryError> {
-    Ok(load_commit(repo, commit)?.tree)
+    repo.odb().commit_tree(&commit).map_err(library_err)
 }
 
 fn empty_tree_oid(repo: &Repository) -> Result<ObjectId, HistoryError> {

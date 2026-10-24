@@ -7,7 +7,7 @@ use std::path::Path;
 use serde::{Deserialize, Serialize};
 
 use crate::lockfile::{LockFile, LockWait};
-use crate::objects::{parse_commit, ObjectId};
+use crate::objects::ObjectId;
 use crate::operation::conflicts_from_tree_merge;
 use crate::porcelain::checkout::checkout_between_trees;
 use crate::porcelain::index_from_tree::index_from_tree_with_worktree_stats;
@@ -729,15 +729,14 @@ fn resolve_head_oid(repo: &Repository) -> Result<ObjectId, RebaseSessionError> {
 }
 
 fn commit_tree(repo: &Repository, commit: ObjectId) -> Result<ObjectId, RebaseSessionError> {
-    Ok(load_commit(repo, commit)?.tree)
+    repo.odb().commit_tree(&commit).map_err(map_lib)
 }
 
 fn load_commit(
     repo: &Repository,
     oid: ObjectId,
 ) -> Result<crate::objects::CommitData, RebaseSessionError> {
-    let raw = repo.odb().read(&oid).map_err(map_lib)?;
-    parse_commit(&raw.data).map_err(map_lib)
+    repo.odb().read_commit(&oid).map_err(map_lib)
 }
 
 fn reset_index_worktree_to_head(

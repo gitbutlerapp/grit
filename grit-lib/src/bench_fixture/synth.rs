@@ -281,7 +281,7 @@ pub fn generate_synth_repo_with_spec(out: &Path, spec: TierSpec) -> Result<Synth
         },
     )?;
     materialize_loose_tip_objects(&repo, head, spec.loose_after_pack)?;
-    let head_tree = commit_tree(&repo, head)?;
+    let head_tree = repo.odb().commit_tree(&head)?;
     checkout_between_trees(&repo, None, &head_tree)?;
     let elapsed = started.elapsed();
     Ok(SynthReport {
@@ -411,10 +411,9 @@ fn write_refs(
 }
 
 fn materialize_loose_tip_objects(repo: &Repository, head: ObjectId, count: usize) -> Result<()> {
-    let head_obj = repo.odb().read(&head)?;
-    let commit = crate::objects::parse_commit(&head_obj.data)?;
+    let head_tree = repo.odb().commit_tree(&head)?;
     let mut blobs = Vec::new();
-    collect_blob_oids(repo.odb(), &commit.tree, &mut blobs)?;
+    collect_blob_oids(repo.odb(), &head_tree, &mut blobs)?;
     for oid in blobs.into_iter().take(count) {
         let obj = repo.odb().read(&oid)?;
         repo.odb().write_loose_materialize(obj.kind, &obj.data)?;
@@ -433,12 +432,6 @@ fn collect_blob_oids(odb: &Odb, tree_oid: &ObjectId, out: &mut Vec<ObjectId>) ->
         }
     }
     Ok(())
-}
-
-fn commit_tree(repo: &Repository, head: ObjectId) -> Result<ObjectId> {
-    let head_obj = repo.odb().read(&head)?;
-    let commit = crate::objects::parse_commit(&head_obj.data)?;
-    Ok(commit.tree)
 }
 
 fn synth_index_entry(path: &[u8], oid: ObjectId, size: usize) -> IndexEntry {

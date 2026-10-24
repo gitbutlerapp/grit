@@ -8,8 +8,7 @@ use std::collections::{HashSet, VecDeque};
 use crate::error::Error;
 use crate::ewah_bitmap::Bitmap;
 use crate::objects::{
-    empty_oid_set, oid_hash_set, parse_commit, parse_tag, ObjectId, ObjectKind, OidHashSet,
-    TreeRefIter,
+    empty_oid_set, oid_hash_set, parse_tag, ObjectId, ObjectKind, OidHashSet, TreeRefIter,
 };
 use crate::pack::read_object_info_from_packs;
 use crate::pack_bitmap::{BitmapError, BitmapIndex};
@@ -440,7 +439,7 @@ fn find_objects_peeled(
             continue;
         }
         if try_or_commit_bitmap(index, &mut bits, &commit, ignore_stored_commit_bitmaps)? {
-            if let Ok(parents) = read_commit(repo, commit, missing).map(|c| c.parents) {
+            if let Ok(parents) = repo.odb().read_commit(&commit).map(|c| c.parents) {
                 for parent in parents {
                     seen_commits.insert(parent);
                 }
@@ -455,7 +454,7 @@ fn find_objects_peeled(
             commit,
             ObjectKind::Commit,
         );
-        let commit_data = match read_commit(repo, commit, missing) {
+        let commit_data = match repo.odb().read_commit(&commit) {
             Ok(c) => c,
             Err(Error::ObjectNotFound(_)) => continue,
             Err(err) => return Err(err.into()),
@@ -604,21 +603,6 @@ fn walk_tree(
         }
     }
     Ok(())
-}
-
-fn read_commit(
-    repo: &Repository,
-    oid: ObjectId,
-    missing: MissingAction,
-) -> std::result::Result<crate::objects::CommitData, Error> {
-    match repo.odb().read(&oid) {
-        Ok(obj) if obj.kind == ObjectKind::Commit => parse_commit(&obj.data),
-        Ok(_) => Err(Error::CorruptObject(format!("{oid} is not a commit"))),
-        Err(Error::ObjectNotFound(_)) if missing != MissingAction::Error => {
-            Err(Error::ObjectNotFound(oid.to_hex()))
-        }
-        Err(err) => Err(err),
-    }
 }
 
 fn apply_filter(

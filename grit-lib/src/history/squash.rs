@@ -3,7 +3,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::merge_base::is_ancestor;
-use crate::objects::{parse_commit, CommitData, ObjectId, ObjectKind};
+use crate::objects::{CommitData, ObjectId};
 use crate::porcelain::rebase::{
     append_nth_squash_message, append_skipped_squash_message, commit_subject_single_line,
     fixup_replacement_message, message_body_after_subject, skip_fixupish_prefix,
@@ -116,13 +116,7 @@ fn squash_head_oid(repo: &Repository) -> Result<ObjectId, HistoryError> {
 }
 
 fn load_commit(repo: &Repository, oid: ObjectId) -> Result<CommitData, HistoryError> {
-    let raw = repo.odb().read(&oid).map_err(planning_err)?;
-    if raw.kind != ObjectKind::Commit {
-        return Err(HistoryError::Planning {
-            message: format!("{oid} is not a commit"),
-        });
-    }
-    parse_commit(&raw.data).map_err(planning_err)
+    repo.odb().read_commit(&oid).map_err(planning_err)
 }
 
 fn planning_err(err: crate::error::Error) -> HistoryError {

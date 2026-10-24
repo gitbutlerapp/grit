@@ -1,7 +1,7 @@
 //! Commit subject lines for history rewrite outcomes.
 
 use crate::error::Error;
-use crate::objects::{parse_commit, CommitData, ObjectId, ObjectKind};
+use crate::objects::{CommitData, ObjectId};
 use crate::repo::Repository;
 
 use super::error::HistoryError;
@@ -12,14 +12,7 @@ fn library_err(err: Error) -> HistoryError {
 }
 
 fn load_commit(repo: &Repository, oid: ObjectId) -> Result<CommitData, HistoryError> {
-    let raw = repo.odb().read(&oid).map_err(library_err)?;
-    if raw.kind != ObjectKind::Commit {
-        return Err(library_err(Error::CorruptObject(format!(
-            "expected commit, got {}",
-            raw.kind.as_str()
-        ))));
-    }
-    parse_commit(&raw.data).map_err(library_err)
+    repo.odb().read_commit(&oid).map_err(library_err)
 }
 
 /// First line of a commit message, without trailing newline on that line.
@@ -81,6 +74,7 @@ mod tests {
     use crate::RefStorageFormat;
 
     use super::*;
+    use crate::objects::ObjectKind;
 
     fn committer(n: i64) -> String {
         format!("Committer <c@example.com> {n} +0000")

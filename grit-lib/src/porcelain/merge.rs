@@ -392,9 +392,9 @@ pub fn predict_merge(
     };
     let _ = options.allow_unrelated_histories;
 
-    let into_tree = commit_tree(repo, &into_oid)?;
-    let other_tree = commit_tree(repo, &other_oid)?;
-    let base_tree = commit_tree(repo, &base_oid)?;
+    let into_tree = repo.odb().commit_tree(&into_oid)?;
+    let other_tree = repo.odb().commit_tree(&other_oid)?;
+    let base_tree = repo.odb().commit_tree(&base_oid)?;
 
     let presentation = TreeMergeConflictPresentation {
         label_theirs: crate::merge_trees::TheirsConflictLabel::Fixed(&options.theirs_label),
@@ -619,8 +619,8 @@ pub fn integrate_branch_with(
     }
     ensure_branch_tip(repo, into_ref, Some(into_oid))?;
 
-    let into_tree = commit_tree(repo, &into_oid)?;
-    let other_tree = commit_tree(repo, &other_oid)?;
+    let into_tree = repo.odb().commit_tree(&into_oid)?;
+    let other_tree = repo.odb().commit_tree(&other_oid)?;
     let ff_possible = is_ancestor(repo, into_oid, other_oid)?;
 
     if matches!(options.fast_forward, FastForwardPolicy::Only) && !ff_possible {
@@ -664,7 +664,7 @@ pub fn integrate_branch_with(
         )));
     };
     let base_tree = if let Some(base_oid) = merge_base.into_iter().next() {
-        commit_tree(repo, &base_oid)?
+        repo.odb().commit_tree(&base_oid)?
     } else {
         empty_tree_oid(repo)?
     };
@@ -1070,7 +1070,7 @@ pub fn abort_branch_merge(repo: &Repository) -> Result<()> {
 fn restore_pre_merge_state(repo: &Repository) -> Result<()> {
     let orig = read_orig_head(repo.git_dir())?
         .ok_or_else(|| Error::Message("merge in progress but ORIG_HEAD is missing".into()))?;
-    let head_tree = commit_tree(repo, &orig)?;
+    let head_tree = repo.odb().commit_tree(&orig)?;
 
     let old_index = repo.load_index()?;
     let from_tree = write_tree_from_index(repo.odb(), &old_index, "")?;
@@ -1129,17 +1129,6 @@ fn merge_checkout_tree_transition(
     let prepared = prepare_tree_transition_allow_local(repo, from_tree, to_tree, &HashSet::new())
         .map_err(map_tree_transition_prepare_error_for_merge)?;
     checkout_prepared_tree_transition_for_merge(repo, prepared)
-}
-
-fn commit_tree(repo: &Repository, commit_oid: &ObjectId) -> Result<ObjectId> {
-    let obj = repo.odb().read(commit_oid)?;
-    if obj.kind != ObjectKind::Commit {
-        return Err(Error::CorruptObject(format!(
-            "expected commit, got {}",
-            obj.kind.as_str()
-        )));
-    }
-    Ok(parse_commit(&obj.data)?.tree)
 }
 
 fn empty_tree_oid(repo: &Repository) -> Result<ObjectId> {
@@ -1386,18 +1375,19 @@ mod integrate_tests {
             .trim()
             .parse()
             .expect("head");
-        let head_tree = commit_tree(&repo, &head).expect("head tree");
+        let head_tree = repo.odb().commit_tree(&head).expect("head tree");
         std::fs::write(tmp.path().join("tracked.txt"), "v2\n").expect("write");
         grit_test_support::git(tmp.path(), &["add", "tracked.txt"]);
         grit_test_support::git(tmp.path(), &["commit", "-m", "target"]);
-        let target_tree = commit_tree(
-            &repo,
-            &grit_test_support::git(tmp.path(), &["rev-parse", "HEAD"])
-                .trim()
-                .parse()
-                .expect("target"),
-        )
-        .expect("target tree");
+        let target_tree = repo
+            .odb()
+            .commit_tree(
+                &grit_test_support::git(tmp.path(), &["rev-parse", "HEAD"])
+                    .trim()
+                    .parse()
+                    .expect("target"),
+            )
+            .expect("target tree");
         std::fs::write(tmp.path().join("new.txt"), "staged\n").expect("write");
         grit_test_support::git(tmp.path(), &["add", "new.txt"]);
         let index = repo.load_index().expect("index");

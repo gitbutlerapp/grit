@@ -1649,7 +1649,7 @@ pub fn bloom_filter_for_commit_write(
     // regardless of how many parents a commit has (see bloom.c:
     // `diff_tree_oid(&c->parents->item->object.oid, ...)`).
     let (changed_paths_vec, raw_count) = if let Some(first_parent) = parents.first() {
-        let p = load_commit_tree(odb, *first_parent)?;
+        let p = odb.commit_tree(first_parent)?;
         diff_changed_paths_for_bloom(odb, Some(p), tree_oid)?
     } else {
         diff_changed_paths_for_bloom(odb, None, tree_oid)?
@@ -1658,12 +1658,6 @@ pub fn bloom_filter_for_commit_write(
     Ok(crate::bloom::build_bloom_filter_data(
         &set, raw_count, settings,
     ))
-}
-
-fn load_commit_tree(odb: &Odb, commit_oid: ObjectId) -> crate::error::Result<ObjectId> {
-    let obj = odb.read(&commit_oid)?;
-    let c = crate::objects::parse_commit(&obj.data)?;
-    Ok(c.tree)
 }
 
 /// Whether any path component in `tree` (recursively) contains a byte with the
@@ -1692,7 +1686,7 @@ fn tree_has_high_bit_paths(odb: &Odb, tree_oid: ObjectId) -> bool {
 /// Whether a commit's tree (recursively) has any high-bit path bytes
 /// (`bloom.c:commit_tree_has_high_bit_paths`).
 pub fn commit_tree_has_high_bit_paths(odb: &Odb, commit_oid: ObjectId) -> bool {
-    match load_commit_tree(odb, commit_oid) {
+    match odb.commit_tree(&commit_oid) {
         Ok(tree) => tree_has_high_bit_paths(odb, tree),
         Err(_) => true,
     }

@@ -15,7 +15,7 @@ use crate::merge_file::MergeFavor;
 use crate::merge_trees::{
     merge_trees_three_way, TreeMergeConflictPresentation, TreeMergeOutput, WhitespaceMergeOptions,
 };
-use crate::objects::{parse_commit, serialize_commit, CommitData, HashAlgo, ObjectId, ObjectKind};
+use crate::objects::{serialize_commit, CommitData, HashAlgo, ObjectId, ObjectKind};
 use crate::porcelain::commit::prepare_commit_bytes;
 use crate::repo::Repository;
 use crate::revwalk::rev_list::{rev_list, OrderingMode, RevListOptions};
@@ -1007,14 +1007,7 @@ pub(crate) fn commit_parents(
 }
 
 fn load_commit(repo: &Repository, oid: ObjectId) -> Result<CommitData, HistoryError> {
-    let raw = repo.odb().read(&oid).map_err(library_err)?;
-    if raw.kind != ObjectKind::Commit {
-        return Err(library_err(Error::CorruptObject(format!(
-            "expected commit, got {}",
-            raw.kind.as_str()
-        ))));
-    }
-    parse_commit(&raw.data).map_err(library_err)
+    repo.odb().read_commit(&oid).map_err(library_err)
 }
 
 fn mapped_first_parent(
@@ -1497,7 +1490,7 @@ fn conflict_paths(merge: &crate::merge_trees::TreeMergeOutput) -> Vec<String> {
 }
 
 fn commit_tree(repo: &Repository, commit: ObjectId) -> Result<ObjectId, HistoryError> {
-    Ok(load_commit(repo, commit)?.tree)
+    repo.odb().commit_tree(&commit).map_err(library_err)
 }
 
 #[allow(clippy::too_many_arguments)]

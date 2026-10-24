@@ -34,7 +34,7 @@ use crate::merge_file::MergeFavor;
 use crate::merge_trees::{
     merge_trees_three_way, TreeMergeConflictPresentation, WhitespaceMergeOptions,
 };
-use crate::objects::{parse_commit, parse_tree, CommitData, ObjectId, ObjectKind};
+use crate::objects::{parse_tree, CommitData, ObjectId, ObjectKind};
 use crate::odb::Odb;
 use crate::pathspec::{
     has_glob_chars, matches_pathspec_list, pathspec_is_exclude, PathspecListMatcher,
@@ -403,8 +403,7 @@ fn head_commit_oid(head: &HeadState) -> Result<ObjectId> {
 }
 
 fn head_commit_subject(repo: &Repository, head_oid: &ObjectId) -> Result<String> {
-    let obj = repo.odb().read(head_oid)?;
-    let commit = parse_commit(&obj.data)?;
+    let commit = repo.odb().read_commit(head_oid)?;
     Ok(commit
         .message
         .lines()
@@ -940,8 +939,7 @@ pub fn preview_stash(
         .ok_or_else(|| Error::PathError("cannot stash in a bare repository".into()))?;
     let head = resolve_head(repo.git_dir())?;
     let head_oid = head_commit_oid(&head)?;
-    let head_obj = repo.odb().read(&head_oid)?;
-    let head_tree = parse_commit(&head_obj.data)?.tree;
+    let head_tree = repo.odb().commit_tree(&head_oid)?;
 
     if selection_is_active(options) {
         let patches = resolve_partial_stash_patches(repo, options)?.unwrap_or_default();
@@ -1230,9 +1228,7 @@ fn build_stash_commit(
     options.validate()?;
     let head = resolve_head(repo.git_dir())?;
     let head_oid = head_commit_oid(&head)?;
-    let head_obj = repo.odb().read(&head_oid)?;
-    let head_commit = parse_commit(&head_obj.data)?;
-    let head_tree = head_commit.tree;
+    let head_tree = repo.odb().commit_tree(&head_oid)?;
     options.validate_staged_worktree(repo, work_tree, &head_tree)?;
 
     let pathspec_push = stash_push_pathspecs_active(options);
@@ -1455,10 +1451,7 @@ pub fn push_stash(
     } else {
         let head = resolve_head(repo.git_dir())?;
         let head_oid = head_commit_oid(&head)?;
-        let head_tree = {
-            let obj = repo.odb().read(&head_oid)?;
-            parse_commit(&obj.data)?.tree
-        };
+        let head_tree = repo.odb().commit_tree(&head_oid)?;
         if !built.untracked_paths.is_empty() {
             remove_stashed_untracked(repo, work_tree, &built.untracked_paths)?;
         }
@@ -1585,22 +1578,15 @@ pub fn stash_diff(
     options: &StashDiffOptions,
 ) -> Result<Vec<DiffEntry>> {
     let oid = stash_oid_at(repo, n)?;
-    let obj = repo.odb().read(&oid)?;
-    let stash_commit = parse_commit(&obj.data)?;
+    let stash_commit = repo.odb().read_commit(&oid)?;
     let head_parent = stash_commit
         .parents
         .first()
         .ok_or(Error::CorruptStash("expected at least 2 parents"))?;
-    let head_obj = repo.odb().read(head_parent)?;
-    let head_commit = parse_commit(&head_obj.data)?;
-    let mut diffs = diff_trees(
-        repo.odb(),
-        Some(&head_commit.tree),
-        Some(&stash_commit.tree),
-        "",
-    )?;
+    let head_tree = repo.odb().commit_tree(head_parent)?;
+    let mut diffs = diff_trees(repo.odb(), Some(&head_tree), Some(&stash_commit.tree), "")?;
     if options.include_untracked {
-        append_stash_untracked_show_entries(repo, &head_commit.tree, &stash_commit, &mut diffs)?;
+        append_stash_untracked_show_entries(repo, &head_tree, &stash_commit, &mut diffs)?;
     }
     Ok(diffs)
 }
@@ -1615,10 +1601,9 @@ fn append_stash_untracked_show_entries(
         return Ok(());
     }
     let ut_oid = &stash_commit.parents[2];
-    let ut_obj = repo.odb().read(ut_oid)?;
-    let ut_commit = parse_commit(&ut_obj.data)?;
+    let ut_tree = repo.odb().commit_tree(ut_oid)?;
     let head_entries = flatten_tree_full_for_repo(repo, head_tree, "")?;
-    let ut_entries = flatten_tree_full_for_repo(repo, &ut_commit.tree, "")?;
+    let ut_entries = flatten_tree_full_for_repo(repo, &ut_tree, "")?;
     for entry in ut_entries {
         if let Some(idx) = diffs.iter().position(|d| d.path() == entry.path.as_str()) {
             if diffs[idx].status == DiffStatus::Deleted {
@@ -1679,8 +1664,7 @@ pub fn stash_branch(
     }
     let work_tree = repo.work_tree().ok_or(Error::StashBareRepository)?;
     let stash_oid = stash_oid_at(repo, n)?;
-    let obj = repo.odb().read(&stash_oid)?;
-    let stash_commit = parse_commit(&obj.data)?;
+    let stash_commit = repo.odb().read_commit(&stash_oid)?;
     let base = *stash_commit
         .parents
         .first()
@@ -1830,9 +1814,8 @@ pub fn stash_worktree_change_paths(
         .first()
         .ok_or(Error::CorruptStash("expected at least 2 parents"))?;
     let stash_tree_entries = flatten_tree_full_for_repo(repo, &stash_commit.tree, "")?;
-    let head_obj = repo.odb().read(head_at_stash)?;
-    let head_commit = parse_commit(&head_obj.data)?;
-    let base_tree_entries = flatten_tree_full_for_repo(repo, &head_commit.tree, "")?;
+    let head_tree = repo.odb().commit_tree(head_at_stash)?;
+    let base_tree_entries = flatten_tree_full_for_repo(repo, &head_tree, "")?;
 
     let changes = collect_flat_tree_worktree_changes(&base_tree_entries, &stash_tree_entries);
     Ok(changes.into_iter().map(|(path, _)| path).collect())
@@ -1932,9 +1915,8 @@ pub(crate) fn check_stash_untracked_restore(
         return Ok(());
     }
     let ut_oid = &stash_commit.parents[2];
-    let ut_obj = repo.odb().read(ut_oid)?;
-    let ut_commit = parse_commit(&ut_obj.data)?;
-    let ut_entries = flatten_tree_full_for_repo(repo, &ut_commit.tree, "")?;
+    let ut_tree = repo.odb().commit_tree(ut_oid)?;
+    let ut_entries = flatten_tree_full_for_repo(repo, &ut_tree, "")?;
     if ut_entries.is_empty() {
         return Ok(());
     }
@@ -1942,9 +1924,8 @@ pub(crate) fn check_stash_untracked_restore(
         .parents
         .first()
         .ok_or(Error::CorruptStash("expected at least 2 parents"))?;
-    let head_obj = repo.odb().read(head_at_stash)?;
-    let head_commit = parse_commit(&head_obj.data)?;
-    let base_tree_entries = flatten_tree_full_for_repo(repo, &head_commit.tree, "")?;
+    let head_tree = repo.odb().commit_tree(head_at_stash)?;
+    let base_tree_entries = flatten_tree_full_for_repo(repo, &head_tree, "")?;
     let stash_tree_entries = flatten_tree_full_for_repo(repo, &stash_commit.tree, "")?;
     let wt_changes = collect_flat_tree_worktree_changes(&base_tree_entries, &stash_tree_entries);
     let wt_deletions: HashSet<String> = wt_changes
@@ -2106,8 +2087,7 @@ fn apply_stash_commit(
     stash_oid: &ObjectId,
     restore_index: bool,
 ) -> Result<StashApplyOutcome> {
-    let obj = repo.odb().read(stash_oid)?;
-    let stash_commit = parse_commit(&obj.data)?;
+    let stash_commit = repo.odb().read_commit(stash_oid)?;
 
     if stash_commit.parents.len() < 2 {
         return Err(Error::CorruptStash("expected at least 2 parents"));
@@ -2117,22 +2097,15 @@ fn apply_stash_commit(
     let index_commit_oid = &stash_commit.parents[1];
 
     let merged_index_tree = if restore_index {
-        let head_at_stash_obj = repo.odb().read(head_at_stash)?;
-        let head_at_stash_commit = parse_commit(&head_at_stash_obj.data)?;
-        let idx_obj = repo.odb().read(index_commit_oid)?;
-        let idx_commit = parse_commit(&idx_obj.data)?;
+        let head_at_stash_tree = repo.odb().commit_tree(head_at_stash)?;
+        let idx_tree = repo.odb().commit_tree(index_commit_oid)?;
         let mut snapshot = match repo.load_index() {
             Ok(idx) => idx,
             Err(Error::Io(e)) if e.kind() == std::io::ErrorKind::NotFound => Index::new(),
             Err(e) => return Err(e),
         };
         let current_index_tree = write_stash_tree_from_index(repo, &mut snapshot)?;
-        merge_stash_index_trees(
-            repo,
-            &head_at_stash_commit.tree,
-            &current_index_tree,
-            &idx_commit.tree,
-        )?
+        merge_stash_index_trees(repo, &head_at_stash_tree, &current_index_tree, &idx_tree)?
     } else {
         None
     };
@@ -2151,16 +2124,14 @@ fn apply_stash_commit(
     let stash_tree_entries = flatten_tree_full_for_repo(repo, &stash_commit.tree, "")?;
 
     // Read HEAD-at-stash tree (base)
-    let head_at_stash_obj = repo.odb().read(head_at_stash)?;
-    let head_at_stash_commit = parse_commit(&head_at_stash_obj.data)?;
-    let base_tree_entries = flatten_tree_full_for_repo(repo, &head_at_stash_commit.tree, "")?;
+    let head_at_stash_tree = repo.odb().commit_tree(head_at_stash)?;
+    let base_tree_entries = flatten_tree_full_for_repo(repo, &head_at_stash_tree, "")?;
 
     let wt_changes = collect_flat_tree_worktree_changes(&base_tree_entries, &stash_tree_entries);
 
     // Read index commit tree
-    let idx_obj = repo.odb().read(index_commit_oid)?;
-    let idx_commit = parse_commit(&idx_obj.data)?;
-    let idx_tree_entries = flatten_tree_full_for_repo(repo, &idx_commit.tree, "")?;
+    let idx_tree = repo.odb().commit_tree(index_commit_oid)?;
+    let idx_tree_entries = flatten_tree_full_for_repo(repo, &idx_tree, "")?;
     // Determine if HEAD has moved since the stash was created
     let current_head = resolve_head(repo.git_dir())?;
     let current_head_oid = current_head.oid().copied();
@@ -2172,9 +2143,8 @@ fn apply_stash_commit(
         let Some(head_oid) = current_head_oid.as_ref() else {
             return Err(Error::StashMissingHead);
         };
-        let head_obj = repo.odb().read(head_oid)?;
-        let head_commit = parse_commit(&head_obj.data)?;
-        current_head_loaded = flatten_tree_full_for_repo(repo, &head_commit.tree, "")?;
+        let head_tree = repo.odb().commit_tree(head_oid)?;
+        current_head_loaded = flatten_tree_full_for_repo(repo, &head_tree, "")?;
         &current_head_loaded
     } else {
         &base_tree_entries
@@ -2568,9 +2538,8 @@ fn apply_stash_commit(
     // Apply untracked files if present (3rd parent)
     if stash_commit.parents.len() >= 3 {
         let ut_oid = &stash_commit.parents[2];
-        let ut_obj = repo.odb().read(ut_oid)?;
-        let ut_commit = parse_commit(&ut_obj.data)?;
-        let ut_entries = flatten_tree_full_for_repo(repo, &ut_commit.tree, "")?;
+        let ut_tree = repo.odb().commit_tree(ut_oid)?;
+        let ut_entries = flatten_tree_full_for_repo(repo, &ut_tree, "")?;
         for entry in &ut_entries {
             materialize_flat_entry_in_worktree(repo, work_tree, &worktree_rules, entry)?;
         }
@@ -2880,8 +2849,7 @@ mod coverage_tests {
         push_stash(&repo, &opts).expect("push").expect("oid");
         fs::write(tmp.path().join("u.txt"), b"precious\n").unwrap();
         let oid = list_stashes(&repo).expect("list")[0].oid;
-        let obj = repo.odb().read(&oid).unwrap();
-        let stash_commit = parse_commit(&obj.data).unwrap();
+        let stash_commit = repo.odb().read_commit(&oid).unwrap();
         let err = super::check_stash_untracked_restore(&repo, tmp.path(), &stash_commit)
             .expect_err("collision");
         assert!(matches!(
@@ -2944,8 +2912,7 @@ mod hunk_push_tests {
     }
 
     fn stash_w_tree(repo: &Repository, stash_oid: &ObjectId) -> ObjectId {
-        let obj = repo.odb().read(stash_oid).unwrap();
-        parse_commit(&obj.data).unwrap().tree
+        repo.odb().commit_tree(stash_oid).unwrap()
     }
 
     fn hunk_selection_for_first_hunk(repo: &Repository) -> HunkSelection {

@@ -600,6 +600,18 @@ pub enum Error {
     #[error("corrupt object: {0}")]
     CorruptObject(String),
 
+    /// An object exists but has a different kind than the operation requires, such as a
+    /// tree or blob where a commit was expected.
+    #[error("object {oid} is a {actual}, not a {expected}")]
+    UnexpectedObjectKind {
+        /// The object that was read.
+        oid: crate::objects::ObjectId,
+        /// The kind the operation required.
+        expected: crate::objects::ObjectKind,
+        /// The kind the object actually has.
+        actual: crate::objects::ObjectKind,
+    },
+
     /// In-pack delta resolution exceeded the read-side chain depth limit (guards
     /// against cyclic ref-delta chains and unbounded recursion; Git has no read limit).
     #[error("delta chain too deep (limit {limit})")]

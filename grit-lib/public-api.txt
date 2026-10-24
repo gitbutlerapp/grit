@@ -5335,6 +5335,10 @@ pub grit_lib::error::Error::TreeSha256InvalidRevision::found: grit_lib::objects:
 pub grit_lib::error::Error::TreeSha256MissingSubmodules(alloc::vec::Vec<grit_lib::tree_sha256::MissingSubmodule>)
 pub grit_lib::error::Error::TreeSha256RequiresSigning
 pub grit_lib::error::Error::UnbornHead
+pub grit_lib::error::Error::UnexpectedObjectKind
+pub grit_lib::error::Error::UnexpectedObjectKind::actual: grit_lib::objects::ObjectKind
+pub grit_lib::error::Error::UnexpectedObjectKind::expected: grit_lib::objects::ObjectKind
+pub grit_lib::error::Error::UnexpectedObjectKind::oid: grit_lib::objects::ObjectId
 pub grit_lib::error::Error::UnknownObjectType(alloc::string::String)
 pub grit_lib::error::Error::UnsupportedObjectStore
 pub grit_lib::error::Error::UnsupportedObjectStore::operation: &'static str
@@ -8045,10 +8049,12 @@ pub fn grit_lib::objects::delta_islands::load_delta_islands(&grit_lib::repo::Rep
 pub mod grit_lib::objects::handle
 pub struct grit_lib::objects::handle::Objects<'repo>
 impl<'repo> grit_lib::objects::handle::Objects<'repo>
+pub fn grit_lib::objects::handle::Objects<'repo>::commit_tree(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::objects::handle::Objects<'repo>::contains(&self, &grit_lib::objects::ObjectId) -> bool
 pub fn grit_lib::objects::handle::Objects<'repo>::hash(&self, grit_lib::objects::ObjectKind, &[u8]) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::objects::handle::Objects<'repo>::new(&'repo grit_lib::repo::Repository) -> Self
 pub fn grit_lib::objects::handle::Objects<'repo>::read(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::objects::Object>
+pub fn grit_lib::objects::handle::Objects<'repo>::read_commit(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::objects::CommitData>
 pub fn grit_lib::objects::handle::Objects<'repo>::read_info(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::objects::ObjectInfo>
 pub fn grit_lib::objects::handle::Objects<'repo>::repository(&self) -> &'repo grit_lib::repo::Repository
 pub fn grit_lib::objects::handle::Objects<'repo>::write(&self, grit_lib::objects::ObjectKind, &[u8]) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
@@ -9389,6 +9395,9 @@ pub fn grit_lib::objects::odb::Odb::write_raw_local(&self, &[u8]) -> grit_lib::e
 pub fn grit_lib::objects::odb::Odb::write_with_options(&self, grit_lib::objects::ObjectKind, &[u8], grit_lib::objects::odb::WriteOptions) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::objects::odb::Odb::zlib_compress_loose_store(&self, &[u8]) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
 impl grit_lib::objects::odb::Odb
+pub fn grit_lib::objects::odb::Odb::commit_tree(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
+pub fn grit_lib::objects::odb::Odb::read_commit(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::objects::CommitData>
+impl grit_lib::objects::odb::Odb
 pub fn grit_lib::objects::odb::Odb::files_objects_dir(&self) -> core::option::Option<&std::path::Path>
 pub fn grit_lib::objects::odb::Odb::gc(&self) -> grit_lib::error::Result<()>
 pub fn grit_lib::objects::odb::Odb::primary_writable(&self) -> grit_lib::error::Result<alloc::rcs::arc::Arc<dyn grit_lib::objects::odb::store::WritableObjectStore>>
@@ -10660,10 +10669,12 @@ impl<'a> core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::ObjectRe
 impl<'a> core::panic::unwind_safe::UnwindSafe for grit_lib::objects::ObjectRef<'a>
 pub struct grit_lib::objects::Objects<'repo>
 impl<'repo> grit_lib::objects::handle::Objects<'repo>
+pub fn grit_lib::objects::handle::Objects<'repo>::commit_tree(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::objects::handle::Objects<'repo>::contains(&self, &grit_lib::objects::ObjectId) -> bool
 pub fn grit_lib::objects::handle::Objects<'repo>::hash(&self, grit_lib::objects::ObjectKind, &[u8]) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::objects::handle::Objects<'repo>::new(&'repo grit_lib::repo::Repository) -> Self
 pub fn grit_lib::objects::handle::Objects<'repo>::read(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::objects::Object>
+pub fn grit_lib::objects::handle::Objects<'repo>::read_commit(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::objects::CommitData>
 pub fn grit_lib::objects::handle::Objects<'repo>::read_info(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::objects::ObjectInfo>
 pub fn grit_lib::objects::handle::Objects<'repo>::repository(&self) -> &'repo grit_lib::repo::Repository
 pub fn grit_lib::objects::handle::Objects<'repo>::write(&self, grit_lib::objects::ObjectKind, &[u8]) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
@@ -14575,6 +14586,10 @@ pub grit_lib::prelude::Error::TreeSha256InvalidRevision::found: grit_lib::object
 pub grit_lib::prelude::Error::TreeSha256MissingSubmodules(alloc::vec::Vec<grit_lib::tree_sha256::MissingSubmodule>)
 pub grit_lib::prelude::Error::TreeSha256RequiresSigning
 pub grit_lib::prelude::Error::UnbornHead
+pub grit_lib::prelude::Error::UnexpectedObjectKind
+pub grit_lib::prelude::Error::UnexpectedObjectKind::actual: grit_lib::objects::ObjectKind
+pub grit_lib::prelude::Error::UnexpectedObjectKind::expected: grit_lib::objects::ObjectKind
+pub grit_lib::prelude::Error::UnexpectedObjectKind::oid: grit_lib::objects::ObjectId
 pub grit_lib::prelude::Error::UnknownObjectType(alloc::string::String)
 pub grit_lib::prelude::Error::UnsupportedObjectStore
 pub grit_lib::prelude::Error::UnsupportedObjectStore::operation: &'static str
@@ -15332,6 +15347,9 @@ pub fn grit_lib::objects::odb::Odb::write_raw(&self, &[u8]) -> grit_lib::error::
 pub fn grit_lib::objects::odb::Odb::write_raw_local(&self, &[u8]) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::objects::odb::Odb::write_with_options(&self, grit_lib::objects::ObjectKind, &[u8], grit_lib::objects::odb::WriteOptions) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::objects::odb::Odb::zlib_compress_loose_store(&self, &[u8]) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
+impl grit_lib::objects::odb::Odb
+pub fn grit_lib::objects::odb::Odb::commit_tree(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
+pub fn grit_lib::objects::odb::Odb::read_commit(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::objects::CommitData>
 impl grit_lib::objects::odb::Odb
 pub fn grit_lib::objects::odb::Odb::files_objects_dir(&self) -> core::option::Option<&std::path::Path>
 pub fn grit_lib::objects::odb::Odb::gc(&self) -> grit_lib::error::Result<()>

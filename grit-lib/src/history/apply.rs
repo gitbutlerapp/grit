@@ -8,7 +8,7 @@ use crate::config::ConfigSet;
 use crate::diff::{diff_trees, mode_from_metadata};
 use crate::index::MODE_REGULAR;
 use crate::objects::ObjectId;
-use crate::objects::{parse_commit, parse_tree, ObjectKind};
+use crate::objects::{parse_tree, ObjectKind};
 use crate::porcelain::switch::{
     checkout_tree_transition_allow_local, checkout_tree_transition_allow_local_with_preserved,
     verify_tree_transition_allow_local, TreeTransitionVerifyError,
@@ -937,22 +937,11 @@ pub(crate) fn commit_tree_for_apply(
     repo: &Repository,
     commit: ObjectId,
 ) -> Result<ObjectId, HistoryError> {
-    let raw = repo
-        .odb()
-        .read(&commit)
+    repo.odb()
+        .commit_tree(&commit)
         .map_err(|e| HistoryError::WorktreeApply {
             message: e.to_string(),
-        })?;
-    if raw.kind != ObjectKind::Commit {
-        return Err(HistoryError::WorktreeApply {
-            message: format!("{commit} is not a commit"),
-        });
-    }
-    Ok(parse_commit(&raw.data)
-        .map_err(|e| HistoryError::WorktreeApply {
-            message: e.to_string(),
-        })?
-        .tree)
+        })
 }
 
 /// Runs the same worktree safety checks as [`apply_rewrite`] without moving refs.

@@ -14,7 +14,7 @@ use crate::merge_file::MergeFavor;
 use crate::merge_trees::{
     merge_trees_three_way, TreeMergeConflictPresentation, WhitespaceMergeOptions,
 };
-use crate::objects::{parse_commit, parse_tree, CommitData, ObjectId, ObjectKind};
+use crate::objects::{parse_tree, CommitData, ObjectId, ObjectKind};
 use crate::porcelain::rebase::commit_subject_single_line;
 use crate::repo::Repository;
 use crate::revwalk::rev_list::{rev_list, OrderingMode, RevListOptions};
@@ -1246,17 +1246,11 @@ fn commit_subject(repo: &Repository, commit: ObjectId) -> String {
 }
 
 fn load_commit(repo: &Repository, oid: ObjectId) -> Result<CommitData, HistoryError> {
-    let raw = repo.odb().read(&oid).map_err(library_err)?;
-    if raw.kind != ObjectKind::Commit {
-        return Err(HistoryError::Planning {
-            message: format!("{oid} is not a commit object"),
-        });
-    }
-    parse_commit(&raw.data).map_err(library_err)
+    repo.odb().read_commit(&oid).map_err(library_err)
 }
 
 fn commit_tree(repo: &Repository, commit: ObjectId) -> Result<ObjectId, HistoryError> {
-    Ok(load_commit(repo, commit)?.tree)
+    repo.odb().commit_tree(&commit).map_err(library_err)
 }
 
 fn first_parent(repo: &Repository, commit: ObjectId) -> Result<Option<ObjectId>, HistoryError> {
