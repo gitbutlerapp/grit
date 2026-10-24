@@ -43,6 +43,8 @@ With `--delete`, deletes remote branches or tags (short names map like Git).
 
 `--follow-tags` pushes annotated tags that point to commits reachable from the refs being pushed (lightweight tags and unreachable annotated tags are skipped). The config key `push.followTags` enables the same behavior by default.
 
+Before anything is sent, grit runs the repository's `pre-push` hook (see [`grit hooks`](../hooks/)) once the remote's current refs are known, on every transport and with `--dry-run` too. The hook gets the remote name (or the URL, for an unnamed remote) and the push URL as arguments, and one line per ref update on stdin, `<local ref> <local oid> <remote ref> <remote oid>`, in Git's format: `(delete)` and a zero object id for deletions, a zero remote object id for new refs, and no line for refs that are up to date or already rejected. If the hook exits non-zero, the push stops, the remote is left untouched and grit exits `1`. The hook's stdout is sent to stderr so `--json` and `--markdown` output stays clean. `--no-verify` skips the hook.
+
 For GitHub over HTTPS, if a push fails because you aren't signed in, `grit` offers to run [`grit auth`](../auth/) and then tries again.
 
 ## Options
@@ -61,6 +63,7 @@ For GitHub over HTTPS, if a push fails because you aren't signed in, `grit` offe
 | `--atomic` | All ref updates succeed or none are applied. |
 | `-o`, `--push-option` | Server-side push option (repeatable; smart HTTP only). |
 | `--follow-tags` | Push annotated tags reachable from the commits being pushed. |
+| `--no-verify` | Skip the `pre-push` hook. |
 | `--remote` | Hidden alias for the remote name (prefer the positional `<remote>`). |
 
 ## Examples
@@ -97,6 +100,16 @@ When the remote moved since your last fetch:
 ```console
 $ grit push --force-with-lease
   rejected origin refs/heads/main: stale remote ref — run `grit fetch` and try again
+```
+
+When the `pre-push` hook refuses the push (nothing is sent):
+
+```console
+$ grit push
+pre-push: secrets found in config/prod.env
+error: hook pre-push failed with exit status 1
+$ echo $?
+1
 ```
 
 When the delete target is not on the remote:
@@ -144,6 +157,14 @@ Example:
 }
 ```
 
+When the `pre-push` hook fails, stdout is a single error object and the exit status is `1`:
+
+```json
+{
+  "error": "hook pre-push failed with exit status 1"
+}
+```
+
 ## Markdown output
 
 Pass [`--markdown`](../global-options/) for agent-friendly output.
@@ -165,7 +186,7 @@ Markdown uses headings, bullet lists, and fenced blocks; pipe characters inside 
 | Code | Meaning |
 | ---: | --- |
 | `0` | Success ([`success`](../exit-codes/)). |
-| `1` | Command failed ([`failure`](../exit-codes/)). |
+| `1` | Command failed, a ref was rejected, or the `pre-push` hook exited non-zero ([`failure`](../exit-codes/)). |
 | `2` | Invalid flags or arguments ([`usage`](../exit-codes/)). |
 
 See [Exit codes](../exit-codes/) for shared rules and structured `--json` `kind` values.

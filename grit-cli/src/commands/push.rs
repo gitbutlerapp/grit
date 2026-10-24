@@ -2,6 +2,7 @@
 
 use anyhow::{Context, Result};
 use grit_lib::config::ConfigSet;
+use grit_lib::error::Error as LibError;
 use grit_lib::objects::ObjectId;
 use grit_lib::remote::push_plan::{
     apply_set_upstream_after_push, load_push_plan_context, open_push_destination, parse_force_mode,
@@ -10,7 +11,7 @@ use grit_lib::remote::push_plan::{
 };
 use grit_lib::remote::push_report::PushRefStatus;
 use grit_lib::remote::transfer::PushOptions;
-use grit_lib::remote::DefaultHttpClientFactory;
+use grit_lib::remote::{DefaultHttpClientFactory, RemoteError};
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::io::Write;
@@ -154,6 +155,7 @@ struct PushWireOptions<'a> {
     atomic: bool,
     push_options: &'a [String],
     remote_ref_tips: Option<Vec<ObjectId>>,
+    no_verify: bool,
 }
 
 /// Positional `[<remote>] [<refspec>...]` plus flags.
@@ -170,6 +172,7 @@ pub fn run(
     atomic: bool,
     push_options: &[String],
     follow_tags: bool,
+    no_verify: bool,
 ) -> Result<PushOutcome> {
     let repo = context::discover()?;
     let config = ConfigSet::load(&crate::context::environment(), Some(repo.git_dir()), true)
@@ -204,6 +207,7 @@ pub fn run(
         atomic,
         push_options,
         remote_ref_tips: plan_ctx.remote_tips,
+        no_verify,
     };
     let report = match push_once(&repo, &config, &plan.remote, &plan.specs, &wire, &factory) {
         Ok(report) => report,
@@ -305,12 +309,16 @@ fn push_once(
                 push_options: wire.push_options.to_vec(),
                 remote_ref_tips: wire.remote_ref_tips.clone(),
                 tracking_remote: Some(remote_name.to_owned()),
+                no_verify: wire.no_verify,
                 ..Default::default()
             },
             &mut NoProgress,
             Some(factory),
         )
-        .map_err(|e| anyhow::Error::msg(e.to_string()))
+        .map_err(|e| match e {
+            RemoteError::Library(hook @ LibError::Hook(_)) => anyhow::Error::new(hook),
+            other => anyhow::Error::msg(other.to_string()),
+        })
 }
 
 #[cfg(test)]

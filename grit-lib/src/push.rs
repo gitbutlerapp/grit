@@ -36,8 +36,8 @@ use crate::objects::{HashAlgo, ObjectId, ObjectKind};
 use crate::pkt_line::{self, Packet};
 use crate::push_report::{PushRefResult, PushRefStatus};
 use crate::transfer::{
-    build_pack, build_pack_push_fast, open_odb, PackBuildOptions, PushOptions, PushOutcome,
-    PushRefSpec,
+    build_pack, build_pack_push_fast, open_odb, PackBuildOptions, PrePushGate, PushOptions,
+    PushOutcome, PushRefSpec,
 };
 use crate::transport::Connection;
 
@@ -91,6 +91,8 @@ const PUSH_CAPS_BASE: &str = "report-status report-status-v2 quiet";
 ///
 /// Protocol v0/v1 only; a v2 connection is rejected.
 ///
+/// The client-side `pre-push` hook is not run here; [`crate::remote::Remote::push`] runs it.
+///
 /// # Errors
 ///
 /// Returns an error if the connection is protocol v2, if a source object is
@@ -102,6 +104,19 @@ pub fn push_remote(
     refs: &[PushRefSpec],
     opts: &PushOptions,
     progress: &mut dyn Progress,
+) -> Result<PushOutcome> {
+    push_remote_gated(local_git_dir, conn, refs, opts, progress, None)
+}
+
+/// [`push_remote`], running `pre_push` after every update is decided against the
+/// advertisement and before any command or pack is sent.
+pub(crate) fn push_remote_gated(
+    local_git_dir: &Path,
+    conn: &mut dyn Connection,
+    refs: &[PushRefSpec],
+    opts: &PushOptions,
+    progress: &mut dyn Progress,
+    pre_push: Option<&PrePushGate<'_>>,
 ) -> Result<PushOutcome> {
     crate::trace::trace_span!("grit.push");
     use crate::net_trace::net_trace;
@@ -138,7 +153,12 @@ pub fn push_remote(
 
     // 2–3. Decide each ref update client-side, handling atomic/dry-run/no-op
     //       early-returns; the shared planner mirrors `push_local`'s gate.
-    let mut plan = match plan_push(refs, &local_odb, local_git_dir, &adv, opts)? {
+    let planned = plan_push(refs, &local_odb, local_git_dir, &adv, opts, pre_push);
+    if planned.is_err() && !opts.dry_run {
+        // End the command list so the server sees an empty push rather than a hang-up.
+        let _ = crate::transport::send_client_flush(conn);
+    }
+    let mut plan = match planned? {
         PlanOutcome::Send(plan) => plan,
         PlanOutcome::Done(results) => {
             if !opts.dry_run {
@@ -342,6 +362,7 @@ fn plan_push(
     local_git_dir: &Path,
     adv: &AdvertisedState,
     opts: &PushOptions,
+    pre_push: Option<&PrePushGate<'_>>,
 ) -> Result<PlanOutcome> {
     let mut decisions: Vec<PushDecision> = Vec::with_capacity(refs.len());
     for spec in refs {
@@ -351,6 +372,9 @@ fn plan_push(
             local_git_dir,
             &adv.remote_refs,
         )?);
+    }
+    if let Some(gate) = pre_push {
+        gate.check(decisions.iter().map(|d| &d.result))?;
     }
 
     // Atomic: a single client-side rejection aborts the whole push without

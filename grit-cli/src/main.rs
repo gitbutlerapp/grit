@@ -1644,6 +1644,9 @@ enum Command {
         /// Push annotated tags reachable from the commits being pushed.
         #[arg(long = "follow-tags")]
         follow_tags: bool,
+        /// Skip the `pre-push` hook.
+        #[arg(long = "no-verify")]
+        no_verify: bool,
         /// Remote name (when not using `--remote`).
         #[arg(value_name = "REMOTE")]
         remote_name: Option<String>,
@@ -3659,6 +3662,7 @@ fn dispatch(
             atomic,
             push_option,
             follow_tags,
+            no_verify,
             remote_name,
             refspecs,
         } => {
@@ -3679,6 +3683,7 @@ fn dispatch(
                 atomic,
                 &push_option,
                 follow_tags,
+                no_verify,
             )?;
             emit_success(&outcome, opts, ctx)?;
             // The outcome (per-ref results) is reported in both modes; a rejected

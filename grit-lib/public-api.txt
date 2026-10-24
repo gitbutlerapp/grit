@@ -1204,6 +1204,26 @@ impl<'a> core::marker::Unpin for grit_lib::command_runner::hooks::CommitHookEnv<
 impl<'a> core::marker::UnsafeUnpin for grit_lib::command_runner::hooks::CommitHookEnv<'a>
 impl<'a> core::panic::unwind_safe::RefUnwindSafe for grit_lib::command_runner::hooks::CommitHookEnv<'a>
 impl<'a> core::panic::unwind_safe::UnwindSafe for grit_lib::command_runner::hooks::CommitHookEnv<'a>
+pub struct grit_lib::command_runner::hooks::PrePushRef
+pub grit_lib::command_runner::hooks::PrePushRef::local_oid: core::option::Option<grit_lib::objects::ObjectId>
+pub grit_lib::command_runner::hooks::PrePushRef::local_ref: core::option::Option<alloc::string::String>
+pub grit_lib::command_runner::hooks::PrePushRef::remote_oid: core::option::Option<grit_lib::objects::ObjectId>
+pub grit_lib::command_runner::hooks::PrePushRef::remote_ref: alloc::string::String
+impl core::clone::Clone for grit_lib::command_runner::hooks::PrePushRef
+pub fn grit_lib::command_runner::hooks::PrePushRef::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::command_runner::hooks::PrePushRef
+impl core::cmp::PartialEq for grit_lib::command_runner::hooks::PrePushRef
+pub fn grit_lib::command_runner::hooks::PrePushRef::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::command_runner::hooks::PrePushRef
+pub fn grit_lib::command_runner::hooks::PrePushRef::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::command_runner::hooks::PrePushRef
+impl core::marker::Freeze for grit_lib::command_runner::hooks::PrePushRef
+impl core::marker::Send for grit_lib::command_runner::hooks::PrePushRef
+impl core::marker::Sync for grit_lib::command_runner::hooks::PrePushRef
+impl core::marker::Unpin for grit_lib::command_runner::hooks::PrePushRef
+impl core::marker::UnsafeUnpin for grit_lib::command_runner::hooks::PrePushRef
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::command_runner::hooks::PrePushRef
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::command_runner::hooks::PrePushRef
 pub struct grit_lib::command_runner::hooks::RunHookOptions<'a>
 pub grit_lib::command_runner::hooks::RunHookOptions::commit_env: core::option::Option<&'a grit_lib::command_runner::hooks::CommitHookEnv<'a>>
 pub grit_lib::command_runner::hooks::RunHookOptions::cwd: core::option::Option<&'a std::path::Path>
@@ -1232,6 +1252,7 @@ pub fn grit_lib::command_runner::hooks::run_hook_capture(&grit_lib::repo::Reposi
 pub fn grit_lib::command_runner::hooks::run_hook_in_git_dir(&grit_lib::repo::Repository, &str, &[&str], core::option::Option<&[u8]>, &[(&str, &str)]) -> (grit_lib::command_runner::hooks::HookResult, alloc::vec::Vec<u8>)
 pub fn grit_lib::command_runner::hooks::run_hook_opts(core::option::Option<&grit_lib::repo::Repository>, &str, &[&str], &grit_lib::config::ConfigSet, grit_lib::command_runner::hooks::RunHookOptions<'_>, core::option::Option<&mut alloc::vec::Vec<u8>>) -> core::result::Result<grit_lib::command_runner::hooks::HookResult, grit_lib::command_runner::hooks::HookError>
 pub fn grit_lib::command_runner::hooks::run_hook_with_env(&grit_lib::repo::Repository, &str, &[&str], core::option::Option<&[u8]>, &[(&str, &str)]) -> (grit_lib::command_runner::hooks::HookResult, alloc::vec::Vec<u8>)
+pub fn grit_lib::command_runner::hooks::run_pre_push_hook(&grit_lib::repo::Repository, &str, &str, &[grit_lib::command_runner::hooks::PrePushRef]) -> core::result::Result<(), grit_lib::command_runner::hooks::HookError>
 pub fn grit_lib::command_runner::hooks::run_reference_transaction_committed_for_head_update(&grit_lib::repo::Repository, &grit_lib::state::HeadState, core::option::Option<grit_lib::objects::ObjectId>, grit_lib::objects::ObjectId) -> core::result::Result<grit_lib::command_runner::hooks::HookResult, grit_lib::command_runner::hooks::HookError>
 pub enum grit_lib::command_runner::CommandStdin
 pub grit_lib::command_runner::CommandStdin::Inherit
@@ -19597,6 +19618,7 @@ pub grit_lib::remote::transfer::PushOptions::atomic: bool
 pub grit_lib::remote::transfer::PushOptions::diagnostics: core::option::Option<grit_lib::diagnostics::DiagnosticsHandle>
 pub grit_lib::remote::transfer::PushOptions::dry_run: bool
 pub grit_lib::remote::transfer::PushOptions::network_trace: bool
+pub grit_lib::remote::transfer::PushOptions::no_verify: bool
 pub grit_lib::remote::transfer::PushOptions::push_options: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::remote::transfer::PushOptions::remote_ref_tips: core::option::Option<alloc::vec::Vec<grit_lib::objects::ObjectId>>
 pub grit_lib::remote::transfer::PushOptions::tracking_remote: core::option::Option<alloc::string::String>

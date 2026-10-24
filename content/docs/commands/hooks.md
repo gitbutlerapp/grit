@@ -34,6 +34,10 @@ In `--json` mode the same message is the `error` field. [`grit commit`](commit.m
 
 [`grit commit`](commit.md) runs `pre-commit` and `commit-msg` automatically before writing the commit object, then `post-commit` after the branch moves. Use `grit commit --no-verify` to skip the first two (same as Git). JSON commit output lists hook basenames that actually ran in `hooks_run`.
 
+[`grit push`](push.md) runs `pre-push` before sending anything and stops when it exits non-zero; `grit push --no-verify` skips it.
+
+These are the only client-side events grit runs on its own. `post-checkout`, `post-merge`, `pre-merge-commit`, `pre-rebase`, `post-rewrite`, `reference-transaction` and the other Git events are not run by `grit switch`, `grit merge`, `grit rebase`, `grit history` or `grit commit --amend`; use `grit hooks run <NAME>` to run one explicitly.
+
 ## Options
 
 ### `grit hooks list`

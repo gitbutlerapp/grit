@@ -750,6 +750,62 @@ pub struct PushOptions {
     /// must come from the push destination, or objects the destination lacks may be left out
     /// of the pack. Wire pushes read the advertisement from their connection and ignore this.
     pub remote_ref_tips: Option<Vec<ObjectId>>,
+    /// Skip the client-side `pre-push` hook.
+    ///
+    /// [`crate::remote::Remote::push`] runs the hook (see
+    /// [`crate::hooks::run_pre_push_hook`]) after reading the remote's refs and before sending
+    /// anything, dry runs included, and fails with [`Error::Hook`] when it exits non-zero. The
+    /// lower-level [`push_local`] and [`crate::push::push_remote`] have no repository or
+    /// remote name to give the hook and never run it.
+    pub no_verify: bool,
+}
+
+/// The client-side `pre-push` hook for one push, run once every update has been decided.
+pub(crate) struct PrePushGate<'a> {
+    /// Repository whose hooks run.
+    pub(crate) repo: &'a crate::repo::Repository,
+    /// First hook argument: remote name, or the URL for an unnamed remote.
+    pub(crate) remote: &'a str,
+    /// Second hook argument: the push URL.
+    pub(crate) url: &'a str,
+}
+
+impl PrePushGate<'_> {
+    /// Run the hook over the updates the push would make; refs that are up to date or
+    /// already rejected locally are left out, as Git does.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Hook`] when the hook fails or cannot run.
+    pub(crate) fn check<'r>(
+        &self,
+        results: impl IntoIterator<Item = &'r PushRefResult>,
+    ) -> Result<()> {
+        let refs: Vec<crate::hooks::PrePushRef> = results
+            .into_iter()
+            .filter(|r| {
+                !matches!(
+                    r.status,
+                    PushRefStatus::UpToDate
+                        | PushRefStatus::RejectNonFastForward
+                        | PushRefStatus::RejectStale
+                        | PushRefStatus::RejectRemoteRefMissing
+                )
+            })
+            .map(|r| crate::hooks::PrePushRef {
+                local_ref: if r.deletion {
+                    None
+                } else {
+                    r.local_ref.clone()
+                },
+                local_oid: r.new_oid,
+                remote_ref: r.remote_ref.clone(),
+                remote_oid: r.old_oid,
+            })
+            .collect();
+        crate::hooks::run_pre_push_hook(self.repo, self.remote, self.url, &refs)?;
+        Ok(())
+    }
 }
 
 /// The structured result of a push. Reuses [`PushRefResult`] for per-ref status.
@@ -2148,6 +2204,8 @@ pub fn fetch_local_with_progress(
 /// Both repositories must use the same object hash algorithm; the hash width is
 /// threaded through [`Odb::hash_algo`] so SHA-256 repos work.
 ///
+/// The client-side `pre-push` hook is not run here; [`crate::remote::Remote::push`] runs it.
+///
 /// # Errors
 ///
 /// Returns an error if either repository cannot be opened, if a source object is
@@ -2161,6 +2219,18 @@ pub fn push_local(
     remote_git_dir: &Path,
     refs: &[PushRefSpec],
     opts: &PushOptions,
+) -> Result<PushOutcome> {
+    push_local_gated(local_git_dir, remote_git_dir, refs, opts, None)
+}
+
+/// [`push_local`], running `pre_push` after every update is decided and before anything is
+/// written to the remote.
+pub(crate) fn push_local_gated(
+    local_git_dir: &Path,
+    remote_git_dir: &Path,
+    refs: &[PushRefSpec],
+    opts: &PushOptions,
+    pre_push: Option<&PrePushGate<'_>>,
 ) -> Result<PushOutcome> {
     if !opts.push_options.is_empty() {
         return Err(Error::PushOptionsUnsupported);
@@ -2199,6 +2269,9 @@ pub fn push_local(
             remote_git_dir,
             local_repo.as_ref(),
         )?);
+    }
+    if let Some(gate) = pre_push {
+        gate.check(decisions.iter().map(|d| &d.result))?;
     }
 
     // Atomic: if any update would be rejected, apply none and demote the
