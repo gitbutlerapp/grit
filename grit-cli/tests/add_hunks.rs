@@ -101,8 +101,8 @@ fn add_plain_json_matches_schema() {
     let add = run_grit(grit, root, &["add", "--json"]);
     assert!(add.status.success());
     let out: serde_json::Value = serde_json::from_slice(&add.stdout).expect("add json");
-    assert!(out.get("staged_hunks").is_none());
-    assert!(out.get("staged_lines").is_none());
+    assert_eq!(out["staged_hunks"], serde_json::json!({}));
+    assert_eq!(out["staged_lines"], serde_json::json!({}));
     validate_add_v1_schema(&out);
 }
 
