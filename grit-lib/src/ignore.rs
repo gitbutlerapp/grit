@@ -563,19 +563,18 @@ fn load_gitignore_for_dir(
     };
 
     // In-tree `.gitignore` must not be a symlink (Git follows symlinks for global/info excludes
-    // only). Match Git's warning and skip the file (t0008).
-    if path.exists() {
-        if let Ok(meta) = fs::symlink_metadata(&path) {
-            if meta.file_type().is_symlink() {
-                warnings.push(crate::diagnostics::warning_line(&format!(
-                    "unable to access '{source_display}': Too many levels of symbolic links"
-                )));
-                return Ok(Vec::new());
-            }
-        }
+    // only). Match Git's warning and skip the file (t0008). The symlink check runs only once the
+    // path is known to exist, so directories without the file cost a single failed open.
+    let read = read_optional_text(&path);
+    if !matches!(read, Ok(None))
+        && fs::symlink_metadata(&path).is_ok_and(|meta| meta.file_type().is_symlink())
+    {
+        warnings.push(crate::diagnostics::warning_line(&format!(
+            "unable to access '{source_display}': Too many levels of symbolic links"
+        )));
+        return Ok(Vec::new());
     }
-
-    if let Some(content) = read_optional_text(&path)? {
+    if let Some(content) = read? {
         return parse_gitignore_content(&content, source, dir, warnings);
     }
 
@@ -1394,6 +1393,45 @@ mod gitignore_glob_tests {
     #[test]
     fn nested_dir_star_extension() {
         assert!(!pathname_pattern_matches("foo/bar/*.c", "foo/bar/baz/x.c"));
+    }
+}
+
+#[cfg(all(test, unix))]
+mod per_directory_gitignore_tests {
+    use super::*;
+    use crate::repo::init_repository;
+    use crate::RefStorageFormat;
+    use std::os::unix::fs::symlink;
+    use tempfile::TempDir;
+
+    fn ignored_with_warnings(repo: &Repository, path: &str) -> (bool, Vec<String>) {
+        let mut matcher = IgnoreMatcher::from_repository(repo).unwrap();
+        let ignored = matcher.is_path_ignored(repo, None, path, false).unwrap();
+        (ignored, matcher.take_warnings())
+    }
+
+    #[test]
+    fn symlinked_gitignore_is_skipped_with_warning_and_plain_one_applies() {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        let repo = init_repository(root, false, "main", None, RefStorageFormat::Files).unwrap();
+        fs::create_dir_all(root.join("plain")).unwrap();
+        fs::create_dir_all(root.join("to_file")).unwrap();
+        fs::create_dir_all(root.join("to_dir")).unwrap();
+        fs::create_dir_all(root.join("none")).unwrap();
+        fs::write(root.join("plain/.gitignore"), "*.log\n").unwrap();
+        fs::write(root.join("rules"), "*.log\n").unwrap();
+        symlink(root.join("rules"), root.join("to_file/.gitignore")).unwrap();
+        symlink(root.join("plain"), root.join("to_dir/.gitignore")).unwrap();
+
+        assert_eq!(ignored_with_warnings(&repo, "plain/a.log"), (true, vec![]));
+        assert_eq!(ignored_with_warnings(&repo, "none/a.log"), (false, vec![]));
+        for dir in ["to_file", "to_dir"] {
+            let (ignored, warnings) = ignored_with_warnings(&repo, &format!("{dir}/a.log"));
+            assert!(!ignored, "{dir}: symlinked .gitignore must not apply");
+            assert_eq!(warnings.len(), 1, "{dir}: {warnings:?}");
+            assert!(warnings[0].contains(&format!("{dir}/.gitignore")));
+        }
     }
 }
 

@@ -141,6 +141,55 @@ fn parallel_status_trusts_stat_with_filemode_true() {
 }
 
 #[test]
+fn untracked_walk_matches_git_around_submodules_and_tracked_dirs() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let sub_src = tmp.path().join("sub-src");
+    let root = tmp.path().join("super");
+    fs::create_dir_all(&sub_src).expect("mkdir");
+    fs::create_dir_all(&root).expect("mkdir");
+    git_committed_repo(&sub_src, 4, true);
+    git_committed_repo(&root, 24, true);
+    let sub_url = sub_src.to_str().expect("utf-8 path");
+    git_in(
+        &root,
+        &[
+            "-c",
+            "protocol.file.allow=always",
+            "submodule",
+            "add",
+            "-q",
+            sub_url,
+            "d1/sub",
+        ],
+    );
+    git_in(&root, &["commit", "-qm", "add submodule"]);
+    fs::write(root.join("d1/s1/untracked.txt"), "u\n").expect("write");
+    fs::write(root.join("d1/sub/inner-untracked.txt"), "u\n").expect("write");
+    fs::create_dir_all(root.join("fresh/deeper")).expect("mkdir");
+    fs::write(root.join("fresh/deeper/new.txt"), "n\n").expect("write");
+    fs::create_dir_all(root.join("d2/s2/embedded")).expect("mkdir");
+    git_in(&root.join("d2/s2/embedded"), &["init", "-q"]);
+
+    let repo = open(&root);
+    let model = status(&repo, &StatusOptions::default(), &mut NullProgress).expect("status");
+    let mut untracked = model.untracked.clone();
+    untracked.sort();
+    assert_eq!(
+        untracked,
+        vec![
+            "d1/s1/untracked.txt".to_owned(),
+            "d2/s2/embedded/".to_owned(),
+            "fresh/".to_owned()
+        ]
+    );
+    let git_untracked: Vec<String> = git_status_porcelain(&root)
+        .lines()
+        .filter_map(|l| l.strip_prefix("?? ").map(str::to_owned))
+        .collect();
+    assert_eq!(untracked, git_untracked);
+}
+
+#[test]
 fn filemode_false_status_still_hashes_same_size_edit() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let root = tmp.path();

@@ -1146,7 +1146,7 @@ fn visit_untracked_dir_entry(
 
 #[allow(clippy::too_many_arguments)]
 fn visit_untracked_read_dir_lazy(
-    entries: ReadDir,
+    entries: impl Iterator<Item = std::io::Result<DirEntry>>,
     repo: &Repository,
     index: &Index,
     work_tree: &Path,
@@ -1227,20 +1227,13 @@ fn visit_untracked_node(
         return Ok(());
     }
 
-    if !rel.is_empty()
-        && abs.is_dir()
-        && dir_is_nested_submodule_worktree(repo.git_dir(), abs)
-        && has_tracked_under(index, gitlinks, rel)
-    {
-        return Ok(());
-    }
-
     let entries = match fs::read_dir(abs) {
         Ok(e) => e,
         Err(_) => return Ok(()),
     };
 
-    if check_only {
+    let tracked_subdir = !rel.is_empty() && has_tracked_under(index, gitlinks, rel);
+    if check_only && !tracked_subdir {
         return visit_untracked_read_dir_lazy(
             entries,
             repo,
@@ -1261,7 +1254,39 @@ fn visit_untracked_node(
         );
     }
 
-    for (name, entry) in &named_entries_sorted(entries) {
+    let named = named_entries_sorted(entries);
+    // The listing shows whether `.git` exists, so most directories skip the submodule probe.
+    if tracked_subdir
+        && named
+            .iter()
+            .any(|(name, _)| name.eq_ignore_ascii_case(b".git"))
+        && dir_is_nested_submodule_worktree(repo.git_dir(), abs)
+    {
+        return Ok(());
+    }
+
+    if check_only {
+        return visit_untracked_read_dir_lazy(
+            named.into_iter().map(|(_, entry)| Ok(entry)),
+            repo,
+            index,
+            work_tree,
+            gitlinks,
+            matcher,
+            ignored_mode,
+            show_all,
+            visible_out,
+            precompose_unicode,
+            tracked_paths,
+            rel,
+            pathspecs,
+            rules,
+            untracked_out,
+            ignored_out,
+        );
+    }
+
+    for (name, entry) in &named {
         if matches!(
             visit_untracked_dir_entry(
                 repo,
