@@ -6518,6 +6518,36 @@ pub fn hash_worktree_file(
     odb.hash(ObjectKind::Blob, &data)
 }
 
+/// Like [`hash_worktree_file`], for callers that already know the worktree file type from a
+/// directory scan (`worktree_mode` is the Git mode derived from that stat), so no metadata
+/// probe is needed.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn hash_worktree_file_with_mode(
+    odb: &Odb,
+    path: &Path,
+    worktree_mode: u32,
+    conv: &crate::crlf::ConversionConfig,
+    file_attrs: &crate::crlf::FileAttrs,
+    rel_path: &str,
+    index_entry: Option<&IndexEntry>,
+    filter_process: Option<&crate::filter_process::FilterProcessState>,
+) -> Result<ObjectId> {
+    let data = if worktree_mode == MODE_SYMLINK {
+        read_worktree_bytes_for_mode(path, worktree_mode)?
+    } else {
+        read_regular_worktree_blob_bytes(
+            odb,
+            path,
+            conv,
+            file_attrs,
+            rel_path,
+            index_entry,
+            filter_process,
+        )?
+    };
+    odb.hash(ObjectKind::Blob, &data)
+}
+
 /// Read, normalize (CRLF/attributes), and store a worktree blob once.
 #[allow(clippy::too_many_arguments)]
 pub fn materialize_worktree_blob(

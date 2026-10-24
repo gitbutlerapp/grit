@@ -14,7 +14,7 @@ use crate::config::ConfigSet;
 use crate::diff::format_mode;
 use crate::diff::{
     diff_index_to_tree, diff_index_to_worktree_with_options, diff_trees, entry_is_racy_with_policy,
-    hash_worktree_file, index_mtime_for_diff, DiffEntry, DiffStatus,
+    index_mtime_for_diff, DiffEntry, DiffStatus,
 };
 use crate::error::{Error, Result};
 use crate::index::StatMatchPolicy;
@@ -281,6 +281,10 @@ enum SwitchWorktreeClean {
 }
 
 /// Whether indexed blobs under `paths` match the worktree for switch (stat-only, plus content when racy).
+///
+/// Stats come from one directory-grouped scan. Racily clean entries (stat matches, but the
+/// file may have changed within the index timestamp's granularity) are then hashed in
+/// parallel from that scan's file type, without a second stat per path.
 fn switch_worktree_clean_for_paths(
     repo: &Repository,
     index: &Index,
@@ -288,16 +292,13 @@ fn switch_worktree_clean_for_paths(
     index_mtime: Option<(u32, u32)>,
     stat_policy: StatMatchPolicy,
 ) -> Result<SwitchWorktreeClean> {
-    use crate::crlf;
     use crate::diff::index_entry_worktree_abs;
-    use crate::diff::stat_matches_with_policy;
     use crate::index::MODE_GITLINK;
     use crate::worktree_scan::{
         collect_blob_lookup_batches, for_each_blob_by_directory,
         group_blob_entries_by_dir_for_paths, visit_blob_lookup_batches, BlobDiskLookup,
         BlobScanSparseMode, WorktreeBlobScanOptions,
     };
-    use std::sync::Mutex;
 
     let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
     let config = repo.config().ok();
@@ -309,20 +310,9 @@ fn switch_worktree_clean_for_paths(
         .as_ref()
         .and_then(|c| c.get_bool("core.ignorecase").and_then(|r| r.ok()))
         .unwrap_or(false);
-    let needs_racy_content = paths.iter().any(|path| {
-        index.get(path.as_bytes(), 0).is_some_and(|ie| {
-            indexed_path_needs_worktree_stat_check(ie)
-                && entry_is_racy_with_policy(ie, index_mtime, stat_policy)
-        })
-    });
-    let dirty_paths: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
-    let note_dirty = |path: &str| {
-        if let Ok(mut guard) = dirty_paths.lock() {
-            guard.insert(path.to_owned());
-        }
-    };
-    let mut stat_clean = true;
-    if paths.len() < SWITCH_TREE_DIFF_STAT_SKIP_MIN {
+    let small = paths.len() < SWITCH_TREE_DIFF_STAT_SKIP_MIN;
+    let mut dirty: BTreeSet<String> = BTreeSet::new();
+    if small {
         for path in paths {
             let Some(ie) = index.get(path.as_bytes(), 0) else {
                 continue;
@@ -331,71 +321,68 @@ fn switch_worktree_clean_for_paths(
                 continue;
             }
             let abs = index_entry_worktree_abs(work_tree, path, precompose_unicode, ignorecase);
-            let meta = match fs::symlink_metadata(&abs) {
-                Ok(m) => m,
-                Err(_) => {
-                    stat_clean = false;
-                    note_dirty(path);
-                    continue;
-                }
-            };
-            if !meta.is_dir() {
-                stat_clean = false;
-                note_dirty(path);
+            if !fs::symlink_metadata(&abs).is_ok_and(|meta| meta.is_dir()) {
+                dirty.insert(path.clone());
             }
         }
-        {
-            let blob_dirs = group_blob_entries_by_dir_for_paths(index, paths);
-            let work_tree_owned = work_tree.to_path_buf();
-            let dir_abs = |dir: &[u8]| {
-                if dir.is_empty() {
-                    work_tree_owned.clone()
-                } else {
-                    crate::diff::index_entry_worktree_abs_bytes(
-                        &work_tree_owned,
-                        dir,
-                        precompose_unicode,
-                        ignorecase,
-                    )
-                }
-            };
-            let work_tree_for_files = work_tree.to_path_buf();
-            let file_abs = move |rel: &[u8]| {
-                crate::diff::index_entry_worktree_abs_bytes(
-                    &work_tree_for_files,
-                    rel,
-                    precompose_unicode,
-                    ignorecase,
-                )
-            };
-            for_each_blob_by_directory(
-                index,
-                &blob_dirs,
-                dir_abs,
-                file_abs,
-                |_| false,
-                |entry_index, lookup| {
-                    let ie = &index.entries[entry_index];
-                    let path = String::from_utf8_lossy(&ie.path);
-                    match lookup {
-                        BlobDiskLookup::Missing => {
-                            stat_clean = false;
-                            note_dirty(&path);
-                        }
-                        BlobDiskLookup::Io(e) => return Err(Error::Io(e)),
-                        BlobDiskLookup::Present(stat) => {
-                            if !crate::diff::stat_matches_blob_stat(ie, &stat, stat_policy) {
-                                stat_clean = false;
-                                note_dirty(&path);
-                            }
-                        }
-                    }
-                    Ok(())
-                },
-            )?;
+    }
+    let mut racy: Vec<(usize, u32)> = Vec::new();
+    let mut visit = |entry_index: usize, lookup: BlobDiskLookup| -> Result<()> {
+        let ie = &index.entries[entry_index];
+        if !indexed_path_needs_worktree_stat_check(ie) {
+            return Ok(());
         }
+        match lookup {
+            BlobDiskLookup::Missing => {
+                dirty.insert(String::from_utf8_lossy(&ie.path).into_owned());
+            }
+            BlobDiskLookup::Io(e) => return Err(Error::Io(e)),
+            BlobDiskLookup::Present(stat) => {
+                let mismatch = if ie.mode == MODE_GITLINK {
+                    !stat.is_dir
+                } else if stat.git_mode != crate::index::MODE_SYMLINK
+                    && stat.git_mode != crate::index::MODE_REGULAR
+                    && stat.git_mode != crate::index::MODE_EXECUTABLE
+                {
+                    true
+                } else {
+                    !crate::diff::stat_matches_blob_stat(ie, &stat, stat_policy)
+                };
+                if mismatch {
+                    dirty.insert(String::from_utf8_lossy(&ie.path).into_owned());
+                } else if entry_is_racy_with_policy(ie, index_mtime, stat_policy) {
+                    racy.push((entry_index, stat.git_mode));
+                }
+            }
+        }
+        Ok(())
+    };
+    let blob_dirs = group_blob_entries_by_dir_for_paths(index, paths);
+    let work_tree_for_dirs = work_tree.to_path_buf();
+    let dir_abs = move |dir: &[u8]| {
+        if dir.is_empty() {
+            work_tree_for_dirs.clone()
+        } else {
+            crate::diff::index_entry_worktree_abs_bytes(
+                &work_tree_for_dirs,
+                dir,
+                precompose_unicode,
+                ignorecase,
+            )
+        }
+    };
+    let work_tree_for_files = work_tree.to_path_buf();
+    let file_abs = move |rel: &[u8]| {
+        crate::diff::index_entry_worktree_abs_bytes(
+            &work_tree_for_files,
+            rel,
+            precompose_unicode,
+            ignorecase,
+        )
+    };
+    if small {
+        for_each_blob_by_directory(index, &blob_dirs, dir_abs, file_abs, |_| false, &mut visit)?;
     } else {
-        let blob_dirs = group_blob_entries_by_dir_for_paths(index, paths);
         if blob_dirs.is_empty() {
             return Ok(SwitchWorktreeClean::Clean);
         }
@@ -405,36 +392,13 @@ fn switch_worktree_clean_for_paths(
             .unwrap_or(true);
         let stat_parallel_threads =
             switch_prepare_stat_parallel_threads(repo, config.as_deref(), paths.len());
-        let blob_scan = WorktreeBlobScanOptions {
-            preload_index,
-            stat_parallel_threads,
-        };
-        let work_tree_owned = work_tree.to_path_buf();
-        let dir_abs = move |dir: &[u8]| {
-            if dir.is_empty() {
-                work_tree_owned.clone()
-            } else {
-                crate::diff::index_entry_worktree_abs_bytes(
-                    &work_tree_owned,
-                    dir,
-                    precompose_unicode,
-                    ignorecase,
-                )
-            }
-        };
-        let work_tree_for_files = work_tree.to_path_buf();
-        let file_abs = move |rel: &[u8]| {
-            crate::diff::index_entry_worktree_abs_bytes(
-                &work_tree_for_files,
-                rel,
-                precompose_unicode,
-                ignorecase,
-            )
-        };
         let guard_batches = collect_blob_lookup_batches(
             index,
             &blob_dirs,
-            blob_scan,
+            WorktreeBlobScanOptions {
+                preload_index,
+                stat_parallel_threads,
+            },
             &Default::default(),
             config.as_deref().unwrap_or(&ConfigSet::new()),
             false,
@@ -442,92 +406,102 @@ fn switch_worktree_clean_for_paths(
             dir_abs,
             file_abs,
             |_| false,
-            BlobScanSparseMode::WorktreeGuard { stat_policy },
+            BlobScanSparseMode::WorktreeGuard {
+                stat_policy,
+                index_mtime,
+            },
         )?;
-        visit_blob_lookup_batches(guard_batches, |entry_index, lookup| {
-            let ie = &index.entries[entry_index];
-            if !indexed_path_needs_worktree_stat_check(ie) {
-                return Ok(());
-            }
-            let path = String::from_utf8_lossy(&ie.path);
-            match lookup {
-                BlobDiskLookup::Missing => {
-                    stat_clean = false;
-                    note_dirty(&path);
-                }
-                BlobDiskLookup::Io(e) => return Err(Error::Io(e)),
-                BlobDiskLookup::Present(stat) => {
-                    let mismatch = if ie.mode == MODE_GITLINK {
-                        !stat.is_dir
-                    } else if stat.git_mode != crate::index::MODE_SYMLINK
-                        && stat.git_mode != crate::index::MODE_REGULAR
-                        && stat.git_mode != crate::index::MODE_EXECUTABLE
-                    {
-                        true
-                    } else {
-                        !crate::diff::stat_matches_blob_stat(ie, &stat, stat_policy)
-                    };
-                    if mismatch {
-                        stat_clean = false;
-                        note_dirty(&path);
-                    }
-                }
-            }
-            Ok(())
-        })?;
+        visit_blob_lookup_batches(guard_batches, &mut visit)?;
     }
-    if needs_racy_content {
+    if !racy.is_empty() {
         let cfg = config.unwrap_or_else(|| Arc::new(ConfigSet::new()));
-        let conv = crlf::ConversionConfig::from_config(cfg.as_ref());
-        let rules = WorktreeRules::from_parts_index_attributes_only(repo, index, cfg)?;
-        let filters = repo.caches().filters();
-        let odb = repo.odb();
-        for path in paths {
-            let Some(ie) = index.get(path.as_bytes(), 0) else {
-                continue;
-            };
-            if !indexed_path_needs_worktree_stat_check(ie)
-                || !entry_is_racy_with_policy(ie, index_mtime, stat_policy)
-            {
-                continue;
-            }
-            let abs = index_entry_worktree_abs(work_tree, path, precompose_unicode, ignorecase);
-            let meta = match fs::symlink_metadata(&abs) {
-                Ok(m) => m,
-                Err(_) => {
-                    stat_clean = false;
-                    note_dirty(path);
-                    continue;
-                }
-            };
-            if !stat_matches_with_policy(ie, &meta, stat_policy) {
-                stat_clean = false;
-                note_dirty(path);
-                continue;
-            }
-            let attrs = rules.file_attrs(path, false);
-            let content_ok = hash_worktree_file(
-                odb,
-                &abs,
-                &meta,
-                &conv,
-                &attrs,
-                path,
-                Some(ie),
-                Some(filters),
-            )
-            .is_ok_and(|oid| oid == ie.oid);
-            if !content_ok {
-                stat_clean = false;
-                note_dirty(path);
-            }
-        }
+        dirty.extend(racy_entries_with_changed_content(
+            repo,
+            index,
+            work_tree,
+            &racy,
+            cfg,
+            precompose_unicode,
+            ignorecase,
+        )?);
     }
-    if !stat_clean {
-        let dirty = dirty_paths.into_inner().unwrap_or_else(|e| e.into_inner());
-        return Ok(SwitchWorktreeClean::StatDirty(dirty));
+    if dirty.is_empty() {
+        return Ok(SwitchWorktreeClean::Clean);
     }
-    Ok(SwitchWorktreeClean::Clean)
+    Ok(SwitchWorktreeClean::StatDirty(dirty))
+}
+
+/// Paths among racily clean `racy` entries (index position, scanned worktree mode) whose
+/// worktree content no longer hashes to the index blob. Unreadable files count as changed.
+///
+/// Each check opens and reads one file, and a racy batch is usually every file the previous
+/// checkout wrote, so the reads run on the index-refresh thread pool.
+fn racy_entries_with_changed_content(
+    repo: &Repository,
+    index: &Index,
+    work_tree: &Path,
+    racy: &[(usize, u32)],
+    cfg: Arc<ConfigSet>,
+    precompose_unicode: bool,
+    ignorecase: bool,
+) -> Result<Vec<String>> {
+    use crate::crlf;
+    use crate::diff::index_entry_worktree_abs;
+
+    struct RacyCheck<'a> {
+        entry: &'a IndexEntry,
+        rel_path: String,
+        abs_path: PathBuf,
+        worktree_mode: u32,
+        attrs: crlf::FileAttrs,
+    }
+
+    let conv = crlf::ConversionConfig::from_config(cfg.as_ref());
+    let mut options = repo
+        .thread_policy()
+        .resolve(ParallelOp::IndexRefresh, cfg.as_ref());
+    options.min_total_bytes = None;
+    let rules = WorktreeRules::from_parts_index_attributes_only(repo, index, cfg)?;
+    let checks: Vec<RacyCheck<'_>> = racy
+        .iter()
+        .map(|&(entry_index, worktree_mode)| {
+            let entry = &index.entries[entry_index];
+            let rel_path = String::from_utf8_lossy(&entry.path).into_owned();
+            RacyCheck {
+                entry,
+                abs_path: index_entry_worktree_abs(
+                    work_tree,
+                    &rel_path,
+                    precompose_unicode,
+                    ignorecase,
+                ),
+                attrs: rules.file_attrs(&rel_path, false),
+                rel_path,
+                worktree_mode,
+            }
+        })
+        .collect();
+    let filters = repo.caches().filters();
+    let odb = repo.odb();
+    let unchanged = crate::parallel::par_map(&checks, options, 0, |check| {
+        crate::diff::hash_worktree_file_with_mode(
+            odb,
+            &check.abs_path,
+            check.worktree_mode,
+            &conv,
+            &check.attrs,
+            &check.rel_path,
+            Some(check.entry),
+            Some(filters),
+        )
+        .is_ok_and(|oid| oid == check.entry.oid)
+    });
+    Ok(checks
+        .into_iter()
+        .zip(unchanged)
+        .filter(|(_, same)| !same)
+        .map(|(check, _)| check.rel_path)
+        .collect())
 }
 
 fn indexed_path_needs_worktree_stat_check(ie: &IndexEntry) -> bool {
@@ -2759,5 +2733,131 @@ mod tests {
             scan.untracked.iter().any(|p| p == "wh/nested/block.pipe"),
             "special files under a scheduled-delete directory must be discovered"
         );
+    }
+
+    fn git_in(dir: &Path, args: &[&str]) -> String {
+        let out = std::process::Command::new("git")
+            .current_dir(dir)
+            .args(args)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .env("GIT_AUTHOR_NAME", "T")
+            .env("GIT_AUTHOR_EMAIL", "t@t")
+            .env("GIT_COMMITTER_NAME", "T")
+            .env("GIT_COMMITTER_EMAIL", "t@t")
+            .output()
+            .expect("git");
+        assert!(
+            out.status.success(),
+            "git {args:?}: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    }
+
+    /// `main` with 40 directories of 10 files; `trimmed` deletes the first 20 directories
+    /// (200 deletions, enough for the directory-batched guard). Every entry is left racily
+    /// clean: files, index entries and the index file share one whole-second mtime, and
+    /// ctime is not trusted so a same-size in-place edit keeps the stat data identical.
+    fn racy_delete_heavy_fixture(root: &Path) -> (Repository, ObjectId) {
+        git_in(root, &["init", "-q", "-b", "main", "."]);
+        git_in(root, &["config", "core.trustctime", "false"]);
+        for d in 0..40 {
+            let dir = root.join(format!("d{d:02}"));
+            std::fs::create_dir_all(&dir).expect("mkdir");
+            for f in 0..10 {
+                std::fs::write(dir.join(format!("f{f}.txt")), format!("body {d} {f}\n"))
+                    .expect("write");
+            }
+        }
+        git_in(root, &["add", "-A"]);
+        git_in(root, &["commit", "-qm", "full"]);
+        git_in(root, &["switch", "-qc", "trimmed"]);
+        let doomed: Vec<String> = (0..20).map(|d| format!("d{d:02}")).collect();
+        let mut rm = vec!["rm", "-rq"];
+        rm.extend(doomed.iter().map(String::as_str));
+        git_in(root, &rm);
+        git_in(root, &["commit", "-qm", "trim"]);
+        let trimmed = ObjectId::from_hex(git_in(root, &["rev-parse", "HEAD"]).trim()).expect("oid");
+        git_in(root, &["switch", "-q", "main"]);
+
+        let pinned = filetime::FileTime::from_unix_time(1_700_000_000, 0);
+        for d in 0..40 {
+            for f in 0..10 {
+                let path = root.join(format!("d{d:02}/f{f}.txt"));
+                filetime::set_file_mtime(&path, pinned).expect("pin");
+            }
+        }
+        git_in(root, &["update-index", "-q", "--refresh"]);
+        let repo = Repository::open(
+            &root.join(".git"),
+            &crate::environment::RepositoryOptions::empty().with_work_tree(root),
+        )
+        .expect("open");
+        let index_path = repo.index_path_for_env().expect("index path");
+        filetime::set_file_mtime(&index_path, pinned).expect("racy index");
+        (repo, trimmed)
+    }
+
+    fn switch_to(repo: &Repository, branch: &str, oid: ObjectId) -> Result<()> {
+        use crate::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
+        switch_repository(
+            repo,
+            &SwitchOptions {
+                mode: SwitchMode::Existing {
+                    branch: branch.into(),
+                    oid,
+                },
+                dry_run: false,
+            },
+        )
+        .map(|_| ())
+    }
+
+    #[test]
+    fn switch_delete_heavy_refuses_racy_same_size_edit() {
+        let tmp = TempDir::new().expect("tempdir");
+        let root = tmp.path();
+        let (repo, trimmed) = racy_delete_heavy_fixture(root);
+        let victim = root.join("d07/f3.txt");
+        let mut edited = std::fs::read(&victim).expect("read");
+        edited[0] = b'X';
+        std::fs::write(&victim, &edited).expect("same-size edit");
+        filetime::set_file_mtime(
+            &victim,
+            filetime::FileTime::from_unix_time(1_700_000_000, 0),
+        )
+        .expect("forge mtime");
+
+        switch_to(&repo, "trimmed", trimmed).expect_err("local edit must block the switch");
+        assert_eq!(std::fs::read(&victim).expect("still there"), edited);
+        assert!(root.join("d00/f0.txt").exists(), "nothing deleted");
+        assert_eq!(
+            git_in(root, &["symbolic-ref", "--short", "HEAD"]).trim(),
+            "main"
+        );
+    }
+
+    #[test]
+    fn switch_delete_heavy_hashes_racy_files_once_and_deletes_them() {
+        let tmp = TempDir::new().expect("tempdir");
+        let root = tmp.path();
+        let (repo, trimmed) = racy_delete_heavy_fixture(root);
+        let metrics = repo.odb().hot_path_metrics();
+        metrics.reset_blob_content_reads();
+        metrics.set_blob_counting(true);
+        switch_to(&repo, "trimmed", trimmed).expect("clean racy deletes switch");
+        metrics.set_blob_counting(false);
+
+        assert_eq!(
+            metrics.blob_content_reads(),
+            200,
+            "each racily clean deleted file is read exactly once"
+        );
+        for d in 0..20 {
+            assert!(!root.join(format!("d{d:02}")).exists(), "d{d:02} removed");
+        }
+        assert_eq!(git_in(root, &["status", "--porcelain"]), "");
+        git_in(root, &["fsck", "--no-progress"]);
     }
 }

@@ -147,7 +147,7 @@ fn symlink_metadata_path(path: &Path) -> io::Result<fs::Metadata> {
 fn sparse_stat_policy(sparse: BlobScanSparseMode) -> crate::index::StatMatchPolicy {
     match sparse {
         BlobScanSparseMode::StatusDiff { stat_policy, .. }
-        | BlobScanSparseMode::WorktreeGuard { stat_policy }
+        | BlobScanSparseMode::WorktreeGuard { stat_policy, .. }
         | BlobScanSparseMode::StatRefresh { stat_policy, .. } => stat_policy,
         _ => crate::index::StatMatchPolicy::default(),
     }
@@ -431,6 +431,7 @@ pub(crate) enum BlobScanSparseMode {
     },
     WorktreeGuard {
         stat_policy: crate::index::StatMatchPolicy,
+        index_mtime: Option<(u32, u32)>,
     },
     StatRefresh {
         stat_policy: crate::index::StatMatchPolicy,
@@ -468,9 +469,10 @@ impl BlobScanSparseMode {
             } => {
                 retain_stage_tracked_lookup(index, entry_index, lookup, index_mtime, trust_filemode)
             }
-            Self::WorktreeGuard { stat_policy } => {
-                retain_worktree_guard_lookup(index, entry_index, lookup, stat_policy)
-            }
+            Self::WorktreeGuard {
+                stat_policy,
+                index_mtime,
+            } => retain_worktree_guard_lookup(index, entry_index, lookup, stat_policy, index_mtime),
             Self::StatRefresh {
                 stat_policy,
                 index_mtime,
@@ -579,6 +581,7 @@ fn retain_worktree_guard_lookup(
     entry_index: usize,
     lookup: &BlobDiskLookup,
     stat_policy: crate::index::StatMatchPolicy,
+    index_mtime: Option<(u32, u32)>,
 ) -> bool {
     let ie = &index.entries[entry_index];
     if ie.stage() != 0 || ie.intent_to_add() || ie.skip_worktree() {
@@ -597,7 +600,9 @@ fn retain_worktree_guard_lookup(
             {
                 return true;
             }
+            // Racily clean entries are kept too: the guard must compare their content.
             !crate::diff::stat_matches_blob_stat(ie, stat, stat_policy)
+                || crate::diff::entry_is_racy_with_policy(ie, index_mtime, stat_policy)
         }
     }
 }
