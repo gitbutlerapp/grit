@@ -37,6 +37,9 @@ fn map_lib_error(err: &LibError) -> String {
                 oid.to_hex()
             )
         }
+        LibError::LockHeld { path, holder } => {
+            crate::json_error::lock_held(path, *holder).to_string()
+        }
         LibError::RefStore(RefStoreError::NotFound { name }) => {
             match name.strip_prefix("refs/heads/") {
                 Some(short) => format!("no branch named '{short}'"),

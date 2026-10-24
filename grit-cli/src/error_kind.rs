@@ -14,6 +14,8 @@ pub enum ErrorKind {
     HashCollision,
     /// Checkout or switch would overwrite local or untracked files.
     WouldOverwrite,
+    /// A lock file such as `.git/index.lock` already exists (another process, or a stale lock).
+    LockHeld,
     /// Invalid `--author`, `--grep`, pickaxe, or similar filter pattern.
     InvalidPattern,
     /// Invalid command arguments for a specific subcommand (exit code 2).
@@ -70,6 +72,7 @@ impl ErrorKind {
             Self::Conflict => "conflict",
             Self::HashCollision => "hash_collision",
             Self::WouldOverwrite => "would_overwrite",
+            Self::LockHeld => "lock_held",
             Self::InvalidPattern => "invalid_pattern",
             Self::Usage => "usage",
             Self::IncompatibleFlags => "incompatible_flags",
@@ -94,6 +97,7 @@ impl ErrorKind {
             Self::Conflict,
             Self::HashCollision,
             Self::WouldOverwrite,
+            Self::LockHeld,
             Self::InvalidPattern,
             Self::Usage,
             Self::IncompatibleFlags,

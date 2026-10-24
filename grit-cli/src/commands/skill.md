@@ -138,6 +138,8 @@ Each commit gets a stable **`change-id`** header (on by default) that survives `
 
 `grit switch`, `grit merge`, `grit pick`, `grit revert` and `grit pull` refuse to run when checkout would overwrite local edits or untracked files. Preflight with `grit switch <branch> --dry-run --json` (checks only; reports `changed_paths`) before switching. On refusal, `--json` emits `kind: would_overwrite` with `reason` (`local_changes` or `untracked`) and sorted `paths`.
 
+When another process holds `.git/index.lock` (or a ref lock), any mutating command fails without changing anything and `--json` emits `kind: lock_held` with `lock.path` (and `lock.holder.pid` / `lock.holder.running` when the owner was recorded). Retry later; remove `lock.path` only when no grit or git process is running, or when `lock.holder.running` is `false`.
+
 ## Combining work
 
 - `grit merge <branch>` fast-forwards when it can, otherwise records a merge commit. `<branch>` can be local or remote-tracking (`origin/main`). Use `grit merge --check <branch>` to predict conflicts in memory without touching refs, the index, or the worktree. Common flags: `--ff-only` (exit 128 when diverged), `--no-ff`, `--squash` (writes `SQUASH_MSG`; finish with `grit commit`), `--no-commit` (Git merge state; finish with `grit commit`), `-X ours|theirs`, `--conflict diff3|zdiff3|merge`, `--allow-unrelated-histories`, `-m` / `-F` / `--message-file`.

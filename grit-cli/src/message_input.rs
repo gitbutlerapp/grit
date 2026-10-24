@@ -74,6 +74,7 @@ fn usage_error(message: impl Into<String>) -> anyhow::Error {
             commit: None,
             would_overwrite: None,
             oid: None,
+            lock: None,
         },
         human,
     })

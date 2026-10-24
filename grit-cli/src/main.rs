@@ -2115,6 +2115,7 @@ fn run() -> Result<ExitStatus, anyhow::Error> {
                     commit: None,
                     would_overwrite: None,
                     oid: None,
+                    lock: None,
                 };
                 output::emit_error(
                     &anyhow::Error::new(json_error::StructuredCliError {

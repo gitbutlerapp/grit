@@ -2,9 +2,11 @@
 
 use std::error::Error as StdError;
 use std::fmt;
+use std::path::Path;
 
 use anyhow::Error;
 use grit_lib::error::{Error as LibError, OverwriteReason};
+use grit_lib::lockfile::LockHolder;
 use grit_lib::objects::ObjectId;
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -18,6 +20,26 @@ pub struct WouldOverwriteJson {
     pub reason: String,
     /// Sorted, deduplicated repository-relative paths.
     pub paths: Vec<String>,
+}
+
+/// The lock file that blocked the command, when `kind == "lock_held"`.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct LockHeldJson {
+    /// Lock file that already exists (for example `/repo/.git/index.lock`).
+    pub path: String,
+    /// Process recorded in the lock's pid sidecar (`core.lockfilePid`); absent when none was written.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub holder: Option<LockHolderJson>,
+}
+
+/// Process recorded as the owner of a held lock.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct LockHolderJson {
+    /// Process id from the pid sidecar.
+    pub pid: u64,
+    /// Whether that process is running; `false` means the lock is stale.
+    pub running: bool,
 }
 
 /// JSON object emitted on stdout for structured command failures.
@@ -43,6 +65,10 @@ pub struct StructuredJsonError {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(skip_serializing_if = "Option::is_none")]
     pub oid: Option<String>,
+    /// Lock file details when `kind == "lock_held"`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub lock: Option<LockHeldJson>,
 }
 
 /// Carries both human text and a structured JSON payload.
@@ -84,6 +110,7 @@ pub fn operation_conflict(
             commit: commit.map(|oid| oid.to_hex()),
             would_overwrite: None,
             oid: None,
+            lock: None,
         },
         human,
     })
@@ -102,6 +129,7 @@ pub fn hash_collision(oid: ObjectId) -> Error {
             commit: None,
             would_overwrite: None,
             oid: Some(hex),
+            lock: None,
         },
         human,
     })
@@ -127,6 +155,7 @@ pub fn would_overwrite_error(
                 paths,
             }),
             oid: None,
+            lock: None,
         },
         human,
     })
@@ -141,8 +170,55 @@ pub fn map_lib_error(err: LibError) -> Error {
             paths,
             message,
         } => would_overwrite_error(reason, paths, message),
+        LibError::LockHeld { path, holder } => lock_held(&path, holder),
         other => Error::new(other),
     }
+}
+
+/// Build a structured CLI error for a lock file that already exists.
+pub fn lock_held(path: &Path, holder: Option<LockHolder>) -> Error {
+    let shown = path.display();
+    let human = match holder {
+        None => format!(
+            "another process holds {shown}; if none is running, remove the stale lock and retry"
+        ),
+        Some(LockHolder { pid, running: true }) => format!(
+            "process {pid} holds {shown}; wait for it to finish, or remove the lock if that process is not grit or git"
+        ),
+        Some(LockHolder {
+            pid,
+            running: false,
+        }) => format!(
+            "{shown} is a stale lock left by process {pid}, which is no longer running; remove it and retry"
+        ),
+    };
+    Error::new(StructuredCliError {
+        payload: StructuredJsonError {
+            error: human.clone(),
+            kind: ErrorKind::LockHeld,
+            conflicts: None,
+            commit: None,
+            would_overwrite: None,
+            oid: None,
+            lock: Some(LockHeldJson {
+                path: shown.to_string(),
+                holder: holder.map(|h| LockHolderJson {
+                    pid: h.pid,
+                    running: h.running,
+                }),
+            }),
+        },
+        human,
+    })
+}
+
+/// Wrap [`LibError::LockHeld`] anywhere in the chain as [`StructuredCliError`].
+fn lock_held_from_chain(err: &Error) -> Option<Error> {
+    err.chain()
+        .find_map(|cause| match cause.downcast_ref::<LibError>() {
+            Some(LibError::LockHeld { path, holder }) => Some(lock_held(path, *holder)),
+            _ => None,
+        })
 }
 
 fn hash_collision_from_chain(err: &Error) -> Option<ObjectId> {
@@ -199,6 +275,9 @@ pub fn ensure_structured(err: Error) -> Error {
     if let Some(structured) = would_overwrite_from_chain(&err) {
         return structured;
     }
+    if let Some(structured) = lock_held_from_chain(&err) {
+        return structured;
+    }
     err
 }
 
@@ -207,17 +286,24 @@ pub fn structured_json_payload(err: &Error) -> Option<StructuredJsonError> {
     if let Some(e) = err.downcast_ref::<StructuredCliError>() {
         return Some(e.payload.clone());
     }
-    hash_collision_from_chain(err).map(|oid| {
-        let hex = oid.to_hex();
-        StructuredJsonError {
-            error: "SHA-1 hash collision".to_owned(),
-            kind: ErrorKind::HashCollision,
-            conflicts: None,
-            commit: None,
-            would_overwrite: None,
-            oid: Some(hex),
-        }
-    })
+    hash_collision_from_chain(err)
+        .map(|oid| {
+            let hex = oid.to_hex();
+            StructuredJsonError {
+                error: "SHA-1 hash collision".to_owned(),
+                kind: ErrorKind::HashCollision,
+                conflicts: None,
+                commit: None,
+                would_overwrite: None,
+                oid: Some(hex),
+                lock: None,
+            }
+        })
+        .or_else(|| {
+            lock_held_from_chain(err)?
+                .downcast_ref::<StructuredCliError>()
+                .map(|structured| structured.payload.clone())
+        })
 }
 
 /// Build a structured error for incompatible `--json` / `--markdown` flag combinations.
@@ -231,6 +317,7 @@ pub fn incompatible_output_flags(human: impl Into<String>, kind: ErrorKind) -> E
             commit: None,
             would_overwrite: None,
             oid: None,
+            lock: None,
         },
         human,
     })
@@ -259,6 +346,7 @@ pub fn invalid_commit_filter(err: grit_lib::revwalk::filter::CommitFilterError) 
             commit: None,
             would_overwrite: None,
             oid: None,
+            lock: None,
         },
         human,
     })
@@ -276,6 +364,7 @@ pub fn invalid_pickaxe(err: grit_lib::diff::PickaxeError) -> Error {
             commit: None,
             would_overwrite: None,
             oid: None,
+            lock: None,
         },
         human,
     })

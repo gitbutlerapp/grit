@@ -370,6 +370,7 @@ fn branch_usage(message: impl Into<String>) -> AnyhowError {
             commit: None,
             would_overwrite: None,
             oid: None,
+            lock: None,
         },
         human,
     })
@@ -853,6 +854,7 @@ pub fn map_branch_error(err: Error) -> anyhow::Error {
                     commit: None,
                     would_overwrite: None,
                     oid: None,
+                    lock: None,
                 },
                 human,
             })
@@ -870,6 +872,7 @@ pub fn map_branch_error(err: Error) -> anyhow::Error {
                     commit: None,
                     would_overwrite: None,
                     oid: None,
+                    lock: None,
                 },
                 human,
             })

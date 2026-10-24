@@ -27,6 +27,7 @@ These values appear in the `kind` field of structured `--json` errors ([error sc
 | `conflict` | Merge, pick, rebase, or similar would introduce conflicts (`conflicts`, optional `commit`). |
 | `hash_collision` | Refusing to store content that triggers SHA-1 collision detection (`oid`). |
 | `would_overwrite` | Checkout / switch would overwrite local or untracked files (`would_overwrite.reason`, `would_overwrite.paths`). |
+| `lock_held` | A lock file such as `.git/index.lock` or `refs/heads/main.lock` already exists, so nothing was changed (`lock.path`, plus `lock.holder.pid` and `lock.holder.running` when `core.lockfilePid` recorded the owner). Retry once the other process finishes; when none is running (or `lock.holder.running` is `false`), the lock is stale and can be removed. |
 | `invalid_pattern` | Invalid filter pattern (exit 129). |
 | `usage` | Subcommand usage mistake (exit 2), e.g. `grit branch` flag combinations. |
 | `incompatible_flags` | Flags that cannot be combined (often `--json` with human-only options). |

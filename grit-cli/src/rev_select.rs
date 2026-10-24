@@ -335,6 +335,7 @@ fn rev_select_usage(message: impl Into<String>) -> anyhow::Error {
             commit: None,
             would_overwrite: None,
             oid: None,
+            lock: None,
         },
         human,
     })

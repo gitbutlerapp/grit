@@ -41,6 +41,7 @@ fn exit_codes_page_matches_enum() {
         "conflict",
         "hash_collision",
         "would_overwrite",
+        "lock_held",
         "invalid_pattern",
         "incompatible_flags",
         "branch_already_exists",
@@ -107,4 +108,55 @@ fn exit_status_for_every_error_kind_cli() {
     assert_ne!(code, 0);
     let v: Value = serde_json::from_str(stdout.trim()).expect("branch_already_exists");
     assert_eq!(v["kind"].as_str(), Some("branch_already_exists"));
+}
+
+#[test]
+fn held_index_lock_reports_lock_held_kind_with_path() {
+    let root = init_repo();
+    fs::write(root.path().join("n"), "n\n").expect("write");
+    let lock = root.path().join(".git/index.lock");
+    fs::write(&lock, b"").expect("hold index.lock");
+
+    let (code, stdout) = grit(root.path(), &["--json", "add", "n"]);
+    assert_eq!(code, 1, "{stdout}");
+    let v: Value = serde_json::from_str(stdout.trim()).expect("json error");
+    assert_eq!(v["kind"].as_str(), Some("lock_held"), "{v}");
+    let path = v["lock"]["path"].as_str().expect("lock.path");
+    assert_eq!(
+        Path::new(path).canonicalize().expect("lock path exists"),
+        lock.canonicalize().expect("lock")
+    );
+    assert!(v["lock"].get("holder").is_none(), "no pid sidecar: {v}");
+    let error = v["error"].as_str().expect("error text");
+    assert!(error.contains(path), "{error}");
+    assert!(!error.contains("entity already exists"), "{error}");
+
+    let pid_file = root.path().join(".git/index~pid.lock");
+    fs::write(&pid_file, "pid 999999999\n").expect("stale pid sidecar");
+    let (code, stdout) = grit(root.path(), &["--json", "add", "n"]);
+    assert_eq!(code, 1, "{stdout}");
+    let v: Value = serde_json::from_str(stdout.trim()).expect("json error");
+    assert_eq!(v["kind"].as_str(), Some("lock_held"), "{v}");
+    assert_eq!(
+        v["lock"]["holder"]["pid"].as_u64(),
+        Some(999_999_999),
+        "{v}"
+    );
+    assert_eq!(v["lock"]["holder"]["running"].as_bool(), Some(false), "{v}");
+
+    let human = Command::new(env!("CARGO_BIN_EXE_grit"))
+        .current_dir(root.path())
+        .args(["add", "n"])
+        .output()
+        .expect("grit");
+    assert_eq!(human.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&human.stderr);
+    assert!(stderr.contains("index.lock"), "{stderr}");
+    assert!(stderr.contains("stale lock"), "{stderr}");
+    assert!(lock.is_file(), "grit must not remove a foreign lock");
+
+    fs::remove_file(&lock).expect("release lock");
+    fs::remove_file(&pid_file).expect("remove pid sidecar");
+    let (code, _) = grit(root.path(), &["add", "n"]);
+    assert_eq!(code, 0, "add succeeds once the lock is gone");
 }

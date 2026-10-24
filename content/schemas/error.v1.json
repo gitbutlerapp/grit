@@ -50,6 +50,13 @@
           "type": "string"
         },
         {
+          "description": "A lock file such as `.git/index.lock` already exists (another process, or a stale lock).",
+          "enum": [
+            "lock_held"
+          ],
+          "type": "string"
+        },
+        {
           "description": "Invalid `--author`, `--grep`, pickaxe, or similar filter pattern.",
           "enum": [
             "invalid_pattern"
@@ -142,6 +149,50 @@
         }
       ]
     },
+    "LockHeldJson": {
+      "description": "The lock file that blocked the command, when `kind == \"lock_held\"`.",
+      "properties": {
+        "holder": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/LockHolderJson"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Process recorded in the lock's pid sidecar (`core.lockfilePid`); absent when none was written."
+        },
+        "path": {
+          "description": "Lock file that already exists (for example `/repo/.git/index.lock`).",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path"
+      ],
+      "type": "object"
+    },
+    "LockHolderJson": {
+      "description": "Process recorded as the owner of a held lock.",
+      "properties": {
+        "pid": {
+          "description": "Process id from the pid sidecar.",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "running": {
+          "description": "Whether that process is running; `false` means the lock is stale.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "pid",
+        "running"
+      ],
+      "type": "object"
+    },
     "StructuredJsonError": {
       "description": "JSON object emitted on stdout for structured command failures.",
       "properties": {
@@ -173,6 +224,17 @@
             }
           ],
           "description": "Machine-readable category (e.g. `conflict`)."
+        },
+        "lock": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/LockHeldJson"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Lock file details when `kind == \"lock_held\"`."
         },
         "oid": {
           "description": "Plain SHA-1 digest for colliding input, when `kind == \"hash_collision\"`.",
