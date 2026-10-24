@@ -882,3 +882,108 @@ fn continued_commit_gets_new_change_id() {
     assert_ne!(change_id(&commit), change_id(&src));
     git_fsck_strict(root.path());
 }
+
+fn commit_nested_tree(root: &Path) {
+    for dir in ["src/a", "src/b", "docs", "tests/deep/er"] {
+        for i in 0..3 {
+            let path = root.join(dir).join(format!("f{i}.txt"));
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(&path, format!("{dir} {i}\n")).unwrap();
+        }
+    }
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "nested base"]);
+}
+
+/// The replay keeps the cache-tree: subtrees it did not touch stay valid and agree with `HEAD`.
+fn assert_untouched_cache_tree_kept(root: &Path, untouched_dir: &str) {
+    let index = grit_lib::index::Index::load(&root.join(".git/index")).expect("load index");
+    let cache_tree = index
+        .cache_tree
+        .as_ref()
+        .expect("index written by the replay must keep the cache-tree extension");
+    let mut node = cache_tree;
+    for component in untouched_dir.split('/') {
+        node = node
+            .children
+            .iter()
+            .find(|child| child.name == component.as_bytes())
+            .unwrap_or_else(|| panic!("cache-tree lost the node for {untouched_dir}"));
+    }
+    let expected = oid_from_rev(root, &format!("HEAD:{untouched_dir}"));
+    assert_eq!(node.oid, Some(expected), "{untouched_dir} must stay valid");
+    assert!(node.entry_count > 0);
+    let head_tree = oid_from_rev(root, "HEAD^{tree}");
+    assert_eq!(git(root, &["write-tree"]).trim(), head_tree.to_hex());
+    assert_eq!(git(root, &["status", "--porcelain"]), "");
+    git_fsck_strict(root);
+}
+
+#[test]
+fn pick_and_revert_keep_valid_cache_tree() {
+    let root = tempfile::tempdir().expect("tempdir");
+    init_repo(root.path());
+    commit_nested_tree(root.path());
+    git(root.path(), &["switch", "-c", "topic"]);
+    fs::write(root.path().join("src/a/f1.txt"), "topic change\n").unwrap();
+    fs::write(root.path().join("tests/deep/er/new.txt"), "added\n").unwrap();
+    git(root.path(), &["add", "-A"]);
+    git(root.path(), &["commit", "-qm", "topic"]);
+    let pick = oid_from_rev(root.path(), "HEAD");
+    git(root.path(), &["switch", "main"]);
+    commit_file(root.path(), "docs/f0.txt", "main change\n", "main");
+    let main_tree = oid_from_rev(root.path(), "HEAD^{tree}");
+    let index = grit_lib::index::Index::load(&root.path().join(".git/index")).expect("index");
+    assert_eq!(
+        index.cache_tree_root,
+        Some(main_tree),
+        "git seeds a cache-tree"
+    );
+
+    let repo = open_repo(root.path());
+    let out = start_replay_sequence(&repo, &pick_req(vec![pick], ReplayOptions::default()))
+        .expect("pick");
+    let picked = match out {
+        SequenceOutcome::Completed { created, .. } => created[0].new_oid,
+        _ => panic!("expected completed pick"),
+    };
+    assert_untouched_cache_tree_kept(root.path(), "src/b");
+
+    let out = start_replay_sequence(&repo, &revert_req(vec![picked], ReplayOptions::default()))
+        .expect("revert");
+    assert!(matches!(out, SequenceOutcome::Completed { .. }));
+    assert_eq!(oid_from_rev(root.path(), "HEAD^{tree}"), main_tree);
+    assert_untouched_cache_tree_kept(root.path(), "docs");
+}
+
+#[test]
+fn pick_refuses_staged_or_unstaged_changes_without_state() {
+    let root = tempfile::tempdir().expect("tempdir");
+    init_repo(root.path());
+    commit_nested_tree(root.path());
+    git(root.path(), &["switch", "-c", "topic"]);
+    commit_file(root.path(), "src/b/f2.txt", "topic\n", "topic");
+    let pick = oid_from_rev(root.path(), "HEAD");
+    git(root.path(), &["switch", "main"]);
+    commit_file(root.path(), "docs/f1.txt", "main\n", "main");
+    let head = oid_from_rev(root.path(), "HEAD");
+    let repo = open_repo(root.path());
+
+    fs::write(root.path().join("src/a/f0.txt"), "staged\n").unwrap();
+    git(root.path(), &["add", "src/a/f0.txt"]);
+    start_replay_sequence(&repo, &pick_req(vec![pick], ReplayOptions::default()))
+        .expect_err("staged change must refuse the pick");
+    assert_no_replay_state(root.path());
+    assert_eq!(oid_from_rev(root.path(), "HEAD"), head);
+    git(root.path(), &["reset", "-q", "--hard"]);
+
+    fs::write(root.path().join("tests/deep/er/f2.txt"), "unstaged\n").unwrap();
+    start_replay_sequence(&repo, &pick_req(vec![pick], ReplayOptions::default()))
+        .expect_err("unstaged change must refuse the pick");
+    assert_no_replay_state(root.path());
+    assert_eq!(oid_from_rev(root.path(), "HEAD"), head);
+    assert_eq!(
+        fs::read_to_string(root.path().join("tests/deep/er/f2.txt")).unwrap(),
+        "unstaged\n"
+    );
+}

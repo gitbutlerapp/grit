@@ -62,8 +62,6 @@ pub(crate) struct ParsedIndexExtensions {
 pub struct IndexParseContext {
     /// `thread_policy` field.
     pub thread_policy: ThreadPolicy,
-    /// Skip parsing the `TREE` (cache-tree) extension to save peak RSS on wide indexes.
-    pub skip_cache_tree: bool,
 }
 
 impl IndexParseContext {
@@ -72,7 +70,6 @@ impl IndexParseContext {
     pub fn from_policy(policy: ThreadPolicy) -> Self {
         Self {
             thread_policy: policy,
-            skip_cache_tree: false,
         }
     }
 }
@@ -270,7 +267,6 @@ pub(crate) fn parse_index_extensions(
     end: usize,
     hash_algo: HashAlgo,
     entries_for_fsmonitor: Option<&mut [IndexEntry]>,
-    skip_cache_tree: bool,
 ) -> Result<ParsedIndexExtensions> {
     let mut out = ParsedIndexExtensions::default();
     let hash_len = hash_algo.len();
@@ -294,19 +290,17 @@ pub(crate) fn parse_index_extensions(
         match sig {
             INDEX_EXT_EOIE | INDEX_EXT_IEOT => {}
             INDEX_EXT_SPARSE_DIRECTORIES => out.sparse_directories = true,
-            INDEX_EXT_UNTRACKED if !skip_cache_tree => {
+            INDEX_EXT_UNTRACKED => {
                 let ext_data = &body[pos..pos + ext_sz];
                 out.untracked_cache = untracked_cache::parse_untracked_extension(ext_data);
             }
-            INDEX_EXT_UNTRACKED => {}
-            INDEX_EXT_FSMONITOR if !skip_cache_tree => {
+            INDEX_EXT_FSMONITOR => {
                 let ext_data = &body[pos..pos + ext_sz];
                 let (token, dirty) = parse_fsmonitor_extension(ext_data)?;
                 out.fsmonitor_last_update = Some(token);
                 out.fsmonitor_dirty = Some(dirty);
                 out.fsmonitor_raw_extension = Some(ext_data.to_vec());
             }
-            INDEX_EXT_FSMONITOR => {}
             INDEX_EXT_RESOLVE_UNDO => {
                 let ext_data = &body[pos..pos + ext_sz];
                 out.resolve_undo = Some(crate::resolve_undo::parse_resolve_undo_payload(ext_data)?);
@@ -315,7 +309,7 @@ pub(crate) fn parse_index_extensions(
                 let ext_data = &body[pos..pos + ext_sz];
                 out.split_link = Some(split_index::parse_link_extension(ext_data, hash_algo)?);
             }
-            INDEX_EXT_CACHE_TREE if !skip_cache_tree => {
+            INDEX_EXT_CACHE_TREE => {
                 let ext_data = &body[pos..pos + ext_sz];
                 out.cache_tree = crate::index::parse_cache_tree(ext_data, hash_len);
                 out.cache_tree_root = out
@@ -323,7 +317,6 @@ pub(crate) fn parse_index_extensions(
                     .as_ref()
                     .and_then(|node| node.oid.filter(|_| node.entry_count >= 0));
             }
-            INDEX_EXT_CACHE_TREE => {}
             other => {
                 let first = (other >> 24) as u8 as char;
                 if !first.is_ascii_uppercase() {

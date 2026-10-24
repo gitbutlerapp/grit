@@ -33,7 +33,7 @@ use crate::porcelain::tree_merge_checkout::{
     apply_clean_tree_merge_to_worktree, apply_clean_tree_merge_to_worktree_with_snapshot,
 };
 use crate::porcelain::worktree_guard::{
-    load_worktree_snapshot_for_replay, prepare_worktree_for_pick, WorktreeSnapshot,
+    load_worktree_snapshot, prepare_worktree_for_pick, WorktreeSnapshot,
 };
 use crate::refs::{update_branch_for_commit_with_config, BranchCommitRefUpdate};
 use crate::repo::Repository;
@@ -267,7 +267,7 @@ pub fn start_replay_sequence(
             "cherry-pick or revert is already in progress".into(),
         ));
     }
-    prepare_worktree_for_pick(repo)?;
+    let worktree = prepare_worktree_for_pick(repo)?;
     let (refname, head_oid) = branch_head(repo)?;
     if req.commits.is_empty() {
         return Ok(SequenceOutcome::Completed {
@@ -298,7 +298,7 @@ pub fn start_replay_sequence(
         Vec::new(),
         Vec::new(),
         &mut Vec::new(),
-        None,
+        worktree,
     )
 }
 
@@ -573,7 +573,7 @@ fn run_sequence(
         None => repo
             .work_tree()
             .is_some()
-            .then(|| load_worktree_snapshot_for_replay(repo))
+            .then(|| load_worktree_snapshot(repo))
             .transpose()?,
     };
     while let Some(entry) = todo.first().cloned() {
@@ -1073,7 +1073,7 @@ fn apply_clean_merge_worktree(
     worktree_snapshot: &mut Option<WorktreeSnapshot>,
 ) -> Result<()> {
     if worktree_snapshot.is_none() {
-        *worktree_snapshot = Some(load_worktree_snapshot_for_replay(repo)?);
+        *worktree_snapshot = Some(load_worktree_snapshot(repo)?);
     }
     match worktree_snapshot.as_mut() {
         Some(snapshot) => {
