@@ -22850,7 +22850,6 @@ pub grit_lib::revwalk::merge_base::ReachableWalkSnapshot::hide: alloc::vec::Vec<
 pub grit_lib::revwalk::merge_base::ReachableWalkSnapshot::queued: alloc::vec::Vec<grit_lib::objects::ObjectId>
 pub grit_lib::revwalk::merge_base::ReachableWalkSnapshot::seeded: alloc::vec::Vec<grit_lib::objects::ObjectId>
 pub grit_lib::revwalk::merge_base::ReachableWalkSnapshot::seq: u64
-pub grit_lib::revwalk::merge_base::ReachableWalkSnapshot::unfinished_children: alloc::vec::Vec<(grit_lib::objects::ObjectId, u32)>
 impl core::clone::Clone for grit_lib::revwalk::merge_base::ReachableWalkSnapshot
 pub fn grit_lib::revwalk::merge_base::ReachableWalkSnapshot::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::revwalk::merge_base::ReachableWalkSnapshot

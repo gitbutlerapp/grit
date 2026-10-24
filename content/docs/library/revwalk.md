@@ -32,7 +32,7 @@ With [`RevListOptions::default`](rustdoc:grit_lib::revwalk::rev_list::RevListOpt
 
 To print the listed commits, set `retain_commit_data` and hand `commit_data` to [`load_commits_with_decorations_reusing`](rustdoc:grit_lib::porcelain::log::load_commits_with_decorations_reusing). It moves out the commits the walk parsed and reads only the rest, such as commits whose parents came from a commit-graph.
 
-For a range `main..feature`, pass `feature` as a positive spec and `main` as a negative spec (or split with [`split_double_dot_range`](rustdoc:grit_lib::revwalk::rev_parse::split_double_dot_range) as the example does). That matches `git rev-list main..feature`.
+For a range `main..feature`, pass `feature` as a positive spec and `main` as a negative spec (or split with [`split_double_dot_range`](rustdoc:grit_lib::revwalk::rev_parse::split_double_dot_range) as the example does). That matches `git rev-list main..feature`, order included. In default order, with or without `max_count`, a range walk only visits commits down to where the two sides meet, not the whole history behind `main`, so a short topic range on a large repository is as quick as `git rev-list`. `OrderingMode::DateOrderWalk` (`--date-order`) and output filters such as paths or `--left-right` still sort the whole range first.
 
 ### Commit filters
 

@@ -6366,8 +6366,8 @@ pub(crate) fn try_bitmap_reachable_commit_set_for_specs(
 /// rev-list path and truncate after ordering instead of the per-commit bounded walk.
 ///
 /// The bounded walks that test exclusions per commit get slower than one up-front closure
-/// as the limit grows. [`can_stream_default_order`] walks are exempt: they stop early at any
-/// limit and cost no more per commit than the full path.
+/// as the limit grows. [`try_bounded_limit_list`] is exempt: its walks stop early at any
+/// limit, or at the hide frontier, and cost no more per commit than the full path.
 const BOUNDED_LIMIT_LIST_EARLY_STOP_MAX: usize = 4096;
 
 fn bounded_limit_list_need(options: &RevListOptions) -> usize {
@@ -6554,12 +6554,10 @@ fn try_bounded_commit_filter_limit_list(
     Ok(Some(ordered))
 }
 
+/// `--date-order` is left to the full path: Git topo-sorts the whole range there, which a walk
+/// that stops early cannot reproduce.
 fn can_use_bounded_limit_list(options: &RevListOptions) -> bool {
-    bounded_limit_list_common(options)
-        && matches!(
-            options.ordering,
-            OrderingMode::Default | OrderingMode::DateOrderWalk
-        )
+    bounded_limit_list_common(options) && options.ordering == OrderingMode::Default
 }
 
 fn can_use_bounded_topo_limit_list(options: &RevListOptions) -> bool {
@@ -6576,11 +6574,18 @@ fn bounded_limit_list_common(options: &RevListOptions) -> bool {
 }
 
 fn bounded_limit_list_common_inner(options: &RevListOptions, graph_topo: bool) -> bool {
-    (options.max_count.is_some() || options.skip > 0)
-        && options
-            .commit_filter
-            .as_ref()
-            .is_none_or(|f| !f.is_active())
+    (options.max_count.is_some() || options.skip > 0) && plain_commit_walk(options, graph_topo)
+}
+
+/// Whether the walk only needs commits in date order, with nothing that forces the full
+/// closure path: no output filters, paths, objects, side or ancestry classification, or
+/// boundary bookkeeping. `graph_topo` admits the graph-rendering flags the incremental topo
+/// walk understands.
+fn plain_commit_walk(options: &RevListOptions, graph_topo: bool) -> bool {
+    options
+        .commit_filter
+        .as_ref()
+        .is_none_or(|f| !f.is_active())
         && options.pickaxe.is_none()
         && !options.all_refs
         && !options.first_parent
@@ -6776,7 +6781,12 @@ fn try_bounded_limit_list(
     exclude: &[ObjectId],
     options: &RevListOptions,
 ) -> Result<Option<RevListResult>> {
-    if include.is_empty() || !can_use_bounded_limit_list(options) {
+    // Excluded tips bound the walk on their own: painting the hide side stops at the merge-base
+    // frontier, so even an unlimited `A..B` only visits the range instead of both closures.
+    let hide_bounded = !exclude.is_empty()
+        && options.ordering == OrderingMode::Default
+        && plain_commit_walk(options, false);
+    if include.is_empty() || !(hide_bounded || can_use_bounded_limit_list(options)) {
         return Ok(None);
     }
     if exclude.is_empty()
@@ -6794,13 +6804,6 @@ fn try_bounded_limit_list(
     if can_stream_default_order(exclude, options) {
         return streaming_default_order_list(repo, include, options).map(Some);
     }
-    if !within_bounded_limit_list_cap(options)
-        && options.since_cutoff.is_none()
-        && options.until_cutoff.is_none()
-    {
-        return Ok(None);
-    }
-
     let need = options
         .skip
         .saturating_add(options.max_count.unwrap_or(usize::MAX));
