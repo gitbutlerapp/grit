@@ -6,14 +6,14 @@ use super::super::helpers::{
     setup_deep_tree, setup_registry_worktree, setup_synth100k, synth10k_kind,
 };
 use super::super::matrix_helpers::{
-    bundle_create_bench, bundle_verify_bench, config_get_bench, config_get_origin_bench,
-    config_set_bench, correctness_bundle_create, hooks_list_bench, ignore_check_bench,
-    notes_add_bench, notes_list_bench, prepare_bundle_create, prepare_bundle_verify,
-    prepare_config_set, prepare_notes_add, prepare_worktree_add, prepare_worktree_remove,
-    remote_list_bench, setup_ignore_check, setup_notes_list, setup_notes_list_n100,
-    setup_remote_list, setup_small, setup_synth10k_bundle, setup_synth10k_linked_worktree,
-    setup_worktree_list_many, setup_worktree_remove, verify_bundle, worktree_add_bench,
-    worktree_list_bench, worktree_remove_bench,
+    bundle_create_all_bench, bundle_create_bench, bundle_verify_bench, config_get_bench,
+    config_get_origin_bench, config_set_bench, correctness_bundle_create, hooks_list_bench,
+    ignore_check_bench, notes_add_bench, notes_list_bench, prepare_bundle_create,
+    prepare_bundle_verify, prepare_config_set, prepare_notes_add, prepare_worktree_add,
+    prepare_worktree_remove, remote_list_bench, setup_git_git_bundle, setup_ignore_check,
+    setup_notes_list, setup_notes_list_n100, setup_remote_list, setup_small, setup_synth10k_bundle,
+    setup_synth10k_linked_worktree, setup_worktree_list_many, setup_worktree_remove, verify_bundle,
+    worktree_add_bench, worktree_list_bench, worktree_remove_bench,
 };
 use super::super::plan::{DailyHeadlinePlan, DailySetup};
 
@@ -170,6 +170,15 @@ pub fn plans() -> Vec<DailyHeadlinePlan> {
             build_git: |c| bundle_create_bench(c).1,
             build_grit: |c| bundle_create_bench(c).0,
             correctness: Some(correctness_bundle_create),
+        },
+        DailyHeadlinePlan {
+            spec: scenario_spec("bundle/create-all@git-git"),
+            pending: false,
+            setup: setup_git_git_bundle,
+            prepare: prepare_bundle_create,
+            build_git: |c| bundle_create_all_bench(c).1,
+            build_grit: |c| bundle_create_all_bench(c).0,
+            correctness: None,
         },
         DailyHeadlinePlan {
             spec: headline_spec("bundle/verify@synth-10k"),

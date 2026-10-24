@@ -175,6 +175,13 @@ pub fn setup_synth10k_bundle(setup: &DailySetup<'_>) -> Result<DailyHeadlineCont
     Ok(ctx)
 }
 
+/// Packed deep history (git.git) for `bundle create --all`.
+pub fn setup_git_git_bundle(setup: &DailySetup<'_>) -> Result<DailyHeadlineContext> {
+    let mut ctx = setup_git_git(setup)?;
+    ctx.bundle_path = Some(ctx.repo.join(BUNDLE_FILE));
+    Ok(ctx)
+}
+
 pub fn setup_synth10k_linked_worktree(setup: &DailySetup<'_>) -> Result<DailyHeadlineContext> {
     let mut ctx = setup_synth10k(setup)?;
     ctx.linked_worktree = Some(ctx.repo.parent().unwrap_or(&ctx.repo).join(LINKED_WT_DIR));
@@ -1016,6 +1023,18 @@ pub fn bundle_create_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv)
     (
         sh_devnull(&ctx.grit, &["bundle", "create", &bundle, "HEAD"]),
         sh_devnull(&ctx.git, &["bundle", "create", &bundle, "HEAD"]),
+    )
+}
+
+pub fn bundle_create_all_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
+    let bundle = ctx
+        .bundle_path
+        .as_ref()
+        .map(|p| p.display().to_string())
+        .unwrap_or_else(|| BUNDLE_FILE.into());
+    (
+        sh_devnull(&ctx.grit, &["bundle", "create", &bundle, "--all"]),
+        sh_devnull(&ctx.git, &["bundle", "create", &bundle, "--all"]),
     )
 }
 

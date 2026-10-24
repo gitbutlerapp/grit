@@ -267,6 +267,7 @@ Overview of **grit-lib** coverage, **`grit` commands**, common workflows, and **
 | id | notes |
 | --- | --- |
 | `bundle/create@synth-10k` | Create bundle file vs git bundle create |
+| `bundle/create-all@git-git` | Bundle every ref of a packed deep history vs git bundle create --all |
 | `bundle/verify@synth-10k` | Verify bundle vs git bundle verify |
 
 ## worktrees

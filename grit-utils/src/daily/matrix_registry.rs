@@ -660,6 +660,13 @@ pub const MATRIX_SCENARIOS: &[ScenarioSpec] = &[
         description: "Create bundle file vs git bundle create",
     },
     ScenarioSpec {
+        id: "bundle/create-all@git-git",
+        area: Area::Bundles,
+        headline: false,
+        name: None,
+        description: "Bundle every ref of a packed deep history vs git bundle create --all",
+    },
+    ScenarioSpec {
         id: "bundle/verify@synth-10k",
         area: Area::Bundles,
         headline: false,
