@@ -221,6 +221,27 @@ pub fn run_revwalk_suite(
             },
             worktree,
         )?);
+        scenarios.push(run_odb_scenario(
+            hyperfine,
+            &bench_exe_path,
+            git,
+            &odb_cfg,
+            &Scenario {
+                id: format!("revs-list-deep-{id_suffix}"),
+                group: "revs".into(),
+                fixture: bare.display().to_string(),
+                description: format!(
+                    "rev-list HEAD (every commit id) on deep-history ({id_suffix})"
+                ),
+                grit_argv: lib_op_argv("rev-list-head", worktree, &[]),
+                git_argv: vec!["rev-list".into(), "HEAD".into()],
+                driver: Driver::Lib,
+                prepare_kind: None,
+                grit_via_shell: false,
+                git_via_shell: false,
+            },
+            worktree,
+        )?);
         scenarios.push(run_scenario(
             hyperfine,
             git,

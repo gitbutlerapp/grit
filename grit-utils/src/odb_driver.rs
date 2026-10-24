@@ -324,6 +324,23 @@ pub fn rev_list_author_n_head(repo: &Repository, author: &str, max_count: usize)
     Ok(())
 }
 
+/// List every commit reachable from `HEAD` in default order, one id per line (`git rev-list HEAD`).
+pub fn rev_list_head(repo: &Repository) -> Result<()> {
+    use std::io::Write;
+
+    let opts = RevListOptions {
+        use_commit_graph: true,
+        ..Default::default()
+    };
+    let result = rev_list(repo, &["HEAD".to_string()], &[], &opts).context("rev-list HEAD")?;
+    let mut out = std::io::BufWriter::new(std::io::stdout().lock());
+    for oid in &result.commits {
+        writeln!(out, "{oid}")?;
+    }
+    out.flush()?;
+    Ok(())
+}
+
 pub fn rev_list_count_head(repo: &Repository) -> Result<()> {
     let opts = RevListOptions {
         count: true,

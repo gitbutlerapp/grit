@@ -949,6 +949,9 @@ enum RefsDriveCmd {
 
 #[derive(Subcommand)]
 enum LibOpCmd {
+    RevListHead {
+        repo: PathBuf,
+    },
     RevListCountHead {
         repo: PathBuf,
     },
@@ -1137,6 +1140,10 @@ fn run_refs_drive(workload: &RefsDriveCmd) -> Result<()> {
 
 fn run_lib_op(workload: &LibOpCmd) -> Result<()> {
     match workload {
+        LibOpCmd::RevListHead { repo } => {
+            let repo = open_repo(repo)?;
+            odb_driver::rev_list_head(&repo)?;
+        }
         LibOpCmd::RevListCountHead { repo } => {
             let repo = open_repo(repo)?;
             odb_driver::rev_list_count_head(&repo)?;

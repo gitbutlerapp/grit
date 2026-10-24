@@ -118,6 +118,10 @@ fn bench_revwalk_date(c: &mut Criterion) {
     revwalk_group(c, OrderingMode::DateOrderWalk, "date_order");
 }
 
+fn bench_revwalk_default(c: &mut Criterion) {
+    revwalk_group(c, OrderingMode::Default, "default");
+}
+
 fn bench_log_group_by_author(c: &mut Criterion) {
     let fx = HistoryBenchFixtures::global();
     let mut group = c.benchmark_group("log-group-by-author");
@@ -427,6 +431,7 @@ criterion_group!(
     bench_s1_rev_list_objects_v1,
     bench_revwalk_topo,
     bench_revwalk_date,
+    bench_revwalk_default,
     bench_log_group_by_author,
     bench_revwalk_filter,
     bench_revwalk_path_limited,
