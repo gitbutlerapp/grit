@@ -117,13 +117,7 @@ impl StreamingReuse {
 
     fn marks_reuse(&self, oid: &ObjectId) -> bool {
         if self.reuse_all_in_pack {
-            return self
-                .pack
-                .idx
-                .find_offset(oid)
-                .ok()
-                .flatten()
-                .is_some();
+            return self.pack.idx.find_offset(oid).ok().flatten().is_some();
         }
         let Some(index) = &self.index else {
             return false;
@@ -223,7 +217,9 @@ fn delta_base_in_output_set(
     oid_to_offset: &crate::objects::OidHashMap<u64>,
     in_pack_base: Option<u64>,
 ) -> bool {
-    let Some(dep) = read_packed_delta_dependency(pack_bytes, entry_off, hash_bytes).ok().flatten()
+    let Some(dep) = read_packed_delta_dependency(pack_bytes, entry_off, hash_bytes)
+        .ok()
+        .flatten()
     else {
         return false;
     };
@@ -236,7 +232,10 @@ fn delta_base_in_output_set(
             if in_pack_base.is_some() {
                 return true;
             }
-            let Some(row) = find_position_by_pack_offset(idx, base_offset).ok().flatten() else {
+            let Some(row) = find_position_by_pack_offset(idx, base_offset)
+                .ok()
+                .flatten()
+            else {
                 return false;
             };
             let Ok(base_oid) = ObjectId::from_bytes(idx.oid_at(row)) else {

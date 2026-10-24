@@ -1303,6 +1303,65 @@ fn repack_with_existing_pack_and_loose_uses_rewrite_not_full_delta_search() {
     git_fsck(grit_copy.path(), true);
 }
 
+/// Reachable packed delta whose base is not in the repack output set must not be copied verbatim.
+#[test]
+fn repack_materializes_delta_when_base_unreachable() {
+    let dir = TempDir::new().expect("tempdir");
+    git(dir.path(), &["init", "-b", "main"]);
+    let mut payload: Vec<u8> = (0..64 * 1024).map(|i| (i % 251) as u8).collect();
+    std::fs::write(dir.path().join("big.bin"), &payload).expect("write");
+    git(dir.path(), &["add", "big.bin"]);
+    git(dir.path(), &["commit", "-m", "v1"]);
+    payload.iter_mut().for_each(|b| *b = b.wrapping_add(1));
+    std::fs::write(dir.path().join("big.bin"), &payload).expect("write v2");
+    git(dir.path(), &["add", "big.bin"]);
+    git(dir.path(), &["commit", "-m", "v2"]);
+    git(dir.path(), &["repack", "-a", "-d"]);
+
+    let tree_out = Command::new("git")
+        .current_dir(dir.path())
+        .args(["rev-parse", "HEAD^{tree}"])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("tree");
+    assert!(tree_out.status.success());
+    let tree = String::from_utf8_lossy(&tree_out.stdout).trim().to_string();
+    let commit_out = Command::new("git")
+        .current_dir(dir.path())
+        .args(["commit-tree", &tree, "-m", "orphan tip"])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("commit-tree");
+    assert!(commit_out.status.success());
+    let orphan = String::from_utf8_lossy(&commit_out.stdout)
+        .trim()
+        .to_string();
+    git(dir.path(), &["update-ref", "refs/heads/main", &orphan]);
+    git(
+        dir.path(),
+        &[
+            "reflog",
+            "expire",
+            "--expire=now",
+            "--expire-unreachable=now",
+            "--all",
+        ],
+    );
+    git(dir.path(), &["repack", "-a", "-d"]);
+
+    let grit_copy = TempDir::new().expect("grit");
+    duplicate_repo_tree(dir.path(), grit_copy.path());
+    let repo =
+        Repository::discover(Some(grit_copy.path()), &RepositoryOptions::empty()).expect("open");
+    let mut opts = RepackOptions::default();
+    opts.keep_unreachable = false;
+    repack_all(&repo, &opts).expect("grit repack");
+    clear_pack_cache_after_disk_maintenance();
+    git_fsck(grit_copy.path(), true);
+}
+
 #[test]
 fn gc_full_run_skips_repack_on_single_pack_with_no_loose() {
     let dir = TempDir::new().expect("tempdir");

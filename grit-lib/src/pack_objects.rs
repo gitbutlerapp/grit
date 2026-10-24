@@ -827,8 +827,7 @@ pub(crate) fn build_pack_from_send_list_full(
         search_threads,
         walk_prefetch,
     )?;
-    let lazy_stream =
-        opts.window == 0 && !opts.thin && opts.reuse_deltas && opts.reuse_objects;
+    let lazy_stream = opts.window == 0 && !opts.thin && opts.reuse_deltas && opts.reuse_objects;
     if lazy_stream && opts.stream_verbatim_single_pack {
         if let Some(mut reuse) = crate::pack_reuse::try_streaming_reuse_for_repack(odb, send)? {
             let mut buf = Vec::new();
