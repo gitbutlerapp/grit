@@ -1150,10 +1150,9 @@ pub(crate) fn plan_deltas(
                 islands: &islands,
                 skip_targets: &reuse_delta_bases,
                 packed: packed.as_ref(),
-                // Same-path history chains up to `max_depth` deep, so earlier revisions
-                // within that distance stay useful bases; beyond it the pass would be
-                // quadratic in a path's revision count.
-                window: opts.window.max(opts.max_depth),
+                // Git's send-order pass uses `pack.window` (not `pack.depth`) for how many
+                // same-path revisions to try; depth limits are applied later.
+                window: opts.window,
                 hash_len: odb.hash_algo().len(),
             },
             &mut delta_to_base,
