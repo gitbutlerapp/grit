@@ -8,7 +8,7 @@ use crate::commands;
 use crate::commands::branch::BranchUsageError;
 use crate::commands::bundle::MissingPrerequisites;
 use crate::commands::history::RebaseExecExit;
-use crate::commands::merge::MergeResult;
+use crate::commands::merge::{MergeOutcome, MergeResult};
 use crate::commands::pick::PickResult;
 use crate::commands::revert::RevertResult;
 use crate::error_kind::ErrorKind;
@@ -175,6 +175,26 @@ impl ExitStatus {
             MergeResult::RefusedNotFf => Self::RefusedNotFf,
             _ => Self::Success,
         }
+    }
+
+    #[must_use]
+    pub fn from_merge_outcome(outcome: &MergeOutcome) -> Self {
+        if outcome.dry_run == Some(true) {
+            if outcome.result == MergeResult::RefusedNotFf {
+                return Self::RefusedNotFf;
+            }
+            return Self::Success;
+        }
+        if outcome.check {
+            if outcome.result == MergeResult::Conflicts {
+                return Self::Failure;
+            }
+            if outcome.result == MergeResult::RefusedNotFf {
+                return Self::RefusedNotFf;
+            }
+            return Self::Success;
+        }
+        Self::from_merge_result(outcome.result)
     }
 
     #[must_use]

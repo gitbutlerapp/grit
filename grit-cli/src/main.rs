@@ -2918,7 +2918,7 @@ fn dispatch(
                 },
             )?;
             emit_success(&outcome, opts, ctx)?;
-            Ok(ExitStatus::from_merge_result(outcome.result))
+            Ok(ExitStatus::from_merge_outcome(&outcome))
         }
         Command::Pick {
             commits,
