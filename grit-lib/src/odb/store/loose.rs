@@ -4,6 +4,7 @@ use std::fs::{self, File};
 use std::io::{self, Read, Write};
 use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use flate2::write::ZlibEncoder;
 use flate2::Compression;
@@ -17,6 +18,8 @@ use crate::odb::WriteOptions;
 use crate::zlib_inflate::with_loose_scratch;
 
 const READ_CHUNK: usize = 64 * 1024;
+
+static LOOSE_PUBLISH_TMP_SEQ: AtomicU64 = AtomicU64::new(0);
 
 /// On-disk loose object store for one `objects/` directory.
 #[derive(Debug, Clone)]
@@ -562,24 +565,48 @@ fn publish_zlib_loose_object(
     oid: &ObjectId,
     zlib_store: &[u8],
 ) -> Result<()> {
-    fs::create_dir_all(prefix_dir).map_err(Error::Io)?;
-    let tmp_path = oid.loose_tmp_path_in_prefix(prefix_dir);
-    if let Err(e) = fs::write(&tmp_path, zlib_store) {
-        let _ = fs::remove_file(&tmp_path);
-        return Err(Error::Io(e));
+    if path.is_file() {
+        set_loose_object_mode(path);
+        return Ok(());
     }
-    match fs::rename(&tmp_path, path) {
-        Ok(()) => {}
-        Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
-            let _ = fs::remove_file(&tmp_path);
-        }
-        Err(e) => {
-            let _ = fs::remove_file(&tmp_path);
-            return Err(Error::Io(e));
+    const MAX_ATTEMPTS: u32 = 4;
+    for attempt in 0..MAX_ATTEMPTS {
+        fs::create_dir_all(prefix_dir).map_err(Error::Io)?;
+        let seq = LOOSE_PUBLISH_TMP_SEQ.fetch_add(1, Ordering::Relaxed);
+        let tmp_path = prefix_dir.join(format!("tmp_{oid}_{seq:016x}"));
+        match fs::write(&tmp_path, zlib_store) {
+            Ok(()) => match fs::rename(&tmp_path, path) {
+                Ok(()) => {
+                    set_loose_object_mode(path);
+                    return Ok(());
+                }
+                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
+                    let _ = fs::remove_file(&tmp_path);
+                    if path.is_file() {
+                        set_loose_object_mode(path);
+                        return Ok(());
+                    }
+                }
+                Err(e) => {
+                    let _ = fs::remove_file(&tmp_path);
+                    if e.kind() == io::ErrorKind::NotFound && attempt + 1 < MAX_ATTEMPTS {
+                        continue;
+                    }
+                    return Err(Error::Io(e));
+                }
+            },
+            Err(e) => {
+                let _ = fs::remove_file(&tmp_path);
+                if e.kind() == io::ErrorKind::NotFound && attempt + 1 < MAX_ATTEMPTS {
+                    continue;
+                }
+                return Err(Error::Io(e));
+            }
         }
     }
-    set_loose_object_mode(path);
-    Ok(())
+    Err(Error::Io(io::Error::other(
+        "exhausted loose object publish retries",
+    )))
 }
 
 fn set_loose_object_mode(path: &Path) {

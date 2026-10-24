@@ -111,6 +111,9 @@ impl FilesSource {
             return Ok(Some(existing));
         }
         if options.trust_new_loose {
+            if self.exists_local_materialized(oid) {
+                return Ok(Some(*oid));
+            }
             return Ok(None);
         }
         if options.assume_loose_only_existence && self.exists_local_materialized(oid) {
