@@ -438,6 +438,65 @@ fn rev_walk_forwards_retain_commit_data() {
         .all(|oid| result.commit_data.contains_key(oid)));
 }
 
+/// A merge-heavy history packed by git, so a bounded walk parses a frontier beyond the page.
+fn packed_merge_history() -> support::HistoryRepo {
+    let repo = support::HistoryRepo::init();
+    let wt = repo.worktree();
+    support::commit_file(wt, "base.txt", "base\n", "base");
+    for i in 0..8 {
+        support::git(wt, &["checkout", "-q", "-b", &format!("side{i}")]);
+        support::commit_file(wt, &format!("side{i}.txt"), "s\n", &format!("side {i}"));
+        support::git(wt, &["checkout", "-q", "main"]);
+        support::commit_file(wt, &format!("main{i}.txt"), "m\n", &format!("main {i}"));
+        support::git(
+            wt,
+            &[
+                "merge",
+                "-q",
+                "--no-ff",
+                "-m",
+                &format!("merge {i}"),
+                &format!("side{i}"),
+            ],
+        );
+    }
+    support::git(wt, &["repack", "-a", "-d", "-q"]);
+    support::git(wt, &["prune-packed"]);
+    repo
+}
+
+#[test]
+fn retained_page_from_git_pack_matches_git_order_and_commit_bodies() {
+    let repo = packed_merge_history();
+    let wt = repo.worktree();
+    let grit_repo = Repository::discover(Some(wt), &RepositoryOptions::empty()).expect("discover");
+    for limit in [1usize, 2, 5, 17, usize::MAX] {
+        let expected = if limit == usize::MAX {
+            support::git_rev_list(wt, &["HEAD"])
+        } else {
+            support::git_rev_list(wt, &["-n", &limit.to_string(), "HEAD"])
+        };
+        let result = grit_repo
+            .rev_walk()
+            .rev_list_result(
+                &["HEAD"],
+                &RevWalkListOptions {
+                    limit: Some(limit),
+                    retain_commit_data: true,
+                    ..Default::default()
+                },
+            )
+            .expect("rev walk");
+        assert_eq!(result.commits, expected, "limit {limit}");
+        assert_eq!(result.commit_data.len(), expected.len(), "limit {limit}");
+        for oid in &result.commits {
+            let body = support::git(wt, &["cat-file", "commit", &oid.to_hex()]);
+            let from_git = parse_commit(body.as_bytes()).expect("parse git body");
+            assert_eq!(result.commit_data.get(oid), Some(&from_git), "{oid}");
+        }
+    }
+}
+
 #[test]
 fn bounded_path_limit_extreme_max_count_does_not_panic() {
     let repo = support::HistoryRepo::init();

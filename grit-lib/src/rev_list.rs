@@ -5867,6 +5867,23 @@ fn load_commit(repo: &Repository, oid: ObjectId) -> Result<crate::objects::Commi
     parse_commit(&object.data)
 }
 
+/// Like [`load_commit`], inflating into the reusable `buf` instead of a fresh object.
+///
+/// For walks that keep the parsed commit and never read the object again, so it skips the
+/// ODB's per-session object copy.
+fn load_commit_into(
+    repo: &Repository,
+    oid: ObjectId,
+    buf: &mut Vec<u8>,
+) -> Result<crate::objects::CommitData> {
+    if repo.odb().read_into(&oid, buf)? != ObjectKind::Commit {
+        return Err(rev_list_unexpected_kind(oid, "commit"));
+    }
+    #[cfg(test)]
+    repo.odb().hot_path_metrics().record_commit_parse();
+    parse_commit(buf)
+}
+
 fn rev_list_result_from_commits(commits: Vec<ObjectId>) -> RevListResult {
     rev_list_result_from_commits_with_linkage(commits, None)
 }
@@ -6791,6 +6808,17 @@ fn try_bounded_limit_list(
     Ok(Some(rev_list_result_from_commits(ordered)))
 }
 
+/// How many commits a date walk listing `listed` commits is likely to parse.
+///
+/// Besides the listed commits, the walk parses the queued frontier (parents of merges not yet
+/// emitted), about a quarter more on merge-heavy histories. Overshooting costs memory, since the
+/// tables round up to the next power of two; a larger frontier just grows the maps once. The cap
+/// keeps an unbounded `--max-count` from reserving a huge table up front.
+fn expected_parsed_commits(listed: usize) -> usize {
+    const CAP: usize = 1 << 16;
+    listed.saturating_add(listed / 4).min(CAP)
+}
+
 /// `--max-count` / `--skip` list in Git's default order, stopping as soon as the page is full.
 fn streaming_default_order_list(
     repo: &Repository,
@@ -6804,7 +6832,9 @@ fn streaming_default_order_list(
         repo.odb().with_pack_read_context(|| -> Result<()> {
             let mut graph = CommitGraph::with_commit_graph(repo, false, options.use_commit_graph);
             if options.retain_commit_data {
-                graph.retain_parsed_commits();
+                graph.retain_parsed_commits(expected_parsed_commits(
+                    options.skip.saturating_add(max_count),
+                ));
             }
             let mut seen = 0usize;
             streaming_date_walk(&mut graph, include, &HashSet::new(), false, |_, oid| {
@@ -7361,7 +7391,12 @@ pub(crate) struct CommitGraph<'r> {
     graft_parents: OidHashMap<Vec<ObjectId>>,
     subjects: HashMap<ObjectId, String>,
     /// Parsed commits kept for the caller once [`Self::retain_parsed_commits`] is called.
+    ///
+    /// Retained commits are the only record of their tree and author time; those side maps
+    /// stay empty for them.
     retained: Option<OidHashMap<CommitData>>,
+    /// Inflate buffer reused across retained commit loads.
+    read_buf: Vec<u8>,
 }
 
 impl<'r> CommitGraph<'r> {
@@ -7400,15 +7435,27 @@ impl<'r> CommitGraph<'r> {
             graft_parents,
             subjects: HashMap::new(),
             retained: None,
+            read_buf: Vec::new(),
         }
     }
 
     /// Keep every commit object parsed from here on, for [`Self::take_retained_commits`].
     ///
+    /// `expected` is how many commits the caller expects to parse; the per-commit maps are
+    /// sized for it up front so a bounded walk does not rehash while it runs.
+    ///
     /// Retained commits stand in for the per-commit subject cache, so [`Self::subject_of`] is
     /// `None` for them.
-    pub(crate) fn retain_parsed_commits(&mut self) {
-        self.retained.get_or_insert_with(oid_hash_map);
+    pub(crate) fn retain_parsed_commits(&mut self, expected: usize) {
+        self.parents.reserve(expected);
+        self.committer_time.reserve(expected);
+        self.retained
+            .get_or_insert_with(oid_hash_map)
+            .reserve(expected);
+    }
+
+    fn retained_commit(&self, oid: &ObjectId) -> Option<&CommitData> {
+        self.retained.as_ref()?.get(oid)
     }
 
     /// Parsed commits among `listed`, moved out of the retained set.
@@ -7439,6 +7486,9 @@ impl<'r> CommitGraph<'r> {
         if let Some(tree) = self.commit_trees.get(&oid).copied() {
             return Ok(tree);
         }
+        if let Some(commit) = self.retained_commit(&oid) {
+            return Ok(commit.tree);
+        }
         let commit = load_commit(self.repo, oid)?;
         self.commit_trees.insert(oid, commit.tree);
         Ok(commit.tree)
@@ -7468,6 +7518,9 @@ impl<'r> CommitGraph<'r> {
     fn author_time(&mut self, oid: ObjectId) -> i64 {
         if self.populate(oid).is_err() {
             return 0;
+        }
+        if let Some(commit) = self.retained_commit(&oid) {
+            return committer_unix_seconds_for_ordering(&commit.author);
         }
         if !self.author_time.contains_key(&oid) {
             self.fill_author_time_from_object(oid);
@@ -7529,7 +7582,7 @@ impl<'r> CommitGraph<'r> {
             }
         }
         if self.retained.is_some() {
-            let commit = load_commit(self.repo, oid)?;
+            let commit = load_commit_into(self.repo, oid, &mut self.read_buf)?;
             let mut parents = if self.shallow_boundaries.contains(&oid) {
                 Vec::new()
             } else {
@@ -7543,9 +7596,6 @@ impl<'r> CommitGraph<'r> {
             }
             self.committer_time
                 .insert(oid, committer_unix_seconds_for_ordering(&commit.committer));
-            self.author_time
-                .insert(oid, committer_unix_seconds_for_ordering(&commit.author));
-            self.commit_trees.insert(oid, commit.tree);
             self.parents.insert(oid, parents);
             if let Some(retained) = self.retained.as_mut() {
                 retained.insert(oid, commit);
@@ -11460,6 +11510,56 @@ mod line_coverage_tests {
             0,
             "commit-graph count path must not parse commit objects"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn expected_parsed_commits_adds_frontier_and_caps() {
+        assert_eq!(expected_parsed_commits(0), 0);
+        assert_eq!(expected_parsed_commits(101), 126);
+        assert_eq!(expected_parsed_commits(1 << 20), 1 << 16);
+        assert_eq!(expected_parsed_commits(usize::MAX), 1 << 16);
+    }
+
+    #[test]
+    fn retained_commits_answer_tree_and_author_time_without_reparsing() -> Result<()> {
+        use crate::hot_path_test_metrics::HotPathMetricsScope;
+
+        let (_dir, repo, tip) = seed_repo(6, true);
+        let metrics = repo.odb().hot_path_metrics_arc();
+        metrics.reset_commit_parse_calls();
+        metrics.set_commit_parse_counting(true);
+        let _scope = HotPathMetricsScope::install(metrics);
+
+        let mut graph = CommitGraph::new(&repo, false);
+        graph.retain_parsed_commits(4);
+        let parents = graph.parents_of(tip)?;
+        assert_eq!(parents.len(), 2, "seeded tip is a merge");
+        for &parent in &parents {
+            graph.parents_of(parent)?;
+        }
+        let parsed = repo.odb().hot_path_metrics().commit_parse_calls();
+        assert_eq!(parsed, 3, "tip and both parents are parsed once each");
+
+        let expected = load_commit(&repo, tip)?;
+        assert_eq!(graph.commit_tree(tip)?, expected.tree);
+        assert_eq!(
+            graph.author_time(tip),
+            committer_unix_seconds_for_ordering(&expected.author)
+        );
+        assert_eq!(
+            graph.committer_time(tip),
+            committer_unix_seconds_for_ordering(&expected.committer)
+        );
+        assert_eq!(
+            repo.odb().hot_path_metrics().commit_parse_calls(),
+            parsed + 1,
+            "only the reference load above parses again"
+        );
+
+        let retained = graph.take_retained_commits(&[tip]);
+        assert_eq!(retained.len(), 1);
+        assert_eq!(retained.get(&tip), Some(&expected));
         Ok(())
     }
 
