@@ -28,6 +28,7 @@ mod options;
 mod patch_log;
 pub mod pickaxe;
 mod posix_ere;
+mod rename_lines;
 pub(crate) use core::is_func_line;
 pub(crate) use posix_ere::PosixBre;
 mod targets;

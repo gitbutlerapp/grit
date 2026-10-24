@@ -117,5 +117,72 @@ fn bench_diff_renames(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(diff_renames, bench_diff_renames);
+fn adoc_like_body(seed: usize, lines: usize) -> Vec<u8> {
+    let mut out = format!("= Documentation chapter {seed}\n\n").into_bytes();
+    for line in 0..lines {
+        out.extend_from_slice(format!("Paragraph {line}: lorem ipsum dolor sit amet.\n").as_bytes());
+    }
+    out
+}
+
+fn bench_diff_renames_adoc_similar(c: &mut Criterion) {
+    let root = TempDir::new().expect("tempdir");
+    let git_dir = root.path().join(".git");
+    std::fs::create_dir_all(git_dir.join("objects")).expect("objects");
+    let odb = Odb::new(&git_dir.join("objects"));
+
+    const N: usize = 64;
+    const LINES: usize = 400;
+    let mut entries: Vec<DiffEntry> = Vec::with_capacity(N * 2);
+    for i in 0..N {
+        let old_data = adoc_like_body(i, LINES);
+        let mut new_data = adoc_like_body(i, LINES);
+        new_data.extend_from_slice(b"\n== Added section\n\nNew content.\n");
+        let old_oid = odb.write(ObjectKind::Blob, &old_data).expect("write old");
+        let new_oid = odb.write(ObjectKind::Blob, &new_data).expect("write new");
+        entries.push(DiffEntry {
+            status: DiffStatus::Deleted,
+            old_path: Some(format!("old/doc-{i}.txt")),
+            new_path: None,
+            old_mode: "100644".to_owned(),
+            new_mode: "000000".to_owned(),
+            old_oid,
+            new_oid: zero_oid(),
+            score: None,
+        });
+        entries.push(DiffEntry {
+            status: DiffStatus::Added,
+            old_path: None,
+            new_path: Some(format!("new/doc-{i}.adoc")),
+            old_mode: "000000".to_owned(),
+            new_mode: "100644".to_owned(),
+            old_oid: zero_oid(),
+            new_oid,
+            score: None,
+        });
+    }
+
+    let config = bench_config();
+    let policy = ThreadPolicy::with_threads_override(Some(4))
+        .min_items_override(Some(0))
+        .min_total_bytes_override(Some(0));
+
+    let mut group = c.benchmark_group("diff_renames_adoc_similar");
+    group.throughput(Throughput::Elements(u64::try_from(N * 2).expect("count")));
+    group.bench_function("detect_64_similar_doc_pairs", |b| {
+        b.iter(|| {
+            black_box(detect_renames_with_policy(
+                &odb,
+                None,
+                entries.clone(),
+                50,
+                &config,
+                &policy,
+            ));
+        });
+    });
+    group.finish();
+}
+
+criterion_group!(diff_renames, bench_diff_renames, bench_diff_renames_adoc_similar);
 criterion_main!(diff_renames);

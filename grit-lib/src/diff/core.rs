@@ -42,6 +42,7 @@ use crate::repo::Repository;
 use crate::userdiff::FuncnameMatcher;
 use crate::worktree_rules::WorktreeRules;
 
+use super::rename_lines::RenameLineTable;
 use super::unified_emit::{
     emit_unified_body_from_edits, line_diff_token, line_ending_only_edits, EditSpan, LineSide,
     SourceLine, UnifiedEmitOptions,
@@ -7350,16 +7351,65 @@ pub fn detect_renames_with_policy(
                 )
             };
 
+            let est_table_bytes: usize = deleted_contents
+                .iter()
+                .chain(added_contents.iter())
+                .filter_map(|opt| opt.as_ref().map(|b| b.len()))
+                .sum();
+            let build_deleted_table = |row: usize| -> std::result::Result<
+                Option<RenameLineTable>,
+                std::convert::Infallible,
+            > {
+                Ok(deleted_contents[row]
+                    .as_ref()
+                    .map(|d| RenameLineTable::from_normalized_blob(d)))
+            };
+            let build_added_table = |col: usize| -> std::result::Result<
+                Option<RenameLineTable>,
+                std::convert::Infallible,
+            > {
+                Ok(added_contents[col]
+                    .as_ref()
+                    .map(|d| RenameLineTable::from_normalized_blob(d)))
+            };
+            let deleted_tables: Vec<Option<RenameLineTable>> = if loads_needed <= 32 {
+                (0..remaining_deleted.len())
+                    .map(|row| build_deleted_table(row).unwrap())
+                    .collect()
+            } else {
+                parallel_map_indices(
+                    odb,
+                    remaining_deleted.len(),
+                    par_opts,
+                    est_table_bytes,
+                    build_deleted_table,
+                )
+                .expect("deleted rename line tables")
+            };
+            let added_tables: Vec<Option<RenameLineTable>> = if loads_needed <= 32 {
+                (0..remaining_added.len())
+                    .map(|col| build_added_table(col).unwrap())
+                    .collect()
+            } else {
+                parallel_map_indices(
+                    odb,
+                    remaining_added.len(),
+                    par_opts,
+                    est_table_bytes,
+                    build_added_table,
+                )
+                .expect("added rename line tables")
+            };
+
             let mut inexact_scores: Vec<(u32, usize, usize)> = Vec::new();
             for (row, col) in candidate_pairs {
                 let di = remaining_deleted[row];
                 let ai = remaining_added[col];
-                let (Some(old_data), Some(new_data)) =
-                    (&deleted_contents[row], &added_contents[col])
+                let (Some(old_table), Some(new_table)) = (&deleted_tables[row], &added_tables[col])
                 else {
                     continue;
                 };
-                let score = line_hash_similarity_score(old_data, new_data);
+                let score = RenameLineTable::similarity_score(old_table, new_table);
                 if score >= threshold {
                     inexact_scores.push((score, di, ai));
                 }
@@ -7664,6 +7714,31 @@ pub fn detect_copies_with_policy(
                 .filter_map(|opt| opt.as_ref().map(|b| b.len()))
                 .sum();
 
+            let source_tables: Vec<Option<RenameLineTable>> = parallel_map_indices(
+                odb,
+                sources.len(),
+                par_opts,
+                est_bytes,
+                |si| -> std::result::Result<Option<RenameLineTable>, std::convert::Infallible> {
+                    Ok(source_contents[si]
+                        .as_ref()
+                        .map(|d| RenameLineTable::from_similarity_blob(d)))
+                },
+            )
+            .expect("copy source line tables");
+            let added_tables: Vec<Option<RenameLineTable>> = parallel_map_indices(
+                odb,
+                added.len(),
+                par_opts,
+                est_bytes,
+                |ai| -> std::result::Result<Option<RenameLineTable>, std::convert::Infallible> {
+                    Ok(added_contents[ai]
+                        .as_ref()
+                        .map(|d| RenameLineTable::from_similarity_blob(d)))
+                },
+            )
+            .expect("copy added line tables");
+
             let score_rows: Vec<Vec<(u32, usize, usize)>> = parallel_map_indices(
                 odb,
                 sources.len(),
@@ -7680,9 +7755,9 @@ pub fn detect_copies_with_policy(
                         if add.new_path.as_deref() == Some(src_path.as_str()) {
                             continue;
                         }
-                        let score = match (&source_contents[si], &added_contents[ai]) {
-                            (Some(old_data), Some(new_data)) => {
-                                compute_similarity(old_data, new_data)
+                        let score = match (&source_tables[si], &added_tables[ai]) {
+                            (Some(old_table), Some(new_table)) => {
+                                RenameLineTable::similarity_score(old_table, new_table)
                             }
                             _ => 0,
                         };
@@ -8270,86 +8345,15 @@ fn rename_pair_size_reachable(src_size: usize, dst_size: usize, minimum_score: u
         <= max_size.saturating_mul((RENAME_SCORE_MAX - minimum_score) as usize)
 }
 
-fn hash_rename_line(line: &[u8]) -> u64 {
-    use std::hash::{Hash, Hasher};
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    line.hash(&mut hasher);
-    hasher.finish()
-}
-
-/// Count bytes copied when matching lines by content hash (Git rename estimate).
-fn count_copied_line_bytes(src: &[u8], dst: &[u8]) -> usize {
-    use std::collections::HashMap;
-
-    fn line_weights(data: &[u8]) -> Vec<(u64, usize)> {
-        let mut out = Vec::new();
-        if data.is_empty() {
-            return out;
-        }
-        let mut start = 0usize;
-        for (i, &b) in data.iter().enumerate() {
-            if b != b'\n' {
-                continue;
-            }
-            // Hash includes the line terminator so `a` and `a\n` are distinct lines.
-            let line = &data[start..=i];
-            let weight = line.len();
-            out.push((hash_rename_line(line), weight));
-            start = i + 1;
-        }
-        if start < data.len() {
-            let line = &data[start..];
-            out.push((hash_rename_line(line), data.len() - start));
-        }
-        out
-    }
-
-    let (short, long) = if src.len() <= dst.len() {
-        (src, dst)
-    } else {
-        (dst, src)
-    };
-    let short_lines = line_weights(short);
-    let long_lines = line_weights(long);
-    let mut counts: HashMap<u64, usize> = HashMap::new();
-    for (hash, weight) in short_lines {
-        *counts.entry(hash).or_default() += weight;
-    }
-    let mut copied = 0usize;
-    for (hash, weight) in long_lines {
-        if let Some(slot) = counts.get_mut(&hash) {
-            if *slot > 0 {
-                let take = weight.min(*slot);
-                copied += take;
-                *slot -= take;
-            }
-        }
-    }
-    copied
-}
-
-fn line_hash_similarity_score(old: &[u8], new: &[u8]) -> u32 {
-    let src_size = old.len();
-    let dst_size = new.len();
-    if src_size == 0 && dst_size == 0 {
-        return 100;
-    }
-    let max_size = src_size.max(dst_size);
-    if max_size == 0 {
-        return 100;
-    }
-    let copied = count_copied_line_bytes(old, new);
-    ((copied * 100) / max_size).min(100) as u32
-}
-
 /// Compute a similarity percentage (0–100) between two byte slices.
 ///
 /// Matches Git rename detection: line-hash intersection over CRLF-normalized bodies,
 /// `score = copied_bytes * 100 / max(src_size, dst_size)`.
 fn compute_similarity(old: &[u8], new: &[u8]) -> u32 {
-    let old_norm = crate::crlf::crlf_to_lf(old);
-    let new_norm = crate::crlf::crlf_to_lf(new);
-    line_hash_similarity_score(&old_norm, &new_norm)
+    RenameLineTable::similarity_score(
+        &RenameLineTable::from_similarity_blob(old),
+        &RenameLineTable::from_similarity_blob(new),
+    )
 }
 
 /// Compute rename/copy similarity percentage (0–100) between two byte slices.
