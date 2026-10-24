@@ -399,9 +399,9 @@ Recorded on the factory VM when the baseline was captured (see `machine` / `tool
 
 | Scenario | Grit ÷ Git (committed baseline) | vs 1.1× bar | Follow-up |
 | --- | ---: | --- | --- |
-| `gc-medium` | **7.31×** | miss | [GitHub #1026](https://github.com/gitbutlerapp/grit/issues/1026) — full in-process gc orchestration vs `git gc` |
-| `repack-medium` | **2.58×** | miss | [#1026](https://github.com/gitbutlerapp/grit/issues/1026) — pack build / bitmap sidecars |
-| `commit-graph-write` | **1.38×** | miss | [#1026](https://github.com/gitbutlerapp/grit/issues/1026) — changed-path Bloom generation |
+| `gc-medium` | **0.30×** | meets | — |
+| `repack-medium` | **1.66×** | miss | [GitHub #1026](https://github.com/gitbutlerapp/grit/issues/1026) — pack build / bitmap sidecars |
+| `commit-graph-write` | **1.17×** | miss | [#1026](https://github.com/gitbutlerapp/grit/issues/1026) — changed-path Bloom generation |
 
 ```bash
 cargo build --release -p grit-cli -p grit-utils
