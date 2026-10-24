@@ -197,9 +197,10 @@ pub fn normalize_commit_date_override(raw: &str) -> Result<String, DateParseErro
 pub fn format_git_timestamp(dt: OffsetDateTime) -> String {
     let epoch = dt.unix_timestamp();
     let offset = dt.offset();
-    let hours = offset.whole_hours();
+    let sign = if offset.is_negative() { '-' } else { '+' };
+    let hours = offset.whole_hours().unsigned_abs();
     let minutes = offset.minutes_past_hour().unsigned_abs();
-    format!("{epoch} {hours:+03}{minutes:02}")
+    format!("{epoch} {sign}{hours:02}{minutes:02}")
 }
 
 /// Assemble a commit identity line (`Name <email> <epoch> <offset>`) from an
@@ -271,6 +272,19 @@ mod tests {
         let now = OffsetDateTime::from_unix_timestamp(1_112_911_993).unwrap();
         let line = assemble_identity("A U Thor", "author@example.com", None, now);
         assert_eq!(line, "A U Thor <author@example.com> 1112911993 +0000");
+    }
+
+    #[test]
+    fn format_git_timestamp_keeps_sign_of_sub_hour_negative_offsets() {
+        let at = |h, m| {
+            OffsetDateTime::from_unix_timestamp(1_700_000_000)
+                .unwrap()
+                .to_offset(time::UtcOffset::from_hms(h, m, 0).unwrap())
+        };
+        assert_eq!(format_git_timestamp(at(0, -30)), "1700000000 -0030");
+        assert_eq!(format_git_timestamp(at(-9, -30)), "1700000000 -0930");
+        assert_eq!(format_git_timestamp(at(5, 45)), "1700000000 +0545");
+        assert_eq!(format_git_timestamp(at(0, 0)), "1700000000 +0000");
     }
 
     #[test]
