@@ -1755,6 +1755,29 @@ pub fn grit_lib::config::dotfile::is_ntfs_dot_gitmodules(&str) -> bool
 pub fn grit_lib::config::dotfile::is_ntfs_dot_mailmap(&str) -> bool
 pub fn grit_lib::config::dotfile::is_ntfs_dotgit(&str) -> bool
 pub mod grit_lib::config::environment
+pub struct grit_lib::config::environment::ConfigOverride
+impl grit_lib::config::environment::ConfigOverride
+pub fn grit_lib::config::environment::ConfigOverride::key(&self) -> &str
+pub fn grit_lib::config::environment::ConfigOverride::new(impl core::convert::Into<alloc::string::String>, core::option::Option<alloc::string::String>) -> grit_lib::error::Result<Self>
+pub fn grit_lib::config::environment::ConfigOverride::value(&self) -> core::option::Option<&str>
+impl core::clone::Clone for grit_lib::config::environment::ConfigOverride
+pub fn grit_lib::config::environment::ConfigOverride::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::config::environment::ConfigOverride
+impl core::cmp::PartialEq for grit_lib::config::environment::ConfigOverride
+pub fn grit_lib::config::environment::ConfigOverride::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::config::environment::ConfigOverride
+pub fn grit_lib::config::environment::ConfigOverride::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::config::environment::ConfigOverride
+impl core::str::traits::FromStr for grit_lib::config::environment::ConfigOverride
+pub type grit_lib::config::environment::ConfigOverride::Err = grit_lib::error::Error
+pub fn grit_lib::config::environment::ConfigOverride::from_str(&str) -> core::result::Result<Self, Self::Err>
+impl core::marker::Freeze for grit_lib::config::environment::ConfigOverride
+impl core::marker::Send for grit_lib::config::environment::ConfigOverride
+impl core::marker::Sync for grit_lib::config::environment::ConfigOverride
+impl core::marker::Unpin for grit_lib::config::environment::ConfigOverride
+impl core::marker::UnsafeUnpin for grit_lib::config::environment::ConfigOverride
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::config::environment::ConfigOverride
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::config::environment::ConfigOverride
 pub struct grit_lib::config::environment::Environment
 pub grit_lib::config::environment::Environment::cwd: std::path::PathBuf
 pub grit_lib::config::environment::Environment::git_alternate_object_directories: core::option::Option<alloc::string::String>
@@ -1812,11 +1835,14 @@ pub fn grit_lib::config::environment::Environment::from_vars(impl core::iter::tr
 pub fn grit_lib::config::environment::Environment::git_now_date_override(&self) -> core::option::Option<i64>
 pub fn grit_lib::config::environment::Environment::home_dir(&self) -> core::option::Option<std::path::PathBuf>
 pub fn grit_lib::config::environment::Environment::is_fetch_options_default(&self) -> bool
+pub fn grit_lib::config::environment::Environment::push_config_override(&mut self, &grit_lib::config::environment::ConfigOverride)
 pub fn grit_lib::config::environment::Environment::reftable_autocompaction_enabled(&self) -> bool
 pub fn grit_lib::config::environment::Environment::subprocess_environment(&self) -> alloc::vec::Vec<(std::ffi::os_str::OsString, std::ffi::os_str::OsString)>
 pub fn grit_lib::config::environment::Environment::test_assume_different_owner(&self) -> bool
 pub fn grit_lib::config::environment::Environment::var(&self, &str) -> core::option::Option<alloc::string::String>
 pub fn grit_lib::config::environment::Environment::var_os(&self, &str) -> core::option::Option<std::ffi::os_str::OsString>
+pub fn grit_lib::config::environment::Environment::with_git_dir(self, impl core::convert::AsRef<std::path::Path>) -> Self
+pub fn grit_lib::config::environment::Environment::with_work_tree(self, impl core::convert::AsRef<std::path::Path>) -> Self
 impl core::clone::Clone for grit_lib::config::environment::Environment
 pub fn grit_lib::config::environment::Environment::clone(&self) -> Self
 impl core::fmt::Debug for grit_lib::config::environment::Environment
@@ -9793,9 +9819,9 @@ pub fn grit_lib::objects::pack_name_hash::pack_name_hash_v2(&[u8]) -> u32
 pub mod grit_lib::objects::pack_object_select
 pub struct grit_lib::objects::pack_object_select::PackEnumerateOptions<'a>
 pub grit_lib::objects::pack_object_select::PackEnumerateOptions::exclude_objects: core::option::Option<&'a std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>>
-pub grit_lib::objects::pack_object_select::PackEnumerateOptions::prefetch_walk_objects: bool
 pub grit_lib::objects::pack_object_select::PackEnumerateOptions::filter: core::option::Option<&'a grit_lib::revwalk::rev_list::ObjectFilter>
 pub grit_lib::objects::pack_object_select::PackEnumerateOptions::have_shallow_grafts: core::option::Option<&'a std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>>
+pub grit_lib::objects::pack_object_select::PackEnumerateOptions::prefetch_walk_objects: bool
 pub grit_lib::objects::pack_object_select::PackEnumerateOptions::shallow_grafts: &'a std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>
 pub grit_lib::objects::pack_object_select::PackEnumerateOptions::use_bitmaps: bool
 impl<'a> core::clone::Clone for grit_lib::objects::pack_object_select::PackEnumerateOptions<'a>
@@ -15102,11 +15128,14 @@ pub fn grit_lib::config::environment::Environment::from_vars(impl core::iter::tr
 pub fn grit_lib::config::environment::Environment::git_now_date_override(&self) -> core::option::Option<i64>
 pub fn grit_lib::config::environment::Environment::home_dir(&self) -> core::option::Option<std::path::PathBuf>
 pub fn grit_lib::config::environment::Environment::is_fetch_options_default(&self) -> bool
+pub fn grit_lib::config::environment::Environment::push_config_override(&mut self, &grit_lib::config::environment::ConfigOverride)
 pub fn grit_lib::config::environment::Environment::reftable_autocompaction_enabled(&self) -> bool
 pub fn grit_lib::config::environment::Environment::subprocess_environment(&self) -> alloc::vec::Vec<(std::ffi::os_str::OsString, std::ffi::os_str::OsString)>
 pub fn grit_lib::config::environment::Environment::test_assume_different_owner(&self) -> bool
 pub fn grit_lib::config::environment::Environment::var(&self, &str) -> core::option::Option<alloc::string::String>
 pub fn grit_lib::config::environment::Environment::var_os(&self, &str) -> core::option::Option<std::ffi::os_str::OsString>
+pub fn grit_lib::config::environment::Environment::with_git_dir(self, impl core::convert::AsRef<std::path::Path>) -> Self
+pub fn grit_lib::config::environment::Environment::with_work_tree(self, impl core::convert::AsRef<std::path::Path>) -> Self
 impl core::clone::Clone for grit_lib::config::environment::Environment
 pub fn grit_lib::config::environment::Environment::clone(&self) -> Self
 impl core::fmt::Debug for grit_lib::config::environment::Environment

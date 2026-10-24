@@ -874,7 +874,7 @@ fn percent_decode_path(path: &str) -> Result<String> {
 }
 
 /// Shell-quote `s` with single quotes like Git's `sq_quote_buf` (`git/quote.c`).
-fn sq_quote_shell_arg(s: &str) -> String {
+pub(crate) fn sq_quote_shell_arg(s: &str) -> String {
     let mut out = String::with_capacity(s.len() + 2);
     out.push('\'');
     for ch in s.chars() {

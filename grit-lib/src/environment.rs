@@ -9,7 +9,8 @@
 
 use std::collections::HashMap;
 use std::ffi::OsString;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::str::FromStr;
 use std::sync::Arc;
 
 use time::{OffsetDateTime, UtcOffset};
@@ -346,6 +347,78 @@ impl Environment {
             .unwrap_or(false)
     }
 
+    /// Use `path` as the repository directory, like setting `GIT_DIR`.
+    ///
+    /// A relative `path` is resolved against [`Self::cwd`] now, so the stored value stays
+    /// correct when it is exported to subprocesses that run in another directory.
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: the `.git` directory (or gitfile) to open instead of discovering one.
+    ///
+    /// # Returns
+    ///
+    /// This environment with [`Self::git_dir`] set.
+    #[must_use]
+    pub fn with_git_dir(mut self, path: impl AsRef<Path>) -> Self {
+        self.git_dir = Some(self.absolute_from_cwd(path.as_ref()));
+        self
+    }
+
+    /// Use `path` as the work tree root, like setting `GIT_WORK_TREE`.
+    ///
+    /// A relative `path` is resolved against [`Self::cwd`] now, as in [`Self::with_git_dir`].
+    ///
+    /// # Parameters
+    ///
+    /// - `path`: the directory to treat as the top of the work tree.
+    ///
+    /// # Returns
+    ///
+    /// This environment with [`Self::git_work_tree`] set.
+    #[must_use]
+    pub fn with_work_tree(mut self, path: impl AsRef<Path>) -> Self {
+        self.git_work_tree = Some(self.absolute_from_cwd(path.as_ref()));
+        self
+    }
+
+    /// Append a command-line configuration override (`git -c key=value`).
+    ///
+    /// The override is added to [`Self::git_config_parameters`] in the quoted
+    /// `'key'='value'` form (`'key'=` for a bare key) that Git itself writes to
+    /// `GIT_CONFIG_PARAMETERS` for `git -c`, so it is read by
+    /// [`ConfigSet::load`](crate::config::ConfigSet::load) with command-line scope and is
+    /// inherited by subprocesses through [`Self::subprocess_environment`]. Later overrides win
+    /// over earlier ones, over `GIT_CONFIG_COUNT` pairs, and over every config file.
+    ///
+    /// # Parameters
+    ///
+    /// - `config_override`: the validated key and optional value to add.
+    pub fn push_config_override(&mut self, config_override: &ConfigOverride) {
+        use crate::transport::sq_quote_shell_arg;
+
+        let mut entry = sq_quote_shell_arg(&config_override.key);
+        entry.push('=');
+        if let Some(value) = &config_override.value {
+            entry.push_str(&sq_quote_shell_arg(value));
+        }
+        match &mut self.git_config_parameters {
+            Some(existing) if !existing.trim().is_empty() => {
+                existing.push(' ');
+                existing.push_str(&entry);
+            }
+            slot => *slot = Some(entry),
+        }
+    }
+
+    fn absolute_from_cwd(&self, path: &Path) -> String {
+        if path.is_absolute() {
+            path.to_string_lossy().into_owned()
+        } else {
+            self.cwd.join(path).to_string_lossy().into_owned()
+        }
+    }
+
     /// Snapshot discovery/config variables from the current process (CLI and legacy call sites).
     #[must_use]
     pub fn capture_process() -> Self {
@@ -648,6 +721,60 @@ impl Environment {
     }
 }
 
+/// One command-line configuration override, the `key[=value]` argument of `git -c`.
+///
+/// Parse one with [`str::parse`] (or [`ConfigOverride::new`]) and apply it with
+/// [`Environment::push_config_override`]. The key is validated like any config key
+/// (`section[.subsection].name`); a bare `key` with no `=` sets the boolean value `true`,
+/// and `key=` sets the empty string.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfigOverride {
+    key: String,
+    value: Option<String>,
+}
+
+impl ConfigOverride {
+    /// Build an override from a key and optional value.
+    ///
+    /// # Parameters
+    ///
+    /// - `key`: config key such as `user.name` or `remote.origin.url`.
+    /// - `value`: the value to set, or `None` for a boolean `true` (bare key).
+    ///
+    /// # Errors
+    ///
+    /// Returns [`crate::error::Error::Config`] when `key` is not a valid config key.
+    pub fn new(key: impl Into<String>, value: Option<String>) -> crate::error::Result<Self> {
+        let key = key.into();
+        crate::config::canonical_key(&key)?;
+        Ok(Self { key, value })
+    }
+
+    /// The config key, as given.
+    #[must_use]
+    pub fn key(&self) -> &str {
+        &self.key
+    }
+
+    /// The value, or `None` when the key was given without `=` (boolean `true`).
+    #[must_use]
+    pub fn value(&self) -> Option<&str> {
+        self.value.as_deref()
+    }
+}
+
+impl FromStr for ConfigOverride {
+    type Err = crate::error::Error;
+
+    /// Parse `key=value` (value may be empty or contain `=`) or a bare `key`.
+    fn from_str(spec: &str) -> Result<Self, Self::Err> {
+        match spec.split_once('=') {
+            Some((key, value)) => Self::new(key, Some(value.to_owned())),
+            None => Self::new(spec, None),
+        }
+    }
+}
+
 impl IdentityEnv for Environment {
     fn var(&self, key: &str) -> Option<String> {
         Environment::var(self, key)
@@ -895,6 +1022,170 @@ mod tests {
         assert_eq!(
             env.default_xdg_config_git_file("ignore"),
             Some(PathBuf::from("/xdg/git/ignore"))
+        );
+    }
+
+    fn isolated_env(dir: &Path) -> Environment {
+        let mut env = Environment::empty();
+        env.cwd = dir.to_path_buf();
+        env.home = Some(dir.as_os_str().to_owned());
+        env.git_config_nosystem = Some("1".to_owned());
+        env.git_config_global = Some(dir.join("no-global").to_string_lossy().into_owned());
+        env
+    }
+
+    fn override_of(spec: &str) -> ConfigOverride {
+        spec.parse().expect("valid override")
+    }
+
+    #[test]
+    fn config_override_parses_key_value_bare_and_empty() {
+        let o = override_of("user.name=Ada Lovelace");
+        assert_eq!((o.key(), o.value()), ("user.name", Some("Ada Lovelace")));
+        let o = override_of("http.extraHeader=Authorization: a=b");
+        assert_eq!(o.value(), Some("Authorization: a=b"));
+        let o = override_of("core.bare");
+        assert_eq!((o.key(), o.value()), ("core.bare", None));
+        let o = override_of("user.email=");
+        assert_eq!(o.value(), Some(""));
+        let o = override_of("remote.My Origin.url=x");
+        assert_eq!(o.key(), "remote.My Origin.url");
+    }
+
+    #[test]
+    fn config_override_rejects_invalid_keys() {
+        for spec in [
+            "nosection",
+            "=value",
+            "user.=x",
+            ".name=x",
+            "us er.name=x",
+            "",
+        ] {
+            assert!(
+                spec.parse::<ConfigOverride>().is_err(),
+                "{spec:?} should be rejected"
+            );
+        }
+        assert!(ConfigOverride::new("a\nb.c", None).is_err());
+    }
+
+    #[test]
+    fn push_config_override_round_trips_through_parameter_parser() {
+        let mut env = Environment::empty();
+        let tricky = "it's a \"quote\" = !bang  spaced";
+        env.push_config_override(
+            &ConfigOverride::new("user.name", Some(tricky.to_owned())).unwrap(),
+        );
+        env.push_config_override(&override_of("core.bare"));
+        env.push_config_override(&override_of("user.email="));
+        let raw = env.git_config_parameters.clone().expect("parameters set");
+        assert_eq!(
+            crate::config::parse_config_parameters(&raw),
+            vec![
+                format!("user.name\u{1}{tricky}"),
+                "core.bare\u{1}".to_owned(),
+                "user.email\u{1}".to_owned(),
+            ]
+        );
+    }
+
+    #[test]
+    fn push_config_override_appends_to_inherited_parameters() {
+        let mut env = Environment::empty();
+        env.git_config_parameters = Some("'core.editor'='vi'".to_owned());
+        env.push_config_override(&override_of("user.name=CI"));
+        assert_eq!(
+            env.git_config_parameters.as_deref(),
+            Some("'core.editor'='vi' 'user.name'='CI'")
+        );
+        let mut blank = Environment::empty();
+        blank.git_config_parameters = Some("  ".to_owned());
+        blank.push_config_override(&override_of("user.name=CI"));
+        assert_eq!(
+            blank.git_config_parameters.as_deref(),
+            Some("'user.name'='CI'")
+        );
+    }
+
+    #[test]
+    fn later_config_override_wins_over_earlier_env_pairs_and_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let git_dir = dir.path().join(".git");
+        std::fs::create_dir_all(&git_dir).unwrap();
+        std::fs::write(
+            git_dir.join("config"),
+            "[user]\n\tname = FromRepo\n\temail = repo@x.y\n[core]\n\tbare = false\n",
+        )
+        .unwrap();
+        let mut env = isolated_env(dir.path());
+        env.git_config_count = Some("1".to_owned());
+        env.git_config_pairs = vec![("user.name".to_owned(), "FromCount".to_owned())];
+        env.push_config_override(&override_of("user.name=First"));
+        env.push_config_override(&override_of("user.name=Second"));
+        env.push_config_override(&override_of("core.bare"));
+
+        let config = crate::config::ConfigSet::load(&env, Some(&git_dir), false).unwrap();
+        assert_eq!(config.get("user.name").as_deref(), Some("Second"));
+        assert_eq!(config.get("user.email").as_deref(), Some("repo@x.y"));
+        assert_eq!(config.get_bool("core.bare"), Some(Ok(true)));
+    }
+
+    #[test]
+    fn config_override_is_exported_to_subprocesses() {
+        let mut env = Environment::empty();
+        env.push_config_override(&override_of("user.name=CI"));
+        assert!(env.subprocess_environment().contains(&(
+            OsString::from("GIT_CONFIG_PARAMETERS"),
+            OsString::from("'user.name'='CI'")
+        )));
+    }
+
+    #[test]
+    fn with_git_dir_and_work_tree_resolve_relative_paths_against_cwd() {
+        let mut env = Environment::empty();
+        env.cwd = PathBuf::from("/base/dir");
+        let env = env.with_git_dir("repo/.git").with_work_tree("wt");
+        assert_eq!(
+            env.git_dir.as_deref().map(PathBuf::from),
+            Some(PathBuf::from("/base/dir/repo/.git"))
+        );
+        assert_eq!(
+            env.git_work_tree.as_deref().map(PathBuf::from),
+            Some(PathBuf::from("/base/dir/wt"))
+        );
+        let abs = std::env::temp_dir().join("abs.git");
+        let env = env.with_git_dir(&abs);
+        assert_eq!(env.git_dir.as_deref().map(PathBuf::from), Some(abs));
+    }
+
+    #[test]
+    fn with_git_dir_opens_that_repository_from_elsewhere() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo_dir = dir.path().join("r");
+        crate::repo::init_repository(
+            &repo_dir,
+            false,
+            "main",
+            None,
+            crate::ref_storage::RefStorageFormat::Files,
+        )
+        .unwrap();
+        let elsewhere = dir.path().join("elsewhere");
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        let mut env = isolated_env(&elsewhere);
+        env.cwd = elsewhere.clone();
+        let env = env.with_git_dir("../r/.git").with_work_tree("../r");
+        let repo =
+            crate::repo::Repository::discover(None, &RepositoryOptions::with_environment(env))
+                .unwrap();
+        assert_eq!(
+            repo.git_dir().canonicalize().unwrap(),
+            repo_dir.join(".git").canonicalize().unwrap()
+        );
+        assert_eq!(
+            repo.work_tree().map(|p| p.canonicalize().unwrap()),
+            Some(repo_dir.canonicalize().unwrap())
         );
     }
 
