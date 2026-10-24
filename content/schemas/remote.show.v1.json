@@ -5,8 +5,29 @@
     "RemoteEntry": {
       "description": "One remote in a `list` outcome.",
       "properties": {
+        "fetch_url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "name": {
           "type": "string"
+        },
+        "push_url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "refspecs": {
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
         },
         "url": {
           "type": "string"
@@ -130,6 +151,78 @@
         "action",
         "name",
         "url"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "action": {
+          "enum": [
+            "set_url"
+          ],
+          "type": "string"
+        },
+        "dry_run": {
+          "type": "boolean"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "old_url": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "url": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "action",
+        "dry_run",
+        "kind",
+        "name",
+        "url"
+      ],
+      "type": "object"
+    },
+    {
+      "properties": {
+        "action": {
+          "enum": [
+            "remove"
+          ],
+          "type": "string"
+        },
+        "branches_untracked": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "dry_run": {
+          "type": "boolean"
+        },
+        "name": {
+          "type": "string"
+        },
+        "refs_deleted": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "action",
+        "branches_untracked",
+        "dry_run",
+        "name",
+        "refs_deleted"
       ],
       "type": "object"
     },
