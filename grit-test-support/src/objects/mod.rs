@@ -11,6 +11,7 @@ mod install;
 mod loose;
 mod pack_builder;
 mod repo_fixture;
+mod state_digest;
 
 pub use corrupt::{flip_byte_at, overwrite_range, truncate_file};
 pub use delta_ops::DeltaOps;
@@ -26,6 +27,7 @@ pub use loose::{
 };
 pub use pack_builder::{ObjectKind, PackBuilder, PackBuilt, PackOffsetLabel};
 pub use repo_fixture::RepoFixture;
+pub use state_digest::git_dir_state_digest;
 
 #[cfg(test)]
 mod tests;
