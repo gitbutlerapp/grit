@@ -132,7 +132,7 @@ pub fn parse_signature_tail(ident: &str) -> Option<SignatureTail> {
 /// Byte-oriented tail parse: identity lines may contain non-UTF-8 names while the
 /// `<unix> <±HHMM>` suffix stays ASCII (Git encoding headers).
 #[must_use]
-pub fn parse_signature_tail_bytes(bytes: &[u8]) -> Option<SignatureTail> {
+pub(crate) fn parse_signature_tail_bytes(bytes: &[u8]) -> Option<SignatureTail> {
     let gt = bytes.iter().rposition(|&b| b == b'>')?;
     let mut i = skip_fsck_date_leading_ws(bytes, gt + 1);
     if i >= bytes.len() || !bytes[i].is_ascii_digit() {
@@ -201,7 +201,7 @@ pub fn signature_timestamp_for_pretty(ident: &str) -> SignatureTimestamp {
 
 /// Like [`signature_timestamp_for_pretty`] on raw identity bytes (non-UTF-8 names allowed).
 #[must_use]
-pub fn signature_timestamp_for_pretty_bytes(bytes: &[u8]) -> SignatureTimestamp {
+pub(crate) fn signature_timestamp_for_pretty_bytes(bytes: &[u8]) -> SignatureTimestamp {
     match parse_signature_tail_bytes(bytes) {
         Some(SignatureTail::Valid(p)) => SignatureTimestamp::Valid(p.unix_seconds),
         Some(SignatureTail::Overflow | SignatureTail::NonNumeric) | None => {
