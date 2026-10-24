@@ -1,0 +1,404 @@
+{
+  "schema": "grit-daily-bench/1",
+  "generated_at": "2026-10-24T03:07:42.035779508Z",
+  "machine": {
+    "cpu_model": "Intel(R) Xeon(R) Processor",
+    "physical_cores": 4,
+    "logical_cores": 4,
+    "ram_bytes": 16780574720,
+    "os": "linux",
+    "kernel": "Linux 6.12.94+",
+    "scratch_filesystem": "ext4",
+    "rustc_version": "rustc 1.99.0 (b940084d7 2026-09-28)",
+    "cargo_profile": "release"
+  },
+  "tools": {
+    "git": "git version 2.43.0",
+    "grit": "grit 0.5.18",
+    "grit_commit": "d330d4d6608bbd9bcfd5d3d0a6557e5ac395b264"
+  },
+  "scenarios": [
+    {
+      "id": "blame/file@git-git",
+      "area": "blame",
+      "headline": true,
+      "name": "blame",
+      "description": "Blame one tracked file vs git blame",
+      "git": {
+        "median_wall_ms": 311.921324,
+        "peak_rss_bytes": 245186560,
+        "runs": 5
+      },
+      "grit": {
+        "median_wall_ms": 411.685074,
+        "peak_rss_bytes": 290566144,
+        "runs": 5
+      },
+      "ratio": 1.3198362610181789
+    },
+    {
+      "id": "branch/list@many-refs",
+      "area": "branching",
+      "headline": true,
+      "name": "branch",
+      "description": "List branches vs git branch",
+      "git": {
+        "median_wall_ms": 2.2275745000000002,
+        "peak_rss_bytes": 7163904,
+        "runs": 20
+      },
+      "grit": {
+        "median_wall_ms": 4.3663585000000005,
+        "peak_rss_bytes": 15790080,
+        "runs": 20
+      },
+      "ratio": 1.960140278136601
+    },
+    {
+      "id": "cat/blob@git-git",
+      "area": "revwalk",
+      "description": "Print one blob at HEAD:<path>: grit cat <oid> vs git cat-file -p <oid> (oid from git rev-parse HEAD:<path>)",
+      "git": {
+        "median_wall_ms": 2.234491,
+        "peak_rss_bytes": 7352320,
+        "runs": 20
+      },
+      "grit": {
+        "median_wall_ms": 3.3079345,
+        "peak_rss_bytes": 15294464,
+        "runs": 20
+      },
+      "ratio": 1.480397325386408
+    },
+    {
+      "id": "config/get@small",
+      "area": "config",
+      "description": "Read one config key vs git config",
+      "git": {
+        "median_wall_ms": 1.6888870000000002,
+        "peak_rss_bytes": 6590464,
+        "runs": 20
+      },
+      "grit": {
+        "median_wall_ms": 3.274871,
+        "peak_rss_bytes": 12034048,
+        "runs": 20
+      },
+      "ratio": 1.9390705239604542
+    },
+    {
+      "id": "diff/worktree@synth-10k",
+      "area": "diff",
+      "headline": true,
+      "name": "diff",
+      "description": "Worktree diff vs git diff",
+      "git": {
+        "median_wall_ms": 7.737403499999999,
+        "peak_rss_bytes": 10039296,
+        "runs": 20
+      },
+      "grit": {
+        "median_wall_ms": 9.9190075,
+        "peak_rss_bytes": 19841024,
+        "runs": 20
+      },
+      "ratio": 1.2819555681696062
+    },
+    {
+      "id": "log/all@git-git",
+      "area": "revwalk",
+      "description": "Full reachable history: grit log (paged) vs git log --oneline",
+      "git": {
+        "median_wall_ms": 50.974736,
+        "peak_rss_bytes": 20996096,
+        "runs": 20
+      },
+      "grit": {
+        "median_wall_ms": 78.3098845,
+        "peak_rss_bytes": 42328064,
+        "runs": 20
+      },
+      "ratio": 1.536248946929318
+    },
+    {
+      "id": "log/author-n50@deep-history",
+      "area": "revwalk",
+      "description": "grit log --author=. -n 50 vs git log on deep-history (no commit-graph)",
+      "git": {
+        "median_wall_ms": 2.2531555,
+        "peak_rss_bytes": 8876032,
+        "runs": 20
+      },
+      "grit": {
+        "median_wall_ms": 4.5131879999999995,
+        "peak_rss_bytes": 19419136,
+        "runs": 20
+      },
+      "ratio": 2.003052163954063
+    },
+    {
+      "id": "log/author-n50@deep-history-cg",
+      "area": "revwalk",
+      "description": "grit log --author=. -n 50 vs git log on deep-history (commit-graph written)",
+      "git": {
+        "median_wall_ms": 2.2671615000000003,
+        "peak_rss_bytes": 10436608,
+        "runs": 20
+      },
+      "grit": {
+        "median_wall_ms": 4.508402,
+        "peak_rss_bytes": 22024192,
+        "runs": 20
+      },
+      "ratio": 1.9885667606829067
+    },
+    {
+      "id": "log/author@git-git",
+      "area": "revwalk",
+      "description": "grit log --author=. -n 50 vs git log on git.git",
+      "git": {
+        "median_wall_ms": 3.306805,
+        "peak_rss_bytes": 12640256,
+        "runs": 20
+      },
+      "grit": {
+        "median_wall_ms": 5.4756745,
+        "peak_rss_bytes": 23724032,
+        "runs": 20
+      },
+      "ratio": 1.6558806763628335
+    },
+    {
+      "id": "log/json-100@git-git",
+      "area": "revwalk",
+      "headline": true,
+      "name": "log",
+      "description": "Last 100 commits as JSON vs git log with a verbose --format",
+      "git": {
+        "median_wall_ms": 3.3185775,
+        "peak_rss_bytes": 14909440,
+        "runs": 20
+      },
+      "grit": {
+        "median_wall_ms": 5.5963475,
+        "peak_rss_bytes": 25337856,
+        "runs": 20
+      },
+      "ratio": 1.6863693856780504
+    },
+    {
+      "id": "log/json-filter@git-git",
+      "area": "revwalk",
+      "description": "Last 50 commit oids via grit log --json --filter '.commits[].oid' vs git log -50 --format=%H",
+      "git": {
+        "median_wall_ms": 2.2546325,
+        "peak_rss_bytes": 10641408,
+        "runs": 20
+      },
+      "grit": {
+        "median_wall_ms": 5.4777915,
+        "peak_rss_bytes": 24006656,
+        "runs": 20
+      },
+      "ratio": 2.4295717816539946
+    },
+    {
+      "id": "log/limit-path@git-git",
+      "area": "revwalk",
+      "description": "Bounded path log without commit-graph: grit log -n 200 -- Documentation vs git log (issue #1517)",
+      "git": {
+        "median_wall_ms": 22.057562,
+        "peak_rss_bytes": 33787904,
+        "runs": 20
+      },
+      "grit": {
+        "median_wall_ms": 53.851609,
+        "peak_rss_bytes": 42840064,
+        "runs": 20
+      },
+      "ratio": 2.4414125640902653
+    },
+    {
+      "id": "log/oneline-100@git-git",
+      "area": "revwalk",
+      "headline": true,
+      "name": "log",
+      "description": "Last 100 commits one line each vs git log --oneline",
+      "git": {
+        "median_wall_ms": 3.319182,
+        "peak_rss_bytes": 14667776,
+        "runs": 20
+      },
+      "grit": {
+        "median_wall_ms": 5.4851215,
+        "peak_rss_bytes": 24854528,
+        "runs": 20
+      },
+      "ratio": 1.652552195089031
+    },
+    {
+      "id": "log/oneline-100@synth-100k",
+      "area": "revwalk",
+      "description": "Last 100 commits: grit log --limit 100 vs git log --oneline -100",
+      "git": {
+        "median_wall_ms": 3.3095790000000003,
+        "peak_rss_bytes": 13398016,
+        "runs": 20
+      },
+      "grit": {
+        "median_wall_ms": 5.500953,
+        "peak_rss_bytes": 22843392,
+        "runs": 20
+      },
+      "ratio": 1.6621307423089158
+    },
+    {
+      "id": "log/path@git-git",
+      "area": "revwalk",
+      "description": "History for one path: grit log -- <path> vs git log --oneline -- <path>",
+      "git": {
+        "median_wall_ms": 403.758388,
+        "peak_rss_bytes": 262057984,
+        "runs": 3
+      },
+      "grit": {
+        "median_wall_ms": 2786.034271,
+        "peak_rss_bytes": 321859584,
+        "runs": 3
+      },
+      "ratio": 6.900251124937619
+    },
+    {
+      "id": "log/stat-n50@git-git",
+      "area": "revwalk",
+      "description": "Last 50 commits with stat: grit log --limit 50 --stat vs git log --stat -50",
+      "git": {
+        "median_wall_ms": 99.59656050000001,
+        "peak_rss_bytes": 40374272,
+        "runs": 6
+      },
+      "grit": {
+        "median_wall_ms": 427.197261,
+        "peak_rss_bytes": 125390848,
+        "runs": 6
+      },
+      "ratio": 4.289277248685711
+    },
+    {
+      "id": "merge-base/branches@git-git",
+      "area": "revwalk",
+      "description": "Merge base of two branches: grit merge-base <a> <b> vs git merge-base <a> <b>",
+      "git": {
+        "median_wall_ms": 16.99584,
+        "peak_rss_bytes": 19791872,
+        "runs": 20
+      },
+      "grit": {
+        "median_wall_ms": 5.696406,
+        "peak_rss_bytes": 25067520,
+        "runs": 20
+      },
+      "ratio": 0.33516472266154534
+    },
+    {
+      "id": "patch-id/commit@git-git",
+      "area": "revwalk",
+      "description": "Stable patch-id for HEAD: grit patch-id HEAD vs git patch-id --stable HEAD",
+      "git": {
+        "median_wall_ms": 2.3340365,
+        "peak_rss_bytes": 12636160,
+        "runs": 20
+      },
+      "grit": {
+        "median_wall_ms": 4.3878165,
+        "peak_rss_bytes": 18386944,
+        "runs": 20
+      },
+      "ratio": 1.879926256508842
+    },
+    {
+      "id": "resolve/head-n@git-git",
+      "area": "revwalk",
+      "description": "Resolve HEAD: grit resolve HEAD vs git rev-parse HEAD",
+      "git": {
+        "median_wall_ms": 2.2261290000000002,
+        "peak_rss_bytes": 6238208,
+        "runs": 20
+      },
+      "grit": {
+        "median_wall_ms": 3.330371,
+        "peak_rss_bytes": 14966784,
+        "runs": 20
+      },
+      "ratio": 1.4960368424291672
+    },
+    {
+      "id": "revs/count@git-git",
+      "area": "revwalk",
+      "description": "Count commits at HEAD: grit revs --count HEAD vs git rev-list --count HEAD",
+      "git": {
+        "median_wall_ms": 540.4024880000001,
+        "peak_rss_bytes": 62889984,
+        "runs": 3
+      },
+      "grit": {
+        "median_wall_ms": 806.734737,
+        "peak_rss_bytes": 130347008,
+        "runs": 3
+      },
+      "ratio": 1.4928405307415977
+    },
+    {
+      "id": "shortlog/ahead@git-git",
+      "area": "revwalk",
+      "description": "Ahead-of-target commits: grit shortlog vs git log <target>..HEAD --oneline",
+      "git": {
+        "median_wall_ms": 19.0064165,
+        "peak_rss_bytes": 19922944,
+        "runs": 20
+      },
+      "grit": {
+        "median_wall_ms": 3.3730899999999995,
+        "peak_rss_bytes": 14008320,
+        "runs": 20
+      },
+      "ratio": 0.1774711187666544
+    },
+    {
+      "id": "show/head@git-git",
+      "area": "revwalk",
+      "headline": true,
+      "name": "show",
+      "description": "Show HEAD commit vs git show",
+      "git": {
+        "median_wall_ms": 2.228437,
+        "peak_rss_bytes": 8138752,
+        "runs": 20
+      },
+      "grit": {
+        "median_wall_ms": 4.379752,
+        "peak_rss_bytes": 19472384,
+        "runs": 20
+      },
+      "ratio": 1.965391886779837
+    },
+    {
+      "id": "status/clean@synth-10k",
+      "area": "worktree",
+      "headline": true,
+      "name": "status-clean",
+      "description": "Clean worktree status vs git status -s",
+      "git": {
+        "median_wall_ms": 7.7628924999999995,
+        "peak_rss_bytes": 9682944,
+        "runs": 20
+      },
+      "grit": {
+        "median_wall_ms": 10.657811500000001,
+        "peak_rss_bytes": 20488192,
+        "runs": 20
+      },
+      "ratio": 1.3729175690633357
+    }
+  ]
+}
