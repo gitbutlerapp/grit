@@ -228,3 +228,55 @@ fn pack_objects_write_to_matches_build_pack_bytes() {
 
 // SHA-256 pack indexing is covered by `matrix_packs::sha256_repo_packs_index_and_fsck_clean`
 // (same `build_pack` / `PackObjects` serializer and trailer width).
+
+#[test]
+fn is_reuse_only_tracks_window_and_reuse_flags() {
+    assert!(PackBuildOptions::for_repack_rewrite(None).is_reuse_only());
+    assert!(!PackBuildOptions::for_local_copy(None).is_reuse_only());
+    assert!(!PackBuildOptions::default().is_reuse_only());
+    let no_reuse = PackBuildOptions {
+        reuse_deltas: false,
+        ..PackBuildOptions::for_repack_rewrite(None)
+    };
+    assert!(!no_reuse.is_reuse_only());
+}
+
+#[test]
+fn reuse_only_write_to_streams_same_bytes_as_build_pack() {
+    let (dir, tip, _have) = build_deep_history_repo(30);
+    let odb = open_odb(dir.path());
+    let opts = PackBuildOptions::for_repack_rewrite(None);
+    let via_build = build_pack(&odb, &[tip], &[], &opts).expect("build_pack");
+    let mut streamed = Vec::new();
+    let stats = PackObjects::new(&odb, PackObjectsOptions::from(opts))
+        .wants(&[tip])
+        .write_to(&mut streamed)
+        .expect("write_to");
+    assert_eq!(
+        streamed, via_build,
+        "streamed reuse-only pack must match build_pack"
+    );
+    assert_eq!(stats.pack_bytes, streamed.len() as u64);
+    assert!(stats.delta_count > 0, "on-disk deltas should be reused");
+    git_index_pack_strict(dir.path(), &streamed);
+}
+
+#[test]
+fn reuse_only_thin_pack_keeps_deltas_against_have_bases() {
+    let (dir, tip, have) = build_deep_history_repo(40);
+    let odb = open_odb(dir.path());
+    let opts = PackBuildOptions {
+        thin: true,
+        ..PackBuildOptions::for_repack_rewrite(None)
+    };
+    let mut thin = Vec::new();
+    let stats = PackObjects::new(&odb, PackObjectsOptions::from(opts))
+        .wants(&[tip])
+        .haves(&[have])
+        .write_to(&mut thin)
+        .expect("thin reuse-only pack");
+    assert!(stats.delta_count > 0, "thin pack should reuse deltas");
+    git_index_pack_stdin_fix_thin(&thin);
+    let map = pack_bytes_to_object_map(&thin, &odb).expect("resolve");
+    assert!(map.contains_key(&tip));
+}

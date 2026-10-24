@@ -128,6 +128,34 @@ impl PackBuildOptions {
             ..Default::default()
         }
     }
+
+    /// Settings for a bundle pack: thin when the recipient holds prerequisites (`thin`).
+    ///
+    /// When the repository already has local packs, existing deltas and whole objects are
+    /// copied from them without a new delta search (like [`Self::for_repack_rewrite`]), so
+    /// the pack streams with memory bounded by the index rather than by inflated object
+    /// size. A repository with only loose objects gets a windowed delta search instead.
+    #[must_use]
+    pub(crate) fn for_bundle(
+        cfg: Option<&crate::config::ConfigSet>,
+        objects_dir: &Path,
+        thin: bool,
+    ) -> Self {
+        let base = if objects_dir_has_local_packs(objects_dir) {
+            Self::for_repack_rewrite(cfg)
+        } else {
+            Self::for_local_copy(cfg)
+        };
+        Self { thin, ..base }
+    }
+
+    /// Whether these options only copy existing pack data (no new delta search).
+    ///
+    /// Reuse-only plans never load object payloads up front and are written by streaming.
+    #[must_use]
+    pub fn is_reuse_only(&self) -> bool {
+        self.delta && self.window == 0 && self.reuse_deltas && self.reuse_objects
+    }
 }
 
 /// Extended options for [`PackObjects`].
@@ -270,11 +298,15 @@ impl<'a> PackObjects<'a> {
 
     /// Write a PACK v2 stream to `w` and return statistics.
     ///
+    /// Reuse-only options ([`PackBuildOptions::is_reuse_only`]) skip loading object payloads
+    /// and stream entries to `w` one at a time, copying packed bytes verbatim.
+    ///
     /// # Errors
     ///
     /// Missing wants, corrupt objects, or I/O failures while writing.
     pub fn write_to(mut self, w: &mut dyn Write) -> Result<PackStats> {
         let opts = self.opts.build;
+        let reuse_only = opts.is_reuse_only();
         let have_shallow: HashSet<ObjectId> = self.have_shallow.iter().copied().collect();
         let source_shallow: HashSet<ObjectId> = self.source_shallow.iter().copied().collect();
         let have_closure = crate::pack_object_select::reachable_closure_walk(
@@ -294,11 +326,24 @@ impl<'a> PackObjects<'a> {
                 have_shallow_grafts: Some(&have_shallow),
                 use_bitmaps: opts.use_bitmaps,
                 exclude_objects: Some(&have_closure),
-                prefetch_walk_objects: true,
+                prefetch_walk_objects: !reuse_only,
             },
         )?;
         let send = selection.send;
         self.fire(PackProgress::Enumerated { total: send.len() });
+        if reuse_only {
+            let plan = plan_deltas(
+                self.source_odb,
+                &send,
+                &have_closure,
+                &opts,
+                &oid_hash_map_from(&selection.blob_name_hashes),
+                self.opts.search_threads,
+                HashMap::new(),
+            )?;
+            self.fire(PackProgress::PlannedDeltas);
+            return write_delta_pack_stream(self.source_odb, &plan, &opts, w, None);
+        }
         let bytes = if !opts.delta {
             serialize_pack(self.source_odb, &send, &opts)?
         } else {
@@ -402,7 +447,7 @@ pub fn build_pack_with_shallow_and_filter(
             have_shallow_grafts: Some(have_shallow),
             use_bitmaps: opts.use_bitmaps,
             exclude_objects: None,
-            prefetch_walk_objects: true,
+            prefetch_walk_objects: !opts.is_reuse_only(),
         },
     )?;
     build_pack_from_send_list(
@@ -414,7 +459,11 @@ pub fn build_pack_with_shallow_and_filter(
     )
 }
 
-/// Stream a pack for upload-pack: pack reuse when bitmaps allow, otherwise pack-objects.
+/// Stream a pack for upload-pack and bundles: pack reuse when bitmaps allow, otherwise
+/// [`PackObjects`].
+///
+/// With reuse-only options ([`PackBuildOptions::is_reuse_only`]) the pack is written to `w`
+/// as it is produced; other delta settings build the pack in memory before writing it.
 #[allow(clippy::too_many_arguments)]
 pub fn write_upload_pack_stream(
     repo: &Repository,
@@ -551,16 +600,11 @@ fn write_planned_entries(
                     continue;
                 }
             }
-            let payload = planned_object_payload(odb, entry.oid, entry, &plan.payloads)?;
             let mut chunk = Vec::new();
-            write_whole_pack_object(
-                &mut chunk,
-                odb,
-                entry.oid,
-                entry.kind,
-                payload.as_ref(),
-                opts,
-            )?;
+            if !append_reused_whole_object(&mut chunk, odb, entry.oid, opts)? {
+                let payload = planned_object_payload(odb, entry.oid, entry, &plan.payloads)?;
+                encode_whole_pack_object(&mut chunk, odb, entry.kind, payload.as_ref())?;
+            }
             w.write_all(&chunk).map_err(Error::Io)?;
             body_written += chunk.len() as u64;
             oid_to_offset.insert(entry.oid, start);
@@ -703,7 +747,7 @@ pub(crate) fn build_pack_with_write_threads_full(
             have_shallow_grafts: Some(empty_shallow),
             use_bitmaps: opts.use_bitmaps,
             exclude_objects: Some(&have_closure),
-            prefetch_walk_objects: true,
+            prefetch_walk_objects: !opts.is_reuse_only(),
         },
     )?;
     build_pack_from_send_list_full(
@@ -739,7 +783,7 @@ pub fn build_pack_with_parallel_threads(
             have_shallow_grafts: Some(empty_shallow),
             use_bitmaps: opts.use_bitmaps,
             exclude_objects: Some(&have_closure),
-            prefetch_walk_objects: true,
+            prefetch_walk_objects: !opts.is_reuse_only(),
         },
     )?;
     build_pack_from_send_list_with_parallel_threads(
@@ -987,12 +1031,38 @@ fn write_whole_pack_object(
     data: &[u8],
     opts: &PackBuildOptions,
 ) -> Result<()> {
-    if opts.reuse_objects && odb.hash_algo() == HashAlgo::Sha1 {
-        if let Some(raw) = crate::pack::packed_full_object_slice(odb.objects_dir(), &oid)? {
-            buf.extend_from_slice(&raw);
-            return Ok(());
-        }
+    if append_reused_whole_object(buf, odb, oid, opts)? {
+        return Ok(());
     }
+    encode_whole_pack_object(buf, odb, kind, data)
+}
+
+/// Append `oid`'s whole-object pack entry verbatim from a local pack when allowed.
+///
+/// Returns `false` (nothing appended) when reuse is disabled or no CRC-valid whole copy exists.
+fn append_reused_whole_object(
+    buf: &mut Vec<u8>,
+    odb: &Odb,
+    oid: ObjectId,
+    opts: &PackBuildOptions,
+) -> Result<bool> {
+    if !opts.reuse_objects || odb.hash_algo() != HashAlgo::Sha1 {
+        return Ok(false);
+    }
+    let Some(raw) = crate::pack::packed_full_object_slice(odb.objects_dir(), &oid)? else {
+        return Ok(false);
+    };
+    buf.extend_from_slice(&raw);
+    Ok(true)
+}
+
+/// Append a freshly compressed whole-object pack entry for `data`.
+fn encode_whole_pack_object(
+    buf: &mut Vec<u8>,
+    odb: &Odb,
+    kind: ObjectKind,
+    data: &[u8],
+) -> Result<()> {
     encode_pack_object_header(buf, pack_type_code(kind), data.len());
     let compression = odb.pack_compression()?;
     write_zlib(buf, data, compression)
@@ -1173,9 +1243,9 @@ pub(crate) fn plan_deltas(
     search_threads: Option<usize>,
     mut walk_prefetch: HashMap<ObjectId, Object>,
 ) -> Result<DeltaPlan> {
-    // Reuse-only repacks (`window == 0`) stream from disk at serialize time; avoid
-    // materializing every payload during planning.
-    let lazy_payloads = opts.window == 0 && !opts.thin && opts.reuse_deltas && opts.reuse_objects;
+    // Reuse-only plans stream from disk at serialize time; avoid materializing every
+    // payload during planning.
+    let lazy_payloads = opts.is_reuse_only();
     let has_local_packs = objects_dir_has_local_packs(odb.objects_dir());
     let blob_only_planning =
         !lazy_payloads && opts.window > 0 && opts.delta && !opts.thin && !has_local_packs;
@@ -1211,11 +1281,20 @@ pub(crate) fn plan_deltas(
     if opts.reuse_deltas && odb.hash_algo() == HashAlgo::Sha1 && has_local_packs {
         let objects_dir = odb.objects_dir();
         let in_pack_std: HashSet<ObjectId> = in_pack.iter().copied().collect();
+        // A reuse-only thin pack keeps an on-disk delta whose base the peer already holds;
+        // it is written as `REF_DELTA` and completed by the receiver. Windowed plans keep
+        // in-pack bases only, since their search expects every base among `objects`.
+        let reusable_bases: Cow<'_, HashSet<ObjectId>> =
+            if lazy_payloads && opts.thin && !have_closure.is_empty() {
+                Cow::Owned(in_pack_std.union(have_closure).copied().collect())
+            } else {
+                Cow::Borrowed(&in_pack_std)
+            };
         let empty_resolved: HashMap<ObjectId, Object> = HashMap::new();
         let candidates = crate::pack::collect_packed_delta_reuse_for_send(
             objects_dir,
             &in_pack_std,
-            &in_pack_std,
+            &reusable_bases,
             &empty_resolved,
         )?;
         for (t, (base, size, pack_bytes, zlib_start, zlib_end)) in candidates {
@@ -1228,7 +1307,7 @@ pub(crate) fn plan_deltas(
             } else if objects[&t].data.is_empty() {
                 continue;
             }
-            if base != t && in_pack.contains(&base) && islands.in_same_island(&t, &base) {
+            if base != t && reusable_bases.contains(&base) && islands.in_same_island(&t, &base) {
                 delta_to_base.insert(t, base);
                 reused_zlib.insert(t, (size, pack_bytes, zlib_start, zlib_end));
             }
