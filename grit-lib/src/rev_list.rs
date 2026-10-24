@@ -24,8 +24,9 @@ use crate::merge_base::{
     commits_reachable_excluding_ancestors_of_cutoffs, ReachableWalkCommitterCutoffs,
 };
 use crate::objects::{
-    oid_hash_map, oid_hash_set, parse_commit, parse_tag, CommitData, CommitRef,
-    ObjectId, ObjectKind, OidHashMap, OidHashSet, TreeEntry, TreeRefIter,
+    find_tree_child_by_name_dir_or_file_in_data, find_tree_child_in_data, oid_hash_map,
+    oid_hash_set, parse_commit, parse_tag, parse_tree, CommitData, CommitRef, ObjectId, ObjectKind,
+    OidHashMap, OidHashSet, TreeEntry, TreeRefIter,
 };
 use crate::odb::store::ObjectStore;
 use crate::pack_bitmap::BitmapIndex;
@@ -4946,6 +4947,7 @@ struct DenseWalkCache {
     component_hits: u64,
     component_misses: u64,
     tree_reads: u64,
+    oid_len: Option<usize>,
     /// Reused across tree reads in one dense walk (not retained per OID).
     tree_read_buf: Vec<u8>,
 }
@@ -4997,6 +4999,33 @@ impl DenseWalkCache {
         self.component_evict_order.push_back(key);
     }
 
+    fn oid_len(&mut self, repo: &Repository) -> usize {
+        *self
+            .oid_len
+            .get_or_insert_with(|| repo.odb().hash_algo().len())
+    }
+
+    fn lookup_tree_component_from_bytes(
+        &mut self,
+        repo: &Repository,
+        tree: ObjectId,
+        name: &[u8],
+        as_tree: bool,
+    ) -> Result<CachedTreeChild> {
+        self.tree_reads += 1;
+        let kind = repo.odb().read_into(&tree, &mut self.tree_read_buf)?;
+        if kind != ObjectKind::Tree {
+            return Err(Error::CorruptObject(format!("object {tree} is not a tree")));
+        }
+        let oid_len = self.oid_len(repo);
+        Ok(
+            match find_tree_child_in_data(self.tree_read_buf.as_slice(), oid_len, name, as_tree)? {
+                Some((mode, oid)) => CachedTreeChild::Found { oid, mode },
+                None => CachedTreeChild::Missing,
+            },
+        )
+    }
+
     /// Resolve one path component under `tree` using Git tree directory ordering when `as_tree`.
     fn lookup_tree_component(
         &mut self,
@@ -5012,15 +5041,8 @@ impl DenseWalkCache {
             return Ok(cached);
         }
         self.component_misses += 1;
-        self.tree_reads += 1;
-        let entries = repo.odb().cached_tree_entries(&tree)?;
-        let resolved = match tree_entry_by_name(entries.as_slice(), component, as_tree) {
-            Some(entry) => CachedTreeChild::Found {
-                oid: entry.oid,
-                mode: entry.mode,
-            },
-            None => CachedTreeChild::Missing,
-        };
+        let resolved =
+            self.lookup_tree_component_from_bytes(repo, tree, component.as_bytes(), as_tree)?;
         self.insert_component(tree, key_name, as_tree, resolved);
         Ok(resolved)
     }
@@ -5031,13 +5053,29 @@ impl DenseWalkCache {
         tree: ObjectId,
         component: &str,
     ) -> Result<CachedTreeChild> {
-        let as_dir = self.lookup_tree_component(repo, tree, component, true)?;
-        if let CachedTreeChild::Found { mode, .. } = as_dir {
-            if is_tree_mode(mode) {
-                return Ok(as_dir);
-            }
+        let key_name: Arc<str> = Arc::from(component);
+        let key = (tree, Arc::clone(&key_name), false);
+        if let Some(cached) = self.component_child.get(&key).copied() {
+            self.component_hits += 1;
+            return Ok(cached);
         }
-        self.lookup_tree_component(repo, tree, component, false)
+        self.component_misses += 1;
+        self.tree_reads += 1;
+        let kind = repo.odb().read_into(&tree, &mut self.tree_read_buf)?;
+        if kind != ObjectKind::Tree {
+            return Err(Error::CorruptObject(format!("object {tree} is not a tree")));
+        }
+        let oid_len = self.oid_len(repo);
+        let resolved = match find_tree_child_by_name_dir_or_file_in_data(
+            self.tree_read_buf.as_slice(),
+            oid_len,
+            component.as_bytes(),
+        )? {
+            Some((mode, oid)) => CachedTreeChild::Found { oid, mode },
+            None => CachedTreeChild::Missing,
+        };
+        self.insert_component(tree, key_name, false, resolved);
+        Ok(resolved)
     }
 }
 
@@ -5426,26 +5464,13 @@ fn pathspec_entry_is_relevant(path: &str, is_tree: bool, pathspecs: &[String]) -
 }
 
 fn read_parsed_tree(repo: &Repository, tree_oid: ObjectId) -> Result<Vec<TreeEntry>> {
-    Ok(repo.odb().cached_tree_entries(&tree_oid)?.as_ref().clone())
-}
-
-fn tree_entry_by_name<'a>(
-    entries: &'a [TreeEntry],
-    name: &str,
-    name_is_tree: bool,
-) -> Option<&'a TreeEntry> {
-    let name_bytes = name.as_bytes();
-    let idx = entries.binary_search_by(|e| {
-        crate::objects::tree_entry_cmp(&e.name, is_tree_mode(e.mode), name_bytes, name_is_tree)
-    });
-    idx.ok().and_then(|i| {
-        let entry = &entries[i];
-        if entry.name.as_slice() == name_bytes {
-            Some(entry)
-        } else {
-            None
-        }
-    })
+    let object = repo.odb().read(&tree_oid)?;
+    if object.kind != ObjectKind::Tree {
+        return Err(Error::CorruptObject(format!(
+            "object {tree_oid} is not a tree"
+        )));
+    }
+    parse_tree(&object.data)
 }
 
 /// Whether any blob path under `tree_oid` matches `pathspecs` (root-commit visibility).
@@ -11590,6 +11615,59 @@ mod line_coverage_tests {
         assert!(
             subject.contains('é'),
             "expected decoded subject, got {subject:?}"
+        );
+        let object = repo.odb().read(&oid)?;
+        let cref = CommitRef::parse(&object.data)?;
+        assert_eq!(
+            cref.author_unix_seconds_for_ordering(),
+            1,
+            "ISO-8859-1 author name must not zero author date ordering"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn dense_path_limited_walk_does_not_populate_session_tree_cache() -> Result<()> {
+        let dir = tempdir().expect("tempdir");
+        let repo = Repository::init(
+            dir.path(),
+            &InitOptions {
+                bare: true,
+                ref_storage: RefStorageFormat::Files,
+                ..InitOptions::default()
+            },
+        )?;
+        let repo = Repository::open(dir.path(), &crate::environment::RepositoryOptions::empty())?;
+        let odb = repo.odb();
+        let mut parent: Option<ObjectId> = None;
+        for i in 0..64 {
+            let blob = odb.write(ObjectKind::Blob, format!("body{i}\n").as_bytes())?;
+            let mut tree_body = Vec::new();
+            tree_body.extend_from_slice(b"100644 tracked.txt\0");
+            tree_body.extend_from_slice(blob.as_bytes());
+            let tree = odb.write(ObjectKind::Tree, &tree_body)?;
+            let parents: Vec<ObjectId> = parent.iter().copied().collect();
+            let mut body = format!("tree {tree}\n");
+            for p in &parents {
+                body.push_str(&format!("parent {p}\n"));
+            }
+            body.push_str(&format!(
+                "author T <t@e.com> {i} +0000\ncommitter T <t@e.com> {i} +0000\n\nc{i}\n"
+            ));
+            parent = Some(odb.write(ObjectKind::Commit, body.as_bytes())?);
+        }
+        let tip = parent.expect("tip");
+        crate::odb::Odb::reset_session_tree_cache_inserts_for_test();
+        let opts = RevListOptions {
+            paths: vec!["tracked.txt".to_owned()],
+            ..Default::default()
+        };
+        let listed = rev_list(&repo, &[tip.to_hex()], &[], &opts)?;
+        assert_eq!(listed.commits.len(), 64);
+        assert_eq!(
+            odb.session_tree_cache_inserts_for_test(),
+            0,
+            "dense component lookup must not insert into session tree cache"
         );
         Ok(())
     }

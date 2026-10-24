@@ -233,6 +233,10 @@ pub struct Odb {
     session_tree_entries: Arc<Mutex<SessionTreeEntries>>,
 }
 
+#[cfg(test)]
+static SESSION_TREE_CACHE_INSERTS: std::sync::atomic::AtomicUsize =
+    std::sync::atomic::AtomicUsize::new(0);
+
 /// Recently parsed trees for [`Odb::cached_tree_entries`], bounded by total entry count.
 #[derive(Default)]
 struct SessionTreeEntries {
@@ -245,9 +249,11 @@ impl SessionTreeEntries {
     /// kept. A parsed entry costs roughly 80 bytes, so this holds a few MiB: enough
     /// for the trees a diff of neighbouring commits revisits, without growing with
     /// history size.
-    const ENTRY_BUDGET: usize = 1 << 20;
+    const ENTRY_BUDGET: usize = 1 << 16;
 
     fn insert(&mut self, oid: ObjectId, tree: Arc<Vec<crate::objects::TreeEntry>>) {
+        #[cfg(test)]
+        SESSION_TREE_CACHE_INSERTS.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         if tree.len() > Self::ENTRY_BUDGET {
             return;
         }
@@ -446,6 +452,16 @@ impl Odb {
             #[cfg(test)]
             hot_path_test_metrics: crate::hot_path_test_metrics::HotPathTestMetrics::new(),
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn reset_session_tree_cache_inserts_for_test() {
+        SESSION_TREE_CACHE_INSERTS.store(0, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    #[cfg(test)]
+    pub(crate) fn session_tree_cache_inserts_for_test(&self) -> usize {
+        SESSION_TREE_CACHE_INSERTS.load(std::sync::atomic::Ordering::Relaxed)
     }
 
     /// Parsed tree entries for `oid`, cached on this [`Odb`] handle.
