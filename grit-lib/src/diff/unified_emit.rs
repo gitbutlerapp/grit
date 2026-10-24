@@ -76,6 +76,9 @@ impl LineSide {
 /// Token for line-based diff alignment (Git compares full records including newline).
 ///
 /// A line terminated with LF/CRLF must not match the same body at EOF without a newline.
+/// The diff pipeline borrows these bytes straight from the source text; this owned form is the
+/// reference the tests compare against.
+#[cfg(test)]
 #[must_use]
 pub(crate) fn line_diff_token(line: &SourceLine) -> String {
     match line.ending {

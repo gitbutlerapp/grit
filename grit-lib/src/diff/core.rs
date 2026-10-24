@@ -20,6 +20,7 @@
 //! Output formats: unified patch, raw (`:old-mode new-mode ...`), stat,
 //! numstat.
 
+use std::borrow::Cow;
 use std::collections::HashSet;
 use std::fs;
 #[cfg(unix)]
@@ -44,21 +45,36 @@ use crate::worktree_rules::WorktreeRules;
 
 use super::rename_lines::RenameLineTable;
 use super::unified_emit::{
-    emit_unified_body_from_edits, line_diff_token, line_ending_only_edits, EditSpan, LineSide,
-    SourceLine, UnifiedEmitOptions,
+    emit_unified_body_from_edits, line_ending_only_edits, EditSpan, LineSide, UnifiedEmitOptions,
 };
 
-fn line_compare_key(line: &SourceLine, ws: super::WhitespaceMode) -> String {
+/// Comparison keys for every line of `side`, which must be [`LineSide::from_text`] of `text`.
+///
+/// Without whitespace normalization a key is the raw line including its `\n` (the same bytes as
+/// [`line_diff_token`]), so it borrows from `text` instead of allocating per line.
+fn line_compare_keys<'a>(
+    text: &'a str,
+    side: &LineSide,
+    ws: super::WhitespaceMode,
+) -> Vec<Cow<'a, str>> {
     if ws.normalizes_line_compare() {
         // Git -w/-b compare normalized bodies only; EOF newline is whitespace.
-        ws.normalize_line_for_compare(&line.body).into_owned()
-    } else {
-        line_diff_token(line)
+        return side
+            .lines
+            .iter()
+            .map(|line| Cow::Owned(ws.normalize_line_for_compare(&line.body).into_owned()))
+            .collect();
     }
-}
-
-fn line_compare_keys(side: &LineSide, ws: super::WhitespaceMode) -> Vec<String> {
-    side.lines.iter().map(|l| line_compare_key(l, ws)).collect()
+    let mut keys = Vec::with_capacity(side.len());
+    let mut rest = text;
+    while !rest.is_empty() {
+        let end = memchr::memchr(b'\n', rest.as_bytes()).map_or(rest.len(), |nl| nl + 1);
+        let (line, tail) = rest.split_at(end);
+        keys.push(Cow::Borrowed(line));
+        rest = tail;
+    }
+    debug_assert_eq!(keys.len(), side.len());
+    keys
 }
 
 #[path = "../structured_diff.rs"]
@@ -89,10 +105,10 @@ pub(crate) fn histogram_compacted_line_ops(
     let new_lines: Vec<&str> = after.lines.iter().map(|l| l.body.as_str()).collect();
     let old_len = old_lines.len();
     let new_len = new_lines.len();
-    let old_compare_owned = line_compare_keys(&before, ws);
-    let new_compare_owned = line_compare_keys(&after, ws);
-    let old_compare: Vec<&str> = old_compare_owned.iter().map(String::as_str).collect();
-    let new_compare: Vec<&str> = new_compare_owned.iter().map(String::as_str).collect();
+    let old_compare_owned = line_compare_keys(old_content, &before, ws);
+    let new_compare_owned = line_compare_keys(new_content, &after, ws);
+    let old_compare: Vec<&str> = old_compare_owned.iter().map(Cow::as_ref).collect();
+    let new_compare: Vec<&str> = new_compare_owned.iter().map(Cow::as_ref).collect();
 
     let (changed1, changed2) = git_xdiff::histogram_changed_flags(&old_compare, &new_compare);
 
@@ -365,10 +381,10 @@ where
     }
     let old_refs: Vec<&str> = before.lines.iter().map(|l| l.body.as_str()).collect();
     let new_refs: Vec<&str> = after.lines.iter().map(|l| l.body.as_str()).collect();
-    let old_compare_owned = line_compare_keys(&before, ws);
-    let new_compare_owned = line_compare_keys(&after, ws);
-    let old_compare: Vec<&str> = old_compare_owned.iter().map(String::as_str).collect();
-    let new_compare: Vec<&str> = new_compare_owned.iter().map(String::as_str).collect();
+    let old_compare_owned = line_compare_keys(old_content, &before, ws);
+    let new_compare_owned = line_compare_keys(new_content, &after, ws);
+    let old_compare: Vec<&str> = old_compare_owned.iter().map(Cow::as_ref).collect();
+    let new_compare: Vec<&str> = new_compare_owned.iter().map(Cow::as_ref).collect();
     let ops = git_xdiff_compacted_line_ops(
         &old_compare,
         &new_compare,
@@ -423,10 +439,10 @@ where
     }
     let old_refs: Vec<&str> = before.lines.iter().map(|l| l.body.as_str()).collect();
     let new_refs: Vec<&str> = after.lines.iter().map(|l| l.body.as_str()).collect();
-    let old_compare_owned = line_compare_keys(&before, ws);
-    let new_compare_owned = line_compare_keys(&after, ws);
-    let old_compare: Vec<&str> = old_compare_owned.iter().map(String::as_str).collect();
-    let new_compare: Vec<&str> = new_compare_owned.iter().map(String::as_str).collect();
+    let old_compare_owned = line_compare_keys(old_content, &before, ws);
+    let new_compare_owned = line_compare_keys(new_content, &after, ws);
+    let old_compare: Vec<&str> = old_compare_owned.iter().map(Cow::as_ref).collect();
+    let new_compare: Vec<&str> = new_compare_owned.iter().map(Cow::as_ref).collect();
     let (changed1, changed2) = git_xdiff::patience_changed_flags(&old_compare, &new_compare);
     let raw = changed_flags_to_ops(&changed1, &changed2, old_refs.len(), new_refs.len());
     let ops = if ws.normalizes_line_compare() {
@@ -645,10 +661,12 @@ fn git_patience_unified_body_raw(
     }
     let old_refs: Vec<&str> = before.lines.iter().map(|l| l.body.as_str()).collect();
     let new_refs: Vec<&str> = after.lines.iter().map(|l| l.body.as_str()).collect();
-    let old_compare_owned = line_compare_keys(&before, super::WhitespaceMode::default());
-    let new_compare_owned = line_compare_keys(&after, super::WhitespaceMode::default());
-    let old_compare: Vec<&str> = old_compare_owned.iter().map(String::as_str).collect();
-    let new_compare: Vec<&str> = new_compare_owned.iter().map(String::as_str).collect();
+    let old_compare_owned =
+        line_compare_keys(old_content, &before, super::WhitespaceMode::default());
+    let new_compare_owned =
+        line_compare_keys(new_content, &after, super::WhitespaceMode::default());
+    let old_compare: Vec<&str> = old_compare_owned.iter().map(Cow::as_ref).collect();
+    let new_compare: Vec<&str> = new_compare_owned.iter().map(Cow::as_ref).collect();
     let (changed1, changed2) = git_xdiff::patience_changed_flags(&old_compare, &new_compare);
     let raw = changed_flags_to_ops(&changed1, &changed2, old_refs.len(), new_refs.len());
     let ops = diff_indent_heuristic::apply_change_compact_to_ops(
@@ -1687,21 +1705,26 @@ mod git_xdiff {
 
     /// Build the `changed` flags for both token streams using Git's xdiff engine.
     /// When `need_min` is true, Git's minimal diff (`--minimal`) is used.
-    /// `ids1`/`ids2` are interned token ids (equal id <=> equal token).
+    /// `ids1`/`ids2` are dense interned token ids from one [`crate::line_interner::LineInterner`]
+    /// (equal id <=> equal token); per-id tables are sized by the largest id.
     /// Returns `(changed1, changed2)`, one bool per original token.
     pub fn changed_flags(ids1: &[u32], ids2: &[u32], need_min: bool) -> (Vec<bool>, Vec<bool>) {
         let nrec1 = ids1.len();
         let nrec2 = ids2.len();
 
-        // Per-token occurrence counts on each side (class len1/len2).
-        use std::collections::HashMap;
-        let mut count1: HashMap<u32, i64> = HashMap::new();
-        let mut count2: HashMap<u32, i64> = HashMap::new();
+        // Per-token occurrence counts on each side (class len1/len2), indexed by the dense ids.
+        let nclasses = ids1
+            .iter()
+            .chain(ids2)
+            .max()
+            .map_or(0, |&max| max as usize + 1);
+        let mut count1 = vec![0i64; nclasses];
+        let mut count2 = vec![0i64; nclasses];
         for &id in ids1 {
-            *count1.entry(id).or_insert(0) += 1;
+            count1[id as usize] += 1;
         }
         for &id in ids2 {
-            *count2.entry(id).or_insert(0) += 1;
+            count2[id as usize] += 1;
         }
 
         let mut xdf1 = XdFile {
@@ -1753,7 +1776,7 @@ mod git_xdiff {
         let mut idx = xdf1.dstart;
         while idx <= xdf1.dend {
             let id = ids1[idx as usize];
-            let nm = *count2.get(&id).unwrap_or(&0);
+            let nm = count2[id as usize];
             action1[idx as usize] = if nm == 0 {
                 DISCARD
             } else if nm >= mlim1 {
@@ -1776,7 +1799,7 @@ mod git_xdiff {
         let mut idx = xdf2.dstart;
         while idx <= xdf2.dend {
             let id = ids2[idx as usize];
-            let nm = *count1.get(&id).unwrap_or(&0);
+            let nm = count1[id as usize];
             action2[idx as usize] = if nm == 0 {
                 DISCARD
             } else if nm >= mlim2 {
@@ -11248,6 +11271,70 @@ fn orderfile_glob_match(pattern: &str, text: &str) -> bool {
         pi += 1;
     }
     pi == pb.len()
+}
+
+#[cfg(test)]
+mod line_compare_key_tests {
+    use super::*;
+    use crate::diff::unified_emit::line_diff_token;
+    use crate::diff::WhitespaceMode;
+
+    #[test]
+    fn borrowed_keys_match_owned_line_tokens() {
+        let texts = [
+            "",
+            "\n",
+            "a",
+            "a\n",
+            "a\nb",
+            "a\r\nb\r\n",
+            "a\r\nb\r",
+            "\n\n\nlast",
+            "x\n\r\n\ry\n",
+        ];
+        for text in texts {
+            let side = LineSide::from_text(text);
+            let keys = line_compare_keys(text, &side, WhitespaceMode::default());
+            let expected: Vec<String> = side.lines.iter().map(line_diff_token).collect();
+            assert_eq!(keys, expected, "text {text:?}");
+            assert!(
+                keys.iter().all(|key| matches!(key, Cow::Borrowed(_))),
+                "text {text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn whitespace_modes_compare_normalized_bodies() {
+        let text = "a  b\nab \n";
+        let side = LineSide::from_text(text);
+        let ws = WhitespaceMode {
+            ignore_all_space: true,
+            ..WhitespaceMode::default()
+        };
+        let keys = line_compare_keys(text, &side, ws);
+        assert_eq!(keys, vec!["ab", "ab"]);
+    }
+
+    #[test]
+    fn xdiff_marks_only_edited_lines_in_large_file() {
+        let old: String = (0..5_000).map(|i| format!("line{i}\n")).collect();
+        let new: String = (0..5_000)
+            .map(|i| {
+                if i % 100 == 0 {
+                    format!("LINE{i}\n")
+                } else {
+                    format!("line{i}\n")
+                }
+            })
+            .collect();
+        let body =
+            git_xdiff_unified_body_raw(&old, &new, 3, 0, true, false, WhitespaceMode::default());
+        assert_eq!(body.matches("\n@@ ").count() + 1, 50);
+        assert_eq!(body.lines().filter(|l| l.starts_with('-')).count(), 50);
+        assert_eq!(body.lines().filter(|l| l.starts_with('+')).count(), 50);
+        assert!(body.starts_with("@@ -1,4 +1,4 @@\n-line0\n+LINE0\n line1\n"));
+    }
 }
 
 #[cfg(test)]
