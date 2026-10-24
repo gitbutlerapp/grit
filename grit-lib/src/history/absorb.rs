@@ -15,13 +15,13 @@ use crate::merge_trees::{
     merge_trees_three_way, TreeMergeConflictPresentation, WhitespaceMergeOptions,
 };
 use crate::objects::{parse_tree, CommitData, ObjectId, ObjectKind};
-use crate::porcelain::rebase::commit_subject_single_line;
 use crate::repo::Repository;
 use crate::revwalk::rev_list::{rev_list, OrderingMode, RevListOptions};
 use crate::state::{resolve_head, HeadState};
 
 use super::error::HistoryError;
 use super::fixup::staged_fixup_paths;
+use super::message::commit_subject_single_line;
 use super::plan::plan_rewrite;
 use super::types::{CommitEdit, HistoryEdits, RewriteOptions, RewritePlan};
 

@@ -4,11 +4,6 @@ use std::collections::{HashMap, HashSet};
 
 use crate::merge_base::is_ancestor;
 use crate::objects::{CommitData, ObjectId};
-use crate::porcelain::rebase::{
-    append_nth_squash_message, append_skipped_squash_message, commit_subject_single_line,
-    fixup_replacement_message, message_body_after_subject, skip_fixupish_prefix,
-    update_squash_message_for_fixup, RebaseTodoCmd,
-};
 use crate::repo::Repository;
 use crate::revwalk::rev_list::{rev_list, OrderingMode, RevListOptions};
 use crate::revwalk::rev_parse::{peel_to_commit_for_merge_base, resolve_revision_for_range_end};
@@ -16,6 +11,11 @@ use crate::revwalk::{parse_rev_walk_tokens, RevWalkParsedSpecs};
 use crate::state::resolve_head;
 
 use super::error::HistoryError;
+use super::message::{
+    append_nth_squash_message, append_skipped_squash_message, commit_subject_single_line,
+    fixup_replacement_message, message_body_after_subject, skip_fixupish_prefix,
+    update_squash_message_for_fixup, SquashStep,
+};
 use super::plan::{plan_fold_range_at_head, plan_rewrite};
 use super::reword::normalize_rewrite_message;
 use super::types::RefScope;
@@ -609,20 +609,20 @@ fn build_combined_squash_message(
     for (i, &oid) in commits.iter().enumerate() {
         let commit = load_commit(repo, oid)?;
         let subject = commit_subject_single_line(&commit.message);
-        let cmd = if subject.starts_with("squash! ") {
-            RebaseTodoCmd::Squash
+        let step = if subject.starts_with("squash! ") {
+            SquashStep::Squash
         } else if subject.starts_with("fixup! ") || subject.starts_with("amend! ") {
-            RebaseTodoCmd::Fixup
+            SquashStep::Fixup
         } else {
-            RebaseTodoCmd::Pick
+            SquashStep::Pick
         };
-        let skip = matches!(cmd, RebaseTodoCmd::Fixup) && !subject.starts_with("amend! ");
+        let skip = matches!(step, SquashStep::Fixup) && !subject.starts_with("amend! ");
         if skip {
             append_skipped_squash_message(&mut buf, &commit.message, i + 1);
         } else {
-            append_nth_squash_message(&mut buf, &commit.message, cmd, seen_squash, i + 1);
+            append_nth_squash_message(&mut buf, &commit.message, step, seen_squash, i + 1);
         }
-        if cmd == RebaseTodoCmd::Squash {
+        if step == SquashStep::Squash {
             seen_squash = true;
         }
         if subject.starts_with("amend! ") {

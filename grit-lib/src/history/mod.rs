@@ -51,6 +51,7 @@ mod error;
 mod exec;
 mod fixup;
 mod last;
+mod message;
 mod r#move;
 mod plan;
 mod rebase;

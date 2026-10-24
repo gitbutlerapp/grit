@@ -1,6 +1,13 @@
 //! Porcelain operations — user-facing workflows that assemble structured result
 //! models from domain modules (e.g. [`diff`](crate::diff), [`revwalk`](crate::revwalk),
-//! `status`, `log`, `merge`, `rebase`, `checkout`, and related commands).
+//! `status`, `log`, `merge`, `checkout`, and related commands).
+//!
+//! Rebase is not a porcelain module: it lives with the other history rewrites in
+//! [`crate::revwalk::history`] ([`start_rebase`](crate::revwalk::history::start_rebase) with
+//! [`continue_rebase`](crate::revwalk::history::continue_rebase) /
+//! [`abort_rebase`](crate::revwalk::history::abort_rebase) for the stop-and-resume flow,
+//! [`plan_rebase`](crate::revwalk::history::plan_rebase) and
+//! [`rebase_onto`](crate::revwalk::history::rebase_onto) for planning).
 //!
 //! # The library/CLI contract
 //!
@@ -68,7 +75,6 @@ pub mod merge;
 pub mod paths;
 pub mod pathspec_match;
 pub mod pull;
-pub mod rebase;
 pub mod replay;
 pub mod replay_sequence;
 pub mod reset;

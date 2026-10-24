@@ -13341,66 +13341,6 @@ pub fn grit_lib::porcelain::quote_path::format_diff_path_with_prefix(&str, &str,
 pub fn grit_lib::porcelain::quote_path::quote_c_style(&str, bool) -> alloc::string::String
 pub fn grit_lib::porcelain::quote_path::quote_c_style_bytes(&[u8], bool) -> alloc::string::String
 pub fn grit_lib::porcelain::quote_path::quote_path_for_display(&str, bool) -> alloc::string::String
-pub mod grit_lib::porcelain::rebase
-pub enum grit_lib::porcelain::rebase::FixupMessageMode
-pub grit_lib::porcelain::rebase::FixupMessageMode::EditCommit
-pub grit_lib::porcelain::rebase::FixupMessageMode::UseCommit
-impl core::clone::Clone for grit_lib::porcelain::rebase::FixupMessageMode
-pub fn grit_lib::porcelain::rebase::FixupMessageMode::clone(&self) -> Self
-impl core::cmp::Eq for grit_lib::porcelain::rebase::FixupMessageMode
-impl core::cmp::PartialEq for grit_lib::porcelain::rebase::FixupMessageMode
-pub fn grit_lib::porcelain::rebase::FixupMessageMode::eq(&self, &Self) -> bool
-impl core::fmt::Debug for grit_lib::porcelain::rebase::FixupMessageMode
-pub fn grit_lib::porcelain::rebase::FixupMessageMode::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for grit_lib::porcelain::rebase::FixupMessageMode
-impl core::marker::StructuralPartialEq for grit_lib::porcelain::rebase::FixupMessageMode
-impl core::marker::Freeze for grit_lib::porcelain::rebase::FixupMessageMode
-impl core::marker::Send for grit_lib::porcelain::rebase::FixupMessageMode
-impl core::marker::Sync for grit_lib::porcelain::rebase::FixupMessageMode
-impl core::marker::Unpin for grit_lib::porcelain::rebase::FixupMessageMode
-impl core::marker::UnsafeUnpin for grit_lib::porcelain::rebase::FixupMessageMode
-impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::rebase::FixupMessageMode
-impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::rebase::FixupMessageMode
-pub enum grit_lib::porcelain::rebase::RebaseTodoCmd
-pub grit_lib::porcelain::rebase::RebaseTodoCmd::Fixup
-pub grit_lib::porcelain::rebase::RebaseTodoCmd::Pick
-pub grit_lib::porcelain::rebase::RebaseTodoCmd::Reword
-pub grit_lib::porcelain::rebase::RebaseTodoCmd::Squash
-impl grit_lib::porcelain::rebase::RebaseTodoCmd
-pub fn grit_lib::porcelain::rebase::RebaseTodoCmd::as_str(self) -> &'static str
-pub fn grit_lib::porcelain::rebase::RebaseTodoCmd::parse_word(&str) -> core::option::Option<Self>
-impl core::clone::Clone for grit_lib::porcelain::rebase::RebaseTodoCmd
-pub fn grit_lib::porcelain::rebase::RebaseTodoCmd::clone(&self) -> Self
-impl core::cmp::Eq for grit_lib::porcelain::rebase::RebaseTodoCmd
-impl core::cmp::PartialEq for grit_lib::porcelain::rebase::RebaseTodoCmd
-pub fn grit_lib::porcelain::rebase::RebaseTodoCmd::eq(&self, &Self) -> bool
-impl core::fmt::Debug for grit_lib::porcelain::rebase::RebaseTodoCmd
-pub fn grit_lib::porcelain::rebase::RebaseTodoCmd::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for grit_lib::porcelain::rebase::RebaseTodoCmd
-impl core::marker::StructuralPartialEq for grit_lib::porcelain::rebase::RebaseTodoCmd
-impl core::marker::Freeze for grit_lib::porcelain::rebase::RebaseTodoCmd
-impl core::marker::Send for grit_lib::porcelain::rebase::RebaseTodoCmd
-impl core::marker::Sync for grit_lib::porcelain::rebase::RebaseTodoCmd
-impl core::marker::Unpin for grit_lib::porcelain::rebase::RebaseTodoCmd
-impl core::marker::UnsafeUnpin for grit_lib::porcelain::rebase::RebaseTodoCmd
-impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::rebase::RebaseTodoCmd
-impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::rebase::RebaseTodoCmd
-pub fn grit_lib::porcelain::rebase::append_commented(&mut alloc::string::String, &str)
-pub fn grit_lib::porcelain::rebase::append_nth_squash_message(&mut alloc::string::String, &str, grit_lib::porcelain::rebase::RebaseTodoCmd, bool, usize)
-pub fn grit_lib::porcelain::rebase::append_skipped_squash_message(&mut alloc::string::String, &str, usize)
-pub fn grit_lib::porcelain::rebase::commit_subject_single_line(&str) -> alloc::string::String
-pub fn grit_lib::porcelain::rebase::copy_section(&mut alloc::string::String, &str, bool)
-pub fn grit_lib::porcelain::rebase::first_line_len(&str) -> usize
-pub fn grit_lib::porcelain::rebase::fixup_replacement_message(&str) -> alloc::string::String
-pub fn grit_lib::porcelain::rebase::format_autosquash_subject_for_match(&str) -> alloc::string::String
-pub fn grit_lib::porcelain::rebase::message_body_after_subject(&str) -> &str
-pub fn grit_lib::porcelain::rebase::rebase_todo_command_for_display(grit_lib::porcelain::rebase::RebaseTodoCmd, &grit_lib::objects::CommitData) -> &'static str
-pub fn grit_lib::porcelain::rebase::rebase_todo_command_for_display_abbrev(grit_lib::porcelain::rebase::RebaseTodoCmd, &grit_lib::objects::CommitData, bool) -> alloc::string::String
-pub fn grit_lib::porcelain::rebase::skip_blank_lines(&str) -> &str
-pub fn grit_lib::porcelain::rebase::skip_fixupish_prefix(&str) -> core::option::Option<&str>
-pub fn grit_lib::porcelain::rebase::squash_comment_subject_prefix(&str, grit_lib::porcelain::rebase::RebaseTodoCmd, bool) -> usize
-pub fn grit_lib::porcelain::rebase::strip_fixupish_chain(&str) -> &str
-pub fn grit_lib::porcelain::rebase::update_squash_message_for_fixup(&mut alloc::string::String)
 pub mod grit_lib::porcelain::replay
 pub enum grit_lib::porcelain::replay::ReplayDirection
 pub grit_lib::porcelain::replay::ReplayDirection::Pick

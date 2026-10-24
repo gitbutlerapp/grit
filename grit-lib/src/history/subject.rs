@@ -17,7 +17,7 @@ fn load_commit(repo: &Repository, oid: ObjectId) -> Result<CommitData, HistoryEr
 
 /// First line of a commit message, without trailing newline on that line.
 ///
-/// Unlike [`crate::porcelain::rebase::commit_subject_single_line`], continuation lines are
+/// Unlike the squash-message subject matching in [`super::squash`], continuation lines are
 /// not folded into the result (history JSON `subject` is one line only).
 #[must_use]
 pub fn commit_message_subject_line(message: &str) -> String {
