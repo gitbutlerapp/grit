@@ -1184,6 +1184,9 @@ pub fn print_switch_outcome(w: &mut dyn Write, outcome: &SwitchOutcome) -> anyho
     } else {
         outln!(w, "- Switched to **`{}`**", outcome.branch);
     }
+    if !outcome.hooks_run.is_empty() {
+        outln!(w, "- Hooks: `{}`", outcome.hooks_run.join("`, `"));
+    }
     Ok(())
 }
 

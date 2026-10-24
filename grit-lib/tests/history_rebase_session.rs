@@ -56,6 +56,7 @@ fn start_opts(upstream: ObjectId, onto: Option<ObjectId>, tip: ObjectId) -> Star
             identity: IDENT.into(),
             reflog_message: "rebase".into(),
             record_operation: None,
+            hooks: grit_lib::PostOperationHooks::Run,
         },
     }
 }
@@ -618,6 +619,7 @@ fn stacked_branches_move_atomically_after_continue() {
             identity: IDENT.into(),
             reflog_message: "rebase".into(),
             record_operation: None,
+            hooks: grit_lib::PostOperationHooks::Run,
         },
     };
     let main_before = resolve_ref(grit.git_dir(), "refs/heads/main").unwrap();

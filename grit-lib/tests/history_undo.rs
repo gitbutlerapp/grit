@@ -37,6 +37,7 @@ fn apply_opts(operation: &str) -> ApplyOptions {
         identity: "Undo Tester <undo@grit.test>".into(),
         reflog_message: format!("history {operation}"),
         record_operation: Some(operation.into()),
+        hooks: grit_lib::PostOperationHooks::Run,
     }
 }
 
@@ -45,6 +46,7 @@ fn undo_opts() -> ApplyOptions {
         identity: "Undo Tester <undo@grit.test>".into(),
         reflog_message: "history undo".into(),
         record_operation: None,
+        hooks: grit_lib::PostOperationHooks::Run,
     }
 }
 

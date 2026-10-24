@@ -6,6 +6,9 @@ use std::path::Path;
 
 use serde::{Deserialize, Serialize};
 
+use crate::hooks::{
+    run_post_checkout, run_post_rewrite, HookName, PostOperationHooks, RewriteKind,
+};
 use crate::lockfile::{LockFile, LockWait};
 use crate::objects::ObjectId;
 use crate::operation::conflicts_from_tree_merge;
@@ -122,6 +125,7 @@ pub fn start_rebase(
             applied: AppliedRewrite {
                 ref_updates: Vec::new(),
                 head: orig_head,
+                hooks_run: Vec::new(),
             },
             plan: RewritePlan {
                 commits: Vec::new(),
@@ -147,6 +151,15 @@ pub fn start_rebase(
                 &opts.apply,
                 *partial,
             )?;
+            if let Some(detached_at) = opts
+                .apply
+                .hooks
+                .enabled()
+                .then(|| resolve_head_oid(repo).ok())
+                .flatten()
+            {
+                run_post_checkout(repo, Some(orig_head), detached_at, true);
+            }
             Ok(RebaseOutcome::Stopped(stop))
         }
     }
@@ -229,6 +242,7 @@ pub fn skip_rebase(
         new: None,
         change_id: None,
         subject: None,
+        reused: false,
     });
 
     let rewrite = replan_rewrite_options(&state);
@@ -282,6 +296,8 @@ struct PersistedRebaseState {
 struct PersistedRewrittenRow {
     old: String,
     new: Option<String>,
+    #[serde(default)]
+    reused: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -433,6 +449,7 @@ fn state_from_partial(
             .map(|r| PersistedRewrittenRow {
                 old: oid_hex(&r.old),
                 new: r.new.as_ref().map(oid_hex),
+                reused: r.reused,
             })
             .collect(),
         edits: edits_to_persist(&partial.edits),
@@ -490,6 +507,7 @@ fn load_persisted_state(git_dir: &Path) -> Result<LoadedState, RebaseSessionErro
                     new: r.new.as_deref().map(parse_oid).transpose()?,
                     change_id: None,
                     subject: None,
+                    reused: r.reused,
                 })
             })
             .collect::<Result<_, RebaseSessionError>>()?,
@@ -619,13 +637,22 @@ fn advance_after_plan(
                     });
                 }
             }
-            let mut applied = apply_rewrite(repo, &plan, apply)?;
+            let apply_without_hooks = ApplyOptions {
+                hooks: PostOperationHooks::Skip,
+                ..apply.clone()
+            };
+            let mut applied = apply_rewrite(repo, &plan, &apply_without_hooks)?;
             refs::write_symbolic_ref_on_store(repo.refs(), repo.git_dir(), "HEAD", &prev.head_ref)
                 .map_err(map_lib)?;
             let branch_tip = repo.resolve_ref_oid(&prev.head_ref).map_err(map_lib)?;
             reset_index_worktree_to_head(repo, branch_tip)?;
             applied.head = branch_tip;
             clear_rebase_state(repo.git_dir())?;
+            if apply.hooks.enabled()
+                && run_post_rewrite(repo, RewriteKind::Rebase, &plan.rewritten_pairs())
+            {
+                applied.hooks_run.push(HookName::PostRewrite);
+            }
             Ok(RebaseOutcome::Done { applied, plan })
         }
         ResumablePlanOutcome::Partial(partial) => {

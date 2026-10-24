@@ -114,6 +114,10 @@ pub struct RewrittenCommit {
     pub change_id: Option<ChangeId>,
     /// First line of the replacement commit message, or the original when dropped.
     pub subject: Option<String>,
+    /// `true` when [`Self::new`] is a commit that already existed (a patch already applied
+    /// upstream, or a fast-forward onto the new base) rather than a replacement the rewrite
+    /// wrote. Such rows are not reported to `post-rewrite`.
+    pub reused: bool,
 }
 
 /// Planned movement of one ref (refs, index, and worktree are not updated by [`super::plan_rewrite`](crate::history::plan_rewrite)).
@@ -154,6 +158,19 @@ pub struct RewritePlan {
 }
 
 impl RewritePlan {
+    /// `(old, new)` for every commit the rewrite replaced, in rewrite order.
+    ///
+    /// Dropped commits, [reused](RewrittenCommit::reused) commits and commits whose replacement
+    /// is the original object are left out; this is the list `post-rewrite` receives on stdin.
+    #[must_use]
+    pub fn rewritten_pairs(&self) -> Vec<(ObjectId, ObjectId)> {
+        self.commits
+            .iter()
+            .filter(|c| !c.reused)
+            .filter_map(|c| c.new.filter(|new| *new != c.old).map(|new| (c.old, new)))
+            .collect()
+    }
+
     /// Subject line for each row in [`Self::commits`], in the same order.
     ///
     /// # Errors
@@ -227,6 +244,10 @@ pub struct ApplyOptions {
     pub reflog_message: String,
     /// When set, persist ref movements to `.git/grit/history-last` after a successful apply.
     pub record_operation: Option<String>,
+    /// Whether to run `post-checkout` (when `HEAD`'s tree changes) and `post-rewrite rebase`
+    /// after the rewrite is applied.
+    #[serde(default)]
+    pub hooks: crate::hooks::PostOperationHooks,
 }
 
 /// Result of [`super::undo::undo_last_rewrite`](crate::history::undo::undo_last_rewrite).
@@ -249,6 +270,9 @@ pub struct AppliedRewrite {
     pub ref_updates: Vec<PlannedRefUpdate>,
     /// Commit OID `HEAD` resolves to after apply.
     pub head: ObjectId,
+    /// Post-operation hooks that ran ([`crate::hooks::HookName::PostCheckout`],
+    /// [`crate::hooks::HookName::PostRewrite`]).
+    pub hooks_run: Vec<crate::hooks::HookName>,
 }
 
 #[cfg(test)]
@@ -275,6 +299,7 @@ mod tests {
                     new: new.map(oid),
                     change_id: None,
                     subject: None,
+                    reused: false,
                 })
                 .collect(),
             ref_updates: ref_updates

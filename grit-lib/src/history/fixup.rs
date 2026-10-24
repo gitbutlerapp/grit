@@ -676,6 +676,7 @@ mod hunk_selection_restore_tests {
             identity: "Fixup <f@grit.test>".into(),
             reflog_message: "history fixup".into(),
             record_operation: None,
+            hooks: crate::hooks::PostOperationHooks::Run,
         };
         apply_fixup_rewrite(&grit, &plan, &apply_opts, &paths).expect("apply rewrite");
         set_test_inject_index_write_fail_remaining(1);

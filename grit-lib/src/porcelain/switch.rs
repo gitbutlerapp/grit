@@ -6,6 +6,7 @@ use crate::branch_tracking::write_branch_upstream_config;
 use crate::check_ref_format::validate_branch_short_name;
 use crate::diff::{DiffEntry, DiffStatus};
 use crate::error::{Error, OverwriteReason, Result};
+use crate::hooks::{run_post_checkout, HookName, PostOperationHooks};
 use crate::index::MODE_GITLINK;
 use crate::objects::{parse_commit, ObjectId};
 use crate::porcelain::branch::resolve_create_tracking;
@@ -69,6 +70,8 @@ pub struct SwitchOptions {
     /// When true, run overwrite checks and report [`SwitchOutcome::changed_paths`] without
     /// updating refs, the index, or the worktree.
     pub dry_run: bool,
+    /// Whether to run `post-checkout` after a real switch.
+    pub hooks: PostOperationHooks,
 }
 
 /// Result of [`switch_repository`].
@@ -86,6 +89,8 @@ pub struct SwitchOutcome {
     pub dry_run: bool,
     /// Paths that would differ after checkout; meaningful when [`Self::dry_run`] is true.
     pub changed_paths: usize,
+    /// Hooks that ran after the switch ([`HookName::PostCheckout`] when installed).
+    pub hooks_run: Vec<HookName>,
 }
 
 pub(crate) struct PreparedSwitch {
@@ -242,7 +247,32 @@ pub fn resolve_revision_spec(repo: &Repository, spec: &str) -> Result<ObjectId> 
 }
 
 /// Perform a branch switch or detached checkout.
+///
+/// After a real switch (including switching to the branch or commit `HEAD` already names, as
+/// Git does), runs `post-checkout <old> <new> 1` unless [`SwitchOptions::hooks`] is
+/// [`PostOperationHooks::Skip`]. The hook's outcome never fails the switch.
+///
+/// # Errors
+///
+/// Returns resolution, overwrite-guard, checkout and ref-update failures; on error the hook does
+/// not run.
 pub fn switch_repository(repo: &Repository, opts: &SwitchOptions) -> Result<SwitchOutcome> {
+    let run_hooks = opts.hooks.enabled() && !opts.dry_run;
+    let old_head = if run_hooks {
+        resolve_head_for_repository(repo)
+            .ok()
+            .and_then(|head| head.oid().copied())
+    } else {
+        None
+    };
+    let mut outcome = switch_without_hooks(repo, opts)?;
+    if run_hooks && run_post_checkout(repo, old_head, outcome.commit, true) {
+        outcome.hooks_run.push(HookName::PostCheckout);
+    }
+    Ok(outcome)
+}
+
+fn switch_without_hooks(repo: &Repository, opts: &SwitchOptions) -> Result<SwitchOutcome> {
     let (
         target_oid,
         branch_ref,
@@ -310,6 +340,7 @@ pub fn switch_repository(repo: &Repository, opts: &SwitchOptions) -> Result<Swit
                 commit: target_oid,
                 dry_run: true,
                 changed_paths: 0,
+                hooks_run: Vec::new(),
             });
         }
         let head_before = resolve_head_for_repository(repo)?;
@@ -327,6 +358,7 @@ pub fn switch_repository(repo: &Repository, opts: &SwitchOptions) -> Result<Swit
             commit: target_oid,
             dry_run: false,
             changed_paths: 0,
+            hooks_run: Vec::new(),
         });
     }
     if detached && is_already_detached_at(repo, target_oid)? {
@@ -337,6 +369,7 @@ pub fn switch_repository(repo: &Repository, opts: &SwitchOptions) -> Result<Swit
             commit: target_oid,
             dry_run: opts.dry_run,
             changed_paths: 0,
+            hooks_run: Vec::new(),
         });
     }
 
@@ -403,6 +436,7 @@ fn switch_to_target(
             commit: target_oid,
             dry_run: true,
             changed_paths,
+            hooks_run: Vec::new(),
         });
     }
     checkout_prepared_tree_transition(repo, prepared)?;
@@ -446,6 +480,7 @@ fn switch_to_target(
         commit: target_oid,
         dry_run: false,
         changed_paths: 0,
+        hooks_run: Vec::new(),
     })
 }
 
@@ -1182,6 +1217,7 @@ mod tests {
                     oid: target_tip,
                 },
                 dry_run: false,
+                hooks: crate::hooks::PostOperationHooks::Run,
             },
         )
         .expect_err("must refuse overwrite");
@@ -1322,6 +1358,7 @@ mod tests {
                     reflog_to_label: "HEAD~1".into(),
                 },
                 dry_run: false,
+                hooks: crate::hooks::PostOperationHooks::Run,
             },
         )
         .expect_err("local changes should block switch");
@@ -1360,6 +1397,7 @@ mod tests {
                     oid: refs::resolve_ref(repo.git_dir(), "refs/heads/other").expect("oid"),
                 },
                 dry_run: false,
+                hooks: crate::hooks::PostOperationHooks::Run,
             },
         )
         .expect("switch");
@@ -1399,6 +1437,7 @@ mod tests {
                     track_upstream: None,
                 },
                 dry_run: false,
+                hooks: crate::hooks::PostOperationHooks::Run,
             },
         )
         .expect_err("conflict");
@@ -1439,6 +1478,7 @@ mod tests {
             &SwitchOptions {
                 mode,
                 dry_run: false,
+                hooks: crate::hooks::PostOperationHooks::Run,
             },
         )
         .expect("switch");
@@ -1496,6 +1536,7 @@ mod tests {
                     reflog_to_label: "v1".into(),
                 },
                 dry_run: false,
+                hooks: crate::hooks::PostOperationHooks::Run,
             },
         )
         .expect("detach at annotated tag");

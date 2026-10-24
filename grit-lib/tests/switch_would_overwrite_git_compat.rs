@@ -62,6 +62,7 @@ fn switch_local_changes_refusal_paths_match_git() {
                 oid: other_oid,
             },
             dry_run: false,
+            hooks: grit_lib::PostOperationHooks::Run,
         },
     )
     .expect_err("switch");
@@ -95,6 +96,7 @@ fn switch_untracked_refusal_paths_match_git() {
                 oid: other_oid,
             },
             dry_run: false,
+            hooks: grit_lib::PostOperationHooks::Run,
         },
     )
     .expect_err("switch");
@@ -134,6 +136,7 @@ fn switch_dry_run_leaves_repo_unchanged_and_reports_path_count() {
                 oid: other_oid,
             },
             dry_run: true,
+            hooks: grit_lib::PostOperationHooks::Run,
         },
     )
     .expect("dry-run switch");
@@ -158,6 +161,7 @@ fn switch_dry_run_leaves_repo_unchanged_and_reports_path_count() {
                 oid: other_oid,
             },
             dry_run: false,
+            hooks: grit_lib::PostOperationHooks::Run,
         },
     )
     .expect("real switch");

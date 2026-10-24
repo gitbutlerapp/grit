@@ -435,6 +435,7 @@ fn hostile_paths_rejected_on_clone_switch_reset_restore() {
             &SwitchOptions {
                 mode,
                 dry_run: false,
+                hooks: grit_lib::PostOperationHooks::Run,
             },
         )
         .unwrap_err();

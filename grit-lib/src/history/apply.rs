@@ -6,6 +6,7 @@ use std::path::Path;
 
 use crate::config::ConfigSet;
 use crate::diff::{diff_trees, mode_from_metadata};
+use crate::hooks::{run_post_checkout, run_post_rewrite, HookName, RewriteKind};
 use crate::index::MODE_REGULAR;
 use crate::objects::ObjectId;
 use crate::objects::{parse_tree, ObjectKind};
@@ -64,10 +65,36 @@ fn complete_applied_rewrite(
         }
         return Err(record_err);
     }
+    let hooks_run = if opts.hooks.enabled() {
+        run_rewrite_hooks(repo, plan)
+    } else {
+        Vec::new()
+    };
     Ok(AppliedRewrite {
         ref_updates: plan.ref_updates.clone(),
         head,
+        hooks_run,
     })
+}
+
+/// Run the hooks Git runs around a rebase once `plan` is applied: `post-checkout <old> <new> 1`
+/// when `HEAD`'s tree changed in a work tree, then `post-rewrite rebase` with
+/// [`RewritePlan::rewritten_pairs`]. Returns the hooks that ran.
+pub(crate) fn run_rewrite_hooks(repo: &Repository, plan: &RewritePlan) -> Vec<HookName> {
+    let mut hooks_run = Vec::new();
+    let tree_changed = head_tree_changes(&plan.head.old_tree, &plan.head.new_tree);
+    if let Some((old, new)) = plan
+        .head_change()
+        .filter(|_| tree_changed && !repo.is_bare())
+    {
+        if run_post_checkout(repo, Some(old), new, true) {
+            hooks_run.push(HookName::PostCheckout);
+        }
+    }
+    if run_post_rewrite(repo, RewriteKind::Rebase, &plan.rewritten_pairs()) {
+        hooks_run.push(HookName::PostRewrite);
+    }
+    hooks_run
 }
 
 fn split_blob_lines(data: &[u8]) -> Vec<Vec<u8>> {
@@ -1723,6 +1750,7 @@ mod inject_and_apply_tests {
                 identity: "T <t@t>".into(),
                 reflog_message: "rewrite".into(),
                 record_operation: None,
+                hooks: crate::hooks::PostOperationHooks::Run,
             },
         )
         .expect_err("inject");
@@ -1852,6 +1880,7 @@ mod inject_and_apply_tests {
                 identity: "T <t@t>".into(),
                 reflog_message: "rewrite".into(),
                 record_operation: None,
+                hooks: crate::hooks::PostOperationHooks::Run,
             },
         )
         .expect_err("inject checkout failure");
@@ -2120,6 +2149,7 @@ mod inject_and_apply_tests {
                 identity: "T <t@t>".into(),
                 reflog_message: "fixup".into(),
                 record_operation: None,
+                hooks: crate::hooks::PostOperationHooks::Run,
             },
             &staged_paths,
         )
@@ -2371,6 +2401,7 @@ mod inject_and_apply_tests {
                 identity: "T <t@t>".into(),
                 reflog_message: "rewrite".into(),
                 record_operation: None,
+                hooks: crate::hooks::PostOperationHooks::Run,
             },
         )
         .expect_err("inject checkout failure");
@@ -2508,6 +2539,7 @@ mod inject_and_apply_tests {
                 identity: "T <t@t>".into(),
                 reflog_message: "rewrite".into(),
                 record_operation: None,
+                hooks: crate::hooks::PostOperationHooks::Run,
             },
         )
         .expect_err("inject checkout failure");
@@ -2631,6 +2663,7 @@ mod inject_and_apply_tests {
                 identity: "T <t@t>".into(),
                 reflog_message: "rewrite".into(),
                 record_operation: None,
+                hooks: crate::hooks::PostOperationHooks::Run,
             },
         )
         .expect_err("inject checkout failure");
@@ -2865,6 +2898,7 @@ mod inject_and_apply_tests {
                 identity: "T <t@t>".into(),
                 reflog_message: "rewrite".into(),
                 record_operation: None,
+                hooks: crate::hooks::PostOperationHooks::Run,
             },
         )
         .expect_err("inject checkout failure");
@@ -3003,6 +3037,7 @@ mod inject_and_apply_tests {
                 identity: "T <t@t>".into(),
                 reflog_message: "rewrite".into(),
                 record_operation: None,
+                hooks: crate::hooks::PostOperationHooks::Run,
             },
         )
         .expect_err("checkout must fail");

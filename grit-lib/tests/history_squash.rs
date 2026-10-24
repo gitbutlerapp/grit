@@ -49,6 +49,7 @@ fn apply_plan(repo: &Repository, plan: &RewritePlan) {
             identity: "Squasher <s@grit.test>".into(),
             reflog_message: "history squash".into(),
             record_operation: None,
+            hooks: grit_lib::PostOperationHooks::Run,
         },
     )
     .expect("apply");

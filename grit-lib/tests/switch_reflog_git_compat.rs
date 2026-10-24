@@ -173,6 +173,7 @@ fn run_repro_sequence(repo: &Repository) {
         &SwitchOptions {
             mode: resolve_create_branch(repo, "topic", None).unwrap(),
             dry_run: false,
+            hooks: grit_lib::PostOperationHooks::Run,
         },
     )
     .expect("switch -c topic");
@@ -186,6 +187,7 @@ fn run_repro_sequence(repo: &Repository) {
                 oid: main_oid,
             },
             dry_run: false,
+            hooks: grit_lib::PostOperationHooks::Run,
         },
     )
     .expect("switch main");
@@ -199,6 +201,7 @@ fn run_repro_sequence(repo: &Repository) {
                 reflog_to_label: "HEAD~1".into(),
             },
             dry_run: false,
+            hooks: grit_lib::PostOperationHooks::Run,
         },
     )
     .expect("detach");
@@ -211,6 +214,7 @@ fn run_repro_sequence(repo: &Repository) {
                 oid: main_oid,
             },
             dry_run: false,
+            hooks: grit_lib::PostOperationHooks::Run,
         },
     )
     .expect("switch main");
@@ -250,6 +254,7 @@ fn detach_at_annotated_tag_matches_git() {
                 reflog_to_label: "v1".into(),
             },
             dry_run: false,
+            hooks: grit_lib::PostOperationHooks::Run,
         },
     )
     .expect("grit switch --detach v1");
@@ -359,6 +364,7 @@ fn switch_minus_and_at_minus_one_return_previous_branch() {
         &SwitchOptions {
             mode: resolve_create_branch(&repo, "topic", None).unwrap(),
             dry_run: false,
+            hooks: grit_lib::PostOperationHooks::Run,
         },
     )
     .expect("topic");
@@ -371,6 +377,7 @@ fn switch_minus_and_at_minus_one_return_previous_branch() {
                 oid: main_oid,
             },
             dry_run: false,
+            hooks: grit_lib::PostOperationHooks::Run,
         },
     )
     .expect("main");
@@ -386,6 +393,7 @@ fn switch_minus_and_at_minus_one_return_previous_branch() {
         &SwitchOptions {
             mode: mode_minus,
             dry_run: false,
+            hooks: grit_lib::PostOperationHooks::Run,
         },
     )
     .expect("switch -");
@@ -398,6 +406,7 @@ fn switch_minus_and_at_minus_one_return_previous_branch() {
                 oid: main_oid,
             },
             dry_run: false,
+            hooks: grit_lib::PostOperationHooks::Run,
         },
     )
     .expect("main again");
@@ -438,6 +447,7 @@ fn checkout_appends_existing_head_reflog_when_log_all_ref_updates_false() {
         &SwitchOptions {
             mode: resolve_create_branch(&repo, "topic", None).expect("x"),
             dry_run: false,
+            hooks: grit_lib::PostOperationHooks::Run,
         },
     )
     .expect("switch -c topic");
@@ -470,6 +480,7 @@ fn same_branch_switch_appends_head_checkout_reflog() {
                 oid: main_oid,
             },
             dry_run: false,
+            hooks: grit_lib::PostOperationHooks::Run,
         },
     )
     .expect("same-branch switch");
@@ -507,6 +518,7 @@ fn remote_dwim_create_uses_remote_ref_in_branch_reflog() {
         &SwitchOptions {
             mode,
             dry_run: false,
+            hooks: grit_lib::PostOperationHooks::Run,
         },
     )
     .expect("switch");
@@ -571,6 +583,7 @@ fn unborn_symbolic_head_switch_writes_zero_to_tip_checkout_reflog() {
                 oid: tip,
             },
             dry_run: false,
+            hooks: grit_lib::PostOperationHooks::Run,
         },
     )
     .expect("switch to feature");

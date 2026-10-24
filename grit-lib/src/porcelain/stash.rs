@@ -1683,6 +1683,7 @@ pub fn stash_branch(
                 track_upstream: None,
             },
             dry_run: false,
+            hooks: crate::hooks::PostOperationHooks::Run,
         },
     )?;
 

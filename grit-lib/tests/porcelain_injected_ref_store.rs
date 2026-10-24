@@ -90,6 +90,7 @@ fn switch_to(repo: &Repository, branch: &str) {
                 oid,
             },
             dry_run: false,
+            hooks: grit_lib::PostOperationHooks::Run,
         },
     )
     .expect("switch");
@@ -245,6 +246,7 @@ fn battery(repo: &Repository, wt: &Path) -> BatteryResult {
                 reflog_to_label: "HEAD~1".into(),
             },
             dry_run: false,
+            hooks: grit_lib::PostOperationHooks::Run,
         },
     )
     .expect("detach");
@@ -533,6 +535,7 @@ fn switch_to_existing_branch_installs_head_when_store_has_none() {
                 oid: tip,
             },
             dry_run: false,
+            hooks: grit_lib::PostOperationHooks::Run,
         },
     )
     .expect("switch");
@@ -557,6 +560,7 @@ fn detached_switch_installs_head_when_store_has_none() {
                 reflog_to_label: "main".into(),
             },
             dry_run: false,
+            hooks: grit_lib::PostOperationHooks::Run,
         },
     )
     .expect("detach");

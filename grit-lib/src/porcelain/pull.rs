@@ -737,6 +737,7 @@ fn rebase_fetched_upstream(
                 identity: checkout_reflog_identity(repo),
                 reflog_message: format!("pull: rebase onto {label}"),
                 record_operation: Some("rebase".into()),
+                hooks: crate::hooks::PostOperationHooks::Run,
             },
         )
         .map_err(map_history_error)?;

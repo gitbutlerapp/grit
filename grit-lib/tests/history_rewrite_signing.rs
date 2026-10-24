@@ -182,6 +182,7 @@ fn history_rewrite_resigns_when_gpgsign() {
             identity: "Rewriter <r@grit.test>".into(),
             reflog_message: "history reword".into(),
             record_operation: None,
+            hooks: grit_lib::PostOperationHooks::Run,
         },
     )
     .expect("apply");

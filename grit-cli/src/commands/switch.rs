@@ -5,6 +5,7 @@ use grit_lib::porcelain::switch::{
     resolve_create_branch, resolve_revision_spec, resolve_switch_target, switch_repository,
     SwitchMode, SwitchOptions,
 };
+use grit_lib::PostOperationHooks;
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::io::Write;
@@ -33,6 +34,8 @@ pub struct SwitchOutcome {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(skip_serializing_if = "Option::is_none")]
     pub changed_paths: Option<usize>,
+    /// Hooks that ran after the switch (`post-checkout` when installed).
+    pub hooks_run: Vec<String>,
 }
 
 impl HumanRender for SwitchOutcome {
@@ -60,15 +63,22 @@ impl HumanRender for SwitchOutcome {
                 .map(|c| &c[..7.min(c.len())])
                 .unwrap_or("HEAD");
             outln!(w, "HEAD detached at {short}");
-            return Ok(());
+            return render_hooks_run(w, &self.hooks_run);
         }
         if self.created {
             outln!(w, "Created and switched to branch {}", self.branch);
         } else {
             outln!(w, "Switched to branch {}", self.branch);
         }
-        Ok(())
+        render_hooks_run(w, &self.hooks_run)
     }
+}
+
+fn render_hooks_run(w: &mut dyn Write, hooks_run: &[String]) -> Result<()> {
+    if !hooks_run.is_empty() {
+        outln!(w, "hooks: {}", hooks_run.join(", "));
+    }
+    Ok(())
 }
 
 impl MarkdownRender for SwitchOutcome {
@@ -108,8 +118,15 @@ pub fn run(
         resolve_switch_target(&repo, &spec).map_err(anyhow::Error::new)?
     };
 
-    let outcome = switch_repository(&repo, &SwitchOptions { mode, dry_run })
-        .map_err(json_error::map_lib_error)?;
+    let outcome = switch_repository(
+        &repo,
+        &SwitchOptions {
+            mode,
+            dry_run,
+            hooks: PostOperationHooks::Run,
+        },
+    )
+    .map_err(json_error::map_lib_error)?;
 
     Ok(SwitchOutcome {
         branch: outcome.branch,
@@ -122,5 +139,10 @@ pub fn run(
         },
         dry_run: outcome.dry_run,
         changed_paths: outcome.dry_run.then_some(outcome.changed_paths),
+        hooks_run: outcome
+            .hooks_run
+            .iter()
+            .map(|h| h.as_str().to_owned())
+            .collect(),
     })
 }

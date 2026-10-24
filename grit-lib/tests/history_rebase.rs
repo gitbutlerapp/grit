@@ -113,6 +113,7 @@ fn apply_plan(repo: &Repository, plan: &grit_lib::revwalk::history::RewritePlan)
             identity: "Test <t@grit.test>".into(),
             reflog_message: "rebase onto".into(),
             record_operation: None,
+            hooks: grit_lib::PostOperationHooks::Run,
         },
     )
     .expect("apply");

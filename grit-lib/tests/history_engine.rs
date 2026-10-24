@@ -1161,6 +1161,7 @@ fn history_public_api_coverage_smoke() {
             new: None,
             change_id: None,
             subject: None,
+            reused: false,
         }],
         ref_updates: vec![PlannedRefUpdate {
             name: "refs/heads/x".into(),

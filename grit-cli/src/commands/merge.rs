@@ -576,6 +576,7 @@ fn build_merge_options(run: &MergeRunOptions) -> Result<MergeOptions> {
         favor,
         conflict_style,
         allow_unrelated: run.allow_unrelated_histories,
+        hooks: grit_lib::PostOperationHooks::Run,
     })
 }
 

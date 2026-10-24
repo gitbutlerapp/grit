@@ -24,6 +24,7 @@ use grit_lib::revwalk::history::{
 };
 use grit_lib::revwalk::rev_parse::resolve_revision_as_commit;
 use grit_lib::revwalk::rev_parse_error::RevParseError;
+use grit_lib::PostOperationHooks;
 use schemars::JsonSchema;
 use serde::Serialize;
 
@@ -619,6 +620,7 @@ impl Rewrite {
             identity: context::committer_reflog_identity(self.repo.environment(), &self.config)?,
             reflog_message,
             record_operation: Some(operation.into()),
+            hooks: PostOperationHooks::Run,
         })
     }
 
@@ -1323,6 +1325,7 @@ pub fn run_undo(shared: &HistoryRewriteArgs) -> Result<HistoryRewriteOutcome> {
         identity: context::committer_reflog_identity(rewrite.repo.environment(), &rewrite.config)?,
         reflog_message: "history undo".into(),
         record_operation: None,
+        hooks: PostOperationHooks::Skip,
     };
     let outcome = undo_last_rewrite(&rewrite.repo, &apply_opts, shared.dry_run).map_err(on_err)?;
     Ok(HistoryRewriteOutcome {

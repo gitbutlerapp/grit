@@ -58,6 +58,7 @@ fn switch_away_when_index_lists_hostile_path_not_in_target_tree() {
         &SwitchOptions {
             mode,
             dry_run: false,
+            hooks: grit_lib::PostOperationHooks::Run,
         },
     )
     .expect("switch despite hostile index path");

@@ -35,6 +35,7 @@ use crate::config::ConfigSet;
 use crate::diagnostics::Warning;
 use crate::diff::diff_trees;
 use crate::error::{Error, Result};
+use crate::hooks::{run_post_merge, PostOperationHooks};
 use crate::ident::parse_signature_times;
 use crate::ident_resolve::{
     resolve_identity_with, resolve_loose_committer_identity_with, IdentRole,
@@ -286,6 +287,8 @@ pub struct MergeOptions {
     pub conflict_style: Option<ConflictStyle>,
     /// When histories share no commits, use the empty tree as merge base (Git `--allow-unrelated-histories`).
     pub allow_unrelated: bool,
+    /// Whether to run `post-merge` after a fast-forward, merge commit or squash.
+    pub hooks: PostOperationHooks,
 }
 
 /// Resolve conflict marker style: explicit option, then `merge.conflictStyle`, then `merge`.
@@ -605,11 +608,42 @@ pub fn integrate_branch(
 
 /// Integrate `other_oid` into the branch at `into_ref` with explicit merge options.
 ///
+/// After a fast-forward or merge commit, runs `post-merge 0`; after a squash, `post-merge 1`
+/// (unless [`MergeOptions::hooks`] is [`PostOperationHooks::Skip`]). Like Git, the hook does not
+/// run when the branch is already up to date, when the merge stops on conflicts, or for
+/// [`MergeCommitMode::NoCommit`]. Its outcome never fails the merge.
+///
 /// # Errors
 ///
 /// Same as [`integrate_branch`], plus [`Error::NotFastForward`] when
 /// [`FastForwardPolicy::Only`] cannot fast-forward.
 pub fn integrate_branch_with(
+    repo: &Repository,
+    into_ref: &str,
+    into_oid: ObjectId,
+    other_oid: ObjectId,
+    label: &str,
+    options: &MergeOptions,
+) -> Result<IntegrateBranchOutcome> {
+    let outcome =
+        integrate_branch_without_hooks(repo, into_ref, into_oid, other_oid, label, options)?;
+    if options.hooks.enabled() {
+        match outcome {
+            IntegrateBranchOutcome::FastForward { .. } | IntegrateBranchOutcome::Merged { .. } => {
+                run_post_merge(repo, false);
+            }
+            IntegrateBranchOutcome::Squashed => {
+                run_post_merge(repo, true);
+            }
+            IntegrateBranchOutcome::UpToDate
+            | IntegrateBranchOutcome::Conflicts { .. }
+            | IntegrateBranchOutcome::Stopped => {}
+        }
+    }
+    Ok(outcome)
+}
+
+fn integrate_branch_without_hooks(
     repo: &Repository,
     into_ref: &str,
     into_oid: ObjectId,

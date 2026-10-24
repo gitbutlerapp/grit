@@ -58,6 +58,7 @@ fn grit_commit_on_detached_reftable_head_advances_head() {
                 reflog_to_label: "HEAD".to_owned(),
             },
             dry_run: false,
+            hooks: grit_lib::PostOperationHooks::Run,
         },
     )
     .expect("detach");
@@ -106,6 +107,7 @@ fn grit_amend_on_detached_reftable_head() {
                 reflog_to_label: "HEAD".to_owned(),
             },
             dry_run: false,
+            hooks: grit_lib::PostOperationHooks::Run,
         },
     )
     .expect("detach");

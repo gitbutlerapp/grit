@@ -342,7 +342,7 @@ pub(crate) mod worktree_ref;
 pub(crate) mod worktree_rules;
 mod worktree_rules_tests;
 mod worktree_scan;
-pub use crate::hooks::HookName;
+pub use crate::hooks::{HookName, PostOperationHooks};
 pub use worktree_scan::PARALLEL_STAT_MIN_ENTRIES;
 #[doc(hidden)]
 pub use worktree_scan::{reset_worktree_metadata_probe, worktree_metadata_probe_count};

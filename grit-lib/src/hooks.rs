@@ -626,7 +626,8 @@ impl HookSpawnContext<'_> {
     }
 }
 
-/// Well-known commit lifecycle hooks tracked in [`crate::porcelain::commit::CommitOutcome`].
+/// Well-known lifecycle hooks that porcelain operations run and report in their outcomes
+/// (for example [`crate::porcelain::commit::CommitOutcome::hooks_run`]).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HookName {
     /// `.git/hooks/pre-commit` or `hook.pre-commit.*`.
@@ -635,18 +636,185 @@ pub enum HookName {
     CommitMsg,
     /// `.git/hooks/post-commit` or `hook.post-commit.*`.
     PostCommit,
+    /// `.git/hooks/post-checkout`, run after `HEAD` moves to another commit or branch.
+    PostCheckout,
+    /// `.git/hooks/post-merge`, run after a merge or fast-forward updates the work tree.
+    PostMerge,
+    /// `.git/hooks/post-rewrite`, run after amend or a history rewrite replaces commits.
+    PostRewrite,
 }
 
 impl HookName {
-    /// Git hook basename (`pre-commit`, `commit-msg`, `post-commit`).
+    /// Git hook basename (`pre-commit`, `commit-msg`, `post-commit`, `post-checkout`, …).
     #[must_use]
     pub const fn as_str(self) -> &'static str {
         match self {
             Self::PreCommit => "pre-commit",
             Self::CommitMsg => "commit-msg",
             Self::PostCommit => "post-commit",
+            Self::PostCheckout => "post-checkout",
+            Self::PostMerge => "post-merge",
+            Self::PostRewrite => "post-rewrite",
         }
     }
+}
+
+/// Whether an operation runs the hooks Git runs once it has completed (`post-checkout`,
+/// `post-merge`, `post-rewrite`).
+///
+/// These hooks are advisory: their exit status never changes the operation's result. Callers
+/// that compose several operations (or an embedder that does not want user scripts to run)
+/// pass [`PostOperationHooks::Skip`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Serialize, serde::Deserialize)]
+pub enum PostOperationHooks {
+    /// Run the installed post-operation hooks (default, matching Git).
+    #[default]
+    Run,
+    /// Do not run post-operation hooks.
+    Skip,
+}
+
+impl PostOperationHooks {
+    /// Whether hooks should run.
+    #[must_use]
+    pub const fn enabled(self) -> bool {
+        matches!(self, Self::Run)
+    }
+}
+
+/// What kind of rewrite a `post-rewrite` hook is told about (its first argument).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RewriteKind {
+    /// `commit --amend` replaced the tip commit.
+    Amend,
+    /// A rebase or history edit replayed commits.
+    Rebase,
+}
+
+impl RewriteKind {
+    /// Hook argument (`amend` or `rebase`).
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Amend => "amend",
+            Self::Rebase => "rebase",
+        }
+    }
+}
+
+/// Run an advisory hook whose outcome never fails the surrounding operation.
+///
+/// Returns whether a hook ran (a non-zero exit still counts as having run). A hook that cannot
+/// be started, or invalid `hook.*` configuration, is reported as [`Warning::HookNotRun`] on the
+/// repository's diagnostics sink and returns `false`.
+///
+/// [`Warning::HookNotRun`]: crate::diagnostics::Warning::HookNotRun
+pub(crate) fn run_advisory_hook(
+    repo: &Repository,
+    hook: HookName,
+    args: &[&str],
+    stdin_data: Option<&[u8]>,
+    commit_env: Option<&CommitHookEnv<'_>>,
+) -> bool {
+    let result = match commit_env {
+        Some(env) => run_commit_hook(repo, hook.as_str(), args, stdin_data, env),
+        None => run_hook(repo, hook.as_str(), args, stdin_data),
+    };
+    match result {
+        Ok(HookResult::Success | HookResult::Failed(_)) => true,
+        Ok(HookResult::NotFound) => false,
+        Err(err) => {
+            let mut detail = err.to_string();
+            let mut cause = std::error::Error::source(&err);
+            while let Some(c) = cause {
+                detail.push_str(": ");
+                detail.push_str(&c.to_string());
+                cause = c.source();
+            }
+            repo.warn(crate::diagnostics::Warning::HookNotRun {
+                hook_name: hook.as_str().to_owned(),
+                detail,
+            });
+            false
+        }
+    }
+}
+
+/// Run `post-checkout <old> <new> <flag>` after `HEAD` moved.
+///
+/// `old` is the commit `HEAD` pointed at before (`None` for an unborn branch, passed as the null
+/// object id). `branch_checkout` is `true` when `HEAD` itself moved to another branch or commit
+/// (switch, rebase) and `false` when only paths were checked out.
+///
+/// Returns whether a hook ran; failures are reported as in [`run_advisory_hook`] and never
+/// returned as errors.
+pub fn run_post_checkout(
+    repo: &Repository,
+    old: Option<ObjectId>,
+    new: ObjectId,
+    branch_checkout: bool,
+) -> bool {
+    let old_hex = old
+        .unwrap_or_else(|| ObjectId::null(repo.odb().hash_algo()))
+        .to_hex();
+    let new_hex = new.to_hex();
+    let flag = if branch_checkout { "1" } else { "0" };
+    run_advisory_hook(
+        repo,
+        HookName::PostCheckout,
+        &[old_hex.as_str(), new_hex.as_str(), flag],
+        None,
+        None,
+    )
+}
+
+/// Run `post-merge <flag>` after a merge or fast-forward updated the work tree; the flag is
+/// `1` for a squash merge and `0` otherwise.
+///
+/// Returns whether a hook ran; failures never become errors (see [`run_advisory_hook`]).
+pub fn run_post_merge(repo: &Repository, squash: bool) -> bool {
+    run_advisory_hook(
+        repo,
+        HookName::PostMerge,
+        &[if squash { "1" } else { "0" }],
+        None,
+        None,
+    )
+}
+
+/// Bytes fed to `post-rewrite` on stdin: one `<old> <new>` line per rewritten commit.
+#[must_use]
+pub fn post_rewrite_stdin(pairs: &[(ObjectId, ObjectId)]) -> Vec<u8> {
+    let mut out = Vec::with_capacity(pairs.len() * 82);
+    for (old, new) in pairs {
+        out.extend_from_slice(old.to_hex().as_bytes());
+        out.push(b' ');
+        out.extend_from_slice(new.to_hex().as_bytes());
+        out.push(b'\n');
+    }
+    out
+}
+
+/// Run `post-rewrite <amend|rebase>` with `pairs` (`old new`, oldest first) on stdin.
+///
+/// Nothing runs when `pairs` is empty. Returns whether a hook ran; failures never become errors
+/// (see [`run_advisory_hook`]).
+pub fn run_post_rewrite(
+    repo: &Repository,
+    kind: RewriteKind,
+    pairs: &[(ObjectId, ObjectId)],
+) -> bool {
+    if pairs.is_empty() {
+        return false;
+    }
+    let stdin = post_rewrite_stdin(pairs);
+    run_advisory_hook(
+        repo,
+        HookName::PostRewrite,
+        &[kind.as_str()],
+        Some(&stdin),
+        None,
+    )
 }
 
 /// Result of running a hook.

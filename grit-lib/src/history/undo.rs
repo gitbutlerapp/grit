@@ -1,5 +1,6 @@
 //! Undo the last history rewrite from a recorded ref plan.
 
+use crate::hooks::PostOperationHooks;
 use crate::refs::resolve_ref;
 use crate::repo::Repository;
 use crate::state::{resolve_head, HeadState};
@@ -14,7 +15,8 @@ use super::types::{ApplyOptions, UndoOutcome};
 /// Builds the inverse ref plan from [`.git/grit/history-last`](super::last::read_history_last),
 /// verifies each ref is still at its recorded `new` OID ([`HistoryError::UndoStale`]), then applies
 /// ref updates and the matching worktree transition. On success, writes the inverse as the new
-/// record so a second call redoes the original rewrite.
+/// record so a second call redoes the original rewrite. Like `reset`, undo runs no
+/// post-operation hooks, whatever [`ApplyOptions::hooks`] says.
 ///
 /// # Errors
 ///
@@ -47,6 +49,7 @@ pub fn undo_last_rewrite(
     let mut apply_opts = opts.clone();
     apply_opts.record_operation = Some("undo".into());
     apply_opts.reflog_message = "history undo".into();
+    apply_opts.hooks = PostOperationHooks::Skip;
     let applied = apply_rewrite(repo, &plan, &apply_opts)?;
     Ok(UndoOutcome {
         ref_updates: applied.ref_updates,

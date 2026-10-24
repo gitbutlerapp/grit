@@ -256,6 +256,7 @@ fn plan_rebase_fast_forward(
             new: Some(onto),
             change_id: None,
             subject: None,
+            reused: true,
         }],
         ref_updates,
         head,

@@ -13,7 +13,6 @@ use crate::commit::trailers::interpret::{
 };
 use crate::commit_trailers::{append_signoff_trailer_with_dedup, format_signoff_line};
 use crate::config::ConfigSet;
-use crate::diagnostics::Warning;
 use crate::diff::refresh_index_stat_content_verified_with_rules;
 use crate::diff::{
     diff_tree_path_change_count, diff_trees_with_renames, flatten_tree_entries,
@@ -21,7 +20,10 @@ use crate::diff::{
 };
 use crate::error::ApplyError;
 use crate::error::{Error, Result};
-use crate::hooks::{run_commit_hook, CommitHookEnv, HookError, HookName, HookResult};
+use crate::hooks::{
+    run_advisory_hook, run_commit_hook, run_post_rewrite, CommitHookEnv, HookError, HookName,
+    HookResult, RewriteKind,
+};
 use crate::ident::{
     fsck_commit_idents, parse_signature_times, prepare_commit_author_from_parent,
     prepare_commit_identity_line,
@@ -548,31 +550,6 @@ fn run_commit_hook_recorded(
             hook_name: hook.as_str().to_owned(),
             status,
         }),
-    }
-}
-
-/// Run `post-commit` after the commit is written; returns whether a hook ran.
-///
-/// Its outcome never fails the commit (Git ignores it too): a non-zero exit is dropped and a
-/// hook that cannot be run is reported as [`Warning::HookNotRun`].
-fn run_post_commit_hook_recorded(repo: &Repository, commit_env: &CommitHookEnv<'_>) -> bool {
-    match run_commit_hook(repo, HookName::PostCommit.as_str(), &[], None, commit_env) {
-        Ok(HookResult::Success | HookResult::Failed(_)) => true,
-        Ok(HookResult::NotFound) => false,
-        Err(err) => {
-            let mut detail = err.to_string();
-            let mut cause = std::error::Error::source(&err);
-            while let Some(c) = cause {
-                detail.push_str(": ");
-                detail.push_str(&c.to_string());
-                cause = c.source();
-            }
-            repo.warn(Warning::HookNotRun {
-                hook_name: HookName::PostCommit.as_str().to_owned(),
-                detail,
-            });
-            false
-        }
     }
 }
 
@@ -1387,8 +1364,19 @@ fn create_commit_with_index(
         git_prefix: None,
         extra_env: &[],
     };
-    if run_post_commit_hook_recorded(repo, &post_commit_env) {
+    if run_advisory_hook(
+        repo,
+        HookName::PostCommit,
+        &[],
+        None,
+        Some(&post_commit_env),
+    ) {
         hooks_run.push(HookName::PostCommit);
+    }
+    if let Some(old_tip) = replaced_tip {
+        if run_post_rewrite(repo, RewriteKind::Amend, &[(old_tip, oid)]) {
+            hooks_run.push(HookName::PostRewrite);
+        }
     }
 
     let stored_change_id = change_id(&commit_data);
