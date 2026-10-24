@@ -210,15 +210,16 @@ fn serve_v0(
     }
     output.flush()?;
     let sideband = request.caps.contains("side-band-64k");
-    let pack = build_response_pack_from_v0(
+    send_response_pack_from_v0(
         repo,
+        &config,
         &refs,
         &request,
         &common,
-        request.filter.as_ref(),
         shallow_resp.as_ref(),
-    )?;
-    write_pack(output, &pack, sideband)
+        output,
+        sideband,
+    )
 }
 
 /// Write the v0 ref advertisement: `HEAD` and every ref, capabilities on the
@@ -399,14 +400,17 @@ fn write_v0_shallow_lines(output: &mut dyn Write, sh: &ShallowResponse) -> Resul
     Ok(())
 }
 
-fn build_response_pack_from_v0(
+#[allow(clippy::too_many_arguments)]
+fn send_response_pack_from_v0(
     repo: &Repository,
+    config: &ConfigSet,
     refs: &[AdvertisedRef],
     request: &V0Request,
     common: &[ObjectId],
-    filter: Option<&ObjectFilter>,
     shallow: Option<&ShallowResponse>,
-) -> Result<Vec<u8>> {
+    output: &mut dyn Write,
+    sideband: bool,
+) -> Result<()> {
     let mut pack_wants = request.wants.clone();
     if let Some(sh) = shallow {
         pack_wants.extend(sh.extra_wants.iter().copied());
@@ -429,16 +433,21 @@ fn build_response_pack_from_v0(
         .map(|s| s.pack_shallow_grafts.clone())
         .unwrap_or_default();
 
-    build_response_pack(ResponsePackInput {
-        repo,
-        refs,
-        wants: &pack_wants,
-        common: &pack_common,
-        caps: &request.caps,
-        filter,
-        have_shallow: &have_shallow,
-        source_shallow: &source_shallow,
-    })
+    send_response_pack(
+        ResponsePackInput {
+            repo,
+            config,
+            refs,
+            wants: &pack_wants,
+            common: &pack_common,
+            caps: &request.caps,
+            filter: request.filter.as_ref(),
+            have_shallow: &have_shallow,
+            source_shallow: &source_shallow,
+        },
+        output,
+        sideband,
+    )
 }
 
 fn serve_v2(
@@ -718,20 +727,24 @@ fn fetch_v2(
     pack_wants.dedup();
 
     let have_shallow: HashSet<ObjectId> = client_shallow.iter().copied().collect();
-    let pack = build_response_pack(ResponsePackInput {
-        repo,
-        refs: &refs,
-        wants: &pack_wants,
-        common: &common,
-        caps: &caps,
-        filter: filter.as_ref(),
-        have_shallow: &have_shallow,
-        source_shallow: &shallow_resp.pack_shallow_grafts,
-    })?;
     write_v2_fetch_line(output, "packfile", sideband_all)?;
     // Protocol v2 always side-band-64k frames the packfile section payload (band 1),
     // even when `sideband-all` was not negotiated.
-    write_pack(output, &pack, true)
+    send_response_pack(
+        ResponsePackInput {
+            repo,
+            config: &config,
+            refs: &refs,
+            wants: &pack_wants,
+            common: &common,
+            caps: &caps,
+            filter: filter.as_ref(),
+            have_shallow: &have_shallow,
+            source_shallow: &shallow_resp.pack_shallow_grafts,
+        },
+        output,
+        true,
+    )
 }
 
 fn write_v2_section_delim(output: &mut dyn Write) -> Result<()> {
@@ -752,9 +765,10 @@ fn write_v2_fetch_line(output: &mut dyn Write, line: &str, sideband_all: bool) -
     }
 }
 
-/// Inputs for [`build_response_pack`].
+/// Inputs for [`send_response_pack`].
 struct ResponsePackInput<'a> {
     repo: &'a Repository,
+    config: &'a ConfigSet,
     refs: &'a [AdvertisedRef],
     wants: &'a [ObjectId],
     common: &'a [ObjectId],
@@ -764,9 +778,33 @@ struct ResponsePackInput<'a> {
     source_shallow: &'a HashSet<ObjectId>,
 }
 
-/// Build the pack answering a fetch, adding annotated tags when `include-tag`
-/// was negotiated.
-fn build_response_pack(input: ResponsePackInput<'_>) -> Result<Vec<u8>> {
+/// Stream the pack answering a fetch to `output`, adding annotated tags when
+/// `include-tag` was negotiated.
+///
+/// With `sideband`, pack bytes are framed on side-band channel 1 as they are
+/// produced and a flush ends the section; a failure after the pack started is
+/// reported to the client on channel 3 before the error is returned.
+fn send_response_pack(
+    input: ResponsePackInput<'_>,
+    output: &mut dyn Write,
+    sideband: bool,
+) -> Result<()> {
+    if !sideband {
+        return write_response_pack(&input, output);
+    }
+    let mut framed = crate::pkt_line::SidebandChannel1Writer::new(output);
+    let written = write_response_pack(&input, &mut framed)
+        .and_then(|()| framed.finish().map_err(ServeError::Io));
+    if let Err(err) = written {
+        let msg = format!("{}\n", serve_error_client_message(&err));
+        let _ = crate::pkt_line::write_sideband_packet(output, 3, msg.as_bytes());
+        return Err(err);
+    }
+    write_flush(output)
+}
+
+/// Write the raw pack for [`send_response_pack`].
+fn write_response_pack(input: &ResponsePackInput<'_>, output: &mut dyn Write) -> Result<()> {
     let mut pack_wants = input.wants.to_vec();
     if input.caps.contains("include-tag") {
         pack_wants.extend(included_tags(
@@ -779,13 +817,16 @@ fn build_response_pack(input: ResponsePackInput<'_>) -> Result<Vec<u8>> {
     pack_wants.sort();
     pack_wants.dedup();
 
+    let (window, max_depth) = PackBuildOptions::window_and_depth_from_config(Some(input.config));
     let pack_opts = PackBuildOptions {
         thin: input.caps.contains("thin-pack"),
         delta: true,
+        window,
+        max_depth,
+        reuse_deltas: max_depth > 0,
         use_ofs_delta: input.caps.contains("ofs-delta"),
         ..PackBuildOptions::default()
     };
-    let mut pack = Vec::new();
     let mut progress = |_ev: PackProgress| {};
     write_upload_pack_stream(
         input.repo,
@@ -796,9 +837,9 @@ fn build_response_pack(input: ResponsePackInput<'_>) -> Result<Vec<u8>> {
         input.filter,
         &pack_opts,
         &mut progress,
-        &mut pack,
+        output,
     )?;
-    Ok(pack)
+    Ok(())
 }
 
 /// Annotated tags the client did not ask for but whose target commit is being
@@ -858,15 +899,4 @@ fn commit_closure(
         queue.extend(commit.parents);
     }
     Ok(seen)
-}
-
-/// Write a pack, framed on side-band channel 1 when negotiated, then a flush.
-fn write_pack(output: &mut dyn Write, pack: &[u8], sideband: bool) -> Result<()> {
-    if sideband {
-        crate::pkt_line::write_sideband_channel1_64k(&mut &mut *output, pack)?;
-        write_flush(output)
-    } else {
-        output.write_all(pack)?;
-        Ok(())
-    }
 }
