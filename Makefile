@@ -78,12 +78,6 @@ public-api-check:
 clean:
 	$(CARGO) clean
 
-public-api:
-	./scripts/public-api.sh generate
-
-public-api-check:
-	./scripts/public-api.sh check
-
 site/node_modules: site/package-lock.json
 	cd site && npm ci
 	@touch site/node_modules
