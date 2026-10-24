@@ -1865,6 +1865,7 @@ impl Repository {
     fn opportunistic_index_write_skippable(err: &crate::error::Error) -> bool {
         use crate::error::Error;
         match err {
+            Error::IndexLocked { .. } => true,
             Error::Io(e) => matches!(
                 e.kind(),
                 std::io::ErrorKind::AlreadyExists
@@ -1995,6 +1996,49 @@ impl Repository {
         updated_workdir: bool,
         updated_skipworktree: bool,
     ) -> Result<()> {
+        self.write_index_file(
+            path,
+            index,
+            split,
+            updated_workdir,
+            updated_skipworktree,
+            None,
+        )
+    }
+
+    /// Persist `index` through `lock` (from [`Self::begin_index_update`]) and replace the
+    /// on-disk index, with the same sparse/split-index handling and `post-index-change` hook as
+    /// [`Self::write_index`].
+    ///
+    /// # Errors
+    ///
+    /// Propagates index finalization, serialization, and I/O failures. On error the lock is
+    /// still held and released when dropped.
+    pub(crate) fn write_index_with_lock(
+        &self,
+        lock: &mut crate::index::IndexLock,
+        index: &mut Index,
+    ) -> Result<()> {
+        let path = lock.index_path.clone();
+        self.write_index_file(
+            &path,
+            index,
+            WriteSplitIndexRequest::default(),
+            false,
+            false,
+            Some(lock),
+        )
+    }
+
+    fn write_index_file(
+        &self,
+        path: &std::path::Path,
+        index: &mut Index,
+        split: WriteSplitIndexRequest,
+        updated_workdir: bool,
+        updated_skipworktree: bool,
+        existing_lock: Option<&mut crate::index::IndexLock>,
+    ) -> Result<()> {
         crate::trace::trace_span!("grit.index.write");
         test_inject_index_write_fail()?;
         // The on-disk index format (entry OID width and trailing checksum) is
@@ -2034,6 +2078,7 @@ impl Repository {
             split,
             skip_hash,
             self.thread_policy(),
+            existing_lock,
         )?;
         // Git `write_locked_index`: `post-index-change` after a successful index write (t1800).
         let updated_workdir_arg = if updated_workdir { "1" } else { "0" };

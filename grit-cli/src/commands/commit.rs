@@ -613,6 +613,7 @@ fn map_commit_error(err: Error) -> anyhow::Error {
             "pathspec '{spec}' did not match any file(s) known to git"
         ),
         hook @ Error::Hook(_) => anyhow::Error::new(hook),
+        locked @ Error::IndexLocked { .. } => crate::json_error::map_lib_error(locked),
         other => anyhow::anyhow!("{other}"),
     }
 }

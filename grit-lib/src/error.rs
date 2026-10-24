@@ -529,6 +529,36 @@ pub enum PathOutsideRepoError {
     },
 }
 
+/// Process recorded as the holder of a lock file (see [`Error::IndexLocked`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LockHolder {
+    /// Process id read from the lock's pid sidecar file.
+    pub pid: u64,
+    /// Whether that process was still running when the lock was found.
+    pub running: bool,
+}
+
+fn index_locked_message(lock_path: &std::path::Path, holder: Option<&LockHolder>) -> String {
+    let detail = match holder {
+        Some(LockHolder { pid, running: true }) => {
+            format!("Lock is held by process {pid}, which is still running.")
+        }
+        Some(LockHolder {
+            pid,
+            running: false,
+        }) => format!(
+            "Lock was created by process {pid}, which is no longer running; the lock is stale and can be removed."
+        ),
+        None => "Another process may be writing the index, or a crashed process left the lock \
+                 behind; remove it only if no other process is running."
+            .to_owned(),
+    };
+    format!(
+        "cannot lock the index: '{}' already exists. {detail}",
+        lock_path.display()
+    )
+}
+
 /// The top-level error type for all grit-lib operations.
 ///
 /// # Examples
@@ -664,6 +694,18 @@ pub enum Error {
     /// Stage-1/2/3 entries are present; a stage-0 tree cannot be built.
     #[error("index contains unmerged entries")]
     IndexUnmerged,
+
+    /// The index lock file already exists, so the index cannot be written.
+    ///
+    /// Operations that return this before changing anything leave the repository untouched. The
+    /// lock file belongs to whoever created it and is never removed.
+    #[error("{}", index_locked_message(lock_path, holder.as_ref()))]
+    IndexLocked {
+        /// Existing lock file (usually `.git/index.lock`).
+        lock_path: std::path::PathBuf,
+        /// Process recorded in the lock's pid sidecar, when one was written (`core.lockfilePid`).
+        holder: Option<LockHolder>,
+    },
 
     /// Explicit [`crate::porcelain::add::stage`] refused paths that still contain conflict markers.
     #[error("unmerged paths still have conflict markers")]
