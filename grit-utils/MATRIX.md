@@ -48,6 +48,7 @@ Overview of **grit-lib** coverage, **`grit` commands**, common workflows, and **
 | `add/dry-run@synth-10k` | Preview staging: grit add --dry-run vs git add -n -A |
 | `add/patch-file@synth-10k` | Apply worktree diff to index: grit add --patch-file vs git apply --cached |
 | `add/hunks@large-file` | Stage half of 500 hunks in a 50k-line file: grit add --hunks vs git apply --cached |
+| `add/patch-file@large-file` | Apply prebuilt half-hunk patch to index: grit add --patch-file vs git apply --cached |
 | `add/lines@large-file` | Stage first 25k new-side lines in a 50k-line file: grit add --lines vs git apply --cached |
 | `add/modified@big-blobs` | Stage ~1% modified paths: grit add -- <paths> vs git add -- <paths> |
 | `add/modified@synth-10k` | Stage modified files vs git add -A |
@@ -68,7 +69,6 @@ Overview of **grit-lib** coverage, **`grit` commands**, common workflows, and **
 | `reset/mixed@synth-10k` | Mixed reset dirty tree: grit reset HEAD vs git reset --mixed HEAD |
 | `restore/hunks@large-file` | Discard half of 500 hunks in a 50k-line file: grit restore --hunks vs git apply -R |
 | `restore/paths@synth-10k` | Restore ~1% paths from index: grit restore -- <paths> vs git restore -- <paths> |
-| `restore/hunks@large-file` | Discard half of 500 hunks in a 50k-line file: grit restore --hunks vs git apply -R |
 | `rm/dir@synth-10k` | Remove tracked directory: grit rm -r <dir> vs git rm -r <dir> |
 | `rm/dry-run@synth-10k` | Preview remove directory: grit rm --dry-run <dir> vs git rm -n -r <dir> |
 | `stash/pop-index@synth-10k` | Restore index from stash: grit stash pop --index vs git stash pop --index |
@@ -166,10 +166,8 @@ Overview of **grit-lib** coverage, **`grit` commands**, common workflows, and **
 | `switch/delete-heavy@wide-48k` | Switch to a branch deleting 2000 files in 20 dirs of a 48k-file tree and back: grit switch vs git switch |
 | `tag/contains@git-git` | Tag --contains ref query vs git tag -l on git.git (commit-graph) |
 | `tag/create@many-refs` | Create lightweight tag vs git tag |
-| `tag/contains@git-git` | Tag --contains ref query vs git tag -l on git.git (commit-graph) |
 | `tag/list-sort-version@git-git` | Tag list --sort=version vs git tag -l --sort=version:refname on git.git |
 | `tag/list@many-refs` | List tags vs git tag -l |
-| `tag/list-sort-version@git-git` | Tag list --sort=version vs git tag -l --sort=version:refname on git.git |
 
 ## remotes
 **grit-lib:** `grit_lib::transport`, `grit_lib::remote`
@@ -190,10 +188,7 @@ Overview of **grit-lib** coverage, **`grit` commands**, common workflows, and **
 | `fetch/dry-run@git-git` | Fetch dry-run reports updates without writing refs or objects |
 | `fetch/incremental@git-git` | Incremental fetch vs git fetch |
 | `fetch/one-branch@git-git` | Fetch one branch refspec vs git fetch origin main |
-| `fetch/dry-run@git-git` | Fetch dry-run reports updates without writing refs or objects |
-| `fetch/deepen@git-git` | Deepen a depth-1 client by 50 commits vs git fetch --deepen 50 |
 | `fetch/noop@git-git` | No-op fetch when client already matches remote (file:// git-git) |
-| `fetch/one-branch@git-git` | Fetch one branch refspec vs git fetch origin main |
 | `ls-remote/all@many-refs` | List all refs on many-refs bare remote vs git ls-remote |
 | `remote/show@many-refs` | Remote show on many-refs client vs `git remote show origin` |
 | `remote/rename@many-refs` | Rename remote with ~10k packed tracking refs vs git remote rename |
@@ -203,7 +198,6 @@ Overview of **grit-lib** coverage, **`grit` commands**, common workflows, and **
 | `push/incremental-http@git-git` | Incremental push over grit smart HTTP (git-git bare remote) |
 | `push/refspec@git-git` | Explicit refspec push HEAD:refs/heads/bench vs git push |
 | `push/incremental@git-git` | Incremental push vs git push |
-| `push/refspec@git-git` | Explicit refspec push HEAD:refs/heads/bench vs git push |
 | `push/force-with-lease@git-git` | Amended commit push with `--force-with-lease` vs git |
 | `remote/list@small` | List remotes vs git remote |
 | `remote/remove@many-refs` | Remove origin with 10k packed tracking refs vs git remote remove |
