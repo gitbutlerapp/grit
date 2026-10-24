@@ -221,36 +221,101 @@ pub fn is_ancestor(repo: &Repository, ancestor: ObjectId, descendant: ObjectId) 
     cache.is_ancestor(ancestor, descendant)
 }
 
-/// Reachability test using only the object database (no commit-graph setup).
+/// Reachability test using only the given object database (no commit-graph,
+/// grafts or shallow boundaries).
 ///
-/// Suitable for client-side fast-forward checks on modest histories (e.g. push).
+/// Works on any [`Odb`](crate::odb::Odb), such as a receive quarantine whose
+/// alternates include the repository's own objects, so it can check commits
+/// that are not yet visible through [`Repository::odb`].
+///
+/// Commits are visited newest committer date first. Once the walk has popped
+/// a run of commits older than `ancestor` (tolerating some clock skew), it
+/// concludes `ancestor` is unreachable, so a non-ancestor costs roughly the
+/// history between the two commits instead of the whole graph.
+///
+/// # Parameters
+///
+/// - `odb` - object database holding both commits and the history between them.
+/// - `ancestor` - candidate ancestor commit.
+/// - `descendant` - commit whose history is searched.
+///
+/// # Returns
+///
+/// `true` when `ancestor` equals or is reachable from `descendant`; `false`
+/// otherwise, including when either object is not a commit. Parents missing
+/// from `odb` end their line of history.
+///
+/// # Errors
+///
+/// Returns read errors for `ancestor` or `descendant`, and parse errors for
+/// commits on the walk.
 pub fn is_ancestor_odb_walk(
     odb: &crate::odb::Odb,
     ancestor: ObjectId,
     descendant: ObjectId,
 ) -> Result<bool> {
+    /// Commits older than `ancestor` popped in a row before giving up.
+    const SLOP: u32 = 100;
+
     if ancestor == descendant {
         return Ok(true);
     }
-    let mut seen = oid_hash_set();
-    let mut queue = VecDeque::from([descendant]);
-    while let Some(cur) = queue.pop_front() {
-        if !seen.insert(cur) {
-            continue;
+    let Some((ancestor_time, _)) = read_commit_linkage(odb, &ancestor)? else {
+        return Ok(false);
+    };
+    let Some((descendant_time, descendant_parents)) = read_commit_linkage(odb, &descendant)? else {
+        return Ok(false);
+    };
+
+    let mut pending_parents: OidHashMap<Vec<ObjectId>> = oid_hash_map();
+    pending_parents.insert(descendant, descendant_parents);
+    let mut visited = oid_hash_set();
+    visited.insert(descendant);
+    let mut heap = BinaryHeap::from([(descendant_time, descendant)]);
+    let mut older_run = 0u32;
+    while let Some((time, oid)) = heap.pop() {
+        if time < ancestor_time {
+            older_run += 1;
+            if older_run >= SLOP {
+                return Ok(false);
+            }
+        } else {
+            older_run = 0;
         }
-        if cur == ancestor {
-            return Ok(true);
-        }
-        let obj = odb.read(&cur)?;
-        if obj.kind != ObjectKind::Commit {
-            continue;
-        }
-        let commit = parse_commit(&obj.data)?;
-        for parent in commit.parents {
-            queue.push_back(parent);
+        for parent in pending_parents.remove(&oid).unwrap_or_default() {
+            if parent == ancestor {
+                return Ok(true);
+            }
+            if !visited.insert(parent) {
+                continue;
+            }
+            let linkage = match read_commit_linkage(odb, &parent) {
+                Err(Error::ObjectNotFound(_)) => None,
+                other => other?,
+            };
+            if let Some((parent_time, grandparents)) = linkage {
+                pending_parents.insert(parent, grandparents);
+                heap.push((parent_time, parent));
+            }
         }
     }
     Ok(false)
+}
+
+/// Committer timestamp and parents of `oid`, or `None` when it is not a commit.
+fn read_commit_linkage(
+    odb: &crate::odb::Odb,
+    oid: &ObjectId,
+) -> Result<Option<(i64, Vec<ObjectId>)>> {
+    let object = odb.read(oid)?;
+    if object.kind != ObjectKind::Commit {
+        return Ok(None);
+    }
+    let commit = CommitRef::parse(&object.data)?;
+    Ok(Some((
+        commit.committer_timestamp(),
+        commit.parents().to_vec(),
+    )))
 }
 
 /// Returns the ref path under `logs/` used for fork-point reflog scanning for `merge-base --fork-point`
@@ -3091,6 +3156,89 @@ mod tests {
         let err = commits_reachable_excluding_ancestors_of(&repo, &[tip], &[], None).unwrap_err();
         assert!(matches!(err, Error::ObjectNotFound(_)));
 
+        Ok(())
+    }
+
+    #[test]
+    fn odb_walk_sees_quarantined_commits_that_repo_odb_cannot() -> Result<()> {
+        let dir = tempdir().map_err(Error::Io)?;
+        let repo = open_test_bare(&dir)?;
+        let old = write_commit_same_time(&repo.odb(), &[], "old", 100)?;
+        let quarantine =
+            crate::receive_quarantine::ReceiveQuarantine::create(&repo.odb(), repo.git_dir())?;
+        let q_odb = quarantine.odb();
+        let mid = write_commit_same_time(&q_odb, &[old], "mid", 200)?;
+        let new = write_commit_same_time(&q_odb, &[mid], "new", 300)?;
+
+        assert!(!repo.odb().exists(&new));
+        assert!(is_ancestor_odb_walk(&q_odb, old, new)?);
+        assert!(!is_ancestor_odb_walk(&q_odb, new, old)?);
+        Ok(())
+    }
+
+    #[test]
+    fn odb_walk_handles_merges_skew_and_non_commits() -> Result<()> {
+        let dir = tempdir().map_err(Error::Io)?;
+        let repo = open_test_bare(&dir)?;
+        let odb = repo.odb();
+        let root = write_commit_same_time(&odb, &[], "root", 1_000)?;
+        // Side branch committed with a clock far ahead of its descendants.
+        let skewed = write_commit_same_time(&odb, &[root], "skewed", 9_000)?;
+        let mut main = root;
+        for i in 0..20 {
+            main = write_commit_same_time(&odb, &[main], &format!("m{i}"), 2_000 + i)?;
+        }
+        let merge = write_commit_same_time(&odb, &[main, skewed], "merge", 3_000)?;
+        let unrelated = write_commit_same_time(&odb, &[], "unrelated", 2_500)?;
+
+        assert!(is_ancestor_odb_walk(&odb, root, merge)?);
+        assert!(is_ancestor_odb_walk(&odb, skewed, merge)?);
+        assert!(is_ancestor_odb_walk(&odb, merge, merge)?);
+        assert!(!is_ancestor_odb_walk(&odb, merge, root)?);
+        assert!(!is_ancestor_odb_walk(&odb, unrelated, merge)?);
+
+        let tree = empty_tree(&odb)?;
+        assert!(!is_ancestor_odb_walk(&odb, tree, merge)?);
+        assert!(!is_ancestor_odb_walk(&odb, root, tree)?);
+        Ok(())
+    }
+
+    #[test]
+    fn odb_walk_treats_missing_parents_as_history_end() -> Result<()> {
+        let dir = tempdir().map_err(Error::Io)?;
+        let repo = open_test_bare(&dir)?;
+        let odb = repo.odb();
+        let missing: ObjectId = "0000000000000000000000000000000000000001"
+            .parse()
+            .expect("oid");
+        let base = write_commit_same_time(&odb, &[], "base", 50)?;
+        let tip = write_commit_same_time(&odb, &[missing], "tip", 100)?;
+
+        assert!(!is_ancestor_odb_walk(&odb, base, tip)?);
+        assert!(matches!(
+            is_ancestor_odb_walk(&odb, missing, base),
+            Err(Error::ObjectNotFound(_))
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn odb_walk_stops_near_the_ancestor_date_instead_of_walking_all_history() -> Result<()> {
+        let dir = tempdir().map_err(Error::Io)?;
+        let repo = open_test_bare(&dir)?;
+        let odb = repo.odb();
+        // An unparsable commit at the bottom: reaching it is an error, so a walk
+        // that returns cleanly never went that deep.
+        let corrupt = odb.write_loose_materialize(ObjectKind::Commit, b"not a commit\n")?;
+        let ancient = write_commit_same_time(&odb, &[], "ancient", 1)?;
+        let mut tip = write_commit_same_time(&odb, &[corrupt], "c0", 1_000)?;
+        for i in 1..500 {
+            tip = write_commit_same_time(&odb, &[tip], &format!("c{i}"), 1_000 + i)?;
+        }
+        let unrelated = write_commit_same_time(&odb, &[], "unrelated", 1_400)?;
+
+        assert!(!is_ancestor_odb_walk(&odb, unrelated, tip)?);
+        assert!(is_ancestor_odb_walk(&odb, ancient, tip).is_err());
         Ok(())
     }
 }
