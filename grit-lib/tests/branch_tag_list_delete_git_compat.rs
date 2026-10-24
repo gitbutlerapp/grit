@@ -463,7 +463,10 @@ fn list_and_delete_use_injected_memory_ref_store() {
 
     let err = delete_branch(&repo, "main", DeleteMode::Force, false).unwrap_err();
     assert!(
-        matches!(err, Error::Branch(BranchError::CheckedOut { .. })),
+        matches!(
+            &err,
+            Error::Branch(BranchError::CurrentlyCheckedOut { name }) if name == "main"
+        ),
         "{err:?}"
     );
 
