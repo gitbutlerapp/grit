@@ -619,6 +619,10 @@ fn stage_unmerged_paths_matching_pathspecs(
             modified.push(rel.to_owned());
             continue;
         }
+        let wt_bytes = fs::read(&abs).map_err(Error::Io)?;
+        if crate::rerere::worktree_bytes_have_unresolved_conflict_markers(&wt_bytes) {
+            continue;
+        }
         let file_attrs = rules.file_attrs(rel, false);
         let mode = mode_from_metadata(&meta);
         let oid = materialize_worktree_blob(
