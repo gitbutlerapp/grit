@@ -73,6 +73,10 @@ pub struct StreamingReuse {
     reuse_bits: Bitmap,
     index: Option<Arc<crate::pack_bitmap::BitmapIndex>>,
     source_to_output: HashMap<u64, u64>,
+    /// Source-pack offset for each object in the repack send list (repack rewrite only).
+    source_entry_offset: HashMap<ObjectId, u64>,
+    /// Reverse map for the source pack index (offset → OID).
+    offset_to_oid: HashMap<u64, ObjectId>,
     stats: ReuseWriteStats,
     /// When set, any object present in [`Self::pack`] may be copied verbatim (repack rewrite).
     reuse_all_in_pack: bool,
@@ -110,6 +114,8 @@ impl StreamingReuse {
             reuse_bits,
             index: Some(Arc::clone(send_set.bitmap_index())),
             source_to_output: HashMap::new(),
+            source_entry_offset: HashMap::new(),
+            offset_to_oid: HashMap::new(),
             stats: ReuseWriteStats::default(),
             reuse_all_in_pack: false,
         }
@@ -117,7 +123,7 @@ impl StreamingReuse {
 
     fn marks_reuse(&self, oid: &ObjectId) -> bool {
         if self.reuse_all_in_pack {
-            return self.pack.idx.find_offset(oid).ok().flatten().is_some();
+            return self.source_entry_offset.contains_key(oid);
         }
         let Some(index) = &self.index else {
             return false;
@@ -128,14 +134,13 @@ impl StreamingReuse {
         self.reuse_bits.get(pos as usize)
     }
 
-    /// Copy a whole packed object when marked reusable; returns bytes written.
-    pub(crate) fn try_write_whole(
+    /// Emit a whole packed object when marked reusable.
+    pub(crate) fn try_emit_whole(
         &mut self,
-        w: &mut dyn Write,
         oid: &ObjectId,
         out_offset: u64,
         opts: &PackBuildOptions,
-    ) -> Result<Option<u64>> {
+    ) -> Result<Option<Vec<u8>>> {
         if !opts.reuse_objects || !self.marks_reuse(oid) {
             return Ok(None);
         }
@@ -146,49 +151,51 @@ impl StreamingReuse {
             .parent()
             .and_then(|p| p.parent())
             .ok_or_else(|| Error::CorruptObject("pack path layout".to_owned()))?;
-        let written = match write_whole_reused(w, objects_dir, oid, opts) {
-            Ok(n) => n,
+        let mut out = Vec::new();
+        match write_whole_reused(&mut out, objects_dir, oid, opts) {
+            Ok(n) => {
+                self.note_verbatim(n);
+            }
             Err(_) => return Ok(None),
         };
-        self.note_verbatim(written);
-        if let Some(entry_off) = self.pack.idx.find_offset(oid)? {
+        if let Some(entry_off) = self.source_entry_offset.get(oid).copied() {
             self.source_to_output.insert(entry_off, out_offset);
         }
-        Ok(Some(written))
+        Ok(Some(out))
     }
 
-    /// Copy or rewrite a delta object when marked reusable.
-    pub(crate) fn try_write_delta(
+    /// Emit a delta object when marked reusable.
+    pub(crate) fn try_emit_delta(
         &mut self,
-        w: &mut dyn Write,
         oid: &ObjectId,
         out_offset: u64,
         in_pack_base: Option<u64>,
         opts: &PackBuildOptions,
         oid_to_offset: &crate::objects::OidHashMap<u64>,
-    ) -> Result<Option<u64>> {
+    ) -> Result<Option<Vec<u8>>> {
         if !self.marks_reuse(oid) {
             return Ok(None);
         }
-        let Some(entry_off) = self.pack.idx.find_offset(oid)? else {
+        let Some(entry_off) = self.source_entry_offset.get(oid).copied() else {
             return Ok(None);
         };
         let pack_bytes = self.pack.pack_bytes.as_ref();
         let hash_bytes = self.pack.idx.oid_at(0).len();
         if !delta_base_in_output_set(
-            &self.pack.idx,
             pack_bytes,
             entry_off,
             hash_bytes,
             &self.source_to_output,
+            &self.offset_to_oid,
             oid_to_offset,
             in_pack_base,
         ) {
             return Ok(None);
         }
         let hb = self.pack.idx.hash_bytes();
-        let written = match write_one_reused(
-            w,
+        let mut out = Vec::new();
+        match emit_one_reused(
+            &mut out,
             &mut self.stats,
             &self.pack,
             pack_bytes,
@@ -197,23 +204,24 @@ impl StreamingReuse {
             opts,
             &self.source_to_output,
             oid_to_offset,
+            &self.offset_to_oid,
             out_offset,
             in_pack_base,
         ) {
-            Ok(n) => n,
+            Ok(_) => {}
             Err(_) => return Ok(None),
         };
         self.source_to_output.insert(entry_off, out_offset);
-        Ok(Some(written))
+        Ok(Some(out))
     }
 }
 
 fn delta_base_in_output_set(
-    idx: &PackIndex,
     pack_bytes: &[u8],
     entry_off: u64,
     hash_bytes: usize,
     source_to_output: &HashMap<u64, u64>,
+    offset_to_oid: &HashMap<u64, ObjectId>,
     oid_to_offset: &crate::objects::OidHashMap<u64>,
     in_pack_base: Option<u64>,
 ) -> bool {
@@ -232,23 +240,16 @@ fn delta_base_in_output_set(
             if in_pack_base.is_some() {
                 return true;
             }
-            let Some(row) = find_position_by_pack_offset(idx, base_offset)
-                .ok()
-                .flatten()
-            else {
-                return false;
-            };
-            let Ok(base_oid) = ObjectId::from_bytes(idx.oid_at(row)) else {
-                return false;
-            };
-            oid_to_offset.contains_key(&base_oid)
+            offset_to_oid
+                .get(&base_offset)
+                .is_some_and(|base_oid| oid_to_offset.contains_key(base_oid))
         }
     }
 }
 
 fn remapped_ofs_base(
-    idx: &PackIndex,
     source_to_output: &HashMap<u64, u64>,
+    offset_to_oid: &HashMap<u64, ObjectId>,
     oid_to_offset: &crate::objects::OidHashMap<u64>,
     base_offset: u64,
     in_pack_base: Option<u64>,
@@ -258,11 +259,9 @@ fn remapped_ofs_base(
         .copied()
         .or(in_pack_base)
         .or_else(|| {
-            find_position_by_pack_offset(idx, base_offset)
-                .ok()
-                .flatten()
-                .and_then(|row| ObjectId::from_bytes(idx.oid_at(row)).ok())
-                .and_then(|base_oid| oid_to_offset.get(&base_oid).copied())
+            offset_to_oid
+                .get(&base_offset)
+                .and_then(|base_oid| oid_to_offset.get(base_oid).copied())
         })
 }
 
@@ -279,20 +278,23 @@ pub fn try_streaming_reuse_for_repack(
     if indexes.is_empty() {
         return Ok(None);
     }
-    let mut best: Option<(usize, Arc<PackIndex>)> = None;
+    let mut best: Option<(usize, Arc<PackIndex>, HashMap<ObjectId, u64>)> = None;
     for idx in indexes {
-        let hits = send
-            .iter()
-            .filter(|oid| idx.find_offset(oid).ok().flatten().is_some())
-            .count();
+        let mut source_entry_offset = HashMap::with_capacity(send.len());
+        for oid in send {
+            if let Some(off) = idx.find_offset(oid).ok().flatten() {
+                source_entry_offset.insert(*oid, off);
+            }
+        }
+        let hits = source_entry_offset.len();
         if hits == 0 {
             continue;
         }
-        if best.as_ref().is_none_or(|(c, _)| hits > *c) {
-            best = Some((hits, idx));
+        if best.as_ref().is_none_or(|(c, _, _)| hits > *c) {
+            best = Some((hits, idx, source_entry_offset));
         }
     }
-    let Some((hits, idx)) = best else {
+    let Some((hits, idx, source_entry_offset)) = best else {
         return Ok(None);
     };
     if hits != send.len() {
@@ -301,6 +303,12 @@ pub fn try_streaming_reuse_for_repack(
         return Ok(None);
     }
     let pack_bytes = read_pack_bytes_cached(&idx.pack_path)?;
+    let mut offset_to_oid = HashMap::with_capacity(idx.len());
+    for row in 0..idx.len() {
+        let off = idx.offset_at(row)?;
+        let oid = ObjectId::from_bytes(idx.oid_at(row))?;
+        offset_to_oid.insert(off, oid);
+    }
     let pack = BitmappedPack {
         idx,
         pack_bytes,
@@ -311,7 +319,9 @@ pub fn try_streaming_reuse_for_repack(
         pack,
         reuse_bits: Bitmap::new(),
         index: None,
-        source_to_output: HashMap::new(),
+        source_to_output: HashMap::with_capacity(send.len()),
+        source_entry_offset,
+        offset_to_oid,
         stats: ReuseWriteStats::default(),
         reuse_all_in_pack: true,
     }))
@@ -596,8 +606,8 @@ fn write_whole_reused(
 }
 
 #[allow(clippy::too_many_arguments)]
-fn write_one_reused(
-    w: &mut dyn Write,
+fn emit_one_reused(
+    out: &mut Vec<u8>,
     stats: &mut ReuseWriteStats,
     pack: &BitmappedPack,
     pack_bytes: &[u8],
@@ -606,9 +616,10 @@ fn write_one_reused(
     opts: &PackBuildOptions,
     source_to_output: &HashMap<u64, u64>,
     oid_to_offset: &crate::objects::OidHashMap<u64>,
+    offset_to_oid: &HashMap<u64, ObjectId>,
     pack_offset: u64,
     in_pack_base: Option<u64>,
-) -> Result<u64> {
+) -> Result<()> {
     let Some(end) = pack_entry_raw_end(&pack.idx, pack_bytes, entry_off)? else {
         return Err(Error::CorruptObject(
             "truncated reused pack entry".to_owned(),
@@ -637,8 +648,8 @@ fn write_one_reused(
                 ));
             };
             if let Some(new_base) = remapped_ofs_base(
-                &pack.idx,
                 source_to_output,
+                offset_to_oid,
                 oid_to_offset,
                 base_offset,
                 in_pack_base,
@@ -646,19 +657,17 @@ fn write_one_reused(
                 let dist = pack_offset
                     .checked_sub(new_base)
                     .ok_or_else(|| Error::CorruptObject("ofs-delta fixup underflow".to_owned()))?;
-                let mut out = Vec::new();
-                encode_pack_object_header(&mut out, 6, size as usize);
-                encode_ofs_delta_distance(&mut out, dist);
+                encode_pack_object_header(out, 6, size as usize);
+                encode_ofs_delta_distance(out, dist);
                 out.extend_from_slice(&pack_bytes[zlib_start..end]);
-                w.write_all(&out).map_err(Error::Io)?;
                 stats.note_ofs_fixup();
                 stats.verbatim_reuse_bytes += (end - zlib_start) as u64;
-                Ok(out.len() as u64)
+                Ok(())
             } else if opts.thin {
-                let n = write_ref_delta_from_ofs(w, pack_bytes, entry_off, end, size, pack)?;
+                append_ref_delta_from_ofs(out, pack_bytes, entry_off, end, size, pack)?;
                 stats.note_ref_from_ofs();
                 stats.verbatim_reuse_bytes += (end - zlib_start) as u64;
-                Ok(n)
+                Ok(())
             } else {
                 Err(Error::CorruptObject(
                     "ofs-delta reuse missing remapped base".to_owned(),
@@ -666,10 +675,10 @@ fn write_one_reused(
             }
         }
         PackedType::OfsDelta if !opts.use_ofs_delta && opts.thin => {
-            let n = write_ref_delta_from_ofs(w, pack_bytes, entry_off, end, size, pack)?;
+            append_ref_delta_from_ofs(out, pack_bytes, entry_off, end, size, pack)?;
             stats.note_ref_from_ofs();
             stats.verbatim_reuse_bytes += (end - zlib_start) as u64;
-            Ok(n)
+            Ok(())
         }
         PackedType::RefDelta => {
             let Some(dep) = read_packed_delta_dependency(pack_bytes, entry_off, hash_bytes)? else {
@@ -687,26 +696,26 @@ fn write_one_reused(
                     "ref-delta base missing from output pack".to_owned(),
                 ));
             }
-            w.write_all(slice).map_err(Error::Io)?;
+            out.extend_from_slice(slice);
             stats.note_verbatim_slice(slice.len() as u64);
-            Ok(slice.len() as u64)
+            Ok(())
         }
         _ => {
-            w.write_all(slice).map_err(Error::Io)?;
+            out.extend_from_slice(slice);
             stats.note_verbatim_slice(slice.len() as u64);
-            Ok(slice.len() as u64)
+            Ok(())
         }
     }
 }
 
-fn write_ref_delta_from_ofs(
-    w: &mut dyn Write,
+fn append_ref_delta_from_ofs(
+    out: &mut Vec<u8>,
     pack_bytes: &[u8],
     entry_off: u64,
     end: usize,
     size: u64,
     pack: &BitmappedPack,
-) -> Result<u64> {
+) -> Result<()> {
     let hash_bytes = pack.idx.oid_at(0).len();
     let zlib_start = pack_entry_zlib_start(pack_bytes, entry_off, hash_bytes)?;
     let Some(dep) = read_packed_delta_dependency(pack_bytes, entry_off, hash_bytes)? else {
@@ -721,10 +730,8 @@ fn write_ref_delta_from_ofs(
             ObjectId::from_bytes(pack.idx.oid_at(row))?
         }
     };
-    let mut out = Vec::new();
-    encode_pack_object_header(&mut out, 7, size as usize);
+    encode_pack_object_header(out, 7, size as usize);
     out.extend_from_slice(base_oid.as_bytes());
     out.extend_from_slice(&pack_bytes[zlib_start..end]);
-    w.write_all(&out).map_err(Error::Io)?;
-    Ok(out.len() as u64)
+    Ok(())
 }

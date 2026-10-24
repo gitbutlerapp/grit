@@ -1,5 +1,6 @@
 //! Repack/gc compatibility: grit maintenance vs system `git fsck`.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -14,7 +15,7 @@ use grit_lib::maintenance::{
 use grit_lib::objects::pack::{clear_pack_cache, test_pack_cache_guard};
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::porcelain::add::stage_for_commit;
-use grit_lib::porcelain::commit::{create_commit, CommitRequest, HookPolicy};
+use grit_lib::porcelain::commit::{create_commit, CommitRequest};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_test_support::git_fsck;
@@ -954,16 +955,16 @@ fn gc_over_existing_pack_keeps_its_deltas_and_deltifies_new_blobs() {
     assert!(fsck.ok, "git fsck --strict: {:?}", fsck.msg_ids);
     let deltas = git_verify_pack_delta_count(seed.path());
     assert!(
-        deltas >= packed_deltas,
-        "grit gc must retain existing pack deltas when repacking with reuse: {deltas} after, {packed_deltas} before"
+        deltas > packed_deltas,
+        "pack deltas must be reused and new blobs deltified: {deltas} after, {packed_deltas} before"
     );
     let (grit_kib, git_kib) = (
         git_size_pack_kib(seed.path()),
         git_size_pack_kib(git_copy.path()),
     );
     assert!(
-        grit_kib <= git_kib.saturating_mul(4).max(git_kib + 24),
-        "grit gc pack {grit_kib} KiB vs git gc {git_kib} KiB (rewrite/reuse may store new blobs less aggressively than git gc)"
+        grit_kib <= git_kib * 2,
+        "grit gc pack {grit_kib} KiB vs git gc {git_kib} KiB"
     );
 }
 
@@ -1306,59 +1307,148 @@ fn repack_with_existing_pack_and_loose_uses_rewrite_not_full_delta_search() {
 /// Reachable packed delta whose base is not in the repack output set must not be copied verbatim.
 #[test]
 fn repack_materializes_delta_when_base_unreachable() {
-    let dir = TempDir::new().expect("tempdir");
-    git(dir.path(), &["init", "-b", "main"]);
-    let mut payload: Vec<u8> = (0..64 * 1024).map(|i| (i % 251) as u8).collect();
-    std::fs::write(dir.path().join("big.bin"), &payload).expect("write");
-    git(dir.path(), &["add", "big.bin"]);
-    git(dir.path(), &["commit", "-m", "v1"]);
-    payload.iter_mut().for_each(|b| *b = b.wrapping_add(1));
-    std::fs::write(dir.path().join("big.bin"), &payload).expect("write v2");
-    git(dir.path(), &["add", "big.bin"]);
-    git(dir.path(), &["commit", "-m", "v2"]);
+    let dir = repo_with_loose_only_edited_blob_history();
     git(dir.path(), &["repack", "-a", "-d"]);
 
-    let tree_out = Command::new("git")
-        .current_dir(dir.path())
-        .args(["rev-parse", "HEAD^{tree}"])
+    let pack_path = std::fs::read_dir(dir.path().join(".git/objects/pack"))
+        .expect("pack dir")
+        .filter_map(|e| e.ok())
+        .find(|e| e.path().extension().is_some_and(|x| x == "pack"))
+        .expect("pack")
+        .path();
+    let verify_before = Command::new("git")
+        .args(["verify-pack", "-v"])
+        .arg(&pack_path)
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .env("GIT_CONFIG_SYSTEM", "/dev/null")
         .output()
-        .expect("tree");
-    assert!(tree_out.status.success());
-    let tree = String::from_utf8_lossy(&tree_out.stdout).trim().to_string();
-    let commit_out = Command::new("git")
-        .current_dir(dir.path())
-        .args(["commit-tree", &tree, "-m", "orphan tip"])
-        .env("GIT_CONFIG_GLOBAL", "/dev/null")
-        .env("GIT_CONFIG_SYSTEM", "/dev/null")
-        .output()
-        .expect("commit-tree");
-    assert!(commit_out.status.success());
-    let orphan = String::from_utf8_lossy(&commit_out.stdout)
-        .trim()
-        .to_string();
-    git(dir.path(), &["update-ref", "refs/heads/main", &orphan]);
-    git(
-        dir.path(),
-        &[
-            "reflog",
-            "expire",
-            "--expire=now",
-            "--expire-unreachable=now",
-            "--all",
-        ],
-    );
-    git(dir.path(), &["repack", "-a", "-d"]);
+        .expect("verify-pack");
+    assert!(verify_before.status.success());
+    let verify_text = String::from_utf8_lossy(&verify_before.stdout);
+
+    let mut blob_oid = None;
+    for line in verify_text.lines() {
+        let fields: Vec<_> = line.split_whitespace().collect();
+        if fields.len() != 7 || fields[1] != "blob" {
+            continue;
+        }
+        let target = fields[0];
+        let base = fields[6];
+        let commits = Command::new("git")
+            .current_dir(dir.path())
+            .args(["rev-list", "--all"])
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .output()
+            .expect("rev-list all");
+        if !commits.status.success() {
+            continue;
+        }
+        let mut tree = String::new();
+        for commit in String::from_utf8_lossy(&commits.stdout).lines() {
+            let commit = commit.trim();
+            if commit.is_empty() {
+                continue;
+            }
+            let ls = Command::new("git")
+                .current_dir(dir.path())
+                .args(["ls-tree", "-r", commit])
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_CONFIG_SYSTEM", "/dev/null")
+                .output()
+                .expect("ls-tree");
+            if !ls.status.success() {
+                continue;
+            }
+            if String::from_utf8_lossy(&ls.stdout).contains(target) {
+                let tree_out = Command::new("git")
+                    .current_dir(dir.path())
+                    .args(["rev-parse", &format!("{commit}^{{tree}}")])
+                    .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                    .env("GIT_CONFIG_SYSTEM", "/dev/null")
+                    .output()
+                    .expect("tree");
+                if tree_out.status.success() {
+                    tree = String::from_utf8_lossy(&tree_out.stdout).trim().to_string();
+                    break;
+                }
+            }
+        }
+        if tree.is_empty() {
+            continue;
+        }
+        let orphan_tip = Command::new("git")
+            .current_dir(dir.path())
+            .args(["commit-tree", &tree, "-m", "orphan delta tip"])
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .output()
+            .expect("commit-tree");
+        assert!(orphan_tip.status.success());
+        let orphan_ref = String::from_utf8_lossy(&orphan_tip.stdout)
+            .trim()
+            .to_string();
+        git(dir.path(), &["update-ref", "refs/heads/main", &orphan_ref]);
+        git(
+            dir.path(),
+            &[
+                "reflog",
+                "expire",
+                "--expire=now",
+                "--expire-unreachable=now",
+                "--all",
+            ],
+        );
+        let reachable = Command::new("git")
+            .current_dir(dir.path())
+            .args(["rev-list", "--objects", "HEAD"])
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .output()
+            .expect("rev-list");
+        assert!(reachable.status.success());
+        let reachable_now: HashSet<String> = String::from_utf8_lossy(&reachable.stdout)
+            .lines()
+            .filter_map(|line| line.split_whitespace().next())
+            .map(str::to_string)
+            .collect();
+        if reachable_now.contains(target) && !reachable_now.contains(base) {
+            blob_oid = Some(target.to_string());
+            break;
+        }
+    }
+    let blob_oid = blob_oid.unwrap_or_else(|| {
+        panic!("no reachable delta with unreachable base in pack:\n{verify_text}")
+    });
 
     let grit_copy = TempDir::new().expect("grit");
     duplicate_repo_tree(dir.path(), grit_copy.path());
+    let expected_payload = Command::new("git")
+        .current_dir(grit_copy.path())
+        .args(["cat-file", "blob", &blob_oid])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("cat-file before")
+        .stdout;
     let repo =
         Repository::discover(Some(grit_copy.path()), &RepositoryOptions::empty()).expect("open");
     let mut opts = RepackOptions::default();
     opts.keep_unreachable = false;
     repack_all(&repo, &opts).expect("grit repack");
     clear_pack_cache_after_disk_maintenance();
+    let cat = Command::new("git")
+        .current_dir(grit_copy.path())
+        .args(["cat-file", "blob", &blob_oid])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("cat-file");
+    assert!(
+        cat.status.success(),
+        "blob must remain readable after repack"
+    );
+    assert_eq!(cat.stdout, expected_payload, "blob payload must round-trip");
     git_fsck(grit_copy.path(), true);
 }
 
