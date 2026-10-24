@@ -93,8 +93,8 @@ Pass `--json` for stable, scripting-friendly output.
 | `dry_run` | boolean | Whether the index was left unchanged. |
 | `count` | number | Total paths touched. |
 | `staged` | number | Same as `count` for successful staging. |
-| `staged_hunks` | object | Path → hunk ids when `--hunks` staged something (omitted when empty). |
-| `staged_lines` | object | Path → line ranges when `--lines` staged something (omitted when empty). |
+| `staged_hunks` | object | Path → hunk ids when `--hunks` staged something (empty object when unused). |
+| `staged_lines` | object | Path → line ranges when `--lines` staged something (empty object when unused). |
 
 ```json
 {
@@ -108,7 +108,7 @@ Pass `--json` for stable, scripting-friendly output.
 }
 ```
 
-When `--hunks` or `--lines` staged something, `staged_hunks` or `staged_lines` maps path → ids or ranges appear on stdout; they are omitted when empty.
+When `--hunks` or `--lines` staged something, `staged_hunks` or `staged_lines` maps path → ids or ranges; otherwise those fields are empty objects.
 
 Grit computes blob object ids with the same plain SHA-1 digests as Git. SHAttered test vectors (for example blobs in the `git/git` history) stage and commit normally; grit does not reject them during ingestion.
 

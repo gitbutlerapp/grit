@@ -540,14 +540,6 @@ pub fn load_committed_schema(command: &str) -> serde_json::Value {
     serde_json::from_str(&text).unwrap_or_else(|e| panic!("parse schema {}: {e}", path.display()))
 }
 
-/// `staged_hunks` / `staged_lines` are omitted on stdout when empty; keep them out of `required`.
-fn patch_add_outcome_optional_map_fields(doc: &mut serde_json::Value) {
-    let Some(required) = doc.get_mut("required").and_then(|v| v.as_array_mut()) else {
-        return;
-    };
-    required.retain(|field| field != "staged_hunks" && field != "staged_lines");
-}
-
 /// Regenerate every schema file under [`schemas_dir`].
 pub fn write_all_schemas(dir: &Path) {
     if let Err(e) = fs::create_dir_all(dir) {
@@ -569,10 +561,7 @@ pub fn write_all_schemas(dir: &Path) {
             continue;
         }
         let schema = (entry.schema)();
-        let mut json = root_schema_to_document(entry.command, schema);
-        if entry.command == "add" {
-            patch_add_outcome_optional_map_fields(&mut json);
-        }
+        let json = root_schema_to_document(entry.command, schema);
         let path = dir.join(schema_file_name_for(entry.command, 1));
         let text = match serde_json::to_string_pretty(&json) {
             Ok(t) => t,
