@@ -208,6 +208,25 @@ Committed baseline: **`grit-utils/baselines/conflicts.json`**. Factory VM median
 ./target/release/grit-bench conflicts --sizes 1000,10000 --format json --output grit-utils/baselines/conflicts.json
 ```
 
+## Pick keeps the cache-tree (2026-10-24)
+
+The daily census flagged `pick/one@synth-100k` going from 0.95× to 1.22× Git. The replay sequencer had started loading the index without its cache-tree extension to save memory. Without a cache-tree, the check that the index matches `HEAD` flattens the whole `HEAD` tree into a map, which costs more time and more memory than the extension it skipped. The index was also parsed a second time for the first replay step, and the index written after the pick lost its cache-tree. Pick and revert now keep the cache-tree, and the snapshot from the cleanliness check feeds the first step.
+
+Same VM sitting, release builds, system `git 2.43.0`, `origin/main` before → after:
+
+| Scenario | Git ms | Grit ms before → after | Grit peak RSS before → after |
+| --- | ---: | ---: | ---: |
+| `pick/one@synth-100k` (daily) | 208.1 | 245.8 → **180.5** | 63.5 → **47.6** MiB |
+| `pick-100000` | 204.0 | 241.4 → **154.5** | 65.3 → **49.4** MiB |
+| `revert-100000` | 195.9 | 241.5 → **155.9** | 66.1 → **51.1** MiB |
+| `pick-series-100000` | 1014.5 | 3822.5 → **2057.9** | 67.0 → **44.2** MiB |
+| `pick-10000` | 140.5 | 75.2 → **73.4** | 29.2 → **26.1** MiB |
+| `revert-10000` | 136.1 | 81.0 → **72.2** | 29.6 → **26.9** MiB |
+| `pick-series-10000` | 137.6 | 495.3 → **288.2** | 25.8 → **22.9** MiB |
+| `pick-range-20` | 135.3 | 116.7 → **113.5** | 24.2 → **22.3** MiB |
+
+`switch-*` and `merge-*` rows are unchanged within noise. `hot-paths-after.json` is refreshed from the after run.
+
 ## Pick, revert and merge apply path (2026-10-22)
 
 A clean `grit pick` / `grit revert` of a commit touching 2000 paths spent most of its time on work that grows with the number of touched paths, not on I/O:
@@ -428,7 +447,7 @@ Two back-to-back hot-path after runs (`hot-paths-after-run1.json` vs `run2.json`
 
 **Scenario:** `grit pick base..topic` vs `git cherry-pick --no-edit base..topic` on the **pick-series** synthetic-**10000** fixture (20 commits on `topic`, one file touched per commit). Baseline: **`grit-utils/baselines/hot-paths-after.json`** (`pick-range-20`).
 
-**Committed baseline (factory VM, dist hyperfine, Git 2.43):** grit median **~107 ms** vs git **~116 ms** (**~0.92×** time); peak RSS **~1.24×** git (grit **~20.8 MiB** vs git **~16.7 MiB**). Median time meets the **≤ 1.0×** goal; peak RSS remains above **≤ 1.2×** until shared replay/checkout work lands.
+**Committed baseline (factory VM, release hyperfine, Git 2.43, 2026-10-24):** grit median **~94 ms** vs git **~118 ms** (**~0.79×** time); peak RSS **~1.42×** git (grit **~22.4 MiB** vs git **~15.8 MiB**). The earlier ~1.24× figure came from a `dist` (LTO, stripped) build with a smaller resident binary. Median time meets the **≤ 1.0×** goal; peak RSS remains above **≤ 1.2×** until shared replay/checkout work lands.
 
 **Follow-up:** [GitHub issue #2977](https://github.com/gitbutlerapp/grit/issues/2977) — cross-cutting replay/merge work (index-hinted tree diffs in replay merge, scoped checkout for changed paths only, reduce peak RSS by avoiding full tree/index copies per step). Benefits **revert**, **merge**, and **rebase**, not pick-only code.
 
