@@ -89,6 +89,8 @@ pub struct PackStreamScanner {
     entry_is_delta: bool,
     inflate: Decompress,
     scratch: Box<[u8]>,
+    /// Pack bytes consumed through the last object (trailer hash not included).
+    stream_consumed: u64,
 }
 
 impl std::fmt::Debug for PackStreamScanner {
@@ -124,7 +126,16 @@ impl PackStreamScanner {
             entry_is_delta: false,
             inflate: Decompress::new(true),
             scratch: vec![0; SCRATCH_LEN].into_boxed_slice(),
+            stream_consumed: 0,
         }
+    }
+
+    /// Byte length of the pack body (header + objects), excluding the trailing hash.
+    ///
+    /// Meaningful once [`Self::is_complete`] is true.
+    #[must_use]
+    pub fn pack_body_byte_len(&self) -> u64 {
+        self.stream_consumed
     }
 
     /// Objects received so far, or `None` until the pack header has arrived.
@@ -160,6 +171,7 @@ impl PackStreamScanner {
                     let take = (buf.len() - *len).min(data.len());
                     buf[*len..*len + take].copy_from_slice(&data[..take]);
                     *len += take;
+                    self.stream_consumed += take as u64;
                     data = &data[take..];
                     if *len == buf.len() {
                         let header = *buf;
@@ -168,6 +180,7 @@ impl PackStreamScanner {
                 }
                 State::EntryHeader { read, kind } => {
                     let byte = data[0];
+                    self.stream_consumed += 1;
                     data = &data[1..];
                     if *read == 0 {
                         *kind = (byte >> 4) & 0x7;
@@ -193,6 +206,7 @@ impl PackStreamScanner {
                 }
                 State::BaseOffset { read } => {
                     let byte = data[0];
+                    self.stream_consumed += 1;
                     data = &data[1..];
                     *read += 1;
                     if *read > MAX_VARINT_BYTES {
@@ -204,6 +218,7 @@ impl PackStreamScanner {
                 }
                 State::BaseId { remaining } => {
                     let take = (*remaining).min(data.len());
+                    self.stream_consumed += take as u64;
                     *remaining -= take;
                     data = &data[take..];
                     if *remaining == 0 {
@@ -250,6 +265,7 @@ impl PackStreamScanner {
                 .decompress(data, &mut self.scratch, FlushDecompress::None)
                 .map_err(|_| PackStreamScanError::Inflate(self.received))?;
             let used = usize::try_from(self.inflate.total_in() - in_before).unwrap_or(data.len());
+            self.stream_consumed += used as u64;
             data = &data[used..];
             match status {
                 Status::StreamEnd => {
@@ -390,5 +406,19 @@ mod tests {
         let mut scanner = PackStreamScanner::new(HashAlgo::Sha1);
         scanner.feed(&pack).expect("scan");
         assert_eq!(scanner.counts(), Some(expected()));
+    }
+
+    #[test]
+    fn pack_body_byte_len_matches_pack_without_trailer() {
+        let pack = sample_pack();
+        let hash_len = HashAlgo::Sha1.len();
+        let mut scanner = PackStreamScanner::new(HashAlgo::Sha1);
+        scanner.feed(&pack).expect("scan");
+        assert!(scanner.is_complete());
+        assert_eq!(
+            scanner.pack_body_byte_len() as usize,
+            pack.len() - hash_len,
+            "body length should exclude the pack trailer"
+        );
     }
 }

@@ -778,3 +778,65 @@ impl Drop for ServerGuard {
         let _ = self.0.wait();
     }
 }
+
+/// Regression for issue #1656: the push client keeps stdin open after the pack;
+/// receive-pack must not block on EOF while reading the pack.
+#[cfg(unix)]
+#[test]
+fn receive_pack_finishes_when_push_client_keeps_stream_open() {
+    use std::io::Write;
+    use std::os::unix::net::UnixStream;
+    use std::thread;
+    use std::time::Duration;
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let bare = tmp.path().join("bare");
+    let repo = open_bare_with_runner(&bare, RecordingRunner::always_success());
+
+    let source = tmp.path().join("src");
+    std::fs::create_dir_all(&source).unwrap();
+    git(&source, &["init", "-q", "-b", "main", "."]);
+    std::fs::write(source.join("f"), "payload\n").unwrap();
+    git(&source, &["add", "f"]);
+    git(&source, &["commit", "-q", "-m", "c"]);
+    let oid = rev_parse(&source, "HEAD");
+    let pack = pack_for_commit(&source, oid);
+    let body = push_body(None, oid, "refs/heads/main", &pack);
+
+    let (mut server, client) = UnixStream::pair().expect("socket pair");
+    let writer = thread::spawn(move || {
+        let mut client = client;
+        client.write_all(&body).expect("write push body");
+        client.flush().expect("flush");
+        thread::sleep(Duration::from_secs(3));
+    });
+
+    let opts = ServeOptions {
+        protocol: ProtocolVersion::V0,
+        stateless_rpc: true,
+        advertise_refs: false,
+        agent: "grit-test".to_owned(),
+        hidden_refs: Vec::new(),
+    };
+    let policy = ReceivePolicy::default();
+    let mut output = Vec::new();
+    let outcome = receive_pack(&repo, &mut server, &mut output, &opts, &policy)
+        .expect("receive_pack must not hang waiting for stdin EOF");
+
+    writer.join().expect("writer thread");
+    assert!(
+        outcome.updates.iter().all(|u| u.error.is_none()),
+        "ref update failed: {:?}",
+        outcome.updates
+    );
+    assert_eq!(
+        resolve_ref(&bare, "refs/heads/main").expect("main"),
+        oid,
+        "push should land on the remote"
+    );
+    let report = String::from_utf8_lossy(&output);
+    assert!(
+        report.contains("unpack ok") && report.contains("ok refs/heads/main"),
+        "report-status should be emitted: {report}"
+    );
+}

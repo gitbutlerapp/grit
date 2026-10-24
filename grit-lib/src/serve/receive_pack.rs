@@ -8,8 +8,11 @@ use super::{
     write_line, Packet, ProtocolVersion, Result, ServeError, ServeOptions,
 };
 use crate::config::ConfigSet;
+use crate::hash::verify_trailer;
 use crate::hooks::{run_hook_in_git_dir, HookResult};
 use crate::index_pack::{ingest_received_pack, IngestPackOptions};
+use crate::objects::pack_stream_scan::{PackStreamScanError, PackStreamScanner};
+use crate::objects::HashAlgo;
 use crate::objects::ObjectId;
 use crate::receive_pack::{max_input_size_from_config, should_use_unpack_objects};
 use crate::receive_quarantine::ReceiveQuarantine;
@@ -188,7 +191,7 @@ pub fn receive_pack(
         let Some(q) = quarantine.as_ref() else {
             return Err(ServeError::Protocol("pack push requires quarantine".into()));
         };
-        match read_push_pack(input, max_input) {
+        match read_push_pack(input, repo.odb().hash_algo(), max_input) {
             Ok(pack) => ingest_pushed_pack(&q.odb(), &pack, cfg.as_ref(), max_input)
                 .err()
                 .map(|e| e.to_string()),
@@ -695,27 +698,78 @@ fn one_line(msg: &str) -> String {
     msg.lines().next().unwrap_or_default().trim().to_owned()
 }
 
-/// Read the pack bytes that follow the ref-update command list on the wire.
+/// Read exactly one packfile from the push stream.
+///
+/// The push client keeps its write half open until the report-status is read,
+/// so this must not block on stdin EOF (issue #1656).
 fn read_push_pack(
     input: &mut dyn Read,
+    hash: HashAlgo,
     max_bytes: Option<u64>,
 ) -> std::result::Result<Vec<u8>, String> {
+    let hash_len = hash.len();
+    let mut scanner = PackStreamScanner::new(hash);
     let mut buf = Vec::new();
+    let mut fed_offset = 0usize;
     let mut chunk = [0u8; 64 * 1024];
+
     loop {
-        let n = input.read(&mut chunk).map_err(|e| e.to_string())?;
-        if n == 0 {
-            break;
-        }
-        if let Some(limit) = max_bytes {
-            let next = buf.len().saturating_add(n);
-            if next as u64 > limit {
-                return Err("pack exceeds maximum input size".to_owned());
+        if scanner.is_complete() {
+            let pack_len = scanner
+                .pack_body_byte_len()
+                .checked_add(u64::try_from(hash_len).unwrap_or(u64::MAX))
+                .ok_or_else(|| "pack size overflow".to_owned())?;
+            if let Some(limit) = max_bytes {
+                if pack_len > limit {
+                    return Err("pack exceeds maximum input size".to_owned());
+                }
             }
+            let pack_len =
+                usize::try_from(pack_len).map_err(|_| "pack size overflow".to_string())?;
+            while buf.len() < pack_len {
+                let n = input.read(&mut chunk).map_err(|e| e.to_string())?;
+                if n == 0 {
+                    break;
+                }
+                if let Some(limit) = max_bytes {
+                    let next = buf.len().saturating_add(n);
+                    if next as u64 > limit {
+                        return Err("pack exceeds maximum input size".to_owned());
+                    }
+                }
+                buf.extend_from_slice(&chunk[..n]);
+            }
+            if buf.len() < pack_len {
+                return Err("truncated pack stream".to_owned());
+            }
+            let pack = buf[..pack_len].to_vec();
+            verify_trailer(hash, &pack).map_err(|e| e.to_string())?;
+            return Ok(pack);
         }
-        buf.extend_from_slice(&chunk[..n]);
+
+        if fed_offset >= buf.len() {
+            let n = input.read(&mut chunk).map_err(|e| e.to_string())?;
+            if n == 0 {
+                return Err("unexpected end of pack stream".to_owned());
+            }
+            if let Some(limit) = max_bytes {
+                let next = buf.len().saturating_add(n);
+                if next as u64 > limit {
+                    return Err("pack exceeds maximum input size".to_owned());
+                }
+            }
+            buf.extend_from_slice(&chunk[..n]);
+        }
+
+        scanner
+            .feed(&buf[fed_offset..])
+            .map_err(|e: PackStreamScanError| e.to_string())?;
+        fed_offset = if scanner.is_complete() {
+            usize::try_from(scanner.pack_body_byte_len()).unwrap_or(buf.len())
+        } else {
+            buf.len()
+        };
     }
-    Ok(buf)
 }
 
 /// Store a pushed pack using unpack-objects or index-pack, per Git limits.
