@@ -945,6 +945,9 @@ pub fn run_hook(
 }
 
 /// Run a hook with extra env vars, cwd = `GIT_DIR` (receive-pack and similar).
+///
+/// The hook sees `GIT_DIR=.`, as Git's receive-pack hooks do, so scripts that run
+/// `git` commands address the repository they were started in.
 pub fn run_hook_in_git_dir(
     repo: &Repository,
     hook_name: &str,
@@ -955,6 +958,10 @@ pub fn run_hook_in_git_dir(
     let Some(config) = repo.config().ok() else {
         return (HookResult::Failed(1), Vec::new());
     };
+    let env_vars: Vec<(&str, &str)> = std::iter::once(("GIT_DIR", "."))
+        .chain(env_vars.iter().copied())
+        .collect();
+    let env_vars = env_vars.as_slice();
     let mut captured = Vec::new();
     match run_hook_opts(
         Some(repo),
