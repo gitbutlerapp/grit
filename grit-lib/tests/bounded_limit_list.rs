@@ -225,6 +225,16 @@ fn large_max_count_without_paths_matches_git() {
 /// A merge-heavy history with many equal committer dates and some clock skew, large enough
 /// that a `--max-count` page crosses the bounded-walk cap. Returns the tip.
 fn write_tied_skewed_history(odb: &Odb, commits: usize) -> grit_lib::objects::ObjectId {
+    *write_tied_skewed_history_commits(odb, commits)
+        .last()
+        .expect("at least one commit")
+}
+
+/// Like [`write_tied_skewed_history`], returning every commit oldest first.
+fn write_tied_skewed_history_commits(
+    odb: &Odb,
+    commits: usize,
+) -> Vec<grit_lib::objects::ObjectId> {
     let mut state: u64 = 0x9e37_79b9_7f4a_7c15;
     let mut next = move || {
         state = state
@@ -251,7 +261,39 @@ fn write_tied_skewed_history(odb: &Odb, commits: usize) -> grit_lib::objects::Ob
         let commit = write_commit(odb, &parents, &format!("c{i}"), when, when).expect("commit");
         written.push(commit);
     }
-    *written.last().expect("at least one commit")
+    written
+}
+
+#[test]
+fn date_order_ranges_keep_children_before_parents_like_git() {
+    let dir = tempdir().expect("tempdir");
+    let repo = open_bare(dir.path()).expect("repo");
+    let commits = write_tied_skewed_history_commits(repo.odb(), 600);
+    let tip = commits[commits.len() - 1].to_hex();
+    let hide = commits[100].to_hex();
+    for max_count in [Some(40usize), None] {
+        let mut args = vec!["--date-order".to_owned(), tip.clone(), format!("^{hide}")];
+        if let Some(n) = max_count {
+            args.push(format!("--max-count={n}"));
+        }
+        let args: Vec<&str> = args.iter().map(String::as_str).collect();
+        let expected = support::git_rev_list(dir.path(), &args);
+        let opts = RevListOptions {
+            ordering: OrderingMode::DateOrderWalk,
+            max_count,
+            path_graph_reorder: false,
+            ..Default::default()
+        };
+        let actual = rev_list(
+            &repo,
+            std::slice::from_ref(&tip),
+            std::slice::from_ref(&hide),
+            &opts,
+        )
+        .expect("rev-list --date-order")
+        .commits;
+        assert_eq!(actual, expected, "rev-list {args:?} differs from git");
+    }
 }
 
 #[test]

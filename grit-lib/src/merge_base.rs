@@ -508,16 +508,15 @@ impl PartialOrd for WalkDateKey {
 
 /// Resumable date-order walk state for [`walk_commits_reachable_excluding_ancestors_of`].
 ///
-/// Ordering matches Git's default `rev-list`: among commits ready to print, take the
-/// greatest committer timestamp; a parent becomes ready only after all of its children
-/// still in the walk have been processed.
+/// Ordering matches Git's default `rev-list`: pop the greatest committer timestamp (ties go
+/// to the earlier queued commit) and queue each parent when it is first discovered. Nothing
+/// waits for a commit's other children, so under clock skew a parent can print before one of
+/// its children, exactly as in Git.
 #[derive(Clone, Debug)]
 pub struct ReachableWalkState {
     heap: BinaryHeap<WalkDateKey>,
     done: OidHashSet,
     queued: OidHashSet,
-    /// Selected children not yet emitted, per parent (Git `limit_list` gating).
-    unfinished_children: OidHashMap<usize>,
     /// Tips seeded on the heap up front (may emit before all children are shown).
     seeded: OidHashSet,
     seq: u64,
@@ -536,8 +535,6 @@ pub struct ReachableWalkSnapshot {
     pub done: Vec<ObjectId>,
     /// Every OID ever queued on the heap.
     pub queued: Vec<ObjectId>,
-    /// Pending child counts per parent OID.
-    pub unfinished_children: Vec<(ObjectId, u32)>,
     /// Tip OIDs seeded on the heap at walk start.
     pub seeded: Vec<ObjectId>,
     /// `seq` field.
@@ -553,16 +550,14 @@ impl ReachableWalkState {
     ///
     /// Propagates commit read errors while seeding the heap.
     pub fn new(repo: &Repository, tips: &[ObjectId], hide: &[ObjectId]) -> Result<Self> {
-        let hide_vec: Vec<ObjectId> = hide.to_vec();
         let mut cache = CommitGraphCache::new(repo);
         let mut state = Self {
             heap: BinaryHeap::new(),
             done: oid_hash_set(),
             queued: oid_hash_set(),
-            unfinished_children: oid_hash_map(),
             seeded: oid_hash_set(),
             seq: 0,
-            hide: hide_vec,
+            hide: hide.to_vec(),
             paint: None,
         };
         for &tip in tips {
@@ -583,7 +578,6 @@ impl ReachableWalkState {
             heap,
             done,
             queued,
-            unfinished_children,
             seeded,
             seq,
             hide,
@@ -595,10 +589,6 @@ impl ReachableWalkState {
                 .collect(),
             done: done.into_iter().collect(),
             queued: queued.into_iter().collect(),
-            unfinished_children: unfinished_children
-                .into_iter()
-                .map(|(oid, count)| (oid, count as usize))
-                .collect(),
             seeded: seeded.into_iter().collect(),
             seq,
             paint: None,
@@ -617,11 +607,6 @@ impl ReachableWalkState {
                 .collect(),
             done: self.done.iter().copied().collect(),
             queued: self.queued.iter().copied().collect(),
-            unfinished_children: self
-                .unfinished_children
-                .iter()
-                .map(|(oid, count)| (*oid, *count as u32))
-                .collect(),
             seeded: self.seeded.iter().copied().collect(),
             seq: self.seq,
             hide: self.hide.clone(),
@@ -699,9 +684,6 @@ impl ReachableWalkState {
         if is_tip {
             self.seeded.insert(oid);
         }
-        for parent in cache.parents_of(oid)? {
-            *self.unfinished_children.entry(parent).or_insert(0) += 1;
-        }
         let time = cache.commit_time(oid)?;
         let seq = self.seq;
         self.seq += 1;
@@ -711,11 +693,7 @@ impl ReachableWalkState {
 
     fn after_processed(&mut self, cache: &mut CommitGraphCache<'_>, oid: ObjectId) -> Result<()> {
         for parent in cache.parents_of(oid)? {
-            let Some(count) = self.unfinished_children.get_mut(&parent) else {
-                continue;
-            };
-            *count = count.saturating_sub(1);
-            if *count == 0 && !self.seeded.contains(&parent) && self.queued.insert(parent) {
+            if self.queued.insert(parent) {
                 // Ancestors of hidden commits are hidden too; keeping them off the
                 // heap stops the walk at the hide frontier instead of the root.
                 if self.is_hidden(cache, parent)? {

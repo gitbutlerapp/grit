@@ -175,11 +175,8 @@ fn write_walk_body(out: &mut Vec<u8>, walk: &ReachableWalkSnapshot) -> Result<()
     write_oid_vec(out, &walk.hide)?;
     write_oid_vec(out, &walk.done)?;
     write_oid_vec(out, &walk.queued)?;
-    write_u32(out, walk.unfinished_children.len() as u32)?;
-    for (oid, count) in &walk.unfinished_children {
-        out.write_all(oid.as_bytes()).map_err(Error::Io)?;
-        write_u32(out, *count)?;
-    }
+    // Reserved `(oid, u32)` list, always written empty; older v3 cursors may fill it.
+    write_u32(out, 0)?;
     write_oid_vec(out, &walk.seeded)?;
     write_u32(out, walk.heap.len() as u32)?;
     for &(time, seq, oid) in &walk.heap {
@@ -234,12 +231,9 @@ fn read_walk_body(cur: &mut Cursor<&[u8]>) -> Result<ReachableWalkSnapshot> {
     let hide = read_oid_vec(cur)?;
     let done = read_oid_vec(cur)?;
     let queued = read_oid_vec(cur)?;
-    let unfinished_len = read_u32(cur)? as usize;
-    let mut unfinished_children = Vec::with_capacity(unfinished_len);
-    for _ in 0..unfinished_len {
-        let oid = read_oid(cur)?;
-        let count = read_u32(cur)?;
-        unfinished_children.push((oid, count));
+    for _ in 0..read_u32(cur)? {
+        read_oid(cur)?;
+        read_u32(cur)?;
     }
     let seeded = read_oid_vec(cur)?;
     let heap_len = read_u32(cur)? as usize;
@@ -254,7 +248,6 @@ fn read_walk_body(cur: &mut Cursor<&[u8]>) -> Result<ReachableWalkSnapshot> {
         heap,
         done,
         queued,
-        unfinished_children,
         seeded,
         seq,
         hide,
@@ -573,6 +566,90 @@ mod tests {
             page.next.is_none(),
             "limit matching since-filtered count must not imply more pages"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn decodes_v3_cursor_with_filled_reserved_list() -> Result<()> {
+        let tip: ObjectId = "1111111111111111111111111111111111111111"
+            .parse()
+            .map_err(|_| Error::CorruptObject("oid".to_owned()))?;
+        let parent: ObjectId = "2222222222222222222222222222222222222222"
+            .parse()
+            .map_err(|_| Error::CorruptObject("oid".to_owned()))?;
+        let mut buf = Vec::new();
+        buf.extend_from_slice(MAGIC_V3);
+        write_oid_vec(&mut buf, &[tip])?;
+        write_oid_vec(&mut buf, &[])?;
+        write_i64(&mut buf, NO_CUTOFF)?;
+        write_i64(&mut buf, NO_CUTOFF)?;
+        write_u64(&mut buf, 2)?;
+        write_oid_vec(&mut buf, &[])?;
+        write_oid_vec(&mut buf, &[tip])?;
+        write_oid_vec(&mut buf, &[tip, parent])?;
+        write_u32(&mut buf, 1)?;
+        buf.extend_from_slice(parent.as_bytes());
+        write_u32(&mut buf, 0)?;
+        write_oid_vec(&mut buf, &[tip])?;
+        write_u32(&mut buf, 1)?;
+        write_i64(&mut buf, 100)?;
+        write_u64(&mut buf, 1)?;
+        buf.extend_from_slice(parent.as_bytes());
+
+        let token = format!("{CURSOR_PREFIX}{}", base64_encode(&buf));
+        let cursor = LogWalkCursor::decode(&token)?;
+        assert_eq!(cursor.query().tips, vec![tip]);
+        assert_eq!(cursor.walk.heap, vec![(100, 1, parent)]);
+        assert_eq!(cursor.walk.queued, vec![tip, parent]);
+
+        let reencoded = LogWalkCursor::decode(&cursor.encode()?)?;
+        assert_eq!(reencoded, cursor);
+        Ok(())
+    }
+
+    #[test]
+    fn range_pages_match_git_log_under_clock_skew() -> Result<()> {
+        let dir = tempdir().map_err(Error::Io)?;
+        let repo = open_repo(&dir)?;
+        let base = write_commit(&repo.odb(), &[], "base", 50)?;
+        let shared = write_commit(&repo.odb(), &[base], "shared", 120)?;
+        let newer = write_commit(&repo.odb(), &[shared], "newer", 350)?;
+        // Older than its parent: Git prints `shared` before this child.
+        let skewed = write_commit(&repo.odb(), &[shared], "skewed", 100)?;
+        let merge = write_commit(&repo.odb(), &[newer, skewed], "merge", 400)?;
+        let tip = write_commit(&repo.odb(), &[merge], "tip", 500)?;
+        crate::refs::write_ref(repo.git_dir(), "refs/heads/main", &tip)?;
+        crate::refs::write_symbolic_ref(repo.git_dir(), "HEAD", "refs/heads/main")?;
+
+        let out = Command::new("git")
+            .args(["-C", repo.git_dir().to_str().expect("utf8"), "rev-list"])
+            .arg(tip.to_hex())
+            .arg(format!("^{base}"))
+            .output()
+            .expect("git rev-list");
+        assert!(out.status.success());
+        let git_order: Vec<ObjectId> = String::from_utf8_lossy(&out.stdout)
+            .lines()
+            .filter_map(|line| line.parse().ok())
+            .collect();
+        assert_eq!(git_order, vec![tip, merge, newer, shared, skewed]);
+
+        let query = LogWalkQuery {
+            tips: vec![tip],
+            hide: vec![base],
+            cutoffs: ReachableWalkCommitterCutoffs::default(),
+        };
+        let mut cursor: Option<LogWalkCursor> = None;
+        let mut paged = Vec::new();
+        loop {
+            let page = LogWalkCursor::step(&repo, &query, cursor.as_ref(), 2)?;
+            paged.extend(page.commits);
+            match page.next {
+                Some(next) => cursor = Some(LogWalkCursor::decode(&next.encode()?)?),
+                None => break,
+            }
+        }
+        assert_eq!(paged, git_order);
         Ok(())
     }
 
