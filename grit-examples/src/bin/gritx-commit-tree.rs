@@ -1,8 +1,10 @@
 use anyhow::Result;
 use clap::Parser;
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::objects::{serialize_commit, CommitData, ObjectKind};
+use grit_lib::ident::Signature;
+use grit_lib::objects::NewCommit;
 use grit_lib::repo::Repository;
+use time::OffsetDateTime;
 
 #[derive(Debug, Parser)]
 #[command(
@@ -34,22 +36,11 @@ fn run() -> Result<()> {
         .iter()
         .map(|p| p.parse())
         .collect::<Result<Vec<_>, _>>()?;
-    let ident = "Grit Example <grit@example.invalid> 1700000000 +0000".to_owned();
-    let commit = CommitData {
-        tree,
-        parents,
-        author: ident.clone(),
-        committer: ident,
-        author_raw: Vec::new(),
-        committer_raw: Vec::new(),
-        encoding: None,
-        message: format!("{}\n", cli.message),
-        raw_message: None,
-        extra_headers: Vec::new(),
-    };
-    let oid = repo
-        .odb()
-        .write(ObjectKind::Commit, &serialize_commit(&commit))?;
+    let when = OffsetDateTime::from_unix_timestamp(1_700_000_000)?;
+    let ident = Signature::new("Grit Example", "grit@example.invalid", when)?;
+    let oid = repo.objects().write_commit(
+        &NewCommit::new(tree, ident.clone(), ident, cli.message).with_parents(parents),
+    )?;
     println!("{oid}");
     Ok(())
 }

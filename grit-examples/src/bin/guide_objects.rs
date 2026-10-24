@@ -1,14 +1,13 @@
-//! Write a blob, tree, and commit through [`grit_lib::objects::odb::Odb`], then read them back.
+//! Write a blob, tree, and commit through [`grit_lib::objects::Objects`], then read them back.
 //!
 //! Source for the library guide "Objects" page (included in the docs site).
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::objects::{
-    parse_commit, parse_tree, serialize_commit, serialize_tree, CommitData, ObjectKind, TreeEntry,
-    TreeRefIter,
-};
+use grit_lib::ident::Signature;
+use grit_lib::objects::{parse_commit, parse_tree, NewCommit, ObjectKind, TreeEntry, TreeRefIter};
 use grit_lib::repo::{InitOptions, Repository};
 use std::path::{Path, PathBuf};
+use time::OffsetDateTime;
 
 fn write_demo_objects(
     repo: &Repository,
@@ -23,30 +22,20 @@ fn write_demo_objects(
     let blob_data = b"hello from the library guide\n";
     let blob_oid = repo.objects().write(ObjectKind::Blob, blob_data)?;
 
-    let tree_entries = vec![TreeEntry {
+    let tree_oid = repo.objects().write_tree([TreeEntry {
         mode: 0o100644,
         name: b"README".to_vec(),
         oid: blob_oid,
-    }];
-    let tree_oid = repo
-        .objects()
-        .write(ObjectKind::Tree, &serialize_tree(&tree_entries))?;
+    }])?;
 
-    let commit = CommitData {
-        tree: tree_oid,
-        parents: Vec::new(),
-        author: "Ada Lovelace <ada@example.com> 0 +0000".to_owned(),
-        committer: "Ada Lovelace <ada@example.com> 0 +0000".to_owned(),
-        author_raw: Vec::new(),
-        committer_raw: Vec::new(),
-        encoding: None,
-        message: "Library guide objects example\n".to_owned(),
-        raw_message: None,
-        extra_headers: Vec::new(),
-    };
-    let commit_oid = repo
-        .objects()
-        .write(ObjectKind::Commit, &serialize_commit(&commit))?;
+    let epoch = OffsetDateTime::UNIX_EPOCH;
+    let ada = Signature::new("Ada Lovelace", "ada@example.com", epoch)?;
+    let commit_oid = repo.objects().write_commit(&NewCommit::new(
+        tree_oid,
+        ada.clone(),
+        ada,
+        "Library guide objects example",
+    ))?;
 
     let tree_obj = repo.objects().read(&tree_oid)?;
     let mut iter_entries = TreeRefIter::infer_oid_len(&tree_obj.data)?;

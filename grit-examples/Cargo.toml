@@ -119,6 +119,7 @@ flate2.workspace = true
 grit-lib = { path = "../grit-lib", features = ["http-ureq"] }
 rusqlite = { version = "0.32", features = ["bundled"] }
 tempfile.workspace = true
+time.workspace = true
 
 [dev-dependencies]
 grit-test-support = { path = "../grit-test-support" }

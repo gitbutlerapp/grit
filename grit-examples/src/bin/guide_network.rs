@@ -5,7 +5,8 @@
 use grit_examples::remote;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::config::ConfigSet;
-use grit_lib::objects::{parse_commit, serialize_commit, CommitData, ObjectKind};
+use grit_lib::ident::parse_signature;
+use grit_lib::objects::NewCommit;
 use grit_lib::refs;
 use grit_lib::remote::transfer::{FetchOptions, PushOptions, PushRefSpec, TagMode};
 use grit_lib::remote::transport_path::resolve_local_remote_git_dir;
@@ -56,23 +57,19 @@ fn main() -> Result<(), grit_lib::error::Error> {
     let tracking = refs::resolve_ref(&git_dir, "refs/remotes/origin/main")?;
     refs::write_ref(&git_dir, "refs/heads/main", &tracking)?;
 
-    let parent_obj = repo.odb().read(&tracking)?;
-    let parent = parse_commit(&parent_obj.data)?;
-    let commit = CommitData {
-        tree: parent.tree,
-        parents: vec![tracking],
-        author: parent.author.clone(),
-        committer: parent.committer.clone(),
-        author_raw: parent.author_raw.clone(),
-        committer_raw: parent.committer_raw.clone(),
-        encoding: parent.encoding.clone(),
-        message: "library guide network example\n".to_owned(),
-        raw_message: None,
-        extra_headers: Vec::new(),
-    };
-    let new_oid = repo
-        .odb()
-        .write(ObjectKind::Commit, &serialize_commit(&commit))?;
+    let parent = repo.objects().read_commit(&tracking)?;
+    let committer = parse_signature(&parent.committer).ok_or_else(|| {
+        grit_lib::error::Error::Message("parent committer is not a valid identity".to_owned())
+    })?;
+    let new_oid = repo.objects().write_commit(
+        &NewCommit::new(
+            parent.tree,
+            committer.clone(),
+            committer,
+            "library guide network example",
+        )
+        .with_parents([tracking]),
+    )?;
     refs::write_ref(&git_dir, "refs/heads/main", &new_oid)?;
 
     let spec = PushRefSpec {
