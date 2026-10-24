@@ -1981,6 +1981,7 @@ pub fn grit_lib::config::git_path::is_common_git_path(&str) -> bool
 pub fn grit_lib::config::git_path::longest_ancestor_length(&str, &str) -> core::result::Result<i32, grit_lib::config::git_path::GitPathError>
 pub fn grit_lib::config::git_path::normalize_path_copy(&str) -> core::result::Result<alloc::string::String, grit_lib::config::git_path::GitPathError>
 pub fn grit_lib::config::git_path::path_for_disk_compare(&std::path::Path) -> std::path::PathBuf
+pub fn grit_lib::config::git_path::path_for_error_message(&std::path::Path) -> alloc::string::String
 pub fn grit_lib::config::git_path::path_lexical_for_disk_compare(&std::path::Path) -> std::path::PathBuf
 pub fn grit_lib::config::git_path::path_to_git_slash(&std::path::Path) -> alloc::string::String
 pub fn grit_lib::config::git_path::prefix_path_gently(&str, &str, &std::path::Path) -> core::option::Option<alloc::string::String>
@@ -11416,6 +11417,8 @@ pub grit_lib::porcelain::branch::BranchError::AlreadyExists::name: alloc::string
 pub grit_lib::porcelain::branch::BranchError::CheckedOut
 pub grit_lib::porcelain::branch::BranchError::CheckedOut::name: alloc::string::String
 pub grit_lib::porcelain::branch::BranchError::CheckedOut::worktree: alloc::string::String
+pub grit_lib::porcelain::branch::BranchError::CurrentlyCheckedOut
+pub grit_lib::porcelain::branch::BranchError::CurrentlyCheckedOut::name: alloc::string::String
 pub grit_lib::porcelain::branch::BranchError::InvalidName
 pub grit_lib::porcelain::branch::BranchError::InvalidName::name: alloc::string::String
 pub grit_lib::porcelain::branch::BranchError::InvalidName::reason: alloc::string::String
@@ -11665,6 +11668,8 @@ pub grit_lib::porcelain::branch_error::BranchError::AlreadyExists::name: alloc::
 pub grit_lib::porcelain::branch_error::BranchError::CheckedOut
 pub grit_lib::porcelain::branch_error::BranchError::CheckedOut::name: alloc::string::String
 pub grit_lib::porcelain::branch_error::BranchError::CheckedOut::worktree: alloc::string::String
+pub grit_lib::porcelain::branch_error::BranchError::CurrentlyCheckedOut
+pub grit_lib::porcelain::branch_error::BranchError::CurrentlyCheckedOut::name: alloc::string::String
 pub grit_lib::porcelain::branch_error::BranchError::InvalidName
 pub grit_lib::porcelain::branch_error::BranchError::InvalidName::name: alloc::string::String
 pub grit_lib::porcelain::branch_error::BranchError::InvalidName::reason: alloc::string::String
