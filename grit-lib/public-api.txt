@@ -11666,6 +11666,22 @@ impl core::marker::Unpin for grit_lib::pathspec::PathspecMatchContext
 impl core::marker::UnsafeUnpin for grit_lib::pathspec::PathspecMatchContext
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::pathspec::PathspecMatchContext
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::pathspec::PathspecMatchContext
+pub struct grit_lib::pathspec::PathspecMatcher<'s>
+impl<'s> grit_lib::pathspec::PathspecMatcher<'s>
+pub fn grit_lib::pathspec::PathspecMatcher<'s>::is_empty(&self) -> bool
+pub fn grit_lib::pathspec::PathspecMatcher<'s>::matches(&self, &str) -> bool
+pub fn grit_lib::pathspec::PathspecMatcher<'s>::matches_change(&self, &str, core::option::Option<&str>) -> bool
+impl<'s> core::clone::Clone for grit_lib::pathspec::PathspecMatcher<'s>
+pub fn grit_lib::pathspec::PathspecMatcher<'s>::clone(&self) -> Self
+impl<'s> core::fmt::Debug for grit_lib::pathspec::PathspecMatcher<'s>
+pub fn grit_lib::pathspec::PathspecMatcher<'s>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'s> core::marker::Freeze for grit_lib::pathspec::PathspecMatcher<'s>
+impl<'s> core::marker::Send for grit_lib::pathspec::PathspecMatcher<'s>
+impl<'s> core::marker::Sync for grit_lib::pathspec::PathspecMatcher<'s>
+impl<'s> core::marker::Unpin for grit_lib::pathspec::PathspecMatcher<'s>
+impl<'s> core::marker::UnsafeUnpin for grit_lib::pathspec::PathspecMatcher<'s>
+impl<'s> core::panic::unwind_safe::RefUnwindSafe for grit_lib::pathspec::PathspecMatcher<'s>
+impl<'s> core::panic::unwind_safe::UnwindSafe for grit_lib::pathspec::PathspecMatcher<'s>
 pub struct grit_lib::pathspec::ResolvedPathspecs
 pub grit_lib::pathspec::ResolvedPathspecs::scoped: bool
 pub grit_lib::pathspec::ResolvedPathspecs::sources: alloc::vec::Vec<alloc::string::String>
@@ -15664,7 +15680,6 @@ pub struct grit_lib::prelude::Repository
 impl grit_lib::repo::Repository
 pub fn grit_lib::repo::Repository::bundles(&self) -> grit_lib::repo_handles::RepositoryBundles<'_>
 pub fn grit_lib::repo::Repository::change_id_generator(&self) -> alloc::rcs::arc::Arc<dyn grit_lib::change_id::ChangeIdGenerator>
-pub fn grit_lib::repo::Repository::change_matches_pathspecs(&self, &str, core::option::Option<&str>, &[alloc::string::String]) -> grit_lib::error::Result<bool>
 pub fn grit_lib::repo::Repository::command_runner(&self) -> alloc::rcs::arc::Arc<dyn grit_lib::command_runner::CommandRunner>
 pub fn grit_lib::repo::Repository::common_git_dir(&self) -> &std::path::Path
 pub fn grit_lib::repo::Repository::config(&self) -> grit_lib::error::Result<alloc::rcs::arc::Arc<grit_lib::config::ConfigSet>>
@@ -15692,6 +15707,7 @@ pub fn grit_lib::repo::Repository::patch_id(&self, &grit_lib::objects::ObjectId,
 pub fn grit_lib::repo::Repository::paths_match_pathspecs(&self, &str, &[alloc::string::String]) -> grit_lib::error::Result<bool>
 pub fn grit_lib::repo::Repository::pathspec_argv_prefix<'a>(&'a self, &str) -> core::option::Option<&'a str>
 pub fn grit_lib::repo::Repository::pathspec_cwd_prefix(&self) -> core::option::Option<&str>
+pub fn grit_lib::repo::Repository::pathspec_matcher<'s>(&self, &'s [alloc::string::String]) -> grit_lib::error::Result<grit_lib::pathspec::PathspecMatcher<'s>>
 pub fn grit_lib::repo::Repository::prefetch_promised(&self, &[grit_lib::objects::ObjectId]) -> grit_lib::error::Result<()>
 pub fn grit_lib::repo::Repository::reference_unix_time(&self) -> i64
 pub fn grit_lib::repo::Repository::references(&self) -> grit_lib::refs::handle::References<'_>
@@ -20508,7 +20524,6 @@ pub struct grit_lib::repo::Repository
 impl grit_lib::repo::Repository
 pub fn grit_lib::repo::Repository::bundles(&self) -> grit_lib::repo_handles::RepositoryBundles<'_>
 pub fn grit_lib::repo::Repository::change_id_generator(&self) -> alloc::rcs::arc::Arc<dyn grit_lib::change_id::ChangeIdGenerator>
-pub fn grit_lib::repo::Repository::change_matches_pathspecs(&self, &str, core::option::Option<&str>, &[alloc::string::String]) -> grit_lib::error::Result<bool>
 pub fn grit_lib::repo::Repository::command_runner(&self) -> alloc::rcs::arc::Arc<dyn grit_lib::command_runner::CommandRunner>
 pub fn grit_lib::repo::Repository::common_git_dir(&self) -> &std::path::Path
 pub fn grit_lib::repo::Repository::config(&self) -> grit_lib::error::Result<alloc::rcs::arc::Arc<grit_lib::config::ConfigSet>>
@@ -20536,6 +20551,7 @@ pub fn grit_lib::repo::Repository::patch_id(&self, &grit_lib::objects::ObjectId,
 pub fn grit_lib::repo::Repository::paths_match_pathspecs(&self, &str, &[alloc::string::String]) -> grit_lib::error::Result<bool>
 pub fn grit_lib::repo::Repository::pathspec_argv_prefix<'a>(&'a self, &str) -> core::option::Option<&'a str>
 pub fn grit_lib::repo::Repository::pathspec_cwd_prefix(&self) -> core::option::Option<&str>
+pub fn grit_lib::repo::Repository::pathspec_matcher<'s>(&self, &'s [alloc::string::String]) -> grit_lib::error::Result<grit_lib::pathspec::PathspecMatcher<'s>>
 pub fn grit_lib::repo::Repository::prefetch_promised(&self, &[grit_lib::objects::ObjectId]) -> grit_lib::error::Result<()>
 pub fn grit_lib::repo::Repository::reference_unix_time(&self) -> i64
 pub fn grit_lib::repo::Repository::references(&self) -> grit_lib::refs::handle::References<'_>
@@ -25499,6 +25515,22 @@ impl core::marker::Unpin for grit_lib::pathspec::PathspecMatchContext
 impl core::marker::UnsafeUnpin for grit_lib::pathspec::PathspecMatchContext
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::pathspec::PathspecMatchContext
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::pathspec::PathspecMatchContext
+pub struct grit_lib::worktree::pathspec::PathspecMatcher<'s>
+impl<'s> grit_lib::pathspec::PathspecMatcher<'s>
+pub fn grit_lib::pathspec::PathspecMatcher<'s>::is_empty(&self) -> bool
+pub fn grit_lib::pathspec::PathspecMatcher<'s>::matches(&self, &str) -> bool
+pub fn grit_lib::pathspec::PathspecMatcher<'s>::matches_change(&self, &str, core::option::Option<&str>) -> bool
+impl<'s> core::clone::Clone for grit_lib::pathspec::PathspecMatcher<'s>
+pub fn grit_lib::pathspec::PathspecMatcher<'s>::clone(&self) -> Self
+impl<'s> core::fmt::Debug for grit_lib::pathspec::PathspecMatcher<'s>
+pub fn grit_lib::pathspec::PathspecMatcher<'s>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'s> core::marker::Freeze for grit_lib::pathspec::PathspecMatcher<'s>
+impl<'s> core::marker::Send for grit_lib::pathspec::PathspecMatcher<'s>
+impl<'s> core::marker::Sync for grit_lib::pathspec::PathspecMatcher<'s>
+impl<'s> core::marker::Unpin for grit_lib::pathspec::PathspecMatcher<'s>
+impl<'s> core::marker::UnsafeUnpin for grit_lib::pathspec::PathspecMatcher<'s>
+impl<'s> core::panic::unwind_safe::RefUnwindSafe for grit_lib::pathspec::PathspecMatcher<'s>
+impl<'s> core::panic::unwind_safe::UnwindSafe for grit_lib::pathspec::PathspecMatcher<'s>
 pub struct grit_lib::worktree::pathspec::ResolvedPathspecs
 pub grit_lib::worktree::pathspec::ResolvedPathspecs::scoped: bool
 pub grit_lib::worktree::pathspec::ResolvedPathspecs::sources: alloc::vec::Vec<alloc::string::String>

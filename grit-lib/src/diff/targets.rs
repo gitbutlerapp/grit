@@ -24,7 +24,7 @@ use crate::index::MODE_TREE;
 use crate::objects::odb::Odb;
 use crate::objects::{parse_commit, parse_tree, CommitData, ObjectId, ObjectKind};
 use crate::parallel::{par_map, ParallelOp, ThreadPolicy};
-use crate::pathspec::{exact_literal_pathspec_set, PathspecMatchContext};
+use crate::pathspec::{exact_literal_pathspec_set, PathspecMatchContext, PathspecMatcher};
 use crate::porcelain::pathspec_match::{
     ensure_pathspec_matches_known_in_repository, pathspec_matches_known_in_repository,
 };
@@ -837,26 +837,20 @@ fn filter_file_changes(
     if specs.is_empty() {
         return Ok(changes);
     }
-    let mut kept = Vec::with_capacity(changes.len());
-    for change in changes {
-        if repo.change_matches_pathspecs(&change.path, change.old_path.as_deref(), specs)? {
-            kept.push(change);
-        }
-    }
-    Ok(kept)
+    let matcher = repo.pathspec_matcher(specs)?;
+    Ok(changes
+        .into_iter()
+        .filter(|c| matcher.matches_change(&c.path, c.old_path.as_deref()))
+        .collect())
 }
 
-fn diff_entry_matches_pathspecs(
-    repo: &Repository,
-    entry: &DiffEntry,
-    specs: &[String],
-) -> Result<bool> {
+fn diff_entry_matches(matcher: &PathspecMatcher<'_>, entry: &DiffEntry) -> bool {
     let path = entry
         .new_path
         .as_deref()
         .or(entry.old_path.as_deref())
         .unwrap_or("");
-    repo.change_matches_pathspecs(path, entry.old_path.as_deref(), specs)
+    matcher.matches_change(path, entry.old_path.as_deref())
 }
 
 fn filter_tree_diff(
@@ -867,13 +861,11 @@ fn filter_tree_diff(
     if specs.is_empty() {
         return Ok(items);
     }
-    let mut kept = Vec::with_capacity(items.len());
-    for item in items {
-        if diff_entry_matches_pathspecs(repo, &item.entry, specs)? {
-            kept.push(item);
-        }
-    }
-    Ok(kept)
+    let matcher = repo.pathspec_matcher(specs)?;
+    Ok(items
+        .into_iter()
+        .filter(|item| diff_entry_matches(&matcher, &item.entry))
+        .collect())
 }
 
 fn pathspec_restrict_set(pathspecs: &[String]) -> Option<Arc<BTreeSet<String>>> {
@@ -1254,13 +1246,8 @@ pub(crate) fn collect_diff_entries_for_patch_target(
         }
     };
     if !pathspecs.is_empty() {
-        let mut kept = Vec::with_capacity(entries.len());
-        for entry in entries {
-            if diff_entry_matches_pathspecs(repo, &entry, pathspecs)? {
-                kept.push(entry);
-            }
-        }
-        entries = kept;
+        let matcher = repo.pathspec_matcher(pathspecs)?;
+        entries.retain(|e| diff_entry_matches(&matcher, e));
     }
     Ok(entries)
 }

@@ -1855,16 +1855,11 @@ fn filter_file_changes(
     repo: &grit_lib::repo::Repository,
     specs: &[String],
 ) -> Result<Vec<FileChange>> {
-    if specs.is_empty() {
-        return Ok(changes);
-    }
-    let mut kept = Vec::with_capacity(changes.len());
-    for change in changes {
-        if repo.change_matches_pathspecs(&change.path, change.old_path.as_deref(), specs)? {
-            kept.push(change);
-        }
-    }
-    Ok(kept)
+    let matcher = repo.pathspec_matcher(specs)?;
+    Ok(changes
+        .into_iter()
+        .filter(|c| matcher.matches_change(&c.path, c.old_path.as_deref()))
+        .collect())
 }
 
 fn single_worktree_pathspec(
@@ -1991,21 +1986,18 @@ fn filter_diff_entries(
     repo: &grit_lib::repo::Repository,
     specs: &[String],
 ) -> Result<Vec<DiffEntry>> {
-    if specs.is_empty() {
-        return Ok(entries);
-    }
-    let mut kept = Vec::with_capacity(entries.len());
-    for entry in entries {
-        let path = entry
-            .new_path
-            .as_deref()
-            .or(entry.old_path.as_deref())
-            .unwrap_or("");
-        if repo.change_matches_pathspecs(path, entry.old_path.as_deref(), specs)? {
-            kept.push(entry);
-        }
-    }
-    Ok(kept)
+    let matcher = repo.pathspec_matcher(specs)?;
+    Ok(entries
+        .into_iter()
+        .filter(|e| {
+            let path = e
+                .new_path
+                .as_deref()
+                .or(e.old_path.as_deref())
+                .unwrap_or("");
+            matcher.matches_change(path, e.old_path.as_deref())
+        })
+        .collect())
 }
 
 fn outcome_stat_from_changes(

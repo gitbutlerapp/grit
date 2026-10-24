@@ -1092,94 +1092,52 @@ impl Repository {
 
     /// Whether `path` is selected by the resolved pathspec list `specs`.
     ///
-    /// Uses Git's list semantics: `path` must match at least one positive spec (any path when
-    /// there are none or `specs` is empty) and no `:(exclude)` spec. All pathspec magic is
-    /// honored, including `:(attr:...)`, which is evaluated against this repository's attributes:
-    /// the work-tree stack (global file, root and nested `.gitattributes`, `info/attributes`), or
-    /// `info/attributes` and the global file for a bare repository. The attributes are loaded
-    /// only when a spec carries attr magic, from the per-handle cache that is revalidated against
-    /// the attribute files on every call. Paths and specs follow `core.precomposeunicode`.
+    /// Shorthand for [`Self::pathspec_matcher`] followed by
+    /// [`crate::pathspec::PathspecMatcher::matches`]; build the matcher once instead when
+    /// filtering many paths with specs that may carry `:(attr:...)` magic.
     ///
-    /// `path` is treated as a regular file: a spec ending in `/` does not match a path equal to
-    /// its directory, and `builtin_objectmode` reads as `100644`. Use
-    /// [`crate::pathspec::matches_pathspec_list_for_object`] when the entry mode matters.
+    /// # Errors
+    ///
+    /// Same as [`Self::pathspec_matcher`].
+    pub fn paths_match_pathspecs(&self, path: &str, specs: &[String]) -> Result<bool> {
+        Ok(self.pathspec_matcher(specs)?.matches(path))
+    }
+
+    /// Prepare `specs` (resolved pathspecs) for matching many paths in this repository.
+    ///
+    /// The matcher applies Git's list semantics and every pathspec magic word, including
+    /// `:(attr:...)`, which is evaluated against this repository's attributes: the work-tree
+    /// stack (global file, root and nested `.gitattributes`, `info/attributes`), or
+    /// `info/attributes` and the global file for a bare repository. Attributes are read only
+    /// when a spec carries attr magic, once per matcher, from the per-handle cache. Paths and
+    /// specs follow `core.precomposeunicode`.
     ///
     /// # Errors
     ///
     /// Only when a spec carries attr magic: the error from loading the attribute files (for
     /// example an unreadable `core.attributesFile` setting or a poisoned cache lock).
-    pub fn paths_match_pathspecs(&self, path: &str, specs: &[String]) -> Result<bool> {
+    pub fn pathspec_matcher<'s>(
+        &self,
+        specs: &'s [String],
+    ) -> Result<crate::pathspec::PathspecMatcher<'s>> {
+        let precompose = self.pathspec_precompose_enabled();
         if !specs
             .iter()
             .any(|spec| crate::pathspec::pathspec_has_attr_magic(spec))
         {
-            return Ok(crate::pathspec::matches_pathspec_list_with_context(
-                path,
-                specs,
-                self.pathspec_match_context(),
+            return Ok(crate::pathspec::PathspecMatcher::new(
+                specs, precompose, None,
             ));
         }
-        let attrs = self.pathspec_attributes()?;
-        Ok(self.paths_match_pathspecs_with_attributes(path, specs, &attrs))
-    }
-
-    /// Attribute rules that `:(attr:...)` pathspecs are evaluated against (see
-    /// [`Self::paths_match_pathspecs`]); load once when matching many paths.
-    pub(crate) fn pathspec_attributes(
-        &self,
-    ) -> Result<Arc<crate::attributes::ParsedGitAttributes>> {
-        match self.work_tree() {
-            Some(work_tree) => self.caches().gitattributes_stack_shared(self, work_tree),
-            None => self.caches().gitattributes_bare_shared(self),
-        }
-    }
-
-    /// [`Self::paths_match_pathspecs`] with attributes from [`Self::pathspec_attributes`].
-    pub(crate) fn paths_match_pathspecs_with_attributes(
-        &self,
-        path: &str,
-        specs: &[String],
-        attrs: &crate::attributes::ParsedGitAttributes,
-    ) -> bool {
-        const REGULAR_FILE: u32 = 0o100644;
-        if !self.pathspec_precompose_enabled() {
-            return crate::pathspec::matches_pathspec_list_for_object(
-                path,
-                REGULAR_FILE,
-                &attrs.rules,
-                specs,
-            );
-        }
-        let path = crate::unicode_normalization::precompose_utf8_path(path);
-        let specs: Vec<String> = specs
-            .iter()
-            .map(|spec| crate::unicode_normalization::precompose_utf8_path(spec).into_owned())
-            .collect();
-        crate::pathspec::matches_pathspec_list_for_object(&path, REGULAR_FILE, &attrs.rules, &specs)
-    }
-
-    /// Whether a changed file is selected by `specs`, checking its current `path` and, for a
-    /// rename or copy, its `old_path` too (Git limits diffs on either side of a rename).
-    ///
-    /// Empty `specs` select every change. See [`Self::paths_match_pathspecs`] for the matching
-    /// rules.
-    ///
-    /// # Errors
-    ///
-    /// Same as [`Self::paths_match_pathspecs`].
-    pub fn change_matches_pathspecs(
-        &self,
-        path: &str,
-        old_path: Option<&str>,
-        specs: &[String],
-    ) -> Result<bool> {
-        if specs.is_empty() || self.paths_match_pathspecs(path, specs)? {
-            return Ok(true);
-        }
-        match old_path {
-            Some(old) if old != path => self.paths_match_pathspecs(old, specs),
-            _ => Ok(false),
-        }
+        let attrs = match self.work_tree() {
+            Some(work_tree) => self.caches().gitattributes_stack_shared(self, work_tree)?,
+            None => self.caches().gitattributes_bare_shared(self)?,
+        };
+        Ok(crate::pathspec::PathspecMatcher::new(
+            specs,
+            precompose,
+            Some(attrs),
+        ))
     }
 
     /// Repository-relative prefix of the process cwd for argv pathspecs (no trailing slash).

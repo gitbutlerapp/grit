@@ -53,18 +53,18 @@ fn filter_entries(
     if pathspecs.is_empty() {
         return Ok(entries);
     }
-    let mut kept = Vec::with_capacity(entries.len());
-    for entry in entries {
-        let path = entry
-            .new_path
-            .as_deref()
-            .or(entry.old_path.as_deref())
-            .unwrap_or("");
-        if repo.change_matches_pathspecs(path, entry.old_path.as_deref(), pathspecs)? {
-            kept.push(entry);
-        }
-    }
-    Ok(kept)
+    let matcher = repo.pathspec_matcher(pathspecs)?;
+    Ok(entries
+        .into_iter()
+        .filter(|entry| {
+            let path = entry
+                .new_path
+                .as_deref()
+                .or(entry.old_path.as_deref())
+                .unwrap_or("");
+            matcher.matches_change(path, entry.old_path.as_deref())
+        })
+        .collect())
 }
 
 fn parent_tree_for_commit(

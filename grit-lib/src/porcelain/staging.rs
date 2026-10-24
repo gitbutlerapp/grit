@@ -42,9 +42,7 @@ pub fn stage_worktree_changes(repo: &Repository, pathspecs: &[String]) -> Result
     let precompose_unicode =
         effective_core_precomposeunicode_with_config(Some(repo.git_dir()), Some(&config_arc));
 
-    let matches = |path: &str| -> Result<bool> {
-        Ok(pathspecs.is_empty() || repo.paths_match_pathspecs(path, pathspecs)?)
-    };
+    let matcher = repo.pathspec_matcher(pathspecs)?;
 
     let rules_arc = std::sync::Arc::new(std::sync::Mutex::new(worktree_rules));
     let diff_opts = DiffIndexToWorktreeOptions {
@@ -70,7 +68,7 @@ pub fn stage_worktree_changes(repo: &Repository, pathspecs: &[String]) -> Result
     let mut staged = 0usize;
     for entry in unstaged {
         let path = entry.path();
-        if !matches(path)? {
+        if !matcher.matches(path) {
             continue;
         }
         if entry.status == DiffStatus::Deleted {
@@ -116,7 +114,7 @@ pub fn stage_worktree_changes(repo: &Repository, pathspecs: &[String]) -> Result
         &worktree_rules,
     )?;
     for path in untracked {
-        if !matches(&path)? {
+        if !matcher.matches(&path) {
             continue;
         }
         stage_new_worktree_path(

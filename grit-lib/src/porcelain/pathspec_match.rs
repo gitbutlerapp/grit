@@ -102,11 +102,8 @@ impl<'r> KnownPathspecChecker<'r> {
         let known = self.known.as_deref().unwrap_or_default();
         if pathspec_has_attr_magic(resolved) {
             let specs = [resolved.to_owned()];
-            let attrs = self.repo.pathspec_attributes()?;
-            return Ok(known.iter().any(|path| {
-                self.repo
-                    .paths_match_pathspecs_with_attributes(path, &specs, &attrs)
-            }));
+            let matcher = self.repo.pathspec_matcher(&specs)?;
+            return Ok(known.iter().any(|path| matcher.matches(path)));
         }
         Ok(sorted_paths_match_pathspec(
             resolved,

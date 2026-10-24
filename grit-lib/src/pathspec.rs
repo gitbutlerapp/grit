@@ -923,6 +923,80 @@ pub fn pathspec_has_attr_magic(spec: &str) -> bool {
         && !parse_element_magic(spec).0.attr_requirements.is_empty()
 }
 
+/// A resolved pathspec list bound to one repository's matching rules, built by
+/// [`crate::repo::Repository::pathspec_matcher`].
+///
+/// Holds the repository's attributes when a spec carries `:(attr:...)` magic, so testing many
+/// paths reads them once. Paths are treated as regular files: a spec ending in `/` does not match
+/// a path equal to its directory, and `builtin_objectmode` reads as `100644`. Use
+/// [`matches_pathspec_list_for_object`] when the entry mode matters.
+#[derive(Debug, Clone)]
+pub struct PathspecMatcher<'s> {
+    specs: Cow<'s, [String]>,
+    precompose: bool,
+    attrs: Option<std::sync::Arc<crate::attributes::ParsedGitAttributes>>,
+}
+
+impl<'s> PathspecMatcher<'s> {
+    pub(crate) fn new(
+        specs: &'s [String],
+        precompose: bool,
+        attrs: Option<std::sync::Arc<crate::attributes::ParsedGitAttributes>>,
+    ) -> Self {
+        // The attribute-aware matcher has no precompose context, so normalize the specs up front.
+        let specs = if precompose && attrs.is_some() {
+            Cow::Owned(
+                specs
+                    .iter()
+                    .map(|spec| precompose_utf8_path(spec).into_owned())
+                    .collect(),
+            )
+        } else {
+            Cow::Borrowed(specs)
+        };
+        Self {
+            specs,
+            precompose,
+            attrs,
+        }
+    }
+
+    /// Whether `path` is selected: it matches at least one positive spec (any path when there
+    /// are none or the list is empty) and no `:(exclude)` spec.
+    #[must_use]
+    pub fn matches(&self, path: &str) -> bool {
+        const REGULAR_FILE: u32 = 0o100644;
+        let Some(attrs) = &self.attrs else {
+            return matches_pathspec_list_with_context(
+                path,
+                &self.specs,
+                pathspec_match_context_with_precompose(self.precompose),
+            );
+        };
+        let path = if self.precompose {
+            precompose_utf8_path(path)
+        } else {
+            Cow::Borrowed(path)
+        };
+        matches_pathspec_list_for_object(&path, REGULAR_FILE, &attrs.rules, &self.specs)
+    }
+
+    /// Whether a changed file is selected, checking its current `path` and, for a rename or
+    /// copy, its `old_path` too (Git limits diffs on either side of a rename).
+    #[must_use]
+    pub fn matches_change(&self, path: &str, old_path: Option<&str>) -> bool {
+        self.specs.is_empty()
+            || self.matches(path)
+            || old_path.is_some_and(|old| old != path && self.matches(old))
+    }
+
+    /// Whether the list is empty (every path is selected).
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.specs.is_empty()
+    }
+}
+
 fn pathspec_match_one_positive(path: &str, magic: PathspecMagic, raw_pattern: &str) -> bool {
     if magic.literal && magic.glob {
         return false;

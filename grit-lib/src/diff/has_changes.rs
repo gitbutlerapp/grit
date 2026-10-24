@@ -16,6 +16,7 @@ use crate::error::{Error, Result};
 use crate::index::Index;
 use crate::objects::odb::Odb;
 use crate::objects::{parse_commit, ObjectId};
+use crate::pathspec::PathspecMatcher;
 use crate::repo::Repository;
 use crate::state::resolve_head;
 use crate::worktree::worktree_rules::WorktreeRules;
@@ -30,15 +31,6 @@ pub static HAS_CHANGES_CALL_COUNT: AtomicUsize = AtomicUsize::new(0);
 
 fn opts_need_content_compare(opts: &DiffOptions) -> bool {
     opts.whitespace.is_active()
-}
-
-/// Returns whether `pathspecs` selects this diff entry (empty means all paths).
-fn entry_matches_pathspecs(
-    repo: &Repository,
-    entry: &DiffEntry,
-    pathspecs: &[String],
-) -> Result<bool> {
-    repo.change_matches_pathspecs(entry.path(), entry.old_path.as_deref(), pathspecs)
 }
 
 fn trust_filemode(config: &ConfigSet) -> bool {
@@ -225,7 +217,7 @@ fn worktree_has_changes(
     repo: &Repository,
     index: &mut Index,
     base_tree: Option<&ObjectId>,
-    pathspecs: &[String],
+    matcher: &PathspecMatcher<'_>,
     opts: &DiffOptions,
 ) -> Result<bool> {
     let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
@@ -269,7 +261,7 @@ fn worktree_has_changes(
         )?;
         for entry in &entries {
             WORKTREE_HAS_CHANGES_ENTRIES_SCANNED.fetch_add(1, Ordering::SeqCst);
-            if !entry_matches_pathspecs(repo, entry, pathspecs)? {
+            if !matcher.matches_change(entry.path(), entry.old_path.as_deref()) {
                 continue;
             }
             if worktree_index_entry_has_changes(
@@ -304,7 +296,7 @@ fn worktree_has_changes(
         &repo.thread_policy(),
     )?;
     for entry in entries {
-        if !entry_matches_pathspecs(repo, &entry, pathspecs)? {
+        if !matcher.matches_change(entry.path(), entry.old_path.as_deref()) {
             continue;
         }
         if tree_entry_has_changes(repo.odb(), &entry, trust_filemode(config.as_ref()), opts)? {
@@ -314,7 +306,11 @@ fn worktree_has_changes(
     Ok(false)
 }
 
-fn staged_has_changes(repo: &Repository, pathspecs: &[String], opts: &DiffOptions) -> Result<bool> {
+fn staged_has_changes(
+    repo: &Repository,
+    matcher: &PathspecMatcher<'_>,
+    opts: &DiffOptions,
+) -> Result<bool> {
     let head_tree = head_tree(repo)?;
     let index = repo.index_handle().load()?;
     let config = repo.config()?;
@@ -328,7 +324,7 @@ fn staged_has_changes(repo: &Repository, pathspecs: &[String], opts: &DiffOption
         &repo.thread_policy(),
     )?;
     for entry in entries.drain(..) {
-        if !entry_matches_pathspecs(repo, &entry, pathspecs)? {
+        if !matcher.matches_change(entry.path(), entry.old_path.as_deref()) {
             continue;
         }
         if tree_entry_has_changes(repo.odb(), &entry, trust_filemode(config.as_ref()), opts)? {
@@ -340,18 +336,18 @@ fn staged_has_changes(repo: &Repository, pathspecs: &[String], opts: &DiffOption
 
 fn unstaged_has_changes(
     repo: &Repository,
-    pathspecs: &[String],
+    matcher: &PathspecMatcher<'_>,
     opts: &DiffOptions,
 ) -> Result<bool> {
     let mut index = repo.index_handle().load()?;
-    worktree_has_changes(repo, &mut index, None, pathspecs, opts)
+    worktree_has_changes(repo, &mut index, None, matcher, opts)
 }
 
 fn commit_trees_has_changes(
     repo: &Repository,
     base: &ObjectId,
     tip: &ObjectId,
-    pathspecs: &[String],
+    matcher: &PathspecMatcher<'_>,
     opts: &DiffOptions,
 ) -> Result<bool> {
     let config = repo.config()?;
@@ -367,7 +363,7 @@ fn commit_trees_has_changes(
         &repo.thread_policy(),
     )?;
     for entry in entries.drain(..) {
-        if !entry_matches_pathspecs(repo, &entry, pathspecs)? {
+        if !matcher.matches_change(entry.path(), entry.old_path.as_deref()) {
             continue;
         }
         if tree_entry_has_changes(repo.odb(), &entry, trust_filemode(config.as_ref()), opts)? {
@@ -395,17 +391,18 @@ impl<'repo> super::handle::Diff<'repo> {
     ) -> Result<bool> {
         HAS_CHANGES_CALL_COUNT.fetch_add(1, Ordering::SeqCst);
         let repo = self.repository();
+        let matcher = repo.pathspec_matcher(pathspecs)?;
         match target {
             DiffTarget::WorktreeVsHead => {
                 let mut index = repo.index_handle().load()?;
                 let head_tree = head_tree(repo)?;
-                worktree_has_changes(repo, &mut index, head_tree.as_ref(), pathspecs, &opts)
+                worktree_has_changes(repo, &mut index, head_tree.as_ref(), &matcher, &opts)
             }
-            DiffTarget::IndexVsHead => staged_has_changes(repo, pathspecs, &opts),
-            DiffTarget::WorktreeVsIndex => unstaged_has_changes(repo, pathspecs, &opts),
+            DiffTarget::IndexVsHead => staged_has_changes(repo, &matcher, &opts),
+            DiffTarget::WorktreeVsIndex => unstaged_has_changes(repo, &matcher, &opts),
             DiffTarget::WorktreeVsTree(tree) => {
                 let mut index = repo.index_handle().load()?;
-                worktree_has_changes(repo, &mut index, Some(tree), pathspecs, &opts)
+                worktree_has_changes(repo, &mut index, Some(tree), &matcher, &opts)
             }
             DiffTarget::Commit(commit) => {
                 let obj = repo.odb().read(commit)?;
@@ -427,7 +424,7 @@ impl<'repo> super::handle::Diff<'repo> {
                     &repo.thread_policy(),
                 )?;
                 for entry in entries.drain(..) {
-                    if !entry_matches_pathspecs(repo, &entry, pathspecs)? {
+                    if !matcher.matches_change(entry.path(), entry.old_path.as_deref()) {
                         continue;
                     }
                     if tree_entry_has_changes(
@@ -442,7 +439,7 @@ impl<'repo> super::handle::Diff<'repo> {
                 Ok(false)
             }
             DiffTarget::Trees { old, new } => match old {
-                Some(base) => commit_trees_has_changes(repo, base, new, pathspecs, &opts),
+                Some(base) => commit_trees_has_changes(repo, base, new, &matcher, &opts),
                 None => {
                     let config = repo.config()?;
                     let tip_tree = tree_oid_of_commit(repo.odb(), new)?;
@@ -456,7 +453,7 @@ impl<'repo> super::handle::Diff<'repo> {
                         &repo.thread_policy(),
                     )?;
                     for entry in entries.drain(..) {
-                        if !entry_matches_pathspecs(repo, &entry, pathspecs)? {
+                        if !matcher.matches_change(entry.path(), entry.old_path.as_deref()) {
                             continue;
                         }
                         if tree_entry_has_changes(

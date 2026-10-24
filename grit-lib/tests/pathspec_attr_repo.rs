@@ -155,6 +155,35 @@ fn attr_pathspecs_in_bare_repository_use_info_attributes() {
 }
 
 #[test]
+fn pathspec_matcher_matches_paths_and_renames() {
+    let dir = init_attr_repo();
+    let root = dir.path();
+    let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
+    let all = git_ls_files(root, &[]);
+
+    let specs = vec![":(attr:diff=rust)".to_owned()];
+    let matcher = repo.pathspec_matcher(&specs).expect("matcher");
+    assert!(!matcher.is_empty());
+    let got: Vec<_> = all.iter().filter(|p| matcher.matches(p)).cloned().collect();
+    assert_eq!(got, git_ls_files(root, &[":(attr:diff=rust)"]));
+    assert!(matcher.matches_change("lib/c.rs", Some("src/b.rs")));
+    assert!(matcher.matches_change("src/b.rs", None));
+    assert!(!matcher.matches_change("lib/c.rs", Some("lib/c.rs")));
+    assert!(!matcher.matches_change("README.md", None));
+
+    let empty: Vec<String> = Vec::new();
+    let all_paths = repo.pathspec_matcher(&empty).expect("matcher");
+    assert!(all_paths.is_empty());
+    assert!(all_paths.matches_change("anything", None));
+
+    let plain = vec!["src".to_owned(), ":(exclude)src/sub".to_owned()];
+    let plain_matcher = repo.pathspec_matcher(&plain).expect("matcher");
+    assert!(plain_matcher.matches("src/b.rs"));
+    assert!(!plain_matcher.matches("src/sub/a.rs"));
+    assert!(plain_matcher.matches_change("lib/x.rs", Some("src/b.rs")));
+}
+
+#[test]
 fn has_attr_magic_detects_long_magic_only() {
     assert!(pathspec_has_attr_magic(":(attr:diff=rust)"));
     assert!(pathspec_has_attr_magic(":(exclude,attr:-diff)src"));
