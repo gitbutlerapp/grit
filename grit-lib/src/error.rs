@@ -640,6 +640,11 @@ pub enum Error {
     #[error("object not found: {0}")]
     ObjectNotFound(String),
 
+    /// A revision expression (branch, tag, object id, `x~n`, `ORIG_HEAD`, …) names nothing in
+    /// the repository. Holds the expression as the caller wrote it.
+    #[error("unknown revision '{0}'")]
+    RevisionNotFound(String),
+
     /// A partial-clone promisor object is not present locally and no fetcher ran.
     #[error("promised object not available locally: {0}")]
     PromisedObjectMissing(crate::objects::ObjectId),

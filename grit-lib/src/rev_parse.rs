@@ -976,6 +976,29 @@ pub fn split_triple_dot_range(spec: &str) -> Option<(&str, &str)> {
     None
 }
 
+/// Whether `spec` is a range (`a..b`, `a...b`, `..b`, `a..`) rather than a single revision.
+///
+/// Only a `..` outside `{…}` selectors and before any `:` counts, so a dotted
+/// message search such as `main^{/release..candidate}` or `:/fix..up`, a reflog date
+/// like `main@{1.week.ago}`, or a path in `rev:../file` is still a single revision.
+#[must_use]
+pub(crate) fn is_top_level_range(spec: &str) -> bool {
+    let bytes = spec.as_bytes();
+    let mut depth = 0usize;
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'{' => depth += 1,
+            b'}' => depth = depth.saturating_sub(1),
+            b':' if depth == 0 => return false,
+            b'.' if depth == 0 && bytes.get(i + 1) == Some(&b'.') => return true,
+            _ => {}
+        }
+        i += 1;
+    }
+    false
+}
+
 /// Like [`resolve_revision`], but does not treat a bare filename as an index path
 /// (matches `git rev-parse` / plumbing, where `file.txt` stays ambiguous).
 pub fn resolve_revision_without_index_dwim(repo: &Repository, spec: &str) -> Result<ObjectId> {
@@ -4219,6 +4242,34 @@ mod line_coverage_tests {
                     }
                 }
             }
+        }
+    }
+
+    #[test]
+    fn top_level_range_ignores_dots_in_selectors_and_paths() {
+        for range in [
+            "a..b",
+            "a...b",
+            "..b",
+            "a..",
+            "...main",
+            "main^{/x}..side",
+            "main@{1}...side",
+        ] {
+            assert!(is_top_level_range(range), "{range}");
+        }
+        for single in [
+            "main",
+            "v1.2.3",
+            "keep~1",
+            "main^{/release..candidate}",
+            "main^{/release...candidate}",
+            "main@{1.week.ago}",
+            ":/fix..up",
+            "HEAD:../file",
+            "HEAD:a..b",
+        ] {
+            assert!(!is_top_level_range(single), "{single}");
         }
     }
 
