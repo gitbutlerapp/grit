@@ -1,14 +1,16 @@
 //! `grit completions` — emit shell completion scripts for the current CLI.
 
 use anyhow::Result;
-use clap::CommandFactory;
 use clap_complete::{generate, Shell};
-
-use crate::Cli;
 
 /// Write a completion script for `shell` to stdout.
 pub fn run(shell: Shell) -> Result<()> {
-    generate(shell, &mut Cli::command(), "grit", &mut std::io::stdout());
+    generate(
+        shell,
+        &mut crate::cli_command::full_cli_command("grit"),
+        "grit",
+        &mut std::io::stdout(),
+    );
     Ok(())
 }
 

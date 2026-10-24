@@ -7,7 +7,6 @@
 
 mod branch_list_args;
 mod clap_value_args;
-#[cfg(test)]
 mod cli_command;
 #[cfg(test)]
 mod cli_contract;
@@ -694,7 +693,15 @@ enum AuthAction {
 }
 
 /// Top-level `grit` commands.
+///
+/// In the binary, each subcommand's arguments are built only when that subcommand is parsed,
+/// so startup does not pay for the whole tree. Help output and completions go through
+/// [`cli_command::full_cli_command`] so deferred building cannot replace a subcommand's
+/// description. Unit tests keep the tree eager: the contract, docs and schema checks walk each
+/// command's declared arguments, which `Command::build` would mix with globals inherited from
+/// the parent.
 #[derive(Debug, Subcommand)]
+#[cfg_attr(not(test), command(defer = true))]
 enum Command {
     /// Create a new, empty repository.
     Init {
@@ -1902,8 +1909,20 @@ fn main() {
 fn run() -> Result<ExitStatus, anyhow::Error> {
     let parse_argv =
         normalize_tag_verify_argv(diff_args::normalize_diff_argv(std::env::args().collect()));
-    let cli = match Cli::try_parse_from(parse_argv) {
+    let cli = match Cli::try_parse_from(&parse_argv) {
         Ok(cli) => cli,
+        Err(err) if is_help_request(&err) => {
+            let bin_name = parse_argv
+                .first()
+                .and_then(|argv0| std::path::Path::new(argv0).file_name())
+                .map_or_else(|| "grit".into(), |name| name.to_string_lossy());
+            let err = cli_command::full_cli_command(&bin_name)
+                .try_get_matches_from(&parse_argv)
+                .err()
+                .unwrap_or(err);
+            let _ = err.print();
+            return Ok(ExitStatus::from_clap_code(err.exit_code()));
+        }
         Err(err) if err.use_stderr() => {
             let json = std::env::args().any(|a| a == "--json");
             if json {
@@ -1958,6 +1977,16 @@ fn run() -> Result<ExitStatus, anyhow::Error> {
             Ok(ExitStatus::for_error(&err))
         }
     }
+}
+
+/// Whether clap stopped to print help, which needs [`cli_command::full_cli_command`] to show
+/// each subcommand's own description.
+fn is_help_request(err: &clap::Error) -> bool {
+    matches!(
+        err.kind(),
+        clap::error::ErrorKind::DisplayHelp
+            | clap::error::ErrorKind::DisplayHelpOnMissingArgumentOrSubcommand
+    )
 }
 
 /// Format a clap usage error for `--json`: keep missing-argument detail, omit Usage/help.
