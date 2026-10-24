@@ -133,7 +133,7 @@ pub fn run_list(limit: Option<usize>) -> Result<HooksOutcome> {
 pub fn run_hook_by_name(name: &str, args: &[String]) -> Result<HooksOutcome> {
     let repo = context::discover()?;
     let arg_refs: Vec<&str> = args.iter().map(String::as_str).collect();
-    let result = run_hook(&repo, name, &arg_refs, None);
+    let result = run_hook(&repo, name, &arg_refs, None)?;
     let (exit_code, executed) = match result {
         HookResult::Success => (0, true),
         HookResult::NotFound => (0, false),

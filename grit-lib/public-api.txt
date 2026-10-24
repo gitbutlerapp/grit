@@ -1127,12 +1127,14 @@ pub grit_lib::command_runner::hooks::HookError::Failed::status: i32
 pub grit_lib::command_runner::hooks::HookError::Internal(alloc::string::String)
 pub grit_lib::command_runner::hooks::HookError::Spawn
 pub grit_lib::command_runner::hooks::HookError::Spawn::hook_name: alloc::string::String
-pub grit_lib::command_runner::hooks::HookError::Spawn::message: alloc::string::String
+pub grit_lib::command_runner::hooks::HookError::Spawn::path: std::path::PathBuf
+pub grit_lib::command_runner::hooks::HookError::Spawn::source: core::io::error::Error
 impl core::convert::From<alloc::string::String> for grit_lib::command_runner::hooks::HookError
 pub fn grit_lib::command_runner::hooks::HookError::from(alloc::string::String) -> Self
 impl core::convert::From<grit_lib::command_runner::hooks::HookError> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(grit_lib::command_runner::hooks::HookError) -> Self
 impl core::error::Error for grit_lib::command_runner::hooks::HookError
+pub fn grit_lib::command_runner::hooks::HookError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
 impl core::fmt::Debug for grit_lib::command_runner::hooks::HookError
 pub fn grit_lib::command_runner::hooks::HookError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::fmt::Display for grit_lib::command_runner::hooks::HookError
@@ -1142,8 +1144,8 @@ impl core::marker::Send for grit_lib::command_runner::hooks::HookError
 impl core::marker::Sync for grit_lib::command_runner::hooks::HookError
 impl core::marker::Unpin for grit_lib::command_runner::hooks::HookError
 impl core::marker::UnsafeUnpin for grit_lib::command_runner::hooks::HookError
-impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::command_runner::hooks::HookError
-impl core::panic::unwind_safe::UnwindSafe for grit_lib::command_runner::hooks::HookError
+impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::command_runner::hooks::HookError
+impl !core::panic::unwind_safe::UnwindSafe for grit_lib::command_runner::hooks::HookError
 pub enum grit_lib::command_runner::hooks::HookName
 pub grit_lib::command_runner::hooks::HookName::CommitMsg
 pub grit_lib::command_runner::hooks::HookName::PostCommit
@@ -1221,14 +1223,14 @@ impl<'a> core::marker::UnsafeUnpin for grit_lib::command_runner::hooks::RunHookO
 impl<'a> core::panic::unwind_safe::RefUnwindSafe for grit_lib::command_runner::hooks::RunHookOptions<'a>
 impl<'a> core::panic::unwind_safe::UnwindSafe for grit_lib::command_runner::hooks::RunHookOptions<'a>
 pub fn grit_lib::command_runner::hooks::resolve_hooks_dir(&grit_lib::repo::Repository) -> std::path::PathBuf
-pub fn grit_lib::command_runner::hooks::run_commit_hook(&grit_lib::repo::Repository, &str, &[&str], core::option::Option<&[u8]>, &grit_lib::command_runner::hooks::CommitHookEnv<'_>) -> core::result::Result<grit_lib::command_runner::hooks::HookResult, alloc::string::String>
+pub fn grit_lib::command_runner::hooks::run_commit_hook(&grit_lib::repo::Repository, &str, &[&str], core::option::Option<&[u8]>, &grit_lib::command_runner::hooks::CommitHookEnv<'_>) -> core::result::Result<grit_lib::command_runner::hooks::HookResult, grit_lib::command_runner::hooks::HookError>
 pub fn grit_lib::command_runner::hooks::run_commit_hook_checked(&grit_lib::repo::Repository, &str, &[&str], core::option::Option<&[u8]>, &grit_lib::command_runner::hooks::CommitHookEnv<'_>) -> core::result::Result<(), grit_lib::command_runner::hooks::HookError>
-pub fn grit_lib::command_runner::hooks::run_hook(&grit_lib::repo::Repository, &str, &[&str], core::option::Option<&[u8]>) -> grit_lib::command_runner::hooks::HookResult
+pub fn grit_lib::command_runner::hooks::run_hook(&grit_lib::repo::Repository, &str, &[&str], core::option::Option<&[u8]>) -> core::result::Result<grit_lib::command_runner::hooks::HookResult, grit_lib::command_runner::hooks::HookError>
 pub fn grit_lib::command_runner::hooks::run_hook_capture(&grit_lib::repo::Repository, &str, &[&str], core::option::Option<&[u8]>) -> (grit_lib::command_runner::hooks::HookResult, alloc::vec::Vec<u8>)
 pub fn grit_lib::command_runner::hooks::run_hook_in_git_dir(&grit_lib::repo::Repository, &str, &[&str], core::option::Option<&[u8]>, &[(&str, &str)]) -> (grit_lib::command_runner::hooks::HookResult, alloc::vec::Vec<u8>)
-pub fn grit_lib::command_runner::hooks::run_hook_opts(core::option::Option<&grit_lib::repo::Repository>, &str, &[&str], &grit_lib::config::ConfigSet, grit_lib::command_runner::hooks::RunHookOptions<'_>, core::option::Option<&mut alloc::vec::Vec<u8>>) -> core::result::Result<grit_lib::command_runner::hooks::HookResult, alloc::string::String>
+pub fn grit_lib::command_runner::hooks::run_hook_opts(core::option::Option<&grit_lib::repo::Repository>, &str, &[&str], &grit_lib::config::ConfigSet, grit_lib::command_runner::hooks::RunHookOptions<'_>, core::option::Option<&mut alloc::vec::Vec<u8>>) -> core::result::Result<grit_lib::command_runner::hooks::HookResult, grit_lib::command_runner::hooks::HookError>
 pub fn grit_lib::command_runner::hooks::run_hook_with_env(&grit_lib::repo::Repository, &str, &[&str], core::option::Option<&[u8]>, &[(&str, &str)]) -> (grit_lib::command_runner::hooks::HookResult, alloc::vec::Vec<u8>)
-pub fn grit_lib::command_runner::hooks::run_reference_transaction_committed_for_head_update(&grit_lib::repo::Repository, &grit_lib::state::HeadState, core::option::Option<grit_lib::objects::ObjectId>, grit_lib::objects::ObjectId) -> grit_lib::command_runner::hooks::HookResult
+pub fn grit_lib::command_runner::hooks::run_reference_transaction_committed_for_head_update(&grit_lib::repo::Repository, &grit_lib::state::HeadState, core::option::Option<grit_lib::objects::ObjectId>, grit_lib::objects::ObjectId) -> core::result::Result<grit_lib::command_runner::hooks::HookResult, grit_lib::command_runner::hooks::HookError>
 pub enum grit_lib::command_runner::CommandStdin
 pub grit_lib::command_runner::CommandStdin::Inherit
 pub grit_lib::command_runner::CommandStdin::Null

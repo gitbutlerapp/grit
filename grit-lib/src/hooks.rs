@@ -8,6 +8,7 @@ use crate::command_runner::{
     CommandStdio, RunningCommand, ShellInvocation,
 };
 use crate::config::{parse_path, ConfigSet};
+use crate::git_path::path_without_verbatim_prefix;
 use crate::objects::ObjectId;
 use crate::repo::Repository;
 use crate::state::HeadState;
@@ -21,12 +22,16 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use thiserror::Error;
 
-#[cfg(unix)]
-const ENOEXEC: i32 = 8;
-
-#[cfg(unix)]
-fn is_enoexec(err: &std::io::Error) -> bool {
-    err.raw_os_error() == Some(ENOEXEC)
+/// Whether `err` means the OS would not execute the file as a program, so it must be run
+/// through a shell (`ENOEXEC` on Unix, `ERROR_BAD_EXE_FORMAT` on Windows).
+fn is_not_an_executable(err: &std::io::Error) -> bool {
+    #[cfg(unix)]
+    const NOT_EXECUTABLE: i32 = 8;
+    #[cfg(windows)]
+    const NOT_EXECUTABLE: i32 = 193;
+    #[cfg(not(any(unix, windows)))]
+    const NOT_EXECUTABLE: i32 = -1;
+    err.raw_os_error() == Some(NOT_EXECUTABLE)
 }
 
 /// Hook subprocess failure (non-zero exit or spawn error).
@@ -40,13 +45,16 @@ pub enum HookError {
         /// Process exit code from the hook subprocess.
         status: i32,
     },
-    /// The hook executable could not be started.
-    #[error("failed to run hook {hook_name}: {message}")]
+    /// The hook (or the shell that runs it) could not be started.
+    #[error("failed to run hook {hook_name} ({})", path.display())]
     Spawn {
-        /// Basename of the hook script that could not be spawned.
+        /// Hook event name (`pre-commit`, `commit-msg`, …).
         hook_name: String,
-        /// OS or I/O error message from `Command` spawn.
-        message: String,
+        /// Program that failed to start: the hook script, or the interpreter chosen for it.
+        path: PathBuf,
+        /// Error returned by the [`CommandRunner`] when spawning.
+        #[source]
+        source: std::io::Error,
     },
     /// Configuration or internal error while resolving hooks.
     #[error("{0}")]
@@ -268,6 +276,9 @@ enum ResolvedHook {
 }
 
 /// Resolve the hooks directory from config or fall back to `$GIT_DIR/hooks`.
+///
+/// Never carries a Windows `\\?\` prefix, so the path can be shown to users and handed to
+/// hook interpreters such as Git for Windows' `sh`.
 pub fn resolve_hooks_dir(repo: &Repository) -> PathBuf {
     resolve_hooks_dir_for_config(
         repo.environment(),
@@ -281,24 +292,25 @@ fn resolve_hooks_dir_for_config(
     git_dir: Option<&Path>,
     config: Option<&ConfigSet>,
 ) -> PathBuf {
-    if let Some(cfg) = config {
-        if let Some(hooks_path) = cfg.get("core.hooksPath") {
-            let expanded = parse_path(env, &hooks_path);
-            let p = PathBuf::from(expanded);
+    let dir = match config.and_then(|cfg| cfg.get("core.hooksPath")) {
+        Some(hooks_path) => {
+            let p = PathBuf::from(parse_path(env, &hooks_path));
             if p.is_absolute() {
-                return p;
+                p
+            } else {
+                env.cwd.join(p)
             }
-            return env.cwd.join(p);
         }
-    }
-    git_dir
-        .map(|gd| crate::repo::common_git_dir_for_config(gd).join("hooks"))
-        .unwrap_or_else(|| PathBuf::from("hooks"))
+        None => git_dir
+            .map(|gd| crate::repo::common_git_dir_for_config(gd).join("hooks"))
+            .unwrap_or_else(|| PathBuf::from("hooks")),
+    };
+    path_without_verbatim_prefix(&dir).into_owned()
 }
 
 fn hook_argv0(repo: &Repository, hooks_dir: &Path, hook_name: &str, cwd: &Path) -> PathBuf {
     let default_hooks_dir = repo.git_dir().join("hooks");
-    if hooks_dir == default_hooks_dir.as_path() {
+    if same_dir(hooks_dir, &default_hooks_dir) {
         if cwd == repo.git_dir() {
             return PathBuf::from("hooks").join(hook_name);
         }
@@ -395,112 +407,200 @@ fn resolve_hook_sequence(
     Ok(seq)
 }
 
-#[expect(clippy::too_many_arguments)]
-/// Spawn a traditional hook executable. On ENOEXEC, retry with `/bin/sh`.
-fn spawn_traditional_hook(
-    runner: &dyn CommandRunner,
-    argv0: &Path,
-    hook_args: &[&str],
-    cwd: &Path,
-    _git_dir: &Path,
-    env: &CommandEnvironment,
-    stdin_piped: bool,
-    stdout_piped: bool,
-    stderr_piped: bool,
-    use_shell: bool,
-) -> std::io::Result<RunningCommand> {
-    let spec = if use_shell {
-        CommandSpec {
-            program: PathBuf::from("/bin/sh"),
-            args: Vec::new(),
-            shell: Some(ShellInvocation::ScriptPath {
-                script_path: argv0.to_path_buf(),
-                args: hook_args.iter().map(|s| OsString::from(*s)).collect(),
-            }),
-            cwd: Some(cwd.to_path_buf()),
-            env: env.clone(),
-            stdin: if stdin_piped {
-                CommandStdin::Pipe(Vec::new())
-            } else {
-                CommandStdin::Inherit
-            },
-            stdout: stdio_mode(stdout_piped),
-            stderr: stdio_mode(stderr_piped),
-        }
-    } else {
-        CommandSpec {
-            program: argv0.to_path_buf(),
-            args: hook_args.iter().map(|s| OsString::from(*s)).collect(),
-            shell: None,
-            cwd: Some(cwd.to_path_buf()),
-            env: env.clone(),
-            stdin: if stdin_piped {
-                CommandStdin::Pipe(Vec::new())
-            } else {
-                CommandStdin::Inherit
-            },
-            stdout: stdio_mode(stdout_piped),
-            stderr: stdio_mode(stderr_piped),
-        }
-    };
-    match runner.spawn(&spec) {
-        Ok(c) => Ok(c),
-        Err(e) => {
-            #[cfg(unix)]
-            {
-                if !use_shell && is_enoexec(&e) {
-                    return spawn_traditional_hook(
-                        runner,
-                        argv0,
-                        hook_args,
-                        cwd,
-                        _git_dir,
-                        env,
-                        stdin_piped,
-                        stdout_piped,
-                        stderr_piped,
-                        true,
-                    );
-                }
-            }
-            Err(e)
-        }
+/// Interpreter basename named by a script's `#!` line, or `None` without one.
+///
+/// `#!/bin/sh -e` gives `sh` and `#!/usr/bin/env bash` gives `bash`. Options after the
+/// interpreter are dropped, as Git for Windows does when it runs scripts itself.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn shebang_interpreter(head: &[u8]) -> Option<String> {
+    let rest = head.strip_prefix(b"#!")?;
+    let line_len = rest
+        .iter()
+        .position(|&b| b == b'\n' || b == b'\r')
+        .unwrap_or(rest.len());
+    let line = std::str::from_utf8(&rest[..line_len]).ok()?;
+    let basename = |word: &str| word.rsplit(['/', '\\']).next().map(str::to_owned);
+    let mut words = line.split_ascii_whitespace();
+    let mut name = basename(words.next()?)?;
+    if name == "env" {
+        name = basename(words.find(|w| !w.starts_with('-'))?)?;
     }
-}
-#[expect(clippy::too_many_arguments)]
-/// Spawn a configured hook (`/bin/sh -c <command>`) with optional extra args as `$1`, `$2`, …
-fn spawn_configured_hook(
-    runner: &dyn CommandRunner,
-    command: &str,
-    hook_args: &[&str],
-    cwd: &Path,
-    env: &CommandEnvironment,
-    stdin_piped: bool,
-    stdout_piped: bool,
-    stderr_piped: bool,
-) -> std::io::Result<RunningCommand> {
-    let spec = CommandSpec {
-        program: PathBuf::from("/bin/sh"),
-        args: Vec::new(),
-        shell: Some(ShellInvocation::DashC {
-            script: command.to_owned(),
-            argv0: Some("hook".to_owned()),
-            args: hook_args.iter().map(|s| OsString::from(*s)).collect(),
-        }),
-        cwd: Some(cwd.to_path_buf()),
-        env: env.clone(),
-        stdin: if stdin_piped {
-            CommandStdin::Pipe(Vec::new())
-        } else {
-            CommandStdin::Inherit
-        },
-        stdout: stdio_mode(stdout_piped),
-        stderr: stdio_mode(stderr_piped),
-    };
-    runner.spawn(&spec)
+    (!name.is_empty()).then_some(name)
 }
 
-fn report_spawn_error(_path: &Path, _err: &std::io::Error) {}
+/// First `dir/name` (or `dir/name.exe` on Windows) that is a file, for `dir` in `path_var`.
+fn find_program_in_path(name: &str, path_var: &std::ffi::OsStr) -> Option<PathBuf> {
+    let suffix = std::env::consts::EXE_SUFFIX;
+    std::env::split_paths(path_var)
+        .filter(|dir| !dir.as_os_str().is_empty())
+        .find_map(|dir| {
+            let with_suffix = (!suffix.is_empty() && !name.ends_with(suffix))
+                .then(|| dir.join(format!("{name}{suffix}")));
+            with_suffix
+                .into_iter()
+                .chain(std::iter::once(dir.join(name)))
+                .find(|candidate| candidate.is_file())
+        })
+}
+
+/// Resolve the interpreter `name` (`sh`, `bash`, …) for running a hook script.
+///
+/// Looks on `path_var` first, then in the Git for Windows tree that owns a `git` found on
+/// `path_var` (`<root>/usr/bin`, `<root>/bin`), where `sh` lives even when only `git` is on
+/// `PATH`. Falls back to the bare name so the OS search applies.
+fn resolve_script_interpreter(name: &str, path_var: Option<&std::ffi::OsStr>) -> PathBuf {
+    let Some(path_var) = path_var else {
+        return PathBuf::from(name);
+    };
+    if let Some(found) = find_program_in_path(name, path_var) {
+        return found;
+    }
+    find_program_in_path("git", path_var)
+        .and_then(|git| {
+            let bin_dir = git.parent()?.to_path_buf();
+            bin_dir
+                .ancestors()
+                .skip(1)
+                .take(2)
+                .flat_map(|root| [root.join("usr").join("bin"), root.join("bin")])
+                .find_map(|dir| find_program_in_path(name, dir.as_os_str()))
+        })
+        .unwrap_or_else(|| PathBuf::from(name))
+}
+
+/// `PATH` as the hook subprocess will see it, when it is set explicitly in `env`.
+fn command_env_path(env: &CommandEnvironment) -> Option<&std::ffi::OsStr> {
+    env.set
+        .iter()
+        .rev()
+        .find(|(k, _)| {
+            if cfg!(windows) {
+                k.eq_ignore_ascii_case("PATH")
+            } else {
+                k == "PATH"
+            }
+        })
+        .map(|(_, v)| v.as_os_str())
+}
+
+/// Shell for `hook.<name>.command` entries and for scripts the OS will not execute directly.
+///
+/// `/bin/sh` on Unix. On Windows there is no `/bin/sh`, so `sh` is resolved against the hook's
+/// `PATH` (see [`resolve_script_interpreter`]).
+fn hook_shell(env: &CommandEnvironment) -> PathBuf {
+    if cfg!(windows) {
+        resolve_script_interpreter("sh", command_env_path(env))
+    } else {
+        PathBuf::from("/bin/sh")
+    }
+}
+
+/// Interpreter from the `#!` line of `script` (Windows cannot execute scripts directly).
+#[cfg(windows)]
+fn script_shebang_interpreter(script: &Path, env: &CommandEnvironment) -> Option<PathBuf> {
+    use std::io::Read;
+    let mut head = [0u8; 256];
+    let mut file = fs::File::open(script).ok()?;
+    let n = file.read(&mut head).ok()?;
+    let name = shebang_interpreter(&head[..n])?;
+    Some(resolve_script_interpreter(&name, command_env_path(env)))
+}
+
+/// Stdio and environment shared by every hook subprocess.
+struct HookSpawnContext<'a> {
+    runner: &'a dyn CommandRunner,
+    cwd: &'a Path,
+    env: &'a CommandEnvironment,
+    stdin_piped: bool,
+    stdout_piped: bool,
+    stderr_piped: bool,
+}
+
+impl HookSpawnContext<'_> {
+    fn spec(&self, program: PathBuf, shell: Option<ShellInvocation>, args: &[&str]) -> CommandSpec {
+        CommandSpec {
+            program,
+            args: if shell.is_some() {
+                Vec::new()
+            } else {
+                args.iter().map(OsString::from).collect()
+            },
+            shell,
+            cwd: Some(path_without_verbatim_prefix(self.cwd).into_owned()),
+            env: self.env.clone(),
+            stdin: if self.stdin_piped {
+                CommandStdin::Pipe(Vec::new())
+            } else {
+                CommandStdin::Inherit
+            },
+            stdout: stdio_mode(self.stdout_piped),
+            stderr: stdio_mode(self.stderr_piped),
+        }
+    }
+
+    fn spawn(&self, spec: &CommandSpec, hook_name: &str) -> Result<RunningCommand, HookError> {
+        self.runner.spawn(spec).map_err(|source| HookError::Spawn {
+            hook_name: hook_name.to_owned(),
+            path: spec.program.clone(),
+            source,
+        })
+    }
+
+    /// Run `script` (spelled `argv0` for the child) directly, or through a shell when the OS
+    /// will not execute it. On Windows a script with a `#!` line goes straight to that
+    /// interpreter.
+    #[cfg_attr(not(windows), allow(unused_variables))]
+    fn spawn_traditional(
+        &self,
+        hook_name: &str,
+        script: &Path,
+        argv0: &Path,
+        args: &[&str],
+    ) -> Result<RunningCommand, HookError> {
+        let argv0 = path_without_verbatim_prefix(argv0);
+        let via_shell = |shell: PathBuf| {
+            let invocation = ShellInvocation::ScriptPath {
+                script_path: argv0.to_path_buf(),
+                args: args.iter().map(OsString::from).collect(),
+            };
+            self.spec(shell, Some(invocation), args)
+        };
+        #[cfg(windows)]
+        if let Some(interpreter) = script_shebang_interpreter(script, self.env) {
+            return self.spawn(&via_shell(interpreter), hook_name);
+        }
+        let direct = self.spec(argv0.to_path_buf(), None, args);
+        match self.runner.spawn(&direct) {
+            Err(e) if is_not_an_executable(&e) => {
+                self.spawn(&via_shell(hook_shell(self.env)), hook_name)
+            }
+            Err(source) => Err(HookError::Spawn {
+                hook_name: hook_name.to_owned(),
+                path: direct.program,
+                source,
+            }),
+            Ok(child) => Ok(child),
+        }
+    }
+
+    /// Run a `hook.<name>.command` entry as `sh -c <command> hook <args>…`.
+    fn spawn_configured(
+        &self,
+        hook_name: &str,
+        command: &str,
+        args: &[&str],
+    ) -> Result<RunningCommand, HookError> {
+        let invocation = ShellInvocation::DashC {
+            script: command.to_owned(),
+            argv0: Some("hook".to_owned()),
+            args: args.iter().map(OsString::from).collect(),
+        };
+        self.spawn(
+            &self.spec(hook_shell(self.env), Some(invocation), args),
+            hook_name,
+        )
+    }
+}
 
 /// Well-known commit lifecycle hooks tracked in [`crate::porcelain::commit::CommitOutcome`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -574,6 +674,12 @@ pub struct RunHookOptions<'a> {
 ///
 /// When `capture_output` is `Some`, each hook's stdout and stderr are appended there (receive-pack /
 /// simulated remote) instead of being written to the process stderr.
+///
+/// # Errors
+///
+/// [`HookError::Spawn`] when a hook (or the shell that runs it) cannot be started, and
+/// [`HookError::Internal`] for invalid `hook.*` configuration. A hook that runs and exits
+/// non-zero is `Ok(HookResult::Failed(status))`.
 pub fn run_hook_opts(
     repo: Option<&Repository>,
     hook_name: &str,
@@ -581,7 +687,7 @@ pub fn run_hook_opts(
     config: &ConfigSet,
     opts: RunHookOptions<'_>,
     mut capture_output: Option<&mut Vec<u8>>,
-) -> Result<HookResult, String> {
+) -> Result<HookResult, HookError> {
     let seq = match repo {
         Some(r) => resolve_hook_sequence(r, hook_name, config)?,
         None => resolve_configured_hooks_only(hook_name, config)?,
@@ -637,51 +743,27 @@ pub fn run_hook_opts(
             (false, false)
         };
 
+        let ctx = HookSpawnContext {
+            runner: runner.as_ref(),
+            cwd: work_dir,
+            env: &hook_env,
+            stdin_piped,
+            stdout_piped,
+            stderr_piped,
+        };
         let mut child = match h {
             ResolvedHook::Traditional { path, argv0 } => {
                 let Some(r) = repo else {
                     continue;
                 };
-                let gd = r.git_dir();
                 let effective_argv0 = path
                     .parent()
                     .map(|hooks_dir| hook_argv0(r, hooks_dir, hook_name, work_dir))
                     .unwrap_or_else(|| argv0.clone());
-                match spawn_traditional_hook(
-                    runner.as_ref(),
-                    &effective_argv0,
-                    args,
-                    work_dir,
-                    gd,
-                    &hook_env,
-                    stdin_piped,
-                    stdout_piped,
-                    stderr_piped,
-                    false,
-                ) {
-                    Ok(c) => c,
-                    Err(e) => {
-                        report_spawn_error(path, &e);
-                        return Ok(HookResult::Failed(1));
-                    }
-                }
+                ctx.spawn_traditional(hook_name, path, &effective_argv0, args)?
             }
             ResolvedHook::Configured { command } => {
-                match spawn_configured_hook(
-                    runner.as_ref(),
-                    command,
-                    args,
-                    work_dir,
-                    &hook_env,
-                    stdin_piped,
-                    stdout_piped,
-                    stderr_piped,
-                ) {
-                    Ok(c) => c,
-                    Err(_e) => {
-                        return Ok(HookResult::Failed(1));
-                    }
-                }
+                ctx.spawn_configured(hook_name, command, args)?
             }
         };
 
@@ -746,8 +828,11 @@ pub fn run_hook_opts(
     Ok(HookResult::Success)
 }
 
-/// Run commit-style hooks with `GIT_INDEX_FILE`, `GIT_PREFIX`, and related env (Git `run_commit_hook`).
-/// Like [`run_commit_hook`] but returns [`HookError`] on failure.
+/// Like [`run_commit_hook`] but a hook that exits non-zero is an error.
+///
+/// # Errors
+///
+/// [`HookError::Failed`] with the hook's exit status, or any error from [`run_commit_hook`].
 pub fn run_commit_hook_checked(
     repo: &Repository,
     hook_name: &str,
@@ -755,9 +840,7 @@ pub fn run_commit_hook_checked(
     stdin_data: Option<&[u8]>,
     commit_env: &CommitHookEnv<'_>,
 ) -> Result<(), HookError> {
-    match run_commit_hook(repo, hook_name, args, stdin_data, commit_env)
-        .map_err(HookError::Internal)?
-    {
+    match run_commit_hook(repo, hook_name, args, stdin_data, commit_env)? {
         HookResult::Success | HookResult::NotFound => Ok(()),
         HookResult::Failed(status) => Err(HookError::Failed {
             hook_name: hook_name.to_owned(),
@@ -766,15 +849,24 @@ pub fn run_commit_hook_checked(
     }
 }
 
-/// `run_commit_hook` function.
+/// Run commit-style hooks with `GIT_INDEX_FILE`, `GIT_PREFIX`, and related env (Git `run_commit_hook`).
+///
+/// # Errors
+///
+/// [`HookError::Spawn`] when a hook cannot be started, [`HookError::Internal`] when the
+/// repository config cannot be loaded or `hook.*` entries are invalid.
 pub fn run_commit_hook(
     repo: &Repository,
     hook_name: &str,
     args: &[&str],
     stdin_data: Option<&[u8]>,
     commit_env: &CommitHookEnv<'_>,
-) -> Result<HookResult, String> {
-    let config = repo.config().map_err(|e| format!("{e}"))?.as_ref().clone();
+) -> Result<HookResult, HookError> {
+    let config = repo
+        .config()
+        .map_err(|e| HookError::Internal(e.to_string()))?
+        .as_ref()
+        .clone();
     let stdout_to_stderr = hook_name != "pre-push";
     run_hook_opts(
         Some(repo),
@@ -796,17 +888,22 @@ pub fn run_commit_hook(
 /// Run a hook by name with the given arguments (Git-compatible multihooks).
 ///
 /// `pre-push` keeps stdout separate; other hooks merge stdout to stderr.
+///
+/// # Errors
+///
+/// [`HookError::Spawn`] when a hook cannot be started, [`HookError::Internal`] when the
+/// repository config cannot be loaded or `hook.*` entries are invalid.
 pub fn run_hook(
     repo: &Repository,
     hook_name: &str,
     args: &[&str],
     stdin_data: Option<&[u8]>,
-) -> HookResult {
-    let Some(config) = repo.config().ok() else {
-        return HookResult::Failed(1);
-    };
+) -> Result<HookResult, HookError> {
+    let config = repo
+        .config()
+        .map_err(|e| HookError::Internal(e.to_string()))?;
     let stdout_to_stderr = hook_name != "pre-push";
-    match run_hook_opts(
+    run_hook_opts(
         Some(repo),
         hook_name,
         args,
@@ -820,10 +917,7 @@ pub fn run_hook(
             commit_env: None,
         },
         None,
-    ) {
-        Ok(r) => r,
-        Err(_msg) => HookResult::Failed(1),
-    }
+    )
 }
 
 /// Run a hook with extra env vars, cwd = `GIT_DIR` (receive-pack and similar).
@@ -905,13 +999,16 @@ pub fn run_hook_capture(
 ///
 /// `old_head_commit` is the commit OID `HEAD` pointed at before the update, or `None` for an
 /// unborn branch (null old OID in hook stdin).
-#[must_use]
+///
+/// # Errors
+///
+/// Same as [`run_hook`].
 pub fn run_reference_transaction_committed_for_head_update(
     repo: &Repository,
     head: &HeadState,
     old_head_commit: Option<ObjectId>,
     new_oid: ObjectId,
-) -> HookResult {
+) -> Result<HookResult, HookError> {
     let zero = ObjectId::zero();
     let old_oid = old_head_commit.unwrap_or(zero);
     let old_hex = if old_oid == zero {
@@ -937,4 +1034,166 @@ pub fn run_reference_transaction_committed_for_head_update(
         &["committed"],
         Some(stdin.as_bytes()),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::ffi::OsStr;
+
+    fn touch(path: &Path) {
+        fs::create_dir_all(path.parent().expect("parent")).expect("mkdir");
+        fs::write(path, b"").expect("write");
+    }
+
+    fn exe(name: &str) -> String {
+        format!("{name}{}", std::env::consts::EXE_SUFFIX)
+    }
+
+    #[test]
+    fn shebang_interpreter_takes_the_interpreter_basename() {
+        assert_eq!(
+            shebang_interpreter(b"#!/bin/sh\nexit 0\n").as_deref(),
+            Some("sh")
+        );
+        assert_eq!(
+            shebang_interpreter(b"#!/bin/bash -e\n").as_deref(),
+            Some("bash")
+        );
+        assert_eq!(shebang_interpreter(b"#! /bin/sh\n").as_deref(), Some("sh"));
+        assert_eq!(
+            shebang_interpreter(b"#!/bin/sh\r\nexit 0\r\n").as_deref(),
+            Some("sh")
+        );
+        assert_eq!(shebang_interpreter(b"#!/bin/sh").as_deref(), Some("sh"));
+        assert_eq!(
+            shebang_interpreter(br"#!C:\tools\perl.exe").as_deref(),
+            Some("perl.exe")
+        );
+    }
+
+    #[test]
+    fn shebang_interpreter_looks_through_env() {
+        assert_eq!(
+            shebang_interpreter(b"#!/usr/bin/env bash\n").as_deref(),
+            Some("bash")
+        );
+        assert_eq!(
+            shebang_interpreter(b"#!/usr/bin/env -S python3 -u\n").as_deref(),
+            Some("python3")
+        );
+        assert_eq!(shebang_interpreter(b"#!/usr/bin/env\n"), None);
+    }
+
+    #[test]
+    fn shebang_interpreter_rejects_non_scripts() {
+        assert_eq!(shebang_interpreter(b"exit 0\n"), None);
+        assert_eq!(shebang_interpreter(b""), None);
+        assert_eq!(shebang_interpreter(b"#!\n"), None);
+        assert_eq!(shebang_interpreter(b"#!/\n"), None);
+        assert_eq!(shebang_interpreter(b"\x7fELF\x02\x01"), None);
+    }
+
+    #[test]
+    fn find_program_in_path_searches_entries_in_order() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let first = tmp.path().join("first");
+        let second = tmp.path().join("second");
+        fs::create_dir_all(&first).expect("mkdir");
+        touch(&second.join(exe("sh")));
+        touch(&tmp.path().join("third").join(exe("sh")));
+        let path_var = std::env::join_paths([
+            PathBuf::new(),
+            first,
+            second.clone(),
+            tmp.path().join("third"),
+        ])
+        .expect("join");
+
+        assert_eq!(
+            find_program_in_path("sh", &path_var),
+            Some(second.join(exe("sh")))
+        );
+        assert_eq!(find_program_in_path("bash", &path_var), None);
+        assert_eq!(find_program_in_path("sh", OsStr::new("")), None);
+    }
+
+    #[test]
+    fn resolve_script_interpreter_prefers_path() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let bin = tmp.path().join("bin");
+        touch(&bin.join(exe("bash")));
+        let path_var = bin.clone().into_os_string();
+        assert_eq!(
+            resolve_script_interpreter("bash", Some(&path_var)),
+            bin.join(exe("bash"))
+        );
+    }
+
+    #[test]
+    fn resolve_script_interpreter_finds_git_for_windows_shell() {
+        for git_dir in [&["cmd"][..], &["mingw64", "bin"][..]] {
+            let tmp = tempfile::tempdir().expect("tempdir");
+            let root = tmp.path().join("Git");
+            let git_bin = git_dir.iter().fold(root.clone(), |p, c| p.join(c));
+            touch(&git_bin.join(exe("git")));
+            touch(&root.join("usr").join("bin").join(exe("sh")));
+            let path_var = git_bin.into_os_string();
+            assert_eq!(
+                resolve_script_interpreter("sh", Some(&path_var)),
+                root.join("usr").join("bin").join(exe("sh")),
+                "git under {git_dir:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn resolve_script_interpreter_falls_back_to_bare_name() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let path_var = tmp.path().as_os_str().to_os_string();
+        assert_eq!(
+            resolve_script_interpreter("sh", Some(&path_var)),
+            PathBuf::from("sh")
+        );
+        assert_eq!(resolve_script_interpreter("sh", None), PathBuf::from("sh"));
+    }
+
+    #[test]
+    fn command_env_path_uses_last_explicit_path() {
+        let mut env = CommandEnvironment::default();
+        assert_eq!(command_env_path(&env), None);
+        env.set.push(("PATH".into(), "/first".into()));
+        env.set.push(("HOME".into(), "/home/u".into()));
+        env.set.push(("PATH".into(), "/second".into()));
+        assert_eq!(command_env_path(&env), Some(OsStr::new("/second")));
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn command_env_path_ignores_case_on_windows() {
+        let mut env = CommandEnvironment::default();
+        env.set.push(("Path".into(), r"C:\Git\cmd".into()));
+        assert_eq!(command_env_path(&env), Some(OsStr::new(r"C:\Git\cmd")));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn hook_shell_is_bin_sh_on_unix() {
+        let mut env = CommandEnvironment::default();
+        env.set.push(("PATH".into(), "/nonexistent".into()));
+        assert_eq!(hook_shell(&env), PathBuf::from("/bin/sh"));
+    }
+
+    #[test]
+    fn not_an_executable_matches_only_the_platform_code() {
+        #[cfg(unix)]
+        assert!(is_not_an_executable(&std::io::Error::from_raw_os_error(8)));
+        #[cfg(windows)]
+        assert!(is_not_an_executable(&std::io::Error::from_raw_os_error(
+            193
+        )));
+        assert!(!is_not_an_executable(&std::io::Error::from(
+            std::io::ErrorKind::NotFound
+        )));
+    }
 }

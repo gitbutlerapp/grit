@@ -46,6 +46,16 @@ fn map_lib_error(err: &LibError) -> String {
         LibError::InvalidPathComponent { path, reason } => {
             format!("cannot use path '{path}': {reason}")
         }
+        LibError::Hook(hook) => {
+            let mut message = hook.to_string();
+            let mut cause = std::error::Error::source(hook);
+            while let Some(c) = cause {
+                message.push_str(": ");
+                message.push_str(&c.to_string());
+                cause = c.source();
+            }
+            message
+        }
         other => other.git_stderr_message(),
     }
 }

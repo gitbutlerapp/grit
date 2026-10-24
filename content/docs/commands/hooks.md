@@ -19,6 +19,19 @@ Discovers traditional hook scripts in the resolved hooks directory (`core.hooksP
 
 `grit hooks run` executes every hook registered for the event (config hooks first, then the script in the hooks directory) through the repository [`CommandRunner`](../../library/maintenance.md). The process exits with the hook's status when a hook ran and returned non-zero.
 
+Hooks run with the invoking environment (including `PATH`), from the top of the work tree. A script the OS will not execute directly runs through `sh`: `/bin/sh` on Unix, while on Windows a script's `#!` line names its interpreter (`#!/bin/sh` → `sh`, `#!/usr/bin/env bash` → `bash`), found on `PATH` or in the Git for Windows install that owns the `git` on `PATH` (`usr\bin`). Hook paths, in `list` output and on the hook's command line, never carry the Windows `\\?\` prefix.
+
+When a hook cannot be started at all (for example, its interpreter is missing), the command fails with an error naming the hook, the program it tried to start and the OS error, instead of reporting an exit status:
+
+```console
+$ grit hooks run pre-commit
+error: failed to run hook pre-commit (.git/hooks/pre-commit): No such file or directory (os error 2)
+$ echo $?
+1
+```
+
+In `--json` mode the same message is the `error` field, and [`grit commit`](commit.md) reports it the same way.
+
 [`grit commit`](commit.md) runs `pre-commit` and `commit-msg` automatically before writing the commit object, then `post-commit` after the branch moves. Use `grit commit --no-verify` to skip the first two (same as Git). JSON commit output lists hook basenames that actually ran in `hooks_run`.
 
 ## Options
@@ -115,6 +128,7 @@ Schema: [v1](/schemas/hooks/v1.json)
 | ---: | --- |
 | `0` | `hooks list` or `hooks run` when the hook exits 0 (or the hook is missing). |
 | *varies* | `hooks run` returns the hook subprocess exit code ([`custom`](../exit-codes/)). |
+| `1` | `hooks run` when a hook could not be started ([`failure`](../exit-codes/)). |
 | `2` | Invalid flags ([`usage`](../exit-codes/)). |
 
 See [Exit codes](../exit-codes/).

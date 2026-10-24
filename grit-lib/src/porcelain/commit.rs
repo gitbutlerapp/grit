@@ -538,9 +538,7 @@ fn run_commit_hook_recorded(
     stdin_data: Option<&[u8]>,
     commit_env: &CommitHookEnv<'_>,
 ) -> std::result::Result<bool, HookError> {
-    match run_commit_hook(repo, hook.as_str(), args, stdin_data, commit_env)
-        .map_err(HookError::Internal)?
-    {
+    match run_commit_hook(repo, hook.as_str(), args, stdin_data, commit_env)? {
         HookResult::Success => Ok(true),
         HookResult::NotFound => Ok(false),
         HookResult::Failed(status) => Err(HookError::Failed {
@@ -555,9 +553,7 @@ fn run_post_commit_hook_recorded(
     repo: &Repository,
     commit_env: &CommitHookEnv<'_>,
 ) -> std::result::Result<bool, HookError> {
-    match run_commit_hook(repo, HookName::PostCommit.as_str(), &[], None, commit_env)
-        .map_err(HookError::Internal)?
-    {
+    match run_commit_hook(repo, HookName::PostCommit.as_str(), &[], None, commit_env)? {
         HookResult::Success | HookResult::Failed(_) => Ok(true),
         HookResult::NotFound => Ok(false),
     }

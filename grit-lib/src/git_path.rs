@@ -721,6 +721,22 @@ pub fn strip_verbatim_path_prefix_str(path: &str) -> Cow<'_, str> {
     }
 }
 
+/// `path` without a Windows `\\?\` / `\\?\UNC\` prefix, for paths handed to child processes.
+///
+/// [`Path::canonicalize`] returns verbatim paths on Windows, and MSYS tools such as Git for
+/// Windows' `sh` cannot open them. Other platforms return `path` unchanged.
+#[must_use]
+pub(crate) fn path_without_verbatim_prefix(path: &Path) -> Cow<'_, Path> {
+    #[cfg(windows)]
+    if let Some(s) = path.to_str() {
+        let stripped = strip_verbatim_path_prefix_str(s);
+        if stripped.len() != s.len() {
+            return Cow::Owned(PathBuf::from(stripped.into_owned()));
+        }
+    }
+    Cow::Borrowed(path)
+}
+
 /// User-facing path: forward slashes, no verbatim prefix (Git-style init/status paths).
 #[must_use]
 pub fn user_display_path(path: &Path) -> String {

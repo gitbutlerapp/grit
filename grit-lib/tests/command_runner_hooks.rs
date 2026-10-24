@@ -52,10 +52,11 @@ fn recording_runner_pre_commit_hook_argv_and_failure() {
 
     let specs = runner.specs();
     assert_eq!(specs.len(), 1);
-    let prog = specs[0].program.to_string_lossy();
+    let prog = &specs[0].program;
     assert!(
-        prog == "sh" || prog == "/bin/sh",
-        "unexpected program: {prog}"
+        prog.file_stem().is_some_and(|stem| stem == "sh"),
+        "unexpected program: {}",
+        prog.display()
     );
 }
 

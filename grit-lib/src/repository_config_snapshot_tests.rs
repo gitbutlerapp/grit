@@ -523,7 +523,7 @@ printf '%s\n' '	hookKey = from-hook' >> "$cfg"
         .unwrap();
         assert!(repo.config().unwrap().get("grit.hookKey").is_none());
 
-        crate::hooks::run_hook(&repo, "post-checkout", &["a", "b", "c"], None);
+        crate::hooks::run_hook(&repo, "post-checkout", &["a", "b", "c"], None).unwrap();
         assert_eq!(
             repo.config().unwrap().get("grit.hookKey"),
             Some("from-hook".to_string())
