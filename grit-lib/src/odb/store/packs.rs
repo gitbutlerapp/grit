@@ -12,7 +12,7 @@ use std::sync::Arc;
 use flate2::read::ZlibDecoder;
 
 use crate::error::{Error, Result};
-use crate::objects::{HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind};
+use crate::objects::{HashAlgo, Object, ObjectId, ObjectIdPrefix, ObjectInfo, ObjectKind};
 use crate::pack::{
     self, read_local_pack_indexes_cached, reprepare_pack_directory_on_miss, PackedType,
 };
@@ -297,13 +297,13 @@ impl ObjectStore for PackedObjects {
         if prefix.len() > self.hash_algo().hex_len() {
             return Ok(());
         }
-        let prefix = super::normalize_oid_prefix(prefix, self.hash_algo())?;
+        let prefix = ObjectIdPrefix::from_hex(prefix, self.hash_algo())?;
         self.with_pack(|objects_dir| {
             let indexes = read_local_pack_indexes_cached(objects_dir)?;
             let mut seen = HashSet::new();
             let mut count = 0usize;
             for idx in &indexes {
-                collect_prefix_from_index(idx, prefix.as_str(), limit, &mut count, out, &mut seen)?;
+                collect_prefix_from_index(idx, &prefix, limit, &mut count, out, &mut seen)?;
                 if limit != 0 && count >= limit {
                     break;
                 }
@@ -390,40 +390,22 @@ fn filtered_indexes(
 
 fn collect_prefix_from_index(
     idx: &PackIndex,
-    prefix: &str,
+    prefix: &ObjectIdPrefix,
     limit: usize,
     count: &mut usize,
     out: &mut Vec<ObjectId>,
     seen: &mut HashSet<ObjectId>,
 ) -> Result<()> {
-    if prefix.is_empty() {
-        for entry in idx.iter() {
-            let Ok(oid) = ObjectId::from_bytes(entry.oid()) else {
-                continue;
-            };
-            if !seen.insert(oid) {
-                continue;
-            }
-            out.push(oid);
-            *count += 1;
-            if limit != 0 && *count >= limit {
-                return Ok(());
-            }
-        }
-        return Ok(());
-    }
-
-    let hb = idx.hash_bytes();
-    let (min_oid, max_oid) = oid_prefix_bounds(prefix, hb)?;
-    let lo = lower_bound_oid(idx, min_oid.as_bytes());
-    let hi = upper_bound_oid(idx, max_oid.as_bytes());
+    let lo = lower_bound_oid(idx, prefix.lowest().as_bytes());
+    let hi = upper_bound_oid(idx, prefix.highest().as_bytes());
     for i in lo..hi {
-        let Ok(oid) = ObjectId::from_bytes(idx.oid_at(i)) else {
+        let digest = idx.oid_at(i);
+        if !prefix.matches_digest(digest) {
+            continue;
+        }
+        let Ok(oid) = ObjectId::from_bytes(digest) else {
             continue;
         };
-        if !oid_hex_has_prefix(&oid, prefix) {
-            continue;
-        }
         if !seen.insert(oid) {
             continue;
         }
@@ -434,19 +416,6 @@ fn collect_prefix_from_index(
         }
     }
     Ok(())
-}
-
-fn oid_prefix_bounds(prefix: &str, hash_bytes: usize) -> Result<(ObjectId, ObjectId)> {
-    let hex_len = hash_bytes * 2;
-    if prefix.len() > hex_len {
-        return Err(Error::InvalidObjectId(prefix.to_owned()));
-    }
-    let pad = hex_len - prefix.len();
-    let min_hex = format!("{prefix}{:0>pad$}", "", pad = pad);
-    let max_hex = format!("{prefix}{}", "f".repeat(pad));
-    let min = ObjectId::from_hex(&min_hex)?;
-    let max = ObjectId::from_hex(&max_hex)?;
-    Ok((min, max))
 }
 
 fn lower_bound_oid(idx: &PackIndex, needle: &[u8]) -> usize {
@@ -475,13 +444,6 @@ fn upper_bound_oid(idx: &PackIndex, needle: &[u8]) -> usize {
         }
     }
     lo
-}
-
-fn oid_hex_has_prefix(oid: &ObjectId, prefix: &str) -> bool {
-    if prefix.is_empty() {
-        return true;
-    }
-    oid.to_hex().starts_with(prefix)
 }
 
 fn parse_pack_object_header(bytes: &[u8], pos: &mut usize) -> Result<(PackedType, u64)> {

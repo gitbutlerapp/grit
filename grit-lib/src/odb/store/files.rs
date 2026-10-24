@@ -9,7 +9,7 @@ use crate::diagnostics::DiagnosticsHandle;
 use crate::error::{Error, Result};
 use crate::hash;
 use crate::midx::midx_oid_listed_in_tip;
-use crate::objects::{HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind};
+use crate::objects::{HashAlgo, Object, ObjectId, ObjectIdPrefix, ObjectInfo, ObjectKind};
 use crate::pack::{self, PackLookupOptions};
 use crate::pack_store::PackStore;
 
@@ -482,13 +482,13 @@ impl ObjectStore for FilesSource {
     }
 
     fn lookup_prefix(&self, prefix: &str, limit: usize, out: &mut Vec<ObjectId>) -> Result<()> {
-        let prefix_norm = super::normalize_oid_prefix(prefix, self.hash_algo())?;
+        ObjectIdPrefix::from_hex(prefix, self.hash_algo())?;
         let mut seen: HashSet<ObjectId> = out.iter().copied().collect();
         if PackStore::read_context_matches_objects_dir(&self.objects_dir) {
-            files_lookup_prefix_layers(self, prefix_norm.as_str(), limit, out, &mut seen)
+            files_lookup_prefix_layers(self, prefix, limit, out, &mut seen)
         } else {
             PackStore::with_context(self.packs.pack_store().clone(), || {
-                files_lookup_prefix_layers(self, prefix_norm.as_str(), limit, out, &mut seen)
+                files_lookup_prefix_layers(self, prefix, limit, out, &mut seen)
             })
         }
     }

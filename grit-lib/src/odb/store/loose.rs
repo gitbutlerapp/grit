@@ -12,7 +12,7 @@ use flate2::{Decompress, FlushDecompress, Status};
 use super::{ObjectStore, ObjectStream, WritableObjectStore};
 use crate::error::{Error, Result};
 use crate::hash;
-use crate::objects::{HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind};
+use crate::objects::{HashAlgo, Object, ObjectId, ObjectIdPrefix, ObjectInfo, ObjectKind};
 use crate::odb::WriteOptions;
 use crate::zlib_inflate::with_loose_scratch;
 
@@ -234,51 +234,24 @@ impl ObjectStore for LooseStore {
     }
 
     fn lookup_prefix(&self, prefix: &str, limit: usize, out: &mut Vec<ObjectId>) -> Result<()> {
-        let prefix = normalize_oid_prefix(prefix, self.hash_algo)?;
-        if prefix.len() < 2 {
-            return lookup_prefix_scan_all(
-                &self.objects_dir,
-                self.hash_algo,
-                prefix.as_str(),
-                limit,
-                out,
-            );
-        }
-        let fanout = &prefix[..2];
-        let fanout_dir = self.objects_dir.join(fanout);
-        if !fanout_dir.is_dir() {
-            return Ok(());
-        }
+        let prefix = ObjectIdPrefix::from_hex(prefix, self.hash_algo)?;
         let start_len = out.len();
-        let sub = match fs::read_dir(&fanout_dir) {
-            Ok(rd) => rd,
-            Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(()),
-            Err(err) => return Err(Error::Io(err)),
-        };
-        for entry in sub {
-            let entry = entry.map_err(Error::Io)?;
-            if !entry.file_type().map_err(Error::Io)?.is_file() {
-                continue;
-            }
-            let suffix_name = entry.file_name();
-            let Some(suffix) = suffix_name.to_str() else {
-                continue;
-            };
-            if !is_loose_suffix_for_algo(suffix, self.hash_algo) {
-                continue;
-            }
-            let hex = format!("{fanout}{suffix}");
-            let Ok(oid) = ObjectId::from_hex(&hex) else {
-                continue;
-            };
-            if oid_hex_has_prefix(&oid, prefix.as_str()) {
-                out.push(oid);
+        let mut collect = |oid: &ObjectId| {
+            if prefix.matches(oid) {
+                out.push(*oid);
                 if limit != 0 && out.len() - start_len >= limit {
-                    break;
+                    return ControlFlow::Break(());
                 }
             }
+            ControlFlow::Continue(())
+        };
+        if prefix.nibbles() < 2 {
+            return for_each_loose_object_id(&self.objects_dir, self.hash_algo, &mut collect);
         }
-        Ok(())
+        let fanout = format!("{:02x}", prefix.lowest().as_bytes()[0]);
+        let fanout_dir = self.objects_dir.join(&fanout);
+        for_each_object_id_in_fanout_dir(&fanout_dir, &fanout, self.hash_algo, &mut collect)
+            .map(drop)
     }
 }
 
@@ -357,34 +330,54 @@ pub fn for_each_loose_object_id(
         if !top_entry.file_type().map_err(Error::Io)?.is_dir() {
             continue;
         }
-
-        let sub = match fs::read_dir(top_entry.path()) {
-            Ok(rd) => rd,
-            Err(e) if e.kind() == io::ErrorKind::NotFound => continue,
-            Err(e) => return Err(Error::Io(e)),
-        };
-        for sub_entry in sub {
-            let sub_entry = sub_entry.map_err(Error::Io)?;
-            if !sub_entry.file_type().map_err(Error::Io)?.is_file() {
-                continue;
-            }
-            let suffix_name = sub_entry.file_name();
-            let Some(suffix) = suffix_name.to_str() else {
-                continue;
-            };
-            if !is_loose_suffix_for_algo(suffix, hash_algo) {
-                continue;
-            }
-            let hex = format!("{prefix}{suffix}");
-            let Ok(oid) = ObjectId::from_hex(&hex) else {
-                continue;
-            };
-            if f(&oid).is_break() {
-                return Ok(());
-            }
+        if for_each_object_id_in_fanout_dir(&top_entry.path(), prefix, hash_algo, f)?.is_break() {
+            return Ok(());
         }
     }
     Ok(())
+}
+
+/// Visit the loose ids in one `objects/<fanout>` directory; a missing directory (or a
+/// non-directory at that path) holds no objects.
+fn for_each_object_id_in_fanout_dir(
+    fanout_dir: &Path,
+    fanout: &str,
+    hash_algo: HashAlgo,
+    f: &mut dyn FnMut(&ObjectId) -> ControlFlow<()>,
+) -> Result<ControlFlow<()>> {
+    let sub = match fs::read_dir(fanout_dir) {
+        Ok(rd) => rd,
+        Err(e)
+            if matches!(
+                e.kind(),
+                io::ErrorKind::NotFound | io::ErrorKind::NotADirectory
+            ) =>
+        {
+            return Ok(ControlFlow::Continue(()));
+        }
+        Err(e) => return Err(Error::Io(e)),
+    };
+    for sub_entry in sub {
+        let sub_entry = sub_entry.map_err(Error::Io)?;
+        if !sub_entry.file_type().map_err(Error::Io)?.is_file() {
+            continue;
+        }
+        let suffix_name = sub_entry.file_name();
+        let Some(suffix) = suffix_name.to_str() else {
+            continue;
+        };
+        if !is_loose_suffix_for_algo(suffix, hash_algo) {
+            continue;
+        }
+        let hex = format!("{fanout}{suffix}");
+        let Ok(oid) = ObjectId::from_hex(&hex) else {
+            continue;
+        };
+        if f(&oid).is_break() {
+            return Ok(ControlFlow::Break(()));
+        }
+    }
+    Ok(ControlFlow::Continue(()))
 }
 
 /// Decompress a zlib-wrapped loose object payload from an open file.
@@ -632,46 +625,6 @@ fn set_loose_object_mode(path: &Path) {
 
 fn is_loose_suffix_for_algo(suffix: &str, algo: HashAlgo) -> bool {
     suffix.len() == algo.hex_len() - 2 && suffix.bytes().all(|b| b.is_ascii_hexdigit())
-}
-
-fn normalize_oid_prefix(prefix: &str, algo: HashAlgo) -> Result<String> {
-    if prefix.is_empty() {
-        return Ok(String::new());
-    }
-    if !prefix.bytes().all(|b| b.is_ascii_hexdigit()) {
-        return Err(Error::InvalidObjectId(prefix.to_owned()));
-    }
-    let max = algo.hex_len();
-    if prefix.len() > max {
-        return Err(Error::InvalidObjectId(prefix.to_owned()));
-    }
-    Ok(prefix.to_ascii_lowercase())
-}
-
-fn oid_hex_has_prefix(oid: &ObjectId, prefix: &str) -> bool {
-    if prefix.is_empty() {
-        return true;
-    }
-    oid.to_hex().starts_with(prefix)
-}
-
-fn lookup_prefix_scan_all(
-    objects_dir: &Path,
-    hash_algo: HashAlgo,
-    prefix: &str,
-    limit: usize,
-    out: &mut Vec<ObjectId>,
-) -> Result<()> {
-    let start_len = out.len();
-    for_each_loose_object_id(objects_dir, hash_algo, &mut |oid| {
-        if oid_hex_has_prefix(oid, prefix) {
-            out.push(*oid);
-            if limit != 0 && out.len() - start_len >= limit {
-                return ControlFlow::Break(());
-            }
-        }
-        ControlFlow::Continue(())
-    })
 }
 
 /// Incremental zlib reader yielding only the object payload (after the Git header).

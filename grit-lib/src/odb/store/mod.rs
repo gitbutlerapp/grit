@@ -28,7 +28,7 @@ use std::path::Path;
 use crate::error::{Error, Result};
 use crate::hash;
 use crate::objects::{
-    oid_hash_map, HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind, OidHashMap,
+    oid_hash_map, HashAlgo, Object, ObjectId, ObjectIdPrefix, ObjectInfo, ObjectKind, OidHashMap,
 };
 use crate::odb::WriteOptions;
 use crate::pack;
@@ -129,18 +129,22 @@ pub trait ObjectStore: Send + Sync + std::fmt::Debug {
     /// matches and `limit` is 1, callers treat the result as ambiguous if `out` would
     /// have held multiple matches.
     ///
-    /// Default implementation scans via [`Self::for_each_object`]; indexed backends
-    /// should override with a prefix search.
+    /// The default implementation parses `prefix` once into an [`ObjectIdPrefix`] and
+    /// compares it against the raw bytes of every id from [`Self::for_each_object`]: one
+    /// allocation-free pass over the whole store per call. Abbreviating ids and resolving
+    /// short ids call this once per id, so a store with many objects and a cheaper way to
+    /// find ids by leading bytes (a sorted index, an ordered key-value range from
+    /// [`ObjectIdPrefix::lowest`] to [`ObjectIdPrefix::highest`]) should override it.
     ///
     /// # Errors
     ///
     /// Returns [`Error::InvalidObjectId`] when `prefix` is not valid hex or is longer
     /// than a full object id for this store's hash algorithm.
     fn lookup_prefix(&self, prefix: &str, limit: usize, out: &mut Vec<ObjectId>) -> Result<()> {
-        let prefix = normalize_oid_prefix(prefix, self.hash_algo())?;
+        let prefix = ObjectIdPrefix::from_hex(prefix, self.hash_algo())?;
         let mut count = 0usize;
         self.for_each_object(&mut |oid| {
-            if oid_hex_has_prefix(oid, prefix.as_str()) {
+            if prefix.matches(oid) {
                 out.push(*oid);
                 count += 1;
                 if limit != 0 && count >= limit {
@@ -360,20 +364,16 @@ impl ObjectStore for MemoryStore {
     }
 
     fn lookup_prefix(&self, prefix: &str, limit: usize, out: &mut Vec<ObjectId>) -> Result<()> {
-        let prefix = normalize_oid_prefix(prefix, self.hash_algo())?;
+        let prefix = ObjectIdPrefix::from_hex(prefix, self.hash_algo())?;
         let guard = self
             .objects
             .read()
             .map_err(|e| Error::Io(io::Error::other(e.to_string())))?;
-        let mut count = 0usize;
-        for oid in guard.keys() {
-            if oid_hex_has_prefix(oid, prefix.as_str()) {
-                out.push(*oid);
-                count += 1;
-                if limit != 0 && count >= limit {
-                    break;
-                }
-            }
+        let matches = guard.keys().filter(|oid| prefix.matches(oid)).copied();
+        if limit == 0 {
+            out.extend(matches);
+        } else {
+            out.extend(matches.take(limit));
         }
         Ok(())
     }
@@ -401,20 +401,6 @@ impl WritableObjectStore for MemoryStore {
     }
 }
 
-pub(super) fn normalize_oid_prefix(prefix: &str, algo: HashAlgo) -> Result<String> {
-    if prefix.is_empty() {
-        return Ok(String::new());
-    }
-    if !prefix.bytes().all(|b| b.is_ascii_hexdigit()) {
-        return Err(Error::InvalidObjectId(prefix.to_owned()));
-    }
-    let max = algo.hex_len();
-    if prefix.len() > max {
-        return Err(Error::InvalidObjectId(prefix.to_owned()));
-    }
-    Ok(prefix.to_ascii_lowercase())
-}
-
 /// Run `store.for_each_object` and stop visiting further stores when `f` returns [`ControlFlow::Break`].
 pub(crate) fn for_each_propagate_break(
     store: &dyn ObjectStore,
@@ -434,13 +420,6 @@ pub(crate) fn for_each_propagate_break(
         }
     })?;
     Ok(stop)
-}
-
-pub(super) fn oid_hex_has_prefix(oid: &ObjectId, prefix: &str) -> bool {
-    if prefix.is_empty() {
-        return true;
-    }
-    oid.to_hex().starts_with(prefix)
 }
 
 #[cfg(test)]
@@ -530,6 +509,40 @@ mod tests {
             .lookup_prefix("ffffffffffffffffffffffffffffffffffffffff", 0, &mut none)
             .unwrap();
         assert!(none.is_empty());
+    }
+
+    #[test]
+    fn lookup_prefix_odd_even_empty_and_full_length() {
+        let store = MemoryStore::new(HashAlgo::Sha1);
+        let ids: Vec<ObjectId> = [
+            "abcdef0123000000000000000000000000000000",
+            "abcdef0124000000000000000000000000000000",
+            "abd0000000000000000000000000000000000000",
+        ]
+        .iter()
+        .map(|hex| ObjectId::from_hex(hex).unwrap())
+        .collect();
+        for id in &ids {
+            store.insert_object(*id, ObjectKind::Blob, Arc::from(Vec::new()));
+        }
+        let lookup = |prefix: &str, limit: usize| {
+            let mut out = Vec::new();
+            store.lookup_prefix(prefix, limit, &mut out).unwrap();
+            out.sort();
+            out
+        };
+        assert_eq!(lookup("", 0), ids);
+        assert_eq!(lookup("ab", 1).len(), 1);
+        assert_eq!(lookup("abc", 0), ids[..2]);
+        assert_eq!(lookup("abcdef012", 0), ids[..2]);
+        assert_eq!(lookup("ABCDEF0124", 0), ids[1..2]);
+        assert_eq!(lookup(&ids[2].to_hex(), 0), ids[2..]);
+        assert!(lookup("abe", 0).is_empty());
+        let mut out = Vec::new();
+        assert!(matches!(
+            store.lookup_prefix("xyz", 0, &mut out),
+            Err(Error::InvalidObjectId(_))
+        ));
     }
 
     #[test]

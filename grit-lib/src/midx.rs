@@ -313,7 +313,7 @@ pub(crate) mod midx_cache {
     };
     use crate::diagnostics::{DiagnosticSink, Warning};
     use crate::error::{Error, Result};
-    use crate::objects::{ObjectId, ObjectInfo};
+    use crate::objects::{ObjectId, ObjectIdPrefix, ObjectInfo};
     use crate::pack::{read_object_at, read_pack_index_cached, PackIndex};
     use crate::pack_map::PackData;
     use std::collections::HashMap;
@@ -559,45 +559,21 @@ pub(crate) mod midx_cache {
 
         fn lookup_prefix(
             &self,
-            prefix: &str,
+            prefix: &ObjectIdPrefix,
             limit: usize,
             count: &mut usize,
             out: &mut Vec<ObjectId>,
             seen: &mut std::collections::HashSet<ObjectId>,
         ) -> Result<()> {
-            if prefix.is_empty() {
-                return self.for_each_listed_object(&mut |oid| {
-                    if !seen.insert(*oid) {
-                        return ControlFlow::Continue(());
-                    }
-                    out.push(*oid);
-                    *count += 1;
-                    if limit != 0 && *count >= limit {
-                        return ControlFlow::Break(());
-                    }
-                    ControlFlow::Continue(())
-                });
-            }
-            let hash_bytes = self.hash_len;
-            let hex_len = hash_bytes * 2;
-            if prefix.len() > hex_len {
-                return Err(Error::InvalidObjectId(prefix.to_owned()));
-            }
-            let pad = hex_len - prefix.len();
-            let min_hex = format!("{prefix}{:0>pad$}", "", pad = pad);
-            let max_hex = format!("{prefix}{}", "f".repeat(pad));
-            let min = ObjectId::from_hex(&min_hex)?;
-            let max = ObjectId::from_hex(&max_hex)?;
-            let min_bytes = min.as_bytes();
-            let max_bytes = max.as_bytes();
-            let lo = self.lower_bound_oid(min_bytes);
-            let hi = self.upper_bound_oid(max_bytes);
+            let lo = self.lower_bound_oid(prefix.lowest().as_bytes());
+            let hi = self.upper_bound_oid(prefix.highest().as_bytes());
             for pos in lo..hi {
-                let oid = ObjectId::from_bytes(self.oid_at(pos))
-                    .map_err(|e| Error::CorruptObject(e.to_string()))?;
-                if !oid.to_hex().starts_with(prefix) {
+                let digest = self.oid_at(pos);
+                if !prefix.matches_digest(digest) {
                     continue;
                 }
+                let oid = ObjectId::from_bytes(digest)
+                    .map_err(|e| Error::CorruptObject(e.to_string()))?;
                 if !seen.insert(oid) {
                     continue;
                 }
@@ -769,10 +745,10 @@ pub(crate) mod midx_cache {
             Ok(())
         }
 
-        /// Collect OIDs whose hex form starts with `prefix` (case-insensitive), up to `limit`.
+        /// Collect OIDs that start with `prefix`, up to `limit` (0 means no limit).
         pub(crate) fn lookup_prefix(
             &self,
-            prefix: &str,
+            prefix: &ObjectIdPrefix,
             limit: usize,
             out: &mut Vec<ObjectId>,
         ) -> Result<()> {

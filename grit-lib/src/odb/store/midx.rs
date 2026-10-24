@@ -11,11 +11,11 @@ use std::sync::{Arc, RwLock};
 use crate::diagnostics::NullDiagnostics;
 use crate::error::{Error, Result};
 use crate::midx::{prepared_midx_chain_strict, PreparedMidxChain};
-use crate::objects::{HashAlgo, Object, ObjectId, ObjectInfo};
+use crate::objects::{HashAlgo, Object, ObjectId, ObjectIdPrefix, ObjectInfo};
 use crate::pack::clear_pack_cache;
 use crate::pack_store::PackStore;
 
-use super::{normalize_oid_prefix, ObjectStore, ObjectStream, PackedObjects};
+use super::{ObjectStore, ObjectStream, PackedObjects};
 
 /// Whether [`MidxObjects`] can serve reads for this repository.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -173,8 +173,8 @@ impl ObjectStore for MidxObjects {
         let Some(chain) = self.active_chain()? else {
             return Ok(());
         };
-        let prefix = normalize_oid_prefix(prefix, self.hash_algo())?;
-        chain.lookup_prefix(prefix.as_str(), limit, out)
+        let prefix = ObjectIdPrefix::from_hex(prefix, self.hash_algo())?;
+        chain.lookup_prefix(&prefix, limit, out)
     }
 
     fn refresh(&self) -> Result<bool> {

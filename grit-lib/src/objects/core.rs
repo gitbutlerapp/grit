@@ -219,6 +219,16 @@ impl ObjectId {
         self.as_bytes().iter().all(|&b| b == 0)
     }
 
+    /// Number of leading hex digits this id shares with `other`.
+    #[must_use]
+    pub(crate) fn common_prefix_nibbles(&self, other: &Self) -> usize {
+        let (a, b) = (self.as_bytes(), other.as_bytes());
+        match a.iter().zip(b).position(|(x, y)| x != y) {
+            Some(i) => i * 2 + usize::from((a[i] ^ b[i]) & 0xf0 == 0),
+            None => a.len().min(b.len()) * 2,
+        }
+    }
+
     /// Whether this OID is Git's well-known empty tree (canonical or legacy typo hash).
     #[must_use]
     pub(crate) fn is_well_known_empty_tree(&self) -> bool {
@@ -429,6 +439,154 @@ impl FromStr for ObjectId {
 
     fn from_str(s: &str) -> Result<Self> {
         Self::from_hex(s)
+    }
+}
+
+/// A parsed abbreviated object id: the leading hex digits ("nibbles") of a digest.
+///
+/// Parse the user's hex once with [`ObjectIdPrefix::from_hex`], then test candidates
+/// with [`ObjectIdPrefix::matches`], which compares raw digest bytes without allocating.
+/// Sorted backends (pack indexes, key-value stores) can instead scan the inclusive id
+/// range [`ObjectIdPrefix::lowest`]..=[`ObjectIdPrefix::highest`], which holds exactly
+/// the ids that match.
+///
+/// # Examples
+///
+/// ```
+/// use grit_lib::objects::{HashAlgo, ObjectId, ObjectIdPrefix};
+///
+/// # fn main() -> grit_lib::error::Result<()> {
+/// let id = ObjectId::from_hex("4b825dc642cb6eb9a060e54bf8d69288fbee4904")?;
+/// let prefix = ObjectIdPrefix::from_hex("4B825", HashAlgo::Sha1)?;
+/// assert_eq!(prefix.nibbles(), 5);
+/// assert!(prefix.matches(&id));
+/// assert!(!ObjectIdPrefix::from_hex("4b826", HashAlgo::Sha1)?.matches(&id));
+/// assert!(prefix.lowest() <= id && id <= prefix.highest());
+/// # Ok(())
+/// # }
+/// ```
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct ObjectIdPrefix {
+    /// Prefix digits packed two per byte; the low nibble of an odd-length tail and
+    /// every byte past it are zero.
+    bytes: [u8; MAX_OID_LEN],
+    nibbles: u8,
+    algo: HashAlgo,
+}
+
+impl ObjectIdPrefix {
+    /// Parse `hex` (either case, possibly empty) as a prefix of `algo` object ids.
+    ///
+    /// The empty prefix matches every id.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`Error::InvalidObjectId`] when `hex` contains a non-hex character or is
+    /// longer than a full `algo` id ([`HashAlgo::hex_len`]).
+    pub fn from_hex(hex: &str, algo: HashAlgo) -> Result<Self> {
+        let digits = hex.as_bytes();
+        if digits.len() > algo.hex_len() {
+            return Err(Error::InvalidObjectId(hex.to_owned()));
+        }
+        let mut bytes = [0u8; MAX_OID_LEN];
+        let mut invalid = 0u8;
+        for (i, &digit) in digits.iter().enumerate() {
+            let nibble = HEX_DECODE[usize::from(digit)];
+            invalid |= nibble;
+            let shift = if i.is_multiple_of(2) { 4 } else { 0 };
+            bytes[i / 2] |= (nibble & 0x0f) << shift;
+        }
+        if invalid & HEX_INVALID != 0 {
+            return Err(Error::InvalidObjectId(hex.to_owned()));
+        }
+        Ok(Self {
+            bytes,
+            nibbles: digits.len() as u8,
+            algo,
+        })
+    }
+
+    /// Number of hex digits in the prefix.
+    #[must_use]
+    pub fn nibbles(&self) -> usize {
+        usize::from(self.nibbles)
+    }
+
+    /// Whether the prefix has no digits (and so matches every id).
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.nibbles == 0
+    }
+
+    /// Hash algorithm the prefix was parsed for.
+    #[must_use]
+    pub fn algo(&self) -> HashAlgo {
+        self.algo
+    }
+
+    /// Whether `oid` starts with this prefix.
+    ///
+    /// Compares raw digest bytes (masking the last byte for an odd digit count), so the
+    /// check never allocates. An id shorter than the prefix never matches.
+    #[must_use]
+    pub fn matches(&self, oid: &ObjectId) -> bool {
+        self.matches_digest(oid.as_bytes())
+    }
+
+    /// Like [`Self::matches`] for a raw digest slice (for example a pack index entry).
+    #[must_use]
+    pub(crate) fn matches_digest(&self, digest: &[u8]) -> bool {
+        let whole = self.nibbles() / 2;
+        let Some(head) = digest.get(..whole) else {
+            return false;
+        };
+        if head != &self.bytes[..whole] {
+            return false;
+        }
+        if self.nibbles.is_multiple_of(2) {
+            return true;
+        }
+        digest
+            .get(whole)
+            .is_some_and(|&b| b & 0xf0 == self.bytes[whole])
+    }
+
+    /// The smallest `algo` id that starts with this prefix (remaining digits all `0`).
+    #[must_use]
+    pub fn lowest(&self) -> ObjectId {
+        ObjectId {
+            bytes: self.bytes,
+            len: self.algo.len() as u8,
+        }
+    }
+
+    /// The largest `algo` id that starts with this prefix (remaining digits all `f`).
+    #[must_use]
+    pub fn highest(&self) -> ObjectId {
+        let mut bytes = self.bytes;
+        let whole = self.nibbles() / 2;
+        if !self.nibbles.is_multiple_of(2) {
+            bytes[whole] |= 0x0f;
+        }
+        let first_free = whole + usize::from(self.nibbles % 2);
+        bytes[first_free..self.algo.len()].fill(0xff);
+        ObjectId {
+            bytes,
+            len: self.algo.len() as u8,
+        }
+    }
+}
+
+impl fmt::Display for ObjectIdPrefix {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let hex = hex::encode(&self.bytes[..self.nibbles().div_ceil(2)]);
+        f.write_str(&hex[..self.nibbles()])
+    }
+}
+
+impl fmt::Debug for ObjectIdPrefix {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "ObjectIdPrefix({self})")
     }
 }
 
@@ -1339,6 +1497,135 @@ pub fn serialize_commit(c: &CommitData) -> Vec<u8> {
         out.extend_from_slice(c.message.as_bytes());
     }
     out
+}
+
+#[cfg(test)]
+mod object_id_prefix_tests {
+    use super::*;
+
+    const ID: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
+
+    fn id() -> ObjectId {
+        ObjectId::from_hex(ID).unwrap()
+    }
+
+    fn prefix(hex: &str) -> ObjectIdPrefix {
+        ObjectIdPrefix::from_hex(hex, HashAlgo::Sha1).unwrap()
+    }
+
+    #[test]
+    fn matches_every_length_of_the_id_and_rejects_a_changed_last_digit() {
+        let id = id();
+        for n in 0..=ID.len() {
+            let p = prefix(&ID[..n]);
+            assert_eq!(p.nibbles(), n);
+            assert_eq!(p.is_empty(), n == 0);
+            assert!(p.matches(&id), "{n} digits");
+            assert_eq!(p.to_string(), ID[..n]);
+            if n > 0 {
+                let mut changed = ID[..n].to_owned();
+                let last = changed.pop().unwrap();
+                changed.push(if last == '0' { '1' } else { '0' });
+                assert!(!prefix(&changed).matches(&id), "{changed}");
+            }
+        }
+    }
+
+    #[test]
+    fn odd_prefix_ignores_the_low_nibble_of_its_last_byte() {
+        let p = prefix("4b8");
+        assert!(p.matches(&ObjectId::from_hex("4b80000000000000000000000000000000000000").unwrap()));
+        assert!(p.matches(&ObjectId::from_hex("4b8fffffffffffffffffffffffffffffffffffff").unwrap()));
+        assert!(
+            !p.matches(&ObjectId::from_hex("4b90000000000000000000000000000000000000").unwrap())
+        );
+    }
+
+    #[test]
+    fn parsing_is_case_insensitive_and_validates() {
+        assert_eq!(prefix("4B825DC"), prefix("4b825dc"));
+        assert!(matches!(
+            ObjectIdPrefix::from_hex("4b8g", HashAlgo::Sha1),
+            Err(Error::InvalidObjectId(_))
+        ));
+        assert!(matches!(
+            ObjectIdPrefix::from_hex(&format!("{ID}0"), HashAlgo::Sha1),
+            Err(Error::InvalidObjectId(_))
+        ));
+        let sha256 = "a".repeat(64);
+        assert_eq!(
+            ObjectIdPrefix::from_hex(&sha256, HashAlgo::Sha256)
+                .unwrap()
+                .nibbles(),
+            64
+        );
+        assert_eq!(prefix("").algo(), HashAlgo::Sha1);
+    }
+
+    #[test]
+    fn longer_prefix_never_matches_a_shorter_digest() {
+        let long = ObjectIdPrefix::from_hex(&format!("{ID}0000"), HashAlgo::Sha256).unwrap();
+        assert!(!long.matches(&id()));
+        assert!(ObjectIdPrefix::from_hex(ID, HashAlgo::Sha256)
+            .unwrap()
+            .matches(&id()));
+    }
+
+    #[test]
+    fn bounds_are_the_first_and_last_matching_ids() {
+        let p = prefix("4b8");
+        assert_eq!(
+            p.lowest().to_hex(),
+            "4b80000000000000000000000000000000000000"
+        );
+        assert_eq!(
+            p.highest().to_hex(),
+            "4b8fffffffffffffffffffffffffffffffffffff"
+        );
+        let even = prefix("4b82");
+        assert_eq!(
+            even.lowest().to_hex(),
+            "4b82000000000000000000000000000000000000"
+        );
+        assert_eq!(
+            even.highest().to_hex(),
+            "4b82ffffffffffffffffffffffffffffffffffff"
+        );
+        assert_eq!(prefix("").lowest(), ObjectId::null(HashAlgo::Sha1));
+        assert_eq!(prefix("").highest().to_hex(), "f".repeat(40));
+        assert_eq!(prefix(ID).lowest(), id());
+        assert_eq!(prefix(ID).highest(), id());
+        let sha256 = ObjectIdPrefix::from_hex("abc", HashAlgo::Sha256).unwrap();
+        assert_eq!(sha256.highest().to_hex(), format!("abc{}", "f".repeat(61)));
+        assert_eq!(format!("{sha256:?}"), "ObjectIdPrefix(abc)");
+    }
+
+    #[test]
+    fn common_prefix_nibbles_counts_shared_leading_digits() {
+        let a = id();
+        let hex = |s: &str| ObjectId::from_hex(s).unwrap();
+        assert_eq!(a.common_prefix_nibbles(&a), 40);
+        assert_eq!(
+            a.common_prefix_nibbles(&hex("4b825dc642cb6eb9a060e54bf8d69288fbee4905")),
+            39
+        );
+        assert_eq!(
+            a.common_prefix_nibbles(&hex("4b815dc642cb6eb9a060e54bf8d69288fbee4904")),
+            3
+        );
+        assert_eq!(
+            a.common_prefix_nibbles(&hex("4b925dc642cb6eb9a060e54bf8d69288fbee4904")),
+            2
+        );
+        assert_eq!(
+            a.common_prefix_nibbles(&hex("5b825dc642cb6eb9a060e54bf8d69288fbee4904")),
+            0
+        );
+        assert_eq!(
+            a.common_prefix_nibbles(&hex("4c825dc642cb6eb9a060e54bf8d69288fbee4904")),
+            1
+        );
+    }
 }
 
 #[cfg(test)]
