@@ -633,3 +633,91 @@ fn t3003_crlf_gitignore_lines() {
     let (ignored, m) = grit_check(&repo, &mut matcher, None, "crlf", false);
     assert_match_eq("crlf", git, ignored, &m);
 }
+
+/// `!pkg/` re-includes only the directory entry; `*` still ignores files beneath it (issue #1650).
+#[test]
+fn negated_directory_only_does_not_reinclude_files_under_dir() {
+    let home = unique_tmp("ignore", "1650-home");
+    let root = unique_tmp("ignore", "1650-star-pkg");
+    fs::create_dir_all(&home).expect("home");
+    assert!(
+        hermetic_git(&home, &root, &["init"]).status.success(),
+        "git init"
+    );
+    fs::write(root.join(".gitignore"), "*\n!pkg/\n").expect("gitignore");
+    fs::create_dir_all(root.join("pkg/sub")).expect("pkg/sub");
+    fs::write(root.join("pkg/other.txt"), "b\n").expect("other");
+    fs::write(root.join("pkg/sub/deep.txt"), "c\n").expect("deep");
+
+    let repo = Repository::open(
+        &root.join(".git"),
+        &RepositoryOptions::empty().with_work_tree(&root),
+    )
+    .expect("open");
+    let mut matcher = IgnoreMatcher::from_repository(&repo).expect("matcher");
+
+    let paths = ["pkg/other.txt", "pkg/sub/deep.txt", "pkg"];
+    let git_map = git_check_ignore_verbose(&home, &root, &paths, false);
+    for path in paths {
+        let git = git_map.get(path).expect("git check-ignore");
+        let is_dir = path == "pkg";
+        let (ignored, m) = grit_check(&repo, &mut matcher, None, path, is_dir);
+        assert_match_eq(path, git, ignored, &m);
+    }
+}
+
+#[test]
+fn negated_directory_only_nested_gitignore() {
+    let home = unique_tmp("ignore", "1650-nested-home");
+    let root = unique_tmp("ignore", "1650-nested-vendor");
+    fs::create_dir_all(&home).expect("home");
+    assert!(
+        hermetic_git(&home, &root, &["init"]).status.success(),
+        "git init"
+    );
+    fs::create_dir_all(root.join("vendor/pkg/sub")).expect("tree");
+    fs::write(root.join("vendor/.gitignore"), "*\n!.gitignore\n!pkg/\n").expect("vendor gitignore");
+    fs::write(root.join("vendor/pkg/other.txt"), "b\n").expect("other");
+
+    let repo = Repository::open(
+        &root.join(".git"),
+        &RepositoryOptions::empty().with_work_tree(&root),
+    )
+    .expect("open");
+    let mut matcher = IgnoreMatcher::from_repository(&repo).expect("matcher");
+
+    let path = "vendor/pkg/other.txt";
+    let git_map = git_check_ignore_verbose(&home, &root, &[path], false);
+    let git = git_map.get(path).expect("git check-ignore");
+    let (ignored, m) = grit_check(&repo, &mut matcher, None, path, false);
+    assert_match_eq(path, git, ignored, &m);
+}
+
+#[test]
+fn negated_file_under_directory_glob_still_works() {
+    let home = unique_tmp("ignore", "1650-control-home");
+    let root = unique_tmp("ignore", "1650-control-keep");
+    fs::create_dir_all(&home).expect("home");
+    assert!(
+        hermetic_git(&home, &root, &["init"]).status.success(),
+        "git init"
+    );
+    fs::create_dir_all(root.join("pkg")).expect("pkg");
+    fs::write(root.join(".gitignore"), "pkg/*\n!pkg/keep\n").expect("gitignore");
+    fs::write(root.join("pkg/keep"), "k\n").expect("keep");
+    fs::write(root.join("pkg/drop"), "d\n").expect("drop");
+
+    let repo = Repository::open(
+        &root.join(".git"),
+        &RepositoryOptions::empty().with_work_tree(&root),
+    )
+    .expect("open");
+    let mut matcher = IgnoreMatcher::from_repository(&repo).expect("matcher");
+
+    for path in ["pkg/keep", "pkg/drop"] {
+        let git_map = git_check_ignore_verbose(&home, &root, &[path], false);
+        let git = git_map.get(path).expect("git check-ignore");
+        let (ignored, m) = grit_check(&repo, &mut matcher, None, path, false);
+        assert_match_eq(path, git, ignored, &m);
+    }
+}

@@ -817,10 +817,11 @@ fn refine_match_for_check_ignore_verbose(
 }
 
 fn rule_matches(rule: &IgnoreRule, repo_rel_path: &str, is_dir: bool) -> bool {
-    // Negated directory-only patterns containing `**` (e.g. `!data/**/`) only apply to directory
-    // paths, not to files inside those directories. Matching them against ancestor paths for
-    // files would incorrectly negate `data/**` for every file (see t0008 "directories and ** matches").
-    if rule.directory_only && rule.negative && rule.body.contains("**") && !is_dir {
+    // Directory-only patterns (`foo/`) participate only when the query path is a directory,
+    // mirroring Git's `PATTERN_FLAG_MUSTBEDIR` / `sparse_pattern_matches` dtype gate. Ancestor
+    // probes use `is_dir=true` (`first_excluded_ancestor`); matching `!pkg/` against files under
+    // `pkg/` would wrongly re-include them when `*` still applies (issue #1650).
+    if rule.directory_only && !is_dir {
         return false;
     }
 
