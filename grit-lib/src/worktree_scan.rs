@@ -1146,32 +1146,36 @@ fn matching_dir_entry<'a>(
         .find(|entry| dir_entry_name_matches(index_file_name, entry))
 }
 
-/// Prefer path metadata on Windows (Git/mingw semantics); fall back to the matched `DirEntry`
-/// when the path probe fails even though `read_dir` listed the name (#1518).
+#[cfg(windows)]
+fn symlink_metadata_blob_lookup(target_abs: &Path) -> BlobDiskLookup {
+    match symlink_metadata_path(target_abs) {
+        Ok(meta) => BlobDiskLookup::Present(BlobDiskStat::from_metadata(&meta)),
+        Err(e) if e.kind() == io::ErrorKind::NotFound || e.raw_os_error() == Some(20) => {
+            BlobDiskLookup::Missing
+        }
+        Err(e) => BlobDiskLookup::Io(e),
+    }
+}
+
+/// Prefer matched `DirEntry` metadata (one stat per indexed file); fall back to path
+/// `symlink_metadata` when `read_dir` missed the name or `DirEntry::metadata` failed (#1622).
+/// When dir stat still disagrees with the index, [`align_lookup_stat_with_index_path_windows`]
+/// may path-probe for Git/mingw post-close semantics (#1518).
 #[cfg(windows)]
 fn blob_lookup_from_dir_entry_or_path(
     dir_entry: Option<&fs::DirEntry>,
     target_abs: impl FnOnce() -> PathBuf,
 ) -> BlobDiskLookup {
-    match symlink_metadata_path(&target_abs()) {
-        Ok(meta) => BlobDiskLookup::Present(BlobDiskStat::from_metadata(&meta)),
-        Err(e) if e.kind() == io::ErrorKind::NotFound || e.raw_os_error() == Some(20) => {
-            if let Some(entry) = dir_entry {
-                match dir_entry_metadata(entry) {
-                    Ok(m) => BlobDiskLookup::Present(BlobDiskStat::from_metadata(&m)),
-                    Err(e2)
-                        if e2.kind() == io::ErrorKind::NotFound
-                            || e2.raw_os_error() == Some(20) =>
-                    {
-                        BlobDiskLookup::Missing
-                    }
-                    Err(e2) => BlobDiskLookup::Io(e2),
-                }
-            } else {
-                BlobDiskLookup::Missing
+    if let Some(entry) = dir_entry {
+        match dir_entry_metadata(entry) {
+            Ok(m) => BlobDiskLookup::Present(BlobDiskStat::from_metadata(&m)),
+            Err(e) if e.kind() == io::ErrorKind::NotFound || e.raw_os_error() == Some(20) => {
+                symlink_metadata_blob_lookup(&target_abs())
             }
+            Err(e) => BlobDiskLookup::Io(e),
         }
-        Err(e) => BlobDiskLookup::Io(e),
+    } else {
+        symlink_metadata_blob_lookup(&target_abs())
     }
 }
 
