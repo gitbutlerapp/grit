@@ -443,7 +443,7 @@ pub(crate) enum BlobScanSparseMode {
     StatusDiff {
         stat_policy: crate::index::StatMatchPolicy,
         index_mtime: Option<(u32, u32)>,
-        trust_filemode: bool,
+        mode_policy: crate::index::WorktreeModePolicy,
         for_status: bool,
         refresh_index_stat_in_pass: bool,
         parallel_blob_work: bool,
@@ -451,7 +451,7 @@ pub(crate) enum BlobScanSparseMode {
     },
     StageTracked {
         index_mtime: Option<(u32, u32)>,
-        trust_filemode: bool,
+        mode_policy: crate::index::WorktreeModePolicy,
     },
     WorktreeGuard {
         stat_policy: crate::index::StatMatchPolicy,
@@ -469,7 +469,7 @@ impl BlobScanSparseMode {
             Self::StatusDiff {
                 stat_policy,
                 index_mtime,
-                trust_filemode,
+                mode_policy,
                 for_status,
                 refresh_index_stat_in_pass,
                 parallel_blob_work,
@@ -480,7 +480,7 @@ impl BlobScanSparseMode {
                 lookup,
                 stat_policy,
                 index_mtime,
-                trust_filemode,
+                mode_policy,
                 for_status,
                 refresh_index_stat_in_pass,
                 parallel_blob_work,
@@ -488,10 +488,8 @@ impl BlobScanSparseMode {
             ),
             Self::StageTracked {
                 index_mtime,
-                trust_filemode,
-            } => {
-                retain_stage_tracked_lookup(index, entry_index, lookup, index_mtime, trust_filemode)
-            }
+                mode_policy,
+            } => retain_stage_tracked_lookup(index, entry_index, lookup, index_mtime, mode_policy),
             Self::WorktreeGuard { stat_policy } => {
                 retain_worktree_guard_lookup(index, entry_index, lookup, stat_policy)
             }
@@ -510,7 +508,7 @@ fn retain_status_diff_lookup(
     lookup: &BlobDiskLookup,
     stat_policy: crate::index::StatMatchPolicy,
     index_mtime: Option<(u32, u32)>,
-    trust_filemode: bool,
+    mode_policy: crate::index::WorktreeModePolicy,
     for_status: bool,
     refresh_index_stat_in_pass: bool,
     parallel_blob_work: bool,
@@ -524,7 +522,6 @@ fn retain_status_diff_lookup(
                 return false;
             }
             let stat_matches = crate::diff::stat_matches_blob_stat(ie, stat, stat_policy);
-            let worktree_mode = stat.git_mode;
             let racy = crate::diff::entry_is_racy_with_policy(ie, index_mtime, stat_policy);
             if refresh_index_stat_in_pass {
                 let skip_refresh_for_status_diff = for_status
@@ -540,7 +537,7 @@ fn retain_status_diff_lookup(
                 // Keep everything the visit pass must hash or report; drop only entries whose
                 // stat data proves them clean (the same test the visit pass applies).
                 return !(stat_matches
-                    && (!trust_filemode || worktree_mode == ie.mode)
+                    && mode_policy.worktree_mode_matches(stat.git_mode, ie.mode)
                     && crate::diff::index_entry_skips_worktree_content_hash_after_stat_match(
                         ie,
                         index_mtime,
@@ -557,7 +554,7 @@ fn retain_stage_tracked_lookup(
     entry_index: usize,
     lookup: &BlobDiskLookup,
     index_mtime: Option<(u32, u32)>,
-    trust_filemode: bool,
+    mode_policy: crate::index::WorktreeModePolicy,
 ) -> bool {
     match lookup {
         BlobDiskLookup::Missing | BlobDiskLookup::Io(_) => true,
@@ -570,13 +567,11 @@ fn retain_stage_tracked_lookup(
                 .fields
                 .matches_index_entry(ie, crate::index::StatMatchPolicy::default());
             let racy = crate::diff::entry_is_racy(ie, index_mtime);
-            let wt_mode = stat.git_mode;
-            let idx_mode = ie.mode;
             if !ie.intent_to_add()
                 && ie.size != 0
                 && stat_same
                 && !racy
-                && (wt_mode == idx_mode || !trust_filemode)
+                && mode_policy.worktree_mode_matches(stat.git_mode, ie.mode)
             {
                 return false;
             }

@@ -14,9 +14,11 @@
 //! ```
 mod core;
 pub mod handle;
+mod mode_policy;
 
 pub use core::*;
 pub use handle::IndexHandle;
+pub use mode_policy::WorktreeModePolicy;
 
 pub mod sparse_checkout {
     //! sparse_checkout API (re-exported at this path).

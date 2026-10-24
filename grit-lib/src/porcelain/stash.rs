@@ -610,7 +610,6 @@ fn stage_tracked_path_for_stash(
         }
         Err(e) => return Err(e.into()),
     };
-    let staged_mode = mode_from_metadata(&meta);
     let Some(ie) = index.get(rel_path.as_bytes(), 0).cloned() else {
         return stage_untracked_path_for_stash(
             repo,
@@ -621,6 +620,8 @@ fn stage_tracked_path_for_stash(
             rules,
         );
     };
+    let staged_mode = crate::index::WorktreeModePolicy::from_config(rules.config())
+        .index_mode_for_worktree(mode_from_metadata(&meta), Some(ie.mode));
     let file_attrs = rules.file_attrs(rel_path, false);
     let refresh = classify_worktree_entry_for_add(&WorktreeAddRefreshParams {
         odb: repo.odb(),
@@ -681,7 +682,9 @@ fn stage_untracked_path_for_stash(
     if meta.is_dir() {
         return Ok(());
     }
-    let mode = mode_from_metadata(&meta);
+    let recorded_mode = index.get(index_relpath.as_bytes(), 0).map(|e| e.mode);
+    let mode = crate::index::WorktreeModePolicy::from_config(rules.config())
+        .index_mode_for_worktree(mode_from_metadata(&meta), recorded_mode);
     if mode == MODE_TREE {
         return Ok(());
     }

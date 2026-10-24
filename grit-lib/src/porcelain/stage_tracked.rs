@@ -16,7 +16,8 @@ use crate::error::{Error, Result};
 use crate::hash::Parallelism;
 use crate::index::index_file_mtime;
 use crate::index::{
-    entry_from_stat, worktree_path_from_index_rel, Index, IndexEntry, MODE_GITLINK,
+    entry_from_stat, worktree_path_from_index_rel, Index, IndexEntry, WorktreeModePolicy,
+    MODE_GITLINK,
 };
 use crate::objects::{ObjectId, ObjectKind};
 use crate::odb::BULK_TRACKED_RESTAGE_LOOSE_WRITE;
@@ -262,11 +263,10 @@ fn stage_tracked_modifications_in_index_body(
         Some(repo.git_dir()),
         repo.config().ok().as_deref(),
     );
-    let trust_filemode = repo
+    let mode_policy = repo
         .config()
-        .ok()
-        .and_then(|cfg| cfg.get_bool("core.filemode").and_then(|r| r.ok()))
-        .unwrap_or(true);
+        .map(|cfg| WorktreeModePolicy::from_config(&cfg))
+        .unwrap_or_default();
 
     let mut unmerged_paths: HashSet<Vec<u8>> = HashSet::new();
     let mut special_stage0: Vec<(Vec<u8>, IndexEntry)> = Vec::new();
@@ -299,7 +299,15 @@ fn stage_tracked_modifications_in_index_body(
         }
         let abs_path =
             abs_path_for_stage_tracked(work_tree, raw_path, precompose_unicode, ignorecase);
-        refresh_unmerged_tracked_path(repo, index, raw_path, &abs_path, rules, &mut summary)?;
+        refresh_unmerged_tracked_path(
+            repo,
+            index,
+            raw_path,
+            &abs_path,
+            mode_policy,
+            rules,
+            &mut summary,
+        )?;
     }
 
     for (raw_path, idx_e) in &special_stage0 {
@@ -313,7 +321,7 @@ fn stage_tracked_modifications_in_index_body(
             raw_path,
             idx_e,
             index_mtime,
-            trust_filemode,
+            mode_policy,
             precompose_unicode,
             ignorecase,
             &mut symlink_parent_cache,
@@ -430,7 +438,7 @@ fn stage_tracked_modifications_in_index_body(
         },
         BlobScanSparseMode::StageTracked {
             index_mtime,
-            trust_filemode,
+            mode_policy,
         },
     )?;
     visit_blob_lookup_batches(stage_batches, |entry_index, lookup| {
@@ -467,7 +475,7 @@ fn stage_tracked_modifications_in_index_body(
                     abs_path: &abs_path,
                     idx_e: &idx_e,
                     index_mtime,
-                    trust_filemode,
+                    mode_policy,
                     rules,
                 };
                 let defer = parallel_restage.then_some(&mut deferred_restage);
@@ -494,7 +502,7 @@ fn stage_tracked_modifications_in_index_body(
             repo,
             index,
             rules,
-            trust_filemode,
+            mode_policy,
             parallelism,
             restage_ctx,
             &deferred_restage,
@@ -513,7 +521,7 @@ struct PresentRefreshCtx<'a> {
     abs_path: &'a Path,
     idx_e: &'a IndexEntry,
     index_mtime: Option<(u32, u32)>,
-    trust_filemode: bool,
+    mode_policy: WorktreeModePolicy,
     rules: &'a mut WorktreeRules,
 }
 
@@ -522,6 +530,7 @@ fn refresh_unmerged_tracked_path(
     index: &mut Index,
     raw_path: &[u8],
     abs_path: &Path,
+    mode_policy: WorktreeModePolicy,
     rules: &mut WorktreeRules,
     summary: &mut StageTrackedSummary,
 ) -> Result<()> {
@@ -563,7 +572,11 @@ fn refresh_unmerged_tracked_path(
                     summary.modified.push(raw_path.to_vec());
                 }
             } else {
-                stage_blob_from_worktree(repo, index, abs_path, raw_path, None, rules)?;
+                let mode = mode_policy.index_mode_for_worktree(
+                    crate::diff::mode_from_metadata(&meta),
+                    Some(idx_mode),
+                );
+                stage_blob_from_worktree(repo, index, abs_path, raw_path, Some(mode), rules)?;
                 summary.modified.push(raw_path.to_vec());
             }
         }
@@ -611,7 +624,7 @@ fn stage_tracked_path_individual(
     raw_path: &[u8],
     idx_e: &IndexEntry,
     index_mtime: Option<(u32, u32)>,
-    trust_filemode: bool,
+    mode_policy: WorktreeModePolicy,
     precompose_unicode: bool,
     ignorecase: bool,
     symlink_parent_cache: &mut HashMap<PathBuf, bool>,
@@ -634,7 +647,7 @@ fn stage_tracked_path_individual(
                 abs_path: &abs_path,
                 idx_e,
                 index_mtime,
-                trust_filemode,
+                mode_policy,
                 rules,
             };
             if refresh_present_tracked_path(ctx, BlobDiskStat::from_metadata(&meta), None, 0)? {
@@ -681,7 +694,7 @@ fn refresh_present_tracked_path(
         abs_path,
         idx_e,
         index_mtime,
-        trust_filemode,
+        mode_policy,
         rules,
     } = ctx;
     let idx_mode = idx_e.mode;
@@ -713,19 +726,18 @@ fn refresh_present_tracked_path(
         }
     }
 
-    let wt_mode = stat.git_mode;
+    let wt_mode = mode_policy.index_mode_for_worktree(stat.git_mode, Some(idx_mode));
     let type_changed = git_entry_type(wt_mode) != git_entry_type(idx_mode);
     let stat_same = stat
         .fields
         .matches_index_entry(idx_e, crate::index::StatMatchPolicy::default());
     let racy = entry_is_racy(idx_e, index_mtime);
     if !idx_intent_to_add && idx_e.size != 0 && stat_same && !racy {
-        if !type_changed && (wt_mode == idx_mode || !trust_filemode) {
+        if wt_mode == idx_mode {
             return Ok(false);
         }
-        if type_changed {
-            // Fall through: blob ↔ symlink (etc.) must restage even when core.filemode=false.
-        } else {
+        // A type change (blob ↔ symlink, etc.) falls through to restage the content.
+        if !type_changed {
             let entry = entry_from_stat(abs_path, raw_path, idx_oid, wt_mode)?;
             index.stage_file(entry);
             return Ok(true);
@@ -756,32 +768,12 @@ fn refresh_present_tracked_path(
                 filter_fp,
             )?;
             if !idx_intent_to_add && staged_oid == idx_oid {
-                if type_changed {
-                    let entry = entry_from_stat(abs_path, raw_path, staged_oid, wt_mode)?;
+                let entry = entry_from_stat(abs_path, raw_path, staged_oid, wt_mode)?;
+                if wt_mode != idx_mode || stat_fields_differ(&entry, idx_e) {
                     index.stage_file(entry);
                     return Ok(true);
                 }
-                let mode_for_index = if trust_filemode { wt_mode } else { idx_mode };
-                if mode_for_index == idx_mode || !trust_filemode {
-                    let entry = entry_from_stat(abs_path, raw_path, staged_oid, mode_for_index)?;
-                    if entry.ctime_sec != idx_e.ctime_sec
-                        || entry.ctime_nsec != idx_e.ctime_nsec
-                        || entry.mtime_sec != idx_e.mtime_sec
-                        || entry.mtime_nsec != idx_e.mtime_nsec
-                        || entry.size != idx_e.size
-                        || entry.ino != idx_e.ino
-                        || entry.dev != idx_e.dev
-                        || entry.uid != idx_e.uid
-                        || entry.gid != idx_e.gid
-                    {
-                        index.stage_file(entry);
-                        return Ok(true);
-                    }
-                    return Ok(false);
-                }
-                let entry = entry_from_stat(abs_path, raw_path, staged_oid, wt_mode)?;
-                index.stage_file(entry);
-                return Ok(true);
+                return Ok(false);
             }
             materialize_worktree_blob(
                 repo.odb(),
@@ -797,21 +789,13 @@ fn refresh_present_tracked_path(
         Err(_) => {
             let meta = fs::symlink_metadata(abs_path).map_err(Error::Io)?;
             let oid = read_worktree_blob_oid_raw(repo, abs_path, &meta)?;
-            if !idx_intent_to_add
-                && idx_oid == oid
-                && (wt_mode == idx_mode || (!trust_filemode && !type_changed))
-            {
+            if !idx_intent_to_add && idx_oid == oid && wt_mode == idx_mode {
                 return Ok(false);
             }
             oid
         }
     };
-    let mode_for_index = if trust_filemode || type_changed {
-        wt_mode
-    } else {
-        idx_mode
-    };
-    let entry = entry_from_stat(abs_path, raw_path, oid, mode_for_index)?;
+    let entry = entry_from_stat(abs_path, raw_path, oid, wt_mode)?;
     index.stage_file(entry);
     Ok(true)
 }
@@ -820,7 +804,7 @@ fn restage_deferred_jobs(
     repo: &Repository,
     index: &mut Index,
     rules: &mut WorktreeRules,
-    trust_filemode: bool,
+    mode_policy: WorktreeModePolicy,
     parallelism: Parallelism,
     ctx: DeferredRestageContext<'_>,
     jobs: &[DeferredRestageJob],
@@ -875,29 +859,12 @@ fn restage_deferred_jobs(
             std::str::from_utf8(raw_path).ok(),
             Some(prep.index_relpath.as_str())
         );
-        let idx_mode = idx_e.mode;
-        let idx_oid = idx_e.oid;
-        let type_changed = git_entry_type(prep.mode) != git_entry_type(idx_mode);
-        let mode_for_index = if trust_filemode || type_changed {
-            prep.mode
-        } else {
-            idx_mode
-        };
+        let mode_for_index = mode_policy.index_mode_for_worktree(prep.mode, Some(idx_e.mode));
         let abs_path =
             abs_path_for_stage_tracked(work_tree, raw_path, precompose_unicode, ignorecase);
-        if prep.oid == idx_oid && (mode_for_index == idx_mode || (!trust_filemode && !type_changed))
-        {
+        if prep.oid == idx_e.oid && mode_for_index == idx_e.mode {
             let entry = entry_from_stat(&abs_path, raw_path, prep.oid, mode_for_index)?;
-            if entry.ctime_sec != idx_e.ctime_sec
-                || entry.ctime_nsec != idx_e.ctime_nsec
-                || entry.mtime_sec != idx_e.mtime_sec
-                || entry.mtime_nsec != idx_e.mtime_nsec
-                || entry.size != idx_e.size
-                || entry.ino != idx_e.ino
-                || entry.dev != idx_e.dev
-                || entry.uid != idx_e.uid
-                || entry.gid != idx_e.gid
-            {
+            if stat_fields_differ(&entry, idx_e) {
                 replacements.push(entry);
                 modified.push(raw_path.to_vec());
             }
@@ -915,15 +882,7 @@ fn restage_deferred_jobs(
             let Some(idx_e) = index.get(raw_path, 0) else {
                 continue;
             };
-            let type_changed = git_entry_type(prep.mode) != git_entry_type(idx_e.mode);
-            let mode_for_index = if trust_filemode || type_changed {
-                prep.mode
-            } else {
-                idx_e.mode
-            };
-            if prep.oid == idx_e.oid
-                && (mode_for_index == idx_e.mode || (!trust_filemode && !type_changed))
-            {
+            if prep.oid == idx_e.oid && mode_policy.worktree_mode_matches(prep.mode, idx_e.mode) {
                 continue;
             }
             repo.odb().write_loose_zlib_prehashed(
@@ -937,6 +896,19 @@ fn restage_deferred_jobs(
         index.replace_stage0_entries_batch(replacements);
     }
     Ok(modified)
+}
+
+/// Whether `entry`'s cached stat fields differ from the index row it would replace.
+fn stat_fields_differ(entry: &IndexEntry, idx_e: &IndexEntry) -> bool {
+    entry.ctime_sec != idx_e.ctime_sec
+        || entry.ctime_nsec != idx_e.ctime_nsec
+        || entry.mtime_sec != idx_e.mtime_sec
+        || entry.mtime_nsec != idx_e.mtime_nsec
+        || entry.size != idx_e.size
+        || entry.ino != idx_e.ino
+        || entry.dev != idx_e.dev
+        || entry.uid != idx_e.uid
+        || entry.gid != idx_e.gid
 }
 
 fn refresh_gitlink(

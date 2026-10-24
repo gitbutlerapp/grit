@@ -4126,6 +4126,7 @@ struct StagingHashJob {
     rel_path: String,
     file_path: PathBuf,
     entry: IndexEntry,
+    /// Worktree mode after [`crate::index::WorktreeModePolicy`] against `entry.mode`.
     worktree_mode: u32,
     file_attrs: crate::crlf::FileAttrs,
 }
@@ -4136,7 +4137,6 @@ fn parallel_process_blob_worktree_jobs(
     jobs: &[StagingHashJob],
     thread_policy: &crate::parallel::ThreadPolicy,
     config: &crate::config::ConfigSet,
-    trust_filemode: bool,
     materialize_dirty_blobs: bool,
     hash_blobs_without_write: bool,
     conv: &crate::crlf::ConversionConfig,
@@ -4187,16 +4187,13 @@ fn parallel_process_blob_worktree_jobs(
                     eff_oid = job.entry.oid;
                 }
             }
-            let mode_differs = trust_filemode && job.worktree_mode != job.entry.mode;
-            if eff_oid != job.entry.oid || mode_differs {
+            if eff_oid != job.entry.oid || job.worktree_mode != job.entry.mode {
                 let path_owned = job.rel_path.clone();
                 let new_oid = if eff_oid != job.entry.oid && !materialize_dirty_blobs {
                     zero_oid()
                 } else {
                     eff_oid
                 };
-                let staged_mode =
-                    staged_index_file_mode(trust_filemode, job.entry.mode, job.worktree_mode);
                 Ok(Some((
                     job.entry_index,
                     DiffEntry {
@@ -4204,7 +4201,7 @@ fn parallel_process_blob_worktree_jobs(
                         old_path: Some(path_owned.clone()),
                         new_path: Some(path_owned),
                         old_mode: format_mode(job.entry.mode),
-                        new_mode: format_mode(staged_mode),
+                        new_mode: format_mode(job.worktree_mode),
                         old_oid: job.entry.oid,
                         new_oid,
                         score: None,
@@ -4231,6 +4228,7 @@ fn try_push_status_modified_on_size_mismatch(
     ie: &IndexEntry,
     path_str_ref: &str,
     meta: &fs::Metadata,
+    worktree_mode: u32,
     for_status: bool,
     result: &mut Vec<DiffEntry>,
 ) -> bool {
@@ -4240,7 +4238,6 @@ fn try_push_status_modified_on_size_mismatch(
     if !for_status || crate::index::munge_index_size(meta.len()) == ie.size {
         return false;
     }
-    let worktree_mode = mode_from_metadata(meta);
     let path_owned = path_str_ref.to_owned();
     result.push(DiffEntry {
         status: DiffStatus::Modified,
@@ -4259,6 +4256,7 @@ fn try_push_status_modified_on_size_mismatch_stat(
     ie: &IndexEntry,
     path_str_ref: &str,
     stat: &crate::worktree_scan::BlobDiskStat,
+    worktree_mode: u32,
     for_status: bool,
     result: &mut Vec<DiffEntry>,
 ) -> bool {
@@ -4268,7 +4266,6 @@ fn try_push_status_modified_on_size_mismatch_stat(
     if !for_status || stat.worktree_size() == ie.size {
         return false;
     }
-    let worktree_mode = stat.git_mode;
     let path_owned = path_str_ref.to_owned();
     result.push(DiffEntry {
         status: DiffStatus::Modified,
@@ -4291,7 +4288,7 @@ fn push_index_blob_worktree_diff(
     file_path: &Path,
     meta: fs::Metadata,
     index_mtime: Option<(u32, u32)>,
-    trust_filemode: bool,
+    mode_policy: crate::index::WorktreeModePolicy,
     stat_policy: crate::index::StatMatchPolicy,
     file_attrs_for: &dyn Fn(&str) -> crate::crlf::FileAttrs,
     conv: &crate::crlf::ConversionConfig,
@@ -4330,9 +4327,10 @@ fn push_index_blob_worktree_diff(
         return Ok(());
     }
 
-    let worktree_mode = mode_from_metadata(&meta);
+    let worktree_mode =
+        mode_policy.index_mode_for_worktree(mode_from_metadata(&meta), Some(ie.mode));
     let stat_same = stat_matches_with_policy(ie, &meta, stat_policy);
-    if trust_filemode && stat_same && worktree_mode != ie.mode {
+    if stat_same && worktree_mode != ie.mode {
         let path_owned = path_str_ref.to_owned();
         result.push(DiffEntry {
             status: DiffStatus::Modified,
@@ -4348,13 +4346,19 @@ fn push_index_blob_worktree_diff(
     }
 
     if stat_same
-        && (!trust_filemode || worktree_mode == ie.mode)
         && index_entry_skips_worktree_content_hash_after_stat_match(ie, index_mtime, stat_policy)
     {
         return Ok(());
     }
 
-    if try_push_status_modified_on_size_mismatch(ie, path_str_ref, &meta, for_status, result) {
+    if try_push_status_modified_on_size_mismatch(
+        ie,
+        path_str_ref,
+        &meta,
+        worktree_mode,
+        for_status,
+        result,
+    ) {
         return Ok(());
     }
 
@@ -4386,8 +4390,7 @@ fn push_index_blob_worktree_diff(
         }
     }
 
-    let mode_differs = trust_filemode && worktree_mode != ie.mode;
-    if eff_oid != ie.oid || mode_differs {
+    if eff_oid != ie.oid || worktree_mode != ie.mode {
         let path_owned = path_str_ref.to_owned();
         // `git diff-files --raw` uses the null OID for the worktree side when content differs.
         // Staging (`diff_index_to_worktree_for_staging`) materializes blobs and needs the real OID.
@@ -4396,17 +4399,12 @@ fn push_index_blob_worktree_diff(
         } else {
             eff_oid
         };
-        let new_mode = if materialize_dirty_blobs {
-            staged_index_file_mode(trust_filemode, ie.mode, worktree_mode)
-        } else {
-            worktree_mode
-        };
         result.push(DiffEntry {
             status: DiffStatus::Modified,
             old_path: Some(path_owned.clone()),
             new_path: Some(path_owned),
             old_mode: format_mode(ie.mode),
-            new_mode: format_mode(new_mode),
+            new_mode: format_mode(worktree_mode),
             old_oid: ie.oid,
             new_oid,
             score: None,
@@ -4712,10 +4710,7 @@ fn diff_index_to_worktree_inner(
         .get_bool("core.precomposeunicode")
         .and_then(|r| r.ok())
         .unwrap_or(false);
-    let trust_filemode = config
-        .get_bool("core.filemode")
-        .and_then(|r| r.ok())
-        .unwrap_or(true);
+    let mode_policy = crate::index::WorktreeModePolicy::from_config(&config);
     let stat_policy = crate::index::StatMatchPolicy::from_config(Some(&config));
     let ignorecase = config
         .get_bool("core.ignorecase")
@@ -4882,7 +4877,7 @@ fn diff_index_to_worktree_inner(
         BlobScanSparseMode::StatusDiff {
             stat_policy,
             index_mtime,
-            trust_filemode,
+            mode_policy,
             for_status: options.for_status,
             refresh_index_stat_in_pass,
             parallel_blob_work,
@@ -4992,11 +4987,12 @@ fn diff_index_to_worktree_inner(
                     }
                 }
                 let ie = &index.entries[entry_index];
+                let worktree_mode =
+                    mode_policy.index_mode_for_worktree(stat.git_mode, Some(ie.mode));
                 if parallel_blob_work {
-                    let worktree_mode = stat.git_mode;
                     let stat_same = stat_matches_blob_stat(ie, &stat, stat_policy);
                     if stat_same
-                        && (!trust_filemode || worktree_mode == ie.mode)
+                        && worktree_mode == ie.mode
                         && index_entry_skips_worktree_content_hash_after_stat_match(
                             ie,
                             index_mtime,
@@ -5005,7 +5001,7 @@ fn diff_index_to_worktree_inner(
                     {
                         return Ok(());
                     }
-                    if trust_filemode && stat_same && worktree_mode != ie.mode {
+                    if stat_same && worktree_mode != ie.mode {
                         let path_owned = path_str_ref.to_owned();
                         result.push(DiffEntry {
                             status: DiffStatus::Modified,
@@ -5021,6 +5017,7 @@ fn diff_index_to_worktree_inner(
                         ie,
                         path_str_ref,
                         &stat,
+                        worktree_mode,
                         options.for_status,
                         &mut result,
                     ) {
@@ -5044,10 +5041,10 @@ fn diff_index_to_worktree_inner(
                     // The scan's lstat already proves an unchanged, non-racy entry clean, and the
                     // stat refresh above may have just verified a racy entry by content; only
                     // re-stat paths that `push_index_blob_worktree_diff` has to inspect.
-                    let same_file_type = (stat.git_mode == crate::index::MODE_SYMLINK)
+                    let same_file_type = (worktree_mode == crate::index::MODE_SYMLINK)
                         == (ie.mode == crate::index::MODE_SYMLINK);
                     if !stat.is_dir
-                        && (!trust_filemode || stat.git_mode == ie.mode)
+                        && worktree_mode == ie.mode
                         && ((refresh_content_verified[entry_index] && same_file_type)
                             || (stat_matches_blob_stat(ie, &stat, stat_policy)
                                 && index_entry_skips_worktree_content_hash_after_stat_match(
@@ -5072,7 +5069,7 @@ fn diff_index_to_worktree_inner(
                         &file_path,
                         meta,
                         index_mtime,
-                        trust_filemode,
+                        mode_policy,
                         stat_policy,
                         &file_attrs_for,
                         &conv,
@@ -5093,7 +5090,6 @@ fn diff_index_to_worktree_inner(
             &staging_hash_jobs,
             &thread_policy,
             &config,
-            trust_filemode,
             materialize_dirty_blobs,
             hash_blobs_without_write,
             &conv,
@@ -5414,10 +5410,7 @@ pub fn worktree_differs_from_index_entry(
         )
         .unwrap_or_else(|_| ConfigSet::new())
     });
-    let trust_filemode = config
-        .get_bool("core.filemode")
-        .and_then(|r| r.ok())
-        .unwrap_or(true);
+    let mode_policy = crate::index::WorktreeModePolicy::from_config(&config);
     let precompose_unicode = config
         .get_bool("core.precomposeunicode")
         .and_then(|r| r.ok())
@@ -5457,8 +5450,7 @@ pub fn worktree_differs_from_index_entry(
         return Ok(true);
     }
 
-    let worktree_mode = mode_from_metadata(&meta);
-    if trust_filemode && worktree_mode != ie.mode {
+    if !mode_policy.worktree_mode_matches(mode_from_metadata(&meta), ie.mode) {
         return Ok(true);
     }
 
@@ -5507,7 +5499,8 @@ pub struct WorktreeAddRefreshParams<'a> {
     pub file_attrs: &'a crate::crlf::FileAttrs,
     /// On-disk index mtime when the index was loaded; `None` skips racy checks.
     pub index_mtime: Option<(u32, u32)>,
-    /// Mode that would be written (after `core.filemode` / `--chmod`).
+    /// Mode that would be written, after [`crate::index::WorktreeModePolicy`] against `ie.mode`
+    /// and any `--chmod` hint.
     pub staged_mode: u32,
     /// Repository-scoped filter-process registry (when staging through a [`crate::repo::Repository`]).
     pub filter_process: Option<&'a crate::filter_process::FilterProcessState>,
@@ -5593,7 +5586,9 @@ pub fn classify_worktree_entry_for_add(
     let trust_stat = index_stat_cache_trustworthy(params.index_mtime);
 
     if ie.mode == MODE_SYMLINK {
-        if !meta.file_type().is_symlink() {
+        // With `core.symlinks=false` the policy keeps a plain file holding the link target as
+        // a symlink entry, so it is compared by content like a real link.
+        if !meta.file_type().is_symlink() && staged_mode != MODE_SYMLINK {
             return Ok(WorktreeAddRefresh::NeedsRestage);
         }
         if stat_same && !racy && trust_stat && staged_mode == ie.mode {
@@ -6164,11 +6159,9 @@ pub(crate) fn path_checkout_skip_blob_write_when_up_to_date_with_config(
             &owned_config
         }
     };
-    let trust_filemode = config
-        .get_bool("core.filemode")
-        .and_then(|r| r.ok())
-        .unwrap_or(true);
-    if trust_filemode && mode_from_metadata(&meta) != expected_mode {
+    if !crate::index::WorktreeModePolicy::from_config(config)
+        .worktree_mode_matches(mode_from_metadata(&meta), expected_mode)
+    {
         return Ok(false);
     }
     let index_mtime = index_mtime_for_diff(index, None);
@@ -6443,21 +6436,6 @@ pub fn materialize_worktree_blob(
     )
 }
 
-/// Mode to store when staging a blob whose worktree stat differs from the index entry.
-fn staged_index_file_mode(trust_filemode: bool, index_mode: u32, worktree_mode: u32) -> u32 {
-    use crate::index::{MODE_EXECUTABLE, MODE_REGULAR};
-    if trust_filemode {
-        return worktree_mode;
-    }
-    let index_is_regular = index_mode == MODE_REGULAR || index_mode == MODE_EXECUTABLE;
-    let worktree_is_regular = worktree_mode == MODE_REGULAR || worktree_mode == MODE_EXECUTABLE;
-    if index_is_regular && worktree_is_regular {
-        index_mode
-    } else {
-        worktree_mode
-    }
-}
-
 /// Derive a Git file mode from filesystem metadata.
 pub fn mode_from_metadata(meta: &fs::Metadata) -> u32 {
     if meta.file_type().is_symlink() {
@@ -6645,10 +6623,7 @@ pub fn diff_tree_to_worktree_with_git_dir_and_rules(
 
     let index_mtime = index_mtime_for_diff(index, None);
     let stat_policy = crate::index::StatMatchPolicy::from_config(Some(&config));
-    let trust_filemode = config
-        .get_bool("core.filemode")
-        .and_then(|r| r.ok())
-        .unwrap_or(true);
+    let mode_policy = crate::index::WorktreeModePolicy::from_config(&config);
     let mut result = Vec::new();
 
     for path in &all_paths {
@@ -6774,8 +6749,9 @@ pub fn diff_tree_to_worktree_with_git_dir_and_rules(
                     None,
                     filter_fp,
                 )?;
-                let wt_mode = mode_from_metadata(meta);
-                if wt_oid != te.oid || (trust_filemode && wt_mode != te.mode) {
+                let wt_mode =
+                    mode_policy.index_mode_for_worktree(mode_from_metadata(meta), Some(te.mode));
+                if wt_oid != te.oid || wt_mode != te.mode {
                     result.push(DiffEntry {
                         status: DiffStatus::Modified,
                         old_path: Some(path.clone()),
@@ -6793,17 +6769,18 @@ pub fn diff_tree_to_worktree_with_git_dir_and_rules(
 
         match (tree_entry, wt_meta) {
             (Some(te), Some(ref meta)) => {
-                let wt_mode = mode_from_metadata(meta);
                 let Some(ie) = index_entries.get(path.as_bytes()) else {
                     continue;
                 };
+                let wt_mode =
+                    mode_policy.index_mode_for_worktree(mode_from_metadata(meta), Some(ie.mode));
 
                 let index_matches_tree = ie.oid == te.oid && ie.mode == te.mode;
 
                 // Fully clean: index matches `HEAD`, worktree matches index, stat cache fresh.
                 let stat_trusted = stat_matches_with_policy(ie, meta, stat_policy)
                     && !entry_is_racy_with_policy(ie, index_mtime, stat_policy);
-                if index_matches_tree && stat_trusted && (!trust_filemode || wt_mode == te.mode) {
+                if index_matches_tree && stat_trusted && wt_mode == te.mode {
                     continue;
                 }
 
@@ -6852,7 +6829,7 @@ pub fn diff_tree_to_worktree_with_git_dir_and_rules(
                             new_oid: zero_oid(),
                             score: None,
                         });
-                    } else if trust_filemode && wt_mode != te.mode {
+                    } else if wt_mode != te.mode {
                         result.push(DiffEntry {
                             status: DiffStatus::Modified,
                             old_path: Some(path.clone()),
@@ -6878,7 +6855,7 @@ pub fn diff_tree_to_worktree_with_git_dir_and_rules(
                     idx_ent,
                     filter_fp,
                 )?;
-                if wt_oid != te.oid || (trust_filemode && wt_mode != te.mode) {
+                if wt_oid != te.oid || wt_mode != te.mode {
                     let new_oid = if wt_oid != te.oid { zero_oid() } else { te.oid };
                     result.push(DiffEntry {
                         status: DiffStatus::Modified,

@@ -763,12 +763,9 @@ fn worktree_index_entry_up_to_date(
     if !meta.is_file() || !stat_matches(entry, &meta) {
         return Ok(false);
     }
-    let trust_filemode = repo
-        .config()?
-        .get_bool("core.filemode")
-        .and_then(|r| r.ok())
-        .unwrap_or(true);
-    if trust_filemode && crate::diff::mode_from_metadata(&meta) != entry.mode {
+    if !crate::index::WorktreeModePolicy::from_config(&*repo.config()?)
+        .worktree_mode_matches(crate::diff::mode_from_metadata(&meta), entry.mode)
+    {
         return Ok(false);
     }
     if !entry_is_racy(entry, index_mtime) {

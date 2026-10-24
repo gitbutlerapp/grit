@@ -12,7 +12,9 @@ use crate::diff::{
     WorktreeAddRefreshParams,
 };
 use crate::error::Result;
-use crate::index::{entry_from_metadata, index_file_mtime, Index, MODE_GITLINK, MODE_TREE};
+use crate::index::{
+    entry_from_metadata, index_file_mtime, Index, WorktreeModePolicy, MODE_GITLINK, MODE_TREE,
+};
 use crate::objects::ObjectKind;
 use crate::porcelain::status::{
     collect_untracked_and_ignored_inner, expand_untracked_for_staging_with_rules, IgnoredMode,
@@ -151,7 +153,6 @@ fn stage_tracked_worktree_path(
         Ok(m) => m,
         Err(_) => return Ok(false),
     };
-    let staged_mode = mode_from_metadata(&meta);
     let Some(ie) = index.get(rel_path.as_bytes(), 0).cloned() else {
         return stage_new_worktree_path(
             repo,
@@ -164,6 +165,8 @@ fn stage_tracked_worktree_path(
         .map(|_| true);
     };
 
+    let staged_mode = WorktreeModePolicy::from_config(rules.config())
+        .index_mode_for_worktree(mode_from_metadata(&meta), Some(ie.mode));
     let file_attrs = rules.file_attrs(rel_path, false);
     let refresh = classify_worktree_entry_for_add(&WorktreeAddRefreshParams {
         odb: repo.odb(),
@@ -225,7 +228,9 @@ fn stage_new_worktree_path(
         }
         return Ok(());
     }
-    let mode = mode_from_metadata(&meta);
+    let recorded_mode = index.get(index_relpath.as_bytes(), 0).map(|e| e.mode);
+    let mode = WorktreeModePolicy::from_config(rules.config())
+        .index_mode_for_worktree(mode_from_metadata(&meta), recorded_mode);
     if mode == MODE_TREE {
         return Ok(());
     }

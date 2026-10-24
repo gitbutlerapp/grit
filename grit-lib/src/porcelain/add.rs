@@ -703,7 +703,8 @@ fn stage_unmerged_paths_matching_pathspecs(
             modified.push(rel.to_owned());
             continue;
         }
-        let mode = mode_from_metadata(&meta);
+        let mode = crate::index::WorktreeModePolicy::from_config(rules.config())
+            .index_mode_for_worktree(mode_from_metadata(&meta), Some(idx_mode));
         let oid = materialize_worktree_blob(
             repo.odb(),
             &abs,
