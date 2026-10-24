@@ -19249,6 +19249,7 @@ pub grit_lib::remote::transfer::FetchOptions::filter: core::option::Option<grit_
 pub grit_lib::remote::transfer::FetchOptions::http_protocol_version: core::option::Option<u8>
 pub grit_lib::remote::transfer::FetchOptions::index_pack_threads: core::option::Option<usize>
 pub grit_lib::remote::transfer::FetchOptions::initial_remote_fetch: bool
+pub grit_lib::remote::transfer::FetchOptions::link_source_objects: bool
 pub grit_lib::remote::transfer::FetchOptions::mark_received_pack_promisor: bool
 pub grit_lib::remote::transfer::FetchOptions::negative_refspecs: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::remote::transfer::FetchOptions::network_trace: bool

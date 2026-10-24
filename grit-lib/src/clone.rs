@@ -424,6 +424,7 @@ pub fn clone(
         remote_progress: progress.remote_sideband_progress(),
         fetch_depth: opts.depth.and_then(crate::transfer::FetchDepth::depth),
         filter: opts.filter,
+        link_source_objects: should_store_absolute_local_clone_url(&opts.url),
         ..Default::default()
     };
     if let Ok(v) = crate::protocol::try_effective_client_protocol_version_from_config(&config) {
