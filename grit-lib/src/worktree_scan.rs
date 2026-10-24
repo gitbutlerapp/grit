@@ -143,6 +143,33 @@ fn symlink_metadata_path(path: &Path) -> io::Result<fs::Metadata> {
     fs::symlink_metadata(path)
 }
 
+/// Whether `path` itself is a symlink, without following it. Missing or unreadable paths
+/// report `false`.
+///
+/// On Windows, `symlink_metadata` opens a handle per call, which dominates status on large
+/// trees. A single attribute query proves the common case (no reparse point) instead; only
+/// reparse points fall back to `symlink_metadata` to classify the reparse tag.
+#[must_use]
+pub(crate) fn path_is_symlink(path: &Path) -> bool {
+    #[cfg(windows)]
+    {
+        use std::os::windows::ffi::OsStrExt;
+        use windows_sys::Win32::Storage::FileSystem::{
+            GetFileAttributesW, FILE_ATTRIBUTE_REPARSE_POINT, INVALID_FILE_ATTRIBUTES,
+        };
+        let mut wide: Vec<u16> = path.as_os_str().encode_wide().collect();
+        if !wide.contains(&0) {
+            wide.push(0);
+            // SAFETY: `wide` is a NUL-terminated UTF-16 path that outlives the call.
+            let attrs = unsafe { GetFileAttributesW(wide.as_ptr()) };
+            if attrs != INVALID_FILE_ATTRIBUTES && attrs & FILE_ATTRIBUTE_REPARSE_POINT == 0 {
+                return false;
+            }
+        }
+    }
+    fs::symlink_metadata(path).is_ok_and(|meta| meta.file_type().is_symlink())
+}
+
 #[cfg(windows)]
 fn sparse_stat_policy(sparse: BlobScanSparseMode) -> crate::index::StatMatchPolicy {
     match sparse {
@@ -644,7 +671,7 @@ fn collect_blob_lookups_in_directory(
     entry_indices: &[usize],
     dir_abs: &dyn Fn(&[u8]) -> PathBuf,
     file_abs: &dyn Fn(&[u8]) -> PathBuf,
-    symlink_missing: &HashSet<Vec<u8>>,
+    under_symlink: bool,
     out: &mut Vec<(usize, BlobDiskLookup)>,
     sparse: BlobScanSparseMode,
     scanned: &mut usize,
@@ -660,7 +687,7 @@ fn collect_blob_lookups_in_directory(
         entry_indices,
         dir_abs,
         file_abs,
-        &mut |rel| symlink_missing.contains(rel),
+        under_symlink,
         &mut |entry_index, rel_path, lookup| {
             #[cfg(not(windows))]
             let _ = rel_path;
@@ -682,30 +709,36 @@ fn collect_blob_lookups_in_directory(
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
-fn for_each_blob_in_one_directory<F, H>(
+/// Whether the directory holding `entry_indices` sits under a symlinked ancestor.
+///
+/// Every entry in one plan directory shares the same ancestors, so one sample path decides.
+fn dir_has_symlink_ancestor(
+    index: &Index,
+    entry_indices: &[usize],
+    has_symlink_ancestor: &mut dyn FnMut(&[u8]) -> bool,
+) -> bool {
+    entry_indices
+        .first()
+        .and_then(|&i| entry_rel_path(index, i).ok())
+        .is_some_and(has_symlink_ancestor)
+}
+
+/// `under_symlink` reports every entry as [`BlobDiskLookup::Missing`] without I/O: a symlink
+/// replaced a directory on the path, so the indexed files are gone even if the link target
+/// holds files with the same names.
+fn for_each_blob_in_one_directory<F>(
     index: &Index,
     dir: &[u8],
     entry_indices: &[usize],
     dir_abs: &dyn Fn(&[u8]) -> PathBuf,
     file_abs: &dyn Fn(&[u8]) -> PathBuf,
-    has_symlink_ancestor: &mut H,
+    under_symlink: bool,
     visit: &mut F,
 ) -> Result<()>
 where
     F: FnMut(usize, &[u8], BlobDiskLookup) -> Result<()>,
-    H: FnMut(&[u8]) -> bool,
 {
-    if entry_indices.is_empty() {
-        return Ok(());
-    }
-    if entry_indices
-        .iter()
-        .all(|&i| match entry_rel_path(index, i) {
-            Ok(rel) => has_symlink_ancestor(rel),
-            Err(_) => true,
-        })
-    {
+    if under_symlink {
         for &entry_index in entry_indices {
             let rel_path = entry_rel_path(index, entry_index)?;
             visit(entry_index, rel_path, BlobDiskLookup::Missing)?;
@@ -716,10 +749,6 @@ where
     if entry_indices.len() < READ_DIR_AMORTIZE_MIN {
         for &entry_index in entry_indices {
             let rel_path = entry_rel_path(index, entry_index)?;
-            if has_symlink_ancestor(rel_path) {
-                visit(entry_index, rel_path, BlobDiskLookup::Missing)?;
-                continue;
-            }
             let target = file_abs(rel_path);
             let lookup = match symlink_metadata_path(&target) {
                 Ok(meta) => BlobDiskLookup::Present(BlobDiskStat::from_metadata(&meta)),
@@ -738,10 +767,6 @@ where
     if entry_indices.len() == 1 {
         let entry_index = entry_indices[0];
         let rel_path = entry_rel_path(index, entry_index)?;
-        if has_symlink_ancestor(rel_path) {
-            visit(entry_index, rel_path, BlobDiskLookup::Missing)?;
-            return Ok(());
-        }
         let file_name = entry_file_name(index, entry_index)?;
         let target = file_abs(rel_path);
         let lookup = lookup_lone_blob_in_directory(&abs_dir, file_name, &target);
@@ -752,10 +777,6 @@ where
     let (dir_readable, on_disk) = read_directory_map(&abs_dir, entry_indices.len())?;
     for &entry_index in entry_indices {
         let rel_path = entry_rel_path(index, entry_index)?;
-        if has_symlink_ancestor(rel_path) {
-            visit(entry_index, rel_path, BlobDiskLookup::Missing)?;
-            continue;
-        }
         let file_name = entry_file_name(index, entry_index)?;
         let lookup = if !dir_readable {
             BlobDiskLookup::Missing
@@ -770,7 +791,7 @@ where
 fn collect_blob_lookups_serial(
     index: &Index,
     plan: &BlobScanPlan,
-    symlink_missing: &HashSet<Vec<u8>>,
+    has_symlink_ancestor: &mut dyn FnMut(&[u8]) -> bool,
     dir_abs: &dyn Fn(&[u8]) -> PathBuf,
     file_abs: &dyn Fn(&[u8]) -> PathBuf,
     sparse: BlobScanSparseMode,
@@ -784,13 +805,15 @@ fn collect_blob_lookups_serial(
         let Some(range) = plan.dir_ranges.get(dir_idx) else {
             continue;
         };
+        let entry_indices = &plan.indices[range.clone()];
+        let under_symlink = dir_has_symlink_ancestor(index, entry_indices, has_symlink_ancestor);
         collect_blob_lookups_in_directory(
             index,
             dir,
-            &plan.indices[range.clone()],
+            entry_indices,
             dir_abs,
             file_abs,
-            symlink_missing,
+            under_symlink,
             &mut out,
             sparse,
             &mut scanned,
@@ -865,7 +888,7 @@ fn preload_blob_lookups_parallel(
     index: &Index,
     plan: &BlobScanPlan,
     threads: usize,
-    symlink_missing: &HashSet<Vec<u8>>,
+    has_symlink_ancestor: &(dyn Fn(&[u8]) -> bool + Sync),
     dir_abs: Arc<DirAbsFn>,
     file_abs: Arc<DirAbsFn>,
     sparse: BlobScanSparseMode,
@@ -882,7 +905,6 @@ fn preload_blob_lookups_parallel(
         for chunk_idx in 0..num_chunks {
             let chunk_start = chunk_idx * chunk_size;
             let chunk_end = (chunk_start + chunk_size).min(plan.dirs.len());
-            let symlink_missing = symlink_missing.clone();
             let dir_abs = Arc::clone(&dir_abs);
             let file_abs = Arc::clone(&file_abs);
             handles.push(
@@ -895,13 +917,17 @@ fn preload_blob_lookups_parallel(
                             continue;
                         };
                         let entry_indices = &plan.indices[range.clone()];
+                        let under_symlink =
+                            dir_has_symlink_ancestor(index, entry_indices, &mut |rel| {
+                                has_symlink_ancestor(rel)
+                            });
                         collect_blob_lookups_in_directory(
                             index,
                             dir,
                             entry_indices,
                             dir_abs.as_ref(),
                             file_abs.as_ref(),
-                            &symlink_missing,
+                            under_symlink,
                             &mut local,
                             sparse,
                             &mut scanned,
@@ -952,11 +978,10 @@ where
     F: FnMut(usize, BlobDiskLookup) -> Result<()>,
     H: FnMut(&[u8]) -> bool,
 {
-    let symlink_missing = build_symlink_missing(index, plan, &mut has_symlink_ancestor);
     let (batch, scanned) = collect_blob_lookups_serial(
         index,
         plan,
-        &symlink_missing,
+        &mut has_symlink_ancestor,
         &dir_abs,
         &file_abs,
         BlobScanSparseMode::Dense,
@@ -970,38 +995,14 @@ where
     visit_blob_lookup_batches(vec![batch], visit)
 }
 
-fn build_symlink_missing(
-    index: &Index,
-    plan: &BlobScanPlan,
-    has_symlink_ancestor: &mut impl FnMut(&[u8]) -> bool,
-) -> HashSet<Vec<u8>> {
-    let mut symlink_missing = HashSet::new();
-    for (dir_idx, _) in plan.dirs.iter().enumerate() {
-        let Some(range) = plan.dir_ranges.get(dir_idx) else {
-            continue;
-        };
-        let Some(&sample_index) = plan.indices.get(range.start) else {
-            continue;
-        };
-        let Ok(sample_path) = entry_rel_path(index, sample_index) else {
-            continue;
-        };
-        if has_symlink_ancestor(sample_path) {
-            for &entry_index in &plan.indices[range.clone()] {
-                if let Ok(rel_path) = entry_rel_path(index, entry_index) {
-                    symlink_missing.insert(rel_path.to_vec());
-                }
-            }
-        }
-    }
-    symlink_missing
-}
-
 /// Collect disk lookups for every entry in `plan`, optionally using parallel preload.
 ///
 /// Returns one batch per parallel worker (or a single batch when serial). Callers should
 /// consume batches with [`visit_blob_lookup_batches`] so index mutations are not blocked
 /// by an active immutable borrow on [`Index`].
+///
+/// `has_symlink_ancestor(rel_path)` is asked once per plan directory, from the scan workers,
+/// so it must be shareable across threads; pass `|_| false` to skip the check.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn collect_blob_lookup_batches(
     index: &Index,
@@ -1009,25 +1010,11 @@ pub(crate) fn collect_blob_lookup_batches(
     scan_options: WorktreeBlobScanOptions,
     thread_policy: &crate::parallel::ThreadPolicy,
     config: &crate::config::ConfigSet,
-    scan_symlink_ancestors: bool,
-    precomputed_symlink_missing: Option<&HashSet<Vec<u8>>>,
     dir_abs: impl Fn(&[u8]) -> PathBuf + Send + Sync + 'static,
     file_abs: impl Fn(&[u8]) -> PathBuf + Send + Sync + 'static,
-    mut has_symlink_ancestor: impl FnMut(&[u8]) -> bool,
+    has_symlink_ancestor: impl Fn(&[u8]) -> bool + Sync,
     sparse: BlobScanSparseMode,
 ) -> Result<Vec<Vec<(usize, BlobDiskLookup)>>> {
-    let symlink_missing_storage;
-    let symlink_missing: &HashSet<Vec<u8>> = if let Some(precomputed) = precomputed_symlink_missing
-    {
-        precomputed
-    } else if scan_symlink_ancestors {
-        symlink_missing_storage = build_symlink_missing(index, plan, &mut has_symlink_ancestor);
-        &symlink_missing_storage
-    } else {
-        symlink_missing_storage = HashSet::new();
-        &symlink_missing_storage
-    };
-
     let blob_count = plan.len();
     let threads = stat_scan_thread_count(thread_policy, config, scan_options, blob_count);
     let dir_abs_arc: Arc<DirAbsFn> = Arc::new(dir_abs);
@@ -1040,7 +1027,7 @@ pub(crate) fn collect_blob_lookup_batches(
             index,
             plan,
             threads,
-            symlink_missing,
+            &has_symlink_ancestor,
             Arc::clone(&dir_abs_arc),
             Arc::clone(&file_abs_arc),
             sparse,
@@ -1049,7 +1036,7 @@ pub(crate) fn collect_blob_lookup_batches(
         let (batch, scanned) = collect_blob_lookups_serial(
             index,
             plan,
-            symlink_missing,
+            &mut |rel| has_symlink_ancestor(rel),
             dir_abs_arc.as_ref(),
             file_abs_arc.as_ref(),
             sparse,
@@ -1084,10 +1071,9 @@ pub(crate) fn for_each_blob_by_directory_parallel<F>(
     scan_options: WorktreeBlobScanOptions,
     thread_policy: &crate::parallel::ThreadPolicy,
     config: &crate::config::ConfigSet,
-    scan_symlink_ancestors: bool,
     dir_abs: impl Fn(&[u8]) -> PathBuf + Send + Sync + 'static,
     file_abs: impl Fn(&[u8]) -> PathBuf + Send + Sync + 'static,
-    has_symlink_ancestor: impl FnMut(&[u8]) -> bool,
+    has_symlink_ancestor: impl Fn(&[u8]) -> bool + Sync,
     visit: F,
 ) -> Result<()>
 where
@@ -1099,8 +1085,6 @@ where
         scan_options,
         thread_policy,
         config,
-        scan_symlink_ancestors,
-        None,
         dir_abs,
         file_abs,
         has_symlink_ancestor,
@@ -1461,7 +1445,6 @@ mod tests {
             },
             &policy,
             &config,
-            false,
             dir_abs,
             file_abs,
             |_| false,
@@ -1595,7 +1578,6 @@ mod tests {
             },
             &policy,
             &config,
-            false,
             dir_abs,
             file_abs,
             |_| false,

@@ -437,8 +437,6 @@ fn switch_worktree_clean_for_paths(
             blob_scan,
             &Default::default(),
             config.as_deref().unwrap_or(&ConfigSet::new()),
-            false,
-            None,
             dir_abs,
             file_abs,
             |_| false,

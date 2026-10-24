@@ -291,7 +291,7 @@ fn stage_tracked_modifications_in_index_body(
         .ok()
         .and_then(|cfg| cfg.get_bool("core.ignorecase").and_then(|r| r.ok()))
         .unwrap_or(false);
-    let mut dir_symlinks = SymlinkDirCache::default();
+    let dir_symlinks = SymlinkDirCache::default();
 
     for raw_path in &unmerged_paths {
         if !tracked_scan_includes_path(restrict_to_paths, raw_path) {
@@ -400,14 +400,13 @@ fn stage_tracked_modifications_in_index_body(
         .parallelism();
     let mut deferred_restage: Vec<DeferredRestageJob> = Vec::new();
     let mut pending_removals: Vec<Vec<u8>> = Vec::new();
+    let symlink_parent_cache = std::sync::Mutex::new(symlink_parent_cache);
     let stage_batches = collect_blob_lookup_batches(
         index,
         &blob_dirs,
         blob_scan_opts,
         &thread_policy,
         &rules_config,
-        true,
-        None,
         dir_abs,
         file_abs,
         |rel_path| {
@@ -423,7 +422,10 @@ fn stage_tracked_modifications_in_index_body(
                     precompose_unicode,
                     ignorecase,
                 );
-                path_has_symlink_parent_cached(work_tree, &abs, &mut symlink_parent_cache)
+                let mut cache = symlink_parent_cache
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner());
+                path_has_symlink_parent_cached(work_tree, &abs, &mut cache)
             }
         },
         BlobScanSparseMode::StageTracked {
