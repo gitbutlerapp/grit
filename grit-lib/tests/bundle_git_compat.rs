@@ -576,6 +576,320 @@ fn bundle_create_short_tag_name_matches_git_list_heads() {
         .any(|l| l.contains(" refs/heads/lite")));
 }
 
+/// Deterministic, poorly compressible text so deltas matter for pack size.
+fn pseudo_random_lines(seed: u64, count: usize) -> Vec<String> {
+    let mut state = seed;
+    (0..count)
+        .map(|_| {
+            (0..48)
+                .map(|_| {
+                    state = state
+                        .wrapping_mul(6364136223846793005)
+                        .wrapping_add(1442695040888963407);
+                    char::from(b'a' + ((state >> 33) % 26) as u8)
+                })
+                .collect()
+        })
+        .collect()
+}
+
+/// A repository whose history is one fully packed, delta-compressed pack.
+fn init_packed_delta_history(dir: &Path, revisions: usize) {
+    git_ok(dir, &["init", "-q", "-b", "main", "."]);
+    let mut lines = pseudo_random_lines(17, 400);
+    for rev in 0..revisions {
+        let slot = (rev * 37) % lines.len();
+        lines[slot] = format!("revision {rev}");
+        std::fs::write(dir.join("doc.txt"), lines.join("\n")).unwrap();
+        git_ok(dir, &["add", "doc.txt"]);
+        git_ok(dir, &["commit", "-q", "-m", &format!("rev {rev}")]);
+    }
+    git_ok(dir, &["tag", "-a", "v1", "-m", "release"]);
+    git_ok(dir, &["branch", "side", "HEAD~3"]);
+    git_ok(dir, &["repack", "-adfq", "--window=10", "--depth=50"]);
+}
+
+fn single_pack_len(dir: &Path) -> u64 {
+    let packs: Vec<_> = std::fs::read_dir(dir.join(".git/objects/pack"))
+        .expect("pack dir")
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|x| x == "pack"))
+        .collect();
+    assert_eq!(packs.len(), 1, "fixture should be fully packed");
+    std::fs::metadata(&packs[0]).expect("pack metadata").len()
+}
+
+/// Index the pack embedded in `bundle_path` with git and return `verify-pack -s` output.
+fn git_verify_bundle_pack_stats(scratch: &Path, bundle_path: &Path) -> String {
+    let bundle = Bundle::open(bundle_path).expect("open bundle");
+    let bytes = std::fs::read(bundle_path).expect("read bundle");
+    let pack_path = scratch.join("bundle.pack");
+    std::fs::write(&pack_path, &bytes[bundle.pack_byte_offset() as usize..]).expect("write pack");
+    git_ok(scratch, &["index-pack", pack_path.to_str().unwrap()]);
+    git(
+        scratch,
+        &[
+            "verify-pack",
+            "-s",
+            scratch.join("bundle.idx").to_str().unwrap(),
+        ],
+    )
+}
+
+#[test]
+// Regression for issue #1758: `--all` on a packed repository reuses the pack's deltas.
+fn bundle_all_from_packed_repo_reuses_deltas_and_round_trips_with_git() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let src = tmp.path().join("src");
+    std::fs::create_dir_all(&src).unwrap();
+    init_packed_delta_history(&src, 40);
+    let source_pack_len = single_pack_len(&src);
+    let object_count: usize = git(&src, &["rev-list", "--all", "--objects"])
+        .lines()
+        .count();
+
+    let bundle_path = tmp.path().join("all.bundle");
+    write_bundle_with_options(
+        &grit_repo(&src),
+        &bundle_path,
+        &BundleCreateOptions {
+            all_refs: true,
+            rev_tokens: Vec::new(),
+        },
+    )
+    .expect("grit bundle --all");
+
+    git_ok(&src, &["bundle", "verify", bundle_path.to_str().unwrap()]);
+    let bundle = Bundle::open(&bundle_path).expect("open bundle");
+    assert!(bundle.header().prerequisites.is_empty());
+    assert_eq!(
+        bundle.pack_object_count().expect("object count") as usize,
+        object_count
+    );
+    let bundle_pack_len =
+        std::fs::metadata(&bundle_path).unwrap().len() - bundle.pack_byte_offset();
+    assert!(
+        bundle_pack_len * 10 <= source_pack_len * 11,
+        "bundle pack ({bundle_pack_len} bytes) should stay near the source pack ({source_pack_len} bytes)"
+    );
+
+    let scratch = tmp.path().join("scratch");
+    std::fs::create_dir_all(&scratch).unwrap();
+    git_ok(&scratch, &["init", "-q", "--bare", "."]);
+    let stats = git_verify_bundle_pack_stats(&scratch, &bundle_path);
+    assert!(
+        stats.contains("chain length"),
+        "bundle pack should keep the source deltas:\n{stats}"
+    );
+
+    let clone = tmp.path().join("clone");
+    git_ok(
+        tmp.path(),
+        &[
+            "clone",
+            "-q",
+            bundle_path.to_str().unwrap(),
+            clone.to_str().unwrap(),
+        ],
+    );
+    fsck_strict(&clone);
+    assert_eq!(
+        git(&clone, &["rev-parse", "origin/side", "v1^{commit}"]),
+        git(&src, &["rev-parse", "side", "v1^{commit}"])
+    );
+}
+
+/// Records the largest single write so tests can tell streaming from a buffered pack.
+#[derive(Default)]
+struct WriteRecorder {
+    bytes: Vec<u8>,
+    largest_write: usize,
+}
+
+impl std::io::Write for WriteRecorder {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.largest_write = self.largest_write.max(buf.len());
+        self.bytes.extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+#[test]
+// Regression for issue #1758: the pack is streamed into the writer, not built in memory first.
+fn write_bundle_streams_pack_into_writer() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let src = tmp.path();
+    git_ok(src, &["init", "-q", "-b", "main", "."]);
+    for i in 0..24u64 {
+        let name = format!("f{i}.txt");
+        std::fs::write(src.join(&name), pseudo_random_lines(i, 40).join("\n")).unwrap();
+        git_ok(src, &["add", &name]);
+        git_ok(src, &["commit", "-q", "-m", &name]);
+    }
+    git_ok(src, &["repack", "-adq"]);
+    let repo = grit_repo(src);
+    let tip = rev_parse(src, "main");
+    let mut out = WriteRecorder::default();
+    write_bundle(
+        &repo,
+        &BundleSpec {
+            include: vec![(tip, "refs/heads/main".to_owned())],
+            ..Default::default()
+        },
+        &mut out,
+    )
+    .expect("write bundle");
+    let pack_start = out
+        .bytes
+        .windows(4)
+        .position(|w| w == b"PACK")
+        .expect("pack magic");
+    let pack_len = out.bytes.len() - pack_start;
+    assert!(
+        out.largest_write * 4 < pack_len,
+        "largest write {} bytes vs {pack_len}-byte pack: pack was buffered, not streamed",
+        out.largest_write
+    );
+
+    let bundle_path = src.join("streamed.bundle");
+    std::fs::write(&bundle_path, &out.bytes).expect("write bundle file");
+    git_ok(src, &["bundle", "verify", bundle_path.to_str().unwrap()]);
+}
+
+#[test]
+fn bundle_all_with_packed_and_loose_objects_round_trips_with_git() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let src = tmp.path().join("src");
+    std::fs::create_dir_all(&src).unwrap();
+    init_packed_delta_history(&src, 12);
+    std::fs::write(src.join("loose.txt"), b"not packed yet\n").unwrap();
+    git_ok(&src, &["add", "loose.txt"]);
+    git_ok(&src, &["commit", "-q", "-m", "loose"]);
+
+    let bundle_path = tmp.path().join("mixed.bundle");
+    write_bundle_with_options(
+        &grit_repo(&src),
+        &bundle_path,
+        &BundleCreateOptions {
+            all_refs: true,
+            rev_tokens: Vec::new(),
+        },
+    )
+    .expect("grit bundle --all");
+    git_ok(&src, &["bundle", "verify", bundle_path.to_str().unwrap()]);
+    let clone = tmp.path().join("clone");
+    git_ok(
+        tmp.path(),
+        &[
+            "clone",
+            "-q",
+            bundle_path.to_str().unwrap(),
+            clone.to_str().unwrap(),
+        ],
+    );
+    fsck_strict(&clone);
+    assert_eq!(
+        git(&clone, &["rev-parse", "HEAD"]),
+        git(&src, &["rev-parse", "HEAD"])
+    );
+}
+
+#[test]
+// An incremental bundle keeps an on-disk delta whose base only the recipient has.
+fn incremental_bundle_reuses_delta_against_prerequisite_blob() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let src = tmp.path().join("src");
+    std::fs::create_dir_all(&src).unwrap();
+    git_ok(&src, &["init", "-q", "-b", "main", "."]);
+    let lines = pseudo_random_lines(99, 3000);
+    std::fs::write(src.join("big.txt"), lines.join("\n")).unwrap();
+    git_ok(&src, &["add", "big.txt"]);
+    git_ok(&src, &["commit", "-q", "-m", "big"]);
+    git_ok(&src, &["branch", "base"]);
+    let base = rev_parse(&src, "HEAD");
+    let mut shorter = lines.clone();
+    shorter.remove(1500);
+    std::fs::write(src.join("big.txt"), shorter.join("\n")).unwrap();
+    git_ok(&src, &["commit", "-q", "-am", "drop a line"]);
+    let tip = rev_parse(&src, "HEAD");
+    git_ok(&src, &["repack", "-adfq"]);
+    let new_blob = git(&src, &["rev-parse", "HEAD:big.txt"]);
+    let verify = git(
+        &src,
+        &[
+            "verify-pack",
+            "-v",
+            &format!("{}", single_pack_idx(&src).display()),
+        ],
+    );
+    assert!(
+        verify
+            .lines()
+            .any(|l| l.starts_with(new_blob.trim()) && l.split_whitespace().count() == 7),
+        "fixture: the new blob should be a delta in the source pack\n{verify}"
+    );
+
+    let bundle_path = tmp.path().join("inc.bundle");
+    {
+        let mut out = std::io::BufWriter::new(std::fs::File::create(&bundle_path).unwrap());
+        write_bundle(
+            &grit_repo(&src),
+            &BundleSpec {
+                include: vec![(tip, "refs/heads/main".to_owned())],
+                exclude: vec![base],
+                ..Default::default()
+            },
+            &mut out,
+        )
+        .expect("write incremental bundle");
+    }
+    let bundle_len = std::fs::metadata(&bundle_path).unwrap().len();
+    assert!(
+        bundle_len < 4096,
+        "thin bundle should carry a delta, not the whole {}-byte blob ({bundle_len} bytes)",
+        shorter.join("\n").len()
+    );
+
+    let dest = tmp.path().join("dest");
+    std::fs::create_dir_all(&dest).unwrap();
+    git_ok(&dest, &["init", "-q", "--bare", "-b", "main", "."]);
+    git_ok(
+        &dest,
+        &[
+            "fetch",
+            "-q",
+            src.to_str().unwrap(),
+            "refs/heads/base:refs/heads/main",
+        ],
+    );
+    git_ok(&dest, &["bundle", "verify", bundle_path.to_str().unwrap()]);
+    git_ok(
+        &dest,
+        &[
+            "fetch",
+            "-q",
+            bundle_path.to_str().unwrap(),
+            "refs/heads/main:refs/heads/main",
+        ],
+    );
+    fsck_strict(&dest);
+    assert_eq!(rev_parse(&dest, "main"), tip);
+}
+
+fn single_pack_idx(dir: &Path) -> std::path::PathBuf {
+    std::fs::read_dir(dir.join(".git/objects/pack"))
+        .expect("pack dir")
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .find(|p| p.extension().is_some_and(|x| x == "idx"))
+        .expect("pack index")
+}
+
 fn normalize_bundle_heads(s: &str) -> Vec<String> {
     let mut lines: Vec<String> = s
         .lines()

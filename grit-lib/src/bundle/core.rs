@@ -18,12 +18,13 @@ use crate::error::{Error, Result};
 use crate::index_pack::{ingest_received_pack_path_with_progress, IngestPackOptions};
 use crate::objects::{parse_commit, HashAlgo, ObjectId, ObjectKind};
 use crate::odb::Odb;
+use crate::pack_objects::{write_upload_pack_stream, PackStats};
 use crate::progress::{NullProgress, ProgressPhase, ProgressSink, ProgressUnit};
 use crate::repo::Repository;
 use crate::rev_list::{
     FilterObjectKind, MissingAction, ObjectFilter, RevListOptions, RevListResult,
 };
-use crate::transfer::{build_pack, build_pack_from_send_list, reachable_closure, PackBuildOptions};
+use crate::transfer::{build_pack_from_send_list, reachable_closure, PackBuildOptions};
 
 const V2_SIGNATURE: &str = "# v2 git bundle\n";
 const V3_SIGNATURE: &str = "# v3 git bundle\n";
@@ -559,8 +560,7 @@ pub fn plan_bundle_create(
         return Err(BundleError::EmptyRefs);
     }
     let header = bundle_header_parts(repo, spec)?;
-    let pack = build_bundle_pack(repo, spec)?;
-    let object_count = crate::receive_pack::pack_object_count(&pack).unwrap_or(0);
+    let object_count = write_bundle_pack(repo, spec, &mut std::io::sink())?.object_count;
     Ok(BundleCreatePlan {
         refs: header
             .refs
@@ -644,47 +644,78 @@ fn bundle_header_parts(
     })
 }
 
-fn build_bundle_pack(
+/// Stream the bundle's pack to `out` and return its statistics.
+///
+/// Packs that are already on disk are reused: existing deltas and whole objects are
+/// copied (see [`PackBuildOptions::for_bundle`]), so memory stays bounded by the pack
+/// index instead of the inflated object size. Bundles with prerequisites are thin.
+fn write_bundle_pack(
     repo: &Repository,
     spec: &BundleSpec,
-) -> std::result::Result<Vec<u8>, BundleError> {
+    out: &mut dyn Write,
+) -> std::result::Result<PackStats, BundleError> {
+    let io_err = |e: Error| BundleError::Io(e.to_string());
     let include_oids: Vec<ObjectId> = spec.include.iter().map(|(o, _)| *o).collect();
     let mut haves: Vec<ObjectId> = spec
         .exclude
         .iter()
         .map(|oid| peel_to_commit(repo.odb(), *oid))
-        .collect::<std::result::Result<Vec<_>, Error>>()
-        .map_err(|e| BundleError::Io(e.to_string()))?;
+        .collect::<Result<Vec<_>>>()
+        .map_err(io_err)?;
     haves.sort();
     haves.dedup();
-    let pack_opts = PackBuildOptions::for_local_push(None);
-    let empty_shallow = HashSet::new();
-    let have_closure = reachable_closure(repo.odb(), &haves, &HashSet::new(), true, &empty_shallow)
-        .map_err(|e| BundleError::Io(e.to_string()))?;
-    if let Some(filter) = spec.filter.as_ref() {
-        let send = filtered_pack_objects(
+    let cfg = repo.config().ok();
+    let pack_opts =
+        PackBuildOptions::for_bundle(cfg.as_deref(), repo.odb().objects_dir(), !haves.is_empty());
+    let no_shallow = HashSet::new();
+    let Some(filter) = spec.filter.as_ref() else {
+        return write_upload_pack_stream(
             repo,
             &include_oids,
-            &spec.exclude,
-            filter.as_filter(),
-            &have_closure,
-        )
-        .map_err(|e| BundleError::Io(e.to_string()))?;
-        build_pack_from_send_list(
-            repo.odb(),
-            &send,
-            &have_closure,
+            &haves,
+            &no_shallow,
+            &no_shallow,
+            None,
             &pack_opts,
-            &HashMap::new(),
+            &mut |_| {},
+            out,
         )
-        .map_err(|e| BundleError::Io(e.to_string()))
-    } else {
-        build_pack(repo.odb(), &include_oids, &haves, &pack_opts)
-            .map_err(|e| BundleError::Io(e.to_string()))
-    }
+        .map_err(io_err);
+    };
+    let have_closure = reachable_closure(repo.odb(), &haves, &HashSet::new(), true, &no_shallow)
+        .map_err(io_err)?;
+    let send = filtered_pack_objects(
+        repo,
+        &include_oids,
+        &spec.exclude,
+        filter.as_filter(),
+        &have_closure,
+    )
+    .map_err(io_err)?;
+    let pack = build_pack_from_send_list(
+        repo.odb(),
+        &send,
+        &have_closure,
+        &pack_opts,
+        &HashMap::new(),
+    )
+    .map_err(io_err)?;
+    out.write_all(&pack).map_err(BundleError::from)?;
+    Ok(PackStats {
+        object_count: crate::receive_pack::pack_object_count(&pack).unwrap_or(0),
+        pack_bytes: pack.len() as u64,
+        ..PackStats::default()
+    })
 }
 
 /// Write a bundle to `out` from `repo` using `spec`.
+///
+/// The header is written first, then the pack is streamed straight into `out`; the
+/// pack is never held in memory as a whole (filtered bundles excepted). Deltas and
+/// whole objects already stored in local packs are copied verbatim rather than
+/// recomputed, and bundles with prerequisites are thin (deltas may name a
+/// prerequisite-reachable base the recipient already holds). Pass a buffered writer:
+/// the pack is emitted in many small writes.
 ///
 /// # Errors
 ///
@@ -725,9 +756,7 @@ pub fn write_bundle(
     }
     writeln!(out).map_err(|e| BundleError::Io(e.to_string()))?;
 
-    let pack = build_bundle_pack(repo, spec)?;
-    out.write_all(&pack)
-        .map_err(|e| BundleError::Io(e.to_string()))?;
+    write_bundle_pack(repo, spec, out)?;
     Ok(())
 }
 

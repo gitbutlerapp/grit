@@ -1,0 +1,303 @@
+{
+  "schema": "grit-daily-bench/1",
+  "generated_at": "2026-10-24T20:06:08.235028462Z",
+  "machine": {
+    "cpu_model": "Intel(R) Xeon(R) Processor",
+    "physical_cores": 4,
+    "logical_cores": 4,
+    "ram_bytes": 16780574720,
+    "os": "linux",
+    "kernel": "Linux 6.12.94+",
+    "scratch_filesystem": "ext4",
+    "rustc_version": "rustc 1.99.0 (b940084d7 2026-09-28)",
+    "cargo_profile": "release"
+  },
+  "tools": {
+    "git": "git version 2.43.0",
+    "grit": "grit 0.5.19",
+    "grit_commit": "cb86b3bfc4202268244c058ea03429fcb4a14b3d"
+  },
+  "scenarios": [
+    {
+      "id": "bundle/create-all@git-git",
+      "area": "bundles",
+      "description": "Bundle every ref of a packed deep history vs git bundle create --all",
+      "git": {
+        "median_wall_ms": 4895.562165,
+        "peak_rss_bytes": 530202624,
+        "runs": 3,
+        "samples_ms": [
+          4822.551,
+          4895.562,
+          5002.281
+        ],
+        "min_ms": 4822.550751,
+        "max_ms": 5002.28078,
+        "stddev_ms": 90.39027665825806
+      },
+      "grit": {
+        "median_wall_ms": 23727.049221,
+        "peak_rss_bytes": 923430912,
+        "runs": 3,
+        "samples_ms": [
+          24040.448,
+          23727.049,
+          23646.814
+        ],
+        "min_ms": 23646.814368,
+        "max_ms": 24040.448158,
+        "stddev_ms": 208.00804711133358
+      },
+      "ratio": 4.846644454978542,
+      "detail": {
+        "prepare": "set -eu\ngrit-bench prepare-daily-reset --git git\nrm -f /tmp/grit-bench-scratch/daily-git-git-wt/worktree-run-git-git-wt/daily-bench.bundle",
+        "commands": {
+          "git": "git bundle create /tmp/grit-bench-scratch/daily-git-git-wt/worktree-run-git-git-wt/daily-bench.bundle --all",
+          "grit": "grit bundle create /tmp/grit-bench-scratch/daily-git-git-wt/worktree-run-git-git-wt/daily-bench.bundle --all"
+        },
+        "phases": {
+          "git": [
+            {
+              "name": "run: git pack-objects",
+              "ms": 4130.969,
+              "count": 1,
+              "depth": 1
+            },
+            {
+              "name": "pack-objects: enumerate-objects",
+              "ms": 3058.64,
+              "count": 1,
+              "depth": 1
+            },
+            {
+              "name": "pack-objects: write-pack-file",
+              "ms": 865.767,
+              "count": 1,
+              "depth": 1
+            },
+            {
+              "name": "pack-objects: prepare-pack",
+              "ms": 189.184,
+              "count": 1,
+              "depth": 1
+            }
+          ],
+          "grit": [
+            {
+              "name": "grit.revwalk.setup",
+              "ms": 715.12,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "grit.repository.open",
+              "ms": 0.928,
+              "count": 3,
+              "depth": 0
+            },
+            {
+              "name": "grit.config.load",
+              "ms": 0.428,
+              "count": 4,
+              "depth": 0
+            },
+            {
+              "name": "grit.pack.index.open",
+              "ms": 0.028,
+              "count": 1,
+              "depth": 1
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "bundle/create@synth-10k",
+      "area": "bundles",
+      "description": "Create bundle file vs git bundle create",
+      "git": {
+        "median_wall_ms": 286.378019,
+        "peak_rss_bytes": 65388544,
+        "runs": 5,
+        "samples_ms": [
+          294.589,
+          324.672,
+          282.75,
+          265.866,
+          286.378
+        ],
+        "min_ms": 265.865789,
+        "max_ms": 324.67227599999995,
+        "stddev_ms": 21.608690836610243
+      },
+      "grit": {
+        "median_wall_ms": 350.156164,
+        "peak_rss_bytes": 75128832,
+        "runs": 5,
+        "samples_ms": [
+          421.862,
+          384.754,
+          348.462,
+          341.915,
+          350.156
+        ],
+        "min_ms": 341.915086,
+        "max_ms": 421.86186799999996,
+        "stddev_ms": 33.734799502016706
+      },
+      "ratio": 1.222706146312158,
+      "detail": {
+        "prepare": "set -eu\ngrit-bench prepare-daily-reset --git git\nrm -f /tmp/grit-bench-scratch/daily-synth-10k/worktree-run-synth-10k/daily-bench.bundle",
+        "commands": {
+          "git": "git bundle create /tmp/grit-bench-scratch/daily-synth-10k/worktree-run-synth-10k/daily-bench.bundle HEAD",
+          "grit": "grit bundle create /tmp/grit-bench-scratch/daily-synth-10k/worktree-run-synth-10k/daily-bench.bundle HEAD"
+        },
+        "correctness": "before timing, git and grit were each run once and their results compared",
+        "phases": {
+          "git": [
+            {
+              "name": "run: git pack-objects",
+              "ms": 263.56,
+              "count": 1,
+              "depth": 1
+            },
+            {
+              "name": "pack-objects: enumerate-objects",
+              "ms": 183.879,
+              "count": 1,
+              "depth": 1
+            },
+            {
+              "name": "pack-objects: write-pack-file",
+              "ms": 63.99,
+              "count": 1,
+              "depth": 1
+            },
+            {
+              "name": "pack-objects: prepare-pack",
+              "ms": 12.989,
+              "count": 1,
+              "depth": 1
+            }
+          ],
+          "grit": [
+            {
+              "name": "grit.revwalk.setup",
+              "ms": 6.97,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "grit.repository.open",
+              "ms": 0.717,
+              "count": 3,
+              "depth": 0
+            },
+            {
+              "name": "grit.config.load",
+              "ms": 0.212,
+              "count": 4,
+              "depth": 0
+            },
+            {
+              "name": "grit.pack.index.open",
+              "ms": 0.018,
+              "count": 1,
+              "depth": 1
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "bundle/verify@synth-10k",
+      "area": "bundles",
+      "description": "Verify bundle vs git bundle verify",
+      "git": {
+        "median_wall_ms": 2.2339504999999997,
+        "peak_rss_bytes": 6721536,
+        "runs": 20,
+        "samples_ms": [
+          2.252,
+          2.246,
+          2.422,
+          2.236,
+          2.218,
+          2.257,
+          2.225,
+          2.229,
+          2.206,
+          2.241,
+          2.245,
+          2.232,
+          2.221,
+          2.269,
+          2.236,
+          2.179,
+          2.221,
+          2.212,
+          2.238,
+          2.228
+        ],
+        "min_ms": 2.178526,
+        "max_ms": 2.421618,
+        "stddev_ms": 0.04693494509637784
+      },
+      "grit": {
+        "median_wall_ms": 3.3202835000000004,
+        "peak_rss_bytes": 12324864,
+        "runs": 20,
+        "samples_ms": [
+          3.391,
+          4.513,
+          3.298,
+          3.305,
+          3.354,
+          3.288,
+          3.304,
+          3.351,
+          3.309,
+          3.316,
+          4.413,
+          3.326,
+          3.32,
+          3.295,
+          3.328,
+          3.321,
+          3.3,
+          3.298,
+          3.429,
+          3.602
+        ],
+        "min_ms": 3.2877370000000004,
+        "max_ms": 4.51288,
+        "stddev_ms": 0.35290483981556564
+      },
+      "ratio": 1.4862833800480364,
+      "detail": {
+        "prepare": "set -eu\ngrit-bench prepare-daily-reset --git git\ncd /tmp/grit-bench-scratch/daily-synth-10k/worktree-run-synth-10k && git bundle create /tmp/grit-bench-scratch/daily-synth-10k/worktree-run-synth-10k/daily-bench.bundle HEAD",
+        "commands": {
+          "git": "git bundle verify /tmp/grit-bench-scratch/daily-synth-10k/worktree-run-synth-10k/daily-bench.bundle",
+          "grit": "grit bundle verify /tmp/grit-bench-scratch/daily-synth-10k/worktree-run-synth-10k/daily-bench.bundle"
+        },
+        "correctness": "before timing, git and grit were each run once and their results compared",
+        "phases": {
+          "grit": [
+            {
+              "name": "grit.repository.open",
+              "ms": 0.358,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "grit.config.load",
+              "ms": 0.138,
+              "count": 2,
+              "depth": 0
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

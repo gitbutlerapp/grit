@@ -65,15 +65,11 @@ pub fn write_bundle_from_rev_specs(
     )
 }
 
-/// Write a bundle file using ref-set flags and revision tokens.
+/// Resolve [`BundleSpec`] from create options without writing a file.
 ///
 /// When [`BundleCreateOptions::all_refs`] is true (or `--all` appears among `rev_tokens`), the bundle
 /// header lists `HEAD` and every ref under `refs/`, matching `git bundle create --all`.
-///
-/// # Errors
-///
-/// Propagates rev-list, ref resolution, and bundle write failures.
-/// Resolve [`BundleSpec`] from create options without writing a file.
+/// Only commits are walked here; objects are enumerated once, by the pack writer.
 ///
 /// # Errors
 ///
@@ -90,7 +86,6 @@ pub fn resolve_bundle_spec(repo: &Repository, options: &BundleCreateOptions) -> 
 
     let rev_opts = crate::rev_list::RevListOptions {
         boundary: true,
-        objects: true,
         all_refs,
         ..Default::default()
     };
@@ -173,10 +168,18 @@ fn include_refs_from_rev_specs(
     positive_specs: &[String],
     revs: &crate::rev_list::RevListResult,
 ) -> Result<Vec<(ObjectId, String)>> {
+    let commits: HashSet<ObjectId> = revs.commits.iter().copied().collect();
+    // A tip is bundled when the commit it peels to is being sent; a tag of a tree or
+    // blob names that object directly.
+    let tip_is_sent = |oid: ObjectId| match repo.odb().peel_tags(oid) {
+        Ok((commit, crate::objects::ObjectKind::Commit)) => commits.contains(&commit),
+        Ok(_) => true,
+        Err(_) => false,
+    };
     let mut include: Vec<(ObjectId, String)> = Vec::new();
     for spec in positive_specs {
         if let Ok(oid) = crate::rev_parse::resolve_revision(repo, spec) {
-            if revs.commits.contains(&oid) || revs.objects.iter().any(|(o, _)| *o == oid) {
+            if tip_is_sent(oid) {
                 let name = display_ref_for_spec(repo, spec, oid)?;
                 if !include.iter().any(|(_, n)| n == &name) {
                     include.push((oid, name));

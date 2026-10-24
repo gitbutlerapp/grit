@@ -20,6 +20,8 @@ Git bundles pack refs and objects into a single file. Use them to move history w
 
 `create` walks the given revision specs (same rules as [`grit log`](../log/)), writes prerequisite commits the recipient must already have, lists tip refs in the header, and appends a pack stream. Bundles are detected by the `# v2 git bundle` / `# v3 git bundle` signature, not by the `.bundle` file extension alone.
 
+When the repository's objects are already packed, `create` copies the existing deltas and whole objects straight from the packs instead of recomputing them, and streams the pack into the file. A bundle of a packed repository is close to a copy of its pack: it takes seconds and its memory is bounded by the pack index, not by the size of the history. Bundles with prerequisites are thin, so an object can be sent as a delta against a prerequisite's blob. In a repository that has packs, objects that are still loose are written whole; run [`grit repack`](../repack/) first if you want them delta-compressed too. A repository with no packs at all gets a full delta search.
+
 `verify` checks the pack checksum and, when run inside a repository, confirms prerequisite commits are present and connected to your history.
 
 `list` prints the refs recorded in the bundle header.
