@@ -10643,6 +10643,33 @@ impl core::marker::Unpin for grit_lib::objects::ObjectId
 impl core::marker::UnsafeUnpin for grit_lib::objects::ObjectId
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::ObjectId
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::ObjectId
+pub struct grit_lib::objects::ObjectIdPrefix
+impl grit_lib::objects::ObjectIdPrefix
+pub fn grit_lib::objects::ObjectIdPrefix::algo(&self) -> grit_lib::objects::HashAlgo
+pub fn grit_lib::objects::ObjectIdPrefix::from_hex(&str, grit_lib::objects::HashAlgo) -> grit_lib::error::Result<Self>
+pub fn grit_lib::objects::ObjectIdPrefix::highest(&self) -> grit_lib::objects::ObjectId
+pub fn grit_lib::objects::ObjectIdPrefix::is_empty(&self) -> bool
+pub fn grit_lib::objects::ObjectIdPrefix::lowest(&self) -> grit_lib::objects::ObjectId
+pub fn grit_lib::objects::ObjectIdPrefix::matches(&self, &grit_lib::objects::ObjectId) -> bool
+pub fn grit_lib::objects::ObjectIdPrefix::nibbles(&self) -> usize
+impl core::clone::Clone for grit_lib::objects::ObjectIdPrefix
+pub fn grit_lib::objects::ObjectIdPrefix::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::objects::ObjectIdPrefix
+impl core::cmp::PartialEq for grit_lib::objects::ObjectIdPrefix
+pub fn grit_lib::objects::ObjectIdPrefix::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::objects::ObjectIdPrefix
+pub fn grit_lib::objects::ObjectIdPrefix::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::objects::ObjectIdPrefix
+pub fn grit_lib::objects::ObjectIdPrefix::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::objects::ObjectIdPrefix
+impl core::marker::StructuralPartialEq for grit_lib::objects::ObjectIdPrefix
+impl core::marker::Freeze for grit_lib::objects::ObjectIdPrefix
+impl core::marker::Send for grit_lib::objects::ObjectIdPrefix
+impl core::marker::Sync for grit_lib::objects::ObjectIdPrefix
+impl core::marker::Unpin for grit_lib::objects::ObjectIdPrefix
+impl core::marker::UnsafeUnpin for grit_lib::objects::ObjectIdPrefix
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::ObjectIdPrefix
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::ObjectIdPrefix
 pub struct grit_lib::objects::ObjectInfo
 pub grit_lib::objects::ObjectInfo::kind: grit_lib::objects::ObjectKind
 pub grit_lib::objects::ObjectInfo::size: u64

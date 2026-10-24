@@ -49,6 +49,31 @@ let _blob = repo.odb.write(ObjectKind::Blob, b"hello")?;
 # Ok::<(), grit_lib::error::Error>(())
 ```
 
+## Short ids and prefix lookup
+
+Resolving a short id and abbreviating an id (for example [`abbreviate_object_id`](rustdoc:grit_lib::revwalk::rev_parse::abbreviate_object_id)) both call [`ObjectStore::lookup_prefix`](rustdoc:grit_lib::objects::odb::store::ObjectStore::lookup_prefix) once per id. A backend only has to implement `for_each_object`: the default `lookup_prefix` parses the prefix once into an [`ObjectIdPrefix`](rustdoc:grit_lib::objects::ObjectIdPrefix) and compares raw id bytes without allocating, so each call is one pass over the whole store (about 1 ms per 200 000 ids on the factory VM).
+
+If your backend keeps ids sorted (a B-tree, an ordered key-value store, an SQL index on the raw id), override `lookup_prefix` with a range scan. Every id that starts with the prefix lies between [`ObjectIdPrefix::lowest`](rustdoc:grit_lib::objects::ObjectIdPrefix::lowest) and [`ObjectIdPrefix::highest`](rustdoc:grit_lib::objects::ObjectIdPrefix::highest), inclusive, and nothing else does:
+
+```rust
+use std::collections::BTreeSet;
+
+use grit_lib::error::Result;
+use grit_lib::objects::{HashAlgo, ObjectId, ObjectIdPrefix};
+
+fn lookup_prefix(
+    ids: &BTreeSet<ObjectId>,
+    prefix: &str,
+    limit: usize,
+    out: &mut Vec<ObjectId>,
+) -> Result<()> {
+    let prefix = ObjectIdPrefix::from_hex(prefix, HashAlgo::Sha1)?;
+    let matches = ids.range(prefix.lowest()..=prefix.highest());
+    out.extend(matches.take(if limit == 0 { usize::MAX } else { limit }));
+    Ok(())
+}
+```
+
 Filesystem-only maintenance (`Odb::gc`, `Odb::write_commit_graph`, `Odb::pack_store`, pack install, MIDX write) returns `Error::UnsupportedObjectStore` when the primary is not the default files backend. Use `Odb::files_objects_dir` when you need the on-disk `objects/` path only for files-backed repos.
 
 ## Conformance tests

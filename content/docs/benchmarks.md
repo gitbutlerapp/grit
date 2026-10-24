@@ -63,6 +63,18 @@ Criterion measures [`Odb::read`](https://docs.rs/grit-lib/latest/grit_lib/odb/st
 
 An additional benchmark, **`odb_backend/exists_miss_loop_10k`**, calls `exists` on 10 000 distinct missing OIDs against the 100k pack fixture (models add/status miss scans).
 
+## grit-lib: abbreviating ids on custom object stores
+
+Criterion bench **`abbreviate`** (`cargo bench -p grit-lib --bench abbreviate`) calls [`abbreviate_object_id`](https://docs.rs/grit-lib/latest/grit_lib/revwalk/rev_parse/fn.abbreviate_object_id.html) with a 7-digit minimum for 200 ids out of 200,000 blobs held in three stores: a [`MemoryStore`](https://docs.rs/grit-lib/latest/grit_lib/objects/odb/store/struct.MemoryStore.html), a store that implements only the required [`ObjectStore`](https://docs.rs/grit-lib/latest/grit_lib/objects/odb/store/trait.ObjectStore.html) methods (so it uses the default full-scan `lookup_prefix`), and one pack in a files ODB. Factory VM medians (2026-10-24, issue #1736):
+
+| Store | Before | After |
+| --- | --- | --- |
+| `MemoryStore` | 3.89 s | 168 ms |
+| Required methods only | 3.90 s | 229 ms |
+| Files ODB, one pack | 668 µs | 601 µs |
+
+Prefix matching now compares raw id bytes against a prefix parsed once ([`ObjectIdPrefix`](https://docs.rs/grit-lib/latest/grit_lib/objects/struct.ObjectIdPrefix.html)) instead of formatting every candidate as hex, and abbreviation makes one lookup per id instead of one per candidate length. A store without an index still scans every id once per lookup; override `lookup_prefix` with a range scan to avoid that (see [Object stores](../library/object-stores/#short-ids-and-prefix-lookup)).
+
 ## grit-lib: pack write (100k reuse vs fresh)
 
 Criterion group **`pack`** (`cargo bench -p grit-lib --bench pack_write`) rebuilds the full closure of the repacked **`pack_100k`** fixture (~100 000 objects) via [`build_pack_with_parallel_threads`](https://docs.rs/grit-lib/latest/grit_lib/objects/pack_objects/fn.build_pack_with_parallel_threads.html):

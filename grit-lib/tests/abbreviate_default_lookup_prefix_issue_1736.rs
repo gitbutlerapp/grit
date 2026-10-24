@@ -1,7 +1,7 @@
 //! Abbreviation and short-id lookup through a store that implements only the required
 //! [`ObjectStore`] methods (issue 1736), plus a round-trip against `git rev-parse --short`.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::io::Write;
 use std::ops::ControlFlow;
 use std::path::Path;
@@ -13,7 +13,7 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::{Error, Result};
 use grit_lib::objects::odb::store::{ObjectStore, WritableObjectStore};
 use grit_lib::objects::odb::{OdbBuilder, WriteOptions};
-use grit_lib::objects::{HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind};
+use grit_lib::objects::{HashAlgo, Object, ObjectId, ObjectIdPrefix, ObjectInfo, ObjectKind};
 use grit_lib::repo::{InitOptions, Repository, RepositoryBuilder};
 use grit_lib::revwalk::rev_parse::{abbreviate_object_id, resolve_revision};
 
@@ -196,6 +196,79 @@ fn default_lookup_prefix_handles_odd_even_empty_full_and_invalid_prefixes() {
         lookup(&format!("{}0", a.to_hex()), 0),
         Err(Error::InvalidObjectId(_))
     ));
+}
+
+/// Keeps ids sorted and answers prefix lookups with a range scan.
+#[derive(Debug, Default)]
+struct SortedStore {
+    ids: BTreeSet<ObjectId>,
+}
+
+impl ObjectStore for SortedStore {
+    fn hash_algo(&self) -> HashAlgo {
+        HashAlgo::Sha1
+    }
+
+    fn read(&self, oid: &ObjectId) -> Result<Option<Object>> {
+        Ok(self.ids.contains(oid).then(|| Object {
+            kind: ObjectKind::Blob,
+            data: Vec::new(),
+        }))
+    }
+
+    fn read_info(&self, oid: &ObjectId) -> Result<Option<ObjectInfo>> {
+        Ok(self.ids.contains(oid).then_some(ObjectInfo {
+            kind: ObjectKind::Blob,
+            size: 0,
+        }))
+    }
+
+    fn for_each_object(&self, f: &mut dyn FnMut(&ObjectId) -> ControlFlow<()>) -> Result<()> {
+        for oid in &self.ids {
+            if f(oid).is_break() {
+                break;
+            }
+        }
+        Ok(())
+    }
+
+    fn lookup_prefix(&self, prefix: &str, limit: usize, out: &mut Vec<ObjectId>) -> Result<()> {
+        let prefix = ObjectIdPrefix::from_hex(prefix, self.hash_algo())?;
+        let range = self.ids.range(prefix.lowest()..=prefix.highest());
+        let take = if limit == 0 { usize::MAX } else { limit };
+        out.extend(range.take(take).inspect(|oid| assert!(prefix.matches(oid))));
+        Ok(())
+    }
+}
+
+#[test]
+fn prefix_range_override_agrees_with_the_default_scan() {
+    let minimal = MinimalStore::default();
+    let mut sorted = SortedStore::default();
+    for i in 0..2000 {
+        let id = grit_lib::objects::hash::hash_object(
+            HashAlgo::Sha1,
+            ObjectKind::Blob,
+            format!("range {i}\n").as_bytes(),
+        )
+        .expect("hash");
+        minimal.insert(id);
+        sorted.ids.insert(id);
+    }
+    let probes = sorted.ids.iter().step_by(97).map(ObjectId::to_hex);
+    for hex in probes {
+        for len in [0, 1, 2, 3, 4, 5, 40] {
+            let (mut by_scan, mut by_range) = (Vec::new(), Vec::new());
+            minimal
+                .lookup_prefix(&hex[..len], 0, &mut by_scan)
+                .expect("scan");
+            sorted
+                .lookup_prefix(&hex[..len], 0, &mut by_range)
+                .expect("range");
+            by_scan.sort();
+            assert_eq!(by_range, by_scan, "prefix {}", &hex[..len]);
+        }
+    }
 }
 
 #[test]
