@@ -14,6 +14,7 @@
 //! | Request | Needs | Answer |
 //! | --- | --- | --- |
 //! | `GET /` | a token | HTML list of the repositories the user can read |
+//! | `GET /.grit/user` | a token | JSON [`ServerIdentity`] of the token's user (what `grit auth <url>` checks) |
 //! | `GET /<repo>` | read | HTML page with the branches and recent commits |
 //! | `GET /<repo>/info/refs?service=git-upload-pack` | read | fetch discovery (v0, v1, v2) |
 //! | `POST /<repo>/git-upload-pack` | read | fetch |
@@ -36,6 +37,7 @@ use axum::{
 };
 use grit_lib::objects::{parse_commit, ObjectKind};
 use grit_lib::porcelain::branch::list_branches;
+use grit_lib::remote::grit_server_auth::{ServerIdentity, IDENTITY_PATH};
 use grit_lib::repo::Repository;
 use grit_lib::state::{resolve_head_for_repository, HeadState};
 use grit_protocol::RepositoryOptions;
@@ -248,6 +250,7 @@ impl Server {
 fn router(state: Arc<ServerState>) -> Router {
     Router::new()
         .route("/", get(index))
+        .route(&format!("/{IDENTITY_PATH}"), get(identity))
         .route("/{*path}", get(get_dispatch).post(post_dispatch))
         .with_state(state)
 }
@@ -413,6 +416,19 @@ fn base_url(headers: &HeaderMap) -> String {
         .and_then(|v| v.to_str().ok())
         .unwrap_or("localhost");
     format!("http://{host}")
+}
+
+/// The token's user as JSON, so a client can check a token before storing it.
+async fn identity(State(state): State<Arc<ServerState>>, headers: HeaderMap) -> Response<Body> {
+    let user = match state.authenticate(&headers) {
+        Ok(user) => user,
+        Err(resp) => return *resp,
+    };
+    axum::Json(ServerIdentity {
+        name: user.name,
+        admin: user.admin,
+    })
+    .into_response()
 }
 
 async fn index(State(state): State<Arc<ServerState>>, headers: HeaderMap) -> Response<Body> {

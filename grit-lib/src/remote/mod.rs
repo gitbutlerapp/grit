@@ -46,6 +46,10 @@ pub mod github_auth {
     //! github_auth API (re-exported at this path).
     pub use crate::github_auth::*;
 }
+pub mod grit_server_auth {
+    //! grit_server_auth API (re-exported at this path).
+    pub use crate::grit_server_auth::*;
+}
 pub mod url_rewrite {
     //! url_rewrite API (re-exported at this path).
     pub use crate::url_rewrite::*;

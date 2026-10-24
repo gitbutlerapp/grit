@@ -707,8 +707,11 @@ enum HooksAction {
 /// Subcommands of `grit auth`.
 #[derive(Debug, Subcommand)]
 enum AuthAction {
-    /// Forget the stored GitHub token (sign out).
+    /// Forget the stored token (sign out) for GitHub, or for a `grit serve` URL.
     Logout {
+        /// A `grit serve` host to sign out of instead of GitHub.
+        #[arg(value_name = "URL")]
+        url: Option<String>,
         /// Report which stored credential would be removed without erasing it.
         #[arg(long = "dry-run")]
         dry_run: bool,
@@ -1838,8 +1841,15 @@ enum Command {
         #[command(subcommand)]
         action: WorktreeAction,
     },
-    /// Sign in to GitHub (device flow) and store a token for HTTPS push/fetch.
+    /// Sign in to GitHub (device flow), or to a `grit serve` host, and store a token for push/fetch.
+    #[command(args_conflicts_with_subcommands = true)]
     Auth {
+        /// A `grit serve` host (or one of its repository URLs) to sign in to instead of GitHub.
+        #[arg(value_name = "URL")]
+        url: Option<String>,
+        /// The access token for a `grit serve` host. Without it, `grit auth <url>` prompts for it (or reads stdin).
+        #[arg(long, value_name = "TOKEN", requires = "url")]
+        token: Option<String>,
         #[command(subcommand)]
         action: Option<AuthAction>,
     },
@@ -3867,12 +3877,38 @@ fn dispatch(
             // push is still a failure, so mirror Git and exit non-zero.
             Ok(ExitStatus::from_push_rejected(outcome.rejected))
         }
-        Command::Auth { action } => match action {
-            None => emit_success(&commands::auth::run()?, opts, ctx),
-            Some(AuthAction::Logout { dry_run }) => {
-                emit_success(&commands::auth::logout(dry_run)?, opts, ctx)
+        Command::Auth { url, token, action } => {
+            match action {
+                None => {
+                    let server = url
+                        .as_deref()
+                        .map(commands::auth::grit_server)
+                        .transpose()?;
+                    let outcome = match server.flatten() {
+                        Some(server) => {
+                            let token = commands::auth::read_token(token)?;
+                            commands::auth::run_server(&server, &token)?
+                        }
+                        None if token.is_some() => {
+                            anyhow::bail!("--token is for `grit serve` hosts; GitHub signs in with the browser")
+                        }
+                        None => commands::auth::run()?,
+                    };
+                    emit_success(&outcome, opts, ctx)
+                }
+                Some(AuthAction::Logout { url, dry_run }) => {
+                    let server = url
+                        .as_deref()
+                        .map(commands::auth::grit_server)
+                        .transpose()?;
+                    emit_success(
+                        &commands::auth::logout(server.flatten().as_ref(), dry_run)?,
+                        opts,
+                        ctx,
+                    )
+                }
             }
-        },
+        }
         Command::Update => emit_success(&commands::update::run(opts.mode)?, opts, ctx),
         Command::Skill => emit_success(&commands::skill::run()?, opts, ctx),
         Command::Completions { shell } => {

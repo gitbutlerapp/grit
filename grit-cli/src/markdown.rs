@@ -1576,7 +1576,10 @@ pub fn print_auth_outcome(w: &mut dyn Write, outcome: &AuthOutcome) -> anyhow::R
     outln!(w, "## Auth");
     outln!(w);
     if outcome.authenticated {
-        outln!(w, "- Signed in to **`{}`**", outcome.host);
+        match &outcome.user {
+            Some(user) => outln!(w, "- Signed in to **`{}`** as **`{user}`**", outcome.host),
+            None => outln!(w, "- Signed in to **`{}`**", outcome.host),
+        }
     } else {
         outln!(w, "- Not signed in to **`{}`**", outcome.host);
     }

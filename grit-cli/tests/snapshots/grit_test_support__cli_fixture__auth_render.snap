@@ -36,5 +36,39 @@ expression: payload
       "stdout": "## Auth logout\n\n- Signed out of **`github.com`** (stored token removed)\n",
       "stderr": ""
     }
+  },
+  "server_sign_in": {
+    "human": {
+      "exit": 0,
+      "stdout": "✓ Signed in to git.example.com:8080 as bob — token stored.\n",
+      "stderr": ""
+    },
+    "json": {
+      "exit": 0,
+      "stdout": "{\"authenticated\":true,\"host\":\"git.example.com:8080\",\"user\":\"bob\"}\n",
+      "stderr": ""
+    },
+    "markdown": {
+      "exit": 0,
+      "stdout": "## Auth\n\n- Signed in to **`git.example.com:8080`** as **`bob`**\n",
+      "stderr": ""
+    }
+  },
+  "server_logout": {
+    "human": {
+      "exit": 0,
+      "stdout": "✓ Signed out of git.example.com:8080 — removed the stored token for git.example.com:8080.\n",
+      "stderr": ""
+    },
+    "json": {
+      "exit": 0,
+      "stdout": "{\"logged_out\":true,\"host\":\"git.example.com:8080\"}\n",
+      "stderr": ""
+    },
+    "markdown": {
+      "exit": 0,
+      "stdout": "## Auth logout\n\n- Signed out of **`git.example.com:8080`** (stored token removed)\n",
+      "stderr": ""
+    }
   }
 }

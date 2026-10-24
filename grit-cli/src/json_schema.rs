@@ -342,8 +342,8 @@ pub fn schema_command_key(args: &[&str]) -> Option<String> {
         },
         "auth" => match positional.get(1).copied() {
             Some("logout") => "auth.logout",
-            None => "auth",
-            _ => return None,
+            // `grit auth` or `grit auth <url>`.
+            _ => "auth",
         },
         "serve" => match positional.get(1).copied() {
             None => "serve",

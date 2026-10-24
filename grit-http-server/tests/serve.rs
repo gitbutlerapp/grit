@@ -250,6 +250,38 @@ fn pages_list_readable_repositories() {
 }
 
 #[test]
+fn the_identity_endpoint_names_the_token_user() {
+    use grit_lib::remote::grit_server_auth::{
+        fetch_identity, ServerAuthError, ServerUrl, TokenCredentialProvider,
+    };
+    use grit_lib::remote::http_client::UreqHttpClient;
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    let database = fixture(root);
+    let addr = start(&root.join("repos"), &database);
+
+    let (status, _) = http_get(addr, "/.grit/user", None);
+    assert!(status.contains("401"), "{status}");
+    let (status, body) = http_get(addr, "/.grit/user", Some(READER_TOKEN));
+    assert!(status.contains("200"), "{status}");
+    assert_eq!(body, r#"{"name":"reader","admin":false}"#);
+
+    // The client side: a 401 challenge, then basic auth with the token.
+    let server = ServerUrl::parse(&format!("http://{addr}/project.git")).expect("server url");
+    let signed_in = |token: &str| {
+        let http = UreqHttpClient::with_credentials(Box::new(TokenCredentialProvider::new(token)));
+        fetch_identity(&http, &server)
+    };
+    let admin = signed_in(ADMIN_TOKEN).expect("admin identity");
+    assert_eq!((admin.name.as_str(), admin.admin), ("admin", true));
+    assert!(matches!(
+        signed_in("grit_wrong"),
+        Err(ServerAuthError::TokenRejected)
+    ));
+}
+
+#[test]
 fn a_single_repository_root_is_served_by_name() {
     let tmp = tempfile::tempdir().expect("tempdir");
     let root = tmp.path();

@@ -19563,6 +19563,10 @@ impl grit_lib::remote::credentials::CredentialProvider for grit_lib::remote::cre
 pub fn grit_lib::remote::credentials::HelperCredentialProvider::approve(&self, &grit_lib::remote::credentials::Credential) -> grit_lib::error::Result<()>
 pub fn grit_lib::remote::credentials::HelperCredentialProvider::fill(&self, &grit_lib::remote::credentials::Credential) -> grit_lib::error::Result<grit_lib::remote::credentials::Credential>
 pub fn grit_lib::remote::credentials::HelperCredentialProvider::reject(&self, &grit_lib::remote::credentials::Credential) -> grit_lib::error::Result<()>
+impl grit_lib::remote::credentials::CredentialProvider for grit_lib::remote::grit_server_auth::TokenCredentialProvider
+pub fn grit_lib::remote::grit_server_auth::TokenCredentialProvider::approve(&self, &grit_lib::remote::credentials::Credential) -> grit_lib::error::Result<()>
+pub fn grit_lib::remote::grit_server_auth::TokenCredentialProvider::fill(&self, &grit_lib::remote::credentials::Credential) -> grit_lib::error::Result<grit_lib::remote::credentials::Credential>
+pub fn grit_lib::remote::grit_server_auth::TokenCredentialProvider::reject(&self, &grit_lib::remote::credentials::Credential) -> grit_lib::error::Result<()>
 pub fn grit_lib::remote::credentials::askpass_program(&grit_lib::config::environment::Environment, &grit_lib::config::ConfigSet) -> core::option::Option<std::path::PathBuf>
 pub fn grit_lib::remote::credentials::redact_embedded_url_credentials(&str) -> alloc::string::String
 pub fn grit_lib::remote::credentials::url_without_userinfo(&str) -> alloc::string::String
@@ -19929,6 +19933,91 @@ pub fn grit_lib::remote::github_auth::SystemPollClock::now(&self) -> std::time::
 pub fn grit_lib::remote::github_auth::SystemPollClock::sleep(&mut self, core::time::Duration)
 pub fn grit_lib::remote::github_auth::github_token_credential(core::option::Option<&str>) -> grit_lib::remote::credentials::Credential
 pub fn grit_lib::remote::github_auth::is_github_https_url(&str) -> bool
+pub mod grit_lib::remote::grit_server_auth
+#[non_exhaustive] pub enum grit_lib::remote::grit_server_auth::ServerAuthError
+pub grit_lib::remote::grit_server_auth::ServerAuthError::Http(grit_lib::error::Error)
+pub grit_lib::remote::grit_server_auth::ServerAuthError::InvalidUrl(alloc::string::String)
+pub grit_lib::remote::grit_server_auth::ServerAuthError::NotGritServer(alloc::string::String)
+pub grit_lib::remote::grit_server_auth::ServerAuthError::TokenRejected
+pub grit_lib::remote::grit_server_auth::ServerAuthError::UnsupportedScheme(alloc::string::String)
+impl core::error::Error for grit_lib::remote::grit_server_auth::ServerAuthError
+pub fn grit_lib::remote::grit_server_auth::ServerAuthError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Debug for grit_lib::remote::grit_server_auth::ServerAuthError
+pub fn grit_lib::remote::grit_server_auth::ServerAuthError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::remote::grit_server_auth::ServerAuthError
+pub fn grit_lib::remote::grit_server_auth::ServerAuthError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::remote::grit_server_auth::ServerAuthError
+impl core::marker::Send for grit_lib::remote::grit_server_auth::ServerAuthError
+impl core::marker::Sync for grit_lib::remote::grit_server_auth::ServerAuthError
+impl core::marker::Unpin for grit_lib::remote::grit_server_auth::ServerAuthError
+impl core::marker::UnsafeUnpin for grit_lib::remote::grit_server_auth::ServerAuthError
+impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::grit_server_auth::ServerAuthError
+impl !core::panic::unwind_safe::UnwindSafe for grit_lib::remote::grit_server_auth::ServerAuthError
+pub struct grit_lib::remote::grit_server_auth::ServerIdentity
+pub grit_lib::remote::grit_server_auth::ServerIdentity::admin: bool
+pub grit_lib::remote::grit_server_auth::ServerIdentity::name: alloc::string::String
+impl core::clone::Clone for grit_lib::remote::grit_server_auth::ServerIdentity
+pub fn grit_lib::remote::grit_server_auth::ServerIdentity::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::remote::grit_server_auth::ServerIdentity
+impl core::cmp::PartialEq for grit_lib::remote::grit_server_auth::ServerIdentity
+pub fn grit_lib::remote::grit_server_auth::ServerIdentity::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::remote::grit_server_auth::ServerIdentity
+pub fn grit_lib::remote::grit_server_auth::ServerIdentity::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::remote::grit_server_auth::ServerIdentity
+impl serde_core::ser::Serialize for grit_lib::remote::grit_server_auth::ServerIdentity
+pub fn grit_lib::remote::grit_server_auth::ServerIdentity::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for grit_lib::remote::grit_server_auth::ServerIdentity
+pub fn grit_lib::remote::grit_server_auth::ServerIdentity::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for grit_lib::remote::grit_server_auth::ServerIdentity
+impl core::marker::Send for grit_lib::remote::grit_server_auth::ServerIdentity
+impl core::marker::Sync for grit_lib::remote::grit_server_auth::ServerIdentity
+impl core::marker::Unpin for grit_lib::remote::grit_server_auth::ServerIdentity
+impl core::marker::UnsafeUnpin for grit_lib::remote::grit_server_auth::ServerIdentity
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::grit_server_auth::ServerIdentity
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::grit_server_auth::ServerIdentity
+pub struct grit_lib::remote::grit_server_auth::ServerUrl
+impl grit_lib::remote::grit_server_auth::ServerUrl
+pub fn grit_lib::remote::grit_server_auth::ServerUrl::credential(&self, core::option::Option<&str>, core::option::Option<&str>) -> grit_lib::remote::credentials::Credential
+pub fn grit_lib::remote::grit_server_auth::ServerUrl::host(&self) -> &str
+pub fn grit_lib::remote::grit_server_auth::ServerUrl::identity_url(&self) -> alloc::string::String
+pub fn grit_lib::remote::grit_server_auth::ServerUrl::parse(&str) -> core::result::Result<Self, grit_lib::remote::grit_server_auth::ServerAuthError>
+pub fn grit_lib::remote::grit_server_auth::ServerUrl::protocol(&self) -> &str
+pub fn grit_lib::remote::grit_server_auth::ServerUrl::root_url(&self) -> alloc::string::String
+impl core::clone::Clone for grit_lib::remote::grit_server_auth::ServerUrl
+pub fn grit_lib::remote::grit_server_auth::ServerUrl::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::remote::grit_server_auth::ServerUrl
+impl core::cmp::PartialEq for grit_lib::remote::grit_server_auth::ServerUrl
+pub fn grit_lib::remote::grit_server_auth::ServerUrl::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::remote::grit_server_auth::ServerUrl
+pub fn grit_lib::remote::grit_server_auth::ServerUrl::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::remote::grit_server_auth::ServerUrl
+impl core::marker::Freeze for grit_lib::remote::grit_server_auth::ServerUrl
+impl core::marker::Send for grit_lib::remote::grit_server_auth::ServerUrl
+impl core::marker::Sync for grit_lib::remote::grit_server_auth::ServerUrl
+impl core::marker::Unpin for grit_lib::remote::grit_server_auth::ServerUrl
+impl core::marker::UnsafeUnpin for grit_lib::remote::grit_server_auth::ServerUrl
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::grit_server_auth::ServerUrl
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::grit_server_auth::ServerUrl
+pub struct grit_lib::remote::grit_server_auth::TokenCredentialProvider
+impl grit_lib::remote::grit_server_auth::TokenCredentialProvider
+pub fn grit_lib::remote::grit_server_auth::TokenCredentialProvider::new(impl core::convert::Into<alloc::string::String>) -> Self
+impl core::clone::Clone for grit_lib::remote::grit_server_auth::TokenCredentialProvider
+pub fn grit_lib::remote::grit_server_auth::TokenCredentialProvider::clone(&self) -> Self
+impl core::fmt::Debug for grit_lib::remote::grit_server_auth::TokenCredentialProvider
+pub fn grit_lib::remote::grit_server_auth::TokenCredentialProvider::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl grit_lib::remote::credentials::CredentialProvider for grit_lib::remote::grit_server_auth::TokenCredentialProvider
+pub fn grit_lib::remote::grit_server_auth::TokenCredentialProvider::approve(&self, &grit_lib::remote::credentials::Credential) -> grit_lib::error::Result<()>
+pub fn grit_lib::remote::grit_server_auth::TokenCredentialProvider::fill(&self, &grit_lib::remote::credentials::Credential) -> grit_lib::error::Result<grit_lib::remote::credentials::Credential>
+pub fn grit_lib::remote::grit_server_auth::TokenCredentialProvider::reject(&self, &grit_lib::remote::credentials::Credential) -> grit_lib::error::Result<()>
+impl core::marker::Freeze for grit_lib::remote::grit_server_auth::TokenCredentialProvider
+impl core::marker::Send for grit_lib::remote::grit_server_auth::TokenCredentialProvider
+impl core::marker::Sync for grit_lib::remote::grit_server_auth::TokenCredentialProvider
+impl core::marker::Unpin for grit_lib::remote::grit_server_auth::TokenCredentialProvider
+impl core::marker::UnsafeUnpin for grit_lib::remote::grit_server_auth::TokenCredentialProvider
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::grit_server_auth::TokenCredentialProvider
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::grit_server_auth::TokenCredentialProvider
+pub const grit_lib::remote::grit_server_auth::IDENTITY_PATH: &str
+pub fn grit_lib::remote::grit_server_auth::fetch_identity(&dyn grit_lib::remote::transport::http::HttpClient, &grit_lib::remote::grit_server_auth::ServerUrl) -> core::result::Result<grit_lib::remote::grit_server_auth::ServerIdentity, grit_lib::remote::grit_server_auth::ServerAuthError>
 pub mod grit_lib::remote::http_client
 pub struct grit_lib::remote::http_client::UreqHttpClient
 impl grit_lib::remote::transport::http::ureq_client::UreqHttpClient

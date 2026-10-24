@@ -8,6 +8,13 @@
     },
     "host": {
       "type": "string"
+    },
+    "user": {
+      "description": "The user the token belongs to on a `grit serve` host (absent for GitHub).",
+      "type": [
+        "string",
+        "null"
+      ]
     }
   },
   "required": [

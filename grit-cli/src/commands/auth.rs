@@ -10,6 +10,13 @@
 //!
 //! There is no intermediate service: every request goes straight to github.com.
 //!
+//! ## `grit serve` hosts
+//!
+//! `grit auth <url>` signs in to a `grit serve` host instead. Its admin hands
+//! out tokens (`grit serve add-user`), so there is no browser step: the token is
+//! checked against the server and stored for the URL's scheme and host with the
+//! same credential helper (see [`grit_lib::remote::grit_server_auth`]).
+//!
 //! ## Client id
 //!
 //! The flow needs the client id of a registered GitHub OAuth App. It is read,
@@ -21,10 +28,14 @@ use std::io::{IsTerminal, Write};
 
 use anyhow::{anyhow, bail, Context, Result};
 use grit_lib::config::ConfigSet;
+use grit_lib::remote::credentials::Credential;
 use grit_lib::remote::credentials::{CredentialProvider, HelperCredentialProvider};
 use grit_lib::remote::github_auth::{
     github_token_credential, is_github_https_url, DeviceFlow, DeviceFlowError, DeviceFlowStep,
     SystemPollClock, GITHUB_HOST,
+};
+use grit_lib::remote::grit_server_auth::{
+    fetch_identity, ServerAuthError, ServerUrl, TokenCredentialProvider,
 };
 use grit_lib::remote::http_client::UreqHttpClient;
 use grit_lib::repo::Repository;
@@ -43,15 +54,22 @@ fn is_false(value: &bool) -> bool {
 pub struct AuthOutcome {
     pub authenticated: bool,
     pub host: String,
+    /// The user the token belongs to on a `grit serve` host (absent for GitHub).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub user: Option<String>,
 }
 
 impl HumanRender for AuthOutcome {
     fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        outln!(
-            w,
-            "\n✓ Signed in to GitHub — token stored for {}.",
-            self.host
-        );
+        match &self.user {
+            Some(user) => outln!(w, "✓ Signed in to {} as {user} — token stored.", self.host),
+            None => outln!(
+                w,
+                "\n✓ Signed in to GitHub — token stored for {}.",
+                self.host
+            ),
+        }
         Ok(())
     }
 }
@@ -106,9 +124,14 @@ impl HumanRender for LogoutOutcome {
             return Ok(());
         }
         if self.logged_out {
+            let service = if self.host == GITHUB_HOST {
+                "GitHub"
+            } else {
+                &self.host
+            };
             outln!(
                 w,
-                "✓ Signed out of GitHub — removed the stored token for {}.",
+                "✓ Signed out of {service} — removed the stored token for {}.",
                 self.host
             );
         } else {
@@ -143,7 +166,7 @@ pub fn run() -> Result<AuthOutcome> {
     // Make sure there's somewhere to put the token before we send the user off
     // to authorize — otherwise they'd do the dance and we'd silently drop it.
     // On Windows we can set one up automatically; elsewhere we explain how.
-    if !has_token_helper(&config) {
+    if !has_token_helper(&config, &github_token_credential(None)) {
         config = ensure_credential_helper()?;
     }
 
@@ -170,22 +193,81 @@ pub fn run() -> Result<AuthOutcome> {
     Ok(AuthOutcome {
         authenticated: true,
         host: GITHUB_HOST.to_owned(),
+        user: None,
+    })
+}
+
+/// The `grit serve` host `url` names, or `None` when it is GitHub (which signs
+/// in with the device flow instead).
+///
+/// # Errors
+///
+/// Fails when `url` is not an `http`/`https` URL with a host.
+pub fn grit_server(url: &str) -> Result<Option<ServerUrl>> {
+    let server = ServerUrl::parse(url).map_err(|e| anyhow!("{e}"))?;
+    let host = server.host().split(':').next().unwrap_or_default();
+    let is_github =
+        host.eq_ignore_ascii_case(GITHUB_HOST) || host.eq_ignore_ascii_case("www.github.com");
+    Ok((!is_github).then_some(server))
+}
+
+/// Run `grit auth <url>` for a `grit serve` host: check `token` against the
+/// server, then store it with the credential helper under the server's scheme
+/// and host, with the server's user name.
+///
+/// # Errors
+///
+/// Fails when no credential helper is configured, the server rejects the token
+/// or cannot be reached, or the helper cannot store it.
+pub fn run_server(server: &ServerUrl, token: &str) -> Result<AuthOutcome> {
+    let mut config = load_config();
+    let lookup = server.credential(None, None);
+    if !has_token_helper(&config, &lookup) {
+        config = ensure_credential_helper()?;
+    }
+
+    let http = UreqHttpClient::from_config(&config)
+        .context("could not set up HTTP client")?
+        .with_credential_provider(Box::new(TokenCredentialProvider::new(token)));
+    let identity = fetch_identity(&http, server).map_err(|e| match e {
+        ServerAuthError::TokenRejected => anyhow!(
+            "{} rejected the token. Ask the server's admin for one (`grit serve add-user`).",
+            server.root_url()
+        ),
+        ServerAuthError::Http(source) => {
+            anyhow::Error::new(source).context(format!("signing in to {}", server.root_url()))
+        }
+        other => anyhow::Error::new(other),
+    })?;
+
+    HelperCredentialProvider::new(config)
+        .approve(&server.credential(Some(&identity.name), Some(token)))
+        .context("storing the token with your credential helper")?;
+
+    Ok(AuthOutcome {
+        authenticated: true,
+        host: server.host().to_owned(),
+        user: Some(identity.name),
     })
 }
 
 /// Run `grit auth logout`: erase the token `grit auth` stored, via the configured
-/// `credential.helper` (`erase`). This removes the same credential `grit auth`
-/// writes — `https://x-access-token@github.com` — so a later push/fetch no longer
-/// authenticates with it.
-pub fn logout(dry_run: bool) -> Result<LogoutOutcome> {
+/// `credential.helper` (`erase`). Without `server` this removes the same
+/// credential `grit auth` writes — `https://x-access-token@github.com`; with a
+/// `grit serve` host it removes whatever is stored for that scheme and host. A
+/// later push/fetch then no longer authenticates with it.
+pub fn logout(server: Option<&ServerUrl>, dry_run: bool) -> Result<LogoutOutcome> {
     let config = load_config();
-    let lookup = github_token_credential(None);
+    let (lookup, host) = match server {
+        Some(server) => (server.credential(None, None), server.host().to_owned()),
+        None => (github_token_credential(None), GITHUB_HOST.to_owned()),
+    };
 
     // Without a helper there's nothing that could be holding the token.
-    if !has_token_helper(&config) {
+    if !has_token_helper(&config, &lookup) {
         return Ok(LogoutOutcome {
             logged_out: false,
-            host: GITHUB_HOST.to_owned(),
+            host,
             dry_run,
             credential: None,
         });
@@ -198,12 +280,12 @@ pub fn logout(dry_run: bool) -> Result<LogoutOutcome> {
             .filter(|c| c.password.as_ref().is_some_and(|p| !p.is_empty()));
         let credential = filled.map(|c| LogoutCredentialPreview {
             protocol: c.protocol.unwrap_or_else(|| "https".to_owned()),
-            host: c.host.unwrap_or_else(|| GITHUB_HOST.to_owned()),
+            host: c.host.unwrap_or_else(|| host.clone()),
             username: c.username,
         });
         return Ok(LogoutOutcome {
             logged_out: credential.is_some(),
-            host: GITHUB_HOST.to_owned(),
+            host,
             dry_run: true,
             credential,
         });
@@ -215,10 +297,38 @@ pub fn logout(dry_run: bool) -> Result<LogoutOutcome> {
 
     Ok(LogoutOutcome {
         logged_out: true,
-        host: GITHUB_HOST.to_owned(),
+        host,
         dry_run: false,
         credential: None,
     })
+}
+
+/// The token for `grit auth <url>`: `--token` when given, otherwise a hidden
+/// prompt on a terminal, otherwise the first line of stdin.
+///
+/// # Errors
+///
+/// Fails when the token cannot be read or is empty.
+pub fn read_token(token: Option<String>) -> Result<String> {
+    let token = match token {
+        Some(token) => token,
+        None if std::io::stdin().is_terminal() => {
+            rpassword::prompt_password("Token (from `grit serve add-user`): ")
+                .context("reading the token")?
+        }
+        None => {
+            let mut line = String::new();
+            std::io::stdin()
+                .read_line(&mut line)
+                .context("reading the token from stdin")?;
+            line
+        }
+    };
+    let token = token.trim();
+    if token.is_empty() {
+        bail!("no token given");
+    }
+    Ok(token.to_owned())
 }
 
 /// Offer to re-authenticate after a push/fetch failed with an auth error.
@@ -311,10 +421,10 @@ fn client_id(config: &ConfigSet) -> Result<String> {
     )
 }
 
-/// Whether any `credential.helper` would receive the GitHub token credential.
-fn has_token_helper(config: &ConfigSet) -> bool {
+/// Whether any `credential.helper` would receive `credential`.
+fn has_token_helper(config: &ConfigSet, credential: &Credential) -> bool {
     !HelperCredentialProvider::new(config.clone())
-        .helpers_for(&github_token_credential(None))
+        .helpers_for(credential)
         .is_empty()
 }
 

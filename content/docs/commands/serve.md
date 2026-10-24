@@ -37,7 +37,7 @@ Every request needs an access token. Users, tokens and repository grants live in
 
 Each token is printed once, when it is created; the database keeps only a SHA-256 hash of it. A token starts with `grit_`.
 
-Git sends the token as the password of HTTP basic auth, so a credential helper or a URL works: `git clone http://alice:<token>@host:8080/project.git`. The user name in the URL is ignored. Other clients can send `Authorization: Bearer <token>`. In a browser, open the server's address and enter any user name with the token as the password.
+Git sends the token as the password of HTTP basic auth. The easiest way to use one is [`grit auth <url>`](../auth/): it checks the token with the server and saves it with your credential helper, so `grit` and `git` clone, fetch and push without asking. A URL works too: `git clone http://alice:<token>@host:8080/project.git` (the user name in the URL is ignored). Other clients can send `Authorization: Bearer <token>`. In a browser, open the server's address and enter any user name with the token as the password.
 
 A request without a valid token gets `401` and a prompt for credentials. A repository the user cannot read answers `404`, the same as one that does not exist, and a push from a user with read access answers `403`.
 
@@ -77,10 +77,12 @@ Serving 1 repository from /srv/git at http://127.0.0.1:8080/
   http://127.0.0.1:8080/demo.git
 ```
 
-Clone and push as the admin from another terminal:
+Sign in as the admin from another terminal, then clone and push:
 
 ```console
-$ git clone http://admin:grit_b3f1c87f0285256919e175ae157a5dee14ccc73f@127.0.0.1:8080/demo.git
+$ grit auth http://127.0.0.1:8080 --token grit_b3f1c87f0285256919e175ae157a5dee14ccc73f
+✓ Signed in to 127.0.0.1:8080 as admin — token stored.
+$ grit clone http://127.0.0.1:8080/demo.git
 ```
 
 Add a user who can only fetch `demo`:

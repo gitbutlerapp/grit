@@ -28,6 +28,8 @@ fn sample_ctx() -> RenderContext {
 struct AuthRenderSnapshot {
     sign_in: AuthModesSnapshot,
     logout: AuthModesSnapshot,
+    server_sign_in: AuthModesSnapshot,
+    server_logout: AuthModesSnapshot,
 }
 
 #[derive(Serialize)]
@@ -71,6 +73,7 @@ fn auth_render() {
     let sign_in = AuthOutcome {
         authenticated: true,
         host: "github.com".to_owned(),
+        user: None,
     };
     let logout = LogoutOutcome {
         logged_out: true,
@@ -78,9 +81,22 @@ fn auth_render() {
         dry_run: false,
         credential: None,
     };
+    let server_sign_in = AuthOutcome {
+        authenticated: true,
+        host: "git.example.com:8080".to_owned(),
+        user: Some("bob".to_owned()),
+    };
+    let server_logout = LogoutOutcome {
+        logged_out: true,
+        host: "git.example.com:8080".to_owned(),
+        dry_run: false,
+        credential: None,
+    };
     let payload = AuthRenderSnapshot {
         sign_in: capture_outcome(&sign_in, &ctx),
         logout: capture_outcome(&logout, &ctx),
+        server_sign_in: capture_outcome(&server_sign_in, &ctx),
+        server_logout: capture_outcome(&server_logout, &ctx),
     };
     let mut settings = insta::Settings::clone_current();
     settings.set_snapshot_path(snapshot_dir());
