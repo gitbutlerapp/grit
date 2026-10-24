@@ -552,7 +552,9 @@ pub struct RevListOptions {
     /// that match Git's bitmap object formatting.
     pub bitmap_oid_only_objects: bool,
     /// Reorder path-limited results for graph-friendly parent ordering (Git `log` / `rev-list`).
-    /// Internal dense passes for `--sparse` set this to `false` to avoid recursion.
+    /// Defaults to `false` so plain [`rev_list`] walks can use bounded `-n` early-stop; set
+    /// `true` for `--topo-order` / `--graph` style output. Internal dense passes for `--sparse`
+    /// also set this to `false` to avoid recursion.
     pub path_graph_reorder: bool,
     /// Exclude commits with committer date strictly after this Unix timestamp (`--until` / `--before`).
     pub until_cutoff: Option<i64>,
@@ -566,6 +568,7 @@ pub struct RevListOptions {
     pub exclude_indexed_objects: bool,
     /// When true, read parent links and committer dates from the on-disk commit-graph
     /// when a commit is present in the file (Git commit-graph walk acceleration).
+    /// Defaults to `true`; [`rev_list`] disables this when `core.commitGraph` is off.
     pub use_commit_graph: bool,
     /// When true with pathspecs, consult commit-graph Bloom filters (matches `core.commitGraph`).
     pub use_commit_graph_bloom: bool,
@@ -589,6 +592,25 @@ pub struct RevListOptions {
 }
 
 impl RevListOptions {
+    /// Align walk flags with [`crate::revwalk::RevWalkListOptions`] / `grit revs`.
+    ///
+    /// Honors `core.commitGraph` when commit-graph acceleration is enabled, and turns on
+    /// Bloom filters for path-limited walks when the chain supports them. [`rev_list`] calls
+    /// this automatically; with [`RevListOptions::default`], `-n` / `--count` use the same
+    /// early-stop and commit-graph paths as the CLI.
+    pub fn normalize_for_walk(&mut self, repo: &Repository, cfg: &ConfigSet) {
+        if self.use_commit_graph {
+            self.use_commit_graph = repo_commit_graph_enabled(repo, cfg);
+        }
+        if self.use_commit_graph
+            && !self.paths.is_empty()
+            && !self.use_commit_graph_bloom
+            && crate::pathspec::pathspecs_allow_bloom(&self.paths)
+        {
+            self.use_commit_graph_bloom = true;
+        }
+    }
+
     /// Whether path-limited walks should keep TREESAME merges for parent rewriting.
     ///
     /// Matches Git when `--parents` is set or the output format includes `%P` / `%p`.
@@ -661,13 +683,13 @@ impl Default for RevListOptions {
             use_bitmap_index: false,
             unpacked_only: false,
             bitmap_oid_only_objects: false,
-            path_graph_reorder: true,
+            path_graph_reorder: false,
             until_cutoff: None,
             since_cutoff: None,
             include_reflog_entries: false,
             include_indexed_objects: false,
             exclude_indexed_objects: false,
-            use_commit_graph: false,
+            use_commit_graph: true,
             use_commit_graph_bloom: false,
             commit_graph_read_changed_paths: true,
             commit_graph_changed_paths_version: -1,
@@ -907,6 +929,9 @@ pub fn rev_list(
     let repo_config = repo
         .config()
         .unwrap_or_else(|_| std::sync::Arc::new(ConfigSet::new()));
+    let mut walk_options = options.clone();
+    walk_options.normalize_for_walk(repo, repo_config.as_ref());
+    let options = &walk_options;
 
     let (mut include, mut object_roots, tip_annotated_tag_by_commit) = if options.objects {
         resolve_specs_for_objects_with_options(
@@ -1117,13 +1142,7 @@ pub fn rev_list(
     // commits like the latest layer's empty filters.
     let (bloom_chain, bloom_read_changed, bloom_version, bloom_cwd) = if !options.paths.is_empty() {
         let cfg = repo_config.as_ref();
-        let mut core_cg = match cfg.get_bool("core.commitgraph") {
-            Some(Ok(b)) => b,
-            _ => true,
-        };
-        if repo.environment().var("GIT_TEST_COMMIT_GRAPH").as_deref() == Some("0") {
-            core_cg = false;
-        }
+        let core_cg = repo_commit_graph_enabled(repo, cfg);
         let read_paths = cfg
             .get("commitgraph.readchangedpaths")
             .and_then(|v| crate::config::parse_bool(&v).ok())
@@ -6878,18 +6897,23 @@ fn can_use_bounded_path_limit_list(options: &RevListOptions) -> bool {
         })
 }
 
-fn dense_bloom_context_for_paths(
-    repo: &Repository,
-    repo_config: &ConfigSet,
-    options: &RevListOptions,
-) -> (Option<Arc<CommitGraphChain>>, bool, i32, Option<String>) {
-    let mut core_cg = match repo_config.get_bool("core.commitgraph") {
+fn repo_commit_graph_enabled(repo: &Repository, cfg: &ConfigSet) -> bool {
+    let mut core_cg = match cfg.get_bool("core.commitgraph") {
         Some(Ok(b)) => b,
         _ => true,
     };
     if repo.environment().var("GIT_TEST_COMMIT_GRAPH").as_deref() == Some("0") {
         core_cg = false;
     }
+    core_cg
+}
+
+fn dense_bloom_context_for_paths(
+    repo: &Repository,
+    repo_config: &ConfigSet,
+    options: &RevListOptions,
+) -> (Option<Arc<CommitGraphChain>>, bool, i32, Option<String>) {
+    let core_cg = repo_commit_graph_enabled(repo, repo_config);
     let read_paths = repo_config
         .get("commitgraph.readchangedpaths")
         .and_then(|v| crate::config::parse_bool(&v).ok())

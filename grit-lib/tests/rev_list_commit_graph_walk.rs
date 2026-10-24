@@ -88,11 +88,14 @@ fn rev_list_commit_graph_walk_matches_object_walk() {
 
     let opts_base = RevListOptions {
         count: true,
+        use_commit_graph: false,
         ..Default::default()
     };
     let without = rev_list(&repo, &["HEAD".to_owned()], &[], &opts_base).expect("walk");
-    let mut with_graph = opts_base.clone();
-    with_graph.use_commit_graph = true;
+    let with_graph = RevListOptions {
+        count: true,
+        ..Default::default()
+    };
     let with = rev_list(&repo, &["HEAD".to_owned()], &[], &with_graph).expect("graph walk");
     assert_eq!(without.commits.len(), 80);
     assert_eq!(without.commit_count(), with.commit_count());

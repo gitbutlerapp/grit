@@ -28,7 +28,7 @@ Common helpers that do not need a full repository walk:
 | `pickaxe` | Optional [`Pickaxe`](rustdoc:grit_lib::diff::pickaxe::Pickaxe) (`-S` / `-G` tree-diff filters). |
 | `retain_commit_data` | Keep the commits the walk parses in [`RevListResult::commit_data`](rustdoc:grit_lib::revwalk::rev_list::RevListResult), so code that prints the listed commits does not read them again. |
 
-With the default order, `max_count` and no negative specs, the walk stops as soon as it has enough commits, however large the limit, and lists them in exactly `git rev-list` order (newest committer date first, ties in discovery order).
+With [`RevListOptions::default`](rustdoc:grit_lib::revwalk::rev_list::RevListOptions) and default date order, `max_count` and no negative specs, the walk stops as soon as it has enough commits, however large the limit, and lists them in exactly `git rev-list` order (newest committer date first, ties in discovery order). The default enables the on-disk commit-graph for parent/date lookup when `core.commitGraph` allows it, matching `git rev-list` speed on large histories; set `use_commit_graph: false` to parse every commit object.
 
 To print the listed commits, set `retain_commit_data` and hand `commit_data` to [`load_commits_with_decorations_reusing`](rustdoc:grit_lib::porcelain::log::load_commits_with_decorations_reusing). It moves out the commits the walk parsed and reads only the rest, such as commits whose parents came from a commit-graph.
 

@@ -23156,6 +23156,7 @@ pub grit_lib::revwalk::rev_list::RevListOptions::use_bitmap_index: bool
 pub grit_lib::revwalk::rev_list::RevListOptions::use_commit_graph: bool
 pub grit_lib::revwalk::rev_list::RevListOptions::use_commit_graph_bloom: bool
 impl grit_lib::revwalk::rev_list::RevListOptions
+pub fn grit_lib::revwalk::rev_list::RevListOptions::normalize_for_walk(&mut self, repo: &grit_lib::repo::Repository, cfg: &grit_lib::config::ConfigSet)
 pub fn grit_lib::revwalk::rev_list::RevListOptions::wants_parent_rewrite(&self) -> bool
 impl core::clone::Clone for grit_lib::revwalk::rev_list::RevListOptions
 pub fn grit_lib::revwalk::rev_list::RevListOptions::clone(&self) -> Self

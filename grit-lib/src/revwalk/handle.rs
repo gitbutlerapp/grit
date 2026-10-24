@@ -75,6 +75,9 @@ impl<'repo> RevWalk<'repo> {
 
     /// Walk commits matching `spec` (supports `A..B`, `^tip`, and plain tips).
     ///
+    /// Uses the same [`RevListOptions`] defaults as [`rev_list`]: commit-graph acceleration
+    /// and bounded `-n` early-stop apply with [`RevListOptions::default`].
+    ///
     /// # Errors
     ///
     /// Propagates rev-parse and rev-list errors.

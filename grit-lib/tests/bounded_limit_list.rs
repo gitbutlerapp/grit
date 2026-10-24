@@ -255,6 +255,33 @@ fn write_tied_skewed_history(odb: &Odb, commits: usize) -> grit_lib::objects::Ob
 }
 
 #[test]
+fn default_rev_list_options_max_count_matches_git_on_large_history() {
+    let dir = tempdir().expect("tempdir");
+    let repo = open_bare(dir.path()).expect("repo");
+    let tip = write_tied_skewed_history(repo.odb(), 4_300);
+    let tip_hex = tip.to_hex();
+    let opts = RevListOptions {
+        max_count: Some(10),
+        ..Default::default()
+    };
+    let expected = support::git_rev_list(dir.path(), &["-n", "10", &tip_hex]);
+    let actual = rev_list(&repo, std::slice::from_ref(&tip_hex), &[], &opts)
+        .expect("rev-list")
+        .commits;
+    assert_eq!(
+        actual, expected,
+        "plain Default options should use bounded -n"
+    );
+
+    let walked = repo
+        .rev_walk()
+        .walk(&tip_hex, &opts)
+        .expect("RevWalk::walk")
+        .commits;
+    assert_eq!(walked, expected, "RevWalk::walk should match rev_list");
+}
+
+#[test]
 fn large_max_count_matches_git_order_with_tied_and_skewed_dates() {
     let dir = tempdir().expect("tempdir");
     let repo = open_bare(dir.path()).expect("repo");
