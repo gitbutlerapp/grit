@@ -48,6 +48,10 @@ name = "guide_network"
 path = "src/bin/guide_network.rs"
 
 [[bin]]
+name = "guide_serve"
+path = "src/bin/guide_serve.rs"
+
+[[bin]]
 name = "guide_refs"
 path = "src/bin/guide_refs.rs"
 

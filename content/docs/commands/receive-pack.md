@@ -26,10 +26,13 @@ Every ref update is checked before it's applied, and the client is told which up
 | `receive.denyCurrentBranch` | Refuse to update the branch checked out in a non-bare repository. On by default; set it to `ignore` or `warn` to allow it. |
 | `receive.hideRefs`, `transfer.hideRefs` | Hide refs from pushing clients and refuse updates to them. |
 | `receive.maxInputSize` | Refuse pushes whose pack is larger than this many bytes. Unlimited by default. |
+| `receive.unpackLimit`, `transfer.unpackLimit` | Store pushes with fewer objects than this as loose objects; keep larger ones as a pack with an index. 100 by default. |
+
+The pushed pack is streamed to a temp file in a quarantine directory inside the repository's object store, so memory use stays flat however large the push is. Its objects become visible in the repository only after the `pre-receive` hook accepts the push.
 
 There is no other limit on push size. `grit-http-server` streams a push body straight into receive-pack instead of buffering it, so a push of any size works over smart HTTP, as with `git http-backend`. Fetch requests, which are small, are capped at 32 MiB (after gzip decoding). Git doesn't gzip push bodies, but if another client does, the decoded body may reach 32 MiB and beyond that at most 32 times the compressed bytes received; a body that expands further is refused with `413`, and one that isn't valid gzip with `400`.
 
-Pushes that ask for an atomic update are applied all or nothing. Server-side hooks are not supported yet.
+Pushes that ask for an atomic update are applied all or nothing. The served repository's `pre-receive`, `update`, `post-receive` and `post-update` hooks run as they do under Git: from the repository directory with `GIT_DIR=.`, with the quarantine variables during `pre-receive`, and with push options in `GIT_PUSH_OPTION_*`.
 
 ## Options
 

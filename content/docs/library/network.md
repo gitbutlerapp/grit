@@ -70,6 +70,26 @@ The `grit-examples` crate also ships `gritx-fetch` and `gritx-push`, which dispa
 
 Integration test `guide_network` builds bare and consumer repos with system Git, runs the binary, then requires clean `git fsck --strict` on both sides and matching `git rev-parse` on the pushed ref.
 
+## Serving fetches and pushes
+
+The server side of the protocol lives in [`remote::serve`](rustdoc:grit_lib::remote::serve). [`upload_pack`](rustdoc:grit_lib::remote::serve::upload_pack) answers clones and fetches (protocol v0, v1 and v2) and [`receive_pack`](rustdoc:grit_lib::remote::serve::receive_pack) accepts pushes. Both take an opened `Repository`, a reader and a writer, and [`ServeOptions`](rustdoc:grit_lib::remote::serve::ServeOptions), so the same code serves a pipe or ssh channel (the defaults) and smart HTTP (`advertise_refs` for `GET info/refs`, `stateless_rpc` for the POST). The library never reads the environment: map `GIT_PROTOCOL` with [`ProtocolVersion::from_git_protocol`](rustdoc:grit_lib::remote::serve::ProtocolVersion::from_git_protocol) at your process boundary. Open the repository with `RepositoryOptions::for_serving()`.
+
+A pushed pack is streamed into a temp file in a quarantine object directory, so memory use does not grow with the pack size, and only bytes up to the pack's trailing checksum are read (a push client keeps its side open until it has the status report). Packs with fewer objects than `receive.unpackLimit` are stored as loose objects; larger ones are indexed and kept as a pack. `receive.maxInputSize` caps the pack size.
+
+What a push may change is decided in three layers, in this order for each push:
+
+1. [`ReceivePolicy`](rustdoc:grit_lib::remote::serve::ReceivePolicy), usually [`ReceivePolicy::from_config`](rustdoc:grit_lib::remote::serve::ReceivePolicy::from_config) (`receive.denyNonFastForwards`, `receive.denyDeletes`, `receive.denyCurrentBranch`), plus the checks every server makes: valid ref names, hidden refs, the expected old value, and that the new objects exist.
+2. An in-process [`ReceiveHook`](rustdoc:grit_lib::remote::serve::ReceiveHook) passed to [`receive_pack_with_hook`](rustdoc:grit_lib::remote::serve::receive_pack_with_hook). Its `pre_receive` method sees every accepted update and an object database that includes the still-quarantined pushed objects; refusing there refuses the whole push and nothing is moved into the repository. Its `update` method checks one ref at a time after the objects are moved in. A closure `Fn(&RefCommand, &Odb) -> Result<(), RefUpdateRefusal>` is a `ReceiveHook` that implements `update`.
+3. The repository's hook scripts (`pre-receive`, `update`, `post-receive`, `post-update`), run through the repository's `CommandRunner` with Git's environment (`GIT_DIR=.`, the quarantine variables and `GIT_PUSH_OPTION_*`). Each in-process check runs just before the matching script.
+
+The [`ReceiveOutcome`](rustdoc:grit_lib::remote::serve::ReceiveOutcome) is typed: each [`RefUpdateResult`](rustdoc:grit_lib::remote::serve::RefUpdateResult) carries an `Option<RefUpdateRefusal>` ([`RefUpdateRefusal`](rustdoc:grit_lib::remote::serve::RefUpdateRefusal): `NonFastForward`, `StaleInfo`, `DeletionProhibited`, `PreReceiveHookDeclined`, `Policy(reason)` from your hook, ...), and `unpack_error` is an [`UnpackError`](rustdoc:grit_lib::remote::serve::UnpackError) (`Truncated`, `TooLarge`, `Malformed`, `Ingest`, `Io`). Match on the variants; their `Display` text is what the client is sent on its `ng <ref> <reason>` and `unpack <reason>` status lines. Neither is an `Err`: `receive_pack` returns [`ServeError`](rustdoc:grit_lib::remote::serve::ServeError) only when the session itself fails (a malformed command list, a broken stream, or a repository error while applying the push).
+
+This server serves fetches, and refuses pushes to `refs/heads/protected/*` with a closure. Git runs it as `git push --receive-pack='guide_serve receive-pack' <path>` (and `--upload-pack='guide_serve upload-pack'` for clone and fetch):
+
+<!-- include: grit-examples/src/bin/guide_serve.rs -->
+
+Integration test `guide_serve` clones through it over protocol v0 and v2, pushes a commit, checks `git fsck --strict` on the server, and checks that a push to a protected branch is reported as `[remote rejected] (protected branch)`. The `grit upload-pack` / `grit receive-pack` commands and `grit-http-server` are built on the same functions.
+
 ## Partial clone and promisor fetch
 
 Filtered fetch and clone record a promisor remote (`remote.<name>.promisor`, `extensions.partialclone`, and `remote.<name>.partialclonefilter`). Blobs omitted from the initial pack are **promised**: they appear in the object database as missing until fetched on demand.
