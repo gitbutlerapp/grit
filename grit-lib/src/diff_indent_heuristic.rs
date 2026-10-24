@@ -572,51 +572,51 @@ fn ops_from_masks(old_lines: &[&str], new_lines: &[&str], c1: &[bool], c2: &[boo
                 });
             }
         } else {
-            // equal line
-            i1 -= 1;
-            i2 -= 1;
+            let l1 = i1;
+            while i1 > 0 && i2 > 0 && !changed1(i1 - 1) && !changed2(i2 - 1) {
+                i1 -= 1;
+                i2 -= 1;
+            }
+            // Unchanged lines left on only one side mean the masks disagree on line counts.
+            debug_assert!(i1 < l1, "inconsistent change masks");
+            if i1 == l1 {
+                break;
+            }
             out_rev.push(DiffOp::Equal {
                 old_index: i1 as usize,
                 new_index: i2 as usize,
-                len: 1,
+                len: (l1 - i1) as usize,
             });
         }
     }
 
     out_rev.reverse();
-    merge_adjacent_equal_ops(out_rev)
+    out_rev
 }
 
-fn merge_adjacent_equal_ops(ops: Vec<DiffOp>) -> Vec<DiffOp> {
-    if ops.is_empty() {
-        return ops;
-    }
-    let mut merged: Vec<DiffOp> = Vec::with_capacity(ops.len());
-    for op in ops {
-        if let (
-            Some(DiffOp::Equal {
-                old_index: o0,
-                new_index: n0,
-                len: l0,
-            }),
-            DiffOp::Equal {
-                old_index: o1,
-                new_index: n1,
-                len: l1,
-            },
-        ) = (merged.last(), op)
-        {
-            if o0 + l0 == o1 && n0 + l0 == n1 {
-                let last = merged.len() - 1;
-                if let DiffOp::Equal { len, .. } = &mut merged[last] {
-                    *len += l1;
-                }
-                continue;
-            }
-        }
-        merged.push(op);
-    }
-    merged
+/// Compact Git xdiff `changed` masks (one flag per line on each side) and return the ops.
+///
+/// Same result as converting the masks to ops and calling [`apply_change_compact_to_ops`], without
+/// the round trip.
+pub(crate) fn apply_change_compact_to_masks(
+    mut changed_old: Vec<bool>,
+    mut changed_new: Vec<bool>,
+    old_lines: &[&str],
+    new_lines: &[&str],
+    indent_heuristic: bool,
+) -> Vec<DiffOp> {
+    changed_old.resize(old_lines.len(), false);
+    changed_new.resize(new_lines.len(), false);
+    change_compact_both_passes(
+        old_lines,
+        new_lines,
+        &mut changed_old,
+        &mut changed_new,
+        indent_heuristic,
+        WhitespaceMode::default(),
+        false,
+    );
+    ops_from_masks(old_lines, new_lines, &changed_old, &changed_new)
 }
 
 /// Apply Git `xdl_change_compact` twice (old/new), optionally with `XDF_INDENT_HEURISTIC`.

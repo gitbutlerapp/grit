@@ -1,29 +1,65 @@
 //! Fast line interning for xdiff-style Myers pipelines.
 
 use std::borrow::Cow;
+use std::hash::BuildHasher;
 
-use hashbrown::HashMap;
+use hashbrown::hash_table::Entry;
+use hashbrown::{DefaultHashBuilder, HashTable};
 
 /// Intern line text to dense `u32` ids (equal id iff equal line bytes).
 ///
-/// Ids are assigned in first-seen order starting at zero, so `0..len()` covers every id handed
-/// out. Borrowed lines are stored without copying; only normalized keys are owned.
+/// Ids are assigned in first-seen order starting at zero, so `0..n` covers every id handed out.
+/// Borrowed lines are stored without copying; only normalized keys are owned. The hash table
+/// holds 4-byte ids and resolves them through `lines`, which keeps it small enough to stay in
+/// cache for files with hundreds of thousands of lines.
 #[derive(Default)]
 pub struct LineInterner<'a> {
-    ids: HashMap<Cow<'a, str>, u32>,
+    lines: Vec<Cow<'a, str>>,
+    table: HashTable<u32>,
+    hasher: DefaultHashBuilder,
 }
 
 impl<'a> LineInterner<'a> {
+    /// Interner with room for `lines` distinct lines before it has to grow.
+    ///
+    /// Pass the total line count of every side that will be interned: growing the table between
+    /// sides rehashes every line seen so far.
+    #[must_use]
+    pub fn with_capacity(lines: usize) -> Self {
+        Self {
+            lines: Vec::with_capacity(lines),
+            table: HashTable::with_capacity(lines),
+            hasher: DefaultHashBuilder::default(),
+        }
+    }
+
     /// Return the id for `line`, inserting when unseen.
     #[must_use]
     pub fn intern(&mut self, line: Cow<'a, str>) -> u32 {
-        let next = u32::try_from(self.ids.len()).unwrap_or(u32::MAX);
-        *self.ids.entry(line).or_insert(next)
+        let Self {
+            lines,
+            table,
+            hasher,
+        } = self;
+        let hash = hasher.hash_one(line.as_ref());
+        let entry = table.entry(
+            hash,
+            |&id| lines[id as usize] == line,
+            |&id| hasher.hash_one(lines[id as usize].as_ref()),
+        );
+        match entry {
+            Entry::Occupied(found) => *found.get(),
+            Entry::Vacant(slot) => {
+                let id = u32::try_from(lines.len()).unwrap_or(u32::MAX);
+                lines.push(line);
+                slot.insert(id);
+                id
+            }
+        }
     }
 
     /// Intern every line in `lines`.
     pub fn intern_all(&mut self, lines: &[&'a str]) -> Vec<u32> {
-        self.ids.reserve(lines.len());
         lines
             .iter()
             .map(|line| self.intern(Cow::Borrowed(*line)))
@@ -36,7 +72,6 @@ impl<'a> LineInterner<'a> {
         lines: &[&'a str],
         normalize: impl Fn(&'a str) -> Cow<'a, str>,
     ) -> Vec<u32> {
-        self.ids.reserve(lines.len());
         lines
             .iter()
             .map(|line| self.intern(normalize(line)))
@@ -58,14 +93,16 @@ mod tests {
             let id = interner.intern(Cow::Borrowed(line.as_str()));
             assert_eq!(id as usize, i);
         }
-        assert_eq!(interner.intern(Cow::Borrowed(lines[0].as_str())), 0);
+        for (i, line) in lines.iter().enumerate() {
+            assert_eq!(interner.intern(Cow::Borrowed(line.as_str())) as usize, i);
+        }
     }
 
     #[test]
     fn equal_lines_share_ids_across_sides() {
         let old = ["a\n", "b\n", "a\n"];
         let new = ["b\n", "c\n", "a"];
-        let mut interner = LineInterner::default();
+        let mut interner = LineInterner::with_capacity(old.len() + new.len());
         let ids1 = interner.intern_all(&old);
         let ids2 = interner.intern_all(&new);
         assert_eq!(ids1, vec![0, 1, 0]);

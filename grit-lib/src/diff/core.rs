@@ -101,8 +101,8 @@ pub(crate) fn histogram_compacted_line_ops(
 ) -> Vec<similar::DiffOp> {
     let before = LineSide::from_text(old_content);
     let after = LineSide::from_text(new_content);
-    let old_lines: Vec<&str> = before.lines.iter().map(|l| l.body.as_str()).collect();
-    let new_lines: Vec<&str> = after.lines.iter().map(|l| l.body.as_str()).collect();
+    let old_lines: Vec<&str> = before.lines.iter().map(|l| l.body).collect();
+    let new_lines: Vec<&str> = after.lines.iter().map(|l| l.body).collect();
     let old_len = old_lines.len();
     let new_len = new_lines.len();
     let old_compare_owned = line_compare_keys(old_content, &before, ws);
@@ -255,8 +255,8 @@ where
 {
     let before = LineSide::from_text(old_content);
     let after = LineSide::from_text(new_content);
-    let old_lines: Vec<&str> = before.lines.iter().map(|l| l.body.as_str()).collect();
-    let new_lines: Vec<&str> = after.lines.iter().map(|l| l.body.as_str()).collect();
+    let old_lines: Vec<&str> = before.lines.iter().map(|l| l.body).collect();
+    let new_lines: Vec<&str> = after.lines.iter().map(|l| l.body).collect();
     let ops = histogram_compacted_line_ops(old_content, new_content, indent_heuristic, ws);
     if ops.is_empty() {
         return String::new();
@@ -285,12 +285,17 @@ pub(crate) fn git_xdiff_compacted_line_ops(
 ) -> Vec<similar::DiffOp> {
     use crate::line_interner::LineInterner;
 
-    let mut interner = LineInterner::default();
+    let mut interner = LineInterner::with_capacity(old_compare.len() + new_compare.len());
     let ids1 = interner.intern_all(old_compare);
     let ids2 = interner.intern_all(new_compare);
     let (changed1, changed2) = git_xdiff::changed_flags(&ids1, &ids2, need_min);
-    let raw = changed_flags_to_ops(&changed1, &changed2, old_lines.len(), new_lines.len());
-    diff_indent_heuristic::apply_change_compact_to_ops(&raw, old_lines, new_lines, indent_heuristic)
+    diff_indent_heuristic::apply_change_compact_to_masks(
+        changed1,
+        changed2,
+        old_lines,
+        new_lines,
+        indent_heuristic,
+    )
 }
 
 fn diff_ops_to_edit_spans(ops: &[similar::DiffOp]) -> Vec<EditSpan> {
@@ -379,8 +384,8 @@ where
     if before.is_empty() && after.is_empty() {
         return String::new();
     }
-    let old_refs: Vec<&str> = before.lines.iter().map(|l| l.body.as_str()).collect();
-    let new_refs: Vec<&str> = after.lines.iter().map(|l| l.body.as_str()).collect();
+    let old_refs: Vec<&str> = before.lines.iter().map(|l| l.body).collect();
+    let new_refs: Vec<&str> = after.lines.iter().map(|l| l.body).collect();
     let old_compare_owned = line_compare_keys(old_content, &before, ws);
     let new_compare_owned = line_compare_keys(new_content, &after, ws);
     let old_compare: Vec<&str> = old_compare_owned.iter().map(Cow::as_ref).collect();
@@ -437,8 +442,8 @@ where
     if before.is_empty() && after.is_empty() {
         return String::new();
     }
-    let old_refs: Vec<&str> = before.lines.iter().map(|l| l.body.as_str()).collect();
-    let new_refs: Vec<&str> = after.lines.iter().map(|l| l.body.as_str()).collect();
+    let old_refs: Vec<&str> = before.lines.iter().map(|l| l.body).collect();
+    let new_refs: Vec<&str> = after.lines.iter().map(|l| l.body).collect();
     let old_compare_owned = line_compare_keys(old_content, &before, ws);
     let new_compare_owned = line_compare_keys(new_content, &after, ws);
     let old_compare: Vec<&str> = old_compare_owned.iter().map(Cow::as_ref).collect();
@@ -659,8 +664,8 @@ fn git_patience_unified_body_raw(
     if before.is_empty() && after.is_empty() {
         return String::new();
     }
-    let old_refs: Vec<&str> = before.lines.iter().map(|l| l.body.as_str()).collect();
-    let new_refs: Vec<&str> = after.lines.iter().map(|l| l.body.as_str()).collect();
+    let old_refs: Vec<&str> = before.lines.iter().map(|l| l.body).collect();
+    let new_refs: Vec<&str> = after.lines.iter().map(|l| l.body).collect();
     let old_compare_owned =
         line_compare_keys(old_content, &before, super::WhitespaceMode::default());
     let new_compare_owned =
@@ -2031,7 +2036,7 @@ mod git_xdiff {
         if old_slice.is_empty() && new_slice.is_empty() {
             return;
         }
-        let mut interner = LineInterner::default();
+        let mut interner = LineInterner::with_capacity(old_slice.len() + new_slice.len());
         let ids1 = interner.intern_all(old_slice);
         let ids2 = interner.intern_all(new_slice);
         let (sub1, sub2) = changed_flags(&ids1, &ids2, false);
@@ -2059,7 +2064,7 @@ pub(crate) fn myers_rediff_changed_masks_for_region(
     if old_lines.is_empty() && new_lines.is_empty() {
         return (Vec::new(), Vec::new());
     }
-    let mut interner = LineInterner::default();
+    let mut interner = LineInterner::with_capacity(old_lines.len() + new_lines.len());
     let (ids1, ids2) = if ws.normalizes_line_compare() {
         (
             interner.intern_all_normalized(old_lines, |line| ws.normalize_line_for_compare(line)),
@@ -2269,7 +2274,8 @@ pub(crate) fn xdiff_new_line_changed_flags(
     new_lines: &[&str],
     indent_heuristic: bool,
 ) -> Vec<bool> {
-    let mut interner = crate::line_interner::LineInterner::default();
+    let mut interner =
+        crate::line_interner::LineInterner::with_capacity(old_lines.len() + new_lines.len());
     let ids1 = interner.intern_all(old_lines);
     let ids2 = interner.intern_all(new_lines);
     let (changed1, changed2) = git_xdiff::changed_flags(&ids1, &ids2, false);

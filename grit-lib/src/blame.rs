@@ -184,7 +184,7 @@ fn blame_compacted_line_ops(
     let new_cmp: Vec<&str> = new_norm.iter().map(String::as_str).collect();
     if diff_algorithm == BlameDiffAlgorithm::Myers {
         use crate::line_interner::LineInterner;
-        let mut interner = LineInterner::default();
+        let mut interner = LineInterner::with_capacity(old_cmp.len() + new_cmp.len());
         let ids1 = interner.intern_all(&old_cmp);
         let ids2 = interner.intern_all(&new_cmp);
         return crate::diff::line_diff_ops_git_xdiff_compacted_ids(

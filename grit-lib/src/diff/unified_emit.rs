@@ -14,33 +14,28 @@ pub enum LineEnding {
     Missing,
 }
 
-/// One logical line of a side, without the line-separator bytes.
-#[derive(Clone, Debug)]
-pub struct SourceLine {
-    pub body: String,
+/// One logical line of a side, without the `\n` separator (a CRLF line keeps its `\r`).
+#[derive(Clone, Copy, Debug)]
+pub struct SourceLine<'a> {
+    pub body: &'a str,
     pub ending: LineEnding,
 }
 
-/// All logical lines of one file version.
+/// All logical lines of one file version, borrowed from its text.
 #[derive(Clone, Debug)]
-pub struct LineSide {
-    pub lines: Vec<SourceLine>,
+pub struct LineSide<'a> {
+    pub lines: Vec<SourceLine<'a>>,
 }
 
-impl LineSide {
+impl<'a> LineSide<'a> {
     /// Split `text` into lines, preserving `\r` in bodies and final incomplete lines.
     #[must_use]
-    pub fn from_text(text: &str) -> Self {
-        if text.is_empty() {
-            return Self { lines: Vec::new() };
-        }
-        let mut lines = Vec::new();
+    pub fn from_text(text: &'a str) -> Self {
+        let mut lines = Vec::with_capacity(memchr::memchr_iter(b'\n', text.as_bytes()).count() + 1);
         let mut start = 0usize;
-        for (i, b) in text.bytes().enumerate() {
-            if b == b'\n' {
-                lines.push(parse_line_segment(&text[start..i], true));
-                start = i + 1;
-            }
+        for i in memchr::memchr_iter(b'\n', text.as_bytes()) {
+            lines.push(parse_line_segment(&text[start..i], true));
+            start = i + 1;
         }
         if start < text.len() {
             lines.push(parse_line_segment(&text[start..], false));
@@ -58,7 +53,7 @@ impl LineSide {
         self.lines.is_empty()
     }
 
-    pub fn line(&self, index: usize) -> &SourceLine {
+    pub fn line(&self, index: usize) -> &SourceLine<'a> {
         &self.lines[index]
     }
 
@@ -82,33 +77,25 @@ impl LineSide {
 #[must_use]
 pub(crate) fn line_diff_token(line: &SourceLine) -> String {
     match line.ending {
-        LineEnding::Missing => line.body.clone(),
+        LineEnding::Missing => line.body.to_string(),
         LineEnding::Lf | LineEnding::CrLf => {
             let mut s = String::with_capacity(line.body.len() + 1);
-            s.push_str(&line.body);
+            s.push_str(line.body);
             s.push('\n');
             s
         }
     }
 }
 
-fn parse_line_segment(raw: &str, had_line_break: bool) -> SourceLine {
-    if had_line_break {
-        let ending = if raw.ends_with('\r') {
-            LineEnding::CrLf
-        } else {
-            LineEnding::Lf
-        };
-        SourceLine {
-            body: raw.to_string(),
-            ending,
-        }
+fn parse_line_segment(raw: &str, had_line_break: bool) -> SourceLine<'_> {
+    let ending = if !had_line_break {
+        LineEnding::Missing
+    } else if raw.ends_with('\r') {
+        LineEnding::CrLf
     } else {
-        SourceLine {
-            body: raw.to_string(),
-            ending: LineEnding::Missing,
-        }
-    }
+        LineEnding::Lf
+    };
+    SourceLine { body: raw, ending }
 }
 
 /// When line-based diff finds no edits but the raw texts differ, Git still emits
