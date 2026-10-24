@@ -136,9 +136,8 @@ fn rename_matches_git_twin_repo_reftable() {
     let bare = bare_upstream(tmp.path());
     let grit_root = git_init_reftable_repo("main");
     let grit_repo = grit_root.path().to_path_buf();
-    let git_repo = tmp.path().join("git");
-    std::fs::create_dir_all(&git_repo).unwrap();
-    init_repo(&git_repo);
+    let git_root = git_init_reftable_repo("main");
+    let git_repo = git_root.path().to_path_buf();
     git(
         &grit_repo,
         &["remote", "add", "origin", bare.to_str().unwrap()],
