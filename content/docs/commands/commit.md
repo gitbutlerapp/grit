@@ -247,6 +247,8 @@ $ grit commit -m "fix" --json -- f1.txt
 {"error":"cannot lock the index: '/work/repo/.git/index.lock' already exists. Another process may be writing the index, or a crashed process left the lock behind; remove it only if no other process is running.","kind":"index_locked"}
 ```
 
+Several `grit commit` processes can run in one checkout at once, for example parallel jobs each committing their own `-- paths`. The index lock serializes them: each one either records a commit with its own message and only its own paths, or fails with `index_locked` and changes nothing. The message always comes from `-m`, `-F` or the positional argument; `.git/COMMIT_EDITMSG` is read back only after a `commit-msg` hook ran, so one process never records another's message. A commit is built on the `HEAD` it read first: if another tool moves the branch before the commit lands, `grit commit` fails with `ref 'refs/heads/<branch>' did not match expected state` (exit `1`) instead of recording a commit that would undo the other change.
+
 
 ## See also
 
