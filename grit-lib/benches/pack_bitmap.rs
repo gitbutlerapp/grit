@@ -201,6 +201,7 @@ fn bench_pack_bitmap(c: &mut Criterion) {
                         have_shallow_grafts: None,
                         use_bitmaps: false,
                         exclude_objects: None,
+                        prefetch_walk_objects: true,
                     },
                 )
                 .expect("enumerate"),
@@ -221,6 +222,7 @@ fn bench_pack_bitmap(c: &mut Criterion) {
                         have_shallow_grafts: None,
                         use_bitmaps: true,
                         exclude_objects: None,
+                        prefetch_walk_objects: true,
                     },
                 )
                 .expect("enumerate"),

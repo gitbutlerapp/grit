@@ -44,6 +44,9 @@ pub struct PackEnumerateOptions<'a> {
     /// Precomputed peer object closure to subtract from `wants` during a walk
     /// (for example when haves live in a different ODB than `wants`).
     pub exclude_objects: Option<&'a HashSet<ObjectId>>,
+    /// When false, the object walk records oids only: blob bodies are not read and
+    /// [`PackObjectSelection::walk_prefetch`] stays empty (reuse-only repacks).
+    pub prefetch_walk_objects: bool,
 }
 
 /// Select pack objects using bitmap reachability when possible, otherwise the object walk.
@@ -194,6 +197,7 @@ fn walk_enumeration(
             &have_closure,
             false,
             opts.shallow_grafts,
+            opts.prefetch_walk_objects,
         )?
     };
     Ok(PackObjectSelection {
@@ -219,6 +223,7 @@ pub(crate) fn reachable_closure_walk(
         stop,
         skip_missing,
         shallow_grafts,
+        true,
     )?
     .0;
     for oid in order {
@@ -270,6 +275,7 @@ fn collect_reachable_excluding_with_name_hashes(
     exclude: &HashSet<ObjectId>,
     skip_missing: bool,
     shallow_grafts: &HashSet<ObjectId>,
+    prefetch_walk_objects: bool,
 ) -> Result<(
     Vec<ObjectId>,
     HashMap<ObjectId, u32>,
@@ -302,6 +308,16 @@ fn collect_reachable_excluding_with_name_hashes(
     }
 
     while let Some((oid, path)) = queue.pop_front() {
+        if !prefetch_walk_objects {
+            let info = match odb.read_info(&oid) {
+                Ok(i) => i,
+                Err(_) if skip_missing => continue,
+                Err(e) => return Err(e),
+            };
+            if info.kind == ObjectKind::Blob {
+                continue;
+            }
+        }
         let obj = match odb.read(&oid) {
             Ok(o) => o,
             Err(_) if skip_missing => continue,
@@ -377,8 +393,89 @@ fn collect_reachable_excluding_with_name_hashes(
             }
             ObjectKind::Blob => {}
         }
-        walk_prefetch.insert(oid, obj);
+        if prefetch_walk_objects {
+            walk_prefetch.insert(oid, obj);
+        }
     }
 
     Ok((ordered, blob_name_hashes, walk_prefetch))
+}
+
+#[cfg(test)]
+mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+
+    use super::*;
+    use crate::porcelain::add::stage_for_commit;
+    use crate::porcelain::commit::{create_commit, CommitRequest};
+    use crate::progress::NullProgress;
+    use crate::repo::{InitOptions, Repository};
+    use tempfile::TempDir;
+
+    #[test]
+    fn walk_prefetch_skipped_when_prefetch_disabled() {
+        let dir = TempDir::new().unwrap();
+        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        std::fs::write(repo.work_tree().unwrap().join("blob"), b"payload").unwrap();
+        stage_for_commit(&repo, &mut NullProgress).expect("stage");
+        let ident = "Test <t@example.com> 1 +0000".to_string();
+        let tip = create_commit(
+            &repo,
+            &CommitRequest {
+                message: "init".into(),
+                author: ident.clone(),
+                committer: ident,
+                allow_empty: false,
+                sign_override: None,
+                amend: false,
+                assume_worktree_synced: false,
+                skip_pre_commit_tree_match: false,
+                staged_change_count: None,
+                ..Default::default()
+            },
+            &mut NullProgress,
+        )
+        .expect("commit");
+        let empty = HashSet::new();
+        let with_prefetch = enumerate_pack_objects(
+            repo.odb(),
+            &[tip.oid],
+            &[],
+            &PackEnumerateOptions {
+                filter: None,
+                shallow_grafts: &empty,
+                have_shallow_grafts: Some(&empty),
+                use_bitmaps: false,
+                exclude_objects: None,
+                prefetch_walk_objects: true,
+            },
+        )
+        .expect("prefetch");
+        assert!(
+            !with_prefetch.walk_prefetch.is_empty(),
+            "default walk should prefetch object bodies"
+        );
+        let without_prefetch = enumerate_pack_objects(
+            repo.odb(),
+            &[tip.oid],
+            &[],
+            &PackEnumerateOptions {
+                filter: None,
+                shallow_grafts: &empty,
+                have_shallow_grafts: Some(&empty),
+                use_bitmaps: false,
+                exclude_objects: None,
+                prefetch_walk_objects: false,
+            },
+        )
+        .expect("no prefetch");
+        assert_eq!(
+            with_prefetch.send, without_prefetch.send,
+            "send list must match"
+        );
+        assert!(
+            without_prefetch.walk_prefetch.is_empty(),
+            "reuse-only repack walk must not retain blob payloads"
+        );
+    }
 }

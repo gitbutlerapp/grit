@@ -1182,6 +1182,8 @@ fn build_repack_pack(
         return build_pack_with_write_threads_full(odb, roots, &[], opts, threads);
     }
     let empty_shallow = HashSet::new();
+    let reuse_only_repack =
+        opts.window == 0 && !opts.thin && opts.reuse_deltas && opts.reuse_objects;
     let selection = enumerate_pack_objects(
         odb,
         roots,
@@ -1192,6 +1194,7 @@ fn build_repack_pack(
             have_shallow_grafts: Some(&empty_shallow),
             use_bitmaps: opts.use_bitmaps,
             exclude_objects: None,
+            prefetch_walk_objects: !reuse_only_repack,
         },
     )?;
     let mut send = selection.send;
@@ -1237,6 +1240,10 @@ fn estimate_repack_object_count(
         return estimate_reachable_count(odb, roots);
     }
     let empty_shallow = HashSet::new();
+    let reuse_only_repack = pack_opts.window == 0
+        && !pack_opts.thin
+        && pack_opts.reuse_deltas
+        && pack_opts.reuse_objects;
     let selection = enumerate_pack_objects(
         odb,
         roots,
@@ -1247,6 +1254,7 @@ fn estimate_repack_object_count(
             have_shallow_grafts: Some(&empty_shallow),
             use_bitmaps: pack_opts.use_bitmaps,
             exclude_objects: None,
+            prefetch_walk_objects: !reuse_only_repack,
         },
     )?;
     let mut send = selection.send;

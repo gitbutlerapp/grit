@@ -294,6 +294,7 @@ impl<'a> PackObjects<'a> {
                 have_shallow_grafts: Some(&have_shallow),
                 use_bitmaps: opts.use_bitmaps,
                 exclude_objects: Some(&have_closure),
+                prefetch_walk_objects: true,
             },
         )?;
         let send = selection.send;
@@ -401,6 +402,7 @@ pub fn build_pack_with_shallow_and_filter(
             have_shallow_grafts: Some(have_shallow),
             use_bitmaps: opts.use_bitmaps,
             exclude_objects: None,
+            prefetch_walk_objects: true,
         },
     )?;
     build_pack_from_send_list(
@@ -700,6 +702,7 @@ pub(crate) fn build_pack_with_write_threads_full(
             have_shallow_grafts: Some(empty_shallow),
             use_bitmaps: opts.use_bitmaps,
             exclude_objects: Some(&have_closure),
+            prefetch_walk_objects: true,
         },
     )?;
     build_pack_from_send_list_full(
@@ -735,6 +738,7 @@ pub fn build_pack_with_parallel_threads(
             have_shallow_grafts: Some(empty_shallow),
             use_bitmaps: opts.use_bitmaps,
             exclude_objects: Some(&have_closure),
+            prefetch_walk_objects: true,
         },
     )?;
     build_pack_from_send_list_with_parallel_threads(
