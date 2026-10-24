@@ -742,9 +742,9 @@ fn read_push_pack(
             if buf.len() < pack_len {
                 return Err("truncated pack stream".to_owned());
             }
-            let pack = buf[..pack_len].to_vec();
-            verify_trailer(hash, &pack).map_err(|e| e.to_string())?;
-            return Ok(pack);
+            buf.truncate(pack_len);
+            verify_trailer(hash, &buf).map_err(|e| e.to_string())?;
+            return Ok(buf);
         }
 
         if fed_offset >= buf.len() {
