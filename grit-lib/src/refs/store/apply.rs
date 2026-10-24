@@ -203,31 +203,42 @@ pub fn apply_update(state: &mut RefBatchState, update: &RefUpdate) -> StoreResul
     Ok(())
 }
 
-fn apply_ref_change(state: &mut RefBatchState, update: &RefUpdate) -> StoreResult<()> {
+/// The one stored ref [`apply_update`] changes in `state`: `update.name`, or the end of its
+/// symref chain when the update dereferences. `None` for reflog-only updates.
+///
+/// After the update that ref holds `update.new_value`; every other ref keeps its value.
+///
+/// # Errors
+///
+/// [`RefStoreError::SymrefLoop`] when the symref chain is too deep.
+pub(crate) fn ref_change_target(
+    state: &RefBatchState,
+    update: &RefUpdate,
+) -> StoreResult<Option<String>> {
     if update.flags.log_only {
-        return Ok(());
+        return Ok(None);
     }
+    let deref = match &update.new_value {
+        None => should_deref_symref(state, update),
+        Some(_) => should_deref_symref_update(state, update),
+    };
+    if deref {
+        symref_peel_write_target(&state.refs, &update.name).map(Some)
+    } else {
+        Ok(Some(update.name.clone()))
+    }
+}
+
+fn apply_ref_change(state: &mut RefBatchState, update: &RefUpdate) -> StoreResult<()> {
+    let Some(target) = ref_change_target(state, update)? else {
+        return Ok(());
+    };
     match &update.new_value {
         None => {
-            if should_deref_symref(state, update) {
-                let target = symref_peel_write_target(&state.refs, &update.name)?;
-                state.refs.remove(&target);
-            } else {
-                state.refs.remove(&update.name);
-            }
+            state.refs.remove(&target);
         }
         Some(new_value) => {
-            if should_deref_symref_update(state, update) {
-                let RawRef::Direct(oid) = new_value else {
-                    return Err(RefStoreError::Corrupt(
-                        "deref update requires direct oid".to_owned(),
-                    ));
-                };
-                let target = symref_peel_write_target(&state.refs, &update.name)?;
-                state.refs.insert(target, RawRef::Direct(*oid));
-            } else {
-                state.refs.insert(update.name.clone(), new_value.clone());
-            }
+            state.refs.insert(target, new_value.clone());
         }
     }
     Ok(())
@@ -291,33 +302,6 @@ fn append_reflog_entry(
         .entry(name.to_owned())
         .or_default()
         .push(entry);
-}
-
-/// Peel targets whose stored value changes when `update` is a symbolic-ref delete with deref.
-pub(crate) fn symref_deref_delete_changed_targets(
-    before: &RefBatchState,
-    after: &RefBatchState,
-    update: &RefUpdate,
-) -> Vec<String> {
-    if update.new_value.is_some() || update.flags.log_only || update.flags.no_deref {
-        return Vec::new();
-    }
-    if !matches!(before.refs.get(&update.name), Some(RawRef::Symbolic(_))) {
-        return Vec::new();
-    }
-    let Ok(target) = symref_peel_write_target(&before.refs, &update.name) else {
-        return Vec::new();
-    };
-    if !before.refs.contains_key(&target) {
-        return Vec::new();
-    }
-    if after.refs.contains_key(&target) {
-        return Vec::new();
-    }
-    if before.refs.get(&target) == after.refs.get(&target) {
-        return Vec::new();
-    }
-    vec![target]
 }
 
 /// Ref names that must be locked for a batch (update targets plus symref peel targets).
@@ -430,6 +414,62 @@ mod tests {
             expected: Expected::Any,
             reflog: None,
             flags: RefUpdateFlags::default(),
+        }
+    }
+
+    #[test]
+    fn ref_change_target_names_the_one_ref_an_update_writes() {
+        let mut state = RefBatchState::default();
+        state
+            .refs
+            .insert("refs/heads/main".to_owned(), RawRef::Direct(oid(1)));
+        state.refs.insert(
+            "HEAD".to_owned(),
+            RawRef::Symbolic("refs/heads/main".to_owned()),
+        );
+        let target = |update: &RefUpdate| ref_change_target(&state, update).expect("target");
+
+        let direct = direct_update("HEAD", oid(2));
+        assert_eq!(target(&direct).as_deref(), Some("refs/heads/main"));
+        let delete = RefUpdate {
+            new_value: None,
+            ..direct.clone()
+        };
+        assert_eq!(target(&delete).as_deref(), Some("refs/heads/main"));
+        let no_deref = RefUpdate {
+            flags: RefUpdateFlags {
+                no_deref: true,
+                ..Default::default()
+            },
+            ..direct.clone()
+        };
+        assert_eq!(target(&no_deref).as_deref(), Some("HEAD"));
+        let symbolic = RefUpdate {
+            new_value: Some(RawRef::Symbolic("refs/heads/other".to_owned())),
+            ..direct.clone()
+        };
+        assert_eq!(target(&symbolic).as_deref(), Some("HEAD"));
+        let log_only = RefUpdate {
+            flags: RefUpdateFlags {
+                log_only: true,
+                ..Default::default()
+            },
+            ..direct
+        };
+        assert_eq!(target(&log_only), None);
+
+        for update in [delete, no_deref, symbolic] {
+            let mut after = state.clone();
+            apply_update(&mut after, &update).expect("apply");
+            let changed: Vec<&String> = state
+                .refs
+                .keys()
+                .chain(after.refs.keys())
+                .filter(|name| state.refs.get(*name) != after.refs.get(*name))
+                .collect();
+            let written = target(&update).expect("writes a ref");
+            assert!(changed.iter().all(|name| **name == written), "{changed:?}");
+            assert_eq!(after.refs.get(&written), update.new_value.as_ref());
         }
     }
 

@@ -1,5 +1,6 @@
 //! Filesystem ref backend (loose refs + `packed-refs`) implementing [`super::RefStore`].
 
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::io;
@@ -8,21 +9,22 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use crate::error::{Error, Result};
+use crate::lockfile::LockWait;
 use crate::objects::ObjectId;
 use crate::reflog::{self, ReflogEntry};
 use crate::refs::{
-    lock_path_for_ref, loose_ref_list_walk_root, prune_empty_loose_ref_parents,
-    read_packed_refs_file_view, read_packed_refs_map_for_prefix_filtered, read_ref_file,
-    remove_empty_ref_directory, remove_packed_ref, remove_packed_ref_under_lock, PackedPeel,
+    lock_path_for_ref, loose_ref_list_walk_root, prune_empty_ref_dirs, read_packed_refs_file_view,
+    read_packed_refs_map_for_prefix_filtered, read_ref_file, remove_empty_ref_directory,
+    remove_packed_ref, remove_packed_ref_under_lock, remove_packed_refs_under_lock, PackedPeel,
     PackedRecordFilter, Ref,
 };
 
 use super::apply::{
-    apply_case_only_ref_rename, apply_reflog_rename, apply_update, ref_lock_names_for_updates,
-    simulate_batch_apply, symref_deref_delete_changed_targets, RefBatchState,
+    apply_case_only_ref_rename, apply_reflog_rename, apply_update, ref_change_target,
+    ref_lock_names_for_updates, simulate_batch_apply, RefBatchState,
 };
 use super::error::RefStoreError;
-use super::routing::{resolve_common_dir, route_ref_storage_with_namespace, RefStorageRoute};
+use super::routing::{resolve_common_dir, route_ref_storage_in_common, RefStorageRoute};
 use super::transaction::expected_matches;
 use super::transaction::RefTransaction;
 use super::types::Expected;
@@ -75,12 +77,29 @@ struct PackedCacheEntry {
     map_is_complete: bool,
 }
 
+/// Per-batch state shared by the steps of [`FilesRefStore::persist_state_diff`].
+#[derive(Debug, Clone, Copy)]
+struct CommitContext<'a> {
+    /// How long to wait for each loose ref lock, read from config once per batch.
+    ref_lock_wait: LockWait,
+    /// Whether the batch holds `packed-refs.lock`.
+    lock_held: bool,
+    /// Logical names whose packed records were already dropped in one up-front rewrite.
+    pruned: &'a HashSet<String>,
+    /// Values of the records that rewrite removed, so commit-time rechecks still see them.
+    removed: &'a HashMap<String, RawRef>,
+    /// Directories that deletions may have left empty (mapped to their storage directory),
+    /// pruned once the batch is done instead of after every ref.
+    emptied_dirs: &'a RefCell<BTreeMap<PathBuf, PathBuf>>,
+}
+
 #[derive(Debug)]
 struct PreparedFilesBatch {
     updates: Vec<RefUpdate>,
     case_only_renames: Vec<super::RefCaseOnlyRename>,
     ref_locks: HashMap<String, PathBuf>,
     packed_lock: Option<PathBuf>,
+    ref_lock_wait: LockWait,
     /// Ref/reflog state observed at prepare (must drive commit, not a reload).
     before_commit: RefBatchState,
     after_commit: RefBatchState,
@@ -577,7 +596,12 @@ impl FilesRefStore {
     }
 
     fn route(&self, refname: &str) -> RefStorageRoute {
-        route_ref_storage_with_namespace(&self.git_dir, refname, self.namespace_prefix.as_deref())
+        route_ref_storage_in_common(
+            &self.git_dir,
+            &self.common_dir,
+            refname,
+            self.namespace_prefix.as_deref(),
+        )
     }
 
     fn logical_name(&self, storage: &str) -> String {
@@ -609,9 +633,8 @@ impl FilesRefStore {
         })
     }
 
-    fn acquire_ref_lock(&self, lock: &Path, refname: &str) -> StoreResult<()> {
-        use crate::lockfile::{LockError, LockFile, LockWait};
-        let wait = LockWait::files_ref_lock_for_git_dir(&self.common_dir);
+    fn acquire_ref_lock(lock: &Path, refname: &str, wait: LockWait) -> StoreResult<()> {
+        use crate::lockfile::{LockError, LockFile};
         LockFile::acquire(lock, wait)
             .map(|guard| guard.detach())
             .map_err(|err| match err {
@@ -649,7 +672,7 @@ impl FilesRefStore {
         &self,
         rename: &super::RefCaseOnlyRename,
         after: &RefBatchState,
-        packed_lock_held: bool,
+        ctx: CommitContext<'_>,
     ) -> Result<()> {
         let Some(value) = after.refs.get(&rename.to) else {
             return Err(Error::Message(format!(
@@ -661,15 +684,9 @@ impl FilesRefStore {
         if let Some(parent) = from_lock.parent() {
             fs::create_dir_all(parent).map_err(Error::Io)?;
         }
-        self.acquire_ref_lock(&from_lock, &rename.from)
-            .map_err(Error::from)?;
-        let route = self.route(&rename.from);
+        Self::acquire_ref_lock(&from_lock, &rename.from, ctx.ref_lock_wait).map_err(Error::from)?;
         if !from_path.is_file() {
-            if packed_lock_held {
-                remove_packed_ref_under_lock(&route.storage_dir, &route.storage_name)?;
-            } else {
-                remove_packed_ref(&route.storage_dir, &route.storage_name)?;
-            }
+            self.remove_packed_record(&rename.from, ctx)?;
             FilesRefStore::write_loose_value(&from_path, &from_lock, value)?;
         }
         let (_, to_path, _) = self.ref_lock_paths(&rename.to);
@@ -683,20 +700,76 @@ impl FilesRefStore {
         Ok(())
     }
 
-    fn delete_loose_ref(&self, refname: &str, lock: &Path, packed_lock_held: bool) -> Result<()> {
+    /// Drop `refname`'s `packed-refs` record unless the up-front batch rewrite already did.
+    fn remove_packed_record(&self, refname: &str, ctx: CommitContext<'_>) -> Result<()> {
+        let route = self.route(refname);
+        if !ctx.lock_held {
+            return remove_packed_ref(&route.storage_dir, &route.storage_name);
+        }
+        if ctx.pruned.contains(refname) {
+            return Ok(());
+        }
+        remove_packed_ref_under_lock(&route.storage_dir, &route.storage_name)
+    }
+
+    /// Remove the `packed-refs` records of every ref `before` has and `after` drops, one
+    /// rewrite per storage directory, ahead of any loose-file change (Git's order, so a
+    /// deleted loose ref never uncovers a stale packed value).
+    ///
+    /// Returns the logical names covered, and the removed values of the deletions in `updates`
+    /// whose expectation [`Self::recheck_update_at_commit`] still has to verify.
+    fn prune_deleted_packed_records(
+        &self,
+        before: &RefBatchState,
+        after: &RefBatchState,
+        updates: &[RefUpdate],
+    ) -> Result<(HashSet<String>, HashMap<String, RawRef>)> {
+        let checked: HashSet<&str> = updates
+            .iter()
+            .filter(|u| u.new_value.is_none() && !u.flags.log_only && u.expected != Expected::Any)
+            .map(|u| u.name.as_str())
+            .collect();
+        let mut pruned = HashSet::new();
+        let mut by_dir: BTreeMap<PathBuf, (HashSet<String>, HashMap<String, String>)> =
+            BTreeMap::new();
+        for name in before.refs.keys() {
+            if after.refs.contains_key(name) {
+                continue;
+            }
+            let route = self.route(name);
+            let (storage_names, reported) = by_dir.entry(route.storage_dir).or_default();
+            if checked.contains(name.as_str()) {
+                reported.insert(route.storage_name.clone(), name.clone());
+            }
+            storage_names.insert(route.storage_name);
+            pruned.insert(name.clone());
+        }
+        let mut removed = HashMap::new();
+        for (dir, (storage_names, reported)) in by_dir {
+            let report: HashSet<String> = reported.keys().cloned().collect();
+            for (storage, oid) in remove_packed_refs_under_lock(&dir, &storage_names, &report)? {
+                if let Some(logical) = reported.get(&storage) {
+                    removed.insert(logical.clone(), RawRef::Direct(oid));
+                }
+            }
+        }
+        self.invalidate_packed_cache_after_write();
+        Ok((pruned, removed))
+    }
+
+    fn delete_loose_ref(&self, refname: &str, lock: &Path, ctx: CommitContext<'_>) -> Result<()> {
         let route = self.route(refname);
         let path = route.storage_dir.join(&route.storage_name);
-        if packed_lock_held {
-            remove_packed_ref_under_lock(&route.storage_dir, &route.storage_name)?;
-        } else {
-            remove_packed_ref(&route.storage_dir, &route.storage_name)?;
-        }
+        self.remove_packed_record(refname, ctx)?;
         remove_empty_ref_directory(&path);
         let _ = fs::remove_file(&path);
-        // Drop the lock before pruning parents: a leftover lock in the ref directory
-        // would make `dir_tree_has_files` treat the parent as non-empty (issue #1317).
         let _ = fs::remove_file(lock);
-        prune_empty_loose_ref_parents(&route.storage_dir, &path);
+        if let Some(parent) = path.parent() {
+            ctx.emptied_dirs
+                .borrow_mut()
+                .entry(parent.to_path_buf())
+                .or_insert(route.storage_dir);
+        }
         Ok(())
     }
 
@@ -747,6 +820,7 @@ impl FilesRefStore {
         batch_extras: &BTreeSet<String>,
         batch_start: &RefBatchState,
         state_before: &RefBatchState,
+        ctx: CommitContext<'_>,
     ) -> StoreResult<()> {
         if update.flags.log_only {
             return Ok(());
@@ -760,11 +834,15 @@ impl FilesRefStore {
                 actual: state_before.refs.get(&update.name).cloned(),
             });
         }
+        if !batch_differs && update.new_value.is_none() && update.expected == Expected::Any {
+            return Ok(());
+        }
         let actual = if batch_differs {
             state_before.refs.get(&update.name).cloned()
         } else {
             self.read_raw(&update.name)
                 .map_err(|e| RefStoreError::Corrupt(e.to_string()))?
+                .or_else(|| ctx.removed.get(&update.name).cloned())
         };
         let actual_ref = actual.as_ref();
         if !batch_differs {
@@ -794,16 +872,17 @@ impl FilesRefStore {
         Ok(())
     }
 
+    /// Store `value` as `name` (`None` deletes it).
     fn persist_one_ref_change(
         &self,
         name: &str,
-        after: &RefBatchState,
+        value: Option<&RawRef>,
         lock: &Path,
-        packed_lock_held: bool,
+        ctx: CommitContext<'_>,
     ) -> Result<()> {
         let (_, path, _) = self.ref_lock_paths(name);
-        match after.refs.get(name) {
-            None => self.delete_loose_ref(name, lock, packed_lock_held),
+        match value {
+            None => self.delete_loose_ref(name, lock, ctx),
             Some(value) => FilesRefStore::write_loose_value(&path, lock, value),
         }
     }
@@ -811,17 +890,16 @@ impl FilesRefStore {
     fn persist_one_ref_name(
         &self,
         name: &str,
-        state: &RefBatchState,
-        packed_lock_held: bool,
+        value: Option<&RawRef>,
+        ctx: CommitContext<'_>,
         persisted_refs: &mut HashSet<String>,
     ) -> Result<()> {
         let (_, _, lock_path) = self.ref_lock_paths(name);
         if let Some(parent) = lock_path.parent() {
             fs::create_dir_all(parent).map_err(Error::Io)?;
         }
-        self.acquire_ref_lock(&lock_path, name)
-            .map_err(Error::from)?;
-        let write_result = self.persist_one_ref_change(name, state, &lock_path, packed_lock_held);
+        Self::acquire_ref_lock(&lock_path, name, ctx.ref_lock_wait).map_err(Error::from)?;
+        let write_result = self.persist_one_ref_change(name, value, &lock_path, ctx);
         let _ = fs::remove_file(&lock_path);
         write_result?;
         persisted_refs.insert(name.to_owned());
@@ -830,6 +908,9 @@ impl FilesRefStore {
 
     /// Lock every ref `update` writes (and `update.name` when its expectation must be
     /// verified), recheck the expectation against disk under those locks, then write the refs.
+    ///
+    /// `running` is the batch state before `update`; `touched` is the one ref the update
+    /// stores [`RefUpdate::new_value`] into (see [`ref_change_target`]).
     ///
     /// Holding the write targets' locks across the recheck matters for symbolic refs too: an
     /// update to `HEAD` that dereferences to `refs/heads/main` must exclude writers of `main`,
@@ -841,26 +922,24 @@ impl FilesRefStore {
         batch_extras: &BTreeSet<String>,
         before: &RefBatchState,
         running: &RefBatchState,
-        next: &RefBatchState,
-        packed_lock_held: bool,
+        touched: Option<&str>,
+        ctx: CommitContext<'_>,
         persisted_refs: &mut HashSet<String>,
         writes_ref: bool,
         carried: &mut Option<(String, PathBuf)>,
     ) -> Result<()> {
-        let mut targets: Vec<String> = running
-            .refs
-            .keys()
-            .chain(next.refs.keys())
-            .filter(|name| *name != &update.name && running.refs.get(*name) != next.refs.get(*name))
-            .cloned()
-            .collect::<BTreeSet<_>>()
+        let value_after = |name: &str| {
+            if touched == Some(name) {
+                update.new_value.as_ref()
+            } else {
+                running.refs.get(name)
+            }
+        };
+        let mut targets: Vec<String> = touched
+            .filter(|t| *t != update.name && running.refs.get(*t) != update.new_value.as_ref())
+            .map(str::to_owned)
             .into_iter()
             .collect();
-        for target in symref_deref_delete_changed_targets(running, next, update) {
-            if !persisted_refs.contains(&target) && !targets.contains(&target) {
-                targets.push(target);
-            }
-        }
         if writes_ref {
             targets.push(update.name.clone());
         }
@@ -885,7 +964,9 @@ impl FilesRefStore {
                 Some(parent) => fs::create_dir_all(parent).map_err(Error::Io),
                 None => Ok(()),
             }
-            .and_then(|()| self.acquire_ref_lock(&lock_path, name).map_err(Error::from));
+            .and_then(|()| {
+                Self::acquire_ref_lock(&lock_path, name, ctx.ref_lock_wait).map_err(Error::from)
+            });
             if let Err(err) = acquired {
                 release(&held);
                 return Err(err);
@@ -893,7 +974,8 @@ impl FilesRefStore {
             held.insert(name.clone(), lock_path);
         }
 
-        if let Err(err) = self.recheck_update_at_commit(update, batch_extras, before, running) {
+        if let Err(err) = self.recheck_update_at_commit(update, batch_extras, before, running, ctx)
+        {
             release(&held);
             return Err(err.into());
         }
@@ -904,7 +986,7 @@ impl FilesRefStore {
             let Some(lock_path) = held.remove(name) else {
                 continue;
             };
-            if let Err(err) = self.persist_one_ref_change(name, next, &lock_path, packed_lock_held)
+            if let Err(err) = self.persist_one_ref_change(name, value_after(name), &lock_path, ctx)
             {
                 let _ = fs::remove_file(&lock_path);
                 release(&held);
@@ -918,13 +1000,14 @@ impl FilesRefStore {
 
     fn persist_state_diff(
         &self,
-        before: &RefBatchState,
-        after: &RefBatchState,
-        packed_lock_held: bool,
-        updates: &[RefUpdate],
-        case_only_renames: &[super::RefCaseOnlyRename],
+        batch: &PreparedFilesBatch,
         carried: &mut Option<(String, PathBuf)>,
+        emptied_dirs: &RefCell<BTreeMap<PathBuf, PathBuf>>,
     ) -> Result<()> {
+        let before = &batch.before_commit;
+        let after = &batch.after_commit;
+        let updates = batch.updates.as_slice();
+        let packed_lock_held = batch.packed_lock.is_some();
         let batch_extras: BTreeSet<String> = updates.iter().map(|u| u.name.clone()).collect();
         if updates.iter().any(|u| {
             u.new_value.is_some() && !u.flags.log_only && !before.refs.contains_key(&u.name)
@@ -945,9 +1028,22 @@ impl FilesRefStore {
             }
         }
 
+        let (pruned, removed) = if packed_lock_held {
+            self.prune_deleted_packed_records(before, after, updates)?
+        } else {
+            Default::default()
+        };
+        let ctx = CommitContext {
+            ref_lock_wait: batch.ref_lock_wait,
+            lock_held: packed_lock_held,
+            pruned: &pruned,
+            removed: &removed,
+            emptied_dirs,
+        };
+
         let mut persisted_refs = HashSet::new();
-        for rename in case_only_renames {
-            self.persist_case_only_loose_ref(rename, after, packed_lock_held)?;
+        for rename in &batch.case_only_renames {
+            self.persist_case_only_loose_ref(rename, after, ctx)?;
             persisted_refs.insert(rename.from.clone());
             persisted_refs.insert(rename.to.clone());
         }
@@ -957,12 +1053,14 @@ impl FilesRefStore {
                 apply_update(&mut running, update).map_err(Error::from)?;
                 continue;
             }
-            let mut next = running.clone();
-            apply_update(&mut next, update).map_err(Error::from)?;
-
+            let touched = ref_change_target(&running, update).map_err(Error::from)?;
             let name = &update.name;
             let b = running.refs.get(name);
-            let a = next.refs.get(name);
+            let a = if touched.as_deref() == Some(name.as_str()) {
+                update.new_value.as_ref()
+            } else {
+                b
+            };
             let materialize_loose = update.new_value.is_some()
                 && a.is_some()
                 && b == a
@@ -976,14 +1074,14 @@ impl FilesRefStore {
                 &batch_extras,
                 before,
                 &running,
-                &next,
-                packed_lock_held,
+                touched.as_deref(),
+                ctx,
                 &mut persisted_refs,
                 writes_ref,
                 carried,
             )?;
 
-            running = next;
+            apply_update(&mut running, update).map_err(Error::from)?;
             crate::refs::test_ref_store_batch_pause_after_ref_write(idx, &self.common_dir);
         }
 
@@ -1001,7 +1099,7 @@ impl FilesRefStore {
             if b == a {
                 continue;
             }
-            self.persist_one_ref_name(name, after, packed_lock_held, &mut persisted_refs)?;
+            self.persist_one_ref_name(name, a, ctx, &mut persisted_refs)?;
         }
         self.invalidate_packed_cache_after_write();
         Ok(())
@@ -1102,6 +1200,7 @@ impl RefStore for FilesRefStore {
             self.ensure_reflog_path_writable(&rename.to)?;
         }
         let lock_names = ref_lock_names_for_updates(&preliminary, &updates);
+        let ref_lock_wait = LockWait::files_ref_lock_for_git_dir(&self.common_dir);
 
         let mut ref_locks: HashMap<String, PathBuf> = HashMap::new();
         for name in &lock_names {
@@ -1109,7 +1208,7 @@ impl RefStore for FilesRefStore {
             if let Some(parent) = lock.parent() {
                 fs::create_dir_all(parent).map_err(|e| RefStoreError::Corrupt(e.to_string()))?;
             }
-            if let Err(err) = self.acquire_ref_lock(&lock, name) {
+            if let Err(err) = Self::acquire_ref_lock(&lock, name, ref_lock_wait) {
                 for acquired in ref_locks.values() {
                     let _ = fs::remove_file(acquired);
                 }
@@ -1143,7 +1242,7 @@ impl RefStore for FilesRefStore {
             }
         }
 
-        let before_commit = preliminary.snapshot();
+        let before_commit = preliminary;
         let mut after_commit = before_commit.clone();
         for update in &updates {
             apply_update(&mut after_commit, update)?;
@@ -1176,7 +1275,7 @@ impl RefStore for FilesRefStore {
             if let Some(parent) = lock.parent() {
                 fs::create_dir_all(parent).map_err(|e| RefStoreError::Corrupt(e.to_string()))?;
             }
-            if let Err(err) = self.acquire_ref_lock(&lock, name) {
+            if let Err(err) = Self::acquire_ref_lock(&lock, name, ref_lock_wait) {
                 for acquired in ref_locks.values() {
                     let _ = fs::remove_file(acquired);
                 }
@@ -1189,7 +1288,7 @@ impl RefStore for FilesRefStore {
         if self.needs_packed_lock(&updates) {
             let packed_path = super::paths::packed_refs_path(&self.common_dir);
             let lock = lock_path_for_ref(&packed_path);
-            use crate::lockfile::{LockError, LockFile, LockWait};
+            use crate::lockfile::{LockError, LockFile};
             let wait = LockWait::packed_refs_for_git_dir(&self.common_dir);
             if let Err(err) = LockFile::acquire(&lock, wait).map(|guard| guard.detach()) {
                 for acquired in ref_locks.values() {
@@ -1210,6 +1309,7 @@ impl RefStore for FilesRefStore {
             case_only_renames,
             ref_locks,
             packed_lock,
+            ref_lock_wait,
             before_commit,
             after_commit,
         });
@@ -1311,16 +1411,14 @@ impl PreparedRefTransaction for FilesPrepared<'_> {
             .prepared
             .lock()
             .unwrap_or_else(|e| e.into_inner());
-        let Some(batch) = guard.take() else {
+        let Some(mut batch) = guard.take() else {
             return Ok(());
         };
-
-        let packed_lock_held = batch.packed_lock.is_some();
 
         // The first update is written before any other ref, so it keeps the lock it took in
         // `prepare` instead of releasing and re-creating it. The rest are released here and
         // re-taken one update at a time, so other writers can touch later refs mid-batch.
-        let mut ref_locks = batch.ref_locks;
+        let mut ref_locks = std::mem::take(&mut batch.ref_locks);
         let mut carried = batch
             .updates
             .iter()
@@ -1331,16 +1429,20 @@ impl PreparedRefTransaction for FilesPrepared<'_> {
         }
         // The packed cache revalidates against the file's size and mtime on every read, so
         // rechecks under the ref locks see concurrent rewrites without a forced re-parse.
-        let persisted = self.store.persist_state_diff(
-            &batch.before_commit,
-            &batch.after_commit,
-            packed_lock_held,
-            &batch.updates,
-            &batch.case_only_renames,
-            &mut carried,
-        );
+        let emptied_dirs = RefCell::new(BTreeMap::new());
+        let persisted = self
+            .store
+            .persist_state_diff(&batch, &mut carried, &emptied_dirs);
         if let Some((_, lock)) = carried {
             let _ = fs::remove_file(lock);
+        }
+        // Pruning runs after every lock of the batch is gone: a leftover lock file would make
+        // its directory look non-empty (issue #1317). Deepest first, so a parent is only
+        // checked once its emptied children are removed.
+        let mut emptied_dirs: Vec<_> = emptied_dirs.into_inner().into_iter().collect();
+        emptied_dirs.sort_by_key(|(dir, _)| std::cmp::Reverse(dir.components().count()));
+        for (dir, storage_dir) in &emptied_dirs {
+            prune_empty_ref_dirs(storage_dir, dir);
         }
         self.store.invalidate_packed_cache_after_write();
         if let Err(err) = persisted {
@@ -1882,5 +1984,144 @@ mod tests {
             writer.read_raw(name).expect("read"),
             Some(RawRef::Direct(oid(3)))
         );
+    }
+
+    fn delete(name: &str, expected: Expected) -> RefUpdate {
+        RefUpdate {
+            name: name.to_owned(),
+            new_value: None,
+            expected,
+            reflog: None,
+            flags: RefUpdateFlags::default(),
+        }
+    }
+
+    fn commit_all(store: &FilesRefStore, updates: Vec<RefUpdate>) -> StoreResult<()> {
+        store
+            .prepare(RefTransaction::from_updates(updates)?)?
+            .commit()
+    }
+
+    /// `packed-refs` with twenty `refs/remotes/o/x<i>`, a peeled tag and `main`, plus a loose
+    /// `x5` that overrides its packed value.
+    fn packed_remote_refs(path: &Path) {
+        let mut body = String::from("# pack-refs with: peeled fully-peeled sorted \n");
+        body.push_str(&format!("{} refs/heads/main\n", oid(4)));
+        let mut remotes: Vec<String> = (0..20).map(|i| format!("refs/remotes/o/x{i}")).collect();
+        remotes.sort();
+        for name in &remotes {
+            body.push_str(&format!("{} {name}\n", oid(1)));
+        }
+        body.push_str(&format!("{} refs/tags/t\n^{}\n", oid(2), oid(3)));
+        fs::write(path.join("packed-refs"), body).expect("packed-refs");
+        fs::create_dir_all(path.join("refs/remotes/o")).expect("dir");
+        fs::write(path.join("refs/remotes/o/x5"), format!("{}\n", oid(9))).expect("loose");
+    }
+
+    #[test]
+    fn batch_delete_of_packed_refs_rewrites_packed_refs_once_and_keeps_the_rest() {
+        let dir = git_dir();
+        let path = dir.path();
+        packed_remote_refs(path);
+        let writer = store(path);
+        let updates = (0..20)
+            .map(|i| {
+                let expected = match i {
+                    0 => Expected::Oid(oid(1)),
+                    5 => Expected::Oid(oid(9)),
+                    7 => Expected::Exists,
+                    _ => Expected::Any,
+                };
+                delete(&format!("refs/remotes/o/x{i}"), expected)
+            })
+            .collect();
+        commit_all(&writer, updates).expect("batch delete");
+
+        for i in 0..20 {
+            let name = format!("refs/remotes/o/x{i}");
+            assert_eq!(writer.read_raw(&name).expect("read"), None, "{name}");
+        }
+        let packed = fs::read_to_string(path.join("packed-refs")).expect("packed");
+        assert_eq!(
+            packed,
+            format!(
+                "# pack-refs with: peeled fully-peeled sorted\n{} refs/heads/main\n{} refs/tags/t\n^{}\n",
+                oid(4),
+                oid(2),
+                oid(3)
+            )
+        );
+        assert!(
+            !path.join("refs/remotes").exists(),
+            "emptied dirs are pruned"
+        );
+        assert!(!path.join("packed-refs.lock").exists());
+        assert!(path.join("refs/heads").is_dir());
+    }
+
+    #[test]
+    fn stale_expectation_on_packed_ref_rejects_the_whole_batch() {
+        let dir = git_dir();
+        let path = dir.path();
+        packed_remote_refs(path);
+        let before = fs::read_to_string(path.join("packed-refs")).expect("packed");
+        let writer = store(path);
+        let err = commit_all(
+            &writer,
+            vec![
+                delete("refs/remotes/o/x1", Expected::Any),
+                delete("refs/remotes/o/x2", Expected::Oid(oid(7))),
+            ],
+        )
+        .expect_err("stale");
+        assert!(
+            matches!(err, RefStoreError::ExpectedMismatch { ref name, .. } if name == "refs/remotes/o/x2"),
+            "{err:?}"
+        );
+        assert_eq!(
+            fs::read_to_string(path.join("packed-refs")).expect("packed"),
+            before
+        );
+        assert!(!path.join("packed-refs.lock").exists());
+        assert!(!path.join("refs/remotes/o/x1.lock").exists());
+    }
+
+    #[test]
+    fn batch_delete_prunes_nested_empty_dirs_deepest_first() {
+        let dir = git_dir();
+        let path = dir.path();
+        let writer = store(path);
+        for name in ["refs/heads/x/y/z", "refs/heads/x/w", "refs/heads/keep/k"] {
+            set(&writer, name, oid(1), Expected::Missing).expect("create");
+        }
+        commit_all(
+            &writer,
+            vec![
+                delete("refs/heads/x/w", Expected::Oid(oid(1))),
+                delete("refs/heads/x/y/z", Expected::Any),
+            ],
+        )
+        .expect("delete");
+        assert!(!path.join("refs/heads/x").exists());
+        assert!(path.join("refs/heads/keep/k").is_file());
+    }
+
+    #[test]
+    fn deleting_through_a_symref_removes_the_packed_target() {
+        let dir = git_dir();
+        let path = dir.path();
+        packed_remote_refs(path);
+        fs::write(path.join("refs/remotes/o/HEAD"), "ref: refs/remotes/o/x3\n").expect("symref");
+        let writer = store(path);
+        commit_all(&writer, vec![delete("refs/remotes/o/HEAD", Expected::Any)])
+            .expect("deref delete");
+        assert_eq!(writer.read_raw("refs/remotes/o/x3").expect("read"), None);
+        assert_eq!(
+            writer.read_raw("refs/remotes/o/HEAD").expect("read"),
+            Some(RawRef::Symbolic("refs/remotes/o/x3".to_owned()))
+        );
+        let packed = fs::read_to_string(path.join("packed-refs")).expect("packed");
+        assert!(!packed.contains("refs/remotes/o/x3\n"), "{packed}");
+        assert!(packed.contains("refs/remotes/o/x4\n"), "{packed}");
     }
 }

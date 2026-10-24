@@ -350,3 +350,113 @@ fn remove_with_only_negative_fetch_does_not_invent_default_refspec() {
         "negative-only fetch must not apply default +refs/heads/* refspec"
     );
 }
+
+/// Directories left below the top-level `refs/<kind>` directories (relative paths, sorted).
+fn ref_dirs(git_dir: &Path) -> Vec<String> {
+    fn walk(root: &Path, dir: &Path, out: &mut Vec<String>) {
+        for entry in std::fs::read_dir(dir).expect("read_dir").flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                let rel = path.strip_prefix(root).unwrap();
+                if rel.components().count() > 2 {
+                    out.push(rel.display().to_string());
+                }
+                walk(root, &path, out);
+            }
+        }
+    }
+    let root = git_dir.join(".git");
+    let mut out = Vec::new();
+    walk(&root, &root.join("refs"), &mut out);
+    out.sort();
+    out
+}
+
+#[test]
+fn remove_many_packed_and_loose_tracking_refs_matches_git() {
+    let seed = build_seed(false);
+    let repo = seed.path();
+    let head = git(repo, &["rev-parse", "HEAD"]).trim().to_owned();
+    git(
+        repo,
+        &[
+            "-c",
+            "user.name=T",
+            "-c",
+            "user.email=t@example.com",
+            "tag",
+            "-a",
+            "-m",
+            "annotated",
+            "v1",
+        ],
+    );
+    let tag = git(repo, &["rev-parse", "v1"]).trim().to_owned();
+    let mut stdin = String::new();
+    for i in 0..600 {
+        stdin.push_str(&format!(
+            "create refs/remotes/origin/team{}/b{i} {head}\n",
+            i % 7
+        ));
+    }
+    stdin.push_str(&format!("create refs/remotes/origin/tagged {tag}\n"));
+    stdin.push_str(&format!("create refs/remotes/upstream/keep {head}\n"));
+    git_cmd(&["update-ref", "--stdin"])
+        .in_dir(repo)
+        .stdin(stdin)
+        .suc();
+    git(repo, &["pack-refs", "--all"]);
+    for i in (0..600).step_by(50) {
+        git(
+            repo,
+            &[
+                "update-ref",
+                &format!("refs/remotes/origin/team{}/b{i}", i % 7),
+                &tag,
+            ],
+        );
+    }
+    git(
+        repo,
+        &["update-ref", "refs/remotes/origin/loose-only", &head],
+    );
+
+    let (_grit_root, grit_dir) = copy_seed(repo, "grit");
+    let (_git_root, git_dir) = copy_seed(repo, "git");
+    let removal = open(&grit_dir)
+        .remotes()
+        .remove("origin", RemoveOptions { dry_run: false })
+        .expect("grit remove");
+    git(&git_dir, &["remote", "remove", "origin"]);
+
+    let mut expected_deleted: Vec<String> = git(
+        repo,
+        &[
+            "for-each-ref",
+            "--format=%(refname)",
+            "refs/remotes/origin/",
+        ],
+    )
+    .lines()
+    .map(str::to_owned)
+    .collect();
+    expected_deleted.sort();
+    let mut deleted = removal.refs_deleted.clone();
+    deleted.sort();
+    assert_eq!(deleted, expected_deleted);
+    assert_eq!(
+        git_for_each_ref(&grit_dir, "refs/"),
+        git_for_each_ref(&git_dir, "refs/"),
+        "for-each-ref"
+    );
+    assert_eq!(git_config_local(&grit_dir), git_config_local(&git_dir));
+    assert_eq!(ref_dirs(&grit_dir), ref_dirs(&git_dir), "refs/ directories");
+    let packed = std::fs::read_to_string(grit_dir.join(".git/packed-refs")).expect("packed");
+    assert!(!packed.contains("refs/remotes/origin/"), "{packed}");
+    assert!(packed.contains("refs/remotes/upstream/keep"), "{packed}");
+    assert!(
+        packed.contains(&format!("{tag} refs/tags/v1\n^{head}\n")),
+        "{packed}"
+    );
+    git_fsck(&grit_dir);
+}
