@@ -1649,3 +1649,141 @@ fn prune_walks_trees_with_non_canonical_directory_modes() {
         "blob under a 40755 directory must survive prune"
     );
 }
+
+/// `refs/heads/main` names a commit whose tree does not exist, stored in a pack with no
+/// loose objects left. Any reachability walk fails on the missing tree, so an operation
+/// that succeeds here did not walk the object graph.
+fn packed_repo_whose_tip_tree_is_missing() -> (TempDir, Repository, ObjectId) {
+    let dir = TempDir::new().expect("tempdir");
+    git(dir.path(), &["init", "-b", "main"]);
+    let repo = Repository::discover(Some(dir.path()), &RepositoryOptions::empty()).expect("open");
+    let commit = format!(
+        "tree {}\nauthor A <a@example.com> 1 +0000\ncommitter A <a@example.com> 1 +0000\n\nm\n",
+        missing_oid().to_hex()
+    );
+    let commit = repo
+        .odb()
+        .write(ObjectKind::Commit, commit.as_bytes())
+        .expect("commit");
+    std::fs::write(
+        repo.git_dir().join("refs/heads/main"),
+        format!("{}\n", commit.to_hex()),
+    )
+    .expect("ref");
+
+    let mut pack_objects = Command::new("git")
+        .current_dir(dir.path())
+        .args(["pack-objects", "-q", ".git/objects/pack/pack"])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .spawn()
+        .expect("spawn git pack-objects");
+    {
+        use std::io::Write as _;
+        let mut stdin = pack_objects.stdin.take().expect("stdin");
+        writeln!(stdin, "{}", commit.to_hex()).expect("write oid");
+    }
+    assert!(pack_objects.wait().expect("pack-objects").success());
+    git(dir.path(), &["prune-packed"]);
+    clear_pack_cache_after_disk_maintenance();
+    assert!(repo
+        .odb()
+        .enumerate_local_loose_objects()
+        .expect("loose")
+        .is_empty());
+    (dir, repo, commit)
+}
+
+/// Like `git prune`, nothing is walked when there is no loose object to consider.
+#[test]
+fn prune_with_no_loose_objects_skips_reachability_walk() {
+    let _pack_guard = test_pack_cache_guard();
+    let (_dir, repo, commit) = packed_repo_whose_tip_tree_is_missing();
+
+    let stats = prune_loose_objects(
+        &repo,
+        &PruneOptions::with_older_than(Some(std::time::SystemTime::now())),
+    )
+    .expect("prune with nothing loose must not walk the graph");
+    assert_eq!(stats, grit_lib::refs::gc::PruneStats::default());
+
+    let stats = grit_lib::refs::gc::prune_loose_unreachable(repo.odb(), &[commit], None)
+        .expect("prune with nothing loose must not walk the graph");
+    assert_eq!(stats, grit_lib::refs::gc::PruneStats::default());
+}
+
+/// Loose objects inside the grace window are kept whether reachable or not, so they do
+/// not need the walk either.
+#[test]
+fn prune_skips_reachability_walk_when_all_loose_objects_are_recent() {
+    let _pack_guard = test_pack_cache_guard();
+    let (_dir, repo, commit) = packed_repo_whose_tip_tree_is_missing();
+    repo.odb()
+        .write(ObjectKind::Blob, b"recent unreachable\n")
+        .expect("blob");
+    let cutoff = std::time::SystemTime::UNIX_EPOCH + std::time::Duration::from_secs(1);
+
+    let stats = grit_lib::refs::gc::prune_loose_unreachable(repo.odb(), &[commit], Some(cutoff))
+        .expect("recent loose objects must not trigger the walk");
+    assert_eq!(stats.pruned, 0, "{stats:?}");
+    assert_eq!(stats.kept, 1, "{stats:?}");
+}
+
+/// gc on an already packed repository with a fresh pack and nothing loose skips the repack
+/// and the prune walk, and still reports the prune as done.
+#[test]
+fn gc_on_single_fresh_pack_skips_reachability_walk() {
+    let _pack_guard = test_pack_cache_guard();
+    let (_dir, repo, _commit) = packed_repo_whose_tip_tree_is_missing();
+    let now = OffsetDateTime::now_utc().unix_timestamp();
+
+    let stats = gc(&repo, &GcOptions::with_reflog_policy(now, false))
+        .expect("gc of a packed repository must not walk the graph");
+    assert_eq!(stats.repack.objects_packed, None, "{:?}", stats.repack);
+    assert!(stats.prune_ran, "{stats:?}");
+    assert_eq!(stats.prune, grit_lib::refs::gc::PruneStats::default());
+}
+
+fn top_commit_graph_has_bloom_filters(repo: &Repository) -> bool {
+    grit_lib::revwalk::commit_graph::CommitGraphChain::try_load(repo.odb().objects_dir())
+        .expect("load commit-graph")
+        .expect("commit-graph written")
+        .top_layer_bloom_settings()
+        .is_some()
+}
+
+/// Like `git gc`, the commit-graph keeps changed-path Bloom filters when the existing graph
+/// has them and does not compute them from scratch otherwise.
+#[test]
+fn gc_commit_graph_keeps_existing_changed_path_choice_like_git() {
+    let _pack_guard = test_pack_cache_guard();
+    let dir = TempDir::new().expect("tempdir");
+    git(dir.path(), &["init", "-b", "main"]);
+    std::fs::write(dir.path().join("a.txt"), b"one\n").expect("write");
+    git(dir.path(), &["add", "a.txt"]);
+    git(dir.path(), &["commit", "-m", "one"]);
+    let repo = Repository::discover(Some(dir.path()), &RepositoryOptions::empty()).expect("open");
+
+    gc(&repo, &GcOptions::with_reflog_policy(1_700_000_000, false)).expect("first gc");
+    assert!(
+        !top_commit_graph_has_bloom_filters(&repo),
+        "gc must not add Bloom filters to a repository without them"
+    );
+    git(dir.path(), &["commit-graph", "verify"]);
+
+    git(
+        dir.path(),
+        &["commit-graph", "write", "--reachable", "--changed-paths"],
+    );
+    std::fs::write(dir.path().join("a.txt"), b"two\n").expect("write");
+    git(dir.path(), &["commit", "-am", "two"]);
+    gc(&repo, &GcOptions::with_reflog_policy(1_700_000_000, false)).expect("second gc");
+    assert!(
+        top_commit_graph_has_bloom_filters(&repo),
+        "gc must keep the Bloom filters of an existing commit-graph"
+    );
+    git(dir.path(), &["commit-graph", "verify"]);
+    git_fsck(dir.path(), true);
+}

@@ -31,19 +31,14 @@ use crate::diff::bloom::BloomFilterSettings;
 use crate::environment::Environment;
 use crate::error::{ConfigError, Error, Result};
 use crate::fsck as repo_fsck;
-use crate::gc::{
-    prune_loose_unreachable, prune_loose_unreachable_after_repack, reachability_closure_for_roots,
-    PruneStats,
-};
+use crate::gc::{prune_loose_unreachable_with, LazyReachable, PruneStats};
 use crate::git_date::approx::approxidate_careful_at;
 use crate::index_pack::{install_pack_bytes, IngestPackOptions};
 use crate::midx::{
     clear_pack_midx_state, write_multi_pack_index_with_options, MidxBitmapWriteOutcome,
     WriteMultiPackIndexOptions, WriteMultiPackIndexResult,
 };
-use crate::objects::{
-    oid_hash_map, oid_hash_set_from, parse_commit, parse_tag, parse_tree, ObjectId, ObjectKind,
-};
+use crate::objects::{oid_hash_map, parse_commit, parse_tag, parse_tree, ObjectId, ObjectKind};
 use crate::odb::Odb;
 use crate::odb::UnreachablePackRetention;
 use crate::pack_bitmap::{PackBitmapWriteOptions, PackBitmapWriter};
@@ -319,7 +314,10 @@ pub struct GcOptions {
     pub now_unix: i64,
     /// When true, pack loose refs before other gc steps.
     pub pack_refs: bool,
-    /// When true, write `objects/info/commit-graph` with changed paths after repack/prune.
+    /// When true, write `objects/info/commit-graph` after repack/prune.
+    ///
+    /// Changed-path Bloom filters are kept when the existing graph has them and are not
+    /// added otherwise, matching `git gc`.
     pub write_commit_graph: bool,
 }
 
@@ -428,6 +426,18 @@ pub(crate) fn bloom_settings_for_commit_graph_write(
         }
     }
     bloom
+}
+
+/// Whether the current commit-graph carries changed-path Bloom filters.
+///
+/// Maintenance rewrites keep Bloom filters when the graph already has them and otherwise
+/// write without them, as Git's gc does: computing filters from scratch diffs every
+/// commit's tree and costs far more than the rest of the graph.
+fn existing_commit_graph_has_changed_paths(repo: &Repository) -> bool {
+    repo.odb()
+        .files_objects_dir()
+        .and_then(|dir| CommitGraphChain::try_load(dir).ok().flatten())
+        .is_some_and(|chain| chain.top_layer_bloom_settings().is_some())
 }
 
 pub(crate) fn commit_graph_writes_generation_data(config: &ConfigSet) -> bool {
@@ -649,7 +659,7 @@ fn repack_detail(repo: &Repository, opts: &RepackOptions) -> Result<RepackDetail
             prune_packed_loose: 0,
             unreachable_loose: PruneStats::default(),
             unreachable_prune_ms: 0,
-            unreachable_prune_ran: false,
+            unreachable_prune_ran: !opts.keep_unreachable && !opts.dry_run,
         });
     }
 
@@ -672,6 +682,7 @@ fn repack_detail(repo: &Repository, opts: &RepackOptions) -> Result<RepackDetail
     });
 
     let run_incremental = opts.incremental;
+    let reachable = LazyReachable::new(odb, &roots);
 
     let skip_repack = !opts.force_recompress
         && !opts.write_bitmap
@@ -683,7 +694,7 @@ fn repack_detail(repo: &Repository, opts: &RepackOptions) -> Result<RepackDetail
             opts.auto_skip,
             cfg.as_ref(),
         )
-        && !skipping_repack_would_retain_prunable_packed_objects(odb, &pack_dir, &roots, opts)?;
+        && !skipping_repack_would_retain_prunable_packed_objects(odb, &pack_dir, &reachable, opts)?;
 
     if opts.dry_run {
         report.objects = if skip_repack {
@@ -716,15 +727,6 @@ fn repack_detail(repo: &Repository, opts: &RepackOptions) -> Result<RepackDetail
         build_repack_pack(odb, &roots, opts.keep_unreachable, &pack_opts, opts.threads)?
     };
     let pack_bytes = built_pack.bytes;
-    if pack_bytes.is_empty() {
-        return Ok(RepackDetail {
-            report,
-            prune_packed_loose: 0,
-            unreachable_loose: PruneStats::default(),
-            unreachable_prune_ms: 0,
-            unreachable_prune_ran: false,
-        });
-    }
     let mut prune_packed_loose = 0usize;
     let mut unreachable_loose = PruneStats::default();
     let pack_trailer_len = 12 + odb.hash_algo().len();
@@ -788,11 +790,7 @@ fn repack_detail(repo: &Repository, opts: &RepackOptions) -> Result<RepackDetail
         let _ = odb.loosen_unreachable_from_superseded_packs(
             &pack_dir,
             &ingested.pack_path,
-            || {
-                Ok(oid_hash_set_from(&reachability_closure_for_roots(
-                    odb, &roots,
-                )?))
-            },
+            &reachable,
             retention,
         )?;
 
@@ -809,7 +807,12 @@ fn repack_detail(repo: &Repository, opts: &RepackOptions) -> Result<RepackDetail
             prune_packed_objects(objects_dir, PrunePackedOptions::default())?.len();
 
         if opts.write_commit_graph {
-            write_commit_graph(repo, &CommitGraphOptions::with_changed_paths(true))?;
+            write_commit_graph(
+                repo,
+                &CommitGraphOptions::with_changed_paths(existing_commit_graph_has_changed_paths(
+                    repo,
+                )),
+            )?;
         }
     }
 
@@ -818,7 +821,7 @@ fn repack_detail(repo: &Repository, opts: &RepackOptions) -> Result<RepackDetail
     if !opts.keep_unreachable {
         let keep_newer_than = opts.prune_older_than.map(offset_to_system_time);
         let prune_start = Instant::now();
-        unreachable_loose = prune_loose_unreachable_after_repack(odb, &roots, keep_newer_than)?;
+        unreachable_loose = prune_loose_unreachable_with(odb, &reachable, keep_newer_than, false)?;
         unreachable_prune_ms = prune_start.elapsed().as_millis() as u64;
         unreachable_prune_ran = true;
     }
@@ -960,10 +963,12 @@ fn should_auto_skip_repack(
 
 /// True when skipping repack would leave unreachable objects in pack storage that repack would
 /// remove under `opts` (for example expired unreachable commits when `gc.pruneExpire=now`).
+///
+/// The reachability walk only runs once some pack is old enough to have objects dropped.
 fn skipping_repack_would_retain_prunable_packed_objects(
     odb: &Odb,
     pack_dir: &Path,
-    roots: &[ObjectId],
+    reachable: &LazyReachable<'_>,
     opts: &RepackOptions,
 ) -> Result<bool> {
     if opts.keep_unreachable {
@@ -974,7 +979,6 @@ fn skipping_repack_would_retain_prunable_packed_objects(
     } else {
         UnreachablePackRetention::DropAll
     };
-    let reachable = reachability_closure_for_roots(odb, roots)?;
     let indexes = crate::pack::read_local_pack_indexes_cached(odb.objects_dir())?;
     for idx in indexes {
         if pack_has_keep_marker(pack_dir, &idx.pack_path) {
@@ -991,6 +995,7 @@ fn skipping_repack_would_retain_prunable_packed_objects(
         if !drop_unreachable_from_pack {
             continue;
         }
+        let reachable = reachable.get()?;
         for entry in idx.iter() {
             let Ok(oid) = ObjectId::from_bytes(entry.oid()) else {
                 continue;
@@ -1070,33 +1075,22 @@ pub fn gc(repo: &Repository, opts: &GcOptions) -> Result<GcStats> {
         return Ok(stats);
     }
 
-    if repack_opts.keep_unreachable {
-        stats.prune = PruneStats::default();
-        stats.prune_ran = false;
-    } else if stats.repack.unreachable_prune_ran {
-        stats.prune = PruneStats {
-            pruned: stats.repack.unreachable_loose_pruned,
-            kept: stats.repack.unreachable_loose_kept,
-        };
-        stats.prune_ran = true;
-    } else {
-        let roots = collect_maintenance_object_roots(repo)?;
-        let keep_newer_than = repack_opts.prune_older_than.map(offset_to_system_time);
-        let prune_start = Instant::now();
-        stats.prune = prune_loose_unreachable(odb, &roots, keep_newer_than)?;
-        stats.phase_timings.prune_ms = duration_ms(prune_start.elapsed());
-        stats.prune_ran = true;
-    }
+    // Repack prunes unreachable loose objects itself (sharing its reachability walk), so gc
+    // only reports the outcome.
+    stats.prune_ran = stats.repack.unreachable_prune_ran;
+    stats.prune = PruneStats {
+        pruned: stats.repack.unreachable_loose_pruned,
+        kept: stats.repack.unreachable_loose_kept,
+    };
 
     if opts.write_commit_graph {
         let start = Instant::now();
         stats.commit_graph = Some(write_commit_graph(
             repo,
-            &CommitGraphOptions::with_changed_paths(true),
+            &CommitGraphOptions::with_changed_paths(existing_commit_graph_has_changed_paths(repo)),
         )?);
         stats.phase_timings.commit_graph_ms = duration_ms(start.elapsed());
     }
-    let _ = odb;
     Ok(stats)
 }
 

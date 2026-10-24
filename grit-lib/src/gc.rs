@@ -16,12 +16,15 @@
 //! Scope note: only the local / on-disk path is in scope here. `git://`,
 //! `http(s)`, and `ssh` remotes are out of scope and left as TODOs.
 
+use std::cell::OnceCell;
 use std::collections::{HashSet, VecDeque};
 use std::path::Path;
 use std::time::SystemTime;
 
 use crate::error::{Error, Result};
-use crate::objects::{parse_commit, parse_tag, parse_tree, ObjectId, ObjectKind};
+use crate::objects::{
+    oid_hash_set, parse_commit, parse_tag, ObjectId, ObjectKind, OidHashSet, TreeRefIter,
+};
 use crate::odb::Odb;
 use crate::refs::store::{Expected, RawRef, RefUpdate, RefUpdateFlags};
 use crate::refs::{self, Ref};
@@ -50,6 +53,9 @@ pub struct PruneStats {
 /// unreachable. A `None` grace window prunes every unreachable loose object
 /// regardless of age.
 ///
+/// Like `git prune`, the walk is skipped when no loose object is old enough to
+/// delete; the roots themselves are still required to exist.
+///
 /// Submodule (gitlink) tree entries are skipped during the walk: the commit they
 /// name lives in another object store.
 ///
@@ -58,8 +64,9 @@ pub struct PruneStats {
 ///
 /// # Errors
 ///
-/// Returns an error if a root or a reachable object cannot be read or parsed, or
-/// on I/O failure while enumerating or deleting loose object files.
+/// Returns [`Error::ObjectNotFound`] if a root is missing, an error if the walk runs
+/// and a reachable object is missing or cannot be read or parsed, or on I/O failure
+/// while enumerating or deleting loose object files.
 pub fn prune_loose_unreachable(
     odb: &Odb,
     reachable_roots: &[ObjectId],
@@ -69,65 +76,62 @@ pub fn prune_loose_unreachable(
 }
 
 /// Like [`prune_loose_unreachable`], but skips deletion when `dry_run` is true.
+///
+/// # Errors
+///
+/// Same as [`prune_loose_unreachable`].
 pub fn prune_loose_unreachable_with_dry_run(
     odb: &Odb,
     reachable_roots: &[ObjectId],
     keep_newer_than: Option<SystemTime>,
     dry_run: bool,
 ) -> Result<PruneStats> {
-    odb.require_files_primary("gc")?;
-    let loose = odb.enumerate_local_loose_objects()?;
-    prune_unreachable_from(odb, loose, reachable_roots, keep_newer_than, dry_run)
+    prune_loose_unreachable_with(
+        odb,
+        &LazyReachable::new(odb, reachable_roots),
+        keep_newer_than,
+        dry_run,
+    )
 }
 
-/// [`prune_loose_unreachable`] right after a repack built from the same `reachable_roots`.
-///
-/// Building that pack already read every reachable object, so when no loose objects
-/// remain there is nothing to delete and the reachability walk is skipped.
-///
-/// # Errors
-///
-/// Same as [`prune_loose_unreachable`] whenever loose objects remain.
-pub(crate) fn prune_loose_unreachable_after_repack(
+/// [`prune_loose_unreachable_with_dry_run`] sharing `reachable` with the other steps of a
+/// maintenance run, so one run walks the object graph at most once.
+pub(crate) fn prune_loose_unreachable_with(
     odb: &Odb,
-    reachable_roots: &[ObjectId],
-    keep_newer_than: Option<SystemTime>,
-) -> Result<PruneStats> {
-    odb.require_files_primary("gc")?;
-    let loose = odb.enumerate_local_loose_objects()?;
-    if loose.is_empty() {
-        return Ok(PruneStats::default());
-    }
-    prune_unreachable_from(odb, loose, reachable_roots, keep_newer_than, false)
-}
-
-fn prune_unreachable_from(
-    odb: &Odb,
-    loose: Vec<(ObjectId, std::path::PathBuf)>,
-    reachable_roots: &[ObjectId],
+    reachable: &LazyReachable<'_>,
     keep_newer_than: Option<SystemTime>,
     dry_run: bool,
 ) -> Result<PruneStats> {
+    odb.require_files_primary("gc")?;
     let mut stats = PruneStats::default();
-    let reachable = reachable_closure(odb, reachable_roots)?;
 
-    for (oid, path) in loose {
+    // Respect the grace window first: objects whose mtime is not strictly older than
+    // the cutoff are kept whether reachable or not, so they never need the walk.
+    let candidates: Vec<_> = odb
+        .enumerate_local_loose_objects()?
+        .into_iter()
+        .filter(|(_, path)| {
+            let too_new = keep_newer_than.is_some_and(|cutoff| {
+                std::fs::metadata(path)
+                    .and_then(|m| m.modified())
+                    .is_ok_and(|mtime| mtime >= cutoff)
+            });
+            if too_new {
+                stats.kept += 1;
+            }
+            !too_new
+        })
+        .collect();
+    if candidates.is_empty() {
+        reachable.require_roots_exist()?;
+        return Ok(stats);
+    }
+
+    let reachable = reachable.get()?;
+    for (oid, path) in candidates {
         if reachable.contains(&oid) {
             stats.kept += 1;
             continue;
-        }
-
-        // Respect the grace window: keep objects whose mtime is not strictly
-        // older than the cutoff.
-        if let Some(cutoff) = keep_newer_than {
-            let too_new = std::fs::metadata(&path)
-                .and_then(|m| m.modified())
-                .map(|mtime| mtime >= cutoff)
-                .unwrap_or(false);
-            if too_new {
-                stats.kept += 1;
-                continue;
-            }
         }
 
         if dry_run {
@@ -170,12 +174,48 @@ pub fn collect_referenced_object_roots(git_dir: &Path) -> Result<Vec<ObjectId>> 
     Ok(roots.into_iter().collect())
 }
 
-/// Full object closure reachable from maintenance roots (used before repack pack removal).
-pub(crate) fn reachability_closure_for_roots(
-    odb: &Odb,
-    roots: &[ObjectId],
-) -> Result<HashSet<ObjectId>> {
-    reachable_closure(odb, roots)
+/// Object closure reachable from a fixed set of roots, walked on first use.
+///
+/// One maintenance run (repack skip check, loosening superseded packs, unreachable prune)
+/// shares a single instance, so the graph is walked at most once and not at all when no
+/// step needs it.
+pub(crate) struct LazyReachable<'a> {
+    odb: &'a Odb,
+    roots: &'a [ObjectId],
+    closure: OnceCell<OidHashSet>,
+}
+
+impl<'a> LazyReachable<'a> {
+    /// Closure of `roots` in `odb`; nothing is read until [`Self::get`].
+    pub(crate) fn new(odb: &'a Odb, roots: &'a [ObjectId]) -> Self {
+        Self {
+            odb,
+            roots,
+            closure: OnceCell::new(),
+        }
+    }
+
+    /// The reachable set, walking the graph on the first call.
+    ///
+    /// # Errors
+    ///
+    /// Same as the reachability walk: [`Error::ObjectNotFound`] for a missing reachable
+    /// object, and read or parse errors.
+    pub(crate) fn get(&self) -> Result<&OidHashSet> {
+        if let Some(closure) = self.closure.get() {
+            return Ok(closure);
+        }
+        let closure = reachable_closure(self.odb, self.roots)?;
+        Ok(self.closure.get_or_init(|| closure))
+    }
+
+    /// Fail with [`Error::ObjectNotFound`] when a root is missing, without walking the graph.
+    pub(crate) fn require_roots_exist(&self) -> Result<()> {
+        if self.closure.get().is_some() {
+            return Ok(());
+        }
+        require_objects_exist(self.odb, self.roots)
+    }
 }
 
 /// Compute the full object closure reachable from `roots` (commits → parents and
@@ -192,9 +232,10 @@ pub(crate) fn reachability_closure_for_roots(
 const S_IFMT: u32 = 0o170000;
 const S_IFDIR: u32 = 0o040000;
 
-fn reachable_closure(odb: &Odb, roots: &[ObjectId]) -> Result<HashSet<ObjectId>> {
-    let mut seen: HashSet<ObjectId> = HashSet::new();
+fn reachable_closure(odb: &Odb, roots: &[ObjectId]) -> Result<OidHashSet> {
+    let mut seen = oid_hash_set();
     let mut queue: VecDeque<ObjectId> = VecDeque::new();
+    let oid_len = odb.hash_algo().len();
     let mut blobs: Vec<ObjectId> = Vec::new();
 
     for &root in roots {
@@ -218,7 +259,8 @@ fn reachable_closure(odb: &Odb, roots: &[ObjectId]) -> Result<HashSet<ObjectId>>
                 }
             }
             ObjectKind::Tree => {
-                for entry in parse_tree(&obj.data)? {
+                for entry in TreeRefIter::with_oid_len(&obj.data, oid_len) {
+                    let entry = entry?;
                     // Skip submodule (gitlink) entries.
                     if entry.mode == 0o160000 {
                         continue;

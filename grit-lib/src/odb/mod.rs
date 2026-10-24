@@ -1094,18 +1094,18 @@ impl Odb {
     /// Git gc stores grace-protected unreachable objects in cruft packs; grit writes them
     /// loose (with preserved mtimes) so later loose pruning can apply `gc.pruneExpire`.
     ///
-    /// `reachable` computes the reachable object set; it only runs when a superseded
-    /// pack holds an object that is in neither the new pack nor a `.keep` pack.
+    /// `reachable` is only walked when a superseded pack holds an object that is in
+    /// neither the new pack nor a `.keep` pack.
     ///
     /// # Errors
     ///
     /// Propagates pack index read failures, object read/write errors, I/O failures,
-    /// and errors from `reachable`.
+    /// and errors from the reachability walk.
     pub(crate) fn loosen_unreachable_from_superseded_packs(
         &self,
         pack_dir: &Path,
         keep_pack: &Path,
-        reachable: impl Fn() -> Result<OidHashSet>,
+        reachable: &crate::gc::LazyReachable<'_>,
         retention: UnreachablePackRetention,
     ) -> Result<usize> {
         if matches!(retention, UnreachablePackRetention::DropAll) {
@@ -1119,7 +1119,6 @@ impl Odb {
             HashSet::new()
         };
         let kept_pack_oids = oids_in_marker_kept_packs(pack_dir, keep_pack)?;
-        let mut reachable_set: Option<OidHashSet> = None;
         let mut loosened = 0usize;
         for (idx_path, pack_mtime) in superseded_pack_indexes(pack_dir, keep_pack)? {
             let oids = PackedObjects::object_ids_from_index_path(&idx_path)?;
@@ -1135,10 +1134,7 @@ impl Odb {
                 if keep_pack_oids.contains(&oid) || kept_pack_oids.contains(&oid) {
                     continue;
                 }
-                if reachable_set.is_none() {
-                    reachable_set = Some(reachable()?);
-                }
-                if reachable_set.as_ref().is_some_and(|set| set.contains(&oid)) {
+                if reachable.get()?.contains(&oid) {
                     continue;
                 }
                 let loose_path = oid.loose_path_in(&self.objects_dir);
