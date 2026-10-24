@@ -422,24 +422,14 @@ fn filtered_worktree_file_changes(
 /// Uncommitted file list for default `grit diff` (no commit arguments).
 ///
 /// With no `--against`, compares HEAD's tree to the worktree (staged and unstaged together).
-/// Path-limited diffs compare the index to the worktree only, matching Git's scoped default.
+/// Path limits only narrow which paths are included; they do not change that comparison.
 fn uncommitted_changes_for_default_diff(
     repo: &grit_lib::repo::Repository,
     against: Option<&str>,
     pathspecs: &[String],
     diff_options: &DiffOptions,
 ) -> Result<Vec<FileChange>> {
-    if against.is_some() {
-        return filtered_worktree_file_changes(repo, against, pathspecs, diff_options);
-    }
-    if pathspecs.is_empty() {
-        return filtered_worktree_file_changes(repo, None, pathspecs, diff_options);
-    }
-    Ok(filter_file_changes(
-        unstaged_changes(repo, diff_options)?,
-        repo,
-        pathspecs,
-    ))
+    filtered_worktree_file_changes(repo, against, pathspecs, diff_options)
 }
 
 fn outcome_from_change_names(changes: Vec<FileChange>, format: DiffFormatArgs) -> DiffOutcome {
@@ -866,19 +856,11 @@ fn run_patch_text(opts: DiffRunOptions) -> Result<DiffOutcome> {
                     None => None,
                 }
             };
-            let entries = if against_ref.is_some() || worktree_pathspecs.is_empty() {
-                filter_diff_entries(
-                    worktree_against_tree_entries(&repo, base_tree.as_ref(), &diff_options)?,
-                    &repo,
-                    &worktree_pathspecs,
-                )
-            } else {
-                filter_diff_entries(
-                    unstaged_entries(&repo, &diff_options)?,
-                    &repo,
-                    &worktree_pathspecs,
-                )
-            };
+            let entries = filter_diff_entries(
+                worktree_against_tree_entries(&repo, base_tree.as_ref(), &diff_options)?,
+                &repo,
+                &worktree_pathspecs,
+            );
             patch_text_outcome(&repo, entries, Some(changes), diff_options, format, quiet)
         }
         1 => {

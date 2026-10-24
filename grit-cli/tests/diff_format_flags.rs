@@ -210,6 +210,55 @@ fn diff_name_status_default_includes_staged_and_unstaged() {
     );
 }
 
+/// Regression for issue #1703: path limits must not drop staged-only changes from default diff.
+#[test]
+fn diff_default_path_limit_includes_staged_only_change() {
+    let fx = CliFixture::new();
+    std::fs::write(fx.path().join("a.txt"), b"1\n").expect("write a");
+    std::fs::write(fx.path().join("b.txt"), b"1\n").expect("write b");
+    git(fx.path(), &["add", "."]);
+    git(fx.path(), &["commit", "-m", "init"]);
+    std::fs::write(fx.path().join("a.txt"), b"2\n").expect("edit a staged");
+    git(fx.path(), &["add", "a.txt"]);
+    std::fs::write(fx.path().join("b.txt"), b"2\n").expect("edit b unstaged");
+
+    let full = grit(fx.path(), &["diff", "--json"]);
+    assert!(full.ok(), "{}", full.dump("full diff"));
+    let v: serde_json::Value = serde_json::from_str(&full.stdout).expect("json");
+    assert!(v["changed"].as_bool().unwrap());
+    let full_paths: Vec<_> = v["files"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|f| f["path"].as_str())
+        .collect();
+    assert_eq!(full_paths, ["a.txt", "b.txt"]);
+
+    let a_only = grit(fx.path(), &["diff", "--json", "--", "a.txt"]);
+    assert!(a_only.ok(), "{}", a_only.dump("a.txt json"));
+    let a_v: serde_json::Value = serde_json::from_str(&a_only.stdout).expect("json a");
+    assert!(
+        a_v["changed"].as_bool().unwrap(),
+        "staged-only a.txt: {a_v}"
+    );
+    assert_eq!(a_v["files"].as_array().unwrap().len(), 1);
+    assert_eq!(a_v["files"][0]["path"], "a.txt");
+
+    let a_exit = grit(fx.path(), &["diff", "--exit-code", "--", "a.txt"]);
+    assert_eq!(a_exit.status, Some(1), "{}", a_exit.dump("a.txt exit-code"));
+
+    let b_only = grit(fx.path(), &["diff", "--json", "--", "b.txt"]);
+    assert!(b_only.ok(), "{}", b_only.dump("b.txt json"));
+    let b_v: serde_json::Value = serde_json::from_str(&b_only.stdout).expect("json b");
+    assert!(b_v["changed"].as_bool().unwrap());
+    assert_eq!(b_v["files"][0]["path"], "b.txt");
+
+    let a_name = grit(fx.path(), &["diff", "--name-status", "--", "a.txt"]);
+    assert!(a_name.ok(), "{}", a_name.dump("a.txt name-status"));
+    assert!(a_name.stdout.contains("a.txt"));
+    assert!(!a_name.stdout.contains("b.txt"));
+}
+
 #[test]
 fn diff_name_only_path_limit() {
     let fx = CliFixture::new();
