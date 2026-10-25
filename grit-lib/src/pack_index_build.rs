@@ -228,9 +228,9 @@ pub(crate) fn build_mapped_pack_index(
 ///
 /// # Errors
 ///
-/// Returns [`Error::CorruptObject`] for a malformed pack, a bad trailer (when
-/// `verify_trailer`), or deltas whose bases are in neither the pack nor `odb`
-/// (the message then contains `could not be resolved for pack index`).
+/// Returns [`Error::CorruptObject`] for a malformed pack or a bad trailer (when
+/// `verify_trailer`), and [`Error::UnresolvedDeltas`] for deltas whose bases are in
+/// neither the pack nor `odb`.
 pub fn build_pack_index_records(
     pack: &[u8],
     odb: &Odb,
@@ -902,9 +902,7 @@ fn resolve_deltas(
     let total = u64::try_from(pending.deltas.len()).unwrap_or(u64::MAX);
     let unresolved = total.saturating_sub(walk.resolved());
     if unresolved > 0 {
-        return Err(Error::CorruptObject(format!(
-            "{unresolved} delta(s) could not be resolved for pack index"
-        )));
+        return Err(Error::UnresolvedDeltas { count: unresolved });
     }
     let mut thin_bases: Vec<ObjectId> = thin
         .iter()
@@ -1349,10 +1347,7 @@ mod line_coverage_tests {
         let pack = pb.build().bytes;
         for threads in [1_usize, 2] {
             match build_pack_index_records(&pack, &odb, Parallelism::resolve(Some(threads)), true) {
-                Err(Error::CorruptObject(msg)) => assert!(
-                    msg.contains("2 delta(s) could not be resolved for pack index"),
-                    "threads={threads}: {msg}"
-                ),
+                Err(Error::UnresolvedDeltas { count: 2 }) => {}
                 other => panic!("threads={threads}: expected unresolved deltas, got {other:?}"),
             }
         }

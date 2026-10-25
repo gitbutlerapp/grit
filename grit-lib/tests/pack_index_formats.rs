@@ -469,7 +469,13 @@ fn truncated_idx_bad_magic_version_and_trailer() {
     let last = trailer_bytes.len() - 1;
     trailer_bytes[last] ^= 0xff;
     std::fs::write(&bad_trailer, &trailer_bytes).expect("write bad trailer idx");
-    assert_corrupt(read_pack_index(&bad_trailer).map(|_| ()));
+    match read_pack_index(&bad_trailer) {
+        Err(Error::PackIndexChecksumMismatch { path, .. }) => assert_eq!(path, bad_trailer),
+        other => panic!(
+            "expected PackIndexChecksumMismatch, got {:?}",
+            other.map(|_| ())
+        ),
+    }
     read_pack_index_no_verify(&bad_trailer).expect("no-verify loads bad trailer");
 }
 

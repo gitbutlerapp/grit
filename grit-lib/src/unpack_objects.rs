@@ -165,8 +165,8 @@ impl UnpackSink for StoreSink<'_> {
 ///
 /// # Errors
 ///
-/// - [`Error::CorruptObject`] — invalid pack format, checksum mismatch, or
-///   unresolvable delta chains.
+/// - [`Error::CorruptObject`] — invalid pack format or checksum mismatch.
+/// - [`Error::UnresolvedDeltas`] — deltas whose bases are in neither the pack nor `odb`.
 /// - [`Error::Io`] — I/O failure reading from `reader`.
 /// - [`Error::Zlib`] — decompression failure.
 pub fn unpack_objects(reader: &mut dyn Read, odb: &Odb, opts: &UnpackOptions) -> Result<usize> {
@@ -233,9 +233,9 @@ pub fn unpack_objects(reader: &mut dyn Read, odb: &Odb, opts: &UnpackOptions) ->
 ///
 /// # Errors
 ///
-/// - [`Error::CorruptObject`] — invalid pack format, checksum mismatch, a delta whose
-///   base is in neither the pack nor `bases`, or (with [`UnpackOptions::strict`]) a
-///   reference that resolves nowhere.
+/// - [`Error::CorruptObject`] — invalid pack format, checksum mismatch, or (with
+///   [`UnpackOptions::strict`]) a reference that resolves nowhere.
+/// - [`Error::UnresolvedDeltas`] — deltas whose bases are in neither the pack nor `bases`.
 /// - [`Error::Io`] — failure reading from `reader`.
 /// - [`Error::Zlib`] — decompression failure.
 /// - Any error `store` or `bases` return.
@@ -473,10 +473,9 @@ fn unpack_into<S: UnpackSink + ?Sized>(
 
         remaining = still_pending;
         if remaining.len() == before {
-            return Err(Error::CorruptObject(format!(
-                "{} delta(s) could not be resolved",
-                remaining.len()
-            )));
+            return Err(Error::UnresolvedDeltas {
+                count: u64::try_from(remaining.len()).unwrap_or(u64::MAX),
+            });
         }
     }
     if let (Some(p), true) = (progress.as_mut(), resolving) {
@@ -822,12 +821,7 @@ fn pack_is_thin_with_ofs_deltas(
             let in_pack: HashSet<ObjectId> = records.into_iter().map(|r| r.oid).collect();
             Ok(ref_delta_bases.iter().any(|b| !in_pack.contains(b)))
         }
-        Err(Error::CorruptObject(msg))
-            if msg.contains("delta base not available")
-                || msg.contains("could not be resolved for pack index") =>
-        {
-            Ok(true)
-        }
+        Err(Error::UnresolvedDeltas { .. }) => Ok(true),
         Err(e) => Err(e),
     }
 }
@@ -838,6 +832,11 @@ fn pack_is_thin_with_ofs_deltas(
 /// applying a push to the permanent ODB.
 ///
 /// Thin-pack bases may be resolved from `odb` when they are not present in the pack.
+///
+/// # Errors
+///
+/// Returns [`Error::UnresolvedDeltas`] when some delta bases are in neither the pack
+/// nor `odb`, and [`Error::CorruptObject`] or [`Error::Zlib`] for a malformed pack.
 pub fn pack_bytes_to_object_map(data: &[u8], odb: &Odb) -> Result<HashMap<ObjectId, Object>> {
     build_pack_object_map(PackReader::new(data), odb)
 }
@@ -866,8 +865,8 @@ pub struct PackIndexRecord {
 ///
 /// # Errors
 ///
-/// Returns [`Error::CorruptObject`] for a malformed pack or a delta whose base is in
-/// neither the pack nor `odb`.
+/// Returns [`Error::CorruptObject`] for a malformed pack and [`Error::UnresolvedDeltas`]
+/// for deltas whose bases are in neither the pack nor `odb`.
 pub fn pack_index_records_from_bytes(data: &[u8], odb: &Odb) -> Result<Vec<PackIndexRecord>> {
     pack_index_records_with_threads(
         data,
@@ -1023,10 +1022,9 @@ fn build_pack_object_map(mut rd: PackReader<'_>, odb: &Odb) -> Result<HashMap<Ob
 
         remaining = still_pending;
         if remaining.len() == before {
-            return Err(Error::CorruptObject(format!(
-                "{} delta(s) could not be resolved",
-                remaining.len()
-            )));
+            return Err(Error::UnresolvedDeltas {
+                count: u64::try_from(remaining.len()).unwrap_or(u64::MAX),
+            });
         }
     }
 
@@ -2215,6 +2213,35 @@ mod tests {
         let err =
             unpack_objects(&mut pack.as_slice(), &odb, &UnpackOptions::default()).unwrap_err();
         assert!(err.to_string().contains("could not be resolved"));
+    }
+
+    #[test]
+    fn missing_ref_delta_base_is_typed_on_every_ingest_path() {
+        use grit_test_support::objects::{HashAlgo as FixtureAlgo, PackBuilder};
+        let delta = [0u8, 1u8, 1u8, b'x'];
+        let mut pb = PackBuilder::new(FixtureAlgo::Sha1);
+        pb.add_ref_delta(&[0xdd; 20], &delta, delta.len());
+        pb.add_ref_delta(&[0xee; 20], &delta, delta.len());
+        let pack = pb.build().bytes;
+        let tmp = tempfile::tempdir().unwrap();
+        let odb = Odb::new(tmp.path());
+
+        let unpacked = unpack_objects(&mut pack.as_slice(), &odb, &UnpackOptions::default());
+        assert!(
+            matches!(unpacked, Err(Error::UnresolvedDeltas { count: 2 })),
+            "{unpacked:?}"
+        );
+        let mapped = pack_bytes_to_object_map(&pack, &odb);
+        assert!(
+            matches!(mapped, Err(Error::UnresolvedDeltas { count: 2 })),
+            "{mapped:?}"
+        );
+        let indexed = pack_index_records_from_bytes(&pack, &odb);
+        assert!(
+            matches!(indexed, Err(Error::UnresolvedDeltas { count: 2 })),
+            "{indexed:?}"
+        );
+        assert!(pack_is_thin(&pack, HashAlgo::Sha1));
     }
 
     #[test]

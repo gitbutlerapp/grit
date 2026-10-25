@@ -863,6 +863,101 @@ fn truncated_pack_checksum() {
     }));
 }
 
+/// Repack with git and return the `.idx` and `.pack` paths, made writable.
+fn git_repack_single_pack(root: &std::path::Path) -> (std::path::PathBuf, std::path::PathBuf) {
+    git(root, &["repack", "-a", "-d"]);
+    let pack_dir = root.join(".git/objects/pack");
+    let idx = fs::read_dir(&pack_dir)
+        .expect("rd")
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .find(|p| p.extension().is_some_and(|x| x == "idx"))
+        .expect("idx");
+    let pack = idx.with_extension("pack");
+    for path in [&idx, &pack] {
+        let mut perms = fs::metadata(path).expect("meta").permissions();
+        perms.set_readonly(false);
+        fs::set_permissions(path, perms).expect("chmod");
+    }
+    (idx, pack)
+}
+
+#[test]
+fn corrupt_idx_trailer_is_idx_mismatch() {
+    let (dir, repo) = init_repo();
+    one_commit(&repo);
+    let (idx, pack) = git_repack_single_pack(dir.path());
+    let mut bytes = fs::read(&idx).expect("read idx");
+    let last = bytes.len() - 1;
+    bytes[last] ^= 0xff;
+    fs::write(&idx, &bytes).expect("write idx");
+
+    let git_text = git(dir.path(), &["fsck"]);
+    assert!(
+        git_text.to_lowercase().contains("index") || git_text.contains("badPack"),
+        "{git_text}"
+    );
+    assert!(matches!(
+        read_pack_index(&idx),
+        Err(grit_lib::error::Error::PackIndexChecksumMismatch { ref path, .. }) if *path == idx
+    ));
+    let report = grit_fsck(&repo, &FsckOptions::full_repository(false));
+    assert!(
+        report
+            .issues
+            .iter()
+            .any(|i| matches!(i, FsckIssue::IdxMismatch { pack: p } if *p == pack)),
+        "{:?}",
+        report.issues
+    );
+    assert!(
+        !report
+            .issues
+            .iter()
+            .any(|i| matches!(i, FsckIssue::PackChecksum { .. })),
+        "{:?}",
+        report.issues
+    );
+}
+
+/// A structurally broken pack is a pack problem even when the repository path happens to
+/// contain the words "index" and "checksum".
+#[test]
+fn bad_pack_signature_is_pack_issue_regardless_of_path() {
+    let tmp = TempDir::new().expect("tempdir");
+    let root = tmp.path().join("index-checksum-repo");
+    fs::create_dir(&root).expect("mkdir");
+    let repo = Repository::init(&root, &InitOptions::default()).expect("init");
+    one_commit(&repo);
+    let (_idx, pack) = git_repack_single_pack(&root);
+    let mut bytes = fs::read(&pack).expect("read pack");
+    bytes[3] = b'X';
+    fs::write(&pack, &bytes).expect("write pack");
+
+    let git_text = git(&root, &["fsck"]);
+    assert!(
+        git_text.contains("error") || git_text.contains("fatal"),
+        "{git_text}"
+    );
+    let report = grit_fsck(&repo, &FsckOptions::full_repository(false));
+    assert!(
+        report
+            .issues
+            .iter()
+            .any(|i| matches!(i, FsckIssue::PackChecksum { pack: p } if *p == pack)),
+        "{:?}",
+        report.issues
+    );
+    assert!(
+        !report
+            .issues
+            .iter()
+            .any(|i| matches!(i, FsckIssue::IdxMismatch { .. })),
+        "{:?}",
+        report.issues
+    );
+}
+
 #[test]
 fn dangling_commit_and_blob() {
     let (dir, repo) = init_repo();

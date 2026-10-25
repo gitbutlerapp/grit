@@ -260,7 +260,7 @@ fn thin_pack_bases_come_from_the_bases_view() {
     )
     .expect_err("thin pack without its bases");
     assert!(
-        matches!(&err, Error::CorruptObject(msg) if msg.contains("could not be resolved")),
+        matches!(&err, Error::UnresolvedDeltas { count } if *count > 0),
         "unexpected error: {err:?}"
     );
 

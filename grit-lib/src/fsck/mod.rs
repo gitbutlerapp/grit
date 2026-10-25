@@ -985,22 +985,8 @@ fn verify_custom_primary_objects(
     Ok((checked, validated, links))
 }
 
-fn pack_object_read_issue(oid: ObjectId, pack: &Path, err: Error) -> FsckIssue {
+fn pack_object_read_issue(oid: ObjectId, err: Error) -> FsckIssue {
     match err {
-        Error::CorruptObject(msg) if msg.contains("checksum") && msg.contains("index") => {
-            FsckIssue::IdxMismatch {
-                pack: pack.to_path_buf(),
-            }
-        }
-        Error::CorruptObject(msg)
-            if msg.contains("trailing checksum")
-                || msg.contains("pack trailing checksum")
-                || msg.contains("pack checksum") =>
-        {
-            FsckIssue::PackChecksum {
-                pack: pack.to_path_buf(),
-            }
-        }
         Error::ObjectNotFound(_) => FsckIssue::MissingObject {
             oid,
             referrer: MissingObjectReferrer::Pack,
@@ -1013,10 +999,6 @@ fn pack_object_read_issue(oid: ObjectId, pack: &Path, err: Error) -> FsckIssue {
                     "SHA-1 collision detected while verifying pack object (digest {colliding})"
                 ),
             ),
-        },
-        Error::CorruptObject(_) | Error::Zlib(_) => FsckIssue::BadObject {
-            oid,
-            error: FsckError::new("corruptObject", err.to_string()),
         },
         other => FsckIssue::BadObject {
             oid,
@@ -1164,13 +1146,13 @@ fn verify_pack_objects(
         let pack_path = idx_path.with_extension("pack");
         let (prep, trailer_issue) = match prepare_pack_for_object_fsck(idx_path) {
             Ok(v) => v,
-            Err(Error::CorruptObject(msg)) => {
-                let issue = if msg.contains("checksum") && msg.contains("index") {
-                    FsckIssue::IdxMismatch { pack: pack_path }
-                } else {
-                    FsckIssue::PackChecksum { pack: pack_path }
-                };
-                issues.push(issue);
+            Err(Error::PackIndexChecksumMismatch { .. }) => {
+                issues.push(FsckIssue::IdxMismatch { pack: pack_path });
+                progress.set((i + 1) as u64);
+                continue;
+            }
+            Err(Error::CorruptObject(_)) => {
+                issues.push(FsckIssue::PackChecksum { pack: pack_path });
                 progress.set((i + 1) as u64);
                 continue;
             }
@@ -1201,7 +1183,7 @@ fn verify_pack_objects(
         for outcome in outcomes {
             match outcome {
                 PackFsckObjectOutcome::Failed { oid, err } => {
-                    let issue = pack_object_read_issue(oid, &pack_path, err);
+                    let issue = pack_object_read_issue(oid, err);
                     if should_emit(config, strict, issue_msg_id(&issue)) {
                         issues.push(issue);
                     }

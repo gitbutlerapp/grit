@@ -591,7 +591,8 @@ pub fn parse_pack_index_bytes(idx_path: &Path, bytes: Vec<u8>, verify: bool) -> 
 ///
 /// # Errors
 ///
-/// Returns [`Error::Io`] or [`Error::CorruptObject`] on failure.
+/// Returns [`Error::Io`] or [`Error::CorruptObject`] on failure, and
+/// [`Error::PackIndexChecksumMismatch`] when `verify` is set and the trailer is wrong.
 pub fn open_pack_index_file(idx_path: &Path, verify: bool) -> Result<PackIndex> {
     let storage = PackIndexStorage(PackData::open_with_min_len(idx_path, IDX_MIN_LEN)?);
     parse_pack_index_storage(idx_path, &storage, verify)
@@ -807,11 +808,9 @@ fn verify_idx_trailing_checksum(idx_path: &Path, bytes: &[u8], hash_bytes: usize
             "unsupported index hash width {hash_bytes}"
         )));
     };
-    verify_trailer(algo, bytes).map_err(|e| {
-        Error::CorruptObject(format!(
-            "index checksum mismatch for {}: {e}",
-            idx_path.display()
-        ))
+    verify_trailer(algo, bytes).map_err(|mismatch| Error::PackIndexChecksumMismatch {
+        path: idx_path.to_path_buf(),
+        mismatch,
     })
 }
 
@@ -1123,6 +1122,38 @@ mod tests {
         assert_eq!(idx.offset_at(0).expect("off0"), 100);
         assert_eq!(idx.offset_at(1).expect("off1"), 200);
         assert_eq!(idx.find_offset(&oid).expect("lookup"), Some(200));
+    }
+
+    #[test]
+    fn verified_open_reports_idx_trailer_mismatch_as_typed_error() {
+        use crate::pack::write_v2_pack_index_with_trailer;
+        use std::fs;
+
+        let oid = ObjectId::from_bytes(&[0x07; 20]).unwrap();
+        let dir = tempfile::tempdir().expect("tempdir");
+        let idx_path = dir.path().join("trailer.idx");
+        write_v2_pack_index_with_trailer(&idx_path, &[(oid, 12, 0)], &[0u8; 20], 20, None)
+            .expect("write idx");
+        open_pack_index_file(&idx_path, true).expect("intact trailer verifies");
+
+        let mut bytes = fs::read(&idx_path).unwrap();
+        let last = bytes.len() - 1;
+        bytes[last] ^= 0xff;
+        fs::write(&idx_path, &bytes).unwrap();
+
+        open_pack_index_file(&idx_path, false).expect("unverified open ignores the trailer");
+        let err = open_pack_index_file(&idx_path, true).expect_err("bad trailer");
+        let message = err.to_string();
+        assert!(
+            message.starts_with("corrupt object: index checksum mismatch for "),
+            "{message}"
+        );
+        let Error::PackIndexChecksumMismatch { path, mismatch } = err else {
+            panic!("expected PackIndexChecksumMismatch: {message}");
+        };
+        assert_eq!(path, idx_path);
+        assert_eq!(mismatch.found, bytes[bytes.len() - 20..]);
+        assert_ne!(mismatch.expected, mismatch.found);
     }
 
     #[test]

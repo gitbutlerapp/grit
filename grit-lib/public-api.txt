@@ -5590,6 +5590,9 @@ pub grit_lib::error::Error::OdbObjectsDirMismatch
 pub grit_lib::error::Error::OdbObjectsDirMismatch::builder: std::path::PathBuf
 pub grit_lib::error::Error::OdbObjectsDirMismatch::repository: std::path::PathBuf
 pub grit_lib::error::Error::OperationInProgress(grit_lib::state::InProgressOperation)
+pub grit_lib::error::Error::PackIndexChecksumMismatch
+pub grit_lib::error::Error::PackIndexChecksumMismatch::mismatch: grit_lib::objects::hash::TrailerMismatch
+pub grit_lib::error::Error::PackIndexChecksumMismatch::path: std::path::PathBuf
 pub grit_lib::error::Error::PackedRefsUnexpectedLine
 pub grit_lib::error::Error::PackedRefsUnexpectedLine::line: alloc::string::String
 pub grit_lib::error::Error::PackedRefsUnexpectedLine::path: alloc::string::String
@@ -5676,6 +5679,8 @@ pub grit_lib::error::Error::UnexpectedObjectKind::oid: grit_lib::objects::Object
 pub grit_lib::error::Error::UnknownObjectType(alloc::string::String)
 pub grit_lib::error::Error::UnmergedConflictMarkers
 pub grit_lib::error::Error::UnmergedConflictMarkers::paths: alloc::vec::Vec<alloc::string::String>
+pub grit_lib::error::Error::UnresolvedDeltas
+pub grit_lib::error::Error::UnresolvedDeltas::count: u64
 pub grit_lib::error::Error::UnsupportedObjectStore
 pub grit_lib::error::Error::UnsupportedObjectStore::operation: &'static str
 pub grit_lib::error::Error::UnsupportedRepositoryExtension(alloc::string::String)
@@ -15462,6 +15467,9 @@ pub grit_lib::prelude::Error::OdbObjectsDirMismatch
 pub grit_lib::prelude::Error::OdbObjectsDirMismatch::builder: std::path::PathBuf
 pub grit_lib::prelude::Error::OdbObjectsDirMismatch::repository: std::path::PathBuf
 pub grit_lib::prelude::Error::OperationInProgress(grit_lib::state::InProgressOperation)
+pub grit_lib::prelude::Error::PackIndexChecksumMismatch
+pub grit_lib::prelude::Error::PackIndexChecksumMismatch::mismatch: grit_lib::objects::hash::TrailerMismatch
+pub grit_lib::prelude::Error::PackIndexChecksumMismatch::path: std::path::PathBuf
 pub grit_lib::prelude::Error::PackedRefsUnexpectedLine
 pub grit_lib::prelude::Error::PackedRefsUnexpectedLine::line: alloc::string::String
 pub grit_lib::prelude::Error::PackedRefsUnexpectedLine::path: alloc::string::String
@@ -15548,6 +15556,8 @@ pub grit_lib::prelude::Error::UnexpectedObjectKind::oid: grit_lib::objects::Obje
 pub grit_lib::prelude::Error::UnknownObjectType(alloc::string::String)
 pub grit_lib::prelude::Error::UnmergedConflictMarkers
 pub grit_lib::prelude::Error::UnmergedConflictMarkers::paths: alloc::vec::Vec<alloc::string::String>
+pub grit_lib::prelude::Error::UnresolvedDeltas
+pub grit_lib::prelude::Error::UnresolvedDeltas::count: u64
 pub grit_lib::prelude::Error::UnsupportedObjectStore
 pub grit_lib::prelude::Error::UnsupportedObjectStore::operation: &'static str
 pub grit_lib::prelude::Error::UnsupportedRepositoryExtension(alloc::string::String)

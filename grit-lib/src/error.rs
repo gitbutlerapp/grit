@@ -824,6 +824,27 @@ pub enum Error {
     #[error("corrupt object: {0}")]
     CorruptObject(String),
 
+    /// A pack index (`.idx`) file's trailing checksum does not match its contents.
+    ///
+    /// Only reported by reads that verify the index trailer, such as
+    /// [`crate::pack::read_pack_index`]; the checksum of the `.pack` the index
+    /// describes is checked separately.
+    #[error("corrupt object: index checksum mismatch for {}: {mismatch}", .path.display())]
+    PackIndexChecksumMismatch {
+        /// The `.idx` file that failed verification.
+        path: std::path::PathBuf,
+        /// Expected and stored trailer digests.
+        mismatch: crate::hash::TrailerMismatch,
+    },
+
+    /// Indexing or unpacking a pack left deltas whose bases are neither in the pack nor
+    /// in the object database: a thin pack without its bases, or a ref-delta cycle.
+    #[error("corrupt object: {count} delta(s) could not be resolved")]
+    UnresolvedDeltas {
+        /// Number of deltas left unresolved.
+        count: u64,
+    },
+
     /// [`crate::objects::Objects::write`] refused a payload that `git fsck` would reject;
     /// nothing was written.
     #[error("refusing to write invalid {kind} object: {}", .check.report_line())]

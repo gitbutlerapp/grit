@@ -1894,7 +1894,8 @@ pub fn hash_object_bytes(kind: ObjectKind, data: &[u8], hash_bytes: usize) -> Re
 ///
 /// # Errors
 ///
-/// Returns [`Error::CorruptObject`] when format checks fail.
+/// Returns [`Error::CorruptObject`] when format checks fail and
+/// [`Error::PackIndexChecksumMismatch`] when the `.idx` trailer is wrong.
 pub fn read_pack_index(idx_path: &Path) -> Result<PackIndex> {
     crate::pack_index::open_pack_index_file(idx_path, true)
 }
