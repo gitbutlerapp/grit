@@ -36,6 +36,9 @@ pub enum PullResult {
     RebaseStopped,
     // In a snapshot checkout with `HEAD` detached: only `origin/<target>` moved.
     Detached,
+    // In a snapshot checkout: the branch's commits landed in the target, so it moved to the
+    // new snapshot (keeping uncommitted changes) instead of replaying them.
+    Landed,
 }
 
 impl From<LibPullResult> for PullResult {
@@ -50,6 +53,7 @@ impl From<LibPullResult> for PullResult {
             LibPullResult::Rebased => Self::Rebased,
             LibPullResult::AutostashConflict => Self::AutostashConflict,
             LibPullResult::RebaseStopped => Self::RebaseStopped,
+            LibPullResult::Landed => Self::Landed,
         }
     }
 }
@@ -326,6 +330,11 @@ impl HumanRender for PullOutcome {
                 self.upstream.as_deref().unwrap_or_default()
             ),
             PullResult::Rebased => outln!(w, "Rebased onto {} ({short})", self.branch),
+            PullResult::Landed => outln!(
+                w,
+                "Moved to {} ({short}), which has this branch's commits; uncommitted changes are kept.",
+                self.branch
+            ),
             PullResult::AutostashConflict => {
                 outln!(
                     w,
@@ -466,6 +475,7 @@ fn check_would_phrase(result: PullResult) -> &'static str {
         PullResult::Conflicts | PullResult::RebaseStopped => "stop with conflicts",
         PullResult::AutostashConflict => "conflict on autostash restore",
         PullResult::Detached => "leave HEAD detached",
+        PullResult::Landed => "move to the upstream, which has this branch's commits",
     }
 }
 

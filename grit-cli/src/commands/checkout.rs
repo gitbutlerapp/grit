@@ -143,8 +143,8 @@ fn download_dir() -> Option<PathBuf> {
     Some(base.join("grit").join("checkouts"))
 }
 
-/// Two random bytes for the work branch's name.
-fn random_pair() -> [u8; 2] {
+/// Two random bytes for a work branch's name.
+pub(crate) fn random_pair() -> [u8; 2] {
     let mut hasher = std::collections::hash_map::RandomState::new().build_hasher();
     hasher.write_u64(0);
     let n = hasher.finish();
@@ -366,8 +366,9 @@ pub struct PullRefreshJson {
     /// With `--dry-run`: nothing was fetched or changed, and the server made
     /// no snapshot.
     pub dry_run: bool,
-    /// The local branch named after the target, with no commits of its own,
-    /// that moved to the new snapshot.
+    /// Local branches with no commits of their own that moved to the new
+    /// snapshot: the one named after the target, and others whose commits
+    /// all landed in the target.
     pub followed: Vec<RefreshFollowedJson>,
     /// Other branches with commits of their own still on an older snapshot.
     pub behind: Vec<RefreshBehindJson>,

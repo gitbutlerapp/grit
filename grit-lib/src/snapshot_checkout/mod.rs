@@ -37,7 +37,11 @@
 //! top of the checkout's last one ([`CheckoutClient::update`]), fetches it from
 //! [`target_ref`] ([`fetch_snapshot`]) and brings the current branch onto it
 //! ([`refresh`]). The client's transfers always go to the URL its marker
-//! records, whatever `origin` has become.
+//! records, whatever `origin` has become. Once a checked-in branch has been
+//! integrated into the branch the checkout snapshots, the checkout records
+//! that it landed ([`land_integration`], [`record_landed`]), so refreshes
+//! never replay its commits onto snapshots that already have them, and
+//! [`Landing::move_off`] puts the user on a fresh work branch.
 //!
 //! The server keeps each checkout's record, and the work-branch names it has
 //! given out, in a [`CheckoutStore`].
@@ -45,6 +49,7 @@
 mod checkin;
 mod graft;
 mod guard;
+mod landing;
 mod refresh;
 mod refs;
 mod store;
@@ -55,6 +60,7 @@ mod tree;
 pub use checkin::{graft_checkin_branch, set_checked_in_branch, BranchSet, CheckinRefusal};
 pub use graft::{decide_checkin, graft, CheckinDecision, GraftError, Grafted};
 pub use guard::TargetGuard;
+pub use landing::{land_integration, move_off_landed_branch, record_landed, Landing, MovedOff};
 pub use refresh::{
     ensure_refreshable, refresh, BranchOnOldSnapshot, FollowedBranch, RefreshOutcome, RefreshedHead,
 };
@@ -176,6 +182,23 @@ pub struct CheckoutState {
     /// longer has the branch.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub tip: Option<String>,
+}
+
+/// `POST /.grit/checkouts/<repo>/<id>/work`: reserve a fresh work branch for
+/// checkout `id`, as making a checkout does ([`CheckoutRequest::work`]).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkBranchRequest {
+    /// The name the client would like.
+    pub work: String,
+}
+
+/// The answer to a [`WorkBranchRequest`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkBranchResponse {
+    /// The name the server reserved: the one asked for, numbered past the
+    /// server's branches and the names it gave out before. It is never given
+    /// out again.
+    pub work: String,
 }
 
 /// The ref a checkout's newest snapshot is kept at on the server.
@@ -530,6 +553,13 @@ pub enum CheckoutError {
     RefKeptMoving {
         /// The ref.
         refname: String,
+    },
+    /// Every work-branch name the server reserved is a branch in the
+    /// checkout already.
+    #[error("the work branches the server reserved are taken here (the last was {name})")]
+    WorkBranchTaken {
+        /// The last name the server reserved.
+        name: String,
     },
     /// The snapshot fetched is not the one the server described: the
     /// checkout was refreshed again (from another worktree, say) meanwhile.
@@ -1087,6 +1117,28 @@ impl<'a> CheckoutClient<'a> {
         )
     }
 
+    /// Reserve a fresh work branch for checkout `id`: `wanted`, numbered past
+    /// the server's branches and the names it gave out before.
+    ///
+    /// # Returns
+    ///
+    /// The name reserved, which the server never gives out again.
+    ///
+    /// # Errors
+    ///
+    /// Request failures, and the server's refusal (no such checkout, a name
+    /// that is not a valid branch name).
+    pub fn reserve_work_branch(&self, id: &str, wanted: &str) -> Result<String> {
+        let reserved: WorkBranchResponse = self.post_json(
+            HttpMethod::Post,
+            &format!("{}/{id}/work", self.url.api),
+            &WorkBranchRequest {
+                work: wanted.to_owned(),
+            },
+        )?;
+        Ok(reserved.work)
+    }
+
     /// Merge a branch into the target on the server.
     ///
     /// # Errors
@@ -1191,6 +1243,14 @@ pub struct CheckoutMarker {
     pub paths: Vec<String>,
     /// The snapshot commits, oldest first.
     pub roots: Vec<SnapshotRoot>,
+    /// Tips of branches this checkout checked in that have landed in
+    /// [`Self::branch`] (the server merged them into it, or it had them
+    /// already): every later snapshot has their commits' changes, though not
+    /// as ancestors, so refreshes never replay them ([`land_integration`]).
+    /// A tip no branch, and no worktree's detached `HEAD`, builds on any
+    /// more is dropped.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub landed: Vec<String>,
 }
 
 /// Where the marker of the repository whose git directory is `git_dir` is:
@@ -1344,6 +1404,7 @@ pub fn materialize(
         branch: info.branch.clone(),
         paths: info.paths.clone(),
         roots: info.roots.clone(),
+        landed: Vec::new(),
     }
     .write(&git_dir)?;
     let tree = ObjectId::from_hex(&info.tree).map_err(|_| mismatch(info.tree.clone()))?;

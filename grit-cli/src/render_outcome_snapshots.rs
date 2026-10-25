@@ -260,8 +260,13 @@ fn sample_refresh() -> PullOutcome {
     }
 }
 
+/// The branch HEAD was on, merged: it moved to the new snapshot and onto a
+/// new work branch.
 #[test]
 fn integrate_render() {
+    let mut refresh = sample_refresh();
+    refresh.result = PullResult::Landed;
+    refresh.oid = refresh.refresh.as_ref().map(|r| r.snapshot.clone());
     let outcome = IntegrateOutcome {
         name: "alice/elm-orchid".to_owned(),
         target: "main".to_owned(),
@@ -270,9 +275,62 @@ fn integrate_render() {
         head: "7f51f16b2cb0e4d3c2b1a0f9e8d7c6b5a4f3e2d1".to_owned(),
         commits: 1,
         checkin: None,
-        refresh: Some(sample_refresh()),
+        refresh: Some(refresh),
+        moved_to: Some("alice/maple-elm".to_owned()),
+        follows: None,
+        refresh_error: None,
     };
     snapshot_modes("integrate_render", &outcome);
+}
+
+/// A merge into another branch than the one the checkout follows (the
+/// server's HEAD moved): the branch keeps its commits here.
+#[test]
+fn integrate_elsewhere_render() {
+    let mut refresh = sample_refresh();
+    refresh.result = PullResult::UpToDate;
+    refresh.oid = Some("5c892b5783dbdeb57f7228eb6a13ffb2fa17d832".to_owned());
+    if let Some(r) = refresh.refresh.as_mut() {
+        r.base = "d08f98a93fcf6c0bd1f4d7e1c5a0b9e8f7d6c5b4".to_owned();
+        r.snapshot = "5c892b5783dbdeb57f7228eb6a13ffb2fa17d832".to_owned();
+        r.moved = false;
+        r.changes = None;
+        r.followed.clear();
+        r.behind.clear();
+    }
+    let outcome = IntegrateOutcome {
+        name: "alice/elm-orchid".to_owned(),
+        target: "develop".to_owned(),
+        status: "merged".to_owned(),
+        previous: "d08f98a93fcf6c0bd1f4d7e1c5a0b9e8f7d6c5b4".to_owned(),
+        head: "7f51f16b2cb0e4d3c2b1a0f9e8d7c6b5a4f3e2d1".to_owned(),
+        commits: 2,
+        checkin: None,
+        refresh: Some(refresh),
+        moved_to: None,
+        follows: Some("main".to_owned()),
+        refresh_error: None,
+    };
+    snapshot_modes("integrate_elsewhere_render", &outcome);
+}
+
+/// A merge whose refresh failed: the merge is still reported.
+#[test]
+fn integrate_refresh_failed_render() {
+    let outcome = IntegrateOutcome {
+        name: "alice/elm-orchid".to_owned(),
+        target: "main".to_owned(),
+        status: "merged".to_owned(),
+        previous: "d08f98a93fcf6c0bd1f4d7e1c5a0b9e8f7d6c5b4".to_owned(),
+        head: "7f51f16b2cb0e4d3c2b1a0f9e8d7c6b5a4f3e2d1".to_owned(),
+        commits: 1,
+        checkin: None,
+        refresh: None,
+        moved_to: None,
+        follows: None,
+        refresh_error: Some("local changes would be overwritten: src/deep/b.rs".to_owned()),
+    };
+    snapshot_modes("integrate_refresh_failed_render", &outcome);
 }
 
 #[test]

@@ -882,6 +882,14 @@ pub fn print_pull_outcome(
                 outln!(w, "- change id `{short}`", short = short_change_id(id));
             }
         }
+        PullResult::Landed => {
+            let short = outcome.oid.as_deref().map(short_hex).unwrap_or("");
+            outln!(
+                w,
+                "- Moved to **`{}`** · `{short}`, which has this branch's commits; uncommitted changes kept",
+                outcome.branch
+            );
+        }
         PullResult::AutostashConflict => {
             outln!(
                 w,

@@ -2595,11 +2595,11 @@ fn dispatch(
             emit_success(&outcome, opts, ctx)?;
             Ok(ExitStatus::from_push_rejected(outcome.refused))
         }
-        Command::Integrate { branch } => emit_success(
-            &commands::checkin::integrate(&branch, opts.mode)?,
-            opts,
-            ctx,
-        ),
+        Command::Integrate { branch } => {
+            let outcome = commands::checkin::integrate(&branch, opts.mode)?;
+            emit_success(&outcome, opts, ctx)?;
+            Ok(ExitStatus::from_integrate(&outcome))
+        }
         Command::Slice { action, url } => match action {
             SliceAction::List => emit_success(&commands::slice::list(url.as_deref())?, opts, ctx),
             SliceAction::New {

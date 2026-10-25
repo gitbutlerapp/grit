@@ -80,6 +80,7 @@ The push advertisement carries a `pushBundle=/push` capability: a [TUS](https://
 | `GET /.grit/checkouts/<name>/<id>/bundle` | its snapshot as a bundle, with `Range` support |
 | `POST /.grit/checkouts/<name>/<id>/update` | a snapshot of the newest tip of the branch the checkout was made from, on top of the checkout's last one, at `refs/checkouts/<id>/target` (`grit pull`) |
 | `POST /.grit/checkouts/<name>/<id>/checkin` | grafts branches pushed to `refs/checkouts/<id>/out/heads/*` onto the real history and sets them (`grit checkin`; write access) |
+| `POST /.grit/checkouts/<name>/<id>/work` | reserves a fresh work-branch name for the checkout, from the `work` name in the JSON body, as making a checkout does (`grit integrate`, moving you off the branch it merged) |
 | `POST /.grit/checkouts/<name>/integrate` | merges a branch into the target with a merge commit (`grit integrate`; write access) |
 | `GET /.grit/checkouts/<name>/slices` | the slices in `.grit/slices.toml` on the target |
 | `PUT`, `DELETE /.grit/checkouts/<name>/slices/<slice>` | changes a slice with a commit on the target (`grit slice`; write access) |

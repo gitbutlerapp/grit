@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "✓ Merged alice/elm-orchid into develop on the server: d08f98a → 7f51f16 (2 commits)\n· This checkout follows main, not develop, so alice/elm-orchid keeps its commits here.\nmain has not moved since this checkout's last snapshot (still at d08f98a).\nAlready up to date.\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\"name\":\"alice/elm-orchid\",\"target\":\"develop\",\"status\":\"merged\",\"previous\":\"d08f98a93fcf6c0bd1f4d7e1c5a0b9e8f7d6c5b4\",\"head\":\"7f51f16b2cb0e4d3c2b1a0f9e8d7c6b5a4f3e2d1\",\"commits\":2,\"refresh\":{\"result\":\"up_to_date\",\"branch\":\"origin/main\",\"oid\":\"5c892b5783dbdeb57f7228eb6a13ffb2fa17d832\",\"refresh\":{\"target\":\"main\",\"upstream_ref\":\"refs/remotes/origin/main\",\"base\":\"d08f98a93fcf6c0bd1f4d7e1c5a0b9e8f7d6c5b4\",\"snapshot\":\"5c892b5783dbdeb57f7228eb6a13ffb2fa17d832\",\"previous_base\":\"d08f98a93fcf6c0bd1f4d7e1c5a0b9e8f7d6c5b4\",\"previous_snapshot\":\"5c892b5783dbdeb57f7228eb6a13ffb2fa17d832\",\"moved\":false,\"changes\":null,\"dry_run\":false,\"followed\":[],\"behind\":[]}},\"follows\":\"main\"}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "## Integrate `alice/elm-orchid` into `develop`\n\n- **status**: merged\n- **previous**: `d08f98a93fcf6c0bd1f4d7e1c5a0b9e8f7d6c5b4`\n- **head**: `7f51f16b2cb0e4d3c2b1a0f9e8d7c6b5a4f3e2d1`\n- **commits**: 2\n- **follows**: `main` (the merge went into `develop`, so `alice/elm-orchid` keeps its commits here)\n\n## Pull\n\n- Refresh: **`main`** has not moved since this checkout's last snapshot (`d08f98a`)\nAlready up to date with **`origin/main`**.\n",
+    "stderr": ""
+  }
+}

@@ -33,7 +33,7 @@ The new repository's history is one commit, `Snapshot of <commit>: <subject>`, w
 
 A plain `git fetch` or `grit fetch` brings only the checkout's own snapshots into `origin/main`, never the real history, other branches or tags. A plain `git push` or `grit push` sends your branches to the check-in area that [`grit checkin`](../checkin/) grafts from, never onto the server's real branches. `grit checkin` and `grit pull` themselves always talk to the server the checkout was made from, even if you point `origin` somewhere else.
 
-What makes the repository a checkout is a small record in its git directory (`grit-checkout.json`): the server, the checkout's id, its target branch, its paths and its snapshots. Every worktree of the checkout (`git worktree add`) shares it, so checking in and refreshing work from any of them.
+What makes the repository a checkout is a small record in its git directory (`grit-checkout.json`): the server, the checkout's id, its target branch, its paths and its snapshots, and the tips of branches it checked in that were since [integrated](../integrate/) into its target branch, whose commits refreshes leave out. Every worktree of the checkout (`git worktree add`) shares it, so checking in and refreshing work from any of them.
 
 Snapshots are made the same way every time, so everyone who checks out the same paths at the same commit gets the same snapshot commit, and the server makes its download once.
 

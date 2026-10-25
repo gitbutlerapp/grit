@@ -4,11 +4,14 @@
 use std::io::Write;
 
 use anyhow::{bail, Result};
+use grit_lib::error::Error as LibError;
 use grit_lib::objects::ObjectId;
+use grit_lib::porcelain::pull::PullError;
 use grit_lib::progress::NeverCancel;
 use grit_lib::remote::snapshot_checkout::{
-    branches_with_work, push_for_checkin, same_branch_name, valid_branch_name, CheckinBranch,
-    CheckinRequest, CheckinStatus, CheckoutError, IntegrateRequest, IntegrateStatus,
+    branches_with_work, land_integration, push_for_checkin, same_branch_name, suggest_work_branch,
+    valid_branch_name, CheckinBranch, CheckinRequest, CheckinStatus, CheckoutError,
+    IntegrateRequest, IntegrateStatus, Landing,
 };
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -245,9 +248,36 @@ pub struct IntegrateOutcome {
     /// The check-in done first, when the branch is here.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub checkin: Option<CheckinOutcome>,
-    /// The refresh done after (as `grit pull` reports it).
+    /// The refresh done after (as `grit pull` reports it); omitted when it
+    /// failed (see `refresh_error`).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub refresh: Option<crate::commands::pull::PullOutcome>,
+    /// The new work branch you are on, when the branch you were on was the
+    /// one merged: that branch is gone here (it stays on the server).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub moved_to: Option<String>,
+    /// The branch this checkout follows, when the server merged into another
+    /// one (its `HEAD` names a different branch now): the merge is not in this
+    /// checkout's snapshots, so the branch keeps its commits here.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub follows: Option<String>,
+    /// Why refreshing this checkout after the merge (or moving to a new work
+    /// branch) failed. The merge stands on the server; the exit status is 1.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub refresh_error: Option<String>,
+}
+
+impl IntegrateOutcome {
+    /// Whether the checkout needs attention after the merge: its refresh
+    /// failed, or stopped on a conflict or a refusal (the exit status is 1).
+    #[must_use]
+    pub fn needs_attention(&self) -> bool {
+        self.refresh_error.is_some()
+            || self
+                .refresh
+                .as_ref()
+                .is_some_and(|r| crate::commands::pull::pull_check_exit_code(r) != 0)
+    }
 }
 
 impl HumanRender for IntegrateOutcome {
@@ -273,8 +303,37 @@ impl HumanRender for IntegrateOutcome {
                 self.name
             ),
         }
+        if let Some(follows) = &self.follows {
+            outln!(
+                w,
+                "· This checkout follows {follows}, not {}, so {} keeps its commits here.",
+                self.target,
+                self.name
+            );
+        }
         if let Some(r) = &self.refresh {
             r.render_human(w, ctx)?;
+        }
+        if let Some(to) = &self.moved_to {
+            outln!(
+                w,
+                "{} is in {} now, so it's gone here. You're on {to}, a new branch.",
+                self.name,
+                self.target
+            );
+        }
+        if let Some(e) = &self.refresh_error {
+            if self.refresh.is_some() {
+                // The refresh worked; moving to a new work branch did not.
+                outln!(w, "✗ {e}");
+            } else {
+                outln!(w, "✗ Refreshing this checkout failed: {e}");
+            }
+            outln!(
+                w,
+                "  The merge stands on the server; fix that, then run `grit integrate {}` again to finish.",
+                self.name
+            );
         }
         Ok(())
     }
@@ -292,6 +351,29 @@ impl MarkdownRender for IntegrateOutcome {
         outln!(w, "- **previous**: `{}`", self.previous);
         outln!(w, "- **head**: `{}`", self.head);
         outln!(w, "- **commits**: {}", self.commits);
+        if let Some(follows) = &self.follows {
+            outln!(
+                w,
+                "- **follows**: `{follows}` (the merge went into `{}`, so `{}` keeps its commits here)",
+                self.target,
+                self.name
+            );
+        }
+        if let Some(to) = &self.moved_to {
+            outln!(
+                w,
+                "- **moved to**: `{to}`, a new branch (`{}` is in `{}` now, so it's gone here)",
+                self.name,
+                self.target
+            );
+        }
+        if let Some(e) = &self.refresh_error {
+            outln!(
+                w,
+                "- **refresh failed**: {e} → the merge stands on the server; fix that, then `grit integrate {}` again to finish",
+                self.name
+            );
+        }
         if let Some(r) = &self.refresh {
             outln!(w);
             r.render_markdown(w, ctx)?;
@@ -300,8 +382,79 @@ impl MarkdownRender for IntegrateOutcome {
     }
 }
 
+/// What `grit integrate` did in the checkout after the server merged.
+#[derive(Default)]
+struct FollowUp {
+    refresh: Option<crate::commands::pull::PullOutcome>,
+    moved_to: Option<String>,
+    error: Option<String>,
+}
+
+/// `err` in words, naming the files when uncommitted changes are in the way.
+fn failure_text(err: &anyhow::Error) -> String {
+    let text = format!("{err:#}");
+    let paths = err.chain().find_map(|cause| {
+        let lib = match cause.downcast_ref::<PullError>() {
+            Some(PullError::Repository(lib)) => Some(lib),
+            _ => cause.downcast_ref::<LibError>(),
+        };
+        match lib {
+            Some(LibError::WouldOverwrite { paths, .. }) if !paths.is_empty() => {
+                Some(paths.join(", "))
+            }
+            _ => None,
+        }
+    });
+    match paths {
+        Some(paths) => format!("{text}: {paths}"),
+        None => text,
+    }
+}
+
+/// Bring the checkout onto the target the merge made, in the order
+/// [`land_integration`] asks for: refresh as `grit pull` does, then move off
+/// the integrated branch when the library says so ([`Landing::move_off`]).
+/// The merge stands whatever happens here, so failures are reported, not
+/// returned.
+fn follow_up(co: &OpenCheckout, name: &str, landing: &Landing, mode: OutputMode) -> FollowUp {
+    let refresh =
+        match crate::commands::pull::run(&crate::commands::pull::PullRunArgs::refresh(), mode) {
+            Ok(refresh) => refresh,
+            Err(e) => {
+                return FollowUp {
+                    error: Some(failure_text(&e)),
+                    ..FollowUp::default()
+                }
+            }
+        };
+    let mut done = FollowUp {
+        refresh: Some(refresh),
+        ..FollowUp::default()
+    };
+    let wanted = suggest_work_branch(
+        co.config.get("user.email").as_deref(),
+        crate::commands::checkout::random_pair(),
+    );
+    let moved = crate::context::discover()
+        .and_then(|repo| Ok(landing.move_off(&repo, &co.client()?, &wanted)?));
+    match moved {
+        Ok(moved) => done.moved_to = moved.map(|m| m.to),
+        Err(e) => {
+            done.error = Some(format!(
+                "moving off {name} to a new work branch failed: {}",
+                failure_text(&e)
+            ))
+        }
+    }
+    done
+}
+
 /// `grit integrate <branch>`: check the branch in (when it is here), merge it
-/// into the target on the server, then refresh this checkout.
+/// into the target on the server, then refresh this checkout. When the merge
+/// went into the branch this checkout follows, the branch's commits are in
+/// its next snapshot, so they are never replayed: when `HEAD` is on the
+/// branch it moves to the new snapshot, keeping uncommitted changes, and onto
+/// a fresh work branch ([`land_integration`] decides).
 pub fn integrate(name: &str, mode: OutputMode) -> Result<IntegrateOutcome> {
     let co = require_checkout()?;
     if same_branch_name(name, &co.marker.branch) {
@@ -315,8 +468,9 @@ pub fn integrate(name: &str, mode: OutputMode) -> Result<IntegrateOutcome> {
     let local = branches_with_work(&co.repo, &co.marker)?
         .into_iter()
         .find(|(n, _)| n == name);
-    let checkin = match local {
+    let (checkin, checked_in) = match local {
         Some(branch) => {
+            let tip = branch.1;
             let done = check_in(&co, &[branch], false, mode)?;
             if done.refused {
                 let why = done
@@ -326,15 +480,27 @@ pub fn integrate(name: &str, mode: OutputMode) -> Result<IntegrateOutcome> {
                     .unwrap_or_default();
                 bail!("{name} could not be checked in: {why}");
             }
-            Some(done)
+            (Some(done), Some(tip))
         }
-        None => None,
+        None => (None, None),
     };
     let response = co.client()?.integrate(&IntegrateRequest {
         name: name.to_owned(),
         author: co.author(),
     })?;
-    let refresh = crate::commands::pull::run(&crate::commands::pull::PullRunArgs::refresh(), mode)?;
+    let (follow, follows) = match land_integration(&co.repo, &co.marker, &response, checked_in) {
+        Ok(landing) => (
+            follow_up(&co, name, &landing, mode),
+            matches!(landing, Landing::Elsewhere { .. }).then(|| co.marker.branch.clone()),
+        ),
+        Err(e) => (
+            FollowUp {
+                error: Some(failure_text(&e.into())),
+                ..FollowUp::default()
+            },
+            None,
+        ),
+    };
     Ok(IntegrateOutcome {
         name: response.name,
         target: response.target,
@@ -347,6 +513,9 @@ pub fn integrate(name: &str, mode: OutputMode) -> Result<IntegrateOutcome> {
         head: response.head,
         commits: response.commits,
         checkin,
-        refresh: Some(refresh),
+        refresh: follow.refresh,
+        moved_to: follow.moved_to,
+        follows,
+        refresh_error: follow.error,
     })
 }

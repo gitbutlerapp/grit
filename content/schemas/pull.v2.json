@@ -82,7 +82,7 @@
           "type": "boolean"
         },
         "followed": {
-          "description": "The local branch named after the target, with no commits of its own, that moved to the new snapshot.",
+          "description": "Local branches with no commits of their own that moved to the new snapshot: the one named after the target, and others whose commits all landed in the target.",
           "items": {
             "$ref": "#/definitions/RefreshFollowedJson"
           },
@@ -143,7 +143,8 @@
         "rebased",
         "autostash_conflict",
         "rebase_stopped",
-        "detached"
+        "detached",
+        "landed"
       ],
       "type": "string"
     },

@@ -291,7 +291,7 @@
           "type": "boolean"
         },
         "followed": {
-          "description": "The local branch named after the target, with no commits of its own, that moved to the new snapshot.",
+          "description": "Local branches with no commits of their own that moved to the new snapshot: the one named after the target, and others whose commits all landed in the target.",
           "items": {
             "$ref": "#/definitions/RefreshFollowedJson"
           },
@@ -352,7 +352,8 @@
         "rebased",
         "autostash_conflict",
         "rebase_stopped",
-        "detached"
+        "detached",
+        "landed"
       ],
       "type": "string"
     },
@@ -446,9 +447,23 @@
       "minimum": 0.0,
       "type": "integer"
     },
+    "follows": {
+      "description": "The branch this checkout follows, when the server merged into another one (its `HEAD` names a different branch now): the merge is not in this checkout's snapshots, so the branch keeps its commits here.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "head": {
       "description": "Where it is now.",
       "type": "string"
+    },
+    "moved_to": {
+      "description": "The new work branch you are on, when the branch you were on was the one merged: that branch is gone here (it stays on the server).",
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "name": {
       "description": "The branch merged.",
@@ -467,7 +482,14 @@
           "type": "null"
         }
       ],
-      "description": "The refresh done after (as `grit pull` reports it)."
+      "description": "The refresh done after (as `grit pull` reports it); omitted when it failed (see `refresh_error`)."
+    },
+    "refresh_error": {
+      "description": "Why refreshing this checkout after the merge (or moving to a new work branch) failed. The merge stands on the server; the exit status is 1.",
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "status": {
       "description": "`merged` or `already_integrated`.",

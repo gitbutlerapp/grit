@@ -249,6 +249,17 @@ impl ExitStatus {
         }
     }
 
+    /// `1` when `grit integrate` merged but the checkout's refresh failed or
+    /// stopped ([`commands::checkin::IntegrateOutcome::needs_attention`]).
+    #[must_use]
+    pub fn from_integrate(outcome: &commands::checkin::IntegrateOutcome) -> Self {
+        if outcome.needs_attention() {
+            Self::Failure
+        } else {
+            Self::Success
+        }
+    }
+
     #[must_use]
     pub fn from_push_rejected(rejected: bool) -> Self {
         if rejected {

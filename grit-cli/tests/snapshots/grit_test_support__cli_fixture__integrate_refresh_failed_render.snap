@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "✓ Merged alice/elm-orchid into main on the server: d08f98a → 7f51f16 (1 commit)\n✗ Refreshing this checkout failed: local changes would be overwritten: src/deep/b.rs\n  The merge stands on the server; fix that, then run `grit integrate alice/elm-orchid` again to finish.\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\"name\":\"alice/elm-orchid\",\"target\":\"main\",\"status\":\"merged\",\"previous\":\"d08f98a93fcf6c0bd1f4d7e1c5a0b9e8f7d6c5b4\",\"head\":\"7f51f16b2cb0e4d3c2b1a0f9e8d7c6b5a4f3e2d1\",\"commits\":1,\"refresh_error\":\"local changes would be overwritten: src/deep/b.rs\"}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "## Integrate `alice/elm-orchid` into `main`\n\n- **status**: merged\n- **previous**: `d08f98a93fcf6c0bd1f4d7e1c5a0b9e8f7d6c5b4`\n- **head**: `7f51f16b2cb0e4d3c2b1a0f9e8d7c6b5a4f3e2d1`\n- **commits**: 1\n- **refresh failed**: local changes would be overwritten: src/deep/b.rs → the merge stands on the server; fix that, then `grit integrate alice/elm-orchid` again to finish\n",
+    "stderr": ""
+  }
+}

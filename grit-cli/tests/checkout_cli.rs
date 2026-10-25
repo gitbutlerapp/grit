@@ -308,6 +308,19 @@ fn servers_without_the_checkout_endpoint_are_refused() {
     assert!(!home.join("demo").exists());
 }
 
+/// Whether system `git` fails with `args` in `dir`.
+fn git_fails(dir: &Path, args: &[&str]) -> bool {
+    !Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .output()
+        .expect("git")
+        .status
+        .success()
+}
+
 fn json(home: &Path, dir: &Path, args: &[&str]) -> Value {
     serde_json::from_slice(&ok(home, dir, args).stdout).expect("JSON output")
 }
@@ -428,10 +441,11 @@ fn work_is_checked_in_integrated_and_refreshed() {
     );
 
     // Integrate merges the work, and the refresh brings their change in and
-    // drops the integrated commit.
+    // moves the branch to the new snapshot, which has the integrated commit.
     let integrated = json(&home, &co, &["--json", "integrate", &work]);
     assert_eq!(integrated["status"], "merged", "{integrated}");
     assert_eq!(integrated["commits"], 1);
+    assert_eq!(integrated["refresh"]["result"], "landed", "{integrated}");
     assert_eq!(
         integrated["refresh"]["refresh"]["moved"],
         Value::Bool(true),
@@ -478,18 +492,33 @@ fn work_is_checked_in_integrated_and_refreshed() {
     assert!(
         git(&co, &["log", "-1", "--format=%B"]).contains(&format!("Grit-Checkout-Base: {main}"))
     );
+    // HEAD was on the merged branch, so it moves to a new work branch the
+    // server reserved; the merged one is gone here and stays on the server.
+    let next = integrated["moved_to"]
+        .as_str()
+        .expect("moved to a new branch")
+        .to_owned();
+    assert!(next.starts_with("alice/") && next != work, "{next}");
+    assert_eq!(git(&co, &["symbolic-ref", "--short", "HEAD"]), next);
+    assert!(git_fails(
+        &co,
+        &["rev-parse", "--verify", "-q", &format!("refs/heads/{work}")]
+    ));
+    assert_eq!(git(&demo, &["rev-parse", &work]), grafted);
 
-    // Work on top of the newer snapshot checks in onto the newer main.
+    // Work on top of the newer snapshot checks in onto the newer main, as a
+    // new branch rather than more of the merged one.
     commit_file(&home, &co, "src/c.rs", "c\n", "Add c");
     let later = json(&home, &co, &["--json", "checkin"]);
-    assert_eq!(later["branches"][0]["status"], "updated", "{later}");
-    assert_eq!(git(&demo, &["rev-parse", &format!("{work}^")]), main);
+    assert_eq!(later["branches"][0]["name"], Value::String(next.clone()));
+    assert_eq!(later["branches"][0]["status"], "created", "{later}");
+    assert_eq!(git(&demo, &["rev-parse", &format!("{next}^")]), main);
 
     // An uncommitted change in the server's worktree that the merge would
     // overwrite refuses it; one the merge doesn't touch survives it.
     std::fs::write(demo.join("src/c.rs"), "mine\n").expect("write");
     std::fs::write(demo.join("README"), "server edit\n").expect("write");
-    let blocked = run(&home, &co, &["integrate", &work]);
+    let blocked = run(&home, &co, &["integrate", &next]);
     assert_eq!(blocked.status.code(), Some(1));
     let why = String::from_utf8_lossy(&blocked.stderr);
     assert!(
@@ -498,7 +527,7 @@ fn work_is_checked_in_integrated_and_refreshed() {
     );
     assert_eq!(git(&demo, &["rev-parse", "main"]), main);
     std::fs::remove_file(demo.join("src/c.rs")).expect("remove");
-    let again = json(&home, &co, &["--json", "integrate", &work]);
+    let again = json(&home, &co, &["--json", "integrate", &next]);
     assert_eq!(again["status"], "merged", "{again}");
     assert_eq!(
         std::fs::read_to_string(demo.join("src/c.rs"))
@@ -1542,4 +1571,406 @@ fn integrations_and_slice_changes_at_once_take_turns() {
         String::from_utf8_lossy(&raw.stderr)
     );
     assert_eq!(git(&demo, &["rev-parse", "main"]), main);
+}
+
+/// The URL of the server `repo_url` (a `…/demo.git` URL) is on.
+fn server_of(repo_url: &str) -> &str {
+    repo_url.trim_end_matches("/demo.git")
+}
+
+#[test]
+fn integrating_commits_that_change_the_same_lines_leaves_a_clean_checkout() {
+    let (_tmp, home, repos, _server, repo_url) = signed_in();
+    let demo = repos.join("demo");
+    let token = std::fs::read_to_string(home.join("token")).expect("token");
+    let first = json(
+        &home,
+        &home,
+        &["--json", "checkout", &repo_url, "-p", "src", "--into", "co"],
+    );
+    let work = first["work"].as_str().expect("work").to_owned();
+    let co = home.join("co");
+    // Each commit appends at the same place, so replaying the first onto a
+    // main that has all three conflicts.
+    for line in ["one", "two", "three"] {
+        let text = std::fs::read_to_string(co.join("src/a.rs")).expect("read");
+        commit_file(&home, &co, "src/a.rs", &format!("{text}{line}\n"), line);
+    }
+    std::fs::write(co.join("src/draft.rs"), "not committed\n").expect("write");
+
+    let out = ok(&home, &co, &["integrate", &work]);
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.contains(&format!("{work} is in main now, so it's gone here")),
+        "{text}"
+    );
+    assert_eq!(git(&demo, &["show", "main:src/a.rs"]), "a\none\ntwo\nthree");
+    assert_eq!(
+        git(&co, &["rev-parse", "HEAD"]),
+        git(&co, &["rev-parse", "origin/main"])
+    );
+    assert_eq!(git(&co, &["status", "--porcelain"]), "?? src/draft.rs");
+    // HEAD moved to a new, empty branch, and the integrated one is gone here.
+    let next = git(&co, &["symbolic-ref", "--short", "HEAD"]);
+    assert!(next.starts_with("alice/") && next != work, "{next}");
+    assert!(
+        text.contains(&format!("You're on {next}, a new branch")),
+        "{text}"
+    );
+    assert!(git_fails(
+        &co,
+        &["rev-parse", "--verify", "-q", &format!("refs/heads/{work}")]
+    ));
+    let pulled = json(&home, &co, &["--json", "pull"]);
+    assert_eq!(pulled["result"], "up_to_date", "{pulled}");
+
+    // The server reserved the new name: asking for it again gets another,
+    // and only for a checkout it has, with a valid name.
+    let id = marker(&co)["id"].as_str().expect("id").to_owned();
+    let api = format!("{}/.grit/checkouts/demo", server_of(&repo_url));
+    let again = post(
+        &format!("{api}/{id}/work"),
+        &token,
+        &format!(r#"{{"work":"{next}"}}"#),
+    );
+    assert_eq!(again["work"], Value::String(format!("{next}-2")), "{again}");
+    let (status, _) = send(
+        "POST",
+        &format!("{api}/0123456789abcdef0123/work"),
+        &token,
+        r#"{"work":"alice/x"}"#,
+    );
+    assert_eq!(status, 404);
+    let (status, _) = send(
+        "POST",
+        &format!("{api}/{id}/work"),
+        &token,
+        r#"{"work":"alice/a..b"}"#,
+    );
+    assert_eq!(status, 400);
+}
+
+#[test]
+fn a_branch_built_on_the_integrated_one_keeps_only_its_own_commits() {
+    let (_tmp, home, _repos, _server, repo_url) = signed_in();
+    let first = json(
+        &home,
+        &home,
+        &["--json", "checkout", &repo_url, "-p", "src", "--into", "co"],
+    );
+    let work = first["work"].as_str().expect("work").to_owned();
+    let co = home.join("co");
+    commit_file(&home, &co, "src/a.rs", "a\none\n", "one");
+    commit_file(&home, &co, "src/a.rs", "a\none\ntwo\n", "two");
+    ok(&home, &co, &["switch", "-c", "next"]);
+    commit_file(&home, &co, "src/a.rs", "a\none\ntwo\nthree\n", "three");
+
+    // Integrating the branch underneath: only `three` is replayed onto the
+    // snapshot that has `one` and `two`.
+    let integrated = json(&home, &co, &["--json", "integrate", &work]);
+    assert_eq!(integrated["status"], "merged", "{integrated}");
+    assert_eq!(integrated["refresh"]["result"], "rebased", "{integrated}");
+    assert!(integrated.get("moved_to").is_none(), "{integrated}");
+    assert_eq!(git(&co, &["symbolic-ref", "--short", "HEAD"]), "next");
+    assert_eq!(
+        git(&co, &["rev-parse", "next^"]),
+        git(&co, &["rev-parse", "origin/main"])
+    );
+    assert_eq!(git(&co, &["log", "-1", "--format=%s", "next"]), "three");
+    assert_eq!(
+        std::fs::read_to_string(co.join("src/a.rs")).expect("read"),
+        "a\none\ntwo\nthree\n"
+    );
+    // The integrated branch has nothing of its own left, so it follows.
+    assert_eq!(
+        integrated["refresh"]["refresh"]["followed"][0]["name"],
+        Value::String(work.clone()),
+        "{integrated}"
+    );
+    assert_eq!(
+        git(&co, &["rev-parse", &work]),
+        git(&co, &["rev-parse", "origin/main"])
+    );
+    let checkin = json(&home, &co, &["--json", "checkin"]);
+    assert_eq!(checkin["branches"][0]["name"], "next", "{checkin}");
+    assert_eq!(checkin["branches"][0]["commits"], 1, "{checkin}");
+}
+
+#[test]
+fn integrate_reports_the_merge_when_its_refresh_stops_or_fails() {
+    let (_tmp, home, repos, _server, repo_url) = signed_in();
+    let demo = repos.join("demo");
+    let token = std::fs::read_to_string(home.join("token")).expect("token");
+    let first = json(
+        &home,
+        &home,
+        &["--json", "checkout", &repo_url, "-p", "src", "--into", "co"],
+    );
+    let work = first["work"].as_str().expect("work").to_owned();
+    let co = home.join("co");
+
+    // From a detached HEAD the merge lands and only origin/main moves.
+    commit_file(&home, &co, "src/a.rs", "a2\n", "Change a");
+    git(&co, &["switch", "-q", "--detach"]);
+    let head = git(&co, &["rev-parse", "HEAD"]);
+    let detached = json(&home, &co, &["--json", "integrate", &work]);
+    assert_eq!(detached["status"], "merged", "{detached}");
+    assert_eq!(detached["refresh"]["result"], "detached", "{detached}");
+    assert!(detached.get("moved_to").is_none(), "{detached}");
+    assert_eq!(git(&co, &["rev-parse", "HEAD"]), head);
+    // The branch's commit landed, so the branch follows to the new snapshot.
+    assert_eq!(
+        detached["refresh"]["refresh"]["followed"][0]["name"],
+        Value::String(work.clone()),
+        "{detached}"
+    );
+    git(&co, &["switch", "-q", &work]);
+    assert_eq!(
+        git(&co, &["rev-parse", "HEAD"]),
+        git(&co, &["rev-parse", "origin/main"])
+    );
+
+    // A refresh that stops on a conflict exits 1, with the merge reported.
+    ok(&home, &co, &["switch", "-c", "other"]);
+    commit_file(&home, &co, "src/a.rs", "OTHER\n", "Other edits a");
+    ok(&home, &co, &["switch", &work]);
+    commit_file(&home, &co, "src/a.rs", "MINE\n", "Mine edits a");
+    let stopped = run(&home, &co, &["--json", "integrate", "other"]);
+    assert_eq!(stopped.status.code(), Some(1));
+    let stopped: Value = serde_json::from_slice(&stopped.stdout).expect("JSON");
+    assert_eq!(stopped["status"], "merged", "{stopped}");
+    assert_eq!(stopped["checkin"]["branches"][0]["name"], "other");
+    assert_eq!(stopped["refresh"]["result"], "rebase_stopped", "{stopped}");
+    assert_eq!(
+        stopped["refresh"]["conflicts"],
+        serde_json::json!(["src/a.rs"])
+    );
+    assert_eq!(
+        git(&demo, &["log", "-1", "--format=%s", "main"]),
+        "Merge branch 'other' into main"
+    );
+    ok(&home, &co, &["rebase", "--abort"]);
+    git(&co, &["reset", "-q", "--hard", "origin/main"]);
+
+    // A refresh that fails: the check-in and the merge are still reported.
+    let other = home.join("other");
+    ok(&home, &home, &["clone", &repo_url, "other"]);
+    commit_file(&home, &other, "src/deep/b.rs", "b2\n", "Bob changes b");
+    ok(&home, &other, &["push", "origin", "main:bob"]);
+    let bob = post(
+        &format!("{}/.grit/checkouts/demo/integrate", server_of(&repo_url)),
+        &token,
+        r#"{"name":"bob"}"#,
+    );
+    assert_eq!(bob["status"], "merged", "{bob}");
+    commit_file(&home, &co, "src/c.rs", "c\n", "Add c");
+    std::fs::write(co.join("src/deep/b.rs"), "mine\n").expect("write");
+    let failed = run(&home, &co, &["--markdown", "integrate", &work]);
+    assert_eq!(failed.status.code(), Some(1));
+    let text = String::from_utf8_lossy(&failed.stdout);
+    for says in [
+        "## Check-in",
+        &format!("## Integrate `{work}` into `main`"),
+        "- **status**: merged",
+        "**refresh failed**: local changes would be overwritten: src/deep/b.rs",
+    ] {
+        assert!(text.contains(says), "{says}: {text}");
+    }
+    assert_eq!(
+        git(&demo, &["log", "-1", "--format=%s", "main"]),
+        format!("Merge branch '{work}' into main")
+    );
+    assert!(
+        text.contains(&format!("`grit integrate {work}` again to finish")),
+        "{text}"
+    );
+    // Nothing moved here; once the change is out of the way, integrating
+    // again finishes: the target has the branch, and the checkout moves on.
+    assert_eq!(git(&co, &["log", "-1", "--format=%s"]), "Add c");
+    git(&co, &["checkout", "--", "src/deep/b.rs"]);
+    let finished = json(&home, &co, &["--json", "integrate", &work]);
+    assert_eq!(finished["status"], "already_integrated", "{finished}");
+    assert_eq!(finished["refresh"]["result"], "landed", "{finished}");
+    let next = finished["moved_to"]
+        .as_str()
+        .expect("moved to a new branch");
+    assert_eq!(git(&co, &["symbolic-ref", "--short", "HEAD"]), next);
+    assert_eq!(
+        git(&co, &["rev-parse", "HEAD"]),
+        git(&co, &["rev-parse", "origin/main"])
+    );
+    assert_eq!(
+        std::fs::read_to_string(co.join("src/deep/b.rs")).expect("read"),
+        "b2\n"
+    );
+}
+
+#[test]
+fn integrating_into_another_branch_than_the_checkout_follows_keeps_its_commits() {
+    let (_tmp, home, repos, _server, repo_url) = signed_in();
+    let demo = repos.join("demo");
+    let first = json(
+        &home,
+        &home,
+        &["--json", "checkout", &repo_url, "-p", "src", "--into", "co"],
+    );
+    let work = first["work"].as_str().expect("work").to_owned();
+    let co = home.join("co");
+    // The checkout follows main; the server's HEAD then moves to develop, so
+    // that is where integrations go.
+    git(&demo, &["branch", "develop", "main"]);
+    git(&demo, &["symbolic-ref", "HEAD", "refs/heads/develop"]);
+    commit_file(&home, &co, "src/a.rs", "a\none\n", "one");
+    commit_file(&home, &co, "src/a.rs", "a\none\ntwo\n", "two");
+
+    let integrated = json(&home, &co, &["--json", "integrate", &work]);
+    assert_eq!(integrated["status"], "merged", "{integrated}");
+    assert_eq!(integrated["target"], "develop", "{integrated}");
+    assert_eq!(integrated["follows"], "main", "{integrated}");
+    assert_eq!(
+        integrated["refresh"]["result"], "up_to_date",
+        "{integrated}"
+    );
+    assert!(integrated.get("moved_to").is_none(), "{integrated}");
+    assert_eq!(git(&demo, &["show", "develop:src/a.rs"]), "a\none\ntwo");
+    assert!(marker(&co).get("landed").is_none(), "{}", marker(&co));
+    assert_eq!(git(&co, &["symbolic-ref", "--short", "HEAD"]), work);
+
+    // main moves on without the work: the next refresh rebases the commits
+    // onto its snapshot instead of dropping them.
+    let tree = git(&demo, &["rev-parse", "main^{tree}"]);
+    let moved = git(
+        &demo,
+        &[
+            "-c",
+            "user.name=Bob",
+            "-c",
+            "user.email=bob@example.com",
+            "commit-tree",
+            &tree,
+            "-p",
+            "main",
+            "-m",
+            "Main moves on",
+        ],
+    );
+    git(&demo, &["update-ref", "refs/heads/main", &moved]);
+    let pulled = json(&home, &co, &["--json", "pull"]);
+    assert_eq!(pulled["result"], "rebased", "{pulled}");
+    assert_eq!(pulled["refresh"]["base"], Value::String(moved), "{pulled}");
+    assert_eq!(git(&co, &["log", "-2", "--format=%s"]), "two\none");
+    assert_eq!(
+        git(&co, &["rev-parse", "HEAD~2"]),
+        git(&co, &["rev-parse", "origin/main"])
+    );
+    assert_eq!(
+        std::fs::read_to_string(co.join("src/a.rs")).expect("read"),
+        "a\none\ntwo\n"
+    );
+}
+
+#[test]
+fn integrating_again_after_the_move_to_a_new_branch_failed_finishes_it() {
+    let (_tmp, home, repos, _server, repo_url) = signed_in();
+    let demo = repos.join("demo");
+    let first = json(
+        &home,
+        &home,
+        &["--json", "checkout", &repo_url, "-p", "src", "--into", "co"],
+    );
+    let work = first["work"].as_str().expect("work").to_owned();
+    let co = home.join("co");
+    commit_file(&home, &co, "src/a.rs", "a\none\n", "one");
+
+    // The server can't reserve a new work branch name: the merge and the
+    // refresh work, the move off doesn't.
+    let names = demo.join(".git/grit-serve/checkouts/names");
+    let parked = demo.join(".git/grit-serve/checkouts/names.parked");
+    std::fs::rename(&names, &parked).expect("park the names");
+    std::fs::write(&names, "not a directory\n").expect("block the names");
+    let out = run(&home, &co, &["integrate", &work]);
+    assert_eq!(out.status.code(), Some(1));
+    let text = String::from_utf8_lossy(&out.stdout);
+    for says in [
+        format!("✓ Merged {work} into main"),
+        format!("✗ moving off {work} to a new work branch failed"),
+        format!("`grit integrate {work}` again to finish"),
+    ] {
+        assert!(text.contains(&says), "{says}: {text}");
+    }
+    assert_eq!(git(&co, &["symbolic-ref", "--short", "HEAD"]), work);
+    assert_eq!(
+        git(&co, &["rev-parse", "HEAD"]),
+        git(&co, &["rev-parse", "origin/main"])
+    );
+    std::fs::remove_file(&names).expect("unblock");
+    std::fs::rename(&parked, &names).expect("restore the names");
+
+    // Integrating again, as the hint says, moves to a new branch.
+    let finished = json(&home, &co, &["--json", "integrate", &work]);
+    assert_eq!(finished["status"], "already_integrated", "{finished}");
+    assert!(finished.get("checkin").is_none(), "{finished}");
+    assert!(finished.get("refresh_error").is_none(), "{finished}");
+    let next = finished["moved_to"]
+        .as_str()
+        .expect("moved to a new branch");
+    assert_ne!(next, work);
+    assert_eq!(git(&co, &["symbolic-ref", "--short", "HEAD"]), next);
+    assert!(git_fails(
+        &co,
+        &["rev-parse", "--verify", "-q", &format!("refs/heads/{work}")]
+    ));
+}
+
+#[test]
+fn a_worktree_detached_on_integrated_commits_replays_only_its_own() {
+    let (_tmp, home, _repos, _server, repo_url) = signed_in();
+    let first = json(
+        &home,
+        &home,
+        &["--json", "checkout", &repo_url, "-p", "src", "--into", "co"],
+    );
+    let work = first["work"].as_str().expect("work").to_owned();
+    let co = home.join("co");
+    commit_file(&home, &co, "src/a.rs", "a\none\n", "one");
+    commit_file(&home, &co, "src/a.rs", "a\none\ntwo\n", "two");
+    let wt = home.join("wt");
+    git(
+        &co,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "--detach",
+            wt.to_str().expect("utf-8 path"),
+            &work,
+        ],
+    );
+
+    let integrated = json(&home, &co, &["--json", "integrate", &work]);
+    assert_eq!(integrated["refresh"]["result"], "landed", "{integrated}");
+    assert!(integrated["moved_to"].is_string(), "{integrated}");
+    // The linked worktree still builds on the integrated commits, so the
+    // checkout keeps remembering them.
+    assert_eq!(
+        marker(&co)["landed"].as_array().map(Vec::len),
+        Some(1),
+        "{}",
+        marker(&co)
+    );
+
+    // A branch started there later replays only its own commit.
+    git(&wt, &["switch", "-q", "-c", "fromwt"]);
+    commit_file(&home, &wt, "src/c.rs", "c\n", "own commit");
+    let pulled = json(&home, &wt, &["--json", "pull"]);
+    assert_eq!(pulled["result"], "rebased", "{pulled}");
+    assert_eq!(
+        git(&wt, &["rev-parse", "HEAD^"]),
+        git(&wt, &["rev-parse", "origin/main"])
+    );
+    assert_eq!(git(&wt, &["log", "-1", "--format=%s"]), "own commit");
+    assert_eq!(
+        std::fs::read_to_string(wt.join("src/a.rs")).expect("read"),
+        "a\none\ntwo\n"
+    );
 }

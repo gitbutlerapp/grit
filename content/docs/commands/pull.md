@@ -43,8 +43,8 @@ In a [snapshot checkout](../checkout/), `grit pull` with no refspecs **refreshes
 
 1. It asks the server for a snapshot of the newest commit of the target branch the checkout was made from (the server keeps following that branch even when its `HEAD` moves to another), made on top of the checkout's last snapshot.
 2. It fetches that snapshot into `origin/<target>` (`refs/remotes/origin/<target>`) from the server the checkout came from, with an explicit refspec and no tags, whatever `origin` is configured as now. Only what changed in the checkout's paths comes down. The checkout records the new snapshot only once it has arrived and is the one the server described.
-3. It brings the current branch onto it: a rebase unless `--ff-only` or `--no-rebase` says otherwise. Commits already merged into the target drop out. When the rebase hits a conflict, it **stops** in a resumable rebase, as [`grit rebase`](../rebase/) does: resolve the files, `grit add` them, then `grit rebase --continue` (or `grit rebase --abort` to put the branch back on the older snapshot). Until then, another `grit pull` refuses to start. When the index or worktree has changes of their own, the rebase can't stop there, so nothing changes; commit or stash them and pull again.
-4. A local branch named after the target (a `main` you made with `grit branch main origin/main`) that has no commits of its own follows to the new snapshot. Every other branch with commits of its own that still builds on an older snapshot is named, with how to bring it up: `grit switch <branch>`, then `grit pull`.
+3. It brings the current branch onto it: a rebase unless `--ff-only` or `--no-rebase` says otherwise. Commits already merged into the target drop out. Commits of a branch this checkout checked in and [integrated](../integrate/) into the branch it follows are never replayed, since the snapshot already has their result (replaying them one by one could conflict with themselves): a branch with nothing above them moves to the new snapshot, keeping uncommitted and untracked changes as `git reset --keep` does (`landed`), and one with commits of its own above them rebases only those, as `git rebase --onto origin/<target> <integrated tip>` would. When the rebase hits a conflict, it **stops** in a resumable rebase, as [`grit rebase`](../rebase/) does: resolve the files, `grit add` them, then `grit rebase --continue` (or `grit rebase --abort` to put the branch back on the older snapshot). Until then, another `grit pull` refuses to start. When the index or worktree has changes of their own, the rebase can't stop there, so nothing changes; commit or stash them and pull again.
+4. A local branch named after the target (a `main` you made with `grit branch main origin/main`) that has no commits of its own follows to the new snapshot, and so does any other branch whose commits have all been integrated. Every other branch with commits of its own that still builds on an older snapshot is named, with how to bring it up: `grit switch <branch>`, then `grit pull` (which leaves out its integrated commits, too).
 
 With `HEAD` detached, the refresh still fetches the new snapshot into `origin/<target>` and leaves `HEAD` where it is. It works the same from any worktree of the checkout.
 
@@ -153,11 +153,11 @@ Schema: [v2](/schemas/pull/v2.json) · [v1](/schemas/pull/v1.json)
 
 Pass `--json` for stable, scripting-friendly output:
 
-Exit codes (also apply to default human output): **0** on success (`up_to_date`, `fast_forward`, `merged`, `rebased`, `set_upstream`, or `detached`) and on `--check` when `check.fast_forward_possible` is true; **1** when `--ff-only` refuses diverged history (`refused_not_ff`), integration stops with conflicts (`conflicts`, with `operation` `merge` or `rebase` in progress), a snapshot checkout's refresh stops in a rebase (`rebase_stopped`), `--check` when a merge or rebase would be required, or `autostash_conflict`.
+Exit codes (also apply to default human output): **0** on success (`up_to_date`, `fast_forward`, `merged`, `rebased`, `set_upstream`, `detached`, or `landed`) and on `--check` when `check.fast_forward_possible` is true; **1** when `--ff-only` refuses diverged history (`refused_not_ff`), integration stops with conflicts (`conflicts`, with `operation` `merge` or `rebase` in progress), a snapshot checkout's refresh stops in a rebase (`rebase_stopped`), `--check` when a merge or rebase would be required, or `autostash_conflict`.
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
-| `result` | string | `up_to_date`, `fast_forward`, `merged`, `rebased`, `refused_not_ff`, `conflicts`, `set_upstream`, `autostash_conflict`, `rebase_stopped` (a snapshot checkout's rebase stopped on a conflict and is in progress), or `detached` (a snapshot checkout refreshed with `HEAD` detached: only `origin/<target>` moved). |
+| `result` | string | `up_to_date`, `fast_forward`, `merged`, `rebased`, `refused_not_ff`, `conflicts`, `set_upstream`, `autostash_conflict`, `rebase_stopped` (a snapshot checkout's rebase stopped on a conflict and is in progress), `detached` (a snapshot checkout refreshed with `HEAD` detached: only `origin/<target>` moved), or `landed` (in a snapshot checkout, every commit of the branch was integrated, so it moved to the new snapshot, keeping uncommitted changes). |
 | `branch` | string | Remote branch label that was integrated (or checked). |
 | `oid` | string or null | Commit the current branch points at after the pull, when applicable (absent when a rebase stopped). |
 | `change_id` | string or null | Stored `change-id` on `oid` when present. |
@@ -182,7 +182,7 @@ Exit codes (also apply to default human output): **0** on success (`up_to_date`,
 | `refresh.moved` | boolean | Whether the target moved since the checkout's last snapshot. |
 | `refresh.changes` | object or null | What changed in the checkout's paths between the two snapshots: `files`, `insertions`, `deletions`; null when the target didn't move. |
 | `refresh.dry_run` | boolean | True with `--dry-run`: nothing was fetched or changed, and the server made no snapshot. |
-| `refresh.followed` | array | The local branch named after the target that moved along: `name`, `from`, `to`. |
+| `refresh.followed` | array | Local branches with no commits of their own that moved along (the one named after the target, and any whose commits were all integrated): `name`, `from`, `to`. |
 | `refresh.behind` | array | Other branches with commits of their own still on an older snapshot: `name`, `tip`. |
 
 Example:

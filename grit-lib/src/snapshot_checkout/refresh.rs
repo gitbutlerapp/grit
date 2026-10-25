@@ -6,7 +6,8 @@
 //! current branch onto it the way [`pull`] does (a rebase by default, which
 //! stops in a resumable rebase session on a conflict), moves a local branch
 //! named after the target that has no commits of its own along with it, and
-//! reports every other branch still building on an older snapshot.
+//! reports every other branch still building on an older snapshot. Commits
+//! that landed in the target ([`super::record_landed`]) are never replayed.
 
 use crate::diff::{build_file_diffs, diff_trees, DiffDetail, DiffOptions, DiffTotals};
 use crate::fetch::Progress;
@@ -22,6 +23,7 @@ use crate::repo::Repository;
 use crate::state::{detect_in_progress, resolve_head_for_repository, HeadState};
 use crate::transfer::TransferStats;
 
+use super::landing::{landed_base, prune_landed};
 use super::refs::{swap_ref_as, Swap};
 use super::{
     branches_with_work, fetch_snapshot, upstream_ref, CheckoutError, CheckoutInfo, CheckoutMarker,
@@ -45,8 +47,9 @@ pub enum RefreshedHead {
     },
 }
 
-/// A local branch named after the target, with no commits of its own, that a
-/// refresh moved to the new snapshot.
+/// A local branch with no commits of its own that a refresh moved to the new
+/// snapshot: the one named after the target, or one whose commits all landed
+/// in the target ([`CheckoutMarker::landed`]).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FollowedBranch {
     /// The branch, without `refs/heads/`.
@@ -88,7 +91,8 @@ pub struct RefreshOutcome {
     pub transfer: TransferStats,
     /// What happened to `HEAD`.
     pub head: RefreshedHead,
-    /// A local branch named after the target that followed the snapshot.
+    /// Local branches with no commits of their own that followed the
+    /// snapshot.
     pub followed: Vec<FollowedBranch>,
     /// Other branches with work still on an older snapshot, which only a
     /// refresh (or rebase) on each of them moves.
@@ -118,12 +122,18 @@ pub fn ensure_refreshable(repo: &Repository) -> Result<()> {
 /// 2. With `HEAD` on a branch, integrates the snapshot as [`pull`] does with
 ///    `options` (a rebase unless `options.mode` says otherwise). A rebase that
 ///    conflicts stops in a resumable rebase session
-///    ([`PullOptions::stop_on_conflict`]). With `HEAD` detached, nothing else
-///    moves.
+///    ([`PullOptions::stop_on_conflict`]). Commits up to a tip that landed in
+///    the target ([`CheckoutMarker::landed`]) are not replayed: a branch with
+///    nothing above one moves to the snapshot keeping uncommitted changes
+///    ([`crate::porcelain::pull::PullResult::Landed`]), and one with commits
+///    above it rebases only those ([`FetchedUpstream::landed`]). With `HEAD`
+///    detached, nothing else moves.
 /// 3. Moves `refs/heads/<target>`, when it is not the current branch and has
-///    no commits of its own, to the new snapshot (not with `options.check`).
+///    no commits of its own, to the new snapshot, and every other branch but
+///    the current one whose commits all landed (not with `options.check`).
 /// 4. Lists the other branches with work that still build on an older
-///    snapshot.
+///    snapshot, and forgets landed tips no branch builds on any more (not
+///    with `options.check`).
 ///
 /// # Parameters
 ///
@@ -150,9 +160,11 @@ pub fn refresh<P: Progress>(
     http_factory: Option<&dyn HttpClientFactory>,
 ) -> Result<RefreshOutcome> {
     ensure_refreshable(repo)?;
-    let current_branch = match resolve_head_for_repository(repo)? {
-        HeadState::Branch { short_name, .. } => Some(short_name),
-        HeadState::Detached { .. } => None,
+    let (current_branch, head_tip) = match resolve_head_for_repository(repo)? {
+        HeadState::Branch {
+            short_name, oid, ..
+        } => (Some(short_name), oid),
+        HeadState::Detached { oid } => (None, Some(oid)),
         HeadState::Invalid => return Err(PullError::InvalidHead.into()),
     };
     let fetched = fetch_snapshot(
@@ -181,9 +193,14 @@ pub fn refresh<P: Progress>(
             integrate.remote = None;
             integrate.branch = None;
             integrate.explicit_fetch = false;
+            let landed = match head_tip {
+                Some(tip) => landed_base(repo, &fetched.marker, tip, root)?,
+                None => None,
+            };
             integrate.upstream = Some(FetchedUpstream {
                 label: format!("origin/{}", info.branch),
                 oid: root,
+                landed,
             });
             integrate.stop_on_conflict = true;
             if integrate.mode.is_none() {
@@ -198,7 +215,16 @@ pub fn refresh<P: Progress>(
     let followed = if options.check {
         Vec::new()
     } else {
-        follow_target_branch(repo, &fetched.marker, current_branch.as_deref(), root)?
+        let mut followed =
+            follow_target_branch(repo, &fetched.marker, current_branch.as_deref(), root)?;
+        followed.extend(follow_landed_branches(
+            repo,
+            &fetched.marker,
+            current_branch.as_deref(),
+            root,
+        )?);
+        prune_landed(repo, root)?;
+        followed
     };
     let behind = branches_on_old_snapshots(repo, &fetched.marker, current_branch.as_deref(), root)?;
     Ok(RefreshOutcome {
@@ -270,6 +296,52 @@ fn follow_target_branch(
     }
 }
 
+/// Move every branch other than `current` whose commits all landed in the
+/// target (its tip is in a landed tip's history) to `root`, which has them.
+fn follow_landed_branches(
+    repo: &Repository,
+    marker: &CheckoutMarker,
+    current: Option<&str>,
+    root: ObjectId,
+) -> Result<Vec<FollowedBranch>> {
+    let mut followed = Vec::new();
+    if marker.landed.is_empty() {
+        return Ok(followed);
+    }
+    let message = format!(
+        "refresh: follow {}, which has the branch's commits",
+        upstream_ref(&marker.branch)
+    );
+    for (name, tip) in branches_with_work(repo, marker)? {
+        if Some(name.as_str()) == current || landed_base(repo, marker, tip, root)? != Some(tip) {
+            continue;
+        }
+        // A branch another worktree has checked out moves only with that worktree.
+        match crate::worktree::ensure_branch_not_checked_out_in_any_worktree(repo, &name) {
+            Ok(()) => {}
+            Err(crate::error::Error::BranchCheckedOutInWorktree { .. }) => continue,
+            Err(e) => return Err(e.into()),
+        }
+        let refname = format!("refs/heads/{name}");
+        let swapped = swap_ref_as(
+            repo,
+            &refname,
+            Some(tip),
+            root,
+            &checkout_reflog_identity(repo),
+            &message,
+        )?;
+        if swapped == Swap::Done {
+            followed.push(FollowedBranch {
+                name,
+                from: tip,
+                to: root,
+            });
+        }
+    }
+    Ok(followed)
+}
+
 /// Branches with work, other than `current`, whose tips don't have `root`.
 fn branches_on_old_snapshots(
     repo: &Repository,
@@ -324,7 +396,11 @@ mod tests {
     use crate::porcelain::pull::PullResult;
     use crate::progress::NeverCancel;
     use crate::remote::fetch::NoProgress;
-    use crate::snapshot_checkout::{make_snapshot, materialize, push_for_checkin, target_ref};
+    use crate::snapshot_checkout::{
+        land_integration, make_snapshot, materialize, move_off_landed_branch, push_for_checkin,
+        record_landed, target_ref, CheckoutClient, IntegrateResponse, IntegrateStatus, Landing,
+        MovedOff,
+    };
     use crate::state::InProgressOperation;
     use std::path::{Path, PathBuf};
     use std::process::Command;
@@ -718,5 +794,359 @@ mod tests {
             Err(CheckoutError::SnapshotMoved { .. })
         ));
         assert_eq!(marker(&repo).roots, info.roots);
+    }
+
+    /// A server that answers each `POST …/work` with the next of its names.
+    struct WorkNames {
+        names: std::sync::Mutex<Vec<&'static str>>,
+        seen: std::sync::Mutex<Vec<String>>,
+    }
+
+    impl crate::transport::http::HttpClient for WorkNames {
+        fn get(&self, url: &str, _: Option<&str>) -> crate::error::Result<Vec<u8>> {
+            Err(crate::error::Error::Message(format!(
+                "unexpected GET {url}"
+            )))
+        }
+
+        fn post(
+            &self,
+            url: &str,
+            _: &str,
+            _: &str,
+            _: &[u8],
+            _: Option<&str>,
+        ) -> crate::error::Result<Vec<u8>> {
+            Err(crate::error::Error::Message(format!(
+                "unexpected POST {url}"
+            )))
+        }
+
+        fn send(
+            &self,
+            request: &crate::transport::http::HttpRequest<'_>,
+        ) -> crate::error::Result<crate::transport::http::HttpResponse> {
+            self.seen.lock().expect("lock").push(format!(
+                "{} {} {}",
+                request.method.as_str(),
+                request.url,
+                String::from_utf8_lossy(request.body)
+            ));
+            let name = self.names.lock().expect("lock").remove(0);
+            let body = serde_json::to_vec(&super::super::WorkBranchResponse {
+                work: name.to_owned(),
+            })
+            .expect("json");
+            Ok(crate::transport::http::HttpResponse {
+                status: 200,
+                headers: Vec::new(),
+                body: Box::new(std::io::Cursor::new(body)),
+            })
+        }
+    }
+
+    #[cfg_attr(not(feature = "full-tests"), ignore = "starts system git or is heavy; run with --features full-tests")]
+    #[test]
+    fn landed_commits_are_never_replayed_and_the_user_moves_to_a_fresh_branch() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let mut served = Served::new(tmp.path());
+        let (co, repo) = check_out(&mut served, tmp.path());
+        // Three commits appending at one place: replayed one by one onto a snapshot that has
+        // all three, the first conflicts.
+        let mut text = "a\n".to_owned();
+        for (i, line) in ["one", "two", "three"].iter().enumerate() {
+            text.push_str(line);
+            text.push('\n');
+            commit(&co, "src/a.rs", &text, line);
+            if i == 1 {
+                git(&co, &["branch", "side"]);
+                git(&co, &["branch", "parked"]);
+            }
+        }
+        let parked = oid(&git(&co, &["rev-parse", "parked"]));
+        let landed = oid(&git(&co, &["rev-parse", "work"]));
+        git(&co, &["switch", "-q", "side"]);
+        let side = commit(&co, "src/s.rs", "s\n", "side work");
+        git(&co, &["switch", "-q", "work"]);
+        std::fs::write(co.join("src/draft.rs"), "not committed\n").expect("write");
+
+        // The server merges them: its snapshot has their result.
+        let info = served.moves("src/a.rs", &text);
+        let recorded = record_landed(&repo, &marker(&repo), landed).expect("record");
+        assert_eq!(recorded.landed, [landed.to_hex()]);
+        assert_eq!(marker(&repo).landed, [landed.to_hex()]);
+
+        let outcome = refreshed(&repo, &info).expect("refresh");
+        assert_eq!(pull_result(&outcome), Some(PullResult::Landed));
+        assert_eq!(git(&co, &["rev-parse", "work"]), info.root);
+        assert_eq!(git(&co, &["status", "--porcelain"]), "?? src/draft.rs");
+        // A branch whose commits all landed follows; one with work of its own is named.
+        assert_eq!(
+            outcome.followed,
+            [FollowedBranch {
+                name: "parked".to_owned(),
+                from: parked,
+                to: oid(&info.root),
+            }]
+        );
+        assert_eq!(git(&co, &["rev-parse", "parked"]), info.root);
+        assert_eq!(
+            outcome.behind,
+            [BranchOnOldSnapshot {
+                name: "side".to_owned(),
+                tip: side,
+            }]
+        );
+        // `side` still builds on two of the landed commits.
+        assert_eq!(marker(&repo).landed, [landed.to_hex()]);
+
+        // A fresh work branch from the server; one that is taken here is skipped.
+        let names = WorkNames {
+            names: std::sync::Mutex::new(vec!["side", "t/fresh"]),
+            seen: std::sync::Mutex::new(Vec::new()),
+        };
+        let client = CheckoutClient::new(&names, "http://127.0.0.1:1/served.git").expect("client");
+        let moved = move_off_landed_branch(&repo, &client, "work", "t/elm-oak")
+            .expect("move off")
+            .expect("moved");
+        assert_eq!(
+            moved,
+            MovedOff {
+                from: "work".to_owned(),
+                to: "t/fresh".to_owned(),
+                tip: oid(&info.root),
+            }
+        );
+        assert_eq!(
+            names.seen.lock().expect("lock").as_slice(),
+            [
+                format!(
+                    "POST http://127.0.0.1:1/.grit/checkouts/served/{ID}/work {{\"work\":\"t/elm-oak\"}}"
+                ),
+                format!(
+                    "POST http://127.0.0.1:1/.grit/checkouts/served/{ID}/work {{\"work\":\"t/elm-oak\"}}"
+                ),
+            ]
+        );
+        assert_eq!(git(&co, &["symbolic-ref", "--short", "HEAD"]), "t/fresh");
+        assert!(git_output_fails(
+            &co,
+            &["rev-parse", "--verify", "-q", "refs/heads/work"]
+        ));
+        assert_eq!(git(&co, &["rev-parse", "HEAD"]), info.root);
+        assert_eq!(git(&co, &["status", "--porcelain"]), "?? src/draft.rs");
+        // Nothing to move off when HEAD is not on the branch.
+        assert_eq!(
+            move_off_landed_branch(&repo, &client, "work", "t/elm-oak").expect("no-op"),
+            None
+        );
+
+        // The branch built on the landed commits keeps only its own when it is refreshed.
+        git(&co, &["switch", "-q", "side"]);
+        let again = refreshed(&repo, &info).expect("refresh side");
+        assert_eq!(pull_result(&again), Some(PullResult::Rebased));
+        assert_eq!(git(&co, &["rev-parse", "side^"]), info.root);
+        assert_eq!(git(&co, &["log", "-1", "--format=%s", "side"]), "side work");
+        // Nothing builds on the landed tip now, so it is forgotten.
+        assert!(marker(&repo).landed.is_empty());
+    }
+
+    /// A server that is down: every request fails.
+    struct Unreachable;
+
+    impl crate::transport::http::HttpClient for Unreachable {
+        fn get(&self, url: &str, _: Option<&str>) -> crate::error::Result<Vec<u8>> {
+            Err(crate::error::Error::Message(format!("{url}: unreachable")))
+        }
+
+        fn post(
+            &self,
+            url: &str,
+            _: &str,
+            _: &str,
+            _: &[u8],
+            _: Option<&str>,
+        ) -> crate::error::Result<Vec<u8>> {
+            Err(crate::error::Error::Message(format!("{url}: unreachable")))
+        }
+    }
+
+    /// The server's answer to integrating `work` into `target`.
+    fn integrated(target: &str, status: IntegrateStatus) -> IntegrateResponse {
+        IntegrateResponse {
+            status,
+            name: "work".to_owned(),
+            target: target.to_owned(),
+            previous: "2222222222222222222222222222222222222222".to_owned(),
+            head: "3333333333333333333333333333333333333333".to_owned(),
+            commits: 2,
+        }
+    }
+
+    #[cfg_attr(not(feature = "full-tests"), ignore = "starts system git or is heavy; run with --features full-tests")]
+    #[test]
+    fn work_merged_into_another_branch_is_rebased_on_the_next_snapshot_not_dropped() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let mut served = Served::new(tmp.path());
+        let (co, repo) = check_out(&mut served, tmp.path());
+        commit(&co, "src/a.rs", "a\none\n", "one");
+        let tip = commit(&co, "src/a.rs", "a\none\ntwo\n", "two");
+
+        // The served HEAD names `develop` now, so that is where the merge went;
+        // this checkout snapshots `main`, which doesn't get the commits.
+        let landing = land_integration(
+            &repo,
+            &marker(&repo),
+            &integrated("develop", IntegrateStatus::Merged),
+            Some(tip),
+        )
+        .expect("land");
+        assert_eq!(
+            landing,
+            Landing::Elsewhere {
+                target: "develop".to_owned()
+            }
+        );
+        assert!(marker(&repo).landed.is_empty());
+        let names = WorkNames {
+            names: std::sync::Mutex::new(vec!["t/fresh"]),
+            seen: std::sync::Mutex::new(Vec::new()),
+        };
+        let client = CheckoutClient::new(&names, "http://127.0.0.1:1/served.git").expect("client");
+        assert_eq!(
+            landing
+                .move_off(&repo, &client, "t/elm-oak")
+                .expect("no-op"),
+            None
+        );
+        assert!(names.seen.lock().expect("lock").is_empty());
+
+        // `main` moves on without the work: the branch keeps its commits on top.
+        let info = served.moves("README", "top2\n");
+        let outcome = refreshed(&repo, &info).expect("refresh");
+        assert_eq!(pull_result(&outcome), Some(PullResult::Rebased));
+        assert_eq!(git(&co, &["rev-parse", "work~2"]), info.root);
+        assert_eq!(git(&co, &["log", "-2", "--format=%s", "work"]), "two\none");
+        assert_eq!(
+            std::fs::read_to_string(co.join("src/a.rs")).expect("read"),
+            "a\none\ntwo\n"
+        );
+    }
+
+    #[cfg_attr(not(feature = "full-tests"), ignore = "starts system git or is heavy; run with --features full-tests")]
+    #[test]
+    fn integrating_again_after_a_failed_move_off_finishes_it() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let mut served = Served::new(tmp.path());
+        let (co, repo) = check_out(&mut served, tmp.path());
+        let tip = commit(&co, "src/a.rs", "a\none\n", "one");
+        let landing = land_integration(
+            &repo,
+            &marker(&repo),
+            &integrated("main", IntegrateStatus::Merged),
+            Some(tip),
+        )
+        .expect("land");
+        let info = served.moves("src/a.rs", "a\none\n");
+        let outcome = refreshed(&repo, &info).expect("refresh");
+        assert_eq!(pull_result(&outcome), Some(PullResult::Landed));
+
+        // The server can't give out a new name: HEAD stays on the landed branch.
+        let down =
+            CheckoutClient::new(&Unreachable, "http://127.0.0.1:1/served.git").expect("client");
+        assert!(landing.move_off(&repo, &down, "t/elm-oak").is_err());
+        assert_eq!(git(&co, &["symbolic-ref", "--short", "HEAD"]), "work");
+        assert_eq!(git(&co, &["rev-parse", "work"]), info.root);
+
+        // Integrating again checks nothing in (the branch is at the snapshot)
+        // and the server already has it; the move off still happens.
+        let again = land_integration(
+            &repo,
+            &marker(&repo),
+            &integrated("main", IntegrateStatus::AlreadyIntegrated),
+            None,
+        )
+        .expect("land");
+        assert_eq!(
+            again,
+            Landing::Here {
+                name: "work".to_owned(),
+                tip: None,
+            }
+        );
+        let outcome = refreshed(&repo, &info).expect("refresh");
+        assert_eq!(pull_result(&outcome), Some(PullResult::UpToDate));
+        let names = WorkNames {
+            names: std::sync::Mutex::new(vec!["t/fresh"]),
+            seen: std::sync::Mutex::new(Vec::new()),
+        };
+        let client = CheckoutClient::new(&names, "http://127.0.0.1:1/served.git").expect("client");
+        assert_eq!(
+            again
+                .move_off(&repo, &client, "t/elm-oak")
+                .expect("move off"),
+            Some(MovedOff {
+                from: "work".to_owned(),
+                to: "t/fresh".to_owned(),
+                tip: oid(&info.root),
+            })
+        );
+        assert_eq!(git(&co, &["symbolic-ref", "--short", "HEAD"]), "t/fresh");
+    }
+
+    #[cfg_attr(not(feature = "full-tests"), ignore = "starts system git or is heavy; run with --features full-tests")]
+    #[test]
+    fn a_landed_tip_another_worktree_is_detached_on_is_kept() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let mut served = Served::new(tmp.path());
+        let (co, repo) = check_out(&mut served, tmp.path());
+        commit(&co, "src/a.rs", "a\none\n", "one");
+        let tip = commit(&co, "src/a.rs", "a\none\ntwo\n", "two");
+        let linked = tmp.path().join("linked");
+        git(
+            &co,
+            &[
+                "worktree",
+                "add",
+                "-q",
+                "--detach",
+                linked.to_str().expect("utf-8 path"),
+                "work",
+            ],
+        );
+        record_landed(&repo, &marker(&repo), tip).expect("record");
+
+        // A refresh here moves `work` off the landed commits; the linked
+        // worktree is still detached on them, so the tip is kept.
+        let info = served.moves("src/a.rs", "a\none\ntwo\n");
+        let outcome = refreshed(&repo, &info).expect("refresh");
+        assert_eq!(pull_result(&outcome), Some(PullResult::Landed));
+        assert_eq!(marker(&repo).landed, [tip.to_hex()]);
+
+        // A branch started there later replays only its own commit.
+        git(&linked, &["switch", "-q", "-c", "fromwt"]);
+        commit(&linked, "src/c.rs", "c\n", "own commit");
+        let linked_repo = open(&linked);
+        let again = refreshed(&linked_repo, &info).expect("refresh linked");
+        assert_eq!(pull_result(&again), Some(PullResult::Rebased));
+        assert_eq!(git(&linked, &["rev-parse", "fromwt^"]), info.root);
+        assert_eq!(
+            git(&linked, &["log", "-1", "--format=%s", "fromwt"]),
+            "own commit"
+        );
+        // Nothing builds on the landed tip any more.
+        assert!(marker(&repo).landed.is_empty());
+    }
+
+    fn git_output_fails(dir: &Path, args: &[&str]) -> bool {
+        !Command::new("git")
+            .current_dir(dir)
+            .args(args)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .output()
+            .expect("run git")
+            .status
+            .success()
     }
 }

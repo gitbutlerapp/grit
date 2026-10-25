@@ -341,6 +341,10 @@ fn router(state: Arc<ServerState>) -> Router {
             post(crate::checkouts::update),
         )
         .route(
+            "/.grit/checkouts/{repo}/{id}/work",
+            post(crate::checkouts::work_branch),
+        )
+        .route(
             "/.grit/checkouts/{repo}/integrate",
             post(crate::checkouts::integrate_branch),
         )

@@ -743,6 +743,8 @@ pub const SNAPSHOT_JSON_SCHEMA_SKIP: &[&str] = &[
     "checkin_render",
     "checkout_render",
     "integrate_render",
+    "integrate_elsewhere_render",
+    "integrate_refresh_failed_render",
     "slice_render",
     "serve_render",
     "update_render",

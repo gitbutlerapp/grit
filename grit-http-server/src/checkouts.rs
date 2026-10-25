@@ -11,6 +11,7 @@
 //! | `GET /.grit/checkouts/<repo>/<id>/bundle` | read | the snapshot as a bundle, with `Range` |
 //! | `POST /.grit/checkouts/<repo>/<id>/update` | read | refresh: JSON [`CheckoutInfo`] |
 //! | `POST /.grit/checkouts/<repo>/<id>/checkin` | write | JSON [`CheckinResponse`] |
+//! | `POST /.grit/checkouts/<repo>/<id>/work` | read | a fresh work branch: JSON [`WorkBranchResponse`] |
 //! | `POST /.grit/checkouts/<repo>/integrate` | write | JSON [`IntegrateResponse`] |
 //! | `/.grit/checkouts/<repo>/slices…` | read / write | the slices on the target |
 //!
@@ -48,7 +49,7 @@ use grit_lib::remote::snapshot_checkout::{
     CheckoutErrorBody, CheckoutInfo, CheckoutRecord, CheckoutRequest, CheckoutServerInfo,
     CheckoutState, CheckoutStore, Ident, IntegrateRequest, IntegrateResponse, Slice, SliceChange,
     SliceDeleteRequest, SliceEdit, SliceRequest, SlicesEdited, SlicesResponse, SnapshotRoot,
-    StoredCheckout, TargetChange, TargetRefusal,
+    StoredCheckout, TargetChange, TargetRefusal, WorkBranchRequest, WorkBranchResponse,
 };
 use grit_lib::repo::Repository;
 use grit_protocol::RepositoryOptions;
@@ -602,6 +603,37 @@ pub(crate) async fn update(
                     &info.root[..12]
                 );
                 Ok(info)
+            },
+        )
+        .await,
+    )
+}
+
+/// `POST /.grit/checkouts/<repo>/<id>/work`: reserve a fresh work branch for
+/// the checkout, as making one does, for a client whose branch was just
+/// integrated and that moves on to a new one.
+pub(crate) async fn work_branch(
+    State(state): State<Arc<ServerState>>,
+    UrlPath((name, id)): UrlPath<(String, String)>,
+    headers: HeaderMap,
+    Json(request): Json<WorkBranchRequest>,
+) -> Response<Body> {
+    respond(
+        with_checkout(
+            &state,
+            &headers,
+            &name,
+            id.clone(),
+            Access::Read,
+            move |served, _, options, locks, slot| {
+                let repo = open(&served, &options)?;
+                load_held(slot, &repo, &id)?;
+                let work = reserve_work_branch(&repo, locks, &request.work)?;
+                eprintln!(
+                    "checkout: {id} of {} moves on to work branch {work}",
+                    served.name
+                );
+                Ok(WorkBranchResponse { work })
             },
         )
         .await,
