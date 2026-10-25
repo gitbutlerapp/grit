@@ -454,6 +454,23 @@ impl Repository {
     }
 }
 
+/// Resolve the `HEAD` file of the linked worktree administered at `admin_dir`.
+///
+/// Files and reftable repositories resolve it from `admin_dir` alone, as Git does. A
+/// repository with an injected ref store keeps a linked worktree's `HEAD` in `admin_dir`
+/// but its branches in that store, so the branch tip is resolved through `repo`.
+pub(crate) fn resolve_linked_worktree_head(
+    repo: &crate::repo::Repository,
+    admin_dir: &Path,
+) -> HeadState {
+    if repo.refs_on_disk() {
+        resolve_head(admin_dir)
+    } else {
+        resolve_head_impl(admin_dir, Some(repo))
+    }
+    .unwrap_or(HeadState::Invalid)
+}
+
 /// [`HeadState`] for `HEAD` pointing symbolically at `refname`.
 ///
 /// A missing `refs/heads/*` target is an unborn branch; any other unresolvable or malformed

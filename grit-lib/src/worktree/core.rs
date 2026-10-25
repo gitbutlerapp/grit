@@ -25,7 +25,7 @@ use crate::progress::NullProgress;
 use crate::refs;
 use crate::repo::{common_git_dir_for_config, Repository};
 use crate::rev_parse::resolve_revision;
-use crate::state::{resolve_head, HeadState};
+use crate::state::{resolve_head, resolve_linked_worktree_head, HeadState};
 
 use super::error::{WorktreeError, WorktreeOperation};
 
@@ -247,7 +247,11 @@ pub fn list_worktrees(repo: &Repository) -> Result<Vec<WorktreeEntry>> {
     let opened_from_linked = git_dir.starts_with(common.join("worktrees"));
     let mut entries = Vec::new();
 
-    let bare = is_bare_repository(&common);
+    let bare = if opened_from_linked {
+        is_bare_repository(&common)
+    } else {
+        repo.is_bare()
+    };
     let main_path = if bare {
         path_for_disk_compare(&common)
     } else if let Some(wt) = repo.work_tree() {
@@ -294,7 +298,7 @@ pub fn list_worktrees(repo: &Repository) -> Result<Vec<WorktreeEntry>> {
 
     for name in names {
         let admin = worktrees_dir.join(&name);
-        let wt_head = resolve_linked_head(&admin, &common);
+        let wt_head = resolve_linked_worktree_head(repo, &admin);
         let wt_path = read_worktree_path(&admin)?;
         let (is_locked, lock_reason) = read_lock_state(&admin)?;
         let (is_prunable, prunable_reason) =
@@ -547,7 +551,7 @@ pub fn add_linked_worktree(
     opts: &AddLinkedWorktreeOptions,
 ) -> Result<WorktreeEntry> {
     let common = common_git_dir(repo.git_dir());
-    if is_bare_repository(&common) {
+    if repo.is_bare() {
         return Err(WorktreeError::BareRepository.into());
     }
 
@@ -578,9 +582,9 @@ pub fn add_linked_worktree(
     let finish = (|| -> Result<WorktreeEntry> {
         if let Some(ref bw) = plan.branch_write {
             let branch_ref = format!("refs/heads/{}", bw.branch_short);
-            let previous_tip = refs::resolve_ref(repo.git_dir(), &branch_ref).ok();
+            let previous_tip = repo.resolve_ref_oid(&branch_ref).ok();
             branch_rollback = Some(BranchRefRollback {
-                git_dir: repo.git_dir(),
+                repo,
                 branch_ref: branch_ref.clone(),
                 previous_tip,
                 committed: false,
@@ -632,14 +636,11 @@ pub fn add_linked_worktree(
         }
 
         if !opts.no_checkout {
-            let linked = Repository::discover(
-                Some(wt_path.as_path()),
-                &repo.linked_worktree_discover_options(),
-            )?;
+            let linked = repo.open_linked_worktree(&admin, &wt_path)?;
             checkout_between_trees(&linked, None, &tree_oid)?;
         }
 
-        linked_worktree_entry(&admin, &common, &worktree_admin_dir(repo))
+        linked_worktree_entry(repo, &admin)
     })();
 
     match finish {
@@ -725,7 +726,7 @@ struct BranchWritePlan {
 }
 
 struct BranchRefRollback<'a> {
-    git_dir: &'a Path,
+    repo: &'a Repository,
     branch_ref: String,
     previous_tip: Option<crate::objects::ObjectId>,
     committed: bool,
@@ -743,8 +744,13 @@ impl Drop for BranchRefRollback<'_> {
             return;
         }
         let _ = match self.previous_tip {
-            None => refs::delete_ref(self.git_dir, &self.branch_ref),
-            Some(old) => refs::write_ref(self.git_dir, &self.branch_ref, &old),
+            None => refs::delete_ref_on_store(self.repo.refs(), &self.branch_ref),
+            Some(old) => refs::update_direct_ref_on_store(
+                self.repo.refs(),
+                self.repo.git_dir(),
+                &self.branch_ref,
+                &old,
+            ),
         };
     }
 }
@@ -808,7 +814,7 @@ fn plan_worktree_head(
         None => {
             if let Some(start) = opts.start_point.as_deref() {
                 if let Some(branch_ref) = resolve_existing_branch(repo, start) {
-                    let tip = refs::resolve_ref(repo.git_dir(), &branch_ref)?;
+                    let tip = repo.resolve_ref_oid(&branch_ref)?;
                     if tip != start_oid {
                         return Err(WorktreeError::BranchTipMismatch {
                             branch: branch_ref
@@ -873,12 +879,13 @@ fn validate_branch_name(name: &str) -> Result<()> {
 
 fn resolve_existing_branch_tip(repo: &Repository, name: &str) -> Result<crate::objects::ObjectId> {
     validate_branch_name(name)?;
-    refs::resolve_ref(repo.git_dir(), &format!("refs/heads/{name}")).map_err(|_| {
-        BranchError::NotFound {
-            name: name.to_owned(),
-        }
-        .into()
-    })
+    repo.resolve_ref_oid(&format!("refs/heads/{name}"))
+        .map_err(|_| {
+            BranchError::NotFound {
+                name: name.to_owned(),
+            }
+            .into()
+        })
 }
 
 fn create_worktree_branch(
@@ -930,13 +937,9 @@ fn maybe_track_new_branch(
     }
 }
 
-fn linked_worktree_entry(
-    admin: &Path,
-    common: &Path,
-    current_admin: &Path,
-) -> Result<WorktreeEntry> {
+fn linked_worktree_entry(repo: &Repository, admin: &Path) -> Result<WorktreeEntry> {
     let wt_path = read_worktree_path(admin)?;
-    let wt_head = resolve_linked_head(admin, common);
+    let wt_head = resolve_linked_worktree_head(repo, admin);
     let (is_locked, lock_reason) = read_lock_state(admin)?;
     let (is_prunable, prunable_reason) = linked_worktree_prunable_state(admin, is_locked, &wt_path);
     Ok(WorktreeEntry {
@@ -948,7 +951,7 @@ fn linked_worktree_entry(
         admin_dir: admin.to_path_buf(),
         is_prunable,
         prunable_reason,
-        is_current: admin_dirs_match(admin, current_admin),
+        is_current: admin_dirs_match(admin, &worktree_admin_dir(repo)),
     })
 }
 
@@ -1194,10 +1197,7 @@ pub fn remove_linked_worktree(repo: &Repository, path: &Path, force: bool) -> Re
         .into());
     }
 
-    let linked = Repository::discover(
-        Some(entry.path.as_path()),
-        &repo.linked_worktree_discover_options(),
-    )?;
+    let linked = repo.open_linked_worktree(&entry.admin_dir, &entry.path)?;
     if !force && worktree_has_local_changes(&linked)? {
         return Err(WorktreeError::HasLocalChanges.into());
     }
@@ -1271,7 +1271,7 @@ fn resolve_existing_branch(repo: &Repository, spec: &str) -> Option<String> {
     } else {
         format!("refs/heads/{spec}")
     };
-    refs::resolve_ref(repo.git_dir(), &full).ok()?;
+    repo.resolve_ref_oid(&full).ok()?;
     Some(full)
 }
 

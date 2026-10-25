@@ -12,6 +12,7 @@ mod apply;
 pub mod backend;
 mod error;
 mod files;
+mod linked_worktree;
 mod memory;
 mod open;
 pub mod paths;
@@ -24,6 +25,7 @@ mod validation;
 
 pub use error::{BackendError, RefStoreError};
 pub use files::{FilesRefStore, FilesRefStoreConfig};
+pub(crate) use linked_worktree::LinkedWorktreeRefStore;
 pub use memory::MemoryRefStore;
 pub use open::open_ref_store;
 pub(crate) use open::{open_files_ref_store, open_ref_store_uncached};

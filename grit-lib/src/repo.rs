@@ -770,6 +770,73 @@ impl Repository {
         }
     }
 
+    /// Handle for the linked worktree administered at `admin_dir` with its files at
+    /// `work_tree`.
+    ///
+    /// When both stores live in the git directory the linked worktree is discovered from
+    /// `work_tree`, as any later open would. Otherwise discovery could not find an injected
+    /// store, so the handle shares this handle's object store and sees this handle's refs
+    /// with the worktree's own `HEAD` (read-only) from `admin_dir`.
+    ///
+    /// # Errors
+    ///
+    /// Discovery failures, [`Error::NotARepository`] when `admin_dir` is missing, and
+    /// [`Error::PathError`] when `work_tree` cannot be canonicalized.
+    pub(crate) fn open_linked_worktree(&self, admin_dir: &Path, work_tree: &Path) -> Result<Self> {
+        let options = self.linked_worktree_discover_options();
+        if self.refs_on_disk() && self.odb.uses_files_primary() {
+            return Self::discover(Some(work_tree), &options);
+        }
+        let git_dir = admin_dir
+            .canonicalize()
+            .map_err(|_| not_a_repository_at(admin_dir))?;
+        let work_tree = work_tree
+            .canonicalize()
+            .map_err(|_| Error::PathError(work_tree.display().to_string()))?;
+        let environment = Arc::new(options.environment);
+        let caches = RepoCaches::with_diagnostics(
+            Arc::clone(&self.command_runner),
+            Arc::clone(&self.diagnostics),
+        );
+        let ref_store = if self.refs_on_disk() {
+            caches.open_ref_store(&git_dir, &environment)?
+        } else {
+            let view: Arc<dyn crate::refs::store::RefStore> =
+                Arc::new(crate::refs::store::LinkedWorktreeRefStore::new(
+                    git_dir.clone(),
+                    Arc::clone(&self.ref_store),
+                ));
+            caches.install_ref_store(&git_dir, Arc::clone(&view));
+            view
+        };
+        let repo = Self {
+            git_prefix: compute_git_prefix(&environment, &work_tree),
+            git_dir,
+            common_git_dir: self.common_git_dir.clone(),
+            work_tree: Some(work_tree),
+            odb: self.odb.clone(),
+            explicit_git_dir: false,
+            discovery_root: None,
+            work_tree_from_env: false,
+            discovery_via_gitfile: true,
+            config_session: Mutex::new(None),
+            caches,
+            ref_store,
+            environment,
+            command_runner: Arc::clone(&self.command_runner),
+            change_id_generator: Arc::clone(&self.change_id_generator),
+            diagnostics: Arc::clone(&self.diagnostics),
+            network_trace: self.network_trace,
+            reference_unix_time: self.reference_unix_time,
+            test_assume_different_owner: self.test_assume_different_owner,
+            force_split_index: self.force_split_index,
+            thread_policy: self.thread_policy,
+            hook_stdio: self.hook_stdio,
+        };
+        repo.refresh_config_session()?;
+        Ok(repo)
+    }
+
     fn repo_cached_settings_from_config(
         cfg: &ConfigSet,
         environment: &Environment,
