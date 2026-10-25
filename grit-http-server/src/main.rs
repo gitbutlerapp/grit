@@ -232,6 +232,7 @@ async fn info_refs_dispatch(
         service,
         protocol_version,
         state.repository_options.clone(),
+        grit_protocol::Extensions::default(),
     )
     .await;
     state.with_cookie(response)
@@ -268,6 +269,7 @@ async fn rpc_dispatch(
         &headers,
         body,
         state.repository_options.clone(),
+        grit_protocol::Extensions::default(),
     )
     .await;
     state.with_cookie(response)

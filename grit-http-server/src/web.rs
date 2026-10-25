@@ -27,13 +27,12 @@ use axum::{
     http::{header, HeaderMap, HeaderValue, Response, StatusCode},
     response::{Html, IntoResponse, Redirect},
 };
-use grit_lib::objects::{parse_commit, ObjectKind};
+use grit_lib::objects::{parse_commit, HashAlgo, ObjectKind};
 use grit_lib::porcelain::branch::list_branches;
 use grit_lib::remote::grit_server_auth::AUTHORIZE_PATH;
 use grit_lib::repo::Repository;
 use grit_lib::state::{resolve_head_for_repository, HeadState};
 use grit_protocol::RepositoryOptions;
-use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 
 use crate::server::{presented_token, store_failure, Authorized, ServerState};
@@ -76,7 +75,9 @@ impl Viewer {
 
 /// The CSRF value for session `secret`: a hash only its holder can compute.
 fn csrf_for(secret: &Token) -> String {
-    hex::encode(Sha256::digest(format!("grit-csrf:{}", secret.secret())))
+    hex::encode(
+        HashAlgo::Sha256.checksum_digest(format!("grit-csrf:{}", secret.secret()).as_bytes()),
+    )
 }
 
 /// The session secret in the request's cookies.

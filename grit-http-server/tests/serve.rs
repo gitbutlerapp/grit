@@ -8,6 +8,7 @@ use std::net::{SocketAddr, TcpStream};
 use std::path::Path;
 use std::process::{Command, Output};
 
+use grit_http_server::bundles::BundleSettings;
 use grit_http_server::server::{ServeConfig, Server, ServerError};
 use grit_http_server::store::{Access, AuthStore, HashedPassword, Token};
 
@@ -120,11 +121,23 @@ fn fixture(root: &Path) -> std::path::PathBuf {
 }
 
 fn start(root: &Path, database: &Path) -> SocketAddr {
+    start_with(
+        root,
+        database,
+        BundleSettings {
+            enabled: false,
+            ..BundleSettings::default()
+        },
+    )
+}
+
+fn start_with(root: &Path, database: &Path, bundles: BundleSettings) -> SocketAddr {
     let server = Server::bind(
         ServeConfig {
             root: root.to_path_buf(),
             database: database.to_path_buf(),
             repository_options: grit_protocol::repository_options_from_process(),
+            bundles,
         },
         "127.0.0.1:0",
     )
@@ -721,8 +734,299 @@ fn a_database_without_users_refuses_to_start() {
             root: tmp.path().to_path_buf(),
             database: tmp.path().join("empty.db"),
             repository_options: grit_protocol::repository_options_from_process(),
+            bundles: BundleSettings::default(),
         },
         "127.0.0.1:0",
     );
     assert!(matches!(result, Err(ServerError::NotSetUp)));
+}
+
+/// A raw HTTP/1.0 exchange with a binary body: status line, headers, body.
+fn http_raw(
+    addr: SocketAddr,
+    method: &str,
+    path: &str,
+    headers: &[String],
+    body: &[u8],
+) -> (String, String, Vec<u8>) {
+    let mut stream = TcpStream::connect(addr).expect("connect");
+    let mut request = format!("{method} {path} HTTP/1.0\r\nHost: {addr}\r\nConnection: close\r\n");
+    for header in headers {
+        request.push_str(header);
+        request.push_str("\r\n");
+    }
+    request.push_str(&format!("Content-Length: {}\r\n\r\n", body.len()));
+    stream.write_all(request.as_bytes()).expect("write request");
+    stream.write_all(body).expect("write body");
+    let mut response = Vec::new();
+    stream.read_to_end(&mut response).expect("read response");
+    let split = response
+        .windows(4)
+        .position(|w| w == b"\r\n\r\n")
+        .unwrap_or(response.len());
+    let head = String::from_utf8_lossy(&response[..split]).into_owned();
+    let body = response.get(split + 4..).unwrap_or_default().to_vec();
+    let (status, head) = head.split_once("\r\n").unwrap_or((&head, ""));
+    (status.to_owned(), head.to_owned(), body)
+}
+
+fn header_of<'a>(head: &'a str, name: &str) -> Option<&'a str> {
+    head.lines().find_map(|line| {
+        let (key, value) = line.split_once(':')?;
+        key.eq_ignore_ascii_case(name).then(|| value.trim())
+    })
+}
+
+fn bearer(token: &str) -> String {
+    format!("Authorization: Bearer {token}")
+}
+
+#[test]
+fn clone_bundles_are_built_served_with_ranges_and_used_by_git() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    let database = fixture(root);
+    let addr = start_with(
+        &root.join("repos"),
+        &database,
+        BundleSettings {
+            check_every: std::time::Duration::from_millis(50),
+            ..BundleSettings::default()
+        },
+    );
+    let repo = root.join("repos/project.git");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+    let manifest = loop {
+        if let Some(m) = grit_http_server::bundles::current(&repo) {
+            break m;
+        }
+        assert!(std::time::Instant::now() < deadline, "no bundle was built");
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    };
+    let path = format!("/project/bundles/{}", manifest.file);
+    let size = manifest.size;
+
+    let (status, head, body) = http_raw(addr, "GET", &path, &[bearer(ADMIN_TOKEN)], b"");
+    assert!(status.contains("200"), "{status}");
+    assert_eq!(body.len() as u64, size);
+    assert!(body.starts_with(b"# v2 git bundle\n"));
+    let etag = header_of(&head, "etag").expect("ETag").to_owned();
+    assert_eq!(header_of(&head, "accept-ranges"), Some("bytes"));
+
+    // Ranges let a download resume; a changed file (other ETag) starts over.
+    let (status, head, part) = http_raw(
+        addr,
+        "GET",
+        &path,
+        &[
+            bearer(READER_TOKEN),
+            "Range: bytes=10-".to_owned(),
+            format!("If-Range: {etag}"),
+        ],
+        b"",
+    );
+    assert!(status.contains("206"), "{status}");
+    assert_eq!(
+        header_of(&head, "content-range").map(str::to_owned),
+        Some(format!("bytes 10-{}/{size}", size - 1))
+    );
+    assert_eq!(part, body[10..]);
+    let (status, _, whole) = http_raw(
+        addr,
+        "GET",
+        &path,
+        &[
+            bearer(ADMIN_TOKEN),
+            "Range: bytes=10-".to_owned(),
+            "If-Range: \"other\"".to_owned(),
+        ],
+        b"",
+    );
+    assert!(status.contains("200"), "{status}");
+    assert_eq!(whole.len() as u64, size);
+    let (status, _, _) = http_raw(
+        addr,
+        "GET",
+        &path,
+        &[bearer(ADMIN_TOKEN), format!("Range: bytes={size}-")],
+        b"",
+    );
+    assert!(status.contains("416"), "{status}");
+
+    // Bundles are gated like the repository.
+    let (status, _, _) = http_raw(addr, "GET", &path, &[], b"");
+    assert!(status.contains("401"), "{status}");
+    let (status, _, _) = http_raw(addr, "GET", &path, &[bearer(OUTSIDER_TOKEN)], b"");
+    assert!(status.contains("404"), "{status}");
+    let (status, _, _) = http_raw(
+        addr,
+        "GET",
+        "/project/bundles/0-nope.bundle",
+        &[bearer(ADMIN_TOKEN)],
+        b"",
+    );
+    assert!(status.contains("404"), "{status}");
+
+    // Git itself clones from the advertised bundle (and keeps its refs). The
+    // bundle URL carries no credentials, so Git needs a helper for it.
+    let helper = format!("!f() {{ echo username=user; echo password={ADMIN_TOKEN}; }}; f");
+    git(
+        root,
+        &[
+            "-c",
+            "transfer.bundleURI=true",
+            "-c",
+            &format!("credential.helper={helper}"),
+            "clone",
+            "-q",
+            &url(addr, None, "project.git"),
+            "from-bundle",
+        ],
+    );
+    let clone = root.join("from-bundle");
+    assert_eq!(
+        rev_parse(&clone, "HEAD"),
+        rev_parse(&root.join("seed"), "HEAD")
+    );
+    assert_eq!(
+        rev_parse(&clone, "refs/bundles/heads/main"),
+        rev_parse(&root.join("seed"), "HEAD")
+    );
+}
+
+#[test]
+fn tus_uploads_resume_and_apply_as_a_push() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    let database = fixture(root);
+    let addr = start(&root.join("repos"), &database);
+    let old = rev_parse(&root.join("seed"), "HEAD");
+
+    let (_, _, advertisement) = http_raw(
+        addr,
+        "GET",
+        "/project/info/refs?service=git-receive-pack",
+        &[bearer(ADMIN_TOKEN)],
+        b"",
+    );
+    assert!(
+        String::from_utf8_lossy(&advertisement).contains("pushBundle=/push"),
+        "{}",
+        String::from_utf8_lossy(&advertisement)
+    );
+
+    // A bundle of one new commit on top of the server's main.
+    let work = root.join("work");
+    git(
+        root,
+        &[
+            "clone",
+            "-q",
+            &url(addr, Some(ADMIN_TOKEN), "project"),
+            "work",
+        ],
+    );
+    std::fs::write(work.join("NEW"), "new\n").expect("write");
+    git(&work, &["add", "NEW"]);
+    git(&work, &["commit", "-q", "-m", "New"]);
+    let new = rev_parse(&work, "HEAD");
+    git(
+        &work,
+        &["bundle", "create", "../push.bundle", "main", "^origin/main"],
+    );
+    let bundle = std::fs::read(root.join("push.bundle")).expect("bundle");
+    let half = bundle.len() / 2;
+
+    let (status, head, _) = http_raw(addr, "OPTIONS", "/project/push", &[], b"");
+    assert!(status.contains("204"), "{status}");
+    assert_eq!(header_of(&head, "tus-version"), Some("1.0.0"));
+
+    let length = format!("Upload-Length: {}", bundle.len());
+    let tus = "Tus-Resumable: 1.0.0".to_owned();
+    let (status, _, _) = http_raw(
+        addr,
+        "POST",
+        "/project/push",
+        &[tus.clone(), length.clone()],
+        b"",
+    );
+    assert!(status.contains("401"), "{status}");
+    let (status, _, _) = http_raw(
+        addr,
+        "POST",
+        "/project/push",
+        &[bearer(READER_TOKEN), tus.clone(), length.clone()],
+        b"",
+    );
+    assert!(status.contains("403"), "{status}");
+    let (status, head, _) = http_raw(
+        addr,
+        "POST",
+        "/project/push",
+        &[bearer(ADMIN_TOKEN), tus.clone(), length],
+        b"",
+    );
+    assert!(status.contains("201"), "{status}");
+    let upload = header_of(&head, "location").expect("Location").to_owned();
+    assert!(upload.starts_with("/project/push/"), "{upload}");
+
+    let patch = |offset: usize, bytes: &[u8]| {
+        http_raw(
+            addr,
+            "PATCH",
+            &upload,
+            &[
+                bearer(ADMIN_TOKEN),
+                tus.clone(),
+                format!("Upload-Offset: {offset}"),
+                "Content-Type: application/offset+octet-stream".to_owned(),
+            ],
+            bytes,
+        )
+    };
+    let (status, head, _) = patch(0, &bundle[..half]);
+    assert!(status.contains("204"), "{status}");
+    assert_eq!(
+        header_of(&head, "upload-offset"),
+        Some(half.to_string().as_str())
+    );
+    let (status, head, _) = http_raw(
+        addr,
+        "HEAD",
+        &upload,
+        &[bearer(ADMIN_TOKEN), tus.clone()],
+        b"",
+    );
+    assert!(status.contains("200"), "{status}");
+    assert_eq!(
+        header_of(&head, "upload-offset"),
+        Some(half.to_string().as_str())
+    );
+    let (status, _, _) = patch(0, &bundle[..half]);
+    assert!(
+        status.contains("409"),
+        "a stale offset is refused: {status}"
+    );
+
+    // Applying before every byte is in is refused.
+    let mut commands = Vec::new();
+    let line = format!("{old} {new} refs/heads/main\0report-status");
+    commands.extend_from_slice(format!("{:04x}{line}\n", line.len() + 5).as_bytes());
+    commands.extend_from_slice(b"0000");
+    let receive = format!("{upload}/receive");
+    let (status, _, _) = http_raw(addr, "POST", &receive, &[bearer(ADMIN_TOKEN)], &commands);
+    assert!(status.contains("409"), "{status}");
+
+    let (status, _, _) = patch(half, &bundle[half..]);
+    assert!(status.contains("204"), "{status}");
+    let (status, _, report) = http_raw(addr, "POST", &receive, &[bearer(ADMIN_TOKEN)], &commands);
+    assert!(status.contains("200"), "{status}");
+    let report = String::from_utf8_lossy(&report).into_owned();
+    assert!(report.contains("unpack ok"), "{report}");
+    assert!(report.contains("ok refs/heads/main"), "{report}");
+    assert_eq!(rev_parse(&root.join("repos/project.git"), "main"), new);
+
+    // The upload is gone once applied.
+    let (status, _, _) = http_raw(addr, "HEAD", &upload, &[bearer(ADMIN_TOKEN), tus], b"");
+    assert!(status.contains("404"), "{status}");
 }

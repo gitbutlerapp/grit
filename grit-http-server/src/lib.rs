@@ -12,9 +12,15 @@
 //!   management for admins.
 //! - [`login`] tracks `grit auth <url>` sign-ins waiting for the user to
 //!   approve them in the browser.
+//! - [`bundles`] builds each repository's clone bundle in the background and
+//!   offers it through `bundle-uri`, so clones can download it resumably.
+//! - [`uploads`] accepts resumable pushes: bundles uploaded over TUS to the
+//!   endpoint receive-pack advertises as `pushBundle`.
 
+pub mod bundles;
 pub mod login;
 pub mod server;
 pub mod smart_http;
 pub mod store;
+pub mod uploads;
 pub mod web;

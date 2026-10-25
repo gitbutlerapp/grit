@@ -99,6 +99,8 @@ pub fn protocol_version_from_headers(headers: &HeaderMap) -> Option<u8> {
 /// - `service`: which advertisement to produce.
 /// - `protocol_version`: from [`protocol_version_from_headers`].
 /// - `options`: environment used to load global and system config.
+/// - `extensions`: a `bundle-uri` bundle list or `pushBundle` endpoint to
+///   advertise.
 ///
 /// Failures become a `500` response rather than an error.
 pub async fn info_refs(
@@ -106,12 +108,18 @@ pub async fn info_refs(
     service: Service,
     protocol_version: Option<u8>,
     options: RepositoryOptions,
+    extensions: grit_protocol::Extensions,
 ) -> Response<Body> {
     let advertisement = tokio::task::spawn_blocking(move || match service {
-        Service::UploadPack => {
-            grit_protocol::upload_pack::advertise_refs(&repo_path, protocol_version, &options)
+        Service::UploadPack => grit_protocol::upload_pack::advertise_refs_with(
+            &repo_path,
+            protocol_version,
+            &options,
+            &extensions,
+        ),
+        Service::ReceivePack => {
+            grit_protocol::receive_pack::advertise_refs_with(&repo_path, &options, &extensions)
         }
-        Service::ReceivePack => grit_protocol::receive_pack::advertise_refs(&repo_path, &options),
     })
     .await;
     let advertisement = match advertisement {
@@ -147,6 +155,7 @@ pub async fn info_refs(
 ///   uses protocol v0.
 /// - `headers`, `body`: the HTTP request.
 /// - `options`: environment used to load global and system config.
+/// - `extensions`: the bundle list `command=bundle-uri` answers with.
 ///
 /// Bad bodies become `400`/`413` and failures `500` responses.
 pub async fn rpc(
@@ -156,6 +165,7 @@ pub async fn rpc(
     headers: &HeaderMap,
     body: Body,
     options: RepositoryOptions,
+    extensions: grit_protocol::Extensions,
 ) -> Response<Body> {
     let encoding = match body_encoding(headers) {
         Ok(e) => e,
@@ -172,11 +182,12 @@ pub async fn rpc(
                 Err(resp) => return *resp,
             };
             let result = tokio::task::spawn_blocking(move || {
-                grit_protocol::upload_pack::stateless_rpc(
+                grit_protocol::upload_pack::stateless_rpc_with(
                     &repo_path,
                     &request,
                     protocol_version,
                     &options,
+                    &extensions,
                 )
             })
             .await;
@@ -210,6 +221,100 @@ pub async fn rpc(
         )
         .body(Body::from(data))
         .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
+}
+
+/// Answer `GET` for a file that clients download with resumable `Range`
+/// requests, such as a clone bundle.
+///
+/// Sends `ETag` and `Accept-Ranges: bytes`. A `Range: bytes=<start>-[<end>]`
+/// header gets `206` with that part (`416` when it starts past the end), unless
+/// `If-Range` names another version, which gets the whole file.
+///
+/// # Parameters
+///
+/// - `path`: the file.
+/// - `etag`: a strong validator for this version of the file.
+/// - `content_type`: the `Content-Type` to send.
+/// - `headers`: the request headers.
+pub async fn serve_file(
+    path: PathBuf,
+    etag: &str,
+    content_type: &str,
+    headers: &HeaderMap,
+) -> Response<Body> {
+    let mut file = match tokio::fs::File::open(&path).await {
+        Ok(f) => f,
+        Err(_) => return (StatusCode::NOT_FOUND, "not found\n").into_response(),
+    };
+    let size = match file.metadata().await {
+        Ok(m) => m.len(),
+        Err(e) => return internal_error(&e.to_string()),
+    };
+    let if_range_matches = headers
+        .get(header::IF_RANGE)
+        .and_then(|v| v.to_str().ok())
+        .is_none_or(|v| v == etag);
+    let range = headers
+        .get(header::RANGE)
+        .and_then(|v| v.to_str().ok())
+        .filter(|_| if_range_matches)
+        .and_then(parse_byte_range);
+    let builder = Response::builder()
+        .header(header::CONTENT_TYPE, content_type)
+        .header(header::ETAG, etag)
+        .header(header::ACCEPT_RANGES, "bytes")
+        .header(
+            header::CACHE_CONTROL,
+            "private, max-age=31536000, immutable",
+        );
+    let (builder, start, len) = match range {
+        None => (builder.status(StatusCode::OK), 0, size),
+        Some((start, _)) if start >= size => {
+            return Response::builder()
+                .status(StatusCode::RANGE_NOT_SATISFIABLE)
+                .header(header::CONTENT_RANGE, format!("bytes */{size}"))
+                .body(Body::empty())
+                .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response());
+        }
+        Some((start, end)) => {
+            let end = end.unwrap_or(size - 1).min(size - 1);
+            if end < start {
+                return (StatusCode::RANGE_NOT_SATISFIABLE, "bad range\n").into_response();
+            }
+            (
+                builder
+                    .status(StatusCode::PARTIAL_CONTENT)
+                    .header(header::CONTENT_RANGE, format!("bytes {start}-{end}/{size}")),
+                start,
+                end - start + 1,
+            )
+        }
+    };
+    use tokio::io::{AsyncReadExt as _, AsyncSeekExt as _};
+    if let Err(e) = file.seek(std::io::SeekFrom::Start(start)).await {
+        return internal_error(&e.to_string());
+    }
+    let stream = tokio_util::io::ReaderStream::new(file.take(len));
+    builder
+        .header(header::CONTENT_LENGTH, len.to_string())
+        .body(Body::from_stream(stream))
+        .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
+}
+
+/// Parse a single `bytes=<start>-[<end>]` range. Suffix ranges (`bytes=-<n>`)
+/// and multiple ranges are not supported and are answered with the whole file.
+fn parse_byte_range(value: &str) -> Option<(u64, Option<u64>)> {
+    let spec = value.trim().strip_prefix("bytes=")?;
+    if spec.contains(',') {
+        return None;
+    }
+    let (start, end) = spec.split_once('-')?;
+    let start = start.trim().parse().ok()?;
+    let end = match end.trim() {
+        "" => None,
+        e => Some(e.parse().ok()?),
+    };
+    Some((start, end))
 }
 
 fn internal_error(message: &str) -> Response<Body> {
@@ -498,6 +603,15 @@ mod tests {
             Err(resp) => assert_eq!(resp.status(), StatusCode::PAYLOAD_TOO_LARGE),
             Ok(_) => panic!("oversized body must fail"),
         }
+    }
+
+    #[test]
+    fn byte_ranges_parse() {
+        assert_eq!(parse_byte_range("bytes=10-"), Some((10, None)));
+        assert_eq!(parse_byte_range("bytes=10-20"), Some((10, Some(20))));
+        assert_eq!(parse_byte_range("bytes=-20"), None);
+        assert_eq!(parse_byte_range("bytes=1-2,4-5"), None);
+        assert_eq!(parse_byte_range("items=1-"), None);
     }
 
     #[test]

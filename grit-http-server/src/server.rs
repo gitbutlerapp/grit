@@ -22,6 +22,8 @@
 //! | `POST /<repo>/git-upload-pack` | read | fetch |
 //! | `GET /<repo>/info/refs?service=git-receive-pack` | write | push discovery |
 //! | `POST /<repo>/git-receive-pack` | write | push |
+//! | `GET /<repo>/bundles/<file>` | read | a clone bundle, with `Range` ([`crate::bundles`]) |
+//! | `/<repo>/push…` (TUS) | write | resumable push ([`crate::uploads`]) |
 //! | `/`, `/<repo>`, `/.grit/…` pages | a session | see [`crate::web`] |
 //!
 //! Repositories the user cannot read answer `404`, the same as missing ones.
@@ -46,11 +48,13 @@ use grit_lib::remote::grit_server_auth::{
 };
 use grit_protocol::RepositoryOptions;
 
+use crate::bundles::{BundleScheduler, BundleSettings};
 use crate::login::{LoginError, PendingLogins, PollOutcome};
 use crate::smart_http::{self, Service};
 use crate::store::{
     normalize_repository_name, Access, AuthStore, HashedPassword, StoreError, Token, User,
 };
+use crate::uploads::{UploadLocks, UploadPath};
 use crate::web;
 
 /// File name of the database [`default_database_path`] picks.
@@ -175,6 +179,8 @@ pub struct ServeConfig {
     pub database: PathBuf,
     /// Environment used to load global and system config for each repository.
     pub repository_options: RepositoryOptions,
+    /// When clone bundles are built ([`crate::bundles`]).
+    pub bundles: BundleSettings,
 }
 
 pub(crate) struct ServerState {
@@ -184,6 +190,10 @@ pub(crate) struct ServerState {
     pub(crate) options: RepositoryOptions,
     /// Checked when a sign-in names no user, so it takes as long as a real one.
     pub(crate) stand_in_password: HashedPassword,
+    bundles: BundleSettings,
+    /// Running once [`Server::run`] started it.
+    scheduler: Mutex<Option<BundleScheduler>>,
+    uploads: UploadLocks,
 }
 
 /// A bound, ready-to-run server.
@@ -221,6 +231,9 @@ impl Server {
                 logins: Mutex::new(PendingLogins::default()),
                 options: config.repository_options,
                 stand_in_password,
+                bundles: config.bundles,
+                scheduler: Mutex::new(None),
+                uploads: UploadLocks::default(),
             }),
         })
     }
@@ -247,6 +260,7 @@ impl Server {
     /// [`ServerError::Io`] when the async runtime cannot start or the
     /// listener fails.
     pub fn run(self) -> Result<(), ServerError> {
+        self.start_bundles();
         let runtime = tokio::runtime::Builder::new_multi_thread()
             .enable_all()
             .build()?;
@@ -255,6 +269,35 @@ impl Server {
             axum::serve(listener, router(self.state)).await
         })?;
         Ok(())
+    }
+}
+
+impl Server {
+    /// Start the thread that builds clone bundles, unless bundles are off.
+    fn start_bundles(&self) {
+        if !self.state.bundles.enabled {
+            return;
+        }
+        let repositories = self.state.repositories.clone();
+        let scheduler = BundleScheduler::start(
+            self.state.bundles,
+            self.state.options.clone(),
+            move || repositories.list().into_iter().map(|r| r.path).collect(),
+            |path, manifest| {
+                eprintln!(
+                    "bundle: built {} ({} bytes) for {}",
+                    manifest.file,
+                    manifest.size,
+                    path.display()
+                );
+            },
+            |path, e| eprintln!("bundle: cannot bundle {}: {e}", path.display()),
+        );
+        *self
+            .state
+            .scheduler
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = Some(scheduler);
     }
 }
 
@@ -279,7 +322,14 @@ fn router(state: Arc<ServerState>) -> Router {
         )
         .route(web::USERS_PATH, get(web::users_page).post(web::add_user))
         .route(web::GRANTS_PATH, post(web::grant))
-        .route("/{*path}", get(get_dispatch).post(post_dispatch))
+        .route(
+            "/{*path}",
+            get(get_dispatch)
+                .post(post_dispatch)
+                .head(head_dispatch)
+                .patch(patch_dispatch)
+                .options(options_dispatch),
+        )
         .with_state(state)
 }
 
@@ -339,6 +389,49 @@ impl ServerState {
         self.logins.lock().unwrap_or_else(|e| e.into_inner())
     }
 
+    /// Check bundles again soon, after a push changed a repository.
+    fn pushed(&self) {
+        if let Some(scheduler) = self
+            .scheduler
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .as_ref()
+        {
+            scheduler.wake();
+        }
+    }
+
+    /// What `repo`'s advertisements offer beyond fetch and push: its clone
+    /// bundle for upload-pack, the resumable push endpoint for receive-pack.
+    fn extensions(
+        &self,
+        repo: &ServedRepository,
+        service: Service,
+        headers: &HeaderMap,
+    ) -> grit_protocol::Extensions {
+        match service {
+            Service::ReceivePack => grit_protocol::Extensions {
+                push_bundle: Some(crate::uploads::PUSH_BUNDLE_PATH.to_owned()),
+                ..Default::default()
+            },
+            Service::UploadPack => {
+                let list = self
+                    .bundles
+                    .enabled
+                    .then(|| crate::bundles::current(&repo.path))
+                    .flatten()
+                    .zip(request_base_url(headers))
+                    .map(|(manifest, base)| {
+                        crate::bundles::bundle_list(&manifest, &base, &repo.name)
+                    });
+                grit_protocol::Extensions {
+                    bundle_list: list,
+                    ..Default::default()
+                }
+            }
+        }
+    }
+
     fn authenticate(&self, headers: &HeaderMap) -> Result<User, Rejection> {
         let token = presented_token(headers).ok_or_else(|| Box::new(unauthorized()))?;
         match self.lock_store().authenticate(&token) {
@@ -384,7 +477,11 @@ impl ServerState {
                     .into_response(),
             ));
         }
-        Ok(Authorized { repo, access })
+        Ok(Authorized {
+            repo,
+            access,
+            user_id: user.id,
+        })
     }
 }
 
@@ -395,6 +492,28 @@ type Rejection = Box<Response<Body>>;
 pub(crate) struct Authorized {
     pub(crate) repo: ServedRepository,
     pub(crate) access: Access,
+    pub(crate) user_id: i64,
+}
+
+/// `scheme://host` the client used to reach the server, from `Host` (or the
+/// `X-Forwarded-*` headers a reverse proxy adds).
+fn request_base_url(headers: &HeaderMap) -> Option<String> {
+    let value = |name: &str| {
+        headers
+            .get(name)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.split(',').next())
+            .map(|v| v.trim().to_owned())
+            .filter(|v| !v.is_empty())
+    };
+    let host = value("x-forwarded-host").or_else(|| value("host"))?;
+    if host.contains(['/', '@', ' ']) {
+        return None;
+    }
+    let scheme = value("x-forwarded-proto")
+        .filter(|p| p == "https" || p == "http")
+        .unwrap_or_else(|| "http".to_owned());
+    Some(format!("{scheme}://{host}"))
 }
 
 fn needed_access(service: Service) -> Access {
@@ -410,6 +529,9 @@ async fn get_dispatch(
     Query(query): Query<InfoRefsQuery>,
     headers: HeaderMap,
 ) -> Response<Body> {
+    if let Some((name, file)) = bundle_path(&path) {
+        return bundle_file(&state, name, file, &headers).await;
+    }
     let Some(name) = path.strip_suffix("/info/refs") else {
         return web::repository_page(&state, path.trim_end_matches('/'), &headers).await;
     };
@@ -421,7 +543,100 @@ async fn get_dispatch(
         Err(resp) => return *resp,
     };
     let protocol_version = smart_http::protocol_version_from_headers(&headers);
-    smart_http::info_refs(repo.path, service, protocol_version, state.options.clone()).await
+    let extensions = state.extensions(&repo, service, &headers);
+    smart_http::info_refs(
+        repo.path,
+        service,
+        protocol_version,
+        state.options.clone(),
+        extensions,
+    )
+    .await
+}
+
+/// `<repo>/bundles/<file>` split into the repository name and the file.
+fn bundle_path(path: &str) -> Option<(&str, &str)> {
+    let (rest, file) = path.rsplit_once('/')?;
+    let name = rest.strip_suffix(&format!("/{}", crate::bundles::BUNDLES_PATH))?;
+    file.ends_with(".bundle").then_some((name, file))
+}
+
+/// Serve a clone bundle (resumable with `Range`).
+async fn bundle_file(
+    state: &ServerState,
+    name: &str,
+    file: &str,
+    headers: &HeaderMap,
+) -> Response<Body> {
+    let repo = match state.authorize(headers, name, Access::Read) {
+        Ok(found) => found.repo,
+        Err(resp) => return *resp,
+    };
+    let Some(path) = crate::bundles::served_file(&repo.path, file) else {
+        return (StatusCode::NOT_FOUND, "no such bundle\n").into_response();
+    };
+    smart_http::serve_file(
+        path,
+        &format!("\"{file}\""),
+        "application/x-git-bundle",
+        headers,
+    )
+    .await
+}
+
+/// Authorize a resumable-push request: write access to the repository.
+fn upload_target(
+    state: &ServerState,
+    headers: &HeaderMap,
+    name: &str,
+) -> Result<Authorized, Rejection> {
+    state.authorize(headers, name, Access::Write)
+}
+
+async fn head_dispatch(
+    State(state): State<Arc<ServerState>>,
+    UrlPath(path): UrlPath<String>,
+    headers: HeaderMap,
+) -> Response<Body> {
+    let Some((name, UploadPath::Upload(id))) = crate::uploads::parse_path(&path) else {
+        return (StatusCode::NOT_FOUND, "not found\n").into_response();
+    };
+    match upload_target(&state, &headers, name) {
+        Ok(found) => crate::uploads::head(&found.repo.path, id, found.user_id),
+        Err(resp) => *resp,
+    }
+}
+
+async fn patch_dispatch(
+    State(state): State<Arc<ServerState>>,
+    UrlPath(path): UrlPath<String>,
+    headers: HeaderMap,
+    body: Body,
+) -> Response<Body> {
+    let Some((name, UploadPath::Upload(id))) = crate::uploads::parse_path(&path) else {
+        return (StatusCode::NOT_FOUND, "not found\n").into_response();
+    };
+    match upload_target(&state, &headers, name) {
+        Ok(found) => {
+            crate::uploads::patch(
+                &found.repo.path,
+                id,
+                found.user_id,
+                &state.uploads,
+                &headers,
+                body,
+            )
+            .await
+        }
+        Err(resp) => *resp,
+    }
+}
+
+async fn options_dispatch(UrlPath(path): UrlPath<String>) -> Response<Body> {
+    match crate::uploads::parse_path(&path) {
+        Some((_, UploadPath::Endpoint | UploadPath::Upload(_))) => crate::uploads::options(),
+        _ => (StatusCode::NOT_FOUND, "not found\n").into_response(),
+    }
 }
 
 async fn post_dispatch(
@@ -430,6 +645,33 @@ async fn post_dispatch(
     headers: HeaderMap,
     body: Body,
 ) -> Response<Body> {
+    if let Some((name, upload)) = crate::uploads::parse_path(&path) {
+        let found = match upload_target(&state, &headers, name) {
+            Ok(found) => found,
+            Err(resp) => return *resp,
+        };
+        return match upload {
+            UploadPath::Endpoint => {
+                crate::uploads::create(&found.repo.path, &found.repo.name, found.user_id, &headers)
+                    .await
+            }
+            UploadPath::Receive(id) => {
+                crate::uploads::receive(
+                    found.repo.path,
+                    id,
+                    found.user_id,
+                    &state.uploads,
+                    body,
+                    state.options.clone(),
+                    || state.pushed(),
+                )
+                .await
+            }
+            UploadPath::Upload(_) => {
+                (StatusCode::METHOD_NOT_ALLOWED, "use PATCH\n").into_response()
+            }
+        };
+    }
     let Some((name, service)) = Service::strip_rpc_suffix(&path) else {
         return (StatusCode::NOT_FOUND, "not found\n").into_response();
     };
@@ -438,15 +680,21 @@ async fn post_dispatch(
         Err(resp) => return *resp,
     };
     let protocol_version = smart_http::protocol_version_from_headers(&headers);
-    smart_http::rpc(
+    let extensions = state.extensions(&repo, service, &headers);
+    let response = smart_http::rpc(
         repo.path,
         service,
         protocol_version,
         &headers,
         body,
         state.options.clone(),
+        extensions,
     )
-    .await
+    .await;
+    if service == Service::ReceivePack && response.status().is_success() {
+        state.pushed();
+    }
+    response
 }
 
 /// The token's user as JSON, so a client can check a token before storing it.

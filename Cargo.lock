@@ -962,7 +962,7 @@ dependencies = [
  "http-body-util",
  "rusqlite",
  "serde",
- "sha2",
+ "serde_json",
  "tempfile",
  "thiserror",
  "time",

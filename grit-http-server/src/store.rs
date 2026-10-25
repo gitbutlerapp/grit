@@ -21,8 +21,8 @@ use std::path::Path;
 
 use argon2::password_hash::{PasswordHash, PasswordHasher, PasswordVerifier, SaltString};
 use argon2::Argon2;
+use grit_lib::objects::HashAlgo;
 use rusqlite::{params, Connection, OptionalExtension};
-use sha2::{Digest, Sha256};
 use time::OffsetDateTime;
 
 /// Errors from the user and token store.
@@ -243,7 +243,7 @@ impl Token {
     }
 
     fn hash(&self) -> String {
-        hex::encode(Sha256::digest(self.0.as_bytes()))
+        hex::encode(HashAlgo::Sha256.checksum_digest(self.0.as_bytes()))
     }
 }
 
