@@ -466,6 +466,34 @@ for id in tag/list@many-refs tag/create@many-refs branch/create@many-refs; do
 done
 ```
 
+## Incremental fetch negotiation (2026-10-25)
+
+An incremental `grit fetch` or `grit pull` of a few new commits into a `git/git` clone took about 740 ms against 115 ms for Git. Nearly all of it was negotiation: before sending its first `have`, a protocol v2 fetch walked the client's entire history, inflating every commit from its pack, only to send the first 16 commits and find the server ready. Now [`Remote::fetch`](rustdoc:grit_lib::remote::Remote) walks history lazily, one round at a time. It sends 16 haves, then twice as many per round. Each round repeats the commits the server acknowledged, because a v2 server keeps no state between requests. It stops when the server is ready, the haves run out, or 256 haves go unacknowledged after a first acknowledgement. Negotiation also starts from remote-tracking refs, as Git's does, so commits already held under `refs/remotes/` are not downloaded again. For a `git/git` clone whose branch was 100 commits behind its remote-tracking ref, that cut the pack for 5 new commits from 105 commits to 5.
+
+`grit-bench daily` rows (10 runs per side, release build), `origin/main` before → after in one sitting against system `git 2.43.0` on the factory VM (4 vCPU), committed in **`daily-fetch-pull-git-git-before.json`** and **`daily-fetch-pull-git-git-after.json`**. The `git/git` remote is served by `git http-backend`, and `fetch/incremental-http` by `grit-http-server`:
+
+| Scenario | Git ms | Grit ms before → after | Grit ÷ Git before → after | Grit peak RSS before → after |
+| --- | ---: | ---: | ---: | ---: |
+| `pull/check@git-git` | 116.5 | 739.9 → **52.9** | 6.25× → **0.45×** | 67.3 → **50.1 MB** |
+| `pull/fast-forward@git-git` | 129.6 | 729.9 → **57.6** | 5.94× → **0.44×** | 66.6 → **50.1 MB** |
+| `fetch/incremental@git-git` | 114.9 | 729.6 → **52.0** | 6.29× → **0.45×** | 66.6 → **49.9 MB** |
+| `fetch/one-branch@git-git` | 116.3 | 740.3 → **50.8** | 6.13× → **0.44×** | 66.7 → **49.8 MB** |
+| `fetch/dry-run@git-git` | 113.0 | 732.2 → **49.5** | 6.25× → **0.44×** | 67.3 → **49.7 MB** |
+| `fetch/incremental-http@git-git` | 16 069 | 15 583 → **13 513** | 0.97× → **0.84×** | 66.9 → **67.2 MB** |
+| `fetch/noop@git-git` | 25.7 | 11.0 → **12.1** | 0.45× → **0.47×** | 17.3 → **17.8 MB** |
+| `fetch/deepen@git-git` | 18 070 | 16 229 → **16 182** | 0.86× → **0.90×** | 222.7 → **228.7 MB** |
+| `pull/rebase@synth-10k` | 76.4 | 27.5 → **27.4** | 0.36× → **0.36×** | 43.6 → **44.5 MB** |
+| `clone/http@synth-10k` | 856.1 | 743.9 → **746.5** | 0.91× → **0.87×** | 30.3 → **31.3 MB** |
+
+The rows that did not negotiate a deep local history are unchanged within noise: a 30-run re-measurement of `fetch/noop` gave 11.99 → 11.95 ms. The `fetch_v2_negotiation_rounds` integration test runs against `git daemon`. It fails if a fetch the server can answer after one round reads deep local history, if a later round drops the acknowledged commits, or if commits already held under `refs/remotes/` are sent again.
+
+```bash
+cargo build --release -p grit-cli -p grit-utils -p grit-http-server
+./target/release/grit-bench daily --only pull/check@git-git,pull/fast-forward@git-git,fetch/incremental@git-git \
+  --min-runs 10 --http-server ./target/release/grit-http-server --format json --output /tmp/fetch-pull.json
+cargo test -p grit-lib --test fetch_v2_negotiation_rounds
+```
+
 ## Receiving a pack: clone and fetch memory (2026-10-25)
 
 Cloning over HTTPS peaked at several times the received pack's size ([#1672](https://github.com/gitbutlerapp/grit/issues/1672)). The received pack is spooled to disk and indexed through a memory map, and peak RSS counts the map's resident pages. The trailer checksum, the object scan and delta resolution each read the whole map, so the full pack stayed resident while it was indexed. After indexing, a check for thin-pack bases re-inflated every object again on one thread. Completing a thin pack then read the pack into memory and indexed it a second time.
