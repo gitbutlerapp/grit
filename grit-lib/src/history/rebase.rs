@@ -164,9 +164,7 @@ pub fn plan_rebase(
         return Ok(RebasePlan::UpToDate);
     }
     let range = commits_in_rebase_range(repo, fork, &[request.branch_tip])?;
-    if range.is_empty()
-        && is_ancestor(repo, request.branch_tip, effective_onto).map_err(library_err)?
-    {
+    if range.is_empty() && is_ancestor(repo, request.branch_tip, effective_onto)? {
         return Ok(RebasePlan::Plan(plan_rebase_fast_forward(
             repo,
             request.branch_tip,
@@ -227,7 +225,7 @@ pub(crate) fn rebase_fork(
     upstream: ObjectId,
     branch_tip: ObjectId,
 ) -> Result<ObjectId, HistoryError> {
-    let bases = merge_bases_first_vs_rest(repo, branch_tip, &[upstream]).map_err(library_err)?;
+    let bases = merge_bases_first_vs_rest(repo, branch_tip, &[upstream])?;
     bases
         .into_iter()
         .next()
@@ -282,10 +280,7 @@ fn is_rebase_up_to_date(
     // `git rebase <upstream>` (no `--onto`) leaves a linear branch unchanged when it already
     // extends upstream: merge-base(upstream, tip) == upstream and every commit in the range
     // is already on top of that base.
-    if onto.is_none()
-        && fork == upstream
-        && is_ancestor(repo, upstream, branch_tip).map_err(library_err)?
-    {
+    if onto.is_none() && fork == upstream && is_ancestor(repo, upstream, branch_tip)? {
         return Ok(true);
     }
     Ok(false)
@@ -307,7 +302,7 @@ pub(crate) fn build_rebase_rewrite_inputs(
     }
 
     for &tip in tips {
-        if !is_ancestor(repo, fork, tip).map_err(library_err)? {
+        if !is_ancestor(repo, fork, tip)? {
             return Err(HistoryError::Planning {
                 message: format!(
                     "fork {} is not an ancestor of tip {}",
@@ -408,9 +403,7 @@ pub(crate) fn plan_rebase_resumable(
         return Ok(Err(RebasePlan::UpToDate));
     }
     let range = commits_in_rebase_range(repo, fork, &[request.branch_tip])?;
-    if range.is_empty()
-        && is_ancestor(repo, request.branch_tip, effective_onto).map_err(library_err)?
-    {
+    if range.is_empty() && is_ancestor(repo, request.branch_tip, effective_onto)? {
         let plan = plan_rebase_fast_forward(repo, request.branch_tip, effective_onto, opts)?;
         return Ok(Ok(ResumablePlanOutcome::Complete(Box::new(plan))));
     }
@@ -525,8 +518,7 @@ fn commits_in_rebase_range(
     fork: ObjectId,
     tips: &[ObjectId],
 ) -> Result<Vec<ObjectId>, HistoryError> {
-    let mut commits =
-        commits_reachable_excluding_ancestors_of(repo, tips, &[fork], None).map_err(library_err)?;
+    let mut commits = commits_reachable_excluding_ancestors_of(repo, tips, &[fork], None)?;
     commits.retain(|oid| *oid != fork);
     let set: HashSet<ObjectId> = commits.iter().copied().collect();
     for &tip in tips {
@@ -534,7 +526,7 @@ fn commits_in_rebase_range(
             commits.push(tip);
         }
     }
-    let mut topo = topo_order_commit_subset(repo, &commits, true).map_err(library_err)?;
+    let mut topo = topo_order_commit_subset(repo, &commits, true)?;
     // Topological oldest-first (topo_order_commit_subset is newest-first).
     topo.reverse();
     Ok(topo)
@@ -544,28 +536,26 @@ fn paths_changed_by_commit(
     repo: &Repository,
     commit: ObjectId,
 ) -> Result<HashSet<String>, HistoryError> {
-    let obj = repo.odb().read(&commit).map_err(library_err)?;
-    let parsed = parse_commit(&obj.data).map_err(library_err)?;
+    let obj = repo.odb().read(&commit)?;
+    let parsed = parse_commit(&obj.data)?;
     let mut paths = HashSet::new();
     if parsed.parents.is_empty() {
         let empty = crate::diff::zero_oid();
-        let changes =
-            diff_trees(repo.odb(), Some(&empty), Some(&parsed.tree), "").map_err(library_err)?;
+        let changes = diff_trees(repo.odb(), Some(&empty), Some(&parsed.tree), "")?;
         for entry in changes {
             paths.insert(entry.path().to_string());
         }
         return Ok(paths);
     }
     for parent in &parsed.parents {
-        let parent_obj = repo.odb().read(parent).map_err(library_err)?;
-        let parent_parsed = parse_commit(&parent_obj.data).map_err(library_err)?;
+        let parent_obj = repo.odb().read(parent)?;
+        let parent_parsed = parse_commit(&parent_obj.data)?;
         let changes = diff_trees(
             repo.odb(),
             Some(&parent_parsed.tree),
             Some(&parsed.tree),
             "",
-        )
-        .map_err(library_err)?;
+        )?;
         for entry in changes {
             paths.insert(entry.path().to_string());
         }
@@ -606,10 +596,9 @@ fn patch_ids_in_fork_to_onto(
     if fork == onto {
         return Ok(HashMap::new());
     }
-    let mut commits = commits_reachable_excluding_ancestors_of(repo, &[onto], &[fork], None)
-        .map_err(library_err)?;
+    let mut commits = commits_reachable_excluding_ancestors_of(repo, &[onto], &[fork], None)?;
     commits.retain(|oid| *oid != fork);
-    let mut commits = topo_order_commit_subset(repo, &commits, true).map_err(library_err)?;
+    let mut commits = topo_order_commit_subset(repo, &commits, true)?;
     commits.reverse();
     let algo = repo.odb().hash_algo();
     let mut by_patch: HashMap<ObjectId, ObjectId> = HashMap::new();
@@ -649,8 +638,7 @@ fn applied_by_patch(
     let algo = repo.odb().hash_algo();
     let mut out = HashMap::new();
     for &commit in range {
-        let Some(pid) = compute_patch_id_recorded(algo, repo.odb(), &commit, PatchIdMode::Stable)
-            .map_err(library_err)?
+        let Some(pid) = compute_patch_id_recorded(algo, repo.odb(), &commit, PatchIdMode::Stable)?
         else {
             continue;
         };
@@ -659,13 +647,6 @@ fn applied_by_patch(
         }
     }
     Ok(out)
-}
-
-fn library_err(err: crate::error::Error) -> HistoryError {
-    if let crate::error::Error::History(inner) = err {
-        return inner;
-    }
-    HistoryError::Library(Box::new(err))
 }
 
 #[cfg(test)]

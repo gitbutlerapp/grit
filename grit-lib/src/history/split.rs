@@ -44,27 +44,23 @@ pub fn split(
         .map(|m| normalize_rewrite_message(m))
         .transpose()?;
 
-    let raw = repo.odb().read(&commit).map_err(library_err)?;
+    let raw = repo.odb().read(&commit)?;
     if raw.kind != ObjectKind::Commit {
         return Err(HistoryError::Planning {
             message: format!("expected commit, got {}", raw.kind.as_str()),
         });
     }
-    let parsed = parse_commit(&raw.data).map_err(library_err)?;
+    let parsed = parse_commit(&raw.data)?;
 
     if parsed.parents.len() > 1 {
         return Err(HistoryError::InsertBeforeOnMerge { commit });
     }
 
     let parent_tree = if parsed.parents.is_empty() {
-        repo.odb()
-            .write(ObjectKind::Tree, &[])
-            .map_err(library_err)?
+        repo.odb().write(ObjectKind::Tree, &[])?
     } else {
         let parent = parsed.parents[0];
-        parse_commit(&repo.odb().read(&parent).map_err(library_err)?.data)
-            .map_err(library_err)?
-            .tree
+        parse_commit(&repo.odb().read(&parent)?.data)?.tree
     };
 
     let ctx = repo.pathspec_match_context();
@@ -93,8 +89,7 @@ fn build_split_tree(
     ctx: PathspecMatchContext,
 ) -> Result<ObjectId, HistoryError> {
     let odb = repo.odb();
-    let diff = diff_trees_with_renames(odb, Some(&parent_tree), Some(&commit_tree), "", 50)
-        .map_err(library_err)?;
+    let diff = diff_trees_with_renames(odb, Some(&parent_tree), Some(&commit_tree), "", 50)?;
 
     if diff.is_empty() {
         return Err(HistoryError::SplitSelectsNothing);
@@ -119,11 +114,11 @@ fn build_split_tree(
         return Err(HistoryError::SplitSelectsEverything);
     }
 
-    let mut index = index_from_tree(repo, &parent_tree).map_err(library_err)?;
+    let mut index = index_from_tree(repo, &parent_tree)?;
     for (entry, sides) in &selected {
         apply_diff_entry_to_index(&mut index, entry, *sides)?;
     }
-    write_tree_from_index(odb, &index, "").map_err(library_err)
+    write_tree_from_index(odb, &index, "").map_err(HistoryError::from)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -286,13 +281,6 @@ fn mode_from_octal(raw: &str) -> Result<u32, HistoryError> {
     u32::from_str_radix(raw, 8).map_err(|e| HistoryError::Planning {
         message: format!("invalid file mode {raw:?}: {e}"),
     })
-}
-
-fn library_err(err: crate::error::Error) -> HistoryError {
-    if let crate::error::Error::History(inner) = err {
-        return inner;
-    }
-    HistoryError::Library(Box::new(err))
 }
 
 fn planning_err(message: impl Into<String>) -> HistoryError {

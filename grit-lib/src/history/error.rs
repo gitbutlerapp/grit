@@ -257,3 +257,14 @@ pub enum HistoryError {
         worktree_restore: Option<String>,
     },
 }
+
+impl From<Error> for HistoryError {
+    /// Unwraps [`Error::History`] back to the history failure it carries; every other library
+    /// error becomes [`HistoryError::Library`].
+    fn from(err: Error) -> Self {
+        match err {
+            Error::History(inner) => inner,
+            other => Self::Library(Box::new(other)),
+        }
+    }
+}
