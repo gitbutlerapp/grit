@@ -10,7 +10,7 @@ use crate::merge_base::{
 };
 use crate::objects::{parse_commit, read_commit_subject_line, ObjectId, ObjectKind};
 use crate::porcelain::checkout::checkout_hard_to_tree_from_head_tree;
-use crate::porcelain::index_from_tree::index_from_tree_with_worktree_stats;
+use crate::porcelain::index_from_tree::index_from_tree_with_owned_seed_worktree_stats;
 use crate::porcelain::switch::{
     checkout_tree_transition_allow_local_reset, keep_style_transition_would_block_paths_for_preview,
 };
@@ -404,7 +404,11 @@ fn apply_reset_worktree(repo: &Repository, opts: &ResetOptions, previous: Object
     match opts.mode {
         ResetMode::Soft => {}
         ResetMode::Mixed => {
-            let mut index = index_from_tree_with_worktree_stats(repo, &target_tree)?;
+            // The current index only seeds cached stat data, so an unreadable one must not
+            // block the reset that replaces it.
+            let current = repo.load_index().unwrap_or_default();
+            let mut index =
+                index_from_tree_with_owned_seed_worktree_stats(repo, &target_tree, current)?;
             repo.write_index(&mut index)?;
         }
         ResetMode::Hard => {
@@ -1363,6 +1367,96 @@ mod tests {
         }
         assert_git_sees_clean_repo(root);
         assert_eq!(git(root, &["rev-parse", "HEAD"]).trim(), trimmed.to_hex());
+    }
+
+    /// `wide_repo_with_trimmed_branch` with settled stat data, one staged edit, one unstaged
+    /// edit and one untracked file.
+    fn wide_repo_with_local_changes(root: &std::path::Path) -> (Repository, ObjectId) {
+        let (repo, trimmed) = wide_repo_with_trimmed_branch(root);
+        pin_worktree_mtimes_and_refresh(root, 1_700_000_000);
+        std::fs::write(root.join("d10/f00.txt"), "staged edit\n").expect("staged edit");
+        git(root, &["add", "d10/f00.txt"]);
+        std::fs::write(root.join("d11/f01.txt"), "unstaged edit\n").expect("unstaged edit");
+        std::fs::write(root.join("untracked.txt"), "new\n").expect("untracked");
+        (repo, trimmed)
+    }
+
+    /// Index rows, status and the stat-only `diff-files` view, as the system `git` sees them.
+    fn git_index_view(root: &std::path::Path) -> [String; 3] {
+        [
+            git(root, &["ls-files", "--stage"]),
+            git(root, &["status", "--porcelain"]),
+            git(root, &["diff-files", "--name-status"]),
+        ]
+    }
+
+    #[test]
+    fn mixed_reset_at_head_reads_only_stat_dirty_files_and_matches_git() {
+        let grit_dir = tempfile::tempdir().expect("tempdir");
+        let git_dir = tempfile::tempdir().expect("tempdir");
+        let (repo, _) = wide_repo_with_local_changes(grit_dir.path());
+        wide_repo_with_local_changes(git_dir.path());
+        let head =
+            ObjectId::from_hex(git(grit_dir.path(), &["rev-parse", "HEAD"]).trim()).expect("head");
+
+        git(git_dir.path(), &["reset", "-q", "--mixed", "HEAD"]);
+        let metrics = repo.odb().hot_path_metrics();
+        metrics.reset_blob_content_reads();
+        metrics.set_blob_counting(true);
+        reset_to_commit(&repo, &reset_opts(head, ResetMode::Mixed)).expect("mixed reset");
+        metrics.set_blob_counting(false);
+
+        assert!(
+            metrics.blob_content_reads() <= 2,
+            "only the staged and the edited file need hashing, read {}",
+            metrics.blob_content_reads()
+        );
+        assert_eq!(
+            git_index_view(grit_dir.path()),
+            git_index_view(git_dir.path())
+        );
+        assert_eq!(
+            git(grit_dir.path(), &["diff-files", "--name-only"]),
+            "d10/f00.txt\nd11/f01.txt\n"
+        );
+        git(grit_dir.path(), &["fsck", "--no-progress"]);
+    }
+
+    #[test]
+    fn mixed_reset_to_other_commit_matches_git() {
+        let grit_dir = tempfile::tempdir().expect("tempdir");
+        let git_dir = tempfile::tempdir().expect("tempdir");
+        let (repo, trimmed) = wide_repo_with_local_changes(grit_dir.path());
+        wide_repo_with_local_changes(git_dir.path());
+
+        git(
+            git_dir.path(),
+            &["reset", "-q", "--mixed", &trimmed.to_hex()],
+        );
+        reset_to_commit(&repo, &reset_opts(trimmed, ResetMode::Mixed)).expect("mixed reset");
+
+        assert_eq!(
+            git_index_view(grit_dir.path()),
+            git_index_view(git_dir.path())
+        );
+        assert_eq!(
+            git(grit_dir.path(), &["rev-parse", "HEAD"]).trim(),
+            trimmed.to_hex()
+        );
+        git(grit_dir.path(), &["fsck", "--no-progress"]);
+    }
+
+    #[test]
+    fn mixed_reset_replaces_an_unreadable_index() {
+        let (_dir, repo) = init_repo();
+        let c1 = commit_file(&repo, "f", "1\n", None);
+        let index_path = repo.index_path_for_env().expect("index path");
+        std::fs::write(&index_path, b"not an index").expect("corrupt index");
+
+        reset_to_commit(&repo, &reset_opts(c1, ResetMode::Mixed)).expect("reset");
+
+        let index = repo.load_index().expect("index readable again");
+        assert!(index.get(b"f", 0).is_some());
     }
 
     #[test]
