@@ -1140,7 +1140,7 @@ mod tests {
 
         assert!(matches!(
             resolve_remote_argument(&config, "nourl"),
-            Err(RemoteError::NoUrl)
+            Err(RemoteError::NoUrl { remote: Some(name) }) if name == "nourl"
         ));
         let err = resolve_remote_argument(&config, "nosuch").expect_err("unknown");
         assert!(matches!(&err, RemoteError::UnknownRemote(name) if name == "nosuch"));
@@ -1172,7 +1172,7 @@ mod tests {
         );
         assert!(matches!(
             resolve_remote_argument(&config, &invocation.remote),
-            Err(RemoteError::NoUrl)
+            Err(RemoteError::NoUrl { remote: Some(name) }) if name == "half"
         ));
     }
 

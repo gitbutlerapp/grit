@@ -95,7 +95,7 @@ fn configured_remotes_match_git_remote_listing() {
     let config = open(tmp.path()).config().expect("config");
     assert!(matches!(
         resolve_remote_argument(&config, "half"),
-        Err(RemoteError::NoUrl)
+        Err(RemoteError::NoUrl { remote: Some(name) }) if name == "half"
     ));
     assert_eq!(
         resolve_remote_argument(&config, "team.prod")

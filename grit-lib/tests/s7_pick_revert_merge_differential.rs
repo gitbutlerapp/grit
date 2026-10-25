@@ -268,5 +268,14 @@ fn s7_differential_pick_refuses_dirty_worktree() {
         },
     )
     .expect_err("dirty");
-    assert!(matches!(err, grit_lib::error::Error::Message(_)));
+    assert!(
+        matches!(
+            &err,
+            grit_lib::error::Error::DirtyWorktree {
+                operation: grit_lib::error::WorktreeOperation::Pick,
+                paths,
+            } if paths == &["a.txt"]
+        ),
+        "{err:?}"
+    );
 }

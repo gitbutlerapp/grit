@@ -981,7 +981,13 @@ mod http_401 {
             )
             .expect_err("wrong creds from helper must fail typed, not hang");
             assert!(
-                matches!(err, Error::Auth(_)),
+                matches!(
+                    err,
+                    Error::Auth {
+                        reason: grit_lib::error::AuthFailure::Rejected,
+                        ..
+                    }
+                ),
                 "expected Error::Auth for wrong helper creds, got: {err:?}"
             );
             // The helper was actually consulted (a `get` was recorded).

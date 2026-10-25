@@ -556,8 +556,8 @@ impl From<Error> for TreeTransitionPrepareError {
 
 fn tree_transition_prepare_to_error(err: TreeTransitionPrepareError) -> Error {
     match err {
-        TreeTransitionPrepareError::OverwritePaths(_) => {
-            Error::Message("you have uncommitted changes — commit them before switching".into())
+        TreeTransitionPrepareError::OverwritePaths(paths) => {
+            Error::dirty_worktree(crate::error::WorktreeOperation::Switch, paths)
         }
         TreeTransitionPrepareError::Failed(err) => err,
     }

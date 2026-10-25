@@ -16,7 +16,7 @@ use crate::diff::{
     diff_index_to_tree, diff_index_to_worktree_with_options, diff_trees, entry_is_racy_with_policy,
     index_mtime_for_diff, DiffEntry, DiffStatus,
 };
-use crate::error::{Error, Result};
+use crate::error::{Error, Result, WorktreeOperation};
 use crate::index::StatMatchPolicy;
 use crate::index::{index_file_mtime, Index, IndexEntry};
 use crate::objects::{parse_commit, ObjectId};
@@ -1342,21 +1342,40 @@ pub(crate) fn collect_untracked_and_wholesale_trust_for_tree_changes(
     ))
 }
 
-fn ensure_worktree_clean_with_message(
+fn ensure_worktree_clean_for(
     repo: &Repository,
-    message: &str,
+    operation: WorktreeOperation,
     persist_index_stat_refresh: bool,
 ) -> Result<()> {
     let mut snapshot = load_worktree_snapshot(repo)?;
-    ensure_worktree_clean_from_snapshot(repo, &mut snapshot, message, persist_index_stat_refresh)?;
+    ensure_worktree_clean_from_snapshot(
+        repo,
+        &mut snapshot,
+        operation,
+        persist_index_stat_refresh,
+    )?;
     Ok(())
+}
+
+/// [`Error::DirtyWorktree`] naming every path in `staged` and `unstaged`.
+fn dirty_worktree_error(
+    operation: WorktreeOperation,
+    staged: &[DiffEntry],
+    unstaged: &[DiffEntry],
+) -> Error {
+    let paths = staged
+        .iter()
+        .chain(unstaged)
+        .map(|entry| entry.path().to_owned())
+        .collect();
+    Error::dirty_worktree(operation, paths)
 }
 
 /// Refuse when staged or unstaged changes exist, reusing an already-loaded snapshot.
 pub(crate) fn ensure_worktree_clean_from_snapshot(
     repo: &Repository,
     snapshot: &mut WorktreeSnapshot,
-    message: &str,
+    operation: WorktreeOperation,
     persist_index_stat_refresh: bool,
 ) -> Result<()> {
     let index_path = repo.index_path_for_env()?;
@@ -1369,7 +1388,7 @@ pub(crate) fn ensure_worktree_clean_from_snapshot(
         snapshot.index.source_mtime = index_file_mtime(&index_path);
     }
     if !staged.is_empty() || !unstaged.is_empty() {
-        return Err(Error::Message(message.into()));
+        return Err(dirty_worktree_error(operation, &staged, &unstaged));
     }
     Ok(())
 }
@@ -1382,12 +1401,7 @@ pub(crate) fn prepare_worktree_for_pick(repo: &Repository) -> Result<Option<Work
         return Ok(None);
     }
     let mut snapshot = load_worktree_snapshot(repo)?;
-    ensure_worktree_clean_from_snapshot(
-        repo,
-        &mut snapshot,
-        "you have uncommitted changes — commit them before picking",
-        false,
-    )?;
+    ensure_worktree_clean_from_snapshot(repo, &mut snapshot, WorktreeOperation::Pick, false)?;
     Ok(Some(snapshot))
 }
 
@@ -1395,39 +1409,27 @@ pub(crate) fn prepare_worktree_for_pick(repo: &Repository) -> Result<Option<Work
 ///
 /// # Errors
 ///
-/// Returns [`Error::Message`] when changes are present, matching `grit pick` wording.
+/// Returns [`Error::DirtyWorktree`] naming the changed paths.
 pub fn ensure_worktree_clean_for_pick(repo: &Repository) -> Result<()> {
-    ensure_worktree_clean_with_message(
-        repo,
-        "you have uncommitted changes — commit them before picking",
-        false,
-    )
+    ensure_worktree_clean_for(repo, WorktreeOperation::Pick, false)
 }
 
 /// Refuse when the index or worktree differs from HEAD (staged or unstaged changes).
 ///
 /// # Errors
 ///
-/// Returns [`Error::Message`] when changes are present, matching `grit merge` wording.
+/// Returns [`Error::DirtyWorktree`] naming the changed paths.
 pub fn ensure_worktree_clean_for_merge(repo: &Repository) -> Result<()> {
-    ensure_worktree_clean_with_message(
-        repo,
-        "you have uncommitted changes — commit them before merging",
-        true,
-    )
+    ensure_worktree_clean_for(repo, WorktreeOperation::Merge, true)
 }
 
 /// Refuse when the index or worktree differs from `HEAD` before `rebase --exec`.
 ///
 /// # Errors
 ///
-/// Returns [`Error::Message`] when staged or unstaged changes are present.
+/// Returns [`Error::DirtyWorktree`] naming the changed paths.
 pub fn ensure_worktree_clean_for_rebase_exec(repo: &Repository) -> Result<()> {
-    ensure_worktree_clean_with_message(
-        repo,
-        "you have uncommitted changes — commit them before rebasing with --exec",
-        false,
-    )
+    ensure_worktree_clean_for(repo, WorktreeOperation::RebaseExec, false)
 }
 
 /// Inputs for a branch switch or fast-forward checkout after cleanliness checks.
@@ -1442,7 +1444,7 @@ pub struct TreeSwitchPlan {
 ///
 /// # Errors
 ///
-/// Returns [`Error::Message`] when staged or unstaged changes exist, or on I/O/ODB failures.
+/// Returns [`Error::DirtyWorktree`] when staged or unstaged changes exist, or I/O/ODB failures.
 pub fn prepare_tree_switch(
     repo: &Repository,
     from_tree: Option<&ObjectId>,
@@ -1456,8 +1458,10 @@ pub fn prepare_tree_switch(
         snapshot.index.source_mtime = index_file_mtime(&index_path);
     }
     if !staged.is_empty() || !unstaged.is_empty() {
-        return Err(Error::Message(
-            "you have uncommitted changes — commit them before switching".into(),
+        return Err(dirty_worktree_error(
+            WorktreeOperation::Switch,
+            &staged,
+            &unstaged,
         ));
     }
 
@@ -2657,6 +2661,52 @@ mod tests {
         let (_dir, repo) = init_repo();
         commit_tracked_with_cache_tree(&repo);
         ensure_worktree_clean_for_pick(&repo).expect("clean");
+    }
+
+    #[test]
+    fn dirty_worktree_errors_name_the_operation_and_paths() {
+        let (_dir, repo) = init_repo();
+        let tree = commit_tracked_with_cache_tree(&repo);
+        let wt = repo.work_tree().expect("wt");
+        std::fs::write(wt.join("tracked.txt"), "edited\n").expect("edit");
+        for (operation, result) in [
+            (
+                WorktreeOperation::Pick,
+                ensure_worktree_clean_for_pick(&repo),
+            ),
+            (
+                WorktreeOperation::Merge,
+                ensure_worktree_clean_for_merge(&repo),
+            ),
+            (
+                WorktreeOperation::RebaseExec,
+                ensure_worktree_clean_for_rebase_exec(&repo),
+            ),
+        ] {
+            let err = result.expect_err("dirty");
+            assert!(
+                matches!(
+                    &err,
+                    Error::DirtyWorktree { operation: op, paths }
+                        if *op == operation && paths == &["tracked.txt"]
+                ),
+                "{err:?}"
+            );
+            assert_eq!(
+                err.to_string(),
+                format!("you have uncommitted changes — commit them before {operation}")
+            );
+        }
+        let err = prepare_tree_switch(&repo, Some(&tree), &tree)
+            .err()
+            .expect("dirty switch");
+        assert!(matches!(
+            err,
+            Error::DirtyWorktree {
+                operation: WorktreeOperation::Switch,
+                ..
+            }
+        ));
     }
 
     #[test]

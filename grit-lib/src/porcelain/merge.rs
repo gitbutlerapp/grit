@@ -1056,15 +1056,13 @@ pub enum ContinueMergeError {
     #[error("there is no merge in progress")]
     NoMergeInProgress,
     /// Stage-1/2/3 entries remain in the index.
-    #[error("you still have unmerged paths: {paths:?}")]
+    #[error("you still have unmerged paths: {}", paths.join(", "))]
     UnmergedPaths {
         /// Repository-relative paths still in conflict stages.
         paths: Vec<String>,
     },
     /// Work tree content is resolved but the index still has conflict stages (`commit.autoStage=false`).
-    #[error(
-        "resolved in the work tree but not staged: {paths:?} — run `grit add` on those paths first"
-    )]
+    #[error("resolved in the work tree but not staged: {}", paths.join(", "))]
     ResolvedNotStaged {
         /// Repository-relative paths cleared of conflict markers but not staged.
         paths: Vec<String>,
@@ -1244,7 +1242,7 @@ fn restore_pre_merge_state(repo: &Repository) -> Result<()> {
 
 fn merge_overwrite_error_message(paths: &[String]) -> Error {
     if paths.is_empty() {
-        Error::Message("you have uncommitted changes — commit them before merging".into())
+        Error::dirty_worktree(crate::error::WorktreeOperation::Merge, Vec::new())
     } else if paths.len() == 1 {
         Error::Message(format!(
             "local changes to '{}' would be overwritten by merge",
@@ -1742,5 +1740,26 @@ mod integrate_tests {
             .parse()
             .expect("tip");
         assert_eq!(tip, main);
+    }
+
+    #[test]
+    fn continue_merge_errors_list_paths_plainly() {
+        let paths = vec!["f.txt".to_owned(), "dir/g h.txt".to_owned()];
+        let unmerged = ContinueMergeError::UnmergedPaths {
+            paths: paths.clone(),
+        }
+        .to_string();
+        assert_eq!(
+            unmerged,
+            "you still have unmerged paths: f.txt, dir/g h.txt"
+        );
+        let unstaged = ContinueMergeError::ResolvedNotStaged { paths }.to_string();
+        assert_eq!(
+            unstaged,
+            "resolved in the work tree but not staged: f.txt, dir/g h.txt"
+        );
+        for message in [unmerged, unstaged] {
+            assert!(!message.contains(['[', ']', '"']), "{message}");
+        }
     }
 }

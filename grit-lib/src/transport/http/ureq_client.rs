@@ -50,7 +50,7 @@ use base64::Engine;
 
 use crate::config::{self, parse_i64, ConfigSet};
 use crate::credentials::{self, Credential, CredentialProvider};
-use crate::error::{Error, Result};
+use crate::error::{AuthFailure, Error, Result};
 use crate::protocol::client_git_protocol_header_from_config;
 use crate::transport_path::redact_url_for_display;
 
@@ -58,12 +58,30 @@ fn url_for_display(url: &str) -> String {
     redact_url_for_display(url)
 }
 
-fn auth_error(url: &str, detail: impl std::fmt::Display) -> Error {
-    Error::Auth(format!("{}: {}", url_for_display(url), detail))
+/// Repository URL for error reports: credentials redacted and the smart-HTTP endpoint
+/// (`/info/refs?service=…`, `/git-upload-pack`, `/git-receive-pack`) removed.
+fn repository_url_for_display(url: &str) -> String {
+    let base = repo_base_from_info_refs_url(url)
+        .or_else(|| {
+            ["/git-upload-pack", "/git-receive-pack"]
+                .iter()
+                .find_map(|endpoint| url.strip_suffix(endpoint))
+                .map(str::to_owned)
+        })
+        .unwrap_or_else(|| url.to_owned());
+    url_for_display(&base)
+}
+
+fn auth_error(url: &str, reason: AuthFailure) -> Error {
+    Error::Auth {
+        url: repository_url_for_display(url),
+        reason,
+    }
 }
 
 use super::{
-    effective_info_refs_url_after_redirect, http_origin_key, http_origins_match, HttpClient,
+    effective_info_refs_url_after_redirect, http_origin_key, http_origins_match,
+    repo_base_from_info_refs_url, HttpClient,
 };
 
 /// A blocking [`ureq`]-backed [`HttpClient`].
@@ -769,35 +787,30 @@ impl UreqHttpClient {
         drain_response_body(reader);
         let Some(provider) = self.credentials.as_ref() else {
             self.clear_auth_header();
-            return Err(auth_error(
-                url,
-                "server requires authentication (401) but no credential provider is configured",
-            ));
+            return Err(auth_error(url, AuthFailure::NoCredentialProvider));
         };
         if !offers_basic(&head.www_authenticate) {
             return Err(auth_error(
                 url,
-                format!(
-                    "server requires an unsupported auth scheme: {:?}",
-                    head.www_authenticate
-                ),
+                AuthFailure::UnsupportedScheme {
+                    schemes: head.www_authenticate.clone(),
+                },
             ));
         }
         let auth_url = effective_info_refs_url_after_redirect(url, Some(head.final_url.as_str()));
         let Some(input) = credential_for_url(&auth_url, &self.credential_config) else {
-            return Err(auth_error(
-                &auth_url,
-                "server requires authentication (401) but the URL could not be decomposed into credential fields",
-            ));
+            return Err(auth_error(&auth_url, AuthFailure::UrlNotDescribable));
         };
-        let cred = provider
-            .fill(&input)
-            .map_err(|e| auth_error(&auth_url, format!("could not obtain credentials: {e}")))?;
-        let Some(header) = basic_auth_header(&cred) else {
-            return Err(auth_error(
+        let cred = provider.fill(&input).map_err(|e| {
+            auth_error(
                 &auth_url,
-                "credential helper returned no usable username/password",
-            ));
+                AuthFailure::CredentialsUnavailable {
+                    detail: e.to_string(),
+                },
+            )
+        })?;
+        let Some(header) = basic_auth_header(&cred) else {
+            return Err(auth_error(&auth_url, AuthFailure::UnusableCredentials));
         };
         let (retry_head, retry_reader) =
             self.do_post_open(url, content_type, accept, body, git_protocol, Some(&header))?;
@@ -805,7 +818,7 @@ impl UreqHttpClient {
             let _ = provider.reject(&cred);
             self.clear_auth_header();
             drain_response_body(retry_reader);
-            return Err(auth_error(url, "supplied credentials were rejected (401)"));
+            return Err(auth_error(url, AuthFailure::Rejected));
         }
         if retry_head.status >= 400 {
             let _ = provider.reject(&cred);
@@ -841,38 +854,33 @@ impl UreqHttpClient {
         // rather than a generic message — and never block.
         let Some(provider) = self.credentials.as_ref() else {
             self.clear_auth_header();
-            return Err(auth_error(
-                url,
-                "server requires authentication (401) but no credential provider is configured",
-            ));
+            return Err(auth_error(url, AuthFailure::NoCredentialProvider));
         };
         if !offers_basic(&first.www_authenticate) {
             return Err(auth_error(
                 url,
-                format!(
-                    "server requires an unsupported auth scheme: {:?}",
-                    first.www_authenticate
-                ),
+                AuthFailure::UnsupportedScheme {
+                    schemes: first.www_authenticate.clone(),
+                },
             ));
         }
         let auth_url = effective_info_refs_url_after_redirect(url, Some(first.final_url.as_str()));
         let Some(input) = credential_for_url(&auth_url, &self.credential_config) else {
-            return Err(auth_error(
-                &auth_url,
-                "server requires authentication (401) but the URL could not be decomposed into credential fields",
-            ));
+            return Err(auth_error(&auth_url, AuthFailure::UrlNotDescribable));
         };
         // A provider that cannot supply a credential (no configured helper, or a
         // non-interactive failure) reports it as a typed auth error rather than a
         // generic message, and crucially never blocks on a TTY.
-        let cred = provider
-            .fill(&input)
-            .map_err(|e| auth_error(&auth_url, format!("could not obtain credentials: {e}")))?;
-        let Some(header) = basic_auth_header(&cred) else {
-            return Err(auth_error(
+        let cred = provider.fill(&input).map_err(|e| {
+            auth_error(
                 &auth_url,
-                "credential helper returned no usable username/password",
-            ));
+                AuthFailure::CredentialsUnavailable {
+                    detail: e.to_string(),
+                },
+            )
+        })?;
+        let Some(header) = basic_auth_header(&cred) else {
+            return Err(auth_error(&auth_url, AuthFailure::UnusableCredentials));
         };
         let retry = attempt(&auth_url, Some(&header))?;
         if retry.status == 401 {
@@ -880,7 +888,7 @@ impl UreqHttpClient {
             // typed auth error.
             let _ = provider.reject(&cred);
             self.clear_auth_header();
-            return Err(auth_error(url, "supplied credentials were rejected (401)"));
+            return Err(auth_error(url, AuthFailure::Rejected));
         }
         if retry.status >= 400 {
             let _ = provider.reject(&cred);
@@ -1081,6 +1089,11 @@ fn http_transport_error(err: impl std::fmt::Display) -> Error {
 }
 
 fn http_status_error(url: &str, status: u16) -> Error {
+    if status == 404 && repo_base_from_info_refs_url(url).is_some() {
+        return Error::RepositoryNotFound {
+            url: repository_url_for_display(url),
+        };
+    }
     Error::Message(format!("HTTP {status} from {}", url_for_display(url)))
 }
 
@@ -1689,6 +1702,44 @@ mod tests {
         assert!(msg.contains("HTTP 404 from https://github.com/o/r.git"));
         assert!(!msg.contains("SECRET"));
         assert!(!msg.contains("x-access-token"));
+    }
+
+    #[test]
+    fn discovery_404_is_repository_not_found_without_the_endpoint() {
+        let url =
+            "https://x-access-token:SECRET@github.com/o/r.git/info/refs?service=git-upload-pack";
+        match super::http_status_error(url, 404) {
+            Error::RepositoryNotFound { url } => assert_eq!(url, "https://github.com/o/r.git"),
+            other => panic!("expected RepositoryNotFound, got {other:?}"),
+        }
+        assert!(matches!(
+            super::http_status_error("https://github.com/o/r.git/git-upload-pack", 404),
+            Error::Message(_)
+        ));
+        assert!(matches!(
+            super::http_status_error(url, 500),
+            Error::Message(_)
+        ));
+    }
+
+    #[test]
+    fn auth_errors_report_the_repository_url() {
+        for endpoint in [
+            "https://u:p@example.com/team/r.git/info/refs?service=git-receive-pack",
+            "https://u:p@example.com/team/r.git/git-receive-pack",
+            "https://u:p@example.com/team/r.git/git-upload-pack",
+        ] {
+            let err = super::auth_error(endpoint, AuthFailure::Rejected);
+            assert!(matches!(
+                &err,
+                Error::Auth { url, reason: AuthFailure::Rejected }
+                    if url == "https://example.com/team/r.git"
+            ));
+            assert_eq!(
+                err.to_string(),
+                "authentication failed for https://example.com/team/r.git: the server rejected the credentials"
+            );
+        }
     }
 
     #[test]

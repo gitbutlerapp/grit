@@ -29,7 +29,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use grit_lib::config::ConfigSet;
-use grit_lib::error::{Error, Result as GritResult};
+use grit_lib::error::{AuthFailure, Error, Result as GritResult};
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::ObjectId;
 use grit_lib::refs::resolve_ref;
@@ -297,7 +297,7 @@ fn fetch_over_authed_http_succeeds_with_right_credentials_and_fails_typed_otherw
         let err = http_fetch(client.clone(), &local_git, &url, &mut opts, &mut NoProgress)
             .expect_err("fetch with no credentials against an authed server must fail");
         assert!(
-            matches!(err, Error::Auth(_)),
+            matches!(&err, Error::Auth { reason, .. } if !reason.is_rejected()),
             "expected a typed Error::Auth without credentials, got: {err:?}"
         );
     }
@@ -317,7 +317,7 @@ fn fetch_over_authed_http_succeeds_with_right_credentials_and_fails_typed_otherw
             &mut NoProgress,
         )
         .expect_err("fetch with embedded wrong creds in URL must fail");
-        assert!(matches!(err, Error::Auth(_)));
+        assert!(matches!(err, Error::Auth { .. }));
         let msg = err.to_string();
         assert!(
             !msg.contains("wrong-embedded-pass"),
@@ -344,7 +344,13 @@ fn fetch_over_authed_http_succeeds_with_right_credentials_and_fails_typed_otherw
         let err = http_fetch(client.clone(), &local_git, &url, &mut opts, &mut NoProgress)
             .expect_err("fetch with wrong credentials must fail");
         assert!(
-            matches!(err, Error::Auth(_)),
+            matches!(
+                err,
+                Error::Auth {
+                    reason: AuthFailure::Rejected,
+                    ..
+                }
+            ),
             "expected a typed Error::Auth for wrong credentials, got: {err:?}"
         );
         let msg = err.to_string();
@@ -499,7 +505,7 @@ fn push_over_authed_http_succeeds_with_right_credentials_and_fails_typed_otherwi
         )
         .expect_err("push with no credentials against an authed server must fail");
         assert!(
-            matches!(err, Error::Auth(_)),
+            matches!(&err, Error::Auth { reason, .. } if !reason.is_rejected()),
             "expected a typed Error::Auth for an unauthenticated push, got: {err:?}"
         );
         assert!(
@@ -680,6 +686,7 @@ fn credential_store_host_entry_authenticates_fetch_and_push() {
         std::slice::from_ref(&spec),
         &PushOptions::default(),
         &mut NoProgress,
+        &grit_lib::progress::NeverCancel,
     )
     .expect("push authenticated by the host-level store entry");
     assert_eq!(outcome.results[0].status, PushRefStatus::Ok);

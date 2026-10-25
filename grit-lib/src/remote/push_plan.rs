@@ -22,6 +22,7 @@ use crate::refs;
 use crate::refspec::{parse_push_refspec, RefspecItem};
 use crate::remote::{HttpClientFactory, Remote, RemoteError, RemoteRef};
 use crate::repo::Repository;
+use crate::repo_handles::has_remote_section;
 use crate::rev_parse::{resolve_push_full_ref_for_branch, resolve_revision_for_verify};
 use crate::state::{resolve_head, HeadState};
 use crate::transfer::{resolve_push_delete_ref, PushRefSpec};
@@ -126,6 +127,10 @@ pub enum PushPlanError {
     /// `push.default = nothing` blocks an empty refspec push.
     #[error("push.default is nothing; no push destination")]
     PushDefaultNothing,
+    /// No remote was named and none is configured: the branch has no push remote or remote,
+    /// `remote.pushDefault` is unset and there is no `origin` with a URL.
+    #[error("no remote to push to")]
+    NoRemote,
     /// Named remote is missing from config.
     #[error("unknown remote '{0}'")]
     UnknownRemote(String),
@@ -548,6 +553,11 @@ fn current_branch_oid(repo: &Repository) -> PlanResult<(String, ObjectId)> {
 
 /// Remote selection for push: explicit, `branch.*.pushRemote`, `remote.pushDefault`,
 /// `branch.*.remote`, then `origin`.
+///
+/// # Errors
+///
+/// [`PushPlanError::NoRemote`] when nothing selects a remote and no `remote.origin.*` section
+/// is configured.
 pub fn configured_remote_for_push(
     repo: &Repository,
     config: &ConfigSet,
@@ -579,6 +589,9 @@ pub fn configured_remote_for_push(
         {
             return Ok(remote);
         }
+    }
+    if !has_remote_section(config, DEFAULT_REMOTE) {
+        return Err(PushPlanError::NoRemote);
     }
     Ok(DEFAULT_REMOTE.to_owned())
 }
@@ -1525,6 +1538,27 @@ mod tests {
     }
 
     #[test]
+    fn push_without_any_remote_is_no_remote() {
+        let (_tmp, repo) = init_repo();
+        assert_eq!(
+            configured_remote_for_push(&repo, &ConfigSet::new(), None),
+            Err(PushPlanError::NoRemote)
+        );
+        assert_eq!(PushPlanError::NoRemote.to_string(), "no remote to push to");
+        assert_eq!(
+            load_push_plan_context(&repo, &ConfigSet::new(), None, None).map(|_| ()),
+            Err(PushPlanError::NoRemote)
+        );
+        let named = configured_remote_for_push(&repo, &ConfigSet::new(), Some("upstream"));
+        assert_eq!(named.as_deref(), Ok("upstream"));
+        let url_less_origin = config_from("[remote \"origin\"]\n\tpushurl = /tmp/o.git\n");
+        assert_eq!(
+            configured_remote_for_push(&repo, &url_less_origin, None).as_deref(),
+            Ok("origin")
+        );
+    }
+
+    #[test]
     fn push_invocation_unknown_remote_before_refspecs_is_rejected() {
         let err = resolve_push_invocation(&ConfigSet::new(), None, &strings(&["nosuch", "main"]))
             .expect_err("unknown remote");
@@ -1542,7 +1576,7 @@ mod tests {
         assert_eq!(literal.name, None);
         assert!(matches!(
             open_push_destination(&config, "nourl"),
-            Err(RemoteError::NoUrl)
+            Err(RemoteError::NoUrl { remote: Some(name) }) if name == "nourl"
         ));
     }
 

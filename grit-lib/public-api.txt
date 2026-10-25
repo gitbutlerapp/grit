@@ -5226,6 +5226,35 @@ impl core::marker::Unpin for grit_lib::error::AttrPathspecError
 impl core::marker::UnsafeUnpin for grit_lib::error::AttrPathspecError
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::error::AttrPathspecError
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::error::AttrPathspecError
+#[non_exhaustive] pub enum grit_lib::error::AuthFailure
+pub grit_lib::error::AuthFailure::CredentialsUnavailable
+pub grit_lib::error::AuthFailure::CredentialsUnavailable::detail: alloc::string::String
+pub grit_lib::error::AuthFailure::NoCredentialProvider
+pub grit_lib::error::AuthFailure::Rejected
+pub grit_lib::error::AuthFailure::UnsupportedScheme
+pub grit_lib::error::AuthFailure::UnsupportedScheme::schemes: alloc::vec::Vec<alloc::string::String>
+pub grit_lib::error::AuthFailure::UnusableCredentials
+pub grit_lib::error::AuthFailure::UrlNotDescribable
+impl grit_lib::error::AuthFailure
+pub fn grit_lib::error::AuthFailure::is_rejected(&self) -> bool
+impl core::clone::Clone for grit_lib::error::AuthFailure
+pub fn grit_lib::error::AuthFailure::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::error::AuthFailure
+impl core::cmp::PartialEq for grit_lib::error::AuthFailure
+pub fn grit_lib::error::AuthFailure::eq(&self, &Self) -> bool
+impl core::error::Error for grit_lib::error::AuthFailure
+impl core::fmt::Debug for grit_lib::error::AuthFailure
+pub fn grit_lib::error::AuthFailure::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::error::AuthFailure
+pub fn grit_lib::error::AuthFailure::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::error::AuthFailure
+impl core::marker::Freeze for grit_lib::error::AuthFailure
+impl core::marker::Send for grit_lib::error::AuthFailure
+impl core::marker::Sync for grit_lib::error::AuthFailure
+impl core::marker::Unpin for grit_lib::error::AuthFailure
+impl core::marker::UnsafeUnpin for grit_lib::error::AuthFailure
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::error::AuthFailure
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::error::AuthFailure
 pub enum grit_lib::error::BadNumericSource
 pub grit_lib::error::BadNumericSource::InvalidUnit
 pub grit_lib::error::BadNumericSource::OutOfRange
@@ -5344,7 +5373,9 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::error::DiffPathError
 #[non_exhaustive] pub enum grit_lib::error::Error
 pub grit_lib::error::Error::AmendUnborn
 pub grit_lib::error::Error::Apply(grit_lib::error::ApplyError)
-pub grit_lib::error::Error::Auth(alloc::string::String)
+pub grit_lib::error::Error::Auth
+pub grit_lib::error::Error::Auth::reason: grit_lib::error::AuthFailure
+pub grit_lib::error::Error::Auth::url: alloc::string::String
 pub grit_lib::error::Error::BlameIgnoreRevUnknown
 pub grit_lib::error::Error::BlameIgnoreRevUnknown::rev: alloc::string::String
 pub grit_lib::error::Error::BlameIgnoreRevsFileInvalidRev
@@ -5374,6 +5405,9 @@ pub grit_lib::error::Error::DeltaChainTooDeep
 pub grit_lib::error::Error::DeltaChainTooDeep::limit: usize
 pub grit_lib::error::Error::DetachedHead
 pub grit_lib::error::Error::DiffPath(grit_lib::error::DiffPathError)
+pub grit_lib::error::Error::DirtyWorktree
+pub grit_lib::error::Error::DirtyWorktree::operation: grit_lib::error::WorktreeOperation
+pub grit_lib::error::Error::DirtyWorktree::paths: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::error::Error::DubiousOwnership(alloc::string::String)
 pub grit_lib::error::Error::EmptyCommitMessage
 pub grit_lib::error::Error::FetchDeepenRelativeUnsupported
@@ -5513,6 +5547,8 @@ pub grit_lib::error::Error::RemovePathsRequired
 pub grit_lib::error::Error::ReplayAbortHeadMoved
 pub grit_lib::error::Error::ReplayContinueUnmerged
 pub grit_lib::error::Error::ReplaySourceAtHead
+pub grit_lib::error::Error::RepositoryNotFound
+pub grit_lib::error::Error::RepositoryNotFound::url: alloc::string::String
 pub grit_lib::error::Error::RequiresWorkTree
 pub grit_lib::error::Error::RestoreConflictMissingOurs
 pub grit_lib::error::Error::RestoreConflictMissingOurs::path: alloc::string::String
@@ -5574,6 +5610,7 @@ pub grit_lib::error::Error::WouldOverwrite::paths: alloc::vec::Vec<alloc::string
 pub grit_lib::error::Error::WouldOverwrite::reason: grit_lib::error::OverwriteReason
 pub grit_lib::error::Error::Zlib(alloc::string::String)
 impl grit_lib::error::Error
+pub fn grit_lib::error::Error::dirty_worktree(grit_lib::error::WorktreeOperation, alloc::vec::Vec<alloc::string::String>) -> Self
 pub fn grit_lib::error::Error::git_stderr_message(&self) -> alloc::string::String
 pub fn grit_lib::error::Error::invalid_path_component(impl core::convert::Into<alloc::string::String>, grit_lib::path_validate::PathComponentError) -> Self
 pub fn grit_lib::error::Error::wants_fatal_prefix(&self) -> bool
@@ -5959,6 +5996,31 @@ impl core::marker::Unpin for grit_lib::error::SparseCheckoutWarning
 impl core::marker::UnsafeUnpin for grit_lib::error::SparseCheckoutWarning
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::error::SparseCheckoutWarning
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::error::SparseCheckoutWarning
+#[non_exhaustive] pub enum grit_lib::error::WorktreeOperation
+pub grit_lib::error::WorktreeOperation::Merge
+pub grit_lib::error::WorktreeOperation::Pick
+pub grit_lib::error::WorktreeOperation::RebaseExec
+pub grit_lib::error::WorktreeOperation::Switch
+impl core::clone::Clone for grit_lib::error::WorktreeOperation
+pub fn grit_lib::error::WorktreeOperation::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::error::WorktreeOperation
+impl core::cmp::PartialEq for grit_lib::error::WorktreeOperation
+pub fn grit_lib::error::WorktreeOperation::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::error::WorktreeOperation
+pub fn grit_lib::error::WorktreeOperation::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::error::WorktreeOperation
+pub fn grit_lib::error::WorktreeOperation::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for grit_lib::error::WorktreeOperation
+pub fn grit_lib::error::WorktreeOperation::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for grit_lib::error::WorktreeOperation
+impl core::marker::StructuralPartialEq for grit_lib::error::WorktreeOperation
+impl core::marker::Freeze for grit_lib::error::WorktreeOperation
+impl core::marker::Send for grit_lib::error::WorktreeOperation
+impl core::marker::Sync for grit_lib::error::WorktreeOperation
+impl core::marker::Unpin for grit_lib::error::WorktreeOperation
+impl core::marker::UnsafeUnpin for grit_lib::error::WorktreeOperation
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::error::WorktreeOperation
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::error::WorktreeOperation
 pub struct grit_lib::error::LockHolder
 pub grit_lib::error::LockHolder::pid: u64
 pub grit_lib::error::LockHolder::running: bool
@@ -14893,7 +14955,9 @@ pub mod grit_lib::prelude
 #[non_exhaustive] pub enum grit_lib::prelude::Error
 pub grit_lib::prelude::Error::AmendUnborn
 pub grit_lib::prelude::Error::Apply(grit_lib::error::ApplyError)
-pub grit_lib::prelude::Error::Auth(alloc::string::String)
+pub grit_lib::prelude::Error::Auth
+pub grit_lib::prelude::Error::Auth::reason: grit_lib::error::AuthFailure
+pub grit_lib::prelude::Error::Auth::url: alloc::string::String
 pub grit_lib::prelude::Error::BlameIgnoreRevUnknown
 pub grit_lib::prelude::Error::BlameIgnoreRevUnknown::rev: alloc::string::String
 pub grit_lib::prelude::Error::BlameIgnoreRevsFileInvalidRev
@@ -14923,6 +14987,9 @@ pub grit_lib::prelude::Error::DeltaChainTooDeep
 pub grit_lib::prelude::Error::DeltaChainTooDeep::limit: usize
 pub grit_lib::prelude::Error::DetachedHead
 pub grit_lib::prelude::Error::DiffPath(grit_lib::error::DiffPathError)
+pub grit_lib::prelude::Error::DirtyWorktree
+pub grit_lib::prelude::Error::DirtyWorktree::operation: grit_lib::error::WorktreeOperation
+pub grit_lib::prelude::Error::DirtyWorktree::paths: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::prelude::Error::DubiousOwnership(alloc::string::String)
 pub grit_lib::prelude::Error::EmptyCommitMessage
 pub grit_lib::prelude::Error::FetchDeepenRelativeUnsupported
@@ -15062,6 +15129,8 @@ pub grit_lib::prelude::Error::RemovePathsRequired
 pub grit_lib::prelude::Error::ReplayAbortHeadMoved
 pub grit_lib::prelude::Error::ReplayContinueUnmerged
 pub grit_lib::prelude::Error::ReplaySourceAtHead
+pub grit_lib::prelude::Error::RepositoryNotFound
+pub grit_lib::prelude::Error::RepositoryNotFound::url: alloc::string::String
 pub grit_lib::prelude::Error::RequiresWorkTree
 pub grit_lib::prelude::Error::RestoreConflictMissingOurs
 pub grit_lib::prelude::Error::RestoreConflictMissingOurs::path: alloc::string::String
@@ -15123,6 +15192,7 @@ pub grit_lib::prelude::Error::WouldOverwrite::paths: alloc::vec::Vec<alloc::stri
 pub grit_lib::prelude::Error::WouldOverwrite::reason: grit_lib::error::OverwriteReason
 pub grit_lib::prelude::Error::Zlib(alloc::string::String)
 impl grit_lib::error::Error
+pub fn grit_lib::error::Error::dirty_worktree(grit_lib::error::WorktreeOperation, alloc::vec::Vec<alloc::string::String>) -> Self
 pub fn grit_lib::error::Error::git_stderr_message(&self) -> alloc::string::String
 pub fn grit_lib::error::Error::invalid_path_component(impl core::convert::Into<alloc::string::String>, grit_lib::path_validate::PathComponentError) -> Self
 pub fn grit_lib::error::Error::wants_fatal_prefix(&self) -> bool
@@ -19327,6 +19397,7 @@ pub grit_lib::remote::push_plan::PushPlanError::InvalidRefspec::spec: alloc::str
 pub grit_lib::remote::push_plan::PushPlanError::LeaseValueRequiresSingleRef
 pub grit_lib::remote::push_plan::PushPlanError::Message(alloc::string::String)
 pub grit_lib::remote::push_plan::PushPlanError::NoCommits
+pub grit_lib::remote::push_plan::PushPlanError::NoRemote
 pub grit_lib::remote::push_plan::PushPlanError::NoTags
 pub grit_lib::remote::push_plan::PushPlanError::PushDefaultNothing
 pub grit_lib::remote::push_plan::PushPlanError::SrcRefspecAmbiguous
@@ -20632,6 +20703,7 @@ pub grit_lib::remote::RemoteError::InvalidRemoteName(alloc::string::String)
 pub grit_lib::remote::RemoteError::InvalidUrl(alloc::string::String)
 pub grit_lib::remote::RemoteError::Library(grit_lib::error::Error)
 pub grit_lib::remote::RemoteError::NoUrl
+pub grit_lib::remote::RemoteError::NoUrl::remote: core::option::Option<alloc::string::String>
 pub grit_lib::remote::RemoteError::RemoteExists(alloc::string::String)
 pub grit_lib::remote::RemoteError::UnknownRemote(alloc::string::String)
 pub grit_lib::remote::RemoteError::UnsupportedScheme

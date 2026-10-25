@@ -59,6 +59,71 @@ impl std::fmt::Display for OverwriteReason {
     }
 }
 
+/// Why an HTTP remote refused access ([`Error::Auth`]).
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[non_exhaustive]
+pub enum AuthFailure {
+    /// The server asked for credentials (`401`) and no credential provider is wired.
+    #[error("no credential provider is configured")]
+    NoCredentialProvider,
+    /// The credential provider could not supply credentials (no helper has them, and
+    /// prompting is not possible).
+    #[error("{detail}")]
+    CredentialsUnavailable {
+        /// The provider's explanation (for example that no helper has credentials and
+        /// prompting is disabled).
+        detail: String,
+    },
+    /// The provider answered without a usable username and password.
+    #[error("the credential helper returned no usable username and password")]
+    UnusableCredentials,
+    /// The URL could not be split into the credential fields helpers expect.
+    #[error("the URL cannot be described to a credential helper")]
+    UrlNotDescribable,
+    /// The server only offers authentication schemes grit does not speak (no `Basic`).
+    #[error("unsupported authentication scheme: {}", schemes.join(", "))]
+    UnsupportedScheme {
+        /// The `WWW-Authenticate` challenges the server sent.
+        schemes: Vec<String>,
+    },
+    /// Credentials were sent and the server rejected them (`401` again).
+    #[error("the server rejected the credentials")]
+    Rejected,
+}
+
+impl AuthFailure {
+    /// Whether credentials were sent and refused, as opposed to never being available.
+    #[must_use]
+    pub fn is_rejected(&self) -> bool {
+        matches!(self, Self::Rejected)
+    }
+}
+
+/// The command a dirty worktree blocked ([`Error::DirtyWorktree`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum WorktreeOperation {
+    /// Switching branches or checking out a commit.
+    Switch,
+    /// Picking (cherry-picking) or reverting commits.
+    Pick,
+    /// Merging.
+    Merge,
+    /// Rebasing with `--exec`.
+    RebaseExec,
+}
+
+impl std::fmt::Display for WorktreeOperation {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Switch => "switching",
+            Self::Pick => "picking",
+            Self::Merge => "merging",
+            Self::RebaseExec => "rebasing with --exec",
+        })
+    }
+}
+
 /// Configuration parse and validation failures.
 #[derive(Debug, Error, Clone, PartialEq, Eq)]
 #[non_exhaustive]
@@ -889,8 +954,21 @@ pub enum Error {
     /// Distinct from [`Error::Message`] so embedders can detect an authentication
     /// failure (and e.g. fall back to an interactive/subprocess path) rather than
     /// string-matching, and so the failure surfaces typed instead of hanging.
-    #[error("authentication failed: {0}")]
-    Auth(String),
+    #[error("authentication failed for {url}: {reason}")]
+    Auth {
+        /// Repository URL with credentials redacted and smart-HTTP endpoint suffixes
+        /// (`/info/refs?service=…`, `/git-upload-pack`, `/git-receive-pack`) removed.
+        url: String,
+        /// What went wrong.
+        reason: AuthFailure,
+    },
+
+    /// Smart-HTTP discovery (`info/refs`) answered `404`: there is no repository at the URL.
+    #[error("repository not found: HTTP 404 from {url}")]
+    RepositoryNotFound {
+        /// Repository URL with credentials redacted and the `/info/refs` suffix removed.
+        url: String,
+    },
 
     /// A push carried `--push-option` values but the remote `git-receive-pack`
     /// did not advertise the `push-options` capability, so the options cannot be
@@ -1113,6 +1191,16 @@ pub enum Error {
         paths: Vec<String>,
         /// Human-readable summary (depends on [`OverwriteReason`]).
         message: String,
+    },
+
+    /// Staged or unstaged changes block an operation that needs a clean worktree.
+    #[error("you have uncommitted changes — commit them before {operation}")]
+    DirtyWorktree {
+        /// The operation that was refused.
+        operation: WorktreeOperation,
+        /// Repository-relative paths with staged or unstaged changes (sorted, deduplicated;
+        /// empty when the caller only knew that something changed).
+        paths: Vec<String>,
     },
 
     /// Author or committer on [`crate::porcelain::commit::CommitRequest`] is invalid.
@@ -1485,6 +1573,14 @@ pub enum Error {
 }
 
 impl Error {
+    /// Build [`Error::DirtyWorktree`], sorting and deduplicating `paths`.
+    #[must_use]
+    pub fn dirty_worktree(operation: WorktreeOperation, mut paths: Vec<String>) -> Self {
+        paths.sort();
+        paths.dedup();
+        Self::DirtyWorktree { operation, paths }
+    }
+
     /// Build [`Error::WouldOverwrite`] for switch and similar tree transitions.
     #[must_use]
     pub fn would_overwrite(reason: OverwriteReason, mut paths: Vec<String>) -> Self {

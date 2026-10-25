@@ -63,9 +63,15 @@ pub(crate) fn is_valid_remote_name(name: &str) -> bool {
 /// Errors specific to remote URL resolution and dispatch.
 #[derive(Debug, Error)]
 pub enum RemoteError {
-    /// A remote name has no `remote.<name>.url` configured.
-    #[error("remote has no configured URL")]
-    NoUrl,
+    /// A remote has no URL: `remote.<name>.url` is unset or blank, or a literal URL was empty.
+    #[error("{}", match remote {
+        Some(name) => format!("remote '{name}' has no URL configured"),
+        None => "remote URL is empty".to_owned(),
+    })]
+    NoUrl {
+        /// The configured remote's name; `None` when an empty literal URL was given.
+        remote: Option<String>,
+    },
     /// The URL uses a scheme grit does not support for remotes.
     #[error("unsupported remote URL scheme")]
     UnsupportedScheme,
@@ -156,7 +162,7 @@ impl TryFrom<&str> for RemoteUrl {
 pub fn parse_remote_url(url: &str) -> RemoteResult<RemoteUrl> {
     let url = url.trim();
     if url.is_empty() {
-        return Err(RemoteError::NoUrl);
+        return Err(RemoteError::NoUrl { remote: None });
     }
     if url.starts_with("file://") {
         let path = crate::transport_path::file_url_to_local_path(url)
@@ -316,7 +322,9 @@ impl Remote {
         let raw_url = config
             .get(&format!("remote.{name}.url"))
             .filter(|u| !u.trim().is_empty())
-            .ok_or(RemoteError::NoUrl)?;
+            .ok_or_else(|| RemoteError::NoUrl {
+                remote: Some(name.to_owned()),
+            })?;
         let fetch_url = url_rewrite::rewrite_fetch_url(config, &raw_url);
         let push_source = config
             .get(&format!("remote.{name}.pushurl"))
@@ -1340,6 +1348,18 @@ mod tests {
             oid: ObjectId::from_hex(&hex_digit.to_string().repeat(40)).unwrap(),
             symref_target: None,
         }
+    }
+
+    #[test]
+    fn missing_urls_name_the_remote() {
+        let err = parse_remote_url("  ").expect_err("empty");
+        assert!(matches!(err, RemoteError::NoUrl { remote: None }));
+        assert_eq!(err.to_string(), "remote URL is empty");
+
+        let config = ConfigSet::new();
+        let err = Remote::from_config(&config, "upstream").expect_err("no url");
+        assert!(matches!(&err, RemoteError::NoUrl { remote: Some(name) } if name == "upstream"));
+        assert_eq!(err.to_string(), "remote 'upstream' has no URL configured");
     }
 
     #[test]

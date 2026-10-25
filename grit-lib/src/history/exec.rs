@@ -224,12 +224,11 @@ fn run_exec_command(
 }
 
 fn map_clean_error(err: crate::error::Error) -> HistoryError {
-    if err.to_string().contains("uncommitted changes") {
-        HistoryError::UncommittedChanges
-    } else {
-        HistoryError::WorktreeApply {
-            message: err.to_string(),
-        }
+    match err {
+        crate::error::Error::DirtyWorktree { .. } => HistoryError::UncommittedChanges,
+        other => HistoryError::WorktreeApply {
+            message: other.to_string(),
+        },
     }
 }
 

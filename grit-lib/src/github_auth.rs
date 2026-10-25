@@ -635,7 +635,10 @@ mod tests {
     #[test]
     fn transport_errors_name_the_failing_step() {
         let http = ScriptedHttp::new(vec![
-            Err(Error::Auth("denied".to_owned())),
+            Err(Error::Auth {
+                url: "https://github.com".to_owned(),
+                reason: crate::error::AuthFailure::Rejected,
+            }),
             Err(Error::Message("offline".to_owned())),
         ]);
         let flow = DeviceFlow::new(&http, "id");
@@ -643,7 +646,7 @@ mod tests {
             flow.request_device_code(),
             Err(DeviceFlowError::Http {
                 step: DeviceFlowStep::RequestDeviceCode,
-                source: Error::Auth(_),
+                source: Error::Auth { .. },
             })
         ));
         assert!(matches!(
