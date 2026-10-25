@@ -66,7 +66,7 @@ let repo = RepositoryBuilder::new(RepositoryOptions::empty())
 
 ## What works with a custom primary
 
-Object reads and writes go through your store, so commits, staging (`porcelain::add::stage` and auto-staging commits), log, diff, merge, stash, notes and bundle creation all work.
+Object reads and writes go through your store, so commits, staging (`porcelain::add::stage` and auto-staging commits), log, diff, merge, stash, notes, bundle creation and unbundling all work.
 
 [`Repository::fsck`](rustdoc:grit_lib::repo::Repository::fsck) works too: it lists the store's objects with `ObjectStore::for_each_object`, re-hashes each one against its id and runs the usual object and connectivity checks. Read or hash failures are reported as `FsckIssue::BadObject`, since there is no loose file path to name.
 
@@ -76,11 +76,23 @@ Some operations still install or verify packs under the on-disk `objects/` direc
 | ----------- | ----------- |
 | `fetch` | [`Remote::fetch`](rustdoc:grit_lib::remote::Remote::fetch), `repo.remotes().fetch` / `fetch_all`, pull, promisor lazy fetch (every transport, bundles included) |
 | `push` | [`Remote::push`](rustdoc:grit_lib::remote::Remote::push), `repo.remotes().push` |
-| `gc`, `commit-graph write`, `repack`, `midx write`, `prune` | Filesystem maintenance (`Odb::gc`, `Odb::write_commit_graph`, `Odb::pack_store`, pack install, MIDX write) |
+| `gc`, `commit-graph write`, `repack`, `midx write`, `prune` | Filesystem maintenance (`Odb::gc`, `Odb::write_commit_graph`, `Odb::pack_store`, pack install with `index_pack::install_pack_*`, MIDX write) |
 
-`repo.bundles().unbundle` reports the same refusal as [`BundleError::UnsupportedObjectStore`](rustdoc:grit_lib::bundle::BundleError::UnsupportedObjectStore) with operation `unbundle`.
+Maintenance stays files-only by design: packs, `.idx`, multi-pack-index and commit-graph files are how the files backend stores objects, and a custom store owns its own layout. Use `Odb::files_objects_dir` when you need the on-disk `objects/` path only for files-backed repos.
 
-To exchange objects with Git from a custom store today, export them as loose objects (as the examples below do) or fetch and push from a files-backed repository. Use `Odb::files_objects_dir` when you need the on-disk `objects/` path only for files-backed repos.
+## Receiving packs into a custom store
+
+Fetch, clone, push and bundles move objects as a pack stream. [`ingest_pack_into`](rustdoc:grit_lib::objects::unpack_objects::ingest_pack_into) applies one to any [`WritableObjectStore`](rustdoc:grit_lib::objects::odb::store::WritableObjectStore): it inflates each object, resolves `OFS_DELTA` and `REF_DELTA` chains, verifies the pack checksum, and calls `write` for every object. A *thin* pack (one whose deltas name bases the sender knew you have) resolves those bases from the `bases` store you pass, after looking in the target store itself. Objects up to 1 MiB stay in memory until the pack is resolved; larger blobs are read back from your store when a delta needs them.
+
+The repository-level entry points use it automatically. [`ingest_received_pack`](rustdoc:grit_lib::objects::index_pack::ingest_received_pack) and [`ingest_received_pack_path`](rustdoc:grit_lib::objects::index_pack::ingest_received_pack_path) write into a custom primary instead of installing `objects/pack/pack-*.pack`, reading thin bases through the whole `Odb`; the returned [`IngestedPack`](rustdoc:grit_lib::objects::index_pack::IngestedPack) has `pack_path: None`. [`Bundle::unbundle`](rustdoc:grit_lib::bundle::Bundle::unbundle) streams the bundle's pack straight from the file into your store, with no temporary copy.
+
+<!-- include: grit-examples/src/bin/ingest_pack_into_store.rs -->
+
+```bash
+cargo run -p grit-examples --bin ingest_pack_into_store
+```
+
+`Remote::fetch` and `Remote::push` do not run on a custom primary yet. Until they do, fetch into a files-backed scratch repository, build a pack of what arrived with [`build_pack`](rustdoc:grit_lib::objects::pack_objects::build_pack), and feed it to `ingest_received_pack` on the custom repository. Going the other way, `build_pack` on the custom repository's `Odb` produces a pack that `git index-pack --strict` accepts.
 
 ## Short ids and prefix lookup
 

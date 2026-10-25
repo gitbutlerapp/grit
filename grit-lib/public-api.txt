@@ -699,8 +699,6 @@ pub grit_lib::bundle::BundleError::ObjectFormatMismatch::bundle_name: &'static s
 pub grit_lib::bundle::BundleError::ObjectFormatMismatch::repo_name: &'static str
 pub grit_lib::bundle::BundleError::PrerequisitesNotConnected
 pub grit_lib::bundle::BundleError::UnsupportedCapability(alloc::string::String)
-pub grit_lib::bundle::BundleError::UnsupportedObjectStore
-pub grit_lib::bundle::BundleError::UnsupportedObjectStore::operation: &'static str
 pub grit_lib::bundle::BundleError::UnsupportedVersion
 impl core::clone::Clone for grit_lib::bundle::BundleError
 pub fn grit_lib::bundle::BundleError::clone(&self) -> Self
@@ -8732,9 +8730,14 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::index_pack::Ing
 pub struct grit_lib::objects::index_pack::IngestedPack
 pub grit_lib::objects::index_pack::IngestedPack::object_counts: grit_lib::objects::index_pack::ObjectKindCounts
 pub grit_lib::objects::index_pack::IngestedPack::object_ids: std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>
-pub grit_lib::objects::index_pack::IngestedPack::pack_path: std::path::PathBuf
+pub grit_lib::objects::index_pack::IngestedPack::pack_bytes: u64
+pub grit_lib::objects::index_pack::IngestedPack::pack_path: core::option::Option<std::path::PathBuf>
 impl core::clone::Clone for grit_lib::objects::index_pack::IngestedPack
 pub fn grit_lib::objects::index_pack::IngestedPack::clone(&self) -> Self
+impl core::convert::From<grit_lib::objects::unpack_objects::IngestedObjects> for grit_lib::objects::index_pack::IngestedPack
+pub fn grit_lib::objects::index_pack::IngestedPack::from(grit_lib::objects::unpack_objects::IngestedObjects) -> Self
+impl core::default::Default for grit_lib::objects::index_pack::IngestedPack
+pub fn grit_lib::objects::index_pack::IngestedPack::default() -> Self
 impl core::fmt::Debug for grit_lib::objects::index_pack::IngestedPack
 pub fn grit_lib::objects::index_pack::IngestedPack::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::marker::Freeze for grit_lib::objects::index_pack::IngestedPack
@@ -10741,6 +10744,25 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::prune_packed
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::prune_packed::PrunePackedOptions
 pub fn grit_lib::objects::prune_packed::prune_packed_objects(&std::path::Path, grit_lib::objects::prune_packed::PrunePackedOptions) -> grit_lib::error::Result<alloc::vec::Vec<std::path::PathBuf>>
 pub mod grit_lib::objects::unpack_objects
+pub struct grit_lib::objects::unpack_objects::IngestedObjects
+pub grit_lib::objects::unpack_objects::IngestedObjects::object_counts: grit_lib::objects::index_pack::ObjectKindCounts
+pub grit_lib::objects::unpack_objects::IngestedObjects::object_ids: std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>
+pub grit_lib::objects::unpack_objects::IngestedObjects::pack_bytes: u64
+impl core::clone::Clone for grit_lib::objects::unpack_objects::IngestedObjects
+pub fn grit_lib::objects::unpack_objects::IngestedObjects::clone(&self) -> Self
+impl core::convert::From<grit_lib::objects::unpack_objects::IngestedObjects> for grit_lib::objects::index_pack::IngestedPack
+pub fn grit_lib::objects::index_pack::IngestedPack::from(grit_lib::objects::unpack_objects::IngestedObjects) -> Self
+impl core::default::Default for grit_lib::objects::unpack_objects::IngestedObjects
+pub fn grit_lib::objects::unpack_objects::IngestedObjects::default() -> Self
+impl core::fmt::Debug for grit_lib::objects::unpack_objects::IngestedObjects
+pub fn grit_lib::objects::unpack_objects::IngestedObjects::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::objects::unpack_objects::IngestedObjects
+impl core::marker::Send for grit_lib::objects::unpack_objects::IngestedObjects
+impl core::marker::Sync for grit_lib::objects::unpack_objects::IngestedObjects
+impl core::marker::Unpin for grit_lib::objects::unpack_objects::IngestedObjects
+impl core::marker::UnsafeUnpin for grit_lib::objects::unpack_objects::IngestedObjects
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::unpack_objects::IngestedObjects
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::unpack_objects::IngestedObjects
 pub struct grit_lib::objects::unpack_objects::PackIndexRecord
 pub grit_lib::objects::unpack_objects::PackIndexRecord::crc32: u32
 pub grit_lib::objects::unpack_objects::PackIndexRecord::kind: grit_lib::objects::ObjectKind
@@ -10778,6 +10800,8 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::unpack_objec
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::unpack_objects::UnpackOptions
 pub fn grit_lib::objects::unpack_objects::apply_delta(&[u8], &[u8]) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
 pub fn grit_lib::objects::unpack_objects::apply_delta_into(&mut alloc::vec::Vec<u8>, &[u8], &[u8]) -> grit_lib::error::Result<()>
+pub fn grit_lib::objects::unpack_objects::ingest_pack_into(&mut dyn alloc::io::read::Read, &dyn grit_lib::objects::odb::store::WritableObjectStore, &dyn grit_lib::objects::odb::store::ObjectStore, &grit_lib::objects::unpack_objects::UnpackOptions) -> grit_lib::error::Result<grit_lib::objects::unpack_objects::IngestedObjects>
+pub fn grit_lib::objects::unpack_objects::ingest_pack_into_with_progress(&mut dyn alloc::io::read::Read, &dyn grit_lib::objects::odb::store::WritableObjectStore, &dyn grit_lib::objects::odb::store::ObjectStore, &grit_lib::objects::unpack_objects::UnpackOptions, core::option::Option<&mut dyn grit_lib::progress::ProgressSink>, core::option::Option<&dyn grit_lib::progress::Cancel>) -> grit_lib::error::Result<grit_lib::objects::unpack_objects::IngestedObjects>
 pub fn grit_lib::objects::unpack_objects::pack_bytes_to_object_map(&[u8], &grit_lib::objects::odb::Odb) -> grit_lib::error::Result<std::collections::hash::map::HashMap<grit_lib::objects::ObjectId, grit_lib::objects::Object>>
 pub fn grit_lib::objects::unpack_objects::pack_index_records_from_bytes(&[u8], &grit_lib::objects::odb::Odb) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::unpack_objects::PackIndexRecord>>
 pub fn grit_lib::objects::unpack_objects::pack_index_records_with_threads(&[u8], &grit_lib::objects::odb::Odb, grit_lib::parallel::Parallelism) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::unpack_objects::PackIndexRecord>>
@@ -20413,7 +20437,7 @@ pub grit_lib::remote::transfer::TransferStats::bytes: u64
 pub grit_lib::remote::transfer::TransferStats::kinds: core::option::Option<grit_lib::objects::index_pack::ObjectKindCounts>
 pub grit_lib::remote::transfer::TransferStats::objects: u64
 impl grit_lib::remote::transfer::TransferStats
-pub fn grit_lib::remote::transfer::TransferStats::from_ingested_pack(&grit_lib::objects::index_pack::IngestedPack) -> grit_lib::error::Result<Self>
+pub fn grit_lib::remote::transfer::TransferStats::from_ingested_pack(&grit_lib::objects::index_pack::IngestedPack) -> Self
 impl core::clone::Clone for grit_lib::remote::transfer::TransferStats
 pub fn grit_lib::remote::transfer::TransferStats::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::remote::transfer::TransferStats

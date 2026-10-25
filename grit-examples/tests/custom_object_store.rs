@@ -134,6 +134,34 @@ fn memory_primary_example_writes_to_memory_only() {
     assert!(stdout.contains("on_disk=false"), "{stdout}");
 }
 
+#[test]
+fn ingest_pack_into_store_example_fills_both_stores() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let output = Command::new(env!("CARGO_BIN_EXE_ingest_pack_into_store"))
+        .env("TMPDIR", tmp.path())
+        .output()
+        .expect("run ingest_pack_into_store");
+    assert!(
+        output.status.success(),
+        "ingest_pack_into_store: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    for line in [
+        "store_objects=6",
+        "store_has_tip=true",
+        "repo_objects=6",
+        "repo_commits=2",
+        "pack_installed=false",
+        "repo_reads_tip=true",
+    ] {
+        assert!(
+            stdout.lines().any(|l| l == line),
+            "missing {line}: {stdout}"
+        );
+    }
+}
+
 /// macOS puts the default temp dir under `/var`, a symlink to `/private/var`.
 #[cfg(unix)]
 #[test]

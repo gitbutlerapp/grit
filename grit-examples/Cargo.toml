@@ -64,6 +64,10 @@ name = "memory_primary"
 path = "src/bin/memory_primary.rs"
 
 [[bin]]
+name = "ingest_pack_into_store"
+path = "src/bin/ingest_pack_into_store.rs"
+
+[[bin]]
 name = "guide_index"
 path = "src/bin/guide_index.rs"
 
