@@ -6,10 +6,18 @@
 //! `core.protectNTFS` and `core.protectHFS`.
 //!
 //! ```rust
-//! use grit_lib::path_validate::{validate_path, EntryMode, ProtectOptions};
+//! use grit_lib::path_validate::{
+//!     validate_path, EntryMode, PathComponentError, PathValidationKind, ProtectOptions,
+//! };
 //!
 //! let opts = ProtectOptions::default();
-//! validate_path(b"src/lib.rs", EntryMode::new(0o100644), opts).unwrap();
+//! let blob = EntryMode::new(0o100644);
+//! let kind = PathValidationKind::Worktree;
+//! validate_path(b"src/lib.rs", blob, opts, kind).unwrap();
+//! assert_eq!(
+//!     validate_path(b"GIT~1./hooks", blob, opts, kind),
+//!     Err(PathComponentError::NtfsDotGit)
+//! );
 //! ```
 
 use crate::config::ConfigSet;
@@ -52,6 +60,9 @@ pub enum PathValidationKind {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ProtectOptions {
     /// Reject NTFS `.git` spellings, short names, `\\` segments, and `:` streams.
+    ///
+    /// On Windows, worktree validation additionally rejects reserved device names,
+    /// trailing spaces or periods, and characters Win32 does not allow in file names.
     pub protect_ntfs: bool,
     /// Reject HFS+ Unicode-ignorable `.git` spellings.
     pub protect_hfs: bool,
@@ -131,8 +142,26 @@ pub enum PathComponentError {
     #[error("path component contains a backslash before a .git alias")]
     NtfsBackslash,
     /// DOS drive prefix or NTFS alternate-data-stream syntax in the component.
+    ///
+    /// On Windows, worktree validation reports any `:` in a component this way.
     #[error("path component uses a forbidden NTFS drive or stream prefix")]
     NtfsDriveOrStream,
+    /// Windows reserved device name (`CON`, `PRN`, `AUX`, `NUL`, `COM1`–`COM9`,
+    /// `LPT0`–`LPT9`, `CONIN$`, `CONOUT$`), with or without an extension or trailing spaces.
+    ///
+    /// Only reported by [`PathValidationKind::Worktree`] on Windows.
+    #[error("path component is a reserved Windows device name")]
+    NtfsReservedName,
+    /// Component ends in a space or period, which Windows silently strips.
+    ///
+    /// Only reported by [`PathValidationKind::Worktree`] on Windows.
+    #[error("path component ends with a space or period")]
+    NtfsTrailingDotOrSpace,
+    /// Component contains a control character or one of `<>"|?*`.
+    ///
+    /// Only reported by [`PathValidationKind::Worktree`] on Windows.
+    #[error("path component contains a character Windows does not allow")]
+    NtfsInvalidChar,
     /// Symlink whose name matches `.gitmodules` (HFS or NTFS spelling).
     #[error("symbolic link must not be named .gitmodules")]
     SymlinkedDotGitmodules,
@@ -229,6 +258,11 @@ pub fn validate_component(
     if audit.dotgit {
         return Err(classify_dotgit_component_error(name, opts));
     }
+    if opts.protect_ntfs && ntfs_path_syntax_rules_apply() && kind == PathValidationKind::Worktree {
+        if let Some(err) = win32_component_error(name) {
+            return Err(err);
+        }
+    }
     Ok(())
 }
 
@@ -317,9 +351,6 @@ impl TreeEntryNameAudit {
 #[must_use]
 pub fn component_is_dotgit_alias(name: &[u8], opts: ProtectOptions) -> bool {
     if name.eq_ignore_ascii_case(b".git") {
-        return true;
-    }
-    if name.eq_ignore_ascii_case(b"git~1") && opts.protect_ntfs {
         return true;
     }
     let Ok(name_str) = std::str::from_utf8(name) else {
@@ -440,6 +471,56 @@ fn has_dos_drive_prefix_bytes(name: &[u8]) -> bool {
     name.len() >= 2 && name[0].is_ascii_alphabetic() && name[1] == b':'
 }
 
+/// Win32 file-name rules for one component; `\` also separates segments there.
+fn win32_component_error(name: &[u8]) -> Option<PathComponentError> {
+    name.split(|&b| b == b'\\').find_map(win32_segment_error)
+}
+
+fn win32_segment_error(segment: &[u8]) -> Option<PathComponentError> {
+    if is_win32_reserved_name(segment) {
+        return Some(PathComponentError::NtfsReservedName);
+    }
+    if segment.contains(&b':') {
+        return Some(PathComponentError::NtfsDriveOrStream);
+    }
+    if segment
+        .iter()
+        .any(|&b| b < 0x20 || matches!(b, b'<' | b'>' | b'"' | b'|' | b'?' | b'*'))
+    {
+        return Some(PathComponentError::NtfsInvalidChar);
+    }
+    let is_dot_or_dotdot = matches!(segment, b"." | b"..");
+    if !is_dot_or_dotdot && matches!(segment.last(), Some(b' ' | b'.')) {
+        return Some(PathComponentError::NtfsTrailingDotOrSpace);
+    }
+    None
+}
+
+/// A device name stays reserved when followed by spaces, an extension, or a stream suffix.
+fn is_win32_reserved_name(segment: &[u8]) -> bool {
+    let stem_end = segment
+        .iter()
+        .position(|&b| b == b'.' || b == b':')
+        .unwrap_or(segment.len());
+    let stem = segment[..stem_end].trim_ascii_end();
+    const DEVICES: [&[u8]; 6] = [b"con", b"prn", b"aux", b"nul", b"conin$", b"conout$"];
+    if DEVICES
+        .iter()
+        .any(|device| stem.eq_ignore_ascii_case(device))
+    {
+        return true;
+    }
+    let (prefix, port) = stem.split_at(stem.len().min(3));
+    let is_com = prefix.eq_ignore_ascii_case(b"com");
+    let is_lpt = prefix.eq_ignore_ascii_case(b"lpt");
+    match port {
+        // Windows also reserves the superscript ports `¹`, `²` and `³` (UTF-8 encoded).
+        [b'1'..=b'9'] | [0xc2, 0xb9 | 0xb2 | 0xb3] => is_com || is_lpt,
+        [b'0'] => is_lpt,
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -518,6 +599,151 @@ mod tests {
         );
         assert_eq!(
             validate_component(b".git ", BLOB, FSCK, FSCK_KIND).unwrap_err(),
+            PathComponentError::NtfsDotGit
+        );
+    }
+
+    #[test]
+    fn ntfs_git_tilde_one_with_trailing_spaces_or_periods() {
+        for name in [
+            b"GIT~1.".as_slice(),
+            b"git~1 ",
+            b"git~1...",
+            b"git~1::$DATA",
+        ] {
+            for kind in [FSCK_KIND, WT_KIND] {
+                assert_eq!(
+                    validate_component(name, BLOB, FSCK, kind).unwrap_err(),
+                    PathComponentError::NtfsDotGit,
+                    "reject {name:?}"
+                );
+            }
+            assert!(audit_tree_entry_name(name, FSCK).dotgit);
+            if !cfg!(windows) {
+                assert!(validate_component(name, BLOB, OFF, FSCK_KIND).is_ok());
+                assert!(validate_component(name, BLOB, OFF, WT_KIND).is_ok());
+            }
+        }
+        assert_eq!(
+            validate_path(b"GIT~1./marker.txt", BLOB, FSCK, WT_KIND).unwrap_err(),
+            PathComponentError::NtfsDotGit
+        );
+        assert!(validate_component(b"git~1.txt", BLOB, FSCK, WT_KIND).is_ok());
+    }
+
+    #[test]
+    fn win32_reserved_device_names() {
+        for name in [
+            "aux",
+            "AUX",
+            "con",
+            "Prn",
+            "nul",
+            "COM1",
+            "com9",
+            "lpt0",
+            "LPT9",
+            "CONIN$",
+            "conout$",
+            "COM1.txt",
+            "aux.c",
+            "nul .txt",
+            "aux  ",
+            "CON:stream",
+            "COM¹",
+            "lpt³.x",
+            "a\\aux",
+        ] {
+            assert_eq!(
+                win32_component_error(name.as_bytes()),
+                Some(PathComponentError::NtfsReservedName),
+                "reject {name:?}"
+            );
+        }
+        for name in [
+            "auxiliary",
+            "con1",
+            "COM0",
+            "COM10",
+            "LPT",
+            "comx",
+            "xaux",
+            "aux_",
+            "conin",
+            "nul x",
+            "CONOUT",
+            "COM⁴",
+            "auxa.txt",
+        ] {
+            assert_eq!(
+                win32_component_error(name.as_bytes()),
+                None,
+                "accept {name:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn win32_trailing_dots_spaces_and_invalid_chars() {
+        for name in ["trail.", "trail ", "a.. ", "x\\y.", "x.\\y"] {
+            assert_eq!(
+                win32_component_error(name.as_bytes()),
+                Some(PathComponentError::NtfsTrailingDotOrSpace),
+                "reject {name:?}"
+            );
+        }
+        for name in ["a<b", "a>b", "a\"b", "a|b", "a?b", "a*b", "a\tb", "a\x1fb"] {
+            assert_eq!(
+                win32_component_error(name.as_bytes()),
+                Some(PathComponentError::NtfsInvalidChar),
+                "reject {name:?}"
+            );
+        }
+        assert_eq!(
+            win32_component_error(b"a:b"),
+            Some(PathComponentError::NtfsDriveOrStream)
+        );
+        for name in [
+            "file.txt",
+            ".hidden",
+            "a b",
+            "..x",
+            "x\\..\\y",
+            "\u{e9}t\u{e9}",
+        ] {
+            assert_eq!(
+                win32_component_error(name.as_bytes()),
+                None,
+                "accept {name:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn win32_rules_apply_to_worktree_on_windows_only() {
+        for (name, err) in [
+            (b"aux".as_slice(), PathComponentError::NtfsReservedName),
+            (b"COM1.txt", PathComponentError::NtfsReservedName),
+            (b"trail.", PathComponentError::NtfsTrailingDotOrSpace),
+            (b"what?.txt", PathComponentError::NtfsInvalidChar),
+            (b"a:b", PathComponentError::NtfsDriveOrStream),
+        ] {
+            assert!(validate_component(name, BLOB, OFF, WT_KIND).is_ok());
+            if cfg!(windows) {
+                assert_eq!(
+                    validate_component(name, BLOB, FSCK, WT_KIND).unwrap_err(),
+                    err,
+                    "reject {name:?}"
+                );
+            } else {
+                assert!(validate_component(name, BLOB, FSCK, WT_KIND).is_ok());
+            }
+            if name != b"a:b" {
+                assert!(validate_component(name, BLOB, FSCK, FSCK_KIND).is_ok());
+            }
+        }
+        assert_eq!(
+            validate_component(b".git.", BLOB, FSCK, WT_KIND).unwrap_err(),
             PathComponentError::NtfsDotGit
         );
     }

@@ -45,11 +45,29 @@ validate_component(
 )?;
 ```
 
+## What `core.protectNTFS` rejects
+
+With `protect_ntfs` on (the default), on every platform and for both kinds:
+
+- `.git` and its 8.3 short name `git~1` (any case), each optionally followed by spaces and periods, which NTFS strips, or by a `:` stream suffix: `.git.`, `GIT~1.`, `git~1  `, `.git::$INDEX_ALLOCATION`. These report `NtfsDotGit` (`DotGit` for the bare `git~1`).
+- A `\`-separated segment inside a component that spells `.git`, such as `.git\config` (`NtfsBackslash`).
+
+On Windows only, **`Worktree`** validation also applies the Win32 file-name rules, matching what Git checks before it writes a file there. Each `\`-separated segment is checked:
+
+| Rule | Examples | Error |
+| --- | --- | --- |
+| Reserved device names, with or without an extension, trailing spaces or a stream suffix: `CON`, `PRN`, `AUX`, `NUL`, `COM1`–`COM9`, `LPT0`–`LPT9`, `CONIN$`, `CONOUT$`, and the superscript ports `COM¹`–`COM³` / `LPT¹`–`LPT³` | `aux`, `COM1.txt`, `nul .c` | `NtfsReservedName` |
+| A `:` anywhere (drive prefix or alternate data stream) | `a:b`, `C:foo` | `NtfsDriveOrStream` |
+| Control characters and `<`, `>`, `"`, `\|`, `?`, `*` | `what?.txt` | `NtfsInvalidChar` |
+| A trailing space or period | `trail.`, `name ` | `NtfsTrailingDotOrSpace` |
+
+These names are legal on Linux and macOS, so other platforms check them out, as Git does. Fsck never applies the Win32 rules.
+
 [`validate_path`](https://docs.rs/grit-lib/latest/grit_lib/path_validate/fn.validate_path.html) splits on `/` and validates each segment. [`audit_tree_entry_name`](https://docs.rs/grit-lib/latest/grit_lib/path_validate/fn.audit_tree_entry_name.html) returns a bitmask-style summary for fsck-style reporting when several rules fire on one name.
 
 ## Errors
 
-[`PathComponentError`](https://docs.rs/grit-lib/latest/grit_lib/path_validate/enum.PathComponentError.html) is a typed, non-exhaustive enum (empty, `.`, `..`, slash/NUL, ASCII and platform `.git` aliases, NTFS backslash/drive/stream spellings, and symlinked dot-files). Checkout and index population return [`Error::InvalidPathComponent`](https://docs.rs/grit-lib/latest/grit_lib/error/enum.Error.html#variant.InvalidPathComponent) with the full path and reason. User-facing `add`/`mv` path arguments use the same typed error; legacy [`Error::InvalidPath`](https://docs.rs/grit-lib/latest/grit_lib/error/enum.Error.html) remains for empty or escaping paths.
+[`PathComponentError`](https://docs.rs/grit-lib/latest/grit_lib/path_validate/enum.PathComponentError.html) is a typed, non-exhaustive enum (empty, `.`, `..`, slash/NUL, ASCII and platform `.git` aliases, NTFS backslash/drive/stream spellings, Windows reserved names, trailing dots or spaces and invalid characters, and symlinked dot-files). Checkout and index population return [`Error::InvalidPathComponent`](https://docs.rs/grit-lib/latest/grit_lib/error/enum.Error.html#variant.InvalidPathComponent) with the full path and reason. User-facing `add`/`mv` path arguments use the same typed error; legacy [`Error::InvalidPath`](https://docs.rs/grit-lib/latest/grit_lib/error/enum.Error.html) remains for empty or escaping paths.
 
 ## Related
 

@@ -95,59 +95,57 @@ fn append_local_config(git_dir: &Path, section: &str) {
 struct HostileCaseMeta {
     label: &'static str,
     upstream_config: &'static str,
+    /// Only rejected by Git (and grit) where Win32 path rules apply.
+    windows_only: bool,
+}
+
+const fn case(label: &'static str) -> HostileCaseMeta {
+    HostileCaseMeta {
+        label,
+        upstream_config: "",
+        windows_only: false,
+    }
+}
+
+const fn windows_case(label: &'static str) -> HostileCaseMeta {
+    HostileCaseMeta {
+        label,
+        upstream_config: "",
+        windows_only: true,
+    }
 }
 
 fn hostile_case_metas() -> &'static [HostileCaseMeta] {
-    &[
-        HostileCaseMeta {
-            label: "dotdot directory",
-            upstream_config: "",
-        },
-        HostileCaseMeta {
-            label: "dot",
-            upstream_config: "",
-        },
-        HostileCaseMeta {
-            label: "dotgit",
-            upstream_config: "",
-        },
-        HostileCaseMeta {
-            label: "dotgit upper",
-            upstream_config: "",
-        },
-        HostileCaseMeta {
-            label: "git tilde1",
-            upstream_config: "",
-        },
-        HostileCaseMeta {
-            label: "ntfs trailing dot",
-            upstream_config: "",
-        },
-        HostileCaseMeta {
-            label: "ntfs trailing space",
-            upstream_config: "",
-        },
-        HostileCaseMeta {
-            label: "ntfs index allocation",
-            upstream_config: "",
-        },
+    const CASES: &[HostileCaseMeta] = &[
+        case("dotdot directory"),
+        case("dot"),
+        case("dotgit"),
+        case("dotgit upper"),
+        case("git tilde1"),
+        case("git tilde1 trailing dot directory"),
+        case("git tilde1 trailing spaces"),
+        case("ntfs trailing dot"),
+        case("ntfs trailing space"),
+        case("ntfs index allocation"),
         HostileCaseMeta {
             label: "hfs dotgit",
             upstream_config: "[core]\n\tprotectHFS = true\n",
+            windows_only: false,
         },
-        HostileCaseMeta {
-            label: "ntfs backslash",
-            upstream_config: "",
-        },
-        HostileCaseMeta {
-            label: "ntfs backslash dotgit config",
-            upstream_config: "",
-        },
-        HostileCaseMeta {
-            label: "symlink gitmodules",
-            upstream_config: "",
-        },
-    ]
+        windows_case("ntfs backslash"),
+        case("ntfs backslash dotgit config"),
+        case("symlink gitmodules"),
+        windows_case("win32 reserved aux directory"),
+        windows_case("win32 reserved com1 with extension"),
+        windows_case("win32 trailing dot directory"),
+        windows_case("win32 invalid character"),
+    ];
+    CASES
+}
+
+fn marker_dir_entry(upstream: &Path, dir_name: &[u8], blob_hex: &str) -> Vec<u8> {
+    let sub = write_tree(upstream, &tree_entry("100644", b"marker.txt", blob_hex));
+    tree_entry("40000", dir_name, &sub)
 }
 
 fn hostile_tree_body(
@@ -166,6 +164,12 @@ fn hostile_tree_body(
         "dotgit" => tree_entry("100644", b".git", blob_hex),
         "dotgit upper" => tree_entry("100644", b".GIT", blob_hex),
         "git tilde1" => tree_entry("100644", b"git~1", blob_hex),
+        "git tilde1 trailing dot directory" => marker_dir_entry(upstream, b"GIT~1.", blob_hex),
+        "git tilde1 trailing spaces" => tree_entry("100644", b"git~1  ", blob_hex),
+        "win32 reserved aux directory" => marker_dir_entry(upstream, b"aux", blob_hex),
+        "win32 reserved com1 with extension" => tree_entry("100644", b"COM1.txt", blob_hex),
+        "win32 trailing dot directory" => marker_dir_entry(upstream, b"trail.", blob_hex),
+        "win32 invalid character" => tree_entry("100644", b"what?.txt", blob_hex),
         "ntfs trailing dot" => tree_entry("100644", b".git.", blob_hex),
         "ntfs trailing space" => tree_entry("100644", b".git ", blob_hex),
         "ntfs index allocation" => tree_entry("100644", b".git::$INDEX_ALLOCATION", blob_hex),
@@ -359,7 +363,7 @@ fn hostile_paths_rejected_on_clone_switch_reset_restore() {
     fs::create_dir_all(upstream.parent().unwrap()).expect("parent dir");
 
     for case in hostile_case_metas() {
-        if case.label == "ntfs backslash" && !cfg!(windows) {
+        if case.windows_only && !cfg!(windows) {
             continue;
         }
         fs::remove_dir_all(&upstream).ok();
@@ -404,6 +408,18 @@ fn hostile_paths_rejected_on_clone_switch_reset_restore() {
             case.label,
             snap_wt_after.keys().collect::<Vec<_>>()
         );
+        if clone_dest.exists() {
+            let written: Vec<_> = fs::read_dir(&clone_dest)
+                .expect("read clone dest")
+                .map(|ent| ent.expect("dirent").file_name())
+                .filter(|name| name != ".git")
+                .collect();
+            assert!(
+                written.is_empty(),
+                "{}: rejected clone wrote work-tree entries {written:?}",
+                case.label
+            );
+        }
 
         if case.label != "hfs dotgit" {
             let git_dest = parent.path().join(format!("git-{slug}"));
@@ -472,6 +488,52 @@ fn hostile_paths_rejected_on_clone_switch_reset_restore() {
         assert_invalid_path_component(restore_err);
         assert_eq!(dir_bytes_snapshot(repo.work_tree().expect("wt")), wt_snap);
         assert_eq!(dir_bytes_snapshot(repo.git_dir()), git_snap);
+    }
+}
+
+/// Win32 reserved names, trailing dots and `<>:"|?*` are legal file names elsewhere,
+/// and system git checks them out there.
+#[cfg(not(windows))]
+#[test]
+fn win32_only_names_check_out_off_windows_like_git() {
+    for label in [
+        "win32 reserved aux directory",
+        "win32 reserved com1 with extension",
+        "win32 trailing dot directory",
+        "win32 invalid character",
+    ] {
+        let parent = tempfile::tempdir().expect("parent");
+        let upstream = parent.path().join("upstream.git");
+        git(parent.path(), &["init", "--bare", "upstream.git"]);
+        let blob_hex = write_blob(&upstream, b"x");
+        let tree_body = hostile_tree_body(label, &upstream, &blob_hex, &blob_hex);
+        let tree = write_tree(&upstream, &tree_body);
+        init_bare_upstream(&upstream, &tree, "");
+        git(&upstream, &["symbolic-ref", "HEAD", "refs/heads/evil"]);
+
+        assert!(
+            !git_clone_fails(&upstream, &parent.path().join("git-clone")),
+            "{label}: system git should accept this name off Windows"
+        );
+        let dest = parent.path().join("grit-clone");
+        let url = upstream.to_string_lossy().into_owned();
+        let opts = CloneOptions {
+            environment: Environment::empty(),
+            ..CloneOptions::new(url, dest.clone())
+        };
+        clone_repo(opts, &mut NoProgress, None)
+            .unwrap_or_else(|e| panic!("{label}: grit clone should succeed: {e:?}"));
+        assert_eq!(
+            dir_bytes_snapshot(&dest)
+                .into_keys()
+                .filter(|p| !p.starts_with(".git"))
+                .collect::<Vec<_>>(),
+            dir_bytes_snapshot(&parent.path().join("git-clone"))
+                .into_keys()
+                .filter(|p| !p.starts_with(".git"))
+                .collect::<Vec<_>>(),
+            "{label}: grit and git should write the same files"
+        );
     }
 }
 
