@@ -57,6 +57,16 @@ const PARALLEL_PER_FILE_DELETE_MIN: usize = 32;
 const PARALLEL_DELETE_CANCEL_CHUNK: usize = 8;
 const POPULATED_TREE_CHECKOUT_CHUNK: usize = 2048;
 
+/// Remove one tracked file during checkout, surfacing [`Error::WorktreePathIo`] on failure.
+fn remove_checkout_worktree_file(work_tree: &Path, rel_path: &str) -> Result<()> {
+    let abs = checkout_stored_worktree_abs(work_tree, rel_path);
+    match fs::remove_file(&abs) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => io_with_path(rel_path, WorktreePathOperation::Remove, Err(e)),
+    }
+}
+
 fn remove_checkout_files_parallel_cancellable(
     work_tree: &Path,
     paths: &[String],
@@ -66,22 +76,17 @@ fn remove_checkout_files_parallel_cancellable(
 ) -> Result<(HashSet<String>, Vec<PathBuf>)> {
     let mut parallel_deleted_paths = HashSet::new();
     let mut deleted_abs_paths = Vec::new();
+    let wt = work_tree.to_path_buf();
     for chunk in paths.chunks(PARALLEL_DELETE_CANCEL_CHUNK) {
         crate::progress::poll_cancel(progress, cancel)?;
-        let abs_paths: Vec<PathBuf> = chunk
-            .iter()
-            .map(|p| checkout_stored_worktree_abs(work_tree, p))
-            .collect();
-        try_par_map(&abs_paths, options, 0, |abs| {
-            let _ = fs::remove_file(abs);
-            Ok(())
+        try_par_map(chunk, options, 0, |rel_path| {
+            remove_checkout_worktree_file(&wt, rel_path)
         })
-        .map_err(|e: ParallelHashError<()>| match e {
-            ParallelHashError::Task(()) => {
-                Error::PathError("parallel checkout delete failed".into())
-            }
+        .map_err(|e: ParallelHashError<Error>| match e {
+            ParallelHashError::Task(err) => err,
         })?;
-        for (path, abs) in chunk.iter().zip(abs_paths) {
+        for path in chunk {
+            let abs = checkout_stored_worktree_abs(work_tree, path);
             parallel_deleted_paths.insert(path.clone());
             deleted_abs_paths.push(abs);
             progress.inc(1);
@@ -1812,9 +1817,8 @@ fn checkout_bulk_mod_delete_tree_changes(
                 remove_uninitialized_gitlink_worktree(&abs);
                 deleted_abs_paths.push(abs);
             } else if !parallel_deleted_paths.contains(path) {
-                let abs = checkout_stored_worktree_abs(work_tree, path);
-                let _ = fs::remove_file(&abs);
-                deleted_abs_paths.push(abs);
+                remove_checkout_worktree_file(work_tree, path)?;
+                deleted_abs_paths.push(checkout_stored_worktree_abs(work_tree, path));
             }
         }
         if !path_under_wholesale_directory(path, wholesale_index_prefixes) {
@@ -1946,9 +1950,8 @@ fn checkout_bulk_deleted_tree_changes(
                 remove_uninitialized_gitlink_worktree(&abs);
                 deleted_abs_paths.push(abs);
             } else if !parallel_deleted_paths.contains(path) {
-                let abs = checkout_stored_worktree_abs(work_tree, path);
-                let _ = fs::remove_file(&abs);
-                deleted_abs_paths.push(abs);
+                remove_checkout_worktree_file(work_tree, path)?;
+                deleted_abs_paths.push(checkout_stored_worktree_abs(work_tree, path));
             }
         }
         if !path_under_wholesale_directory(path, wholesale_index_prefixes) {
@@ -2285,9 +2288,8 @@ fn checkout_tree_changes_with_progress(
                             remove_uninitialized_gitlink_worktree(&abs);
                             deleted_abs_paths.push(abs);
                         } else if !parallel_deleted_paths.contains(path) {
-                            let abs = checkout_stored_worktree_abs(work_tree, path);
-                            let _ = fs::remove_file(&abs);
-                            deleted_abs_paths.push(abs);
+                            remove_checkout_worktree_file(work_tree, path)?;
+                            deleted_abs_paths.push(checkout_stored_worktree_abs(work_tree, path));
                         }
                     }
                     if !path_under_wholesale_directory(path, &wholesale_dirs_removed) {
