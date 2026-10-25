@@ -16,7 +16,8 @@ use grit_lib::porcelain::pull::{pull, PullError, PullMode, PullOptions};
 use grit_lib::progress::NeverCancel;
 use grit_lib::remote::fetch_request::resolve_fetch_invocation;
 use grit_lib::remote::transfer::{resolve_fetch_prune, resolve_fetch_tags, FetchOptions};
-use grit_lib::remote::{DefaultHttpClientFactory, DEFAULT_REMOTE};
+use grit_lib::remote::DefaultHttpClientFactory;
+use grit_lib::state::resolve_head_for_repository;
 
 pub use pull_outcome::{map_outcome, PullOutcome, PullResult};
 
@@ -47,11 +48,12 @@ pub fn run(args: &PullRunArgs, mode: OutputMode) -> Result<PullOutcome> {
     };
     let mut options = PullOptions::for_working_branch(&repo, context::environment(), cli_mode)
         .map_err(anyhow::Error::new)?;
+    let head = resolve_head_for_repository(&repo)?;
     let invocation = resolve_fetch_invocation(
         &config,
         args.fetch.remote.as_deref(),
         &args.fetch.refspecs,
-        DEFAULT_REMOTE,
+        head.branch_name(),
     );
     options.remote = Some(invocation.remote.clone());
     options.explicit_fetch = !invocation.user_refspecs.is_empty();

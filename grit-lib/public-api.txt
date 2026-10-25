@@ -18866,8 +18866,9 @@ impl core::marker::Unpin for grit_lib::remote::fetch_request::ResolvedFetchRef
 impl core::marker::UnsafeUnpin for grit_lib::remote::fetch_request::ResolvedFetchRef
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::fetch_request::ResolvedFetchRef
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::fetch_request::ResolvedFetchRef
+pub fn grit_lib::remote::fetch_request::configured_remote_for_fetch(&grit_lib::config::ConfigSet, core::option::Option<&str>) -> alloc::string::String
 pub fn grit_lib::remote::fetch_request::refname_match_fetch_dwim(&str, &str) -> u32
-pub fn grit_lib::remote::fetch_request::resolve_fetch_invocation(&grit_lib::config::ConfigSet, core::option::Option<&str>, &[alloc::string::String], &str) -> grit_lib::remote::fetch_request::FetchInvocation
+pub fn grit_lib::remote::fetch_request::resolve_fetch_invocation(&grit_lib::config::ConfigSet, core::option::Option<&str>, &[alloc::string::String], core::option::Option<&str>) -> grit_lib::remote::fetch_request::FetchInvocation
 pub fn grit_lib::remote::fetch_request::resolve_fetch_remote(&grit_lib::config::ConfigSet, &str) -> core::result::Result<grit_lib::remote::Remote, grit_lib::remote::RemoteError>
 pub fn grit_lib::remote::fetch_request::resolve_remote_argument(&grit_lib::config::ConfigSet, &str) -> core::result::Result<grit_lib::remote::Remote, grit_lib::remote::RemoteError>
 pub mod grit_lib::remote::github_auth

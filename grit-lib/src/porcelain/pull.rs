@@ -13,7 +13,7 @@ use crate::config::ident_resolve::IdentRole;
 use crate::config::parse_git_config_maybe_bool;
 use crate::config::ConfigSet;
 use crate::error::Error;
-use crate::fetch_request::resolve_remote_argument;
+use crate::fetch_request::{configured_remote_for_fetch, resolve_remote_argument};
 use crate::merge_base::{count_symmetric_ahead_behind, is_ancestor, merge_bases_first_vs_rest};
 use crate::objects::ObjectId;
 use crate::porcelain::checkout::checkout_between_trees;
@@ -29,7 +29,7 @@ use crate::porcelain::stash::{
 use crate::porcelain::worktree_guard::prepare_tree_checkout;
 use crate::remote::fetch::Progress;
 use crate::remote::transfer::{resolve_fetch_prune, FetchOptions, TagMode, TransferStats};
-use crate::remote::{HttpClientFactory, RemoteError, DEFAULT_REMOTE};
+use crate::remote::{HttpClientFactory, RemoteError};
 use crate::repo::Repository;
 use crate::revwalk::history::{
     apply_rewrite, rebase_onto, ApplyOptions, EmptyPolicy, HistoryError, RebaseOntoOptions,
@@ -61,7 +61,7 @@ pub enum PullMode {
 /// Options for [`pull`].
 #[derive(Clone, Default)]
 pub struct PullOptions {
-    /// Remote name override; when `None`, uses `branch.<name>.remote` or [`DEFAULT_REMOTE`].
+    /// Remote name override; when `None`, uses [`configured_remote_for_fetch`].
     pub remote: Option<String>,
     /// Remote branch or refspec to integrate (`pull origin feature`); also see [`Self::fetch`].
     pub branch: Option<String>,
@@ -250,11 +250,7 @@ impl PullOptions {
             HeadState::Invalid => return Err(PullError::InvalidHead),
         };
         let config = repo.config().map_err(PullError::Repository)?;
-        let remote_name = config
-            .get(&format!("branch.{short_name}.remote"))
-            .map(|r| r.trim().to_owned())
-            .filter(|r| !r.is_empty())
-            .unwrap_or_else(|| DEFAULT_REMOTE.to_owned());
+        let remote_name = configured_remote_for_fetch(config.as_ref(), Some(&short_name));
         let prune = resolve_fetch_prune(config.as_ref(), &remote_name, None)
             .map_err(PullError::Repository)?;
         Ok(Self {
@@ -351,13 +347,7 @@ where
     let remote_name = options
         .remote
         .clone()
-        .or_else(|| {
-            config
-                .get(&format!("branch.{short_name}.remote"))
-                .map(|r| r.trim().to_owned())
-                .filter(|r| !r.is_empty())
-        })
-        .unwrap_or_else(|| DEFAULT_REMOTE.to_owned());
+        .unwrap_or_else(|| configured_remote_for_fetch(config.as_ref(), Some(&short_name)));
 
     let integration = resolve_pull_integration(config.as_ref(), Some(&short_name), options.mode)?;
     let (explicit_fetch, branch_refspecs) = pull_fetch_refspecs(options);

@@ -1,4 +1,5 @@
-//! `grit fetch` — download refs and objects from a remote (default `origin`).
+//! `grit fetch` — download refs and objects from a remote (default: the current
+//! branch's remote, else `origin`).
 
 use crate::commands::fetch_args::FetchArgs;
 use crate::output::OutputMode;
@@ -12,7 +13,8 @@ use grit_lib::remote::transfer::{
     resolve_fetch_prune, resolve_fetch_tags, FetchDepth, FetchOptions,
     FetchOutcome as LibFetchOutcome, TagMode, TransferStats, UpdateMode,
 };
-use grit_lib::remote::{DefaultHttpClientFactory, RemoteError, DEFAULT_REMOTE};
+use grit_lib::remote::{DefaultHttpClientFactory, RemoteError};
+use grit_lib::state::{resolve_head_for_repository, HeadState};
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::io::Write;
@@ -271,11 +273,12 @@ fn run_one(args: &FetchArgs, mode: OutputMode) -> Result<FetchOutcome> {
     let repo = context::discover()?;
     let config = ConfigSet::load(&crate::context::environment(), Some(repo.git_dir()), true)
         .context("could not load config")?;
+    let head = resolve_head_for_repository(&repo).ok();
     let invocation = resolve_fetch_invocation(
         &config,
         args.remote.as_deref(),
         &args.refspecs,
-        DEFAULT_REMOTE,
+        head.as_ref().and_then(HeadState::branch_name),
     );
     let remote_name = invocation.remote.clone();
     let prune_enabled = resolve_fetch_prune(&config, &remote_name, args.prune_override())

@@ -12,7 +12,7 @@ pub struct FetchArgs {
         conflicts_with_all = ["refspecs"]
     )]
     pub all: bool,
-    /// Remote to fetch from when no refspec names one (defaults to `origin`).
+    /// Remote to fetch from (defaults to the current branch's remote, else `origin`).
     #[arg(value_name = "REMOTE")]
     pub remote: Option<String>,
     /// Refspecs selecting refs to fetch (`main`, `+refs/heads/x:refs/heads/y`, …).

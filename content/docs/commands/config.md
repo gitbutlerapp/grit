@@ -35,7 +35,7 @@ Keys are written as `section.name`, for example `user.email`.
 | --- | --- |
 | `user.name`, `user.email` | The author and committer of new commits. |
 | `target.branch` | The branch [`grit status`](../status/) and [`grit shortlog`](../shortlog/) compare against. |
-| `branch.<name>.remote` | Which remote [`grit push`](../push/) and [`grit pull`](../pull/) use for a branch. Defaults to `origin`. |
+| `branch.<name>.remote` | Which remote [`grit push`](../push/), [`grit fetch`](../fetch/) and [`grit pull`](../pull/) use for a branch. Defaults to `origin`. |
 | `branch.<name>.merge` | Which remote branch a branch pushes to and pulls from. Defaults to the same name. |
 | `credential.helper` | Where HTTPS credentials are stored and looked up. See [`grit auth`](../auth/). |
 | `grit.githubClientId` | The GitHub OAuth app [`grit auth`](../auth/) signs in with. |

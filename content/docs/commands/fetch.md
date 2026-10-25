@@ -15,7 +15,7 @@ grit fetch [<remote>] [<refspec>…] [--all] [--depth N] [--deepen N] [--unshall
 
 Downloads objects and updates refs from a remote. Your working tree and current branch are unchanged; use [`grit merge`](../merge/) or [`grit pull`](../pull/) to integrate fetched commits.
 
-`<remote>` defaults to `origin`. It may be a configured remote name, a URL, an scp-style `host:path`, a filesystem path, or a [git bundle](https://git-scm.com/docs/git-bundle) file. Anything else fails with `unknown remote`.
+`<remote>` defaults to the current branch's remote (`branch.<name>.remote`, the remote `grit branch -u` and `grit push -u` record), and to `origin` when that is not set or `HEAD` is detached. It may be a configured remote name, a URL, an scp-style `host:path`, a filesystem path, or a [git bundle](https://git-scm.com/docs/git-bundle) file. Anything else fails with `unknown remote`.
 
 Each `<refspec>` selects what to fetch (`main`, `refs/heads/x:refs/heads/y`, `+refs/…` to force). When no refspecs are given, configured `remote.<name>.fetch` refspecs apply (usually all heads into `refs/remotes/<remote>/…`).
 
@@ -41,7 +41,7 @@ By default grit follows tags, fetching every tag (lightweight or annotated) that
 
 | Option | Description |
 | --- | --- |
-| `<remote>` | Remote name, URL, path, or bundle. Defaults to `origin`. |
+| `<remote>` | Remote name, URL, path, or bundle. Defaults to the current branch's remote, else `origin`. |
 | `<refspec>…` | What to fetch; short names expand like Git (`main` → `refs/heads/main`). |
 | `--tags` | Fetch all tags from the remote. |
 | `--no-tags` | Do not fetch tags automatically. |

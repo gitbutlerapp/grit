@@ -23,7 +23,7 @@ Runs [`grit fetch`](../fetch/) (same shared fetch flags: tags, prune, dry-run, q
 
 Positional arguments follow [`grit fetch`](../fetch/): an optional remote (configured name, URL, or path), then optional refspecs. With `grit pull origin feature`, grit fetches that branch and integrates the tip recorded in `FETCH_HEAD`, even when no remote-tracking ref exists yet — the same model as `git pull origin feature`.
 
-The default remote is `branch.<name>.remote`, or `origin`. With no refspecs, the upstream is `branch.<name>.merge`, or `refs/remotes/<remote>/<branch>`. The remote's `remote.<name>.fetch` refspecs decide which local ref holds each fetched branch. With `branch.<name>.remote = .` the upstream is a local branch, and `grit pull` merges it without fetching.
+The default remote is `branch.<name>.remote`, or `origin`; every mode (`--ff-only`, `--rebase`, `--autostash`, `--check`) fetches from that remote, so a branch tracking `backup/main` pulls from `backup`. With no refspecs, the upstream is `branch.<name>.merge`, or `refs/remotes/<remote>/<branch>`. The remote's `remote.<name>.fetch` refspecs decide which local ref holds each fetched branch. With `branch.<name>.remote = .` the upstream is a local branch, and `grit pull` merges it without fetching.
 
 On a branch with no commits yet, the branch is created at the upstream commit with an `initial pull` reflog entry.
 
