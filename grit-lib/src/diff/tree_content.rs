@@ -7,7 +7,8 @@ use crate::objects::pack_store::PackReadContextGuard;
 use crate::objects::ObjectId;
 use crate::odb::Odb;
 use crate::parallel::{try_par_map_with_local, ParallelHashError};
-use crate::parallel::{ParallelOp, ThreadPolicy};
+use crate::parallel::{ParallelOp, ParallelOptions, ThreadPolicy};
+use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
@@ -20,6 +21,29 @@ fn note_blob_read(counter: Option<&AtomicUsize>) {
     if let Some(c) = counter {
         c.fetch_add(1, Ordering::Relaxed);
     }
+}
+
+/// Pool options for per-entry content work that should fan out whenever it can.
+///
+/// A single entry always runs on the calling thread, so the policy (which probes the
+/// CPU count and cgroup quota) is only consulted when there is more than one.
+fn per_entry_parallel_options(
+    thread_policy: &ThreadPolicy,
+    config: &ConfigSet,
+    entry_count: usize,
+) -> ParallelOptions {
+    if entry_count < 2 {
+        return ParallelOptions {
+            threads: NonZeroUsize::MIN,
+            min_items: 0,
+            min_total_bytes: None,
+            signed_entry_threshold: None,
+        };
+    }
+    let mut par_opts = thread_policy.resolve(ParallelOp::DiffContent, config);
+    par_opts.min_items = 0;
+    par_opts.min_total_bytes = None;
+    par_opts
 }
 
 /// Tree diff entry with structured line hunks ready for CLI rendering.
@@ -97,9 +121,7 @@ pub fn tree_diff_stat_parallel(
     if entries.is_empty() {
         return Ok(Vec::new());
     }
-    let mut par_opts = thread_policy.resolve(ParallelOp::DiffContent, config);
-    par_opts.min_items = 0;
-    par_opts.min_total_bytes = None;
+    let par_opts = per_entry_parallel_options(thread_policy, config, entries.len());
     let line_diff_opts = diff_options;
     let blob_counter = line_diff_opts.blob_read_counter.clone();
     let store = odb.pack_store_for(odb.objects_dir());
@@ -163,9 +185,7 @@ pub fn tree_diff_structured_parallel(
         return Ok(Vec::new());
     }
     let diff_options = diff_options.cap_word_level_inline_for_changed_files(entries.len());
-    let mut par_opts = thread_policy.resolve(ParallelOp::DiffContent, config);
-    par_opts.min_items = 0;
-    par_opts.min_total_bytes = None;
+    let par_opts = per_entry_parallel_options(thread_policy, config, entries.len());
     let line_diff_opts = diff_options;
     let blob_counter = line_diff_opts.blob_read_counter.clone();
     let store = odb.pack_store_for(odb.objects_dir());
@@ -301,7 +321,8 @@ fn bytes_for_diff(data: &[u8]) -> (SideBytes, bool) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::diff::{diff_trees, DiffStatus};
+    use crate::config::ConfigSet;
+    use crate::diff::{diff_trees, DiffOptions, DiffStatus};
     use crate::objects::{serialize_tree, ObjectKind, TreeEntry};
     use crate::parallel::ThreadPolicy;
     use crate::repo::{InitOptions, Repository};
@@ -406,5 +427,60 @@ mod tests {
         .expect("name-only");
         metrics.set_blob_counting(false);
         assert_eq!(metrics.blob_content_reads(), 0);
+    }
+
+    #[test]
+    fn single_entry_runs_serially_without_consulting_the_policy() {
+        let config = ConfigSet::new();
+        let policy = ThreadPolicy::with_threads_override(Some(4));
+        for count in [0, 1] {
+            let opts = per_entry_parallel_options(&policy, &config, count);
+            assert_eq!(opts.threads, NonZeroUsize::MIN);
+        }
+        let opts = per_entry_parallel_options(&policy, &config, 2);
+        assert_eq!(opts.min_items, 0);
+        assert_eq!(opts.min_total_bytes, None);
+        assert_eq!(
+            opts.threads,
+            policy.resolve(ParallelOp::DiffContent, &config).threads
+        );
+    }
+
+    #[test]
+    fn single_entry_structured_diff_matches_threaded_policy() {
+        let (_dir, repo) = init_repo();
+        let odb = repo.odb();
+        let a = odb.write(ObjectKind::Blob, b"one\ntwo\n").expect("write a");
+        let b = odb
+            .write(ObjectKind::Blob, b"one\nthree\n")
+            .expect("write b");
+        let tree = |oid| {
+            odb.write(
+                ObjectKind::Tree,
+                &serialize_tree(&[TreeEntry {
+                    mode: 0o100644,
+                    name: b"f.txt".to_vec(),
+                    oid,
+                }]),
+            )
+            .expect("tree")
+        };
+        let (old, new) = (tree(a), tree(b));
+        let entries = diff_trees(odb, Some(&old), Some(&new), "").expect("entries");
+        assert_eq!(entries.len(), 1);
+        let config = repo.config().expect("config");
+        let run = |threads| {
+            tree_diff_structured_parallel(
+                odb,
+                entries.clone(),
+                &config,
+                &ThreadPolicy::with_threads_override(Some(threads)),
+                DiffOptions::default(),
+            )
+            .expect("structured diff")
+        };
+        let serial = run(1);
+        assert_eq!(serial, run(4));
+        assert_eq!(serial[0].structured.hunks.len(), 1);
     }
 }

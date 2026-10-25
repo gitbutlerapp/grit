@@ -597,6 +597,19 @@ mod tests {
     }
 
     #[test]
+    fn single_item_never_uses_the_pool() {
+        use crate::parallel::map::pool_worthwhile;
+        let opts = ParallelOptions {
+            threads: NonZeroUsize::new(8).unwrap_or(NonZeroUsize::MIN),
+            min_items: 0,
+            min_total_bytes: None,
+            signed_entry_threshold: None,
+        };
+        assert!(!pool_worthwhile(1, usize::MAX, opts));
+        assert!(pool_worthwhile(2, 0, opts));
+    }
+
+    #[test]
     fn checkout_thread_override_beats_workers_config() {
         let cfg = config_from("[checkout]\n\tworkers = 2\n");
         let policy = ThreadPolicy::with_threads_override(Some(6));

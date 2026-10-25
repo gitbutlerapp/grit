@@ -9,7 +9,7 @@ use super::ParallelHashError;
 
 #[must_use]
 pub(crate) fn pool_worthwhile(len: usize, total_bytes: usize, options: ParallelOptions) -> bool {
-    if options.threads.get() <= 1 || len == 0 {
+    if options.threads.get() <= 1 || len < 2 {
         return false;
     }
     if let Some(threshold) = options.signed_entry_threshold {
