@@ -110,6 +110,9 @@ pub struct CommitRequest {
     pub amend: bool,
     /// When true, skip the post-commit full-tree index stat refresh because the caller already
     /// synced the index from the worktree (for example via [`crate::porcelain::add::stage_for_commit`]).
+    ///
+    /// [`commit_worktree`] and every [`commit_with_scope`] scope set this themselves, since their
+    /// staging pass already refreshed the index; only [`create_commit`] callers need to choose.
     pub assume_worktree_synced: bool,
     /// When true with [`Self::assume_worktree_synced`], skip the pre-commit index↔parent tree
     /// match; the post-`write_tree` parent comparison still rejects empty commits (issue #1064).
@@ -724,7 +727,9 @@ pub fn create_commit(
 
 /// Stage every worktree change and record a commit using a single in-memory index (issue #1064).
 ///
-/// Avoids an extra index load/write between implicit staging and commit tree construction.
+/// Avoids an extra index load/write between implicit staging and commit tree construction. The
+/// staging pass is the only work-tree scan: it refreshes the stat data of every tracked entry, so
+/// the commit always runs as if [`CommitRequest::assume_worktree_synced`] were set.
 ///
 /// When staging changed the index but the result matches the parent tree (for example a new
 /// file that was staged and then deleted from the work tree), the staged index is still written
@@ -747,7 +752,8 @@ pub fn commit_worktree(
         return Err(Error::IndexUnmerged);
     }
     let mut req = req.clone();
-    if req.assume_worktree_synced && req.skip_pre_commit_tree_match {
+    req.assume_worktree_synced = true;
+    if req.skip_pre_commit_tree_match {
         req.staged_change_count = Some(staged.total());
     }
     let result = create_commit_with_index(repo, head, &mut index, &req, progress, None);

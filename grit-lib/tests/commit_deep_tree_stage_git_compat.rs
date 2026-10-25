@@ -415,3 +415,151 @@ fn commit_worktree_allow_empty_clean_tree_single_staging_pass() {
     req.message = "second empty".into();
     commit_worktree(&repo, &req, &mut NullProgress).expect("second allow-empty");
 }
+
+fn plain_commit_request(message: &str) -> CommitRequest {
+    let ident = "Test <t@example.com> 1 +0000".to_string();
+    CommitRequest {
+        message: message.into(),
+        author: Some(ident.parse().expect("signature")),
+        committer: Some(ident.parse().expect("signature")),
+        hooks: HookPolicy::SkipVerify,
+        ..Default::default()
+    }
+}
+
+/// Auto-stage commit with a default request (as `grit commit -m`) scans the work tree once (issue #1884).
+#[test]
+fn commit_auto_stage_default_request_stats_tracked_files_once() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    init_repo(root);
+    write_deep_tree(root, 25, 25, 7);
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "base"]);
+
+    fs::write(root.join("b00/d00/f0.txt"), "edited\n").expect("edit");
+    let repo = open_repo(root);
+    let tracked = git(root, &["ls-files"]).lines().count();
+
+    let probe = reset_worktree_metadata_probe(root);
+    let outcome = commit_with_scope(
+        &repo,
+        &plain_commit_request("one edit"),
+        CommitScope::AutoStage,
+        &mut NullProgress,
+    )
+    .expect("auto-stage commit");
+    let meta_calls = worktree_metadata_probe_count();
+    drop(probe);
+    assert_eq!(outcome.changes, 1);
+    let dir_budget = 25 * 25 + 64;
+    assert!(
+        meta_calls <= tracked + dir_budget,
+        "auto-stage commit must stat each tracked path once (metadata probes {meta_calls}, tracked {tracked})"
+    );
+
+    let _probe = reset_worktree_metadata_probe(root);
+    let mut req = plain_commit_request("empty");
+    req.allow_empty = true;
+    commit_with_scope(&repo, &req, CommitScope::AutoStage, &mut NullProgress)
+        .expect("allow-empty auto-stage commit");
+    let meta_calls = worktree_metadata_probe_count();
+    assert!(
+        meta_calls <= tracked + dir_budget,
+        "clean allow-empty auto-stage commit must stat each tracked path once (metadata probes {meta_calls}, tracked {tracked})"
+    );
+}
+
+/// Index stats recorded by the single auto-stage pass are fresh enough for Git (issue #1884).
+#[test]
+fn commit_auto_stage_leaves_index_stat_clean_for_git() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    init_repo(root);
+    write_deep_tree(root, 4, 4, 3);
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "base"]);
+
+    // Same bytes, new stat: must be refreshed in the index without being reported as a change.
+    let touched = root.join("b01/d01/f1.txt");
+    let same = fs::read(&touched).expect("read");
+    fs::remove_file(&touched).expect("unlink");
+    fs::write(&touched, same).expect("rewrite identical");
+    fs::write(root.join("b00/d00/f0.txt"), "edited\n").expect("edit");
+    fs::write(root.join("new.txt"), "new\n").expect("untracked");
+
+    let repo = open_repo(root);
+    let outcome = commit_with_scope(
+        &repo,
+        &plain_commit_request("auto-stage"),
+        CommitScope::AutoStage,
+        &mut NullProgress,
+    )
+    .expect("auto-stage commit");
+    assert_eq!(outcome.changes, 2, "files: {:?}", outcome.files);
+
+    let diff_files = Command::new("git")
+        .args(["diff-files", "--quiet"])
+        .current_dir(root)
+        .status()
+        .expect("git diff-files");
+    assert!(
+        diff_files.success(),
+        "git diff-files (no refresh) must see stat-clean index entries"
+    );
+    let porcelain = git(root, &["status", "--porcelain"]);
+    assert!(
+        porcelain.trim().is_empty(),
+        "git should see a clean tree after grit commit, got:\n{porcelain}"
+    );
+    let out = Command::new("git")
+        .args(["fsck", "--no-progress"])
+        .current_dir(root)
+        .output()
+        .expect("git fsck");
+    assert!(out.status.success(), "git fsck after grit commit");
+}
+
+/// An edit that keeps size and mtime after the commit wrote the index is still visible to Git.
+#[test]
+fn commit_auto_stage_racy_edit_after_commit_is_seen_by_git() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    init_repo(root);
+    git(root, &["config", "core.trustctime", "false"]);
+    git(root, &["config", "core.checkStat", "minimal"]);
+    write_deep_tree(root, 3, 3, 2);
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "base"]);
+
+    let racy = root.join("b00/d00/f0.txt");
+    let future = std::time::SystemTime::now() + std::time::Duration::from_secs(3600);
+    fs::write(&racy, "aaaa\n").expect("edit");
+    fs::File::options()
+        .write(true)
+        .open(&racy)
+        .and_then(|f| f.set_modified(future))
+        .expect("set mtime");
+
+    let repo = open_repo(root);
+    commit_with_scope(
+        &repo,
+        &plain_commit_request("racy"),
+        CommitScope::AutoStage,
+        &mut NullProgress,
+    )
+    .expect("auto-stage commit");
+
+    fs::write(&racy, "bbbb\n").expect("same-size edit");
+    fs::File::options()
+        .write(true)
+        .open(&racy)
+        .and_then(|f| f.set_modified(future))
+        .expect("restore mtime");
+
+    let porcelain = git(root, &["status", "--porcelain"]);
+    assert!(
+        porcelain.contains("b00/d00/f0.txt"),
+        "git must notice the same-size, same-mtime edit, got:\n{porcelain}"
+    );
+}
