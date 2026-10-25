@@ -659,7 +659,25 @@ pub struct ReachableWalkState {
     paint: Option<SidePaint>,
     /// Read parents and dates from the on-disk commit-graph when one is present.
     use_commit_graph: bool,
+    /// When the hide paint may stop (see [`HidePaintStop`]).
+    hide_paint_stop: HidePaintStop,
 }
+
+/// When [`SidePaint::compute_hiding`] may stop painting.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+enum HidePaintStop {
+    /// Paint until every queued commit is reachable from both sides. Exact under clock skew,
+    /// but a hide tip that forked near the root keeps the walk going down to that fork.
+    #[default]
+    Converged,
+    /// Stop once no queued commit is reachable from the tips alone, after a few more commits
+    /// of slop, like Git's limited revision walk. Exact with commit-graph generations; heavily
+    /// skewed committer dates without them can misreport, as in Git.
+    TipsResolved,
+}
+
+/// Commits [`HidePaintStop::TipsResolved`] keeps painting after the tips are resolved.
+const HIDE_PAINT_SLOP: usize = 5;
 
 /// Serializable snapshot of [`ReachableWalkState`] for resuming a bounded walk.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -706,6 +724,7 @@ impl ReachableWalkState {
             hide: hide.to_vec(),
             paint: None,
             use_commit_graph,
+            hide_paint_stop: HidePaintStop::default(),
         };
         for &tip in tips {
             if state.hide.contains(&tip) {
@@ -741,6 +760,7 @@ impl ReachableWalkState {
             paint: None,
             hide,
             use_commit_graph: true,
+            hide_paint_stop: HidePaintStop::default(),
         }
     }
 
@@ -793,7 +813,12 @@ impl ReachableWalkState {
             return Ok(());
         }
         let pending: Vec<ObjectId> = self.heap.iter().map(|key| key.oid).collect();
-        self.paint = Some(SidePaint::compute_hiding(cache, &pending, &self.hide)?);
+        self.paint = Some(SidePaint::compute_hiding(
+            cache,
+            &pending,
+            &self.hide,
+            self.hide_paint_stop,
+        )?);
         Ok(())
     }
 
@@ -972,6 +997,40 @@ pub fn walk_commits_reachable_excluding_ancestors_of_cutoffs(
 
     let out = state.emit_until(repo, stop_early_at, cutoffs)?;
     Ok((out.len(), out))
+}
+
+/// Count the commits reachable from `tips` that no `hide` tip reaches, keeping the newest
+/// `retain_newest` of them: the commits a ref move leaves behind.
+///
+/// Same result as [`walk_commits_reachable_excluding_ancestors_of`] with
+/// [`ReachableWalkLimit::CountAllRetainNewest`], except that the hide paint stops as soon as
+/// `tips` are resolved ([`HidePaintStop::TipsResolved`]). A hidden ref that forked from `tips`
+/// near the root then costs nothing, which matters because callers hide every ref in the
+/// repository.
+///
+/// # Errors
+///
+/// Propagates commit read and parse errors from the walk.
+pub(crate) fn count_commits_left_behind(
+    repo: &Repository,
+    tips: &[ObjectId],
+    hide: &[ObjectId],
+    retain_newest: usize,
+) -> Result<(usize, Vec<ObjectId>)> {
+    let mut state = ReachableWalkState::new(repo, tips, hide)?;
+    state.hide_paint_stop = HidePaintStop::TipsResolved;
+    let mut cache = CommitGraphCache::new(repo);
+    let mut newest = Vec::new();
+    let mut total = 0usize;
+    while let Some(oid) =
+        state.pop_next_emit(&mut cache, ReachableWalkCommitterCutoffs::default())?
+    {
+        total += 1;
+        if newest.len() < retain_newest {
+            newest.push(oid);
+        }
+    }
+    Ok((total, newest))
 }
 
 /// Count commits reachable from `head` but not from `target`, and return up to `retain_newest`
@@ -1759,9 +1818,15 @@ impl SidePaint {
         cache: &mut CommitGraphCache<'_>,
         tips: &[ObjectId],
         hide: &[ObjectId],
+        stop: HidePaintStop,
     ) -> Result<Self> {
         let walk = PaintWalk {
             skip_missing_right: true,
+            open_while_left_only: stop == HidePaintStop::TipsResolved,
+            slop: match stop {
+                HidePaintStop::Converged => 0,
+                HidePaintStop::TipsResolved => HIDE_PAINT_SLOP,
+            },
             ..PaintWalk::default()
         };
         Self::paint(cache, tips, hide, walk)
@@ -1781,7 +1846,15 @@ impl SidePaint {
                 walk.mark(cache, tip, side)?;
             }
         }
-        while walk.open > 0 {
+        let mut slop = walk.slop;
+        loop {
+            if walk.open > 0 {
+                slop = walk.slop;
+            } else if slop == 0 {
+                break;
+            } else {
+                slop -= 1;
+            }
             let Some(node) = walk.heap.pop() else {
                 break;
             };
@@ -1838,6 +1911,11 @@ struct PaintWalk {
     open: usize,
     /// Leave unreadable commits reached from the right side unqueued instead of failing.
     skip_missing_right: bool,
+    /// Only commits reachable from the left side alone keep the walk going, instead of every
+    /// commit not yet reachable from both sides ([`HidePaintStop::TipsResolved`]).
+    open_while_left_only: bool,
+    /// Commits to keep popping once nothing keeps the walk going.
+    slop: usize,
 }
 
 impl PaintWalk {
@@ -1872,7 +1950,12 @@ impl PaintWalk {
             }
             Err(e) => return Err(e),
         };
-        let is_open = after != PAINT_BOTH || repaint;
+        let unresolved = if self.open_while_left_only {
+            after == PAINT_LEFT
+        } else {
+            after != PAINT_BOTH
+        };
+        let is_open = unresolved || repaint;
         self.queued.insert(oid, is_open);
         if is_open {
             self.open += 1;
@@ -3523,6 +3606,87 @@ mod tests {
         ] {
             assert_eq!(walk(a, d)?, is_ancestor_odb_walk(&q_odb, a, d)?);
         }
+        Ok(())
+    }
+
+    #[test]
+    fn left_behind_walk_ignores_hidden_ref_forked_near_root() -> Result<()> {
+        use super::intersect_walk_test_hooks::{
+            commit_parent_lookups, reset_commit_parent_lookups,
+        };
+
+        let dir = tempdir().map_err(Error::Io)?;
+        let repo = open_test_bare(&dir)?;
+        let trunk = write_chain(&repo, 2000, |i| 1_000 + i as i64)?;
+        let old_side = write_commit_same_time(&repo.odb(), &[trunk[1]], "old side", 1_002)?;
+        let stray = write_commit_same_time(&repo.odb(), &[trunk[1999]], "stray", 5_000)?;
+        let hide = [trunk[1999], old_side];
+
+        clear_commit_linkage(&repo);
+        reset_commit_parent_lookups();
+        let exhaustive = walk_commits_reachable_excluding_ancestors_of(
+            &repo,
+            &[stray],
+            &hide,
+            ReachableWalkLimit::CountAllRetainNewest(20),
+        )?;
+        let exhaustive_lookups = commit_parent_lookups();
+        clear_commit_linkage(&repo);
+        reset_commit_parent_lookups();
+        let bounded = count_commits_left_behind(&repo, &[stray], &hide, 20)?;
+        let lookups = commit_parent_lookups();
+
+        assert_eq!(bounded, (1, vec![stray]));
+        assert_eq!(bounded, exhaustive);
+        assert!(
+            exhaustive_lookups >= 1900,
+            "the converging paint walks the trunk down to the old fork ({exhaustive_lookups})"
+        );
+        assert!(
+            lookups <= 50,
+            "an old hidden side branch must not walk the trunk to its fork ({lookups})"
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn left_behind_walk_hides_commits_a_descendant_ref_reaches() -> Result<()> {
+        let dir = tempdir().map_err(Error::Io)?;
+        let repo = open_test_bare(&dir)?;
+        let odb = repo.odb();
+        let base = write_commit_same_time(&odb, &[], "base", 100)?;
+        let shared = write_commit_same_time(&odb, &[base], "shared", 200)?;
+        let kept = write_commit_same_time(&odb, &[shared], "kept by tag", 300)?;
+        let lost_a = write_commit_same_time(&odb, &[shared], "lost a", 400)?;
+        let lost_b = write_commit_same_time(&odb, &[lost_a], "lost b", 500)?;
+        let target = write_commit_same_time(&odb, &[base], "target", 600)?;
+        let hide = [target, kept];
+
+        let bounded = count_commits_left_behind(&repo, &[lost_b], &hide, 20)?;
+        let exhaustive = walk_commits_reachable_excluding_ancestors_of(
+            &repo,
+            &[lost_b],
+            &hide,
+            ReachableWalkLimit::CountAllRetainNewest(20),
+        )?;
+
+        assert_eq!(bounded, (2, vec![lost_b, lost_a]));
+        assert_eq!(bounded, exhaustive);
+        let capped = count_commits_left_behind(&repo, &[lost_b], &hide, 1)?;
+        assert_eq!(capped, (2, vec![lost_b]));
+        Ok(())
+    }
+
+    #[test]
+    fn left_behind_walk_with_nothing_hidden_counts_all_history() -> Result<()> {
+        let dir = tempdir().map_err(Error::Io)?;
+        let repo = open_test_bare(&dir)?;
+        let chain = write_chain(&repo, 30, |i| 100 + i as i64)?;
+
+        let (total, newest) = count_commits_left_behind(&repo, &[chain[29]], &[], 3)?;
+
+        assert_eq!(total, 30);
+        assert_eq!(newest, vec![chain[29], chain[28], chain[27]]);
         Ok(())
     }
 }

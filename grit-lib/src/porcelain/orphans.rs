@@ -6,13 +6,10 @@
 use crate::change_id::resolved_change_id;
 use crate::error::Result;
 use crate::git_path::path_for_disk_compare;
-use crate::merge_base::{
-    is_ancestor, walk_commits_reachable_excluding_ancestors_of, ReachableWalkLimit,
-};
+use crate::merge_base::{count_commits_left_behind, is_ancestor};
 use crate::objects::{parse_commit, read_commit_subject_line, ObjectId};
 use crate::refs;
 use crate::repo::Repository;
-use crate::rev_parse::try_peel_to_commit_for_merge_base;
 use crate::state::HeadState;
 use crate::worktree::{list_worktrees, WorktreeEntry};
 
@@ -60,12 +57,8 @@ pub(crate) fn compute_orphan_info(
         return Ok(OrphanComputation::default());
     }
     let hide = orphan_hide_tips(repo, head, target)?;
-    let (total, oids) = walk_commits_reachable_excluding_ancestors_of(
-        repo,
-        std::slice::from_ref(&previous),
-        &hide,
-        ReachableWalkLimit::CountAllRetainNewest(limit),
-    )?;
+    let (total, oids) =
+        count_commits_left_behind(repo, std::slice::from_ref(&previous), &hide, limit)?;
     let truncated = total > oids.len();
     let commits = oids
         .into_iter()
@@ -87,24 +80,24 @@ fn orphan_hide_tips(
         HeadState::Branch { refname, .. } => Some(refname.as_str()),
         _ => None,
     };
+    // Tips stay unpeeled: the walk peels each one once and skips those that name no commit.
     let mut hide = vec![target];
-    for (refname, oid) in refs::list_refs_for_repository(repo, "refs/")? {
-        if moving_branch == Some(refname.as_str()) {
-            continue;
-        }
-        orphan_hide_push_peeled_commit(repo, &mut hide, oid)?;
-    }
+    hide.extend(
+        refs::list_refs_for_repository(repo, "refs/")?
+            .into_iter()
+            .filter(|(refname, _)| moving_branch != Some(refname.as_str()))
+            .map(|(_, oid)| oid),
+    );
     if let Ok(oid) = repo.resolve_ref_oid("refs/stash") {
-        orphan_hide_push_peeled_commit(repo, &mut hide, oid)?;
+        hide.push(oid);
     }
     for wt in list_worktrees(repo)? {
         if worktree_is_moving_head(repo, head, &wt) {
             continue;
         }
-        match &wt.head {
-            HeadState::Detached { oid } => orphan_hide_push_peeled_commit(repo, &mut hide, *oid)?,
-            HeadState::Branch { oid: Some(oid), .. } => {
-                orphan_hide_push_peeled_commit(repo, &mut hide, *oid)?;
+        match wt.head {
+            HeadState::Detached { oid } | HeadState::Branch { oid: Some(oid), .. } => {
+                hide.push(oid);
             }
             HeadState::Branch { .. } | HeadState::Invalid => {}
         }
@@ -112,18 +105,6 @@ fn orphan_hide_tips(
     hide.sort_unstable();
     hide.dedup();
     Ok(hide)
-}
-
-/// Add a ref or peeled tip to the orphan hide set when it names a commit.
-fn orphan_hide_push_peeled_commit(
-    repo: &Repository,
-    hide: &mut Vec<ObjectId>,
-    oid: ObjectId,
-) -> Result<()> {
-    if let Some(commit) = try_peel_to_commit_for_merge_base(repo, oid)? {
-        hide.push(commit);
-    }
-    Ok(())
 }
 
 /// True when this listed worktree is the one whose `HEAD` ref or file is being moved.
