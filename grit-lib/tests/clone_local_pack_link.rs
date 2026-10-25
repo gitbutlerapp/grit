@@ -93,3 +93,73 @@ fn clone_local_repacked_source_links_pack_and_reports_index_stats() {
 
     git(&dest, &["fsck", "--strict"]);
 }
+
+#[test]
+fn clone_local_repacked_plus_unreachable_loose_still_links_pack() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let remote = tmp.path().join("remote");
+    std::fs::create_dir_all(&remote).unwrap();
+    git(&remote, &["init", "-q", "-b", "main", "."]);
+    for i in 0..48 {
+        std::fs::write(remote.join(format!("f{i}.txt")), format!("payload {i}\n")).unwrap();
+        git(&remote, &["add", "."]);
+        git(&remote, &["commit", "-q", "-m", &format!("c{i}")]);
+    }
+    git(&remote, &["repack", "-a", "-d", "-f"]);
+    let remote_git = remote.join(".git");
+    let mut hash = Command::new("git")
+        .current_dir(&remote)
+        .args(["hash-object", "-w", "--stdin"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .spawn()
+        .expect("hash-object");
+    if let Some(mut stdin) = hash.stdin.take() {
+        use std::io::Write;
+        stdin.write_all(b"x\n").unwrap();
+        drop(stdin);
+    }
+    let out = hash.wait_with_output().expect("hash-object wait");
+    assert!(out.status.success());
+    let loose_hex = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    assert_eq!(loose_hex.len(), 40, "hash-object must return an oid");
+    let shard = &loose_hex[..2];
+    let rest = &loose_hex[2..];
+    assert!(
+        remote_git.join("objects").join(shard).join(rest).is_file(),
+        "unreachable loose blob must exist in source"
+    );
+
+    let remote_packs = pack_basenames(&remote_git);
+    assert_eq!(remote_packs.len(), 1);
+
+    let dest = tmp.path().join("dest");
+    let outcome = clone_repo(
+        CloneOptions {
+            ..CloneOptions::new(remote.to_string_lossy(), dest.clone())
+        },
+        &mut NoProgress,
+        &NeverCancel,
+        None,
+    )
+    .expect("clone");
+
+    let remote_idx = remote_git
+        .join("objects/pack")
+        .join(remote_packs[0].replace(".pack", ".idx"));
+    let expected_objects = index_object_count(&remote_idx);
+    assert_eq!(
+        outcome.transfer.objects,
+        u64::try_from(expected_objects).expect("object count"),
+        "must not walk the full object graph when pack link suffices"
+    );
+
+    let clone_git = dest.join(".git");
+    let local_packs = pack_basenames(&clone_git);
+    assert_eq!(local_packs.len(), 1);
+    assert_eq!(local_packs[0], remote_packs[0]);
+
+    git(&dest, &["fsck", "--strict"]);
+}

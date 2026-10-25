@@ -829,40 +829,82 @@ fn copy_objects_for_local_fetch(
     cancel: &dyn crate::progress::Cancel,
 ) -> Result<(HashSet<ObjectId>, TransferStats)> {
     use crate::local_object_copy::{
-        link_loose_objects_for_oids, linked_object_set, refresh_local_odb_after_link,
-        source_objects_fully_packed, try_satisfy_via_object_link,
+        link_loose_objects, link_loose_objects_for_oids, link_remote_pack_files, linked_object_set,
+        refresh_local_odb_after_link, try_satisfy_via_object_link,
     };
 
     let remote_objects = objects_dir(remote_git_dir);
     let local_objects = objects_dir(local_git_dir);
     let pack_dir_before = pack_file_basenames(&local_objects_pack_dir(local_git_dir));
 
-    if !pack_build.thin
-        && try_pack_link
-        && haves.is_empty()
-        && !wants.is_empty()
-        && source_objects_fully_packed(&remote_objects)?
-    {
+    if !pack_build.thin && try_pack_link && haves.is_empty() && !wants.is_empty() {
         progress.start(ProgressPhase::CopyingObjects, Some(wants.len() as u64));
         crate::progress::poll_cancel(progress, cancel)?;
-        if try_satisfy_via_object_link(
+        let linked_packs = link_remote_pack_files(
             &remote_objects,
             &local_objects,
-            local_odb,
-            wants,
-            false,
             progress,
             cancel,
-        )? {
-            progress.set(wants.len() as u64);
+            wants.len(),
+        )?;
+        if linked_packs > 0 {
+            refresh_local_odb_after_link(local_odb);
+        }
+        let pack_alone_satisfies_wants =
+            linked_packs > 0 && wants.iter().all(|oid| local_odb.exists(oid));
+        let linked_loose = link_loose_objects(&remote_objects, &local_objects, progress, cancel)?;
+        if linked_packs > 0 || linked_loose > 0 {
+            refresh_local_odb_after_link(local_odb);
+        }
+        if (linked_packs > 0 || linked_loose > 0) && wants.iter().all(|oid| local_odb.exists(oid)) {
+            if linked_loose == 0 {
+                progress.set(wants.len() as u64);
+            }
             progress.finish();
-            let oids = linked_object_set(local_odb, wants);
-            let transfer = transfer_stats_for_local_operation(
+            let empty_peer_objects = local_git_dir.join(".grit-empty-peer-objects");
+            let _ = fs::create_dir_all(&empty_peer_objects);
+            let empty_peer = Odb::new(&empty_peer_objects);
+            let stats_objects: HashSet<ObjectId> = if pack_alone_satisfies_wants {
+                HashSet::new()
+            } else {
+                let send_set = collect_reachable_excluding_peer(
+                    local_odb,
+                    wants,
+                    &empty_peer,
+                    &HashSet::new(),
+                    false,
+                    source_shallow,
+                )?;
+                send_set.objects.into_iter().collect()
+            };
+            let oids = if stats_objects.is_empty() {
+                linked_object_set(local_odb, wants)
+            } else {
+                stats_objects.clone()
+            };
+            let mut transfer = transfer_stats_for_local_operation(
                 local_git_dir,
                 local_odb,
-                &oids,
+                &stats_objects,
                 &pack_dir_before,
             )?;
+            if transfer.objects == 0 {
+                let send_set = collect_reachable_excluding_peer(
+                    local_odb,
+                    wants,
+                    &empty_peer,
+                    &HashSet::new(),
+                    false,
+                    source_shallow,
+                )?;
+                let fallback: HashSet<ObjectId> = send_set.objects.into_iter().collect();
+                transfer = transfer_stats_for_local_operation(
+                    local_git_dir,
+                    local_odb,
+                    &fallback,
+                    &pack_dir_before,
+                )?;
+            }
             return Ok((oids, transfer));
         }
         progress.finish();

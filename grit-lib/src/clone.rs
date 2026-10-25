@@ -1076,28 +1076,45 @@ mod tests {
         );
         let count_text = String::from_utf8_lossy(&count_out.stdout);
         let mut in_pack = None::<u64>;
+        let mut loose_count = None::<u64>;
         for line in count_text.lines() {
             if let Some(v) = line.strip_prefix("in-pack: ") {
                 in_pack = Some(v.trim().parse().expect("in-pack"));
+            } else if let Some(v) = line.strip_prefix("count: ") {
+                loose_count = Some(v.trim().parse().expect("count"));
             }
         }
-        let git_objects = in_pack.expect("in-pack line");
+        let git_objects = in_pack.expect("in-pack line") + loose_count.expect("count line");
         let git_dir = dest.path().join(".git");
-        let pack_dir = git_dir.join("objects/pack");
-        let pack_bytes = std::fs::read_dir(&pack_dir)
-            .expect("pack dir")
-            .filter_map(|e| e.ok())
-            .map(|e| e.path())
-            .filter(|p| p.extension().is_some_and(|x| x == "pack"))
-            .map(|p| std::fs::metadata(&p).expect("pack stat").len())
-            .sum::<u64>();
+        let objects_dir = git_dir.join("objects");
+        let on_disk_bytes =
+            |path: &Path| -> u64 { std::fs::metadata(path).map(|m| m.len()).unwrap_or(0) };
+        let mut git_bytes = 0u64;
+        let pack_dir = objects_dir.join("pack");
+        if pack_dir.is_dir() {
+            for entry in std::fs::read_dir(&pack_dir).expect("pack dir").flatten() {
+                let path = entry.path();
+                if path.extension().is_some_and(|x| x == "pack") {
+                    git_bytes += on_disk_bytes(&path);
+                }
+            }
+        }
+        for shard in std::fs::read_dir(&objects_dir).expect("objects").flatten() {
+            let name = shard.file_name().to_string_lossy().into_owned();
+            if name.len() != 2 || !name.chars().all(|c| c.is_ascii_hexdigit()) {
+                continue;
+            }
+            for obj in std::fs::read_dir(shard.path()).expect("shard").flatten() {
+                git_bytes += on_disk_bytes(&obj.path());
+            }
+        }
         assert_eq!(
             outcome.transfer.objects, git_objects,
-            "object count must match git count-objects -v in-pack"
+            "object count must match git count-objects -v (in-pack + loose)"
         );
         assert_eq!(
-            outcome.transfer.bytes, pack_bytes,
-            "pack bytes must match on-disk .pack file size"
+            outcome.transfer.bytes, git_bytes,
+            "transfer bytes must match on-disk object store payload size"
         );
         assert!(outcome.branches >= 2, "expected at least main and feature");
         assert!(outcome.tags >= 1, "expected tag v1");
