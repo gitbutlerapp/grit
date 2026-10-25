@@ -1689,13 +1689,13 @@ pub fn write_v2_pack_index_with_trailer(
     hash_bytes: usize,
     sort_threads: Option<usize>,
 ) -> Result<()> {
-    if pack_trailer.len() != hash_bytes {
-        return Err(Error::CorruptObject(format!(
-            "pack trailer length {} does not match hash width {hash_bytes}",
-            pack_trailer.len()
-        )));
-    }
-    write_v2_pack_index_body(idx_path, entries, pack_trailer, hash_bytes, sort_threads)
+    write_v2_pack_index_sorting(
+        idx_path,
+        &mut entries.to_vec(),
+        pack_trailer,
+        hash_bytes,
+        sort_threads,
+    )
 }
 
 /// `write_v2_pack_index` function.
@@ -1717,110 +1717,153 @@ pub fn write_v2_pack_index(
 
 const PARALLEL_INDEX_SORT_MIN: usize = 8_192;
 
-fn sort_index_entries(entries: &mut [(ObjectId, u64, u32)], sort_threads: Option<usize>) {
-    if entries.len() < PARALLEL_INDEX_SORT_MIN {
-        entries.sort_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes()));
-        return;
+/// Sort `entries` by object id in place and return the v2 fanout table.
+///
+/// Entries are first partitioned in place by their leading byte (which also yields the
+/// fanout), then contiguous runs of buckets are sorted on up to `sort_threads` workers.
+/// No copy of the entries is made.
+fn sort_index_entries(
+    entries: &mut [(ObjectId, u64, u32)],
+    sort_threads: Option<usize>,
+) -> [u32; 256] {
+    let lead = |entry: &(ObjectId, u64, u32)| usize::from(entry.0.as_bytes()[0]);
+    let mut counts = [0usize; 256];
+    for entry in entries.iter() {
+        counts[lead(entry)] += 1;
     }
+    let mut ends = [0usize; 256];
+    let mut total = 0usize;
+    for (end, count) in ends.iter_mut().zip(counts) {
+        total += count;
+        *end = total;
+    }
+    let mut next = [0usize; 256];
+    next[1..].copy_from_slice(&ends[..255]);
+    for bucket in 0..256 {
+        while next[bucket] < ends[bucket] {
+            let at = next[bucket];
+            let home = lead(&entries[at]);
+            if home == bucket {
+                next[bucket] += 1;
+            } else {
+                entries.swap(at, next[home]);
+                next[home] += 1;
+            }
+        }
+    }
+
+    let by_oid =
+        |a: &(ObjectId, u64, u32), b: &(ObjectId, u64, u32)| a.0.as_bytes().cmp(b.0.as_bytes());
     let threads = sort_threads.unwrap_or(1).max(1);
-    if threads <= 1 {
-        entries.sort_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes()));
-        return;
-    }
-    let chunk = entries.len().div_ceil(threads);
-    std::thread::scope(|scope| {
-        for part in entries.chunks_mut(chunk) {
-            scope.spawn(|| part.sort_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes())));
+    if threads <= 1 || entries.len() < PARALLEL_INDEX_SORT_MIN {
+        let mut start = 0;
+        for end in ends {
+            entries[start..end].sort_unstable_by(by_oid);
+            start = end;
         }
-    });
-    merge_sorted_index_entry_chunks(entries, chunk);
+    } else {
+        let share = entries.len().div_ceil(threads);
+        std::thread::scope(|scope| {
+            let mut rest = &mut *entries;
+            let mut taken = 0usize;
+            for end in ends {
+                if end - taken >= share || end == total {
+                    let (run, tail) = std::mem::take(&mut rest).split_at_mut(end - taken);
+                    rest = tail;
+                    taken = end;
+                    if run.len() > 1 {
+                        scope.spawn(move || run.sort_unstable_by(by_oid));
+                    }
+                }
+            }
+        });
+    }
+    ends.map(|end| u32::try_from(end).unwrap_or(u32::MAX))
 }
 
-fn merge_sorted_index_entry_chunks(entries: &mut [(ObjectId, u64, u32)], chunk: usize) {
-    let mut merged: Vec<(ObjectId, u64, u32)> = Vec::with_capacity(entries.len());
-    let n_chunks = entries.len().div_ceil(chunk);
-    let mut cursors = vec![0usize; n_chunks];
-    while merged.len() < entries.len() {
-        let mut best: Option<(usize, usize)> = None;
-        for (ci, cursor) in cursors.iter().enumerate() {
-            let start = ci * chunk;
-            let chunk_len = entries.len().saturating_sub(start).min(chunk);
-            if *cursor >= chunk_len {
-                continue;
-            }
-            let idx = start + *cursor;
-            let Some(entry) = entries.get(idx) else {
-                continue;
-            };
-            let replace = match best {
-                None => true,
-                Some((best_idx, _)) => entry.0.as_bytes() < entries[best_idx].0.as_bytes(),
-            };
-            if replace {
-                best = Some((idx, ci));
-            }
-        }
-        let Some((idx, ci)) = best else {
-            break;
-        };
-        cursors[ci] += 1;
-        merged.push(entries[idx]);
-    }
-    entries.copy_from_slice(&merged);
-}
-
-fn write_v2_pack_index_body(
+/// Sort `entries` in place and write them as a version-2 pack index at `idx_path`.
+///
+/// Streams the file through its checksum instead of building it in memory, so the only
+/// large allocation is the caller's `entries`.
+///
+/// # Errors
+///
+/// Returns [`Error::CorruptObject`] when an object id or the trailer does not have
+/// `hash_bytes` bytes, or the large-offset table overflows, and [`Error::Io`] on write
+/// failure.
+pub(crate) fn write_v2_pack_index_sorting(
     idx_path: &Path,
-    entries: &[(ObjectId, u64, u32)],
+    entries: &mut [(ObjectId, u64, u32)],
     pack_trailer: &[u8],
     hash_bytes: usize,
     sort_threads: Option<usize>,
 ) -> Result<()> {
-    let mut sorted: Vec<(ObjectId, u64, u32)> = entries.to_vec();
-    sort_index_entries(&mut sorted, sort_threads);
-    let oid_slices: Vec<&[u8]> = sorted.iter().map(|(oid, _, _)| oid.as_bytes()).collect();
-    let fanout = compute_fanout_from_oid_slices(&oid_slices);
-    let mut buf = Vec::new();
-    buf.extend_from_slice(b"\xfftOc");
-    buf.extend_from_slice(&2u32.to_be_bytes());
-    for f in fanout {
-        buf.extend_from_slice(&f.to_be_bytes());
-    }
-    for (oid, _, _) in &sorted {
-        if oid.as_bytes().len() != hash_bytes {
-            return Err(Error::CorruptObject(format!(
-                "OID width {} does not match index hash width {hash_bytes}",
-                oid.as_bytes().len()
-            )));
-        }
-        buf.extend_from_slice(oid.as_bytes());
-    }
-    for (_, _, crc) in &sorted {
-        buf.extend_from_slice(&crc.to_be_bytes());
-    }
-    let mut large_offsets: Vec<u64> = Vec::new();
-    for (_, off, _) in &sorted {
-        if *off < (1u64 << 31) {
-            buf.extend_from_slice(&u32::try_from(*off).unwrap_or(0).to_be_bytes());
-        } else {
-            let idx = u32::try_from(large_offsets.len()).map_err(|_| {
-                Error::CorruptObject("pack index large-offset table overflow".to_owned())
-            })?;
-            large_offsets.push(*off);
-            buf.extend_from_slice(&(0x8000_0000u32 | idx).to_be_bytes());
-        }
-    }
-    for off in large_offsets {
-        buf.extend_from_slice(&off.to_be_bytes());
-    }
-    buf.extend_from_slice(pack_trailer);
+    use std::io::Write;
+
     let Some(algo) = HashAlgo::from_len(hash_bytes) else {
         return Err(Error::CorruptObject(format!(
             "unsupported index hash width {hash_bytes}"
         )));
     };
-    buf.extend_from_slice(&algo.checksum_digest(&buf));
-    fs::write(idx_path, buf).map_err(Error::Io)?;
+    if pack_trailer.len() != hash_bytes {
+        return Err(Error::CorruptObject(format!(
+            "pack trailer length {} does not match hash width {hash_bytes}",
+            pack_trailer.len()
+        )));
+    }
+    if let Some((oid, _, _)) = entries
+        .iter()
+        .find(|(oid, _, _)| oid.as_bytes().len() != hash_bytes)
+    {
+        return Err(Error::CorruptObject(format!(
+            "OID width {} does not match index hash width {hash_bytes}",
+            oid.as_bytes().len()
+        )));
+    }
+    let fanout = sort_index_entries(entries, sort_threads);
+
+    let file = fs::File::create(idx_path).map_err(Error::Io)?;
+    let mut out = std::io::BufWriter::with_capacity(256 * 1024, file);
+    let mut hasher = algo.checksum_hasher();
+    let mut put = |bytes: &[u8]| -> Result<()> {
+        hasher.update(bytes);
+        out.write_all(bytes).map_err(Error::Io)
+    };
+    put(b"\xfftOc")?;
+    put(&2u32.to_be_bytes())?;
+    for f in fanout {
+        put(&f.to_be_bytes())?;
+    }
+    for (oid, _, _) in entries.iter() {
+        put(oid.as_bytes())?;
+    }
+    for (_, _, crc) in entries.iter() {
+        put(&crc.to_be_bytes())?;
+    }
+    let mut large = 0u32;
+    for (_, off, _) in entries.iter() {
+        match u32::try_from(*off) {
+            Ok(small) if small < 0x8000_0000 => put(&small.to_be_bytes())?,
+            _ => {
+                if large >= 0x8000_0000 {
+                    return Err(Error::CorruptObject(
+                        "pack index large-offset table overflow".to_owned(),
+                    ));
+                }
+                put(&(0x8000_0000u32 | large).to_be_bytes())?;
+                large += 1;
+            }
+        }
+    }
+    for (_, off, _) in entries.iter() {
+        if *off >= 0x8000_0000 {
+            put(&off.to_be_bytes())?;
+        }
+    }
+    put(pack_trailer)?;
+    let digest = hasher.finalize();
+    out.write_all(&digest).map_err(Error::Io)?;
+    out.flush().map_err(Error::Io)?;
     Ok(())
 }
 
@@ -6168,6 +6211,71 @@ mod tests {
         assert_eq!(idx.offset_at(0).expect("off"), object_offset);
         let got = read_object_from_pack(&idx, &oid).expect("read at large offset");
         assert_eq!(got.data, data);
+    }
+
+    fn synthetic_index_entries(n: u32) -> Vec<(ObjectId, u64, u32)> {
+        (0..n)
+            .map(|i| {
+                let digest = HashAlgo::Sha1.checksum_digest(&i.to_be_bytes());
+                let oid = ObjectId::from_bytes(&digest).expect("oid");
+                let offset = if i % 7 == 0 {
+                    (1u64 << 31) + u64::from(i)
+                } else {
+                    12 + u64::from(i) * 40
+                };
+                (oid, offset, i.wrapping_mul(2_654_435_761))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn index_entries_sort_in_place_on_any_thread_count() {
+        for n in [0_u32, 1, 300, 20_000] {
+            let mut reference = synthetic_index_entries(n);
+            reference.sort_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes()));
+            let mut fanout_ref = [0u32; 256];
+            for (oid, _, _) in &reference {
+                for slot in &mut fanout_ref[usize::from(oid.as_bytes()[0])..] {
+                    *slot += 1;
+                }
+            }
+            for threads in [None, Some(1), Some(2), Some(3), Some(8)] {
+                let mut entries = synthetic_index_entries(n);
+                let fanout = sort_index_entries(&mut entries, threads);
+                assert_eq!(entries, reference, "n={n} threads={threads:?}");
+                assert_eq!(fanout, fanout_ref, "n={n} threads={threads:?}");
+            }
+        }
+    }
+
+    #[test]
+    fn index_written_in_place_reads_back_every_row_with_large_offsets() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let idx_path = tmp.path().join("p.idx");
+        let rows = synthetic_index_entries(20_000);
+        let trailer = [0x5a_u8; 20];
+        let mut entries = rows.clone();
+        write_v2_pack_index_sorting(&idx_path, &mut entries, &trailer, 20, Some(4))
+            .expect("write idx");
+        let idx = read_pack_index(&idx_path).expect("read idx");
+        assert_eq!(idx.len(), rows.len());
+        let mut want = rows;
+        want.sort_by(|a, b| a.0.as_bytes().cmp(b.0.as_bytes()));
+        for (pos, (oid, offset, crc)) in want.iter().enumerate() {
+            assert_eq!(idx.oid_at(pos), oid.as_bytes(), "row {pos}");
+            assert_eq!(idx.offset_at(pos).expect("offset"), *offset, "row {pos}");
+            assert_eq!(idx.crc32_at(pos).expect("crc"), *crc, "row {pos}");
+        }
+
+        let mut bad = vec![(ObjectId::from_bytes(&[1; 32]).expect("oid"), 12, 0)];
+        assert!(matches!(
+            write_v2_pack_index_sorting(&idx_path, &mut bad, &trailer, 20, None),
+            Err(Error::CorruptObject(_))
+        ));
+        assert!(matches!(
+            write_v2_pack_index_sorting(&idx_path, &mut entries, &trailer[..19], 20, None),
+            Err(Error::CorruptObject(_))
+        ));
     }
 
     /// Hash pack bytes already written to `file` (from offset 0 through current EOF) for a SHA-1 trailer.
