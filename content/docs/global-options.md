@@ -47,7 +47,7 @@ The `grit` CLI snapshots the process environment into [`Environment`](../library
 | Variable | Effect |
 | --- | --- |
 | `GIT_DIR`, `GIT_WORK_TREE`, `GIT_CEILING_DIRECTORIES`, `GIT_PREFIX` | Repository discovery |
-| `GIT_INDEX_FILE`, `GIT_OBJECT_DIRECTORY`, `GIT_ALTERNATE_OBJECT_DIRECTORIES` | Index and object store paths |
+| `GIT_INDEX_FILE`, `GIT_OBJECT_DIRECTORY`, `GIT_ALTERNATE_OBJECT_DIRECTORIES` | Index and object store paths. With `GIT_OBJECT_DIRECTORY` set, every command reads and writes objects there instead of `.git/objects`, which stays visible only when listed in `GIT_ALTERNATE_OBJECT_DIRECTORIES` |
 | `GIT_CONFIG`, `GIT_CONFIG_GLOBAL`, `GIT_CONFIG_SYSTEM`, `GIT_CONFIG_NOSYSTEM`, `GIT_CONFIG_COUNT`, `GIT_CONFIG_KEY_n`, `GIT_CONFIG_VALUE_n`, `GIT_CONFIG_PARAMETERS` | Config cascade |
 | `HOME`, `XDG_CONFIG_HOME`, `USERPROFILE`, `USER`, `USERNAME` | Home and identity fallbacks |
 | `GIT_AUTHOR_*`, `GIT_COMMITTER_*` | Author/committer name, email, and date overrides for new objects |

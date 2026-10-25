@@ -23,13 +23,17 @@ For a given [`Odb`](rustdoc:grit_lib::objects::odb::Odb) handle:
 3. Extra read sources from `OdbBuilder::push_read_source`
 4. Alternate object directories when `OdbBuilder::alternates` is true (`info/alternates`, environment alternates, submodule object dirs)
 
+## Where the primary store lives
+
+A files-backed primary is `<git_dir>/objects` (the common directory's `objects/` for a linked worktree). When the [`Environment`](rustdoc:grit_lib::config::environment::Environment) passed in [`RepositoryOptions`](rustdoc:grit_lib::config::environment::RepositoryOptions) sets [`git_object_directory`](rustdoc:grit_lib::config::environment::Environment::git_object_directory) (`GIT_OBJECT_DIRECTORY`), that directory is the primary instead: reads and writes go there, and a relative path resolves against the environment's current directory. The directory must exist. As in Git, `<git_dir>/objects` is then reachable only as an alternate, through [`git_alternate_object_directories`](rustdoc:grit_lib::config::environment::Environment::git_alternate_object_directories) or the new directory's `info/alternates`. This is how hooks and quarantines keep new objects out of the shared store.
+
 ## Backend failures
 
 An error from your store's `read`, `read_info` or `contains` (a dropped connection, a locked database) reaches the caller as that error, not as a missing object. To test for an object, call [`Odb::contains`](rustdoc:grit_lib::objects::odb::Odb::contains): it walks the lookup order like a read does and returns the first source failure, so it never reports an object as present that `Odb::read` cannot return. Fetch and push negotiation, write-tree, ref checks and rev-parse all use it, so an outage stops the operation with a retryable error instead of re-sending objects or reporting broken refs. [`Odb::exists`](rustdoc:grit_lib::objects::odb::Odb::exists) is the infallible form: it treats a failing source as not having the object, so keep it for hints where a wrong answer is harmless.
 
 ## Building a custom repository
 
-Pass an [`OdbBuilder`](rustdoc:grit_lib::objects::odb::OdbBuilder) rooted at the repository's `objects/` directory to [`RepositoryBuilder::odb_builder`](rustdoc:grit_lib::repo::RepositoryBuilder::odb_builder). Any path naming that directory works: one through symlinks (such as macOS `/var` → `/private/var` or `/tmp` → `/private/tmp`) or one relative to the environment's current directory. The opened [`Odb`](rustdoc:grit_lib::objects::odb::Odb) reports the canonical path. A builder rooted anywhere else fails with [`Error::OdbObjectsDirMismatch`](rustdoc:grit_lib::error::Error::OdbObjectsDirMismatch).
+Pass an [`OdbBuilder`](rustdoc:grit_lib::objects::odb::OdbBuilder) rooted at the repository's `objects/` directory (or at `GIT_OBJECT_DIRECTORY` when the environment sets it) to [`RepositoryBuilder::odb_builder`](rustdoc:grit_lib::repo::RepositoryBuilder::odb_builder). Any path naming that directory works: one through symlinks (such as macOS `/var` → `/private/var` or `/tmp` → `/private/tmp`) or one relative to the environment's current directory. The opened [`Odb`](rustdoc:grit_lib::objects::odb::Odb) reports the canonical path. A builder rooted anywhere else fails with [`Error::OdbObjectsDirMismatch`](rustdoc:grit_lib::error::Error::OdbObjectsDirMismatch).
 
 <!-- include: grit-examples/src/bin/memory_primary.rs -->
 

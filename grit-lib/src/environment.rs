@@ -43,6 +43,13 @@ pub struct Environment {
     /// Override for `GIT_ALTERNATE_OBJECT_DIRECTORIES` when set (see Git environment variable of the same name).
     pub git_alternate_object_directories: Option<String>,
     /// Override for `GIT_OBJECT_DIRECTORY` when set (see Git environment variable of the same name).
+    ///
+    /// When non-empty, a [`Repository`](crate::repo::Repository) opened with this environment
+    /// reads and writes objects in this directory instead of `<git-dir>/objects` (a relative
+    /// path resolves against [`Self::cwd`]). The directory must exist, or opening fails with
+    /// [`Error::NotARepository`](crate::error::Error::NotARepository). `<git-dir>/objects` is
+    /// not consulted unless it is listed in [`Self::git_alternate_object_directories`] or in
+    /// this directory's `info/alternates`.
     pub git_object_directory: Option<String>,
     /// When set, overrides the repository-relative cwd prefix derived from `cwd`.
     pub git_prefix: Option<String>,
@@ -496,6 +503,8 @@ impl Environment {
             "GIT_INDEX_FILE" => self.git_index_file.clone(),
             "GIT_NAMESPACE" => self.git_namespace.clone(),
             "GIT_REPLACE_REF_BASE" => self.git_replace_ref_base.clone(),
+            "GIT_ALTERNATE_OBJECT_DIRECTORIES" => self.git_alternate_object_directories.clone(),
+            "GIT_OBJECT_DIRECTORY" => self.git_object_directory.clone(),
             "GIT_CONFIG_NOSYSTEM" => self.git_config_nosystem.clone(),
             "GIT_CONFIG_SYSTEM" => self.git_config_system.clone(),
             "GIT_CONFIG_GLOBAL" => self.git_config_global.clone(),
@@ -1101,6 +1110,28 @@ mod tests {
         assert!(!env.is_fetch_options_default());
         env.captured_vars.clear();
         assert!(env.is_fetch_options_default());
+    }
+
+    #[test]
+    fn var_reads_typed_object_directory_fields() {
+        let vars = [
+            ("GIT_OBJECT_DIRECTORY", "/captured/objects"),
+            ("GIT_ALTERNATE_OBJECT_DIRECTORIES", "/captured/alt"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (OsString::from(k), OsString::from(v)));
+        let mut env = Environment::from_vars(vars, PathBuf::from("/tmp"));
+        assert_eq!(
+            env.var("GIT_OBJECT_DIRECTORY").as_deref(),
+            Some("/captured/objects")
+        );
+        env.git_object_directory = Some("/typed/objects".to_owned());
+        env.git_alternate_object_directories = None;
+        assert_eq!(
+            env.var("GIT_OBJECT_DIRECTORY").as_deref(),
+            Some("/typed/objects")
+        );
+        assert_eq!(env.var("GIT_ALTERNATE_OBJECT_DIRECTORIES"), None);
     }
 
     #[test]
