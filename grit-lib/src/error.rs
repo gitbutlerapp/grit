@@ -990,11 +990,15 @@ pub enum Error {
         paths: Vec<String>,
     },
 
-    /// `remove_paths` refused because tracked paths have local modifications without `--force`.
-    #[error("the following files have local changes:\n{}", paths.join("\n"))]
-    PathsHaveLocalModifications {
-        /// Worktree paths that still have local modifications.
-        paths: Vec<String>,
+    /// [`crate::porcelain::paths::remove_paths`] refused paths whose removal would lose
+    /// content, because [`crate::porcelain::paths::RemoveOptions::force`] was not set.
+    #[error(
+        "refusing to remove paths with unsaved content:\n{}",
+        paths.iter().map(ToString::to_string).collect::<Vec<_>>().join("\n")
+    )]
+    RemoveBlocked {
+        /// Each refused path with the reason it was refused.
+        paths: Vec<crate::porcelain::paths::BlockedRemoval>,
     },
 
     /// A directory pathspec was used without `recursive` ([`crate::porcelain::paths::remove_paths`]).

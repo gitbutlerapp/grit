@@ -5468,8 +5468,6 @@ pub grit_lib::error::Error::PackedRefsUnexpectedLine::path: alloc::string::Strin
 pub grit_lib::error::Error::PartialCommitDuringMerge
 pub grit_lib::error::Error::PathError(alloc::string::String)
 pub grit_lib::error::Error::PathOutsideRepo(grit_lib::error::PathOutsideRepoError)
-pub grit_lib::error::Error::PathsHaveLocalModifications
-pub grit_lib::error::Error::PathsHaveLocalModifications::paths: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::error::Error::PathspecBeyondSymlink
 pub grit_lib::error::Error::PathspecBeyondSymlink::spec: alloc::string::String
 pub grit_lib::error::Error::PathspecFromFile(grit_lib::error::PathspecFromFileParseError)
@@ -5490,6 +5488,8 @@ pub grit_lib::error::Error::ReflogUnknownRef
 pub grit_lib::error::Error::ReflogUnknownRef::refname: alloc::string::String
 pub grit_lib::error::Error::Reftable(grit_lib::refs::reftable::ReftableError)
 pub grit_lib::error::Error::RemoteReadFailed
+pub grit_lib::error::Error::RemoveBlocked
+pub grit_lib::error::Error::RemoveBlocked::paths: alloc::vec::Vec<grit_lib::porcelain::paths::BlockedRemoval>
 pub grit_lib::error::Error::RemovePathsRequired
 pub grit_lib::error::Error::ReplayAbortHeadMoved
 pub grit_lib::error::Error::ReplayContinueUnmerged
@@ -13351,6 +13351,53 @@ pub mod grit_lib::porcelain::paths
 pub struct grit_lib::porcelain::paths::MoveOptions
 pub grit_lib::porcelain::paths::MoveOptions::destination: alloc::string::String
 pub grit_lib::porcelain::paths::MoveOptions::dry_run: bool
+pub enum grit_lib::porcelain::paths::RemoveBlockReason
+pub grit_lib::porcelain::paths::RemoveBlockReason::LocalModifications
+pub grit_lib::porcelain::paths::RemoveBlockReason::StagedAndLocal
+pub grit_lib::porcelain::paths::RemoveBlockReason::StagedChanges
+impl grit_lib::porcelain::paths::RemoveBlockReason
+pub fn grit_lib::porcelain::paths::RemoveBlockReason::allowed_with_cached(self) -> bool
+pub fn grit_lib::porcelain::paths::RemoveBlockReason::classify(bool, bool, bool) -> core::option::Option<Self>
+impl core::clone::Clone for grit_lib::porcelain::paths::RemoveBlockReason
+pub fn grit_lib::porcelain::paths::RemoveBlockReason::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::paths::RemoveBlockReason
+impl core::cmp::PartialEq for grit_lib::porcelain::paths::RemoveBlockReason
+pub fn grit_lib::porcelain::paths::RemoveBlockReason::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::porcelain::paths::RemoveBlockReason
+pub fn grit_lib::porcelain::paths::RemoveBlockReason::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::porcelain::paths::RemoveBlockReason
+pub fn grit_lib::porcelain::paths::RemoveBlockReason::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for grit_lib::porcelain::paths::RemoveBlockReason
+pub fn grit_lib::porcelain::paths::RemoveBlockReason::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for grit_lib::porcelain::paths::RemoveBlockReason
+impl core::marker::StructuralPartialEq for grit_lib::porcelain::paths::RemoveBlockReason
+impl core::marker::Freeze for grit_lib::porcelain::paths::RemoveBlockReason
+impl core::marker::Send for grit_lib::porcelain::paths::RemoveBlockReason
+impl core::marker::Sync for grit_lib::porcelain::paths::RemoveBlockReason
+impl core::marker::Unpin for grit_lib::porcelain::paths::RemoveBlockReason
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::paths::RemoveBlockReason
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::paths::RemoveBlockReason
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::paths::RemoveBlockReason
+pub struct grit_lib::porcelain::paths::BlockedRemoval
+pub grit_lib::porcelain::paths::BlockedRemoval::path: alloc::string::String
+pub grit_lib::porcelain::paths::BlockedRemoval::reason: grit_lib::porcelain::paths::RemoveBlockReason
+impl core::clone::Clone for grit_lib::porcelain::paths::BlockedRemoval
+pub fn grit_lib::porcelain::paths::BlockedRemoval::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::paths::BlockedRemoval
+impl core::cmp::PartialEq for grit_lib::porcelain::paths::BlockedRemoval
+pub fn grit_lib::porcelain::paths::BlockedRemoval::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::porcelain::paths::BlockedRemoval
+pub fn grit_lib::porcelain::paths::BlockedRemoval::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::porcelain::paths::BlockedRemoval
+pub fn grit_lib::porcelain::paths::BlockedRemoval::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::porcelain::paths::BlockedRemoval
+impl core::marker::Freeze for grit_lib::porcelain::paths::BlockedRemoval
+impl core::marker::Send for grit_lib::porcelain::paths::BlockedRemoval
+impl core::marker::Sync for grit_lib::porcelain::paths::BlockedRemoval
+impl core::marker::Unpin for grit_lib::porcelain::paths::BlockedRemoval
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::paths::BlockedRemoval
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::paths::BlockedRemoval
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::paths::BlockedRemoval
 pub grit_lib::porcelain::paths::MoveOptions::force: bool
 pub grit_lib::porcelain::paths::MoveOptions::sources: alloc::vec::Vec<alloc::string::String>
 impl core::clone::Clone for grit_lib::porcelain::paths::MoveOptions
@@ -15039,8 +15086,6 @@ pub grit_lib::prelude::Error::PackedRefsUnexpectedLine::path: alloc::string::Str
 pub grit_lib::prelude::Error::PartialCommitDuringMerge
 pub grit_lib::prelude::Error::PathError(alloc::string::String)
 pub grit_lib::prelude::Error::PathOutsideRepo(grit_lib::error::PathOutsideRepoError)
-pub grit_lib::prelude::Error::PathsHaveLocalModifications
-pub grit_lib::prelude::Error::PathsHaveLocalModifications::paths: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::prelude::Error::PathspecBeyondSymlink
 pub grit_lib::prelude::Error::PathspecBeyondSymlink::spec: alloc::string::String
 pub grit_lib::prelude::Error::PathspecFromFile(grit_lib::error::PathspecFromFileParseError)
@@ -15064,6 +15109,8 @@ pub grit_lib::prelude::Error::RemoteReadFailed
 pub grit_lib::prelude::Error::RemovePathsRequired
 pub grit_lib::prelude::Error::ReplayAbortHeadMoved
 pub grit_lib::prelude::Error::ReplayContinueUnmerged
+pub grit_lib::prelude::Error::RemoveBlocked
+pub grit_lib::prelude::Error::RemoveBlocked::paths: alloc::vec::Vec<grit_lib::porcelain::paths::BlockedRemoval>
 pub grit_lib::prelude::Error::ReplaySourceAtHead
 pub grit_lib::prelude::Error::RequiresWorkTree
 pub grit_lib::prelude::Error::RestoreConflictMissingOurs

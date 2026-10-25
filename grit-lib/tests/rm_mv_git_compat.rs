@@ -8,7 +8,7 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::index::write_tree::{
     cache_tree_fully_valid, write_tree_update_index, WriteTreeFlags,
 };
-use grit_lib::porcelain::paths::{move_path, remove_paths, RemoveOptions};
+use grit_lib::porcelain::paths::{move_path, remove_paths, RemoveBlockReason, RemoveOptions};
 use grit_lib::repo::Repository;
 use grit_test_support::git;
 
@@ -210,10 +210,7 @@ fn rm_modified_refused_without_force() {
         },
     )
     .expect_err("rm should refuse");
-    assert!(matches!(
-        err,
-        grit_lib::error::Error::PathsHaveLocalModifications { .. }
-    ));
+    assert!(matches!(err, grit_lib::error::Error::RemoveBlocked { .. }));
 }
 
 #[test]
@@ -786,4 +783,233 @@ fn grit_rm_after_git_staged_rename() {
         status.contains("D  tracked.txt") || status.contains("D tracked.txt"),
         "git rm -f after a staged rename stages deletion of the old path:\n{status}"
     );
+}
+
+fn rm_opts(path: &str, cached: bool) -> RemoveOptions {
+    RemoveOptions {
+        pathspecs: vec![path.into()],
+        pathspec_sources: vec![path.into()],
+        cached,
+        ..Default::default()
+    }
+}
+
+fn blocked_reasons(err: grit_lib::error::Error) -> Vec<(String, RemoveBlockReason)> {
+    match err {
+        grit_lib::error::Error::RemoveBlocked { paths } => {
+            paths.into_iter().map(|b| (b.path, b.reason)).collect()
+        }
+        other => panic!("expected RemoveBlocked, got {other:?}"),
+    }
+}
+
+#[test]
+fn rm_cached_keeps_committed_file_edited_since() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let repo_dir = tmp.path();
+    git(repo_dir, &["init", "-q", "-b", "main"]);
+    fs::write(repo_dir.join(".env"), "secret\n").unwrap();
+    commit_all(repo_dir, "oops");
+    fs::write(repo_dir.join(".env"), "secret\nmore\n").unwrap();
+
+    let repo = grit_repo(repo_dir);
+    let outcome = remove_paths(&repo, &rm_opts(".env", true)).expect("rm --cached");
+    assert_eq!(outcome.removed, vec![".env".to_string()]);
+
+    assert_eq!(
+        fs::read_to_string(repo_dir.join(".env")).unwrap(),
+        "secret\nmore\n",
+        "working copy must keep the edits"
+    );
+    let status = git_porcelain(repo_dir);
+    assert!(
+        status.contains("D  .env") && status.contains("?? .env"),
+        "expected staged deletion plus untracked file, got:\n{status}"
+    );
+    fsck_strict(repo_dir);
+}
+
+#[test]
+fn rm_cached_refuses_staged_then_edited_file() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let repo_dir = tmp.path();
+    git(repo_dir, &["init", "-q", "-b", "main"]);
+    fs::write(repo_dir.join("f.txt"), "v1\n").unwrap();
+    commit_all(repo_dir, "init");
+    fs::write(repo_dir.join("f.txt"), "v2\n").unwrap();
+    git(repo_dir, &["add", "f.txt"]);
+    fs::write(repo_dir.join("f.txt"), "v3\n").unwrap();
+    let status_before = git_porcelain(repo_dir);
+
+    let repo = grit_repo(repo_dir);
+    let err = remove_paths(&repo, &rm_opts("f.txt", true)).expect_err("must refuse");
+    assert_eq!(
+        blocked_reasons(err),
+        vec![("f.txt".to_string(), RemoveBlockReason::StagedAndLocal)]
+    );
+    assert_eq!(git_porcelain(repo_dir), status_before, "index untouched");
+
+    let err = remove_paths(&repo, &rm_opts("f.txt", false)).expect_err("must refuse");
+    assert_eq!(
+        blocked_reasons(err),
+        vec![("f.txt".to_string(), RemoveBlockReason::StagedAndLocal)]
+    );
+}
+
+#[test]
+fn rm_cached_untracks_freshly_added_file() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let repo_dir = tmp.path();
+    git(repo_dir, &["init", "-q", "-b", "main"]);
+    fs::write(repo_dir.join("base.txt"), "base\n").unwrap();
+    commit_all(repo_dir, "init");
+    fs::write(repo_dir.join("new.txt"), "new\n").unwrap();
+    git(repo_dir, &["add", "new.txt"]);
+
+    let repo = grit_repo(repo_dir);
+    let err = remove_paths(&repo, &rm_opts("new.txt", false)).expect_err("staged, no --cached");
+    assert_eq!(
+        blocked_reasons(err),
+        vec![("new.txt".to_string(), RemoveBlockReason::StagedChanges)]
+    );
+
+    remove_paths(&repo, &rm_opts("new.txt", true)).expect("rm --cached fresh file");
+    assert!(repo_dir.join("new.txt").is_file());
+    assert_eq!(git_porcelain(repo_dir), "?? new.txt\n");
+}
+
+#[test]
+fn rm_cached_untracks_file_before_first_commit() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let repo_dir = tmp.path();
+    git(repo_dir, &["init", "-q", "-b", "main"]);
+    fs::write(repo_dir.join("a.txt"), "a\n").unwrap();
+    git(repo_dir, &["add", "a.txt"]);
+
+    let repo = grit_repo(repo_dir);
+    let err = remove_paths(&repo, &rm_opts("a.txt", false)).expect_err("unborn HEAD");
+    assert_eq!(
+        blocked_reasons(err),
+        vec![("a.txt".to_string(), RemoveBlockReason::StagedChanges)]
+    );
+    remove_paths(&repo, &rm_opts("a.txt", true)).expect("rm --cached unborn");
+    assert!(repo_dir.join("a.txt").is_file());
+    assert_eq!(git_porcelain(repo_dir), "?? a.txt\n");
+}
+
+#[test]
+fn rm_staged_change_refused_without_cached() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let repo_dir = tmp.path();
+    git(repo_dir, &["init", "-q", "-b", "main"]);
+    fs::write(repo_dir.join("s.txt"), "v1\n").unwrap();
+    commit_all(repo_dir, "init");
+    fs::write(repo_dir.join("s.txt"), "v2\n").unwrap();
+    git(repo_dir, &["add", "s.txt"]);
+
+    let repo = grit_repo(repo_dir);
+    let err = remove_paths(&repo, &rm_opts("s.txt", false)).expect_err("staged change");
+    assert_eq!(
+        blocked_reasons(err),
+        vec![("s.txt".to_string(), RemoveBlockReason::StagedChanges)]
+    );
+    assert!(repo_dir.join("s.txt").is_file());
+
+    remove_paths(&repo, &rm_opts("s.txt", true)).expect("index matches worktree");
+    assert_eq!(fs::read_to_string(repo_dir.join("s.txt")).unwrap(), "v2\n");
+    let status = git_porcelain(repo_dir);
+    assert!(
+        status.contains("D  s.txt") && status.contains("?? s.txt"),
+        "got:\n{status}"
+    );
+}
+
+#[test]
+fn rm_modified_reports_local_modifications() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let repo_dir = tmp.path();
+    git(repo_dir, &["init", "-q", "-b", "main"]);
+    fs::write(repo_dir.join("dirty.txt"), "v1\n").unwrap();
+    commit_all(repo_dir, "init");
+    fs::write(repo_dir.join("dirty.txt"), "v2\n").unwrap();
+
+    let repo = grit_repo(repo_dir);
+    let err = remove_paths(&repo, &rm_opts("dirty.txt", false)).expect_err("refuse");
+    assert_eq!(
+        blocked_reasons(err),
+        vec![(
+            "dirty.txt".to_string(),
+            RemoveBlockReason::LocalModifications
+        )]
+    );
+}
+
+#[test]
+fn rm_file_already_deleted_from_worktree() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let repo_dir = tmp.path();
+    git(repo_dir, &["init", "-q", "-b", "main"]);
+    fs::write(repo_dir.join("gone.txt"), "v1\n").unwrap();
+    fs::write(repo_dir.join("staged.txt"), "v1\n").unwrap();
+    commit_all(repo_dir, "init");
+    fs::write(repo_dir.join("staged.txt"), "v2\n").unwrap();
+    git(repo_dir, &["add", "staged.txt"]);
+    fs::remove_file(repo_dir.join("gone.txt")).unwrap();
+    fs::remove_file(repo_dir.join("staged.txt")).unwrap();
+
+    let repo = grit_repo(repo_dir);
+    let mut opts = rm_opts("gone.txt", false);
+    opts.pathspecs.push("staged.txt".into());
+    opts.pathspec_sources.push("staged.txt".into());
+    let outcome = remove_paths(&repo, &opts).expect("nothing left on disk to lose");
+    assert_eq!(outcome.removed, vec!["gone.txt", "staged.txt"]);
+    assert_eq!(git_porcelain(repo_dir), "D  gone.txt\nD  staged.txt\n");
+    fsck_strict(repo_dir);
+}
+
+#[test]
+fn rm_refusal_lists_every_blocked_path_with_its_reason() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let repo_dir = tmp.path();
+    git(repo_dir, &["init", "-q", "-b", "main"]);
+    for name in ["clean", "local", "staged", "both"] {
+        fs::write(repo_dir.join(name), "v1\n").unwrap();
+    }
+    commit_all(repo_dir, "init");
+    fs::write(repo_dir.join("local"), "v2\n").unwrap();
+    fs::write(repo_dir.join("staged"), "v2\n").unwrap();
+    fs::write(repo_dir.join("both"), "v2\n").unwrap();
+    git(repo_dir, &["add", "staged", "both"]);
+    fs::write(repo_dir.join("both"), "v3\n").unwrap();
+
+    let repo = grit_repo(repo_dir);
+    let mut opts = rm_opts("clean", false);
+    for name in ["local", "staged", "both"] {
+        opts.pathspecs.push(name.into());
+        opts.pathspec_sources.push(name.into());
+    }
+    let err = remove_paths(&repo, &opts).expect_err("refuse");
+    assert_eq!(
+        blocked_reasons(err),
+        vec![
+            ("both".to_string(), RemoveBlockReason::StagedAndLocal),
+            ("local".to_string(), RemoveBlockReason::LocalModifications),
+            ("staged".to_string(), RemoveBlockReason::StagedChanges),
+        ]
+    );
+
+    opts.cached = true;
+    let err = remove_paths(&repo, &opts).expect_err("both still refused with --cached");
+    assert_eq!(
+        blocked_reasons(err),
+        vec![("both".to_string(), RemoveBlockReason::StagedAndLocal)]
+    );
+
+    opts.force = true;
+    let outcome = remove_paths(&repo, &opts).expect("--cached --force");
+    assert_eq!(outcome.removed.len(), 4);
+    for name in ["clean", "local", "staged", "both"] {
+        assert!(repo_dir.join(name).is_file(), "{name} kept on disk");
+    }
+    fsck_strict(repo_dir);
 }

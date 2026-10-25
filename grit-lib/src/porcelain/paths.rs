@@ -9,7 +9,7 @@ use crate::diff::{
     diff_index_to_tree, diff_index_to_worktree_with_options, DiffIndexToWorktreeOptions, DiffStatus,
 };
 use crate::error::{Error, Result};
-use crate::index::{index_file_mtime, Index, IndexEntry, MODE_TREE};
+use crate::index::{index_file_mtime, Index, IndexEntry, MODE_GITLINK, MODE_TREE};
 use crate::objects::{parse_commit, ObjectId};
 use crate::path_icase::paths_equal;
 use crate::path_validate::{validate_path, EntryMode, PathValidationKind, ProtectOptions};
@@ -59,6 +59,75 @@ pub struct RemoveOutcome {
     pub removed: Vec<String>,
 }
 
+/// Why [`remove_paths`] refused to remove a path without [`RemoveOptions::force`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum RemoveBlockReason {
+    /// The index entry differs from `HEAD` (or there is no `HEAD` commit yet) while the work
+    /// tree file matches the index. Deleting the file would lose the staged content;
+    /// [`RemoveOptions::cached`] keeps it on disk.
+    StagedChanges,
+    /// The work tree file differs from the index while the index matches `HEAD`. Deleting
+    /// the file would lose the edits; [`RemoveOptions::cached`] keeps it on disk.
+    LocalModifications,
+    /// The index entry differs from both `HEAD` and the work tree file, so the staged
+    /// content exists nowhere else. Refused even with [`RemoveOptions::cached`].
+    StagedAndLocal,
+}
+
+impl RemoveBlockReason {
+    /// Decide whether a path is refused, given how its index entry compares.
+    ///
+    /// # Parameters
+    ///
+    /// - `staged`: the index entry differs from `HEAD`, or there is no `HEAD` commit.
+    /// - `local`: the work tree file differs from the index entry.
+    /// - `cached`: the removal keeps the work tree file ([`RemoveOptions::cached`]).
+    ///
+    /// # Returns
+    ///
+    /// `None` when the path may be removed without `force`.
+    #[must_use]
+    pub fn classify(staged: bool, local: bool, cached: bool) -> Option<Self> {
+        match (staged, local) {
+            (true, true) => Some(Self::StagedAndLocal),
+            (true, false) if !cached => Some(Self::StagedChanges),
+            (false, true) if !cached => Some(Self::LocalModifications),
+            _ => None,
+        }
+    }
+
+    /// Whether retrying with [`RemoveOptions::cached`] would remove the path.
+    #[must_use]
+    pub fn allowed_with_cached(self) -> bool {
+        !matches!(self, Self::StagedAndLocal)
+    }
+}
+
+impl std::fmt::Display for RemoveBlockReason {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::StagedChanges => "staged changes",
+            Self::LocalModifications => "local modifications",
+            Self::StagedAndLocal => "staged content differs from both HEAD and the working tree",
+        })
+    }
+}
+
+/// A path [`remove_paths`] refused to remove, carried by [`Error::RemoveBlocked`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BlockedRemoval {
+    /// Repository-relative path that was not removed.
+    pub path: String,
+    /// Why removing it would lose content.
+    pub reason: RemoveBlockReason,
+}
+
+impl std::fmt::Display for BlockedRemoval {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{} ({})", self.path, self.reason)
+    }
+}
+
 /// One tracked path rename performed by [`move_paths`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PathMove {
@@ -90,14 +159,25 @@ pub struct MoveOutcome {
 
 /// Remove paths matching `opts.pathspecs` from the index and (unless `cached`) the work tree.
 ///
-/// Refuses when a tracked path has staged or unstaged modifications unless `force` is set.
+/// Unless `force` is set, refuses paths whose removal would lose content that exists
+/// nowhere else (see [`RemoveBlockReason`]):
+///
+/// - Without `cached`, a path is refused when its index entry differs from `HEAD` (every
+///   entry counts as staged before the first commit) or its work tree file differs from
+///   the index.
+/// - With `cached`, a path is refused only when its index entry differs from both `HEAD`
+///   and the work tree file, so a committed file edited since (or a freshly added file)
+///   can always be untracked while keeping the file on disk.
+/// - A path whose work tree file is already gone (or replaced by a directory) is never
+///   refused.
+///
 /// Directory prefixes require `recursive`. Empty parent directories are removed after
 /// deleting files. Cache-tree entries for touched paths are invalidated before the index
 /// is written atomically after the index lock is acquired ([`IndexHandle::begin_update`](crate::index::IndexHandle::begin_update)).
 ///
 /// # Errors
 ///
-/// Returns [`Error::PathspecNoMatch`], [`Error::PathsHaveLocalModifications`],
+/// Returns [`Error::PathspecNoMatch`], [`Error::RemoveBlocked`],
 /// [`Error::NotRemovingRecursively`], or I/O / object-store failures.
 pub fn remove_paths(repo: &Repository, opts: &RemoveOptions) -> Result<RemoveOutcome> {
     let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
@@ -116,15 +196,16 @@ pub fn remove_paths(repo: &Repository, opts: &RemoveOptions) -> Result<RemoveOut
     let to_remove = collect_removal_paths(repo, &tracked_paths, work_tree, &opts)?;
 
     if !opts.force {
-        let modified =
-            paths_with_local_modifications(repo, &mut index, head_tree.as_ref(), work_tree)?;
-        let blocked: Vec<String> = to_remove
-            .iter()
-            .filter(|p| path_or_ancestor_modified(p, &modified))
-            .cloned()
-            .collect();
+        let blocked = blocked_removals(
+            repo,
+            &mut index,
+            head_tree.as_ref(),
+            work_tree,
+            &to_remove,
+            opts.cached,
+        )?;
         if !blocked.is_empty() {
-            return Err(Error::PathsHaveLocalModifications { paths: blocked });
+            return Err(Error::RemoveBlocked { paths: blocked });
         }
     }
 
@@ -651,13 +732,67 @@ fn has_child_paths(prefix: &str, tracked: &BTreeSet<String>) -> bool {
         .any(|p| p.len() > plen && p.starts_with(prefix) && p.as_bytes()[plen] == b'/')
 }
 
-fn paths_with_local_modifications(
+/// Classify every path in `to_remove` and return the ones removal must refuse.
+///
+/// Only paths that could still be blocked are compared against the work tree: all of
+/// `to_remove` normally, but just the staged ones with `cached`.
+fn blocked_removals(
     repo: &Repository,
     index: &mut Index,
     head_tree: Option<&ObjectId>,
     work_tree: &Path,
+    to_remove: &[String],
+    cached: bool,
+) -> Result<Vec<BlockedRemoval>> {
+    let staged: HashSet<String> = diff_index_to_tree(repo.odb(), index, head_tree, false)?
+        .into_iter()
+        .filter(|entry| entry.status != DiffStatus::Unmerged)
+        .map(|entry| entry.path().to_string())
+        .collect();
+    let compare: BTreeSet<String> = to_remove
+        .iter()
+        .filter(|path| !cached || staged.contains(*path))
+        .cloned()
+        .collect();
+    let local = if compare.is_empty() {
+        HashSet::new()
+    } else {
+        paths_differing_from_worktree(repo, index, work_tree, compare)?
+    };
+
+    Ok(to_remove
+        .iter()
+        .filter_map(|path| {
+            let reason =
+                RemoveBlockReason::classify(staged.contains(path), local.contains(path), cached)?;
+            let entry = index.get(path.as_bytes(), 0)?;
+            if cached && entry.intent_to_add() {
+                return None;
+            }
+            worktree_still_has_file(work_tree, path, entry.mode).then(|| BlockedRemoval {
+                path: path.clone(),
+                reason,
+            })
+        })
+        .collect())
+}
+
+/// A tracked file that has vanished from the work tree, or turned into a directory, has
+/// nothing left on disk to lose, so its removal is never refused.
+fn worktree_still_has_file(work_tree: &Path, path: &str, mode: u32) -> bool {
+    match fs::symlink_metadata(work_tree.join(path)) {
+        Ok(meta) => !meta.is_dir() || mode == MODE_GITLINK,
+        Err(_) => false,
+    }
+}
+
+/// Index paths in `paths` whose work tree file differs from the index entry.
+fn paths_differing_from_worktree(
+    repo: &Repository,
+    index: &mut Index,
+    work_tree: &Path,
+    paths: BTreeSet<String>,
 ) -> Result<HashSet<String>> {
-    let staged = diff_index_to_tree(repo.odb(), index, head_tree, false)?;
     let index_mtime = index_file_mtime(&repo.index_path());
     let worktree_rules = crate::worktree_rules::WorktreeRules::from_repository(repo, index)?;
     let rules_arc = Arc::new(Mutex::new(worktree_rules));
@@ -668,32 +803,16 @@ fn paths_with_local_modifications(
         config: repo.config().ok(),
         worktree_rules: Some(Arc::clone(&rules_arc)),
         command_runner: Some(repo.command_runner()),
+        restrict_to_paths: Some(Arc::new(paths)),
         ..Default::default()
     };
     let (unstaged, _) =
         diff_index_to_worktree_with_options(repo.odb(), index, work_tree, diff_opts)?;
-
-    let mut modified = HashSet::new();
-    for entry in staged {
-        if entry.status != DiffStatus::Unmerged {
-            modified.insert(entry.path().to_string());
-        }
-    }
-    for entry in unstaged {
-        if entry.status != DiffStatus::Unmerged {
-            modified.insert(entry.path().to_string());
-        }
-    }
-    Ok(modified)
-}
-
-fn path_or_ancestor_modified(path: &str, modified: &HashSet<String>) -> bool {
-    if modified.contains(path) {
-        return true;
-    }
-    modified
-        .iter()
-        .any(|m| m.starts_with(path) && m.as_bytes().get(path.len()) == Some(&b'/'))
+    Ok(unstaged
+        .into_iter()
+        .filter(|entry| entry.status != DiffStatus::Unmerged)
+        .map(|entry| entry.path().to_string())
+        .collect())
 }
 
 #[derive(Debug, Clone)]
@@ -1194,6 +1313,80 @@ fn entry_with_relpath(mut entry: IndexEntry, path: &str) -> IndexEntry {
     let path_len = entry.path.len().min(0xFFF) as u16;
     entry.flags = (entry.flags & !0x0FFF) | path_len;
     entry
+}
+
+#[cfg(test)]
+mod remove_block_reason_tests {
+    use super::{worktree_still_has_file, BlockedRemoval, RemoveBlockReason};
+    use crate::index::{MODE_GITLINK, MODE_REGULAR};
+
+    #[test]
+    fn classify_without_cached_refuses_any_difference() {
+        assert_eq!(RemoveBlockReason::classify(false, false, false), None);
+        assert_eq!(
+            RemoveBlockReason::classify(true, false, false),
+            Some(RemoveBlockReason::StagedChanges)
+        );
+        assert_eq!(
+            RemoveBlockReason::classify(false, true, false),
+            Some(RemoveBlockReason::LocalModifications)
+        );
+        assert_eq!(
+            RemoveBlockReason::classify(true, true, false),
+            Some(RemoveBlockReason::StagedAndLocal)
+        );
+    }
+
+    #[test]
+    fn classify_with_cached_refuses_only_staged_and_local() {
+        assert_eq!(RemoveBlockReason::classify(false, false, true), None);
+        assert_eq!(RemoveBlockReason::classify(true, false, true), None);
+        assert_eq!(RemoveBlockReason::classify(false, true, true), None);
+        assert_eq!(
+            RemoveBlockReason::classify(true, true, true),
+            Some(RemoveBlockReason::StagedAndLocal)
+        );
+    }
+
+    #[test]
+    fn allowed_with_cached_matches_classify() {
+        for reason in [
+            RemoveBlockReason::StagedChanges,
+            RemoveBlockReason::LocalModifications,
+            RemoveBlockReason::StagedAndLocal,
+        ] {
+            let (staged, local) = match reason {
+                RemoveBlockReason::StagedChanges => (true, false),
+                RemoveBlockReason::LocalModifications => (false, true),
+                RemoveBlockReason::StagedAndLocal => (true, true),
+            };
+            assert_eq!(
+                reason.allowed_with_cached(),
+                RemoveBlockReason::classify(staged, local, true).is_none()
+            );
+        }
+    }
+
+    #[test]
+    fn blocked_removal_display_names_path_and_reason() {
+        let blocked = BlockedRemoval {
+            path: "dir/a.txt".into(),
+            reason: RemoveBlockReason::LocalModifications,
+        };
+        assert_eq!(blocked.to_string(), "dir/a.txt (local modifications)");
+    }
+
+    #[test]
+    fn worktree_presence_ignores_missing_files_and_directories() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let wt = tmp.path();
+        std::fs::write(wt.join("file"), b"x\n").unwrap();
+        std::fs::create_dir(wt.join("dir")).unwrap();
+        assert!(worktree_still_has_file(wt, "file", MODE_REGULAR));
+        assert!(!worktree_still_has_file(wt, "missing", MODE_REGULAR));
+        assert!(!worktree_still_has_file(wt, "dir", MODE_REGULAR));
+        assert!(worktree_still_has_file(wt, "dir", MODE_GITLINK));
+    }
 }
 
 #[cfg(test)]
