@@ -7,7 +7,7 @@
 use std::collections::HashSet;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 
 use crate::error::{Error, Result};
 use crate::hash::{verify_trailer, Parallelism};
@@ -275,9 +275,11 @@ pub fn install_pack_bytes_with_progress(
     odb.require_files_primary("index_pack")?;
     let pack_dir = odb.objects_dir().join("pack");
     std::fs::create_dir_all(&pack_dir).map_err(Error::Io)?;
-    static INSTALL_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let seq = INSTALL_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let tmp = pack_dir.join(format!("tmp_install_{}_{seq}", std::process::id()));
+    let tmp = pack_dir.join(format!(
+        "tmp_install_{}_{}",
+        std::process::id(),
+        next_install_seq()
+    ));
     std::fs::write(&tmp, &pack).map_err(Error::Io)?;
     match install_pack_path_with_progress(&tmp, odb, opts, progress, cancel) {
         Ok(ingested) => Ok(ingested),
@@ -331,25 +333,17 @@ pub fn install_pack_path_with_progress(
             "received data is not a pack stream".to_owned(),
         ));
     }
-    let mut trailer = vec![0u8; hb];
-    {
-        use std::io::{Read, Seek, SeekFrom};
-        let mut f = std::fs::File::open(&owned).map_err(Error::Io)?;
-        f.seek(SeekFrom::End(-(hb as i64))).map_err(Error::Io)?;
-        f.read_exact(&mut trailer).map_err(Error::Io)?;
-    }
-    let pack_hash = ObjectId::from_bytes(&trailer)?;
-    let stem = format!("pack-{}", pack_hash.to_hex());
     let pack_dir = odb.objects_dir().join("pack");
     std::fs::create_dir_all(&pack_dir).map_err(Error::Io)?;
-    let final_pack = pack_dir.join(format!("{stem}.pack"));
-    let idx_path = pack_dir.join(format!("{stem}.idx"));
-
-    let stage = pack_dir.join(format!(".{stem}-install"));
-    let stage_pack = stage.join(format!("{stem}.pack"));
-    let stage_idx = stage.join(format!("{stem}.idx"));
-
-    cleanup_stale_install_stage(&stage);
+    // Thin-pack completion rewrites the trailer, so the published `pack-<hash>` name is only
+    // known once indexing is done; stage under a name that does not depend on it.
+    let stage = pack_dir.join(format!(
+        ".tmp-{}-{}-install",
+        std::process::id(),
+        next_install_seq()
+    ));
+    let stage_pack = stage.join("tmp.pack");
+    let stage_idx = stage.join("tmp.idx");
 
     let install_result = (|| -> Result<IngestedPack> {
         poll_ingest_cancel(&mut progress, cancel)?;
@@ -363,7 +357,7 @@ pub fn install_pack_path_with_progress(
         let parallelism = opts.index_parallelism(odb)?;
         record_resolved_ingest_threads(parallelism.threads().get());
         let sort_threads = parallelism.threads().get();
-        let (entries, oids, object_counts, trailer) = {
+        let (entries, oids, object_counts) = {
             let pack_bytes: &[u8] = indexed.deref();
             verify_trailer(odb.hash_algo(), pack_bytes).map_err(|e| {
                 Error::CorruptObject(format!(
@@ -371,7 +365,6 @@ pub fn install_pack_path_with_progress(
                 ))
             })?;
             poll_ingest_cancel(&mut progress, cancel)?;
-            let trailer = pack_bytes[pack_bytes.len() - hb..].to_vec();
             if let Some(rows) = &opts.trusted_index_rows {
                 if rows.len()
                     != u32::from_be_bytes([
@@ -387,7 +380,7 @@ pub fn install_pack_path_with_progress(
                 }
                 let oids: HashSet<ObjectId> = rows.iter().map(|(oid, _, _)| *oid).collect();
                 let object_counts = ObjectKindCounts::default();
-                (rows.clone(), oids, object_counts, trailer)
+                (rows.clone(), oids, object_counts)
             } else {
                 let mut records = crate::pack_index_build::build_pack_index_records_with_progress(
                     pack_bytes,
@@ -426,43 +419,60 @@ pub fn install_pack_path_with_progress(
                          }| (oid, offset, crc32),
                     )
                     .collect();
-                (entries, oids, object_counts, trailer)
+                (entries, oids, object_counts)
             }
         };
+        let pack_hash = ObjectId::from_bytes(&indexed[indexed.len() - hb..])?;
         drop(indexed);
         poll_ingest_cancel(&mut progress, cancel)?;
-        write_v2_pack_index_with_trailer(&stage_idx, &entries, &trailer, hb, Some(sort_threads))?;
+        write_v2_pack_index_with_trailer(
+            &stage_idx,
+            &entries,
+            pack_hash.as_bytes(),
+            hb,
+            Some(sort_threads),
+        )?;
         poll_ingest_cancel(&mut progress, cancel)?;
         if !opts.skip_post_index_verify {
             verify_pack_and_collect(&stage_idx)?;
         }
         poll_ingest_cancel(&mut progress, cancel)?;
+        let final_pack = pack_dir.join(format!("pack-{}.pack", pack_hash.to_hex()));
+        let idx_path = final_pack.with_extension("idx");
         std::fs::rename(&stage_pack, &final_pack).map_err(Error::Io)?;
-        poll_ingest_cancel(&mut progress, cancel)?;
-        std::fs::rename(&stage_idx, &idx_path).map_err(|e| {
+        let published = std::fs::rename(&stage_idx, &idx_path).and_then(|()| {
+            if opts.mark_promisor_pack {
+                std::fs::write(final_pack.with_extension("promisor"), b"")
+            } else {
+                Ok(())
+            }
+        });
+        if let Err(e) = published {
             let _ = std::fs::remove_file(&final_pack);
-            Error::Io(e)
-        })?;
-        if opts.mark_promisor_pack {
-            std::fs::write(final_pack.with_extension("promisor"), b"").map_err(Error::Io)?;
+            let _ = std::fs::remove_file(&idx_path);
+            return Err(Error::Io(e));
         }
         let _ = std::fs::remove_dir(&stage);
         Ok(IngestedPack {
             object_ids: oids,
-            pack_path: final_pack.clone(),
+            pack_path: final_pack,
             object_counts,
         })
     })();
 
     if install_result.is_err() {
         cleanup_stale_install_stage(&stage);
-        let _ = std::fs::remove_file(&final_pack);
-        let _ = std::fs::remove_file(&idx_path);
         let _ = std::fs::remove_file(&owned);
     }
     let ingested = install_result?;
     odb.invalidate_packs();
     Ok(ingested)
+}
+
+/// Per-process counter that keeps concurrent installs' temporary names apart.
+fn next_install_seq() -> u64 {
+    static INSTALL_SEQ: AtomicU64 = AtomicU64::new(0);
+    INSTALL_SEQ.fetch_add(1, Ordering::Relaxed)
 }
 
 fn pack_needs_thin_fix(records: &[PackIndexRecord], ref_bases: &[ObjectId]) -> bool {
