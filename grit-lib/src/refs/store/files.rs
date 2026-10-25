@@ -336,7 +336,7 @@ impl FilesRefStore {
         for base in self.store_bases() {
             let dir = base.join(&storage);
             if dir.is_dir() {
-                collect_loose_raw_refs(&dir, &format!("{storage}/"), &mut storage_map)?;
+                collect_loose_raw_refs(&dir, &format!("{storage}/"), "", &mut storage_map)?;
             }
         }
         // Refs live under `refs/`, so a one-level name has no packed descendants; skipping it
@@ -528,7 +528,7 @@ impl FilesRefStore {
                 let root = base.join(storage_prefix.trim_end_matches('/'));
                 if root.is_dir() {
                     let mut storage_map = BTreeMap::new();
-                    collect_loose_raw_refs(&root, storage_prefix, &mut storage_map)?;
+                    collect_loose_raw_refs(&root, storage_prefix, "", &mut storage_map)?;
                     for (storage, value) in storage_map {
                         let logical = self.logical_name(&storage);
                         if logical_prefix.is_empty() || logical.starts_with(logical_prefix) {
@@ -540,7 +540,12 @@ impl FilesRefStore {
                 let (walk_root, walk_prefix) = loose_ref_list_walk_root(base, logical_prefix);
                 if walk_root.is_dir() {
                     let mut storage_map = BTreeMap::new();
-                    collect_loose_raw_refs(&walk_root, &walk_prefix, &mut storage_map)?;
+                    collect_loose_raw_refs(
+                        &walk_root,
+                        &walk_prefix,
+                        logical_prefix,
+                        &mut storage_map,
+                    )?;
                     for (storage, value) in storage_map {
                         let logical = self.logical_name(&storage);
                         if logical_prefix.is_empty() || logical.starts_with(logical_prefix) {
@@ -1429,9 +1434,15 @@ fn ref_to_raw(r: Ref) -> RawRef {
     }
 }
 
+/// Read every loose ref file below `dir` into `out`, keyed by `prefix` plus its relative path.
+///
+/// Only names starting with `want` are read; entries that cannot lead to one are skipped
+/// without a `stat`, so a partial-name prefix such as `refs/tags/v1` does not read every
+/// file in `refs/tags/`. An empty `want` reads everything.
 fn collect_loose_raw_refs(
     dir: &Path,
     prefix: &str,
+    want: &str,
     out: &mut BTreeMap<String, RawRef>,
 ) -> Result<()> {
     let read = match fs::read_dir(dir) {
@@ -1452,11 +1463,19 @@ fn collect_loose_raw_refs(
             ))
         })?;
         let refname = format!("{prefix}{name_owned}");
+        let wanted = refname.starts_with(want);
+        let leads_to_wanted = || {
+            want.strip_prefix(refname.as_str())
+                .is_some_and(|rest| rest.starts_with('/'))
+        };
+        if !wanted && !leads_to_wanted() {
+            continue;
+        }
         let path = entry.path();
         let meta = fs::metadata(&path).map_err(Error::Io)?;
         if meta.is_dir() {
-            collect_loose_raw_refs(&path, &format!("{refname}/"), out)?;
-        } else if meta.is_file() {
+            collect_loose_raw_refs(&path, &format!("{refname}/"), want, out)?;
+        } else if meta.is_file() && wanted {
             if let Ok(r) = read_ref_file(&path) {
                 out.insert(refname, ref_to_raw(r));
             }
@@ -1616,6 +1635,41 @@ mod tests {
         fs::create_dir_all(dir.path().join("refs/heads")).expect("refs");
         fs::write(dir.path().join("HEAD"), "ref: refs/heads/main\n").expect("HEAD");
         dir
+    }
+
+    fn listed_names(store: &FilesRefStore, prefix: &str) -> Vec<String> {
+        let mut names = Vec::new();
+        store
+            .for_each_ref(prefix, &mut |entry| {
+                names.push(entry.name.clone());
+                ControlFlow::Continue(())
+            })
+            .expect("list");
+        names
+    }
+
+    #[test]
+    fn partial_name_prefix_lists_loose_refs_without_visiting_siblings() {
+        let dir = git_dir();
+        let tags = dir.path().join("refs/tags");
+        for name in ["v1", "v10", "v1x/a", "v2/deep", "w"] {
+            let path = tags.join(name);
+            fs::create_dir_all(path.parent().expect("parent")).expect("mkdir");
+            fs::write(path, format!("{}\n", oid(1))).expect("ref");
+        }
+        // A sibling that cannot be stat'ed fails any walk that looks at it.
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(tags.join("missing-target"), tags.join("zzz"))
+            .expect("dangling symlink");
+        let store = store(dir.path());
+
+        assert_eq!(
+            listed_names(&store, "refs/tags/v1"),
+            ["refs/tags/v1", "refs/tags/v10", "refs/tags/v1x/a"]
+        );
+        assert_eq!(listed_names(&store, "refs/tags/v2/"), ["refs/tags/v2/deep"]);
+        assert_eq!(listed_names(&store, "refs/tags/w"), ["refs/tags/w"]);
+        assert!(listed_names(&store, "refs/tags/x").is_empty());
     }
 
     /// Two writers that both expect `expected` must not both succeed: the one that commits
