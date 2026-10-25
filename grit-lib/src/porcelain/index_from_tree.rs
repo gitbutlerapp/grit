@@ -107,6 +107,7 @@ pub(crate) fn index_from_tree_with_owned_seed_worktree_stats(
         Some(index) => index,
         None => index_from_tree_with_seeded_stats(repo, tree_oid, &seed)?,
     };
+    drop(seed);
     if let Some(work_tree) = repo.work_tree() {
         refresh_stage0_index_stats_from_worktree(repo, work_tree, &mut index)?;
     }
@@ -197,9 +198,8 @@ pub(crate) fn index_from_tree_reusing_cache_tree(
     };
     let cache_tree = walk.walk(tree_oid, b"", Vec::new(), seed_root)?;
     let mut index = Index::new();
-    for entry in walk.entries {
-        index.push_entry_unsorted(entry);
-    }
+    index.entries = walk.entries;
+    index.mark_entries_unsorted();
     index.sort();
     if usize::try_from(cache_tree.entry_count).ok() == Some(index.entries.len()) {
         index.set_cache_tree(cache_tree);
