@@ -31,7 +31,7 @@ Acceptance for both: grit median wall time and peak RSS must be **≤** git on t
 
 ## grit-lib: parallel object hashing
 
-Criterion group `hash/batch_parallel` (`cargo bench -p grit-lib --bench objects hash/batch_parallel`) hashes **20 000** Git blob objects of **16 KiB** each using [`hash_objects_parallel`](https://docs.rs/grit-lib/latest/grit_lib/hash/fn.hash_objects_parallel.html) (SHA-1, release build).
+Criterion group `hash/batch_parallel` (`cargo bench -p grit-lib --bench objects hash/batch_parallel`) hashes **20 000** Git blob objects of **16 KiB** each using [`hash_objects_parallel`](rustdoc:grit_lib::objects::hash::hash_objects_parallel) (SHA-1, release build).
 
 | Threads | Time (median) | Throughput |
 | ------- | ------------- | ---------- |
@@ -40,19 +40,19 @@ Criterion group `hash/batch_parallel` (`cargo bench -p grit-lib --bench objects 
 
 **Speedup (8 vs 1 thread): ~3.9×** on the factory VM (2026-10-07).
 
-Parallel hashing falls back to a serial loop when there are fewer than [`PAR_HASH_MIN_ITEMS`](https://docs.rs/grit-lib/latest/grit_lib/hash/constant.PAR_HASH_MIN_ITEMS.html) (32) objects or less than [`PAR_HASH_MIN_TOTAL_BYTES`](https://docs.rs/grit-lib/latest/grit_lib/hash/constant.PAR_HASH_MIN_TOTAL_BYTES.html) (256 KiB) of payload, so small batches avoid thread overhead.
+Parallel hashing falls back to a serial loop when there are fewer than [`PAR_HASH_MIN_ITEMS`](rustdoc:grit_lib::objects::hash::PAR_HASH_MIN_ITEMS) (32) objects or less than [`PAR_HASH_MIN_TOTAL_BYTES`](rustdoc:grit_lib::objects::hash::PAR_HASH_MIN_TOTAL_BYTES) (256 KiB) of payload, so small batches avoid thread overhead.
 
 ## grit-lib: OID hash maps
 
-Criterion bench **`oid_hashmap`** (`cargo bench -p grit-lib --bench oid_hashmap`) compares `std` `HashMap`/`HashSet` keyed by [`ObjectId`](https://docs.rs/grit-lib/latest/grit_lib/objects/struct.ObjectId.html) (SipHash over the full digest) against [`OidHashMap`](https://docs.rs/grit-lib/latest/grit_lib/objects/type.OidHashMap.html) / [`OidHashSet`](https://docs.rs/grit-lib/latest/grit_lib/objects/type.OidHashSet.html) (hashbrown tables with [`OidBuildHasher`](https://docs.rs/grit-lib/latest/grit_lib/objects/struct.OidBuildHasher.html): first eight digest bytes; [`finish`](https://docs.rs/grit-lib/latest/grit_lib/objects/struct.OidHasher.html#method.finish) XORs that prefix with a process-wide random value). Insert has two symmetric variants at **1 M** keys (SHA-1 OIDs from seeded `ObjectHasher`, distinct first-eight-byte prefixes): **`oid_hashmap_insert_presized`** (both sides call `with_capacity`) and **`oid_hashmap_insert_default_growth`** (both start from empty maps). Factory VM medians from `cargo bench -p grit-lib --bench oid_hashmap -- --sample-size 10 --warm-up-time 1 --measurement-time 3 oid_hashmap_insert` (2026-10-21): presized **~72 ms** SipHash vs **~49 ms** OID (~**1.48×**); default-growth **~115 ms** vs **~72 ms** (~**1.59×**). Lookup and contains groups use the same pre-built tables on both sides. Hot paths (rev-list commit cache, pack delta planning, fsck connectivity, ODB session caches, and related maps) call [`oid_hash_map_with_capacity`](https://docs.rs/grit-lib/latest/grit_lib/objects/fn.oid_hash_map_with_capacity.html) / [`oid_hash_set_with_capacity`](https://docs.rs/grit-lib/latest/grit_lib/objects/fn.oid_hash_set_with_capacity.html) when an object count is known; public APIs still expose standard `HashSet`/`HashMap` at boundaries.
+Criterion bench **`oid_hashmap`** (`cargo bench -p grit-lib --bench oid_hashmap`) compares `std` `HashMap`/`HashSet` keyed by [`ObjectId`](rustdoc:grit_lib::objects::ObjectId) (SipHash over the full digest) against [`OidHashMap`](rustdoc:grit_lib::objects::OidHashMap) / [`OidHashSet`](rustdoc:grit_lib::objects::OidHashSet) (hashbrown tables with [`OidBuildHasher`](rustdoc:grit_lib::objects::OidBuildHasher): first eight digest bytes; [`finish`](rustdoc:grit_lib::objects::OidHasher::finish) XORs that prefix with a process-wide random value). Insert has two symmetric variants at **1 M** keys (SHA-1 OIDs from seeded `ObjectHasher`, distinct first-eight-byte prefixes): **`oid_hashmap_insert_presized`** (both sides call `with_capacity`) and **`oid_hashmap_insert_default_growth`** (both start from empty maps). Factory VM medians from `cargo bench -p grit-lib --bench oid_hashmap -- --sample-size 10 --warm-up-time 1 --measurement-time 3 oid_hashmap_insert` (2026-10-21): presized **~72 ms** SipHash vs **~49 ms** OID (~**1.48×**); default-growth **~115 ms** vs **~72 ms** (~**1.59×**). Lookup and contains groups use the same pre-built tables on both sides. Hot paths (rev-list commit cache, pack delta planning, fsck connectivity, ODB session caches, and related maps) call [`oid_hash_map_with_capacity`](rustdoc:grit_lib::objects::oid_hash_map_with_capacity) / [`oid_hash_set_with_capacity`](rustdoc:grit_lib::objects::oid_hash_set_with_capacity) when an object count is known; public APIs still expose standard `HashSet`/`HashMap` at boundaries.
 
 ## grit-lib: ODB backend (pluggable object store)
 
-Criterion group **`odb_backend`** compares post-refactor [`Odb`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html) against the saved baseline **`odb-before`** (`cargo bench -p grit-lib --bench odb_backend -- --baseline odb-before`). Built-in layouts route hot reads through [`FilesSource`](https://docs.rs/grit-lib/latest/grit_lib/odb/store/struct.FilesSource.html) on the primary store and [`CompositeStore`](https://docs.rs/grit-lib/latest/grit_lib/odb/store/struct.CompositeStore.html) for alternates so behaviour matches the pre-refactor oracle tests while keeping a pluggable [`ObjectStore`](https://docs.rs/grit-lib/latest/grit_lib/odb/store/trait.ObjectStore.html) boundary.
+Criterion group **`odb_backend`** compares post-refactor [`Odb`](rustdoc:grit_lib::objects::odb::Odb) against the saved baseline **`odb-before`** (`cargo bench -p grit-lib --bench odb_backend -- --baseline odb-before`). Built-in layouts route hot reads through [`FilesSource`](rustdoc:grit_lib::objects::odb::store::FilesSource) on the primary store and [`CompositeStore`](rustdoc:grit_lib::objects::odb::store::CompositeStore) for alternates so behaviour matches the pre-refactor oracle tests while keeping a pluggable [`ObjectStore`](rustdoc:grit_lib::objects::odb::ObjectStore) boundary.
 
 **Pluggable object store overhead (factory VM, 2026-10-09):** Re-run Criterion with `--baseline odb-before` after ODB changes; command-level **`grit-bench odb-backend`** baselines are in **`odb-backend-before.json`** (pre-refactor capture, scenario ids suffixed `-pre-refactor`) and **`odb-backend-after.json`**. Post-refactor Grit medians for cat-file batch/check are much lower than the pre-refactor capture on the same fixture; rev-list wall time is similar while Grit/Git **ratios** can drift when system `git` speeds up between runs.
 
-Criterion measures [`Odb::read`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html), [`read_info`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html#method.read_info), [`exists`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html#method.exists) (hit and miss), and [`write`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html#method.write) on four deterministic layouts built in `grit-lib/benches/fixture.rs`:
+Criterion measures [`Odb::read`](rustdoc:grit_lib::objects::odb::Odb), [`read_info`](rustdoc:grit_lib::objects::odb::Odb::read_info), [`exists`](rustdoc:grit_lib::objects::odb::Odb::exists) (hit and miss), and [`write`](rustdoc:grit_lib::objects::odb::Odb::write) on four deterministic layouts built in `grit-lib/benches/fixture.rs`:
 
 | Fixture | Shape |
 | --- | --- |
@@ -65,7 +65,7 @@ An additional benchmark, **`odb_backend/exists_miss_loop_10k`**, calls `exists` 
 
 ## grit-lib: abbreviating ids on custom object stores
 
-Criterion bench **`abbreviate`** (`cargo bench -p grit-lib --bench abbreviate`) calls [`abbreviate_object_id`](https://docs.rs/grit-lib/latest/grit_lib/revwalk/rev_parse/fn.abbreviate_object_id.html) with a 7-digit minimum for 200 ids out of 200,000 blobs held in three stores: a [`MemoryStore`](https://docs.rs/grit-lib/latest/grit_lib/objects/odb/store/struct.MemoryStore.html), a store that implements only the required [`ObjectStore`](https://docs.rs/grit-lib/latest/grit_lib/objects/odb/store/trait.ObjectStore.html) methods (so it uses the default full-scan `lookup_prefix`), and one pack in a files ODB. Factory VM medians (2026-10-24, issue #1736):
+Criterion bench **`abbreviate`** (`cargo bench -p grit-lib --bench abbreviate`) calls [`abbreviate_object_id`](rustdoc:grit_lib::revwalk::rev_parse::abbreviate_object_id) with a 7-digit minimum for 200 ids out of 200,000 blobs held in three stores: a [`MemoryStore`](rustdoc:grit_lib::objects::odb::store::MemoryStore), a store that implements only the required [`ObjectStore`](rustdoc:grit_lib::objects::odb::store::ObjectStore) methods (so it uses the default full-scan `lookup_prefix`), and one pack in a files ODB. Factory VM medians (2026-10-24, issue #1736):
 
 | Store | Before | After |
 | --- | --- | --- |
@@ -73,11 +73,11 @@ Criterion bench **`abbreviate`** (`cargo bench -p grit-lib --bench abbreviate`) 
 | Required methods only | 3.90 s | 229 ms |
 | Files ODB, one pack | 668 µs | 601 µs |
 
-Prefix matching now compares raw id bytes against a prefix parsed once ([`ObjectIdPrefix`](https://docs.rs/grit-lib/latest/grit_lib/objects/struct.ObjectIdPrefix.html)) instead of formatting every candidate as hex, and abbreviation makes one lookup per id instead of one per candidate length. A store without an index still scans every id once per lookup; override `lookup_prefix` with a range scan to avoid that (see [Object stores](../library/object-stores/#short-ids-and-prefix-lookup)).
+Prefix matching now compares raw id bytes against a prefix parsed once ([`ObjectIdPrefix`](rustdoc:grit_lib::objects::ObjectIdPrefix)) instead of formatting every candidate as hex, and abbreviation makes one lookup per id instead of one per candidate length. A store without an index still scans every id once per lookup; override `lookup_prefix` with a range scan to avoid that (see [Object stores](../library/object-stores/#short-ids-and-prefix-lookup)).
 
 ## grit-lib: pack write (100k reuse vs fresh)
 
-Criterion group **`pack`** (`cargo bench -p grit-lib --bench pack_write`) rebuilds the full closure of the repacked **`pack_100k`** fixture (~100 000 objects) via [`build_pack_with_parallel_threads`](https://docs.rs/grit-lib/latest/grit_lib/objects/pack_objects/fn.build_pack_with_parallel_threads.html):
+Criterion group **`pack`** (`cargo bench -p grit-lib --bench pack_write`) rebuilds the full closure of the repacked **`pack_100k`** fixture (~100 000 objects) via [`build_pack_with_parallel_threads`](rustdoc:grit_lib::objects::pack_objects::build_pack_with_parallel_threads):
 
 | Benchmark | What it measures |
 | --- | --- |
@@ -115,14 +115,14 @@ The rev-list gap is dominated by history/object enumeration in `grit-lib`, not b
 
 ## grit-lib: parallel packed ODB reads
 
-Criterion group **`odb_read_parallel/packed_blobs`** (`cargo bench -p grit-lib --bench odb_read_parallel`) measures throughput when worker threads share one [`Odb`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html) and hold [`Odb::with_pack_read_context`](https://docs.rs/grit-lib/latest/grit_lib/odb/struct.Odb.html#method.with_pack_read_context) for the worker lifetime. Each iteration reads a partition of **50 000** whole-object pack blobs (**3072-byte** payload; loose copies are removed after packing so hits are pack-only). Baseline **`odb-read-parallel.json`** records Criterion central estimates on the factory VM (**4 logical CPUs**, Rust **1.99** stable).
+Criterion group **`odb_read_parallel/packed_blobs`** (`cargo bench -p grit-lib --bench odb_read_parallel`) measures throughput when worker threads share one [`Odb`](rustdoc:grit_lib::objects::odb::Odb) and hold [`Odb::with_pack_read_context`](rustdoc:grit_lib::objects::odb::Odb::with_pack_read_context) for the worker lifetime. Each iteration reads a partition of **50 000** whole-object pack blobs (**3072-byte** payload; loose copies are removed after packing so hits are pack-only). Baseline **`odb-read-parallel.json`** records Criterion central estimates on the factory VM (**4 logical CPUs**, Rust **1.99** stable).
 
 | Threads | Median time (50k reads) | Throughput |
 | ------- | ----------------------: | ---------- |
 | 1 | ~149 ms | ~336 Kelem/s |
 | 4 | ~51 ms | ~983 Kelem/s |
 
-**Speedup (4 vs 1 thread): ~2.9×** on the factory VM (2026-10-11). This exercises the explicit batch read-context API and shared [`PackStore`](https://docs.rs/grit-lib/latest/grit_lib/pack_store/struct.PackStore.html) catalog, not ad-hoc per-read context installation.
+**Speedup (4 vs 1 thread): ~2.9×** on the factory VM (2026-10-11). This exercises the explicit batch read-context API and shared [`PackStore`](rustdoc:grit_lib::objects::pack_store::PackStore) catalog, not ad-hoc per-read context installation.
 
 ```bash
 cargo bench -p grit-lib --bench odb_read_parallel -- packed_blobs
@@ -168,7 +168,7 @@ Intermediate capture on the same VM before the final writer stack (**2026-10-10*
 
 ## grit-lib: parallel index-pack (in-memory)
 
-Release [`index_pack_bench`](https://github.com/gitbutlerapp/grit/tree/main/grit-lib/examples/index_pack_bench.rs) on a **~112 500-object** depth-50 pack (`git fast-import` + `git repack -adf --depth=50`, factory VM 2026-10-12). Grit uses [`pack_index_records_with_threads`](https://docs.rs/grit-lib/latest/grit_lib/unpack_objects/fn.pack_index_records_with_threads.html) (`GRIT_INDEX_PACK_BENCH_PACK` / `GRIT_INDEX_PACK_THREADS`); timings cover in-memory record building only (no `.idx` write). System **`git index-pack`** rows are end-to-end on a fresh temp directory each run (writes `.idx`).
+Release [`index_pack_bench`](https://github.com/gitbutlerapp/grit/tree/main/grit-lib/examples/index_pack_bench.rs) on a **~112 500-object** depth-50 pack (`git fast-import` + `git repack -adf --depth=50`, factory VM 2026-10-12). Grit uses [`pack_index_records_with_threads`](rustdoc:grit_lib::objects::unpack_objects::pack_index_records_with_threads) (`GRIT_INDEX_PACK_BENCH_PACK` / `GRIT_INDEX_PACK_THREADS`); timings cover in-memory record building only (no `.idx` write). System **`git index-pack`** rows are end-to-end on a fresh temp directory each run (writes `.idx`).
 
 | Command | Median (5 runs) |
 | ------- | ---------------- |
@@ -183,7 +183,7 @@ Integration coverage uses a **≥ 50 000** object fixture built with `git fa
 
 ## Hashing
 
-Checksum throughput uses plain accelerated SHA-1/256 from the `sha1` / `sha2` crates ([`HashingWriter`](https://docs.rs/grit-lib/latest/grit_lib/hash/struct.HashingWriter.html), Criterion `hash_sha1` / `hashing_writer_sha1`). Object-id hashing on ingestion uses [`ObjectHasher::for_object`](https://docs.rs/grit-lib/latest/grit_lib/hash/enum.ObjectHasher.html) with the **sha1dc** crate (collision detection on the canonical object header + payload). OpenSSL numbers are from `openssl speed -evp sha1 -bytes 16384` and `openssl speed -evp sha256` (16 KiB blocks where shown). Git blob hashing uses `git hash-object` on a 256 MiB file vs the `gritx-hash-file` example (same canonical blob object id, no object-database write).
+Checksum throughput uses plain accelerated SHA-1/256 from the `sha1` / `sha2` crates ([`HashingWriter`](rustdoc:grit_lib::objects::hash::HashingWriter), Criterion `hash_sha1` / `hashing_writer_sha1`). Object-id hashing on ingestion uses [`ObjectHasher::for_object`](rustdoc:grit_lib::objects::hash::ObjectHasher) with the **sha1dc** crate (collision detection on the canonical object header + payload). OpenSSL numbers are from `openssl speed -evp sha1 -bytes 16384` and `openssl speed -evp sha256` (16 KiB blocks where shown). Git blob hashing uses `git hash-object` on a 256 MiB file vs the `gritx-hash-file` example (same canonical blob object id, no object-database write).
 
 **Environment (2026-10-21):** Intel Xeon (SHA-NI present), Linux, `git` 2.43.0, OpenSSL 3.0.13, Rust stable 1.99. `hash-info --json` reports `{"sha1":"x86_sha_ni","sha256":"x86_sha_ni"}`.
 
@@ -209,7 +209,7 @@ Committed baseline **`grit-utils/baselines/hash-after.json`** (paired with **`ha
 | `index-pack-git-git` (100k repacked) | 123.1 ms | 197.7 ms | **0.623×** (1.61× faster) |
 | `fsck-medium` | 416.7 ms | 239.4 ms | **1.741×** (grit slower; follow-up [#1475](https://maint.grit-scm.com/factory/1475)) |
 
-Versus **`hash-before.json`**, grit median on `hash-object-256mib` is **−3.9%** (3971.9 ms → 3818.5 ms), within the **5%** acceptance bar. Profiling the `hash-object -w` path showed a redundant **payload-only sha1dc pass** on every large blob after canonical object-id hashing; **`grit-lib`** now skips that pass when the payload is larger than 64 KiB and does not start with a SHAttered block prefix. Loose writes use [`hash_object`](https://docs.rs/grit-lib/latest/grit_lib/hash/fn.hash_object.html) for the object id (no duplicate `ObjectHasher` in the store layer). `index-pack` uses the repacked 100k fixture (see **`factory/checked-object-hash-2718`**) so before/after medians for that scenario are not directly comparable.
+Versus **`hash-before.json`**, grit median on `hash-object-256mib` is **−3.9%** (3971.9 ms → 3818.5 ms), within the **5%** acceptance bar. Profiling the `hash-object -w` path showed a redundant **payload-only sha1dc pass** on every large blob after canonical object-id hashing; **`grit-lib`** now skips that pass when the payload is larger than 64 KiB and does not start with a SHAttered block prefix. Loose writes use [`hash_object`](rustdoc:grit_lib::objects::hash::hash_object) for the object id (no duplicate `ObjectHasher` in the store layer). `index-pack` uses the repacked 100k fixture (see **`factory/checked-object-hash-2718`**) so before/after medians for that scenario are not directly comparable.
 
 ### Commands
 
@@ -625,7 +625,7 @@ No GitHub issues were filed from this factory run (`file_bug_report` is dogfoodi
 
 ### Refs
 
-The **`grit-bench refs`** suite compares library drivers (`grit-bench refs-driver …`) to **`git for-each-ref`** and **`git update-ref --stdin`** on bare repositories with **100 000** branch refs. Fixtures are built once with system git and cached under the bench scratch directory: fully **packed** refs, **loose** refs only, and (when system git is **≥ 2.45**) a **reftable** layout. Scenarios list all refs, list the **`refs/heads/b05*`** glob (~1 000 refs), batch-**create** 100 000 refs into an empty-refs working copy, **update** 1 000 existing refs, and **delete** 1 000 refs; a prepare hook restores the fixture before each timed iteration. Initial packed/loose listing baselines are in **`grit-utils/baselines/refs-before.json`**; files-backend listing and batch **`update-ref`** optimizations on the 100k-ref fixtures are in **`grit-utils/baselines/refs-after.json`**; reftable timings (Git **≥ 2.45**) are in **`grit-utils/baselines/refs-after-reftable.json`**. The **`grit-utils/baselines/refs-after-994.json`** snapshot captures [`gc::update_refs`](https://docs.rs/grit-lib/latest/grit_lib/gc/fn.update_refs.html) batching through [`commit_ref_store_batch`](https://docs.rs/grit-lib/latest/grit_lib/refs/fn.commit_ref_store_batch.html) with a reused packed-refs cache instead of reparsing `packed-refs` per update.
+The **`grit-bench refs`** suite compares library drivers (`grit-bench refs-driver …`) to **`git for-each-ref`** and **`git update-ref --stdin`** on bare repositories with **100 000** branch refs. Fixtures are built once with system git and cached under the bench scratch directory: fully **packed** refs, **loose** refs only, and (when system git is **≥ 2.45**) a **reftable** layout. Scenarios list all refs, list the **`refs/heads/b05*`** glob (~1 000 refs), batch-**create** 100 000 refs into an empty-refs working copy, **update** 1 000 existing refs, and **delete** 1 000 refs; a prepare hook restores the fixture before each timed iteration. Initial packed/loose listing baselines are in **`grit-utils/baselines/refs-before.json`**; files-backend listing and batch **`update-ref`** optimizations on the 100k-ref fixtures are in **`grit-utils/baselines/refs-after.json`**; reftable timings (Git **≥ 2.45**) are in **`grit-utils/baselines/refs-after-reftable.json`**. The **`grit-utils/baselines/refs-after-994.json`** snapshot captures [`gc::update_refs`](rustdoc:grit_lib::refs::gc::update_refs) batching through [`commit_ref_store_batch`](rustdoc:grit_lib::refs::commit_ref_store_batch) with a reused packed-refs cache instead of reparsing `packed-refs` per update.
 
 On the **100k packed** fixture, **update 1 000 refs** (`update-ref-update-1k-refs-100k-packed`) dropped from **~184 s** Grit mean (4 485× git) to **~1.5 s** (**~36×** git at ~41 ms); the regression was repeated full `packed-refs` parses per update in the batch path, not transaction semantics.
 

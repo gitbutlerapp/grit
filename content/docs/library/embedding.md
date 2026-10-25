@@ -34,7 +34,7 @@ Use `RepositoryOptions::with_environment` and `with_command_runner` on [`Reposit
 
 Non-fatal conditions are `Warning` values delivered to a `DiagnosticSink`. The default is `NullDiagnostics`. Tests and embedders often use `CollectingDiagnostics` to assert warnings without parsing stderr.
 
-Long-running work (status, fetch, pack indexing) takes a `ProgressSink` (for example `NullProgress`). Progress is separate from diagnostics: progress reports throughput; diagnostics report Git-style warnings.
+Long-running work (status, staging, checkout and switch, fetch, pack indexing) takes a [`ProgressSink`](rustdoc:grit_lib::progress::ProgressSink). Pass [`NullProgress`](rustdoc:grit_lib::progress::NullProgress) when you don't want progress updates. Progress is separate from diagnostics: progress reports throughput; diagnostics report Git-style warnings.
 
 ## CommandRunner
 

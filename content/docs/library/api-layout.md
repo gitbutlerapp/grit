@@ -1,6 +1,6 @@
 # grit-lib API layout
 
-Grit’s stable surface is the **canonical domain tree** (≤25 root modules plus [`prelude`](rustdoc:grit_lib::prelude)). Flat implementation modules such as `grit_lib::objects::odb` or `grit_lib::remote::fetch` are **private**; use `grit_lib::objects::odb` and `grit_lib::remote::fetch` instead. The map in [`grit-lib/canonical-modules.toml`](https://github.com/gitbutlerapp/grit/blob/main/grit-lib/canonical-modules.toml) lists every previously flat path and its canonical replacement.
+Grit’s stable surface is the **canonical domain tree** (≤25 root modules plus [`prelude`](rustdoc:grit_lib::prelude)). Flat implementation modules such as `odb` or `fetch` at the crate root are **private**; use `grit_lib::objects::odb` and `grit_lib::remote::fetch` instead. The map in [`grit-lib/canonical-modules.toml`](https://github.com/gitbutlerapp/grit/blob/main/grit-lib/canonical-modules.toml) lists every previously flat path and its canonical replacement.
 
 ## Domain roots
 
@@ -23,20 +23,22 @@ Cross-cutting entry points (`repo`, `error`, `porcelain`, `progress`, …) remai
 
 ## Flat → canonical map
 
-The authoritative map lives in [`grit-lib/canonical-modules.toml`](https://github.com/gitbutlerapp/grit/blob/main/grit-lib/canonical-modules.toml). CI checks that every `grit_lib::…` import in `grit-cli`, `grit-protocol`, `grit-examples`, `grit-utils`, `grit-test-support`, and `grit-lib/tests` appears in that file (`scripts/check_canonical_layout.py`, wired from `canonical_paths` integration test). Imports must use the **canonical domain path** (for example `grit_lib::objects::odb`, not `grit_lib::objects::odb`); `scripts/check_noncanonical_grit_lib_imports.py` enforces that (`no_noncanonical_grit_lib_imports` in the same integration test, and `scripts/tests/test_canonical_layout.py` in the docs CI job).
+The authoritative map lives in [`grit-lib/canonical-modules.toml`](https://github.com/gitbutlerapp/grit/blob/main/grit-lib/canonical-modules.toml). CI checks that every `grit_lib::…` import in `grit-cli`, `grit-protocol`, `grit-examples`, `grit-utils`, `grit-test-support`, and `grit-lib/tests` appears in that file (`scripts/check_canonical_layout.py`, wired from `canonical_paths` integration test). Imports must use the **canonical domain path** (for example `grit_lib::objects::odb`, not the private flat `odb` module); `scripts/check_noncanonical_grit_lib_imports.py` enforces that (`no_noncanonical_grit_lib_imports` in the same integration test, and `scripts/tests/test_canonical_layout.py` in the docs CI job).
 
 Examples:
 
-| Flat path | Canonical path |
+| Private flat module | Canonical path |
 | --- | --- |
-| `grit_lib::objects::odb` | `grit_lib::objects::odb` |
-| `grit_lib::objects::bitmap` | `grit_lib::objects::bitmap` |
-| `grit_lib::objects::bitmap` | `grit_lib::objects::bitmap` |
-| `grit_lib::revwalk::rev_list` | `grit_lib::revwalk::rev_list` |
-| `grit_lib::remote::fetch` | `grit_lib::remote::fetch` |
-| `grit_lib::worktree::ignore` | `grit_lib::worktree::ignore` |
-| `grit_lib::index::sparse_checkout` | `grit_lib::index::sparse_checkout` |
-| `grit_lib::refs::reflog` | `grit_lib::refs::reflog` |
+| `odb` | `grit_lib::objects::odb` |
+| `pack_bitmap` | `grit_lib::objects::bitmap` |
+| `bitmap_walk` | `grit_lib::objects::bitmap` |
+| `rev_list` | `grit_lib::revwalk::rev_list` |
+| `fetch` | `grit_lib::remote::fetch` |
+| `ignore` | `grit_lib::worktree::ignore` |
+| `sparse_checkout` | `grit_lib::index::sparse_checkout` |
+| `reflog` | `grit_lib::refs::reflog` |
+| `serve` | `grit_lib::remote::serve` |
+| `transfer` | `grit_lib::remote::transfer` |
 
 Removed **view modules** (use domains above instead): `object_store`, `references`, `worktree_index`, `revision`, `diffing`, `merging`, `configuration`, and the empty `plumbing` scaffold.
 
