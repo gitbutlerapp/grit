@@ -5,7 +5,8 @@ use anyhow::{Context, Result};
 use grit_lib::diff::DiffEntry;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::status::{
-    short_status_lines, status, status_options_from_config, Conflict, IgnoredMode, UntrackedMode,
+    short_status_lines, status, status_options_from_config, Conflict, ConflictGroup, ConflictKind,
+    IgnoredMode, StatusAction, StatusGuidance, UntrackedMode,
 };
 use grit_lib::progress::NeverCancel;
 use grit_lib::progress::NullProgress;
@@ -121,13 +122,10 @@ pub struct StatusOutcome {
     standing: BranchStanding,
     #[serde(skip)]
     #[schemars(skip)]
-    conflict_entries: Vec<Conflict>,
+    conflict_groups: Vec<ConflictGroup>,
     #[serde(skip)]
     #[schemars(skip)]
-    next_steps: Vec<NextStep>,
-    #[serde(skip)]
-    #[schemars(skip)]
-    alternative_steps: Vec<NextStep>,
+    guidance: StatusGuidance,
     #[serde(skip)]
     #[schemars(skip)]
     short_format: bool,
@@ -267,11 +265,6 @@ impl StatusOutcome {
         Ok(())
     }
 
-    /// Ref name for the `grit pull` hint (`pull` integrates the configured upstream).
-    fn pull_update_ref(&self) -> Option<&str> {
-        StatusHeader::pull_integration_ref(&self.standing)
-    }
-
     fn render_header(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
         let branch = self.branch.as_deref().unwrap_or_default();
         let base = self.header_comparison_name();
@@ -368,7 +361,7 @@ impl StatusOutcome {
         }
         ui::print_change_group(w, "Staged", &self.staged_entries, display)?;
         ui::print_change_group(w, "Changed (not staged)", &self.unstaged_entries, display)?;
-        if !self.conflict_entries.is_empty() {
+        if !self.conflict_groups.is_empty() {
             self.render_conflicts_by_kind(w, display)?;
         }
         ui::print_untracked(w, &self.untracked, display)?;
@@ -381,20 +374,13 @@ impl StatusOutcome {
         w: &mut dyn Write,
         display: Option<&PathDisplayOptions>,
     ) -> Result<()> {
-        use grit_lib::porcelain::status::ConflictKind;
-        use std::collections::BTreeMap;
-
-        let mut by_kind: BTreeMap<ConflictKind, Vec<&Conflict>> = BTreeMap::new();
-        for c in &self.conflict_entries {
-            by_kind.entry(c.kind).or_default().push(c);
-        }
         outln!(w, "Conflicts");
-        for (kind, entries) in by_kind {
-            outln!(w, "  {} ({})", kind_label(kind), entries.len());
-            for c in entries {
+        for group in &self.conflict_groups {
+            outln!(w, "  {} ({})", kind_label(group.kind), group.paths.len());
+            for path in &group.paths {
                 let path = display
-                    .map(|d| d.format_path_for_human(&c.path))
-                    .unwrap_or_else(|| c.path.clone());
+                    .map(|d| d.format_path_for_human(path))
+                    .unwrap_or_else(|| path.clone());
                 outln!(w, "    {path}");
             }
         }
@@ -403,53 +389,41 @@ impl StatusOutcome {
     }
 
     fn render_hints(&self, w: &mut dyn Write) -> Result<()> {
-        let sequential: Vec<_> = self
-            .next_steps
-            .iter()
-            .filter_map(NextStep::command)
-            .collect();
-        if !sequential.is_empty() {
-            outln!(w, "→ {}", sequential.join("  ·  "));
-            if let Some(alt) = self
-                .alternative_steps
-                .iter()
-                .filter_map(NextStep::command)
-                .next()
-            {
-                outln!(w, "or {alt}");
+        match &self.guidance {
+            StatusGuidance::Operation { steps, alternative } => {
+                let steps: Vec<_> = steps.iter().filter_map(NextStep::command).collect();
+                outln!(w, "→ {}", steps.join("  ·  "));
+                if let Some(alt) = alternative.as_ref().and_then(NextStep::command) {
+                    outln!(w, "or {alt}");
+                }
             }
-            return Ok(());
-        }
-        if !self.conflicts.is_empty() && self.merging {
-            outln!(w, "→ resolve conflicts, then grit merge --continue");
-            return Ok(());
-        }
-        if !self.conflicts.is_empty() {
-            outln!(
-                w,
-                "→ resolve conflicts, then grit add <file> to mark them resolved"
-            );
-            return Ok(());
-        }
-        if self.merging {
-            outln!(w, "→ grit merge --continue to finish the merge");
-            return Ok(());
-        }
-        let mut hints: Vec<String> = Vec::new();
-        if !self.unstaged_entries.is_empty() {
-            hints.push("grit restore <file> to discard worktree changes".to_owned());
-        }
-        if !self.unstaged_entries.is_empty() || !self.untracked.is_empty() {
-            hints.push("grit add <file> to stage".to_owned());
-        }
-        if !self.staged_entries.is_empty() {
-            hints.push("grit commit \"message\" to commit".to_owned());
-        }
-        if let Some(base) = self.pull_update_ref() {
-            hints.push(format!("grit pull to update from {base}"));
-        }
-        if !hints.is_empty() {
-            outln!(w, "→ {}", hints.join("  ·  "));
+            StatusGuidance::ResolveConflictsThenContinueMerge => {
+                outln!(w, "→ resolve conflicts, then grit merge --continue");
+            }
+            StatusGuidance::ResolveConflictsThenStage => {
+                outln!(
+                    w,
+                    "→ resolve conflicts, then grit add <file> to mark them resolved"
+                );
+            }
+            StatusGuidance::ContinueMerge => {
+                outln!(w, "→ grit merge --continue to finish the merge");
+            }
+            StatusGuidance::Actions(actions) if !actions.is_empty() => {
+                let hints: Vec<String> = actions
+                    .iter()
+                    .map(|action| match action {
+                        StatusAction::DiscardWorktreeChanges => {
+                            "grit restore <file> to discard worktree changes".to_owned()
+                        }
+                        StatusAction::Stage => "grit add <file> to stage".to_owned(),
+                        StatusAction::Commit => "grit commit \"message\" to commit".to_owned(),
+                        StatusAction::Pull { from } => format!("grit pull to update from {from}"),
+                    })
+                    .collect();
+                outln!(w, "→ {}", hints.join("  ·  "));
+            }
+            StatusGuidance::Actions(_) => {}
         }
         Ok(())
     }
@@ -473,50 +447,44 @@ impl StatusOutcome {
     }
 
     fn render_markdown_hints(&self, w: &mut dyn Write) -> Result<()> {
-        let sequential: Vec<_> = self
-            .next_steps
-            .iter()
-            .filter_map(NextStep::command)
-            .collect();
-        if !sequential.is_empty() {
-            outln!(w, "→ `{}`", sequential.join("`  ·  `"));
-            if let Some(alt) = self
-                .alternative_steps
-                .iter()
-                .filter_map(NextStep::command)
-                .next()
-            {
-                outln!(w, "or `{alt}`");
+        match &self.guidance {
+            StatusGuidance::Operation { steps, alternative } => {
+                let steps: Vec<_> = steps.iter().filter_map(NextStep::command).collect();
+                outln!(w, "→ `{}`", steps.join("`  ·  `"));
+                if let Some(alt) = alternative.as_ref().and_then(NextStep::command) {
+                    outln!(w, "or `{alt}`");
+                }
             }
-            return Ok(());
-        }
-        if !self.conflicts.is_empty() && self.merging {
-            outln!(w, "→ resolve conflicts, then grit merge --continue");
-            return Ok(());
-        }
-        if !self.conflicts.is_empty() {
-            outln!(
-                w,
-                "→ resolve conflicts, then grit add `PATH` to mark them resolved"
-            );
-            return Ok(());
-        }
-        if self.merging {
-            outln!(w, "→ grit merge --continue to finish the merge");
-            return Ok(());
-        }
-        let mut hints: Vec<String> = Vec::new();
-        if !self.unstaged_entries.is_empty() || !self.untracked.is_empty() {
-            hints.push("grit add `PATH` to stage".to_owned());
-        }
-        if !self.staged_entries.is_empty() {
-            hints.push("grit commit `\"message\"` to commit".to_owned());
-        }
-        if let Some(base) = self.pull_update_ref() {
-            hints.push(format!("grit pull to update from `{base}`"));
-        }
-        if !hints.is_empty() {
-            outln!(w, "→ {}", hints.join("  ·  "));
+            StatusGuidance::ResolveConflictsThenContinueMerge => {
+                outln!(w, "→ resolve conflicts, then grit merge --continue");
+            }
+            StatusGuidance::ResolveConflictsThenStage => {
+                outln!(
+                    w,
+                    "→ resolve conflicts, then grit add `PATH` to mark them resolved"
+                );
+            }
+            StatusGuidance::ContinueMerge => {
+                outln!(w, "→ grit merge --continue to finish the merge");
+            }
+            StatusGuidance::Actions(actions) => {
+                let hints: Vec<String> = actions
+                    .iter()
+                    .filter_map(|action| match action {
+                        StatusAction::DiscardWorktreeChanges => None,
+                        StatusAction::Stage => Some("grit add `PATH` to stage".to_owned()),
+                        StatusAction::Commit => {
+                            Some("grit commit `\"message\"` to commit".to_owned())
+                        }
+                        StatusAction::Pull { from } => {
+                            Some(format!("grit pull to update from `{from}`"))
+                        }
+                    })
+                    .collect();
+                if !hints.is_empty() {
+                    outln!(w, "→ {}", hints.join("  ·  "));
+                }
+            }
         }
         Ok(())
     }
@@ -637,7 +605,7 @@ impl StatusOutcome {
         }
         markdown::print_change_section(w, "Staged", &self.staged_entries, display)?;
         markdown::print_change_section(w, "Changed (not staged)", &self.unstaged_entries, display)?;
-        if !self.conflict_entries.is_empty() {
+        if !self.conflict_groups.is_empty() {
             self.render_markdown_conflicts_by_kind(w, display)?;
         }
         markdown::print_untracked(w, &self.untracked, display)?;
@@ -650,20 +618,18 @@ impl StatusOutcome {
         w: &mut dyn Write,
         display: Option<&PathDisplayOptions>,
     ) -> Result<()> {
-        use grit_lib::porcelain::status::ConflictKind;
-        use std::collections::BTreeMap;
-
-        let mut by_kind: BTreeMap<ConflictKind, Vec<&Conflict>> = BTreeMap::new();
-        for c in &self.conflict_entries {
-            by_kind.entry(c.kind).or_default().push(c);
-        }
         outln!(w, "## Conflicts");
-        for (kind, entries) in by_kind {
-            outln!(w, "- **{}** ({} paths)", kind_label(kind), entries.len());
-            for c in entries {
+        for group in &self.conflict_groups {
+            outln!(
+                w,
+                "- **{}** ({} paths)",
+                kind_label(group.kind),
+                group.paths.len()
+            );
+            for path in &group.paths {
                 let path = display
-                    .map(|d| d.format_path_for_human(&c.path))
-                    .unwrap_or_else(|| c.path.clone());
+                    .map(|d| d.format_path_for_human(path))
+                    .unwrap_or_else(|| path.clone());
                 let shown = markdown::format_inline_code(&path);
                 outln!(w, "  - {shown}");
             }
@@ -678,15 +644,15 @@ fn short_hex(oid: &str) -> &str {
     oid.get(..7).unwrap_or(oid)
 }
 
-fn kind_label(kind: grit_lib::porcelain::status::ConflictKind) -> &'static str {
+fn kind_label(kind: ConflictKind) -> &'static str {
     match kind {
-        grit_lib::porcelain::status::ConflictKind::BothModified => "both modified",
-        grit_lib::porcelain::status::ConflictKind::BothAdded => "both added",
-        grit_lib::porcelain::status::ConflictKind::BothDeleted => "both deleted",
-        grit_lib::porcelain::status::ConflictKind::AddedByUs => "added by us",
-        grit_lib::porcelain::status::ConflictKind::AddedByThem => "added by them",
-        grit_lib::porcelain::status::ConflictKind::DeletedByUs => "deleted by us",
-        grit_lib::porcelain::status::ConflictKind::DeletedByThem => "deleted by them",
+        ConflictKind::BothModified => "both modified",
+        ConflictKind::BothAdded => "both added",
+        ConflictKind::BothDeleted => "both deleted",
+        ConflictKind::AddedByUs => "added by us",
+        ConflictKind::AddedByThem => "added by them",
+        ConflictKind::DeletedByUs => "deleted by us",
+        ConflictKind::DeletedByThem => "deleted by them",
     }
 }
 
@@ -770,14 +736,9 @@ pub fn run(args: &StatusCliArgs) -> Result<StatusOutcome> {
 
     let operations = detect_in_progress(repo.git_dir());
     let merging = model.state.merge_in_progress;
-    let conflict_entries = model.conflict_details.clone();
-    let conflicts: Vec<ConflictJson> = conflict_entries.iter().map(conflict_json).collect();
+    let conflicts: Vec<ConflictJson> = model.conflict_details.iter().map(conflict_json).collect();
+    let conflict_groups = model.conflict_groups();
     let operation = model.operation.as_ref().map(operation_json);
-    let (next_steps, alternative_steps) = model
-        .operation
-        .as_ref()
-        .map(|op| (op.next_steps.clone(), op.alternatives.clone()))
-        .unwrap_or_else(|| (Vec::new(), Vec::new()));
 
     let standing = BranchStanding::compute(
         &repo,
@@ -809,11 +770,8 @@ pub fn run(args: &StatusCliArgs) -> Result<StatusOutcome> {
 
     let staged: Vec<ChangeJson> = model.staged.iter().map(change_json).collect();
     let unstaged: Vec<ChangeJson> = model.unstaged.iter().map(change_json).collect();
-    let clean = model.staged.is_empty()
-        && model.unstaged.is_empty()
-        && model.untracked.is_empty()
-        && conflict_entries.is_empty()
-        && !merging;
+    let clean = model.is_clean();
+    let guidance = model.guidance(&standing);
 
     let path_display = PathDisplayOptions::from_repo(&repo).ok();
     let short_lines = if args.short {
@@ -850,9 +808,8 @@ pub fn run(args: &StatusCliArgs) -> Result<StatusOutcome> {
         path_display,
         show_counts,
         standing: standing_for_outcome,
-        conflict_entries,
-        next_steps,
-        alternative_steps,
+        conflict_groups,
+        guidance,
         short_format: args.short,
         short_lines,
     })
