@@ -46,7 +46,7 @@ use crate::odb::UnreachablePackRetention;
 use crate::pack_bitmap::{PackBitmapWriteOptions, PackBitmapWriter};
 use crate::pack_delta::{pack_delta_search_parallel_options, pack_write_parallel_options};
 use crate::pack_object_select::{
-    enumerate_pack_objects, PackEnumerateOptions, PackObjectSelection,
+    enumerate_pack_objects_naming, NameTrees, PackEnumerateOptions, PackObjectSelection,
 };
 use crate::pack_objects::{
     build_pack_from_send_list_with_parallel_threads, PackBuildOptions, SerializedDeltaPack,
@@ -78,8 +78,12 @@ pub struct RepackOptions {
     pub keep_unreachable: bool,
     /// Worker threads for pack indexing (`None` reads `pack.threads` / CPU count).
     pub threads: Option<usize>,
-    /// Override pack-objects settings; `None` picks [`PackBuildOptions::for_repack_rewrite`] when
-    /// consolidating existing packs and [`PackBuildOptions::for_local_copy`] for loose-only builds.
+    /// Override the delta settings of a full repack; `None` uses
+    /// [`PackBuildOptions::for_local_copy`] (`pack.window` / `pack.depth` from config).
+    ///
+    /// A full repack honors `delta`, `window`, `max_depth`, `reuse_deltas`, `reuse_objects`,
+    /// `use_ofs_delta` and `use_bitmaps`. Objects already in a pack keep their stored form
+    /// when the reuse flags allow it; only the rest go through the `window` search.
     pub pack_build: Option<PackBuildOptions>,
     /// Config/environment for ingest and pack threads (defaults to repo config).
     pub merged_config: Option<ConfigSet>,
@@ -94,8 +98,9 @@ pub struct RepackOptions {
     /// packed object is still reachable and none would be dropped by the active prune policy.
     /// Explicit [`repack_all`] / [`repack`] leave this false so maintenance still runs.
     pub auto_skip: bool,
-    /// When true, pack with [`PackBuildOptions::for_local_copy`] but without reusing
-    /// on-disk deltas (Git `git repack -f`). Library callers only until the CLI exposes it.
+    /// When true, recompute every delta instead of keeping the ones stored in packs
+    /// (`git repack -f`, `grit repack --force`). Whole objects that stay whole are
+    /// still copied verbatim.
     pub force_recompress: bool,
 }
 
@@ -1246,10 +1251,14 @@ fn repack_object_list(
     keep_unreachable: bool,
     use_bitmaps: bool,
 ) -> Result<PackObjectSelection> {
+    // Roots arrive in hash-set order; sorting them makes the pack (and its name)
+    // the same on every run.
+    let mut roots = roots.to_vec();
+    roots.sort_unstable();
     let empty_shallow = HashSet::new();
-    let mut selection = enumerate_pack_objects(
+    let mut selection = enumerate_pack_objects_naming(
         odb,
-        roots,
+        &roots,
         &[],
         &PackEnumerateOptions {
             filter: None,
@@ -1259,6 +1268,7 @@ fn repack_object_list(
             exclude_objects: None,
             prefetch_walk_objects: false,
         },
+        NameTrees::Yes,
     )?;
     if keep_unreachable {
         append_repack_unreachable_retention(odb, &mut selection.send)?;

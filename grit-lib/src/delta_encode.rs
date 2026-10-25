@@ -109,6 +109,14 @@ impl DeltaIndex {
         }
     }
 
+    /// Like [`Self::new`], indexing a buffer the caller already shares instead of copying it.
+    #[must_use]
+    pub(crate) fn from_shared(base: std::sync::Arc<[u8]>) -> Self {
+        Self {
+            inner: crate::pack_roll_delta::BaseMatchCatalog::build_shared(base),
+        }
+    }
+
     /// Indexed stride used when subsampling large bases (Git indexes one entry per 16-byte rolling-hash window).
     #[must_use]
     pub fn index_stride(&self) -> usize {

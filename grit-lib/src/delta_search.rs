@@ -13,11 +13,9 @@
 //! threads, so the chosen deltas are the same on every machine.
 
 use std::cmp::Ordering as CmpOrdering;
-use std::io::Write;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use flate2::write::ZlibEncoder;
 use flate2::Compression;
 
 use crate::delta_encode::DeltaIndex;
@@ -32,8 +30,12 @@ const MIN_DELTA_OBJECT_SIZE: u64 = 50;
 /// memory than the delta could save.
 const MAX_DELTA_OBJECT_SIZE: u64 = 512 * 1024 * 1024;
 
-/// Preferred number of candidates searched as one unit of work.
-const CHUNK_TARGET: usize = 4096;
+/// Preferred payload bytes searched as one unit of work. Search cost grows with
+/// object size, so cutting by bytes keeps the chunks (and the threads) balanced.
+const CHUNK_BYTES: u64 = 4 * 1024 * 1024;
+
+/// Fewest candidates in a chunk, so a run of huge objects still shares a window.
+const CHUNK_MIN_OBJECTS: usize = 256;
 
 /// One object that may become a delta target or base.
 #[derive(Clone, Copy, Debug)]
@@ -115,20 +117,28 @@ fn kind_rank(kind: ObjectKind) -> u8 {
     }
 }
 
-/// Split `sorted` into chunks of about [`CHUNK_TARGET`] candidates, moving each cut
-/// forward to the next change of kind or path hash so one file's history is not
-/// split (up to twice the target size).
+/// Split `sorted` into chunks of about [`CHUNK_BYTES`] of payload (at least
+/// [`CHUNK_MIN_OBJECTS`] candidates), moving each cut forward to the next change
+/// of kind or path hash so one file's history is not split, as long as the chunk
+/// stays under twice its target.
 fn chunk_bounds(sorted: &[DeltaCandidate]) -> Vec<(usize, usize)> {
     let n = sorted.len();
-    let mut out = Vec::with_capacity(n / CHUNK_TARGET + 1);
+    let mut out = Vec::new();
     let mut start = 0;
     while start < n {
-        let mut end = (start + CHUNK_TARGET).min(n);
-        let hard_end = (start + 2 * CHUNK_TARGET).min(n);
-        while end < hard_end
+        let mut end = start;
+        let mut bytes = 0u64;
+        while end < n && (bytes < CHUNK_BYTES || end - start < CHUNK_MIN_OBJECTS) {
+            bytes += sorted[end].size;
+            end += 1;
+        }
+        let soft_bytes = bytes;
+        while end < n
+            && bytes < 2 * soft_bytes
             && sorted[end].kind == sorted[end - 1].kind
             && sorted[end].name_hash == sorted[end - 1].name_hash
         {
+            bytes += sorted[end].size;
             end += 1;
         }
         out.push((start, end));
@@ -248,6 +258,7 @@ fn search_chunk(
 ) -> Result<()> {
     let window = params.window + 1;
     let mut slots: Vec<Slot> = (0..window).map(|_| Slot::default()).collect();
+    let mut zlib = flate2::Compress::new(params.compression, true);
     let mut filled = 0usize;
     let mut idx = 0usize;
 
@@ -281,7 +292,7 @@ fn search_chunk(
                 target: target.id,
                 base: list[best.base_pos].id,
                 delta_len,
-                zlib: zlib_compress(&best.delta, params.compression)?,
+                zlib: zlib_compress(&mut zlib, &best.delta)?,
             });
             // A delta at the depth limit can never serve as a base: let the next
             // target take its slot.
@@ -361,7 +372,7 @@ fn try_pair(
     let source_data = slots[src].payload(odb, &source.oid)?;
     let index = slots[src]
         .index
-        .get_or_insert_with(|| DeltaIndex::new(&source_data));
+        .get_or_insert_with(|| DeltaIndex::from_shared(Arc::clone(&source_data)));
     let Some(delta) = index.encode(&target_data, max_size) else {
         return Ok(false);
     };
@@ -391,15 +402,32 @@ fn rotate_into_place(slots: &mut [Slot], from: usize, target: usize, window: usi
     }
 }
 
-fn zlib_compress(data: &[u8], compression: Compression) -> Result<Vec<u8>> {
-    let mut enc = ZlibEncoder::new(Vec::with_capacity(data.len() / 2 + 16), compression);
-    enc.write_all(data).map_err(Error::Io)?;
-    enc.finish().map_err(Error::Io)
+/// Compress `data` as one zlib stream, reusing `zlib`'s state between calls
+/// (setting up a deflate stream costs more than compressing a typical delta).
+fn zlib_compress(zlib: &mut flate2::Compress, data: &[u8]) -> Result<Vec<u8>> {
+    zlib.reset();
+    let mut out = Vec::with_capacity(data.len() / 2 + 64);
+    loop {
+        let consumed = zlib.total_in() as usize;
+        let status = zlib
+            .compress_vec(&data[consumed..], &mut out, flate2::FlushCompress::Finish)
+            .map_err(|e| Error::Zlib(e.to_string()))?;
+        if status == flate2::Status::StreamEnd {
+            return Ok(out);
+        }
+        out.reserve(out.capacity().max(64));
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used)]
+
+    use std::collections::HashMap;
+    use std::io::Read;
+
     use super::*;
+    use crate::repo::{InitOptions, Repository};
 
     fn cand(id: u32, kind: ObjectKind, name_hash: u32, size: u64) -> DeltaCandidate {
         DeltaCandidate {
@@ -429,31 +457,35 @@ mod tests {
     }
 
     #[test]
-    fn chunk_bounds_do_not_split_one_path_below_twice_the_target() {
-        let mut v: Vec<DeltaCandidate> = (0..CHUNK_TARGET as u32 + 10)
-            .map(|i| cand(i, ObjectKind::Blob, 1, 100))
+    fn chunk_bounds_cut_by_bytes_and_keep_one_path_together() {
+        // 1 KiB objects: a chunk fills after 4096 of them, then runs on to the end of
+        // the path it is in.
+        let mut v: Vec<DeltaCandidate> = (0..4100)
+            .map(|i| cand(i, ObjectKind::Blob, 1, 1024))
             .collect();
-        v.extend((0..5).map(|i| cand(90_000 + i, ObjectKind::Blob, 2, 100)));
+        v.extend((0..5).map(|i| cand(90_000 + i, ObjectKind::Blob, 2, 1024)));
         let bounds = chunk_bounds(&v);
-        assert_eq!(
-            bounds,
-            vec![(0, CHUNK_TARGET + 10), (CHUNK_TARGET + 10, v.len())]
-        );
+        assert_eq!(bounds, vec![(0, 4100), (4100, v.len())]);
     }
 
     #[test]
-    fn chunk_bounds_cut_long_histories_at_twice_the_target() {
-        let v: Vec<DeltaCandidate> = (0..5 * CHUNK_TARGET as u32)
-            .map(|i| cand(i, ObjectKind::Blob, 1, 100))
+    fn chunk_bounds_cap_long_histories_and_keep_a_minimum_size() {
+        let v: Vec<DeltaCandidate> = (0..20_000)
+            .map(|i| cand(i, ObjectKind::Blob, 1, 1024))
             .collect();
         let bounds = chunk_bounds(&v);
-        assert_eq!(bounds.first(), Some(&(0, 2 * CHUNK_TARGET)));
+        assert_eq!(bounds.first(), Some(&(0, 8192)));
         assert_eq!(bounds.last().map(|b| b.1), Some(v.len()));
         assert!(bounds.windows(2).all(|w| w[0].1 == w[1].0));
+
+        let huge: Vec<DeltaCandidate> = (0..600)
+            .map(|i| cand(i, ObjectKind::Blob, i, 64 * 1024 * 1024))
+            .collect();
+        assert_eq!(chunk_bounds(&huge)[0], (0, CHUNK_MIN_OBJECTS));
     }
 
     #[test]
-    fn rotate_into_place_moves_base_behind_target() {
+    fn rotate_into_place_makes_the_base_newest() {
         let mut slots: Vec<Slot> = (0..5)
             .map(|i| Slot {
                 pos: Some(i),
@@ -474,5 +506,129 @@ mod tests {
     fn searchable_skips_tiny_objects() {
         assert!(!searchable(&cand(0, ObjectKind::Blob, 0, 10)));
         assert!(searchable(&cand(0, ObjectKind::Blob, 0, 50)));
+    }
+
+    /// `count` versions of one file; each rewrites a line and appends one, so the
+    /// closest version is always the best base.
+    fn drifting_versions(repo: &Repository, count: usize) -> Vec<DeltaCandidate> {
+        let mut lines: Vec<String> = (0..80).map(|i| format!("original line {i}")).collect();
+        (0..count)
+            .map(|v| {
+                let at = (v * 7) % lines.len();
+                lines[at] = format!("rewritten in version {v}");
+                lines.push(format!("added in version {v}"));
+                let data = lines.join("\n");
+                let oid = repo.odb().write(ObjectKind::Blob, data.as_bytes()).unwrap();
+                DeltaCandidate {
+                    id: v as u32,
+                    oid,
+                    kind: ObjectKind::Blob,
+                    size: data.len() as u64,
+                    name_hash: 7,
+                    whole_in_pack: None,
+                    in_pack: None,
+                    dependent_depth: 0,
+                }
+            })
+            .collect()
+    }
+
+    fn params(max_depth: usize, threads: usize) -> DeltaSearchParams {
+        DeltaSearchParams {
+            window: 10,
+            max_depth,
+            window_memory: 0,
+            hash_len: 20,
+            compression: Compression::default(),
+            threads,
+        }
+    }
+
+    fn depth(edges: &HashMap<u32, u32>, mut id: u32) -> usize {
+        let mut d = 0;
+        while let Some(&base) = edges.get(&id) {
+            d += 1;
+            id = base;
+        }
+        d
+    }
+
+    #[test]
+    fn search_finds_valid_deltas_within_the_depth_limit() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let repo = Repository::init(dir.path(), &InitOptions::default()).unwrap();
+        let candidates = drifting_versions(&repo, 40);
+        let found = search_deltas(repo.odb(), candidates.clone(), params(3, 1)).unwrap();
+        assert!(found.len() >= 30, "only {} deltas", found.len());
+
+        let edges: HashMap<u32, u32> = found.iter().map(|d| (d.target, d.base)).collect();
+        for delta in &found {
+            assert!(depth(&edges, delta.target) <= 3);
+            let mut raw = Vec::new();
+            flate2::read::ZlibDecoder::new(&delta.zlib[..])
+                .read_to_end(&mut raw)
+                .unwrap();
+            assert_eq!(raw.len(), delta.delta_len);
+            let base = repo
+                .odb()
+                .read(&candidates[delta.base as usize].oid)
+                .unwrap();
+            let target = repo
+                .odb()
+                .read(&candidates[delta.target as usize].oid)
+                .unwrap();
+            let applied = crate::unpack_objects::apply_delta(&base.data, &raw).unwrap();
+            assert_eq!(applied, target.data);
+        }
+    }
+
+    #[test]
+    fn search_result_does_not_depend_on_thread_count() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let repo = Repository::init(dir.path(), &InitOptions::default()).unwrap();
+        let candidates = drifting_versions(&repo, 60);
+        let key = |found: Vec<FoundDelta>| {
+            let mut v: Vec<(u32, u32, Vec<u8>)> = found
+                .into_iter()
+                .map(|d| (d.target, d.base, d.zlib))
+                .collect();
+            v.sort();
+            v
+        };
+        let one = key(search_deltas(repo.odb(), candidates.clone(), params(50, 1)).unwrap());
+        let four = key(search_deltas(repo.odb(), candidates, params(50, 4)).unwrap());
+        assert_eq!(one, four);
+    }
+
+    #[test]
+    fn search_skips_pairs_already_compared_in_one_pack() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let repo = Repository::init(dir.path(), &InitOptions::default()).unwrap();
+        let mut candidates = drifting_versions(&repo, 20);
+        for c in &mut candidates {
+            c.whole_in_pack = Some(0);
+            c.in_pack = Some(0);
+        }
+        // One object from elsewhere (for example a loose object) may still pair.
+        candidates[5].whole_in_pack = None;
+        candidates[5].in_pack = None;
+        let found = search_deltas(repo.odb(), candidates, params(50, 1)).unwrap();
+        assert!(!found.is_empty());
+        assert!(
+            found.iter().all(|d| d.target == 5 || d.base == 5),
+            "{found:?}"
+        );
+    }
+
+    #[test]
+    fn search_leaves_room_for_dependent_chains() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let repo = Repository::init(dir.path(), &InitOptions::default()).unwrap();
+        let mut candidates = drifting_versions(&repo, 20);
+        for c in &mut candidates {
+            c.dependent_depth = 50;
+        }
+        let found = search_deltas(repo.odb(), candidates, params(50, 1)).unwrap();
+        assert!(found.is_empty(), "{found:?}");
     }
 }

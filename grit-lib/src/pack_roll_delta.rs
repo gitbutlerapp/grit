@@ -57,7 +57,12 @@ impl BaseMatchCatalog {
 
     #[must_use]
     pub fn build(base: &[u8]) -> Self {
-        let base: Arc<[u8]> = Arc::from(base);
+        Self::build_shared(Arc::from(base))
+    }
+
+    /// Like [`Self::build`], indexing a buffer the caller already shares instead of copying it.
+    #[must_use]
+    pub fn build_shared(base: Arc<[u8]>) -> Self {
         if base.len() < WINDOW + 1 {
             return Self {
                 base,

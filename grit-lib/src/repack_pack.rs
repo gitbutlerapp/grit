@@ -156,6 +156,7 @@ pub(crate) fn write_repack_pack(
 ) -> Result<Vec<(ObjectId, u64, u32)>> {
     let n = u32::try_from(objects.len())
         .map_err(|_| Error::CorruptObject("too many objects for one pack".to_owned()))?;
+    let _pack_context = odb.pack_read_context_guard();
     let mut packs = open_source_packs(odb)?;
     let stored = locate_objects(odb, objects, &mut packs)?;
     let mut plan = initial_plan(&stored, settings);
@@ -775,4 +776,87 @@ fn delta_header(
         header.extend_from_slice(objects[base].as_bytes());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn copy_delta(base: u32) -> Plan {
+        Plan::CopyDelta { base }
+    }
+
+    fn bases(plan: &[Plan]) -> Vec<Option<u32>> {
+        plan.iter().map(Plan::base).collect()
+    }
+
+    #[test]
+    fn limit_reused_chains_cuts_every_link_past_max_depth() {
+        // 0 <- 1 <- 2 <- 3 <- 4 <- 5, max depth 2: 3 is cut and starts a new chain.
+        let mut plan = vec![
+            Plan::CopyWhole,
+            copy_delta(0),
+            copy_delta(1),
+            copy_delta(2),
+            copy_delta(3),
+            copy_delta(4),
+        ];
+        let mut dependent = vec![0; plan.len()];
+        limit_reused_chains(&mut plan, &mut dependent, 2);
+        assert_eq!(
+            bases(&plan),
+            vec![None, Some(0), Some(1), None, Some(3), Some(4)]
+        );
+        assert!(matches!(plan[3], Plan::Compress));
+        assert_eq!(dependent[0], 2);
+        assert_eq!(dependent[3], 2);
+    }
+
+    #[test]
+    fn limit_reused_chains_records_deepest_branch_per_root() {
+        // Root 0 with branches 0 <- 1 and 0 <- 2 <- 3.
+        let mut plan = vec![Plan::CopyWhole, copy_delta(0), copy_delta(0), copy_delta(2)];
+        let mut dependent = vec![0; plan.len()];
+        limit_reused_chains(&mut plan, &mut dependent, 50);
+        assert_eq!(bases(&plan), vec![None, Some(0), Some(0), Some(2)]);
+        assert_eq!(dependent, vec![2, 0, 0, 0]);
+    }
+
+    #[test]
+    fn limit_reused_chains_breaks_cycles() {
+        let mut plan = vec![copy_delta(1), copy_delta(0), copy_delta(1)];
+        let mut dependent = vec![0; plan.len()];
+        limit_reused_chains(&mut plan, &mut dependent, 50);
+        let kept: Vec<bool> = plan
+            .iter()
+            .map(|p| matches!(p, Plan::CopyDelta { .. }))
+            .collect();
+        assert_eq!(kept.iter().filter(|k| !**k).count(), 1, "one link is cut");
+        assert!(matches!(plan[2], Plan::CopyDelta { base: 1 }));
+    }
+
+    #[test]
+    fn limit_reused_chains_with_zero_depth_keeps_no_delta() {
+        let mut plan = vec![Plan::CopyWhole, copy_delta(0), copy_delta(1)];
+        let mut dependent = vec![0; plan.len()];
+        limit_reused_chains(&mut plan, &mut dependent, 0);
+        assert_eq!(bases(&plan), vec![None, None, None]);
+    }
+
+    #[test]
+    fn write_order_puts_bases_first_and_drops_skipped() {
+        // 0 deltas against 3, 3 against 2; 1 is a duplicate.
+        let plan = vec![
+            copy_delta(3),
+            Plan::Skip,
+            Plan::CopyWhole,
+            Plan::NewDelta {
+                base: 2,
+                delta_len: 4,
+                zlib: Box::new([]),
+            },
+            Plan::Compress,
+        ];
+        assert_eq!(write_order(&plan, 5), vec![2, 3, 0, 4]);
+    }
 }
