@@ -48,9 +48,6 @@ pub struct PackBuildOptions {
     pub reuse_objects: bool,
     /// Use pack reachability bitmaps for object enumeration when present.
     pub use_bitmaps: bool,
-    /// When set by maintenance repack, stream verbatim bytes from the sole on-disk pack
-    /// (`window == 0`, zero loose objects). Not for general pack-objects callers.
-    pub stream_verbatim_single_pack: bool,
 }
 
 impl Default for PackBuildOptions {
@@ -65,7 +62,6 @@ impl Default for PackBuildOptions {
             reuse_deltas: true,
             reuse_objects: true,
             use_bitmaps: true,
-            stream_verbatim_single_pack: false,
         }
     }
 }
@@ -108,25 +104,6 @@ impl PackBuildOptions {
             reuse_deltas: max_depth > 0,
             reuse_objects: true,
             use_bitmaps: true,
-            ..Default::default()
-        }
-    }
-
-    /// Repack when pack files and loose objects both exist: reuse on-disk deltas and run the
-    /// configured delta window for new loose blobs.
-    #[must_use]
-    pub fn for_repack_with_loose(cfg: Option<&crate::config::ConfigSet>) -> Self {
-        let (window, max_depth) = Self::window_and_depth_from_config(cfg);
-        Self {
-            thin: false,
-            delta: true,
-            window,
-            max_depth,
-            use_ofs_delta: true,
-            reuse_deltas: max_depth > 0,
-            reuse_objects: true,
-            use_bitmaps: true,
-            stream_verbatim_single_pack: false,
             ..Default::default()
         }
     }
@@ -370,7 +347,7 @@ impl<'a> PackObjects<'a> {
             &send,
             &have_closure,
             &opts,
-            &oid_hash_map_from(&selection.blob_name_hashes),
+            &oid_hash_map_from(&selection.name_hashes),
             self.opts.search_threads,
             selection.walk_prefetch,
         )?;
@@ -491,7 +468,7 @@ fn write_pack_with_shallow_and_filter(
         &selection.send,
         &selection.have_closure,
         opts,
-        &oid_hash_map_from(&selection.blob_name_hashes),
+        &oid_hash_map_from(&selection.name_hashes),
         None,
         HashMap::new(),
     )?;
@@ -660,31 +637,6 @@ pub(crate) fn serialize_delta_plan_stream(
     })
 }
 
-/// Like [`serialize_delta_plan_stream`], but writes the pack to `staging_path` instead of memory.
-pub(crate) fn serialize_delta_plan_stream_to_path(
-    staging_path: &std::path::Path,
-    odb: &Odb,
-    plan: &DeltaPlan,
-    opts: &PackBuildOptions,
-    reuse: Option<&mut crate::pack_reuse::StreamingReuse>,
-) -> Result<SerializedDeltaPack> {
-    use std::fs::File;
-    use std::io::BufWriter;
-
-    use crate::hash::HashingWriter;
-
-    let file = File::create(staging_path).map_err(Error::Io)?;
-    let mut hashed = HashingWriter::new(odb.hash_algo(), BufWriter::new(file));
-    let index_rows = write_delta_plan_stream_body(&mut hashed, odb, plan, opts, reuse)?;
-    let (mut inner, _digest) = hashed.finish().map_err(Error::Io)?;
-    inner.flush().map_err(Error::Io)?;
-    Ok(SerializedDeltaPack {
-        bytes: Vec::new(),
-        index_rows,
-        staging_path: Some(staging_path.to_path_buf()),
-    })
-}
-
 fn write_planned_entries(
     w: &mut dyn Write,
     odb: &Odb,
@@ -705,7 +657,7 @@ fn write_planned_entries(
         let mut chunk = Vec::new();
         if entry.base.is_none() {
             if let Some(reuse) = reuse.as_mut() {
-                if let Some(bytes) = reuse.try_emit_whole(&entry.oid, start, opts)? {
+                if let Some(bytes) = reuse.try_emit_whole(&entry.oid, opts)? {
                     chunk = bytes;
                 }
             }
@@ -730,74 +682,62 @@ fn write_planned_entries(
             continue;
         };
         let in_pack_offset = oid_to_offset.get(&base_oid).copied();
-        if let Some(reuse) = reuse.as_mut() {
-            if let Some(bytes) =
-                reuse.try_emit_delta(&entry.oid, start, in_pack_offset, opts, &oid_to_offset)?
-            {
-                chunk = bytes;
-            }
-        }
-        if chunk.is_empty() {
-            if let Some((delta_size, pack_bytes, zlib_start, zlib_end)) = &entry.reused_delta_zlib {
-                let delta_len = usize::try_from(*delta_size).map_err(|_| {
-                    Error::CorruptObject("reused delta size exceeds usize".to_owned())
+        if let Some((delta_size, pack_bytes, zlib_start, zlib_end)) = &entry.reused_delta_zlib {
+            let delta_len = usize::try_from(*delta_size)
+                .map_err(|_| Error::CorruptObject("reused delta size exceeds usize".to_owned()))?;
+            if let Some(base_off) = in_pack_offset.filter(|_| opts.use_ofs_delta) {
+                let dist = start.checked_sub(base_off).ok_or_else(|| {
+                    Error::CorruptObject("ofs-delta distance underflow".to_owned())
                 })?;
-                if let Some(base_off) = in_pack_offset.filter(|_| opts.use_ofs_delta) {
-                    let dist = start.checked_sub(base_off).ok_or_else(|| {
-                        Error::CorruptObject("ofs-delta distance underflow".to_owned())
-                    })?;
-                    encode_pack_object_header(&mut chunk, 6, delta_len);
-                    encode_ofs_delta_distance(&mut chunk, dist);
-                    if let Some(reuse) = reuse.as_mut() {
-                        reuse.record_ofs_fixup();
-                    }
-                } else {
-                    encode_pack_object_header(&mut chunk, 7, delta_len);
-                    chunk.extend_from_slice(base_oid.as_bytes());
-                }
-                chunk.extend_from_slice(&pack_bytes[*zlib_start..*zlib_end]);
+                encode_pack_object_header(&mut chunk, 6, delta_len);
+                encode_ofs_delta_distance(&mut chunk, dist);
                 if let Some(reuse) = reuse.as_mut() {
-                    reuse.record_verbatim_zlib((zlib_end - zlib_start) as u64);
+                    reuse.record_ofs_fixup();
                 }
             } else {
-                let target_data = planned_object_payload(odb, entry.oid, entry, &plan.payloads)?;
-                let delta = if let Some(reused) = &entry.reused_delta {
-                    reused.clone()
-                } else {
-                    let base_data = planned_object_payload(odb, base_oid, entry, &plan.payloads)?;
-                    if target_data.starts_with(base_data.as_ref())
-                        && target_data.len() > base_data.len()
-                    {
-                        encode_prefix_extension_delta(base_data.as_ref(), &target_data)?
-                    } else {
-                        delta_index_by_base
-                            .entry(base_oid)
-                            .or_insert_with(|| DeltaIndex::new(base_data.as_ref()))
-                            .encode(&target_data, 0)
-                            .ok_or_else(|| {
-                                Error::CorruptObject(
-                                    "failed to encode pack delta for object".into(),
-                                )
-                            })?
-                    }
-                };
-                if let Some(base_off) = in_pack_offset.filter(|_| opts.use_ofs_delta) {
-                    let dist = start.checked_sub(base_off).ok_or_else(|| {
-                        Error::CorruptObject("ofs-delta distance underflow".to_owned())
-                    })?;
-                    encode_pack_object_header(&mut chunk, 6, delta.len());
-                    encode_ofs_delta_distance(&mut chunk, dist);
-                } else {
-                    encode_pack_object_header(&mut chunk, 7, delta.len());
-                    if base_oid.as_bytes().len() != algo.len() {
-                        return Err(Error::CorruptObject(
-                            "ref-delta base oid width mismatch".to_owned(),
-                        ));
-                    }
-                    chunk.extend_from_slice(base_oid.as_bytes());
-                }
-                write_zlib(&mut chunk, &delta, compression)?;
+                encode_pack_object_header(&mut chunk, 7, delta_len);
+                chunk.extend_from_slice(base_oid.as_bytes());
             }
+            chunk.extend_from_slice(&pack_bytes[*zlib_start..*zlib_end]);
+            if let Some(reuse) = reuse.as_mut() {
+                reuse.record_verbatim_zlib((zlib_end - zlib_start) as u64);
+            }
+        } else {
+            let target_data = planned_object_payload(odb, entry.oid, entry, &plan.payloads)?;
+            let delta = if let Some(reused) = &entry.reused_delta {
+                reused.clone()
+            } else {
+                let base_data = planned_object_payload(odb, base_oid, entry, &plan.payloads)?;
+                if target_data.starts_with(base_data.as_ref())
+                    && target_data.len() > base_data.len()
+                {
+                    encode_prefix_extension_delta(base_data.as_ref(), &target_data)?
+                } else {
+                    delta_index_by_base
+                        .entry(base_oid)
+                        .or_insert_with(|| DeltaIndex::new(base_data.as_ref()))
+                        .encode(&target_data, 0)
+                        .ok_or_else(|| {
+                            Error::CorruptObject("failed to encode pack delta for object".into())
+                        })?
+                }
+            };
+            if let Some(base_off) = in_pack_offset.filter(|_| opts.use_ofs_delta) {
+                let dist = start.checked_sub(base_off).ok_or_else(|| {
+                    Error::CorruptObject("ofs-delta distance underflow".to_owned())
+                })?;
+                encode_pack_object_header(&mut chunk, 6, delta.len());
+                encode_ofs_delta_distance(&mut chunk, dist);
+            } else {
+                encode_pack_object_header(&mut chunk, 7, delta.len());
+                if base_oid.as_bytes().len() != algo.len() {
+                    return Err(Error::CorruptObject(
+                        "ref-delta base oid width mismatch".to_owned(),
+                    ));
+                }
+                chunk.extend_from_slice(base_oid.as_bytes());
+            }
+            write_zlib(&mut chunk, &delta, compression)?;
         }
         w.write_all(&chunk).map_err(Error::Io)?;
         index_rows.push((entry.oid, start, crc32fast::hash(&chunk)));
@@ -873,7 +813,7 @@ pub(crate) fn build_pack_with_write_threads_full(
         &selection.send,
         &selection.have_closure,
         opts,
-        &selection.blob_name_hashes,
+        &selection.name_hashes,
         None,
         write_threads,
         selection.walk_prefetch,
@@ -909,7 +849,7 @@ pub fn build_pack_with_parallel_threads(
         &selection.send,
         &selection.have_closure,
         opts,
-        &selection.blob_name_hashes,
+        &selection.name_hashes,
         search_threads,
         write_threads,
         selection.walk_prefetch,
@@ -991,24 +931,6 @@ pub(crate) fn build_pack_from_send_list_full(
         search_threads,
         walk_prefetch,
     )?;
-    let lazy_stream = opts.window == 0 && !opts.thin && opts.reuse_deltas && opts.reuse_objects;
-    if lazy_stream && opts.stream_verbatim_single_pack {
-        if let Some(mut reuse) = crate::pack_reuse::try_streaming_reuse_for_repack(odb, send)? {
-            let objects_dir = odb
-                .files_objects_dir()
-                .ok_or(Error::UnsupportedObjectStore {
-                    operation: "pack_stream_staging",
-                })?;
-            let pack_dir = objects_dir.join("pack");
-            std::fs::create_dir_all(&pack_dir).map_err(Error::Io)?;
-            static STAGING_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-            let seq = STAGING_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-            let staging = pack_dir.join(format!("tmp_repack_stream_{}_{seq}", std::process::id()));
-            let pack =
-                serialize_delta_plan_stream_to_path(&staging, odb, &plan, opts, Some(&mut reuse))?;
-            return Ok(pack);
-        }
-    }
     crate::pack_delta::serialize_pack_with_deltas(
         odb,
         &plan.entries,
@@ -1857,7 +1779,7 @@ pub(crate) mod tests {
             &selection.send,
             &selection.have_closure,
             &opts,
-            &oid_hash_map_from(&selection.blob_name_hashes),
+            &oid_hash_map_from(&selection.name_hashes),
             None,
             selection.walk_prefetch,
         )

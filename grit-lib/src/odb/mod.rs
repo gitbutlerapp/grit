@@ -1096,6 +1096,13 @@ impl Odb {
         Ok(indexes.first().map(|idx| idx.idx_path.clone()))
     }
 
+    /// Drop the resolved delta bases cached for the primary `objects/` packs, keeping
+    /// indexes and pack bytes. Frees memory between phases of a long operation whose
+    /// next reads will not revisit the same bases.
+    pub(crate) fn clear_delta_base_cache(&self) {
+        self.pack_store.delta_bases().clear();
+    }
+
     /// Drop cached pack listings, parsed indexes, pack bytes, delta bases, and MIDX layers.
     ///
     /// Call after in-process repack, garbage collection, or [`crate::index_pack::install_pack_bytes`]

@@ -4,6 +4,7 @@
 //! exploding every object into loose storage. Small receive-pack pushes may still
 //! use [`crate::unpack_objects`] via [`crate::receive_pack::should_use_unpack_objects`].
 
+use std::borrow::Cow;
 use std::collections::HashSet;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
@@ -128,7 +129,9 @@ pub struct IngestPackOptions {
     /// When true, write an empty sibling `.promisor` file next to the installed pack.
     pub mark_promisor_pack: bool,
     /// Rows for a pack built in-process (`oid`, pack offset, per-object CRC32). When set, the
-    /// pack body is not rescanned to rebuild the index (local repack/gc only).
+    /// pack body is not rescanned to rebuild the index (local repack/gc only); together with
+    /// [`Self::skip_post_index_verify`] the pack's trailer is trusted as written too, so the
+    /// body is not read at all.
     pub trusted_index_rows: Option<Vec<(ObjectId, u64, u32)>>,
 }
 
@@ -359,11 +362,32 @@ pub fn install_pack_path_with_progress(
             let _ = std::fs::remove_file(&owned);
         }
         poll_ingest_cancel(&mut progress, cancel)?;
-        let mut indexed = PackData::open(&stage_pack)?;
         let parallelism = opts.index_parallelism(odb)?;
         record_resolved_ingest_threads(parallelism.threads().get());
         let sort_threads = parallelism.threads().get();
-        let (entries, oids, object_counts, trailer) = {
+        // A pack built in-process with trusted rows and its trailer checked at
+        // write time is installed without reading its body again.
+        let trusted_as_written = opts
+            .trusted_index_rows
+            .as_deref()
+            .filter(|_| opts.skip_post_index_verify);
+        let (entries, oids, object_counts, trailer) = if let Some(rows) = trusted_as_written {
+            if rows.len()
+                != u32::from_be_bytes([header[8], header[9], header[10], header[11]]) as usize
+            {
+                return Err(Error::CorruptObject(
+                    "trusted index row count does not match pack header".to_owned(),
+                ));
+            }
+            let oids: HashSet<ObjectId> = rows.iter().map(|(oid, _, _)| *oid).collect();
+            (
+                Cow::Borrowed(rows),
+                oids,
+                ObjectKindCounts::default(),
+                trailer.clone(),
+            )
+        } else {
+            let mut indexed = PackData::open(&stage_pack)?;
             let pack_bytes: &[u8] = indexed.deref();
             verify_trailer(odb.hash_algo(), pack_bytes).map_err(|e| {
                 Error::CorruptObject(format!(
@@ -387,7 +411,7 @@ pub fn install_pack_path_with_progress(
                 }
                 let oids: HashSet<ObjectId> = rows.iter().map(|(oid, _, _)| *oid).collect();
                 let object_counts = ObjectKindCounts::default();
-                (rows.clone(), oids, object_counts, trailer)
+                (Cow::Borrowed(rows.as_slice()), oids, object_counts, trailer)
             } else {
                 let mut records = crate::pack_index_build::build_pack_index_records_with_progress(
                     pack_bytes,
@@ -426,10 +450,9 @@ pub fn install_pack_path_with_progress(
                          }| (oid, offset, crc32),
                     )
                     .collect();
-                (entries, oids, object_counts, trailer)
+                (Cow::Owned(entries), oids, object_counts, trailer)
             }
         };
-        drop(indexed);
         poll_ingest_cancel(&mut progress, cancel)?;
         write_v2_pack_index_with_trailer(&stage_idx, &entries, &trailer, hb, Some(sort_threads))?;
         poll_ingest_cancel(&mut progress, cancel)?;

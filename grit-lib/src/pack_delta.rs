@@ -1416,7 +1416,7 @@ mod tests {
             &selection.send,
             &selection.have_closure,
             &opts,
-            &crate::objects::oid_hash_map_from(&selection.blob_name_hashes),
+            &crate::objects::oid_hash_map_from(&selection.name_hashes),
             None,
             selection.walk_prefetch,
         )

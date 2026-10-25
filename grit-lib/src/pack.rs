@@ -2473,7 +2473,7 @@ fn remember_pack_read_info(pack_path: &Path, offset: u64, info: ObjectInfo) {
 /// Read the delta result-size varint from a pack zlib stream without inflating the full delta.
 ///
 /// Advances `*pos` past the compressed bytes consumed from `bytes`.
-fn read_delta_result_size_from_pack_zlib(bytes: &[u8], pos: &mut usize) -> Result<u64> {
+pub(crate) fn read_delta_result_size_from_pack_zlib(bytes: &[u8], pos: &mut usize) -> Result<u64> {
     DELTA_SIZE_ZLIB.with(|slot| slot.borrow_mut().read_pack_delta_result_size(bytes, pos))
 }
 
@@ -4665,7 +4665,7 @@ pub fn packed_ref_delta_reuse_slice(
 
 /// Prefer older packs when the same OID exists as a full object in a fresh repack and as a delta
 /// in an earlier thin pack (t5316).
-fn sort_pack_indexes_oldest_first(indexes: &mut [Arc<PackIndex>]) {
+pub(crate) fn sort_pack_indexes_oldest_first(indexes: &mut [Arc<PackIndex>]) {
     indexes.sort_by(|a, b| {
         let ta = fs::metadata(&a.pack_path)
             .and_then(|m| m.modified())
@@ -4888,29 +4888,6 @@ pub fn read_packed_delta_dependency(
             Ok(Some(PackedDeltaDependency::RefBase { base_oid }))
         }
         _ => Ok(None),
-    }
-}
-
-/// Byte offset where the zlib payload begins for a pack object at `object_offset`.
-pub(crate) fn pack_entry_zlib_start(
-    pack_bytes: &[u8],
-    object_offset: u64,
-    hash_bytes: usize,
-) -> Result<usize> {
-    let mut pos = object_offset as usize;
-    let (ty, _) = parse_pack_object_header(pack_bytes, &mut pos)?;
-    match ty {
-        PackedType::OfsDelta => {
-            parse_ofs_delta_base(pack_bytes, &mut pos, object_offset)?;
-            Ok(pos)
-        }
-        PackedType::RefDelta => {
-            if pos + hash_bytes > pack_bytes.len() {
-                return Err(Error::CorruptObject("truncated ref-delta base oid".into()));
-            }
-            Ok(pos + hash_bytes)
-        }
-        _ => Ok(pos),
     }
 }
 

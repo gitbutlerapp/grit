@@ -38,20 +38,25 @@ use crate::midx::{
     clear_pack_midx_state, write_multi_pack_index_with_options, MidxBitmapWriteOutcome,
     WriteMultiPackIndexOptions, WriteMultiPackIndexResult,
 };
-use crate::objects::{oid_hash_map, parse_commit, parse_tag, parse_tree, ObjectId, ObjectKind};
+use crate::objects::{
+    oid_hash_map, parse_commit, parse_tag, parse_tree, ObjectId, ObjectKind, OidHashSet,
+};
 use crate::odb::Odb;
 use crate::odb::UnreachablePackRetention;
 use crate::pack_bitmap::{PackBitmapWriteOptions, PackBitmapWriter};
-use crate::pack_object_select::{enumerate_pack_objects, PackEnumerateOptions};
+use crate::pack_delta::{pack_delta_search_parallel_options, pack_write_parallel_options};
+use crate::pack_object_select::{
+    enumerate_pack_objects, PackEnumerateOptions, PackObjectSelection,
+};
 use crate::pack_objects::{
-    build_pack_from_send_list_full, build_pack_from_send_list_with_parallel_threads,
-    build_pack_with_write_threads_full, PackBuildOptions, SerializedDeltaPack,
+    build_pack_from_send_list_with_parallel_threads, PackBuildOptions, SerializedDeltaPack,
 };
 use crate::pack_rev::write_pack_rev_sidecar_for_index_path;
 use crate::prune_packed::{prune_packed_objects, PrunePackedOptions};
 use crate::reflog::{
     expire_reflog_git, list_reflog_refs, load_gc_reflog_expire_config, ReflogExpireParams,
 };
+use crate::repack_pack::{write_repack_pack, RepackPackSettings};
 use crate::repo::Repository;
 use time::OffsetDateTime;
 
@@ -668,27 +673,11 @@ fn repack_detail(repo: &Repository, opts: &RepackOptions) -> Result<RepackDetail
         .merged_config
         .clone()
         .or_else(|| repo.config().ok().map(|c| (*c).clone()));
-    let mut pack_opts = opts.pack_build.unwrap_or_else(|| {
-        if opts.incremental || packs_before == 0 {
-            PackBuildOptions::for_local_copy(cfg.as_ref())
-        } else if loose_before > 0 {
-            PackBuildOptions::for_repack_with_loose(cfg.as_ref())
-        } else if packs_before > 0 && loose_before == 0 && !opts.force_recompress {
-            // Repack consolidated on-disk pack(s) with nothing loose: reuse pack bytes
-            // (Git `--window=0`), not a full delta search over every stored object.
-            PackBuildOptions::for_repack_rewrite(cfg.as_ref())
-        } else {
-            // Loose objects and/or forced full recompression: delta consolidation like Git
-            // `repack -adf` on loose or `-f` on existing packs.
-            let mut build = PackBuildOptions::for_local_copy(cfg.as_ref());
-            if opts.force_recompress {
-                build.reuse_deltas = false;
-            }
-            build
-        }
-    });
-    if !opts.incremental && packs_before > 0 && loose_before == 0 {
-        pack_opts.stream_verbatim_single_pack = true;
+    let mut pack_opts = opts
+        .pack_build
+        .unwrap_or_else(|| PackBuildOptions::for_local_copy(cfg.as_ref()));
+    if opts.force_recompress {
+        pack_opts.reuse_deltas = false;
     }
 
     let run_incremental = opts.incremental;
@@ -712,7 +701,7 @@ fn repack_detail(repo: &Repository, opts: &RepackOptions) -> Result<RepackDetail
         } else if run_incremental {
             odb.enumerate_local_loose_objects()?.len()
         } else {
-            estimate_repack_object_count(odb, &roots, opts.keep_unreachable, &pack_opts)?
+            estimate_repack_object_count(odb, &roots, opts.keep_unreachable, pack_opts.use_bitmaps)?
         };
         return Ok(RepackDetail {
             report,
@@ -736,7 +725,15 @@ fn repack_detail(repo: &Repository, opts: &RepackOptions) -> Result<RepackDetail
             staging_path: None,
         }
     } else {
-        build_repack_pack(odb, &roots, opts.keep_unreachable, &pack_opts, opts.threads)?
+        build_repack_pack(
+            odb,
+            &pack_dir,
+            &roots,
+            opts.keep_unreachable,
+            &pack_opts,
+            opts.threads,
+            cfg.as_ref(),
+        )?
     };
     let pack_bytes_len = built_pack
         .staging_path
@@ -765,9 +762,9 @@ fn repack_detail(repo: &Repository, opts: &RepackOptions) -> Result<RepackDetail
             threads: opts.threads,
             merged_config: cfg.clone(),
             environment: opts.environment.clone(),
-            trusted_index_rows: trusted_rows.clone(),
             // Locally built pack: trailer checked at write time; index rows match the stream.
             skip_post_index_verify: trusted_rows.is_some(),
+            trusted_index_rows: trusted_rows,
             ..IngestPackOptions::default()
         };
         let ingested = if let Some(staging) = built_pack.staging_path.as_ref() {
@@ -1197,18 +1194,60 @@ fn count_loose_objects(odb: &Odb) -> Result<usize> {
 
 fn build_repack_pack(
     odb: &Odb,
+    pack_dir: &Path,
     roots: &[ObjectId],
     keep_unreachable: bool,
     opts: &PackBuildOptions,
     threads: Option<usize>,
+    cfg: Option<&ConfigSet>,
 ) -> Result<SerializedDeltaPack> {
-    if !keep_unreachable {
-        return build_pack_with_write_threads_full(odb, roots, &[], opts, threads);
+    let selection = repack_object_list(odb, roots, keep_unreachable, opts.use_bitmaps)?;
+    odb.clear_delta_base_cache();
+    let max_depth = if opts.delta { opts.max_depth } else { 0 };
+    let settings = RepackPackSettings {
+        window: opts.window,
+        max_depth,
+        reuse_deltas: opts.reuse_deltas,
+        reuse_objects: opts.reuse_objects,
+        use_ofs_delta: opts.use_ofs_delta,
+        window_memory: cfg.map_or(0, ConfigSet::pack_window_memory_bytes),
+        search_threads: pack_delta_search_parallel_options(odb, threads)?
+            .threads
+            .get(),
+        write_threads: pack_write_parallel_options(odb, threads)?.threads.get(),
+    };
+    fs::create_dir_all(pack_dir).map_err(Error::Io)?;
+    let staging = pack_dir.join(format!("tmp_repack_{}", std::process::id()));
+    let written = write_repack_pack(
+        odb,
+        &selection.send,
+        &selection.name_hashes,
+        &settings,
+        &staging,
+    );
+    match written {
+        Ok(index_rows) => Ok(SerializedDeltaPack {
+            bytes: Vec::new(),
+            index_rows,
+            staging_path: Some(staging),
+        }),
+        Err(err) => {
+            let _ = fs::remove_file(&staging);
+            Err(err)
+        }
     }
+}
+
+/// Objects a full repack writes: everything reachable from `roots`, plus every
+/// other packed and loose object when `keep_unreachable` is set.
+fn repack_object_list(
+    odb: &Odb,
+    roots: &[ObjectId],
+    keep_unreachable: bool,
+    use_bitmaps: bool,
+) -> Result<PackObjectSelection> {
     let empty_shallow = HashSet::new();
-    let reuse_only_repack =
-        opts.window == 0 && !opts.thin && opts.reuse_deltas && opts.reuse_objects;
-    let selection = enumerate_pack_objects(
+    let mut selection = enumerate_pack_objects(
         odb,
         roots,
         &[],
@@ -1216,28 +1255,20 @@ fn build_repack_pack(
             filter: None,
             shallow_grafts: &empty_shallow,
             have_shallow_grafts: Some(&empty_shallow),
-            use_bitmaps: opts.use_bitmaps,
+            use_bitmaps,
             exclude_objects: None,
-            prefetch_walk_objects: !reuse_only_repack,
+            prefetch_walk_objects: false,
         },
     )?;
-    let mut send = selection.send;
-    append_repack_unreachable_retention(odb, &mut send)?;
-    build_pack_from_send_list_full(
-        odb,
-        &send,
-        &selection.have_closure,
-        opts,
-        &selection.blob_name_hashes,
-        threads,
-        threads,
-        selection.walk_prefetch,
-    )
+    if keep_unreachable {
+        append_repack_unreachable_retention(odb, &mut selection.send)?;
+    }
+    Ok(selection)
 }
 
 /// Append packed and loose objects not already selected for the repack send list.
 fn append_repack_unreachable_retention(odb: &Odb, send: &mut Vec<ObjectId>) -> Result<()> {
-    let mut in_send: HashSet<ObjectId> = send.iter().copied().collect();
+    let mut in_send: OidHashSet = send.iter().copied().collect();
     odb.primary()?
         .packed_objects()
         .for_each_removable_pack_object(&mut |oid| {
@@ -1258,32 +1289,14 @@ fn estimate_repack_object_count(
     odb: &Odb,
     roots: &[ObjectId],
     keep_unreachable: bool,
-    pack_opts: &PackBuildOptions,
+    use_bitmaps: bool,
 ) -> Result<usize> {
     if !keep_unreachable {
         return estimate_reachable_count(odb, roots);
     }
-    let empty_shallow = HashSet::new();
-    let reuse_only_repack = pack_opts.window == 0
-        && !pack_opts.thin
-        && pack_opts.reuse_deltas
-        && pack_opts.reuse_objects;
-    let selection = enumerate_pack_objects(
-        odb,
-        roots,
-        &[],
-        &PackEnumerateOptions {
-            filter: None,
-            shallow_grafts: &empty_shallow,
-            have_shallow_grafts: Some(&empty_shallow),
-            use_bitmaps: pack_opts.use_bitmaps,
-            exclude_objects: None,
-            prefetch_walk_objects: !reuse_only_repack,
-        },
-    )?;
-    let mut send = selection.send;
-    append_repack_unreachable_retention(odb, &mut send)?;
-    Ok(send.len())
+    Ok(repack_object_list(odb, roots, true, use_bitmaps)?
+        .send
+        .len())
 }
 
 fn count_pack_files(pack_dir: &Path) -> usize {
