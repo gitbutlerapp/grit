@@ -18,6 +18,7 @@ pub mod daily;
 pub mod fixture;
 pub mod fixture_registry;
 pub mod fsck_suite;
+pub mod gc_loose_suite;
 pub mod hash_suite;
 pub mod headlines_suite;
 pub mod history_compat;

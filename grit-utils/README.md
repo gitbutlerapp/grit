@@ -59,6 +59,10 @@ cargo build --release -p grit-cli -p grit-utils
 # All status/add scenarios
 ./target/release/grit-bench all --sizes 100,1000,10000
 
+# grit gc vs git gc with every object loose (deep-history fixture exploded, 200k-file commit)
+./target/release/grit-bench gc-loose --format json --output baselines/gc-loose.json
+./target/release/grit-bench gc-loose --smoke
+
 # History scenarios (log, show, rev-list count, blame, cat-file batch) on synthetic fixtures
 ./target/release/grit-bench history --format json --output baselines/history-synth-L.json
 ./target/release/grit-bench history --smoke --format json --output /tmp/history-smoke.json

@@ -79,6 +79,8 @@ pub enum PrepareKind {
     RestoreReset,
     StashReset,
     MaintenanceReset,
+    /// Restore an all-loose repository from its pristine copy (`gc-loose` scenarios).
+    GcLooseReset,
     DiffDirtyReset,
     DiffSyntheticReset,
     WorktreeStatusClean,
@@ -168,6 +170,7 @@ fn prepare_command(
         PrepareKind::RestoreReset => "prepare-restore",
         PrepareKind::StashReset => "prepare-stash",
         PrepareKind::MaintenanceReset => "prepare-maintenance",
+        PrepareKind::GcLooseReset => "prepare-gc-loose",
         PrepareKind::DiffDirtyReset => "prepare-diff-dirty",
         PrepareKind::DiffSyntheticReset => "prepare-diff-synthetic",
         PrepareKind::WorktreeStatusClean => "prepare-worktree-status-clean",
@@ -209,7 +212,10 @@ fn prepare_command(
         args.push("--grit".to_string());
         args.push(grit.display().to_string());
     }
-    if kind == PrepareKind::MaintenanceReset {
+    if matches!(
+        kind,
+        PrepareKind::MaintenanceReset | PrepareKind::GcLooseReset
+    ) {
         args.push("--worktree".to_string());
         args.push(repo.display().to_string());
     }
