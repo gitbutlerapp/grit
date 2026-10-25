@@ -680,6 +680,7 @@ fn credential_store_host_entry_authenticates_fetch_and_push() {
         std::slice::from_ref(&spec),
         &PushOptions::default(),
         &mut NoProgress,
+        &grit_lib::progress::NeverCancel,
     )
     .expect("push authenticated by the host-level store entry");
     assert_eq!(outcome.results[0].status, PushRefStatus::Ok);

@@ -11,7 +11,7 @@ use grit_lib::config::ConfigSet;
 use grit_lib::error::{Error, FilterError, FilterPhase};
 use grit_lib::porcelain::add::{stage, StageOptions};
 use grit_lib::porcelain::status::{status, StatusOptions};
-use grit_lib::progress::NullProgress;
+use grit_lib::progress::{NeverCancel, NullProgress};
 use grit_lib::repo::Repository;
 use grit_lib::worktree::crlf::{
     convert_to_git_with_opts, convert_to_worktree_with_runner, ConversionConfig, ConvertToGitOpts,
@@ -218,6 +218,7 @@ fn working_filter_round_trips_with_git_and_status_is_clean() {
         &repo,
         &StatusOptions::default(),
         &mut grit_lib::progress::NullProgress,
+        &NeverCancel,
     )
     .expect("status");
     assert!(
