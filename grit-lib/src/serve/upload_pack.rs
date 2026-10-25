@@ -92,6 +92,7 @@ fn serve_error_client_message(err: &ServeError) -> String {
         ServeError::ObjectFormatMismatch { client, repository } => {
             format!("object format mismatch: client wants {client}, repository uses {repository}")
         }
+        ServeError::FsckSkipList(e) => e.to_string(),
         ServeError::Repository(e) => e.to_string(),
         ServeError::Io(e) => e.to_string(),
     }

@@ -70,6 +70,27 @@ The `grit-examples` crate also ships `gritx-fetch` and `gritx-push`, which dispa
 
 Integration test `guide_network` builds bare and consumer repos with system Git, runs the binary, then requires clean `git fsck --strict` on both sides and matching `git rev-parse` on the pushed ref.
 
+## Serving fetches and pushes
+
+[`serve::upload_pack`](rustdoc:grit_lib::remote::serve::upload_pack) and [`serve::receive_pack`](rustdoc:grit_lib::remote::serve::receive_pack) are the server side of the wire protocol. They work on any byte streams, so the same calls answer an SSH or pipe connection and the stateless requests of smart HTTP (`grit-http-server` uses them in-process).
+
+What a push may do is a [`ReceivePolicy`](rustdoc:grit_lib::remote::serve::ReceivePolicy). [`ReceivePolicy::from_config`](rustdoc:grit_lib::remote::serve::ReceivePolicy::from_config) reads Git's `receive.*` keys, or build one in code. Setting [`fsck_objects`](rustdoc:grit_lib::remote::serve::ReceivePolicy::fsck_objects) to an [`ObjectFsckPolicy`](rustdoc:grit_lib::maintenance::fsck::ObjectFsckPolicy) checks every pushed commit, tree and tag in the receive quarantine before it can reach the repository. A malformed object refuses the whole push: [`ReceiveOutcome::rejected_object`](rustdoc:grit_lib::remote::serve::ReceiveOutcome::rejected_object) names it and its fsck message id, every update fails with `unpacker error`, and the quarantine is deleted. Transfer checks are strict like Git's (warnings are errors); [`ObjectFsckPolicy::set_level`](rustdoc:grit_lib::maintenance::fsck::ObjectFsckPolicy::set_level) changes single messages, as `receive.fsck.<msg-id>` does in config.
+
+```rust
+use grit_lib::maintenance::fsck::{FsckMsgLevel, ObjectFsckPolicy};
+use grit_lib::remote::serve::ReceivePolicy;
+
+let mut fsck = ObjectFsckPolicy::default();
+fsck.set_level("missingEmail", FsckMsgLevel::Warn);
+let policy = ReceivePolicy {
+    fsck_objects: Some(fsck),
+    ..ReceivePolicy::default()
+};
+assert!(policy.fsck_objects.is_some());
+```
+
+To check objects from some other source with the same rules, call [`ObjectFsckPolicy::checker`](rustdoc:grit_lib::maintenance::fsck::ObjectFsckPolicy::checker) once and [`ObjectFsckChecker::check`](rustdoc:grit_lib::maintenance::fsck::ObjectFsckChecker::check) per object.
+
 ## Partial clone and promisor fetch
 
 Filtered fetch and clone record a promisor remote (`remote.<name>.promisor`, `extensions.partialclone`, and `remote.<name>.partialclonefilter`). Blobs omitted from the initial pack are **promised**: they appear in the object database as missing until fetched on demand.

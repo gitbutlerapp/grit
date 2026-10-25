@@ -44,6 +44,7 @@ Keys are written as `section.name`, for example `user.email`.
 | `receive.denyNonFastForwards` | Refuse pushes that would discard commits. Enforced by [`grit receive-pack`](../receive-pack/). |
 | `receive.denyDeletes` | Refuse pushes that delete branches or tags. |
 | `receive.denyCurrentBranch` | Refuse pushes to the branch checked out in a non-bare repository. On by default. |
+| `receive.fsckObjects`, `transfer.fsckObjects` | Refuse pushes that contain malformed commits, trees or tags. Tune single checks with `receive.fsck.<msg-id>` and `receive.fsck.skipList`. See [`grit receive-pack`](../receive-pack/). |
 
 ## Options
 

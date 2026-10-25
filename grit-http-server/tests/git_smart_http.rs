@@ -482,3 +482,92 @@ fn global_receive_deny_non_fast_forward_accepts_fast_forward_rejects_force_push(
         "non-fast-forward force push must not rewind the served branch"
     );
 }
+
+/// Issue #1818: `receive.fsckObjects` in the served repository refuses a
+/// malformed commit pushed over smart HTTP, before any ref or object lands.
+#[test]
+fn receive_fsck_objects_refuses_malformed_commit_over_http() {
+    let server_bin = require_binary("grit-http-server");
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let work = tmp.path().join("work");
+    std::fs::create_dir_all(&work).unwrap();
+    git(&work, &["init", "-q", "-b", "main", "."]);
+    std::fs::write(work.join("f"), "x\n").unwrap();
+    git(&work, &["add", "f"]);
+    git(&work, &["commit", "-q", "-m", "base"]);
+
+    let root = tmp.path().join("srv");
+    std::fs::create_dir_all(&root).unwrap();
+    let bare = root.join("project.git");
+    git(
+        tmp.path(),
+        &["init", "-q", "--bare", bare.to_str().expect("utf8 path")],
+    );
+    git(&bare, &["config", "receive.fsckObjects", "true"]);
+
+    let port = require_port();
+    let child = spawn_server(&server_bin, &root, port, None);
+    let _guard = ServerGuard(child);
+    assert!(
+        wait_ready(port),
+        "grit-http-server did not become ready on port {port}"
+    );
+    let url = format!("http://127.0.0.1:{port}/project.git");
+    git(&work, &["push", "-q", url.as_str(), "main"]);
+
+    let body = format!(
+        "tree {}\nparent {}\nauthor Bad Guy no-email 1700000000 +0000\ncommitter Bad <b@c> 1700000000 +0000\n\nbad\n",
+        rev_parse(&work, "HEAD^{tree}"),
+        rev_parse(&work, "HEAD")
+    );
+    let mut hash = git_cmd(
+        &work,
+        &[
+            "hash-object",
+            "-t",
+            "commit",
+            "-w",
+            "--literally",
+            "--stdin",
+        ],
+    )
+    .stdin(Stdio::piped())
+    .stdout(Stdio::piped())
+    .spawn()
+    .expect("hash-object");
+    std::io::Write::write_all(hash.stdin.as_mut().expect("stdin"), body.as_bytes())
+        .expect("write commit");
+    let out = hash.wait_with_output().expect("hash-object");
+    assert!(out.status.success());
+    let bad = String::from_utf8(out.stdout)
+        .expect("utf8")
+        .trim()
+        .to_owned();
+
+    let push = git_output(
+        &work,
+        &["push", url.as_str(), &format!("{bad}:refs/heads/bad")],
+    );
+    let stderr = String::from_utf8_lossy(&push.stderr);
+    assert!(!push.status.success(), "push must be refused: {stderr}");
+    assert!(stderr.contains("unpacker error"), "{stderr}");
+    assert!(
+        !git_ok(&bare, &["rev-parse", "-q", "--verify", "refs/heads/bad"]),
+        "the refused push must not create a ref"
+    );
+    assert!(
+        !git_ok(&bare, &["cat-file", "-e", &bad]),
+        "the malformed commit must not be stored"
+    );
+    assert!(git_ok(&bare, &["fsck", "--strict"]));
+
+    std::fs::write(work.join("g"), "y\n").unwrap();
+    git(&work, &["add", "g"]);
+    git(&work, &["commit", "-q", "-m", "clean"]);
+    git(&work, &["push", "-q", url.as_str(), "main"]);
+    assert_eq!(
+        rev_parse(&bare, "refs/heads/main"),
+        rev_parse(&work, "HEAD")
+    );
+}

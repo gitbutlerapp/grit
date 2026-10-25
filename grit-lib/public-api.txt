@@ -6874,6 +6874,52 @@ pub fn grit_lib::lockfile::SystemLockJitter::fraction(&self, &std::path::Path, u
 pub fn grit_lib::lockfile::lock_held_as_ref_present(grit_lib::lockfile::LockError) -> core::io::error::Error
 pub mod grit_lib::maintenance
 pub mod grit_lib::maintenance::fsck
+pub enum grit_lib::maintenance::fsck::FsckMsgLevel
+pub grit_lib::maintenance::fsck::FsckMsgLevel::Error
+pub grit_lib::maintenance::fsck::FsckMsgLevel::Ignore
+pub grit_lib::maintenance::fsck::FsckMsgLevel::Warn
+impl grit_lib::maintenance::fsck::FsckMsgLevel
+pub fn grit_lib::maintenance::fsck::FsckMsgLevel::parse(&str) -> core::option::Option<Self>
+impl core::clone::Clone for grit_lib::maintenance::fsck::FsckMsgLevel
+pub fn grit_lib::maintenance::fsck::FsckMsgLevel::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::maintenance::fsck::FsckMsgLevel
+impl core::cmp::PartialEq for grit_lib::maintenance::fsck::FsckMsgLevel
+pub fn grit_lib::maintenance::fsck::FsckMsgLevel::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::maintenance::fsck::FsckMsgLevel
+pub fn grit_lib::maintenance::fsck::FsckMsgLevel::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::hash::Hash for grit_lib::maintenance::fsck::FsckMsgLevel
+pub fn grit_lib::maintenance::fsck::FsckMsgLevel::hash<__H: core::hash::Hasher>(&self, &mut __H)
+impl core::marker::Copy for grit_lib::maintenance::fsck::FsckMsgLevel
+impl core::marker::StructuralPartialEq for grit_lib::maintenance::fsck::FsckMsgLevel
+impl core::marker::Freeze for grit_lib::maintenance::fsck::FsckMsgLevel
+impl core::marker::Send for grit_lib::maintenance::fsck::FsckMsgLevel
+impl core::marker::Sync for grit_lib::maintenance::fsck::FsckMsgLevel
+impl core::marker::Unpin for grit_lib::maintenance::fsck::FsckMsgLevel
+impl core::marker::UnsafeUnpin for grit_lib::maintenance::fsck::FsckMsgLevel
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::maintenance::fsck::FsckMsgLevel
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::maintenance::fsck::FsckMsgLevel
+pub enum grit_lib::maintenance::fsck::SkipListError
+pub grit_lib::maintenance::fsck::SkipListError::InvalidLine
+pub grit_lib::maintenance::fsck::SkipListError::InvalidLine::line: usize
+pub grit_lib::maintenance::fsck::SkipListError::InvalidLine::path: std::path::PathBuf
+pub grit_lib::maintenance::fsck::SkipListError::Read
+pub grit_lib::maintenance::fsck::SkipListError::Read::path: std::path::PathBuf
+pub grit_lib::maintenance::fsck::SkipListError::Read::source: core::io::error::Error
+impl core::convert::From<grit_lib::maintenance::fsck::SkipListError> for grit_lib::remote::serve::ServeError
+pub fn grit_lib::remote::serve::ServeError::from(grit_lib::maintenance::fsck::SkipListError) -> Self
+impl core::error::Error for grit_lib::maintenance::fsck::SkipListError
+pub fn grit_lib::maintenance::fsck::SkipListError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Debug for grit_lib::maintenance::fsck::SkipListError
+pub fn grit_lib::maintenance::fsck::SkipListError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::maintenance::fsck::SkipListError
+pub fn grit_lib::maintenance::fsck::SkipListError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::maintenance::fsck::SkipListError
+impl core::marker::Send for grit_lib::maintenance::fsck::SkipListError
+impl core::marker::Sync for grit_lib::maintenance::fsck::SkipListError
+impl core::marker::Unpin for grit_lib::maintenance::fsck::SkipListError
+impl core::marker::UnsafeUnpin for grit_lib::maintenance::fsck::SkipListError
+impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::maintenance::fsck::SkipListError
+impl !core::panic::unwind_safe::UnwindSafe for grit_lib::maintenance::fsck::SkipListError
 pub struct grit_lib::maintenance::fsck::FsckError
 pub grit_lib::maintenance::fsck::FsckError::detail: alloc::string::String
 pub grit_lib::maintenance::fsck::FsckError::id: &'static str
@@ -6913,7 +6959,47 @@ impl core::marker::Unpin for grit_lib::maintenance::fsck::FsckObjectOptions
 impl core::marker::UnsafeUnpin for grit_lib::maintenance::fsck::FsckObjectOptions
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::maintenance::fsck::FsckObjectOptions
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::maintenance::fsck::FsckObjectOptions
+pub struct grit_lib::maintenance::fsck::ObjectFsckChecker<'a>
+impl grit_lib::maintenance::fsck::ObjectFsckChecker<'_>
+pub fn grit_lib::maintenance::fsck::ObjectFsckChecker<'_>::check(&self, &grit_lib::objects::ObjectId, grit_lib::objects::ObjectKind, &[u8]) -> core::result::Result<alloc::vec::Vec<grit_lib::maintenance::fsck::FsckError>, grit_lib::maintenance::fsck::FsckError>
+impl<'a> core::clone::Clone for grit_lib::maintenance::fsck::ObjectFsckChecker<'a>
+pub fn grit_lib::maintenance::fsck::ObjectFsckChecker<'a>::clone(&self) -> Self
+impl<'a> core::fmt::Debug for grit_lib::maintenance::fsck::ObjectFsckChecker<'a>
+pub fn grit_lib::maintenance::fsck::ObjectFsckChecker<'a>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'a> core::marker::Freeze for grit_lib::maintenance::fsck::ObjectFsckChecker<'a>
+impl<'a> core::marker::Send for grit_lib::maintenance::fsck::ObjectFsckChecker<'a>
+impl<'a> core::marker::Sync for grit_lib::maintenance::fsck::ObjectFsckChecker<'a>
+impl<'a> core::marker::Unpin for grit_lib::maintenance::fsck::ObjectFsckChecker<'a>
+impl<'a> core::marker::UnsafeUnpin for grit_lib::maintenance::fsck::ObjectFsckChecker<'a>
+impl<'a> core::panic::unwind_safe::RefUnwindSafe for grit_lib::maintenance::fsck::ObjectFsckChecker<'a>
+impl<'a> core::panic::unwind_safe::UnwindSafe for grit_lib::maintenance::fsck::ObjectFsckChecker<'a>
+pub struct grit_lib::maintenance::fsck::ObjectFsckPolicy
+impl grit_lib::maintenance::fsck::ObjectFsckPolicy
+pub fn grit_lib::maintenance::fsck::ObjectFsckPolicy::checker(&self, grit_lib::objects::HashAlgo, &std::path::Path, &grit_lib::config::environment::Environment) -> core::result::Result<grit_lib::maintenance::fsck::ObjectFsckChecker<'_>, grit_lib::maintenance::fsck::SkipListError>
+pub fn grit_lib::maintenance::fsck::ObjectFsckPolicy::from_config(&grit_lib::config::ConfigSet, &str) -> Self
+pub fn grit_lib::maintenance::fsck::ObjectFsckPolicy::level(&self, &str) -> grit_lib::maintenance::fsck::FsckMsgLevel
+pub fn grit_lib::maintenance::fsck::ObjectFsckPolicy::set_level(&mut self, &str, grit_lib::maintenance::fsck::FsckMsgLevel)
+pub fn grit_lib::maintenance::fsck::ObjectFsckPolicy::set_skip_list(&mut self, core::option::Option<alloc::string::String>)
+pub fn grit_lib::maintenance::fsck::ObjectFsckPolicy::skip_list(&self) -> core::option::Option<&str>
+impl core::clone::Clone for grit_lib::maintenance::fsck::ObjectFsckPolicy
+pub fn grit_lib::maintenance::fsck::ObjectFsckPolicy::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::maintenance::fsck::ObjectFsckPolicy
+impl core::cmp::PartialEq for grit_lib::maintenance::fsck::ObjectFsckPolicy
+pub fn grit_lib::maintenance::fsck::ObjectFsckPolicy::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::maintenance::fsck::ObjectFsckPolicy
+pub fn grit_lib::maintenance::fsck::ObjectFsckPolicy::default() -> Self
+impl core::fmt::Debug for grit_lib::maintenance::fsck::ObjectFsckPolicy
+pub fn grit_lib::maintenance::fsck::ObjectFsckPolicy::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::maintenance::fsck::ObjectFsckPolicy
+impl core::marker::Freeze for grit_lib::maintenance::fsck::ObjectFsckPolicy
+impl core::marker::Send for grit_lib::maintenance::fsck::ObjectFsckPolicy
+impl core::marker::Sync for grit_lib::maintenance::fsck::ObjectFsckPolicy
+impl core::marker::Unpin for grit_lib::maintenance::fsck::ObjectFsckPolicy
+impl core::marker::UnsafeUnpin for grit_lib::maintenance::fsck::ObjectFsckPolicy
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::maintenance::fsck::ObjectFsckPolicy
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::maintenance::fsck::ObjectFsckPolicy
 pub fn grit_lib::maintenance::fsck::fsck_object(grit_lib::objects::ObjectKind, &[u8], grit_lib::maintenance::fsck::FsckObjectOptions) -> core::result::Result<(), grit_lib::maintenance::fsck::FsckError>
+pub fn grit_lib::maintenance::fsck::fsck_object_with(grit_lib::objects::ObjectKind, &[u8], grit_lib::maintenance::fsck::FsckObjectOptions, &mut dyn core::ops::function::FnMut(&grit_lib::maintenance::fsck::FsckError) -> core::ops::control_flow::ControlFlow<()>) -> core::result::Result<(), grit_lib::maintenance::fsck::FsckError>
 pub mod grit_lib::maintenance::repository_fsck
 #[non_exhaustive] pub enum grit_lib::maintenance::repository_fsck::FsckIssue
 pub grit_lib::maintenance::repository_fsck::FsckIssue::BadObject
@@ -19162,6 +19248,7 @@ impl core::marker::UnsafeUnpin for grit_lib::remote::serve::ProtocolVersion
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::serve::ProtocolVersion
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::serve::ProtocolVersion
 pub enum grit_lib::remote::serve::ServeError
+pub grit_lib::remote::serve::ServeError::FsckSkipList(grit_lib::maintenance::fsck::SkipListError)
 pub grit_lib::remote::serve::ServeError::Io(core::io::error::Error)
 pub grit_lib::remote::serve::ServeError::NotOurRef(grit_lib::objects::ObjectId)
 pub grit_lib::remote::serve::ServeError::ObjectFormatMismatch
@@ -19175,6 +19262,8 @@ impl core::convert::From<core::io::error::Error> for grit_lib::remote::serve::Se
 pub fn grit_lib::remote::serve::ServeError::from(core::io::error::Error) -> Self
 impl core::convert::From<grit_lib::error::Error> for grit_lib::remote::serve::ServeError
 pub fn grit_lib::remote::serve::ServeError::from(grit_lib::error::Error) -> Self
+impl core::convert::From<grit_lib::maintenance::fsck::SkipListError> for grit_lib::remote::serve::ServeError
+pub fn grit_lib::remote::serve::ServeError::from(grit_lib::maintenance::fsck::SkipListError) -> Self
 impl core::error::Error for grit_lib::remote::serve::ServeError
 pub fn grit_lib::remote::serve::ServeError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
 impl core::fmt::Debug for grit_lib::remote::serve::ServeError
@@ -19210,6 +19299,7 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::serve::HookRunRe
 pub struct grit_lib::remote::serve::ReceiveOutcome
 pub grit_lib::remote::serve::ReceiveOutcome::hooks: alloc::vec::Vec<grit_lib::remote::serve::HookRunRecord>
 pub grit_lib::remote::serve::ReceiveOutcome::push_options: alloc::vec::Vec<alloc::string::String>
+pub grit_lib::remote::serve::ReceiveOutcome::rejected_object: core::option::Option<grit_lib::remote::serve::RejectedObject>
 pub grit_lib::remote::serve::ReceiveOutcome::unpack_error: core::option::Option<alloc::string::String>
 pub grit_lib::remote::serve::ReceiveOutcome::updates: alloc::vec::Vec<grit_lib::remote::serve::RefUpdateResult>
 impl core::clone::Clone for grit_lib::remote::serve::ReceiveOutcome
@@ -19233,6 +19323,7 @@ pub struct grit_lib::remote::serve::ReceivePolicy
 pub grit_lib::remote::serve::ReceivePolicy::deny_current_branch: bool
 pub grit_lib::remote::serve::ReceivePolicy::deny_deletes: bool
 pub grit_lib::remote::serve::ReceivePolicy::deny_non_fast_forwards: bool
+pub grit_lib::remote::serve::ReceivePolicy::fsck_objects: core::option::Option<grit_lib::maintenance::fsck::ObjectFsckPolicy>
 impl grit_lib::remote::serve::ReceivePolicy
 pub fn grit_lib::remote::serve::ReceivePolicy::from_config(&grit_lib::config::ConfigSet) -> Self
 impl core::clone::Clone for grit_lib::remote::serve::ReceivePolicy
@@ -19244,7 +19335,6 @@ impl core::default::Default for grit_lib::remote::serve::ReceivePolicy
 pub fn grit_lib::remote::serve::ReceivePolicy::default() -> Self
 impl core::fmt::Debug for grit_lib::remote::serve::ReceivePolicy
 pub fn grit_lib::remote::serve::ReceivePolicy::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for grit_lib::remote::serve::ReceivePolicy
 impl core::marker::StructuralPartialEq for grit_lib::remote::serve::ReceivePolicy
 impl core::marker::Freeze for grit_lib::remote::serve::ReceivePolicy
 impl core::marker::Send for grit_lib::remote::serve::ReceivePolicy
@@ -19273,6 +19363,27 @@ impl core::marker::Unpin for grit_lib::remote::serve::RefUpdateResult
 impl core::marker::UnsafeUnpin for grit_lib::remote::serve::RefUpdateResult
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::serve::RefUpdateResult
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::serve::RefUpdateResult
+pub struct grit_lib::remote::serve::RejectedObject
+pub grit_lib::remote::serve::RejectedObject::error: grit_lib::maintenance::fsck::FsckError
+pub grit_lib::remote::serve::RejectedObject::kind: grit_lib::objects::ObjectKind
+pub grit_lib::remote::serve::RejectedObject::oid: grit_lib::objects::ObjectId
+impl core::clone::Clone for grit_lib::remote::serve::RejectedObject
+pub fn grit_lib::remote::serve::RejectedObject::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::remote::serve::RejectedObject
+impl core::cmp::PartialEq for grit_lib::remote::serve::RejectedObject
+pub fn grit_lib::remote::serve::RejectedObject::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::remote::serve::RejectedObject
+pub fn grit_lib::remote::serve::RejectedObject::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::remote::serve::RejectedObject
+pub fn grit_lib::remote::serve::RejectedObject::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::remote::serve::RejectedObject
+impl core::marker::Freeze for grit_lib::remote::serve::RejectedObject
+impl core::marker::Send for grit_lib::remote::serve::RejectedObject
+impl core::marker::Sync for grit_lib::remote::serve::RejectedObject
+impl core::marker::Unpin for grit_lib::remote::serve::RejectedObject
+impl core::marker::UnsafeUnpin for grit_lib::remote::serve::RejectedObject
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::serve::RejectedObject
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::serve::RejectedObject
 pub struct grit_lib::remote::serve::ServeOptions
 pub grit_lib::remote::serve::ServeOptions::advertise_refs: bool
 pub grit_lib::remote::serve::ServeOptions::agent: alloc::string::String

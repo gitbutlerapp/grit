@@ -21,7 +21,7 @@ pub(crate) use shallow_upload::{
 };
 
 pub use receive_pack::{
-    receive_pack, HookRunRecord, ReceiveOutcome, ReceivePolicy, RefUpdateResult,
+    receive_pack, HookRunRecord, ReceiveOutcome, ReceivePolicy, RefUpdateResult, RejectedObject,
 };
 pub use upload_pack::upload_pack;
 
@@ -51,6 +51,9 @@ pub enum ServeError {
         /// Hash algorithm of the served repository.
         repository: &'static str,
     },
+    /// The `receive.fsck.skipList` file could not be loaded.
+    #[error(transparent)]
+    FsckSkipList(#[from] crate::fsck_msg_policy::SkipListError),
     /// Reading or writing repository data failed.
     #[error(transparent)]
     Repository(#[from] crate::error::Error),
