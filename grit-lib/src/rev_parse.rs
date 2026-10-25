@@ -978,23 +978,26 @@ pub fn split_triple_dot_range(spec: &str) -> Option<(&str, &str)> {
 
 /// Whether `spec` is a range (`a..b`, `a...b`, `..b`, `a..`) rather than a single revision.
 ///
-/// Only a `..` outside `{…}` selectors and before any `:` counts, so a dotted
+/// Only a `..` outside `^{…}` / `@{…}` selectors and before any `:` counts, so a dotted
 /// message search such as `main^{/release..candidate}` or `:/fix..up`, a reflog date
 /// like `main@{1.week.ago}`, or a path in `rev:../file` is still a single revision.
+///
+/// A selector opens only at `^{` or `@{`. Ref names may contain a bare `{` or `}` (but never
+/// `^` or `@{`), so `foo{bar...main` is a range over the branch `foo{bar`. Inside an open
+/// selector every brace nests, which keeps `main^{/a{2}..b}` a single revision.
 #[must_use]
 pub(crate) fn is_top_level_range(spec: &str) -> bool {
     let bytes = spec.as_bytes();
     let mut depth = 0usize;
-    let mut i = 0;
-    while i < bytes.len() {
-        match bytes[i] {
-            b'{' => depth += 1,
-            b'}' => depth = depth.saturating_sub(1),
+    for (i, &b) in bytes.iter().enumerate() {
+        match b {
+            b'{' if depth > 0 => depth += 1,
+            b'{' if i > 0 && matches!(bytes[i - 1], b'^' | b'@') => depth = 1,
+            b'}' if depth > 0 => depth -= 1,
             b':' if depth == 0 => return false,
             b'.' if depth == 0 && bytes.get(i + 1) == Some(&b'.') => return true,
             _ => {}
         }
-        i += 1;
     }
     false
 }
@@ -4255,6 +4258,13 @@ mod line_coverage_tests {
             "...main",
             "main^{/x}..side",
             "main@{1}...side",
+            "foo{bar...main",
+            "foo{bar..main",
+            "main...foo{bar",
+            "foo}bar...main",
+            "a{b}c..main",
+            "foo{bar@{1}...main",
+            "main^{/a{2}}..side",
         ] {
             assert!(is_top_level_range(range), "{range}");
         }
@@ -4268,6 +4278,11 @@ mod line_coverage_tests {
             ":/fix..up",
             "HEAD:../file",
             "HEAD:a..b",
+            "foo{bar",
+            "foo{bar~1",
+            "foo{bar^{/release..candidate}",
+            "main^{/a{2}..b}",
+            "@{1.week.ago}",
         ] {
             assert!(!is_top_level_range(single), "{single}");
         }

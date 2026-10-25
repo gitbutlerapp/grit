@@ -2,7 +2,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-use grit_test_support::{git, git_fsck, CliFixture};
+use grit_test_support::{git, git_cmd, git_fsck, CliFixture};
 use serde_json::Value;
 
 /// main: c1..c4 with tag `keep` at c4; current branch `side` forks from c2.
@@ -157,4 +157,29 @@ fn merge_dotted_message_selector() {
     let target = rev(&fixture, spec);
     assert_eq!(target, rev(&fixture, "main~1"));
     assert_merged(&fixture, spec, &target);
+}
+
+#[test]
+fn merge_rejects_ranges_over_brace_containing_branch_like_git() {
+    let fixture = diverged();
+    git(fixture.path(), &["check-ref-format", "--branch", "foo{bar"]);
+    git(fixture.path(), &["branch", "foo{bar", "main~1"]);
+    let head = rev(&fixture, "HEAD");
+
+    for range in ["foo{bar...main", "foo{bar..main", "main...foo{bar"] {
+        let git_out = git_cmd(&["merge", "-q", "--no-edit", range])
+            .in_dir(fixture.path())
+            .exec();
+        assert_ne!(git_out.status, Some(0), "git merge {range} should fail");
+        assert_eq!(rev(&fixture, "HEAD"), head, "git merge {range}");
+
+        let out = fixture.run(&["--json", "merge", range]);
+        assert_eq!(out.status, Some(1), "{}", out.dump(range));
+        let v: Value = serde_json::from_str(out.stdout.trim()).expect("json");
+        assert_eq!(v["kind"], "revision_not_found", "{range}: {v}");
+        assert_eq!(rev(&fixture, "HEAD"), head, "grit merge {range}");
+    }
+
+    let target = rev(&fixture, "foo{bar");
+    assert_merged(&fixture, "foo{bar", &target);
 }

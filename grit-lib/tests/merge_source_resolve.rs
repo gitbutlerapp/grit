@@ -222,3 +222,33 @@ fn dotted_message_selector_is_a_commit_not_a_range() {
         assert_eq!(got.oid, rev(&dir, spec), "{spec}");
     }
 }
+
+#[test]
+fn ranges_over_brace_containing_branch_are_not_found() {
+    let (dir, c) = fixture();
+    git(dir.path(), &["branch", "foo{bar", &c[1].to_hex()]);
+    git(dir.path(), &["branch", "a{b}c", &c[1].to_hex()]);
+    let repo = open_repo(dir.path());
+    assert_eq!(
+        resolved(&repo, "foo{bar"),
+        MergeSource {
+            oid: c[1],
+            kind: MergeSourceKind::LocalBranch
+        }
+    );
+    let got = resolved(&repo, "foo{bar~1");
+    assert_eq!((got.oid, got.kind), (c[0], MergeSourceKind::Commit));
+    assert_eq!(got.oid, rev(&dir, "foo{bar~1"));
+    for spec in [
+        "foo{bar...main",
+        "foo{bar..main",
+        "main...foo{bar",
+        "a{b}c...main",
+        "foo{bar@{0}...main",
+    ] {
+        match resolve_merge_source(&repo, spec) {
+            Err(Error::RevisionNotFound(s)) => assert_eq!(s, spec),
+            other => panic!("{spec}: expected RevisionNotFound, got {other:?}"),
+        }
+    }
+}
