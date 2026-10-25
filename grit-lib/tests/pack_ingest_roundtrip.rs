@@ -1329,8 +1329,13 @@ fn pack_index_build_errors_and_thin_pack_with_odb_base() {
         },
     )
     .expect("fix thin install");
-    assert_installed_pack_consistent(&installed.pack_path, HashAlgo::Sha1);
-    let installed_count = pack_object_count(&std::fs::read(&installed.pack_path).expect("pack"));
+    assert_installed_pack_consistent(
+        &installed.pack_path.as_deref().expect("installed pack"),
+        HashAlgo::Sha1,
+    );
+    let installed_count = pack_object_count(
+        &std::fs::read(&installed.pack_path.as_deref().expect("installed pack")).expect("pack"),
+    );
     assert!(
         installed_count > thin_count,
         "fix_thin must append the missing base ({thin_count} -> {installed_count})"
@@ -1454,16 +1459,22 @@ fn fetched_thin_pack_installs_with_matching_idx_and_name() {
             },
         )
         .expect("ingest thin pack");
-        let installed_count =
-            pack_object_count(&std::fs::read(&installed.pack_path).expect("pack"));
+        let installed_count = pack_object_count(
+            &std::fs::read(&installed.pack_path.as_deref().expect("installed pack")).expect("pack"),
+        );
         assert!(
             installed_count > thin_count,
             "thin completion must append the base ({thin_count} -> {installed_count})"
         );
-        assert_installed_pack_consistent(&installed.pack_path, HashAlgo::Sha1);
+        assert_installed_pack_consistent(
+            &installed.pack_path.as_deref().expect("installed pack"),
+            HashAlgo::Sha1,
+        );
         assert!(
             !installed
                 .pack_path
+                .as_deref()
+                .expect("installed pack")
                 .parent()
                 .expect("pack dir")
                 .read_dir()
@@ -1538,9 +1549,14 @@ fn fix_thin_install_rewrites_pack_and_index_that_git_accepts() {
             },
         )
         .unwrap_or_else(|e| panic!("threads={threads}: fix-thin install: {e}"));
-        let idx = ingested.pack_path.with_extension("idx");
+        let idx = ingested
+            .pack_path
+            .as_deref()
+            .expect("installed pack")
+            .with_extension("idx");
         git_run(&git_dir, &["verify-pack", &idx.to_string_lossy()]);
-        let pack = std::fs::read(&ingested.pack_path).expect("read installed pack");
+        let pack = std::fs::read(&ingested.pack_path.as_deref().expect("installed pack"))
+            .expect("read installed pack");
         assert!(!pack_is_thin(&pack, HashAlgo::Sha1), "threads={threads}");
         assert_eq!(
             pack_header_count(&pack) as usize,
@@ -1549,7 +1565,12 @@ fn fix_thin_install_rewrites_pack_and_index_that_git_accepts() {
         );
         let trailer = ObjectId::from_bytes(&pack[pack.len() - 20..]).expect("trailer");
         assert_eq!(
-            ingested.pack_path.file_name().and_then(|n| n.to_str()),
+            ingested
+                .pack_path
+                .as_deref()
+                .expect("installed pack")
+                .file_name()
+                .and_then(|n| n.to_str()),
             Some(format!("pack-{}.pack", trailer.to_hex()).as_str()),
             "threads={threads}: pack is named after its rewritten checksum"
         );

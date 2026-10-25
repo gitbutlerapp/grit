@@ -1,9 +1,10 @@
-//! `unpack-objects`: unpack a pack stream into loose objects.
+//! `unpack-objects`: unpack a pack stream into individual objects.
 //!
 //! Reads a pack-format byte stream, validates the trailing checksum, and
-//! writes each object as a loose file in the object database.  Delta objects
-//! (both `OFS_DELTA` and `REF_DELTA`) are resolved against already-unpacked
-//! objects or objects already present in the ODB.
+//! writes each object to the object database ([`unpack_objects`]) or to any
+//! [`WritableObjectStore`] ([`ingest_pack_into`]).  Delta objects (both
+//! `OFS_DELTA` and `REF_DELTA`) are resolved against already-unpacked objects
+//! or objects already present in the target.
 //!
 //! Large blobs are written to the ODB and dropped from the in-memory maps so
 //! cloning multi-gigabyte repositories does not require holding the full pack
@@ -17,8 +18,11 @@ use crate::error::{Error, Result};
 use crate::gitmodules;
 use crate::hash::ChecksumHasher;
 use crate::index::MODE_GITLINK;
+use crate::index_pack::ObjectKindCounts;
 use crate::objects::{parse_commit, parse_tag, parse_tree, HashAlgo, Object, ObjectId, ObjectKind};
-use crate::odb::Odb;
+use crate::odb::store::{ObjectStore, WritableObjectStore};
+use crate::odb::{Odb, WriteOptions};
+use crate::progress::{poll_cancel, Cancel, NullProgress, ProgressPhase, ProgressSink};
 use flate2::read::ZlibDecoder;
 use flate2::{Decompress, FlushDecompress, Status};
 
@@ -61,11 +65,101 @@ struct PendingDelta {
     delta_data: Vec<u8>,
 }
 
+/// Objects a pack stream delivered into an object store, from [`ingest_pack_into`].
+#[derive(Debug, Clone, Default)]
+pub struct IngestedObjects {
+    /// Id of every object the pack held (delta objects by their resolved id).
+    pub object_ids: HashSet<ObjectId>,
+    /// How many objects of each type the pack held.
+    pub object_counts: ObjectKindCounts,
+    /// Bytes of pack stream consumed, trailer included.
+    pub pack_bytes: u64,
+}
+
+/// Where [`unpack_into`] stores resolved objects and finds objects the pack did not carry.
+trait UnpackSink {
+    fn hash_algo(&self) -> HashAlgo;
+
+    /// Store `data`, or only hash it when `dry_run` is set.
+    fn write(&self, kind: ObjectKind, data: &[u8], dry_run: bool) -> Result<ObjectId>;
+
+    /// Read an object stored before or during this unpack (thin-pack bases, large blobs).
+    fn read_stored(&self, oid: &ObjectId) -> Result<Option<Object>>;
+
+    /// Whether `oid` is already stored (strict connectivity).
+    fn contains(&self, oid: &ObjectId) -> Result<bool>;
+}
+
+impl UnpackSink for Odb {
+    fn hash_algo(&self) -> HashAlgo {
+        Odb::hash_algo(self)
+    }
+
+    fn write(&self, kind: ObjectKind, data: &[u8], dry_run: bool) -> Result<ObjectId> {
+        if dry_run {
+            return self.hash(kind, data);
+        }
+        if !self.uses_files_primary() {
+            return Odb::write(self, kind, data);
+        }
+        // Always materialize into this ODB: objects reachable only via alternates must still be
+        // written locally (matches git unpack-objects; t5519-push-alternates).
+        self.write_local(kind, data)
+    }
+
+    fn read_stored(&self, oid: &ObjectId) -> Result<Option<Object>> {
+        match self.read(oid) {
+            Ok(obj) => Ok(Some(obj)),
+            Err(Error::ObjectNotFound(_)) => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    fn contains(&self, oid: &ObjectId) -> Result<bool> {
+        Odb::contains(self, oid)
+    }
+}
+
+/// A [`WritableObjectStore`] target with a separate view for objects it already holds.
+struct StoreSink<'a> {
+    store: &'a dyn WritableObjectStore,
+    bases: &'a dyn ObjectStore,
+}
+
+impl UnpackSink for StoreSink<'_> {
+    fn hash_algo(&self) -> HashAlgo {
+        self.store.hash_algo()
+    }
+
+    fn write(&self, kind: ObjectKind, data: &[u8], dry_run: bool) -> Result<ObjectId> {
+        if dry_run {
+            return crate::hash::hash_object(self.store.hash_algo(), kind, data);
+        }
+        self.store.write(kind, data, WriteOptions::default())
+    }
+
+    fn read_stored(&self, oid: &ObjectId) -> Result<Option<Object>> {
+        if let Some(obj) = self.store.read(oid)? {
+            return Ok(Some(obj));
+        }
+        self.bases.read(oid)
+    }
+
+    fn contains(&self, oid: &ObjectId) -> Result<bool> {
+        Ok(self.store.contains(oid)? || self.bases.contains(oid)?)
+    }
+}
+
 /// Unpack a pack stream from `reader` into `odb`.
 ///
 /// Reads the complete pack from `reader`, validates the trailing SHA-1
 /// checksum, unpacks all objects (including full delta-chain resolution), and —
 /// unless [`UnpackOptions::dry_run`] is set — writes each object to `odb`.
+///
+/// With a files-backed primary every object is written as a loose object in this
+/// object directory, even when an alternate already has it. With a custom
+/// [`OdbBuilder::primary`](crate::odb::OdbBuilder::primary) objects go to that store
+/// through [`Odb::write`].
 ///
 /// Returns the total number of objects processed.
 ///
@@ -76,12 +170,159 @@ struct PendingDelta {
 /// - [`Error::Io`] — I/O failure reading from `reader`.
 /// - [`Error::Zlib`] — decompression failure.
 pub fn unpack_objects(reader: &mut dyn Read, odb: &Odb, opts: &UnpackOptions) -> Result<usize> {
+    unpack_into(reader, odb, opts, None, None).map(|unpacked| unpacked.count)
+}
+
+/// Apply a pack stream to any [`WritableObjectStore`], resolving every delta.
+///
+/// This is how a pack received by fetch, clone, push or a bundle reaches a custom
+/// backend (SQLite, key-value, remote blob storage): each object is inflated, its
+/// `OFS_DELTA`/`REF_DELTA` chain resolved, and the result stored with
+/// [`WritableObjectStore::write`]. No `objects/` directory is involved.
+///
+/// - `reader` yields the raw pack (`PACK` header through the trailing checksum). It is
+///   read in small pieces, so wrap files and sockets in a [`std::io::BufReader`].
+/// - `store` receives every object in the pack.
+/// - `bases` resolves `REF_DELTA` bases a *thin* pack leaves out, and answers
+///   [`UnpackOptions::strict`] connectivity checks. `store` is consulted first, so pass
+///   `store` again when it is the only source, or a repository-wide view (for example a
+///   [`CompositeStore`](crate::odb::store::CompositeStore)) when bases may live elsewhere.
+///
+/// The trailing checksum is verified before any delta is applied. Objects without a
+/// delta are written as they are read, so a failed ingest can leave some objects in
+/// `store`; Git stores tolerate unreferenced objects and later garbage collection
+/// removes them. Objects up to 1 MiB are kept in memory until the pack is resolved
+/// (as delta bases); larger blobs are read back from `store` when a delta needs them.
+///
+/// Only [`UnpackOptions::dry_run`], [`UnpackOptions::strict`] and its allowances, and
+/// [`UnpackOptions::max_input_bytes`] apply; [`UnpackOptions::quiet`] has no effect.
+///
+/// # Examples
+///
+/// ```
+/// use std::io::Cursor;
+/// use std::sync::Arc;
+///
+/// use grit_lib::objects::odb::store::{MemoryStore, ObjectStore};
+/// use grit_lib::objects::odb::OdbBuilder;
+/// use grit_lib::objects::pack_objects::{build_pack, PackBuildOptions};
+/// use grit_lib::objects::unpack_objects::{ingest_pack_into, UnpackOptions};
+/// use grit_lib::objects::{HashAlgo, ObjectKind};
+///
+/// # fn main() -> grit_lib::error::Result<()> {
+/// // Any object database can produce the pack; here another in-memory store.
+/// let source = OdbBuilder::files("/nonexistent/objects")
+///     .primary(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
+///     .alternates(false)
+///     .build();
+/// let blob = source.write(ObjectKind::Blob, b"hello\n")?;
+/// let pack = build_pack(&source, &[blob], &[], &PackBuildOptions::default())?;
+///
+/// let target = MemoryStore::new(HashAlgo::Sha1);
+/// let ingested = ingest_pack_into(
+///     &mut Cursor::new(pack),
+///     &target,
+///     &target,
+///     &UnpackOptions::default(),
+/// )?;
+/// assert!(ingested.object_ids.contains(&blob));
+/// assert!(target.contains(&blob)?);
+/// # Ok(())
+/// # }
+/// ```
+///
+/// # Errors
+///
+/// - [`Error::CorruptObject`] — invalid pack format, checksum mismatch, a delta whose
+///   base is in neither the pack nor `bases`, or (with [`UnpackOptions::strict`]) a
+///   reference that resolves nowhere.
+/// - [`Error::Io`] — failure reading from `reader`.
+/// - [`Error::Zlib`] — decompression failure.
+/// - Any error `store` or `bases` return.
+pub fn ingest_pack_into(
+    reader: &mut dyn Read,
+    store: &dyn WritableObjectStore,
+    bases: &dyn ObjectStore,
+    opts: &UnpackOptions,
+) -> Result<IngestedObjects> {
+    ingest_pack_into_with_progress(reader, store, bases, opts, None, None)
+}
+
+/// Like [`ingest_pack_into`], reporting [`ProgressPhase::IndexingObjects`] and
+/// [`ProgressPhase::ResolvingDeltas`] on `progress` and stopping with
+/// [`Error::Cancelled`] once `cancel` fires.
+///
+/// # Errors
+///
+/// Same as [`ingest_pack_into`], plus [`Error::Cancelled`].
+pub fn ingest_pack_into_with_progress(
+    reader: &mut dyn Read,
+    store: &dyn WritableObjectStore,
+    bases: &dyn ObjectStore,
+    opts: &UnpackOptions,
+    progress: Option<&mut dyn ProgressSink>,
+    cancel: Option<&dyn Cancel>,
+) -> Result<IngestedObjects> {
+    unpack_into(reader, &StoreSink { store, bases }, opts, progress, cancel)
+        .map(Unpacked::into_ingested)
+}
+
+/// Like [`ingest_pack_into_with_progress`], writing into `odb` the way [`unpack_objects`]
+/// does (loose objects for a files primary, the custom primary otherwise).
+pub(crate) fn ingest_pack_into_odb(
+    reader: &mut dyn Read,
+    odb: &Odb,
+    opts: &UnpackOptions,
+    progress: Option<&mut dyn ProgressSink>,
+    cancel: Option<&dyn Cancel>,
+) -> Result<IngestedObjects> {
+    unpack_into(reader, odb, opts, progress, cancel).map(Unpacked::into_ingested)
+}
+
+/// Everything [`unpack_into`] resolved.
+struct Unpacked {
+    count: usize,
+    by_oid: HashMap<ObjectId, PackedObjectEntry>,
+    object_counts: ObjectKindCounts,
+    pack_bytes: u64,
+}
+
+impl Unpacked {
+    fn into_ingested(self) -> IngestedObjects {
+        IngestedObjects {
+            object_ids: self.by_oid.into_keys().collect(),
+            object_counts: self.object_counts,
+            pack_bytes: self.pack_bytes,
+        }
+    }
+}
+
+fn poll_unpack_cancel(
+    progress: &mut Option<&mut dyn ProgressSink>,
+    cancel: Option<&dyn Cancel>,
+) -> Result<()> {
+    let Some(cancel) = cancel else {
+        return Ok(());
+    };
+    match progress {
+        Some(p) => poll_cancel(&mut **p, cancel),
+        None => poll_cancel(&mut NullProgress, cancel),
+    }
+}
+
+fn unpack_into<S: UnpackSink + ?Sized>(
+    reader: &mut dyn Read,
+    sink: &S,
+    opts: &UnpackOptions,
+    mut progress: Option<&mut dyn ProgressSink>,
+    cancel: Option<&dyn Cancel>,
+) -> Result<Unpacked> {
     /// Blobs larger than this stay on disk only (after write) so huge packs do
     /// not retain every blob in RAM. Smaller objects are kept for delta bases
     /// and `--strict` graph walks without extra ODB reads.
     const MAX_RETAIN_BYTES: usize = 1024 * 1024;
 
-    let algo = odb.hash_algo();
+    let algo = sink.hash_algo();
     let mut rd = StreamingPackReader::new(reader, opts.max_input_bytes, algo);
 
     // Validate magic and version.
@@ -106,8 +347,13 @@ pub fn unpack_objects(reader: &mut dyn Read, odb: &Odb, opts: &UnpackOptions) ->
 
     let mut pending: Vec<PendingDelta> = Vec::new();
     let mut count = 0usize;
+    let mut object_counts = ObjectKindCounts::default();
 
+    if let Some(p) = progress.as_mut() {
+        p.start(ProgressPhase::IndexingObjects, Some(nr_objects as u64));
+    }
     for _ in 0..nr_objects {
+        poll_unpack_cancel(&mut progress, cancel)?;
         let obj_offset = rd.stream_pos();
         let (type_code, size) = rd.read_type_size()?;
 
@@ -115,10 +361,11 @@ pub fn unpack_objects(reader: &mut dyn Read, odb: &Odb, opts: &UnpackOptions) ->
             1..=4 => {
                 let kind = type_code_to_kind(type_code)?;
                 let data = rd.decompress(size)?;
-                let oid = write_or_hash(kind, &data, odb, opts.dry_run)?;
-                let entry = packed_entry_after_write(kind, data, oid, odb, opts, MAX_RETAIN_BYTES);
+                let oid = sink.write(kind, &data, opts.dry_run)?;
+                let entry = packed_entry_after_write(kind, data, oid, opts, MAX_RETAIN_BYTES);
                 by_offset.insert(obj_offset, entry.clone());
                 by_oid.insert(oid, entry);
+                object_counts.add(kind);
                 count += 1;
             }
             6 => {
@@ -153,6 +400,12 @@ pub fn unpack_objects(reader: &mut dyn Read, odb: &Odb, opts: &UnpackOptions) ->
                 )))
             }
         }
+        if let Some(p) = progress.as_mut() {
+            p.inc(1);
+        }
+    }
+    if let Some(p) = progress.as_mut() {
+        p.finish();
     }
 
     // Trailing pack checksum (hash of all preceding bytes); not included in the hash.
@@ -163,30 +416,36 @@ pub fn unpack_objects(reader: &mut dyn Read, odb: &Odb, opts: &UnpackOptions) ->
             "pack trailing checksum mismatch".to_owned(),
         ));
     }
+    let pack_bytes = rd.stream_pos() as u64;
 
     // Resolve pending deltas iteratively.  Each pass resolves all deltas whose
     // base is now known; repeat until none remain or we stall (corrupt pack).
     let mut remaining = pending;
+    if let (Some(p), false) = (progress.as_mut(), remaining.is_empty()) {
+        p.start(ProgressPhase::ResolvingDeltas, Some(remaining.len() as u64));
+    }
+    let resolving = !remaining.is_empty();
     loop {
         if remaining.is_empty() {
             break;
         }
+        poll_unpack_cancel(&mut progress, cancel)?;
         let before = remaining.len();
         let mut still_pending: Vec<PendingDelta> = Vec::new();
 
         for delta in remaining {
-            let base_res: Option<Result<(ObjectKind, Cow<'_, [u8]>)>> =
+            let base_res: Option<(ObjectKind, Cow<'_, [u8]>)> =
                 if let Some(base_off) = delta.base_offset {
-                    by_offset
-                        .get(&base_off)
-                        .map(|e| entry_object_bytes(e, odb).map(|d| (e.kind(), d)))
+                    match by_offset.get(&base_off) {
+                        Some(e) => Some((e.kind(), entry_object_bytes(e, sink)?)),
+                        None => None,
+                    }
                 } else if let Some(ref base_id) = delta.base_oid {
                     if let Some(e) = by_oid.get(base_id) {
-                        Some(entry_object_bytes(e, odb).map(|d| (e.kind(), d)))
+                        Some((e.kind(), entry_object_bytes(e, sink)?))
                     } else if !opts.dry_run {
-                        odb.read(base_id)
-                            .ok()
-                            .map(|obj| Ok((obj.kind, Cow::Owned(obj.data))))
+                        sink.read_stored(base_id)?
+                            .map(|obj| (obj.kind, Cow::Owned(obj.data)))
                     } else {
                         None
                     }
@@ -195,22 +454,19 @@ pub fn unpack_objects(reader: &mut dyn Read, odb: &Odb, opts: &UnpackOptions) ->
                 };
 
             match base_res {
-                Some(Ok((base_kind, base_data))) => {
+                Some((base_kind, base_data)) => {
                     let result = apply_delta(base_data.as_ref(), &delta.delta_data)?;
-                    let oid = write_or_hash(base_kind, &result, odb, opts.dry_run)?;
-                    let new_entry = packed_entry_after_write(
-                        base_kind,
-                        result,
-                        oid,
-                        odb,
-                        opts,
-                        MAX_RETAIN_BYTES,
-                    );
+                    let oid = sink.write(base_kind, &result, opts.dry_run)?;
+                    let new_entry =
+                        packed_entry_after_write(base_kind, result, oid, opts, MAX_RETAIN_BYTES);
                     by_offset.insert(delta.offset, new_entry.clone());
                     by_oid.insert(oid, new_entry);
+                    object_counts.add(base_kind);
                     count += 1;
+                    if let Some(p) = progress.as_mut() {
+                        p.inc(1);
+                    }
                 }
-                Some(Err(e)) => return Err(e),
                 None => still_pending.push(delta),
             }
         }
@@ -223,21 +479,21 @@ pub fn unpack_objects(reader: &mut dyn Read, odb: &Odb, opts: &UnpackOptions) ->
             )));
         }
     }
+    if let (Some(p), true) = (progress.as_mut(), resolving) {
+        p.finish();
+    }
 
     if opts.strict {
         let mut dot_fsck_map: HashMap<ObjectId, (ObjectKind, Vec<u8>)> =
             HashMap::with_capacity(by_oid.len());
         for (oid, entry) in &by_oid {
             let kind = entry.kind();
-            let data = match entry {
-                PackedObjectEntry::InMemory { data, .. } => data.clone(),
-                PackedObjectEntry::BlobOnDisk { oid: blob_oid } => odb.read(blob_oid)?.data,
-            };
+            let data = entry_object_bytes(entry, sink)?.into_owned();
             dot_fsck_map.insert(*oid, (kind, data));
         }
         gitmodules::verify_packed_dot_special(&dot_fsck_map)?;
         strict_verify_packed_references_map(
-            Some(odb),
+            sink,
             &by_oid,
             &opts.allowed_missing,
             opts.allow_promisor_missing_references,
@@ -245,7 +501,12 @@ pub fn unpack_objects(reader: &mut dyn Read, odb: &Odb, opts: &UnpackOptions) ->
         )?;
     }
 
-    Ok(count)
+    Ok(Unpacked {
+        count,
+        by_oid,
+        object_counts,
+        pack_bytes,
+    })
 }
 
 /// Resolved non-delta object: either full bytes in memory or a large blob on disk.
@@ -268,7 +529,6 @@ fn packed_entry_after_write(
     kind: ObjectKind,
     data: Vec<u8>,
     oid: ObjectId,
-    _odb: &Odb,
     opts: &UnpackOptions,
     max_retain: usize,
 ) -> PackedObjectEntry {
@@ -279,15 +539,21 @@ fn packed_entry_after_write(
     }
 }
 
-fn entry_object_bytes<'a>(entry: &'a PackedObjectEntry, odb: &Odb) -> Result<Cow<'a, [u8]>> {
+fn entry_object_bytes<'a, S: UnpackSink + ?Sized>(
+    entry: &'a PackedObjectEntry,
+    sink: &S,
+) -> Result<Cow<'a, [u8]>> {
     match entry {
         PackedObjectEntry::InMemory { data, .. } => Ok(Cow::Borrowed(data.as_slice())),
-        PackedObjectEntry::BlobOnDisk { oid } => Ok(Cow::Owned(odb.read(oid)?.data)),
+        PackedObjectEntry::BlobOnDisk { oid } => sink
+            .read_stored(oid)?
+            .map(|obj| Cow::Owned(obj.data))
+            .ok_or_else(|| Error::ObjectNotFound(oid.to_hex())),
     }
 }
 
-fn strict_verify_packed_references_map(
-    odb: Option<&Odb>,
+fn strict_verify_packed_references_map<S: UnpackSink + ?Sized>(
+    sink: &S,
     pack: &HashMap<ObjectId, PackedObjectEntry>,
     allowed_missing: &HashSet<ObjectId>,
     allow_promisor_missing_references: bool,
@@ -309,7 +575,7 @@ fn strict_verify_packed_references_map(
                         if !strict_ref_resolves_map(
                             &e.oid,
                             pack,
-                            odb,
+                            sink,
                             allowed_missing,
                             allow_promisor_missing_references,
                         )? {
@@ -325,7 +591,7 @@ fn strict_verify_packed_references_map(
                     if !strict_ref_resolves_map(
                         &c.tree,
                         pack,
-                        odb,
+                        sink,
                         allowed_missing,
                         allow_promisor_missing_references,
                     )? {
@@ -344,7 +610,7 @@ fn strict_verify_packed_references_map(
                         if !strict_ref_resolves_map(
                             p,
                             pack,
-                            odb,
+                            sink,
                             allowed_missing,
                             allow_promisor_missing_references,
                         )? {
@@ -360,7 +626,7 @@ fn strict_verify_packed_references_map(
                     if !strict_ref_resolves_map(
                         &t.object,
                         pack,
-                        odb,
+                        sink,
                         allowed_missing,
                         allow_promisor_missing_references,
                     )? {
@@ -377,10 +643,10 @@ fn strict_verify_packed_references_map(
     Ok(())
 }
 
-fn strict_ref_resolves_map(
+fn strict_ref_resolves_map<S: UnpackSink + ?Sized>(
     oid: &ObjectId,
     pack: &HashMap<ObjectId, PackedObjectEntry>,
-    odb: Option<&Odb>,
+    sink: &S,
     allowed_missing: &HashSet<ObjectId>,
     allow_promisor_missing_references: bool,
 ) -> Result<bool> {
@@ -388,7 +654,7 @@ fn strict_ref_resolves_map(
     {
         return Ok(true);
     }
-    odb.map_or(Ok(false), |o| o.contains(oid))
+    sink.contains(oid)
 }
 
 fn strict_ref_resolves(
@@ -768,18 +1034,6 @@ fn build_pack_object_map(mut rd: PackReader<'_>, odb: &Odb) -> Result<HashMap<Ob
         .into_iter()
         .map(|(oid, (kind, data))| (oid, Object::new(kind, data)))
         .collect())
-}
-
-/// Either write `data` as a loose object (if `!dry_run`) or just compute its
-/// [`ObjectId`] without touching the filesystem.
-fn write_or_hash(kind: ObjectKind, data: &[u8], odb: &Odb, dry_run: bool) -> Result<ObjectId> {
-    if dry_run {
-        odb.hash(kind, data)
-    } else {
-        // Always materialize into this ODB: objects reachable only via alternates must still be
-        // written locally (matches git unpack-objects; t5519-push-alternates).
-        odb.write_local(kind, data)
-    }
 }
 
 /// Convert a pack object type code to an [`ObjectKind`].

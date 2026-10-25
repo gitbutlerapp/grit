@@ -465,13 +465,15 @@ pub struct TransferStats {
 }
 
 impl TransferStats {
-    /// Build stats from a pack installed under `objects/pack/`.
-    ///
-    /// # Errors
-    ///
-    /// Returns [`Error::Io`] when the pack file cannot be read.
-    pub fn from_ingested_pack(ingested: &crate::index_pack::IngestedPack) -> Result<Self> {
-        transfer_stats_from_ingested(ingested)
+    /// Build stats from an ingested pack (installed under `objects/pack/` or written
+    /// into a custom primary store).
+    #[must_use]
+    pub fn from_ingested_pack(ingested: &crate::index_pack::IngestedPack) -> Self {
+        Self {
+            objects: u64::try_from(ingested.object_ids.len()).unwrap_or(u64::MAX),
+            bytes: ingested.pack_bytes,
+            kinds: Some(ingested.object_counts),
+        }
     }
 }
 
@@ -555,17 +557,6 @@ impl FetchOutcome {
     pub fn has_rejections(&self) -> bool {
         self.updates.iter().any(|u| u.mode.is_rejected())
     }
-}
-
-fn transfer_stats_from_ingested(
-    ingested: &crate::index_pack::IngestedPack,
-) -> Result<TransferStats> {
-    let bytes = fs::metadata(&ingested.pack_path).map_err(Error::Io)?.len();
-    Ok(TransferStats {
-        objects: u64::try_from(ingested.object_ids.len()).unwrap_or(u64::MAX),
-        bytes,
-        kinds: Some(ingested.object_counts),
-    })
 }
 
 fn object_kind_counts_for_oids(

@@ -383,7 +383,7 @@ fn unbundle_promisor_marks_installed_pack_not_preexisting() {
     .expect("seed pack");
     let seeded = install_pack_bytes(seed_pack, bare.odb(), &IngestPackOptions::default())
         .expect("install seed");
-    let old_pack = seeded.pack_path;
+    let old_pack = seeded.pack_path.expect("installed seed pack");
     assert!(old_pack.is_file());
     let future = filetime::FileTime::from_unix_time(2_000_000_000, 0);
     filetime::set_file_mtime(&old_pack, future).expect("touch old pack mtime");

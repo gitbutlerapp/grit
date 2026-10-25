@@ -140,13 +140,10 @@ fn bundle_pack_odb_and_midx_paths() {
     let pack = build_pack(repo.odb(), &[blob], &[], &pack_opts).expect("pack");
     let ingested = install_pack_bytes(pack.clone(), repo.odb(), &IngestPackOptions::default())
         .expect("install");
-    let _ = install_pack_path(
-        &ingested.pack_path,
-        repo.odb(),
-        &IngestPackOptions::default(),
-    );
+    let installed_pack = ingested.pack_path.clone().expect("installed pack path");
+    let _ = install_pack_path(&installed_pack, repo.odb(), &IngestPackOptions::default());
     let _ = ingest_received_pack_path(
-        ingested.pack_path.clone(),
+        installed_pack.clone(),
         repo.odb(),
         &IngestPackOptions::default(),
     );
@@ -159,7 +156,7 @@ fn bundle_pack_odb_and_midx_paths() {
         .find(|p| p.extension().is_some_and(|x| x == "idx"))
         .expect("idx");
     let idx = read_pack_index(&idx_path).expect("read idx");
-    let pack_bytes = fs::read(&ingested.pack_path).expect("read pack");
+    let pack_bytes = fs::read(&installed_pack).expect("read pack");
     if let Some(off) = idx.find_offset(&blob).expect("lookup") {
         let _ = read_object_from_pack_at_offset(&idx, off).expect("read at off");
         let _ = slice_one_pack_object(&pack_bytes, off, idx.hash_bytes());

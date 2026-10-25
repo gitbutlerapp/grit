@@ -1,9 +1,10 @@
 //! Transport, fsck, unbundle, and staging behavior for repositories whose object database
 //! uses a custom [`OdbBuilder::primary`] store (issue #1735).
 //!
-//! Fetch, push, and unbundle still assume the files-backed `objects/` directory, so they
-//! must fail up front with a typed [`Error::UnsupportedObjectStore`] instead of writing packs
-//! the repository cannot read or moving refs to objects it does not have. Staging writes go
+//! Unbundling writes every object of the bundle's pack into the custom primary (issue #1892).
+//! Fetch and push still assume the files-backed `objects/` directory, so they must fail up
+//! front with a typed [`Error::UnsupportedObjectStore`] instead of writing packs the
+//! repository cannot read or moving refs to objects it does not have. Staging writes go
 //! through the custom primary, and fsck validates the objects the primary lists.
 
 use std::fs;
@@ -231,18 +232,108 @@ fn fetch_from_bundle_into_custom_primary_is_rejected() {
     assert!(is_unsupported(&err, "fetch"), "unexpected error: {err:?}");
     assert!(resolve_ref(repo.git_dir(), "refs/remotes/origin/main").is_err());
     assert_eq!(object_files(repo.git_dir()), before);
+}
+
+#[test]
+fn unbundle_into_custom_primary_writes_every_object_into_the_store() {
+    let upstream = git_upstream();
+    let bundle = upstream.path().join("all.bundle");
+    git(
+        upstream.path(),
+        &["bundle", "create", bundle.to_str().expect("utf8"), "main"],
+    );
+    let (_dir, repo, store) = memory_repo();
+    let before = object_files(repo.git_dir());
+
+    let outcome = repo.bundles().unbundle(&bundle).expect("unbundle");
+    let tip = rev_parse(upstream.path(), "main");
+    assert_eq!(outcome.refs.len(), 1);
+    assert_eq!(outcome.refs[0].oid, tip);
+
+    let expected: Vec<ObjectId> = git(upstream.path(), &["rev-list", "--objects", "main"])
+        .lines()
+        .map(|line| ObjectId::from_hex(&line[..40]).expect("oid"))
+        .collect();
+    assert_eq!(expected.len(), 6, "two commits, two trees, two blobs");
+    assert_eq!(outcome.transfer.objects, 6);
+    assert_eq!(
+        outcome.transfer.bytes,
+        fs::metadata(&bundle).expect("meta").len()
+            - grit_lib::bundle::Bundle::open(&bundle)
+                .expect("open")
+                .pack_byte_offset()
+    );
+    assert_eq!(
+        outcome.pack_object_ids,
+        expected
+            .iter()
+            .copied()
+            .collect::<std::collections::HashSet<_>>()
+    );
+    for oid in &expected {
+        let obj = store.read(oid).expect("read").expect("object in store");
+        let rehashed = grit_lib::objects::hash::hash_object(HashAlgo::Sha1, obj.kind, &obj.data)
+            .expect("hash");
+        assert_eq!(&rehashed, oid);
+    }
+    assert_eq!(
+        object_files(repo.git_dir()),
+        before,
+        "unbundle must not stage the pack under objects/ for a custom primary"
+    );
+
+    // An incremental bundle whose prerequisite is already in the store.
+    fs::write(upstream.path().join("c.txt"), "three\n").expect("write");
+    git(upstream.path(), &["add", "c.txt"]);
+    git(upstream.path(), &["commit", "-q", "-m", "c3"]);
+    let incremental = upstream.path().join("incr.bundle");
+    git(
+        upstream.path(),
+        &[
+            "bundle",
+            "create",
+            incremental.to_str().expect("utf8"),
+            "main~1..main",
+        ],
+    );
+    let opened = grit_lib::bundle::Bundle::open(&incremental).expect("open bundle");
+    assert!(opened
+        .verify(&repo)
+        .expect("verify")
+        .missing_prerequisites
+        .is_empty());
+    let new_tip = rev_parse(upstream.path(), "main");
+    let outcome = repo
+        .bundles()
+        .unbundle(&incremental)
+        .expect("unbundle incremental");
+    assert_eq!(outcome.refs[0].oid, new_tip);
+    assert!(store.contains(&new_tip).expect("contains"));
+    assert!(repo.odb().read(&new_tip).is_ok());
+}
+
+#[test]
+fn unbundle_into_custom_primary_reports_a_corrupt_pack() {
+    let upstream = git_upstream();
+    let bundle = upstream.path().join("all.bundle");
+    git(
+        upstream.path(),
+        &["bundle", "create", bundle.to_str().expect("utf8"), "main"],
+    );
+    let mut bytes = fs::read(&bundle).expect("read bundle");
+    let last = bytes.len() - 1;
+    bytes[last] ^= 0xff;
+    fs::write(&bundle, &bytes).expect("corrupt trailer");
+    let (_dir, repo, _store) = memory_repo();
 
     let err = repo
         .bundles()
         .unbundle(&bundle)
-        .expect_err("unbundle into a custom primary must fail");
-    assert_eq!(
-        err,
-        BundleError::UnsupportedObjectStore {
-            operation: "unbundle"
-        }
+        .expect_err("corrupt trailer must fail");
+    assert!(
+        matches!(&err, BundleError::Io(msg) if msg.contains("checksum")),
+        "unexpected error: {err:?}"
     );
-    assert_eq!(object_files(repo.git_dir()), before);
 }
 
 #[test]

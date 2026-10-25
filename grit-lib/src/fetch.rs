@@ -1544,15 +1544,8 @@ pub fn fetch_remote(
                     Some(cancel),
                 )?
             };
+            transfer = crate::transfer::TransferStats::from_ingested_pack(&ingested);
             pack_oids = ingested.object_ids;
-            let bytes = std::fs::metadata(&ingested.pack_path)
-                .map_err(crate::error::Error::Io)?
-                .len();
-            transfer = crate::transfer::TransferStats {
-                objects: u64::try_from(pack_oids.len()).unwrap_or(u64::MAX),
-                bytes,
-                kinds: Some(ingested.object_counts),
-            };
         }
     }
 
@@ -1904,14 +1897,7 @@ fn fetch_remote_object_wants(
             Some(progress),
             Some(cancel),
         )?;
-        let bytes = std::fs::metadata(&ingested.pack_path)
-            .map_err(crate::error::Error::Io)?
-            .len();
-        transfer = crate::transfer::TransferStats {
-            objects: u64::try_from(ingested.object_ids.len()).unwrap_or(u64::MAX),
-            bytes,
-            kinds: Some(ingested.object_counts),
-        };
+        transfer = crate::transfer::TransferStats::from_ingested_pack(&ingested);
     }
 
     if v2_caps.is_some() && !wants.is_empty() {

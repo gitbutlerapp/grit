@@ -177,13 +177,6 @@ pub enum BundleError {
     /// The pack stream did not start where expected.
     #[error("bundle pack stream missing or invalid")]
     MissingPack,
-    /// The repository uses a custom [`OdbBuilder::primary`](crate::odb::OdbBuilder::primary)
-    /// store; ingesting the pack needs the files-backed `objects/` directory.
-    #[error("{operation} requires the files-backed object store; it is not supported with a custom primary")]
-    UnsupportedObjectStore {
-        /// Refused bundle operation (`"unbundle"`).
-        operation: &'static str,
-    },
     /// Underlying I/O failure.
     #[error("{0}")]
     Io(String),
@@ -345,11 +338,15 @@ impl Bundle {
 
     /// Stream the embedded pack into `repo`'s ODB (does not update refs).
     ///
+    /// With a files-backed primary the pack is installed under `objects/pack/`. With a
+    /// custom [`OdbBuilder::primary`](crate::odb::OdbBuilder::primary) store the pack is
+    /// read straight from the bundle file and every object is written into that store;
+    /// no temporary file is created. A filtered (v3 `filter`) bundle is then not marked
+    /// as a promisor pack, since there is no pack to mark.
+    ///
     /// # Errors
     ///
-    /// Returns [`BundleError`] or ingest failures wrapped as [`BundleError::Io`], and
-    /// [`BundleError::UnsupportedObjectStore`] before reading the pack when `repo` uses a
-    /// custom primary object store.
+    /// Returns [`BundleError`] or ingest failures wrapped as [`BundleError::Io`].
     pub fn unbundle(
         &self,
         repo: &Repository,
@@ -366,21 +363,58 @@ impl Bundle {
         progress: &mut dyn ProgressSink,
         cancel: &dyn crate::progress::Cancel,
     ) -> std::result::Result<UnbundleOutcome, BundleError> {
-        if !repo.odb().uses_files_primary() {
-            return Err(BundleError::UnsupportedObjectStore {
-                operation: "unbundle",
-            });
-        }
-        crate::progress::poll_cancel(progress, cancel).map_err(|e| match e {
-            crate::error::Error::Cancelled => BundleError::Cancelled,
-            other => BundleError::Io(other.to_string()),
-        })?;
+        crate::progress::poll_cancel(progress, cancel).map_err(bundle_ingest_error)?;
         if self.header.object_format != repo.odb().hash_algo() {
             return Err(BundleError::ObjectFormatMismatch {
                 bundle_name: self.header.object_format.name(),
                 repo_name: repo.odb().hash_algo().name(),
             });
         }
+        let ingested = if repo.odb().uses_files_primary() {
+            self.install_pack(repo, progress, cancel)?
+        } else {
+            let mut input = File::open(&self.path)?;
+            Seek::seek(&mut input, std::io::SeekFrom::Start(self.pack_offset))?;
+            let mut reader = std::io::BufReader::with_capacity(1 << 20, input);
+            crate::unpack_objects::ingest_pack_into_odb(
+                &mut reader,
+                repo.odb(),
+                &crate::unpack_objects::UnpackOptions::default(),
+                Some(progress),
+                Some(cancel),
+            )
+            .map(crate::index_pack::IngestedPack::from)
+            .map_err(bundle_ingest_error)?
+        };
+        if let (Some(_), Some(pack_path)) = (&self.header.filter, &ingested.pack_path) {
+            std::fs::write(pack_path.with_extension("promisor"), b"")
+                .map_err(|e| BundleError::Io(e.to_string()))?;
+            repo.odb().invalidate_packs();
+        }
+        let transfer = crate::transfer::TransferStats::from_ingested_pack(&ingested);
+        let refs = self
+            .header
+            .refs
+            .iter()
+            .map(|(name, oid)| UnbundledRef {
+                name: name.clone(),
+                oid: *oid,
+            })
+            .collect();
+        Ok(UnbundleOutcome {
+            refs,
+            transfer,
+            pack_object_ids: ingested.object_ids,
+        })
+    }
+
+    /// Copy the embedded pack under `objects/pack/` and install it there.
+    fn install_pack(
+        &self,
+        repo: &Repository,
+        progress: &mut dyn ProgressSink,
+        cancel: &dyn crate::progress::Cancel,
+    ) -> std::result::Result<crate::index_pack::IngestedPack, BundleError> {
         let pack_bytes = std::fs::metadata(&self.path)
             .map(|m| m.len().saturating_sub(self.pack_offset))
             .unwrap_or(0);
@@ -399,10 +433,7 @@ impl Bundle {
             let mut copied = 0u64;
             let mut buf = [0u8; 64 * 1024];
             loop {
-                crate::progress::poll_cancel(progress, cancel).map_err(|e| match e {
-                    crate::error::Error::Cancelled => BundleError::Cancelled,
-                    other => BundleError::Io(other.to_string()),
-                })?;
+                crate::progress::poll_cancel(progress, cancel).map_err(bundle_ingest_error)?;
                 let n = input.read(&mut buf).map_err(BundleError::from)?;
                 if n == 0 {
                     break;
@@ -414,46 +445,26 @@ impl Bundle {
             output.flush().map_err(BundleError::from)?;
         }
         progress.finish();
-        crate::progress::poll_cancel(progress, cancel).map_err(|e| match e {
-            crate::error::Error::Cancelled => BundleError::Cancelled,
-            other => BundleError::Io(other.to_string()),
-        })?;
+        crate::progress::poll_cancel(progress, cancel).map_err(bundle_ingest_error)?;
         let opts = IngestPackOptions {
             fix_thin: true,
             ..Default::default()
         };
-        let ingested = ingest_received_pack_path_with_progress(
+        ingest_received_pack_path_with_progress(
             tmp.path().to_path_buf(),
             repo.odb(),
             &opts,
             Some(progress),
             Some(cancel),
         )
-        .map_err(|e| match e {
-            crate::error::Error::Cancelled => BundleError::Cancelled,
-            other => BundleError::Io(other.to_string()),
-        })?;
-        if self.header.filter.is_some() {
-            std::fs::write(ingested.pack_path.with_extension("promisor"), b"")
-                .map_err(|e| BundleError::Io(e.to_string()))?;
-            repo.odb().invalidate_packs();
-        }
-        let transfer = crate::transfer::TransferStats::from_ingested_pack(&ingested)
-            .map_err(|e| BundleError::Io(e.to_string()))?;
-        let refs = self
-            .header
-            .refs
-            .iter()
-            .map(|(name, oid)| UnbundledRef {
-                name: name.clone(),
-                oid: *oid,
-            })
-            .collect();
-        Ok(UnbundleOutcome {
-            refs,
-            transfer,
-            pack_object_ids: ingested.object_ids,
-        })
+        .map_err(bundle_ingest_error)
+    }
+}
+
+fn bundle_ingest_error(e: Error) -> BundleError {
+    match e {
+        Error::Cancelled => BundleError::Cancelled,
+        other => BundleError::Io(other.to_string()),
     }
 }
 

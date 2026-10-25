@@ -17,7 +17,7 @@ use crate::pack::{verify_pack_and_collect, write_v2_pack_index_sorting};
 use crate::pack_index_build::{build_mapped_pack_index, RESIDENT_PACK_BYTES};
 use crate::pack_map::{PackData, ResidentBudget};
 use crate::progress::{poll_cancel, Cancel, ProgressSink};
-use crate::unpack_objects::PackIndexRecord;
+use crate::unpack_objects::{IngestedObjects, PackIndexRecord};
 
 pub use crate::pack_index_build::{
     build_pack_index_records, build_pack_index_records_with_progress,
@@ -99,15 +99,33 @@ impl FromIterator<ObjectKind> for ObjectKindCounts {
     }
 }
 
-/// Result of installing a pack under `objects/pack/`.
-#[derive(Debug, Clone)]
+/// Result of ingesting a received pack into an object database.
+#[derive(Debug, Clone, Default)]
 pub struct IngestedPack {
-    /// Object ids recorded in the new pack index.
+    /// Object ids the pack delivered.
     pub object_ids: HashSet<ObjectId>,
     /// Absolute path to the published `pack-*.pack` file.
-    pub pack_path: PathBuf,
+    ///
+    /// `None` when nothing was published: the pack was empty, or the object database
+    /// has a custom [`OdbBuilder::primary`](crate::odb::OdbBuilder::primary) store and
+    /// the objects were written into it one by one.
+    pub pack_path: Option<PathBuf>,
     /// How many objects of each type the pack holds.
     pub object_counts: ObjectKindCounts,
+    /// Size in bytes of the published pack (after completing a thin pack), or of the
+    /// pack stream when the objects went to a custom primary store.
+    pub pack_bytes: u64,
+}
+
+impl From<IngestedObjects> for IngestedPack {
+    fn from(ingested: IngestedObjects) -> Self {
+        Self {
+            object_ids: ingested.object_ids,
+            pack_path: None,
+            object_counts: ingested.object_counts,
+            pack_bytes: ingested.pack_bytes,
+        }
+    }
 }
 
 /// Options controlling how a received pack is ingested.
@@ -173,6 +191,18 @@ impl IngestPackOptions {
 /// Ingest a pack received from fetch/clone by installing it under `objects/pack/`.
 ///
 /// Returns the installed pack identity and indexed object ids.
+///
+/// When `odb` has a custom [`OdbBuilder::primary`](crate::odb::OdbBuilder::primary)
+/// store, the pack is not installed: its objects are resolved and written into that
+/// store (see [`ingest_pack_into`](crate::unpack_objects::ingest_pack_into)), thin-pack
+/// bases are read through `odb`, and [`IngestedPack::pack_path`] is `None`. Only
+/// the pack checksum is verified then; [`IngestPackOptions`] fields that describe the
+/// installed `.pack`/`.idx` pair (threads, promisor marker, trusted rows) do not apply.
+///
+/// # Errors
+///
+/// [`Error::CorruptObject`] when the bytes are not a complete pack, plus any
+/// indexing, delta-resolution, or object-store failure.
 pub fn ingest_received_pack(
     pack: Vec<u8>,
     odb: &Odb,
@@ -190,11 +220,7 @@ pub fn ingest_received_pack_with_progress(
     cancel: Option<&dyn Cancel>,
 ) -> Result<IngestedPack> {
     if pack.is_empty() {
-        return Ok(IngestedPack {
-            object_ids: HashSet::new(),
-            pack_path: PathBuf::new(),
-            object_counts: ObjectKindCounts::default(),
-        });
+        return Ok(IngestedPack::default());
     }
     if pack.len() < 12 || &pack[0..4] != b"PACK" {
         return Err(Error::CorruptObject(
@@ -206,7 +232,27 @@ pub fn ingest_received_pack_with_progress(
             "received pack checksum mismatch (download may be incomplete): {e}"
         ))
     })?;
+    if !odb.uses_files_primary() {
+        return ingest_into_custom_primary(&mut pack.as_slice(), odb, progress, cancel);
+    }
     install_pack_bytes_with_progress(pack, odb, opts, progress, cancel)
+}
+
+/// Resolve every object of the pack on `reader` into `odb`'s custom primary store.
+fn ingest_into_custom_primary(
+    reader: &mut dyn std::io::Read,
+    odb: &Odb,
+    progress: Option<&mut dyn ProgressSink>,
+    cancel: Option<&dyn Cancel>,
+) -> Result<IngestedPack> {
+    crate::unpack_objects::ingest_pack_into_odb(
+        reader,
+        odb,
+        &crate::unpack_objects::UnpackOptions::default(),
+        progress,
+        cancel,
+    )
+    .map(IngestedPack::from)
 }
 
 /// Ingest a pack already written to disk (streaming fetch/clone receive path).
@@ -243,6 +289,10 @@ fn wait_for_received_pack_path(path: PathBuf) -> Result<PathBuf> {
 }
 
 /// Like [`ingest_received_pack_path`], reporting pack indexing progress on `progress` when set.
+///
+/// With a custom primary store the objects are written into it as described on
+/// [`ingest_received_pack`], and the file at `pack_path` is removed afterwards
+/// (whether or not ingestion succeeded), just as a files-backed ingest moves it.
 pub fn ingest_received_pack_path_with_progress(
     pack_path: PathBuf,
     odb: &Odb,
@@ -252,6 +302,16 @@ pub fn ingest_received_pack_path_with_progress(
 ) -> Result<IngestedPack> {
     crate::trace::trace_span!("grit.pack.index");
     let pack_path = wait_for_received_pack_path(pack_path)?;
+    if !odb.uses_files_primary() {
+        let ingested = std::fs::File::open(&pack_path)
+            .map_err(Error::Io)
+            .and_then(|file| {
+                let mut reader = std::io::BufReader::with_capacity(1 << 20, file);
+                ingest_into_custom_primary(&mut reader, odb, progress, cancel)
+            });
+        let _ = std::fs::remove_file(&pack_path);
+        return ingested;
+    }
     install_pack_path_with_progress(&pack_path, odb, opts, progress, cancel)
 }
 
@@ -468,10 +528,12 @@ pub fn install_pack_path_with_progress(
             std::fs::write(final_pack.with_extension("promisor"), b"").map_err(Error::Io)?;
         }
         let _ = std::fs::remove_dir(&stage);
+        let pack_bytes = std::fs::metadata(&final_pack).map_err(Error::Io)?.len();
         Ok(IngestedPack {
             object_ids: oids,
-            pack_path: final_pack.clone(),
+            pack_path: Some(final_pack.clone()),
             object_counts,
+            pack_bytes,
         })
     })();
 
