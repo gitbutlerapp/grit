@@ -8,8 +8,12 @@ use std::process::{Command, Stdio};
 use std::collections::HashSet;
 
 use grit_lib::objects::odb::Odb;
-use grit_lib::objects::pack_object_select::{enumerate_pack_objects, PackEnumerateOptions};
-use grit_lib::objects::pack_objects::{PackBuildOptions, PackObjects, PackObjectsOptions};
+use grit_lib::objects::pack_object_select::{
+    enumerate_pack_objects, HaveBoundary, PackEnumerateOptions,
+};
+use grit_lib::objects::pack_objects::{
+    build_pack_for_push, PackBuildOptions, PackObjects, PackObjectsOptions,
+};
 use grit_lib::objects::unpack_objects::pack_bytes_to_object_map;
 use grit_lib::objects::ObjectId;
 use grit_lib::remote::transfer::build_pack;
@@ -231,6 +235,7 @@ fn incremental_thin_pack_divergent_tips_matches_git_send_size() {
             use_bitmaps: false,
             exclude_objects: None,
             peer_odb: None,
+            have_boundary: grit_lib::objects::pack_object_select::HaveBoundary::CommitClosure,
         },
     )
     .expect("enumerate");
@@ -261,6 +266,51 @@ fn incremental_thin_pack_divergent_tips_matches_git_send_size() {
     git_index_pack_stdin_fix_thin(dir, have, &grit_pack);
 }
 
+/// Issue #1975: send-pack must not pre-walk the full commit closure of every advertised ref.
+#[test]
+fn push_send_pack_uses_tips_only_have_boundary() {
+    let (dir, tip, _) = build_deep_history_repo(800);
+    let parent = rev_parse(dir.path(), "HEAD~1");
+    let mut haves = vec![parent];
+    for n in (2..400).step_by(2) {
+        haves.push(rev_parse(dir.path(), &format!("HEAD~{n}")));
+    }
+    let odb = open_odb(dir.path());
+    let empty = HashSet::new();
+    let selection = enumerate_pack_objects(
+        &odb,
+        &[tip],
+        &haves,
+        &PackEnumerateOptions {
+            filter: None,
+            shallow_grafts: &empty,
+            have_shallow_grafts: Some(&empty),
+            use_bitmaps: false,
+            exclude_objects: None,
+            peer_odb: None,
+            have_boundary: HaveBoundary::TipsOnly,
+        },
+    )
+    .expect("enumerate");
+    assert!(
+        selection.send.len() < 40,
+        "one new commit with many advertised tips should stay small, got {} objects",
+        selection.send.len()
+    );
+    build_pack_for_push(
+        &odb,
+        &[tip],
+        &haves,
+        &PackBuildOptions {
+            delta: true,
+            thin: true,
+            use_bitmaps: false,
+            ..PackBuildOptions::default()
+        },
+    )
+    .expect("push pack");
+}
+
 /// Issue #1938: incremental enumeration must not walk or load the full peer closure.
 #[test]
 fn incremental_thin_pack_send_list_is_bounded() {
@@ -279,6 +329,7 @@ fn incremental_thin_pack_send_list_is_bounded() {
             use_bitmaps: true,
             exclude_objects: None,
             peer_odb: None,
+            have_boundary: grit_lib::objects::pack_object_select::HaveBoundary::CommitClosure,
         },
     )
     .expect("enumerate");

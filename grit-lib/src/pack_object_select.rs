@@ -51,6 +51,19 @@ impl fmt::Debug for PackObjectSelection {
     }
 }
 
+/// How client `haves` bound the want-side object walk.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum HaveBoundary {
+    /// Pre-walk all commits reachable from every `have` (upload-pack negotiation).
+    #[default]
+    CommitClosure,
+    /// Treat each `have` as a tip boundary only (`send-pack` / push thin packs).
+    ///
+    /// The want-side walk stops when it meets a `have` commit and seals that
+    /// snapshot, without walking history backward from every advertised ref first.
+    TipsOnly,
+}
+
 /// Parameters for [`enumerate_pack_objects`].
 #[derive(Clone, Copy, Debug)]
 pub struct PackEnumerateOptions<'a> {
@@ -69,6 +82,8 @@ pub struct PackEnumerateOptions<'a> {
     pub exclude_objects: Option<&'a HashSet<ObjectId>>,
     /// When `wants` are read from another ODB, objects already stored here are boundaries.
     pub peer_odb: Option<&'a Odb>,
+    /// Whether `haves` are expanded to a full commit closure before the want walk.
+    pub have_boundary: HaveBoundary,
 }
 
 /// Select pack objects using bitmap reachability when possible, otherwise the object walk.
@@ -235,7 +250,12 @@ fn walk_enumeration(
     name_trees: NameTrees,
 ) -> Result<PackObjectSelection> {
     let have_shallow = opts.have_shallow_grafts.unwrap_or(opts.shallow_grafts);
-    let have_commits = commits_reachable_from_haves(odb, haves, have_shallow, true)?;
+    let have_commits = match opts.have_boundary {
+        HaveBoundary::CommitClosure => {
+            commits_reachable_from_haves(odb, haves, have_shallow, true)?
+        }
+        HaveBoundary::TipsOnly => haves.iter().copied().collect(),
+    };
     let mut boundary: HashSet<ObjectId> = HashSet::new();
     if let Some(extra) = opts.exclude_objects {
         boundary.extend(extra.iter().copied());
@@ -882,6 +902,7 @@ mod tests {
                 use_bitmaps: false,
                 exclude_objects: None,
                 peer_odb: None,
+                have_boundary: HaveBoundary::CommitClosure,
             },
             name_trees,
         )
@@ -918,6 +939,52 @@ mod tests {
         repo.odb()
             .write(ObjectKind::Commit, body.as_bytes())
             .expect("commit")
+    }
+
+    #[test]
+    fn tips_only_boundary_matches_closure_on_linear_incremental_push() {
+        let dir = TempDir::new().unwrap();
+        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        let blob = |s: &str| repo.odb().write(ObjectKind::Blob, s.as_bytes()).unwrap();
+        let mut parent = write_commit(
+            &repo,
+            write_tree(&repo, &[(0o100644, "f", blob("0"))]),
+            &[],
+            0,
+        );
+        for i in 1..800 {
+            let tree = write_tree(&repo, &[(0o100644, "f", blob(&i.to_string()))]);
+            parent = write_commit(&repo, tree, &[parent], i);
+        }
+        let remote_tip = parent;
+        let new_tree = write_tree(&repo, &[(0o100644, "f", blob("new"))]);
+        let new_tip = write_commit(&repo, new_tree, &[remote_tip], 900);
+        let empty = HashSet::new();
+        let closure_opts = PackEnumerateOptions {
+            filter: None,
+            shallow_grafts: &empty,
+            have_shallow_grafts: Some(&empty),
+            use_bitmaps: false,
+            exclude_objects: None,
+            peer_odb: None,
+            have_boundary: HaveBoundary::CommitClosure,
+        };
+        let tips_opts = PackEnumerateOptions {
+            have_boundary: HaveBoundary::TipsOnly,
+            ..closure_opts
+        };
+        let closure = enumerate_pack_objects(repo.odb(), &[new_tip], &[remote_tip], &closure_opts)
+            .expect("closure");
+        let tips = enumerate_pack_objects(repo.odb(), &[new_tip], &[remote_tip], &tips_opts)
+            .expect("tips");
+        let closure_set: HashSet<ObjectId> = closure.send.iter().copied().collect();
+        let tips_set: HashSet<ObjectId> = tips.send.iter().copied().collect();
+        assert_eq!(closure_set, tips_set);
+        assert!(
+            tips.send.len() <= 8,
+            "one new commit should enumerate a handful of objects, got {}",
+            tips.send.len()
+        );
     }
 
     #[test]
@@ -1016,6 +1083,7 @@ mod tests {
                 use_bitmaps: false,
                 exclude_objects: None,
                 peer_odb: None,
+                have_boundary: HaveBoundary::CommitClosure,
             },
         )
         .unwrap();

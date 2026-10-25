@@ -1743,6 +1743,7 @@ fn repack_object_list(
             use_bitmaps,
             exclude_objects: None,
             peer_odb: None,
+            have_boundary: crate::pack_object_select::HaveBoundary::CommitClosure,
         },
         NameTrees::Yes,
     )?;

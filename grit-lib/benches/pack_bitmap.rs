@@ -202,6 +202,8 @@ fn bench_pack_bitmap(c: &mut Criterion) {
                         use_bitmaps: false,
                         exclude_objects: None,
                         peer_odb: None,
+                        have_boundary:
+                            grit_lib::objects::pack_object_select::HaveBoundary::CommitClosure,
                     },
                 )
                 .expect("enumerate"),
@@ -223,6 +225,8 @@ fn bench_pack_bitmap(c: &mut Criterion) {
                         use_bitmaps: true,
                         exclude_objects: None,
                         peer_odb: None,
+                        have_boundary:
+                            grit_lib::objects::pack_object_select::HaveBoundary::CommitClosure,
                     },
                 )
                 .expect("enumerate"),
