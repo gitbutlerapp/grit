@@ -1,6 +1,6 @@
 //! `grit pick` — cherry-pick one or more commits onto the current branch.
 
-use crate::commands::replay_merge_args::{mainline_parent, ReplayMergeArgs};
+use crate::commands::replay_merge_args::{mainline_parent, EmptyStepArg, ReplayMergeArgs};
 use crate::context;
 use crate::markdown;
 use crate::message_input::{read_message_input, MessageInputArgs};
@@ -11,7 +11,6 @@ use crate::operation_output::{
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 use crate::revision_errors::map_commit_spec_error;
 use anyhow::{bail, Context, Result};
-use clap::ValueEnum;
 use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::config::ConfigSet;
 use grit_lib::error::Error;
@@ -22,8 +21,8 @@ use grit_lib::operation::{
 use grit_lib::porcelain::replay::ReplayDirection;
 use grit_lib::porcelain::replay_sequence::{
     abort_replay_sequence, commits_to_replay, continue_replay_sequence, predict_replay_sequence,
-    skip_replay_step, start_replay_sequence, ReplayCreated, ReplayEmptyPolicy, ReplayOptions,
-    ReplaySequenceRequest, SequenceOutcome, SequencePrediction,
+    skip_replay_step, start_replay_sequence, ReplayCreated, ReplayOptions, ReplaySequenceRequest,
+    SequenceOutcome, SequencePrediction,
 };
 use grit_lib::state::InProgressOperation;
 use schemars::JsonSchema;
@@ -89,25 +88,6 @@ pub struct PickOutcome {
     pub check: bool,
 }
 
-/// How to handle an empty replay step (`--empty`).
-#[derive(Clone, Copy, Debug, Default, ValueEnum, PartialEq, Eq)]
-pub enum PickEmptyArg {
-    #[default]
-    Stop,
-    Keep,
-    Drop,
-}
-
-impl From<PickEmptyArg> for ReplayEmptyPolicy {
-    fn from(value: PickEmptyArg) -> Self {
-        match value {
-            PickEmptyArg::Stop => ReplayEmptyPolicy::Stop,
-            PickEmptyArg::Keep => ReplayEmptyPolicy::Keep,
-            PickEmptyArg::Drop => ReplayEmptyPolicy::Drop,
-        }
-    }
-}
-
 /// Options for [`run`].
 pub struct PickRunOptions {
     pub commits: Vec<String>,
@@ -116,7 +96,7 @@ pub struct PickRunOptions {
     pub skip: bool,
     pub record_origin: bool,
     pub no_commit: bool,
-    pub empty: PickEmptyArg,
+    pub empty: EmptyStepArg,
     pub message: MessageInputArgs,
     pub mainline: Option<u32>,
     pub dry_run: bool,

@@ -1406,8 +1406,8 @@ enum Command {
         #[arg(long = "no-commit")]
         no_commit: bool,
         /// When a pick step would not change the tree: stop (default), keep an empty commit, or drop the step.
-        #[arg(long = "empty", value_enum, default_value_t = commands::pick::PickEmptyArg::Stop)]
-        empty: commands::pick::PickEmptyArg,
+        #[arg(long = "empty", value_enum, default_value_t = commands::replay_merge_args::EmptyStepArg::Stop)]
+        empty: commands::replay_merge_args::EmptyStepArg,
         #[command(flatten)]
         message: message_input::MessageInputArgs,
         /// Predict whether the pick would succeed without changing refs, the index, or the worktree.
@@ -1446,8 +1446,8 @@ enum Command {
         #[arg(long = "no-commit")]
         no_commit: bool,
         /// When a revert step would not change the tree: stop (default), keep an empty commit, or drop the step.
-        #[arg(long = "empty", value_enum, default_value_t = commands::revert::ReplayEmptyPolicyArg::Stop)]
-        empty: commands::revert::ReplayEmptyPolicyArg,
+        #[arg(long = "empty", value_enum, default_value_t = commands::replay_merge_args::EmptyStepArg::Stop)]
+        empty: commands::replay_merge_args::EmptyStepArg,
         #[command(flatten)]
         message: message_input::MessageInputArgs,
         /// Predict whether the revert would succeed without changing refs, the index, or the worktree.

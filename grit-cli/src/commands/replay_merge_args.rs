@@ -2,8 +2,9 @@
 
 use std::num::NonZeroU32;
 
-use clap::Args;
+use clap::{Args, ValueEnum};
 use grit_lib::diff::merge_file::{ConflictStyle, MergeFavor};
+use grit_lib::porcelain::replay_sequence::ReplayEmptyPolicy;
 
 use crate::commands::merge_strategy::MergeStrategyArg;
 use crate::conflict_style::ConflictStyleArg;
@@ -17,6 +18,28 @@ pub struct ReplayMergeArgs {
     /// Conflict marker style when a step would stop with conflicts.
     #[arg(long = "conflict", value_enum)]
     pub conflict_style: Option<ConflictStyleArg>,
+}
+
+/// How to handle a pick / revert step that would not change `HEAD` (`--empty`).
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, ValueEnum)]
+pub enum EmptyStepArg {
+    /// Stop and leave sequencer state for `--continue` / `--skip`.
+    #[default]
+    Stop,
+    /// Record an empty commit for the step.
+    Keep,
+    /// Skip the commit and continue with the next one.
+    Drop,
+}
+
+impl From<EmptyStepArg> for ReplayEmptyPolicy {
+    fn from(value: EmptyStepArg) -> Self {
+        match value {
+            EmptyStepArg::Stop => ReplayEmptyPolicy::Stop,
+            EmptyStepArg::Keep => ReplayEmptyPolicy::Keep,
+            EmptyStepArg::Drop => ReplayEmptyPolicy::Drop,
+        }
+    }
 }
 
 /// Validate `--mainline <n>` (1-based parent number) for pick / revert.

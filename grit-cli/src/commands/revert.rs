@@ -1,6 +1,6 @@
 //! `grit revert` — undo one or more commits with new inverse commits.
 
-use crate::commands::replay_merge_args::{mainline_parent, ReplayMergeArgs};
+use crate::commands::replay_merge_args::{mainline_parent, EmptyStepArg, ReplayMergeArgs};
 use crate::context;
 use crate::markdown;
 use crate::message_input::{read_message_input, MessageInputArgs};
@@ -11,7 +11,6 @@ use crate::operation_output::{
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 use crate::revision_errors::map_commit_spec_error;
 use anyhow::{bail, Context, Result};
-use clap::ValueEnum;
 use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::config::ConfigSet;
 use grit_lib::error::Error;
@@ -19,35 +18,13 @@ use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::replay::ReplayDirection;
 use grit_lib::porcelain::replay_sequence::{
     abort_replay_sequence, continue_replay_sequence, predict_replay_sequence, skip_replay_step,
-    start_replay_sequence, ReplayCreated, ReplayEmptyPolicy, ReplayOptions, ReplaySequenceRequest,
-    SequenceOutcome, SequencePrediction,
+    start_replay_sequence, ReplayCreated, ReplayOptions, ReplaySequenceRequest, SequenceOutcome,
+    SequencePrediction,
 };
 use grit_lib::porcelain::revert::commits_to_revert;
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::io::Write;
-
-/// How to handle a revert step whose patch would not change `HEAD`.
-#[derive(Debug, Clone, Copy, ValueEnum, Default, PartialEq, Eq)]
-pub enum ReplayEmptyPolicyArg {
-    /// Stop and leave sequencer state for `--continue` / `--skip`.
-    #[default]
-    Stop,
-    /// Record an empty revert commit for the step.
-    Keep,
-    /// Skip the commit and continue with the next one.
-    Drop,
-}
-
-impl From<ReplayEmptyPolicyArg> for ReplayEmptyPolicy {
-    fn from(value: ReplayEmptyPolicyArg) -> Self {
-        match value {
-            ReplayEmptyPolicyArg::Stop => ReplayEmptyPolicy::Stop,
-            ReplayEmptyPolicyArg::Keep => ReplayEmptyPolicy::Keep,
-            ReplayEmptyPolicyArg::Drop => ReplayEmptyPolicy::Drop,
-        }
-    }
-}
 
 /// One revert commit created on the current branch.
 #[derive(Debug, Clone, Serialize, JsonSchema)]
@@ -238,7 +215,7 @@ pub struct RevertRunOptions {
     pub abort: bool,
     pub skip: bool,
     pub no_commit: bool,
-    pub empty: ReplayEmptyPolicyArg,
+    pub empty: EmptyStepArg,
     pub message: MessageInputArgs,
     pub dry_run: bool,
     pub check: bool,
