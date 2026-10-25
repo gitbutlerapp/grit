@@ -1446,6 +1446,33 @@ pub fn prepare_tree_switch(
     from_tree: Option<&ObjectId>,
     to_tree: &ObjectId,
 ) -> Result<TreeSwitchPlan> {
+    prepare_tree_switch_for(repo, WorktreeOperation::Switch, from_tree, to_tree)
+}
+
+/// Refuse when moving the worktree from `HEAD` to `to_tree` for a rebase stop would lose data.
+///
+/// A rebase that stops on conflicts hard-resets the index and worktree to the replayed parent,
+/// so staged or unstaged changes, and untracked files at paths `to_tree` adds, must not exist.
+///
+/// # Errors
+///
+/// Returns [`Error::DirtyWorktree`] for local changes and [`Error::Message`] when an untracked
+/// file would be overwritten.
+pub(crate) fn ensure_safe_for_rebase_stop(
+    repo: &Repository,
+    from_tree: &ObjectId,
+    to_tree: &ObjectId,
+) -> Result<()> {
+    let plan = prepare_tree_switch_for(repo, WorktreeOperation::Rebase, Some(from_tree), to_tree)?;
+    ensure_no_untracked_overwrite(&plan.untracked, &plan.tree_changes)
+}
+
+fn prepare_tree_switch_for(
+    repo: &Repository,
+    operation: WorktreeOperation,
+    from_tree: Option<&ObjectId>,
+    to_tree: &ObjectId,
+) -> Result<TreeSwitchPlan> {
     let mut snapshot = load_worktree_snapshot(repo)?;
     let index_path = repo.index_path_for_env()?;
     let (staged, unstaged, index_changed) =
@@ -1454,11 +1481,7 @@ pub fn prepare_tree_switch(
         snapshot.index.source_mtime = index_file_mtime(&index_path);
     }
     if !staged.is_empty() || !unstaged.is_empty() {
-        return Err(dirty_worktree_error(
-            WorktreeOperation::Switch,
-            &staged,
-            &unstaged,
-        ));
+        return Err(dirty_worktree_error(operation, &staged, &unstaged));
     }
 
     let tree_changes = if from_tree == Some(to_tree) {

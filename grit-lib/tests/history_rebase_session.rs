@@ -1091,3 +1091,93 @@ fn abort_clears_rerere_state_of_git_started_rebase_like_git() {
     assert_eq!(git(wt, &["rerere", "remaining"]), "");
     assert_git_fsck_strict(wt);
 }
+
+fn assert_refused_untouched(wt: &std::path::Path, grit: &Repository, orig_tip: ObjectId) {
+    assert_eq!(git_oid(wt, "topic"), orig_tip);
+    assert_eq!(
+        git(wt, &["symbolic-ref", "HEAD"]).trim(),
+        "refs/heads/topic"
+    );
+    assert!(!grit.git_dir().join("rebase-merge").exists());
+    assert!(!std::fs::read_to_string(wt.join("f.txt"))
+        .expect("f.txt")
+        .contains("<<<<<<<"));
+}
+
+#[test]
+fn conflicting_start_refuses_staged_and_unstaged_changes_instead_of_discarding_them() {
+    let (repo, upstream, onto, tip, orig_tip) = conflict_rebase_fixture();
+    let wt = repo.worktree();
+    git(wt, &["switch", "topic"]);
+    std::fs::write(wt.join("new.txt"), "staged work\n").expect("write");
+    git(wt, &["add", "new.txt"]);
+    std::fs::write(wt.join("new.txt"), "staged work\nplus unstaged\n").expect("write");
+    let grit = open_grit(wt);
+
+    let err = start_rebase(&grit, &start_opts(upstream, Some(onto), tip))
+        .expect_err("a stop would discard local changes");
+    match err {
+        RebaseSessionError::Library(grit_lib::error::Error::DirtyWorktree { operation, paths }) => {
+            assert_eq!(operation, grit_lib::error::WorktreeOperation::Rebase);
+            assert_eq!(paths, vec!["new.txt".to_owned()]);
+        }
+        other => panic!("expected dirty worktree, got {other:?}"),
+    }
+    assert_refused_untouched(wt, &grit, orig_tip);
+    assert_eq!(
+        std::fs::read_to_string(wt.join("new.txt")).expect("new.txt"),
+        "staged work\nplus unstaged\n"
+    );
+    assert_eq!(git(wt, &["show", ":new.txt"]), "staged work\n");
+}
+
+#[test]
+fn conflicting_start_refuses_to_overwrite_untracked_file() {
+    let (repo, upstream, _onto, tip, orig_tip) = conflict_rebase_fixture();
+    let wt = repo.worktree();
+    commit_file(wt, "added.txt", "upstream adds this\n", "main adds file");
+    let onto = git_oid(wt, "HEAD");
+    git(wt, &["switch", "topic"]);
+    std::fs::write(wt.join("added.txt"), "precious untracked\n").expect("write");
+    let grit = open_grit(wt);
+
+    let err = start_rebase(&grit, &start_opts(upstream, Some(onto), tip))
+        .expect_err("a stop would overwrite the untracked file");
+    assert!(
+        matches!(
+            &err,
+            RebaseSessionError::Library(grit_lib::error::Error::Message(msg)) if msg.contains("added.txt")
+        ),
+        "unexpected {err:?}"
+    );
+    assert_refused_untouched(wt, &grit, orig_tip);
+    assert_eq!(
+        std::fs::read_to_string(wt.join("added.txt")).expect("added.txt"),
+        "precious untracked\n"
+    );
+}
+
+#[test]
+fn clean_replay_still_carries_local_changes() {
+    let repo = HistoryRepo::init();
+    let wt = repo.worktree();
+    commit_file(wt, "a.txt", "a\n", "base");
+    let upstream = git_oid(wt, "HEAD");
+    git(wt, &["switch", "-c", "topic"]);
+    commit_file(wt, "t.txt", "t\n", "topic");
+    let tip = git_oid(wt, "HEAD");
+    git(wt, &["switch", "main"]);
+    commit_file(wt, "m.txt", "m\n", "main");
+    let onto = git_oid(wt, "HEAD");
+    git(wt, &["switch", "topic"]);
+    std::fs::write(wt.join("t.txt"), "t\nlocal edit\n").expect("write");
+
+    let grit = open_grit(wt);
+    let out = start_rebase(&grit, &start_opts(upstream, Some(onto), tip)).expect("start");
+    assert!(matches!(out, RebaseOutcome::Done { .. }));
+    assert_eq!(
+        std::fs::read_to_string(wt.join("t.txt")).expect("t.txt"),
+        "t\nlocal edit\n"
+    );
+    assert_git_fsck_strict(wt);
+}

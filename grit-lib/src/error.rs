@@ -171,6 +171,8 @@ pub enum WorktreeOperation {
     Merge,
     /// Rebasing with `--exec`.
     RebaseExec,
+    /// Starting a rebase that stops on conflicts (the stop rewrites the index and worktree).
+    Rebase,
 }
 
 impl std::fmt::Display for WorktreeOperation {
@@ -180,6 +182,7 @@ impl std::fmt::Display for WorktreeOperation {
             Self::Pick => "picking",
             Self::Merge => "merging",
             Self::RebaseExec => "rebasing with --exec",
+            Self::Rebase => "rebasing",
         })
     }
 }

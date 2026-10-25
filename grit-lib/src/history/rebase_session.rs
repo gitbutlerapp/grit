@@ -15,6 +15,7 @@ use crate::operation::conflicts_from_tree_merge;
 use crate::porcelain::checkout::checkout_hard_to_tree_from_head_tree;
 use crate::porcelain::merge::apply_conflict_merge_worktree;
 use crate::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
+use crate::porcelain::worktree_guard::ensure_safe_for_rebase_stop;
 use crate::refs;
 use crate::repo::Repository;
 use crate::state::{resolve_head_for_repository, HeadState};
@@ -119,7 +120,11 @@ pub enum RebaseSessionError {
 ///
 /// Returns [`RebaseSessionError::RebaseAlreadyInProgress`] when grit or `git` already has a
 /// rebase in progress, [`RebaseSessionError::NotOnBranch`] when `HEAD` is not on a branch,
-/// and planning/apply failures otherwise.
+/// and planning/apply failures otherwise. When the replay would stop on conflicts but the index
+/// or worktree has local changes (or an untracked file sits where the stop checks out a path),
+/// returns [`RebaseSessionError::Library`] wrapping
+/// [`Error::DirtyWorktree`](crate::error::Error::DirtyWorktree) or the overwrite error and
+/// leaves the repository untouched, because stopping would discard that work.
 pub fn start_rebase(
     repo: &Repository,
     opts: &StartRebaseOptions,
@@ -153,6 +158,9 @@ pub fn start_rebase(
             })
         }
         Ok(ResumablePlanOutcome::Partial(partial)) => {
+            let orig_tree = commit_tree(repo, orig_head)?;
+            let stop_tree = commit_tree(repo, partial.conflict.replayed_parent)?;
+            ensure_safe_for_rebase_stop(repo, &orig_tree, &stop_tree)?;
             let stop = install_stopped_rebase(
                 repo,
                 &head_ref,
