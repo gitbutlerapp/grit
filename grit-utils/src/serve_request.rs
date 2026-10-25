@@ -84,6 +84,28 @@ pub fn ensure_serve_clone_request(repo: &Path) -> Result<std::path::PathBuf> {
     Ok(path)
 }
 
+/// Write a protocol v2 `ls-refs` request asking for refs under `ref_prefix`, with
+/// `peel` and `symrefs`, as `git fetch` sends it.
+///
+/// The bytes are what `upload-pack --stateless-rpc` reads with `GIT_PROTOCOL=version=2`.
+pub fn write_v2_ls_refs_request(
+    object_format: &str,
+    ref_prefix: &str,
+    out: &mut impl Write,
+) -> Result<()> {
+    let mut buf = Vec::new();
+    let pkt = grit_lib::remote::pkt_line::write_line_to_vec;
+    pkt(&mut buf, "command=ls-refs").context("write command")?;
+    pkt(&mut buf, &format!("object-format={object_format}")).context("write object-format")?;
+    buf.extend_from_slice(grit_lib::remote::pkt_line::DELIM.as_bytes());
+    for arg in ["peel", "symrefs", &format!("ref-prefix {ref_prefix}")] {
+        pkt(&mut buf, arg).context("write ls-refs argument")?;
+    }
+    buf.extend_from_slice(grit_lib::remote::pkt_line::FLUSH.as_bytes());
+    out.write_all(&buf).context("write ls-refs request")?;
+    Ok(())
+}
+
 /// Parse pkt-lines from a request body (for tests and validation).
 pub fn parse_v0_request_lines(body: &[u8]) -> Result<Vec<String>> {
     let mut lines = Vec::new();
@@ -145,5 +167,16 @@ mod tests {
         assert!(first_want.contains("side-band-64k"));
         assert!(first_want.contains("thin-pack"));
         assert!(first_want.contains("ofs-delta"));
+    }
+
+    #[test]
+    fn v2_ls_refs_request_matches_wire_bytes() {
+        let mut body = Vec::new();
+        write_v2_ls_refs_request("sha1", "refs/tags/t00001", &mut body).expect("write request");
+        assert_eq!(
+            body,
+            b"0014command=ls-refs\n0017object-format=sha1\n00010009peel\n000csymrefs\n\
+              0020ref-prefix refs/tags/t00001\n0000"
+        );
     }
 }

@@ -579,6 +579,13 @@ The **`grit-bench refs`** suite compares library drivers (`grit-bench refs-drive
 
 On the **100k packed** fixture, **update 1 000 refs** (`update-ref-update-1k-refs-100k-packed`) dropped from **~184 s** Grit mean (4 485× git) to **~1.5 s** (**~36×** git at ~41 ms); the regression was repeated full `packed-refs` parses per update in the batch path, not transaction semantics.
 
+The same fixtures serve two **`grit upload-pack`** scenarios against **`git upload-pack`**. The first is a protocol v2 **`ls-refs`** request with `peel`, `symrefs` and **`ref-prefix refs/heads/b05000`**, the request `git fetch origin b05000` sends (`upload-pack-ls-refs-prefix-*`). The second is the full v0 advertisement (`upload-pack-advertise-v0-*`). Both are read-only, so they run without the restore hook. Set **`GRIT_BENCH_REFS_ONLY_SERVE=1`** to run only these. Before [#1820](https://github.com/gitbutlerapp/grit/issues/1820), `ls-refs` listed and peeled every ref and only then applied the prefix: on the packed fixture it took **387 ms** for one ref (git **1.0 ms**), and **1.15 s** on the loose fixture (git **242 ms**). It now asks the ref store for the requested prefix only and peels only when the client asks. That brings it to **4.0 ms / 19.6 MB** packed and **42.5 ms / 12.9 MB** loose, where it beats git (**277 ms**) because the loose walk skips sibling ref files by name. The packed v0 advertisement went from **414 ms** to **117 ms** (git **16 ms**) because `packed-refs` peel lines replace tag reads. Before and after are in **`grit-utils/baselines/refs-serve-before.json`** and **`grit-utils/baselines/refs-serve-after.json`** (system `git 2.43.0`, one sitting).
+
+```bash
+cargo build --release -p grit-cli -p grit-utils
+GRIT_BENCH_REFS_ONLY_SERVE=1 GRIT_BENCH_BRANCH=factory/ls-refs-prefix-first ./target/release/grit-bench --min-runs 10 refs --format json --output grit-utils/baselines/refs-serve-after.json
+```
+
 Criterion micro-benchmarks for the reftable backend: **`cargo bench -p grit-lib --bench refs_reftable`** (`for_each_ref_100k`, `prefix_seek`, `transaction_create_10k`).
 
 ```bash

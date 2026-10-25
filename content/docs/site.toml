@@ -121,6 +121,7 @@ baseline = [
   "grit-utils/baselines/ignore-check-1000.json",
   "grit-utils/baselines/refs-after.json",
   "grit-utils/baselines/refs-after-reftable.json",
+  "grit-utils/baselines/refs-serve-after.json",
   "grit-utils/baselines/ref-query-reachability.json",
   "grit-utils/baselines/parallel-after.json",
   "grit-utils/baselines/add-initial-monorepo-20k.json",

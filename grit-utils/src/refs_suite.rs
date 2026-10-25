@@ -140,6 +140,10 @@ fn only_refs_create_scenarios() -> bool {
     std::env::var("GRIT_BENCH_REFS_ONLY_CREATE").is_ok()
 }
 
+fn only_refs_serve_scenarios() -> bool {
+    std::env::var("GRIT_BENCH_REFS_ONLY_SERVE").is_ok()
+}
+
 fn fixture_label(kind: RefsFixtureKind) -> &'static str {
     match kind {
         RefsFixtureKind::Packed => "refs-100k-packed",
@@ -148,10 +152,102 @@ fn fixture_label(kind: RefsFixtureKind) -> &'static str {
     }
 }
 
+/// Serving scenarios on a many-ref repository: a v2 `ls-refs` request naming one ref (what
+/// `git fetch origin <branch>` sends) and the full v0 advertisement. Both are read-only.
+#[allow(clippy::too_many_arguments)]
+fn add_upload_pack_scenarios(
+    hyperfine: &Path,
+    bench_exe: &Path,
+    git: &Path,
+    grit_cli: &Path,
+    cfg: &RefsRunConfig,
+    label: &str,
+    repo: &Path,
+    out: &mut Vec<ScenarioResult>,
+) -> Result<()> {
+    let request = refs_scratch_root().join("ls-refs-prefix-b05000.req");
+    let mut body = Vec::new();
+    crate::serve_request::write_v2_ls_refs_request("sha1", "refs/heads/b05000", &mut body)?;
+    std::fs::write(&request, body)?;
+
+    let ls_refs = |bin: &Path| {
+        sh_redirect_stdin(
+            &format!(
+                "GIT_PROTOCOL=version=2 {}",
+                shell_command(
+                    bin,
+                    &[
+                        "upload-pack".into(),
+                        "--stateless-rpc".into(),
+                        repo.display().to_string(),
+                    ],
+                )
+            ),
+            &request,
+        )
+    };
+    out.push(run_refs_scenario(
+        hyperfine,
+        bench_exe,
+        git,
+        cfg,
+        &Scenario {
+            id: format!("upload-pack-ls-refs-prefix-{label}"),
+            group: "refs".into(),
+            fixture: label.into(),
+            description: format!(
+                "upload-pack v2 ls-refs ref-prefix refs/heads/b05000 ({REF_COUNT} refs)"
+            ),
+            grit_argv: vec![ls_refs(grit_cli)],
+            git_argv: vec![ls_refs(git)],
+            driver: Driver::Cli,
+            prepare_kind: None,
+            grit_via_shell: true,
+            git_via_shell: true,
+        },
+        repo,
+        None,
+    )?);
+
+    let advertise = |bin: &Path| {
+        shell_command(
+            bin,
+            &[
+                "upload-pack".into(),
+                "--advertise-refs".into(),
+                repo.display().to_string(),
+            ],
+        )
+    };
+    out.push(run_refs_scenario(
+        hyperfine,
+        bench_exe,
+        git,
+        cfg,
+        &Scenario {
+            id: format!("upload-pack-advertise-v0-{label}"),
+            group: "refs".into(),
+            fixture: label.into(),
+            description: format!("upload-pack v0 ref advertisement ({REF_COUNT} refs)"),
+            grit_argv: vec![advertise(grit_cli)],
+            git_argv: vec![advertise(git)],
+            driver: Driver::Cli,
+            prepare_kind: None,
+            grit_via_shell: true,
+            git_via_shell: true,
+        },
+        repo,
+        None,
+    )?);
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
 fn add_fixture_scenarios(
     hyperfine: &Path,
     bench_exe: &Path,
     git: &Path,
+    grit_cli: &Path,
     cfg: &RefsRunConfig,
     kind: RefsFixtureKind,
     out: &mut Vec<ScenarioResult>,
@@ -189,6 +285,12 @@ fn add_fixture_scenarios(
     let create_stdin = fixture_path.join(&meta.create_stdin);
     let update_stdin = fixture_path.join(&meta.update_stdin);
     let delete_stdin = fixture_path.join(&meta.delete_stdin);
+
+    if only_refs_serve_scenarios() {
+        return add_upload_pack_scenarios(
+            hyperfine, bench_exe, git, grit_cli, cfg, label, &work_full, out,
+        );
+    }
 
     let run_non_create = !only_refs_create_scenarios();
 
@@ -234,6 +336,10 @@ fn add_fixture_scenarios(
             &work_full,
             Some(&prepare_full),
         )?);
+
+        add_upload_pack_scenarios(
+            hyperfine, bench_exe, git, grit_cli, cfg, label, &work_full, out,
+        )?;
 
         let grit_update = sh_redirect_stdin(
             &shell_command(
@@ -417,6 +523,7 @@ pub fn run_refs_suite(
             hyperfine,
             bench_exe,
             git,
+            grit_cli,
             cfg,
             RefsFixtureKind::Packed,
             &mut scenarios,
@@ -425,6 +532,7 @@ pub fn run_refs_suite(
             hyperfine,
             bench_exe,
             git,
+            grit_cli,
             cfg,
             RefsFixtureKind::Loose,
             &mut scenarios,
@@ -435,6 +543,7 @@ pub fn run_refs_suite(
             hyperfine,
             bench_exe,
             git,
+            grit_cli,
             cfg,
             RefsFixtureKind::Reftable,
             &mut scenarios,
