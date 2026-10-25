@@ -76,8 +76,12 @@ pub struct RebaseOntoOptions {
     pub rewrite: RewriteOptions,
     /// When `true` (default), omit commits whose stable patch-id already appears on the onto side between fork and onto.
     pub skip_applied: bool,
-    /// When `true`, drop merge commits that are branch tips in the replay range and move refs to
-    /// the replayed second parent (matches `git pull --rebase=merges` on linearizable merges).
+    /// When `true`, linearize the replay the way `git rebase` without `--rebase-merges` does
+    /// (what `git pull --rebase` runs): merge commits in the range are dropped and every other
+    /// commit is replayed on top of the previous one, starting at the onto commit, in
+    /// topological order. A branch that merged its upstream, or merged a local topic, keeps all
+    /// of its own commits and ends on top of the onto commit. All tips are chained into that one
+    /// line, so pass a single tip. When `false`, merges are replayed as merges.
     pub flatten_leaf_merges: bool,
     /// Auto-resolve replay conflicts the same way as `git rebase -X ours|theirs`.
     ///
@@ -202,7 +206,8 @@ pub fn plan_rebase(
 /// The `upstream` argument is the exclude boundary (fork point), not necessarily the user's
 /// upstream ref; [`plan_rebase`] computes the fork from upstream and tip instead.
 ///
-/// Merge commits in the range are replayed with updated parents and trees. Under
+/// Merge commits in the range are replayed with updated parents and trees, unless
+/// [`RebaseOntoOptions::flatten_leaf_merges`] linearizes the replay. Under
 /// [`RefScope::Branches`](super::RefScope::Branches),
 /// every local branch whose tip descends from the rewritten range is moved to its replayed tip.
 ///
@@ -327,9 +332,57 @@ pub(crate) fn build_rebase_rewrite_inputs(
         HashMap::new()
     };
 
+    let edits = if opts.flatten_leaf_merges {
+        linear_rebase_edits(repo, onto, &range, &skip_map)?
+    } else {
+        merge_preserving_rebase_edits(repo, fork, onto, &range, &skip_map)?
+    };
+
+    let replay_order = extend_rebase_replay_order(repo, fork, &range, &opts.rewrite, &skip_map)?;
+    Ok((edits, replay_order, range))
+}
+
+/// Edits that replay `range` in one line onto `onto`, like `git rebase` without
+/// `--rebase-merges`.
+///
+/// Merges are dropped, commits whose patch is already in `fork..onto` reuse that commit, and
+/// every other commit is reparented onto the previous replayed one. Planning with
+/// `linearize_onto` maps the dropped and reused entries to the tip of the line.
+fn linear_rebase_edits(
+    repo: &Repository,
+    onto: ObjectId,
+    range: &[ObjectId],
+    skip_map: &HashMap<ObjectId, ObjectId>,
+) -> Result<HistoryEdits, HistoryError> {
+    let mut edits = HistoryEdits::new();
+    let mut previous = onto;
+    for &commit in range {
+        if let Some(&existing) = skip_map.get(&commit) {
+            edits.insert(commit, CommitEdit::Reuse(existing));
+            continue;
+        }
+        if commit_parents(repo, commit)?.len() > 1 {
+            edits.insert(commit, CommitEdit::Drop);
+            continue;
+        }
+        edits.insert(commit, CommitEdit::Reparent { parent: previous });
+        previous = commit;
+    }
+    Ok(edits)
+}
+
+/// Edits that replay `range` onto `onto` keeping its shape: local roots move onto `onto` (or
+/// onto the replayed mainline of the merge that brings them in) and merges are replayed.
+fn merge_preserving_rebase_edits(
+    repo: &Repository,
+    fork: ObjectId,
+    onto: ObjectId,
+    range: &[ObjectId],
+    skip_map: &HashMap<ObjectId, ObjectId>,
+) -> Result<HistoryEdits, HistoryError> {
     let range_set: HashSet<ObjectId> = range.iter().copied().collect();
     let mut edits = HistoryEdits::new();
-    for &commit in &range {
+    for &commit in range {
         if let Some(&existing) = skip_map.get(&commit) {
             edits.insert(commit, CommitEdit::Reuse(existing));
             continue;
@@ -353,13 +406,8 @@ pub(crate) fn build_rebase_rewrite_inputs(
                 },
             );
         }
-        if opts.flatten_leaf_merges && is_leaf_merge_in_range(repo, commit, &range_set)? {
-            edits.insert(commit, CommitEdit::Drop);
-        }
     }
-
-    let replay_order = extend_rebase_replay_order(repo, fork, &range, &opts.rewrite, &skip_map)?;
-    Ok((edits, replay_order, range))
+    Ok(edits)
 }
 
 fn rebase_onto_impl(
@@ -384,7 +432,7 @@ fn rebase_onto_impl(
         &edits,
         &opts.rewrite,
         Some(&replay_order),
-        opts.flatten_leaf_merges,
+        opts.flatten_leaf_merges.then_some(onto),
         opts.favor,
     )?;
     plan.head.checkout_onto = Some(onto);
@@ -429,7 +477,7 @@ pub(crate) fn plan_rebase_resumable(
         &edits,
         &opts.rewrite,
         Some(&replay_order),
-        opts.flatten_leaf_merges,
+        opts.flatten_leaf_merges.then_some(effective_onto),
     )?;
     if let ResumablePlanOutcome::Complete(plan) = &mut outcome {
         plan.head.checkout_onto = Some(effective_onto);
@@ -490,27 +538,6 @@ fn mainline_anchor_for_parallel_root(
         }
     }
     Ok(None)
-}
-
-fn is_leaf_merge_in_range(
-    repo: &Repository,
-    oid: ObjectId,
-    range_set: &HashSet<ObjectId>,
-) -> Result<bool, HistoryError> {
-    let parents = commit_parents(repo, oid)?;
-    if parents.len() <= 1 {
-        return Ok(false);
-    }
-    for &other in range_set {
-        if other == oid {
-            continue;
-        }
-        let parents = commit_parents(repo, other)?;
-        if parents.contains(&oid) {
-            return Ok(false);
-        }
-    }
-    Ok(true)
 }
 
 fn commits_in_rebase_range(
@@ -1015,5 +1042,179 @@ mod tests {
         };
         let plan = plan_rebase(&repo, &request, &opts).expect("plan");
         assert_eq!(plan, RebasePlan::UpToDate);
+    }
+
+    fn files_tree(repo: &Repository, files: &[(&str, &[u8])]) -> crate::error::Result<ObjectId> {
+        let mut index = Index::new();
+        index.hash_algo = repo.odb().hash_algo();
+        for (path, bytes) in files {
+            let oid = repo.odb().write(ObjectKind::Blob, bytes)?;
+            index.add_or_replace(IndexEntry {
+                ctime_sec: 0,
+                ctime_nsec: 0,
+                mtime_sec: 0,
+                mtime_nsec: 0,
+                dev: 0,
+                ino: 0,
+                mode: MODE_REGULAR,
+                uid: 0,
+                gid: 0,
+                size: bytes.len() as u32,
+                oid,
+                flags: path.len().min(0xfff) as u16,
+                flags_extended: None,
+                path: path.as_bytes().to_vec(),
+                base_index_pos: 0,
+            });
+        }
+        write_tree_from_index(repo.odb(), &index, "")
+    }
+
+    fn init_repo(dir: &std::path::Path) -> Repository {
+        Repository::init(
+            dir,
+            &crate::repo::InitOptions::new()
+                .with_initial_branch("main".to_owned())
+                .with_ref_storage(crate::RefStorageFormat::Files),
+        )
+        .expect("init")
+    }
+
+    fn flatten_opts(id: &str) -> RebaseOntoOptions {
+        let mut opts = RebaseOntoOptions::new(RewriteOptions {
+            scope: RefScope::Head,
+            empty: crate::revwalk::history::EmptyPolicy::Drop,
+            committer: id.parse().expect("signature"),
+            preserve_committer: false,
+            sign: false,
+        });
+        opts.flatten_leaf_merges = true;
+        opts
+    }
+
+    /// `root`, local `a` on it, upstream `s2` on it, `m` merging `s2` into `a`, upstream `s3`
+    /// on `s2`; `refs/heads/main` (checked out) points at `m`.
+    struct MergedUpstream {
+        a: ObjectId,
+        s2: ObjectId,
+        m: ObjectId,
+        s3: ObjectId,
+    }
+
+    fn merged_upstream_fixture(repo: &Repository, id: &str) -> MergedUpstream {
+        let root_tree = files_tree(repo, &[("base.txt", b"base\n")]).expect("root tree");
+        let root = write_commit(repo, root_tree, &[], "root", id).expect("root");
+        let a_tree =
+            files_tree(repo, &[("a.txt", b"local\n"), ("base.txt", b"base\n")]).expect("a tree");
+        let a = write_commit(repo, a_tree, &[root], "Change a", id).expect("a");
+        let s2_tree =
+            files_tree(repo, &[("b.txt", b"2\n"), ("base.txt", b"base\n")]).expect("s2 tree");
+        let s2 = write_commit(repo, s2_tree, &[root], "S2", id).expect("s2");
+        let m_tree = files_tree(
+            repo,
+            &[
+                ("a.txt", b"local\n"),
+                ("b.txt", b"2\n"),
+                ("base.txt", b"base\n"),
+            ],
+        )
+        .expect("m tree");
+        let m = write_commit(repo, m_tree, &[a, s2], "Merge S2", id).expect("m");
+        let s3_tree = files_tree(
+            repo,
+            &[
+                ("b.txt", b"2\n"),
+                ("base.txt", b"base\n"),
+                ("c.txt", b"3\n"),
+            ],
+        )
+        .expect("s3 tree");
+        let s3 = write_commit(repo, s3_tree, &[s2], "S3", id).expect("s3");
+        crate::refs::write_ref(repo.git_dir(), "refs/heads/main", &m).expect("main");
+        MergedUpstream { a, s2, m, s3 }
+    }
+
+    #[test]
+    fn linear_rebase_edits_chain_commits_and_drop_merges() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = init_repo(dir.path());
+        let id = ident(1);
+        let fx = merged_upstream_fixture(&repo, &id);
+        let range = commits_in_rebase_range(&repo, fx.s2, &[fx.m]).expect("range");
+        assert_eq!(range, vec![fx.a, fx.m]);
+        let edits = linear_rebase_edits(&repo, fx.s3, &range, &HashMap::new()).expect("edits");
+        assert_eq!(
+            edits.get(&fx.a),
+            Some(&CommitEdit::Reparent { parent: fx.s3 })
+        );
+        assert_eq!(edits.get(&fx.m), Some(&CommitEdit::Drop));
+    }
+
+    #[test]
+    fn flattened_rebase_keeps_local_commit_under_merge_of_upstream() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = init_repo(dir.path());
+        let id = ident(1);
+        let fx = merged_upstream_fixture(&repo, &id);
+
+        let plan = rebase_onto(&repo, fx.s2, fx.s3, &[fx.m], &flatten_opts(&id)).expect("plan");
+
+        let row = |old: ObjectId| {
+            plan.commits
+                .iter()
+                .find(|row| row.old == old)
+                .expect("row")
+                .new
+        };
+        assert_eq!(row(fx.m), None, "the merge is dropped");
+        let replayed = row(fx.a).expect("local commit is replayed");
+        let commit = repo.odb().read_commit(&replayed).expect("replayed commit");
+        assert_eq!(commit.parents, vec![fx.s3]);
+        let expected_tree = files_tree(
+            &repo,
+            &[
+                ("a.txt", b"local\n"),
+                ("b.txt", b"2\n"),
+                ("base.txt", b"base\n"),
+                ("c.txt", b"3\n"),
+            ],
+        )
+        .expect("expected tree");
+        assert_eq!(commit.tree, expected_tree);
+        assert_eq!(plan.ref_updates.len(), 1);
+        assert_eq!(plan.ref_updates[0].name, "refs/heads/main");
+        assert_eq!(
+            plan.ref_updates[0].new, replayed,
+            "the branch lands on the replayed local commit, not the merged-in upstream commit"
+        );
+    }
+
+    #[test]
+    fn flattened_rebase_of_merge_without_local_commits_lands_on_onto() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = init_repo(dir.path());
+        let id = ident(1);
+        let root_tree = files_tree(&repo, &[("base.txt", b"base\n")]).expect("root tree");
+        let root = write_commit(&repo, root_tree, &[], "root", &id).expect("root");
+        let s2_tree =
+            files_tree(&repo, &[("b.txt", b"2\n"), ("base.txt", b"base\n")]).expect("s2 tree");
+        let s2 = write_commit(&repo, s2_tree, &[root], "S2", &id).expect("s2");
+        let m = write_commit(&repo, s2_tree, &[root, s2], "Merge S2", &id).expect("m");
+        let s3_tree = files_tree(
+            &repo,
+            &[
+                ("b.txt", b"2\n"),
+                ("base.txt", b"base\n"),
+                ("c.txt", b"3\n"),
+            ],
+        )
+        .expect("s3 tree");
+        let s3 = write_commit(&repo, s3_tree, &[s2], "S3", &id).expect("s3");
+        crate::refs::write_ref(repo.git_dir(), "refs/heads/main", &m).expect("main");
+
+        let plan = rebase_onto(&repo, s2, s3, &[m], &flatten_opts(&id)).expect("plan");
+
+        assert_eq!(plan.ref_updates.len(), 1);
+        assert_eq!(plan.ref_updates[0].new, s3);
     }
 }

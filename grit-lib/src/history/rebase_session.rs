@@ -288,7 +288,7 @@ pub fn continue_rebase(
         &edits,
         &rewrite,
         Some(&state.replay_order),
-        state.flatten_leaf_merges,
+        state.flatten_leaf_merges.then_some(state.onto),
         Some(seed),
         Some(state.scoped_refs.clone()),
     )?;
@@ -339,7 +339,7 @@ pub fn skip_rebase(
         &state.edits,
         &rewrite,
         Some(&state.replay_order),
-        state.flatten_leaf_merges,
+        state.flatten_leaf_merges.then_some(state.onto),
         Some((mapping, rewritten)),
         Some(state.scoped_refs.clone()),
     )?;
@@ -647,7 +647,7 @@ fn state_from_partial(
         head_ref: head_ref.to_owned(),
         orig_head: oid_hex(&orig_head),
         branch_tip: oid_hex(&request.branch_tip),
-        flatten_leaf_merges: partial.flatten_leaf_merges,
+        flatten_leaf_merges: partial.linearize_onto.is_some(),
         scoped_refs: partial
             .scoped_refs
             .iter()

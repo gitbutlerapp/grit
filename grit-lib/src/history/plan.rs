@@ -65,8 +65,9 @@ pub(crate) struct PartialRewritePlan {
     pub edits: HistoryEdits,
     /// Rewrite options.
     pub opts: RewriteOptions,
-    /// Leaf-merge flatten flag passed to planning.
-    pub flatten_leaf_merges: bool,
+    /// Start of the linear chain when planning linearizes the replay (see
+    /// [`plan_rewrite_with_order`]); `None` when merges are replayed.
+    pub linearize_onto: Option<ObjectId>,
 }
 
 /// Outcome of [`plan_rewrite_with_order_resumable`].
@@ -182,12 +183,10 @@ pub fn plan_rewrite(
     edits: &HistoryEdits,
     opts: &RewriteOptions,
 ) -> Result<RewritePlan, HistoryError> {
-    plan_rewrite_with_order(repo, edits, opts, None, false, MergeFavor::default())
+    plan_rewrite_with_order(repo, edits, opts, None, None, MergeFavor::default())
 }
 
-/// Like [`plan_rewrite`], but when `replay_order` is set, replays commits in that exact
-/// topological order (used by [`super::rebase::rebase_onto`](crate::history::rebase::rebase_onto)
-/// so merge side branches are included).
+/// Turn a replay conflict during resumable planning into partial progress; other errors pass through.
 #[allow(clippy::too_many_arguments)]
 fn finish_plan_rewrite_on_replay_error(
     err: HistoryError,
@@ -197,7 +196,7 @@ fn finish_plan_rewrite_on_replay_error(
     scoped_refs: Vec<(String, ObjectId)>,
     edits: &HistoryEdits,
     opts: &RewriteOptions,
-    flatten_leaf_merges: bool,
+    linearize_onto: Option<ObjectId>,
 ) -> Result<ResumablePlanOutcome, HistoryError> {
     if matches!(err, HistoryError::Conflict { .. }) {
         if let Some(conflict) = take_resumable_conflict() {
@@ -210,7 +209,7 @@ fn finish_plan_rewrite_on_replay_error(
                     scoped_refs,
                     edits: edits.clone(),
                     opts: opts.clone(),
-                    flatten_leaf_merges,
+                    linearize_onto,
                 },
             )));
         }
@@ -224,14 +223,14 @@ pub(crate) fn plan_rewrite_with_order_resumable(
     edits: &HistoryEdits,
     opts: &RewriteOptions,
     replay_order: Option<&[ObjectId]>,
-    flatten_leaf_merges: bool,
+    linearize_onto: Option<ObjectId>,
 ) -> Result<ResumablePlanOutcome, HistoryError> {
     plan_rewrite_with_order_resumable_seeded(
         repo,
         edits,
         opts,
         replay_order,
-        flatten_leaf_merges,
+        linearize_onto,
         None,
         None,
     )
@@ -243,7 +242,7 @@ pub(crate) fn plan_rewrite_with_order_resumable_seeded(
     edits: &HistoryEdits,
     opts: &RewriteOptions,
     replay_order: Option<&[ObjectId]>,
-    flatten_leaf_merges: bool,
+    linearize_onto: Option<ObjectId>,
     seed: Option<(HashMap<ObjectId, ObjectId>, Vec<RewrittenCommit>)>,
     scoped_refs: Option<Vec<(String, ObjectId)>>,
 ) -> Result<ResumablePlanOutcome, HistoryError> {
@@ -253,7 +252,7 @@ pub(crate) fn plan_rewrite_with_order_resumable_seeded(
             edits,
             opts,
             replay_order,
-            flatten_leaf_merges,
+            linearize_onto,
             MergeFavor::default(),
             seed,
             scoped_refs,
@@ -261,12 +260,21 @@ pub(crate) fn plan_rewrite_with_order_resumable_seeded(
     })
 }
 
+/// Like [`plan_rewrite`], but when `replay_order` is set, replays commits in that exact
+/// topological order (used by [`super::rebase::rebase_onto`](crate::history::rebase::rebase_onto)
+/// so merge side branches are included).
+///
+/// `linearize_onto` makes the replay one line starting at that commit, the way `git rebase`
+/// without `--rebase-merges` replays a branch: a [`CommitEdit::Drop`] or [`CommitEdit::Reuse`]
+/// entry maps to the tip of the line built so far instead of its own parent or the reused
+/// commit, so dropped merges and patches already upstream never pull the branch back off the
+/// line. The caller chains the replayed commits with [`CommitEdit::Reparent`] edits.
 pub(crate) fn plan_rewrite_with_order(
     repo: &Repository,
     edits: &HistoryEdits,
     opts: &RewriteOptions,
     replay_order: Option<&[ObjectId]>,
-    flatten_leaf_merges: bool,
+    linearize_onto: Option<ObjectId>,
     merge_favor: MergeFavor,
 ) -> Result<RewritePlan, HistoryError> {
     match plan_rewrite_with_order_impl(
@@ -274,7 +282,7 @@ pub(crate) fn plan_rewrite_with_order(
         edits,
         opts,
         replay_order,
-        flatten_leaf_merges,
+        linearize_onto,
         merge_favor,
         None,
         None,
@@ -290,7 +298,7 @@ fn plan_rewrite_with_order_impl(
     edits: &HistoryEdits,
     opts: &RewriteOptions,
     replay_order: Option<&[ObjectId]>,
-    flatten_leaf_merges: bool,
+    linearize_onto: Option<ObjectId>,
     merge_favor: MergeFavor,
     seed: Option<(HashMap<ObjectId, ObjectId>, Vec<RewrittenCommit>)>,
     scoped_refs_override: Option<Vec<(String, ObjectId)>>,
@@ -382,9 +390,15 @@ fn plan_rewrite_with_order_impl(
         (HashMap::new(), Vec::with_capacity(commits_to_replay.len()))
     };
     let skip_replayed: HashSet<ObjectId> = mapping.keys().copied().collect();
+    // Tip of the linear chain built so far when linearizing; every replay-order entry maps to
+    // the tip as it stood once that entry was handled.
+    let mut linear_tip = linearize_onto;
 
     for &old_oid in &commits_to_replay {
         if skip_replayed.contains(&old_oid) {
+            if linear_tip.is_some() {
+                linear_tip = mapping.get(&old_oid).copied().or(linear_tip);
+            }
             continue;
         }
         let old = load_commit(repo, old_oid)?;
@@ -399,7 +413,9 @@ fn plan_rewrite_with_order_impl(
         }
 
         if let Some(CommitEdit::Reuse(existing)) = edit {
-            mapping.insert(old_oid, *existing);
+            // A linear replay drops a patch that is already upstream: descendants and refs
+            // continue from the linear tip, while the row still names the upstream commit.
+            mapping.insert(old_oid, linear_tip.unwrap_or(*existing));
             rewritten.push(RewrittenCommit {
                 old: old_oid,
                 new: Some(*existing),
@@ -414,13 +430,9 @@ fn plan_rewrite_with_order_impl(
             if old.parents.is_empty() {
                 return Err(HistoryError::RootCommit { commit: old_oid });
             }
-            let parent = if flatten_leaf_merges && old.parents.len() > 1 {
-                mapping
-                    .get(&old.parents[1])
-                    .copied()
-                    .unwrap_or(old.parents[1])
-            } else {
-                mapped_first_parent(&mapping, &old, old_oid)?
+            let parent = match linear_tip {
+                Some(tip) => tip,
+                None => mapped_first_parent(&mapping, &old, old_oid)?,
             };
             mapping.insert(old_oid, parent);
             rewritten.push(RewrittenCommit {
@@ -626,12 +638,15 @@ fn plan_rewrite_with_order_impl(
                     scoped_refs.clone(),
                     edits,
                     opts,
-                    flatten_leaf_merges,
+                    linearize_onto,
                 );
             }
         };
 
         mapping.insert(old_oid, new_oid);
+        if linear_tip.is_some() {
+            linear_tip = Some(new_oid);
+        }
         rewritten.push(RewrittenCommit {
             old: old_oid,
             new: new_field,

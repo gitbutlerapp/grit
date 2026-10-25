@@ -1,5 +1,7 @@
 //! `porcelain::pull` rebase integration against system `git pull --rebase`.
 
+#![allow(clippy::unwrap_used, clippy::expect_used)]
+
 use grit_lib::change_id::{change_id, resolved_change_id, ChangeIdPolicy};
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::objects::{parse_commit, ObjectId};
@@ -663,4 +665,196 @@ fn pull_rebase_fast_forward_when_no_local_commits() {
     assert_eq!(outcome.result, PullResult::FastForward);
     git_pull_rebase(&git_dir);
     assert_repo_matches_git(&grit_dir, &git_dir);
+}
+
+fn git_pull_merge(dir: &Path) {
+    git(dir, &["pull", "-q", "--no-rebase", "--no-ff", "--no-edit"]);
+}
+
+fn parent_count(dir: &Path, spec: &str) -> usize {
+    git(dir, &["rev-list", "--parents", "-n", "1", spec])
+        .split_whitespace()
+        .count()
+        .saturating_sub(1)
+}
+
+/// Both clones commit `Change a`, merge upstream `S2` with `pull --no-rebase`, then upstream
+/// adds `S3`: the shape a refresh after a merge pull leaves behind.
+fn setup_merge_of_upstream(tag: &str) -> (PathBuf, PathBuf, PathBuf) {
+    let (grit_dir, git_dir) = setup_tracked_pair(tag);
+    let origin = grit_dir.parent().unwrap().join("origin");
+    commit(&grit_dir, "a.txt", "local\n", "Change a");
+    commit(&git_dir, "a.txt", "local\n", "Change a");
+    commit(&origin, "b.txt", "2\n", "S2");
+    git_pull_merge(&grit_dir);
+    git_pull_merge(&git_dir);
+    assert_eq!(parent_count(&grit_dir, "HEAD"), 2, "fixture tip is a merge");
+    (grit_dir, git_dir, origin)
+}
+
+#[test]
+fn pull_rebase_keeps_local_commits_under_merge_of_upstream() {
+    let (grit_dir, git_dir, origin) = setup_merge_of_upstream("merge-of-upstream");
+    commit(&origin, "c.txt", "3\n", "S3");
+    git(&grit_dir, &["fetch", "-q"]);
+    git(&git_dir, &["fetch", "-q"]);
+
+    let outcome = pull_rebase_grit(&open(&grit_dir));
+    assert_eq!(outcome.result, PullResult::Rebased);
+    assert_eq!(outcome.oid, Some(rev(&grit_dir, "HEAD")));
+    git_pull_rebase(&git_dir);
+    assert_repo_matches_git(&grit_dir, &git_dir);
+
+    assert_eq!(
+        rev(&grit_dir, "HEAD^"),
+        rev(&grit_dir, "origin/main"),
+        "the local commit is replayed onto the new upstream tip"
+    );
+    assert_eq!(parent_count(&grit_dir, "HEAD"), 1);
+    assert_eq!(
+        fs::read_to_string(grit_dir.join("a.txt")).expect("a.txt"),
+        "local\n",
+        "the local change stays in the worktree"
+    );
+    assert!(
+        grit_dir.join("c.txt").is_file(),
+        "upstream S3 is checked out"
+    );
+    assert_eq!(git(&grit_dir, &["status", "--porcelain"]), "");
+}
+
+#[test]
+fn pull_rebase_linearizes_merge_of_upstream_below_local_commit() {
+    let (grit_dir, git_dir, origin) = setup_merge_of_upstream("merge-of-upstream-mid");
+    commit(&grit_dir, "d.txt", "after\n", "Change d");
+    commit(&git_dir, "d.txt", "after\n", "Change d");
+    commit(&origin, "c.txt", "3\n", "S3");
+    git(&grit_dir, &["fetch", "-q"]);
+    git(&git_dir, &["fetch", "-q"]);
+
+    let outcome = pull_rebase_grit(&open(&grit_dir));
+    assert_eq!(outcome.result, PullResult::Rebased);
+    git_pull_rebase(&git_dir);
+    assert_repo_matches_git(&grit_dir, &git_dir);
+    assert_eq!(rev(&grit_dir, "HEAD~2"), rev(&grit_dir, "origin/main"));
+}
+
+#[test]
+fn pull_rebase_keeps_local_commits_under_two_merges_of_upstream() {
+    let (grit_dir, git_dir, origin) = setup_merge_of_upstream("merge-of-upstream-twice");
+    commit(&origin, "c.txt", "3\n", "S3");
+    git_pull_merge(&grit_dir);
+    git_pull_merge(&git_dir);
+    commit(&origin, "e.txt", "4\n", "S4");
+    git(&grit_dir, &["fetch", "-q"]);
+    git(&git_dir, &["fetch", "-q"]);
+
+    let outcome = pull_rebase_grit(&open(&grit_dir));
+    assert_eq!(outcome.result, PullResult::Rebased);
+    git_pull_rebase(&git_dir);
+    assert_repo_matches_git(&grit_dir, &git_dir);
+    assert_eq!(rev(&grit_dir, "HEAD^"), rev(&grit_dir, "origin/main"));
+}
+
+#[test]
+fn pull_rebase_flattens_no_ff_topic_merge_onto_upstream() {
+    let (grit_dir, git_dir) = setup_tracked_pair("no-ff-topic");
+    let origin = grit_dir.parent().unwrap().join("origin");
+    for dir in [&grit_dir, &git_dir] {
+        git(dir, &["checkout", "-q", "-b", "topic"]);
+        commit(dir, "topic.txt", "t\n", "topic change");
+        git(dir, &["checkout", "-q", "main"]);
+        git(dir, &["merge", "-q", "--no-ff", "--no-edit", "topic"]);
+        assert_eq!(parent_count(dir, "HEAD"), 2, "fixture tip is a merge");
+    }
+    commit(&origin, "up.txt", "u\n", "upstream");
+    git(&grit_dir, &["fetch", "-q"]);
+    git(&git_dir, &["fetch", "-q"]);
+
+    let outcome = pull_rebase_grit(&open(&grit_dir));
+    assert_eq!(outcome.result, PullResult::Rebased);
+    git_pull_rebase(&git_dir);
+    assert_repo_matches_git(&grit_dir, &git_dir);
+    assert_eq!(rev(&grit_dir, "HEAD^"), rev(&grit_dir, "origin/main"));
+}
+
+#[test]
+fn pull_rebase_flattens_multi_commit_topic_merge() {
+    let (grit_dir, git_dir) = setup_tracked_pair("multi-topic");
+    let origin = grit_dir.parent().unwrap().join("origin");
+    for dir in [&grit_dir, &git_dir] {
+        git(dir, &["checkout", "-q", "-b", "topic"]);
+        commit(dir, "t1.txt", "1\n", "topic one");
+        commit(dir, "t2.txt", "2\n", "topic two");
+        git(dir, &["checkout", "-q", "main"]);
+        commit(dir, "main.txt", "m\n", "main line");
+        git(dir, &["merge", "-q", "--no-ff", "--no-edit", "topic"]);
+    }
+    commit(&origin, "up.txt", "u\n", "upstream");
+    git(&grit_dir, &["fetch", "-q"]);
+    git(&git_dir, &["fetch", "-q"]);
+
+    let outcome = pull_rebase_grit(&open(&grit_dir));
+    assert_eq!(outcome.result, PullResult::Rebased);
+    git_pull_rebase(&git_dir);
+    assert_repo_matches_git(&grit_dir, &git_dir);
+    assert_eq!(rev(&grit_dir, "HEAD~3"), rev(&grit_dir, "origin/main"));
+}
+
+#[test]
+fn pull_rebase_skips_patch_already_upstream_between_local_commits() {
+    let (grit_dir, git_dir) = setup_tracked_pair("applied-mid-chain");
+    let origin = grit_dir.parent().unwrap().join("origin");
+    for dir in [&grit_dir, &git_dir] {
+        commit(dir, "a.txt", "a\n", "local a");
+        commit(dir, "shared.txt", "same\n", "shared change");
+        commit(dir, "c.txt", "c\n", "local c");
+    }
+    commit(&origin, "shared.txt", "same\n", "shared change");
+    commit(&origin, "other.txt", "x\n", "other upstream");
+    git(&grit_dir, &["fetch", "-q"]);
+    git(&git_dir, &["fetch", "-q"]);
+
+    let outcome = pull_rebase_grit(&open(&grit_dir));
+    assert_eq!(outcome.result, PullResult::Rebased);
+    git_pull_rebase(&git_dir);
+    assert_repo_matches_git(&grit_dir, &git_dir);
+    assert_eq!(rev(&grit_dir, "HEAD~2"), rev(&grit_dir, "origin/main"));
+}
+
+#[test]
+fn pull_rebase_lands_on_upstream_when_only_local_patch_is_upstream() {
+    let (grit_dir, git_dir) = setup_tracked_pair("applied-only-patch");
+    let origin = grit_dir.parent().unwrap().join("origin");
+    // Distinct commit objects with the same patch, so the local commit is not simply upstream's.
+    commit(&grit_dir, "shared.txt", "same\n", "shared change (local)");
+    commit(&git_dir, "shared.txt", "same\n", "shared change (local)");
+    commit(&origin, "shared.txt", "same\n", "shared change");
+    commit(&origin, "other.txt", "x\n", "other upstream");
+    git(&grit_dir, &["fetch", "-q"]);
+    git(&git_dir, &["fetch", "-q"]);
+
+    pull_rebase_grit(&open(&grit_dir));
+    git_pull_rebase(&git_dir);
+    assert_repo_matches_git(&grit_dir, &git_dir);
+    assert_eq!(rev(&grit_dir, "HEAD"), rev(&grit_dir, "origin/main"));
+}
+
+#[test]
+fn pull_rebase_drops_merge_of_upstream_without_local_commits() {
+    let (grit_dir, git_dir) = setup_tracked_pair("merge-only");
+    let origin = grit_dir.parent().unwrap().join("origin");
+    commit(&origin, "b.txt", "2\n", "S2");
+    for dir in [&grit_dir, &git_dir] {
+        git(dir, &["pull", "-q", "--no-rebase", "--no-ff", "--no-edit"]);
+        assert_eq!(parent_count(dir, "HEAD"), 2, "fixture tip is a merge");
+    }
+    commit(&origin, "c.txt", "3\n", "S3");
+    git(&grit_dir, &["fetch", "-q"]);
+    git(&git_dir, &["fetch", "-q"]);
+
+    pull_rebase_grit(&open(&grit_dir));
+    git_pull_rebase(&git_dir);
+    assert_repo_matches_git(&grit_dir, &git_dir);
+    assert_eq!(rev(&grit_dir, "HEAD"), rev(&grit_dir, "origin/main"));
 }

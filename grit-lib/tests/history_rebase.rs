@@ -960,3 +960,77 @@ fn rebase_check_reports_conflict_without_side_effects() {
         other => panic!("expected conflict prediction, got {other:?}"),
     }
 }
+
+fn flatten_opts() -> RebaseOntoOptions {
+    let mut opts = rebase_opts(RefScope::Head, EmptyPolicy::Drop, true);
+    opts.flatten_leaf_merges = true;
+    opts
+}
+
+fn planned_ref_tip(plan: &grit_lib::revwalk::history::RewritePlan, name: &str) -> ObjectId {
+    plan.ref_updates
+        .iter()
+        .find(|update| update.name == name)
+        .unwrap_or_else(|| panic!("{name} moves"))
+        .new
+}
+
+#[test]
+fn rebase_onto_flatten_keeps_local_commit_under_merge_of_upstream_like_git() {
+    let repo = HistoryRepo::init();
+    let wt = repo.worktree();
+    commit_file(wt, "base.txt", "base\n", "S1");
+    git(wt, &["checkout", "-q", "-b", "local"]);
+    let local = commit_file(wt, "a.txt", "local\n", "Change a");
+    git(wt, &["checkout", "-q", "main"]);
+    let s2 = commit_file(wt, "b.txt", "2\n", "S2");
+    git(wt, &["checkout", "-q", "local"]);
+    git(wt, &["merge", "-q", "--no-ff", "--no-edit", "main"]);
+    let merge = git_rev_parse(wt, "HEAD");
+    git(wt, &["checkout", "-q", "main"]);
+    let s3 = commit_file(wt, "c.txt", "3\n", "S3");
+    git(wt, &["checkout", "-q", "local"]);
+    git(wt, &["config", "grit.changeIds", "false"]);
+    let grit = open_grit(wt);
+
+    let plan = rebase_onto(&grit, s2, s3, &[merge], &flatten_opts()).expect("plan");
+
+    let merge_row = plan.commits.iter().find(|r| r.old == merge).expect("row");
+    assert_eq!(merge_row.new, None, "the merge of upstream is dropped");
+    let local_row = plan.commits.iter().find(|r| r.old == local).expect("row");
+    let tip = planned_ref_tip(&plan, "refs/heads/local");
+    assert_eq!(local_row.new, Some(tip), "the branch lands on Change a");
+
+    // `git rebase` drops merges too and replays `Change a` onto S3: same commit, byte for byte.
+    git_rebase_onto(wt, &s3, &s2, "local");
+    assert_eq!(git_rev_parse(wt, "local"), tip);
+    assert_eq!(git_rev_parse(wt, "local^"), s3);
+    assert_git_fsck_strict(wt);
+}
+
+#[test]
+fn rebase_onto_flatten_linearizes_topic_merge_like_git() {
+    let repo = HistoryRepo::init();
+    let wt = repo.worktree();
+    let fork = commit_file(wt, "base.txt", "base\n", "base");
+    git(wt, &["checkout", "-q", "-b", "topic"]);
+    commit_file(wt, "t1.txt", "1\n", "topic one");
+    commit_file(wt, "t2.txt", "2\n", "topic two");
+    git(wt, &["checkout", "-q", "main"]);
+    commit_file(wt, "main.txt", "m\n", "main line");
+    git(wt, &["merge", "-q", "--no-ff", "--no-edit", "topic"]);
+    let merge = git_rev_parse(wt, "HEAD");
+    git(wt, &["checkout", "-q", "-b", "upstream", &fork.to_hex()]);
+    let onto = commit_file(wt, "up.txt", "u\n", "upstream");
+    git(wt, &["checkout", "-q", "main"]);
+    git(wt, &["config", "grit.changeIds", "false"]);
+    let grit = open_grit(wt);
+
+    let plan = rebase_onto(&grit, fork, onto, &[merge], &flatten_opts()).expect("plan");
+    let tip = planned_ref_tip(&plan, "refs/heads/main");
+
+    git_rebase_onto(wt, &onto, &fork, "main");
+    assert_eq!(git_rev_parse(wt, "main"), tip, "same line as `git rebase`");
+    assert_eq!(git_rev_parse(wt, "main~3"), onto);
+    assert_git_fsck_strict(wt);
+}

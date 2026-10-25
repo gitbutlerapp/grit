@@ -3,6 +3,7 @@
 //! without the checkout endpoint is refused with a clear error.
 
 #![cfg(unix)]
+#![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpListener;
@@ -520,4 +521,62 @@ fn slices_name_paths_on_the_target_branch() {
         &["--json", "slice", "list", "--url", &repo_url],
     );
     assert_eq!(none["slices"], serde_json::json!([]));
+}
+
+#[test]
+fn refresh_after_a_merge_pull_keeps_the_local_commit() {
+    let (_tmp, home, repos) = setup();
+    let demo = repos.join("demo");
+    let (_server, url) = serve(&home, &repos);
+    let token = std::fs::read_to_string(home.join("token")).expect("token");
+    ok(&home, &home, &["login", &url, "--token", &token]);
+    let repo_url = format!("{url}/demo.git");
+    ok(
+        &home,
+        &home,
+        &["checkout", &repo_url, "-p", "src", "--into", "co"],
+    );
+    let co = home.join("co");
+    commit_file(&home, &co, "src/a.rs", "a2\n", "Change a");
+
+    // The target moves; a merge pull brings the new snapshot in under a merge commit.
+    commit_file(&home, &demo, "src/deep/b.rs", "b2\n", "Bob changes b");
+    ok(&home, &co, &["pull", "--no-rebase"]);
+    assert_eq!(
+        git(&co, &["rev-list", "--parents", "-n", "1", "HEAD"])
+            .split_whitespace()
+            .count(),
+        3,
+        "the merge pull made a merge commit"
+    );
+
+    // The target moves again; the default (rebase) refresh replays the local commit onto the
+    // newest snapshot instead of landing on the merged-in one.
+    commit_file(&home, &demo, "src/deep/b.rs", "b3\n", "Bob changes b again");
+    let pulled = json(&home, &co, &["--json", "pull"]);
+    assert_eq!(pulled["result"], "rebased", "{pulled}");
+    assert_eq!(pulled["refresh"]["moved"], Value::Bool(true), "{pulled}");
+    assert_eq!(
+        git(&co, &["rev-parse", "HEAD^"]),
+        git(&co, &["rev-parse", "origin/main"]),
+        "the local commit sits on the newest snapshot"
+    );
+    assert_eq!(git(&co, &["log", "-1", "--format=%s"]), "Change a");
+    assert_eq!(
+        git(&co, &["rev-list", "--parents", "-n", "1", "HEAD"])
+            .split_whitespace()
+            .count(),
+        2,
+        "the merge is gone"
+    );
+    assert_eq!(
+        std::fs::read_to_string(co.join("src/a.rs")).ok().as_deref(),
+        Some("a2\n")
+    );
+    assert_eq!(
+        std::fs::read_to_string(co.join("src/deep/b.rs"))
+            .ok()
+            .as_deref(),
+        Some("b3\n")
+    );
 }

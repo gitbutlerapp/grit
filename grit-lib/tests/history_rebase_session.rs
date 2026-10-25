@@ -1699,3 +1699,85 @@ fn exec_failure_during_recovery_rolls_back_and_clears_exec_stop() {
     assert_eq!(std::fs::read(wt.join("f")).unwrap(), b"base\nedit\n");
     assert_git_fsck_strict(wt);
 }
+
+#[test]
+fn flattened_session_drops_merge_and_chains_commits_after_continue() {
+    let repo = HistoryRepo::init();
+    let wt = repo.worktree();
+    commit_file(wt, "f.txt", "base\n", "base");
+    git(wt, &["switch", "-c", "topic"]);
+    commit_file(wt, "f.txt", "topic change\n", "topic commit");
+    git(wt, &["switch", "main"]);
+    commit_file(wt, "b.txt", "2\n", "upstream two");
+    git(wt, &["switch", "topic"]);
+    git(wt, &["merge", "-q", "--no-ff", "--no-edit", "main"]);
+    commit_file(wt, "d.txt", "later\n", "after merge");
+    let tip = git_oid(wt, "HEAD");
+    git(wt, &["switch", "main"]);
+    commit_file(wt, "f.txt", "main change\n", "upstream three");
+    let upstream = git_oid(wt, "HEAD");
+    git(wt, &["switch", "topic"]);
+
+    let git_wt = tempfile::tempdir().expect("git copy");
+    std::process::Command::new("cp")
+        .args([
+            "-a",
+            &format!("{}/.", wt.display()),
+            &git_wt.path().to_string_lossy(),
+        ])
+        .status()
+        .unwrap();
+
+    let mut opts = start_opts(upstream, None, tip);
+    opts.rebase.flatten_leaf_merges = true;
+    let grit = open_grit(wt);
+    let stop = match start_rebase(&grit, &opts).expect("start") {
+        RebaseOutcome::Stopped(stop) => stop,
+        other => panic!("expected a conflict stop, got {other:?}"),
+    };
+    assert!(stop.conflicts.iter().any(|c| c.path == "f.txt"));
+    std::fs::write(wt.join("f.txt"), "resolved\n").expect("resolve");
+    git(wt, &["add", "f.txt"]);
+    let grit = open_grit(wt);
+    match continue_rebase(&grit, &opts).expect("continue") {
+        RebaseOutcome::Done { .. } => {}
+        other => panic!("expected done after continue, got {other:?}"),
+    }
+
+    let out = std::process::Command::new("git")
+        .current_dir(git_wt.path())
+        .args(["rebase", &upstream.to_hex()])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("git rebase");
+    assert!(!out.status.success(), "git rebase should stop on conflict");
+    std::fs::write(git_wt.path().join("f.txt"), "resolved\n").expect("resolve");
+    git(git_wt.path(), &["add", "f.txt"]);
+    let cont = std::process::Command::new("git")
+        .current_dir(git_wt.path())
+        .args(["rebase", "--continue"])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .env("GIT_EDITOR", ":")
+        .env("EDITOR", ":")
+        .output()
+        .expect("git rebase --continue");
+    assert!(cont.status.success(), "git rebase --continue failed");
+
+    for dir in [wt, git_wt.path()] {
+        assert_eq!(
+            git(dir, &["log", "--format=%s", "topic"]),
+            "after merge\ntopic commit\nupstream three\nupstream two\nbase\n",
+            "the merge is dropped and the line ends on upstream in {}",
+            dir.display()
+        );
+    }
+    assert_eq!(
+        git(wt, &["rev-parse", "topic^{tree}"]),
+        git(git_wt.path(), &["rev-parse", "topic^{tree}"]),
+        "topic tree matches git rebase"
+    );
+    assert_eq!(git_oid(wt, "topic~2"), upstream);
+    assert_git_fsck_strict(wt);
+}

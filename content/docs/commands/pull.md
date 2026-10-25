@@ -47,7 +47,7 @@ Refreshed onto main at 3c011e2 (snapshot 7ae0a80)
 Rebased onto origin (FETCH_HEAD) (2b87e20)
 ```
 
-`--ff-only` and `--no-rebase` still apply; without them the refresh rebases.
+`--ff-only` and `--no-rebase` still apply; without them the refresh rebases. A later rebasing refresh drops the merge commits a `--no-rebase` refresh made and replays your own commits onto the new snapshot.
 
 `--check` fetches (always for real — not a dry run) and reports whether the branch could fast-forward or is already up to date, without changing `HEAD`, the index, the worktree, or reflogs. In rebase mode it also predicts whether the replay would stop on conflicts (`would` is `conflicts`). It cannot be combined with `--autostash` or integration mode overrides (`--ff-only`, `--rebase`, `--no-rebase`).
 
@@ -66,7 +66,7 @@ Rebased onto origin (FETCH_HEAD) (2b87e20)
 | `--dry-run` | Fetch dry-run only: report ref updates without writing refs or objects; integration is skipped. |
 | `-q`, `--quiet` | Suppress fetch progress (human mode). |
 | `--ff-only` | Refuse to create a merge commit when the current branch has local commits; exit with `refused_not_ff` in `--json` output instead. Honors `pull.ff=only` when set. Conflicts with `--rebase`, `--no-rebase`, and `--check`. |
-| `--rebase` | Rebase local commits onto the upstream tip, overriding `pull.rebase=false`. Conflicts with `--ff-only`, `--no-rebase`, and `--check`. |
+| `--rebase` | Rebase local commits onto the upstream tip, overriding `pull.rebase=false`. As with `git pull --rebase`, merge commits on the branch (such as an earlier merge pull) are dropped, and the branch's own commits are replayed one after another on top of the upstream tip, skipping any whose change is already upstream. Conflicts with `--ff-only`, `--no-rebase`, and `--check`. |
 | `--no-rebase` | After fetch, merge the upstream with a merge commit when a fast-forward is not possible (the default when `pull.rebase` is not true). Conflicts with `--ff-only`, `--rebase`, and `--check`. |
 | `--autostash` | Stash before integrating and re-apply after (see `merge.autoStash` / `rebase.autoStash`). Conflicts with `--check`. |
 | `--check` | Fetch and report whether a fast-forward or up-to-date result is possible; exit **0** when yes, **1** when a merge or rebase would be required. Conflicts with `--autostash` and mode overrides. |

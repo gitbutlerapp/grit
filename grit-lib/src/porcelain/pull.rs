@@ -56,7 +56,8 @@ pub enum PullMode {
     FfOnly,
     /// Merge (or fast-forward when possible).
     Merge,
-    /// Rebase local commits onto the upstream tip via the history engine.
+    /// Rebase local commits onto the upstream tip via the history engine, in one line like
+    /// `git pull --rebase`: merge commits on the branch are dropped.
     Rebase,
 }
 
