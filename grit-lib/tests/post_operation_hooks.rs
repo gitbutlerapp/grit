@@ -130,6 +130,8 @@ fn switch(repo: &Repository, mode: SwitchMode) -> grit_lib::porcelain::switch::S
             dry_run: false,
             hooks: PostOperationHooks::Run,
         },
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
     )
     .expect("switch")
 }
@@ -237,6 +239,8 @@ fn switch_dry_run_or_skip_runs_no_hook() {
             dry_run: true,
             hooks: PostOperationHooks::Run,
         },
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
     )
     .expect("dry run");
     assert!(outcome.hooks_run.is_empty());
@@ -248,6 +252,8 @@ fn switch_dry_run_or_skip_runs_no_hook() {
             dry_run: false,
             hooks: PostOperationHooks::Skip,
         },
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
     )
     .expect("switch without hooks");
     assert!(outcome.hooks_run.is_empty());
@@ -569,7 +575,14 @@ fn reword_runs_post_rewrite_without_post_checkout() {
         &rewrite_options(),
     )
     .expect("plan reword");
-    let applied = apply_rewrite(&repo, &plan, &apply_options(None)).expect("apply");
+    let applied = apply_rewrite(
+        &repo,
+        &plan,
+        &apply_options(None),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("apply");
     assert_eq!(applied.hooks_run, vec![HookName::PostRewrite]);
     assert_eq!(
         fx.take_log(),
@@ -590,7 +603,14 @@ fn drop_leaves_dropped_commit_out_of_post_rewrite() {
     let repo = fx.repo();
 
     let plan = history_drop(&repo, c2, &rewrite_options()).expect("plan drop");
-    let applied = apply_rewrite(&repo, &plan, &apply_options(None)).expect("apply");
+    let applied = apply_rewrite(
+        &repo,
+        &plan,
+        &apply_options(None),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("apply");
     let new_c3 = fx.oid("main");
     assert_eq!(
         applied.hooks_run,
@@ -621,6 +641,8 @@ fn skipped_rewrite_hooks_and_undo_run_nothing() {
             hooks: PostOperationHooks::Skip,
             ..apply_options(Some("drop"))
         },
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
     )
     .expect("apply");
     assert!(applied.hooks_run.is_empty());

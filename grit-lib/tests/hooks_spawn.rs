@@ -530,6 +530,8 @@ fn switch_with_unstartable_post_checkout_hook_succeeds_with_warning() {
             dry_run: false,
             hooks: grit_lib::PostOperationHooks::Run,
         },
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
     )
     .expect("post-checkout runs after the switch and must not fail it");
     assert!(outcome.hooks_run.is_empty());

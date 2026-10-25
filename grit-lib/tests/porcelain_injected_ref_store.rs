@@ -92,6 +92,8 @@ fn switch_to(repo: &Repository, branch: &str) {
             dry_run: false,
             hooks: grit_lib::PostOperationHooks::Run,
         },
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
     )
     .expect("switch");
 }
@@ -189,6 +191,8 @@ fn battery(repo: &Repository, wt: &Path) -> BatteryResult {
             IDENT_TS,
             "reset: moving to HEAD~1",
         ),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
     )
     .expect("reset");
     assert_eq!(reset.target, main_tip);
@@ -198,6 +202,8 @@ fn battery(repo: &Repository, wt: &Path) -> BatteryResult {
     reset_to_commit(
         repo,
         &ResetOptions::new(merged, ResetMode::Hard, IDENT_TS, "reset: moving to v1"),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
     )
     .expect("reset back");
 
@@ -243,6 +249,8 @@ fn battery(repo: &Repository, wt: &Path) -> BatteryResult {
             dry_run: false,
             hooks: grit_lib::PostOperationHooks::Run,
         },
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
     )
     .expect("detach");
     assert!(head_branch(repo).is_none());
@@ -254,6 +262,8 @@ fn battery(repo: &Repository, wt: &Path) -> BatteryResult {
     reset_to_commit(
         repo,
         &ResetOptions::new(detached, ResetMode::Hard, IDENT_TS, "reset: moving to HEAD"),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
     )
     .expect("clean detached");
     switch_to(repo, "main");
@@ -532,6 +542,8 @@ fn switch_to_existing_branch_installs_head_when_store_has_none() {
             dry_run: false,
             hooks: grit_lib::PostOperationHooks::Run,
         },
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
     )
     .expect("switch");
     assert_eq!(outcome.commit, tip);
@@ -557,6 +569,8 @@ fn detached_switch_installs_head_when_store_has_none() {
             dry_run: false,
             hooks: grit_lib::PostOperationHooks::Run,
         },
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
     )
     .expect("detach");
     assert_eq!(

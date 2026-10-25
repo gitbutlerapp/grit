@@ -175,6 +175,8 @@ fn run_repro_sequence(repo: &Repository) {
             dry_run: false,
             hooks: grit_lib::PostOperationHooks::Run,
         },
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
     )
     .expect("switch -c topic");
 
@@ -189,6 +191,8 @@ fn run_repro_sequence(repo: &Repository) {
             dry_run: false,
             hooks: grit_lib::PostOperationHooks::Run,
         },
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
     )
     .expect("switch main");
 
@@ -203,6 +207,8 @@ fn run_repro_sequence(repo: &Repository) {
             dry_run: false,
             hooks: grit_lib::PostOperationHooks::Run,
         },
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
     )
     .expect("detach");
 
@@ -216,6 +222,8 @@ fn run_repro_sequence(repo: &Repository) {
             dry_run: false,
             hooks: grit_lib::PostOperationHooks::Run,
         },
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
     )
     .expect("switch main");
 
@@ -256,6 +264,8 @@ fn detach_at_annotated_tag_matches_git() {
             dry_run: false,
             hooks: grit_lib::PostOperationHooks::Run,
         },
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
     )
     .expect("grit switch --detach v1");
 
@@ -366,6 +376,8 @@ fn switch_minus_and_at_minus_one_return_previous_branch() {
             dry_run: false,
             hooks: grit_lib::PostOperationHooks::Run,
         },
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
     )
     .expect("topic");
     let main_oid = refs::resolve_ref(repo.git_dir(), "refs/heads/main").unwrap();
@@ -379,6 +391,8 @@ fn switch_minus_and_at_minus_one_return_previous_branch() {
             dry_run: false,
             hooks: grit_lib::PostOperationHooks::Run,
         },
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
     )
     .expect("main");
 
@@ -395,6 +409,8 @@ fn switch_minus_and_at_minus_one_return_previous_branch() {
             dry_run: false,
             hooks: grit_lib::PostOperationHooks::Run,
         },
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
     )
     .expect("switch -");
 
@@ -408,6 +424,8 @@ fn switch_minus_and_at_minus_one_return_previous_branch() {
             dry_run: false,
             hooks: grit_lib::PostOperationHooks::Run,
         },
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
     )
     .expect("main again");
 
@@ -449,6 +467,8 @@ fn checkout_appends_existing_head_reflog_when_log_all_ref_updates_false() {
             dry_run: false,
             hooks: grit_lib::PostOperationHooks::Run,
         },
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
     )
     .expect("switch -c topic");
 
@@ -482,6 +502,8 @@ fn same_branch_switch_appends_head_checkout_reflog() {
             dry_run: false,
             hooks: grit_lib::PostOperationHooks::Run,
         },
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
     )
     .expect("same-branch switch");
 
@@ -520,6 +542,8 @@ fn remote_dwim_create_uses_remote_ref_in_branch_reflog() {
             dry_run: false,
             hooks: grit_lib::PostOperationHooks::Run,
         },
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
     )
     .expect("switch");
 
@@ -585,6 +609,8 @@ fn unborn_symbolic_head_switch_writes_zero_to_tip_checkout_reflog() {
             dry_run: false,
             hooks: grit_lib::PostOperationHooks::Run,
         },
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
     )
     .expect("switch to feature");
 

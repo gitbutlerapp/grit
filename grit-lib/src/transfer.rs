@@ -974,7 +974,15 @@ fn copy_objects_for_local_fetch(
     {
         progress.start(ProgressPhase::CopyingObjects, Some(wants.len() as u64));
         crate::progress::poll_cancel(progress, cancel)?;
-        if try_satisfy_via_object_link(&remote_objects, &local_objects, local_odb, wants, false)? {
+        if try_satisfy_via_object_link(
+            &remote_objects,
+            &local_objects,
+            local_odb,
+            wants,
+            false,
+            progress,
+            cancel,
+        )? {
             progress.set(wants.len() as u64);
             progress.finish();
             let oids = linked_object_set(local_odb, wants);
@@ -1002,7 +1010,16 @@ fn copy_objects_for_local_fetch(
 
     if !pack_build.thin && try_pack_link {
         progress.start(ProgressPhase::CopyingObjects, Some(send.len() as u64));
-        if try_satisfy_via_object_link(&remote_objects, &local_objects, local_odb, send, false)? {
+        crate::progress::poll_cancel(progress, cancel)?;
+        if try_satisfy_via_object_link(
+            &remote_objects,
+            &local_objects,
+            local_odb,
+            send,
+            false,
+            progress,
+            cancel,
+        )? {
             progress.set(send.len() as u64);
             progress.finish();
             let oids = linked_object_set(local_odb, send);
@@ -1029,8 +1046,13 @@ fn copy_objects_for_local_fetch(
     // install a pack (or pack link), not thousands of loose files.
     if !haves.is_empty() {
         progress.start(ProgressPhase::CopyingObjects, Some(send.len() as u64));
-        let linked_loose =
-            link_loose_objects_for_oids(&remote_objects, &local_objects, &still_missing)?;
+        let linked_loose = link_loose_objects_for_oids(
+            &remote_objects,
+            &local_objects,
+            &still_missing,
+            progress,
+            cancel,
+        )?;
         if linked_loose > 0 {
             progress.inc(linked_loose as u64);
             refresh_local_odb_after_link(local_odb);
@@ -1065,8 +1087,15 @@ fn copy_objects_for_local_fetch(
         have_shallow,
         &pack_opts,
     )?;
+    crate::progress::poll_cancel(progress, cancel)?;
     let ingest_opts = ingest_pack_options_for_fetch(local_git_dir, fetch_opts)?;
-    let ingested = crate::index_pack::ingest_received_pack(pack, local_odb, &ingest_opts)?;
+    let ingested = crate::index_pack::ingest_received_pack_with_progress(
+        pack,
+        local_odb,
+        &ingest_opts,
+        Some(progress),
+        Some(cancel),
+    )?;
     progress.inc(ingested.object_ids.len() as u64);
     progress.finish();
     refresh_local_odb_after_link(local_odb);
@@ -1108,8 +1137,18 @@ fn copy_objects_for_local_push(
     )?;
     let send = &send_set.objects;
 
+    let mut progress = crate::progress::NullProgress;
+    let cancel = crate::progress::NeverCancel;
     if !opts.thin
-        && try_satisfy_via_object_link(&local_objects, &remote_objects, remote_odb, send, false)?
+        && try_satisfy_via_object_link(
+            &local_objects,
+            &remote_objects,
+            remote_odb,
+            send,
+            false,
+            &mut progress,
+            &cancel,
+        )?
     {
         return Ok(());
     }
@@ -1120,8 +1159,13 @@ fn copy_objects_for_local_push(
     }
 
     if !haves.is_empty() {
-        let linked_loose =
-            link_loose_objects_for_oids(&local_objects, &remote_objects, &still_missing)?;
+        let linked_loose = link_loose_objects_for_oids(
+            &local_objects,
+            &remote_objects,
+            &still_missing,
+            &mut progress,
+            &cancel,
+        )?;
         if linked_loose > 0 {
             refresh_local_odb_after_link(remote_odb);
             still_missing = remote_odb.missing_oids(still_missing)?;

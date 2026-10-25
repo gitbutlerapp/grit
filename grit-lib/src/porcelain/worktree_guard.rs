@@ -2107,6 +2107,8 @@ mod tests {
                 dry_run: false,
                 hooks: crate::hooks::PostOperationHooks::Run,
             },
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
         );
         assert!(
             switch_err.is_err(),
@@ -2486,6 +2488,8 @@ mod tests {
                 dry_run: false,
                 hooks: crate::hooks::PostOperationHooks::Run,
             },
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
         );
         assert!(
             switch_err.is_err(),
@@ -2872,6 +2876,8 @@ mod tests {
                 dry_run: false,
                 hooks: crate::hooks::PostOperationHooks::Run,
             },
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
         )
         .map(|_| ())
     }

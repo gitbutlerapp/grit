@@ -50,7 +50,13 @@ pub fn undo_last_rewrite(
     apply_opts.record_operation = Some("undo".into());
     apply_opts.reflog_message = "history undo".into();
     apply_opts.hooks = PostOperationHooks::Skip;
-    let applied = apply_rewrite(repo, &plan, &apply_opts)?;
+    let applied = apply_rewrite(
+        repo,
+        &plan,
+        &apply_opts,
+        &mut crate::progress::NullProgress,
+        &crate::progress::NeverCancel,
+    )?;
     Ok(UndoOutcome {
         ref_updates: applied.ref_updates,
         head: applied.head,

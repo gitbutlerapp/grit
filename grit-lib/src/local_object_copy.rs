@@ -63,7 +63,13 @@ fn pack_entry_name_ok(name: &str) -> bool {
 ///
 /// Skips files that already exist in the destination. Returns the number of
 /// files newly installed.
-pub(crate) fn link_remote_pack_files(remote_objects: &Path, local_objects: &Path) -> Result<usize> {
+pub(crate) fn link_remote_pack_files(
+    remote_objects: &Path,
+    local_objects: &Path,
+    progress: &mut dyn crate::progress::ProgressSink,
+    cancel: &dyn crate::progress::Cancel,
+    total_hint: usize,
+) -> Result<usize> {
     let remote_pack = remote_objects.join("pack");
     if !remote_pack.is_dir() {
         return Ok(0);
@@ -72,6 +78,7 @@ pub(crate) fn link_remote_pack_files(remote_objects: &Path, local_objects: &Path
     fs::create_dir_all(&local_pack).map_err(Error::Io)?;
     let mut linked = 0usize;
     for entry in fs::read_dir(&remote_pack).map_err(Error::Io)? {
+        crate::progress::poll_cancel(progress, cancel)?;
         let entry = entry.map_err(Error::Io)?;
         let name = entry.file_name();
         let name_str = name.to_string_lossy();
@@ -84,13 +91,22 @@ pub(crate) fn link_remote_pack_files(remote_objects: &Path, local_objects: &Path
         }
         hard_link_or_copy(&entry.path(), &dst)?;
         linked += 1;
+        if total_hint > 0 {
+            progress.inc(1);
+        }
     }
     Ok(linked)
 }
 
-fn link_loose_objects(remote_objects: &Path, local_objects: &Path) -> Result<usize> {
+fn link_loose_objects(
+    remote_objects: &Path,
+    local_objects: &Path,
+    progress: &mut dyn crate::progress::ProgressSink,
+    cancel: &dyn crate::progress::Cancel,
+) -> Result<usize> {
     let mut copied = 0usize;
     for entry in fs::read_dir(remote_objects).map_err(Error::Io)? {
+        crate::progress::poll_cancel(progress, cancel)?;
         let entry = entry.map_err(Error::Io)?;
         let name = entry.file_name();
         let name_str = name.to_string_lossy();
@@ -103,12 +119,16 @@ fn link_loose_objects(remote_objects: &Path, local_objects: &Path) -> Result<usi
             continue;
         };
         for obj in shard_entries.flatten() {
+            if copied.is_multiple_of(64) {
+                crate::progress::poll_cancel(progress, cancel)?;
+            }
             let dst = local_shard.join(obj.file_name());
             if dst.exists() {
                 continue;
             }
             hard_link_or_copy(&obj.path(), &dst)?;
             copied += 1;
+            progress.inc(1);
         }
     }
     Ok(copied)
@@ -157,13 +177,22 @@ pub(crate) fn try_satisfy_via_object_link(
     local_odb: &Odb,
     needed: &[ObjectId],
     link_loose: bool,
+    progress: &mut dyn crate::progress::ProgressSink,
+    cancel: &dyn crate::progress::Cancel,
 ) -> Result<bool> {
     if needed.is_empty() {
         return Ok(true);
     }
-    let linked_packs = link_remote_pack_files(remote_objects, local_objects)?;
+    crate::progress::poll_cancel(progress, cancel)?;
+    let linked_packs = link_remote_pack_files(
+        remote_objects,
+        local_objects,
+        progress,
+        cancel,
+        needed.len(),
+    )?;
     let linked_loose = if link_loose {
-        link_loose_objects(remote_objects, local_objects)?
+        link_loose_objects(remote_objects, local_objects, progress, cancel)?
     } else {
         0
     };
@@ -187,9 +216,14 @@ pub(crate) fn link_loose_objects_for_oids(
     source_objects: &Path,
     dest_objects: &Path,
     oids: &[ObjectId],
+    progress: &mut dyn crate::progress::ProgressSink,
+    cancel: &dyn crate::progress::Cancel,
 ) -> Result<usize> {
     let mut linked = 0usize;
-    for oid in oids {
+    for (i, oid) in oids.iter().enumerate() {
+        if i.is_multiple_of(64) {
+            crate::progress::poll_cancel(progress, cancel)?;
+        }
         let hex = oid.to_hex();
         if hex.len() < 2 {
             continue;
@@ -207,6 +241,7 @@ pub(crate) fn link_loose_objects_for_oids(
         }
         hard_link_or_copy(&src, &dst)?;
         linked += 1;
+        progress.inc(1);
     }
     Ok(linked)
 }
@@ -315,7 +350,14 @@ mod tests {
 
         let dst_objects = tmp.path().join("dst/objects");
         fs::create_dir_all(&dst_objects).unwrap();
-        let linked = link_remote_pack_files(&src.join(".git/objects"), &dst_objects).expect("link");
+        let linked = link_remote_pack_files(
+            &src.join(".git/objects"),
+            &dst_objects,
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
+            0,
+        )
+        .expect("link");
         assert!(
             linked >= 2,
             "expected at least .pack and .idx, got {linked}"

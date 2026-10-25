@@ -195,7 +195,13 @@ pub fn run(
     opts.dry_run = dry_run;
     opts.orphan_limit = orphan_limit.unwrap_or(DEFAULT_ORPHAN_LIMIT);
 
-    let outcome = reset_to_commit(&repo, &opts).map_err(anyhow::Error::new)?;
+    let outcome = reset_to_commit(
+        &repo,
+        &opts,
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .map_err(anyhow::Error::new)?;
 
     Ok(outcome.into())
 }

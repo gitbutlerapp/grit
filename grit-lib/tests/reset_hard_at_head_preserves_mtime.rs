@@ -78,7 +78,13 @@ fn hard_reset_at_head_preserves_file_mtimes_on_clean_tree() {
         })
         .collect();
 
-    reset_to_commit(&repo, &reset_opts(head, ResetMode::Hard)).expect("hard reset at HEAD");
+    reset_to_commit(
+        &repo,
+        &reset_opts(head, ResetMode::Hard),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("hard reset at HEAD");
 
     for (rel, old_mtime) in before {
         let path = work_tree.join(&rel);

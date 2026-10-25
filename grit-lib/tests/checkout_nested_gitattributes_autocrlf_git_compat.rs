@@ -155,6 +155,8 @@ fn switch_honours_nested_binary_with_autocrlf() {
             dry_run: false,
             hooks: grit_lib::PostOperationHooks::Run,
         },
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
     )
     .expect("switch older");
 
@@ -168,6 +170,8 @@ fn switch_honours_nested_binary_with_autocrlf() {
             dry_run: false,
             hooks: grit_lib::PostOperationHooks::Run,
         },
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
     )
     .expect("switch main");
 

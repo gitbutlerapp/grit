@@ -76,6 +76,8 @@ pub(crate) fn apply_clean_tree_merge_to_worktree_with_snapshot(
         repo,
         &tree_changes,
         &mut snapshot.index,
+        &mut crate::progress::NullProgress,
+        &crate::progress::NeverCancel,
         CheckoutApplyOptions {
             parallel_prepare_blobs: tree_changes.len() > 16,
             defer_index_disk_write: true,

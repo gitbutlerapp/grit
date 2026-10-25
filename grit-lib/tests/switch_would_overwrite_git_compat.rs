@@ -64,6 +64,8 @@ fn switch_local_changes_refusal_paths_match_git() {
             dry_run: false,
             hooks: grit_lib::PostOperationHooks::Run,
         },
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
     )
     .expect_err("switch");
     match err {
@@ -98,6 +100,8 @@ fn switch_untracked_refusal_paths_match_git() {
             dry_run: false,
             hooks: grit_lib::PostOperationHooks::Run,
         },
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
     )
     .expect_err("switch");
     match err {
@@ -138,6 +142,8 @@ fn switch_dry_run_leaves_repo_unchanged_and_reports_path_count() {
             dry_run: true,
             hooks: grit_lib::PostOperationHooks::Run,
         },
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
     )
     .expect("dry-run switch");
     assert!(outcome.dry_run);
@@ -163,6 +169,8 @@ fn switch_dry_run_leaves_repo_unchanged_and_reports_path_count() {
             dry_run: false,
             hooks: grit_lib::PostOperationHooks::Run,
         },
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
     )
     .expect("real switch");
     let _ = main_oid;

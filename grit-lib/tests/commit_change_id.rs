@@ -653,6 +653,8 @@ fn reword_preserves_derived_change_id_for_headerless_git_commit() {
             record_operation: None,
             hooks: grit_lib::PostOperationHooks::Run,
         },
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
     )
     .expect("apply");
     let new_oid = row.new.expect("new oid");

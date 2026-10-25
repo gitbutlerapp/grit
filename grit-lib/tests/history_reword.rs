@@ -166,6 +166,8 @@ fn reword_author_only_keeps_message_and_date() {
             record_operation: None,
             hooks: grit_lib::PostOperationHooks::Run,
         },
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
     )
     .expect("apply");
     let new_b = plan
@@ -213,6 +215,8 @@ fn reword_author_and_message() {
             record_operation: None,
             hooks: grit_lib::PostOperationHooks::Run,
         },
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
     )
     .expect("apply");
     let new_b = plan.replacement(oids["b"]).expect("mapped");
@@ -432,6 +436,8 @@ fn reword_root_replays_merge_with_merge_only_tree_content() {
             record_operation: None,
             hooks: grit_lib::PostOperationHooks::Run,
         },
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
     )
     .expect("apply");
 

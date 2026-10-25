@@ -54,7 +54,14 @@ fn undo_opts() -> ApplyOptions {
 
 fn drop_and_apply(grit: &Repository, commit: grit_lib::objects::ObjectId) {
     let plan = history_drop(grit, commit, &rewrite_opts()).expect("drop plan");
-    apply_rewrite(grit, &plan, &apply_opts("drop")).expect("apply drop");
+    apply_rewrite(
+        grit,
+        &plan,
+        &apply_opts("drop"),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("apply drop");
 }
 
 #[test]
@@ -99,7 +106,14 @@ fn undo_after_rebase_restores_stacked_branches() {
         },
     )
     .expect("rebase plan");
-    apply_rewrite(&grit, &plan, &apply_opts("rebase")).expect("apply rebase");
+    apply_rewrite(
+        &grit,
+        &plan,
+        &apply_opts("rebase"),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("apply rebase");
     assert_ne!(
         resolve_ref(grit.git_dir(), "refs/heads/main").expect("main"),
         main_before

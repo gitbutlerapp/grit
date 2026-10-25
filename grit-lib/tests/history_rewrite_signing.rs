@@ -184,6 +184,8 @@ fn history_rewrite_resigns_when_gpgsign() {
             record_operation: None,
             hooks: grit_lib::PostOperationHooks::Run,
         },
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
     )
     .expect("apply");
 

@@ -51,6 +51,8 @@ fn apply_plan(repo: &Repository, plan: &RewritePlan) {
             record_operation: None,
             hooks: grit_lib::PostOperationHooks::Run,
         },
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
     )
     .expect("apply");
 }

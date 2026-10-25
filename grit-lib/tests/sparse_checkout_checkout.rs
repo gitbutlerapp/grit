@@ -193,6 +193,8 @@ fn reset(repo: &Repository, target: ObjectId, mode: ResetMode) {
     reset_to_commit(
         repo,
         &ResetOptions::new(target, mode, "T <t@example.com>", "reset"),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
     )
     .expect("grit reset");
 }
@@ -285,6 +287,8 @@ fn switch_detach_keeps_out_of_cone_paths_skip_worktree() {
             dry_run: false,
             hooks: grit_lib::PostOperationHooks::Run,
         },
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
     )
     .expect("grit switch");
 
@@ -311,6 +315,8 @@ fn switch_branch_adds_out_of_cone_paths_as_skip_worktree() {
             dry_run: false,
             hooks: grit_lib::PostOperationHooks::Run,
         },
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
     )
     .expect("grit switch");
 
@@ -520,6 +526,8 @@ fn sparse_index_survives_reset_hard_and_switch() {
             dry_run: false,
             hooks: grit_lib::PostOperationHooks::Run,
         },
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
     )
     .expect("grit switch");
 
@@ -563,6 +571,8 @@ fn switch_does_not_refuse_untracked_file_at_skipped_path() {
                 dry_run: false,
                 hooks: grit_lib::PostOperationHooks::Run,
             },
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::NeverCancel,
         )
         .expect("grit switch");
         assert_untracked_file_kept(&pair, contents);
@@ -639,6 +649,8 @@ fn switch_with_wholesale_deleted_directories_keeps_new_skip_worktree_rows() {
             dry_run: false,
             hooks: grit_lib::PostOperationHooks::Run,
         },
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
     )
     .expect("grit switch");
 

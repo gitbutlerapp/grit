@@ -170,6 +170,7 @@ const EMPTY_BLOB_SHA256: [u8; 32] = [
 /// # }
 /// ```
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 pub struct ObjectId {
     bytes: [u8; MAX_OID_LEN],
     len: u8,

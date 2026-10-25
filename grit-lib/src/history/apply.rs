@@ -821,10 +821,17 @@ fn apply_fixup_worktree_after_refs(
     let force_preserve = prestate
         .map(|pre| pre.force_preserve_worktree_paths(staged_paths))
         .unwrap_or_default();
-    checkout_tree_transition_allow_local_with_preserved(repo, from_tree, to_tree, &force_preserve)
-        .map_err(|e| HistoryError::WorktreeApply {
-            message: e.to_string(),
-        })?;
+    checkout_tree_transition_allow_local_with_preserved(
+        repo,
+        from_tree,
+        to_tree,
+        &force_preserve,
+        &mut crate::progress::NullProgress,
+        &crate::progress::NeverCancel,
+    )
+    .map_err(|e| HistoryError::WorktreeApply {
+        message: e.to_string(),
+    })?;
     if !staged_paths.is_empty() {
         let head = repo.head_commit()?;
         clear_fixup_staging_after_apply(repo, head, staged_paths)?;
@@ -999,6 +1006,8 @@ pub fn apply_rewrite(
     repo: &Repository,
     plan: &RewritePlan,
     opts: &ApplyOptions,
+    progress: &mut dyn crate::progress::ProgressSink,
+    cancel: &dyn crate::progress::Cancel,
 ) -> Result<AppliedRewrite, HistoryError> {
     verify_live_head_matches_plan(repo, &plan.head)?;
 
@@ -1035,7 +1044,9 @@ pub fn apply_rewrite(
                 message: "missing head tree for worktree apply".into(),
             });
         };
-        if let Err(checkout_err) = apply_head_tree_to_worktree(repo, Some(&old), &new) {
+        if let Err(checkout_err) =
+            apply_head_tree_to_worktree(repo, Some(&old), &new, progress, cancel)
+        {
             let ref_rollback = rollback_ref_updates(repo, &plan.ref_updates, opts).err();
             let worktree_restore = restore_worktree_after_failed_apply(
                 repo,
@@ -1141,11 +1152,19 @@ fn apply_head_tree_to_worktree(
     repo: &Repository,
     from_tree: Option<&ObjectId>,
     to_tree: &ObjectId,
+    progress: &mut dyn crate::progress::ProgressSink,
+    cancel: &dyn crate::progress::Cancel,
 ) -> Result<(), HistoryError> {
-    checkout_tree_transition_allow_local(repo, from_tree, to_tree).map_err(|e| {
-        HistoryError::WorktreeApply {
-            message: e.to_string(),
-        }
+    checkout_tree_transition_allow_local_with_preserved(
+        repo,
+        from_tree,
+        to_tree,
+        &std::collections::HashSet::new(),
+        progress,
+        cancel,
+    )
+    .map_err(|e| HistoryError::WorktreeApply {
+        message: e.to_string(),
     })
 }
 
@@ -1749,6 +1768,8 @@ mod inject_and_apply_tests {
                 record_operation: None,
                 hooks: crate::hooks::PostOperationHooks::Run,
             },
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
         )
         .expect_err("inject");
         assert!(matches!(err, HistoryError::RefApply { .. }));
@@ -1879,6 +1900,8 @@ mod inject_and_apply_tests {
                 record_operation: None,
                 hooks: crate::hooks::PostOperationHooks::Run,
             },
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
         )
         .expect_err("inject checkout failure");
         crate::repo::set_test_inject_index_write_fail(false);
@@ -2400,6 +2423,8 @@ mod inject_and_apply_tests {
                 record_operation: None,
                 hooks: crate::hooks::PostOperationHooks::Run,
             },
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
         )
         .expect_err("inject checkout failure");
         crate::repo::set_test_inject_index_write_fail(false);
@@ -2538,6 +2563,8 @@ mod inject_and_apply_tests {
                 record_operation: None,
                 hooks: crate::hooks::PostOperationHooks::Run,
             },
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
         )
         .expect_err("inject checkout failure");
         crate::repo::set_test_inject_index_write_fail(false);
@@ -2662,6 +2689,8 @@ mod inject_and_apply_tests {
                 record_operation: None,
                 hooks: crate::hooks::PostOperationHooks::Run,
             },
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
         )
         .expect_err("inject checkout failure");
         crate::repo::set_test_inject_index_write_fail(false);
@@ -2897,6 +2926,8 @@ mod inject_and_apply_tests {
                 record_operation: None,
                 hooks: crate::hooks::PostOperationHooks::Run,
             },
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
         )
         .expect_err("inject checkout failure");
         crate::repo::set_test_inject_index_write_fail(false);
@@ -3036,6 +3067,8 @@ mod inject_and_apply_tests {
                 record_operation: None,
                 hooks: crate::hooks::PostOperationHooks::Run,
             },
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
         )
         .expect_err("checkout must fail");
         crate::repo::set_test_inject_index_write_fail(false);

@@ -324,6 +324,89 @@ pub fn poll_cancel(
     }
 }
 
+/// [`ProgressSink`] that stops forwarding once [`Cancel`] or [`ProgressSink::should_cancel`] fires.
+///
+/// Long checkout loops call [`Self::finish_poll`] after apply so callers get [`crate::error::Error::Cancelled`]
+/// even when cancellation happened on an [`ProgressSink::inc`] boundary.
+pub struct CancelProgress<'a> {
+    inner: &'a mut dyn ProgressSink,
+    cancel: &'a dyn Cancel,
+    stopped: std::cell::Cell<bool>,
+}
+
+impl<'a> CancelProgress<'a> {
+    /// Wrap `inner` so every progress update observes `cancel`.
+    pub fn new(inner: &'a mut dyn ProgressSink, cancel: &'a dyn Cancel) -> Self {
+        Self {
+            inner,
+            cancel,
+            stopped: std::cell::Cell::new(false),
+        }
+    }
+
+    /// Whether a cancel signal was observed.
+    #[must_use]
+    pub fn stopped(&self) -> bool {
+        self.stopped.get()
+    }
+
+    /// Returns [`crate::error::Error::Cancelled`] when [`Self::stopped`].
+    pub fn finish_poll(&self) -> crate::error::Result<()> {
+        if self.stopped() {
+            Err(crate::error::Error::Cancelled)
+        } else {
+            Ok(())
+        }
+    }
+
+    fn note_stop(&self) {
+        if self.cancel.is_cancelled() || self.inner.should_cancel() {
+            self.stopped.set(true);
+        }
+    }
+}
+
+impl ProgressSink for CancelProgress<'_> {
+    fn start(&mut self, phase: ProgressPhase, total: Option<u64>) {
+        self.note_stop();
+        if !self.stopped.get() {
+            self.inner.start(phase, total);
+        }
+    }
+
+    fn start_with_unit(&mut self, phase: ProgressPhase, unit: ProgressUnit, total: Option<u64>) {
+        self.note_stop();
+        if !self.stopped.get() {
+            self.inner.start_with_unit(phase, unit, total);
+        }
+    }
+
+    fn inc(&mut self, units: u64) {
+        self.note_stop();
+        if !self.stopped.get() {
+            self.inner.inc(units);
+        }
+    }
+
+    fn set(&mut self, current: u64) {
+        self.note_stop();
+        if !self.stopped.get() {
+            self.inner.set(current);
+        }
+    }
+
+    fn finish(&mut self) {
+        self.note_stop();
+        if !self.stopped.get() {
+            self.inner.finish();
+        }
+    }
+
+    fn should_cancel(&self) -> bool {
+        self.stopped.get() || self.cancel.is_cancelled() || self.inner.should_cancel()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

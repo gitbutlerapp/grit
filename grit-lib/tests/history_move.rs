@@ -53,6 +53,8 @@ fn apply_plan(wt: &std::path::Path, plan: &grit_lib::revwalk::history::RewritePl
             record_operation: None,
             hooks: grit_lib::PostOperationHooks::Run,
         },
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
     )
     .expect("apply");
 }

@@ -36,7 +36,9 @@ use crate::parallel::{try_par_map, ParallelHashError, ParallelOp};
 use crate::path_icase::paths_equal;
 use crate::path_population::{validate_tree_walk_entry, validate_worktree_path};
 use crate::path_validate::ProtectOptions;
-use crate::progress::{NullProgress, ProgressPhase, ProgressSink, ProgressUnit};
+use crate::progress::{
+    Cancel, CancelProgress, NeverCancel, NullProgress, ProgressPhase, ProgressSink, ProgressUnit,
+};
 use crate::repo::Repository;
 use crate::sparse_checkout::SparseCheckout;
 use crate::worktree_rules::WorktreeRules;
@@ -190,6 +192,7 @@ fn checkout_populated_tree(
     repo: &Repository,
     tree_oid: &ObjectId,
     progress: &mut dyn ProgressSink,
+    cancel: &dyn Cancel,
 ) -> Result<()> {
     let work_tree = repo
         .work_tree()
@@ -242,6 +245,7 @@ fn checkout_populated_tree(
     let mut bulk_index_rewrite = false;
 
     while walk.fill_chunk(&mut chunk)? {
+        crate::progress::poll_cancel(progress, cancel)?;
         let chunk_changes: Vec<DiffEntry> =
             chunk.iter().map(populated_blob_to_added_diff).collect();
         let changes = apply_sparse_tree_changes_to_index(
@@ -278,6 +282,7 @@ fn checkout_populated_tree(
                 repo,
                 &changes,
                 &mut chunk_progress,
+                cancel,
                 Some(index_mut),
                 apply.clone(),
                 None,
@@ -290,7 +295,7 @@ fn checkout_populated_tree(
     write_checkout_index(repo, index_mut, bulk_index_rewrite, None)?;
 
     progress.finish();
-    Ok(())
+    crate::progress::poll_cancel(progress, cancel)
 }
 
 fn checkout_between_trees_slow(
@@ -298,6 +303,7 @@ fn checkout_between_trees_slow(
     from: Option<&ObjectId>,
     to: Option<&ObjectId>,
     progress: &mut dyn ProgressSink,
+    cancel: &dyn Cancel,
 ) -> Result<()> {
     let changes = diff_trees(repo.odb(), from, to, "")?;
     let mut apply = CheckoutApplyOptions::default();
@@ -307,7 +313,7 @@ fn checkout_between_trees_slow(
             apply.parallel_prepare_blobs = true;
         }
     }
-    checkout_tree_changes_with_progress(repo, &changes, progress, None, apply, None)
+    checkout_tree_changes_with_progress(repo, &changes, progress, cancel, None, apply, None)
 }
 
 /// Apply the change from tree `from` to tree `to` onto the working tree and
@@ -327,7 +333,7 @@ pub fn checkout_between_trees(
     from: Option<&ObjectId>,
     to: &ObjectId,
 ) -> Result<()> {
-    checkout_between_trees_with_progress(repo, from, to, &mut NullProgress)
+    checkout_between_trees_with_progress(repo, from, to, &mut NullProgress, &NeverCancel)
 }
 
 /// Like [`checkout_between_trees`], reporting checkout progress to `progress`.
@@ -340,11 +346,12 @@ pub fn checkout_between_trees_with_progress(
     from: Option<&ObjectId>,
     to: &ObjectId,
     progress: &mut dyn ProgressSink,
+    cancel: &dyn Cancel,
 ) -> Result<()> {
     if from.is_none() {
-        return checkout_populated_tree(repo, to, progress);
+        return checkout_populated_tree(repo, to, progress, cancel);
     }
-    checkout_between_trees_slow(repo, from, Some(to), progress)
+    checkout_between_trees_slow(repo, from, Some(to), progress, cancel)
 }
 
 /// Replace the index and tracked worktree so they match `target_tree` exactly.
@@ -786,6 +793,7 @@ pub fn checkout_tree_changes(repo: &Repository, changes: &[DiffEntry]) -> Result
         repo,
         changes,
         &mut NullProgress,
+        &NeverCancel,
         None,
         CheckoutApplyOptions::default(),
         None,
@@ -837,6 +845,8 @@ pub fn checkout_tree_changes_with_index(
         repo,
         changes,
         index,
+        &mut NullProgress,
+        &NeverCancel,
         CheckoutApplyOptions::default(),
         None,
     )
@@ -847,13 +857,16 @@ pub(crate) fn checkout_tree_changes_with_index_opts(
     repo: &Repository,
     changes: &[DiffEntry],
     index: &mut Index,
+    progress: &mut dyn ProgressSink,
+    cancel: &dyn Cancel,
     apply: CheckoutApplyOptions,
     attribute_changes: Option<&[DiffEntry]>,
 ) -> Result<()> {
     checkout_tree_changes_with_progress(
         repo,
         changes,
-        &mut NullProgress,
+        progress,
+        cancel,
         Some(index),
         apply,
         attribute_changes,
@@ -1892,10 +1905,12 @@ fn checkout_tree_changes_with_progress(
     repo: &Repository,
     changes: &[DiffEntry],
     progress: &mut dyn ProgressSink,
+    cancel: &dyn Cancel,
     reuse_index: Option<&mut Index>,
     apply: CheckoutApplyOptions,
     attribute_changes: Option<&[DiffEntry]>,
 ) -> Result<()> {
+    let mut progress = CancelProgress::new(progress, cancel);
     let work_tree = repo
         .work_tree()
         .ok_or_else(|| Error::PathError("cannot update a bare repository's working tree".into()))?;
@@ -1954,19 +1969,39 @@ fn checkout_tree_changes_with_progress(
         let conv = bulk_rules.conversion().clone();
 
         if bulk_mod_delete_checkout_eligible(changes, bulk_rules) {
-            return checkout_bulk_mod_delete_tree_changes(
-                repo, work_tree, changes, index_mut, bulk_rules, &config, &conv, apply, precompose,
-                ignorecase, progress,
-            );
+            checkout_bulk_mod_delete_tree_changes(
+                repo,
+                work_tree,
+                changes,
+                index_mut,
+                bulk_rules,
+                &config,
+                &conv,
+                apply,
+                precompose,
+                ignorecase,
+                &mut progress,
+            )?;
+            return progress.finish_poll();
         }
         if bulk_write_checkout_eligible(changes, bulk_rules)
             && (tree_changes_are_all_additions(changes)
                 || tree_changes_are_all_modifications(changes))
         {
-            return checkout_bulk_added_tree_changes(
-                repo, work_tree, changes, index_mut, bulk_rules, &config, &conv, apply, precompose,
-                ignorecase, progress,
-            );
+            checkout_bulk_added_tree_changes(
+                repo,
+                work_tree,
+                changes,
+                index_mut,
+                bulk_rules,
+                &config,
+                &conv,
+                apply,
+                precompose,
+                ignorecase,
+                &mut progress,
+            )?;
+            return progress.finish_poll();
         }
         if changes.len() >= BULK_DELETE_CHECKOUT_MIN && tree_changes_are_all_deletions(changes) {
             let index: &Index = index_mut;
@@ -2028,7 +2063,7 @@ fn checkout_tree_changes_with_progress(
                     }
                 }
             }
-            return checkout_bulk_deleted_tree_changes(
+            checkout_bulk_deleted_tree_changes(
                 repo,
                 work_tree,
                 changes,
@@ -2036,9 +2071,10 @@ fn checkout_tree_changes_with_progress(
                 &wholesale_index_prefixes,
                 &wholesale_dirs_removed,
                 &mut deleted_abs_paths,
-                progress,
+                &mut progress,
                 &apply,
-            );
+            )?;
+            return progress.finish_poll();
         }
     }
 
@@ -2361,7 +2397,7 @@ fn checkout_tree_changes_with_progress(
         apply.defer_index_disk_write,
     )?;
     progress.finish();
-    Ok(())
+    progress.finish_poll()
 }
 
 #[derive(Clone)]
@@ -3567,7 +3603,8 @@ mod tests {
         repo.write_index(&mut index).expect("empty index");
 
         let mut rec = CheckoutProgressRecorder::default();
-        checkout_between_trees_with_progress(&repo, None, &tree, &mut rec).expect("checkout");
+        checkout_between_trees_with_progress(&repo, None, &tree, &mut rec, &NeverCancel)
+            .expect("checkout");
 
         let index = repo.load_index().expect("index after");
         assert_eq!(
@@ -3606,7 +3643,7 @@ mod tests {
         let changes = diff_trees(repo.odb(), Some(&head), Some(&to_tree), "").expect("diff");
 
         let mut rec = CheckoutProgressRecorder::default();
-        checkout_between_trees_with_progress(&repo, Some(&head), &to_tree, &mut rec)
+        checkout_between_trees_with_progress(&repo, Some(&head), &to_tree, &mut rec, &NeverCancel)
             .expect("checkout");
 
         assert_eq!(rec.started.len(), 1);
@@ -3720,6 +3757,8 @@ mod tests {
             &repo,
             &changes,
             &mut index,
+            &mut NullProgress,
+            &NeverCancel,
             CheckoutApplyOptions {
                 parallel_prepare_blobs: true,
                 checkout_parallel_threshold: Some(0),
@@ -3801,6 +3840,8 @@ mod tests {
             &repo,
             &changes,
             &mut index,
+            &mut NullProgress,
+            &NeverCancel,
             CheckoutApplyOptions {
                 parallel_prepare_blobs: true,
                 checkout_parallel_threshold: Some(0),

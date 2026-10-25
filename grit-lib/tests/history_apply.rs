@@ -192,7 +192,14 @@ fn apply_rewrite_updates_refs_atomically_files_backend() {
     let oids = build_commit_dag(wt, &[("b", "a"), ("c", "b")], &[("c", "refs/heads/main")]);
     let plan = plan_reword(wt, oids["b"], "reworded");
     let grit = open_grit(wt);
-    let applied = apply_rewrite(&grit, &plan, &apply_opts()).expect("apply");
+    let applied = apply_rewrite(
+        &grit,
+        &plan,
+        &apply_opts(),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("apply");
     assert_eq!(applied.ref_updates.len(), 1);
     let new_tip = applied.head;
     assert_ne!(new_tip, oids["c"]);
@@ -214,7 +221,14 @@ fn apply_rewrite_updates_refs_atomically_reftable_backend() {
     let oids = build_commit_dag(wt, &[("b", "a"), ("c", "b")], &[("c", "refs/heads/main")]);
     let plan = plan_reword(wt, oids["b"], "reftable reword");
     let grit = open_grit(wt);
-    apply_rewrite(&grit, &plan, &apply_opts()).expect("apply");
+    apply_rewrite(
+        &grit,
+        &plan,
+        &apply_opts(),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("apply");
     git_fsck_strict(wt);
 }
 
@@ -257,7 +271,14 @@ fn apply_rewrite_refuses_when_head_moved_since_plan() {
     git(wt, &["switch", "other"]);
     let main_before = git_rev_parse(wt, "refs/heads/main").expect("main");
     let grit = open_grit(wt);
-    let err = apply_rewrite(&grit, &plan, &apply_opts()).expect_err("head moved");
+    let err = apply_rewrite(
+        &grit,
+        &plan,
+        &apply_opts(),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect_err("head moved");
     assert!(matches!(
         err,
         grit_lib::revwalk::history::HistoryError::HeadMovedSincePlan { .. }
@@ -279,7 +300,14 @@ fn apply_rewrite_cas_mismatch_changes_nothing() {
     commit_file(wt, "move.txt", "tip\n", "advance tip");
     let tip_after_move = git_rev_parse(wt, "refs/heads/main").expect("tip");
     let grit = open_grit(wt);
-    let err = apply_rewrite(&grit, &plan, &apply_opts()).expect_err("stale plan");
+    let err = apply_rewrite(
+        &grit,
+        &plan,
+        &apply_opts(),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect_err("stale plan");
     assert!(matches!(
         err,
         grit_lib::revwalk::history::HistoryError::HeadMovedSincePlan { .. }
@@ -296,7 +324,14 @@ fn apply_rewrite_refuses_when_local_changes_would_be_overwritten() {
     let plan = plan_reword_with_tree(wt, oids["b"], "clash.txt", b"from rewrite\n", "tree change");
     fs::write(wt.join("clash.txt"), "local untracked\n").expect("write");
     let grit = open_grit(wt);
-    let err = apply_rewrite(&grit, &plan, &apply_opts()).expect_err("blocked");
+    let err = apply_rewrite(
+        &grit,
+        &plan,
+        &apply_opts(),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect_err("blocked");
     match err {
         grit_lib::revwalk::history::HistoryError::LocalChangesWouldBeOverwritten { paths } => {
             assert!(paths.iter().any(|p| p.contains("clash")));
@@ -317,7 +352,14 @@ fn apply_rewrite_preserves_unrelated_staged_and_unstaged_changes() {
     fs::write(wt.join("staged.txt"), "new\n").expect("staged");
     git(wt, &["add", "staged.txt"]);
     let grit = open_grit(wt);
-    apply_rewrite(&grit, &plan, &apply_opts()).expect("apply");
+    apply_rewrite(
+        &grit,
+        &plan,
+        &apply_opts(),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("apply");
     assert_eq!(
         fs::read_to_string(wt.join("keep.txt")).expect("read"),
         "unstaged edit\n"
@@ -381,7 +423,14 @@ fn apply_rewrite_bare_repository() {
         },
     )
     .expect("plan");
-    apply_rewrite(&grit, &plan, &apply_opts()).expect("apply bare");
+    apply_rewrite(
+        &grit,
+        &plan,
+        &apply_opts(),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("apply bare");
 }
 
 #[test]
@@ -391,7 +440,14 @@ fn apply_rewrite_writes_reflog_entries() {
     let oids = build_commit_dag(wt, &[("b", "a")], &[("b", "refs/heads/main")]);
     let plan = plan_reword(wt, oids["b"], "reworded");
     let grit = open_grit(wt);
-    apply_rewrite(&grit, &plan, &apply_opts()).expect("apply");
+    apply_rewrite(
+        &grit,
+        &plan,
+        &apply_opts(),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("apply");
     let tip = resolve_ref(grit.git_dir(), "refs/heads/main").expect("main");
     let branch_reflog = git(wt, &["reflog", "show", "-1", "main"]);
     assert!(
@@ -429,7 +485,14 @@ fn apply_rewrite_checked_out_branch_reflog_single_entry_per_update() {
     let pre_rewrite_tip = tips[2];
     let plan = plan_reword(wt, tips[1], "reworded");
     let grit = open_grit(wt);
-    apply_rewrite(&grit, &plan, &apply_opts()).expect("apply");
+    apply_rewrite(
+        &grit,
+        &plan,
+        &apply_opts(),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("apply");
     let new_tip = resolve_ref(grit.git_dir(), "refs/heads/main").expect("main tip");
     let head_log = read_reflog(grit.git_dir(), "HEAD").expect("HEAD reflog");
     let branch_log = read_reflog(grit.git_dir(), "refs/heads/main").expect("main reflog");
@@ -481,7 +544,14 @@ fn apply_rewrite_head_reflog_matches_git_update_ref_on_checked_out_branch() {
     );
     let plan = plan_reword(wt, oids["b"], "reworded");
     let grit = open_grit(wt);
-    apply_rewrite(&grit, &plan, &apply_opts()).expect("apply");
+    apply_rewrite(
+        &grit,
+        &plan,
+        &apply_opts(),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("apply");
     let tip = resolve_ref(grit.git_dir(), "refs/heads/main").expect("main");
     let head_gs = git(wt, &["reflog", "show", "-1", "--format=%gs", "HEAD"]);
     let branch_gs = git(
@@ -509,7 +579,14 @@ fn apply_rewrite_head_reflog_reftable_backend() {
     let oids = build_commit_dag(wt, &[("b", "a"), ("c", "b")], &[("c", "refs/heads/main")]);
     let plan = plan_reword(wt, oids["b"], "reftable reword");
     let grit = open_grit(wt);
-    apply_rewrite(&grit, &plan, &apply_opts()).expect("apply");
+    apply_rewrite(
+        &grit,
+        &plan,
+        &apply_opts(),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("apply");
     let head_log = read_reflog(grit.git_dir(), "HEAD").expect("head log");
     let branch_log = read_reflog(grit.git_dir(), "refs/heads/main").expect("branch log");
     let head_entry = head_log.last().expect("HEAD reflog entry");
@@ -605,7 +682,14 @@ fn apply_rewrite_failed_checkout_restores_refs_and_preserves_dirty_worktree() {
     );
     let tip_before = git_rev_parse(wt, "refs/heads/main").expect("tip");
     set_test_inject_index_write_fail_remaining(1);
-    let err = apply_rewrite(&grit, &plan, &apply_opts()).expect_err("injected checkout failure");
+    let err = apply_rewrite(
+        &grit,
+        &plan,
+        &apply_opts(),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect_err("injected checkout failure");
     grit_lib::repo::set_test_inject_index_write_fail(false);
     assert!(matches!(
         err,

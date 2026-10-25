@@ -59,6 +59,8 @@ fn main() -> Result<(), grit_lib::error::Error> {
             record_operation: None,
             hooks: grit_lib::PostOperationHooks::Run,
         },
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
     )
     .map_err(grit_lib::error::Error::History)?;
 

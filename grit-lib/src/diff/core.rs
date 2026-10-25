@@ -2309,6 +2309,7 @@ pub fn map_new_to_old_lines_compacted(
 
 /// The kind of change between two sides of a diff.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 pub enum DiffStatus {
     /// File was added.
     Added,
@@ -2359,6 +2360,7 @@ impl DiffStatus {
 
 /// A single diff entry representing one changed path.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 pub struct DiffEntry {
     /// The status of this change.
     pub status: DiffStatus,

@@ -173,6 +173,8 @@ fn apply_plan(grit: &Repository, plan: &grit_lib::revwalk::history::RewritePlan)
             record_operation: None,
             hooks: grit_lib::PostOperationHooks::Run,
         },
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
     )
     .expect("apply");
 }

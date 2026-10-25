@@ -319,15 +319,18 @@ fn config_for_status_rename_detection(config: &ConfigSet) -> ConfigSet {
 /// `format_long` read today, so a renderer can be a pure function of this model
 /// plus the user's chosen output format.
 #[derive(Debug, Clone)]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 pub struct StatusModel {
     /// The resolved HEAD (branch, detached, or unborn).
     pub head: HeadState,
     /// Tree OID of the HEAD commit, or `None` on an unborn branch.
     pub head_tree: Option<ObjectId>,
     /// In-progress operation state (merge, rebase, cherry-pick, bisect, …).
+    #[cfg_attr(feature = "serde-models", serde(skip))]
     pub state: WtStatusState,
     /// The loaded index, with sparse-directory placeholders expanded — the same
     /// index the renderers query for per-stage entries.
+    #[cfg_attr(feature = "serde-models", serde(skip))]
     pub index: Index,
     /// Staged changes: the index-vs-HEAD-tree diff.
     pub staged: Vec<DiffEntry>,
@@ -340,8 +343,10 @@ pub struct StatusModel {
     /// Paths with unmerged index stages (1–3), sorted and deduplicated.
     pub conflicts: Vec<String>,
     /// Unmerged paths with a [`ConflictKind`] derived from index stages 1–3.
+    #[cfg_attr(feature = "serde-models", serde(skip))]
     pub conflict_details: Vec<Conflict>,
     /// Paused operation and suggested follow-up steps, when any apply.
+    #[cfg_attr(feature = "serde-models", serde(skip))]
     pub operation: Option<Operation>,
     /// Number of stash entries (for the optional stash footer / `--show-stash`).
     pub stash_count: usize,

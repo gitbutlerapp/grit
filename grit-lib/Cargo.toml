@@ -35,6 +35,8 @@ http-ureq-native-tls = ["http-ureq", "ureq?/native-tls"]
 unstable-bench-helpers = []
 # Forward `trace_span!` to the `tracing` crate (zero cost when disabled).
 tracing = ["dep:tracing"]
+# Derive `serde::Serialize` on porcelain result DTOs (`StatusModel`, `DiffEntry`, …).
+serde-models = []
 
 [dependencies]
 tracing = { version = "0.1", optional = true, default-features = false, features = ["std"] }

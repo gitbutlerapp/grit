@@ -1808,6 +1808,8 @@ fn hard_reset_branch(repo: &Repository, refname: &str, target: ObjectId) -> Resu
             "Grit <grit@local> 0 +0000",
             "abort replay",
         ),
+        &mut crate::progress::NullProgress,
+        &crate::progress::NeverCancel,
     )?;
     let _ = short;
     Ok(())

@@ -135,7 +135,14 @@ fn drop_keep_empty_keeps_replayed_empty_commit() {
     let parent_tree = write_tree_with_blob(&grit, "f.txt", b"a\n").expect("parent tree");
     assert_eq!(parsed.tree, parent_tree);
     assert_eq!(parsed.parents, vec![_a]);
-    apply_rewrite(&grit, &plan, &apply_opts()).expect("apply");
+    apply_rewrite(
+        &grit,
+        &plan,
+        &apply_opts(),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("apply");
     git_fsck_strict(wt);
 }
 
@@ -275,6 +282,13 @@ fn reword_keep_committer_preserves_committer_line() {
         .find_map(|line| line.strip_prefix(b"committer "))
         .expect("new committer line");
     assert_eq!(new_committer, old_committer);
-    apply_rewrite(&grit, &plan, &apply_opts()).expect("apply");
+    apply_rewrite(
+        &grit,
+        &plan,
+        &apply_opts(),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("apply");
     git_fsck_strict(wt);
 }

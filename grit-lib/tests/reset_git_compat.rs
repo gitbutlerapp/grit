@@ -87,6 +87,8 @@ fn mixed_reset_readable_by_git() {
     reset_to_commit(
         &repo,
         &ResetOptions::new(c1, ResetMode::Mixed, identity(), "reset"),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
     )
     .expect("reset");
 
@@ -137,6 +139,8 @@ fn reset_keep_preserves_unrelated_local_changes_like_git() {
     reset_to_commit(
         &repo,
         &ResetOptions::new(parent, ResetMode::Keep, "T <t@t.com> 0 +0000", "reset"),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
     )
     .expect("keep reset");
     assert_porcelain_v2_matches_git(dir2.path(), &repo);
@@ -164,6 +168,8 @@ fn reset_keep_refuses_when_changed_file_has_local_edits() {
     let err = reset_to_commit(
         &repo,
         &ResetOptions::new(parent, ResetMode::Keep, "T <t@t.com> 0 +0000", "reset"),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
     )
     .expect_err("grit should refuse");
     assert!(
@@ -200,7 +206,13 @@ fn reset_dry_run_hard_lists_overwritten_paths_and_changes_nothing() {
 
     let mut opts = ResetOptions::new(c1, ResetMode::Hard, "T <t@t.com> 0 +0000", "reset");
     opts.dry_run = true;
-    let outcome = reset_to_commit(&repo, &opts).expect("dry-run");
+    let outcome = reset_to_commit(
+        &repo,
+        &opts,
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("dry-run");
     assert!(outcome.dry_run);
     assert!(outcome.would_overwrite.iter().any(|p| p == "a"));
     assert_eq!(
@@ -249,7 +261,13 @@ fn reset_orphaned_commits_main_only_git_init() {
 
     let mut opts = ResetOptions::new(c1, ResetMode::Hard, "T <t@t.com> 0 +0000", "reset");
     opts.dry_run = true;
-    let preview = reset_to_commit(&repo, &opts).expect("dry-run reset");
+    let preview = reset_to_commit(
+        &repo,
+        &opts,
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("dry-run reset");
     assert_eq!(preview.orphaned_total, 2, "c2 and c3 should orphan");
     assert_eq!(preview.orphaned_commits.len(), 2);
     assert_eq!(
@@ -282,6 +300,8 @@ fn reset_orphaned_commits_excludes_commits_held_by_other_refs() {
     let outcome = reset_to_commit(
         &repo,
         &ResetOptions::new(c1, ResetMode::Mixed, "T <t@t.com> 0 +0000", "reset"),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
     )
     .expect("reset");
     assert_eq!(outcome.orphaned_total, 1);
@@ -308,6 +328,8 @@ fn reset_orphan_zero_when_other_ref_holds_old_tip() {
     let outcome = reset_to_commit(
         &repo,
         &ResetOptions::new(c1, ResetMode::Mixed, "T <t@t.com> 0 +0000", "reset"),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
     )
     .expect("reset");
     assert_eq!(outcome.orphaned_total, 0);
@@ -345,6 +367,8 @@ fn reset_keep_rejects_unmerged_index_like_git() {
     let err = reset_to_commit(
         &repo,
         &ResetOptions::new(head, ResetMode::Keep, "T <t@t.com> 0 +0000", "reset"),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
     )
     .expect_err("grit keep should refuse unmerged index");
     assert!(matches!(err, Error::IndexUnmerged));
@@ -366,6 +390,8 @@ fn reset_forward_has_no_orphan_walk() {
     let outcome = reset_to_commit(
         &repo,
         &ResetOptions::new(c2, ResetMode::Mixed, "T <t@t.com> 0 +0000", "reset"),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
     )
     .expect("reset");
     assert_eq!(outcome.orphaned_total, 0);

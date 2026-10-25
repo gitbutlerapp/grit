@@ -309,7 +309,12 @@ pub fn resolve_revision_spec(repo: &Repository, spec: &str) -> Result<ObjectId> 
 /// Returns [`Error::OperationInProgress`] (also for [`SwitchOptions::dry_run`]) while a merge,
 /// rebase, am, cherry-pick or revert is paused, whichever tool started it; overwrite refusals
 /// and ref/object failures otherwise. On error the hook does not run.
-pub fn switch_repository(repo: &Repository, opts: &SwitchOptions) -> Result<SwitchOutcome> {
+pub fn switch_repository(
+    repo: &Repository,
+    opts: &SwitchOptions,
+    progress: &mut dyn crate::progress::ProgressSink,
+    cancel: &dyn crate::progress::Cancel,
+) -> Result<SwitchOutcome> {
     if let Some(op) = crate::state::operation_blocking_switch(repo.git_dir())? {
         return Err(Error::OperationInProgress(op));
     }
@@ -321,14 +326,19 @@ pub fn switch_repository(repo: &Repository, opts: &SwitchOptions) -> Result<Swit
     } else {
         None
     };
-    let mut outcome = switch_without_hooks(repo, opts)?;
+    let mut outcome = switch_without_hooks(repo, opts, progress, cancel)?;
     if run_hooks && run_post_checkout(repo, old_head, outcome.commit, true) {
         outcome.hooks_run.push(HookName::PostCheckout);
     }
     Ok(outcome)
 }
 
-fn switch_without_hooks(repo: &Repository, opts: &SwitchOptions) -> Result<SwitchOutcome> {
+fn switch_without_hooks(
+    repo: &Repository,
+    opts: &SwitchOptions,
+    progress: &mut dyn crate::progress::ProgressSink,
+    cancel: &dyn crate::progress::Cancel,
+) -> Result<SwitchOutcome> {
     let (
         target_oid,
         branch_ref,
@@ -437,6 +447,8 @@ fn switch_without_hooks(repo: &Repository, opts: &SwitchOptions) -> Result<Switc
         track_upstream,
         &reflog_to,
         opts.dry_run,
+        progress,
+        cancel,
     )
 }
 
@@ -452,6 +464,8 @@ fn switch_to_target(
     track_upstream: Option<(String, String)>,
     reflog_to_label: &str,
     dry_run: bool,
+    progress: &mut dyn crate::progress::ProgressSink,
+    cancel: &dyn crate::progress::Cancel,
 ) -> Result<SwitchOutcome> {
     let head_before = resolve_head_for_repository(repo)?;
     let head_oid = head_before.oid().copied();
@@ -493,7 +507,7 @@ fn switch_to_target(
         )
         .with_stranded(stranded));
     }
-    checkout_prepared_tree_transition(repo, prepared)?;
+    checkout_prepared_tree_transition(repo, prepared, progress, cancel)?;
 
     if let Some(from_label) = checkout_reflog_from_label(&head_before) {
         finish_switch_ref_updates(
@@ -945,7 +959,14 @@ pub(crate) fn checkout_tree_transition_allow_local(
     from_tree: Option<&ObjectId>,
     to_tree: &ObjectId,
 ) -> Result<()> {
-    checkout_tree_transition_allow_local_with_preserved(repo, from_tree, to_tree, &HashSet::new())
+    checkout_tree_transition_allow_local_with_preserved(
+        repo,
+        from_tree,
+        to_tree,
+        &HashSet::new(),
+        &mut crate::progress::NullProgress,
+        &crate::progress::NeverCancel,
+    )
 }
 
 /// Like [`checkout_tree_transition_allow_local`], but local-overwrite paths become [`Error::WouldOverwrite`].
@@ -953,11 +974,13 @@ pub(crate) fn checkout_tree_transition_allow_local_reset(
     repo: &Repository,
     from_tree: Option<&ObjectId>,
     to_tree: &ObjectId,
+    progress: &mut dyn crate::progress::ProgressSink,
+    cancel: &dyn crate::progress::Cancel,
 ) -> Result<()> {
     let prepared = prepare_tree_transition_allow_local(repo, from_tree, to_tree, &HashSet::new())
         .map_err(map_switch_tree_transition_prepare_error)?;
     verify_prepared_switch_no_untracked_overwrite(&prepared.plan)?;
-    checkout_prepared_tree_transition(repo, prepared)
+    checkout_prepared_tree_transition(repo, prepared, progress, cancel)
 }
 
 /// Like [`checkout_tree_transition_allow_local`], but always keeps worktree bytes on `force_preserve_worktree`.
@@ -966,11 +989,13 @@ pub(crate) fn checkout_tree_transition_allow_local_with_preserved(
     from_tree: Option<&ObjectId>,
     to_tree: &ObjectId,
     force_preserve_worktree: &HashSet<String>,
+    progress: &mut dyn crate::progress::ProgressSink,
+    cancel: &dyn crate::progress::Cancel,
 ) -> Result<()> {
     let prepared =
         prepare_tree_transition_allow_local(repo, from_tree, to_tree, force_preserve_worktree)
             .map_err(tree_transition_prepare_to_error)?;
-    checkout_prepared_tree_transition(repo, prepared)
+    checkout_prepared_tree_transition(repo, prepared, progress, cancel)
 }
 
 /// Run the checkout half of a prepared allow-local transition (for merge integration).
@@ -978,12 +1003,19 @@ pub(crate) fn checkout_prepared_tree_transition_for_merge(
     repo: &Repository,
     prepared: PreparedSwitch,
 ) -> Result<()> {
-    checkout_prepared_tree_transition(repo, prepared)
+    checkout_prepared_tree_transition(
+        repo,
+        prepared,
+        &mut crate::progress::NullProgress,
+        &crate::progress::NeverCancel,
+    )
 }
 
 fn checkout_prepared_tree_transition(
     repo: &Repository,
     mut prepared: PreparedSwitch,
+    progress: &mut dyn crate::progress::ProgressSink,
+    cancel: &dyn crate::progress::Cancel,
 ) -> Result<()> {
     let overwrite_untracked = if tree_changes_contain_additions(&prepared.plan.tree_changes) {
         prepared.plan.untracked.as_slice()
@@ -1030,6 +1062,8 @@ fn checkout_prepared_tree_transition(
         repo,
         checkout_changes,
         &mut prepared.index,
+        progress,
+        cancel,
         CheckoutApplyOptions {
             parallel_prepare_blobs: true,
             checkout_parallel_threshold: None,
@@ -1282,6 +1316,8 @@ mod tests {
                 dry_run: false,
                 hooks: crate::hooks::PostOperationHooks::Run,
             },
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
         )
         .expect_err("must refuse overwrite");
         assert!(matches!(
@@ -1423,6 +1459,8 @@ mod tests {
                 dry_run: false,
                 hooks: crate::hooks::PostOperationHooks::Run,
             },
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
         )
         .expect_err("local changes should block switch");
         assert!(matches!(
@@ -1462,6 +1500,8 @@ mod tests {
                 dry_run: false,
                 hooks: crate::hooks::PostOperationHooks::Run,
             },
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
         )
         .expect("switch");
 
@@ -1508,6 +1548,8 @@ mod tests {
                 dry_run: false,
                 hooks: crate::hooks::PostOperationHooks::Run,
             },
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
         )
         .expect_err("conflict");
         assert!(matches!(
@@ -1549,6 +1591,8 @@ mod tests {
                 dry_run: false,
                 hooks: crate::hooks::PostOperationHooks::Run,
             },
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
         )
         .expect("switch");
         let config = repo.config().expect("config");
@@ -1607,6 +1651,8 @@ mod tests {
                 dry_run: false,
                 hooks: crate::hooks::PostOperationHooks::Run,
             },
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
         )
         .expect("detach at annotated tag");
 
@@ -1629,6 +1675,8 @@ mod tests {
                 dry_run: false,
                 hooks: crate::hooks::PostOperationHooks::Run,
             },
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
         )
         .expect("detach");
         assert_eq!(detached.branch, None);
@@ -1645,6 +1693,8 @@ mod tests {
                 dry_run: true,
                 hooks: crate::hooks::PostOperationHooks::Run,
             },
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
         )
         .expect("preview");
         assert_eq!(preview.branch.as_deref(), Some("main"));
@@ -1657,6 +1707,8 @@ mod tests {
                 dry_run: false,
                 hooks: crate::hooks::PostOperationHooks::Run,
             },
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
         )
         .expect("create");
         assert_eq!(attached.branch.as_deref(), Some("topic"));
@@ -1717,6 +1769,8 @@ mod tests {
                 dry_run,
                 hooks: Default::default(),
             },
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
         )
         .expect("switch")
     }
