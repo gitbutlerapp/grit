@@ -180,6 +180,7 @@ Overview of **grit-lib** coverage, **`grit` commands**, common workflows, and **
 | --- | --- |
 | `clone/http@synth-10k` | Clone synth-10k over grit smart HTTP vs git clone |
 | `clone/local@synth-10k` | Clone over file:// (not git clone --local hardlink shortcut) vs git clone |
+| `clone/full@git-git` | Full clone of git/git over smart HTTP (git http-backend) vs git clone; tracks peak RSS of large-pack ingest |
 | `clone/bare@synth-10k` | Bare clone synth-10k vs `git clone --bare --no-local file://` |
 | `clone/checkout@synth-100k` | Local-path clone with full checkout of 100k files (both tools link the pack, so the checkout dominates) vs git clone |
 | `clone/shallow@git-git` | Shallow clone (`--depth 1`) over file:// vs git clone --depth 1 |

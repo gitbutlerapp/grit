@@ -318,6 +318,29 @@ pub fn setup_git_git_remote(setup: &DailySetup<'_>) -> Result<DailyHeadlineConte
     })
 }
 
+/// The git/git bare served by `git http-backend`, for full clones of a large real pack.
+pub fn setup_git_git_clone_remote(setup: &DailySetup<'_>) -> Result<DailyHeadlineContext> {
+    with_remote_scratch("git-git-clone", |scratch| {
+        let bare = scratch.join("remote.git");
+        copy_cached_bare(setup.git, setup, FixtureKind::GitGit, &bare)?;
+        let meta = install_network_meta(setup.git, &bare, setup.smoke)?;
+        clear_network_sidecars(&meta);
+        let (remote_url, git_http) = serve_over_http(setup.git, &bare)?;
+        std::env::set_var("GRIT_BENCH_DAILY_NETWORK_BARE", &bare);
+        Ok(ctx_with_remote(
+            scratch.to_path_buf(),
+            setup,
+            DailyRemoteState {
+                bare,
+                meta,
+                remote_url,
+                grit_http: None,
+                git_http: Some(git_http),
+            },
+        ))
+    })
+}
+
 pub fn setup_synth10k_remote(setup: &DailySetup<'_>) -> Result<DailyHeadlineContext> {
     with_remote_scratch("synth-10k-clone", |scratch| {
         let kind = if setup.smoke {

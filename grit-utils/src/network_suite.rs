@@ -26,8 +26,11 @@ fn refresh_http_mirror(git: &Path, bare: &Path) -> Result<()> {
 }
 use crate::network_http::{GitHttpBackendServer, GritHttpServer};
 use crate::network_verify::verify_clone_against_bare;
+use crate::resource::bench_with_peak_rss;
 use crate::scenarios::RunConfig;
-use crate::schema::{BenchReport, DriverKind, ScenarioResult, ToolVersions, SCHEMA_VERSION};
+use crate::schema::{
+    BenchReport, DriverKind, ScenarioResult, TimingStats, ToolVersions, SCHEMA_VERSION,
+};
 use crate::shell::shell_command;
 use crate::stats::{median_ratio, timing_from_hyperfine};
 
@@ -480,34 +483,25 @@ fn run_paired_cli_scenario(
     spec: &ScenarioSpec,
 ) -> Result<ScenarioResult> {
     let env_prefix = cfg.isolated_config.then(isolated_env_prefix);
-    let git_entry = run_hyperfine(
-        hyperfine,
-        &HyperfineRun {
-            command: shell_command(git, &spec.git_argv),
-            working_directory: cwd.to_path_buf(),
-            prepare: spec.prepare.clone(),
-            warmup: cfg.warmup,
-            min_runs: cfg.min_runs,
-            exact_runs: cfg.exact_runs,
-            command_name: Some(format!("git-{}", spec.id)),
-            env_prefix: env_prefix.clone(),
-        },
-    )?;
-    let grit_entry = run_hyperfine(
-        hyperfine,
-        &HyperfineRun {
-            command: shell_command(grit, &spec.grit_argv),
-            working_directory: cwd.to_path_buf(),
-            prepare: spec.prepare.clone(),
-            warmup: cfg.warmup,
-            min_runs: cfg.min_runs,
-            exact_runs: cfg.exact_runs,
-            command_name: Some(format!("grit-{}", spec.id)),
-            env_prefix,
-        },
-    )?;
-    let git_stats = timing_from_hyperfine(&git_entry);
-    let grit_stats = timing_from_hyperfine(&grit_entry);
+    let measure_helper = std::env::current_exe().context("grit-bench exe path")?;
+    let run = |tool: &Path, argv: &[String], name: String| -> Result<TimingStats> {
+        let (mut stats, peak) = bench_with_peak_rss(
+            hyperfine,
+            &measure_helper,
+            &shell_command(tool, argv),
+            cwd,
+            cfg.warmup,
+            cfg.min_runs,
+            cfg.exact_runs,
+            &name,
+            env_prefix.as_deref(),
+            spec.prepare.as_deref(),
+        )?;
+        stats.peak_rss_bytes = Some(peak);
+        Ok(stats)
+    };
+    let git_stats = run(git, &spec.git_argv, format!("git-{}", spec.id))?;
+    let grit_stats = run(grit, &spec.grit_argv, format!("grit-{}", spec.id))?;
     let ratio = median_ratio(git_stats.median_ms, grit_stats.median_ms);
     Ok(ScenarioResult {
         id: spec.id.clone(),
