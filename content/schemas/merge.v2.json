@@ -36,8 +36,7 @@
             "aborted",
             "squashed",
             "stopped",
-            "refused_not_ff",
-            "set_upstream"
+            "refused_not_ff"
           ],
           "type": "string"
         },
@@ -64,7 +63,7 @@
       ]
     },
     "branch": {
-      "description": "The merge source label (for `set_upstream`, the branch being set).",
+      "description": "The merge source label.",
       "type": "string"
     },
     "change_id": {
@@ -106,7 +105,7 @@
       ]
     },
     "oid": {
-      "description": "Resulting commit (fast-forward target, merge commit, or adopted upstream).",
+      "description": "Resulting commit (fast-forward target or merge commit).",
       "type": [
         "string",
         "null"
@@ -124,13 +123,6 @@
     },
     "result": {
       "$ref": "#/definitions/MergeResult"
-    },
-    "upstream": {
-      "description": "For `set_upstream` (unborn `grit pull`): the upstream the branch was set to.",
-      "type": [
-        "string",
-        "null"
-      ]
     }
   },
   "required": [

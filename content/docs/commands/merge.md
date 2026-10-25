@@ -163,14 +163,13 @@ Pass `--json` for stable, scripting-friendly output:
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
-| `result` | string | `up_to_date`, `fast_forward`, `clean` (`--check` only), `merged`, `squashed`, `stopped`, `conflicts`, `refused_not_ff`, `aborted`, or `set_upstream`. |
+| `result` | string | `up_to_date`, `fast_forward`, `clean` (`--check` only), `merged`, `squashed`, `stopped`, `conflicts`, `refused_not_ff`, or `aborted`. |
 | `check` | boolean | `true` when this outcome is from `--check` (nothing was merged). Omitted for real merges. |
 | `dry_run` | boolean | `true` when this outcome is from `--dry-run` (nothing was merged). Omitted for real merges. |
-| `branch` | string | The branch, tag or commit that was merged in, exactly as given on the command line (or the branch set as upstream). |
+| `branch` | string | The branch, tag or commit that was merged in, exactly as given on the command line. |
 | `oid` | string or null | Resulting commit after a real merge or fast-forward; for `--check` with `result: clean`, the predicted merge tree OID. Omitted for `--dry-run` when a new merge commit would be created. |
 | `parents` | array or null | For `--dry-run` with `result: merged`, the two parent commit ids of the merge commit that would be recorded. |
 | `change_id` | string or null | Stored `change-id` on `oid` when present (merge commit or fast-forward tip). |
-| `upstream` | string or null | For `set_upstream`, the remote-tracking branch that was adopted. |
 | `conflicts` | array or null | When `result` is `conflicts`, each item has `path`, `kind` (`content`, `add_add`, or `modify_delete`), and optional `summary` text. |
 | `next_steps` | array or null | Ordered follow-up commands when `result` is `conflicts` (for example `grit diff`, `grit add .`), or suggested commands when `result` is `squashed` or `stopped`. |
 | `alternatives` | array or null | Mutually exclusive options such as `grit merge --abort` (not part of the ordered sequence). |

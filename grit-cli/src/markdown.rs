@@ -695,15 +695,6 @@ pub fn print_merge_outcome(w: &mut dyn Write, outcome: &MergeOutcome) -> anyhow:
             }
         }
         MergeResult::Aborted => outln!(w, "Merge aborted."),
-        MergeResult::SetUpstream => {
-            let short = outcome.oid.as_deref().map(short_hex).unwrap_or("");
-            let upstream = outcome.upstream.as_deref().unwrap_or("");
-            outln!(
-                w,
-                "- Set **`{}`** to `{upstream}` · `{short}`",
-                outcome.branch
-            );
-        }
     }
     if let Some(steps) = &outcome.next_steps {
         let already_rendered = matches!(outcome.result, MergeResult::Conflicts) && !outcome.check;
