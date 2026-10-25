@@ -107,6 +107,12 @@ fn lookup_prefix(
 }
 ```
 
+## Batched existence checks
+
+When grit needs to know whether many objects exist at once, it calls [`ObjectStore::contains_many`](rustdoc:grit_lib::objects::odb::store::ObjectStore::contains_many) with the whole batch and expects one answer per id, in input order. Write-tree (and so every commit) uses it to confirm that the cached trees of unchanged directories still exist. Fetch and push negotiation use it to sort out which ids are already present. The default implementation calls `contains` once per id. A store that pays per call, such as a database or a network service, should override it to answer the batch in one query.
+
+With an override, committing one changed file costs a handful of store calls however many directories the repository has: one batch for the reused trees, one for the changed directory's files, and an existence check before each of the objects the commit writes. Subtrees grit has just confirmed or written are not probed again.
+
 ## Conformance tests
 
 The workspace crate `grit_test_support::odb_conformance` provides shared read/write suites (and `grit_test_support::refstore_conformance` does the same for ref stores, see [Refs](refs.md#writing-a-ref-backend)). Run them from an integration test in your crate (see [`grit-lib/tests/odb_conformance_memory.rs`](https://github.com/gitbutlerapp/grit/blob/main/grit-lib/tests/odb_conformance_memory.rs)) to validate a custom backend before wiring it through [`OdbBuilder`](rustdoc:grit_lib::objects::odb::OdbBuilder).

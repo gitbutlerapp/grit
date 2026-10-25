@@ -7,7 +7,10 @@ use crate::index::{
     CacheTreeNode, Index, IndexEntry, MODE_EXECUTABLE, MODE_GITLINK, MODE_REGULAR, MODE_SYMLINK,
     MODE_TREE,
 };
-use crate::objects::{parse_tree, serialize_tree, tree_entry_cmp, ObjectId, ObjectKind, TreeEntry};
+use crate::objects::{
+    oid_hash_set_with_capacity, parse_tree, serialize_tree, tree_entry_cmp, ObjectId, ObjectKind,
+    OidHashSet, TreeEntry,
+};
 use crate::odb::{Odb, WriteOptions};
 
 /// How [`cache_tree_update`] persists rebuilt tree objects.
@@ -85,25 +88,53 @@ pub fn cache_tree_extension_valid(node: Option<&CacheTreeNode>) -> bool {
 }
 
 /// Returns whether every node in `node` is valid and its tree object exists in `odb`.
+///
+/// The existence check asks the object store about all tree ids in one batch
+/// ([`ObjectStore::contains_many`](crate::odb::store::ObjectStore::contains_many)), so
+/// a database- or network-backed store answers in a single round trip. A store
+/// failure counts as "not valid".
 #[must_use]
 pub fn cache_tree_fully_valid(odb: &Odb, node: Option<&CacheTreeNode>) -> bool {
     let Some(root) = node else {
         return false;
     };
-    if !cache_tree_extension_valid(Some(root)) {
+    let mut oids = Vec::new();
+    if !collect_reusable_tree_ids(root, &mut oids) {
         return false;
     }
-    let mut stack = vec![root];
-    while let Some(n) = stack.pop() {
-        let Some(oid) = n.oid else {
-            return false;
-        };
-        if !odb.exists_local(&oid) {
-            return false;
-        }
-        stack.extend(&n.children);
-    }
+    odb.try_exists_local_many(&oids)
+        .is_ok_and(|present| present.into_iter().all(|p| p))
+}
+
+/// Push the tree id of every node of `node` whose whole subtree is valid, and return
+/// whether `node`'s own subtree is (in which case its id is the last one pushed).
+fn collect_reusable_tree_ids(node: &CacheTreeNode, out: &mut Vec<ObjectId>) -> bool {
+    let children_valid = node.children.iter().fold(true, |all, child| {
+        collect_reusable_tree_ids(child, out) & all
+    });
+    let Some(oid) = node.oid.filter(|_| children_valid && node.is_valid()) else {
+        return false;
+    };
+    out.push(oid);
     true
+}
+
+/// Tree ids of the cached subtrees `cache_tree_update` may reuse, confirmed present in `odb`.
+///
+/// Every candidate is probed in one batch up front instead of one store call per cached
+/// directory while rebuilding. A store failure leaves the set empty, so everything is
+/// rebuilt (and the writes surface the failure).
+fn present_reusable_trees(odb: &Odb, root: &CacheTreeNode) -> OidHashSet {
+    let mut oids = Vec::new();
+    collect_reusable_tree_ids(root, &mut oids);
+    let present = odb.try_exists_local_many(&oids).unwrap_or_default();
+    let mut reusable = oid_hash_set_with_capacity(oids.len());
+    reusable.extend(
+        oids.into_iter()
+            .zip(present)
+            .filter_map(|(oid, has)| has.then_some(oid)),
+    );
+    reusable
 }
 
 /// Update the index cache-tree extension and write any missing tree objects.
@@ -126,8 +157,13 @@ pub fn cache_tree_update(odb: &Odb, index: &mut Index, flags: WriteTreeFlags) ->
         .unwrap_or_else(empty_cache_tree_root);
 
     let rows: Vec<&IndexEntry> = cache_tree_index_rows(index);
+    let ctx = CacheTreeRebuild {
+        odb,
+        flags,
+        reusable: present_reusable_trees(odb, &root),
+    };
     let mut skipped = 0i32;
-    let consumed = rebuild_directory_node(odb, &mut root, &rows, b"", 0, &mut skipped, flags)?;
+    let (consumed, _) = rebuild_directory_node(&ctx, &mut root, &rows, b"", 0, &mut skipped)?;
     if consumed < 0 {
         return Err(Error::IndexError("cache-tree update failed".to_owned()));
     }
@@ -258,18 +294,32 @@ fn find_or_create_child<'a>(
     node.children.last_mut()
 }
 
+/// Per-update state shared by every [`rebuild_directory_node`] call of one
+/// [`cache_tree_update`].
+struct CacheTreeRebuild<'a> {
+    odb: &'a Odb,
+    flags: WriteTreeFlags,
+    /// Cached tree ids already confirmed present (see [`present_reusable_trees`]).
+    reusable: OidHashSet,
+}
+
 /// Rebuild one cache-tree node and the index rows it covers.
+///
+/// Returns the number of index rows consumed and whether `node.oid` is known to exist
+/// in the object store (reused, just written, or found by a repair probe), in which
+/// case the parent does not probe it again.
 fn rebuild_directory_node(
-    odb: &Odb,
+    ctx: &CacheTreeRebuild<'_>,
     node: &mut CacheTreeNode,
     rows: &[&IndexEntry],
     anchor: &[u8],
     prefix_len: usize,
     extra_skip: &mut i32,
-    flags: WriteTreeFlags,
-) -> Result<i32> {
+) -> Result<(i32, bool)> {
     use std::collections::HashMap;
 
+    let odb = ctx.odb;
+    let flags = ctx.flags;
     *extra_skip = 0;
 
     if let Some(head) = rows.first() {
@@ -279,15 +329,15 @@ fn rebuild_directory_node(
         {
             node.entry_count = 1;
             node.oid = Some(head.oid);
-            return Ok(1);
+            return Ok((1, false));
         }
     }
 
-    if cached_node_still_good(node, odb) {
-        return Ok(node.entry_count);
+    if subtree_reusable(node, &ctx.reusable) {
+        return Ok((node.entry_count, true));
     }
 
-    let mut nested_sizes: HashMap<Vec<u8>, i32> = HashMap::new();
+    let mut nested_sizes: HashMap<Vec<u8>, (i32, bool)> = HashMap::new();
     let mut direct_tree_names: HashMap<Vec<u8>, ()> = HashMap::new();
     let mut pos = 0usize;
     while pos < rows.len() {
@@ -311,19 +361,18 @@ fn rebuild_directory_node(
         })?;
         let nested_len = prefix_len + component_end + 1;
         let mut nested_extra = 0i32;
-        let covered = rebuild_directory_node(
-            odb,
+        let (covered, known_present) = rebuild_directory_node(
+            ctx,
             child,
             &rows[pos..],
             path,
             nested_len,
             &mut nested_extra,
-            flags,
         )?;
         if covered <= 0 {
-            return Ok(covered);
+            return Ok((covered, false));
         }
-        nested_sizes.insert(child_name.to_vec(), covered);
+        nested_sizes.insert(child_name.to_vec(), (covered, known_present));
         pos += covered as usize;
         *extra_skip += nested_extra;
     }
@@ -338,6 +387,8 @@ fn rebuild_directory_node(
     };
 
     let mut members: Vec<TreeEntry> = Vec::new();
+    // Members whose existence is still unconfirmed, probed as one batch below.
+    let mut unconfirmed: Vec<(ObjectId, u32, &[u8])> = Vec::new();
     let mut stale = false;
     pos = 0;
     while pos < rows.len() {
@@ -350,7 +401,7 @@ fn rebuild_directory_node(
         let tail = path_strip_prefix(path, prefix_len);
         let slash = tail.iter().position(|&b| b == b'/');
 
-        let (oid, mode, name_len, advance) = if let Some(off) = slash {
+        let (oid, mode, name_len, advance, known_present) = if let Some(off) = slash {
             let name = &tail[..off];
             let child = find_or_create_child(node, name, false).ok_or_else(|| {
                 Error::IndexError(format!(
@@ -359,7 +410,7 @@ fn rebuild_directory_node(
                     String::from_utf8_lossy(path)
                 ))
             })?;
-            let covered = *nested_sizes
+            let (covered, known_present) = *nested_sizes
                 .get(name)
                 .ok_or_else(|| Error::IndexError("cache-tree nested size missing".to_owned()))?;
             let pending = child.entry_count < 0;
@@ -373,7 +424,7 @@ fn rebuild_directory_node(
                 pos += covered as usize;
                 continue;
             }
-            (oid, MODE_TREE, off, covered as usize)
+            (oid, MODE_TREE, off, covered as usize, known_present)
         } else {
             if row.intent_to_add() {
                 stale = true;
@@ -392,17 +443,16 @@ fn rebuild_directory_node(
             } else {
                 canonicalize_blob_mode(row.mode)
             };
-            (row.oid, mode, tail.len(), 1)
+            (row.oid, mode, tail.len(), 1, false)
         };
 
+        if oid.is_zero() {
+            return Err(missing_member_error(mode, &oid, path));
+        }
         let gitlink = mode == MODE_GITLINK;
         let allow_missing = gitlink || flags.missing_ok || (slash.is_none() && row.intent_to_add());
-        if oid.is_zero() || (!allow_missing && !odb.contains(&oid)?) {
-            return Err(Error::ObjectNotFound(format!(
-                "{mode:o} {} at {}",
-                oid.to_hex(),
-                String::from_utf8_lossy(path)
-            )));
+        if !allow_missing && !known_present {
+            unconfirmed.push((oid, mode, path));
         }
 
         members.push(TreeEntry {
@@ -411,6 +461,15 @@ fn rebuild_directory_node(
             oid,
         });
         pos += advance;
+    }
+
+    if !unconfirmed.is_empty() {
+        let oids: Vec<ObjectId> = unconfirmed.iter().map(|(oid, _, _)| *oid).collect();
+        let present = odb.contains_many(&oids)?;
+        if let Some(((oid, mode, path), _)) = unconfirmed.iter().zip(present).find(|(_, has)| !has)
+        {
+            return Err(missing_member_error(*mode, oid, path));
+        }
     }
 
     members.sort_by(|a, b| {
@@ -422,14 +481,33 @@ fn rebuild_directory_node(
     let payload = serialize_tree(&members);
     let (tree_oid, repair_stale) = store_tree_payload(odb, &payload, flags, write_opts)?;
     stale |= repair_stale;
+    let known_present = match flags.persistence {
+        WriteTreePersistence::Write => true,
+        WriteTreePersistence::Repair => !repair_stale,
+        WriteTreePersistence::DryRun => false,
+    };
 
     node.oid = Some(tree_oid);
     node.entry_count = if stale { -1 } else { pos as i32 - *extra_skip };
-    Ok(pos as i32)
+    Ok((pos as i32, known_present))
 }
 
-fn cached_node_still_good(node: &CacheTreeNode, odb: &Odb) -> bool {
-    cache_tree_fully_valid(odb, Some(node))
+fn missing_member_error(mode: u32, oid: &ObjectId, path: &[u8]) -> Error {
+    Error::ObjectNotFound(format!(
+        "{mode:o} {} at {}",
+        oid.to_hex(),
+        String::from_utf8_lossy(path)
+    ))
+}
+
+/// Whether `node` and every descendant are valid and their trees are in `reusable`.
+fn subtree_reusable(node: &CacheTreeNode, reusable: &OidHashSet) -> bool {
+    node.is_valid()
+        && node.oid.is_some_and(|oid| reusable.contains(&oid))
+        && node
+            .children
+            .iter()
+            .all(|child| subtree_reusable(child, reusable))
 }
 
 fn entry_matches_prefix(path: &[u8], anchor: &[u8], prefix_len: usize) -> bool {
@@ -1510,6 +1588,52 @@ mod tests {
             FileTime::from_last_modification_time(&fs::metadata(&wide_path).unwrap()),
             wide_mtime,
             "unchanged wide tree must not be rewritten"
+        );
+    }
+
+    #[test]
+    fn cache_tree_update_does_not_reprobe_reused_or_written_subtrees() {
+        let dir = TempDir::new().unwrap();
+        let odb = Odb::new(dir.path());
+        let dirs = 200;
+        let mut index = Index::new();
+        for d in 0..dirs {
+            let blob = odb
+                .write(ObjectKind::Blob, format!("{d}\n").as_bytes())
+                .unwrap();
+            index.add_or_replace(entry(&format!("d{d}/f"), MODE_REGULAR, blob));
+        }
+        cache_tree_update(&odb, &mut index, WriteTreeFlags::default()).unwrap();
+
+        let changed = odb.write(ObjectKind::Blob, b"changed\n").unwrap();
+        index.invalidate_cache_tree_for_path(b"d0/f");
+        index.add_or_replace(entry("d0/f", MODE_REGULAR, changed));
+        odb.reset_exists_probe();
+        cache_tree_update(&odb, &mut index, WriteTreeFlags::default()).unwrap();
+        // The changed blob, plus the write-skip check of the two rewritten trees (`d0`
+        // and the root). The reused directories were confirmed by the batched reuse
+        // check and the new `d0` tree was just written, so neither is probed again.
+        assert_eq!(odb.exists_probe_count(), 3);
+        assert_eq!(
+            index.cache_tree.as_ref().unwrap().oid,
+            build_cache_tree_from_index(&odb, &index).unwrap().oid
+        );
+        assert!(cache_tree_fully_valid(&odb, index.cache_tree.as_ref()));
+    }
+
+    #[test]
+    fn cache_tree_update_reports_missing_blob_beside_reused_subtrees() {
+        let dir = TempDir::new().unwrap();
+        let odb = Odb::new(dir.path());
+        let mut index = build_nested_index(&odb);
+        cache_tree_update(&odb, &mut index, WriteTreeFlags::default()).unwrap();
+        let missing = ObjectId::from_hex("00000000000000000000000000000000000000cd").unwrap();
+        index.invalidate_cache_tree_for_path(b"beta/three");
+        index.add_or_replace(entry("beta/three", MODE_REGULAR, missing));
+        let err = cache_tree_update(&odb, &mut index, WriteTreeFlags::default()).unwrap_err();
+        assert!(
+            matches!(&err, Error::ObjectNotFound(msg) if msg.contains("beta/three")),
+            "{err:?}"
         );
     }
 
