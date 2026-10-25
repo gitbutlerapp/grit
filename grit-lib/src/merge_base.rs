@@ -9,6 +9,7 @@ use std::collections::{BTreeSet, BinaryHeap, HashSet, VecDeque};
 
 use crate::error::{Error, Result};
 use crate::ewah_bitmap::Bitmap;
+use crate::log_walk::WalkedCommits;
 use crate::objects::{
     oid_hash_map, oid_hash_set, oid_hash_set_from, parse_commit, CommitRef, ObjectId, ObjectKind,
     OidHashMap, OidHashSet,
@@ -697,6 +698,15 @@ impl ReachableWalkState {
         use_commit_graph: bool,
     ) -> Result<Self> {
         let mut cache = CommitGraphCache::with_commit_graph(repo, use_commit_graph);
+        Self::seed(&mut cache, tips, hide, use_commit_graph)
+    }
+
+    fn seed(
+        cache: &mut CommitGraphCache<'_>,
+        tips: &[ObjectId],
+        hide: &[ObjectId],
+        use_commit_graph: bool,
+    ) -> Result<Self> {
         let mut state = Self {
             heap: BinaryHeap::new(),
             done: oid_hash_set(),
@@ -712,10 +722,44 @@ impl ReachableWalkState {
                 continue;
             }
             if state.queued.insert(tip) {
-                state.push_on_heap(&mut cache, tip, true)?;
+                state.push_on_heap(cache, tip, true)?;
             }
         }
         Ok(state)
+    }
+
+    /// Start (or resume from `resume`) a walk and emit up to `limit` commits, also returning
+    /// the raw object bytes of every emitted commit whose object the walk had to read.
+    ///
+    /// Commits whose parents and dates came from the commit-graph (or an earlier walk's
+    /// linkage cache, such as commits read while painting the hidden side) are absent from
+    /// the map; callers read those themselves.
+    pub(crate) fn page_retaining_commits(
+        repo: &Repository,
+        resume: Option<ReachableWalkSnapshot>,
+        tips: &[ObjectId],
+        hide: &[ObjectId],
+        limit: usize,
+        cutoffs: ReachableWalkCommitterCutoffs,
+    ) -> Result<(Self, Vec<ObjectId>, WalkedCommits)> {
+        // Sized for the page up front so the id table never exists twice while it grows.
+        const MAX_PRESIZE: usize = 1 << 16;
+        let mut cache = CommitGraphCache::new(repo);
+        cache.retained = Some(WalkedCommits::with_capacity(
+            limit.saturating_add(16).min(MAX_PRESIZE),
+        ));
+        let mut state = match resume {
+            Some(snapshot) => Self::from_snapshot(snapshot),
+            None => Self::seed(&mut cache, tips, hide, true)?,
+        };
+        let commits = state.emit_with(&mut cache, Some(limit), cutoffs)?;
+        let mut retained = cache.retained.take().unwrap_or_default();
+        let emitted_present = commits.iter().filter(|oid| retained.contains(oid)).count();
+        if emitted_present < retained.len() {
+            let emitted: OidHashSet = commits.iter().copied().collect();
+            retained.retain(|oid| emitted.contains(oid));
+        }
+        Ok((state, commits, retained))
     }
 
     /// Restore walk state from a [`ReachableWalkSnapshot`].
@@ -832,7 +876,7 @@ impl ReachableWalkState {
         if is_tip {
             self.seeded.insert(oid);
         }
-        let time = cache.commit_time(oid)?;
+        let time = cache.commit_time_for_heap(oid)?;
         let seq = self.seq;
         self.seq += 1;
         self.heap.push(WalkDateKey { oid, time, seq });
@@ -907,8 +951,17 @@ impl ReachableWalkState {
         cutoffs: ReachableWalkCommitterCutoffs,
     ) -> Result<Vec<ObjectId>> {
         let mut cache = CommitGraphCache::with_commit_graph(repo, self.use_commit_graph);
+        self.emit_with(&mut cache, limit, cutoffs)
+    }
+
+    fn emit_with(
+        &mut self,
+        cache: &mut CommitGraphCache<'_>,
+        limit: Option<usize>,
+        cutoffs: ReachableWalkCommitterCutoffs,
+    ) -> Result<Vec<ObjectId>> {
         let mut out = Vec::new();
-        while let Some(oid) = self.pop_next_emit(&mut cache, cutoffs)? {
+        while let Some(oid) = self.pop_next_emit(cache, cutoffs)? {
             out.push(oid);
             if limit.is_some_and(|n| out.len() >= n) {
                 break;
@@ -2096,6 +2149,12 @@ struct CommitGraphCache<'r> {
     graph: Option<crate::commit_graph_file::CommitGraphChain>,
     /// Monotonic pack cursor for single-pack repos (deep-history benchmarks).
     single_pack: Option<crate::pack::SingleLocalPackReader>,
+    /// When set, the commit objects [`Self::commit_time_for_heap`] reads from the object
+    /// database, so a caller that renders the walked commits does not read them a second time.
+    retained: Option<WalkedCommits>,
+    /// True only while [`Self::commit_time_for_heap`] runs, so commits read for painting
+    /// or ancestry checks are not retained.
+    retain_reads: bool,
 }
 
 impl<'r> CommitGraphCache<'r> {
@@ -2105,7 +2164,7 @@ impl<'r> CommitGraphCache<'r> {
 
     /// `use_commit_graph: false` leaves [`Self::graph`] empty so every lookup parses the commit.
     fn with_commit_graph(repo: &'r Repository, use_commit_graph: bool) -> Self {
-        let cfg = repo.config().map(|c| (*c).clone()).unwrap_or_default();
+        let cfg = repo.config().unwrap_or_default();
         // Stop ancestry traversal only at genuinely-missing promisor objects, not
         // at every member of a promisor pack. The clone base commit lives in a
         // promisor pack but is fully present locally; treating it as a stop point
@@ -2138,6 +2197,16 @@ impl<'r> CommitGraphCache<'r> {
             graft_parents,
             graph,
             single_pack: None,
+            retained: None,
+            retain_reads: false,
+        }
+    }
+
+    fn read_object(&mut self, oid: &ObjectId) -> Result<crate::objects::Object> {
+        self.ensure_single_pack_reader();
+        match self.single_pack.as_mut() {
+            Some(reader) => reader.read_object(oid),
+            None => self.repo.odb().read(oid),
         }
     }
 
@@ -2243,30 +2312,36 @@ impl<'r> CommitGraphCache<'r> {
                 return Ok(parents);
             }
         }
-        let commit_oid = peel_to_commit_for_merge_base(self.repo, oid).map_err(|e| match e {
-            Error::InvalidRef(msg) => Error::CorruptObject(msg),
-            other => other,
-        })?;
-        self.ensure_single_pack_reader();
-        let (time, parsed_parents) = if let Some(reader) = self.single_pack.as_mut() {
-            let object = reader.read_object(&commit_oid)?;
-            if object.kind != ObjectKind::Commit {
-                return Err(Error::CorruptObject(format!(
-                    "object {commit_oid} is not a commit"
-                )));
-            }
-            let linkage = CommitRef::parse(&object.data)?;
-            (linkage.committer_timestamp(), linkage.parents().to_vec())
+        // A plain commit without a replacement is its own peel target, so one read serves both
+        // the peel and the parse; anything else (tags, replaced objects) peels first.
+        let direct = if self.repo.object_id_after_replace(&oid) == oid {
+            Some(self.read_object(&oid)?).filter(|object| object.kind == ObjectKind::Commit)
         } else {
-            let object = self.repo.odb().read(&commit_oid)?;
-            if object.kind != ObjectKind::Commit {
-                return Err(Error::CorruptObject(format!(
-                    "object {commit_oid} is not a commit"
-                )));
-            }
-            let linkage = CommitRef::parse(&object.data)?;
-            (linkage.committer_timestamp(), linkage.parents().to_vec())
+            None
         };
+        let (commit_oid, object) = match direct {
+            Some(object) => (oid, object),
+            None => {
+                let commit_oid =
+                    peel_to_commit_for_merge_base(self.repo, oid).map_err(|e| match e {
+                        Error::InvalidRef(msg) => Error::CorruptObject(msg),
+                        other => other,
+                    })?;
+                (commit_oid, self.read_object(&commit_oid)?)
+            }
+        };
+        if object.kind != ObjectKind::Commit {
+            return Err(Error::CorruptObject(format!(
+                "object {commit_oid} is not a commit"
+            )));
+        }
+        let linkage = CommitRef::parse(&object.data)?;
+        let (time, parsed_parents) = (linkage.committer_timestamp(), linkage.parents().to_vec());
+        if self.retain_reads && commit_oid == oid {
+            if let Some(retained) = self.retained.as_mut() {
+                retained.insert(oid, &object.data);
+            }
+        }
         let parents: Vec<ObjectId> = if self.shallow_boundaries.contains(&commit_oid) {
             Vec::new()
         } else {
@@ -2295,6 +2370,15 @@ impl<'r> CommitGraphCache<'r> {
         Ok(self
             .with_linkage(|link| link.times.get(&oid).copied())
             .unwrap_or(0))
+    }
+
+    /// [`Self::commit_time`] for a commit being queued for emission, retaining its parsed
+    /// object when retention is enabled.
+    fn commit_time_for_heap(&mut self, oid: ObjectId) -> Result<i64> {
+        self.retain_reads = self.retained.is_some();
+        let time = self.commit_time(oid);
+        self.retain_reads = false;
+        time
     }
 
     /// Whether `ancestor` is an ancestor of (or equal to) `descendant`.

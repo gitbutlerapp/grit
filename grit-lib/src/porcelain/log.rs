@@ -211,19 +211,52 @@ pub fn load_commits_with_decorations(
     oids: &[ObjectId],
     decorations: &DecorationMap,
 ) -> Result<Vec<LoadedCommit>> {
-    load_commits_with_decorations_reusing(repo, oids, decorations, &mut OidHashMap::default())
+    load_commits_with_decorations_reusing(
+        repo,
+        oids,
+        decorations,
+        &mut OidHashMap::<CommitData>::default(),
+    )
 }
 
-/// Like [`load_commits_with_decorations`], but takes commits already parsed (for example
-/// [`crate::revwalk::rev_list::RevListResult::commit_data`]) out of `parsed` instead of reading them
-/// again. Commits missing from `parsed` are read from the object database.
+/// Commits a caller already holds, handed out once each so loaders skip the object read.
+///
+/// Implemented for maps of parsed commits (such as
+/// [`RevListResult::commit_data`](crate::revwalk::rev_list::RevListResult::commit_data)) and for
+/// [`WalkedCommits`](crate::revwalk::log_walk::WalkedCommits), which parses on demand.
+pub trait CommitReuse {
+    /// Remove the commit `oid` from this source and return it parsed, or [`None`] when the
+    /// source does not hold it.
+    ///
+    /// # Errors
+    ///
+    /// Returns commit-parse errors for sources that hold unparsed objects.
+    fn take_commit(&mut self, oid: &ObjectId) -> Option<Result<CommitData>>;
+}
+
+impl CommitReuse for OidHashMap<CommitData> {
+    fn take_commit(&mut self, oid: &ObjectId) -> Option<Result<CommitData>> {
+        self.remove(oid).map(Ok)
+    }
+}
+
+impl<T: CommitReuse + ?Sized> CommitReuse for &mut T {
+    fn take_commit(&mut self, oid: &ObjectId) -> Option<Result<CommitData>> {
+        (**self).take_commit(oid)
+    }
+}
+
+/// Like [`load_commits_with_decorations`], but takes commits the caller already holds (for
+/// example [`crate::revwalk::rev_list::RevListResult::commit_data`] or
+/// [`crate::revwalk::log_walk::LogWalkPage::commit_data`]) out of `parsed` instead of reading
+/// them again. Commits missing from `parsed` are read from the object database.
 ///
 /// # Parameters
 ///
 /// - `repo` - repository to read commits missing from `parsed` from.
 /// - `oids` - commits to load, in output order.
 /// - `decorations` - ref labels from [`collect_decorations`].
-/// - `parsed` - parsed commits by id; entries for `oids` are moved out.
+/// - `parsed` - commits by id; entries for `oids` are moved out.
 ///
 /// # Errors
 ///
@@ -232,13 +265,13 @@ pub fn load_commits_with_decorations_reusing(
     repo: &Repository,
     oids: &[ObjectId],
     decorations: &DecorationMap,
-    parsed: &mut OidHashMap<CommitData>,
+    parsed: &mut impl CommitReuse,
 ) -> Result<Vec<LoadedCommit>> {
     let odb = repo.odb();
     let mut out = Vec::with_capacity(oids.len());
     for oid in oids {
-        let data = match parsed.remove(oid) {
-            Some(data) => data,
+        let data = match parsed.take_commit(oid) {
+            Some(data) => data?,
             None => parse_commit(&odb.read(oid)?.data)?,
         };
         let resolved = resolved_change_id(oid, &data);

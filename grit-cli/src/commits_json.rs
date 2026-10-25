@@ -4,7 +4,7 @@ use anyhow::Result;
 use grit_lib::objects::{CommitData, ObjectId, OidHashMap};
 use grit_lib::porcelain::log::{
     collect_decorations, collect_decorations_for_commits, load_commits_with_decorations_reusing,
-    DecorationMap, LoadedCommit,
+    CommitReuse, DecorationMap, LoadedCommit,
 };
 use grit_lib::repo::Repository;
 
@@ -44,12 +44,12 @@ impl CommitJsonLoader {
     pub fn load_summaries_only(
         repo: &Repository,
         oids: &[ObjectId],
-        parsed: &mut OidHashMap<CommitData>,
+        parsed: &mut impl CommitReuse,
     ) -> Result<Vec<CommitSummary>> {
         let mut summaries = Vec::with_capacity(oids.len());
         for oid in oids {
-            let data = match parsed.remove(oid) {
-                Some(data) => data,
+            let data = match parsed.take_commit(oid) {
+                Some(data) => data?,
                 None => grit_lib::objects::parse_commit(&repo.odb().read(oid)?.data)?,
             };
             let resolved = grit_lib::change_id::resolved_change_id(oid, &data);
@@ -79,16 +79,17 @@ impl CommitJsonLoader {
         oids: &[ObjectId],
         now: i64,
     ) -> Result<(Vec<CommitJson>, Vec<CommitSummary>)> {
-        self.load_with_summaries_reusing(repo, oids, now, &mut OidHashMap::default())
+        self.load_with_summaries_reusing(repo, oids, now, OidHashMap::<CommitData>::default())
     }
 
-    /// Like [`Self::load_with_summaries`], taking commits the walk already parsed out of `parsed`.
+    /// Like [`Self::load_with_summaries`], taking commits the walk already read out of `parsed`.
+    /// An owned `parsed` is dropped before the rows are built.
     pub fn load_with_summaries_reusing(
         &self,
         repo: &Repository,
         oids: &[ObjectId],
         now: i64,
-        parsed: &mut OidHashMap<CommitData>,
+        mut parsed: impl CommitReuse,
     ) -> Result<(Vec<CommitJson>, Vec<CommitSummary>)> {
         let listed;
         let decorations = match &self.decorations {
@@ -98,7 +99,8 @@ impl CommitJsonLoader {
                 &listed
             }
         };
-        let loaded = load_commits_with_decorations_reusing(repo, oids, decorations, parsed)?;
+        let loaded = load_commits_with_decorations_reusing(repo, oids, decorations, &mut parsed)?;
+        drop(parsed);
         let mut json = Vec::with_capacity(loaded.len());
         let mut summaries = Vec::with_capacity(loaded.len());
         for row in &loaded {

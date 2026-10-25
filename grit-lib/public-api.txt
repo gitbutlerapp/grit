@@ -13042,9 +13042,17 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::log::LoadedCo
 pub fn grit_lib::porcelain::log::collect_decorations(&grit_lib::repo::Repository, bool) -> grit_lib::error::Result<grit_lib::porcelain::log::DecorationMap>
 pub fn grit_lib::porcelain::log::collect_decorations_for_commits(&grit_lib::repo::Repository, bool, &[grit_lib::objects::ObjectId]) -> grit_lib::error::Result<grit_lib::porcelain::log::DecorationMap>
 pub fn grit_lib::porcelain::log::collect_decorations_inner(&grit_lib::repo::Repository, bool, bool, &grit_lib::porcelain::log::DecorationFilter) -> grit_lib::error::Result<grit_lib::porcelain::log::DecorationMap>
+pub trait grit_lib::porcelain::log::CommitReuse
+pub fn grit_lib::porcelain::log::CommitReuse::take_commit(&mut self, &grit_lib::objects::ObjectId) -> core::option::Option<grit_lib::error::Result<grit_lib::objects::CommitData>>
+impl grit_lib::porcelain::log::CommitReuse for grit_lib::objects::OidHashMap<grit_lib::objects::CommitData>
+pub fn grit_lib::objects::OidHashMap<grit_lib::objects::CommitData>::take_commit(&mut self, &grit_lib::objects::ObjectId) -> core::option::Option<grit_lib::error::Result<grit_lib::objects::CommitData>>
+impl grit_lib::porcelain::log::CommitReuse for grit_lib::revwalk::log_walk::WalkedCommits
+pub fn grit_lib::revwalk::log_walk::WalkedCommits::take_commit(&mut self, &grit_lib::objects::ObjectId) -> core::option::Option<grit_lib::error::Result<grit_lib::objects::CommitData>>
+impl<T: grit_lib::porcelain::log::CommitReuse + ?core::marker::Sized> grit_lib::porcelain::log::CommitReuse for &mut T
+pub fn &mut T::take_commit(&mut self, &grit_lib::objects::ObjectId) -> core::option::Option<grit_lib::error::Result<grit_lib::objects::CommitData>>
 pub fn grit_lib::porcelain::log::current_branch_decoration_index(&[grit_lib::porcelain::log::DecorationItem], &grit_lib::state::HeadState) -> core::option::Option<usize>
 pub fn grit_lib::porcelain::log::load_commits_with_decorations(&grit_lib::repo::Repository, &[grit_lib::objects::ObjectId], &grit_lib::porcelain::log::DecorationMap) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::porcelain::log::LoadedCommit>>
-pub fn grit_lib::porcelain::log::load_commits_with_decorations_reusing(&grit_lib::repo::Repository, &[grit_lib::objects::ObjectId], &grit_lib::porcelain::log::DecorationMap, &mut grit_lib::objects::OidHashMap<grit_lib::objects::CommitData>) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::porcelain::log::LoadedCommit>>
+pub fn grit_lib::porcelain::log::load_commits_with_decorations_reusing(&grit_lib::repo::Repository, &[grit_lib::objects::ObjectId], &grit_lib::porcelain::log::DecorationMap, &mut impl grit_lib::porcelain::log::CommitReuse) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::porcelain::log::LoadedCommit>>
 pub fn grit_lib::porcelain::log::normalize_glob_ref(&str) -> alloc::string::String
 pub fn grit_lib::porcelain::log::peel_to_commit_hex(&grit_lib::objects::odb::Odb, &str) -> core::option::Option<alloc::string::String>
 pub type grit_lib::porcelain::log::DecorationMap = std::collections::hash::map::HashMap<alloc::string::String, alloc::vec::Vec<grit_lib::porcelain::log::DecorationItem>>
@@ -23253,6 +23261,7 @@ impl core::marker::UnsafeUnpin for grit_lib::revwalk::log_walk::LogWalkCursor
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::log_walk::LogWalkCursor
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::log_walk::LogWalkCursor
 pub struct grit_lib::revwalk::log_walk::LogWalkPage
+pub grit_lib::revwalk::log_walk::LogWalkPage::commit_data: grit_lib::revwalk::log_walk::WalkedCommits
 pub grit_lib::revwalk::log_walk::LogWalkPage::commits: alloc::vec::Vec<grit_lib::objects::ObjectId>
 pub grit_lib::revwalk::log_walk::LogWalkPage::next: core::option::Option<grit_lib::revwalk::log_walk::LogWalkCursor>
 impl core::clone::Clone for grit_lib::revwalk::log_walk::LogWalkPage
@@ -23295,6 +23304,30 @@ pub mod grit_lib::revwalk::merge_base
 pub enum grit_lib::revwalk::merge_base::MergeBaseForDiffError
 pub grit_lib::revwalk::merge_base::MergeBaseForDiffError::Multiple
 pub grit_lib::revwalk::merge_base::MergeBaseForDiffError::None
+pub struct grit_lib::revwalk::log_walk::WalkedCommits
+impl grit_lib::revwalk::log_walk::WalkedCommits
+pub fn grit_lib::revwalk::log_walk::WalkedCommits::contains(&self, &grit_lib::objects::ObjectId) -> bool
+pub fn grit_lib::revwalk::log_walk::WalkedCommits::is_empty(&self) -> bool
+pub fn grit_lib::revwalk::log_walk::WalkedCommits::len(&self) -> usize
+pub fn grit_lib::revwalk::log_walk::WalkedCommits::oids(&self) -> impl core::iter::traits::iterator::Iterator<Item = &grit_lib::objects::ObjectId> + '_
+impl core::clone::Clone for grit_lib::revwalk::log_walk::WalkedCommits
+pub fn grit_lib::revwalk::log_walk::WalkedCommits::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::revwalk::log_walk::WalkedCommits
+impl core::cmp::PartialEq for grit_lib::revwalk::log_walk::WalkedCommits
+pub fn grit_lib::revwalk::log_walk::WalkedCommits::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::revwalk::log_walk::WalkedCommits
+pub fn grit_lib::revwalk::log_walk::WalkedCommits::default() -> Self
+impl core::fmt::Debug for grit_lib::revwalk::log_walk::WalkedCommits
+pub fn grit_lib::revwalk::log_walk::WalkedCommits::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl grit_lib::porcelain::log::CommitReuse for grit_lib::revwalk::log_walk::WalkedCommits
+pub fn grit_lib::revwalk::log_walk::WalkedCommits::take_commit(&mut self, &grit_lib::objects::ObjectId) -> core::option::Option<grit_lib::error::Result<grit_lib::objects::CommitData>>
+impl core::marker::Freeze for grit_lib::revwalk::log_walk::WalkedCommits
+impl core::marker::Send for grit_lib::revwalk::log_walk::WalkedCommits
+impl core::marker::Sync for grit_lib::revwalk::log_walk::WalkedCommits
+impl core::marker::Unpin for grit_lib::revwalk::log_walk::WalkedCommits
+impl core::marker::UnsafeUnpin for grit_lib::revwalk::log_walk::WalkedCommits
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::log_walk::WalkedCommits
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::log_walk::WalkedCommits
 pub grit_lib::revwalk::merge_base::MergeBaseForDiffError::Other(alloc::string::String)
 impl core::clone::Clone for grit_lib::revwalk::merge_base::MergeBaseForDiffError
 pub fn grit_lib::revwalk::merge_base::MergeBaseForDiffError::clone(&self) -> Self

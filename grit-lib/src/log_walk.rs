@@ -4,10 +4,12 @@
 //! so `--cursor` continues the same traversal instead of restarting from a single commit.
 
 use std::io::{Cursor, Read, Write};
+use std::ops::Range;
 
 use crate::error::{Error, Result};
 use crate::merge_base::{ReachableWalkCommitterCutoffs, ReachableWalkSnapshot, ReachableWalkState};
-use crate::objects::ObjectId;
+use crate::objects::{parse_commit, CommitData, ObjectId, OidHashMap};
+use crate::porcelain::log::CommitReuse;
 use crate::repo::Repository;
 use crate::revwalk::queries::{resolve_log_walk_tips_and_hide, MergeFilter, RevWalkListOptions};
 
@@ -74,10 +76,100 @@ pub struct LogWalkCursor {
 /// One page of commits plus an optional continuation cursor.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LogWalkPage {
-    /// `commits` field.
+    /// Emitted commits, newest first.
     pub commits: Vec<ObjectId>,
-    /// `next` field.
+    /// Cursor for the next page, or [`None`] when the walk is exhausted.
     pub next: Option<LogWalkCursor>,
+    /// Commits from [`Self::commits`] that the walk already read from the object database.
+    /// Commits whose parents and dates came from the commit-graph are absent.
+    ///
+    /// Pass this to
+    /// [`load_commits_with_decorations_reusing`](crate::porcelain::log::load_commits_with_decorations_reusing)
+    /// to build output rows without reading those commits again.
+    pub commit_data: WalkedCommits,
+}
+
+/// Commit objects a log walk already read, kept as raw object bytes and parsed when taken.
+///
+/// The payloads share one buffer instead of a parsed [`CommitData`] (or allocation) per
+/// commit: a long page then costs one large block that goes back to the operating system
+/// when dropped, rather than thousands of small ones that raise the heap's high-water mark.
+#[derive(Clone, Debug, Default)]
+pub struct WalkedCommits {
+    bytes: Vec<u8>,
+    spans: OidHashMap<Range<usize>>,
+}
+
+impl WalkedCommits {
+    /// Empty set with room for the ids of `commits` commits.
+    pub(crate) fn with_capacity(commits: usize) -> Self {
+        Self {
+            bytes: Vec::new(),
+            spans: crate::objects::oid_hash_map_with_capacity(commits),
+        }
+    }
+
+    /// Keep a copy of the commit object payload `data` for `oid`.
+    pub(crate) fn insert(&mut self, oid: ObjectId, data: &[u8]) {
+        let start = self.bytes.len();
+        self.bytes.extend_from_slice(data);
+        self.spans.insert(oid, start..self.bytes.len());
+    }
+
+    /// Forget every commit not in `keep`.
+    pub(crate) fn retain(&mut self, keep: impl Fn(&ObjectId) -> bool) {
+        self.spans.retain(|oid, _| keep(oid));
+    }
+
+    /// Number of commits held.
+    #[must_use]
+    pub fn len(&self) -> usize {
+        self.spans.len()
+    }
+
+    /// Whether no commits are held.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.spans.is_empty()
+    }
+
+    /// Whether the commit `oid` is held.
+    #[must_use]
+    pub fn contains(&self, oid: &ObjectId) -> bool {
+        self.spans.contains_key(oid)
+    }
+
+    /// Ids of the commits held, in no particular order.
+    pub fn oids(&self) -> impl Iterator<Item = &ObjectId> + '_ {
+        self.spans.keys()
+    }
+
+    fn payload(&self, span: &Range<usize>) -> &[u8] {
+        self.bytes.get(span.clone()).unwrap_or_default()
+    }
+}
+
+/// Equal when both hold the same commits with the same payloads, however they are laid out.
+impl PartialEq for WalkedCommits {
+    fn eq(&self, other: &Self) -> bool {
+        self.spans.len() == other.spans.len()
+            && self.spans.iter().all(|(oid, span)| {
+                other
+                    .spans
+                    .get(oid)
+                    .is_some_and(|theirs| self.payload(span) == other.payload(theirs))
+            })
+    }
+}
+
+impl Eq for WalkedCommits {}
+
+impl CommitReuse for WalkedCommits {
+    /// Remove `oid` and parse it, exactly as [`parse_commit`] parses the object payload.
+    fn take_commit(&mut self, oid: &ObjectId) -> Option<Result<CommitData>> {
+        let span = self.spans.remove(oid)?;
+        Some(parse_commit(self.payload(&span)))
+    }
 }
 
 impl LogWalkCursor {
@@ -106,29 +198,41 @@ impl LogWalkCursor {
             return Ok(LogWalkPage {
                 commits: Vec::new(),
                 next: cursor.cloned(),
+                commit_data: WalkedCommits::default(),
             });
         }
 
-        let mut state = match cursor {
-            None => ReachableWalkState::new(repo, &query.tips, &query.hide)?,
+        let resume = match cursor {
+            None => None,
             Some(c) => {
                 if c.query != *query {
                     return Err(Error::CorruptObject(
                         "log walk cursor does not match the current revision selection".to_owned(),
                     ));
                 }
-                ReachableWalkState::from_snapshot(c.walk.clone())
+                Some(c.walk.clone())
             }
         };
 
-        let commits = state.emit_until(repo, Some(limit), query.cutoffs)?;
+        let (state, commits, commit_data) = ReachableWalkState::page_retaining_commits(
+            repo,
+            resume,
+            &query.tips,
+            &query.hide,
+            limit,
+            query.cutoffs,
+        )?;
         let next = state
             .has_emittable_pending(query.cutoffs)
             .then(|| LogWalkCursor {
                 query: query.clone(),
                 walk: state.snapshot(),
             });
-        Ok(LogWalkPage { commits, next })
+        Ok(LogWalkPage {
+            commits,
+            next,
+            commit_data,
+        })
     }
 
     /// Encode this cursor for `--cursor` (URL-safe, opaque to callers).
@@ -650,6 +754,99 @@ mod tests {
             }
         }
         assert_eq!(paged, git_order);
+        Ok(())
+    }
+
+    fn assert_commit_data_matches_odb(repo: &Repository, page: &LogWalkPage) -> Result<()> {
+        let emitted: HashSet<ObjectId> = page.commits.iter().copied().collect();
+        let mut walked = page.commit_data.clone();
+        let held: Vec<ObjectId> = walked.oids().copied().collect();
+        assert_eq!(held.len(), walked.len());
+        for oid in held {
+            assert!(emitted.contains(&oid), "{oid} retained but not emitted");
+            assert!(walked.contains(&oid));
+            let data = walked.take_commit(&oid).expect("held commit")?;
+            let fresh = crate::objects::parse_commit(&repo.odb().read(&oid)?.data)?;
+            assert_eq!(
+                data, fresh,
+                "retained data for {oid} differs from the object"
+            );
+            assert!(!walked.contains(&oid));
+            assert!(walked.take_commit(&oid).is_none(), "taken twice");
+        }
+        assert!(walked.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn pages_carry_parsed_commits_for_every_emitted_commit_read() -> Result<()> {
+        let dir = tempdir().map_err(Error::Io)?;
+        let repo = open_repo(&dir)?;
+        let base = write_commit(&repo.odb(), &[], "base", 100)?;
+        let hidden_side = write_commit(&repo.odb(), &[base], "hidden side", 150)?;
+        let side = write_commit(&repo.odb(), &[base], "side\n\nbody line\n", 160)?;
+        let main = write_commit(&repo.odb(), &[base], "main", 200)?;
+        let merge = write_commit(&repo.odb(), &[main, side], "merge", 300)?;
+        let tip = write_commit(&repo.odb(), &[merge], "tip", 400)?;
+        crate::refs::write_ref(repo.git_dir(), "refs/heads/main", &tip)?;
+        crate::refs::write_symbolic_ref(repo.git_dir(), "HEAD", "refs/heads/main")?;
+
+        let query = LogWalkQuery {
+            tips: vec![tip],
+            hide: Vec::new(),
+            cutoffs: ReachableWalkCommitterCutoffs::default(),
+        };
+        let first = LogWalkCursor::step(&repo, &query, None, 3)?;
+        assert_eq!(first.commits.len(), 3);
+        assert_eq!(first.commit_data.len(), 3, "loose commits are all read");
+        assert_commit_data_matches_odb(&repo, &first)?;
+        let second = LogWalkCursor::step(&repo, &query, first.next.as_ref(), 10)?;
+        assert_commit_data_matches_odb(&repo, &second)?;
+        let mut all = first.commits.clone();
+        all.extend(second.commits.iter().copied());
+        assert_eq!(all, git_log_oids(&repo, 20));
+
+        // Commits read only to paint the hidden side are not handed back.
+        let reopened = Repository::open(dir.path(), &RepositoryOptions::empty())?;
+        let range = LogWalkQuery {
+            tips: vec![tip],
+            hide: vec![hidden_side],
+            cutoffs: ReachableWalkCommitterCutoffs::default(),
+        };
+        let page = LogWalkCursor::step(&reopened, &range, None, 10)?;
+        assert_eq!(page.commits, vec![tip, merge, main, side]);
+        assert!(!page.commit_data.contains(&hidden_side));
+        assert!(!page.commit_data.contains(&base));
+        assert_commit_data_matches_odb(&reopened, &page)?;
+        Ok(())
+    }
+
+    #[test]
+    fn commit_graph_walks_match_git_log_without_object_reads() -> Result<()> {
+        let dir = tempdir().map_err(Error::Io)?;
+        let repo = open_repo(&dir)?;
+        let mut parent = write_commit(&repo.odb(), &[], "c0", 100)?;
+        for i in 1..8 {
+            parent = write_commit(&repo.odb(), &[parent], &format!("c{i}"), 100 + i * 10)?;
+        }
+        crate::refs::write_ref(repo.git_dir(), "refs/heads/main", &parent)?;
+        crate::refs::write_symbolic_ref(repo.git_dir(), "HEAD", "refs/heads/main")?;
+        let status = Command::new("git")
+            .args(["-C", repo.git_dir().to_str().expect("utf8")])
+            .args(["commit-graph", "write", "--reachable"])
+            .status()
+            .expect("git commit-graph write");
+        assert!(status.success());
+
+        let repo = Repository::open(dir.path(), &RepositoryOptions::empty())?;
+        let query = LogWalkQuery {
+            tips: vec![parent],
+            hide: Vec::new(),
+            cutoffs: ReachableWalkCommitterCutoffs::default(),
+        };
+        let page = LogWalkCursor::step(&repo, &query, None, 20)?;
+        assert_eq!(page.commits, git_log_oids(&repo, 20));
+        assert_commit_data_matches_odb(&repo, &page)?;
         Ok(())
     }
 

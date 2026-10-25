@@ -5,7 +5,8 @@
 
 use anyhow::{bail, Context, Result};
 use grit_lib::diff::{CommitFilesManyInput, CommitFilesManyOptions, DiffOptions};
-use grit_lib::objects::{CommitData, ObjectId, OidHashMap};
+use grit_lib::objects::ObjectId;
+use grit_lib::porcelain::log::CommitReuse;
 use grit_lib::revwalk::graph::{
     display_parents_for_graph, log_graph_materialize, GraphCharset, GraphCommitInput, GraphLayout,
     GraphLineKind, GraphRenderedLine,
@@ -321,7 +322,7 @@ pub fn run(
         return build_commit_outcome(
             &repo,
             &page.commits,
-            &mut OidHashMap::default(),
+            page.commit_data,
             format,
             path_args,
             next,
@@ -339,17 +340,21 @@ pub fn run(
     let mut walk_opts = opts.clone();
     walk_opts.graph = display.graph;
 
-    let use_rev_walk = display.graph
+    let needs_rev_walk = display.graph
         || display.group_by.is_some()
         || pathspecs.has_any()
         || walk_opts
             .commit_filter
             .as_ref()
             .is_some_and(|f| f.is_active())
-        || walk_opts.pickaxe.is_some()
-        || LogWalkQuery::from_rev_walk(&repo, &token_refs, &walk_opts)?.is_none();
+        || walk_opts.pickaxe.is_some();
+    let log_query = if needs_rev_walk {
+        None
+    } else {
+        LogWalkQuery::from_rev_walk(&repo, &token_refs, &walk_opts)?
+    };
 
-    if use_rev_walk {
+    let Some(query) = log_query else {
         if rev.max_count() == Some(0) {
             return empty_outcome(display);
         }
@@ -365,7 +370,7 @@ pub fn run(
         let mut list_result = walk
             .rev_list_result(&token_refs, &fetch_opts)
             .context("could not list commits")?;
-        let mut parsed = std::mem::take(&mut list_result.commit_data);
+        let parsed = std::mem::take(&mut list_result.commit_data);
         let graph_linkage = list_result.log_graph_linkage.clone();
         let (oids, truncated) = truncate_oid_list(list_result.commits, page_limit);
         if display.group_by == Some(LogGroupBy::Author) {
@@ -407,7 +412,7 @@ pub fn run(
         return build_commit_outcome(
             &repo,
             &oids,
-            &mut parsed,
+            parsed,
             format,
             path_args,
             None,
@@ -420,10 +425,7 @@ pub fn run(
                 linkage: graph_linkage,
             },
         );
-    }
-
-    let query = LogWalkQuery::from_rev_walk(&repo, &token_refs, &opts)?
-        .context("internal error: log walk query missing")?;
+    };
 
     let page =
         LogWalkCursor::step(&repo, &query, None, page_size).context("could not list commits")?;
@@ -436,7 +438,7 @@ pub fn run(
     build_commit_outcome(
         &repo,
         &page.commits,
-        &mut OidHashMap::default(),
+        page.commit_data,
         format,
         path_args,
         next,
@@ -592,7 +594,7 @@ pub(crate) fn load_commits_with_format_for_oids(
     oids: &[ObjectId],
     format: DiffFormatArgs,
     path_args: &[String],
-    parsed: &mut OidHashMap<CommitData>,
+    parsed: impl CommitReuse,
 ) -> Result<LoadedCommitList> {
     let now = context::wall_clock_now(repo.environment()).unix_timestamp();
     let (commit_json_rows, commit_rows) = CommitJsonLoader::for_listed_commits()
@@ -679,7 +681,7 @@ pub(crate) fn load_commits_with_format_for_oids(
 fn build_commit_outcome(
     repo: &grit_lib::repo::Repository,
     oids: &[ObjectId],
-    parsed: &mut OidHashMap<CommitData>,
+    mut parsed: impl CommitReuse,
     format: DiffFormatArgs,
     path_args: &[String],
     next: Option<String>,
@@ -728,7 +730,8 @@ fn build_commit_outcome(
     let (commits, commit_rows, commit_diffs) = if need_commit_details {
         load_commits_with_format_for_oids(repo, oids, format, path_args, parsed)?
     } else {
-        let summaries = CommitJsonLoader::load_summaries_only(repo, oids, parsed)?;
+        let summaries = CommitJsonLoader::load_summaries_only(repo, oids, &mut parsed)?;
+        drop(parsed);
         let json_rows = summaries
             .iter()
             .map(|s| CommitJson::from_summary(s, now))
