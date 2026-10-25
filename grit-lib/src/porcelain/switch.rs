@@ -19,6 +19,9 @@ use crate::porcelain::checkout_reflog::{
     append_head_checkout_reflog, checkout_reflog_from_label, finish_switch_ref_updates,
     is_already_detached_at, is_already_on_branch, switch_create_reflog_source_label,
 };
+use crate::porcelain::orphans::{
+    compute_orphan_info, OrphanComputation, OrphanedCommitSummary, DEFAULT_ORPHAN_LIMIT,
+};
 use crate::porcelain::worktree_guard::{
     collect_untracked_and_wholesale_trust_for_tree_changes, ensure_no_untracked_overwrite,
     load_worktree_snapshot, untracked_would_be_overwritten_by_tree_changes,
@@ -29,7 +32,7 @@ use crate::repo::Repository;
 use crate::rev_parse::expand_at_minus_to_branch_name;
 
 use crate::rev_parse::{peel_to_commit_for_merge_base, resolve_revision};
-use crate::state::resolve_head_for_repository;
+use crate::state::{resolve_head_for_repository, HeadState};
 
 /// Resolved switch target after DWIM and revision parsing.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -84,6 +87,15 @@ pub struct SwitchOutcome {
     pub dry_run: bool,
     /// Paths that would differ after checkout; meaningful when [`Self::dry_run`] is true.
     pub changed_paths: usize,
+    /// Newest-first sample (at most [`DEFAULT_ORPHAN_LIMIT`]) of commits that only the
+    /// previous detached `HEAD` reached and that no ref, stash, other worktree, or the switch
+    /// target keeps. Empty when `HEAD` was on a branch, since that branch still holds its commits.
+    /// Filled for dry runs too.
+    pub stranded_commits: Vec<OrphanedCommitSummary>,
+    /// Total stranded commit count (may exceed [`Self::stranded_commits`].len()).
+    pub stranded_total: usize,
+    /// True when [`Self::stranded_commits`] was capped at [`DEFAULT_ORPHAN_LIMIT`].
+    pub stranded_truncated: bool,
 }
 
 impl SwitchOutcome {
@@ -107,6 +119,18 @@ impl SwitchOutcome {
             commit,
             dry_run,
             changed_paths,
+            stranded_commits: Vec::new(),
+            stranded_total: 0,
+            stranded_truncated: false,
+        }
+    }
+
+    fn with_stranded(self, stranded: OrphanComputation) -> Self {
+        Self {
+            stranded_commits: stranded.commits,
+            stranded_total: stranded.total,
+            stranded_truncated: stranded.truncated,
+            ..self
         }
     }
 }
@@ -431,6 +455,7 @@ fn switch_to_target(
 
     let prepared = prepare_tree_switch_allow_local_with_snapshot(repo, &target_tree, snapshot)?;
     let changed_paths = count_unique_tree_change_paths(&prepared.plan.tree_changes);
+    let stranded = stranded_by_leaving_detached_head(repo, &head_before, target_oid)?;
     if dry_run {
         return Ok(SwitchOutcome::new(
             branch_label,
@@ -439,7 +464,8 @@ fn switch_to_target(
             target_oid,
             true,
             changed_paths,
-        ));
+        )
+        .with_stranded(stranded));
     }
     checkout_prepared_tree_transition(repo, prepared)?;
 
@@ -475,14 +501,24 @@ fn switch_to_target(
         }
     }
 
-    Ok(SwitchOutcome::new(
-        branch_label,
-        created,
-        detached,
-        target_oid,
-        false,
-        0,
-    ))
+    Ok(
+        SwitchOutcome::new(branch_label, created, detached, target_oid, false, 0)
+            .with_stranded(stranded),
+    )
+}
+
+/// Commits only the detached `head` reaches that nothing keeps once `HEAD` moves to `target`.
+///
+/// Skips the walk when `HEAD` is attached: the branch it leaves still holds its commits.
+fn stranded_by_leaving_detached_head(
+    repo: &Repository,
+    head: &HeadState,
+    target: ObjectId,
+) -> Result<OrphanComputation> {
+    let HeadState::Detached { oid: previous } = head else {
+        return Ok(OrphanComputation::default());
+    };
+    compute_orphan_info(repo, head, *previous, target, DEFAULT_ORPHAN_LIMIT)
 }
 
 fn count_unique_tree_change_paths(tree_changes: &[DiffEntry]) -> usize {
@@ -1627,5 +1663,197 @@ mod tests {
         let err = resolve_switch_target(&repo, "rel1").expect_err("tag");
         assert!(matches!(err, Error::Message(_)));
         assert!(err.to_string().contains("--detach"));
+    }
+
+    /// Commit on top of `parent` with `HEAD` detached at the new commit and no ref holding it.
+    fn commit_on_detached_head(repo: &Repository, contents: &str, parent: ObjectId) -> ObjectId {
+        let oid = commit_on_branch(repo, "scratch", "f", contents, Some(parent));
+        refs::update_direct_ref_on_store(repo.refs(), repo.git_dir(), "HEAD", &oid)
+            .expect("detach");
+        refs::delete_ref(repo.git_dir(), "refs/heads/scratch").expect("drop scratch");
+        oid
+    }
+
+    fn switch_to(repo: &Repository, mode: SwitchMode, dry_run: bool) -> SwitchOutcome {
+        switch_repository(repo, &SwitchOptions { mode, dry_run }).expect("switch")
+    }
+
+    #[test]
+    fn leaving_detached_head_reports_stranded_commit() {
+        let (_dir, repo) = init_repo();
+        let main_tip = commit_on_branch(&repo, "main", "f", "one\n", None);
+        let detached = commit_on_detached_head(&repo, "two\n", main_tip);
+
+        let outcome = switch_to(
+            &repo,
+            SwitchMode::Existing {
+                branch: "main".into(),
+                oid: main_tip,
+            },
+            false,
+        );
+
+        assert_eq!(outcome.stranded_total, 1);
+        assert!(!outcome.stranded_truncated);
+        assert_eq!(outcome.stranded_commits.len(), 1);
+        assert_eq!(outcome.stranded_commits[0].oid, detached);
+        assert_eq!(outcome.stranded_commits[0].subject, "c");
+        assert!(!outcome.stranded_commits[0].change_id.is_empty());
+        assert!(matches!(
+            resolve_head_for_repository(&repo).expect("head"),
+            HeadState::Branch { refname, .. } if refname == "refs/heads/main"
+        ));
+    }
+
+    #[test]
+    fn detaching_elsewhere_reports_stranded_commits_newest_first() {
+        let (_dir, repo) = init_repo();
+        let main_tip = commit_on_branch(&repo, "main", "f", "one\n", None);
+        let first = commit_on_detached_head(&repo, "two\n", main_tip);
+        let second = commit_on_detached_head(&repo, "three\n", first);
+
+        let outcome = switch_to(
+            &repo,
+            SwitchMode::Detached {
+                commit: main_tip,
+                reflog_to_label: "main".into(),
+            },
+            false,
+        );
+
+        assert!(outcome.is_detached());
+        assert_eq!(outcome.stranded_total, 2);
+        let oids: Vec<_> = outcome.stranded_commits.iter().map(|c| c.oid).collect();
+        assert_eq!(oids, vec![second, first]);
+    }
+
+    #[test]
+    fn create_from_detached_head_strands_nothing() {
+        let (_dir, repo) = init_repo();
+        let main_tip = commit_on_branch(&repo, "main", "f", "one\n", None);
+        let detached = commit_on_detached_head(&repo, "two\n", main_tip);
+
+        let outcome = switch_to(
+            &repo,
+            SwitchMode::Create {
+                branch: "keep".into(),
+                start_oid: detached,
+                create_source_label: "HEAD".into(),
+                track_upstream: None,
+            },
+            false,
+        );
+
+        assert!(outcome.created);
+        assert_eq!(outcome.stranded_total, 0);
+        assert!(outcome.stranded_commits.is_empty());
+    }
+
+    #[test]
+    fn create_elsewhere_from_detached_head_reports_stranded_commit() {
+        let (_dir, repo) = init_repo();
+        let main_tip = commit_on_branch(&repo, "main", "f", "one\n", None);
+        let detached = commit_on_detached_head(&repo, "two\n", main_tip);
+
+        let outcome = switch_to(
+            &repo,
+            SwitchMode::Create {
+                branch: "fresh".into(),
+                start_oid: main_tip,
+                create_source_label: "main".into(),
+                track_upstream: None,
+            },
+            false,
+        );
+
+        assert_eq!(outcome.stranded_total, 1);
+        assert_eq!(outcome.stranded_commits[0].oid, detached);
+    }
+
+    #[test]
+    fn detached_head_held_by_another_ref_strands_nothing() {
+        let (_dir, repo) = init_repo();
+        let main_tip = commit_on_branch(&repo, "main", "f", "one\n", None);
+        let detached = commit_on_detached_head(&repo, "two\n", main_tip);
+        refs::write_ref(repo.git_dir(), "refs/tags/keep", &detached).expect("tag");
+
+        let outcome = switch_to(
+            &repo,
+            SwitchMode::Existing {
+                branch: "main".into(),
+                oid: main_tip,
+            },
+            false,
+        );
+
+        assert_eq!(outcome.stranded_total, 0);
+        assert!(outcome.stranded_commits.is_empty());
+    }
+
+    #[test]
+    fn dry_run_reports_stranded_commit_without_moving_head() {
+        let (_dir, repo) = init_repo();
+        let main_tip = commit_on_branch(&repo, "main", "f", "one\n", None);
+        let detached = commit_on_detached_head(&repo, "two\n", main_tip);
+
+        let outcome = switch_to(
+            &repo,
+            SwitchMode::Existing {
+                branch: "main".into(),
+                oid: main_tip,
+            },
+            true,
+        );
+
+        assert!(outcome.dry_run);
+        assert_eq!(outcome.stranded_total, 1);
+        assert_eq!(outcome.stranded_commits[0].oid, detached);
+        assert_eq!(
+            resolve_head_for_repository(&repo).expect("head"),
+            HeadState::Detached { oid: detached }
+        );
+    }
+
+    #[test]
+    fn leaving_a_branch_strands_nothing() {
+        let (_dir, repo) = init_repo();
+        let main_tip = commit_on_branch(&repo, "main", "f", "one\n", None);
+        commit_on_branch(&repo, "topic", "f", "two\n", Some(main_tip));
+
+        let outcome = switch_to(
+            &repo,
+            SwitchMode::Existing {
+                branch: "main".into(),
+                oid: main_tip,
+            },
+            false,
+        );
+
+        assert_eq!(outcome.stranded_total, 0);
+        assert!(outcome.stranded_commits.is_empty());
+    }
+
+    #[test]
+    fn stranded_listing_is_capped_at_the_default_limit() {
+        let (_dir, repo) = init_repo();
+        let main_tip = commit_on_branch(&repo, "main", "f", "base\n", None);
+        let mut tip = main_tip;
+        for i in 0..=DEFAULT_ORPHAN_LIMIT {
+            tip = commit_on_detached_head(&repo, &format!("{i}\n"), tip);
+        }
+
+        let outcome = switch_to(
+            &repo,
+            SwitchMode::Existing {
+                branch: "main".into(),
+                oid: main_tip,
+            },
+            true,
+        );
+
+        assert_eq!(outcome.stranded_total, DEFAULT_ORPHAN_LIMIT + 1);
+        assert!(outcome.stranded_truncated);
+        assert_eq!(outcome.stranded_commits.len(), DEFAULT_ORPHAN_LIMIT);
+        assert_eq!(outcome.stranded_commits[0].oid, tip);
     }
 }
