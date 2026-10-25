@@ -211,20 +211,18 @@ fn compute_corrected_generations(
 }
 
 fn resolve_parent_edge(
+    commit: ObjectId,
     parent: ObjectId,
     oid_to_idx: &OidHashMap<u32>,
     base_count: u32,
     chain: Option<&CommitGraphChain>,
-) -> u32 {
+) -> crate::error::Result<u32> {
     if let Some(&idx) = oid_to_idx.get(&parent) {
-        return idx + base_count;
+        return Ok(idx + base_count);
     }
-    if let Some(c) = chain {
-        if let Some(gpos) = c.global_position(&parent) {
-            return gpos;
-        }
-    }
-    PARENT_NONE
+    chain
+        .and_then(|c| c.global_position(&parent))
+        .ok_or(crate::error::Error::CommitGraphParentMissing { commit, parent })
 }
 
 /// Counters emitted as `GIT_TRACE2_EVENT` for Bloom generation (`commit-graph.c`).
@@ -324,21 +322,25 @@ pub(crate) fn build_commit_graph_bytes_from_oid_maps(
         let info = &infos[oid];
         cdat.extend_from_slice(info.tree.as_bytes());
 
+        let edge = |parent: ObjectId| {
+            resolve_parent_edge(*oid, parent, &oid_to_idx, base_count, base_chain)
+        };
         let p1 = info
             .parents
             .first()
-            .map(|p| resolve_parent_edge(*p, &oid_to_idx, base_count, base_chain))
+            .map(|p| edge(*p))
+            .transpose()?
             .unwrap_or(PARENT_NONE);
         cdat.extend_from_slice(&p1.to_be_bytes());
 
         let p2 = if info.parents.len() <= 1 {
             PARENT_NONE
         } else if info.parents.len() == 2 {
-            resolve_parent_edge(info.parents[1], &oid_to_idx, base_count, base_chain)
+            edge(info.parents[1])?
         } else {
             let start_u32 = (extra_edges.len() / 4) as u32;
             for (j, p) in info.parents.iter().enumerate().skip(1) {
-                let mut ev = resolve_parent_edge(*p, &oid_to_idx, base_count, base_chain);
+                let mut ev = edge(*p)?;
                 if j + 1 == info.parents.len() {
                     ev |= GRAPH_LAST_EDGE;
                 }
@@ -969,6 +971,50 @@ mod tests {
         assert!(bytes.windows(4).any(|w| w == b"EDGE"));
         crate::commit_graph_file::CommitGraphLayer::try_parse(std::path::PathBuf::from("g"), bytes)
             .expect("parse octopus graph");
+    }
+
+    #[test]
+    fn build_rejects_parent_outside_graph() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = init_repository(
+            dir.path(),
+            false,
+            "main",
+            None,
+            crate::RefStorageFormat::Files,
+        )
+        .expect("init");
+        let root = empty_commit(&repo, vec![], "T <t@example.com> 1 +0000");
+        let side = empty_commit(&repo, vec![], "T <t@example.com> 2 +0000");
+        let merge = empty_commit(&repo, vec![root, side], "T <t@example.com> 3 +0000");
+        let sorted = vec![merge, side];
+        let mut infos = oid_hash_map();
+        for oid in &sorted {
+            infos.insert(
+                *oid,
+                super::load_commit_graph_commit_info(&repo.odb(), *oid).expect("info"),
+            );
+        }
+        let empty = empty_filter_map();
+        let err = super::build_commit_graph_bytes(
+            &sorted,
+            &commit_infos_std(&infos),
+            &repo.odb(),
+            false,
+            &BloomFilterSettings::default(),
+            None,
+            &[],
+            None,
+            &empty,
+            &empty,
+            true,
+        )
+        .expect_err("first parent is not in the graph");
+        assert!(matches!(
+            err,
+            crate::error::Error::CommitGraphParentMissing { commit, parent }
+                if commit == merge && parent == root
+        ));
     }
 
     #[test]

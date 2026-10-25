@@ -764,6 +764,16 @@ pub enum Error {
         actual: crate::objects::ObjectKind,
     },
 
+    /// A commit-graph write was given a commit whose parent is neither among the commits
+    /// being written nor in the base graph layers, so its parent edge cannot be encoded.
+    #[error("commit-graph cannot encode parent {parent} of commit {commit}: parent not in graph")]
+    CommitGraphParentMissing {
+        /// Commit whose parent list was being encoded.
+        commit: crate::objects::ObjectId,
+        /// Parent that is missing from the graph.
+        parent: crate::objects::ObjectId,
+    },
+
     /// In-pack delta resolution exceeded the read-side chain depth limit (guards
     /// against cyclic ref-delta chains and unbounded recursion; Git has no read limit).
     #[error("delta chain too deep (limit {limit})")]
