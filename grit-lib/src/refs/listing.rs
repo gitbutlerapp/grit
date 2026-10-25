@@ -704,7 +704,7 @@ fn finish_query(
 ///
 /// Loading the peel lines indexes the whole file, which in a repository with many packed
 /// refs costs more than a handful of object-header reads.
-const PACKED_PEELS_MIN_REFS: usize = 64;
+pub(crate) const PACKED_PEELS_MIN_REFS: usize = 64;
 
 /// Set `entry.peeled` for annotated tags, preferring `packed-refs` peel lines over
 /// reading the tag object.

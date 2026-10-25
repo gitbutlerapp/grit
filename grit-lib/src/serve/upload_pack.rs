@@ -6,7 +6,7 @@ use super::upload_pack_policy::{
 };
 use super::{
     advertised_refs, check_object_format, head_info, parse_oid, read_packet, write_flush,
-    write_line, AdvertisedRef, Packet, ProtocolVersion, Result, ServeError, ServeOptions,
+    write_line, AdvertisedRef, Packet, Peel, ProtocolVersion, Result, ServeError, ServeOptions,
 };
 use crate::config::ConfigSet;
 use crate::objects::{ObjectId, ObjectKind};
@@ -113,7 +113,7 @@ fn serve_v0(
 ) -> Result<()> {
     let config = repo_config(repo);
     let policy = UploadPackPolicy::from_config(&config);
-    let refs = advertised_refs(repo, &opts.hidden_refs)?;
+    let refs = advertised_refs(repo, &opts.hidden_refs, &[], Peel::Yes)?;
     let head = head_info(repo);
 
     if opts.advertise_refs || !opts.stateless_rpc {
@@ -553,13 +553,13 @@ fn ls_refs(
     opts: &ServeOptions,
 ) -> Result<()> {
     let mut symrefs = false;
-    let mut peel = false;
+    let mut peel = Peel::No;
     let mut unborn = false;
     let mut prefixes: Vec<&str> = Vec::new();
     for arg in args {
         match arg.as_str() {
             "symrefs" => symrefs = true,
-            "peel" => peel = true,
+            "peel" => peel = Peel::Yes,
             "unborn" => unborn = true,
             other => {
                 if let Some(p) = other.strip_prefix("ref-prefix ") {
@@ -568,9 +568,7 @@ fn ls_refs(
             }
         }
     }
-    let wanted = |name: &str| prefixes.is_empty() || prefixes.iter().any(|p| name.starts_with(p));
-
-    if wanted("HEAD") {
+    if prefixes.is_empty() || prefixes.iter().any(|p| "HEAD".starts_with(p)) {
         let head = head_info(repo);
         let target = head.target.as_deref().filter(|_| symrefs);
         match (head.oid, target) {
@@ -584,12 +582,9 @@ fn ls_refs(
             (None, _) => {}
         }
     }
-    for r in advertised_refs(repo, &opts.hidden_refs)? {
-        if !wanted(&r.name) {
-            continue;
-        }
+    for r in advertised_refs(repo, &opts.hidden_refs, &prefixes, peel)? {
         let mut line = format!("{} {}", r.oid.to_hex(), r.name);
-        if let (true, Some(p)) = (peel, r.peeled) {
+        if let Some(p) = r.peeled {
             line.push_str(&format!(" peeled:{}", p.to_hex()));
         }
         write_line(output, &line)?;
@@ -655,7 +650,7 @@ fn fetch_v2(
         }
     }
 
-    let refs = advertised_refs(repo, &opts.hidden_refs)?;
+    let refs = advertised_refs(repo, &opts.hidden_refs, &[], Peel::Yes)?;
     let head = head_info(repo);
     for name in want_ref_names {
         wants.push(resolve_want_ref(repo, &refs, &opts.hidden_refs, &name)?);

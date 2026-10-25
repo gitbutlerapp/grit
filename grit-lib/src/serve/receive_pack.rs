@@ -5,7 +5,7 @@ use std::io::{BufReader, BufWriter, Read, Write};
 
 use super::{
     advertised_refs, check_object_format, head_info, parse_oid, read_packet, write_flush,
-    write_line, Packet, ProtocolVersion, Result, ServeError, ServeOptions,
+    write_line, Packet, Peel, ProtocolVersion, Result, ServeError, ServeOptions,
 };
 use crate::config::ConfigSet;
 use crate::hooks::{run_hook_in_git_dir, HookResult};
@@ -488,7 +488,7 @@ fn write_advertisement(
     }
     let caps = caps.join(" ");
 
-    let refs = advertised_refs(repo, &opts.hidden_refs)?;
+    let refs = advertised_refs(repo, &opts.hidden_refs, &[], Peel::No)?;
     if refs.is_empty() {
         let zero = ObjectId::null(repo.odb().hash_algo());
         write_line(

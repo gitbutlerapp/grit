@@ -32,7 +32,12 @@ pub use receive_pack::{
 };
 pub use upload_pack::upload_pack;
 
+use std::ops::ControlFlow;
+
 use crate::objects::ObjectId;
+use crate::refs::listing::PACKED_PEELS_MIN_REFS;
+use crate::refs::store::RawRef;
+use crate::refs::PackedRefPeels;
 use crate::repo::Repository;
 
 /// Errors produced while serving a fetch or a push.
@@ -148,30 +153,117 @@ pub(crate) struct AdvertisedRef {
     pub(crate) peeled: Option<ObjectId>,
 }
 
+/// Whether [`advertised_refs`] fills [`AdvertisedRef::peeled`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Peel {
+    /// Leave `peeled` empty and read no objects.
+    No,
+    /// Peel annotated tags, trusting `packed-refs` peel lines where they apply.
+    Yes,
+}
+
 /// List the repository's refs in advertisement order, skipping hidden ones.
 ///
-/// Refs whose names are not safe to send, or that point at missing objects,
-/// are left out rather than failing the whole advertisement.
-pub(crate) fn advertised_refs(repo: &Repository, hidden: &[String]) -> Result<Vec<AdvertisedRef>> {
-    let mut refs = crate::refs::list_refs_for_repository(repo, "refs/")?;
-    refs.sort_by(|a, b| a.0.cmp(&b.0));
-    let mut out = Vec::with_capacity(refs.len());
-    for (name, oid) in refs {
-        if !crate::refs::is_valid_fetch_advertised_ref(&name)
-            || crate::hide_refs::ref_is_hidden(&name, &name, hidden)
-        {
-            continue;
-        }
-        let Ok(peeled) = repo.odb().peel_tags(oid).map(|(p, _)| p) else {
-            continue;
-        };
-        out.push(AdvertisedRef {
-            name,
-            oid,
-            peeled: (peeled != oid).then_some(peeled),
-        });
+/// Only refs whose names start with one of `prefixes` are listed (every ref
+/// under `refs/` when `prefixes` is empty), and the ref store is asked for
+/// those prefixes alone, so the cost follows the refs returned rather than the
+/// refs stored. Prefixes that cannot name a ref under `refs/` (such as `HEAD`)
+/// select nothing here.
+///
+/// Refs whose names are not safe to send and symbolic refs that do not resolve
+/// are left out. As in Git, a ref naming a missing object is still advertised;
+/// with [`Peel::Yes`] it, like any ref whose tag chain cannot be read, simply
+/// gets no peeled value.
+pub(crate) fn advertised_refs(
+    repo: &Repository,
+    hidden: &[String],
+    prefixes: &[&str],
+    peel: Peel,
+) -> Result<Vec<AdvertisedRef>> {
+    let store = repo.refs();
+    let git_dir = repo.git_dir();
+    let linked_worktree = crate::worktree_ref::is_linked_worktree_git_dir(git_dir);
+    let mut listed: Vec<(String, ObjectId)> = Vec::new();
+    for prefix in scan_prefixes(prefixes) {
+        store.for_each_ref(prefix, &mut |entry| {
+            let name = entry.name.as_str();
+            if !name.starts_with(prefix)
+                || !crate::refs::is_valid_fetch_advertised_ref(name)
+                || crate::hide_refs::ref_is_hidden(name, name, hidden)
+                || (linked_worktree
+                    && !crate::worktree_ref::ref_visible_from_worktree(git_dir, name))
+            {
+                return ControlFlow::Continue(());
+            }
+            let oid = match &entry.value {
+                RawRef::Direct(oid) => Some(*oid),
+                RawRef::Symbolic(_) => entry.peeled.or_else(|| store.resolve(name).ok()),
+            };
+            if let Some(oid) = oid {
+                listed.push((entry.name.clone(), oid));
+            }
+            ControlFlow::Continue(())
+        })?;
     }
-    Ok(out)
+    if !listed.is_sorted_by(|a, b| a.0 < b.0) {
+        listed.sort_by(|a, b| a.0.cmp(&b.0));
+        listed.dedup_by(|later, first| later.0 == first.0);
+    }
+
+    if peel == Peel::No {
+        return Ok(listed
+            .into_iter()
+            .map(|(name, oid)| AdvertisedRef {
+                name,
+                oid,
+                peeled: None,
+            })
+            .collect());
+    }
+    let odb = repo.odb();
+    // A malformed `packed-refs` only loses the shortcut; peeling falls back to the objects.
+    let packed = (listed.len() >= PACKED_PEELS_MIN_REFS)
+        .then(|| PackedRefPeels::for_store(store, git_dir).ok())
+        .flatten();
+    Ok(odb.with_pack_read_context(|| {
+        listed
+            .into_iter()
+            .map(|(name, oid)| {
+                let peeled = packed
+                    .as_ref()
+                    .and_then(|p| p.peeled(&name, &oid))
+                    .unwrap_or_else(|| odb.peel_tag_target(oid).ok().flatten());
+                AdvertisedRef { name, oid, peeled }
+            })
+            .collect()
+    }))
+}
+
+/// Ref-store prefixes to list so that every ref under `refs/` starting with one
+/// of `requested` is visited exactly once.
+///
+/// No request means all of `refs/`. A request shorter than `refs/` that it
+/// begins (`""`, `"re"`) widens to `refs/`; one outside it selects nothing.
+/// Prefixes covered by a shorter one are dropped, which leaves the result
+/// sorted and disjoint: listing each in turn yields names in sorted order.
+fn scan_prefixes<'a>(requested: &[&'a str]) -> Vec<&'a str> {
+    const ALL: &str = "refs/";
+    if requested.is_empty() {
+        return vec![ALL];
+    }
+    let mut scan: Vec<&str> = requested
+        .iter()
+        .filter_map(|p| {
+            if p.starts_with(ALL) {
+                Some(*p)
+            } else {
+                ALL.starts_with(p).then_some(ALL)
+            }
+        })
+        .collect();
+    scan.sort_unstable();
+    scan.dedup_by(|later, kept| later.starts_with(*kept));
+    scan
 }
 
 /// Where `HEAD` points: its symbolic target (if any) and resolved object (if born).
@@ -256,7 +348,111 @@ pub(crate) fn check_object_format(repo: &Repository, client: Option<&str>) -> Re
 
 #[cfg(test)]
 mod tests {
-    use super::ProtocolVersion;
+    use super::{advertised_refs, scan_prefixes, Peel, ProtocolVersion};
+    use crate::config::environment::RepositoryOptions;
+    use crate::objects::{ObjectId, ObjectKind};
+    use crate::repo::{InitOptions, Repository};
+
+    #[test]
+    fn scan_prefixes_collapse_to_disjoint_sorted_ref_prefixes() {
+        assert_eq!(scan_prefixes(&[]), vec!["refs/"]);
+        assert_eq!(scan_prefixes(&["HEAD"]), Vec::<&str>::new());
+        assert_eq!(scan_prefixes(&["", "HEAD"]), vec!["refs/"]);
+        assert_eq!(scan_prefixes(&["re", "refs/tags/"]), vec!["refs/"]);
+        assert_eq!(
+            scan_prefixes(&[
+                "refs/tags/v1",
+                "refs/heads/",
+                "refs/tags/",
+                "refs/heads/main"
+            ]),
+            vec!["refs/heads/", "refs/tags/"]
+        );
+        assert_eq!(
+            scan_prefixes(&["refs/tags/v2", "refs/tags/v1", "refs/tags/v1"]),
+            vec!["refs/tags/v1", "refs/tags/v2"]
+        );
+    }
+
+    /// A bare repository with `main`, `feature`, an annotated tag `v1`, a hidden ref, and a
+    /// ref naming a missing object.
+    fn fixture() -> (tempfile::TempDir, Repository, ObjectId, ObjectId) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        Repository::init(
+            dir.path(),
+            &InitOptions::new()
+                .with_bare(true)
+                .with_initial_branch("main"),
+        )
+        .expect("init");
+        let repo = Repository::open(dir.path(), &RepositoryOptions::empty()).expect("open");
+        let tree = repo.odb().write(ObjectKind::Tree, b"").expect("tree");
+        let commit = repo
+            .odb()
+            .write(
+                ObjectKind::Commit,
+                format!("tree {tree}\nauthor A <a@e> 1 +0000\ncommitter A <a@e> 1 +0000\n\nc\n")
+                    .as_bytes(),
+            )
+            .expect("commit");
+        let tag = repo
+            .odb()
+            .write(
+                ObjectKind::Tag,
+                format!("object {commit}\ntype commit\ntag v1\ntagger A <a@e> 1 +0000\n\nv1\n")
+                    .as_bytes(),
+            )
+            .expect("tag");
+        let missing = ObjectId::from_hex("0123456789abcdef0123456789abcdef01234567").expect("oid");
+        for (name, oid) in [
+            ("refs/heads/main", commit),
+            ("refs/heads/feature", commit),
+            ("refs/heads/broken", missing),
+            ("refs/hidden/x", commit),
+            ("refs/tags/v1", tag),
+        ] {
+            let path = dir.path().join(name);
+            std::fs::create_dir_all(path.parent().expect("parent")).expect("mkdir");
+            std::fs::write(path, format!("{oid}\n")).expect("ref");
+        }
+        (dir, repo, commit, tag)
+    }
+
+    fn listed(refs: &[super::AdvertisedRef]) -> Vec<(&str, Option<ObjectId>)> {
+        refs.iter().map(|r| (r.name.as_str(), r.peeled)).collect()
+    }
+
+    #[test]
+    fn advertised_refs_lists_requested_prefixes_and_skips_hidden() {
+        let (_dir, repo, commit, _tag) = fixture();
+        let hidden = vec!["refs/hidden".to_owned()];
+
+        let all = advertised_refs(&repo, &hidden, &[], Peel::Yes).expect("all");
+        assert_eq!(
+            listed(&all),
+            vec![
+                ("refs/heads/broken", None),
+                ("refs/heads/feature", None),
+                ("refs/heads/main", None),
+                ("refs/tags/v1", Some(commit)),
+            ]
+        );
+
+        let some = advertised_refs(
+            &repo,
+            &hidden,
+            &["refs/tags/", "refs/heads/m", "HEAD", "refs/hidden/"],
+            Peel::No,
+        )
+        .expect("prefixed");
+        assert_eq!(
+            listed(&some),
+            vec![("refs/heads/main", None), ("refs/tags/v1", None)]
+        );
+
+        let none = advertised_refs(&repo, &hidden, &["HEAD"], Peel::Yes).expect("HEAD only");
+        assert!(none.is_empty());
+    }
 
     #[test]
     fn git_protocol_picks_highest_version() {
