@@ -12,7 +12,7 @@ use grit_lib::progress::NeverCancel;
 use grit_lib::remote::resumable::{discard_download, download_resumable};
 use grit_lib::remote::snapshot_checkout::{
     materialize, normalize_paths, suggest_work_branch, CheckoutClient, CheckoutMarker,
-    CheckoutRequest,
+    CheckoutRequest, CheckoutState, RefreshOutcome,
 };
 use grit_lib::remote::HttpClientFactory;
 use schemars::JsonSchema;
@@ -343,56 +343,126 @@ pub(crate) fn require_checkout() -> Result<OpenCheckout> {
 pub struct PullRefreshJson {
     /// The server's target branch.
     pub target: String,
-    /// The real commit the newest snapshot stands for.
+    /// The local ref holding the newest snapshot, `refs/remotes/origin/<target>`.
+    pub upstream_ref: String,
+    /// The real commit the newest snapshot stands for. With `--dry-run`, where
+    /// the target is now.
     pub base: String,
-    /// The newest snapshot commit, now `origin/<target>`.
+    /// The newest snapshot commit, now `origin/<target>`. With `--dry-run`, the
+    /// checkout's snapshot as it is.
     pub snapshot: String,
+    /// The real commit the checkout's previous snapshot stood for.
+    pub previous_base: Option<String>,
+    /// The checkout's previous snapshot.
+    pub previous_snapshot: Option<String>,
     /// Whether the target had moved since the checkout's last snapshot.
     pub moved: bool,
+    /// What changed in the checkout's paths between the two snapshots; null
+    /// when the target didn't move.
+    pub changes: Option<RefreshChangesJson>,
+    /// With `--dry-run`: nothing was fetched or changed, and the server made
+    /// no snapshot.
+    pub dry_run: bool,
+    /// The local branch named after the target, with no commits of its own,
+    /// that moved to the new snapshot.
+    pub followed: Vec<RefreshFollowedJson>,
+    /// Other branches with commits of their own still on an older snapshot.
+    pub behind: Vec<RefreshBehindJson>,
 }
 
-/// In a snapshot checkout, ask the server for a snapshot of the newest target
-/// on top of the last one and point `options` at it: fetch it into
-/// `origin/<target>` and rebase onto it. Commits already merged into the
-/// target drop out of the rebase.
-///
-/// # Returns
-///
-/// `None` outside a checkout (nothing changes).
-pub(crate) fn refresh_pull_options(
-    repo: &grit_lib::repo::Repository,
-    options: &mut grit_lib::porcelain::pull::PullOptions,
-) -> Result<Option<PullRefreshJson>> {
-    let Some(marker) = CheckoutMarker::read(repo.git_dir()) else {
-        return Ok(None);
-    };
-    let config = ConfigSet::load(&crate::context::environment(), Some(repo.git_dir()), true)
-        .context("could not load config")?;
-    let http = DefaultHttpClientFactory
-        .create(&config)
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
-    let client = CheckoutClient::new(http.as_ref(), &marker.url)?;
-    let previous = marker.roots.last().map(|r| r.commit.clone());
-    let info = client.update(&marker.id)?;
-    let updated = CheckoutMarker {
-        roots: info.roots.clone(),
-        ..marker
-    };
-    updated.write(repo.git_dir())?;
-    options.remote = Some("origin".to_owned());
-    options.explicit_fetch = true;
-    options.fetch.refspecs = vec![format!(
-        "+{}:refs/remotes/origin/{}",
-        grit_lib::remote::snapshot_checkout::target_ref(&info.id),
-        info.branch
-    )];
-    if options.mode.is_none() {
-        options.mode = Some(grit_lib::porcelain::pull::PullMode::Rebase);
+/// What changed in a checkout's paths between two snapshots, as
+/// `git diff --shortstat` counts it.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct RefreshChangesJson {
+    /// Files changed.
+    pub files: usize,
+    /// Lines added.
+    pub insertions: usize,
+    /// Lines removed.
+    pub deletions: usize,
+}
+
+/// A branch a refresh moved along with the snapshot.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct RefreshFollowedJson {
+    /// The branch.
+    pub name: String,
+    /// The older snapshot it was at.
+    pub from: String,
+    /// The new snapshot it is at.
+    pub to: String,
+}
+
+/// A branch still building on an older snapshot after a refresh.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct RefreshBehindJson {
+    /// The branch.
+    pub name: String,
+    /// Its tip.
+    pub tip: String,
+}
+
+impl PullRefreshJson {
+    /// The JSON of a refresh the library did.
+    #[must_use]
+    pub fn from_outcome(r: &RefreshOutcome) -> Self {
+        Self {
+            target: r.target.clone(),
+            upstream_ref: r.upstream_ref.clone(),
+            base: r.current.base.clone(),
+            snapshot: r.current.commit.clone(),
+            previous_base: r.previous.as_ref().map(|p| p.base.clone()),
+            previous_snapshot: r.previous.as_ref().map(|p| p.commit.clone()),
+            moved: r.moved,
+            changes: r.changes.map(|c| RefreshChangesJson {
+                files: c.files_changed,
+                insertions: c.insertions,
+                deletions: c.deletions,
+            }),
+            dry_run: false,
+            followed: r
+                .followed
+                .iter()
+                .map(|f| RefreshFollowedJson {
+                    name: f.name.clone(),
+                    from: f.from.to_hex(),
+                    to: f.to.to_hex(),
+                })
+                .collect(),
+            behind: r
+                .behind
+                .iter()
+                .map(|b| RefreshBehindJson {
+                    name: b.name.clone(),
+                    tip: b.tip.to_hex(),
+                })
+                .collect(),
+        }
     }
-    Ok(Some(PullRefreshJson {
-        target: info.branch,
-        base: info.base,
-        moved: previous.as_deref() != Some(info.root.as_str()),
-        snapshot: info.root,
-    }))
+
+    /// The JSON of `grit pull --dry-run`: the checkout as `marker` has it, and
+    /// where the server says its target is now.
+    #[must_use]
+    pub fn dry_run(marker: &CheckoutMarker, state: &CheckoutState) -> Self {
+        let last = marker.last();
+        let previous_base = last.map(|r| r.base.clone());
+        let base = state
+            .tip
+            .clone()
+            .or_else(|| previous_base.clone())
+            .unwrap_or_default();
+        Self {
+            target: marker.branch.clone(),
+            upstream_ref: marker.upstream_ref(),
+            moved: previous_base.as_deref() != Some(base.as_str()),
+            base,
+            snapshot: last.map(|r| r.commit.clone()).unwrap_or_default(),
+            previous_snapshot: last.map(|r| r.commit.clone()),
+            previous_base,
+            changes: None,
+            dry_run: true,
+            followed: Vec::new(),
+            behind: Vec::new(),
+        }
+    }
 }

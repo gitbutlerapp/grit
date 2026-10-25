@@ -1,5 +1,6 @@
 //! `--json` / human / markdown rendering for `grit pull`.
 
+use crate::commands::checkout::PullRefreshJson;
 use crate::commands::merge::MergeConflictJson;
 use crate::markdown;
 use crate::operation_output::{render_rebase_conflict_footer_human, OperationConflictBlock};
@@ -11,6 +12,9 @@ use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::merge::MergeConflictDetail;
 use grit_lib::porcelain::pull::{
     PullCheck as LibPullCheck, PullOutcome as LibPullOutcome, PullResult as LibPullResult,
+};
+use grit_lib::remote::snapshot_checkout::{
+    CheckoutMarker, CheckoutState, RefreshOutcome, RefreshedHead,
 };
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -28,6 +32,26 @@ pub enum PullResult {
     SetUpstream,
     Rebased,
     AutostashConflict,
+    // A rebase stopped on a conflict and is left in progress (`grit rebase --continue`).
+    RebaseStopped,
+    // In a snapshot checkout with `HEAD` detached: only `origin/<target>` moved.
+    Detached,
+}
+
+impl From<LibPullResult> for PullResult {
+    fn from(result: LibPullResult) -> Self {
+        match result {
+            LibPullResult::UpToDate => Self::UpToDate,
+            LibPullResult::FastForward => Self::FastForward,
+            LibPullResult::Merged => Self::Merged,
+            LibPullResult::RefusedNotFf => Self::RefusedNotFf,
+            LibPullResult::Conflicts | LibPullResult::RebaseConflicts => Self::Conflicts,
+            LibPullResult::SetUpstream => Self::SetUpstream,
+            LibPullResult::Rebased => Self::Rebased,
+            LibPullResult::AutostashConflict => Self::AutostashConflict,
+            LibPullResult::RebaseStopped => Self::RebaseStopped,
+        }
+    }
 }
 
 /// Dry-run summary from `grit pull --check`.
@@ -91,7 +115,7 @@ pub struct PullOutcome {
     /// In a snapshot checkout, the server snapshot the pull refreshed onto.
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(skip_serializing_if = "Option::is_none")]
-    pub refresh: Option<crate::commands::checkout::PullRefreshJson>,
+    pub refresh: Option<PullRefreshJson>,
     /// What the fetch step received and where the time went, for the human summary.
     #[serde(skip)]
     #[schemars(skip)]
@@ -99,7 +123,10 @@ pub struct PullOutcome {
 }
 
 pub fn map_outcome(outcome: LibPullOutcome) -> PullOutcome {
-    let rebase_stop = outcome.result == LibPullResult::RebaseConflicts;
+    let rebase_stop = matches!(
+        outcome.result,
+        LibPullResult::RebaseConflicts | LibPullResult::RebaseStopped
+    );
     let details = outcome.conflicts.as_deref().unwrap_or(&[]);
     let (conflicts, conflict_details) = outcome
         .conflicts
@@ -113,7 +140,7 @@ pub fn map_outcome(outcome: LibPullOutcome) -> PullOutcome {
             "merge",
             OperationConflictBlock::for_merge(details, &outcome.label),
         )),
-        LibPullResult::RebaseConflicts => {
+        LibPullResult::RebaseConflicts | LibPullResult::RebaseStopped => {
             Some(("rebase", OperationConflictBlock::for_rebase(details)))
         }
         _ => None,
@@ -127,7 +154,7 @@ pub fn map_outcome(outcome: LibPullOutcome) -> PullOutcome {
         None => (None, None, None),
     };
     PullOutcome {
-        result: map_result(outcome.result),
+        result: outcome.result.into(),
         branch: outcome.label,
         oid: outcome.oid.as_ref().map(ObjectId::to_hex),
         change_id: outcome
@@ -151,25 +178,60 @@ pub fn map_outcome(outcome: LibPullOutcome) -> PullOutcome {
 }
 
 /// Rebase stops share `conflicts` with merge stops; `operation` tells them apart.
-fn map_result(result: LibPullResult) -> PullResult {
-    match result {
-        LibPullResult::UpToDate => PullResult::UpToDate,
-        LibPullResult::FastForward => PullResult::FastForward,
-        LibPullResult::Merged => PullResult::Merged,
-        LibPullResult::RefusedNotFf => PullResult::RefusedNotFf,
-        LibPullResult::Conflicts | LibPullResult::RebaseConflicts => PullResult::Conflicts,
-        LibPullResult::SetUpstream => PullResult::SetUpstream,
-        LibPullResult::Rebased => PullResult::Rebased,
-        LibPullResult::AutostashConflict => PullResult::AutostashConflict,
-    }
-}
-
 fn map_check(check: LibPullCheck) -> PullCheckJson {
     PullCheckJson {
         ahead: check.ahead,
         behind: check.behind,
         fast_forward_possible: check.fast_forward_possible,
-        would: map_result(check.would),
+        would: check.would.into(),
+    }
+}
+
+impl PullOutcome {
+    /// A pull with nothing but `result` and `branch` set.
+    fn bare(result: PullResult, branch: String) -> Self {
+        Self {
+            result,
+            branch,
+            oid: None,
+            change_id: None,
+            upstream: None,
+            conflicts: None,
+            conflict_details: None,
+            operation: None,
+            commit: None,
+            next_steps: None,
+            alternatives: None,
+            autostash: None,
+            ahead: None,
+            behind: None,
+            check: None,
+            refresh: None,
+            transfer: TransferSummary::default(),
+        }
+    }
+
+    /// `grit pull` in a snapshot checkout: what the refresh did to the
+    /// current branch, with the refresh itself in [`Self::refresh`].
+    pub fn from_refresh(refreshed: RefreshOutcome) -> Self {
+        let refresh = PullRefreshJson::from_outcome(&refreshed);
+        let mut outcome = match refreshed.head {
+            RefreshedHead::Branch { pull, .. } => map_outcome(*pull),
+            RefreshedHead::Detached => {
+                Self::bare(PullResult::Detached, format!("origin/{}", refreshed.target))
+            }
+        };
+        outcome.refresh = Some(refresh);
+        outcome.transfer = TransferSummary::new(refreshed.transfer, Vec::new(), Default::default());
+        outcome
+    }
+
+    /// `grit pull --dry-run` in a snapshot checkout: where the target is now,
+    /// with nothing fetched or changed.
+    pub fn refresh_dry_run(marker: &CheckoutMarker, state: &CheckoutState) -> Self {
+        let mut outcome = Self::bare(PullResult::UpToDate, format!("origin/{}", marker.branch));
+        outcome.refresh = Some(PullRefreshJson::dry_run(marker, state));
+        outcome
     }
 }
 
@@ -202,6 +264,12 @@ fn map_conflicts(
 
 impl HumanRender for PullOutcome {
     fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
+        if let Some(r) = &self.refresh {
+            render_refresh_head(w, r)?;
+            if r.dry_run {
+                return Ok(());
+            }
+        }
         if let Some(check) = &self.check {
             outln!(
                 w,
@@ -216,23 +284,6 @@ impl HumanRender for PullOutcome {
                 }
             );
             return Ok(());
-        }
-        if let Some(r) = &self.refresh {
-            if r.moved {
-                outln!(
-                    w,
-                    "Refreshed onto {} at {} (snapshot {})",
-                    r.target,
-                    short_hex(&r.base),
-                    short_hex(&r.snapshot)
-                );
-            } else {
-                outln!(
-                    w,
-                    "{} has not moved since this checkout's snapshot.",
-                    r.target
-                );
-            }
         }
         let short = self.oid.as_deref().map(short_hex).unwrap_or_default();
         match self.result {
@@ -253,20 +304,7 @@ impl HumanRender for PullOutcome {
                 );
             }
             PullResult::Conflicts => {
-                if let Some(details) = &self.conflict_details {
-                    for item in details {
-                        if let Some(summary) = &item.summary {
-                            eprintln!("CONFLICT ({kind}): {summary}", kind = item.kind);
-                        } else {
-                            eprintln!("CONFLICT ({kind}): {}", item.path, kind = item.kind);
-                        }
-                    }
-                } else if let Some(paths) = &self.conflicts {
-                    eprintln!("Conflicts in:");
-                    for path in paths {
-                        eprintln!("  {path}");
-                    }
-                }
+                print_conflicts_to_stderr(self);
                 if self.operation.as_deref() == Some("rebase") {
                     render_rebase_conflict_footer_human();
                     if let Some(stash) = &self.autostash {
@@ -295,6 +333,28 @@ impl HumanRender for PullOutcome {
                     self.branch
                 );
             }
+            PullResult::RebaseStopped => {
+                for item in self.conflict_details.as_deref().unwrap_or(&[]) {
+                    outln!(w, "CONFLICT ({}): {}", item.kind, item.path);
+                }
+                outln!(
+                    w,
+                    "Rebasing onto {} stopped on a conflict; the rebase is in progress.",
+                    self.branch
+                );
+                outln!(
+                    w,
+                    "Resolve the conflicts, `grit add` the files, then run `grit rebase --continue`; or run `grit rebase --abort` to put the branch back where it was."
+                );
+            }
+            PullResult::Detached => outln!(
+                w,
+                "HEAD is detached, so only {} moved; the new snapshot is there.",
+                self.branch
+            ),
+        }
+        if let Some(r) = &self.refresh {
+            render_refresh_branches(w, r)?;
         }
         if self.transfer.received_anything() {
             outln!(w);
@@ -302,6 +362,97 @@ impl HumanRender for PullOutcome {
         }
         Ok(())
     }
+}
+
+/// The `CONFLICT (...)` lines of a pull that stopped, on stderr.
+fn print_conflicts_to_stderr(outcome: &PullOutcome) {
+    if let Some(details) = &outcome.conflict_details {
+        for item in details {
+            if let Some(summary) = &item.summary {
+                eprintln!("CONFLICT ({kind}): {summary}", kind = item.kind);
+            } else {
+                eprintln!("CONFLICT ({kind}): {}", item.path, kind = item.kind);
+            }
+        }
+    } else if let Some(paths) = &outcome.conflicts {
+        eprintln!("Conflicts in:");
+        for path in paths {
+            eprintln!("  {path}");
+        }
+    }
+}
+
+/// The first line of a refresh: whether the target moved, and what changed
+/// in the checkout's paths.
+fn render_refresh_head(w: &mut dyn Write, r: &PullRefreshJson) -> Result<()> {
+    let previous = r.previous_base.as_deref().map(short_hex).unwrap_or("?");
+    if !r.moved {
+        outln!(
+            w,
+            "{} has not moved since this checkout's last snapshot (still at {}).",
+            r.target,
+            short_hex(&r.base)
+        );
+        return Ok(());
+    }
+    if r.dry_run {
+        outln!(
+            w,
+            "{} has moved {previous} → {} since this checkout's last snapshot; `grit pull` would refresh onto it.",
+            r.target,
+            short_hex(&r.base)
+        );
+        return Ok(());
+    }
+    outln!(
+        w,
+        "{} moved {previous} → {}; new snapshot {} at origin/{}",
+        r.target,
+        short_hex(&r.base),
+        short_hex(&r.snapshot),
+        r.target
+    );
+    match &r.changes {
+        Some(c) if c.files == 0 => outln!(w, "  nothing changed in this checkout's paths"),
+        Some(c) => outln!(w, "  {} in this checkout's paths", changes_phrase(c)),
+        None => {}
+    }
+    Ok(())
+}
+
+/// `N files changed, I insertions(+), D deletions(-)`, as `git diff --shortstat` words it.
+pub(crate) fn changes_phrase(c: &crate::commands::checkout::RefreshChangesJson) -> String {
+    let plural = |n: usize, one: &str, many: &str| {
+        if n == 1 {
+            format!("{n} {one}")
+        } else {
+            format!("{n} {many}")
+        }
+    };
+    let mut parts = vec![plural(c.files, "file changed", "files changed")];
+    if c.insertions > 0 || c.deletions == 0 {
+        parts.push(plural(c.insertions, "insertion(+)", "insertions(+)"));
+    }
+    if c.deletions > 0 {
+        parts.push(plural(c.deletions, "deletion(-)", "deletions(-)"));
+    }
+    parts.join(", ")
+}
+
+/// The other branches a refresh moved, or left on an older snapshot.
+fn render_refresh_branches(w: &mut dyn Write, r: &PullRefreshJson) -> Result<()> {
+    for f in &r.followed {
+        outln!(w, "{} follows to {}", f.name, short_hex(&f.to));
+    }
+    for b in &r.behind {
+        outln!(
+            w,
+            "{} still builds on an older snapshot; run `grit switch {}`, then `grit pull`",
+            b.name,
+            b.name
+        );
+    }
+    Ok(())
 }
 
 fn check_would_phrase(result: PullResult) -> &'static str {
@@ -312,8 +463,9 @@ fn check_would_phrase(result: PullResult) -> &'static str {
         PullResult::Rebased => "rebase",
         PullResult::SetUpstream => "set upstream",
         PullResult::RefusedNotFf => "refuse (not fast-forward)",
-        PullResult::Conflicts => "stop with conflicts",
+        PullResult::Conflicts | PullResult::RebaseStopped => "stop with conflicts",
         PullResult::AutostashConflict => "conflict on autostash restore",
+        PullResult::Detached => "leave HEAD detached",
     }
 }
 

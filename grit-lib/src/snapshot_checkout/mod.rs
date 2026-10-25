@@ -13,43 +13,55 @@
 //! The server hands the snapshot out as a bundle, which the client downloads
 //! with [`crate::resumable::download_resumable`] (so an interrupted checkout
 //! resumes) and turns into a new repository whose history is that one commit,
-//! with the snapshot at `refs/remotes/origin/<branch>` and a new work branch
-//! on top of it checked out.
+//! with the snapshot at [`upstream_ref`] (`refs/remotes/origin/<branch>`) and a
+//! new work branch on top of it checked out. Its `origin` fetches only the
+//! checkout's snapshots ([`snapshot_fetch_refspec`], no tags) and pushes to the
+//! check-in area ([`out_push_refspec`]), so plain `git` and `grit` fetches and
+//! pushes in a checkout never bring the full history or touch the server's
+//! real branches.
 //!
 //! - Wire types: [`CheckoutServerInfo`], [`CheckoutRequest`], [`CheckoutInfo`].
 //! - Server side: [`normalize_paths`], [`filtered_tree`], [`snapshot_object`],
 //!   [`make_snapshot`].
 //! - Client side: [`CheckoutUrl`], [`CheckoutClient`], [`materialize`],
-//!   [`CheckoutMarker`].
+//!   [`CheckoutMarker`], [`push_for_checkin`], [`fetch_snapshot`], [`refresh`].
 //!
 //! Work comes back with a **check-in**: the client pushes its branches' raw
-//! tips to [`out_ref`] and asks the server to [`graft`] them onto the real
-//! history ([`graft_checkin_branch`]) and set the server's branches
-//! ([`set_checked_in_branch`], deciding with [`decide_checkin`]). The server can
-//! [`integrate`] a branch into the target with a merge commit, and keeps
-//! **slices** — named sets of paths — in [`SLICES_PATH`] on the target branch.
-//! A **refresh** asks the server for a snapshot of the newest target on top of
-//! the checkout's last one, fetches it from [`target_ref`] and rebases the
-//! work onto it.
+//! tips to [`out_ref`] ([`push_for_checkin`]) and asks the server to [`graft`]
+//! them onto the real history ([`graft_checkin_branch`]) and set the server's
+//! branches ([`set_checked_in_branch`], deciding with [`decide_checkin`]). The
+//! server can [`integrate`] a branch into the target with a merge commit, and
+//! keeps **slices** — named sets of paths — in [`SLICES_PATH`] on the target
+//! branch. A **refresh** asks the server for a snapshot of the newest target on
+//! top of the checkout's last one ([`CheckoutClient::update`]), fetches it from
+//! [`target_ref`] ([`fetch_snapshot`]) and brings the current branch onto it
+//! ([`refresh`]). The client's transfers always go to the URL its marker
+//! records, whatever `origin` has become.
 //!
 //! The server keeps each checkout's record, and the work-branch names it has
 //! given out, in a [`CheckoutStore`].
 
 mod checkin;
 mod graft;
+mod refresh;
 mod refs;
 mod store;
 mod target;
+mod transfer;
 mod tree;
 
 pub use checkin::{graft_checkin_branch, set_checked_in_branch, BranchSet, CheckinRefusal};
 pub use graft::{decide_checkin, graft, CheckinDecision, GraftError, Grafted};
+pub use refresh::{
+    ensure_refreshable, refresh, BranchOnOldSnapshot, FollowedBranch, RefreshOutcome, RefreshedHead,
+};
 pub use store::{valid_checkout_id, CheckoutRecord, CheckoutStore, ReservedName, StoredCheckout};
 pub use target::{
     commit_slices, integrate, missing_paths, parse_slices, read_slices, render_slices,
     same_branch_name, target_branch, valid_slice_name, Integrated, Signature, TargetRefusal,
     SLICES_PATH,
 };
+pub use transfer::{fetch_snapshot, push_for_checkin, FetchedSnapshot};
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -75,7 +87,8 @@ pub const SNAPSHOT_IDENT: &str = "grit-checkout <snapshot@grit-checkout>";
 /// Trailer naming the real commit a snapshot stands for.
 pub const SNAPSHOT_BASE_TRAILER: &str = "Grit-Checkout-Base";
 
-/// File in the git directory that marks a repository as a snapshot checkout.
+/// File in the repository's common git directory (shared by all its worktrees)
+/// that marks it as a snapshot checkout.
 pub const MARKER_FILE: &str = "grit-checkout.json";
 
 const TREE_MODE: u32 = 0o040000;
@@ -148,6 +161,20 @@ pub struct CheckoutInfo {
     pub work: Option<String>,
 }
 
+/// `GET /.grit/checkouts/<repo>/<id>`: a checkout as the server has it, and
+/// where its target branch is now.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CheckoutState {
+    /// The checkout's record.
+    #[serde(flatten)]
+    pub info: CheckoutInfo,
+    /// Where the target branch is now, which is past [`CheckoutInfo::base`]
+    /// when it moved since the last snapshot; `None` when the server no
+    /// longer has the branch.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tip: Option<String>,
+}
+
 /// The ref a checkout's newest snapshot is kept at on the server.
 #[must_use]
 pub fn target_ref(id: &str) -> String {
@@ -168,6 +195,34 @@ pub fn valid_branch_name(name: &str) -> bool {
 #[must_use]
 pub fn out_ref(id: &str, name: &str) -> String {
     format!("refs/checkouts/{id}/out/heads/{name}")
+}
+
+/// The local ref a checkout keeps its newest snapshot of `branch` at:
+/// `refs/remotes/origin/<branch>`.
+#[must_use]
+pub fn upstream_ref(branch: &str) -> String {
+    format!("refs/remotes/origin/{branch}")
+}
+
+/// The refspec that fetches checkout `id`'s newest snapshot (at [`target_ref`]
+/// on the server) into [`upstream_ref`]`(branch)`:
+/// `+refs/checkouts/<id>/target:refs/remotes/origin/<branch>`.
+///
+/// A checkout's `origin` fetches with it, so a plain `git fetch` or
+/// `grit fetch` there brings only snapshots, never the full history.
+#[must_use]
+pub fn snapshot_fetch_refspec(id: &str, branch: &str) -> String {
+    format!("+{}:{}", target_ref(id), upstream_ref(branch))
+}
+
+/// The refspec a checkout's `origin` pushes with:
+/// `+refs/heads/*:refs/checkouts/<id>/out/heads/*`.
+///
+/// A plain `git push` or `grit push` in a checkout then lands where check-ins
+/// graft from ([`out_ref`]), never on the server's real branches.
+#[must_use]
+pub fn out_push_refspec(id: &str) -> String {
+    format!("+refs/heads/*:{}", out_ref(id, "*"))
 }
 
 /// One branch of a check-in: its name and the tip the client pushed to
@@ -421,6 +476,25 @@ pub enum CheckoutError {
         /// The ref.
         refname: String,
     },
+    /// The snapshot fetched is not the one the server described: the
+    /// checkout was refreshed again (from another worktree, say) meanwhile.
+    #[error("the server's snapshot moved again while fetching: expected {expected}, got {got}")]
+    SnapshotMoved {
+        /// The snapshot the server described.
+        expected: String,
+        /// What the fetch brought into the checkout's upstream ref.
+        got: String,
+    },
+    /// The checkout is in the middle of an operation (a stopped rebase, a
+    /// merge) that has to be finished or aborted first.
+    #[error("a {} is in progress", .0.description())]
+    OperationInProgress(crate::state::InProgressOperation),
+    /// A fetch from or push to the server failed.
+    #[error(transparent)]
+    Remote(Box<crate::remote::RemoteError>),
+    /// Bringing the current branch onto the new snapshot failed.
+    #[error(transparent)]
+    Pull(Box<crate::porcelain::pull::PullError>),
     /// The server's answer could not be parsed.
     #[error("unexpected answer from {url}: {detail}")]
     Protocol {
@@ -449,6 +523,18 @@ impl From<crate::error::Error> for CheckoutError {
 impl From<crate::resumable::ResumableError> for CheckoutError {
     fn from(e: crate::resumable::ResumableError) -> Self {
         Self::Download(Box::new(e))
+    }
+}
+
+impl From<crate::remote::RemoteError> for CheckoutError {
+    fn from(e: crate::remote::RemoteError) -> Self {
+        Self::Remote(Box::new(e))
+    }
+}
+
+impl From<crate::porcelain::pull::PullError> for CheckoutError {
+    fn from(e: crate::porcelain::pull::PullError) -> Self {
+        Self::Pull(Box::new(e))
     }
 }
 
@@ -895,6 +981,17 @@ impl<'a> CheckoutClient<'a> {
         format!("{}/{id}/bundle", self.url.api)
     }
 
+    /// Checkout `id` as the server has it, and where its target branch is now
+    /// ([`CheckoutState::tip`]). Changes nothing on the server, so a dry run can
+    /// tell whether a refresh would move.
+    ///
+    /// # Errors
+    ///
+    /// Request failures, and the server's refusal (no such checkout).
+    pub fn show(&self, id: &str) -> Result<CheckoutState> {
+        self.json(HttpMethod::Get, &format!("{}/{id}", self.url.api), None)
+    }
+
     fn post_json<T: Serialize, R: serde::de::DeserializeOwned>(
         &self,
         method: HttpMethod,
@@ -1025,7 +1122,8 @@ pub fn branches_with_work(
 }
 
 /// What makes a repository a snapshot checkout: where it came from and which
-/// snapshot commits it has. Kept as [`MARKER_FILE`] in the git directory.
+/// snapshot commits it has. Kept as [`MARKER_FILE`] in the repository's common
+/// git directory, so every worktree of a checkout shares it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CheckoutMarker {
     /// The repository URL it was checked out from.
@@ -1040,18 +1138,28 @@ pub struct CheckoutMarker {
     pub roots: Vec<SnapshotRoot>,
 }
 
+/// Where the marker of the repository whose git directory is `git_dir` is:
+/// in its common git directory, which a linked worktree's `commondir` names.
+fn marker_path(git_dir: &Path) -> PathBuf {
+    crate::refs::common_dir(git_dir)
+        .unwrap_or_else(|| git_dir.to_path_buf())
+        .join(MARKER_FILE)
+}
+
 impl CheckoutMarker {
-    /// Read the marker of the repository whose git directory is `git_dir`.
+    /// Read the marker of the repository whose git directory is `git_dir`
+    /// (the main one or a linked worktree's).
     ///
     /// # Returns
     ///
     /// `None` when it is not a snapshot checkout.
     #[must_use]
     pub fn read(git_dir: &Path) -> Option<Self> {
-        serde_json::from_slice(&std::fs::read(git_dir.join(MARKER_FILE)).ok()?).ok()
+        serde_json::from_slice(&std::fs::read(marker_path(git_dir)).ok()?).ok()
     }
 
-    /// Write it into `git_dir`.
+    /// Write it into the common git directory of the repository whose git
+    /// directory is `git_dir`, replacing the old one in one rename.
     ///
     /// # Errors
     ///
@@ -1059,10 +1167,24 @@ impl CheckoutMarker {
     pub fn write(&self, git_dir: &Path) -> Result<()> {
         let bytes =
             serde_json::to_vec_pretty(self).map_err(|e| std::io::Error::other(e.to_string()))?;
-        let tmp = git_dir.join(format!("{MARKER_FILE}.tmp"));
+        let path = marker_path(git_dir);
+        let tmp = path.with_file_name(format!("{MARKER_FILE}.tmp"));
         std::fs::write(&tmp, bytes)?;
-        std::fs::rename(&tmp, git_dir.join(MARKER_FILE))?;
+        std::fs::rename(&tmp, path)?;
         Ok(())
+    }
+
+    /// The checkout's newest snapshot, the last of [`Self::roots`].
+    #[must_use]
+    pub fn last(&self) -> Option<&SnapshotRoot> {
+        self.roots.last()
+    }
+
+    /// The local ref the checkout keeps its newest snapshot at
+    /// ([`upstream_ref`] of [`Self::branch`]).
+    #[must_use]
+    pub fn upstream_ref(&self) -> String {
+        upstream_ref(&self.branch)
     }
 }
 
@@ -1082,9 +1204,11 @@ pub struct Materialized {
 ///
 /// Creates the repository, unpacks the bundle, checks that the snapshot
 /// commit is byte for byte the one the server described, points
-/// `refs/remotes/origin/<branch>` and the new branch `work` at it, configures
-/// `origin` as `repo_url`, writes the [`CheckoutMarker`] and checks out the
-/// files.
+/// [`upstream_ref`] (`refs/remotes/origin/<branch>`, which
+/// `refs/remotes/origin/HEAD` names) and the new branch `work` at it,
+/// configures `origin` as `repo_url` fetching [`snapshot_fetch_refspec`] with
+/// no tags and pushing [`out_push_refspec`], writes the [`CheckoutMarker`] and
+/// checks out the files.
 ///
 /// # Errors
 ///
@@ -1139,11 +1263,9 @@ pub fn materialize(
         )));
     }
     let git_dir = repo.git_dir().to_path_buf();
-    crate::refs::write_ref(
-        &git_dir,
-        &format!("refs/remotes/origin/{}", info.branch),
-        &root,
-    )?;
+    let upstream = upstream_ref(&info.branch);
+    crate::refs::write_ref(&git_dir, &upstream, &root)?;
+    crate::refs::write_symbolic_ref(&git_dir, "refs/remotes/origin/HEAD", &upstream)?;
     crate::refs::write_ref(&git_dir, &format!("refs/heads/{work}"), &root)?;
     crate::refs::write_symbolic_ref(&git_dir, "HEAD", &format!("refs/heads/{work}"))?;
     let config_path = git_dir.join("config");
@@ -1154,7 +1276,12 @@ pub fn materialize(
         crate::config::ConfigScope::Local,
     )?;
     config.set("remote.origin.url", repo_url)?;
-    config.set("remote.origin.fetch", "+refs/heads/*:refs/remotes/origin/*")?;
+    config.set(
+        "remote.origin.fetch",
+        &snapshot_fetch_refspec(&info.id, &info.branch),
+    )?;
+    config.set("remote.origin.push", &out_push_refspec(&info.id))?;
+    config.set("remote.origin.tagOpt", "--no-tags")?;
     config.write()?;
     CheckoutMarker {
         url: repo_url.to_owned(),

@@ -7,7 +7,7 @@
 //! | --- | --- | --- |
 //! | `GET /.grit/checkouts/<repo>` | read | JSON [`CheckoutServerInfo`] |
 //! | `POST /.grit/checkouts/<repo>` | read | make a checkout: JSON [`CheckoutInfo`] |
-//! | `GET /.grit/checkouts/<repo>/<id>` | read | JSON [`CheckoutInfo`] |
+//! | `GET /.grit/checkouts/<repo>/<id>` | read | JSON [`CheckoutState`]: the record and where its target is now |
 //! | `GET /.grit/checkouts/<repo>/<id>/bundle` | read | the snapshot as a bundle, with `Range` |
 //! | `POST /.grit/checkouts/<repo>/<id>/update` | read | refresh: JSON [`CheckoutInfo`] |
 //! | `POST /.grit/checkouts/<repo>/<id>/checkin` | write | JSON [`CheckinResponse`] |
@@ -40,9 +40,9 @@ use grit_lib::remote::snapshot_checkout::{
     read_slices, set_checked_in_branch, target_branch, target_ref, valid_checkout_id,
     valid_slice_name, CheckinBranch, CheckinRefusal, CheckinRequest, CheckinResponse,
     CheckinResult, CheckinStatus, CheckoutError, CheckoutErrorBody, CheckoutInfo, CheckoutRecord,
-    CheckoutRequest, CheckoutServerInfo, CheckoutStore, Ident, IntegrateRequest, IntegrateResponse,
-    IntegrateStatus, Integrated, Signature, Slice, SliceChange, SliceDeleteRequest, SliceRequest,
-    SlicesResponse, SnapshotRoot, StoredCheckout,
+    CheckoutRequest, CheckoutServerInfo, CheckoutState, CheckoutStore, Ident, IntegrateRequest,
+    IntegrateResponse, IntegrateStatus, Integrated, Signature, Slice, SliceChange,
+    SliceDeleteRequest, SliceRequest, SlicesResponse, SnapshotRoot, StoredCheckout,
 };
 use grit_lib::repo::Repository;
 use grit_protocol::RepositoryOptions;
@@ -346,14 +346,19 @@ fn load_held<'a>(
     Ok((record, stored))
 }
 
-/// `GET /.grit/checkouts/<repo>/<id>`.
+/// `GET /.grit/checkouts/<repo>/<id>`: the checkout's record, and where the
+/// branch it was made from is now, so a client can tell whether a refresh
+/// would move without making a snapshot.
 pub(crate) async fn show(
     State(state): State<Arc<ServerState>>,
     UrlPath((name, id)): UrlPath<(String, String)>,
     headers: HeaderMap,
 ) -> Response<Body> {
     let result = with_repo(&state, &headers, &name, move |served, options| {
-        Ok(load(&open(&served, &options)?, &id)?.info)
+        let repo = open(&served, &options)?;
+        let info = load(&repo, &id)?.info;
+        let tip = branch_tip(&repo, &info.branch).ok().map(|t| t.to_hex());
+        Ok(CheckoutState { info, tip })
     })
     .await;
     match result {

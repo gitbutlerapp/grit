@@ -17,7 +17,7 @@ In a [snapshot checkout](../checkout/), the target branch only changes on the se
 
 1. **checks the branch in** first when you have it here (see [`grit checkin`](../checkin/));
 2. **merges it into the target branch on the server**, with a merge commit by you (`user.name` and `user.email`, or the signed-in user), when it merges without conflicts. A branch that conflicts is not merged: the error names the files; refresh, rebase and try again. A branch the target already has is left alone;
-3. **refreshes this checkout** onto the new target, as [`grit pull`](../pull/) does. Commits now in the target drop out of your branches.
+3. **refreshes this checkout** onto the new target, as [`grit pull`](../pull/#in-a-snapshot-checkout) does: the current branch is rebased onto the new snapshot, and commits now in the target drop out of it. A local branch named after the target with no commits of its own follows; other branches still on an older snapshot are named, with how to bring each up to date.
 
 The branch can also be one somebody else checked in or pushed. Integrating needs write access. Where the server's repository keeps reflogs, the move of the target is logged as `integrate: Merge branch '<branch>' into <target>`, so `git reflog <target>` on the server shows it.
 
@@ -33,8 +33,9 @@ The branch can also be one somebody else checked in or pushed. Integrating needs
 $ grit integrate alice/elm-orchid
 · alice/elm-orchid already at 7fb21e5 on the server
 ✓ Merged alice/elm-orchid into main on the server: d08f98a → 7f51f16 (1 commit)
-Refreshed onto main at 7f51f16 (snapshot 2b12f15)
-Rebased onto origin (FETCH_HEAD) (2b12f15)
+main moved d08f98a → 7f51f16; new snapshot 2b12f15 at origin/main
+  2 files changed, 2 insertions(+), 2 deletions(-) in this checkout's paths
+Rebased onto origin/main (2b12f15)
 ```
 
 ## JSON output
@@ -69,6 +70,8 @@ Pass [`--markdown`](../global-options/) for agent-friendly output.
 
 Schema: [v1](/schemas/integrate/v1.json)
 
+The check-in done first, and the refresh done after, follow in their own sections, as [`grit checkin`](../checkin/) and [`grit pull`](../pull/) render them:
+
 ```markdown
 ## Integrate `alice/elm-orchid` into `main`
 
@@ -76,6 +79,11 @@ Schema: [v1](/schemas/integrate/v1.json)
 - **previous**: `d08f98a93fcf6c0bd1f4d7e1c5a0b9e8f7d6c5b4`
 - **head**: `7f51f16b2cb0e4d3c2b1a0f9e8d7c6b5a4f3e2d1`
 - **commits**: 1
+
+## Pull
+
+- Refresh: **`main`** moved `d08f98a` → `7f51f16` · new snapshot `2b12f15` at `refs/remotes/origin/main` · 2 files changed, 2 insertions(+), 2 deletions(-) in this checkout's paths
+- Rebased onto **`origin/main`** · `2b12f15`
 ```
 
 ## Exit status

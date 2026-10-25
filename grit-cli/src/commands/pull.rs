@@ -1,5 +1,6 @@
 //! `grit pull` — fetch from the remote, then integrate the upstream into the
-//! current branch (fast-forward when possible, otherwise a merge).
+//! current branch (fast-forward when possible, otherwise a merge). In a snapshot
+//! checkout it refreshes the checkout onto the server's newest snapshot.
 
 #[path = "pull_outcome.rs"]
 mod pull_outcome;
@@ -15,9 +16,15 @@ use grit_lib::config::ConfigSet;
 use grit_lib::porcelain::pull::{pull, PullError, PullMode, PullOptions};
 use grit_lib::progress::NeverCancel;
 use grit_lib::remote::fetch_request::resolve_pull_invocation;
+use grit_lib::remote::snapshot_checkout::{
+    ensure_refreshable, refresh, CheckoutClient, CheckoutError, CheckoutMarker,
+};
 use grit_lib::remote::transfer::{resolve_fetch_prune, resolve_fetch_tags, FetchOptions};
-use grit_lib::state::resolve_head_for_repository;
+use grit_lib::remote::HttpClientFactory;
+use grit_lib::repo::Repository;
+use grit_lib::state::{resolve_head_for_repository, InProgressOperation};
 
+pub(crate) use pull_outcome::changes_phrase;
 pub use pull_outcome::{map_outcome, PullOutcome, PullResult};
 
 #[derive(Default)]
@@ -38,14 +45,9 @@ impl PullRunArgs {
     }
 }
 
-pub fn run(args: &PullRunArgs, mode: OutputMode) -> Result<PullOutcome> {
-    if args.check && args.autostash {
-        anyhow::bail!("--check cannot be used with --autostash");
-    }
-    let repo = context::discover()?;
-    let config = ConfigSet::load(&context::environment(), Some(repo.git_dir()), true)
-        .context("could not load config")?;
-    let cli_mode = if args.ff_only {
+/// The integration mode the flags ask for, if any.
+fn cli_mode(args: &PullRunArgs) -> Option<PullMode> {
+    if args.ff_only {
         Some(PullMode::FfOnly)
     } else if args.no_rebase {
         Some(PullMode::Merge)
@@ -53,9 +55,22 @@ pub fn run(args: &PullRunArgs, mode: OutputMode) -> Result<PullOutcome> {
         Some(PullMode::Rebase)
     } else {
         None
-    };
-    let mut options = PullOptions::for_working_branch(&repo, context::environment(), cli_mode)
-        .map_err(anyhow::Error::new)?;
+    }
+}
+
+pub fn run(args: &PullRunArgs, mode: OutputMode) -> Result<PullOutcome> {
+    if args.check && args.autostash {
+        anyhow::bail!("--check cannot be used with --autostash");
+    }
+    let repo = context::discover()?;
+    let config = ConfigSet::load(&context::environment(), Some(repo.git_dir()), true)
+        .context("could not load config")?;
+    if let Some(marker) = checkout_to_refresh(&repo, &config, args) {
+        return refresh_checkout(&repo, &config, &marker, args, mode);
+    }
+    let mut options =
+        PullOptions::for_working_branch(&repo, context::environment(), cli_mode(args))
+            .map_err(anyhow::Error::new)?;
     let head = resolve_head_for_repository(&repo)?;
     let invocation = resolve_pull_invocation(
         &config,
@@ -81,17 +96,7 @@ pub fn run(args: &PullRunArgs, mode: OutputMode) -> Result<PullOutcome> {
         remote_name: Some(invocation.remote.clone()),
         ..Default::default()
     };
-    // In a snapshot checkout, pull refreshes onto the server's newest snapshot.
-    let refresh = if args.fetch.remote.is_none() && args.fetch.refspecs.is_empty() {
-        crate::commands::checkout::refresh_pull_options(&repo, &mut options)?
-    } else {
-        None
-    };
-    let remote_name = if refresh.is_some() {
-        "origin".to_owned()
-    } else {
-        invocation.remote
-    };
+    let remote_name = invocation.remote;
     let factory = crate::context::http_client_factory();
     // The work-tree update after the fetch reports no progress, so the overall
     // bar covers the transfer only.
@@ -126,10 +131,119 @@ pub fn run(args: &PullRunArgs, mode: OutputMode) -> Result<PullOutcome> {
         }
     };
     let mut outcome = map_outcome(lib);
-    outcome.refresh = refresh;
     outcome.transfer.records = progress.phases().to_vec();
     outcome.transfer.elapsed = progress.elapsed();
     Ok(outcome)
+}
+
+/// The checkout `grit pull` should refresh: in a snapshot checkout, a pull
+/// that names no refspecs and no remote, or names the checkout's own server
+/// (`origin`, or whatever it is called now).
+fn checkout_to_refresh(
+    repo: &Repository,
+    config: &ConfigSet,
+    args: &PullRunArgs,
+) -> Option<CheckoutMarker> {
+    if !args.fetch.refspecs.is_empty() || args.fetch.all {
+        return None;
+    }
+    let marker = CheckoutMarker::read(repo.git_dir())?;
+    match args.fetch.remote.as_deref() {
+        None => Some(marker),
+        Some(remote) => {
+            let url = config.get(&format!("remote.{remote}.url"));
+            (remote == marker.url || url.as_deref() == Some(marker.url.as_str())).then_some(marker)
+        }
+    }
+}
+
+/// `grit pull` in a snapshot checkout: ask the server for a snapshot of the
+/// newest target, fetch it from the checkout's server and bring the current
+/// branch onto it. With `--dry-run`, only ask where the target is now.
+fn refresh_checkout(
+    repo: &Repository,
+    config: &ConfigSet,
+    marker: &CheckoutMarker,
+    args: &PullRunArgs,
+    mode: OutputMode,
+) -> Result<PullOutcome> {
+    ensure_refreshable(repo).map_err(refresh_error)?;
+    let http = crate::context::http_client_factory()
+        .create(config)
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let client = CheckoutClient::new(http.as_ref(), &marker.url)?;
+    if args.fetch.dry_run {
+        let state = client.show(&marker.id)?;
+        return Ok(PullOutcome::refresh_dry_run(marker, &state));
+    }
+    let mut progress = args.fetch.quiet.progress(mode).with_overall(false);
+    if progress.is_drawing() {
+        eprintln!(
+            "{}",
+            transfer_header(
+                "Refreshing",
+                &marker.branch,
+                Some(&marker.url),
+                progress.uses_color()
+            )
+        );
+    }
+    let info = client.update(&marker.id)?;
+    let options = PullOptions {
+        mode: cli_mode(args),
+        autostash: args.autostash,
+        check: args.check,
+        fetch: FetchOptions {
+            thread_policy: repo.thread_policy(),
+            environment: context::environment(),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let refreshed = refresh(
+        repo,
+        marker,
+        &info,
+        &options,
+        &mut progress,
+        &NeverCancel,
+        Some(&crate::context::http_client_factory()),
+    )
+    .map_err(refresh_error)?;
+    let mut outcome = PullOutcome::from_refresh(refreshed);
+    outcome.transfer.records = progress.phases().to_vec();
+    outcome.transfer.elapsed = progress.elapsed();
+    Ok(outcome)
+}
+
+/// A refresh failure in words that say what to do next.
+fn refresh_error(err: CheckoutError) -> anyhow::Error {
+    match err {
+        CheckoutError::Remote(remote) => map_remote_error(*remote),
+        CheckoutError::Pull(pull) => match *pull {
+            PullError::Remote(remote) => map_remote_error(remote),
+            other => anyhow::Error::new(other),
+        },
+        CheckoutError::OperationInProgress(operation) => {
+            let next = match operation {
+                InProgressOperation::Rebase | InProgressOperation::RebaseInteractive => {
+                    "resolve the conflicts, `grit add` the files and run `grit rebase --continue`, or put the branch back with `grit rebase --abort`"
+                }
+                InProgressOperation::Merge => {
+                    "finish it with `grit commit`, or cancel it with `grit merge --abort`"
+                }
+                _ => "finish or cancel it",
+            };
+            anyhow::anyhow!(
+                "a {} is in progress; {next}, then run `grit pull` again",
+                operation.description()
+            )
+        }
+        moved @ CheckoutError::SnapshotMoved { .. } => {
+            anyhow::anyhow!("{moved}; run `grit pull` again")
+        }
+        other => other.into(),
+    }
 }
 
 /// Exit code for `grit pull --check` (0 when up-to-date or fast-forward is possible).
@@ -142,7 +256,10 @@ pub fn pull_check_exit_code(outcome: &PullOutcome) -> i32 {
         return 1;
     }
     match outcome.result {
-        PullResult::Conflicts | PullResult::RefusedNotFf | PullResult::AutostashConflict => 1,
+        PullResult::Conflicts
+        | PullResult::RefusedNotFf
+        | PullResult::AutostashConflict
+        | PullResult::RebaseStopped => 1,
         _ => 0,
     }
 }

@@ -408,6 +408,15 @@ fn work_is_checked_in_integrated_and_refreshed() {
         Value::Bool(true),
         "{integrated}"
     );
+    assert_eq!(
+        integrated["refresh"]["refresh"]["previous_base"],
+        first["base"]
+    );
+    // What changed in the checkout's paths: src/a.rs and src/deep/b.rs.
+    assert_eq!(
+        integrated["refresh"]["refresh"]["changes"]["files"], 2,
+        "{integrated}"
+    );
     let main = git(&demo, &["rev-parse", "main"]);
     assert_eq!(integrated["head"], Value::String(main.clone()));
     assert_eq!(
@@ -854,4 +863,309 @@ fn the_target_is_refused_in_any_case_and_after_the_servers_head_moves() {
         "blob"
     );
     assert_eq!(git(&demo, &["show", &format!("{work}:docs/d.md")]), "d");
+}
+
+/// The checkout's marker, as JSON.
+fn marker(co: &Path) -> Value {
+    serde_json::from_slice(&std::fs::read(co.join(".git/grit-checkout.json")).expect("marker"))
+        .expect("marker JSON")
+}
+
+#[test]
+fn plain_fetches_and_pushes_in_a_checkout_stay_with_its_snapshots() {
+    let (_tmp, home, repos, _server, repo_url) = signed_in();
+    let demo = repos.join("demo");
+    let first = json(
+        &home,
+        &home,
+        &["--json", "checkout", &repo_url, "-p", "src", "--into", "co"],
+    );
+    let work = first["work"].as_str().expect("work").to_owned();
+    let id = first["id"].as_str().expect("id").to_owned();
+    let snapshot = first["snapshot"].as_str().expect("snapshot").to_owned();
+    let co = home.join("co");
+    assert_eq!(
+        git(&co, &["config", "remote.origin.fetch"]),
+        format!("+refs/checkouts/{id}/target:refs/remotes/origin/main")
+    );
+    assert_eq!(
+        git(&co, &["config", "remote.origin.push"]),
+        format!("+refs/heads/*:refs/checkouts/{id}/out/heads/*")
+    );
+    assert_eq!(git(&co, &["config", "remote.origin.tagOpt"]), "--no-tags");
+    assert_eq!(git(&co, &["rev-parse", "origin"]), snapshot);
+
+    // The server's history grows, with another branch and a tag; a plain
+    // fetch brings none of it.
+    commit_file(&home, &demo, "docs/d.md", "d2\n", "More docs");
+    git(&demo, &["branch", "other"]);
+    git(&demo, &["tag", "v1"]);
+    ok(&home, &co, &["fetch"]);
+    assert_eq!(git(&co, &["rev-parse", "origin/main"]), snapshot);
+    assert_eq!(git(&co, &["rev-list", "--count", "--all"]), "1");
+    assert_eq!(git(&co, &["tag", "-l"]), "");
+    assert_eq!(
+        git(
+            &co,
+            &["for-each-ref", "--format=%(refname)", "refs/remotes"]
+        ),
+        "refs/remotes/origin/HEAD\nrefs/remotes/origin/main"
+    );
+
+    // A plain push lands where check-ins graft from, not on a real branch.
+    commit_file(&home, &co, "src/a.rs", "a2\n", "Change a");
+    ok(&home, &co, &["push"]);
+    assert_eq!(
+        git(
+            &demo,
+            &[
+                "rev-parse",
+                &format!("refs/checkouts/{id}/out/heads/{work}")
+            ]
+        ),
+        git(&co, &["rev-parse", "HEAD"])
+    );
+    assert_eq!(git(&demo, &["branch", "--list", &work]), "");
+    let checkin = json(&home, &co, &["--json", "checkin"]);
+    assert_eq!(checkin["branches"][0]["status"], "created", "{checkin}");
+
+    // Check-ins and refreshes go to the checkout's server, whatever origin is.
+    git(
+        &co,
+        &[
+            "remote",
+            "set-url",
+            "origin",
+            "http://127.0.0.1:1/elsewhere.git",
+        ],
+    );
+    commit_file(&home, &co, "src/c.rs", "c\n", "Add c");
+    let again = json(&home, &co, &["--json", "checkin"]);
+    assert_eq!(again["branches"][0]["status"], "updated", "{again}");
+    commit_file(&home, &demo, "src/deep/b.rs", "b2\n", "Bob changes b");
+    let pulled = json(&home, &co, &["--json", "pull"]);
+    assert_eq!(pulled["refresh"]["moved"], Value::Bool(true), "{pulled}");
+    assert_eq!(pulled["result"], "rebased", "{pulled}");
+}
+
+#[test]
+fn a_conflicting_refresh_stops_in_a_rebase_to_finish_with_grit_rebase() {
+    let (_tmp, home, repos, _server, repo_url) = signed_in();
+    let demo = repos.join("demo");
+    let first = json(
+        &home,
+        &home,
+        &["--json", "checkout", &repo_url, "-p", "src", "--into", "co"],
+    );
+    let work = first["work"].as_str().expect("work").to_owned();
+    let co = home.join("co");
+    commit_file(&home, &co, "src/a.rs", "ours\n", "Change a here");
+    commit_file(&home, &demo, "src/a.rs", "theirs\n", "Change a there");
+
+    // The new snapshot comes down; the rebase onto it stops on the conflict.
+    let stopped = run(&home, &co, &["pull"]);
+    assert_eq!(stopped.status.code(), Some(1));
+    let text = String::from_utf8_lossy(&stopped.stdout);
+    assert!(text.contains("main moved"), "{text}");
+    assert!(text.contains("CONFLICT (content): src/a.rs"), "{text}");
+    assert!(
+        text.contains("stopped on a conflict") && text.contains("grit rebase --continue"),
+        "{text}"
+    );
+    assert!(co.join(".git/rebase-merge").is_dir());
+    assert_eq!(marker(&co)["roots"].as_array().map(Vec::len), Some(2));
+
+    // Another refresh waits for the rebase.
+    let waiting = run(&home, &co, &["pull"]);
+    assert_eq!(waiting.status.code(), Some(1));
+    let text = String::from_utf8_lossy(&waiting.stderr);
+    assert!(text.contains("a rebase is in progress"), "{text}");
+
+    // Aborting puts the branch back; a refresh stops in the rebase again.
+    ok(&home, &co, &["rebase", "--abort"]);
+    let again = run(&home, &co, &["--json", "pull"]);
+    assert_eq!(again.status.code(), Some(1));
+    let again: Value = serde_json::from_slice(&again.stdout).expect("JSON");
+    assert_eq!(again["result"], "rebase_stopped", "{again}");
+    assert_eq!(again["branch"], "origin/main", "{again}");
+    assert_eq!(again["conflicts"], serde_json::json!(["src/a.rs"]));
+    assert_eq!(again["refresh"]["moved"], Value::Bool(false), "{again}");
+    assert_eq!(again["refresh"]["upstream_ref"], "refs/remotes/origin/main");
+
+    // Resolved and continued, the work sits on the new snapshot and checks in.
+    std::fs::write(co.join("src/a.rs"), "both\n").expect("resolve");
+    ok(&home, &co, &["add", "src/a.rs"]);
+    ok(&home, &co, &["rebase", "--continue"]);
+    assert_eq!(git(&co, &["branch", "--show-current"]), work);
+    assert_eq!(
+        git(&co, &["rev-parse", "HEAD^"]),
+        git(&co, &["rev-parse", "origin/main"])
+    );
+    let pulled = json(&home, &co, &["--json", "pull"]);
+    assert_eq!(pulled["result"], "up_to_date", "{pulled}");
+    let checkin = json(&home, &co, &["--json", "checkin"]);
+    assert_eq!(checkin["branches"][0]["status"], "created", "{checkin}");
+    assert_eq!(git(&demo, &["show", &format!("{work}:src/a.rs")]), "both");
+}
+
+#[test]
+fn a_refresh_moves_the_target_branch_along_and_names_branches_left_behind() {
+    let (_tmp, home, repos, _server, repo_url) = signed_in();
+    let demo = repos.join("demo");
+    let first = json(
+        &home,
+        &home,
+        &["--json", "checkout", &repo_url, "-p", "src", "--into", "co"],
+    );
+    let work = first["work"].as_str().expect("work").to_owned();
+    let co = home.join("co");
+    git(&co, &["branch", "main", "origin/main"]);
+    git(&co, &["switch", "-q", "-c", "side"]);
+    commit_file(&home, &co, "src/s.rs", "s\n", "Side work");
+    git(&co, &["switch", "-q", &work]);
+    commit_file(&home, &co, "src/w.rs", "w\n", "Work");
+    commit_file(&home, &demo, "src/deep/b.rs", "b2\n", "Bob changes b");
+
+    let out = ok(&home, &co, &["pull"]);
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(text.contains("main moved"), "{text}");
+    assert!(
+        text.contains("1 file changed, 1 insertion(+), 1 deletion(-) in this checkout's paths"),
+        "{text}"
+    );
+    assert!(text.contains("main follows to"), "{text}");
+    assert!(
+        text.contains("side still builds on an older snapshot")
+            && text.contains("`grit switch side`"),
+        "{text}"
+    );
+    assert_eq!(
+        git(&co, &["rev-parse", "main"]),
+        git(&co, &["rev-parse", "origin/main"])
+    );
+    assert_eq!(
+        git(&co, &["rev-parse", &format!("{work}^")]),
+        git(&co, &["rev-parse", "origin/main"])
+    );
+
+    let markdown = ok(&home, &co, &["--markdown", "pull"]);
+    let text = String::from_utf8_lossy(&markdown.stdout);
+    assert!(
+        text.contains("- Refresh: **`main`** has not moved"),
+        "{text}"
+    );
+    assert!(
+        text.contains("`side` still builds on an older snapshot"),
+        "{text}"
+    );
+    let pulled = json(&home, &co, &["--json", "pull"]);
+    assert_eq!(pulled["refresh"]["behind"][0]["name"], "side", "{pulled}");
+    assert_eq!(pulled["refresh"]["followed"], serde_json::json!([]));
+}
+
+#[test]
+fn refreshes_work_from_a_detached_head_and_from_a_linked_worktree() {
+    let (_tmp, home, repos, _server, repo_url) = signed_in();
+    let demo = repos.join("demo");
+    let first = json(
+        &home,
+        &home,
+        &["--json", "checkout", &repo_url, "-p", "src", "--into", "co"],
+    );
+    let work = first["work"].as_str().expect("work").to_owned();
+    let co = home.join("co");
+    git(&co, &["switch", "-q", "--detach"]);
+    let head = git(&co, &["rev-parse", "HEAD"]);
+    commit_file(&home, &demo, "src/deep/b.rs", "b2\n", "Bob changes b");
+
+    let pulled = json(&home, &co, &["--json", "pull"]);
+    assert_eq!(pulled["result"], "detached", "{pulled}");
+    assert_eq!(pulled["refresh"]["moved"], Value::Bool(true), "{pulled}");
+    assert_eq!(
+        Value::String(git(&co, &["rev-parse", "origin/main"])),
+        pulled["refresh"]["snapshot"]
+    );
+    assert_eq!(git(&co, &["rev-parse", "HEAD"]), head);
+    git(&co, &["switch", "-q", &work]);
+
+    // A linked worktree of the checkout is the same checkout.
+    let linked = home.join("linked");
+    git(
+        &co,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            linked.to_str().expect("path"),
+            "-b",
+            "feature",
+        ],
+    );
+    commit_file(&home, &linked, "src/f.rs", "f\n", "Feature");
+    let checkin = json(&home, &linked, &["--json", "checkin", "feature"]);
+    assert_eq!(checkin["branches"][0]["status"], "created", "{checkin}");
+    commit_file(&home, &demo, "src/deep/b.rs", "b3\n", "Bob changes b again");
+    let pulled = json(&home, &linked, &["--json", "pull"]);
+    assert_eq!(pulled["result"], "rebased", "{pulled}");
+    assert_eq!(pulled["refresh"]["moved"], Value::Bool(true), "{pulled}");
+    assert_eq!(marker(&co)["roots"].as_array().map(Vec::len), Some(3));
+}
+
+#[test]
+fn a_dry_run_refresh_asks_the_server_and_changes_nothing() {
+    let (_tmp, home, repos, _server, repo_url) = signed_in();
+    let demo = repos.join("demo");
+    let first = json(
+        &home,
+        &home,
+        &["--json", "checkout", &repo_url, "-p", "src", "--into", "co"],
+    );
+    let id = first["id"].as_str().expect("id").to_owned();
+    let co = home.join("co");
+    let before = marker(&co);
+    commit_file(&home, &demo, "src/a.rs", "a2\n", "Main changes a");
+    let main = git(&demo, &["rev-parse", "main"]);
+
+    let dry = json(&home, &co, &["--json", "pull", "--dry-run"]);
+    assert_eq!(dry["refresh"]["dry_run"], Value::Bool(true), "{dry}");
+    assert_eq!(dry["refresh"]["moved"], Value::Bool(true), "{dry}");
+    assert_eq!(dry["refresh"]["base"], Value::String(main.clone()));
+    let human = ok(&home, &co, &["pull", "--dry-run"]);
+    assert!(String::from_utf8_lossy(&human.stdout).contains("`grit pull` would refresh onto it"));
+    assert_eq!(marker(&co), before);
+    assert_eq!(git(&co, &["rev-parse", "origin/main"]), first["snapshot"]);
+    assert_eq!(
+        Value::String(git(
+            &demo,
+            &["rev-parse", &format!("refs/checkouts/{id}/target")]
+        )),
+        first["snapshot"]
+    );
+
+    // `--check` refreshes for real but leaves the branch where it is.
+    let checked = json(&home, &co, &["--json", "pull", "--check"]);
+    let refresh = &checked["refresh"];
+    assert_eq!(refresh["moved"], Value::Bool(true), "{checked}");
+    assert_eq!(refresh["base"], Value::String(main));
+    assert_eq!(refresh["previous_base"], first["base"]);
+    assert_eq!(refresh["previous_snapshot"], first["snapshot"]);
+    assert_eq!(
+        refresh["changes"],
+        serde_json::json!({"files": 1, "insertions": 1, "deletions": 1})
+    );
+    assert_eq!(checked["check"]["would"], "fast_forward", "{checked}");
+    assert_eq!(git(&co, &["rev-parse", "HEAD"]), first["snapshot"]);
+    assert_eq!(
+        Value::String(git(&co, &["rev-parse", "origin/main"])),
+        refresh["snapshot"]
+    );
+    assert_eq!(marker(&co)["roots"].as_array().map(Vec::len), Some(2));
+
+    let pulled = json(&home, &co, &["--json", "pull"]);
+    assert_eq!(pulled["refresh"]["moved"], Value::Bool(false), "{pulled}");
+    assert_eq!(pulled["result"], "fast_forward", "{pulled}");
+    assert_eq!(
+        git(&co, &["rev-parse", "HEAD"]),
+        git(&co, &["rev-parse", "origin/main"])
+    );
 }

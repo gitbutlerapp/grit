@@ -5,17 +5,17 @@ expression: payload
 {
   "human": {
     "exit": 0,
-    "stdout": "✓ Merged alice/elm-orchid into main on the server: d08f98a → 7f51f16 (1 commit)\n",
+    "stdout": "✓ Merged alice/elm-orchid into main on the server: d08f98a → 7f51f16 (1 commit)\nmain moved d08f98a → 7f51f16; new snapshot e1d2c3b at origin/main\n  2 files changed, 3 insertions(+), 1 deletion(-) in this checkout's paths\nRebased onto origin/main (2b12f15)\nmain follows to e1d2c3b\nalice/side still builds on an older snapshot; run `grit switch alice/side`, then `grit pull`\n",
     "stderr": ""
   },
   "json": {
     "exit": 0,
-    "stdout": "{\"name\":\"alice/elm-orchid\",\"target\":\"main\",\"status\":\"merged\",\"previous\":\"d08f98a93fcf6c0bd1f4d7e1c5a0b9e8f7d6c5b4\",\"head\":\"7f51f16b2cb0e4d3c2b1a0f9e8d7c6b5a4f3e2d1\",\"commits\":1}\n",
+    "stdout": "{\"name\":\"alice/elm-orchid\",\"target\":\"main\",\"status\":\"merged\",\"previous\":\"d08f98a93fcf6c0bd1f4d7e1c5a0b9e8f7d6c5b4\",\"head\":\"7f51f16b2cb0e4d3c2b1a0f9e8d7c6b5a4f3e2d1\",\"commits\":1,\"refresh\":{\"result\":\"rebased\",\"branch\":\"origin/main\",\"oid\":\"2b12f15c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a\",\"refresh\":{\"target\":\"main\",\"upstream_ref\":\"refs/remotes/origin/main\",\"base\":\"7f51f16b2cb0e4d3c2b1a0f9e8d7c6b5a4f3e2d1\",\"snapshot\":\"e1d2c3b4a5f60718293a4b5c6d7e8f9012345678\",\"previous_base\":\"d08f98a93fcf6c0bd1f4d7e1c5a0b9e8f7d6c5b4\",\"previous_snapshot\":\"5c892b5783dbdeb57f7228eb6a13ffb2fa17d832\",\"moved\":true,\"changes\":{\"files\":2,\"insertions\":3,\"deletions\":1},\"dry_run\":false,\"followed\":[{\"name\":\"main\",\"from\":\"5c892b5783dbdeb57f7228eb6a13ffb2fa17d832\",\"to\":\"e1d2c3b4a5f60718293a4b5c6d7e8f9012345678\"}],\"behind\":[{\"name\":\"alice/side\",\"tip\":\"8e2d26b0a1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6\"}]}}}\n",
     "stderr": ""
   },
   "markdown": {
     "exit": 0,
-    "stdout": "## Integrate `alice/elm-orchid` into `main`\n\n- **status**: merged\n- **previous**: `d08f98a93fcf6c0bd1f4d7e1c5a0b9e8f7d6c5b4`\n- **head**: `7f51f16b2cb0e4d3c2b1a0f9e8d7c6b5a4f3e2d1`\n- **commits**: 1\n",
+    "stdout": "## Integrate `alice/elm-orchid` into `main`\n\n- **status**: merged\n- **previous**: `d08f98a93fcf6c0bd1f4d7e1c5a0b9e8f7d6c5b4`\n- **head**: `7f51f16b2cb0e4d3c2b1a0f9e8d7c6b5a4f3e2d1`\n- **commits**: 1\n\n## Pull\n\n- Refresh: **`main`** moved `d08f98a` → `7f51f16` · new snapshot `e1d2c3b` at `refs/remotes/origin/main` · 2 files changed, 3 insertions(+), 1 deletion(-) in this checkout's paths\n- Rebased onto **`origin/main`** · `2b12f15`\n- `main` follows to `e1d2c3b`\n- `alice/side` still builds on an older snapshot → `grit switch alice/side`, then `grit pull`\n",
     "stderr": ""
   }
 }

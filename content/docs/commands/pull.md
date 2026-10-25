@@ -27,7 +27,7 @@ The default remote is `branch.<name>.remote`, or `origin`; every mode (`--ff-onl
 
 On a branch with no commits yet, the branch is created at the upstream commit with an `initial pull` reflog entry.
 
-Like `grit merge`, `grit pull` uses the same scoped local-change rules as [`grit switch`](../switch/) and won't run with a detached HEAD. Conflicts follow the same model as `grit merge` and `grit rebase`: the pull stops with conflict markers and an operation in progress (a merge, or a rebase), and the result tells you how to finish it.
+Like `grit merge`, `grit pull` uses the same scoped local-change rules as [`grit switch`](../switch/) and won't run with a detached HEAD (except to refresh a [snapshot checkout](#in-a-snapshot-checkout)). Conflicts follow the same model as `grit merge` and `grit rebase`: the pull stops with conflict markers and an operation in progress (a merge, or a rebase), and the result tells you how to finish it.
 
 The fetch step uses the same terminal progress as [`grit fetch`](../fetch/) and [`grit clone`](../clone/): a `Pulling <remote> <url>` line, then live stderr progress with an overall bar on a TTY in human mode, silent when stderr is piped or when you pass `--json` or `--markdown`. When the fetch received objects, the result line is followed by the same `time`, `data` and `objects` summary rows as `grit fetch`. When you need an explicit fetch refspec or fetch-only flags (`--depth`, `--deepen`, `--unshallow`, `--tags`, `--no-tags`, `--prune`, `--no-prune`, `--dry-run`, `-q`), run [`grit fetch`](../fetch/) first, then integrate with `grit merge` or the pull integration flags below.
 
@@ -39,15 +39,40 @@ Integration runs the same hooks as `git pull`: `post-merge 0` after a fast-forwa
 
 ### In a snapshot checkout
 
-In a [snapshot checkout](../checkout/), `grit pull` with no remote or refspecs **refreshes** the checkout. It asks the server for a snapshot of the newest commit of the target branch the checkout was made from (the server keeps following that branch even when its `HEAD` moves to another), made on top of the checkout's last snapshot, fetches it into `origin/<target>` (only what changed in the checkout's paths comes down) and rebases the current branch onto it. Commits already merged into the target drop out. The first result line says where it refreshed to, or that the target hasn't moved:
+In a [snapshot checkout](../checkout/), `grit pull` with no refspecs **refreshes** the checkout (so does `grit pull origin`, or a pull naming whatever remote has the checkout's server URL now):
+
+1. It asks the server for a snapshot of the newest commit of the target branch the checkout was made from (the server keeps following that branch even when its `HEAD` moves to another), made on top of the checkout's last snapshot.
+2. It fetches that snapshot into `origin/<target>` (`refs/remotes/origin/<target>`) from the server the checkout came from, with an explicit refspec and no tags, whatever `origin` is configured as now. Only what changed in the checkout's paths comes down. The checkout records the new snapshot only once it has arrived and is the one the server described.
+3. It brings the current branch onto it: a rebase unless `--ff-only` or `--no-rebase` says otherwise. Commits already merged into the target drop out. When the rebase hits a conflict, it **stops** in a resumable rebase, as [`grit rebase`](../rebase/) does: resolve the files, `grit add` them, then `grit rebase --continue` (or `grit rebase --abort` to put the branch back on the older snapshot). Until then, another `grit pull` refuses to start. When the index or worktree has changes of their own, the rebase can't stop there, so nothing changes; commit or stash them and pull again.
+4. A local branch named after the target (a `main` you made with `grit branch main origin/main`) that has no commits of its own follows to the new snapshot. Every other branch with commits of its own that still builds on an older snapshot is named, with how to bring it up: `grit switch <branch>`, then `grit pull`.
+
+With `HEAD` detached, the refresh still fetches the new snapshot into `origin/<target>` and leaves `HEAD` where it is. It works the same from any worktree of the checkout.
+
+The first lines say how far the target moved and what changed in the checkout's paths (as `git diff --shortstat` counts it), or that it hasn't moved:
 
 ```console
 $ grit pull
-Refreshed onto main at 3c011e2 (snapshot 7ae0a80)
-Rebased onto origin (FETCH_HEAD) (2b87e20)
+main moved 4f06b71 → 3182ed4; new snapshot 39dfeba at origin/main
+  1 file changed, 1 insertion(+), 1 deletion(-) in this checkout's paths
+Rebased onto origin/main (2b87e20)
+main follows to 39dfeba
+side still builds on an older snapshot; run `grit switch side`, then `grit pull`
 ```
 
-`--ff-only` and `--no-rebase` still apply; without them the refresh rebases. A merge commit a `--no-rebase` refresh makes checks in as a merge whose result keeps the target's changes outside your paths (see [`grit checkin`](../checkin/)). A later rebasing refresh drops the merge commits a `--no-rebase` refresh made and replays your own commits onto the new snapshot.
+```console
+$ grit pull
+main moved e8d5aa5 → f3dbd6f; new snapshot 552fbc6 at origin/main
+  1 file changed, 1 insertion(+), 1 deletion(-) in this checkout's paths
+CONFLICT (content): src/a.rs
+Rebasing onto origin/main stopped on a conflict; the rebase is in progress.
+Resolve the conflicts, `grit add` the files, then run `grit rebase --continue`; or run `grit rebase --abort` to put the branch back where it was.
+$ grit add src/a.rs && grit rebase --continue
+Rebased 1 commit(s)
+```
+
+A merge commit a `--no-rebase` refresh makes checks in as a merge whose result keeps the target's changes outside your paths (see [`grit checkin`](../checkin/)). A later rebasing refresh drops the merge commits a `--no-rebase` refresh made and replays your own commits onto the new snapshot.
+
+`--dry-run` asks the server where the target is now and says whether a refresh would move, without the server making a snapshot, and without fetching or changing anything here. `--check` refreshes for real (the server makes the snapshot and it is fetched into `origin/<target>`), then reports what bringing the branch onto it would do, without changing the branch, the index or the worktree.
 
 `--check` fetches (always for real — not a dry run) and reports whether the branch could fast-forward or is already up to date, without changing `HEAD`, the index, the worktree, or reflogs. In rebase mode it also predicts whether the replay would stop on conflicts (`would` is `conflicts`). It cannot be combined with `--autostash` or integration mode overrides (`--ff-only`, `--rebase`, `--no-rebase`).
 
@@ -128,18 +153,18 @@ Schema: [v2](/schemas/pull/v2.json) · [v1](/schemas/pull/v1.json)
 
 Pass `--json` for stable, scripting-friendly output:
 
-Exit codes (also apply to default human output): **0** on success (`up_to_date`, `fast_forward`, `merged`, `rebased`, or `set_upstream`) and on `--check` when `check.fast_forward_possible` is true; **1** when `--ff-only` refuses diverged history (`refused_not_ff`), integration stops with conflicts (`conflicts`, with `operation` `merge` or `rebase` in progress), `--check` when a merge or rebase would be required, or `autostash_conflict`.
+Exit codes (also apply to default human output): **0** on success (`up_to_date`, `fast_forward`, `merged`, `rebased`, `set_upstream`, or `detached`) and on `--check` when `check.fast_forward_possible` is true; **1** when `--ff-only` refuses diverged history (`refused_not_ff`), integration stops with conflicts (`conflicts`, with `operation` `merge` or `rebase` in progress), a snapshot checkout's refresh stops in a rebase (`rebase_stopped`), `--check` when a merge or rebase would be required, or `autostash_conflict`.
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
-| `result` | string | `up_to_date`, `fast_forward`, `merged`, `rebased`, `refused_not_ff`, `conflicts`, `set_upstream`, or `autostash_conflict`. |
+| `result` | string | `up_to_date`, `fast_forward`, `merged`, `rebased`, `refused_not_ff`, `conflicts`, `set_upstream`, `autostash_conflict`, `rebase_stopped` (a snapshot checkout's rebase stopped on a conflict and is in progress), or `detached` (a snapshot checkout refreshed with `HEAD` detached: only `origin/<target>` moved). |
 | `branch` | string | Remote branch label that was integrated (or checked). |
 | `oid` | string or null | Commit the current branch points at after the pull, when applicable (absent when a rebase stopped). |
 | `change_id` | string or null | Stored `change-id` on `oid` when present. |
 | `upstream` | string or null | For `set_upstream`, the remote-tracking branch that was adopted. |
-| `conflicts` | array of strings or null | Path names when `result` is `conflicts` (legacy list). |
-| `conflict_details` | array or null | Structured conflict items when `result` is `conflicts`: `path`, `kind` (`content`, `add_add`, `modify_delete`), and for merges a `summary`. |
-| `operation` | string or null | When `result` is `conflicts`: the operation left in progress, `merge` or `rebase`. |
+| `conflicts` | array of strings or null | Path names when `result` is `conflicts` or `rebase_stopped` (legacy list). |
+| `conflict_details` | array or null | Structured conflict items when `result` is `conflicts` or `rebase_stopped`: `path`, `kind` (`content`, `add_add`, `modify_delete`), and for merges a `summary`. |
+| `operation` | string or null | When `result` is `conflicts` or `rebase_stopped`: the operation left in progress, `merge` or `rebase`. |
 | `commit` | string or null | When `operation` is `rebase`: the local commit that could not be replayed. |
 | `next_steps` | array of strings or null | When `result` is `conflicts`: ordered `grit` commands to finish (for a rebase, ending in `grit rebase --continue`). |
 | `alternatives` | array of strings or null | When `result` is `conflicts`: other ways out (`grit merge --abort`, or `grit rebase --abort` / `grit rebase --skip`). |
@@ -147,7 +172,18 @@ Exit codes (also apply to default human output): **0** on success (`up_to_date`,
 | `ahead` | integer or null | Local-only commits when `result` is `refused_not_ff` or with `--check`. |
 | `behind` | integer or null | Upstream-only commits when `result` is `refused_not_ff` or with `--check`. |
 | `check` | object or null | Present with `--check`: `ahead`, `behind`, `fast_forward_possible`, and `would` (same result strings as `result`). |
-| `refresh` | object or omitted | In a snapshot checkout: `target` (the server's target branch), `base` (the real commit the newest snapshot stands for), `snapshot` (the snapshot, now `origin/<target>`) and `moved` (whether the target moved since the last snapshot). |
+| `refresh` | object or omitted | In a snapshot checkout, the refresh (fields below). |
+| `refresh.target` | string | The server's target branch the checkout follows. |
+| `refresh.upstream_ref` | string | The local ref holding the newest snapshot, `refs/remotes/origin/<target>`. |
+| `refresh.base` | string | The real commit the newest snapshot stands for. With `--dry-run`, where the target is now. |
+| `refresh.snapshot` | string | The newest snapshot commit, now at `upstream_ref`. With `--dry-run`, the checkout's snapshot as it is. |
+| `refresh.previous_base` | string or null | The real commit the checkout's previous snapshot stood for. |
+| `refresh.previous_snapshot` | string or null | The checkout's previous snapshot. |
+| `refresh.moved` | boolean | Whether the target moved since the checkout's last snapshot. |
+| `refresh.changes` | object or null | What changed in the checkout's paths between the two snapshots: `files`, `insertions`, `deletions`; null when the target didn't move. |
+| `refresh.dry_run` | boolean | True with `--dry-run`: nothing was fetched or changed, and the server made no snapshot. |
+| `refresh.followed` | array | The local branch named after the target that moved along: `name`, `from`, `to`. |
+| `refresh.behind` | array | Other branches with commits of their own still on an older snapshot: `name`, `tip`. |
 
 Example:
 
@@ -171,6 +207,37 @@ A rebase pull that stopped on conflicts:
   "commit": "1e644589243fb885b773ec4d697b779000495741",
   "next_steps": ["grit diff", "grit add .", "grit rebase --continue"],
   "alternatives": ["grit rebase --abort", "grit rebase --skip"]
+}
+```
+
+In a snapshot checkout:
+
+```json
+{
+  "result": "rebased",
+  "branch": "origin/main",
+  "oid": "2b87e20c6d1f0a9e8b7c6d5e4f3a2b1c0d9e8f7a",
+  "refresh": {
+    "target": "main",
+    "upstream_ref": "refs/remotes/origin/main",
+    "base": "3182ed489b694ae64834b5f6648079c4f30c5e64",
+    "snapshot": "39dfeba2cfa4b1d0e9f8a7b6c5d4e3f2a1b0c9d8",
+    "previous_base": "4f06b71eca1af2057ee312b06eecac8f40c15b00",
+    "previous_snapshot": "5c892b5783dbdeb57f7228eb6a13ffb2fa17d832",
+    "moved": true,
+    "changes": { "files": 1, "insertions": 1, "deletions": 1 },
+    "dry_run": false,
+    "followed": [
+      {
+        "name": "main",
+        "from": "5c892b5783dbdeb57f7228eb6a13ffb2fa17d832",
+        "to": "39dfeba2cfa4b1d0e9f8a7b6c5d4e3f2a1b0c9d8"
+      }
+    ],
+    "behind": [
+      { "name": "side", "tip": "8e2d26b0a1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6" }
+    ]
+  }
 }
 ```
 
@@ -207,12 +274,23 @@ Markdown uses headings, bullet lists, and fenced blocks; pipe characters inside 
 - Fast-forwarded **`origin/main`** → `d0f5bdf`
 ```
 
+In a snapshot checkout, the refresh comes first, and branches it moved or left behind follow the result:
+
+```text
+## Pull
+
+- Refresh: **`main`** moved `4f06b71` → `3182ed4` · new snapshot `39dfeba` at `refs/remotes/origin/main` · 1 file changed, 1 insertion(+), 1 deletion(-) in this checkout's paths
+- Rebased onto **`origin/main`** · `2b87e20`
+- `main` follows to `39dfeba`
+- `side` still builds on an older snapshot → `grit switch side`, then `grit pull`
+```
+
 ## Exit status
 
 | Code | Meaning |
 | ---: | --- |
 | `0` | Success (`up_to_date`, `fast_forward`, `merged`, `rebased`, `set_upstream`) or `--check` when fast-forward is possible. |
-| `1` | Conflicts, refused merge/rebase, `--check` when integration would be required, or `autostash_conflict`. |
+| `1` | Conflicts, refused merge/rebase, a snapshot checkout's rebase stopped in progress (`rebase_stopped`), a refresh refused while a rebase or merge is in progress, `--check` when integration would be required, or `autostash_conflict`. |
 | `2` | Invalid flags ([`usage`](../exit-codes/)). |
 | `128` | `--ff-only` when history diverged ([`refused_not_ff`](../exit-codes/)). |
 | `128` | The fetch could not reach or read the remote ([`remote_unreadable`](../exit-codes/)). |

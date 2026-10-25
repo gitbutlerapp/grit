@@ -1,5 +1,6 @@
-//! Ref moves the server makes for snapshot checkouts: one compare-and-swap
-//! each, with a reflog entry where the repository keeps reflogs.
+//! Ref moves made for snapshot checkouts, by the server and by a refresh: one
+//! compare-and-swap each, with a reflog entry where the repository keeps
+//! reflogs.
 
 use crate::error::Error;
 use crate::objects::ObjectId;
@@ -36,12 +37,29 @@ pub(crate) fn swap_ref(
     who: &Signature,
     message: &str,
 ) -> Result<Swap> {
+    swap_ref_as(repo, refname, expected, new, &who.line(), message)
+}
+
+/// [`swap_ref`], logged as `identity`: a whole reflog identity line,
+/// `Name <email> <seconds> <zone>`.
+///
+/// # Errors
+///
+/// As [`swap_ref`].
+pub(crate) fn swap_ref_as(
+    repo: &Repository,
+    refname: &str,
+    expected: Option<ObjectId>,
+    new: ObjectId,
+    identity: &str,
+    message: &str,
+) -> Result<Swap> {
     let config = repo.config()?;
     let logged =
         crate::refs::should_autocreate_reflog_with_config(&config, repo.git_dir(), refname)
             || repo.refs().reflog_exists(refname)?;
     let reflog = logged.then(|| ReflogUpdate {
-        identity: who.line(),
+        identity: identity.to_owned(),
         message: message.to_owned(),
         // The identity carries its own time, so this one is never read.
         time: time::OffsetDateTime::UNIX_EPOCH,

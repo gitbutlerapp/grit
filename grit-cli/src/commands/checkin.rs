@@ -7,11 +7,9 @@ use anyhow::{bail, Result};
 use grit_lib::objects::ObjectId;
 use grit_lib::progress::NeverCancel;
 use grit_lib::remote::snapshot_checkout::{
-    branches_with_work, out_ref, CheckinBranch, CheckinRequest, CheckinStatus, IntegrateRequest,
-    IntegrateStatus,
+    branches_with_work, push_for_checkin, CheckinBranch, CheckinRequest, CheckinStatus,
+    CheckoutError, IntegrateRequest, IntegrateStatus,
 };
-use grit_lib::remote::transfer::{PushOptions, PushRefSpec};
-use grit_lib::remote::{DefaultHttpClientFactory, Remote};
 use schemars::JsonSchema;
 use serde::Serialize;
 
@@ -132,35 +130,27 @@ impl MarkdownRender for CheckinOutcome {
     }
 }
 
-/// Push `branches` to their out refs and ask the server to graft them.
+/// Push `branches` to their out refs on the checkout's server (the URL the
+/// checkout records, whatever `origin` is now) and ask it to graft them.
 fn check_in(
     co: &OpenCheckout,
     branches: &[(String, ObjectId)],
     force: bool,
     mode: OutputMode,
 ) -> Result<CheckinOutcome> {
-    let specs: Vec<PushRefSpec> = branches
-        .iter()
-        .map(|(name, tip)| PushRefSpec {
-            src: Some(*tip),
-            src_ref: Some(format!("refs/heads/{name}")),
-            dst: out_ref(&co.marker.id, name),
-            force: true,
-            ..Default::default()
-        })
-        .collect();
-    let remote = Remote::from_config(&co.config, "origin").map_err(|e| anyhow::anyhow!("{e}"))?;
     let mut progress = TerminalProgress::new(mode);
-    let pushed = remote
-        .push(
-            &co.repo,
-            &specs,
-            PushOptions::default(),
-            &mut progress,
-            &NeverCancel,
-            Some(&DefaultHttpClientFactory),
-        )
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let pushed = push_for_checkin(
+        &co.repo,
+        &co.marker,
+        branches,
+        &mut progress,
+        &NeverCancel,
+        Some(&crate::context::http_client_factory()),
+    )
+    .map_err(|e| match e {
+        CheckoutError::Remote(remote) => crate::commands::fetch::map_remote_error(*remote),
+        other => other.into(),
+    })?;
     drop(progress);
     if let Some(bad) = pushed.results.iter().find(|r| r.status.is_error()) {
         bail!(
@@ -291,13 +281,21 @@ impl HumanRender for IntegrateOutcome {
 }
 
 impl MarkdownRender for IntegrateOutcome {
-    fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
+    fn render_markdown(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
+        if let Some(c) = &self.checkin {
+            c.render_markdown(w, ctx)?;
+            outln!(w);
+        }
         outln!(w, "## Integrate `{}` into `{}`", self.name, self.target);
         outln!(w);
         outln!(w, "- **status**: {}", self.status);
         outln!(w, "- **previous**: `{}`", self.previous);
         outln!(w, "- **head**: `{}`", self.head);
         outln!(w, "- **commits**: {}", self.commits);
+        if let Some(r) = &self.refresh {
+            outln!(w);
+            r.render_markdown(w, ctx)?;
+        }
         Ok(())
     }
 }

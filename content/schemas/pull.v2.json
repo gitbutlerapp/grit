@@ -56,27 +56,78 @@
       "description": "What `grit pull` refreshed in a checkout.",
       "properties": {
         "base": {
-          "description": "The real commit the newest snapshot stands for.",
+          "description": "The real commit the newest snapshot stands for. With `--dry-run`, where the target is now.",
           "type": "string"
+        },
+        "behind": {
+          "description": "Other branches with commits of their own still on an older snapshot.",
+          "items": {
+            "$ref": "#/definitions/RefreshBehindJson"
+          },
+          "type": "array"
+        },
+        "changes": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RefreshChangesJson"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "What changed in the checkout's paths between the two snapshots; null when the target didn't move."
+        },
+        "dry_run": {
+          "description": "With `--dry-run`: nothing was fetched or changed, and the server made no snapshot.",
+          "type": "boolean"
+        },
+        "followed": {
+          "description": "The local branch named after the target, with no commits of its own, that moved to the new snapshot.",
+          "items": {
+            "$ref": "#/definitions/RefreshFollowedJson"
+          },
+          "type": "array"
         },
         "moved": {
           "description": "Whether the target had moved since the checkout's last snapshot.",
           "type": "boolean"
         },
+        "previous_base": {
+          "description": "The real commit the checkout's previous snapshot stood for.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "previous_snapshot": {
+          "description": "The checkout's previous snapshot.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "snapshot": {
-          "description": "The newest snapshot commit, now `origin/<target>`.",
+          "description": "The newest snapshot commit, now `origin/<target>`. With `--dry-run`, the checkout's snapshot as it is.",
           "type": "string"
         },
         "target": {
           "description": "The server's target branch.",
           "type": "string"
+        },
+        "upstream_ref": {
+          "description": "The local ref holding the newest snapshot, `refs/remotes/origin/<target>`.",
+          "type": "string"
         }
       },
       "required": [
         "base",
+        "behind",
+        "dry_run",
+        "followed",
         "moved",
         "snapshot",
-        "target"
+        "target",
+        "upstream_ref"
       ],
       "type": "object"
     },
@@ -90,9 +141,81 @@
         "conflicts",
         "set_upstream",
         "rebased",
-        "autostash_conflict"
+        "autostash_conflict",
+        "rebase_stopped",
+        "detached"
       ],
       "type": "string"
+    },
+    "RefreshBehindJson": {
+      "description": "A branch still building on an older snapshot after a refresh.",
+      "properties": {
+        "name": {
+          "description": "The branch.",
+          "type": "string"
+        },
+        "tip": {
+          "description": "Its tip.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "name",
+        "tip"
+      ],
+      "type": "object"
+    },
+    "RefreshChangesJson": {
+      "description": "What changed in a checkout's paths between two snapshots, as `git diff --shortstat` counts it.",
+      "properties": {
+        "deletions": {
+          "description": "Lines removed.",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "files": {
+          "description": "Files changed.",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "insertions": {
+          "description": "Lines added.",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        }
+      },
+      "required": [
+        "deletions",
+        "files",
+        "insertions"
+      ],
+      "type": "object"
+    },
+    "RefreshFollowedJson": {
+      "description": "A branch a refresh moved along with the snapshot.",
+      "properties": {
+        "from": {
+          "description": "The older snapshot it was at.",
+          "type": "string"
+        },
+        "name": {
+          "description": "The branch.",
+          "type": "string"
+        },
+        "to": {
+          "description": "The new snapshot it is at.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "from",
+        "name",
+        "to"
+      ],
+      "type": "object"
     }
   },
   "description": "Outcome of `grit pull`.",

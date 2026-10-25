@@ -9,7 +9,10 @@ use time::OffsetDateTime;
 
 use crate::commands::auth::{AuthOutcome, LogoutOutcome};
 use crate::commands::checkin::{CheckinBranchJson, CheckinOutcome, IntegrateOutcome};
-use crate::commands::checkout::CheckoutOutcome;
+use crate::commands::checkout::{
+    CheckoutOutcome, PullRefreshJson, RefreshBehindJson, RefreshChangesJson, RefreshFollowedJson,
+};
+use crate::commands::pull::{PullOutcome, PullResult};
 use crate::commands::serve_http::{ServeGrantJson, ServeUserJson, ServeUsersOutcome};
 use crate::commands::slice::{SliceJson, SliceListOutcome};
 use crate::commands::update::UpdateOutcome;
@@ -211,6 +214,52 @@ fn checkin_render() {
     snapshot_modes("checkin_render", &sample_checkin());
 }
 
+/// The refresh `grit integrate` runs after the merge, as `grit pull` reports it.
+fn sample_refresh() -> PullOutcome {
+    PullOutcome {
+        result: PullResult::Rebased,
+        branch: "origin/main".to_owned(),
+        oid: Some("2b12f15c0d9e8f7a6b5c4d3e2f1a0b9c8d7e6f5a".to_owned()),
+        change_id: None,
+        upstream: None,
+        conflicts: None,
+        conflict_details: None,
+        operation: None,
+        commit: None,
+        next_steps: None,
+        alternatives: None,
+        autostash: None,
+        ahead: None,
+        behind: None,
+        check: None,
+        refresh: Some(PullRefreshJson {
+            target: "main".to_owned(),
+            upstream_ref: "refs/remotes/origin/main".to_owned(),
+            base: "7f51f16b2cb0e4d3c2b1a0f9e8d7c6b5a4f3e2d1".to_owned(),
+            snapshot: "e1d2c3b4a5f60718293a4b5c6d7e8f9012345678".to_owned(),
+            previous_base: Some("d08f98a93fcf6c0bd1f4d7e1c5a0b9e8f7d6c5b4".to_owned()),
+            previous_snapshot: Some("5c892b5783dbdeb57f7228eb6a13ffb2fa17d832".to_owned()),
+            moved: true,
+            changes: Some(RefreshChangesJson {
+                files: 2,
+                insertions: 3,
+                deletions: 1,
+            }),
+            dry_run: false,
+            followed: vec![RefreshFollowedJson {
+                name: "main".to_owned(),
+                from: "5c892b5783dbdeb57f7228eb6a13ffb2fa17d832".to_owned(),
+                to: "e1d2c3b4a5f60718293a4b5c6d7e8f9012345678".to_owned(),
+            }],
+            behind: vec![RefreshBehindJson {
+                name: "alice/side".to_owned(),
+                tip: "8e2d26b0a1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6".to_owned(),
+            }],
+        }),
+        transfer: Default::default(),
+    }
+}
+
 #[test]
 fn integrate_render() {
     let outcome = IntegrateOutcome {
@@ -221,7 +270,7 @@ fn integrate_render() {
         head: "7f51f16b2cb0e4d3c2b1a0f9e8d7c6b5a4f3e2d1".to_owned(),
         commits: 1,
         checkin: None,
-        refresh: None,
+        refresh: Some(sample_refresh()),
     };
     snapshot_modes("integrate_render", &outcome);
 }

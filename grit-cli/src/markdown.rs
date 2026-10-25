@@ -771,6 +771,12 @@ pub fn print_pull_outcome(
     use crate::commands::pull::PullResult;
     outln!(w, "## Pull");
     outln!(w);
+    if let Some(r) = &outcome.refresh {
+        print_refresh_head(w, r)?;
+        if r.dry_run {
+            return Ok(());
+        }
+    }
     if let Some(check) = &outcome.check {
         outln!(
             w,
@@ -883,6 +889,82 @@ pub fn print_pull_outcome(
                 outcome.branch
             );
         }
+        PullResult::RebaseStopped => {
+            outln!(
+                w,
+                "- Rebase onto **`{}`** stopped on a conflict; the rebase is in progress",
+                outcome.branch
+            );
+            outln!(w);
+            for item in outcome.conflict_details.as_deref().unwrap_or(&[]) {
+                outln!(w, "- **{}** — `{path}`", item.kind, path = item.path);
+            }
+            outln!(
+                w,
+                "→ resolve the conflicts, `grit add` the files, then `grit rebase --continue`; or `grit rebase --abort` to put the branch back"
+            );
+        }
+        PullResult::Detached => {
+            outln!(
+                w,
+                "- `HEAD` is detached, so only **`{}`** moved; the new snapshot is there",
+                outcome.branch
+            );
+        }
+    }
+    if let Some(r) = &outcome.refresh {
+        for f in &r.followed {
+            outln!(w, "- `{}` follows to `{}`", f.name, short_hex(&f.to));
+        }
+        for b in &r.behind {
+            outln!(
+                w,
+                "- `{}` still builds on an older snapshot → `grit switch {}`, then `grit pull`",
+                b.name,
+                b.name
+            );
+        }
+    }
+    Ok(())
+}
+
+/// The refresh line of `grit pull` in a snapshot checkout.
+fn print_refresh_head(
+    w: &mut dyn Write,
+    r: &crate::commands::checkout::PullRefreshJson,
+) -> anyhow::Result<()> {
+    let previous = r.previous_base.as_deref().map(short_hex).unwrap_or("?");
+    if !r.moved {
+        outln!(
+            w,
+            "- Refresh: **`{}`** has not moved since this checkout's last snapshot (`{}`)",
+            r.target,
+            short_hex(&r.base)
+        );
+    } else if r.dry_run {
+        outln!(
+            w,
+            "- Refresh (dry run): **`{}`** moved `{previous}` → `{}`; `grit pull` would refresh onto it",
+            r.target,
+            short_hex(&r.base)
+        );
+    } else {
+        let changes = match &r.changes {
+            Some(c) if c.files == 0 => " · nothing changed in this checkout's paths".to_owned(),
+            Some(c) => format!(
+                " · {} in this checkout's paths",
+                crate::commands::pull::changes_phrase(c)
+            ),
+            None => String::new(),
+        };
+        outln!(
+            w,
+            "- Refresh: **`{}`** moved `{previous}` → `{}` · new snapshot `{}` at `{}`{changes}",
+            r.target,
+            short_hex(&r.base),
+            short_hex(&r.snapshot),
+            r.upstream_ref
+        );
     }
     Ok(())
 }
