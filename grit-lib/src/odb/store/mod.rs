@@ -37,6 +37,27 @@ use crate::pack;
 
 type MemoryObjectEntry = (ObjectKind, Arc<[u8]>);
 
+/// An object read only when its payload is no larger than a caller's limit.
+#[derive(Debug)]
+pub(crate) enum BoundedRead {
+    /// The whole object; its payload is within the limit.
+    Object(Object),
+    /// The payload exceeds the limit and was not read.
+    Larger,
+}
+
+/// Where [`FilesSource::read_unless_larger`] found an object.
+#[derive(Debug)]
+pub(crate) enum LocalSizedRead {
+    /// In a local pack but not read: the payload size when the pack stores it whole, `None`
+    /// when it is stored as a delta (sizing it would mean inflating the delta).
+    Packed(Option<u64>),
+    /// A loose object, read or sized against the limit.
+    Loose(BoundedRead),
+    /// In neither a local pack nor the loose store.
+    Missing,
+}
+
 /// Streaming handle for a single object's uncompressed payload.
 ///
 /// The reader yields bytes after the Git object header (`"<kind> <size>\\0"`).

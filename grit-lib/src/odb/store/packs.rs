@@ -9,13 +9,11 @@ use std::ops::ControlFlow;
 use std::path::Path;
 use std::sync::Arc;
 
-use flate2::read::ZlibDecoder;
+use flate2::{Decompress, FlushDecompress, Status};
 
 use crate::error::{Error, Result};
 use crate::objects::{HashAlgo, Object, ObjectId, ObjectIdPrefix, ObjectInfo, ObjectKind};
-use crate::pack::{
-    self, read_local_pack_indexes_cached, reprepare_pack_directory_on_miss, PackedType,
-};
+use crate::pack::{self, read_local_pack_indexes_cached, reprepare_pack_directory_on_miss};
 use crate::pack_index::PackIndex;
 use crate::pack_store::PackStore;
 
@@ -250,24 +248,14 @@ impl ObjectStore for PackedObjects {
 
     fn open_stream(&self, oid: &ObjectId) -> Result<Option<ObjectStream<'_>>> {
         self.with_pack(|dir| {
-            let Some(entry) = pack::packed_full_object_slice(dir, oid)? else {
+            let pack::PackedEntry::Whole(whole) = pack::locate_packed_whole_object(dir, oid)?
+            else {
                 return stream_from_buffered_read(self, oid);
             };
-            let mut pos = 0usize;
-            let (packed_type, size) = parse_pack_object_header(&entry, &mut pos)?;
-            if matches!(packed_type, PackedType::OfsDelta | PackedType::RefDelta) {
-                return stream_from_buffered_read(self, oid);
-            }
-            let kind = packed_type_to_kind(packed_type)?;
-            let zlib = entry[pos..].to_vec();
-            let decoder = ZlibDecoder::new(Cursor::new(zlib));
             Ok(Some(ObjectStream {
-                kind,
-                size,
-                reader: Box::new(PackPayloadStream {
-                    decoder,
-                    remaining: size,
-                }),
+                kind: whole.kind,
+                size: whole.size,
+                reader: Box::new(PackPayloadStream::new(whole)),
             }))
         })
     }
@@ -446,53 +434,6 @@ fn upper_bound_oid(idx: &PackIndex, needle: &[u8]) -> usize {
     lo
 }
 
-fn parse_pack_object_header(bytes: &[u8], pos: &mut usize) -> Result<(PackedType, u64)> {
-    let first = *bytes.get(*pos).ok_or_else(|| {
-        Error::CorruptObject("unexpected end of pack header while decoding object".to_owned())
-    })?;
-    *pos += 1;
-
-    let type_code = (first >> 4) & 0x7;
-    let mut size = (first & 0x0f) as u64;
-    let mut shift = 4u32;
-    let mut c = first;
-    while (c & 0x80) != 0 {
-        c = *bytes.get(*pos).ok_or_else(|| {
-            Error::CorruptObject("unexpected end of variable size header".to_owned())
-        })?;
-        *pos += 1;
-        size |= ((c & 0x7f) as u64) << shift;
-        shift += 7;
-    }
-
-    let packed_type = match type_code {
-        1 => PackedType::Commit,
-        2 => PackedType::Tree,
-        3 => PackedType::Blob,
-        4 => PackedType::Tag,
-        6 => PackedType::OfsDelta,
-        7 => PackedType::RefDelta,
-        _ => {
-            return Err(Error::CorruptObject(format!(
-                "unsupported packed object type {type_code}"
-            )));
-        }
-    };
-    Ok((packed_type, size))
-}
-
-fn packed_type_to_kind(packed_type: PackedType) -> Result<ObjectKind> {
-    match packed_type {
-        PackedType::Commit => Ok(ObjectKind::Commit),
-        PackedType::Tree => Ok(ObjectKind::Tree),
-        PackedType::Blob => Ok(ObjectKind::Blob),
-        PackedType::Tag => Ok(ObjectKind::Tag),
-        PackedType::OfsDelta | PackedType::RefDelta => Err(Error::CorruptObject(
-            "delta object passed to undeltified stream path".to_owned(),
-        )),
-    }
-}
-
 fn touch_pack_mtime(pack_path: &std::path::Path) -> bool {
     let now = filetime::FileTime::now();
     if filetime::set_file_times(pack_path, now, now).is_err() {
@@ -504,20 +445,82 @@ fn touch_pack_mtime(pack_path: &std::path::Path) -> bool {
     true
 }
 
+/// Inflates a whole (non-delta) pack entry straight out of the mapped pack.
+///
+/// Yields exactly the declared payload size, then requires the zlib stream to end there, so
+/// truncated, oversized or checksum-corrupt entries surface as read errors.
 struct PackPayloadStream {
-    decoder: ZlibDecoder<Cursor<Vec<u8>>>,
+    whole: pack::PackedWholeObject,
+    dec: Decompress,
+    pos: usize,
     remaining: u64,
+    stream_ended: bool,
+}
+
+impl PackPayloadStream {
+    fn new(whole: pack::PackedWholeObject) -> Self {
+        Self {
+            pos: whole.zlib_offset,
+            remaining: whole.size,
+            whole,
+            dec: Decompress::new(true),
+            stream_ended: false,
+        }
+    }
+
+    /// Inflate into `out`, returning the bytes produced.
+    fn inflate(&mut self, out: &mut [u8]) -> io::Result<usize> {
+        let input = &self.whole.pack[self.pos..self.whole.data_end];
+        let before_in = self.dec.total_in();
+        let before_out = self.dec.total_out();
+        let status = self
+            .dec
+            .decompress(input, out, FlushDecompress::None)
+            .map_err(|e| corrupt_pack_stream(&e.to_string()))?;
+        let consumed = (self.dec.total_in() - before_in) as usize;
+        let produced = (self.dec.total_out() - before_out) as usize;
+        self.pos += consumed;
+        if status == Status::StreamEnd {
+            self.stream_ended = true;
+        } else if consumed == 0 && produced == 0 {
+            return Err(corrupt_pack_stream("zlib stream truncated"));
+        }
+        Ok(produced)
+    }
+}
+
+fn corrupt_pack_stream(detail: &str) -> io::Error {
+    io::Error::new(
+        io::ErrorKind::InvalidData,
+        format!("corrupt packed object: {detail}"),
+    )
 }
 
 impl Read for PackPayloadStream {
     fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
         if self.remaining == 0 {
+            let mut excess = [0u8; 1];
+            while !self.stream_ended {
+                if self.inflate(&mut excess)? > 0 {
+                    return Err(corrupt_pack_stream("more data than declared size"));
+                }
+            }
             return Ok(0);
         }
-        let max = buf.len().min(self.remaining as usize);
-        let n = self.decoder.read(&mut buf[..max])?;
-        self.remaining -= n as u64;
-        Ok(n)
+        if buf.is_empty() {
+            return Ok(0);
+        }
+        let max = usize::try_from(self.remaining).map_or(buf.len(), |r| r.min(buf.len()));
+        loop {
+            if self.stream_ended {
+                return Err(corrupt_pack_stream("less data than declared size"));
+            }
+            let produced = self.inflate(&mut buf[..max])?;
+            if produced > 0 {
+                self.remaining -= produced as u64;
+                return Ok(produced);
+            }
+        }
     }
 }
 
@@ -535,4 +538,92 @@ fn stream_from_buffered_read(
         size,
         reader: Box::new(Cursor::new(obj.data)),
     }))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use flate2::write::ZlibEncoder;
+    use flate2::Compression;
+    use std::io::Write;
+
+    use crate::pack_map::PackData;
+
+    const TRAILER: usize = 20;
+
+    fn zlib(data: &[u8]) -> Vec<u8> {
+        let mut enc = ZlibEncoder::new(Vec::new(), Compression::default());
+        enc.write_all(data).expect("deflate");
+        enc.finish().expect("deflate")
+    }
+
+    /// A fake pack holding one whole entry: some leading bytes, the zlib stream, a trailer.
+    fn whole(zlib_stream: &[u8], declared_size: u64) -> pack::PackedWholeObject {
+        let mut bytes = b"PACK\0\0\0\x02\0\0\0\x01\xb0".to_vec();
+        let zlib_offset = bytes.len();
+        bytes.extend_from_slice(zlib_stream);
+        let data_end = bytes.len();
+        bytes.extend_from_slice(&[0u8; TRAILER]);
+        pack::PackedWholeObject {
+            pack: PackData::from_owned(bytes),
+            zlib_offset,
+            data_end,
+            kind: ObjectKind::Blob,
+            size: declared_size,
+        }
+    }
+
+    fn read_all(whole: pack::PackedWholeObject) -> io::Result<Vec<u8>> {
+        let mut stream = PackPayloadStream::new(whole);
+        let mut out = Vec::new();
+        let mut chunk = [0u8; 1000];
+        loop {
+            match stream.read(&mut chunk)? {
+                0 => return Ok(out),
+                n => out.extend_from_slice(&chunk[..n]),
+            }
+        }
+    }
+
+    fn data() -> Vec<u8> {
+        (0..200_000u32)
+            .flat_map(|i| (i % 251).to_le_bytes())
+            .collect()
+    }
+
+    #[test]
+    fn pack_payload_stream_yields_the_whole_payload() {
+        let data = data();
+        let out = read_all(whole(&zlib(&data), data.len() as u64)).expect("stream");
+        assert!(out == data);
+    }
+
+    #[test]
+    fn pack_payload_stream_rejects_truncated_entry() {
+        let data = data();
+        let stream = zlib(&data);
+        let err =
+            read_all(whole(&stream[..stream.len() / 2], data.len() as u64)).expect_err("truncated");
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData, "{err}");
+    }
+
+    #[test]
+    fn pack_payload_stream_rejects_size_mismatch_both_ways() {
+        let data = data();
+        let stream = zlib(&data);
+        let err = read_all(whole(&stream, data.len() as u64 + 1)).expect_err("short");
+        assert!(err.to_string().contains("less data"), "{err}");
+        let err = read_all(whole(&stream, data.len() as u64 - 1)).expect_err("long");
+        assert!(err.to_string().contains("more data"), "{err}");
+    }
+
+    #[test]
+    fn pack_payload_stream_rejects_bad_checksum() {
+        let data = data();
+        let mut stream = zlib(&data);
+        let last = stream.len() - 1;
+        stream[last] ^= 0xff;
+        let err = read_all(whole(&stream, data.len() as u64)).expect_err("adler mismatch");
+        assert_eq!(err.kind(), io::ErrorKind::InvalidData, "{err}");
+    }
 }

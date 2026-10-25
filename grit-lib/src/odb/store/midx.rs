@@ -146,6 +146,9 @@ impl ObjectStore for MidxObjects {
         let Some(info) = self.read_info(oid)? else {
             return Ok(None);
         };
+        if let Some(stream) = self.packs.open_stream(oid)? {
+            return Ok(Some(stream));
+        }
         let Some(obj) = self.read(oid)? else {
             return Ok(None);
         };

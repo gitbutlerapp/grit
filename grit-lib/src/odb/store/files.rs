@@ -14,8 +14,8 @@ use crate::pack::{self, PackLookupOptions};
 use crate::pack_store::PackStore;
 
 use super::{
-    LooseStore, MidxObjects, MidxObjectsStatus, ObjectStore, ObjectStream, PackedObjects,
-    WritableObjectStore,
+    LocalSizedRead, LooseStore, MidxObjects, MidxObjectsStatus, ObjectStore, ObjectStream,
+    PackedObjects, WritableObjectStore,
 };
 use crate::odb::{empty_tree_oid_matches, WriteOptions};
 
@@ -308,6 +308,36 @@ impl FilesSource {
         #[cfg(test)]
         crate::hot_path_test_metrics::record_loose_path_open_for_active_scope();
         self.loose.read_info(oid)
+    }
+
+    /// Find `oid` locally, reading it only when it is a loose object of at most `limit` bytes.
+    ///
+    /// Packed objects are not read here ([`LocalSizedRead::Packed`]); one stored whole is sized
+    /// from its entry header without inflating it. Loose objects are opened once, and inflation
+    /// stops at the header when the object is too large.
+    ///
+    /// # Errors
+    ///
+    /// Propagates pack lookup and loose read failures.
+    pub(crate) fn read_unless_larger(&self, oid: &ObjectId, limit: u64) -> Result<LocalSizedRead> {
+        let probe = || {
+            match pack::locate_packed_whole_object(&self.objects_dir, oid)? {
+                pack::PackedEntry::Whole(whole) => {
+                    return Ok(LocalSizedRead::Packed(Some(whole.size)))
+                }
+                pack::PackedEntry::DeltaOnly => return Ok(LocalSizedRead::Packed(None)),
+                pack::PackedEntry::Absent => {}
+            }
+            Ok(match self.loose.read_unless_larger(oid, limit)? {
+                Some(read) => LocalSizedRead::Loose(read),
+                None => LocalSizedRead::Missing,
+            })
+        };
+        if PackStore::read_context_matches_objects_dir(&self.objects_dir) {
+            probe()
+        } else {
+            PackStore::with_context(self.packs.pack_store().clone(), probe)
+        }
     }
 
     fn read_with_pack_retry(&self, oid: &ObjectId) -> Result<Option<Object>> {

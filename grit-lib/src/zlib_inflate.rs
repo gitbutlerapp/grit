@@ -317,18 +317,49 @@ impl ZlibInflateScratch {
         file: &mut std::fs::File,
         out: &mut Vec<u8>,
     ) -> Result<()> {
+        self.inflate_loose_file_bounded(file, out, None).map(drop)
+    }
+
+    /// Like [`Self::inflate_loose_file`], but give up once the object header declares a
+    /// payload larger than `limit` bytes.
+    ///
+    /// Returns `true` when the whole object was inflated into `out`. Returns `false` when the
+    /// payload is larger than `limit`; `out` then holds only the inflated prefix, starting
+    /// with the complete `"<type> <size>\0"` header.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Self::inflate_loose_file`].
+    pub fn inflate_loose_file_unless_larger(
+        &mut self,
+        file: &mut std::fs::File,
+        out: &mut Vec<u8>,
+        limit: u64,
+    ) -> Result<bool> {
+        self.inflate_loose_file_bounded(file, out, Some(limit))
+    }
+
+    fn inflate_loose_file_bounded(
+        &mut self,
+        file: &mut std::fs::File,
+        out: &mut Vec<u8>,
+        limit: Option<u64>,
+    ) -> Result<bool> {
         self.reset();
         out.clear();
         let mut input = std::mem::take(&mut self.input);
         if input.len() < READ_CHUNK {
             input.resize(READ_CHUNK, 0);
         }
-        let result = self.inflate_loose_reads(&mut input, file, out);
+        let result = self.inflate_loose_reads(&mut input, file, out, limit);
         self.input = input;
         result
     }
 
     /// Inflate the rest of a loose object file into `out`.
+    ///
+    /// Returns `false`, leaving the inflated prefix in `out`, as soon as the header declares a
+    /// payload larger than `limit`.
     ///
     /// `out` is grown and zero-initialised only ahead of the inflater (each byte once), and
     /// the inflater writes into that initialised slice. Handing zlib the whole spare capacity
@@ -338,7 +369,8 @@ impl ZlibInflateScratch {
         input: &mut [u8],
         file: &mut std::fs::File,
         out: &mut Vec<u8>,
-    ) -> Result<()> {
+        limit: Option<u64>,
+    ) -> Result<bool> {
         let mut filled = 0usize;
         while filled < 2 {
             let n = read_retrying(file, &mut input[filled..])?;
@@ -402,9 +434,15 @@ impl ZlibInflateScratch {
             len += produced;
             if declared.is_none() {
                 declared = declared_loose_object_len(&out[..len]);
+                if let (Some(total), Some(limit)) = (declared, limit) {
+                    let header_len = memchr::memchr(0, &out[..len]).map_or(0, |nul| nul + 1);
+                    if (total - header_len) as u64 > limit {
+                        break Ok(false);
+                    }
+                }
             }
             match status {
-                Status::StreamEnd => break Ok(()),
+                Status::StreamEnd => break Ok(true),
                 Status::Ok | Status::BufError => {
                     let out_has_room = produced < room;
                     if eof && in_off == filled && out_has_room {
@@ -919,6 +957,35 @@ mod tests {
         assert_eq!(loose_output_growth(len, Some(usize::MAX), 0), len);
         assert_eq!(loose_output_growth(len, Some(len + 7), 0), 7);
         assert_eq!(loose_output_growth(len, Some(len - 1), 0), len);
+    }
+
+    #[test]
+    fn inflate_loose_file_unless_larger_stops_at_header_of_large_object() {
+        let payload = noise(4 * READ_CHUNK);
+        let plain = loose_bytes("blob", &payload);
+        let file = loose_file(&plain);
+        let mut scratch = ZlibInflateScratch::default();
+        let mut out = Vec::new();
+        let complete = scratch
+            .inflate_loose_file_unless_larger(
+                &mut file.reopen().expect("reopen"),
+                &mut out,
+                payload.len() as u64 - 1,
+            )
+            .expect("inflate");
+        assert!(!complete);
+        assert!(out.starts_with(format!("blob {}\0", payload.len()).as_bytes()));
+        assert!(out.len() < plain.len());
+
+        let complete = scratch
+            .inflate_loose_file_unless_larger(
+                &mut file.reopen().expect("reopen"),
+                &mut out,
+                payload.len() as u64,
+            )
+            .expect("inflate");
+        assert!(complete);
+        assert!(out == plain);
     }
 
     #[test]

@@ -63,7 +63,8 @@ use crate::pack_store::PackStore;
 use filetime::{set_file_mtime, FileTime};
 use flate2::Compression;
 
-use store::PackedObjects;
+pub(crate) use store::BoundedRead;
+use store::{LocalSizedRead, PackedObjects};
 
 /// How repack/gc retains unreachable objects stored only in packs about to be deleted.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2299,22 +2300,94 @@ impl Odb {
         Ok(None)
     }
 
+    /// Read `oid` unless its payload is larger than `limit` bytes, in which case
+    /// [`BoundedRead::Larger`] is returned (for example so the caller can stream it with
+    /// [`Self::with_stream`] instead).
+    ///
+    /// Costs about one [`Self::read`]: a loose object is opened once and inflation stops at
+    /// its header when it is too large, and an object stored whole in a pack is sized from its
+    /// entry header before it is read. A pack delta is always read whole, since reconstructing
+    /// it needs the full object in memory anyway.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Self::read`], including [`Error::ObjectNotFound`].
+    pub(crate) fn read_unless_larger(&self, oid: &ObjectId, limit: u64) -> Result<BoundedRead> {
+        if self.custom_primary.is_none() && !self.multi_pack_index_reads_enabled() {
+            if let Some(read) =
+                pack::pack_cache::try_read_object_via_single_pack_reader_unless_whole_larger(
+                    &self.objects_dir,
+                    oid,
+                    limit,
+                )?
+            {
+                return Ok(read);
+            }
+        }
+        if let Ok(files) = self.primary() {
+            if self.multi_pack_index_reads_enabled() {
+                self.ensure_midx_prepared();
+            }
+            match files.read_unless_larger(oid, limit)? {
+                LocalSizedRead::Packed(Some(size)) if size > limit => {
+                    return Ok(BoundedRead::Larger);
+                }
+                LocalSizedRead::Packed(_) => return self.read(oid).map(BoundedRead::Object),
+                LocalSizedRead::Loose(read) => return Ok(read),
+                LocalSizedRead::Missing => {}
+            }
+        }
+        let info = self.read_info(oid)?;
+        if info.size > limit {
+            return Ok(BoundedRead::Larger);
+        }
+        self.read(oid).map(BoundedRead::Object)
+    }
+
     /// Open a stream over `oid`'s uncompressed payload (overlay, primary, then alternates).
+    ///
+    /// The returned stream owns its payload: it is read whole into memory before returning.
+    /// Use [`Self::with_stream`] to read a large object in bounded memory.
     ///
     /// # Errors
     ///
     /// Propagates backend failures other than a missing object (`Ok(None)`).
     pub fn open_stream(&self, oid: &ObjectId) -> Result<Option<ObjectStream<'static>>> {
+        self.with_stream(oid, materialize_stream)
+    }
+
+    /// Run `f` on a stream over `oid`'s uncompressed payload (overlay, primary, then alternates).
+    ///
+    /// Unlike [`Self::open_stream`] the payload is not buffered: loose objects and objects
+    /// stored whole in a pack are inflated as `f` reads, so memory stays bounded however large
+    /// the object is. Objects stored as pack deltas are reconstructed in memory first.
+    ///
+    /// # Parameters
+    ///
+    /// - `oid` — the object to stream.
+    /// - `f` — consumes the stream; its result is returned as `Ok(Some(_))`.
+    ///
+    /// # Errors
+    ///
+    /// Propagates backend failures other than a missing object (`Ok(None)`, and `f` is not
+    /// called), and any error returned by `f`. A corrupt or truncated object surfaces as an
+    /// [`std::io::Error`] from the stream's reader.
+    pub fn with_stream<R>(
+        &self,
+        oid: &ObjectId,
+        f: impl FnOnce(ObjectStream<'_>) -> Result<R>,
+    ) -> Result<Option<R>> {
         use std::io::Cursor;
         if let Some(obj) = self.overlay_read(oid) {
             let size = u64::try_from(obj.data.len()).map_err(|_| {
                 Error::CorruptObject(format!("object size overflow for {}", oid.to_hex()))
             })?;
-            return Ok(Some(ObjectStream {
+            return f(ObjectStream {
                 kind: obj.kind,
                 size,
                 reader: Box::new(Cursor::new(obj.data)),
-            }));
+            })
+            .map(Some);
         }
         if self.multi_pack_index_reads_enabled() {
             self.ensure_midx_prepared();
@@ -2324,7 +2397,7 @@ impl Odb {
         let files_primary = self.primary().ok();
         let mut unreadable_local_loose = None;
         match primary.open_stream(oid) {
-            Ok(Some(stream)) => return materialize_stream(stream),
+            Ok(Some(stream)) => return f(stream).map(Some),
             Ok(None) => {}
             Err(err)
                 if files_primary
@@ -2336,13 +2409,13 @@ impl Odb {
             Err(err) => return Err(err),
         }
         if let Some(stream) = self.try_open_stream_extra_sources(oid)? {
-            return materialize_stream(stream);
+            return f(stream).map(Some);
         }
         if self.alternates_enabled {
-            match self.sources()?.open_stream(oid) {
-                Ok(Some(stream)) => return materialize_stream(stream),
-                Ok(None) => {}
-                Err(err) => return Err(err),
+            let sources = self.sources()?;
+            let stream = sources.open_stream(oid)?;
+            if let Some(stream) = stream {
+                return f(stream).map(Some);
             }
         }
         if let Some(err) = unreadable_local_loose {
@@ -2838,7 +2911,7 @@ fn append_lookup_prefix_layer(
     Ok(())
 }
 
-fn materialize_stream(stream: ObjectStream<'_>) -> Result<Option<ObjectStream<'static>>> {
+fn materialize_stream(stream: ObjectStream<'_>) -> Result<ObjectStream<'static>> {
     use std::io::{Cursor, Read};
     let ObjectStream {
         kind,
@@ -2847,11 +2920,11 @@ fn materialize_stream(stream: ObjectStream<'_>) -> Result<Option<ObjectStream<'s
     } = stream;
     let mut payload = Vec::new();
     reader.read_to_end(&mut payload).map_err(Error::Io)?;
-    Ok(Some(ObjectStream {
+    Ok(ObjectStream {
         kind,
         size,
         reader: Box::new(Cursor::new(payload)),
-    }))
+    })
 }
 
 /// Parse a colon-separated alternates string, handling double-quoted entries
@@ -3065,6 +3138,82 @@ mod tests {
             .hash_object(ObjectKind::Blob, b"hello")
             .expect("hash");
         assert_eq!(oid.to_hex(), "b6fc4c620b67d95f953a5c1c1230aaab5db5a1b0");
+    }
+
+    /// Pack `oids` into one new pack and drop their loose copies.
+    fn pack_objects(objects: &Path, oids: &[ObjectId]) {
+        let odb = Odb::new(objects);
+        let pack = crate::pack_objects::build_pack_from_send_list(
+            &odb,
+            oids,
+            &HashSet::new(),
+            &crate::pack_objects::PackBuildOptions::default(),
+            &HashMap::new(),
+        )
+        .unwrap();
+        for oid in oids {
+            fs::remove_file(oid.loose_path_in(objects)).unwrap();
+        }
+        crate::index_pack::install_pack_bytes(
+            pack,
+            &odb,
+            &crate::index_pack::IngestPackOptions::default(),
+        )
+        .unwrap();
+    }
+
+    fn bounded_read_fixture() -> (TempDir, PathBuf, ObjectId, ObjectId) {
+        let dir = TempDir::new().unwrap();
+        let objects = dir.path().to_path_buf();
+        let odb = Odb::new(&objects);
+        let small = odb.write(ObjectKind::Blob, b"small blob\n").unwrap();
+        let big: Vec<u8> = (0..300_000u32).flat_map(|i| i.to_le_bytes()).collect();
+        let big = odb.write(ObjectKind::Blob, &big).unwrap();
+        (dir, objects, small, big)
+    }
+
+    fn assert_bounded_reads(odb: &Odb, small: &ObjectId, big: &ObjectId) {
+        match odb.read_unless_larger(small, 1000).unwrap() {
+            BoundedRead::Object(obj) => assert_eq!(obj.data, b"small blob\n"),
+            BoundedRead::Larger => panic!("small blob is within the limit"),
+        }
+        assert!(matches!(
+            odb.read_unless_larger(big, 1000).unwrap(),
+            BoundedRead::Larger
+        ));
+        match odb.read_unless_larger(big, 1_200_000).unwrap() {
+            BoundedRead::Object(obj) => assert_eq!(obj.data.len(), 1_200_000),
+            BoundedRead::Larger => panic!("limit equal to the size reads the object"),
+        }
+        let missing = ObjectId::from_hex("1234567890123456789012345678901234567890").unwrap();
+        assert!(matches!(
+            odb.read_unless_larger(&missing, 1000),
+            Err(Error::ObjectNotFound(_))
+        ));
+    }
+
+    #[test]
+    fn read_unless_larger_sizes_loose_objects_from_their_header() {
+        let (_dir, objects, small, big) = bounded_read_fixture();
+        assert_bounded_reads(&Odb::new(&objects), &small, &big);
+    }
+
+    #[test]
+    fn read_unless_larger_sizes_packed_objects_in_and_out_of_read_context() {
+        let (_dir, objects, small, big) = bounded_read_fixture();
+        pack_objects(&objects, &[small, big]);
+        let odb = Odb::new(&objects);
+        assert_bounded_reads(&odb, &small, &big);
+        odb.with_pack_read_context(|| assert_bounded_reads(&odb, &small, &big));
+    }
+
+    #[test]
+    fn read_unless_larger_finds_objects_across_several_packs() {
+        let (_dir, objects, small, big) = bounded_read_fixture();
+        pack_objects(&objects, &[small]);
+        pack_objects(&objects, &[big]);
+        let odb = Odb::new(&objects);
+        odb.with_pack_read_context(|| assert_bounded_reads(&odb, &small, &big));
     }
 
     #[test]

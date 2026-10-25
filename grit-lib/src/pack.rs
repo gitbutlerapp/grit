@@ -11,6 +11,7 @@ pub use crate::pack_index::{
 use crate::error::{Error, Result};
 use crate::hash::{hash_object, verify_trailer};
 use crate::objects::{HashAlgo, Object, ObjectId, ObjectInfo, ObjectKind};
+use crate::odb::BoundedRead;
 pub use crate::pack_map::PackData;
 use crate::unpack_objects::apply_delta_into;
 use crate::zlib_inflate::ZlibInflateScratch;
@@ -227,6 +228,27 @@ pub(crate) mod pack_cache {
         };
         match reader.read_object(oid) {
             Ok(obj) => Ok(Some(obj)),
+            Err(Error::ObjectNotFound(_)) => Ok(None),
+            Err(err) => Err(err),
+        }
+    }
+
+    /// Like [`try_read_object_via_single_pack_reader`], skipping objects the pack stores whole
+    /// with a payload larger than `limit` (see
+    /// [`super::SingleLocalPackReader::read_object_unless_whole_larger`]).
+    pub(crate) fn try_read_object_via_single_pack_reader_unless_whole_larger(
+        objects_dir: &Path,
+        oid: &crate::objects::ObjectId,
+        limit: u64,
+    ) -> Result<Option<super::BoundedRead>> {
+        if !crate::pack_store::PackStore::read_context_matches_objects_dir(objects_dir) {
+            return Ok(None);
+        }
+        let Some(mut reader) = super::SingleLocalPackReader::open_allow_loose(objects_dir)? else {
+            return Ok(None);
+        };
+        match reader.read_object_unless_whole_larger(oid, limit) {
+            Ok(read) => Ok(Some(read)),
             Err(Error::ObjectNotFound(_)) => Ok(None),
             Err(err) => Err(err),
         }
@@ -4104,6 +4126,38 @@ impl SingleLocalPackReader {
         read_object_from_pack_at_offset(&self.idx, offset)
     }
 
+    /// Like [`Self::read_object`], but skip an object the pack stores whole with a payload
+    /// larger than `limit`, returning [`BoundedRead::Larger`] without inflating it.
+    ///
+    /// Deltas are always read: reconstructing one needs the whole object in memory anyway.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Self::read_object`].
+    pub(crate) fn read_object_unless_whole_larger(
+        &mut self,
+        oid: &ObjectId,
+        limit: u64,
+    ) -> Result<BoundedRead> {
+        let Some(offset) = self.idx.find_offset_monotonic(oid, &mut self.cursor)? else {
+            return Err(Error::ObjectNotFound(oid.to_hex()));
+        };
+        let mut pos = usize::try_from(offset)
+            .map_err(|_| Error::CorruptObject(format!("pack offset {offset} overflows")))?;
+        if let Ok((packed_type, size)) = parse_pack_object_header(&self.pack_bytes, &mut pos) {
+            let whole = !matches!(packed_type, PackedType::OfsDelta | PackedType::RefDelta);
+            if whole && size > limit {
+                return Ok(BoundedRead::Larger);
+            }
+        }
+        if let Some(obj) =
+            read_whole_pack_entry_object_fast(&self.idx, offset, self.pack_bytes.as_ref())
+        {
+            return Ok(BoundedRead::Object(obj));
+        }
+        read_object_from_pack_at_offset(&self.idx, offset).map(BoundedRead::Object)
+    }
+
     /// Like [`Self::read_object`], inflating into `out` and preserving its capacity when possible.
     pub fn read_object_into(&mut self, oid: &ObjectId, out: &mut Vec<u8>) -> Result<ObjectKind> {
         let Some(offset) = self.idx.find_offset_monotonic(oid, &mut self.cursor)? else {
@@ -4785,6 +4839,77 @@ pub(crate) fn pack_entry_raw_end(
     Ok(Some(
         idx.next_pack_offset_after(entry_offset, pack_end as u64)? as usize,
     ))
+}
+
+/// A non-delta object's zlib stream inside a mapped local pack.
+pub(crate) struct PackedWholeObject {
+    /// The pack holding the object.
+    pub(crate) pack: Arc<PackData>,
+    /// Offset of the object's zlib stream, just past its entry header.
+    pub(crate) zlib_offset: usize,
+    /// End of the pack's object data (start of the trailing checksum).
+    pub(crate) data_end: usize,
+    /// Object type from the entry header (never a delta type).
+    pub(crate) kind: ObjectKind,
+    /// Uncompressed payload size from the entry header.
+    pub(crate) size: u64,
+}
+
+/// How the local packs store an object, from [`locate_packed_whole_object`].
+pub(crate) enum PackedEntry {
+    /// Stored whole in some pack.
+    Whole(PackedWholeObject),
+    /// Present in a pack, but only as a delta (or with an unparsable entry header).
+    DeltaOnly,
+    /// In no local pack.
+    Absent,
+}
+
+/// Locate `oid` stored whole (not as a delta) in a local pack, without inflating it.
+///
+/// Costs one index lookup and entry-header parse per pack holding the object. Packs that
+/// hold it only as a delta, or whose entry header does not parse, are skipped so another
+/// pack can serve it whole.
+///
+/// # Errors
+///
+/// Returns [`Error::Io`] when pack indexes or pack files cannot be read.
+pub(crate) fn locate_packed_whole_object(
+    objects_dir: &Path,
+    oid: &ObjectId,
+) -> Result<PackedEntry> {
+    let indexes = read_local_pack_indexes_cached(objects_dir)?;
+    let mut found = PackedEntry::Absent;
+    for idx in &indexes {
+        let Some(entry_offset) = idx.find_offset(oid)? else {
+            continue;
+        };
+        found = PackedEntry::DeltaOnly;
+        let pack = read_pack_bytes_cached(&idx.pack_path)?;
+        let Some(data_end) = pack.len().checked_sub(idx.hash_bytes()) else {
+            continue;
+        };
+        let Ok(mut pos) = usize::try_from(entry_offset) else {
+            continue;
+        };
+        if pos >= data_end {
+            continue;
+        }
+        let Ok((packed_type, size)) = parse_pack_object_header(&pack[..data_end], &mut pos) else {
+            continue;
+        };
+        let Ok(kind) = packed_type_to_kind(packed_type) else {
+            continue;
+        };
+        return Ok(PackedEntry::Whole(PackedWholeObject {
+            pack,
+            zlib_offset: pos,
+            data_end,
+            kind,
+            size,
+        }));
+    }
+    Ok(found)
 }
 
 /// When `oid` is stored as a full (non-delta) object in a local pack, return its verbatim packed

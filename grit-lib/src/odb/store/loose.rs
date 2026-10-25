@@ -9,7 +9,7 @@ use flate2::write::ZlibEncoder;
 use flate2::Compression;
 use flate2::{Decompress, FlushDecompress, Status};
 
-use super::{ObjectStore, ObjectStream, WritableObjectStore};
+use super::{BoundedRead, ObjectStore, ObjectStream, WritableObjectStore};
 use crate::error::{Error, Result};
 use crate::hash;
 use crate::objects::{HashAlgo, Object, ObjectId, ObjectIdPrefix, ObjectInfo, ObjectKind};
@@ -164,6 +164,35 @@ impl LooseStore {
             });
         }
         Ok(obj)
+    }
+
+    /// Read `oid` unless its payload is larger than `limit` bytes, opening the file once.
+    ///
+    /// Inflation stops as soon as the header declares a payload larger than `limit`.
+    /// `Ok(None)` when there is no loose file.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`ObjectStore::read`]: [`Error::Io`], [`Error::Zlib`] or
+    /// [`Error::CorruptObject`] for unreadable or malformed objects.
+    pub(crate) fn read_unless_larger(
+        &self,
+        oid: &ObjectId,
+        limit: u64,
+    ) -> Result<Option<BoundedRead>> {
+        let mut file = match fs::File::open(self.object_path(oid)) {
+            Ok(f) => f,
+            Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(err) => return Err(Error::Io(err)),
+        };
+        let mut buf = Vec::new();
+        let complete =
+            with_loose_scratch(|s| s.inflate_loose_file_unless_larger(&mut file, &mut buf, limit))?;
+        if !complete {
+            return Ok(Some(BoundedRead::Larger));
+        }
+        let kind = strip_decompressed_object_header(&mut buf, Some(oid))?;
+        Ok(Some(BoundedRead::Object(Object::new(kind, buf))))
     }
 
     fn touch_mtime(path: &Path) -> bool {
@@ -626,7 +655,9 @@ fn is_loose_suffix_for_algo(suffix: &str, algo: HashAlgo) -> bool {
 struct LoosePayloadReader {
     file: File,
     dec: Decompress,
+    /// Compressed input read from `file`; bytes before `pending_pos` are already consumed.
     pending: Vec<u8>,
+    pending_pos: usize,
     /// All compressed input from the file has been read.
     input_exhausted: bool,
     /// Inflater reached `Status::StreamEnd` (payload + zlib trailer validated).
@@ -657,6 +688,7 @@ impl LoosePayloadReader {
             file,
             dec: Decompress::new(true),
             pending: hdr.to_vec(),
+            pending_pos: 0,
             input_exhausted: false,
             zlib_complete: false,
             preset_dictionary,
@@ -680,7 +712,7 @@ impl LoosePayloadReader {
             if header_buf.contains(&0) || header_buf.len() >= 128 {
                 break;
             }
-            if self.input_exhausted && self.pending.is_empty() {
+            if self.input_exhausted && self.pending_pos == self.pending.len() {
                 break;
             }
         }
@@ -699,29 +731,42 @@ impl LoosePayloadReader {
     }
 
     fn pump_zlib(&mut self, on_out: &mut dyn FnMut(&[u8])) -> Result<()> {
+        let mut out_chunk = [0u8; READ_CHUNK];
+        let produced = self.inflate_into(&mut out_chunk)?;
+        on_out(&out_chunk[..produced]);
+        Ok(())
+    }
+
+    /// Inflate into `out`, reading more compressed input when the pending input is used up.
+    ///
+    /// Returns the bytes produced, which is zero once the zlib stream has ended.
+    fn inflate_into(&mut self, out: &mut [u8]) -> Result<usize> {
         if self.zlib_complete {
-            return Ok(());
+            return Ok(0);
         }
-        if self.pending.is_empty() && !self.input_exhausted {
-            let mut buf = [0u8; READ_CHUNK];
-            let n = self.file.read(&mut buf).map_err(Error::Io)?;
-            if n == 0 {
-                self.input_exhausted = true;
-            } else {
-                self.pending.extend_from_slice(&buf[..n]);
-            }
+        if self.pending_pos == self.pending.len() && !self.input_exhausted {
+            self.pending.resize(READ_CHUNK, 0);
+            let n = loop {
+                match self.file.read(&mut self.pending) {
+                    Ok(n) => break n,
+                    Err(e) if e.kind() == io::ErrorKind::Interrupted => {}
+                    Err(e) => return Err(Error::Io(e)),
+                }
+            };
+            self.pending.truncate(n);
+            self.pending_pos = 0;
+            self.input_exhausted = n == 0;
         }
-        let flush = if self.input_exhausted && self.pending.is_empty() {
+        let flush = if self.input_exhausted && self.pending_pos == self.pending.len() {
             FlushDecompress::Finish
         } else {
             FlushDecompress::None
         };
         let before_in = self.dec.total_in();
         let before_out = self.dec.total_out();
-        let mut out_chunk = [0u8; READ_CHUNK];
         let status = match self
             .dec
-            .decompress(self.pending.as_slice(), &mut out_chunk, flush)
+            .decompress(&self.pending[self.pending_pos..], out, flush)
         {
             Ok(s) => s,
             Err(e) => {
@@ -731,19 +776,13 @@ impl LoosePayloadReader {
                 return Err(Error::Zlib(e.to_string()));
             }
         };
-        let consumed = (self.dec.total_in() - before_in) as usize;
-        if consumed > self.pending.len() {
-            return Err(Error::CorruptObject(
-                "zlib consumed more than pending buffer".to_owned(),
-            ));
-        }
-        self.pending.drain(..consumed);
+        // Both are bounded by the slices just passed to the inflater.
+        self.pending_pos += (self.dec.total_in() - before_in) as usize;
         let produced = (self.dec.total_out() - before_out) as usize;
-        on_out(&out_chunk[..produced]);
         if matches!(status, Status::StreamEnd) {
             self.zlib_complete = true;
         }
-        Ok(())
+        Ok(produced)
     }
 
     /// After the declared payload is delivered, drain the zlib trailer and reject truncation.
@@ -770,7 +809,7 @@ impl LoosePayloadReader {
             if self.zlib_complete {
                 return Ok(());
             }
-            if self.input_exhausted && self.pending.is_empty() {
+            if self.input_exhausted && self.pending_pos == self.pending.len() {
                 return Err(io::Error::other(
                     "corrupt object: zlib stream ended before trailer validation",
                 ));
@@ -805,11 +844,15 @@ impl Read for LoosePayloadReader {
                 self.payload_remaining -= take as u64;
                 continue;
             }
-            let mut out_chunk = Vec::new();
-            self.pump_zlib(&mut |bytes| out_chunk.extend_from_slice(bytes))
+            let want = usize::try_from(self.payload_remaining)
+                .map_or(buf.len() - delivered, |r| r.min(buf.len() - delivered));
+            let produced = self
+                .inflate_into(&mut buf[delivered..delivered + want])
                 .map_err(|e| io::Error::other(e.to_string()))?;
-            if out_chunk.is_empty() {
-                if self.input_exhausted && !self.zlib_complete {
+            if produced == 0 {
+                if self.zlib_complete
+                    || (self.input_exhausted && self.pending_pos == self.pending.len())
+                {
                     return Err(io::Error::other(format!(
                         "corrupt object: zlib stream ended with {} payload bytes remaining",
                         self.payload_remaining
@@ -817,16 +860,8 @@ impl Read for LoosePayloadReader {
                 }
                 continue;
             }
-            let take = out_chunk
-                .len()
-                .min(buf.len() - delivered)
-                .min(self.payload_remaining as usize);
-            buf[delivered..delivered + take].copy_from_slice(&out_chunk[..take]);
-            if take < out_chunk.len() {
-                self.extra_payload.extend_from_slice(&out_chunk[take..]);
-            }
-            delivered += take;
-            self.payload_remaining -= take as u64;
+            delivered += produced;
+            self.payload_remaining -= produced as u64;
         }
         if self.payload_remaining == 0 {
             self.ensure_zlib_complete()?;
@@ -889,6 +924,56 @@ mod tests {
         let kind = ObjectStore::read_into(&store, &oid, &mut buf).unwrap();
         assert_eq!(kind, Some(ObjectKind::Blob));
         assert_eq!(buf, data);
+    }
+
+    #[test]
+    fn read_unless_larger_reads_small_and_skips_large_objects() {
+        let (_dir, store) = temp_store();
+        let data = vec![b'x'; 3 * READ_CHUNK];
+        let oid =
+            WritableObjectStore::write(&store, ObjectKind::Blob, &data, WriteOptions::default())
+                .unwrap();
+        match store.read_unless_larger(&oid, data.len() as u64).unwrap() {
+            Some(BoundedRead::Object(obj)) => {
+                assert_eq!(obj.kind, ObjectKind::Blob);
+                assert_eq!(obj.data, data);
+            }
+            other => panic!("expected the object, got {other:?}"),
+        }
+        assert!(matches!(
+            store
+                .read_unless_larger(&oid, data.len() as u64 - 1)
+                .unwrap(),
+            Some(BoundedRead::Larger)
+        ));
+        let missing = ObjectId::from_hex("1234567890123456789012345678901234567890").unwrap();
+        assert!(store.read_unless_larger(&missing, 0).unwrap().is_none());
+    }
+
+    #[test]
+    fn stream_reader_delivers_payload_through_tiny_and_huge_buffers() {
+        let (_dir, store) = temp_store();
+        let data: Vec<u8> = (0..5 * READ_CHUNK as u32)
+            .map(|i| (i.wrapping_mul(2_654_435_761) >> 11) as u8)
+            .collect();
+        let oid =
+            WritableObjectStore::write(&store, ObjectKind::Blob, &data, WriteOptions::default())
+                .unwrap();
+        for chunk_len in [1usize, 7, 4096, 10 * READ_CHUNK] {
+            let mut stream = ObjectStore::open_stream(&store, &oid)
+                .unwrap()
+                .expect("stream");
+            let mut out = Vec::new();
+            let mut chunk = vec![0u8; chunk_len];
+            loop {
+                let n = stream.reader.read(&mut chunk).unwrap();
+                if n == 0 {
+                    break;
+                }
+                out.extend_from_slice(&chunk[..n]);
+            }
+            assert!(out == data, "chunk length {chunk_len}");
+        }
     }
 
     #[test]
