@@ -207,6 +207,7 @@ pub(crate) mod fetch_negotiator;
 mod fetch_request;
 pub(crate) mod filter_process;
 pub(crate) mod fmt_merge_msg;
+pub(crate) mod fs_publish;
 pub(crate) mod fsck;
 pub(crate) mod fsck_standalone;
 #[path = "fsmonitor.rs"]

@@ -416,3 +416,59 @@ fn install_pack_path_matches_git_index() {
     let _ = pack_on_disk;
     assert_eq!(grit_idx, git_idx);
 }
+
+#[test]
+fn concurrent_installs_of_one_pack_into_one_repo_all_succeed() {
+    let fx = shared_fixture_sha1();
+    let tmp = tempfile::tempdir().expect("repo");
+    git_run(tmp.path(), &["init", "-q", "-b", "main"]);
+    let objects = tmp.path().join(".git/objects");
+    let barrier = std::sync::Barrier::new(4);
+    std::thread::scope(|s| {
+        let handles: Vec<_> = (0..4)
+            .map(|_| {
+                s.spawn(|| {
+                    let odb = Odb::new(objects.as_path());
+                    barrier.wait();
+                    install_pack_bytes(
+                        fx.pack.clone(),
+                        &odb,
+                        &IngestPackOptions {
+                            fix_thin: false,
+                            threads: Some(2),
+                            ..Default::default()
+                        },
+                    )
+                })
+            })
+            .collect();
+        for h in handles {
+            h.join()
+                .expect("join")
+                .expect("every concurrent install succeeds");
+        }
+    });
+
+    let names: Vec<String> = std::fs::read_dir(objects.join("pack"))
+        .expect("pack dir")
+        .filter_map(|e| e.ok())
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .collect();
+    assert_eq!(
+        names.iter().filter(|n| n.ends_with(".pack")).count(),
+        1,
+        "{names:?}"
+    );
+    assert_eq!(
+        names.iter().filter(|n| n.ends_with(".idx")).count(),
+        1,
+        "{names:?}"
+    );
+    assert!(
+        names
+            .iter()
+            .all(|n| !n.starts_with('.') && !n.starts_with("tmp_")),
+        "leftover staging files: {names:?}"
+    );
+    git_run(tmp.path(), &["fsck", "--strict", "--no-dangling"]);
+}

@@ -9,9 +9,13 @@ use std::ops::Deref;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
+use tempfile::TempPath;
+
 use crate::error::{Error, Result};
+use crate::fs_publish::publish_no_clobber;
 use crate::hash::{verify_trailer, Parallelism};
 use crate::objects::{ObjectId, ObjectKind};
+use crate::odb::store::touch_pack_mtime;
 use crate::odb::Odb;
 use crate::pack::{verify_pack_and_collect, write_v2_pack_index_sorting};
 use crate::pack_index_build::{build_mapped_pack_index, RESIDENT_PACK_BYTES};
@@ -277,9 +281,7 @@ pub fn install_pack_bytes_with_progress(
     odb.require_files_primary("index_pack")?;
     let pack_dir = odb.objects_dir().join("pack");
     std::fs::create_dir_all(&pack_dir).map_err(Error::Io)?;
-    static INSTALL_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-    let seq = INSTALL_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let tmp = pack_dir.join(format!("tmp_install_{}_{seq}", std::process::id()));
+    let tmp = pack_dir.join(format!("tmp_install_{}", unique_install_suffix()));
     std::fs::write(&tmp, &pack).map_err(Error::Io)?;
     match install_pack_path_with_progress(&tmp, odb, opts, progress, cancel) {
         Ok(ingested) => Ok(ingested),
@@ -294,6 +296,12 @@ pub fn install_pack_bytes_with_progress(
 ///
 /// The file is moved into place when possible; callers may pass a temp receive
 /// path under `objects/pack/`.
+///
+/// Several threads or processes may install the same pack into one repository at
+/// once (parallel fetches): each stages under its own name, and a `.pack`/`.idx`
+/// already published under the same content-addressed name is kept, freshened, and
+/// reported as success rather than replaced. A failed install removes only files it
+/// created itself.
 pub fn install_pack_path(
     pack_path: &Path,
     odb: &Odb,
@@ -345,14 +353,14 @@ pub fn install_pack_path_with_progress(
     let pack_dir = odb.objects_dir().join("pack");
     std::fs::create_dir_all(&pack_dir).map_err(Error::Io)?;
 
-    let stage = pack_dir.join(format!(".{stem}-install"));
+    // Unique per install: processes receiving the same pack must not share a stage.
+    let stage = pack_dir.join(format!(".{stem}-install-{}", unique_install_suffix()));
     let stage_pack = stage.join(format!("{stem}.pack"));
     let stage_idx = stage.join(format!("{stem}.idx"));
 
-    cleanup_stale_install_stage(&stage);
-
-    // Final `.pack`/`.idx` paths once known; completing a thin pack changes its checksum.
-    let mut published: Option<(PathBuf, PathBuf)> = None;
+    // Final files this install created (completing a thin pack changes the checksum, so
+    // the names are known late). A file another writer published first is never removed.
+    let mut published: Vec<PathBuf> = Vec::new();
     let install_result = (|| -> Result<IngestedPack> {
         poll_ingest_cancel(&mut progress, cancel)?;
         std::fs::create_dir_all(&stage).map_err(Error::Io)?;
@@ -457,13 +465,18 @@ pub fn install_pack_path_with_progress(
         let stem = format!("pack-{}", ObjectId::from_bytes(&trailer)?.to_hex());
         let final_pack = pack_dir.join(format!("{stem}.pack"));
         let idx_path = pack_dir.join(format!("{stem}.idx"));
-        published = Some((final_pack.clone(), idx_path.clone()));
-        std::fs::rename(&stage_pack, &final_pack).map_err(Error::Io)?;
-        poll_ingest_cancel(&mut progress, cancel)?;
-        std::fs::rename(&stage_idx, &idx_path).map_err(|e| {
-            let _ = std::fs::remove_file(&final_pack);
-            Error::Io(e)
-        })?;
+        // Names are content-addressed: an existing `.pack`/`.idx` holds these bytes.
+        // The pack goes first so a reader never sees an index without its pack.
+        for (staged, final_path) in [(&stage_pack, &final_pack), (&stage_idx, &idx_path)] {
+            poll_ingest_cancel(&mut progress, cancel)?;
+            let staged = TempPath::try_from_path(staged).map_err(Error::Io)?;
+            if publish_no_clobber(staged, final_path).map_err(Error::Io)? {
+                published.push(final_path.clone());
+            }
+        }
+        if !published.contains(&final_pack) {
+            touch_pack_mtime(&final_pack);
+        }
         if opts.mark_promisor_pack {
             std::fs::write(final_pack.with_extension("promisor"), b"").map_err(Error::Io)?;
         }
@@ -476,10 +489,9 @@ pub fn install_pack_path_with_progress(
     })();
 
     if install_result.is_err() {
-        cleanup_stale_install_stage(&stage);
-        if let Some((final_pack, idx_path)) = &published {
-            let _ = std::fs::remove_file(final_pack);
-            let _ = std::fs::remove_file(idx_path);
+        cleanup_install_stage(&stage);
+        for path in published.iter().rev() {
+            let _ = std::fs::remove_file(path);
         }
         let _ = std::fs::remove_file(&owned);
     }
@@ -575,7 +587,14 @@ fn poll_ingest_cancel(
     }
 }
 
-fn cleanup_stale_install_stage(stage: &Path) {
+/// `<pid>_<seq>`: unique among all installs running on this machine.
+fn unique_install_suffix() -> String {
+    static INSTALL_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = INSTALL_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    format!("{}_{seq}", std::process::id())
+}
+
+fn cleanup_install_stage(stage: &Path) {
     if !stage.exists() {
         return;
     }
@@ -1280,7 +1299,7 @@ mod tests {
                     .all(|p| p.extension().is_some_and(|e| e == "pack" || e == "idx")
                         || p.file_name()
                             .and_then(|n| n.to_str())
-                            .is_some_and(|n| n.starts_with('.') && n.ends_with("-install"))),
+                            .is_some_and(|n| n.starts_with('.') && n.contains("-install-"))),
                 "must not publish partial .pack/.idx, got {entries:?}"
             );
         }

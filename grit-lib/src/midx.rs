@@ -21,6 +21,7 @@ use crate::hash::verify_trailer;
 use crate::config::ConfigSet;
 use crate::diagnostics::{DiagnosticSink, NullDiagnostics, Warning};
 use crate::error::{Error, MidxError, Result};
+use crate::fs_publish::hard_link_or_copy;
 use crate::objects::{HashAlgo, ObjectId, ObjectInfo};
 use crate::pack::{read_pack_index_no_verify, PackIndex};
 use crate::pack_bitmap::{MidxBitmapWriter, PackBitmapWriteOptions};
@@ -1333,15 +1334,6 @@ fn midx_checksum_hex_from_path(path: &Path) -> Result<String> {
     }
     let hash = &data[data.len() - hash_len..];
     Ok(hex::encode(hash))
-}
-
-fn hard_link_or_copy(src: &Path, dst: &Path) -> Result<()> {
-    let _ = fs::remove_file(dst);
-    if fs::hard_link(src, dst).is_ok() {
-        return Ok(());
-    }
-    fs::copy(src, dst).map_err(Error::Io)?;
-    Ok(())
 }
 
 fn link_root_midx_into_chain(pack_dir: &Path, root_checksum_hex: &str) -> Result<()> {

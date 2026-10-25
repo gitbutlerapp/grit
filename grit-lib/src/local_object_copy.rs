@@ -8,43 +8,10 @@ use std::fs;
 use std::path::Path;
 
 use crate::error::{Error, Result};
+use crate::fs_publish::hard_link_or_copy;
 use crate::objects::ObjectId;
 use crate::odb::Odb;
 use crate::pack;
-
-/// Refuse symlinks and non-regular files (matches `git clone --local` safety).
-fn ensure_linkable_regular_file(src: &Path) -> Result<()> {
-    let meta = fs::symlink_metadata(src).map_err(Error::Io)?;
-    if meta.file_type().is_symlink() {
-        return Err(Error::PathError(format!(
-            "refusing to link symlink object store entry {}",
-            src.display()
-        )));
-    }
-    if !meta.is_file() {
-        return Err(Error::PathError(format!(
-            "refusing to link non-regular object store entry {}",
-            src.display()
-        )));
-    }
-    Ok(())
-}
-
-fn hard_link_or_copy(src: &Path, dst: &Path) -> Result<()> {
-    if dst.exists() {
-        return Ok(());
-    }
-    ensure_linkable_regular_file(src)?;
-    if let Some(parent) = dst.parent() {
-        fs::create_dir_all(parent).map_err(Error::Io)?;
-    }
-    let _ = fs::remove_file(dst);
-    if fs::hard_link(src, dst).is_ok() {
-        return Ok(());
-    }
-    fs::copy(src, dst).map_err(Error::Io)?;
-    Ok(())
-}
 
 fn pack_entry_name_ok(name: &str) -> bool {
     if name.starts_with("tmp_") || name.starts_with(".") {
@@ -61,8 +28,10 @@ fn pack_entry_name_ok(name: &str) -> bool {
 
 /// Link or copy pack-related files from `remote_objects/pack/` into `local_objects/pack/`.
 ///
-/// Skips files that already exist in the destination. Returns the number of
-/// files newly installed.
+/// Skips files that already exist in the destination. Every `.idx` is linked after
+/// the other files, so a reader never finds an index without its pack. Safe to run
+/// from several processes into one destination at once. Returns the number of files
+/// this call found missing and installed (racing writers may each count a file).
 pub(crate) fn link_remote_pack_files(remote_objects: &Path, local_objects: &Path) -> Result<usize> {
     let remote_pack = remote_objects.join("pack");
     if !remote_pack.is_dir() {
@@ -70,19 +39,21 @@ pub(crate) fn link_remote_pack_files(remote_objects: &Path, local_objects: &Path
     }
     let local_pack = local_objects.join("pack");
     fs::create_dir_all(&local_pack).map_err(Error::Io)?;
-    let mut linked = 0usize;
+    let mut names = Vec::new();
     for entry in fs::read_dir(&remote_pack).map_err(Error::Io)? {
-        let entry = entry.map_err(Error::Io)?;
-        let name = entry.file_name();
-        let name_str = name.to_string_lossy();
-        if !pack_entry_name_ok(&name_str) {
-            continue;
+        let name = entry.map_err(Error::Io)?.file_name();
+        if pack_entry_name_ok(&name.to_string_lossy()) {
+            names.push(name);
         }
+    }
+    names.sort_by_key(|name| name.to_string_lossy().ends_with(".idx"));
+    let mut linked = 0usize;
+    for name in names {
         let dst = local_pack.join(&name);
         if dst.exists() {
             continue;
         }
-        hard_link_or_copy(&entry.path(), &dst)?;
+        hard_link_or_copy(&remote_pack.join(&name), &dst)?;
         linked += 1;
     }
     Ok(linked)
@@ -330,6 +301,70 @@ mod tests {
             .unwrap();
         let tip = ObjectId::from_hex(String::from_utf8_lossy(&rev.stdout).trim()).unwrap();
         assert!(local_odb.exists(&tip));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn parallel_link_remote_pack_files_into_one_repo_all_succeed() {
+        use std::os::unix::fs::PermissionsExt;
+
+        for source_mode in [0o444, 0o644] {
+            let tmp = tempfile::tempdir().expect("tempdir");
+            let src = tmp.path().join("src");
+            fs::create_dir_all(&src).unwrap();
+            git(&src, &["init", "-q", "-b", "main"]);
+            for i in 0..20 {
+                fs::write(src.join(format!("f{i}")), format!("payload {i}\n")).unwrap();
+            }
+            git(&src, &["add", "."]);
+            git(&src, &["commit", "-qm", "c"]);
+            git(&src, &["repack", "-a", "-d", "-f"]);
+            let src_objects = src.join(".git/objects");
+            let src_pack_dir = src_objects.join("pack");
+            let mut before = Vec::new();
+            for entry in fs::read_dir(&src_pack_dir).unwrap().flatten() {
+                fs::set_permissions(entry.path(), fs::Permissions::from_mode(source_mode)).unwrap();
+                before.push((entry.path(), fs::read(entry.path()).unwrap()));
+            }
+
+            let dst = tmp.path().join("dst");
+            fs::create_dir_all(&dst).unwrap();
+            git(&dst, &["init", "-q", "-b", "main"]);
+            let dst_objects = std::sync::Arc::new(dst.join(".git/objects"));
+            let src_objects = std::sync::Arc::new(src_objects);
+            let barrier = std::sync::Arc::new(std::sync::Barrier::new(6));
+            let handles: Vec<_> = (0..6)
+                .map(|_| {
+                    let (s, d, b) = (src_objects.clone(), dst_objects.clone(), barrier.clone());
+                    std::thread::spawn(move || {
+                        b.wait();
+                        link_remote_pack_files(&s, &d)
+                    })
+                })
+                .collect();
+            for h in handles {
+                h.join().unwrap().expect("parallel link succeeds");
+            }
+
+            for (path, bytes) in &before {
+                assert_eq!(&fs::read(path).unwrap(), bytes, "source changed: {path:?}");
+            }
+            git(&src, &["fsck", "--strict"]);
+            let tip = Command::new("git")
+                .current_dir(&src)
+                .args(["rev-parse", "HEAD"])
+                .output()
+                .unwrap();
+            git(
+                &dst,
+                &[
+                    "update-ref",
+                    "refs/heads/main",
+                    String::from_utf8_lossy(&tip.stdout).trim(),
+                ],
+            );
+            git(&dst, &["fsck", "--strict"]);
+        }
     }
 
     #[test]
