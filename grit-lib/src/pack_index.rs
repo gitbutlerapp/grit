@@ -303,6 +303,9 @@ impl PackIndex {
             return Ok(None);
         }
         let len = self.len();
+        if len == 0 {
+            return Ok(None);
+        }
         if *cursor >= len {
             *cursor = 0;
         }
@@ -315,6 +318,16 @@ impl PackIndex {
         }
         let mut pos = *cursor;
         let scan_start = pos;
+        // Probes that jump past the scan window (walk order over a large pack) would compare
+        // every row in it and fault in index pages a binary search never touches.
+        let window_last = (scan_start + FORWARD_SCAN_MAX).min(len) - 1;
+        if compare_oid_bytes(self.oid_at(window_last), needle) == Ordering::Less {
+            if let Some(found) = self.find_position(oid) {
+                *cursor = found;
+                return Ok(Some(self.offset_at(found)?));
+            }
+            return Ok(None);
+        }
         while pos < len && pos - scan_start < FORWARD_SCAN_MAX {
             match compare_oid_bytes(self.oid_at(pos), needle) {
                 Ordering::Less => pos += 1,
@@ -981,6 +994,59 @@ mod tests {
         }
         let miss = ObjectId::from_bytes(&[0x06; 20]).unwrap();
         assert!(idx.find_position(&miss).is_none());
+    }
+
+    #[test]
+    fn find_offset_monotonic_matches_find_offset_for_any_probe_order() {
+        // Enough rows that probes jump well past the forward-scan window.
+        let rows: Vec<(Vec<u8>, u64)> = (0..1200u32)
+            .map(|i| {
+                let mut oid = vec![0u8; 20];
+                oid[..4].copy_from_slice(&i.wrapping_mul(2_654_435_761).to_be_bytes());
+                oid[19] = 1;
+                (oid, 12 + u64::from(i) * 40)
+            })
+            .collect();
+        let idx = parse_pack_index_bytes(Path::new("mono.idx"), build_v1_idx_bytes(&rows), false)
+            .expect("parse v1 idx");
+        let mut sorted: Vec<ObjectId> = rows
+            .iter()
+            .map(|(oid, _)| ObjectId::from_bytes(oid).expect("oid"))
+            .collect();
+        sorted.sort();
+        let missing = |oid: &ObjectId| {
+            let mut bytes = oid.as_bytes().to_vec();
+            bytes[19] = 2;
+            ObjectId::from_bytes(&bytes).expect("oid")
+        };
+        let mut probes: Vec<ObjectId> = Vec::new();
+        probes.extend(sorted.iter().copied());
+        probes.extend(sorted.iter().step_by(300).copied());
+        probes.extend(sorted.iter().rev().step_by(7).copied());
+        probes.extend(sorted.iter().step_by(11).map(missing));
+        probes.extend(
+            rows.iter()
+                .map(|(oid, _)| ObjectId::from_bytes(oid).expect("oid")),
+        );
+        let mut cursor = 0usize;
+        for probe in &probes {
+            assert_eq!(
+                idx.find_offset_monotonic(probe, &mut cursor)
+                    .expect("monotonic"),
+                idx.find_offset(probe).expect("binary search"),
+                "probe {probe}"
+            );
+        }
+
+        let empty = parse_pack_index_bytes(Path::new("empty.idx"), build_v1_idx_bytes(&[]), false)
+            .expect("parse empty idx");
+        let mut cursor = 5usize;
+        assert_eq!(
+            empty
+                .find_offset_monotonic(&sorted[0], &mut cursor)
+                .expect("empty"),
+            None
+        );
     }
 
     #[test]
