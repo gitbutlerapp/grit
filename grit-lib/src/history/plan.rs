@@ -19,7 +19,7 @@ use crate::objects::{serialize_commit, CommitData, HashAlgo, ObjectId, ObjectKin
 use crate::porcelain::commit::prepare_commit_bytes;
 use crate::repo::Repository;
 use crate::revwalk::rev_list::{rev_list, OrderingMode, RevListOptions};
-use crate::state::resolve_head;
+use crate::state::resolve_head_for_repository;
 use crate::worktree::{find_worktree_with_branch_checked_out, worktree_admin_dir};
 
 use super::error::HistoryError;
@@ -931,7 +931,7 @@ pub(crate) fn collect_scoped_refs(
     opts: &RewriteOptions,
     oldest: ObjectId,
 ) -> Result<Vec<(String, ObjectId)>, HistoryError> {
-    let head = resolve_head(repo.git_dir()).map_err(library_err)?;
+    let head = resolve_head_for_repository(repo).map_err(library_err)?;
     let mut out = Vec::new();
 
     match opts.scope {
@@ -1655,7 +1655,7 @@ pub(crate) fn head_effect(
     repo: &Repository,
     mapping: &HashMap<ObjectId, ObjectId>,
 ) -> Result<HeadEffect, HistoryError> {
-    let head = resolve_head(repo.git_dir()).map_err(library_err)?;
+    let head = resolve_head_for_repository(repo).map_err(library_err)?;
     let old_oid = match head {
         crate::state::HeadState::Branch { oid, .. } => oid,
         crate::state::HeadState::Detached { oid } => Some(oid),

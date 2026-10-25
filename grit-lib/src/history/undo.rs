@@ -1,9 +1,8 @@
 //! Undo the last history rewrite from a recorded ref plan.
 
 use crate::hooks::PostOperationHooks;
-use crate::refs::resolve_ref;
 use crate::repo::Repository;
-use crate::state::{resolve_head, HeadState};
+use crate::state::{resolve_head_for_repository, HeadState};
 
 use super::apply::{apply_rewrite, verify_rewrite_plan};
 use super::error::HistoryError;
@@ -17,6 +16,9 @@ use super::types::{ApplyOptions, UndoOutcome};
 /// ref updates and the matching worktree transition. On success, writes the inverse as the new
 /// record so a second call redoes the original rewrite. Like `reset`, undo runs no
 /// post-operation hooks, whatever [`ApplyOptions::hooks`] says.
+///
+/// Refs and `HEAD` are read and moved through the repository's ref store
+/// ([`Repository::refs`]); the undo record itself is a file under the git directory.
 ///
 /// # Errors
 ///
@@ -64,22 +66,15 @@ fn verify_record_still_valid(
     record: &HistoryLastRecord,
 ) -> Result<(), HistoryError> {
     for update in &record.ref_updates {
-        let live = match resolve_ref(repo.git_dir(), &update.name) {
-            Ok(oid) => oid,
-            Err(_) => {
-                return Err(HistoryError::UndoStale {
-                    name: update.name.clone(),
-                })
-            }
-        };
-        if live != update.new {
+        let live = repo.references().resolve_if_exists(&update.name);
+        if !matches!(live, Ok(Some(oid)) if oid == update.new) {
             return Err(HistoryError::UndoStale {
                 name: update.name.clone(),
             });
         }
     }
     if let Some(expected) = record.head_new_commit {
-        let head = match resolve_head(repo.git_dir()) {
+        let head = match resolve_head_for_repository(repo) {
             Ok(state) => state,
             Err(_) => {
                 return Err(HistoryError::UndoStale {

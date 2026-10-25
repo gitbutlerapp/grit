@@ -260,6 +260,10 @@ pub struct ApplyOptions {
     /// Reflog message for every ref update in the batch.
     pub reflog_message: String,
     /// When set, persist ref movements to `.git/grit/history-last` after a successful apply.
+    ///
+    /// The record is a file under [`Repository::git_dir`](crate::repo::Repository::git_dir),
+    /// even when refs live in an injected ref store. Writing it is part of the apply: on failure
+    /// the ref updates are rolled back.
     pub record_operation: Option<String>,
     /// Whether to run `post-checkout` (when `HEAD`'s tree changes) and `post-rewrite rebase`
     /// after the rewrite is applied.

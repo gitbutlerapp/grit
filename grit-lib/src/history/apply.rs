@@ -15,7 +15,7 @@ use crate::porcelain::switch::{
     verify_tree_transition_allow_local, TreeTransitionVerifyError,
 };
 use crate::porcelain::worktree_guard::prepare_tree_checkout;
-use crate::refs::read_head;
+use crate::refs::read_symbolic_ref_for_repository;
 use crate::refs::ref_update_flags;
 use crate::refs::should_autocreate_reflog_with_config;
 use crate::refs::store::RefUpdateFlags;
@@ -23,7 +23,7 @@ use crate::refs::store::{
     Expected, RawRef, RefStoreError, RefTransaction, RefUpdate, ReflogUpdate,
 };
 use crate::repo::Repository;
-use crate::state::{resolve_head, HeadState};
+use crate::state::{resolve_head_for_repository, HeadState};
 
 use similar::{capture_diff_slices, Algorithm, DiffTag};
 
@@ -48,11 +48,11 @@ fn complete_applied_rewrite(
     repo: &Repository,
     plan: &RewritePlan,
     opts: &ApplyOptions,
+    head: ObjectId,
     needs_worktree: bool,
     index_snapshot: Option<&[u8]>,
     worktree_snapshot: Option<&HashMap<String, WorktreePathSnapshot>>,
 ) -> Result<AppliedRewrite, HistoryError> {
-    let head = repo.head_commit()?;
     if let Err(record_err) = maybe_record_history_last(repo, opts, plan) {
         if opts.record_operation.is_some() {
             if !plan.ref_updates.is_empty() {
@@ -283,6 +283,7 @@ fn apply_absorb_refs_and_worktree(
     } else {
         None
     };
+    let new_head_commit = head_commit_after(repo, &plan.ref_updates)?;
 
     if !plan.ref_updates.is_empty() {
         commit_planned_ref_updates(repo, &plan.ref_updates, opts)?;
@@ -302,6 +303,7 @@ fn apply_absorb_refs_and_worktree(
             Some(&old),
             &new,
             old_head_commit,
+            new_head_commit,
             absorb,
             staged_paths,
             prestate,
@@ -327,17 +329,20 @@ fn apply_absorb_refs_and_worktree(
         repo,
         plan,
         opts,
+        new_head_commit,
         needs_worktree,
         index_snapshot_owned.as_deref(),
         worktree_snapshot.as_ref(),
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 fn apply_absorb_worktree_after_refs(
     repo: &Repository,
     from_tree: Option<&ObjectId>,
     to_tree: &ObjectId,
     old_head_commit: ObjectId,
+    new_head: ObjectId,
     absorb: &AbsorbPlan,
     staged_paths: &[String],
     prestate: Option<&FixupApplyPrestate>,
@@ -355,7 +360,6 @@ fn apply_absorb_worktree_after_refs(
     if staged_paths.is_empty() {
         return Ok(());
     }
-    let new_head = repo.head_commit()?;
     let new_head_tree = commit_tree_for_apply(repo, new_head)?;
     let old_head_tree = commit_tree_for_apply(repo, old_head_commit)?;
     let mut index = repo.load_index().map_err(|e| HistoryError::WorktreeApply {
@@ -747,6 +751,7 @@ fn apply_fixup_refs_and_worktree(
     } else {
         None
     };
+    let new_head_commit = head_commit_after(repo, &plan.ref_updates)?;
 
     if !plan.ref_updates.is_empty() {
         commit_planned_ref_updates(repo, &plan.ref_updates, opts)?;
@@ -766,6 +771,7 @@ fn apply_fixup_refs_and_worktree(
             Some(&old),
             &new,
             old_head_commit,
+            new_head_commit,
             staged_paths,
             prestate,
         ) {
@@ -791,6 +797,7 @@ fn apply_fixup_refs_and_worktree(
         repo,
         plan,
         opts,
+        new_head_commit,
         needs_worktree,
         index_snapshot_owned.as_deref(),
         worktree_snapshot.as_ref(),
@@ -802,6 +809,7 @@ fn apply_fixup_worktree_after_refs(
     from_tree: Option<&ObjectId>,
     to_tree: &ObjectId,
     old_head_commit: ObjectId,
+    new_head_commit: ObjectId,
     staged_paths: &[String],
     prestate: Option<&FixupApplyPrestate>,
 ) -> Result<(), HistoryError> {
@@ -826,8 +834,7 @@ fn apply_fixup_worktree_after_refs(
             message: e.to_string(),
         })?;
     if !staged_paths.is_empty() {
-        let head = repo.head_commit()?;
-        clear_fixup_staging_after_apply(repo, head, staged_paths)?;
+        clear_fixup_staging_after_apply(repo, new_head_commit, staged_paths)?;
         if let Some(pre) = prestate {
             pre.restore_worktrees_not_matching_staged(repo)?;
             pre.reapply_unstaged_worktree_deltas(repo)?;
@@ -1024,6 +1031,7 @@ pub fn apply_rewrite(
     } else {
         None
     };
+    let new_head_commit = head_commit_after(repo, &plan.ref_updates)?;
 
     if !plan.ref_updates.is_empty() {
         commit_planned_ref_updates(repo, &plan.ref_updates, opts)?;
@@ -1055,6 +1063,7 @@ pub fn apply_rewrite(
         repo,
         plan,
         opts,
+        new_head_commit,
         needs_worktree,
         index_snapshot.as_deref(),
         worktree_snapshot.as_ref(),
@@ -1068,7 +1077,7 @@ fn verify_live_head_matches_plan(
     let Some(planned_commit) = head.old_commit else {
         return Ok(());
     };
-    let live = resolve_head(repo.git_dir()).map_err(|e| HistoryError::RefApply {
+    let live = resolve_head_for_repository(repo).map_err(|e| HistoryError::RefApply {
         message: e.to_string(),
     })?;
     let mismatch = || HistoryError::HeadMovedSincePlan {
@@ -1157,9 +1166,10 @@ fn commit_planned_ref_updates(
     let store = repo.refs();
     let git_dir = repo.git_dir();
     let config = repo.config().ok();
-    let head_target = read_head(git_dir).map_err(|e| HistoryError::RefApply {
-        message: e.to_string(),
-    })?;
+    let head_target =
+        read_symbolic_ref_for_repository(repo, "HEAD").map_err(|e| HistoryError::RefApply {
+            message: e.to_string(),
+        })?;
     let mut txn = RefTransaction::new();
     for planned in updates {
         let reflog = reflog_for_update(
@@ -1262,6 +1272,27 @@ fn map_ref_store_error(err: RefStoreError, label: &str) -> HistoryError {
         other => HistoryError::RefApply {
             message: format!("{label}: {other}"),
         },
+    }
+}
+
+/// Commit `HEAD` resolves to once `updates` are committed, read through the repository's ref
+/// store before any ref moves so a failure leaves every ref untouched.
+fn head_commit_after(
+    repo: &Repository,
+    updates: &[PlannedRefUpdate],
+) -> Result<ObjectId, HistoryError> {
+    let head = resolve_head_for_repository(repo)?;
+    let head_name = match &head {
+        HeadState::Branch { refname, .. } => refname.as_str(),
+        HeadState::Detached { .. } | HeadState::Invalid => "HEAD",
+    };
+    if let Some(update) = updates.iter().find(|u| u.name == head_name) {
+        return Ok(update.new);
+    }
+    match head {
+        HeadState::Branch { oid: Some(oid), .. } | HeadState::Detached { oid } => Ok(oid),
+        HeadState::Branch { oid: None, .. } => Err(crate::error::Error::UnbornHead.into()),
+        HeadState::Invalid => Err(crate::error::Error::InvalidHead.into()),
     }
 }
 

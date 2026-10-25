@@ -17,7 +17,7 @@ use crate::merge_trees::{
 use crate::objects::{parse_tree, CommitData, ObjectId, ObjectKind};
 use crate::repo::Repository;
 use crate::revwalk::rev_list::{rev_list, OrderingMode, RevListOptions};
-use crate::state::{resolve_head, HeadState};
+use crate::state::{resolve_head_for_repository, HeadState};
 
 use super::error::HistoryError;
 use super::fixup::staged_fixup_paths;
@@ -1201,7 +1201,7 @@ fn hide_other_branch_tips(
     repo: &Repository,
     hidden: &mut HashSet<ObjectId>,
 ) -> Result<(), HistoryError> {
-    let head_ref = resolve_head(repo.git_dir()).map_err(library_err)?;
+    let head_ref = resolve_head_for_repository(repo).map_err(library_err)?;
     let current = match head_ref {
         HeadState::Branch { refname, .. } => refname,
         _ => return Ok(()),
@@ -1216,7 +1216,7 @@ fn hide_other_branch_tips(
 }
 
 fn current_branch_short(repo: &Repository) -> Result<Option<String>, HistoryError> {
-    match resolve_head(repo.git_dir()).map_err(library_err)? {
+    match resolve_head_for_repository(repo).map_err(library_err)? {
         HeadState::Branch { refname, .. } => {
             Ok(refname.strip_prefix("refs/heads/").map(str::to_owned))
         }

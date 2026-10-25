@@ -14,7 +14,7 @@ use crate::porcelain::switch::{
     TreeTransitionVerifyError,
 };
 use crate::porcelain::worktree_guard::ensure_worktree_clean_for_rebase_exec;
-use crate::refs::{write_ref, write_symbolic_ref};
+use crate::refs::{update_direct_ref_on_store, write_symbolic_ref_on_store};
 use crate::repo::Repository;
 use crate::state::{resolve_head_for_repository, HeadState};
 
@@ -134,8 +134,10 @@ pub fn verify_rebase_with_exec(
 
     for commit in commits {
         let commit_tree = commit_tree_for_apply(repo, commit)?;
-        write_ref(repo.git_dir(), "HEAD", &commit).map_err(|e| HistoryError::WorktreeApply {
-            message: e.to_string(),
+        update_direct_ref_on_store(repo.refs(), repo.git_dir(), "HEAD", &commit).map_err(|e| {
+            HistoryError::WorktreeApply {
+                message: e.to_string(),
+            }
         })?;
         session.active = true;
 
@@ -273,15 +275,17 @@ fn restore_exec_prestate(
 ) -> Result<(), HistoryError> {
     match &pre.head {
         SavedHead::Symbolic(refname) => {
-            write_symbolic_ref(repo.git_dir(), "HEAD", refname).map_err(|e| {
+            write_symbolic_ref_on_store(repo.refs(), repo.git_dir(), "HEAD", refname).map_err(
+                |e| HistoryError::WorktreeApply {
+                    message: e.to_string(),
+                },
+            )?;
+        }
+        SavedHead::Detached(oid) => {
+            update_direct_ref_on_store(repo.refs(), repo.git_dir(), "HEAD", oid).map_err(|e| {
                 HistoryError::WorktreeApply {
                     message: e.to_string(),
                 }
-            })?;
-        }
-        SavedHead::Detached(oid) => {
-            write_ref(repo.git_dir(), "HEAD", oid).map_err(|e| HistoryError::WorktreeApply {
-                message: e.to_string(),
             })?;
         }
     }
@@ -514,10 +518,11 @@ mod tests {
         let injected = RepositoryBuilder::new(
             RepositoryOptions::empty().with_work_tree(dir.path().to_path_buf()),
         )
-        .ref_store(store)
+        .ref_store(store.clone())
         .open(repo.git_dir(), Some(dir.path()))
         .expect("open injected");
         assert_eq!(injected.head_commit().expect("injected head"), tip);
+        let disk_head = fs::read(repo.git_dir().join("HEAD")).expect("disk HEAD");
 
         let runner = RecordingRunner::always_success();
         let spec = ExecSpec {
@@ -526,13 +531,22 @@ mod tests {
         verify_rebase_with_exec(&injected, &plan, &spec, runner.as_ref()).expect("exec");
 
         assert_eq!(
-            grit_test_support::git(dir.path(), &["rev-parse", "HEAD"]).trim(),
-            tip.to_hex(),
+            store.read_raw("HEAD").expect("store HEAD"),
+            Some(RawRef::Direct(tip)),
             "restore writes the HEAD the clean check and saved tree came from"
         );
         assert_eq!(index_sha256(&repo), index_before);
         assert_eq!(fs::read(dir.path().join("b.txt")).expect("b.txt"), b"2\n");
-        assert_eq!(disk_status(), "", "restored HEAD, index and worktree agree");
+        assert_eq!(
+            fs::read(repo.git_dir().join("HEAD")).expect("disk HEAD"),
+            disk_head,
+            "HEAD moves only in the injected store"
+        );
+        assert_eq!(
+            grit_test_support::git(dir.path(), &["rev-parse", "HEAD"]).trim(),
+            root.to_hex()
+        );
+        assert_eq!(disk_status(), "A  b.txt\n", "on-disk refs stay untouched");
     }
 
     #[test]

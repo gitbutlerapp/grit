@@ -8,7 +8,7 @@ use crate::repo::Repository;
 use crate::revwalk::rev_list::{rev_list, OrderingMode, RevListOptions};
 use crate::revwalk::rev_parse::{peel_to_commit_for_merge_base, resolve_revision_for_range_end};
 use crate::revwalk::{parse_rev_walk_tokens, RevWalkParsedSpecs};
-use crate::state::resolve_head;
+use crate::state::resolve_head_for_repository;
 
 use super::error::HistoryError;
 use super::message::{
@@ -213,7 +213,7 @@ fn check_divergent_branch_tips(
             return Err(HistoryError::DivergentBranch { name });
         }
     }
-    if let Ok(crate::state::HeadState::Detached { oid }) = resolve_head(repo.git_dir()) {
+    if let Ok(crate::state::HeadState::Detached { oid }) = resolve_head_for_repository(repo) {
         if oid != tip
             && is_ancestor(repo, oldest, oid).map_err(planning_err)?
             && !is_ancestor(repo, tip, oid).map_err(planning_err)?
