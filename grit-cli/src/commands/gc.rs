@@ -410,6 +410,7 @@ pub fn run_full(dry_run: bool, quiet: bool, mode: OutputMode) -> Result<GcOutcom
 
 pub fn run_repack(
     bitmaps: bool,
+    force: bool,
     dry_run: bool,
     quiet: bool,
     mode: OutputMode,
@@ -417,6 +418,7 @@ pub fn run_repack(
     let repo = context::discover()?;
     let mut opts = RepackOptions::with_dry_run(dry_run);
     opts.write_bitmap = bitmaps;
+    opts.force_recompress = force;
     let (stats, elapsed) = timed(mode, "Repacking objects…", || {
         repack_all(&repo, &opts).map_err(|e| anyhow::anyhow!("{e}"))
     })?;

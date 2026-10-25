@@ -9,13 +9,18 @@ order: 2
 
 ```text
 grit repack
+grit repack --force
 grit repack --dry-run
 grit repack --quiet
 ```
 
 ## Description
 
-Packs every object reachable from maintenance roots (refs, reflogs, and the index) into a single packfile (similar to `git repack -ad`), removes older pack files, and deletes loose objects that are already stored in the new pack. When the repository already has pack files, grit reuses existing pack bytes and deltas (window `0`) instead of running a full delta search. Unlike full [`grit gc`](./gc.md), **`grit repack` always runs** (it does not apply `gc.auto` skip heuristics). Unreachable objects that lived only in removed packs are written loose first so they are not dropped silently; when [`grit gc`](./gc.md) runs with `gc.pruneExpire`, recently written unreachable objects are kept for the grace window before loose pruning.
+Packs every object reachable from maintenance roots (refs, reflogs, and the index) into a single packfile (similar to `git repack -ad`), removes older pack files, and deletes loose objects that are already stored in the new pack. Unlike full [`grit gc`](./gc.md), **`grit repack` always runs** (it does not apply `gc.auto` skip heuristics).
+
+Objects already stored in a pack keep their stored form: whole objects are copied byte for byte and deltas are copied with only their base reference rewritten, as long as the base is packed too and the chain stays within `pack.depth`. Only the remaining objects (loose objects, and deltas whose base is dropped) go through a delta search over `pack.window` neighbours, so repacking an already packed repository costs about as much as copying it. With `--force` (like `git repack -adf`) every delta is recomputed, which takes longer but can make a pack written by a weaker packer smaller. Both modes stream object payloads and the new pack instead of holding them in memory.
+
+Unreachable objects that lived only in removed packs are written loose first so they are not dropped silently; when [`grit gc`](./gc.md) runs with `gc.pruneExpire`, recently written unreachable objects are kept for the grace window before loose pruning.
 
 Use this when a repository has accumulated many loose objects after local commits. Clones and fetches already install packs; repack is mainly for long-lived worktrees built entirely with `grit commit`.
 
@@ -23,6 +28,7 @@ Use this when a repository has accumulated many loose objects after local commit
 
 | Option | Description |
 | --- | --- |
+| `-f`, `--force` | Recompute every delta instead of reusing the ones already in packs (whole objects are still copied when they stay whole). |
 | `--dry-run` | Report how many objects would be packed without writing. |
 | `-q`, `--quiet` | Suppress the human summary (JSON and Markdown output are unchanged). |
 
@@ -33,6 +39,13 @@ Repack a repository with many loose commits:
 ```console
 $ grit repack
 Packed 412 objects into .git/objects/pack/pack-….pack (0 redundant pack files removed, 380 loose objects pruned).
+```
+
+Recompress a pack received from a server with full delta search:
+
+```console
+$ grit repack --force
+Packed 195008 objects into .git/objects/pack/pack-….pack (1 redundant pack files removed, 0 loose objects pruned).
 ```
 
 Preview only:

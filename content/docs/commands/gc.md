@@ -11,7 +11,7 @@ order: 3
 grit gc
 grit gc --dry-run
 grit gc --quiet
-grit gc repack [--bitmaps] [--dry-run]
+grit gc repack [--bitmaps] [--force] [--dry-run]
 grit gc commit-graph [--dry-run]
 grit gc midx [--dry-run]
 grit gc pack-refs [--dry-run]
@@ -26,7 +26,7 @@ Bare **`grit gc`** runs, in order:
 
 1. **pack-refs** — merge loose refs into `packed-refs` (or compact reftable).
 2. **reflog-expire** — apply `gc.reflogExpire*` rules using the current time.
-3. **repack** — consolidate reachable and retained unreachable objects into pack files, removing redundant loose objects and merging multiple packs when present. **Skips** rebuilding when Git would (`gc.auto` loose count and `gc.autoPackLimit`, typically a single pack with no loose objects after clone), unless repack side effects are requested (for example `repack.writeBitmaps`). When repack runs, existing on-disk deltas are reused for pack-only repositories unless loose objects need new deltas. Writes a `.bitmap` when `repack.writeBitmaps` is true or the repository is bare. Explicit [`grit repack`](repack.md) does not use this skip (`auto_skip` stays false).
+3. **repack** — consolidate reachable and retained unreachable objects into pack files, removing redundant loose objects and merging multiple packs when present. **Skips** rebuilding when Git would (`gc.auto` loose count and `gc.autoPackLimit`, typically a single pack with no loose objects after clone), unless repack side effects are requested (for example `repack.writeBitmaps`). When repack runs, objects already in packs are copied in their stored form (deltas included) and only loose objects go through delta search, as described for [`grit repack`](repack.md). Writes a `.bitmap` when `repack.writeBitmaps` is true or the repository is bare. Explicit [`grit repack`](repack.md) does not use this skip (`auto_skip` stays false).
 4. **prune** — delete unreachable loose objects older than `gc.pruneExpire` (default `2.weeks.ago`). The object graph is only walked when some loose object is old enough to delete, and one gc walks it at most once (shared with the repack step), so gc of an already packed repository does not read the object graph at all.
 5. **commit-graph** — write `objects/info/commit-graph`. Like `git gc`, changed-path Bloom filters are kept when the existing commit-graph has them and are not computed from scratch otherwise; run `grit gc commit-graph` to add them.
 
@@ -46,6 +46,7 @@ Progress lines go to **stderr**. The human summary lists each task, key counters
 | Option | Description |
 | --- | --- |
 | `--bitmaps` | Write a reachability `.bitmap` sidecar for the new pack. |
+| `-f`, `--force` | Recompute every delta instead of reusing the ones already in packs (like `git repack -f`). |
 | `--dry-run` | Report how many objects would be packed; no pack files or refs are modified. |
 
 ### `grit gc commit-graph`, `grit gc midx`, `grit gc pack-refs`
