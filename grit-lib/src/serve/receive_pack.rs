@@ -4,7 +4,7 @@ use std::collections::HashSet;
 use std::io::{BufReader, BufWriter, Read, Write};
 
 use super::{
-    advertised_refs, check_object_format, head_info, parse_oid, read_packet, write_flush,
+    advertised_refs, check_object_format, parse_oid, read_packet, ref_update_policy, write_flush,
     write_line, Packet, Peel, ProtocolVersion, Result, ServeError, ServeOptions,
 };
 use crate::config::ConfigSet;
@@ -593,22 +593,18 @@ fn apply_commands_with_hooks(
     hook_records: &mut Vec<HookRunRecord>,
 ) -> Result<Vec<RefUpdateResult>> {
     let lookup_odb = quarantine.as_ref().map(|q| q.odb());
-    let current_branch = if repo.is_bare() {
-        None
-    } else {
-        head_info(repo).target
-    };
+    let current_branch = ref_update_policy::checked_out_branch(repo);
     let mut results: Vec<RefUpdateResult> = request
         .commands
         .iter()
         .map(|c| {
             Ok(
-                match check_command(
+                match ref_update_policy::validate_ref_update(
                     repo,
                     lookup_odb.as_ref(),
                     c,
-                    opts,
                     policy,
+                    &opts.hidden_refs,
                     current_branch.as_deref(),
                 )? {
                     Some(reason) => c.refused(reason),
@@ -845,83 +841,6 @@ fn relay_hook_sideband(out: &mut Option<&mut dyn Write>, result: &HookResult) ->
         crate::pkt_line::write_sideband_packet(*w, 2, chunk).map_err(ServeError::Io)?;
     }
     Ok(())
-}
-
-/// Decide whether one command may be applied. Returns the refusal reason.
-///
-/// # Errors
-///
-/// Propagates [`crate::odb::Odb::contains`] failures for the pushed object, so a
-/// backend outage is not reported as [`RefUpdateRefusal::MissingObjects`].
-fn check_command(
-    repo: &Repository,
-    lookup: Option<&Odb>,
-    cmd: &RefCommand,
-    opts: &ServeOptions,
-    policy: &ReceivePolicy,
-    current_branch: Option<&str>,
-) -> Result<Option<RefUpdateRefusal>> {
-    if !cmd.refname.starts_with("refs/") || !crate::refs::is_valid_storable_ref_name(&cmd.refname) {
-        return Ok(Some(RefUpdateRefusal::InvalidRefName));
-    }
-    if crate::hide_refs::ref_is_hidden(&cmd.refname, &cmd.refname, &opts.hidden_refs) {
-        return Ok(Some(RefUpdateRefusal::HiddenRef));
-    }
-    let current = crate::refs::resolve_ref(repo.git_dir(), &cmd.refname).ok();
-    if current != cmd.old {
-        return Ok(Some(RefUpdateRefusal::StaleInfo));
-    }
-    let is_current_branch = current_branch == Some(cmd.refname.as_str());
-
-    let Some(new) = cmd.new else {
-        if policy.deny_deletes {
-            return Ok(Some(RefUpdateRefusal::DeletionProhibited));
-        }
-        if is_current_branch && policy.deny_current_branch {
-            return Ok(Some(RefUpdateRefusal::CurrentBranchDeletion));
-        }
-        return Ok(None);
-    };
-    let odb = lookup.unwrap_or(repo.odb());
-    if !odb.contains(&new)? {
-        return Ok(Some(RefUpdateRefusal::MissingObjects));
-    }
-    if is_current_branch && policy.deny_current_branch {
-        return Ok(Some(RefUpdateRefusal::CurrentBranch));
-    }
-    if let (Some(old), true) = (current, policy.deny_non_fast_forwards) {
-        if cmd.refname.starts_with("refs/heads/") {
-            return Ok(check_fast_forward(repo, odb, old, new));
-        }
-    }
-    Ok(None)
-}
-
-/// Refusal reason when moving a branch from `old` to `new` would discard history.
-///
-/// `odb` must see the pushed objects (the receive quarantine) as well as the
-/// repository's own; the repository's commit-graph bounds the walk.
-fn check_fast_forward(
-    repo: &Repository,
-    odb: &crate::odb::Odb,
-    old: ObjectId,
-    new: ObjectId,
-) -> Option<RefUpdateRefusal> {
-    let is_commit = |oid: &ObjectId| {
-        odb.read_info(oid)
-            .is_ok_and(|info| info.kind == crate::objects::ObjectKind::Commit)
-    };
-    if !is_commit(&old) || !is_commit(&new) {
-        return Some(RefUpdateRefusal::BadRef);
-    }
-    let graph = repo
-        .caches()
-        .commit_graph_chain(&repo.git_dir().join("objects"));
-    match crate::merge_base::is_ancestor_odb_walk_with_graph(odb, graph.as_deref(), old, new) {
-        Ok(true) => None,
-        Ok(false) => Some(RefUpdateRefusal::NonFastForward),
-        Err(_) => Some(RefUpdateRefusal::FastForwardCheckFailed),
-    }
 }
 
 /// Encode the status report as pkt-lines: the unpack result, one line per ref,

@@ -1991,6 +1991,8 @@ pub fn push_local(
         )?);
     }
 
+    apply_remote_receive_policy(remote_git_dir, &local_odb, &mut decisions)?;
+
     // Atomic: if any update would be rejected, apply none and demote the
     // otherwise-accepted updates to AtomicPushFailed.
     let any_rejected = decisions.iter().any(|d| d.result.status.is_error());
@@ -2086,6 +2088,59 @@ pub fn push_local(
     }
 
     Ok(PushOutcome { results })
+}
+
+/// Apply the remote repository's `receive.*` policy to updates that would mutate refs.
+fn apply_remote_receive_policy(
+    remote_git_dir: &Path,
+    local_odb: &Odb,
+    decisions: &mut [PushDecision],
+) -> Result<()> {
+    if !decisions.iter().any(|d| d.apply) {
+        return Ok(());
+    }
+    let remote_repo = crate::repo::Repository::open(remote_git_dir, &RepositoryOptions::empty())?;
+    let cfg = remote_repo
+        .config()
+        .unwrap_or_else(|_| std::sync::Arc::new(crate::config::ConfigSet::new()));
+    let policy = crate::serve::ReceivePolicy::from_config(cfg.as_ref());
+    let hidden_refs = crate::hide_refs::hide_ref_patterns_receive(cfg.as_ref());
+    let current_branch = crate::serve::checked_out_branch(&remote_repo);
+
+    for d in decisions.iter_mut().filter(|d| d.apply) {
+        let cmd = match &d.action {
+            PushAction::Update(src) => crate::serve::RefCommand {
+                refname: d.result.remote_ref.clone(),
+                old: d.result.old_oid,
+                new: Some(*src),
+            },
+            PushAction::Delete => crate::serve::RefCommand {
+                refname: d.result.remote_ref.clone(),
+                old: d.result.old_oid,
+                new: None,
+            },
+            PushAction::None => continue,
+        };
+        let refusal = match crate::serve::validate_ref_update(
+            &remote_repo,
+            Some(local_odb),
+            &cmd,
+            &policy,
+            &hidden_refs,
+            current_branch.as_deref(),
+        ) {
+            Ok(r) => r,
+            Err(crate::serve::ServeError::Repository(e)) => return Err(e),
+            Err(e) => return Err(Error::Message(e.to_string())),
+        };
+        if let Some(reason) = refusal {
+            d.result.status = PushRefStatus::RemoteRejected;
+            d.result.message = Some(reason.to_string());
+            d.apply = false;
+            d.action = PushAction::None;
+        }
+    }
+    Ok(())
 }
 
 fn push_store_ref_update(

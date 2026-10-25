@@ -26,6 +26,8 @@ grit push --remote <name>   # hidden alias for one release
 
 Pushes refs to a remote over the smart HTTP or `file://` transport. With no refspecs, grit pushes the current branch using the same remote-selection rules as Git (`branch.<name>.pushRemote`, `remote.pushDefault`, `branch.<name>.remote`, then `origin`) and applies `remote.<name>.push` refspecs when configured.
 
+On the remote, `receive.denyNonFastForwards`, `receive.denyDeletes`, and `receive.denyCurrentBranch` are enforced for every transport, including local-path remotes (not only [`grit receive-pack`](../receive-pack/) over HTTP).
+
 Explicit refspecs follow Git push rules: any revision on the left (`HEAD`, tags, branches), optional `+` for force, `:dst` to delete, and a bare branch name DWIMs to the matching local ref (then through configured push refspecs when present).
 
 `--dry-run` negotiates with the remote and reports what would change without updating refs or sending objects.

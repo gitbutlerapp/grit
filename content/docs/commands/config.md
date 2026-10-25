@@ -41,9 +41,9 @@ Keys are written as `section.name`, for example `user.email`.
 | `grit.githubClientId` | The GitHub OAuth app [`grit auth`](../auth/) signs in with. |
 | `grit.changeIds` | When true (default), [`grit commit`](../commit/) adds a `change-id` header to new commits and stores derived ids on amends when the old tip had none. |
 | `grit.testing.changeId` | Test-only: `content-hash` makes change ids deterministic from commit bytes; any other value is used verbatim. |
-| `receive.denyNonFastForwards` | Refuse pushes that would discard commits. Enforced by [`grit receive-pack`](../receive-pack/). |
-| `receive.denyDeletes` | Refuse pushes that delete branches or tags. |
-| `receive.denyCurrentBranch` | Refuse pushes to the branch checked out in a non-bare repository. On by default. |
+| `receive.denyNonFastForwards` | Refuse pushes that would discard commits. Enforced on the remote for [`grit receive-pack`](../receive-pack/), smart HTTP, and local-path [`grit push`](../push/). |
+| `receive.denyDeletes` | Refuse pushes that delete branches or tags. Same enforcement as `receive.denyNonFastForwards`. |
+| `receive.denyCurrentBranch` | Refuse pushes to the branch checked out in a non-bare repository. On by default; same enforcement as the other `receive.deny*` keys. |
 
 ## Options
 
