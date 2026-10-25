@@ -5428,92 +5428,138 @@ pub fn worktree_differs_from_index_entry(
     config: Option<&ConfigSet>,
     filter_process: Option<&crate::filter_process::FilterProcessState>,
 ) -> Result<bool> {
-    use crate::config::ConfigSet;
-    use crate::crlf;
+    WorktreeEntryComparer::new(repository_git_dir, work_tree, config).differs(
+        odb,
+        ie,
+        ignore_submodule_untracked,
+        filter_process,
+    )
+}
 
-    let path_stored = crate::repo_relpath::storage_string(&ie.path);
-    let path_str_ref = crate::repo_relpath::as_utf8_for_matching(&path_stored);
-    let config = config.cloned().unwrap_or_else(|| {
-        ConfigSet::load(
-            &crate::environment::Environment::empty(),
-            Some(repository_git_dir),
-            true,
-        )
-        .unwrap_or_else(|_| ConfigSet::new())
-    });
-    let trust_filemode = config
-        .get_bool("core.filemode")
-        .and_then(|r| r.ok())
-        .unwrap_or(true);
-    let precompose_unicode = config
-        .get_bool("core.precomposeunicode")
-        .and_then(|r| r.ok())
-        .unwrap_or(false);
-    let ignorecase = config
-        .get_bool("core.ignorecase")
-        .and_then(|r| r.ok())
-        .unwrap_or(false);
-    let file_path =
-        index_entry_worktree_abs_bytes(work_tree, &ie.path, precompose_unicode, ignorecase);
+/// Repeated [`worktree_differs_from_index_entry`] checks against one worktree.
+///
+/// Loads config-derived settings and the root `.gitattributes` once instead of per entry.
+pub(crate) struct WorktreeEntryComparer<'a> {
+    work_tree: &'a Path,
+    config: ConfigSet,
+    trust_filemode: bool,
+    precompose_unicode: bool,
+    ignorecase: bool,
+    conv: std::cell::OnceCell<crate::crlf::ConversionConfig>,
+    attrs: std::cell::OnceCell<Vec<crate::crlf::AttrRule>>,
+}
 
-    if ie.mode == 0o160000 {
-        let sub_head_oid = read_submodule_head(&file_path);
-        let ref_matches = match sub_head_oid {
-            Some(oid) => oid == ie.oid,
-            None => submodule_worktree_is_unpopulated_placeholder(&file_path),
-        };
-        let mut flags = submodule_porcelain_flags(work_tree, path_str_ref.as_ref(), ie.oid);
-        if ignore_submodule_untracked {
-            flags.untracked = false;
+impl<'a> WorktreeEntryComparer<'a> {
+    /// Capture settings for `work_tree`; `config` falls back to the repository config files.
+    pub(crate) fn new(
+        repository_git_dir: &Path,
+        work_tree: &'a Path,
+        config: Option<&ConfigSet>,
+    ) -> Self {
+        let config = config.cloned().unwrap_or_else(|| {
+            ConfigSet::load(
+                &crate::environment::Environment::empty(),
+                Some(repository_git_dir),
+                true,
+            )
+            .unwrap_or_else(|_| ConfigSet::new())
+        });
+        let flag =
+            |key: &str, default: bool| config.get_bool(key).and_then(|r| r.ok()).unwrap_or(default);
+        Self {
+            work_tree,
+            trust_filemode: flag("core.filemode", true),
+            precompose_unicode: flag("core.precomposeunicode", false),
+            ignorecase: flag("core.ignorecase", false),
+            config,
+            conv: std::cell::OnceCell::new(),
+            attrs: std::cell::OnceCell::new(),
         }
-        return Ok(!ref_matches || flags.modified || flags.untracked);
     }
 
-    let meta = match fs::symlink_metadata(&file_path) {
-        Ok(m) => m,
-        Err(e)
-            if e.kind() == std::io::ErrorKind::NotFound
-                || e.raw_os_error() == Some(20) /* ENOTDIR */ =>
-        {
+    /// Same contract as [`worktree_differs_from_index_entry`].
+    pub(crate) fn differs(
+        &self,
+        odb: &Odb,
+        ie: &IndexEntry,
+        ignore_submodule_untracked: bool,
+        filter_process: Option<&crate::filter_process::FilterProcessState>,
+    ) -> Result<bool> {
+        use crate::crlf;
+
+        let work_tree = self.work_tree;
+        let path_stored = crate::repo_relpath::storage_string(&ie.path);
+        let path_str_ref = crate::repo_relpath::as_utf8_for_matching(&path_stored);
+        let file_path = index_entry_worktree_abs_bytes(
+            work_tree,
+            &ie.path,
+            self.precompose_unicode,
+            self.ignorecase,
+        );
+
+        if ie.mode == 0o160000 {
+            let sub_head_oid = read_submodule_head(&file_path);
+            let ref_matches = match sub_head_oid {
+                Some(oid) => oid == ie.oid,
+                None => submodule_worktree_is_unpopulated_placeholder(&file_path),
+            };
+            let mut flags = submodule_porcelain_flags(work_tree, path_str_ref.as_ref(), ie.oid);
+            if ignore_submodule_untracked {
+                flags.untracked = false;
+            }
+            return Ok(!ref_matches || flags.modified || flags.untracked);
+        }
+
+        let meta = match fs::symlink_metadata(&file_path) {
+            Ok(m) => m,
+            Err(e)
+                if e.kind() == std::io::ErrorKind::NotFound
+                    || e.raw_os_error() == Some(20) /* ENOTDIR */ =>
+            {
+                return Ok(true);
+            }
+            Err(e) => return Err(Error::Io(e)),
+        };
+
+        if meta.is_dir() {
             return Ok(true);
         }
-        Err(e) => return Err(Error::Io(e)),
-    };
 
-    if meta.is_dir() {
-        return Ok(true);
-    }
+        let worktree_mode = mode_from_metadata(&meta);
+        if self.trust_filemode && worktree_mode != ie.mode {
+            return Ok(true);
+        }
 
-    let worktree_mode = mode_from_metadata(&meta);
-    if trust_filemode && worktree_mode != ie.mode {
-        return Ok(true);
-    }
+        let conv = self
+            .conv
+            .get_or_init(|| crlf::ConversionConfig::from_config(&self.config));
+        let attrs = self
+            .attrs
+            .get_or_init(|| crlf::load_gitattributes(work_tree));
+        let file_attrs = crlf::get_file_attrs(attrs, path_str_ref.as_ref(), false, &self.config);
+        let worktree_oid = hash_worktree_file(
+            odb,
+            &file_path,
+            &meta,
+            conv,
+            &file_attrs,
+            path_str_ref.as_ref(),
+            Some(ie),
+            filter_process,
+        )?;
 
-    let conv = crlf::ConversionConfig::from_config(&config);
-    let attrs = crlf::load_gitattributes(work_tree);
-    let file_attrs = crlf::get_file_attrs(&attrs, path_str_ref.as_ref(), false, &config);
-    let worktree_oid = hash_worktree_file(
-        odb,
-        &file_path,
-        &meta,
-        &conv,
-        &file_attrs,
-        path_str_ref.as_ref(),
-        Some(ie),
-        filter_process,
-    )?;
-
-    let mut eff_oid = worktree_oid;
-    if eff_oid != ie.oid {
-        if let Ok(raw) = fs::read(&file_path) {
-            let raw_oid = odb.hash(ObjectKind::Blob, &raw)?;
-            if raw_oid == ie.oid {
-                eff_oid = ie.oid;
+        let mut eff_oid = worktree_oid;
+        if eff_oid != ie.oid {
+            if let Ok(raw) = fs::read(&file_path) {
+                let raw_oid = odb.hash(ObjectKind::Blob, &raw)?;
+                if raw_oid == ie.oid {
+                    eff_oid = ie.oid;
+                }
             }
         }
-    }
 
-    Ok(eff_oid != ie.oid)
+        Ok(eff_oid != ie.oid)
+    }
 }
 
 /// Inputs for [`classify_worktree_entry_for_add`].
