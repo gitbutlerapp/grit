@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "desktop  apps/desktop, packages/ui\n         The desktop app and its UI package\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\"url\":\"http://127.0.0.1:8080/demo.git\",\"target\":\"main\",\"head\":\"2f44ddc44831f89c598c98491de99dab2af647c8\",\"slices\":[{\"name\":\"desktop\",\"description\":\"The desktop app and its UI package\",\"paths\":[\"apps/desktop\",\"packages/ui\"]}]}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "## Slices on `main`\n\n| Slice | Paths | Description |\n| --- | --- | --- |\n| `desktop` | `apps/desktop`, `packages/ui` | The desktop app and its UI package |\n",
+    "stderr": ""
+  }
+}

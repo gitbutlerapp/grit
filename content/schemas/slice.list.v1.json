@@ -1,0 +1,64 @@
+{
+  "$id": "https://grit-scm.com/schemas/slice.list/v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "definitions": {
+    "SliceJson": {
+      "description": "A slice as `grit slice` reports it.",
+      "properties": {
+        "description": {
+          "description": "What it is for.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "description": "The slice's name.",
+          "type": "string"
+        },
+        "paths": {
+          "description": "Its paths.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "paths"
+      ],
+      "type": "object"
+    }
+  },
+  "description": "Result of `grit slice list`.",
+  "properties": {
+    "head": {
+      "description": "Where it is.",
+      "type": "string"
+    },
+    "slices": {
+      "description": "The slices.",
+      "items": {
+        "$ref": "#/definitions/SliceJson"
+      },
+      "type": "array"
+    },
+    "target": {
+      "description": "The target branch the slices are on.",
+      "type": "string"
+    },
+    "url": {
+      "description": "The server repository.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "head",
+    "slices",
+    "target",
+    "url"
+  ],
+  "title": "SliceListOutcome",
+  "type": "object"
+}

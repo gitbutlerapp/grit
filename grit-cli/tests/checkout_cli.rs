@@ -306,3 +306,218 @@ fn servers_without_the_checkout_endpoint_are_refused() {
     );
     assert!(!home.join("demo").exists());
 }
+
+fn json(home: &Path, dir: &Path, args: &[&str]) -> Value {
+    serde_json::from_slice(&ok(home, dir, args).stdout).expect("JSON output")
+}
+
+fn commit_file(home: &Path, dir: &Path, path: &str, text: &str, message: &str) {
+    if let Some(parent) = Path::new(path).parent() {
+        std::fs::create_dir_all(dir.join(parent)).expect("mkdir");
+    }
+    std::fs::write(dir.join(path), text).expect("write");
+    ok(home, dir, &["add", path]);
+    ok(home, dir, &["commit", "-m", message]);
+}
+
+#[test]
+fn work_is_checked_in_integrated_and_refreshed() {
+    let (_tmp, home, repos) = setup();
+    let demo = repos.join("demo");
+    ok(
+        &home,
+        &demo,
+        &["config", "receive.denyCurrentBranch", "ignore"],
+    );
+    let (_server, url) = serve(&home, &repos);
+    let token = std::fs::read_to_string(home.join("token")).expect("token");
+    ok(&home, &home, &["login", &url, "--token", &token]);
+    let repo_url = format!("{url}/demo.git");
+    let first = json(
+        &home,
+        &home,
+        &["--json", "checkout", &repo_url, "-p", "src", "--into", "co"],
+    );
+    let work = first["work"].as_str().expect("work").to_owned();
+    let co = home.join("co");
+
+    // Nothing to check in yet.
+    let nothing = run(&home, &co, &["checkin"]);
+    assert!(!nothing.status.success());
+    assert!(String::from_utf8_lossy(&nothing.stderr).contains("nothing to check in"));
+
+    // A commit on the snapshot becomes a commit on the real history.
+    commit_file(&home, &co, "src/a.rs", "a2\n", "Change a");
+    let checkin = json(&home, &co, &["--json", "checkin"]);
+    assert_eq!(checkin["refused"], Value::Bool(false), "{checkin}");
+    assert_eq!(checkin["branches"][0]["name"], Value::String(work.clone()));
+    assert_eq!(checkin["branches"][0]["status"], "created");
+    let grafted = checkin["branches"][0]["grafted"]
+        .as_str()
+        .expect("grafted")
+        .to_owned();
+    assert_eq!(git(&demo, &["rev-parse", &work]), grafted);
+    assert_eq!(
+        git(&demo, &["rev-parse", &format!("{work}^")]),
+        git(&demo, &["rev-parse", "main"])
+    );
+    assert_eq!(
+        git(&demo, &["show", &format!("{work}:docs/d.md")]),
+        "d",
+        "paths outside the checkout are kept"
+    );
+    assert_eq!(git(&demo, &["show", &format!("{work}:src/a.rs")]), "a2");
+    assert_eq!(
+        git(&demo, &["log", "-1", "--format=%an %s", &work]),
+        "A U Thor Change a"
+    );
+    // Checking in again changes nothing.
+    let again = json(&home, &co, &["--json", "checkin", &work]);
+    assert_eq!(again["branches"][0]["status"], "unchanged");
+
+    // The target branch can't be checked in directly.
+    ok(&home, &co, &["branch", "main"]);
+    commit_file(&home, &co, "src/x.rs", "x\n", "On a side branch");
+    ok(&home, &co, &["branch", "-f", "main"]);
+    let target = run(&home, &co, &["--json", "checkin", "main"]);
+    assert_eq!(target.status.code(), Some(1));
+    let target: Value = serde_json::from_slice(&target.stdout).expect("JSON");
+    assert_eq!(target["branches"][0]["status"], "refused");
+    assert!(target["branches"][0]["message"]
+        .as_str()
+        .unwrap_or_default()
+        .contains("target branch"));
+    ok(&home, &co, &["reset", "--hard", "HEAD~1"]);
+    ok(&home, &co, &["branch", "-D", "main"]);
+
+    // Someone else moves the target; integrate merges the work, and the refresh
+    // brings their change in and drops the integrated commit.
+    let other = home.join("other");
+    ok(&home, &home, &["clone", &repo_url, "other"]);
+    commit_file(&home, &other, "src/deep/b.rs", "b2\n", "Bob changes b");
+    ok(&home, &other, &["push"]);
+    let integrated = json(&home, &co, &["--json", "integrate", &work]);
+    assert_eq!(integrated["status"], "merged", "{integrated}");
+    assert_eq!(integrated["commits"], 1);
+    assert_eq!(
+        integrated["refresh"]["refresh"]["moved"],
+        Value::Bool(true),
+        "{integrated}"
+    );
+    let main = git(&demo, &["rev-parse", "main"]);
+    assert_eq!(integrated["head"], Value::String(main.clone()));
+    assert_eq!(
+        git(&demo, &["log", "-1", "--format=%s", "main"]),
+        format!("Merge branch '{work}' into main")
+    );
+    assert_eq!(
+        std::fs::read_to_string(co.join("src/deep/b.rs"))
+            .ok()
+            .as_deref(),
+        Some("b2\n")
+    );
+    assert_eq!(
+        git(&co, &["rev-parse", "HEAD"]),
+        git(&co, &["rev-parse", "origin/main"]),
+        "the integrated commit dropped out"
+    );
+    assert!(
+        git(&co, &["log", "-1", "--format=%B"]).contains(&format!("Grit-Checkout-Base: {main}"))
+    );
+
+    // Work on top of the newer snapshot checks in onto the newer main.
+    commit_file(&home, &co, "src/c.rs", "c\n", "Add c");
+    let later = json(&home, &co, &["--json", "checkin"]);
+    assert_eq!(later["branches"][0]["status"], "updated", "{later}");
+    assert_eq!(git(&demo, &["rev-parse", &format!("{work}^")]), main);
+
+    // A plain pull when the target hasn't moved.
+    let pulled = json(&home, &co, &["--json", "pull"]);
+    assert_eq!(pulled["refresh"]["moved"], Value::Bool(false), "{pulled}");
+}
+
+#[test]
+fn slices_name_paths_on_the_target_branch() {
+    let (_tmp, home, repos) = setup();
+    let demo = repos.join("demo");
+    let (_server, url) = serve(&home, &repos);
+    let token = std::fs::read_to_string(home.join("token")).expect("token");
+    ok(&home, &home, &["login", &url, "--token", &token]);
+    let repo_url = format!("{url}/demo.git");
+
+    let empty = json(
+        &home,
+        &home,
+        &["--json", "slice", "list", "--url", &repo_url],
+    );
+    assert_eq!(empty["slices"], serde_json::json!([]));
+    let outside = run(&home, &home, &["slice", "list"]);
+    assert!(String::from_utf8_lossy(&outside.stderr).contains("--url"));
+
+    let made = json(
+        &home,
+        &home,
+        &[
+            "--json",
+            "slice",
+            "new",
+            "deep",
+            "-p",
+            "src/deep",
+            "-d",
+            "Deep code",
+            "--url",
+            &repo_url,
+        ],
+    );
+    assert_eq!(made["action"], "new");
+    assert_eq!(
+        git(&demo, &["log", "-1", "--format=%an <%ae> %s", "main"]),
+        "alice@example.com <alice@example.com> Add slice deep"
+    );
+    assert!(git(&demo, &["show", "main:.grit/slices.toml"]).contains("[slices.deep]"));
+    let duplicate = run(
+        &home,
+        &home,
+        &["slice", "new", "deep", "-p", "docs", "--url", &repo_url],
+    );
+    assert!(!duplicate.status.success());
+    let missing = run(
+        &home,
+        &home,
+        &["slice", "new", "nope", "-p", "nope", "--url", &repo_url],
+    );
+    assert!(String::from_utf8_lossy(&missing.stderr).contains("not in main"));
+
+    // Check out by slice name; inside the checkout, --url is not needed.
+    let co = json(&home, &home, &["--json", "checkout", &repo_url, "deep"]);
+    assert_eq!(co["paths"], serde_json::json!(["src/deep"]));
+    assert!(home.join("deep/src/deep/b.rs").is_file());
+    assert!(!home.join("deep/docs").exists());
+    let edited = json(
+        &home,
+        &home.join("deep"),
+        &["--json", "slice", "edit", "deep", "--add", "docs"],
+    );
+    assert_eq!(
+        edited["slice"]["paths"],
+        serde_json::json!(["docs", "src/deep"])
+    );
+    let listed = json(&home, &home.join("deep"), &["--json", "slice", "list"]);
+    assert_eq!(listed["slices"][0]["description"], "Deep code");
+    let unknown = run(&home, &home, &["checkout", &repo_url, "nosuch"]);
+    assert!(String::from_utf8_lossy(&unknown.stderr).contains("has no slice nosuch; it has deep"));
+
+    let deleted = json(
+        &home,
+        &home.join("deep"),
+        &["--json", "slice", "delete", "deep"],
+    );
+    assert!(deleted.get("slice").is_none());
+    let none = json(
+        &home,
+        &home,
+        &["--json", "slice", "list", "--url", &repo_url],
+    );
+    assert_eq!(none["slices"], serde_json::json!([]));
+}

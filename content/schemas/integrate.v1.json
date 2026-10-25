@@ -1,0 +1,361 @@
+{
+  "$id": "https://grit-scm.com/schemas/integrate/v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "definitions": {
+    "CheckinBranchJson": {
+      "description": "One branch of `grit checkin`.",
+      "properties": {
+        "commits": {
+          "description": "Commits replayed onto the server's history.",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "grafted": {
+          "description": "The commit on the server's history the branch became.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "message": {
+          "description": "Why it was refused.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "description": "The branch.",
+          "type": "string"
+        },
+        "previous": {
+          "description": "Where the server's branch was before.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "description": "`created`, `updated`, `unchanged` or `refused`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "commits",
+        "name",
+        "status"
+      ],
+      "type": "object"
+    },
+    "CheckinOutcome": {
+      "description": "Result of `grit checkin`.",
+      "properties": {
+        "branches": {
+          "description": "One entry per branch.",
+          "items": {
+            "$ref": "#/definitions/CheckinBranchJson"
+          },
+          "type": "array"
+        },
+        "refused": {
+          "description": "Whether any branch was refused (the exit status is then `1`).",
+          "type": "boolean"
+        },
+        "url": {
+          "description": "The server repository.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "branches",
+        "refused",
+        "url"
+      ],
+      "type": "object"
+    },
+    "MergeConflictJson": {
+      "description": "One conflicted path in `--json` output (pull v1 `conflict_details` and merge v2 items).",
+      "properties": {
+        "kind": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "summary": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "kind",
+        "path"
+      ],
+      "type": "object"
+    },
+    "PullCheckJson": {
+      "description": "Dry-run summary from `grit pull --check`.",
+      "properties": {
+        "ahead": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "behind": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "fast_forward_possible": {
+          "type": "boolean"
+        },
+        "would": {
+          "$ref": "#/definitions/PullResult"
+        }
+      },
+      "required": [
+        "ahead",
+        "behind",
+        "fast_forward_possible",
+        "would"
+      ],
+      "type": "object"
+    },
+    "PullOutcome": {
+      "description": "Outcome of `grit pull`.",
+      "properties": {
+        "ahead": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "alternatives": {
+          "description": "Abort/skip commands (not part of the ordered sequence).",
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "autostash": {
+          "description": "Autostash commit kept on `refs/stash` (rebase stopped, or re-applying it conflicted).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "behind": {
+          "format": "uint",
+          "minimum": 0.0,
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "branch": {
+          "type": "string"
+        },
+        "change_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "check": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PullCheckJson"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "commit": {
+          "description": "Local commit the rebase stopped on (`operation` is `rebase`).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "conflict_details": {
+          "items": {
+            "$ref": "#/definitions/MergeConflictJson"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "conflicts": {
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "next_steps": {
+          "description": "Ordered `grit` commands to finish the paused operation.",
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
+        "oid": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "operation": {
+          "description": "Paused operation when `result` is `conflicts`: `merge` or `rebase`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "refresh": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/PullRefreshJson"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "In a snapshot checkout, the server snapshot the pull refreshed onto."
+        },
+        "result": {
+          "$ref": "#/definitions/PullResult"
+        },
+        "upstream": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "required": [
+        "branch",
+        "result"
+      ],
+      "type": "object"
+    },
+    "PullRefreshJson": {
+      "description": "What `grit pull` refreshed in a checkout.",
+      "properties": {
+        "base": {
+          "description": "The real commit the newest snapshot stands for.",
+          "type": "string"
+        },
+        "moved": {
+          "description": "Whether the target had moved since the checkout's last snapshot.",
+          "type": "boolean"
+        },
+        "snapshot": {
+          "description": "The newest snapshot commit, now `origin/<target>`.",
+          "type": "string"
+        },
+        "target": {
+          "description": "The server's target branch.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "base",
+        "moved",
+        "snapshot",
+        "target"
+      ],
+      "type": "object"
+    },
+    "PullResult": {
+      "description": "Result of `grit pull` (`--json` contract).",
+      "enum": [
+        "up_to_date",
+        "fast_forward",
+        "merged",
+        "refused_not_ff",
+        "conflicts",
+        "set_upstream",
+        "rebased",
+        "autostash_conflict"
+      ],
+      "type": "string"
+    }
+  },
+  "description": "Result of `grit integrate`.",
+  "properties": {
+    "checkin": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/CheckinOutcome"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The check-in done first, when the branch is here."
+    },
+    "commits": {
+      "description": "The branch's commits the merge brought in.",
+      "format": "uint",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "head": {
+      "description": "Where it is now.",
+      "type": "string"
+    },
+    "name": {
+      "description": "The branch merged.",
+      "type": "string"
+    },
+    "previous": {
+      "description": "Where the target was.",
+      "type": "string"
+    },
+    "refresh": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/PullOutcome"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The refresh done after (as `grit pull` reports it)."
+    },
+    "status": {
+      "description": "`merged` or `already_integrated`.",
+      "type": "string"
+    },
+    "target": {
+      "description": "The server's target branch.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "commits",
+    "head",
+    "name",
+    "previous",
+    "status",
+    "target"
+  ],
+  "title": "IntegrateOutcome",
+  "type": "object"
+}

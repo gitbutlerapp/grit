@@ -8,8 +8,10 @@ use grit_test_support::CliFixture;
 use time::OffsetDateTime;
 
 use crate::commands::auth::{AuthOutcome, LogoutOutcome};
+use crate::commands::checkin::{CheckinBranchJson, CheckinOutcome, IntegrateOutcome};
 use crate::commands::checkout::CheckoutOutcome;
 use crate::commands::serve_http::{ServeGrantJson, ServeUserJson, ServeUsersOutcome};
+use crate::commands::slice::{SliceJson, SliceListOutcome};
 use crate::commands::update::UpdateOutcome;
 use crate::output::{render_to_string, HumanRender, MarkdownRender, OutputMode, RenderContext};
 use grit_test_support::ModeCapture;
@@ -165,6 +167,76 @@ fn checkout_render() {
         &json,
         &markdown,
     );
+}
+
+fn snapshot_modes<T: Serialize + HumanRender + MarkdownRender>(name: &str, outcome: &T) {
+    let ctx = sample_ctx();
+    let human = render_to_string(outcome, OutputMode::Human, &ctx).expect("human");
+    let json = render_to_string(outcome, OutputMode::Json, &ctx).expect("json");
+    let markdown = render_to_string(outcome, OutputMode::Markdown, &ctx).expect("markdown");
+    CliFixture::snapshot_rendered_modes(name, snapshot_dir(), &human, &json, &markdown);
+}
+
+fn sample_checkin() -> CheckinOutcome {
+    CheckinOutcome {
+        url: "http://127.0.0.1:8080/demo.git".to_owned(),
+        branches: vec![
+            CheckinBranchJson {
+                name: "alice/elm-orchid".to_owned(),
+                status: "created".to_owned(),
+                grafted: Some("7fb21e5a0c1e4f7d9b2e6a3c8d0f1e2a3b4c5d6e".to_owned()),
+                previous: None,
+                commits: 2,
+                message: None,
+            },
+            CheckinBranchJson {
+                name: "main".to_owned(),
+                status: "refused".to_owned(),
+                grafted: None,
+                previous: None,
+                commits: 0,
+                message: Some(
+                    "main is the server's target branch and can't be changed directly".to_owned(),
+                ),
+            },
+        ],
+        refused: true,
+    }
+}
+
+#[test]
+fn checkin_render() {
+    snapshot_modes("checkin_render", &sample_checkin());
+}
+
+#[test]
+fn integrate_render() {
+    let outcome = IntegrateOutcome {
+        name: "alice/elm-orchid".to_owned(),
+        target: "main".to_owned(),
+        status: "merged".to_owned(),
+        previous: "d08f98a93fcf6c0bd1f4d7e1c5a0b9e8f7d6c5b4".to_owned(),
+        head: "7f51f16b2cb0e4d3c2b1a0f9e8d7c6b5a4f3e2d1".to_owned(),
+        commits: 1,
+        checkin: None,
+        refresh: None,
+    };
+    snapshot_modes("integrate_render", &outcome);
+}
+
+#[test]
+fn slice_render() {
+    let outcome = SliceListOutcome {
+        url: "http://127.0.0.1:8080/demo.git".to_owned(),
+        target: "main".to_owned(),
+        head: "2f44ddc44831f89c598c98491de99dab2af647c8".to_owned(),
+        slices: vec![SliceJson {
+            name: "desktop".to_owned(),
+            description: Some("The desktop app and its UI package".to_owned()),
+            paths: vec!["apps/desktop".to_owned(), "packages/ui".to_owned()],
+        }],
+    };
+    snapshot_modes("slice_render", &outcome);
 }
 
 #[test]

@@ -8,7 +8,7 @@ order: 3
 ## Synopsis
 
 ```text
-grit checkout <url> [-p|--path <path>]... [--into <dir>]
+grit checkout <url> [<slice>] [-p|--path <path>]... [--into <dir>]
 ```
 
 ## Description
@@ -17,6 +17,7 @@ grit checkout <url> [-p|--path <path>]... [--into <dir>]
 
 - With no `--path`, the snapshot is the whole tree.
 - With `--path <dir>` (repeatable), it is everything under each path, plus the files directly in every directory above one, the top level included — the same files Git's cone-mode sparse checkout would have.
+- With a `<slice>` name, it is that [slice](../slice/)'s paths (plus any `--path`), and the directory defaults to the slice's name.
 
 The new repository's history is one commit, `Snapshot of <commit>: <subject>`, which stands for the real commit on the server. It is at `origin/<branch>`, and you are on a new **work branch** on top of it, named for your `user.email` and two random words (like `alice/amber-brook`, numbered when the server already has that branch). There is no local copy of the target branch. `origin` is the repository URL.
 
@@ -32,6 +33,8 @@ error: https://example.com/demo.git offers no grit checkout (no https://example.
 
 Sign in to the server first with [`grit auth <url>`](../auth/).
 
+Work comes back with [`grit checkin`](../checkin/), which rebuilds your branches on the server's real history. [`grit integrate <branch>`](../integrate/) merges one into the target branch, and [`grit pull`](../pull/) refreshes the checkout: the server makes a snapshot of the newest target on top of your last one, `grit pull` fetches just the changes in your paths and rebases your work onto it. Commits already in the target drop out.
+
 To switch branches, use [`grit switch`](../switch/) (also `grit co`).
 
 ## Options
@@ -39,6 +42,7 @@ To switch branches, use [`grit switch`](../switch/) (also `grit co`).
 | Option | Description |
 | --- | --- |
 | `<url>` | The repository, such as `http://127.0.0.1:8080/demo.git`. |
+| `<slice>` | A [slice](../slice/) on the server whose paths to check out. |
 | `-p`, `--path <path>` | Check out only this path (a directory or file), plus the files in the directories above it. Repeatable. |
 | `--into <dir>` | Directory to check out into. Defaults to the repository's name. It must not exist or must be empty. |
 
@@ -121,9 +125,10 @@ Schema: [v1](/schemas/checkout/v1.json)
 | Code | Meaning |
 | --- | --- |
 | `0` | The checkout was made. |
-| `1` | The server offers no snapshot checkouts for the repository, refused the request (for example a path it doesn't have), the destination is not empty, or the download failed. |
+| `1` | The server offers no snapshot checkouts for the repository, has no such slice, refused the request (for example a path it doesn't have), the destination is not empty, or the download failed. |
 
 ## See also
 
 - [`grit serve`](../serve/) — serves snapshot checkouts.
+- [`grit checkin`](../checkin/), [`grit integrate`](../integrate/), [`grit slice`](../slice/) and [`grit pull`](../pull/) — working in a checkout.
 - [`grit clone`](../clone/) — a full copy with history.

@@ -11,7 +11,8 @@ use grit_lib::config::ConfigSet;
 use grit_lib::progress::NeverCancel;
 use grit_lib::remote::resumable::{discard_download, download_resumable};
 use grit_lib::remote::snapshot_checkout::{
-    materialize, normalize_paths, suggest_work_branch, CheckoutClient, CheckoutRequest,
+    materialize, normalize_paths, suggest_work_branch, CheckoutClient, CheckoutMarker,
+    CheckoutRequest,
 };
 use grit_lib::remote::HttpClientFactory;
 use schemars::JsonSchema;
@@ -150,9 +151,10 @@ fn random_pair() -> [u8; 2] {
     [n as u8, (n >> 8) as u8]
 }
 
-/// `grit checkout <url> [--path <path>]... [--into <dir>]`.
+/// `grit checkout <url> [<slice>] [--path <path>]... [--into <dir>]`.
 pub fn run(
     url: &str,
+    slice: Option<&str>,
     paths: &[String],
     into: Option<&Path>,
     mode: OutputMode,
@@ -165,10 +167,28 @@ pub fn run(
         .map_err(|e| anyhow::anyhow!("{e}"))?;
     let client = CheckoutClient::new(http.as_ref(), url)?;
     let server = client.server_info()?;
-    let paths = normalize_paths(paths)?;
+    let mut wanted = Vec::new();
+    if let Some(name) = slice {
+        let slices = client.slices()?;
+        let Some(found) = slices.slices.iter().find(|s| s.name == name) else {
+            let names: Vec<&str> = slices.slices.iter().map(|s| s.name.as_str()).collect();
+            anyhow::bail!(
+                "{url} has no slice {name}; {}",
+                if names.is_empty() {
+                    "it has none yet (make one with `grit slice new <name> --path <dir>`)"
+                        .to_owned()
+                } else {
+                    format!("it has {}", names.join(", "))
+                }
+            );
+        };
+        wanted.extend(found.paths.iter().cloned());
+    }
+    wanted.extend(paths.iter().cloned());
+    let paths = normalize_paths(&wanted)?;
     let dest = match into {
         Some(d) => d.to_path_buf(),
-        None => std::env::current_dir()?.join(&server.name),
+        None => std::env::current_dir()?.join(slice.unwrap_or(&server.name)),
     };
     if dest.is_dir() && std::fs::read_dir(&dest)?.next().is_some() {
         anyhow::bail!("{} already exists and is not empty", dest.display());
@@ -256,4 +276,123 @@ pub fn run(
         id: info.id,
         seconds: started.elapsed().as_secs_f64(),
     })
+}
+
+/// A snapshot checkout opened from the current directory.
+pub(crate) struct OpenCheckout {
+    pub(crate) repo: grit_lib::repo::Repository,
+    pub(crate) marker: CheckoutMarker,
+    pub(crate) config: ConfigSet,
+    pub(crate) http: Box<dyn grit_lib::remote::http_client::HttpClient>,
+}
+
+impl OpenCheckout {
+    /// The client for the server the checkout came from.
+    pub(crate) fn client(&self) -> Result<CheckoutClient<'_>> {
+        Ok(CheckoutClient::new(self.http.as_ref(), &self.marker.url)?)
+    }
+
+    /// Who server-made commits are by: `user.name` and `user.email`.
+    pub(crate) fn author(&self) -> Option<grit_lib::remote::snapshot_checkout::Ident> {
+        let email = self.config.get("user.email")?;
+        let name = self
+            .config
+            .get("user.name")
+            .unwrap_or_else(|| email.clone());
+        Some(grit_lib::remote::snapshot_checkout::Ident { name, email })
+    }
+}
+
+/// The checkout the current directory is in.
+///
+/// # Returns
+///
+/// `None` when the current repository is not a snapshot checkout.
+pub(crate) fn open_checkout_here() -> Result<Option<OpenCheckout>> {
+    let repo = crate::context::discover()?;
+    open_checkout(repo)
+}
+
+/// `repo` as a snapshot checkout, when it is one.
+pub(crate) fn open_checkout(repo: grit_lib::repo::Repository) -> Result<Option<OpenCheckout>> {
+    let Some(marker) = CheckoutMarker::read(repo.git_dir()) else {
+        return Ok(None);
+    };
+    let config = ConfigSet::load(&crate::context::environment(), Some(repo.git_dir()), true)
+        .context("could not load config")?;
+    let http = crate::context::http_client_factory()
+        .create(&config)
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    Ok(Some(OpenCheckout {
+        repo,
+        marker,
+        config,
+        http,
+    }))
+}
+
+/// [`open_checkout_here`], failing outside a checkout.
+pub(crate) fn require_checkout() -> Result<OpenCheckout> {
+    open_checkout_here()?.ok_or_else(|| {
+        anyhow::anyhow!("this is not a snapshot checkout; make one with `grit checkout <url>`")
+    })
+}
+
+/// What `grit pull` refreshed in a checkout.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct PullRefreshJson {
+    /// The server's target branch.
+    pub target: String,
+    /// The real commit the newest snapshot stands for.
+    pub base: String,
+    /// The newest snapshot commit, now `origin/<target>`.
+    pub snapshot: String,
+    /// Whether the target had moved since the checkout's last snapshot.
+    pub moved: bool,
+}
+
+/// In a snapshot checkout, ask the server for a snapshot of the newest target
+/// on top of the last one and point `options` at it: fetch it into
+/// `origin/<target>` and rebase onto it. Commits already merged into the
+/// target drop out of the rebase.
+///
+/// # Returns
+///
+/// `None` outside a checkout (nothing changes).
+pub(crate) fn refresh_pull_options(
+    repo: &grit_lib::repo::Repository,
+    options: &mut grit_lib::porcelain::pull::PullOptions,
+) -> Result<Option<PullRefreshJson>> {
+    let Some(marker) = CheckoutMarker::read(repo.git_dir()) else {
+        return Ok(None);
+    };
+    let config = ConfigSet::load(&crate::context::environment(), Some(repo.git_dir()), true)
+        .context("could not load config")?;
+    let http = DefaultHttpClientFactory
+        .create(&config)
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let client = CheckoutClient::new(http.as_ref(), &marker.url)?;
+    let previous = marker.roots.last().map(|r| r.commit.clone());
+    let info = client.update(&marker.id)?;
+    let updated = CheckoutMarker {
+        roots: info.roots.clone(),
+        ..marker
+    };
+    updated.write(repo.git_dir())?;
+    options.remote = Some("origin".to_owned());
+    options.explicit_fetch = true;
+    options.fetch.refspecs = vec![format!(
+        "+{}:refs/remotes/origin/{}",
+        grit_lib::remote::snapshot_checkout::target_ref(&info.id),
+        info.branch
+    )];
+    if options.mode.is_none() {
+        options.mode = Some(grit_lib::porcelain::pull::PullMode::Rebase);
+    }
+    Ok(Some(PullRefreshJson {
+        target: info.branch,
+        base: info.base,
+        moved: previous.as_deref() != Some(info.root.as_str()),
+        snapshot: info.root,
+    }))
 }

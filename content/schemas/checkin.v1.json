@@ -1,0 +1,77 @@
+{
+  "$id": "https://grit-scm.com/schemas/checkin/v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "definitions": {
+    "CheckinBranchJson": {
+      "description": "One branch of `grit checkin`.",
+      "properties": {
+        "commits": {
+          "description": "Commits replayed onto the server's history.",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "grafted": {
+          "description": "The commit on the server's history the branch became.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "message": {
+          "description": "Why it was refused.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "description": "The branch.",
+          "type": "string"
+        },
+        "previous": {
+          "description": "Where the server's branch was before.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "description": "`created`, `updated`, `unchanged` or `refused`.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "commits",
+        "name",
+        "status"
+      ],
+      "type": "object"
+    }
+  },
+  "description": "Result of `grit checkin`.",
+  "properties": {
+    "branches": {
+      "description": "One entry per branch.",
+      "items": {
+        "$ref": "#/definitions/CheckinBranchJson"
+      },
+      "type": "array"
+    },
+    "refused": {
+      "description": "Whether any branch was refused (the exit status is then `1`).",
+      "type": "boolean"
+    },
+    "url": {
+      "description": "The server repository.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "branches",
+    "refused",
+    "url"
+  ],
+  "title": "CheckinOutcome",
+  "type": "object"
+}

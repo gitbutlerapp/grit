@@ -78,8 +78,13 @@ The push advertisement carries a `pushBundle=/push` capability: a [TUS](https://
 | `POST /.grit/checkouts/<name>` | makes a checkout of the paths in the JSON body |
 | `GET /.grit/checkouts/<name>/<id>` | the checkout |
 | `GET /.grit/checkouts/<name>/<id>/bundle` | its snapshot as a bundle, with `Range` support |
+| `POST /.grit/checkouts/<name>/<id>/update` | a snapshot of the newest target on top of the checkout's last one, at `refs/checkouts/<id>/target` (`grit pull`) |
+| `POST /.grit/checkouts/<name>/<id>/checkin` | grafts branches pushed to `refs/checkouts/<id>/out/heads/*` onto the real history and sets them (`grit checkin`; write access) |
+| `POST /.grit/checkouts/<name>/integrate` | merges a branch into the target with a merge commit (`grit integrate`; write access) |
+| `GET /.grit/checkouts/<name>/slices` | the slices in `.grit/slices.toml` on the target |
+| `PUT`, `DELETE /.grit/checkouts/<name>/slices/<slice>` | changes a slice with a commit on the target (`grit slice`; write access) |
 
-The server keeps checkouts in `grit-serve/checkouts/` inside the Git directory and points `refs/checkouts/<id>/target` at each one's snapshot.
+The server keeps checkouts in `grit-serve/checkouts/` inside the Git directory and points `refs/checkouts/<id>/target` at each one's snapshot. Integrations and slice changes move the target branch's ref directly; in a repository with a working tree, that tree is not updated (as with a push to a checked-out branch).
 
 ### Running it
 

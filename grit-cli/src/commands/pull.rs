@@ -20,6 +20,7 @@ use grit_lib::state::resolve_head_for_repository;
 
 pub use pull_outcome::{map_outcome, PullOutcome, PullResult};
 
+#[derive(Default)]
 pub struct PullRunArgs {
     pub fetch: FetchArgs,
     pub ff_only: bool,
@@ -27,6 +28,14 @@ pub struct PullRunArgs {
     pub rebase: bool,
     pub autostash: bool,
     pub check: bool,
+}
+
+impl PullRunArgs {
+    /// A plain `grit pull`, as `grit integrate` runs it to refresh a checkout.
+    #[must_use]
+    pub fn refresh() -> Self {
+        Self::default()
+    }
 }
 
 pub fn run(args: &PullRunArgs, mode: OutputMode) -> Result<PullOutcome> {
@@ -72,7 +81,17 @@ pub fn run(args: &PullRunArgs, mode: OutputMode) -> Result<PullOutcome> {
         remote_name: Some(invocation.remote.clone()),
         ..Default::default()
     };
-    let remote_name = invocation.remote;
+    // In a snapshot checkout, pull refreshes onto the server's newest snapshot.
+    let refresh = if args.fetch.remote.is_none() && args.fetch.refspecs.is_empty() {
+        crate::commands::checkout::refresh_pull_options(&repo, &mut options)?
+    } else {
+        None
+    };
+    let remote_name = if refresh.is_some() {
+        "origin".to_owned()
+    } else {
+        invocation.remote
+    };
     let factory = crate::context::http_client_factory();
     // The work-tree update after the fetch reports no progress, so the overall
     // bar covers the transfer only.
@@ -107,6 +126,7 @@ pub fn run(args: &PullRunArgs, mode: OutputMode) -> Result<PullOutcome> {
         }
     };
     let mut outcome = map_outcome(lib);
+    outcome.refresh = refresh;
     outcome.transfer.records = progress.phases().to_vec();
     outcome.transfer.elapsed = progress.elapsed();
     Ok(outcome)

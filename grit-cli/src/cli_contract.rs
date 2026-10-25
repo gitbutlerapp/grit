@@ -116,6 +116,54 @@ const COMMAND_CONTRACTS: &[(&str, CommandContract)] = &[
         },
     ),
     (
+        "checkin",
+        CommandContract {
+            kind: CommandKind::Mutation,
+            takes_message: false,
+            takes_paths: false,
+        },
+    ),
+    (
+        "integrate",
+        CommandContract {
+            kind: CommandKind::Mutation,
+            takes_message: false,
+            takes_paths: false,
+        },
+    ),
+    (
+        "slice.list",
+        CommandContract {
+            kind: CommandKind::Query,
+            takes_message: false,
+            takes_paths: false,
+        },
+    ),
+    (
+        "slice.new",
+        CommandContract {
+            kind: CommandKind::Mutation,
+            takes_message: false,
+            takes_paths: false,
+        },
+    ),
+    (
+        "slice.edit",
+        CommandContract {
+            kind: CommandKind::Mutation,
+            takes_message: false,
+            takes_paths: false,
+        },
+    ),
+    (
+        "slice.delete",
+        CommandContract {
+            kind: CommandKind::Mutation,
+            takes_message: false,
+            takes_paths: false,
+        },
+    ),
+    (
         "checkout",
         CommandContract {
             kind: CommandKind::Mutation,
@@ -910,6 +958,36 @@ const EXCEPTIONS: &[(&str, ContractRule, &str, &str)] = &[
         ContractRule::DryRun,
         "s5 dry-run",
         "notes add has no `--dry-run` yet (step 5)",
+    ),
+    (
+        "checkin",
+        ContractRule::DryRun,
+        "clone-remote",
+        "checkin has no `--dry-run` yet",
+    ),
+    (
+        "integrate",
+        ContractRule::DryRun,
+        "clone-remote",
+        "integrate has no `--dry-run` yet",
+    ),
+    (
+        "slice.new",
+        ContractRule::DryRun,
+        "clone-remote",
+        "slice new has no `--dry-run` yet",
+    ),
+    (
+        "slice.edit",
+        ContractRule::DryRun,
+        "clone-remote",
+        "slice edit has no `--dry-run` yet",
+    ),
+    (
+        "slice.delete",
+        ContractRule::DryRun,
+        "clone-remote",
+        "slice delete has no `--dry-run` yet",
     ),
     (
         "checkout",

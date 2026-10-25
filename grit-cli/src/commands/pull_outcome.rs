@@ -88,6 +88,10 @@ pub struct PullOutcome {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(skip_serializing_if = "Option::is_none")]
     pub check: Option<PullCheckJson>,
+    /// In a snapshot checkout, the server snapshot the pull refreshed onto.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub refresh: Option<crate::commands::checkout::PullRefreshJson>,
     /// What the fetch step received and where the time went, for the human summary.
     #[serde(skip)]
     #[schemars(skip)]
@@ -141,6 +145,7 @@ pub fn map_outcome(outcome: LibPullOutcome) -> PullOutcome {
         ahead: outcome.ahead,
         behind: outcome.behind,
         check: outcome.check.map(map_check),
+        refresh: None,
         transfer: TransferSummary::new(outcome.transfer, Vec::new(), Default::default()),
     }
 }
@@ -211,6 +216,23 @@ impl HumanRender for PullOutcome {
                 }
             );
             return Ok(());
+        }
+        if let Some(r) = &self.refresh {
+            if r.moved {
+                outln!(
+                    w,
+                    "Refreshed onto {} at {} (snapshot {})",
+                    r.target,
+                    short_hex(&r.base),
+                    short_hex(&r.snapshot)
+                );
+            } else {
+                outln!(
+                    w,
+                    "{} has not moved since this checkout's snapshot.",
+                    r.target
+                );
+            }
         }
         let short = self.oid.as_deref().map(short_hex).unwrap_or_default();
         match self.result {

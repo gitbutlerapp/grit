@@ -1,0 +1,77 @@
+{
+  "$id": "https://grit-scm.com/schemas/slice.edit/v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "definitions": {
+    "SliceJson": {
+      "description": "A slice as `grit slice` reports it.",
+      "properties": {
+        "description": {
+          "description": "What it is for.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "name": {
+          "description": "The slice's name.",
+          "type": "string"
+        },
+        "paths": {
+          "description": "Its paths.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        }
+      },
+      "required": [
+        "name",
+        "paths"
+      ],
+      "type": "object"
+    }
+  },
+  "description": "Result of `grit slice new`, `edit` and `delete`.",
+  "properties": {
+    "action": {
+      "description": "`new`, `edit` or `delete`.",
+      "type": "string"
+    },
+    "head": {
+      "description": "Where it is: the server's commit changing the slices file.",
+      "type": "string"
+    },
+    "name": {
+      "description": "The slice's name.",
+      "type": "string"
+    },
+    "previous": {
+      "description": "Where it was.",
+      "type": "string"
+    },
+    "slice": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/SliceJson"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The slice as it is now; omitted once deleted."
+    },
+    "target": {
+      "description": "The target branch.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "action",
+    "head",
+    "name",
+    "previous",
+    "target"
+  ],
+  "title": "SliceChangeOutcome",
+  "type": "object"
+}

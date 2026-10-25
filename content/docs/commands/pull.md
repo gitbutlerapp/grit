@@ -37,6 +37,18 @@ Integration runs the same hooks as `git pull`: `post-merge 0` after a fast-forwa
 
 `--autostash` stashes dirty index/worktree changes (including untracked files) before integrating, then re-applies them afterward. Config `merge.autoStash` / `rebase.autoStash` enables the same behavior by default for merge and rebase pulls respectively. If re-applying the stash conflicts, the pull integration is kept, the stash entry remains on `refs/stash`, and the result is `autostash_conflict` (exit **1**). When a rebase pull stops on conflicts, the stash is not applied over the conflict markers: it stays on `refs/stash` (reported as `autostash`) so you can `grit stash pop` once the rebase is finished or aborted.
 
+### In a snapshot checkout
+
+In a [snapshot checkout](../checkout/), `grit pull` with no remote or refspecs **refreshes** the checkout. It asks the server for a snapshot of the newest target branch, made on top of the checkout's last snapshot, fetches it into `origin/<target>` (only what changed in the checkout's paths comes down) and rebases the current branch onto it. Commits already merged into the target drop out. The first result line says where it refreshed to, or that the target hasn't moved:
+
+```console
+$ grit pull
+Refreshed onto main at 3c011e2 (snapshot 7ae0a80)
+Rebased onto origin (FETCH_HEAD) (2b87e20)
+```
+
+`--ff-only` and `--no-rebase` still apply; without them the refresh rebases.
+
 `--check` fetches (always for real — not a dry run) and reports whether the branch could fast-forward or is already up to date, without changing `HEAD`, the index, the worktree, or reflogs. In rebase mode it also predicts whether the replay would stop on conflicts (`would` is `conflicts`). It cannot be combined with `--autostash` or integration mode overrides (`--ff-only`, `--rebase`, `--no-rebase`).
 
 ## Options
@@ -135,6 +147,7 @@ Exit codes (also apply to default human output): **0** on success (`up_to_date`,
 | `ahead` | integer or null | Local-only commits when `result` is `refused_not_ff` or with `--check`. |
 | `behind` | integer or null | Upstream-only commits when `result` is `refused_not_ff` or with `--check`. |
 | `check` | object or null | Present with `--check`: `ahead`, `behind`, `fast_forward_possible`, and `would` (same result strings as `result`). |
+| `refresh` | object or omitted | In a snapshot checkout: `target` (the server's target branch), `base` (the real commit the newest snapshot stands for), `snapshot` (the snapshot, now `origin/<target>`) and `moved` (whether the target moved since the last snapshot). |
 
 Example:
 

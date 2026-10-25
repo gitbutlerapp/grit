@@ -718,6 +718,43 @@ enum AuthAction {
     },
 }
 
+/// Subcommands of `grit slice`.
+#[derive(Debug, Subcommand)]
+enum SliceAction {
+    /// List the slices.
+    List,
+    /// Make a slice.
+    New {
+        /// The slice's name.
+        name: String,
+        /// A path in the slice (repeatable).
+        #[arg(short = 'p', long = "path", value_name = "PATH")]
+        paths: Vec<String>,
+        /// What the slice is for.
+        #[arg(short = 'd', long, value_name = "TEXT")]
+        description: Option<String>,
+    },
+    /// Add paths to a slice or remove them.
+    Edit {
+        /// The slice's name.
+        name: String,
+        /// A path to add (repeatable).
+        #[arg(long, value_name = "PATH")]
+        add: Vec<String>,
+        /// A path to remove (repeatable).
+        #[arg(long, value_name = "PATH")]
+        remove: Vec<String>,
+        /// A new description.
+        #[arg(short = 'd', long, value_name = "TEXT")]
+        description: Option<String>,
+    },
+    /// Delete a slice.
+    Delete {
+        /// The slice's name.
+        name: String,
+    },
+}
+
 /// Subcommands of `grit serve`.
 #[derive(Debug, Subcommand)]
 enum ServeAction {
@@ -788,12 +825,37 @@ enum Command {
     Checkout {
         /// The repository on a server that offers snapshot checkouts (`grit serve`).
         url: String,
+        /// A slice (named set of paths) on the server to check out; `--path` adds to it.
+        slice: Option<String>,
         /// Check out only this path, plus the files in the directories above it (repeatable).
         #[arg(short = 'p', long = "path", value_name = "PATH")]
         paths: Vec<String>,
         /// Directory to check out into (defaults to the repository name).
         #[arg(long, value_name = "DIR")]
         into: Option<std::path::PathBuf>,
+    },
+    /// Send a snapshot checkout's branches back to the server, grafted onto its real history.
+    Checkin {
+        /// Branches to check in (default: every branch with commits on top of the snapshot).
+        #[arg(value_name = "BRANCH")]
+        branches: Vec<String>,
+        /// Replace a server branch even where that drops commits it has.
+        #[arg(short = 'f', long)]
+        force: bool,
+    },
+    /// Merge a branch into the server's target branch (checking it in first), then refresh this checkout.
+    Integrate {
+        /// The branch to merge.
+        #[arg(value_name = "BRANCH")]
+        branch: String,
+    },
+    /// Named sets of paths to check out together, kept on the server's target branch.
+    Slice {
+        #[command(subcommand)]
+        action: SliceAction,
+        /// The repository whose slices to use (default: the checkout you are in).
+        #[arg(long, global = true, value_name = "URL")]
+        url: Option<String>,
     },
     /// Copy a remote repository into a new directory.
     Clone {
@@ -2506,11 +2568,69 @@ fn dispatch(
             opts,
             ctx,
         ),
-        Command::Checkout { url, paths, into } => emit_success(
-            &commands::checkout::run(&url, &paths, into.as_deref(), opts.mode)?,
+        // `grit checkout <branch>` is the Git habit for `grit switch`; only a URL
+        // asks for a snapshot checkout.
+        Command::Checkout {
+            url,
+            slice: None,
+            paths,
+            into: None,
+        } if paths.is_empty() && !url.contains("://") => emit_success(
+            &commands::switch::run(Some(url), None, false, false, false)?,
             opts,
             ctx,
         ),
+        Command::Checkout {
+            url,
+            slice,
+            paths,
+            into,
+        } => emit_success(
+            &commands::checkout::run(&url, slice.as_deref(), &paths, into.as_deref(), opts.mode)?,
+            opts,
+            ctx,
+        ),
+        Command::Checkin { branches, force } => {
+            let outcome = commands::checkin::run(&branches, force, opts.mode)?;
+            emit_success(&outcome, opts, ctx)?;
+            Ok(ExitStatus::from_push_rejected(outcome.refused))
+        }
+        Command::Integrate { branch } => emit_success(
+            &commands::checkin::integrate(&branch, opts.mode)?,
+            opts,
+            ctx,
+        ),
+        Command::Slice { action, url } => match action {
+            SliceAction::List => emit_success(&commands::slice::list(url.as_deref())?, opts, ctx),
+            SliceAction::New {
+                name,
+                paths,
+                description,
+            } => emit_success(
+                &commands::slice::new(url.as_deref(), &name, &paths, description.as_deref())?,
+                opts,
+                ctx,
+            ),
+            SliceAction::Edit {
+                name,
+                add,
+                remove,
+                description,
+            } => emit_success(
+                &commands::slice::edit(
+                    url.as_deref(),
+                    &name,
+                    &add,
+                    &remove,
+                    description.as_deref(),
+                )?,
+                opts,
+                ctx,
+            ),
+            SliceAction::Delete { name } => {
+                emit_success(&commands::slice::delete(url.as_deref(), &name)?, opts, ctx)
+            }
+        },
         Command::Clone {
             url,
             dir,
@@ -4130,7 +4250,10 @@ mod tests {
     /// In-process render snapshots that satisfy coverage for a top-level command.
     const RENDER_SNAPSHOT_FOR_COMMAND: &[(&str, &str)] = &[
         ("auth", "auth_render"),
+        ("checkin", "checkin_render"),
         ("checkout", "checkout_render"),
+        ("integrate", "integrate_render"),
+        ("slice", "slice_render"),
         ("serve", "serve_render"),
         ("update", "update_render"),
     ];

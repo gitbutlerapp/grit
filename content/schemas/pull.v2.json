@@ -52,6 +52,34 @@
       ],
       "type": "object"
     },
+    "PullRefreshJson": {
+      "description": "What `grit pull` refreshed in a checkout.",
+      "properties": {
+        "base": {
+          "description": "The real commit the newest snapshot stands for.",
+          "type": "string"
+        },
+        "moved": {
+          "description": "Whether the target had moved since the checkout's last snapshot.",
+          "type": "boolean"
+        },
+        "snapshot": {
+          "description": "The newest snapshot commit, now `origin/<target>`.",
+          "type": "string"
+        },
+        "target": {
+          "description": "The server's target branch.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "base",
+        "moved",
+        "snapshot",
+        "target"
+      ],
+      "type": "object"
+    },
     "PullResult": {
       "description": "Result of `grit pull` (`--json` contract).",
       "enum": [
@@ -168,6 +196,17 @@
         "string",
         "null"
       ]
+    },
+    "refresh": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/PullRefreshJson"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "In a snapshot checkout, the server snapshot the pull refreshed onto."
     },
     "result": {
       "$ref": "#/definitions/PullResult"

@@ -101,6 +101,7 @@ fn build_schema_registry() -> Vec<SchemaRegistryEntry> {
             BundleCreateOutcome, BundleListOutcome, BundleUnbundleOutcome, BundleVerifyOutcome,
         },
         cat::CatOutcome,
+        checkin::{CheckinOutcome, IntegrateOutcome},
         checkout::CheckoutOutcome,
         clean::CleanOutcome,
         clone::CloneOutcome,
@@ -140,6 +141,7 @@ fn build_schema_registry() -> Vec<SchemaRegistryEntry> {
         shortlog::ShortlogOutcome,
         show::ShowRunResult,
         skill::SkillOutcome,
+        slice::{SliceChangeOutcome, SliceListOutcome},
         stash::{
             StashApplyOutcome, StashBranchOutcome, StashClearOutcome, StashDropOutcome,
             StashListOutcome, StashPopOutcome, StashPushOutcome, StashShowOutcome,
@@ -156,6 +158,12 @@ fn build_schema_registry() -> Vec<SchemaRegistryEntry> {
         entry::<InitOutcome>("init"),
         entry::<CloneOutcome>("clone"),
         entry::<CheckoutOutcome>("checkout"),
+        entry::<CheckinOutcome>("checkin"),
+        entry::<IntegrateOutcome>("integrate"),
+        entry::<SliceListOutcome>("slice.list"),
+        entry::<SliceChangeOutcome>("slice.new"),
+        entry::<SliceChangeOutcome>("slice.edit"),
+        entry::<SliceChangeOutcome>("slice.delete"),
         entry::<RemoteOutcome>("remote"),
         entry::<RemoteOutcome>("remote.add"),
         entry::<RemoteOutcome>("remote.refs"),
@@ -347,6 +355,13 @@ pub fn schema_command_key(args: &[&str]) -> Option<String> {
             Some("logout") => "auth.logout",
             // `grit auth` or `grit auth <url>`.
             _ => "auth",
+        },
+        "slice" => match positional.get(1).copied() {
+            Some("list") => "slice.list",
+            Some("new") => "slice.new",
+            Some("edit") => "slice.edit",
+            Some("delete") => "slice.delete",
+            _ => return None,
         },
         "serve" => match positional.get(1).copied() {
             None => "serve",
@@ -725,7 +740,10 @@ pub const SNAPSHOT_FILE_PREFIX: &str = "grit_test_support__cli_fixture__";
 pub const SNAPSHOT_JSON_SCHEMA_SKIP: &[&str] = &[
     "auth_render",
     "log_json_filter_commits_oid",
+    "checkin_render",
     "checkout_render",
+    "integrate_render",
+    "slice_render",
     "serve_render",
     "update_render",
 ];
