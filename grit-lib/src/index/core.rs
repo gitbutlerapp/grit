@@ -2403,6 +2403,51 @@ impl Index {
         self.merge_replacements_into_sorted_index(replacements);
     }
 
+    /// Overwrite the stage-0 rows that already hold each replacement's path, in place.
+    ///
+    /// Same result and cache invalidation as [`Self::replace_stage0_entries_batch`], without
+    /// growing `entries` to merge: restaging only changes rows, never their order. Replacements
+    /// with no stage-0 row at their path (or not at stage 0) go through the sorted merge.
+    pub(crate) fn overwrite_stage0_entries(&mut self, replacements: Vec<IndexEntry>) {
+        const BULK_INVALIDATE_MIN: usize = 64;
+        if replacements.is_empty() {
+            return;
+        }
+        let defer_untracked = self.defer_untracked_cache_invalidation;
+        let drop_caches = !defer_untracked && replacements.len() >= BULK_INVALIDATE_MIN;
+        let mut unmatched = Vec::new();
+        for mut entry in replacements {
+            let pos = if entry.stage() == 0 {
+                self.find_entry_pos(&entry.path, 0)
+            } else {
+                None
+            };
+            let Some(pos) = pos else {
+                unmatched.push(entry);
+                continue;
+            };
+            if !drop_caches {
+                if !defer_untracked {
+                    if let Ok(p) = std::str::from_utf8(&entry.path) {
+                        self.invalidate_untracked_cache_for_path(p);
+                    }
+                }
+                self.invalidate_cache_tree_for_path(&entry.path);
+            }
+            entry.base_index_pos = self.entries[pos].base_index_pos;
+            self.entries[pos] = entry;
+        }
+        if drop_caches {
+            self.cache_tree = None;
+            self.cache_tree_root = None;
+            self.untracked_cache = None;
+        }
+        self.touch_fsmonitor_after_entry_change();
+        if !unmatched.is_empty() {
+            self.merge_replacements_into_sorted_index(unmatched);
+        }
+    }
+
     /// Append sorted `replacements` to a sorted index and merge in one linear pass.
     fn merge_sorted_replacements_into_entries(&mut self, mut replacements: Vec<IndexEntry>) {
         if replacements.is_empty() {
@@ -4656,6 +4701,99 @@ mod tests {
         assert_eq!(loaded.entries.len(), 2);
         assert_eq!(loaded.entries[0].path, b"bar/baz.txt");
         assert_eq!(loaded.entries[1].path, b"foo.txt");
+    }
+
+    fn overwrite_fixture() -> Index {
+        let mut idx = Index::new();
+        for i in 0..200 {
+            let mut e = make_entry(&format!("d{}/f{i:03}.txt", i % 4));
+            e.base_index_pos = i + 1;
+            idx.add_or_replace(e);
+        }
+        for stage in 1..=3u16 {
+            let mut e = make_entry("d0/conflict.txt");
+            e.flags |= stage << 12;
+            idx.add_or_replace(e);
+        }
+        let leaf =
+            |name: &str| CacheTreeNode::valid(name.as_bytes().to_vec(), 50, dummy_oid(), vec![]);
+        idx.cache_tree_root = Some(dummy_oid());
+        idx.cache_tree = Some(CacheTreeNode::valid(
+            Vec::new(),
+            203,
+            dummy_oid(),
+            vec![leaf("d0"), leaf("d1"), leaf("d2"), leaf("d3")],
+        ));
+        assert!(idx.entries_sorted);
+        idx
+    }
+
+    fn overwrite_replacements(count: usize) -> Vec<IndexEntry> {
+        let changed = ObjectId::from_bytes(&[7u8; 20]).unwrap();
+        let mut out: Vec<IndexEntry> = (0..count)
+            .map(|i| {
+                let mut e = make_entry(&format!("d{}/f{:03}.txt", (i * 3) % 4, i * 3));
+                e.oid = changed;
+                e.size = 9;
+                e
+            })
+            .collect();
+        out.sort_by(|a, b| a.path.cmp(&b.path));
+        out
+    }
+
+    #[test]
+    fn overwrite_stage0_entries_matches_sorted_merge() {
+        for count in [3, 64] {
+            let mut merged = overwrite_fixture();
+            merged.replace_stage0_entries_batch(overwrite_replacements(count));
+            let mut overwritten = overwrite_fixture();
+            overwritten.overwrite_stage0_entries(overwrite_replacements(count));
+            assert_eq!(overwritten.entries, merged.entries, "count {count}");
+            assert_eq!(overwritten.cache_tree, merged.cache_tree, "count {count}");
+            assert_eq!(overwritten.cache_tree_root, merged.cache_tree_root);
+            assert_eq!(overwritten.entries.len(), 203);
+        }
+    }
+
+    #[test]
+    fn overwrite_stage0_entries_keeps_split_positions_and_invalidates_touched_dirs() {
+        let mut idx = overwrite_fixture();
+        let target = b"d1/f001.txt".to_vec();
+        let pos = idx.find_entry_pos(&target, 0).unwrap();
+        let before = idx.entries[pos].base_index_pos;
+        let mut e = make_entry("d1/f001.txt");
+        e.size = 42;
+        idx.overwrite_stage0_entries(vec![e]);
+        assert_eq!(idx.entries[pos].size, 42);
+        assert_eq!(idx.entries[pos].base_index_pos, before);
+        let tree = idx.cache_tree.as_ref().unwrap();
+        assert!(!tree.is_valid());
+        let child = |name: &[u8]| tree.children.iter().find(|c| c.name == name).unwrap();
+        assert!(!child(b"d1").is_valid());
+        assert!(child(b"d0").is_valid());
+    }
+
+    #[test]
+    fn overwrite_stage0_entries_merges_paths_without_a_stage0_row() {
+        let mut idx = overwrite_fixture();
+        let mut new_path = make_entry("d2/new.txt");
+        new_path.size = 1;
+        idx.overwrite_stage0_entries(vec![make_entry("d0/f000.txt"), new_path]);
+        assert_eq!(idx.entries.len(), 204);
+        assert!(idx.get(b"d2/new.txt", 0).is_some());
+        assert_eq!(
+            idx.entries
+                .iter()
+                .filter(|e| e.path == b"d0/conflict.txt")
+                .count(),
+            3
+        );
+        assert!(idx.entries.windows(2).all(|w| {
+            Index::cmp_paths(&w[0].path, &w[1].path)
+                .then_with(|| w[0].stage().cmp(&w[1].stage()))
+                .is_lt()
+        }));
     }
 
     #[test]

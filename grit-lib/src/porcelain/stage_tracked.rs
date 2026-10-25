@@ -33,8 +33,11 @@ use crate::worktree_scan::{
     BlobScanSparseMode, WorktreeBlobScanOptions,
 };
 
-/// Above this index size, defer parallel blob restage and multi-thread stat preload to cap RSS.
-const PARALLEL_DEFERRED_RESTAGE_MAX_ENTRIES: usize = 80_000;
+/// Most deferred restage jobs read into memory at once; bounds peak RSS on bulk restages.
+const RESTAGE_CHUNK_MAX_JOBS: usize = 1024;
+
+/// Most worktree bytes (by stat size) one deferred restage chunk reads into memory at once.
+const RESTAGE_CHUNK_MAX_BYTES: u64 = 64 * 1024 * 1024;
 
 /// Summary of paths updated while staging tracked modifications/deletions.
 ///
@@ -190,10 +193,7 @@ pub(crate) fn stage_tracked_modifications_in_index_with_rules(
 ) -> Result<StageTrackedSummary> {
     let entry_count_at_start = index.entries.len();
     let bulk_untr_defer = entry_count_at_start >= thresholds.large_index_restage;
-    // Parallel deferred restage holds every changed path plus batch read inputs at peak; stay
-    // serial on campaign-scale indexes so bulk add stays under the factory RSS ceiling.
-    let parallel_restage = entry_count_at_start >= thresholds.parallel_tracked_restage
-        && entry_count_at_start < PARALLEL_DEFERRED_RESTAGE_MAX_ENTRIES;
+    let parallel_restage = entry_count_at_start >= thresholds.parallel_tracked_restage;
     if bulk_untr_defer {
         index.defer_untracked_cache_invalidation = true;
     }
@@ -388,19 +388,15 @@ fn stage_tracked_modifications_in_index_body(
         .unwrap_or(true);
     let blob_count = blob_dirs.len();
     let thread_policy = repo.thread_policy();
-    let stat_threads = if index.entries.len() >= PARALLEL_DEFERRED_RESTAGE_MAX_ENTRIES {
-        1
-    } else {
-        stat_scan_thread_count(
-            &thread_policy,
-            rules_config.as_ref(),
-            WorktreeBlobScanOptions {
-                preload_index,
-                stat_parallel_threads: None,
-            },
-            blob_count,
-        )
-    };
+    let stat_threads = stat_scan_thread_count(
+        &thread_policy,
+        rules_config.as_ref(),
+        WorktreeBlobScanOptions {
+            preload_index,
+            stat_parallel_threads: None,
+        },
+        blob_count,
+    );
     let blob_scan_opts = WorktreeBlobScanOptions {
         preload_index,
         stat_parallel_threads: Some(stat_threads),
@@ -672,6 +668,8 @@ fn stage_tracked_path_individual(
 /// Deferred blob restage: path captured at defer time (stable if later index rows shift).
 struct DeferredRestageJob {
     raw_path: Vec<u8>,
+    /// Worktree size from the scan's stat, used only to bound chunk memory.
+    size: u64,
 }
 
 struct DeferredRestageContext<'a> {
@@ -755,6 +753,7 @@ fn refresh_present_tracked_path(
                 let _ = entry_index;
                 deferred.push(DeferredRestageJob {
                     raw_path: raw_path.to_vec(),
+                    size: u64::from(stat.fields.index_size()),
                 });
                 return Ok(false);
             }
@@ -814,7 +813,66 @@ fn restage_deferred_jobs(
     ctx: DeferredRestageContext<'_>,
     jobs: &[DeferredRestageJob],
 ) -> Result<Vec<Vec<u8>>> {
-    let DeferredRestageContext {
+    let mut modified = Vec::new();
+    let mut loose_dirs_ready = false;
+    for chunk in restage_chunks(jobs) {
+        let replacements = restage_deferred_chunk(
+            repo,
+            index,
+            rules,
+            mode_policy,
+            parallelism,
+            &ctx,
+            chunk,
+            &mut loose_dirs_ready,
+            &mut modified,
+        )?;
+        index.overwrite_stage0_entries(replacements);
+    }
+    Ok(modified)
+}
+
+/// Split `jobs` into runs of at most [`RESTAGE_CHUNK_MAX_JOBS`] jobs and roughly
+/// [`RESTAGE_CHUNK_MAX_BYTES`] worktree bytes (a single larger file is its own chunk).
+fn restage_chunks(jobs: &[DeferredRestageJob]) -> Vec<&[DeferredRestageJob]> {
+    let mut chunks = Vec::new();
+    let mut start = 0;
+    let mut bytes = 0u64;
+    for (i, job) in jobs.iter().enumerate() {
+        let len = i - start;
+        if len > 0
+            && (len >= RESTAGE_CHUNK_MAX_JOBS
+                || bytes.saturating_add(job.size) > RESTAGE_CHUNK_MAX_BYTES)
+        {
+            chunks.push(&jobs[start..i]);
+            start = i;
+            bytes = 0;
+        }
+        bytes = bytes.saturating_add(job.size);
+    }
+    if start < jobs.len() {
+        chunks.push(&jobs[start..]);
+    }
+    chunks
+}
+
+/// Read, hash and store one chunk of deferred jobs in parallel. Appends the restaged paths
+/// to `modified` and returns the index rows to apply; `index` is not changed yet, so the
+/// blob store pass still compares against the rows being replaced.
+#[allow(clippy::too_many_arguments)]
+fn restage_deferred_chunk(
+    repo: &Repository,
+    index: &Index,
+    rules: &mut WorktreeRules,
+    mode_policy: WorktreeModePolicy,
+    parallelism: Parallelism,
+    ctx: &DeferredRestageContext<'_>,
+    jobs: &[DeferredRestageJob],
+    loose_dirs_ready: &mut bool,
+    modified: &mut Vec<Vec<u8>>,
+) -> Result<Vec<IndexEntry>> {
+    let mut replacements = Vec::with_capacity(jobs.len());
+    let &DeferredRestageContext {
         work_tree,
         precompose_unicode,
         ignorecase,
@@ -852,8 +910,6 @@ fn restage_deferred_jobs(
         Some(rules.filter_process()),
     )?;
 
-    let mut replacements = Vec::new();
-    let mut modified = Vec::new();
     let mut needs_loose_write = false;
     for (job, prep) in jobs.iter().zip(prepared.iter()) {
         let raw_path = job.raw_path.as_slice();
@@ -881,7 +937,10 @@ fn restage_deferred_jobs(
         replacements.push(entry);
     }
     if needs_loose_write {
-        repo.odb().ensure_all_loose_prefix_dirs()?;
+        if !*loose_dirs_ready {
+            repo.odb().ensure_all_loose_prefix_dirs()?;
+            *loose_dirs_ready = true;
+        }
         for prep in &prepared {
             let raw_path = prep.index_relpath.as_bytes();
             let Some(idx_e) = index.get(raw_path, 0) else {
@@ -894,10 +953,7 @@ fn restage_deferred_jobs(
                 .store(repo.odb(), &prep.oid, BULK_TRACKED_RESTAGE_LOOSE_WRITE)?;
         }
     }
-    if !replacements.is_empty() {
-        index.replace_stage0_entries_batch(replacements);
-    }
-    Ok(modified)
+    Ok(replacements)
 }
 
 /// Whether `entry`'s cached stat fields differ from the index row it would replace.
@@ -1108,6 +1164,38 @@ mod tests {
         )
         .unwrap();
         (dir, repo)
+    }
+
+    fn jobs_with_sizes(sizes: &[u64]) -> Vec<DeferredRestageJob> {
+        sizes
+            .iter()
+            .enumerate()
+            .map(|(i, &size)| DeferredRestageJob {
+                raw_path: format!("f{i}").into_bytes(),
+                size,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn restage_chunks_bound_job_count_and_bytes() {
+        assert!(restage_chunks(&[]).is_empty());
+
+        let many = jobs_with_sizes(&vec![10; RESTAGE_CHUNK_MAX_JOBS * 2 + 5]);
+        let lens: Vec<usize> = restage_chunks(&many).iter().map(|c| c.len()).collect();
+        assert_eq!(
+            lens,
+            [RESTAGE_CHUNK_MAX_JOBS, RESTAGE_CHUNK_MAX_JOBS, 5],
+            "job count bound"
+        );
+
+        let half = RESTAGE_CHUNK_MAX_BYTES / 2;
+        let big = jobs_with_sizes(&[half, half, 1, RESTAGE_CHUNK_MAX_BYTES * 3, 1]);
+        let lens: Vec<usize> = restage_chunks(&big).iter().map(|c| c.len()).collect();
+        assert_eq!(lens, [2, 1, 1, 1], "byte bound; an oversized file is alone");
+
+        let total: usize = restage_chunks(&many).iter().map(|c| c.len()).sum();
+        assert_eq!(total, many.len());
     }
 
     #[test]
