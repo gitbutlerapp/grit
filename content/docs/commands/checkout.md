@@ -19,7 +19,7 @@ grit checkout <url> [<slice>] [-p|--path <path>]... [--into <dir>]
 - With `--path <dir>` (repeatable), it is everything under each path, plus the files directly in every directory above one, the top level included — the same files Git's cone-mode sparse checkout would have.
 - With a `<slice>` name, it is that [slice](../slice/)'s paths (plus any `--path`), and the directory defaults to the slice's name.
 
-The new repository's history is one commit, `Snapshot of <commit>: <subject>`, which stands for the real commit on the server. It is at `origin/<branch>`, and you are on a new **work branch** on top of it, named for your `user.email` and two random words (like `alice/amber-brook`, numbered when the server already has that branch). There is no local copy of the target branch. `origin` is the repository URL.
+The new repository's history is one commit, `Snapshot of <commit>: <subject>`, which stands for the real commit on the server. It is at `origin/<branch>`, and you are on a new **work branch** on top of it, named for your `user.email` and two random words (like `alice/amber-brook`). The server picks the final name: it numbers it (`alice/amber-brook-2`) when it already has that branch or has given the name to another checkout, and never gives a name out twice, even across restarts. There is no local copy of the target branch. `origin` is the repository URL.
 
 Snapshots are made the same way every time, so everyone who checks out the same paths at the same commit gets the same snapshot commit, and the server makes its download once.
 
@@ -33,7 +33,7 @@ error: https://example.com/demo.git offers no grit checkout (no https://example.
 
 Sign in to the server first with [`grit auth <url>`](../auth/).
 
-Work comes back with [`grit checkin`](../checkin/), which rebuilds your branches on the server's real history. [`grit integrate <branch>`](../integrate/) merges one into the target branch, and [`grit pull`](../pull/) refreshes the checkout: the server makes a snapshot of the newest target on top of your last one, `grit pull` fetches just the changes in your paths and rebases your work onto it. Commits already in the target drop out.
+Work comes back with [`grit checkin`](../checkin/), which rebuilds your branches on the server's real history. [`grit integrate <branch>`](../integrate/) merges one into the target branch, and [`grit pull`](../pull/) refreshes the checkout: the server makes a snapshot of the newest commit of the branch the checkout was made from (even if the server's `HEAD` has since moved to another branch) on top of your last one, `grit pull` fetches just the changes in your paths and rebases your work onto it. Commits already in the target drop out.
 
 To switch branches, use [`grit switch`](../switch/) (also `grit co`).
 

@@ -37,6 +37,11 @@ pub struct CheckinBranchJson {
     /// Why it was refused.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+    /// What kind of refusal it was: `invalid_name`, `target_branch`,
+    /// `case_conflict`, `invalid_tip`, `not_pushed`, `not_on_snapshot`,
+    /// `conflict`, `merge_conflict` or `diverged`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
 }
 
 /// Result of `grit checkin`.
@@ -44,7 +49,7 @@ pub struct CheckinBranchJson {
 pub struct CheckinOutcome {
     /// The server repository.
     pub url: String,
-    /// One entry per branch.
+    /// One entry per branch; empty when no branch had commits to check in.
     pub branches: Vec<CheckinBranchJson>,
     /// Whether any branch was refused (the exit status is then `1`).
     pub refused: bool,
@@ -54,8 +59,15 @@ fn short(oid: &str) -> &str {
     oid.get(..7).unwrap_or(oid)
 }
 
+/// What `grit checkin` says when no branch has work on the snapshot.
+const NOTHING_TO_CHECK_IN: &str =
+    "nothing to check in: no branch has commits on top of the snapshot";
+
 impl HumanRender for CheckinOutcome {
     fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
+        if self.branches.is_empty() {
+            outln!(w, "· {NOTHING_TO_CHECK_IN}");
+        }
         for b in &self.branches {
             let at = b.grafted.as_deref().map(short).unwrap_or_default();
             let commits = if b.commits == 1 {
@@ -88,6 +100,10 @@ impl MarkdownRender for CheckinOutcome {
     fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         outln!(w, "## Check-in to `{}`", self.url);
         outln!(w);
+        if self.branches.is_empty() {
+            outln!(w, "- {NOTHING_TO_CHECK_IN}");
+            return Ok(());
+        }
         outln!(w, "| Branch | Status | Server commit | Commits |");
         outln!(w, "| --- | --- | --- | ---: |");
         for b in &self.branches {
@@ -180,6 +196,7 @@ fn check_in(
             previous: r.previous,
             commits: r.commits,
             message: r.message,
+            reason: r.reason.map(|reason| reason.kind().to_owned()),
         })
         .collect();
     Ok(CheckinOutcome {
@@ -189,14 +206,11 @@ fn check_in(
     })
 }
 
-/// The local branches named, or every branch with work on the snapshot.
+/// The local branches named, or every branch with work on the snapshot
+/// (possibly none).
 fn chosen_branches(co: &OpenCheckout, names: &[String]) -> Result<Vec<(String, ObjectId)>> {
     if names.is_empty() {
-        let found = branches_with_work(&co.repo, &co.marker)?;
-        if found.is_empty() {
-            bail!("nothing to check in: no branch has commits on top of the snapshot");
-        }
-        return Ok(found);
+        return Ok(branches_with_work(&co.repo, &co.marker)?);
     }
     names
         .iter()
@@ -208,10 +222,18 @@ fn chosen_branches(co: &OpenCheckout, names: &[String]) -> Result<Vec<(String, O
         .collect()
 }
 
-/// `grit checkin [<branch>...] [--force]`.
+/// `grit checkin [<branch>...] [--force]`. With no branch named and none with
+/// work on the snapshot, there is nothing to do, and that is not an error.
 pub fn run(names: &[String], force: bool, mode: OutputMode) -> Result<CheckinOutcome> {
     let co = require_checkout()?;
     let branches = chosen_branches(&co, names)?;
+    if branches.is_empty() {
+        return Ok(CheckinOutcome {
+            url: co.marker.url.clone(),
+            branches: Vec::new(),
+            refused: false,
+        });
+    }
     check_in(&co, &branches, force, mode)
 }
 

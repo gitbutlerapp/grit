@@ -103,6 +103,11 @@ pub(crate) fn lookup(odb: &Odb, tree: ObjectId, path: &[u8]) -> Result<Option<En
 /// `base` (or an empty tree) with each `(path, entry)` set, or removed when
 /// the entry is `None`. Only the trees along edited paths are rewritten;
 /// directories left empty disappear.
+///
+/// Setting a path replaces whatever has its name, so a directory that becomes
+/// a file (or a file that becomes a directory) works in one batch: removing a
+/// name removes only a file there, and a directory emptied by the batch goes
+/// only while it is still a directory.
 pub(crate) fn edit(
     odb: &Odb,
     base: Option<ObjectId>,
@@ -129,7 +134,9 @@ pub(crate) fn edit(
                 current.insert(name, e);
             }
             None => {
-                current.remove(&name);
+                if current.get(&name).is_some_and(|e| e.0 != TREE_MODE) {
+                    current.remove(&name);
+                }
             }
         }
     }
@@ -137,7 +144,10 @@ pub(crate) fn edit(
         let sub_base = current.get(&dir).filter(|e| e.0 == TREE_MODE).map(|e| e.1);
         let tree = edit(odb, sub_base, &sub)?;
         if parse_tree(&odb.read(&tree)?.data)?.is_empty() {
-            current.remove(&dir);
+            // A file set at this name in the same batch stays.
+            if sub_base.is_some() {
+                current.remove(&dir);
+            }
         } else {
             current.insert(dir, (TREE_MODE, tree));
         }
@@ -207,5 +217,53 @@ mod tests {
             ]
         );
         assert!(diff(odb, Some(next), Some(next)).expect("diff").is_empty());
+    }
+
+    #[test]
+    fn a_directory_and_a_file_replace_each_other_in_one_batch() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        let odb = repo.odb();
+        let (x, y, f) = (blob(odb, "x"), blob(odb, "y"), blob(odb, "f"));
+        let with_dir = edit(
+            odb,
+            None,
+            &[(b"lib/x".to_vec(), Some(x)), (b"lib/y".to_vec(), Some(y))],
+        )
+        .expect("tree");
+        let with_file = edit(odb, None, &[(b"lib".to_vec(), Some(f))]).expect("tree");
+
+        // A directory emptied while a file is set at its name: the file stays,
+        // whatever order the edits come in.
+        for edits in [
+            vec![
+                (b"lib/x".to_vec(), None),
+                (b"lib".to_vec(), Some(f)),
+                (b"lib/y".to_vec(), None),
+            ],
+            vec![
+                (b"lib".to_vec(), Some(f)),
+                (b"lib/x".to_vec(), None),
+                (b"lib/y".to_vec(), None),
+            ],
+        ] {
+            assert_eq!(edit(odb, Some(with_dir), &edits).expect("edit"), with_file);
+        }
+        // A file removed while a directory gets files at its name.
+        let back = edit(
+            odb,
+            Some(with_file),
+            &[
+                (b"lib/x".to_vec(), Some(x)),
+                (b"lib".to_vec(), None),
+                (b"lib/y".to_vec(), Some(y)),
+            ],
+        )
+        .expect("edit");
+        assert_eq!(back, with_dir);
+        // The diff of a replacement, applied, gives the replacement.
+        let changes = diff(odb, Some(with_dir), Some(with_file)).expect("diff");
+        let edits: Vec<Edit> = changes.into_iter().map(|c| (c.path, c.new)).collect();
+        assert_eq!(edit(odb, Some(with_dir), &edits).expect("edit"), with_file);
     }
 }

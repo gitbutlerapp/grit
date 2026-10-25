@@ -188,6 +188,7 @@ fn sample_checkin() -> CheckinOutcome {
                 previous: None,
                 commits: 2,
                 message: None,
+                reason: None,
             },
             CheckinBranchJson {
                 name: "main".to_owned(),
@@ -198,6 +199,7 @@ fn sample_checkin() -> CheckinOutcome {
                 message: Some(
                     "main is the server's target branch and can't be changed directly".to_owned(),
                 ),
+                reason: Some("target_branch".to_owned()),
             },
         ],
         refused: true,

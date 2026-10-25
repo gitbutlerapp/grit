@@ -36,6 +36,13 @@
             "null"
           ]
         },
+        "reason": {
+          "description": "What kind of refusal it was: `invalid_name`, `target_branch`, `case_conflict`, `invalid_tip`, `not_pushed`, `not_on_snapshot`, `conflict`, `merge_conflict` or `diverged`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "status": {
           "description": "`created`, `updated`, `unchanged` or `refused`.",
           "type": "string"
@@ -52,7 +59,7 @@
       "description": "Result of `grit checkin`.",
       "properties": {
         "branches": {
-          "description": "One entry per branch.",
+          "description": "One entry per branch; empty when no branch had commits to check in.",
           "items": {
             "$ref": "#/definitions/CheckinBranchJson"
           },

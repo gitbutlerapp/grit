@@ -1,7 +1,11 @@
 //! Changes the server makes to its target branch: merging a checked-in
 //! branch ([`integrate`]) and editing the slices file ([`commit_slices`]).
 //! Both write a commit and move the target with a compare-and-swap, so a
-//! concurrent change is refused rather than lost.
+//! concurrent change is refused rather than lost, and log the move in the
+//! target's reflog where the repository keeps one.
+//!
+//! The target is the branch the served repository's `HEAD` names
+//! ([`target_branch`]).
 
 use std::collections::BTreeMap;
 
@@ -17,6 +21,7 @@ use crate::merge_trees::{
 use crate::objects::{parse_commit, ObjectId, ObjectKind};
 use crate::repo::Repository;
 
+use super::refs::{swap_ref, Swap};
 use super::tree::{edit, lookup};
 use super::{CheckoutError, Result, Slice};
 
@@ -33,9 +38,40 @@ pub struct Signature {
 }
 
 impl Signature {
-    fn line(&self) -> String {
+    /// `Name <email> <seconds> +0000`, as commit headers and reflogs have it.
+    pub(crate) fn line(&self) -> String {
         format!("{} {} +0000", self.ident, self.when)
     }
+}
+
+/// The target branch of a served repository: the branch its `HEAD` names,
+/// without `refs/heads/`, or `main` when `HEAD` names no branch.
+///
+/// # Parameters
+///
+/// - `repo`: the served repository.
+///
+/// # Returns
+///
+/// The branch name; the branch itself may not exist yet.
+#[must_use]
+pub fn target_branch(repo: &Repository) -> String {
+    crate::refs::read_symbolic_ref(repo.git_dir(), "HEAD")
+        .ok()
+        .flatten()
+        .and_then(|head| head.strip_prefix("refs/heads/").map(str::to_owned))
+        .unwrap_or_else(|| "main".to_owned())
+}
+
+/// Whether branch names `a` and `b` are the same apart from case, so a
+/// case-insensitive file system (macOS, Windows) keeps them in one file.
+///
+/// # Parameters
+///
+/// - `a`, `b`: branch names without `refs/heads/`.
+#[must_use]
+pub fn same_branch_name(a: &str, b: &str) -> bool {
+    a == b || a.to_lowercase() == b.to_lowercase()
 }
 
 /// Why the target could not be changed.
@@ -89,22 +125,30 @@ fn write_commit(
     repo.odb().write(ObjectKind::Commit, s.as_bytes())
 }
 
-/// Move `target_ref` from `previous` to `new`, unless it moved meanwhile.
+/// Move `target_ref` from `previous` to `new`, unless it moved meanwhile,
+/// logging the move by `who` with `message`.
 fn move_target(
     repo: &Repository,
     target_ref: &str,
     previous: ObjectId,
     new: ObjectId,
-) -> std::result::Result<(), TargetRefusal> {
-    crate::refs::write_ref_cas(repo.git_dir(), target_ref, &new, previous).map_err(|_| {
-        TargetRefusal::Moved {
-            target: target_ref.trim_start_matches("refs/heads/").to_owned(),
-        }
-    })
+    who: &Signature,
+    message: &str,
+) -> Result<std::result::Result<(), TargetRefusal>> {
+    Ok(
+        match swap_ref(repo, target_ref, Some(previous), new, who, message)? {
+            Swap::Done => Ok(()),
+            Swap::Moved => Err(TargetRefusal::Moved {
+                target: target_ref.trim_start_matches("refs/heads/").to_owned(),
+            }),
+        },
+    )
 }
 
 /// Merge `branch` (named `name`) into the target branch `target_ref`, at
-/// `previous`, with a merge commit by `who`, when the merge is clean.
+/// `previous`, with a merge commit by `who`, when the merge is clean. The
+/// move is logged as `integrate: <merge message>` where the repository keeps
+/// a reflog for the target.
 ///
 /// # Returns
 ///
@@ -163,17 +207,17 @@ pub fn integrate(
         &[previous],
         ReachableWalkLimit::Unlimited,
     )?;
-    let head = write_commit(
+    let message = format!("Merge branch '{name}' into {target}");
+    let head = write_commit(repo, merged.result_tree, &[previous, branch], who, &message)?;
+    Ok(move_target(
         repo,
-        merged.result_tree,
-        &[previous, branch],
+        target_ref,
+        previous,
+        head,
         who,
-        &format!("Merge branch '{name}' into {target}"),
-    )?;
-    Ok(match move_target(repo, target_ref, previous, head) {
-        Ok(()) => Ok(Integrated::Merged { head, commits }),
-        Err(e) => Err(e),
-    })
+        &format!("integrate: {message}"),
+    )?
+    .map(|()| Integrated::Merged { head, commits }))
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -276,7 +320,8 @@ pub fn missing_paths(repo: &Repository, commit: ObjectId, paths: &[String]) -> R
 }
 
 /// Commit `slices` as the slices file on the target `target_ref` at
-/// `previous`, by `who`, with `message`.
+/// `previous`, by `who`, with `message`. The move is logged as
+/// `slice: <message>` where the repository keeps a reflog for the target.
 ///
 /// # Returns
 ///
@@ -307,7 +352,15 @@ pub fn commit_slices(
         return Ok(Ok(previous));
     }
     let head = write_commit(repo, new_tree, &[previous], who, message)?;
-    Ok(move_target(repo, target_ref, previous, head).map(|()| head))
+    Ok(move_target(
+        repo,
+        target_ref,
+        previous,
+        head,
+        who,
+        &format!("slice: {message}"),
+    )?
+    .map(|()| head))
 }
 
 #[cfg(test)]
@@ -342,5 +395,98 @@ mod tests {
         assert!(!valid_slice_name(".hidden"));
         assert!(!valid_slice_name("a/b"));
         assert!(!valid_slice_name("-x"));
+    }
+
+    #[test]
+    fn the_target_is_heads_branch_and_names_compare_without_case() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = Repository::init(
+            dir.path(),
+            &crate::repo::InitOptions {
+                initial_branch: Some("trunk".to_owned()),
+                ..crate::repo::InitOptions::default()
+            },
+        )
+        .expect("init");
+        assert_eq!(target_branch(&repo), "trunk");
+        crate::refs::write_symbolic_ref(repo.git_dir(), "HEAD", "refs/heads/main").expect("head");
+        assert_eq!(target_branch(&repo), "main");
+        for (a, b, same) in [
+            ("main", "main", true),
+            ("Main", "main", true),
+            ("MAIN", "main", true),
+            ("feature", "main", false),
+            ("main-2", "main", false),
+        ] {
+            assert_eq!(same_branch_name(a, b), same, "{a} {b}");
+        }
+    }
+
+    #[test]
+    fn integrating_and_slices_log_the_target_move() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo =
+            Repository::init(dir.path(), &crate::repo::InitOptions::default()).expect("init");
+        let odb = repo.odb();
+        let blob = |t: &str| {
+            (
+                0o100644,
+                odb.write(ObjectKind::Blob, t.as_bytes()).expect("blob"),
+            )
+        };
+        let who = Signature {
+            ident: "Alice <alice@example.com>".to_owned(),
+            when: 1_700_000_000,
+        };
+        let base_tree = edit(odb, None, &[(b"a".to_vec(), Some(blob("a")))]).expect("tree");
+        let base = write_commit(&repo, base_tree, &[], &who, "base").expect("commit");
+        crate::refs::write_ref(repo.git_dir(), "refs/heads/main", &base).expect("ref");
+        let work_tree =
+            edit(odb, Some(base_tree), &[(b"b".to_vec(), Some(blob("b")))]).expect("tree");
+        let work = write_commit(&repo, work_tree, &[base], &who, "work").expect("commit");
+
+        let merged = integrate(&repo, "refs/heads/main", base, work, "topic", &who)
+            .expect("integrate")
+            .expect("merged");
+        let Integrated::Merged { head, commits } = merged else {
+            panic!("not merged: {merged:?}");
+        };
+        assert_eq!(commits, 1);
+        assert_eq!(
+            integrate(&repo, "refs/heads/main", head, work, "topic", &who).expect("integrate"),
+            Ok(Integrated::AlreadyIntegrated)
+        );
+        // A merge onto a stale `previous` is refused, not lost.
+        let other = write_commit(&repo, base_tree, &[base], &who, "other").expect("commit");
+        assert_eq!(
+            integrate(&repo, "refs/heads/main", base, other, "other", &who).expect("integrate"),
+            Err(TargetRefusal::Moved {
+                target: "main".to_owned()
+            })
+        );
+        let sliced = commit_slices(
+            &repo,
+            "refs/heads/main",
+            head,
+            &[Slice {
+                name: "docs".to_owned(),
+                description: None,
+                paths: vec!["a".to_owned()],
+            }],
+            &who,
+            "Add slice docs",
+        )
+        .expect("slices")
+        .expect("committed");
+        let log = crate::reflog::read_reflog(repo.git_dir(), "refs/heads/main").expect("reflog");
+        let moves: Vec<(ObjectId, &str)> = log
+            .iter()
+            .map(|e| (e.new_oid, e.message.as_str()))
+            .collect();
+        assert!(
+            moves.contains(&(head, "integrate: Merge branch 'topic' into main"))
+                && moves.contains(&(sliced, "slice: Add slice docs")),
+            "{moves:?}"
+        );
     }
 }

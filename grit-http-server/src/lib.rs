@@ -15,11 +15,13 @@
 //! - [`bundles`] builds each repository's clone bundle in the background and
 //!   offers it through `bundle-uri`, so clones can download it resumably.
 //! - [`checkouts`] serves snapshot checkouts: a repository's target branch,
-//!   cut down to some paths, as one commit (`grit checkout`).
+//!   cut down to some paths, as one commit (`grit checkout`); the requests
+//!   that change them take turns on locks kept per repository and checkout.
 //! - [`uploads`] accepts resumable pushes: bundles uploaded over TUS to the
 //!   endpoint receive-pack advertises as `pushBundle`.
 
 pub mod bundles;
+mod checkout_locks;
 pub mod checkouts;
 pub mod login;
 pub mod server;

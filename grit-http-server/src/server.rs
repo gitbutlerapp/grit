@@ -50,6 +50,7 @@ use grit_lib::remote::grit_server_auth::{
 use grit_protocol::RepositoryOptions;
 
 use crate::bundles::{BundleScheduler, BundleSettings};
+use crate::checkout_locks::CheckoutLocks;
 use crate::login::{LoginError, PendingLogins, PollOutcome};
 use crate::smart_http::{self, Service};
 use crate::store::{
@@ -195,6 +196,8 @@ pub(crate) struct ServerState {
     /// Running once [`Server::run`] started it.
     scheduler: Mutex<Option<BundleScheduler>>,
     uploads: UploadLocks,
+    /// What snapshot-checkout requests take turns on.
+    pub(crate) checkout_locks: CheckoutLocks,
 }
 
 /// A bound, ready-to-run server.
@@ -235,6 +238,7 @@ impl Server {
                 bundles: config.bundles,
                 scheduler: Mutex::new(None),
                 uploads: UploadLocks::default(),
+                checkout_locks: CheckoutLocks::default(),
             }),
         })
     }

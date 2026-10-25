@@ -24,21 +24,31 @@
 //!
 //! Work comes back with a **check-in**: the client pushes its branches' raw
 //! tips to [`out_ref`] and asks the server to [`graft`] them onto the real
-//! history and set the server's branches ([`decide_checkin`]). The server can
+//! history ([`graft_checkin_branch`]) and set the server's branches
+//! ([`set_checked_in_branch`], deciding with [`decide_checkin`]). The server can
 //! [`integrate`] a branch into the target with a merge commit, and keeps
 //! **slices** — named sets of paths — in [`SLICES_PATH`] on the target branch.
 //! A **refresh** asks the server for a snapshot of the newest target on top of
 //! the checkout's last one, fetches it from [`target_ref`] and rebases the
 //! work onto it.
+//!
+//! The server keeps each checkout's record, and the work-branch names it has
+//! given out, in a [`CheckoutStore`].
 
+mod checkin;
 mod graft;
+mod refs;
+mod store;
 mod target;
 mod tree;
 
+pub use checkin::{graft_checkin_branch, set_checked_in_branch, BranchSet, CheckinRefusal};
 pub use graft::{decide_checkin, graft, CheckinDecision, GraftError, Grafted};
+pub use store::{valid_checkout_id, CheckoutRecord, CheckoutStore, ReservedName, StoredCheckout};
 pub use target::{
     commit_slices, integrate, missing_paths, parse_slices, read_slices, render_slices,
-    valid_slice_name, Integrated, Signature, TargetRefusal, SLICES_PATH,
+    same_branch_name, target_branch, valid_slice_name, Integrated, Signature, TargetRefusal,
+    SLICES_PATH,
 };
 
 use std::collections::BTreeMap;
@@ -210,9 +220,12 @@ pub struct CheckinResult {
     /// Commits replayed.
     #[serde(default)]
     pub commits: usize,
-    /// Why it was refused.
+    /// Why it was refused, in words.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
+    /// Why it was refused, for programs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<CheckinRefusal>,
 }
 
 /// The answer to a check-in.
@@ -389,6 +402,25 @@ pub enum CheckoutError {
     /// The destination already has files.
     #[error("{0} already exists and is not empty")]
     DestinationNotEmpty(PathBuf),
+    /// A name is not a valid branch name.
+    #[error("{0} is not a valid branch name")]
+    InvalidBranchName(String),
+    /// A checkout's stored record could not be read.
+    #[error("the record of checkout {id} at {path} is damaged: {detail}")]
+    DamagedRecord {
+        /// The checkout's id.
+        id: String,
+        /// The record's file.
+        path: PathBuf,
+        /// What was wrong with it.
+        detail: String,
+    },
+    /// A ref kept moving while the server tried to set it.
+    #[error("{refname} kept moving while it was being set")]
+    RefKeptMoving {
+        /// The ref.
+        refname: String,
+    },
     /// The server's answer could not be parsed.
     #[error("unexpected answer from {url}: {detail}")]
     Protocol {
@@ -538,6 +570,34 @@ impl Dir {
 /// [`CheckoutError::MissingPath`] when `tree` has no entry at one of `paths`,
 /// and object read or write failures.
 pub fn filtered_tree(odb: &Odb, tree: ObjectId, paths: &[String]) -> Result<ObjectId> {
+    cut_tree(odb, tree, paths, true)
+}
+
+/// [`filtered_tree`], skipping paths `tree` doesn't have instead of failing.
+pub(crate) fn view_tree(odb: &Odb, tree: ObjectId, paths: &[String]) -> Result<ObjectId> {
+    cut_tree(odb, tree, paths, false)
+}
+
+/// Whether `path` (a file's slash-separated path) is in the view `paths`
+/// give, as [`filtered_tree`] cuts it: under one of them, or directly in a
+/// directory above one (the top level included). No paths is the whole tree.
+pub(crate) fn in_view(path: &[u8], paths: &[String]) -> bool {
+    if paths.is_empty() {
+        return true;
+    }
+    let parent = path
+        .iter()
+        .rposition(|b| *b == b'/')
+        .map_or(&b""[..], |i| &path[..i]);
+    let under = |dir: &[u8], p: &[u8]| p.starts_with(dir) && p.get(dir.len()) == Some(&b'/');
+    parent.is_empty()
+        || paths
+            .iter()
+            .map(String::as_bytes)
+            .any(|p| path == p || under(p, path) || under(parent, p))
+}
+
+fn cut_tree(odb: &Odb, tree: ObjectId, paths: &[String], strict: bool) -> Result<ObjectId> {
     if paths.is_empty() {
         return Ok(tree);
     }
@@ -576,13 +636,16 @@ pub fn filtered_tree(odb: &Odb, tree: ObjectId, paths: &[String]) -> Result<Obje
         }
     }
     for p in paths {
-        let Some((mode, oid)) = lookup(odb, tree, p.as_bytes())? else {
-            return Err(CheckoutError::MissingPath {
-                path: p.clone(),
-                base: tree.to_hex(),
-            });
-        };
-        root.insert(p.as_bytes(), mode, oid);
+        match lookup(odb, tree, p.as_bytes())? {
+            Some((mode, oid)) => root.insert(p.as_bytes(), mode, oid),
+            None if strict => {
+                return Err(CheckoutError::MissingPath {
+                    path: p.clone(),
+                    base: tree.to_hex(),
+                })
+            }
+            None => {}
+        }
     }
     Ok(root.write(odb)?)
 }
@@ -1164,6 +1227,26 @@ mod tests {
         assert!(normalize_paths(&["/abs".to_owned()]).is_err());
         assert!(normalize_paths(&["a/../b".to_owned()]).is_err());
         assert!(normalize_paths(&["a//b".to_owned()]).is_err());
+    }
+
+    #[test]
+    fn views_are_the_paths_and_the_files_above_them() {
+        let paths = vec!["src/deep".to_owned(), "docs/guide.md".to_owned()];
+        for (path, seen) in [
+            ("README", true),
+            ("src/a.rs", true),
+            ("src/deep/b.rs", true),
+            ("src/deep/more/c.rs", true),
+            ("src/other/d.rs", false),
+            ("docs/guide.md", true),
+            ("docs/other.md", true),
+            ("docs/api/x.md", false),
+            ("srcx/a.rs", false),
+            ("src/deeper/a.rs", false),
+        ] {
+            assert_eq!(in_view(path.as_bytes(), &paths), seen, "{path}");
+        }
+        assert!(in_view(b"anything/at/all", &[]));
     }
 
     #[test]

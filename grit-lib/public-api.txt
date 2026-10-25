@@ -21281,6 +21281,49 @@ impl core::marker::Unpin for grit_lib::remote::snapshot_checkout::CheckinDecisio
 impl core::marker::UnsafeUnpin for grit_lib::remote::snapshot_checkout::CheckinDecision
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::snapshot_checkout::CheckinDecision
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::snapshot_checkout::CheckinDecision
+pub enum grit_lib::remote::snapshot_checkout::CheckinRefusal
+pub grit_lib::remote::snapshot_checkout::CheckinRefusal::CaseConflict
+pub grit_lib::remote::snapshot_checkout::CheckinRefusal::CaseConflict::existing: alloc::string::String
+pub grit_lib::remote::snapshot_checkout::CheckinRefusal::Conflict
+pub grit_lib::remote::snapshot_checkout::CheckinRefusal::Conflict::commit: alloc::string::String
+pub grit_lib::remote::snapshot_checkout::CheckinRefusal::Conflict::outside_paths: bool
+pub grit_lib::remote::snapshot_checkout::CheckinRefusal::Conflict::path: alloc::string::String
+pub grit_lib::remote::snapshot_checkout::CheckinRefusal::Diverged
+pub grit_lib::remote::snapshot_checkout::CheckinRefusal::Diverged::tip: alloc::string::String
+pub grit_lib::remote::snapshot_checkout::CheckinRefusal::InvalidName
+pub grit_lib::remote::snapshot_checkout::CheckinRefusal::InvalidTip
+pub grit_lib::remote::snapshot_checkout::CheckinRefusal::MergeConflict
+pub grit_lib::remote::snapshot_checkout::CheckinRefusal::MergeConflict::commit: alloc::string::String
+pub grit_lib::remote::snapshot_checkout::CheckinRefusal::MergeConflict::paths: alloc::vec::Vec<alloc::string::String>
+pub grit_lib::remote::snapshot_checkout::CheckinRefusal::NotOnSnapshot
+pub grit_lib::remote::snapshot_checkout::CheckinRefusal::NotOnSnapshot::commit: alloc::string::String
+pub grit_lib::remote::snapshot_checkout::CheckinRefusal::NotPushed
+pub grit_lib::remote::snapshot_checkout::CheckinRefusal::NotPushed::out_ref: alloc::string::String
+pub grit_lib::remote::snapshot_checkout::CheckinRefusal::TargetBranch
+pub grit_lib::remote::snapshot_checkout::CheckinRefusal::TargetBranch::target: alloc::string::String
+impl grit_lib::remote::snapshot_checkout::CheckinRefusal
+pub fn grit_lib::remote::snapshot_checkout::CheckinRefusal::kind(&self) -> &'static str
+impl core::clone::Clone for grit_lib::remote::snapshot_checkout::CheckinRefusal
+pub fn grit_lib::remote::snapshot_checkout::CheckinRefusal::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::remote::snapshot_checkout::CheckinRefusal
+impl core::cmp::PartialEq for grit_lib::remote::snapshot_checkout::CheckinRefusal
+pub fn grit_lib::remote::snapshot_checkout::CheckinRefusal::eq(&self, &Self) -> bool
+impl core::convert::From<grit_lib::remote::snapshot_checkout::GraftError> for grit_lib::remote::snapshot_checkout::CheckinRefusal
+pub fn grit_lib::remote::snapshot_checkout::CheckinRefusal::from(grit_lib::remote::snapshot_checkout::GraftError) -> Self
+impl core::fmt::Debug for grit_lib::remote::snapshot_checkout::CheckinRefusal
+pub fn grit_lib::remote::snapshot_checkout::CheckinRefusal::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::remote::snapshot_checkout::CheckinRefusal
+impl serde_core::ser::Serialize for grit_lib::remote::snapshot_checkout::CheckinRefusal
+pub fn grit_lib::remote::snapshot_checkout::CheckinRefusal::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for grit_lib::remote::snapshot_checkout::CheckinRefusal
+pub fn grit_lib::remote::snapshot_checkout::CheckinRefusal::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for grit_lib::remote::snapshot_checkout::CheckinRefusal
+impl core::marker::Send for grit_lib::remote::snapshot_checkout::CheckinRefusal
+impl core::marker::Sync for grit_lib::remote::snapshot_checkout::CheckinRefusal
+impl core::marker::Unpin for grit_lib::remote::snapshot_checkout::CheckinRefusal
+impl core::marker::UnsafeUnpin for grit_lib::remote::snapshot_checkout::CheckinRefusal
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::snapshot_checkout::CheckinRefusal
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::snapshot_checkout::CheckinRefusal
 pub enum grit_lib::remote::snapshot_checkout::CheckinStatus
 pub grit_lib::remote::snapshot_checkout::CheckinStatus::Created
 pub grit_lib::remote::snapshot_checkout::CheckinStatus::Refused
@@ -21307,8 +21350,13 @@ impl core::marker::UnsafeUnpin for grit_lib::remote::snapshot_checkout::CheckinS
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::snapshot_checkout::CheckinStatus
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::snapshot_checkout::CheckinStatus
 pub enum grit_lib::remote::snapshot_checkout::CheckoutError
+pub grit_lib::remote::snapshot_checkout::CheckoutError::DamagedRecord
+pub grit_lib::remote::snapshot_checkout::CheckoutError::DamagedRecord::detail: alloc::string::String
+pub grit_lib::remote::snapshot_checkout::CheckoutError::DamagedRecord::id: alloc::string::String
+pub grit_lib::remote::snapshot_checkout::CheckoutError::DamagedRecord::path: std::path::PathBuf
 pub grit_lib::remote::snapshot_checkout::CheckoutError::DestinationNotEmpty(std::path::PathBuf)
 pub grit_lib::remote::snapshot_checkout::CheckoutError::Download(alloc::boxed::Box<grit_lib::remote::resumable::ResumableError>)
+pub grit_lib::remote::snapshot_checkout::CheckoutError::InvalidBranchName(alloc::string::String)
 pub grit_lib::remote::snapshot_checkout::CheckoutError::InvalidPath
 pub grit_lib::remote::snapshot_checkout::CheckoutError::InvalidPath::path: alloc::string::String
 pub grit_lib::remote::snapshot_checkout::CheckoutError::InvalidPath::reason: &'static str
@@ -21327,6 +21375,8 @@ pub grit_lib::remote::snapshot_checkout::CheckoutError::NotOffered::url: alloc::
 pub grit_lib::remote::snapshot_checkout::CheckoutError::Protocol
 pub grit_lib::remote::snapshot_checkout::CheckoutError::Protocol::detail: alloc::string::String
 pub grit_lib::remote::snapshot_checkout::CheckoutError::Protocol::url: alloc::string::String
+pub grit_lib::remote::snapshot_checkout::CheckoutError::RefKeptMoving
+pub grit_lib::remote::snapshot_checkout::CheckoutError::RefKeptMoving::refname: alloc::string::String
 pub grit_lib::remote::snapshot_checkout::CheckoutError::Server
 pub grit_lib::remote::snapshot_checkout::CheckoutError::Server::message: alloc::string::String
 pub grit_lib::remote::snapshot_checkout::CheckoutError::Server::status: u16
@@ -21353,7 +21403,11 @@ impl !core::panic::unwind_safe::UnwindSafe for grit_lib::remote::snapshot_checko
 pub enum grit_lib::remote::snapshot_checkout::GraftError
 pub grit_lib::remote::snapshot_checkout::GraftError::Conflict
 pub grit_lib::remote::snapshot_checkout::GraftError::Conflict::commit: alloc::string::String
+pub grit_lib::remote::snapshot_checkout::GraftError::Conflict::outside_paths: bool
 pub grit_lib::remote::snapshot_checkout::GraftError::Conflict::path: alloc::string::String
+pub grit_lib::remote::snapshot_checkout::GraftError::MergeConflict
+pub grit_lib::remote::snapshot_checkout::GraftError::MergeConflict::commit: alloc::string::String
+pub grit_lib::remote::snapshot_checkout::GraftError::MergeConflict::paths: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::remote::snapshot_checkout::GraftError::NotOnSnapshot
 pub grit_lib::remote::snapshot_checkout::GraftError::NotOnSnapshot::commit: alloc::string::String
 impl core::clone::Clone for grit_lib::remote::snapshot_checkout::GraftError
@@ -21361,6 +21415,8 @@ pub fn grit_lib::remote::snapshot_checkout::GraftError::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::remote::snapshot_checkout::GraftError
 impl core::cmp::PartialEq for grit_lib::remote::snapshot_checkout::GraftError
 pub fn grit_lib::remote::snapshot_checkout::GraftError::eq(&self, &Self) -> bool
+impl core::convert::From<grit_lib::remote::snapshot_checkout::GraftError> for grit_lib::remote::snapshot_checkout::CheckinRefusal
+pub fn grit_lib::remote::snapshot_checkout::CheckinRefusal::from(grit_lib::remote::snapshot_checkout::GraftError) -> Self
 impl core::error::Error for grit_lib::remote::snapshot_checkout::GraftError
 impl core::fmt::Debug for grit_lib::remote::snapshot_checkout::GraftError
 pub fn grit_lib::remote::snapshot_checkout::GraftError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
@@ -21442,6 +21498,25 @@ impl core::marker::Unpin for grit_lib::remote::snapshot_checkout::TargetRefusal
 impl core::marker::UnsafeUnpin for grit_lib::remote::snapshot_checkout::TargetRefusal
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::snapshot_checkout::TargetRefusal
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::snapshot_checkout::TargetRefusal
+pub struct grit_lib::remote::snapshot_checkout::BranchSet
+pub grit_lib::remote::snapshot_checkout::BranchSet::previous: core::option::Option<grit_lib::objects::ObjectId>
+pub grit_lib::remote::snapshot_checkout::BranchSet::status: grit_lib::remote::snapshot_checkout::CheckinStatus
+impl core::clone::Clone for grit_lib::remote::snapshot_checkout::BranchSet
+pub fn grit_lib::remote::snapshot_checkout::BranchSet::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::remote::snapshot_checkout::BranchSet
+impl core::cmp::PartialEq for grit_lib::remote::snapshot_checkout::BranchSet
+pub fn grit_lib::remote::snapshot_checkout::BranchSet::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::remote::snapshot_checkout::BranchSet
+pub fn grit_lib::remote::snapshot_checkout::BranchSet::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::remote::snapshot_checkout::BranchSet
+impl core::marker::StructuralPartialEq for grit_lib::remote::snapshot_checkout::BranchSet
+impl core::marker::Freeze for grit_lib::remote::snapshot_checkout::BranchSet
+impl core::marker::Send for grit_lib::remote::snapshot_checkout::BranchSet
+impl core::marker::Sync for grit_lib::remote::snapshot_checkout::BranchSet
+impl core::marker::Unpin for grit_lib::remote::snapshot_checkout::BranchSet
+impl core::marker::UnsafeUnpin for grit_lib::remote::snapshot_checkout::BranchSet
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::snapshot_checkout::BranchSet
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::snapshot_checkout::BranchSet
 pub struct grit_lib::remote::snapshot_checkout::CheckinBranch
 pub grit_lib::remote::snapshot_checkout::CheckinBranch::name: alloc::string::String
 pub grit_lib::remote::snapshot_checkout::CheckinBranch::raw: alloc::string::String
@@ -21515,6 +21590,7 @@ pub grit_lib::remote::snapshot_checkout::CheckinResult::grafted: core::option::O
 pub grit_lib::remote::snapshot_checkout::CheckinResult::message: core::option::Option<alloc::string::String>
 pub grit_lib::remote::snapshot_checkout::CheckinResult::name: alloc::string::String
 pub grit_lib::remote::snapshot_checkout::CheckinResult::previous: core::option::Option<alloc::string::String>
+pub grit_lib::remote::snapshot_checkout::CheckinResult::reason: core::option::Option<grit_lib::remote::snapshot_checkout::CheckinRefusal>
 pub grit_lib::remote::snapshot_checkout::CheckinResult::status: grit_lib::remote::snapshot_checkout::CheckinStatus
 impl core::clone::Clone for grit_lib::remote::snapshot_checkout::CheckinResult
 pub fn grit_lib::remote::snapshot_checkout::CheckinResult::clone(&self) -> Self
@@ -21637,6 +21713,27 @@ impl core::marker::Unpin for grit_lib::remote::snapshot_checkout::CheckoutMarker
 impl core::marker::UnsafeUnpin for grit_lib::remote::snapshot_checkout::CheckoutMarker
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::snapshot_checkout::CheckoutMarker
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::snapshot_checkout::CheckoutMarker
+pub struct grit_lib::remote::snapshot_checkout::CheckoutRecord
+impl grit_lib::remote::snapshot_checkout::CheckoutRecord
+pub fn grit_lib::remote::snapshot_checkout::CheckoutRecord::id(&self) -> &str
+pub fn grit_lib::remote::snapshot_checkout::CheckoutRecord::load(&self) -> grit_lib::remote::snapshot_checkout::Result<core::option::Option<grit_lib::remote::snapshot_checkout::StoredCheckout>>
+pub fn grit_lib::remote::snapshot_checkout::CheckoutRecord::path(&self) -> &std::path::Path
+pub fn grit_lib::remote::snapshot_checkout::CheckoutRecord::save(&mut self, &grit_lib::remote::snapshot_checkout::StoredCheckout) -> grit_lib::remote::snapshot_checkout::Result<()>
+impl core::clone::Clone for grit_lib::remote::snapshot_checkout::CheckoutRecord
+pub fn grit_lib::remote::snapshot_checkout::CheckoutRecord::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::remote::snapshot_checkout::CheckoutRecord
+impl core::cmp::PartialEq for grit_lib::remote::snapshot_checkout::CheckoutRecord
+pub fn grit_lib::remote::snapshot_checkout::CheckoutRecord::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::remote::snapshot_checkout::CheckoutRecord
+pub fn grit_lib::remote::snapshot_checkout::CheckoutRecord::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::remote::snapshot_checkout::CheckoutRecord
+impl core::marker::Freeze for grit_lib::remote::snapshot_checkout::CheckoutRecord
+impl core::marker::Send for grit_lib::remote::snapshot_checkout::CheckoutRecord
+impl core::marker::Sync for grit_lib::remote::snapshot_checkout::CheckoutRecord
+impl core::marker::Unpin for grit_lib::remote::snapshot_checkout::CheckoutRecord
+impl core::marker::UnsafeUnpin for grit_lib::remote::snapshot_checkout::CheckoutRecord
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::snapshot_checkout::CheckoutRecord
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::snapshot_checkout::CheckoutRecord
 pub struct grit_lib::remote::snapshot_checkout::CheckoutRequest
 pub grit_lib::remote::snapshot_checkout::CheckoutRequest::client: core::option::Option<alloc::string::String>
 pub grit_lib::remote::snapshot_checkout::CheckoutRequest::paths: alloc::vec::Vec<alloc::string::String>
@@ -21685,6 +21782,29 @@ impl core::marker::Unpin for grit_lib::remote::snapshot_checkout::CheckoutServer
 impl core::marker::UnsafeUnpin for grit_lib::remote::snapshot_checkout::CheckoutServerInfo
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::snapshot_checkout::CheckoutServerInfo
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::snapshot_checkout::CheckoutServerInfo
+pub struct grit_lib::remote::snapshot_checkout::CheckoutStore
+impl grit_lib::remote::snapshot_checkout::CheckoutStore
+pub fn grit_lib::remote::snapshot_checkout::CheckoutStore::at(impl core::convert::Into<std::path::PathBuf>) -> Self
+pub fn grit_lib::remote::snapshot_checkout::CheckoutStore::dir(&self) -> &std::path::Path
+pub fn grit_lib::remote::snapshot_checkout::CheckoutStore::for_repository(&grit_lib::repo::Repository) -> Self
+pub fn grit_lib::remote::snapshot_checkout::CheckoutStore::has_checkouts(&self) -> bool
+pub fn grit_lib::remote::snapshot_checkout::CheckoutStore::record(&self, &str) -> core::option::Option<grit_lib::remote::snapshot_checkout::CheckoutRecord>
+pub fn grit_lib::remote::snapshot_checkout::CheckoutStore::reserve_work_branch(&self, &grit_lib::repo::Repository, &str, u64) -> grit_lib::remote::snapshot_checkout::Result<grit_lib::remote::snapshot_checkout::ReservedName>
+impl core::clone::Clone for grit_lib::remote::snapshot_checkout::CheckoutStore
+pub fn grit_lib::remote::snapshot_checkout::CheckoutStore::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::remote::snapshot_checkout::CheckoutStore
+impl core::cmp::PartialEq for grit_lib::remote::snapshot_checkout::CheckoutStore
+pub fn grit_lib::remote::snapshot_checkout::CheckoutStore::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::remote::snapshot_checkout::CheckoutStore
+pub fn grit_lib::remote::snapshot_checkout::CheckoutStore::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::remote::snapshot_checkout::CheckoutStore
+impl core::marker::Freeze for grit_lib::remote::snapshot_checkout::CheckoutStore
+impl core::marker::Send for grit_lib::remote::snapshot_checkout::CheckoutStore
+impl core::marker::Sync for grit_lib::remote::snapshot_checkout::CheckoutStore
+impl core::marker::Unpin for grit_lib::remote::snapshot_checkout::CheckoutStore
+impl core::marker::UnsafeUnpin for grit_lib::remote::snapshot_checkout::CheckoutStore
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::snapshot_checkout::CheckoutStore
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::snapshot_checkout::CheckoutStore
 pub struct grit_lib::remote::snapshot_checkout::CheckoutUrl
 pub grit_lib::remote::snapshot_checkout::CheckoutUrl::api: alloc::string::String
 pub grit_lib::remote::snapshot_checkout::CheckoutUrl::name: alloc::string::String
@@ -21807,6 +21927,24 @@ impl core::marker::Unpin for grit_lib::remote::snapshot_checkout::Materialized
 impl core::marker::UnsafeUnpin for grit_lib::remote::snapshot_checkout::Materialized
 impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::snapshot_checkout::Materialized
 impl !core::panic::unwind_safe::UnwindSafe for grit_lib::remote::snapshot_checkout::Materialized
+pub struct grit_lib::remote::snapshot_checkout::ReservedName
+pub grit_lib::remote::snapshot_checkout::ReservedName::name: alloc::string::String
+pub grit_lib::remote::snapshot_checkout::ReservedName::next: u64
+impl core::clone::Clone for grit_lib::remote::snapshot_checkout::ReservedName
+pub fn grit_lib::remote::snapshot_checkout::ReservedName::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::remote::snapshot_checkout::ReservedName
+impl core::cmp::PartialEq for grit_lib::remote::snapshot_checkout::ReservedName
+pub fn grit_lib::remote::snapshot_checkout::ReservedName::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::remote::snapshot_checkout::ReservedName
+pub fn grit_lib::remote::snapshot_checkout::ReservedName::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::remote::snapshot_checkout::ReservedName
+impl core::marker::Freeze for grit_lib::remote::snapshot_checkout::ReservedName
+impl core::marker::Send for grit_lib::remote::snapshot_checkout::ReservedName
+impl core::marker::Sync for grit_lib::remote::snapshot_checkout::ReservedName
+impl core::marker::Unpin for grit_lib::remote::snapshot_checkout::ReservedName
+impl core::marker::UnsafeUnpin for grit_lib::remote::snapshot_checkout::ReservedName
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::snapshot_checkout::ReservedName
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::snapshot_checkout::ReservedName
 pub struct grit_lib::remote::snapshot_checkout::Signature
 pub grit_lib::remote::snapshot_checkout::Signature::ident: alloc::string::String
 pub grit_lib::remote::snapshot_checkout::Signature::when: i64
@@ -21988,6 +22126,32 @@ impl core::marker::Unpin for grit_lib::remote::snapshot_checkout::SnapshotRoot
 impl core::marker::UnsafeUnpin for grit_lib::remote::snapshot_checkout::SnapshotRoot
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::snapshot_checkout::SnapshotRoot
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::snapshot_checkout::SnapshotRoot
+pub struct grit_lib::remote::snapshot_checkout::StoredCheckout
+pub grit_lib::remote::snapshot_checkout::StoredCheckout::info: grit_lib::remote::snapshot_checkout::CheckoutInfo
+pub grit_lib::remote::snapshot_checkout::StoredCheckout::set_last: alloc::collections::btree::map::BTreeMap<alloc::string::String, alloc::string::String>
+impl grit_lib::remote::snapshot_checkout::StoredCheckout
+pub fn grit_lib::remote::snapshot_checkout::StoredCheckout::last_set(&self, &str) -> core::option::Option<grit_lib::objects::ObjectId>
+pub fn grit_lib::remote::snapshot_checkout::StoredCheckout::new(grit_lib::remote::snapshot_checkout::CheckoutInfo) -> Self
+pub fn grit_lib::remote::snapshot_checkout::StoredCheckout::record_set(&mut self, &str, grit_lib::objects::ObjectId)
+impl core::clone::Clone for grit_lib::remote::snapshot_checkout::StoredCheckout
+pub fn grit_lib::remote::snapshot_checkout::StoredCheckout::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::remote::snapshot_checkout::StoredCheckout
+impl core::cmp::PartialEq for grit_lib::remote::snapshot_checkout::StoredCheckout
+pub fn grit_lib::remote::snapshot_checkout::StoredCheckout::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::remote::snapshot_checkout::StoredCheckout
+pub fn grit_lib::remote::snapshot_checkout::StoredCheckout::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::remote::snapshot_checkout::StoredCheckout
+impl serde_core::ser::Serialize for grit_lib::remote::snapshot_checkout::StoredCheckout
+pub fn grit_lib::remote::snapshot_checkout::StoredCheckout::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for grit_lib::remote::snapshot_checkout::StoredCheckout
+pub fn grit_lib::remote::snapshot_checkout::StoredCheckout::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for grit_lib::remote::snapshot_checkout::StoredCheckout
+impl core::marker::Send for grit_lib::remote::snapshot_checkout::StoredCheckout
+impl core::marker::Sync for grit_lib::remote::snapshot_checkout::StoredCheckout
+impl core::marker::Unpin for grit_lib::remote::snapshot_checkout::StoredCheckout
+impl core::marker::UnsafeUnpin for grit_lib::remote::snapshot_checkout::StoredCheckout
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::snapshot_checkout::StoredCheckout
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::snapshot_checkout::StoredCheckout
 pub const grit_lib::remote::snapshot_checkout::CHECKOUT_API: &str
 pub const grit_lib::remote::snapshot_checkout::MARKER_FILE: &str
 pub const grit_lib::remote::snapshot_checkout::SLICES_PATH: &str
@@ -21997,7 +22161,8 @@ pub fn grit_lib::remote::snapshot_checkout::branches_with_work(&grit_lib::repo::
 pub fn grit_lib::remote::snapshot_checkout::commit_slices(&grit_lib::repo::Repository, &str, grit_lib::objects::ObjectId, &[grit_lib::remote::snapshot_checkout::Slice], &grit_lib::remote::snapshot_checkout::Signature, &str) -> grit_lib::remote::snapshot_checkout::Result<core::result::Result<grit_lib::objects::ObjectId, grit_lib::remote::snapshot_checkout::TargetRefusal>>
 pub fn grit_lib::remote::snapshot_checkout::decide_checkin(&grit_lib::repo::Repository, core::option::Option<grit_lib::objects::ObjectId>, grit_lib::objects::ObjectId, core::option::Option<grit_lib::objects::ObjectId>, bool) -> grit_lib::remote::snapshot_checkout::Result<grit_lib::remote::snapshot_checkout::CheckinDecision>
 pub fn grit_lib::remote::snapshot_checkout::filtered_tree(&grit_lib::objects::odb::Odb, grit_lib::objects::ObjectId, &[alloc::string::String]) -> grit_lib::remote::snapshot_checkout::Result<grit_lib::objects::ObjectId>
-pub fn grit_lib::remote::snapshot_checkout::graft(&grit_lib::repo::Repository, &[grit_lib::remote::snapshot_checkout::SnapshotRoot], grit_lib::objects::ObjectId) -> grit_lib::remote::snapshot_checkout::Result<core::result::Result<grit_lib::remote::snapshot_checkout::Grafted, grit_lib::remote::snapshot_checkout::GraftError>>
+pub fn grit_lib::remote::snapshot_checkout::graft(&grit_lib::repo::Repository, &[grit_lib::remote::snapshot_checkout::SnapshotRoot], &[alloc::string::String], grit_lib::objects::ObjectId) -> grit_lib::remote::snapshot_checkout::Result<core::result::Result<grit_lib::remote::snapshot_checkout::Grafted, grit_lib::remote::snapshot_checkout::GraftError>>
+pub fn grit_lib::remote::snapshot_checkout::graft_checkin_branch(&grit_lib::repo::Repository, &grit_lib::remote::snapshot_checkout::CheckoutInfo, &str, &grit_lib::remote::snapshot_checkout::CheckinBranch) -> grit_lib::remote::snapshot_checkout::Result<core::result::Result<grit_lib::remote::snapshot_checkout::Grafted, grit_lib::remote::snapshot_checkout::CheckinRefusal>>
 pub fn grit_lib::remote::snapshot_checkout::integrate(&grit_lib::repo::Repository, &str, grit_lib::objects::ObjectId, grit_lib::objects::ObjectId, &str, &grit_lib::remote::snapshot_checkout::Signature) -> grit_lib::remote::snapshot_checkout::Result<core::result::Result<grit_lib::remote::snapshot_checkout::Integrated, grit_lib::remote::snapshot_checkout::TargetRefusal>>
 pub fn grit_lib::remote::snapshot_checkout::make_snapshot(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, &[alloc::string::String], core::option::Option<grit_lib::objects::ObjectId>) -> grit_lib::remote::snapshot_checkout::Result<grit_lib::remote::snapshot_checkout::Snapshot>
 pub fn grit_lib::remote::snapshot_checkout::materialize(&std::path::Path, &grit_lib::remote::snapshot_checkout::CheckoutInfo, &std::path::Path, &str, &str, &mut dyn grit_lib::remote::fetch::Progress, &dyn grit_lib::progress::Cancel) -> grit_lib::remote::snapshot_checkout::Result<grit_lib::remote::snapshot_checkout::Materialized>
@@ -22007,10 +22172,14 @@ pub fn grit_lib::remote::snapshot_checkout::out_ref(&str, &str) -> alloc::string
 pub fn grit_lib::remote::snapshot_checkout::parse_slices(&str) -> grit_lib::remote::snapshot_checkout::Result<alloc::vec::Vec<grit_lib::remote::snapshot_checkout::Slice>>
 pub fn grit_lib::remote::snapshot_checkout::read_slices(&grit_lib::repo::Repository, grit_lib::objects::ObjectId) -> grit_lib::remote::snapshot_checkout::Result<alloc::vec::Vec<grit_lib::remote::snapshot_checkout::Slice>>
 pub fn grit_lib::remote::snapshot_checkout::render_slices(&[grit_lib::remote::snapshot_checkout::Slice]) -> alloc::string::String
+pub fn grit_lib::remote::snapshot_checkout::same_branch_name(&str, &str) -> bool
+pub fn grit_lib::remote::snapshot_checkout::set_checked_in_branch(&grit_lib::repo::Repository, &str, grit_lib::objects::ObjectId, core::option::Option<grit_lib::objects::ObjectId>, bool, &grit_lib::remote::snapshot_checkout::Signature, &str) -> grit_lib::remote::snapshot_checkout::Result<core::result::Result<grit_lib::remote::snapshot_checkout::BranchSet, grit_lib::remote::snapshot_checkout::CheckinRefusal>>
 pub fn grit_lib::remote::snapshot_checkout::snapshot_object(grit_lib::objects::ObjectId, core::option::Option<grit_lib::objects::ObjectId>, grit_lib::objects::ObjectId, i64, &str) -> alloc::vec::Vec<u8>
 pub fn grit_lib::remote::snapshot_checkout::suggest_work_branch(core::option::Option<&str>, [u8; 2]) -> alloc::string::String
+pub fn grit_lib::remote::snapshot_checkout::target_branch(&grit_lib::repo::Repository) -> alloc::string::String
 pub fn grit_lib::remote::snapshot_checkout::target_ref(&str) -> alloc::string::String
 pub fn grit_lib::remote::snapshot_checkout::valid_branch_name(&str) -> bool
+pub fn grit_lib::remote::snapshot_checkout::valid_checkout_id(&str) -> bool
 pub fn grit_lib::remote::snapshot_checkout::valid_slice_name(&str) -> bool
 pub type grit_lib::remote::snapshot_checkout::Result<T> = core::result::Result<T, grit_lib::remote::snapshot_checkout::CheckoutError>
 pub mod grit_lib::remote::transfer

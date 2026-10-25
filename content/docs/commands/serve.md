@@ -78,13 +78,15 @@ The push advertisement carries a `pushBundle=/push` capability: a [TUS](https://
 | `POST /.grit/checkouts/<name>` | makes a checkout of the paths in the JSON body |
 | `GET /.grit/checkouts/<name>/<id>` | the checkout |
 | `GET /.grit/checkouts/<name>/<id>/bundle` | its snapshot as a bundle, with `Range` support |
-| `POST /.grit/checkouts/<name>/<id>/update` | a snapshot of the newest target on top of the checkout's last one, at `refs/checkouts/<id>/target` (`grit pull`) |
+| `POST /.grit/checkouts/<name>/<id>/update` | a snapshot of the newest tip of the branch the checkout was made from, on top of the checkout's last one, at `refs/checkouts/<id>/target` (`grit pull`) |
 | `POST /.grit/checkouts/<name>/<id>/checkin` | grafts branches pushed to `refs/checkouts/<id>/out/heads/*` onto the real history and sets them (`grit checkin`; write access) |
 | `POST /.grit/checkouts/<name>/integrate` | merges a branch into the target with a merge commit (`grit integrate`; write access) |
 | `GET /.grit/checkouts/<name>/slices` | the slices in `.grit/slices.toml` on the target |
 | `PUT`, `DELETE /.grit/checkouts/<name>/slices/<slice>` | changes a slice with a commit on the target (`grit slice`; write access) |
 
-The server keeps checkouts in `grit-serve/checkouts/` inside the Git directory and points `refs/checkouts/<id>/target` at each one's snapshot. Integrations and slice changes move the target branch's ref directly; in a repository with a working tree, that tree is not updated (as with a push to a checked-out branch).
+The server keeps checkouts in `grit-serve/checkouts/` inside the Git directory (each checkout's record in `<id>.json`, replaced whole so a crash never leaves half of one, and the work-branch names it has given out under `names/`, so a name is never given out twice) and points `refs/checkouts/<id>/target` at each one's snapshot. Requests on one checkout take turns, and so do check-ins setting the repository's branches: of several check-ins of one branch at once, the first sets it and the others are refused. Branches are set with a compare-and-swap, so a branch that moved meanwhile is decided again rather than overwritten.
+
+Integrations and slice changes move the target branch's ref directly; in a repository with a working tree, that tree is not updated (as with a push to a checked-out branch). Every ref move the server makes is logged where the repository keeps reflogs (`core.logAllRefUpdates`, on by default in a repository with a working tree), as `checkin: from checkout <id>`, `integrate: Merge branch '<branch>' into <target>` or `slice: <message>`, so `git reflog <branch>` shows it and `<branch>@{1}` undoes it.
 
 ### Running it
 

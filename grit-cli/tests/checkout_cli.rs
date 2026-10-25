@@ -342,10 +342,12 @@ fn work_is_checked_in_integrated_and_refreshed() {
     let work = first["work"].as_str().expect("work").to_owned();
     let co = home.join("co");
 
-    // Nothing to check in yet.
-    let nothing = run(&home, &co, &["checkin"]);
-    assert!(!nothing.status.success());
-    assert!(String::from_utf8_lossy(&nothing.stderr).contains("nothing to check in"));
+    // Nothing to check in yet: a successful no-op.
+    let nothing = ok(&home, &co, &["checkin"]);
+    assert!(String::from_utf8_lossy(&nothing.stdout).contains("nothing to check in"));
+    let nothing = json(&home, &co, &["--json", "checkin"]);
+    assert_eq!(nothing["branches"], serde_json::json!([]), "{nothing}");
+    assert_eq!(nothing["refused"], Value::Bool(false));
 
     // A commit on the snapshot becomes a commit on the real history.
     commit_file(&home, &co, "src/a.rs", "a2\n", "Change a");
@@ -384,6 +386,7 @@ fn work_is_checked_in_integrated_and_refreshed() {
     assert_eq!(target.status.code(), Some(1));
     let target: Value = serde_json::from_slice(&target.stdout).expect("JSON");
     assert_eq!(target["branches"][0]["status"], "refused");
+    assert_eq!(target["branches"][0]["reason"], "target_branch");
     assert!(target["branches"][0]["message"]
         .as_str()
         .unwrap_or_default()
@@ -579,4 +582,276 @@ fn refresh_after_a_merge_pull_keeps_the_local_commit() {
             .as_deref(),
         Some("b3\n")
     );
+}
+
+/// POST `body` (JSON) to `url` as the holder of `token`, and the JSON answer.
+fn post(url: &str, token: &str, body: &str) -> Value {
+    let rest = url.strip_prefix("http://").expect("an http URL");
+    let (host, path) = rest.split_once('/').expect("a path");
+    let mut stream = std::net::TcpStream::connect(host).expect("connect");
+    write!(
+        stream,
+        "POST /{path} HTTP/1.1\r\nHost: {host}\r\nAuthorization: Bearer {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        token.trim(),
+        body.len()
+    )
+    .expect("send");
+    let mut answer = String::new();
+    stream.read_to_string(&mut answer).expect("read");
+    let (head, body) = answer.split_once("\r\n\r\n").expect("an HTTP answer");
+    assert!(head.starts_with("HTTP/1.1 200"), "{answer}");
+    serde_json::from_str(body).expect("JSON answer")
+}
+
+/// A server running on a fresh `demo`, the user signed in, and the URL of `demo`.
+fn signed_in() -> (tempfile::TempDir, PathBuf, PathBuf, ServerGuard, String) {
+    let (tmp, home, repos) = setup();
+    let (server, url) = serve(&home, &repos);
+    let token = std::fs::read_to_string(home.join("token")).expect("token");
+    ok(&home, &home, &["login", &url, "--token", &token]);
+    let repo_url = format!("{url}/demo.git");
+    (tmp, home, repos, server, repo_url)
+}
+
+#[test]
+fn checkouts_checking_in_one_branch_at_once_take_turns() {
+    let (_tmp, home, repos, _server, repo_url) = signed_in();
+    let demo = repos.join("demo");
+    let checkouts: Vec<PathBuf> = (0..6)
+        .map(|i| {
+            let into = format!("co{i}");
+            ok(
+                &home,
+                &home,
+                &["checkout", &repo_url, "-p", "src", "--into", &into],
+            );
+            let co = home.join(into);
+            ok(&home, &co, &["switch", "-c", "shared"]);
+            commit_file(
+                &home,
+                &co,
+                &format!("src/{i}.rs"),
+                "work\n",
+                &format!("work {i}"),
+            );
+            co
+        })
+        .collect();
+    let outputs: Vec<Output> = std::thread::scope(|s| {
+        let running: Vec<_> = checkouts
+            .iter()
+            .map(|co| {
+                let home = &home;
+                s.spawn(move || run(home, co, &["--json", "checkin", "shared"]))
+            })
+            .collect();
+        running
+            .into_iter()
+            .map(|h| h.join().expect("check-in thread"))
+            .collect()
+    });
+    // One creates the branch; every other is refused for the reason it was,
+    // not overwritten and not a server error.
+    let mut created = 0;
+    for out in &outputs {
+        let answer: Value = serde_json::from_slice(&out.stdout)
+            .unwrap_or_else(|_| panic!("no JSON: {}", String::from_utf8_lossy(&out.stderr)));
+        let branch = &answer["branches"][0];
+        match branch["status"].as_str() {
+            Some("created") => {
+                assert!(out.status.success(), "{answer}");
+                created += 1;
+            }
+            Some("refused") => {
+                assert_eq!(out.status.code(), Some(1), "{answer}");
+                assert_eq!(branch["reason"], "diverged", "{answer}");
+                let message = branch["message"].as_str().unwrap_or_default();
+                assert!(
+                    message.contains("has commits this checkout doesn't")
+                        && message.contains("`grit pull shared`"),
+                    "{message}"
+                );
+            }
+            other => panic!("{other:?}: {answer}"),
+        }
+    }
+    assert_eq!(created, 1);
+    assert_eq!(git(&demo, &["rev-list", "--count", "shared"]), "2");
+}
+
+#[test]
+fn check_ins_from_one_checkout_at_once_each_keep_their_record() {
+    let (_tmp, home, _repos, _server, repo_url) = signed_in();
+    let first = json(
+        &home,
+        &home,
+        &["--json", "checkout", &repo_url, "-p", "src", "--into", "co"],
+    );
+    let work = first["work"].as_str().expect("work").to_owned();
+    let co = home.join("co");
+    let names: Vec<String> = (1..=6).map(|i| format!("b{i}")).collect();
+    for name in &names {
+        ok(&home, &co, &["switch", "-c", name, &work]);
+        commit_file(&home, &co, &format!("src/{name}.rs"), "b\n", name);
+    }
+    let outputs: Vec<Output> = std::thread::scope(|s| {
+        let running: Vec<_> = names
+            .iter()
+            .map(|name| {
+                let (home, co) = (&home, &co);
+                s.spawn(move || run(home, co, &["--json", "checkin", name]))
+            })
+            .collect();
+        running
+            .into_iter()
+            .map(|h| h.join().expect("check-in thread"))
+            .collect()
+    });
+    for out in &outputs {
+        let answer: Value = serde_json::from_slice(&out.stdout).expect("JSON");
+        assert_eq!(answer["branches"][0]["status"], "created", "{answer}");
+    }
+    // Each check-in recorded that this checkout set its branch, so each may
+    // replace its own work after an amend.
+    for name in &names {
+        ok(&home, &co, &["switch", name]);
+        ok(
+            &home,
+            &co,
+            &["commit", "--amend", "-m", &format!("{name}, amended")],
+        );
+        let again = json(&home, &co, &["--json", "checkin", name]);
+        assert_eq!(again["branches"][0]["status"], "updated", "{again}");
+    }
+}
+
+#[test]
+fn a_work_branch_name_given_out_is_not_given_again_after_a_restart() {
+    let (_tmp, home, repos) = setup();
+    let token = std::fs::read_to_string(home.join("token")).expect("token");
+    let create = |url: &str| {
+        post(
+            &format!("{url}/.grit/checkouts/demo"),
+            &token,
+            r#"{"paths":["src"],"work":"alice/quiet-river"}"#,
+        )["work"]
+            .as_str()
+            .map(str::to_owned)
+    };
+    let (server, url) = serve(&home, &repos);
+    assert_eq!(create(&url).as_deref(), Some("alice/quiet-river"));
+    assert_eq!(create(&url).as_deref(), Some("alice/quiet-river-2"));
+    drop(server);
+    // Neither checkout has checked in, so the server has no branch by those names.
+    let (_server, url) = serve(&home, &repos);
+    assert_eq!(create(&url).as_deref(), Some("alice/quiet-river-3"));
+}
+
+#[test]
+fn a_merge_pull_checks_in_without_reverting_the_targets_other_changes() {
+    let (_tmp, home, repos, _server, repo_url) = signed_in();
+    let demo = repos.join("demo");
+    let first = json(
+        &home,
+        &home,
+        &["--json", "checkout", &repo_url, "-p", "src", "--into", "co"],
+    );
+    let work = first["work"].as_str().expect("work").to_owned();
+    let co = home.join("co");
+    commit_file(&home, &co, "src/a.rs", "a2\n", "Change a");
+
+    // Bob changes the docs, outside the checkout's paths; a merge pull brings
+    // the new snapshot in under a merge commit.
+    commit_file(&home, &demo, "docs/d.md", "d2\n", "Bob changes the docs");
+    ok(&home, &co, &["pull", "--no-rebase"]);
+    assert_eq!(
+        git(&co, &["rev-list", "--parents", "-n", "1", "HEAD"])
+            .split_whitespace()
+            .count(),
+        3,
+        "the merge pull made a merge commit"
+    );
+
+    let checkin = json(&home, &co, &["--json", "checkin"]);
+    assert_eq!(checkin["branches"][0]["status"], "created", "{checkin}");
+    assert_eq!(
+        git(&demo, &["show", &format!("{work}:docs/d.md")]),
+        "d2",
+        "the graft keeps Bob's change"
+    );
+    let integrated = json(&home, &co, &["--json", "integrate", &work]);
+    assert_eq!(integrated["status"], "merged", "{integrated}");
+    assert_eq!(git(&demo, &["show", "main:docs/d.md"]), "d2");
+    assert_eq!(git(&demo, &["show", "main:src/a.rs"]), "a2");
+
+    // The served repository has a worktree, so the server's ref moves are logged.
+    let main_log = git(&demo, &["reflog", "show", "--format=%gs", "main"]);
+    assert!(
+        main_log.contains(&format!("integrate: Merge branch '{work}' into main")),
+        "{main_log}"
+    );
+    let work_log = git(&demo, &["reflog", "show", "--format=%gs", &work]);
+    assert!(work_log.contains("checkin: from checkout"), "{work_log}");
+}
+
+#[test]
+fn the_target_is_refused_in_any_case_and_after_the_servers_head_moves() {
+    let (_tmp, home, repos, _server, repo_url) = signed_in();
+    let demo = repos.join("demo");
+    let first = json(
+        &home,
+        &home,
+        &["--json", "checkout", &repo_url, "-p", "src", "--into", "co"],
+    );
+    let work = first["work"].as_str().expect("work").to_owned();
+    let co = home.join("co");
+
+    // main moves on, then the server's HEAD moves to a new branch.
+    git(&demo, &["branch", "trunk"]);
+    commit_file(&home, &demo, "src/deep/b.rs", "b2\n", "Bob changes b");
+    let main = git(&demo, &["rev-parse", "main"]);
+    let trunk = git(&demo, &["rev-parse", "trunk"]);
+    git(&demo, &["symbolic-ref", "HEAD", "refs/heads/trunk"]);
+
+    // A refresh still follows main, the branch the checkout was made from.
+    let pulled = json(&home, &co, &["--json", "pull"]);
+    assert_eq!(
+        pulled["refresh"]["base"],
+        Value::String(main.clone()),
+        "{pulled}"
+    );
+    assert_eq!(pulled["refresh"]["moved"], Value::Bool(true), "{pulled}");
+
+    // Neither the checkout's target, in any case, nor the server's new target
+    // can be checked in.
+    commit_file(&home, &co, "src/x.rs", "x\n", "Straight onto the target");
+    for name in ["Main", "trunk"] {
+        ok(&home, &co, &["branch", "-f", name]);
+        let out = run(&home, &co, &["--json", "checkin", name]);
+        assert_eq!(out.status.code(), Some(1), "{name}");
+        let answer: Value = serde_json::from_slice(&out.stdout).expect("JSON");
+        assert_eq!(answer["branches"][0]["reason"], "target_branch", "{answer}");
+        ok(&home, &co, &["branch", "-D", name]);
+    }
+    assert_eq!(git(&demo, &["rev-parse", "main"]), main);
+    assert_eq!(git(&demo, &["rev-parse", "trunk"]), trunk);
+
+    // A directory replaced by a file checks in.
+    ok(&home, &co, &["switch", &work]);
+    ok(&home, &co, &["rm", "src/deep/b.rs"]);
+    let _ = std::fs::remove_dir(co.join("src/deep"));
+    commit_file(
+        &home,
+        &co,
+        "src/deep",
+        "now a file\n",
+        "deep becomes a file",
+    );
+    let checkin = json(&home, &co, &["--json", "checkin", &work]);
+    assert_eq!(checkin["branches"][0]["status"], "created", "{checkin}");
+    assert_eq!(
+        git(&demo, &["cat-file", "-t", &format!("{work}:src/deep")]),
+        "blob"
+    );
+    assert_eq!(git(&demo, &["show", &format!("{work}:docs/d.md")]), "d");
 }

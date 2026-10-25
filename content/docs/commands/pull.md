@@ -39,7 +39,7 @@ Integration runs the same hooks as `git pull`: `post-merge 0` after a fast-forwa
 
 ### In a snapshot checkout
 
-In a [snapshot checkout](../checkout/), `grit pull` with no remote or refspecs **refreshes** the checkout. It asks the server for a snapshot of the newest target branch, made on top of the checkout's last snapshot, fetches it into `origin/<target>` (only what changed in the checkout's paths comes down) and rebases the current branch onto it. Commits already merged into the target drop out. The first result line says where it refreshed to, or that the target hasn't moved:
+In a [snapshot checkout](../checkout/), `grit pull` with no remote or refspecs **refreshes** the checkout. It asks the server for a snapshot of the newest commit of the target branch the checkout was made from (the server keeps following that branch even when its `HEAD` moves to another), made on top of the checkout's last snapshot, fetches it into `origin/<target>` (only what changed in the checkout's paths comes down) and rebases the current branch onto it. Commits already merged into the target drop out. The first result line says where it refreshed to, or that the target hasn't moved:
 
 ```console
 $ grit pull
@@ -47,7 +47,7 @@ Refreshed onto main at 3c011e2 (snapshot 7ae0a80)
 Rebased onto origin (FETCH_HEAD) (2b87e20)
 ```
 
-`--ff-only` and `--no-rebase` still apply; without them the refresh rebases. A later rebasing refresh drops the merge commits a `--no-rebase` refresh made and replays your own commits onto the new snapshot.
+`--ff-only` and `--no-rebase` still apply; without them the refresh rebases. A merge commit a `--no-rebase` refresh makes checks in as a merge whose result keeps the target's changes outside your paths (see [`grit checkin`](../checkin/)). A later rebasing refresh drops the merge commits a `--no-rebase` refresh made and replays your own commits onto the new snapshot.
 
 `--check` fetches (always for real — not a dry run) and reports whether the branch could fast-forward or is already up to date, without changing `HEAD`, the index, the worktree, or reflogs. In rebase mode it also predicts whether the replay would stop on conflicts (`would` is `conflicts`). It cannot be combined with `--autostash` or integration mode overrides (`--ff-only`, `--rebase`, `--no-rebase`).
 

@@ -10,7 +10,7 @@ expression: payload
   },
   "json": {
     "exit": 0,
-    "stdout": "{\"url\":\"http://127.0.0.1:8080/demo.git\",\"branches\":[{\"name\":\"alice/elm-orchid\",\"status\":\"created\",\"grafted\":\"7fb21e5a0c1e4f7d9b2e6a3c8d0f1e2a3b4c5d6e\",\"commits\":2},{\"name\":\"main\",\"status\":\"refused\",\"commits\":0,\"message\":\"main is the server's target branch and can't be changed directly\"}],\"refused\":true}\n",
+    "stdout": "{\"url\":\"http://127.0.0.1:8080/demo.git\",\"branches\":[{\"name\":\"alice/elm-orchid\",\"status\":\"created\",\"grafted\":\"7fb21e5a0c1e4f7d9b2e6a3c8d0f1e2a3b4c5d6e\",\"commits\":2},{\"name\":\"main\",\"status\":\"refused\",\"commits\":0,\"message\":\"main is the server's target branch and can't be changed directly\",\"reason\":\"target_branch\"}],\"refused\":true}\n",
     "stderr": ""
   },
   "markdown": {

@@ -19,7 +19,7 @@ In a [snapshot checkout](../checkout/), the target branch only changes on the se
 2. **merges it into the target branch on the server**, with a merge commit by you (`user.name` and `user.email`, or the signed-in user), when it merges without conflicts. A branch that conflicts is not merged: the error names the files; refresh, rebase and try again. A branch the target already has is left alone;
 3. **refreshes this checkout** onto the new target, as [`grit pull`](../pull/) does. Commits now in the target drop out of your branches.
 
-The branch can also be one somebody else checked in or pushed. Integrating needs write access.
+The branch can also be one somebody else checked in or pushed. Integrating needs write access. Where the server's repository keeps reflogs, the move of the target is logged as `integrate: Merge branch '<branch>' into <target>`, so `git reflog <target>` on the server shows it.
 
 ## Options
 
