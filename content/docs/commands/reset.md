@@ -26,6 +26,8 @@ Moves the current branch (or detached `HEAD`) to `<rev>`, which defaults to `HEA
 
 `--hard` moves the tip, resets the index, and updates tracked files in the worktree to match `<rev>`. Untracked files are left alone.
 
+In a sparse checkout (`git sparse-checkout`), `--hard` and `--mixed` keep paths outside the sparse patterns out of the worktree: their index entries keep the skip-worktree bit, the same as `git reset`.
+
 `--keep` moves the tip and updates paths that differ between the current commit and `<rev>`, but refuses when a path that would change also has local staged or unstaged edits. Unrelated local changes (files that do not differ between the commits) are preserved.
 
 `--dry-run` reports what would happen — including paths that `--hard` would discard or `--keep` would refuse on — without moving refs, the index, or the worktree.

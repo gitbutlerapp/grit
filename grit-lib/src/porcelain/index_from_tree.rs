@@ -8,6 +8,7 @@ use crate::index::{index_file_mtime, Index};
 use crate::objects::ObjectId;
 use crate::porcelain::merge::tree_to_index_entries;
 use crate::repo::Repository;
+use crate::sparse_checkout::SparseCheckout;
 use crate::worktree_rules::WorktreeRules;
 use crate::write_tree::build_cache_tree_from_tree;
 
@@ -51,11 +52,17 @@ pub(crate) fn refresh_stage0_index_stats_from_worktree(
 }
 
 /// Like [`index_from_tree`], then refresh stat caches from the worktree when a work tree exists.
+///
+/// In a sparse checkout the rebuilt index keeps the on-disk index's `skip-worktree` bits (see
+/// [`SparseCheckout::carry_skip_worktree`]).
 pub(crate) fn index_from_tree_with_worktree_stats(
     repo: &Repository,
     tree_oid: &ObjectId,
 ) -> Result<Index> {
     let mut index = index_from_tree(repo, tree_oid)?;
+    if let Some(sparse) = SparseCheckout::load(repo)? {
+        sparse.carry_skip_worktree(&mut index, &repo.load_index()?);
+    }
     if let Some(work_tree) = repo.work_tree() {
         refresh_stage0_index_stats_from_worktree(repo, work_tree, &mut index)?;
     }
@@ -77,6 +84,9 @@ pub(crate) fn index_from_tree_with_seeded_worktree_stats(
     seed: &Index,
 ) -> Result<Index> {
     let mut index = index_from_tree(repo, tree_oid)?;
+    if let Some(sparse) = SparseCheckout::load(repo)? {
+        sparse.carry_skip_worktree(&mut index, seed);
+    }
     let cache_tree = build_cache_tree_from_tree(repo.odb(), tree_oid)?;
     if usize::try_from(cache_tree.entry_count).ok() == Some(index.entries.len()) {
         index.set_cache_tree(cache_tree);

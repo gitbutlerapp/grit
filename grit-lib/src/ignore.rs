@@ -1185,35 +1185,50 @@ fn sparse_list_last_match(
 /// directory until the decision is made or the path is rejected at the top level.
 #[must_use]
 pub fn path_in_sparse_checkout(path: &str, lines: &[String], work_tree: Option<&Path>) -> bool {
-    if path.is_empty() {
-        return true;
+    ParsedSparsePatterns::parse(lines).includes(path, work_tree)
+}
+
+/// Non-cone sparse-checkout lines parsed once, for repeated [`path_in_sparse_checkout`] checks.
+#[derive(Debug, Clone)]
+pub(crate) struct ParsedSparsePatterns(Vec<SparsePattern>);
+
+impl ParsedSparsePatterns {
+    /// Parse sparse-checkout lines; blank lines and comments are dropped.
+    pub(crate) fn parse(lines: &[String]) -> Self {
+        Self(
+            lines
+                .iter()
+                .filter_map(|l| SparsePattern::from_line(l))
+                .collect(),
+        )
     }
-    let parsed: Vec<SparsePattern> = lines
-        .iter()
-        .filter_map(|l| SparsePattern::from_line(l))
-        .collect();
-    if parsed.is_empty() {
-        return true;
-    }
 
-    let mut end = path.len();
-    let mut as_directory = false;
+    /// Whether `path` is included; `work_tree` lets on-disk directories match directory-only rules.
+    pub(crate) fn includes(&self, path: &str, work_tree: Option<&Path>) -> bool {
+        if path.is_empty() || self.0.is_empty() {
+            return true;
+        }
 
-    loop {
-        let pathname = &path[..end];
-        let dtype_is_dir = work_tree.is_some_and(|wt| wt.join(pathname).is_dir()) || as_directory;
+        let mut end = path.len();
+        let mut as_directory = false;
 
-        match sparse_list_last_match(pathname, dtype_is_dir, &parsed) {
-            Some(true) => return true,
-            Some(false) => return false,
-            None => {
-                let Some(slash) = path[..end].rfind('/') else {
-                    // Top-level path with no matching rule: Git stops here (UNDECIDED → excluded),
-                    // not at an empty pathname.
-                    return false;
-                };
-                end = slash;
-                as_directory = true;
+        loop {
+            let pathname = &path[..end];
+            let dtype_is_dir =
+                work_tree.is_some_and(|wt| wt.join(pathname).is_dir()) || as_directory;
+
+            match sparse_list_last_match(pathname, dtype_is_dir, &self.0) {
+                Some(true) => return true,
+                Some(false) => return false,
+                None => {
+                    let Some(slash) = path[..end].rfind('/') else {
+                        // Top-level path with no matching rule: Git stops here (UNDECIDED → excluded),
+                        // not at an empty pathname.
+                        return false;
+                    };
+                    end = slash;
+                    as_directory = true;
+                }
             }
         }
     }

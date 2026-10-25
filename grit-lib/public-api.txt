@@ -6190,6 +6190,26 @@ impl core::marker::Unpin for grit_lib::index::sparse_checkout::NonConePatterns
 impl core::marker::UnsafeUnpin for grit_lib::index::sparse_checkout::NonConePatterns
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::index::sparse_checkout::NonConePatterns
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::index::sparse_checkout::NonConePatterns
+pub struct grit_lib::index::sparse_checkout::SparseCheckout
+impl grit_lib::index::sparse_checkout::SparseCheckout
+pub fn grit_lib::index::sparse_checkout::SparseCheckout::carry_skip_worktree(&self, &mut grit_lib::index::Index, &grit_lib::index::Index)
+pub fn grit_lib::index::sparse_checkout::SparseCheckout::from_config(&std::path::Path, &grit_lib::config::ConfigSet) -> grit_lib::error::Result<core::option::Option<Self>>
+pub fn grit_lib::index::sparse_checkout::SparseCheckout::includes(&self, &str) -> bool
+pub fn grit_lib::index::sparse_checkout::SparseCheckout::includes_index_path(&self, &[u8]) -> bool
+pub fn grit_lib::index::sparse_checkout::SparseCheckout::load(&grit_lib::repo::Repository) -> grit_lib::error::Result<core::option::Option<Self>>
+pub fn grit_lib::index::sparse_checkout::SparseCheckout::mark_index_entries(&self, &mut grit_lib::index::Index, core::option::Option<&std::path::Path>)
+pub fn grit_lib::index::sparse_checkout::SparseCheckout::parse(&str, bool) -> Self
+impl core::clone::Clone for grit_lib::index::sparse_checkout::SparseCheckout
+pub fn grit_lib::index::sparse_checkout::SparseCheckout::clone(&self) -> Self
+impl core::fmt::Debug for grit_lib::index::sparse_checkout::SparseCheckout
+pub fn grit_lib::index::sparse_checkout::SparseCheckout::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::index::sparse_checkout::SparseCheckout
+impl core::marker::Send for grit_lib::index::sparse_checkout::SparseCheckout
+impl core::marker::Sync for grit_lib::index::sparse_checkout::SparseCheckout
+impl core::marker::Unpin for grit_lib::index::sparse_checkout::SparseCheckout
+impl core::marker::UnsafeUnpin for grit_lib::index::sparse_checkout::SparseCheckout
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::index::sparse_checkout::SparseCheckout
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::index::sparse_checkout::SparseCheckout
 pub fn grit_lib::index::sparse_checkout::apply_sparse_checkout_skip_worktree(&std::path::Path, core::option::Option<&std::path::Path>, &mut grit_lib::index::Index, bool) -> alloc::vec::Vec<alloc::string::String>
 pub fn grit_lib::index::sparse_checkout::build_expanded_cone_sparse_checkout_lines(&[alloc::string::String]) -> alloc::vec::Vec<alloc::string::String>
 pub fn grit_lib::index::sparse_checkout::clear_skip_worktree_from_present_files(&std::path::Path, &std::path::Path, &mut grit_lib::index::Index, core::option::Option<&grit_lib::config::ConfigSet>)

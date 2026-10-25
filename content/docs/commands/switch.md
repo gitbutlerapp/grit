@@ -34,6 +34,8 @@ When `<branch>` names a remote-tracking branch (for example `origin/feature`), G
 
 `--detach` checks out `<rev>` without moving a branch tip. Use another branch or `grit switch <branch>` to reattach.
 
+In a sparse checkout (`git sparse-checkout`), only paths inside the sparse patterns are written to the worktree. Paths outside them are recorded in the index with the skip-worktree bit, the same as `git switch`. The same applies to [`grit merge`](../merge/), [`grit pull`](../pull/) and [`grit reset`](../reset/).
+
 Updating the working tree uses parallel checkout when the change set is large enough; tune [`checkout.workers`](../../library/parallelism.md) and `checkout.thresholdForParallelism`. On non-Windows hosts, global [`--threads`](../global-options.md) can cap checkout workers for this run; on **Windows**, checkout stays serial until `checkout.workers` is set in config (see [parallelism](../../library/parallelism.md)).
 
 ## Options

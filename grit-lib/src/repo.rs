@@ -2078,13 +2078,14 @@ impl Repository {
             .unwrap_or(false);
         let patterns = read_sparse_checkout_patterns(&self.git_dir);
         let cone = effective_cone_mode_for_sparse_file(cone_cfg, &patterns);
-        let head = resolve_head(&self.git_dir)?;
-        let tree_oid = if let Some(oid) = head.oid() {
-            let obj = self.odb.read(oid)?;
-            let commit = parse_commit(&obj.data)?;
-            Some(commit.tree)
-        } else {
-            None
+        // Checkout writes the index before moving HEAD; a valid cache-tree root names the tree
+        // the index already matches.
+        let tree_oid = match index.cache_tree_root {
+            Some(tree) => Some(tree),
+            None => match resolve_head(&self.git_dir)?.oid() {
+                Some(oid) => Some(parse_commit(&self.odb.read(oid)?.data)?.tree),
+                None => None,
+            },
         };
         if let Some(t) = tree_oid {
             let protect = crate::path_validate::ProtectOptions::from_config(cfg.as_ref());

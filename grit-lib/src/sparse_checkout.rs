@@ -501,9 +501,13 @@ pub fn path_in_sparse_checkout(
 /// # Parameters
 ///
 /// - `git_dir` — repository git directory (reads `config` and `info/sparse-checkout`).
+/// - `work_tree` — when set, on-disk directories can match directory-only non-cone patterns.
 /// - `index` — index to update in place; bumped to version 3 when any entry is marked skip-worktree.
 /// - `skip_sparse_checkout` — when true (e.g. `read-tree --no-sparse-checkout`), do not set
 ///   `skip-worktree` bits even if sparse checkout is enabled.
+///
+/// Returns cone-parse warnings when `core.sparseCheckoutCone` is set but the file is not a
+/// valid cone definition (matching then falls back to non-cone rules).
 pub fn apply_sparse_checkout_skip_worktree(
     git_dir: &std::path::Path,
     work_tree: Option<&std::path::Path>,
@@ -513,83 +517,222 @@ pub fn apply_sparse_checkout_skip_worktree(
     if skip_sparse_checkout {
         return Vec::new();
     }
-
     let config = crate::config::ConfigSet::load(
         &crate::environment::Environment::empty(),
         Some(git_dir),
         true,
     )
     .unwrap_or_else(|_| crate::config::ConfigSet::new());
-    let sparse_enabled = config
-        .get_bool("core.sparsecheckout")
-        .and_then(|r| r.ok())
-        .unwrap_or(false);
-
-    if !sparse_enabled {
-        return Vec::new();
-    }
-
-    // Git default for core.sparseCheckoutCone is false (environment.c zero-init). When the key
-    // is absent, treat the sparse file as non-cone so we do not try to cone-parse a legitimate
-    // non-cone file (e.g. a bare `sub` pattern) and emit spurious "disabling cone pattern
-    // matching" warnings on every index update (t1011 subtest 21).
-    let cone_config = config
-        .get_bool("core.sparsecheckoutcone")
-        .and_then(|r| r.ok())
-        .unwrap_or(false);
-
     let mut warnings = Vec::new();
-    let (_cone_ok, _cone_loaded, non_cone) =
-        load_sparse_checkout_with_warnings(git_dir, cone_config, &mut warnings);
-
-    let sparse_path = git_dir.join("info").join("sparse-checkout");
-    let file_content = std::fs::read_to_string(&sparse_path).unwrap_or_default();
-    let sparse_lines = parse_sparse_checkout_file(&file_content);
-
-    // Use silent cone parsing here: non-cone files like `sub` are normal and should not emit
-    // "disabling cone pattern matching" on every index update (t1011 checkout noise).
-    let cone_struct = if cone_config {
-        ConePatterns::try_parse(&file_content)
-    } else {
-        None
+    let Ok(Some(sparse)) =
+        SparseCheckout::from_config_with_warnings(git_dir, &config, &mut warnings)
+    else {
+        return warnings;
     };
-    let effective_cone = cone_config && cone_struct.is_some();
-
-    // Git: an on-disk sparse-checkout file with no effective patterns (e.g. a file that only
-    // contains blank lines) still enables sparse mode and excludes every path (`pl->nr == 0`
-    // yields UNDECIDED → rejected at repo root in `path_in_sparse_checkout_1`).
-    let sparse_file_exists = sparse_path.is_file();
-    let exclude_all = sparse_file_exists && sparse_lines.is_empty();
-
-    let mut any_skip = false;
-    for entry in &mut index.entries {
-        if entry.stage() != 0 {
-            continue;
-        }
-        let path_str = String::from_utf8_lossy(&entry.path);
-        let included = if exclude_all {
-            false
-        } else if effective_cone {
-            path_in_sparse_checkout(
-                path_str.as_ref(),
-                true,
-                cone_struct.as_ref(),
-                &non_cone,
-                work_tree,
-            )
-        } else {
-            crate::ignore::path_in_sparse_checkout(path_str.as_ref(), non_cone.lines(), work_tree)
-        };
-        entry.set_skip_worktree(!included);
-        if !included {
-            any_skip = true;
-        }
-    }
-
-    if any_skip && index.version < 3 {
-        index.version = 3;
-    }
+    sparse.mark_index_entries(index, work_tree);
     warnings
+}
+
+/// The active sparse-checkout definition of a repository, compiled once for path checks.
+///
+/// Checkout-updating operations (`reset --hard`, `switch`, `merge`, `pull`, `restore`, …) load
+/// this once per operation: paths it excludes are recorded in the index with the
+/// `skip-worktree` bit instead of being written to the work tree, like Git's sparse checkout.
+///
+/// [`SparseCheckout::load`] returns `None` when `core.sparseCheckout` is off or
+/// `info/sparse-checkout` does not exist, so non-sparse repositories pay only a config lookup.
+#[derive(Debug, Clone)]
+pub struct SparseCheckout {
+    rules: SparseRules,
+}
+
+#[derive(Debug, Clone)]
+enum SparseRules {
+    Cone(ConePatterns),
+    NonCone(crate::ignore::ParsedSparsePatterns),
+    /// A sparse-checkout file without any pattern excludes every path.
+    ExcludeAll,
+}
+
+impl SparseCheckout {
+    /// Load the sparse-checkout definition of `repo` from its config and `info/sparse-checkout`.
+    ///
+    /// Reads `core.sparseCheckout` and `core.sparseCheckoutCone` from the repository's cached
+    /// configuration; the pattern file is only read when sparse checkout is enabled.
+    ///
+    /// # Returns
+    ///
+    /// `Ok(None)` when sparse checkout is disabled or the pattern file is missing.
+    ///
+    /// # Errors
+    ///
+    /// [`crate::error::Error::Config`] when either key holds an invalid boolean, and
+    /// [`crate::error::Error::Io`] when the pattern file exists but cannot be read.
+    pub fn load(repo: &crate::repo::Repository) -> crate::error::Result<Option<Self>> {
+        let config = repo.config()?;
+        Self::from_config(repo.git_dir(), &config)
+    }
+
+    /// Like [`SparseCheckout::load`], with an explicit git directory and configuration.
+    ///
+    /// # Parameters
+    ///
+    /// - `git_dir` — directory holding `info/sparse-checkout` (the per-worktree git dir).
+    /// - `config` — configuration providing `core.sparseCheckout` / `core.sparseCheckoutCone`.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`SparseCheckout::load`].
+    pub fn from_config(
+        git_dir: &std::path::Path,
+        config: &crate::config::ConfigSet,
+    ) -> crate::error::Result<Option<Self>> {
+        Self::from_config_with_warnings(git_dir, config, &mut Vec::new())
+    }
+
+    fn from_config_with_warnings(
+        git_dir: &std::path::Path,
+        config: &crate::config::ConfigSet,
+        warnings: &mut Vec<String>,
+    ) -> crate::error::Result<Option<Self>> {
+        let get_bool = |key: &str| -> crate::error::Result<bool> {
+            config
+                .get_bool(key)
+                .transpose()
+                .map(|v| v.unwrap_or(false))
+                .map_err(|e| crate::error::Error::Config(e.into()))
+        };
+        if !get_bool("core.sparsecheckout")? {
+            return Ok(None);
+        }
+        // Git's default for core.sparseCheckoutCone is false: an unset key means the file is
+        // matched with non-cone rules.
+        let cone = get_bool("core.sparsecheckoutcone")?;
+        let path = git_dir.join("info").join("sparse-checkout");
+        let content = match std::fs::read_to_string(&path) {
+            Ok(content) => content,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(crate::error::Error::Io(e)),
+        };
+        Ok(Some(Self::parse_with_warnings(&content, cone, warnings)))
+    }
+
+    /// Compile sparse-checkout file `content`.
+    ///
+    /// # Parameters
+    ///
+    /// - `content` — text of `info/sparse-checkout`.
+    /// - `cone` — the value of `core.sparseCheckoutCone`; a file that is not a valid cone
+    ///   definition falls back to non-cone matching.
+    #[must_use]
+    pub fn parse(content: &str, cone: bool) -> Self {
+        Self::parse_with_warnings(content, cone, &mut Vec::new())
+    }
+
+    fn parse_with_warnings(content: &str, cone: bool, warnings: &mut Vec<String>) -> Self {
+        let lines = parse_sparse_checkout_file(content);
+        if lines.is_empty() {
+            return Self {
+                rules: SparseRules::ExcludeAll,
+            };
+        }
+        let cone_patterns = if cone {
+            ConePatterns::try_parse_with_warnings(content, warnings)
+        } else {
+            None
+        };
+        let rules = match cone_patterns {
+            Some(cone) => SparseRules::Cone(cone),
+            None => SparseRules::NonCone(crate::ignore::ParsedSparsePatterns::parse(&lines)),
+        };
+        Self { rules }
+    }
+
+    /// Whether the repository-relative file `path` (`/`-separated) belongs in the work tree.
+    #[must_use]
+    pub fn includes(&self, path: &str) -> bool {
+        self.includes_at(path, None)
+    }
+
+    fn includes_at(&self, path: &str, work_tree: Option<&std::path::Path>) -> bool {
+        match &self.rules {
+            SparseRules::Cone(cone) => cone.path_included(path),
+            SparseRules::NonCone(patterns) => patterns.includes(path, work_tree),
+            SparseRules::ExcludeAll => false,
+        }
+    }
+
+    /// Like [`SparseCheckout::includes`], for a raw index path.
+    #[must_use]
+    pub fn includes_index_path(&self, path: &[u8]) -> bool {
+        self.includes(&String::from_utf8_lossy(path))
+    }
+
+    /// Whether a checkout that gives `path` new content keeps it out of the work tree.
+    ///
+    /// True when `path` is outside the definition and `index` (the index before the checkout)
+    /// either marks it skip-worktree or has no entry for it at all. A path whose file is
+    /// already materialized, or that is conflicted, is checked out normally.
+    #[must_use]
+    pub(crate) fn checkout_skips(&self, index: &crate::index::Index, path: &str) -> bool {
+        if self.includes(path) {
+            return false;
+        }
+        let bytes = crate::repo_relpath::storage_bytes(path);
+        match index.get(&bytes, 0) {
+            Some(entry) => entry.skip_worktree(),
+            None => (1..=3).all(|stage| index.get(&bytes, stage).is_none()),
+        }
+    }
+
+    /// Set `skip-worktree` on every stage-0 entry of `index` that is outside the definition
+    /// and clear it on the others; bumps the index to version 3 when any bit is set.
+    ///
+    /// # Parameters
+    ///
+    /// - `index` — index to update in place.
+    /// - `work_tree` — when set, on-disk directories can match directory-only non-cone patterns.
+    pub fn mark_index_entries(
+        &self,
+        index: &mut crate::index::Index,
+        work_tree: Option<&std::path::Path>,
+    ) {
+        let mut any_skip = false;
+        for entry in index.entries.iter_mut().filter(|e| e.stage() == 0) {
+            let included = self.includes_at(&String::from_utf8_lossy(&entry.path), work_tree);
+            entry.set_skip_worktree(!included);
+            any_skip |= !included;
+        }
+        if any_skip && index.version < 3 {
+            index.version = 3;
+        }
+    }
+
+    /// Carry sparse state into `index`, an index rebuilt from a tree without touching the
+    /// work tree (mixed reset, merge abort, stash): a stage-0 entry gets `skip-worktree` when
+    /// `previous` marks the same path skip-worktree, or when `previous` has no entry for the
+    /// path and the path is outside the definition.
+    ///
+    /// # Parameters
+    ///
+    /// - `index` — the rebuilt index, updated in place.
+    /// - `previous` — the index the rebuild replaces.
+    pub fn carry_skip_worktree(
+        &self,
+        index: &mut crate::index::Index,
+        previous: &crate::index::Index,
+    ) {
+        for entry in index.entries.iter_mut().filter(|e| e.stage() == 0) {
+            let skip = match previous.get(&entry.path, 0) {
+                Some(prev) => prev.skip_worktree(),
+                None => {
+                    (1..=3).all(|stage| previous.get(&entry.path, stage).is_none())
+                        && !self.includes_index_path(&entry.path)
+                }
+            };
+            entry.set_skip_worktree(skip);
+        }
+    }
 }
 
 /// Longest common prefix of `path1` and `path2` that ends at a `/` (Git `max_common_dir_prefix`).
@@ -1463,6 +1606,132 @@ mod sparse_public_api_coverage {
         assert!(!index.entries()[0].skip_worktree());
         apply_sparse_checkout_skip_worktree(&git_dir, Some(wt), &mut index, false);
         assert!(index.entries()[0].skip_worktree());
+    }
+
+    fn stage0_entry(path: &str) -> crate::index::IndexEntry {
+        crate::index::IndexEntry {
+            ctime_sec: 0,
+            ctime_nsec: 0,
+            mtime_sec: 0,
+            mtime_nsec: 0,
+            dev: 0,
+            ino: 0,
+            mode: crate::index::MODE_REGULAR,
+            uid: 0,
+            gid: 0,
+            size: 0,
+            oid: crate::objects::ObjectId::zero(),
+            flags: path.len().min(0xFFF) as u16,
+            flags_extended: None,
+            path: path.as_bytes().to_vec(),
+            base_index_pos: 0,
+        }
+    }
+
+    fn index_of(paths: &[&str]) -> crate::index::Index {
+        let mut index = crate::index::Index::new();
+        for path in paths {
+            index.add_or_replace(stage0_entry(path));
+        }
+        index.sort();
+        index
+    }
+
+    fn skip_bits(index: &crate::index::Index) -> Vec<(String, bool)> {
+        index
+            .entries()
+            .iter()
+            .map(|e| {
+                (
+                    String::from_utf8_lossy(&e.path).into_owned(),
+                    e.skip_worktree(),
+                )
+            })
+            .collect()
+    }
+
+    #[test]
+    fn sparse_checkout_from_config_reads_keys_and_file() {
+        let tmp = write_sparse_repo(true, "/*\n!/*/\n/a/\n");
+        let git_dir = tmp.path().join(".git");
+        let mut config = crate::config::ConfigSet::new();
+        assert!(SparseCheckout::from_config(&git_dir, &config)
+            .expect("disabled")
+            .is_none());
+
+        config = crate::config::ConfigSet::load(
+            &crate::environment::Environment::empty(),
+            Some(&git_dir),
+            true,
+        )
+        .expect("config");
+        let sparse = SparseCheckout::from_config(&git_dir, &config)
+            .expect("load")
+            .expect("enabled");
+        assert!(sparse.includes("a/x") && sparse.includes("top") && !sparse.includes("b/x"));
+
+        fs::remove_file(git_dir.join("info/sparse-checkout")).expect("rm");
+        assert!(SparseCheckout::from_config(&git_dir, &config)
+            .expect("missing file")
+            .is_none());
+
+        fs::write(git_dir.join("config"), "[core]\n\tsparseCheckout = maybe\n").expect("config");
+        let bad = crate::config::ConfigSet::load(
+            &crate::environment::Environment::empty(),
+            Some(&git_dir),
+            true,
+        )
+        .expect("config");
+        assert!(matches!(
+            SparseCheckout::from_config(&git_dir, &bad),
+            Err(crate::error::Error::Config(_))
+        ));
+    }
+
+    #[test]
+    fn sparse_checkout_marks_and_carries_skip_worktree() {
+        let sparse = SparseCheckout::parse("/*\n!/*/\n/a/\n", true);
+        let mut index = index_of(&["a/f", "b/f", "top"]);
+        sparse.mark_index_entries(&mut index, None);
+        assert_eq!(
+            skip_bits(&index),
+            [
+                ("a/f".to_owned(), false),
+                ("b/f".to_owned(), true),
+                ("top".to_owned(), false)
+            ]
+        );
+        assert_eq!(index.version, 3);
+
+        let mut previous = index_of(&["a/f", "a/skipped", "b/f", "b/present"]);
+        for entry in previous.entries_mut() {
+            entry.set_skip_worktree(entry.path.as_slice() != b"b/present");
+        }
+        previous.entries_mut()[0].set_skip_worktree(false);
+        let mut rebuilt = index_of(&["a/f", "a/new", "a/skipped", "b/f", "b/new", "b/present"]);
+        sparse.carry_skip_worktree(&mut rebuilt, &previous);
+        assert_eq!(
+            skip_bits(&rebuilt),
+            [
+                ("a/f".to_owned(), false),
+                ("a/new".to_owned(), false),
+                ("a/skipped".to_owned(), true),
+                ("b/f".to_owned(), true),
+                ("b/new".to_owned(), true),
+                ("b/present".to_owned(), false)
+            ]
+        );
+
+        let mut conflicted = index_of(&[]);
+        let mut ours = stage0_entry("b/c");
+        ours.flags |= 2 << 12;
+        conflicted.add_or_replace(ours);
+        let mut resolved = index_of(&["b/c"]);
+        sparse.carry_skip_worktree(&mut resolved, &conflicted);
+        assert!(!resolved.entries()[0].skip_worktree());
+        assert!(sparse.checkout_skips(&index_of(&[]), "b/x"));
+        assert!(!sparse.checkout_skips(&conflicted, "b/c"));
+        assert!(!sparse.checkout_skips(&index_of(&["b/x"]), "b/x"));
     }
 
     #[test]
