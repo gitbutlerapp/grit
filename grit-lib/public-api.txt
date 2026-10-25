@@ -5422,6 +5422,9 @@ pub grit_lib::error::Error::CacheTreeCorrupt
 pub grit_lib::error::Error::Cancelled
 pub grit_lib::error::Error::CannotDeleteCurrentBranch
 pub grit_lib::error::Error::CannotDeleteCurrentBranch::branch: alloc::string::String
+pub grit_lib::error::Error::CommitGraphParentMissing
+pub grit_lib::error::Error::CommitGraphParentMissing::commit: grit_lib::objects::ObjectId
+pub grit_lib::error::Error::CommitGraphParentMissing::parent: grit_lib::objects::ObjectId
 pub grit_lib::error::Error::Config(grit_lib::error::ConfigError)
 pub grit_lib::error::Error::CorruptObject(alloc::string::String)
 pub grit_lib::error::Error::CorruptStash(&'static str)
@@ -7367,6 +7370,28 @@ pub fn grit_lib::maintenance::repository_fsck::issue_severity(&grit_lib::mainten
 pub fn grit_lib::maintenance::repository_fsck::issue_visible_by_default(&grit_lib::maintenance::repository_fsck::FsckIssue, &grit_lib::config::ConfigSet, bool) -> bool
 pub fn grit_lib::maintenance::repository_fsck::missing_object_detail(grit_lib::objects::ObjectId, grit_lib::maintenance::repository_fsck::MissingObjectReferrer) -> alloc::string::String
 pub fn grit_lib::maintenance::repository_fsck::reachability_roots(&grit_lib::repo::Repository) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::ObjectId>>
+#[non_exhaustive] pub enum grit_lib::maintenance::CommitGraphSkipReason
+pub grit_lib::maintenance::CommitGraphSkipReason::Grafts
+pub grit_lib::maintenance::CommitGraphSkipReason::ReplaceRefs
+pub grit_lib::maintenance::CommitGraphSkipReason::Shallow
+impl grit_lib::maintenance::CommitGraphSkipReason
+pub fn grit_lib::maintenance::CommitGraphSkipReason::as_str(self) -> &'static str
+impl core::clone::Clone for grit_lib::maintenance::CommitGraphSkipReason
+pub fn grit_lib::maintenance::CommitGraphSkipReason::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::maintenance::CommitGraphSkipReason
+impl core::cmp::PartialEq for grit_lib::maintenance::CommitGraphSkipReason
+pub fn grit_lib::maintenance::CommitGraphSkipReason::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::maintenance::CommitGraphSkipReason
+pub fn grit_lib::maintenance::CommitGraphSkipReason::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::maintenance::CommitGraphSkipReason
+impl core::marker::StructuralPartialEq for grit_lib::maintenance::CommitGraphSkipReason
+impl core::marker::Freeze for grit_lib::maintenance::CommitGraphSkipReason
+impl core::marker::Send for grit_lib::maintenance::CommitGraphSkipReason
+impl core::marker::Sync for grit_lib::maintenance::CommitGraphSkipReason
+impl core::marker::Unpin for grit_lib::maintenance::CommitGraphSkipReason
+impl core::marker::UnsafeUnpin for grit_lib::maintenance::CommitGraphSkipReason
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::maintenance::CommitGraphSkipReason
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::maintenance::CommitGraphSkipReason
 #[non_exhaustive] pub struct grit_lib::maintenance::CommitGraphOptions
 pub grit_lib::maintenance::CommitGraphOptions::changed_paths: bool
 pub grit_lib::maintenance::CommitGraphOptions::dry_run: bool
@@ -7396,6 +7421,7 @@ pub grit_lib::maintenance::CommitGraphWriteReport::bloom_stats: core::option::Op
 pub grit_lib::maintenance::CommitGraphWriteReport::commit_count: usize
 pub grit_lib::maintenance::CommitGraphWriteReport::path: std::path::PathBuf
 pub grit_lib::maintenance::CommitGraphWriteReport::removed_chain: bool
+pub grit_lib::maintenance::CommitGraphWriteReport::skipped: core::option::Option<grit_lib::maintenance::CommitGraphSkipReason>
 impl core::clone::Clone for grit_lib::maintenance::CommitGraphWriteReport
 pub fn grit_lib::maintenance::CommitGraphWriteReport::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::maintenance::CommitGraphWriteReport
@@ -15060,6 +15086,9 @@ pub grit_lib::prelude::Error::CacheTreeCorrupt
 pub grit_lib::prelude::Error::Cancelled
 pub grit_lib::prelude::Error::CannotDeleteCurrentBranch
 pub grit_lib::prelude::Error::CannotDeleteCurrentBranch::branch: alloc::string::String
+pub grit_lib::prelude::Error::CommitGraphParentMissing
+pub grit_lib::prelude::Error::CommitGraphParentMissing::commit: grit_lib::objects::ObjectId
+pub grit_lib::prelude::Error::CommitGraphParentMissing::parent: grit_lib::objects::ObjectId
 pub grit_lib::prelude::Error::Config(grit_lib::error::ConfigError)
 pub grit_lib::prelude::Error::CorruptObject(alloc::string::String)
 pub grit_lib::prelude::Error::CorruptStash(&'static str)

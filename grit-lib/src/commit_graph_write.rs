@@ -776,6 +776,29 @@ pub fn remove_commit_graph_chain_dir(objects_dir: &std::path::Path) -> bool {
     std::fs::remove_dir_all(&graphs).is_ok()
 }
 
+/// Delete `objects/info/commit-graph` and any split `commit-graphs/` chain.
+///
+/// Returns `true` when a chain directory was removed (as [`remove_commit_graph_chain_dir`]).
+///
+/// # Errors
+///
+/// Propagates I/O failures removing the monolithic graph other than it being absent.
+pub(crate) fn remove_commit_graph_files(
+    objects_dir: &std::path::Path,
+) -> crate::error::Result<bool> {
+    let graph_path = objects_dir.join("info").join("commit-graph");
+    #[cfg(windows)]
+    if std::fs::symlink_metadata(&graph_path).is_ok_and(|m| m.file_type().is_file()) {
+        clear_readonly_attribute(&graph_path, true)?;
+    }
+    match std::fs::remove_file(&graph_path) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(crate::error::Error::Io(e)),
+    }
+    Ok(remove_commit_graph_chain_dir(objects_dir))
+}
+
 /// Count unique commit OIDs that refs point to directly (peeling annotated tags), matching Git's
 /// `add_ref_to_set` accounting for the "Collecting referenced commits" progress meter. Unlike
 /// [`collect_reachable_commit_oids`], this does not walk commit parents.
@@ -1193,6 +1216,23 @@ mod tests {
 
         assert!(super::remove_commit_graph_chain_dir(&objects_dir));
         assert!(!chain_root.exists());
+    }
+
+    #[test]
+    fn remove_commit_graph_files_tolerates_missing_graph() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let objects_dir = dir.path().join("objects");
+        std::fs::create_dir_all(objects_dir.join("info")).expect("info");
+        assert!(!super::remove_commit_graph_files(&objects_dir).expect("nothing to remove"));
+
+        let graph_path = objects_dir.join("info").join("commit-graph");
+        std::fs::write(&graph_path, b"graph").expect("seed graph");
+        let mut perms = std::fs::metadata(&graph_path).expect("meta").permissions();
+        perms.set_readonly(true);
+        std::fs::set_permissions(&graph_path, perms).expect("readonly");
+        std::fs::create_dir_all(objects_dir.join("info").join("commit-graphs")).expect("chain");
+        assert!(super::remove_commit_graph_files(&objects_dir).expect("remove"));
+        assert!(!graph_path.exists());
     }
 
     #[cfg(unix)]

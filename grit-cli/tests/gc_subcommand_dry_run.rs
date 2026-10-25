@@ -80,6 +80,37 @@ fn gc_commit_graph_dry_run_then_real() {
 }
 
 #[test]
+fn gc_in_shallow_repo_reports_skipped_commit_graph() {
+    let fixture = CliFixture::new();
+    fixture.run_ok(&["gc", "commit-graph"]);
+    let graph = fixture.path().join(".git/objects/info/commit-graph");
+    assert!(graph.exists());
+    let head = grit_test_support::git(fixture.path(), &["rev-parse", "HEAD"]);
+    std::fs::write(fixture.path().join(".git/shallow"), head).expect("write shallow");
+
+    let dry = fixture.run_ok(&["gc", "commit-graph", "--dry-run", "--json"]);
+    let dry_doc: Value = serde_json::from_str(&dry.stdout).expect("json");
+    assert_eq!(task_report(&dry_doc, "commit-graph")["skipped"], "shallow");
+    assert!(graph.exists(), "dry run keeps the graph");
+
+    let real = fixture.run_ok(&["gc", "--json"]);
+    let real_doc: Value = serde_json::from_str(&real.stdout).expect("json");
+    let task = task_report(&real_doc, "commit-graph");
+    assert_eq!(task["skipped"], "shallow");
+    assert_eq!(task["commit_count"], 0);
+    assert!(!graph.exists(), "gc removes the graph git would reject");
+
+    let human = fixture.run_ok(&["gc", "commit-graph"]);
+    assert!(human.stdout.contains("skipped"), "{}", human.stdout);
+    let markdown = fixture.run_ok(&["gc", "commit-graph", "--markdown"]);
+    assert!(
+        markdown.stdout.contains("- **skipped:** shallow"),
+        "{}",
+        markdown.stdout
+    );
+}
+
+#[test]
 fn gc_pack_refs_dry_run_then_real() {
     let fixture = CliFixture::new();
     fixture.run_ok(&["branch", "side"]);

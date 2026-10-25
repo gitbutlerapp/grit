@@ -24,7 +24,7 @@ use crate::commit_graph_file::CommitGraphChain;
 use crate::commit_graph_write::{
     atomic_replace_commit_graph, build_commit_graph_bytes_from_oid_maps,
     collect_reachable_commit_oids_for_repository, load_commit_graph_commit_info,
-    remove_commit_graph_chain_dir, BloomWriteStats,
+    remove_commit_graph_chain_dir, remove_commit_graph_files, BloomWriteStats,
 };
 use crate::config::ConfigSet;
 use crate::diff::bloom::BloomFilterSettings;
@@ -211,12 +211,73 @@ impl CommitGraphOptions {
 pub struct CommitGraphWriteReport {
     /// Path to the monolithic commit-graph file.
     pub path: PathBuf,
-    /// Commits encoded in the graph.
+    /// Commits encoded in the graph (`0` when [`Self::skipped`] is set).
     pub commit_count: usize,
     /// Whether a split `commit-graphs/` chain was removed.
     pub removed_chain: bool,
-    /// Bloom generation counters when [`CommitGraphOptions::changed_paths`] was set.
+    /// Bloom generation counters when [`CommitGraphOptions::changed_paths`] was set and a
+    /// graph was written.
     pub bloom_stats: Option<BloomWriteStats>,
+    /// Why no graph was written, when the repository rewrites parent lists.
+    pub skipped: Option<CommitGraphSkipReason>,
+}
+
+/// Why [`write_commit_graph`] wrote no graph.
+///
+/// A commit-graph stores each commit's parents as recorded in the commit object. When the
+/// repository overrides those parents, a graph would disagree with what Git sees: Git
+/// neither writes nor reads a graph in that state, and `git fsck` rejects one that exists.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum CommitGraphSkipReason {
+    /// `.git/shallow` lists boundary commits whose parents are cut off.
+    Shallow,
+    /// `info/grafts` overrides the parents of at least one commit.
+    Grafts,
+    /// Replace refs (`refs/replace/`) are present and enabled.
+    ReplaceRefs,
+}
+
+impl CommitGraphSkipReason {
+    /// Stable kebab-case identifier: `shallow`, `grafts` or `replace-refs`.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Shallow => "shallow",
+            Self::Grafts => "grafts",
+            Self::ReplaceRefs => "replace-refs",
+        }
+    }
+
+    /// Check whether the repository at `git_dir` rewrites parent lists.
+    ///
+    /// `git_dir` may be a linked worktree's git directory; shallow and graft files are read
+    /// from the common directory. `has_replace_refs` is only called when neither applies and
+    /// reports whether enabled replace refs exist.
+    pub(crate) fn detect(
+        git_dir: &Path,
+        has_replace_refs: impl FnOnce() -> Result<bool>,
+    ) -> Result<Option<Self>> {
+        let common = crate::repo::common_git_dir_for_config(git_dir);
+        if !crate::shallow::load_shallow_boundaries(&common).is_empty() {
+            return Ok(Some(Self::Shallow));
+        }
+        if !crate::rev_parse::load_graft_parents(&common).is_empty() {
+            return Ok(Some(Self::Grafts));
+        }
+        Ok(has_replace_refs()?.then_some(Self::ReplaceRefs))
+    }
+
+    /// Like [`Self::detect`] for an open repository, honoring `core.useReplaceRefs`,
+    /// `GIT_NO_REPLACE_OBJECTS` and `GIT_REPLACE_REF_BASE`.
+    pub(crate) fn detect_for_repository(repo: &Repository) -> Result<Option<Self>> {
+        Self::detect(repo.git_dir(), || {
+            let Some(base) = repo.replace_ref_base_if_enabled() else {
+                return Ok(false);
+            };
+            Ok(!repo.references().list(&base)?.is_empty())
+        })
+    }
 }
 
 /// Options for [`Repository::write_midx`].
@@ -454,6 +515,12 @@ pub(crate) fn commit_graph_writes_generation_data(config: &ConfigSet) -> bool {
 /// Reachable commits are discovered from [`Repository::refs`](crate::repo::Repository::refs)
 /// (reftable, packed-refs, and linked-worktree visibility), not by scanning `git_dir/refs` alone.
 ///
+/// In a shallow repository, with `info/grafts`, or with enabled replace refs, nothing is
+/// written and [`CommitGraphWriteReport::skipped`] says why (see [`CommitGraphSkipReason`]).
+/// Git only skips the write in that state, but `git fsck` still verifies a graph that is
+/// already there, so an existing graph and split chain are deleted as well (except in
+/// [`CommitGraphOptions::dry_run`]).
+///
 /// # Errors
 ///
 /// Returns [`Error::UnsupportedObjectStore`] for non-files ODB backends, or errors from graph
@@ -469,6 +536,25 @@ pub fn write_commit_graph(
         .ok_or(Error::UnsupportedObjectStore {
             operation: "commit-graph write",
         })?;
+    let path = objects_dir.join("info").join("commit-graph");
+
+    if let Some(reason) = CommitGraphSkipReason::detect_for_repository(repo)? {
+        let removed_chain = if opts.dry_run {
+            false
+        } else {
+            let removed = remove_commit_graph_files(objects_dir)?;
+            repo.caches().invalidate_commit_graph_cache();
+            removed
+        };
+        return Ok(CommitGraphWriteReport {
+            path,
+            commit_count: 0,
+            removed_chain,
+            bloom_stats: None,
+            skipped: Some(reason),
+        });
+    }
+
     let config = repo.config()?;
     let bloom = bloom_settings_for_commit_graph_write(&config, opts.changed_paths);
     let write_generation = commit_graph_writes_generation_data(&config);
@@ -479,7 +565,6 @@ pub fn write_commit_graph(
     let mut sorted: Vec<ObjectId> = commits.into_iter().collect();
     sorted.sort();
     let commit_count = sorted.len();
-    let path = objects_dir.join("info").join("commit-graph");
 
     if opts.dry_run {
         return Ok(CommitGraphWriteReport {
@@ -487,6 +572,7 @@ pub fn write_commit_graph(
             commit_count,
             removed_chain: false,
             bloom_stats: opts.changed_paths.then_some(BloomWriteStats::default()),
+            skipped: None,
         });
     }
 
@@ -532,6 +618,7 @@ pub fn write_commit_graph(
         commit_count,
         removed_chain,
         bloom_stats: opts.changed_paths.then_some(bloom_stats),
+        skipped: None,
     })
 }
 

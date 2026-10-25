@@ -57,6 +57,8 @@ pub enum GcTaskReport {
         commit_count: usize,
         path: String,
         removed_chain: bool,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        skipped: Option<String>,
     },
     Midx {
         duration_ms: u64,
@@ -223,6 +225,23 @@ impl GcTaskReport {
             }
             Self::CommitGraph {
                 duration_ms,
+                skipped: Some(reason),
+                ..
+            } => {
+                if dry_run {
+                    outln!(
+                        w,
+                        "commit-graph: would skip, parents are rewritten ({reason}); any existing graph would be removed ({duration_ms} ms)."
+                    );
+                } else {
+                    outln!(
+                        w,
+                        "commit-graph: skipped, parents are rewritten ({reason}); any existing graph removed ({duration_ms} ms)."
+                    );
+                }
+            }
+            Self::CommitGraph {
+                duration_ms,
                 commit_count,
                 path,
                 ..
@@ -310,12 +329,16 @@ impl GcTaskReport {
                 commit_count,
                 path,
                 removed_chain,
+                skipped,
             } => {
                 outln!(w, "#### commit-graph\n");
                 outln!(w, "- **duration_ms:** {duration_ms}");
                 outln!(w, "- **commit_count:** {commit_count}");
                 outln!(w, "- **path:** `{path}`");
                 outln!(w, "- **removed_chain:** {removed_chain}");
+                if let Some(reason) = skipped {
+                    outln!(w, "- **skipped:** {reason}");
+                }
                 outln!(w);
             }
             Self::Midx {
@@ -386,6 +409,7 @@ fn tasks_from_gc_stats(stats: GcStats, timings: GcPhaseTimings) -> Vec<GcTaskRep
             commit_count: graph.commit_count,
             path: filesystem_path_for_user(&graph.path),
             removed_chain: graph.removed_chain,
+            skipped: graph.skipped.map(|reason| reason.as_str().to_owned()),
         });
     }
     tasks
@@ -445,6 +469,7 @@ pub fn run_commit_graph(dry_run: bool, quiet: bool, mode: OutputMode) -> Result<
             commit_count: report.commit_count,
             path: filesystem_path_for_user(&report.path),
             removed_chain: report.removed_chain,
+            skipped: report.skipped.map(|reason| reason.as_str().to_owned()),
         }],
     })
 }

@@ -2387,6 +2387,19 @@ impl Repository {
         self.work_tree.is_none()
     }
 
+    /// Ref prefix holding replace refs (`refs/replace/` unless `GIT_REPLACE_REF_BASE` says
+    /// otherwise), or `None` when `GIT_NO_REPLACE_OBJECTS` or `core.useReplaceRefs=false`
+    /// disables them.
+    pub(crate) fn replace_ref_base_if_enabled(&self) -> Option<String> {
+        if self.environment.git_no_replace_objects {
+            return None;
+        }
+        let settings = self.cached_settings();
+        settings
+            .use_replace_refs
+            .then_some(settings.replace_ref_base)
+    }
+
     /// Object id to use after applying `refs/replace` (when enabled).
     pub(crate) fn object_id_after_replace(
         &self,

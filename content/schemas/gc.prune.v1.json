@@ -189,6 +189,12 @@
             "removed_chain": {
               "type": "boolean"
             },
+            "skipped": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
             "task": {
               "enum": [
                 "commit-graph"

@@ -198,6 +198,10 @@ impl Odb {
 
     /// Write `objects/info/commit-graph` from reachable commits (files primary only).
     ///
+    /// Writes nothing and deletes any existing graph in a repository that rewrites parent
+    /// lists (shallow, `info/grafts`, or replace refs unless `core.useReplaceRefs=false`), as
+    /// [`crate::maintenance::write_commit_graph`] does.
+    ///
     /// # Errors
     ///
     /// Returns [`Error::UnsupportedObjectStore`] for custom primaries, or errors from graph
@@ -220,6 +224,17 @@ impl Odb {
             true,
         )
         .unwrap_or_default();
+        let skip = crate::maintenance::CommitGraphSkipReason::detect(git_dir, || {
+            let enabled = config
+                .get_bool("core.useReplaceRefs")
+                .and_then(|r| r.ok())
+                .unwrap_or(true);
+            Ok(enabled && !crate::refs::list_refs(git_dir, "refs/replace/")?.is_empty())
+        })?;
+        if skip.is_some() {
+            crate::commit_graph_write::remove_commit_graph_files(objects_dir)?;
+            return Ok(());
+        }
         let bloom = crate::maintenance::bloom_settings_for_commit_graph_write(&config, true);
         let write_generation = crate::maintenance::commit_graph_writes_generation_data(&config);
         let commits = collect_reachable_commit_oids(git_dir, self)?;
