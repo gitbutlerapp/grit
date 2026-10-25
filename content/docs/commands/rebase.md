@@ -19,6 +19,8 @@ grit rebase|history rebase … [--check] [-X ours|theirs] [--dry-run] [--exec <c
 
 `grit rebase` replays commits reachable from `HEAD` but not from `<upstream>` onto `<upstream>` (or onto `--onto` when set). It uses the same history engine as [`grit history`](history.md). When every commit replays cleanly, grit writes new commit objects and updates refs in one batch.
 
+When the rebase moves `HEAD` to a different tree, grit runs the `post-checkout` hook (`<old tip> <new tip> 1`). Git runs it when it checks out the onto commit; grit applies the rebase atomically, so the hook names the final tip. When a rebase stops on conflicts, `post-checkout` runs once `HEAD` is detached at the stop point. When the rebase finishes, grit runs `post-rewrite rebase` with one `<old> <new>` line per replayed commit on stdin, oldest first. Dropped commits, commits already upstream, and fast-forwards are not listed, so a fast-forward rebase runs only `post-checkout`. Unlike Git, grit does not run `post-commit` for each replayed commit. Hook exit statuses never change the result. See [`grit hooks`](hooks.md).
+
 When `<upstream>` is omitted, grit uses `@{upstream}` of the current branch. If no upstream is configured, the command fails with a hint to run [`grit branch -u`](branch.md).
 
 When replay stops on conflicts, grit writes Git-compatible `.git/rebase-merge/` state (including `grit-plan`), leaves conflict markers in the worktree, and exits **1**. The branch tip recorded in `orig-head` is unchanged until you `--continue`, `--skip`, or `--abort`. Resume with the same conflict model as [`grit pick`](pick.md) and [`grit revert`](revert.md): inspect (`grit diff`), resolve, stage (`grit add`), then `grit rebase --continue`, or use `--skip` / `--abort`.

@@ -1150,7 +1150,10 @@ impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::command_runner::hook
 impl !core::panic::unwind_safe::UnwindSafe for grit_lib::command_runner::hooks::HookError
 pub enum grit_lib::command_runner::hooks::HookName
 pub grit_lib::command_runner::hooks::HookName::CommitMsg
+pub grit_lib::command_runner::hooks::HookName::PostCheckout
 pub grit_lib::command_runner::hooks::HookName::PostCommit
+pub grit_lib::command_runner::hooks::HookName::PostMerge
+pub grit_lib::command_runner::hooks::HookName::PostRewrite
 pub grit_lib::command_runner::hooks::HookName::PreCommit
 impl grit_lib::command_runner::hooks::HookName
 pub const fn grit_lib::command_runner::hooks::HookName::as_str(self) -> &'static str
@@ -1186,6 +1189,54 @@ impl core::marker::Unpin for grit_lib::command_runner::hooks::HookResult
 impl core::marker::UnsafeUnpin for grit_lib::command_runner::hooks::HookResult
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::command_runner::hooks::HookResult
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::command_runner::hooks::HookResult
+pub enum grit_lib::command_runner::hooks::PostOperationHooks
+pub grit_lib::command_runner::hooks::PostOperationHooks::Run
+pub grit_lib::command_runner::hooks::PostOperationHooks::Skip
+impl grit_lib::command_runner::hooks::PostOperationHooks
+pub const fn grit_lib::command_runner::hooks::PostOperationHooks::enabled(self) -> bool
+impl core::clone::Clone for grit_lib::command_runner::hooks::PostOperationHooks
+pub fn grit_lib::command_runner::hooks::PostOperationHooks::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::command_runner::hooks::PostOperationHooks
+impl core::cmp::PartialEq for grit_lib::command_runner::hooks::PostOperationHooks
+pub fn grit_lib::command_runner::hooks::PostOperationHooks::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::command_runner::hooks::PostOperationHooks
+pub fn grit_lib::command_runner::hooks::PostOperationHooks::default() -> Self
+impl core::fmt::Debug for grit_lib::command_runner::hooks::PostOperationHooks
+pub fn grit_lib::command_runner::hooks::PostOperationHooks::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::command_runner::hooks::PostOperationHooks
+impl core::marker::StructuralPartialEq for grit_lib::command_runner::hooks::PostOperationHooks
+impl serde_core::ser::Serialize for grit_lib::command_runner::hooks::PostOperationHooks
+pub fn grit_lib::command_runner::hooks::PostOperationHooks::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for grit_lib::command_runner::hooks::PostOperationHooks
+pub fn grit_lib::command_runner::hooks::PostOperationHooks::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for grit_lib::command_runner::hooks::PostOperationHooks
+impl core::marker::Send for grit_lib::command_runner::hooks::PostOperationHooks
+impl core::marker::Sync for grit_lib::command_runner::hooks::PostOperationHooks
+impl core::marker::Unpin for grit_lib::command_runner::hooks::PostOperationHooks
+impl core::marker::UnsafeUnpin for grit_lib::command_runner::hooks::PostOperationHooks
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::command_runner::hooks::PostOperationHooks
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::command_runner::hooks::PostOperationHooks
+pub enum grit_lib::command_runner::hooks::RewriteKind
+pub grit_lib::command_runner::hooks::RewriteKind::Amend
+pub grit_lib::command_runner::hooks::RewriteKind::Rebase
+impl grit_lib::command_runner::hooks::RewriteKind
+pub const fn grit_lib::command_runner::hooks::RewriteKind::as_str(self) -> &'static str
+impl core::clone::Clone for grit_lib::command_runner::hooks::RewriteKind
+pub fn grit_lib::command_runner::hooks::RewriteKind::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::command_runner::hooks::RewriteKind
+impl core::cmp::PartialEq for grit_lib::command_runner::hooks::RewriteKind
+pub fn grit_lib::command_runner::hooks::RewriteKind::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::command_runner::hooks::RewriteKind
+pub fn grit_lib::command_runner::hooks::RewriteKind::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::command_runner::hooks::RewriteKind
+impl core::marker::StructuralPartialEq for grit_lib::command_runner::hooks::RewriteKind
+impl core::marker::Freeze for grit_lib::command_runner::hooks::RewriteKind
+impl core::marker::Send for grit_lib::command_runner::hooks::RewriteKind
+impl core::marker::Sync for grit_lib::command_runner::hooks::RewriteKind
+impl core::marker::Unpin for grit_lib::command_runner::hooks::RewriteKind
+impl core::marker::UnsafeUnpin for grit_lib::command_runner::hooks::RewriteKind
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::command_runner::hooks::RewriteKind
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::command_runner::hooks::RewriteKind
 pub struct grit_lib::command_runner::hooks::CommitHookEnv<'a>
 pub grit_lib::command_runner::hooks::CommitHookEnv::extra_env: &'a [(&'a str, &'a str)]
 pub grit_lib::command_runner::hooks::CommitHookEnv::git_editor: core::option::Option<&'a str>
@@ -1224,6 +1275,7 @@ impl<'a> core::marker::Unpin for grit_lib::command_runner::hooks::RunHookOptions
 impl<'a> core::marker::UnsafeUnpin for grit_lib::command_runner::hooks::RunHookOptions<'a>
 impl<'a> core::panic::unwind_safe::RefUnwindSafe for grit_lib::command_runner::hooks::RunHookOptions<'a>
 impl<'a> core::panic::unwind_safe::UnwindSafe for grit_lib::command_runner::hooks::RunHookOptions<'a>
+pub fn grit_lib::command_runner::hooks::post_rewrite_stdin(&[(grit_lib::objects::ObjectId, grit_lib::objects::ObjectId)]) -> alloc::vec::Vec<u8>
 pub fn grit_lib::command_runner::hooks::resolve_hooks_dir(&grit_lib::repo::Repository) -> std::path::PathBuf
 pub fn grit_lib::command_runner::hooks::run_commit_hook(&grit_lib::repo::Repository, &str, &[&str], core::option::Option<&[u8]>, &grit_lib::command_runner::hooks::CommitHookEnv<'_>) -> core::result::Result<grit_lib::command_runner::hooks::HookResult, grit_lib::command_runner::hooks::HookError>
 pub fn grit_lib::command_runner::hooks::run_commit_hook_checked(&grit_lib::repo::Repository, &str, &[&str], core::option::Option<&[u8]>, &grit_lib::command_runner::hooks::CommitHookEnv<'_>) -> core::result::Result<(), grit_lib::command_runner::hooks::HookError>
@@ -1232,6 +1284,9 @@ pub fn grit_lib::command_runner::hooks::run_hook_capture(&grit_lib::repo::Reposi
 pub fn grit_lib::command_runner::hooks::run_hook_in_git_dir(&grit_lib::repo::Repository, &str, &[&str], core::option::Option<&[u8]>, &[(&str, &str)]) -> (grit_lib::command_runner::hooks::HookResult, alloc::vec::Vec<u8>)
 pub fn grit_lib::command_runner::hooks::run_hook_opts(core::option::Option<&grit_lib::repo::Repository>, &str, &[&str], &grit_lib::config::ConfigSet, grit_lib::command_runner::hooks::RunHookOptions<'_>, core::option::Option<&mut alloc::vec::Vec<u8>>) -> core::result::Result<grit_lib::command_runner::hooks::HookResult, grit_lib::command_runner::hooks::HookError>
 pub fn grit_lib::command_runner::hooks::run_hook_with_env(&grit_lib::repo::Repository, &str, &[&str], core::option::Option<&[u8]>, &[(&str, &str)]) -> (grit_lib::command_runner::hooks::HookResult, alloc::vec::Vec<u8>)
+pub fn grit_lib::command_runner::hooks::run_post_checkout(&grit_lib::repo::Repository, core::option::Option<grit_lib::objects::ObjectId>, grit_lib::objects::ObjectId, bool) -> bool
+pub fn grit_lib::command_runner::hooks::run_post_merge(&grit_lib::repo::Repository, bool) -> bool
+pub fn grit_lib::command_runner::hooks::run_post_rewrite(&grit_lib::repo::Repository, grit_lib::command_runner::hooks::RewriteKind, &[(grit_lib::objects::ObjectId, grit_lib::objects::ObjectId)]) -> bool
 pub fn grit_lib::command_runner::hooks::run_reference_transaction_committed_for_head_update(&grit_lib::repo::Repository, &grit_lib::state::HeadState, core::option::Option<grit_lib::objects::ObjectId>, grit_lib::objects::ObjectId) -> core::result::Result<grit_lib::command_runner::hooks::HookResult, grit_lib::command_runner::hooks::HookError>
 pub enum grit_lib::command_runner::CommandStdin
 pub grit_lib::command_runner::CommandStdin::Inherit
@@ -13039,6 +13094,7 @@ pub grit_lib::porcelain::merge::MergeOptions::commit: grit_lib::porcelain::merge
 pub grit_lib::porcelain::merge::MergeOptions::conflict_style: core::option::Option<grit_lib::diff::merge_file::ConflictStyle>
 pub grit_lib::porcelain::merge::MergeOptions::fast_forward: grit_lib::porcelain::merge::FastForwardPolicy
 pub grit_lib::porcelain::merge::MergeOptions::favor: grit_lib::diff::merge_file::MergeFavor
+pub grit_lib::porcelain::merge::MergeOptions::hooks: grit_lib::command_runner::hooks::PostOperationHooks
 pub grit_lib::porcelain::merge::MergeOptions::message: core::option::Option<alloc::string::String>
 impl core::clone::Clone for grit_lib::porcelain::merge::MergeOptions
 pub fn grit_lib::porcelain::merge::MergeOptions::clone(&self) -> Self
@@ -14345,6 +14401,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::switch::Sw
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::switch::SwitchMode
 pub struct grit_lib::porcelain::switch::SwitchOptions
 pub grit_lib::porcelain::switch::SwitchOptions::dry_run: bool
+pub grit_lib::porcelain::switch::SwitchOptions::hooks: grit_lib::command_runner::hooks::PostOperationHooks
 pub grit_lib::porcelain::switch::SwitchOptions::mode: grit_lib::porcelain::switch::SwitchMode
 impl core::clone::Clone for grit_lib::porcelain::switch::SwitchOptions
 pub fn grit_lib::porcelain::switch::SwitchOptions::clone(&self) -> Self
@@ -14364,6 +14421,7 @@ pub grit_lib::porcelain::switch::SwitchOutcome::commit: grit_lib::objects::Objec
 pub grit_lib::porcelain::switch::SwitchOutcome::created: bool
 pub grit_lib::porcelain::switch::SwitchOutcome::detached: bool
 pub grit_lib::porcelain::switch::SwitchOutcome::dry_run: bool
+pub grit_lib::porcelain::switch::SwitchOutcome::hooks_run: alloc::vec::Vec<grit_lib::command_runner::hooks::HookName>
 impl core::clone::Clone for grit_lib::porcelain::switch::SwitchOutcome
 pub fn grit_lib::porcelain::switch::SwitchOutcome::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::porcelain::switch::SwitchOutcome
@@ -22169,6 +22227,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::history::Abs
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::history::AbsorbPlan
 pub struct grit_lib::revwalk::history::AppliedRewrite
 pub grit_lib::revwalk::history::AppliedRewrite::head: grit_lib::objects::ObjectId
+pub grit_lib::revwalk::history::AppliedRewrite::hooks_run: alloc::vec::Vec<grit_lib::command_runner::hooks::HookName>
 pub grit_lib::revwalk::history::AppliedRewrite::ref_updates: alloc::vec::Vec<grit_lib::revwalk::history::PlannedRefUpdate>
 impl core::clone::Clone for grit_lib::revwalk::history::AppliedRewrite
 pub fn grit_lib::revwalk::history::AppliedRewrite::clone(&self) -> Self
@@ -22186,6 +22245,7 @@ impl core::marker::UnsafeUnpin for grit_lib::revwalk::history::AppliedRewrite
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::history::AppliedRewrite
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::history::AppliedRewrite
 pub struct grit_lib::revwalk::history::ApplyOptions
+pub grit_lib::revwalk::history::ApplyOptions::hooks: grit_lib::command_runner::hooks::PostOperationHooks
 pub grit_lib::revwalk::history::ApplyOptions::identity: alloc::string::String
 pub grit_lib::revwalk::history::ApplyOptions::record_operation: core::option::Option<alloc::string::String>
 pub grit_lib::revwalk::history::ApplyOptions::reflog_message: alloc::string::String
@@ -22536,6 +22596,7 @@ pub fn grit_lib::revwalk::history::RewritePlan::head_change(&self) -> core::opti
 pub fn grit_lib::revwalk::history::RewritePlan::mapped_tip(&self, grit_lib::objects::ObjectId) -> core::option::Option<grit_lib::objects::ObjectId>
 pub fn grit_lib::revwalk::history::RewritePlan::ref_update_lines(&self) -> alloc::vec::Vec<alloc::string::String>
 pub fn grit_lib::revwalk::history::RewritePlan::replacement(&self, grit_lib::objects::ObjectId) -> core::option::Option<grit_lib::objects::ObjectId>
+pub fn grit_lib::revwalk::history::RewritePlan::rewritten_pairs(&self) -> alloc::vec::Vec<(grit_lib::objects::ObjectId, grit_lib::objects::ObjectId)>
 pub fn grit_lib::revwalk::history::RewritePlan::subjects(&self, &grit_lib::repo::Repository) -> core::result::Result<alloc::vec::Vec<core::option::Option<alloc::string::String>>, grit_lib::revwalk::history::HistoryError>
 impl core::clone::Clone for grit_lib::revwalk::history::RewritePlan
 pub fn grit_lib::revwalk::history::RewritePlan::clone(&self) -> Self
@@ -22556,6 +22617,7 @@ pub struct grit_lib::revwalk::history::RewrittenCommit
 pub grit_lib::revwalk::history::RewrittenCommit::change_id: core::option::Option<grit_lib::change_id::ChangeId>
 pub grit_lib::revwalk::history::RewrittenCommit::new: core::option::Option<grit_lib::objects::ObjectId>
 pub grit_lib::revwalk::history::RewrittenCommit::old: grit_lib::objects::ObjectId
+pub grit_lib::revwalk::history::RewrittenCommit::reused: bool
 pub grit_lib::revwalk::history::RewrittenCommit::subject: core::option::Option<alloc::string::String>
 impl core::clone::Clone for grit_lib::revwalk::history::RewrittenCommit
 pub fn grit_lib::revwalk::history::RewrittenCommit::clone(&self) -> Self
@@ -25945,7 +26007,10 @@ pub fn grit_lib::worktree::worktree_admin_dir(&grit_lib::repo::Repository) -> st
 pub fn grit_lib::worktree::worktree_path_basename(&std::path::Path) -> alloc::string::String
 pub enum grit_lib::HookName
 pub grit_lib::HookName::CommitMsg
+pub grit_lib::HookName::PostCheckout
 pub grit_lib::HookName::PostCommit
+pub grit_lib::HookName::PostMerge
+pub grit_lib::HookName::PostRewrite
 pub grit_lib::HookName::PreCommit
 impl grit_lib::command_runner::hooks::HookName
 pub const fn grit_lib::command_runner::hooks::HookName::as_str(self) -> &'static str
@@ -25965,6 +26030,33 @@ impl core::marker::Unpin for grit_lib::command_runner::hooks::HookName
 impl core::marker::UnsafeUnpin for grit_lib::command_runner::hooks::HookName
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::command_runner::hooks::HookName
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::command_runner::hooks::HookName
+pub enum grit_lib::PostOperationHooks
+pub grit_lib::PostOperationHooks::Run
+pub grit_lib::PostOperationHooks::Skip
+impl grit_lib::command_runner::hooks::PostOperationHooks
+pub const fn grit_lib::command_runner::hooks::PostOperationHooks::enabled(self) -> bool
+impl core::clone::Clone for grit_lib::command_runner::hooks::PostOperationHooks
+pub fn grit_lib::command_runner::hooks::PostOperationHooks::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::command_runner::hooks::PostOperationHooks
+impl core::cmp::PartialEq for grit_lib::command_runner::hooks::PostOperationHooks
+pub fn grit_lib::command_runner::hooks::PostOperationHooks::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::command_runner::hooks::PostOperationHooks
+pub fn grit_lib::command_runner::hooks::PostOperationHooks::default() -> Self
+impl core::fmt::Debug for grit_lib::command_runner::hooks::PostOperationHooks
+pub fn grit_lib::command_runner::hooks::PostOperationHooks::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::command_runner::hooks::PostOperationHooks
+impl core::marker::StructuralPartialEq for grit_lib::command_runner::hooks::PostOperationHooks
+impl serde_core::ser::Serialize for grit_lib::command_runner::hooks::PostOperationHooks
+pub fn grit_lib::command_runner::hooks::PostOperationHooks::serialize<__S>(&self, __S) -> core::result::Result<<__S as serde_core::ser::Serializer>::Ok, <__S as serde_core::ser::Serializer>::Error> where __S: serde_core::ser::Serializer
+impl<'de> serde_core::de::Deserialize<'de> for grit_lib::command_runner::hooks::PostOperationHooks
+pub fn grit_lib::command_runner::hooks::PostOperationHooks::deserialize<__D>(__D) -> core::result::Result<Self, <__D as serde_core::de::Deserializer>::Error> where __D: serde_core::de::Deserializer<'de>
+impl core::marker::Freeze for grit_lib::command_runner::hooks::PostOperationHooks
+impl core::marker::Send for grit_lib::command_runner::hooks::PostOperationHooks
+impl core::marker::Sync for grit_lib::command_runner::hooks::PostOperationHooks
+impl core::marker::Unpin for grit_lib::command_runner::hooks::PostOperationHooks
+impl core::marker::UnsafeUnpin for grit_lib::command_runner::hooks::PostOperationHooks
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::command_runner::hooks::PostOperationHooks
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::command_runner::hooks::PostOperationHooks
 #[non_exhaustive] pub enum grit_lib::RefStorageFormat
 pub grit_lib::RefStorageFormat::Files
 pub grit_lib::RefStorageFormat::Reftable

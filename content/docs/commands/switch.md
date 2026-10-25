@@ -34,6 +34,8 @@ When `<branch>` names a remote-tracking branch (for example `origin/feature`), G
 
 `--detach` checks out `<rev>` without moving a branch tip. Use another branch or `grit switch <branch>` to reattach.
 
+After a real switch (not `--dry-run`), grit runs the `post-checkout` hook with the previous `HEAD` commit, the new one, and `1`, as Git does. The old id is all zeros when switching away from a branch with no commits. The hook also runs when you switch to the branch or commit you are already on. Its exit status never changes the result; a hook that cannot be started prints a `hook_not_run` warning. See [`grit hooks`](../hooks/).
+
 Updating the working tree uses parallel checkout when the change set is large enough; tune [`checkout.workers`](../../library/parallelism.md) and `checkout.thresholdForParallelism`. On non-Windows hosts, global [`--threads`](../global-options.md) can cap checkout workers for this run; on **Windows**, checkout stays serial until `checkout.workers` is set in config (see [parallelism](../../library/parallelism.md)).
 
 ## Options
@@ -55,6 +57,7 @@ Created and switched to branch feature
 
 $ grit switch main
 Switched to branch main
+hooks: post-checkout
 
 $ grit switch -
 Switched to branch feature
@@ -97,6 +100,7 @@ Pass `--json` for stable, scripting-friendly output:
 | `commit` | string or null | Full hex oid when `detached` is true; omitted when attached. |
 | `dry_run` | boolean | `true` when `--dry-run` was used (omitted when false). |
 | `changed_paths` | integer or null | With `--dry-run`, count of paths that would differ after checkout. |
+| `hooks_run` | array of strings | Hooks that ran after the switch (`post-checkout` when installed); empty on `--dry-run`. |
 
 Example (branch switch):
 
@@ -104,7 +108,8 @@ Example (branch switch):
 {
   "branch": "feature",
   "created": true,
-  "detached": false
+  "detached": false,
+  "hooks_run": ["post-checkout"]
 }
 ```
 
@@ -116,7 +121,8 @@ Example (`--dry-run`):
   "created": false,
   "detached": false,
   "dry_run": true,
-  "changed_paths": 3
+  "changed_paths": 3,
+  "hooks_run": []
 }
 ```
 
@@ -127,7 +133,8 @@ Example (detached):
   "branch": "",
   "created": false,
   "detached": true,
-  "commit": "a1b2c3d4e5f6789012345678901234567890abcd"
+  "commit": "a1b2c3d4e5f6789012345678901234567890abcd",
+  "hooks_run": []
 }
 ```
 
@@ -136,7 +143,7 @@ On overwrite refusal with `--json`, stdout is a single object with `kind` `would
 ## Markdown output
 
 Schema: [v1](/schemas/switch/v1.json)
-Pass [`--markdown`](../global-options/) for a `Switch` heading and one summary line:
+Pass [`--markdown`](../global-options/) for a `Switch` heading and one summary line, plus a `- Hooks:` line when a hook ran:
 
 ```text
 - Switched to **`feature`**

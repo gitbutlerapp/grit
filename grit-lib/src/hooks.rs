@@ -746,8 +746,9 @@ pub(crate) fn run_advisory_hook(
 /// object id). `branch_checkout` is `true` when `HEAD` itself moved to another branch or commit
 /// (switch, rebase) and `false` when only paths were checked out.
 ///
-/// Returns whether a hook ran; failures are reported as in [`run_advisory_hook`] and never
-/// returned as errors.
+/// Returns whether a hook ran (a non-zero exit still counts). The hook's outcome is never an
+/// error: a hook that cannot be started is reported as
+/// [`Warning::HookNotRun`](crate::diagnostics::Warning::HookNotRun) and returns `false`.
 pub fn run_post_checkout(
     repo: &Repository,
     old: Option<ObjectId>,
@@ -771,7 +772,7 @@ pub fn run_post_checkout(
 /// Run `post-merge <flag>` after a merge or fast-forward updated the work tree; the flag is
 /// `1` for a squash merge and `0` otherwise.
 ///
-/// Returns whether a hook ran; failures never become errors (see [`run_advisory_hook`]).
+/// Returns whether a hook ran; failures never become errors (see [`run_post_checkout`]).
 pub fn run_post_merge(repo: &Repository, squash: bool) -> bool {
     run_advisory_hook(
         repo,
@@ -798,7 +799,7 @@ pub fn post_rewrite_stdin(pairs: &[(ObjectId, ObjectId)]) -> Vec<u8> {
 /// Run `post-rewrite <amend|rebase>` with `pairs` (`old new`, oldest first) on stdin.
 ///
 /// Nothing runs when `pairs` is empty. Returns whether a hook ran; failures never become errors
-/// (see [`run_advisory_hook`]).
+/// (see [`run_post_checkout`]).
 pub fn run_post_rewrite(
     repo: &Repository,
     kind: RewriteKind,

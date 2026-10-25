@@ -643,7 +643,8 @@ pub struct CommitOutcome {
     pub parents: Vec<ObjectId>,
     /// Author recorded on the commit object.
     pub author: CommitAuthorInfo,
-    /// Commit hooks that were installed and executed successfully during this commit.
+    /// Hooks that were installed and ran during this commit: `pre-commit`, `commit-msg`,
+    /// `post-commit`, and `post-rewrite` (with `amend`) when [`CommitRequest::amend`] is set.
     pub hooks_run: Vec<HookName>,
     /// Number of path-level changes between the parent commit tree and this commit's tree.
     pub changes: usize,

@@ -23,7 +23,7 @@ grit history undo [--dry-run]
 
 ## Description
 
-`grit history` groups **stateless** rewrite operations: grit plans how commits and refs should change, writes new commit objects into the object database, then applies ref updates in one atomic batch. There is no sequencer state file and **no Git hooks** run during planning or apply. Rewrites preserve stable [change ids](../change-ids/) on surviving logical changes and store derived ids when the source commit had no header.
+`grit history` groups **stateless** rewrite operations: grit plans how commits and refs should change, writes new commit objects into the object database, then applies ref updates in one atomic batch. There is no sequencer state file and no hooks run during planning. Once a rewrite is applied, grit runs `post-checkout` (`<old HEAD> <new HEAD> 1`) when `HEAD`'s tree changed, then `post-rewrite rebase` with an `<old> <new>` line per rewritten commit on stdin (dropped commits are left out), as Git does after `rebase -i`. `--dry-run` and `history undo` run no hooks. Rewrites preserve stable [change ids](../change-ids/) on surviving logical changes and store derived ids when the source commit had no header.
 
 Shared behavior for every subcommand:
 

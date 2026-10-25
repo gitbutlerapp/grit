@@ -30,9 +30,19 @@ $ echo $?
 1
 ```
 
-In `--json` mode the same message is the `error` field. [`grit commit`](commit.md) reports it the same way for `pre-commit` and `commit-msg`; for `post-commit`, which runs after the commit is written, it is a warning and the commit still succeeds.
+In `--json` mode the same message is the `error` field. [`grit commit`](commit.md) reports it the same way for `pre-commit` and `commit-msg`; for `post-commit` and the other hooks that run after an operation completes, it is a warning and the operation still succeeds.
 
 [`grit commit`](commit.md) runs `pre-commit` and `commit-msg` automatically before writing the commit object, then `post-commit` after the branch moves. Use `grit commit --no-verify` to skip the first two (same as Git). JSON commit output lists hook basenames that actually ran in `hooks_run`.
+
+Other commands run the hooks Git runs after them, with Git's arguments:
+
+| Hook | Run by | Arguments and stdin |
+| --- | --- | --- |
+| `post-checkout` | [`grit switch`](switch.md), [`grit rebase`](rebase.md) and [`grit history`](history.md) rewrites that change `HEAD`'s tree | `<old HEAD> <new HEAD> 1` (all-zero old id from an unborn branch) |
+| `post-merge` | [`grit merge`](merge.md) and [`grit pull`](pull.md) after a fast-forward or merge commit (`0`) or a squash (`1`) | `0` or `1` |
+| `post-rewrite` | `grit commit --amend` (`amend`), `grit rebase` and `grit history` rewrites (`rebase`) | `amend` or `rebase`; stdin has one `<old> <new>` line per rewritten commit |
+
+These hooks run after the operation is complete, so their exit status never changes the result, and a hook that cannot be started is a `hook_not_run` warning. `--dry-run` and `--check` run no hooks. [`grit switch`](switch.md) and [`grit commit`](commit.md) list the hooks that ran in their JSON `hooks_run` field.
 
 ## Options
 
