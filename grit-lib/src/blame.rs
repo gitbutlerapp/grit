@@ -2570,11 +2570,7 @@ fn compute_blame_with_session(
                     parents_with_path.push(*parent_oid);
                 }
             }
-            if parents_with_path.is_empty() {
-                // The merge introduced the path: rename detection against the first
-                // parent, or attribution to this commit, takes it from here.
-                parents.truncate(1);
-            } else if parents_with_path.len() < parents.len() {
+            if !parents_with_path.is_empty() && parents_with_path.len() < parents.len() {
                 parents = parents_with_path;
             }
         }
@@ -2586,7 +2582,7 @@ fn compute_blame_with_session(
             };
             let line_count = cur_lines_arc.len();
 
-            let mut parent_blobs: Vec<Option<(ObjectId, ObjectId, u32)>> =
+            let mut parent_blobs: Vec<Option<(ObjectId, ObjectId, u32, String)>> =
                 vec![None; parents.len()];
             let mut par_lines_vec: Vec<Option<Arc<BlobLines>>> = vec![None; parents.len()];
             let mut maps: Vec<Option<Arc<Vec<Option<usize>>>>> = vec![None; parents.len()];
@@ -2610,13 +2606,48 @@ fn compute_blame_with_session(
                     break;
                 }
                 let p = parents[i];
-                let Some((blob, mode)) =
-                    session.resolve_blob_at_commit(odb, p, &current_path, &mut commit_cache)?
-                else {
+                let parent_commit =
+                    get_blame_commit(odb, p, &mut commit_cache, session.commit_graph.as_deref())?;
+                let mut parent_path = current_path.clone();
+                let mut resolved =
+                    session.resolve_blob_at_commit(odb, p, &current_path, &mut commit_cache)?;
+                if resolved.is_none() {
+                    if let Some((renamed_path, renamed_mode)) = find_path_by_oid_in_tree(
+                        odb,
+                        &parent_commit.tree,
+                        &commit.tree,
+                        &current_blob_oid,
+                        &current_path,
+                    )? {
+                        parent_path = renamed_path;
+                        resolved = session.resolve_blob_at_commit(
+                            odb,
+                            p,
+                            &parent_path,
+                            &mut commit_cache,
+                        )?;
+                        if resolved.is_none() {
+                            resolved = Some((current_blob_oid, renamed_mode));
+                        }
+                    } else if let Some(entry) = find_rename_entry_for_path(
+                        odb,
+                        &parent_commit.tree,
+                        &commit.tree,
+                        &current_path,
+                        BLAME_RENAME_SIMILARITY,
+                    )? {
+                        parent_path = entry.old_path.clone().unwrap_or_default();
+                        let p_blob_oid = entry.old_oid;
+                        let p_blob_mode = mode_from_diff_entry_mode(&entry.old_mode);
+                        resolved = Some((p_blob_oid, p_blob_mode));
+                    }
+                }
+                let Some((blob, mode)) = resolved else {
                     continue;
                 };
+                let renamed_parent = parent_path != current_path;
                 any_parent_has_path = true;
-                parent_blobs[i] = Some((p, blob, mode));
+                parent_blobs[i] = Some((p, blob, mode, parent_path.clone()));
                 if blob == current_blob_oid {
                     par_lines_vec[i] = Some(Arc::clone(&cur_lines_arc));
                     maps[i] = Some(session.identity_line_map(line_count));
@@ -2631,11 +2662,16 @@ fn compute_blame_with_session(
                             && session.merge_line_stamps[i].is_unused(t.current_idx)
                         {
                             session.merge_line_stamps[i].mark(t.current_idx);
+                            let source_path = if renamed_parent {
+                                Some(parent_path.clone())
+                            } else {
+                                t.source_path.clone()
+                            };
                             buckets[i].push(TrackedLine {
                                 final_lineno: t.final_lineno,
                                 current_idx: t.current_idx,
                                 ignored: t.ignored,
-                                source_path: t.source_path.clone(),
+                                source_path,
                                 origin: t.origin,
                             });
                         } else {
@@ -2645,11 +2681,11 @@ fn compute_blame_with_session(
                     remaining = next_remaining;
                     continue;
                 }
-                let pl_arc = session.load_blob_lines(blob, &current_path, mode)?;
+                let pl_arc = session.load_blob_lines(blob, &parent_path, mode)?;
                 let map_algo = diff_algorithm;
                 let pair = session.parent_child_line_maps(
                     blob,
-                    &current_path,
+                    &parent_path,
                     mode,
                     current_blob_oid,
                     &current_path,
@@ -2693,11 +2729,16 @@ fn compute_blame_with_session(
                             && session.merge_line_stamps[i].is_unused(p_idx)
                         {
                             session.merge_line_stamps[i].mark(p_idx);
+                            let source_path = if renamed_parent {
+                                Some(parent_path.clone())
+                            } else {
+                                t.source_path.clone()
+                            };
                             buckets[i].push(TrackedLine {
                                 final_lineno: t.final_lineno,
                                 current_idx: p_idx,
                                 ignored: t.ignored,
-                                source_path: t.source_path.clone(),
+                                source_path,
                                 origin: t.origin,
                             });
                         } else {
@@ -2734,7 +2775,7 @@ fn compute_blame_with_session(
                     if buckets[i].is_empty() {
                         continue;
                     }
-                    let Some((p, blob, mode)) = parent_blobs[i] else {
+                    let Some((p, blob, mode, parent_path)) = parent_blobs[i].clone() else {
                         continue;
                     };
                     next_origin += 1;
@@ -2747,7 +2788,7 @@ fn compute_blame_with_session(
                             oid: p,
                             blob,
                             mode,
-                            path: current_path.clone(),
+                            path: parent_path,
                             lines: par_lines_vec[i].take(),
                             pending: handed_off,
                         },
@@ -2756,9 +2797,14 @@ fn compute_blame_with_session(
                 }
 
                 if !buckets[0].is_empty() {
-                    let Some((p, blob, mode)) = parent_blobs[0] else {
+                    let Some((p, blob, mode, parent_path)) = parent_blobs[0].clone() else {
                         continue 'blame_loop;
                     };
+                    if parent_path != current_path {
+                        note_blame_source_path(&mut buckets[0], &parent_path);
+                        current_path = parent_path;
+                        session.set_bloom_path(&current_path);
+                    }
                     current_oid = p;
                     current_blob_oid = blob;
                     current_blob_mode = mode;
@@ -2767,6 +2813,7 @@ fn compute_blame_with_session(
                 }
                 continue;
             }
+            pending = remaining;
         }
 
         let parent_oid = parents[0];

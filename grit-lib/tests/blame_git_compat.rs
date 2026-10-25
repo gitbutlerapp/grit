@@ -1623,3 +1623,51 @@ fn blame_merge_renaming_path_matches_git() {
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
     assert_blame_matches(&repo, root, "new.txt", None, None);
 }
+
+/// Subtree merge (`read-tree --prefix=vendor/`): blame follows rename into merged-in parent.
+#[test]
+fn blame_subtree_merge_vendor_prefix_matches_git() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    let lib = root.join("lib");
+    let proj = root.join("proj");
+    std::fs::create_dir_all(&lib).unwrap();
+    std::fs::create_dir_all(&proj).unwrap();
+
+    git_run(&lib, &["init", "-q", "-b", "main"]);
+    git_run(&lib, &["config", "user.name", "Blame Test"]);
+    git_run(&lib, &["config", "user.email", "blame@example.com"]);
+    std::fs::write(lib.join("app.sh"), "a1\na2\na3\n").unwrap();
+    git_run(&lib, &["add", "."]);
+    git_run(&lib, &["commit", "-qm", "lib: first"]);
+    std::fs::write(lib.join("app.sh"), "a1\na2\na3\nb4 by bob\n").unwrap();
+    git_run(&lib, &["add", "app.sh"]);
+    git_run(&lib, &["commit", "-qam", "lib: bob adds line"]);
+
+    git_run(&proj, &["init", "-q", "-b", "main"]);
+    git_run(&proj, &["config", "user.name", "Blame Test"]);
+    git_run(&proj, &["config", "user.email", "blame@example.com"]);
+    std::fs::write(proj.join("README"), "readme\n").unwrap();
+    git_run(&proj, &["add", "."]);
+    git_run(&proj, &["commit", "-qm", "proj init"]);
+
+    git_run(&proj, &["remote", "add", "lib", &lib.to_string_lossy()]);
+    git_run(&proj, &["fetch", "-q", "lib"]);
+    git_run(
+        &proj,
+        &[
+            "merge",
+            "-q",
+            "-s",
+            "ours",
+            "--no-commit",
+            "--allow-unrelated-histories",
+            "lib/main",
+        ],
+    );
+    git_run(&proj, &["read-tree", "--prefix=vendor/", "-u", "lib/main"]);
+    git_run(&proj, &["commit", "-qm", "Merge lib as subtree"]);
+
+    let repo = Repository::discover(Some(&proj), &RepositoryOptions::empty()).expect("open");
+    assert_blame_matches(&repo, &proj, "vendor/app.sh", None, None);
+}
