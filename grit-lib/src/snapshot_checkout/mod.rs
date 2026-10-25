@@ -21,6 +21,25 @@
 //!   [`make_snapshot`].
 //! - Client side: [`CheckoutUrl`], [`CheckoutClient`], [`materialize`],
 //!   [`CheckoutMarker`].
+//!
+//! Work comes back with a **check-in**: the client pushes its branches' raw
+//! tips to [`out_ref`] and asks the server to [`graft`] them onto the real
+//! history and set the server's branches ([`decide_checkin`]). The server can
+//! [`integrate`] a branch into the target with a merge commit, and keeps
+//! **slices** — named sets of paths — in [`SLICES_PATH`] on the target branch.
+//! A **refresh** asks the server for a snapshot of the newest target on top of
+//! the checkout's last one, fetches it from [`target_ref`] and rebases the
+//! work onto it.
+
+mod graft;
+mod target;
+mod tree;
+
+pub use graft::{decide_checkin, graft, CheckinDecision, GraftError, Grafted};
+pub use target::{
+    commit_slices, integrate, missing_paths, parse_slices, read_slices, render_slices,
+    valid_slice_name, Integrated, Signature, TargetRefusal, SLICES_PATH,
+};
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -117,6 +136,199 @@ pub struct CheckoutInfo {
     /// when the server already has a branch by that name.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub work: Option<String>,
+}
+
+/// The ref a checkout's newest snapshot is kept at on the server.
+#[must_use]
+pub fn target_ref(id: &str) -> String {
+    format!("refs/checkouts/{id}/target")
+}
+
+/// Whether `name` is a valid branch name (`refs/heads/<name>` is a valid ref).
+#[must_use]
+pub fn valid_branch_name(name: &str) -> bool {
+    crate::check_ref_format::check_refname_format(
+        &format!("refs/heads/{name}"),
+        &crate::check_ref_format::RefNameOptions::default(),
+    )
+    .is_ok()
+}
+
+/// Where a checkout pushes its branch `name` for the server to graft.
+#[must_use]
+pub fn out_ref(id: &str, name: &str) -> String {
+    format!("refs/checkouts/{id}/out/heads/{name}")
+}
+
+/// One branch of a check-in: its name and the tip the client pushed to
+/// [`out_ref`].
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CheckinBranch {
+    /// Branch name (without `refs/heads/`).
+    pub name: String,
+    /// The tip pushed to [`out_ref`].
+    pub raw: String,
+}
+
+/// `POST /.grit/checkouts/<repo>/<id>/checkin`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CheckinRequest {
+    /// The branches to check in.
+    pub branches: Vec<CheckinBranch>,
+    /// Set a branch even where it would drop commits the server has.
+    #[serde(default)]
+    pub force: bool,
+}
+
+/// What a check-in did to one branch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CheckinStatus {
+    /// The server had no such branch; it does now.
+    Created,
+    /// The server's branch moved to the graft.
+    Updated,
+    /// The server's branch was already there.
+    Unchanged,
+    /// The branch was not set.
+    Refused,
+}
+
+/// The result for one branch of a check-in.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CheckinResult {
+    /// The branch.
+    pub name: String,
+    /// What happened.
+    pub status: CheckinStatus,
+    /// The commit on the server's history the branch's tip became.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub grafted: Option<String>,
+    /// Where the server's branch was before.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub previous: Option<String>,
+    /// Commits replayed.
+    #[serde(default)]
+    pub commits: usize,
+    /// Why it was refused.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub message: Option<String>,
+}
+
+/// The answer to a check-in.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CheckinResponse {
+    /// One result per branch, in request order.
+    pub results: Vec<CheckinResult>,
+}
+
+/// Who did something.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Ident {
+    /// Name.
+    pub name: String,
+    /// Email address.
+    pub email: String,
+}
+
+/// `POST /.grit/checkouts/<repo>/integrate`: merge a branch into the target.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IntegrateRequest {
+    /// The branch on the server.
+    pub name: String,
+    /// Who the merge commit is by (the signed-in user when absent).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author: Option<Ident>,
+}
+
+/// What an integration did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum IntegrateStatus {
+    /// A merge commit moved the target.
+    Merged,
+    /// The target already had every commit of the branch.
+    AlreadyIntegrated,
+}
+
+/// The answer to an integration.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct IntegrateResponse {
+    /// What happened.
+    pub status: IntegrateStatus,
+    /// The branch.
+    pub name: String,
+    /// The target branch.
+    pub target: String,
+    /// Where the target was.
+    pub previous: String,
+    /// Where it is now.
+    pub head: String,
+    /// The branch's commits the merge brought in.
+    pub commits: usize,
+}
+
+/// A named set of paths to check out together.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Slice {
+    /// The slice's name.
+    pub name: String,
+    /// What it is for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Its paths.
+    pub paths: Vec<String>,
+}
+
+/// `GET /.grit/checkouts/<repo>/slices`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SlicesResponse {
+    /// The target branch.
+    pub target: String,
+    /// Where it is.
+    pub head: String,
+    /// The slices on it.
+    pub slices: Vec<Slice>,
+}
+
+/// `PUT /.grit/checkouts/<repo>/slices/<name>`: make or change a slice.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SliceRequest {
+    /// The slice's paths.
+    pub paths: Vec<String>,
+    /// What it is for.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+    /// Make a new slice, refusing a name that exists; otherwise change one
+    /// that does.
+    #[serde(default)]
+    pub create: bool,
+    /// Who the commit is by (the signed-in user when absent).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author: Option<Ident>,
+}
+
+/// `DELETE /.grit/checkouts/<repo>/slices/<name>`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SliceDeleteRequest {
+    /// Who the commit is by (the signed-in user when absent).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub author: Option<Ident>,
+}
+
+/// What a change to the slices did.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct SliceChange {
+    /// The slice as it is now; none once deleted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub slice: Option<Slice>,
+    /// The target branch.
+    pub target: String,
+    /// Where it was.
+    pub previous: String,
+    /// Where it is: a commit changing the slices file, or `previous` when
+    /// nothing changed.
+    pub head: String,
 }
 
 /// An error body the checkout endpoints answer with.
@@ -619,6 +831,134 @@ impl<'a> CheckoutClient<'a> {
     pub fn bundle_url(&self, id: &str) -> String {
         format!("{}/{id}/bundle", self.url.api)
     }
+
+    fn post_json<T: Serialize, R: serde::de::DeserializeOwned>(
+        &self,
+        method: HttpMethod,
+        url: &str,
+        body: &T,
+    ) -> Result<R> {
+        let body = serde_json::to_vec(body).map_err(|e| CheckoutError::Protocol {
+            url: url.to_owned(),
+            detail: e.to_string(),
+        })?;
+        self.json(method, url, Some(&body))
+    }
+
+    /// Ask the server to graft branches the client pushed to [`out_ref`].
+    ///
+    /// # Errors
+    ///
+    /// Request failures and the server's refusal of the whole request.
+    pub fn checkin(&self, id: &str, request: &CheckinRequest) -> Result<CheckinResponse> {
+        self.post_json(
+            HttpMethod::Post,
+            &format!("{}/{id}/checkin", self.url.api),
+            request,
+        )
+    }
+
+    /// Ask the server for a snapshot of the newest target branch on top of
+    /// checkout `id`'s last one (kept at [`target_ref`]).
+    ///
+    /// # Errors
+    ///
+    /// Request failures.
+    pub fn update(&self, id: &str) -> Result<CheckoutInfo> {
+        self.post_json(
+            HttpMethod::Post,
+            &format!("{}/{id}/update", self.url.api),
+            &(),
+        )
+    }
+
+    /// Merge a branch into the target on the server.
+    ///
+    /// # Errors
+    ///
+    /// Request failures, and the server's refusal (a conflict, no such branch).
+    pub fn integrate(&self, request: &IntegrateRequest) -> Result<IntegrateResponse> {
+        self.post_json(
+            HttpMethod::Post,
+            &format!("{}/integrate", self.url.api),
+            request,
+        )
+    }
+
+    /// The slices on the target branch.
+    ///
+    /// # Errors
+    ///
+    /// [`CheckoutError::NotOffered`] and request failures.
+    pub fn slices(&self) -> Result<SlicesResponse> {
+        self.server_info()?;
+        self.json(HttpMethod::Get, &format!("{}/slices", self.url.api), None)
+    }
+
+    /// Make or change slice `name`.
+    ///
+    /// # Errors
+    ///
+    /// Request failures and the server's refusal (a name that exists or
+    /// doesn't, a path the target lacks).
+    pub fn put_slice(&self, name: &str, request: &SliceRequest) -> Result<SliceChange> {
+        self.post_json(
+            HttpMethod::Put,
+            &format!("{}/slices/{name}", self.url.api),
+            request,
+        )
+    }
+
+    /// Delete slice `name`.
+    ///
+    /// # Errors
+    ///
+    /// Request failures and the server's refusal (no such slice).
+    pub fn delete_slice(&self, name: &str, request: &SliceDeleteRequest) -> Result<SliceChange> {
+        self.post_json(
+            HttpMethod::Delete,
+            &format!("{}/slices/{name}", self.url.api),
+            request,
+        )
+    }
+}
+
+/// Local branches with work to check in: every branch whose tip is a commit
+/// on top of one of the checkout's snapshots (not a snapshot itself).
+///
+/// # Errors
+///
+/// Ref and ancestry failures.
+pub fn branches_with_work(
+    repo: &Repository,
+    marker: &CheckoutMarker,
+) -> Result<Vec<(String, ObjectId)>> {
+    let roots: Vec<ObjectId> = marker
+        .roots
+        .iter()
+        .filter_map(|r| ObjectId::from_hex(&r.commit).ok())
+        .collect();
+    let mut out = Vec::new();
+    for (refname, tip) in crate::refs::list_refs(repo.git_dir(), "refs/heads/")? {
+        if roots.contains(&tip) {
+            continue;
+        }
+        let mut on_snapshot = false;
+        for root in &roots {
+            if crate::merge_base::is_ancestor(repo, *root, tip)? {
+                on_snapshot = true;
+                break;
+            }
+        }
+        if on_snapshot {
+            let name = refname
+                .strip_prefix("refs/heads/")
+                .unwrap_or(&refname)
+                .to_owned();
+            out.push((name, tip));
+        }
+    }
+    Ok(out)
 }
 
 /// What makes a repository a snapshot checkout: where it came from and which
@@ -762,7 +1102,9 @@ pub fn materialize(
     }
     .write(&git_dir)?;
     let tree = ObjectId::from_hex(&info.tree).map_err(|_| mismatch(info.tree.clone()))?;
-    crate::porcelain::checkout::checkout_between_trees_with_progress(&repo, None, &tree, progress)?;
+    crate::porcelain::checkout::checkout_between_trees_with_progress(
+        &repo, None, &tree, progress, cancel,
+    )?;
     let files = u64::try_from(repo.index_handle().load()?.entries().len()).unwrap_or(u64::MAX);
     Ok(Materialized {
         repo,

@@ -187,6 +187,10 @@ pub enum HttpMethod {
     Post,
     /// `PATCH`.
     Patch,
+    /// `PUT`.
+    Put,
+    /// `DELETE`.
+    Delete,
 }
 
 impl HttpMethod {
@@ -198,6 +202,8 @@ impl HttpMethod {
             Self::Head => "HEAD",
             Self::Post => "POST",
             Self::Patch => "PATCH",
+            Self::Put => "PUT",
+            Self::Delete => "DELETE",
         }
     }
 }

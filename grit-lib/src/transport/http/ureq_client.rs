@@ -886,6 +886,12 @@ impl UreqHttpClient {
             HttpMethod::Patch => self
                 .decorate(self.agent.patch(url), request, auth)
                 .send(request.body),
+            HttpMethod::Put => self
+                .decorate(self.agent.put(url), request, auth)
+                .send(request.body),
+            HttpMethod::Delete => self
+                .decorate(self.agent.delete(url).force_send_body(), request, auth)
+                .send(request.body),
         });
         let resp = result.map_err(|e| http_transport_error(url, &e))?;
         let headers = resp

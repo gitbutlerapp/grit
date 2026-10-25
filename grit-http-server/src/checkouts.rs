@@ -29,8 +29,12 @@ use axum::Json;
 use grit_lib::bundle::BundleSpec;
 use grit_lib::objects::ObjectId;
 use grit_lib::remote::snapshot_checkout::{
-    make_snapshot, normalize_paths, CheckoutError, CheckoutErrorBody, CheckoutInfo,
-    CheckoutRequest, CheckoutServerInfo, SnapshotRoot,
+    commit_slices, decide_checkin, graft, integrate, make_snapshot, missing_paths, normalize_paths,
+    out_ref, read_slices, target_ref, valid_branch_name, valid_slice_name, CheckinDecision,
+    CheckinRequest, CheckinResponse, CheckinResult, CheckinStatus, CheckoutError,
+    CheckoutErrorBody, CheckoutInfo, CheckoutRequest, CheckoutServerInfo, Ident, IntegrateRequest,
+    IntegrateResponse, IntegrateStatus, Integrated, Signature, Slice, SliceChange,
+    SliceDeleteRequest, SliceRequest, SlicesResponse, SnapshotRoot,
 };
 use grit_lib::repo::Repository;
 use grit_protocol::RepositoryOptions;
@@ -84,6 +88,22 @@ fn target(repo: &Repository) -> Result<(String, ObjectId), Rejection> {
             format!("{branch} has no commits yet, so there is nothing to check out"),
         )),
     }
+}
+
+/// Run `f` for a request on `name` that needs `needed` access, with the
+/// signed-in user's email.
+async fn with_access<T: Send + 'static>(
+    state: &Arc<ServerState>,
+    headers: &HeaderMap,
+    name: &str,
+    needed: Access,
+    f: impl FnOnce(ServedRepository, String, RepositoryOptions) -> Result<T, Rejection> + Send + 'static,
+) -> Result<T, Rejection> {
+    let found = state.authorize(headers, name, needed)?;
+    let options = state.options.clone();
+    tokio::task::spawn_blocking(move || f(found.repo, found.email, options))
+        .await
+        .map_err(|e| error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
 }
 
 /// Run `f` for an authorized read of `name`.
@@ -166,12 +186,8 @@ fn create_blocking(
     let mut random = [0u8; 10];
     getrandom::getrandom(&mut random).map_err(|e| internal(&e))?;
     let id = hex::encode(random);
-    grit_lib::refs::write_ref(
-        repo.git_dir(),
-        &format!("refs/checkouts/{id}/target"),
-        &snapshot.commit,
-    )
-    .map_err(|e| internal(&e))?;
+    grit_lib::refs::write_ref(repo.git_dir(), &target_ref(&id), &snapshot.commit)
+        .map_err(|e| internal(&e))?;
     let work = request.work.as_deref().map(|w| free_branch(repo, w));
     let info = CheckoutInfo {
         id: id.clone(),
@@ -314,4 +330,462 @@ mod tests {
         assert!(!valid_id("../../etc/passwd...."));
         assert!(!valid_id("abc"));
     }
+}
+
+fn respond<T: serde::Serialize>(result: Result<T, Rejection>) -> Response<Body> {
+    match result {
+        Ok(value) => Json(value).into_response(),
+        Err(resp) => *resp,
+    }
+}
+
+fn internal(e: &dyn std::fmt::Display) -> Rejection {
+    error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
+}
+
+fn save(repo: &Repository, info: &CheckoutInfo) -> Result<(), Rejection> {
+    let bytes = serde_json::to_vec_pretty(info).map_err(|e| internal(&e))?;
+    let path = state_dir(repo).join(format!("{}.json", info.id));
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, bytes).map_err(|e| internal(&e))?;
+    std::fs::rename(&tmp, &path).map_err(|e| internal(&e))
+}
+
+/// The branches each checkout set last, so it may replace its own work.
+type LastSet = std::collections::BTreeMap<String, String>;
+
+fn last_set_path(repo: &Repository, id: &str) -> PathBuf {
+    state_dir(repo).join(format!("{id}.branches.json"))
+}
+
+fn read_last_set(repo: &Repository, id: &str) -> LastSet {
+    std::fs::read(last_set_path(repo, id))
+        .ok()
+        .and_then(|b| serde_json::from_slice(&b).ok())
+        .unwrap_or_default()
+}
+
+/// The commit signature for a server-made commit: the request's author, or
+/// the signed-in user.
+fn signature(author: Option<&Ident>, email: &str) -> Signature {
+    let ident = match author {
+        Some(a) => format!("{} <{}>", a.name, a.email),
+        None => format!("{email} <{email}>"),
+    };
+    Signature {
+        ident,
+        when: time::OffsetDateTime::now_utc().unix_timestamp(),
+    }
+}
+
+/// `POST /.grit/checkouts/<repo>/<id>/update`: a snapshot of the newest target
+/// on top of the checkout's last one.
+pub(crate) async fn update(
+    State(state): State<Arc<ServerState>>,
+    UrlPath((name, id)): UrlPath<(String, String)>,
+    headers: HeaderMap,
+) -> Response<Body> {
+    respond(
+        with_repo(&state, &headers, &name, move |served, options| {
+            let repo = open(&served, &options)?;
+            let mut info = load(&repo, &id)?;
+            let (_, head) = target(&repo)?;
+            if info.base == head.to_hex() {
+                return Ok(info);
+            }
+            let parent = ObjectId::from_hex(&info.root).map_err(|e| internal(&e))?;
+            let snapshot =
+                make_snapshot(&repo, head, &info.paths, Some(parent)).map_err(|e| match e {
+                    CheckoutError::MissingPath { .. } => error(
+                        StatusCode::CONFLICT,
+                        format!("{e}; the checkout's paths are gone from the target"),
+                    ),
+                    other => internal(&other),
+                })?;
+            grit_lib::refs::write_ref(repo.git_dir(), &target_ref(&id), &snapshot.commit)
+                .map_err(|e| internal(&e))?;
+            info.base = head.to_hex();
+            info.root = snapshot.commit.to_hex();
+            info.root_object = String::from_utf8_lossy(&snapshot.object).into_owned();
+            info.tree = snapshot.tree.to_hex();
+            info.files = snapshot.files;
+            info.bytes = snapshot.bytes;
+            info.roots.push(SnapshotRoot {
+                commit: info.root.clone(),
+                base: info.base.clone(),
+            });
+            save(&repo, &info)?;
+            eprintln!(
+                "checkout: {id} of {} refreshed to {} → {}",
+                served.name,
+                &info.base[..12],
+                &info.root[..12]
+            );
+            Ok(info)
+        })
+        .await,
+    )
+}
+
+/// `POST /.grit/checkouts/<repo>/<id>/checkin`: graft pushed branches onto
+/// the real history and set the server's branches.
+pub(crate) async fn checkin(
+    State(state): State<Arc<ServerState>>,
+    UrlPath((name, id)): UrlPath<(String, String)>,
+    headers: HeaderMap,
+    Json(request): Json<CheckinRequest>,
+) -> Response<Body> {
+    let result = with_access(
+        &state,
+        &headers,
+        &name,
+        Access::Write,
+        move |served, _, options| {
+            let repo = open(&served, &options)?;
+            checkin_blocking(&repo, &served, &id, &request)
+        },
+    )
+    .await;
+    if result.is_ok() {
+        state.pushed();
+    }
+    respond(result)
+}
+
+fn checkin_blocking(
+    repo: &Repository,
+    served: &ServedRepository,
+    id: &str,
+    request: &CheckinRequest,
+) -> Result<CheckinResponse, Rejection> {
+    let info = load(repo, id)?;
+    let mut last = read_last_set(repo, id);
+    let mut results = Vec::new();
+    for branch in &request.branches {
+        let refused = |message: String| CheckinResult {
+            name: branch.name.clone(),
+            status: CheckinStatus::Refused,
+            grafted: None,
+            previous: None,
+            commits: 0,
+            message: Some(message),
+        };
+        let refname = format!("refs/heads/{}", branch.name);
+        if !valid_branch_name(&branch.name) {
+            results.push(refused(format!(
+                "{} is not a valid branch name",
+                branch.name
+            )));
+            continue;
+        }
+        if branch.name == info.branch {
+            results.push(refused(format!(
+                "{} is the server's target branch and can't be changed directly; put your work on another branch, check that in, and merge it with `grit integrate <branch>`",
+                info.branch
+            )));
+            continue;
+        }
+        let pushed = grit_lib::refs::resolve_ref(repo.git_dir(), &out_ref(id, &branch.name)).ok();
+        let Some(raw) = pushed.filter(|p| p.to_hex() == branch.raw) else {
+            results.push(refused(format!(
+                "the server doesn't have {} at {}; push it to {} first",
+                branch.name,
+                &branch.raw[..branch.raw.len().min(12)],
+                out_ref(id, &branch.name)
+            )));
+            continue;
+        };
+        let grafted = match graft(repo, &info.roots, raw).map_err(|e| internal(&e))? {
+            Ok(g) => g,
+            Err(e) => {
+                results.push(refused(e.to_string()));
+                continue;
+            }
+        };
+        let previous = grit_lib::refs::resolve_ref(repo.git_dir(), &refname).ok();
+        let set_last = last
+            .get(&branch.name)
+            .and_then(|s| ObjectId::from_hex(s).ok());
+        let decision = decide_checkin(repo, previous, grafted.tip, set_last, request.force)
+            .map_err(|e| internal(&e))?;
+        let status = match decision {
+            CheckinDecision::Unchanged => CheckinStatus::Unchanged,
+            CheckinDecision::Diverged => {
+                results.push(CheckinResult {
+                    previous: previous.map(|p| p.to_hex()),
+                    ..refused(format!(
+                        "the server's {} has commits yours doesn't; run `grit pull` to rebase onto them, or check in with --force to replace it",
+                        branch.name
+                    ))
+                });
+                continue;
+            }
+            CheckinDecision::Create | CheckinDecision::Update => {
+                let written = match previous {
+                    Some(p) => {
+                        grit_lib::refs::write_ref_cas(repo.git_dir(), &refname, &grafted.tip, p)
+                    }
+                    None => grit_lib::refs::write_ref(repo.git_dir(), &refname, &grafted.tip),
+                };
+                if let Err(e) = written {
+                    results.push(refused(format!(
+                        "{} moved while it was being set: {e}",
+                        branch.name
+                    )));
+                    continue;
+                }
+                last.insert(branch.name.clone(), grafted.tip.to_hex());
+                if previous.is_some() {
+                    CheckinStatus::Updated
+                } else {
+                    CheckinStatus::Created
+                }
+            }
+        };
+        eprintln!(
+            "checkin: {id} of {}: {} {:?} at {} ({} commits)",
+            served.name,
+            branch.name,
+            status,
+            &grafted.tip.to_hex()[..12],
+            grafted.commits.len()
+        );
+        results.push(CheckinResult {
+            name: branch.name.clone(),
+            status,
+            grafted: Some(grafted.tip.to_hex()),
+            previous: previous.map(|p| p.to_hex()),
+            commits: grafted.commits.len(),
+            message: None,
+        });
+    }
+    let bytes = serde_json::to_vec_pretty(&last).map_err(|e| internal(&e))?;
+    std::fs::write(last_set_path(repo, id), bytes).map_err(|e| internal(&e))?;
+    Ok(CheckinResponse { results })
+}
+
+/// `POST /.grit/checkouts/<repo>/integrate`: merge a branch into the target.
+pub(crate) async fn integrate_branch(
+    State(state): State<Arc<ServerState>>,
+    UrlPath(name): UrlPath<String>,
+    headers: HeaderMap,
+    Json(request): Json<IntegrateRequest>,
+) -> Response<Body> {
+    let result = with_access(
+        &state,
+        &headers,
+        &name,
+        Access::Write,
+        move |served, email, options| {
+            let repo = open(&served, &options)?;
+            let (target_name, previous) = target(&repo)?;
+            let refname = format!("refs/heads/{}", request.name);
+            let branch = grit_lib::refs::resolve_ref(repo.git_dir(), &refname).map_err(|_| {
+                error(
+                    StatusCode::NOT_FOUND,
+                    format!(
+                        "the server has no branch {}; check it in first",
+                        request.name
+                    ),
+                )
+            })?;
+            let who = signature(request.author.as_ref(), &email);
+            let target_ref = format!("refs/heads/{target_name}");
+            let done = integrate(&repo, &target_ref, previous, branch, &request.name, &who)
+                .map_err(|e| internal(&e))?
+                .map_err(|e| error(StatusCode::CONFLICT, e.to_string()))?;
+            let (status, head, commits) = match done {
+                Integrated::AlreadyIntegrated => (IntegrateStatus::AlreadyIntegrated, previous, 0),
+                Integrated::Merged { head, commits } => (IntegrateStatus::Merged, head, commits),
+            };
+            eprintln!(
+                "integrate: {} into {target_name} of {}: {:?} {} → {}",
+                request.name,
+                served.name,
+                status,
+                &previous.to_hex()[..12],
+                &head.to_hex()[..12]
+            );
+            Ok(IntegrateResponse {
+                status,
+                name: request.name.clone(),
+                target: target_name,
+                previous: previous.to_hex(),
+                head: head.to_hex(),
+                commits,
+            })
+        },
+    )
+    .await;
+    if result.is_ok() {
+        state.pushed();
+    }
+    respond(result)
+}
+
+/// `GET /.grit/checkouts/<repo>/slices`.
+pub(crate) async fn list_slices(
+    State(state): State<Arc<ServerState>>,
+    UrlPath(name): UrlPath<String>,
+    headers: HeaderMap,
+) -> Response<Body> {
+    respond(
+        with_repo(&state, &headers, &name, |served, options| {
+            let repo = open(&served, &options)?;
+            let (target_name, head) = target(&repo)?;
+            let slices = read_slices(&repo, head).map_err(|e| internal(&e))?;
+            Ok(SlicesResponse {
+                target: target_name,
+                head: head.to_hex(),
+                slices,
+            })
+        })
+        .await,
+    )
+}
+
+/// `PUT /.grit/checkouts/<repo>/slices/<slice>`: make or change a slice.
+pub(crate) async fn put_slice(
+    State(state): State<Arc<ServerState>>,
+    UrlPath((name, slice)): UrlPath<(String, String)>,
+    headers: HeaderMap,
+    Json(request): Json<SliceRequest>,
+) -> Response<Body> {
+    let result = with_access(
+        &state,
+        &headers,
+        &name,
+        Access::Write,
+        move |served, email, options| {
+            let repo = open(&served, &options)?;
+            if !valid_slice_name(&slice) {
+                return Err(error(
+                    StatusCode::BAD_REQUEST,
+                    format!(
+                        "{slice} is not a valid slice name: use letters, digits, `-`, `_` and `.`"
+                    ),
+                ));
+            }
+            let paths = normalize_paths(&request.paths)
+                .map_err(|e| error(StatusCode::BAD_REQUEST, e.to_string()))?;
+            if paths.is_empty() {
+                return Err(error(
+                    StatusCode::BAD_REQUEST,
+                    "a slice needs at least one path",
+                ));
+            }
+            let (target_name, previous) = target(&repo)?;
+            let missing = missing_paths(&repo, previous, &paths).map_err(|e| internal(&e))?;
+            if !missing.is_empty() {
+                return Err(error(
+                    StatusCode::BAD_REQUEST,
+                    format!("{} not in {target_name}", missing.join(", ")),
+                ));
+            }
+            let mut slices = read_slices(&repo, previous).map_err(|e| internal(&e))?;
+            let existing = slices.iter().position(|s| s.name == slice);
+            let new = Slice {
+                name: slice.clone(),
+                description: request
+                    .description
+                    .clone()
+                    .or_else(|| existing.and_then(|i| slices[i].description.clone())),
+                paths,
+            };
+            let message = match (existing, request.create) {
+                (Some(_), true) => {
+                    return Err(error(
+                        StatusCode::CONFLICT,
+                        format!("slice {slice} already exists"),
+                    ))
+                }
+                (None, false) => {
+                    return Err(error(
+                        StatusCode::NOT_FOUND,
+                        format!("there is no slice {slice}"),
+                    ))
+                }
+                (Some(i), false) => {
+                    slices[i] = new.clone();
+                    format!("Change slice {slice}")
+                }
+                (None, true) => {
+                    slices.push(new.clone());
+                    format!("Add slice {slice}")
+                }
+            };
+            let who = signature(request.author.as_ref(), &email);
+            let head = commit_slices(
+                &repo,
+                &format!("refs/heads/{target_name}"),
+                previous,
+                &slices,
+                &who,
+                &message,
+            )
+            .map_err(|e| internal(&e))?
+            .map_err(|e| error(StatusCode::CONFLICT, e.to_string()))?;
+            Ok(SliceChange {
+                slice: Some(new),
+                target: target_name,
+                previous: previous.to_hex(),
+                head: head.to_hex(),
+            })
+        },
+    )
+    .await;
+    if result.is_ok() {
+        state.pushed();
+    }
+    respond(result)
+}
+
+/// `DELETE /.grit/checkouts/<repo>/slices/<slice>`.
+pub(crate) async fn delete_slice(
+    State(state): State<Arc<ServerState>>,
+    UrlPath((name, slice)): UrlPath<(String, String)>,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Response<Body> {
+    let request: SliceDeleteRequest = serde_json::from_slice(&body).unwrap_or_default();
+    let result = with_access(
+        &state,
+        &headers,
+        &name,
+        Access::Write,
+        move |served, email, options| {
+            let repo = open(&served, &options)?;
+            let (target_name, previous) = target(&repo)?;
+            let mut slices = read_slices(&repo, previous).map_err(|e| internal(&e))?;
+            let Some(i) = slices.iter().position(|s| s.name == slice) else {
+                return Err(error(
+                    StatusCode::NOT_FOUND,
+                    format!("there is no slice {slice}"),
+                ));
+            };
+            slices.remove(i);
+            let who = signature(request.author.as_ref(), &email);
+            let head = commit_slices(
+                &repo,
+                &format!("refs/heads/{target_name}"),
+                previous,
+                &slices,
+                &who,
+                &format!("Remove slice {slice}"),
+            )
+            .map_err(|e| internal(&e))?
+            .map_err(|e| error(StatusCode::CONFLICT, e.to_string()))?;
+            Ok(SliceChange {
+                slice: None,
+                target: target_name,
+                previous: previous.to_hex(),
+                head: head.to_hex(),
+            })
+        },
+    )
+    .await;
+    if result.is_ok() {
+        state.pushed();
+    }
+    respond(result)
 }

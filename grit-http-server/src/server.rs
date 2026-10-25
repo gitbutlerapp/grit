@@ -329,6 +329,26 @@ fn router(state: Arc<ServerState>) -> Router {
         )
         .route("/.grit/checkouts/{repo}/{id}", get(crate::checkouts::show))
         .route(
+            "/.grit/checkouts/{repo}/{id}/checkin",
+            post(crate::checkouts::checkin),
+        )
+        .route(
+            "/.grit/checkouts/{repo}/{id}/update",
+            post(crate::checkouts::update),
+        )
+        .route(
+            "/.grit/checkouts/{repo}/integrate",
+            post(crate::checkouts::integrate_branch),
+        )
+        .route(
+            "/.grit/checkouts/{repo}/slices",
+            get(crate::checkouts::list_slices),
+        )
+        .route(
+            "/.grit/checkouts/{repo}/slices/{slice}",
+            axum::routing::put(crate::checkouts::put_slice).delete(crate::checkouts::delete_slice),
+        )
+        .route(
             "/.grit/checkouts/{repo}/{id}/bundle",
             get(crate::checkouts::bundle),
         )
@@ -400,7 +420,7 @@ impl ServerState {
     }
 
     /// Check bundles again soon, after a push changed a repository.
-    fn pushed(&self) {
+    pub(crate) fn pushed(&self) {
         if let Some(scheduler) = self
             .scheduler
             .lock()
@@ -491,6 +511,7 @@ impl ServerState {
             repo,
             access,
             user_id: user.id,
+            email: user.email,
         })
     }
 }
@@ -503,6 +524,8 @@ pub(crate) struct Authorized {
     pub(crate) repo: ServedRepository,
     pub(crate) access: Access,
     pub(crate) user_id: i64,
+    /// The signed-in user's email address.
+    pub(crate) email: String,
 }
 
 /// `scheme://host` the client used to reach the server, from `Host` (or the

@@ -1038,6 +1038,7 @@ dependencies = [
  "terminal_size",
  "thiserror",
  "time",
+ "toml",
  "tracing",
  "tracing-subscriber",
  "tz-rs",

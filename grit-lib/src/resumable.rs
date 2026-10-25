@@ -986,7 +986,7 @@ mod tests {
                         }
                     }
                 }
-                HttpMethod::Get => reply(405, vec![]),
+                HttpMethod::Get | HttpMethod::Put | HttpMethod::Delete => reply(405, vec![]),
             })
         }
     }
