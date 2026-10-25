@@ -218,6 +218,7 @@ fn working_filter_round_trips_with_git_and_status_is_clean() {
         &repo,
         &StatusOptions::default(),
         &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
     )
     .expect("status");
     assert!(
