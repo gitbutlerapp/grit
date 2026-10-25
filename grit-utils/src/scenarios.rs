@@ -11,10 +11,11 @@ use crate::fixture::{
     bench_work_dir, create_blame_deep_history_repo, create_blame_large_mid_churn_repo,
     create_blame_large_tail_churn_repo, create_blame_merge_heavy_repo,
     create_deep_leaf_dogfood_repo, create_dense_leaf_dogfood_repo, create_repo,
-    create_repo_with_history, create_untracked_monorepo_repo, dirty_repo, modify_files_for_diff,
-    modify_rs_files_for_diff, modify_txt_files_for_diff, prepare_add_iteration,
-    prepare_commit_iteration, prepare_dense_leaf_add_iteration, prepare_initial_monorepo_add,
-    prepare_restore_iteration, scratch_dir, DeepLeafDogfoodSpec, DenseLeafDogfoodSpec,
+    create_repo_with_history, create_untracked_many_dirs_repo, create_untracked_monorepo_repo,
+    dirty_repo, modify_files_for_diff, modify_rs_files_for_diff, modify_txt_files_for_diff,
+    prepare_add_iteration, prepare_commit_iteration, prepare_dense_leaf_add_iteration,
+    prepare_initial_monorepo_add, prepare_restore_iteration, scratch_dir, DeepLeafDogfoodSpec,
+    DenseLeafDogfoodSpec, ManyDirsLayout,
 };
 use crate::hot_path_fixture::{
     load_meta, prepare_merge, prepare_pick, prepare_pick_series, prepare_revert, prepare_switch,
@@ -1014,6 +1015,59 @@ pub fn run_initial_monorepo_add_suite(
         &repo,
     )?;
     Ok(build_report(git, grit, timestamp, vec![scenario]))
+}
+
+/// Initial `add .` on untracked files spread over many directories (#1854): `dirs` one-file
+/// directories, then `nested_files` files in the `d<i % 200>/s<i % 37>` layout.
+pub fn run_add_many_dirs_suite(
+    hyperfine: &Path,
+    git: &Path,
+    grit: &Path,
+    cfg: &RunConfig,
+    dirs: usize,
+    nested_files: usize,
+    timestamp: time::OffsetDateTime,
+) -> Result<BenchReport> {
+    let mut scenarios = Vec::new();
+    for (layout, count) in [
+        (ManyDirsLayout::Flat, dirs),
+        (ManyDirsLayout::Nested, nested_files),
+    ] {
+        let (id, description) = match layout {
+            ManyDirsLayout::Flat => (
+                format!("add-dot-many-dirs-{count}"),
+                format!("initial `add .` on {count} untracked one-file directories (#1854)"),
+            ),
+            ManyDirsLayout::Nested => (
+                format!("add-dot-nested-dirs-{count}"),
+                format!(
+                    "initial `add .` on {count} untracked files in d<i%200>/s<i%37> directories (#1854)"
+                ),
+            ),
+        };
+        let repo = create_untracked_many_dirs_repo(git, count, layout)?;
+        prepare_initial_monorepo_add(&repo)?;
+        scenarios.push(run_scenario(
+            hyperfine,
+            git,
+            grit,
+            cfg,
+            &Scenario {
+                fixture: id.trim_start_matches("add-dot-").to_owned(),
+                id,
+                group: "add".into(),
+                description,
+                grit_argv: vec!["add".into(), ".".into()],
+                git_argv: vec!["add".into(), "-A".into()],
+                driver: Driver::Cli,
+                prepare_kind: Some(PrepareKind::InitialMonorepoAdd),
+                grit_via_shell: false,
+                git_via_shell: false,
+            },
+            &repo,
+        )?);
+    }
+    Ok(build_report(git, grit, timestamp, scenarios))
 }
 
 /// `grit commit` (stage all + commit) vs `git add -A && git commit` at each file count.

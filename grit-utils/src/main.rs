@@ -43,16 +43,17 @@ use grit_utils::revision_selection_suite::run_revision_selection_suite;
 use grit_utils::revwalk_suite::run_revwalk_suite;
 use grit_utils::scenario_suite::{self, ScenarioSuiteOptions};
 use grit_utils::scenarios::{
-    run_add_suite, run_blame_suite, run_commit_suite, run_deep_leaf_worktree_suite,
-    run_dense_leaf_worktree_suite, run_diff_suite, run_hot_path_suite,
-    run_initial_monorepo_add_suite, run_log_suite, run_merge_check_suite, run_merge_only_suite,
-    run_prepare_add, run_prepare_commit, run_prepare_conflicts_merge_conflict_continue,
-    run_prepare_conflicts_merge_no_ff, run_prepare_conflicts_pick_range,
-    run_prepare_conflicts_revert_mainline, run_prepare_conflicts_revert_single,
-    run_prepare_dense_leaf_add, run_prepare_initial_monorepo_add, run_prepare_merge,
-    run_prepare_pick, run_prepare_pick_series, run_prepare_restore, run_prepare_revert,
-    run_prepare_stash, run_prepare_switch, run_prepare_switch_detach_tag, run_prepare_switch_wide,
-    run_restore_suite, run_stash_suite, run_status_suite, RunConfig,
+    run_add_many_dirs_suite, run_add_suite, run_blame_suite, run_commit_suite,
+    run_deep_leaf_worktree_suite, run_dense_leaf_worktree_suite, run_diff_suite,
+    run_hot_path_suite, run_initial_monorepo_add_suite, run_log_suite, run_merge_check_suite,
+    run_merge_only_suite, run_prepare_add, run_prepare_commit,
+    run_prepare_conflicts_merge_conflict_continue, run_prepare_conflicts_merge_no_ff,
+    run_prepare_conflicts_pick_range, run_prepare_conflicts_revert_mainline,
+    run_prepare_conflicts_revert_single, run_prepare_dense_leaf_add,
+    run_prepare_initial_monorepo_add, run_prepare_merge, run_prepare_pick, run_prepare_pick_series,
+    run_prepare_restore, run_prepare_revert, run_prepare_stash, run_prepare_switch,
+    run_prepare_switch_detach_tag, run_prepare_switch_wide, run_restore_suite, run_stash_suite,
+    run_status_suite, RunConfig,
 };
 use grit_utils::schema::BenchReport;
 use grit_utils::synth::{generate_synth_repo, SynthReport, SynthTier};
@@ -124,6 +125,13 @@ enum Cmd {
     AddInitial {
         #[arg(long, default_value_t = 20_000)]
         files: usize,
+    },
+    /// Initial `add .` on untracked files spread over many directories (#1854 layouts)
+    AddManyDirs {
+        #[arg(long, default_value_t = 4_000)]
+        dirs: usize,
+        #[arg(long, default_value_t = 49_000)]
+        nested_files: usize,
     },
     /// Benchmark `grit commit` (stage all + commit) at selected repo sizes
     Commit {
@@ -1774,6 +1782,19 @@ fn main() -> Result<()> {
             eprintln!("Running initial monorepo add benchmark ({files} files)...");
             let cfg = run_config(&cli, false);
             run_initial_monorepo_add_suite(&hyperfine, &git, &grit, &cfg, *files, timestamp)?
+        }
+        Cmd::AddManyDirs { dirs, nested_files } => {
+            eprintln!("Running many-directory add benchmark ({dirs} dirs, {nested_files} nested files)...");
+            let cfg = run_config(&cli, false);
+            run_add_many_dirs_suite(
+                &hyperfine,
+                &git,
+                &grit,
+                &cfg,
+                *dirs,
+                *nested_files,
+                timestamp,
+            )?
         }
         Cmd::Commit { sizes } => {
             eprintln!("Running commit benchmarks...");

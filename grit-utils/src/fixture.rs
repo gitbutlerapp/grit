@@ -332,6 +332,39 @@ pub fn create_untracked_monorepo_repo(init_with: &Path, file_count: usize) -> Re
     Ok(dir)
 }
 
+/// Layout of [`create_untracked_many_dirs_repo`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ManyDirsLayout {
+    /// `d<i>/f.txt`: one file in each of `count` top-level directories.
+    Flat,
+    /// `d<i % 200>/s<i % 37>/f<i>.txt`: `count` files spread over up to 7,400 directories.
+    Nested,
+}
+
+/// Initialized repo whose untracked files live in many small directories (#1854).
+pub fn create_untracked_many_dirs_repo(
+    init_with: &Path,
+    count: usize,
+    layout: ManyDirsLayout,
+) -> Result<PathBuf> {
+    let dir = scratch_dir();
+    remove_dir_robust(&dir);
+    fs::create_dir_all(&dir).context("create scratch dir")?;
+    for i in 0..count {
+        let (leaf, name) = match layout {
+            ManyDirsLayout::Flat => (dir.join(format!("d{i}")), "f.txt".to_owned()),
+            ManyDirsLayout::Nested => (
+                dir.join(format!("d{}/s{}", i % 200, i % 37)),
+                format!("f{i}.txt"),
+            ),
+        };
+        fs::create_dir_all(&leaf).context("create many-dirs leaf")?;
+        fs::write(leaf.join(name), "x\n").context("write many-dirs file")?;
+    }
+    run_git(init_with, &dir, &["init"])?;
+    Ok(dir)
+}
+
 /// Reset index and loose objects so the next add re-hashes every file (#1674 regression guard).
 pub fn prepare_initial_monorepo_add(dir: &Path) -> Result<()> {
     let git_dir = dir.join(".git");
