@@ -25,13 +25,14 @@ pub mod builder;
 mod commit;
 mod peel;
 pub mod store;
+mod stream;
 
 #[doc(inline)]
 pub use builder::OdbBuilder;
 
 pub(crate) use store::loose::{
-    build_store_bytes, decompress_zlib_loose_bytes, for_each_loose_object_id, parse_object_bytes,
-    read_loose_object_info, zlib_compress_store_bytes,
+    decompress_zlib_loose_bytes, for_each_loose_object_id, parse_object_bytes,
+    read_loose_object_info,
 };
 #[doc(inline)]
 pub use store::LooseStore;
@@ -229,6 +230,8 @@ pub struct Odb {
     loose_zlib_cache: Arc<OnceLock<Compression>>,
     /// Zlib level for pack-objects output, resolved from config and cached.
     pack_zlib_cache: Arc<OnceLock<Compression>>,
+    /// `core.bigFileThreshold`, resolved from config and cached.
+    big_file_threshold_cache: Arc<OnceLock<u64>>,
     /// Shared with [`crate::repo::Repository`] so config is loaded once per open handle.
     shared_config_state: Option<crate::repo::RepositoryConfigSnapshot>,
     /// One-time sync of `core.deltaBaseCacheLimit` into the process-wide pack delta-base LRU.
@@ -403,6 +406,7 @@ impl Odb {
             hash_algo_cache: Arc::new(OnceLock::new()),
             loose_zlib_cache: Arc::new(OnceLock::new()),
             pack_zlib_cache: Arc::new(OnceLock::new()),
+            big_file_threshold_cache: Arc::new(OnceLock::new()),
             shared_config_state: None,
             delta_base_cache_sync: Arc::new(OnceLock::new()),
             shared_environment: None,
@@ -455,6 +459,7 @@ impl Odb {
             hash_algo_cache: Arc::new(OnceLock::new()),
             loose_zlib_cache: Arc::new(OnceLock::new()),
             pack_zlib_cache: Arc::new(OnceLock::new()),
+            big_file_threshold_cache: Arc::new(OnceLock::new()),
             shared_config_state: None,
             delta_base_cache_sync: Arc::new(OnceLock::new()),
             shared_environment: None,
@@ -1049,6 +1054,29 @@ impl Odb {
         let compression = crate::pack_zlib::flate2_compression_for_pack_level(level);
         let _ = self.pack_zlib_cache.set(compression);
         Ok(compression)
+    }
+
+    /// `core.bigFileThreshold` ([`ConfigSet::big_file_threshold`]), cached for the lifetime of
+    /// this `Odb`.
+    ///
+    /// Objects of at least this size are written by [`Self::write_stream`] into their own
+    /// pack, and worktree files of at least this size that need no clean conversion are hashed
+    /// and stored as a stream instead of being read into memory.
+    ///
+    /// # Errors
+    ///
+    /// Returns errors from loading the config cascade or from an invalid threshold value.
+    pub fn big_file_threshold(&self) -> Result<u64> {
+        if let Some(cached) = self.big_file_threshold_cache.get() {
+            return Ok(*cached);
+        }
+        let threshold = if self.config_git_dir.is_none() && self.objects_dir.parent().is_none() {
+            ConfigSet::BIG_FILE_THRESHOLD_DEFAULT
+        } else {
+            self.load_config_cascade()?.big_file_threshold()?
+        };
+        let _ = self.big_file_threshold_cache.set(threshold);
+        Ok(threshold)
     }
 
     fn sync_delta_base_cache_limit(&self) {
@@ -2449,6 +2477,95 @@ impl Odb {
         hash_object_data_with(self.hash_algo(), kind, data)
     }
 
+    /// Hash `size` payload bytes of `kind` read from `reader`, without storing anything.
+    ///
+    /// Memory use does not depend on `size`: the payload is read in fixed-size chunks. Exactly
+    /// `size` bytes are consumed; anything after them is left unread.
+    ///
+    /// # Errors
+    ///
+    /// - [`Error::ObjectStreamTruncated`] — `reader` ended before `size` bytes.
+    /// - [`Error::Io`] — reading failed.
+    /// - [`Error::HashCollision`] — sha1dc detected a chosen-prefix collision.
+    pub fn hash_stream(
+        &self,
+        kind: ObjectKind,
+        size: u64,
+        reader: &mut dyn std::io::Read,
+    ) -> Result<ObjectId> {
+        stream::hash_stream(self.hash_algo(), kind, size, reader)
+    }
+
+    /// Store `size` payload bytes of `kind` read from `reader` and return the object id.
+    ///
+    /// Objects smaller than [`Self::big_file_threshold`] are read into memory and written like
+    /// [`Self::write_with_options`]. Bigger ones are hashed and deflated in fixed-size chunks
+    /// straight into a new single-object pack (at the [`ConfigSet::pack_objects_zlib_level`]
+    /// level), as Git does for big files, so memory use does not depend on `size`. If the
+    /// object already exists the new pack is discarded and the existing copy is freshened
+    /// unless `options.silent` is set.
+    ///
+    /// A custom primary receives the stream through [`WritableObjectStore::write_stream`];
+    /// while the in-memory overlay is active the object is buffered into the overlay.
+    ///
+    /// Exactly `size` bytes are consumed from `reader`.
+    ///
+    /// # Errors
+    ///
+    /// - [`Error::ObjectStreamTruncated`] — `reader` ended before `size` bytes.
+    /// - [`Error::Io`] / [`Error::Zlib`] — reading, compressing, or writing failed.
+    /// - [`Error::HashCollision`] — sha1dc detected a chosen-prefix collision.
+    /// - Config errors from resolving the threshold or compression level.
+    pub fn write_stream(
+        &self,
+        kind: ObjectKind,
+        size: u64,
+        reader: &mut dyn std::io::Read,
+        options: WriteOptions,
+    ) -> Result<ObjectId> {
+        if let Some(primary) = &self.custom_primary {
+            if !self.overlay_active() {
+                let oid = primary.write_stream(kind, size, reader, options)?;
+                self.note_commit_object_written(kind);
+                return Ok(oid);
+            }
+        }
+        if self.overlay_active() || size < self.big_file_threshold()? {
+            let len = usize::try_from(size).map_err(|_| {
+                Error::CorruptObject(format!("object size {size} exceeds address space"))
+            })?;
+            let mut data = Vec::with_capacity(len);
+            let read =
+                std::io::Read::read_to_end(&mut std::io::Read::take(reader, size), &mut data)?;
+            if read != len {
+                return Err(Error::ObjectStreamTruncated {
+                    expected: size,
+                    actual: read as u64,
+                });
+            }
+            return self.write_with_options(kind, &data, options);
+        }
+        let staged = stream::StagedPack::write(
+            &self.objects_dir.join("pack"),
+            self.hash_algo(),
+            kind,
+            size,
+            reader,
+            self.pack_compression()?,
+        )?;
+        let oid = staged.oid();
+        if self.object_exists_for_write_skip(&oid) {
+            if !options.silent {
+                let _ = self.freshen_object(&oid);
+            }
+            return Ok(oid);
+        }
+        staged.install()?;
+        self.invalidate_packs();
+        self.note_commit_object_written(kind);
+        Ok(oid)
+    }
+
     /// Object id of the empty tree for this store's hash algorithm.
     ///
     /// Hashes the canonical empty tree payload only; nothing is written to disk.
@@ -2602,6 +2719,43 @@ impl Odb {
         }
 
         primary.write_zlib_prehashed(oid, zlib_store, options)
+    }
+
+    /// Write blob `data` whose id `oid` the caller already computed.
+    ///
+    /// On a files primary the content is deflated straight into the loose object file, so
+    /// no compressed copy is held in memory; a custom primary gets
+    /// [`Self::write_with_options`].
+    pub(crate) fn write_blob_prehashed(
+        &self,
+        oid: &ObjectId,
+        data: &[u8],
+        options: WriteOptions,
+    ) -> Result<ObjectId> {
+        if self.custom_primary.is_some() {
+            return self.write_with_options(ObjectKind::Blob, data, options);
+        }
+        let primary = self.primary()?;
+        if let Some(existing) = primary.try_finish_duplicate_write(oid, options)? {
+            return Ok(existing);
+        }
+        let already_exists = !(options.trust_new_loose || options.assume_loose_only_existence)
+            && self.object_exists_for_write_skip(oid);
+        if self.overlay_active()
+            && !already_exists
+            && self.overlay_store_object(*oid, ObjectKind::Blob, data)
+        {
+            return Ok(*oid);
+        }
+        if already_exists {
+            if !options.silent {
+                let _ = self.freshen_object(oid);
+            }
+            return Ok(*oid);
+        }
+        primary
+            .loose_store()
+            .write_prehashed(oid, ObjectKind::Blob, data, options)
     }
 
     /// Like [`Self::write`], with control over freshen behaviour on existing objects.
@@ -2806,16 +2960,18 @@ pub(crate) fn empty_tree_oid_matches(algo: HashAlgo, oid: &ObjectId) -> bool {
     oid.is_empty_tree_for(algo)
 }
 
-/// Build canonical blob store bytes (`"blob <len>\\0<payload>"`).
-pub(crate) fn blob_store_bytes(data: &[u8]) -> Vec<u8> {
-    build_store_bytes(ObjectKind::Blob, data)
-}
-
-pub(crate) fn zlib_compress_loose_store_from_bytes(
-    store_bytes: &[u8],
+/// Zlib-compress blob `data` in loose-object form (`"blob <len>\\0<payload>"`) without first
+/// copying it behind the header.
+pub(crate) fn zlib_compress_blob_loose(
+    data: &[u8],
     compression: flate2::Compression,
 ) -> Result<Vec<u8>> {
-    zlib_compress_store_bytes(store_bytes, compression)
+    use std::io::Write as _;
+    let mut encoder = flate2::write::ZlibEncoder::new(Vec::new(), compression);
+    let zlib_err = |e: std::io::Error| Error::Zlib(e.to_string());
+    write!(encoder, "{} {}\0", ObjectKind::Blob, data.len()).map_err(zlib_err)?;
+    encoder.write_all(data).map_err(zlib_err)?;
+    encoder.finish().map_err(zlib_err)
 }
 
 fn append_lookup_prefix_layer(
@@ -3198,10 +3354,10 @@ mod tests {
         let dir2 = TempDir::new().unwrap();
         let objects2 = dir2.path().join("objects");
         let odb2 = Odb::new(&objects2);
-        let store = super::blob_store_bytes(data);
         let oid = hash::hash_object(odb2.hash_algo(), ObjectKind::Blob, data).expect("hash");
         assert_eq!(oid, oid_normal);
-        let zlib = odb2.zlib_compress_loose_store(&store).unwrap();
+        let zlib =
+            super::zlib_compress_blob_loose(data, odb2.loose_compression().unwrap()).unwrap();
         let oid2 = odb2
             .write_loose_zlib_prehashed(
                 &oid,
@@ -3234,11 +3390,7 @@ mod tests {
             .build();
         let data = b"staged through a custom primary";
         let oid = hash::hash_object(HashAlgo::Sha1, ObjectKind::Blob, data).unwrap();
-        let zlib = zlib_compress_loose_store_from_bytes(
-            &super::blob_store_bytes(data),
-            Compression::fast(),
-        )
-        .unwrap();
+        let zlib = super::zlib_compress_blob_loose(data, Compression::fast()).unwrap();
 
         odb.ensure_all_loose_prefix_dirs().unwrap();
         let written = odb

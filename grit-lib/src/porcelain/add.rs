@@ -1075,6 +1075,9 @@ fn stage_untracked_paths_parallel(
             parallelism,
             Some(rules.filter_process()),
         )?
+        .into_iter()
+        .map(|prepared| prepared.blob)
+        .collect()
     } else {
         prepare_and_store_worktree_blobs_parallel(
             repo.odb(),

@@ -9,6 +9,22 @@ Git stores four object kinds grit-lib exposes as [`ObjectKind`](rustdoc:grit_lib
 
 [`Objects::write`](rustdoc:grit_lib::objects::handle::Objects::write) takes a kind and payload bytes, stores a loose object under `objects/`, and returns the id. Tree, commit and tag payloads are checked first with the same rules as `git hash-object -t <kind>`: an unsorted tree, a duplicate entry, or an identity line without a timestamp fails with `InvalidObject` on [`Error`](rustdoc:grit_lib::error::Error), which carries Git's fsck message id (`treeNotSorted`, `missingSpaceBeforeDate`, …), and nothing is written. [`Objects::write_literally`](rustdoc:grit_lib::objects::handle::Objects::write_literally) skips the checks, like `git hash-object --literally`; it exists to reproduce corrupt objects in tests. [`Odb::write`](rustdoc:grit_lib::objects::odb::Odb::write) is the unchecked internal path the engine uses for objects it has built itself. Use [`parse_tree`](rustdoc:grit_lib::objects::parse_tree) and [`parse_commit`](rustdoc:grit_lib::objects::parse_commit) when reading objects back.
 
+## Big objects
+
+[`Odb::write_stream`](rustdoc:grit_lib::objects::odb::Odb::write_stream) stores an object from any [`Read`](https://doc.rust-lang.org/std/io/trait.Read.html) of known size without holding it in memory. Objects of at least [`Odb::big_file_threshold`](rustdoc:grit_lib::objects::odb::Odb::big_file_threshold) bytes (`core.bigFileThreshold`, 512 MiB unless configured) are hashed and deflated in fixed-size chunks straight into a new single-object pack at the pack compression level (`pack.compression` / `core.compression`), which is what Git does with big files; smaller objects are written loose as usual. If the object already exists, the new pack is discarded. [`Odb::hash_stream`](rustdoc:grit_lib::objects::odb::Odb::hash_stream) computes the id the same way without storing anything. A reader that ends early fails with [`Error::ObjectStreamTruncated`](rustdoc:grit_lib::error::Error::ObjectStreamTruncated).
+
+Staging uses the same path: `add`, `commit` auto-staging and `status` stream every worktree file at or above the threshold whose content needs no clean conversion (no clean filter, `working-tree-encoding` or line-ending conversion), so their memory use does not grow with the file size. Files that need a conversion are read whole, as in Git.
+
+```rust
+use std::fs::File;
+use grit_lib::objects::ObjectKind;
+use grit_lib::objects::odb::WriteOptions;
+
+let mut file = File::open("dataset.bin")?;
+let size = file.metadata()?.len();
+let oid = repo.odb().write_stream(ObjectKind::Blob, size, &mut file, WriteOptions::default())?;
+```
+
 ## Building trees and commits
 
 A program that creates history without an index or work tree (a bare-repository tool, a changelog bot) should not assemble object bytes by hand. [`Objects::write_tree`](rustdoc:grit_lib::objects::handle::Objects::write_tree) takes [`TreeEntry`](rustdoc:grit_lib::objects::TreeEntry) values in any order, sorts them into Git's tree order, and refuses entries `git fsck` would reject with a typed [`TreeEntryError`](rustdoc:grit_lib::objects::TreeEntryError): an empty, `.`, `..` or `.git` name, a `/` or NUL in a name, a mode other than `100644`, `100755`, `120000`, `40000` or `160000`, the null id, an id of the other hash algorithm, a name over 4096 bytes, or a name used twice (a file and a directory with the same name count). Entry objects need not exist yet, as with `git mktree --missing`.

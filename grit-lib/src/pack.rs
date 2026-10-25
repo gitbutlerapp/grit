@@ -1769,7 +1769,9 @@ fn merge_sorted_index_entry_chunks(entries: &mut [(ObjectId, u64, u32)], chunk: 
     entries.copy_from_slice(&merged);
 }
 
-fn write_v2_pack_index_body(
+/// Write a version-2 `.idx` at `idx_path` for `(oid, offset, crc32)` rows of a pack whose
+/// trailing checksum is `pack_trailer`.
+pub(crate) fn write_v2_pack_index_body(
     idx_path: &Path,
     entries: &[(ObjectId, u64, u32)],
     pack_trailer: &[u8],

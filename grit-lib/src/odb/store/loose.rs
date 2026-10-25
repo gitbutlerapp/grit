@@ -145,6 +145,40 @@ impl LooseStore {
         Ok(*oid)
     }
 
+    /// Write `data` as object `oid` of `kind` (hash already computed by the caller),
+    /// deflating straight into the temporary loose file so no compressed copy is held in
+    /// memory.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`WritableObjectStore::write`].
+    pub(crate) fn write_prehashed(
+        &self,
+        oid: &ObjectId,
+        kind: ObjectKind,
+        data: &[u8],
+        options: WriteOptions,
+    ) -> Result<ObjectId> {
+        if oid.algo() != self.hash_algo {
+            return Err(Error::InvalidObjectId(oid.to_hex()));
+        }
+        if let Some(existing) = self.try_finish_if_loose_present(oid, options)? {
+            return Ok(existing);
+        }
+        let path = self.object_path(oid);
+        let prefix_dir = path
+            .parent()
+            .ok_or_else(|| Error::PathError("object path has no parent".to_owned()))?;
+        publish_loose_object(
+            &path,
+            prefix_dir,
+            oid,
+            options.loose_prefix_dirs_ready,
+            |tmp| write_deflated_object(tmp, kind, data, self.compression),
+        )?;
+        Ok(*oid)
+    }
+
     /// Read a loose object at `path`, verifying the payload hashes to `expected_oid`.
     ///
     /// # Errors
@@ -257,7 +291,7 @@ impl ObjectStore for LooseStore {
 
 impl WritableObjectStore for LooseStore {
     fn write(&self, kind: ObjectKind, data: &[u8], options: WriteOptions) -> Result<ObjectId> {
-        let (store_bytes, oid) = build_store_bytes_and_hash(self.hash_algo, kind, data)?;
+        let oid = hash::hash_object(self.hash_algo, kind, data)?;
         if let Some(existing) = self.try_finish_if_loose_present(&oid, options)? {
             return Ok(existing);
         }
@@ -267,14 +301,10 @@ impl WritableObjectStore for LooseStore {
             .ok_or_else(|| Error::PathError("object path has no parent".to_owned()))?;
         fs::create_dir_all(prefix_dir).map_err(Error::Io)?;
         let tmp_path = oid.loose_tmp_path_in_prefix(prefix_dir);
-        {
-            let tmp_file = fs::File::create(&tmp_path).map_err(Error::Io)?;
-            let mut encoder = ZlibEncoder::new(tmp_file, self.compression);
-            encoder
-                .write_all(&store_bytes)
-                .map_err(|e| Error::Zlib(e.to_string()))?;
-            encoder.finish().map_err(|e| Error::Zlib(e.to_string()))?;
-        }
+        write_deflated_object(&tmp_path, kind, data, self.compression).map_err(|e| {
+            let _ = fs::remove_file(&tmp_path);
+            Error::Io(e)
+        })?;
         fs::rename(&tmp_path, &path).map_err(|e| {
             let _ = fs::remove_file(&tmp_path);
             Error::Io(e)
@@ -442,26 +472,6 @@ pub(crate) fn parse_object_bytes_with_oid(raw: &[u8], oid: &ObjectId) -> Result<
     parse_object_bytes_inner(raw, Some(oid))
 }
 
-/// Build the canonical store byte sequence: `"<kind> <len>\0<data>"`.
-pub(crate) fn build_store_bytes(kind: ObjectKind, data: &[u8]) -> Vec<u8> {
-    let header = format!("{} {}\0", kind, data.len());
-    let mut out = Vec::with_capacity(header.len() + data.len());
-    out.extend_from_slice(header.as_bytes());
-    out.extend_from_slice(data);
-    out
-}
-
-/// Build canonical store bytes and the object id for a loose write.
-pub(crate) fn build_store_bytes_and_hash(
-    algo: HashAlgo,
-    kind: ObjectKind,
-    data: &[u8],
-) -> Result<(Vec<u8>, ObjectId)> {
-    let store_bytes = build_store_bytes(kind, data);
-    let oid = hash::hash_object(algo, kind, data)?;
-    Ok((store_bytes, oid))
-}
-
 pub(crate) fn zlib_compress_store_bytes(
     store_bytes: &[u8],
     compression: Compression,
@@ -569,6 +579,33 @@ fn publish_zlib_loose_object(
     zlib_store: &[u8],
     prefix_dir_ready: bool,
 ) -> Result<()> {
+    publish_loose_object(path, prefix_dir, oid, prefix_dir_ready, |tmp| {
+        fs::write(tmp, zlib_store)
+    })
+}
+
+/// Deflate `"<kind> <len>\0"` and `data` into a new file at `path`.
+fn write_deflated_object(
+    path: &Path,
+    kind: ObjectKind,
+    data: &[u8],
+    compression: Compression,
+) -> io::Result<()> {
+    let mut encoder = ZlibEncoder::new(fs::File::create(path)?, compression);
+    write!(encoder, "{} {}\0", kind, data.len())?;
+    encoder.write_all(data)?;
+    encoder.finish().map(drop)
+}
+
+/// Publish a loose object by writing it to a unique temporary file with `write_tmp` and
+/// renaming that into place, retrying when a concurrent prune removes the prefix directory.
+fn publish_loose_object(
+    path: &Path,
+    prefix_dir: &Path,
+    oid: &ObjectId,
+    prefix_dir_ready: bool,
+    write_tmp: impl Fn(&Path) -> io::Result<()>,
+) -> Result<()> {
     if path.is_file() {
         set_loose_object_mode(path);
         return Ok(());
@@ -579,7 +616,7 @@ fn publish_zlib_loose_object(
             fs::create_dir_all(prefix_dir).map_err(Error::Io)?;
         }
         let tmp_path = publish_loose_tmp_path(prefix_dir, oid, attempt);
-        match fs::write(&tmp_path, zlib_store) {
+        match write_tmp(&tmp_path) {
             Ok(()) => match fs::rename(&tmp_path, path) {
                 Ok(()) => {
                     set_loose_object_mode(path);

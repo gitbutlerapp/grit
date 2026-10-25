@@ -1371,7 +1371,19 @@ pub fn convert_to_git_with_opts(
     file_attrs: &FileAttrs,
     opts: ConvertToGitOpts<'_>,
 ) -> Result<Vec<u8>, FilterError> {
-    let mut buf = data.to_vec();
+    convert_to_git_owned(data.to_vec(), rel_path, conv, file_attrs, opts)
+}
+
+/// [`convert_to_git_with_opts`] taking ownership of `data`, so content that needs no
+/// conversion is returned without a copy.
+pub(crate) fn convert_to_git_owned(
+    data: Vec<u8>,
+    rel_path: &str,
+    conv: &ConversionConfig,
+    file_attrs: &FileAttrs,
+    opts: ConvertToGitOpts<'_>,
+) -> Result<Vec<u8>, FilterError> {
+    let mut buf = data;
     let owned_filter_state;
     let filter_state = if let Some(s) = opts.filter_process {
         s
@@ -1482,61 +1494,72 @@ pub fn convert_to_git_with_opts(
 /// Returns true if the file *would* be subject to conversion (even if no
 /// actual bytes need changing).
 fn would_convert_on_input(conv: &ConversionConfig, attrs: &FileAttrs, data: &[u8]) -> bool {
+    match input_eol_rule(conv, attrs) {
+        InputEolRule::Never => false,
+        InputEolRule::Always => true,
+        InputEolRule::UnlessBinary => !is_binary(data),
+    }
+}
+
+/// Whether CRLF/LF conversion applies on input, before looking at the content.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum InputEolRule {
+    Never,
+    Always,
+    UnlessBinary,
+}
+
+fn input_eol_rule(conv: &ConversionConfig, attrs: &FileAttrs) -> InputEolRule {
     match attrs.crlf_legacy {
-        CrlfLegacyAttr::Unset => return false,
-        CrlfLegacyAttr::Input => {
-            if is_binary(data) {
-                return false;
-            }
-            return true;
-        }
+        CrlfLegacyAttr::Unset => return InputEolRule::Never,
+        CrlfLegacyAttr::Input => return InputEolRule::UnlessBinary,
         CrlfLegacyAttr::Crlf => {
             if attrs.text == TextAttr::Unset {
-                return false;
+                return InputEolRule::Never;
             }
-            if is_binary(data) {
-                return false;
-            }
-            return true;
+            return InputEolRule::UnlessBinary;
         }
         CrlfLegacyAttr::Unspecified => {}
     }
 
     // If text is explicitly unset (-text or binary), never convert
     if attrs.text == TextAttr::Unset {
-        return false;
+        return InputEolRule::Never;
     }
 
     // If eol attr is set, this implies text mode
     if attrs.eol != EolAttr::Unspecified {
-        if attrs.text == TextAttr::Auto && is_binary(data) {
-            return false;
+        if attrs.text == TextAttr::Auto {
+            return InputEolRule::UnlessBinary;
         }
-        return true;
+        return InputEolRule::Always;
     }
 
-    // If text is explicitly set, always convert
-    if attrs.text == TextAttr::Set {
-        return true;
-    }
-
-    if attrs.text == TextAttr::Auto {
-        if is_binary(data) {
-            return false;
-        }
-        return true;
+    match attrs.text {
+        TextAttr::Set => return InputEolRule::Always,
+        TextAttr::Auto => return InputEolRule::UnlessBinary,
+        _ => {}
     }
 
     // No text attribute: fall back to core.autocrlf
     match conv.autocrlf {
-        AutoCrlf::True | AutoCrlf::Input => {
-            if is_binary(data) {
-                return false;
-            }
-            true
-        }
-        AutoCrlf::False => false,
+        AutoCrlf::True | AutoCrlf::Input => InputEolRule::UnlessBinary,
+        AutoCrlf::False => InputEolRule::Never,
     }
+}
+
+/// Whether the clean direction ([`convert_to_git_with_opts`]) returns any content unchanged
+/// for this path: no clean filter or filter process, no `working-tree-encoding`, and no
+/// line-ending conversion whatever the content is.
+///
+/// Such files can be hashed and stored straight from disk as a stream.
+#[must_use]
+pub(crate) fn clean_is_identity(conv: &ConversionConfig, attrs: &FileAttrs) -> bool {
+    attrs.filter_process.is_none()
+        && attrs.filter_clean.is_none()
+        && !attrs.filter_clean_required
+        && attrs.working_tree_encoding.is_none()
+        && input_eol_rule(conv, attrs) == InputEolRule::Never
 }
 
 /// Git-compatible stderr when `core.safecrlf` is `warn` (clean direction, CRLF→LF).

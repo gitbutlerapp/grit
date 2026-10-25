@@ -862,13 +862,13 @@ fn restage_deferred_jobs(
         };
         debug_assert_eq!(
             std::str::from_utf8(raw_path).ok(),
-            Some(prep.index_relpath.as_str())
+            Some(prep.blob.index_relpath.as_str())
         );
-        let mode_for_index = mode_policy.index_mode_for_worktree(prep.mode, Some(idx_e.mode));
+        let mode_for_index = mode_policy.index_mode_for_worktree(prep.blob.mode, Some(idx_e.mode));
         let abs_path =
             abs_path_for_stage_tracked(work_tree, raw_path, precompose_unicode, ignorecase);
-        if prep.oid == idx_e.oid && mode_for_index == idx_e.mode {
-            let entry = entry_from_stat(&abs_path, raw_path, prep.oid, mode_for_index)?;
+        if prep.blob.oid == idx_e.oid && mode_for_index == idx_e.mode {
+            let entry = entry_from_stat(&abs_path, raw_path, prep.blob.oid, mode_for_index)?;
             if stat_fields_differ(&entry, idx_e) {
                 replacements.push(entry);
                 modified.push(raw_path.to_vec());
@@ -876,22 +876,28 @@ fn restage_deferred_jobs(
             continue;
         }
         needs_loose_write = true;
-        let entry = entry_from_stat(&abs_path, raw_path, prep.oid, mode_for_index)?;
+        let entry = entry_from_stat(&abs_path, raw_path, prep.blob.oid, mode_for_index)?;
         modified.push(raw_path.to_vec());
         replacements.push(entry);
     }
     if needs_loose_write {
         repo.odb().ensure_all_loose_prefix_dirs()?;
         for prep in &prepared {
-            let raw_path = prep.index_relpath.as_bytes();
+            let raw_path = prep.blob.index_relpath.as_bytes();
             let Some(idx_e) = index.get(raw_path, 0) else {
                 continue;
             };
-            if prep.oid == idx_e.oid && mode_policy.worktree_mode_matches(prep.mode, idx_e.mode) {
+            if prep.blob.oid == idx_e.oid
+                && mode_policy.worktree_mode_matches(prep.blob.mode, idx_e.mode)
+            {
                 continue;
             }
-            prep.payload
-                .store(repo.odb(), &prep.oid, BULK_TRACKED_RESTAGE_LOOSE_WRITE)?;
+            prep.payload.store(
+                repo.odb(),
+                &prep.blob.index_relpath,
+                &prep.blob.oid,
+                BULK_TRACKED_RESTAGE_LOOSE_WRITE,
+            )?;
         }
     }
     if !replacements.is_empty() {

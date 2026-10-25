@@ -749,6 +749,22 @@ pub enum Error {
         source: std::io::Error,
     },
 
+    /// A streamed object write or hash ended before the declared size was read.
+    #[error("object stream ended after {actual} of {expected} bytes")]
+    ObjectStreamTruncated {
+        /// Payload size the caller declared.
+        expected: u64,
+        /// Bytes the stream delivered before end of file.
+        actual: u64,
+    },
+
+    /// A worktree file hashed earlier in an operation had different content when stored.
+    #[error("{path} changed while it was being added")]
+    WorktreeFileChanged {
+        /// Index-relative path of the file.
+        path: String,
+    },
+
     /// The index file is missing, truncated, or has a bad header.
     #[error("index error: {0}")]
     IndexError(String),

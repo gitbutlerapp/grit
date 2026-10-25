@@ -19,6 +19,8 @@ Paths are relative to your current directory, so from inside `src/`, `grit add m
 
 Files with a `filter=<driver>` attribute (Git LFS, for example) are staged through the driver's clean filter, which runs through `sh` the way Git runs it. On Windows that is the `sh` bundled with Git for Windows, so you don't need it on `PATH`. If the driver sets `filter.<driver>.required=true` and the filter fails or cannot be started, `grit add` fails, says why, and stages nothing. It never stores the unfiltered file. When an optional filter fails, the file is staged unfiltered, as Git does.
 
+Files of at least `core.bigFileThreshold` bytes (512 MiB unless configured; `k`, `m` and `g` suffixes work) are hashed and compressed as a stream straight into their own pack, as Git does, so staging a multi-gigabyte file takes a few megabytes of memory. This applies to [`grit commit`](../commit/) auto-staging and to the re-hash `grit status` does after a big file's timestamp changes, too. A file that needs a clean filter, `working-tree-encoding` or line-ending conversion is read into memory whatever its size.
+
 On filesystems where Grit sets `core.filemode=false` (typical on Windows), every new file is staged as non-executable (`100644`) even when it is a script. Use `--executable` on the paths you ship as runnable scripts so the index and commits record mode `100755`. Use `--non-executable` to clear an explicit executable bit in the index. These flags require at least one path argument.
 
 [`grit commit`](../commit/) stages every change before it records a commit, so you don't need `grit add` to commit. It's useful for starting to track a new file and checking what will be committed.

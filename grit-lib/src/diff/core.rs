@@ -4174,13 +4174,15 @@ fn parallel_process_blob_worktree_jobs(
     par_opts.min_items = 0;
     par_opts.min_total_bytes = None;
     let est_bytes = jobs.len().saturating_mul(8192);
+    let store_dirty_blobs = (materialize_dirty_blobs && !hash_blobs_without_write)
+        .then_some(crate::odb::BULK_NEW_LOOSE_WRITE);
 
     let rows = try_par_map::<StagingHashJob, Option<(usize, DiffEntry)>, Error, _>(
         jobs,
         par_opts,
         est_bytes,
         |job| {
-            let data = read_regular_worktree_blob_bytes(
+            let eff_oid = read_regular_worktree_blob(
                 odb,
                 &job.file_path,
                 conv,
@@ -4188,27 +4190,8 @@ fn parallel_process_blob_worktree_jobs(
                 &job.rel_path,
                 Some(&job.entry),
                 filter_process,
-            )?;
-            let worktree_oid = if materialize_dirty_blobs {
-                if hash_blobs_without_write {
-                    odb.hash(ObjectKind::Blob, &data)?
-                } else {
-                    odb.write_with_options(
-                        ObjectKind::Blob,
-                        &data,
-                        crate::odb::BULK_NEW_LOOSE_WRITE,
-                    )?
-                }
-            } else {
-                odb.hash(ObjectKind::Blob, &data)?
-            };
-            let mut eff_oid = worktree_oid;
-            if eff_oid != job.entry.oid {
-                let raw_oid = odb.hash(ObjectKind::Blob, &data)?;
-                if raw_oid == job.entry.oid {
-                    eff_oid = job.entry.oid;
-                }
-            }
+            )?
+            .object_id(odb, store_dirty_blobs)?;
             if eff_oid != job.entry.oid || job.worktree_mode != job.entry.mode {
                 let path_owned = job.rel_path.clone();
                 let new_oid = if eff_oid != job.entry.oid && !materialize_dirty_blobs {
@@ -4385,7 +4368,9 @@ fn push_index_blob_worktree_diff(
     }
 
     let file_attrs = file_attrs_for(path_str_ref);
-    let data = worktree_blob_bytes(
+    let store = (materialize_dirty_blobs && !hash_blobs_without_write)
+        .then_some(crate::odb::BULK_NEW_LOOSE_WRITE);
+    let eff_oid = worktree_blob_content(
         odb,
         file_path,
         &meta,
@@ -4394,23 +4379,8 @@ fn push_index_blob_worktree_diff(
         path_str_ref,
         Some(ie),
         filter_process,
-    )?;
-    let worktree_oid = if materialize_dirty_blobs {
-        if hash_blobs_without_write {
-            odb.hash(ObjectKind::Blob, &data)?
-        } else {
-            odb.write_with_options(ObjectKind::Blob, &data, crate::odb::BULK_NEW_LOOSE_WRITE)?
-        }
-    } else {
-        odb.hash(ObjectKind::Blob, &data)?
-    };
-    let mut eff_oid = worktree_oid;
-    if eff_oid != ie.oid {
-        let raw_oid = odb.hash(ObjectKind::Blob, &data)?;
-        if raw_oid == ie.oid {
-            eff_oid = ie.oid;
-        }
-    }
+    )?
+    .object_id(odb, store)?;
 
     if eff_oid != ie.oid || worktree_mode != ie.mode {
         let path_owned = path_str_ref.to_owned();
@@ -6309,9 +6279,58 @@ pub(crate) fn symlink_target_bytes(target: &Path) -> Vec<u8> {
     }
 }
 
-fn read_regular_worktree_blob_bytes(
+/// A worktree file's blob content: normalized bytes, or an open file that is hashed or
+/// stored as a stream.
+///
+/// Regular files of at least [`Odb::big_file_threshold`] bytes whose clean conversion is the
+/// identity ([`crate::crlf::clean_is_identity`]) are streamed so memory use does not depend
+/// on the file size.
+pub(crate) enum WorktreeBlobContent {
+    /// Content after the clean conversion (filters, encoding, line endings).
+    Bytes(Vec<u8>),
+    /// Unconverted big file, positioned at its start.
+    Stream {
+        /// Open handle on the worktree file.
+        file: fs::File,
+        /// File size when it was opened.
+        size: u64,
+    },
+}
+
+impl WorktreeBlobContent {
+    /// Object id of the content, without storing it.
+    pub(crate) fn hash(self, odb: &Odb) -> Result<ObjectId> {
+        match self {
+            Self::Bytes(data) => odb.hash(ObjectKind::Blob, &data),
+            Self::Stream { mut file, size } => odb.hash_stream(ObjectKind::Blob, size, &mut file),
+        }
+    }
+
+    /// Store the content as a blob and return its id.
+    pub(crate) fn store(self, odb: &Odb, options: crate::odb::WriteOptions) -> Result<ObjectId> {
+        match self {
+            Self::Bytes(data) => odb.write_with_options(ObjectKind::Blob, &data, options),
+            Self::Stream { mut file, size } => {
+                odb.write_stream(ObjectKind::Blob, size, &mut file, options)
+            }
+        }
+    }
+
+    /// [`Self::store`] with `options` when given, otherwise [`Self::hash`].
+    fn object_id(self, odb: &Odb, store: Option<crate::odb::WriteOptions>) -> Result<ObjectId> {
+        match store {
+            Some(options) => self.store(odb, options),
+            None => self.hash(odb),
+        }
+    }
+}
+
+/// Read and clean-convert an open regular worktree file of `size` bytes.
+#[allow(clippy::too_many_arguments)]
+fn read_regular_worktree_bytes(
     odb: &Odb,
-    path: &Path,
+    mut file: fs::File,
+    size: u64,
     conv: &crate::crlf::ConversionConfig,
     file_attrs: &crate::crlf::FileAttrs,
     rel_path: &str,
@@ -6327,7 +6346,8 @@ fn read_regular_worktree_blob_bytes(
     } else {
         None
     };
-    let raw = fs::read(path)?;
+    let mut raw = Vec::with_capacity(usize::try_from(size).unwrap_or_default());
+    std::io::Read::read_to_end(&mut file, &mut raw)?;
     #[cfg(test)]
     odb.hot_path_metrics().record_blob_content_read();
     let opts = crate::crlf::ConvertToGitOpts {
@@ -6337,11 +6357,78 @@ fn read_regular_worktree_blob_bytes(
         filter_process,
         command_runner: None,
     };
-    Ok(crate::crlf::convert_to_git_with_opts(
-        &raw, rel_path, conv, file_attrs, opts,
+    Ok(crate::crlf::convert_to_git_owned(
+        raw, rel_path, conv, file_attrs, opts,
     )?)
 }
 
+fn open_with_size(path: &Path) -> Result<(fs::File, u64)> {
+    let file = fs::File::open(path)?;
+    let size = file.metadata()?.len();
+    Ok((file, size))
+}
+
+fn read_regular_worktree_blob(
+    odb: &Odb,
+    path: &Path,
+    conv: &crate::crlf::ConversionConfig,
+    file_attrs: &crate::crlf::FileAttrs,
+    rel_path: &str,
+    index_entry: Option<&IndexEntry>,
+    filter_process: Option<&crate::filter_process::FilterProcessState>,
+) -> Result<WorktreeBlobContent> {
+    let (file, size) = open_with_size(path)?;
+    if crate::crlf::clean_is_identity(conv, file_attrs) && size >= odb.big_file_threshold()? {
+        #[cfg(test)]
+        odb.hot_path_metrics().record_blob_content_read();
+        return Ok(WorktreeBlobContent::Stream { file, size });
+    }
+    read_regular_worktree_bytes(
+        odb,
+        file,
+        size,
+        conv,
+        file_attrs,
+        rel_path,
+        index_entry,
+        filter_process,
+    )
+    .map(WorktreeBlobContent::Bytes)
+}
+
+/// Blob content for a worktree path: symlink target, empty for a directory, or the
+/// clean-converted (or streamed, see [`WorktreeBlobContent`]) file content.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn worktree_blob_content(
+    odb: &Odb,
+    path: &Path,
+    meta: &fs::Metadata,
+    conv: &crate::crlf::ConversionConfig,
+    file_attrs: &crate::crlf::FileAttrs,
+    rel_path: &str,
+    index_entry: Option<&IndexEntry>,
+    filter_process: Option<&crate::filter_process::FilterProcessState>,
+) -> Result<WorktreeBlobContent> {
+    if meta.file_type().is_symlink() {
+        let target = fs::read_link(path)?;
+        return Ok(WorktreeBlobContent::Bytes(symlink_target_bytes(&target)));
+    }
+    if meta.is_dir() {
+        return Ok(WorktreeBlobContent::Bytes(Vec::new()));
+    }
+    read_regular_worktree_blob(
+        odb,
+        path,
+        conv,
+        file_attrs,
+        rel_path,
+        index_entry,
+        filter_process,
+    )
+}
+
+/// Like [`worktree_blob_content`], always returning the bytes (for callers that need the
+/// content itself, such as line diffs).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn worktree_blob_bytes(
     odb: &Odb,
@@ -6353,15 +6440,6 @@ pub(crate) fn worktree_blob_bytes(
     index_entry: Option<&IndexEntry>,
     filter_process: Option<&crate::filter_process::FilterProcessState>,
 ) -> Result<Vec<u8>> {
-    let needs_index_blob =
-        index_entry.is_some_and(|_| crate::crlf::clean_uses_autocrlf_index_guard(file_attrs, conv));
-    let prior_blob: Option<Vec<u8>> = if needs_index_blob {
-        index_entry
-            .filter(|e| e.oid != zero_oid())
-            .and_then(|e| odb.read(&e.oid).ok().map(|o| o.data))
-    } else {
-        None
-    };
     if meta.file_type().is_symlink() {
         let target = fs::read_link(path)?;
         return Ok(symlink_target_bytes(&target));
@@ -6369,19 +6447,17 @@ pub(crate) fn worktree_blob_bytes(
     if meta.is_dir() {
         return Ok(Vec::new());
     }
-    let raw = fs::read(path)?;
-    #[cfg(test)]
-    odb.hot_path_metrics().record_blob_content_read();
-    let opts = crate::crlf::ConvertToGitOpts {
-        index_blob: prior_blob.as_deref(),
-        renormalize: false,
-        check_safecrlf: false,
+    let (file, size) = open_with_size(path)?;
+    read_regular_worktree_bytes(
+        odb,
+        file,
+        size,
+        conv,
+        file_attrs,
+        rel_path,
+        index_entry,
         filter_process,
-        command_runner: None,
-    };
-    Ok(crate::crlf::convert_to_git_with_opts(
-        &raw, rel_path, conv, file_attrs, opts,
-    )?)
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -6396,7 +6472,7 @@ fn worktree_file_oid(
     materialize: bool,
     filter_process: Option<&crate::filter_process::FilterProcessState>,
 ) -> Result<ObjectId> {
-    let data = worktree_blob_bytes(
+    worktree_blob_content(
         odb,
         path,
         meta,
@@ -6405,15 +6481,14 @@ fn worktree_file_oid(
         rel_path,
         index_entry,
         filter_process,
-    )?;
-    if materialize {
-        odb.write_with_options(ObjectKind::Blob, &data, crate::odb::BULK_NEW_LOOSE_WRITE)
-    } else {
-        odb.hash(ObjectKind::Blob, &data)
-    }
+    )?
+    .object_id(odb, materialize.then_some(crate::odb::BULK_NEW_LOOSE_WRITE))
 }
 
 /// Hash normalized worktree bytes for a path (does not write to the object database).
+///
+/// Files of at least `core.bigFileThreshold` bytes that need no clean conversion are hashed
+/// as a stream, without reading them into memory.
 ///
 /// # Errors
 ///
@@ -6431,7 +6506,7 @@ pub fn hash_worktree_file(
     index_entry: Option<&IndexEntry>,
     filter_process: Option<&crate::filter_process::FilterProcessState>,
 ) -> Result<ObjectId> {
-    let data = worktree_blob_bytes(
+    worktree_file_oid(
         odb,
         path,
         meta,
@@ -6439,9 +6514,9 @@ pub fn hash_worktree_file(
         file_attrs,
         rel_path,
         index_entry,
+        false,
         filter_process,
-    )?;
-    odb.hash(ObjectKind::Blob, &data)
+    )
 }
 
 /// Like [`hash_worktree_file`], for callers that already know the worktree file type from a
@@ -6458,20 +6533,20 @@ pub(crate) fn hash_worktree_file_with_mode(
     index_entry: Option<&IndexEntry>,
     filter_process: Option<&crate::filter_process::FilterProcessState>,
 ) -> Result<ObjectId> {
-    let data = if worktree_mode == MODE_SYMLINK {
-        read_worktree_bytes_for_mode(path, worktree_mode)?
-    } else {
-        read_regular_worktree_blob_bytes(
-            odb,
-            path,
-            conv,
-            file_attrs,
-            rel_path,
-            index_entry,
-            filter_process,
-        )?
-    };
-    odb.hash(ObjectKind::Blob, &data)
+    if worktree_mode == MODE_SYMLINK {
+        let data = read_worktree_bytes_for_mode(path, worktree_mode)?;
+        return odb.hash(ObjectKind::Blob, &data);
+    }
+    read_regular_worktree_blob(
+        odb,
+        path,
+        conv,
+        file_attrs,
+        rel_path,
+        index_entry,
+        filter_process,
+    )?
+    .hash(odb)
 }
 
 /// Read, normalize (CRLF/attributes), and store a worktree blob once.

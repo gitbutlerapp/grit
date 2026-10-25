@@ -39,7 +39,7 @@ use std::time::SystemTime;
 #[cfg(test)]
 use std::sync::atomic::{AtomicUsize, Ordering};
 
-use crate::error::{ConfigError, Error, Result};
+use crate::error::{BadNumericSource, ConfigError, Error, Result};
 
 /// Test-only counters for config cascade load activity (see `porcelain_ops_load_config_cascade_once`).
 #[cfg(test)]
@@ -2304,6 +2304,41 @@ impl ConfigSet {
     /// Git's default zlib level for loose objects when neither `core.looseCompression` nor
     /// `core.compression` is set (`Z_BEST_SPEED`).
     pub const LOOSE_OBJECTS_ZLIB_DEFAULT: i32 = 1;
+
+    /// Git's default `core.bigFileThreshold` (512 MiB).
+    pub const BIG_FILE_THRESHOLD_DEFAULT: u64 = 512 * 1024 * 1024;
+
+    /// Size in bytes at or above which files are treated as big (`core.bigFileThreshold`).
+    ///
+    /// Big files are hashed and stored as a stream instead of being read into memory, and
+    /// are written straight into a pack. The value accepts Git's `k`/`m`/`g` suffixes; the
+    /// last entry wins. When unset, returns [`Self::BIG_FILE_THRESHOLD_DEFAULT`].
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ConfigError::BadNumericValue`] when the value is missing, not a number, has
+    /// an unknown unit, or is negative.
+    pub fn big_file_threshold(&self) -> Result<u64> {
+        const KEY: &str = "core.bigfilethreshold";
+        let Some(entry) = self.get_last_entry(KEY) else {
+            return Ok(Self::BIG_FILE_THRESHOLD_DEFAULT);
+        };
+        let raw = entry.value.as_deref().unwrap_or_default();
+        let bad = |reason| {
+            Error::Config(ConfigError::BadNumericValue {
+                key: KEY.to_owned(),
+                value: raw.to_owned(),
+                reason,
+            })
+        };
+        let value = parse_git_config_int_strict(raw.trim()).map_err(|e| {
+            bad(match e {
+                GitConfigIntStrictError::InvalidUnit => BadNumericSource::InvalidUnit,
+                GitConfigIntStrictError::OutOfRange => BadNumericSource::OutOfRange,
+            })
+        })?;
+        u64::try_from(value).map_err(|_| bad(BadNumericSource::OutOfRange))
+    }
 
     /// Zlib deflate level for `git pack-objects` (Git's `pack_compression_level`).
     ///
@@ -4714,6 +4749,45 @@ mod loose_compression_tests {
         let mut set = ConfigSet::new();
         set.merge(&file);
         set
+    }
+
+    #[test]
+    fn big_file_threshold_default_suffixes_and_errors() {
+        assert_eq!(
+            ConfigSet::new().big_file_threshold().unwrap(),
+            512 * 1024 * 1024
+        );
+        let cases = [
+            ("1000", 1000),
+            ("0", 0),
+            ("4k", 4096),
+            ("2m", 2 * 1024 * 1024),
+            ("1g", 1024 * 1024 * 1024),
+            ("8G", 8 * 1024 * 1024 * 1024),
+        ];
+        for (raw, want) in cases {
+            let set = set_from_snippet(&format!("[core]\n\tbigFileThreshold = {raw}\n"));
+            assert_eq!(set.big_file_threshold().unwrap(), want, "value {raw}");
+        }
+        let set = set_from_snippet("[core]\n\tbigfilethreshold = 1k\n\tbigFileThreshold = 3k\n");
+        assert_eq!(set.big_file_threshold().unwrap(), 3 * 1024);
+
+        for raw in ["-1", "12x", "lots", ""] {
+            let snippet = if raw.is_empty() {
+                "[core]\n\tbigFileThreshold\n".to_owned()
+            } else {
+                format!("[core]\n\tbigFileThreshold = {raw}\n")
+            };
+            let err = set_from_snippet(&snippet).big_file_threshold().unwrap_err();
+            assert!(
+                matches!(
+                    err,
+                    Error::Config(super::ConfigError::BadNumericValue { ref key, .. })
+                        if key == "core.bigfilethreshold"
+                ),
+                "value {raw:?}: {err:?}"
+            );
+        }
     }
 
     #[test]
