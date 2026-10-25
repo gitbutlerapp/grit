@@ -17,7 +17,6 @@ use crate::porcelain::switch::{
 use crate::porcelain::worktree_guard::{load_worktree_snapshot, local_change_diffs};
 use crate::refs;
 use crate::repo::Repository;
-use crate::rev_parse::try_peel_to_commit_for_merge_base;
 use crate::state::{resolve_head_for_repository, HeadState};
 use crate::worktree::{list_worktrees, WorktreeEntry};
 
@@ -298,7 +297,7 @@ fn compute_orphan_info(
             truncated: false,
         });
     }
-    let hide = orphan_hide_tips(repo, head, target, previous)?;
+    let hide = orphan_hide_tips(repo, head, target)?;
     let (total, oids) = walk_commits_reachable_excluding_ancestors_of(
         repo,
         std::slice::from_ref(&previous),
@@ -317,53 +316,61 @@ fn compute_orphan_info(
     })
 }
 
+/// Commits that keep history alive besides the moving tip: `target`, every other ref, the
+/// stash and the other worktrees' `HEAD`s, peeled through annotated tags.
+///
+/// Peel lines in `packed-refs` are used when present, so tags need not be read. A ref
+/// naming a tree or blob holds no commits: it is dropped here when peeled from the objects,
+/// and skipped by the walk when its packed peel line names it.
 fn orphan_hide_tips(
     repo: &Repository,
     head: &HeadState,
     target: ObjectId,
-    _previous: ObjectId,
 ) -> Result<Vec<ObjectId>> {
     let moving_branch = match head {
         HeadState::Branch { refname, .. } => Some(refname.as_str()),
         _ => None,
     };
-    let mut hide = vec![target];
-    for (refname, oid) in refs::list_refs_for_repository(repo, "refs/")? {
+    let listed = refs::list_refs_for_repository(repo, "refs/")?;
+    // A malformed `packed-refs` only loses the shortcut; peeling falls back to the objects.
+    let packed = refs::PackedRefPeels::for_store(repo.refs(), repo.git_dir()).ok();
+    let mut hide = Vec::with_capacity(listed.len() + 1);
+    hide.push(target);
+    let mut unpeeled = Vec::new();
+    for (refname, oid) in listed {
         if moving_branch == Some(refname.as_str()) {
             continue;
         }
-        orphan_hide_push_peeled_commit(repo, &mut hide, oid)?;
+        match packed.as_ref().and_then(|p| p.peeled(&refname, &oid)) {
+            Some(peeled) => hide.push(peeled.unwrap_or(oid)),
+            None => unpeeled.push(oid),
+        }
     }
     if let Ok(oid) = repo.resolve_ref_oid("refs/stash") {
-        orphan_hide_push_peeled_commit(repo, &mut hide, oid)?;
+        unpeeled.push(oid);
     }
     for wt in list_worktrees(repo)? {
         if worktree_is_reset_moving_head(repo, head, &wt) {
             continue;
         }
         match &wt.head {
-            HeadState::Detached { oid } => orphan_hide_push_peeled_commit(repo, &mut hide, *oid)?,
-            HeadState::Branch { oid: Some(oid), .. } => {
-                orphan_hide_push_peeled_commit(repo, &mut hide, *oid)?;
+            HeadState::Detached { oid } | HeadState::Branch { oid: Some(oid), .. } => {
+                unpeeled.push(*oid);
             }
             HeadState::Branch { .. } | HeadState::Invalid => {}
+        }
+    }
+    unpeeled.sort_unstable();
+    unpeeled.dedup();
+    let odb = repo.odb();
+    for oid in unpeeled {
+        if let Some(commit) = odb.peel_to_commit(oid)? {
+            hide.push(commit);
         }
     }
     hide.sort_unstable();
     hide.dedup();
     Ok(hide)
-}
-
-/// Add a ref or peeled tip to the orphan hide set when it names a commit.
-fn orphan_hide_push_peeled_commit(
-    repo: &Repository,
-    hide: &mut Vec<ObjectId>,
-    oid: ObjectId,
-) -> Result<()> {
-    if let Some(commit) = try_peel_to_commit_for_merge_base(repo, oid)? {
-        hide.push(commit);
-    }
-    Ok(())
 }
 
 /// True when this listed worktree is the one whose HEAD ref/file is being moved by the reset.
@@ -1239,6 +1246,77 @@ mod tests {
         let outcome = reset_to_commit(&repo, &reset_opts(c2, ResetMode::Mixed)).expect("reset");
         assert_eq!(outcome.orphaned_total, 0);
         assert!(outcome.orphaned_commits.is_empty());
+    }
+
+    #[test]
+    fn orphan_count_matches_git_rev_list_with_many_tags() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        git(root, &["init", "-q", "-b", "main", "."]);
+        for i in 1..=120 {
+            git(
+                root,
+                &["commit", "-q", "--allow-empty", "-m", &format!("c{i}")],
+            );
+            if i % 10 == 0 {
+                git(root, &["tag", "-a", "-m", "release", &format!("v{i}")]);
+            }
+            if i == 100 {
+                git(root, &["branch", "side"]);
+            }
+        }
+        git(root, &["tag", "-a", "-m", "outer", "outer", "v10"]);
+        let blob = git(root, &["hash-object", "-w", "--stdin"]);
+        git(root, &["tag", "-a", "-m", "key", "key", blob.trim()]);
+        git(root, &["switch", "-q", "side"]);
+        git(root, &["commit", "-q", "--allow-empty", "-m", "side work"]);
+        git(root, &["switch", "-q", "main"]);
+        let base = git(root, &["rev-parse", "HEAD"]).trim().to_owned();
+        for i in 1..=3 {
+            git(
+                root,
+                &["commit", "-q", "--allow-empty", "-m", &format!("local{i}")],
+            );
+            if i == 1 {
+                git(root, &["tag", "-a", "-m", "keep", "keep-local1"]);
+            }
+        }
+        let target = ObjectId::from_hex(&base).expect("oid");
+        let opts = reset_opts(target, ResetMode::Mixed);
+
+        for packed in [false, true] {
+            if packed {
+                git(root, &["pack-refs", "--all"]);
+            }
+            let repo = Repository::open(
+                &root.join(".git"),
+                &crate::environment::RepositoryOptions::empty().with_work_tree(root),
+            )
+            .expect("open");
+            let preview = preview_reset(&repo, &opts).expect("preview");
+            let expected: Vec<ObjectId> = git(
+                root,
+                &[
+                    "rev-list",
+                    "main",
+                    "--not",
+                    "--exclude=main",
+                    "--branches",
+                    "--tags",
+                    &base,
+                ],
+            )
+            .lines()
+            .map(|l| ObjectId::from_hex(l).expect("oid"))
+            .collect();
+            assert_eq!(expected.len(), 2, "local2 and local3 are only on main");
+            assert_eq!(preview.orphaned_total, expected.len(), "packed={packed}");
+            let mut got: Vec<ObjectId> = preview.orphaned_commits.iter().map(|c| c.oid).collect();
+            let mut want = expected.clone();
+            got.sort_unstable();
+            want.sort_unstable();
+            assert_eq!(got, want, "packed={packed}");
+        }
     }
 
     fn git(dir: &std::path::Path, args: &[&str]) -> String {

@@ -32,7 +32,7 @@ In a sparse checkout (`git sparse-checkout`), `--hard` and `--mixed` keep paths 
 
 `--dry-run` reports what would happen — including paths that `--hard` would discard or `--keep` would refuse on — without moving refs, the index, or the worktree.
 
-When resetting backward, grit lists commits that would become unreachable (not reachable from `<rev>` or any other ref, including branches, tags, remotes, stash, and other worktrees). A warning is printed when any would be orphaned.
+When resetting backward, grit lists commits that would become unreachable (not reachable from `<rev>` or any other ref, including branches, tags, remotes, stash, and other worktrees). A warning is printed when any would be orphaned. The check walks only the commits being left behind and the history next to them, never the whole history, so undoing the last commit stays fast on deep repositories; its remaining cost grows with the number of refs (annotated tags are peeled from `packed-refs` when it records their targets).
 
 `<rev>` is any revision Grit understands: branch name, `HEAD~1`, full or abbreviated commit id, and so on.
 
