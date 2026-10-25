@@ -1,7 +1,7 @@
-//! Parallel tracked restage in several bounded chunks matches `git add -u`.
+//! Tracked restage (serial, and parallel in several bounded chunks) matches `git add -u`.
 //!
 //! More changed paths than one restage chunk holds, plus deletions, mode-only changes and
-//! stat-only touches, staged once with and once without untracked-cache deferral.
+//! stat-only touches, staged with and without untracked-cache deferral.
 
 mod support;
 
@@ -79,6 +79,14 @@ fn mutate(repo: &Path) {
 }
 
 fn assert_matches_git_add_u(large_index_restage: usize) {
+    assert_matches_git_add_u_with(IndexStagingThresholds {
+        large_index_restage,
+        parallel_tracked_restage: 64,
+    });
+}
+
+fn assert_matches_git_add_u_with(thresholds: IndexStagingThresholds) {
+    let large_index_restage = thresholds.large_index_restage;
     let tmp = tempfile::tempdir().expect("tempdir");
     let oracle = tmp.path().join("oracle");
     fs::create_dir_all(&oracle).expect("mkdir oracle");
@@ -90,10 +98,6 @@ fn assert_matches_git_add_u(large_index_restage: usize) {
 
     let repo = Repository::discover(Some(&grit_root), &RepositoryOptions::empty())
         .expect("open grit repo");
-    let thresholds = IndexStagingThresholds {
-        large_index_restage,
-        parallel_tracked_restage: 64,
-    };
     let summary = stage_tracked_modifications_with_thresholds(
         &repo,
         repo.work_tree().expect("wt"),
@@ -136,4 +140,12 @@ fn chunked_parallel_restage_matches_git_with_untracked_deferral() {
 #[test]
 fn chunked_parallel_restage_matches_git_without_untracked_deferral() {
     assert_matches_git_add_u(usize::MAX);
+}
+
+#[test]
+fn serial_restage_matches_git() {
+    assert_matches_git_add_u_with(IndexStagingThresholds {
+        large_index_restage: usize::MAX,
+        parallel_tracked_restage: usize::MAX,
+    });
 }

@@ -5329,8 +5329,10 @@ pub fn entry_is_racy_with_policy(
 /// recorded OID and the entry timestamp is racy relative to `index_mtime`. That forces the
 /// next diff or status pass to re-hash the path instead of trusting stat alone.
 ///
-/// Skip-worktree, assume-unchanged, and intent-to-add entries are left unchanged. When
-/// `index_mtime` is `None` (no prior on-disk index), nothing is smudged.
+/// Skip-worktree, assume-unchanged, and intent-to-add entries are left unchanged, and so are
+/// entries this process just hashed from the worktree to their current OID (Git skips its
+/// `CE_UPTODATE` entries the same way). When `index_mtime` is `None` (no prior on-disk index),
+/// nothing is smudged.
 ///
 /// Content equality uses `git_dir` config and worktree attributes with [`hash_worktree_file`]
 /// so the repository hash algorithm and clean (CRLF/filter) conversion match index OIDs.
@@ -5362,6 +5364,7 @@ pub fn smudge_racily_clean_entries(
     });
     let conv = crlf::ConversionConfig::from_config(&config);
     let attrs = crlf::load_gitattributes(work_tree);
+    let verified = std::mem::take(&mut index.content_verified);
 
     let mut changed = false;
     for ie in &mut index.entries {
@@ -5375,6 +5378,9 @@ pub fn smudge_racily_clean_entries(
             continue;
         }
         if !entry_is_racy(ie, Some(index_mtime)) {
+            continue;
+        }
+        if verified.get(&ie.path) == Some(&ie.oid) {
             continue;
         }
         let Ok(path) = std::str::from_utf8(&ie.path) else {
@@ -12611,6 +12617,61 @@ mod smudge_racily_clean_tests {
         let diff = diff_index_to_worktree(&odb, &mut index, wt, false, false).expect("diff");
         assert_eq!(diff.len(), 1);
         assert_eq!(diff[0].path(), "f.txt");
+    }
+
+    /// A racy index row plus the git dir and odb it lives in; the worktree no longer matches.
+    fn racy_stale_entry(wt: &Path) -> (PathBuf, Odb, Index, (u32, u32), ObjectId) {
+        let index_mtime = setup_index_mtime(wt);
+        let (git_dir, odb) = minimal_repo(wt, "[core]\n");
+        let entry = staged_entry_for_file(&odb, wt, "f.txt", b"same length!!", index_mtime);
+        let stale_oid = entry.oid;
+        fs::write(wt.join("f.txt"), b"same length??").expect("rewrite");
+        pin_mtime_and_sample(&wt.join("f.txt"), index_mtime.0, index_mtime.1);
+        let meta = fs::symlink_metadata(wt.join("f.txt")).expect("stat");
+        let mut index = Index::new();
+        index.entries.push(entry_from_metadata(
+            &meta,
+            b"f.txt",
+            stale_oid,
+            MODE_REGULAR,
+        ));
+        (git_dir, odb, index, index_mtime, stale_oid)
+    }
+
+    #[test]
+    fn content_verified_entry_is_not_reread_and_the_mark_is_consumed() {
+        let td = tempfile::tempdir().expect("tempdir");
+        let wt = td.path();
+        let (git_dir, odb, mut index, index_mtime, stale_oid) = racy_stale_entry(wt);
+        index.mark_content_verified(b"f.txt", stale_oid);
+
+        let smudge = |index: &mut Index| {
+            smudge_racily_clean_entries(&odb, &git_dir, index, wt, Some(index_mtime), None, None)
+        };
+        assert!(!smudge(&mut index), "a verified entry is trusted");
+        assert_ne!(index.entries[0].size, 0);
+        assert!(index.content_verified.is_empty());
+        assert!(smudge(&mut index), "without the mark the entry is checked");
+        assert_eq!(index.entries[0].size, 0);
+    }
+
+    #[test]
+    fn content_verified_mark_for_another_oid_does_not_skip_the_check() {
+        let td = tempfile::tempdir().expect("tempdir");
+        let wt = td.path();
+        let (git_dir, odb, mut index, index_mtime, _) = racy_stale_entry(wt);
+        let other = odb.hash(ObjectKind::Blob, b"other").expect("hash");
+        index.mark_content_verified(b"f.txt", other);
+        assert!(smudge_racily_clean_entries(
+            &odb,
+            &git_dir,
+            &mut index,
+            wt,
+            Some(index_mtime),
+            None,
+            None,
+        ));
+        assert_eq!(index.entries[0].size, 0);
     }
 
     #[test]

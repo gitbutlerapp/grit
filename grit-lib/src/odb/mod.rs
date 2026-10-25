@@ -2604,6 +2604,46 @@ impl Odb {
         primary.write_zlib_prehashed(oid, zlib_store, options)
     }
 
+    /// Store blob `data` that the caller already hashed to `oid`.
+    ///
+    /// Same existence, freshen and overlay rules as [`Self::write_with_options`], but on the
+    /// files backend `data` is not hashed again, and it is only compressed when the object is
+    /// not already stored. A custom primary goes through [`Self::write_with_options`].
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Self::write`].
+    pub(crate) fn write_blob_prehashed(
+        &self,
+        oid: &ObjectId,
+        data: &[u8],
+        options: WriteOptions,
+    ) -> Result<ObjectId> {
+        if self.custom_primary.is_some() {
+            return self.write_with_options(ObjectKind::Blob, data, options);
+        }
+        let primary = self.primary()?;
+        if let Some(existing) = primary.try_finish_duplicate_write(oid, options)? {
+            return Ok(existing);
+        }
+        let already_exists = !(options.trust_new_loose || options.assume_loose_only_existence)
+            && self.object_exists_for_write_skip(oid);
+        if self.overlay_active()
+            && !already_exists
+            && self.overlay_store_object(*oid, ObjectKind::Blob, data)
+        {
+            return Ok(*oid);
+        }
+        if already_exists {
+            if !options.silent {
+                let _ = self.freshen_object(oid);
+            }
+            return Ok(*oid);
+        }
+        let zlib = zlib_compress_blob(data, self.loose_compression()?)?;
+        primary.write_zlib_prehashed(oid, &zlib, options)
+    }
+
     /// Like [`Self::write`], with control over freshen behaviour on existing objects.
     pub fn write_with_options(
         &self,
@@ -2809,6 +2849,22 @@ pub(crate) fn empty_tree_oid_matches(algo: HashAlgo, oid: &ObjectId) -> bool {
 /// Build canonical blob store bytes (`"blob <len>\\0<payload>"`).
 pub(crate) fn blob_store_bytes(data: &[u8]) -> Vec<u8> {
     build_store_bytes(ObjectKind::Blob, data)
+}
+
+/// Zlib-compress the loose store form of blob `data` (header, then payload) without first
+/// copying both into one buffer.
+fn zlib_compress_blob(data: &[u8], compression: Compression) -> Result<Vec<u8>> {
+    use std::io::Write as _;
+    let header = format!("blob {}\0", data.len());
+    let mut encoder = flate2::write::ZlibEncoder::new(
+        Vec::with_capacity(data.len() / 2 + header.len()),
+        compression,
+    );
+    encoder
+        .write_all(header.as_bytes())
+        .and_then(|()| encoder.write_all(data))
+        .map_err(|e| Error::Zlib(e.to_string()))?;
+    encoder.finish().map_err(|e| Error::Zlib(e.to_string()))
 }
 
 pub(crate) fn zlib_compress_loose_store_from_bytes(
@@ -3217,6 +3273,40 @@ mod tests {
             fs::read(odb2.object_path(&oid2)).unwrap(),
             fs::read(odb.object_path(&oid_normal)).unwrap()
         );
+    }
+
+    #[test]
+    fn write_blob_prehashed_matches_write_and_skips_existing_objects() {
+        let dir = TempDir::new().unwrap();
+        let odb = Odb::new(&dir.path().join("objects"));
+        let data = vec![7u8; 100_000];
+        let oid_normal = odb.write(ObjectKind::Blob, &data).unwrap();
+
+        let dir2 = TempDir::new().unwrap();
+        let odb2 = Odb::new(&dir2.path().join("objects"));
+        let oid = hash::hash_object(odb2.hash_algo(), ObjectKind::Blob, &data).unwrap();
+        let options = WriteOptions {
+            assume_loose_only_existence: true,
+            ..WriteOptions::default()
+        };
+        assert_eq!(
+            odb2.write_blob_prehashed(&oid, &data, options).unwrap(),
+            oid
+        );
+        assert_eq!(oid, oid_normal);
+        assert!(odb2.object_path(&oid).is_file());
+        let obj = odb2.read(&oid).unwrap();
+        assert_eq!(
+            (obj.kind, obj.data.as_slice()),
+            (ObjectKind::Blob, data.as_slice())
+        );
+
+        // An existing object is kept as is, even when handed different bytes for its id.
+        assert_eq!(
+            odb2.write_blob_prehashed(&oid, b"other", options).unwrap(),
+            oid
+        );
+        assert_eq!(odb2.read(&oid).unwrap().data, data);
     }
 
     #[test]

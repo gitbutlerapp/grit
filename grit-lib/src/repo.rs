@@ -1999,6 +1999,7 @@ impl Repository {
                 }
             }
         }
+        index.content_verified.clear();
         let skip_hash = crate::index::index_skip_hash_for_write(Some(cfg.as_ref()));
         index.write_to_path_with_config_and_lock_mode(
             &path,
@@ -2297,6 +2298,7 @@ impl Repository {
                 }
             }
         }
+        index.content_verified.clear();
         let skip_hash = crate::index::index_skip_hash_for_write(Some(cfg.as_ref()));
         write_index_file_split(
             path,

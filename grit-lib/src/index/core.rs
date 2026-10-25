@@ -16,7 +16,7 @@
 //! the authoritative format specification.
 
 use std::borrow::Cow;
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fs;
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
@@ -412,6 +412,11 @@ pub struct Index {
     pub(crate) defer_untracked_cache_invalidation: bool,
     /// Skip the pre-write racy smudge walk (checkout just aligned worktree and index entries).
     pub(crate) skip_racy_smudge_on_write: bool,
+    /// In-memory only (Git `CE_UPTODATE`): stage-0 paths whose worktree content this process
+    /// hashed to the recorded object id after taking the stat data now in the entry. The
+    /// pre-write racy smudge skips an entry that still holds that id instead of reading the
+    /// file again; the next index write consumes the map.
+    pub(crate) content_verified: HashMap<Vec<u8>, ObjectId>,
     /// In-memory only: Git `istate->fsmonitor_has_run_once`.
     pub(crate) fsmonitor_refresh_ran: bool,
     /// Skip racy smudge and UNTR shell setup on the next index write (checkout fast path).
@@ -785,6 +790,7 @@ impl Index {
             source_mtime: None,
             defer_untracked_cache_invalidation: false,
             skip_racy_smudge_on_write: false,
+            content_verified: HashMap::new(),
             fsmonitor_refresh_ran: false,
             suppress_pre_write_index_housekeeping: false,
         }
@@ -836,6 +842,7 @@ impl Index {
             source_mtime: None,
             defer_untracked_cache_invalidation: false,
             skip_racy_smudge_on_write: false,
+            content_verified: HashMap::new(),
             fsmonitor_refresh_ran: false,
             suppress_pre_write_index_housekeeping: false,
         }
@@ -867,6 +874,7 @@ impl Index {
                 source_mtime: None,
                 defer_untracked_cache_invalidation: false,
                 skip_racy_smudge_on_write: false,
+                content_verified: HashMap::new(),
                 fsmonitor_refresh_ran: false,
                 suppress_pre_write_index_housekeeping: false,
             };
@@ -906,6 +914,7 @@ impl Index {
             source_mtime: None,
             defer_untracked_cache_invalidation: false,
             skip_racy_smudge_on_write: false,
+            content_verified: HashMap::new(),
             fsmonitor_refresh_ran: false,
             suppress_pre_write_index_housekeeping: false,
         }
@@ -935,6 +944,7 @@ impl Index {
                 source_mtime: None,
                 defer_untracked_cache_invalidation: false,
                 skip_racy_smudge_on_write: false,
+                content_verified: HashMap::new(),
                 fsmonitor_refresh_ran: false,
                 suppress_pre_write_index_housekeeping: false,
             };
@@ -977,6 +987,7 @@ impl Index {
             source_mtime: None,
             defer_untracked_cache_invalidation: false,
             skip_racy_smudge_on_write: false,
+            content_verified: HashMap::new(),
             fsmonitor_refresh_ran: false,
             suppress_pre_write_index_housekeeping: false,
         }
@@ -1409,6 +1420,7 @@ impl Index {
             source_mtime: None,
             defer_untracked_cache_invalidation: false,
             skip_racy_smudge_on_write: false,
+            content_verified: HashMap::new(),
             fsmonitor_refresh_ran: false,
             suppress_pre_write_index_housekeeping: false,
         })
@@ -2401,6 +2413,12 @@ impl Index {
     /// Replace many stage-0 entries in one sorted merge (bulk `git add` restage).
     pub(crate) fn replace_stage0_entries_batch(&mut self, replacements: Vec<IndexEntry>) {
         self.merge_replacements_into_sorted_index(replacements);
+    }
+
+    /// Record that the worktree file at `path` was just hashed to `oid` (see
+    /// [`Self::content_verified`]), so the next write does not re-read it for the racy check.
+    pub(crate) fn mark_content_verified(&mut self, path: &[u8], oid: ObjectId) {
+        self.content_verified.insert(path.to_vec(), oid);
     }
 
     /// Overwrite the stage-0 rows that already hold each replacement's path, in place.

@@ -700,6 +700,7 @@ pub(crate) fn write_index_file_split(
             source_mtime: None,
             defer_untracked_cache_invalidation: false,
             skip_racy_smudge_on_write: false,
+            content_verified: std::collections::HashMap::new(),
             fsmonitor_refresh_ran: false,
             suppress_pre_write_index_housekeeping: false,
         };
@@ -857,6 +858,7 @@ pub(crate) fn write_index_file_split(
         source_mtime: index.source_mtime,
         defer_untracked_cache_invalidation: false,
         skip_racy_smudge_on_write: false,
+        content_verified: std::collections::HashMap::new(),
         fsmonitor_refresh_ran: index.fsmonitor_refresh_ran,
         suppress_pre_write_index_housekeeping: index.suppress_pre_write_index_housekeeping,
     };

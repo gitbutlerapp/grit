@@ -742,6 +742,7 @@ fn stage_unmerged_paths_matching_pathspecs(
         let mut entry = entry_from_metadata(&meta, raw_path, oid, mode);
         entry.mode = mode;
         index.stage_file(entry);
+        index.mark_content_verified(raw_path, oid);
         mark_fsmonitor_staged(index, rel);
         modified.push(rel.to_owned());
     }
@@ -1117,6 +1118,7 @@ fn stage_untracked_paths_parallel(
             if let Ok(rel) = std::str::from_utf8(&entry.path) {
                 mark_fsmonitor_staged(index, rel);
             }
+            index.mark_content_verified(&entry.path, entry.oid);
         }
     }
     if staged_batch_count >= 64 {
@@ -1228,6 +1230,7 @@ fn stage_untracked_path(
     let mut entry = entry_from_metadata(&meta, index_relpath.as_bytes(), oid, mode);
     entry.mode = mode;
     index.stage_file(entry);
+    index.mark_content_verified(index_relpath.as_bytes(), oid);
     mark_fsmonitor_staged(index, &index_relpath);
     Ok(())
 }

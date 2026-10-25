@@ -9,18 +9,18 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::diff::{
-    entry_is_racy, hash_worktree_file, index_entry_worktree_abs, materialize_worktree_blob,
-    read_submodule_head_oid, symlink_target_bytes, SymlinkDirCache,
+    entry_is_racy, index_entry_worktree_abs, materialize_worktree_blob, read_submodule_head_oid,
+    symlink_target_bytes, worktree_blob_bytes, SymlinkDirCache,
 };
 use crate::error::{Error, Result};
 use crate::hash::Parallelism;
 use crate::index::index_file_mtime;
 use crate::index::{
-    entry_from_stat, worktree_path_from_index_rel, Index, IndexEntry, WorktreeModePolicy,
-    MODE_GITLINK,
+    entry_from_metadata, entry_from_stat, worktree_path_from_index_rel, Index, IndexEntry,
+    WorktreeModePolicy, MODE_GITLINK,
 };
 use crate::objects::{ObjectId, ObjectKind};
-use crate::odb::BULK_TRACKED_RESTAGE_LOOSE_WRITE;
+use crate::odb::{WriteOptions, BULK_TRACKED_RESTAGE_LOOSE_WRITE};
 pub use crate::porcelain::bulk_index::IndexStagingThresholds;
 use crate::precompose_config::effective_core_precomposeunicode_with_config;
 use crate::repo::Repository;
@@ -31,6 +31,12 @@ use crate::worktree_scan::{
     collect_blob_lookup_batches, group_blob_entries_by_dir, group_blob_entries_by_dir_for_paths,
     stat_scan_thread_count, visit_blob_lookup_batches, BlobDiskLookup, BlobDiskStat,
     BlobScanSparseMode, WorktreeBlobScanOptions,
+};
+
+/// One-at-a-time restage writes: the loose prefix directory may not exist yet.
+const SERIAL_RESTAGE_WRITE: WriteOptions = WriteOptions {
+    loose_prefix_dirs_ready: false,
+    ..BULK_TRACKED_RESTAGE_LOOSE_WRITE
 };
 
 /// Most deferred restage jobs read into memory at once; bounds peak RSS on bulk restages.
@@ -759,36 +765,32 @@ fn refresh_present_tracked_path(
             }
             let meta = fs::symlink_metadata(abs_path).map_err(Error::Io)?;
             let file_attrs = rules.file_attrs(rel_path, false);
-            let conv = rules.conversion();
-            let filter_fp = Some(rules.filter_process());
-            let staged_oid = hash_worktree_file(
+            let data = worktree_blob_bytes(
                 repo.odb(),
                 abs_path,
                 &meta,
-                conv,
+                rules.conversion(),
                 &file_attrs,
                 rel_path,
                 Some(idx_e),
-                filter_fp,
+                Some(rules.filter_process()),
             )?;
+            let staged_oid = repo.odb().hash(ObjectKind::Blob, &data)?;
+            // Stat taken before the read, so a write racing the read is caught next time.
+            let entry = entry_from_metadata(&meta, raw_path, staged_oid, wt_mode);
             if !idx_intent_to_add && staged_oid == idx_oid {
-                let entry = entry_from_stat(abs_path, raw_path, staged_oid, wt_mode)?;
                 if wt_mode != idx_mode || stat_fields_differ(&entry, idx_e) {
                     index.stage_file(entry);
+                    index.mark_content_verified(raw_path, staged_oid);
                     return Ok(true);
                 }
                 return Ok(false);
             }
-            materialize_worktree_blob(
-                repo.odb(),
-                abs_path,
-                &meta,
-                conv,
-                &file_attrs,
-                rel_path,
-                Some(idx_e),
-                filter_fp,
-            )?
+            repo.odb()
+                .write_blob_prehashed(&staged_oid, &data, SERIAL_RESTAGE_WRITE)?;
+            index.stage_file(entry);
+            index.mark_content_verified(raw_path, staged_oid);
+            return Ok(true);
         }
         Err(_) => {
             let meta = fs::symlink_metadata(abs_path).map_err(Error::Io)?;
@@ -827,6 +829,9 @@ fn restage_deferred_jobs(
             &mut loose_dirs_ready,
             &mut modified,
         )?;
+        for entry in &replacements {
+            index.mark_content_verified(&entry.path, entry.oid);
+        }
         index.overwrite_stage0_entries(replacements);
     }
     Ok(modified)
@@ -921,10 +926,9 @@ fn restage_deferred_chunk(
             Some(prep.index_relpath.as_str())
         );
         let mode_for_index = mode_policy.index_mode_for_worktree(prep.mode, Some(idx_e.mode));
-        let abs_path =
-            abs_path_for_stage_tracked(work_tree, raw_path, precompose_unicode, ignorecase);
+        // The read pass's stat precedes the read, like the serial path.
+        let entry = entry_from_metadata(&prep.meta, raw_path, prep.oid, mode_for_index);
         if prep.oid == idx_e.oid && mode_for_index == idx_e.mode {
-            let entry = entry_from_stat(&abs_path, raw_path, prep.oid, mode_for_index)?;
             if stat_fields_differ(&entry, idx_e) {
                 replacements.push(entry);
                 modified.push(raw_path.to_vec());
@@ -932,7 +936,6 @@ fn restage_deferred_chunk(
             continue;
         }
         needs_loose_write = true;
-        let entry = entry_from_stat(&abs_path, raw_path, prep.oid, mode_for_index)?;
         modified.push(raw_path.to_vec());
         replacements.push(entry);
     }
