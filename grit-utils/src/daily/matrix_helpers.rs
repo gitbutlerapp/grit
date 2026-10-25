@@ -410,6 +410,86 @@ pub fn setup_delete_heavy_wide(setup: &DailySetup<'_>) -> Result<DailyHeadlineCo
     })
 }
 
+/// Directories and files per directory in the both-sides content-merge fixture
+/// (production / smoke).
+fn content_merge_wide_shape(smoke: bool) -> (usize, usize) {
+    if smoke {
+        (20, 100)
+    } else {
+        (200, 100)
+    }
+}
+
+/// Rewrite every tracked file under `repo` (as listed in `files`) through `edit`.
+fn edit_every_file(repo: &Path, files: &[PathBuf], edit: impl Fn(&str) -> String) -> Result<()> {
+    for rel in files {
+        let path = repo.join(rel);
+        let text = std::fs::read_to_string(&path)?;
+        std::fs::write(&path, edit(&text))?;
+    }
+    Ok(())
+}
+
+/// Wide tree (200 directories of 100 twenty-line files) where `topic` appends a line to every
+/// file and `main` prepends one, so merging `topic` content-merges every path cleanly: the
+/// shape from issue #1881.
+pub fn setup_content_merge_wide(setup: &DailySetup<'_>) -> Result<DailyHeadlineContext> {
+    use crate::hot_path_fixture::{meta_path, rev_parse, HotPathMeta};
+
+    with_scratch("content-merge-wide", |_scratch| {
+        let (dirs, files_per_dir) = content_merge_wide_shape(setup.smoke);
+        let repo = crate::fixture::scratch_dir();
+        crate::fixture::remove_dir_robust(&repo);
+        std::fs::create_dir_all(&repo)?;
+        run_git(setup.git, &repo, &["init", "-q", "-b", "main"])?;
+        // A detached auto-gc after the big commits would repack under the timed runs.
+        run_git(setup.git, &repo, &["config", "gc.auto", "0"])?;
+        let mut files = Vec::with_capacity(dirs * files_per_dir);
+        for d in 0..dirs {
+            let dir = PathBuf::from(format!("d{d:04}"));
+            std::fs::create_dir_all(repo.join(&dir))?;
+            for f in 0..files_per_dir {
+                let rel = dir.join(format!("f{f:04}.txt"));
+                let body: String = (0..20).map(|j| format!("line {j} of {d}/{f}\n")).collect();
+                std::fs::write(repo.join(&rel), body)?;
+                files.push(rel);
+            }
+        }
+        run_git(setup.git, &repo, &["add", "-A"])?;
+        run_git(setup.git, &repo, &["commit", "-q", "-m", "wide tree"])?;
+        let base_commit = rev_parse(setup.git, &repo, "HEAD")?;
+        run_git(setup.git, &repo, &["checkout", "-q", "-b", "topic"])?;
+        edit_every_file(&repo, &files, |text| format!("{text}topic tail\n"))?;
+        run_git(setup.git, &repo, &["commit", "-q", "-a", "-m", "topic"])?;
+        run_git(setup.git, &repo, &["checkout", "-q", "main"])?;
+        edit_every_file(&repo, &files, |text| format!("main head\n{text}"))?;
+        run_git(setup.git, &repo, &["commit", "-q", "-a", "-m", "main"])?;
+        run_git(setup.git, &repo, &["gc", "-q"])?;
+        let main_tip = rev_parse(setup.git, &repo, "main")?;
+        let meta = HotPathMeta {
+            branch_a: "main".into(),
+            branch_b: "topic".into(),
+            main_branch: "main".into(),
+            topic_branch: "topic".into(),
+            base_commit,
+            main_tip,
+            pick_commit: String::new(),
+            pick_series_commits: Vec::new(),
+            wide: true,
+            wide_branch_b: None,
+        };
+        std::fs::write(meta_path(&repo), serde_json::to_string_pretty(&meta)?)?;
+        let mut headline = ctx(repo, setup);
+        headline.hot_path_meta = Some(meta);
+        Ok(headline)
+    })
+}
+
+/// Merge `topic` into `main` where both sides edited every file of the wide tree.
+pub fn merge_content_wide_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
+    merge_bench_from_meta(ctx)
+}
+
 /// Switch to the delete-heavy branch and back, so the return trip deletes files the first
 /// trip just wrote (racily clean entries).
 pub fn switch_delete_heavy_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {

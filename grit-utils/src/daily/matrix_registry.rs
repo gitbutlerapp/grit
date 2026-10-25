@@ -527,6 +527,13 @@ pub const MATRIX_SCENARIOS: &[ScenarioSpec] = &[
         description: "Merge branch on 100k-file synthetic vs git merge",
     },
     ScenarioSpec {
+        id: "merge/content-both-sides@wide-20k",
+        area: Area::Branching,
+        headline: false,
+        name: None,
+        description: "Merge a branch where both sides edited all 20k files (one content merge per path) vs git merge",
+    },
+    ScenarioSpec {
         id: "revert/one@synth-10k",
         area: Area::Branching,
         headline: false,

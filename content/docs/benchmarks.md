@@ -351,6 +351,32 @@ cargo build --release -p grit-cli -p grit-utils
   --min-runs 10 --output grit-utils/baselines/daily-delete-heavy-after.json
 ```
 
+## Content merges on both sides (2026-10-25)
+
+A merge where both branches edited the same files grew with the number of content-merged paths times the size of the index: 146 s for 20 000 files edited on both sides, where Git takes 2.9 s, and 112 s for 2000 overlapping edits in a 200 000-file tree (issue #1881). For every path that needed a three-way content merge, the tree merge reloaded the index and rebuilt the attribute and ignore rules (config, `info/exclude`, the global ignore file, `.gitattributes`) up to four times, just to look up `merge=union`, `-merge`, `-text` and `-diff`. The rules are now built from one index load per tree merge, on the first path that needs them, and each path looks its attributes up once. Results are unchanged: the merged trees are identical to Git's.
+
+Same VM sitting, release builds, system `git 2.43.0`, `/usr/bin/time` wall time and peak RSS, one run each:
+
+| Repository | Git | Grit before | Grit after |
+| --- | ---: | ---: | ---: |
+| 2000 files, all edited on both sides | 0.36 s / 9 MB | 2.26 s / 25 MB | **0.24 s** / 25 MB |
+| 20 000 files, all edited on both sides | 2.85 s / 40 MB | 145.9 s / 100 MB | **2.66 s** / 103 MB |
+| 200 000 files, 2000 overlapping edits | 2.51 s / 96 MB | 112.2 s / 122 MB | **1.05 s** / 102 MB |
+
+The new `grit-bench daily` row `merge/content-both-sides@wide-20k` (200 directories of 100 twenty-line files, `topic` appends a line to every file, `main` prepends one, packed fixture) is committed in **`daily-merge-content-wide-before.json`** and **`daily-merge-content-wide-after.json`**:
+
+| Scenario | Git ms (before / after run) | Grit ms before → after | Grit ÷ Git before → after | Grit peak RSS before → after |
+| --- | ---: | ---: | ---: | ---: |
+| `merge/content-both-sides@wide-20k` | 1395.6 / 1378.3 | 149 610.9 → **1236.5** | 107.2× → **0.90×** | 115 → 116 MB |
+
+Peak memory is still about twice Git's on this shape and is not addressed by this change.
+
+```bash
+cargo build --release -p grit-cli -p grit-utils
+./target/release/grit-bench daily --only merge/content-both-sides@wide-20k \
+  --min-runs 10 --output grit-utils/baselines/daily-merge-content-wide-after.json
+```
+
 ## Pick keeps the cache-tree (2026-10-24)
 
 The daily census flagged `pick/one@synth-100k` going from 0.95× to 1.22× Git. The replay sequencer had started loading the index without its cache-tree extension to save memory. Without a cache-tree, the check that the index matches `HEAD` flattens the whole `HEAD` tree into a map, which costs more time and more memory than the extension it skipped. The index was also parsed a second time for the first replay step, and the index written after the pick lost its cache-tree. Pick and revert now keep the cache-tree, and the snapshot from the cleanliness check feeds the first step.

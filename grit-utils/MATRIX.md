@@ -154,6 +154,7 @@ Overview of **grit-lib** coverage, **`grit` commands**, common workflows, and **
 | `branch/merged@many-refs` | Branch --merged vs git branch --merged |
 | `branch/merged-ref@many-refs` | Branch --merged ref query vs git for-each-ref on many-refs |
 | `history/reword@synth-10k` | History reword vs git history reword or scripted rebase |
+| `merge/content-both-sides@wide-20k` | Merge a branch where both sides edited all 20k files (one content merge per path) vs git merge |
 | `merge/clean@synth-100k` | Merge branch on 100k-file synthetic vs git merge |
 | `merge/clean@synth-10k` | Merge branch vs git merge |
 | `pick/one@synth-100k` | Cherry-pick one commit on 100k-file synthetic vs git cherry-pick |
