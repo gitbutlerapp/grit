@@ -265,7 +265,7 @@ pub fn list_worktrees(repo: &Repository) -> Result<Vec<WorktreeEntry>> {
         path_for_disk_compare(common.parent().unwrap_or(&common))
     };
 
-    let main_head = if opened_from_linked || repo.refs_on_disk() {
+    let main_head = if opened_from_linked || (repo.refs_on_disk() && git_dir != common) {
         resolve_head(&common)
     } else {
         crate::state::resolve_head_for_repository(repo)

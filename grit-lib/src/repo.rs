@@ -1591,7 +1591,7 @@ impl Repository {
             repo.validate_repository_format_cached()?;
         }
         repo.install_config_snapshot();
-        warn_core_bare_worktree_conflict(options, repo.git_dir());
+        warn_core_bare_worktree_conflict(options, &repo);
         let _ = trace_repo_setup_if_requested(&repo);
         Ok(repo)
     }
@@ -1717,7 +1717,7 @@ impl Repository {
         if options.validate_repository_format {
             repo.validate_repository_format_cached()?;
         }
-        warn_core_bare_worktree_conflict(options, repo.git_dir());
+        warn_core_bare_worktree_conflict(options, &repo);
         let _ = trace_repo_setup_if_requested(&repo);
         Ok(repo)
     }
@@ -3962,7 +3962,10 @@ fn safe_directory_matches(config_value: &str, checked: &str, cwd: &Path) -> bool
     config_norm == checked_norm
 }
 
-fn warn_core_bare_worktree_conflict(options: &RepositoryOptions, git_dir: &Path) {
+/// Warn when `repo`'s configuration sets both `core.bare` and `core.worktree`.
+///
+/// Reads the configuration snapshot `repo` just loaded rather than parsing the cascade again.
+fn warn_core_bare_worktree_conflict(options: &RepositoryOptions, repo: &Repository) {
     if options
         .environment
         .git_work_tree
@@ -3971,12 +3974,13 @@ fn warn_core_bare_worktree_conflict(options: &RepositoryOptions, git_dir: &Path)
     {
         return;
     }
-    if let Ok((bare, wt)) = read_core_bare_and_worktree(git_dir) {
-        if bare && wt.is_some() {
-            options
-                .diagnostics
-                .warn(diagnostics::Warning::CoreBareWithWorktree);
-        }
+    let Ok(cfg) = repo.ensure_config_arc_fast() else {
+        return;
+    };
+    if let (true, Some(_)) = read_core_bare_and_worktree_from_config(&cfg) {
+        options
+            .diagnostics
+            .warn(diagnostics::Warning::CoreBareWithWorktree);
     }
 }
 

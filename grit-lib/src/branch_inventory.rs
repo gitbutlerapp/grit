@@ -5,6 +5,7 @@ use std::path::PathBuf;
 
 use time::OffsetDateTime;
 
+use crate::config::ConfigSet;
 use crate::error::{Error, Result};
 use crate::objects::{read_commit_subject_pretty, ObjectId, ObjectKind};
 use crate::parallel::{try_par_map, ParallelHashError, ParallelOp};
@@ -101,7 +102,8 @@ pub fn upstream_status(repo: &Repository, branch: &str) -> Result<Option<Upstrea
     let tip = repo
         .references()
         .resolve_if_exists(&format!("refs/heads/{branch}"))?;
-    build_upstream_status(repo, branch, tip, BranchDetail::Full)
+    let config = repo.config()?;
+    build_upstream_status(repo, &config, branch, tip, BranchDetail::Full)
 }
 
 /// List branches matching `query` at the requested detail level.
@@ -121,10 +123,11 @@ pub fn list_branches(
     if detail == BranchDetail::Names && matches!(query.refs.sort.key, SortKey::Date) {
         return Err(Error::BranchListNamesDateSort);
     }
+    let config = repo.config()?;
     let listings = query_refs_peeling(
         repo,
         &ref_query_for_branch_list(query),
-        &ref_query_options(repo)?,
+        &ref_query_options(&config),
         PeelTips::WhenFiltering,
     )
     .map_err(ref_query_error)?;
@@ -156,7 +159,13 @@ pub fn list_branches(
         let upstream = if is_remote {
             None
         } else {
-            build_upstream_status(repo, &listing.short_name, Some(listing.oid), detail)?
+            build_upstream_status(
+                repo,
+                &config,
+                &listing.short_name,
+                Some(listing.oid),
+                detail,
+            )?
         };
 
         let worktree = if is_remote {
@@ -198,9 +207,8 @@ fn ref_query_for_branch_list(query: &BranchListQuery) -> RefQuery {
     refs
 }
 
-fn ref_query_options(repo: &Repository) -> Result<RefQueryOptions> {
-    let config = repo.config()?;
-    Ok(RefQueryOptions {
+fn ref_query_options(config: &ConfigSet) -> RefQueryOptions {
+    RefQueryOptions {
         versionsort_suffixes: config
             .get_all("versionsort.suffix")
             .iter()
@@ -210,7 +218,7 @@ fn ref_query_options(repo: &Repository) -> Result<RefQueryOptions> {
             .get_bool("core.ignorecase")
             .and_then(|r| r.ok())
             .unwrap_or(false),
-    })
+    }
 }
 
 fn ref_query_error(err: RefQueryError) -> Error {
@@ -237,14 +245,14 @@ fn branch_worktree_paths(repo: &Repository) -> Result<HashMap<String, PathBuf>> 
 
 fn build_upstream_status(
     repo: &Repository,
+    config: &ConfigSet,
     branch_short: &str,
     branch_tip: Option<ObjectId>,
     detail: BranchDetail,
 ) -> Result<Option<UpstreamStatus>> {
-    let config = repo.config()?;
     let remote_key = format!("branch.{branch_short}.remote");
     let merge_key = format!("branch.{branch_short}.merge");
-    let Some(full_ref) = crate::branch_tracking::branch_upstream_full_ref(&config, branch_short)
+    let Some(full_ref) = crate::branch_tracking::branch_upstream_full_ref(config, branch_short)
     else {
         return Ok(None);
     };
