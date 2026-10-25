@@ -6,9 +6,9 @@ use std::time::{Duration, Instant, SystemTime};
 use anyhow::Result;
 use grit_lib::config::git_date::approx::approxidate_careful_at;
 use grit_lib::maintenance::{
-    gc, pack_refs, prune_loose_objects, repack_all, write_commit_graph, write_midx,
-    CommitGraphOptions, GcOptions, GcPhaseTimings, GcStats, MidxOptions, PackRefsOptions,
-    PruneOptions, RepackOptions,
+    auto_gc_needed, gc, gc_auto, pack_refs, prune_loose_objects, repack_all, write_commit_graph,
+    write_midx, AutoGcOutcome, AutoGcReason, CommitGraphOptions, GcLock, GcOptions, GcPhaseTimings,
+    GcStats, MidxOptions, PackRefsOptions, PruneOptions, RepackOptions,
 };
 use grit_lib::objects::midx::MidxBitmapWriteOutcome;
 use schemars::JsonSchema;
@@ -25,7 +25,125 @@ pub struct GcOutcome {
     #[serde(skip)]
     pub quiet: bool,
     pub dry_run: bool,
+    /// Decision of `grit gc --auto`; absent for a plain `grit gc`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auto: Option<GcAutoReport>,
     pub tasks: Vec<GcTaskReport>,
+}
+
+/// What `grit gc --auto` decided (JSON uses a `status` discriminator).
+#[derive(Serialize, JsonSchema)]
+#[serde(tag = "status", rename_all = "kebab-case")]
+pub enum GcAutoReport {
+    /// Below `gc.auto` and `gc.autoPackLimit` (or `gc.auto=0`); nothing ran.
+    NotNeeded,
+    /// Another maintenance run holds `gc.pid`; nothing ran.
+    AlreadyRunning {
+        pid: Option<u64>,
+        host: Option<String>,
+    },
+    /// The `pre-auto-gc` hook exited non-zero; nothing ran.
+    DeclinedByHook { exit_code: i32 },
+    /// Maintenance ran (or would run, with `--dry-run`).
+    Ran {
+        #[serde(flatten)]
+        trigger: GcAutoTrigger,
+    },
+}
+
+/// Threshold that triggered `grit gc --auto`.
+#[derive(Serialize, JsonSchema)]
+#[serde(tag = "trigger", rename_all = "kebab-case")]
+pub enum GcAutoTrigger {
+    /// Estimated loose objects above `gc.auto`.
+    LooseObjects { estimate: usize, limit: usize },
+    /// Packs without `.keep` above `gc.autoPackLimit`.
+    Packs { count: usize, limit: usize },
+}
+
+impl From<AutoGcReason> for GcAutoTrigger {
+    fn from(reason: AutoGcReason) -> Self {
+        match reason {
+            AutoGcReason::TooManyLoose { estimate, limit } => {
+                Self::LooseObjects { estimate, limit }
+            }
+            AutoGcReason::TooManyPacks { count, limit } => Self::Packs { count, limit },
+        }
+    }
+}
+
+impl GcAutoReport {
+    fn render_human_line(&self, w: &mut dyn Write, dry_run: bool) -> Result<()> {
+        match self {
+            Self::NotNeeded => outln!(
+                w,
+                "auto: nothing to do (below gc.auto and gc.autoPackLimit)."
+            ),
+            Self::AlreadyRunning { pid, host } => {
+                let holder = match (pid, host) {
+                    (Some(pid), Some(host)) => format!(" (process {pid} on {host})"),
+                    (Some(pid), None) => format!(" (process {pid})"),
+                    _ => String::new(),
+                };
+                outln!(w, "auto: skipped, maintenance already running{holder}.");
+            }
+            Self::DeclinedByHook { exit_code } => outln!(
+                w,
+                "auto: skipped, pre-auto-gc hook exited with status {exit_code}."
+            ),
+            Self::Ran { trigger } => {
+                let verb = if dry_run { "would run" } else { "ran" };
+                match trigger {
+                    GcAutoTrigger::LooseObjects { estimate, limit } => outln!(
+                        w,
+                        "auto: {verb} for about {estimate} loose objects (gc.auto = {limit})."
+                    ),
+                    GcAutoTrigger::Packs { count, limit } => outln!(
+                        w,
+                        "auto: {verb} for {count} packs (gc.autoPackLimit = {limit})."
+                    ),
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn render_markdown(&self, w: &mut dyn Write) -> Result<()> {
+        let status = match self {
+            Self::NotNeeded => "not-needed",
+            Self::AlreadyRunning { .. } => "already-running",
+            Self::DeclinedByHook { .. } => "declined-by-hook",
+            Self::Ran { .. } => "ran",
+        };
+        outln!(w, "- **auto:** {status}");
+        match self {
+            Self::NotNeeded => {}
+            Self::AlreadyRunning { pid, host } => {
+                if let Some(pid) = pid {
+                    outln!(w, "- **pid:** {pid}");
+                }
+                if let Some(host) = host {
+                    outln!(w, "- **host:** {host}");
+                }
+            }
+            Self::DeclinedByHook { exit_code } => outln!(w, "- **exit_code:** {exit_code}"),
+            Self::Ran {
+                trigger: GcAutoTrigger::LooseObjects { estimate, limit },
+            } => {
+                outln!(w, "- **trigger:** loose-objects");
+                outln!(w, "- **estimate:** {estimate}");
+                outln!(w, "- **limit:** {limit}");
+            }
+            Self::Ran {
+                trigger: GcAutoTrigger::Packs { count, limit },
+            } => {
+                outln!(w, "- **trigger:** packs");
+                outln!(w, "- **count:** {count}");
+                outln!(w, "- **limit:** {limit}");
+            }
+        }
+        Ok(())
+    }
 }
 
 /// One maintenance task report (JSON uses a `task` discriminator).
@@ -125,6 +243,9 @@ impl HumanRender for GcOutcome {
         if self.dry_run {
             outln!(w, "Dry run: no changes written.");
         }
+        if let Some(auto) = &self.auto {
+            auto.render_human_line(w, self.dry_run)?;
+        }
         for task in &self.tasks {
             task.render_human_line(w, self.dry_run)?;
         }
@@ -136,6 +257,9 @@ impl MarkdownRender for GcOutcome {
     fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         outln!(w, "## Garbage collection\n");
         outln!(w, "- **dry_run:** {}", self.dry_run);
+        if let Some(auto) = &self.auto {
+            auto.render_markdown(w)?;
+        }
         outln!(w, "\n### Tasks\n");
         for task in &self.tasks {
             task.render_markdown(w)?;
@@ -404,8 +528,110 @@ pub fn run_full(dry_run: bool, quiet: bool, mode: OutputMode) -> Result<GcOutcom
     Ok(GcOutcome {
         quiet,
         dry_run,
+        auto: None,
         tasks,
     })
+}
+
+/// `grit gc --auto`: run maintenance only when `gc.auto` / `gc.autoPackLimit` say it is due.
+pub fn run_auto(dry_run: bool, quiet: bool, now: OffsetDateTime) -> Result<GcOutcome> {
+    let repo = context::discover()?;
+    let opts = GcOptions::full_run(dry_run, now.unix_timestamp());
+    let outcome = gc_auto(&repo, &opts).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let (auto, tasks) = match outcome {
+        AutoGcOutcome::NotNeeded => (GcAutoReport::NotNeeded, Vec::new()),
+        AutoGcOutcome::AlreadyRunning(holder) => (
+            GcAutoReport::AlreadyRunning {
+                pid: holder.pid,
+                host: holder.host,
+            },
+            Vec::new(),
+        ),
+        AutoGcOutcome::DeclinedByHook { status, .. } => (
+            GcAutoReport::DeclinedByHook { exit_code: status },
+            Vec::new(),
+        ),
+        AutoGcOutcome::Ran { reason, stats } => {
+            let timings = stats.phase_timings;
+            (
+                GcAutoReport::Ran {
+                    trigger: reason.into(),
+                },
+                tasks_from_gc_stats(*stats, timings),
+            )
+        }
+        _ => (GcAutoReport::NotNeeded, Vec::new()),
+    };
+    Ok(GcOutcome {
+        quiet,
+        dry_run,
+        auto: Some(auto),
+        tasks,
+    })
+}
+
+/// Start automatic maintenance after a command that wrote objects, when it is due.
+///
+/// Honors `maintenance.auto`, `gc.auto`, `gc.autoPackLimit` and `gc.autoDetach`. Detached runs
+/// re-execute this binary as `grit gc --auto --quiet` in the background; otherwise maintenance
+/// runs here before the command exits. Never fails the command that triggered it: problems are
+/// reported on stderr in human mode only.
+pub fn run_auto_after_command(mode: OutputMode, now: OffsetDateTime) {
+    let Ok(repo) = context::discover() else {
+        return;
+    };
+    let Ok(config) = repo.config() else {
+        return;
+    };
+    if !config.maintenance_auto() {
+        return;
+    }
+    let Ok(Some(_)) = auto_gc_needed(&repo) else {
+        return;
+    };
+    if GcLock::current_holder(&repo, now.unix_timestamp()).is_some() {
+        return;
+    }
+    let human = mode == OutputMode::Human;
+    if config.gc_auto_detach() {
+        match spawn_detached_auto_gc() {
+            Ok(()) => {
+                if human {
+                    eprintln!("Packing the repository in the background (gc.auto); see `grit gc`.");
+                }
+                return;
+            }
+            Err(err) if human => {
+                eprintln!("warning: could not start background maintenance: {err}");
+            }
+            Err(_) => {}
+        }
+    }
+    if human {
+        eprintln!("Packing the repository (gc.auto); see `grit gc`.");
+    }
+    let opts = GcOptions::full_run(false, now.unix_timestamp());
+    if let Err(err) = gc_auto(&repo, &opts) {
+        if human {
+            eprintln!("warning: automatic maintenance failed: {err}");
+        }
+    }
+}
+
+fn spawn_detached_auto_gc() -> std::io::Result<()> {
+    let exe = std::env::current_exe()?;
+    let mut cmd = std::process::Command::new(exe);
+    cmd.args(["gc", "--auto", "--quiet"])
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt as _;
+        // Own process group, so a Ctrl-C aimed at the user's shell does not stop it.
+        cmd.process_group(0);
+    }
+    cmd.spawn().map(drop)
 }
 
 pub fn run_repack(
@@ -423,6 +649,7 @@ pub fn run_repack(
     Ok(GcOutcome {
         quiet,
         dry_run,
+        auto: None,
         tasks: vec![GcTaskReport::Repack {
             duration_ms: elapsed.as_millis() as u64,
             report: stats.into(),
@@ -440,6 +667,7 @@ pub fn run_commit_graph(dry_run: bool, quiet: bool, mode: OutputMode) -> Result<
     Ok(GcOutcome {
         quiet,
         dry_run,
+        auto: None,
         tasks: vec![GcTaskReport::CommitGraph {
             duration_ms: elapsed.as_millis() as u64,
             commit_count: report.commit_count,
@@ -459,6 +687,7 @@ pub fn run_midx(dry_run: bool, quiet: bool, mode: OutputMode) -> Result<GcOutcom
     Ok(GcOutcome {
         quiet,
         dry_run,
+        auto: None,
         tasks: vec![GcTaskReport::Midx {
             duration_ms: elapsed.as_millis() as u64,
             pack_count: report.pack_count,
@@ -478,6 +707,7 @@ pub fn run_pack_refs(dry_run: bool, quiet: bool, mode: OutputMode) -> Result<GcO
     Ok(GcOutcome {
         quiet,
         dry_run,
+        auto: None,
         tasks: vec![GcTaskReport::PackRefs {
             duration_ms: elapsed.as_millis() as u64,
             refs_packed: report.refs_packed,
@@ -503,6 +733,7 @@ pub fn run_prune(
     Ok(GcOutcome {
         quiet,
         dry_run,
+        auto: None,
         tasks: vec![GcTaskReport::Prune {
             duration_ms: elapsed.as_millis() as u64,
             pruned: stats.pruned,

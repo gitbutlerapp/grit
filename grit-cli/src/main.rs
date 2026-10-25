@@ -1067,6 +1067,9 @@ enum Command {
         /// Show what would run without writing.
         #[arg(long = "dry-run")]
         dry_run: bool,
+        /// Run only when `gc.auto` or `gc.autoPackLimit` is exceeded (what commands run on their own).
+        #[arg(long = "auto")]
+        auto: bool,
         /// Suppress progress summary on stderr.
         #[arg(short, long)]
         quiet: bool,
@@ -2181,13 +2184,56 @@ fn run() -> Result<ExitStatus, anyhow::Error> {
     let render_ctx = RenderContext {
         now: context::wall_clock_now(&env),
     };
+    let auto_maintenance = cli.command.as_ref().is_some_and(writes_objects);
     match dispatch(cli, &opts, &render_ctx, &env) {
+        Ok(ExitStatus::Success) if auto_maintenance => {
+            commands::gc::run_auto_after_command(opts.mode, render_ctx.now);
+            Ok(ExitStatus::Success)
+        }
         Ok(status) => Ok(status),
         Err(err) => {
             let err = json_error::ensure_structured(err);
             output::emit_error(&err, &opts);
             Ok(ExitStatus::for_error(&err))
         }
+    }
+}
+
+/// Commands that write objects and so may start automatic maintenance when they succeed.
+fn writes_objects(command: &Command) -> bool {
+    match command {
+        Command::Commit { dry_run, .. } => !dry_run,
+        Command::Merge { check, dry_run, .. }
+        | Command::Pick { check, dry_run, .. }
+        | Command::Revert { check, dry_run, .. } => !check && !dry_run,
+        Command::Fetch { fetch } => !fetch.dry_run,
+        Command::Pull { fetch, check, .. } => !fetch.dry_run && !check,
+        Command::Rebase { shared, .. } => !shared.dry_run,
+        Command::History { action } => !history_action_shared(action).dry_run,
+        Command::Stash {
+            dry_run, action, ..
+        } => {
+            !dry_run
+                && matches!(
+                    action,
+                    None | Some(StashAction::Push { dry_run: false, .. })
+                )
+        }
+        _ => false,
+    }
+}
+
+fn history_action_shared(action: &HistoryAction) -> &commands::history::HistoryRewriteArgs {
+    match action {
+        HistoryAction::Drop { shared, .. }
+        | HistoryAction::Move { shared, .. }
+        | HistoryAction::Reword { shared, .. }
+        | HistoryAction::Fixup { shared, .. }
+        | HistoryAction::Absorb { shared, .. }
+        | HistoryAction::Rebase { shared, .. }
+        | HistoryAction::Split { shared, .. }
+        | HistoryAction::Undo { shared }
+        | HistoryAction::Squash { shared, .. } => shared,
     }
 }
 
@@ -2795,11 +2841,16 @@ fn dispatch(
         }
         Command::Gc {
             dry_run,
+            auto,
             quiet,
             action,
         } => {
             let mode = opts.mode;
+            if auto && action.is_some() {
+                bail!("`--auto` cannot be combined with a gc subcommand");
+            }
             let outcome = match action {
+                None if auto => commands::gc::run_auto(dry_run, quiet, ctx.now)?,
                 None => commands::gc::run(dry_run, quiet, mode)?,
                 Some(GcAction::Repack {
                     bitmaps,

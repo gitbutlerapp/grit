@@ -11,6 +11,7 @@ order: 3
 grit gc
 grit gc --dry-run
 grit gc --quiet
+grit gc --auto [--dry-run]
 grit gc repack [--bitmaps] [--dry-run]
 grit gc commit-graph [--dry-run]
 grit gc midx [--dry-run]
@@ -34,11 +35,32 @@ Task subcommands run a single step and return the same JSON shape with one entry
 
 Progress lines go to **stderr**. The human summary lists each task, key counters, and elapsed milliseconds.
 
+### Automatic maintenance
+
+Like Git, grit keeps loose objects from piling up without you scheduling anything. After a successful **`grit commit`**, **`merge`**, **`pick`**, **`revert`**, **`rebase`**, **`history`** rewrite, **`stash`** (push), **`fetch`** or **`pull`** (none of them with `--dry-run` or `--check`), grit runs the same check as `git gc --auto`:
+
+- **Too many packs:** more local packs without a `.keep` file than `gc.autoPackLimit` (default 50). Every pack is consolidated into one, as a full `grit gc` does.
+- **Too many loose objects:** the loose-object count is estimated from one fan-out directory (`objects/17`, times 256) and compared with `gc.auto` (default 6700). The loose objects are packed into one new pack and existing packs are left alone, so the cost depends on the loose objects rather than the repository size.
+
+When either fires, `grit gc --auto` runs: pack-refs, reflog expiry, the repack above, unreachable-object pruning under `gc.pruneExpire`, and commit-graph. The check itself is two directory reads, so commands do not get slower in the common case.
+
+| Config | Default | Effect |
+| --- | --- | --- |
+| `gc.auto` | `6700` | Loose-object threshold. `0` or a negative value turns automatic maintenance off entirely. |
+| `gc.autoPackLimit` | `50` | Pack-count threshold. `0` or a negative value turns off only this trigger. |
+| `gc.autoDetach` | `true` | Run in the background (`grit gc --auto --quiet` in a separate process) so the command returns at once. `false` runs it before the command exits. |
+| `maintenance.auto` | `true` | `false` stops commands from starting automatic maintenance; `grit gc --auto` still works. |
+
+Before doing any work, an automatic run takes the `gc.pid` lock that Git uses, so it never overlaps another grit or Git gc, and runs the `pre-auto-gc` hook; a non-zero hook exit skips the run. In human mode the triggering command prints one line on stderr when it starts maintenance; `--json` and `--markdown` output are unchanged.
+
+A plain `grit gc` always runs and also takes the `gc.pid` lock: it fails with an error when another gc is running.
+
 ## Options
 
 | Option | Description |
 | --- | --- |
 | `--dry-run` | Preview maintenance without writing refs or objects (full `grit gc`, or combine with a task subcommand). |
+| `--auto` | Run only when `gc.auto` or `gc.autoPackLimit` is exceeded (see [Automatic maintenance](#automatic-maintenance)). With `--dry-run`, report the decision and the planned work. Cannot be combined with a task subcommand. |
 | `-q`, `--quiet` | Suppress the human task summary. |
 
 ### `grit gc repack`
@@ -88,6 +110,48 @@ $ grit gc repack --bitmaps
 repack: packed 412 objects into .git/objects/pack/pack-….pack (800 ms).
 ```
 
+Automatic maintenance, below and above the threshold:
+
+```console
+$ grit gc --auto
+auto: nothing to do (below gc.auto and gc.autoPackLimit).
+$ grit gc --auto
+auto: ran for about 8192 loose objects (gc.auto = 6700).
+pack-refs: packed 1 refs (1 loose removed) → .git/packed-refs (0 ms).
+reflog-expire: removed 0 entries (3 ms).
+repack: packed 9633 objects into .git/objects/pack/pack-….pack (469 ms).
+prune: removed 0 unreachable loose objects (0 kept, 0 ms).
+commit-graph: wrote 2401 commits to .git/objects/info/commit-graph (25 ms).
+```
+
+With `--json`, the decision is in `auto` (abbreviated):
+
+```json
+{
+  "dry_run": false,
+  "auto": {
+    "status": "ran",
+    "trigger": "loose-objects",
+    "estimate": 8192,
+    "limit": 6700
+  },
+  "tasks": [
+    {
+      "task": "repack",
+      "duration_ms": 469,
+      "loose_before": 9633,
+      "packs_before": 0,
+      "objects_packed": 9633,
+      "pack_bytes": 2675908,
+      "pack_path": ".git/objects/pack/pack-6ac7a5ee….pack",
+      "removed_pack_files": 0,
+      "pruned_loose": 9633,
+      "unreachable_loose_pruned": 0
+    }
+  ]
+}
+```
+
 ## JSON output
 
 Schema: [v1](/schemas/gc/v1.json) (task subcommands also have [gc.repack](/schemas/gc.repack/v1.json), [gc.commit-graph](/schemas/gc.commit-graph/v1.json), [gc.midx](/schemas/gc.midx/v1.json), [gc.pack-refs](/schemas/gc.pack-refs/v1.json), and [gc.prune](/schemas/gc.prune/v1.json) schemas).
@@ -97,6 +161,7 @@ Pass `--json` for stable, scripting-friendly output:
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
 | `dry_run` | boolean | Whether this run only estimated work (full gc). |
+| `auto` | object | Only with `--auto`. `status` is `not-needed`, `already-running` (with `pid` and `host` from `gc.pid`, each `null` when unreadable), `declined-by-hook` (with the hook's `exit_code`), or `ran`. For `ran`, `trigger` is `loose-objects` (with `estimate` and `limit`) or `packs` (with `count` and `limit`). |
 | `tasks` | array | One object per maintenance task; each value includes `task` (`pack-refs`, `reflog-expire`, `repack`, `prune`, `commit-graph`, `midx`) and task-specific counters plus `duration_ms`. |
 
 Example (abbreviated):

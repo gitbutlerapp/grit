@@ -2,6 +2,146 @@
   "$id": "https://grit-scm.com/schemas/gc.pack-refs/v1.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "definitions": {
+    "GcAutoReport": {
+      "description": "What `grit gc --auto` decided (JSON uses a `status` discriminator).",
+      "oneOf": [
+        {
+          "description": "Below `gc.auto` and `gc.autoPackLimit` (or `gc.auto=0`); nothing ran.",
+          "properties": {
+            "status": {
+              "enum": [
+                "not-needed"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Another maintenance run holds `gc.pid`; nothing ran.",
+          "properties": {
+            "host": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "pid": {
+              "format": "uint64",
+              "minimum": 0.0,
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "status": {
+              "enum": [
+                "already-running"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "The `pre-auto-gc` hook exited non-zero; nothing ran.",
+          "properties": {
+            "exit_code": {
+              "format": "int32",
+              "type": "integer"
+            },
+            "status": {
+              "enum": [
+                "declined-by-hook"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "exit_code",
+            "status"
+          ],
+          "type": "object"
+        },
+        {
+          "description": "Maintenance ran (or would run, with `--dry-run`).",
+          "oneOf": [
+            {
+              "description": "Estimated loose objects above `gc.auto`.",
+              "properties": {
+                "estimate": {
+                  "format": "uint",
+                  "minimum": 0.0,
+                  "type": "integer"
+                },
+                "limit": {
+                  "format": "uint",
+                  "minimum": 0.0,
+                  "type": "integer"
+                },
+                "trigger": {
+                  "enum": [
+                    "loose-objects"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "estimate",
+                "limit",
+                "trigger"
+              ],
+              "type": "object"
+            },
+            {
+              "description": "Packs without `.keep` above `gc.autoPackLimit`.",
+              "properties": {
+                "count": {
+                  "format": "uint",
+                  "minimum": 0.0,
+                  "type": "integer"
+                },
+                "limit": {
+                  "format": "uint",
+                  "minimum": 0.0,
+                  "type": "integer"
+                },
+                "trigger": {
+                  "enum": [
+                    "packs"
+                  ],
+                  "type": "string"
+                }
+              },
+              "required": [
+                "count",
+                "limit",
+                "trigger"
+              ],
+              "type": "object"
+            }
+          ],
+          "properties": {
+            "status": {
+              "enum": [
+                "ran"
+              ],
+              "type": "string"
+            }
+          },
+          "required": [
+            "status"
+          ],
+          "type": "object"
+        }
+      ]
+    },
     "GcTaskReport": {
       "description": "One maintenance task report (JSON uses a `task` discriminator).",
       "oneOf": [
@@ -244,6 +384,17 @@
   },
   "description": "Result of `grit gc` and its task subcommands.",
   "properties": {
+    "auto": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/GcAutoReport"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "Decision of `grit gc --auto`; absent for a plain `grit gc`."
+    },
     "dry_run": {
       "type": "boolean"
     },
