@@ -1053,8 +1053,9 @@ impl Index {
         )
     }
 
-    /// Like [`Index::load_expand_sparse`], but treats a missing index or Git's
-    /// `"file too short"` placeholder as an empty index.
+    /// Like [`Index::load_expand_sparse`], but treats a missing index as an empty index.
+    ///
+    /// An index file too short to hold a header and checksum is an error, as in Git.
     pub fn load_expand_sparse_optional(path: &Path, odb: &Odb) -> Result<Self> {
         Self::load_expand_sparse_optional_with_context(
             path,
@@ -1075,15 +1076,7 @@ impl Index {
         let mut idx = match read_index_file(path) {
             Ok((data, mtime)) => Self {
                 source_mtime: Some(mtime),
-                ..Self::parse_with_algo_and_config(&data, algo, config, parse_context).or_else(
-                    |e| match e {
-                        Error::IndexError(msg) if msg == "file too short" => Ok(Self {
-                            hash_algo: algo,
-                            ..Self::new()
-                        }),
-                        other => Err(other),
-                    },
-                )?
+                ..Self::parse_with_algo_and_config(&data, algo, config, parse_context)?
             },
             Err(e) if e.kind() == io::ErrorKind::NotFound => Self {
                 hash_algo: algo,
@@ -5611,6 +5604,26 @@ mod tests {
         e.set_intent_to_add(true);
         idx.add_or_replace(e);
         crate::write_tree::write_tree_from_index(&odb, &idx, "").unwrap();
+    }
+
+    #[test]
+    fn optional_load_is_empty_only_when_the_index_is_missing() {
+        let dir = TempDir::new().unwrap();
+        let odb = crate::odb::Odb::new(dir.path());
+        let path = dir.path().join("index");
+        let missing = Index::load_expand_sparse_optional(&path, &odb).unwrap();
+        assert!(missing.entries.is_empty());
+
+        for len in [0, 12, 31] {
+            std::fs::write(&path, b"DIRC\0\0\0\x02\0\0\0\0".repeat(3)[..len].to_vec()).unwrap();
+            assert!(
+                matches!(
+                    Index::load_expand_sparse_optional(&path, &odb),
+                    Err(Error::IndexError(_))
+                ),
+                "len={len}"
+            );
+        }
     }
 
     fn naive_merge_sorted(kept: &[IndexEntry], insert: &[IndexEntry]) -> Vec<IndexEntry> {
