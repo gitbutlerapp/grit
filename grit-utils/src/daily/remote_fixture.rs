@@ -345,6 +345,35 @@ pub fn setup_synth10k_remote(setup: &DailySetup<'_>) -> Result<DailyHeadlineCont
     })
 }
 
+/// Bare copy of the 100k-file synthetic fixture, cloned by plain path: both tools then link the
+/// pack locally (git skips `upload-pack`), so the timed clone is dominated by the checkout.
+pub fn setup_synth100k_path_remote(setup: &DailySetup<'_>) -> Result<DailyHeadlineContext> {
+    with_remote_scratch("synth-100k-path-clone", |scratch| {
+        let kind = if setup.smoke {
+            FixtureKind::Synth100kSmoke
+        } else {
+            FixtureKind::Synth100k
+        };
+        let (worktree, _) = fixture_registry::ensure_cached(setup.git, kind, setup.offline)?;
+        let bare = scratch.join("remote.git");
+        worktree_to_bare(setup.git, &worktree, &bare)?;
+        let meta = install_network_meta(setup.git, &bare, setup.smoke)?;
+        let remote_url = bare.display().to_string();
+        std::env::set_var("GRIT_BENCH_DAILY_NETWORK_BARE", &bare);
+        Ok(ctx_with_remote(
+            scratch.to_path_buf(),
+            setup,
+            DailyRemoteState {
+                bare,
+                meta,
+                remote_url,
+                grit_http: None,
+                git_http: None,
+            },
+        ))
+    })
+}
+
 pub fn setup_remote_remove_many_refs(setup: &DailySetup<'_>) -> Result<DailyHeadlineContext> {
     let mut ctx = setup_many_refs_remote(setup)?;
     let remote = ctx.remote.as_ref().context("remote state")?;

@@ -1,0 +1,141 @@
+{
+  "schema": "grit-daily-bench/1",
+  "generated_at": "2026-10-25T00:15:18.906432377Z",
+  "machine": {
+    "cpu_model": "Intel(R) Xeon(R) Processor",
+    "physical_cores": 4,
+    "logical_cores": 4,
+    "ram_bytes": 16780574720,
+    "os": "linux",
+    "kernel": "Linux 6.12.94+",
+    "scratch_filesystem": "ext4",
+    "rustc_version": "rustc 1.99.0 (b940084d7 2026-09-28)",
+    "cargo_profile": "release"
+  },
+  "tools": {
+    "git": "git version 2.43.0",
+    "grit": "grit 0.5.19",
+    "grit_commit": "dfd3640488fe9109fd14d09d3081f45a26dbb493"
+  },
+  "scenarios": [
+    {
+      "id": "clone/checkout@synth-100k",
+      "area": "remotes",
+      "description": "Local-path clone with full checkout of 100k files vs git clone",
+      "git": {
+        "median_wall_ms": 2956.976892,
+        "peak_rss_bytes": 75165696,
+        "runs": 3,
+        "samples_ms": [
+          2946.414,
+          2956.977,
+          3059.277
+        ],
+        "min_ms": 2946.41378,
+        "max_ms": 3059.277016,
+        "stddev_ms": 62.336459029382944
+      },
+      "grit": {
+        "median_wall_ms": 4268.585985,
+        "peak_rss_bytes": 156753920,
+        "runs": 3,
+        "samples_ms": [
+          4023.694,
+          4268.586,
+          4370.177
+        ],
+        "min_ms": 4023.694117,
+        "max_ms": 4370.177247,
+        "stddev_ms": 178.11202977427743
+      },
+      "ratio": 1.4435642011773961,
+      "detail": {
+        "setup": "remote /tmp/grit-bench-scratch/daily-remote-synth-100k-path-clone/remote.git served by no server",
+        "prepare": "grit-bench prepare-network-clone --git git --bare /tmp/grit-bench-scratch/daily-remote-synth-100k-path-clone/remote.git",
+        "commands": {
+          "git": "rm -rf /tmp/grit-bench-scratch/daily-remote-synth-100k-path-clone/remote.git-campaign-clone && git clone -q /tmp/grit-bench-scratch/daily-remote-synth-100k-path-clone/remote.git remote.git-campaign-clone",
+          "grit": "rm -rf /tmp/grit-bench-scratch/daily-remote-synth-100k-path-clone/remote.git-campaign-clone && grit clone /tmp/grit-bench-scratch/daily-remote-synth-100k-path-clone/remote.git remote.git-campaign-clone"
+        },
+        "correctness": "before timing, git and grit were each run once and their results compared",
+        "phases": {
+          "git": [
+            {
+              "name": "unpack_trees: unpack_trees",
+              "ms": 2998.686,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "unpack_trees: traverse_trees",
+              "ms": 38.142,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "cache_tree: update",
+              "ms": 30.11,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "index: do_write_index",
+              "ms": 25.48,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "run: git-upload-pack",
+              "ms": 24.307,
+              "count": 1,
+              "depth": 1
+            },
+            {
+              "name": "cache_tree: write",
+              "ms": 0.099,
+              "count": 1,
+              "depth": 0
+            }
+          ],
+          "grit": [
+            {
+              "name": "grit.index.write",
+              "ms": 12.1,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "grit.index.read",
+              "ms": 6.002,
+              "count": 2,
+              "depth": 0
+            },
+            {
+              "name": "grit.pack.delta.resolve",
+              "ms": 0.733,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "grit.repository.open",
+              "ms": 0.696,
+              "count": 3,
+              "depth": 0
+            },
+            {
+              "name": "grit.config.load",
+              "ms": 0.314,
+              "count": 4,
+              "depth": 0
+            },
+            {
+              "name": "grit.pack.index.open",
+              "ms": 0.148,
+              "count": 8,
+              "depth": 0
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

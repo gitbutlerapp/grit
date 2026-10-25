@@ -11,13 +11,14 @@ use super::super::remote_fixture::{
     setup_git_git_grit_http_fetch_remote, setup_git_git_grit_http_push_remote,
     setup_git_git_remote, setup_git_git_remote_blobless, setup_many_refs_remote,
     setup_many_refs_remote_show, setup_remote_remove_many_refs, setup_remote_rename_many_refs,
-    setup_synth10k_grit_http_remote, setup_synth10k_pull_rebase_remote, setup_synth10k_remote,
-    verify_clone_bare, verify_clone_blobless, verify_clone_http, verify_clone_local,
-    verify_clone_shallow, verify_clone_shallow_http, verify_fetch_deepen, verify_fetch_dry_run,
-    verify_fetch_incremental, verify_fetch_incremental_http, verify_fetch_noop,
-    verify_fetch_one_branch, verify_ls_remote_all, verify_pull_check, verify_pull_fast_forward,
-    verify_pull_rebase, verify_push_force_with_lease, verify_push_incremental,
-    verify_push_incremental_http, verify_push_refspec,
+    setup_synth100k_path_remote, setup_synth10k_grit_http_remote,
+    setup_synth10k_pull_rebase_remote, setup_synth10k_remote, verify_clone_bare,
+    verify_clone_blobless, verify_clone_http, verify_clone_local, verify_clone_shallow,
+    verify_clone_shallow_http, verify_fetch_deepen, verify_fetch_dry_run, verify_fetch_incremental,
+    verify_fetch_incremental_http, verify_fetch_noop, verify_fetch_one_branch,
+    verify_ls_remote_all, verify_pull_check, verify_pull_fast_forward, verify_pull_rebase,
+    verify_push_force_with_lease, verify_push_incremental, verify_push_incremental_http,
+    verify_push_refspec,
 };
 use super::super::runner::BenchArgv;
 use crate::shell::shell_quote;
@@ -596,6 +597,15 @@ fn matrix_plans() -> Vec<DailyHeadlinePlan> {
             build_git: clone_blobless_git,
             build_grit: clone_blobless_grit,
             correctness: Some(correctness_clone_blobless),
+        },
+        DailyHeadlinePlan {
+            spec: matrix_spec("clone/checkout@synth-100k"),
+            pending: false,
+            setup: setup_synth100k_path_remote,
+            prepare: prepare_network_clone,
+            build_git: clone_local_git,
+            build_grit: clone_local_grit,
+            correctness: Some(correctness_clone_local),
         },
         DailyHeadlinePlan {
             spec: matrix_spec("clone/shallow-depth1@synth-10k"),

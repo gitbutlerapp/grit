@@ -411,6 +411,22 @@ cargo build --profile dist -p grit-cli -p grit-http-server -p grit-utils
   --format json --output grit-utils/baselines/daily-common-paths.json --grit ./target/dist/grit
 ```
 
+### Clone checkout of a wide tree (2026-10-24)
+
+The daily matrix id **`clone/checkout@synth-100k`** clones a bare copy of the **100k-file** synthetic fixture by plain path, so both tools link the pack locally and the timed run is dominated by checking out every file (`git clone -q <path>` vs `grit clone <path>`). It closes issue #1678, where a 200k-file clone was **2.5×** slower than git with **~4×** git's user CPU: the populated-tree checkout writes files in chunks of 2048, and every chunk rebuilt the index cache tree from the whole commit tree (about 100 full tree walks for 200k files) only to discard it until the last chunk. Chunks now update only the in-memory index; the cache tree is built and the index is written once after the last chunk.
+
+| Capture | git | grit | grit ÷ git | grit peak RSS |
+| --- | ---: | ---: | ---: | ---: |
+| Before (`daily-clone-checkout-synth-100k-before.json`) | 2957 ms | 4269 ms | 1.44× | 150 MiB |
+| After (`daily-clone-checkout-synth-100k-after.json`) | 2959 ms | 3155 ms | 1.07× | 150 MiB |
+
+On the 200k-file repro from the issue (one commit, gc'd, 4 vCPU), `grit clone` went from **7.16 s** (user 5.34 s) to **3.12 s** (user 1.45 s), against **3.50 s** (user 1.14 s) for git; peak RSS is about **89 MB** vs **61 MB** for git. The remaining system time is concurrent file creation in the same directories across checkout workers.
+
+```bash
+./target/release/grit-bench daily --only 'clone/checkout@synth-100k' \
+  --format json --output grit-utils/baselines/daily-clone-checkout-synth-100k-after.json --grit ./target/release/grit
+```
+
 ### git.git headlines (hyperfine wall time + peak RSS)
 
 **`grit-utils/baselines/dashboard/git-dot-git-headlines.json`** uses the standard grit-bench schema (hyperfine medians + **`peak_rss_bytes`** per side). Headline wall times are **not** taken from the daily RSS poll loop (which quantized sub-50 ms commands to ~50 ms); they use the same hyperfine + **`measure-rss`** path as other scenario suites.

@@ -234,7 +234,7 @@ pub const HEADLINE_SCENARIOS: [HeadlineScenario; 22] = [
 ];
 
 /// Remote matrix scenarios (non-headline) for the daily census.
-pub const REMOTE_MATRIX_SCENARIOS: [ScenarioSpec; 17] = [
+pub const REMOTE_MATRIX_SCENARIOS: [ScenarioSpec; 18] = [
     ScenarioSpec {
         id: "fetch/noop@git-git",
         area: Area::Remotes,
@@ -333,6 +333,13 @@ pub const REMOTE_MATRIX_SCENARIOS: [ScenarioSpec; 17] = [
         name: None,
         description:
             "Blobless partial clone over smart HTTP: grit clone --blobs none vs git clone --filter=blob:none",
+    },
+    ScenarioSpec {
+        id: "clone/checkout@synth-100k",
+        area: Area::Remotes,
+        headline: false,
+        name: None,
+        description: "Local-path clone with full checkout of 100k files vs git clone",
     },
     ScenarioSpec {
         id: "clone/shallow-depth1@synth-10k",
