@@ -2361,6 +2361,51 @@ mod tests {
         assert!(!shared.is_empty(), "index must stay split");
     }
 
+    #[test]
+    fn commit_on_split_index_with_skip_hash_stays_readable_by_git() {
+        for key in ["index.skipHash", "feature.manyFiles"] {
+            let tmp = TempDir::new().unwrap();
+            let root = tmp.path();
+            system_git(root, &["init", "-q", "-b", "main"]);
+            fs::write(root.join("a"), b"1\n").unwrap();
+            system_git(root, &["add", "a"]);
+            system_git(root, &["commit", "-qm", "c1"]);
+            system_git(root, &["config", "core.splitIndex", "true"]);
+            system_git(root, &["update-index", "--split-index"]);
+            fs::write(root.join("a"), b"1\n2\n").unwrap();
+            system_git(root, &["add", "a"]);
+            system_git(root, &["commit", "-qm", "c2"]);
+            system_git(root, &["config", key, "true"]);
+            assert_eq!(system_git(root, &["status", "--short"]), "");
+            fs::write(root.join("n"), b"n\n").unwrap();
+
+            let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).unwrap();
+            let outcome = commit_with_scope(
+                &repo,
+                &commit_req("g"),
+                CommitScope::AutoStage,
+                &mut NullProgress,
+            )
+            .unwrap();
+
+            assert_eq!(system_git(root, &["ls-files"]), "a\nn\n", "{key}");
+            // Keep git from rebuilding the shared index itself: under skipHash it names it
+            // `sharedindex.000…0` and then reads its own index as unsplit.
+            system_git(root, &["config", "splitIndex.maxPercentChange", "100"]);
+            assert_eq!(system_git(root, &["status", "--porcelain"]), "", "{key}");
+            assert_eq!(
+                system_git(root, &["rev-parse", "HEAD"]).trim(),
+                outcome.oid.to_hex()
+            );
+            system_git(root, &["fsck", "--strict", "--no-progress"]);
+            fs::write(root.join("m"), b"m\n").unwrap();
+            system_git(root, &["add", "-A"]);
+            system_git(root, &["commit", "-qm", "git after grit"]);
+            assert_eq!(system_git(root, &["ls-files"]), "a\nm\nn\n", "{key}");
+            assert_eq!(repo.load_index().unwrap().entries.len(), 3, "{key}");
+        }
+    }
+
     fn author_info_from_commit(repo: &Repository, oid: ObjectId) -> CommitAuthorInfo {
         let data = repo.odb().read(&oid).unwrap().data;
         author_info_from_header_line(&parse_commit(&data).unwrap().author)

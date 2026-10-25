@@ -332,6 +332,19 @@ fn resolve_shared_index_file(git_dir: &Path, index_path: &Path, base_oid: &Objec
     primary
 }
 
+/// Read the trailing checksum of the index file at `path`, which is the oid a split index's
+/// `link` extension names it by.
+fn read_index_trailer(path: &Path, algo: HashAlgo) -> Result<ObjectId> {
+    use std::io::{Read, Seek, SeekFrom};
+    let hash_len = algo.len();
+    let mut file = fs::File::open(path).map_err(Error::Io)?;
+    file.seek(SeekFrom::End(-(hash_len as i64)))
+        .map_err(Error::Io)?;
+    let mut trailer = vec![0u8; hash_len];
+    file.read_exact(&mut trailer).map_err(Error::Io)?;
+    ObjectId::from_bytes(&trailer)
+}
+
 pub(crate) fn hash_index_body(body: &[u8], algo: HashAlgo) -> ObjectId {
     ObjectId::from_bytes(&algo.checksum_digest(body))
         .unwrap_or_else(|_| unreachable!("checksum digest length matches object id"))
@@ -643,7 +656,9 @@ pub(crate) fn write_index_file_split(
         .map(|l| l.base_oid)
         .unwrap_or(ObjectId::zero());
 
-    let mut rebuild = index.split_link.is_none()
+    // A zero base oid is what Git leaves after writing the shared index under `index.skipHash`;
+    // readers treat it as unsplit, so there is no usable shared index to reuse.
+    let mut rebuild = prev_base.is_zero()
         || should_rebuild_shared_index(index, cfg)
         || git_test_split_index_force_reorder(&prev_base);
 
@@ -718,20 +733,17 @@ pub(crate) fn write_index_file_split(
             Err(e) => return Err(Error::Io(e)),
         };
         let tmp_path = tmp.path().to_path_buf();
+        // The shared index always carries a real checksum, even under `index.skipHash`: readers
+        // match the link's base oid against the shared file's trailer, and a zero base oid means
+        // "not split", so a skipped trailer would leave the index unreadable.
         shared_index.write_to_path_with_config_and_policy(
             &tmp_path,
-            skip_hash,
+            false,
             Some(cfg),
             thread_policy,
         )?;
         adjust_shared_perm_file(&tmp_path, shared_repo).map_err(Error::Io)?;
-        let file_data = fs::read(&tmp_path).map_err(Error::Io)?;
-        let hash_len = index.hash_algo.len();
-        if file_data.len() < hash_len {
-            return Err(Error::IndexError("shared index temp too short".to_owned()));
-        }
-        let body = &file_data[..file_data.len() - hash_len];
-        let oid = hash_index_body(body, index.hash_algo);
+        let oid = read_index_trailer(&tmp_path, index.hash_algo)?;
         let dest = git_dir.join(format!("sharedindex.{}", oid.to_hex()));
         if let Err(e) = fs::rename(&tmp_path, &dest) {
             if e.kind() == io::ErrorKind::PermissionDenied {
@@ -910,8 +922,14 @@ pub fn resolve_split_index_if_needed(
             "split index: shared index too short".to_owned(),
         ));
     }
-    let body = &data[..data.len() - hash_len];
-    let got = hash_index_body(body, index.hash_algo);
+    let (body, trailer) = data.split_at(data.len() - hash_len);
+    // The link names the shared file's trailer, which must also match its body.
+    let trailer = ObjectId::from_bytes(trailer)?;
+    let got = if trailer == base_oid {
+        hash_index_body(body, index.hash_algo)
+    } else {
+        trailer
+    };
     if got != base_oid {
         return Err(Error::IndexError(format!(
             "broken index, expect {} in {}, got {}",
@@ -921,7 +939,7 @@ pub fn resolve_split_index_if_needed(
         )));
     }
     freshen_shared_index(&shared_path);
-    let base_entries = Index::parse(&data)?.entries;
+    let base_entries = Index::parse_with_algo(&data, index.hash_algo)?.entries;
     merge_split_into_index(index, link, base_entries)?;
     index.split_link = Some(SplitIndexLink {
         base_oid,
@@ -1195,6 +1213,177 @@ mod tests {
         fs::write(&index_path, b"x").expect("write");
         let err = resolve_split_index_if_needed(&mut idx, &git_dir, &index_path).expect_err("read");
         assert!(err.to_string().contains("shared index"));
+    }
+
+    fn system_git(root: &Path, args: &[&str]) -> String {
+        let out = std::process::Command::new("git")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_AUTHOR_NAME", "Test")
+            .env("GIT_AUTHOR_EMAIL", "test@example.com")
+            .env("GIT_COMMITTER_NAME", "Test")
+            .env("GIT_COMMITTER_EMAIL", "test@example.com")
+            .current_dir(root)
+            .args(args)
+            .output()
+            .expect("run git");
+        assert!(
+            out.status.success(),
+            "git {args:?} failed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        String::from_utf8(out.stdout).expect("utf8")
+    }
+
+    fn open_repo(root: &Path) -> crate::repo::Repository {
+        crate::repo::Repository::discover(
+            Some(root),
+            &crate::environment::RepositoryOptions::empty(),
+        )
+        .expect("open")
+    }
+
+    fn shared_index_names(git_dir: &Path) -> Vec<String> {
+        let mut names: Vec<String> = fs::read_dir(git_dir)
+            .expect("read git dir")
+            .flatten()
+            .filter_map(|e| e.file_name().to_str().map(str::to_owned))
+            .filter(|n| n.starts_with("sharedindex."))
+            .collect();
+        names.sort();
+        names
+    }
+
+    /// A split index whose shared file was written by Git before `index.skipHash` was turned on.
+    fn git_split_index_repo(root: &Path, skip_hash_key: &str) {
+        system_git(root, &["init", "-q", "-b", "main"]);
+        for name in ["a.txt", "b.txt"] {
+            fs::write(root.join(name), b"1\n").expect("write");
+        }
+        system_git(root, &["add", "."]);
+        system_git(root, &["commit", "-qm", "init"]);
+        system_git(root, &["config", "core.splitIndex", "true"]);
+        system_git(root, &["update-index", "--split-index"]);
+        system_git(root, &["config", skip_hash_key, "true"]);
+        system_git(root, &["status", "--porcelain"]);
+    }
+
+    fn assert_git_reads_index(root: &Path, expected_paths: &str) {
+        assert_eq!(system_git(root, &["ls-files"]), expected_paths);
+        system_git(root, &["status", "--porcelain"]);
+        system_git(root, &["fsck", "--strict", "--no-progress"]);
+    }
+
+    #[test]
+    fn rebuilt_shared_index_under_skip_hash_is_readable_by_git() {
+        for key in ["index.skipHash", "feature.manyFiles"] {
+            let tmp = tempfile::tempdir().expect("tempdir");
+            let root = tmp.path();
+            git_split_index_repo(root, key);
+            system_git(root, &["config", "splitIndex.maxPercentChange", "0"]);
+            let before = shared_index_names(&root.join(".git"));
+
+            let repo = open_repo(root);
+            let mut index = repo.load_index().expect("load");
+            assert!(index.remove(b"b.txt"));
+            repo.write_index(&mut index).expect("write");
+
+            let git_dir = repo.git_dir();
+            let main = fs::read(git_dir.join("index")).expect("read index");
+            assert!(
+                main[main.len() - 20..].iter().all(|&b| b == 0),
+                "{key}: the main index keeps honoring skipHash"
+            );
+            let reread = Index::parse(&main).expect("parse");
+            let link = reread.split_link.expect("index stays split");
+            assert!(!link.base_oid.is_zero());
+            let shared_name = format!("sharedindex.{}", link.base_oid.to_hex());
+            assert_ne!(shared_index_names(git_dir), before, "{key}: rebuilt");
+            let shared = fs::read(git_dir.join(&shared_name)).expect("shared index named by link");
+            assert_eq!(
+                &shared[shared.len() - 20..],
+                link.base_oid.as_bytes(),
+                "{key}: shared index trailer must match its name"
+            );
+
+            // Git itself would rebuild the shared index on its next write, which under skipHash
+            // leaves an index it cannot read; keep it on the shared index grit wrote.
+            system_git(root, &["config", "splitIndex.maxPercentChange", "100"]);
+            assert_git_reads_index(root, "a.txt\n");
+            assert_eq!(repo.load_index().expect("grit reload").entries.len(), 1);
+        }
+    }
+
+    #[test]
+    fn reused_shared_index_under_skip_hash_is_readable_by_git() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path();
+        git_split_index_repo(root, "index.skipHash");
+        system_git(root, &["config", "splitIndex.maxPercentChange", "100"]);
+        let before = shared_index_names(&root.join(".git"));
+
+        let repo = open_repo(root);
+        let mut index = repo.load_index().expect("load");
+        assert!(index.remove(b"b.txt"));
+        repo.write_index(&mut index).expect("write");
+
+        assert_eq!(
+            shared_index_names(repo.git_dir()),
+            before,
+            "shared index reused"
+        );
+        assert_git_reads_index(root, "a.txt\n");
+    }
+
+    #[test]
+    fn null_split_link_rebuilds_a_real_shared_index() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path();
+        git_split_index_repo(root, "index.skipHash");
+        system_git(root, &["config", "splitIndex.maxPercentChange", "100"]);
+
+        let repo = open_repo(root);
+        let mut index = repo.load_index().expect("load");
+        index.split_link = Some(SplitIndexLink {
+            base_oid: ObjectId::zero(),
+            delete_bitmap: None,
+            replace_bitmap: None,
+        });
+        repo.write_index(&mut index).expect("write");
+
+        let link = repo
+            .load_index()
+            .expect("reload")
+            .split_link
+            .expect("split");
+        assert!(!link.base_oid.is_zero());
+        assert_git_reads_index(root, "a.txt\nb.txt\n");
+    }
+
+    #[test]
+    fn resolve_split_index_rejects_link_not_matching_shared_trailer() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let git_dir = tmp.path().join(".git");
+        fs::create_dir_all(&git_dir).expect("mkdir");
+        let mut shared = Index::empty(2);
+        shared.entries.push(sample_entry("a.txt", 1));
+        let staged = git_dir.join("staged");
+        shared.write_to_path(&staged, true).expect("write shared");
+        let data = fs::read(&staged).expect("read");
+        let body_oid = hash_index_body(&data[..data.len() - 20], HashAlgo::Sha1);
+        let shared_path = git_dir.join(format!("sharedindex.{}", body_oid.to_hex()));
+        fs::rename(&staged, &shared_path).expect("rename");
+
+        let mut idx = Index::empty(2);
+        idx.split_link = Some(SplitIndexLink {
+            base_oid: body_oid,
+            delete_bitmap: None,
+            replace_bitmap: None,
+        });
+        let index_path = git_dir.join("index");
+        let err = resolve_split_index_if_needed(&mut idx, &git_dir, &index_path)
+            .expect_err("zero trailer does not match the link");
+        assert!(err.to_string().contains("broken index"), "{err}");
     }
 
     #[test]
