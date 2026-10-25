@@ -1169,11 +1169,14 @@ enum Command {
             id = "commit_message",
             value_name = "MESSAGE",
             conflicts_with_all = ["message", "message_file"],
-            allow_hyphen_values = true
+            allow_hyphen_values = true,
+            value_parser = clap_value_args::FreeTextPositional::new("-m")
         )]
         commit_message: Option<String>,
         #[command(flatten)]
         message_input: message_input::MessageInputArgs,
+        #[command(flatten)]
+        quiet: quiet_args::QuietArgs,
         #[command(flatten)]
         author: message_input::AuthorArg,
         /// Override the author date (Git date formats, RFC 3339, `@epoch`, …).
@@ -2350,6 +2353,19 @@ fn emit_success<T: output::HumanRender + output::MarkdownRender + serde::Seriali
     Ok(ExitStatus::Success)
 }
 
+/// Like [`emit_success`], but renders nothing in human mode under `--quiet`.
+fn emit_success_quiet<T: output::HumanRender + output::MarkdownRender + serde::Serialize>(
+    value: &T,
+    quiet: &quiet_args::QuietArgs,
+    opts: &OutputOptions,
+    ctx: &RenderContext,
+) -> Result<ExitStatus> {
+    if quiet.shows_outcome(opts.mode) {
+        emit(value, opts, ctx)?;
+    }
+    Ok(ExitStatus::Success)
+}
+
 fn finish_hunk_error(err: &anyhow::Error, opts: &OutputOptions, code: i32) -> ExitStatus {
     if opts.mode == OutputMode::Human {
         eprintln!("error: {err:#}");
@@ -2964,6 +2980,7 @@ fn dispatch(
         Command::Commit {
             commit_message,
             message_input,
+            quiet,
             author,
             author_date,
             trailers,
@@ -2993,7 +3010,7 @@ fn dispatch(
                 !lines.is_empty(),
             )?;
             if let Some(file) = patch_file {
-                emit_success(
+                emit_success_quiet(
                     &commands::commit::run_patch_file(
                         message.or(message_flag),
                         message_file,
@@ -3011,6 +3028,7 @@ fn dispatch(
                         allow_empty,
                         &file,
                     )?,
+                    &quiet,
                     opts,
                     ctx,
                 )
@@ -3034,7 +3052,7 @@ fn dispatch(
                     &hunks,
                     &lines,
                 ) {
-                    Ok(outcome) => emit_success(&outcome, opts, ctx),
+                    Ok(outcome) => emit_success_quiet(&outcome, &quiet, opts, ctx),
                     Err(err) => Ok(finish_hunk_error(
                         &err,
                         opts,
@@ -3042,7 +3060,7 @@ fn dispatch(
                     )),
                 }
             } else {
-                emit_success(
+                emit_success_quiet(
                     &commands::commit::run(
                         message.or(message_flag),
                         message_file,
@@ -3062,6 +3080,7 @@ fn dispatch(
                         staged,
                         paths,
                     )?,
+                    &quiet,
                     opts,
                     ctx,
                 )

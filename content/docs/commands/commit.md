@@ -16,6 +16,7 @@ grit commit -F <file|->
 grit commit --author "Name <email>"
 grit commit --no-verify -m <message>
 grit commit --dry-run -m <message>
+grit commit -q -m <message>
 grit commit --allow-empty -m <message>
 grit commit --amend [-m <message>]
 grit commit --hunks <id,...> -m <message> [-- <path>…]
@@ -32,7 +33,7 @@ Use **trailing paths** (`grit commit -m msg -- a b`) or **`--pathspec-from-file`
 
 Use **`--hunks`** with stable ids from [`grit diff --json`](../diff/) to stage and commit only selected unstaged hunks in one step (like `git apply --cached` on those hunks, then commit). Optional **`-- paths`** narrow the diff scan the same way as [`grit add --hunks`](../add/). Use **`--patch-file`** to apply a unified diff to the index and commit the result (`-` reads stdin). These modes do not auto-stage the rest of the worktree (same effective scope as **`--staged`**). They cannot be combined with `-a` / `--all`, **`--staged`**, or path-only commits. **`--lines`** follows the same rules as `grit add --lines` when that flag is available.
 
-The message can be given as an argument, with `-m`, or with `-F` / `--message-file` (`-` reads stdin). Messages may start with `-` when quoted on the shell (for example `grit commit -m "-fix typo"`) or passed via `--message=-fix typo`. Message text is normalized with Git-style stripspace before hooks run (leading/trailing blank lines collapse; a trailing newline is added). A message with several lines is recorded as is after normalization; its first line is the subject that [`grit log`](../log/) shows. A normal commit needs a message: without one, `grit commit` stops with an error and does not change the index or working tree. You cannot combine `-m`, a positional message, and `--message-file`.
+The message can be given as an argument, with `-m`, or with `-F` / `--message-file` (`-` reads stdin). Messages may start with `-` when quoted on the shell (for example `grit commit -m "-fix typo"`) or passed via `--message=-fix typo`. A positional message that starts with `-` must contain whitespace (`grit commit "-fix typo"`): a single hyphen-leading word such as `-q`, `--bogus` or `--opt=value` is treated as an unknown flag and rejected with exit status `2` before anything is staged or committed, so a misspelled or unsupported flag never becomes the commit message. Pass such a message with `-m` (`grit commit -m --bogus`). Message text is normalized with Git-style stripspace before hooks run (leading/trailing blank lines collapse; a trailing newline is added). A message with several lines is recorded as is after normalization; its first line is the subject that [`grit log`](../log/) shows. A normal commit needs a message: without one, `grit commit` stops with an error and does not change the index or working tree. You cannot combine `-m`, a positional message, and `--message-file`.
 
 Use **`--dry-run`** to preview what would be committed: path list, parents, and author, without writing objects, updating refs, running hooks, or changing the index on disk. Dry-run returns the same errors as a real commit for nothing-to-commit and unmerged index.
 
@@ -88,7 +89,8 @@ Every commit `grit commit` creates gets a `change-id` header (reverse-hex by def
 
 | Option | Description |
 | --- | --- |
-| `<message>` | The commit message. |
+| `<message>` | The commit message. A single hyphen-leading word is rejected as an unknown flag; use `-m` for it. |
+| `-q`, `--quiet` | Print nothing on success in human mode. `--json` and `--markdown` output is unchanged; errors still go to stderr. |
 | `-m`, `--message <message>` | The commit message, as an option. Use either this, the argument, or `--message-file`, not more than one. Optional with `--amend` (keeps the previous message). |
 | `-F`, `--message-file <file\|->` | Read the commit message from a file, or from stdin when the path is `-`. |
 | `--author <ident>` | Author for this commit (`Name <email>` or bare email). Committer unchanged. |
@@ -256,6 +258,19 @@ With `--dry-run`, output lists the paths that would be committed instead of a ne
 | `0` | Success ([`success`](../exit-codes/)). |
 | `1` | Command failed ([`failure`](../exit-codes/)). |
 | `2` | Invalid flags or arguments ([`usage`](../exit-codes/)). |
+
+An unknown flag is a usage error even when it lands where the positional message goes; nothing is staged or committed:
+
+```console
+$ grit commit --bogus
+error: unexpected argument '--bogus' found
+
+  tip: to use '--bogus' as text, pass it with '-m --bogus'
+
+Usage: grit commit [OPTIONS] [MESSAGE] [-- <PATH>...]
+
+For more information, try '--help'.
+```
 
 See [Exit codes](../exit-codes/) for shared rules and structured `--json` `kind` values.
 

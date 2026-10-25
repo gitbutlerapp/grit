@@ -1,4 +1,4 @@
-//! Shared `-q` / `--quiet` argument group for network commands (fetch, pull, clone, push).
+//! Shared `-q` / `--quiet` argument group (fetch, pull, clone, push, commit).
 
 use clap::Args;
 

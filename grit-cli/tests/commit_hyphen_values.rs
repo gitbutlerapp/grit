@@ -140,6 +140,90 @@ fn commit_message_positional_leading_hyphen() -> TestResult {
     Ok(())
 }
 
+fn head(root: &Path) -> Result<String, Box<dyn Error>> {
+    let out = git(root, &["rev-parse", "HEAD"]);
+    if !out.success() {
+        return Err(out.dump().into());
+    }
+    Ok(out.stdout.trim().to_owned())
+}
+
+/// Repository with one commit and a dirty worktree that auto-stage would commit.
+fn dirty_repo(tag: &str) -> Result<(Scratch, String), Box<dyn Error>> {
+    let scratch = Scratch::new(tag)?;
+    let root = scratch.path();
+    assert!(
+        git(root, &["init", "-q", "-b", "main"]).success(),
+        "git init"
+    );
+    fs::write(root.join("a.txt"), "a\n")?;
+    let out = gs(root, ["commit", "-m", "first"]);
+    assert!(out.success(), "{}", out.dump());
+    fs::write(root.join("a.txt"), "a\nb\n")?;
+    let tip = head(root)?;
+    Ok((scratch, tip))
+}
+
+fn assert_unexpected_argument(out: &CmdOutput, arg: &str) {
+    assert_eq!(out.status, Some(2), "{}", out.dump());
+    assert!(
+        out.stderr
+            .contains(&format!("unexpected argument '{arg}' found")),
+        "{}",
+        out.dump()
+    );
+}
+
+#[test]
+fn commit_unknown_flag_is_rejected_not_used_as_message() -> TestResult {
+    for flag in ["--bogus", "-x", "--verbose", "--opt=value"] {
+        let (scratch, tip) = dirty_repo("unknown-flag")?;
+        let root = scratch.path();
+        let out = gs(root, ["commit", flag]);
+        assert_unexpected_argument(&out, flag);
+        assert_eq!(head(root)?, tip, "{flag} must not create a commit");
+    }
+    Ok(())
+}
+
+#[test]
+fn commit_unknown_flag_with_message_reports_unexpected_argument() -> TestResult {
+    for args in [
+        ["commit", "-m", "x", "--bogus"],
+        ["commit", "--bogus", "-m", "x"],
+    ] {
+        let (scratch, tip) = dirty_repo("unknown-flag-with-m")?;
+        let root = scratch.path();
+        let out = gs(root, args);
+        assert_unexpected_argument(&out, "--bogus");
+        assert_eq!(head(root)?, tip);
+    }
+    Ok(())
+}
+
+#[test]
+fn commit_quiet_suppresses_human_output_only() -> TestResult {
+    let (scratch, tip) = dirty_repo("quiet")?;
+    let root = scratch.path();
+
+    let out = gs(root, ["commit", "-q"]);
+    assert_eq!(out.status, Some(1), "{}", out.dump());
+    assert_eq!(head(root)?, tip, "-q is not a message");
+
+    let out = gs(root, ["commit", "-q", "-m", "real message"]);
+    assert!(out.success(), "{}", out.dump());
+    assert!(out.stdout.is_empty(), "{}", out.dump());
+    let subject = git(root, &["log", "-1", "--format=%s"]);
+    assert_eq!(subject.stdout.trim(), "real message");
+
+    fs::write(root.join("a.txt"), "a\nb\nc\n")?;
+    let out = gs(root, ["commit", "--quiet", "-m", "json", "--json"]);
+    assert!(out.success(), "{}", out.dump());
+    let json: serde_json::Value = serde_json::from_str(&out.stdout)?;
+    assert_eq!(json["subject"], "json");
+    Ok(())
+}
+
 #[test]
 fn commit_author_leading_hyphen() -> TestResult {
     let scratch = Scratch::new("author")?;
