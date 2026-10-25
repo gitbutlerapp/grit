@@ -21,6 +21,7 @@ use crate::diff::{
 };
 use crate::error::ApplyError;
 use crate::error::{Error, Result};
+use crate::history::{ensure_rewrite_apply_ready, HistoryError};
 use crate::hooks::{
     run_advisory_hook, run_commit_hook, run_post_rewrite, CommitHookEnv, HookError, HookName,
     PostOperationHooks, RewriteKind,
@@ -50,6 +51,7 @@ use crate::signing::{
 };
 use crate::state::{
     finish_merge_state, read_merge_heads, read_merge_msg, resolve_head_for_repository, HeadState,
+    InProgressOperation,
 };
 use crate::stripspace::{process, Mode};
 use crate::worktree_rules::WorktreeRules;
@@ -82,6 +84,15 @@ pub struct CommitAuthorInfo {
     pub email: String,
     /// Git timestamp suffix (`<unix> <+HHMM>`).
     pub date: String,
+}
+
+fn guard_incomplete_rewrite_apply(repo: &Repository) -> Result<()> {
+    ensure_rewrite_apply_ready(repo).map_err(|err| match err {
+        HistoryError::RewriteApplyIncomplete => {
+            Error::OperationInProgress(InProgressOperation::RewriteApply)
+        }
+        other => Error::History(other),
+    })
 }
 
 /// Inputs for [`create_commit`].
@@ -720,6 +731,7 @@ pub fn create_commit(
     req: &CommitRequest,
     progress: &mut dyn ProgressSink,
 ) -> Result<CommitOutcome> {
+    guard_incomplete_rewrite_apply(repo)?;
     let head = resolve_head_for_repository(repo)?;
     let mut index = repo.load_index()?;
     create_commit_with_index(repo, head, &mut index, req, progress, None)
@@ -744,6 +756,7 @@ pub fn commit_worktree(
     req: &CommitRequest,
     progress: &mut dyn ProgressSink,
 ) -> Result<CommitOutcome> {
+    guard_incomplete_rewrite_apply(repo)?;
     let head = resolve_head_for_repository(repo)?;
     let mut index = repo.load_index()?;
     let staged =

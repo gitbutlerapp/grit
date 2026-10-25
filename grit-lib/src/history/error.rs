@@ -246,6 +246,10 @@ pub enum HistoryError {
         message: String,
     },
 
+    /// Refs were updated but the worktree checkout did not finish (see `.git/grit/rewrite-apply/`).
+    #[error("history rewrite checkout is incomplete")]
+    RewriteApplyIncomplete,
+
     /// Checkout failed after refs were updated; rollback or worktree restore may also have failed.
     #[error("checkout failed after refs were updated")]
     ApplyRollbackIncomplete {

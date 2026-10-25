@@ -14,8 +14,8 @@ use grit_lib::refs::reflog::read_reflog;
 use grit_lib::refs::resolve_ref;
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::history::{
-    apply_rewrite, plan_rewrite, ApplyOptions, CommitEdit, EmptyPolicy, HistoryEdits, RefScope,
-    RewriteOptions,
+    apply_rewrite, plan_rewrite, recover_interrupted_rewrite_apply, rewrite_apply_journal_active,
+    ApplyOptions, CommitEdit, EmptyPolicy, HistoryEdits, RefScope, RewriteOptions,
 };
 
 use support::{
@@ -626,4 +626,44 @@ fn apply_rewrite_failed_checkout_restores_refs_and_preserves_dirty_worktree() {
         !wt.join("rewritten-only.txt").exists(),
         "partial checkout paths must be rolled back"
     );
+}
+
+#[test]
+fn interrupted_rewrite_apply_recovers_and_blocks_commit_until_finished() {
+    let repo = HistoryRepo::init();
+    let wt = repo.worktree();
+    let oids = build_commit_dag(wt, &[("b", "a"), ("c", "b")], &[("c", "refs/heads/main")]);
+    let grit = open_grit(wt);
+    let plan = plan_reword_with_tree(
+        wt,
+        oids["b"],
+        "rewritten-only.txt",
+        b"from rewrite\n",
+        "tree change",
+    );
+    assert_ne!(plan.head.old_tree, plan.head.new_tree);
+    let tip_before = git_rev_parse(wt, "refs/heads/main").expect("tip");
+    grit_lib::repo::set_test_inject_rewrite_apply_abort_after_refs(true);
+    let err = apply_rewrite(&grit, &plan, &apply_opts()).expect_err("injected abort after refs");
+    grit_lib::repo::set_test_inject_rewrite_apply_abort_after_refs(false);
+    let grit_lib::revwalk::history::HistoryError::WorktreeApply { message } = err else {
+        panic!("unexpected apply error");
+    };
+    assert!(
+        message.contains("injected abort after rewrite ref updates"),
+        "unexpected message: {message}"
+    );
+    assert!(rewrite_apply_journal_active(grit.git_dir()));
+    assert_ne!(git_rev_parse(wt, "refs/heads/main"), Some(tip_before));
+    assert!(wt.join("rewritten-only.txt").exists() == false);
+
+    let recovery = recover_interrupted_rewrite_apply(&grit)
+        .expect("recover")
+        .expect("recovery outcome");
+    assert_eq!(
+        recovery,
+        grit_lib::revwalk::history::RewriteApplyRecovery::FinishedCheckout
+    );
+    assert!(!rewrite_apply_journal_active(grit.git_dir()));
+    assert!(wt.join("rewritten-only.txt").exists());
 }

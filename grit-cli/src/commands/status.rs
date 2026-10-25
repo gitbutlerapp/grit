@@ -883,6 +883,7 @@ fn in_progress_label(op: InProgressOperation) -> String {
         InProgressOperation::Revert => "revert".to_owned(),
         InProgressOperation::Bisect => "bisect".to_owned(),
         InProgressOperation::Am => "am".to_owned(),
+        InProgressOperation::RewriteApply => "rewrite-apply".to_owned(),
     }
 }
 

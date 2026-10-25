@@ -4622,6 +4622,24 @@ pub fn set_test_inject_index_write_fail_remaining(remaining: usize) {
     index_write_fail_inject::INJECT_REMAINING.with(|c| *c.borrow_mut() = Some(remaining));
 }
 
+mod rewrite_apply_inject {
+    use std::cell::RefCell;
+
+    thread_local! {
+        pub static ABORT_AFTER_REFS: RefCell<bool> = const { RefCell::new(false) };
+    }
+}
+
+/// Debug-only: stop [`crate::history::apply_rewrite`] after ref updates without rolling back.
+#[doc(hidden)]
+pub fn set_test_inject_rewrite_apply_abort_after_refs(enabled: bool) {
+    rewrite_apply_inject::ABORT_AFTER_REFS.with(|c| *c.borrow_mut() = enabled);
+}
+
+pub(crate) fn test_inject_rewrite_apply_abort_after_refs() -> bool {
+    rewrite_apply_inject::ABORT_AFTER_REFS.with(|c| *c.borrow())
+}
+
 fn test_inject_index_write_fail() -> Result<()> {
     index_write_fail_inject::INJECT.with(|enabled| {
         if !*enabled.borrow() {

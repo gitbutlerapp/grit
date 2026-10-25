@@ -124,6 +124,7 @@ pub fn start_rebase(
     repo: &Repository,
     opts: &StartRebaseOptions,
 ) -> Result<RebaseOutcome, RebaseSessionError> {
+    super::ensure_rewrite_apply_ready(repo)?;
     if active_rebase(repo.git_dir()).is_some() {
         return Err(RebaseSessionError::RebaseAlreadyInProgress);
     }
@@ -286,6 +287,10 @@ pub fn skip_rebase(
 /// [`RebaseSessionError::ForeignRebaseInProgress`] when a git-started rebase recorded an
 /// autostash or has no readable `orig-head` (finish those with `git rebase --abort`).
 pub fn abort_rebase(repo: &Repository, identity: &str) -> Result<(), RebaseSessionError> {
+    if super::rewrite_apply_journal_active(repo.git_dir()) {
+        super::abort_interrupted_rewrite_apply(repo)?;
+        return Ok(());
+    }
     match active_rebase(repo.git_dir()) {
         None => Err(RebaseSessionError::NoRebaseInProgress),
         Some(ActiveRebase::Foreign(dir)) => abort_foreign_rebase(repo, &dir, identity),

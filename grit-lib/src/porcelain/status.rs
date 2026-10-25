@@ -2001,6 +2001,8 @@ pub fn status(
     cancel: &dyn crate::progress::Cancel,
 ) -> Result<StatusModel> {
     crate::trace::trace_span!("grit.status.scan");
+    let _ = crate::history::recover_interrupted_rewrite_apply(repo)
+        .map_err(crate::error::Error::History)?;
     let watch = crate::progress::cancel_watch_arc(cancel);
     let mut progress = crate::progress::WatchProgress::new(progress, std::sync::Arc::clone(&watch));
     crate::progress::poll_cancel_watch(&mut progress, cancel, &watch)?;

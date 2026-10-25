@@ -262,75 +262,31 @@ fn apply_absorb_refs_and_worktree(
     let plan = &absorb.plan;
     let (old_tree, new_tree) = head_tree_transition(plan);
     let needs_worktree = !repo.is_bare() && head_tree_changes(&old_tree, &new_tree);
-    let index_snapshot_owned = prestate.map(|p| p.index_bytes.clone()).or_else(|| {
-        if needs_worktree {
-            fs::read(repo.index_path()).ok()
-        } else {
-            None
-        }
-    });
-    let worktree_snapshot = if needs_worktree {
-        match (old_tree.as_ref(), new_tree.as_ref()) {
-            (Some(old), Some(new)) => Some(snapshot_worktree_for_tree_transition(repo, old, new)?),
-            _ => None,
-        }
-    } else {
-        None
-    };
-
     let old_head_commit = if needs_worktree {
         Some(repo.head_commit()?)
     } else {
         None
     };
-
-    if !plan.ref_updates.is_empty() {
-        commit_planned_ref_updates(repo, &plan.ref_updates, opts)?;
-    }
-
-    if needs_worktree {
-        let (Some(old), Some(new)) = (old_tree, new_tree) else {
-            return Err(HistoryError::WorktreeApply {
-                message: "missing head tree for absorb apply".into(),
-            });
-        };
+    run_planned_rewrite_apply(repo, plan, opts, |repo, old_tree, new_tree| {
         let old_head_commit = old_head_commit.ok_or_else(|| HistoryError::WorktreeApply {
             message: "missing old HEAD commit for absorb apply".into(),
         })?;
-        if let Err(apply_err) = apply_absorb_worktree_after_refs(
+        apply_absorb_worktree_after_refs(
             repo,
-            Some(&old),
-            &new,
+            old_tree,
+            new_tree,
             old_head_commit,
             absorb,
             staged_paths,
             prestate,
-        ) {
-            let ref_rollback = rollback_ref_updates(repo, &plan.ref_updates, opts);
-            let restore = restore_worktree_after_failed_apply(
-                repo,
-                index_snapshot_owned.as_deref(),
-                worktree_snapshot.as_ref(),
-            );
-            if let Some(pre) = prestate {
-                let _ = pre.restore(repo);
-            }
-            return Err(match (restore, ref_rollback) {
-                (Err(restore_err), _) => restore_err,
-                (Ok(()), Err(ref_err)) => ref_err,
-                (Ok(()), Ok(())) => apply_err,
-            });
+        )
+    })
+    .map_err(|err| {
+        if let Some(pre) = prestate {
+            let _ = pre.restore(repo);
         }
-    }
-
-    complete_applied_rewrite(
-        repo,
-        plan,
-        opts,
-        needs_worktree,
-        index_snapshot_owned.as_deref(),
-        worktree_snapshot.as_ref(),
-    )
+        err
+    })
 }
 
 fn apply_absorb_worktree_after_refs(
@@ -726,75 +682,30 @@ fn apply_fixup_refs_and_worktree(
 ) -> Result<AppliedRewrite, HistoryError> {
     let (old_tree, new_tree) = head_tree_transition(plan);
     let needs_worktree = !repo.is_bare() && head_tree_changes(&old_tree, &new_tree);
-    let index_snapshot_owned = prestate.map(|p| p.index_bytes.clone()).or_else(|| {
-        if needs_worktree {
-            fs::read(repo.index_path()).ok()
-        } else {
-            None
-        }
-    });
-    let worktree_snapshot = if needs_worktree {
-        match (old_tree.as_ref(), new_tree.as_ref()) {
-            (Some(old), Some(new)) => Some(snapshot_worktree_for_tree_transition(repo, old, new)?),
-            _ => None,
-        }
-    } else {
-        None
-    };
-
     let old_head_commit = if needs_worktree {
         Some(repo.head_commit()?)
     } else {
         None
     };
-
-    if !plan.ref_updates.is_empty() {
-        commit_planned_ref_updates(repo, &plan.ref_updates, opts)?;
-    }
-
-    if needs_worktree {
-        let (Some(old), Some(new)) = (old_tree, new_tree) else {
-            return Err(HistoryError::WorktreeApply {
-                message: "missing head tree for fixup apply".into(),
-            });
-        };
+    run_planned_rewrite_apply(repo, plan, opts, |repo, old_tree, new_tree| {
         let old_head_commit = old_head_commit.ok_or_else(|| HistoryError::WorktreeApply {
             message: "missing old HEAD commit for fixup apply".into(),
         })?;
-        if let Err(checkout_err) = apply_fixup_worktree_after_refs(
+        apply_fixup_worktree_after_refs(
             repo,
-            Some(&old),
-            &new,
+            old_tree,
+            new_tree,
             old_head_commit,
             staged_paths,
             prestate,
-        ) {
-            let ref_rollback = rollback_ref_updates(repo, &plan.ref_updates, opts).err();
-            let worktree_restore = restore_worktree_after_failed_apply(
-                repo,
-                index_snapshot_owned.as_deref(),
-                worktree_snapshot.as_ref(),
-            )
-            .err();
-            if let Some(pre) = prestate {
-                let _ = pre.restore(repo);
-            }
-            return Err(apply_failure_after_ref_update(
-                checkout_err,
-                ref_rollback,
-                worktree_restore,
-            ));
+        )
+    })
+    .map_err(|err| {
+        if let Some(pre) = prestate {
+            let _ = pre.restore(repo);
         }
-    }
-
-    complete_applied_rewrite(
-        repo,
-        plan,
-        opts,
-        needs_worktree,
-        index_snapshot_owned.as_deref(),
-        worktree_snapshot.as_ref(),
-    )
+        err
+    })
 }
 
 fn apply_fixup_worktree_after_refs(
@@ -1001,18 +912,31 @@ pub fn apply_rewrite(
     opts: &ApplyOptions,
 ) -> Result<AppliedRewrite, HistoryError> {
     verify_live_head_matches_plan(repo, &plan.head)?;
-
     let (old_tree, new_tree) = head_tree_transition(plan);
-    let needs_worktree = !repo.is_bare() && head_tree_changes(&old_tree, &new_tree);
-
     if let (Some(old), Some(new)) = (old_tree.as_ref(), new_tree.as_ref()) {
         if !repo.is_bare() {
             verify_worktree_ready_for_head_tree_change(repo, Some(old), new)?;
         }
     }
+    run_planned_rewrite_apply(repo, plan, opts, |repo, old_tree, new_tree| {
+        apply_head_tree_to_worktree(repo, old_tree, new_tree)
+    })
+}
+
+fn run_planned_rewrite_apply<F>(
+    repo: &Repository,
+    plan: &RewritePlan,
+    opts: &ApplyOptions,
+    apply_worktree: F,
+) -> Result<AppliedRewrite, HistoryError>
+where
+    F: FnOnce(&Repository, Option<&ObjectId>, &ObjectId) -> Result<(), HistoryError>,
+{
+    let (old_tree, new_tree) = head_tree_transition(plan);
+    let needs_worktree = !repo.is_bare() && head_tree_changes(&old_tree, &new_tree);
 
     let index_snapshot = if needs_worktree {
-        fs::read(repo.index_path()).ok()
+        Some(capture_index_snapshot(repo)?)
     } else {
         None
     };
@@ -1025,17 +949,44 @@ pub fn apply_rewrite(
         None
     };
 
+    let index_lock = needs_worktree
+        .then(|| repo.begin_index_update())
+        .transpose()
+        .map_err(|e| HistoryError::WorktreeApply {
+            message: e.to_string(),
+        })?;
+
+    if needs_worktree {
+        let index_bytes = index_snapshot.as_deref().ok_or_else(|| HistoryError::WorktreeApply {
+            message: "missing index snapshot for rewrite apply journal".into(),
+        })?;
+        let worktree_snap = worktree_snapshot.as_ref().ok_or_else(|| HistoryError::WorktreeApply {
+            message: "missing worktree snapshot for rewrite apply journal".into(),
+        })?;
+        rewrite_journal::write_rewrite_apply_journal(
+            repo, plan, opts, index_bytes, worktree_snap,
+        )?;
+    }
+
     if !plan.ref_updates.is_empty() {
         commit_planned_ref_updates(repo, &plan.ref_updates, opts)?;
     }
 
+    drop(index_lock);
+
     if needs_worktree {
+        if crate::repo::test_inject_rewrite_apply_abort_after_refs() {
+            return Err(HistoryError::WorktreeApply {
+                message: "injected abort after rewrite ref updates".into(),
+            });
+        }
         let (Some(old), Some(new)) = (old_tree, new_tree) else {
+            let _ = rewrite_journal::clear_rewrite_apply_journal(repo);
             return Err(HistoryError::WorktreeApply {
                 message: "missing head tree for worktree apply".into(),
             });
         };
-        if let Err(checkout_err) = apply_head_tree_to_worktree(repo, Some(&old), &new) {
+        if let Err(checkout_err) = apply_worktree(repo, Some(&old), &new) {
             let ref_rollback = rollback_ref_updates(repo, &plan.ref_updates, opts).err();
             let worktree_restore = restore_worktree_after_failed_apply(
                 repo,
@@ -1043,6 +994,9 @@ pub fn apply_rewrite(
                 worktree_snapshot.as_ref(),
             )
             .err();
+            if ref_rollback.is_none() && worktree_restore.is_none() {
+                let _ = rewrite_journal::clear_rewrite_apply_journal(repo);
+            }
             return Err(apply_failure_after_ref_update(
                 checkout_err,
                 ref_rollback,
@@ -1051,14 +1005,18 @@ pub fn apply_rewrite(
         }
     }
 
-    complete_applied_rewrite(
+    let applied = complete_applied_rewrite(
         repo,
         plan,
         opts,
         needs_worktree,
         index_snapshot.as_deref(),
         worktree_snapshot.as_ref(),
-    )
+    );
+    if applied.is_ok() {
+        let _ = rewrite_journal::clear_rewrite_apply_journal(repo);
+    }
+    applied
 }
 
 fn verify_live_head_matches_plan(
@@ -1095,6 +1053,29 @@ fn verify_live_head_matches_plan(
         (_, HeadState::Invalid) => return Err(mismatch()),
     }
     Ok(())
+}
+
+fn capture_index_snapshot(repo: &Repository) -> Result<Vec<u8>, HistoryError> {
+    let path = repo.index_path();
+    if path.is_file() {
+        return fs::read(path).map_err(|e| HistoryError::WorktreeApply {
+            message: e.to_string(),
+        });
+    }
+    let mut index = repo.load_index().map_err(|e| HistoryError::WorktreeApply {
+        message: e.to_string(),
+    })?;
+    let tmp = tempfile::NamedTempFile::new().map_err(|e| HistoryError::WorktreeApply {
+        message: e.to_string(),
+    })?;
+    index
+        .write_to_path(tmp.path(), false)
+        .map_err(|e| HistoryError::WorktreeApply {
+            message: e.to_string(),
+        })?;
+    fs::read(tmp.path()).map_err(|e| HistoryError::WorktreeApply {
+        message: e.to_string(),
+    })
 }
 
 fn head_tree_transition(plan: &RewritePlan) -> (Option<ObjectId>, Option<ObjectId>) {
@@ -1540,6 +1521,14 @@ fn restore_worktree_path(abs: &Path, saved: &WorktreePathSnapshot) -> std::io::R
         }
     }
 }
+
+#[path = "rewrite_journal.rs"]
+mod rewrite_journal;
+
+pub use rewrite_journal::{
+    abort_interrupted_rewrite_apply, ensure_rewrite_apply_ready, recover_interrupted_rewrite_apply,
+    rewrite_apply_journal_active, RewriteApplyRecovery,
+};
 
 #[cfg(test)]
 mod inject_and_apply_tests {
