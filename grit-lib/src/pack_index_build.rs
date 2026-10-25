@@ -4,24 +4,24 @@
 //! on batched whole objects. Single-threaded builds inflate and hash each whole object
 //! once in pack order.
 //!
-//! Deltas are resolved depth-first from each base that has delta children: a worker
-//! inflates the base once, then walks its delta tree applying each delta exactly once.
-//! Only the bytes of the chain currently being walked are held, a parent is released
-//! as soon as its last child is taken, and a per-worker byte cap evicts ancestors that
-//! are rebuilt from the pack if they are needed again. Peak memory therefore follows the
-//! deepest chain rather than the number of deltas waiting on resolved bases.
+//! Deltas are resolved depth-first from each base that has delta children (see
+//! [`crate::pack_delta_walk`]), so peak memory follows the deepest chain rather than the
+//! number of deltas waiting on resolved bases.
 
 use crate::error::{Error, Result};
 use crate::hash::{hash_object, Parallelism};
 use crate::objects::{HashAlgo, ObjectId, ObjectKind};
 use crate::odb::Odb;
+use crate::pack_delta_walk::{
+    record_first_error, DeltaBase, DeltaRoot, DeltaVisitor, DeltaWalk, PendingDelta,
+    DELTA_CHAIN_BYTES_PER_WORKER,
+};
 use crate::pack_zlib::skip_zlib_at_with_scratch;
 use crate::progress::{
     cancel_watch_arc, poll_cancel, poll_watch, Cancel, ProgressPhase, ProgressSink,
 };
-use crate::unpack_objects::{apply_delta_into, type_code_to_kind, PackIndexRecord, PackReader};
+use crate::unpack_objects::{type_code_to_kind, PackIndexRecord, PackReader};
 use crate::zlib_inflate::ZlibInflateScratch;
-use std::borrow::Cow;
 use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex};
@@ -116,19 +116,16 @@ impl<'a> PackIndexReporter<'a> {
     }
 }
 
-/// Where a delta's base lives: an earlier pack offset (ofs-delta) or an object id (ref-delta).
-#[derive(Clone, Copy)]
-enum DeltaBase {
-    Offset(usize),
-    Oid(ObjectId),
+/// A delta found by the scan, with the CRC-32 of its packed slot for the index record.
+struct PendingIndexDelta {
+    delta: PendingDelta,
+    crc32: u32,
 }
 
-struct PendingIndexDelta {
-    offset: usize,
-    crc32: u32,
-    base: DeltaBase,
-    zlib_offset: usize,
-    uncompressed_size: usize,
+impl AsRef<PendingDelta> for PendingIndexDelta {
+    fn as_ref(&self) -> &PendingDelta {
+        &self.delta
+    }
 }
 
 struct WholeSlot {
@@ -143,11 +140,6 @@ struct WholeSlot {
 const LARGE_WHOLE_OBJECT: usize = 4 * 1024 * 1024;
 /// Soft cap on total uncompressed bytes being hashed by whole-object workers at once.
 const WHOLE_INFLIGHT_BYTES_PER_THREAD: usize = 8 * 1024 * 1024;
-/// Soft cap on ancestor bytes one delta worker keeps for the chain it is walking.
-///
-/// The base being applied right now is always kept, so a single object larger than
-/// the cap still resolves; older ancestors beyond the cap are rebuilt on demand.
-const DELTA_CHAIN_BYTES_PER_WORKER: usize = 16 * 1024 * 1024;
 
 struct PackHeader {
     nr_objects: usize,
@@ -609,14 +601,6 @@ fn scan_and_hash_whole_slots_overlapped(
     Ok(())
 }
 
-fn record_first_error(first_error: &Mutex<Option<Error>>, err: Error) {
-    if let Ok(mut guard) = first_error.lock() {
-        if guard.is_none() {
-            *guard = Some(err);
-        }
-    }
-}
-
 fn hash_whole_slot(
     pack: &[u8],
     work: &WholeSlot,
@@ -666,11 +650,13 @@ fn push_ofs_delta(
     let pack_end = rd.pos + consumed;
     rd.pos = pack_end;
     pending.push(PendingIndexDelta {
-        offset: obj_offset,
+        delta: PendingDelta {
+            offset: obj_offset,
+            base: DeltaBase::Offset(base_offset),
+            zlib_offset,
+            uncompressed_size: size,
+        },
         crc32: crc32fast::hash(&pack[obj_offset..pack_end]),
-        base: DeltaBase::Offset(base_offset),
-        zlib_offset,
-        uncompressed_size: size,
     });
     Ok(())
 }
@@ -691,11 +677,13 @@ fn push_ref_delta(
     let pack_end = rd.pos + consumed;
     rd.pos = pack_end;
     pending.push(PendingIndexDelta {
-        offset: obj_offset,
+        delta: PendingDelta {
+            offset: obj_offset,
+            base: DeltaBase::Oid(base_oid),
+            zlib_offset,
+            uncompressed_size: size,
+        },
         crc32: crc32fast::hash(&pack[obj_offset..pack_end]),
-        base: DeltaBase::Oid(base_oid),
-        zlib_offset,
-        uncompressed_size: size,
     });
     Ok(())
 }
@@ -720,113 +708,46 @@ fn verify_pack_trailer(pack: &[u8], consumed: usize, algo: HashAlgo) -> Result<(
     Ok(())
 }
 
-/// Delta indices grouped by base, sorted so each base's children form one slice.
-struct DeltaChildren {
-    by_offset: Vec<(usize, u32)>,
-    by_oid: Vec<(ObjectId, u32)>,
-}
-
-impl DeltaChildren {
-    fn new(pending: &[PendingIndexDelta]) -> Result<Self> {
-        let mut by_offset = Vec::new();
-        let mut by_oid = Vec::new();
-        for (index, delta) in pending.iter().enumerate() {
-            let index = u32::try_from(index)
-                .map_err(|_| Error::CorruptObject("too many deltas in pack".to_owned()))?;
-            match delta.base {
-                DeltaBase::Offset(offset) => by_offset.push((offset, index)),
-                DeltaBase::Oid(oid) => by_oid.push((oid, index)),
-            }
-        }
-        by_offset.sort_unstable();
-        by_oid.sort_unstable();
-        Ok(Self { by_offset, by_oid })
-    }
-
-    fn of_offset(&self, offset: usize) -> &[(usize, u32)] {
-        let start = self.by_offset.partition_point(|(base, _)| *base < offset);
-        let len = self.by_offset[start..].partition_point(|(base, _)| *base == offset);
-        &self.by_offset[start..start + len]
-    }
-
-    fn of_oid(&self, oid: &ObjectId) -> &[(ObjectId, u32)] {
-        let start = self.by_oid.partition_point(|(base, _)| base < oid);
-        let len = self.by_oid[start..].partition_point(|(base, _)| base == oid);
-        &self.by_oid[start..start + len]
-    }
-}
-
-/// A base object whose delta tree one worker resolves depth-first.
-enum DeltaRoot {
-    /// A whole object in this pack, re-inflated from its header offset.
-    Pack { offset: usize, oid: ObjectId },
-    /// A thin-pack base that only exists in the object database.
-    Odb(ObjectId),
-}
-
-/// How to rebuild a chain frame whose bytes were evicted.
-#[derive(Clone, Copy)]
-enum Anchor {
-    /// Start from the walk's root object.
-    Root,
-    /// Start from the frame at this stack index.
-    Frame(usize),
-}
-
-/// One object on the chain a worker is walking, with the children still to resolve.
-struct ChainFrame<'c> {
-    kind: ObjectKind,
-    data: Option<Vec<u8>>,
-    ofs_children: &'c [(usize, u32)],
-    ref_children: &'c [(ObjectId, u32)],
-    next_child: usize,
-    anchor: Anchor,
-    /// Deltas applied, in order, to the anchor's bytes to rebuild this frame. Parents
-    /// released after their last child leave their delta here instead of a stack slot.
-    via: Vec<u32>,
-}
-
-impl ChainFrame<'_> {
-    fn take_next_child(&mut self) -> Option<u32> {
-        let k = self.next_child;
-        let child = match self.ofs_children.get(k) {
-            Some(&(_, child)) => child,
-            None => self.ref_children.get(k - self.ofs_children.len())?.1,
-        };
-        self.next_child += 1;
-        Some(child)
-    }
-
-    fn is_exhausted(&self) -> bool {
-        self.next_child >= self.ofs_children.len() + self.ref_children.len()
-    }
-
-    fn held_bytes(&self) -> usize {
-        self.data.as_ref().map_or(0, Vec::capacity)
-    }
-}
-
-/// Buffers one delta worker reuses across objects.
-#[derive(Default)]
-struct DeltaScratch {
-    zlib: ZlibInflateScratch,
-    delta: Vec<u8>,
-    leaf: Vec<u8>,
-}
-
-/// Shared, read-only view of the pack's deltas for the resolving workers.
-struct DeltaResolver<'a> {
-    pack: &'a [u8],
-    odb: &'a Odb,
+/// Turns each resolved delta into an index record; any failure aborts the build.
+struct IndexRecordVisitor<'a> {
     algo: HashAlgo,
     pending: &'a [PendingIndexDelta],
-    children: &'a DeltaChildren,
-    /// Set by the worker that resolves a delta, so a base duplicated in the pack (or
-    /// reached again as a thin base) never resolves the same ref-delta twice.
-    claimed: &'a [AtomicBool],
-    resolved: &'a AtomicU64,
-    failed: &'a AtomicBool,
-    chain_limit: usize,
+}
+
+impl DeltaVisitor for IndexRecordVisitor<'_> {
+    type Out = Vec<PackIndexRecord>;
+
+    fn root(
+        &self,
+        _root: &DeltaRoot,
+        _kind: ObjectKind,
+        _data: &[u8],
+        _out: &mut Self::Out,
+    ) -> Result<bool> {
+        Ok(true)
+    }
+
+    fn delta(
+        &self,
+        index: u32,
+        kind: ObjectKind,
+        data: &[u8],
+        out: &mut Self::Out,
+    ) -> Result<Option<ObjectId>> {
+        let oid = hash_object(self.algo, kind, data)?;
+        let pending = &self.pending[index as usize];
+        out.push(PackIndexRecord {
+            oid,
+            offset: u64::try_from(pending.delta.offset).unwrap_or(u64::MAX),
+            crc32: pending.crc32,
+            kind,
+        });
+        Ok(Some(oid))
+    }
+
+    fn merge(into: &mut Self::Out, mut from: Self::Out) {
+        into.append(&mut from);
+    }
 }
 
 /// Resolve every pending delta, appending one record per delta to `records`.
@@ -850,307 +771,35 @@ fn resolve_deltas(
         return Ok(());
     }
     poll_index_build_cancel(cancel, None, cancel_watch)?;
-    let children = DeltaChildren::new(pending)?;
-    let claimed: Vec<AtomicBool> = pending.iter().map(|_| AtomicBool::new(false)).collect();
-    let resolved = AtomicU64::new(0);
-    let failed = AtomicBool::new(false);
-    let resolver = DeltaResolver {
-        pack,
-        odb,
-        algo,
-        pending,
-        children: &children,
-        claimed: &claimed,
-        resolved: &resolved,
-        failed: &failed,
-        chain_limit,
-    };
-
+    let visitor = IndexRecordVisitor { algo, pending };
+    let walk = DeltaWalk::new(pack, odb, pending, chain_limit, &visitor)?;
     let in_pack: Vec<DeltaRoot> = records
         .iter()
         .filter_map(|record| {
             let offset = usize::try_from(record.offset).ok()?;
-            let has_children =
-                !children.of_offset(offset).is_empty() || !children.of_oid(&record.oid).is_empty();
-            has_children.then_some(DeltaRoot::Pack {
-                offset,
-                oid: record.oid,
-            })
+            walk.has_children(offset, &record.oid)
+                .then_some(DeltaRoot::Pack {
+                    offset,
+                    oid: record.oid,
+                })
         })
         .collect();
-    resolver.run(&in_pack, threads, records, progress.as_deref_mut())?;
-
-    let thin: Vec<DeltaRoot> = children
-        .by_oid
-        .chunk_by(|a, b| a.0 == b.0)
-        .filter(|group| {
-            group
-                .iter()
-                .any(|(_, child)| !claimed[*child as usize].load(Ordering::Relaxed))
-        })
-        .map(|group| DeltaRoot::Odb(group[0].0))
-        .collect();
-    resolver.run(&thin, threads, records, progress)?;
+    let mut report = |resolved: u64| {
+        if let Some(r) = progress.as_mut() {
+            r.set_deltas_resolved(resolved);
+        }
+    };
+    walk.run(&in_pack, threads, records, &mut report)?;
+    walk.run(&walk.thin_roots(), threads, records, &mut report)?;
 
     let total = u64::try_from(pending.len()).unwrap_or(u64::MAX);
-    let unresolved = total.saturating_sub(resolved.load(Ordering::Relaxed));
+    let unresolved = total.saturating_sub(walk.resolved());
     if unresolved > 0 {
         return Err(Error::CorruptObject(format!(
             "{unresolved} delta(s) could not be resolved for pack index"
         )));
     }
     Ok(())
-}
-
-impl DeltaResolver<'_> {
-    /// Walk `roots` on up to `threads` workers; the caller thread works too and reports progress.
-    fn run(
-        &self,
-        roots: &[DeltaRoot],
-        threads: std::num::NonZeroUsize,
-        records: &mut Vec<PackIndexRecord>,
-        mut progress: Option<&mut PackIndexReporter<'_>>,
-    ) -> Result<()> {
-        if roots.is_empty() {
-            return Ok(());
-        }
-        let next_root = AtomicUsize::new(0);
-        let first_error: Mutex<Option<Error>> = Mutex::new(None);
-        let helpers = threads.get().min(roots.len()).saturating_sub(1);
-        let work = |out: &mut Vec<PackIndexRecord>, after_root: &mut dyn FnMut()| {
-            let mut scratch = DeltaScratch::default();
-            while !self.failed.load(Ordering::Relaxed) {
-                let Some(root) = roots.get(next_root.fetch_add(1, Ordering::Relaxed)) else {
-                    break;
-                };
-                if let Err(err) = self.resolve_root(root, &mut scratch, out) {
-                    record_first_error(&first_error, err);
-                    self.failed.store(true, Ordering::Relaxed);
-                }
-                after_root();
-            }
-        };
-        thread::scope(|scope| {
-            let work = &work;
-            let handles: Vec<_> = (0..helpers)
-                .map(|_| {
-                    scope.spawn(move || {
-                        let mut out = Vec::new();
-                        work(&mut out, &mut || {});
-                        out
-                    })
-                })
-                .collect();
-            work(records, &mut || {
-                if let Some(r) = progress.as_mut() {
-                    r.set_deltas_resolved(self.resolved.load(Ordering::Relaxed));
-                }
-            });
-            for handle in handles {
-                match handle.join() {
-                    Ok(mut out) => records.append(&mut out),
-                    Err(_) => record_first_error(
-                        &first_error,
-                        Error::CorruptObject("index-pack delta worker stopped".to_owned()),
-                    ),
-                }
-            }
-        });
-        if let Some(r) = progress.as_mut() {
-            r.set_deltas_resolved(self.resolved.load(Ordering::Relaxed));
-        }
-        match first_error.into_inner().unwrap_or_else(|e| e.into_inner()) {
-            Some(err) => Err(err),
-            None => Ok(()),
-        }
-    }
-
-    /// Resolve every delta reachable from `root`, depth-first.
-    fn resolve_root(
-        &self,
-        root: &DeltaRoot,
-        scratch: &mut DeltaScratch,
-        records: &mut Vec<PackIndexRecord>,
-    ) -> Result<()> {
-        let Some((kind, data)) = self.load_root(root, &mut scratch.zlib)? else {
-            return Ok(());
-        };
-        let (ofs_children, ref_children) = match root {
-            DeltaRoot::Pack { offset, oid } => {
-                (self.children.of_offset(*offset), self.children.of_oid(oid))
-            }
-            DeltaRoot::Odb(oid) => (&[][..], self.children.of_oid(oid)),
-        };
-        let mut held = data.capacity();
-        let mut stack = vec![ChainFrame {
-            kind,
-            data: Some(data),
-            ofs_children,
-            ref_children,
-            next_child: 0,
-            anchor: Anchor::Root,
-            via: Vec::new(),
-        }];
-        while let Some(top) = stack.len().checked_sub(1) {
-            if self.failed.load(Ordering::Relaxed) {
-                return Ok(());
-            }
-            let Some(child) = stack[top].take_next_child() else {
-                if let Some(done) = stack.pop() {
-                    held = held.saturating_sub(done.held_bytes());
-                }
-                continue;
-            };
-            if self.claimed[child as usize].swap(true, Ordering::AcqRel) {
-                continue;
-            }
-            if stack[top].data.is_none() {
-                let data = self.rebuild(&stack, top, root, scratch)?;
-                held += data.capacity();
-                stack[top].data = Some(data);
-            }
-            let delta = &self.pending[child as usize];
-            let kind = stack[top].kind;
-            let ofs_children = self.children.of_offset(delta.offset);
-            // Results that become bases get their own exact allocation; leaves reuse one buffer.
-            let mut result = if ofs_children.is_empty() {
-                std::mem::take(&mut scratch.leaf)
-            } else {
-                Vec::new()
-            };
-            let base = stack[top].data.as_deref().unwrap_or_default();
-            self.apply(
-                delta,
-                base,
-                &mut scratch.zlib,
-                &mut scratch.delta,
-                &mut result,
-            )?;
-            let oid = hash_object(self.algo, kind, &result)?;
-            records.push(PackIndexRecord {
-                oid,
-                offset: u64::try_from(delta.offset).unwrap_or(u64::MAX),
-                crc32: delta.crc32,
-                kind,
-            });
-            self.resolved.fetch_add(1, Ordering::Relaxed);
-            let ref_children = self.children.of_oid(&oid);
-            if ofs_children.is_empty() && ref_children.is_empty() {
-                scratch.leaf = result;
-                continue;
-            }
-            result.shrink_to_fit();
-            let exhausted = stack[top].is_exhausted();
-            let (anchor, via) = match exhausted.then(|| stack.pop()).flatten() {
-                Some(parent) => {
-                    held = held.saturating_sub(parent.held_bytes());
-                    let mut via = parent.via;
-                    via.push(child);
-                    (parent.anchor, via)
-                }
-                None => (Anchor::Frame(top), vec![child]),
-            };
-            held += result.capacity();
-            stack.push(ChainFrame {
-                kind,
-                data: Some(result),
-                ofs_children,
-                ref_children,
-                next_child: 0,
-                anchor,
-                via,
-            });
-            held = evict_ancestors(&mut stack, held, self.chain_limit);
-        }
-        Ok(())
-    }
-
-    /// Bytes and kind of `root`, or `None` for a thin base the object database lacks.
-    fn load_root(
-        &self,
-        root: &DeltaRoot,
-        zlib: &mut ZlibInflateScratch,
-    ) -> Result<Option<(ObjectKind, Vec<u8>)>> {
-        match root {
-            DeltaRoot::Pack { offset, .. } => {
-                let mut rd = PackReader::new(self.pack);
-                rd.pos = *offset;
-                let (type_code, size) = rd.read_type_size()?;
-                let kind = type_code_to_kind(type_code)?;
-                let mut data = Vec::new();
-                let size = u64::try_from(size).unwrap_or(u64::MAX);
-                zlib.decompress_fixed_into(self.pack, &mut rd.pos, size, &mut data)?;
-                Ok(Some((kind, data)))
-            }
-            DeltaRoot::Odb(oid) => Ok(self.odb.read(oid).ok().map(|obj| (obj.kind, obj.data))),
-        }
-    }
-
-    /// Recompute the bytes of the evicted frame at `index` from its anchor.
-    fn rebuild(
-        &self,
-        stack: &[ChainFrame<'_>],
-        index: usize,
-        root: &DeltaRoot,
-        scratch: &mut DeltaScratch,
-    ) -> Result<Vec<u8>> {
-        let frame = &stack[index];
-        let mut current: Cow<'_, [u8]> = match frame.anchor {
-            Anchor::Root => match self.load_root(root, &mut scratch.zlib)? {
-                Some((_, data)) => Cow::Owned(data),
-                None => {
-                    return Err(Error::CorruptObject("delta base not available".to_owned()));
-                }
-            },
-            Anchor::Frame(parent) => match stack[parent].data.as_deref() {
-                Some(data) => Cow::Borrowed(data),
-                None => Cow::Owned(self.rebuild(stack, parent, root, scratch)?),
-            },
-        };
-        for &step in &frame.via {
-            let mut out = Vec::new();
-            self.apply(
-                &self.pending[step as usize],
-                &current,
-                &mut scratch.zlib,
-                &mut scratch.delta,
-                &mut out,
-            )?;
-            current = Cow::Owned(out);
-        }
-        Ok(current.into_owned())
-    }
-
-    fn apply(
-        &self,
-        delta: &PendingIndexDelta,
-        base: &[u8],
-        zlib: &mut ZlibInflateScratch,
-        delta_buf: &mut Vec<u8>,
-        out: &mut Vec<u8>,
-    ) -> Result<()> {
-        let mut pos = delta.zlib_offset;
-        let size = u64::try_from(delta.uncompressed_size).unwrap_or(u64::MAX);
-        zlib.decompress_fixed_into(self.pack, &mut pos, size, delta_buf)?;
-        apply_delta_into(out, base, delta_buf)
-    }
-}
-
-/// Drop the bytes of the oldest ancestors until the chain fits in `limit`; the frame on
-/// top is always kept. Returns the bytes still held.
-fn evict_ancestors(stack: &mut [ChainFrame<'_>], mut held: usize, limit: usize) -> usize {
-    let Some(keep) = stack.len().checked_sub(1) else {
-        return held;
-    };
-    for frame in &mut stack[..keep] {
-        if held <= limit {
-            break;
-        }
-        if let Some(data) = frame.data.take() {
-            held = held.saturating_sub(data.capacity());
-        }
-    }
-    held
 }
 
 #[cfg(test)]
@@ -1581,27 +1230,6 @@ mod line_coverage_tests {
                 other => panic!("threads={threads}: expected unresolved deltas, got {other:?}"),
             }
         }
-    }
-
-    #[test]
-    fn evict_ancestors_keeps_the_frame_being_applied() {
-        let frame = |len: usize| ChainFrame {
-            kind: ObjectKind::Blob,
-            data: Some(vec![0; len]),
-            ofs_children: &[],
-            ref_children: &[],
-            next_child: 0,
-            anchor: Anchor::Root,
-            via: Vec::new(),
-        };
-        let mut stack = vec![frame(10), frame(20), frame(30)];
-        let held: usize = stack.iter().map(ChainFrame::held_bytes).sum();
-        assert_eq!(evict_ancestors(&mut stack, held, 35), 30);
-        assert!(stack[0].data.is_none() && stack[1].data.is_none());
-        assert!(stack[2].data.is_some());
-        let mut stack = vec![frame(10), frame(20), frame(30)];
-        assert_eq!(evict_ancestors(&mut stack, held, 50), 50);
-        assert!(stack[0].data.is_none() && stack[1].data.is_some());
     }
 
     #[test]

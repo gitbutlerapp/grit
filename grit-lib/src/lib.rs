@@ -253,6 +253,7 @@ pub mod operation;
 pub(crate) mod pack;
 pub(crate) mod pack_bitmap;
 mod pack_delta;
+mod pack_delta_walk;
 mod pack_fsck_verify;
 mod pack_index;
 pub(crate) mod pack_index_build;
