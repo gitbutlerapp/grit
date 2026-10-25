@@ -5,7 +5,7 @@
 
 use encoding_rs::Encoding;
 
-fn is_iso_8859_1(label: &str) -> bool {
+pub(crate) fn is_iso_8859_1(label: &str) -> bool {
     matches!(
         label.trim().to_ascii_lowercase().as_str(),
         "iso-8859-1" | "iso8859-1" | "latin1" | "latin-1"
@@ -34,6 +34,17 @@ pub(crate) fn encode_latin1_lossy(unicode: &str) -> Vec<u8> {
             }
         })
         .collect()
+}
+
+/// Latin-1 working-tree bytes → UTF-8 blob bytes (Git `working-tree-encoding` clean filter).
+pub(crate) fn worktree_latin1_to_utf8_bytes(bytes: &[u8]) -> Vec<u8> {
+    decode_latin1(bytes).into_bytes()
+}
+
+/// UTF-8 blob bytes → Latin-1 working-tree bytes (Git smudge filter).
+pub(crate) fn utf8_bytes_to_worktree_latin1(utf8: &[u8]) -> Option<Vec<u8>> {
+    let s = std::str::from_utf8(utf8).ok()?;
+    Some(encode_latin1_lossy(s))
 }
 
 /// Find the offset of the first byte that is not part of a strictly valid UTF-8
@@ -276,5 +287,23 @@ mod tests {
         let encoded = encode_header_text("ISO8859-1", unicode).expect("latin1 encodes");
         assert_eq!(encoded, vec![0xC1, 0xE9, 0xED, 0x20, 0xF3, 0xFA]);
         assert_eq!(decode_bytes(Some("ISO8859-1"), &encoded), unicode);
+    }
+
+    #[test]
+    fn iso8859_1_aliases_for_worktree_encoding() {
+        for label in ["latin1", "ISO8859-1", "ISO-8859-1", "latin-1", "  LATIN1  "] {
+            assert!(is_iso_8859_1(label), "expected Latin-1 alias: {label}");
+        }
+    }
+
+    #[test]
+    fn worktree_latin1_round_trip_bytes() {
+        let worktree = b"h\xe9llo\n";
+        let utf8_blob = worktree_latin1_to_utf8_bytes(worktree);
+        assert_eq!(utf8_blob, b"h\xc3\xa9llo\n");
+        assert_eq!(
+            utf8_bytes_to_worktree_latin1(&utf8_blob).as_deref(),
+            Some(worktree.as_slice())
+        );
     }
 }

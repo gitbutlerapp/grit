@@ -1113,6 +1113,9 @@ fn decode_working_tree_bytes_to_utf8(
         // Bare UTF-16/UTF-32 keep their BOM; iconv consumes it to pick the byte order.
         Some(c) => (utf_canon_to_iconv_name(c), src),
         None => {
+            if crate::commit_encoding::is_iso_8859_1(label) {
+                return Ok(crate::commit_encoding::worktree_latin1_to_utf8_bytes(src));
+            }
             // Unknown / unsupported label (Git `reencode_string_len` returns NULL →
             // `failed to encode '%s' from %s to %s`).
             let Some(enc) = crate::commit_encoding::resolve(label) else {
@@ -1285,6 +1288,10 @@ fn encode_utf8_blob_to_working_tree_bytes(
             return encode_utf_with_encoding_rs(src, c).ok_or_else(fail);
         }
         None => {}
+    }
+
+    if crate::commit_encoding::is_iso_8859_1(label) {
+        return crate::commit_encoding::utf8_bytes_to_worktree_latin1(src).ok_or_else(fail);
     }
 
     let s = std::str::from_utf8(src).map_err(|_| fail())?;
