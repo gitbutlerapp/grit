@@ -303,3 +303,124 @@ fn restore_merge_uses_resolve_undo() {
     assert_eq!(worktree_bytes(&dir), want);
     assert!(!git_cmd(dir.path(), &["ls-files", "-u"]).trim().is_empty());
 }
+
+fn plain_restore_opts(path: &str) -> RestoreOptions {
+    conflict_opts_path(path, None, None)
+}
+
+fn git_restore_status(dir: &tempfile::TempDir, args: &[&str]) -> std::process::Output {
+    Command::new("git")
+        .current_dir(dir.path())
+        .arg("restore")
+        .args(args)
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("git restore")
+}
+
+#[test]
+fn restore_unmerged_path_from_index_refused_like_git() {
+    let (dir_git, _repo_git) = init_repo();
+    merge_conflict_repo(&dir_git);
+    let markers = worktree_bytes(&dir_git);
+    assert!(!git_restore_status(&dir_git, &["f.txt"]).status.success());
+    assert_eq!(worktree_bytes(&dir_git), markers);
+
+    let (dir, repo) = init_repo();
+    merge_conflict_repo(&dir);
+    let markers = worktree_bytes(&dir);
+    let unmerged = ls_files_unmerged(&dir);
+    let err = restore_paths(&repo, &plain_restore_opts("f.txt")).unwrap_err();
+    assert!(
+        matches!(
+            &err,
+            grit_lib::error::Error::RestorePathUnmerged { paths } if paths == &["f.txt"]
+        ),
+        "{err:?}"
+    );
+    assert_eq!(worktree_bytes(&dir), markers);
+    assert_eq!(ls_files_unmerged(&dir), unmerged);
+}
+
+#[test]
+fn restore_dot_with_unmerged_path_restores_nothing_like_git() {
+    fn setup(dir: &tempfile::TempDir) {
+        fs::write(dir.path().join("other.txt"), "other\n").unwrap();
+        git_cmd(dir.path(), &["add", "other.txt"]);
+        merge_conflict_repo(dir);
+        fs::write(dir.path().join("other.txt"), "edited\n").unwrap();
+    }
+
+    let (dir_git, _repo_git) = init_repo();
+    setup(&dir_git);
+    assert!(!git_restore_status(&dir_git, &["."]).status.success());
+    assert_eq!(worktree_bytes_path(&dir_git, "other.txt"), b"edited\n");
+
+    let (dir, repo) = init_repo();
+    setup(&dir);
+    let err = restore_paths(&repo, &plain_restore_opts(".")).unwrap_err();
+    assert!(
+        matches!(
+            &err,
+            grit_lib::error::Error::RestorePathUnmerged { paths } if paths == &["f.txt"]
+        ),
+        "{err:?}"
+    );
+    assert_eq!(worktree_bytes_path(&dir, "other.txt"), b"edited\n");
+}
+
+#[test]
+fn restore_excluding_unmerged_path_still_restores_others() {
+    let (dir, repo) = init_repo();
+    fs::write(dir.path().join("other.txt"), "other\n").unwrap();
+    git_cmd(dir.path(), &["add", "other.txt"]);
+    merge_conflict_repo(&dir);
+    fs::write(dir.path().join("other.txt"), "edited\n").unwrap();
+    let opts = RestoreOptions {
+        pathspecs: vec![".".into(), ":!f.txt".into()],
+        pathspec_sources: vec![".".into(), ":!f.txt".into()],
+        ..plain_restore_opts(".")
+    };
+    restore_paths(&repo, &opts).expect("restore other paths");
+    assert_eq!(worktree_bytes_path(&dir, "other.txt"), b"other\n");
+}
+
+#[test]
+fn restore_staged_unmerged_path_resets_index_like_git() {
+    let staged_opts = RestoreOptions {
+        staged: true,
+        worktree: false,
+        ..plain_restore_opts("f.txt")
+    };
+
+    let (dir_git, _repo_git) = init_repo();
+    merge_conflict_repo(&dir_git);
+    assert!(git_restore_status(&dir_git, &["--staged", "f.txt"])
+        .status
+        .success());
+    let want_index = git_cmd(dir_git.path(), &["ls-files", "-s", "f.txt"]);
+
+    let (dir, repo) = init_repo();
+    merge_conflict_repo(&dir);
+    restore_paths(&repo, &staged_opts).expect("restore --staged");
+    assert_eq!(
+        git_cmd(dir.path(), &["ls-files", "-s", "f.txt"]),
+        want_index
+    );
+    assert!(ls_files_unmerged(&dir).trim().is_empty());
+}
+
+#[test]
+fn restore_unmerged_path_from_tree_source_is_allowed() {
+    let (dir, repo) = init_repo();
+    merge_conflict_repo(&dir);
+    let head_tree = git_cmd(dir.path(), &["rev-parse", "HEAD^{tree}"]);
+    let tree = grit_lib::objects::ObjectId::from_hex(head_tree.trim()).expect("tree oid");
+    let opts = RestoreOptions {
+        source: RestoreSource::Tree(tree),
+        ..plain_restore_opts("f.txt")
+    };
+    restore_paths(&repo, &opts).expect("restore from tree");
+    assert_eq!(worktree_bytes(&dir), b"line1\nmaster\nline3\n");
+}

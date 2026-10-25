@@ -84,8 +84,11 @@ pub struct RestoreOutcome {
 ///
 /// # Errors
 ///
-/// Returns [`Error::PathspecNoMatch`] when a positive pathspec matches nothing.
-/// Conflict options ([`RestoreOptions::stage`], [`RestoreOptions::remerge`]) also
+/// Returns [`Error::PathspecNoMatch`] when a positive pathspec matches nothing, and
+/// [`Error::RestorePathUnmerged`] (before writing anything) when the worktree would be
+/// restored from the index for paths with conflict stages; use [`RestoreOptions::stage`] or
+/// [`RestoreOptions::remerge`] for those. `--staged` and an explicit tree source replace
+/// conflict stages instead. Conflict options ([`RestoreOptions::stage`], [`RestoreOptions::remerge`]) also
 /// return [`Error::RestoreConflictWithStaged`], [`Error::RestoreConflictWithSource`],
 /// [`Error::RestoreConflictMissingOurs`], [`Error::RestoreConflictMissingTheirs`],
 /// or [`Error::RestoreConflictNotUnmerged`] when the index shape does not allow
@@ -103,9 +106,18 @@ pub fn restore_paths(repo: &Repository, opts: &RestoreOptions) -> Result<Restore
     }
 
     let mut index = repo.load_index()?;
-    let protect = crate::path_validate::ProtectOptions::from_config(&*repo.config()?);
-
+    let pathspec_ctx = repo.pathspec_match_context();
     let restore_staged = opts.staged;
+    if !restore_staged && matches!(opts.source, RestoreSource::Index) {
+        let unmerged = collect_conflict_matched_paths(&index, &opts.pathspecs, false, pathspec_ctx);
+        if !unmerged.is_empty() {
+            return Err(Error::RestorePathUnmerged {
+                paths: unmerged.into_iter().collect(),
+            });
+        }
+    }
+
+    let protect = crate::path_validate::ProtectOptions::from_config(&*repo.config()?);
     let restore_worktree = opts.worktree || !opts.staged;
     let worktree_from_tree = matches!(opts.source, RestoreSource::Tree(_)) && !restore_staged;
 
@@ -124,7 +136,6 @@ pub fn restore_paths(repo: &Repository, opts: &RestoreOptions) -> Result<Restore
     };
 
     let select_all_tracked = pathspecs_select_all_tracked(&opts.pathspecs);
-    let pathspec_ctx = repo.pathspec_match_context();
     let matched = collect_matched_paths(
         &index,
         head_entries.as_slice(),
@@ -1035,5 +1046,124 @@ mod tests {
         )
         .expect("status");
         assert!(st.unstaged.is_empty(), "{st:?}");
+    }
+
+    fn staged_entry(repo: &Repository, path: &str, data: &[u8], stage: u16) -> IndexEntry {
+        let oid = repo.odb().write(ObjectKind::Blob, data).expect("blob");
+        IndexEntry {
+            ctime_sec: 0,
+            ctime_nsec: 0,
+            mtime_sec: 0,
+            mtime_nsec: 0,
+            dev: 0,
+            ino: 0,
+            mode: crate::index::MODE_REGULAR,
+            uid: 0,
+            gid: 0,
+            size: data.len() as u32,
+            oid,
+            flags: (path.len() as u16) | (stage << 12),
+            flags_extended: None,
+            path: path.as_bytes().to_vec(),
+            base_index_pos: 0,
+        }
+    }
+
+    /// `f` is unmerged (stages 1–3) and `g` is tracked with a worktree edit.
+    fn conflicted_repo() -> (TempDir, Repository) {
+        let (dir, repo) = init_repo();
+        let wt = repo.work_tree().expect("wt").to_path_buf();
+        std::fs::write(wt.join("f"), "<<<<<<< ours\n").expect("write f");
+        std::fs::write(wt.join("g"), "edited\n").expect("write g");
+        let mut index = repo.load_index().expect("index");
+        for (stage, data) in [(1, &b"base\n"[..]), (2, b"ours\n"), (3, b"theirs\n")] {
+            index.entries.push(staged_entry(&repo, "f", data, stage));
+        }
+        index.entries.push(staged_entry(&repo, "g", b"g\n", 0));
+        index.sort();
+        repo.write_index(&mut index).expect("write index");
+        (dir, repo)
+    }
+
+    fn opts(pathspec: &str) -> RestoreOptions {
+        RestoreOptions {
+            pathspecs: vec![pathspec.into()],
+            pathspec_sources: vec![pathspec.into()],
+            source: RestoreSource::Index,
+            staged: false,
+            worktree: true,
+            stage: None,
+            remerge: None,
+        }
+    }
+
+    #[test]
+    fn restore_from_index_refuses_unmerged_path() {
+        let (dir, repo) = conflicted_repo();
+        let err = restore_paths(&repo, &opts("f")).unwrap_err();
+        assert!(
+            matches!(&err, Error::RestorePathUnmerged { paths } if paths == &["f"]),
+            "{err:?}"
+        );
+        assert!(err.to_string().contains("path 'f' is unmerged"), "{err}");
+        assert_eq!(
+            std::fs::read(dir.path().join("f")).expect("f"),
+            b"<<<<<<< ours\n"
+        );
+    }
+
+    #[test]
+    fn restore_dot_with_unmerged_path_writes_nothing() {
+        let (dir, repo) = conflicted_repo();
+        let err = restore_paths(&repo, &opts(".")).unwrap_err();
+        assert!(matches!(err, Error::RestorePathUnmerged { .. }), "{err:?}");
+        assert_eq!(std::fs::read(dir.path().join("g")).expect("g"), b"edited\n");
+    }
+
+    #[test]
+    fn restore_merged_path_beside_unmerged_one_succeeds() {
+        let (dir, repo) = conflicted_repo();
+        let outcome = restore_paths(&repo, &opts("g")).expect("restore g");
+        assert_eq!(outcome.restored, vec!["g".to_string()]);
+        assert_eq!(std::fs::read(dir.path().join("g")).expect("g"), b"g\n");
+    }
+
+    #[test]
+    fn conflict_options_still_restore_unmerged_path() {
+        let (dir, repo) = conflicted_repo();
+        for (side, want) in [
+            (ConflictSide::Ours, &b"ours\n"[..]),
+            (ConflictSide::Theirs, b"theirs\n"),
+        ] {
+            restore_paths(
+                &repo,
+                &RestoreOptions {
+                    stage: Some(side),
+                    ..opts("f")
+                },
+            )
+            .expect("restore side");
+            assert_eq!(std::fs::read(dir.path().join("f")).expect("f"), want);
+        }
+        restore_paths(
+            &repo,
+            &RestoreOptions {
+                remerge: Some(ConflictStyle::Merge),
+                ..opts("f")
+            },
+        )
+        .expect("restore --merge");
+        let merged = std::fs::read_to_string(dir.path().join("f")).expect("f");
+        assert!(merged.contains("<<<<<<< ours"), "{merged}");
+    }
+
+    #[test]
+    fn restore_unmerged_message_lists_every_path() {
+        let err = Error::RestorePathUnmerged {
+            paths: vec!["a".into(), "b".into()],
+        };
+        let msg = err.to_string();
+        assert!(msg.starts_with("paths are unmerged: 'a', 'b'"), "{msg}");
+        assert!(msg.contains("--ours") && msg.contains("--merge"), "{msg}");
     }
 }

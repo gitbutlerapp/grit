@@ -117,6 +117,22 @@ impl fmt::Display for StructuredCliError {
 
 impl StdError for StructuredCliError {}
 
+/// Build an error for a command refused because `paths` still have conflict stages.
+pub fn unmerged_paths(human: String, paths: Vec<String>) -> Error {
+    Error::new(StructuredCliError {
+        payload: StructuredJsonError {
+            error: human.clone(),
+            kind: ErrorKind::Conflict,
+            conflicts: Some(paths),
+            commit: None,
+            would_overwrite: None,
+            oid: None,
+            hook: None,
+        },
+        human,
+    })
+}
+
 /// Build an error for a merge, pick, or rebase that would introduce conflicts.
 pub fn operation_conflict(
     operation: &str,

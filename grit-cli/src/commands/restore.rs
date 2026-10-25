@@ -1,6 +1,7 @@
 //! `grit restore` — restore working tree and/or index paths.
 
 use anyhow::{Context, Result};
+use grit_lib::error::Error as LibError;
 use grit_lib::porcelain::hunk_select::{
     parse_hunk_id_list, restore_hunks, HunkSelectError, RestoreHunksOutcome,
 };
@@ -16,6 +17,7 @@ use std::collections::BTreeMap;
 use std::io::Write;
 
 use crate::context;
+use crate::json_error;
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 use crate::pathspec_args::PathspecArgs;
 
@@ -190,6 +192,16 @@ pub fn run(
         remerge,
     };
 
-    let outcome = restore_paths(&repo, &opts).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let outcome = restore_paths(&repo, &opts).map_err(map_restore_error)?;
     Ok(outcome.into())
+}
+
+fn map_restore_error(err: LibError) -> anyhow::Error {
+    match err {
+        LibError::RestorePathUnmerged { ref paths } => {
+            let paths = paths.clone();
+            json_error::unmerged_paths(err.to_string(), paths)
+        }
+        other => anyhow::anyhow!("{other}"),
+    }
 }

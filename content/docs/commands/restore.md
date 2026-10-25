@@ -22,6 +22,7 @@ Discards local changes for tracked paths you name. By default, `grit restore` re
 - `--source=<rev>` reads content from a commit or tree instead of the usual default (`HEAD` for `--staged`, the index for the worktree).
 - Paths that are missing in the source are removed from the target. Untracked files are never touched.
 - During a merge conflict, `--ours` and `--theirs` write index stage 2 or 3 into the worktree (filters and line endings apply) and leave the index unmerged. `--merge` rebuilds conflict markers from stages 1–3; `--conflict` picks the marker style and implies `--merge`. These options cannot be combined with `--staged` or `--source`.
+- A plain worktree restore (no `--staged`, no `--source`) refuses paths that are still unmerged, for example after a conflicted `grit merge` or `grit stash pop`: there is no single index version to restore. It fails before writing anything, even when other matched paths could be restored (`grit restore .` included), and tells you to pick `--ours`, `--theirs` or `--merge`. Exclude the conflicted path (`-- . ':!f.txt'`) to restore the rest. `--staged` and `--source` replace the conflict stages instead, like Git.
 
 ## Options
 
@@ -83,6 +84,13 @@ $ grit restore --merge --conflict=diff3 -- README.md
 Restored README.md
 ```
 
+A plain restore on a conflicted path names the options that work:
+
+```console
+$ grit restore README.md
+error: path 'README.md' is unmerged; restore a side with --ours or --theirs, or the conflict markers with --merge
+```
+
 ## JSON output
 
 Schema: [v1](/schemas/restore/v1.json)
@@ -109,6 +117,8 @@ Example:
 }
 ```
 
+When a plain restore refuses an unmerged path, stdout with `--json` is a single error object with `kind` `conflict` and a `conflicts` array of the unmerged paths. See the [error schema](/schemas/error/v1.json).
+
 ## Markdown output
 
 Schema: [v1](/schemas/restore/v1.json)
@@ -129,7 +139,7 @@ Pass `--markdown` for agent-friendly bullet lists of restored and removed paths.
 | Code | Meaning |
 | ---: | --- |
 | `0` | Success ([`success`](../exit-codes/)). |
-| `1` | Command failed ([`failure`](../exit-codes/)). |
+| `1` | Command failed ([`failure`](../exit-codes/)), including a plain restore of an unmerged path. |
 | `2` | Invalid flags or arguments ([`usage`](../exit-codes/)). |
 
 See [Exit codes](../exit-codes/) for shared rules and structured `--json` `kind` values.

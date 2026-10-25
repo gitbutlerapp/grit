@@ -658,6 +658,23 @@ fn index_locked_message(lock_path: &std::path::Path, holder: Option<&LockHolder>
     )
 }
 
+fn restore_unmerged_message(paths: &[String]) -> String {
+    let subject = match paths {
+        [path] => format!("path '{path}' is unmerged"),
+        _ => format!(
+            "paths are unmerged: {}",
+            paths
+                .iter()
+                .map(|p| format!("'{p}'"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ),
+    };
+    format!(
+        "{subject}; restore a side with --ours or --theirs, or the conflict markers with --merge"
+    )
+}
+
 /// The top-level error type for all grit-lib operations.
 ///
 /// # Examples
@@ -1035,6 +1052,16 @@ pub enum Error {
     RestoreConflictNotUnmerged {
         /// Repository-relative path.
         path: String,
+    },
+
+    /// [`crate::porcelain::restore::restore_paths`] was asked to restore the worktree from the
+    /// index for paths that still have conflict stages; pick a side or rebuild the markers instead.
+    ///
+    /// Nothing is written when this is returned.
+    #[error("{}", restore_unmerged_message(paths))]
+    RestorePathUnmerged {
+        /// Matched repository-relative paths with conflict stages (sorted, deduplicated).
+        paths: Vec<String>,
     },
 
     /// A literal pathspec names a file under a symlink directory component.
