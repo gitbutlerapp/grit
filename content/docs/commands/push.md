@@ -50,6 +50,17 @@ With `--delete`, deletes remote branches or tags (short names map like Git).
 
 In human output, messages the remote sends while it processes the push (hook output, CI links, policy text) are shown on stderr as `remote: …` lines, including when stderr is not a terminal. `-q` / `--quiet` hides them and the human summary, so a successful push prints nothing; a rejected push is still reported and exits `1`. With `--json` or `--markdown`, the same lines appear in `remote_messages` (omitted when empty).
 
+### Large pushes
+
+When a smart-HTTP server advertises a resumable push endpoint (the `pushBundle` capability, as [`grit serve`](../serve/) does) and the pack to send is larger than 16 MiB, grit writes the pack as a bundle and uploads it with the [TUS](https://tus.io/protocols/resumable-upload) resumable-upload protocol instead of one long request, then asks the server to apply the ref updates. The result is reported like any other push. A dropped connection is retried from the server's offset, and an interrupted push keeps its bundle and upload in `.git/grit/push-bundles/`: run the same `grit push` again and it skips building the pack and sends only the rest.
+
+```text
+↻ Resuming push bundle upload at 12.0 MiB of 29.6 MiB (41%)  example.com/demo/push/97d00bc69d6359be08d3a13753f95d2a
+  ✓ push bundle 29.6 MiB in 3.4s · 5.20 MiB/s · resumed at 12.0 MiB
+```
+
+Set `push.bundleThreshold` (bytes, with optional `k`, `m` or `g`) to change the size at which this starts.
+
 For GitHub over HTTPS, if a push fails because you aren't signed in, `grit` offers to run [`grit auth`](../auth/) and then tries again.
 
 ## Options

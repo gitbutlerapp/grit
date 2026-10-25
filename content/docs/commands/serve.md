@@ -8,7 +8,7 @@ order: 7
 ## Synopsis
 
 ```text
-grit serve [--root <path>] [--db <file>] [--bind <host:port>]
+grit serve [--root <path>] [--db <file>] [--bind <host:port>] [--bundle-interval <duration>] [--no-bundles]
 grit serve --setup [--email <email>] [--root <path>] [--db <file>]
 grit serve add-user <email> [--admin] [--root <path>] [--db <file>]
 grit serve token <email> [--root <path>] [--db <file>]
@@ -48,6 +48,26 @@ For scripts and CI, which cannot sign in in a browser, an admin can make a token
 
 A Git request without a valid token gets `401`, and a browser without a session is sent to the sign-in page. A repository the user cannot read answers `404`, the same as one that does not exist, and a push from a user with read access answers `403`.
 
+### Clone bundles
+
+The server keeps a prebuilt [bundle](https://git-scm.com/docs/git-bundle) of each repository's branches and tags in `grit-serve/bundles/` inside its Git directory. A background thread builds a repository's first bundle as soon as the server starts (or as soon as the repository gets its first branch), and builds a new one after pushes have changed its refs, once the current bundle is older than `--bundle-interval` (24 hours by default; `0s` rebuilds right after every push). Each bundle gets a new file name and the previous one is kept, so a client part way through downloading the old bundle can still finish it.
+
+Fetches over protocol v2 see the `bundle-uri` command in the server's capabilities. It answers with the current bundle's URL, `http://<host>:<port>/<name>/bundles/<file>`, which serves the file with `Range` support so an interrupted download can resume. [`grit clone`](../clone/) downloads the bundle first and then fetches only what is newer; `git clone` does the same with `-c transfer.bundleURI=true` and a credential helper that knows the token. Downloading a bundle needs read access, like fetching.
+
+`--no-bundles` turns this off: nothing is built and nothing is advertised.
+
+### Resumable pushes
+
+The push advertisement carries a `pushBundle=/push` capability: a [TUS](https://tus.io/protocols/resumable-upload) upload endpoint at `http://<host>:<port>/<name>/push`. [`grit push`](../push/) sends a large push there as a bundle, in chunks that survive a dropped connection, then posts the usual ref updates to `…/push/<id>/receive`. The server applies them exactly as for a normal push (the same checks, policy and hooks) and answers with the usual push report. Uploading needs write access, and an upload belongs to the user who started it. Unfinished uploads are deleted after a week. Git clients ignore the capability and push the usual way.
+
+| Request | Answer |
+| --- | --- |
+| `OPTIONS /<name>/push` | TUS version and extensions (`creation`) |
+| `POST /<name>/push` with `Upload-Length` | `201` and the upload's `Location` |
+| `HEAD /<name>/push/<id>` | `Upload-Offset`: bytes received so far |
+| `PATCH /<name>/push/<id>` with `Upload-Offset` | appends the body; answers the new offset |
+| `POST /<name>/push/<id>/receive` | applies the bundle with the posted ref updates |
+
 ### Running it
 
 `grit serve` with no subcommand and no `--setup` runs the server until interrupted. It refuses to start until `--setup` has created a user. It listens on `127.0.0.1:8080`; use `--bind 0.0.0.0:8080` to accept connections from other machines. The server speaks plain HTTP, so put it behind a TLS-terminating proxy before sending passwords and tokens across a network you don't trust.
@@ -61,6 +81,8 @@ A Git request without a valid token gets `401`, and a browser without a session 
 | `--bind <host:port>` | Address to listen on. Defaults to `127.0.0.1:8080`. |
 | `--setup` | Create the database and its first admin user, then exit. Prompts for a password, or generates a temporary one. Fails when the database already has users. |
 | `--email <email>` | Email address of the admin `--setup` creates. Asked for on a terminal when omitted. Requires `--setup`. |
+| `--bundle-interval <duration>` | How old a changed repository's clone bundle gets before a new one is built: a number with `s`, `m`, `h` or `d`. Defaults to `24h`. |
+| `--no-bundles` | Do not build or advertise clone bundles. |
 | `add-user <email>` | Add a user, named by their email address. Prompts for a password, or generates a temporary one. |
 | `add-user --admin` | Make the new user an admin. |
 | `token <email>` | Create an access token for a user and print it, for scripts and CI. |
@@ -82,6 +104,8 @@ $ grit serve
 Serving 1 repository from /srv/git at http://127.0.0.1:8080/
   http://127.0.0.1:8080/demo.git
 Sign in at http://127.0.0.1:8080/ (command line: grit auth http://127.0.0.1:8080)
+Clone bundles are built in the background and rebuilt every 24h after pushes
+bundle: built 1792924806-0bfb630026ae.bundle (30309803 bytes) for /srv/git/demo
 ```
 
 Sign in from another terminal, approve the code in the browser, then clone and push:
@@ -137,6 +161,13 @@ $ grit serve token bob@example.com
   Token: grit_617db60c2d54601c6109c9a9e7aaeac0dd3c5307
 
 Save it now; it is not shown again. Use it as the password when Git asks, or run `grit auth <url> --token <token>`.
+```
+
+Rebuild bundles an hour after pushes, or not at all:
+
+```console
+$ grit serve --bundle-interval 1h
+$ grit serve --no-bundles
 ```
 
 Serve a single repository from its working tree:

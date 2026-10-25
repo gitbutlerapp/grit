@@ -37,6 +37,7 @@ impl TerminalProgress {
             ProgressPhase::ResolvingDeltas => "Resolving deltas",
             ProgressPhase::CopyingObjects => "Copying objects",
             ProgressPhase::CheckingOutFiles => "Checking out files",
+            ProgressPhase::TransferringBundle => "Transferring bundle",
             _ => "Working",
         }
     }

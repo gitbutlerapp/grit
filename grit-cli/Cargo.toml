@@ -44,6 +44,7 @@ jaq-std = "3.0"
 terminal_size.workspace = true
 libc.workspace = true
 rpassword = "7"
+ctrlc = "3"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 grit-lib = { version = "0.5", path = "../grit-lib", features = ["http-ureq", "http-ureq-native-tls", "tracing"] }

@@ -45,7 +45,12 @@ fn open_existing(database: &Path) -> Result<AuthStore> {
 ///
 /// Fails when the database has no users, cannot be opened, or the address
 /// cannot be bound.
-pub fn run(root: &Path, db: Option<&Path>, bind: &str) -> Result<()> {
+pub fn run(
+    root: &Path,
+    db: Option<&Path>,
+    bind: &str,
+    bundles: grit_http_server::bundles::BundleSettings,
+) -> Result<()> {
     let root =
         std::fs::canonicalize(root).with_context(|| format!("cannot serve {}", root.display()))?;
     let database = database_path(&root, db);
@@ -54,6 +59,7 @@ pub fn run(root: &Path, db: Option<&Path>, bind: &str) -> Result<()> {
         root: root.clone(),
         database,
         repository_options: grit_protocol::repository_options_from_process(),
+        bundles,
     };
     let server = match Server::bind(config, bind) {
         Ok(server) => server,
@@ -76,8 +82,52 @@ pub fn run(root: &Path, db: Option<&Path>, bind: &str) -> Result<()> {
         eprintln!("  http://{addr}/{}.git", repo.name);
     }
     eprintln!("Sign in at http://{addr}/ (command line: grit auth http://{addr})");
+    if bundles.enabled {
+        eprintln!(
+            "Clone bundles are built in the background and rebuilt every {} after pushes",
+            format_interval(bundles.interval)
+        );
+    }
     server.run()?;
     Ok(())
+}
+
+/// Parse a `--bundle-interval` value: a number with `s`, `m`, `h` or `d`
+/// (seconds when there is no unit).
+///
+/// # Errors
+///
+/// A message naming the bad value.
+pub fn parse_interval(value: &str) -> std::result::Result<std::time::Duration, String> {
+    let value = value.trim();
+    let split = value
+        .find(|c: char| !c.is_ascii_digit())
+        .unwrap_or(value.len());
+    let (number, unit) = value.split_at(split);
+    let number: u64 = number
+        .parse()
+        .map_err(|_| format!("`{value}` is not a duration like 24h, 30m or 2d"))?;
+    let seconds = match unit {
+        "" | "s" => 1,
+        "m" => 60,
+        "h" => 60 * 60,
+        "d" => 24 * 60 * 60,
+        _ => return Err(format!("`{value}` is not a duration like 24h, 30m or 2d")),
+    };
+    Ok(std::time::Duration::from_secs(
+        number.saturating_mul(seconds),
+    ))
+}
+
+/// `86400s` as `24h`, for the startup banner.
+fn format_interval(interval: std::time::Duration) -> String {
+    let secs = interval.as_secs();
+    for (unit, size) in [("d", 86_400), ("h", 3_600), ("m", 60)] {
+        if secs >= size && secs.is_multiple_of(size) {
+            return format!("{}{unit}", secs / size);
+        }
+    }
+    format!("{secs}s")
 }
 
 /// Result of `grit serve --setup` and `grit serve add-user`: a new user.
@@ -459,5 +509,25 @@ impl HumanRender for ServeUsersOutcome {
 impl MarkdownRender for ServeUsersOutcome {
     fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         markdown::print_serve_users_outcome(w, self)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    #[test]
+    fn intervals_parse_with_units() {
+        assert_eq!(parse_interval("24h"), Ok(Duration::from_secs(86_400)));
+        assert_eq!(parse_interval("30m"), Ok(Duration::from_secs(1_800)));
+        assert_eq!(parse_interval("2d"), Ok(Duration::from_secs(172_800)));
+        assert_eq!(parse_interval("90"), Ok(Duration::from_secs(90)));
+        assert_eq!(parse_interval("0s"), Ok(Duration::ZERO));
+        assert!(parse_interval("soon").is_err());
+        assert!(parse_interval("5w").is_err());
+        assert_eq!(format_interval(Duration::from_secs(86_400)), "1d");
+        assert_eq!(format_interval(Duration::from_secs(7_200)), "2h");
+        assert_eq!(format_interval(Duration::from_secs(90)), "90s");
     }
 }

@@ -16,6 +16,33 @@
         }
       ]
     },
+    "CloneBundleJson": {
+      "description": "The server's prebuilt bundle a clone started from (`bundle-uri`).",
+      "properties": {
+        "bytes": {
+          "description": "Size of the bundle file in bytes.",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "resumed_from": {
+          "description": "Bytes an earlier, interrupted clone had already downloaded.",
+          "format": "uint64",
+          "minimum": 0.0,
+          "type": "integer"
+        },
+        "uri": {
+          "description": "Where the bundle was downloaded from.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "bytes",
+        "resumed_from",
+        "uri"
+      ],
+      "type": "object"
+    },
     "ClonePhase": {
       "description": "Timing for one step of the clone.",
       "properties": {
@@ -26,7 +53,7 @@
           "type": "integer"
         },
         "phase": {
-          "description": "`receiving`, `indexing`, `resolving_deltas`, `copying` or `checkout`.",
+          "description": "`bundle`, `receiving`, `indexing`, `resolving_deltas`, `copying` or `checkout`.",
           "type": "string"
         },
         "seconds": {
@@ -120,6 +147,17 @@
         "array",
         "null"
       ]
+    },
+    "bundle": {
+      "anyOf": [
+        {
+          "$ref": "#/definitions/CloneBundleJson"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "The server's prebuilt bundle the clone started from, when it offered one. `objects` and `bytes` include what it brought."
     },
     "bytes": {
       "description": "Pack bytes received during the fetch.",

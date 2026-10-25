@@ -329,6 +329,7 @@ fn plan_error(err: PushPlanError) -> anyhow::Error {
     anyhow::Error::new(err)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn push_once(
     repo: &grit_lib::repo::Repository,
     config: &ConfigSet,

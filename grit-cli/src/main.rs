@@ -2062,6 +2062,17 @@ enum Command {
         /// Email address of the admin `--setup` creates (asked for when omitted).
         #[arg(long, value_name = "EMAIL", requires = "setup")]
         email: Option<String>,
+        /// How often to rebuild a changed repository's clone bundle, like `24h`, `30m` or `2d`.
+        #[arg(
+            long,
+            value_name = "DURATION",
+            default_value = "24h",
+            value_parser = commands::serve_http::parse_interval
+        )]
+        bundle_interval: std::time::Duration,
+        /// Do not build or offer clone bundles.
+        #[arg(long)]
+        no_bundles: bool,
     },
     /// Serve a fetch or clone over stdin/stdout (run by ssh and grit-http-server).
     #[command(name = "upload-pack", hide = true)]
@@ -3987,6 +3998,8 @@ fn dispatch(
             bind,
             setup,
             email,
+            bundle_interval,
+            no_bundles,
         } => {
             let db = db.as_deref();
             match action {
@@ -4024,7 +4037,12 @@ fn dispatch(
                 }
                 // The running server logs to stderr; it has no stdout result.
                 None => {
-                    commands::serve_http::run(&root, db, &bind)?;
+                    let bundles = grit_http_server::bundles::BundleSettings {
+                        enabled: !no_bundles,
+                        interval: bundle_interval,
+                        ..Default::default()
+                    };
+                    commands::serve_http::run(&root, db, &bind, bundles)?;
                     Ok(ExitStatus::Success)
                 }
             }

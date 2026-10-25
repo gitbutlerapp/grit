@@ -44,6 +44,22 @@ After the clone, stdout gets a summary: total time with a bar showing where it w
 
 On a case-insensitive filesystem (`core.ignorecase`), when the repository contains paths that differ only by case (or other spellings that map to one on-disk file), grit prints a **warning** on **stderr** (human mode only) listing every colliding index path. Only one path from each group exists on disk; the summary **files** and **worktree_bytes** counts reflect distinct on-disk files, not the number of index entries. With `commit.autoStage` (the default), grit does not auto-stage collision losers — their index blobs stay as recorded in the tree even though the work tree shows them as modified.
 
+### Starting from the server's bundle
+
+When an HTTP(S) server offers a prebuilt bundle through Git's `bundle-uri` protocol command (as [`grit serve`](../serve/) does), clone downloads that bundle first, unpacks it, and then fetches only what is newer than it. A bundle is a plain file, so the download resumes instead of starting over:
+
+- a connection that drops is picked up again from where it stopped, a few times, in the same run;
+- an interrupted clone (Ctrl-C, a lost network, a closed laptop) keeps what it downloaded in `$XDG_CACHE_HOME/grit/bundles` (`~/.cache/grit/bundles` by default). Run the same `grit clone` again and the download carries on from there. The partial clone directory is removed on Ctrl-C, so the command can simply be repeated.
+
+The bundle download has its own display: an arrow and the bundle's URL, then a bar. A resumed download says where it picked up, and its bar shows the bytes from the earlier run in grey:
+
+```text
+↻ Resuming bundle download at 14.1 MiB of 58.5 MiB (24%)  example.com/demo/bundles/1792925548-38bec2f6f89f.bundle
+  ━━━━━━━━━━━━━━━━━━━─────────────   60%  35.5 MiB of 58.5 MiB  5.22 MiB/s  ~4s left
+```
+
+When it finishes, the line becomes `✓ bundle 58.5 MiB in 8.5s · 5.23 MiB/s · resumed at 14.1 MiB`, and the summary gets a `bundle` row. Shallow (`--depth`) and partial (`--blobs`) clones never use a bundle, and `transfer.bundleURI=false` in config turns bundles off. When the bundle cannot be used, clone warns and fetches everything as usual.
+
 For private GitHub repositories over HTTPS, sign in first with [`grit auth`](../auth/).
 
 When the remote has no commits yet (an empty bare repository), grit still creates the destination directory, configures `origin`, and points `HEAD` at the remote's default branch without checking out files. Human output includes a short note on stderr (`note: the remote repository is empty.`); `--json` reports `"files": 0`, `"no_checkout_reason": "empty_remote"`, and the configured branch name.
@@ -174,10 +190,11 @@ Pass `--json` for stable, scripting-friendly output:
 | `object_types` | object or null | Objects received by type: `commits`, `trees`, `blobs` and `tags` (annotated tag objects). Populated when grit indexed the received pack or can tally every object in the transfer. `null` when a local pack link installed more objects than the transfer summary tracks individually (typical for a single linked pack on clone). |
 | `worktree_bytes` | integer | Total size of the checked-out files. |
 | `seconds` | number | Wall-clock seconds for the whole clone. |
-| `phases` | array | Time spent in each step, in order: `phase` (`receiving`, `indexing`, `resolving_deltas`, `copying` or `checkout`), `unit` (`bytes`, `objects` or `files`), `count` and `seconds`. Steps that processed nothing are left out. |
+| `phases` | array | Time spent in each step, in order: `phase` (`bundle`, `receiving`, `indexing`, `resolving_deltas`, `copying` or `checkout`), `unit` (`bytes`, `objects` or `files`), `count` and `seconds`. Steps that processed nothing are left out. |
 | `bare` | boolean | `true` when `--bare` was used. |
 | `no_checkout_reason` | string or omitted | When no files were checked out: `empty_remote`, `unborn_default_branch`, `bare`, or `no_checkout`. Omitted when checkout succeeded. |
 | `branches_with_commits` | array of strings | Remote branch names that have commits when `no_checkout_reason` is `unborn_default_branch`. Omitted when empty. |
+| `bundle` | object or omitted | The server's prebuilt bundle the clone started from: `uri`, `bytes` (its size) and `resumed_from` (bytes an earlier, interrupted clone had already downloaded). `objects` and `bytes` above include what it brought. Omitted when no bundle was used. |
 
 Example (repository with commits):
 

@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 use anyhow::Result;
+use grit_lib::remote::bundle_uri::BundleSeed;
 use grit_lib::remote::clone::{
     cleanup_failed_clone, clone as clone_repo, clone_effective_single_branch, derive_clone_dir,
     dest_preexisted_empty, CloneCheckout, CloneError, CloneHead, CloneOptions,
@@ -24,7 +25,7 @@ use grit_lib::progress::{NeverCancel, ProgressPhase, ProgressUnit};
 /// Timing for one step of the clone.
 #[derive(Serialize, JsonSchema)]
 pub struct ClonePhase {
-    /// `receiving`, `indexing`, `resolving_deltas`, `copying` or `checkout`.
+    /// `bundle`, `receiving`, `indexing`, `resolving_deltas`, `copying` or `checkout`.
     pub phase: String,
     /// Unit of `count`: `bytes`, `objects` or `files`.
     pub unit: String,
@@ -132,6 +133,17 @@ pub struct CloneRunOptions {
     pub mode: OutputMode,
 }
 
+/// The server's prebuilt bundle a clone started from (`bundle-uri`).
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct CloneBundleJson {
+    /// Where the bundle was downloaded from.
+    pub uri: String,
+    /// Size of the bundle file in bytes.
+    pub bytes: u64,
+    /// Bytes an earlier, interrupted clone had already downloaded.
+    pub resumed_from: u64,
+}
+
 /// Result of `grit clone`.
 #[derive(Serialize, JsonSchema)]
 pub struct CloneOutcome {
@@ -191,6 +203,10 @@ pub struct CloneOutcome {
     /// Index paths that collided on a case-insensitive filesystem during checkout.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub path_collisions: Vec<String>,
+    /// The server's prebuilt bundle the clone started from, when it offered
+    /// one. `objects` and `bytes` include what it brought.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bundle: Option<CloneBundleJson>,
     /// Timing and transfer totals for the human summary.
     #[serde(skip)]
     #[schemars(skip)]
@@ -247,6 +263,14 @@ fn render_summary(o: &CloneOutcome, w: &mut dyn Write, color: bool) -> Result<()
 
     o.transfer.render_rows(w, color)?;
 
+    if let Some(bundle) = &o.bundle {
+        let mut parts = vec![format!("{} prebuilt", format_bytes(bundle.bytes))];
+        if bundle.resumed_from > 0 {
+            parts.push(format!("resumed at {}", format_bytes(bundle.resumed_from)));
+        }
+        outln!(w, "  {}  {}", label("bundle"), join(&parts, color));
+    }
+
     outln!(
         w,
         "  {}  {}",
@@ -292,6 +316,7 @@ fn phase_json_name(phase: ProgressPhase) -> &'static str {
         ProgressPhase::ResolvingDeltas => "resolving_deltas",
         ProgressPhase::CopyingObjects => "copying",
         ProgressPhase::CheckingOutFiles => "checkout",
+        ProgressPhase::TransferringBundle => "bundle",
         _ => "other",
     }
 }
@@ -341,6 +366,15 @@ impl MarkdownRender for CloneOutcome {
             }
         }
         outln!(w, "- **url**: `{}`", self.url);
+        if let Some(bundle) = &self.bundle {
+            outln!(
+                w,
+                "- **bundle**: `{}` ({} bytes, resumed at {})",
+                bundle.uri,
+                bundle.bytes,
+                bundle.resumed_from
+            );
+        }
         outln!(w, "- **objects**: {}", self.objects);
         if let Some(t) = self.object_types {
             outln!(
@@ -501,6 +535,17 @@ pub fn run(mut opts: CloneRunOptions) -> Result<CloneOutcome> {
     let dest_preexisted_empty = dest_preexisted_empty(&path);
     let started = Instant::now();
 
+    // Ctrl-C would leave a half-made clone in the way of running the same
+    // command again, which resumes an interrupted bundle download.
+    {
+        let path = path.clone();
+        let _ = ctrlc::set_handler(move || {
+            eprintln!();
+            cleanup_failed_clone(&path, dest_preexisted_empty);
+            std::process::exit(130);
+        });
+    }
+
     // A clone always ends with a checkout, so the overall bar can size it.
     let mut term_progress = opts.quiet.progress(mode).with_overall(true);
     if term_progress.is_drawing() {
@@ -571,6 +616,7 @@ fn clone_into(
         )),
         bare: run.bare,
         checkout: !run.no_checkout,
+        bundle_cache: bundle_cache_dir(),
     };
     let single_branch = clone_effective_single_branch(&clone_opts);
     let outcome = clone_repo(
@@ -579,6 +625,23 @@ fn clone_into(
         &NeverCancel,
         Some(&factory),
     )?;
+    let bundle = match &outcome.bundle {
+        BundleSeed::Seeded(seeded) => Some(CloneBundleJson {
+            uri: seeded.uri.clone(),
+            bytes: seeded.bytes,
+            resumed_from: seeded.resumed_from,
+        }),
+        BundleSeed::Failed { uri, reason } => {
+            if run.mode == OutputMode::Human {
+                let from = uri.as_deref().map(|u| format!(" {u}")).unwrap_or_default();
+                eprintln!(
+                    "warning: could not use the server's bundle{from} ({reason}); fetched everything instead"
+                );
+            }
+            None
+        }
+        BundleSeed::NotOffered => None,
+    };
 
     let files = outcome.files;
     let worktree_bytes = outcome.worktree_bytes;
@@ -649,7 +712,23 @@ fn clone_into(
         branches_with_commits,
         path_collisions,
         bare: outcome.bare,
+        bundle,
     })
+}
+
+/// Where clone keeps bundle downloads between attempts:
+/// `$XDG_CACHE_HOME/grit/bundles`, else `~/.cache/grit/bundles`.
+fn bundle_cache_dir() -> Option<PathBuf> {
+    let env = crate::context::environment();
+    let base = env
+        .var("XDG_CACHE_HOME")
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| {
+            env.var("HOME")
+                .map(|home| PathBuf::from(home).join(".cache"))
+        })?;
+    Some(base.join("grit").join("bundles"))
 }
 
 #[cfg(test)]
@@ -714,6 +793,7 @@ mod tests {
             no_checkout_reason: None,
             branches_with_commits: None,
             path_collisions: Vec::new(),
+            bundle: None,
             bare: false,
         }
     }

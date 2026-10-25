@@ -18,6 +18,7 @@ use terminal_size::{terminal_size, Width};
 
 use crate::output::OutputMode;
 
+pub mod resumable;
 pub mod summary;
 
 /// Minimum time between in-place redraws.
@@ -143,6 +144,8 @@ pub struct TerminalProgress {
     overall: Option<OverallEstimator>,
     /// Whether the overall bar is on screen and must be cleared at the end.
     overall_on_screen: bool,
+    /// Bundle downloads and uploads, which get their own display.
+    resumable: resumable::ResumableDisplay,
 }
 
 impl TerminalProgress {
@@ -161,12 +164,13 @@ impl TerminalProgress {
     fn new_inner(mode: OutputMode, force_silent: bool) -> Self {
         let draw = !force_silent && mode == OutputMode::Human && io::stderr().is_terminal();
         let emit_remote = !force_silent && mode == OutputMode::Human;
+        let color = draw
+            && grit_lib::porcelain::terminal::stderr_supports_color()
+            && std::env::var_os("NO_COLOR").is_none();
         Self {
             origin: Instant::now(),
             draw,
-            color: draw
-                && grit_lib::porcelain::terminal::stderr_supports_color()
-                && std::env::var_os("NO_COLOR").is_none(),
+            color,
             active: None,
             finished: Vec::new(),
             last_draw: Instant::now() - MIN_REDRAW,
@@ -175,6 +179,7 @@ impl TerminalProgress {
             emit_remote,
             overall: None,
             overall_on_screen: false,
+            resumable: resumable::ResumableDisplay::new(draw, color),
         }
     }
 
@@ -237,6 +242,10 @@ impl TerminalProgress {
         let Some(active) = &self.active else {
             return;
         };
+        // Bundle transfers are drawn by their own display.
+        if active.phase == ProgressPhase::TransferringBundle {
+            return;
+        }
         let now = Instant::now();
         if !force && now.duration_since(self.last_draw) < MIN_REDRAW {
             return;
@@ -268,7 +277,7 @@ impl TerminalProgress {
         if record.count == 0 {
             return;
         }
-        if self.draw {
+        if self.draw && record.phase != ProgressPhase::TransferringBundle {
             let line = render_done(&record, terminal_width(), self.color);
             let mut out = format!("\r{}{line}\n", clear_seq(self.color));
             // Keep the overall bar up through the gap before the next phase.
@@ -341,6 +350,10 @@ impl Progress for TerminalProgress {
         self.overall.is_some()
     }
 
+    fn resumable_transfer(&mut self, event: &grit_lib::remote::resumable::ResumableEvent) {
+        self.resumable.handle(event);
+    }
+
     fn received_objects(&mut self, counts: ReceivedObjects) {
         let at = self.since_start();
         if let Some(overall) = &mut self.overall {
@@ -409,7 +422,7 @@ impl ProgressSink for TerminalProgress {
     }
 }
 
-fn terminal_width() -> usize {
+pub(crate) fn terminal_width() -> usize {
     terminal_size()
         .map(|(Width(w), _)| w as usize)
         .unwrap_or(80)
@@ -447,6 +460,7 @@ pub(crate) fn phase_palette(phase: ProgressPhase) -> [u8; 5] {
         ProgressPhase::ResolvingDeltas => [130, 172, 178, 214, 220],
         ProgressPhase::CopyingObjects => [23, 30, 37, 44, 87],
         ProgressPhase::CheckingOutFiles => [22, 28, 34, 40, 82],
+        ProgressPhase::TransferringBundle => [96, 133, 170, 177, 219],
         _ => [240, 244, 248, 252, 255],
     }
 }
@@ -459,6 +473,7 @@ pub(crate) fn phase_label(phase: ProgressPhase) -> &'static str {
         ProgressPhase::ResolvingDeltas => "Resolving",
         ProgressPhase::CopyingObjects => "Copying",
         ProgressPhase::CheckingOutFiles => "Checkout",
+        ProgressPhase::TransferringBundle => "Bundle",
         _ => "Working",
     }
 }
@@ -762,7 +777,7 @@ fn render_done(record: &PhaseRecord, width: usize, color: bool) -> String {
 }
 
 /// `~12s left`, `~1m 05s left`, or `<1s left`.
-fn format_eta(left: Duration) -> String {
+pub(crate) fn format_eta(left: Duration) -> String {
     let secs = left.as_secs_f64().round() as u64;
     match secs {
         0 => "<1s left".to_owned(),
