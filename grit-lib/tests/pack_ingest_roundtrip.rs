@@ -1318,7 +1318,8 @@ fn pack_index_build_errors_and_thin_pack_with_odb_base() {
     let records = pack_index_records_with_threads(&thin, &odb, Parallelism::resolve(Some(4)))
         .expect("thin index");
     assert!(!records.is_empty());
-    install_pack_bytes(
+    let thin_count = pack_object_count(&thin);
+    let installed = install_pack_bytes(
         thin,
         &odb,
         &IngestPackOptions {
@@ -1328,6 +1329,157 @@ fn pack_index_build_errors_and_thin_pack_with_odb_base() {
         },
     )
     .expect("fix thin install");
+    assert_installed_pack_consistent(&installed.pack_path, HashAlgo::Sha1);
+    let installed_count = pack_object_count(&std::fs::read(&installed.pack_path).expect("pack"));
+    assert!(
+        installed_count > thin_count,
+        "fix_thin must append the missing base ({thin_count} -> {installed_count})"
+    );
+}
+
+/// Object count from a pack header.
+fn pack_object_count(pack: &[u8]) -> u32 {
+    u32::from_be_bytes(pack[8..12].try_into().expect("pack header"))
+}
+
+/// The installed pack's trailer, the checksum recorded in its `.idx`, and the `pack-<hash>`
+/// file name must all agree, or `git` refuses the pack ("packfile does not match index").
+fn assert_installed_pack_consistent(pack_path: &Path, algo: HashAlgo) {
+    let hb = algo.len();
+    let pack = std::fs::read(pack_path).expect("read installed pack");
+    let idx = std::fs::read(pack_path.with_extension("idx")).expect("read installed idx");
+    let pack_trailer = &pack[pack.len() - hb..];
+    let idx_pack_checksum = &idx[idx.len() - 2 * hb..idx.len() - hb];
+    let trailer_hex = ObjectId::from_bytes(pack_trailer)
+        .expect("trailer")
+        .to_hex();
+    assert_eq!(
+        ObjectId::from_bytes(idx_pack_checksum)
+            .expect("idx checksum")
+            .to_hex(),
+        trailer_hex,
+        "idx records a different pack checksum than the pack trailer"
+    );
+    assert_eq!(
+        pack_path.file_name().and_then(|n| n.to_str()),
+        Some(format!("pack-{trailer_hex}.pack").as_str()),
+        "pack file name must be derived from the final trailer"
+    );
+    git_verify_and_fsck(pack_path.parent().expect("pack dir"), algo);
+}
+
+/// `git pack-objects --thin` output for `want` given the receiver has `have`, as upload-pack
+/// sends it for an incremental fetch.
+fn git_thin_pack(dir: &Path, want: &str, have: &str) -> Vec<u8> {
+    let mut cmd = Command::new("git");
+    cmd.current_dir(dir)
+        .args(["pack-objects", "--stdout", "--revs", "--thin"]);
+    for (k, v) in GIT_ENV {
+        cmd.env(k, v);
+    }
+    let mut child = cmd
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("spawn git pack-objects");
+    {
+        let mut stdin = child.stdin.take().expect("stdin");
+        writeln!(stdin, "{want}\n^{have}").expect("write revs");
+    }
+    let out = child.wait_with_output().expect("wait pack-objects");
+    assert!(
+        out.status.success(),
+        "git pack-objects --thin: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    out.stdout
+}
+
+/// Issue #1844: a small fetch receives a thin pack (a one-line edit of a text file whose base
+/// lives only in the receiving repository). Completing it rewrites the pack, so the `.idx`
+/// checksum and file name must come from the completed pack. Covers both the fetch
+/// configuration (`skip_post_index_verify`) and the verifying one.
+#[test]
+fn fetched_thin_pack_installs_with_matching_idx_and_name() {
+    for skip_post_index_verify in [true, false] {
+        let up = tempfile::tempdir().expect("upstream");
+        init_repo(up.path(), false);
+        std::fs::create_dir_all(up.path().join("f1")).expect("mkdir");
+        let text: String = (0..100)
+            .map(|i| format!("harbor line {i:03} with some text to delta against\n"))
+            .collect();
+        std::fs::write(up.path().join("f1/harbor.txt"), &text).expect("write text");
+        let binary: Vec<u8> = (0..2 * 1024 * 1024u32)
+            .map(|i| (i.wrapping_mul(2_654_435_761) >> 24) as u8)
+            .collect();
+        std::fs::write(up.path().join("blob.bin"), &binary).expect("write binary");
+        git_run(up.path(), &["add", "-A"]);
+        git_run(up.path(), &["commit", "-q", "-m", "seed"]);
+        let have = git(up.path(), &["rev-parse", "HEAD"]).trim().to_owned();
+
+        let down = tempfile::tempdir().expect("downstream");
+        git_run(
+            down.path(),
+            &[
+                "clone",
+                "-q",
+                "--no-local",
+                up.path().to_str().expect("utf-8"),
+                ".",
+            ],
+        );
+
+        std::fs::write(
+            up.path().join("f1/harbor.txt"),
+            format!("{text}one more line\n"),
+        )
+        .expect("edit");
+        git_run(up.path(), &["commit", "-q", "-am", "edit1"]);
+        let want = git(up.path(), &["rev-parse", "HEAD"]).trim().to_owned();
+
+        let thin = git_thin_pack(up.path(), &want, &have);
+        assert!(pack_is_thin(&thin, HashAlgo::Sha1), "fixture must be thin");
+        let thin_count = pack_object_count(&thin);
+
+        let git_dir = down.path().join(".git");
+        let odb = Odb::new(git_dir.join("objects").as_path()).with_config_git_dir(git_dir);
+        let installed = ingest_received_pack(
+            thin,
+            &odb,
+            &IngestPackOptions {
+                fix_thin: true,
+                skip_post_index_verify,
+                ..Default::default()
+            },
+        )
+        .expect("ingest thin pack");
+        let installed_count =
+            pack_object_count(&std::fs::read(&installed.pack_path).expect("pack"));
+        assert!(
+            installed_count > thin_count,
+            "thin completion must append the base ({thin_count} -> {installed_count})"
+        );
+        assert_installed_pack_consistent(&installed.pack_path, HashAlgo::Sha1);
+        assert!(
+            !installed
+                .pack_path
+                .parent()
+                .expect("pack dir")
+                .read_dir()
+                .expect("read pack dir")
+                .flatten()
+                .any(|e| e.file_name().to_string_lossy().starts_with('.')),
+            "no install staging left behind"
+        );
+
+        git_run(down.path(), &["update-ref", "refs/heads/main", &want]);
+        assert_eq!(
+            git(down.path(), &["log", "-1", "--format=%s", "main"]).trim(),
+            "edit1"
+        );
+        git_run(down.path(), &["fsck", "--strict", "--no-progress"]);
+    }
 }
 
 /// Manual RSS harness: `GRIT_PACK_IDX=/path/to.idx cargo test --release rss_harness_verify_pack_only -- --ignored --exact`
