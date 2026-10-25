@@ -314,14 +314,14 @@ pub fn run(
         let resume = LogWalkCursor::decode(token).context("invalid log continuation cursor")?;
         let query = resume.query().clone();
         let page_size = rev.max_count().unwrap_or(PAGE);
-        let page = LogWalkCursor::step(&repo, &query, Some(&resume), page_size)
+        let mut page = LogWalkCursor::step(&repo, &query, Some(&resume), page_size)
             .context("could not list commits")?;
         let truncated = page.next.is_some();
         let next = page.next.map(|c| c.encode()).transpose()?;
         return build_commit_outcome(
             &repo,
             &page.commits,
-            &mut OidHashMap::default(),
+            &mut page.commit_data,
             format,
             path_args,
             next,
@@ -425,7 +425,7 @@ pub fn run(
     let query = LogWalkQuery::from_rev_walk(&repo, &token_refs, &opts)?
         .context("internal error: log walk query missing")?;
 
-    let page =
+    let mut page =
         LogWalkCursor::step(&repo, &query, None, page_size).context("could not list commits")?;
     let truncated = page.next.is_some();
     let next = if rev.max_count().is_some() {
@@ -436,7 +436,7 @@ pub fn run(
     build_commit_outcome(
         &repo,
         &page.commits,
-        &mut OidHashMap::default(),
+        &mut page.commit_data,
         format,
         path_args,
         next,

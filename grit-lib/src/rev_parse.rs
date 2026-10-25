@@ -1543,18 +1543,30 @@ fn normalize_colon_path_for_tree(repo: &Repository, raw_path: &str) -> Result<St
 }
 
 /// Peel tags to a commit OID for merge-base computation (`A...B` and `rev-parse` output).
-pub fn peel_to_commit_for_merge_base(repo: &Repository, mut oid: ObjectId) -> Result<ObjectId> {
-    oid = apply_peel(repo, oid, Some(""))?;
-    let obj = repo.read_replaced(&oid)?;
-    match obj.kind {
-        ObjectKind::Commit => Ok(oid),
-        ObjectKind::Tree => Err(Error::InvalidRef(format!(
-            "object {oid} does not name a commit"
-        ))),
-        ObjectKind::Blob => Err(Error::InvalidRef(format!(
-            "object {oid} does not name a commit"
-        ))),
-        ObjectKind::Tag => Err(Error::InvalidRef("unexpected tag after peel".to_owned())),
+pub fn peel_to_commit_for_merge_base(repo: &Repository, oid: ObjectId) -> Result<ObjectId> {
+    peel_to_commit_object_for_merge_base(repo, oid).map(|(oid, _)| oid)
+}
+
+/// Like [`peel_to_commit_for_merge_base`], reading each object on the way once.
+///
+/// Also returns the commit object when it was read at the commit OID itself (no replace ref
+/// redirected it), so callers that need the commit next can parse it without a second read.
+pub(crate) fn peel_to_commit_object_for_merge_base(
+    repo: &Repository,
+    mut oid: ObjectId,
+) -> Result<(ObjectId, Option<crate::objects::Object>)> {
+    loop {
+        let effective = repo.object_id_after_replace(&oid);
+        let obj = repo.odb().read(&effective)?;
+        match obj.kind {
+            ObjectKind::Tag => oid = parse_tag_target(&obj.data)?,
+            ObjectKind::Commit => return Ok((oid, (effective == oid).then_some(obj))),
+            ObjectKind::Tree | ObjectKind::Blob => {
+                return Err(Error::InvalidRef(format!(
+                    "object {oid} does not name a commit"
+                )));
+            }
+        }
     }
 }
 
@@ -4096,6 +4108,55 @@ mod line_coverage_tests {
         }
         let _ = peel_to_tree(&repo, tip)?;
         let _ = try_parse_double_dot_log_range(&repo, "main..main")?;
+        Ok(())
+    }
+
+    #[test]
+    fn peel_to_commit_object_reads_through_tags_and_replace_refs() -> crate::error::Result<()> {
+        let dir = tempdir().map_err(crate::error::Error::Io)?;
+        Repository::init(
+            dir.path(),
+            &InitOptions {
+                bare: true,
+                ref_storage: crate::RefStorageFormat::Files,
+                ..InitOptions::default()
+            },
+        )?;
+        let repo = Repository::open(dir.path(), &RepositoryOptions::empty())?;
+        let odb = repo.odb();
+        let tree = odb.write_loose_materialize(ObjectKind::Tree, b"")?;
+        let commit = |msg: &str| {
+            let body = format!(
+                "tree {tree}\nauthor T <t@e.com> 100 +0000\ncommitter T <t@e.com> 100 +0000\n\n{msg}\n"
+            );
+            odb.write_loose_materialize(ObjectKind::Commit, body.as_bytes())
+        };
+        let tip = commit("tip")?;
+        let tag_body =
+            format!("object {tip}\ntype commit\ntag v1\ntagger T <t@e.com> 100 +0000\n\nv1\n");
+        let tag = odb.write_loose_materialize(ObjectKind::Tag, tag_body.as_bytes())?;
+
+        let (peeled, object) = peel_to_commit_object_for_merge_base(&repo, tag)?;
+        assert_eq!(peeled, tip);
+        let object = object.expect("commit read at its own id");
+        assert_eq!(object.kind, ObjectKind::Commit);
+        assert_eq!(object.data, odb.read(&tip)?.data);
+        assert_eq!(peel_to_commit_for_merge_base(&repo, tag)?, tip);
+        assert!(matches!(
+            peel_to_commit_object_for_merge_base(&repo, tree),
+            Err(Error::InvalidRef(_))
+        ));
+
+        let replacement = commit("replacement")?;
+        crate::refs::write_ref(
+            repo.git_dir(),
+            &format!("refs/replace/{}", tip.to_hex()),
+            &replacement,
+        )?;
+        let repo = Repository::open(dir.path(), &RepositoryOptions::empty())?;
+        let (peeled, object) = peel_to_commit_object_for_merge_base(&repo, tip)?;
+        assert_eq!(peeled, tip);
+        assert!(object.is_none(), "a replaced commit is not handed back");
         Ok(())
     }
 

@@ -18,8 +18,9 @@ use crate::promisor::{read_promisor_missing_oids, repo_treats_promisor_packs};
 use crate::reflog::read_reflog;
 use crate::repo::Repository;
 use crate::rev_parse::{
-    load_graft_parents, peel_to_commit_for_merge_base, resolve_revision,
-    resolve_upstream_symbolic_name, try_peel_to_commit_for_merge_base, upstream_suffix_info,
+    load_graft_parents, peel_to_commit_for_merge_base, peel_to_commit_object_for_merge_base,
+    resolve_revision, resolve_upstream_symbolic_name, try_peel_to_commit_for_merge_base,
+    upstream_suffix_info,
 };
 use crate::shallow::load_shallow_boundaries;
 
@@ -907,8 +908,32 @@ impl ReachableWalkState {
         cutoffs: ReachableWalkCommitterCutoffs,
     ) -> Result<Vec<ObjectId>> {
         let mut cache = CommitGraphCache::with_commit_graph(repo, self.use_commit_graph);
+        self.emit_with_cache(&mut cache, limit, cutoffs)
+    }
+
+    /// Like [`Self::emit_until`], also returning the raw bytes of the commits this call had to
+    /// read (keyed by commit id, read without a replace ref redirect). Commits whose parents
+    /// came from the commit-graph or an earlier walk are absent and must be read by the caller.
+    pub(crate) fn emit_until_retaining_commits(
+        &mut self,
+        repo: &Repository,
+        limit: Option<usize>,
+        cutoffs: ReachableWalkCommitterCutoffs,
+    ) -> Result<(Vec<ObjectId>, OidHashMap<Vec<u8>>)> {
+        let mut cache = CommitGraphCache::with_commit_graph(repo, self.use_commit_graph);
+        cache.retained_commits = Some(oid_hash_map());
+        let emitted = self.emit_with_cache(&mut cache, limit, cutoffs)?;
+        Ok((emitted, cache.retained_commits.take().unwrap_or_default()))
+    }
+
+    fn emit_with_cache(
+        &mut self,
+        cache: &mut CommitGraphCache<'_>,
+        limit: Option<usize>,
+        cutoffs: ReachableWalkCommitterCutoffs,
+    ) -> Result<Vec<ObjectId>> {
         let mut out = Vec::new();
-        while let Some(oid) = self.pop_next_emit(&mut cache, cutoffs)? {
+        while let Some(oid) = self.pop_next_emit(cache, cutoffs)? {
             out.push(oid);
             if limit.is_some_and(|n| out.len() >= n) {
                 break;
@@ -2096,6 +2121,9 @@ struct CommitGraphCache<'r> {
     graph: Option<crate::commit_graph_file::CommitGraphChain>,
     /// Monotonic pack cursor for single-pack repos (deep-history benchmarks).
     single_pack: Option<crate::pack::SingleLocalPackReader>,
+    /// When set, raw bytes of commits [`Self::parents_of`] read (at their own id, with no
+    /// replace ref in between), so a caller rendering them does not inflate them again.
+    retained_commits: Option<OidHashMap<Vec<u8>>>,
 }
 
 impl<'r> CommitGraphCache<'r> {
@@ -2138,6 +2166,7 @@ impl<'r> CommitGraphCache<'r> {
             graft_parents,
             graph,
             single_pack: None,
+            retained_commits: None,
         }
     }
 
@@ -2243,30 +2272,34 @@ impl<'r> CommitGraphCache<'r> {
                 return Ok(parents);
             }
         }
-        let commit_oid = peel_to_commit_for_merge_base(self.repo, oid).map_err(|e| match e {
-            Error::InvalidRef(msg) => Error::CorruptObject(msg),
-            other => other,
-        })?;
-        self.ensure_single_pack_reader();
-        let (time, parsed_parents) = if let Some(reader) = self.single_pack.as_mut() {
-            let object = reader.read_object(&commit_oid)?;
-            if object.kind != ObjectKind::Commit {
-                return Err(Error::CorruptObject(format!(
-                    "object {commit_oid} is not a commit"
-                )));
+        let (commit_oid, peeled) =
+            peel_to_commit_object_for_merge_base(self.repo, oid).map_err(|e| match e {
+                Error::InvalidRef(msg) => Error::CorruptObject(msg),
+                other => other,
+            })?;
+        let read_at_own_id = peeled.is_some();
+        let object = match peeled {
+            Some(object) => object,
+            None => {
+                self.ensure_single_pack_reader();
+                match self.single_pack.as_mut() {
+                    Some(reader) => reader.read_object(&commit_oid)?,
+                    None => self.repo.odb().read(&commit_oid)?,
+                }
             }
-            let linkage = CommitRef::parse(&object.data)?;
-            (linkage.committer_timestamp(), linkage.parents().to_vec())
-        } else {
-            let object = self.repo.odb().read(&commit_oid)?;
-            if object.kind != ObjectKind::Commit {
-                return Err(Error::CorruptObject(format!(
-                    "object {commit_oid} is not a commit"
-                )));
-            }
-            let linkage = CommitRef::parse(&object.data)?;
-            (linkage.committer_timestamp(), linkage.parents().to_vec())
         };
+        if object.kind != ObjectKind::Commit {
+            return Err(Error::CorruptObject(format!(
+                "object {commit_oid} is not a commit"
+            )));
+        }
+        let linkage = CommitRef::parse(&object.data)?;
+        let (time, parsed_parents) = (linkage.committer_timestamp(), linkage.parents().to_vec());
+        if read_at_own_id {
+            if let Some(retained) = self.retained_commits.as_mut() {
+                retained.insert(commit_oid, object.data);
+            }
+        }
         let parents: Vec<ObjectId> = if self.shallow_boundaries.contains(&commit_oid) {
             Vec::new()
         } else {

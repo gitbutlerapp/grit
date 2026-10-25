@@ -7,7 +7,7 @@ use std::io::{Cursor, Read, Write};
 
 use crate::error::{Error, Result};
 use crate::merge_base::{ReachableWalkCommitterCutoffs, ReachableWalkSnapshot, ReachableWalkState};
-use crate::objects::ObjectId;
+use crate::objects::{parse_commit, CommitData, ObjectId, OidHashMap};
 use crate::repo::Repository;
 use crate::revwalk::queries::{resolve_log_walk_tips_and_hide, MergeFilter, RevWalkListOptions};
 
@@ -78,6 +78,10 @@ pub struct LogWalkPage {
     pub commits: Vec<ObjectId>,
     /// `next` field.
     pub next: Option<LogWalkCursor>,
+    /// Parsed commits from [`Self::commits`] that the walk already read, keyed by id, so a
+    /// caller rendering the page does not read them again. Commits the walk did not need to
+    /// read (parents from the commit-graph, or linkage cached by an earlier walk) are absent.
+    pub commit_data: OidHashMap<CommitData>,
 }
 
 impl LogWalkCursor {
@@ -106,6 +110,7 @@ impl LogWalkCursor {
             return Ok(LogWalkPage {
                 commits: Vec::new(),
                 next: cursor.cloned(),
+                commit_data: OidHashMap::default(),
             });
         }
 
@@ -121,14 +126,24 @@ impl LogWalkCursor {
             }
         };
 
-        let commits = state.emit_until(repo, Some(limit), query.cutoffs)?;
+        let (commits, mut raw) =
+            state.emit_until_retaining_commits(repo, Some(limit), query.cutoffs)?;
+        let commit_data = commits
+            .iter()
+            .filter_map(|oid| raw.remove(oid).map(|bytes| (*oid, bytes)))
+            .map(|(oid, bytes)| Ok((oid, parse_commit(&bytes)?)))
+            .collect::<Result<OidHashMap<CommitData>>>()?;
         let next = state
             .has_emittable_pending(query.cutoffs)
             .then(|| LogWalkCursor {
                 query: query.clone(),
                 walk: state.snapshot(),
             });
-        Ok(LogWalkPage { commits, next })
+        Ok(LogWalkPage {
+            commits,
+            next,
+            commit_data,
+        })
     }
 
     /// Encode this cursor for `--cursor` (URL-safe, opaque to callers).
@@ -474,6 +489,64 @@ mod tests {
 
         let git_order = git_log_oids(&repo, 20);
         assert_eq!(paged, git_order);
+        Ok(())
+    }
+
+    #[test]
+    fn page_commit_data_holds_the_commits_the_walk_read() -> Result<()> {
+        let dir = tempdir().map_err(Error::Io)?;
+        let repo = open_repo(&dir)?;
+        let base = write_commit(&repo.odb(), &[], "base", 100)?;
+        let side = write_commit(&repo.odb(), &[base], "side", 150)?;
+        let main1 = write_commit(&repo.odb(), &[base], "main1", 200)?;
+        let merge = write_commit(&repo.odb(), &[main1, side], "merge", 300)?;
+        let tip = write_commit(&repo.odb(), &[merge], "tip", 400)?;
+        let query = LogWalkQuery {
+            tips: vec![tip],
+            hide: Vec::new(),
+            cutoffs: ReachableWalkCommitterCutoffs::default(),
+        };
+        let page = LogWalkCursor::step(&repo, &query, None, 10)?;
+        assert_eq!(page.commits.len(), 5);
+        // Seeding the walk reads the tip linkage first, so only the tip may be missing.
+        assert!(page.commit_data.len() >= page.commits.len() - 1);
+        for (oid, data) in &page.commit_data {
+            assert!(page.commits.contains(oid));
+            assert_eq!(data, &parse_commit(&repo.odb().read(oid)?.data)?);
+        }
+
+        let reopened = Repository::open(dir.path(), &RepositoryOptions::empty())?;
+        let limited = LogWalkCursor::step(&reopened, &query, None, 2)?;
+        assert!(limited
+            .commit_data
+            .keys()
+            .all(|oid| limited.commits.contains(oid)));
+        Ok(())
+    }
+
+    #[test]
+    fn page_commit_data_skips_commits_behind_a_replace_ref() -> Result<()> {
+        let dir = tempdir().map_err(Error::Io)?;
+        let repo = open_repo(&dir)?;
+        let base = write_commit(&repo.odb(), &[], "base", 100)?;
+        let mid = write_commit(&repo.odb(), &[base], "mid", 200)?;
+        let tip = write_commit(&repo.odb(), &[mid], "tip", 300)?;
+        let replacement = write_commit(&repo.odb(), &[base], "replacement", 200)?;
+        crate::refs::write_ref(
+            repo.git_dir(),
+            &format!("refs/replace/{}", mid.to_hex()),
+            &replacement,
+        )?;
+        let repo = Repository::open(dir.path(), &RepositoryOptions::empty())?;
+        let query = LogWalkQuery {
+            tips: vec![tip],
+            hide: Vec::new(),
+            cutoffs: ReachableWalkCommitterCutoffs::default(),
+        };
+        let page = LogWalkCursor::step(&repo, &query, None, 10)?;
+        assert!(page.commits.contains(&mid));
+        assert!(!page.commit_data.contains_key(&mid));
+        assert!(page.commit_data.contains_key(&base));
         Ok(())
     }
 
