@@ -4,6 +4,7 @@
 //! between base↔ours and base↔theirs (same idea as Git's merge-ort rename paths), then
 //! runs path-by-path three-way rules with optional content merge.
 
+use std::cell::OnceCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 #[path = "merge_tree_cache.rs"]
@@ -12,14 +13,16 @@ pub(crate) use merge_tree_cache::MergeTreeCache;
 #[path = "merge_trees_walk.rs"]
 mod merge_trees_walk;
 
+use crate::crlf::{DiffAttr, FileAttrs, MergeAttr, TextAttr};
 use crate::diff::{detect_renames, diff_trees, DiffStatus};
 use crate::index::{
     entry_from_stat, worktree_path_from_index_rel, Index, IndexEntry, MODE_REGULAR,
 };
-use crate::merge_file::{merge, ConflictStyle, MergeFavor, MergeInput};
+use crate::merge_file::{is_binary, merge, ConflictStyle, MergeFavor, MergeInput};
 use crate::objects::{ObjectId, ObjectKind};
 use crate::odb::Odb;
 use crate::repo::Repository;
+use crate::worktree_rules::WorktreeRules;
 use crate::write_tree::write_tree_from_index;
 
 /// Result of merging three trees with optional conflict-marker blobs for checkout.
@@ -498,7 +501,7 @@ fn rename_pairs_base_to_other(
 }
 #[expect(clippy::too_many_arguments)]
 pub(crate) fn merge_one_path(
-    repo: &Repository,
+    ctx: &PathMergeContext<'_>,
     index: &mut Index,
     conflict_content: &mut BTreeMap<Vec<u8>, ObjectId>,
     out_path: &[u8],
@@ -557,7 +560,7 @@ pub(crate) fn merge_one_path(
         }
         (Some(be), Some(oe), Some(te)) => {
             content_merge_or_conflict(
-                repo,
+                ctx,
                 index,
                 conflict_content,
                 out_path,
@@ -595,7 +598,7 @@ pub(crate) fn merge_one_path(
             // previously only recorded the index stages, leaving the working-tree file as the
             // plain "ours" blob — that hid the conflict from `rerere` and the user (t3504).
             add_add_content_conflict(
-                repo,
+                ctx,
                 index,
                 conflict_content,
                 out_path,
@@ -635,42 +638,51 @@ fn same_blob(a: &IndexEntry, b: &IndexEntry) -> bool {
     a.oid == b.oid && a.mode == b.mode
 }
 
-fn file_attrs_for_merge_path(repo: &Repository, path: &[u8]) -> Option<crate::crlf::FileAttrs> {
-    let index = repo.load_index().ok()?;
-    let rules = crate::worktree_rules::WorktreeRules::from_repository(repo, &index).ok()?;
-    let path_str = String::from_utf8_lossy(path);
-    Some(rules.file_attrs(path_str.as_ref(), false))
+/// Repository handle plus the attribute rules shared by every path of one tree merge.
+///
+/// The rules come from a single load of the repository index, made the first time a path
+/// needs a content merge; a failure to load them means "no attributes", as for each path before.
+pub(crate) struct PathMergeContext<'r> {
+    repo: &'r Repository,
+    rules: OnceCell<Option<WorktreeRules>>,
 }
 
-fn merge_favor_for_path(repo: &Repository, path: &[u8], favor: MergeFavor) -> MergeFavor {
-    if favor != MergeFavor::None {
-        return favor;
-    }
-    let Some(attrs) = file_attrs_for_merge_path(repo, path) else {
-        return favor;
-    };
-    if let crate::crlf::MergeAttr::Driver(name) = &attrs.merge {
-        if name == "union" {
-            return MergeFavor::Union;
+impl<'r> PathMergeContext<'r> {
+    pub(crate) fn new(repo: &'r Repository) -> Self {
+        Self {
+            repo,
+            rules: OnceCell::new(),
         }
     }
-    favor
+
+    fn file_attrs(&self, path: &[u8]) -> Option<FileAttrs> {
+        let rules = self
+            .rules
+            .get_or_init(|| {
+                let index = self.repo.load_index().ok()?;
+                WorktreeRules::from_repository(self.repo, &index).ok()
+            })
+            .as_ref()?;
+        Some(rules.file_attrs(&String::from_utf8_lossy(path), false))
+    }
 }
 
-fn blob_is_binary_for_merge(repo: &Repository, path: &[u8], data: &[u8]) -> bool {
-    if crate::merge_file::is_binary(data) {
-        return true;
+fn merge_favor_for_path(attrs: Option<&FileAttrs>, favor: MergeFavor) -> MergeFavor {
+    match attrs.map(|a| &a.merge) {
+        Some(MergeAttr::Driver(name)) if favor == MergeFavor::None && name == "union" => {
+            MergeFavor::Union
+        }
+        _ => favor,
     }
-    let Some(attrs) = file_attrs_for_merge_path(repo, path) else {
-        return false;
-    };
-    if matches!(attrs.merge, crate::crlf::MergeAttr::Unset) {
-        return true;
-    }
-    if attrs.text == crate::crlf::TextAttr::Unset {
-        return true;
-    }
-    matches!(attrs.diff_attr, crate::crlf::DiffAttr::Unset)
+}
+
+/// True when attributes force a binary merge (`-merge`, `-text` or `-diff`).
+fn attrs_force_binary(attrs: Option<&FileAttrs>) -> bool {
+    attrs.is_some_and(|a| {
+        matches!(a.merge, MergeAttr::Unset)
+            || a.text == TextAttr::Unset
+            || matches!(a.diff_attr, DiffAttr::Unset)
+    })
 }
 
 pub(crate) fn stage_entry(index: &mut Index, path: &[u8], src: &IndexEntry, stage: u8) {
@@ -681,7 +693,7 @@ pub(crate) fn stage_entry(index: &mut Index, path: &[u8], src: &IndexEntry, stag
 }
 #[expect(clippy::too_many_arguments)]
 fn content_merge_or_conflict(
-    repo: &Repository,
+    ctx: &PathMergeContext<'_>,
     index: &mut Index,
     conflict_content: &mut BTreeMap<Vec<u8>, ObjectId>,
     path: &[u8],
@@ -708,14 +720,17 @@ fn content_merge_or_conflict(
     // only a genuine line conflict (`result.conflicts > 0`) records unmerged stages 1/2/3. The
     // marker style (merge vs. diff3) is taken from `presentation.style`, so `--conflict=diff3`
     // produces the `||||||| base` section (t7201 5, 6, 9).
+    let repo = ctx.repo;
     let base_obj = repo.odb().read(&base.oid)?;
     let ours_obj = repo.odb().read(&ours.oid)?;
     let theirs_obj = repo.odb().read(&theirs.oid)?;
-    let favor = merge_favor_for_path(repo, path, favor);
+    let attrs = ctx.file_attrs(path);
+    let favor = merge_favor_for_path(attrs.as_ref(), favor);
 
-    if blob_is_binary_for_merge(repo, path, &base_obj.data)
-        || blob_is_binary_for_merge(repo, path, &ours_obj.data)
-        || blob_is_binary_for_merge(repo, path, &theirs_obj.data)
+    if attrs_force_binary(attrs.as_ref())
+        || is_binary(&base_obj.data)
+        || is_binary(&ours_obj.data)
+        || is_binary(&theirs_obj.data)
     {
         match favor {
             MergeFavor::Theirs => {
@@ -795,7 +810,7 @@ fn content_merge_or_conflict(
 /// `content_merge_or_conflict` policy.
 #[allow(clippy::too_many_arguments)]
 fn add_add_content_conflict(
-    repo: &Repository,
+    ctx: &PathMergeContext<'_>,
     index: &mut Index,
     conflict_content: &mut BTreeMap<Vec<u8>, ObjectId>,
     path: &[u8],
@@ -813,13 +828,16 @@ fn add_add_content_conflict(
         return Ok(());
     }
 
+    let repo = ctx.repo;
     let ours_obj = repo.odb().read(&ours.oid)?;
     let theirs_obj = repo.odb().read(&theirs.oid)?;
-    let favor = merge_favor_for_path(repo, path, favor);
+    let attrs = ctx.file_attrs(path);
+    let favor = merge_favor_for_path(attrs.as_ref(), favor);
 
     // Binary add/add: honour an explicit favour, else leave unmerged stages.
-    if blob_is_binary_for_merge(repo, path, &ours_obj.data)
-        || blob_is_binary_for_merge(repo, path, &theirs_obj.data)
+    if attrs_force_binary(attrs.as_ref())
+        || is_binary(&ours_obj.data)
+        || is_binary(&theirs_obj.data)
     {
         match favor {
             MergeFavor::Theirs => {
@@ -1508,6 +1526,105 @@ mod tests {
         let entry = out.index.get(b"bin.dat", 0).expect("stage 0");
         let theirs_blob = repo.odb().read(&entry.oid).expect("blob");
         assert_eq!(theirs_blob.data, vec![0, 1, 3]);
+    }
+
+    fn head_tree(repo: &Repository, dir: &std::path::Path) -> ObjectId {
+        let oid: ObjectId = grit_test_support::git(dir, &["rev-parse", "HEAD"])
+            .trim()
+            .parse()
+            .expect("HEAD");
+        let obj = repo.odb().read(&oid).expect("read");
+        parse_commit(&obj.data).expect("parse").tree
+    }
+
+    #[test]
+    fn merge_trees_loads_attributes_once_and_applies_them_per_path() {
+        use crate::worktree_rules::file_load_counters;
+
+        const N: usize = 20;
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let dir = tmp.path();
+        grit_test_support::git(dir, &["init", "-q", "-b", "main"]);
+        std::fs::write(dir.join(".gitattributes"), "*.u merge=union\n*.bin -text\n")
+            .expect("write");
+        std::fs::write(dir.join(".git/info/exclude"), "*.tmp\n").expect("write");
+        let body = |i: usize| -> String { (0..10).map(|j| format!("line {j} of {i}\n")).collect() };
+        for i in 0..N {
+            std::fs::write(dir.join(format!("f{i}.u")), "shared\n").expect("write");
+            std::fs::write(dir.join(format!("f{i}.bin")), body(i)).expect("write");
+            std::fs::write(dir.join(format!("f{i}.txt")), body(i)).expect("write");
+        }
+        grit_test_support::git(dir, &["add", "-A"]);
+        grit_test_support::git(dir, &["commit", "-qm", "base"]);
+        grit_test_support::git(dir, &["switch", "-qc", "topic"]);
+        for i in 0..N {
+            std::fs::write(dir.join(format!("f{i}.u")), "shared\ntheirs\n").expect("write");
+            std::fs::write(dir.join(format!("f{i}.bin")), format!("{}tail\n", body(i)))
+                .expect("write");
+            std::fs::write(dir.join(format!("f{i}.txt")), format!("{}tail\n", body(i)))
+                .expect("write");
+        }
+        grit_test_support::git(dir, &["commit", "-qam", "theirs"]);
+        let repo = Repository::discover(Some(dir), &RepositoryOptions::empty()).expect("repo");
+        let theirs_tree = head_tree(&repo, dir);
+        grit_test_support::git(dir, &["switch", "-q", "main"]);
+        let base_tree = head_tree(&repo, dir);
+        for i in 0..N {
+            std::fs::write(dir.join(format!("f{i}.u")), "shared\nours\n").expect("write");
+            std::fs::write(dir.join(format!("f{i}.bin")), format!("head\n{}", body(i)))
+                .expect("write");
+            std::fs::write(dir.join(format!("f{i}.txt")), format!("head\n{}", body(i)))
+                .expect("write");
+        }
+        grit_test_support::git(dir, &["commit", "-qam", "ours"]);
+        let ours_tree = head_tree(&repo, dir);
+
+        file_load_counters::reset();
+        let out = merge_trees_three_way(
+            &repo,
+            base_tree,
+            ours_tree,
+            theirs_tree,
+            MergeFavor::default(),
+            WhitespaceMergeOptions::default(),
+            None,
+            TreeMergeConflictPresentation::default(),
+        )
+        .expect("merge");
+        assert!(
+            file_load_counters::max_reads_per_file() <= 1,
+            "attribute/ignore files must be read at most once per tree merge, got {}",
+            file_load_counters::max_reads_per_file()
+        );
+        assert_eq!(
+            file_load_counters::reads_for(&dir.join(".git/info/exclude")),
+            1
+        );
+
+        for i in 0..N {
+            let union = out
+                .index
+                .get(format!("f{i}.u").as_bytes(), 0)
+                .expect("union path merges cleanly");
+            let blob = repo.odb().read(&union.oid).expect("blob");
+            assert_eq!(blob.data, b"shared\nours\ntheirs\n");
+
+            let bin = format!("f{i}.bin");
+            for stage in 1..=3 {
+                assert!(
+                    out.index.get(bin.as_bytes(), stage).is_some(),
+                    "-text path {bin} conflicts as binary (stage {stage})"
+                );
+            }
+            assert!(!out.conflict_content.contains_key(bin.as_bytes()));
+
+            let txt = out
+                .index
+                .get(format!("f{i}.txt").as_bytes(), 0)
+                .expect("text path merges cleanly");
+            let blob = repo.odb().read(&txt.oid).expect("blob");
+            assert_eq!(blob.data, format!("head\n{}tail\n", body(i)).as_bytes());
+        }
     }
 
     #[test]

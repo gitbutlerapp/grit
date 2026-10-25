@@ -9,7 +9,8 @@ use super::merge_tree_cache::{
 use crate::index::IndexEntry;
 use crate::merge_file::MergeFavor;
 use crate::merge_trees::{
-    merge_one_path, TreeMergeConflictPresentation, TreeMergeOutput, WhitespaceMergeOptions,
+    merge_one_path, PathMergeContext, TreeMergeConflictPresentation, TreeMergeOutput,
+    WhitespaceMergeOptions,
 };
 use crate::objects::{serialize_tree, ObjectId, ObjectKind, TreeEntry};
 use crate::odb::Odb;
@@ -416,6 +417,7 @@ pub(crate) fn three_way_on_touched_paths(
     use std::collections::HashSet as HSet;
 
     let odb = repo.odb();
+    let ctx = PathMergeContext::new(repo);
     let mut out = crate::index::Index::new();
     let mut conflict_content = BTreeMap::new();
     let mut handled_base: HSet<Vec<u8>> = HSet::new();
@@ -519,7 +521,7 @@ pub(crate) fn three_way_on_touched_paths(
         };
 
         merge_one_path(
-            repo,
+            &ctx,
             &mut out,
             &mut conflict_content,
             &out_path,
@@ -561,7 +563,7 @@ pub(crate) fn three_way_on_touched_paths(
             handled_theirs.insert(tp.clone());
         }
         merge_one_path(
-            repo,
+            &ctx,
             &mut out,
             &mut conflict_content,
             &bp,
@@ -591,7 +593,7 @@ pub(crate) fn three_way_on_touched_paths(
             continue;
         }
         merge_one_path(
-            repo,
+            &ctx,
             &mut out,
             &mut conflict_content,
             &tp,
