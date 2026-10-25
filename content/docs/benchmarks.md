@@ -399,6 +399,31 @@ for id in tag/list@many-refs tag/create@many-refs branch/create@many-refs; do
 done
 ```
 
+## Receiving a pack: clone and fetch memory (2026-10-25)
+
+Cloning over HTTPS peaked at several times the received pack's size ([#1672](https://github.com/gitbutlerapp/grit/issues/1672)). The received pack is spooled to disk and indexed through a memory map, and peak RSS counts the map's resident pages. The trailer checksum, the object scan and delta resolution each read the whole map, so the full pack stayed resident while it was indexed. After indexing, a check for thin-pack bases re-inflated every object again on one thread. Completing a thin pack then read the pack into memory and indexed it a second time.
+
+Indexing now keeps the pack's resident pages within a few megabytes. The two sequential passes drop the map's pages every 2 MiB, and delta resolution reads each compressed delta from the file with a positioned read, as `git index-pack` does. The index build reports the thin-pack bases it took from the object database. Missing bases are appended to the pack file in place, the header count and checksum are rewritten, and records for the new objects are added to the index without rebuilding it. Smaller buffers also cut working memory: deltas waiting to be resolved take 32 bytes instead of 72, worker threads hand their records over in batches, and the `.idx` is sorted in place and streamed to disk. The thin-pack rewrite also fixes a compatibility bug. Before it, the `.idx` kept the old pack checksum, and `git fsck` reported "packfile does not match index" after an incremental `grit fetch` from GitHub.
+
+Factory VM (4 vCPU), system `git 2.43.0`, release builds, `origin/main` (`2657344c7`) against this change in one sitting, median of three runs. Clone rows are `grit clone` / `git clone -q` from GitHub. Ingest rows index the pack that `git clone` received: [`install_pack_path`](rustdoc:grit_lib::objects::index_pack::install_pack_path) with fetch options against `git index-pack` on the same file.
+
+| Scenario | Git | Grit before | Grit after |
+| --- | ---: | ---: | ---: |
+| clone `rust-lang/cargo` (78 MB pack) | 4.54 s / 46.6 MB | 3.42 s / 126.9 MB | **2.40 s / 72.4 MB** |
+| clone `git/git` (326 MB pack) | 18.38 s / 96.8 MB | 10.69 s / 419.2 MB | **7.47 s / 167.4 MB** |
+| ingest `rust-lang/cargo` pack | 3.06 s / 28.5 MB | 2.39 s / 117.3 MB | **1.28 s / 35.1 MB** |
+| ingest `git/git` pack | 13.26 s / 63.5 MB | 8.75 s / 406.6 MB | **5.21 s / 77.4 MB** |
+
+Ingest now peaks at 1.2× `git index-pack`, down from 4–6×, and runs in 40% less time. The rest of the clone peak comes from checkout, which reads blobs through the 96 MB delta-base cache (`core.deltaBaseCacheLimit`, the same default as Git).
+
+Two gates keep the memory from regressing. The `pack_ingest_memory` integration test builds a 43 MB, 70k-object pack with `git fast-import` and fails when grit's ingest peaks above 1.5× `git index-pack` on it, each measured in its own child process. `origin/main` measures 5.7× there and this change measures 1.4×. The daily matrix row `clone/full@git-git` records time and peak RSS for a full `git/git` clone over smart HTTP from `git http-backend`. The `grit-bench network` clone, fetch, push and ls-remote scenarios now record peak RSS for both tools as well.
+
+```bash
+cargo test -p grit-lib --test pack_ingest_memory -- --nocapture
+GRIT_CARGO_PACK=/path/to/received.pack GRIT_SKIP_VERIFY=1 \
+  cargo test --release -p grit-lib --test pack_ingest_roundtrip rss_harness_install_pack_path -- --ignored --exact
+```
+
 ## Performance plan close-out (2026-10-21)
 
 After the memory and libification wave (fair single-process `grit log --limit`, mapped pack index / commit-graph / MIDX, packed-refs seek, repository path cache, LTO release profile, merge tree cache, pick/revert/merge pass reduction, status/diff scan memory, add without full index copies), the factory re-ran the **cooking dashboard** matrix on **`grit 0.5.15`** (`756aa953`) vs system **`git 2.43.0`**. Committed baselines: **`suite-after-LH.json`**, **`hot-paths-after.json`**, **`commit-after-LH.json`**, and **`dashboard/current.json`**. **`grit-bench compare`** against the pre-plan dashboard snapshot at **`grit 0.5.14`** shows **no overlapping 10k scenario regressed more than 5%** on Grit median wall time.
