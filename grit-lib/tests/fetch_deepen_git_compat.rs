@@ -161,6 +161,31 @@ fn assert_twin_matches(git_work: &Path, grit_work: &Path) {
     fsck(grit_work);
 }
 
+/// Issue #1934: repeated `fetch --depth N` must set absolute depth, not deepen by N each time.
+#[test]
+fn fetch_depth_absolute_on_shallow_clone_matches_git() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let bare = build_linear_bare(tmp.path(), 6);
+    let git_client = shallow_clone(tmp.path(), &bare, "git-abs", 1);
+    let grit_client = shallow_clone(tmp.path(), &bare, "grit-abs", 1);
+    assert_twin_matches(&git_client, &grit_client);
+    assert_eq!(rev_list_count(&git_client), 1);
+
+    for depth in [1u32, 2, 3] {
+        git_fetch(
+            &git_client,
+            &["fetch", "--depth", &depth.to_string(), "origin"],
+        );
+        grit_fetch_local(&grit_client, &bare, FetchDepth::depth(depth)).expect("depth fetch");
+        assert_twin_matches(&git_client, &grit_client);
+        assert_eq!(
+            rev_list_count(&git_client),
+            depth as usize,
+            "git depth {depth}"
+        );
+    }
+}
+
 #[test]
 fn deepen_and_unshallow_file_remote_matches_git() {
     let tmp = tempfile::tempdir().expect("tempdir");

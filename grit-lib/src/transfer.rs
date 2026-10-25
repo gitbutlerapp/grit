@@ -1581,9 +1581,16 @@ pub fn fetch_local_with_progress(
 
     let shallow_wants: Vec<ObjectId> = matched
         .iter()
-        .filter(|m| !m.is_tag)
-        .map(|m| m.oid)
-        .filter(|oid| wants.contains(oid))
+        .filter_map(|m| {
+            let tip = if m.is_tag {
+                m.advertised_peel.filter(|p| !p.is_zero()).unwrap_or(m.oid)
+            } else {
+                m.oid
+            };
+            wants.contains(&tip).then_some(tip)
+        })
+        .collect::<HashSet<_>>()
+        .into_iter()
         .collect();
 
     let mut haves: Vec<ObjectId> = Vec::new();

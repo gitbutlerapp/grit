@@ -5,8 +5,8 @@ use std::collections::{HashMap, HashSet};
 use crate::objects::{ObjectId, ObjectKind};
 use crate::repo::Repository;
 use crate::rev_list::{
-    shallow_boundary_oids, shallow_grafts_for_upload_pack_deepen,
-    shallow_grafts_for_upload_pack_rev_list, shallow_grafts_for_upload_pack_target_depth,
+    shallow_boundary_oids, shallow_grafts_for_upload_pack_rev_list,
+    shallow_grafts_for_upload_pack_target_depth,
 };
 use crate::shallow::INFINITE_DEPTH;
 
@@ -77,11 +77,8 @@ pub(crate) fn compute_shallow_response(
         } else {
             depth
         };
-        new_shallow = if req.deepen_relative {
-            shallow_grafts_for_upload_pack_target_depth(repo, wants, &req.client_shallow, depth)
-        } else {
-            shallow_grafts_for_upload_pack_deepen(repo, wants, &req.client_shallow, depth)
-        };
+        new_shallow =
+            shallow_grafts_for_upload_pack_target_depth(repo, wants, &req.client_shallow, depth);
     } else if req.deepen_since.is_some() || !req.deepen_not.is_empty() {
         new_shallow = shallow_grafts_for_upload_pack_rev_list(
             repo,
@@ -94,6 +91,7 @@ pub(crate) fn compute_shallow_response(
         new_shallow = crate::rev_list::shallow_borders_reachable_from_wants(repo, wants);
     }
 
+    let new_shallow_set: HashSet<ObjectId> = new_shallow.iter().copied().collect();
     for oid in new_shallow {
         if !client_set.contains(&oid) {
             out.shallow.push(oid);
@@ -101,7 +99,6 @@ pub(crate) fn compute_shallow_response(
     }
 
     let deepening = req.depth.is_some() || req.deepen_since.is_some() || !req.deepen_not.is_empty();
-    let new_shallow_set: HashSet<ObjectId> = out.shallow.iter().copied().collect();
     if deepening {
         for oid in &req.client_shallow {
             if new_shallow_set.contains(oid) {
