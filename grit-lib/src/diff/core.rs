@@ -6288,9 +6288,21 @@ pub fn read_worktree_side_bytes_for_diff(
 ) -> Result<Vec<u8>> {
     let file_path = crate::repo_relpath::worktree_abs(work_tree, rel_path);
     let rel_match = crate::repo_relpath::as_utf8_for_matching(rel_path);
-    let meta = fs::symlink_metadata(&file_path).map_err(Error::Io)?;
+    let meta = fs::symlink_metadata(&file_path).map_err(|source| {
+        crate::worktree::map_worktree_io(
+            rel_match.as_ref(),
+            crate::worktree::WorktreePathOperation::Metadata,
+            source,
+        )
+    })?;
     if mode == MODE_SYMLINK && meta.file_type().is_symlink() {
-        let target = fs::read_link(&file_path).map_err(Error::Io)?;
+        let target = fs::read_link(&file_path).map_err(|source| {
+            crate::worktree::map_worktree_io(
+                rel_match.as_ref(),
+                crate::worktree::WorktreePathOperation::Read,
+                source,
+            )
+        })?;
         return Ok(symlink_target_bytes(&target));
     }
     if let Some(rules) = worktree_rules {
@@ -6405,7 +6417,13 @@ fn read_regular_worktree_bytes(
         None
     };
     let mut raw = Vec::with_capacity(usize::try_from(size).unwrap_or_default());
-    std::io::Read::read_to_end(&mut file, &mut raw)?;
+    std::io::Read::read_to_end(&mut file, &mut raw).map_err(|source| {
+        crate::worktree::map_worktree_io(
+            rel_path,
+            crate::worktree::WorktreePathOperation::Read,
+            source,
+        )
+    })?;
     #[cfg(test)]
     odb.hot_path_metrics().record_blob_content_read();
     let opts = crate::crlf::ConvertToGitOpts {
@@ -6420,9 +6438,24 @@ fn read_regular_worktree_bytes(
     )?)
 }
 
-fn open_with_size(path: &Path) -> Result<(fs::File, u64)> {
-    let file = fs::File::open(path)?;
-    let size = file.metadata()?.len();
+fn open_with_size(path: &Path, rel_path: &str) -> Result<(fs::File, u64)> {
+    let file = fs::File::open(path).map_err(|source| {
+        crate::worktree::map_worktree_io(
+            rel_path,
+            crate::worktree::WorktreePathOperation::Read,
+            source,
+        )
+    })?;
+    let size = file
+        .metadata()
+        .map_err(|source| {
+            crate::worktree::map_worktree_io(
+                rel_path,
+                crate::worktree::WorktreePathOperation::Metadata,
+                source,
+            )
+        })?
+        .len();
     Ok((file, size))
 }
 
@@ -6435,7 +6468,7 @@ fn read_regular_worktree_blob(
     index_entry: Option<&IndexEntry>,
     filter_process: Option<&crate::filter_process::FilterProcessState>,
 ) -> Result<WorktreeBlobContent> {
-    let (file, size) = open_with_size(path)?;
+    let (file, size) = open_with_size(path, rel_path)?;
     if crate::crlf::clean_is_identity(conv, file_attrs) && size >= odb.big_file_threshold()? {
         #[cfg(test)]
         odb.hot_path_metrics().record_blob_content_read();
@@ -6468,7 +6501,13 @@ pub(crate) fn worktree_blob_content(
     filter_process: Option<&crate::filter_process::FilterProcessState>,
 ) -> Result<WorktreeBlobContent> {
     if meta.file_type().is_symlink() {
-        let target = fs::read_link(path)?;
+        let target = fs::read_link(path).map_err(|source| {
+            crate::worktree::map_worktree_io(
+                rel_path,
+                crate::worktree::WorktreePathOperation::Read,
+                source,
+            )
+        })?;
         return Ok(WorktreeBlobContent::Bytes(symlink_target_bytes(&target)));
     }
     if meta.is_dir() {
@@ -6499,13 +6538,19 @@ pub(crate) fn worktree_blob_bytes(
     filter_process: Option<&crate::filter_process::FilterProcessState>,
 ) -> Result<Vec<u8>> {
     if meta.file_type().is_symlink() {
-        let target = fs::read_link(path)?;
+        let target = fs::read_link(path).map_err(|source| {
+            crate::worktree::map_worktree_io(
+                rel_path,
+                crate::worktree::WorktreePathOperation::Read,
+                source,
+            )
+        })?;
         return Ok(symlink_target_bytes(&target));
     }
     if meta.is_dir() {
         return Ok(Vec::new());
     }
-    let (file, size) = open_with_size(path)?;
+    let (file, size) = open_with_size(path, rel_path)?;
     read_regular_worktree_bytes(
         odb,
         file,

@@ -25,6 +25,7 @@ pub use crate::porcelain::bulk_index::IndexStagingThresholds;
 use crate::precompose_config::effective_core_precomposeunicode_with_config;
 use crate::repo::Repository;
 use crate::unicode_normalization::resolve_worktree_path_for_staging;
+use crate::worktree::{io_with_path, map_worktree_io, WorktreePathOperation};
 use crate::worktree_batch::WorktreeBlobReadInput;
 use crate::worktree_rules::WorktreeRules;
 use crate::worktree_scan::{
@@ -467,11 +468,17 @@ fn stage_tracked_modifications_in_index_body(
                     pending_removals.push(raw_path);
                     return Ok(());
                 }
-                if symlink_metadata_for_staging(&abs_path)?.is_none() {
+                if symlink_metadata_for_staging(rel_path, &abs_path)?.is_none() {
                     pending_removals.push(raw_path);
                 }
             }
-            BlobDiskLookup::Io(e) => return Err(Error::Io(e)),
+            BlobDiskLookup::Io(e) => {
+                return Err(map_worktree_io(
+                    rel_path,
+                    WorktreePathOperation::Metadata,
+                    e,
+                ));
+            }
             BlobDiskLookup::Present(stat) => {
                 let ctx = PresentRefreshCtx {
                     repo,
@@ -552,10 +559,15 @@ fn refresh_unmerged_tracked_path(
                 .map(|e| e.mode)
         })
         .unwrap_or(0o100644);
-    match symlink_metadata_for_staging(abs_path)? {
+    let index_relpath = crate::repo_relpath::storage_string(raw_path);
+    match symlink_metadata_for_staging(&index_relpath, abs_path)? {
         Some(meta) => {
             if crate::rerere::worktree_metadata_needs_conflict_marker_inspection(&meta, idx_mode) {
-                let wt_bytes = fs::read(abs_path).map_err(Error::Io)?;
+                let wt_bytes = io_with_path(
+                    &index_relpath,
+                    WorktreePathOperation::Read,
+                    fs::read(abs_path),
+                )?;
                 let marker_size = std::str::from_utf8(raw_path)
                     .map(|rel| {
                         rules
@@ -594,11 +606,18 @@ fn refresh_unmerged_tracked_path(
 }
 
 /// Worktree metadata for staging: present, definitively missing, or I/O error.
-fn symlink_metadata_for_staging(path: &Path) -> Result<Option<fs::Metadata>> {
-    match fs::symlink_metadata(path) {
+fn symlink_metadata_for_staging(
+    index_relpath: &str,
+    abs_path: &Path,
+) -> Result<Option<fs::Metadata>> {
+    match fs::symlink_metadata(abs_path) {
         Ok(meta) => Ok(Some(meta)),
         Err(e) if worktree_path_is_missing(&e) => Ok(None),
-        Err(e) => Err(Error::Io(e)),
+        Err(e) => Err(map_worktree_io(
+            index_relpath,
+            WorktreePathOperation::Metadata,
+            e,
+        )),
     }
 }
 
@@ -643,7 +662,8 @@ fn stage_tracked_path_individual(
         }
         return Ok(());
     }
-    match symlink_metadata_for_staging(&abs_path)? {
+    let index_relpath = crate::repo_relpath::storage_string(raw_path);
+    match symlink_metadata_for_staging(&index_relpath, &abs_path)? {
         Some(meta) => {
             let ctx = PresentRefreshCtx {
                 repo,

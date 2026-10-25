@@ -14,10 +14,15 @@
 //! ```
 mod core;
 mod error;
+pub mod io_error;
 mod move_repair;
 
 pub use core::*;
 pub use error::{WorktreeError, WorktreeOperation};
+pub use io_error::{
+    format_worktree_path_io_message, io_with_path, is_file_in_use, map_worktree_io,
+    WorktreePathOperation,
+};
 pub use move_repair::{
     move_linked_worktree, repair_worktrees, resolve_move_destination, MoveWorktreeOptions,
     WorktreeRepair, WorktreeRepairKind,

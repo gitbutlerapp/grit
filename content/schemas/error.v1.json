@@ -223,6 +223,13 @@
             "dirty_worktree"
           ],
           "type": "string"
+        },
+        {
+          "description": "Worktree file I/O failed on a named path (`paths`, often one entry).",
+          "enum": [
+            "worktree_path_io"
+          ],
+          "type": "string"
         }
       ]
     },

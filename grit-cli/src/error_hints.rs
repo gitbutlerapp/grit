@@ -178,6 +178,12 @@ fn guide_lib(err: &LibError) -> Option<Error> {
                 Some(paths.clone()),
             ))
         }
+        LibError::WorktreePathIo { path, .. } => Some(guided(
+            ErrorKind::WorktreePathIo,
+            err.to_string(),
+            Some("close programs that may have the file open, then try again".to_owned()),
+            Some(vec![path.clone()]),
+        )),
         LibError::Branch(BranchError::NotFound { name }) => Some(guided(
             ErrorKind::BranchNotFound,
             format!("no branch named '{name}'"),

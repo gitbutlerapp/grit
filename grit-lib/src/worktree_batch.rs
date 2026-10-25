@@ -13,6 +13,7 @@ use crate::hash::{
 use crate::index::IndexEntry;
 use crate::objects::{HashAlgo, ObjectId, ObjectKind};
 use crate::odb::{self, Odb, WriteOptions};
+use crate::worktree::{io_with_path, map_worktree_io, WorktreePathOperation};
 
 /// One worktree path to read and normalize in parallel.
 pub(crate) struct WorktreeBlobReadInput {
@@ -64,7 +65,9 @@ impl PreparedBlobPayload {
                 debug_assert_eq!(written, *oid);
             }
             Self::Stream(path) => {
-                let mut file = fs::File::open(path)?;
+                let mut file = fs::File::open(path).map_err(|source| {
+                    map_worktree_io(index_relpath, WorktreePathOperation::Read, source)
+                })?;
                 let size = file.metadata()?.len();
                 let written = odb.write_stream(ObjectKind::Blob, size, &mut file, options)?;
                 if written != *oid {
@@ -136,7 +139,11 @@ impl PrepareBlobContext {
     ) -> Result<(fs::Metadata, WorktreeBlobContent)> {
         let meta = match &item.cached_meta {
             Some(m) => m.clone(),
-            None => fs::symlink_metadata(&item.abs).map_err(Error::Io)?,
+            None => io_with_path(
+                &item.index_relpath,
+                WorktreePathOperation::Metadata,
+                fs::symlink_metadata(&item.abs),
+            )?,
         };
         let content = worktree_blob_content(
             odb,
@@ -219,6 +226,7 @@ fn with_path_context(index_relpath: &str, err: Error) -> Error {
             path: index_relpath.to_owned(),
             source,
         },
+        Error::WorktreePathIo { .. } => err,
         other => other,
     }
 }

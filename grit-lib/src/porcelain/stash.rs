@@ -22,8 +22,9 @@ use crate::diff::{
     diff_index_to_tree, diff_index_to_worktree_with_options, diff_trees, format_mode, zero_oid,
     DiffEntry, DiffIndexToWorktreeOptions, DiffStatus,
 };
-use crate::error::{Error, Result};
+use crate::error::{ApplyError, Error, Result};
 use crate::index::{index_file_mtime, Index, IndexEntry, MODE_GITLINK, MODE_SYMLINK, MODE_TREE};
+use crate::worktree::{map_worktree_io, WorktreePathOperation};
 // `MODE_EXECUTABLE` only drives the Unix executable-bit application below.
 use crate::apply::{apply_patch_to_index, FilePatch, IndexApplyOptions};
 use crate::check_ref_format::validate_branch_short_name;
@@ -757,7 +758,7 @@ fn stage_untracked_path_for_stash(
             None,
             filter_fp,
         )
-        .map_err(|e| Error::Message(format!("could not store {index_relpath}: {e}")))?
+        .map_err(|e| materialize_stash_blob_err(e, &index_relpath))?
     };
     let entry = entry_from_stat(&abs, index_relpath.as_bytes(), oid, mode)?;
     index.add_or_replace(entry);
@@ -1519,12 +1520,6 @@ pub(crate) fn push_stash(
         message: built.message.clone(),
         w_tree: built.w_tree,
     };
-    store_stash(
-        repo,
-        built.w_commit,
-        &built.message,
-        &options.identity.header_line(),
-    )?;
     if let Some(ref patches) = built.partial_patches {
         if !built.untracked_paths.is_empty() {
             remove_stashed_untracked(repo, work_tree, &built.untracked_paths)?;
@@ -1534,7 +1529,7 @@ pub(crate) fn push_stash(
             patches,
             &WorktreeReverseApplyOptions { dry_run: false },
         )
-        .map_err(|e| Error::Message(e.to_string()))?;
+        .map_err(stash_worktree_step_error)?;
     } else {
         let head = resolve_head_for_repository(repo)?;
         let head_oid = head_commit_oid(&head)?;
@@ -1577,7 +1572,29 @@ pub(crate) fn push_stash(
             }
         }
     }
+    store_stash(
+        repo,
+        built.w_commit,
+        &built.message,
+        &options.identity.header_line(),
+    )?;
     Ok(Some(result))
+}
+
+fn stash_worktree_step_error(err: ApplyError) -> Error {
+    match err {
+        ApplyError::Failed { path, message } if !path.is_empty() => Error::Message(format!(
+            "could not update '{path}' while finishing stash: {message}"
+        )),
+        other => Error::Message(other.to_string()),
+    }
+}
+
+fn materialize_stash_blob_err(err: Error, index_relpath: &str) -> Error {
+    match err {
+        Error::Io(source) => map_worktree_io(index_relpath, WorktreePathOperation::Read, source),
+        other => other,
+    }
 }
 
 /// List stash entries from `refs/stash` reflog (newest first).

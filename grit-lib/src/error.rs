@@ -16,6 +16,7 @@
 use thiserror::Error;
 
 pub use crate::midx_error::MidxError;
+pub use crate::worktree::io_error::WorktreePathOperation;
 
 /// Why a Git config numeric value was rejected (`git config int` strict parsing).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -905,6 +906,17 @@ pub enum Error {
         /// Index-relative path of the blob being stored.
         path: String,
         /// Underlying filesystem error from the object store.
+        source: std::io::Error,
+    },
+
+    /// Filesystem I/O failed on a repository-relative worktree path (checkout, staging, diff).
+    #[error("{}", crate::worktree::io_error::format_worktree_path_io_message(.path, *operation, .source))]
+    WorktreePathIo {
+        /// Index- or worktree-relative path grit was operating on.
+        path: String,
+        /// What the operation was trying to do when I/O failed.
+        operation: WorktreePathOperation,
+        /// Underlying OS error.
         source: std::io::Error,
     },
 

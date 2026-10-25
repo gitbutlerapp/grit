@@ -64,6 +64,8 @@ pub enum ErrorKind {
     UnmergedPaths,
     /// Staged or unstaged changes block the operation (`paths`).
     DirtyWorktree,
+    /// Worktree file I/O failed on a named path (`paths`, often one entry).
+    WorktreePathIo,
 }
 
 impl ErrorKind {
@@ -119,6 +121,7 @@ impl ErrorKind {
             Self::AuthRejected => "auth_rejected",
             Self::UnmergedPaths => "unmerged_paths",
             Self::DirtyWorktree => "dirty_worktree",
+            Self::WorktreePathIo => "worktree_path_io",
         }
     }
 
@@ -155,6 +158,7 @@ impl ErrorKind {
             Self::AuthRejected,
             Self::UnmergedPaths,
             Self::DirtyWorktree,
+            Self::WorktreePathIo,
         ]
     }
 }

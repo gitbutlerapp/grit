@@ -39,6 +39,7 @@ use crate::path_validate::ProtectOptions;
 use crate::progress::{NullProgress, ProgressPhase, ProgressSink, ProgressUnit};
 use crate::repo::Repository;
 use crate::sparse_checkout::SparseCheckout;
+use crate::worktree::{io_with_path, WorktreePathOperation};
 use crate::worktree_rules::WorktreeRules;
 
 #[path = "checkout_parallel.rs"]
@@ -3033,9 +3034,14 @@ fn write_fresh_worktree_blob(
             .truncate(true)
             .mode(create_mode)
             .open(abs_path)
-            .map_err(|e| Error::PathError(format!("writing '{rel_path}': {e}")))?;
-        file.write_all(data)
-            .map_err(|e| Error::PathError(format!("writing '{rel_path}': {e}")))?;
+            .map_err(|e| {
+                crate::worktree::map_worktree_io(rel_path, WorktreePathOperation::Replace, e)
+            })?;
+        io_with_path(
+            rel_path,
+            WorktreePathOperation::Replace,
+            file.write_all(data),
+        )?;
         written_file_metadata(file, abs_path)
     }
     #[cfg(not(unix))]
@@ -3045,9 +3051,14 @@ fn write_fresh_worktree_blob(
             .create(true)
             .truncate(true)
             .open(abs_path)
-            .map_err(|e| Error::PathError(format!("writing '{rel_path}': {e}")))?;
-        file.write_all(data)
-            .map_err(|e| Error::PathError(format!("writing '{rel_path}': {e}")))?;
+            .map_err(|e| {
+                crate::worktree::map_worktree_io(rel_path, WorktreePathOperation::Replace, e)
+            })?;
+        io_with_path(
+            rel_path,
+            WorktreePathOperation::Replace,
+            file.write_all(data),
+        )?;
         written_file_metadata(file, abs_path)
     }
 }
@@ -3091,9 +3102,11 @@ pub(crate) fn write_to_worktree_cached(
     dir_cache.ensure_parents(work_tree, rel_path)?;
     if let Some(parent) = abs_path.parent() {
         if !dir_cache.ready.contains(parent) {
-            fs::create_dir_all(parent).map_err(|e| {
-                Error::PathError(format!("creating parent directories for '{rel_path}': {e}"))
-            })?;
+            io_with_path(
+                rel_path,
+                WorktreePathOperation::Create,
+                fs::create_dir_all(parent),
+            )?;
             dir_cache.ready.insert(parent.to_path_buf());
         }
     }
@@ -3102,11 +3115,23 @@ pub(crate) fn write_to_worktree_cached(
     // replace symlinked paths (e.g. `D` → `untracked`) before creating a real directory tree.
     if let Ok(meta) = fs::symlink_metadata(&abs_path) {
         if meta.file_type().is_symlink() {
-            fs::remove_file(&abs_path)?;
+            io_with_path(
+                rel_path,
+                WorktreePathOperation::Remove,
+                fs::remove_file(&abs_path),
+            )?;
         } else if meta.is_dir() {
-            fs::remove_dir_all(&abs_path)?;
+            io_with_path(
+                rel_path,
+                WorktreePathOperation::Remove,
+                fs::remove_dir_all(&abs_path),
+            )?;
         } else {
-            fs::remove_file(&abs_path)?;
+            io_with_path(
+                rel_path,
+                WorktreePathOperation::Remove,
+                fs::remove_file(&abs_path),
+            )?;
         }
     }
 
@@ -3115,8 +3140,11 @@ pub(crate) fn write_to_worktree_cached(
             Error::PathError(format!("symlink target for '{rel_path}' is not UTF-8"))
         })?;
         #[cfg(unix)]
-        std::os::unix::fs::symlink(target, &abs_path)
-            .map_err(|e| Error::PathError(format!("creating symlink '{rel_path}': {e}")))?;
+        io_with_path(
+            rel_path,
+            WorktreePathOperation::Create,
+            std::os::unix::fs::symlink(target, &abs_path),
+        )?;
         // Windows lacks unprivileged symlink creation; materialise the link as a
         // regular file containing the target path so the worktree stays populated.
         #[cfg(not(unix))]
@@ -3126,9 +3154,14 @@ pub(crate) fn write_to_worktree_cached(
                 .create(true)
                 .truncate(true)
                 .open(&abs_path)
-                .map_err(|e| Error::PathError(format!("writing symlink '{rel_path}': {e}")))?;
-            file.write_all(target.as_bytes())
-                .map_err(|e| Error::PathError(format!("writing symlink '{rel_path}': {e}")))?;
+                .map_err(|e| {
+                    crate::worktree::map_worktree_io(rel_path, WorktreePathOperation::Replace, e)
+                })?;
+            io_with_path(
+                rel_path,
+                WorktreePathOperation::Replace,
+                file.write_all(target.as_bytes()),
+            )?;
             return written_file_metadata(file, &abs_path);
         }
         #[cfg(unix)]
