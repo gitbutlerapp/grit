@@ -328,15 +328,7 @@ fn parse_cutoff(date: &str, now_sec: i64) -> Result<i64> {
 fn rev_select_usage(message: impl Into<String>) -> anyhow::Error {
     let human = message.into();
     anyhow::Error::new(StructuredCliError {
-        payload: StructuredJsonError {
-            error: human.clone(),
-            kind: ErrorKind::Usage,
-            conflicts: None,
-            commit: None,
-            would_overwrite: None,
-            oid: None,
-            hook: None,
-        },
+        payload: StructuredJsonError::new(human.clone(), ErrorKind::Usage),
         human,
     })
 }

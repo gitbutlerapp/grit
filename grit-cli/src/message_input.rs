@@ -67,15 +67,7 @@ pub fn is_message_input_usage_error(err: &anyhow::Error) -> bool {
 fn usage_error(message: impl Into<String>) -> anyhow::Error {
     let human = message.into();
     anyhow::Error::new(StructuredCliError {
-        payload: StructuredJsonError {
-            error: human.clone(),
-            kind: ErrorKind::Usage,
-            conflicts: None,
-            commit: None,
-            would_overwrite: None,
-            oid: None,
-            hook: None,
-        },
+        payload: StructuredJsonError::new(human.clone(), ErrorKind::Usage),
         human,
     })
     .context(MessageInputUsageError)

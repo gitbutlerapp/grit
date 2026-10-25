@@ -69,7 +69,7 @@ Update mode refuses to overwrite the live file when the diff would be **breaking
 
 Schema: [v1](/schemas/error/v1.json)
 
-On failure with `--json`, stdout is a single object with an **`error`** string (the same message a human sees after `error:` on stderr). Some failures add a **`kind`** and optional fields (for example merge/pick **conflicts**, **`would_overwrite`** with `reason` and `paths` on switch refusal, or **`hash_collision`** with an **`oid`** digest when object ingestion detects an SHA-1 chosen-prefix collision); see the error schema for the plain vs structured union.
+On failure with `--json`, stdout is a single object with an **`error`** string (the same message a human sees after `error:` on stderr). Some failures add a **`kind`** and optional fields (for example merge/pick **conflicts**, **`would_overwrite`** with `reason` and `paths` on switch refusal, or **`hash_collision`** with an **`oid`** digest when object ingestion detects an SHA-1 chosen-prefix collision); see the error schema for the plain vs structured union. When grit knows the next step, a **`hint`** names the command to run (`grit remote add origin <url>`, `grit push -u origin main`, `grit auth`, `grit merge --continue`, …), and **`paths`** lists the files an `unmerged_paths` or `dirty_worktree` failure is about. Branch on `kind`, not on the `error` text.
 
 ```console
 $ grit commit --json

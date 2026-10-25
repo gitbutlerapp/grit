@@ -224,23 +224,17 @@ pub fn logout(dry_run: bool) -> Result<LogoutOutcome> {
 /// Offer to re-authenticate after a push/fetch failed with an auth error.
 ///
 /// Returns `Ok(true)` when the user re-authenticated successfully and the caller
-/// should retry the operation. Returns `Ok(false)` (after printing a hint) when
-/// re-auth doesn't apply — the error wasn't an auth failure, the remote isn't an
-/// HTTPS github.com remote, there's no TTY to prompt on, or the user declined.
+/// should retry the operation. Returns `Ok(false)` when re-auth doesn't apply — the
+/// error wasn't an auth failure, the remote isn't an HTTPS github.com remote, there's
+/// no TTY to prompt on, or the user declined; the error's own hint then names
+/// `grit auth`.
 pub fn offer_reauth(err: &anyhow::Error, remote_url: &str) -> Result<bool> {
-    if !is_auth_error(err) || !is_github_https_url(remote_url) {
+    if !is_auth_error(err) || !is_github_https_url(remote_url) || !std::io::stdin().is_terminal() {
         return Ok(false);
     }
 
     eprintln!("\nAuthentication to {GITHUB_HOST} failed — your token may be missing or expired.");
-
-    if !std::io::stdin().is_terminal() {
-        eprintln!("Run `grit auth` to sign in to GitHub, then try again.");
-        return Ok(false);
-    }
-
     if !confirm("Sign in to GitHub now? [Y/n] ")? {
-        eprintln!("Run `grit auth` to sign in to GitHub, then try again.");
         return Ok(false);
     }
 
@@ -256,11 +250,18 @@ pub fn offer_reauth(err: &anyhow::Error, remote_url: &str) -> Result<bool> {
 
 /// Whether `err` (or a cause) is a transport-level HTTP authentication failure.
 fn is_auth_error(err: &anyhow::Error) -> bool {
-    err.chain().any(|cause| {
-        cause
-            .downcast_ref::<grit_lib::error::Error>()
-            .is_some_and(|e| matches!(e, grit_lib::error::Error::Auth(_)))
-    })
+    let structured_auth = crate::json_error::structured_json_payload(err).is_some_and(|p| {
+        matches!(
+            p.kind,
+            crate::error_kind::ErrorKind::AuthRequired | crate::error_kind::ErrorKind::AuthRejected
+        )
+    });
+    structured_auth
+        || err.chain().any(|cause| {
+            cause
+                .downcast_ref::<grit_lib::error::Error>()
+                .is_some_and(|e| matches!(e, grit_lib::error::Error::Auth { .. }))
+        })
 }
 
 /// Prompt on the TTY for a yes/no answer (default yes on empty input).

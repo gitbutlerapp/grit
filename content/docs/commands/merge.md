@@ -129,6 +129,14 @@ $ grit merge nonexist
 error: no branch, tag or commit named 'nonexist'
 ```
 
+When `--continue` runs while conflict markers are still in a file:
+
+```console
+$ grit merge --continue
+error: you still have unmerged paths: notes.txt
+hint: resolve the conflict markers in notes.txt, then run `grit merge --continue` (or `grit merge --abort` to start over)
+```
+
 When an untracked file would be overwritten:
 
 ```console
@@ -216,6 +224,10 @@ When the merge stops on conflicts (exit code 1), stdout is still a single JSON o
 ```
 
 When `<rev>` names nothing, the command exits **1** with `{"error":"no branch, tag or commit named 'nonexist'","kind":"revision_not_found"}` on stdout (see [`revision_not_found`](../exit-codes/)).
+
+When `--continue` finds unresolved conflicts, it exits **1** with `kind` `unmerged_paths`, the files in `paths` and the next step in `hint` (with `commit.autoStage=false`, files that are resolved but not staged get a `grit add` hint instead), for example `{"error":"you still have unmerged paths: notes.txt","hint":"…","kind":"unmerged_paths","paths":["notes.txt"]}`.
+
+Uncommitted changes that block a merge are `kind` `dirty_worktree` with `paths`.
 
 ## Markdown output
 

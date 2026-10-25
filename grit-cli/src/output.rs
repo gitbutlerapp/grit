@@ -172,6 +172,7 @@ pub fn emit_error(err: &anyhow::Error, opts: &OutputOptions) {
     }
     let human = human_error_message(err);
     let hook_output = crate::json_error::hook_error_from_chain(err).and_then(HookError::output);
+    let hint = structured_json_payload(err).and_then(|payload| payload.hint);
     match opts.mode {
         OutputMode::Human => {
             if let Some(output) = hook_output {
@@ -184,11 +185,17 @@ pub fn emit_error(err: &anyhow::Error, opts: &OutputOptions) {
             } else {
                 eprintln!("error: {human}");
             }
+            if let Some(hint) = &hint {
+                eprintln!("hint: {hint}");
+            }
         }
         OutputMode::Markdown => {
             let stdout = std::io::stdout();
             let mut lock = stdout.lock();
             let _ = stdio::io_result(writeln!(lock, "**Error:** {human}"));
+            if let Some(hint) = &hint {
+                let _ = stdio::io_result(writeln!(lock, "\n**Hint:** {hint}"));
+            }
             if let Some(output) = hook_output {
                 let _ = crate::markdown::render_hook_output(
                     &mut lock,

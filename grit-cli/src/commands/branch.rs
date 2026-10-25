@@ -363,15 +363,7 @@ impl StdError for BranchUsageError {}
 fn branch_usage(message: impl Into<String>) -> AnyhowError {
     let human = message.into();
     AnyhowError::new(StructuredCliError {
-        payload: StructuredJsonError {
-            error: human.clone(),
-            kind: ErrorKind::Usage,
-            conflicts: None,
-            commit: None,
-            would_overwrite: None,
-            oid: None,
-            hook: None,
-        },
+        payload: StructuredJsonError::new(human.clone(), ErrorKind::Usage),
         human,
     })
     .context(BranchUsageError)
@@ -847,15 +839,10 @@ pub fn map_branch_error(err: Error) -> anyhow::Error {
         Error::Branch(branch_err) => {
             let human = branch_error_message(&branch_err);
             anyhow::Error::new(StructuredCliError {
-                payload: StructuredJsonError {
-                    error: human.clone(),
-                    kind: ErrorKind::from_branch_error(&branch_err),
-                    conflicts: None,
-                    commit: None,
-                    would_overwrite: None,
-                    oid: None,
-                    hook: None,
-                },
+                payload: StructuredJsonError::new(
+                    human.clone(),
+                    ErrorKind::from_branch_error(&branch_err),
+                ),
                 human,
             })
         }
@@ -865,15 +852,7 @@ pub fn map_branch_error(err: Error) -> anyhow::Error {
             );
             let human = format!("branch is checked out in '{worktree}'");
             anyhow::Error::new(StructuredCliError {
-                payload: StructuredJsonError {
-                    error: human.clone(),
-                    kind: ErrorKind::BranchCheckedOut,
-                    conflicts: None,
-                    commit: None,
-                    would_overwrite: None,
-                    oid: None,
-                    hook: None,
-                },
+                payload: StructuredJsonError::new(human.clone(), ErrorKind::BranchCheckedOut),
                 human,
             })
         }

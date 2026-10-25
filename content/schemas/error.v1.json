@@ -167,6 +167,62 @@
             "revision_not_found"
           ],
           "type": "string"
+        },
+        {
+          "description": "Push has no remote: none was named and no `origin` is configured.",
+          "enum": [
+            "no_remote"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "A named remote is not configured.",
+          "enum": [
+            "remote_not_found"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "A configured remote has no URL.",
+          "enum": [
+            "remote_no_url"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "The server wants credentials and none were available.",
+          "enum": [
+            "auth_required"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "The server rejected the credentials that were sent.",
+          "enum": [
+            "auth_rejected"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "There is no repository at the remote URL (HTTP 404).",
+          "enum": [
+            "repository_not_found"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "`merge --continue` found conflicts that are not resolved (or not staged) yet (`paths`).",
+          "enum": [
+            "unmerged_paths"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "Staged or unstaged changes block the operation (`paths`).",
+          "enum": [
+            "dirty_worktree"
+          ],
+          "type": "string"
         }
       ]
     },
@@ -223,6 +279,13 @@
           "description": "Short, stable summary for scripts.",
           "type": "string"
         },
+        "hint": {
+          "description": "The next command to run, in prose (also printed as `hint:` on stderr).",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "hook": {
           "anyOf": [
             {
@@ -246,6 +309,16 @@
           "description": "Plain SHA-1 digest for colliding input, when `kind == \"hash_collision\"`.",
           "type": [
             "string",
+            "null"
+          ]
+        },
+        "paths": {
+          "description": "Repository-relative paths the failure is about, when `kind` is `unmerged_paths` or `dirty_worktree`.",
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
             "null"
           ]
         },

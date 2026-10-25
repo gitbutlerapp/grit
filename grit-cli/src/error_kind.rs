@@ -48,6 +48,22 @@ pub enum ErrorKind {
     HookFailed,
     /// A branch, tag, commit id or revision expression names nothing.
     RevisionNotFound,
+    /// Push has no remote: none was named and no `origin` is configured.
+    NoRemote,
+    /// A named remote is not configured.
+    RemoteNotFound,
+    /// A configured remote has no URL.
+    RemoteNoUrl,
+    /// The server wants credentials and none were available.
+    AuthRequired,
+    /// The server rejected the credentials that were sent.
+    AuthRejected,
+    /// There is no repository at the remote URL (HTTP 404).
+    RepositoryNotFound,
+    /// `merge --continue` found conflicts that are not resolved (or not staged) yet (`paths`).
+    UnmergedPaths,
+    /// Staged or unstaged changes block the operation (`paths`).
+    DirtyWorktree,
 }
 
 impl ErrorKind {
@@ -95,6 +111,14 @@ impl ErrorKind {
             Self::BranchError => "branch_error",
             Self::HookFailed => "hook_failed",
             Self::RevisionNotFound => "revision_not_found",
+            Self::NoRemote => "no_remote",
+            Self::RemoteNotFound => "remote_not_found",
+            Self::RemoteNoUrl => "remote_no_url",
+            Self::AuthRequired => "auth_required",
+            Self::AuthRejected => "auth_rejected",
+            Self::RepositoryNotFound => "repository_not_found",
+            Self::UnmergedPaths => "unmerged_paths",
+            Self::DirtyWorktree => "dirty_worktree",
         }
     }
 
@@ -123,6 +147,14 @@ impl ErrorKind {
             Self::BranchError,
             Self::HookFailed,
             Self::RevisionNotFound,
+            Self::NoRemote,
+            Self::RemoteNotFound,
+            Self::RemoteNoUrl,
+            Self::AuthRequired,
+            Self::AuthRejected,
+            Self::RepositoryNotFound,
+            Self::UnmergedPaths,
+            Self::DirtyWorktree,
         ]
     }
 }

@@ -11,6 +11,7 @@ use grit_lib::state::{InProgressOperation, NextStep, Operation};
 use schemars::JsonSchema;
 use serde::Serialize;
 
+use crate::error_hints;
 use crate::error_kind::ErrorKind;
 
 /// Paths that would be overwritten, when `kind == "would_overwrite"`.
@@ -49,6 +50,33 @@ pub struct StructuredJsonError {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(skip_serializing_if = "Option::is_none")]
     pub hook: Option<HookFailureJson>,
+    /// Repository-relative paths the failure is about, when `kind` is `unmerged_paths` or
+    /// `dirty_worktree`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub paths: Option<Vec<String>>,
+    /// The next command to run, in prose (also printed as `hint:` on stderr).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub hint: Option<String>,
+}
+
+impl StructuredJsonError {
+    /// A payload with only `error` and `kind` set.
+    #[must_use]
+    pub fn new(error: impl Into<String>, kind: ErrorKind) -> Self {
+        Self {
+            error: error.into(),
+            kind,
+            conflicts: None,
+            commit: None,
+            would_overwrite: None,
+            oid: None,
+            hook: None,
+            paths: None,
+            hint: None,
+        }
+    }
 }
 
 /// A hook that exited non-zero, when `kind == "hook_failed"`.
@@ -84,18 +112,13 @@ fn hook_failure_payload(err: &Error) -> Option<StructuredJsonError> {
         return None;
     };
     Some(StructuredJsonError {
-        error: hook.to_string(),
-        kind: ErrorKind::HookFailed,
-        conflicts: None,
-        commit: None,
-        would_overwrite: None,
-        oid: None,
         hook: Some(HookFailureJson {
             name: hook_name.clone(),
             status: *status,
             stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
             stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
         }),
+        ..StructuredJsonError::new(hook.to_string(), ErrorKind::HookFailed)
     })
 }
 
@@ -132,13 +155,9 @@ pub fn operation_conflict(
     );
     Error::new(StructuredCliError {
         payload: StructuredJsonError {
-            error: format!("{operation} has conflicts"),
-            kind: ErrorKind::Conflict,
             conflicts: Some(paths),
             commit: commit.map(|oid| oid.to_hex()),
-            would_overwrite: None,
-            oid: None,
-            hook: None,
+            ..StructuredJsonError::new(format!("{operation} has conflicts"), ErrorKind::Conflict)
         },
         human,
     })
@@ -151,39 +170,32 @@ pub fn hash_collision(oid: ObjectId) -> Error {
         format!("refusing to store content that triggers an SHA-1 hash collision (digest {hex})");
     Error::new(StructuredCliError {
         payload: StructuredJsonError {
-            error: "SHA-1 hash collision".to_owned(),
-            kind: ErrorKind::HashCollision,
-            conflicts: None,
-            commit: None,
-            would_overwrite: None,
             oid: Some(hex),
-            hook: None,
+            ..StructuredJsonError::new("SHA-1 hash collision", ErrorKind::HashCollision)
         },
         human,
     })
 }
 
 /// Build a structured CLI error for switch (and similar) overwrite refusal.
+///
+/// `message` is the library summary; the human text adds the paths and both get a hint.
 pub fn would_overwrite_error(
     reason: OverwriteReason,
     mut paths: Vec<String>,
-    human: String,
+    message: String,
 ) -> Error {
     paths.sort();
     paths.dedup();
-    let reason_str = reason.to_string();
+    let human = format!("{message}{}", error_hints::indented_paths(&paths));
     Error::new(StructuredCliError {
         payload: StructuredJsonError {
-            error: human.clone(),
-            kind: ErrorKind::WouldOverwrite,
-            conflicts: None,
-            commit: None,
+            hint: Some(error_hints::would_overwrite_hint(reason).to_owned()),
             would_overwrite: Some(WouldOverwriteJson {
-                reason: reason_str,
+                reason: reason.to_string(),
                 paths,
             }),
-            oid: None,
-            hook: None,
+            ..StructuredJsonError::new(message, ErrorKind::WouldOverwrite)
         },
         human,
     })
@@ -192,15 +204,7 @@ pub fn would_overwrite_error(
 /// Build a structured CLI error for [`LibError::IndexLocked`] (`human` is the library message).
 pub fn index_locked(human: String) -> Error {
     Error::new(StructuredCliError {
-        payload: StructuredJsonError {
-            error: human.clone(),
-            kind: ErrorKind::IndexLocked,
-            conflicts: None,
-            commit: None,
-            would_overwrite: None,
-            oid: None,
-            hook: None,
-        },
+        payload: StructuredJsonError::new(human.clone(), ErrorKind::IndexLocked),
         human,
     })
 }
@@ -235,15 +239,10 @@ pub fn operation_in_progress(
         }
     }
     Error::new(StructuredCliError {
-        payload: StructuredJsonError {
-            error: format!("{description} in progress"),
-            kind: ErrorKind::OperationInProgress,
-            conflicts: None,
-            commit: None,
-            would_overwrite: None,
-            oid: None,
-            hook: None,
-        },
+        payload: StructuredJsonError::new(
+            format!("{description} in progress"),
+            ErrorKind::OperationInProgress,
+        ),
         human,
     })
 }
@@ -252,15 +251,7 @@ pub fn operation_in_progress(
 pub fn revision_not_found(spec: &str) -> Error {
     let human = format!("no branch, tag or commit named '{spec}'");
     Error::new(StructuredCliError {
-        payload: StructuredJsonError {
-            error: human.clone(),
-            kind: ErrorKind::RevisionNotFound,
-            conflicts: None,
-            commit: None,
-            would_overwrite: None,
-            oid: None,
-            hook: None,
-        },
+        payload: StructuredJsonError::new(human.clone(), ErrorKind::RevisionNotFound),
         human,
     })
 }
@@ -343,7 +334,7 @@ pub fn ensure_structured(err: Error) -> Error {
     {
         return index_locked(locked);
     }
-    err
+    error_hints::guided_error(&err).unwrap_or(err)
 }
 
 /// If `err` wraps a [`StructuredCliError`], return its JSON payload.
@@ -354,17 +345,9 @@ pub fn structured_json_payload(err: &Error) -> Option<StructuredJsonError> {
     if let Some(payload) = hook_failure_payload(err) {
         return Some(payload);
     }
-    hash_collision_from_chain(err).map(|oid| {
-        let hex = oid.to_hex();
-        StructuredJsonError {
-            error: "SHA-1 hash collision".to_owned(),
-            kind: ErrorKind::HashCollision,
-            conflicts: None,
-            commit: None,
-            would_overwrite: None,
-            oid: Some(hex),
-            hook: None,
-        }
+    hash_collision_from_chain(err).map(|oid| StructuredJsonError {
+        oid: Some(oid.to_hex()),
+        ..StructuredJsonError::new("SHA-1 hash collision", ErrorKind::HashCollision)
     })
 }
 
@@ -372,15 +355,7 @@ pub fn structured_json_payload(err: &Error) -> Option<StructuredJsonError> {
 pub fn incompatible_output_flags(human: impl Into<String>, kind: ErrorKind) -> Error {
     let human = human.into();
     Error::new(StructuredCliError {
-        payload: StructuredJsonError {
-            error: human.clone(),
-            kind,
-            conflicts: None,
-            commit: None,
-            would_overwrite: None,
-            oid: None,
-            hook: None,
-        },
+        payload: StructuredJsonError::new(human.clone(), kind),
         human,
     })
 }
@@ -401,15 +376,7 @@ impl StdError for InvalidCommitFilterExit {}
 pub fn invalid_commit_filter(err: grit_lib::revwalk::filter::CommitFilterError) -> Error {
     let human = err.to_string();
     Error::new(StructuredCliError {
-        payload: StructuredJsonError {
-            error: human.clone(),
-            kind: ErrorKind::InvalidPattern,
-            conflicts: None,
-            commit: None,
-            would_overwrite: None,
-            oid: None,
-            hook: None,
-        },
+        payload: StructuredJsonError::new(human.clone(), ErrorKind::InvalidPattern),
         human,
     })
     .context(InvalidCommitFilterExit)
@@ -419,15 +386,7 @@ pub fn invalid_commit_filter(err: grit_lib::revwalk::filter::CommitFilterError) 
 pub fn invalid_pickaxe(err: grit_lib::diff::PickaxeError) -> Error {
     let human = err.to_string();
     Error::new(StructuredCliError {
-        payload: StructuredJsonError {
-            error: human.clone(),
-            kind: ErrorKind::InvalidPattern,
-            conflicts: None,
-            commit: None,
-            would_overwrite: None,
-            oid: None,
-            hook: None,
-        },
+        payload: StructuredJsonError::new(human.clone(), ErrorKind::InvalidPattern),
         human,
     })
     .context(InvalidCommitFilterExit)

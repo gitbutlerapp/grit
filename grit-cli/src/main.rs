@@ -22,6 +22,7 @@ mod diagnostics;
 mod diff_args;
 mod diff_format;
 mod diff_render;
+mod error_hints;
 mod error_kind;
 mod exit_status;
 mod global_args;
@@ -2118,15 +2119,10 @@ fn run() -> Result<ExitStatus, anyhow::Error> {
                     filter: extract_filter_flag(),
                 };
                 let message = clap_json_error_message(&err);
-                let payload = json_error::StructuredJsonError {
-                    error: message.clone(),
-                    kind: error_kind::ErrorKind::Usage,
-                    conflicts: None,
-                    commit: None,
-                    would_overwrite: None,
-                    oid: None,
-                    hook: None,
-                };
+                let payload = json_error::StructuredJsonError::new(
+                    message.clone(),
+                    error_kind::ErrorKind::Usage,
+                );
                 output::emit_error(
                     &anyhow::Error::new(json_error::StructuredCliError {
                         payload,
@@ -2184,9 +2180,15 @@ fn run() -> Result<ExitStatus, anyhow::Error> {
     match dispatch(cli, &opts, &render_ctx, &env) {
         Ok(status) => Ok(status),
         Err(err) => {
+            // Structuring can replace a typed error that also decides the exit code (a clone
+            // that could not read the remote exits 128), so the more specific status wins.
+            let status = ExitStatus::for_error(&err);
             let err = json_error::ensure_structured(err);
             output::emit_error(&err, &opts);
-            Ok(ExitStatus::for_error(&err))
+            Ok(match status {
+                ExitStatus::Failure => ExitStatus::for_error(&err),
+                specific => specific,
+            })
         }
     }
 }

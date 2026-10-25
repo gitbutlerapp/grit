@@ -78,6 +78,16 @@ When local changes would conflict with the destination branch:
 ```console
 $ grit switch other
 error: you have uncommitted changes — commit them before switching
+  notes.txt
+hint: commit them with `grit commit`, or set them aside with `grit stash`, then try again
+```
+
+When no branch has that name:
+
+```console
+$ grit switch nonexistent
+error: no branch named 'nonexistent'
+hint: `grit branch` lists your branches; create this one with `grit switch -c nonexistent`
 ```
 
 While a rebase that `git` started is stopped on a conflict:
@@ -92,6 +102,8 @@ When an untracked file would be overwritten:
 ```console
 $ grit switch other
 error: untracked file 'new.txt' would be overwritten — move or remove it first
+  new.txt
+hint: move or remove those files, then try again
 ```
 
 ## JSON output
@@ -142,7 +154,9 @@ Example (detached):
 }
 ```
 
-On overwrite refusal with `--json`, stdout is a single object with `kind` `would_overwrite` and `would_overwrite.reason` (`local_changes` or `untracked`) plus a sorted `paths` array. See the [error schema](/schemas/error/v1.json).
+On overwrite refusal with `--json`, stdout is a single object with `kind` `would_overwrite` and `would_overwrite.reason` (`local_changes` or `untracked`) plus a sorted `paths` array, and a `hint`, for example `{"error":"you have uncommitted changes — commit them before switching","hint":"…","kind":"would_overwrite","would_overwrite":{"paths":["notes.txt"],"reason":"local_changes"}}`. See the [error schema](/schemas/error/v1.json).
+
+A branch that does not exist is `kind` `branch_not_found` with a `hint`.
 
 While a merge, rebase, pick or revert is paused, the refusal is `{"error": "interactive rebase in progress", "kind": "operation_in_progress"}` (the `error` names the paused operation).
 

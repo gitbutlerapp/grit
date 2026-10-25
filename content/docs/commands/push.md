@@ -110,6 +110,24 @@ $ grit push origin --delete no-such-branch
   rejected origin refs/heads/no-such-branch: remote ref does not exist
 ```
 
+When there is nowhere to push yet, or the server wants credentials, the error says so and the `hint:` line names the next command:
+
+```console
+$ grit push
+error: no remote to push to
+hint: add one with `grit remote add origin <url>`, or push to a URL with `grit push <url> <branch>`
+
+$ grit push upstream main
+error: unknown remote 'upstream'
+hint: add it with `grit remote add upstream <url>`, or pass a URL or path instead; `grit remote` lists the configured remotes
+
+$ grit push
+error: authentication failed for https://github.com/ada/project.git: credentials required but unavailable (non-interactive)
+hint: sign in to GitHub with `grit auth` and try again; if it still fails, check the URL
+```
+
+For other HTTPS hosts the hint points at a `credential.helper` instead of `grit auth`. With `--json` these failures are `{"error", "kind", "hint"}` objects with `kind` `no_remote`, `remote_not_found`, `remote_no_url`, `auth_required`, `auth_rejected` or `repository_not_found` (see [Exit codes](../exit-codes/)).
+
 ## JSON output
 
 Schema: [v1](/schemas/push/v1.json)

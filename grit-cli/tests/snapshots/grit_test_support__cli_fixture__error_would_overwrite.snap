@@ -6,16 +6,16 @@ expression: payload
   "human": {
     "exit": 1,
     "stdout": "",
-    "stderr": "error: untracked file 'slot/precious.txt' would be overwritten — move or remove it first\n"
+    "stderr": "error: untracked file 'slot/precious.txt' would be overwritten — move or remove it first\n  slot/precious.txt\nhint: move or remove those files, then try again\n"
   },
   "json": {
     "exit": 1,
-    "stdout": "{\"error\":\"untracked file 'slot/precious.txt' would be overwritten — move or remove it first\",\"kind\":\"would_overwrite\",\"would_overwrite\":{\"paths\":[\"slot/precious.txt\"],\"reason\":\"untracked\"}}\n",
+    "stdout": "{\"error\":\"untracked file 'slot/precious.txt' would be overwritten — move or remove it first\",\"hint\":\"move or remove those files, then try again\",\"kind\":\"would_overwrite\",\"would_overwrite\":{\"paths\":[\"slot/precious.txt\"],\"reason\":\"untracked\"}}\n",
     "stderr": ""
   },
   "markdown": {
     "exit": 1,
-    "stdout": "**Error:** untracked file 'slot/precious.txt' would be overwritten — move or remove it first\n",
+    "stdout": "**Error:** untracked file 'slot/precious.txt' would be overwritten — move or remove it first\n  slot/precious.txt\n\n**Hint:** move or remove those files, then try again\n",
     "stderr": ""
   }
 }

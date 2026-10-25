@@ -16,6 +16,7 @@ use serde::Serialize;
 use std::io::Write;
 
 use crate::commands::auth;
+use crate::commands::fetch::map_remote_error;
 use crate::context;
 use crate::markdown;
 use crate::output::{outln, HumanRender, MarkdownRender, OutputMode, RenderContext};
@@ -304,7 +305,7 @@ pub fn run(
 }
 
 fn plan_error(err: PushPlanError) -> anyhow::Error {
-    anyhow::Error::msg(err.to_string())
+    anyhow::Error::new(err)
 }
 
 fn push_once(
@@ -317,7 +318,7 @@ fn push_once(
     progress: &mut TerminalProgress,
 ) -> Result<grit_lib::remote::transfer::PushOutcome> {
     open_push_destination(config, remote_name)
-        .map_err(|e| anyhow::Error::msg(e.to_string()))?
+        .map_err(map_remote_error)?
         .push(
             repo,
             specs,
@@ -333,7 +334,7 @@ fn push_once(
             &NeverCancel,
             Some(factory),
         )
-        .map_err(|e| anyhow::Error::msg(e.to_string()))
+        .map_err(map_remote_error)
 }
 
 #[cfg(test)]

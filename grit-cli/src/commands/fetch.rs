@@ -524,9 +524,13 @@ fn fetch_once(
         .map_err(map_remote_fetch_error)
 }
 
-/// Preserve typed [`grit_lib::error::Error::HashCollision`] for JSON output; other library
-/// errors keep the pre-mapper string form (no top-level [`grit_lib::error::Error`] downcast).
+/// Preserve typed [`grit_lib::error::Error::HashCollision`] for JSON output and give
+/// failures with a known next step their hint; other library errors keep the pre-mapper
+/// string form (no top-level [`grit_lib::error::Error`] downcast).
 pub(crate) fn map_remote_error(err: RemoteError) -> anyhow::Error {
+    if let Some(guided) = crate::error_hints::guide_remote(&err) {
+        return guided;
+    }
     match err {
         RemoteError::Library(grit_lib::error::Error::BundleMissingPrerequisites) => {
             anyhow::Error::new(crate::commands::bundle::MissingPrerequisites)
@@ -535,9 +539,6 @@ pub(crate) fn map_remote_error(err: RemoteError) -> anyhow::Error {
             crate::json_error::map_lib_error(grit_lib::error::Error::HashCollision { oid })
         }
         RemoteError::Library(lib) => anyhow::Error::msg(RemoteError::Library(lib).to_string()),
-        RemoteError::UnknownRemote(name) => anyhow::anyhow!(
-            "unknown remote '{name}' (not configured — pass a URL or path, or use `grit remote add`)"
-        ),
         other => anyhow::Error::msg(other.to_string()),
     }
 }

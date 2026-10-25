@@ -81,6 +81,16 @@ $ grit pull --autostash
 Merged origin/main into the current branch (acd1d4b)
 ```
 
+When the branch has no upstream yet:
+
+```console
+$ grit pull
+error: no upstream configured for branch main
+hint: pull a branch by name with `grit pull origin main`, or publish this one and track it with `grit push -u origin main`
+```
+
+With `--json` that is `{"error":"no upstream configured for branch main","hint":"…","kind":"branch_no_upstream"}`. A missing remote is `kind` `remote_not_found` and an authentication failure `auth_required` or `auth_rejected`, each with a `hint` (see [Exit codes](../exit-codes/)).
+
 ## JSON output
 
 Schema: [v2](/schemas/pull/v2.json) · [v1](/schemas/pull/v1.json)

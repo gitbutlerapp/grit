@@ -292,7 +292,7 @@ Markdown uses headings, bullet lists, and fenced blocks; pipe characters inside 
 | Code | Meaning |
 | ---: | --- |
 | `0` | Clone succeeded (including empty remote with no checkout). |
-| `1` | Destination not empty, checkout failure, or other error. |
+| `1` | Destination not empty, checkout failure, or other error. A URL with no repository behind it is `kind` `repository_not_found` and missing or refused credentials `auth_required` / `auth_rejected`, each with a `hint` in `--json` and on the human `hint:` line. |
 | `2` | Invalid flags ([`usage`](../exit-codes/)). |
 | `128` | Remote unreadable ([`remote_unreadable`](../exit-codes/)). |
 
