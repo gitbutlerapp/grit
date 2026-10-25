@@ -168,7 +168,7 @@ pub fn fetch(
     remote: &RemoteInfo,
     opts: &FetchOptions,
 ) -> Result<FetchOutcome> {
-    let factory = DefaultHttpClientFactory;
+    let factory = DefaultHttpClientFactory::new();
     remote
         .remote
         .fetch(
@@ -188,7 +188,7 @@ pub fn push(
     refs: &[PushRefSpec],
     opts: &PushOptions,
 ) -> Result<PushOutcome> {
-    let factory = DefaultHttpClientFactory;
+    let factory = DefaultHttpClientFactory::new();
     remote
         .remote
         .push(

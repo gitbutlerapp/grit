@@ -8,8 +8,8 @@ use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::fetch_request::resolve_remote_argument;
 use grit_lib::remote::transfer::FetchOptions;
 use grit_lib::remote::{
-    fold_peeled_refs, DefaultHttpClientFactory, InspectOptions, ListRefsOptions,
-    RemoteBranchStateKind, RemoteError, RemoteRef, RemoteSummary,
+    fold_peeled_refs, InspectOptions, ListRefsOptions, RemoteBranchStateKind, RemoteError,
+    RemoteRef, RemoteSummary,
 };
 use grit_lib::repo::Repository;
 use grit_lib::repo_handles::{RemoteUrlKind, RemoveOptions, SetHead, SetHeadOutcome, UrlChange};
@@ -505,7 +505,7 @@ pub fn run_refs(
     cli: &RemoteRefsCliOptions,
     mode: OutputMode,
 ) -> Result<RemoteOutcome> {
-    let factory = DefaultHttpClientFactory;
+    let factory = crate::context::http_client_factory();
     let repo = context::discover().ok();
     let env = crate::context::environment();
     let config = match repo.as_ref() {
@@ -645,7 +645,7 @@ fn list(repo: &Repository, verbose: bool) -> Result<RemoteOutcome> {
 fn add_remote(repo: &Repository, name: &str, url: &str, fetch: bool) -> Result<RemoteOutcome> {
     repo.remotes().add(name, url).map_err(map_remote_error)?;
     if fetch {
-        let factory = DefaultHttpClientFactory;
+        let factory = crate::context::http_client_factory();
         let remote = repo.remotes().get(name).map_err(map_remote_error)?;
         let mut progress = NoProgress;
         repo.remotes()
@@ -665,7 +665,7 @@ fn add_remote(repo: &Repository, name: &str, url: &str, fetch: bool) -> Result<R
     })
 }
 pub fn run_prune(name: &str, dry_run: bool) -> Result<RemoteOutcome> {
-    let factory = DefaultHttpClientFactory;
+    let factory = crate::context::http_client_factory();
     let repo = context::discover()?;
     let refs = repo
         .remotes()
@@ -684,7 +684,7 @@ pub fn run_prune(name: &str, dry_run: bool) -> Result<RemoteOutcome> {
 }
 
 pub fn run_set_head(name: &str, mode: SetHead, dry_run: bool) -> Result<RemoteOutcome> {
-    let factory = DefaultHttpClientFactory;
+    let factory = crate::context::http_client_factory();
     let repo = context::discover()?;
     let outcome = repo
         .remotes()
@@ -752,7 +752,7 @@ pub struct RemoteShowCliOptions {
 }
 
 pub fn run_show(name: &str, cli: &RemoteShowCliOptions) -> Result<RemoteOutcome> {
-    let factory = DefaultHttpClientFactory;
+    let factory = crate::context::http_client_factory();
     let repo = context::discover()?;
     let options = InspectOptions {
         query: cli.query,

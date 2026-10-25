@@ -183,7 +183,7 @@ pub fn run(
     let invocation = resolve_push_invocation(&config, remote_flag.as_deref(), positionals)
         .map_err(plan_error)?;
 
-    let factory = DefaultHttpClientFactory;
+    let factory = crate::context::http_client_factory();
     let plan_ctx =
         load_push_plan_context(&repo, &config, invocation.remote.as_deref(), Some(&factory))
             .map_err(plan_error)?;

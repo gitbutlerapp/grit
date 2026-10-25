@@ -246,7 +246,7 @@ pub fn repository_options(
         .map(|d| d.as_secs() as i64);
     options.promisor_fetcher = Some(std::sync::Arc::new(
         grit_lib::objects::promisor::DefaultPromisorFetcher::new(std::sync::Arc::new(
-            grit_lib::remote::DefaultHttpClientFactory,
+            crate::context::http_client_factory(),
         )),
     ));
     (options, sink)

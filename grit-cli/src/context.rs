@@ -49,6 +49,11 @@ pub fn environment() -> Environment {
     Environment::from_vars(std::env::vars_os(), cwd)
 }
 
+/// HTTP client factory whose credential fallback honors `GIT_ASKPASS` / `SSH_ASKPASS`.
+pub fn http_client_factory() -> grit_lib::remote::DefaultHttpClientFactory {
+    grit_lib::remote::DefaultHttpClientFactory::with_environment(environment())
+}
+
 /// Wall-clock instant for commit/reflog identity, with [`Environment::tz`] applied.
 pub fn wall_clock_now(env: &Environment) -> OffsetDateTime {
     let epoch = std::time::SystemTime::now()

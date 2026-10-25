@@ -12,7 +12,9 @@ use thiserror::Error;
 
 use crate::config::ConfigSet;
 #[cfg(feature = "http-ureq")]
-use crate::credentials::HelperCredentialProvider;
+use crate::credentials::{askpass_program, HelperCredentialProvider};
+#[cfg(feature = "http-ureq")]
+use crate::environment::Environment;
 use crate::error::Error;
 use crate::fetch::{fetch_remote, Progress};
 use crate::objects::ObjectId;
@@ -292,14 +294,46 @@ pub trait HttpClientFactory: Send + Sync {
 }
 
 /// Default [`HttpClientFactory`] using `UreqHttpClient` (`http-ureq` feature).
+///
+/// Clients authenticate through the configured credential helpers, then the
+/// askpass program from [`askpass_program`]. [`Default`] consults
+/// `core.askPass` only; build with
+/// [`with_environment`](DefaultHttpClientFactory::with_environment) to also
+/// honor `GIT_ASKPASS` and `SSH_ASKPASS`.
 #[cfg(feature = "http-ureq")]
-#[derive(Debug, Default, Clone, Copy)]
-pub struct DefaultHttpClientFactory;
+#[derive(Debug, Default, Clone)]
+pub struct DefaultHttpClientFactory {
+    environment: Option<Environment>,
+}
+
+#[cfg(feature = "http-ureq")]
+impl DefaultHttpClientFactory {
+    /// A factory that consults config only (same as [`Default`]); usable in a
+    /// `static`.
+    #[must_use]
+    pub const fn new() -> Self {
+        Self { environment: None }
+    }
+
+    /// A factory that reads `GIT_ASKPASS` / `SSH_ASKPASS` (and `HOME` for a
+    /// `~/` in `core.askPass`) from `environment`.
+    #[must_use]
+    pub fn with_environment(environment: Environment) -> Self {
+        Self {
+            environment: Some(environment),
+        }
+    }
+}
 
 #[cfg(feature = "http-ureq")]
 impl HttpClientFactory for DefaultHttpClientFactory {
     fn create(&self, config: &ConfigSet) -> RemoteResult<Box<dyn HttpClient>> {
-        let provider = Box::new(HelperCredentialProvider::new(config.clone()));
+        let askpass = match &self.environment {
+            Some(env) => askpass_program(env, config),
+            None => askpass_program(&Environment::empty(), config),
+        };
+        let provider =
+            Box::new(HelperCredentialProvider::new(config.clone()).with_askpass(askpass));
         let client = UreqHttpClient::from_config(config)
             .map_err(|e| RemoteError::InvalidUrl(e.to_string()))?
             .with_credential_provider(provider);
@@ -790,7 +824,8 @@ fn http_client(
     }
     #[cfg(feature = "http-ureq")]
     {
-        DefaultHttpClientFactory.create(config.as_ref())
+        DefaultHttpClientFactory::with_environment(repo.environment().clone())
+            .create(config.as_ref())
     }
     #[cfg(not(feature = "http-ureq"))]
     {
@@ -817,7 +852,10 @@ fn list_refs_http(
         None => {
             #[cfg(feature = "http-ureq")]
             {
-                DefaultHttpClientFactory.create(config.as_ref())?
+                repo.map_or_else(DefaultHttpClientFactory::default, |r| {
+                    DefaultHttpClientFactory::with_environment(r.environment().clone())
+                })
+                .create(config.as_ref())?
             }
             #[cfg(not(feature = "http-ureq"))]
             {

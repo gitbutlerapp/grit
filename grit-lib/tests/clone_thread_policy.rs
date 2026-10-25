@@ -141,7 +141,7 @@ fn http_clone_honors_thread_policy_over_pack_config_for_ingest() {
         },
         &mut NoProgress,
         &grit_lib::progress::NeverCancel,
-        Some(&DefaultHttpClientFactory),
+        Some(&DefaultHttpClientFactory::new()),
     )
     .expect("http clone");
 

@@ -136,7 +136,7 @@ fn lazy_read_fetches_missing_blob() {
     let url = format!("file://{}", bare.canonicalize().unwrap().display());
     let dest = TempDir::new().expect("dest");
     let fetcher = Arc::new(DefaultPromisorFetcher::new(Arc::new(
-        DefaultHttpClientFactory,
+        DefaultHttpClientFactory::new(),
     )));
     let repo = grit_blobless_clone(&url, dest.path(), Some(fetcher));
 
@@ -183,7 +183,7 @@ fn checkout_prefetch_uses_single_request() {
     let calls = Arc::new(AtomicUsize::new(0));
     let fetcher = Arc::new(CountingFetcher {
         calls: Arc::clone(&calls),
-        inner: DefaultPromisorFetcher::new(Arc::new(DefaultHttpClientFactory)),
+        inner: DefaultPromisorFetcher::new(Arc::new(DefaultHttpClientFactory::new())),
     });
     let repo = grit_blobless_clone(&url, dest.path(), Some(fetcher));
 
@@ -211,7 +211,7 @@ fn lazy_fetch_opt_out_config() {
     let url = format!("file://{}", bare.canonicalize().unwrap().display());
     let dest = TempDir::new().expect("dest");
     let fetcher = Arc::new(DefaultPromisorFetcher::new(Arc::new(
-        DefaultHttpClientFactory,
+        DefaultHttpClientFactory::new(),
     )));
     let repo = grit_blobless_clone(&url, dest.path(), Some(fetcher));
 
@@ -254,7 +254,7 @@ fn blobless_clone_checkout_matches_git() {
 
     let grit_dest = TempDir::new().expect("grit dest");
     let fetcher = Arc::new(DefaultPromisorFetcher::new(Arc::new(
-        DefaultHttpClientFactory,
+        DefaultHttpClientFactory::new(),
     )));
     let repo = grit_blobless_clone(&url, grit_dest.path(), Some(fetcher));
     let head = git_cmd(&["rev-parse", "HEAD"])
@@ -283,7 +283,7 @@ fn lazy_read_into_and_read_info() {
     let url = format!("file://{}", bare.canonicalize().unwrap().display());
     let dest = TempDir::new().expect("dest");
     let fetcher = Arc::new(DefaultPromisorFetcher::new(Arc::new(
-        DefaultHttpClientFactory,
+        DefaultHttpClientFactory::new(),
     )));
     let repo = grit_blobless_clone(&url, dest.path(), Some(fetcher));
 
@@ -336,7 +336,7 @@ fn concurrent_lazy_reads_do_not_share_recursion_limit() {
     let url = format!("file://{}", bare.canonicalize().unwrap().display());
     let dest = TempDir::new().expect("dest");
     let fetcher = Arc::new(DefaultPromisorFetcher::new(Arc::new(
-        DefaultHttpClientFactory,
+        DefaultHttpClientFactory::new(),
     )));
     let repo = Arc::new(grit_blobless_clone(&url, dest.path(), Some(fetcher)));
 
@@ -364,7 +364,7 @@ fn repeated_checkout_does_not_refetch_promisor_blobs() {
     let calls = Arc::new(AtomicUsize::new(0));
     let fetcher = Arc::new(CountingFetcher {
         calls: Arc::clone(&calls),
-        inner: DefaultPromisorFetcher::new(Arc::new(DefaultHttpClientFactory)),
+        inner: DefaultPromisorFetcher::new(Arc::new(DefaultHttpClientFactory::new())),
     });
     let repo = grit_blobless_clone(&url, dest.path(), Some(fetcher));
 
@@ -428,7 +428,7 @@ fn noop_negotiation_fetches_deltified_missing_blob() {
     let url = format!("file://{}", bare.canonicalize().unwrap().display());
     let dest = TempDir::new().expect("dest");
     let fetcher = Arc::new(DefaultPromisorFetcher::new(Arc::new(
-        DefaultHttpClientFactory,
+        DefaultHttpClientFactory::new(),
     )));
     let repo = grit_blobless_clone(&url, dest.path(), Some(fetcher));
 

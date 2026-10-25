@@ -439,7 +439,7 @@ mod http_v2 {
             },
             &mut NoProgress,
             &NeverCancel,
-            Some(&grit_lib::remote::DefaultHttpClientFactory),
+            Some(&grit_lib::remote::DefaultHttpClientFactory::new()),
         )
         .expect("http clone");
         let git_dir = dest.path().join(".git");

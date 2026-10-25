@@ -19026,6 +19026,7 @@ pub struct grit_lib::remote::credentials::HelperCredentialProvider
 impl grit_lib::remote::credentials::HelperCredentialProvider
 pub fn grit_lib::remote::credentials::HelperCredentialProvider::helpers_for(&self, &grit_lib::remote::credentials::Credential) -> alloc::vec::Vec<alloc::string::String>
 pub fn grit_lib::remote::credentials::HelperCredentialProvider::new(grit_lib::config::ConfigSet) -> Self
+pub fn grit_lib::remote::credentials::HelperCredentialProvider::with_askpass(self, core::option::Option<std::path::PathBuf>) -> Self
 pub fn grit_lib::remote::credentials::HelperCredentialProvider::with_command_runner(self, alloc::rcs::arc::Arc<dyn grit_lib::command_runner::CommandRunner>) -> Self
 impl grit_lib::remote::credentials::CredentialProvider for grit_lib::remote::credentials::HelperCredentialProvider
 pub fn grit_lib::remote::credentials::HelperCredentialProvider::approve(&self, &grit_lib::remote::credentials::Credential) -> grit_lib::error::Result<()>
@@ -19047,6 +19048,7 @@ impl grit_lib::remote::credentials::CredentialProvider for grit_lib::remote::cre
 pub fn grit_lib::remote::credentials::HelperCredentialProvider::approve(&self, &grit_lib::remote::credentials::Credential) -> grit_lib::error::Result<()>
 pub fn grit_lib::remote::credentials::HelperCredentialProvider::fill(&self, &grit_lib::remote::credentials::Credential) -> grit_lib::error::Result<grit_lib::remote::credentials::Credential>
 pub fn grit_lib::remote::credentials::HelperCredentialProvider::reject(&self, &grit_lib::remote::credentials::Credential) -> grit_lib::error::Result<()>
+pub fn grit_lib::remote::credentials::askpass_program(&grit_lib::config::environment::Environment, &grit_lib::config::ConfigSet) -> core::option::Option<std::path::PathBuf>
 pub fn grit_lib::remote::credentials::redact_embedded_url_credentials(&str) -> alloc::string::String
 pub fn grit_lib::remote::credentials::url_without_userinfo(&str) -> alloc::string::String
 pub fn grit_lib::remote::credentials::use_http_path(&grit_lib::config::ConfigSet, core::option::Option<&str>) -> bool
@@ -21127,13 +21129,15 @@ impl core::marker::UnsafeUnpin for grit_lib::remote::RemoteUrl
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::RemoteUrl
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::RemoteUrl
 pub struct grit_lib::remote::DefaultHttpClientFactory
+impl grit_lib::remote::DefaultHttpClientFactory
+pub const fn grit_lib::remote::DefaultHttpClientFactory::new() -> Self
+pub fn grit_lib::remote::DefaultHttpClientFactory::with_environment(grit_lib::config::environment::Environment) -> Self
 impl core::clone::Clone for grit_lib::remote::DefaultHttpClientFactory
 pub fn grit_lib::remote::DefaultHttpClientFactory::clone(&self) -> Self
 impl core::default::Default for grit_lib::remote::DefaultHttpClientFactory
 pub fn grit_lib::remote::DefaultHttpClientFactory::default() -> Self
 impl core::fmt::Debug for grit_lib::remote::DefaultHttpClientFactory
 pub fn grit_lib::remote::DefaultHttpClientFactory::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for grit_lib::remote::DefaultHttpClientFactory
 impl grit_lib::remote::HttpClientFactory for grit_lib::remote::DefaultHttpClientFactory
 pub fn grit_lib::remote::DefaultHttpClientFactory::create(&self, &grit_lib::config::ConfigSet) -> core::result::Result<alloc::boxed::Box<dyn grit_lib::remote::transport::http::HttpClient>, grit_lib::remote::RemoteError>
 impl core::marker::Freeze for grit_lib::remote::DefaultHttpClientFactory

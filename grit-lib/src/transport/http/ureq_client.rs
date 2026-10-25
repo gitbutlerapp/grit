@@ -37,8 +37,10 @@
 //! (`socks*://localhost/path.sock`) — `ureq`'s built-in SOCKS support is not
 //! compiled in here, so a SOCKS proxy URL is rejected with a clear error rather
 //! than silently mishandled. Also omitted: custom CA bundles, gzip request
-//! bodies, and the `GIT_ASKPASS` / `GIT_TRACE_CURL` plumbing. Embedders that need
-//! those should implement [`HttpClient`] over their own stack.
+//! bodies, and `GIT_TRACE_CURL`. Embedders that need those should implement
+//! [`HttpClient`] over their own stack. Askpass (`GIT_ASKPASS`, `core.askPass`)
+//! is the credential provider's job; see
+//! [`HelperCredentialProvider::with_askpass`](credentials::HelperCredentialProvider::with_askpass).
 
 use std::env;
 use std::io::{self, Read};

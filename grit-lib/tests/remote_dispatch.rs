@@ -617,7 +617,7 @@ fn list_refs_smart_http_matches_git_ls_remote() {
         ..Default::default()
     };
     let refs = remote
-        .list_refs(None, &opts, Some(&DefaultHttpClientFactory))
+        .list_refs(None, &opts, Some(&DefaultHttpClientFactory::new()))
         .unwrap();
     assert_refs_match_git(&url, &refs, &opts, &[]);
 }
@@ -646,7 +646,7 @@ fn list_refs_smart_http_v0_matches_git_ls_remote() {
         ..Default::default()
     };
     let refs = remote
-        .list_refs(None, &opts, Some(&DefaultHttpClientFactory))
+        .list_refs(None, &opts, Some(&DefaultHttpClientFactory::new()))
         .unwrap();
     assert!(
         !refs.is_empty(),

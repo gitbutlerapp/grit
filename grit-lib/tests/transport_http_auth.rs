@@ -713,3 +713,287 @@ fn credential_store_host_entry_authenticates_fetch_and_push() {
         stored
     );
 }
+
+/// An askpass script that answers `USER` for the username prompt and `PASS`
+/// otherwise, appending every prompt it receives to `log`.
+#[cfg(unix)]
+fn write_askpass(dir: &Path, log: &Path) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt as _;
+    let script = dir.join("askpass.sh");
+    std::fs::write(
+        &script,
+        format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$1\" >>'{}'\ncase \"$1\" in Username*) echo {USER};; *) echo {PASS};; esac\n",
+            log.display()
+        ),
+    )
+    .unwrap();
+    let mut perms = std::fs::metadata(&script).unwrap().permissions();
+    perms.set_mode(0o755);
+    std::fs::set_permissions(&script, perms).unwrap();
+    script
+}
+
+fn shared_client(
+    factory: &grit_lib::remote::DefaultHttpClientFactory,
+    config: &ConfigSet,
+) -> Arc<dyn grit_lib::remote::transport::http::HttpClient> {
+    use grit_lib::remote::HttpClientFactory as _;
+    Arc::from(factory.create(config).expect("client from factory"))
+}
+
+fn git_fsck(git_dir: &Path) {
+    let fsck = Command::new("git")
+        .arg("--git-dir")
+        .arg(git_dir)
+        .args(["fsck", "--no-dangling"])
+        .output()
+        .expect("run git fsck");
+    assert!(
+        fsck.status.success(),
+        "git fsck failed: {}",
+        String::from_utf8_lossy(&fsck.stderr)
+    );
+}
+
+/// `GIT_ASKPASS` answers the auth challenge when no helper does: grit asks the
+/// same prompts as system `git` with the same script, the fetch lands objects
+/// `git fsck` accepts, and the askpass credential is stored with the helpers.
+#[cfg(unix)]
+#[test]
+fn git_askpass_authenticates_fetch_with_the_prompts_system_git_uses() {
+    if find_binary("grit-http-server").is_none() {
+        eprintln!("SKIP: `grit-http-server` binary not found (build it first)");
+        return;
+    }
+    if system_credential_store().is_none() {
+        eprintln!("SKIP: system git-credential-store not available");
+        return;
+    }
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let work = tmp.path().join("work");
+    std::fs::create_dir_all(&work).unwrap();
+    build_source(&work);
+    let root = tmp.path().join("srv");
+    let source = mirror_bare(&work, &root, "hello.git");
+    let main_oid = rev_parse(&source, "refs/heads/main");
+    let Some((_guard, port)) = start_authed_server(&root) else {
+        eprintln!("SKIP: could not start authed grit-http-server");
+        return;
+    };
+    let url = format!("http://127.0.0.1:{port}/hello.git");
+
+    let git_log = tmp.path().join("git-askpass.log");
+    let git_askpass_dir = tmp.path().join("git-askpass");
+    std::fs::create_dir_all(&git_askpass_dir).unwrap();
+    let git_askpass = write_askpass(&git_askpass_dir, &git_log);
+    let git_clone = Command::new("git")
+        .args(["clone", "-q", &url])
+        .arg(tmp.path().join("git-clone"))
+        .env("GIT_ASKPASS", &git_askpass)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env_remove("SSH_ASKPASS")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("run git clone");
+    assert!(
+        git_clone.status.success(),
+        "system git clone with GIT_ASKPASS failed: {}",
+        String::from_utf8_lossy(&git_clone.stderr)
+    );
+
+    let grit_log = tmp.path().join("grit-askpass.log");
+    let askpass = write_askpass(tmp.path(), &grit_log);
+    let store_file = tmp.path().join("git-credentials");
+    let mut config = ConfigSet::new();
+    config
+        .add_command_override(
+            "credential.helper",
+            &format!("store --file {}", store_file.display()),
+        )
+        .unwrap();
+    let env = grit_lib::config::environment::Environment::from_vars(
+        [(
+            std::ffi::OsString::from("GIT_ASKPASS"),
+            askpass.clone().into_os_string(),
+        )],
+        tmp.path().to_path_buf(),
+    );
+    let factory = grit_lib::remote::DefaultHttpClientFactory::with_environment(env);
+
+    let local = tmp.path().join("grit-clone");
+    std::fs::create_dir_all(&local).unwrap();
+    git(&local, &["init", "-q", "-b", "main", "."]);
+    let local_git = local.join(".git");
+    let mut opts = FetchOptions {
+        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
+        tags: TagMode::All,
+        ..Default::default()
+    };
+    http_fetch(
+        shared_client(&factory, &config),
+        &local_git,
+        &url,
+        &mut opts,
+        &mut NoProgress,
+    )
+    .expect("fetch authenticated through GIT_ASKPASS");
+    assert_eq!(
+        resolve_ref(&local_git, "refs/remotes/origin/main").expect("origin/main"),
+        main_oid
+    );
+    git_fsck(&local_git);
+
+    assert_eq!(
+        std::fs::read_to_string(&grit_log).expect("grit askpass log"),
+        std::fs::read_to_string(&git_log).expect("git askpass log"),
+        "grit must ask askpass the same prompts as system git"
+    );
+    let filled = Command::new("git")
+        .args([
+            "-c",
+            &format!("credential.helper=store --file {}", store_file.display()),
+        ])
+        .args(["credential", "fill"])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env_remove("GIT_ASKPASS")
+        .env_remove("SSH_ASKPASS")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .spawn()
+        .and_then(|mut child| {
+            use std::io::Write as _;
+            child
+                .stdin
+                .take()
+                .expect("stdin")
+                .write_all(format!("protocol=http\nhost=127.0.0.1:{port}\n\n").as_bytes())?;
+            child.wait_with_output()
+        })
+        .expect("run git credential fill");
+    let filled = String::from_utf8_lossy(&filled.stdout);
+    assert!(
+        filled.contains(&format!("username={USER}\n"))
+            && filled.contains(&format!("password={PASS}\n")),
+        "system git must find the askpass credential grit stored: {filled}"
+    );
+}
+
+/// `core.askPass` works through the default factory without any environment,
+/// for push as well as fetch, and the pushed objects pass `git fsck`.
+#[cfg(unix)]
+#[test]
+fn core_askpass_authenticates_push_through_the_default_factory() {
+    if find_binary("grit-http-server").is_none() {
+        eprintln!("SKIP: `grit-http-server` binary not found (build it first)");
+        return;
+    }
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let work = tmp.path().join("work");
+    std::fs::create_dir_all(&work).unwrap();
+    build_source(&work);
+    let root = tmp.path().join("srv");
+    let push_target = make_bare_target(&root, "push.git");
+    let main_oid = rev_parse(&work, "refs/heads/main");
+    let Some((_guard, port)) = start_authed_server(&root) else {
+        eprintln!("SKIP: could not start authed grit-http-server");
+        return;
+    };
+
+    let log = tmp.path().join("askpass.log");
+    let askpass = write_askpass(tmp.path(), &log);
+    let mut config = ConfigSet::new();
+    config
+        .add_command_override("core.askPass", askpass.to_str().expect("utf8 path"))
+        .unwrap();
+    let factory = grit_lib::remote::DefaultHttpClientFactory::new();
+    let spec = PushRefSpec {
+        src: Some(main_oid),
+        dst: "refs/heads/main".to_owned(),
+        ..Default::default()
+    };
+    let outcome = push_http(
+        shared_client(&factory, &config),
+        &work.join(".git"),
+        &format!("http://127.0.0.1:{port}/push.git"),
+        std::slice::from_ref(&spec),
+        &PushOptions::default(),
+        &mut NoProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("push authenticated through core.askPass");
+    assert_eq!(outcome.results[0].status, PushRefStatus::Ok);
+    assert_eq!(
+        git(&push_target, &["rev-parse", "refs/heads/main"]).trim(),
+        main_oid.to_hex()
+    );
+    git_fsck(&push_target);
+    assert_eq!(
+        std::fs::read_to_string(&log).expect("askpass log"),
+        format!(
+            "Username for 'http://127.0.0.1:{port}': \nPassword for 'http://{USER}@127.0.0.1:{port}': \n"
+        )
+    );
+}
+
+/// Credentials in the URL are sent as they are: wrong ones are reported as
+/// rejected (not as unavailable), and askpass is not consulted for them.
+#[cfg(unix)]
+#[test]
+fn wrong_credentials_in_the_url_are_rejected_without_asking_askpass() {
+    if find_binary("grit-http-server").is_none() {
+        eprintln!("SKIP: `grit-http-server` binary not found (build it first)");
+        return;
+    }
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let work = tmp.path().join("work");
+    std::fs::create_dir_all(&work).unwrap();
+    build_source(&work);
+    let root = tmp.path().join("srv");
+    mirror_bare(&work, &root, "hello.git");
+    let Some((_guard, port)) = start_authed_server(&root) else {
+        eprintln!("SKIP: could not start authed grit-http-server");
+        return;
+    };
+
+    let log = tmp.path().join("askpass.log");
+    let askpass = write_askpass(tmp.path(), &log);
+    let mut config = ConfigSet::new();
+    config
+        .add_command_override("core.askPass", askpass.to_str().expect("utf8 path"))
+        .unwrap();
+    let factory = grit_lib::remote::DefaultHttpClientFactory::new();
+    let local = tmp.path().join("clone");
+    std::fs::create_dir_all(&local).unwrap();
+    git(&local, &["init", "-q", "-b", "main", "."]);
+    let mut opts = FetchOptions {
+        refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".to_owned()],
+        ..Default::default()
+    };
+    let err = http_fetch(
+        shared_client(&factory, &config),
+        &local.join(".git"),
+        &format!("http://{USER}:wrong@127.0.0.1:{port}/hello.git"),
+        &mut opts,
+        &mut NoProgress,
+    )
+    .expect_err("wrong URL credentials must fail");
+    assert!(
+        matches!(
+            &err,
+            Error::Auth {
+                reason: AuthFailure::Rejected,
+                ..
+            }
+        ),
+        "expected a rejected-credentials error, got: {err:?}"
+    );
+    assert!(!err.to_string().contains("wrong"), "secret leaked: {err}");
+    assert!(
+        !log.exists(),
+        "askpass must not run for a complete URL credential"
+    );
+}

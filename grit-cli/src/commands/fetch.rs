@@ -285,7 +285,7 @@ fn run_one(args: &FetchArgs, mode: OutputMode) -> Result<FetchOutcome> {
         .context("could not resolve fetch prune settings")?;
     let tags = resolve_fetch_tags(&config, &remote_name, args.tag_mode_override());
 
-    let factory = DefaultHttpClientFactory;
+    let factory = crate::context::http_client_factory();
     // No checkout follows a fetch, so the overall bar ends with the pack.
     let mut progress = args.quiet.progress(mode).with_overall(false);
     if matches!(args.depth, Some(0)) {
@@ -380,7 +380,7 @@ fn run_all(args: &FetchArgs, mode: OutputMode) -> Result<FetchAllOutcome> {
     let repo = context::discover()?;
     let config = ConfigSet::load(&crate::context::environment(), Some(repo.git_dir()), true)
         .context("could not load config")?;
-    let factory = DefaultHttpClientFactory;
+    let factory = crate::context::http_client_factory();
     let mut progress = args.quiet.progress(mode);
     let base = FetchOptions {
         dry_run: args.dry_run,

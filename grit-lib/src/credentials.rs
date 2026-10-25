@@ -15,16 +15,22 @@
 //! - [`HelperCredentialProvider`] — the Git-compatible default that runs the
 //!   configured `credential.helper` / `credential.<url>.helper` programs
 //!   (shell `!cmd`, the built-in `store`/`cache` helpers, and external
-//!   `git-credential-*` binaries).
+//!   `git-credential-*` binaries), then falls back to an askpass program.
 //!
-//! ## Non-interactive by design
+//! ## Askpass, never a terminal
 //!
-//! Unlike the CLI, [`HelperCredentialProvider`] **never** prompts on a TTY or
-//! via askpass. When the configured helpers cannot supply a usable
-//! username/password, [`fill`](CredentialProvider::fill) returns a typed
+//! When the configured helpers cannot supply a usable username/password,
+//! [`HelperCredentialProvider`] asks the askpass program set with
+//! [`HelperCredentialProvider::with_askpass`] for the missing fields, as Git
+//! does. [`askpass_program`] resolves that program from `GIT_ASKPASS`,
+//! `core.askPass` and `SSH_ASKPASS`; this is how CI systems inject tokens
+//! non-interactively. `credential.interactive=false` (or `never`) disables
+//! the fallback.
+//!
+//! The provider **never** prompts on a TTY. Without an askpass program, or
+//! when it is disabled, [`fill`](CredentialProvider::fill) returns a typed
 //! [`Error::Message`] (see [`NON_INTERACTIVE_MESSAGE`]) rather than blocking on
-//! `/dev/tty`. Interactive prompting is an explicitly opt-in concern an
-//! embedder can layer on top.
+//! `/dev/tty`.
 
 use std::collections::HashSet;
 use std::ffi::OsString;
@@ -35,13 +41,45 @@ use crate::command_runner::{
     system_command_runner, CommandEnvironment, CommandRunner, CommandSpec, CommandStdin,
     CommandStdio, ShellInvocation,
 };
-use crate::config::{parse_bool, ConfigSet};
+use crate::config::{parse_bool, parse_path, ConfigSet};
+use crate::environment::Environment;
 use crate::error::{Error, Result};
 
 /// Message returned (as [`Error::Message`]) when credentials are required but
-/// no configured helper could supply a complete username/password and
-/// interactive prompting is disallowed.
+/// no configured helper could supply a complete username/password and no
+/// askpass program is available to ask for them.
 pub const NON_INTERACTIVE_MESSAGE: &str = "credentials required but unavailable (non-interactive)";
+
+/// The askpass program Git would run to ask for a missing username or
+/// password.
+///
+/// The first of these that is set wins: the `GIT_ASKPASS` environment
+/// variable, the `core.askPass` config value (with `~/` expanded), then the
+/// `SSH_ASKPASS` environment variable. As in Git, a source that is set to an
+/// empty value stops the search and disables askpass.
+///
+/// # Parameters
+///
+/// * `env` — the environment to read `GIT_ASKPASS` / `SSH_ASKPASS` (and `HOME`
+///   for `~/`) from; pass [`Environment::empty`] to consult config only.
+/// * `config` — merged config holding `core.askPass`.
+///
+/// # Returns
+///
+/// The program to pass to [`HelperCredentialProvider::with_askpass`], or
+/// `None` when askpass is not configured.
+#[must_use]
+pub fn askpass_program(env: &Environment, config: &ConfigSet) -> Option<PathBuf> {
+    let program = env
+        .var_os("GIT_ASKPASS")
+        .or_else(|| {
+            config
+                .get("core.askPass")
+                .map(|value| parse_path(env, &value).into())
+        })
+        .or_else(|| env.var_os("SSH_ASKPASS"))?;
+    (!program.is_empty()).then(|| PathBuf::from(program))
+}
 
 /// A structured Git credential.
 ///
@@ -107,6 +145,13 @@ impl Credential {
     /// the host. Other protocols always carry the path. The path is
     /// percent-decoded and has surrounding slashes removed, as in Git.
     ///
+    /// A `user[:password]@` in the URL becomes the percent-decoded
+    /// [`username`](Credential::username) and
+    /// [`password`](Credential::password), so a URL with both is already
+    /// complete and a username-only URL is only asked for its password. The
+    /// stored [`url`](Credential::url) has the userinfo removed, so the secret
+    /// never reaches config matching or messages built from it.
+    ///
     /// Pass the repository URL (`https://host/owner/repo.git`), not a
     /// smart-HTTP request URL with `/info/refs` and a query appended.
     ///
@@ -122,15 +167,21 @@ impl Credential {
             None => host.to_owned(),
         };
         let protocol = parsed.scheme();
+        let url = url_without_userinfo(url);
         let is_http = matches!(protocol, "http" | "https");
-        let path = (!is_http || use_http_path(config, Some(url)))
+        let path = (!is_http || use_http_path(config, Some(&url)))
             .then(|| percent_decode_lossy(parsed.path().trim_matches('/')))
             .filter(|path| !path.is_empty());
+        let username = Some(parsed.username())
+            .filter(|user| !user.is_empty())
+            .map(percent_decode_lossy);
         Some(Credential {
             protocol: Some(protocol.to_owned()),
             host: Some(host),
             path,
-            url: Some(url.to_owned()),
+            password: parsed.password().map(percent_decode_lossy),
+            username,
+            url: Some(url),
             ..Default::default()
         })
     }
@@ -250,6 +301,41 @@ impl Credential {
         Some(url)
     }
 
+    /// The askpass prompt for `field` (`Username` or `Password`), in the
+    /// `<field> for '<protocol>://[<user>@]<host>[/<path>]': ` form askpass
+    /// scripts match on. With `sanitize` (Git's `credential.sanitizePrompt`,
+    /// on by default) control and URL-unsafe characters in the user, host and
+    /// path are percent-encoded.
+    fn prompt(&self, field: &str, sanitize: bool) -> String {
+        let Some(protocol) = self.protocol.as_deref() else {
+            return format!("{field}: ");
+        };
+        let part = |value: &str, escape: fn(u8) -> bool| {
+            if sanitize {
+                percent_encode_where(value, escape)
+            } else {
+                value.to_owned()
+            }
+        };
+        let mut target = format!("{protocol}://");
+        if let Some(user) = self.username.as_deref().filter(|u| !u.is_empty()) {
+            target.push_str(&part(user, |b| {
+                b == b'/' || URL_UNSAFE_PROMPT_BYTES.contains(&b)
+            }));
+            target.push('@');
+        }
+        if let Some(host) = self.host.as_deref() {
+            target.push_str(&part(host, |b| {
+                !b.is_ascii_alphanumeric() && !b"-.:[]".contains(&b)
+            }));
+        }
+        if let Some(path) = self.path.as_deref() {
+            target.push('/');
+            target.push_str(&part(path, |b| URL_UNSAFE_PROMPT_BYTES.contains(&b)));
+        }
+        format!("{field} for '{target}': ")
+    }
+
     /// Merge a helper's `get` response into this credential: fill any missing
     /// username/password (and other recognized fields) without clobbering
     /// values we already hold. `quit` and `capability[]` are tracked in
@@ -314,22 +400,26 @@ pub trait CredentialProvider {
 /// [`approve`](CredentialProvider::approve)), or `erase` (for
 /// [`reject`](CredentialProvider::reject)) exactly as Git does.
 ///
-/// **Never prompts.** If no helper yields a complete credential,
-/// [`fill`](CredentialProvider::fill) returns [`Error::Message`] with
+/// If no helper yields a complete credential, [`fill`](CredentialProvider::fill)
+/// asks the [askpass program](HelperCredentialProvider::with_askpass) for the
+/// missing username and password. It never prompts on a terminal: without an
+/// askpass program it returns [`Error::Message`] with
 /// [`NON_INTERACTIVE_MESSAGE`].
 pub struct HelperCredentialProvider {
     config: ConfigSet,
     command_runner: Arc<dyn CommandRunner>,
     probed_git_exec_path: OnceLock<Vec<PathBuf>>,
+    askpass: Option<PathBuf>,
 }
 
 impl HelperCredentialProvider {
-    /// Build a provider from a loaded [`ConfigSet`].
+    /// Build a provider from a loaded [`ConfigSet`], with no askpass program.
     pub fn new(config: ConfigSet) -> Self {
         Self {
             config,
             command_runner: system_command_runner(),
             probed_git_exec_path: OnceLock::new(),
+            askpass: None,
         }
     }
 
@@ -337,6 +427,21 @@ impl HelperCredentialProvider {
     #[must_use]
     pub fn with_command_runner(mut self, runner: Arc<dyn CommandRunner>) -> Self {
         self.command_runner = runner;
+        self
+    }
+
+    /// Ask `program` for a username and password the helpers could not
+    /// supply, usually the result of [`askpass_program`].
+    ///
+    /// `program` runs once per missing field with the prompt (for example
+    /// `Username for 'https://example.com': `) as its only argument, and its
+    /// stdout up to the first line break is the answer. Credentials obtained
+    /// this way are stored with the helpers when the transport
+    /// [approves](CredentialProvider::approve) them. `None` disables the
+    /// fallback. `credential.interactive=false` or `never` also disables it.
+    #[must_use]
+    pub fn with_askpass(mut self, program: Option<PathBuf>) -> Self {
+        self.askpass = program;
         self
     }
 
@@ -377,6 +482,13 @@ impl HelperCredentialProvider {
         request
     }
 
+    /// False when `credential.interactive` is `false` or `never`.
+    fn prompts_allowed(&self) -> bool {
+        self.config
+            .get("credential.interactive")
+            .is_none_or(|value| value != "never" && parse_bool(&value).unwrap_or(true))
+    }
+
     fn exec_path_candidates(&self) -> Vec<PathBuf> {
         credential_helper_exec_path_candidates(
             self.command_runner.as_ref(),
@@ -411,9 +523,23 @@ impl CredentialProvider for HelperCredentialProvider {
                 return Ok(filled);
             }
         }
-        // No helper could complete the credential. The library default does NOT
-        // fall back to an interactive prompt; surface a typed error instead.
-        Err(Error::Message(NON_INTERACTIVE_MESSAGE.to_string()))
+        let Some(askpass) = self.askpass.as_deref().filter(|_| self.prompts_allowed()) else {
+            return Err(Error::Message(NON_INTERACTIVE_MESSAGE.to_string()));
+        };
+        let sanitize = self
+            .config
+            .get_bool("credential.sanitizePrompt")
+            .and_then(std::result::Result::ok)
+            .unwrap_or(true);
+        if filled.username.is_none() {
+            let prompt = filled.prompt("Username", sanitize);
+            filled.username = Some(run_askpass(self.command_runner.as_ref(), askpass, &prompt)?);
+        }
+        if filled.password.is_none() {
+            let prompt = filled.prompt("Password", sanitize);
+            filled.password = Some(run_askpass(self.command_runner.as_ref(), askpass, &prompt)?);
+        }
+        Ok(filled)
     }
 
     fn approve(&self, cred: &Credential) -> Result<()> {
@@ -640,6 +766,24 @@ fn percent_decode_lossy(input: &str) -> String {
         idx += 1;
     }
     String::from_utf8_lossy(&out).into_owned()
+}
+
+/// Bytes a sanitized askpass prompt percent-encodes in the user and path.
+const URL_UNSAFE_PROMPT_BYTES: &[u8] = b" <>\"%{}|\\^`:?#[]@!$&'()*+,;=";
+
+/// Percent-encode control and non-ASCII bytes of `value`, plus every byte for
+/// which `escape` returns true.
+fn percent_encode_where(value: &str, escape: fn(u8) -> bool) -> String {
+    use std::fmt::Write as _;
+    let mut out = String::with_capacity(value.len());
+    for byte in value.bytes() {
+        if byte <= 0x1f || byte >= 0x7f || escape(byte) {
+            let _ = write!(out, "%{byte:02X}");
+        } else {
+            out.push(char::from(byte));
+        }
+    }
+    out
 }
 
 fn hex_value(byte: u8) -> Option<u8> {
@@ -872,6 +1016,43 @@ fn invoke_helper(
     Ok(Credential::parse_bytes(&output.stdout))
 }
 
+/// Run the askpass `program` with `prompt` as its argument and return its
+/// answer: stdout up to the first `\r` or `\n`.
+fn run_askpass(runner: &dyn CommandRunner, program: &Path, prompt: &str) -> Result<String> {
+    let spec = CommandSpec {
+        program: program.to_path_buf(),
+        args: vec![OsString::from(prompt)],
+        shell: None,
+        cwd: None,
+        env: CommandEnvironment::inherit_process_only(),
+        stdin: CommandStdin::Null,
+        stdout: CommandStdio::Pipe,
+        stderr: CommandStdio::Inherit,
+    };
+    let output = runner
+        .spawn(&spec)
+        .and_then(|child| child.wait_with_output())
+        .map_err(|e| {
+            Error::Message(format!(
+                "could not run askpass program '{}': {e}",
+                program.display()
+            ))
+        })?;
+    if !output.status.success {
+        return Err(Error::Message(format!(
+            "askpass program '{}' exited with status {}",
+            program.display(),
+            output.status.code.unwrap_or(-1)
+        )));
+    }
+    let answer = String::from_utf8_lossy(&output.stdout);
+    Ok(answer
+        .split(['\r', '\n'])
+        .next()
+        .unwrap_or_default()
+        .to_owned())
+}
+
 /// Whether `credential.useHttpPath` (optionally URL-scoped) is enabled.
 ///
 /// Exposed so embedders can decide whether to include the `path` field when
@@ -1088,6 +1269,7 @@ pub mod windows_store {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::command_runner::{RecordedResponse, RecordingRunner};
 
     #[cfg(unix)]
     #[test]
@@ -1285,6 +1467,251 @@ mod tests {
             std::fs::read_to_string(&log).expect("helper log"),
             "protocol=http\nhost=127.0.0.1:9418\n\n\
              protocol=http\nhost=127.0.0.1:9418\nusername=u\npassword=p\n\n"
+        );
+    }
+
+    fn env_with(vars: &[(&str, &str)]) -> Environment {
+        Environment::from_vars(
+            vars.iter()
+                .map(|(k, v)| (OsString::from(k), OsString::from(v))),
+            PathBuf::from("/"),
+        )
+    }
+
+    fn config_with(entries: &[(&str, &str)]) -> ConfigSet {
+        let mut cfg = ConfigSet::new();
+        for (key, value) in entries {
+            cfg.add_command_override(key, value).unwrap();
+        }
+        cfg
+    }
+
+    #[test]
+    fn askpass_program_prefers_git_askpass_then_core_askpass_then_ssh_askpass() {
+        let cfg = config_with(&[("core.askPass", "/cfg/askpass")]);
+        let all = env_with(&[("GIT_ASKPASS", "/env/git"), ("SSH_ASKPASS", "/env/ssh")]);
+        assert_eq!(askpass_program(&all, &cfg), Some(PathBuf::from("/env/git")));
+        let ssh_only = env_with(&[("SSH_ASKPASS", "/env/ssh")]);
+        assert_eq!(
+            askpass_program(&ssh_only, &cfg),
+            Some(PathBuf::from("/cfg/askpass"))
+        );
+        assert_eq!(
+            askpass_program(&ssh_only, &ConfigSet::new()),
+            Some(PathBuf::from("/env/ssh"))
+        );
+        assert_eq!(
+            askpass_program(&Environment::empty(), &ConfigSet::new()),
+            None
+        );
+    }
+
+    #[test]
+    fn askpass_program_empty_value_disables_askpass_and_core_askpass_expands_home() {
+        let cfg = config_with(&[("core.askPass", "~/bin/askpass")]);
+        let empty_git = env_with(&[("GIT_ASKPASS", ""), ("SSH_ASKPASS", "/env/ssh")]);
+        assert_eq!(askpass_program(&empty_git, &cfg), None);
+        let home = env_with(&[("HOME", "/home/ci")]);
+        assert_eq!(
+            askpass_program(&home, &cfg),
+            Some(PathBuf::from("/home/ci/bin/askpass"))
+        );
+        let empty_cfg = config_with(&[("core.askPass", "")]);
+        assert_eq!(
+            askpass_program(&env_with(&[("SSH_ASKPASS", "/env/ssh")]), &empty_cfg),
+            None
+        );
+    }
+
+    fn askpass_provider(
+        cfg: ConfigSet,
+        responses: Vec<RecordedResponse>,
+    ) -> (HelperCredentialProvider, Arc<RecordingRunner>) {
+        let runner = Arc::new(RecordingRunner::default());
+        for response in responses {
+            runner.push_response(response);
+        }
+        let provider = HelperCredentialProvider::new(cfg)
+            .with_command_runner(runner.clone())
+            .with_askpass(Some(PathBuf::from("/ci/askpass")));
+        (provider, runner)
+    }
+
+    fn answer(text: &str) -> RecordedResponse {
+        RecordedResponse::Output {
+            stdout: text.as_bytes().to_vec(),
+            code: 0,
+        }
+    }
+
+    fn askpass_prompts(runner: &RecordingRunner) -> Vec<String> {
+        runner
+            .specs()
+            .iter()
+            .map(|spec| {
+                assert_eq!(spec.program, PathBuf::from("/ci/askpass"));
+                assert!(spec.shell.is_none(), "askpass runs without a shell");
+                assert!(matches!(spec.stdin, CommandStdin::Null));
+                assert_eq!(spec.args.len(), 1, "the prompt is the only argument");
+                spec.args[0].to_string_lossy().into_owned()
+            })
+            .collect()
+    }
+
+    #[test]
+    fn fill_asks_askpass_for_username_then_password_and_keeps_the_first_line() {
+        let (provider, runner) = askpass_provider(
+            ConfigSet::new(),
+            vec![answer("ci\nignored\n"), answer("s3cret\r\n")],
+        );
+        let input =
+            Credential::from_url("http://127.0.0.1:9431/hello.git", &ConfigSet::new()).unwrap();
+        let filled = provider.fill(&input).expect("askpass fills");
+        assert_eq!(filled.username.as_deref(), Some("ci"));
+        assert_eq!(filled.password.as_deref(), Some("s3cret"));
+        assert_eq!(
+            askpass_prompts(&runner),
+            [
+                "Username for 'http://127.0.0.1:9431': ",
+                "Password for 'http://ci@127.0.0.1:9431': ",
+            ]
+        );
+    }
+
+    #[test]
+    fn fill_asks_only_for_the_password_when_the_url_names_the_user() {
+        let cfg = config_with(&[("credential.useHttpPath", "true")]);
+        let (provider, runner) = askpass_provider(cfg.clone(), vec![answer("tok")]);
+        let input = Credential::from_url("https://ci@example.com/o/r.git", &cfg).unwrap();
+        let filled = provider.fill(&input).expect("askpass fills");
+        assert_eq!(filled.username.as_deref(), Some("ci"));
+        assert_eq!(filled.password.as_deref(), Some("tok"));
+        assert_eq!(
+            askpass_prompts(&runner),
+            ["Password for 'https://ci@example.com/o/r.git': "]
+        );
+    }
+
+    #[test]
+    fn askpass_prompt_is_sanitized_unless_disabled() {
+        let cred = Credential {
+            protocol: Some("https".into()),
+            host: Some("example.com".into()),
+            username: Some("a b/c\x1b".into()),
+            path: Some("o/r e.git".into()),
+            ..Default::default()
+        };
+        assert_eq!(
+            cred.prompt("Password", true),
+            "Password for 'https://a%20b%2Fc%1B@example.com/o/r%20e.git': "
+        );
+        assert_eq!(
+            cred.prompt("Password", false),
+            "Password for 'https://a b/c\x1b@example.com/o/r e.git': "
+        );
+        assert_eq!(Credential::default().prompt("Username", true), "Username: ");
+
+        let (provider, runner) = askpass_provider(
+            config_with(&[("credential.sanitizePrompt", "false")]),
+            vec![answer("p")],
+        );
+        let input = Credential {
+            username: Some("a b".into()),
+            ..cred
+        };
+        provider.fill(&input).expect("askpass fills");
+        assert_eq!(
+            askpass_prompts(&runner),
+            ["Password for 'https://a b@example.com/o/r e.git': "]
+        );
+    }
+
+    #[test]
+    fn failing_askpass_is_an_error_naming_the_program() {
+        let (provider, _runner) =
+            askpass_provider(ConfigSet::new(), vec![RecordedResponse::Exit(3)]);
+        let input = Credential::from_url("https://example.com/r.git", &ConfigSet::new()).unwrap();
+        let err = provider.fill(&input).expect_err("askpass failed");
+        let message = err.to_string();
+        assert!(message.contains("/ci/askpass"), "{message}");
+        assert!(message.contains("status 3"), "{message}");
+    }
+
+    #[test]
+    fn no_askpass_or_credential_interactive_never_keeps_fill_non_interactive() {
+        let input = Credential::from_url("https://example.com/r.git", &ConfigSet::new()).unwrap();
+        let err = HelperCredentialProvider::new(ConfigSet::new())
+            .fill(&input)
+            .expect_err("nothing can answer");
+        assert_eq!(err.to_string(), NON_INTERACTIVE_MESSAGE);
+
+        for value in ["never", "false"] {
+            let (provider, runner) = askpass_provider(
+                config_with(&[("credential.interactive", value)]),
+                vec![answer("unused")],
+            );
+            let err = provider.fill(&input).expect_err("askpass disabled");
+            assert_eq!(err.to_string(), NON_INTERACTIVE_MESSAGE);
+            assert!(
+                runner.specs().is_empty(),
+                "askpass must not run for {value}"
+            );
+        }
+    }
+
+    #[test]
+    fn from_url_takes_decoded_userinfo_and_keeps_it_out_of_the_url() {
+        let cfg = ConfigSet::new();
+        let cred =
+            Credential::from_url("https://ci%40corp:p%3Ass@example.com/r.git", &cfg).unwrap();
+        assert_eq!(cred.username.as_deref(), Some("ci@corp"));
+        assert_eq!(cred.password.as_deref(), Some("p:ss"));
+        assert_eq!(cred.url.as_deref(), Some("https://example.com/r.git"));
+        assert!(cred.is_complete());
+
+        let user_only = Credential::from_url("https://ci@example.com/r.git", &cfg).unwrap();
+        assert_eq!(user_only.username.as_deref(), Some("ci"));
+        assert_eq!(user_only.password, None);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn helpers_answer_before_askpass_runs() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let askpass = tmp.path().join("askpass");
+        let log = tmp.path().join("askpass.log");
+        std::fs::write(
+            &askpass,
+            format!(
+                "#!/bin/sh\necho \"$1\" >>'{}'\necho from-askpass\n",
+                log.display()
+            ),
+        )
+        .unwrap();
+        let mut perms = std::fs::metadata(&askpass).unwrap().permissions();
+        std::os::unix::fs::PermissionsExt::set_mode(&mut perms, 0o755);
+        std::fs::set_permissions(&askpass, perms).unwrap();
+
+        let cfg = config_with(&[("credential.helper", "!echo username=helper-user; :")]);
+        let provider = HelperCredentialProvider::new(cfg.clone()).with_askpass(Some(askpass));
+        let input = Credential::from_url("https://example.com/r.git", &cfg).unwrap();
+        let filled = provider.fill(&input).expect("helper plus askpass");
+        assert_eq!(filled.username.as_deref(), Some("helper-user"));
+        assert_eq!(filled.password.as_deref(), Some("from-askpass"));
+        assert_eq!(
+            std::fs::read_to_string(&log).unwrap(),
+            "Password for 'https://helper-user@example.com': \n"
+        );
+
+        let complete =
+            config_with(&[("credential.helper", "!echo username=u; echo password=p; :")]);
+        let provider = HelperCredentialProvider::new(complete.clone())
+            .with_askpass(Some(tmp.path().join("askpass")));
+        provider.fill(&input).expect("helper answers");
+        assert_eq!(
+            std::fs::read_to_string(&log).unwrap().lines().count(),
+            1,
+            "askpass must not run when a helper completes the credential"
         );
     }
 

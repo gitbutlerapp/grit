@@ -60,7 +60,11 @@ fn http_status_server(status: &'static str) -> u16 {
 
 fn http_factory() -> Option<&'static dyn HttpClientFactory> {
     #[cfg(feature = "http-ureq")]
-    return Some(&grit_lib::remote::DefaultHttpClientFactory);
+    {
+        static FACTORY: grit_lib::remote::DefaultHttpClientFactory =
+            grit_lib::remote::DefaultHttpClientFactory::new();
+        return Some(&FACTORY);
+    }
     #[cfg(not(feature = "http-ureq"))]
     None
 }

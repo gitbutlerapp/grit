@@ -11,7 +11,6 @@ use grit_lib::remote::clone::{
     CloneOutcome as LibCloneOutcome, CloneTags,
 };
 use grit_lib::remote::partial_clone::ObjectFilterSpec;
-use grit_lib::remote::DefaultHttpClientFactory;
 use schemars::JsonSchema;
 use serde::Serialize;
 
@@ -521,7 +520,7 @@ fn clone_into(
     started: Instant,
     term_progress: &mut TerminalProgress,
 ) -> Result<CloneOutcome> {
-    let factory = DefaultHttpClientFactory;
+    let factory = crate::context::http_client_factory();
     let remote_name = run
         .origin
         .clone()
@@ -540,7 +539,9 @@ fn clone_into(
         single_branch: run.single_branch,
         tags: resolved_clone_tags(run),
         promisor_fetcher: Some(std::sync::Arc::new(
-            grit_lib::objects::promisor::DefaultPromisorFetcher::new(std::sync::Arc::new(factory)),
+            grit_lib::objects::promisor::DefaultPromisorFetcher::new(std::sync::Arc::new(
+                factory.clone(),
+            )),
         )),
         bare: run.bare,
         checkout: !run.no_checkout,

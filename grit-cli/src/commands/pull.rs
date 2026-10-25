@@ -16,7 +16,6 @@ use grit_lib::porcelain::pull::{pull, PullError, PullMode, PullOptions};
 use grit_lib::progress::NeverCancel;
 use grit_lib::remote::fetch_request::resolve_pull_invocation;
 use grit_lib::remote::transfer::{resolve_fetch_prune, resolve_fetch_tags, FetchOptions};
-use grit_lib::remote::DefaultHttpClientFactory;
 use grit_lib::state::resolve_head_for_repository;
 
 pub use pull_outcome::{map_outcome, PullOutcome, PullResult};
@@ -74,7 +73,7 @@ pub fn run(args: &PullRunArgs, mode: OutputMode) -> Result<PullOutcome> {
         ..Default::default()
     };
     let remote_name = invocation.remote;
-    let factory = DefaultHttpClientFactory;
+    let factory = crate::context::http_client_factory();
     // The work-tree update after the fetch reports no progress, so the overall
     // bar covers the transfer only.
     let mut progress = args.fetch.quiet.progress(mode).with_overall(false);
