@@ -23578,7 +23578,7 @@ pub grit_lib::revwalk::rev_list::RevListResult::omitted_objects: alloc::vec::Vec
 pub grit_lib::revwalk::rev_list::RevListResult::per_commit_object_counts: alloc::vec::Vec<usize>
 pub grit_lib::revwalk::rev_list::RevListResult::reachable_commit_count: core::option::Option<usize>
 pub grit_lib::revwalk::rev_list::RevListResult::reachable_non_commit_object_count: core::option::Option<usize>
-pub grit_lib::revwalk::rev_list::RevListResult::tip_annotated_tag_by_commit: std::collections::hash::map::HashMap<grit_lib::objects::ObjectId, grit_lib::objects::ObjectId>
+pub grit_lib::revwalk::rev_list::RevListResult::tip_annotated_tag_by_commit: std::collections::hash::map::HashMap<grit_lib::objects::ObjectId, alloc::vec::Vec<grit_lib::objects::ObjectId>>
 impl grit_lib::revwalk::rev_list::RevListResult
 pub fn grit_lib::revwalk::rev_list::RevListResult::commit_count(&self) -> usize
 pub fn grit_lib::revwalk::rev_list::RevListResult::count_with_objects_total(&self) -> usize

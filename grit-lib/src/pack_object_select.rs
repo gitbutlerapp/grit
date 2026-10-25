@@ -7,7 +7,8 @@ use crate::bitmap_walk::{BitmapWalkError, ReachabilityQuery, ReachableSet};
 use crate::environment::RepositoryOptions;
 use crate::error::Result;
 use crate::objects::{
-    oid_hash_set, parse_commit, parse_tag, Object, ObjectId, ObjectKind, OidHashSet, TreeRefIter,
+    oid_hash_map, oid_hash_set, parse_commit, parse_tag, Object, ObjectId, ObjectKind, OidHashMap,
+    OidHashSet, TreeRefIter,
 };
 use crate::odb::Odb;
 use crate::pack_bitmap::BitmapIndex;
@@ -84,7 +85,7 @@ pub fn try_bitmap_reachable_for_upload(
     filter: Option<&ObjectFilter>,
     shallow_grafts: &HashSet<ObjectId>,
 ) -> Result<Option<(ReachableSet, HashSet<ObjectId>)>> {
-    if !shallow_grafts.is_empty() {
+    if !shallow_grafts.is_empty() || filter.is_some_and(selects_object_type) {
         return Ok(None);
     }
     let Some(git_dir) = odb.config_git_dir() else {
@@ -132,6 +133,16 @@ pub fn try_bitmap_reachable_for_upload(
     };
 
     Ok(Some((send_set, have_set.object_ids())))
+}
+
+/// Bitmap `object:type` selection also drops the wanted commits and tags, which a
+/// pack must always carry, so those filters use the object walk.
+fn selects_object_type(filter: &ObjectFilter) -> bool {
+    match filter {
+        ObjectFilter::ObjectType(_) => true,
+        ObjectFilter::Combine(parts) => parts.iter().any(selects_object_type),
+        _ => false,
+    }
 }
 
 fn try_bitmap_enumeration(
@@ -193,22 +204,26 @@ fn walk_enumeration(
     } else {
         reachable_closure_walk(odb, haves, &HashSet::new(), true, have_shallow)?
     };
-    let (send, blob_name_hashes, walk_prefetch) = if opts.filter.is_some() {
-        let (send, blob_name_hashes) = rev_list_filtered_objects(odb, wants, haves, opts.filter)?;
-        (send, blob_name_hashes, HashMap::new())
-    } else {
-        // With local packs the delta planner copies packed objects at write time
-        // instead of reusing walked payloads, so holding them would only cost memory.
-        let keep_payloads = opts.prefetch_walk_objects
-            && !crate::pack_objects::objects_dir_has_local_packs(odb.objects_dir());
-        collect_reachable_excluding_with_name_hashes(
-            odb,
-            wants,
-            &have_closure,
-            false,
-            opts.shallow_grafts,
-            keep_payloads,
-        )?
+    let (send, blob_name_hashes, walk_prefetch) = match opts.filter {
+        Some(filter) if filter.uses_paths() => {
+            let (send, blob_name_hashes) = rev_list_filtered_objects(odb, wants, haves, filter)?;
+            (send, blob_name_hashes, HashMap::new())
+        }
+        filter => {
+            // With local packs the delta planner copies packed objects at write time
+            // instead of reusing walked payloads, so holding them would only cost memory.
+            let keep_payloads = opts.prefetch_walk_objects
+                && !crate::pack_objects::objects_dir_has_local_packs(odb.objects_dir());
+            collect_reachable_excluding_with_name_hashes(
+                odb,
+                wants,
+                &have_closure,
+                false,
+                opts.shallow_grafts,
+                keep_payloads,
+                filter,
+            )?
+        }
     };
     Ok(PackObjectSelection {
         send,
@@ -234,6 +249,7 @@ pub(crate) fn reachable_closure_walk(
         skip_missing,
         shallow_grafts,
         false,
+        None,
     )?
     .0;
     for oid in order {
@@ -242,28 +258,27 @@ pub(crate) fn reachable_closure_walk(
     Ok(seen)
 }
 
+/// Objects for a path-based filter (`sparse:oid`), which needs the full object walk.
 fn rev_list_filtered_objects(
     odb: &Odb,
     wants: &[ObjectId],
     haves: &[ObjectId],
-    filter: Option<&ObjectFilter>,
+    filter: &ObjectFilter,
 ) -> Result<(Vec<ObjectId>, HashMap<ObjectId, u32>)> {
     let Some(git_dir) = odb.config_git_dir() else {
         return Ok((Vec::new(), HashMap::new()));
     };
     let repo = Repository::open(git_dir, &RepositoryOptions::empty())?;
     let wants: Vec<String> = wants.iter().map(ObjectId::to_hex).collect();
-    let have_args: Vec<String> = haves.iter().map(|h| format!("^{}", h.to_hex())).collect();
-    let mut rev_args = wants;
-    rev_args.extend(have_args);
+    let haves: Vec<String> = haves.iter().map(ObjectId::to_hex).collect();
     let opts = crate::rev_list::RevListOptions {
         objects: true,
         no_object_names: true,
         quiet: true,
-        filter: filter.cloned(),
+        filter: Some(filter.clone()),
         ..Default::default()
     };
-    let result = crate::rev_list::rev_list(&repo, &rev_args, &[], &opts)?;
+    let result = crate::rev_list::rev_list(&repo, &wants, &haves, &opts)?;
     let mut ordered = Vec::new();
     let mut seen = HashSet::new();
     for oid in result
@@ -280,6 +295,14 @@ fn rev_list_filtered_objects(
 
 /// Walk objects reachable from `roots` in discovery order, with blob name hashes.
 ///
+/// `roots` and the objects tags point at are always listed. With `filter`, parent
+/// commits, trees and blobs are listed only when they pass it, the way
+/// `pack-objects --filter` selects them: a tree's depth counts from its commit's root
+/// tree (`0`), and a blob is checked against the depth of the tree holding it. As in
+/// Git, a root or tag target that is also some commit's root tree counts as that root
+/// tree. Trees whose entries cannot pass are not read, and blob sizes are only looked
+/// up for `blob:limit`.
+///
 /// When `keep_payloads` is set, the commits, trees and tags read by the walk are
 /// returned as well so the pack builder does not read them again.
 #[allow(clippy::type_complexity)]
@@ -290,39 +313,37 @@ fn collect_reachable_excluding_with_name_hashes(
     skip_missing: bool,
     shallow_grafts: &HashSet<ObjectId>,
     keep_payloads: bool,
+    filter: Option<&ObjectFilter>,
 ) -> Result<(
     Vec<ObjectId>,
     HashMap<ObjectId, u32>,
     HashMap<ObjectId, Object>,
 )> {
     let oid_len = odb.hash_algo().len();
-    let mut visited: OidHashSet = oid_hash_set();
-    let mut ordered: Vec<ObjectId> = Vec::new();
-    let mut queue: VecDeque<(ObjectId, String)> = VecDeque::new();
-    let mut blob_name_hashes: HashMap<ObjectId, u32> = HashMap::new();
-    let mut walk_prefetch: HashMap<ObjectId, Object> = HashMap::new();
-
-    let enqueue = |oid: ObjectId,
-                   path: String,
-                   queue: &mut VecDeque<(ObjectId, String)>,
-                   visited: &mut OidHashSet,
-                   ordered: &mut Vec<ObjectId>|
-     -> bool {
-        if !visited.insert(oid) {
-            return false;
-        }
-        if !exclude.contains(&oid) {
-            ordered.push(oid);
-        }
-        queue.push_back((oid, path));
-        true
+    let mut walk = EnumerationWalk {
+        odb,
+        exclude,
+        skip_missing,
+        filter,
+        depth_sensitive: filter.is_some_and(ObjectFilter::is_depth_sensitive),
+        visited: oid_hash_set(),
+        tree_depths: oid_hash_map(),
+        unlisted: oid_hash_set(),
+        ordered: Vec::new(),
+        queue: VecDeque::new(),
+        blob_name_hashes: HashMap::new(),
     };
+    let mut walk_prefetch: HashMap<ObjectId, Object> = HashMap::new();
+    // Commit root trees the filter drops, even where a root or tag names them.
+    let mut dropped_root_trees: Option<OidHashSet> = filter
+        .filter(|f| !f.includes_tree(0))
+        .map(|_| oid_hash_set());
 
     for &root in roots {
-        enqueue(root, String::new(), &mut queue, &mut visited, &mut ordered);
+        walk.push_object(root, String::new());
     }
 
-    while let Some((oid, path)) = queue.pop_front() {
+    while let Some((oid, path, depth)) = walk.queue.pop_front() {
         let obj = match odb.read(&oid) {
             Ok(o) => o,
             Err(_) if skip_missing => continue,
@@ -333,31 +354,19 @@ fn collect_reachable_excluding_with_name_hashes(
                 let commit = parse_commit(&obj.data)?;
                 if !shallow_grafts.contains(&oid) {
                     for parent in commit.parents {
-                        enqueue(
-                            parent,
-                            String::new(),
-                            &mut queue,
-                            &mut visited,
-                            &mut ordered,
-                        );
+                        walk.push_parent(parent);
                     }
                 }
-                enqueue(
-                    commit.tree,
-                    String::new(),
-                    &mut queue,
-                    &mut visited,
-                    &mut ordered,
-                );
+                if let Some(dropped) = dropped_root_trees.as_mut() {
+                    dropped.insert(commit.tree);
+                }
+                walk.push_tree(commit.tree, String::new(), 0);
             }
             ObjectKind::Tree => {
                 for entry in TreeRefIter::with_oid_len(&obj.data, oid_len) {
                     let entry = entry?;
-                    if entry.mode == 0o160000 || !visited.insert(entry.oid) {
+                    if entry.mode == 0o160000 {
                         continue;
-                    }
-                    if !exclude.contains(&entry.oid) {
-                        ordered.push(entry.oid);
                     }
                     // Regular files and symlinks have no children: record them
                     // without inflating their contents. The pack writer reads (or
@@ -365,26 +374,25 @@ fn collect_reachable_excluding_with_name_hashes(
                     // missing. Any other mode, including directories written with
                     // non-canonical permission bits, is read so the object's own
                     // kind decides whether it is walked.
-                    let file_type = entry.mode & 0o170000;
-                    if file_type == 0o120000 {
-                        continue;
-                    }
-                    let name = String::from_utf8_lossy(entry.name);
-                    let child_path = if path.is_empty() {
-                        name.into_owned()
-                    } else {
-                        format!("{path}/{name}")
-                    };
-                    if file_type == 0o100000 {
-                        blob_name_hashes.insert(entry.oid, pack_name_hash(&child_path));
-                    } else {
-                        queue.push_back((entry.oid, child_path));
+                    match entry.mode & 0o170000 {
+                        0o120000 => walk.push_blob(entry.oid, None, depth)?,
+                        0o100000 => {
+                            walk.push_blob(entry.oid, Some((&path, entry.name)), depth)?;
+                        }
+                        file_type => {
+                            let child_path = child_path(&path, entry.name);
+                            if file_type == 0o040000 {
+                                walk.push_tree(entry.oid, child_path, depth + 1);
+                            } else {
+                                walk.push_object(entry.oid, child_path);
+                            }
+                        }
                     }
                 }
             }
             ObjectKind::Tag => {
                 let tag = parse_tag(&obj.data)?;
-                enqueue(tag.object, path, &mut queue, &mut visited, &mut ordered);
+                walk.push_object(tag.object, path);
             }
             ObjectKind::Blob => {}
         }
@@ -393,7 +401,155 @@ fn collect_reachable_excluding_with_name_hashes(
         }
     }
 
-    Ok((ordered, blob_name_hashes, walk_prefetch))
+    if let Some(dropped) = dropped_root_trees.filter(|d| !d.is_empty()) {
+        walk.ordered.retain(|oid| !dropped.contains(oid));
+    }
+    Ok((walk.ordered, walk.blob_name_hashes, walk_prefetch))
+}
+
+fn child_path(parent: &str, name: &[u8]) -> String {
+    let name = String::from_utf8_lossy(name);
+    if parent.is_empty() {
+        name.into_owned()
+    } else {
+        format!("{parent}/{name}")
+    }
+}
+
+/// State of [`collect_reachable_excluding_with_name_hashes`].
+struct EnumerationWalk<'a> {
+    odb: &'a Odb,
+    exclude: &'a HashSet<ObjectId>,
+    skip_missing: bool,
+    filter: Option<&'a ObjectFilter>,
+    /// The filter's verdict for trees and blobs depends on where they are met.
+    depth_sensitive: bool,
+    /// Objects listed (or held by the peer), and objects the filter left out whose
+    /// verdict cannot change: parent commits, and without a depth-sensitive filter,
+    /// trees and size-checked blobs.
+    visited: OidHashSet,
+    /// Shallowest depth each tree was walked at (depth-sensitive filters only).
+    tree_depths: OidHashMap<u64>,
+    /// Objects in [`Self::visited`] that the filter left out. A root or tag target
+    /// naming one of them still lists it.
+    unlisted: OidHashSet,
+    ordered: Vec<ObjectId>,
+    /// Objects to read: id, path for name hashes, and tree depth.
+    queue: VecDeque<(ObjectId, String, u64)>,
+    blob_name_hashes: HashMap<ObjectId, u32>,
+}
+
+impl EnumerationWalk<'_> {
+    fn list(&mut self, oid: ObjectId) {
+        if !self.exclude.contains(&oid) {
+            self.ordered.push(oid);
+        }
+    }
+
+    /// An object that is sent whatever the filter says: a root or a tag target.
+    fn push_object(&mut self, oid: ObjectId, path: String) {
+        if self.visited.insert(oid) {
+            self.list(oid);
+            self.queue.push_back((oid, path, 0));
+        } else if self.unlisted.remove(&oid) {
+            self.list(oid);
+        }
+    }
+
+    /// A parent commit: always walked, listed unless the filter keeps other types only.
+    fn push_parent(&mut self, oid: ObjectId) {
+        let listed = self
+            .filter
+            .is_none_or(|f| f.includes_commit_or_tag_object(ObjectKind::Commit));
+        if listed {
+            self.push_object(oid, String::new());
+        } else if self.visited.insert(oid) {
+            self.unlisted.insert(oid);
+            self.queue.push_back((oid, String::new(), 0));
+        }
+    }
+
+    /// A commit's root tree (`depth` 0) or a subtree found in a tree.
+    fn push_tree(&mut self, oid: ObjectId, path: String, depth: u64) {
+        let Some(filter) = self.filter else {
+            self.push_object(oid, path);
+            return;
+        };
+        let first_walk = if self.depth_sensitive {
+            match self.tree_depths.get(&oid) {
+                Some(&walked_at) if walked_at <= depth => false,
+                _ => {
+                    self.tree_depths.insert(oid, depth);
+                    true
+                }
+            }
+        } else {
+            self.visited.insert(oid)
+        };
+        if !first_walk {
+            return;
+        }
+        if filter.includes_tree(depth) {
+            if !self.depth_sensitive || self.visited.insert(oid) {
+                self.list(oid);
+            }
+        } else if !self.depth_sensitive {
+            self.unlisted.insert(oid);
+        }
+        if !filter.prunes_tree_entries(depth) {
+            self.queue.push_back((oid, path, depth));
+        }
+    }
+
+    /// A blob in a tree at `tree_depth`; `name` is `(tree path, entry name)` for regular
+    /// files, which get a pack name hash.
+    fn push_blob(
+        &mut self,
+        oid: ObjectId,
+        name: Option<(&str, &[u8])>,
+        tree_depth: u64,
+    ) -> Result<()> {
+        if self.visited.contains(&oid) {
+            return Ok(());
+        }
+        let (passes, size_checked) = match self.filter {
+            None => (true, false),
+            Some(filter) => self.blob_passes(filter, &oid, tree_depth)?,
+        };
+        if passes {
+            self.visited.insert(oid);
+            self.list(oid);
+            if let Some((parent, entry_name)) = name {
+                self.blob_name_hashes
+                    .insert(oid, pack_name_hash(&child_path(parent, entry_name)));
+            }
+        } else if size_checked && !self.depth_sensitive {
+            self.visited.insert(oid);
+            self.unlisted.insert(oid);
+        }
+        Ok(())
+    }
+
+    /// Whether the blob passes `filter`, and whether its size had to be looked up.
+    fn blob_passes(
+        &self,
+        filter: &ObjectFilter,
+        oid: &ObjectId,
+        tree_depth: u64,
+    ) -> Result<(bool, bool)> {
+        // A smaller blob never fares worse, so the size only matters between the extremes.
+        if !filter.includes_blob_under_tree(0, tree_depth) {
+            return Ok((false, false));
+        }
+        if filter.includes_blob_under_tree(u64::MAX, tree_depth) {
+            return Ok((true, false));
+        }
+        match self.odb.read_info(oid) {
+            Ok(info) => Ok((filter.includes_blob_under_tree(info.size, tree_depth), true)),
+            Err(_) if self.skip_missing => Ok((false, true)),
+            Err(e) => Err(e),
+        }
+    }
 }
 
 #[cfg(test)]

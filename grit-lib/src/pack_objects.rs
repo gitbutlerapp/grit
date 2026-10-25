@@ -405,8 +405,8 @@ pub fn build_pack(
 
 /// Build a pack for upload-pack with optional shallow grafts and object filter.
 ///
-/// When `filter` is set, object selection follows `rev-list --objects --filter`
-/// (same path as filtered bundles).
+/// When `filter` is set, objects are selected the way `pack-objects --filter` does:
+/// `wants` and the objects their tags point at are always sent.
 pub fn build_pack_with_shallow_and_filter(
     odb: &Odb,
     wants: &[ObjectId],
@@ -1483,8 +1483,24 @@ pub(crate) fn plan_deltas(
             }
         }
 
-        if opts.thin {
-            let hash_len = odb.hash_algo().len();
+        let hash_len = odb.hash_algo().len();
+        let thin_targets: Vec<ObjectId> = if opts.thin {
+            send.iter()
+                .filter(|t| !delta_to_base.contains_key(*t) && !reuse_delta_bases.contains(*t))
+                .filter(|t| {
+                    objects.get(*t).is_some_and(|obj| {
+                        obj.kind == ObjectKind::Blob
+                            && obj.data.len().saturating_div(2).saturating_sub(hash_len) > 0
+                    })
+                })
+                .copied()
+                .collect()
+        } else {
+            Vec::new()
+        };
+        // Peer-held blobs are only read when some blob still needs a base (a
+        // `blob:none` pack has none).
+        if !thin_targets.is_empty() {
             let mut external_blob_data: OidHashMap<Vec<u8>> = oid_hash_map();
             for &oid in have_closure {
                 if in_pack.contains(&oid) {
@@ -1496,21 +1512,12 @@ pub(crate) fn plan_deltas(
                     }
                 }
             }
-            for &t in send {
-                if delta_to_base.contains_key(&t) || reuse_delta_bases.contains(&t) {
-                    continue;
-                }
+            for t in thin_targets {
                 let Some(obj) = objects.get(&t) else {
                     continue;
                 };
-                if obj.kind != ObjectKind::Blob || obj.data.is_empty() {
-                    continue;
-                }
                 let t_data = &obj.data;
                 let max_size = t_data.len().saturating_div(2).saturating_sub(hash_len);
-                if max_size == 0 {
-                    continue;
-                }
                 let mut best: Option<(ObjectId, usize)> = None;
                 for (&b, b_data) in &external_blob_data {
                     if !islands.in_same_island(&t, &b) {
