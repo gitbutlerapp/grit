@@ -84,6 +84,23 @@ fn next_flush_count(count: usize) -> usize {
     }
 }
 
+/// Batch size at which protocol v2 rounds stop doubling and grow by 10%.
+const LARGE_FLUSH: usize = 16384;
+
+/// Haves sent since the last new `ACK` after which a v2 fetch gives up and
+/// sends `done` (only once the server has acknowledged something).
+const MAX_IN_VAIN: usize = 256;
+
+/// Size of the next protocol v2 have batch. Every v2 `fetch` request is
+/// stateless, so rounds grow geometrically to bound the number of round trips.
+fn next_v2_flush_count(count: usize) -> usize {
+    if count < LARGE_FLUSH {
+        count * 2
+    } else {
+        count + count / 10
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum AckKind {
     /// `ACK <oid>` with no status suffix (post-`done` or legacy).
@@ -309,31 +326,8 @@ fn negotiate_pack(
     // commits, excluding the wants. Advertised tips we already have become
     // `known_common`.
     let mut negotiator = SkippingNegotiator::new(local_repo);
-    let mut tips: Vec<ObjectId> = Vec::new();
-    let mut seen_tip: HashSet<ObjectId> = HashSet::new();
-    for prefix in ["refs/heads/", "refs/tags/"] {
-        if let Ok(entries) = crate::refs::list_refs(local_git_dir, prefix) {
-            for (_, oid) in entries {
-                if let Ok(Some(c)) = negotiator.repo().odb().peel_to_commit(oid) {
-                    if !want_set.contains(&c) && seen_tip.insert(c) {
-                        tips.push(c);
-                    }
-                }
-            }
-        }
-    }
-    if let Ok(h) = crate::refs::resolve_ref(local_git_dir, "HEAD") {
-        if let Ok(Some(c)) = negotiator.repo().odb().peel_to_commit(h) {
-            if !want_set.contains(&c) && seen_tip.insert(c) {
-                tips.push(c);
-            }
-        }
-    }
-    tips.sort_by_key(ObjectId::to_hex);
     if !skip_haves {
-        for t in tips {
-            negotiator.add_tip(t)?;
-        }
+        add_negotiation_tips(&mut negotiator, local_git_dir, &want_set)?;
         // Seed `known_common` only for advertised refs we already track at the same
         // peeled commit. Unchanged refs avoid walking parent chains for every server
         // tip during incremental fetch; moved refs are discovered via `have`s.
@@ -705,63 +699,77 @@ pub(crate) fn parse_v2_ls_refs_response(reader: &mut dyn Read) -> Result<LsRefsA
     Ok((advertised, head_symref, advertised_peel, head_oid))
 }
 
-/// Build the ordered `have` candidate list for a v2 fetch from the local ref
-/// tips (heads, tags, HEAD), peeled to commits and excluding the wants, driven
-/// through the [`SkippingNegotiator`]'s skipping schedule.
-///
-/// Shared by the streaming (`negotiate_pack_v2`) and stateless-HTTP v2 fetch
-/// paths so both offer the server the same `have`s in the same order. The wire
-/// rounds (how many haves per request, when to send `done`) are batched by the
-/// caller, which differs between a duplex socket and stateless POSTs.
-pub(crate) fn v2_local_haves(local_git_dir: &Path, wants: &[ObjectId]) -> Result<Vec<ObjectId>> {
-    let want_set: HashSet<ObjectId> = wants.iter().copied().collect();
-    let local_repo = crate::repo::Repository::open(local_git_dir, &RepositoryOptions::empty())?;
-    let mut negotiator = SkippingNegotiator::new(local_repo);
+/// Seed `negotiator` with the local ref tips (heads, remote-tracking refs, tags,
+/// HEAD), peeled to commits and excluding `wants`, in a deterministic (hex)
+/// order. Remote-tracking tips matter: they usually sit right below what the
+/// server is about to send, so offering them keeps the pack minimal.
+fn add_negotiation_tips(
+    negotiator: &mut SkippingNegotiator,
+    local_git_dir: &Path,
+    wants: &HashSet<ObjectId>,
+) -> Result<()> {
     let mut tips: Vec<ObjectId> = Vec::new();
     let mut seen_tip: HashSet<ObjectId> = HashSet::new();
-    for prefix in ["refs/heads/", "refs/tags/"] {
+    let mut push_tip = |negotiator: &SkippingNegotiator, oid: ObjectId| {
+        if let Ok(Some(c)) = negotiator.repo().odb().peel_to_commit(oid) {
+            if !wants.contains(&c) && seen_tip.insert(c) {
+                tips.push(c);
+            }
+        }
+    };
+    for prefix in ["refs/heads/", "refs/remotes/", "refs/tags/"] {
         if let Ok(entries) = crate::refs::list_refs(local_git_dir, prefix) {
             for (_, oid) in entries {
-                if let Ok(Some(c)) = negotiator.repo().odb().peel_to_commit(oid) {
-                    if !want_set.contains(&c) && seen_tip.insert(c) {
-                        tips.push(c);
-                    }
-                }
+                push_tip(negotiator, oid);
             }
         }
     }
     if let Ok(h) = crate::refs::resolve_ref(local_git_dir, "HEAD") {
-        if let Ok(Some(c)) = negotiator.repo().odb().peel_to_commit(h) {
-            if !want_set.contains(&c) && seen_tip.insert(c) {
-                tips.push(c);
-            }
-        }
+        push_tip(negotiator, h);
     }
-    tips.sort_by_key(ObjectId::to_hex);
+    tips.sort_unstable();
     for t in tips {
         negotiator.add_tip(t)?;
     }
-    // Drain the negotiator into an ordered have list (it already applies the
-    // skipping schedule); the caller batches the wire rounds.
-    let mut haves: Vec<ObjectId> = Vec::new();
-    while let Some(oid) = negotiator.next_have()? {
-        haves.push(oid);
+    Ok(())
+}
+
+/// Collect up to `limit` haves from `negotiator` onto `out`, returning how many
+/// were added. The negotiator walks history lazily, so a fetch whose first
+/// round the server finds sufficient never reads the rest of the local history.
+fn take_v2_haves(
+    negotiator: &mut SkippingNegotiator,
+    limit: usize,
+    out: &mut Vec<ObjectId>,
+    progress: &mut dyn Progress,
+    cancel: &dyn Cancel,
+) -> Result<usize> {
+    let mut added = 0;
+    while added < limit {
+        poll_cancel(progress, cancel)?;
+        let Some(oid) = negotiator.next_have()? else {
+            break;
+        };
+        out.push(oid);
+        added += 1;
     }
-    Ok(haves)
+    Ok(added)
 }
 
 /// Run a v2 `command=fetch` negotiation over the connection and return the raw
 /// pack bytes for `wants`.
 ///
-/// Drives the [`SkippingNegotiator`] exactly like the v0/v1 path, but frames the
-/// request as v2 (`command=fetch`, capability echo, `0001`, then
+/// Drives the [`SkippingNegotiator`] lazily, one round per request, framed as
+/// v2 (`command=fetch`, capability echo, `0001`, then
 /// `thin-pack`/`no-progress`/`ofs-delta`, `want <oid>` lines, `have <oid>` lines,
-/// and `done`). Multi-round: round 1 sends the first batch of haves *without*
-/// `done`, reads the `acknowledgments` section (looking for `ready`); if not yet
-/// ready it sends the remaining haves + `done`. Then reads the response sections
-/// (`acknowledgments`, optional `shallow-info`, then `wanted-refs`, then `packfile`) and
-/// demuxes the side-band-64k pack. Lifted from `write_v2_fetch_request` +
-/// `read_v2_acknowledgments` / `read_v2_fetch_pack_response`.
+/// and `done`). v2 servers keep no state between requests, so every round
+/// resends the commits the server has acknowledged so far, followed by the next
+/// batch of haves (16, then doubling). The walk stops as soon as the server
+/// answers `ready`, the negotiator runs out of haves, or [`MAX_IN_VAIN`] haves
+/// go unacknowledged after a first `ACK`; the final request carries `done`.
+/// Then reads the response sections (`acknowledgments`, optional
+/// `shallow-info`, then `wanted-refs`, then `packfile`) and demuxes the
+/// side-band-64k pack.
 #[allow(clippy::too_many_arguments)]
 fn negotiate_pack_v2(
     local_git_dir: &Path,
@@ -787,112 +795,80 @@ fn negotiate_pack_v2(
     // single-round path so the server sends a `shallow-info` section + pack.
     let shallow_request = deepen.is_shallow_request();
 
-    // The ordered `have` list, built from the local ref tips with the skipping
-    // negotiator (shared with the stateless-HTTP v2 path). Empty for a shallow
-    // request or promisor object-want fetch (Git `negotiationAlgorithm=noop`).
-    let haves = if shallow_request || skip_local_haves {
-        Vec::new()
+    // No haves for a shallow request or a promisor object-want fetch (Git
+    // `negotiationAlgorithm=noop`): a single round of wants + `done`.
+    let mut negotiator = if shallow_request || skip_local_haves {
+        None
     } else {
-        v2_local_haves(local_git_dir, wants)?
+        let local_repo = crate::repo::Repository::open(local_git_dir, &RepositoryOptions::empty())?;
+        let mut negotiator = SkippingNegotiator::new(local_repo);
+        let want_set: HashSet<ObjectId> = wants.iter().copied().collect();
+        add_negotiation_tips(&mut negotiator, local_git_dir, &want_set)?;
+        Some(negotiator)
     };
 
     let mut pack_receive = crate::pack_receive::TempPackReceive::create(local_odb.objects_dir())?;
     let mut shallow_update = ShallowUpdate::default();
-    if haves.is_empty() {
-        // No local history to offer: single round, wants + done, read the pack.
+    let mut common: Vec<ObjectId> = Vec::new();
+    let mut common_set: HashSet<ObjectId> = HashSet::new();
+    let mut batch = INITIAL_FLUSH;
+    let mut in_vain: usize = 0;
+    let mut seen_ack = false;
+    let mut round_haves: Vec<ObjectId> = Vec::new();
+    loop {
+        round_haves.clear();
+        round_haves.extend_from_slice(&common);
+        let added = match negotiator.as_mut() {
+            Some(negotiator) => {
+                take_v2_haves(negotiator, batch, &mut round_haves, progress, cancel)?
+            }
+            None => 0,
+        };
+        in_vain += added;
+        let done = added == 0 || (seen_ack && in_vain >= MAX_IN_VAIN);
         write_v2_fetch_request(
             conn.writer(),
             &object_format,
             &cap_echo,
             wants,
-            &[],
+            &round_haves,
             sideband_all,
             deepen,
             wire_filter,
-            true,
+            done,
         )?;
-        read_v2_fetch_pack_response(
-            conn.reader(),
-            &mut Vec::new(),
-            Some(&mut pack_receive),
-            &mut shallow_update,
-            progress,
-            cancel,
-            sideband_all,
-        )?;
-        return Ok((pack_receive.finish()?, shallow_update));
+        if done {
+            break;
+        }
+        match read_v2_acknowledgments(conn.reader(), sideband_all)? {
+            // Not ready: record the new common commits and send the next round.
+            Some(round) if !round.ready => {
+                for oid in round.common {
+                    if let Some(negotiator) = negotiator.as_mut() {
+                        negotiator.ack(oid)?;
+                    }
+                    if common_set.insert(oid) {
+                        common.push(oid);
+                    }
+                    in_vain = 0;
+                    seen_ack = true;
+                }
+                batch = next_v2_flush_count(batch);
+            }
+            // `ready` (or no acknowledgments section): the pack follows in
+            // this same response after a delimiter.
+            _ => break,
+        }
     }
-
-    // Multi-round: round 1 sends the first batch of haves WITHOUT done.
-    let first_batch = haves.len().min(INITIAL_FLUSH);
-    write_v2_fetch_request(
-        conn.writer(),
-        &object_format,
-        &cap_echo,
-        wants,
-        &haves[..first_batch],
+    read_v2_fetch_pack_response(
+        conn.reader(),
+        &mut Vec::new(),
+        Some(&mut pack_receive),
+        &mut shallow_update,
+        progress,
+        cancel,
         sideband_all,
-        deepen,
-        wire_filter,
-        false,
     )?;
-
-    let ack = read_v2_acknowledgments(conn.reader(), sideband_all)?;
-    match ack {
-        // Server is `ready`: the pack follows in the SAME response after a delim.
-        Some(round) if round.ready => {
-            read_v2_fetch_pack_response(
-                conn.reader(),
-                &mut Vec::new(),
-                Some(&mut pack_receive),
-                &mut shallow_update,
-                progress,
-                cancel,
-                sideband_all,
-            )?;
-        }
-        // Server skipped acknowledgments and went straight to the pack header
-        // (consumed inside the reader); read the pack now.
-        None => {
-            read_v2_fetch_pack_response(
-                conn.reader(),
-                &mut Vec::new(),
-                Some(&mut pack_receive),
-                &mut shallow_update,
-                progress,
-                cancel,
-                sideband_all,
-            )?;
-        }
-        // Not ready yet: round 2 sends the remaining haves + `done`, then pack.
-        Some(_) => {
-            let haves_round2: &[ObjectId] = if conn.stateless_rpc() {
-                &haves[..]
-            } else {
-                &haves[first_batch..]
-            };
-            write_v2_fetch_request(
-                conn.writer(),
-                &object_format,
-                &cap_echo,
-                wants,
-                haves_round2,
-                sideband_all,
-                deepen,
-                wire_filter,
-                true,
-            )?;
-            read_v2_fetch_pack_response(
-                conn.reader(),
-                &mut Vec::new(),
-                Some(&mut pack_receive),
-                &mut shallow_update,
-                progress,
-                cancel,
-                sideband_all,
-            )?;
-        }
-    }
     Ok((pack_receive.finish()?, shallow_update))
 }
 
@@ -1036,6 +1012,8 @@ pub(crate) struct V2AckRound {
     /// Server emitted `ready`: the packfile follows in the same response after a
     /// delimiter — the caller reads the pack now without sending more.
     pub(crate) ready: bool,
+    /// Commits the server acknowledged as common (`ACK <oid>`), in wire order.
+    pub(crate) common: Vec<ObjectId>,
 }
 
 /// Read a v2 `acknowledgments` section header and its `ACK`/`NAK`/`ready` lines.
@@ -1052,7 +1030,12 @@ pub(crate) fn read_v2_acknowledgments(
     let mut reader = reader;
     let hdr = match crate::shallow::read_v2_fetch_primary_line(&mut reader, sideband_all)? {
         Some(s) => s,
-        None => return Ok(Some(V2AckRound { ready: false })),
+        None => {
+            return Ok(Some(V2AckRound {
+                ready: false,
+                common: Vec::new(),
+            }))
+        }
     };
     let hdr = hdr.as_str();
     if let Some(msg) = hdr.strip_prefix("ERR ") {
@@ -1073,6 +1056,7 @@ pub(crate) fn read_v2_acknowledgments(
         )));
     }
     let mut ready = false;
+    let mut common = Vec::new();
     loop {
         match pkt_line::read_packet(&mut reader)? {
             Some(pkt_line::Packet::Delim) | Some(pkt_line::Packet::Flush) | None => break,
@@ -1082,7 +1066,14 @@ pub(crate) fn read_v2_acknowledgments(
                 else {
                     continue;
                 };
-                if ln == "NAK" || ln.starts_with("ACK ") {
+                if ln == "NAK" {
+                    continue;
+                }
+                if let Some(hex) = ln.strip_prefix("ACK ") {
+                    let oid = ObjectId::from_hex(hex.trim()).map_err(|_| {
+                        Error::Message(format!("unexpected acknowledgment line: '{ln}'"))
+                    })?;
+                    common.push(oid);
                     continue;
                 }
                 if ln == "ready" {
@@ -1095,7 +1086,7 @@ pub(crate) fn read_v2_acknowledgments(
             }
         }
     }
-    Ok(Some(V2AckRound { ready }))
+    Ok(Some(V2AckRound { ready, common }))
 }
 
 /// Whether `line` is a v2 `wanted-refs` (or ls-refs) advertisement row:
@@ -2423,6 +2414,62 @@ mod fetch_advertised_ref_tests {
         assert!(
             text.contains("unborn"),
             "request must ask for unborn HEAD:\n{text}"
+        );
+    }
+
+    #[test]
+    fn v2_acknowledgments_collect_acked_commits_and_ready() {
+        let a = ObjectId::from_hex("aabbccddeeff00112233445566778899aabbccdd").unwrap();
+        let b = ObjectId::from_hex("00112233445566778899aabbccddeeff00112233").unwrap();
+        let mut body = Vec::new();
+        crate::pkt_line::write_line(&mut body, "acknowledgments").unwrap();
+        crate::pkt_line::write_line(&mut body, &format!("ACK {a}")).unwrap();
+        crate::pkt_line::write_line(&mut body, &format!("ACK {b}")).unwrap();
+        crate::pkt_line::write_line(&mut body, "ready").unwrap();
+        crate::pkt_line::write_delim(&mut body).unwrap();
+
+        let round = read_v2_acknowledgments(&mut Cursor::new(body), false)
+            .unwrap()
+            .unwrap();
+        assert!(round.ready);
+        assert_eq!(round.common, vec![a, b]);
+    }
+
+    #[test]
+    fn v2_acknowledgments_nak_has_no_common() {
+        let mut body = Vec::new();
+        crate::pkt_line::write_line(&mut body, "acknowledgments").unwrap();
+        crate::pkt_line::write_line(&mut body, "NAK").unwrap();
+        crate::pkt_line::write_flush(&mut body).unwrap();
+
+        let round = read_v2_acknowledgments(&mut Cursor::new(body), false)
+            .unwrap()
+            .unwrap();
+        assert!(!round.ready);
+        assert!(round.common.is_empty());
+    }
+
+    #[test]
+    fn v2_acknowledgments_reject_malformed_ack() {
+        let mut body = Vec::new();
+        crate::pkt_line::write_line(&mut body, "acknowledgments").unwrap();
+        crate::pkt_line::write_line(&mut body, "ACK not-an-oid").unwrap();
+        crate::pkt_line::write_flush(&mut body).unwrap();
+
+        assert!(read_v2_acknowledgments(&mut Cursor::new(body), false).is_err());
+    }
+
+    #[test]
+    fn v2_flush_schedule_doubles_then_grows_by_a_tenth() {
+        let mut sizes = vec![INITIAL_FLUSH];
+        while sizes.len() < 6 {
+            let last = *sizes.last().unwrap();
+            sizes.push(next_v2_flush_count(last));
+        }
+        assert_eq!(sizes, vec![16, 32, 64, 128, 256, 512]);
+        assert_eq!(
+            next_v2_flush_count(LARGE_FLUSH),
+            LARGE_FLUSH + LARGE_FLUSH / 10
         );
     }
 
