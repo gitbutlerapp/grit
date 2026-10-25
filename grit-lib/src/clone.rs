@@ -2,6 +2,7 @@
 //! and optionally check out the working tree.
 
 use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -272,6 +273,119 @@ pub fn dest_preexisted_empty(path: &Path) -> bool {
             .unwrap_or(false)
 }
 
+struct CloneDestinationGuard;
+
+impl CloneDestinationGuard {
+    fn try_claim(dest: &Path, bare: bool) -> std::result::Result<(), CloneError> {
+        let label = dest
+            .to_str()
+            .ok_or_else(|| {
+                CloneError::Library(Error::Message("non-UTF-8 destination path".into()))
+            })?
+            .to_owned();
+        if bare {
+            Self::try_claim_bare(dest, label)
+        } else {
+            Self::try_claim_non_bare(dest, label)
+        }
+    }
+
+    fn try_claim_non_bare(dest: &Path, label: String) -> std::result::Result<(), CloneError> {
+        if dest.is_dir() && !dir_is_empty(dest) {
+            return Err(CloneError::DestNotEmpty(label));
+        }
+
+        if !dest.is_dir() {
+            if let Some(parent) = dest.parent() {
+                fs::create_dir_all(parent).map_err(|e| {
+                    CloneError::Library(Error::Message(format!(
+                        "could not create clone destination parent: {e}"
+                    )))
+                })?;
+            }
+            match fs::create_dir(dest) {
+                Ok(()) => {}
+                Err(source) if source.kind() == io::ErrorKind::AlreadyExists => {}
+                Err(source) => {
+                    return Err(CloneError::Library(Error::Message(format!(
+                        "could not create clone destination: {source}"
+                    ))));
+                }
+            }
+        }
+
+        if !dest.is_dir() {
+            return Err(CloneError::DestNotEmpty(label));
+        }
+        if !dir_is_empty(dest) {
+            return Err(CloneError::DestNotEmpty(label));
+        }
+
+        let git_dir = dest.join(".git");
+        match fs::create_dir(&git_dir) {
+            Ok(()) => Ok(()),
+            Err(source) if source.kind() == io::ErrorKind::AlreadyExists => {
+                Err(CloneError::DestNotEmpty(label))
+            }
+            Err(source) => Err(CloneError::Library(Error::Message(format!(
+                "could not create '{}/.git': {source}",
+                dest.display()
+            )))),
+        }
+    }
+
+    fn try_claim_bare(dest: &Path, label: String) -> std::result::Result<(), CloneError> {
+        if dest.is_dir() && !dir_is_empty(dest) {
+            return Err(CloneError::DestNotEmpty(label));
+        }
+
+        if !dest.is_dir() {
+            if let Some(parent) = dest.parent() {
+                fs::create_dir_all(parent).map_err(|e| {
+                    CloneError::Library(Error::Message(format!(
+                        "could not create clone destination parent: {e}"
+                    )))
+                })?;
+            }
+            match fs::create_dir(dest) {
+                Ok(()) => {}
+                Err(source) if source.kind() == io::ErrorKind::AlreadyExists => {}
+                Err(source) => {
+                    return Err(CloneError::Library(Error::Message(format!(
+                        "could not create clone destination: {source}"
+                    ))));
+                }
+            }
+        }
+
+        if !dest.is_dir() {
+            return Err(CloneError::DestNotEmpty(label));
+        }
+        if !dir_is_empty(dest) {
+            return Err(CloneError::DestNotEmpty(label));
+        }
+
+        // Reserve the bare git directory before concurrent inits race on `config` / `HEAD`.
+        let objects = dest.join("objects");
+        match fs::create_dir(&objects) {
+            Ok(()) => Ok(()),
+            Err(source) if source.kind() == io::ErrorKind::AlreadyExists => {
+                Err(CloneError::DestNotEmpty(label))
+            }
+            Err(source) => Err(CloneError::Library(Error::Message(format!(
+                "could not create '{}/objects': {source}",
+                dest.display()
+            )))),
+        }
+    }
+}
+
+fn dir_is_empty(path: &Path) -> bool {
+    path.read_dir()
+        .map(|mut entries| entries.next().is_none())
+        .unwrap_or(false)
+}
+
 /// Remove a partially created clone destination.
 ///
 /// When `keep_toplevel` is true, only contents of `path` are removed (empty dir existed before clone).
@@ -304,19 +418,6 @@ pub fn clone(
     cancel: &dyn Cancel,
     http_factory: Option<&dyn HttpClientFactory>,
 ) -> std::result::Result<CloneOutcome, CloneError> {
-    let dir = opts
-        .dest
-        .to_str()
-        .ok_or_else(|| CloneError::Library(Error::Message("non-UTF-8 destination path".into())))?;
-    if opts.dest.is_dir()
-        && opts
-            .dest
-            .read_dir()
-            .map(|mut entries| entries.next().is_some())
-            .unwrap_or(false)
-    {
-        return Err(CloneError::DestNotEmpty(dir.to_owned()));
-    }
     if opts.depth == Some(0) {
         return Err(CloneError::InvalidCloneDepth);
     }
@@ -326,13 +427,22 @@ pub fn clone(
         )));
     }
 
-    if !crate::remote::is_valid_remote_name(&opts.remote_name) {
-        return Err(CloneError::Remote(RemoteError::InvalidRemoteName(
-            opts.remote_name.clone(),
-        )));
-    }
-
     let bare = opts.bare;
+    CloneDestinationGuard::try_claim(&opts.dest, bare)?;
+    clone_after_claim(opts, progress, cancel, http_factory, bare)
+}
+
+fn clone_after_claim(
+    opts: CloneOptions,
+    progress: &mut dyn Progress,
+    cancel: &dyn Cancel,
+    http_factory: Option<&dyn HttpClientFactory>,
+    bare: bool,
+) -> std::result::Result<CloneOutcome, CloneError> {
+    let dir = opts
+        .dest
+        .to_str()
+        .ok_or_else(|| CloneError::Library(Error::Message("non-UTF-8 destination path".into())))?;
     init_repository(
         &opts.dest,
         bare,
