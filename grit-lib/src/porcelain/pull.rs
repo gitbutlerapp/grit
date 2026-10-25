@@ -2,9 +2,10 @@
 //!
 //! [`pull`] runs fetch, resolves the branch upstream via [`resolve_pull_integration_base`], then
 //! fast-forwards, merges, rebases local commits onto the upstream tip, or refuses
-//! when `--ff-only` / `pull.ff=only` forbids a merge commit. Rebase conflicts abort
-//! atomically (no sequencer state); stop/continue rebase is a follow-up once the
-//! shared history conflict model lands.
+//! when `--ff-only` / `pull.ff=only` forbids a merge commit. Rebase conflicts stop a
+//! resumable rebase session ([`start_rebase`]) with Git-compatible `.git/rebase-merge/`
+//! state, finished with [`continue_rebase`](crate::history::continue_rebase),
+//! [`skip_rebase`](crate::history::skip_rebase) or [`abort_rebase`](crate::history::abort_rebase).
 
 use crate::branch_tracking::resolve_pull_integration_base;
 use crate::change_id::{logical_change_id_for_commit, ChangeId};
@@ -20,8 +21,8 @@ use crate::porcelain::checkout::checkout_between_trees;
 use crate::porcelain::checkout_reflog::checkout_reflog_identity;
 use crate::porcelain::merge::{
     ensure_branch_tip, integrate_branch_with_options, predict_merge, update_checked_out_branch,
-    IntegrateBranchOptions, IntegrateBranchOutcome, MergeConflictDetail, MergeConflictKind,
-    MergePrediction, MergePredictionOptions,
+    IntegrateBranchOptions, IntegrateBranchOutcome, MergeConflictDetail, MergePrediction,
+    MergePredictionOptions,
 };
 use crate::porcelain::stash::{
     apply_operation_autostash, push_operation_autostash, restore_operation_autostash,
@@ -32,8 +33,9 @@ use crate::remote::transfer::{resolve_fetch_prune, FetchOptions, TagMode, Transf
 use crate::remote::{HttpClientFactory, RemoteError};
 use crate::repo::Repository;
 use crate::revwalk::history::{
-    apply_rewrite, rebase_onto, ApplyOptions, EmptyPolicy, HistoryError, RebaseOntoOptions,
-    RefScope, RewriteOptions,
+    plan_rebase_check, start_rebase, ApplyOptions, EmptyPolicy, HistoryError, RebaseCheckPlan,
+    RebaseOntoOptions, RebaseOutcome, RebaseRequest, RebaseSessionError, RefScope, RewriteOptions,
+    StartRebaseOptions,
 };
 use crate::state::{resolve_head_for_repository, HeadState};
 use thiserror::Error;
@@ -107,6 +109,15 @@ pub enum PullResult {
     SetUpstream,
     /// Local commits were replayed onto the upstream tip.
     Rebased,
+    /// Replaying local commits onto the upstream tip stopped on conflicts.
+    ///
+    /// A resumable rebase session is in progress (`.git/rebase-merge/`, conflict markers and
+    /// unmerged index entries, as `git pull --rebase` leaves them); the branch ref still points
+    /// at its pre-pull tip. Finish it with [`continue_rebase`](crate::history::continue_rebase)
+    /// after staging the resolution, or [`skip_rebase`](crate::history::skip_rebase) /
+    /// [`abort_rebase`](crate::history::abort_rebase). With [`PullOptions::check`] this
+    /// predicts the stop without touching anything.
+    RebaseConflicts,
     /// Integration succeeded but re-applying `--autostash` left conflicts (stash kept).
     AutostashConflict,
 }
@@ -124,8 +135,15 @@ pub struct PullOutcome {
     pub change_id: Option<ChangeId>,
     /// For [`PullResult::SetUpstream`], the upstream label that was adopted.
     pub upstream: Option<String>,
-    /// Conflicted paths when [`Self::result`] is [`PullResult::Conflicts`].
+    /// Conflicted paths when [`Self::result`] is [`PullResult::Conflicts`] or
+    /// [`PullResult::RebaseConflicts`].
     pub conflicts: Option<Vec<MergeConflictDetail>>,
+    /// For [`PullResult::RebaseConflicts`], the local commit that could not be replayed.
+    pub stopped_commit: Option<ObjectId>,
+    /// Autostash commit left on `refs/stash` because it could not be re-applied: the pull
+    /// stopped on rebase conflicts ([`PullResult::RebaseConflicts`]) or re-applying it
+    /// conflicted ([`PullResult::AutostashConflict`]).
+    pub autostash: Option<ObjectId>,
     /// Commits on the branch not reachable from upstream when refused as not ff.
     pub ahead: Option<usize>,
     /// Commits on upstream not reachable from the branch when refused as not ff.
@@ -135,6 +153,38 @@ pub struct PullOutcome {
     /// Objects and pack bytes the fetch step received (zero when nothing was
     /// transferred or the upstream is local, `remote = .`).
     pub transfer: TransferStats,
+}
+
+impl PullOutcome {
+    fn new(result: PullResult, label: &str) -> Self {
+        Self {
+            result,
+            label: label.to_owned(),
+            oid: None,
+            change_id: None,
+            upstream: None,
+            conflicts: None,
+            stopped_commit: None,
+            autostash: None,
+            ahead: None,
+            behind: None,
+            check: None,
+            transfer: TransferStats::default(),
+        }
+    }
+
+    fn at_commit(
+        result: PullResult,
+        label: &str,
+        repo: &Repository,
+        oid: ObjectId,
+    ) -> std::result::Result<Self, Error> {
+        Ok(Self {
+            oid: Some(oid),
+            change_id: logical_change_id_for_commit(repo, oid)?,
+            ..Self::new(result, label)
+        })
+    }
 }
 
 /// Errors from [`pull`].
@@ -155,6 +205,9 @@ pub enum PullError {
     /// `pull.rebase=interactive` (or branch rebase) is not supported.
     #[error("interactive rebase is not supported; use grit history instead")]
     RebaseInteractive,
+    /// Starting the rebase session failed (for example a rebase is already in progress).
+    #[error(transparent)]
+    Rebase(RebaseSessionError),
     /// Remote resolution or transport failure.
     #[error(transparent)]
     Remote(#[from] RemoteError),
@@ -173,7 +226,8 @@ impl PullError {
             Self::DetachedHead
             | Self::InvalidHead
             | Self::NoUpstream { .. }
-            | Self::RebaseInteractive => false,
+            | Self::RebaseInteractive
+            | Self::Rebase(_) => false,
         }
     }
 }
@@ -400,18 +454,11 @@ where
 
         if fetch_dry_run {
             return Ok(PullOutcome {
-                result: PullResult::UpToDate,
-                label: short_name.clone(),
                 oid: head_oid,
                 change_id: head_oid
                     .and_then(|oid| logical_change_id_for_commit(repo, oid).ok())
                     .flatten(),
-                upstream: None,
-                conflicts: None,
-                ahead: None,
-                behind: None,
-                check: None,
-                transfer: TransferStats::default(),
+                ..PullOutcome::new(PullResult::UpToDate, &short_name)
             });
         }
 
@@ -454,6 +501,14 @@ where
             if fetch_dry_run {
                 restore_autostash_after_abort(repo, stash_oid.as_ref());
                 return Ok(outcome);
+            }
+            if outcome.result == PullResult::RebaseConflicts {
+                // Applying the stash now would mix it into the conflict markers; it stays on
+                // `refs/stash` for the caller to pop once the rebase is finished or aborted.
+                return Ok(PullOutcome {
+                    autostash: stash_oid,
+                    ..outcome
+                });
             }
             if matches!(
                 outcome.result,
@@ -509,6 +564,7 @@ fn apply_autostash_after_pull(
     if let Some(stash_oid) = stash_oid {
         if apply_operation_autostash(repo, stash_oid).map_err(PullError::Repository)? {
             outcome.result = PullResult::AutostashConflict;
+            outcome.autostash = Some(*stash_oid);
         }
     }
     Ok(outcome)
@@ -534,14 +590,10 @@ fn pull_check_outcome(
         }
     };
     Ok(PullOutcome {
-        result: would,
-        label: label.to_owned(),
         oid: head_oid,
         change_id: head_oid
             .and_then(|oid| logical_change_id_for_commit(repo, oid).ok())
             .flatten(),
-        upstream: None,
-        conflicts: None,
         ahead: Some(ahead),
         behind: Some(behind),
         check: Some(PullCheck {
@@ -550,7 +602,7 @@ fn pull_check_outcome(
             fast_forward_possible,
             would,
         }),
-        transfer: TransferStats::default(),
+        ..PullOutcome::new(would, label)
     })
 }
 
@@ -572,7 +624,21 @@ fn predict_pull_result(
     if diverged {
         return match integration.mode {
             PullMode::FfOnly => Ok(PullResult::RefusedNotFf),
-            PullMode::Rebase => Ok(PullResult::Rebased),
+            PullMode::Rebase => {
+                let mut opts = pull_rebase_options(repo)?;
+                opts.rewrite.sign = false;
+                let request = RebaseRequest {
+                    upstream: upstream_oid,
+                    onto: None,
+                    branch_tip: head_oid,
+                };
+                match plan_rebase_check(repo, &request, &opts).map_err(map_history_error)? {
+                    RebaseCheckPlan::UpToDate | RebaseCheckPlan::Clean { .. } => {
+                        Ok(PullResult::Rebased)
+                    }
+                    RebaseCheckPlan::Conflict { .. } => Ok(PullResult::RebaseConflicts),
+                }
+            }
             PullMode::Merge => match predict_merge(
                 repo,
                 head_oid,
@@ -609,16 +675,8 @@ fn adopt_unborn_upstream(
     checkout_between_trees(repo, None, &upstream_tree).map_err(PullError::Repository)?;
     update_checked_out_branch(repo, refname, None, upstream_oid, INITIAL_PULL_REFLOG)?;
     Ok(PullOutcome {
-        result: PullResult::SetUpstream,
-        label: short_name.to_owned(),
-        oid: Some(upstream_oid),
-        change_id: logical_change_id_for_commit(repo, upstream_oid)?,
         upstream: Some(label.to_owned()),
-        conflicts: None,
-        ahead: None,
-        behind: None,
-        check: None,
-        transfer: TransferStats::default(),
+        ..PullOutcome::at_commit(PullResult::SetUpstream, short_name, repo, upstream_oid)?
     })
 }
 
@@ -640,16 +698,9 @@ fn integrate_fetched_upstream(
                 let (ahead, behind) = count_symmetric_ahead_behind(repo, head_oid, upstream_oid)
                     .map_err(PullError::Repository)?;
                 return Ok(PullOutcome {
-                    result: PullResult::RefusedNotFf,
-                    label: label.to_owned(),
-                    oid: Some(head_oid),
-                    change_id: logical_change_id_for_commit(repo, head_oid)?,
-                    upstream: None,
-                    conflicts: None,
                     ahead: Some(ahead),
                     behind: Some(behind),
-                    check: None,
-                    transfer: TransferStats::default(),
+                    ..PullOutcome::at_commit(PullResult::RefusedNotFf, label, repo, head_oid)?
                 });
             }
             PullMode::Rebase => {
@@ -680,112 +731,71 @@ fn rebase_fetched_upstream(
     upstream_oid: ObjectId,
     label: &str,
 ) -> std::result::Result<PullOutcome, PullError> {
-    let fork = merge_bases_first_vs_rest(repo, head_oid, &[upstream_oid])
+    if merge_bases_first_vs_rest(repo, head_oid, &[upstream_oid])
         .map_err(PullError::Repository)?
-        .into_iter()
-        .next()
-        .ok_or_else(|| {
-            PullError::Repository(Error::Message(format!(
-                "'{label}' has no common history with the current branch"
-            )))
-        })?;
+        .is_empty()
+    {
+        return Err(PullError::Repository(Error::Message(format!(
+            "'{label}' has no common history with the current branch"
+        ))));
+    }
 
+    let start = StartRebaseOptions {
+        request: RebaseRequest {
+            upstream: upstream_oid,
+            onto: None,
+            branch_tip: head_oid,
+        },
+        rebase: pull_rebase_options(repo)?,
+        apply: ApplyOptions {
+            identity: checkout_reflog_identity(repo),
+            reflog_message: format!("pull: rebase onto {label}"),
+            record_operation: Some("rebase".into()),
+            hooks: crate::hooks::PostOperationHooks::Run,
+        },
+    };
+    match start_rebase(repo, &start).map_err(map_rebase_session_error)? {
+        RebaseOutcome::Stopped(stop) => Ok(PullOutcome {
+            conflicts: Some(stop.conflicts),
+            stopped_commit: Some(stop.commit),
+            ..PullOutcome::new(PullResult::RebaseConflicts, label)
+        }),
+        RebaseOutcome::Done { applied, .. } if applied.head != head_oid => Ok(
+            PullOutcome::at_commit(PullResult::Rebased, label, repo, applied.head)?,
+        ),
+        // Nothing was rewritten: integrate like `git pull --rebase`, which fast-forwards when
+        // the branch is simply behind the upstream tip.
+        RebaseOutcome::Done { .. } => {
+            let integrate = integrate_branch_with_options(
+                repo,
+                refname,
+                head_oid,
+                upstream_oid,
+                label,
+                IntegrateBranchOptions {
+                    allow_fast_forward: true,
+                },
+            )
+            .map_err(PullError::Repository)?;
+            Ok(map_integrate_outcome(integrate, label))
+        }
+    }
+}
+
+/// Replay options shared by the rebase pull and its `--check` prediction.
+fn pull_rebase_options(repo: &Repository) -> std::result::Result<RebaseOntoOptions, PullError> {
     let committer = repo
         .identity(IdentRole::Committer, repo.identity_now())
         .map_err(PullError::Repository)?;
-
-    let mut rebase_opts = RebaseOntoOptions::new(RewriteOptions {
+    let mut opts = RebaseOntoOptions::new(RewriteOptions {
         scope: RefScope::Head,
         empty: EmptyPolicy::Drop,
         committer,
         preserve_committer: false,
         sign: true,
     });
-    rebase_opts.flatten_leaf_merges = true;
-
-    let plan = match rebase_onto(repo, fork, upstream_oid, &[head_oid], &rebase_opts) {
-        Ok(plan) => plan,
-        Err(HistoryError::Conflict { paths, .. }) => {
-            let details: Vec<MergeConflictDetail> = paths
-                .into_iter()
-                .map(|path| MergeConflictDetail {
-                    path,
-                    kind: MergeConflictKind::Content,
-                })
-                .collect();
-            return Ok(PullOutcome {
-                result: PullResult::Conflicts,
-                label: label.to_owned(),
-                oid: Some(head_oid),
-                change_id: logical_change_id_for_commit(repo, head_oid)?,
-                upstream: None,
-                conflicts: Some(details),
-                ahead: None,
-                behind: None,
-                check: None,
-                transfer: TransferStats::default(),
-            });
-        }
-        Err(other) => return Err(map_history_error(other)),
-    };
-
-    if plan.head.old_commit == Some(head_oid) && plan.head.commit_changes {
-        let applied = apply_rewrite(
-            repo,
-            &plan,
-            &ApplyOptions {
-                identity: checkout_reflog_identity(repo),
-                reflog_message: format!("pull: rebase onto {label}"),
-                record_operation: Some("rebase".into()),
-                hooks: crate::hooks::PostOperationHooks::Run,
-            },
-        )
-        .map_err(map_history_error)?;
-        return Ok(PullOutcome {
-            result: PullResult::Rebased,
-            label: label.to_owned(),
-            oid: Some(applied.head),
-            change_id: logical_change_id_for_commit(repo, applied.head)?,
-            upstream: None,
-            conflicts: None,
-            ahead: None,
-            behind: None,
-            check: None,
-            transfer: TransferStats::default(),
-        });
-    }
-
-    // Skipped every local patch or nothing to rewrite: match `git pull --rebase` by
-    // fast-forwarding when the branch is simply behind the upstream tip.
-    if is_ancestor(repo, head_oid, upstream_oid).map_err(PullError::Repository)?
-        && head_oid != upstream_oid
-    {
-        let integrate = integrate_branch_with_options(
-            repo,
-            refname,
-            head_oid,
-            upstream_oid,
-            label,
-            IntegrateBranchOptions {
-                allow_fast_forward: true,
-            },
-        )
-        .map_err(PullError::Repository)?;
-        return Ok(map_integrate_outcome(integrate, label));
-    }
-
-    let integrate = integrate_branch_with_options(
-        repo,
-        refname,
-        head_oid,
-        upstream_oid,
-        label,
-        IntegrateBranchOptions {
-            allow_fast_forward: true,
-        },
-    )
-    .map_err(PullError::Repository)?;
-    Ok(map_integrate_outcome(integrate, label))
+    opts.flatten_leaf_merges = true;
+    Ok(opts)
 }
 
 fn map_history_error(err: HistoryError) -> PullError {
@@ -795,55 +805,30 @@ fn map_history_error(err: HistoryError) -> PullError {
     }
 }
 
+fn map_rebase_session_error(err: RebaseSessionError) -> PullError {
+    match err {
+        RebaseSessionError::Library(e) => PullError::Repository(e),
+        RebaseSessionError::History(e) => map_history_error(e),
+        other => PullError::Rebase(other),
+    }
+}
+
 fn map_integrate_outcome(outcome: IntegrateBranchOutcome, label: &str) -> PullOutcome {
     match outcome {
-        IntegrateBranchOutcome::UpToDate => PullOutcome {
-            result: PullResult::UpToDate,
-            label: label.to_owned(),
-            oid: None,
-            change_id: None,
-            upstream: None,
-            conflicts: None,
-            ahead: None,
-            behind: None,
-            check: None,
-            transfer: TransferStats::default(),
-        },
+        IntegrateBranchOutcome::UpToDate => PullOutcome::new(PullResult::UpToDate, label),
         IntegrateBranchOutcome::FastForward { oid, change_id } => PullOutcome {
-            result: PullResult::FastForward,
-            label: label.to_owned(),
             oid: Some(oid),
             change_id,
-            upstream: None,
-            conflicts: None,
-            ahead: None,
-            behind: None,
-            check: None,
-            transfer: TransferStats::default(),
+            ..PullOutcome::new(PullResult::FastForward, label)
         },
         IntegrateBranchOutcome::Merged { oid, change_id } => PullOutcome {
-            result: PullResult::Merged,
-            label: label.to_owned(),
             oid: Some(oid),
             change_id,
-            upstream: None,
-            conflicts: None,
-            ahead: None,
-            behind: None,
-            check: None,
-            transfer: TransferStats::default(),
+            ..PullOutcome::new(PullResult::Merged, label)
         },
         IntegrateBranchOutcome::Conflicts { details, .. } => PullOutcome {
-            result: PullResult::Conflicts,
-            label: label.to_owned(),
-            oid: None,
-            change_id: None,
-            upstream: None,
             conflicts: Some(details),
-            ahead: None,
-            behind: None,
-            check: None,
-            transfer: TransferStats::default(),
+            ..PullOutcome::new(PullResult::Conflicts, label)
         },
         IntegrateBranchOutcome::Squashed | IntegrateBranchOutcome::Stopped => {
             unreachable!("pull does not use squash or no-commit merge modes")
