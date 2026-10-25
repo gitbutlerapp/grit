@@ -914,9 +914,7 @@ fn check_fast_forward(
     if !is_commit(&old) || !is_commit(&new) {
         return Some(RefUpdateRefusal::BadRef);
     }
-    let graph = repo
-        .caches()
-        .commit_graph_chain(&repo.git_dir().join("objects"));
+    let graph = repo.caches().commit_graph_chain(repo.odb().objects_dir());
     match crate::merge_base::is_ancestor_odb_walk_with_graph(odb, graph.as_deref(), old, new) {
         Ok(true) => None,
         Ok(false) => Some(RefUpdateRefusal::NonFastForward),

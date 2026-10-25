@@ -250,7 +250,7 @@ fn try_count_authors_via_bitmap(
 ) -> Result<Option<Vec<AuthorGroup>>> {
     let mut opts = rev_list_options_from_walk(repo, walk_options, parsed, all_refs, false)?;
     opts.use_bitmap_index = true;
-    let objects_dir = repo.git_dir().join("objects");
+    let objects_dir = repo.odb().objects_dir();
     repo.odb().with_pack_read_context(|| {
         if let Some((index, reachable)) =
             try_bitmap_reachable_commit_set_for_specs(repo, positive, negative, &opts)?
@@ -261,7 +261,7 @@ fn try_count_authors_via_bitmap(
                     .map_err(|e| Error::CorruptObject(format!("pack bitmap: {e}")))?;
                 let mut counter = count_authors_at_pack_rows(
                     repo,
-                    &objects_dir,
+                    objects_dir,
                     &index,
                     &pack_idx,
                     &positions,
@@ -272,7 +272,7 @@ fn try_count_authors_via_bitmap(
                         let mut pack_reader = None;
                         accumulate_author_for_oid(
                             repo,
-                            &objects_dir,
+                            objects_dir,
                             &mut pack_reader,
                             *oid,
                             mailmap,
@@ -295,7 +295,7 @@ fn try_count_authors_via_bitmap(
             |oid| {
                 accumulate_author_for_oid(
                     repo,
-                    &objects_dir,
+                    objects_dir,
                     &mut pack_reader,
                     oid,
                     mailmap,
@@ -432,7 +432,7 @@ fn count_authors_at_pack_rows_serial(
 }
 
 fn commit_graph_available(repo: &Repository) -> bool {
-    let objects = repo.git_dir().join("objects");
+    let objects = repo.odb().objects_dir();
     objects.join("info/commit-graph").is_file() || objects.join("info/commit-graphs").is_dir()
 }
 
@@ -538,7 +538,7 @@ fn count_authors_stack_walk(
     if tips.is_empty() {
         return Ok(Vec::new());
     }
-    let objects_dir = repo.git_dir().join("objects");
+    let objects_dir = repo.odb().objects_dir();
     let excluded: HashSet<ObjectId> = if exclude.is_empty() {
         HashSet::new()
     } else {
@@ -558,7 +558,7 @@ fn count_authors_stack_walk(
         }
         let commit_bytes = load_commit_bytes_and_count_author(
             repo,
-            &objects_dir,
+            objects_dir,
             &mut pack_reader,
             oid,
             mailmap,
@@ -600,10 +600,10 @@ fn count_authors_from_commit_oids(
     oids: &[ObjectId],
     mailmap: Option<&MailmapTable>,
 ) -> Result<Vec<AuthorGroup>> {
-    let objects_dir = repo.git_dir().join("objects");
+    let objects_dir = repo.odb().objects_dir();
     let mut counter = AuthorCounter::new();
     repo.odb().with_pack_read_context(|| {
-        count_authors_single_pack(repo, &objects_dir, oids, mailmap, &mut counter)
+        count_authors_single_pack(repo, objects_dir, oids, mailmap, &mut counter)
     })?;
     Ok(counter.into_sorted_groups())
 }

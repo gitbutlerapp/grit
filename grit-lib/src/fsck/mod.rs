@@ -517,7 +517,7 @@ pub fn fsck(
         let treats_promisor = crate::promisor::repo_treats_promisor_packs(repo.git_dir(), &config);
         let promisor_parents = if treats_promisor {
             oid_hash_set_from(&crate::promisor::promisor_pack_object_ids(
-                &repo.git_dir().join("objects"),
+                repo.odb().objects_dir(),
             ))
         } else {
             oid_hash_set()

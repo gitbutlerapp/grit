@@ -2257,7 +2257,7 @@ impl<'r> CommitGraphCache<'r> {
         };
         let graph = if use_commit_graph {
             repo.caches()
-                .commit_graph_chain(&repo.git_dir().join("objects"))
+                .commit_graph_chain(repo.odb().objects_dir())
                 .map(|arc| (*arc).clone())
         } else {
             None
@@ -2306,8 +2306,8 @@ impl<'r> CommitGraphCache<'r> {
         if self.single_pack.is_some() {
             return;
         }
-        let objects_dir = self.repo.git_dir().join("objects");
-        if let Ok(Some(reader)) = crate::pack::SingleLocalPackReader::open(&objects_dir) {
+        let objects_dir = self.repo.odb().objects_dir();
+        if let Ok(Some(reader)) = crate::pack::SingleLocalPackReader::open(objects_dir) {
             self.single_pack = Some(reader);
         }
     }

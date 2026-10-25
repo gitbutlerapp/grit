@@ -389,7 +389,7 @@ impl Bundle {
             ProgressUnit::Bytes,
             Some(pack_bytes),
         );
-        let tmp = tempfile::NamedTempFile::new_in(repo.git_dir().join("objects").join("pack"))
+        let tmp = tempfile::NamedTempFile::new_in(repo.odb().objects_dir().join("pack"))
             .map_err(|e| BundleError::Io(e.to_string()))?;
         {
             let mut input = File::open(&self.path)?;

@@ -387,8 +387,8 @@ pub fn find_commits_by_change_id_prefix(
         }
     }
 
-    let objects_dir = repo.git_dir().join("objects");
-    let scan_stored_headers = stored_change_id_headers_likely(repo, &objects_dir)?;
+    let objects_dir = repo.odb().objects_dir();
+    let scan_stored_headers = stored_change_id_headers_likely(repo, objects_dir)?;
     repo.odb().with_pack_read_context(|| {
         let mut matches = Vec::new();
         let mut seen = HashSet::new();
@@ -396,15 +396,11 @@ pub fn find_commits_by_change_id_prefix(
 
         for oid in derived_hits {
             let derived = ChangeId::derived_from_commit_id(&oid);
-            let resolved = match stored_change_id_from_commit_oid(
-                repo,
-                &objects_dir,
-                &mut pack_reader,
-                oid,
-            )? {
-                Some(stored) => stored,
-                None => derived,
-            };
+            let resolved =
+                match stored_change_id_from_commit_oid(repo, objects_dir, &mut pack_reader, oid)? {
+                    Some(stored) => stored,
+                    None => derived,
+                };
             if resolved.as_str().starts_with(prefix) && seen.insert(oid) {
                 matches.push(ChangeIdMatch {
                     oid,
@@ -415,7 +411,7 @@ pub fn find_commits_by_change_id_prefix(
 
         if scan_stored_headers {
             let stored_matches =
-                find_stored_change_id_prefix_matches(repo, &objects_dir, &stored_scan, prefix)?;
+                find_stored_change_id_prefix_matches(repo, objects_dir, &stored_scan, prefix)?;
             for m in stored_matches {
                 if seen.insert(m.oid) {
                     matches.push(m);
