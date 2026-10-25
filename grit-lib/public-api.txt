@@ -20235,6 +20235,7 @@ pub grit_lib::remote::serve::ServeOptions::advertise_refs: bool
 pub grit_lib::remote::serve::ServeOptions::agent: alloc::string::String
 pub grit_lib::remote::serve::ServeOptions::hidden_refs: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::remote::serve::ServeOptions::protocol: grit_lib::remote::serve::ProtocolVersion
+pub grit_lib::remote::serve::ServeOptions::server_options: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::remote::serve::ServeOptions::stateless_rpc: bool
 impl core::clone::Clone for grit_lib::remote::serve::ServeOptions
 pub fn grit_lib::remote::serve::ServeOptions::clone(&self) -> Self
@@ -20261,8 +20262,8 @@ pub fn F::update(&self, &grit_lib::remote::serve::RefCommand, &grit_lib::objects
 pub fn grit_lib::remote::serve::receive_pack(&grit_lib::repo::Repository, &mut dyn alloc::io::read::Read, &mut dyn core::io::write::Write, &grit_lib::remote::serve::ServeOptions, &grit_lib::remote::serve::ReceivePolicy) -> grit_lib::remote::serve::Result<grit_lib::remote::serve::ReceiveOutcome>
 pub fn grit_lib::remote::serve::receive_pack(&grit_lib::repo::Repository, &mut dyn alloc::io::read::Read, &mut dyn core::io::write::Write, &grit_lib::remote::serve::ServeOptions, &grit_lib::remote::serve::ReceivePolicy) -> grit_lib::remote::serve::Result<grit_lib::remote::serve::ReceiveOutcome>
 pub fn grit_lib::remote::serve::receive_pack_with_hook(&grit_lib::repo::Repository, &mut dyn alloc::io::read::Read, &mut dyn core::io::write::Write, &grit_lib::remote::serve::ServeOptions, &grit_lib::remote::serve::ReceivePolicy, &dyn grit_lib::remote::serve::ReceiveHook) -> grit_lib::remote::serve::Result<grit_lib::remote::serve::ReceiveOutcome>
-pub fn grit_lib::remote::serve::upload_pack(&grit_lib::repo::Repository, &mut dyn alloc::io::read::Read, &mut dyn core::io::write::Write, &grit_lib::remote::serve::ServeOptions) -> grit_lib::remote::serve::Result<()>
-pub fn grit_lib::remote::serve::upload_pack(&grit_lib::repo::Repository, &mut dyn alloc::io::read::Read, &mut dyn core::io::write::Write, &grit_lib::remote::serve::ServeOptions) -> grit_lib::remote::serve::Result<()>
+pub fn grit_lib::remote::serve::upload_pack(&grit_lib::repo::Repository, &mut dyn alloc::io::read::Read, &mut dyn core::io::write::Write, &mut grit_lib::remote::serve::ServeOptions) -> grit_lib::remote::serve::Result<()>
+pub fn grit_lib::remote::serve::upload_pack(&grit_lib::repo::Repository, &mut dyn alloc::io::read::Read, &mut dyn core::io::write::Write, &mut grit_lib::remote::serve::ServeOptions) -> grit_lib::remote::serve::Result<()>
 pub type grit_lib::remote::serve::Result<T> = core::result::Result<T, grit_lib::remote::serve::ServeError>
 pub mod grit_lib::remote::shallow
 pub const grit_lib::remote::shallow::INFINITE_DEPTH: u32
