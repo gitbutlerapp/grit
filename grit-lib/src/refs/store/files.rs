@@ -1646,7 +1646,11 @@ fn collect_loose_raw_refs(
             continue;
         }
         let path = entry.path();
-        let meta = fs::metadata(&path).map_err(Error::Io)?;
+        let meta = match fs::metadata(&path) {
+            Ok(m) => m,
+            // Concurrent delete or an unreadable entry (e.g. dangling symlink): skip it.
+            Err(_) => continue,
+        };
         if meta.is_dir() {
             collect_loose_raw_refs(&path, &format!("{refname}/"), want, out)?;
         } else if meta.is_file() && wanted {
@@ -2385,5 +2389,56 @@ mod tests {
             )
         );
         assert!(before.contains("refs/tags/z"));
+    }
+
+    /// Refs deleted while listing must not fail the walk (matches Git upload-pack behavior).
+    #[test]
+    fn concurrent_loose_ref_delete_during_list_is_tolerated() {
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+        use std::thread;
+        use std::time::Duration;
+
+        let dir = git_dir();
+        set(
+            &store(dir.path()),
+            "refs/heads/main",
+            oid(1),
+            Expected::Missing,
+        )
+        .expect("seed main");
+
+        let stop = Arc::new(AtomicBool::new(false));
+        let writer_dir = dir.path().to_path_buf();
+        let writer_stop = stop.clone();
+        let writer = thread::spawn(move || {
+            use crate::refs::{delete_ref, write_ref};
+            let c = oid(2);
+            while !writer_stop.load(Ordering::Relaxed) {
+                for i in 0..7 {
+                    let name = format!("refs/heads/d{i}/sub/x");
+                    let _ = write_ref(&writer_dir, &name, &c);
+                    let _ = delete_ref(&writer_dir, &name);
+                }
+            }
+        });
+
+        let lister = store(dir.path());
+        let mut errors = 0usize;
+        for _ in 0..400 {
+            if lister
+                .for_each_ref("", &mut |_| ControlFlow::Continue(()))
+                .is_err()
+            {
+                errors += 1;
+            }
+        }
+        stop.store(true, Ordering::Relaxed);
+        writer.join().expect("writer");
+        thread::sleep(Duration::from_millis(10));
+        assert_eq!(
+            errors, 0,
+            "listing must tolerate refs deleted between readdir and open"
+        );
     }
 }
