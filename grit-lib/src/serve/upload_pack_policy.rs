@@ -15,31 +15,18 @@ pub(crate) struct UploadPackPolicy {
     pub allow_tip_sha1_in_want: bool,
     pub allow_reachable_sha1_in_want: bool,
     pub ref_in_want: bool,
+    pub allow_sideband_all: bool,
 }
 
 impl UploadPackPolicy {
     pub fn from_config(config: &ConfigSet) -> Self {
-        let allow_filter = config
-            .get_bool("uploadpack.allowfilter")
-            .map(|v| v.unwrap_or(false))
-            .unwrap_or(false);
-        let allow_tip = config
-            .get_bool("uploadpack.allowtipsha1inwant")
-            .map(|v| v.unwrap_or(false))
-            .unwrap_or(false);
-        let allow_reachable = config
-            .get_bool("uploadpack.allowreachablesha1inwant")
-            .map(|v| v.unwrap_or(false))
-            .unwrap_or(false);
-        let ref_in_want = config
-            .get_bool("uploadpack.allowrefinwant")
-            .map(|v| v.unwrap_or(false))
-            .unwrap_or(false);
+        let flag = |key: &str| config.get_bool(key).and_then(|v| v.ok()).unwrap_or(false);
         Self {
-            allow_filter,
-            allow_tip_sha1_in_want: allow_tip,
-            allow_reachable_sha1_in_want: allow_reachable,
-            ref_in_want,
+            allow_filter: flag("uploadpack.allowfilter"),
+            allow_tip_sha1_in_want: flag("uploadpack.allowtipsha1inwant"),
+            allow_reachable_sha1_in_want: flag("uploadpack.allowreachablesha1inwant"),
+            ref_in_want: flag("uploadpack.allowrefinwant"),
+            allow_sideband_all: flag("uploadpack.allowsidebandall"),
         }
     }
 
@@ -57,24 +44,20 @@ impl UploadPackPolicy {
         caps
     }
 
+    /// Features for the v2 `fetch=` capability line.
+    ///
+    /// Only v2 features belong here. Request arguments every v2 server accepts
+    /// (`thin-pack`, `ofs-delta`, `deepen-not`, ...) are not advertised.
     pub fn v2_fetch_features(&self) -> Vec<&'static str> {
-        let mut f = vec![
-            "thin-pack",
-            "no-progress",
-            "include-tag",
-            "ofs-delta",
-            "sideband-all",
-            "shallow",
-            "deepen",
-            "deepen-since",
-            "deepen-not",
-            "deepen-relative",
-        ];
+        let mut f = vec!["shallow"];
         if self.allow_filter {
             f.push("filter");
         }
         if self.ref_in_want {
             f.push("ref-in-want");
+        }
+        if self.allow_sideband_all {
+            f.push("sideband-all");
         }
         f
     }
