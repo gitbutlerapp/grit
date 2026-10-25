@@ -2315,6 +2315,17 @@ fn resolve_base(
         );
     }
 
+    if spec == "HEAD" {
+        return match crate::state::resolve_head_for_repository(repo) {
+            Ok(crate::state::HeadState::Branch { oid: None, .. }) => Err(Error::UnbornHead),
+            Ok(crate::state::HeadState::Branch { oid: Some(oid), .. }) => Ok(oid),
+            Ok(crate::state::HeadState::Detached { oid }) => Ok(oid),
+            Ok(crate::state::HeadState::Invalid) | Err(_) => {
+                Err(Error::ObjectNotFound(spec.to_owned()))
+            }
+        };
+    }
+
     // `FETCH_HEAD`: prefer the first for-merge line, but allow checkout-style consumers to use
     // the first fetched OID even when every line is marked `not-for-merge`.
     if spec == "FETCH_HEAD" {
@@ -4730,6 +4741,15 @@ mod line_coverage_tests {
                 let _ = ambiguous_object_hint_lines(&repo, &prefix, None);
             }
         }
+        Ok(())
+    }
+
+    #[test]
+    fn unborn_head_resolves_as_unborn_not_object_not_found() -> crate::error::Result<()> {
+        let dir = tempdir().map_err(crate::error::Error::Io)?;
+        let repo = crate::repo::Repository::init(dir.path(), &crate::repo::InitOptions::default())?;
+        let err = resolve_revision_for_range_end(&repo, "HEAD").expect_err("HEAD");
+        assert!(matches!(err, Error::UnbornHead), "{err:?}");
         Ok(())
     }
 

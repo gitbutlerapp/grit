@@ -48,6 +48,7 @@ mod revision_errors;
 mod stdio;
 mod terminal_progress;
 mod ui;
+mod unborn_errors;
 
 use anyhow::{bail, Result};
 use clap::{Parser, Subcommand};

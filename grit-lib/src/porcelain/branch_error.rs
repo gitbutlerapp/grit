@@ -22,6 +22,10 @@ pub enum BranchError {
         name: String,
     },
 
+    /// `grit switch -` / `@{-N}` when HEAD has no previous checkout in the reflog.
+    #[error("there is no previous branch to go back to")]
+    NoPreviousBranch,
+
     /// The branch name failed ref-format validation.
     #[error("invalid branch name '{name}': {reason}")]
     InvalidName {

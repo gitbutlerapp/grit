@@ -46,6 +46,7 @@ fn exit_codes_page_matches_enum() {
         "index_locked",
         "branch_already_exists",
         "branch_not_found",
+        "no_previous_branch",
         "branch_invalid_name",
         "branch_not_fully_merged",
         "branch_checked_out",

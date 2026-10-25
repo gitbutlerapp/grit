@@ -249,6 +249,67 @@ fn switch_over_local_changes_names_files_and_suggests_stash() {
     assert!(failure.stderr.contains("\n  a\n"), "{}", failure.stderr);
 }
 
+fn empty_repo() -> (tempfile::TempDir, tempfile::TempDir) {
+    let repo = tempfile::tempdir().expect("repo");
+    let home = tempfile::tempdir().expect("home");
+    ok(repo.path(), home.path(), &["init", "."]);
+    (repo, home)
+}
+
+#[test]
+fn fresh_repo_switch_minus_has_no_previous_branch_hint() {
+    let (repo, home) = empty_repo();
+    let failure = fails(repo.path(), home.path(), &["switch", "-"]);
+    assert_eq!(
+        failure.json["error"],
+        "there is no previous branch to go back to"
+    );
+    assert_eq!(failure.json["kind"], "no_previous_branch");
+    assert!(failure.json["hint"].is_null(), "{}", failure.json);
+    assert!(
+        !failure.stderr.contains("switch -c"),
+        "must not suggest creating a branch: {}",
+        failure.stderr
+    );
+}
+
+#[test]
+fn fresh_repo_log_and_show_say_no_commits_yet() {
+    let (repo, home) = empty_repo();
+    for args in [
+        &["log"][..],
+        &["show"][..],
+        &["reset"][..],
+        &["reset", "--hard"][..],
+    ] {
+        let failure = fails(repo.path(), home.path(), args);
+        assert_eq!(failure.json["kind"], "branch_no_commits", "{args:?}");
+        let hint = failure.json["hint"].as_str().expect("hint");
+        assert!(hint.contains(r#"grit commit "message""#), "{hint}");
+        assert!(
+            failure.json["error"]
+                .as_str()
+                .expect("error")
+                .contains("no commits yet"),
+            "{args:?}"
+        );
+    }
+}
+
+#[test]
+fn fresh_repo_stash_pop_with_no_entries() {
+    let (repo, home) = empty_repo();
+    let failure = fails(repo.path(), home.path(), &["stash", "pop"]);
+    assert_eq!(failure.json["error"], "no stash entries");
+    let hint = failure.json["hint"].as_str().expect("hint");
+    assert!(hint.contains("grit stash push"), "{hint}");
+    assert!(
+        !failure.stderr.contains("stash@{"),
+        "must not leak stash ref syntax: {}",
+        failure.stderr
+    );
+}
+
 #[test]
 fn switch_to_unknown_branch_suggests_listing_or_creating() {
     let (repo, home) = fresh_repo();

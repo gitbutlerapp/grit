@@ -1,10 +1,12 @@
 //! Switch and branch creation write Git-compatible reflogs (issue #979).
 
 use grit_lib::diff::zero_oid;
+use grit_lib::error::Error;
 use grit_lib::index::entry_from_stat;
 use grit_lib::index::write_tree::{write_tree_update_index, WriteTreeFlags};
 use grit_lib::objects::{serialize_commit, CommitData, ObjectId, ObjectKind};
 use grit_lib::porcelain::branch::{create_branch, CreateBranchOptions};
+use grit_lib::porcelain::branch_error::BranchError;
 use grit_lib::porcelain::switch::{
     resolve_create_branch, resolve_revision_spec, resolve_switch_target, switch_repository,
     SwitchMode, SwitchOptions,
@@ -657,5 +659,15 @@ fn create_branch_leaves_no_ref_when_reflog_dir_not_writable() {
     assert!(
         refs::resolve_ref(repo.git_dir(), "refs/heads/fail").is_err(),
         "branch ref must not exist when reflog write fails"
+    );
+}
+
+#[test]
+fn switch_minus_without_prior_checkout_is_no_previous_branch() {
+    let (_dir, repo) = init_repo();
+    let err = resolve_switch_target(&repo, "-").expect_err("fresh repo has no reflog checkout");
+    assert!(
+        matches!(err, Error::Branch(BranchError::NoPreviousBranch)),
+        "{err:?}"
     );
 }

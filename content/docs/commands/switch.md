@@ -97,6 +97,13 @@ error: you have uncommitted changes — commit them before switching
 hint: commit them with `grit commit`, or set them aside with `grit stash`, then try again
 ```
 
+When `grit switch -` has no previous branch to return to (for example right after `grit init`):
+
+```console
+$ grit switch -
+error: there is no previous branch to go back to
+```
+
 When no branch has that name:
 
 ```console

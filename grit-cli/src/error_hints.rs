@@ -184,16 +184,49 @@ fn guide_lib(err: &LibError) -> Option<Error> {
             Some("close programs that may have the file open, then try again".to_owned()),
             Some(vec![path.clone()]),
         )),
-        LibError::Branch(BranchError::NotFound { name }) => Some(guided(
-            ErrorKind::BranchNotFound,
-            format!("no branch named '{name}'"),
-            Some(format!(
-                "`grit branch` lists your branches; create this one with `grit switch -c {name}`"
-            )),
-            None,
-        )),
+        LibError::UnbornHead => Some(
+            crate::unborn_errors::unborn_head_from_cwd()
+                .unwrap_or_else(|| crate::unborn_errors::unborn_head_error(None)),
+        ),
+        LibError::Branch(branch_err) => guide_branch(branch_err),
         _ => None,
     }
+}
+
+fn guide_branch(err: &BranchError) -> Option<Error> {
+    match err {
+        BranchError::NoPreviousBranch => Some(guided(
+            ErrorKind::NoPreviousBranch,
+            err.to_string(),
+            None,
+            None,
+        )),
+        BranchError::NotFound { name } => {
+            let hint = (!looks_like_rev_syntax(name)).then(|| {
+                format!(
+                    "`grit branch` lists your branches; create this one with `grit switch -c {name}`"
+                )
+            });
+            Some(guided(
+                ErrorKind::BranchNotFound,
+                format!("no branch named '{name}'"),
+                hint,
+                None,
+            ))
+        }
+        _ => None,
+    }
+}
+
+/// True when `name` is revision syntax, not a literal branch name (do not suggest `switch -c`).
+fn looks_like_rev_syntax(name: &str) -> bool {
+    name.starts_with("@{")
+        || name.contains('^')
+        || name.contains('~')
+        || name.contains(':')
+        || name.contains('*')
+        || name.contains('?')
+        || (name.starts_with('-') && name != "-")
 }
 
 fn auth_error(err: &LibError, url: &str, reason: &AuthFailure) -> Error {

@@ -265,6 +265,8 @@ pub fn map_lib_error(err: LibError) -> Error {
         LibError::HashCollision { oid } => hash_collision(oid),
         locked @ LibError::IndexLocked { .. } => index_locked(locked.to_string()),
         LibError::RevisionNotFound(spec) => revision_not_found(&spec),
+        LibError::UnbornHead => crate::unborn_errors::unborn_head_from_cwd()
+            .unwrap_or_else(|| crate::unborn_errors::unborn_head_error(None)),
         LibError::WouldOverwrite {
             reason,
             paths,
@@ -342,7 +344,7 @@ pub fn ensure_structured(err: Error) -> Error {
     {
         return index_locked(locked);
     }
-    err
+    crate::unborn_errors::enrich_unborn_head(err)
 }
 
 /// Whether `err` carries a library failure to reach or read the remote.

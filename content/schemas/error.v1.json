@@ -99,6 +99,13 @@
           "type": "string"
         },
         {
+          "description": "`grit switch -` when there is no previous branch in the reflog.",
+          "enum": [
+            "no_previous_branch"
+          ],
+          "type": "string"
+        },
+        {
           "description": "Branch name failed validation.",
           "enum": [
             "branch_invalid_name"

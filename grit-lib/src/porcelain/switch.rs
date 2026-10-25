@@ -10,7 +10,7 @@ use crate::hooks::{run_post_checkout, HookName, PostOperationHooks};
 use crate::index::MODE_GITLINK;
 use crate::objects::{parse_commit, ObjectId};
 use crate::porcelain::branch::resolve_create_tracking;
-use crate::porcelain::branch_error::TrackMode;
+use crate::porcelain::branch_error::{BranchError, TrackMode};
 use crate::porcelain::checkout::{
     checkout_tree_changes_with_index_opts, precompute_wholesale_safe_directories,
     trusted_wholesale_directories_for_switch, CheckoutApplyOptions, WholesalePrecomputeResult,
@@ -191,7 +191,12 @@ pub fn resolve_create_branch(
 /// Resolve a branch name, remote-tracking branch, or revision for `grit switch`.
 pub fn resolve_switch_target(repo: &Repository, spec: &str) -> Result<SwitchMode> {
     let spec = normalize_switch_spec(spec);
-    if let Ok(Some(branch)) = expand_at_minus_to_branch_name(repo, spec) {
+    if is_at_minus_branch_spec(spec) {
+        let branch = match expand_at_minus_to_branch_name(repo, spec) {
+            Err(err) => return Err(map_at_minus_switch_error(spec, err)),
+            Ok(None) => return Err(Error::Branch(BranchError::NoPreviousBranch)),
+            Ok(Some(branch)) => branch,
+        };
         let oid = repo.resolve_ref_oid(&format!("refs/heads/{branch}"))?;
         return Ok(SwitchMode::Existing { branch, oid });
     }
@@ -250,6 +255,17 @@ fn normalize_switch_spec(spec: &str) -> &str {
     } else {
         spec
     }
+}
+
+fn is_at_minus_branch_spec(spec: &str) -> bool {
+    spec.starts_with("@{-") && spec.ends_with('}')
+}
+
+fn map_at_minus_switch_error(spec: &str, err: Error) -> Error {
+    if is_at_minus_branch_spec(spec) && matches!(err, Error::InvalidRef(_)) {
+        return Error::Branch(BranchError::NoPreviousBranch);
+    }
+    err
 }
 
 fn resolve_unique_dwim_switch(repo: &Repository, spec: &str) -> Result<Option<SwitchMode>> {

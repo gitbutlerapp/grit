@@ -28,6 +28,8 @@ pub enum ErrorKind {
     BranchAlreadyExists,
     /// Named branch does not exist.
     BranchNotFound,
+    /// `grit switch -` when there is no previous branch in the reflog.
+    NoPreviousBranch,
     /// Branch name failed validation.
     BranchInvalidName,
     /// Delete refused: branch is not fully merged.
@@ -75,6 +77,7 @@ impl ErrorKind {
         match err {
             BranchError::AlreadyExists { .. } => Self::BranchAlreadyExists,
             BranchError::NotFound { .. } => Self::BranchNotFound,
+            BranchError::NoPreviousBranch => Self::NoPreviousBranch,
             BranchError::InvalidName { .. } => Self::BranchInvalidName,
             BranchError::NotFullyMerged { .. } => Self::BranchNotFullyMerged,
             BranchError::CurrentlyCheckedOut { .. } | BranchError::CheckedOut { .. } => {
@@ -103,6 +106,7 @@ impl ErrorKind {
             Self::IndexLocked => "index_locked",
             Self::BranchAlreadyExists => "branch_already_exists",
             Self::BranchNotFound => "branch_not_found",
+            Self::NoPreviousBranch => "no_previous_branch",
             Self::BranchInvalidName => "branch_invalid_name",
             Self::BranchNotFullyMerged => "branch_not_fully_merged",
             Self::BranchCheckedOut => "branch_checked_out",
@@ -140,6 +144,7 @@ impl ErrorKind {
             Self::IndexLocked,
             Self::BranchAlreadyExists,
             Self::BranchNotFound,
+            Self::NoPreviousBranch,
             Self::BranchInvalidName,
             Self::BranchNotFullyMerged,
             Self::BranchCheckedOut,

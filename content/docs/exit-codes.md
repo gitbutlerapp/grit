@@ -44,6 +44,7 @@ $ grit push --json
 | `index_locked` | Another process holds `.git/index.lock` (exit 1). The operation stopped before changing refs, the reflog or the index, so retrying later is safe; the lock file is left alone. |
 | `branch_already_exists` | Create branch when the name already exists. |
 | `branch_not_found` | Branch name not found. `grit switch` hints at `grit branch` and `grit switch -c <name>`. |
+| `no_previous_branch` | `grit switch -` when HEAD has no earlier checkout in the reflog. |
 | `branch_invalid_name` | Invalid branch name. |
 | `branch_not_fully_merged` | Delete refused: not fully merged. |
 | `branch_checked_out` | Branch checked out in this or another worktree. |
