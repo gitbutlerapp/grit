@@ -713,7 +713,36 @@ pub(crate) fn parse_v2_ls_refs_response(reader: &mut dyn Read) -> Result<LsRefsA
 /// paths so both offer the server the same `have`s in the same order. The wire
 /// rounds (how many haves per request, when to send `done`) are batched by the
 /// caller, which differs between a duplex socket and stateless POSTs.
-pub(crate) fn v2_local_haves(local_git_dir: &Path, wants: &[ObjectId]) -> Result<Vec<ObjectId>> {
+/// The ordered local `have` list for a v2 fetch, produced on demand.
+///
+/// Draining the skipping negotiator walks the whole local history, so only as many haves are
+/// taken as the rounds actually send: usually the first batch is enough for the server to be
+/// `ready`.
+pub(crate) struct V2LocalHaves {
+    negotiator: SkippingNegotiator,
+    taken: Vec<ObjectId>,
+    exhausted: bool,
+}
+
+impl V2LocalHaves {
+    /// The first `n` haves (fewer when the local history has fewer).
+    fn first(&mut self, n: usize) -> Result<&[ObjectId]> {
+        while self.taken.len() < n && !self.exhausted {
+            match self.negotiator.next_have()? {
+                Some(oid) => self.taken.push(oid),
+                None => self.exhausted = true,
+            }
+        }
+        Ok(&self.taken[..self.taken.len().min(n)])
+    }
+
+    /// Every have, in the same order as [`Self::first`].
+    fn all(&mut self) -> Result<&[ObjectId]> {
+        self.first(usize::MAX)
+    }
+}
+
+pub(crate) fn v2_local_haves(local_git_dir: &Path, wants: &[ObjectId]) -> Result<V2LocalHaves> {
     let want_set: HashSet<ObjectId> = wants.iter().copied().collect();
     let local_repo = crate::repo::Repository::open(local_git_dir, &RepositoryOptions::empty())?;
     let mut negotiator = SkippingNegotiator::new(local_repo);
@@ -741,13 +770,11 @@ pub(crate) fn v2_local_haves(local_git_dir: &Path, wants: &[ObjectId]) -> Result
     for t in tips {
         negotiator.add_tip(t)?;
     }
-    // Drain the negotiator into an ordered have list (it already applies the
-    // skipping schedule); the caller batches the wire rounds.
-    let mut haves: Vec<ObjectId> = Vec::new();
-    while let Some(oid) = negotiator.next_have()? {
-        haves.push(oid);
-    }
-    Ok(haves)
+    Ok(V2LocalHaves {
+        negotiator,
+        taken: Vec::new(),
+        exhausted: false,
+    })
 }
 
 /// Run a v2 `command=fetch` negotiation over the connection and return the raw
@@ -790,15 +817,19 @@ fn negotiate_pack_v2(
     // The ordered `have` list, built from the local ref tips with the skipping
     // negotiator (shared with the stateless-HTTP v2 path). Empty for a shallow
     // request or promisor object-want fetch (Git `negotiationAlgorithm=noop`).
-    let haves = if shallow_request || skip_local_haves {
-        Vec::new()
+    let mut haves = if shallow_request || skip_local_haves {
+        None
     } else {
-        v2_local_haves(local_git_dir, wants)?
+        Some(v2_local_haves(local_git_dir, wants)?)
+    };
+    let first_haves = match haves.as_mut() {
+        Some(haves) => haves.first(INITIAL_FLUSH)?.to_vec(),
+        None => Vec::new(),
     };
 
     let mut pack_receive = crate::pack_receive::TempPackReceive::create(local_odb.objects_dir())?;
     let mut shallow_update = ShallowUpdate::default();
-    if haves.is_empty() {
+    let Some(haves) = haves.as_mut().filter(|_| !first_haves.is_empty()) else {
         // No local history to offer: single round, wants + done, read the pack.
         write_v2_fetch_request(
             conn.writer(),
@@ -821,16 +852,16 @@ fn negotiate_pack_v2(
             sideband_all,
         )?;
         return Ok((pack_receive.finish()?, shallow_update));
-    }
+    };
 
     // Multi-round: round 1 sends the first batch of haves WITHOUT done.
-    let first_batch = haves.len().min(INITIAL_FLUSH);
+    let first_batch = first_haves.len();
     write_v2_fetch_request(
         conn.writer(),
         &object_format,
         &cap_echo,
         wants,
-        &haves[..first_batch],
+        &first_haves,
         sideband_all,
         deepen,
         wire_filter,
@@ -866,10 +897,11 @@ fn negotiate_pack_v2(
         }
         // Not ready yet: round 2 sends the remaining haves + `done`, then pack.
         Some(_) => {
+            let all_haves = haves.all()?;
             let haves_round2: &[ObjectId] = if conn.stateless_rpc() {
-                &haves[..]
+                all_haves
             } else {
-                &haves[first_batch..]
+                &all_haves[first_batch..]
             };
             write_v2_fetch_request(
                 conn.writer(),
@@ -2399,6 +2431,73 @@ mod fetch_advertised_ref_tests {
     use super::*;
     use crate::objects::ObjectId;
     use std::io::Cursor;
+
+    fn linear_history(len: usize) -> (tempfile::TempDir, Vec<ObjectId>) {
+        use crate::objects::ObjectKind;
+        let dir = tempfile::tempdir().unwrap();
+        let repo = crate::repo::init_repository(
+            dir.path(),
+            true,
+            "main",
+            None,
+            crate::RefStorageFormat::Files,
+        )
+        .unwrap();
+        let odb = repo.odb();
+        let tree = odb.write(ObjectKind::Tree, b"").unwrap();
+        let mut commits: Vec<ObjectId> = Vec::new();
+        for i in 0..len {
+            let mut body = format!("tree {tree}\n");
+            if let Some(parent) = commits.last() {
+                body.push_str(&format!("parent {parent}\n"));
+            }
+            let time = 1_000_000 + i;
+            body.push_str(&format!(
+                "author T <t@e.com> {time} +0000\ncommitter T <t@e.com> {time} +0000\n\nc{i}\n"
+            ));
+            commits.push(odb.write(ObjectKind::Commit, body.as_bytes()).unwrap());
+        }
+        let tip = commits.last().copied().unwrap();
+        crate::refs::write_ref(repo.git_dir(), "refs/heads/main", &tip).unwrap();
+        (dir, commits)
+    }
+
+    #[test]
+    fn v2_local_haves_are_produced_only_as_far_as_asked() {
+        let (dir, commits) = linear_history(400);
+        let unrelated_want = ObjectId::from_bytes(&[9u8; 20]).unwrap();
+
+        let mut drained = v2_local_haves(dir.path(), &[unrelated_want]).unwrap();
+        let all = drained.all().unwrap().to_vec();
+        assert!(drained.exhausted);
+        assert_eq!(all[0], *commits.last().unwrap());
+        assert!(
+            all.len() > 4,
+            "skipping still offers several haves: {}",
+            all.len()
+        );
+
+        let mut lazy = v2_local_haves(dir.path(), &[unrelated_want]).unwrap();
+        let first = lazy.first(4).unwrap().to_vec();
+        assert_eq!(first.as_slice(), &all[..4]);
+        assert_eq!(lazy.taken.len(), 4, "only the requested haves are walked");
+        assert!(!lazy.exhausted);
+        assert_eq!(lazy.all().unwrap(), all.as_slice());
+    }
+
+    #[test]
+    fn v2_local_haves_first_stops_at_a_short_history() {
+        let (dir, _) = linear_history(3);
+        let want = ObjectId::from_bytes(&[9u8; 20]).unwrap();
+        let all = v2_local_haves(dir.path(), &[want])
+            .unwrap()
+            .all()
+            .unwrap()
+            .to_vec();
+        let mut haves = v2_local_haves(dir.path(), &[want]).unwrap();
+        assert_eq!(haves.first(INITIAL_FLUSH).unwrap(), all.as_slice());
+        assert!(haves.exhausted);
+    }
 
     #[test]
     fn fetch_ref_list_prefixes_includes_refs_dwim_for_pull() {
