@@ -26236,10 +26236,12 @@ pub fn grit_lib::worktree::ignore::IgnoreMatcher::add_cli_excludes(&mut self, &[
 pub fn grit_lib::worktree::ignore::IgnoreMatcher::add_exclude_from_files(&mut self, &[std::path::PathBuf], &std::path::Path) -> grit_lib::error::Result<()>
 pub fn grit_lib::worktree::ignore::IgnoreMatcher::check_path(&mut self, &grit_lib::repo::Repository, core::option::Option<&grit_lib::index::Index>, &str, bool) -> grit_lib::error::Result<(bool, core::option::Option<grit_lib::worktree::ignore::IgnoreMatch>)>
 pub fn grit_lib::worktree::ignore::IgnoreMatcher::from_repository(&grit_lib::repo::Repository) -> grit_lib::error::Result<Self>
+pub fn grit_lib::worktree::ignore::IgnoreMatcher::ignore_case(&self) -> bool
 pub fn grit_lib::worktree::ignore::IgnoreMatcher::is_path_ignored(&mut self, &grit_lib::repo::Repository, core::option::Option<&grit_lib::index::Index>, &str, bool) -> grit_lib::error::Result<bool>
 pub fn grit_lib::worktree::ignore::IgnoreMatcher::note_directory_entered(&mut self, &grit_lib::repo::Repository, core::option::Option<&grit_lib::index::Index>, &str) -> grit_lib::error::Result<()>
 pub fn grit_lib::worktree::ignore::IgnoreMatcher::set_per_directory_name(&mut self, &str)
 pub fn grit_lib::worktree::ignore::IgnoreMatcher::take_warnings(&mut self) -> alloc::vec::Vec<alloc::string::String>
+pub fn grit_lib::worktree::ignore::IgnoreMatcher::with_ignore_case(self, bool) -> Self
 impl core::clone::Clone for grit_lib::worktree::ignore::IgnoreMatcher
 pub fn grit_lib::worktree::ignore::IgnoreMatcher::clone(&self) -> Self
 impl core::default::Default for grit_lib::worktree::ignore::IgnoreMatcher

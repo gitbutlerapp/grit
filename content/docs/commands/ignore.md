@@ -14,7 +14,7 @@ grit ignore check --all <PATH>...
 
 ## Description
 
-The `check` subcommand reports whether paths are ignored by `.gitignore`, `.git/info/exclude`, and `core.excludesfile`, using the same precedence as Git. Tracked index entries are never treated as ignored.
+The `check` subcommand reports whether paths are ignored by `.gitignore`, `.git/info/exclude`, and `core.excludesfile`, using the same precedence as Git. Tracked index entries are never treated as ignored. When `core.ignorecase` is `true` (`grit init` sets it on case-insensitive filesystems, such as the Windows and macOS defaults), patterns match without regard to ASCII case, as in Git: `Build/` ignores `build/x.o` and `*.LOG` ignores `debug.log`. [`grit status`](status.md), [`grit add`](add.md), [`grit commit`](commit.md) and [`grit clean`](clean.md) use the same rules.
 
 By default only **ignored** paths are printed. Pass `--all` to also list paths that are not ignored.
 

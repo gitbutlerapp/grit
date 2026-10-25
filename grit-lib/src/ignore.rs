@@ -2,7 +2,8 @@
 //!
 //! This module implements a focused subset of Git ignore behavior:
 //! per-directory `.gitignore`, `.git/info/exclude`, and `core.excludesfile`
-//! with "last matching pattern wins" precedence.
+//! with "last matching pattern wins" precedence. With `core.ignorecase=true`, patterns match
+//! without regard to ASCII case, as in Git.
 
 use std::collections::HashMap;
 use std::fmt;
@@ -14,7 +15,7 @@ use crate::error::{Error, Result};
 use crate::index::{Index, MODE_GITLINK};
 use crate::objects::ObjectKind;
 use crate::repo::Repository;
-use crate::wildmatch::{wildmatch, WM_PATHNAME};
+use crate::wildmatch::{wildmatch, WM_CASEFOLD, WM_PATHNAME};
 
 /// Where an ignore pattern was loaded from.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -106,10 +107,15 @@ pub struct IgnoreMatcher {
     per_dir_dirs_cache: Option<(String, Vec<String>)>,
     /// Per-directory ancestor exclude stacks reused across sibling checks under the same prefix.
     dir_exclude_stack_cache: HashMap<String, Vec<String>>,
+    /// Fold ASCII case when comparing patterns and base directories (`core.ignorecase`).
+    ignore_case: bool,
 }
 
 impl IgnoreMatcher {
     /// Build a matcher from repository exclude sources.
+    ///
+    /// Honors `core.ignorecase`: when it is `true`, patterns match paths without regard to
+    /// ASCII case (`Build/` ignores `build/`, `*.LOG` ignores `debug.log`), as Git does.
     ///
     /// # Parameters
     ///
@@ -117,15 +123,43 @@ impl IgnoreMatcher {
     ///
     /// # Errors
     ///
-    /// Returns [`Error::Io`] if configured pattern files cannot be read.
+    /// Returns [`Error::Io`] if configured pattern files cannot be read, or a config error if
+    /// the repository configuration cannot be loaded.
     pub fn from_repository(repo: &Repository) -> Result<Self> {
+        let ignore_case = crate::crlf::config_ignorecase(repo.config()?.as_ref());
         Ok(Self {
             global_rules: load_global_excludes(repo)?,
             info_rules: load_info_excludes(repo)?,
             // Standard excludes include the per-directory `.gitignore` set (Git `EXC_DIRS`).
             read_per_directory: true,
+            ignore_case,
             ..Self::default()
         })
+    }
+
+    /// Set whether patterns match case-insensitively (Git's `core.ignorecase`).
+    ///
+    /// [`Self::from_repository`] reads this from configuration; use this to override it, or to
+    /// opt in on a matcher built with [`Default::default`]. Only ASCII letters are folded, like
+    /// Git.
+    ///
+    /// # Parameters
+    ///
+    /// - `ignore_case` - `true` to fold ASCII case when matching.
+    ///
+    /// # Returns
+    ///
+    /// The matcher with the setting applied.
+    #[must_use]
+    pub fn with_ignore_case(mut self, ignore_case: bool) -> Self {
+        self.ignore_case = ignore_case;
+        self
+    }
+
+    /// Whether patterns match case-insensitively (see [`Self::with_ignore_case`]).
+    #[must_use]
+    pub fn ignore_case(&self) -> bool {
+        self.ignore_case
     }
 
     /// Append patterns from `ls-files --exclude-from` / `-X` files (relative paths resolve from `cwd`).
@@ -275,6 +309,7 @@ impl IgnoreMatcher {
             ignored,
             matched,
             &all_rules,
+            self.ignore_case,
         );
 
         Ok((ignored, matched))
@@ -298,7 +333,7 @@ impl IgnoreMatcher {
         for group in &groups {
             let mut group_match: Option<&&IgnoreRule> = None;
             for rule in group {
-                if rule_matches(rule, path, is_dir) {
+                if rule_matches(rule, path, is_dir, self.ignore_case) {
                     group_match = Some(rule);
                 }
             }
@@ -773,6 +808,7 @@ fn refine_match_for_check_ignore_verbose(
     ignored: bool,
     matched: Option<IgnoreMatch>,
     rules: &[&IgnoreRule],
+    ignore_case: bool,
 ) -> Option<IgnoreMatch> {
     let m = matched?;
     if m.negative {
@@ -786,7 +822,7 @@ fn refine_match_for_check_ignore_verbose(
         if !rule.directory_only {
             continue;
         }
-        if !rule_matches(rule, repo_rel_path, is_dir) {
+        if !rule_matches(rule, repo_rel_path, is_dir, ignore_case) {
             continue;
         }
         match best {
@@ -814,7 +850,7 @@ fn refine_match_for_check_ignore_verbose(
     )
 }
 
-fn rule_matches(rule: &IgnoreRule, repo_rel_path: &str, is_dir: bool) -> bool {
+fn rule_matches(rule: &IgnoreRule, repo_rel_path: &str, is_dir: bool, ignore_case: bool) -> bool {
     // Directory-only patterns (`foo/`) participate only when the query path is a directory,
     // mirroring Git's `PATTERN_FLAG_MUSTBEDIR` / `sparse_pattern_matches` dtype gate. Ancestor
     // probes use `is_dir=true` (`first_excluded_ancestor`); matching `!pkg/` against files under
@@ -823,21 +859,21 @@ fn rule_matches(rule: &IgnoreRule, repo_rel_path: &str, is_dir: bool) -> bool {
         return false;
     }
 
-    let Some(rel_to_base) = strip_base(&rule.base_dir, repo_rel_path) else {
+    let Some(rel_to_base) = strip_base(&rule.base_dir, repo_rel_path, ignore_case) else {
         return false;
     };
 
     if rule.directory_only {
         if rule.has_slash || rule.anchored {
             for ancestor in ancestor_dirs(rel_to_base, is_dir) {
-                if rule_body_matches(rule, &ancestor, true) {
+                if rule_body_matches(rule, &ancestor, true, ignore_case) {
                     return true;
                 }
             }
             return false;
         }
         for ancestor in ancestor_dir_basenames(rel_to_base, is_dir) {
-            if rule_body_matches(rule, ancestor, false) {
+            if rule_body_matches(rule, ancestor, false, ignore_case) {
                 return true;
             }
         }
@@ -845,12 +881,12 @@ fn rule_matches(rule: &IgnoreRule, repo_rel_path: &str, is_dir: bool) -> bool {
     }
 
     if rule.has_slash || rule.anchored {
-        return rule_body_matches(rule, rel_to_base, true);
+        return rule_body_matches(rule, rel_to_base, true, ignore_case);
     }
 
     path_component_names(rel_to_base)
         .iter()
-        .any(|name| rule_body_matches(rule, name, false))
+        .any(|name| rule_body_matches(rule, name, false, ignore_case))
 }
 
 fn is_tracked(index: Option<&Index>, repo_rel_path: &str) -> bool {
@@ -963,15 +999,48 @@ fn read_optional_text(path: &Path) -> Result<Option<String>> {
     }
 }
 
-fn strip_base<'a>(base: &str, path: &'a str) -> Option<&'a str> {
+/// Path of `path` relative to the `.gitignore` directory `base`, or `None` when `path` is not
+/// inside it. With `ignore_case`, the base compares without regard to ASCII case.
+fn strip_base<'a>(base: &str, path: &'a str, ignore_case: bool) -> Option<&'a str> {
     if base.is_empty() {
         return Some(path);
     }
-    if path == base {
-        return Some("");
+    if !starts_with_fold(path, base, ignore_case) {
+        return None;
     }
-    let prefix = format!("{base}/");
-    path.strip_prefix(&prefix)
+    match path.as_bytes().get(base.len()) {
+        None => Some(""),
+        // `base.len()` is a char boundary: the byte there is ASCII `/`.
+        Some(b'/') => path.get(base.len() + 1..),
+        Some(_) => None,
+    }
+}
+
+fn eq_fold(text: &str, pattern: &str, ignore_case: bool) -> bool {
+    if ignore_case {
+        text.eq_ignore_ascii_case(pattern)
+    } else {
+        text == pattern
+    }
+}
+
+fn starts_with_fold(text: &str, prefix: &str, ignore_case: bool) -> bool {
+    if !ignore_case {
+        return text.starts_with(prefix);
+    }
+    text.as_bytes()
+        .get(..prefix.len())
+        .is_some_and(|head| head.eq_ignore_ascii_case(prefix.as_bytes()))
+}
+
+fn ends_with_fold(text: &str, suffix: &str, ignore_case: bool) -> bool {
+    if !ignore_case {
+        return text.ends_with(suffix);
+    }
+    text.len()
+        .checked_sub(suffix.len())
+        .and_then(|start| text.as_bytes().get(start..))
+        .is_some_and(|tail| tail.eq_ignore_ascii_case(suffix.as_bytes()))
 }
 
 fn parent_dir(path: &str) -> &str {
@@ -1028,20 +1097,24 @@ fn pattern_matches_kind(
     pattern: &str,
     text: &str,
     pathname: bool,
+    ignore_case: bool,
 ) -> bool {
     match kind {
-        IgnorePatternKind::Literal(lit) => text == lit,
-        IgnorePatternKind::Prefix(prefix) => text.starts_with(prefix),
-        IgnorePatternKind::Suffix(suffix) => text.ends_with(suffix),
+        IgnorePatternKind::Literal(lit) => eq_fold(text, lit, ignore_case),
+        IgnorePatternKind::Prefix(prefix) => starts_with_fold(text, prefix, ignore_case),
+        IgnorePatternKind::Suffix(suffix) => ends_with_fold(text, suffix, ignore_case),
         IgnorePatternKind::Wild => {
-            let flags = if pathname { WM_PATHNAME } else { 0 };
+            let mut flags = if pathname { WM_PATHNAME } else { 0 };
+            if ignore_case {
+                flags |= WM_CASEFOLD;
+            }
             wildmatch(pattern.as_bytes(), text.as_bytes(), flags)
         }
     }
 }
 
-fn rule_body_matches(rule: &IgnoreRule, text: &str, pathname: bool) -> bool {
-    pattern_matches_kind(&rule.match_kind, &rule.body, text, pathname)
+fn rule_body_matches(rule: &IgnoreRule, text: &str, pathname: bool, ignore_case: bool) -> bool {
+    pattern_matches_kind(&rule.match_kind, &rule.body, text, pathname, ignore_case)
 }
 
 /// One line from a sparse-checkout specification blob (`--filter=sparse:oid=…`).
@@ -1378,7 +1451,66 @@ mod gitignore_glob_tests {
     use super::*;
 
     fn pathname_pattern_matches(pattern: &str, text: &str) -> bool {
-        pattern_matches_kind(&classify_ignore_pattern(pattern), pattern, text, true)
+        pattern_matches_kind(
+            &classify_ignore_pattern(pattern),
+            pattern,
+            text,
+            true,
+            false,
+        )
+    }
+
+    fn rule(line: &str, base_dir: &str) -> IgnoreRule {
+        parse_rule_line(line, 1, IgnoreSource::InfoExclude, base_dir).unwrap()
+    }
+
+    #[test]
+    fn every_pattern_kind_folds_ascii_case_only_with_ignore_case() {
+        for (pattern, kind, path) in [
+            ("README", "literal", "readme"),
+            ("Target*", "prefix", "target-debug"),
+            ("*.LOG", "suffix", "debug.log"),
+            ("[Dd]EBUG?.txt", "wild", "debug1.TXT"),
+        ] {
+            let r = rule(pattern, "");
+            assert!(!rule_matches(&r, path, false, false), "{kind}: {pattern}");
+            assert!(rule_matches(&r, path, false, true), "{kind}: {pattern}");
+            assert!(rule_matches(&r, &format!("sub/{path}"), false, true));
+        }
+        assert!(!rule_matches(&rule("*.LOG", ""), "x.lag", false, true));
+        assert!(!rule_matches(&rule("Target*", ""), "tar", false, true));
+        assert!(!rule_matches(&rule("*.LOG", ""), "LOG", false, true));
+        // Git folds ASCII only; non-ASCII letters keep their case.
+        assert!(!rule_matches(&rule("*É", ""), "é", false, true));
+        assert!(!rule_matches(&rule("Über", ""), "über", false, true));
+        assert!(rule_matches(&rule("Über", ""), "ÜBER", false, true));
+    }
+
+    #[test]
+    fn directory_and_anchored_rules_fold_case() {
+        let dir_only = rule("Build/", "");
+        assert!(rule_matches(&dir_only, "build", true, true));
+        assert!(rule_matches(&dir_only, "src/BUILD", true, true));
+        assert!(!rule_matches(&dir_only, "build", true, false));
+        assert!(!rule_matches(&dir_only, "build", false, true));
+        let anchored = rule("/Docs/*.PDF", "");
+        assert!(rule_matches(&anchored, "docs/manual.pdf", false, true));
+        assert!(!rule_matches(&anchored, "docs/sub/manual.pdf", false, true));
+        assert!(!rule_matches(&anchored, "docs/manual.pdf", false, false));
+    }
+
+    #[test]
+    fn nested_gitignore_base_dir_folds_case() {
+        let nested = rule("*.tmp", "Sub/Dir");
+        assert!(rule_matches(&nested, "Sub/Dir/a.tmp", false, false));
+        assert!(!rule_matches(&nested, "sub/dir/a.tmp", false, false));
+        assert!(rule_matches(&nested, "sub/dir/a.tmp", false, true));
+        assert!(!rule_matches(&nested, "sub/dirx/a.tmp", false, true));
+        assert!(!rule_matches(&nested, "sub/di", false, true));
+        assert_eq!(strip_base("Sub", "sub", true), Some(""));
+        assert_eq!(strip_base("Sub", "SUB/x", true), Some("x"));
+        assert_eq!(strip_base("Sub", "subway/x", true), None);
+        assert_eq!(strip_base("Sub", "sub/x", false), None);
     }
 
     #[test]
@@ -1422,6 +1554,7 @@ mod gitignore_glob_tests {
                 match_kind: IgnorePatternKind::Suffix(".log".into()),
             },
             "app.log",
+            false,
             false
         ));
     }
@@ -1505,6 +1638,68 @@ mod per_directory_gitignore_tests {
             assert_eq!(warnings.len(), 1, "{dir}: {warnings:?}");
             assert!(warnings[0].contains(&format!("{dir}/.gitignore")));
         }
+    }
+}
+
+#[cfg(test)]
+mod ignore_case_matcher_tests {
+    use super::*;
+    use crate::repo::init_repository;
+    use crate::RefStorageFormat;
+    use tempfile::TempDir;
+
+    fn issue_repo(ignore_case: bool) -> (TempDir, Repository) {
+        let dir = TempDir::new().unwrap();
+        let root = dir.path();
+        init_repository(root, false, "main", None, RefStorageFormat::Files).unwrap();
+        let mut config = fs::read_to_string(root.join(".git/config")).unwrap();
+        config.push_str(&format!("[core]\n\tignorecase = {ignore_case}\n"));
+        fs::write(root.join(".git/config"), config).unwrap();
+        fs::write(root.join(".gitignore"), "Build/\n*.LOG\n!keep.log\n").unwrap();
+        fs::create_dir_all(root.join("build")).unwrap();
+        for file in ["build/x.o", "debug.log", "keep.log", "README"] {
+            fs::write(root.join(file), "x\n").unwrap();
+        }
+        let options = crate::environment::RepositoryOptions::empty().with_work_tree(root);
+        let repo = Repository::open(&root.join(".git"), &options).unwrap();
+        (dir, repo)
+    }
+
+    fn ignored(matcher: &mut IgnoreMatcher, repo: &Repository, path: &str, is_dir: bool) -> bool {
+        let fast = matcher.is_path_ignored(repo, None, path, is_dir).unwrap();
+        let (verbose, _) = matcher.check_path(repo, None, path, is_dir).unwrap();
+        assert_eq!(fast, verbose, "{path}");
+        fast
+    }
+
+    #[test]
+    fn from_repository_honors_core_ignorecase() {
+        let (_dir, repo) = issue_repo(true);
+        let mut matcher = IgnoreMatcher::from_repository(&repo).unwrap();
+        assert!(matcher.ignore_case());
+        assert!(ignored(&mut matcher, &repo, "build", true));
+        assert!(ignored(&mut matcher, &repo, "build/x.o", false));
+        assert!(ignored(&mut matcher, &repo, "debug.log", false));
+        assert!(!ignored(&mut matcher, &repo, "keep.log", false));
+        assert!(!ignored(&mut matcher, &repo, "KEEP.LOG", false));
+        assert!(!ignored(&mut matcher, &repo, "README", false));
+        let (_, matched) = matcher.check_path(&repo, None, "build/x.o", false).unwrap();
+        assert_eq!(matched.unwrap().pattern_text, "Build/");
+    }
+
+    #[test]
+    fn case_sensitive_by_default_and_overridable() {
+        let (_dir, repo) = issue_repo(false);
+        let mut matcher = IgnoreMatcher::from_repository(&repo).unwrap();
+        assert!(!matcher.ignore_case());
+        assert!(!ignored(&mut matcher, &repo, "build/x.o", false));
+        assert!(!ignored(&mut matcher, &repo, "debug.log", false));
+        assert!(ignored(&mut matcher, &repo, "Build/x.o", false));
+
+        let mut folded = matcher.with_ignore_case(true);
+        assert!(ignored(&mut folded, &repo, "build/x.o", false));
+        assert!(ignored(&mut folded, &repo, "debug.log", false));
+        assert!(!IgnoreMatcher::default().ignore_case());
     }
 }
 
