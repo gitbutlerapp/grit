@@ -54,6 +54,7 @@ use crate::config::{self, parse_i64, ConfigSet};
 use crate::credentials::{self, Credential, CredentialProvider};
 use crate::error::{AuthFailure, Error, RemoteUnreadableReason, Result};
 use crate::protocol::client_git_protocol_header_from_config;
+use crate::transport::http::{HttpMethod, HttpRequest, HttpResponse};
 use crate::transport_path::redact_url_for_display;
 
 fn url_for_display(url: &str) -> String {
@@ -839,6 +840,135 @@ impl UreqHttpClient {
         Ok(retry_reader)
     }
 
+    /// Add the headers every request carries (agent, auth, cookies,
+    /// `http.extraHeader`) plus `request`'s own, and lift the whole-request
+    /// timeout for long transfers.
+    fn decorate<B>(
+        &self,
+        mut req: ureq::RequestBuilder<B>,
+        request: &HttpRequest<'_>,
+        auth: Option<&str>,
+    ) -> ureq::RequestBuilder<B> {
+        req = req.header("User-Agent", &self.user_agent);
+        if let Some(a) = auth {
+            req = req.header("Authorization", a);
+        }
+        if let Some(cookie) = self.cookie_header_for_url(request.url) {
+            req = req.header("Cookie", &cookie);
+        }
+        for (name, value) in self.extra_headers_for_url(request.url) {
+            req = req.header(&name, &value);
+        }
+        for (name, value) in &request.headers {
+            req = req.header(*name, value);
+        }
+        if request.long_running {
+            req = req.config().timeout_global(None).build();
+        }
+        req
+    }
+
+    /// One attempt at [`HttpClient::send`]: the response head and an open body.
+    fn do_send(
+        &self,
+        request: &HttpRequest<'_>,
+        auth: Option<&str>,
+    ) -> Result<(RawResponseHead, HttpResponse)> {
+        let url = request.url;
+        // Only reads may be resent after an interrupted socket call.
+        let idempotent = matches!(request.method, HttpMethod::Get | HttpMethod::Head);
+        let result = retry_interrupted(idempotent, || match request.method {
+            HttpMethod::Get => self.decorate(self.agent.get(url), request, auth).call(),
+            HttpMethod::Head => self.decorate(self.agent.head(url), request, auth).call(),
+            HttpMethod::Post => self
+                .decorate(self.agent.post(url), request, auth)
+                .send(request.body),
+            HttpMethod::Patch => self
+                .decorate(self.agent.patch(url), request, auth)
+                .send(request.body),
+        });
+        let resp = result.map_err(|e| http_transport_error(url, &e))?;
+        let headers = resp
+            .headers()
+            .iter()
+            .filter_map(|(name, value)| {
+                Some((
+                    name.as_str().to_ascii_lowercase(),
+                    value.to_str().ok()?.to_owned(),
+                ))
+            })
+            .collect();
+        let timeouts = if request.long_running {
+            HttpTransportTimeouts {
+                global: None,
+                ..self.transport_timeouts.clone()
+            }
+        } else {
+            self.transport_timeouts.clone()
+        };
+        let (head, reader) = open_response_body(resp, &timeouts)?;
+        let response = HttpResponse {
+            status: head.status,
+            headers,
+            body: Box::new(reader),
+        };
+        Ok((head, response))
+    }
+
+    /// [`HttpClient::send`] with the same `401` handling as the other requests.
+    fn send_with_auth_retry(&self, request: &HttpRequest<'_>) -> Result<HttpResponse> {
+        let url = request.url;
+        let initial_auth = self.cached_auth_header_for_url(url);
+        let (head, response) = self.do_send(request, initial_auth.as_deref())?;
+        if head.status != 401 {
+            self.invalidate_auth_on_cross_origin_redirect(url, &head.final_url);
+            self.save_response_cookies(&head.set_cookie);
+            return Ok(response);
+        }
+        let mut body = response.body;
+        let _ = std::io::copy(&mut body, &mut io::sink());
+        let Some(provider) = self.credentials.as_ref() else {
+            self.clear_auth_header();
+            return Err(auth_error(url, AuthFailure::NoCredentialProvider));
+        };
+        if !offers_basic(&head.www_authenticate) {
+            return Err(auth_error(
+                url,
+                AuthFailure::UnsupportedScheme {
+                    schemes: head.www_authenticate.clone(),
+                },
+            ));
+        }
+        let Some(input) = credential_for_url(url, &self.credential_config) else {
+            return Err(auth_error(url, AuthFailure::UrlNotDescribable));
+        };
+        let cred = provider.fill(&input).map_err(|e| {
+            auth_error(
+                url,
+                AuthFailure::CredentialsUnavailable {
+                    detail: e.to_string(),
+                },
+            )
+        })?;
+        let Some(header) = basic_auth_header(&cred) else {
+            return Err(auth_error(url, AuthFailure::UnusableCredentials));
+        };
+        let (retry_head, retry) = self.do_send(request, Some(&header))?;
+        if retry_head.status == 401 {
+            let _ = provider.reject(&cred);
+            self.clear_auth_header();
+            return Err(auth_error(url, AuthFailure::Rejected));
+        }
+        if retry_head.status < 400 {
+            let _ = provider.approve(&cred);
+            if http_origins_match(url, &retry_head.final_url) {
+                self.store_auth_header(header, url);
+            }
+        }
+        self.save_response_cookies(&retry_head.set_cookie);
+        Ok(retry)
+    }
+
     /// Run `attempt` (a GET or POST closure) with auth-retry on 401, returning
     /// the response body and the final URL after any followed redirects.
     fn with_auth_retry<F>(&self, url: &str, attempt: F) -> Result<(Vec<u8>, String)>
@@ -983,6 +1113,10 @@ impl HttpClient for UreqHttpClient {
 
     fn reset_auth_after_redirect_rebase(&self) {
         self.clear_auth_header();
+    }
+
+    fn send(&self, request: &HttpRequest<'_>) -> Result<HttpResponse> {
+        self.send_with_auth_retry(request)
     }
 }
 

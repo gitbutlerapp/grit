@@ -62,6 +62,15 @@ impl Error {
 /// Result alias for protocol handlers.
 pub type Result<T> = std::result::Result<T, Error>;
 
+/// Server features beyond plain fetch and push, for the `_with` handlers.
+#[derive(Debug, Clone, Default)]
+pub struct Extensions {
+    /// Bundles offered through the protocol v2 `bundle-uri` command.
+    pub bundle_list: Option<grit_lib::remote::bundle_uri::BundleList>,
+    /// Resumable push endpoint advertised by receive-pack as `pushBundle=<value>`.
+    pub push_bundle: Option<String>,
+}
+
 /// Build [`RepositoryOptions`] from the current process environment.
 ///
 /// Captures `HOME`, `GIT_CONFIG_*`, and the other variables [`ConfigSet::load`]
@@ -106,6 +115,7 @@ pub(crate) fn run_upload_pack(
     advertise_refs: bool,
     input: &[u8],
     repository_options: &RepositoryOptions,
+    extensions: &Extensions,
 ) -> Result<Vec<u8>> {
     let repo = Repository::open(repo_path, &repository_options.clone().for_serving())?;
     let config =
@@ -117,6 +127,8 @@ pub(crate) fn run_upload_pack(
         advertise_refs,
         agent: format!("grit/{}", env!("CARGO_PKG_VERSION")),
         hidden_refs,
+        bundle_list: extensions.bundle_list.clone(),
+        push_bundle: None,
         ..ServeOptions::default()
     };
     let mut output = Vec::new();
@@ -130,6 +142,7 @@ pub(crate) fn run_receive_pack(
     advertise_refs: bool,
     input: &mut dyn Read,
     repository_options: &RepositoryOptions,
+    extensions: &Extensions,
 ) -> Result<Vec<u8>> {
     let repo = Repository::open(repo_path, &repository_options.clone().for_serving())?;
     let config =
@@ -141,6 +154,8 @@ pub(crate) fn run_receive_pack(
         advertise_refs,
         agent: format!("grit/{}", env!("CARGO_PKG_VERSION")),
         hidden_refs,
+        bundle_list: None,
+        push_bundle: extensions.push_bundle.clone(),
         ..ServeOptions::default()
     };
     let policy = ReceivePolicy::from_config(&config);

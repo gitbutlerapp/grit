@@ -485,6 +485,9 @@ fn write_advertisement(
         caps.push("push-options".to_owned());
     }
     caps.push(format!("object-format={}", repo.odb().hash_algo().name()));
+    if let Some(path) = &opts.push_bundle {
+        caps.push(format!("{}={path}", super::PUSH_BUNDLE_CAPABILITY));
+    }
     if !opts.agent.is_empty() {
         caps.push(format!("agent={}", opts.agent));
     }

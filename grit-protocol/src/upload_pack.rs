@@ -7,7 +7,7 @@ use std::path::Path;
 
 use grit_lib::config::environment::RepositoryOptions;
 
-use crate::{run_upload_pack, Result};
+use crate::{run_upload_pack, Extensions, Result};
 
 /// Run upload-pack ref advertisement (for `GET /info/refs?service=git-upload-pack`).
 ///
@@ -34,6 +34,29 @@ pub fn advertise_refs(
         true,
         &[],
         repository_options,
+        &Extensions::default(),
+    )
+}
+
+/// [`advertise_refs`] with [`Extensions`] (a `bundle-uri` bundle list).
+///
+/// # Errors
+///
+/// Same as [`advertise_refs`].
+pub fn advertise_refs_with(
+    repo_path: &Path,
+    protocol_version: Option<u8>,
+    repository_options: &RepositoryOptions,
+    extensions: &Extensions,
+) -> Result<Vec<u8>> {
+    run_upload_pack(
+        repo_path,
+        protocol_version,
+        false,
+        true,
+        &[],
+        repository_options,
+        extensions,
     )
 }
 
@@ -58,5 +81,29 @@ pub fn stateless_rpc(
         false,
         request_body,
         repository_options,
+        &Extensions::default(),
+    )
+}
+
+/// [`stateless_rpc`] with [`Extensions`], so `command=bundle-uri` is answered.
+///
+/// # Errors
+///
+/// Same as [`stateless_rpc`].
+pub fn stateless_rpc_with(
+    repo_path: &Path,
+    request_body: &[u8],
+    protocol_version: Option<u8>,
+    repository_options: &RepositoryOptions,
+    extensions: &Extensions,
+) -> Result<Vec<u8>> {
+    run_upload_pack(
+        repo_path,
+        protocol_version,
+        true,
+        false,
+        request_body,
+        repository_options,
+        extensions,
     )
 }

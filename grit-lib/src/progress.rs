@@ -45,6 +45,11 @@ pub enum ProgressPhase {
     CopyingObjects,
     /// Updating the work tree to match a tree (checkout, reset --hard, clone).
     CheckingOutFiles,
+    /// Downloading or uploading a bundle that can resume where it stopped
+    /// (clone's `bundle-uri` bundle, a large push). Counted in bytes, including
+    /// any bytes an earlier run already moved; the detailed events go to
+    /// [`crate::fetch::Progress::resumable_transfer`].
+    TransferringBundle,
 }
 
 impl ProgressPhase {
@@ -57,6 +62,7 @@ impl ProgressPhase {
             | Self::ResolvingDeltas
             | Self::CopyingObjects => ProgressUnit::Objects,
             Self::CheckingOutFiles => ProgressUnit::Files,
+            Self::TransferringBundle => ProgressUnit::Bytes,
         }
     }
 }

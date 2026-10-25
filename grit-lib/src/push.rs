@@ -200,6 +200,28 @@ pub(crate) fn push_remote_from(
     progress: &mut dyn Progress,
     cancel: &dyn Cancel,
 ) -> Result<PushOutcome> {
+    push_remote_with(local, conn, refs, opts, progress, cancel, None)
+}
+
+/// A smart-HTTP remote a push may send a resumable bundle to, when its
+/// receive-pack advertises `pushBundle` (see [`crate::push_bundle`]).
+pub(crate) struct BundlePushTarget<'a> {
+    /// Client for the TUS requests.
+    pub(crate) client: &'a dyn crate::transport::http::HttpClient,
+    /// The repository URL the advertisement came from.
+    pub(crate) repo_url: &'a str,
+}
+
+/// [`push_remote_from`], optionally sending large packs as a resumable bundle.
+pub(crate) fn push_remote_with(
+    local: &Repository,
+    conn: &mut dyn Connection,
+    refs: &[PushRefSpec],
+    opts: &PushOptions,
+    progress: &mut dyn Progress,
+    cancel: &dyn Cancel,
+    bundle_target: Option<BundlePushTarget<'_>>,
+) -> Result<PushOutcome> {
     crate::trace::trace_span!("grit.push");
     let local_git_dir = local.git_dir();
     let mut sideband = PushSidebandCollector {
@@ -257,6 +279,76 @@ pub(crate) fn push_remote_from(
     //    does not read one after a delete-only command block, so sending an empty
     //    pack would leave unread bytes on the wire and reset the connection.
     let commands = build_command_block(&plan, &adv, algo, opts)?;
+    let sent_refs: Vec<&str> = plan
+        .to_send
+        .iter()
+        .map(|&i| plan.decisions[i].result.remote_ref.as_str())
+        .collect();
+
+    // A large pack goes to the server's resumable endpoint instead, as a bundle
+    // uploaded over TUS; an upload an earlier run left unfinished is resumed
+    // without building the pack again.
+    let bundle_route = match (&bundle_target, adv.push_bundle.as_deref()) {
+        (Some(target), Some(endpoint)) if !opts.dry_run => {
+            crate::push_bundle::resolve_endpoint(target.repo_url, endpoint)
+                .map(|endpoint| (target, endpoint))
+        }
+        _ => None,
+    };
+    let mut prebuilt_pack = None;
+    if let Some((target, endpoint)) = &bundle_route {
+        let session =
+            crate::push_bundle::Session::locate(local_git_dir, target.repo_url, &commands);
+        let ready = if session.has_bundle() {
+            true
+        } else {
+            let pack = build_push_pack(&plan, local, &adv)?;
+            let threshold = opts
+                .resumable_threshold
+                .unwrap_or(crate::push_bundle::DEFAULT_THRESHOLD);
+            match pack {
+                Some(pack) if pack.len() as u64 > threshold => {
+                    let tips: Vec<(ObjectId, String)> = plan
+                        .to_send
+                        .iter()
+                        .filter_map(|&i| {
+                            let d = &plan.decisions[i];
+                            Some((d.new_tip?, d.result.remote_ref.clone()))
+                        })
+                        .collect();
+                    let mut haves: Vec<ObjectId> = adv.remote_refs.values().copied().collect();
+                    haves.extend_from_slice(&adv.advertised_haves);
+                    session.write_bundle(local.odb(), &haves, &tips, &pack)?;
+                    true
+                }
+                pack => {
+                    prebuilt_pack = Some(pack);
+                    false
+                }
+            }
+        };
+        if ready {
+            let raw = crate::push_bundle::push(
+                target.client,
+                &session,
+                endpoint,
+                &commands,
+                &sent_refs,
+                adv.server_sideband,
+                &mut sideband,
+            )?;
+            let report = if adv.server_sideband {
+                demux_report_and_remote_messages(&raw, &mut sideband)?
+            } else {
+                raw
+            };
+            apply_report_status(&report, &mut plan.decisions);
+            let results: Vec<_> = plan.decisions.into_iter().map(|d| d.result).collect();
+            sideband.finish_pending();
+            return finish_push_outcome(local_git_dir, opts, results, sideband.remote_messages);
+        }
+    }
+
     net_trace!(
         opts.network_trace,
         opts.diagnostics.as_ref(),
@@ -266,7 +358,11 @@ pub(crate) fn push_remote_from(
     conn.writer().write_all(&commands)?;
     conn.writer().flush()?;
 
-    if let Some(pack) = build_push_pack(&plan, local, &adv)? {
+    let pack = match prebuilt_pack {
+        Some(pack) => pack,
+        None => build_push_pack(&plan, local, &adv)?,
+    };
+    if let Some(pack) = pack {
         poll_cancel(&mut sideband, cancel)?;
         net_trace!(
             opts.network_trace,
@@ -302,11 +398,6 @@ pub(crate) fn push_remote_from(
     // reset the TCP connection immediately after sending a complete report-status
     // instead of shutting down cleanly. Treat that as success when the bytes we
     // already received parse as a full report for every ref we sent.
-    let sent_refs: Vec<&str> = plan
-        .to_send
-        .iter()
-        .map(|&i| plan.decisions[i].result.remote_ref.as_str())
-        .collect();
     let raw = read_receive_pack_response(conn.reader(), &sent_refs, adv.server_sideband)?;
     let report = if adv.server_sideband {
         demux_report_and_remote_messages(&raw, &mut sideband)?
@@ -397,6 +488,8 @@ struct AdvertisedState {
     server_push_options: bool,
     /// Whether the server advertised `atomic` (one transaction for all refs).
     server_atomic: bool,
+    /// The resumable push endpoint from `pushBundle=<path>`, when advertised.
+    push_bundle: Option<String>,
 }
 
 impl AdvertisedState {
@@ -423,6 +516,11 @@ impl AdvertisedState {
             server_ofs_delta: caps.iter().any(|c| c == "ofs-delta"),
             server_push_options: caps.iter().any(|c| c == "push-options"),
             server_atomic: caps.iter().any(|c| c == "atomic"),
+            push_bundle: caps.iter().find_map(|c| {
+                c.strip_prefix(crate::serve::PUSH_BUNDLE_CAPABILITY)?
+                    .strip_prefix('=')
+                    .map(str::to_owned)
+            }),
         }
     }
 }
@@ -836,7 +934,7 @@ fn decide_push_wire(
 /// When the server resets the connection after sending a complete
 /// `report-status`, the accumulated bytes are returned as success so tracking
 /// refs can be updated. Incomplete buffers still surface as I/O errors.
-fn read_receive_pack_response(
+pub(crate) fn read_receive_pack_response(
     reader: &mut dyn Read,
     sent_refs: &[&str],
     server_sideband: bool,
@@ -1064,6 +1162,7 @@ mod tests {
             server_ofs_delta: ofs_delta,
             server_push_options: push_options,
             server_atomic: false,
+            push_bundle: None,
         }
     }
 

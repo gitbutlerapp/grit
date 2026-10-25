@@ -168,7 +168,18 @@ pub struct ServeOptions {
     /// the current command request. Cleared at the start of each v2 command and
     /// filled before `ls-refs` / `fetch` / `object-info` handlers run.
     pub server_options: Vec<String>,
+    /// Bundles to offer through the protocol v2 `bundle-uri` command. `None`
+    /// leaves the command out of the advertisement.
+    pub bundle_list: Option<crate::bundle_uri::BundleList>,
+    /// Where clients may upload a resumable push bundle, advertised by
+    /// receive-pack as `pushBundle=<value>`; relative values are relative to
+    /// the repository URL. `None` advertises nothing.
+    pub push_bundle: Option<String>,
 }
+
+/// Name of the receive-pack capability that advertises a resumable push
+/// endpoint ([`ServeOptions::push_bundle`]).
+pub const PUSH_BUNDLE_CAPABILITY: &str = "pushBundle";
 
 /// One ref as it appears in an advertisement.
 #[derive(Debug, Clone)]

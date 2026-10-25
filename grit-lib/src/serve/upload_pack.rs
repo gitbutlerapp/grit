@@ -501,6 +501,9 @@ fn serve_v2(
             write_line(output, &format!("agent={}", opts.agent))?;
         }
         write_line(output, "ls-refs=unborn")?;
+        if opts.bundle_list.is_some() {
+            write_line(output, "bundle-uri")?;
+        }
         let policy = upload_policy(repo);
         let fetch_caps = policy.v2_fetch_features().join(" ");
         write_line(output, &format!("fetch={fetch_caps}"))?;
@@ -529,6 +532,7 @@ fn serve_v2(
             "object-info" => {
                 super::object_info::write_object_info_response(repo, output, &request.args)?
             }
+            "bundle-uri" if opts.bundle_list.is_some() => bundle_uri(output, opts)?,
             other => return Err(ServeError::UnknownCommand(other.to_owned())),
         }
         output.flush()?;
@@ -597,6 +601,16 @@ fn read_v2_request(input: &mut dyn Read, opts: &mut ServeOptions) -> Result<Opti
             "command request without command".into(),
         )),
     }
+}
+
+/// Answer `command=bundle-uri` with the configured bundle list.
+fn bundle_uri(output: &mut dyn Write, opts: &ServeOptions) -> Result<()> {
+    if let Some(list) = &opts.bundle_list {
+        for line in list.to_lines() {
+            write_line(output, &line)?;
+        }
+    }
+    write_flush(output)
 }
 
 fn ls_refs(

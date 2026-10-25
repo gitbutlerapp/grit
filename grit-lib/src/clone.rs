@@ -153,6 +153,10 @@ pub struct CloneOptions {
     pub bare: bool,
     /// Populate the index and working tree after fetch (`git clone --no-checkout` when false).
     pub checkout: bool,
+    /// Where bundle downloads are kept, so an interrupted clone resumes its
+    /// download next time. `None` skips the server's `bundle-uri` bundle. Shallow
+    /// and partial clones never use one.
+    pub bundle_cache: Option<PathBuf>,
 }
 
 impl CloneOptions {
@@ -174,6 +178,7 @@ impl CloneOptions {
             promisor_fetcher: None,
             bare: false,
             checkout: true,
+            bundle_cache: None,
         }
     }
 }
@@ -265,6 +270,9 @@ pub struct CloneOutcome {
     pub path_collisions: Vec<String>,
     /// Whether the destination is a bare repository.
     pub bare: bool,
+    /// Whether a bundle from the server's `bundle-uri` seeded the clone.
+    /// [`Self::transfer`] includes what the bundle brought.
+    pub bundle: crate::bundle_uri::BundleSeed,
 }
 
 /// Derive a destination directory from a clone URL (Git [`git_url_basename`]).
@@ -563,7 +571,17 @@ fn clone_after_claim(
     if let Ok(v) = crate::protocol::try_effective_client_protocol_version_from_config(&config) {
         fetch_opts.http_protocol_version = Some(v);
     }
-    let fetch_outcome = remote.fetch(&repo, fetch_opts, progress, cancel, http_factory)?;
+    let bundle = match opts.bundle_cache.as_deref() {
+        Some(cache) if opts.depth.is_none() && opts.filter.is_none() => {
+            remote.seed_from_bundle_uri(&repo, cache, progress, cancel, http_factory)
+        }
+        _ => crate::bundle_uri::BundleSeed::NotOffered,
+    };
+    let mut fetch_outcome = remote.fetch(&repo, fetch_opts, progress, cancel, http_factory)?;
+    if let crate::bundle_uri::BundleSeed::Seeded(seeded) = &bundle {
+        crate::bundle_uri::remove_bundle_refs(&repo).map_err(CloneError::Library)?;
+        fetch_outcome.transfer += seeded.transfer;
+    }
     // Wire clone may upgrade an empty SHA-1 destination to the remote object format; reopen so
     // checkout uses a fresh ODB hash algorithm (the pre-fetch handle caches SHA-1).
     repo = open_clone_repository(
@@ -631,6 +649,7 @@ fn clone_after_claim(
         worktree_bytes,
         path_collisions,
         bare,
+        bundle,
     })
 }
 

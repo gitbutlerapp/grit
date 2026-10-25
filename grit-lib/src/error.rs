@@ -1349,6 +1349,10 @@ pub enum Error {
         reason: RemoteUnreadableReason,
     },
 
+    /// A resumable bundle download or upload failed.
+    #[error(transparent)]
+    Resumable(#[from] Box<crate::resumable::ResumableError>),
+
     /// Explicit fetch refspec resolution failed (missing or ambiguous source).
     #[error("{0}")]
     FetchRefspec(#[from] crate::fetch_request::FetchRefspecError),

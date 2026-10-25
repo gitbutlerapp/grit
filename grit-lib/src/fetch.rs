@@ -63,6 +63,10 @@ pub trait Progress: ProgressSink {
     /// phase when [`Progress::wants_received_objects`] is true. Counts may lag
     /// the bytes reported through [`ProgressSink::inc`] slightly.
     fn received_objects(&mut self, _counts: crate::progress::ReceivedObjects) {}
+
+    /// Progress of a resumable bundle download (clone with `bundle-uri`) or
+    /// upload (push to a `pushBundle` endpoint).
+    fn resumable_transfer(&mut self, _event: &crate::resumable::ResumableEvent) {}
 }
 
 /// A [`Progress`] / [`ProgressSink`] that discards everything.
@@ -779,7 +783,12 @@ fn add_negotiation_tips(
             }
         }
     };
-    for prefix in ["refs/heads/", "refs/remotes/", "refs/tags/"] {
+    for prefix in [
+        "refs/heads/",
+        "refs/remotes/",
+        "refs/tags/",
+        crate::bundle_uri::BUNDLE_REFS_PREFIX,
+    ] {
         if let Ok(entries) = crate::refs::list_refs(local_git_dir, prefix) {
             for (_, oid) in entries {
                 push_tip(negotiator, oid);

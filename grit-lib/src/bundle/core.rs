@@ -780,8 +780,46 @@ pub fn write_bundle(
     if spec.include.is_empty() {
         return Err(BundleError::EmptyRefs);
     }
-    let algo = repo.odb().hash_algo();
-    let version = if algo != HashAlgo::Sha1 || spec.filter.is_some() {
+    let header = bundle_header_parts(repo, spec)?;
+    write_header(
+        out,
+        repo.odb().hash_algo(),
+        spec.filter.as_ref(),
+        &header.prerequisites,
+        &header.refs,
+    )?;
+
+    write_bundle_pack(repo, spec, out)?;
+    Ok(())
+}
+
+/// Write a bundle header: the signature, the capabilities a non-SHA-1 bundle
+/// needs, one `-<oid> <subject>` line per prerequisite, one `<oid> <ref>` line
+/// per tip, and the blank line the pack follows.
+///
+/// For callers that already have a pack for those tips (such as a push), so a
+/// bundle is this header followed by the pack bytes.
+///
+/// # Errors
+///
+/// [`BundleError::Io`] when writing fails.
+pub fn write_bundle_header(
+    out: &mut dyn Write,
+    algo: HashAlgo,
+    prerequisites: &[(ObjectId, Option<String>)],
+    refs: &[(ObjectId, String)],
+) -> std::result::Result<(), BundleError> {
+    write_header(out, algo, None, prerequisites, refs)
+}
+
+fn write_header(
+    out: &mut dyn Write,
+    algo: HashAlgo,
+    filter: Option<&FilterSpec>,
+    prerequisites: &[(ObjectId, Option<String>)],
+    refs: &[(ObjectId, String)],
+) -> std::result::Result<(), BundleError> {
+    let version = if algo != HashAlgo::Sha1 || filter.is_some() {
         BundleVersion::V3
     } else {
         BundleVersion::V2
@@ -789,27 +827,21 @@ pub fn write_bundle(
     write_signature(out, version)?;
     if version == BundleVersion::V3 {
         write_capability_object_format(out, algo)?;
-        if let Some(filter) = &spec.filter {
+        if let Some(filter) = filter {
             write_capability_filter(out, filter)?;
         }
     }
-
-    let header = bundle_header_parts(repo, spec)?;
-    for (oid, subject) in &header.prerequisites {
+    for (oid, subject) in prerequisites {
         write!(out, "-{} ", oid.to_hex()).map_err(|e| BundleError::Io(e.to_string()))?;
         if let Some(s) = subject {
             write!(out, "{s}").map_err(|e| BundleError::Io(e.to_string()))?;
         }
         writeln!(out).map_err(|e| BundleError::Io(e.to_string()))?;
     }
-
-    for (oid, name) in &header.refs {
+    for (oid, name) in refs {
         writeln!(out, "{} {name}", oid.to_hex()).map_err(|e| BundleError::Io(e.to_string()))?;
     }
-    writeln!(out).map_err(|e| BundleError::Io(e.to_string()))?;
-
-    write_bundle_pack(repo, spec, out)?;
-    Ok(())
+    writeln!(out).map_err(|e| BundleError::Io(e.to_string()))
 }
 
 /// Incremental writer for bundle bytes (header + pack).

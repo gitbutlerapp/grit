@@ -84,6 +84,8 @@ impl Stage {
             ProgressPhase::IndexingObjects => Some(Self::Indexing),
             ProgressPhase::ResolvingDeltas => Some(Self::Resolving),
             ProgressPhase::CheckingOutFiles => Some(Self::Checkout),
+            // Shown by its own display; the estimate covers the fetch after it.
+            ProgressPhase::TransferringBundle => None,
         }
     }
 }

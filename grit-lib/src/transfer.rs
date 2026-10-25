@@ -808,6 +808,11 @@ pub struct PushOptions {
     /// must come from the push destination, or objects the destination lacks may be left out
     /// of the pack. Wire pushes read the advertisement from their connection and ignore this.
     pub remote_ref_tips: Option<Vec<ObjectId>>,
+    /// Packs larger than this many bytes go to the server's resumable
+    /// `pushBundle` endpoint, when it advertises one, instead of the
+    /// receive-pack request. `None` uses `push.bundleThreshold` from config,
+    /// else 16 MiB.
+    pub resumable_threshold: Option<u64>,
 }
 
 /// The structured result of a push. Reuses [`PushRefResult`] for per-ref status.

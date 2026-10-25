@@ -150,6 +150,154 @@ pub trait HttpClient: Send + Sync {
     /// Drop cached HTTP authorization after an `info/refs` redirect changed the
     /// effective repository base (Git re-binds credentials via `credential_from_url`).
     fn reset_auth_after_redirect_rebase(&self) {}
+
+    /// Send an arbitrary request and return the response without judging its
+    /// status.
+    ///
+    /// The resumable transfers ([`crate::remote::resumable`]) need methods and headers
+    /// the smart-HTTP calls above do not: `HEAD`, `PATCH`, `Range` and the TUS
+    /// headers. Unlike [`Self::get`] and [`Self::post`], every status comes back
+    /// as `Ok` (a `206`, `404` or `409` means something to those callers); only
+    /// a transport failure, or an authentication failure the client could not
+    /// resolve, is an error. Clients that authenticate should do so here as
+    /// they do for [`Self::get`].
+    ///
+    /// The default implementation reports [`Error::Message`] saying the client
+    /// cannot send such requests, which turns resumable transfers off.
+    ///
+    /// # Errors
+    ///
+    /// A transport or authentication failure.
+    fn send(&self, request: &HttpRequest<'_>) -> Result<HttpResponse> {
+        Err(Error::Message(format!(
+            "this HTTP client cannot send {} requests",
+            request.method.as_str()
+        )))
+    }
+}
+
+/// Method of an [`HttpRequest`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum HttpMethod {
+    /// `GET`.
+    Get,
+    /// `HEAD`.
+    Head,
+    /// `POST`.
+    Post,
+    /// `PATCH`.
+    Patch,
+}
+
+impl HttpMethod {
+    /// The method name on the wire.
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Get => "GET",
+            Self::Head => "HEAD",
+            Self::Post => "POST",
+            Self::Patch => "PATCH",
+        }
+    }
+}
+
+/// A request for [`HttpClient::send`].
+#[derive(Debug, Clone)]
+pub struct HttpRequest<'a> {
+    /// Request method.
+    pub method: HttpMethod,
+    /// Absolute URL.
+    pub url: &'a str,
+    /// Extra request headers, in order.
+    pub headers: Vec<(&'static str, String)>,
+    /// Request body; empty for `GET` and `HEAD`.
+    pub body: &'a [u8],
+    /// Whether the request may run longer than the client's usual whole-request
+    /// timeout (a large download or upload).
+    pub long_running: bool,
+}
+
+impl<'a> HttpRequest<'a> {
+    /// A request with no headers and no body.
+    #[must_use]
+    pub fn new(method: HttpMethod, url: &'a str) -> Self {
+        Self {
+            method,
+            url,
+            headers: Vec::new(),
+            body: &[],
+            long_running: false,
+        }
+    }
+
+    /// Add a header.
+    #[must_use]
+    pub fn header(mut self, name: &'static str, value: impl Into<String>) -> Self {
+        self.headers.push((name, value.into()));
+        self
+    }
+
+    /// Set the body.
+    #[must_use]
+    pub fn body(mut self, body: &'a [u8]) -> Self {
+        self.body = body;
+        self
+    }
+
+    /// Mark the request as a long transfer (see [`Self::long_running`]).
+    #[must_use]
+    pub fn long_running(mut self) -> Self {
+        self.long_running = true;
+        self
+    }
+}
+
+/// A response from [`HttpClient::send`].
+pub struct HttpResponse {
+    /// Status code.
+    pub status: u16,
+    /// Response headers; names are lowercase.
+    pub headers: Vec<(String, String)>,
+    /// The body, read as it arrives.
+    pub body: Box<dyn Read + Send>,
+}
+
+impl HttpResponse {
+    /// The first value of header `name` (case-insensitive).
+    #[must_use]
+    pub fn header(&self, name: &str) -> Option<&str> {
+        self.headers
+            .iter()
+            .find(|(n, _)| n.eq_ignore_ascii_case(name))
+            .map(|(_, v)| v.as_str())
+    }
+
+    /// Whether the status is in the 2xx range.
+    #[must_use]
+    pub fn is_success(&self) -> bool {
+        (200..300).contains(&self.status)
+    }
+
+    /// Read the whole body.
+    ///
+    /// # Errors
+    ///
+    /// The read error.
+    pub fn into_bytes(mut self) -> Result<Vec<u8>> {
+        let mut out = Vec::new();
+        self.body.read_to_end(&mut out).map_err(Error::Io)?;
+        Ok(out)
+    }
+}
+
+impl std::fmt::Debug for HttpResponse {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HttpResponse")
+            .field("status", &self.status)
+            .field("headers", &self.headers)
+            .finish_non_exhaustive()
+    }
 }
 
 /// Forward [`HttpClient`] through a shared [`std::sync::Arc`], so one client can
@@ -208,6 +356,10 @@ impl HttpClient for std::sync::Arc<dyn HttpClient> {
     fn reset_auth_after_redirect_rebase(&self) {
         (**self).reset_auth_after_redirect_rebase();
     }
+
+    fn send(&self, request: &HttpRequest<'_>) -> Result<HttpResponse> {
+        (**self).send(request)
+    }
 }
 
 impl<C: HttpClient> HttpClient for std::sync::Arc<C> {
@@ -259,6 +411,14 @@ impl<C: HttpClient> HttpClient for std::sync::Arc<C> {
 
     fn smart_http_enabled(&self) -> bool {
         (**self).smart_http_enabled()
+    }
+
+    fn reset_auth_after_redirect_rebase(&self) {
+        (**self).reset_auth_after_redirect_rebase();
+    }
+
+    fn send(&self, request: &HttpRequest<'_>) -> Result<HttpResponse> {
+        (**self).send(request)
     }
 }
 

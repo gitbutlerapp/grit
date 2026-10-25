@@ -46,6 +46,18 @@ pub mod github_auth {
     //! github_auth API (re-exported at this path).
     pub use crate::github_auth::*;
 }
+pub mod push_bundle {
+    //! resumable push API (re-exported at this path).
+    pub use crate::push_bundle::*;
+}
+pub mod resumable {
+    //! resumable transfer API (re-exported at this path).
+    pub use crate::resumable::*;
+}
+pub mod bundle_uri {
+    //! bundle-uri API (re-exported at this path).
+    pub use crate::bundle_uri::*;
+}
 pub mod grit_server_auth {
     //! grit_server_auth API (re-exported at this path).
     pub use crate::grit_server_auth::*;

@@ -988,6 +988,7 @@ pub fn grit_lib::bundle::plan_bundle_create(&grit_lib::repo::Repository, &grit_l
 pub fn grit_lib::bundle::plan_bundle_unbundle(&grit_lib::bundle::Bundle, &grit_lib::repo::Repository) -> core::result::Result<grit_lib::bundle::BundleUnbundlePlan, grit_lib::bundle::BundleError>
 pub fn grit_lib::bundle::read_header(&mut dyn alloc::io::buf_read::BufRead) -> core::result::Result<grit_lib::bundle::BundleHeader, grit_lib::bundle::BundleError>
 pub fn grit_lib::bundle::write_bundle(&grit_lib::repo::Repository, &grit_lib::bundle::BundleSpec, &mut dyn core::io::write::Write) -> core::result::Result<(), grit_lib::bundle::BundleError>
+pub fn grit_lib::bundle::write_bundle_header(&mut dyn core::io::write::Write, grit_lib::objects::HashAlgo, &[(grit_lib::objects::ObjectId, core::option::Option<alloc::string::String>)], &[(grit_lib::objects::ObjectId, alloc::string::String)]) -> core::result::Result<(), grit_lib::bundle::BundleError>
 pub mod grit_lib::change_id
 pub enum grit_lib::change_id::ChangeIdError
 pub grit_lib::change_id::ChangeIdError::HashCollision
@@ -5734,6 +5735,7 @@ pub grit_lib::error::Error::RestoreConflictWithSource
 pub grit_lib::error::Error::RestoreConflictWithStaged
 pub grit_lib::error::Error::RestorePathUnmerged
 pub grit_lib::error::Error::RestorePathUnmerged::paths: alloc::vec::Vec<alloc::string::String>
+pub grit_lib::error::Error::Resumable(alloc::boxed::Box<grit_lib::remote::resumable::ResumableError>)
 pub grit_lib::error::Error::RevList(grit_lib::revwalk::rev_list_error::RevListError)
 pub grit_lib::error::Error::RevParse(grit_lib::revwalk::rev_parse_error::RevParseError)
 pub grit_lib::error::Error::RevisionNotFound(alloc::string::String)
@@ -5802,6 +5804,8 @@ pub fn grit_lib::error::Error::is_remote_unreadable(&self) -> bool
 pub fn grit_lib::error::Error::remote_unreadable(impl core::convert::Into<alloc::string::String>, grit_lib::error::RemoteUnreadableReason) -> Self
 pub fn grit_lib::error::Error::wants_fatal_prefix(&self) -> bool
 pub fn grit_lib::error::Error::would_overwrite(grit_lib::error::OverwriteReason, alloc::vec::Vec<alloc::string::String>) -> Self
+impl core::convert::From<alloc::boxed::Box<grit_lib::remote::resumable::ResumableError>> for grit_lib::error::Error
+pub fn grit_lib::error::Error::from(alloc::boxed::Box<grit_lib::remote::resumable::ResumableError>) -> Self
 impl core::convert::From<core::io::error::Error> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(core::io::error::Error) -> Self
 impl core::convert::From<grit_lib::command_runner::hooks::HookError> for grit_lib::error::Error
@@ -5840,6 +5844,8 @@ impl core::convert::From<grit_lib::error::Error> for grit_lib::remote::clone::Cl
 pub fn grit_lib::remote::clone::CloneError::from(grit_lib::error::Error) -> Self
 impl core::convert::From<grit_lib::error::Error> for grit_lib::remote::partial_clone::PartialCloneError
 pub fn grit_lib::remote::partial_clone::PartialCloneError::from(grit_lib::error::Error) -> Self
+impl core::convert::From<grit_lib::error::Error> for grit_lib::remote::resumable::ResumableError
+pub fn grit_lib::remote::resumable::ResumableError::from(grit_lib::error::Error) -> Self
 impl core::convert::From<grit_lib::error::Error> for grit_lib::remote::serve::ServeError
 pub fn grit_lib::remote::serve::ServeError::from(grit_lib::error::Error) -> Self
 impl core::convert::From<grit_lib::error::Error> for grit_lib::remote::serve::UnpackError
@@ -15868,6 +15874,7 @@ pub grit_lib::prelude::Error::RestoreConflictWithSource
 pub grit_lib::prelude::Error::RestoreConflictWithStaged
 pub grit_lib::prelude::Error::RestorePathUnmerged
 pub grit_lib::prelude::Error::RestorePathUnmerged::paths: alloc::vec::Vec<alloc::string::String>
+pub grit_lib::prelude::Error::Resumable(alloc::boxed::Box<grit_lib::remote::resumable::ResumableError>)
 pub grit_lib::prelude::Error::RevList(grit_lib::revwalk::rev_list_error::RevListError)
 pub grit_lib::prelude::Error::RevParse(grit_lib::revwalk::rev_parse_error::RevParseError)
 pub grit_lib::prelude::Error::RevisionNotFound(alloc::string::String)
@@ -15936,6 +15943,8 @@ pub fn grit_lib::error::Error::is_remote_unreadable(&self) -> bool
 pub fn grit_lib::error::Error::remote_unreadable(impl core::convert::Into<alloc::string::String>, grit_lib::error::RemoteUnreadableReason) -> Self
 pub fn grit_lib::error::Error::wants_fatal_prefix(&self) -> bool
 pub fn grit_lib::error::Error::would_overwrite(grit_lib::error::OverwriteReason, alloc::vec::Vec<alloc::string::String>) -> Self
+impl core::convert::From<alloc::boxed::Box<grit_lib::remote::resumable::ResumableError>> for grit_lib::error::Error
+pub fn grit_lib::error::Error::from(alloc::boxed::Box<grit_lib::remote::resumable::ResumableError>) -> Self
 impl core::convert::From<core::io::error::Error> for grit_lib::error::Error
 pub fn grit_lib::error::Error::from(core::io::error::Error) -> Self
 impl core::convert::From<grit_lib::command_runner::hooks::HookError> for grit_lib::error::Error
@@ -15974,6 +15983,8 @@ impl core::convert::From<grit_lib::error::Error> for grit_lib::remote::clone::Cl
 pub fn grit_lib::remote::clone::CloneError::from(grit_lib::error::Error) -> Self
 impl core::convert::From<grit_lib::error::Error> for grit_lib::remote::partial_clone::PartialCloneError
 pub fn grit_lib::remote::partial_clone::PartialCloneError::from(grit_lib::error::Error) -> Self
+impl core::convert::From<grit_lib::error::Error> for grit_lib::remote::resumable::ResumableError
+pub fn grit_lib::remote::resumable::ResumableError::from(grit_lib::error::Error) -> Self
 impl core::convert::From<grit_lib::error::Error> for grit_lib::remote::serve::ServeError
 pub fn grit_lib::remote::serve::ServeError::from(grit_lib::error::Error) -> Self
 impl core::convert::From<grit_lib::error::Error> for grit_lib::remote::serve::UnpackError
@@ -16928,6 +16939,7 @@ pub grit_lib::progress::ProgressPhase::CopyingObjects
 pub grit_lib::progress::ProgressPhase::IndexingObjects
 pub grit_lib::progress::ProgressPhase::ReceivingObjects
 pub grit_lib::progress::ProgressPhase::ResolvingDeltas
+pub grit_lib::progress::ProgressPhase::TransferringBundle
 impl grit_lib::progress::ProgressPhase
 pub fn grit_lib::progress::ProgressPhase::default_unit(self) -> grit_lib::progress::ProgressUnit
 impl core::clone::Clone for grit_lib::progress::ProgressPhase
@@ -19355,6 +19367,118 @@ pub fn grit_lib::refs::write_ref_cached(&std::path::Path, &str, &grit_lib::objec
 pub fn grit_lib::refs::write_ref_cas(&std::path::Path, &str, &grit_lib::objects::ObjectId, grit_lib::objects::ObjectId) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::write_symbolic_ref(&std::path::Path, &str, &str) -> grit_lib::error::Result<()>
 pub mod grit_lib::remote
+pub mod grit_lib::remote::bundle_uri
+pub enum grit_lib::remote::bundle_uri::BundleListMode
+pub grit_lib::remote::bundle_uri::BundleListMode::All
+pub grit_lib::remote::bundle_uri::BundleListMode::Any
+impl core::clone::Clone for grit_lib::remote::bundle_uri::BundleListMode
+pub fn grit_lib::remote::bundle_uri::BundleListMode::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::remote::bundle_uri::BundleListMode
+impl core::cmp::PartialEq for grit_lib::remote::bundle_uri::BundleListMode
+pub fn grit_lib::remote::bundle_uri::BundleListMode::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::remote::bundle_uri::BundleListMode
+pub fn grit_lib::remote::bundle_uri::BundleListMode::default() -> Self
+impl core::fmt::Debug for grit_lib::remote::bundle_uri::BundleListMode
+pub fn grit_lib::remote::bundle_uri::BundleListMode::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::remote::bundle_uri::BundleListMode
+impl core::marker::StructuralPartialEq for grit_lib::remote::bundle_uri::BundleListMode
+impl core::marker::Freeze for grit_lib::remote::bundle_uri::BundleListMode
+impl core::marker::Send for grit_lib::remote::bundle_uri::BundleListMode
+impl core::marker::Sync for grit_lib::remote::bundle_uri::BundleListMode
+impl core::marker::Unpin for grit_lib::remote::bundle_uri::BundleListMode
+impl core::marker::UnsafeUnpin for grit_lib::remote::bundle_uri::BundleListMode
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::bundle_uri::BundleListMode
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::bundle_uri::BundleListMode
+pub enum grit_lib::remote::bundle_uri::BundleSeed
+pub grit_lib::remote::bundle_uri::BundleSeed::Failed
+pub grit_lib::remote::bundle_uri::BundleSeed::Failed::reason: alloc::string::String
+pub grit_lib::remote::bundle_uri::BundleSeed::Failed::uri: core::option::Option<alloc::string::String>
+pub grit_lib::remote::bundle_uri::BundleSeed::NotOffered
+pub grit_lib::remote::bundle_uri::BundleSeed::Seeded(grit_lib::remote::bundle_uri::SeededBundle)
+impl core::clone::Clone for grit_lib::remote::bundle_uri::BundleSeed
+pub fn grit_lib::remote::bundle_uri::BundleSeed::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::remote::bundle_uri::BundleSeed
+impl core::cmp::PartialEq for grit_lib::remote::bundle_uri::BundleSeed
+pub fn grit_lib::remote::bundle_uri::BundleSeed::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::remote::bundle_uri::BundleSeed
+pub fn grit_lib::remote::bundle_uri::BundleSeed::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::remote::bundle_uri::BundleSeed
+impl core::marker::Freeze for grit_lib::remote::bundle_uri::BundleSeed
+impl core::marker::Send for grit_lib::remote::bundle_uri::BundleSeed
+impl core::marker::Sync for grit_lib::remote::bundle_uri::BundleSeed
+impl core::marker::Unpin for grit_lib::remote::bundle_uri::BundleSeed
+impl core::marker::UnsafeUnpin for grit_lib::remote::bundle_uri::BundleSeed
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::bundle_uri::BundleSeed
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::bundle_uri::BundleSeed
+pub struct grit_lib::remote::bundle_uri::BundleList
+pub grit_lib::remote::bundle_uri::BundleList::bundles: alloc::vec::Vec<grit_lib::remote::bundle_uri::BundleListEntry>
+pub grit_lib::remote::bundle_uri::BundleList::mode: grit_lib::remote::bundle_uri::BundleListMode
+impl grit_lib::remote::bundle_uri::BundleList
+pub fn grit_lib::remote::bundle_uri::BundleList::clone_bundle(&self) -> core::option::Option<&grit_lib::remote::bundle_uri::BundleListEntry>
+pub fn grit_lib::remote::bundle_uri::BundleList::parse<'a>(impl core::iter::traits::collect::IntoIterator<Item = &'a str>) -> grit_lib::error::Result<Self>
+pub fn grit_lib::remote::bundle_uri::BundleList::to_lines(&self) -> alloc::vec::Vec<alloc::string::String>
+impl core::clone::Clone for grit_lib::remote::bundle_uri::BundleList
+pub fn grit_lib::remote::bundle_uri::BundleList::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::remote::bundle_uri::BundleList
+impl core::cmp::PartialEq for grit_lib::remote::bundle_uri::BundleList
+pub fn grit_lib::remote::bundle_uri::BundleList::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::remote::bundle_uri::BundleList
+pub fn grit_lib::remote::bundle_uri::BundleList::default() -> Self
+impl core::fmt::Debug for grit_lib::remote::bundle_uri::BundleList
+pub fn grit_lib::remote::bundle_uri::BundleList::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::remote::bundle_uri::BundleList
+impl core::marker::Freeze for grit_lib::remote::bundle_uri::BundleList
+impl core::marker::Send for grit_lib::remote::bundle_uri::BundleList
+impl core::marker::Sync for grit_lib::remote::bundle_uri::BundleList
+impl core::marker::Unpin for grit_lib::remote::bundle_uri::BundleList
+impl core::marker::UnsafeUnpin for grit_lib::remote::bundle_uri::BundleList
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::bundle_uri::BundleList
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::bundle_uri::BundleList
+pub struct grit_lib::remote::bundle_uri::BundleListEntry
+pub grit_lib::remote::bundle_uri::BundleListEntry::creation_token: core::option::Option<u64>
+pub grit_lib::remote::bundle_uri::BundleListEntry::id: alloc::string::String
+pub grit_lib::remote::bundle_uri::BundleListEntry::uri: alloc::string::String
+impl core::clone::Clone for grit_lib::remote::bundle_uri::BundleListEntry
+pub fn grit_lib::remote::bundle_uri::BundleListEntry::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::remote::bundle_uri::BundleListEntry
+impl core::cmp::PartialEq for grit_lib::remote::bundle_uri::BundleListEntry
+pub fn grit_lib::remote::bundle_uri::BundleListEntry::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::remote::bundle_uri::BundleListEntry
+pub fn grit_lib::remote::bundle_uri::BundleListEntry::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::remote::bundle_uri::BundleListEntry
+impl core::marker::Freeze for grit_lib::remote::bundle_uri::BundleListEntry
+impl core::marker::Send for grit_lib::remote::bundle_uri::BundleListEntry
+impl core::marker::Sync for grit_lib::remote::bundle_uri::BundleListEntry
+impl core::marker::Unpin for grit_lib::remote::bundle_uri::BundleListEntry
+impl core::marker::UnsafeUnpin for grit_lib::remote::bundle_uri::BundleListEntry
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::bundle_uri::BundleListEntry
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::bundle_uri::BundleListEntry
+pub struct grit_lib::remote::bundle_uri::SeededBundle
+pub grit_lib::remote::bundle_uri::SeededBundle::bytes: u64
+pub grit_lib::remote::bundle_uri::SeededBundle::refs: alloc::vec::Vec<(alloc::string::String, grit_lib::objects::ObjectId)>
+pub grit_lib::remote::bundle_uri::SeededBundle::resumed_from: u64
+pub grit_lib::remote::bundle_uri::SeededBundle::transfer: grit_lib::remote::transfer::TransferStats
+pub grit_lib::remote::bundle_uri::SeededBundle::uri: alloc::string::String
+impl core::clone::Clone for grit_lib::remote::bundle_uri::SeededBundle
+pub fn grit_lib::remote::bundle_uri::SeededBundle::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::remote::bundle_uri::SeededBundle
+impl core::cmp::PartialEq for grit_lib::remote::bundle_uri::SeededBundle
+pub fn grit_lib::remote::bundle_uri::SeededBundle::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::remote::bundle_uri::SeededBundle
+pub fn grit_lib::remote::bundle_uri::SeededBundle::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::remote::bundle_uri::SeededBundle
+impl core::marker::Freeze for grit_lib::remote::bundle_uri::SeededBundle
+impl core::marker::Send for grit_lib::remote::bundle_uri::SeededBundle
+impl core::marker::Sync for grit_lib::remote::bundle_uri::SeededBundle
+impl core::marker::Unpin for grit_lib::remote::bundle_uri::SeededBundle
+impl core::marker::UnsafeUnpin for grit_lib::remote::bundle_uri::SeededBundle
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::bundle_uri::SeededBundle
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::bundle_uri::SeededBundle
+pub const grit_lib::remote::bundle_uri::BUNDLE_REFS_PREFIX: &str
+pub fn grit_lib::remote::bundle_uri::bundle_cache_path(&std::path::Path, &str) -> std::path::PathBuf
+pub fn grit_lib::remote::bundle_uri::fetch_bundle_list(&dyn grit_lib::remote::transport::http::HttpClient, &str) -> grit_lib::error::Result<core::option::Option<grit_lib::remote::bundle_uri::BundleList>>
+pub fn grit_lib::remote::bundle_uri::remove_bundle_refs(&grit_lib::repo::Repository) -> grit_lib::error::Result<()>
+pub fn grit_lib::remote::bundle_uri::seed_from_bundle_uri(&grit_lib::repo::Repository, &dyn grit_lib::remote::transport::http::HttpClient, &str, &std::path::Path, &mut dyn grit_lib::remote::fetch::Progress, &dyn grit_lib::progress::Cancel) -> grit_lib::remote::bundle_uri::BundleSeed
 pub mod grit_lib::remote::clone
 pub enum grit_lib::remote::clone::CloneCheckout
 pub grit_lib::remote::clone::CloneCheckout::CheckedOut(grit_lib::objects::ObjectId)
@@ -19454,6 +19578,7 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::clone::CloneTags
 pub struct grit_lib::remote::clone::CloneOptions
 pub grit_lib::remote::clone::CloneOptions::bare: bool
 pub grit_lib::remote::clone::CloneOptions::branch: core::option::Option<alloc::string::String>
+pub grit_lib::remote::clone::CloneOptions::bundle_cache: core::option::Option<std::path::PathBuf>
 pub grit_lib::remote::clone::CloneOptions::checkout: bool
 pub grit_lib::remote::clone::CloneOptions::depth: core::option::Option<u32>
 pub grit_lib::remote::clone::CloneOptions::dest: std::path::PathBuf
@@ -19479,6 +19604,7 @@ pub struct grit_lib::remote::clone::CloneOutcome
 pub grit_lib::remote::clone::CloneOutcome::bare: bool
 pub grit_lib::remote::clone::CloneOutcome::branches: u64
 pub grit_lib::remote::clone::CloneOutcome::branches_with_commits: alloc::vec::Vec<alloc::string::String>
+pub grit_lib::remote::clone::CloneOutcome::bundle: grit_lib::remote::bundle_uri::BundleSeed
 pub grit_lib::remote::clone::CloneOutcome::checkout: grit_lib::remote::clone::CloneCheckout
 pub grit_lib::remote::clone::CloneOutcome::checkout_oid: grit_lib::objects::ObjectId
 pub grit_lib::remote::clone::CloneOutcome::files: u64
@@ -19587,6 +19713,7 @@ impl grit_lib::remote::fetch::Progress for grit_lib::remote::fetch::NoProgress
 pub fn grit_lib::remote::fetch::NoProgress::message(&mut self, &[u8])
 pub fn grit_lib::remote::fetch::NoProgress::received_objects(&mut self, grit_lib::progress::ReceivedObjects)
 pub fn grit_lib::remote::fetch::NoProgress::remote_sideband_progress(&self) -> bool
+pub fn grit_lib::remote::fetch::NoProgress::resumable_transfer(&mut self, &grit_lib::remote::resumable::ResumableEvent)
 pub fn grit_lib::remote::fetch::NoProgress::wants_received_objects(&self) -> bool
 impl core::marker::Freeze for grit_lib::remote::fetch::NoProgress
 impl core::marker::Send for grit_lib::remote::fetch::NoProgress
@@ -19599,11 +19726,13 @@ pub trait grit_lib::remote::fetch::Progress: grit_lib::progress::ProgressSink
 pub fn grit_lib::remote::fetch::Progress::message(&mut self, &[u8])
 pub fn grit_lib::remote::fetch::Progress::received_objects(&mut self, grit_lib::progress::ReceivedObjects)
 pub fn grit_lib::remote::fetch::Progress::remote_sideband_progress(&self) -> bool
+pub fn grit_lib::remote::fetch::Progress::resumable_transfer(&mut self, &grit_lib::remote::resumable::ResumableEvent)
 pub fn grit_lib::remote::fetch::Progress::wants_received_objects(&self) -> bool
 impl grit_lib::remote::fetch::Progress for grit_lib::remote::fetch::NoProgress
 pub fn grit_lib::remote::fetch::NoProgress::message(&mut self, &[u8])
 pub fn grit_lib::remote::fetch::NoProgress::received_objects(&mut self, grit_lib::progress::ReceivedObjects)
 pub fn grit_lib::remote::fetch::NoProgress::remote_sideband_progress(&self) -> bool
+pub fn grit_lib::remote::fetch::NoProgress::resumable_transfer(&mut self, &grit_lib::remote::resumable::ResumableEvent)
 pub fn grit_lib::remote::fetch::NoProgress::wants_received_objects(&self) -> bool
 pub fn grit_lib::remote::fetch::fetch_operation_identity(&grit_lib::config::environment::Environment, &std::path::Path) -> grit_lib::error::Result<grit_lib::ident::Signature>
 pub fn grit_lib::remote::fetch::fetch_remote(&std::path::Path, &mut dyn grit_lib::remote::transport::Connection, &mut grit_lib::remote::transfer::FetchOptions, &mut dyn grit_lib::remote::fetch::Progress, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<grit_lib::remote::transfer::FetchOutcome>
@@ -20150,6 +20279,7 @@ pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::git_proto
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::post(&self, &str, &str, &str, &[u8], core::option::Option<&str>) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::post_into_reader(&self, &str, &str, &str, &[u8], core::option::Option<&str>) -> grit_lib::error::Result<alloc::boxed::Box<(dyn alloc::io::read::Read + core::marker::Send)>>
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::reset_auth_after_redirect_rebase(&self)
+pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::send(&self, &grit_lib::remote::transport::http::HttpRequest<'_>) -> grit_lib::error::Result<grit_lib::remote::transport::http::HttpResponse>
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::smart_http_enabled(&self) -> bool
 impl !core::marker::Freeze for grit_lib::remote::transport::http::ureq_client::UreqHttpClient
 impl core::marker::Send for grit_lib::remote::transport::http::ureq_client::UreqHttpClient
@@ -20166,6 +20296,7 @@ pub fn grit_lib::remote::http_client::HttpClient::git_protocol_header(&self) -> 
 pub fn grit_lib::remote::http_client::HttpClient::post(&self, &str, &str, &str, &[u8], core::option::Option<&str>) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
 pub fn grit_lib::remote::http_client::HttpClient::post_into_reader(&self, &str, &str, &str, &[u8], core::option::Option<&str>) -> grit_lib::error::Result<alloc::boxed::Box<(dyn alloc::io::read::Read + core::marker::Send)>>
 pub fn grit_lib::remote::http_client::HttpClient::reset_auth_after_redirect_rebase(&self)
+pub fn grit_lib::remote::http_client::HttpClient::send(&self, &grit_lib::remote::transport::http::HttpRequest<'_>) -> grit_lib::error::Result<grit_lib::remote::transport::http::HttpResponse>
 pub fn grit_lib::remote::http_client::HttpClient::smart_http_enabled(&self) -> bool
 impl grit_lib::remote::transport::http::HttpClient for alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>
 pub fn alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>::get(&self, &str, core::option::Option<&str>) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
@@ -20175,6 +20306,7 @@ pub fn alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>::
 pub fn alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>::post(&self, &str, &str, &str, &[u8], core::option::Option<&str>) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
 pub fn alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>::post_into_reader(&self, &str, &str, &str, &[u8], core::option::Option<&str>) -> grit_lib::error::Result<alloc::boxed::Box<(dyn alloc::io::read::Read + core::marker::Send)>>
 pub fn alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>::reset_auth_after_redirect_rebase(&self)
+pub fn alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>::send(&self, &grit_lib::remote::transport::http::HttpRequest<'_>) -> grit_lib::error::Result<grit_lib::remote::transport::http::HttpResponse>
 pub fn alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>::smart_http_enabled(&self) -> bool
 impl grit_lib::remote::transport::http::HttpClient for grit_lib::remote::transport::http::ureq_client::UreqHttpClient
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::get(&self, &str, core::option::Option<&str>) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
@@ -20184,6 +20316,7 @@ pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::git_proto
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::post(&self, &str, &str, &str, &[u8], core::option::Option<&str>) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::post_into_reader(&self, &str, &str, &str, &[u8], core::option::Option<&str>) -> grit_lib::error::Result<alloc::boxed::Box<(dyn alloc::io::read::Read + core::marker::Send)>>
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::reset_auth_after_redirect_rebase(&self)
+pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::send(&self, &grit_lib::remote::transport::http::HttpRequest<'_>) -> grit_lib::error::Result<grit_lib::remote::transport::http::HttpResponse>
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::smart_http_enabled(&self) -> bool
 impl<C: grit_lib::remote::transport::http::HttpClient> grit_lib::remote::transport::http::HttpClient for alloc::rcs::arc::Arc<C>
 pub fn alloc::rcs::arc::Arc<C>::get(&self, &str, core::option::Option<&str>) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
@@ -20193,6 +20326,7 @@ pub fn alloc::rcs::arc::Arc<C>::git_protocol_header(&self) -> core::option::Opti
 pub fn alloc::rcs::arc::Arc<C>::post(&self, &str, &str, &str, &[u8], core::option::Option<&str>) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
 pub fn alloc::rcs::arc::Arc<C>::post_into_reader(&self, &str, &str, &str, &[u8], core::option::Option<&str>) -> grit_lib::error::Result<alloc::boxed::Box<(dyn alloc::io::read::Read + core::marker::Send)>>
 pub fn alloc::rcs::arc::Arc<C>::reset_auth_after_redirect_rebase(&self)
+pub fn alloc::rcs::arc::Arc<C>::send(&self, &grit_lib::remote::transport::http::HttpRequest<'_>) -> grit_lib::error::Result<grit_lib::remote::transport::http::HttpResponse>
 pub fn alloc::rcs::arc::Arc<C>::smart_http_enabled(&self) -> bool
 pub mod grit_lib::remote::partial_clone
 pub enum grit_lib::remote::partial_clone::ObjectFilterSpec
@@ -20407,6 +20541,10 @@ pub fn grit_lib::remote::protocol_v2::server_advertises_bundle_uri(&[alloc::stri
 pub mod grit_lib::remote::push
 pub fn grit_lib::remote::push::push_http(alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>, &std::path::Path, &str, &[grit_lib::remote::transfer::PushRefSpec], &grit_lib::remote::transfer::PushOptions, &mut dyn grit_lib::remote::fetch::Progress, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<grit_lib::remote::transfer::PushOutcome>
 pub fn grit_lib::remote::push::push_remote(&std::path::Path, &mut dyn grit_lib::remote::transport::Connection, &[grit_lib::remote::transfer::PushRefSpec], &grit_lib::remote::transfer::PushOptions, &mut dyn grit_lib::remote::fetch::Progress, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<grit_lib::remote::transfer::PushOutcome>
+pub mod grit_lib::remote::push_bundle
+pub const grit_lib::remote::push_bundle::DEFAULT_THRESHOLD: u64
+pub const grit_lib::remote::push_bundle::RECEIVE_SUFFIX: &str
+pub fn grit_lib::remote::push_bundle::resolve_endpoint(&str, &str) -> core::option::Option<alloc::string::String>
 pub mod grit_lib::remote::push_plan
 pub enum grit_lib::remote::push_plan::ForceMode
 pub grit_lib::remote::push_plan::ForceMode::Force
@@ -20664,6 +20802,135 @@ pub fn grit_lib::remote::receive_pack::max_input_size_from_config(&grit_lib::con
 pub fn grit_lib::remote::receive_pack::pack_object_count(&[u8]) -> core::option::Option<u32>
 pub fn grit_lib::remote::receive_pack::receive_unpack_limit(&grit_lib::config::ConfigSet) -> i32
 pub fn grit_lib::remote::receive_pack::should_use_unpack_objects(&[u8], &grit_lib::config::ConfigSet) -> bool
+pub mod grit_lib::remote::resumable
+pub enum grit_lib::remote::resumable::ResumableError
+pub grit_lib::remote::resumable::ResumableError::Exhausted
+pub grit_lib::remote::resumable::ResumableError::Exhausted::attempts: u32
+pub grit_lib::remote::resumable::ResumableError::Exhausted::last: alloc::string::String
+pub grit_lib::remote::resumable::ResumableError::Exhausted::url: alloc::string::String
+pub grit_lib::remote::resumable::ResumableError::Http(alloc::boxed::Box<grit_lib::error::Error>)
+pub grit_lib::remote::resumable::ResumableError::Io(core::io::error::Error)
+pub grit_lib::remote::resumable::ResumableError::Protocol
+pub grit_lib::remote::resumable::ResumableError::Protocol::detail: alloc::string::String
+pub grit_lib::remote::resumable::ResumableError::Protocol::url: alloc::string::String
+pub grit_lib::remote::resumable::ResumableError::Status
+pub grit_lib::remote::resumable::ResumableError::Status::status: u16
+pub grit_lib::remote::resumable::ResumableError::Status::url: alloc::string::String
+impl core::convert::From<alloc::boxed::Box<grit_lib::remote::resumable::ResumableError>> for grit_lib::error::Error
+pub fn grit_lib::error::Error::from(alloc::boxed::Box<grit_lib::remote::resumable::ResumableError>) -> Self
+impl core::convert::From<core::io::error::Error> for grit_lib::remote::resumable::ResumableError
+pub fn grit_lib::remote::resumable::ResumableError::from(core::io::error::Error) -> Self
+impl core::convert::From<grit_lib::error::Error> for grit_lib::remote::resumable::ResumableError
+pub fn grit_lib::remote::resumable::ResumableError::from(grit_lib::error::Error) -> Self
+impl core::error::Error for grit_lib::remote::resumable::ResumableError
+pub fn grit_lib::remote::resumable::ResumableError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
+impl core::fmt::Debug for grit_lib::remote::resumable::ResumableError
+pub fn grit_lib::remote::resumable::ResumableError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::remote::resumable::ResumableError
+pub fn grit_lib::remote::resumable::ResumableError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::remote::resumable::ResumableError
+impl core::marker::Send for grit_lib::remote::resumable::ResumableError
+impl core::marker::Sync for grit_lib::remote::resumable::ResumableError
+impl core::marker::Unpin for grit_lib::remote::resumable::ResumableError
+impl core::marker::UnsafeUnpin for grit_lib::remote::resumable::ResumableError
+impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::resumable::ResumableError
+impl !core::panic::unwind_safe::UnwindSafe for grit_lib::remote::resumable::ResumableError
+pub enum grit_lib::remote::resumable::ResumableEvent
+pub grit_lib::remote::resumable::ResumableEvent::Advanced
+pub grit_lib::remote::resumable::ResumableEvent::Advanced::done: u64
+pub grit_lib::remote::resumable::ResumableEvent::Advanced::total: core::option::Option<u64>
+pub grit_lib::remote::resumable::ResumableEvent::Finished
+pub grit_lib::remote::resumable::ResumableEvent::Finished::done: u64
+pub grit_lib::remote::resumable::ResumableEvent::Finished::resumed_from: u64
+pub grit_lib::remote::resumable::ResumableEvent::Reconnecting
+pub grit_lib::remote::resumable::ResumableEvent::Reconnecting::attempt: u32
+pub grit_lib::remote::resumable::ResumableEvent::Reconnecting::done: u64
+pub grit_lib::remote::resumable::ResumableEvent::Started
+pub grit_lib::remote::resumable::ResumableEvent::Started::direction: grit_lib::remote::resumable::TransferDirection
+pub grit_lib::remote::resumable::ResumableEvent::Started::resumed_from: u64
+pub grit_lib::remote::resumable::ResumableEvent::Started::total: core::option::Option<u64>
+pub grit_lib::remote::resumable::ResumableEvent::Started::url: alloc::string::String
+impl core::clone::Clone for grit_lib::remote::resumable::ResumableEvent
+pub fn grit_lib::remote::resumable::ResumableEvent::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::remote::resumable::ResumableEvent
+impl core::cmp::PartialEq for grit_lib::remote::resumable::ResumableEvent
+pub fn grit_lib::remote::resumable::ResumableEvent::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::remote::resumable::ResumableEvent
+pub fn grit_lib::remote::resumable::ResumableEvent::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::remote::resumable::ResumableEvent
+impl core::marker::Freeze for grit_lib::remote::resumable::ResumableEvent
+impl core::marker::Send for grit_lib::remote::resumable::ResumableEvent
+impl core::marker::Sync for grit_lib::remote::resumable::ResumableEvent
+impl core::marker::Unpin for grit_lib::remote::resumable::ResumableEvent
+impl core::marker::UnsafeUnpin for grit_lib::remote::resumable::ResumableEvent
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::resumable::ResumableEvent
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::resumable::ResumableEvent
+pub enum grit_lib::remote::resumable::TransferDirection
+pub grit_lib::remote::resumable::TransferDirection::Download
+pub grit_lib::remote::resumable::TransferDirection::Upload
+impl core::clone::Clone for grit_lib::remote::resumable::TransferDirection
+pub fn grit_lib::remote::resumable::TransferDirection::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::remote::resumable::TransferDirection
+impl core::cmp::PartialEq for grit_lib::remote::resumable::TransferDirection
+pub fn grit_lib::remote::resumable::TransferDirection::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::remote::resumable::TransferDirection
+pub fn grit_lib::remote::resumable::TransferDirection::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::remote::resumable::TransferDirection
+impl core::marker::StructuralPartialEq for grit_lib::remote::resumable::TransferDirection
+impl core::marker::Freeze for grit_lib::remote::resumable::TransferDirection
+impl core::marker::Send for grit_lib::remote::resumable::TransferDirection
+impl core::marker::Sync for grit_lib::remote::resumable::TransferDirection
+impl core::marker::Unpin for grit_lib::remote::resumable::TransferDirection
+impl core::marker::UnsafeUnpin for grit_lib::remote::resumable::TransferDirection
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::resumable::TransferDirection
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::resumable::TransferDirection
+pub struct grit_lib::remote::resumable::DownloadOutcome
+pub grit_lib::remote::resumable::DownloadOutcome::bytes: u64
+pub grit_lib::remote::resumable::DownloadOutcome::resumed_from: u64
+impl core::clone::Clone for grit_lib::remote::resumable::DownloadOutcome
+pub fn grit_lib::remote::resumable::DownloadOutcome::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::remote::resumable::DownloadOutcome
+impl core::cmp::PartialEq for grit_lib::remote::resumable::DownloadOutcome
+pub fn grit_lib::remote::resumable::DownloadOutcome::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::remote::resumable::DownloadOutcome
+pub fn grit_lib::remote::resumable::DownloadOutcome::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::remote::resumable::DownloadOutcome
+impl core::marker::StructuralPartialEq for grit_lib::remote::resumable::DownloadOutcome
+impl core::marker::Freeze for grit_lib::remote::resumable::DownloadOutcome
+impl core::marker::Send for grit_lib::remote::resumable::DownloadOutcome
+impl core::marker::Sync for grit_lib::remote::resumable::DownloadOutcome
+impl core::marker::Unpin for grit_lib::remote::resumable::DownloadOutcome
+impl core::marker::UnsafeUnpin for grit_lib::remote::resumable::DownloadOutcome
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::resumable::DownloadOutcome
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::resumable::DownloadOutcome
+pub struct grit_lib::remote::resumable::TusUpload
+pub grit_lib::remote::resumable::TusUpload::length: u64
+pub grit_lib::remote::resumable::TusUpload::url: alloc::string::String
+impl grit_lib::remote::resumable::TusUpload
+pub fn grit_lib::remote::resumable::TusUpload::create(&dyn grit_lib::remote::transport::http::HttpClient, &str, u64) -> grit_lib::remote::resumable::Result<Self>
+pub fn grit_lib::remote::resumable::TusUpload::offset(&self, &dyn grit_lib::remote::transport::http::HttpClient) -> grit_lib::remote::resumable::Result<core::option::Option<u64>>
+pub fn grit_lib::remote::resumable::TusUpload::send_file(&self, &dyn grit_lib::remote::transport::http::HttpClient, &std::path::Path, &mut dyn grit_lib::remote::fetch::Progress) -> grit_lib::remote::resumable::Result<()>
+impl core::clone::Clone for grit_lib::remote::resumable::TusUpload
+pub fn grit_lib::remote::resumable::TusUpload::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::remote::resumable::TusUpload
+impl core::cmp::PartialEq for grit_lib::remote::resumable::TusUpload
+pub fn grit_lib::remote::resumable::TusUpload::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::remote::resumable::TusUpload
+pub fn grit_lib::remote::resumable::TusUpload::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::remote::resumable::TusUpload
+impl core::marker::Freeze for grit_lib::remote::resumable::TusUpload
+impl core::marker::Send for grit_lib::remote::resumable::TusUpload
+impl core::marker::Sync for grit_lib::remote::resumable::TusUpload
+impl core::marker::Unpin for grit_lib::remote::resumable::TusUpload
+impl core::marker::UnsafeUnpin for grit_lib::remote::resumable::TusUpload
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::resumable::TusUpload
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::resumable::TusUpload
+pub const grit_lib::remote::resumable::TUS_PATCH_CONTENT_TYPE: &str
+pub const grit_lib::remote::resumable::TUS_VERSION: &str
+pub fn grit_lib::remote::resumable::discard_download(&std::path::Path) -> core::io::error::Result<()>
+pub fn grit_lib::remote::resumable::download_resumable(&dyn grit_lib::remote::transport::http::HttpClient, &str, &std::path::Path, &mut dyn grit_lib::remote::fetch::Progress) -> grit_lib::remote::resumable::Result<grit_lib::remote::resumable::DownloadOutcome>
+pub fn grit_lib::remote::resumable::resolve_url(&str, &str) -> core::option::Option<alloc::string::String>
+pub type grit_lib::remote::resumable::Result<T> = core::result::Result<T, grit_lib::remote::resumable::ResumableError>
 pub mod grit_lib::remote::serve
 pub enum grit_lib::remote::serve::DeepenNotError
 pub grit_lib::remote::serve::DeepenNotError::AmbiguousRef
@@ -20904,8 +21171,10 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::serve::RefUpdate
 pub struct grit_lib::remote::serve::ServeOptions
 pub grit_lib::remote::serve::ServeOptions::advertise_refs: bool
 pub grit_lib::remote::serve::ServeOptions::agent: alloc::string::String
+pub grit_lib::remote::serve::ServeOptions::bundle_list: core::option::Option<grit_lib::remote::bundle_uri::BundleList>
 pub grit_lib::remote::serve::ServeOptions::hidden_refs: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::remote::serve::ServeOptions::protocol: grit_lib::remote::serve::ProtocolVersion
+pub grit_lib::remote::serve::ServeOptions::push_bundle: core::option::Option<alloc::string::String>
 pub grit_lib::remote::serve::ServeOptions::server_options: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::remote::serve::ServeOptions::stateless_rpc: bool
 impl core::clone::Clone for grit_lib::remote::serve::ServeOptions
@@ -20921,6 +21190,7 @@ impl core::marker::Unpin for grit_lib::remote::serve::ServeOptions
 impl core::marker::UnsafeUnpin for grit_lib::remote::serve::ServeOptions
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::serve::ServeOptions
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::serve::ServeOptions
+pub const grit_lib::remote::serve::PUSH_BUNDLE_CAPABILITY: &str
 pub trait grit_lib::remote::serve::ReceiveHook
 pub fn grit_lib::remote::serve::ReceiveHook::pre_receive(&self, &[grit_lib::remote::serve::RefCommand], &grit_lib::objects::odb::Odb) -> core::result::Result<(), grit_lib::remote::serve::RefUpdateRefusal>
 pub fn grit_lib::remote::serve::ReceiveHook::update(&self, &grit_lib::remote::serve::RefCommand, &grit_lib::objects::odb::Odb) -> core::result::Result<(), grit_lib::remote::serve::RefUpdateRefusal>
@@ -21241,6 +21511,7 @@ pub grit_lib::remote::transfer::PushOptions::dry_run: bool
 pub grit_lib::remote::transfer::PushOptions::network_trace: bool
 pub grit_lib::remote::transfer::PushOptions::push_options: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::remote::transfer::PushOptions::remote_ref_tips: core::option::Option<alloc::vec::Vec<grit_lib::objects::ObjectId>>
+pub grit_lib::remote::transfer::PushOptions::resumable_threshold: core::option::Option<u64>
 pub grit_lib::remote::transfer::PushOptions::tracking_remote: core::option::Option<alloc::string::String>
 impl core::clone::Clone for grit_lib::remote::transfer::PushOptions
 pub fn grit_lib::remote::transfer::PushOptions::clone(&self) -> Self
@@ -21366,6 +21637,7 @@ pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::git_proto
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::post(&self, &str, &str, &str, &[u8], core::option::Option<&str>) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::post_into_reader(&self, &str, &str, &str, &[u8], core::option::Option<&str>) -> grit_lib::error::Result<alloc::boxed::Box<(dyn alloc::io::read::Read + core::marker::Send)>>
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::reset_auth_after_redirect_rebase(&self)
+pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::send(&self, &grit_lib::remote::transport::http::HttpRequest<'_>) -> grit_lib::error::Result<grit_lib::remote::transport::http::HttpResponse>
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::smart_http_enabled(&self) -> bool
 impl !core::marker::Freeze for grit_lib::remote::transport::http::ureq_client::UreqHttpClient
 impl core::marker::Send for grit_lib::remote::transport::http::ureq_client::UreqHttpClient
@@ -21374,6 +21646,68 @@ impl core::marker::Unpin for grit_lib::remote::transport::http::ureq_client::Ure
 impl core::marker::UnsafeUnpin for grit_lib::remote::transport::http::ureq_client::UreqHttpClient
 impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::transport::http::ureq_client::UreqHttpClient
 impl !core::panic::unwind_safe::UnwindSafe for grit_lib::remote::transport::http::ureq_client::UreqHttpClient
+pub enum grit_lib::remote::transport::http::HttpMethod
+pub grit_lib::remote::transport::http::HttpMethod::Get
+pub grit_lib::remote::transport::http::HttpMethod::Head
+pub grit_lib::remote::transport::http::HttpMethod::Patch
+pub grit_lib::remote::transport::http::HttpMethod::Post
+impl grit_lib::remote::transport::http::HttpMethod
+pub fn grit_lib::remote::transport::http::HttpMethod::as_str(self) -> &'static str
+impl core::clone::Clone for grit_lib::remote::transport::http::HttpMethod
+pub fn grit_lib::remote::transport::http::HttpMethod::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::remote::transport::http::HttpMethod
+impl core::cmp::PartialEq for grit_lib::remote::transport::http::HttpMethod
+pub fn grit_lib::remote::transport::http::HttpMethod::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::remote::transport::http::HttpMethod
+pub fn grit_lib::remote::transport::http::HttpMethod::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::remote::transport::http::HttpMethod
+impl core::marker::StructuralPartialEq for grit_lib::remote::transport::http::HttpMethod
+impl core::marker::Freeze for grit_lib::remote::transport::http::HttpMethod
+impl core::marker::Send for grit_lib::remote::transport::http::HttpMethod
+impl core::marker::Sync for grit_lib::remote::transport::http::HttpMethod
+impl core::marker::Unpin for grit_lib::remote::transport::http::HttpMethod
+impl core::marker::UnsafeUnpin for grit_lib::remote::transport::http::HttpMethod
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::transport::http::HttpMethod
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::transport::http::HttpMethod
+pub struct grit_lib::remote::transport::http::HttpRequest<'a>
+pub grit_lib::remote::transport::http::HttpRequest::body: &'a [u8]
+pub grit_lib::remote::transport::http::HttpRequest::headers: alloc::vec::Vec<(&'static str, alloc::string::String)>
+pub grit_lib::remote::transport::http::HttpRequest::long_running: bool
+pub grit_lib::remote::transport::http::HttpRequest::method: grit_lib::remote::transport::http::HttpMethod
+pub grit_lib::remote::transport::http::HttpRequest::url: &'a str
+impl<'a> grit_lib::remote::transport::http::HttpRequest<'a>
+pub fn grit_lib::remote::transport::http::HttpRequest<'a>::body(self, &'a [u8]) -> Self
+pub fn grit_lib::remote::transport::http::HttpRequest<'a>::header(self, &'static str, impl core::convert::Into<alloc::string::String>) -> Self
+pub fn grit_lib::remote::transport::http::HttpRequest<'a>::long_running(self) -> Self
+pub fn grit_lib::remote::transport::http::HttpRequest<'a>::new(grit_lib::remote::transport::http::HttpMethod, &'a str) -> Self
+impl<'a> core::clone::Clone for grit_lib::remote::transport::http::HttpRequest<'a>
+pub fn grit_lib::remote::transport::http::HttpRequest<'a>::clone(&self) -> Self
+impl<'a> core::fmt::Debug for grit_lib::remote::transport::http::HttpRequest<'a>
+pub fn grit_lib::remote::transport::http::HttpRequest<'a>::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl<'a> core::marker::Freeze for grit_lib::remote::transport::http::HttpRequest<'a>
+impl<'a> core::marker::Send for grit_lib::remote::transport::http::HttpRequest<'a>
+impl<'a> core::marker::Sync for grit_lib::remote::transport::http::HttpRequest<'a>
+impl<'a> core::marker::Unpin for grit_lib::remote::transport::http::HttpRequest<'a>
+impl<'a> core::marker::UnsafeUnpin for grit_lib::remote::transport::http::HttpRequest<'a>
+impl<'a> core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::transport::http::HttpRequest<'a>
+impl<'a> core::panic::unwind_safe::UnwindSafe for grit_lib::remote::transport::http::HttpRequest<'a>
+pub struct grit_lib::remote::transport::http::HttpResponse
+pub grit_lib::remote::transport::http::HttpResponse::body: alloc::boxed::Box<(dyn alloc::io::read::Read + core::marker::Send)>
+pub grit_lib::remote::transport::http::HttpResponse::headers: alloc::vec::Vec<(alloc::string::String, alloc::string::String)>
+pub grit_lib::remote::transport::http::HttpResponse::status: u16
+impl grit_lib::remote::transport::http::HttpResponse
+pub fn grit_lib::remote::transport::http::HttpResponse::header(&self, &str) -> core::option::Option<&str>
+pub fn grit_lib::remote::transport::http::HttpResponse::into_bytes(self) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
+pub fn grit_lib::remote::transport::http::HttpResponse::is_success(&self) -> bool
+impl core::fmt::Debug for grit_lib::remote::transport::http::HttpResponse
+pub fn grit_lib::remote::transport::http::HttpResponse::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::remote::transport::http::HttpResponse
+impl core::marker::Send for grit_lib::remote::transport::http::HttpResponse
+impl !core::marker::Sync for grit_lib::remote::transport::http::HttpResponse
+impl core::marker::Unpin for grit_lib::remote::transport::http::HttpResponse
+impl core::marker::UnsafeUnpin for grit_lib::remote::transport::http::HttpResponse
+impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::transport::http::HttpResponse
+impl !core::panic::unwind_safe::UnwindSafe for grit_lib::remote::transport::http::HttpResponse
 pub struct grit_lib::remote::transport::http::SmartHttpTransport<C: grit_lib::remote::transport::http::HttpClient>
 impl<C: grit_lib::remote::transport::http::HttpClient + core::clone::Clone + 'static> grit_lib::remote::transport::http::SmartHttpTransport<C>
 pub fn grit_lib::remote::transport::http::SmartHttpTransport<C>::client(&self) -> &C
@@ -21396,6 +21730,7 @@ pub fn grit_lib::remote::transport::http::HttpClient::git_protocol_header(&self)
 pub fn grit_lib::remote::transport::http::HttpClient::post(&self, &str, &str, &str, &[u8], core::option::Option<&str>) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
 pub fn grit_lib::remote::transport::http::HttpClient::post_into_reader(&self, &str, &str, &str, &[u8], core::option::Option<&str>) -> grit_lib::error::Result<alloc::boxed::Box<(dyn alloc::io::read::Read + core::marker::Send)>>
 pub fn grit_lib::remote::transport::http::HttpClient::reset_auth_after_redirect_rebase(&self)
+pub fn grit_lib::remote::transport::http::HttpClient::send(&self, &grit_lib::remote::transport::http::HttpRequest<'_>) -> grit_lib::error::Result<grit_lib::remote::transport::http::HttpResponse>
 pub fn grit_lib::remote::transport::http::HttpClient::smart_http_enabled(&self) -> bool
 impl grit_lib::remote::transport::http::HttpClient for alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>
 pub fn alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>::get(&self, &str, core::option::Option<&str>) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
@@ -21405,6 +21740,7 @@ pub fn alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>::
 pub fn alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>::post(&self, &str, &str, &str, &[u8], core::option::Option<&str>) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
 pub fn alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>::post_into_reader(&self, &str, &str, &str, &[u8], core::option::Option<&str>) -> grit_lib::error::Result<alloc::boxed::Box<(dyn alloc::io::read::Read + core::marker::Send)>>
 pub fn alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>::reset_auth_after_redirect_rebase(&self)
+pub fn alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>::send(&self, &grit_lib::remote::transport::http::HttpRequest<'_>) -> grit_lib::error::Result<grit_lib::remote::transport::http::HttpResponse>
 pub fn alloc::rcs::arc::Arc<dyn grit_lib::remote::transport::http::HttpClient>::smart_http_enabled(&self) -> bool
 impl grit_lib::remote::transport::http::HttpClient for grit_lib::remote::transport::http::ureq_client::UreqHttpClient
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::get(&self, &str, core::option::Option<&str>) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
@@ -21414,6 +21750,7 @@ pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::git_proto
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::post(&self, &str, &str, &str, &[u8], core::option::Option<&str>) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::post_into_reader(&self, &str, &str, &str, &[u8], core::option::Option<&str>) -> grit_lib::error::Result<alloc::boxed::Box<(dyn alloc::io::read::Read + core::marker::Send)>>
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::reset_auth_after_redirect_rebase(&self)
+pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::send(&self, &grit_lib::remote::transport::http::HttpRequest<'_>) -> grit_lib::error::Result<grit_lib::remote::transport::http::HttpResponse>
 pub fn grit_lib::remote::transport::http::ureq_client::UreqHttpClient::smart_http_enabled(&self) -> bool
 impl<C: grit_lib::remote::transport::http::HttpClient> grit_lib::remote::transport::http::HttpClient for alloc::rcs::arc::Arc<C>
 pub fn alloc::rcs::arc::Arc<C>::get(&self, &str, core::option::Option<&str>) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
@@ -21423,6 +21760,7 @@ pub fn alloc::rcs::arc::Arc<C>::git_protocol_header(&self) -> core::option::Opti
 pub fn alloc::rcs::arc::Arc<C>::post(&self, &str, &str, &str, &[u8], core::option::Option<&str>) -> grit_lib::error::Result<alloc::vec::Vec<u8>>
 pub fn alloc::rcs::arc::Arc<C>::post_into_reader(&self, &str, &str, &str, &[u8], core::option::Option<&str>) -> grit_lib::error::Result<alloc::boxed::Box<(dyn alloc::io::read::Read + core::marker::Send)>>
 pub fn alloc::rcs::arc::Arc<C>::reset_auth_after_redirect_rebase(&self)
+pub fn alloc::rcs::arc::Arc<C>::send(&self, &grit_lib::remote::transport::http::HttpRequest<'_>) -> grit_lib::error::Result<grit_lib::remote::transport::http::HttpResponse>
 pub fn alloc::rcs::arc::Arc<C>::smart_http_enabled(&self) -> bool
 pub fn grit_lib::remote::transport::http::discover_upload_pack(&dyn grit_lib::remote::transport::http::HttpClient, &str, core::option::Option<&str>) -> grit_lib::error::Result<grit_lib::remote::transport::http::UploadPackDiscovery>
 pub fn grit_lib::remote::transport::http::discover_upload_pack_exact(&dyn grit_lib::remote::transport::http::HttpClient, &str, core::option::Option<&str>) -> grit_lib::error::Result<grit_lib::remote::transport::http::UploadPackDiscovery>
@@ -21946,6 +22284,7 @@ pub fn grit_lib::remote::Remote::list_push_refs(&self, &grit_lib::repo::Reposito
 pub fn grit_lib::remote::Remote::list_refs(&self, core::option::Option<&grit_lib::repo::Repository>, &grit_lib::remote::ListRefsOptions, core::option::Option<&dyn grit_lib::remote::HttpClientFactory>) -> grit_lib::remote::RemoteResult<alloc::vec::Vec<grit_lib::remote::RemoteRef>>
 pub fn grit_lib::remote::Remote::push(&self, &grit_lib::repo::Repository, &[grit_lib::remote::transfer::PushRefSpec], grit_lib::remote::transfer::PushOptions, &mut dyn grit_lib::remote::fetch::Progress, &dyn grit_lib::progress::Cancel, core::option::Option<&dyn grit_lib::remote::HttpClientFactory>) -> grit_lib::remote::RemoteResult<grit_lib::remote::transfer::PushOutcome>
 pub fn grit_lib::remote::Remote::push_url(&self) -> &grit_lib::remote::RemoteUrl
+pub fn grit_lib::remote::Remote::seed_from_bundle_uri(&self, &grit_lib::repo::Repository, &std::path::Path, &mut dyn grit_lib::remote::fetch::Progress, &dyn grit_lib::progress::Cancel, core::option::Option<&dyn grit_lib::remote::HttpClientFactory>) -> grit_lib::remote::bundle_uri::BundleSeed
 impl core::clone::Clone for grit_lib::remote::Remote
 pub fn grit_lib::remote::Remote::clone(&self) -> Self
 impl core::fmt::Debug for grit_lib::remote::Remote

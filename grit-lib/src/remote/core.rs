@@ -501,6 +501,13 @@ impl Remote {
         if opts.tracking_remote.is_none() {
             opts.tracking_remote = self.name.clone();
         }
+        if opts.resumable_threshold.is_none() {
+            opts.resumable_threshold = repo
+                .config()
+                .ok()
+                .and_then(|c| c.get_i64("push.bundleThreshold").and_then(|r| r.ok()))
+                .and_then(|v| u64::try_from(v).ok());
+        }
         self.dispatch_push(
             repo,
             self.push_url(),
@@ -515,6 +522,60 @@ impl Remote {
                 network_trace: repo.network_trace_enabled(),
                 ..Default::default()
             },
+        )
+    }
+
+    /// Seed the empty repository `repo` from the bundle this remote advertises
+    /// with `bundle-uri` (see [`crate::bundle_uri::seed_from_bundle_uri`]).
+    ///
+    /// Only smart-HTTP remotes advertise bundles; other transports, and
+    /// `transfer.bundleURI=false` in `repo`'s config, give
+    /// [`BundleSeed::NotOffered`](crate::bundle_uri::BundleSeed::NotOffered).
+    ///
+    /// # Parameters
+    ///
+    /// - `repo`: the new repository the clone is filling.
+    /// - `cache_dir`: where bundle downloads are kept between attempts.
+    /// - `progress`: receives the download and unpack progress.
+    /// - `cancel`: checked while the bundle is unpacked.
+    /// - `http_factory`: builds the HTTP client, as for [`Self::fetch`].
+    #[must_use]
+    pub fn seed_from_bundle_uri(
+        &self,
+        repo: &Repository,
+        cache_dir: &Path,
+        progress: &mut dyn Progress,
+        cancel: &dyn crate::progress::Cancel,
+        http_factory: Option<&dyn HttpClientFactory>,
+    ) -> crate::bundle_uri::BundleSeed {
+        use crate::bundle_uri::BundleSeed;
+        let (RemoteUrl::Http(url) | RemoteUrl::Https(url)) = &self.fetch_url else {
+            return BundleSeed::NotOffered;
+        };
+        let enabled = repo
+            .config()
+            .ok()
+            .and_then(|c| c.get_bool("transfer.bundleURI").and_then(|r| r.ok()))
+            .unwrap_or(true);
+        if !enabled {
+            return BundleSeed::NotOffered;
+        }
+        let client = match http_client(http_factory, repo) {
+            Ok(c) => c,
+            Err(e) => {
+                return BundleSeed::Failed {
+                    uri: None,
+                    reason: e.to_string(),
+                }
+            }
+        };
+        crate::bundle_uri::seed_from_bundle_uri(
+            repo,
+            client.as_ref(),
+            url,
+            cache_dir,
+            progress,
+            cancel,
         )
     }
 
@@ -661,10 +722,19 @@ impl Remote {
             }
             RemoteUrl::Http(u) | RemoteUrl::Https(u) => {
                 let client: Arc<dyn HttpClient> = Arc::from(http_client(http_factory, repo)?);
-                let transport = SmartHttpTransport::new(client);
+                let transport = SmartHttpTransport::new(client.clone());
                 let mut conn = transport.connect(u, Service::ReceivePack, &connect)?;
-                Ok(push_remote_from(
-                    repo, &mut *conn, refs, opts, progress, cancel,
+                Ok(crate::push::push_remote_with(
+                    repo,
+                    &mut *conn,
+                    refs,
+                    opts,
+                    progress,
+                    cancel,
+                    Some(crate::push::BundlePushTarget {
+                        client: client.as_ref(),
+                        repo_url: u,
+                    }),
                 )?)
             }
             RemoteUrl::Git(u) => {

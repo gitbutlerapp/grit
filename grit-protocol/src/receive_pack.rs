@@ -8,7 +8,7 @@ use std::path::Path;
 
 use grit_lib::config::environment::RepositoryOptions;
 
-use crate::{run_receive_pack, Result};
+use crate::{run_receive_pack, Extensions, Result};
 
 /// Run receive-pack ref advertisement (for `GET /info/refs?service=git-receive-pack`).
 ///
@@ -29,6 +29,27 @@ pub fn advertise_refs(repo_path: &Path, repository_options: &RepositoryOptions) 
         true,
         &mut std::io::empty(),
         repository_options,
+        &Extensions::default(),
+    )
+}
+
+/// [`advertise_refs`] with [`Extensions`] (a `pushBundle` endpoint).
+///
+/// # Errors
+///
+/// Same as [`advertise_refs`].
+pub fn advertise_refs_with(
+    repo_path: &Path,
+    repository_options: &RepositoryOptions,
+    extensions: &Extensions,
+) -> Result<Vec<u8>> {
+    run_receive_pack(
+        repo_path,
+        false,
+        true,
+        &mut std::io::empty(),
+        repository_options,
+        extensions,
     )
 }
 
@@ -78,5 +99,12 @@ pub fn stateless_rpc_from_reader(
     request_body: &mut dyn Read,
     repository_options: &RepositoryOptions,
 ) -> Result<Vec<u8>> {
-    run_receive_pack(repo_path, true, false, request_body, repository_options)
+    run_receive_pack(
+        repo_path,
+        true,
+        false,
+        request_body,
+        repository_options,
+        &Extensions::default(),
+    )
 }
