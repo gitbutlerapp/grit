@@ -547,7 +547,8 @@ pub fn print_fetch_updates(
     Ok(())
 }
 
-fn short_hex(oid: &str) -> &str {
+/// First seven hex digits of `oid` (all of it when shorter).
+pub(crate) fn short_hex(oid: &str) -> &str {
     oid.get(..7).unwrap_or(oid)
 }
 
@@ -1192,7 +1193,7 @@ pub fn print_switch_outcome(w: &mut dyn Write, outcome: &SwitchOutcome) -> anyho
             outcome.target_label(),
             outcome.changed_paths.unwrap_or(0)
         );
-        return Ok(());
+        return print_switch_stranded(w, outcome);
     }
     match outcome.branch.as_deref() {
         None => outln!(w, "- HEAD detached at `{}`", outcome.target_label()),
@@ -1201,6 +1202,34 @@ pub fn print_switch_outcome(w: &mut dyn Write, outcome: &SwitchOutcome) -> anyho
         }
         Some(branch) => outln!(w, "- Switched to **`{branch}`**"),
     }
+    print_switch_stranded(w, outcome)
+}
+
+fn print_switch_stranded(w: &mut dyn Write, outcome: &SwitchOutcome) -> anyhow::Result<()> {
+    let Some(newest) = outcome.stranded_commits.first() else {
+        return Ok(());
+    };
+    let count = outcome.stranded_total;
+    let (noun, them) = if count == 1 {
+        ("commit", "it")
+    } else {
+        ("commits", "them")
+    };
+    let would = if outcome.dry_run { " would be" } else { "" };
+    outln!(w);
+    outln!(
+        w,
+        "> **Warning:** {count} {noun}{would} left behind, not on any branch:"
+    );
+    outln!(w);
+    for commit in &outcome.stranded_commits {
+        outln!(w, "- `{}` {}", short_hex(&commit.oid), commit.subject);
+    }
+    if outcome.stranded_truncated {
+        outln!(w, "- … and {} more", count - outcome.stranded_commits.len());
+    }
+    outln!(w);
+    outln!(w, "Keep {them} with `grit branch <name> {}`.", newest.oid);
     Ok(())
 }
 

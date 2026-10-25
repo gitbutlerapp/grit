@@ -38,6 +38,8 @@ When `<branch>` names a remote-tracking branch (for example `origin/feature`), G
 
 In a sparse checkout (`git sparse-checkout`), only paths inside the sparse patterns are written to the worktree. Paths outside them are recorded in the index with the skip-worktree bit, the same as `git switch`. The same applies to [`grit merge`](../merge/), [`grit pull`](../pull/) and [`grit reset`](../reset/).
 
+Leaving a detached `HEAD` that carries commits of its own (made with `grit commit` after `--detach`) would leave those commits on no branch, recoverable only through `grit reflog` until garbage collection removes them. Grit still switches, but warns on stderr with the commits it leaves behind (newest first, up to 20) and a `grit branch <name> <oid>` command that keeps them. A commit counts as left behind when no ref, the stash, another worktree's `HEAD`, or the switch destination reaches it, so `grit switch -c <new>` from the detached commit leaves nothing behind. `--dry-run` reports the same list without switching. Leaving a branch never warns: the branch still holds its commits.
+
 Updating the working tree uses parallel checkout when the change set is large enough; tune [`checkout.workers`](../../library/parallelism.md) and `checkout.thresholdForParallelism`. On non-Windows hosts, global [`--threads`](../global-options.md) can cap checkout workers for this run; on **Windows**, checkout stays serial until `checkout.workers` is set in config (see [parallelism](../../library/parallelism.md)).
 
 ## Options
@@ -71,6 +73,16 @@ HEAD detached at a1b2c3d
 
 $ grit switch other --dry-run
 Would switch to other (3 path(s) would change)
+```
+
+When you leave a detached `HEAD` with commits no branch holds:
+
+```console
+$ grit switch main
+Switched to branch main
+Warning: 1 commit left behind, not on any branch:
+  85ffcb0 work done on detached HEAD
+Keep it on a branch with: grit branch <name> 85ffcb090615556eb238400c577de383ca034213
 ```
 
 When local changes would conflict with the destination branch:
@@ -108,6 +120,9 @@ Pass `--json` for stable, scripting-friendly output:
 | `commit` | string or null | Full hex oid when `detached` is true; omitted when attached. |
 | `dry_run` | boolean | `true` when `--dry-run` was used (omitted when false). |
 | `changed_paths` | integer or null | With `--dry-run`, count of paths that would differ after checkout. |
+| `stranded_commits` | array | Commits only the previous detached `HEAD` reached, newest first, at most 20. Each has `oid`, `change_id` and `subject`. Omitted when nothing is left behind. |
+| `stranded_total` | integer | Total commits left behind (may exceed the length of `stranded_commits`). Omitted when zero. |
+| `stranded_truncated` | boolean | `true` when `stranded_commits` was capped (omitted when false). |
 
 Example (branch switch):
 
@@ -142,6 +157,24 @@ Example (detached):
 }
 ```
 
+Example (leaving a detached `HEAD` with one commit of its own):
+
+```json
+{
+  "branch": "main",
+  "created": false,
+  "detached": false,
+  "stranded_commits": [
+    {
+      "oid": "85ffcb090615556eb238400c577de383ca034213",
+      "change_id": "zrmsknstkznuqxynsolvwoovmolrxwum",
+      "subject": "work done on detached HEAD"
+    }
+  ],
+  "stranded_total": 1
+}
+```
+
 On overwrite refusal with `--json`, stdout is a single object with `kind` `would_overwrite` and `would_overwrite.reason` (`local_changes` or `untracked`) plus a sorted `paths` array. See the [error schema](/schemas/error/v1.json).
 
 While a merge, rebase, pick or revert is paused, the refusal is `{"error": "interactive rebase in progress", "kind": "operation_in_progress"}` (the `error` names the paused operation).
@@ -171,6 +204,18 @@ Detached HEAD:
 
 ```text
 - HEAD detached at `9244cbd`
+```
+
+Leaving commits behind adds a warning block after the summary line:
+
+```text
+- Switched to **`main`**
+
+> **Warning:** 1 commit left behind, not on any branch:
+
+- `85ffcb0` work done on detached HEAD
+
+Keep it with `grit branch <name> 85ffcb090615556eb238400c577de383ca034213`.
 ```
 
 

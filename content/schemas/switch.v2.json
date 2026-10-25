@@ -1,6 +1,28 @@
 {
   "$id": "https://grit-scm.com/schemas/switch/v2.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "definitions": {
+    "OrphanedCommitJson": {
+      "description": "One commit left unreachable by a reset, or by switching away from a detached `HEAD`.",
+      "properties": {
+        "change_id": {
+          "type": "string"
+        },
+        "oid": {
+          "type": "string"
+        },
+        "subject": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "change_id",
+        "oid",
+        "subject"
+      ],
+      "type": "object"
+    }
+  },
   "description": "Result of `grit switch`.",
   "properties": {
     "branch": {
@@ -31,6 +53,22 @@
       "type": "boolean"
     },
     "dry_run": {
+      "type": "boolean"
+    },
+    "stranded_commits": {
+      "description": "Newest-first commits only the previous detached `HEAD` reached (capped at 20).",
+      "items": {
+        "$ref": "#/definitions/OrphanedCommitJson"
+      },
+      "type": "array"
+    },
+    "stranded_total": {
+      "description": "Total commits left behind; may exceed `stranded_commits` when truncated.",
+      "format": "uint",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "stranded_truncated": {
       "type": "boolean"
     }
   },

@@ -11,9 +11,10 @@ use schemars::JsonSchema;
 use serde::Serialize;
 use std::io::Write;
 
+use crate::commands::reset::OrphanedCommitJson;
 use crate::context;
 use crate::json_error;
-use crate::markdown;
+use crate::markdown::{self, short_hex};
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 
 fn is_false(value: &bool) -> bool {
@@ -36,10 +37,64 @@ pub struct SwitchOutcome {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(skip_serializing_if = "Option::is_none")]
     pub changed_paths: Option<usize>,
+    /// Newest-first commits only the previous detached `HEAD` reached (capped at 20).
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(default)]
+    pub stranded_commits: Vec<OrphanedCommitJson>,
+    /// Total commits left behind; may exceed `stranded_commits` when truncated.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    #[schemars(default)]
+    pub stranded_total: usize,
+    #[serde(default, skip_serializing_if = "is_false")]
+    #[schemars(default)]
+    pub stranded_truncated: bool,
+}
+
+fn is_zero(value: &usize) -> bool {
+    *value == 0
+}
+
+impl SwitchOutcome {
+    /// Warn on stderr that commits were (or would be) left behind, with a command to keep them.
+    fn warn_stranded(&self) {
+        let Some(newest) = self.stranded_commits.first() else {
+            return;
+        };
+        let count = self.stranded_total;
+        let (noun, them) = if count == 1 {
+            ("commit", "it")
+        } else {
+            ("commits", "them")
+        };
+        let would = if self.dry_run { " would be" } else { "" };
+        eprintln!("Warning: {count} {noun}{would} left behind, not on any branch:");
+        for commit in &self.stranded_commits {
+            eprintln!("  {} {}", short_hex(&commit.oid), commit.subject);
+        }
+        if self.stranded_truncated {
+            eprintln!("  … and {} more", count - self.stranded_commits.len());
+        }
+        eprintln!(
+            "Keep {them} on a branch with: grit branch <name> {}",
+            newest.oid
+        );
+    }
 }
 
 impl HumanRender for SwitchOutcome {
     fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
+        self.render_switch_line(w)?;
+        if !self.stranded_commits.is_empty() {
+            crate::stdio::io_result(w.flush())
+                .map_err(|e| anyhow::anyhow!("writing output: {e}"))?;
+            self.warn_stranded();
+        }
+        Ok(())
+    }
+}
+
+impl SwitchOutcome {
+    fn render_switch_line(&self, w: &mut dyn Write) -> Result<()> {
         if self.dry_run {
             outln!(
                 w,
@@ -130,5 +185,12 @@ pub fn run(
         commit: detached.then(|| outcome.commit.to_hex()),
         dry_run: outcome.dry_run,
         changed_paths: outcome.dry_run.then_some(outcome.changed_paths),
+        stranded_commits: outcome
+            .stranded_commits
+            .into_iter()
+            .map(Into::into)
+            .collect(),
+        stranded_total: outcome.stranded_total,
+        stranded_truncated: outcome.stranded_truncated,
     })
 }

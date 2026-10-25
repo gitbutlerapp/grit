@@ -3,7 +3,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "definitions": {
     "OrphanedCommitJson": {
-      "description": "One commit that would become unreachable after the reset.",
+      "description": "One commit left unreachable by a reset, or by switching away from a detached `HEAD`.",
       "properties": {
         "change_id": {
           "type": "string"

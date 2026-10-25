@@ -4,7 +4,8 @@ use anyhow::{Context, Result};
 use grit_lib::config::ConfigSet;
 use grit_lib::error::Error;
 use grit_lib::porcelain::reset::{
-    reset_to_commit, ResetMode, ResetOptions, ResetOutcome, DEFAULT_ORPHAN_LIMIT,
+    reset_to_commit, OrphanedCommitSummary, ResetMode, ResetOptions, ResetOutcome,
+    DEFAULT_ORPHAN_LIMIT,
 };
 use grit_lib::revwalk::rev_parse::resolve_revision_as_commit_without_index_dwim;
 use schemars::JsonSchema;
@@ -35,12 +36,22 @@ impl From<ResetMode> for ResetCliMode {
     }
 }
 
-/// One commit that would become unreachable after the reset.
+/// One commit left unreachable by a reset, or by switching away from a detached `HEAD`.
 #[derive(Serialize, JsonSchema)]
 pub struct OrphanedCommitJson {
     pub oid: String,
     pub change_id: String,
     pub subject: String,
+}
+
+impl From<OrphanedCommitSummary> for OrphanedCommitJson {
+    fn from(c: OrphanedCommitSummary) -> Self {
+        Self {
+            oid: c.oid.to_hex(),
+            change_id: c.change_id,
+            subject: c.subject,
+        }
+    }
 }
 
 /// CLI view of [`ResetOutcome`].
@@ -68,15 +79,7 @@ impl From<ResetOutcome> for ResetCliOutcome {
             dry_run: value.dry_run,
             would_overwrite: value.would_overwrite,
             would_block: value.would_block,
-            orphaned_commits: value
-                .orphaned_commits
-                .into_iter()
-                .map(|c| OrphanedCommitJson {
-                    oid: c.oid.to_hex(),
-                    change_id: c.change_id,
-                    subject: c.subject,
-                })
-                .collect(),
+            orphaned_commits: value.orphaned_commits.into_iter().map(Into::into).collect(),
             orphaned_total: value.orphaned_total,
             orphaned_truncated: value.orphaned_truncated,
         }
