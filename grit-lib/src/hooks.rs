@@ -8,7 +8,7 @@ use crate::command_runner::{
     CommandStdio, RunningCommand, ShellInvocation,
 };
 use crate::config::{parse_path, ConfigSet};
-use crate::git_path::path_without_verbatim_prefix;
+use crate::git_path::{path_without_verbatim_prefix, strip_verbatim_path_prefix_str};
 use crate::objects::ObjectId;
 use crate::repo::Repository;
 use crate::state::HeadState;
@@ -456,31 +456,43 @@ fn is_wsl_launcher_dir(dir: &Path) -> bool {
     })
 }
 
+/// Program that runs a hook script, and the Git for Windows installation it belongs to.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ScriptInterpreter {
+    program: PathBuf,
+    /// Installation root (e.g. `C:\Program Files\Git`) when `program` was found inside one.
+    git_root: Option<PathBuf>,
+}
+
+impl ScriptInterpreter {
+    fn bare(program: impl Into<PathBuf>) -> Self {
+        Self {
+            program: program.into(),
+            git_root: None,
+        }
+    }
+}
+
 /// Resolve the interpreter `name` (`sh`, `bash`, …) for running a hook script.
 ///
 /// Looks first in the Git for Windows tree that owns a `git` found on `path_var`
 /// (`<root>/usr/bin`, `<root>/bin`), as Git for Windows puts those ahead of `PATH` for hooks,
 /// then on `path_var` itself, skipping the WSL launcher directories. Falls back to the bare
 /// name so the OS search applies.
-fn resolve_script_interpreter(name: &str, path_var: Option<&std::ffi::OsStr>) -> PathBuf {
+fn resolve_script_interpreter(name: &str, path_var: Option<&std::ffi::OsStr>) -> ScriptInterpreter {
     let Some(path_var) = path_var else {
-        return PathBuf::from(name);
+        return ScriptInterpreter::bare(name);
     };
     let in_git_tree = || {
         let git = find_program_in_path("git", path_var)?;
-        let bin_dir = git.parent()?.to_path_buf();
-        let roots: Vec<PathBuf> = bin_dir
-            .ancestors()
-            .skip(1)
-            .take(2)
-            .map(Path::to_path_buf)
-            .collect();
-        find_program_in_dirs(
-            name,
-            roots
-                .iter()
-                .flat_map(|root| [root.join("usr").join("bin"), root.join("bin")]),
-        )
+        git.parent()?.ancestors().skip(1).take(2).find_map(|root| {
+            let program =
+                find_program_in_dirs(name, [root.join("usr").join("bin"), root.join("bin")])?;
+            Some(ScriptInterpreter {
+                program,
+                git_root: Some(root.to_path_buf()),
+            })
+        })
     };
     in_git_tree()
         .or_else(|| {
@@ -488,8 +500,33 @@ fn resolve_script_interpreter(name: &str, path_var: Option<&std::ffi::OsStr>) ->
                 name,
                 std::env::split_paths(path_var).filter(|dir| !is_wsl_launcher_dir(dir)),
             )
+            .map(ScriptInterpreter::bare)
         })
-        .unwrap_or_else(|| PathBuf::from(name))
+        .unwrap_or_else(|| ScriptInterpreter::bare(name))
+}
+
+/// Directories of a Git for Windows installation that its `git` puts at the front of `PATH`
+/// for hooks: the MinGW `bin` of the installed architecture, then `usr/bin` with the MSYS
+/// tools (`grep`, `sed`, `env`, …) that shell hooks expect. Only existing directories.
+fn git_for_windows_tool_dirs(root: &Path) -> Vec<PathBuf> {
+    const MINGW_PREFIXES: [&str; 4] = ["mingw64", "clangarm64", "ucrt64", "mingw32"];
+    let mingw_bin = MINGW_PREFIXES
+        .iter()
+        .map(|prefix| root.join(prefix).join("bin"))
+        .find(|dir| dir.is_dir());
+    mingw_bin
+        .into_iter()
+        .chain(std::iter::once(root.join("usr").join("bin")))
+        .filter(|dir| dir.is_dir())
+        .collect()
+}
+
+fn is_path_var(key: &std::ffi::OsStr) -> bool {
+    if cfg!(windows) {
+        key.eq_ignore_ascii_case("PATH")
+    } else {
+        key == "PATH"
+    }
 }
 
 /// `PATH` as the hook subprocess will see it, when it is set explicitly in `env`.
@@ -497,31 +534,79 @@ fn command_env_path(env: &CommandEnvironment) -> Option<&std::ffi::OsStr> {
     env.set
         .iter()
         .rev()
-        .find(|(k, _)| {
-            if cfg!(windows) {
-                k.eq_ignore_ascii_case("PATH")
-            } else {
-                k == "PATH"
-            }
-        })
+        .find(|(k, _)| is_path_var(k))
         .map(|(_, v)| v.as_os_str())
+}
+
+/// Put `dirs` in front of the `PATH` that `env` sets explicitly.
+///
+/// Leaves `env` unchanged when it sets no `PATH` (the child then inherits one) or `dirs` is
+/// empty or cannot be joined into a `PATH` value.
+fn prepend_to_command_path(env: &mut CommandEnvironment, dirs: &[PathBuf]) {
+    if dirs.is_empty() {
+        return;
+    }
+    let Some((_, path)) = env.set.iter_mut().rev().find(|(k, _)| is_path_var(k)) else {
+        return;
+    };
+    let Ok(mut prefixed) = std::env::join_paths(dirs) else {
+        return;
+    };
+    if !path.is_empty() {
+        prefixed.push(if cfg!(windows) { ";" } else { ":" });
+        prefixed.push(&*path);
+    }
+    *path = prefixed;
+}
+
+/// Variables naming one repository path, which hooks hand on to `git` and shell tools.
+const HOOK_PATH_VARS: [&str; 5] = [
+    "GIT_DIR",
+    "GIT_COMMON_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_OBJECT_DIRECTORY",
+];
+
+/// Strip Windows `\\?\` prefixes from the path-valued `GIT_*` variables in `set`.
+///
+/// Repository paths are canonicalized, which makes them verbatim on Windows, but Git for
+/// Windows does not open a verbatim `GIT_INDEX_FILE` (it reads an empty index instead) and
+/// MSYS tools cannot open such paths at all.
+fn strip_verbatim_prefix_from_path_vars(set: &mut [(OsString, OsString)]) {
+    for (key, value) in set.iter_mut() {
+        if !HOOK_PATH_VARS.iter().any(|var| key == *var) {
+            continue;
+        }
+        let Some(s) = value.to_str() else {
+            continue;
+        };
+        let stripped = strip_verbatim_path_prefix_str(s);
+        if stripped.len() != s.len() {
+            let stripped = OsString::from(stripped.into_owned());
+            *value = stripped;
+        }
+    }
 }
 
 /// Shell for `hook.<name>.command` entries and for scripts the OS will not execute directly.
 ///
 /// `/bin/sh` on Unix. On Windows there is no `/bin/sh`, so `sh` is resolved against the hook's
 /// `PATH` (see [`resolve_script_interpreter`]).
-fn hook_shell(env: &CommandEnvironment) -> PathBuf {
+fn hook_shell(env: &CommandEnvironment) -> ScriptInterpreter {
     if cfg!(windows) {
         resolve_script_interpreter("sh", command_env_path(env))
     } else {
-        PathBuf::from("/bin/sh")
+        ScriptInterpreter::bare("/bin/sh")
     }
 }
 
 /// Interpreter from the `#!` line of `script` (Windows cannot execute scripts directly).
 #[cfg(windows)]
-fn script_shebang_interpreter(script: &Path, env: &CommandEnvironment) -> Option<PathBuf> {
+fn script_shebang_interpreter(
+    script: &Path,
+    env: &CommandEnvironment,
+) -> Option<ScriptInterpreter> {
     use std::io::Read;
     let mut head = [0u8; 256];
     let mut file = fs::File::open(script).ok()?;
@@ -562,6 +647,21 @@ impl HookSpawnContext<'_> {
         }
     }
 
+    /// Spec running `interpreter` with `invocation`; an interpreter from a Git for Windows
+    /// tree also gets that tree's tool directories in front of `PATH`, as Git gives hooks.
+    fn interpreter_spec(
+        &self,
+        interpreter: ScriptInterpreter,
+        invocation: ShellInvocation,
+        args: &[&str],
+    ) -> CommandSpec {
+        let mut spec = self.spec(interpreter.program, Some(invocation), args);
+        if let Some(root) = &interpreter.git_root {
+            prepend_to_command_path(&mut spec.env, &git_for_windows_tool_dirs(root));
+        }
+        spec
+    }
+
     fn spawn(&self, spec: &CommandSpec, hook_name: &str) -> Result<RunningCommand, HookError> {
         self.runner.spawn(spec).map_err(|source| HookError::Spawn {
             hook_name: hook_name.to_owned(),
@@ -582,12 +682,12 @@ impl HookSpawnContext<'_> {
         args: &[&str],
     ) -> Result<RunningCommand, HookError> {
         let argv0 = path_without_verbatim_prefix(argv0);
-        let via_shell = |shell: PathBuf| {
+        let via_shell = |shell: ScriptInterpreter| {
             let invocation = ShellInvocation::ScriptPath {
                 script_path: argv0.to_path_buf(),
                 args: args.iter().map(OsString::from).collect(),
             };
-            self.spec(shell, Some(invocation), args)
+            self.interpreter_spec(shell, invocation, args)
         };
         #[cfg(windows)]
         if let Some(interpreter) = script_shebang_interpreter(script, self.env) {
@@ -620,7 +720,7 @@ impl HookSpawnContext<'_> {
             args: args.iter().map(OsString::from).collect(),
         };
         self.spawn(
-            &self.spec(hook_shell(self.env), Some(invocation), args),
+            &self.interpreter_spec(hook_shell(self.env), invocation, args),
             hook_name,
         )
     }
@@ -748,10 +848,13 @@ pub fn run_hook_opts(
         }
     }
 
-    let hook_env = match repo {
+    let mut hook_env = match repo {
         Some(r) => CommandEnvironment::from_repository_environment(r.environment(), &merged_env),
         None => hook_command_env(git_dir_for_configured, &merged_env),
     };
+    if cfg!(windows) {
+        strip_verbatim_prefix_from_path_vars(&mut hook_env.set);
+    }
 
     for h in &seq {
         let (stdin_piped, stdin_file) = match opts.path_to_stdin {
@@ -1149,7 +1252,7 @@ mod tests {
         touch(&bin.join(exe("bash")));
         let path_var = bin.clone().into_os_string();
         assert_eq!(
-            resolve_script_interpreter("bash", Some(&path_var)),
+            resolve_script_interpreter("bash", Some(&path_var)).program,
             bin.join(exe("bash"))
         );
     }
@@ -1164,7 +1267,7 @@ mod tests {
             touch(&root.join("usr").join("bin").join(exe("sh")));
             let path_var = git_bin.into_os_string();
             assert_eq!(
-                resolve_script_interpreter("sh", Some(&path_var)),
+                resolve_script_interpreter("sh", Some(&path_var)).program,
                 root.join("usr").join("bin").join(exe("sh")),
                 "git under {git_dir:?}"
             );
@@ -1181,7 +1284,7 @@ mod tests {
         touch(&root.join("usr").join("bin").join(exe("bash")));
         let path_var = std::env::join_paths([other, root.join("cmd")]).expect("join");
         assert_eq!(
-            resolve_script_interpreter("bash", Some(&path_var)),
+            resolve_script_interpreter("bash", Some(&path_var)).program,
             root.join("usr").join("bin").join(exe("bash"))
         );
     }
@@ -1198,12 +1301,12 @@ mod tests {
         let path_var =
             std::env::join_paths([system32.clone(), apps.clone(), msys.clone()]).expect("join");
         assert_eq!(
-            resolve_script_interpreter("bash", Some(&path_var)),
+            resolve_script_interpreter("bash", Some(&path_var)).program,
             msys.join(exe("bash"))
         );
         let only_wsl = std::env::join_paths([system32, apps]).expect("join");
         assert_eq!(
-            resolve_script_interpreter("bash", Some(&only_wsl)),
+            resolve_script_interpreter("bash", Some(&only_wsl)).program,
             PathBuf::from("bash")
         );
     }
@@ -1213,10 +1316,13 @@ mod tests {
         let tmp = tempfile::tempdir().expect("tempdir");
         let path_var = tmp.path().as_os_str().to_os_string();
         assert_eq!(
-            resolve_script_interpreter("sh", Some(&path_var)),
+            resolve_script_interpreter("sh", Some(&path_var)).program,
             PathBuf::from("sh")
         );
-        assert_eq!(resolve_script_interpreter("sh", None), PathBuf::from("sh"));
+        assert_eq!(
+            resolve_script_interpreter("sh", None),
+            ScriptInterpreter::bare("sh")
+        );
     }
 
     #[test]
@@ -1237,12 +1343,172 @@ mod tests {
         assert_eq!(command_env_path(&env), Some(OsStr::new(r"C:\Git\cmd")));
     }
 
+    #[test]
+    fn resolve_script_interpreter_reports_the_git_for_windows_root() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path().join("Git");
+        touch(&root.join("cmd").join(exe("git")));
+        touch(&root.join("usr").join("bin").join(exe("sh")));
+        let path_var = root.join("cmd").into_os_string();
+        assert_eq!(
+            resolve_script_interpreter("sh", Some(&path_var)).git_root,
+            Some(root)
+        );
+
+        let other = tmp.path().join("other-bin");
+        touch(&other.join(exe("bash")));
+        let path_var = other.clone().into_os_string();
+        assert_eq!(
+            resolve_script_interpreter("bash", Some(&path_var)),
+            ScriptInterpreter::bare(other.join(exe("bash")))
+        );
+    }
+
+    #[test]
+    fn git_for_windows_tool_dirs_lists_mingw_then_usr_bin() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path().join("Git");
+        assert!(git_for_windows_tool_dirs(&root).is_empty());
+
+        touch(&root.join("usr").join("bin").join(exe("grep")));
+        assert_eq!(
+            git_for_windows_tool_dirs(&root),
+            vec![root.join("usr").join("bin")]
+        );
+
+        touch(&root.join("clangarm64").join("bin").join(exe("git")));
+        touch(&root.join("mingw64").join("bin").join(exe("git")));
+        assert_eq!(
+            git_for_windows_tool_dirs(&root),
+            vec![
+                root.join("mingw64").join("bin"),
+                root.join("usr").join("bin")
+            ]
+        );
+    }
+
+    #[test]
+    fn prepend_to_command_path_puts_dirs_first() {
+        let sep = if cfg!(windows) { ";" } else { ":" };
+        let first = PathBuf::from("first");
+        let second = PathBuf::from("second");
+        let mut env = CommandEnvironment::default();
+        env.set.push(("HOME".into(), "home".into()));
+        env.set.push(("PATH".into(), "inherited".into()));
+        prepend_to_command_path(&mut env, &[first.clone(), second.clone()]);
+        assert_eq!(
+            command_env_path(&env),
+            Some(OsStr::new(&format!("first{sep}second{sep}inherited")))
+        );
+        assert_eq!(env.set[0].1, OsString::from("home"));
+
+        let mut empty_path = CommandEnvironment::default();
+        empty_path.set.push(("PATH".into(), "".into()));
+        prepend_to_command_path(&mut empty_path, std::slice::from_ref(&first));
+        assert_eq!(command_env_path(&empty_path), Some(OsStr::new("first")));
+
+        let mut no_path = CommandEnvironment::default();
+        prepend_to_command_path(&mut no_path, &[first]);
+        assert!(no_path.set.is_empty(), "no PATH to extend");
+
+        let mut unchanged = CommandEnvironment::default();
+        unchanged.set.push(("PATH".into(), "inherited".into()));
+        prepend_to_command_path(&mut unchanged, &[]);
+        assert_eq!(command_env_path(&unchanged), Some(OsStr::new("inherited")));
+    }
+
+    #[test]
+    fn interpreter_from_git_tree_gets_its_tool_dirs_on_path() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path().join("Git");
+        touch(&root.join("cmd").join(exe("git")));
+        touch(&root.join("mingw64").join("bin").join(exe("git")));
+        touch(&root.join("usr").join("bin").join(exe("sh")));
+        let mut env = CommandEnvironment::default();
+        env.set
+            .push(("PATH".into(), root.join("cmd").into_os_string()));
+        let runner = crate::command_runner::RecordingRunner::always_success();
+        let ctx = HookSpawnContext {
+            runner: runner.as_ref(),
+            cwd: tmp.path(),
+            env: &env,
+            stdin_piped: false,
+            stdout_piped: false,
+            stderr_piped: false,
+        };
+        let interpreter = resolve_script_interpreter("sh", command_env_path(&env));
+        let invocation = ShellInvocation::DashC {
+            script: "true".into(),
+            argv0: Some("hook".into()),
+            args: Vec::new(),
+        };
+        let spec = ctx.interpreter_spec(interpreter, invocation, &[]);
+        assert_eq!(spec.program, root.join("usr").join("bin").join(exe("sh")));
+        let expected = std::env::join_paths([
+            root.join("mingw64").join("bin"),
+            root.join("usr").join("bin"),
+            root.join("cmd"),
+        ])
+        .expect("join");
+        assert_eq!(command_env_path(&spec.env), Some(expected.as_os_str()));
+
+        let bare = ctx.interpreter_spec(
+            ScriptInterpreter::bare("/bin/sh"),
+            ShellInvocation::DashC {
+                script: "true".into(),
+                argv0: None,
+                args: Vec::new(),
+            },
+            &[],
+        );
+        assert_eq!(
+            command_env_path(&bare.env),
+            Some(root.join("cmd").as_os_str()),
+            "interpreters outside a Git tree keep PATH as is"
+        );
+    }
+
+    #[test]
+    fn verbatim_prefixes_are_stripped_from_path_vars() {
+        let mut set: Vec<(OsString, OsString)> = vec![
+            ("GIT_INDEX_FILE".into(), r"\\?\C:\repo\.git\index".into()),
+            ("GIT_DIR".into(), r"\\?\UNC\server\share\repo\.git".into()),
+            ("GIT_WORK_TREE".into(), r"C:\repo".into()),
+            (
+                "GIT_OBJECT_DIRECTORY".into(),
+                r"\\?\C:\repo\.git\objects".into(),
+            ),
+            ("GIT_PREFIX".into(), r"\\?\kept".into()),
+        ];
+        strip_verbatim_prefix_from_path_vars(&mut set);
+        let value = |key: &str| {
+            set.iter()
+                .find(|(k, _)| k == key)
+                .map(|(_, v)| v.clone())
+                .expect("present")
+        };
+        assert_eq!(
+            value("GIT_INDEX_FILE"),
+            OsString::from(r"C:\repo\.git\index")
+        );
+        assert_eq!(
+            value("GIT_DIR"),
+            OsString::from(r"\\server\share\repo\.git")
+        );
+        assert_eq!(value("GIT_WORK_TREE"), OsString::from(r"C:\repo"));
+        assert_eq!(
+            value("GIT_OBJECT_DIRECTORY"),
+            OsString::from(r"C:\repo\.git\objects")
+        );
+        assert_eq!(value("GIT_PREFIX"), OsString::from(r"\\?\kept"));
+    }
+
     #[cfg(unix)]
     #[test]
     fn hook_shell_is_bin_sh_on_unix() {
         let mut env = CommandEnvironment::default();
         env.set.push(("PATH".into(), "/nonexistent".into()));
-        assert_eq!(hook_shell(&env), PathBuf::from("/bin/sh"));
+        assert_eq!(hook_shell(&env), ScriptInterpreter::bare("/bin/sh"));
     }
 
     #[test]

@@ -390,3 +390,110 @@ fn commit_with_unstartable_post_commit_hook_succeeds_with_warning() {
     });
     assert!(warned, "warnings: {:?}", diagnostics.warnings());
 }
+
+fn git_in(dir: &Path, args: &[&str]) {
+    let status = Command::new("git")
+        .args(["-c", "user.name=T", "-c", "user.email=t@t"])
+        .args(args)
+        .current_dir(dir)
+        .status()
+        .expect("run git");
+    assert!(status.success(), "git {args:?}");
+}
+
+/// Repository at `<tmp>/repo` with `a.txt` and `b.txt` committed by system git, opened through
+/// its canonical path (verbatim `\\?\` on Windows, like the CLI's repository discovery).
+fn repo_with_two_files(tmp: &Path) -> (PathBuf, Repository) {
+    let dir = tmp.join("repo");
+    std::fs::create_dir_all(&dir).expect("mkdir repo");
+    git_init(&dir);
+    std::fs::write(dir.join("a.txt"), b"a\n").expect("write a");
+    std::fs::write(dir.join("b.txt"), b"b\n").expect("write b");
+    git_in(&dir, &["add", "-A"]);
+    git_in(&dir, &["commit", "-q", "-m", "base"]);
+    let canonical = dir.canonicalize().expect("canonicalize");
+    let repo = open(&canonical, process_environment(&canonical), None);
+    (dir, repo)
+}
+
+fn commit_staged(
+    repo: &Repository,
+    dir: &Path,
+    message: &str,
+) -> grit_lib::error::Result<CommitOutcome> {
+    std::fs::write(dir.join("b.txt"), b"b\nc\n").expect("modify b");
+    stage(repo, &StageOptions::default(), &mut NullProgress).expect("stage");
+    let ident = "T <t@t> 1 +0000".to_string();
+    create_commit(
+        repo,
+        &CommitRequest {
+            message: message.into(),
+            author: ident.clone(),
+            committer: ident,
+            ..Default::default()
+        },
+        &mut NullProgress,
+    )
+}
+
+#[test]
+fn pre_commit_hook_lists_only_staged_files_with_system_git() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let (dir, repo) = repo_with_two_files(tmp.path());
+    write_hook(
+        &dir,
+        "pre-commit",
+        "#!/bin/sh\ngit diff --cached --name-only > ../hook-out.txt 2>&1\nenv > ../hook-env.txt 2>&1\nexit 0\n",
+    );
+
+    let outcome = commit_staged(&repo, &dir, "x").expect("commit");
+    assert!(outcome.hooks_run.contains(&HookName::PreCommit));
+
+    let listed = std::fs::read_to_string(tmp.path().join("hook-out.txt")).expect("hook output");
+    assert_eq!(
+        listed.lines().collect::<Vec<_>>(),
+        ["b.txt"],
+        "git inside the hook must read grit's index: {listed}"
+    );
+    let env = std::fs::read_to_string(tmp.path().join("hook-env.txt")).expect("hook env");
+    let var = |name: &str| {
+        env.lines()
+            .find_map(|line| line.strip_prefix(name)?.strip_prefix('='))
+            .map(str::to_owned)
+    };
+    let index_file = var("GIT_INDEX_FILE").unwrap_or_else(|| panic!("GIT_INDEX_FILE in {env}"));
+    assert!(!index_file.starts_with(r"\\?\"), "{index_file}");
+    #[cfg(windows)]
+    {
+        let path = var("PATH").unwrap_or_else(|| panic!("PATH in {env}"));
+        assert!(
+            path.contains("/usr/bin"),
+            "MSYS tools must be on PATH: {path}"
+        );
+    }
+}
+
+#[test]
+fn commit_msg_hook_using_grep_rejects_the_commit() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let (dir, repo) = repo_with_two_files(tmp.path());
+    write_hook(
+        &dir,
+        "commit-msg",
+        "#!/bin/sh\nif grep -q WIP \"$1\"; then echo no WIP >&2; exit 1; fi\n",
+    );
+    let head_before = resolve_head(repo.git_dir()).expect("head").oid().copied();
+
+    match commit_staged(&repo, &dir, "WIP thing") {
+        Err(grit_lib::error::Error::Hook(HookError::Failed { hook_name, status })) => {
+            assert_eq!(hook_name, "commit-msg");
+            assert_eq!(status, 1);
+        }
+        other => panic!("expected commit-msg to reject the commit, got {other:?}"),
+    }
+    assert_eq!(
+        resolve_head(repo.git_dir()).expect("head").oid().copied(),
+        head_before
+    );
+    commit_staged(&repo, &dir, "real change").expect("a message without WIP passes");
+}
