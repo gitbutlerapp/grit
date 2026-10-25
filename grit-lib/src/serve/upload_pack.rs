@@ -52,8 +52,9 @@ const V0_CAPABILITIES: &[&str] = &[
 ///
 /// # Errors
 ///
-/// Returns [`ServeError::NotOurRef`] when the client wants an object that was not
-/// advertised, [`ServeError::Protocol`] for malformed or unsupported requests,
+/// Returns [`ServeError::NotOurRef`] when the client wants an object outside the
+/// allowed set (advertised refs in stateful mode; reachable from ref tips in
+/// stateless RPC), [`ServeError::Protocol`] for malformed or unsupported requests,
 /// and I/O or repository errors from reading objects and writing the pack.
 pub fn upload_pack(
     repo: &Repository,
@@ -135,7 +136,14 @@ fn serve_v0(
     if request.filter.is_some() {
         validate_wants_filtered(repo, &request.wants)?;
     } else {
-        validate_wants(repo, &refs, head.oid, &request.wants, &policy)?;
+        validate_wants(
+            repo,
+            &refs,
+            head.oid,
+            &request.wants,
+            &policy,
+            opts.stateless_rpc,
+        )?;
     }
 
     let shallow_resp = if request.shallow.is_active() {
@@ -701,7 +709,7 @@ fn fetch_v2(
     if filter.is_some() {
         validate_wants_filtered(repo, &wants)?;
     } else {
-        validate_wants(repo, &refs, head.oid, &wants, &policy)?;
+        validate_wants(repo, &refs, head.oid, &wants, &policy, opts.stateless_rpc)?;
     }
 
     let sideband_all = caps.contains("sideband-all");

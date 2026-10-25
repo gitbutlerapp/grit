@@ -27,6 +27,8 @@ A filtered pack holds the objects `git upload-pack` would send for the same requ
 
 Protocol v2 `want-ref` is accepted only when `uploadpack.allowRefInWant` is set, and the response then includes a `wanted-refs` section with the object each requested ref resolved to. Asking for the same ref twice is a protocol error. Protocol v2 `sideband-all` is advertised and accepted only when `uploadpack.allowSidebandAll` is set. Optional `want` rules follow `uploadpack.allowTipSha1InWant` and `uploadpack.allowReachableSha1InWant`.
 
+In `--stateless-rpc` mode (smart HTTP POST), any commit reachable from the server's current ref tips may appear in a `want` line without those config flags. That matches Git when ref discovery and the fetch run as separate requests and a push can move refs in between. Stateful sessions (SSH and the negotiation half of a long-lived connection) still require each `want` to match the ref advertisement from that session unless `uploadpack.allowReachableSha1InWant` or `uploadpack.allowTipSha1InWant` is set.
+
 ## Options
 
 | Option | Description |

@@ -114,13 +114,18 @@ pub(crate) fn validate_wants_filtered(repo: &Repository, wants: &[ObjectId]) -> 
     Ok(())
 }
 
-/// Validate `want` OIDs against advertisement and config rela rules.
+/// Validate `want` OIDs against advertisement, config rules, and session mode.
+///
+/// Stateful sessions only accept wants that appeared in the ref advertisement
+/// (plus `HEAD`). Stateless RPC (smart HTTP POST) matches Git: any commit
+/// reachable from current ref tips is allowed without extra config.
 pub(crate) fn validate_wants(
     repo: &Repository,
     refs: &[AdvertisedRef],
     head: Option<ObjectId>,
     wants: &[ObjectId],
     policy: &UploadPackPolicy,
+    stateless_rpc: bool,
 ) -> Result<()> {
     if policy.allow_reachable_sha1_in_want {
         let reachable = reachable_from_repository_tips(repo)?;
@@ -135,6 +140,15 @@ pub(crate) fn validate_wants(
         let tips = repository_tip_commits(repo)?;
         for w in wants {
             if !tips.contains(w) {
+                return Err(ServeError::NotOurRef(*w));
+            }
+        }
+        return Ok(());
+    }
+    if stateless_rpc {
+        let reachable = reachable_from_repository_tips(repo)?;
+        for w in wants {
+            if !reachable.contains(w) {
                 return Err(ServeError::NotOurRef(*w));
             }
         }

@@ -255,3 +255,162 @@ fn upload_pack_serves_git_packed_history_with_its_deltas() {
     };
     assert_eq!(count(&dst), count(&src));
 }
+
+fn seed_three_linear_commits(repo: &Repository) -> (ObjectId, ObjectId) {
+    let empty_tree =
+        ObjectId::from_hex("4b825dc642cb6eb9a060e54bf8d69288fbee4904").expect("empty tree");
+    let _ = repo
+        .odb()
+        .write_loose_materialize(ObjectKind::Tree, &[] as &[u8]);
+    let mut parent: Option<ObjectId> = None;
+    let mut chain = Vec::new();
+    for i in 1..=3 {
+        let mut body = format!("tree {}\n", empty_tree.to_hex());
+        if let Some(p) = parent {
+            body.push_str(&format!("parent {}\n", p.to_hex()));
+        }
+        body.push_str("author T <t@e.com> 100 +0000\ncommitter T <t@e.com> 100 +0000\n\n");
+        body.push_str(&format!("c{i}\n"));
+        let oid = repo
+            .odb()
+            .write_loose_materialize(ObjectKind::Commit, body.as_bytes())
+            .expect("commit");
+        chain.push(oid);
+        parent = Some(oid);
+    }
+    let tip = chain[2];
+    let middle = chain[1];
+    std::fs::write(repo.git_dir().join("refs/heads/main"), format!("{tip}\n")).expect("ref");
+    (tip, middle)
+}
+
+/// Issue #1939: stateless RPC must accept a want for a reachable non-tip commit.
+#[test]
+fn upload_pack_stateless_v0_want_reachable_non_tip() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    Repository::init(
+        dir.path(),
+        &InitOptions::new()
+            .with_bare(true)
+            .with_initial_branch("main")
+            .with_ref_storage(RefStorageFormat::Files),
+    )
+    .expect("init");
+    let repo = Repository::open(dir.path(), &RepositoryOptions::empty()).expect("open");
+    let (_tip, middle) = seed_three_linear_commits(&repo);
+
+    let mut pack_out = Vec::new();
+    upload_pack(
+        &repo,
+        &mut Cursor::new(v0_stateless_fetch_body(middle)),
+        &mut pack_out,
+        &ServeOptions {
+            protocol: ProtocolVersion::V0,
+            advertise_refs: false,
+            stateless_rpc: true,
+            agent: "grit-cov".to_owned(),
+            hidden_refs: Vec::new(),
+        },
+    )
+    .expect("stateless want for ancestor must succeed");
+    assert!(pack_out.starts_with(b"0008NAK\n"));
+    let pack = sideband_band1(&pack_out["0008NAK\n".len()..]);
+    assert!(pack.starts_with(b"PACK"));
+
+    let wt = dir.path().join("git-check");
+    grit_test_support::git(dir.path(), &["init", "-q", &wt.to_string_lossy()]);
+    for i in 1..=3 {
+        grit_test_support::git(
+            &wt,
+            &["commit", "-q", "--allow-empty", "-m", &format!("c{i}")],
+        );
+    }
+    let git_middle =
+        ObjectId::from_hex(grit_test_support::git(&wt, &["rev-parse", "HEAD~1"]).trim())
+            .expect("git middle");
+    let mut git_body = pkt_line(&format!("want {} ofs-delta\n", git_middle.to_hex()));
+    git_body.extend_from_slice(b"0000");
+    git_body.extend_from_slice(&pkt_line("done\n"));
+    git_body.extend_from_slice(b"0000");
+    let git_out = grit_test_support::git_cmd(&["upload-pack", "--stateless-rpc", "."])
+        .in_dir(&wt.join(".git"))
+        .stdin(git_body)
+        .suc()
+        .stdout;
+    assert!(git_out.as_bytes().starts_with(b"0008NAK\n"));
+}
+
+#[test]
+fn upload_pack_stateful_v0_rejects_non_advertised_ancestor_want() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    Repository::init(
+        dir.path(),
+        &InitOptions::new()
+            .with_bare(true)
+            .with_initial_branch("main")
+            .with_ref_storage(RefStorageFormat::Files),
+    )
+    .expect("init");
+    let repo = Repository::open(dir.path(), &RepositoryOptions::empty()).expect("open");
+    let (_tip, middle) = seed_three_linear_commits(&repo);
+
+    let caps = "multi_ack_detailed side-band-64k thin-pack no-progress include-tag ofs-delta";
+    let mut body = pkt_line(&format!("want {} {caps}\n", middle.to_hex()));
+    body.extend_from_slice(b"0000");
+    body.extend_from_slice(&pkt_line("done\n"));
+
+    let err = upload_pack(
+        &repo,
+        &mut Cursor::new(body),
+        &mut Vec::new(),
+        &ServeOptions {
+            protocol: ProtocolVersion::V0,
+            advertise_refs: false,
+            stateless_rpc: false,
+            agent: "grit-cov".to_owned(),
+            hidden_refs: Vec::new(),
+        },
+    )
+    .expect_err("stateful session should reject ancestor not in advertisement");
+    assert!(
+        err.to_string().contains("not our ref"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn upload_pack_stateless_v2_want_reachable_non_tip() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    Repository::init(
+        dir.path(),
+        &InitOptions::new()
+            .with_bare(true)
+            .with_initial_branch("main")
+            .with_ref_storage(RefStorageFormat::Files),
+    )
+    .expect("init");
+    let repo = Repository::open(dir.path(), &RepositoryOptions::empty()).expect("open");
+    let (_tip, middle) = seed_three_linear_commits(&repo);
+
+    let mut fetch_body = pkt_line("command=fetch\n");
+    fetch_body.extend_from_slice(&pkt_line("agent=grit-cov\n"));
+    fetch_body.extend_from_slice(&pkt_line(&format!("want {0}\n", middle.to_hex())));
+    fetch_body.extend_from_slice(b"0000");
+    fetch_body.extend_from_slice(&pkt_line("done"));
+    fetch_body.extend_from_slice(b"0000");
+    let mut v2_fetch = Vec::new();
+    upload_pack(
+        &repo,
+        &mut Cursor::new(fetch_body),
+        &mut v2_fetch,
+        &ServeOptions {
+            protocol: ProtocolVersion::V2,
+            advertise_refs: false,
+            stateless_rpc: true,
+            agent: "grit-cov".to_owned(),
+            hidden_refs: Vec::new(),
+        },
+    )
+    .expect("v2 stateless fetch for ancestor");
+    assert!(v2_fetch.len() > 20);
+}
