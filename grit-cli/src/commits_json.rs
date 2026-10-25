@@ -32,6 +32,13 @@ impl CommitJsonLoader {
         Self { decorations: None }
     }
 
+    /// Leave every row's `refs` empty, for output that never renders decorations.
+    pub fn without_refs() -> Self {
+        Self {
+            decorations: Some(DecorationMap::default()),
+        }
+    }
+
     /// Build human [`CommitSummary`] rows without loading ref decorations (no extra config I/O).
     /// Commits already parsed (by the walk) are taken out of `parsed` instead of read again.
     pub fn load_summaries_only(

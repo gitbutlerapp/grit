@@ -42,6 +42,8 @@ pub struct ShowRunOptions {
     pub format: DiffFormatArgs,
     pub word_level_inline: bool,
     pub diff_merges: DiffMerges,
+    /// Collect ref decorations for `commit.refs` (only JSON output shows them).
+    pub include_refs: bool,
 }
 
 /// One resolved object in a multi-object show (commit metadata or `rev:path` contents).
@@ -305,7 +307,12 @@ fn show_commit(spec: &str, opts: &ShowRunOptions) -> Result<ShowOutcome> {
         .with_context(|| format!("'{}' does not resolve to a commit", resolved.to_hex()))?;
 
     let now = context::wall_clock_now(repo.environment()).unix_timestamp();
-    let commit_json = CommitJsonLoader::for_listed_commits().load_one(&repo, &commit_oid, now)?;
+    let loader = if opts.include_refs {
+        CommitJsonLoader::for_listed_commits()
+    } else {
+        CommitJsonLoader::without_refs()
+    };
+    let commit_json = loader.load_one(&repo, &commit_oid, now)?;
     let commit = CommitInfo {
         oid: commit_json.oid,
         parents: commit_json.parents,

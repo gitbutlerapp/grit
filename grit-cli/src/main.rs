@@ -2643,6 +2643,7 @@ fn dispatch(
                     word_level_inline: matches!(opts.mode, crate::output::OutputMode::Human)
                         && commands::diff::diff_word_level_inline_for_output(),
                     diff_merges,
+                    include_refs: matches!(opts.mode, crate::output::OutputMode::Json),
                 })?,
                 opts,
                 ctx,
