@@ -25,6 +25,8 @@ Verifies repository integrity without invoking the system `git` binary:
 - With `--connectivity-only`: walk reachability from refs and validate linked objects only (faster; skips store-wide object scans).
 - With `--dangling` (or by default on a full run): list objects present in the object database but not reachable from refs.
 
+Ref checks include loose ref files, symrefs and `packed-refs`. A `packed-refs` file whose header claims the `sorted` trait while its records are out of order is an error (`packedRefUnsorted`, at the first out-of-order line). Normal reads trust that trait and binary-search the file, as Git does, so refs on the wrong side of the disorder can be invisible until the file is rewritten (for example by `grit gc`).
+
 Progress during long checks is written to **stderr** in human mode (suppressed for `--json` / `--markdown`).
 
 `grit verify` is an alias for `grit fsck`. Exit status **1** when any **error-severity** issue is reported. Warnings alone exit **0** unless `--strict` promotes ref warnings. Unreachable (**dangling**) objects alone do not fail the command.

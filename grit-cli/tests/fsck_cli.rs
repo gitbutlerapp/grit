@@ -215,6 +215,60 @@ fn fsck_json_includes_ok_and_severity() {
     assert!(parsed.get("issues").and_then(|v| v.as_array()).is_some());
 }
 
+/// A `packed-refs` header that claims `sorted` over out-of-order records fails fsck in every
+/// output mode, since normal reads trust the claim and binary-search the file.
+#[test]
+fn fsck_reports_lying_sorted_packed_refs_in_every_output() {
+    let fix = CliFixture::new();
+    let head = Command::new("git")
+        .current_dir(fix.path())
+        .args(["rev-parse", "HEAD"])
+        .output()
+        .expect("git rev-parse");
+    let head = String::from_utf8_lossy(&head.stdout).trim().to_owned();
+    let git_dir = fix.path().join(".git");
+    fs::write(
+        git_dir.join("packed-refs"),
+        format!(
+            "# pack-refs with: peeled fully-peeled sorted \n\
+             {head} refs/heads/zeta\n{head} refs/heads/alpha\n"
+        ),
+    )
+    .expect("packed-refs");
+
+    let human = fix.run(&["fsck", "--no-dangling"]);
+    assert_eq!(human.status, Some(1), "{human:?}");
+    let text = format!("{}{}", human.stdout, human.stderr);
+    assert!(text.contains("packedRefUnsorted"), "{text}");
+    assert!(text.contains("refs/heads/alpha"), "{text}");
+
+    let json = fix.run(&["--json", "fsck", "--no-dangling"]);
+    assert_eq!(json.status, Some(1));
+    let parsed: serde_json::Value = serde_json::from_str(&json.stdout).expect("json");
+    assert_eq!(parsed["ok"], serde_json::Value::Bool(false));
+    let issue = parsed["issues"]
+        .as_array()
+        .expect("issues")
+        .iter()
+        .find(|i| i["kind"] == "packedRefUnsorted")
+        .unwrap_or_else(|| panic!("no packedRefUnsorted in {parsed}"));
+    assert_eq!(issue["severity"], "error");
+    assert_eq!(issue["path"], "packed-refs line 3");
+
+    let markdown = fix.run(&["--markdown", "fsck", "--no-dangling"]);
+    assert_eq!(markdown.status, Some(1));
+    assert!(
+        markdown.stdout.contains("packedRefUnsorted"),
+        "{}",
+        markdown.stdout
+    );
+    assert!(
+        markdown.stdout.contains("**ok:** false"),
+        "{}",
+        markdown.stdout
+    );
+}
+
 fn one_commit_with_staged_blob(fixture: &CliFixture) {
     let repo = Repository::discover(Some(fixture.path()), &RepositoryOptions::default())
         .expect("discover");
