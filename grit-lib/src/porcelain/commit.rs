@@ -730,6 +730,11 @@ pub fn create_commit(
 ///
 /// Avoids an extra index load/write between implicit staging and commit tree construction.
 ///
+/// When staging changed the index but the result matches the parent tree (for example a new
+/// file that was staged and then deleted from the work tree), the staged index is still written
+/// before [`Error::NothingToCommit`] is returned, so the on-disk index matches `HEAD` afterwards.
+/// [`CommitRequest::dry_run`] never writes the index.
+///
 /// # Errors
 ///
 /// Same as [`create_commit`], plus staging failures from [`crate::porcelain::add::stage_for_commit`].
@@ -749,7 +754,11 @@ pub fn commit_worktree(
     if req.assume_worktree_synced && req.skip_pre_commit_tree_match {
         req.staged_change_count = Some(staged.total());
     }
-    create_commit_with_index(repo, head, &mut index, &req, progress, None)
+    let result = create_commit_with_index(repo, head, &mut index, &req, progress, None);
+    if matches!(result, Err(Error::NothingToCommit)) && !req.dry_run && staged.total() > 0 {
+        repo.write_index(&mut index)?;
+    }
+    result
 }
 
 fn commit_files_from_diff_entries(entries: &[DiffEntry]) -> Vec<CommitFile> {
@@ -1706,6 +1715,30 @@ mod tests {
 
         let err = create_commit(&repo, &commit_req("noop"), &mut NullProgress).unwrap_err();
         assert!(matches!(err, Error::NothingToCommit));
+    }
+
+    #[test]
+    fn commit_worktree_nothing_to_commit_persists_staged_deletion() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        fs::write(root.join("a.txt"), b"1\n").unwrap();
+        commit_worktree(&repo, &commit_req("first"), &mut NullProgress).unwrap();
+
+        let mut index = repo.load_index().unwrap();
+        stage_file_in_index(&repo, &mut index, "n.txt", b"staged\n");
+        write_index(&repo, &mut index);
+        fs::remove_file(root.join("n.txt")).unwrap();
+
+        let err = commit_worktree(&repo, &dry_run_req("noop"), &mut NullProgress).unwrap_err();
+        assert!(matches!(err, Error::NothingToCommit));
+        assert!(repo.load_index().unwrap().get(b"n.txt", 0).is_some());
+
+        let err = commit_worktree(&repo, &commit_req("noop"), &mut NullProgress).unwrap_err();
+        assert!(matches!(err, Error::NothingToCommit));
+        let index = repo.load_index().unwrap();
+        assert!(index.get(b"n.txt", 0).is_none());
+        assert!(index.get(b"a.txt", 0).is_some());
     }
 
     #[test]
