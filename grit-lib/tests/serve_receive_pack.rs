@@ -557,3 +557,33 @@ fn hook_scripts_see_git_dir_dot() {
     assert!(outcome.updates[0].error.is_none());
     assert_eq!(std::fs::read_to_string(&log).expect("hook log"), ".");
 }
+
+/// Regression for issue #1945: a multi-megabyte blob in a small pack must unpack
+/// to loose objects under the default `receive.unpackLimit` without requiring
+/// the full inflated payload in memory.
+#[test]
+fn large_blob_push_under_unpack_limit_materializes_loose() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let src = tmp.path().join("src");
+    std::fs::create_dir_all(&src).expect("mkdir");
+    git(&src, &["init", "-q", "-b", "main", "."]);
+    let payload: Vec<u8> = (0..3 * 1024 * 1024).map(|i| (i % 251) as u8).collect();
+    std::fs::write(src.join("big.bin"), &payload).expect("write");
+    git(&src, &["add", "big.bin"]);
+    git(&src, &["commit", "-q", "-m", "big"]);
+    let tip = rev_parse(&src, "HEAD");
+    let pack = pack_for(&src, &[tip.to_hex()]);
+
+    let bare = tmp.path().join("bare.git");
+    bare_repo(&bare);
+    let repo = open(&bare);
+    let body = push_body(&[(None, Some(tip), "refs/heads/main")], &pack);
+    let (outcome, report) = serve(&repo, &body, &ReceivePolicy::default(), &());
+    assert!(outcome.unpack_error.is_none(), "{:?} {report}", outcome.unpack_error);
+    assert!(
+        pack_files(&bare.join("objects")).is_empty(),
+        "few-object push unpacks to loose, not pack"
+    );
+    fsck(&bare);
+    assert_eq!(resolve_ref(&bare, "refs/heads/main").expect("main"), tip);
+}

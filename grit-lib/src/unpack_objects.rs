@@ -15,8 +15,8 @@ use std::collections::{HashMap, HashSet};
 use std::io::{self, Read};
 
 use crate::error::{Error, Result};
-use crate::gitmodules;
-use crate::hash::ChecksumHasher;
+use crate::gitmodules::DotFsckTracker;
+use crate::hash::{ChecksumHasher, ObjectPayloadHasher};
 use crate::index::MODE_GITLINK;
 use crate::index_pack::ObjectKindCounts;
 use crate::objects::{parse_commit, parse_tag, parse_tree, HashAlgo, Object, ObjectId, ObjectKind};
@@ -83,6 +83,25 @@ trait UnpackSink {
     /// Store `data`, or only hash it when `dry_run` is set.
     fn write(&self, kind: ObjectKind, data: &[u8], dry_run: bool) -> Result<ObjectId>;
 
+    /// When true, [`Self::write_inflated_from_pack`] streams large inflated payloads.
+    fn supports_streaming_inflate(&self) -> bool {
+        false
+    }
+
+    /// Inflate one pack object from `rd` and store it without holding the full payload in RAM.
+    fn write_inflated_from_pack(
+        &self,
+        kind: ObjectKind,
+        size: usize,
+        rd: &mut StreamingPackReader<'_>,
+        dry_run: bool,
+    ) -> Result<ObjectId> {
+        let _ = (kind, size, rd, dry_run);
+        Err(Error::UnsupportedObjectStore {
+            operation: "write_inflated_from_pack",
+        })
+    }
+
     /// Read an object stored before or during this unpack (thin-pack bases, large blobs).
     fn read_stored(&self, oid: &ObjectId) -> Result<Option<Object>>;
 
@@ -117,6 +136,37 @@ impl UnpackSink for Odb {
 
     fn contains(&self, oid: &ObjectId) -> Result<bool> {
         Odb::contains(self, oid)
+    }
+
+    fn supports_streaming_inflate(&self) -> bool {
+        self.uses_files_primary()
+    }
+
+    fn write_inflated_from_pack(
+        &self,
+        kind: ObjectKind,
+        size: usize,
+        rd: &mut StreamingPackReader<'_>,
+        dry_run: bool,
+    ) -> Result<ObjectId> {
+        let size_u64 = u64::try_from(size).map_err(|_| {
+            Error::CorruptObject(format!("object size {size} exceeds address space"))
+        })?;
+        if dry_run {
+            let mut hasher = ObjectPayloadHasher::new(self.hash_algo(), kind, size_u64);
+            rd.decompress_into(size, |chunk| {
+                hasher.update(chunk);
+                Ok(())
+            })?;
+            return hasher.finish();
+        }
+        if !self.uses_files_primary() {
+            let data = rd.decompress(size)?;
+            return self.write_local(kind, &data);
+        }
+        self.write_local_stream_with(kind, size_u64, |chunk_sink| {
+            rd.decompress_into(size, chunk_sink)
+        })
     }
 }
 
@@ -360,9 +410,21 @@ fn unpack_into<S: UnpackSink + ?Sized>(
         match type_code {
             1..=4 => {
                 let kind = type_code_to_kind(type_code)?;
-                let data = rd.decompress(size)?;
-                let oid = sink.write(kind, &data, opts.dry_run)?;
-                let entry = packed_entry_after_write(kind, data, oid, opts, MAX_RETAIN_BYTES);
+                let (oid, entry) = if !opts.dry_run
+                    && size > MAX_RETAIN_BYTES
+                    && kind == ObjectKind::Blob
+                    && sink.supports_streaming_inflate()
+                {
+                    let oid = sink.write_inflated_from_pack(kind, size, &mut rd, false)?;
+                    (oid, PackedObjectEntry::BlobOnDisk { oid })
+                } else {
+                    let data = rd.decompress(size)?;
+                    let oid = sink.write(kind, &data, opts.dry_run)?;
+                    (
+                        oid,
+                        packed_entry_after_write(kind, data, oid, opts, MAX_RETAIN_BYTES),
+                    )
+                };
                 by_offset.insert(obj_offset, entry.clone());
                 by_oid.insert(oid, entry);
                 object_counts.add(kind);
@@ -484,14 +546,7 @@ fn unpack_into<S: UnpackSink + ?Sized>(
     }
 
     if opts.strict {
-        let mut dot_fsck_map: HashMap<ObjectId, (ObjectKind, Vec<u8>)> =
-            HashMap::with_capacity(by_oid.len());
-        for (oid, entry) in &by_oid {
-            let kind = entry.kind();
-            let data = entry_object_bytes(entry, sink)?.into_owned();
-            dot_fsck_map.insert(*oid, (kind, data));
-        }
-        gitmodules::verify_packed_dot_special(&dot_fsck_map)?;
+        verify_packed_dot_special_entries(&by_oid, sink)?;
         strict_verify_packed_references_map(
             sink,
             &by_oid,
@@ -523,6 +578,44 @@ impl PackedObjectEntry {
             PackedObjectEntry::BlobOnDisk { .. } => ObjectKind::Blob,
         }
     }
+}
+
+fn verify_packed_dot_special_entries<S: UnpackSink + ?Sized>(
+    by_oid: &HashMap<ObjectId, PackedObjectEntry>,
+    sink: &S,
+) -> Result<()> {
+    let mut tracker = DotFsckTracker::default();
+    let mut keys: Vec<ObjectId> = by_oid.keys().copied().collect();
+    keys.sort();
+    for oid in keys {
+        let entry = &by_oid[&oid];
+        let kind = entry.kind();
+        let data = entry_object_bytes(entry, sink)?;
+        if kind == ObjectKind::Tree {
+            for di in tracker.on_tree(&oid, &data)? {
+                if di.is_error_severity() {
+                    return Err(Error::CorruptObject(di.format_line()));
+                }
+            }
+        }
+        for di in tracker.on_object(&oid, kind, &data) {
+            if di.is_error_severity() {
+                return Err(Error::CorruptObject(di.format_line()));
+            }
+        }
+    }
+    for di in tracker.finish_pending_resolve(|id| {
+        by_oid.get(id).and_then(|entry| {
+            entry_object_bytes(entry, sink)
+                .ok()
+                .map(|data| (entry.kind(), data.into_owned()))
+        })
+    })? {
+        if di.is_error_severity() {
+            return Err(Error::CorruptObject(di.format_line()));
+        }
+    }
+    Ok(())
 }
 
 fn packed_entry_after_write(
@@ -1324,10 +1417,12 @@ impl<'a> StreamingPackReader<'a> {
     /// When the pack arrives in small chunks (e.g. side-band-64k from `upload-pack`), `flate2` may
     /// return an error before the full deflate stream is in `pending`. Retry after reading more
     /// from `inner` (same idea as [`PackReader::decompress`], which sees the whole zlib at once).
-    fn decompress(&mut self, expected_size: usize) -> Result<Vec<u8>> {
-        // `Read::read_exact` into an empty buffer returns `Ok` immediately without touching the
-        // decoder, so a 0-byte packed object would leave the zlib header in `pending` and desync
-        // the pack stream (bundle / clone unpack). Always run the zlib decoder once.
+    /// Inflate one pack object to `expected_size` bytes, invoking `chunk_sink` for each step.
+    pub(crate) fn decompress_into(
+        &mut self,
+        expected_size: usize,
+        mut chunk_sink: impl FnMut(&[u8]) -> Result<()>,
+    ) -> Result<()> {
         if expected_size == 0 {
             const CHUNK: usize = 64 * 1024;
             let mut scratch = [0u8; CHUNK];
@@ -1358,7 +1453,7 @@ impl<'a> StreamingPackReader<'a> {
                         self.stream_pos += consumed;
                         self.pending.drain(..consumed);
                         self.enforce_max_input()?;
-                        return Ok(Vec::new());
+                        return Ok(());
                     }
                     Ok(_) => {
                         return Err(Error::CorruptObject(
@@ -1382,10 +1477,10 @@ impl<'a> StreamingPackReader<'a> {
 
         const CHUNK: usize = 64 * 1024;
         let mut scratch = [0u8; CHUNK];
+        let mut scratch_out = [0u8; CHUNK];
 
-        let mut out = vec![0u8; expected_size];
         let mut z = Decompress::new(true);
-        let mut out_pos = 0usize;
+        let mut produced = 0usize;
         let mut eof = false;
         loop {
             if self.pending.is_empty() && !eof {
@@ -1406,7 +1501,7 @@ impl<'a> StreamingPackReader<'a> {
             let before_in = z.total_in();
             let before_out = z.total_out();
             let status = z
-                .decompress(self.pending.as_slice(), &mut out[out_pos..], flush)
+                .decompress(self.pending.as_slice(), &mut scratch_out, flush)
                 .map_err(|e| Error::Zlib(e.to_string()))?;
             let consumed = (z.total_in() - before_in) as usize;
             if consumed > self.pending.len() {
@@ -1418,16 +1513,28 @@ impl<'a> StreamingPackReader<'a> {
             self.stream_pos += consumed;
             self.pending.drain(..consumed);
             self.enforce_max_input()?;
-            out_pos += (z.total_out() - before_out) as usize;
+            let chunk_len = (z.total_out() - before_out) as usize;
+            if chunk_len > 0 {
+                let chunk = &scratch_out[..chunk_len];
+                let take = chunk.len().min(expected_size - produced);
+                chunk_sink(&chunk[..take])?;
+                produced += take;
+                if take < chunk.len() {
+                    return Err(Error::CorruptObject(format!(
+                        "decompressed size mismatch: got {}, want {expected_size}",
+                        produced + (chunk.len() - take)
+                    )));
+                }
+            }
 
             match status {
                 Status::StreamEnd => {
-                    if out_pos != expected_size {
+                    if produced != expected_size {
                         return Err(Error::CorruptObject(format!(
-                            "decompressed size mismatch: got {out_pos}, want {expected_size}"
+                            "decompressed size mismatch: got {produced}, want {expected_size}"
                         )));
                     }
-                    return Ok(out);
+                    return Ok(());
                 }
                 Status::Ok | Status::BufError => {
                     if consumed == 0 && !eof {
@@ -1437,7 +1544,7 @@ impl<'a> StreamingPackReader<'a> {
                         } else {
                             self.pending.extend_from_slice(&scratch[..n]);
                         }
-                    } else if eof && self.pending.is_empty() && out_pos != expected_size {
+                    } else if eof && self.pending.is_empty() && produced != expected_size {
                         return Err(Error::CorruptObject(format!(
                             "pack stream truncated (zlib) at offset {}",
                             self.stream_pos
@@ -1446,6 +1553,17 @@ impl<'a> StreamingPackReader<'a> {
                 }
             }
         }
+    }
+
+    fn decompress(&mut self, expected_size: usize) -> Result<Vec<u8>> {
+        let mut out = vec![0u8; expected_size];
+        let mut pos = 0usize;
+        self.decompress_into(expected_size, |chunk| {
+            out[pos..pos + chunk.len()].copy_from_slice(chunk);
+            pos += chunk.len();
+            Ok(())
+        })?;
+        Ok(out)
     }
 
     /// Hash over all pack bytes read so far (objects only; trailer not yet read).

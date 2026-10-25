@@ -2855,6 +2855,45 @@ impl Odb {
         Ok(oid)
     }
 
+    /// Like [`Self::write_local`], but reads the payload from `reader` in bounded chunks.
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Self::write_local`], plus [`Error::ObjectStreamTruncated`].
+    pub fn write_local_stream(
+        &self,
+        kind: ObjectKind,
+        size: u64,
+        reader: &mut dyn std::io::Read,
+    ) -> Result<ObjectId> {
+        if self.custom_primary.is_some() {
+            return Err(Error::UnsupportedObjectStore {
+                operation: "write_local_stream",
+            });
+        }
+        let loose = self.local_loose()?;
+        let oid = loose.write_payload_stream(kind, size, reader, WriteOptions::default())?;
+        self.note_commit_object_written(kind);
+        Ok(oid)
+    }
+
+    pub(crate) fn write_local_stream_with(
+        &self,
+        kind: ObjectKind,
+        size: u64,
+        supply: impl FnMut(&mut dyn FnMut(&[u8]) -> Result<()>) -> Result<()>,
+    ) -> Result<ObjectId> {
+        if self.custom_primary.is_some() {
+            return Err(Error::UnsupportedObjectStore {
+                operation: "write_local_stream",
+            });
+        }
+        let loose = self.local_loose()?;
+        let oid = loose.write_payload_stream_with(kind, size, WriteOptions::default(), supply)?;
+        self.note_commit_object_written(kind);
+        Ok(oid)
+    }
+
     /// Write a loose object file when it is missing, even if [`Self::exists`] is true because
     /// the object lives only in a pack.
     ///

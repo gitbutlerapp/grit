@@ -12,12 +12,14 @@ use flate2::{Decompress, FlushDecompress, Status};
 
 use super::{ObjectStore, ObjectStream, WritableObjectStore};
 use crate::error::{Error, Result};
-use crate::hash;
+use crate::hash::{self, ObjectPayloadHasher};
 use crate::objects::{HashAlgo, Object, ObjectId, ObjectIdPrefix, ObjectInfo, ObjectKind};
 use crate::odb::WriteOptions;
 use crate::zlib_inflate::with_loose_scratch;
 
 const READ_CHUNK: usize = 64 * 1024;
+/// Payload bytes read from a source stream per step when writing a loose object.
+const STREAM_CHUNK: usize = 128 * 1024;
 
 /// On-disk loose object store for one `objects/` directory.
 #[derive(Debug, Clone)]
@@ -303,6 +305,16 @@ impl WritableObjectStore for LooseStore {
         Ok(oid)
     }
 
+    fn write_stream(
+        &self,
+        kind: ObjectKind,
+        size: u64,
+        reader: &mut dyn Read,
+        options: WriteOptions,
+    ) -> Result<ObjectId> {
+        self.write_payload_stream(kind, size, reader, options)
+    }
+
     fn freshen(&self, oid: &ObjectId) -> Result<bool> {
         let path = self.object_path(oid);
         if path.is_file() {
@@ -579,6 +591,107 @@ fn deflate_object_into(
     encoder.write_all(data).map_err(zlib_err)?;
     encoder.finish().map_err(zlib_err)?;
     Ok(())
+}
+
+fn read_payload_chunks(
+    reader: &mut dyn Read,
+    size: u64,
+    mut sink: impl FnMut(&[u8]) -> Result<()>,
+) -> Result<()> {
+    let mut remaining = size;
+    let mut buf = [0u8; STREAM_CHUNK];
+    while remaining > 0 {
+        let want = usize::try_from(remaining.min(STREAM_CHUNK as u64)).map_err(|_| {
+            Error::CorruptObject(format!("object size {size} exceeds address space"))
+        })?;
+        let n = match reader.read(&mut buf[..want]) {
+            Ok(0) => {
+                return Err(Error::ObjectStreamTruncated {
+                    expected: size,
+                    actual: size - remaining,
+                })
+            }
+            Ok(n) => n,
+            Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+            Err(e) => return Err(Error::Io(e)),
+        };
+        sink(&buf[..n])?;
+        remaining -= n as u64;
+    }
+    Ok(())
+}
+
+impl LooseStore {
+    /// Store `size` uncompressed payload bytes of `kind` read from `reader` as a loose object.
+    ///
+    /// Hashes and deflates in fixed-size chunks so memory use does not grow with `size`.
+    pub(crate) fn write_payload_stream(
+        &self,
+        kind: ObjectKind,
+        size: u64,
+        reader: &mut dyn Read,
+        options: WriteOptions,
+    ) -> Result<ObjectId> {
+        self.write_payload_stream_with(kind, size, options, |chunk_sink| {
+            read_payload_chunks(reader, size, chunk_sink)
+        })
+    }
+
+    /// Store a payload supplied chunk-by-chunk through `supply` (used by pack unpack).
+    pub(crate) fn write_payload_stream_with(
+        &self,
+        kind: ObjectKind,
+        size: u64,
+        options: WriteOptions,
+        mut supply: impl FnMut(&mut dyn FnMut(&[u8]) -> Result<()>) -> Result<()>,
+    ) -> Result<ObjectId> {
+        let prefix_dir = &self.objects_dir;
+        let mut hasher = ObjectPayloadHasher::new(self.hash_algo, kind, size);
+        let tmp_path = unique_loose_tmp_path(prefix_dir);
+        fs::create_dir_all(prefix_dir).map_err(Error::Io)?;
+        let file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp_path)
+            .map_err(Error::Io)?;
+        let zlib_err = |e: io::Error| Error::Zlib(e.to_string());
+        let mut encoder = ZlibEncoder::new(file, self.compression);
+        if let Err(e) = (|| {
+            write!(encoder, "{} {}\0", kind, size).map_err(zlib_err)?;
+            supply(&mut |chunk| {
+                hasher.update(chunk);
+                encoder.write_all(chunk).map_err(zlib_err)
+            })?;
+            encoder.finish().map_err(zlib_err)?;
+            Ok::<(), Error>(())
+        })() {
+            let _ = fs::remove_file(&tmp_path);
+            return Err(e);
+        }
+        let oid = hasher.finish()?;
+        if let Some(existing) = self.try_finish_if_loose_present(&oid, options)? {
+            let _ = fs::remove_file(&tmp_path);
+            return Ok(existing);
+        }
+        let path = self.object_path(&oid);
+        let dest_prefix = path
+            .parent()
+            .ok_or_else(|| Error::PathError("object path has no parent".to_owned()))?;
+        fs::create_dir_all(dest_prefix).map_err(Error::Io)?;
+        match fs::rename(&tmp_path, &path) {
+            Ok(()) => {
+                set_loose_object_mode(&path);
+                Ok(oid)
+            }
+            Err(e) => {
+                let _ = fs::remove_file(&tmp_path);
+                if path.is_file() {
+                    return Ok(oid);
+                }
+                Err(Error::Io(e))
+            }
+        }
+    }
 }
 
 /// Publish a loose object at `path`: `fill` writes the zlib stream into a new, uniquely

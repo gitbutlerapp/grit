@@ -345,8 +345,10 @@ pub fn receive_pack(
 /// The pushed pack is streamed into a temp file inside a quarantine object
 /// directory, so memory use does not grow with the pack size. Its objects are
 /// then stored via [`unpack_objects`] for packs with fewer objects than
-/// `receive.unpacklimit` and installed as a pack with an index otherwise,
-/// matching Git receive-pack. Updates are checked against `policy` and
+/// `receive.unpackLimit` and installed as a pack with an index otherwise,
+/// matching Git receive-pack. On that unpack path, blobs larger than 1 MiB are
+/// inflated and written as loose objects in fixed-size chunks, so peak memory
+/// stays bounded rather than holding the full inflated payload. Updates are checked against `policy` and
 /// against the value the client expected each ref to have; with the `atomic`
 /// capability either every update is applied or none is. Server-side hooks run
 /// through the repository [`CommandRunner`](crate::command_runner::CommandRunner)
