@@ -478,6 +478,28 @@ On the 200k-file repro from the issue (one commit, gc'd, 4 vCPU), `grit clone` w
   --format json --output grit-utils/baselines/daily-clone-checkout-synth-100k-after.json --grit ./target/release/grit
 ```
 
+### Log pages on git.git (2026-10-25)
+
+`grit log` pages walk history in committer-date order, and the walk reads every commit it queues to learn its parents and date. The rows were then built by reading and parsing the same commits a second time, which cost about a third of a 5000-commit page. The walk now keeps the payloads it read (in one shared buffer, released as soon as the rows are loaded) and hands them to the row loader through [`LogWalkPage::commit_data`](rustdoc:grit_lib::revwalk::log_walk::LogWalkPage), so each commit is inflated once. Several fixed costs paid on every page also shrank: peeling to a commit decides the object kind from its header instead of inflating it twice, DWIM ref resolution reads each candidate (`refs/HEAD`, `refs/tags/HEAD`, …) once instead of twice, `packed-refs` records decode their ids while validating them, and pack index lookups in walk order binary-search directly instead of first comparing up to 128 rows after the previous hit.
+
+Hyperfine medians, `dist` builds of the commit before and after the change on the pinned git.git clone (factory VM, same sitting), with median peak RSS over 15 runs:
+
+| Command | git ms | grit before | grit after | git RSS | grit RSS before | grit RSS after |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `log --limit 100 --json` (`log/json-100@git-git`) | 2.85 | 4.34 | 4.00 | 12.4 MiB | 18.5 MiB | 18.5 MiB |
+| `log --limit 100` (`log/oneline-100@git-git`) | 2.87 | 3.89 | 3.66 | 12.3 MiB | 18.0 MiB | 17.9 MiB |
+| `log --limit 50 --json --filter …` (`log/json-filter@git-git`) | 2.15 | 4.31 | 4.07 | 10.0 MiB | 16.8 MiB | 17.1 MiB |
+| `log --limit 1000 --json` | 11.50 | 21.35 | 14.93 | 15.0 MiB | 23.4 MiB | 23.3 MiB |
+| `log --limit 5000` (`log/all@git-git`) | 46.36 | 98.65 | 59.17 | 18.1 MiB | 31.1 MiB | 31.0 MiB |
+
+Path-limited, `--author`, `--stat`, `revs` and `show` rows are unchanged within noise (`daily-log-git-git-before.json` / `daily-log-git-git-after.json` hold the full daily matrix capture for both binaries). What remains of the 100-commit gap is mostly fixed cost: argument parsing, repository discovery and config loading, and listing `packed-refs` for the decorations in the JSON rows.
+
+```bash
+cargo build --profile dist -p grit-cli -p grit-utils
+./target/dist/grit-bench daily --only 'log/json-100@git-git,log/oneline-100@git-git,log/all@git-git,log/author@git-git,log/json-filter@git-git,log/limit-path@git-git,log/path@git-git,log/stat-n50@git-git' \
+  --min-runs 20 --format json --output grit-utils/baselines/daily-log-git-git-after.json --grit ./target/dist/grit
+```
+
 ### git.git headlines (hyperfine wall time + peak RSS)
 
 **`grit-utils/baselines/dashboard/git-dot-git-headlines.json`** uses the standard grit-bench schema (hyperfine medians + **`peak_rss_bytes`** per side). Headline wall times are **not** taken from the daily RSS poll loop (which quantized sub-50 ms commands to ~50 ms); they use the same hyperfine + **`measure-rss`** path as other scenario suites.
