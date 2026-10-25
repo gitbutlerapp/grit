@@ -529,6 +529,7 @@ pub fn fsck(
         } else {
             None
         };
+        let shallow = oid_hash_set_from(&crate::shallow::load_shallow_boundaries(repo.git_dir()));
         let (walked, connectivity_issues) = walk_connectivity(
             repo,
             &roots,
@@ -540,6 +541,7 @@ pub fn fsck(
             progress,
             cancel,
             &promisor_parents,
+            &shallow,
         )?;
         reachable = walked;
         issues.extend(connectivity_issues);
@@ -1266,6 +1268,10 @@ fn verify_midx_and_commit_graph(repo: &Repository, issues: &mut Vec<FsckIssue>) 
     Ok(())
 }
 
+/// Walk everything reachable from `roots`, reporting missing and mistyped links.
+///
+/// Commits in `shallow` are boundaries: like Git's shallow grafts they have no
+/// parents, so their parents are neither followed nor reported missing.
 #[allow(clippy::too_many_arguments)]
 fn walk_connectivity(
     repo: &Repository,
@@ -1278,6 +1284,7 @@ fn walk_connectivity(
     progress: &mut dyn ProgressSink,
     cancel: &dyn Cancel,
     promisor_parents: &OidHashSet,
+    shallow: &OidHashSet,
 ) -> Result<(OidHashSet, Vec<FsckIssue>)> {
     let odb = repo.odb();
     let algo = odb.hash_algo();
@@ -1323,6 +1330,7 @@ fn walk_connectivity(
                 root_kind,
                 links,
                 promisor_parents,
+                shallow,
             );
             continue;
         }
@@ -1362,6 +1370,11 @@ fn walk_connectivity(
                     Err(_) => commit_link_targets(&obj.data, algo),
                 }) else {
                     continue;
+                };
+                let parents = if shallow.contains(&oid) {
+                    Vec::new()
+                } else {
+                    parents
                 };
                 for p in parents {
                     follow_typed_link(
@@ -1596,9 +1609,11 @@ fn walk_from_validated_links(
     _root_kind: WalkRootKind,
     links: &ValidatedObjectLinks,
     promisor_parents: &OidHashSet,
+    shallow: &OidHashSet,
 ) {
     match links {
         ValidatedObjectLinks::Commit { tree, parents } => {
+            let parents: &[ObjectId] = if shallow.contains(&oid) { &[] } else { parents };
             for p in parents {
                 follow_typed_link(
                     odb,

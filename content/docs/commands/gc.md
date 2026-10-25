@@ -30,6 +30,8 @@ Bare **`grit gc`** runs, in order:
 4. **prune** — delete unreachable loose objects older than `gc.pruneExpire` (default `2.weeks.ago`). The object graph is only walked when some loose object is old enough to delete, and one gc walks it at most once (shared with the repack step), so gc of an already packed repository does not read the object graph at all.
 5. **commit-graph** — write `objects/info/commit-graph`. Like `git gc`, changed-path Bloom filters are kept when the existing commit-graph has them and are not computed from scratch otherwise; run `grit gc commit-graph` to add them.
 
+Every step that walks history (repack, prune, bitmap) stops at the shallow boundaries in `.git/shallow`, so gc works in shallow clones and keeps everything down to the boundary commits.
+
 Task subcommands run a single step and return the same JSON shape with one entry in `tasks`.
 
 Progress lines go to **stderr**. The human summary lists each task, key counters, and elapsed milliseconds.

@@ -22,6 +22,7 @@ use crate::pack_rev::{
 };
 use crate::refs;
 use crate::repo::Repository;
+use crate::shallow::load_shallow_boundaries;
 
 use super::order::BitmapOrder;
 
@@ -252,21 +253,23 @@ fn write_bitmap_for_order(
 ) -> Result<PathBuf, PackBitmapWriteError> {
     let roots = collect_referenced_object_roots(repo.git_dir())
         .map_err(|e| PackBitmapWriteError::Object(e.to_string()))?;
+    // Shallow boundary commits have no parents for reachability, as in Git.
+    let shallow = load_shallow_boundaries(repo.git_dir());
     if options.verify_reachability_closure {
-        verify_order_closure(repo, order, &roots)?;
+        verify_order_closure(repo, order, &roots, &shallow)?;
     }
     let tips = commit_tips_from_roots(repo, &roots)?;
     let needs_bitmap = tip_needs_flags(repo, &tips, &options.prefer_bitmap_tips)?;
     let hash_cache_len = hash_cache_row_count(order);
     let mut name_hashes = vec![0u32; hash_cache_len];
-    let (type_bitmaps, commits) = build_type_bitmaps_and_commits(repo, order)?;
+    let (type_bitmaps, commits) = build_type_bitmaps_and_commits(repo, order, &shallow)?;
     let mut selected = select_commits(&commits, &tips, &needs_bitmap);
     let strict = options.verify_reachability_closure;
     if !strict {
         selected.retain(|c| order.position_of(c).is_some());
     }
     let commit_bitmaps =
-        build_commit_bitmaps(repo, order, &commits, &selected, &mut name_hashes, strict)?;
+        build_commit_bitmaps(repo, order, &selected, &shallow, &mut name_hashes, strict)?;
     let (selected_sorted, xor_plan) = plan_xor_compression(repo, &selected, &commit_bitmaps);
     let bytes = assemble_bitmap_bytes(
         order,
@@ -349,9 +352,23 @@ struct CommitRow {
     parents: Vec<ObjectId>,
 }
 
+/// `parents` of commit `oid`, or none when `oid` is a shallow boundary.
+fn graft_parents(
+    oid: &ObjectId,
+    parents: Vec<ObjectId>,
+    shallow: &HashSet<ObjectId>,
+) -> Vec<ObjectId> {
+    if shallow.contains(oid) {
+        Vec::new()
+    } else {
+        parents
+    }
+}
+
 fn build_type_bitmaps_and_commits(
     repo: &Repository,
     order: &BitmapOrder,
+    shallow: &HashSet<ObjectId>,
 ) -> Result<(TypeBitmaps, Vec<CommitRow>), PackBitmapWriteError> {
     let mut commits = Vec::new();
     let mut commit_bm = Bitmap::new();
@@ -379,7 +396,7 @@ fn build_type_bitmaps_and_commits(
                 commits.push(CommitRow {
                     oid,
                     committer_date,
-                    parents: c.parents,
+                    parents: graft_parents(&oid, c.parents, shallow),
                 });
             }
             ObjectKind::Tree => trees.set(p),
@@ -472,8 +489,9 @@ fn verify_order_closure(
     repo: &Repository,
     order: &BitmapOrder,
     tips: &[ObjectId],
+    shallow: &HashSet<ObjectId>,
 ) -> Result<(), PackBitmapWriteError> {
-    let reachable = reachable_from_tips(repo, tips)?;
+    let reachable = reachable_from_tips(repo, tips, shallow)?;
     let mut missing = Vec::new();
     for oid in &reachable {
         if order.position_of(oid).is_none() {
@@ -492,6 +510,7 @@ fn verify_order_closure(
 fn reachable_from_tips(
     repo: &Repository,
     tips: &[ObjectId],
+    shallow: &HashSet<ObjectId>,
 ) -> Result<HashSet<ObjectId>, PackBitmapWriteError> {
     let mut seen = HashSet::new();
     let mut queue = VecDeque::new();
@@ -509,7 +528,7 @@ fn reachable_from_tips(
             ObjectKind::Commit => {
                 let c = parse_commit(&obj.data)
                     .map_err(|e| PackBitmapWriteError::Object(e.to_string()))?;
-                for p in c.parents {
+                for p in graft_parents(&oid, c.parents, shallow) {
                     if seen.insert(p) {
                         queue.push_back(p);
                     }
@@ -597,8 +616,8 @@ struct TypeBitmaps {
 fn build_commit_bitmaps(
     repo: &Repository,
     order: &BitmapOrder,
-    _commits: &[CommitRow],
     selected: &[ObjectId],
+    shallow: &HashSet<ObjectId>,
     name_hashes: &mut [u32],
     strict_closure: bool,
 ) -> Result<HashMap<ObjectId, Bitmap>, PackBitmapWriteError> {
@@ -606,7 +625,7 @@ fn build_commit_bitmaps(
     topo.sort_by_key(|a| commit_date(repo, *a));
     let mut computed: HashMap<ObjectId, Bitmap> = HashMap::new();
     for commit in topo {
-        let mut bm = seed_from_computed_ancestors(repo, commit, &computed)?;
+        let mut bm = seed_from_computed_ancestors(repo, commit, &computed, shallow)?;
         fill_commit_bitmap(
             repo,
             order,
@@ -614,6 +633,7 @@ fn build_commit_bitmaps(
             commit,
             name_hashes,
             &computed,
+            shallow,
             strict_closure,
         )?;
         computed.insert(commit, bm);
@@ -625,6 +645,7 @@ fn seed_from_computed_ancestors(
     repo: &Repository,
     commit: ObjectId,
     computed: &HashMap<ObjectId, Bitmap>,
+    shallow: &HashSet<ObjectId>,
 ) -> Result<Bitmap, PackBitmapWriteError> {
     let obj = repo
         .odb()
@@ -632,7 +653,7 @@ fn seed_from_computed_ancestors(
         .map_err(|e| PackBitmapWriteError::Object(e.to_string()))?;
     let c = parse_commit(&obj.data).map_err(|e| PackBitmapWriteError::Object(e.to_string()))?;
     let mut bm = Bitmap::new();
-    for parent in c.parents {
+    for parent in graft_parents(&commit, c.parents, shallow) {
         if let Some(parent_bm) = computed.get(&parent) {
             bm.or_assign(parent_bm);
             continue;
@@ -649,7 +670,10 @@ fn seed_from_computed_ancestors(
                 .map_err(|e| PackBitmapWriteError::Object(e.to_string()))?;
             let parent_commit = parse_commit(&parent_obj.data)
                 .map_err(|e| PackBitmapWriteError::Object(e.to_string()))?;
-            match parent_commit.parents.first().copied() {
+            match graft_parents(&walk, parent_commit.parents, shallow)
+                .first()
+                .copied()
+            {
                 Some(next) => walk = next,
                 None => break,
             }
@@ -687,6 +711,7 @@ fn commit_date(repo: &Repository, oid: ObjectId) -> i64 {
         .unwrap_or(0)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn fill_commit_bitmap(
     repo: &Repository,
     order: &BitmapOrder,
@@ -694,6 +719,7 @@ fn fill_commit_bitmap(
     tip: ObjectId,
     name_hashes: &mut [u32],
     computed: &HashMap<ObjectId, Bitmap>,
+    shallow: &HashSet<ObjectId>,
     strict_closure: bool,
 ) -> Result<(), PackBitmapWriteError> {
     let mut queue: VecDeque<ObjectId> = VecDeque::new();
@@ -722,7 +748,7 @@ fn fill_commit_bitmap(
             ObjectKind::Commit => {
                 let c = parse_commit(&obj.data)
                     .map_err(|e| PackBitmapWriteError::Object(e.to_string()))?;
-                for parent in c.parents {
+                for parent in graft_parents(&oid, c.parents, shallow) {
                     queue.push_back(parent);
                 }
                 fill_tree_bitmap(

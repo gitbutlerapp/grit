@@ -59,6 +59,10 @@ pub struct PruneStats {
 /// Submodule (gitlink) tree entries are skipped during the walk: the commit they
 /// name lives in another object store.
 ///
+/// When `odb` belongs to a repository ([`Odb::config_git_dir`]), the commits listed in
+/// its `shallow` file are treated as having no parents, like every Git history walk:
+/// their trees are walked but their (absent) parents are not.
+///
 /// The repository hash width is threaded through [`Odb::hash_algo`] (via the
 /// 2-char fan-out directory + suffix length), so SHA-256 repositories work.
 ///
@@ -86,9 +90,13 @@ pub fn prune_loose_unreachable_with_dry_run(
     keep_newer_than: Option<SystemTime>,
     dry_run: bool,
 ) -> Result<PruneStats> {
+    let shallow = odb
+        .config_git_dir()
+        .map(crate::shallow::load_shallow_boundaries)
+        .unwrap_or_default();
     prune_loose_unreachable_with(
         odb,
-        &LazyReachable::new(odb, reachable_roots),
+        &LazyReachable::new(odb, reachable_roots, &shallow),
         keep_newer_than,
         dry_run,
     )
@@ -182,15 +190,18 @@ pub fn collect_referenced_object_roots(git_dir: &Path) -> Result<Vec<ObjectId>> 
 pub(crate) struct LazyReachable<'a> {
     odb: &'a Odb,
     roots: &'a [ObjectId],
+    shallow: &'a HashSet<ObjectId>,
     closure: OnceCell<OidHashSet>,
 }
 
 impl<'a> LazyReachable<'a> {
-    /// Closure of `roots` in `odb`; nothing is read until [`Self::get`].
-    pub(crate) fn new(odb: &'a Odb, roots: &'a [ObjectId]) -> Self {
+    /// Closure of `roots` in `odb`, not following the parents of the `shallow` boundary
+    /// commits; nothing is read until [`Self::get`].
+    pub(crate) fn new(odb: &'a Odb, roots: &'a [ObjectId], shallow: &'a HashSet<ObjectId>) -> Self {
         Self {
             odb,
             roots,
+            shallow,
             closure: OnceCell::new(),
         }
     }
@@ -205,7 +216,7 @@ impl<'a> LazyReachable<'a> {
         if let Some(closure) = self.closure.get() {
             return Ok(closure);
         }
-        let closure = reachable_closure(self.odb, self.roots)?;
+        let closure = reachable_closure(self.odb, self.roots, self.shallow)?;
         Ok(self.closure.get_or_init(|| closure))
     }
 
@@ -218,21 +229,26 @@ impl<'a> LazyReachable<'a> {
     }
 }
 
+/// File type bits of a tree entry mode, and the value that marks a directory.
+const S_IFMT: u32 = 0o170000;
+const S_IFDIR: u32 = 0o040000;
+
 /// Compute the full object closure reachable from `roots` (commits → parents and
 /// tree, trees → entries, tags → target). Mirrors the reachability walk used by
 /// the transfer pack builder, but specialized for prune (no exclusion set).
 ///
+/// Commits in `shallow` are boundaries: their tree is walked, their parents are not.
 /// Blobs named by trees are checked for existence but not read: they link to nothing.
 ///
 /// # Errors
 ///
 /// [`Error::ObjectNotFound`] when a reachable object is missing, and read or parse
 /// errors for the objects that are walked.
-/// File type bits of a tree entry mode, and the value that marks a directory.
-const S_IFMT: u32 = 0o170000;
-const S_IFDIR: u32 = 0o040000;
-
-fn reachable_closure(odb: &Odb, roots: &[ObjectId]) -> Result<OidHashSet> {
+fn reachable_closure(
+    odb: &Odb,
+    roots: &[ObjectId],
+    shallow: &HashSet<ObjectId>,
+) -> Result<OidHashSet> {
     let mut seen = oid_hash_set();
     let mut queue: VecDeque<ObjectId> = VecDeque::new();
     let oid_len = odb.hash_algo().len();
@@ -249,9 +265,11 @@ fn reachable_closure(odb: &Odb, roots: &[ObjectId]) -> Result<OidHashSet> {
         match obj.kind {
             ObjectKind::Commit => {
                 let commit = parse_commit(&obj.data)?;
-                for parent in commit.parents {
-                    if seen.insert(parent) {
-                        queue.push_back(parent);
+                if !shallow.contains(&oid) {
+                    for parent in commit.parents {
+                        if seen.insert(parent) {
+                            queue.push_back(parent);
+                        }
                     }
                 }
                 if seen.insert(commit.tree) {

@@ -22,6 +22,8 @@ Objects already stored in a pack keep their stored form: whole objects are copie
 
 Unreachable objects that lived only in removed packs are written loose first so they are not dropped silently; when [`grit gc`](./gc.md) runs with `gc.pruneExpire`, recently written unreachable objects are kept for the grace window before loose pruning.
 
+In a shallow clone (`grit clone --depth` or `git clone --depth`), the commits listed in `.git/shallow` are history boundaries, as in Git: their trees are packed, but their parents are neither packed nor required to exist.
+
 Use this when a repository has accumulated many loose objects after local commits. Clones and fetches already install packs; repack is mainly for long-lived worktrees built entirely with `grit commit`.
 
 ## Options

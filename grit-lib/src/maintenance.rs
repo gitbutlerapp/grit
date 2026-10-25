@@ -58,6 +58,7 @@ use crate::reflog::{
 };
 use crate::repack_pack::{write_repack_pack, RepackPackSettings};
 use crate::repo::Repository;
+use crate::shallow::load_shallow_boundaries;
 use time::OffsetDateTime;
 
 /// Options for [`repack_all()`].
@@ -686,7 +687,8 @@ fn repack_detail(repo: &Repository, opts: &RepackOptions) -> Result<RepackDetail
     }
 
     let run_incremental = opts.incremental;
-    let reachable = LazyReachable::new(odb, &roots);
+    let shallow = load_shallow_boundaries(repo.git_dir());
+    let reachable = LazyReachable::new(odb, &roots, &shallow);
 
     let skip_repack = !opts.force_recompress
         && !opts.write_bitmap
@@ -706,7 +708,13 @@ fn repack_detail(repo: &Repository, opts: &RepackOptions) -> Result<RepackDetail
         } else if run_incremental {
             odb.enumerate_local_loose_objects()?.len()
         } else {
-            estimate_repack_object_count(odb, &roots, opts.keep_unreachable, pack_opts.use_bitmaps)?
+            estimate_repack_object_count(
+                odb,
+                &roots,
+                &shallow,
+                opts.keep_unreachable,
+                pack_opts.use_bitmaps,
+            )?
         };
         return Ok(RepackDetail {
             report,
@@ -734,6 +742,7 @@ fn repack_detail(repo: &Repository, opts: &RepackOptions) -> Result<RepackDetail
             odb,
             &pack_dir,
             &roots,
+            &shallow,
             opts.keep_unreachable,
             &pack_opts,
             opts.threads,
@@ -1058,7 +1067,13 @@ pub fn prune_loose_objects(repo: &Repository, opts: &PruneOptions) -> Result<Pru
         },
     };
     let roots = collect_maintenance_object_roots(repo)?;
-    crate::gc::prune_loose_unreachable_with_dry_run(odb, &roots, keep_newer_than, opts.dry_run)
+    let shallow = load_shallow_boundaries(repo.git_dir());
+    prune_loose_unreachable_with(
+        odb,
+        &LazyReachable::new(odb, &roots, &shallow),
+        keep_newer_than,
+        opts.dry_run,
+    )
 }
 
 fn duration_ms(d: std::time::Duration) -> u64 {
@@ -1197,16 +1212,20 @@ fn count_loose_objects(odb: &Odb) -> Result<usize> {
     Ok(odb.enumerate_local_loose_objects()?.len())
 }
 
+/// Build the all-into-one repack pack for `roots`, stopping history at the `shallow`
+/// boundary commits.
+#[allow(clippy::too_many_arguments)]
 fn build_repack_pack(
     odb: &Odb,
     pack_dir: &Path,
     roots: &[ObjectId],
+    shallow: &HashSet<ObjectId>,
     keep_unreachable: bool,
     opts: &PackBuildOptions,
     threads: Option<usize>,
     cfg: Option<&ConfigSet>,
 ) -> Result<SerializedDeltaPack> {
-    let selection = repack_object_list(odb, roots, keep_unreachable, opts.use_bitmaps)?;
+    let selection = repack_object_list(odb, roots, shallow, keep_unreachable, opts.use_bitmaps)?;
     odb.clear_delta_base_cache();
     let max_depth = if opts.delta { opts.max_depth } else { 0 };
     let settings = RepackPackSettings {
@@ -1243,11 +1262,13 @@ fn build_repack_pack(
     }
 }
 
-/// Objects a full repack writes: everything reachable from `roots`, plus every
-/// other packed and loose object when `keep_unreachable` is set.
+/// Objects a full repack writes: everything reachable from `roots` down to the
+/// `shallow` boundary commits, plus every other packed and loose object when
+/// `keep_unreachable` is set.
 fn repack_object_list(
     odb: &Odb,
     roots: &[ObjectId],
+    shallow: &HashSet<ObjectId>,
     keep_unreachable: bool,
     use_bitmaps: bool,
 ) -> Result<PackObjectSelection> {
@@ -1255,15 +1276,14 @@ fn repack_object_list(
     // the same on every run.
     let mut roots = roots.to_vec();
     roots.sort_unstable();
-    let empty_shallow = HashSet::new();
     let mut selection = enumerate_pack_objects_naming(
         odb,
         &roots,
         &[],
         &PackEnumerateOptions {
             filter: None,
-            shallow_grafts: &empty_shallow,
-            have_shallow_grafts: Some(&empty_shallow),
+            shallow_grafts: shallow,
+            have_shallow_grafts: Some(shallow),
             use_bitmaps,
             exclude_objects: None,
             prefetch_walk_objects: false,
@@ -1298,13 +1318,14 @@ fn append_repack_unreachable_retention(odb: &Odb, send: &mut Vec<ObjectId>) -> R
 fn estimate_repack_object_count(
     odb: &Odb,
     roots: &[ObjectId],
+    shallow: &HashSet<ObjectId>,
     keep_unreachable: bool,
     use_bitmaps: bool,
 ) -> Result<usize> {
     if !keep_unreachable {
-        return estimate_reachable_count(odb, roots);
+        return estimate_reachable_count(odb, roots, shallow);
     }
-    Ok(repack_object_list(odb, roots, true, use_bitmaps)?
+    Ok(repack_object_list(odb, roots, shallow, true, use_bitmaps)?
         .send
         .len())
 }
@@ -1327,7 +1348,11 @@ fn count_pack_files(pack_dir: &Path) -> usize {
         .unwrap_or(0)
 }
 
-fn estimate_reachable_count(odb: &Odb, roots: &[ObjectId]) -> Result<usize> {
+fn estimate_reachable_count(
+    odb: &Odb,
+    roots: &[ObjectId],
+    shallow: &HashSet<ObjectId>,
+) -> Result<usize> {
     let mut seen: HashSet<ObjectId> = HashSet::new();
     let mut queue: VecDeque<ObjectId> = VecDeque::new();
     for &root in roots {
@@ -1343,9 +1368,11 @@ fn estimate_reachable_count(odb: &Odb, roots: &[ObjectId]) -> Result<usize> {
         match obj.kind {
             ObjectKind::Commit => {
                 let commit = parse_commit(&obj.data)?;
-                for parent in commit.parents {
-                    if seen.insert(parent) {
-                        queue.push_back(parent);
+                if !shallow.contains(&oid) {
+                    for parent in commit.parents {
+                        if seen.insert(parent) {
+                            queue.push_back(parent);
+                        }
                     }
                 }
                 if seen.insert(commit.tree) {
