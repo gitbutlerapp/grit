@@ -20,6 +20,8 @@ use serde::Serialize;
 use std::io::{self, Read, Write};
 
 use crate::context::{self, subject_line};
+use crate::error_kind::ErrorKind;
+use crate::json_error::{StructuredCliError, StructuredJsonError};
 use crate::markdown;
 use crate::output::{outln, HumanRender, MarkdownRender, Person, RenderContext};
 use crate::pathspec_args::TrailingPathspecArgs;
@@ -619,9 +621,34 @@ fn scope_json(scope: &CommitScope) -> CommitScopeJson {
     }
 }
 
+fn nothing_staged_commit_error(unstaged: usize, untracked: usize) -> anyhow::Error {
+    let total = unstaged + untracked;
+    let files = if total == 1 { "file" } else { "files" };
+    let summary =
+        format!("nothing staged to commit ({total} {files} have unstaged or untracked changes)");
+    let hint = "run `grit add <file>` first, or `grit commit -- <path>`";
+    let human = format!("{summary} — {hint}");
+    anyhow::Error::new(StructuredCliError {
+        payload: StructuredJsonError {
+            hint: Some(hint.to_owned()),
+            ..StructuredJsonError::new(summary, ErrorKind::NothingStaged)
+        },
+        human,
+    })
+}
+
 fn map_commit_error(err: Error) -> anyhow::Error {
     match err {
-        Error::NothingToCommit => anyhow::anyhow!("nothing to commit — working tree clean"),
+        Error::NothingStagedToCommit { unstaged, untracked } => {
+            nothing_staged_commit_error(unstaged, untracked)
+        }
+        Error::NothingToCommit => anyhow::Error::new(StructuredCliError {
+            payload: StructuredJsonError::new(
+                "nothing to commit — working tree clean",
+                ErrorKind::NothingToCommit,
+            ),
+            human: "nothing to commit — working tree clean".to_owned(),
+        }),
         Error::IndexUnmerged => anyhow::anyhow!(
             "cannot commit: unresolved merge conflicts remain — resolve each conflicted path (grit add or grit rm), then try again"
         ),

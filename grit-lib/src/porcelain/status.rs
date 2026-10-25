@@ -28,12 +28,14 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use crate::config::{parse_git_config_maybe_bool, ConfigSet};
-use crate::diff::{is_unregistered_embedded_git_repo, DiffEntry};
-use crate::error::ConfigError;
-use crate::error::Result;
+use crate::diff::{
+    diff_index_to_worktree_with_options, is_unregistered_embedded_git_repo, DiffEntry,
+    DiffIndexToWorktreeOptions, DiffStatus,
+};
+use crate::error::{ConfigError, Error, Result};
 use crate::hash::{try_par_hash_with, ParallelHashError};
 use crate::ignore::IgnoreMatcher;
-use crate::index::{Index, MODE_GITLINK, MODE_TREE};
+use crate::index::{index_file_mtime, Index, MODE_GITLINK, MODE_TREE};
 use crate::objects::ObjectId;
 use crate::parallel::ParallelOp;
 use crate::precompose_config::effective_core_precomposeunicode_with_config;
@@ -428,6 +430,57 @@ pub fn collect_untracked_and_ignored_with_cache(
         None,
     )
     .map(|(untracked, ignored, _)| (untracked, ignored))
+}
+
+/// Count unstaged (index vs work tree) and untracked paths for an index that already matches `HEAD`.
+///
+/// Used when an index-only commit is refused so callers can tell a clean tree from dirty worktree
+/// state (issue #1969). Does not run rename detection or build a full [`StatusModel`].
+///
+/// # Errors
+///
+/// Propagates work-tree, diff, and untracked-walk failures.
+pub fn count_unstaged_and_untracked_paths(
+    repo: &Repository,
+    index: &mut Index,
+) -> Result<(usize, usize)> {
+    let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
+    let index_mtime = index_file_mtime(&repo.index_path());
+    let worktree_rules = crate::worktree_rules::WorktreeRules::from_repository(repo, index)?;
+    let rules_arc = Arc::new(Mutex::new(worktree_rules));
+    let diff_opts = DiffIndexToWorktreeOptions {
+        index_mtime,
+        ignore_submodule_untracked: true,
+        repository_git_dir: Some(repo.git_dir().to_path_buf()),
+        config: repo.config().ok(),
+        worktree_rules: Some(Arc::clone(&rules_arc)),
+        ..Default::default()
+    };
+    let (unstaged, _) =
+        diff_index_to_worktree_with_options(repo.odb(), index, work_tree, diff_opts)?;
+    let unstaged_count = unstaged
+        .iter()
+        .filter(|e| e.status != DiffStatus::Unmerged)
+        .count();
+    let worktree_rules = rules_arc
+        .lock()
+        .map_err(|e| Error::Message(format!("worktree rules lock poisoned: {e}")))?;
+    let (untracked, _, _) = collect_untracked_and_ignored_inner(
+        repo,
+        index,
+        work_tree,
+        &[],
+        UntrackedScan {
+            ignored_mode: IgnoredMode::No,
+            show_all: false,
+            sort_paths: true,
+            use_untracked_cache: false,
+            cache_miss: UntrackedCacheMissAction::RefreshFull,
+        },
+        &worktree_rules,
+        None,
+    )?;
+    Ok((unstaged_count, untracked.len()))
 }
 
 /// Like [`collect_untracked_and_ignored`], reusing an existing
@@ -1893,8 +1946,6 @@ fn directory_pathspec_matches_self(rel_dir: &str, pathspecs: &[String]) -> bool 
     pathspecs.is_empty()
         || status_path_matches(&format!("{}/", rel_dir.trim_end_matches('/')), pathspecs)
 }
-
-use crate::diff::DiffStatus;
 
 /// Collect unmerged paths and their [`ConflictKind`] from the index.
 #[must_use]

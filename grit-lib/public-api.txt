@@ -5604,6 +5604,9 @@ pub grit_lib::error::Error::NotesRefNotCommit
 pub grit_lib::error::Error::NotesRefNotCommit::found: grit_lib::objects::ObjectKind
 pub grit_lib::error::Error::NotesRefNotCommit::notes_ref: alloc::string::String
 pub grit_lib::error::Error::NothingToCommit
+pub grit_lib::error::Error::NothingStagedToCommit
+pub grit_lib::error::Error::NothingStagedToCommit::unstaged: usize
+pub grit_lib::error::Error::NothingStagedToCommit::untracked: usize
 pub grit_lib::error::Error::ObjectHeaderTooLong
 pub grit_lib::error::Error::ObjectHeaderTooLong::oid: alloc::string::String
 pub grit_lib::error::Error::ObjectNotFound(alloc::string::String)
@@ -14983,6 +14986,7 @@ impl core::marker::Unpin for grit_lib::porcelain::status::UntrackedCollectMeta
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::status::UntrackedCollectMeta
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::status::UntrackedCollectMeta
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::status::UntrackedCollectMeta
+pub fn grit_lib::porcelain::status::count_unstaged_and_untracked_paths(&grit_lib::repo::Repository, &mut grit_lib::index::Index) -> grit_lib::error::Result<(usize, usize)>
 pub fn grit_lib::porcelain::status::collect_untracked_and_ignored(&grit_lib::repo::Repository, &mut grit_lib::index::Index, &std::path::Path, grit_lib::porcelain::status::IgnoredMode, bool, &[alloc::string::String]) -> grit_lib::error::Result<(alloc::vec::Vec<alloc::string::String>, alloc::vec::Vec<alloc::string::String>)>
 pub fn grit_lib::porcelain::status::collect_untracked_and_ignored_with_cache(&grit_lib::repo::Repository, &mut grit_lib::index::Index, &std::path::Path, grit_lib::porcelain::status::IgnoredMode, bool, &[alloc::string::String], bool) -> grit_lib::error::Result<(alloc::vec::Vec<alloc::string::String>, alloc::vec::Vec<alloc::string::String>)>
 pub fn grit_lib::porcelain::status::collect_untracked_and_ignored_with_rules(&grit_lib::repo::Repository, &mut grit_lib::index::Index, &std::path::Path, grit_lib::porcelain::status::IgnoredMode, bool, &[alloc::string::String], &grit_lib::worktree::worktree_rules::WorktreeRules) -> grit_lib::error::Result<(alloc::vec::Vec<alloc::string::String>, alloc::vec::Vec<alloc::string::String>, grit_lib::porcelain::status::UntrackedCollectMeta)>
@@ -15479,6 +15483,9 @@ pub grit_lib::prelude::Error::NotesRefNotCommit
 pub grit_lib::prelude::Error::NotesRefNotCommit::found: grit_lib::objects::ObjectKind
 pub grit_lib::prelude::Error::NotesRefNotCommit::notes_ref: alloc::string::String
 pub grit_lib::prelude::Error::NothingToCommit
+pub grit_lib::prelude::Error::NothingStagedToCommit
+pub grit_lib::prelude::Error::NothingStagedToCommit::unstaged: usize
+pub grit_lib::prelude::Error::NothingStagedToCommit::untracked: usize
 pub grit_lib::prelude::Error::ObjectHeaderTooLong
 pub grit_lib::prelude::Error::ObjectHeaderTooLong::oid: alloc::string::String
 pub grit_lib::prelude::Error::ObjectNotFound(alloc::string::String)

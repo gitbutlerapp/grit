@@ -66,6 +66,10 @@ pub enum ErrorKind {
     DirtyWorktree,
     /// Worktree file I/O failed on a named path (`paths`, often one entry).
     WorktreePathIo,
+    /// Index-only commit while the work tree has unstaged or untracked changes.
+    NothingStaged,
+    /// Genuinely nothing to commit (clean tree or auto-stage cancel-out).
+    NothingToCommit,
 }
 
 impl ErrorKind {
@@ -122,6 +126,8 @@ impl ErrorKind {
             Self::UnmergedPaths => "unmerged_paths",
             Self::DirtyWorktree => "dirty_worktree",
             Self::WorktreePathIo => "worktree_path_io",
+            Self::NothingStaged => "nothing_staged",
+            Self::NothingToCommit => "nothing_to_commit",
         }
     }
 
@@ -159,6 +165,8 @@ impl ErrorKind {
             Self::UnmergedPaths,
             Self::DirtyWorktree,
             Self::WorktreePathIo,
+            Self::NothingStaged,
+            Self::NothingToCommit,
         ]
     }
 }

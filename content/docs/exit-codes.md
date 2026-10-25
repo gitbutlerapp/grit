@@ -63,3 +63,5 @@ $ grit push --json
 | `unmerged_paths` | `grit merge --continue` while conflicts are unresolved, or resolved but not staged with `commit.autoStage=false` (`paths`). The hint names the files and `grit merge --continue` / `grit merge --abort` (or `grit add`). Also a plain `grit restore` of a conflicted path; the hint names `grit restore --ours` / `--theirs` / `--merge`. |
 | `dirty_worktree` | Staged or unstaged changes block a merge, pick, revert, switch or `rebase --exec` (`paths`). Hint: `grit commit` or `grit stash`. |
 | `worktree_path_io` | Checkout, stash, add, diff, or reset could not read or replace a worktree file (`paths`, often one path). Typical cause: another program has the file open. Hint: close the program and retry. |
+| `nothing_staged` | `grit commit` with `commit.autoStage=false` or `--staged` while the index matches `HEAD` but the work tree has unstaged or untracked paths. Hint: `grit add` or `grit commit -- <path>`. |
+| `nothing_to_commit` | `grit commit` on a genuinely clean tree (or after auto-staging cancels out against `HEAD`). |

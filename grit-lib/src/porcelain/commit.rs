@@ -137,6 +137,10 @@ pub struct CommitRequest {
     pub reuse_message_from: Option<ObjectId>,
     /// When true, compute the commit tree and file list without writing objects, updating refs, or running hooks.
     pub dry_run: bool,
+    /// When true, a [`Error::NothingToCommit`] is upgraded to [`Error::NothingStagedToCommit`] if the
+    /// work tree still has unstaged or untracked paths (index-only commit; issue #1969).
+    #[doc(hidden)]
+    pub index_only: bool,
     /// Whether an amend runs `post-rewrite amend` ([`PostOperationHooks::Skip`] is Git's
     /// `--no-post-rewrite`). `post-commit` runs either way.
     pub post_rewrite: PostOperationHooks,
@@ -321,6 +325,7 @@ pub fn commit_with_scope(
             let mut req = req.clone();
             // Index stats were refreshed when paths were staged; skip full-tree refresh (#1622).
             req.assume_worktree_synced = true;
+            req.index_only = true;
             create_commit(repo, &req, progress)
         }
         CommitScope::Paths(paths) => commit_paths_scope(repo, req, &paths, progress),
@@ -907,10 +912,10 @@ fn finish_commit_dry_run(
 
     if !req.allow_empty && !req_amend {
         if parent_tree.is_none() && index.entries.is_empty() {
-            return Err(Error::NothingToCommit);
+            return Err(empty_commit_error(repo, index, req));
         }
         if !concluding_merge && files.is_empty() {
-            return Err(Error::NothingToCommit);
+            return Err(empty_commit_error(repo, index, req));
         }
     }
 
@@ -1151,10 +1156,10 @@ fn create_commit_with_index(
         if !skip_tree_match {
             if let Some(ref old) = parent_tree {
                 if index_staged_tree_matches(repo.odb(), index, old) {
-                    return Err(Error::NothingToCommit);
+                    return Err(empty_commit_error(repo, index, req));
                 }
             } else if index.entries.is_empty() {
-                return Err(Error::NothingToCommit);
+                return Err(empty_commit_error(repo, index, req));
             }
         }
     }
@@ -1214,12 +1219,12 @@ fn create_commit_with_index(
 
     if !req.allow_empty && !req.amend {
         if parent_tree.is_none() && is_empty_tree_oid(repo.odb(), &tree) {
-            return Err(Error::NothingToCommit);
+            return Err(empty_commit_error(repo, index, req));
         }
         if !concluding_merge {
             if let Some(ref old) = parent_tree {
                 if old == &tree {
-                    return Err(Error::NothingToCommit);
+                    return Err(empty_commit_error(repo, index, req));
                 }
             }
         }
@@ -1549,6 +1554,22 @@ pub fn write_commit_object(
     let config = repo.config()?;
     let bytes = prepare_commit_bytes(repo, config.as_ref(), data, sign_override)?;
     repo.odb().write(ObjectKind::Commit, &bytes)
+}
+
+fn empty_commit_error(repo: &Repository, index: &mut Index, req: &CommitRequest) -> Error {
+    if req.index_only {
+        if let Ok((unstaged, untracked)) =
+            crate::porcelain::status::count_unstaged_and_untracked_paths(repo, index)
+        {
+            if unstaged + untracked > 0 {
+                return Error::NothingStagedToCommit {
+                    unstaged,
+                    untracked,
+                };
+            }
+        }
+    }
+    Error::NothingToCommit
 }
 
 /// True when stage-0 index entries describe `tree_oid`, using a valid cache-tree when present.

@@ -1381,6 +1381,15 @@ pub enum Error {
     #[error("nothing to commit")]
     NothingToCommit,
 
+    /// Index-only commit ([`CommitRequest::index_only`]) while the work tree has unstaged or untracked paths.
+    #[error("nothing staged to commit")]
+    NothingStagedToCommit {
+        /// Tracked paths that differ between the index and the work tree.
+        unstaged: usize,
+        /// Untracked paths under the work tree.
+        untracked: usize,
+    },
+
     /// [`create_commit`](crate::porcelain::commit::create_commit) requires a branch checkout.
     #[error("HEAD is detached")]
     DetachedHead,
