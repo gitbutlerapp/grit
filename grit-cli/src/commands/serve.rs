@@ -56,19 +56,20 @@ pub fn run(
     let protocol = std::env::var("GIT_PROTOCOL")
         .map(|v| ProtocolVersion::from_git_protocol(&v))
         .unwrap_or_default();
-    let opts = ServeOptions {
+    let mut opts = ServeOptions {
         protocol,
         stateless_rpc,
         advertise_refs,
         agent: format!("grit/{}", env!("CARGO_PKG_VERSION")),
         hidden_refs,
+        ..ServeOptions::default()
     };
 
     let stdin = std::io::stdin();
     let mut input = stdin.lock();
     let mut output = BufWriter::new(std::io::stdout().lock());
     match service {
-        Service::UploadPack => serve::upload_pack(&repo, &mut input, &mut output, &opts)?,
+        Service::UploadPack => serve::upload_pack(&repo, &mut input, &mut output, &mut opts)?,
         Service::ReceivePack => {
             let policy = ReceivePolicy::from_config(&config);
             serve::receive_pack(&repo, &mut input, &mut output, &opts, &policy)?;

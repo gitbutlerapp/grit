@@ -111,15 +111,16 @@ pub(crate) fn run_upload_pack(
     let config =
         ConfigSet::load(repo.environment(), Some(repo.git_dir()), true).unwrap_or_default();
     let hidden_refs = grit_lib::refs::hide_refs::hide_ref_patterns_uploadpack(&config);
-    let opts = ServeOptions {
+    let mut opts = ServeOptions {
         protocol: protocol_version_from_header(protocol_version),
         stateless_rpc,
         advertise_refs,
         agent: format!("grit/{}", env!("CARGO_PKG_VERSION")),
         hidden_refs,
+        ..ServeOptions::default()
     };
     let mut output = Vec::new();
-    serve::upload_pack(&repo, &mut &*input, &mut output, &opts)?;
+    serve::upload_pack(&repo, &mut &*input, &mut output, &mut opts)?;
     Ok(output)
 }
 
@@ -140,6 +141,7 @@ pub(crate) fn run_receive_pack(
         advertise_refs,
         agent: format!("grit/{}", env!("CARGO_PKG_VERSION")),
         hidden_refs,
+        ..ServeOptions::default()
     };
     let policy = ReceivePolicy::from_config(&config);
     let mut output = Vec::new();

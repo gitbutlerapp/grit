@@ -48,7 +48,8 @@ const V0_CAPABILITIES: &[&str] = &[
 /// - `repo`: the repository being served.
 /// - `input`: requests from the client.
 /// - `output`: where responses are written.
-/// - `opts`: framing, protocol version, agent string, and hidden refs.
+/// - `opts`: framing, protocol version, agent string, hidden refs, and (for v2)
+///   [`ServeOptions::server_options`] filled from each command request.
 ///
 /// # Errors
 ///
@@ -59,7 +60,7 @@ pub fn upload_pack(
     repo: &Repository,
     input: &mut dyn Read,
     output: &mut dyn Write,
-    opts: &ServeOptions,
+    opts: &mut ServeOptions,
 ) -> Result<()> {
     let result = match opts.protocol {
         ProtocolVersion::V2 => serve_v2(repo, input, output, opts),
@@ -481,7 +482,7 @@ fn serve_v2(
     repo: &Repository,
     input: &mut dyn Read,
     output: &mut dyn Write,
-    opts: &ServeOptions,
+    opts: &mut ServeOptions,
 ) -> Result<()> {
     if opts.advertise_refs || !opts.stateless_rpc {
         write_line(output, "version 2")?;
@@ -492,10 +493,12 @@ fn serve_v2(
         let policy = upload_policy(repo);
         let fetch_caps = policy.v2_fetch_features().join(" ");
         write_line(output, &format!("fetch={fetch_caps}"))?;
+        write_line(output, "server-option")?;
         write_line(
             output,
             &format!("object-format={}", repo.odb().hash_algo().name()),
         )?;
+        write_line(output, "object-info")?;
         write_flush(output)?;
         if opts.advertise_refs {
             return Ok(());
@@ -504,13 +507,17 @@ fn serve_v2(
     }
 
     loop {
-        let Some(request) = read_v2_request(input)? else {
+        opts.server_options.clear();
+        let Some(request) = read_v2_request(input, opts)? else {
             return Ok(());
         };
         check_object_format(repo, request.object_format.as_deref())?;
         match request.command.as_str() {
             "ls-refs" => ls_refs(repo, output, &request.args, opts)?,
             "fetch" => fetch_v2(repo, output, &request.args, opts)?,
+            "object-info" => {
+                super::object_info::write_object_info_response(repo, output, &request.args)?
+            }
             other => return Err(ServeError::UnknownCommand(other.to_owned())),
         }
         output.flush()?;
@@ -529,7 +536,7 @@ struct V2Request {
 
 /// Read a v2 command request. Returns `None` at end of input or on a bare
 /// flush, which ends the session.
-fn read_v2_request(input: &mut dyn Read) -> Result<Option<V2Request>> {
+fn read_v2_request(input: &mut dyn Read, opts: &mut ServeOptions) -> Result<Option<V2Request>> {
     let mut command = None;
     let mut object_format = None;
     let mut args = Vec::new();
@@ -544,14 +551,22 @@ fn read_v2_request(input: &mut dyn Read) -> Result<Option<V2Request>> {
             }
             Some(Packet::Flush) => break,
             Some(Packet::Delim) if !in_args => in_args = true,
-            Some(Packet::Data(line)) if in_args => args.push(line),
+            Some(Packet::Data(line)) if in_args => {
+                if let Some(value) = line.strip_prefix("server-option ") {
+                    opts.server_options.push(value.to_owned());
+                } else {
+                    args.push(line);
+                }
+            }
             Some(Packet::Data(line)) => {
                 if let Some(c) = line.strip_prefix("command=") {
                     command = Some(c.to_owned());
                 } else if let Some(f) = line.strip_prefix("object-format=") {
                     object_format = Some(f.to_owned());
+                } else if let Some(opt) = line.strip_prefix("server-option=") {
+                    opts.server_options.push(opt.to_owned());
                 }
-                // agent=, server-option= and unknown capabilities are ignored.
+                // agent= and unknown capabilities are ignored.
             }
             Some(other) => {
                 return Err(ServeError::Protocol(format!(
@@ -623,7 +638,7 @@ fn fetch_v2(
     repo: &Repository,
     output: &mut dyn Write,
     args: &[String],
-    opts: &ServeOptions,
+    opts: &mut ServeOptions,
 ) -> Result<()> {
     let config = repo_config(repo);
     let policy = UploadPackPolicy::from_config(&config);
@@ -637,6 +652,7 @@ fn fetch_v2(
     let mut deepen_relative = false;
     let mut filter_spec: Option<String> = None;
     let mut want_ref_names: Vec<String> = Vec::new();
+    let mut _wait_for_done = false;
     for arg in args {
         if let Some(hex) = arg.strip_prefix("want ") {
             wants.push(parse_oid(repo, hex.trim())?);
@@ -667,8 +683,12 @@ fn fetch_v2(
             want_ref_names.push(name.to_owned());
         } else if arg == "done" {
             done = true;
+        } else if arg == "wait-for-done" {
+            _wait_for_done = true;
         } else if arg == "deepen-relative" {
             deepen_relative = true;
+        } else if let Some(value) = arg.strip_prefix("server-option ") {
+            opts.server_options.push(value.to_owned());
         } else if matches!(
             arg.as_str(),
             "thin-pack" | "no-progress" | "include-tag" | "ofs-delta"
@@ -681,7 +701,6 @@ fn fetch_v2(
             )));
         }
     }
-
     let refs = advertised_refs(repo, &opts.hidden_refs, &[], Peel::Yes)?;
     let head = head_info(repo);
     let wanted_refs = want_ref_names

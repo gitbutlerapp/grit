@@ -124,17 +124,12 @@ fn response_sections(resp: &[u8]) -> Vec<String> {
 fn serve_grit(bare: &Path, body: &[u8]) -> Vec<u8> {
     let repo = Repository::open(bare, &RepositoryOptions::empty()).expect("open");
     let mut out = Vec::new();
-    upload_pack(
-        &repo,
-        &mut Cursor::new(body.to_vec()),
-        &mut out,
-        &ServeOptions {
-            protocol: ProtocolVersion::V2,
-            stateless_rpc: true,
-            ..ServeOptions::default()
-        },
-    )
-    .expect("upload_pack");
+    let mut opts = ServeOptions {
+        protocol: ProtocolVersion::V2,
+        stateless_rpc: true,
+        ..ServeOptions::default()
+    };
+    upload_pack(&repo, &mut Cursor::new(body.to_vec()), &mut out, &mut opts).expect("upload_pack");
     out
 }
 
@@ -158,17 +153,12 @@ fn serve_git(bare: &Path, body: &[u8]) -> Vec<u8> {
 fn advertised_fetch_features(bare: &Path) -> String {
     let repo = Repository::open(bare, &RepositoryOptions::empty()).expect("open");
     let mut out = Vec::new();
-    upload_pack(
-        &repo,
-        &mut Cursor::new(Vec::new()),
-        &mut out,
-        &ServeOptions {
-            protocol: ProtocolVersion::V2,
-            advertise_refs: true,
-            ..ServeOptions::default()
-        },
-    )
-    .expect("advertise");
+    let mut opts = ServeOptions {
+        protocol: ProtocolVersion::V2,
+        advertise_refs: true,
+        ..ServeOptions::default()
+    };
+    upload_pack(&repo, &mut Cursor::new(Vec::new()), &mut out, &mut opts).expect("advertise");
     response_sections(&out)
         .into_iter()
         .find_map(|l| l.strip_prefix("fetch=").map(str::to_owned))
@@ -179,16 +169,12 @@ fn advertised_fetch_features(bare: &Path) -> String {
 fn serve_grit_err(bare: &Path, body: &[u8]) -> ServeError {
     let repo = Repository::open(bare, &RepositoryOptions::empty()).expect("open");
     let mut out = Vec::new();
-    upload_pack(
-        &repo,
-        &mut Cursor::new(body.to_vec()),
-        &mut out,
-        &ServeOptions {
-            protocol: ProtocolVersion::V2,
-            ..ServeOptions::default()
-        },
-    )
-    .expect_err("request should be refused")
+    let mut opts = ServeOptions {
+        protocol: ProtocolVersion::V2,
+        ..ServeOptions::default()
+    };
+    upload_pack(&repo, &mut Cursor::new(body.to_vec()), &mut out, &mut opts)
+        .expect_err("request should be refused")
 }
 
 fn shallow_lines(sections: &[String]) -> Vec<&str> {
@@ -373,7 +359,7 @@ fn sideband_all_is_refused_unless_allowed() {
 fn v2_fetch_capability_lists_only_v2_features() {
     let tmp = tempfile::tempdir().unwrap();
     let bare = fixture(tmp.path());
-    assert_eq!(advertised_fetch_features(&bare), "shallow");
+    assert_eq!(advertised_fetch_features(&bare), "shallow wait-for-done");
 
     git(&bare, &["config", "uploadpack.allowFilter", "true"]);
     git(&bare, &["config", "uploadpack.allowRefInWant", "true"]);
@@ -382,6 +368,152 @@ fn v2_fetch_capability_lists_only_v2_features() {
     let features: Vec<&str> = features.split(' ').collect();
     assert_eq!(
         features,
-        ["shallow", "filter", "ref-in-want", "sideband-all"]
+        [
+            "shallow",
+            "wait-for-done",
+            "filter",
+            "ref-in-want",
+            "sideband-all"
+        ]
+    );
+}
+
+fn v2_capability_lines(bare: &Path) -> Vec<String> {
+    let repo = Repository::open(bare, &RepositoryOptions::empty()).expect("open");
+    let mut out = Vec::new();
+    let mut opts = ServeOptions {
+        protocol: ProtocolVersion::V2,
+        advertise_refs: true,
+        ..ServeOptions::default()
+    };
+    upload_pack(&repo, &mut Cursor::new(Vec::new()), &mut out, &mut opts).expect("advertise");
+    response_sections(&out)
+        .into_iter()
+        .filter(|l| !matches!(l.as_str(), "<flush>" | "<delim>"))
+        .collect()
+}
+
+#[test]
+fn v2_advertisement_includes_server_option_object_info_and_wait_for_done() {
+    let tmp = tempfile::tempdir().unwrap();
+    let bare = fixture(tmp.path());
+    let grit_caps = v2_capability_lines(&bare);
+    let git_out = Command::new("git")
+        .args(["upload-pack", "--advertise-refs", "--stateless-rpc"])
+        .arg(&bare)
+        .env("GIT_PROTOCOL", "version=2")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("git advertise");
+    assert!(git_out.status.success());
+    let git_caps: Vec<String> = response_sections(&git_out.stdout)
+        .into_iter()
+        .filter(|l| !matches!(l.as_str(), "<flush>" | "<delim>" | "version 2"))
+        .collect();
+    for required in [
+        "server-option",
+        "object-info",
+        "fetch=shallow wait-for-done",
+    ] {
+        assert!(
+            grit_caps.iter().any(|l| l == required),
+            "grit missing {required:?}; caps={grit_caps:?}"
+        );
+        assert!(
+            git_caps.iter().any(|l| l == required),
+            "git missing {required:?}; caps={git_caps:?}"
+        );
+    }
+}
+
+#[test]
+fn v2_fetch_records_server_option_from_client() {
+    let tmp = tempfile::tempdir().unwrap();
+    let bare = fixture(tmp.path());
+    let tip = git(&bare, &["rev-parse", "main"]);
+    let mut body = Vec::new();
+    pkt(&mut body, "command=fetch");
+    pkt(&mut body, "server-option=trace-id=42");
+    pkt(&mut body, "object-format=sha1");
+    body.extend(b"0001");
+    pkt(&mut body, &format!("want {tip}"));
+    pkt(&mut body, "done");
+    body.extend(b"0000");
+    let repo = Repository::open(&bare, &RepositoryOptions::empty()).expect("open");
+    let mut out = Vec::new();
+    let mut opts = ServeOptions {
+        protocol: ProtocolVersion::V2,
+        stateless_rpc: true,
+        ..ServeOptions::default()
+    };
+    upload_pack(&repo, &mut Cursor::new(body), &mut out, &mut opts)
+        .expect("fetch with server-option");
+    assert_eq!(opts.server_options, ["trace-id=42"]);
+}
+
+#[test]
+fn object_info_matches_git_for_tip_commit() {
+    let tmp = tempfile::tempdir().unwrap();
+    let bare = fixture(tmp.path());
+    let tip = git(&bare, &["rev-parse", "main"]);
+    let mut body = Vec::new();
+    pkt(&mut body, "command=object-info");
+    pkt(&mut body, "object-format=sha1");
+    body.extend(b"0001");
+    pkt(&mut body, "size");
+    pkt(&mut body, &format!("oid {tip}"));
+    body.extend(b"0000");
+    let grit_resp = serve_grit(&bare, &body);
+    let git_resp = serve_git(&bare, &body);
+    assert_eq!(
+        response_sections(&grit_resp),
+        response_sections(&git_resp),
+        "object-info response should match git"
+    );
+}
+
+fn grit_bin_for_subprocess() -> Option<std::path::PathBuf> {
+    if let Ok(p) = std::env::var("CARGO_BIN_EXE_grit") {
+        return Some(p.into());
+    }
+    let candidate =
+        std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../target/debug/grit");
+    candidate.is_file().then_some(candidate)
+}
+
+#[test]
+fn git_fetch_accepts_grit_upload_pack_with_server_option() {
+    let Some(grit_bin) = grit_bin_for_subprocess() else {
+        eprintln!(
+            "skip git_fetch_accepts_grit_upload_pack_with_server_option: grit binary not built"
+        );
+        return;
+    };
+    let tmp = tempfile::tempdir().unwrap();
+    let bare = fixture(tmp.path());
+    let client = tmp.path().join("client");
+    git(tmp.path(), &["init", "-q", client.to_str().unwrap()]);
+    let out = Command::new("git")
+        .current_dir(&client)
+        .args([
+            "fetch",
+            "--server-option=trace-id=42",
+            &format!("--upload-pack={} upload-pack", grit_bin.display()),
+            bare.to_str().unwrap(),
+            "main:fetched-main",
+        ])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("git fetch");
+    assert!(
+        out.status.success(),
+        "git fetch failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(
+        git(&client, &["rev-parse", "fetched-main"]),
+        git(&bare, &["rev-parse", "main"])
     );
 }

@@ -107,16 +107,18 @@ fn serve_opts(protocol: ProtocolVersion, stateless_rpc: bool, hidden: &[&str]) -
         advertise_refs: !stateless_rpc,
         agent: String::new(),
         hidden_refs: hidden.iter().map(|h| (*h).to_owned()).collect(),
+        ..ServeOptions::default()
     }
 }
 
 fn grit_ls_refs(repo: &Repository, args: &[&str], hidden: &[&str]) -> Vec<u8> {
     let mut out = Vec::new();
+    let mut opts = serve_opts(ProtocolVersion::V2, true, hidden);
     upload_pack(
         repo,
         &mut Cursor::new(ls_refs_request(args)),
         &mut out,
-        &serve_opts(ProtocolVersion::V2, true, hidden),
+        &mut opts,
     )
     .expect("grit ls-refs");
     out
@@ -390,13 +392,9 @@ fn v0_advertisements_match_git_apart_from_capabilities() {
         b"",
     );
     let mut actual = Vec::new();
-    upload_pack(
-        &repo,
-        &mut Cursor::new(b""),
-        &mut actual,
-        &serve_opts(ProtocolVersion::V0, false, &[hidden]),
-    )
-    .expect("grit upload-pack advertisement");
+    let mut opts = serve_opts(ProtocolVersion::V0, false, &[hidden]);
+    upload_pack(&repo, &mut Cursor::new(b""), &mut actual, &mut opts)
+        .expect("grit upload-pack advertisement");
     assert_eq!(
         without_capabilities(&actual),
         without_capabilities(&expected)

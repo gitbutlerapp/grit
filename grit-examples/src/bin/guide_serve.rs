@@ -41,7 +41,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let protocol = std::env::var("GIT_PROTOCOL")
         .map(|v| ProtocolVersion::from_git_protocol(&v))
         .unwrap_or_default();
-    let opts = ServeOptions {
+    let mut opts = ServeOptions {
         protocol,
         agent: "guide-serve/1".to_owned(),
         ..ServeOptions::default()
@@ -50,7 +50,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut input = std::io::stdin().lock();
     let mut output = BufWriter::new(std::io::stdout().lock());
     match service.as_str() {
-        "upload-pack" => serve::upload_pack(&repo, &mut input, &mut output, &opts)?,
+        "upload-pack" => serve::upload_pack(&repo, &mut input, &mut output, &mut opts)?,
         "receive-pack" => {
             let policy = ReceivePolicy::from_config(&*repo.config()?);
             let outcome = serve::receive_pack_with_hook(

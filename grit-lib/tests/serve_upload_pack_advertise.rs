@@ -34,15 +34,16 @@ fn upload_pack_v0_and_v2_advertise_refs_only() -> grit_lib::remote::serve::Resul
     .map_err(ServeError::Io)?;
 
     for protocol in [ProtocolVersion::V0, ProtocolVersion::V2] {
-        let opts = ServeOptions {
+        let mut opts = ServeOptions {
             protocol,
             stateless_rpc: false,
             advertise_refs: true,
             agent: "grit-coverage".to_owned(),
             hidden_refs: Vec::new(),
+            ..ServeOptions::default()
         };
         let mut out = Vec::new();
-        upload_pack(&repo, &mut Cursor::new(b""), &mut out, &opts)?;
+        upload_pack(&repo, &mut Cursor::new(b""), &mut out, &mut opts)?;
         assert!(!out.is_empty());
     }
     Ok(())

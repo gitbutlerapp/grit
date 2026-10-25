@@ -49,7 +49,7 @@ impl UploadPackPolicy {
     /// Only v2 features belong here. Request arguments every v2 server accepts
     /// (`thin-pack`, `ofs-delta`, `deepen-not`, ...) are not advertised.
     pub fn v2_fetch_features(&self) -> Vec<&'static str> {
-        let mut f = vec!["shallow"];
+        let mut f = vec!["shallow", "wait-for-done"];
         if self.allow_filter {
             f.push("filter");
         }

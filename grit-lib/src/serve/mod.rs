@@ -17,6 +17,7 @@
 //! expected to map `GIT_PROTOCOL` to a [`ProtocolVersion`] and to load
 //! configuration at their own boundary.
 
+mod object_info;
 mod receive_pack;
 mod shallow_upload;
 mod upload_pack;
@@ -163,6 +164,10 @@ pub struct ServeOptions {
     /// Ref patterns hidden from the advertisement (`transfer.hideRefs` and the
     /// service-specific `uploadpack.hideRefs` / `receive.hideRefs`).
     pub hidden_refs: Vec<String>,
+    /// Values the client sent as v2 `server-option=<value>` capability lines on
+    /// the current command request. Cleared at the start of each v2 command and
+    /// filled before `ls-refs` / `fetch` / `object-info` handlers run.
+    pub server_options: Vec<String>,
 }
 
 /// One ref as it appears in an advertisement.

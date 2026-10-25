@@ -655,17 +655,19 @@ fn upload_pack_full_clone(repo: &Repository, tip: &ObjectId, protocol: ProtocolV
         }
     }
     let mut out = Vec::new();
+    let mut serve_opts = ServeOptions {
+        protocol,
+        advertise_refs: false,
+        stateless_rpc: true,
+        agent: "grit-test".to_owned(),
+        hidden_refs: Vec::new(),
+        ..ServeOptions::default()
+    };
     upload_pack(
         repo,
         &mut std::io::Cursor::new(body),
         &mut out,
-        &ServeOptions {
-            protocol,
-            advertise_refs: false,
-            stateless_rpc: true,
-            agent: "grit-test".to_owned(),
-            hidden_refs: Vec::new(),
-        },
+        &mut serve_opts,
     )
     .expect("upload-pack");
     sideband_pack(&out)

@@ -97,6 +97,7 @@ fn serve_push(repo: &Repository, body: &[u8]) -> ReceiveOutcome {
         advertise_refs: false,
         agent: "grit-test".to_owned(),
         hidden_refs: Vec::new(),
+        ..ServeOptions::default()
     };
     let policy = ReceivePolicy {
         deny_non_fast_forwards: true,

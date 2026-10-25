@@ -14,6 +14,21 @@ fn pkt_line(payload: &str) -> Vec<u8> {
     format!("{:04x}{}", bytes.len() + 4, payload).into_bytes()
 }
 
+fn test_serve_opts(
+    protocol: ProtocolVersion,
+    advertise_refs: bool,
+    stateless_rpc: bool,
+) -> ServeOptions {
+    ServeOptions {
+        protocol,
+        advertise_refs,
+        stateless_rpc,
+        agent: "grit-cov".to_owned(),
+        hidden_refs: Vec::new(),
+        ..ServeOptions::default()
+    }
+}
+
 fn seed_bare_main(repo: &Repository) -> ObjectId {
     let blob = repo
         .odb()
@@ -61,33 +76,23 @@ fn upload_pack_v0_advertise_and_stateless_fetch() {
     let tip = seed_bare_main(&repo);
 
     let mut ad_out = Vec::new();
+    let mut serve_opts = test_serve_opts(ProtocolVersion::V0, true, false);
     upload_pack(
         &repo,
         &mut Cursor::new([] as [u8; 0]),
         &mut ad_out,
-        &ServeOptions {
-            protocol: ProtocolVersion::V0,
-            advertise_refs: true,
-            stateless_rpc: false,
-            agent: "grit-cov".to_owned(),
-            hidden_refs: Vec::new(),
-        },
+        &mut serve_opts,
     )
     .expect("advertise");
     assert!(ad_out.len() > 20);
 
     let mut pack_out = Vec::new();
+    let mut serve_opts = test_serve_opts(ProtocolVersion::V0, false, true);
     upload_pack(
         &repo,
         &mut Cursor::new(v0_stateless_fetch_body(tip)),
         &mut pack_out,
-        &ServeOptions {
-            protocol: ProtocolVersion::V0,
-            advertise_refs: false,
-            stateless_rpc: true,
-            agent: "grit-cov".to_owned(),
-            hidden_refs: Vec::new(),
-        },
+        &mut serve_opts,
     )
     .expect("fetch");
     assert!(pack_out.len() > 50);
@@ -108,50 +113,29 @@ fn upload_pack_v1_and_v2_entry_points() {
     let tip = seed_bare_main(&repo);
 
     let mut v1_out = Vec::new();
+    let mut serve_opts = test_serve_opts(ProtocolVersion::V1, true, false);
     upload_pack(
         &repo,
         &mut Cursor::new([] as [u8; 0]),
         &mut v1_out,
-        &ServeOptions {
-            protocol: ProtocolVersion::V1,
-            advertise_refs: true,
-            stateless_rpc: false,
-            agent: "grit-cov".to_owned(),
-            hidden_refs: Vec::new(),
-        },
+        &mut serve_opts,
     )
     .expect("v1 ad");
     assert!(v1_out.windows(9).any(|w| w == b"version 1"));
 
     let v2_ls = pkt_line("command=ls-refs\n");
     let mut v2_out = Vec::new();
-    upload_pack(
-        &repo,
-        &mut Cursor::new(v2_ls),
-        &mut v2_out,
-        &ServeOptions {
-            protocol: ProtocolVersion::V2,
-            advertise_refs: false,
-            stateless_rpc: true,
-            agent: "grit-cov".to_owned(),
-            hidden_refs: Vec::new(),
-        },
-    )
-    .expect("v2 ls-refs");
+    let mut serve_opts = test_serve_opts(ProtocolVersion::V2, false, true);
+    upload_pack(&repo, &mut Cursor::new(v2_ls), &mut v2_out, &mut serve_opts).expect("v2 ls-refs");
     assert!(!v2_out.is_empty());
 
     let mut v2_ad = Vec::new();
+    let mut serve_opts = test_serve_opts(ProtocolVersion::V2, true, false);
     upload_pack(
         &repo,
         &mut Cursor::new([] as [u8; 0]),
         &mut v2_ad,
-        &ServeOptions {
-            protocol: ProtocolVersion::V2,
-            advertise_refs: true,
-            stateless_rpc: false,
-            agent: "grit-cov".to_owned(),
-            hidden_refs: Vec::new(),
-        },
+        &mut serve_opts,
     )
     .expect("v2 capability ad");
     assert!(v2_ad.windows(9).any(|w| w == b"version 2"));
@@ -163,17 +147,12 @@ fn upload_pack_v1_and_v2_entry_points() {
     fetch_body.extend_from_slice(b"0000");
     fetch_body.extend_from_slice(&pkt_line("done"));
     fetch_body.extend_from_slice(b"0000");
+    let mut serve_opts = test_serve_opts(ProtocolVersion::V2, false, true);
     upload_pack(
         &repo,
         &mut Cursor::new(fetch_body),
         &mut v2_fetch,
-        &ServeOptions {
-            protocol: ProtocolVersion::V2,
-            advertise_refs: false,
-            stateless_rpc: true,
-            agent: "grit-cov".to_owned(),
-            hidden_refs: Vec::new(),
-        },
+        &mut serve_opts,
     )
     .expect("v2 fetch");
     assert!(v2_fetch.len() > 20);
@@ -217,17 +196,12 @@ fn upload_pack_serves_git_packed_history_with_its_deltas() {
     body.extend_from_slice(b"0000");
     body.extend_from_slice(&pkt_line("done\n"));
     let mut response = Vec::new();
+    let mut serve_opts = test_serve_opts(ProtocolVersion::V0, false, true);
     upload_pack(
         &repo,
         &mut Cursor::new(body),
         &mut response,
-        &ServeOptions {
-            protocol: ProtocolVersion::V0,
-            advertise_refs: false,
-            stateless_rpc: true,
-            agent: "grit-cov".to_owned(),
-            hidden_refs: Vec::new(),
-        },
+        &mut serve_opts,
     )
     .expect("fetch");
     assert!(response.starts_with(b"0008NAK\n"));
