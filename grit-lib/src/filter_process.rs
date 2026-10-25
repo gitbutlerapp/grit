@@ -4,8 +4,9 @@
 
 use std::collections::{HashMap, HashSet};
 use std::io::{Read, Write};
+use std::path::PathBuf;
 use std::process::{Child, ChildStdin, ChildStdout};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use crate::command_runner::{
     CommandEnvironment, CommandRunner, CommandSpec, CommandStdin, CommandStdio, ShellInvocation,
@@ -75,11 +76,17 @@ pub(crate) struct RunningFilter {
     caps: u32,
 }
 
+struct FilterSubprocessContext {
+    cwd: PathBuf,
+    env: CommandEnvironment,
+}
+
 /// Per-repository filter-process registry (long-running `filter.*.process` drivers).
 pub struct FilterProcessState {
     command_runner: Arc<dyn CommandRunner>,
     registry: Mutex<HashMap<String, Arc<Mutex<RunningFilter>>>>,
     disabled: Mutex<HashSet<String>>,
+    subprocess: OnceLock<FilterSubprocessContext>,
 }
 
 impl std::fmt::Debug for FilterProcessState {
@@ -94,7 +101,21 @@ impl FilterProcessState {
             command_runner,
             registry: Mutex::new(HashMap::new()),
             disabled: Mutex::new(HashSet::new()),
+            subprocess: OnceLock::new(),
         }
+    }
+
+    /// Set cwd and environment for filter subprocesses (long-running and one-shot).
+    pub(crate) fn configure_subprocess(&self, cwd: PathBuf, env: CommandEnvironment) {
+        let _ = self.subprocess.set(FilterSubprocessContext { cwd, env });
+    }
+
+    pub(crate) fn apply_subprocess_to_spec(&self, spec: &mut CommandSpec) {
+        let Some(ctx) = self.subprocess.get() else {
+            return;
+        };
+        spec.cwd = Some(ctx.cwd.clone());
+        spec.env = ctx.env.clone();
     }
 
     pub(crate) fn shutdown_all(&self) {
@@ -345,12 +366,10 @@ impl std::fmt::Display for ProcessFilterStartError {
 }
 
 fn spawn_running(
-    runner: &dyn CommandRunner,
+    state: &FilterProcessState,
     cmd: &str,
 ) -> Result<RunningFilter, ProcessFilterStartError> {
-    let mut env = CommandEnvironment::inherit_process_only();
-    env.remove.push("GIT_CONFIG_GLOBAL".into());
-    let spec = CommandSpec {
+    let mut spec = CommandSpec {
         program: "sh".into(),
         args: Vec::new(),
         shell: Some(ShellInvocation::DashC {
@@ -359,12 +378,19 @@ fn spawn_running(
             args: Vec::new(),
         }),
         cwd: None,
-        env,
+        env: CommandEnvironment::inherit_process_only(),
         stdin: CommandStdin::Pipe(Vec::new()),
         stdout: CommandStdio::Pipe,
         stderr: CommandStdio::Inherit,
     };
-    let running = runner
+    if let Some(ctx) = state.subprocess.get() {
+        spec.cwd = Some(ctx.cwd.clone());
+        spec.env = ctx.env.clone();
+    } else {
+        spec.env.remove.push("GIT_CONFIG_GLOBAL".into());
+    }
+    let running = state
+        .command_runner
         .spawn(&spec)
         .map_err(ProcessFilterStartError::Spawn)?;
     let other = |e: std::io::Error| ProcessFilterStartError::Other(e.to_string());
@@ -408,7 +434,7 @@ pub(crate) fn start_process_filter(
     match reg.entry(cmd.to_string()) {
         Entry::Occupied(_) => Ok(()),
         Entry::Vacant(v) => {
-            let rf = spawn_running(state.command_runner.as_ref(), cmd)?;
+            let rf = spawn_running(state, cmd)?;
             v.insert(Arc::new(Mutex::new(rf)));
             Ok(())
         }
@@ -810,4 +836,57 @@ pub fn apply_process_smudge(
     rf.stdin = Some(stdin);
     rf.stdout = Some(stdout);
     result
+}
+
+#[cfg(test)]
+mod subprocess_context_tests {
+    use super::*;
+    use crate::command_runner::RecordingRunner;
+    use crate::config::environment::{Environment, RepositoryOptions};
+    use crate::repo::Repository;
+    use std::path::Path;
+    use std::process::Command;
+
+    fn git(dir: &Path, args: &[&str]) {
+        assert!(
+            Command::new("git")
+                .current_dir(dir)
+                .args(args)
+                .status()
+                .expect("git")
+                .success()
+        );
+    }
+
+    #[test]
+    fn filter_process_uses_repository_work_tree_as_cwd() {
+        let parent = tempfile::tempdir().expect("tempdir");
+        let repo_root = parent.path().join("child");
+        std::fs::create_dir_all(&repo_root).expect("mkdir");
+        git(&repo_root, &["init", "-q"]);
+        git(
+            &repo_root,
+            &["config", "filter.lfs.process", "git-lfs filter-process"],
+        );
+        std::fs::write(repo_root.join(".gitattributes"), "* filter=lfs\n").expect("attrs");
+
+        let runner = RecordingRunner::always_success();
+        let vars = std::env::vars_os();
+        let env = Environment::from_vars(vars, parent.path().to_path_buf());
+        let opts = RepositoryOptions::with_environment(env)
+            .with_command_runner(runner.clone())
+            .with_work_tree(repo_root.clone());
+
+        let repo = Repository::open(&repo_root.join(".git"), &opts).expect("open");
+        let filter_state = repo.caches().filters();
+        let _ = ensure_process_filter_started(filter_state, "git-lfs filter-process");
+
+        let spec = runner.specs().into_iter().next().expect("spawn");
+        assert_eq!(spec.cwd.as_deref(), Some(repo_root.as_path()));
+        assert!(!spec.env.inherit_process);
+        assert!(
+            spec.env.set.iter().any(|(k, _)| k == "GIT_DIR"),
+            "GIT_DIR must be set for filter subprocess"
+        );
+    }
 }

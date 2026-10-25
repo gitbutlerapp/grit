@@ -1425,15 +1425,17 @@ pub(crate) fn convert_to_git_owned(
         }
     } else {
         match file_attrs.filter_clean.as_ref() {
-            Some(clean_cmd) => match run_filter_command(runner, clean_cmd, &buf, rel_path) {
-                Ok(filtered) => buf = filtered,
-                Err(e) if file_attrs.filter_clean_required => {
-                    let name = file_attrs.filter_driver_name.as_deref().unwrap_or_default();
-                    return Err(e.into_required_error(name, rel_path, FilterPhase::Clean));
+            Some(clean_cmd) => {
+                match run_filter_command(runner, clean_cmd, &buf, rel_path, Some(filter_state)) {
+                    Ok(filtered) => buf = filtered,
+                    Err(e) if file_attrs.filter_clean_required => {
+                        let name = file_attrs.filter_driver_name.as_deref().unwrap_or_default();
+                        return Err(e.into_required_error(name, rel_path, FilterPhase::Clean));
+                    }
+                    // Like Git, an optional filter that fails leaves the content unfiltered.
+                    Err(_) => {}
                 }
-                // Like Git, an optional filter that fails leaves the content unfiltered.
-                Err(_) => {}
-            },
+            }
             None => {
                 if file_attrs.filter_clean_required {
                     let name = file_attrs.filter_driver_name.as_deref().unwrap_or_default();
@@ -1798,13 +1800,15 @@ pub fn convert_to_worktree_with_runner(
         buf = out;
     } else {
         match file_attrs.filter_smudge.as_ref() {
-            Some(smudge_cmd) => match run_filter_command(runner, smudge_cmd, &buf, rel_path) {
-                Ok(filtered) => buf = filtered,
-                Err(e) if file_attrs.filter_smudge_required => {
-                    return Err(e.into_required_error(driver, rel_path, FilterPhase::Smudge));
+            Some(smudge_cmd) => {
+                match run_filter_command(runner, smudge_cmd, &buf, rel_path, Some(filter_state)) {
+                    Ok(filtered) => buf = filtered,
+                    Err(e) if file_attrs.filter_smudge_required => {
+                        return Err(e.into_required_error(driver, rel_path, FilterPhase::Smudge));
+                    }
+                    Err(_) => {}
                 }
-                Err(_) => {}
-            },
+            }
             None => {
                 if file_attrs.filter_smudge_required {
                     return Err(external_filter_failed(
@@ -2159,7 +2163,7 @@ pub fn run_filter(
     data: &[u8],
     rel_path: &str,
 ) -> Result<Vec<u8>, FilterError> {
-    run_filter_command(runner, cmd, data, rel_path).map_err(|e| match e {
+    run_filter_command(runner, cmd, data, rel_path, None).map_err(|e| match e {
         FilterRunError::Spawn { source, .. } | FilterRunError::Io(source) => {
             filter_detail(rel_path, source.to_string())
         }
@@ -2215,9 +2219,13 @@ fn run_filter_command(
     cmd: &str,
     data: &[u8],
     rel_path: &str,
+    filter_state: Option<&FilterProcessState>,
 ) -> Result<Vec<u8>, FilterRunError> {
     let expanded = expand_filter_command(cmd, rel_path);
     let mut spec = CommandSpec::sh_dash_c_filter(expanded);
+    if let Some(st) = filter_state {
+        st.apply_subprocess_to_spec(&mut spec);
+    }
     spec.stdin = CommandStdin::Pipe(data.to_vec());
     let output = runner
         .spawn(&spec)

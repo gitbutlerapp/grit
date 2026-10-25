@@ -586,6 +586,7 @@ impl Repository {
             .and_then(|wt| compute_git_prefix(environment.as_ref(), wt));
 
         let ref_store = open_or_install_ref_store(&caches, &git_dir, &environment, injected_refs)?;
+        caches.configure_filter_subprocess(environment.as_ref(), &git_dir, work_tree.as_deref());
 
         Ok(Self {
             git_dir,
@@ -1692,6 +1693,7 @@ impl Repository {
             .and_then(|wt| compute_git_prefix(environment.as_ref(), wt));
 
         let ref_store = open_or_install_ref_store(&caches, &git_dir, &environment, injected_refs)?;
+        caches.configure_filter_subprocess(environment.as_ref(), &git_dir, work_tree.as_deref());
 
         let repo = Self {
             git_dir,
