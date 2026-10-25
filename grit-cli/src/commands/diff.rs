@@ -24,9 +24,10 @@ use grit_lib::diff::{
     structured::{
         format_hunk_range, structured_file_diff, SideBytes, StructuredFileDiff, StructuredLineKind,
     },
-    submodule_porcelain_flags, tree_diff_structured_parallel, write_patch, write_patch_resolved,
-    DiffDetail, DiffEntry, DiffFilesOutput, DiffIndexToWorktreeOptions, DiffMerges, DiffOptions,
-    DiffSide, DiffStatus, PatchResolvedSide, PatchTextOptions, TreeDiffStructured,
+    submodule_porcelain_flags, tree_diff_structured_entry, tree_diff_structured_parallel,
+    write_patch, write_patch_resolved, DiffDetail, DiffEntry, DiffFilesOutput,
+    DiffIndexToWorktreeOptions, DiffMerges, DiffOptions, DiffSide, DiffStatus, PatchResolvedSide,
+    PatchTextOptions, TreeDiffStructured,
 };
 use grit_lib::index::Index;
 use grit_lib::objects::odb::Odb;
@@ -58,7 +59,7 @@ use crate::diff_render::{
     render_shortstat, render_stat,
 };
 use crate::markdown;
-use crate::output::{outln, ChangeStatus, HumanRender, MarkdownRender, RenderContext};
+use crate::output::{outln, ChangeStatus, HumanRender, MarkdownRender, OutputMode, RenderContext};
 use crate::pathspec_args::TrailingPathspecArgs;
 use crate::ui::{self, PathDisplayOptions};
 
@@ -116,6 +117,9 @@ pub struct DiffOutcome {
     #[serde(skip)]
     #[schemars(skip)]
     path_display: Option<PathDisplayOptions>,
+    #[serde(skip)]
+    #[schemars(skip)]
+    body_streamed: bool,
 }
 
 /// One changed file.
@@ -306,6 +310,17 @@ pub struct Segment {
     pub emphasis: bool,
 }
 
+/// How commit-range patch bodies are delivered (memory vs JSON aggregation).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DiffBodyDelivery {
+    /// Build every file diff in memory (for `--json` and tests).
+    Collect,
+    /// Stream each file to stdout as it is computed (human or markdown).
+    Stream(OutputMode),
+    /// Only record whether anything changed (`--quiet`, `--exit-code`).
+    MetadataOnly,
+}
+
 /// Inputs for `grit diff` (flags and revision arguments).
 pub struct DiffRunOptions {
     /// Compare two filesystem paths outside any repository (Git `--no-index`).
@@ -326,6 +341,8 @@ pub struct DiffRunOptions {
     pub quiet: bool,
     /// Assign stable hunk ids (loads opposite-side peers when needed). True for `--json` patch output only.
     pub emit_json_hunk_ids: bool,
+    /// Patch body delivery for ODB-backed tree diffs (commit ranges).
+    pub body_delivery: DiffBodyDelivery,
 }
 
 /// Exit status when `grit diff` fails while `--exit-code` or `--quiet` is set.
@@ -455,6 +472,7 @@ fn outcome_from_change_names(changes: Vec<FileChange>, format: DiffFormatArgs) -
         totals: None,
         format,
         path_display: None,
+        body_streamed: false,
     }
 }
 
@@ -523,6 +541,7 @@ fn outcome_from_lib(
         totals,
         format,
         path_display: None,
+        body_streamed: false,
     }
 }
 
@@ -672,6 +691,7 @@ pub fn run_no_index(opts: DiffRunOptions) -> Result<DiffOutcome> {
             totals: None,
             format,
             path_display: None,
+            body_streamed: false,
         },
     ))
 }
@@ -710,6 +730,7 @@ fn run_no_index_patch_text(opts: DiffRunOptions) -> Result<DiffOutcome> {
         totals: None,
         format,
         path_display: None,
+        body_streamed: true,
     })
 }
 
@@ -761,6 +782,7 @@ fn patch_text_outcome(
         totals: None,
         format,
         path_display: None,
+        body_streamed: false,
     })
 }
 
@@ -1134,7 +1156,14 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
                 return Ok(finish_outcome(
                     &repo,
                     format,
-                    tree_diff_outcome(&repo, entries, detail, diff_options, format)?,
+                    tree_diff_outcome(
+                        &repo,
+                        entries,
+                        detail,
+                        diff_options,
+                        format,
+                        opts.body_delivery,
+                    )?,
                 ));
             } else if let Ok(oid) = resolve_diff_commit(&repo, spec) {
                 let entries = filter_diff_entries(
@@ -1145,7 +1174,14 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
                 return Ok(finish_outcome(
                     &repo,
                     format,
-                    tree_diff_outcome(&repo, entries, detail, diff_options, format)?,
+                    tree_diff_outcome(
+                        &repo,
+                        entries,
+                        detail,
+                        diff_options,
+                        format,
+                        opts.body_delivery,
+                    )?,
                 ));
             } else if path_args.is_empty() {
                 single_argument_path_unstaged_diff(&repo, spec, &diff_options)?
@@ -1178,7 +1214,14 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
                     return Ok(finish_outcome(
                         &repo,
                         format,
-                        tree_diff_outcome(&repo, entries, detail, diff_options, format)?,
+                        tree_diff_outcome(
+                            &repo,
+                            entries,
+                            detail,
+                            diff_options,
+                            format,
+                            opts.body_delivery,
+                        )?,
                     ));
                 }
                 match resolve_diff_commit(&repo, &commits[1]) {
@@ -1198,7 +1241,14 @@ pub fn run(opts: DiffRunOptions) -> Result<DiffOutcome> {
             return Ok(finish_outcome(
                 &repo,
                 format,
-                tree_diff_outcome(&repo, entries, detail, diff_options, format)?,
+                tree_diff_outcome(
+                    &repo,
+                    entries,
+                    detail,
+                    diff_options,
+                    format,
+                    opts.body_delivery,
+                )?,
             ));
         }
         _ => unreachable!("checked above"),
@@ -1291,6 +1341,7 @@ pub fn diff_of_commit(repo: &grit_lib::repo::Repository, oid: &ObjectId) -> Resu
             totals: None,
             format: DiffFormatArgs::default(),
             path_display: None,
+            body_streamed: false,
         });
     }
     diff_for_commit(
@@ -1355,6 +1406,7 @@ fn outcome_from_tree_structured(
         totals: None,
         format,
         path_display: None,
+        body_streamed: false,
     }
 }
 
@@ -1676,6 +1728,7 @@ fn outcome_from_changes(
         totals: None,
         format,
         path_display: None,
+        body_streamed: false,
     }
 }
 
@@ -2050,6 +2103,7 @@ fn outcome_stat_from_changes(
         files,
         format,
         path_display: None,
+        body_streamed: false,
     }
 }
 
@@ -2108,21 +2162,83 @@ fn tree_diff_outcome(
     detail: DiffDetail,
     diff_options: DiffOptions,
     format: DiffFormatArgs,
+    body_delivery: DiffBodyDelivery,
 ) -> Result<DiffOutcome> {
     if detail == DiffDetail::Patch {
-        let config = repo.config().context("could not load config")?;
-        let thread_policy = repo.thread_policy();
-        let structured = tree_diff_structured_parallel(
-            repo.odb(),
-            entries,
-            config.as_ref(),
-            &thread_policy,
-            diff_options,
-        )?;
-        Ok(outcome_from_tree_structured(structured, format))
+        match body_delivery {
+            DiffBodyDelivery::MetadataOnly => Ok(DiffOutcome {
+                changed: !entries.is_empty(),
+                files: Vec::new(),
+                totals: None,
+                format,
+                path_display: None,
+                body_streamed: false,
+            }),
+            DiffBodyDelivery::Stream(mode) => {
+                stream_tree_patch_diff(repo, &entries, diff_options, format, mode)
+            }
+            DiffBodyDelivery::Collect => {
+                let config = repo.config().context("could not load config")?;
+                let thread_policy = repo.thread_policy();
+                let structured = tree_diff_structured_parallel(
+                    repo.odb(),
+                    entries,
+                    config.as_ref(),
+                    &thread_policy,
+                    diff_options,
+                )?;
+                Ok(outcome_from_tree_structured(structured, format))
+            }
+        }
     } else {
         outcome_from_entries(repo, entries, detail, diff_options, format)
     }
+}
+
+fn stream_tree_patch_diff(
+    repo: &grit_lib::repo::Repository,
+    entries: &[DiffEntry],
+    diff_options: DiffOptions,
+    format: DiffFormatArgs,
+    mode: OutputMode,
+) -> Result<DiffOutcome> {
+    let changed = !entries.is_empty();
+    if !changed {
+        return Ok(DiffOutcome {
+            changed: false,
+            files: Vec::new(),
+            totals: None,
+            format,
+            path_display: None,
+            body_streamed: false,
+        });
+    }
+    let path_display = PathDisplayOptions::from_repo(repo).ok();
+    let color = diff_render::use_color();
+    let mut stdout = std::io::stdout();
+    let diff_options = diff_options.cap_word_level_inline_for_changed_files(entries.len());
+    for entry in entries {
+        let structured = tree_diff_structured_entry(repo.odb(), entry, &diff_options)
+            .context("structured diff")?;
+        let file = file_diff_from_tree_structured(structured);
+        match mode {
+            OutputMode::Human => render_file(&mut stdout, &file, color, path_display.as_ref())?,
+            OutputMode::Markdown => markdown::print_diff_files(
+                &mut stdout,
+                std::slice::from_ref(&file),
+                path_display.as_ref(),
+            )?,
+            OutputMode::Json => unreachable!("stream delivery is not used for JSON"),
+        }
+    }
+    Ok(DiffOutcome {
+        changed: true,
+        files: Vec::new(),
+        totals: None,
+        format,
+        path_display,
+        body_streamed: true,
+    })
 }
 
 /// Staged diff entries: index vs `HEAD`'s tree (no blob loading).
@@ -2584,6 +2700,14 @@ impl DiffOutcome {
     /// Render only the diff body (no commit header). `empty_message` is printed when there
     /// are no files in patch mode; pass `None` to stay silent (as `grit show` does).
     pub fn render_human_diff(&self, w: &mut dyn Write, empty_message: Option<&str>) -> Result<()> {
+        if self.body_streamed {
+            if !self.changed {
+                if let Some(msg) = empty_message {
+                    outln!(w, "{msg}");
+                }
+            }
+            return Ok(());
+        }
         if self.files.is_empty() {
             if format_is_byte_list_or_stat(self.format) {
                 return Ok(());
@@ -2620,6 +2744,12 @@ impl DiffOutcome {
 
     /// Markdown diff body only (used by `grit show` after the commit header).
     pub fn render_markdown_diff(&self, w: &mut dyn Write) -> Result<()> {
+        if self.body_streamed {
+            if !self.changed {
+                outln!(w, "No changes.");
+            }
+            return Ok(());
+        }
         if self.files.is_empty() && format_is_byte_list_or_stat(self.format) {
             return Ok(());
         }

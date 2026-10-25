@@ -169,6 +169,86 @@ pub fn tree_diff_stat_parallel(
     }
 }
 
+/// Load sides and compute a structured line diff for one tree diff entry.
+///
+/// # Errors
+///
+/// Propagates object database read failures.
+pub fn tree_diff_structured_entry(
+    odb: &Odb,
+    entry: &DiffEntry,
+    diff_options: &DiffOptions,
+) -> Result<TreeDiffStructured> {
+    let blob_reads = diff_options.blob_read_counter.as_deref();
+    if !entry.old_oid.is_zero()
+        && entry.old_oid == entry.new_oid
+        && entry.old_mode == entry.new_mode
+    {
+        let (old_bytes, old_bin) = load_old_side(odb, entry, blob_reads)?;
+        return Ok(TreeDiffStructured {
+            entry: entry.clone(),
+            structured: StructuredFileDiff {
+                old_mode: mode_display(&entry.old_mode),
+                new_mode: mode_display(&entry.new_mode),
+                old_encoding_lossy: old_bytes.encoding_lossy,
+                new_encoding_lossy: old_bytes.encoding_lossy,
+                hunks: Vec::new(),
+            },
+            binary: old_bin,
+            patch_bytes: None,
+        });
+    }
+    let (old_bytes, old_bin) = load_old_side(odb, entry, blob_reads)?;
+    let (new_bytes, new_bin) = load_new_side(odb, entry, blob_reads)?;
+    let binary = old_bin || new_bin;
+    let structured = if binary {
+        StructuredFileDiff {
+            old_mode: mode_display(&entry.old_mode),
+            new_mode: mode_display(&entry.new_mode),
+            old_encoding_lossy: old_bytes.encoding_lossy,
+            new_encoding_lossy: new_bytes.encoding_lossy,
+            hunks: Vec::new(),
+        }
+    } else {
+        structured_file_diff(
+            &entry.old_mode,
+            &entry.new_mode,
+            &old_bytes,
+            &new_bytes,
+            diff_options.clone(),
+        )
+    };
+    Ok(TreeDiffStructured {
+        entry: entry.clone(),
+        structured,
+        binary,
+        patch_bytes: None,
+    })
+}
+
+/// Visit structured tree diffs one entry at a time (serial blob loads and hunk generation).
+///
+/// Use this when rendering or writing patch output should not retain every file's hunks at once.
+///
+/// # Errors
+///
+/// Propagates object database read failures and callback errors.
+pub fn for_each_tree_diff_structured(
+    odb: &Odb,
+    entries: &[DiffEntry],
+    diff_options: DiffOptions,
+    mut visit: impl FnMut(TreeDiffStructured) -> Result<()>,
+) -> Result<()> {
+    if entries.is_empty() {
+        return Ok(());
+    }
+    let diff_options = diff_options.cap_word_level_inline_for_changed_files(entries.len());
+    for entry in entries {
+        visit(tree_diff_structured_entry(odb, entry, &diff_options)?)?;
+    }
+    Ok(())
+}
+
 /// Load sides and compute structured line diffs for each entry in parallel.
 ///
 /// # Errors
@@ -187,60 +267,13 @@ pub fn tree_diff_structured_parallel(
     let diff_options = diff_options.cap_word_level_inline_for_changed_files(entries.len());
     let par_opts = per_entry_parallel_options(thread_policy, config, entries.len());
     let line_diff_opts = diff_options;
-    let blob_counter = line_diff_opts.blob_read_counter.clone();
     let store = odb.pack_store_for(odb.objects_dir());
     let rows = try_par_map_with_local(
         &entries,
         par_opts,
         0,
         || PackReadContextGuard::install(Arc::clone(&store)),
-        move |_ctx, entry| {
-            let blob_reads = blob_counter.as_deref();
-            if !entry.old_oid.is_zero()
-                && entry.old_oid == entry.new_oid
-                && entry.old_mode == entry.new_mode
-            {
-                let (old_bytes, old_bin) = load_old_side(odb, entry, blob_reads)?;
-                return Ok(TreeDiffStructured {
-                    entry: entry.clone(),
-                    structured: StructuredFileDiff {
-                        old_mode: mode_display(&entry.old_mode),
-                        new_mode: mode_display(&entry.new_mode),
-                        old_encoding_lossy: old_bytes.encoding_lossy,
-                        new_encoding_lossy: old_bytes.encoding_lossy,
-                        hunks: Vec::new(),
-                    },
-                    binary: old_bin,
-                    patch_bytes: None,
-                });
-            }
-            let (old_bytes, old_bin) = load_old_side(odb, entry, blob_reads)?;
-            let (new_bytes, new_bin) = load_new_side(odb, entry, blob_reads)?;
-            let binary = old_bin || new_bin;
-            let structured = if binary {
-                StructuredFileDiff {
-                    old_mode: mode_display(&entry.old_mode),
-                    new_mode: mode_display(&entry.new_mode),
-                    old_encoding_lossy: old_bytes.encoding_lossy,
-                    new_encoding_lossy: new_bytes.encoding_lossy,
-                    hunks: Vec::new(),
-                }
-            } else {
-                structured_file_diff(
-                    &entry.old_mode,
-                    &entry.new_mode,
-                    &old_bytes,
-                    &new_bytes,
-                    line_diff_opts.clone(),
-                )
-            };
-            Ok(TreeDiffStructured {
-                entry: entry.clone(),
-                structured,
-                binary,
-                patch_bytes: None,
-            })
-        },
+        move |_ctx, entry| tree_diff_structured_entry(odb, entry, &line_diff_opts),
     );
     match rows {
         Ok(rows) => Ok(rows),

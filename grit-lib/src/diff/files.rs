@@ -143,6 +143,26 @@ pub fn build_file_diffs(
     }
 }
 
+/// Build patch [`FileDiff`] rows one entry at a time without retaining every hunk list.
+///
+/// The callback receives each [`FileDiff`] in path order; drop it before the next entry is
+/// computed so peak memory stays near one file's diff.
+///
+/// # Errors
+///
+/// Propagates object database and parallel diff errors, and callback errors.
+pub fn build_file_diffs_streaming(
+    odb: &Odb,
+    entries: Vec<DiffEntry>,
+    diff_options: DiffOptions,
+    mut emit: impl FnMut(FileDiff) -> Result<()>,
+) -> Result<()> {
+    use super::tree_content::for_each_tree_diff_structured;
+    for_each_tree_diff_structured(odb, &entries, diff_options, |structured| {
+        emit(file_diff_from_structured(structured))
+    })
+}
+
 /// Git `--name-status` letter for a diff entry (uppercase status + rename score suffix).
 #[must_use]
 pub fn name_status_line(entry: &DiffEntry) -> String {

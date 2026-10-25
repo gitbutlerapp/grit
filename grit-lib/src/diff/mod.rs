@@ -40,7 +40,7 @@ pub use commit_files_many::{CommitFilesManyInput, CommitFilesManyOptions, Commit
 pub use core::*;
 pub use detail::FileDiff as ListedFileDiff;
 pub use detail::{line_change_counts, DiffDetail, DiffTotals, LineStat};
-pub use files::{build_file_diffs, name_status_line, DiffFilesOutput};
+pub use files::{build_file_diffs, build_file_diffs_streaming, name_status_line, DiffFilesOutput};
 pub use filter::{DiffFilter, InvalidDiffFilter};
 pub use handle::Diff;
 pub use has_changes::{
@@ -84,8 +84,8 @@ pub use targets::{
     resolve_diff_arguments, DiffArguments, DiffTarget, FileDiff, ResolveDiffArgumentsError,
 };
 pub use tree_content::{
-    tree_diff_contents_parallel, tree_diff_stat_parallel, tree_diff_structured_parallel,
-    TreeDiffContent, TreeDiffStructured,
+    for_each_tree_diff_structured, tree_diff_contents_parallel, tree_diff_stat_parallel,
+    tree_diff_structured_entry, tree_diff_structured_parallel, TreeDiffContent, TreeDiffStructured,
 };
 
 pub mod bloom {

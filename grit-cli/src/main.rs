@@ -2674,6 +2674,13 @@ fn dispatch(
                 bail!("`--patch-text` cannot be used with --json or --markdown");
             }
             let wants_exit_code = exit_code || quiet || no_index;
+            let body_delivery = if quiet || format.patch_text {
+                commands::diff::DiffBodyDelivery::MetadataOnly
+            } else if opts.mode == crate::output::OutputMode::Json {
+                commands::diff::DiffBodyDelivery::Collect
+            } else {
+                commands::diff::DiffBodyDelivery::Stream(opts.mode)
+            };
             let run_opts = commands::diff::DiffRunOptions {
                 no_index,
                 staged,
@@ -2687,6 +2694,7 @@ fn dispatch(
                     && commands::diff::diff_word_level_inline_for_output(),
                 quiet,
                 emit_json_hunk_ids: opts.mode == crate::output::OutputMode::Json,
+                body_delivery,
             };
             let run_result = commands::diff::run(run_opts);
             match run_result {

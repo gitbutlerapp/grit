@@ -103,42 +103,22 @@ pub fn write_patch<W: Write>(
         abbrev_len: opts.abbrev_len,
         commit_header: LogPatchCommitHeader::FormatPercentH,
     };
-    let mut par_opts = thread_policy.resolve(crate::parallel::ParallelOp::DiffContent, &config);
-    par_opts.min_items = 0;
-    par_opts.min_total_bytes = None;
-    let store = odb.pack_store_for(odb.objects_dir());
-    let entries_vec = entries.to_vec();
     let abbrev_len = opts.abbrev_len;
     let mut abbrev_cache = OidAbbrevCache::new(abbrev_len);
-    let oids = entries_vec.iter().flat_map(|e| [e.old_oid, e.new_oid]);
+    let oids = entries.iter().flat_map(|e| [e.old_oid, e.new_oid]);
     abbrev_cache.warm_for_patch_batch(repo, oids, &thread_policy, &config)?;
-    let chunks = match crate::parallel::try_par_map_with_local(
-        &entries_vec,
-        par_opts,
-        0,
-        || crate::objects::pack_store::PackReadContextGuard::install(std::sync::Arc::clone(&store)),
-        |_ctx, entry| {
-            let mut buf = Vec::new();
-            let mut abbrev_cache = abbrev_cache.clone();
-            write_diff_entry_patch(
-                &mut buf,
-                repo,
-                odb,
-                entry,
-                &log_opts,
-                &mut abbrev_cache,
-                None,
-                DiffEntryPatchBinaryFormat::GitApplyBinaryPatch,
-                &config,
-            )?;
-            Ok(buf)
-        },
-    ) {
-        Ok(rows) => rows,
-        Err(crate::parallel::ParallelHashError::Task(err)) => return Err(err),
-    };
-    for chunk in chunks {
-        out.write_all(&chunk)?;
+    for entry in entries {
+        write_diff_entry_patch(
+            out,
+            repo,
+            odb,
+            entry,
+            &log_opts,
+            &mut abbrev_cache,
+            None,
+            DiffEntryPatchBinaryFormat::GitApplyBinaryPatch,
+            &config,
+        )?;
     }
     Ok(())
 }
