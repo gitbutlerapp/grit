@@ -76,15 +76,30 @@ pub(crate) fn index_from_tree_with_seeded_worktree_stats(
     tree_oid: &ObjectId,
     seed: &Index,
 ) -> Result<Index> {
+    let mut index = index_from_tree_with_seeded_stats(repo, tree_oid, seed)?;
+    if let Some(work_tree) = repo.work_tree() {
+        refresh_stage0_index_stats_from_worktree(repo, work_tree, &mut index)?;
+    }
+    Ok(index)
+}
+
+/// Like [`index_from_tree`], but copies cached stat data from `seed` for entries with the same
+/// path, mode and blob id, and primes the cache-tree from `tree_oid`. Does not touch the worktree.
+///
+/// Stat data copied from `seed` is only trustworthy relative to the mtime of the index file
+/// `seed` was loaded from; callers comparing the result against the worktree must judge
+/// raciness against that mtime.
+pub(crate) fn index_from_tree_with_seeded_stats(
+    repo: &Repository,
+    tree_oid: &ObjectId,
+    seed: &Index,
+) -> Result<Index> {
     let mut index = index_from_tree(repo, tree_oid)?;
     let cache_tree = build_cache_tree_from_tree(repo.odb(), tree_oid)?;
     if usize::try_from(cache_tree.entry_count).ok() == Some(index.entries.len()) {
         index.set_cache_tree(cache_tree);
     }
-    if let Some(work_tree) = repo.work_tree() {
-        seed_stage0_stat_data(&mut index, seed);
-        refresh_stage0_index_stats_from_worktree(repo, work_tree, &mut index)?;
-    }
+    seed_stage0_stat_data(&mut index, seed);
     Ok(index)
 }
 

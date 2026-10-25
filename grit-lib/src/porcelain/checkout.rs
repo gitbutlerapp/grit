@@ -41,9 +41,10 @@ use crate::worktree_rules::WorktreeRules;
 
 #[path = "checkout_parallel.rs"]
 mod checkout_parallel;
+pub(crate) use checkout_parallel::is_eligible_for_parallel_checkout;
 use checkout_parallel::{
-    execute_write_jobs, is_eligible_for_parallel_checkout, paths_needing_serial_checkout,
-    CheckoutPlanSlot, CheckoutWriteJob, WriteJobOutcome,
+    execute_write_jobs, paths_needing_serial_checkout, CheckoutPlanSlot, CheckoutWriteJob,
+    WriteJobOutcome,
 };
 
 const PARALLEL_PER_FILE_DELETE_MIN: usize = 32;

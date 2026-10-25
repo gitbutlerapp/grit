@@ -1247,3 +1247,150 @@ fn stash_show_untracked_lists_u_path_in_base_tree_when_not_in_w_diff() {
         "stash show -u must match git when U paths overlap base tree"
     );
 }
+
+/// Build the same committed tree of `dirs * per_dir` files plus `bin/tool.sh` in `root`.
+fn init_wide_repo(root: &std::path::Path, dirs: usize, per_dir: usize) {
+    init_repo(root);
+    for d in 0..dirs {
+        let dir = root.join(format!("d{d:02}"));
+        std::fs::create_dir_all(&dir).expect("mkdir");
+        for f in 0..per_dir {
+            std::fs::write(dir.join(format!("f{f:02}.txt")), format!("{d}/{f}\n")).expect("write");
+        }
+    }
+    std::fs::create_dir_all(root.join("bin")).expect("mkdir bin");
+    std::fs::write(root.join("bin/tool.sh"), "#!/bin/sh\necho tool\n").expect("write tool");
+    git_cmd(root, &["add", "-A"]);
+    git_cmd(root, &["commit", "-qm", "init"]);
+}
+
+/// Unstaged edits in several directories, a mode-only change alone in its directory, and one
+/// staged edit.
+fn dirty_wide_repo(root: &std::path::Path, dirs: usize, per_dir: usize) {
+    for d in (0..dirs).step_by(2) {
+        for f in 0..per_dir {
+            let path = root.join(format!("d{d:02}/f{f:02}.txt"));
+            let mut body = std::fs::read_to_string(&path).expect("read");
+            body.push_str("changed\n");
+            std::fs::write(&path, body).expect("modify");
+        }
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(
+            root.join("bin/tool.sh"),
+            std::fs::Permissions::from_mode(0o755),
+        )
+        .expect("chmod");
+    }
+    std::fs::write(root.join("d01/f00.txt"), "staged\n").expect("stage edit");
+    git_cmd(root, &["add", "d01/f00.txt"]);
+}
+
+fn rev_parse(root: &std::path::Path, rev: &str) -> String {
+    git_cmd(root, &["rev-parse", rev]).trim().to_owned()
+}
+
+/// Push and pop on a clean-stat index with a valid cache-tree must record the same W and I
+/// trees as `git stash` and leave the worktree, index and executable bits as git does.
+#[test]
+fn stash_push_pop_wide_tree_matches_git_trees_and_status() {
+    let (dirs, per_dir) = (12, 25);
+    let grit_root = tempfile::tempdir().expect("tempdir");
+    let git_root = tempfile::tempdir().expect("tempdir");
+    for root in [grit_root.path(), git_root.path()] {
+        init_wide_repo(root, dirs, per_dir);
+        dirty_wide_repo(root, dirs, per_dir);
+    }
+
+    let repo = open_grit(grit_root.path());
+    push_stash(&repo, &stash_options(false, None))
+        .expect("push")
+        .expect("changes");
+    git_cmd(git_root.path(), &["stash", "push", "-q"]);
+    for rev in ["refs/stash^{tree}", "refs/stash^2^{tree}"] {
+        assert_eq!(
+            rev_parse(grit_root.path(), rev),
+            rev_parse(git_root.path(), rev),
+            "{rev} must match git"
+        );
+    }
+    assert_eq!(
+        git_cmd(grit_root.path(), &["status", "--porcelain"]),
+        "",
+        "push must leave a clean worktree"
+    );
+    assert_fsck_strict(grit_root.path());
+
+    let repo = open_grit(grit_root.path());
+    let conflicts = pop_stash(
+        &repo,
+        grit_root.path(),
+        0,
+        false,
+        "Test <t@example.com> 0 +0000",
+    )
+    .expect("pop");
+    assert!(!conflicts);
+    git_cmd(git_root.path(), &["stash", "pop", "-q"]);
+
+    for args in [
+        &["status", "--porcelain"][..],
+        &["diff"][..],
+        &["diff", "--cached"][..],
+        &["stash", "list"][..],
+    ] {
+        assert_eq!(
+            git_cmd(grit_root.path(), args),
+            git_cmd(git_root.path(), args),
+            "git {} after pop must match git",
+            args.join(" ")
+        );
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(grit_root.path().join("bin/tool.sh"))
+            .expect("stat tool")
+            .permissions()
+            .mode();
+        assert_ne!(mode & 0o111, 0, "pop must restore the executable bit");
+    }
+    assert_fsck_strict(grit_root.path());
+}
+
+/// A stashed path rewritten right after push (same size, typically within the index file's
+/// mtime second) must still be detected as a local change: pop refuses and keeps the entry.
+#[test]
+fn stash_pop_refuses_racily_rewritten_same_size_file() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    init_repo(dir.path());
+    std::fs::write(dir.path().join("a.txt"), "aaaa\n").expect("write");
+    git_cmd(dir.path(), &["add", "a.txt"]);
+    git_cmd(dir.path(), &["commit", "-qm", "init"]);
+    std::fs::write(dir.path().join("a.txt"), "bbbb\n").expect("modify");
+
+    let repo = open_grit(dir.path());
+    push_stash(&repo, &stash_options(false, None))
+        .expect("push")
+        .expect("changes");
+    assert_eq!(
+        std::fs::read(dir.path().join("a.txt")).expect("read"),
+        b"aaaa\n"
+    );
+    std::fs::write(dir.path().join("a.txt"), "cccc\n").expect("racy rewrite");
+
+    let repo = open_grit(dir.path());
+    let err = pop_stash(&repo, dir.path(), 0, false, "Test <t@example.com> 0 +0000")
+        .expect_err("pop must refuse to overwrite the local change");
+    assert!(
+        matches!(err, Error::StashWouldOverwriteLocalChanges { .. }),
+        "unexpected error: {err:?}"
+    );
+    assert_eq!(
+        std::fs::read(dir.path().join("a.txt")).expect("read"),
+        b"cccc\n"
+    );
+    assert_eq!(list_stashes(&repo).expect("list").len(), 1);
+}
