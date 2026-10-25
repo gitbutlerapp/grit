@@ -1212,24 +1212,31 @@ fn resolve_ref_dwim_for_rev_parse(repo: &Repository, spec: &str) -> (usize, Opti
     let refname_opts = RefNameOptions::default();
     for rule in RULES {
         let candidate = rule.replace("{0}", spec);
-        if let Ok(Some(target)) = refs::read_symbolic_ref_for_repository(repo, &candidate) {
-            if check_refname_format(&target, &refname_opts).is_err()
-                || repo.resolve_ref_oid(&target).is_err()
-            {
-                // Match upstream `expand_ref` (refs.c): a dangling symref is
-                // silently ignored when it is literally `HEAD` (e.g. an unborn
-                // branch in a fresh repo). The warning is only emitted for other
-                // dangling symrefs encountered while DWIM-resolving a ref.
-                if candidate != "HEAD" {
-                    repo.diagnostics()
-                        .warn(crate::diagnostics::Warning::DanglingSymref {
-                            name: candidate.clone(),
-                        });
+        // One raw read decides missing and direct candidates; only symrefs need resolving.
+        let resolved = match repo.refs().read_raw(&candidate) {
+            Ok(None) => continue,
+            Ok(Some(refs::store::RawRef::Direct(oid))) => Ok(oid),
+            Ok(Some(refs::store::RawRef::Symbolic(target))) => {
+                if check_refname_format(&target, &refname_opts).is_err()
+                    || repo.resolve_ref_oid(&target).is_err()
+                {
+                    // Match upstream `expand_ref` (refs.c): a dangling symref is
+                    // silently ignored when it is literally `HEAD` (e.g. an unborn
+                    // branch in a fresh repo). The warning is only emitted for other
+                    // dangling symrefs encountered while DWIM-resolving a ref.
+                    if candidate != "HEAD" {
+                        repo.diagnostics()
+                            .warn(crate::diagnostics::Warning::DanglingSymref {
+                                name: candidate.clone(),
+                            });
+                    }
+                    continue;
                 }
-                continue;
+                repo.resolve_ref_oid(&candidate)
             }
-        }
-        if let Ok(oid) = repo.resolve_ref_oid(&candidate) {
+            Err(_) => repo.resolve_ref_oid(&candidate),
+        };
+        if let Ok(oid) = resolved {
             count += 1;
             if first.is_none() {
                 first = Some(oid);
@@ -1544,17 +1551,17 @@ fn normalize_colon_path_for_tree(repo: &Repository, raw_path: &str) -> Result<St
 
 /// Peel tags to a commit OID for merge-base computation (`A...B` and `rev-parse` output).
 pub fn peel_to_commit_for_merge_base(repo: &Repository, mut oid: ObjectId) -> Result<ObjectId> {
-    oid = apply_peel(repo, oid, Some(""))?;
-    let obj = repo.read_replaced(&oid)?;
-    match obj.kind {
-        ObjectKind::Commit => Ok(oid),
-        ObjectKind::Tree => Err(Error::InvalidRef(format!(
-            "object {oid} does not name a commit"
-        ))),
-        ObjectKind::Blob => Err(Error::InvalidRef(format!(
-            "object {oid} does not name a commit"
-        ))),
-        ObjectKind::Tag => Err(Error::InvalidRef("unexpected tag after peel".to_owned())),
+    // Only tags need their payload; every other kind is decided from the object header.
+    loop {
+        match repo.read_info_replaced(&oid)?.kind {
+            ObjectKind::Commit => return Ok(oid),
+            ObjectKind::Tag => oid = parse_tag_target(&repo.read_replaced(&oid)?.data)?,
+            ObjectKind::Tree | ObjectKind::Blob => {
+                return Err(Error::InvalidRef(format!(
+                    "object {oid} does not name a commit"
+                )))
+            }
+        }
     }
 }
 
@@ -4096,6 +4103,59 @@ mod line_coverage_tests {
         }
         let _ = peel_to_tree(&repo, tip)?;
         let _ = try_parse_double_dot_log_range(&repo, "main..main")?;
+        Ok(())
+    }
+
+    #[test]
+    fn peel_to_commit_for_merge_base_follows_tag_chains_only_to_commits() -> crate::error::Result<()>
+    {
+        let dir = tempdir().map_err(crate::error::Error::Io)?;
+        Repository::init(
+            dir.path(),
+            &InitOptions {
+                bare: true,
+                ref_storage: crate::RefStorageFormat::Files,
+                ..InitOptions::default()
+            },
+        )?;
+        let repo = crate::repo::Repository::open(dir.path(), &RepositoryOptions::empty())?;
+        let odb = repo.odb();
+        let tree = odb.write_loose_materialize(ObjectKind::Tree, b"")?;
+        let blob = odb.write_loose_materialize(ObjectKind::Blob, b"data\n")?;
+        let commit = odb.write_loose_materialize(
+            ObjectKind::Commit,
+            format!(
+                "tree {tree}\nauthor T <t@e.com> 1 +0000\ncommitter T <t@e.com> 1 +0000\n\nm\n"
+            )
+            .as_bytes(),
+        )?;
+        let tag = |target: ObjectId, kind: &str, name: &str| {
+            odb.write_loose_materialize(
+                ObjectKind::Tag,
+                format!(
+                    "object {target}\ntype {kind}\ntag {name}\ntagger T <t@e.com> 1 +0000\n\nt\n"
+                )
+                .as_bytes(),
+            )
+        };
+        let inner = tag(commit, "commit", "inner")?;
+        let outer = tag(inner, "tag", "outer")?;
+        let blob_tag = tag(blob, "blob", "blobtag")?;
+
+        assert_eq!(peel_to_commit_for_merge_base(&repo, commit)?, commit);
+        assert_eq!(peel_to_commit_for_merge_base(&repo, inner)?, commit);
+        assert_eq!(peel_to_commit_for_merge_base(&repo, outer)?, commit);
+        for not_commit in [tree, blob, blob_tag] {
+            assert!(matches!(
+                peel_to_commit_for_merge_base(&repo, not_commit),
+                Err(crate::error::Error::InvalidRef(_))
+            ));
+        }
+        let absent = ObjectId::from_hex("1111111111111111111111111111111111111111")?;
+        assert!(matches!(
+            peel_to_commit_for_merge_base(&repo, absent),
+            Err(crate::error::Error::ObjectNotFound(_))
+        ));
         Ok(())
     }
 
