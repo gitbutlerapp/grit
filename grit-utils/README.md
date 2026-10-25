@@ -199,6 +199,7 @@ Mutating scenarios should take a **`git clone --local`** copy via [`fixture_regi
 | --- | --- | --- |
 | `status-dirty-{N}` | status | Dirty tree (~10% modified, ~5% untracked): `git status -s` vs `grit status` |
 | `status-clean-{N}` | status | Clean tree: `git status -s` vs `grit status` |
+| `status-after-checkout-{N}` | status | First status after a checkout: every entry racily clean (files and index in one timestamp second); each run restores that index |
 | `add-{N}` | add | `git add -A` vs `grit add` (stage all); **git** resets the index between timed runs |
 | `switch-{N}` | switch | Two branches differing in ~50 paths; `git switch -q X && switch -q Y` vs `grit switch X && switch Y` |
 | `switch-wide-{N}` | switch | ~10% path delta including directory deletions; same switch pattern |

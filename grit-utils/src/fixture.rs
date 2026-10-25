@@ -254,6 +254,62 @@ fn git_reset_head_unstaged(git: &Path, dir: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Copy of the racily clean index written by [`make_index_racy`], restored before each run.
+const RACY_INDEX_COPY: &str = "grit-bench-racy-index";
+/// Timestamp second shared by every tracked file and the index in [`make_index_racy`].
+const RACY_SECOND: u64 = 1_600_000_000;
+
+/// Leave `dir`'s index as a clone or switch does: every entry racily clean.
+///
+/// All tracked files get one mtime second, git refreshes the index to match, and the index
+/// mtime is stamped half a second later, inside the same second. A copy is kept under
+/// `.git/` for [`restore_racy_index`].
+pub fn make_index_racy(git: &Path, dir: &Path) -> Result<()> {
+    let second = std::time::UNIX_EPOCH + std::time::Duration::from_secs(RACY_SECOND);
+    for path in tracked_worktree_files(git, dir)? {
+        fs::File::options()
+            .write(true)
+            .open(&path)
+            .and_then(|f| f.set_modified(second))
+            .with_context(|| format!("pin mtime of {}", path.display()))?;
+    }
+    run_git(git, dir, &["update-index", "-q", "--refresh"])?;
+    let index = dir.join(".git/index");
+    let stamp = second + std::time::Duration::from_millis(500);
+    fs::File::options()
+        .write(true)
+        .open(&index)
+        .and_then(|f| f.set_modified(stamp))
+        .context("stamp index mtime")?;
+    let copy = dir.join(".git").join(RACY_INDEX_COPY);
+    fs::copy(&index, &copy).context("save racy index")?;
+    fs::File::options()
+        .write(true)
+        .open(&copy)
+        .and_then(|f| f.set_modified(stamp))
+        .context("stamp racy index copy")?;
+    Ok(())
+}
+
+/// Put back the index saved by [`make_index_racy`], bytes and mtime.
+///
+/// Status verifies racy entries and then rewrites the index, so each timed run needs a fresh
+/// racy index.
+pub fn restore_racy_index(dir: &Path) -> Result<()> {
+    let copy = dir.join(".git").join(RACY_INDEX_COPY);
+    let stamp = fs::metadata(&copy)
+        .and_then(|m| m.modified())
+        .context("read racy index copy")?;
+    let index = dir.join(".git/index");
+    fs::copy(&copy, &index).context("restore racy index")?;
+    fs::File::options()
+        .write(true)
+        .open(&index)
+        .and_then(|f| f.set_modified(stamp))
+        .context("stamp restored index")?;
+    Ok(())
+}
+
 /// Modify ~20% of tracked files in the worktree only (for `restore` benchmarks).
 pub fn prepare_restore_iteration(dir: &Path) -> Result<()> {
     let files = walkdir(dir)?;

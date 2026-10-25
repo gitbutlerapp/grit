@@ -12,10 +12,11 @@ use crate::fixture::{
     create_blame_large_mid_churn_repo, create_blame_large_tail_churn_repo,
     create_blame_merge_heavy_repo, create_deep_leaf_dogfood_repo, create_dense_leaf_dogfood_repo,
     create_repo, create_repo_with_history, create_untracked_many_dirs_repo,
-    create_untracked_monorepo_repo, dirty_repo, modify_files_for_diff, modify_rs_files_for_diff,
-    modify_txt_files_for_diff, prepare_add_iteration, prepare_commit_iteration,
-    prepare_dense_leaf_add_iteration, prepare_initial_monorepo_add, prepare_restore_iteration,
-    scratch_dir, DeepLeafDogfoodSpec, DenseLeafDogfoodSpec, ManyDirsLayout,
+    create_untracked_monorepo_repo, dirty_repo, make_index_racy, modify_files_for_diff,
+    modify_rs_files_for_diff, modify_txt_files_for_diff, prepare_add_iteration,
+    prepare_commit_iteration, prepare_dense_leaf_add_iteration, prepare_initial_monorepo_add,
+    prepare_restore_iteration, restore_racy_index, scratch_dir, DeepLeafDogfoodSpec,
+    DenseLeafDogfoodSpec, ManyDirsLayout,
 };
 use crate::hot_path_fixture::{
     load_meta, prepare_merge, prepare_pick, prepare_pick_series, prepare_revert, prepare_switch,
@@ -105,6 +106,7 @@ pub enum PrepareKind {
     ConflictsPickRangeReset,
     ConflictsRevertSingleReset,
     ConflictsRevertMainlineReset,
+    StatusAfterCheckout,
 }
 
 /// Hyperfine tuning for all scenarios in a run.
@@ -196,6 +198,7 @@ fn prepare_command(
         PrepareKind::ConflictsPickRangeReset => "prepare-conflicts-pick-range",
         PrepareKind::ConflictsRevertSingleReset => "prepare-conflicts-revert-single",
         PrepareKind::ConflictsRevertMainlineReset => "prepare-conflicts-revert-mainline",
+        PrepareKind::StatusAfterCheckout => "prepare-status-after-checkout",
     };
     let mut args = vec![
         sub.to_string(),
@@ -512,6 +515,30 @@ pub fn run_status_suite(
                 git_via_shell: false,
             },
             &repo_clean,
+        )?);
+
+        let repo_racy = create_repo(git, size)?;
+        make_index_racy(git, &repo_racy)?;
+        scenarios.push(run_scenario(
+            hyperfine,
+            git,
+            grit,
+            cfg,
+            &Scenario {
+                id: format!("status-after-checkout-{size}"),
+                group: "status".into(),
+                fixture: fixture.clone(),
+                description: "first status after a checkout wrote the index, every entry \
+                              racily clean (git -s, grit default)"
+                    .into(),
+                grit_argv: vec!["status".into()],
+                git_argv: vec!["status".into(), "-s".into()],
+                driver: Driver::Cli,
+                prepare_kind: Some(PrepareKind::StatusAfterCheckout),
+                grit_via_shell: false,
+                git_via_shell: false,
+            },
+            &repo_racy,
         )?);
     }
 
@@ -1445,6 +1472,11 @@ pub fn run_prepare_dense_leaf_add(git: &Path) -> Result<()> {
 
 pub fn run_prepare_commit(git: &Path) -> Result<()> {
     prepare_commit_iteration(&bench_work_dir(), git)
+}
+
+/// Hyperfine prepare for `status-after-checkout`: restore the racily clean index.
+pub fn run_prepare_status_after_checkout() -> Result<()> {
+    restore_racy_index(&bench_work_dir())
 }
 
 pub fn run_prepare_restore(_git: &Path) -> Result<()> {
