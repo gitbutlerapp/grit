@@ -8206,10 +8206,7 @@ pub fn shallow_grafts_for_upload_pack_rev_list(
     }
 
     let positive: Vec<String> = wants.iter().map(|o| o.to_hex()).collect();
-    let negative: Vec<String> = deepen_not
-        .iter()
-        .map(|o| format!("^{}", o.to_hex()))
-        .collect();
+    let negative: Vec<String> = deepen_not.iter().map(ObjectId::to_hex).collect();
 
     let options = RevListOptions {
         since_cutoff: deepen_since,

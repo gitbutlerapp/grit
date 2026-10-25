@@ -47,6 +47,15 @@ pub enum ServeError {
     /// The client requested a v2 command this server does not implement.
     #[error("unknown command: {0}")]
     UnknownCommand(String),
+    /// A `deepen-not` argument (`--shallow-exclude`) cannot be used as a
+    /// shallow-history exclusion point.
+    #[error("invalid deepen-not '{spec}': {reason}")]
+    InvalidDeepenNot {
+        /// The argument exactly as the client sent it.
+        spec: String,
+        /// Why it was rejected.
+        reason: DeepenNotError,
+    },
     /// An upload-pack filter request was rejected by repository config.
     #[error(transparent)]
     UploadFilter(#[from] crate::upload_filter::UploadFilterError),
@@ -64,6 +73,20 @@ pub enum ServeError {
     /// The underlying stream failed.
     #[error(transparent)]
     Io(#[from] std::io::Error),
+}
+
+/// Why a `deepen-not` argument was rejected; see [`ServeError::InvalidDeepenNot`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum DeepenNotError {
+    /// The argument names neither an existing ref nor an object in the repository.
+    #[error("no such ref or object")]
+    UnknownRef,
+    /// A short name matched more than one ref under the ref lookup rules.
+    #[error("matches more than one ref")]
+    AmbiguousRef,
+    /// The ref or object id does not lead to a commit once tags are peeled.
+    #[error("does not point at a commit")]
+    NotACommit,
 }
 
 /// Result alias for serving operations.

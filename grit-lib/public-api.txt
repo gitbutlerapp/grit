@@ -19417,6 +19417,29 @@ pub fn grit_lib::remote::receive_pack::pack_object_count(&[u8]) -> core::option:
 pub fn grit_lib::remote::receive_pack::receive_unpack_limit(&grit_lib::config::ConfigSet) -> i32
 pub fn grit_lib::remote::receive_pack::should_use_unpack_objects(&[u8], &grit_lib::config::ConfigSet) -> bool
 pub mod grit_lib::remote::serve
+pub enum grit_lib::remote::serve::DeepenNotError
+pub grit_lib::remote::serve::DeepenNotError::AmbiguousRef
+pub grit_lib::remote::serve::DeepenNotError::NotACommit
+pub grit_lib::remote::serve::DeepenNotError::UnknownRef
+impl core::clone::Clone for grit_lib::remote::serve::DeepenNotError
+pub fn grit_lib::remote::serve::DeepenNotError::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::remote::serve::DeepenNotError
+impl core::cmp::PartialEq for grit_lib::remote::serve::DeepenNotError
+pub fn grit_lib::remote::serve::DeepenNotError::eq(&self, &Self) -> bool
+impl core::error::Error for grit_lib::remote::serve::DeepenNotError
+impl core::fmt::Debug for grit_lib::remote::serve::DeepenNotError
+pub fn grit_lib::remote::serve::DeepenNotError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::fmt::Display for grit_lib::remote::serve::DeepenNotError
+pub fn grit_lib::remote::serve::DeepenNotError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::remote::serve::DeepenNotError
+impl core::marker::StructuralPartialEq for grit_lib::remote::serve::DeepenNotError
+impl core::marker::Freeze for grit_lib::remote::serve::DeepenNotError
+impl core::marker::Send for grit_lib::remote::serve::DeepenNotError
+impl core::marker::Sync for grit_lib::remote::serve::DeepenNotError
+impl core::marker::Unpin for grit_lib::remote::serve::DeepenNotError
+impl core::marker::UnsafeUnpin for grit_lib::remote::serve::DeepenNotError
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::serve::DeepenNotError
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::serve::DeepenNotError
 pub enum grit_lib::remote::serve::ProtocolVersion
 pub grit_lib::remote::serve::ProtocolVersion::V0
 pub grit_lib::remote::serve::ProtocolVersion::V1
@@ -19477,6 +19500,9 @@ impl core::marker::UnsafeUnpin for grit_lib::remote::serve::RefUpdateRefusal
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::serve::RefUpdateRefusal
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::remote::serve::RefUpdateRefusal
 pub enum grit_lib::remote::serve::ServeError
+pub grit_lib::remote::serve::ServeError::InvalidDeepenNot
+pub grit_lib::remote::serve::ServeError::InvalidDeepenNot::reason: grit_lib::remote::serve::DeepenNotError
+pub grit_lib::remote::serve::ServeError::InvalidDeepenNot::spec: alloc::string::String
 pub grit_lib::remote::serve::ServeError::Io(core::io::error::Error)
 pub grit_lib::remote::serve::ServeError::NotOurRef(grit_lib::objects::ObjectId)
 pub grit_lib::remote::serve::ServeError::ObjectFormatMismatch
