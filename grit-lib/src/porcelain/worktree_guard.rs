@@ -16,7 +16,7 @@ use crate::diff::{
     diff_index_to_tree, diff_index_to_worktree_with_options, diff_trees, entry_is_racy_with_policy,
     index_mtime_for_diff, DiffEntry, DiffStatus,
 };
-use crate::error::{Error, Result};
+use crate::error::{Error, OverwriteReason, Result};
 use crate::index::StatMatchPolicy;
 use crate::index::{index_file_mtime, Index, IndexEntry};
 use crate::objects::{parse_commit, ObjectId};
@@ -1442,7 +1442,8 @@ pub struct TreeSwitchPlan {
 ///
 /// # Errors
 ///
-/// Returns [`Error::Message`] when staged or unstaged changes exist, or on I/O/ODB failures.
+/// Returns [`Error::WouldOverwrite`] with [`OverwriteReason::LocalChanges`] and the changed
+/// paths when staged or unstaged changes exist, or I/O/ODB failures.
 pub fn prepare_tree_switch(
     repo: &Repository,
     from_tree: Option<&ObjectId>,
@@ -1456,9 +1457,12 @@ pub fn prepare_tree_switch(
         snapshot.index.source_mtime = index_file_mtime(&index_path);
     }
     if !staged.is_empty() || !unstaged.is_empty() {
-        return Err(Error::Message(
-            "you have uncommitted changes — commit them before switching".into(),
-        ));
+        let paths = staged
+            .iter()
+            .chain(&unstaged)
+            .map(|entry| entry.path().to_owned())
+            .collect();
+        return Err(Error::would_overwrite(OverwriteReason::LocalChanges, paths));
     }
 
     let tree_changes = if from_tree == Some(to_tree) {

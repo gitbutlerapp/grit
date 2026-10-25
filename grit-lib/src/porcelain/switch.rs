@@ -554,15 +554,6 @@ impl From<Error> for TreeTransitionPrepareError {
     }
 }
 
-fn tree_transition_prepare_to_error(err: TreeTransitionPrepareError) -> Error {
-    match err {
-        TreeTransitionPrepareError::OverwritePaths(_) => {
-            Error::Message("you have uncommitted changes — commit them before switching".into())
-        }
-        TreeTransitionPrepareError::Failed(err) => err,
-    }
-}
-
 /// Plan a tree-to-tree checkout that keeps staged/unstaged edits on paths the target tree already matches.
 pub(crate) fn prepare_tree_transition_allow_local(
     repo: &Repository,
@@ -907,7 +898,7 @@ pub(crate) fn checkout_tree_transition_allow_local_with_preserved(
 ) -> Result<()> {
     let prepared =
         prepare_tree_transition_allow_local(repo, from_tree, to_tree, force_preserve_worktree)
-            .map_err(tree_transition_prepare_to_error)?;
+            .map_err(map_switch_tree_transition_prepare_error)?;
     checkout_prepared_tree_transition(repo, prepared)
 }
 

@@ -77,7 +77,7 @@ When local changes would conflict with the destination branch:
 
 ```console
 $ grit switch other
-error: you have uncommitted changes — commit them before switching
+error: you have uncommitted changes — commit or stash them before switching
 ```
 
 While a rebase that `git` started is stopped on a conflict:

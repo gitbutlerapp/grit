@@ -1588,7 +1588,7 @@ impl Error {
         paths.dedup();
         let message = match reason {
             OverwriteReason::LocalChanges => {
-                "you have uncommitted changes — commit them before switching".into()
+                "you have uncommitted changes — commit or stash them before switching".into()
             }
             OverwriteReason::Untracked => {
                 let first = paths.first().map(String::as_str).unwrap_or("<path>");
