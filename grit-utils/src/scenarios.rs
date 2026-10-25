@@ -8,13 +8,14 @@ use anyhow::{Context, Result};
 use crate::bench_env::isolated_env_prefix;
 use crate::binary::{report_grit_commit, tool_version};
 use crate::fixture::{
-    bench_work_dir, create_blame_deep_history_repo, create_blame_large_mid_churn_repo,
-    create_blame_large_tail_churn_repo, create_blame_merge_heavy_repo,
-    create_deep_leaf_dogfood_repo, create_dense_leaf_dogfood_repo, create_repo,
-    create_repo_with_history, create_untracked_monorepo_repo, dirty_repo, modify_files_for_diff,
-    modify_rs_files_for_diff, modify_txt_files_for_diff, prepare_add_iteration,
-    prepare_commit_iteration, prepare_dense_leaf_add_iteration, prepare_initial_monorepo_add,
-    prepare_restore_iteration, scratch_dir, DeepLeafDogfoodSpec, DenseLeafDogfoodSpec,
+    bench_work_dir, create_big_file_repo, create_blame_deep_history_repo,
+    create_blame_large_mid_churn_repo, create_blame_large_tail_churn_repo,
+    create_blame_merge_heavy_repo, create_deep_leaf_dogfood_repo, create_dense_leaf_dogfood_repo,
+    create_repo, create_repo_with_history, create_untracked_monorepo_repo, dirty_repo,
+    modify_files_for_diff, modify_rs_files_for_diff, modify_txt_files_for_diff,
+    prepare_add_iteration, prepare_commit_iteration, prepare_dense_leaf_add_iteration,
+    prepare_initial_monorepo_add, prepare_restore_iteration, scratch_dir, DeepLeafDogfoodSpec,
+    DenseLeafDogfoodSpec,
 };
 use crate::hot_path_fixture::{
     load_meta, prepare_merge, prepare_pick, prepare_pick_series, prepare_revert, prepare_switch,
@@ -1014,6 +1015,45 @@ pub fn run_initial_monorepo_add_suite(
         &repo,
     )?;
     Ok(build_report(git, grit, timestamp, vec![scenario]))
+}
+
+/// Stage one big untracked text file per size (#1850): time and peak RSS against
+/// `git add`, which streams files above `core.bigFileThreshold` (512 MiB).
+pub fn run_big_file_add_suite(
+    hyperfine: &Path,
+    git: &Path,
+    grit: &Path,
+    cfg: &RunConfig,
+    megabytes: &[usize],
+    timestamp: time::OffsetDateTime,
+) -> Result<BenchReport> {
+    let mut scenarios = Vec::new();
+    for &mb in megabytes {
+        let repo = create_big_file_repo(git, mb)?;
+        prepare_initial_monorepo_add(&repo)?;
+        scenarios.push(run_scenario(
+            hyperfine,
+            git,
+            grit,
+            cfg,
+            &Scenario {
+                id: format!("add-big-file-{mb}m"),
+                group: "add".into(),
+                fixture: format!("big-file-{mb}m"),
+                description: format!(
+                    "stage one untracked {mb} MiB text file (index and objects reset between runs, #1850)"
+                ),
+                grit_argv: vec!["add".into(), "big.txt".into()],
+                git_argv: vec!["add".into(), "big.txt".into()],
+                driver: Driver::Cli,
+                prepare_kind: Some(PrepareKind::InitialMonorepoAdd),
+                grit_via_shell: false,
+                git_via_shell: false,
+            },
+            &repo,
+        )?);
+    }
+    Ok(build_report(git, grit, timestamp, scenarios))
 }
 
 /// `grit commit` (stage all + commit) vs `git add -A && git commit` at each file count.

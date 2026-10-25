@@ -332,6 +332,32 @@ pub fn create_untracked_monorepo_repo(init_with: &Path, file_count: usize) -> Re
     Ok(dir)
 }
 
+/// Initialized repo holding one untracked `big.txt` of `megabytes` MiB of numbered lines
+/// (`seq`-style text, the #1850 layout). Pair with [`prepare_initial_monorepo_add`] between runs.
+pub fn create_big_file_repo(init_with: &Path, megabytes: usize) -> Result<PathBuf> {
+    use std::io::Write as _;
+
+    let dir = scratch_dir();
+    remove_dir_robust(&dir);
+    fs::create_dir_all(&dir).context("create scratch dir")?;
+    let target = megabytes * 1024 * 1024;
+    let file = fs::File::create(dir.join("big.txt")).context("create big.txt")?;
+    let mut out = std::io::BufWriter::with_capacity(1 << 20, file);
+    let mut written = 0usize;
+    let mut n = 1u64;
+    while written < target {
+        let line = format!("{n}\n");
+        let take = line.len().min(target - written);
+        out.write_all(&line.as_bytes()[..take])
+            .context("write big.txt")?;
+        written += take;
+        n += 1;
+    }
+    out.flush().context("flush big.txt")?;
+    run_git(init_with, &dir, &["init"])?;
+    Ok(dir)
+}
+
 /// Reset index and loose objects so the next add re-hashes every file (#1674 regression guard).
 pub fn prepare_initial_monorepo_add(dir: &Path) -> Result<()> {
     let git_dir = dir.join(".git");

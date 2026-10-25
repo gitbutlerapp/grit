@@ -270,6 +270,28 @@ cargo build --release -p grit-cli -p grit-utils
 cargo bench -p grit-lib --bench history -- 'revwalk_(default|topo|date_order)/'
 ```
 
+## Big files are streamed (2026-10-25)
+
+`grit add` of a 1 GB file used to read it into memory and copy it twice more on the way to the object store, peaking at 2.4–3× the file size (issue #1850). Files of at least `core.bigFileThreshold` (512 MiB by default) that need no clean conversion are now hashed and deflated in 128 KiB chunks straight into their own pack, as Git does, at the pack compression level. Smaller files lost two copies (the clean conversion takes ownership of the bytes, and `add` deflates straight into the loose object file instead of a buffer kept until the batch finished), so they now peak at about 1× the file size, like Git.
+
+Same Linux VM sitting (4 vCPU), release builds, system `git 2.43.0`, `/usr/bin/time -v`, one run each; grit is `origin/main` before → after:
+
+| Command | Git | Grit before → after (wall) | Peak RSS Git, Grit before → after | `.git` size Git, Grit before → after |
+| --- | ---: | ---: | ---: | ---: |
+| `add` 1.09 GB text (`seq 1 120000000`) | 19.1 s | 5.3 → **7.4** s | 5 MB, 2,596 → **14** MB | 265, 466 → **271** MB |
+| `commit` (auto-stage) 1 GB random | 22.4 s | 12.6 → **18.7** s | 5 MB, 2,997 → **16** MB | 1,000, 1,055 → **1,000** MB |
+| `status` after touching the 1 GB file | 19.3 s | 1.9 → **0.8** s | 5 MB, 1,966 → **15** MB | |
+| `add` 349 MB text | 3.0 s | 1.7 → **1.3** s | 346, 846 → **355** MB | 90, 155 → 155 MB |
+| `add` 300 MB random | 6.3 s | 3.7 → **3.3** s | 298, 909 → **307** MB | 300, 316 → 316 MB |
+
+Big files are slower than before because the pack level (`pack.compression`, default 6) replaces the loose level 1, whose zlib-rs fast path compresses text far worse. Both are still faster than Git, and the repository is now about Git's size. Set `pack.compression` (or `core.compression`) lower to trade size for speed. Files below the threshold keep the loose level, which is why their repository size is unchanged. `grit-bench add-initial` (20,000 small files) and `add` / `status` at 10,000 files are unchanged within noise.
+
+`grit-bench add-big-file` (committed as `add-big-file.json`) times `add` of one untracked text file per size with the index and objects reset between runs, and records peak RSS:
+
+```bash
+./target/release/grit-bench --warmup 1 --min-runs 3 --format json --output grit-utils/baselines/add-big-file.json add-big-file --megabytes 256,1024
+```
+
 ## Clean-tree status (2026-10-24)
 
 Dogfooding on Windows (issue #1702) found `grit status` re-reading tracked files on clean trees and running 3.5–5× slower than Git on rust-lang/cargo and git.git. Four causes, all in `grit-lib`:

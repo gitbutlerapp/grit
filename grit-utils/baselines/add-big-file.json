@@ -1,0 +1,90 @@
+{
+  "schema_version": 1,
+  "timestamp": "2026-10-25T08:15:49.760167013Z",
+  "machine": {
+    "cpu_model": "Intel(R) Xeon(R) Processor",
+    "physical_cores": 4,
+    "logical_cores": 4,
+    "ram_bytes": 16780574720,
+    "os": "linux",
+    "kernel": "Linux 6.12.94+",
+    "scratch_filesystem": "ext4",
+    "rustc_version": "rustc 1.99.0 (b940084d7 2026-09-28)",
+    "cargo_profile": "release"
+  },
+  "tools": {
+    "git": "git version 2.43.0",
+    "grit": "grit 0.5.20",
+    "grit_commit": "5d764886b47be49c089fc00cc853dfef2155b78d"
+  },
+  "scenarios": [
+    {
+      "id": "add-big-file-256m",
+      "group": "add",
+      "fixture": "big-file-256m",
+      "description": "stage one untracked 256 MiB text file (index and objects reset between runs, #1850)",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 2271.1064269733333,
+        "median_ms": 2269.9872496400003,
+        "stddev_ms": 2.279138325084661,
+        "min_ms": 2269.6032376400003,
+        "max_ms": 2273.7287936400003,
+        "runs_ms": [
+          2273.7287936400003,
+          2269.6032376400003,
+          2269.9872496400003
+        ],
+        "peak_rss_bytes": 275763200
+      },
+      "grit": {
+        "mean_ms": 933.0076386133334,
+        "median_ms": 932.7969082799999,
+        "stddev_ms": 1.9839669827445052,
+        "min_ms": 931.1374482800001,
+        "max_ms": 935.08855928,
+        "runs_ms": [
+          935.08855928,
+          932.7969082799999,
+          931.1374482800001
+        ],
+        "peak_rss_bytes": 284131328
+      },
+      "ratio": 0.4109260562709915
+    },
+    {
+      "id": "add-big-file-1024m",
+      "group": "add",
+      "fixture": "big-file-1024m",
+      "description": "stage one untracked 1024 MiB text file (index and objects reset between runs, #1850)",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 19264.30087532667,
+        "median_ms": 18906.46568066,
+        "stddev_ms": 884.9616426656897,
+        "min_ms": 18614.28989366,
+        "max_ms": 20272.14705166,
+        "runs_ms": [
+          18906.46568066,
+          20272.14705166,
+          18614.28989366
+        ],
+        "peak_rss_bytes": 7798784
+      },
+      "grit": {
+        "mean_ms": 7355.373590726666,
+        "median_ms": 7322.78706806,
+        "stddev_ms": 122.85897581534485,
+        "min_ms": 7252.09295506,
+        "max_ms": 7491.24074906,
+        "runs_ms": [
+          7491.24074906,
+          7252.09295506,
+          7322.78706806
+        ],
+        "peak_rss_bytes": 15912960
+      },
+      "ratio": 0.3873165504196113
+    }
+  ]
+}
