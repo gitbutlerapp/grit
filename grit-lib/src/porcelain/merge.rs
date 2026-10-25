@@ -1688,6 +1688,7 @@ mod integrate_tests {
             conflict_content,
             result_tree: crate::diff::zero_oid(),
             touched_paths: HashSet::new(),
+            rename_conflicts: Vec::new(),
         };
         let paths: Vec<String> = conflicts_from_tree_merge(&merged)
             .into_iter()

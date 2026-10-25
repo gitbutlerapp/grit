@@ -3758,6 +3758,25 @@ impl<'a> core::marker::Unpin for grit_lib::diff::merge_trees::TheirsConflictLabe
 impl<'a> core::marker::UnsafeUnpin for grit_lib::diff::merge_trees::TheirsConflictLabel<'a>
 impl<'a> core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::merge_trees::TheirsConflictLabel<'a>
 impl<'a> core::panic::unwind_safe::UnwindSafe for grit_lib::diff::merge_trees::TheirsConflictLabel<'a>
+pub struct grit_lib::diff::merge_trees::RenameRenameConflict
+pub grit_lib::diff::merge_trees::RenameRenameConflict::base_path: alloc::vec::Vec<u8>
+pub grit_lib::diff::merge_trees::RenameRenameConflict::ours_path: alloc::vec::Vec<u8>
+pub grit_lib::diff::merge_trees::RenameRenameConflict::theirs_path: alloc::vec::Vec<u8>
+impl core::clone::Clone for grit_lib::diff::merge_trees::RenameRenameConflict
+pub fn grit_lib::diff::merge_trees::RenameRenameConflict::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::diff::merge_trees::RenameRenameConflict
+impl core::cmp::PartialEq for grit_lib::diff::merge_trees::RenameRenameConflict
+pub fn grit_lib::diff::merge_trees::RenameRenameConflict::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::diff::merge_trees::RenameRenameConflict
+pub fn grit_lib::diff::merge_trees::RenameRenameConflict::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::diff::merge_trees::RenameRenameConflict
+impl core::marker::Freeze for grit_lib::diff::merge_trees::RenameRenameConflict
+impl core::marker::Send for grit_lib::diff::merge_trees::RenameRenameConflict
+impl core::marker::Sync for grit_lib::diff::merge_trees::RenameRenameConflict
+impl core::marker::Unpin for grit_lib::diff::merge_trees::RenameRenameConflict
+impl core::marker::UnsafeUnpin for grit_lib::diff::merge_trees::RenameRenameConflict
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::merge_trees::RenameRenameConflict
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::merge_trees::RenameRenameConflict
 pub struct grit_lib::diff::merge_trees::TreeMergeConflictPresentation<'a>
 pub grit_lib::diff::merge_trees::TreeMergeConflictPresentation::checkout_merge: bool
 pub grit_lib::diff::merge_trees::TreeMergeConflictPresentation::df_directory_ours_commit: core::option::Option<grit_lib::objects::ObjectId>
@@ -3783,6 +3802,7 @@ impl<'a> core::panic::unwind_safe::UnwindSafe for grit_lib::diff::merge_trees::T
 pub struct grit_lib::diff::merge_trees::TreeMergeOutput
 pub grit_lib::diff::merge_trees::TreeMergeOutput::conflict_content: alloc::collections::btree::map::BTreeMap<alloc::vec::Vec<u8>, grit_lib::objects::ObjectId>
 pub grit_lib::diff::merge_trees::TreeMergeOutput::index: grit_lib::index::Index
+pub grit_lib::diff::merge_trees::TreeMergeOutput::rename_conflicts: alloc::vec::Vec<grit_lib::diff::merge_trees::RenameRenameConflict>
 pub grit_lib::diff::merge_trees::TreeMergeOutput::result_tree: grit_lib::objects::ObjectId
 pub grit_lib::diff::merge_trees::TreeMergeOutput::touched_paths: std::collections::hash::set::HashSet<alloc::vec::Vec<u8>>
 impl core::fmt::Debug for grit_lib::diff::merge_trees::TreeMergeOutput
@@ -11407,8 +11427,12 @@ pub grit_lib::operation::ConflictKind::AddAdd
 pub grit_lib::operation::ConflictKind::Content
 pub grit_lib::operation::ConflictKind::ModifyDelete
 pub grit_lib::operation::ConflictKind::ModifyDelete::deleted_in_current: bool
+pub grit_lib::operation::ConflictKind::RenameRename
+pub grit_lib::operation::ConflictKind::RenameRename::base_path: alloc::string::String
+pub grit_lib::operation::ConflictKind::RenameRename::ours_path: alloc::string::String
+pub grit_lib::operation::ConflictKind::RenameRename::theirs_path: alloc::string::String
 impl grit_lib::operation::ConflictKind
-pub fn grit_lib::operation::ConflictKind::as_str(self) -> &'static str
+pub fn grit_lib::operation::ConflictKind::as_str(&self) -> &'static str
 impl core::clone::Clone for grit_lib::operation::ConflictKind
 pub fn grit_lib::operation::ConflictKind::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::operation::ConflictKind
@@ -11416,7 +11440,6 @@ impl core::cmp::PartialEq for grit_lib::operation::ConflictKind
 pub fn grit_lib::operation::ConflictKind::eq(&self, &Self) -> bool
 impl core::fmt::Debug for grit_lib::operation::ConflictKind
 pub fn grit_lib::operation::ConflictKind::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for grit_lib::operation::ConflictKind
 impl core::marker::StructuralPartialEq for grit_lib::operation::ConflictKind
 impl core::marker::Freeze for grit_lib::operation::ConflictKind
 impl core::marker::Send for grit_lib::operation::ConflictKind
@@ -13267,8 +13290,12 @@ pub grit_lib::porcelain::merge::MergeConflictKind::AddAdd
 pub grit_lib::porcelain::merge::MergeConflictKind::Content
 pub grit_lib::porcelain::merge::MergeConflictKind::ModifyDelete
 pub grit_lib::porcelain::merge::MergeConflictKind::ModifyDelete::deleted_in_current: bool
+pub grit_lib::porcelain::merge::MergeConflictKind::RenameRename
+pub grit_lib::porcelain::merge::MergeConflictKind::RenameRename::base_path: alloc::string::String
+pub grit_lib::porcelain::merge::MergeConflictKind::RenameRename::ours_path: alloc::string::String
+pub grit_lib::porcelain::merge::MergeConflictKind::RenameRename::theirs_path: alloc::string::String
 impl grit_lib::operation::ConflictKind
-pub fn grit_lib::operation::ConflictKind::as_str(self) -> &'static str
+pub fn grit_lib::operation::ConflictKind::as_str(&self) -> &'static str
 impl core::clone::Clone for grit_lib::operation::ConflictKind
 pub fn grit_lib::operation::ConflictKind::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::operation::ConflictKind
@@ -13276,7 +13303,6 @@ impl core::cmp::PartialEq for grit_lib::operation::ConflictKind
 pub fn grit_lib::operation::ConflictKind::eq(&self, &Self) -> bool
 impl core::fmt::Debug for grit_lib::operation::ConflictKind
 pub fn grit_lib::operation::ConflictKind::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::Copy for grit_lib::operation::ConflictKind
 impl core::marker::StructuralPartialEq for grit_lib::operation::ConflictKind
 impl core::marker::Freeze for grit_lib::operation::ConflictKind
 impl core::marker::Send for grit_lib::operation::ConflictKind

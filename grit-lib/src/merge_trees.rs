@@ -33,6 +33,26 @@ pub struct TreeMergeOutput {
     pub result_tree: ObjectId,
     /// Repository-relative paths whose merge outcome differs from `ours_tree`.
     pub touched_paths: HashSet<Vec<u8>>,
+    /// Base paths renamed to a different destination on each side, sorted by base path.
+    ///
+    /// Each one leaves the base entry at stage 1 under [`RenameRenameConflict::base_path`],
+    /// stage 2 under [`RenameRenameConflict::ours_path`] and stage 3 under
+    /// [`RenameRenameConflict::theirs_path`], with the merged content at both destinations.
+    pub rename_conflicts: Vec<RenameRenameConflict>,
+}
+
+/// One base path that each side of a merge renamed to a different destination.
+///
+/// Git calls this a rename/rename (1to2) conflict: the merge cannot pick a name, so both
+/// destinations are kept and the path stays unmerged until the user resolves it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RenameRenameConflict {
+    /// Path of the file in the merge base.
+    pub base_path: Vec<u8>,
+    /// Destination the ours side renamed it to.
+    pub ours_path: Vec<u8>,
+    /// Destination the theirs side renamed it to.
+    pub theirs_path: Vec<u8>,
 }
 
 #[derive(Clone, Copy, Debug, Default)]
@@ -227,6 +247,8 @@ pub(crate) fn merge_trees_three_way_cached(
         touched.insert(old.clone());
         touched.insert(new.clone());
     }
+    let rename_conflicts =
+        rename_rename_conflicts(&ours_new_to_old, &theirs_old_to_new, &base, &ours, &theirs);
 
     let mut output = merge_trees_walk::three_way_on_touched_paths(
         cache,
@@ -240,6 +262,7 @@ pub(crate) fn merge_trees_three_way_cached(
         &theirs,
         &ours_new_to_old,
         &theirs_old_to_new,
+        rename_conflicts,
         favor,
         ws,
         diff_algorithm,
@@ -297,6 +320,163 @@ fn augment_renames_with_same_blob(
         }
         pairs.push((old, new, 100));
     }
+}
+
+/// Base files each side renamed to a different, otherwise unoccupied destination.
+///
+/// Destinations that collide with another file on the opposite side (rename/add,
+/// rename/rename 2to1) are left to the path-by-path walk.
+fn rename_rename_conflicts(
+    ours_new_to_old: &HashMap<Vec<u8>, Vec<u8>>,
+    theirs_old_to_new: &HashMap<Vec<u8>, Vec<u8>>,
+    base: &BTreeMap<Vec<u8>, IndexEntry>,
+    ours: &BTreeMap<Vec<u8>, IndexEntry>,
+    theirs: &BTreeMap<Vec<u8>, IndexEntry>,
+) -> Vec<RenameRenameConflict> {
+    let mut out: Vec<RenameRenameConflict> = ours_new_to_old
+        .iter()
+        .filter_map(|(ours_path, base_path)| {
+            let theirs_path = theirs_old_to_new.get(base_path)?;
+            let distinct =
+                ours_path != base_path && theirs_path != base_path && theirs_path != ours_path;
+            let unoccupied = !ours.contains_key(base_path)
+                && !theirs.contains_key(base_path)
+                && !ours.contains_key(theirs_path)
+                && !theirs.contains_key(ours_path);
+            let present = base.contains_key(base_path)
+                && ours.contains_key(ours_path)
+                && theirs.contains_key(theirs_path);
+            (distinct && unoccupied && present).then(|| RenameRenameConflict {
+                base_path: base_path.clone(),
+                ours_path: ours_path.clone(),
+                theirs_path: theirs_path.clone(),
+            })
+        })
+        .collect();
+    out.sort_by(|a, b| a.base_path.cmp(&b.base_path));
+    out
+}
+
+/// Record a rename/rename (1to2) conflict the way Git's index does.
+///
+/// The base entry stays at stage 1 under the old name. Both destinations get the three-way
+/// merge of the content (with conflict markers when the edits overlap): stage 2 at the ours
+/// name and stage 3 at the theirs name, and the same blob in the work tree. Content that
+/// cannot be merged line by line (binary, symlink, gitlink) keeps each side's own version.
+#[expect(clippy::too_many_arguments)]
+pub(crate) fn merge_rename_rename(
+    repo: &Repository,
+    index: &mut Index,
+    conflict_content: &mut BTreeMap<Vec<u8>, ObjectId>,
+    conflict: &RenameRenameConflict,
+    base: &IndexEntry,
+    ours: &IndexEntry,
+    theirs: &IndexEntry,
+    favor: MergeFavor,
+    ws: WhitespaceMergeOptions,
+    diff_algorithm: Option<&str>,
+    presentation: TreeMergeConflictPresentation<'_>,
+) -> crate::error::Result<()> {
+    let merged = rename_rename_content(
+        repo,
+        conflict,
+        base,
+        ours,
+        theirs,
+        favor,
+        ws,
+        diff_algorithm,
+        presentation,
+    )?;
+    let (at_ours, at_theirs) = match &merged {
+        Some(entry) => (entry, entry),
+        None => (ours, theirs),
+    };
+    stage_entry(index, &conflict.base_path, base, 1);
+    stage_entry(index, &conflict.ours_path, at_ours, 2);
+    stage_entry(index, &conflict.theirs_path, at_theirs, 3);
+    conflict_content.insert(conflict.ours_path.clone(), at_ours.oid);
+    conflict_content.insert(conflict.theirs_path.clone(), at_theirs.oid);
+    Ok(())
+}
+
+/// Merged entry for both rename destinations, or `None` when each side keeps its own blob.
+#[expect(clippy::too_many_arguments)]
+fn rename_rename_content(
+    repo: &Repository,
+    conflict: &RenameRenameConflict,
+    base: &IndexEntry,
+    ours: &IndexEntry,
+    theirs: &IndexEntry,
+    favor: MergeFavor,
+    ws: WhitespaceMergeOptions,
+    diff_algorithm: Option<&str>,
+    presentation: TreeMergeConflictPresentation<'_>,
+) -> crate::error::Result<Option<IndexEntry>> {
+    if same_blob(ours, theirs) || same_blob(base, theirs) {
+        return Ok(Some(ours.clone()));
+    }
+    if same_blob(base, ours) {
+        return Ok(Some(theirs.clone()));
+    }
+    let regular = |e: &IndexEntry| matches!(e.mode, 0o100644 | 0o100755);
+    if !(regular(base) && regular(ours) && regular(theirs)) {
+        return Ok(None);
+    }
+    let base_obj = repo.odb().read(&base.oid)?;
+    let ours_obj = repo.odb().read(&ours.oid)?;
+    let theirs_obj = repo.odb().read(&theirs.oid)?;
+    let favor = merge_favor_for_path(repo, &conflict.base_path, favor);
+    if blob_is_binary_for_merge(repo, &conflict.base_path, &base_obj.data)
+        || blob_is_binary_for_merge(repo, &conflict.ours_path, &ours_obj.data)
+        || blob_is_binary_for_merge(repo, &conflict.theirs_path, &theirs_obj.data)
+    {
+        return Ok(match favor {
+            MergeFavor::Ours => Some(ours.clone()),
+            MergeFavor::Theirs => Some(theirs.clone()),
+            _ => None,
+        });
+    }
+
+    let label_base = format!(
+        "{}:{}",
+        presentation.label_base,
+        String::from_utf8_lossy(&conflict.base_path)
+    );
+    let label_ours = format!(
+        "{}:{}",
+        presentation.label_ours,
+        String::from_utf8_lossy(&conflict.ours_path)
+    );
+    let theirs_path = String::from_utf8_lossy(&conflict.theirs_path);
+    let label_theirs = match presentation.label_theirs {
+        TheirsConflictLabel::PathUtf8 => theirs_path.into_owned(),
+        TheirsConflictLabel::Fixed(s) => format!("{s}:{theirs_path}"),
+    };
+    // Git writes 8-character markers for rename/rename content merges; matching it keeps the
+    // conflicted blobs, and so the result tree, identical to Git's.
+    let result = merge(&MergeInput {
+        base: &base_obj.data,
+        ours: &ours_obj.data,
+        theirs: &theirs_obj.data,
+        label_ours: &label_ours,
+        label_base: &label_base,
+        label_theirs: &label_theirs,
+        favor,
+        style: presentation.style,
+        marker_size: 8,
+        diff_algorithm: diff_algorithm.map(str::to_owned),
+        ignore_all_space: ws.ignore_all_space,
+        ignore_space_change: ws.ignore_space_change,
+        ignore_space_at_eol: ws.ignore_space_at_eol,
+        ignore_cr_at_eol: ws.ignore_cr_at_eol,
+    })?;
+    let mut entry = ours.clone();
+    entry.oid = repo.odb().write(ObjectKind::Blob, &result.content)?;
+    if base.mode == ours.mode {
+        entry.mode = theirs.mode;
+    }
+    Ok(Some(entry))
 }
 
 #[derive(Default)]
@@ -1034,6 +1214,7 @@ fn pending_tree_merge_index_rows(index: &Index, merged: &TreeMergeOutput) -> Tre
             .filter(|path| !up_to_date(path))
             .cloned()
             .collect(),
+        rename_conflicts: Vec::new(),
     }
 }
 

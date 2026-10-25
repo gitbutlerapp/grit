@@ -110,6 +110,23 @@ CONFLICT (modify_delete): f deleted on the current branch and modified in feat; 
 Automatic merge failed; fix conflicts and run `grit merge --continue`, or run `grit merge --abort`.
 ```
 
+When both branches renamed the same file to different names, grit cannot pick a name, so it stops (like Git) and keeps both names in the work tree. Each one holds the merged content. The old name stays unmerged in the index next to the two new names. To keep one name, remove the old name and the other new name with `grit rm`, then run `grit merge --continue`. `grit merge --check` exits **1** for this case.
+
+```console
+$ grit merge topic
+CONFLICT (rename_rename): a renamed to b on the current branch and to c in topic; both names are in the work tree
+CONFLICT (rename_rename): b
+CONFLICT (rename_rename): c
+
+Automatic merge failed; fix conflicts and run `grit merge --continue`, or run `grit merge --abort`.
+
+$ grit rm a c
+Removed 2 paths.
+
+$ grit merge --continue
+Merged topic into the current branch (b3e1fe8)
+```
+
 After resolving markers (staging is optional when `commit.autoStage` is true):
 
 ```console
@@ -163,7 +180,7 @@ Pass `--json` for stable, scripting-friendly output:
 | `parents` | array or null | For `--dry-run` with `result: merged`, the two parent commit ids of the merge commit that would be recorded. |
 | `change_id` | string or null | Stored `change-id` on `oid` when present (merge commit or fast-forward tip). |
 | `upstream` | string or null | For `set_upstream`, the remote-tracking branch that was adopted. |
-| `conflicts` | array or null | When `result` is `conflicts`, each item has `path`, `kind` (`content`, `add_add`, or `modify_delete`), and optional `summary` text. |
+| `conflicts` | array or null | When `result` is `conflicts`, each item has `path`, `kind` (`content`, `add_add`, `modify_delete`, or `rename_rename`), and optional `summary` text. A `rename_rename` conflict lists all three paths (the old name and both new names); the `summary` is on the old name's item. |
 | `next_steps` | array or null | Ordered follow-up commands when `result` is `conflicts` (for example `grit diff`, `grit add .`), or suggested commands when `result` is `squashed` or `stopped`. |
 | `alternatives` | array or null | Mutually exclusive options such as `grit merge --abort` (not part of the ordered sequence). |
 

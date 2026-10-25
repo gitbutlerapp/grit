@@ -8,14 +8,15 @@ use crate::context;
 use crate::markdown;
 use crate::merge_strategy_args::MergeStrategyArgs;
 use crate::message_input::{read_message_input, MessageInputArgs};
-use crate::operation_output::{render_conflicts_human, ConflictJson, OperationConflictBlock};
+use crate::operation_output::{
+    conflict_json, render_conflicts_human, ConflictJson, OperationConflictBlock,
+};
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 use anyhow::{bail, Context, Result};
 use grit_lib::change_id::ChangeId;
 use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
-use grit_lib::operation::{Conflict, ConflictKind};
 use grit_lib::porcelain::merge::{
     abort_branch_merge, continue_merge, integrate_branch_with, plan_branch_merge, predict_merge,
     resolve_merge_source, ContinueOptions, FastForwardPolicy, IntegrateBranchOutcome,
@@ -116,26 +117,13 @@ pub(crate) fn merge_conflict_json(
     detail: &MergeConflictDetail,
     merge_label: &str,
 ) -> MergeConflictJson {
-    let (kind, summary) = match detail.kind {
-        ConflictKind::Content => ("content".to_owned(), None),
-        ConflictKind::AddAdd => ("add_add".to_owned(), None),
-        ConflictKind::ModifyDelete { deleted_in_current } => {
-            let summary = if deleted_in_current {
-                Some(format!(
-                    "{} deleted on the current branch and modified in {merge_label}; {merge_label}'s version is in the work tree",
-                    detail.path
-                ))
-            } else {
-                Some(format!(
-                    "{} modified on the current branch and deleted in {merge_label}; the current branch's version is in the work tree",
-                    detail.path
-                ))
-            };
-            ("modify_delete".to_owned(), summary)
-        }
-    };
+    let ConflictJson {
+        path,
+        kind,
+        summary,
+    } = conflict_json(detail, Some(merge_label));
     MergeConflictJson {
-        path: detail.path.clone(),
+        path,
         kind,
         summary,
     }
@@ -260,12 +248,7 @@ impl MergeOutcome {
         let conflicts = Some(
             details
                 .iter()
-                .map(|d| merge_conflict_json(d, label))
-                .map(|j| ConflictJson {
-                    path: j.path,
-                    kind: j.kind,
-                    summary: j.summary,
-                })
+                .map(|d| conflict_json(d, Some(label)))
                 .collect(),
         );
         Self {
@@ -291,14 +274,7 @@ impl MergeOutcome {
     }
 
     fn conflicts(label: &str, details: Vec<MergeConflictDetail>) -> Self {
-        let library_conflicts: Vec<Conflict> = details
-            .iter()
-            .map(|d| Conflict {
-                path: d.path.clone(),
-                kind: d.kind,
-            })
-            .collect();
-        let block = OperationConflictBlock::for_merge(&library_conflicts, label);
+        let block = OperationConflictBlock::for_merge(&details, label);
         Self {
             result: MergeResult::Conflicts,
             branch: label.to_owned(),

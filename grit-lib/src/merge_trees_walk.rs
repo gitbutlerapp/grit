@@ -9,7 +9,8 @@ use super::merge_tree_cache::{
 use crate::index::IndexEntry;
 use crate::merge_file::MergeFavor;
 use crate::merge_trees::{
-    merge_one_path, TreeMergeConflictPresentation, TreeMergeOutput, WhitespaceMergeOptions,
+    merge_one_path, merge_rename_rename, RenameRenameConflict, TreeMergeConflictPresentation,
+    TreeMergeOutput, WhitespaceMergeOptions,
 };
 use crate::objects::{serialize_tree, ObjectId, ObjectKind, TreeEntry};
 use crate::odb::Odb;
@@ -408,6 +409,7 @@ pub(crate) fn three_way_on_touched_paths(
     theirs: &BTreeMap<Vec<u8>, IndexEntry>,
     ours_new_to_old: &std::collections::HashMap<Vec<u8>, Vec<u8>>,
     theirs_old_to_new: &std::collections::HashMap<Vec<u8>, Vec<u8>>,
+    rename_conflicts: Vec<RenameRenameConflict>,
     favor: MergeFavor,
     ws: WhitespaceMergeOptions,
     diff_algorithm: Option<&str>,
@@ -420,6 +422,37 @@ pub(crate) fn three_way_on_touched_paths(
     let mut conflict_content = BTreeMap::new();
     let mut handled_base: HSet<Vec<u8>> = HSet::new();
     let mut handled_theirs: HSet<Vec<u8>> = HSet::new();
+    let mut rename_conflict_paths: HSet<&[u8]> = HSet::new();
+
+    for conflict in &rename_conflicts {
+        let (Some(b), Some(o), Some(t)) = (
+            base.get(&conflict.base_path),
+            ours.get(&conflict.ours_path),
+            theirs.get(&conflict.theirs_path),
+        ) else {
+            continue;
+        };
+        merge_rename_rename(
+            repo,
+            &mut out,
+            &mut conflict_content,
+            conflict,
+            b,
+            o,
+            t,
+            favor,
+            ws,
+            diff_algorithm,
+            presentation,
+        )?;
+        handled_base.insert(conflict.base_path.clone());
+        handled_theirs.insert(conflict.theirs_path.clone());
+        rename_conflict_paths.extend([
+            conflict.base_path.as_slice(),
+            conflict.ours_path.as_slice(),
+            conflict.theirs_path.as_slice(),
+        ]);
+    }
 
     let mut ours_paths: Vec<Vec<u8>> = touched.iter().cloned().collect();
     for new in ours_new_to_old.keys() {
@@ -444,6 +477,9 @@ pub(crate) fn three_way_on_touched_paths(
     }
 
     for op in ours_paths {
+        if rename_conflict_paths.contains(op.as_slice()) {
+            continue;
+        }
         if theirs_rename_destinations.contains(&op) && !ours_new_to_old.contains_key(&op) {
             if let Some(old) = theirs_rename_source_by_dest.get(&op) {
                 let ours_still_at_source = ours.contains_key(old)
@@ -612,6 +648,7 @@ pub(crate) fn three_way_on_touched_paths(
         conflict_content,
         result_tree: ObjectId::zero(),
         touched_paths: touched.clone(),
+        rename_conflicts,
     })
 }
 

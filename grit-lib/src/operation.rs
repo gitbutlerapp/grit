@@ -13,6 +13,8 @@
 //! );
 //! ```
 
+use std::collections::HashMap;
+
 use crate::diff::merge_trees::TreeMergeOutput;
 use crate::index::Index;
 
@@ -22,7 +24,7 @@ pub use crate::state::{
 };
 
 /// How a tree-merge conflict should be presented (content, add/add, modify/delete, …).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ConflictKind {
     /// Both sides edited the same tracked file (textual or binary).
     Content,
@@ -33,16 +35,28 @@ pub enum ConflictKind {
         /// When true, the deletion is on the current branch (HEAD); the incoming side modified the file.
         deleted_in_current: bool,
     },
+    /// Both sides renamed the same base file, to different paths.
+    ///
+    /// Reported once for each of the three paths involved; [`Conflict::path`] says which one.
+    RenameRename {
+        /// Path of the file in the merge base (left at stage 1).
+        base_path: String,
+        /// Name the current branch gave it (stage 2).
+        ours_path: String,
+        /// Name the incoming side gave it (stage 3).
+        theirs_path: String,
+    },
 }
 
 impl ConflictKind {
     /// Stable snake_case name for JSON and scripting.
     #[must_use]
-    pub fn as_str(self) -> &'static str {
+    pub fn as_str(&self) -> &'static str {
         match self {
             Self::Content => "content",
             Self::AddAdd => "add_add",
             Self::ModifyDelete { .. } => "modify_delete",
+            Self::RenameRename { .. } => "rename_rename",
         }
     }
 }
@@ -94,13 +108,33 @@ pub fn conflicts_from_index(index: &Index) -> Vec<Conflict> {
 }
 
 /// Collect conflicted paths and kinds from a three-way tree merge result.
+///
+/// Paths of a [`TreeMergeOutput::rename_conflicts`] entry are reported as
+/// [`ConflictKind::RenameRename`]; every other path is classified by its unmerged stages.
 #[must_use]
 pub fn conflicts_from_tree_merge(merged: &TreeMergeOutput) -> Vec<Conflict> {
+    let mut rename_kinds: HashMap<&[u8], ConflictKind> = HashMap::new();
+    for rr in &merged.rename_conflicts {
+        let kind = ConflictKind::RenameRename {
+            base_path: String::from_utf8_lossy(&rr.base_path).into_owned(),
+            ours_path: String::from_utf8_lossy(&rr.ours_path).into_owned(),
+            theirs_path: String::from_utf8_lossy(&rr.theirs_path).into_owned(),
+        };
+        for path in [&rr.base_path, &rr.ours_path, &rr.theirs_path] {
+            rename_kinds.insert(path.as_slice(), kind.clone());
+        }
+    }
     let paths = tree_merge_conflict_path_strings(merged);
     paths
         .into_iter()
         .map(|path| {
             let path_bytes = path.as_bytes();
+            if let Some(kind) = rename_kinds.get(path_bytes) {
+                return Conflict {
+                    kind: kind.clone(),
+                    path,
+                };
+            }
             let stage1 = merged.index.get(path_bytes, 1).is_some();
             let stage2 = merged.index.get(path_bytes, 2).is_some();
             let stage3 = merged.index.get(path_bytes, 3).is_some();
@@ -233,6 +267,60 @@ mod tests {
             .as_str(),
             "modify_delete"
         );
+        assert_eq!(
+            ConflictKind::RenameRename {
+                base_path: "a".into(),
+                ours_path: "b".into(),
+                theirs_path: "c".into(),
+            }
+            .as_str(),
+            "rename_rename"
+        );
+    }
+
+    #[test]
+    fn conflicts_from_tree_merge_reports_rename_rename_on_all_three_paths() {
+        let mut index = Index::new();
+        index.add_or_replace(index_entry("a", 1));
+        index.add_or_replace(index_entry("b", 2));
+        index.add_or_replace(index_entry("c", 3));
+        index.add_or_replace(index_entry("d", 1));
+        index.add_or_replace(index_entry("d", 2));
+        let merged = TreeMergeOutput {
+            index,
+            conflict_content: BTreeMap::new(),
+            result_tree: crate::diff::zero_oid(),
+            touched_paths: HashSet::new(),
+            rename_conflicts: vec![crate::merge_trees::RenameRenameConflict {
+                base_path: b"a".to_vec(),
+                ours_path: b"b".to_vec(),
+                theirs_path: b"c".to_vec(),
+            }],
+        };
+        let kind = ConflictKind::RenameRename {
+            base_path: "a".into(),
+            ours_path: "b".into(),
+            theirs_path: "c".into(),
+        };
+        let conflicts = conflicts_from_tree_merge(&merged);
+        let got: Vec<(&str, &ConflictKind)> = conflicts
+            .iter()
+            .map(|c| (c.path.as_str(), &c.kind))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                ("a", &kind),
+                ("b", &kind),
+                ("c", &kind),
+                (
+                    "d",
+                    &ConflictKind::ModifyDelete {
+                        deleted_in_current: false
+                    }
+                ),
+            ]
+        );
     }
 
     #[test]
@@ -247,6 +335,7 @@ mod tests {
             conflict_content,
             result_tree: crate::diff::zero_oid(),
             touched_paths: HashSet::new(),
+            rename_conflicts: Vec::new(),
         };
         let conflicts = conflicts_from_tree_merge(&merged);
         assert_eq!(conflicts.len(), 2);
