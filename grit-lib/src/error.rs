@@ -1219,7 +1219,9 @@ pub enum Error {
     #[error("HEAD is detached")]
     DetachedHead,
 
-    /// [`replay_commit`](crate::porcelain::replay::replay_commit) requires a branch with at least one commit.
+    /// `HEAD` is on a branch with no commits yet, but the operation needs a commit
+    /// ([`Repository::head_commit`](crate::repo::Repository::head_commit),
+    /// [`replay_commit`](crate::porcelain::replay::replay_commit)).
     #[error("no commits yet on this branch")]
     UnbornHead,
 

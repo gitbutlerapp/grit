@@ -24,7 +24,6 @@ use crate::porcelain::hunk_select::{
 };
 use crate::porcelain::index_from_tree::index_from_tree;
 use crate::repo::Repository;
-use crate::state::resolve_head;
 
 /// Options for [`fixup`].
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -61,7 +60,7 @@ pub fn fixup(
         return Err(HistoryError::BareRepository);
     }
 
-    let head_oid = head_commit_oid(repo)?;
+    let head_oid = repo.head_commit()?;
     let head_tree = commit_tree(repo, head_oid)?;
     let index_tree = if let Some(selection) = &opts.selection {
         index_tree_for_fixup_selection(repo, head_tree, selection, &opts.pathspecs)?
@@ -229,7 +228,7 @@ fn capture_hunk_fixup_apply_snapshot(
     let index_bytes = fs::read(repo.index_path()).map_err(|e| HistoryError::WorktreeApply {
         message: e.to_string(),
     })?;
-    let pre_head_tree = commit_tree(repo, head_commit_oid(repo)?)?;
+    let pre_head_tree = commit_tree(repo, repo.head_commit()?)?;
     let index = repo.load_index().map_err(library_err)?;
     let mut path_states = Vec::with_capacity(paths.len());
     for path in paths {
@@ -296,7 +295,7 @@ fn restore_after_hunk_fixup_apply(
     repo: &Repository,
     snapshot: &HunkFixupApplySnapshot,
 ) -> Result<(), HistoryError> {
-    let post_head_tree = commit_tree(repo, head_commit_oid(repo)?)?;
+    let post_head_tree = commit_tree(repo, repo.head_commit()?)?;
     let mut index = repo.load_index().map_err(library_err)?;
     let mut index_changed = false;
     let worktree = repo.work_tree();
@@ -468,13 +467,6 @@ fn library_err(err: crate::error::Error) -> HistoryError {
     }
 }
 
-fn head_commit_oid(repo: &Repository) -> Result<ObjectId, HistoryError> {
-    let head = resolve_head(repo.git_dir()).map_err(library_err)?;
-    head.oid().copied().ok_or_else(|| HistoryError::Planning {
-        message: "HEAD does not point at a commit".into(),
-    })
-}
-
 fn load_commit(repo: &Repository, oid: ObjectId) -> Result<CommitData, HistoryError> {
     repo.odb().read_commit(&oid).map_err(library_err)
 }
@@ -535,7 +527,7 @@ pub fn staged_fixup_paths(repo: &Repository) -> Result<Vec<String>, HistoryError
     if repo.is_bare() {
         return Err(HistoryError::BareRepository);
     }
-    let head_oid = head_commit_oid(repo)?;
+    let head_oid = repo.head_commit()?;
     let head_tree = commit_tree(repo, head_oid)?;
     let index = repo.load_index().map_err(library_err)?;
     let staged =
@@ -646,7 +638,7 @@ mod hunk_selection_restore_tests {
         };
         let pre_index = fs::read(wt.join(".git/index")).expect("index");
         let pre_worktree = fs::read(wt.join("f.txt")).expect("worktree");
-        let head_before = head_commit_oid(&grit).expect("head");
+        let head_before = grit.head_commit().expect("head");
         let opts = FixupOptions {
             message: None,
             empty: EmptyPolicy::Drop,
@@ -685,7 +677,7 @@ mod hunk_selection_restore_tests {
         crate::repo::set_test_inject_index_write_fail(false);
         assert!(matches!(err, HistoryError::WorktreeApply { .. }));
         assert_ne!(
-            head_commit_oid(&grit).expect("head after"),
+            grit.head_commit().expect("head after"),
             head_before,
             "HEAD should move during apply before restore failed"
         );

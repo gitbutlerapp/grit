@@ -358,7 +358,7 @@ fn plan_rewrite_with_order_impl(
     };
 
     if matches!(opts.scope, RefScope::Head) && seed.is_none() {
-        let head_oid = head_oid(repo)?;
+        let head_oid = repo.head_commit()?;
         for &edited in edits.keys() {
             if !is_ancestor(repo, edited, head_oid).map_err(library_err)? {
                 return Err(HistoryError::NotInHistory { commit: edited });
@@ -689,7 +689,7 @@ pub fn plan_replay_linear_segment(
     let segment_set: HashSet<ObjectId> = commits_to_replay.iter().copied().collect();
 
     if matches!(opts.scope, RefScope::Head) {
-        let head_oid = head_oid(repo)?;
+        let head_oid = repo.head_commit()?;
         if !is_ancestor(repo, oldest, head_oid).map_err(library_err)? {
             return Err(HistoryError::NotInHistory { commit: oldest });
         }
@@ -763,7 +763,7 @@ pub fn plan_replay_linear_segment(
     let ref_updates =
         plan_ref_updates_reordered(&scoped_refs, &mapping, segment_tip_old, segment_tip_new);
     let mut head_mapping = mapping.clone();
-    if let Ok(head_oid) = head_oid(repo) {
+    if let Ok(head_oid) = repo.head_commit() {
         if head_oid == segment_tip_old {
             head_mapping.insert(segment_tip_old, segment_tip_new);
         }
@@ -924,13 +924,6 @@ fn oldest_edited_commit(repo: &Repository, edits: &HistoryEdits) -> Result<Objec
         .copied()
         .unwrap_or_else(|| ObjectId::null(repo.odb().hash_algo()));
     Err(HistoryError::NotInHistory { commit: fallback })
-}
-
-fn head_oid(repo: &Repository) -> Result<ObjectId, HistoryError> {
-    let head = resolve_head(repo.git_dir()).map_err(library_err)?;
-    head.oid().copied().ok_or(HistoryError::NotInHistory {
-        commit: ObjectId::null(repo.odb().hash_algo()),
-    })
 }
 
 pub(crate) fn collect_scoped_refs(
@@ -1707,7 +1700,7 @@ pub fn plan_fold_range_at_head(
         });
     }
     let change_ids = ChangeIdWriteContext::from_repo(repo)?;
-    let head = head_oid(repo)?;
+    let head = repo.head_commit()?;
     if tip != head {
         return Err(HistoryError::Planning {
             message: "fold fast path requires the range tip to be HEAD".into(),

@@ -152,7 +152,7 @@ pub fn absorb(repo: &Repository, opts: &AbsorbOptions) -> Result<AbsorbPlan, His
         return Err(HistoryError::BareRepository);
     }
 
-    let head = head_commit_oid(repo)?;
+    let head = repo.head_commit()?;
     let head_tree = commit_tree(repo, head)?;
     let index = repo.load_index().map_err(library_err)?;
     let staged_entries =
@@ -1227,15 +1227,6 @@ fn current_branch_short(repo: &Repository) -> Result<Option<String>, HistoryErro
 fn library_err(err: crate::error::Error) -> HistoryError {
     HistoryError::Planning {
         message: err.to_string(),
-    }
-}
-
-fn head_commit_oid(repo: &Repository) -> Result<ObjectId, HistoryError> {
-    match resolve_head(repo.git_dir()).map_err(library_err)? {
-        HeadState::Branch { oid: Some(oid), .. } | HeadState::Detached { oid } => Ok(oid),
-        HeadState::Branch { oid: None, .. } | HeadState::Invalid => Err(HistoryError::Planning {
-            message: "HEAD does not point at a commit".into(),
-        }),
     }
 }
 

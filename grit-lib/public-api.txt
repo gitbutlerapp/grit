@@ -16141,6 +16141,8 @@ impl grit_lib::repo::Repository
 pub fn grit_lib::repo::Repository::enforce_safe_directory(&self) -> grit_lib::error::Result<()>
 pub fn grit_lib::repo::Repository::verify_safe_for_clone_source(&self) -> grit_lib::error::Result<()>
 impl grit_lib::repo::Repository
+pub fn grit_lib::repo::Repository::head_commit(&self) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
+impl grit_lib::repo::Repository
 pub fn grit_lib::repo::Repository::ignore_check(&self, &[alloc::string::String], &grit_lib::index::Index) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::worktree::ignore::IgnoreCheck>>
 impl grit_lib::repo::Repository
 pub fn grit_lib::repo::Repository::read_object_for_display(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::revwalk::object_inspect::ObjectContents>
@@ -21226,6 +21228,8 @@ pub fn grit_lib::repo::Repository::write_largest_pack_bitmap(&self, &grit_lib::o
 impl grit_lib::repo::Repository
 pub fn grit_lib::repo::Repository::enforce_safe_directory(&self) -> grit_lib::error::Result<()>
 pub fn grit_lib::repo::Repository::verify_safe_for_clone_source(&self) -> grit_lib::error::Result<()>
+impl grit_lib::repo::Repository
+pub fn grit_lib::repo::Repository::head_commit(&self) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 impl grit_lib::repo::Repository
 pub fn grit_lib::repo::Repository::ignore_check(&self, &[alloc::string::String], &grit_lib::index::Index) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::worktree::ignore::IgnoreCheck>>
 impl grit_lib::repo::Repository

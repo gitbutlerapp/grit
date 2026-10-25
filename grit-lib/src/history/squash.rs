@@ -77,7 +77,7 @@ pub fn squash(
     let message = choose_squash_message(repo, &resolved, opts)?;
     if matches!(opts.rewrite.scope, RefScope::Head)
         && !matches!(opts.message, SquashMessage::Combine)
-        && resolved.tip == squash_head_oid(repo)?
+        && resolved.tip == repo.head_commit()?
     {
         return plan_fold_range_at_head(
             repo,
@@ -106,13 +106,6 @@ pub fn squash(
         }
     }
     plan_rewrite(repo, &edits, &opts.rewrite)
-}
-
-fn squash_head_oid(repo: &Repository) -> Result<ObjectId, HistoryError> {
-    let head = resolve_head(repo.git_dir()).map_err(planning_err)?;
-    head.oid().copied().ok_or_else(|| HistoryError::Planning {
-        message: "HEAD does not resolve to a commit".into(),
-    })
 }
 
 fn load_commit(repo: &Repository, oid: ObjectId) -> Result<CommitData, HistoryError> {

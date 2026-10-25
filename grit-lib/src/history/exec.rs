@@ -237,7 +237,7 @@ fn capture_exec_prestate(repo: &Repository) -> Result<ExecPrestate, HistoryError
     let head_state = resolve_head(repo.git_dir()).map_err(|e| HistoryError::WorktreeApply {
         message: e.to_string(),
     })?;
-    let head_commit = resolve_head_commit_oid(repo)?;
+    let head_commit = repo.head_commit()?;
     let head_tree = commit_tree_for_apply(repo, head_commit)?;
     let index_bytes = fs::read(repo.index_path()).map_err(|e| HistoryError::WorktreeApply {
         message: e.to_string(),
@@ -286,17 +286,6 @@ fn restore_exec_prestate(
         message: e.to_string(),
     })?;
     Ok(())
-}
-
-fn resolve_head_commit_oid(repo: &Repository) -> Result<ObjectId, HistoryError> {
-    let head = resolve_head(repo.git_dir()).map_err(|e| HistoryError::WorktreeApply {
-        message: e.to_string(),
-    })?;
-    head.oid()
-        .copied()
-        .ok_or_else(|| HistoryError::WorktreeApply {
-            message: "HEAD has no commit".into(),
-        })
 }
 
 #[cfg(test)]

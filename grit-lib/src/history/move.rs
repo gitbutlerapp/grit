@@ -1,23 +1,14 @@
 //! Reorder one commit on the first-parent chain of `HEAD`.
 
-use crate::error::Error;
 use crate::objects::ObjectId;
 use crate::repo::Repository;
-use crate::state::resolve_head;
 
 use super::error::HistoryError;
 use super::plan::plan_replay_linear_segment;
 use super::types::{RewriteOptions, RewritePlan};
 
-fn library_err(err: Error) -> HistoryError {
-    if let Error::History(inner) = err {
-        return inner;
-    }
-    HistoryError::Library(Box::new(err))
-}
-
 fn commit_parents(repo: &Repository, oid: ObjectId) -> Result<Vec<ObjectId>, HistoryError> {
-    Ok(repo.odb().read_commit(&oid).map_err(library_err)?.parents)
+    Ok(repo.odb().read_commit(&oid)?.parents)
 }
 
 /// Where to place a moved commit relative to an anchor on the first-parent chain.
@@ -38,13 +29,16 @@ pub enum Placement {
 ///
 /// Returns [`HistoryError::NotInHistory`], [`HistoryError::MoveTargetNotInHistory`],
 /// [`HistoryError::NoOp`], [`HistoryError::NotLinear`], or errors from replay planning.
+/// An unborn or invalid `HEAD` is [`HistoryError::Library`] wrapping
+/// [`Error::UnbornHead`](crate::error::Error::UnbornHead) or
+/// [`Error::InvalidHead`](crate::error::Error::InvalidHead).
 pub fn move_commit(
     repo: &Repository,
     commit: ObjectId,
     placement: Placement,
     opts: &RewriteOptions,
 ) -> Result<RewritePlan, HistoryError> {
-    let head = head_oid(repo)?;
+    let head = repo.head_commit()?;
     let mut chain = first_parent_chain(repo, head)?;
     if chain.is_empty() {
         return Err(HistoryError::NotInHistory { commit });
@@ -90,13 +84,6 @@ pub fn move_commit(
     let replay_order: Vec<ObjectId> = chain[segment_start..].to_vec();
 
     plan_replay_linear_segment(repo, oldest, &replay_order, opts)
-}
-
-fn head_oid(repo: &Repository) -> Result<ObjectId, HistoryError> {
-    let head = resolve_head(repo.git_dir()).map_err(library_err)?;
-    head.oid().copied().ok_or(HistoryError::NotInHistory {
-        commit: ObjectId::null(repo.odb().hash_algo()),
-    })
 }
 
 fn first_parent_chain(repo: &Repository, tip: ObjectId) -> Result<Vec<ObjectId>, HistoryError> {

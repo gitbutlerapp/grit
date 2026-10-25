@@ -433,6 +433,27 @@ pub fn resolve_head_for_repository(repo: &crate::repo::Repository) -> Result<Hea
     }
 }
 
+impl Repository {
+    /// The commit `HEAD` points at, whether through a branch or detached.
+    ///
+    /// `HEAD` is read with [`resolve_head_for_repository`], so injected ref stores are honoured.
+    /// Use that function instead when the caller also needs the branch name or must treat an
+    /// unborn branch as a normal state.
+    ///
+    /// # Errors
+    ///
+    /// - [`Error::UnbornHead`] when `HEAD` names a branch with no commits yet.
+    /// - [`Error::InvalidHead`] when `HEAD` is missing or names something that is not a ref.
+    /// - Ref store read failures while resolving `HEAD`.
+    pub fn head_commit(&self) -> Result<ObjectId> {
+        match resolve_head_for_repository(self)? {
+            HeadState::Branch { oid: Some(oid), .. } | HeadState::Detached { oid } => Ok(oid),
+            HeadState::Branch { oid: None, .. } => Err(Error::UnbornHead),
+            HeadState::Invalid => Err(Error::InvalidHead),
+        }
+    }
+}
+
 /// [`HeadState`] for `HEAD` pointing symbolically at `refname`.
 ///
 /// A missing `refs/heads/*` target is an unborn branch; any other unresolvable or malformed

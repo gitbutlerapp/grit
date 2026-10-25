@@ -16,7 +16,6 @@ use grit_lib::refs::check_ref_format::validate_tag_short_name;
 use grit_lib::refs::listing::{RefQuery, RefSort, SortKey};
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::rev_parse::resolve_revision;
-use grit_lib::state::{resolve_head_for_repository, HeadState};
 use grit_lib::tree_sha256::{
     MissingSubmodule, MissingSubmoduleReason, SignatureVerdict, TagVerifyOptions,
     TreeSha256Options, TreeSha256Verdict,
@@ -559,13 +558,8 @@ fn list(
     let mut contains_ids = Vec::new();
     if let Some(rev) = contains {
         let oid = if rev == "HEAD" {
-            match resolve_head_for_repository(repo)
+            repo.head_commit()
                 .context("could not resolve HEAD for --contains")?
-            {
-                HeadState::Branch { oid: Some(oid), .. } | HeadState::Detached { oid } => oid,
-                HeadState::Branch { .. } => bail!("HEAD has no commit for --contains"),
-                HeadState::Invalid => bail!("HEAD is in an unknown state"),
-            }
         } else {
             resolve_revision(repo, &rev).context("could not resolve --contains")?
         };
@@ -658,11 +652,8 @@ fn create(repo: &Repository, name: &str, opts: &TagRunOptions) -> Result<TagOutc
     let target_oid = if let Some(rev) = rev {
         resolve_revision(repo, &rev).context("could not resolve tag target")?
     } else {
-        match resolve_head_for_repository(repo)? {
-            HeadState::Branch { oid: Some(oid), .. } | HeadState::Detached { oid } => oid,
-            HeadState::Branch { .. } => bail!("no commits yet to tag"),
-            HeadState::Invalid => bail!("HEAD is in an unknown state"),
-        }
+        repo.head_commit()
+            .context("could not resolve HEAD to tag")?
     };
 
     let message = read_message(opts.message.clone(), opts.message_file.clone())?;

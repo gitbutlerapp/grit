@@ -52,7 +52,7 @@ fn complete_applied_rewrite(
     index_snapshot: Option<&[u8]>,
     worktree_snapshot: Option<&HashMap<String, WorktreePathSnapshot>>,
 ) -> Result<AppliedRewrite, HistoryError> {
-    let head = resolve_head_commit(repo)?;
+    let head = repo.head_commit()?;
     if let Err(record_err) = maybe_record_history_last(repo, opts, plan) {
         if opts.record_operation.is_some() {
             if !plan.ref_updates.is_empty() {
@@ -279,7 +279,7 @@ fn apply_absorb_refs_and_worktree(
     };
 
     let old_head_commit = if needs_worktree {
-        Some(resolve_head_commit(repo)?)
+        Some(repo.head_commit()?)
     } else {
         None
     };
@@ -355,7 +355,7 @@ fn apply_absorb_worktree_after_refs(
     if staged_paths.is_empty() {
         return Ok(());
     }
-    let new_head = resolve_head_commit(repo)?;
+    let new_head = repo.head_commit()?;
     let new_head_tree = commit_tree_for_apply(repo, new_head)?;
     let old_head_tree = commit_tree_for_apply(repo, old_head_commit)?;
     let mut index = repo.load_index().map_err(|e| HistoryError::WorktreeApply {
@@ -743,7 +743,7 @@ fn apply_fixup_refs_and_worktree(
     };
 
     let old_head_commit = if needs_worktree {
-        Some(resolve_head_commit(repo)?)
+        Some(repo.head_commit()?)
     } else {
         None
     };
@@ -826,7 +826,7 @@ fn apply_fixup_worktree_after_refs(
             message: e.to_string(),
         })?;
     if !staged_paths.is_empty() {
-        let head = resolve_head_commit(repo)?;
+        let head = repo.head_commit()?;
         clear_fixup_staging_after_apply(repo, head, staged_paths)?;
         if let Some(pre) = prestate {
             pre.restore_worktrees_not_matching_staged(repo)?;
@@ -1263,15 +1263,6 @@ fn map_ref_store_error(err: RefStoreError, label: &str) -> HistoryError {
             message: format!("{label}: {other}"),
         },
     }
-}
-
-fn resolve_head_commit(repo: &Repository) -> Result<ObjectId, HistoryError> {
-    let head = resolve_head(repo.git_dir()).map_err(|e| HistoryError::RefApply {
-        message: e.to_string(),
-    })?;
-    head.oid().copied().ok_or_else(|| HistoryError::RefApply {
-        message: "HEAD has no commit".into(),
-    })
 }
 
 fn apply_failure_after_ref_update(

@@ -35,7 +35,7 @@ Every backend (files, reftable, memory, or your own wrapper around one) refuses 
 
 ## Resolving HEAD and symbolic refs
 
-`resolve_head` reads `HEAD` from a git directory and returns a `HeadState`; `resolve_head_for_repository` reads it through the repository's store (an empty injected store gives `HeadState::Invalid`). `resolve_ref` (or `RefStore::resolve` on the repository store) follows symbolic refs with cycle detection. `read_ref_file` returns a `Ref` without resolving the full chain.
+`resolve_head` reads `HEAD` from a git directory and returns a `HeadState`; `resolve_head_for_repository` reads it through the repository's store (an empty injected store gives `HeadState::Invalid`). When you only need the commit `HEAD` is on, call [`Repository::head_commit`](rustdoc:grit_lib::repo::Repository::head_commit): it reads through the same store and fails with `Error::UnbornHead` on a branch with no commits yet, or `Error::InvalidHead` when `HEAD` names nothing. `resolve_ref` (or `RefStore::resolve` on the repository store) follows symbolic refs with cycle detection. `read_ref_file` returns a `Ref` without resolving the full chain.
 
 On every backend, a missing ref fails with [`RefStoreError::NotFound`](rustdoc:grit_lib::refs::store::RefStoreError::NotFound) inside `Error::RefStore`, naming the ref that is absent. For a dangling symbolic ref (an unborn branch behind `HEAD`, say) that is the target, not the name you asked for. `delete_ref` on a missing ref fails the same way. Match on the variant rather than the message:
 
