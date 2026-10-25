@@ -6483,13 +6483,8 @@ pub fn hash_worktree_file(
     index_entry: Option<&IndexEntry>,
     filter_process: Option<&crate::filter_process::FilterProcessState>,
 ) -> Result<ObjectId> {
-    if meta.is_file()
-        && meta.len() >= STREAMED_HASH_MIN_SIZE
-        && crate::crlf::git_conversion_is_identity(conv, file_attrs)
-    {
-        if let Some(oid) = hash_verbatim_file_in_chunks(odb, path, meta.len())? {
-            return Ok(oid);
-        }
+    if meta.is_file() && crate::crlf::git_conversion_is_identity(conv, file_attrs) {
+        return hash_verbatim_regular_file(odb, path);
     }
     let data = worktree_blob_bytes(
         odb,
@@ -6504,17 +6499,26 @@ pub fn hash_worktree_file(
     odb.hash(ObjectKind::Blob, &data)
 }
 
-/// Work-tree files at least this large are hashed in chunks when their content goes into Git
-/// unchanged, instead of being read whole.
+/// Work-tree files at least this large are hashed in chunks instead of being read whole.
 const STREAMED_HASH_MIN_SIZE: u64 = 1024 * 1024;
 
-/// Blob id of the regular file at `path`, hashed as it is in fixed-size chunks.
+/// Blob id of the regular file at `path`, whose content goes into Git unchanged
+/// ([`crate::crlf::git_conversion_is_identity`]).
 ///
-/// `size` is the length the caller saw; `None` means the file no longer has that length (it
-/// changed underneath), so the caller should fall back to reading it whole.
-fn hash_verbatim_file_in_chunks(odb: &Odb, path: &Path, size: u64) -> Result<Option<ObjectId>> {
+/// The file is opened once and sized from the open handle: smaller files are read whole,
+/// files of at least [`STREAMED_HASH_MIN_SIZE`] are hashed in fixed-size chunks. When the file
+/// changes length while it is hashed, it is hashed again as read whole.
+fn hash_verbatim_regular_file(odb: &Odb, path: &Path) -> Result<ObjectId> {
     use std::io::Read;
     let mut file = fs::File::open(path)?;
+    let size = file.metadata()?.len();
+    #[cfg(test)]
+    odb.hot_path_metrics().record_blob_content_read();
+    if size < STREAMED_HASH_MIN_SIZE {
+        let mut data = Vec::with_capacity(usize::try_from(size).unwrap_or(0));
+        file.read_to_end(&mut data)?;
+        return odb.hash(ObjectKind::Blob, &data);
+    }
     let mut hasher = crate::hash::ObjectPayloadHasher::new(odb.hash_algo(), ObjectKind::Blob, size);
     let mut buf = vec![0u8; 256 * 1024];
     let mut total = 0u64;
@@ -6527,14 +6531,14 @@ fn hash_verbatim_file_in_chunks(odb: &Odb, path: &Path, size: u64) -> Result<Opt
         };
         total += n as u64;
         if total > size {
-            return Ok(None);
+            break;
         }
         hasher.update(&buf[..n]);
     }
     if total != size {
-        return Ok(None);
+        return odb.hash(ObjectKind::Blob, &fs::read(path)?);
     }
-    hasher.finish().map(Some)
+    hasher.finish()
 }
 
 /// Like [`hash_worktree_file`], for callers that already know the worktree file type from a
@@ -6551,6 +6555,9 @@ pub(crate) fn hash_worktree_file_with_mode(
     index_entry: Option<&IndexEntry>,
     filter_process: Option<&crate::filter_process::FilterProcessState>,
 ) -> Result<ObjectId> {
+    if worktree_mode != MODE_SYMLINK && crate::crlf::git_conversion_is_identity(conv, file_attrs) {
+        return hash_verbatim_regular_file(odb, path);
+    }
     let data = if worktree_mode == MODE_SYMLINK {
         read_worktree_bytes_for_mode(path, worktree_mode)?
     } else {
