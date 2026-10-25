@@ -1401,6 +1401,9 @@ impl Repository {
 
 /// Standalone object fsck helpers.
 pub mod fsck {
+    pub use crate::fsck_msg_policy::{
+        FsckMsgLevel, ObjectFsckChecker, ObjectFsckPolicy, SkipListError,
+    };
     pub use crate::fsck_standalone::*;
 }
 

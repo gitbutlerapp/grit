@@ -7,6 +7,7 @@ use crate::check_ref_format::{check_refname_format, RefNameOptions};
 use crate::git_date::tm::date_overflows;
 use crate::objects::{HashAlgo, ObjectId, ObjectKind};
 use crate::path_validate::{audit_tree_entry_name, ProtectOptions};
+use std::ops::ControlFlow;
 
 /// Repository hash width for object-id fields in commit, tag, and tree headers.
 #[derive(Debug, Clone, Copy)]
@@ -57,17 +58,93 @@ impl FsckError {
 
 /// Validate raw object bytes before hashing (same rules as `git hash-object` fsck).
 ///
+/// Every problem is fatal: the first one found is returned. Use
+/// [`fsck_object_with`] to accept some problems and keep checking.
+///
 /// `options.hash_algo` selects the required object-id hex width on header and tree lines.
+///
+/// # Errors
+///
+/// The first [`FsckError`] found in the object.
 pub fn fsck_object(
     kind: ObjectKind,
     data: &[u8],
     options: FsckObjectOptions,
 ) -> Result<(), FsckError> {
+    fsck_object_with(kind, data, options, &mut |_| ControlFlow::Break(()))
+}
+
+/// Validate raw object bytes, letting `report` decide which problems are fatal.
+///
+/// Each problem found is passed to `report`. [`ControlFlow::Break`] makes it
+/// fatal: checking stops and the problem is returned. [`ControlFlow::Continue`]
+/// accepts it and checking goes on with the rest of the object, so a problem
+/// the caller tolerates cannot hide a later one it does not. Problems that
+/// leave the rest of the object unparseable (a missing `tree` line, a truncated
+/// tree, an unterminated header, ...) end the check even when accepted.
+///
+/// # Parameters
+///
+/// - `kind`: the object type; blobs have no structure and always pass.
+/// - `data`: the object body, without the loose-object header.
+/// - `options`: the repository hash width for object-id fields.
+/// - `report`: called once per problem, in the order found.
+///
+/// # Errors
+///
+/// The first problem for which `report` returned [`ControlFlow::Break`].
+pub fn fsck_object_with(
+    kind: ObjectKind,
+    data: &[u8],
+    options: FsckObjectOptions,
+    report: &mut dyn FnMut(&FsckError) -> ControlFlow<()>,
+) -> Result<(), FsckError> {
+    let mut r = Reporter(report);
     match kind {
         ObjectKind::Blob => Ok(()),
-        ObjectKind::Commit => fsck_commit(data, options),
-        ObjectKind::Tag => fsck_tag(data, options),
-        ObjectKind::Tree => fsck_tree(data, options),
+        ObjectKind::Commit => fsck_commit(data, options, &mut r),
+        ObjectKind::Tag => fsck_tag(data, options, &mut r),
+        ObjectKind::Tree => fsck_tree(data, options, &mut r),
+    }
+}
+
+/// Hands each problem to the caller's callback.
+struct Reporter<'a>(&'a mut dyn FnMut(&FsckError) -> ControlFlow<()>);
+
+impl Reporter<'_> {
+    /// `Err(err)` when the caller treats `err` as fatal.
+    fn issue(&mut self, err: FsckError) -> Result<(), FsckError> {
+        match (self.0)(&err) {
+            ControlFlow::Break(()) => Err(err),
+            ControlFlow::Continue(()) => Ok(()),
+        }
+    }
+}
+
+/// Offset just past the newline that ends the line containing `pos`.
+fn next_line_start(data: &[u8], pos: usize) -> usize {
+    let pos = pos.min(data.len());
+    data[pos..]
+        .iter()
+        .position(|&b| b == b'\n')
+        .map_or(data.len(), |rel| pos + rel + 1)
+}
+
+/// Check the object id that starts at `i` and ends its line; returns the next
+/// line's offset.
+fn oid_line(
+    data: &[u8],
+    i: usize,
+    bad_id: &'static str,
+    expected_hex_len: usize,
+    r: &mut Reporter<'_>,
+) -> Result<usize, FsckError> {
+    match parse_oid_line(&data[i.min(data.len())..], bad_id, expected_hex_len) {
+        Ok(n) => Ok(i + n),
+        Err(e) => {
+            r.issue(e)?;
+            Ok(next_line_start(data, i))
+        }
     }
 }
 
@@ -134,7 +211,20 @@ fn oid_line_label(bad_id: &'static str) -> &'static str {
     }
 }
 
-fn fsck_ident(data: &[u8], start: usize, buffer_end: usize) -> Result<usize, FsckError> {
+/// Check the identity that starts at `start`; returns the next line's offset.
+fn fsck_ident(
+    data: &[u8],
+    start: usize,
+    buffer_end: usize,
+    r: &mut Reporter<'_>,
+) -> Result<usize, FsckError> {
+    if let Err(e) = check_ident(data, start, buffer_end) {
+        r.issue(e)?;
+    }
+    Ok(next_line_start(&data[..buffer_end], start))
+}
+
+fn check_ident(data: &[u8], start: usize, buffer_end: usize) -> Result<(), FsckError> {
     let mut p = start;
     if p >= buffer_end {
         return Err(FsckError::new(
@@ -274,159 +364,172 @@ fn fsck_ident(data: &[u8], start: usize, buffer_end: usize) -> Result<usize, Fsc
         ));
     }
 
-    Ok(line_end + 1)
+    Ok(())
 }
 
-fn fsck_commit(data: &[u8], options: FsckObjectOptions) -> Result<(), FsckError> {
-    verify_headers(data, "nulInHeader")?;
+fn fsck_commit(
+    data: &[u8],
+    options: FsckObjectOptions,
+    r: &mut Reporter<'_>,
+) -> Result<(), FsckError> {
+    if let Err(e) = verify_headers(data, "nulInHeader") {
+        return r.issue(e);
+    }
 
     let oid_hex_len = options.hash_algo.hex_len();
     let buffer_end = data.len();
     let mut i = 0usize;
 
     if i >= buffer_end || !data[i..].starts_with(b"tree ") {
-        return Err(FsckError::new(
+        return r.issue(FsckError::new(
             "missingTree",
             "commit header must start with a tree line",
         ));
     }
-    i += 5;
-    let n = parse_oid_line(&data[i..], "badTreeSha1", oid_hex_len)?;
-    i += n;
+    i = oid_line(data, i + 5, "badTreeSha1", oid_hex_len, r)?;
 
     while i < buffer_end && data[i..].starts_with(b"parent ") {
-        i += 7;
-        let n = parse_oid_line(&data[i..], "badParentSha1", oid_hex_len)?;
-        i += n;
+        i = oid_line(data, i + 7, "badParentSha1", oid_hex_len, r)?;
     }
 
     let mut author_count = 0usize;
     while i < buffer_end && data[i..].starts_with(b"author ") {
         author_count += 1;
-        i += 7;
-        i = fsck_ident(data, i, buffer_end)?;
+        i = fsck_ident(data, i + 7, buffer_end, r)?;
     }
 
     if author_count < 1 {
-        return Err(FsckError::new(
+        r.issue(FsckError::new(
             "missingAuthor",
             "commit header must include an author line",
-        ));
-    }
-    if author_count > 1 {
-        return Err(FsckError::new(
+        ))?;
+    } else if author_count > 1 {
+        r.issue(FsckError::new(
             "multipleAuthors",
             "commit header has more than one author line",
-        ));
+        ))?;
     }
 
     if i >= buffer_end || !data[i..].starts_with(b"committer ") {
-        return Err(FsckError::new(
+        return r.issue(FsckError::new(
             "missingCommitter",
             "commit header must include a committer line",
         ));
     }
-    i += 10;
-    fsck_ident(data, i, buffer_end)?;
+    fsck_ident(data, i + 10, buffer_end, r)?;
 
     if data.contains(&0) {
-        return Err(FsckError::new(
+        r.issue(FsckError::new(
             "nulInCommit",
             "commit body contains a NUL byte",
-        ));
+        ))?;
     }
 
     Ok(())
 }
 
-/// Byte offset immediately after the newline that terminates the `tagger` line.
-fn parse_tag_headers_through_tagger(
+fn fsck_tag(
     data: &[u8],
     options: FsckObjectOptions,
-) -> Result<usize, FsckError> {
-    verify_headers(data, "nulInHeader")?;
+    r: &mut Reporter<'_>,
+) -> Result<(), FsckError> {
+    if let Err(e) = verify_headers(data, "nulInHeader") {
+        return r.issue(e);
+    }
 
     let oid_hex_len = options.hash_algo.hex_len();
     let buffer_end = data.len();
     let mut i = 0usize;
 
     if i >= buffer_end || !data[i..].starts_with(b"object ") {
-        return Err(FsckError::new(
+        return r.issue(FsckError::new(
             "missingObject",
             "annotated tag must start with an object line",
         ));
     }
-    i += 7;
-    let n = parse_oid_line(&data[i..], "badObjectSha1", oid_hex_len)?;
-    i += n;
+    i = oid_line(data, i + 7, "badObjectSha1", oid_hex_len, r)?;
 
     if i >= buffer_end || !data[i..].starts_with(b"type ") {
-        return Err(FsckError::new(
+        return r.issue(FsckError::new(
             "missingTypeEntry",
             "annotated tag header must include a type line",
         ));
     }
     i += 5;
     let type_start = i;
-    let eol = data[type_start..buffer_end]
+    let Some(eol) = data[type_start..buffer_end]
         .iter()
         .position(|&b| b == b'\n')
         .map(|rel| type_start + rel)
-        .ok_or_else(|| FsckError::new("missingType", "type line on annotated tag is incomplete"))?;
+    else {
+        return r.issue(FsckError::new(
+            "missingType",
+            "type line on annotated tag is incomplete",
+        ));
+    };
 
     if ObjectKind::from_tag_type_field(&data[type_start..eol]).is_none() {
-        return Err(FsckError::new(
+        r.issue(FsckError::new(
             "badType",
             "annotated tag has unknown type name",
-        ));
+        ))?;
     }
     i = eol + 1;
 
     if i >= buffer_end || !data[i..].starts_with(b"tag ") {
-        return Err(FsckError::new(
+        return r.issue(FsckError::new(
             "missingTagEntry",
             "annotated tag header must include a tag line",
         ));
     }
     i += 4;
     let tag_start = i;
-    let eol = data[tag_start..buffer_end]
+    let Some(eol) = data[tag_start..buffer_end]
         .iter()
         .position(|&b| b == b'\n')
         .map(|rel| tag_start + rel)
-        .ok_or_else(|| {
-            FsckError::new("missingTag", "tag name line on annotated tag is incomplete")
-        })?;
-
-    let tag_name = std::str::from_utf8(&data[tag_start..eol])
-        .map_err(|_| FsckError::new("badTagName", "annotated tag name is not a valid ref name"))?;
-    let refname = format!("refs/tags/{tag_name}");
-    if check_refname_format(&refname, &RefNameOptions::default()).is_err() {
-        return Err(FsckError::new(
-            "badTagName",
-            format!("annotated tag name is not a valid ref name: {tag_name}"),
+    else {
+        return r.issue(FsckError::new(
+            "missingTag",
+            "tag name line on annotated tag is incomplete",
         ));
+    };
+
+    match std::str::from_utf8(&data[tag_start..eol]) {
+        Err(_) => r.issue(FsckError::new(
+            "badTagName",
+            "annotated tag name is not a valid ref name",
+        ))?,
+        Ok(tag_name) => {
+            let refname = format!("refs/tags/{tag_name}");
+            if check_refname_format(&refname, &RefNameOptions::default()).is_err() {
+                r.issue(FsckError::new(
+                    "badTagName",
+                    format!("annotated tag name is not a valid ref name: {tag_name}"),
+                ))?;
+            }
+        }
     }
     i = eol + 1;
 
     if i >= buffer_end || !data[i..].starts_with(b"tagger ") {
-        return Err(FsckError::new(
+        r.issue(FsckError::new(
             "missingTaggerEntry",
             "annotated tag header must include a tagger line",
-        ));
+        ))?;
+    } else {
+        i = fsck_ident(data, i + 7, buffer_end, r)?;
     }
-    i += 7;
-    fsck_ident(data, i, buffer_end)
-}
 
-fn fsck_tag(data: &[u8], options: FsckObjectOptions) -> Result<(), FsckError> {
-    let mut i = parse_tag_headers_through_tagger(data, options)?;
-    i = skip_tag_gpgsig_headers(data, i)?;
+    i = match skip_tag_gpgsig_headers(data, i) {
+        Ok(next) => next,
+        Err(e) => return r.issue(e),
+    };
     if i < data.len() && data[i] != b'\n' {
-        return Err(FsckError::new(
+        r.issue(FsckError::new(
             "extraHeaderEntry",
             "annotated tag header has unexpected lines after tagger",
-        ));
+        ))?;
     }
     Ok(())
 }
@@ -486,62 +589,55 @@ struct TreeProblemSet {
 }
 
 impl TreeProblemSet {
-    fn first_error(&self) -> Option<FsckError> {
-        if self.null_oid {
-            return Some(FsckError::new("nullSha1", "tree lists the null object id"));
-        }
-        if self.slash_in_name {
-            return Some(FsckError::new(
+    /// Every problem found, in a fixed order.
+    fn errors(&self) -> impl Iterator<Item = FsckError> {
+        [
+            (self.null_oid, "nullSha1", "tree lists the null object id"),
+            (
+                self.slash_in_name,
                 "fullPathname",
                 "tree entry name contains a slash",
-            ));
-        }
-        if self.dot_name {
-            return Some(FsckError::new("hasDot", "tree entry name is a single dot"));
-        }
-        if self.dotdot_name {
-            return Some(FsckError::new(
+            ),
+            (self.dot_name, "hasDot", "tree entry name is a single dot"),
+            (
+                self.dotdot_name,
                 "hasDotdot",
                 "tree entry name is parent directory",
-            ));
-        }
-        if self.dotgit_alias {
-            return Some(FsckError::new(
+            ),
+            (
+                self.dotgit_alias,
                 "hasDotgit",
                 "tree entry name is a .git alias",
-            ));
-        }
-        if self.zero_padded_mode {
-            return Some(FsckError::new(
+            ),
+            (
+                self.zero_padded_mode,
                 "zeroPaddedFilemode",
                 "tree entry mode has leading zeros",
-            ));
-        }
-        if self.disallowed_mode {
-            return Some(FsckError::new(
+            ),
+            (
+                self.disallowed_mode,
                 "badFilemode",
                 "tree entry mode is not allowed",
-            ));
-        }
-        if self.duplicate_names {
-            return Some(FsckError::new(
+            ),
+            (
+                self.duplicate_names,
                 "duplicateEntries",
                 "tree lists the same name more than once",
-            ));
-        }
-        if self.wrong_order {
-            return Some(FsckError::new(
+            ),
+            (
+                self.wrong_order,
                 "treeNotSorted",
                 "tree entries are out of canonical order",
-            ));
-        }
-        if self.oversized_name {
-            return Some(FsckError::new(
+            ),
+            (
+                self.oversized_name,
                 "largePathname",
                 "tree entry name exceeds the length limit",
-            ));
-        }
-        None
+            ),
+        ]
+        .into_iter()
+        .filter(|(found, _, _)| *found)
+        .map(|(_, id, detail)| FsckError::new(id, detail))
     }
 }
 
@@ -728,17 +824,24 @@ fn decode_tree_for_fsck(
     Ok((entries, problems))
 }
 
-fn fsck_tree(data: &[u8], options: FsckObjectOptions) -> Result<(), FsckError> {
+fn fsck_tree(
+    data: &[u8],
+    options: FsckObjectOptions,
+    r: &mut Reporter<'_>,
+) -> Result<(), FsckError> {
     let oid_len = options.hash_algo.len();
     if !tree_walk_consumes_all(data, oid_len) {
-        return Err(FsckError::new(
+        return r.issue(FsckError::new(
             "badTree",
             "tree object bytes are not a valid tree encoding",
         ));
     }
-    let (_entries, problems) = decode_tree_for_fsck(data, oid_len)?;
-    if let Some(err) = problems.first_error() {
-        return Err(err);
+    let problems = match decode_tree_for_fsck(data, oid_len) {
+        Ok((_entries, problems)) => problems,
+        Err(e) => return r.issue(e),
+    };
+    for err in problems.errors() {
+        r.issue(err)?;
     }
     Ok(())
 }

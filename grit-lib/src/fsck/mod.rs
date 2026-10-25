@@ -34,6 +34,7 @@ use std::path::{Path, PathBuf};
 use crate::commit_graph_file::CommitGraphChain;
 use crate::config::ConfigSet;
 use crate::error::{Error, Result};
+use crate::fsck_msg_policy::{default_fsck_level, DefaultFsckLevel};
 use crate::fsck_standalone::{fsck_object, FsckError, FsckObjectOptions};
 use crate::gitmodules::{DotFsckIssue, DotFsckTracker};
 use crate::index::MODE_GITLINK;
@@ -254,34 +255,6 @@ pub fn issue_msg_id(issue: &FsckIssue) -> &'static str {
     }
 }
 
-/// Git default level for object-buffer fsck msg-ids (`Documentation/fsck-msgids.txt` / `fsck.h`).
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum ObjectFsckDefaultLevel {
-    Fatal,
-    Error,
-    Warn,
-    Info,
-    Ignore,
-}
-
-fn object_fsck_default_level(msg_id: &str) -> ObjectFsckDefaultLevel {
-    match msg_id {
-        "nulInHeader" | "unterminatedHeader" => ObjectFsckDefaultLevel::Fatal,
-        "emptyName" | "fullPathname" | "hasDot" | "hasDotdot" | "hasDotgit" | "nullSha1"
-        | "zeroPaddedFilemode" | "nulInCommit" | "largePathname" => ObjectFsckDefaultLevel::Warn,
-        "badFilemode"
-        | "gitmodulesParse"
-        | "gitignoreSymlink"
-        | "gitattributesSymlink"
-        | "mailmapSymlink"
-        | "badTagName"
-        | "missingTaggerEntry" => ObjectFsckDefaultLevel::Info,
-        "extraHeaderEntry" => ObjectFsckDefaultLevel::Ignore,
-        "sha1Collision" => ObjectFsckDefaultLevel::Warn,
-        _ => ObjectFsckDefaultLevel::Error,
-    }
-}
-
 fn severity_from_config(config: &ConfigSet, msg_id: &str) -> Option<FsckSeverity> {
     let key = format!("fsck.{msg_id}");
     match config.get(&key).map(|s| s.to_ascii_lowercase()).as_deref() {
@@ -296,11 +269,11 @@ fn object_buffer_fsck_severity(msg_id: &str, config: &ConfigSet, strict: bool) -
     if let Some(sev) = severity_from_config(config, msg_id) {
         return sev;
     }
-    match object_fsck_default_level(msg_id) {
-        ObjectFsckDefaultLevel::Fatal | ObjectFsckDefaultLevel::Error => FsckSeverity::Error,
-        ObjectFsckDefaultLevel::Warn if strict => FsckSeverity::Error,
-        ObjectFsckDefaultLevel::Warn => FsckSeverity::Warning,
-        ObjectFsckDefaultLevel::Info | ObjectFsckDefaultLevel::Ignore => FsckSeverity::Info,
+    match default_fsck_level(msg_id) {
+        DefaultFsckLevel::Fatal | DefaultFsckLevel::Error => FsckSeverity::Error,
+        DefaultFsckLevel::Warn if strict => FsckSeverity::Error,
+        DefaultFsckLevel::Warn => FsckSeverity::Warning,
+        DefaultFsckLevel::Info | DefaultFsckLevel::Ignore => FsckSeverity::Info,
     }
 }
 
