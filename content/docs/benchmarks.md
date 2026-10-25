@@ -845,7 +845,14 @@ Scenario **`fsck-medium`** (`grit-bench fsck`) runs **`grit fsck --no-dangling`*
 
 **Acceptance bar:** ≤**1.1×** git median wall time (same bar as other maintenance hot paths).
 
-**2026-10-13 status:** After aligning workloads (`--no-dangling` on both sides), the committed baseline is still ~**9.4×** git (~**1840 ms** vs ~**196 ms** median on the factory VM). Grit pays full Rust-side loose/pack verification and connectivity walks without the mature C fsck fast paths Git uses on this fixture. **Follow-up:** [factory step #1475](https://maint.grit-scm.com/factory/1475) performance close-out (parallel pack verification, avoid redundant reads, bitmap-assisted reachability where applicable) — do not weaken checks to match the ratio.
+**2026-10-25 status:** Pack verification now streams each pack's delta trees depth-first on worker threads, checks every object as soon as it is inflated, and keeps only compact per-object facts; the connectivity walk re-reads trees instead of caching every entry. The committed baseline is **0.82×** git (~**156 ms** vs ~**191 ms** median, peak RSS ~**76 MiB** vs ~**42 MiB**), down from ~**9.4×** (~**1840 ms**). On full clones measured with `/usr/bin/time` on the factory VM:
+
+| Repository | git fsck | grit fsck before | grit fsck now |
+| --- | --- | --- | --- |
+| rust-lang/cargo (195k objects, 80 MB pack) | 6.0 s, 232 MB | 3.5 s, 2.45 GB | **1.6 s, 277 MB** |
+| git/git (422k objects, 322 MB pack) | 34.2 s, 513 MB | 74.3 s, 13.0 GB | **17.7 s, 638 MB** |
+
+**Memory guard:** `grit-bench fsck` fails when grit's peak RSS exceeds both **2×** git's and git's plus **64 MiB** (the slack covers fixed per-thread overhead on small fixtures). The Rust test `grit-lib/tests/fsck_memory.rs` checks that fsck's peak does not grow with the uncompressed size of a delta-heavy pack.
 
 ```bash
 cargo build --release -p grit-cli -p grit-utils
