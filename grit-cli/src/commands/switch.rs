@@ -183,6 +183,8 @@ pub fn run(
             dry_run,
             hooks: PostOperationHooks::Run,
         },
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
     )
     .map_err(|err| match err {
         LibError::OperationInProgress(kind) => {

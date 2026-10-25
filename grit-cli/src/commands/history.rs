@@ -661,6 +661,8 @@ pub fn run_move(
             &rewrite.repo,
             &plan,
             &rewrite.apply_options("move", message)?,
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::NeverCancel,
         )
         .map_err(on_err)?;
     }
@@ -681,6 +683,8 @@ pub fn run_drop(commit: &str, shared: &HistoryRewriteArgs) -> Result<HistoryRewr
             &rewrite.repo,
             &plan,
             &rewrite.apply_options("drop", message)?,
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::NeverCancel,
         )
         .map_err(on_err)?;
     }
@@ -728,6 +732,8 @@ pub fn run_reword(
             &rewrite.repo,
             &plan,
             &rewrite.apply_options("reword", message)?,
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::NeverCancel,
         )
         .map_err(on_err)?;
     }
@@ -843,6 +849,8 @@ pub fn run_squash(
             &rewrite.repo,
             &plan,
             &rewrite.apply_options("squash", message)?,
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::NeverCancel,
         )
         .map_err(on_err)?;
     }
@@ -882,6 +890,8 @@ pub fn run_split(
             &rewrite.repo,
             &plan,
             &rewrite.apply_options("split", format!("history split: {subject}"))?,
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::NeverCancel,
         )
         .map_err(on_err)?;
     }
@@ -1096,6 +1106,8 @@ fn run_rebase_with_exec(
                 &rewrite.repo,
                 &plan,
                 &rewrite.apply_options("rebase", message)?,
+                &mut grit_lib::progress::NullProgress,
+                &grit_lib::progress::NeverCancel,
             )
             .map_err(on_err)?;
             Ok(RebaseRunOutcome::Rebase(RebaseCliOutcome::from_rewrite(
@@ -1207,6 +1219,8 @@ pub fn run_rebase(opts: &RebaseRunOptions<'_>) -> Result<RebaseRunOutcome> {
                         &rewrite.repo,
                         &plan,
                         &rewrite.apply_options("rebase", message)?,
+                        &mut grit_lib::progress::NullProgress,
+                        &grit_lib::progress::NeverCancel,
                     )
                     .map_err(on_err)?;
                 }

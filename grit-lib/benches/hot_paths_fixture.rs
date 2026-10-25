@@ -382,6 +382,8 @@ fn hard_reset_to_main(repo: &Repository, main_head_oid: ObjectId) {
             BENCH_IDENT,
             "bench: reset to main",
         ),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
     )
     .expect("hard reset to main");
 }
@@ -432,6 +434,8 @@ pub fn bench_switch_wide(fx: &HotPathsFixture) {
             dry_run: false,
             hooks: grit_lib::PostOperationHooks::Run,
         },
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
     )
     .expect("switch wide");
     switch_repository(
@@ -444,6 +448,8 @@ pub fn bench_switch_wide(fx: &HotPathsFixture) {
             dry_run: false,
             hooks: grit_lib::PostOperationHooks::Run,
         },
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
     )
     .expect("switch main");
 }

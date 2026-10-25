@@ -12741,7 +12741,7 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::branch_error:
 pub mod grit_lib::porcelain::checkout
 pub fn grit_lib::porcelain::checkout::apply_index_file_mode(&std::path::Path, u32) -> grit_lib::error::Result<()>
 pub fn grit_lib::porcelain::checkout::checkout_between_trees(&grit_lib::repo::Repository, core::option::Option<&grit_lib::objects::ObjectId>, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<()>
-pub fn grit_lib::porcelain::checkout::checkout_between_trees_with_progress(&grit_lib::repo::Repository, core::option::Option<&grit_lib::objects::ObjectId>, &grit_lib::objects::ObjectId, &mut dyn grit_lib::progress::ProgressSink) -> grit_lib::error::Result<()>
+pub fn grit_lib::porcelain::checkout::checkout_between_trees_with_progress(&grit_lib::repo::Repository, core::option::Option<&grit_lib::objects::ObjectId>, &grit_lib::objects::ObjectId, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<()>
 pub fn grit_lib::porcelain::checkout::checkout_hard_to_tree_from_head_tree(&grit_lib::repo::Repository, &grit_lib::objects::ObjectId, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<()>
 pub fn grit_lib::porcelain::checkout::checkout_tree_changes(&grit_lib::repo::Repository, &[grit_lib::diff::DiffEntry]) -> grit_lib::error::Result<()>
 pub fn grit_lib::porcelain::checkout::checkout_tree_changes_with_index(&grit_lib::repo::Repository, &[grit_lib::diff::DiffEntry], &mut grit_lib::index::Index) -> grit_lib::error::Result<()>
@@ -14341,7 +14341,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::reset::Res
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::reset::ResetPreview
 pub const grit_lib::porcelain::reset::DEFAULT_ORPHAN_LIMIT: usize
 pub fn grit_lib::porcelain::reset::preview_reset(&grit_lib::repo::Repository, &grit_lib::porcelain::reset::ResetOptions) -> grit_lib::error::Result<grit_lib::porcelain::reset::ResetPreview>
-pub fn grit_lib::porcelain::reset::reset_to_commit(&grit_lib::repo::Repository, &grit_lib::porcelain::reset::ResetOptions) -> grit_lib::error::Result<grit_lib::porcelain::reset::ResetOutcome>
+pub fn grit_lib::porcelain::reset::reset_to_commit(&grit_lib::repo::Repository, &grit_lib::porcelain::reset::ResetOptions, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<grit_lib::porcelain::reset::ResetOutcome>
 pub mod grit_lib::porcelain::restore
 pub enum grit_lib::porcelain::restore::ConflictSide
 pub grit_lib::porcelain::restore::ConflictSide::Ours
@@ -15000,7 +15000,7 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::switch::Switc
 pub fn grit_lib::porcelain::switch::resolve_create_branch(&grit_lib::repo::Repository, &str, core::option::Option<&str>) -> grit_lib::error::Result<grit_lib::porcelain::switch::SwitchMode>
 pub fn grit_lib::porcelain::switch::resolve_revision_spec(&grit_lib::repo::Repository, &str) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::porcelain::switch::resolve_switch_target(&grit_lib::repo::Repository, &str) -> grit_lib::error::Result<grit_lib::porcelain::switch::SwitchMode>
-pub fn grit_lib::porcelain::switch::switch_repository(&grit_lib::repo::Repository, &grit_lib::porcelain::switch::SwitchOptions) -> grit_lib::error::Result<grit_lib::porcelain::switch::SwitchOutcome>
+pub fn grit_lib::porcelain::switch::switch_repository(&grit_lib::repo::Repository, &grit_lib::porcelain::switch::SwitchOptions, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<grit_lib::porcelain::switch::SwitchOutcome>
 pub mod grit_lib::porcelain::tag
 pub enum grit_lib::porcelain::tag::TagDetail
 pub grit_lib::porcelain::tag::TagDetail::Annotation
@@ -16750,6 +16750,17 @@ pub fn &mut T::start_with_unit(&mut self, grit_lib::progress::ProgressPhase, gri
 pub fn grit_lib::progress::cancel_watch_arc(&dyn grit_lib::progress::Cancel) -> alloc::rcs::arc::Arc<core::sync::atomic::AtomicBool>
 pub fn grit_lib::progress::poll_cancel(&mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<()>
 pub fn grit_lib::progress::poll_cancel_watch(&mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel, &core::sync::atomic::AtomicBool) -> grit_lib::error::Result<()>
+pub struct grit_lib::progress::CancelProgress<'a>
+pub fn grit_lib::progress::CancelProgress::new(&mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> grit_lib::progress::CancelProgress<'_>
+pub fn grit_lib::progress::CancelProgress::finish_poll(&self) -> grit_lib::error::Result<()>
+pub fn grit_lib::progress::CancelProgress::stopped(&self) -> bool
+impl grit_lib::progress::ProgressSink for grit_lib::progress::CancelProgress<'_>
+pub fn grit_lib::progress::CancelProgress::finish(&mut self)
+pub fn grit_lib::progress::CancelProgress::inc(&mut self, u64)
+pub fn grit_lib::progress::CancelProgress::set(&mut self, u64)
+pub fn grit_lib::progress::CancelProgress::should_cancel(&self) -> bool
+pub fn grit_lib::progress::CancelProgress::start(&mut self, grit_lib::progress::ProgressPhase, core::option::Option<u64>)
+pub fn grit_lib::progress::CancelProgress::start_with_unit(&mut self, grit_lib::progress::ProgressPhase, grit_lib::progress::ProgressUnit, core::option::Option<u64>)
 pub fn grit_lib::progress::poll_watch(&core::sync::atomic::AtomicBool) -> grit_lib::error::Result<()>
 pub mod grit_lib::quote_path
 pub fn grit_lib::quote_path::format_diff_path_with_prefix(&str, &str, bool) -> alloc::string::String
@@ -23572,7 +23583,7 @@ pub fn grit_lib::revwalk::history::absorb(&grit_lib::repo::Repository, &grit_lib
 pub fn grit_lib::revwalk::history::apply_absorb_rewrite(&grit_lib::repo::Repository, &grit_lib::revwalk::history::AbsorbPlan, &grit_lib::revwalk::history::ApplyOptions) -> core::result::Result<grit_lib::revwalk::history::AppliedRewrite, grit_lib::revwalk::history::HistoryError>
 pub fn grit_lib::revwalk::history::apply_fixup_hunk_selection(&grit_lib::repo::Repository, &grit_lib::revwalk::history::RewritePlan, &grit_lib::revwalk::history::ApplyOptions, &grit_lib::porcelain::hunk_select::HunkSelection, &[alloc::string::String]) -> core::result::Result<grit_lib::revwalk::history::AppliedRewrite, grit_lib::revwalk::history::HistoryError>
 pub fn grit_lib::revwalk::history::apply_fixup_rewrite(&grit_lib::repo::Repository, &grit_lib::revwalk::history::RewritePlan, &grit_lib::revwalk::history::ApplyOptions, &[alloc::string::String]) -> core::result::Result<grit_lib::revwalk::history::AppliedRewrite, grit_lib::revwalk::history::HistoryError>
-pub fn grit_lib::revwalk::history::apply_rewrite(&grit_lib::repo::Repository, &grit_lib::revwalk::history::RewritePlan, &grit_lib::revwalk::history::ApplyOptions) -> core::result::Result<grit_lib::revwalk::history::AppliedRewrite, grit_lib::revwalk::history::HistoryError>
+pub fn grit_lib::revwalk::history::apply_rewrite(&grit_lib::repo::Repository, &grit_lib::revwalk::history::RewritePlan, &grit_lib::revwalk::history::ApplyOptions, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> core::result::Result<grit_lib::revwalk::history::AppliedRewrite, grit_lib::revwalk::history::HistoryError>
 pub fn grit_lib::revwalk::history::commit_message_subject_line(&str) -> alloc::string::String
 pub fn grit_lib::revwalk::history::continue_rebase(&grit_lib::repo::Repository, &grit_lib::revwalk::history::StartRebaseOptions) -> core::result::Result<grit_lib::revwalk::history::RebaseOutcome, grit_lib::revwalk::history::RebaseSessionError>
 pub fn grit_lib::revwalk::history::default_absorb_base(&grit_lib::repo::Repository, grit_lib::objects::ObjectId) -> core::result::Result<grit_lib::objects::ObjectId, grit_lib::revwalk::history::HistoryError>

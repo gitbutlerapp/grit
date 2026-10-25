@@ -739,6 +739,8 @@ fn rebase_fetched_upstream(
                 record_operation: Some("rebase".into()),
                 hooks: crate::hooks::PostOperationHooks::Run,
             },
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
         )
         .map_err(map_history_error)?;
         return Ok(PullOutcome {

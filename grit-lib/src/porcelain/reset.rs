@@ -151,7 +151,12 @@ pub fn preview_reset(repo: &Repository, opts: &ResetOptions) -> Result<ResetPrev
 ///
 /// Returns an error when there is no current commit, the work tree is required but
 /// missing (hard/keep reset), local edits block keep reset, or ref/index/checkout I/O fails.
-pub fn reset_to_commit(repo: &Repository, opts: &ResetOptions) -> Result<ResetOutcome> {
+pub fn reset_to_commit(
+    repo: &Repository,
+    opts: &ResetOptions,
+    progress: &mut dyn crate::progress::ProgressSink,
+    cancel: &dyn crate::progress::Cancel,
+) -> Result<ResetOutcome> {
     let (previous, head, preview) = plan_reset(repo, opts, opts.dry_run)?;
     let ref_label = ref_label_for_head(&head);
 
@@ -170,7 +175,7 @@ pub fn reset_to_commit(repo: &Repository, opts: &ResetOptions) -> Result<ResetOu
         });
     }
 
-    apply_reset_worktree(repo, opts, previous)?;
+    apply_reset_worktree(repo, opts, previous, progress, cancel)?;
     let ref_updated = if previous != opts.target {
         match &head {
             HeadState::Branch { refname, .. } => {
@@ -260,7 +265,13 @@ fn plan_reset(
     ))
 }
 
-fn apply_reset_worktree(repo: &Repository, opts: &ResetOptions, previous: ObjectId) -> Result<()> {
+fn apply_reset_worktree(
+    repo: &Repository,
+    opts: &ResetOptions,
+    previous: ObjectId,
+    progress: &mut dyn crate::progress::ProgressSink,
+    cancel: &dyn crate::progress::Cancel,
+) -> Result<()> {
     let target_tree = commit_tree_oid(repo, &opts.target)?;
     match opts.mode {
         ResetMode::Soft => {}
@@ -281,7 +292,13 @@ fn apply_reset_worktree(repo: &Repository, opts: &ResetOptions, previous: Object
             ensure_reset_worktree_mode(repo, ResetMode::Keep)?;
             ensure_keep_index_merged(repo, opts.mode)?;
             let head_tree = commit_tree_oid(repo, &previous)?;
-            checkout_tree_transition_allow_local_reset(repo, Some(&head_tree), &target_tree)?;
+            checkout_tree_transition_allow_local_reset(
+                repo,
+                Some(&head_tree),
+                &target_tree,
+                progress,
+                cancel,
+            )?;
         }
     }
     Ok(())
@@ -508,7 +525,13 @@ mod tests {
         let resolved =
             resolve_revision_as_commit_without_index_dwim(&repo, "v1").expect("peel tag to commit");
         assert_eq!(resolved, tip);
-        reset_to_commit(&repo, &reset_opts(resolved, ResetMode::Hard)).expect("reset to tag");
+        reset_to_commit(
+            &repo,
+            &reset_opts(resolved, ResetMode::Hard),
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .expect("reset to tag");
         assert_eq!(
             refs::resolve_ref(repo.git_dir(), "refs/heads/main").expect("main"),
             tip
@@ -522,7 +545,13 @@ mod tests {
         let (_dir, repo) = init_repo();
         commit_file(&repo, "f", "1\n", None);
         let tree = resolve_revision(&repo, "HEAD^{tree}").expect("tree");
-        let err = reset_to_commit(&repo, &reset_opts(tree, ResetMode::Hard)).expect_err("tree");
+        let err = reset_to_commit(
+            &repo,
+            &reset_opts(tree, ResetMode::Hard),
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .expect_err("tree");
         assert!(
             matches!(err, Error::InvalidRef(ref msg) if msg.contains("does not name a commit")),
             "unexpected: {err:?}"
@@ -537,7 +566,13 @@ mod tests {
         let wt = repo.work_tree().expect("wt");
         std::fs::write(wt.join("f"), "2\n").expect("wt");
 
-        let outcome = reset_to_commit(&repo, &reset_opts(c1, ResetMode::Mixed)).expect("reset");
+        let outcome = reset_to_commit(
+            &repo,
+            &reset_opts(c1, ResetMode::Mixed),
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .expect("reset");
 
         assert_eq!(outcome.target, c1);
         assert_eq!(outcome.previous, c2);
@@ -570,7 +605,13 @@ mod tests {
         index.add_or_replace(entry);
         repo.write_index(&mut index).expect("write index");
 
-        reset_to_commit(&repo, &reset_opts(c1, ResetMode::Mixed)).expect("reset");
+        reset_to_commit(
+            &repo,
+            &reset_opts(c1, ResetMode::Mixed),
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .expect("reset");
 
         let st = status(
             &repo,
@@ -590,7 +631,13 @@ mod tests {
         std::fs::write(wt.join("b.txt"), "b\n").expect("write b");
         let c2 = commit_two_files(&repo, &[("a.txt", "a\n"), ("b.txt", "b\n")], Some(c1));
 
-        reset_to_commit(&repo, &reset_opts(c2, ResetMode::Mixed)).expect("reset at HEAD");
+        reset_to_commit(
+            &repo,
+            &reset_opts(c2, ResetMode::Mixed),
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .expect("reset at HEAD");
 
         let index = repo.load_index().expect("index");
         assert!(index.get(b"a.txt", 0).expect("a").size > 0);
@@ -614,7 +661,13 @@ mod tests {
         std::fs::write(wt.join("a.txt"), "v2\n").expect("edit a");
         let c2 = commit_two_files(&repo, &[("a.txt", "v2\n"), ("b.txt", "same\n")], Some(c1));
 
-        reset_to_commit(&repo, &reset_opts(c1, ResetMode::Mixed)).expect("reset back");
+        reset_to_commit(
+            &repo,
+            &reset_opts(c1, ResetMode::Mixed),
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .expect("reset back");
 
         let st = status(
             &repo,
@@ -635,7 +688,13 @@ mod tests {
         let wt = repo.work_tree().expect("wt");
         std::fs::write(wt.join("f"), "precious\n").expect("wt");
 
-        reset_to_commit(&repo, &reset_opts(c1, ResetMode::Hard)).expect("reset");
+        reset_to_commit(
+            &repo,
+            &reset_opts(c1, ResetMode::Hard),
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .expect("reset");
 
         let disk = std::fs::read(wt.join("f")).expect("disk");
         assert_eq!(disk, b"base\n");
@@ -649,7 +708,13 @@ mod tests {
         let wt = repo.work_tree().expect("wt");
         std::fs::write(wt.join("f"), "precious\n").expect("wt");
 
-        reset_to_commit(&repo, &reset_opts(c1, ResetMode::Hard)).expect("reset");
+        reset_to_commit(
+            &repo,
+            &reset_opts(c1, ResetMode::Hard),
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .expect("reset");
 
         assert_eq!(std::fs::read(wt.join("f")).expect("disk"), b"base\n");
         assert_eq!(
@@ -705,7 +770,13 @@ mod tests {
         std::fs::write(wt.join("f"), "ours\n").expect("wt");
         repo.write_index(&mut index).expect("write index");
 
-        reset_to_commit(&repo, &reset_opts(c1, ResetMode::Hard)).expect("reset");
+        reset_to_commit(
+            &repo,
+            &reset_opts(c1, ResetMode::Hard),
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .expect("reset");
 
         let index = repo.load_index().expect("index");
         assert!(
@@ -795,7 +866,13 @@ mod tests {
         run.set_mode(0o100644);
         std::fs::set_permissions(wt.join("run.sh"), run).expect("chmod run");
 
-        reset_to_commit(&repo, &reset_opts(c1, ResetMode::Hard)).expect("reset");
+        reset_to_commit(
+            &repo,
+            &reset_opts(c1, ResetMode::Hard),
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .expect("reset");
 
         assert_eq!(
             std::fs::metadata(wt.join("plain.txt"))
@@ -853,7 +930,13 @@ mod tests {
         refs::write_ref(&repo.git_dir(), "refs/heads/main", &c1).expect("branch");
         refs::write_symbolic_ref(&repo.git_dir(), "HEAD", "refs/heads/main").expect("symhead");
 
-        let err = reset_to_commit(&repo, &reset_opts(c1, ResetMode::Hard)).expect_err("bare");
+        let err = reset_to_commit(
+            &repo,
+            &reset_opts(c1, ResetMode::Hard),
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .expect_err("bare");
         assert!(matches!(err, Error::PathError(_)));
         assert_eq!(
             refs::resolve_ref(&repo.git_dir(), "refs/heads/main").expect("ref"),
@@ -871,7 +954,13 @@ mod tests {
 
         let mut opts = reset_opts(c1, ResetMode::Hard);
         opts.dry_run = true;
-        let outcome = reset_to_commit(&repo, &opts).expect("dry-run");
+        let outcome = reset_to_commit(
+            &repo,
+            &opts,
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .expect("dry-run");
         assert!(outcome.dry_run);
         assert!(outcome.would_overwrite.iter().any(|p| p == "f"));
         assert_eq!(
@@ -930,7 +1019,13 @@ mod tests {
 
         let mut opts = reset_opts(c1, ResetMode::Keep);
         opts.dry_run = true;
-        let outcome = reset_to_commit(&repo, &opts).expect("keep dry-run");
+        let outcome = reset_to_commit(
+            &repo,
+            &opts,
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .expect("keep dry-run");
         assert_eq!(outcome.would_block, ["f", "u"]);
     }
 
@@ -972,7 +1067,13 @@ mod tests {
         for mode in [ResetMode::Soft, ResetMode::Mixed, ResetMode::Hard] {
             refs::write_ref(&repo.git_dir(), "refs/heads/main", &c2).expect("restore tip");
             refs::write_symbolic_ref(&repo.git_dir(), "HEAD", "refs/heads/main").expect("symhead");
-            reset_to_commit(&repo, &reset_opts(c1, mode)).expect("reset");
+            reset_to_commit(
+                &repo,
+                &reset_opts(c1, mode),
+                &mut crate::progress::NullProgress,
+                &crate::progress::NeverCancel,
+            )
+            .expect("reset");
             assert_eq!(
                 refs::resolve_ref(&repo.git_dir(), "refs/heads/main").expect("ref"),
                 c1,
@@ -996,7 +1097,13 @@ mod tests {
         let c1 = commit_file(&repo, "f", "1\n", None);
         let c2 = commit_file(&repo, "f", "2\n", Some(c1));
         let c3 = commit_file(&repo, "f", "3\n", Some(c2));
-        reset_to_commit(&repo, &reset_opts(c1, ResetMode::Soft)).expect("move main back");
+        reset_to_commit(
+            &repo,
+            &reset_opts(c1, ResetMode::Soft),
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .expect("move main back");
         refs::write_ref(&repo.git_dir(), "HEAD", &c3).expect("detach at c3");
 
         let preview = preview_reset(&repo, &reset_opts(c1, ResetMode::Mixed)).expect("preview");
@@ -1043,7 +1150,13 @@ mod tests {
         std::fs::write(wt.join("f"), "ours\n").expect("wt");
         repo.write_index(&mut index).expect("write index");
 
-        let err = reset_to_commit(&repo, &reset_opts(c1, ResetMode::Keep)).expect_err("keep");
+        let err = reset_to_commit(
+            &repo,
+            &reset_opts(c1, ResetMode::Keep),
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .expect_err("keep");
         assert!(matches!(err, Error::IndexUnmerged));
     }
 
@@ -1076,7 +1189,13 @@ mod tests {
 
         let mut opts = reset_opts(c1, ResetMode::Hard);
         opts.dry_run = true;
-        let err = reset_to_commit(&repo, &opts).expect_err("bare dry-run hard");
+        let err = reset_to_commit(
+            &repo,
+            &opts,
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .expect_err("bare dry-run hard");
         assert!(matches!(err, Error::PathError(_)));
     }
 
@@ -1101,7 +1220,13 @@ mod tests {
         let (_dir, repo) = init_repo();
         let c1 = commit_file(&repo, "f", "1\n", None);
         let c2 = commit_file(&repo, "f", "2\n", Some(c1));
-        let outcome = reset_to_commit(&repo, &reset_opts(c2, ResetMode::Mixed)).expect("reset");
+        let outcome = reset_to_commit(
+            &repo,
+            &reset_opts(c2, ResetMode::Mixed),
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .expect("reset");
         assert_eq!(outcome.orphaned_total, 0);
         assert!(outcome.orphaned_commits.is_empty());
     }
@@ -1208,7 +1333,13 @@ mod tests {
         metrics.reset_blob_content_reads();
         metrics.set_blob_counting(true);
         let probes = reset_worktree_metadata_probe(root);
-        reset_to_commit(&repo, &reset_opts(trimmed, ResetMode::Hard)).expect("hard reset");
+        reset_to_commit(
+            &repo,
+            &reset_opts(trimmed, ResetMode::Hard),
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .expect("hard reset");
         let probe_count = worktree_metadata_probe_count();
         drop(probes);
         metrics.set_blob_counting(false);
@@ -1264,7 +1395,13 @@ mod tests {
         let metrics = repo.odb().hot_path_metrics();
         metrics.reset_blob_content_reads();
         metrics.set_blob_counting(true);
-        reset_to_commit(&repo, &reset_opts(head, ResetMode::Mixed)).expect("mixed reset");
+        reset_to_commit(
+            &repo,
+            &reset_opts(head, ResetMode::Mixed),
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .expect("mixed reset");
         metrics.set_blob_counting(false);
 
         assert!(
@@ -1294,7 +1431,13 @@ mod tests {
             git_dir.path(),
             &["reset", "-q", "--mixed", &git_trimmed.to_hex()],
         );
-        reset_to_commit(&repo, &reset_opts(trimmed, ResetMode::Mixed)).expect("mixed reset");
+        reset_to_commit(
+            &repo,
+            &reset_opts(trimmed, ResetMode::Mixed),
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .expect("mixed reset");
 
         assert_eq!(
             git_index_view(grit_dir.path()),
@@ -1318,7 +1461,13 @@ mod tests {
             git_dir.path(),
             &["reset", "-q", "--hard", &git_trimmed.to_hex()],
         );
-        reset_to_commit(&repo, &reset_opts(trimmed, ResetMode::Hard)).expect("hard reset");
+        reset_to_commit(
+            &repo,
+            &reset_opts(trimmed, ResetMode::Hard),
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .expect("hard reset");
 
         let tree = commit_tree_oid(&repo, &trimmed).expect("tree");
         assert_eq!(
@@ -1340,7 +1489,13 @@ mod tests {
         let index_path = repo.index_path_for_env().expect("index path");
         std::fs::write(&index_path, b"not an index").expect("corrupt index");
 
-        reset_to_commit(&repo, &reset_opts(c1, ResetMode::Mixed)).expect("reset");
+        reset_to_commit(
+            &repo,
+            &reset_opts(c1, ResetMode::Mixed),
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .expect("reset");
 
         let index = repo.load_index().expect("index readable again");
         assert!(index.get(b"f", 0).is_some());
@@ -1373,7 +1528,13 @@ mod tests {
             "fixture entry must be racy"
         );
 
-        reset_to_commit(&repo, &reset_opts(trimmed, ResetMode::Hard)).expect("hard reset");
+        reset_to_commit(
+            &repo,
+            &reset_opts(trimmed, ResetMode::Hard),
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .expect("hard reset");
 
         assert_eq!(std::fs::read(&kept).expect("read"), original);
         assert_git_sees_clean_repo(root);
@@ -1397,7 +1558,13 @@ mod tests {
         entry.ctime_nsec = 7;
         repo.write_index(&mut index).expect("write index");
 
-        reset_to_commit(&repo, &reset_opts(trimmed, ResetMode::Hard)).expect("hard reset");
+        reset_to_commit(
+            &repo,
+            &reset_opts(trimmed, ResetMode::Hard),
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .expect("hard reset");
 
         let after = repo.load_index().expect("index after");
         let row = after.get(kept.as_bytes(), 0).expect("kept row");
@@ -1468,7 +1635,13 @@ mod tests {
         let repo = open_at(grit_dir.path());
         let head =
             ObjectId::from_hex(git(grit_dir.path(), &["rev-parse", "HEAD"]).trim()).expect("head");
-        reset_to_commit(&repo, &reset_opts(head, ResetMode::Hard)).expect("hard reset");
+        reset_to_commit(
+            &repo,
+            &reset_opts(head, ResetMode::Hard),
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .expect("hard reset");
 
         for root in [git_dir.path(), grit_dir.path()] {
             let victim = root.join("victim");
@@ -1510,6 +1683,8 @@ mod tests {
                 dry_run: false,
                 hooks: crate::hooks::PostOperationHooks::Run,
             },
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
         )
         .expect_err("grit refuses the switch too");
         assert!(
@@ -1531,7 +1706,13 @@ mod tests {
         git(root, &["add", "d00/staged.txt"]);
         std::fs::write(root.join("d01/untracked.txt"), "keep me\n").expect("untracked");
 
-        reset_to_commit(&repo, &reset_opts(trimmed, ResetMode::Hard)).expect("hard reset");
+        reset_to_commit(
+            &repo,
+            &reset_opts(trimmed, ResetMode::Hard),
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .expect("hard reset");
 
         assert!(
             !root.join("d00").exists(),

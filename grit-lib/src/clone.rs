@@ -462,7 +462,7 @@ pub fn clone(
     let mut worktree_bytes = 0;
     if opts.checkout && !bare {
         if let CloneCheckout::CheckedOut(checkout_oid) = checkout {
-            (files, worktree_bytes) = perform_clone_checkout(&repo, checkout_oid, progress)
+            (files, worktree_bytes) = perform_clone_checkout(&repo, checkout_oid, progress, cancel)
                 .map_err(CloneError::Library)?;
         }
     } else if matches!(checkout, CloneCheckout::CheckedOut(_)) {
@@ -490,9 +490,12 @@ fn perform_clone_checkout(
     repo: &Repository,
     commit: ObjectId,
     progress: &mut dyn Progress,
+    cancel: &dyn Cancel,
 ) -> Result<(u64, u64)> {
     let tree = crate::diff::tree_oid_of_commit_in_repo(repo, &commit)?;
-    crate::porcelain::checkout::checkout_between_trees_with_progress(repo, None, &tree, progress)?;
+    crate::porcelain::checkout::checkout_between_trees_with_progress(
+        repo, None, &tree, progress, cancel,
+    )?;
     let index = repo.index_handle().load()?;
     let entries = index.entries();
     let files = u64::try_from(entries.len()).unwrap_or(u64::MAX);

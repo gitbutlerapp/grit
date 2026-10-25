@@ -706,6 +706,8 @@ fn switch_refuses_during_git_started_rebase_and_git_continue_still_moves_only_to
                 dry_run,
                 hooks: grit_lib::PostOperationHooks::Run,
             },
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::NeverCancel,
         )
         .unwrap_err();
         assert!(
@@ -761,6 +763,8 @@ fn switch_refuses_during_merge_conflict() {
             dry_run: false,
             hooks: grit_lib::PostOperationHooks::Run,
         },
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
     )
     .unwrap_err();
     assert!(

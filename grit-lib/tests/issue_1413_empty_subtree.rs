@@ -82,7 +82,14 @@ fn history_drop_emptied_subdirectory_fsck_clean() {
     let c2 = git_rev_parse(wt, "HEAD~1").expect("c2");
     let grit = open_grit_repo(wt);
     let plan = history_drop(&grit, c2, &drop_opts(0)).expect("drop c2");
-    apply_rewrite(&grit, &plan, &apply_opts()).expect("apply");
+    apply_rewrite(
+        &grit,
+        &plan,
+        &apply_opts(),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("apply");
     assert_head_has_no_empty_subtree_dirs(wt);
 }
 

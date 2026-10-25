@@ -74,6 +74,7 @@ pub struct CommitRefDecoration {
 
 /// Commit metadata loaded once per oid for porcelain JSON (`log`, `show`, `revs`, …).
 #[derive(Clone, Debug, PartialEq, Eq)]
+#[cfg_attr(feature = "serde-models", derive(serde::Serialize))]
 pub struct LoadedCommit {
     /// Commit object id.
     pub oid: ObjectId,

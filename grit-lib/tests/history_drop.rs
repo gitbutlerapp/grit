@@ -129,7 +129,14 @@ fn drop_reports_replacements_and_head_change() {
     let new_c = plan.replacement(oids["c"]).expect("c replayed");
     assert_ne!(new_c, oids["c"]);
     assert_eq!(plan.head_change(), Some((oids["c"], new_c)));
-    apply_rewrite(&grit, &plan, &apply_opts()).expect("apply");
+    apply_rewrite(
+        &grit,
+        &plan,
+        &apply_opts(),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("apply");
     assert_eq!(git_rev_parse(wt, "HEAD"), Some(new_c));
     git_fsck_strict(wt);
 }
@@ -169,7 +176,14 @@ fn drop_moves_branch_at_dropped_commit_to_parent() {
     );
     let grit = open_grit(wt);
     let plan = history_drop(&grit, oids["b"], &opts(2)).expect("drop");
-    apply_rewrite(&grit, &plan, &apply_opts()).expect("apply");
+    apply_rewrite(
+        &grit,
+        &plan,
+        &apply_opts(),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("apply");
     let tip = git_rev_parse(wt, "refs/heads/points-at-b").expect("ref");
     assert_eq!(tip, oids["a"]);
     git_fsck_strict(wt);
@@ -267,7 +281,14 @@ fn drop_syncs_worktree_when_head_affected() {
     commit_file(wt, "third.t", "3\n", "third");
     let grit = open_grit(wt);
     let plan = history_drop(&grit, b, &opts(6)).expect("drop");
-    apply_rewrite(&grit, &plan, &apply_opts()).expect("apply");
+    apply_rewrite(
+        &grit,
+        &plan,
+        &apply_opts(),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("apply");
     assert!(wt.join("first.t").is_file());
     assert!(wt.join("third.t").is_file());
     assert!(
@@ -313,7 +334,14 @@ fn history_drop_matches_git_rebase_drop() {
         },
     )
     .expect("plan");
-    apply_rewrite(&grit, &plan, &apply_opts()).expect("apply");
+    apply_rewrite(
+        &grit,
+        &plan,
+        &apply_opts(),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("apply");
     let editor = git_dir.path().join("rebase-drop.sh");
     fs::write(&editor, "#!/bin/sh\nsed -i '2s/^pick/drop/' \"$1\"\n").expect("write editor");
     #[cfg(unix)]
@@ -385,7 +413,14 @@ fn history_drop_matches_git_history_when_available() {
         },
     )
     .expect("plan");
-    apply_rewrite(&grit, &plan, &apply_opts()).expect("apply");
+    apply_rewrite(
+        &grit,
+        &plan,
+        &apply_opts(),
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("apply");
     let git_out = Command::new("git")
         .current_dir(git_dir.path())
         .args(["history", "drop", "HEAD~"])

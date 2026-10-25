@@ -439,6 +439,8 @@ fn hostile_paths_rejected_on_clone_switch_reset_restore() {
                 dry_run: false,
                 hooks: grit_lib::PostOperationHooks::Run,
             },
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::NeverCancel,
         )
         .unwrap_err();
         assert_invalid_path_component(switch_err);
@@ -453,6 +455,8 @@ fn hostile_paths_rejected_on_clone_switch_reset_restore() {
                 "T <t@e.com>",
                 "reset test",
             ),
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::NeverCancel,
         )
         .unwrap_err();
         assert_invalid_path_component(reset_err);

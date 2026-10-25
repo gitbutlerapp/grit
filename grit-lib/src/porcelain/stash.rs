@@ -1751,6 +1751,8 @@ pub(crate) fn stash_branch(repo: &Repository, name: &str, n: usize) -> Result<St
             dry_run: false,
             hooks: crate::hooks::PostOperationHooks::Run,
         },
+        &mut crate::progress::NullProgress,
+        &crate::progress::NeverCancel,
     )?;
 
     let applied = apply_stash_entry(

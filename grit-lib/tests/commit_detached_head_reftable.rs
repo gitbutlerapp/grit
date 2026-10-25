@@ -60,6 +60,8 @@ fn grit_commit_on_detached_reftable_head_advances_head() {
             dry_run: false,
             hooks: grit_lib::PostOperationHooks::Run,
         },
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
     )
     .expect("detach");
 
@@ -109,6 +111,8 @@ fn grit_amend_on_detached_reftable_head() {
             dry_run: false,
             hooks: grit_lib::PostOperationHooks::Run,
         },
+        &mut grit_lib::progress::NullProgress,
+        &grit_lib::progress::NeverCancel,
     )
     .expect("detach");
 
