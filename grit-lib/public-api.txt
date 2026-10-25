@@ -9743,6 +9743,7 @@ pub fn grit_lib::objects::odb::Odb::sources(&self) -> grit_lib::error::Result<al
 pub fn grit_lib::objects::odb::Odb::with_config_git_dir(self, std::path::PathBuf) -> Self
 pub fn grit_lib::objects::odb::Odb::with_env_alternate_dirs(self, alloc::vec::Vec<std::path::PathBuf>) -> Self
 pub fn grit_lib::objects::odb::Odb::with_pack_read_context<R>(&self, impl core::ops::function::FnOnce() -> R) -> R
+pub fn grit_lib::objects::odb::Odb::with_stream<R>(&self, &grit_lib::objects::ObjectId, impl core::ops::function::FnOnce(grit_lib::objects::odb::store::ObjectStream<'_>) -> grit_lib::error::Result<R>) -> grit_lib::error::Result<core::option::Option<R>>
 pub fn grit_lib::objects::odb::Odb::with_work_tree(&std::path::Path, &std::path::Path) -> Self
 pub fn grit_lib::objects::odb::Odb::write(&self, grit_lib::objects::ObjectKind, &[u8]) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::objects::odb::Odb::write_local(&self, grit_lib::objects::ObjectKind, &[u8]) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
@@ -10182,6 +10183,7 @@ pub fn grit_lib::objects::pack::skip_one_pack_object(&[u8], &mut usize, u64, usi
 pub fn grit_lib::objects::pack::slice_one_pack_object(&[u8], u64, usize) -> grit_lib::error::Result<&[u8]>
 pub fn grit_lib::objects::pack::test_pack_cache_guard() -> grit_lib::pack::pack_cache_test_sync::PackCacheTestGuard
 pub fn grit_lib::objects::pack::try_read_object_from_local_packs_cached(&std::path::Path, &grit_lib::objects::ObjectId, impl core::ops::function::FnMut() -> grit_lib::error::Result<grit_lib::objects::Object>) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::Object>>
+pub fn grit_lib::objects::pack::try_streaming_reuse_for_repack(&grit_lib::objects::odb::Odb, &[grit_lib::objects::ObjectId]) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::pack::StreamingReuse>>
 pub fn grit_lib::objects::pack::try_write_streaming_pack(&grit_lib::repo::Repository, &[grit_lib::objects::ObjectId], &[grit_lib::objects::ObjectId], &std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>, &std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>, core::option::Option<&grit_lib::revwalk::rev_list::ObjectFilter>, &grit_lib::objects::pack_objects::PackBuildOptions, &mut dyn core::ops::function::FnMut(grit_lib::objects::pack_objects::PackProgress), &mut dyn core::io::write::Write) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::pack_objects::PackStats>>
 pub fn grit_lib::objects::pack::verify_pack_and_collect(&std::path::Path) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::pack::VerifyObjectRecord>>
 pub fn grit_lib::objects::pack::write_v2_pack_index(&std::path::Path, &std::path::Path, &[(grit_lib::objects::ObjectId, u64, u32)], usize) -> grit_lib::error::Result<()>
@@ -10257,9 +10259,9 @@ pub grit_lib::objects::pack_objects::PackBuildOptions::max_depth: usize
 pub grit_lib::objects::pack_objects::PackBuildOptions::respect_islands: bool
 pub grit_lib::objects::pack_objects::PackBuildOptions::reuse_deltas: bool
 pub grit_lib::objects::pack_objects::PackBuildOptions::reuse_objects: bool
+pub grit_lib::objects::pack_objects::PackBuildOptions::stream_verbatim_single_pack: bool
 pub grit_lib::objects::pack_objects::PackBuildOptions::thin: bool
 pub grit_lib::objects::pack_objects::PackBuildOptions::use_bitmaps: bool
-pub grit_lib::objects::pack_objects::PackBuildOptions::stream_verbatim_single_pack: bool
 pub grit_lib::objects::pack_objects::PackBuildOptions::use_ofs_delta: bool
 pub grit_lib::objects::pack_objects::PackBuildOptions::window: usize
 impl grit_lib::objects::pack_objects::PackBuildOptions
@@ -10420,6 +10422,7 @@ impl core::marker::Unpin for grit_lib::objects::pack::StreamingReuse
 impl core::marker::UnsafeUnpin for grit_lib::objects::pack::StreamingReuse
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::pack::StreamingReuse
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::pack::StreamingReuse
+pub fn grit_lib::objects::pack_reuse::try_streaming_reuse_for_repack(&grit_lib::objects::odb::Odb, &[grit_lib::objects::ObjectId]) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::pack::StreamingReuse>>
 pub fn grit_lib::objects::pack_reuse::try_write_streaming_pack(&grit_lib::repo::Repository, &[grit_lib::objects::ObjectId], &[grit_lib::objects::ObjectId], &std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>, &std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>, core::option::Option<&grit_lib::revwalk::rev_list::ObjectFilter>, &grit_lib::objects::pack_objects::PackBuildOptions, &mut dyn core::ops::function::FnMut(grit_lib::objects::pack_objects::PackProgress), &mut dyn core::io::write::Write) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::pack_objects::PackStats>>
 pub mod grit_lib::objects::pack_rev
 pub const grit_lib::objects::pack_rev::RIDX_HASH_ID_SHA1: u32
@@ -11499,6 +11502,7 @@ impl core::marker::Unpin for grit_lib::objects::pack::StreamingReuse
 impl core::marker::UnsafeUnpin for grit_lib::objects::pack::StreamingReuse
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::pack::StreamingReuse
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::objects::pack::StreamingReuse
+pub fn grit_lib::pack_reuse::try_streaming_reuse_for_repack(&grit_lib::objects::odb::Odb, &[grit_lib::objects::ObjectId]) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::pack::StreamingReuse>>
 pub fn grit_lib::pack_reuse::try_write_streaming_pack(&grit_lib::repo::Repository, &[grit_lib::objects::ObjectId], &[grit_lib::objects::ObjectId], &std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>, &std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>, core::option::Option<&grit_lib::revwalk::rev_list::ObjectFilter>, &grit_lib::objects::pack_objects::PackBuildOptions, &mut dyn core::ops::function::FnMut(grit_lib::objects::pack_objects::PackProgress), &mut dyn core::io::write::Write) -> grit_lib::error::Result<core::option::Option<grit_lib::objects::pack_objects::PackStats>>
 pub mod grit_lib::pack_write
 pub struct grit_lib::pack_write::InstallPackOptions
@@ -15909,6 +15913,7 @@ pub fn grit_lib::objects::odb::Odb::sources(&self) -> grit_lib::error::Result<al
 pub fn grit_lib::objects::odb::Odb::with_config_git_dir(self, std::path::PathBuf) -> Self
 pub fn grit_lib::objects::odb::Odb::with_env_alternate_dirs(self, alloc::vec::Vec<std::path::PathBuf>) -> Self
 pub fn grit_lib::objects::odb::Odb::with_pack_read_context<R>(&self, impl core::ops::function::FnOnce() -> R) -> R
+pub fn grit_lib::objects::odb::Odb::with_stream<R>(&self, &grit_lib::objects::ObjectId, impl core::ops::function::FnOnce(grit_lib::objects::odb::store::ObjectStream<'_>) -> grit_lib::error::Result<R>) -> grit_lib::error::Result<core::option::Option<R>>
 pub fn grit_lib::objects::odb::Odb::with_work_tree(&std::path::Path, &std::path::Path) -> Self
 pub fn grit_lib::objects::odb::Odb::write(&self, grit_lib::objects::ObjectKind, &[u8]) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
 pub fn grit_lib::objects::odb::Odb::write_local(&self, grit_lib::objects::ObjectKind, &[u8]) -> grit_lib::error::Result<grit_lib::objects::ObjectId>
@@ -20019,6 +20024,7 @@ pub grit_lib::remote::transfer::PackBuildOptions::max_depth: usize
 pub grit_lib::remote::transfer::PackBuildOptions::respect_islands: bool
 pub grit_lib::remote::transfer::PackBuildOptions::reuse_deltas: bool
 pub grit_lib::remote::transfer::PackBuildOptions::reuse_objects: bool
+pub grit_lib::remote::transfer::PackBuildOptions::stream_verbatim_single_pack: bool
 pub grit_lib::remote::transfer::PackBuildOptions::thin: bool
 pub grit_lib::remote::transfer::PackBuildOptions::use_bitmaps: bool
 pub grit_lib::remote::transfer::PackBuildOptions::use_ofs_delta: bool
@@ -25681,6 +25687,7 @@ pub fn grit_lib::worktree::crlf::file_attrs_from_attr_map(&std::collections::has
 pub fn grit_lib::worktree::crlf::file_attrs_from_gitattributes(&[grit_lib::worktree::attributes::AttrRule], &grit_lib::worktree::attributes::MacroTable, &str, bool, &grit_lib::config::ConfigSet) -> grit_lib::worktree::crlf::FileAttrs
 pub fn grit_lib::worktree::crlf::gather_convert_stats_ascii(&[u8]) -> &'static str
 pub fn grit_lib::worktree::crlf::get_file_attrs(&[grit_lib::worktree::attributes::AttrRule], &str, bool, &grit_lib::config::ConfigSet) -> grit_lib::worktree::crlf::FileAttrs
+pub fn grit_lib::worktree::crlf::git_conversion_is_identity(&grit_lib::worktree::crlf::ConversionConfig, &grit_lib::worktree::crlf::FileAttrs) -> bool
 pub fn grit_lib::worktree::crlf::has_crlf(&[u8]) -> bool
 pub fn grit_lib::worktree::crlf::has_crlf_in_index_blob(&[u8]) -> bool
 pub fn grit_lib::worktree::crlf::has_lone_lf(&[u8]) -> bool
@@ -25697,6 +25704,7 @@ pub fn grit_lib::worktree::crlf::parse_gitattributes_content(&str) -> alloc::vec
 pub fn grit_lib::worktree::crlf::path_gitattribute_value(&[grit_lib::worktree::attributes::AttrRule], &str, bool, &str) -> core::option::Option<alloc::string::String>
 pub fn grit_lib::worktree::crlf::run_filter(&dyn grit_lib::command_runner::CommandRunner, &str, &[u8], &str) -> core::result::Result<alloc::vec::Vec<u8>, grit_lib::error::FilterError>
 pub fn grit_lib::worktree::crlf::should_convert_to_crlf(&grit_lib::worktree::crlf::ConversionConfig, &grit_lib::worktree::crlf::FileAttrs, &[u8]) -> bool
+pub fn grit_lib::worktree::crlf::worktree_conversion_is_identity(&grit_lib::worktree::crlf::ConversionConfig, &grit_lib::worktree::crlf::FileAttrs) -> bool
 pub type grit_lib::worktree::crlf::GitAttributes = alloc::vec::Vec<grit_lib::worktree::attributes::AttrRule>
 pub mod grit_lib::worktree::fsmonitor
 pub struct grit_lib::worktree::fsmonitor::FsmonitorQueryBoundary(pub u64)

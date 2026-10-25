@@ -6483,6 +6483,14 @@ pub fn hash_worktree_file(
     index_entry: Option<&IndexEntry>,
     filter_process: Option<&crate::filter_process::FilterProcessState>,
 ) -> Result<ObjectId> {
+    if meta.is_file()
+        && meta.len() >= STREAMED_HASH_MIN_SIZE
+        && crate::crlf::git_conversion_is_identity(conv, file_attrs)
+    {
+        if let Some(oid) = hash_verbatim_file_in_chunks(odb, path, meta.len())? {
+            return Ok(oid);
+        }
+    }
     let data = worktree_blob_bytes(
         odb,
         path,
@@ -6494,6 +6502,39 @@ pub fn hash_worktree_file(
         filter_process,
     )?;
     odb.hash(ObjectKind::Blob, &data)
+}
+
+/// Work-tree files at least this large are hashed in chunks when their content goes into Git
+/// unchanged, instead of being read whole.
+const STREAMED_HASH_MIN_SIZE: u64 = 1024 * 1024;
+
+/// Blob id of the regular file at `path`, hashed as it is in fixed-size chunks.
+///
+/// `size` is the length the caller saw; `None` means the file no longer has that length (it
+/// changed underneath), so the caller should fall back to reading it whole.
+fn hash_verbatim_file_in_chunks(odb: &Odb, path: &Path, size: u64) -> Result<Option<ObjectId>> {
+    use std::io::Read;
+    let mut file = fs::File::open(path)?;
+    let mut hasher = crate::hash::ObjectPayloadHasher::new(odb.hash_algo(), ObjectKind::Blob, size);
+    let mut buf = vec![0u8; 256 * 1024];
+    let mut total = 0u64;
+    loop {
+        let n = match file.read(&mut buf) {
+            Ok(0) => break,
+            Ok(n) => n,
+            Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(e) => return Err(Error::Io(e)),
+        };
+        total += n as u64;
+        if total > size {
+            return Ok(None);
+        }
+        hasher.update(&buf[..n]);
+    }
+    if total != size {
+        return Ok(None);
+    }
+    hasher.finish().map(Some)
 }
 
 /// Like [`hash_worktree_file`], for callers that already know the worktree file type from a

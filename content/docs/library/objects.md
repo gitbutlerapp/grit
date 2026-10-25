@@ -50,6 +50,29 @@ For hot loops (tree walks, batch cat-file), [`Odb::read_into`](rustdoc:grit_lib:
 
 When you only need type and size (for example listing objects without loading blob bodies), use [`Odb::read_info`](rustdoc:grit_lib::objects::odb::Odb) (see `read_info` on [`Odb`](rustdoc:grit_lib::objects::odb::Odb)). It returns [`ObjectInfo`](rustdoc:grit_lib::objects::ObjectInfo) and avoids inflating full payloads for loose objects and non-delta pack entries; delta chains are resolved from headers and delta size varints only.
 
+## Streaming large objects
+
+[`Odb::with_stream`](rustdoc:grit_lib::objects::odb::Odb::with_stream) hands a callback an [`ObjectStream`](rustdoc:grit_lib::objects::odb::ObjectStream) (kind, size and a reader over the payload) and returns the callback's result, or `None` when the object is missing. Loose objects and objects stored whole in a pack are inflated as you read, in fixed-size chunks, so copying a multi-gigabyte blob to a file takes a few hundred KiB of memory. Pack deltas are rebuilt in memory first, which Git also has to do. A truncated or corrupt object, including one whose zlib checksum fails, comes back as an `io::Error` from the reader. [`Odb::open_stream`](rustdoc:grit_lib::objects::odb::Odb::open_stream) returns a stream that owns its payload, so it reads the whole object first. Use it only for small objects.
+
+```rust
+use std::io::{Read, Write};
+
+let copied = odb.with_stream(&blob_id, |stream| {
+    let mut reader = stream.reader;
+    let mut buf = vec![0u8; 256 * 1024];
+    loop {
+        let n = reader.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        out.write_all(&buf[..n])?;
+    }
+    Ok(stream.size)
+})?;
+```
+
+Checkout uses this path. `restore`, `switch`, `reset --hard` and clone stream any regular file larger than 1 MiB straight into the work tree when no content conversion applies to its path (no `ident`, `working-tree-encoding`, smudge filter or LF-to-CRLF setting; see [`worktree_conversion_is_identity`](rustdoc:grit_lib::worktree::crlf::worktree_conversion_is_identity)). Choosing the path costs nothing extra: a loose object's header, or a whole pack entry's header, gives its size before anything is inflated. The check that a restored file matches its blob hashes large files in chunks too, when nothing would change the file on its way into Git ([`git_conversion_is_identity`](rustdoc:grit_lib::worktree::crlf::git_conversion_is_identity)).
+
 ## Reading commits
 
 [`Odb::read_commit`](rustdoc:grit_lib::objects::odb::Odb::read_commit) (also on [`Objects`](rustdoc:grit_lib::objects::handle::Objects)) reads an id, checks it names a commit and returns the parsed [`CommitData`](rustdoc:grit_lib::objects::CommitData). When you only need the root tree, [`Odb::commit_tree`](rustdoc:grit_lib::objects::odb::Odb::commit_tree) decodes just the commit headers. Neither follows annotated tags; peel first (see below) when the id may name one. An id that names a tree, blob or tag fails with `UnexpectedObjectKind` on [`Error`](rustdoc:grit_lib::error::Error), which carries the id and both kinds, so callers can tell "wrong kind of object" from a missing or corrupt one without matching message text. Stash, merge, pull, the history engine and commit-graph Bloom filters read commits through these two methods.

@@ -19,7 +19,8 @@ use crate::unicode_normalization::precompose_utf8_path;
 use crate::worktree_rules::WorktreeRules;
 
 use super::{
-    worktree_bytes_from_index_blob, write_checkout_entry, DelayedCheckoutTarget, LeadingDirCache,
+    read_blob_unless_streamed, stream_checkout_entry, worktree_bytes_from_index_blob,
+    write_checkout_entry, DelayedCheckoutTarget, LeadingDirCache, WorktreeFileContent,
 };
 
 /// One blob checkout after attribute/conversion resolution on the caller thread.
@@ -179,7 +180,9 @@ struct ParallelWriteWorker {
 
 struct PreparedWrite {
     idx: usize,
-    bytes: Vec<u8>,
+    /// Work-tree bytes, or `None` when the blob is streamed from the object database at write
+    /// time instead of being held in memory.
+    bytes: Option<Vec<u8>>,
 }
 
 fn worktree_bytes_for_parallel_job(
@@ -207,22 +210,36 @@ fn prepare_write_job(
     repo: &Repository,
     conv: &ConversionConfig,
     job: &CheckoutWriteJob,
-) -> Result<Vec<u8>> {
-    let object = repo.odb().read(&job.oid)?;
-    worktree_bytes_for_parallel_job(conv, job, &object.data)
+) -> Result<Option<Vec<u8>>> {
+    let Some(object) = read_blob_unless_streamed(repo, conv, &job.file_attrs, job.mode, &job.oid)?
+    else {
+        return Ok(None);
+    };
+    worktree_bytes_for_parallel_job(conv, job, &object.data).map(Some)
 }
 
 fn write_prepared_job(
+    repo: &Repository,
     work_tree: &Path,
-    jobs: &[CheckoutWriteJob],
-    prepared: &PreparedWrite,
+    job: &CheckoutWriteJob,
+    bytes: Option<&[u8]>,
     dir_cache: &mut LeadingDirCache,
 ) -> Result<IndexEntry> {
-    let job = &jobs[prepared.idx];
+    let Some(bytes) = bytes else {
+        return stream_checkout_entry(
+            repo,
+            work_tree,
+            &job.path,
+            job.mode,
+            &job.change,
+            dir_cache,
+            job.oid,
+        );
+    };
     write_checkout_entry(
         work_tree,
         &job.path,
-        &prepared.bytes,
+        WorktreeFileContent::Bytes(bytes),
         job.mode,
         &job.change,
         dir_cache,
@@ -231,6 +248,7 @@ fn write_prepared_job(
 }
 
 fn flush_prepared_writes_serial(
+    repo: &Repository,
     work_tree: &Path,
     jobs: &[CheckoutWriteJob],
     prepared: &[PreparedWrite],
@@ -238,7 +256,13 @@ fn flush_prepared_writes_serial(
     outcomes: &mut [Option<WriteJobOutcome>],
 ) -> Result<()> {
     for item in prepared {
-        let entry = write_prepared_job(work_tree, jobs, item, dir_cache)?;
+        let entry = write_prepared_job(
+            repo,
+            work_tree,
+            &jobs[item.idx],
+            item.bytes.as_deref(),
+            dir_cache,
+        )?;
         outcomes[item.idx] = Some(WriteJobOutcome::Index(entry));
     }
     Ok(())
@@ -266,15 +290,12 @@ fn flush_prepared_writes_parallel(
             dir_cache: LeadingDirCache::with_ready_from(&parent_dirs),
         },
         |worker, item| {
-            let job = &jobs[item.idx];
-            write_checkout_entry(
+            write_prepared_job(
+                repo,
                 &worker.work_tree,
-                &job.path,
-                &item.bytes,
-                job.mode,
-                &job.change,
+                &jobs[item.idx],
+                item.bytes.as_deref(),
                 &mut worker.dir_cache,
-                job.oid,
             )
         },
     )
@@ -295,7 +316,25 @@ fn materialize_write_job_serial(
     job: &CheckoutWriteJob,
     delayed: &mut DelayedProcessCheckout,
 ) -> Result<WriteJobOutcome> {
-    let object = repo.odb().read(&job.oid)?;
+    let Some(object) = read_blob_unless_streamed(
+        repo,
+        rules.conversion(),
+        &job.file_attrs,
+        job.mode,
+        &job.oid,
+    )?
+    else {
+        return stream_checkout_entry(
+            repo,
+            work_tree,
+            &job.path,
+            job.mode,
+            &job.change,
+            dir_cache,
+            job.oid,
+        )
+        .map(WriteJobOutcome::Index);
+    };
     let worktree_bytes = worktree_bytes_from_index_blob(
         repo,
         rules,
@@ -317,7 +356,7 @@ fn materialize_write_job_serial(
     let entry = write_checkout_entry(
         work_tree,
         &job.path,
-        &worktree_bytes,
+        WorktreeFileContent::Bytes(&worktree_bytes),
         job.mode,
         &job.change,
         dir_cache,
@@ -350,38 +389,39 @@ fn flush_parallel_batch(
     let use_parallel = options.threads.get() > 1 && checkout_pool_worthwhile(batch.len(), options);
     let pack_store = repo.odb().pack_store_for(repo.odb().objects_dir());
 
-    let prepared: Vec<PreparedWrite> =
-        if parallel_prepare_blobs && options.threads.get() > 1 && batch.len() > 1 {
-            try_par_map_with_local(
-                batch,
-                options,
-                0,
-                || PackReadContextGuard::install(Arc::clone(&pack_store)),
-                |_, &idx| {
-                    prepare_write_job(repo, conv, &jobs[idx])
-                        .map(|bytes| PreparedWrite { idx, bytes })
-                },
-            )
-            .map_err(|e: ParallelHashError<Error>| match e {
-                ParallelHashError::Task(err) => err,
-            })?
-        } else {
-            let mut prepared = Vec::with_capacity(batch.len());
-            let prepare_result = repo.odb().with_pack_read_context(|| {
-                for &idx in batch {
-                    match prepare_write_job(repo, conv, &jobs[idx]) {
-                        Ok(bytes) => prepared.push(PreparedWrite { idx, bytes }),
-                        Err(err) => return Err(err),
-                    }
+    let prepared: Vec<PreparedWrite> = if parallel_prepare_blobs
+        && options.threads.get() > 1
+        && batch.len() > 1
+    {
+        try_par_map_with_local(
+            batch,
+            options,
+            0,
+            || PackReadContextGuard::install(Arc::clone(&pack_store)),
+            |_, &idx| {
+                prepare_write_job(repo, conv, &jobs[idx]).map(|bytes| PreparedWrite { idx, bytes })
+            },
+        )
+        .map_err(|e: ParallelHashError<Error>| match e {
+            ParallelHashError::Task(err) => err,
+        })?
+    } else {
+        let mut prepared = Vec::with_capacity(batch.len());
+        let prepare_result = repo.odb().with_pack_read_context(|| {
+            for &idx in batch {
+                match prepare_write_job(repo, conv, &jobs[idx]) {
+                    Ok(bytes) => prepared.push(PreparedWrite { idx, bytes }),
+                    Err(err) => return Err(err),
                 }
-                Ok(())
-            });
-            if let Err(err) = prepare_result {
-                flush_prepared_writes_serial(work_tree, jobs, &prepared, dir_cache, outcomes)?;
-                return Err(err);
             }
-            prepared
-        };
+            Ok(())
+        });
+        if let Err(err) = prepare_result {
+            flush_prepared_writes_serial(repo, work_tree, jobs, &prepared, dir_cache, outcomes)?;
+            return Err(err);
+        }
+        prepared
+    };
 
     if use_parallel {
         let parent_snapshot = LeadingDirCache::with_ready_from(&*dir_cache);
@@ -395,7 +435,7 @@ fn flush_parallel_batch(
             outcomes,
         )
     } else {
-        flush_prepared_writes_serial(work_tree, jobs, &prepared, dir_cache, outcomes)
+        flush_prepared_writes_serial(repo, work_tree, jobs, &prepared, dir_cache, outcomes)
     }
 }
 

@@ -1478,10 +1478,56 @@ pub fn convert_to_git_with_opts(
     Ok(buf)
 }
 
+/// Whether [`convert_to_git_with_opts`] returns every file at a path with these attributes
+/// unchanged.
+///
+/// Decided from configuration and attributes alone, without looking at content: no clean or
+/// process filter (required or not) and no `working-tree-encoding` applies, and no line-ending
+/// setting can turn CRLF into LF. When this holds, a work-tree file's blob id can be computed
+/// by hashing the file as it is, for example in chunks without loading it whole.
+///
+/// # Parameters
+///
+/// - `conv` — line-ending configuration (`core.autocrlf`, `core.eol`).
+/// - `attrs` — the path's resolved attributes.
+#[must_use]
+pub fn git_conversion_is_identity(conv: &ConversionConfig, attrs: &FileAttrs) -> bool {
+    attrs.filter_process.is_none()
+        && attrs.filter_clean.is_none()
+        && !attrs.filter_clean_required
+        && attrs.working_tree_encoding.is_none()
+        && !crlf_input_possible(conv, attrs)
+}
+
+/// Whether some content at this path could be converted CRLF→LF on input.
+///
+/// `false` means [`would_convert_on_input`] is `false` for every file.
+fn crlf_input_possible(conv: &ConversionConfig, attrs: &FileAttrs) -> bool {
+    match attrs.crlf_legacy {
+        CrlfLegacyAttr::Unset => return false,
+        CrlfLegacyAttr::Input => return true,
+        CrlfLegacyAttr::Crlf => return attrs.text != TextAttr::Unset,
+        CrlfLegacyAttr::Unspecified => {}
+    }
+    if attrs.text == TextAttr::Unset {
+        return false;
+    }
+    if attrs.eol != EolAttr::Unspecified {
+        return true;
+    }
+    match attrs.text {
+        TextAttr::Set | TextAttr::Auto => true,
+        _ => conv.autocrlf != AutoCrlf::False,
+    }
+}
+
 /// Decide whether CRLF/LF conversion is configured for this file on input.
 /// Returns true if the file *would* be subject to conversion (even if no
 /// actual bytes need changing).
 fn would_convert_on_input(conv: &ConversionConfig, attrs: &FileAttrs, data: &[u8]) -> bool {
+    if !crlf_input_possible(conv, attrs) {
+        return false;
+    }
     match attrs.crlf_legacy {
         CrlfLegacyAttr::Unset => return false,
         CrlfLegacyAttr::Input => {
@@ -1818,9 +1864,54 @@ pub fn convert_to_worktree_eager(
     }
 }
 
+/// Whether [`convert_to_worktree`] returns every blob at a path with these attributes unchanged.
+///
+/// Decided from configuration and attributes alone, without looking at content: no `ident`,
+/// `working-tree-encoding`, smudge or process filter applies, and no line-ending setting can
+/// turn LF into CRLF. When this holds, a blob can be copied into the work tree verbatim, for
+/// example streamed straight from the object database.
+///
+/// # Parameters
+///
+/// - `conv` — line-ending configuration (`core.autocrlf`, `core.eol`).
+/// - `attrs` — the path's resolved attributes.
+#[must_use]
+pub fn worktree_conversion_is_identity(conv: &ConversionConfig, attrs: &FileAttrs) -> bool {
+    !attrs.ident
+        && attrs.working_tree_encoding.is_none()
+        && attrs.filter_smudge.is_none()
+        && attrs.filter_process.is_none()
+        && !attrs.filter_smudge_required
+        && !crlf_output_possible(conv, attrs)
+}
+
+/// Whether some content at this path could be converted LF→CRLF on output.
+///
+/// `false` means [`should_convert_to_crlf`] is `false` for every blob.
+fn crlf_output_possible(conv: &ConversionConfig, attrs: &FileAttrs) -> bool {
+    match attrs.crlf_legacy {
+        CrlfLegacyAttr::Unset | CrlfLegacyAttr::Input => return false,
+        CrlfLegacyAttr::Crlf => return attrs.text != TextAttr::Unset,
+        CrlfLegacyAttr::Unspecified => {}
+    }
+    if attrs.text == TextAttr::Unset {
+        return false;
+    }
+    if attrs.eol != EolAttr::Unspecified {
+        return attrs.eol == EolAttr::Crlf;
+    }
+    match attrs.text {
+        TextAttr::Set | TextAttr::Auto => output_eol_is_crlf(conv),
+        _ => conv.autocrlf == AutoCrlf::True,
+    }
+}
+
 /// Decide whether to convert LF→CRLF on output (working tree / smudge direction).
 #[must_use]
 pub fn should_convert_to_crlf(conv: &ConversionConfig, attrs: &FileAttrs, data: &[u8]) -> bool {
+    if !crlf_output_possible(conv, attrs) {
+        return false;
+    }
     match attrs.crlf_legacy {
         CrlfLegacyAttr::Unset | CrlfLegacyAttr::Input => return false,
         CrlfLegacyAttr::Crlf => {
@@ -2188,6 +2279,131 @@ pub type GitAttributes = Vec<AttrRule>;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Attribute and config combinations covering every line-ending branch.
+    fn conversion_matrix() -> Vec<(ConversionConfig, FileAttrs)> {
+        let mut out = Vec::new();
+        for autocrlf in [AutoCrlf::False, AutoCrlf::True, AutoCrlf::Input] {
+            for eol in [CoreEol::Lf, CoreEol::Crlf, CoreEol::Native] {
+                for text in [
+                    TextAttr::Set,
+                    TextAttr::Auto,
+                    TextAttr::Unset,
+                    TextAttr::Unspecified,
+                ] {
+                    for attr_eol in [EolAttr::Unspecified, EolAttr::Lf, EolAttr::Crlf] {
+                        for crlf_legacy in [
+                            CrlfLegacyAttr::Unspecified,
+                            CrlfLegacyAttr::Crlf,
+                            CrlfLegacyAttr::Input,
+                            CrlfLegacyAttr::Unset,
+                        ] {
+                            let conv = ConversionConfig {
+                                autocrlf,
+                                eol,
+                                safecrlf: SafeCrlf::False,
+                                command_runner: system_command_runner(),
+                            };
+                            let attrs = FileAttrs {
+                                text,
+                                eol: attr_eol,
+                                crlf_legacy,
+                                ..FileAttrs::default()
+                            };
+                            out.push((conv, attrs));
+                        }
+                    }
+                }
+            }
+        }
+        out
+    }
+
+    const SAMPLES: [&[u8]; 4] = [
+        b"a\nb\n",
+        b"a\r\nb\r\n",
+        b"mixed\r\nends\n",
+        b"bin\0\r\nary\n",
+    ];
+
+    #[test]
+    fn worktree_identity_implies_no_output_conversion_for_any_content() {
+        let mut identities = 0;
+        for (conv, attrs) in conversion_matrix() {
+            if !worktree_conversion_is_identity(&conv, &attrs) {
+                continue;
+            }
+            identities += 1;
+            for data in SAMPLES {
+                let out = convert_to_worktree(data, "f", &conv, &attrs, None, None, None, None)
+                    .expect("convert")
+                    .expect("not delayed");
+                assert_eq!(out, data, "{conv:?} {attrs:?} changed {data:?}");
+            }
+        }
+        assert!(identities > 0);
+    }
+
+    #[test]
+    fn git_identity_implies_no_input_conversion_for_any_content() {
+        let mut identities = 0;
+        for (conv, attrs) in conversion_matrix() {
+            if !git_conversion_is_identity(&conv, &attrs) {
+                continue;
+            }
+            identities += 1;
+            for data in SAMPLES {
+                let out = convert_to_git_with_opts(
+                    data,
+                    "f",
+                    &conv,
+                    &attrs,
+                    ConvertToGitOpts {
+                        index_blob: None,
+                        renormalize: false,
+                        check_safecrlf: false,
+                        filter_process: None,
+                        command_runner: None,
+                    },
+                )
+                .expect("convert");
+                assert_eq!(out, data, "{conv:?} {attrs:?} changed {data:?}");
+            }
+        }
+        assert!(identities > 0);
+    }
+
+    #[test]
+    fn identity_checks_see_filters_ident_and_encoding() {
+        let conv = ConversionConfig::from_config(&ConfigSet::new());
+        assert!(worktree_conversion_is_identity(
+            &conv,
+            &FileAttrs::default()
+        ));
+        assert!(git_conversion_is_identity(&conv, &FileAttrs::default()));
+        let with = |f: &dyn Fn(&mut FileAttrs)| {
+            let mut attrs = FileAttrs::default();
+            f(&mut attrs);
+            attrs
+        };
+        for attrs in [
+            with(&|a| a.ident = true),
+            with(&|a| a.working_tree_encoding = Some("UTF-16".into())),
+            with(&|a| a.filter_smudge = Some("cat".into())),
+            with(&|a| a.filter_process = Some("proc".into())),
+            with(&|a| a.filter_smudge_required = true),
+        ] {
+            assert!(!worktree_conversion_is_identity(&conv, &attrs), "{attrs:?}");
+        }
+        for attrs in [
+            with(&|a| a.working_tree_encoding = Some("UTF-16".into())),
+            with(&|a| a.filter_clean = Some("cat".into())),
+            with(&|a| a.filter_process = Some("proc".into())),
+            with(&|a| a.filter_clean_required = true),
+        ] {
+            assert!(!git_conversion_is_identity(&conv, &attrs), "{attrs:?}");
+        }
+    }
 
     #[test]
     fn test_crlf_to_lf() {

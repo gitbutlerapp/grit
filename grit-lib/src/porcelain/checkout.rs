@@ -15,7 +15,7 @@
 use std::borrow::Cow;
 use std::collections::{BTreeSet, HashSet};
 use std::fs::{self, OpenOptions};
-use std::io::Write;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
@@ -30,8 +30,8 @@ use crate::index::{
     entry_from_metadata, entry_from_stat, Index, IndexEntry, MODE_EXECUTABLE, MODE_GITLINK,
     MODE_REGULAR, MODE_SYMLINK, MODE_TREE,
 };
-use crate::objects::{ObjectId, TreeEntry};
-use crate::odb::Odb;
+use crate::objects::{Object, ObjectId, TreeEntry};
+use crate::odb::{BoundedRead, Odb};
 use crate::parallel::{try_par_map, ParallelHashError, ParallelOp};
 use crate::path_icase::paths_equal;
 use crate::path_population::{validate_tree_walk_entry, validate_worktree_path};
@@ -523,7 +523,25 @@ pub fn checkout_hard_to_tree_from_head_tree(
 
         let path = crate::repo_relpath::storage_string(&te.path);
         let change = diff_entry_for_worktree_blob_refresh(work_tree, &path, te.oid, mode);
-        let object = repo.odb().read(&te.oid)?;
+        let Some(object) = read_blob_unless_streamed(
+            repo,
+            rules.conversion(),
+            &rules.file_attrs(&path, false),
+            mode,
+            &te.oid,
+        )?
+        else {
+            new_entries.push(stream_checkout_entry(
+                repo,
+                work_tree,
+                &path,
+                mode,
+                &change,
+                &mut dir_cache,
+                te.oid,
+            )?);
+            continue;
+        };
         let worktree_bytes = worktree_bytes_from_index_blob(
             repo,
             &rules,
@@ -546,7 +564,7 @@ pub fn checkout_hard_to_tree_from_head_tree(
         let entry = write_checkout_entry(
             work_tree,
             &path,
-            &worktree_bytes,
+            WorktreeFileContent::Bytes(&worktree_bytes),
             mode,
             &change,
             &mut dir_cache,
@@ -2479,16 +2497,20 @@ pub(crate) fn write_smudged_blob_to_worktree(
     oid: &ObjectId,
     mode: u32,
 ) -> Result<()> {
-    let blob = repo.odb().read(oid)?;
-    let worktree_bytes =
-        smudge_bytes_for_worktree_path(repo, rules, rel_path, mode, &blob.data, oid)?;
-    write_to_worktree_cached(
+    let written = write_blob_to_worktree(
+        repo,
+        rules,
         work_tree,
         rel_path,
-        &worktree_bytes,
+        oid,
         mode,
         &mut LeadingDirCache::new(),
     )?;
+    if written.is_none() {
+        return Err(Error::PathError(format!(
+            "delayed filter checkout is not supported for '{rel_path}'"
+        )));
+    }
     Ok(())
 }
 
@@ -2587,7 +2609,7 @@ fn finish_delayed_checkouts(
             let entry = write_checkout_entry(
                 work_tree,
                 path,
-                data,
+                WorktreeFileContent::Bytes(data),
                 target.mode,
                 &target.change,
                 dir_cache,
@@ -2789,45 +2811,187 @@ fn can_overwrite_regular_in_place(change: &DiffEntry) -> bool {
         && is_regular_git_mode(parse_git_mode(&change.new_mode))
 }
 
+/// Blobs larger than this are streamed from the object database into the work tree when
+/// checkout copies them verbatim, so checkout memory stays flat however large a file is.
+const STREAMED_CHECKOUT_LIMIT: u64 = 1024 * 1024;
+
+/// Buffer size for copying a streamed blob into a work-tree file.
+const STREAMED_CHECKOUT_COPY_BUF: usize = 256 * 1024;
+
+/// Contents of one work-tree file being checked out.
+pub(crate) enum WorktreeFileContent<'a> {
+    /// Bytes already in memory, after any checkout conversion.
+    Bytes(&'a [u8]),
+    /// A blob payload copied verbatim from an object-database stream (regular files only).
+    Stream(&'a mut dyn Read),
+}
+
+/// Why writing [`WorktreeFileContent`] into a file failed.
+enum ContentWriteError {
+    /// Reading the object stream failed (corrupt or truncated object).
+    Read(std::io::Error),
+    /// Writing the work-tree file failed.
+    Write(std::io::Error),
+}
+
+impl ContentWriteError {
+    /// Convert to a library error, describing a write failure with `describe_write`.
+    fn into_error(self, describe_write: impl FnOnce(std::io::Error) -> String) -> Error {
+        match self {
+            Self::Read(e) => Error::Io(e),
+            Self::Write(e) => Error::PathError(describe_write(e)),
+        }
+    }
+}
+
+impl WorktreeFileContent<'_> {
+    fn write_into(self, file: &mut fs::File) -> std::result::Result<(), ContentWriteError> {
+        match self {
+            Self::Bytes(data) => file.write_all(data).map_err(ContentWriteError::Write),
+            Self::Stream(reader) => {
+                let mut buf = vec![0u8; STREAMED_CHECKOUT_COPY_BUF];
+                loop {
+                    let n = match reader.read(&mut buf) {
+                        Ok(0) => return Ok(()),
+                        Ok(n) => n,
+                        Err(e) if e.kind() == std::io::ErrorKind::Interrupted => continue,
+                        Err(e) => return Err(ContentWriteError::Read(e)),
+                    };
+                    file.write_all(&buf[..n])
+                        .map_err(ContentWriteError::Write)?;
+                }
+            }
+        }
+    }
+}
+
+/// Read blob `oid` for checkout, or return `None` when it should be streamed instead.
+///
+/// A regular file whose checkout conversion is the identity
+/// ([`crlf::worktree_conversion_is_identity`]) and whose blob is larger than
+/// [`STREAMED_CHECKOUT_LIMIT`] is left for [`stream_checkout_entry`]; everything else is read
+/// whole. Either way the object is looked up once.
+pub(crate) fn read_blob_unless_streamed(
+    repo: &Repository,
+    conv: &crlf::ConversionConfig,
+    attrs: &crlf::FileAttrs,
+    mode: u32,
+    oid: &ObjectId,
+) -> Result<Option<Object>> {
+    if !is_regular_git_mode(mode) || !crlf::worktree_conversion_is_identity(conv, attrs) {
+        return repo.odb().read(oid).map(Some);
+    }
+    match repo
+        .odb()
+        .read_unless_larger(oid, STREAMED_CHECKOUT_LIMIT)?
+    {
+        BoundedRead::Object(object) => Ok(Some(object)),
+        BoundedRead::Larger => Ok(None),
+    }
+}
+
+/// Check out blob `oid` at `rel_path` by streaming it straight into the work tree.
+///
+/// For blobs [`read_blob_unless_streamed`] left unread; the content is written verbatim.
+///
+/// # Errors
+///
+/// [`Error::ObjectNotFound`] when the object is missing, [`Error::Io`] when its stream is
+/// corrupt, and the usual work-tree write errors.
+pub(crate) fn stream_checkout_entry(
+    repo: &Repository,
+    work_tree: &Path,
+    rel_path: &str,
+    mode: u32,
+    change: &DiffEntry,
+    dir_cache: &mut LeadingDirCache,
+    oid: ObjectId,
+) -> Result<IndexEntry> {
+    repo.odb()
+        .with_stream(&oid, |stream| {
+            let mut reader = stream.reader;
+            write_checkout_entry(
+                work_tree,
+                rel_path,
+                WorktreeFileContent::Stream(&mut *reader),
+                mode,
+                change,
+                dir_cache,
+                oid,
+            )
+        })?
+        .ok_or_else(|| Error::ObjectNotFound(oid.to_hex()))
+}
+
+/// Write blob `oid` to `rel_path` with checkout conversion, replacing whatever is there.
+///
+/// Large blobs copied verbatim are streamed from the object database (see
+/// [`read_blob_unless_streamed`]); everything else is read, converted and written whole.
+/// Returns the written path's metadata, or `None` when a process filter delayed the path.
+pub(crate) fn write_blob_to_worktree(
+    repo: &Repository,
+    rules: &WorktreeRules,
+    work_tree: &Path,
+    rel_path: &str,
+    oid: &ObjectId,
+    mode: u32,
+    dir_cache: &mut LeadingDirCache,
+) -> Result<Option<fs::Metadata>> {
+    let attrs = rules.file_attrs(rel_path, false);
+    let Some(blob) = read_blob_unless_streamed(repo, rules.conversion(), &attrs, mode, oid)? else {
+        return repo
+            .odb()
+            .with_stream(oid, |stream| {
+                let mut reader = stream.reader;
+                write_worktree_content(
+                    work_tree,
+                    rel_path,
+                    WorktreeFileContent::Stream(&mut *reader),
+                    mode,
+                    dir_cache,
+                )
+            })?
+            .ok_or_else(|| Error::ObjectNotFound(oid.to_hex()))
+            .map(Some);
+    };
+    let Some(bytes) =
+        worktree_bytes_from_index_blob(repo, rules, rel_path, mode, &blob.data, oid, None, None)?
+    else {
+        return Ok(None);
+    };
+    write_to_worktree_cached(work_tree, rel_path, &bytes, mode, dir_cache).map(Some)
+}
+
 fn write_checkout_entry(
     work_tree: &Path,
     rel_path: &str,
-    data: &[u8],
+    content: WorktreeFileContent<'_>,
     mode: u32,
     change: &DiffEntry,
     dir_cache: &mut LeadingDirCache,
     oid: ObjectId,
 ) -> Result<IndexEntry> {
     let index_path = crate::repo_relpath::storage_bytes(rel_path).into_owned();
-    if mode == MODE_SYMLINK {
-        let meta = write_to_worktree_cached(work_tree, rel_path, data, mode, dir_cache)?;
-        return Ok(entry_from_metadata(&meta, &index_path, oid, mode));
-    }
-
-    if can_overwrite_regular_in_place(change) {
+    if mode != MODE_SYMLINK && can_overwrite_regular_in_place(change) {
         dir_cache.ensure_parents(work_tree, rel_path)?;
         let abs_path = crate::repo_relpath::worktree_abs(work_tree, rel_path);
-        let old_mode = parse_git_mode(&change.old_mode);
-        let mut file = match OpenOptions::new()
+        if let Ok(mut file) = OpenOptions::new()
             .write(true)
             .truncate(true)
             .open(&abs_path)
         {
-            Ok(f) => f,
-            Err(_) => {
-                let meta = write_to_worktree_cached(work_tree, rel_path, data, mode, dir_cache)?;
-                return Ok(entry_from_metadata(&meta, &index_path, oid, mode));
-            }
-        };
-        file.write_all(data)
-            .map_err(|e| Error::PathError(format!("writing '{rel_path}' during checkout: {e}")))?;
-        drop(file);
-        apply_in_place_git_mode_transition_at_path(&abs_path, old_mode, mode)?;
-        let meta = written_file_symlink_metadata(&abs_path)?;
-        return Ok(entry_from_metadata(&meta, &index_path, oid, mode));
+            content.write_into(&mut file).map_err(|e| {
+                e.into_error(|e| format!("writing '{rel_path}' during checkout: {e}"))
+            })?;
+            drop(file);
+            let old_mode = parse_git_mode(&change.old_mode);
+            apply_in_place_git_mode_transition_at_path(&abs_path, old_mode, mode)?;
+            let meta = written_file_symlink_metadata(&abs_path)?;
+            return Ok(entry_from_metadata(&meta, &index_path, oid, mode));
+        }
     }
 
-    let meta = write_to_worktree_cached(work_tree, rel_path, data, mode, dir_cache)?;
+    let meta = write_worktree_content(work_tree, rel_path, content, mode, dir_cache)?;
     Ok(entry_from_metadata(&meta, &index_path, oid, mode))
 }
 
@@ -3019,36 +3183,25 @@ fn git_create_mode_for_index_mode(mode: u32) -> u32 {
 fn write_fresh_worktree_blob(
     abs_path: &Path,
     rel_path: &str,
-    data: &[u8],
+    content: WorktreeFileContent<'_>,
     mode: u32,
 ) -> Result<fs::Metadata> {
+    let mut options = OpenOptions::new();
+    options.write(true).create(true).truncate(true);
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
-        let create_mode = git_create_mode_for_index_mode(mode);
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(create_mode)
-            .open(abs_path)
-            .map_err(|e| Error::PathError(format!("writing '{rel_path}': {e}")))?;
-        file.write_all(data)
-            .map_err(|e| Error::PathError(format!("writing '{rel_path}': {e}")))?;
-        written_file_metadata(file, abs_path)
+        options.mode(git_create_mode_for_index_mode(mode));
     }
     #[cfg(not(unix))]
-    {
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .open(abs_path)
-            .map_err(|e| Error::PathError(format!("writing '{rel_path}': {e}")))?;
-        file.write_all(data)
-            .map_err(|e| Error::PathError(format!("writing '{rel_path}': {e}")))?;
-        written_file_metadata(file, abs_path)
-    }
+    let _ = mode;
+    let mut file = options
+        .open(abs_path)
+        .map_err(|e| Error::PathError(format!("writing '{rel_path}': {e}")))?;
+    content
+        .write_into(&mut file)
+        .map_err(|e| e.into_error(|e| format!("writing '{rel_path}': {e}")))?;
+    written_file_metadata(file, abs_path)
 }
 
 /// Adjust an existing file to an executable index mode (in-place checkout only).
@@ -3083,6 +3236,23 @@ pub(crate) fn write_to_worktree_cached(
     mode: u32,
     dir_cache: &mut LeadingDirCache,
 ) -> Result<fs::Metadata> {
+    write_worktree_content(
+        work_tree,
+        rel_path,
+        WorktreeFileContent::Bytes(data),
+        mode,
+        dir_cache,
+    )
+}
+
+/// Write `content` to a fresh working tree file, replacing whatever is at the path.
+fn write_worktree_content(
+    work_tree: &Path,
+    rel_path: &str,
+    content: WorktreeFileContent<'_>,
+    mode: u32,
+    dir_cache: &mut LeadingDirCache,
+) -> Result<fs::Metadata> {
     let rel_bytes = crate::repo_relpath::storage_bytes(rel_path);
     validate_worktree_path(&rel_bytes, mode, dir_cache.protect)?;
     let abs_path = crate::index::worktree_path_from_index_rel(work_tree, &rel_bytes);
@@ -3110,6 +3280,11 @@ pub(crate) fn write_to_worktree_cached(
     }
 
     if mode == MODE_SYMLINK {
+        let WorktreeFileContent::Bytes(data) = content else {
+            return Err(Error::PathError(format!(
+                "symlink target for '{rel_path}' must be in memory"
+            )));
+        };
         let target = std::str::from_utf8(data).map_err(|_| {
             Error::PathError(format!("symlink target for '{rel_path}' is not UTF-8"))
         })?;
@@ -3133,7 +3308,7 @@ pub(crate) fn write_to_worktree_cached(
         #[cfg(unix)]
         return written_file_symlink_metadata(&abs_path);
     }
-    write_fresh_worktree_blob(&abs_path, rel_path, data, mode)
+    write_fresh_worktree_blob(&abs_path, rel_path, content, mode)
 }
 
 /// Remove empty parent directories up to (but not including) `work_tree`.

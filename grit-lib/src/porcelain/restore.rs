@@ -20,8 +20,8 @@ use crate::pathspec::{
     pathspec_is_exclude, sorted_paths_match_pathspec, PathspecListMatcher, PathspecMatchContext,
 };
 use crate::porcelain::checkout::{
-    remove_empty_parent_dirs, worktree_bytes_from_index_blob, write_smudged_blob_to_worktree,
-    write_to_worktree_cached, LeadingDirCache,
+    remove_empty_parent_dirs, write_blob_to_worktree, write_smudged_blob_to_worktree,
+    LeadingDirCache,
 };
 use crate::porcelain::stash::{flat_tree_lookup, flatten_tree_full, FlatTreeEntry};
 use crate::repo::Repository;
@@ -784,6 +784,23 @@ fn worktree_index_entry_up_to_date(
     Ok(wt_oid == entry.oid)
 }
 
+/// Write blob `oid` to `path` in the work tree and return the written path's metadata.
+fn restore_blob_to_worktree(
+    repo: &Repository,
+    rules: &WorktreeRules,
+    work_tree: &Path,
+    path: &str,
+    oid: &ObjectId,
+    mode: u32,
+    dir_cache: &mut LeadingDirCache,
+) -> Result<fs::Metadata> {
+    write_blob_to_worktree(repo, rules, work_tree, path, oid, mode, dir_cache)?.ok_or_else(|| {
+        Error::Message(format!(
+            "filter delayed checkout for '{path}' is not supported by grit restore"
+        ))
+    })
+}
+
 #[allow(clippy::too_many_arguments)]
 fn restore_worktree_blob_from_index(
     repo: &Repository,
@@ -800,17 +817,7 @@ fn restore_worktree_blob_from_index(
     if mode == MODE_GITLINK {
         return Ok(());
     }
-    let object = repo.odb().read(&oid)?;
-    let worktree_bytes =
-        worktree_bytes_from_index_blob(repo, rules, path, mode, &object.data, &oid, None, None)?;
-    let Some(bytes) = worktree_bytes else {
-        return Err(Error::Message(format!(
-            "filter delayed checkout for '{path}' is not supported by grit restore"
-        )));
-    };
-    write_to_worktree_cached(work_tree, path, &bytes, mode, dir_cache)?;
-    let abs = crate::repo_relpath::worktree_abs(work_tree, path);
-    let meta = fs::symlink_metadata(&abs).map_err(Error::Io)?;
+    let meta = restore_blob_to_worktree(repo, rules, work_tree, path, &oid, mode, dir_cache)?;
     let index_path = crate::repo_relpath::storage_bytes(path);
     index_out.add_or_replace(entry_from_metadata(&meta, index_path.as_ref(), oid, mode));
     *index_dirty = true;
@@ -835,25 +842,9 @@ fn restore_worktree_entry(
     if entry.mode == MODE_GITLINK {
         return Ok(());
     }
-    let abs = work_tree.join(path);
-    let object = repo.odb().read(&entry.oid)?;
-    let worktree_bytes = worktree_bytes_from_index_blob(
-        repo,
-        rules,
-        path,
-        entry.mode,
-        &object.data,
-        &entry.oid,
-        None,
-        None,
+    let meta = restore_blob_to_worktree(
+        repo, rules, work_tree, path, &entry.oid, entry.mode, dir_cache,
     )?;
-    let Some(bytes) = worktree_bytes else {
-        return Err(Error::Message(format!(
-            "filter delayed checkout for '{path}' is not supported by grit restore"
-        )));
-    };
-    write_to_worktree_cached(work_tree, path, &bytes, entry.mode, dir_cache)?;
-    let meta = fs::symlink_metadata(&abs).map_err(Error::Io)?;
     if worktree_from_tree {
         if let Some(existing) = existing_index {
             index_out.add_or_replace(entry_from_metadata(
