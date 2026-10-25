@@ -10,12 +10,13 @@ use super::super::matrix_helpers::{
     branch_rename_bench, history_reword_bench, merge_100k_bench, pick_100k_bench,
     prepare_branch_create, prepare_branch_delete, prepare_branch_rename, prepare_stash_list,
     prepare_tag_create, ref_query_contains_tags_bench, ref_query_merged_branches_bench,
-    revert_bench, setup_branch_create, setup_branch_delete, setup_branch_rename,
+    revert_bench, setup_big_asset, setup_branch_create, setup_branch_delete, setup_branch_rename,
     setup_delete_heavy_wide, setup_git_git_ref_contains, setup_history_reword,
     setup_hot_path_pick_merge_100k, setup_hot_path_revert, setup_hot_path_switch_100k,
     setup_many_refs, setup_many_refs_loose, setup_many_refs_merged, setup_stash_with_entry,
-    setup_tag_create, stash_list_bench, switch_100k_bench, switch_delete_heavy_bench,
-    tag_create_bench, tag_list_bench, tag_list_sort_version_git_git_bench,
+    setup_tag_create, stash_list_bench, switch_100k_bench, switch_big_asset_bench,
+    switch_delete_heavy_bench, tag_create_bench, tag_list_bench,
+    tag_list_sort_version_git_git_bench,
 };
 use super::super::plan::DailyHeadlinePlan;
 
@@ -82,6 +83,15 @@ pub fn plans() -> Vec<DailyHeadlinePlan> {
             prepare: prepare_switch_reset,
             build_git: |c| switch_delete_heavy_bench(c).1,
             build_grit: |c| switch_delete_heavy_bench(c).0,
+            correctness: None,
+        },
+        DailyHeadlinePlan {
+            spec: matrix_spec("switch/large-blob@big-asset"),
+            pending: false,
+            setup: setup_big_asset,
+            prepare: prepare_switch_reset,
+            build_git: |c| switch_big_asset_bench(c).1,
+            build_grit: |c| switch_big_asset_bench(c).0,
             correctness: None,
         },
         DailyHeadlinePlan {

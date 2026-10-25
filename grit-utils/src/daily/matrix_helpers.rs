@@ -410,6 +410,70 @@ pub fn setup_delete_heavy_wide(setup: &DailySetup<'_>) -> Result<DailyHeadlineCo
     })
 }
 
+/// Size of the single large blob in the big-asset fixture (production / smoke).
+fn big_asset_bytes(smoke: bool) -> usize {
+    if smoke {
+        8 * 1024 * 1024
+    } else {
+        300 * 1024 * 1024
+    }
+}
+
+/// One large text file (a dataset or build artifact) committed loose on `bench-a`; `bench-b`
+/// deletes it, so every switch back writes the whole blob to the work tree (issue #1849).
+pub fn setup_big_asset(setup: &DailySetup<'_>) -> Result<DailyHeadlineContext> {
+    use crate::hot_path_fixture::{meta_path, rev_parse, HotPathMeta};
+    use std::io::Write;
+
+    with_scratch("big-asset", |_scratch| {
+        let repo = crate::fixture::scratch_dir();
+        crate::fixture::remove_dir_robust(&repo);
+        std::fs::create_dir_all(&repo)?;
+        run_git(setup.git, &repo, &["init", "-q"])?;
+        run_git(setup.git, &repo, &["config", "gc.auto", "0"])?;
+        let mut file = std::io::BufWriter::new(std::fs::File::create(repo.join("big.txt"))?);
+        let (target, mut written, mut n) = (big_asset_bytes(setup.smoke), 0usize, 1u64);
+        while written < target {
+            let line = format!("{n}\n");
+            file.write_all(line.as_bytes())?;
+            written += line.len();
+            n += 1;
+        }
+        file.flush()?;
+        drop(file);
+        std::fs::write(repo.join("README"), "big asset fixture\n")?;
+        run_git(setup.git, &repo, &["add", "-A"])?;
+        run_git(setup.git, &repo, &["commit", "-q", "-m", "big asset"])?;
+        run_git(setup.git, &repo, &["branch", "-q", "bench-a"])?;
+        run_git(setup.git, &repo, &["checkout", "-q", "-b", "bench-b"])?;
+        run_git(setup.git, &repo, &["rm", "-q", "big.txt"])?;
+        run_git(setup.git, &repo, &["commit", "-q", "-m", "drop big asset"])?;
+        run_git(setup.git, &repo, &["checkout", "-q", "bench-a"])?;
+        let base_commit = rev_parse(setup.git, &repo, "bench-a")?;
+        let meta = HotPathMeta {
+            branch_a: "bench-a".into(),
+            branch_b: "bench-b".into(),
+            main_branch: "bench-a".into(),
+            topic_branch: "bench-b".into(),
+            base_commit: base_commit.clone(),
+            main_tip: base_commit,
+            pick_commit: String::new(),
+            pick_series_commits: Vec::new(),
+            wide: false,
+            wide_branch_b: None,
+        };
+        std::fs::write(meta_path(&repo), serde_json::to_string_pretty(&meta)?)?;
+        let mut headline = ctx(repo, setup);
+        headline.hot_path_meta = Some(meta);
+        Ok(headline)
+    })
+}
+
+/// Switch away from the big asset and back, writing the whole blob to the work tree.
+pub fn switch_big_asset_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
+    switch_bench_from_meta(ctx)
+}
+
 /// Switch to the delete-heavy branch and back, so the return trip deletes files the first
 /// trip just wrote (racily clean entries).
 pub fn switch_delete_heavy_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {

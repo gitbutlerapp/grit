@@ -457,6 +457,13 @@ pub const MATRIX_SCENARIOS: &[ScenarioSpec] = &[
         description: "Switch to a branch deleting 2000 files in 20 dirs of a 48k-file tree and back: grit switch vs git switch",
     },
     ScenarioSpec {
+        id: "switch/large-blob@big-asset",
+        area: Area::Branching,
+        headline: false,
+        name: None,
+        description: "Switch away from a 300 MB loose text blob and back, writing it to the work tree: grit switch vs git switch",
+    },
+    ScenarioSpec {
         id: "branch/create@many-refs",
         area: Area::Branching,
         headline: false,
