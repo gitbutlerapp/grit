@@ -377,6 +377,31 @@ mod tests {
     }
 
     #[test]
+    fn debug_reports_length_and_backing() {
+        let owned = PackData::from_owned(vec![0u8; 12]);
+        let rendered = format!("{owned:?}");
+        assert!(rendered.contains("len: 12"), "{rendered}");
+        assert!(rendered.contains("\"owned\""), "{rendered}");
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("mapped.pack");
+        let mut pack = Vec::from(b"PACK\x00\x00\x00\x02\x00\x00\x00\x00" as &[u8]);
+        pack.resize(
+            usize::try_from(OWNED_READ_THRESHOLD).expect("threshold") + 64,
+            0,
+        );
+        fs::write(&path, &pack).expect("write");
+        let mapped = PackData::open(&path).expect("open mapped");
+        assert!(mapped.is_mapped_backing());
+        let rendered = format!("{mapped:?}");
+        assert!(rendered.contains("\"mapped\""), "{rendered}");
+        assert!(
+            rendered.contains(&format!("len: {}", pack.len())),
+            "{rendered}"
+        );
+    }
+
+    #[test]
     fn mmap_large_sparse_pack() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("sparse.pack");
