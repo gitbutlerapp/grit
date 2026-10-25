@@ -9,6 +9,7 @@ use std::sync::Arc;
 #[derive(Default)]
 pub struct HotPathTestMetrics {
     tree_writes: AtomicUsize,
+    cache_tree_builds: AtomicUsize,
     freshen_calls: AtomicUsize,
     blob_content_reads: AtomicUsize,
     pack_signature_stats: AtomicUsize,
@@ -42,6 +43,16 @@ impl HotPathTestMetrics {
 
     pub(crate) fn record_tree_write(&self) {
         self.tree_writes.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// Whole-tree cache-tree builds (`build_cache_tree_from_tree`) on this ODB.
+    #[must_use]
+    pub fn cache_tree_builds(&self) -> usize {
+        self.cache_tree_builds.load(Ordering::SeqCst)
+    }
+
+    pub(crate) fn record_cache_tree_build(&self) {
+        self.cache_tree_builds.fetch_add(1, Ordering::Relaxed);
     }
 
     /// Clear freshen-touch count.

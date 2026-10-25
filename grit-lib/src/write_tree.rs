@@ -576,6 +576,8 @@ pub fn build_cache_tree_from_index(odb: &Odb, index: &Index) -> Result<CacheTree
 /// `entry_count` exceeds the number of (deduplicated) index entries, so [`verify_cache_tree`] later
 /// reports "corrupted cache-tree has entries not present in index".
 pub fn build_cache_tree_from_tree(odb: &Odb, tree_oid: &ObjectId) -> Result<CacheTreeNode> {
+    #[cfg(test)]
+    odb.hot_path_metrics().record_cache_tree_build();
     build_cache_tree_from_tree_named(odb, tree_oid, Vec::new())
 }
 

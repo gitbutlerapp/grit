@@ -225,23 +225,27 @@ fn checkout_populated_tree(
 
     let mut walk = PopulatedTreeWalk::new(repo.odb(), tree_oid, protect)?;
     let mut chunk = Vec::with_capacity(POPULATED_TREE_CHECKOUT_CHUNK);
+    // Chunks only update the in-memory index. Building the cache tree walks the whole tree and
+    // writing the index serializes every entry, so both happen once, after the last chunk.
     let mut apply = CheckoutApplyOptions {
         parallel_prepare_blobs: false,
-        checkout_result_tree: Some(*tree_oid),
+        checkout_result_tree: None,
+        defer_index_disk_write: true,
         precomputed_worktree_rules: Some(Rc::clone(&rules)),
         ..CheckoutApplyOptions::default()
     };
-    let mut deferred_index_flush = false;
+    let mut bulk_index_rewrite = false;
 
     while walk.fill_chunk(&mut chunk)? {
-        deferred_index_flush = chunk.len() == POPULATED_TREE_CHECKOUT_CHUNK;
-        apply.defer_index_disk_write = deferred_index_flush;
         let changes: Vec<DiffEntry> = chunk.iter().map(populated_blob_to_added_diff).collect();
         prefetch_promisor_blobs_for_checkout(repo, &changes)?;
         let mut chunk_progress = ChunkProgressSink(progress);
-        if bulk_write_checkout_eligible(&changes, rules.as_ref())
-            && tree_changes_are_all_additions(&changes)
-        {
+        let bulk_write = bulk_write_checkout_eligible(&changes, rules.as_ref())
+            && tree_changes_are_all_additions(&changes);
+        bulk_index_rewrite = chunk.len() == POPULATED_TREE_CHECKOUT_CHUNK
+            || bulk_write
+            || changes.len() >= BULK_INDEX_REWRITE_MIN;
+        if bulk_write {
             checkout_bulk_added_tree_changes(
                 repo,
                 work_tree,
@@ -269,16 +273,8 @@ fn checkout_populated_tree(
         }
     }
 
-    if deferred_index_flush {
-        index_mut.suppress_pre_write_index_housekeeping = true;
-        index_mut.skip_racy_smudge_on_write = true;
-        repo.write_index_with_post_index_change(index_mut, true, false)?;
-        index_mut.skip_racy_smudge_on_write = false;
-        index_mut.suppress_pre_write_index_housekeeping = false;
-        let index_path = repo.index_path_for_env()?;
-        crate::index::advance_index_file_mtime_past_entries(index_mut, &index_path, None)?;
-        index_mut.source_mtime = crate::index::index_file_mtime(&index_path);
-    }
+    attach_checkout_result_cache_tree(repo, index_mut, tree_oid)?;
+    write_checkout_index(repo, index_mut, bulk_index_rewrite, None)?;
 
     progress.finish();
     Ok(())
@@ -941,6 +937,8 @@ fn checkout_stored_index_path_bytes(stored_path: &str) -> Vec<u8> {
 }
 
 const BULK_ADD_CHECKOUT_MIN: usize = 32;
+/// Change count from which a checkout's index write skips the pre-write housekeeping.
+const BULK_INDEX_REWRITE_MIN: usize = 64;
 const BULK_DELETE_CHECKOUT_MIN: usize = 32;
 
 fn remove_wholesale_directories_on_disk(
@@ -1026,19 +1024,41 @@ fn checkout_commit_index_update(
     );
     index_mut.ensure_canonical_order();
     if let Some(tree) = checkout_result_tree {
-        if index_mut.cache_tree.is_some() {
-            index_mut.cache_tree_root = Some(tree);
-        } else {
-            let cache_tree = crate::write_tree::build_cache_tree_from_tree(repo.odb(), &tree)?;
-            if usize::try_from(cache_tree.entry_count).ok() == Some(index_mut.entries.len()) {
-                index_mut.set_cache_tree(cache_tree);
-            }
-        }
+        attach_checkout_result_cache_tree(repo, index_mut, &tree)?;
     }
     index_mut.defer_untracked_cache_invalidation = false;
     if defer_index_disk_write {
         return Ok(());
     }
+    write_checkout_index(repo, index_mut, bulk_index_rewrite, index_mtime_hint)
+}
+
+/// Record that `index_mut` now matches `tree`: keep a still-valid cache tree and point its
+/// root at `tree`, or build one from `tree` when the entry counts agree.
+fn attach_checkout_result_cache_tree(
+    repo: &Repository,
+    index_mut: &mut Index,
+    tree: &ObjectId,
+) -> Result<()> {
+    if index_mut.cache_tree.is_some() {
+        index_mut.cache_tree_root = Some(*tree);
+        return Ok(());
+    }
+    let cache_tree = crate::write_tree::build_cache_tree_from_tree(repo.odb(), tree)?;
+    if usize::try_from(cache_tree.entry_count).ok() == Some(index_mut.entries.len()) {
+        index_mut.set_cache_tree(cache_tree);
+    }
+    Ok(())
+}
+
+/// Write the index after a checkout, with fresh stat data trusted (no racy smudging), then
+/// move the index file mtime past the newest entry so later status checks stay fast.
+fn write_checkout_index(
+    repo: &Repository,
+    index_mut: &mut Index,
+    bulk_index_rewrite: bool,
+    index_mtime_hint: Option<(u32, u32)>,
+) -> Result<()> {
     index_mut.suppress_pre_write_index_housekeeping = bulk_index_rewrite;
     index_mut.skip_racy_smudge_on_write = true;
     let result = repo.write_index_with_post_index_change(index_mut, true, false);
@@ -1984,7 +2004,7 @@ fn checkout_tree_changes_with_progress(
 
     remove_empty_parent_dirs_batch(work_tree, &deleted_abs_paths);
     drop(rules);
-    let bulk_index_rewrite = changes.len() >= 64;
+    let bulk_index_rewrite = changes.len() >= BULK_INDEX_REWRITE_MIN;
     checkout_commit_index_update(
         repo,
         index_mut,
@@ -3490,5 +3510,47 @@ mod tests {
             calls >= 2,
             "expected promisor prefetch at least once per populated-tree chunk, got {calls}"
         );
+    }
+
+    #[test]
+    fn populated_tree_builds_cache_tree_once_across_chunks() {
+        // Two full chunks take the bulk path; the short tail takes the per-change path.
+        let count = 2 * POPULATED_TREE_CHECKOUT_CHUNK + 5;
+        let tmp = TempDir::new().expect("tempdir");
+        let repo = init_repository(
+            tmp.path(),
+            false,
+            "main",
+            None,
+            crate::RefStorageFormat::Files,
+        )
+        .expect("init");
+        let wt = repo.work_tree().expect("wt");
+        for i in 0..count {
+            fs::write(wt.join(format!("f{i:05}.txt")), format!("body {i}\n")).expect("write");
+        }
+        let tree = commit_all(&repo, "many");
+        let mut index = Index::new();
+        repo.index_handle().write(&mut index).expect("clear index");
+        for i in 0..count {
+            fs::remove_file(wt.join(format!("f{i:05}.txt"))).expect("remove");
+        }
+
+        let builds_before = repo.odb().hot_path_metrics().cache_tree_builds();
+        checkout_between_trees(&repo, None, &tree).expect("populate");
+        let builds = repo.odb().hot_path_metrics().cache_tree_builds() - builds_before;
+
+        assert_eq!(
+            builds, 1,
+            "populated checkout should build the cache tree once, not once per chunk"
+        );
+        let index = repo.load_index().expect("index after");
+        assert_eq!(index.entries.len(), count);
+        assert_eq!(index.cache_tree_root, Some(tree));
+        assert_eq!(
+            index.cache_tree.as_ref().map(|t| t.entry_count),
+            Some(i32::try_from(count).expect("count fits"))
+        );
+        assert!(wt.join(format!("f{:05}.txt", count - 1)).is_file());
     }
 }
