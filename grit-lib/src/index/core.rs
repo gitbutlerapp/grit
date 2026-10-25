@@ -151,27 +151,7 @@ pub fn index_entries_stat_equivalent(
     b: &IndexEntry,
     policy: StatMatchPolicy,
 ) -> bool {
-    if a.size != b.size {
-        return false;
-    }
-    if a.mtime_sec != b.mtime_sec {
-        return false;
-    }
-    if policy.use_nanosec && policy.check_stat && a.mtime_nsec != b.mtime_nsec {
-        return false;
-    }
-    if policy.trust_ctime && policy.check_stat {
-        if a.ctime_sec != b.ctime_sec {
-            return false;
-        }
-        if policy.use_nanosec && a.ctime_nsec != b.ctime_nsec {
-            return false;
-        }
-    }
-    if policy.check_stat && (a.dev != b.dev || a.ino != b.ino || a.uid != b.uid || a.gid != b.gid) {
-        return false;
-    }
-    true
+    IndexStatFields::of_entry(a).equivalent_to(&IndexStatFields::of_entry(b), policy)
 }
 
 /// Git index extension signature `sdir` (sparse directory entries present).
@@ -4238,8 +4218,13 @@ pub(crate) fn stage0_mtime_max(entries: &[IndexEntry]) -> (u32, u32) {
 
 /// Advance the on-disk index mtime to be strictly newer than every stage-0 entry mtime.
 ///
-/// Checkout writes blob timestamps first, then the index in the same second; without this bump the
-/// next switch would treat every touched path as racy. Git usually ends up with a newer index second.
+/// This only acts when the index write lands on the same timestamp tick as the newest entry
+/// (or earlier), as coarse filesystem clocks allow, and moves it the smallest step past that
+/// entry. That step clears raciness only under `core.usenanosec`. Under the default
+/// whole-second rule, entries in the index's own second stay racy, and the next status
+/// verifies them by content once and then rewrites the index. Never move the mtime into a
+/// later second: stat matching ignores nanoseconds by default, so that would hide an edit
+/// made within the entry's second.
 ///
 /// When `touched_only_max` is set, it must be the true maximum stage-0 mtime in the index after
 /// checkout (not just the touched entries), or later switch prepare may treat paths as racy.
@@ -4357,6 +4342,59 @@ impl IndexStatFields {
                 size: munge_index_size(meta.len()),
             }
         }
+    }
+
+    /// Stat fields currently cached on `ie`.
+    #[must_use]
+    pub(crate) fn of_entry(ie: &IndexEntry) -> Self {
+        Self {
+            ctime_sec: ie.ctime_sec,
+            ctime_nsec: ie.ctime_nsec,
+            mtime_sec: ie.mtime_sec,
+            mtime_nsec: ie.mtime_nsec,
+            dev: ie.dev,
+            ino: ie.ino,
+            uid: ie.uid,
+            gid: ie.gid,
+            size: ie.size,
+        }
+    }
+
+    /// Whether `self` and `other` carry the same stat data under `policy`.
+    #[must_use]
+    pub(crate) fn equivalent_to(&self, other: &Self, policy: StatMatchPolicy) -> bool {
+        if self.size != other.size || self.mtime_sec != other.mtime_sec {
+            return false;
+        }
+        if policy.use_nanosec && policy.check_stat && self.mtime_nsec != other.mtime_nsec {
+            return false;
+        }
+        if policy.trust_ctime && policy.check_stat {
+            if self.ctime_sec != other.ctime_sec {
+                return false;
+            }
+            if policy.use_nanosec && self.ctime_nsec != other.ctime_nsec {
+                return false;
+            }
+        }
+        !policy.check_stat
+            || (self.dev == other.dev
+                && self.ino == other.ino
+                && self.uid == other.uid
+                && self.gid == other.gid)
+    }
+
+    /// Replace the stat data cached on `ie` with these fields (OID, mode and path are kept).
+    pub(crate) fn store_in(&self, ie: &mut IndexEntry) {
+        ie.ctime_sec = self.ctime_sec;
+        ie.ctime_nsec = self.ctime_nsec;
+        ie.mtime_sec = self.mtime_sec;
+        ie.mtime_nsec = self.mtime_nsec;
+        ie.dev = self.dev;
+        ie.ino = self.ino;
+        ie.uid = self.uid;
+        ie.gid = self.gid;
+        ie.size = self.size;
     }
 
     /// Build a stage-0 index entry using cached stat fields.

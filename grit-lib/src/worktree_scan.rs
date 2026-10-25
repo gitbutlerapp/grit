@@ -523,22 +523,21 @@ fn retain_status_diff_lookup(
             if honor_fsmonitor_stat_skip && crate::fsmonitor::entry_skips_worktree_stat(ie, index) {
                 return false;
             }
-            let stat_matches = crate::diff::stat_matches_blob_stat(ie, stat, stat_policy);
-            let racy = crate::diff::entry_is_racy_with_policy(ie, index_mtime, stat_policy);
-            if refresh_index_stat_in_pass {
-                let skip_refresh_for_status_diff = for_status
-                    && !stat_matches
-                    && stat.worktree_size() != ie.size
-                    && !ie.stat_cache_unset();
-                let skip_refresh_clean_status = for_status && stat_matches && !racy;
-                if !skip_refresh_for_status_diff && !skip_refresh_clean_status {
-                    return true;
-                }
+            if refresh_index_stat_in_pass
+                && crate::diff::worktree_diff_refreshes_entry(
+                    ie,
+                    stat,
+                    index_mtime,
+                    stat_policy,
+                    for_status,
+                )
+            {
+                return true;
             }
             if parallel_blob_work {
                 // Keep everything the visit pass must hash or report; drop only entries whose
                 // stat data proves them clean (the same test the visit pass applies).
-                return !(stat_matches
+                return !(crate::diff::stat_matches_blob_stat(ie, stat, stat_policy)
                     && mode_policy.worktree_mode_matches(stat.git_mode, ie.mode)
                     && crate::diff::index_entry_skips_worktree_content_hash_after_stat_match(
                         ie,

@@ -4085,7 +4085,8 @@ pub struct DiffIndexToWorktreeOptions {
     pub refresh_index_stat_in_pass: bool,
     /// When set, used instead of loading config from [`Self::repository_git_dir`].
     pub config: Option<std::sync::Arc<crate::config::ConfigSet>>,
-    /// Override parallel stat workers (`Some(1)` forces serial). When `None`, honors
+    /// Cap parallel stat workers (`Some(1)` forces serial), also applied to hashing the
+    /// racily clean entries the stat refresh verifies. When `None`, honors
     /// `core.preloadIndex` and [`crate::worktree_scan::PARALLEL_STAT_MIN_ENTRIES`].
     pub stat_parallel_threads: Option<usize>,
     /// CLI / embedder thread override applied to stat preload and hashing in this diff.
@@ -4906,6 +4907,39 @@ fn diff_index_to_worktree_inner(
         },
         sparse,
     )?;
+    let refresh_checks = if refresh_index_stat_in_pass {
+        let par_opts =
+            refresh_hash_parallel_options(&thread_policy, &config, options.stat_parallel_threads);
+        refresh_content_checks(
+            odb,
+            index,
+            &blob_stat_batches,
+            index_mtime,
+            stat_policy,
+            &|ie, stat| {
+                !(use_fsmonitor_stat_skip && crate::fsmonitor::entry_skips_worktree_stat(ie, index))
+                    && worktree_diff_refreshes_entry(
+                        ie,
+                        stat,
+                        index_mtime,
+                        stat_policy,
+                        options.for_status,
+                    )
+            },
+            &WorktreeHashContext {
+                work_tree,
+                precompose_unicode,
+                ignorecase,
+                conv: &conv,
+                file_attrs_for: &file_attrs_for,
+                filter_process: filter_fp,
+            },
+            par_opts,
+        )
+    } else {
+        Vec::new()
+    };
+    poll_diff_cancel_watch(cancel_watch)?;
     visit_blob_lookup_batches(blob_stat_batches, |entry_index, lookup| {
         poll_diff_cancel_watch(cancel_watch)?;
         let path_owned = crate::repo_relpath::storage_string(&index.entries[entry_index].path);
@@ -4935,58 +4969,33 @@ fn diff_index_to_worktree_inner(
                 if materialize_dirty_blobs {
                     staging_stat_cache.insert(path_str_ref.to_owned(), stat.fields);
                 }
-                if refresh_index_stat_in_pass {
-                    let ie_ref = &index.entries[entry_index];
-                    let stat_matches = stat_matches_blob_stat(ie_ref, &stat, stat_policy);
-                    let worktree_size = stat.worktree_size();
-                    // When size changed, the status fast path skips content hashing for the
-                    // unstaged diff; skip the refresh pass's duplicate read here too.
-                    // Mtime-only bumps keep size and still refresh.
-                    let skip_refresh_for_status_diff = options.for_status
-                        && !stat_matches
-                        && worktree_size != ie_ref.size
-                        && !ie_ref.stat_cache_unset();
-                    let racy = entry_is_racy_with_policy(ie_ref, index_mtime, stat_policy);
-                    let skip_refresh_clean_status = options.for_status && stat_matches && !racy;
-                    if !skip_refresh_for_status_diff && !skip_refresh_clean_status {
-                        let path_owned = path_str_ref.to_owned();
-                        let path_bytes = index.entries[entry_index].path.as_slice();
-                        let file_path = index_entry_worktree_abs_bytes(
-                            work_tree,
-                            path_bytes,
-                            precompose_unicode,
-                            ignorecase,
-                        );
-                        let ie = &mut index.entries[entry_index];
-                        let meta = fs::symlink_metadata(&file_path).map_err(Error::Io)?;
-                        let refresh = refresh_index_blob_stat_from_metadata(
-                            odb,
-                            ie,
-                            &meta,
-                            &path_owned,
-                            &file_path,
-                            index_mtime,
-                            &conv,
-                            &file_attrs_for,
-                            stat_policy,
-                            filter_fp,
-                        );
-                        if refresh.index_changed {
-                            index_stat_refresh_changed = true;
-                        }
-                        if refresh.content_verified {
-                            refresh_content_verified[entry_index] = true;
-                        }
-                        if index.fsmonitor_last_update.is_some()
-                            && stat_matches_blob_stat(
-                                &index.entries[entry_index],
-                                &stat,
-                                stat_policy,
-                            )
-                            && !refresh.index_changed
-                        {
-                            index.entries[entry_index].set_fsmonitor_valid(true);
-                        }
+                if refresh_index_stat_in_pass
+                    && worktree_diff_refreshes_entry(
+                        &index.entries[entry_index],
+                        &stat,
+                        index_mtime,
+                        stat_policy,
+                        options.for_status,
+                    )
+                {
+                    let refresh = refresh_index_blob_stat_from_scan(
+                        &mut index.entries[entry_index],
+                        &stat,
+                        index_mtime,
+                        stat_policy,
+                        refresh_checks[entry_index].unwrap_or(false),
+                    );
+                    if refresh.index_changed {
+                        index_stat_refresh_changed = true;
+                    }
+                    if refresh.content_verified {
+                        refresh_content_verified[entry_index] = true;
+                    }
+                    if index.fsmonitor_last_update.is_some()
+                        && stat_matches_blob_stat(&index.entries[entry_index], &stat, stat_policy)
+                        && !refresh.index_changed
+                    {
+                        index.entries[entry_index].set_fsmonitor_valid(true);
                     }
                 }
                 let ie = &index.entries[entry_index];
@@ -5951,30 +5960,34 @@ pub fn refresh_index_stat_content_verified_with_rules(
             index_mtime,
         },
     )?;
-    visit_blob_lookup_batches(refresh_batches, |entry_index, lookup| {
-        let BlobDiskLookup::Present(_stat) = lookup else {
-            return Ok(());
-        };
-        let path_owned = crate::repo_relpath::storage_string(&index.entries[entry_index].path);
-        let file_path = index_entry_worktree_abs_bytes(
+    let par_opts = refresh_hash_parallel_options(&thread_policy, &config, stat_parallel_threads);
+    let refresh_checks = refresh_content_checks(
+        odb,
+        index,
+        &refresh_batches,
+        index_mtime,
+        stat_policy,
+        &|_, _| true,
+        &WorktreeHashContext {
             work_tree,
-            &index.entries[entry_index].path,
             precompose_unicode,
             ignorecase,
-        );
-        let meta = fs::symlink_metadata(&file_path).map_err(Error::Io)?;
-        let ie = &mut index.entries[entry_index];
-        if refresh_index_blob_stat_from_metadata(
-            odb,
-            ie,
-            &meta,
-            &path_owned,
-            &file_path,
+            conv: &conv,
+            file_attrs_for: &file_attrs_for,
+            filter_process: filter_fp,
+        },
+        par_opts,
+    );
+    visit_blob_lookup_batches(refresh_batches, |entry_index, lookup| {
+        let BlobDiskLookup::Present(stat) = lookup else {
+            return Ok(());
+        };
+        if refresh_index_blob_stat_from_scan(
+            &mut index.entries[entry_index],
+            &stat,
             index_mtime,
-            &conv,
-            &file_attrs_for,
             stat_policy,
-            filter_fp,
+            refresh_checks[entry_index].unwrap_or(false),
         )
         .index_changed
         {
@@ -5993,143 +6006,212 @@ struct BlobStatRefreshOutcome {
     content_verified: bool,
 }
 
-#[allow(clippy::too_many_arguments)]
-fn refresh_index_blob_stat_from_metadata(
-    odb: &Odb,
-    ie: &mut IndexEntry,
-    meta: &fs::Metadata,
-    path: &str,
-    abs: &Path,
-    index_mtime: Option<(u32, u32)>,
-    conv: &crate::crlf::ConversionConfig,
-    file_attrs_for: &dyn Fn(&str) -> crate::crlf::FileAttrs,
-    stat_policy: crate::index::StatMatchPolicy,
-    filter_process: Option<&crate::filter_process::FilterProcessState>,
-) -> BlobStatRefreshOutcome {
+/// Whether the stat refresh may adopt worktree stat data for `ie` at all.
+fn refresh_index_entry_eligible(ie: &IndexEntry) -> bool {
     use crate::index::{MODE_EXECUTABLE, MODE_REGULAR, MODE_SYMLINK};
+    ie.stage() == 0
+        && !ie.skip_worktree()
+        && !ie.assume_unchanged()
+        && !ie.intent_to_add()
+        && matches!(ie.mode, MODE_REGULAR | MODE_EXECUTABLE | MODE_SYMLINK)
+}
 
-    if ie.stage() != 0 || ie.skip_worktree() || ie.assume_unchanged() || ie.intent_to_add() {
-        return BlobStatRefreshOutcome {
-            index_changed: false,
-            content_verified: false,
-        };
+/// Whether refreshing `ie` from the scanned `stat` must first prove by content that the
+/// worktree still holds `ie.oid`: the stat data changed, or it matches but is racy.
+fn refresh_needs_content_check(
+    ie: &IndexEntry,
+    stat: &crate::worktree_scan::BlobDiskStat,
+    index_mtime: Option<(u32, u32)>,
+    stat_policy: crate::index::StatMatchPolicy,
+) -> bool {
+    refresh_index_entry_eligible(ie)
+        && !stat.is_dir
+        && (!stat_matches_blob_stat(ie, stat, stat_policy)
+            || entry_is_racy_with_policy(ie, index_mtime, stat_policy))
+}
+
+/// Whether a worktree diff with `refresh_index_stat_in_pass` refreshes `ie` from `stat`.
+///
+/// Status leaves out entries whose stat data already decides the answer: clean and not racy,
+/// or a changed size (reported as modified without reading the file).
+pub(crate) fn worktree_diff_refreshes_entry(
+    ie: &IndexEntry,
+    stat: &crate::worktree_scan::BlobDiskStat,
+    index_mtime: Option<(u32, u32)>,
+    stat_policy: crate::index::StatMatchPolicy,
+    for_status: bool,
+) -> bool {
+    if !for_status {
+        return true;
     }
-    if ie.mode != MODE_REGULAR && ie.mode != MODE_EXECUTABLE && ie.mode != MODE_SYMLINK {
-        return BlobStatRefreshOutcome {
-            index_changed: false,
-            content_verified: false,
-        };
+    if stat_matches_blob_stat(ie, stat, stat_policy) {
+        return entry_is_racy_with_policy(ie, index_mtime, stat_policy);
     }
-    if !stat_matches_with_policy(ie, meta, stat_policy) {
-        let file_attrs = file_attrs_for(path);
-        let content_matches = hash_worktree_file(
+    stat.worktree_size() == ie.size || ie.stat_cache_unset()
+}
+
+/// Pool options for the stat refresh's content checks.
+///
+/// `thread_policy` and config pick the worker count; `stat_parallel_threads` caps it the same
+/// way it caps the stat scan (`Some(0)` or `Some(1)` keeps hashing on the calling thread).
+/// There is no byte threshold: opening each file, not hashing its bytes, dominates for the
+/// small files a checkout leaves racy.
+fn refresh_hash_parallel_options(
+    thread_policy: &crate::parallel::ThreadPolicy,
+    config: &ConfigSet,
+    stat_parallel_threads: Option<usize>,
+) -> crate::parallel::ParallelOptions {
+    let policy = crate::parallel::ThreadPolicy {
+        min_total_bytes_override: thread_policy.min_total_bytes_override.or(Some(0)),
+        ..*thread_policy
+    };
+    let mut par_opts = policy.resolve(crate::parallel::ParallelOp::IndexRefresh, config);
+    if let Some(cap) = stat_parallel_threads {
+        par_opts.threads = par_opts
+            .threads
+            .min(std::num::NonZeroUsize::new(cap).unwrap_or(std::num::NonZeroUsize::MIN));
+    }
+    par_opts
+}
+
+/// Worktree layout and attribute context for hashing index entries during a scan.
+struct WorktreeHashContext<'a> {
+    work_tree: &'a Path,
+    precompose_unicode: bool,
+    ignorecase: bool,
+    conv: &'a crate::crlf::ConversionConfig,
+    file_attrs_for: &'a dyn Fn(&str) -> crate::crlf::FileAttrs,
+    filter_process: Option<&'a crate::filter_process::FilterProcessState>,
+}
+
+/// Run every content check the stat refresh needs before the serial visit of `batches`.
+///
+/// Racily clean entries are the common case right after a checkout writes the index: every
+/// file then shares the index's timestamp second. Hashing them here, in parallel when
+/// `par_opts` and the total size allow it, keeps that first scan from reading files one by one.
+///
+/// Returns one slot per index entry: `Some(matches)` for scanned entries that `include` admits
+/// and [`refresh_needs_content_check`] selects, `None` elsewhere. Read and filter failures count
+/// as a mismatch, so those entries stay unverified.
+#[allow(clippy::too_many_arguments)]
+fn refresh_content_checks(
+    odb: &Odb,
+    index: &Index,
+    batches: &[Vec<(usize, crate::worktree_scan::BlobDiskLookup)>],
+    index_mtime: Option<(u32, u32)>,
+    stat_policy: crate::index::StatMatchPolicy,
+    include: &dyn Fn(&IndexEntry, &crate::worktree_scan::BlobDiskStat) -> bool,
+    ctx: &WorktreeHashContext<'_>,
+    par_opts: crate::parallel::ParallelOptions,
+) -> Vec<Option<bool>> {
+    use crate::worktree_scan::BlobDiskLookup;
+
+    /// Attributes are resolved on the calling thread: the shared rules are not `Sync`.
+    struct ContentCheck {
+        entry_index: usize,
+        worktree_mode: u32,
+        file_attrs: crate::crlf::FileAttrs,
+    }
+
+    let mut jobs = Vec::new();
+    let mut total_bytes = 0usize;
+    for (entry_index, lookup) in batches.iter().flatten() {
+        let BlobDiskLookup::Present(stat) = lookup else {
+            continue;
+        };
+        let ie = &index.entries[*entry_index];
+        if !refresh_needs_content_check(ie, stat, index_mtime, stat_policy) || !include(ie, stat) {
+            continue;
+        }
+        total_bytes = total_bytes.saturating_add(ie.size as usize);
+        jobs.push(ContentCheck {
+            entry_index: *entry_index,
+            worktree_mode: stat.git_mode,
+            file_attrs: (ctx.file_attrs_for)(&crate::repo_relpath::storage_string(&ie.path)),
+        });
+    }
+    let mut checks = vec![None; index.entries.len()];
+    if jobs.is_empty() {
+        return checks;
+    }
+    let (work_tree, precompose_unicode, ignorecase) =
+        (ctx.work_tree, ctx.precompose_unicode, ctx.ignorecase);
+    let (conv, filter_process) = (ctx.conv, ctx.filter_process);
+    let entries = index.entries.as_slice();
+    let matches = crate::parallel::par_map(&jobs, par_opts, total_bytes, |job| {
+        let ie = &entries[job.entry_index];
+        let file_path =
+            index_entry_worktree_abs_bytes(work_tree, &ie.path, precompose_unicode, ignorecase);
+        hash_worktree_file_with_mode(
             odb,
-            abs,
-            meta,
+            &file_path,
+            job.worktree_mode,
             conv,
-            &file_attrs,
-            path,
+            &job.file_attrs,
+            &crate::repo_relpath::storage_string(&ie.path),
             Some(ie),
             filter_process,
         )
-        .map(|oid| oid == ie.oid)
-        .unwrap_or(false);
+        .is_ok_and(|oid| oid == ie.oid)
+    });
+    for (job, matched) in jobs.iter().zip(matches) {
+        checks[job.entry_index] = Some(matched);
+    }
+    checks
+}
+
+/// Adopt the scanned `stat` for `ie` where that cannot hide a worktree change.
+///
+/// `content_matches` is the [`refresh_content_checks`] result for this entry; it is only
+/// consulted when [`refresh_needs_content_check`] holds. A racy entry whose content no longer
+/// matches has its stat cache invalidated so later scans re-hash it.
+fn refresh_index_blob_stat_from_scan(
+    ie: &mut IndexEntry,
+    stat: &crate::worktree_scan::BlobDiskStat,
+    index_mtime: Option<(u32, u32)>,
+    stat_policy: crate::index::StatMatchPolicy,
+    content_matches: bool,
+) -> BlobStatRefreshOutcome {
+    const UNCHANGED: BlobStatRefreshOutcome = BlobStatRefreshOutcome {
+        index_changed: false,
+        content_verified: false,
+    };
+    if !refresh_index_entry_eligible(ie) || stat.is_dir {
+        return UNCHANGED;
+    }
+    let cached = crate::index::IndexStatFields::of_entry(ie);
+    let stat_same = cached.equivalent_to(&stat.fields, stat_policy);
+    let stat_matches = stat_matches_blob_stat(ie, stat, stat_policy);
+    if !stat_matches || entry_is_racy_with_policy(ie, index_mtime, stat_policy) {
         if !content_matches {
-            return BlobStatRefreshOutcome {
-                index_changed: false,
-                content_verified: false,
-            };
+            if stat_matches {
+                invalidate_index_stat_cache(ie);
+                return BlobStatRefreshOutcome {
+                    index_changed: true,
+                    content_verified: false,
+                };
+            }
+            return UNCHANGED;
         }
-        let refreshed = crate::index::entry_from_metadata(meta, &ie.path, ie.oid, ie.mode);
-        if index_entry_stat_matches(ie, &refreshed, stat_policy) {
-            return BlobStatRefreshOutcome {
-                index_changed: false,
-                content_verified: true,
-            };
+        if !stat_same {
+            stat.fields.store_in(ie);
         }
-        ie.ctime_sec = refreshed.ctime_sec;
-        ie.ctime_nsec = refreshed.ctime_nsec;
-        ie.mtime_sec = refreshed.mtime_sec;
-        ie.mtime_nsec = refreshed.mtime_nsec;
-        ie.dev = refreshed.dev;
-        ie.ino = refreshed.ino;
-        ie.uid = refreshed.uid;
-        ie.gid = refreshed.gid;
-        ie.size = refreshed.size;
         return BlobStatRefreshOutcome {
-            index_changed: true,
+            index_changed: !stat_same,
             content_verified: true,
         };
     }
-    if entry_is_racy_with_policy(ie, index_mtime, stat_policy) {
-        let file_attrs = file_attrs_for(path);
-        let content_matches = hash_worktree_file(
-            odb,
-            abs,
-            meta,
-            conv,
-            &file_attrs,
-            path,
-            Some(ie),
-            filter_process,
-        )
-        .map(|oid| oid == ie.oid)
-        .unwrap_or(false);
-        if !content_matches {
-            invalidate_index_stat_cache(ie);
-            return BlobStatRefreshOutcome {
-                index_changed: true,
-                content_verified: false,
-            };
-        }
-        let refreshed = crate::index::entry_from_metadata(meta, &ie.path, ie.oid, ie.mode);
-        let index_changed = if index_entry_stat_matches(ie, &refreshed, stat_policy) {
-            false
-        } else {
-            ie.ctime_sec = refreshed.ctime_sec;
-            ie.ctime_nsec = refreshed.ctime_nsec;
-            ie.mtime_sec = refreshed.mtime_sec;
-            ie.mtime_nsec = refreshed.mtime_nsec;
-            ie.dev = refreshed.dev;
-            ie.ino = refreshed.ino;
-            ie.uid = refreshed.uid;
-            ie.gid = refreshed.gid;
-            ie.size = refreshed.size;
-            true
-        };
-        return BlobStatRefreshOutcome {
-            index_changed,
-            content_verified: true,
-        };
-    }
-    let refreshed = crate::index::entry_from_metadata(meta, &ie.path, ie.oid, ie.mode);
-    if index_entry_stat_matches(ie, &refreshed, stat_policy) {
+    if stat_same {
         return BlobStatRefreshOutcome {
             index_changed: false,
             content_verified: true,
         };
     }
-    ie.ctime_sec = refreshed.ctime_sec;
-    ie.ctime_nsec = refreshed.ctime_nsec;
-    ie.mtime_sec = refreshed.mtime_sec;
-    ie.mtime_nsec = refreshed.mtime_nsec;
-    ie.dev = refreshed.dev;
-    ie.ino = refreshed.ino;
-    ie.uid = refreshed.uid;
-    ie.gid = refreshed.gid;
-    ie.size = refreshed.size;
+    stat.fields.store_in(ie);
     BlobStatRefreshOutcome {
         index_changed: true,
         content_verified: false,
     }
-}
-
-fn index_entry_stat_matches(
-    a: &IndexEntry,
-    b: &IndexEntry,
-    policy: crate::index::StatMatchPolicy,
-) -> bool {
-    crate::index::index_entries_stat_equivalent(a, b, policy)
 }
 
 /// Whether path-only checkout can skip writing a blob because the worktree is up to date.

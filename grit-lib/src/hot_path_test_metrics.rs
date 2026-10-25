@@ -2,8 +2,10 @@
 //! Per-[`crate::odb::Odb`] hot-path counters for regression tests (test builds only).
 
 use std::cell::RefCell;
+use std::collections::HashSet;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::thread::ThreadId;
 
 /// Counters and opt-in recording flags for one object database / repository.
 #[derive(Default)]
@@ -12,6 +14,7 @@ pub struct HotPathTestMetrics {
     cache_tree_builds: AtomicUsize,
     freshen_calls: AtomicUsize,
     blob_content_reads: AtomicUsize,
+    blob_read_threads: Mutex<HashSet<ThreadId>>,
     pack_signature_stats: AtomicUsize,
     midx_stamp_stats: AtomicUsize,
     loose_path_open_attempts: AtomicUsize,
@@ -78,6 +81,10 @@ impl HotPathTestMetrics {
     /// Clear worktree blob read count.
     pub fn reset_blob_content_reads(&self) {
         self.blob_content_reads.store(0, Ordering::SeqCst);
+        self.blob_read_threads
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clear();
     }
 
     pub fn set_blob_counting(&self, enabled: bool) {
@@ -89,9 +96,22 @@ impl HotPathTestMetrics {
         self.blob_content_reads.load(Ordering::SeqCst)
     }
 
+    /// Distinct threads that read worktree blob content since the last reset.
+    #[must_use]
+    pub fn blob_read_thread_count(&self) -> usize {
+        self.blob_read_threads
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .len()
+    }
+
     pub(crate) fn record_blob_content_read(&self) {
         if self.blob_counting.load(Ordering::Relaxed) {
             self.blob_content_reads.fetch_add(1, Ordering::Relaxed);
+            self.blob_read_threads
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .insert(std::thread::current().id());
         }
     }
 

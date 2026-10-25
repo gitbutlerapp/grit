@@ -209,26 +209,129 @@ fn status_skips_index_rewrite_within_the_second_of_racy_entries() {
     );
 }
 
+/// Status right after a checkout: every entry shares the index's timestamp second, so each one
+/// must be verified by content once, spread over the worker pool rather than read one by one.
 #[test]
-fn racy_same_size_edit_stays_modified_after_status_rewrites_index() {
-    const FILES: usize = 16;
+fn parallel_status_verifies_racy_tree_once_on_worker_threads() {
+    const FILES: usize = PARALLEL_STAT_MIN_ENTRIES + 24;
     let tmp = tempfile::tempdir().expect("tempdir");
     let root = tmp.path();
     git_committed_repo(root, FILES, true);
+    git_in(root, &["config", "index.threads", "4"]);
+    make_index_racy(root, FILES);
+
+    let repo = open(root);
+    let (unstaged, first_reads) = status_counting_reads(&repo, 4);
+    assert!(unstaged.is_empty(), "{unstaged:?}");
+    let non_empty = (0..FILES).filter(|i| i % 8 != 0).count();
+    assert!(
+        (non_empty..=FILES).contains(&first_reads),
+        "racy entries must be verified by content exactly once ({first_reads} reads)"
+    );
+    let threads = repo.odb().hot_path_metrics().blob_read_thread_count();
+    assert!(
+        threads > 1,
+        "racy content checks must run on the worker pool, read on {threads} thread(s)"
+    );
+
+    let (unstaged, second_reads) = status_counting_reads(&repo, 4);
+    assert!(unstaged.is_empty(), "{unstaged:?}");
+    assert_eq!(second_reads, 0, "second status must trust stat data");
+    assert_eq!(git_status_porcelain(root), "");
+    git_in(root, &["fsck", "--no-progress"]);
+}
+
+/// A same-size edit within the racy second keeps matching stat data; only its content shows it.
+fn assert_racy_same_size_edit_stays_modified(files: usize, threads: usize) {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    git_committed_repo(root, files, true);
     git_in(root, &["config", "core.trustctime", "false"]);
+    git_in(root, &["config", "index.threads", &threads.to_string()]);
     let rel = "d1/s1/f0001.txt";
     let abs = root.join(rel);
     let mut bytes = fs::read(&abs).expect("read");
     bytes[0] = b'X';
     fs::write(&abs, &bytes).expect("write");
-    make_index_racy(root, FILES);
+    make_index_racy(root, files);
 
     let repo = open(root);
     for run in 0..2 {
-        let (unstaged, _) = status_counting_reads(&repo, 1);
-        assert_eq!(unstaged, vec![rel.to_owned()], "run {run}");
+        let (unstaged, _) = status_counting_reads(&repo, threads);
+        assert_eq!(
+            unstaged,
+            vec![rel.to_owned()],
+            "run {run}, threads {threads}"
+        );
     }
     assert_eq!(git_status_porcelain(root), format!(" M {rel}\n"));
+}
+
+#[test]
+fn racy_same_size_edit_stays_modified_after_status_rewrites_index() {
+    assert_racy_same_size_edit_stays_modified(16, 1);
+}
+
+#[test]
+fn parallel_racy_same_size_edit_stays_modified_after_status_rewrites_index() {
+    assert_racy_same_size_edit_stays_modified(PARALLEL_STAT_MIN_ENTRIES + 24, 4);
+}
+
+/// The standalone stat refresh (used before index writes by reset and stash) verifies racy
+/// entries on the worker pool, adopts nothing for an edited one, and smudges it for later scans.
+#[test]
+fn stat_refresh_verifies_racy_entries_in_parallel_and_smudges_the_edited_one() {
+    const FILES: usize = PARALLEL_STAT_MIN_ENTRIES + 24;
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    git_committed_repo(root, FILES, true);
+    git_in(root, &["config", "core.trustctime", "false"]);
+    git_in(root, &["config", "index.threads", "4"]);
+    let rel = "d2/s2/f0002.txt";
+    let abs = root.join(rel);
+    let mut bytes = fs::read(&abs).expect("read");
+    bytes[0] = b'Y';
+    fs::write(&abs, &bytes).expect("write");
+    make_index_racy(root, FILES);
+
+    let repo = open(root);
+    let mut index = repo.load_index().expect("index");
+    let before = index.entries.clone();
+    let index_mtime = index.source_mtime;
+    let metrics = repo.odb().hot_path_metrics();
+    metrics.reset_blob_content_reads();
+    metrics.set_blob_counting(true);
+    let changed = crate::diff::refresh_index_stat_content_verified(
+        repo.odb(),
+        repo.git_dir(),
+        &mut index,
+        root,
+        index_mtime,
+        None,
+        Some(4),
+    )
+    .expect("refresh");
+    metrics.set_blob_counting(false);
+    assert!(changed, "the edited racy entry must be invalidated");
+    assert!(
+        metrics.blob_read_thread_count() > 1,
+        "refresh must hash in parallel"
+    );
+    for (old, new) in before.iter().zip(&index.entries) {
+        if old.path == rel.as_bytes() {
+            assert_eq!(new.size, 0, "edited racy entry is smudged");
+        } else {
+            assert!(
+                crate::index::index_entries_stat_equivalent(
+                    old,
+                    new,
+                    crate::index::StatMatchPolicy::default()
+                ),
+                "clean entry {} keeps its stat",
+                String::from_utf8_lossy(&old.path)
+            );
+        }
+    }
 }
 
 /// Git's racy-write smudge leaves `size == 0` on a non-empty blob; an empty worktree file with
