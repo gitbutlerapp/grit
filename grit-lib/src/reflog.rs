@@ -17,7 +17,6 @@ use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
 
 use crate::config::ConfigSet;
-use crate::diff::zero_oid;
 use crate::error::{Error, Result};
 use crate::ident::Signature;
 use crate::merge_base;
@@ -423,8 +422,7 @@ pub fn all_reflog_oids(git_dir: &Path) -> Result<HashSet<ObjectId>> {
     if !logs.is_dir() {
         return Ok(out);
     }
-    let z = zero_oid();
-    walk_reflog_files(&logs, &mut out, &z)?;
+    walk_reflog_files(&logs, &mut out)?;
     Ok(out)
 }
 
@@ -443,13 +441,12 @@ pub fn all_reflog_oids_ordered(git_dir: &Path) -> Result<Vec<ObjectId>> {
         // Reftable repos: fall back to the ref-name-ordered reflog walk for a deterministic order.
         let mut out = Vec::new();
         let mut seen = HashSet::new();
-        let z = zero_oid();
         let mut names = list_reflog_refs(git_dir).unwrap_or_default();
         names.sort();
         for refname in names {
             for entry in read_reflog(git_dir, &refname).unwrap_or_default() {
                 for oid in [entry.old_oid, entry.new_oid] {
-                    if oid != z && seen.insert(oid) {
+                    if !oid.is_zero() && seen.insert(oid) {
                         out.push(oid);
                     }
                 }
@@ -463,7 +460,6 @@ pub fn all_reflog_oids_ordered(git_dir: &Path) -> Result<Vec<ObjectId>> {
     if !logs.is_dir() {
         return Ok(out);
     }
-    let z = zero_oid();
     let mut names = list_reflog_refs(git_dir).unwrap_or_default();
     names.sort();
     for refname in names {
@@ -476,7 +472,7 @@ pub fn all_reflog_oids_ordered(git_dir: &Path) -> Result<Vec<ObjectId>> {
                 continue;
             };
             for oid in [e.old_oid, e.new_oid] {
-                if oid != z && seen.insert(oid) {
+                if !oid.is_zero() && seen.insert(oid) {
                     out.push(oid);
                 }
             }
@@ -485,20 +481,20 @@ pub fn all_reflog_oids_ordered(git_dir: &Path) -> Result<Vec<ObjectId>> {
     Ok(out)
 }
 
-fn walk_reflog_files(dir: &Path, out: &mut HashSet<ObjectId>, zero: &ObjectId) -> Result<()> {
+fn walk_reflog_files(dir: &Path, out: &mut HashSet<ObjectId>) -> Result<()> {
     for entry in fs::read_dir(dir).map_err(Error::Io)? {
         let entry = entry.map_err(Error::Io)?;
         let path = entry.path();
         if path.is_dir() {
-            walk_reflog_files(&path, out, zero)?;
+            walk_reflog_files(&path, out)?;
         } else if path.is_file() {
             let content = fs::read_to_string(&path).map_err(Error::Io)?;
             for line in content.lines() {
                 if let Some(e) = parse_reflog_line(line) {
-                    if e.old_oid != *zero {
+                    if !e.old_oid.is_zero() {
                         out.insert(e.old_oid);
                     }
-                    if e.new_oid != *zero {
+                    if !e.new_oid.is_zero() {
                         out.insert(e.new_oid);
                     }
                 }

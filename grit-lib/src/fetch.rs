@@ -1270,7 +1270,7 @@ pub fn fetch_remote(
     if !opts.object_wants.is_empty() {
         return fetch_remote_object_wants(local_git_dir, conn, opts, progress, cancel);
     }
-    let local_odb = open_odb(local_git_dir);
+    let local_odb_for_ls = open_odb(local_git_dir);
 
     // 1. Remote refs + default branch.
     //
@@ -1284,7 +1284,7 @@ pub fn fetch_remote(
     {
         let caps: Vec<String> = conn.capabilities().to_vec();
         let (refs, head_symref, peel, head_oid) =
-            v2_ls_refs(conn, &caps, &local_odb, opts.tags, &opts.refspecs)?;
+            v2_ls_refs(conn, &caps, &local_odb_for_ls, opts.tags, &opts.refspecs)?;
         let default_branch =
             head_symref.map(|t| t.strip_prefix("refs/heads/").unwrap_or(&t).to_owned());
         (refs, default_branch, Some(caps), peel, head_oid)
@@ -1331,6 +1331,14 @@ pub fn fetch_remote(
             reason: crate::error::RemoteUnreadableReason::NoHandshake,
         });
     }
+
+    let conn_caps: Vec<String> = conn.capabilities().to_vec();
+    let remote_algo = crate::transfer::remote_hash_algo_from_advertisement(
+        &[v2_caps.as_deref().unwrap_or(&[]), conn_caps.as_slice()],
+        &remote_refs,
+    );
+    crate::transfer::sync_empty_destination_object_format(local_git_dir, remote_algo, opts)?;
+    let local_odb = open_odb(local_git_dir);
 
     let crate::transfer::FetchMatchSet {
         mut matched,
@@ -2001,12 +2009,12 @@ pub(crate) fn finish_initial_remote_fetch_layout(
         if crate::refs::resolve_ref(git_dir, &target).is_ok() {
             crate::refs::write_symbolic_ref(git_dir, &head_ref, &target)?;
             if let Some(ref log) = opts.clone_reflog {
-                let zero = ObjectId::zero();
-                let tip = crate::refs::resolve_ref(git_dir, &target).unwrap_or(zero);
+                let null = ObjectId::null(open_odb(git_dir).hash_algo());
+                let tip = crate::refs::resolve_ref(git_dir, &target).unwrap_or(null);
                 crate::refs::append_reflog(
                     git_dir,
                     &head_ref,
-                    &zero,
+                    &null,
                     &tip,
                     &log.identity,
                     &log.message,

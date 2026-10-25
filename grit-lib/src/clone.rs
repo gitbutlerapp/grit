@@ -12,7 +12,7 @@ use crate::environment::Environment;
 use crate::environment::RepositoryOptions;
 use crate::error::{Error, Result};
 use crate::fetch::{fetch_operation_identity, Progress};
-use crate::objects::ObjectId;
+use crate::objects::{HashAlgo, ObjectId};
 use crate::partial_clone::{ObjectFilterSpec, PartialCloneConfig};
 use crate::progress::Cancel;
 use crate::promisor_fetch::PromisorFetcher;
@@ -21,7 +21,7 @@ use crate::refs;
 use crate::remote::{
     fold_peeled_refs, HttpClientFactory, ListRefsOptions, Remote, RemoteError, DEFAULT_REMOTE,
 };
-use crate::repo::{init_repository, Repository};
+use crate::repo::{init_repository_with_object_format, Repository};
 use crate::transfer::{CloneReflog, FetchOptions, TagMode, TransferStats};
 use crate::transport_path::{
     absolute_local_clone_source_url, git_url_basename, resolve_local_remote_git_dir,
@@ -333,12 +333,14 @@ pub fn clone(
     }
 
     let bare = opts.bare;
-    init_repository(
+    let object_format = local_clone_source_hash_algo(&opts.url).unwrap_or(HashAlgo::Sha1);
+    init_repository_with_object_format(
         &opts.dest,
         bare,
         &opts.initial_branch,
         None,
         RefStorageFormat::Files,
+        object_format,
     )
     .map_err(|e| {
         CloneError::Library(Error::Message(format!("could not initialize '{dir}': {e}")))
@@ -937,6 +939,17 @@ fn pick_default_branch_bare(repo: &Repository) -> Option<String> {
         .ok()?
         .into_iter()
         .find_map(|(name, _)| name.strip_prefix("refs/heads/").map(str::to_owned))
+}
+
+/// When cloning from a local path, match the source repository's object hash up front.
+fn local_clone_source_hash_algo(url: &str) -> Option<HashAlgo> {
+    if !url_is_local_not_ssh(url.trim()) {
+        return None;
+    }
+    let cwd = std::env::current_dir().ok()?;
+    let probe_git = cwd.join(".git");
+    let remote_git = resolve_local_remote_git_dir(url.trim(), &probe_git, Some(&cwd));
+    Some(crate::transfer::open_odb(&remote_git).hash_algo())
 }
 
 fn default_branch_from_local_remote(url: &str, repo: &Repository) -> Option<String> {

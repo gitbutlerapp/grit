@@ -24,7 +24,7 @@ use std::path::{Path, PathBuf};
 
 use crate::error::{Error, RemoteUnreadableReason, Result};
 use crate::fetch::{NoProgress, Progress};
-use crate::objects::{parse_commit, parse_tag, parse_tree, ObjectId, ObjectKind};
+use crate::objects::{parse_commit, parse_tag, parse_tree, HashAlgo, ObjectId, ObjectKind};
 use crate::odb::Odb;
 use crate::progress::{ProgressPhase, ProgressSink};
 use crate::push_report::{PushRefResult, PushRefStatus};
@@ -1510,8 +1510,9 @@ pub fn fetch_local_with_progress(
     ensure_local_remote_repository(remote_git_dir)?;
     validate_fetch_depth_local(local_git_dir, opts)?;
 
-    let local_odb = open_odb(local_git_dir);
     let remote_odb = open_odb(remote_git_dir);
+    sync_empty_destination_object_format(local_git_dir, remote_odb.hash_algo(), opts)?;
+    let local_odb = open_odb(local_git_dir);
 
     // 1. Enumerate remote refs (with HEAD symref for the default branch).
     let remote_entries = crate::remote::list_refs_from_git_dir_for_fetch(
@@ -2474,6 +2475,65 @@ fn objects_dir(git_dir: &Path) -> PathBuf {
 
 pub(crate) fn open_odb(git_dir: &Path) -> Odb {
     Odb::new(&objects_dir(git_dir)).with_config_git_dir(git_dir.to_path_buf())
+}
+
+/// Infer the remote repository hash algorithm from fetch capability lines and ref oids.
+pub(crate) fn remote_hash_algo_from_advertisement(
+    capability_blocks: &[&[String]],
+    remote_refs: &[(String, ObjectId)],
+) -> HashAlgo {
+    for caps in capability_blocks {
+        for c in *caps {
+            if let Some(name) = c.strip_prefix("object-format=") {
+                if let Some(algo) = HashAlgo::from_name(name) {
+                    return algo;
+                }
+            }
+        }
+    }
+    remote_refs
+        .iter()
+        .find_map(|(_, oid)| HashAlgo::from_len(oid.as_bytes().len()))
+        .unwrap_or(HashAlgo::Sha1)
+}
+
+/// Before the first pack lands in a fresh clone, align `extensions.objectformat` with the remote.
+pub(crate) fn sync_empty_destination_object_format(
+    local_git_dir: &Path,
+    remote_algo: HashAlgo,
+    opts: &FetchOptions,
+) -> Result<()> {
+    if opts.dry_run || !opts.initial_remote_fetch {
+        return Ok(());
+    }
+    let local_odb = open_odb(local_git_dir);
+    if local_odb.hash_algo() == remote_algo {
+        return Ok(());
+    }
+    if local_odb.approximate_object_count()? > 0 {
+        return Err(Error::Message(format!(
+            "unsupported object format: destination uses {} but remote uses {}; re-clone into an empty directory with a matching format",
+            local_odb.hash_algo().name(),
+            remote_algo.name()
+        )));
+    }
+    write_empty_destination_object_format(local_git_dir, remote_algo)
+}
+
+fn write_empty_destination_object_format(git_dir: &Path, algo: HashAlgo) -> Result<()> {
+    use crate::config::{ConfigFile, ConfigScope};
+    let config_path = crate::repo::local_config_write_path(git_dir);
+    let content = fs::read_to_string(&config_path).unwrap_or_default();
+    let mut file = ConfigFile::parse(&config_path, &content, ConfigScope::Local)?;
+    if algo == HashAlgo::Sha1 {
+        file.unset("extensions.objectformat")?;
+        file.set("core.repositoryformatversion", "0")?;
+    } else {
+        file.set("core.repositoryformatversion", "1")?;
+        file.set("extensions.objectformat", algo.name())?;
+    }
+    file.write()?;
+    Ok(())
 }
 
 fn config_for_git_dir(git_dir: &Path) -> Option<crate::config::ConfigSet> {
