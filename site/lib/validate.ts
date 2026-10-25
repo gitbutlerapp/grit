@@ -3,6 +3,7 @@ import type { Post } from "./blog";
 import { linkTargetSlug, type Site } from "./docs";
 import { collectLinks, parseDoc } from "./markdown";
 import { SITE_URL } from "./repo";
+import { rustdocAvailable, unresolvedGritLibPaths } from "./rustdoc";
 import { isExternal } from "./text";
 
 /** Static files and routes that live outside the docs pages. */
@@ -43,6 +44,18 @@ function anchorsFor(site: Site): Map<string, Set<string>> {
 /** Docs slug for a site path: `/docs/status/` or the twin `/docs/status/index.md`. */
 function docsSlug(path: string): string {
   return path.slice(6).replace(/(^|\/)index\.md$/, "").replace(/\/$/, "") || "index";
+}
+
+/**
+ * Every `grit_lib::…` path or docs.rs URL in the docs that isn't public API,
+ * as `source: path: reason`. Skipped when rustdoc isn't built (strict mode
+ * requires it elsewhere).
+ */
+export function validateGritLibPaths(site: Site): string[] {
+  if (!rustdocAvailable()) return [];
+  return site.pages.flatMap((page) =>
+    unresolvedGritLibPaths(page.markdown).map((problem) => `content/docs page ${page.slug}: ${problem}`),
+  );
 }
 
 /** Every broken internal link, as `source: target (reason)`. */

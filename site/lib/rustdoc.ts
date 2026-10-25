@@ -72,6 +72,19 @@ function memberFragmentInRustdocHtml(htmlPath: string, member: string): string |
   return undefined;
 }
 
+/**
+ * The page a module's `pub use` row for `name` points at. Rustdoc lists a
+ * re-export of an item that is already public elsewhere as a "Re-exports" row
+ * instead of writing a page for it at the re-exported path.
+ */
+function reexportTarget(moduleIndex: string, name: string): string | undefined {
+  if (!isFile(moduleIndex)) return undefined;
+  const row = new RegExp(`<dt id="reexport\\.${name}">([\\s\\S]*?)</dt>`).exec(fs.readFileSync(moduleIndex, "utf8"));
+  const hrefs = row ? [...row[1].matchAll(/href="([^"#]+)"/g)].map((m) => m[1]) : [];
+  const target = hrefs.length ? path.resolve(path.dirname(moduleIndex), hrefs[hrefs.length - 1]!) : undefined;
+  return target && isFile(target) ? target : undefined;
+}
+
 /** The rustdoc HTML path (relative to `grit_lib/`) for a qualified item path. */
 export function resolveRustdocPath(qualified: string): string {
   if (!RUSTDOC_PATH.test(qualified)) throw new Error(`invalid rustdoc path syntax: ${qualified}`);
@@ -111,6 +124,11 @@ export function resolveRustdocPath(qualified: string): string {
     const relative = path.relative(root, modIndex).split(path.sep).join("/");
     return attachFragment(relative, modIndex, qualified);
   }
+  const reexported = reexportTarget(path.join(current, "index.html"), last);
+  if (reexported) {
+    const relative = path.relative(root, reexported).split(path.sep).join("/");
+    return attachFragment(relative, reexported, qualified);
+  }
   throw new Error(`rustdoc item not found: ${qualified}`);
 }
 
@@ -142,6 +160,49 @@ export function unresolvedRustdocLinks(markdown: string): string[] {
     } catch (err) {
       bad.push(`${match[1].trim()}: ${(err as Error).message}`);
     }
+  }
+  return bad;
+}
+
+const GRIT_LIB_PATH = /\bgrit_lib(?:::[A-Za-z_][A-Za-z0-9_]*)+/g;
+const GRIT_LIB_USE_GROUP = /\bgrit_lib((?:::[A-Za-z_][A-Za-z0-9_]*)*)::\{([^{}]*)\}/g;
+const DOCS_RS_ITEM_URL = new RegExp(`${DOCS_RS_LATEST.replace(/[.]/g, "\\.")}/grit_lib/([A-Za-z0-9_./]*)`, "g");
+const REDIRECT_PAGE = /<meta http-equiv="refresh"/;
+
+/** Whether `relative` (under `grit_lib/`) is a real rustdoc page, not a redirect stub for a private path. */
+function isPublicRustdocPage(relative: string): boolean {
+  const target = path.join(crateDir(), relative || "index.html");
+  const file = isFile(target) ? target : path.join(target, "index.html");
+  return isFile(file) && !REDIRECT_PAGE.test(fs.readFileSync(file, "utf8"));
+}
+
+/**
+ * Every `grit_lib::…` path written in docs text (prose, code spans, `use`
+ * lines in code blocks, hand-written docs.rs URLs) that a library user cannot
+ * import, for CI validation. `rustdoc:` links are left to
+ * [`expandRustdocLinks`]. Paths behind private modules fail because rustdoc
+ * writes only redirect stubs (no module `index.html`) for them.
+ */
+export function unresolvedGritLibPaths(markdown: string): string[] {
+  const text = markdown.replace(RUSTDOC_LINK, "]()");
+  const paths = new Set<string>();
+  for (const m of text.matchAll(GRIT_LIB_USE_GROUP)) {
+    for (const item of m[2].split(",")) {
+      const name = item.trim().split(/\s+as\s+/)[0]?.trim();
+      if (name && name !== "self" && /^[A-Za-z_][A-Za-z0-9_:]*$/.test(name)) paths.add(`grit_lib${m[1]}::${name}`);
+    }
+  }
+  for (const m of text.replace(DOCS_RS_ITEM_URL, "").matchAll(GRIT_LIB_PATH)) paths.add(m[0]);
+  const bad: string[] = [];
+  for (const qualified of [...paths].sort()) {
+    try {
+      resolveRustdocPath(qualified);
+    } catch (err) {
+      bad.push(`${qualified}: ${(err as Error).message}`);
+    }
+  }
+  for (const m of new Set([...text.matchAll(DOCS_RS_ITEM_URL)].map((u) => u[1]))) {
+    if (!isPublicRustdocPage(m)) bad.push(`${docsRsUrl(m)}: no public rustdoc page`);
   }
   return bad;
 }
