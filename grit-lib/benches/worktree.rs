@@ -169,6 +169,18 @@ fn bench_ignore_match(c: &mut Criterion) {
             }
         });
     });
+    let mut folded = matcher.clone().with_ignore_case(true);
+    group.bench_function("check_path_ignore_case", |b| {
+        b.iter(|| {
+            for path in paths {
+                black_box(
+                    folded
+                        .check_path(&fx.ignore_repo, None, path, false)
+                        .expect("check ignore"),
+                );
+            }
+        });
+    });
     group.finish();
 }
 

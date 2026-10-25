@@ -851,6 +851,20 @@ fn refine_match_for_check_ignore_verbose(
 }
 
 fn rule_matches(rule: &IgnoreRule, repo_rel_path: &str, is_dir: bool, ignore_case: bool) -> bool {
+    if ignore_case {
+        rule_matches_with::<true>(rule, repo_rel_path, is_dir)
+    } else {
+        rule_matches_with::<false>(rule, repo_rel_path, is_dir)
+    }
+}
+
+/// [`rule_matches`] specialized on case folding so the default case-sensitive path carries
+/// no per-comparison `core.ignorecase` checks.
+fn rule_matches_with<const FOLD: bool>(
+    rule: &IgnoreRule,
+    repo_rel_path: &str,
+    is_dir: bool,
+) -> bool {
     // Directory-only patterns (`foo/`) participate only when the query path is a directory,
     // mirroring Git's `PATTERN_FLAG_MUSTBEDIR` / `sparse_pattern_matches` dtype gate. Ancestor
     // probes use `is_dir=true` (`first_excluded_ancestor`); matching `!pkg/` against files under
@@ -859,21 +873,21 @@ fn rule_matches(rule: &IgnoreRule, repo_rel_path: &str, is_dir: bool, ignore_cas
         return false;
     }
 
-    let Some(rel_to_base) = strip_base(&rule.base_dir, repo_rel_path, ignore_case) else {
+    let Some(rel_to_base) = strip_base(&rule.base_dir, repo_rel_path, FOLD) else {
         return false;
     };
 
     if rule.directory_only {
         if rule.has_slash || rule.anchored {
             for ancestor in ancestor_dirs(rel_to_base, is_dir) {
-                if rule_body_matches(rule, &ancestor, true, ignore_case) {
+                if rule_body_matches(rule, &ancestor, true, FOLD) {
                     return true;
                 }
             }
             return false;
         }
         for ancestor in ancestor_dir_basenames(rel_to_base, is_dir) {
-            if rule_body_matches(rule, ancestor, false, ignore_case) {
+            if rule_body_matches(rule, ancestor, false, FOLD) {
                 return true;
             }
         }
@@ -881,12 +895,13 @@ fn rule_matches(rule: &IgnoreRule, repo_rel_path: &str, is_dir: bool, ignore_cas
     }
 
     if rule.has_slash || rule.anchored {
-        return rule_body_matches(rule, rel_to_base, true, ignore_case);
+        return rule_body_matches(rule, rel_to_base, true, FOLD);
     }
 
-    path_component_names(rel_to_base)
-        .iter()
-        .any(|name| rule_body_matches(rule, name, false, ignore_case))
+    !rel_to_base.is_empty()
+        && rel_to_base
+            .split('/')
+            .any(|name| rule_body_matches(rule, name, false, FOLD))
 }
 
 fn is_tracked(index: Option<&Index>, repo_rel_path: &str) -> bool {
@@ -1048,13 +1063,6 @@ fn parent_dir(path: &str) -> &str {
         Some((parent, _)) => parent,
         None => "",
     }
-}
-
-fn path_component_names(path: &str) -> Vec<&str> {
-    if path.is_empty() {
-        return Vec::new();
-    }
-    path.split('/').collect()
 }
 
 fn ancestor_dirs(path: &str, is_dir: bool) -> Vec<String> {
