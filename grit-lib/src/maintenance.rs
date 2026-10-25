@@ -1696,7 +1696,22 @@ fn build_repack_pack(
             .get(),
         write_threads: pack_write_parallel_options(odb, threads)?.threads.get(),
     };
-    fs::create_dir_all(pack_dir).map_err(Error::Io)?;
+    let git_dir = odb
+        .config_git_dir()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| {
+            pack_dir
+                .parent()
+                .and_then(|objects| objects.parent())
+                .map(Path::to_path_buf)
+                .unwrap_or_else(|| pack_dir.to_path_buf())
+        });
+    crate::git_dir::io_error::io_with_git_path(
+        &git_dir,
+        pack_dir,
+        crate::git_dir::GitDirPathOperation::GcPack,
+        fs::create_dir_all(pack_dir),
+    )?;
     let staging = pack_dir.join(format!("tmp_repack_{}", std::process::id()));
     let written = write_repack_pack(
         odb,

@@ -15,6 +15,7 @@
 
 use thiserror::Error;
 
+pub use crate::git_dir::GitDirPathOperation;
 pub use crate::midx_error::MidxError;
 pub use crate::worktree::io_error::WorktreePathOperation;
 
@@ -916,6 +917,17 @@ pub enum Error {
         path: String,
         /// What the operation was trying to do when I/O failed.
         operation: WorktreePathOperation,
+        /// Underlying OS error.
+        source: std::io::Error,
+    },
+
+    /// Filesystem I/O failed on a path under the repository git directory (objects, refs, logs, …).
+    #[error("{}", crate::git_dir::io_error::format_git_dir_io_message(.path, *operation, .source))]
+    GitDirPathIo {
+        /// Display path such as `.git/objects` or `.git/refs/heads/main`.
+        path: String,
+        /// What the operation was trying to do when I/O failed.
+        operation: GitDirPathOperation,
         /// Underlying OS error.
         source: std::io::Error,
     },

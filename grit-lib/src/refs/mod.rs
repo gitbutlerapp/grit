@@ -1882,27 +1882,47 @@ fn write_ref_at_storage(
         )));
     }
     if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
+        crate::git_dir::io_error::io_with_git_path(
+            git_dir,
+            parent,
+            crate::git_dir::GitDirPathOperation::CreateDir,
+            fs::create_dir_all(parent),
+        )?;
     }
     let content = format!("{oid}\n");
     // Write via lock file for atomicity (`O_CREAT|O_EXCL`), with optional backoff
     // per `core.filesRefLockTimeout`. Callers (e.g. fetch) map a held lock to
     // "cannot lock ref … File exists." and skip that ref while updating the rest.
-    let lock = lock_path_for_ref(&path);
+    let lock_path = lock_path_for_ref(&path);
     use crate::lockfile::{LockError, LockFile, LockWait};
     use std::io::Write as _;
     let wait = LockWait::files_ref_lock_for_git_dir(git_dir);
-    let mut lock = LockFile::acquire(&lock, wait).map_err(|err| match err {
+    let mut lock = LockFile::acquire(&lock_path, wait).map_err(|err| match err {
         LockError::Held { path } => {
             Error::Io(crate::lockfile::lock_held_as_ref_present(LockError::Held {
                 path,
             }))
         }
-        LockError::Io { source, .. } => Error::Io(source),
+        LockError::Io { source, .. } => crate::git_dir::io_error::map_git_dir_io(
+            git_dir,
+            &lock_path,
+            crate::git_dir::GitDirPathOperation::UpdateRef,
+            source,
+        ),
     })?;
-    lock.write_all(content.as_bytes()).map_err(Error::Io)?;
+    crate::git_dir::io_error::io_with_git_path(
+        git_dir,
+        &path,
+        crate::git_dir::GitDirPathOperation::UpdateRef,
+        lock.write_all(content.as_bytes()),
+    )?;
     lock.commit_to(&path).map_err(|err| match err {
-        LockError::Io { source, .. } => Error::Io(source),
+        LockError::Io { source, .. } => crate::git_dir::io_error::map_git_dir_io(
+            git_dir,
+            &path,
+            crate::git_dir::GitDirPathOperation::UpdateRef,
+            source,
+        ),
         LockError::Held { path } => {
             Error::Io(crate::lockfile::lock_held_as_ref_present(LockError::Held {
                 path,
@@ -2825,7 +2845,12 @@ pub fn append_reflog_with_config(
         // does not fail with "File exists" / "Not a directory".
         let logs_root = storage_dir.join("logs");
         clear_conflicting_reflog_files(&logs_root, parent);
-        fs::create_dir_all(parent)?;
+        crate::git_dir::io_error::io_with_git_path(
+            git_dir,
+            parent,
+            crate::git_dir::GitDirPathOperation::CreateDir,
+            fs::create_dir_all(parent),
+        )?;
     }
     // A reflog records `<old> <new>` at the repository's hash width. The null
     // ("0000…") side of a ref creation/deletion is stored at SHA-1 width by
@@ -2840,9 +2865,22 @@ pub fn append_reflog_with_config(
     let mut file = fs::OpenOptions::new()
         .create(true)
         .append(true)
-        .open(&log_path)?;
+        .open(&log_path)
+        .map_err(|source| {
+            crate::git_dir::io_error::map_git_dir_io(
+                git_dir,
+                &log_path,
+                crate::git_dir::GitDirPathOperation::AppendReflog,
+                source,
+            )
+        })?;
     use io::Write;
-    file.write_all(line.as_bytes())?;
+    crate::git_dir::io_error::io_with_git_path(
+        git_dir,
+        &log_path,
+        crate::git_dir::GitDirPathOperation::AppendReflog,
+        file.write_all(line.as_bytes()),
+    )?;
     Ok(())
 }
 
@@ -3411,7 +3449,12 @@ impl BranchCommitRefLock {
             .into());
         }
         if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)?;
+            crate::git_dir::io_error::io_with_git_path(
+                git_dir,
+                parent,
+                crate::git_dir::GitDirPathOperation::CreateDir,
+                fs::create_dir_all(parent),
+            )?;
         }
 
         let lock_path = lock_path_for_ref(&path);
@@ -3423,7 +3466,12 @@ impl BranchCommitRefLock {
                     path,
                 }))
             }
-            LockError::Io { source, .. } => Error::Io(source),
+            LockError::Io { source, path } => crate::git_dir::io_error::map_git_dir_io(
+                git_dir,
+                path.as_path(),
+                crate::git_dir::GitDirPathOperation::UpdateRef,
+                source,
+            ),
         })?;
 
         let current = read_loose_or_packed_oid(git_dir, branch_ref)?;
@@ -3562,9 +3610,22 @@ fn finish_branch_commit_ref_lock_files(
         .lock
         .take()
         .ok_or_else(|| Error::Message("branch ref lock already released".into()))?;
-    file_lock.write_all(content.as_bytes()).map_err(Error::Io)?;
+    crate::git_dir::io_error::io_with_git_path(
+        git_dir,
+        &path,
+        crate::git_dir::GitDirPathOperation::UpdateRef,
+        file_lock.write_all(content.as_bytes()),
+    )?;
     file_lock.commit_to(&path).map_err(|err| match err {
-        LockError::Io { source, .. } => Error::Io(source),
+        LockError::Io {
+            source,
+            path: lock_path,
+        } => crate::git_dir::io_error::map_git_dir_io(
+            git_dir,
+            lock_path.as_path(),
+            crate::git_dir::GitDirPathOperation::UpdateRef,
+            source,
+        ),
         LockError::Held { path } => {
             Error::Io(crate::lockfile::lock_held_as_ref_present(LockError::Held {
                 path,
