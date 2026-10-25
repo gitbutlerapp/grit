@@ -54,7 +54,9 @@ Common conditions use dedicated variants rather than `Error::Message`: bare or m
 
 Two or more `Repository` handles may be used from different threads in one process when each handle is opened with its **own** `Environment`, `RepositoryOptions`, diagnostics sink, and command runner. Repository-scoped caches (config, attributes, pack read caches) do not leak between handles.
 
-Integration coverage: `grit-lib/tests/concurrent_repos.rs` runs parallel commit loops and a fetch/merge/notes scenario with isolated config and sinks.
+Object writes are safe to race. Every loose object is staged in its own uniquely named `objects/xx/tmp_obj_*` file and renamed into place, so handles, threads or processes writing the same object at once all get its id back (whichever rename lands first publishes it, the same as Git). Ref updates such as adding a note are compare-and-swap: when two writers race, one wins and the other gets a typed ref-store error instead of losing the first update.
+
+Integration coverage: `grit-lib/tests/concurrent_repos.rs` runs parallel commit loops and a fetch/merge/notes scenario with isolated config and sinks; `grit-lib/tests/loose_write_concurrent_issue_1875.rs` races identical small and large blob writes from separate handles and checks the result with `git fsck --strict`.
 
 ## Example
 
