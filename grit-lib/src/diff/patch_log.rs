@@ -1,5 +1,6 @@
 //! Git-compatible `log -p` / `show` patch output streamed to a [`Write`](std::io::Write).
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::io::Write;
 
@@ -10,7 +11,8 @@ use crate::commit_pretty::{
 };
 use crate::config::ConfigSet;
 use crate::diff::options::DiffOptions;
-use crate::error::Result;
+use crate::error::{Error, Result};
+use crate::index::Index;
 use crate::merge_file;
 use crate::objects::CommitData;
 use crate::objects::{parse_commit, ObjectId, ObjectKind};
@@ -19,8 +21,11 @@ use crate::oid_abbrev_cache::OidAbbrevCache;
 use crate::quote_path::format_diff_path_with_prefix;
 use crate::repo::Repository;
 use crate::userdiff::{matcher_for_path_parsed, FuncnameMatcher};
+use crate::worktree_rules::WorktreeRules;
 
-use super::{diff_trees, empty_blob_oid, zero_oid, DiffEntry, DiffStatus};
+use super::{
+    diff_trees, empty_blob_oid, read_worktree_side_bytes_for_diff, zero_oid, DiffEntry, DiffStatus,
+};
 
 /// How much commit metadata precedes each patch in [`write_commit_log_patch`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -961,22 +966,57 @@ fn write_diff_entry_patch_with_resolved_bytes<W: Write>(
     Ok(())
 }
 
-/// One file with both sides already resolved (worktree/index paths).
-#[derive(Debug, Clone)]
-pub struct PatchResolvedSide {
-    /// Tree diff metadata.
-    pub entry: DiffEntry,
-    /// Old side bytes.
-    pub old_bytes: Vec<u8>,
-    /// New side bytes.
-    pub new_bytes: Vec<u8>,
+/// Where [`write_patch_resolved`] takes the content of one side of a file.
+///
+/// Pass [`PatchSide::Bytes`] for content already in memory. A caller that skipped loading
+/// a side (diff collection usually drops binary content, which structured hunks never use)
+/// names where the side lives instead, and the writer reads it only while rendering that
+/// file. A side whose mode in [`PatchResolvedSide::entry`] is `000000` is empty whatever
+/// variant is given.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PatchSide {
+    /// Content the caller already loaded, in repository form.
+    Bytes(Vec<u8>),
+    /// The blob named by this side's id in [`PatchResolvedSide::entry`], read from the
+    /// object database.
+    Blob,
+    /// The work-tree file at this side's path, converted to repository form the way
+    /// `git add` would (clean filters, `.gitattributes` and line-ending rules).
+    Worktree,
 }
 
-/// Write patch text when blob bytes are already loaded (worktree diffs).
+/// One file for [`write_patch_resolved`]: diff metadata plus where each side's content is.
+#[derive(Debug, Clone)]
+pub struct PatchResolvedSide {
+    /// Tree diff metadata (paths, modes, ids, status).
+    pub entry: DiffEntry,
+    /// Old side content.
+    pub old: PatchSide,
+    /// New side content.
+    pub new: PatchSide,
+}
+
+/// Write `git diff --binary`-compatible patch text for files whose sides may live in memory,
+/// the object database, or the work tree (index and work-tree diffs).
+///
+/// Binary files are written as `GIT binary patch` sections. Their `index` line always carries
+/// full ids of the content actually written, hashed from the bytes for [`PatchSide::Bytes`] and
+/// [`PatchSide::Worktree`] sides, because `git apply` refuses a binary patch without one and
+/// work-tree entries often carry no blob id for the work-tree side.
+///
+/// # Parameters
+///
+/// - `repo`: repository for objects, config, and (for [`PatchSide::Worktree`]) the work tree
+///   and index.
+/// - `files`: files to write, in output order.
+/// - `opts`: hunk and abbreviation settings.
+/// - `out`: destination for patch bytes.
 ///
 /// # Errors
 ///
-/// Propagates ODB reads and I/O errors.
+/// Returns [`Error::RequiresWorkTree`](crate::error::Error::RequiresWorkTree) when a
+/// [`PatchSide::Worktree`] side is requested in a bare repository, and propagates index, ODB,
+/// work-tree, hashing and I/O errors.
 pub fn write_patch_resolved<W: Write>(
     repo: &Repository,
     files: &[PatchResolvedSide],
@@ -998,21 +1038,138 @@ pub fn write_patch_resolved<W: Write>(
         .iter()
         .flat_map(|f| [f.entry.old_oid, f.entry.new_oid]);
     abbrev_cache.warm_for_patch_batch(repo, oids, &thread_policy, &config)?;
+    let mut worktree = None;
     for file in files {
+        let old = resolve_patch_side(repo, file, EntrySide::Old, &mut worktree)?;
+        let new = resolve_patch_side(repo, file, EntrySide::New, &mut worktree)?;
+        let entry = if merge_file::is_binary(&old) || merge_file::is_binary(&new) {
+            Cow::Owned(entry_with_content_ids(repo, file, &old, &new)?)
+        } else {
+            Cow::Borrowed(&file.entry)
+        };
         write_diff_entry_patch_with_resolved_bytes(
             out,
             repo,
-            &file.entry,
+            &entry,
             &log_opts,
             &mut abbrev_cache,
             DiffEntryPatchBinaryFormat::GitApplyBinaryPatch,
             &config,
-            &file.old_bytes,
-            &file.new_bytes,
+            &old,
+            &new,
             None,
         )?;
     }
     Ok(())
+}
+
+#[derive(Clone, Copy)]
+enum EntrySide {
+    Old,
+    New,
+}
+
+impl EntrySide {
+    fn of(self, file: &PatchResolvedSide) -> (&PatchSide, &str, ObjectId) {
+        let e = &file.entry;
+        match self {
+            Self::Old => (&file.old, &e.old_mode, e.old_oid),
+            Self::New => (&file.new, &e.new_mode, e.new_oid),
+        }
+    }
+
+    fn path(self, entry: &DiffEntry) -> &str {
+        match self {
+            Self::Old => entry.old_path.as_deref().unwrap_or_else(|| entry.path()),
+            Self::New => entry.path(),
+        }
+    }
+}
+
+/// Index and attribute rules for reading [`PatchSide::Worktree`] sides, loaded on first use.
+struct WorktreeSideReader<'r> {
+    work_tree: &'r std::path::Path,
+    index: Index,
+    rules: WorktreeRules,
+}
+
+impl<'r> WorktreeSideReader<'r> {
+    fn open(repo: &'r Repository) -> Result<Self> {
+        let work_tree = repo.work_tree().ok_or(Error::RequiresWorkTree)?;
+        let index = repo.index_handle().load()?;
+        let rules = WorktreeRules::from_repository(repo, &index)?;
+        Ok(Self {
+            work_tree,
+            index,
+            rules,
+        })
+    }
+
+    fn read(&self, odb: &Odb, path: &str, mode: u32) -> Result<Vec<u8>> {
+        let index_entry = self.index.get(&crate::repo_relpath::storage_bytes(path), 0);
+        read_worktree_side_bytes_for_diff(
+            odb,
+            self.work_tree,
+            path,
+            mode,
+            self.rules.config(),
+            index_entry,
+            Some(&self.rules),
+        )
+    }
+}
+
+fn resolve_patch_side<'f, 'r>(
+    repo: &'r Repository,
+    file: &'f PatchResolvedSide,
+    side: EntrySide,
+    worktree: &mut Option<WorktreeSideReader<'r>>,
+) -> Result<Cow<'f, [u8]>> {
+    let (source, mode, oid) = side.of(file);
+    let mode = log_patch_parse_mode_u32(mode);
+    if mode == 0 {
+        return Ok(Cow::Borrowed(&[]));
+    }
+    match source {
+        PatchSide::Bytes(bytes) => Ok(Cow::Borrowed(bytes)),
+        PatchSide::Blob => Ok(Cow::Owned(read_blob_side(repo.odb(), oid, false)?)),
+        PatchSide::Worktree => {
+            let reader = match worktree {
+                Some(reader) => reader,
+                None => worktree.insert(WorktreeSideReader::open(repo)?),
+            };
+            Ok(Cow::Owned(reader.read(
+                repo.odb(),
+                side.path(&file.entry),
+                mode,
+            )?))
+        }
+    }
+}
+
+/// `file.entry` with each present side's id set to the id of the content being written.
+fn entry_with_content_ids(
+    repo: &Repository,
+    file: &PatchResolvedSide,
+    old: &[u8],
+    new: &[u8],
+) -> Result<DiffEntry> {
+    let content_id = |side: EntrySide, bytes: &[u8]| -> Result<ObjectId> {
+        let (source, mode, oid) = side.of(file);
+        if log_patch_parse_mode_u32(mode) == 0 {
+            return Ok(zero_oid());
+        }
+        match source {
+            PatchSide::Blob => Ok(oid),
+            PatchSide::Bytes(_) | PatchSide::Worktree => {
+                repo.odb().hash_algo().hash_object(ObjectKind::Blob, bytes)
+            }
+        }
+    };
+    let mut entry = file.entry.clone();
+    entry.old_oid = content_id(EntrySide::Old, old)?;
+    entry.new_oid = content_id(EntrySide::New, new)?;
+    Ok(entry)
 }
 
 fn read_blob_side(odb: &Odb, oid: ObjectId, is_missing: bool) -> Result<Vec<u8>> {

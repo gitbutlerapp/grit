@@ -26,7 +26,7 @@ use grit_lib::diff::{
     },
     submodule_porcelain_flags, tree_diff_structured_parallel, write_patch, write_patch_resolved,
     DiffDetail, DiffEntry, DiffFilesOutput, DiffIndexToWorktreeOptions, DiffMerges, DiffOptions,
-    DiffSide, DiffStatus, PatchResolvedSide, PatchTextOptions, TreeDiffStructured,
+    DiffSide, DiffStatus, PatchResolvedSide, PatchSide, PatchTextOptions, TreeDiffStructured,
 };
 use grit_lib::index::Index;
 use grit_lib::objects::odb::Odb;
@@ -713,10 +713,14 @@ fn run_no_index_patch_text(opts: DiffRunOptions) -> Result<DiffOutcome> {
     })
 }
 
+/// Collected changes for `--patch-text`, plus where the new side of a binary file lives
+/// (collection keeps no bytes for binary files).
+type PatchChanges = (Vec<FileChange>, PatchSide);
+
 fn emit_patch_text_to_stdout(
     repo: &grit_lib::repo::Repository,
-    entries: &[DiffEntry],
-    changes: Option<&[FileChange]>,
+    entries: Vec<DiffEntry>,
+    changes: Option<PatchChanges>,
     diff_options: DiffOptions,
     quiet: bool,
 ) -> Result<()> {
@@ -725,22 +729,28 @@ fn emit_patch_text_to_stdout(
     }
     let patch_opts = PatchTextOptions::from_repo(repo, diff_options)?;
     let mut stdout = std::io::stdout();
-    if let Some(changes) = changes {
+    if let Some((changes, binary_new)) = changes {
         if entries.len() != changes.len() {
             anyhow::bail!("internal error: patch-text entry/change count mismatch");
         }
         let resolved: Vec<PatchResolvedSide> = entries
-            .iter()
-            .zip(changes.iter())
-            .map(|(entry, fc)| PatchResolvedSide {
-                entry: entry.clone(),
-                old_bytes: fc.old_bytes.data.clone(),
-                new_bytes: fc.new_bytes.data.clone(),
+            .into_iter()
+            .zip(changes)
+            .map(|(entry, fc)| {
+                let (old, new) = if fc.binary {
+                    (PatchSide::Blob, binary_new.clone())
+                } else {
+                    (
+                        PatchSide::Bytes(fc.old_bytes.data),
+                        PatchSide::Bytes(fc.new_bytes.data),
+                    )
+                };
+                PatchResolvedSide { entry, old, new }
             })
             .collect();
         write_patch_resolved(repo, &resolved, &patch_opts, &mut stdout)?;
     } else {
-        write_patch(repo, entries, &patch_opts, &mut stdout)?;
+        write_patch(repo, &entries, &patch_opts, &mut stdout)?;
     }
     Ok(())
 }
@@ -748,13 +758,13 @@ fn emit_patch_text_to_stdout(
 fn patch_text_outcome(
     repo: &grit_lib::repo::Repository,
     entries: Vec<DiffEntry>,
-    changes: Option<Vec<FileChange>>,
+    changes: Option<PatchChanges>,
     diff_options: DiffOptions,
     format: DiffFormatArgs,
     quiet: bool,
 ) -> Result<DiffOutcome> {
     let changed = !entries.is_empty();
-    emit_patch_text_to_stdout(repo, &entries, changes.as_deref(), diff_options, quiet)?;
+    emit_patch_text_to_stdout(repo, entries, changes, diff_options, quiet)?;
     Ok(DiffOutcome {
         changed,
         files: Vec::new(),
@@ -797,7 +807,14 @@ fn run_patch_text(opts: DiffRunOptions) -> Result<DiffOutcome> {
             &worktree_pathspecs,
         )?;
         let changes = staged_changes_from_entries(&repo, entries.clone())?;
-        return patch_text_outcome(&repo, entries, Some(changes), diff_options, format, quiet);
+        return patch_text_outcome(
+            &repo,
+            entries,
+            Some((changes, PatchSide::Blob)),
+            diff_options,
+            format,
+            quiet,
+        );
     }
     if opts.unstaged {
         if !commits.is_empty() || opts.against.is_some() {
@@ -815,7 +832,14 @@ fn run_patch_text(opts: DiffRunOptions) -> Result<DiffOutcome> {
             &worktree_pathspecs,
         )?;
         let changes = unstaged_changes_from_entries(&repo, entries.clone())?;
-        return patch_text_outcome(&repo, entries, Some(changes), diff_options, format, quiet);
+        return patch_text_outcome(
+            &repo,
+            entries,
+            Some((changes, PatchSide::Worktree)),
+            diff_options,
+            format,
+            quiet,
+        );
     }
     if commits.len() > 2 {
         anyhow::bail!("at most two commits, or one two-dot range such as A..B");
@@ -859,7 +883,14 @@ fn run_patch_text(opts: DiffRunOptions) -> Result<DiffOutcome> {
                 &repo,
                 &worktree_pathspecs,
             )?;
-            patch_text_outcome(&repo, entries, Some(changes), diff_options, format, quiet)
+            patch_text_outcome(
+                &repo,
+                entries,
+                Some((changes, PatchSide::Worktree)),
+                diff_options,
+                format,
+                quiet,
+            )
         }
         1 => {
             let spec = &commits[0];
@@ -892,7 +923,14 @@ fn run_patch_text(opts: DiffRunOptions) -> Result<DiffOutcome> {
                     &repo,
                     &pathspecs,
                 )?;
-                patch_text_outcome(&repo, entries, Some(changes), diff_options, format, quiet)
+                patch_text_outcome(
+                    &repo,
+                    entries,
+                    Some((changes, PatchSide::Worktree)),
+                    diff_options,
+                    format,
+                    quiet,
+                )
             } else {
                 resolve_diff_commit(&repo, spec)?;
                 unreachable!("resolve_diff_commit errors above");

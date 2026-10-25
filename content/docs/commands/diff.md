@@ -37,7 +37,7 @@ Each file starts with its path (UTF-8 names print literally; C-quoted only when 
 | `--shortstat` | Only the summary line (`N files changed, …`). |
 | `--name-only` | Changed paths, one per line. |
 | `--name-status` | Status letter and path(s) per line (`M`, `A`, `R100<TAB>old<TAB>new`, …). |
-| `--patch-text` | Git-apply-compatible unified patch on stdout (`git diff --binary` shape). Human output only; not combinable with `--json` or `--markdown`. |
+| `--patch-text` | Git-apply-compatible unified patch on stdout (`git diff --binary` shape): binary files appear as `GIT binary patch` sections with full ids on the `index` line, so `git apply --index` reproduces them. Human output only; not combinable with `--json` or `--markdown`. |
 | `-M`, `--find-renames[=<n>]` | Detect renames (default similarity 50). Long form requires `=` when a threshold is given. |
 | `--no-renames` | Do not detect renames. |
 | `--diff-algorithm <algo>` | Line diff algorithm (`myers`, `minimal`, `patience`, `histogram`). |
@@ -128,6 +128,24 @@ $ grit diff v0.1 --json --filter '.files[].path'
   "README.md",
   "main.rs"
 ]
+```
+
+Write the staged changes, binary files included, as a patch `git apply` can replay elsewhere:
+
+```console
+$ grit diff --staged --patch-text
+diff --git a/b.bin b/b.bin
+new file mode 100644
+index 0000000000000000000000000000000000000000..eaf36c1daccfdf325514461cd1a2ffbc139b5464
+GIT binary patch
+literal 4
+Lc${NkWMT#Y01f~L
+
+literal 0
+Hc$@<O00001
+
+$ grit diff --staged --patch-text > ../change.patch
+$ cd ../other && git apply --index ../change.patch
 ```
 
 Compare two files or directories that aren't in a repository:

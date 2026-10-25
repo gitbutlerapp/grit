@@ -4373,6 +4373,25 @@ impl core::marker::Unpin for grit_lib::diff::NoIndexError
 impl core::marker::UnsafeUnpin for grit_lib::diff::NoIndexError
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::NoIndexError
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::NoIndexError
+pub enum grit_lib::diff::PatchSide
+pub grit_lib::diff::PatchSide::Blob
+pub grit_lib::diff::PatchSide::Bytes(alloc::vec::Vec<u8>)
+pub grit_lib::diff::PatchSide::Worktree
+impl core::clone::Clone for grit_lib::diff::PatchSide
+pub fn grit_lib::diff::PatchSide::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::diff::PatchSide
+impl core::cmp::PartialEq for grit_lib::diff::PatchSide
+pub fn grit_lib::diff::PatchSide::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::diff::PatchSide
+pub fn grit_lib::diff::PatchSide::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::diff::PatchSide
+impl core::marker::Freeze for grit_lib::diff::PatchSide
+impl core::marker::Send for grit_lib::diff::PatchSide
+impl core::marker::Sync for grit_lib::diff::PatchSide
+impl core::marker::Unpin for grit_lib::diff::PatchSide
+impl core::marker::UnsafeUnpin for grit_lib::diff::PatchSide
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::PatchSide
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::PatchSide
 pub enum grit_lib::diff::PickaxeError
 pub grit_lib::diff::PickaxeError::InvalidPattern
 pub grit_lib::diff::PickaxeError::InvalidPattern::detail: alloc::string::String
@@ -4903,8 +4922,8 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::LogPatchOptions
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::LogPatchOptions
 pub struct grit_lib::diff::PatchResolvedSide
 pub grit_lib::diff::PatchResolvedSide::entry: grit_lib::diff::DiffEntry
-pub grit_lib::diff::PatchResolvedSide::new_bytes: alloc::vec::Vec<u8>
-pub grit_lib::diff::PatchResolvedSide::old_bytes: alloc::vec::Vec<u8>
+pub grit_lib::diff::PatchResolvedSide::new: grit_lib::diff::PatchSide
+pub grit_lib::diff::PatchResolvedSide::old: grit_lib::diff::PatchSide
 impl core::clone::Clone for grit_lib::diff::PatchResolvedSide
 pub fn grit_lib::diff::PatchResolvedSide::clone(&self) -> Self
 impl core::fmt::Debug for grit_lib::diff::PatchResolvedSide

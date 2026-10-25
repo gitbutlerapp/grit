@@ -71,7 +71,7 @@ pub(crate) use core::{imara_unified_hunk_slices, unified_hunk_body_for_diff_opti
 pub use patch_log::{
     write_commit_header_and_message, write_commit_log_patch, write_commits_log_patch,
     write_diff_entry_log_patch, write_patch, write_patch_resolved, write_patch_structured,
-    LogPatchCommitHeader, LogPatchOptions, PatchResolvedSide, PatchTextOptions,
+    LogPatchCommitHeader, LogPatchOptions, PatchResolvedSide, PatchSide, PatchTextOptions,
 };
 pub use pickaxe::{Pickaxe, PickaxeError, PickaxeKind};
 pub use targets::hunk_diff_bundle;
