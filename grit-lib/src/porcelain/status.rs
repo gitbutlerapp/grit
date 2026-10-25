@@ -27,6 +27,7 @@ use std::fs::{self, DirEntry, ReadDir};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 
+use crate::branch_tracking::{BranchStanding, StatusHeader};
 use crate::config::{parse_git_config_maybe_bool, ConfigSet};
 use crate::diff::{is_unregistered_embedded_git_repo, DiffEntry};
 use crate::error::ConfigError;
@@ -38,7 +39,7 @@ use crate::objects::ObjectId;
 use crate::parallel::ParallelOp;
 use crate::precompose_config::effective_core_precomposeunicode_with_config;
 use crate::repo::Repository;
-use crate::state::{status_operation, HeadState, Operation, WtStatusState};
+use crate::state::{status_operation, HeadState, NextStep, Operation, WtStatusState};
 use crate::unicode_normalization::precompose_utf8_segment;
 
 /// How untracked files are reported (`git status --untracked-files=<mode>`).
@@ -354,6 +355,147 @@ pub struct StatusModel {
     pub index_sparse_on_disk: bool,
     /// Sparse-directory prefixes present in the on-disk index, if any.
     pub sparse_directory_prefixes: Vec<Vec<u8>>,
+}
+
+/// Unmerged paths that share one [`ConflictKind`], from [`StatusModel::conflict_groups`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConflictGroup {
+    /// How the two sides collided for every path in [`Self::paths`].
+    pub kind: ConflictKind,
+    /// Repository-relative paths, in the model's (sorted) conflict order.
+    pub paths: Vec<String>,
+}
+
+/// What to do next with the repository, from [`StatusModel::guidance`].
+///
+/// The variants are ordered by precedence: a paused operation with runnable steps wins, then
+/// unresolved conflicts, then an unfinished merge, then everyday actions.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StatusGuidance {
+    /// A paused operation that grit (or `git`) can advance.
+    Operation {
+        /// Ordered follow-ups. Every step has a [`NextStep::command`].
+        steps: Vec<NextStep>,
+        /// The first mutually exclusive option (for example aborting the merge) that has a
+        /// [`NextStep::command`], when any.
+        alternative: Option<NextStep>,
+    },
+    /// Unmerged paths while a merge is in progress: resolve them, then continue the merge.
+    ResolveConflictsThenContinueMerge,
+    /// Unmerged paths outside a merge: resolve them, then stage each resolved path.
+    ResolveConflictsThenStage,
+    /// A merge is in progress with no unmerged paths left: continue it.
+    ContinueMerge,
+    /// No paused operation: the everyday actions that apply, in suggestion order (possibly none).
+    Actions(Vec<StatusAction>),
+}
+
+/// An everyday follow-up suggested by [`StatusGuidance::Actions`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StatusAction {
+    /// Unstaged worktree changes exist and can be discarded.
+    DiscardWorktreeChanges,
+    /// Unstaged or untracked changes exist and can be staged.
+    Stage,
+    /// Staged changes exist and can be committed.
+    Commit,
+    /// The branch is behind (and not ahead of) the ref it integrates with: pull from it.
+    Pull {
+        /// Short name of the upstream, or of the target when no upstream is configured.
+        from: String,
+    },
+}
+
+impl StatusModel {
+    /// Whether there is nothing to commit or resolve: no staged, unstaged, untracked or
+    /// unmerged paths, and no merge in progress.
+    ///
+    /// Ignored paths do not count.
+    #[must_use]
+    pub fn is_clean(&self) -> bool {
+        self.staged.is_empty()
+            && self.unstaged.is_empty()
+            && self.untracked.is_empty()
+            && self.conflict_details.is_empty()
+            && !self.state.merge_in_progress
+    }
+
+    /// Group [`Self::conflict_details`] by [`ConflictKind`], in [`ConflictKind`] order.
+    ///
+    /// Empty kinds are omitted; paths keep the model's order within each group.
+    #[must_use]
+    pub fn conflict_groups(&self) -> Vec<ConflictGroup> {
+        let mut groups: Vec<ConflictGroup> = Vec::new();
+        for conflict in &self.conflict_details {
+            let path = conflict.path.clone();
+            match groups.binary_search_by(|g| g.kind.cmp(&conflict.kind)) {
+                Ok(at) => groups[at].paths.push(path),
+                Err(at) => groups.insert(
+                    at,
+                    ConflictGroup {
+                        kind: conflict.kind,
+                        paths: vec![path],
+                    },
+                ),
+            }
+        }
+        groups
+    }
+
+    /// Suggest what to do next, given the branch's target/upstream `standing`.
+    ///
+    /// # Parameters
+    ///
+    /// - `standing`: the current branch's comparison with its target and upstream, used for
+    ///   [`StatusAction::Pull`] (see [`StatusHeader::pull_integration_ref`]).
+    ///
+    /// # Returns
+    ///
+    /// The highest-precedence [`StatusGuidance`]. Steps of [`Self::operation`] without a
+    /// runnable command are dropped; when none remain, the conflict and merge fallbacks apply.
+    #[must_use]
+    pub fn guidance(&self, standing: &BranchStanding) -> StatusGuidance {
+        if let Some(op) = &self.operation {
+            let steps: Vec<NextStep> = op
+                .next_steps
+                .iter()
+                .filter(|step| step.command().is_some())
+                .cloned()
+                .collect();
+            if !steps.is_empty() {
+                let alternative = op
+                    .alternatives
+                    .iter()
+                    .find(|step| step.command().is_some())
+                    .cloned();
+                return StatusGuidance::Operation { steps, alternative };
+            }
+        }
+        let has_conflicts = !self.conflict_details.is_empty();
+        let merging = self.state.merge_in_progress;
+        match (has_conflicts, merging) {
+            (true, true) => return StatusGuidance::ResolveConflictsThenContinueMerge,
+            (true, false) => return StatusGuidance::ResolveConflictsThenStage,
+            (false, true) => return StatusGuidance::ContinueMerge,
+            (false, false) => {}
+        }
+        let mut actions = Vec::new();
+        if !self.unstaged.is_empty() {
+            actions.push(StatusAction::DiscardWorktreeChanges);
+        }
+        if !self.unstaged.is_empty() || !self.untracked.is_empty() {
+            actions.push(StatusAction::Stage);
+        }
+        if !self.staged.is_empty() {
+            actions.push(StatusAction::Commit);
+        }
+        if let Some(from) = StatusHeader::pull_integration_ref(standing) {
+            actions.push(StatusAction::Pull {
+                from: from.to_owned(),
+            });
+        }
+        StatusGuidance::Actions(actions)
+    }
 }
 
 // --- Untracked / ignored worktree walk -------------------------------------
@@ -2671,6 +2813,299 @@ fn porcelain_v2_worktree_mode(
         return "000000".to_owned();
     }
     "000000".to_owned()
+}
+
+#[cfg(test)]
+mod guidance_tests {
+    use super::*;
+    use crate::branch_tracking::{StandingHeader, TrackedComparison};
+    use crate::diff::DiffStatus;
+    use crate::state::{status_operation, InProgressOperation};
+
+    fn model() -> StatusModel {
+        StatusModel {
+            head: HeadState::Branch {
+                refname: "refs/heads/main".to_owned(),
+                short_name: "main".to_owned(),
+                oid: Some(ObjectId::zero()),
+            },
+            head_tree: None,
+            state: WtStatusState::default(),
+            index: Index::default(),
+            staged: Vec::new(),
+            unstaged: Vec::new(),
+            untracked: Vec::new(),
+            ignored: Vec::new(),
+            conflicts: Vec::new(),
+            conflict_details: Vec::new(),
+            operation: None,
+            stash_count: 0,
+            index_sparse_on_disk: false,
+            sparse_directory_prefixes: Vec::new(),
+        }
+    }
+
+    fn modified(path: &str) -> DiffEntry {
+        DiffEntry {
+            status: DiffStatus::Modified,
+            old_path: Some(path.to_owned()),
+            new_path: Some(path.to_owned()),
+            old_mode: "100644".to_owned(),
+            new_mode: "100644".to_owned(),
+            old_oid: ObjectId::zero(),
+            new_oid: ObjectId::zero(),
+            score: None,
+        }
+    }
+
+    fn conflict(path: &str, kind: ConflictKind) -> Conflict {
+        Conflict {
+            path: path.to_owned(),
+            kind,
+        }
+    }
+
+    fn tracked(name: &str, ahead: Option<usize>, behind: Option<usize>) -> TrackedComparison {
+        TrackedComparison {
+            name: name.to_owned(),
+            full_ref: format!("refs/remotes/{name}"),
+            oid: ObjectId::zero(),
+            ahead,
+            behind,
+            newest_ahead: Vec::new(),
+        }
+    }
+
+    fn standing(
+        target: Option<TrackedComparison>,
+        upstream: Option<TrackedComparison>,
+    ) -> BranchStanding {
+        BranchStanding {
+            branch: Some("main".to_owned()),
+            target,
+            upstream,
+            header: StandingHeader::NoTarget,
+        }
+    }
+
+    fn merging(model: &mut StatusModel) {
+        model.state.merge_in_progress = true;
+        model.operation = status_operation(&model.state, !model.conflict_details.is_empty());
+    }
+
+    #[test]
+    fn empty_model_is_clean_with_no_actions() {
+        let m = model();
+        assert!(m.is_clean());
+        assert!(m.conflict_groups().is_empty());
+        assert_eq!(
+            m.guidance(&standing(None, None)),
+            StatusGuidance::Actions(Vec::new())
+        );
+    }
+
+    #[test]
+    fn ignored_paths_keep_the_model_clean() {
+        let mut m = model();
+        m.ignored.push("target/".to_owned());
+        assert!(m.is_clean());
+    }
+
+    #[test]
+    fn each_kind_of_change_makes_the_model_dirty() {
+        let mut staged = model();
+        staged.staged.push(modified("a"));
+        let mut unstaged = model();
+        unstaged.unstaged.push(modified("a"));
+        let mut untracked = model();
+        untracked.untracked.push("new".to_owned());
+        let mut conflicted = model();
+        conflicted
+            .conflict_details
+            .push(conflict("a", ConflictKind::BothModified));
+        let mut merge = model();
+        merge.state.merge_in_progress = true;
+        for m in [staged, unstaged, untracked, conflicted, merge] {
+            assert!(!m.is_clean());
+        }
+    }
+
+    #[test]
+    fn conflict_groups_follow_kind_order_and_keep_path_order() {
+        let mut m = model();
+        m.conflict_details = vec![
+            conflict("a", ConflictKind::DeletedByThem),
+            conflict("b", ConflictKind::BothModified),
+            conflict("c", ConflictKind::DeletedByThem),
+            conflict("d", ConflictKind::BothAdded),
+            conflict("e", ConflictKind::BothModified),
+        ];
+        assert_eq!(
+            m.conflict_groups(),
+            vec![
+                ConflictGroup {
+                    kind: ConflictKind::BothModified,
+                    paths: vec!["b".to_owned(), "e".to_owned()],
+                },
+                ConflictGroup {
+                    kind: ConflictKind::BothAdded,
+                    paths: vec!["d".to_owned()],
+                },
+                ConflictGroup {
+                    kind: ConflictKind::DeletedByThem,
+                    paths: vec!["a".to_owned(), "c".to_owned()],
+                },
+            ]
+        );
+    }
+
+    #[test]
+    fn everyday_actions_come_in_suggestion_order() {
+        let mut m = model();
+        m.staged.push(modified("s"));
+        m.unstaged.push(modified("u"));
+        let behind_upstream = standing(None, Some(tracked("origin/main", Some(0), Some(2))));
+        assert_eq!(
+            m.guidance(&behind_upstream),
+            StatusGuidance::Actions(vec![
+                StatusAction::DiscardWorktreeChanges,
+                StatusAction::Stage,
+                StatusAction::Commit,
+                StatusAction::Pull {
+                    from: "origin/main".to_owned()
+                },
+            ])
+        );
+    }
+
+    #[test]
+    fn untracked_paths_suggest_staging_but_not_discarding() {
+        let mut m = model();
+        m.untracked.push("new".to_owned());
+        assert_eq!(
+            m.guidance(&standing(None, None)),
+            StatusGuidance::Actions(vec![StatusAction::Stage])
+        );
+    }
+
+    #[test]
+    fn pull_is_suggested_only_when_strictly_behind() {
+        let m = model();
+        let cases = [
+            (
+                standing(Some(tracked("main", Some(0), Some(3))), None),
+                true,
+            ),
+            (
+                standing(Some(tracked("main", Some(1), Some(3))), None),
+                false,
+            ),
+            (
+                standing(Some(tracked("main", Some(0), Some(0))), None),
+                false,
+            ),
+            (standing(Some(tracked("main", None, None)), None), false),
+            (
+                standing(
+                    Some(tracked("main", Some(0), Some(3))),
+                    Some(tracked("origin/topic", Some(0), Some(0))),
+                ),
+                false,
+            ),
+        ];
+        for (standing, pull) in cases {
+            let suggests_pull = matches!(
+                m.guidance(&standing),
+                StatusGuidance::Actions(actions)
+                    if actions.iter().any(|a| matches!(a, StatusAction::Pull { .. }))
+            );
+            assert_eq!(suggests_pull, pull, "{standing:?}");
+        }
+    }
+
+    #[test]
+    fn paused_merge_with_conflicts_lists_runnable_steps_and_abort() {
+        let mut m = model();
+        m.conflict_details
+            .push(conflict("a", ConflictKind::BothModified));
+        merging(&mut m);
+        assert_eq!(
+            m.guidance(&standing(None, None)),
+            StatusGuidance::Operation {
+                steps: vec![NextStep::ResolveConflicts, NextStep::StageResolved],
+                alternative: Some(NextStep::Abort(InProgressOperation::Merge)),
+            }
+        );
+    }
+
+    #[test]
+    fn resolved_merge_suggests_continue() {
+        let mut m = model();
+        merging(&mut m);
+        assert_eq!(
+            m.guidance(&standing(None, None)),
+            StatusGuidance::Operation {
+                steps: vec![NextStep::Continue(InProgressOperation::Merge)],
+                alternative: Some(NextStep::Abort(InProgressOperation::Merge)),
+            }
+        );
+    }
+
+    #[test]
+    fn steps_without_a_command_fall_back_to_conflict_and_merge_guidance() {
+        let unrunnable = Operation {
+            kind: InProgressOperation::Am,
+            next_steps: vec![NextStep::Continue(InProgressOperation::Am)],
+            alternatives: vec![NextStep::Abort(InProgressOperation::Am)],
+        };
+        let none = standing(None, None);
+
+        let mut m = model();
+        m.operation = Some(unrunnable.clone());
+        m.conflict_details
+            .push(conflict("a", ConflictKind::BothAdded));
+        assert_eq!(m.guidance(&none), StatusGuidance::ResolveConflictsThenStage);
+
+        m.state.merge_in_progress = true;
+        assert_eq!(
+            m.guidance(&none),
+            StatusGuidance::ResolveConflictsThenContinueMerge
+        );
+
+        m.conflict_details.clear();
+        assert_eq!(m.guidance(&none), StatusGuidance::ContinueMerge);
+
+        let mut m = model();
+        m.operation = Some(unrunnable);
+        m.staged.push(modified("s"));
+        assert_eq!(
+            m.guidance(&none),
+            StatusGuidance::Actions(vec![StatusAction::Commit])
+        );
+    }
+
+    #[test]
+    fn alternatives_without_a_command_are_skipped() {
+        let mut m = model();
+        m.operation = Some(Operation {
+            kind: InProgressOperation::Merge,
+            next_steps: vec![
+                NextStep::ContinueWithGit(InProgressOperation::Bisect),
+                NextStep::Continue(InProgressOperation::Merge),
+            ],
+            alternatives: vec![
+                NextStep::Abort(InProgressOperation::Am),
+                NextStep::Abort(InProgressOperation::Merge),
+            ],
+        });
+        assert_eq!(
+            m.guidance(&standing(None, None)),
+            StatusGuidance::Operation {
+                steps: vec![NextStep::Continue(InProgressOperation::Merge)],
+                alternative: Some(NextStep::Abort(InProgressOperation::Merge)),
+            }
+        );
+    }
 }
 
 #[cfg(test)]

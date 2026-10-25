@@ -14814,6 +14814,50 @@ impl core::marker::Unpin for grit_lib::porcelain::status::IgnoredMode
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::status::IgnoredMode
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::status::IgnoredMode
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::status::IgnoredMode
+pub enum grit_lib::porcelain::status::StatusAction
+pub grit_lib::porcelain::status::StatusAction::Commit
+pub grit_lib::porcelain::status::StatusAction::DiscardWorktreeChanges
+pub grit_lib::porcelain::status::StatusAction::Pull
+pub grit_lib::porcelain::status::StatusAction::Pull::from: alloc::string::String
+pub grit_lib::porcelain::status::StatusAction::Stage
+impl core::clone::Clone for grit_lib::porcelain::status::StatusAction
+pub fn grit_lib::porcelain::status::StatusAction::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::status::StatusAction
+impl core::cmp::PartialEq for grit_lib::porcelain::status::StatusAction
+pub fn grit_lib::porcelain::status::StatusAction::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::porcelain::status::StatusAction
+pub fn grit_lib::porcelain::status::StatusAction::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::porcelain::status::StatusAction
+impl core::marker::Freeze for grit_lib::porcelain::status::StatusAction
+impl core::marker::Send for grit_lib::porcelain::status::StatusAction
+impl core::marker::Sync for grit_lib::porcelain::status::StatusAction
+impl core::marker::Unpin for grit_lib::porcelain::status::StatusAction
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::status::StatusAction
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::status::StatusAction
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::status::StatusAction
+pub enum grit_lib::porcelain::status::StatusGuidance
+pub grit_lib::porcelain::status::StatusGuidance::Actions(alloc::vec::Vec<grit_lib::porcelain::status::StatusAction>)
+pub grit_lib::porcelain::status::StatusGuidance::ContinueMerge
+pub grit_lib::porcelain::status::StatusGuidance::Operation
+pub grit_lib::porcelain::status::StatusGuidance::Operation::alternative: core::option::Option<grit_lib::state::NextStep>
+pub grit_lib::porcelain::status::StatusGuidance::Operation::steps: alloc::vec::Vec<grit_lib::state::NextStep>
+pub grit_lib::porcelain::status::StatusGuidance::ResolveConflictsThenContinueMerge
+pub grit_lib::porcelain::status::StatusGuidance::ResolveConflictsThenStage
+impl core::clone::Clone for grit_lib::porcelain::status::StatusGuidance
+pub fn grit_lib::porcelain::status::StatusGuidance::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::status::StatusGuidance
+impl core::cmp::PartialEq for grit_lib::porcelain::status::StatusGuidance
+pub fn grit_lib::porcelain::status::StatusGuidance::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::porcelain::status::StatusGuidance
+pub fn grit_lib::porcelain::status::StatusGuidance::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::porcelain::status::StatusGuidance
+impl core::marker::Freeze for grit_lib::porcelain::status::StatusGuidance
+impl core::marker::Send for grit_lib::porcelain::status::StatusGuidance
+impl core::marker::Sync for grit_lib::porcelain::status::StatusGuidance
+impl core::marker::Unpin for grit_lib::porcelain::status::StatusGuidance
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::status::StatusGuidance
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::status::StatusGuidance
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::status::StatusGuidance
 pub enum grit_lib::porcelain::status::StatusShortLine
 pub grit_lib::porcelain::status::StatusShortLine::Ignored(alloc::string::String)
 pub grit_lib::porcelain::status::StatusShortLine::Tracked
@@ -14902,6 +14946,24 @@ impl core::marker::Unpin for grit_lib::porcelain::status::Conflict
 impl core::marker::UnsafeUnpin for grit_lib::porcelain::status::Conflict
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::status::Conflict
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::status::Conflict
+pub struct grit_lib::porcelain::status::ConflictGroup
+pub grit_lib::porcelain::status::ConflictGroup::kind: grit_lib::porcelain::status::ConflictKind
+pub grit_lib::porcelain::status::ConflictGroup::paths: alloc::vec::Vec<alloc::string::String>
+impl core::clone::Clone for grit_lib::porcelain::status::ConflictGroup
+pub fn grit_lib::porcelain::status::ConflictGroup::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::status::ConflictGroup
+impl core::cmp::PartialEq for grit_lib::porcelain::status::ConflictGroup
+pub fn grit_lib::porcelain::status::ConflictGroup::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::porcelain::status::ConflictGroup
+pub fn grit_lib::porcelain::status::ConflictGroup::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::porcelain::status::ConflictGroup
+impl core::marker::Freeze for grit_lib::porcelain::status::ConflictGroup
+impl core::marker::Send for grit_lib::porcelain::status::ConflictGroup
+impl core::marker::Sync for grit_lib::porcelain::status::ConflictGroup
+impl core::marker::Unpin for grit_lib::porcelain::status::ConflictGroup
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::status::ConflictGroup
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::status::ConflictGroup
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::status::ConflictGroup
 pub struct grit_lib::porcelain::status::RenameDetection
 pub grit_lib::porcelain::status::RenameDetection::copies: bool
 pub grit_lib::porcelain::status::RenameDetection::threshold: u32
@@ -14936,6 +14998,10 @@ pub grit_lib::porcelain::status::StatusModel::stash_count: usize
 pub grit_lib::porcelain::status::StatusModel::state: grit_lib::state::WtStatusState
 pub grit_lib::porcelain::status::StatusModel::unstaged: alloc::vec::Vec<grit_lib::diff::DiffEntry>
 pub grit_lib::porcelain::status::StatusModel::untracked: alloc::vec::Vec<alloc::string::String>
+impl grit_lib::porcelain::status::StatusModel
+pub fn grit_lib::porcelain::status::StatusModel::conflict_groups(&self) -> alloc::vec::Vec<grit_lib::porcelain::status::ConflictGroup>
+pub fn grit_lib::porcelain::status::StatusModel::guidance(&self, &grit_lib::refs::branch_tracking::BranchStanding) -> grit_lib::porcelain::status::StatusGuidance
+pub fn grit_lib::porcelain::status::StatusModel::is_clean(&self) -> bool
 impl core::clone::Clone for grit_lib::porcelain::status::StatusModel
 pub fn grit_lib::porcelain::status::StatusModel::clone(&self) -> Self
 impl core::fmt::Debug for grit_lib::porcelain::status::StatusModel
