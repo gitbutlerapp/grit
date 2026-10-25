@@ -304,3 +304,77 @@ fn rebase_onto_the_other_rename_conflicts() {
     assert_eq!(commit, fx.main);
     assert_eq!(paths, vec!["a", "b", "c"]);
 }
+
+/// Both sides renamed `a` to `b` (rename/rename 1to1) and edited different lines.
+#[test]
+fn same_rename_on_both_sides_merges_cleanly() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    git(root, &["init", "-q", "-b", "main"]);
+    git(root, &["config", "user.name", "T"]);
+    git(root, &["config", "user.email", "t@e.com"]);
+    fs::write(root.join("a"), BASE).expect("write a");
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "base"]);
+    git(root, &["switch", "-qc", "topic"]);
+    git(root, &["mv", "a", "b"]);
+    apply_edit(&root.join("b"), Edit::Bottom("LINE8-theirs"));
+    git(root, &["commit", "-qam", "a->b theirs"]);
+    git(root, &["switch", "-q", "main"]);
+    git(root, &["mv", "a", "b"]);
+    apply_edit(&root.join("b"), Edit::Top("LINE1-ours"));
+    git(root, &["commit", "-qam", "a->b ours"]);
+    assert_clean_merge_matches_git(root);
+}
+
+/// Our side renamed `a` to `b`; theirs edited `a` in place (the mirror of issue #1093).
+#[test]
+fn rename_on_ours_edit_on_theirs_merges_cleanly() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    git(root, &["init", "-q", "-b", "main"]);
+    git(root, &["config", "user.name", "T"]);
+    git(root, &["config", "user.email", "t@e.com"]);
+    fs::write(root.join("a"), BASE).expect("write a");
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "base"]);
+    git(root, &["switch", "-qc", "topic"]);
+    apply_edit(&root.join("a"), Edit::Bottom("LINE8-theirs"));
+    git(root, &["commit", "-qam", "edit a"]);
+    git(root, &["switch", "-q", "main"]);
+    git(root, &["mv", "a", "b"]);
+    git(root, &["commit", "-qam", "a->b"]);
+    assert_clean_merge_matches_git(root);
+}
+
+/// `main` and `topic` must merge cleanly, in memory and for real, to Git's tree.
+fn assert_clean_merge_matches_git(root: &Path) {
+    let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
+    let rev = |spec: &str| -> ObjectId { git(root, &["rev-parse", spec]).trim().parse().unwrap() };
+    let (main, topic) = (rev("main"), rev("topic"));
+    let oracle = git_merge_tree_oracle(root, None, &main, &topic, MergeFavor::None);
+    assert!(oracle.unmerged.is_empty(), "git: {}", oracle.stdout);
+    let prediction =
+        predict_merge(&repo, main, topic, &MergePredictionOptions::default()).expect("predict");
+    assert_eq!(
+        prediction,
+        MergePrediction::Clean {
+            tree: oracle.result_tree
+        }
+    );
+    let outcome = integrate_branch_with(
+        &repo,
+        "refs/heads/main",
+        main,
+        topic,
+        "topic",
+        &MergeOptions::default(),
+    )
+    .expect("merge");
+    let IntegrateBranchOutcome::Merged { oid, .. } = outcome else {
+        panic!("expected a clean merge, got {outcome:?}");
+    };
+    assert_eq!(commit_tree(&repo, &oid).unwrap(), oracle.result_tree);
+    assert!(git(root, &["status", "--porcelain"]).is_empty());
+    assert_git_fsck_strict(root);
+}

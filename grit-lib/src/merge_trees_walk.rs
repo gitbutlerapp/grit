@@ -476,8 +476,21 @@ pub(crate) fn three_way_on_touched_paths(
         }
     }
 
+    // Base paths ours renamed away are merged at their ours destination.
+    let ours_rename_sources: HSet<&[u8]> = ours_new_to_old
+        .iter()
+        .filter(|(new, old)| new != old)
+        .map(|(_, old)| old.as_slice())
+        .collect();
+
     for op in ours_paths {
         if rename_conflict_paths.contains(op.as_slice()) {
+            continue;
+        }
+        if ours_rename_sources.contains(op.as_slice())
+            && !ours.contains_key(&op)
+            && lookup_index_entry_at_path(cache, odb, &ours_tree, &op)?.is_none()
+        {
             continue;
         }
         if theirs_rename_destinations.contains(&op) && !ours_new_to_old.contains_key(&op) {
