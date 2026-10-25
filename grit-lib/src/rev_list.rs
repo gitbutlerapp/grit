@@ -7199,7 +7199,7 @@ fn stdin_die_requires_value(opt: &str) -> Error {
 }
 
 fn apply_stdin_pseudo_opt(
-    git_dir: &Path,
+    repo: &Repository,
     line: &str,
     next_line: Option<&str>,
     not_mode: bool,
@@ -7207,142 +7207,46 @@ fn apply_stdin_pseudo_opt(
     negative: &mut Vec<String>,
     stdin_all_refs: &mut bool,
 ) -> Result<Option<usize>> {
-    if line == "--end-of-options" {
+    let target = if not_mode { negative } else { positive };
+    let mut push_tips = |tips: Vec<(String, ObjectId)>| {
+        target.extend(tips.into_iter().map(|(_, oid)| oid.to_hex()));
+    };
+    if line == "--end-of-options" || line == "--not" {
         return Ok(Some(1));
     }
     if line == "--all" {
         if not_mode {
-            for (_, oid) in refs::list_refs(git_dir, "refs/")? {
-                let s = oid.to_hex();
-                negative.push(s);
-            }
-            if let Ok(head_oid) = refs::resolve_ref(git_dir, "HEAD") {
-                negative.push(head_oid.to_hex());
+            push_tips(refs::list_refs_in(repo, "refs/")?);
+            if let Ok(head_oid) = refs::resolve_ref_in(repo, "HEAD") {
+                target.push(head_oid.to_hex());
             }
         } else {
             *stdin_all_refs = true;
         }
         return Ok(Some(1));
     }
-    if line == "--not" {
-        return Ok(Some(1));
-    }
-    if line == "--branches" {
-        for (_, oid) in refs::list_refs(git_dir, "refs/heads/")? {
-            let s = oid.to_hex();
-            if not_mode {
-                negative.push(s);
-            } else {
-                positive.push(s);
-            }
+    for (option, prefix) in [
+        ("branches", "refs/heads/"),
+        ("tags", "refs/tags/"),
+        ("remotes", "refs/remotes/"),
+    ] {
+        if line.strip_prefix("--") == Some(option) {
+            push_tips(refs::list_refs_in(repo, prefix)?);
+            return Ok(Some(1));
         }
-        return Ok(Some(1));
-    }
-    if line == "--tags" {
-        for (_, oid) in refs::list_refs(git_dir, "refs/tags/")? {
-            let s = oid.to_hex();
-            if not_mode {
-                negative.push(s);
-            } else {
-                positive.push(s);
-            }
+        if let Some((consumed, pattern)) = parse_long_opt_value(option, line, next_line) {
+            push_tips(refs::list_refs_glob_in(
+                repo,
+                &format!("{prefix}{pattern}"),
+            )?);
+            return Ok(Some(consumed));
         }
-        return Ok(Some(1));
-    }
-    if line == "--remotes" {
-        for (_, oid) in refs::list_refs(git_dir, "refs/remotes/")? {
-            let s = oid.to_hex();
-            if not_mode {
-                negative.push(s);
-            } else {
-                positive.push(s);
-            }
-        }
-        return Ok(Some(1));
-    }
-    if let Some((consumed, pattern)) = parse_long_opt_value("branches", line, next_line) {
-        let full_pattern = format!("refs/heads/{pattern}");
-        for (_, oid) in refs::list_refs_glob(git_dir, &full_pattern)? {
-            let s = oid.to_hex();
-            if not_mode {
-                negative.push(s);
-            } else {
-                positive.push(s);
-            }
-        }
-        return Ok(Some(consumed));
-    }
-    if let Some((1, pattern)) = parse_long_opt_value("tags", line, None) {
-        let full_pattern = format!("refs/tags/{pattern}");
-        for (_, oid) in refs::list_refs_glob(git_dir, &full_pattern)? {
-            let s = oid.to_hex();
-            if not_mode {
-                negative.push(s);
-            } else {
-                positive.push(s);
-            }
-        }
-        return Ok(Some(1));
-    }
-    if let Some((consumed, pattern)) = parse_long_opt_value("tags", line, next_line) {
-        let full_pattern = format!("refs/tags/{pattern}");
-        for (_, oid) in refs::list_refs_glob(git_dir, &full_pattern)? {
-            let s = oid.to_hex();
-            if not_mode {
-                negative.push(s);
-            } else {
-                positive.push(s);
-            }
-        }
-        return Ok(Some(consumed));
-    }
-    if let Some((1, pattern)) = parse_long_opt_value("remotes", line, None) {
-        let full_pattern = format!("refs/remotes/{pattern}");
-        for (_, oid) in refs::list_refs_glob(git_dir, &full_pattern)? {
-            let s = oid.to_hex();
-            if not_mode {
-                negative.push(s);
-            } else {
-                positive.push(s);
-            }
-        }
-        return Ok(Some(1));
-    }
-    if let Some((consumed, pattern)) = parse_long_opt_value("remotes", line, next_line) {
-        let full_pattern = format!("refs/remotes/{pattern}");
-        for (_, oid) in refs::list_refs_glob(git_dir, &full_pattern)? {
-            let s = oid.to_hex();
-            if not_mode {
-                negative.push(s);
-            } else {
-                positive.push(s);
-            }
-        }
-        return Ok(Some(consumed));
     }
     if line == "--glob" {
         return Err(stdin_die_requires_value("--glob"));
     }
-    if let Some((1, pattern)) = parse_long_opt_value("glob", line, None) {
-        for (_, oid) in refs::list_refs_glob(git_dir, &pattern)? {
-            let s = oid.to_hex();
-            if not_mode {
-                negative.push(s);
-            } else {
-                positive.push(s);
-            }
-        }
-        return Ok(Some(1));
-    }
     if let Some((consumed, pattern)) = parse_long_opt_value("glob", line, next_line) {
-        for (_, oid) in refs::list_refs_glob(git_dir, &pattern)? {
-            let s = oid.to_hex();
-            if not_mode {
-                negative.push(s);
-            } else {
-                positive.push(s);
-            }
-        }
+        push_tips(refs::list_refs_glob_in(repo, &pattern)?);
         return Ok(Some(consumed));
     }
     if line == "--no-walk" || line.starts_with("--no-walk=") {
@@ -7370,7 +7274,7 @@ fn apply_stdin_pseudo_opt(
 }
 
 /// Parse `--stdin` revision lines and pathspec tail (after `--`), matching Git `read_revisions_from_stdin`.
-fn parse_revision_stdin_lines(git_dir: &Path, lines: &[String]) -> Result<StdinRevisionSpecs> {
+fn parse_revision_stdin_lines(repo: &Repository, lines: &[String]) -> Result<StdinRevisionSpecs> {
     let mut positive = Vec::new();
     let mut negative = Vec::new();
     let mut stdin_all_refs = false;
@@ -7397,7 +7301,7 @@ fn parse_revision_stdin_lines(git_dir: &Path, lines: &[String]) -> Result<StdinR
             }
             let next = lines.get(i + 1).map(|s| s.as_str());
             match apply_stdin_pseudo_opt(
-                git_dir,
+                repo,
                 line,
                 next,
                 stdin_not_mode,
@@ -7427,21 +7331,23 @@ fn parse_revision_stdin_lines(git_dir: &Path, lines: &[String]) -> Result<StdinR
 }
 
 /// Read `--stdin` revision lines from the process stdin stream.
-fn read_revisions_from_stdin_lines(git_dir: &Path) -> Result<StdinRevisionSpecs> {
+fn read_revisions_from_stdin_lines(repo: &Repository) -> Result<StdinRevisionSpecs> {
     let stdin = std::io::read_to_string(std::io::stdin()).map_err(Error::Io)?;
     let lines: Vec<String> = stdin.lines().map(std::borrow::ToOwned::to_owned).collect();
-    parse_revision_stdin_lines(git_dir, &lines)
+    parse_revision_stdin_lines(repo, &lines)
 }
 
 /// Merge command-line revision strings with explicit `--stdin` lines (tests and embedders).
 ///
 /// Same behavior as [`collect_revision_specs_with_stdin`] when stdin contains `lines`.
+/// Ref pseudo-options (`--all`, `--branches[=<glob>]`, `--tags`, `--remotes`, `--glob`) list
+/// refs through [`Repository::refs`], so an injected ref store is honoured.
 ///
 /// # Errors
 ///
-/// Propagates [`RevListError`] for invalid stdin pseudo-options.
+/// Propagates [`RevListError`] for invalid stdin pseudo-options and ref store failures.
 pub fn collect_revision_specs_from_stdin_lines(
-    git_dir: &Path,
+    repo: &Repository,
     args_specs: &[String],
     lines: &[&str],
 ) -> Result<StdinRevisionSpecs> {
@@ -7455,7 +7361,7 @@ pub fn collect_revision_specs_from_stdin_lines(
     }
 
     let owned: Vec<String> = lines.iter().map(|s| (*s).to_owned()).collect();
-    let (s_pos, s_neg, stdin_all_refs, stdin_paths) = parse_revision_stdin_lines(git_dir, &owned)?;
+    let (s_pos, s_neg, stdin_all_refs, stdin_paths) = parse_revision_stdin_lines(repo, &owned)?;
     positive.extend(s_pos);
     negative.extend(s_neg);
 
@@ -7473,7 +7379,7 @@ pub fn collect_revision_specs_from_stdin_lines(
 ///
 /// Returns [`Error::Message`] for Git-compatible `fatal:` stderr lines from stdin mode.
 pub fn collect_revision_specs_with_stdin(
-    git_dir: &Path,
+    repo: &Repository,
     args_specs: &[String],
     read_stdin: bool,
 ) -> Result<StdinRevisionSpecs> {
@@ -7490,16 +7396,20 @@ pub fn collect_revision_specs_with_stdin(
         return Ok((positive, negative, false, Vec::new()));
     }
 
-    let (s_pos, s_neg, stdin_all_refs, stdin_paths) = read_revisions_from_stdin_lines(git_dir)?;
+    let (s_pos, s_neg, stdin_all_refs, stdin_paths) = read_revisions_from_stdin_lines(repo)?;
     positive.extend(s_pos);
     negative.extend(s_neg);
 
     Ok((positive, negative, stdin_all_refs, stdin_paths))
 }
 
-/// Resolve every local tag object ID.
-pub fn tag_targets(git_dir: &Path) -> Result<HashSet<ObjectId>> {
-    Ok(refs::list_refs(git_dir, "refs/tags/")?
+/// Object ids every tag under `refs/tags/` points at, read through [`Repository::refs`].
+///
+/// # Errors
+///
+/// Propagates ref store failures.
+pub fn tag_targets(repo: &Repository) -> Result<HashSet<ObjectId>> {
+    Ok(refs::list_refs_in(repo, "refs/tags/")?
         .into_iter()
         .map(|(_, oid)| oid)
         .collect())
@@ -7938,10 +7848,10 @@ fn relevant_parent_reaches(
 
 fn ref_pairs_for_all(repo: &Repository) -> Result<Vec<(String, ObjectId)>> {
     let mut pairs = Vec::new();
-    if let Ok(head) = refs::resolve_ref(repo.git_dir(), "HEAD") {
+    if let Ok(head) = refs::resolve_ref_in(repo, "HEAD") {
         pairs.push(("HEAD".to_owned(), head));
     }
-    pairs.extend(refs::list_refs(repo.git_dir(), "refs/")?);
+    pairs.extend(refs::list_refs_in(repo, "refs/")?);
     Ok(pairs)
 }
 
@@ -9919,19 +9829,25 @@ mod tests {
         assert_eq!(pair.1, "right");
     }
 
-    fn minimal_git_dir() -> (TempDir, PathBuf) {
+    fn minimal_repo() -> (TempDir, Repository) {
         let tmp = TempDir::new().expect("tempdir");
-        let git_dir = tmp.path().join(".git");
-        fs::create_dir_all(git_dir.join("refs/heads")).expect("refs");
-        fs::write(git_dir.join("HEAD"), "ref: refs/heads/main\n").expect("head");
-        (tmp, git_dir)
+        Repository::init(
+            tmp.path(),
+            &InitOptions {
+                bare: true,
+                ..InitOptions::default()
+            },
+        )
+        .expect("init");
+        let repo = Repository::open(tmp.path(), &RepositoryOptions::empty()).expect("open");
+        (tmp, repo)
     }
 
     #[test]
     fn stdin_revision_specs_pathspec_tail() -> Result<()> {
-        let (_tmp, git_dir) = minimal_git_dir();
+        let (_tmp, repo) = minimal_repo();
         let (_, _, _, paths) = collect_revision_specs_from_stdin_lines(
-            &git_dir,
+            &repo,
             &[String::from("HEAD")],
             &["--", "src/foo.rs"],
         )?;
@@ -9941,14 +9857,14 @@ mod tests {
 
     #[test]
     fn stdin_invalid_no_walk_and_unknown_option() {
-        let (_tmp, git_dir) = minimal_git_dir();
-        let err = collect_revision_specs_from_stdin_lines(&git_dir, &[], &["--no-walk=bogus"])
+        let (_tmp, repo) = minimal_repo();
+        let err = collect_revision_specs_from_stdin_lines(&repo, &[], &["--no-walk=bogus"])
             .expect_err("no-walk");
         assert!(matches!(
             err,
             Error::RevList(RevListError::InvalidNoWalkArgument)
         ));
-        let err = collect_revision_specs_from_stdin_lines(&git_dir, &[], &["--not-a-real-flag"])
+        let err = collect_revision_specs_from_stdin_lines(&repo, &[], &["--not-a-real-flag"])
             .expect_err("bad opt");
         assert!(matches!(
             err,
@@ -10662,7 +10578,7 @@ mod line_coverage_tests {
         let lines = read_lines(&list_path)?;
         assert_eq!(lines.len(), 2);
         let (_specs, _neg, _all, paths) = collect_revision_specs_from_stdin_lines(
-            &repo.git_dir(),
+            &repo,
             &[String::from("HEAD")],
             &["--", "tracked.txt"],
         )?;
@@ -10794,14 +10710,14 @@ mod line_coverage_tests {
         let filter = ObjectFilter::BlobLimit(512);
         let _ = reachable_object_ids_for_cat_file(&repo, Some(&filter), true)?;
         let _ = object_ids_for_cat_file_filtered(&repo, &filter)?;
-        let _ = tag_targets(&repo.git_dir())?;
+        let _ = tag_targets(&repo)?;
         let pairs = vec![
             (String::from("refs/heads/main"), tip),
             (String::from("refs/heads/side"), tip),
         ];
         let _ = commit_tips_from_named_refs(&repo, &pairs, &RefExclusions::default())?;
         let (_pos, _neg, _all, _paths) =
-            collect_revision_specs_with_stdin(&repo.git_dir(), &[String::from("main")], false)?;
+            collect_revision_specs_with_stdin(&repo, &[String::from("main")], false)?;
         let borders = shallow_borders_reachable_from_wants(&repo, &[tip]);
         let _ = borders;
         Ok(())
@@ -11066,7 +10982,7 @@ mod line_coverage_tests {
             ..RevListOptions::default()
         };
         let _ = rev_list(&repo, &[String::from("main")], &[], &opts)?;
-        let _ = tag_targets(&repo.git_dir())?;
+        let _ = tag_targets(&repo)?;
         Ok(())
     }
 
@@ -11092,8 +11008,7 @@ mod line_coverage_tests {
             "--tags=v2",
             "--branches=main",
         ];
-        let (pos, _neg, _all, paths) =
-            collect_revision_specs_from_stdin_lines(repo.git_dir(), &[], &lines)?;
+        let (pos, _neg, _all, paths) = collect_revision_specs_from_stdin_lines(&repo, &[], &lines)?;
         assert!(paths.is_empty());
         assert!(
             !pos.is_empty(),
@@ -11110,19 +11025,16 @@ mod line_coverage_tests {
         )?;
         let not_lines = ["--not", "--branches", "--tags", "--remotes"];
         let (_npos, nneg, _nall, _npaths) =
-            collect_revision_specs_from_stdin_lines(repo.git_dir(), &[], &not_lines)?;
+            collect_revision_specs_from_stdin_lines(&repo, &[], &not_lines)?;
         assert!(!nneg.is_empty());
         let split_lines = ["--tags", "v2", "--glob=refs/heads/topic/*"];
-        let (spos, _, _, _) =
-            collect_revision_specs_from_stdin_lines(repo.git_dir(), &[], &split_lines)?;
+        let (spos, _, _, _) = collect_revision_specs_from_stdin_lines(&repo, &[], &split_lines)?;
         assert!(!spos.is_empty());
         let eoo_lines = ["--end-of-options", "--not-a-ref"];
-        let (epos, _, _, _) =
-            collect_revision_specs_from_stdin_lines(repo.git_dir(), &[], &eoo_lines)?;
+        let (epos, _, _, _) = collect_revision_specs_from_stdin_lines(&repo, &[], &eoo_lines)?;
         assert_eq!(epos, vec![String::from("--not-a-ref")]);
         let path_lines = ["main", "--", "tracked.txt"];
-        let (_, _, _, paths) =
-            collect_revision_specs_from_stdin_lines(repo.git_dir(), &[], &path_lines)?;
+        let (_, _, _, paths) = collect_revision_specs_from_stdin_lines(&repo, &[], &path_lines)?;
         assert_eq!(paths, vec!["tracked.txt".to_owned()]);
         let _dir_guard = dir;
         Ok(())
@@ -11160,7 +11072,7 @@ mod line_coverage_tests {
         ];
         for lines in cases {
             let (pos, neg, all, paths) =
-                collect_revision_specs_from_stdin_lines(repo.git_dir(), &[], lines)?;
+                collect_revision_specs_from_stdin_lines(&repo, &[], lines)?;
             assert!(paths.is_empty());
             let _ = rev_list(
                 &repo,

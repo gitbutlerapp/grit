@@ -3887,14 +3887,74 @@ pub fn list_refs_for_repository(
     repo: &crate::repo::Repository,
     prefix: &str,
 ) -> Result<Vec<(String, ObjectId)>> {
-    let git_dir = &repo.git_dir();
-    let prefix_norm = normalize_list_refs_prefix(git_dir, prefix);
-    let mut results = collect_resolved_refs(repo.refs(), prefix_norm.as_str())?;
+    let prefix_norm = normalize_list_refs_prefix(repo.git_dir(), prefix);
+    list_store_refs_with_name_prefix(repo, &prefix_norm)
+}
+
+/// Refs whose names start with `prefix` (taken literally), from `repo`'s ref store.
+fn list_store_refs_with_name_prefix(
+    repo: &crate::repo::Repository,
+    prefix: &str,
+) -> Result<Vec<(String, ObjectId)>> {
+    let git_dir = repo.git_dir();
+    let mut results = collect_resolved_refs(repo.refs(), prefix)?;
     if crate::worktree_ref::is_linked_worktree_git_dir(git_dir) {
         results.retain(|(name, _)| crate::worktree_ref::ref_visible_from_worktree(git_dir, name));
     }
     results.sort_by(|a, b| a.0.cmp(&b.0));
     Ok(results)
+}
+
+/// [`list_refs`] for `repo`, honouring an injected ref store.
+///
+/// Files and reftable repositories are listed from the git directory with a throwaway store:
+/// for a one-off listing of many refs that is faster and leaner than going through the
+/// handle's long-lived store, which keeps a `packed-refs` snapshot. Any other store is
+/// listed through [`list_refs_for_repository`].
+///
+/// # Errors
+///
+/// Propagates ref-store open/read failures.
+pub(crate) fn list_refs_in(
+    repo: &crate::repo::Repository,
+    prefix: &str,
+) -> Result<Vec<(String, ObjectId)>> {
+    if repo.refs_on_disk() {
+        list_refs(repo.git_dir(), prefix)
+    } else {
+        list_refs_for_repository(repo, prefix)
+    }
+}
+
+/// [`resolve_ref`] for `repo`, honouring an injected ref store the same way [`list_refs_in`]
+/// does.
+///
+/// # Errors
+///
+/// Same as [`resolve_ref`].
+pub(crate) fn resolve_ref_in(repo: &crate::repo::Repository, refname: &str) -> Result<ObjectId> {
+    if repo.refs_on_disk() {
+        resolve_ref(repo.git_dir(), refname)
+    } else {
+        repo.resolve_ref_oid(refname)
+    }
+}
+
+/// [`list_refs_glob`] for `repo`, honouring an injected ref store the same way
+/// [`list_refs_in`] does.
+///
+/// # Errors
+///
+/// Propagates ref-store open/read failures.
+pub(crate) fn list_refs_glob_in(
+    repo: &crate::repo::Repository,
+    pattern: &str,
+) -> Result<Vec<(String, ObjectId)>> {
+    if repo.refs_on_disk() {
+        list_refs_glob(repo.git_dir(), pattern)
+    } else {
+        list_refs_glob_for_repository(repo, pattern)
+    }
 }
 
 /// List resolved refs under `git_dir` whose full names start with `prefix`.
@@ -4055,25 +4115,23 @@ pub fn list_refs_glob_for_repository(
     repo: &crate::repo::Repository,
     pattern: &str,
 ) -> Result<Vec<(String, ObjectId)>> {
-    let glob_pos = pattern.find(['*', '?', '[']);
-    let prefix_owned: String = match glob_pos {
-        Some(pos) => pattern[..pos].to_owned(),
+    // The text before a wildcard is a name prefix, not a directory (`refs/tags/v*` must
+    // list `refs/tags/v1`), so it skips the directory normalization of
+    // [`list_refs_for_repository`].
+    let all = match pattern.find(['*', '?', '[']) {
+        Some(pos) => list_store_refs_with_name_prefix(repo, &pattern[..pos])?,
         None => {
-            let mut p = pattern.trim_end_matches('/').to_owned();
-            if !p.is_empty() {
-                p.push('/');
+            let mut dir = pattern.trim_end_matches('/').to_owned();
+            if !dir.is_empty() {
+                dir.push('/');
             }
-            p
+            list_refs_for_repository(repo, &dir)?
         }
     };
-    let all = list_refs_for_repository(repo, prefix_owned.as_str())?;
-    let mut results = Vec::new();
-    for (refname, oid) in all {
-        if ref_matches_glob(&refname, pattern) {
-            results.push((refname, oid));
-        }
-    }
-    Ok(results)
+    Ok(all
+        .into_iter()
+        .filter(|(refname, _)| ref_matches_glob(refname, pattern))
+        .collect())
 }
 
 /// List refs matching a glob pattern (e.g. `refs/heads/topic/*`).

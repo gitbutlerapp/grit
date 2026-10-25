@@ -159,7 +159,7 @@ pub fn symbolic_full_name(repo: &Repository, spec: &str) -> Option<String> {
     }
 
     if spec == "HEAD" {
-        if let Ok(Some(target)) = refs::read_symbolic_ref(repo.git_dir(), "HEAD") {
+        if let Ok(Some(target)) = refs::read_symbolic_ref_for_repository(repo, "HEAD") {
             return Some(target);
         }
         return None;
@@ -199,7 +199,7 @@ fn remote_tracking_head_symbolic_target(repo: &Repository, name: &str) -> Option
     let url_key = format!("remote.{name}.url");
     config.get(&url_key)?;
     let head_ref = format!("refs/remotes/{name}/HEAD");
-    let target = refs::read_symbolic_ref(repo.git_dir(), &head_ref).ok()??;
+    let target = refs::read_symbolic_ref_for_repository(repo, &head_ref).ok()??;
     Some(target)
 }
 
@@ -570,7 +570,7 @@ fn resolve_upstream_branch_context(repo: &Repository, base: &str) -> Result<(Str
     let base = if base == "@" { "" } else { base };
 
     if base.is_empty() {
-        let Some(head) = refs::read_head(repo.git_dir())? else {
+        let Some(head) = refs::read_symbolic_ref_for_repository(repo, "HEAD")? else {
             return Err(RevParseError::HeadNotBranch.into());
         };
         let Some(short) = head.strip_prefix("refs/heads/") else {
@@ -578,7 +578,7 @@ fn resolve_upstream_branch_context(repo: &Repository, base: &str) -> Result<(Str
         };
         return Ok((short.to_owned(), short.to_owned()));
     }
-    let head_branch = refs::read_head(repo.git_dir())?.and_then(|h| {
+    let head_branch = refs::read_symbolic_ref_for_repository(repo, "HEAD")?.and_then(|h| {
         h.strip_prefix("refs/heads/")
             .map(std::borrow::ToOwned::to_owned)
     });
@@ -2642,7 +2642,7 @@ fn resolve_base(
         && spec != "MERGE_HEAD"
     {
         const REMOTES: &str = "refs/remotes/";
-        if let Ok(remote_refs) = refs::list_refs(repo.git_dir(), REMOTES) {
+        if let Ok(remote_refs) = refs::list_refs_in(repo, REMOTES) {
             let matches: Vec<ObjectId> = remote_refs
                 .into_iter()
                 .filter(|(r, _)| {
@@ -2986,7 +2986,7 @@ pub fn reflog_walk_refname(repo: &Repository, spec: &str) -> Result<Option<Strin
     };
 
     let mut current_spec = if prefix_resolved.is_empty() {
-        if let Ok(Some(b)) = refs::read_head(repo.git_dir()) {
+        if let Ok(Some(b)) = refs::read_symbolic_ref_for_repository(repo, "HEAD") {
             if let Some(short) = b.strip_prefix("refs/heads/") {
                 short.to_owned()
             } else {
@@ -3043,14 +3043,8 @@ pub fn resolve_reflog_walk_log_ref(repo: &Repository, r: &str) -> Result<String>
         return Ok(r.to_string());
     }
     if r.starts_with("@{") {
-        if let Some(n_str) = r.strip_prefix("@{").and_then(|s| s.strip_suffix('}')) {
-            if let Some(stripped) = n_str.strip_prefix('-') {
-                if stripped.parse::<usize>().is_ok() {
-                    if let Ok(branch) = refs::resolve_at_n_branch(repo.git_dir(), r) {
-                        return Ok(format!("refs/heads/{branch}"));
-                    }
-                }
-            }
+        if let Ok(Some(branch)) = expand_at_minus_to_branch_name(repo, r) {
+            return Ok(format!("refs/heads/{branch}"));
         }
         return Ok(r.to_string());
     }
@@ -3076,7 +3070,7 @@ fn try_resolve_reflog_index(repo: &Repository, spec: &str) -> Result<Option<Obje
     };
 
     let mut current_spec = if prefix_resolved.is_empty() {
-        if let Ok(Some(b)) = refs::read_head(repo.git_dir()) {
+        if let Ok(Some(b)) = refs::read_symbolic_ref_for_repository(repo, "HEAD") {
             if let Some(short) = b.strip_prefix("refs/heads/") {
                 short.to_owned()
             } else {
@@ -3929,9 +3923,8 @@ fn resolve_commit_message_search(
         (false, pattern)
     };
     let regex = Regex::new(effective_pattern).ok();
-    use crate::state::resolve_head;
-    let head =
-        resolve_head(repo.git_dir()).map_err(|_| Error::ObjectNotFound(format!(":/{pattern}")))?;
+    let head = crate::state::resolve_head_for_repository(repo)
+        .map_err(|_| Error::ObjectNotFound(format!(":/{pattern}")))?;
     let start_oid = match head.oid() {
         Some(oid) => *oid,
         None => return Err(Error::ObjectNotFound(format!(":/{pattern}"))),
@@ -3941,7 +3934,7 @@ fn resolve_commit_message_search(
     let mut queue = std::collections::VecDeque::new();
     queue.push_back(start_oid);
     visited.insert(start_oid);
-    if let Ok(refs) = crate::refs::list_refs(repo.git_dir(), "refs/") {
+    if let Ok(refs) = crate::refs::list_refs_in(repo, "refs/") {
         for (_name, oid) in refs {
             if visited.insert(oid) {
                 queue.push_back(oid);

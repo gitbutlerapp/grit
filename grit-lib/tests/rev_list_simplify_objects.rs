@@ -223,12 +223,9 @@ fn t6018_ref_globs_and_exclude_match_git() {
     git(wt, &["checkout", "main"]);
 
     let grit_repo = Repository::discover(Some(wt), &RepositoryOptions::empty()).expect("discover");
-    let (pos, _neg, _all, _paths) = collect_revision_specs_from_stdin_lines(
-        grit_repo.git_dir(),
-        &[],
-        &["--glob=refs/heads/subspace/*"],
-    )
-    .expect("stdin glob");
+    let (pos, _neg, _all, _paths) =
+        collect_revision_specs_from_stdin_lines(&grit_repo, &[], &["--glob=refs/heads/subspace/*"])
+            .expect("stdin glob");
     let git_oids = git_rev_list(wt, &["--glob=refs/heads/subspace/*"]);
     let grit_oids = rev_list(
         &grit_repo,
@@ -446,7 +443,7 @@ fn t6017_stdin_revision_specs_match_git_semantics() {
     commit_file(wt, "b", "2\n", "two");
     let grit_repo = Repository::discover(Some(wt), &RepositoryOptions::empty()).expect("discover");
     let (pos, neg, all, paths) = collect_revision_specs_from_stdin_lines(
-        grit_repo.git_dir(),
+        &grit_repo,
         &[String::from("HEAD")],
         &["--not", "HEAD~1"],
     )

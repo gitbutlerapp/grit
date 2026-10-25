@@ -24317,8 +24317,8 @@ impl core::marker::UnsafeUnpin for grit_lib::revwalk::rev_list::RevListResult
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::rev_list::RevListResult
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::rev_list::RevListResult
 pub fn grit_lib::revwalk::rev_list::all_ref_commit_tips_for_walk(&grit_lib::repo::Repository) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::ObjectId>>
-pub fn grit_lib::revwalk::rev_list::collect_revision_specs_from_stdin_lines(&std::path::Path, &[alloc::string::String], &[&str]) -> grit_lib::error::Result<(alloc::vec::Vec<alloc::string::String>, alloc::vec::Vec<alloc::string::String>, bool, alloc::vec::Vec<alloc::string::String>)>
-pub fn grit_lib::revwalk::rev_list::collect_revision_specs_with_stdin(&std::path::Path, &[alloc::string::String], bool) -> grit_lib::error::Result<(alloc::vec::Vec<alloc::string::String>, alloc::vec::Vec<alloc::string::String>, bool, alloc::vec::Vec<alloc::string::String>)>
+pub fn grit_lib::revwalk::rev_list::collect_revision_specs_from_stdin_lines(&grit_lib::repo::Repository, &[alloc::string::String], &[&str]) -> grit_lib::error::Result<(alloc::vec::Vec<alloc::string::String>, alloc::vec::Vec<alloc::string::String>, bool, alloc::vec::Vec<alloc::string::String>)>
+pub fn grit_lib::revwalk::rev_list::collect_revision_specs_with_stdin(&grit_lib::repo::Repository, &[alloc::string::String], bool) -> grit_lib::error::Result<(alloc::vec::Vec<alloc::string::String>, alloc::vec::Vec<alloc::string::String>, bool, alloc::vec::Vec<alloc::string::String>)>
 pub fn grit_lib::revwalk::rev_list::commit_tips_from_named_refs(&grit_lib::repo::Repository, &[(alloc::string::String, grit_lib::objects::ObjectId)], &grit_lib::refs::ref_exclusions::RefExclusions) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::ObjectId>>
 pub fn grit_lib::revwalk::rev_list::commit_visible_for_dense_pathspecs(&grit_lib::repo::Repository, grit_lib::objects::ObjectId, &[alloc::string::String]) -> grit_lib::error::Result<bool>
 pub fn grit_lib::revwalk::rev_list::expand_object_filter_for_protocol(&str) -> core::result::Result<alloc::string::String, alloc::string::String>
@@ -24341,7 +24341,7 @@ pub fn grit_lib::revwalk::rev_list::shallow_grafts_for_upload_pack_rev_list(&gri
 pub fn grit_lib::revwalk::rev_list::shallow_grafts_for_upload_pack_target_depth(&grit_lib::repo::Repository, &[grit_lib::objects::ObjectId], &[grit_lib::objects::ObjectId], usize) -> alloc::vec::Vec<grit_lib::objects::ObjectId>
 pub fn grit_lib::revwalk::rev_list::split_revision_token(&str) -> (alloc::vec::Vec<alloc::string::String>, alloc::vec::Vec<alloc::string::String>)
 pub fn grit_lib::revwalk::rev_list::split_symmetric_diff(&str) -> core::option::Option<(alloc::string::String, alloc::string::String)>
-pub fn grit_lib::revwalk::rev_list::tag_targets(&std::path::Path) -> grit_lib::error::Result<std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>>
+pub fn grit_lib::revwalk::rev_list::tag_targets(&grit_lib::repo::Repository) -> grit_lib::error::Result<std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>>
 pub fn grit_lib::revwalk::rev_list::url_encode_object_filter_subspec(&str) -> alloc::string::String
 pub mod grit_lib::revwalk::rev_list_error
 #[non_exhaustive] pub enum grit_lib::revwalk::rev_list_error::RevListError

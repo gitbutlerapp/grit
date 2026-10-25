@@ -229,7 +229,7 @@ fn ref_tips_exclusions_and_revision_resolve() {
     assert!(!tips.contains(&hidden));
     let resolved = resolve_revision_commits(&repo, &["main".to_owned()]).expect("resolve");
     assert_eq!(resolved.len(), 1);
-    let tags = tag_targets(repo.git_dir()).expect("tags");
+    let tags = tag_targets(&repo).expect("tags");
     assert!(tags.is_empty());
 }
 
@@ -276,10 +276,7 @@ fn tagged_tip_object_walk_and_symmetric_range() {
     )
     .expect("range");
     assert!(!range.commits.is_empty());
-    let tag_set: HashSet<_> = tag_targets(repo.git_dir())
-        .expect("tags")
-        .into_iter()
-        .collect();
+    let tag_set: HashSet<_> = tag_targets(&repo).expect("tags").into_iter().collect();
     assert!(tag_set.contains(&tag_oid));
 }
 

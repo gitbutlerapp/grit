@@ -282,7 +282,7 @@ fn rev_list_deep_history_and_ref_matrix() -> grit_lib::error::Result<()> {
     assert!(!tips.is_empty());
     let _ = resolve_revision_commits(&repo, &["main".to_owned(), "side".to_owned()])?;
     let _ = resolve_object_walk_roots(&repo, &["main".to_owned()])?;
-    let _ = tag_targets(repo.git_dir())?;
+    let _ = tag_targets(&repo)?;
     let _ = shallow_boundary_oids(repo.git_dir());
     let _ = shallow_borders_reachable_from_wants(&repo, &[tip]);
     let filter = ObjectFilter::BlobLimit(4096);
