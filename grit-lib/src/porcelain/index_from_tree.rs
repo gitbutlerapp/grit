@@ -177,8 +177,9 @@ pub(crate) fn index_from_tree_with_seeded_stats(
 /// [`crate::write_tree::build_cache_tree_from_tree`], but subtrees whose `seed` cache-tree node is valid and
 /// records the same tree id are taken from `seed`'s rows instead of being read from the object
 /// database. Rows taken from `seed` carry only path, mode and oid (stat data and flags are reset
-/// exactly as a tree read would leave them).
-fn index_from_tree_reusing_cache_tree(
+/// exactly as a tree read would leave them). The cache-tree is attached only when its entry
+/// count matches the rows (a tree with duplicate entries yields more tree entries than rows).
+pub(crate) fn index_from_tree_reusing_cache_tree(
     repo: &Repository,
     tree_oid: &ObjectId,
     seed: &Index,

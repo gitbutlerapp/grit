@@ -1447,6 +1447,32 @@ mod tests {
     }
 
     #[test]
+    fn hard_reset_records_the_target_cache_tree_like_git() {
+        let grit_dir = tempfile::tempdir().expect("tempdir");
+        let git_dir = tempfile::tempdir().expect("tempdir");
+        let (repo, trimmed) = wide_repo_with_local_changes(grit_dir.path());
+        wide_repo_with_local_changes(git_dir.path());
+
+        git(
+            git_dir.path(),
+            &["reset", "-q", "--hard", &trimmed.to_hex()],
+        );
+        reset_to_commit(&repo, &reset_opts(trimmed, ResetMode::Hard)).expect("hard reset");
+
+        let tree = commit_tree_oid(&repo, &trimmed).expect("tree");
+        assert_eq!(
+            repo.load_index().expect("index").cache_tree_root,
+            Some(tree)
+        );
+        assert_eq!(git(grit_dir.path(), &["write-tree"]).trim(), tree.to_hex());
+        assert_eq!(
+            git_index_view(grit_dir.path()),
+            git_index_view(git_dir.path())
+        );
+        git(grit_dir.path(), &["fsck", "--no-progress"]);
+    }
+
+    #[test]
     fn mixed_reset_replaces_an_unreadable_index() {
         let (_dir, repo) = init_repo();
         let c1 = commit_file(&repo, "f", "1\n", None);

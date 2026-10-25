@@ -364,20 +364,22 @@ pub fn checkout_hard_to_tree_from_head_tree(
     head_tree: &ObjectId,
     target_tree: &ObjectId,
 ) -> Result<()> {
-    use crate::porcelain::merge::tree_to_index_entries;
+    use crate::porcelain::index_from_tree::index_from_tree_reusing_cache_tree;
 
     let work_tree = repo
         .work_tree()
         .ok_or_else(|| Error::PathError("cannot update a bare repository's working tree".into()))?;
 
-    let target_entries = tree_to_index_entries(repo, target_tree, "")?;
+    let pre_reset_index = repo.load_index()?;
+    let mut target = index_from_tree_reusing_cache_tree(repo, target_tree, &pre_reset_index)?;
+    let target_cache_tree = target.cache_tree.take();
+    let target_entries = std::mem::take(&mut target.entries);
     let trees_differ = head_tree != target_tree;
     let changes = if trees_differ {
         diff_trees(repo.odb(), Some(head_tree), Some(target_tree), "")?
     } else {
         Vec::new()
     };
-    let pre_reset_index = repo.load_index()?;
     // Raciness is judged against the index as it was before the reset: the tree-diff checkout
     // below rewrites the index, which would make racily clean entries look settled.
     let pre_reset_index_mtime = crate::diff::index_mtime_for_diff(&pre_reset_index, None);
@@ -570,11 +572,10 @@ pub fn checkout_hard_to_tree_from_head_tree(
     let mut new_index = Index::new();
     new_index.entries = new_entries;
     new_index.sort();
-    if sparse.is_some() {
-        let cache_tree = crate::write_tree::build_cache_tree_from_tree(repo.odb(), target_tree)?;
-        if usize::try_from(cache_tree.entry_count).ok() == Some(new_index.entries.len()) {
-            new_index.set_cache_tree(cache_tree);
-        }
+    if let Some(cache_tree) = target_cache_tree
+        .filter(|ct| usize::try_from(ct.entry_count).ok() == Some(new_index.entries.len()))
+    {
+        new_index.set_cache_tree(cache_tree);
     }
     repo.write_index(&mut new_index)?;
     Ok(())
