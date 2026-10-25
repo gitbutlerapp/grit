@@ -68,7 +68,11 @@ pub use absorb::{
     AbsorbPlan, HunkAssignment, HunkRange, UnassignedHunk, UnassignedReason,
     DEFAULT_ABSORB_STACK_LIMIT,
 };
-pub use apply::{apply_absorb_rewrite, apply_fixup_rewrite, apply_rewrite, verify_rewrite_plan};
+pub use apply::{
+    abort_interrupted_rewrite_apply, apply_absorb_rewrite, apply_fixup_rewrite, apply_rewrite,
+    ensure_rewrite_apply_ready, recover_interrupted_rewrite_apply, rewrite_apply_journal_active,
+    verify_rewrite_plan, RewriteApplyRecovery,
+};
 pub use drop::drop;
 pub use error::HistoryError;
 pub use exec::{verify_rebase_with_exec, ExecReport, ExecRunRecord, ExecSpec};
