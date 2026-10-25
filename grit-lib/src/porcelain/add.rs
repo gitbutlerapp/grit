@@ -304,12 +304,13 @@ fn stage_with_tracked_scan(
     stage_inner(repo, opts, progress, true)
 }
 
-/// Match the UNTR `dir_flags` already stored on the index so add does not rebuild the cache.
+/// List every untracked file unless the index UNTR cache stores collapsed (normal-mode)
+/// directories: matching its `dir_flags` keeps add from rebuilding the cache.
 fn untracked_show_all_matching_index(index: &Index) -> bool {
     index
         .untracked_cache
         .as_ref()
-        .is_some_and(|uc| uc.dir_flags == 0)
+        .is_none_or(|uc| uc.dir_flags == 0)
 }
 
 fn stage_inner(
@@ -435,56 +436,40 @@ fn stage_inner_on_index(
     };
 
     let rules = lock_rules(&rules_arc)?;
-    let bulk_empty_index_add =
-        opts.mode == StageMode::All && index.entries.is_empty() && opts.pathspecs.is_empty();
     let mut untracked = if opts.mode == StageMode::All {
-        if bulk_empty_index_add {
-            let scan = UntrackedScan {
-                ignored_mode: IgnoredMode::No,
-                show_all: true,
-                sort_paths: false,
-                use_untracked_cache: false,
-                cache_miss: UntrackedCacheMissAction::RefreshFull,
-            };
-            let (untracked, _, _) = collect_untracked_and_ignored_inner(
-                repo,
-                index,
-                work_tree,
-                &opts.pathspecs,
-                scan,
-                &rules,
-                None,
-            )?;
+        let bulk_empty_index_add = index.entries.is_empty() && staging_pathspecs.is_empty();
+        // The UNTR cache only answers pathspec-free walks; everywhere else the full listing
+        // is one walk, while collapsed `dir/` entries would each need a second walk.
+        let show_all = bulk_empty_index_add
+            || !staging_pathspecs.is_empty()
+            || untracked_show_all_matching_index(index);
+        let scan = UntrackedScan {
+            ignored_mode: IgnoredMode::No,
+            show_all,
+            sort_paths: !bulk_empty_index_add,
+            use_untracked_cache: !bulk_empty_index_add,
+            cache_miss: UntrackedCacheMissAction::RefreshFull,
+        };
+        let (untracked, _, _) = collect_untracked_and_ignored_inner(
+            repo,
+            index,
+            work_tree,
+            staging_pathspecs.as_ref(),
+            scan,
+            &rules,
+            None,
+        )?;
+        if show_all || untracked.is_empty() {
             untracked
         } else {
-            let scan = UntrackedScan {
-                ignored_mode: IgnoredMode::No,
-                show_all: untracked_show_all_matching_index(index),
-                sort_paths: !use_tracked_scan,
-                use_untracked_cache: true,
-                cache_miss: UntrackedCacheMissAction::RefreshFull,
-            };
-            let (untracked, _, _) = collect_untracked_and_ignored_inner(
+            expand_untracked_for_staging_with_rules(
                 repo,
                 index,
                 work_tree,
-                &opts.pathspecs,
-                scan,
+                untracked,
+                staging_pathspecs.as_ref(),
                 &rules,
-                None,
-            )?;
-            if untracked.is_empty() {
-                untracked
-            } else {
-                expand_untracked_for_staging_with_rules(
-                    repo,
-                    index,
-                    work_tree,
-                    untracked,
-                    &opts.pathspecs,
-                    &rules,
-                )?
-            }
+            )?
         }
     } else {
         Vec::new()
@@ -2693,6 +2678,122 @@ mod tests {
         assert_eq!(entry.mode, MODE_GITLINK);
         assert_eq!(entry.oid, head);
         assert!(index.get(b"inner/i", 0).is_none());
+    }
+
+    fn seed_one_file_dirs(root: &Path, count: usize) {
+        for i in 0..count {
+            let dir = root.join(format!("d{i}"));
+            fs::create_dir_all(&dir).unwrap();
+            fs::write(dir.join("f.txt"), format!("{i}\n")).unwrap();
+        }
+    }
+
+    fn stage_with_pathspecs(repo: &Repository, specs: &[&str]) -> StageOutcome {
+        let specs: Vec<String> = specs.iter().map(|s| (*s).to_owned()).collect();
+        stage(
+            repo,
+            &StageOptions {
+                pathspecs: specs.clone(),
+                pathspec_sources: specs,
+                ..StageOptions::default()
+            },
+            &mut NullProgress,
+        )
+        .unwrap()
+    }
+
+    fn stage0_entries(repo: &Repository) -> Vec<(Vec<u8>, u32, ObjectId)> {
+        repo.load_index()
+            .unwrap()
+            .entries
+            .iter()
+            .map(|e| (e.path.clone(), e.mode, e.oid))
+            .collect()
+    }
+
+    #[test]
+    fn stage_dot_on_many_untracked_dirs_matches_no_pathspec() {
+        for tracked in [false, true] {
+            let mut results = Vec::new();
+            for specs in [&[][..], &["."], &["./"]] {
+                let tmp = TempDir::new().unwrap();
+                let root = tmp.path();
+                let repo = init_repo(root);
+                if tracked {
+                    let mut index = Index::new();
+                    stage_file_in_index(&repo, &mut index, "tracked/t.txt", b"t\n");
+                    write_index(&repo, &mut index);
+                }
+                seed_one_file_dirs(root, 60);
+                let outcome = stage_with_pathspecs(&repo, specs);
+                assert_eq!(outcome.added.len(), 60, "{specs:?}");
+                results.push(stage0_entries(&repo));
+            }
+            assert_eq!(results[0], results[1], "tracked={tracked}");
+            assert_eq!(results[0], results[2], "tracked={tracked}");
+        }
+    }
+
+    #[test]
+    fn stage_pathspec_lists_each_untracked_dir_once() {
+        const DIRS: u32 = 200;
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        let mut index = Index::new();
+        stage_file_in_index(&repo, &mut index, "tracked.txt", b"t\n");
+        write_index(&repo, &mut index);
+        seed_one_file_dirs(root, DIRS as usize);
+
+        for specs in [&["*.txt"][..], &["d*"], &["."]] {
+            crate::porcelain::status::untracked_walk_probe::reset();
+            let outcome = stage(
+                &repo,
+                &StageOptions {
+                    pathspecs: specs.iter().map(|s| (*s).to_owned()).collect(),
+                    dry_run: true,
+                    ..StageOptions::default()
+                },
+                &mut NullProgress,
+            )
+            .unwrap();
+            assert_eq!(outcome.added.len(), DIRS as usize, "{specs:?}");
+            let dirs_read = crate::porcelain::status::untracked_walk_probe::dirs_read();
+            assert!(
+                dirs_read <= DIRS + 8,
+                "{specs:?}: untracked walk listed {dirs_read} directories for {DIRS} \
+                 untracked directories"
+            );
+        }
+    }
+
+    #[test]
+    fn stage_pathspec_keeps_embedded_repo_and_skips_ignored_dirs() {
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let repo = init_repo(root);
+        fs::write(root.join(".gitignore"), "build/\n").unwrap();
+        fs::create_dir_all(root.join("top/a/build")).unwrap();
+        fs::write(root.join("top/a/build/out.bin"), b"o\n").unwrap();
+        fs::write(root.join("top/a/keep.txt"), b"k\n").unwrap();
+        fs::create_dir_all(root.join("other")).unwrap();
+        fs::write(root.join("other/o.txt"), b"o\n").unwrap();
+        let sub = root.join("top/inner");
+        fs::create_dir_all(&sub).unwrap();
+        let sub_repo = open_nested_repo(&sub);
+        let head = commit_in_repo(&sub_repo, "i", b"i\n", "i");
+        set_branch_head(&sub_repo, head);
+
+        stage_with_pathspecs(&repo, &["top"]);
+
+        let index = repo.load_index().unwrap();
+        let gitlink = index.get(b"top/inner", 0).expect("gitlink at top/inner");
+        assert_eq!(gitlink.mode, MODE_GITLINK);
+        assert_eq!(gitlink.oid, head);
+        assert!(index.get(b"top/a/keep.txt", 0).is_some());
+        assert!(index.get(b"top/a/build/out.bin", 0).is_none());
+        assert!(index.get(b"top/inner/i", 0).is_none());
+        assert!(index.get(b"other/o.txt", 0).is_none());
     }
 
     #[test]

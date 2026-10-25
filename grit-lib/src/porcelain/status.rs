@@ -598,12 +598,7 @@ pub(crate) fn collect_untracked_and_ignored_inner(
     let tracked_paths =
         crate::path_icase::Stage0TrackedPaths::from_index_for_untracked_scan(index, ignorecase);
 
-    let gitlinks: HashSet<String> = index
-        .entries
-        .iter()
-        .filter(|e| e.stage() == 0 && e.mode == MODE_GITLINK)
-        .map(|e| crate::repo_relpath::storage_string(&e.path))
-        .collect();
+    let gitlinks = stage0_gitlink_paths(index);
 
     let mut untracked = Vec::new();
     let mut ignored = Vec::new();
@@ -684,6 +679,11 @@ pub fn expand_untracked_for_staging(
 
 /// Like [`expand_untracked_for_staging`], reusing an existing
 /// [`crate::worktree_rules::WorktreeRules`] for every nested directory walk.
+///
+/// Each collapsed directory is walked once, starting at the directory itself, with the full
+/// untracked listing; files are kept only when they match `pathspecs`. Ignored directories are
+/// dropped and unregistered embedded repositories stay as `dir/` markers. The cost is linear
+/// in the size of the collapsed subtrees.
 pub fn expand_untracked_for_staging_with_rules(
     repo: &Repository,
     index: &mut Index,
@@ -692,53 +692,48 @@ pub fn expand_untracked_for_staging_with_rules(
     pathspecs: &[String],
     rules: &crate::worktree_rules::WorktreeRules,
 ) -> Result<Vec<String>> {
-    let mut expanded = Vec::new();
-    for path in untracked {
-        if !path.ends_with('/') {
-            expanded.push(path);
-            continue;
-        }
-        let dir = path.trim_end_matches('/').to_owned();
-        if dir.is_empty() {
-            continue;
-        }
-        let abs_dir = work_tree.join(&dir);
-        let mut ignore = rules.ignore().clone();
-        if ignore.is_path_ignored(repo, Some(index), &dir, true)? {
-            continue;
-        }
-        if is_unregistered_embedded_git_repo(index, &dir, &abs_dir) {
-            expanded.push(format!("{dir}/"));
-            continue;
-        }
-        let narrow = if pathspecs.is_empty() {
-            vec![dir.clone()]
-        } else {
-            pathspecs.to_vec()
-        };
-        let (files, _, _) = collect_untracked_and_ignored_with_rules(
-            repo,
-            index,
-            work_tree,
-            IgnoredMode::No,
-            true,
-            &narrow,
-            rules,
-        )?;
-        for file in files {
-            if file.ends_with('/') {
-                let nested = expand_untracked_for_staging_with_rules(
-                    repo,
-                    index,
-                    work_tree,
-                    vec![file],
-                    &narrow,
-                    rules,
-                )?;
-                expanded.extend(nested);
-            } else {
-                expanded.push(file);
+    let (mut expanded, dirs): (Vec<String>, Vec<String>) =
+        untracked.into_iter().partition(|p| !p.ends_with('/'));
+    if !dirs.is_empty() {
+        let ignorecase = rules
+            .config()
+            .get_bool("core.ignorecase")
+            .and_then(|r| r.ok())
+            .unwrap_or(false);
+        let tracked_paths =
+            crate::path_icase::Stage0TrackedPaths::from_index_for_untracked_scan(index, ignorecase);
+        let gitlinks = stage0_gitlink_paths(index);
+        let precompose_unicode = effective_core_precomposeunicode_with_config(
+            Some(repo.git_dir()),
+            Some(rules.config()),
+        );
+        let mut matcher = rules.ignore_mut();
+        let mut ignored = Vec::new();
+        for path in dirs {
+            let dir = path.trim_end_matches('/');
+            if dir.is_empty() {
+                continue;
             }
+            visit_untracked_directory(
+                repo,
+                index,
+                work_tree,
+                &gitlinks,
+                &mut matcher,
+                IgnoredMode::No,
+                true,
+                false,
+                None,
+                precompose_unicode,
+                &tracked_paths,
+                dir,
+                &work_tree.join(dir),
+                pathspecs,
+                Some(rules),
+                &mut expanded,
+                &mut ignored,
+                None,
+            )?;
         }
     }
     expanded.sort();
@@ -746,25 +741,46 @@ pub fn expand_untracked_for_staging_with_rules(
     Ok(expanded)
 }
 
-/// Test-only counter of directory entries consumed during check-only untracked probes.
+/// Stored paths of the stage-0 gitlink entries in `index`.
+fn stage0_gitlink_paths(index: &Index) -> HashSet<String> {
+    index
+        .entries
+        .iter()
+        .filter(|e| e.stage() == 0 && e.mode == MODE_GITLINK)
+        .map(|e| crate::repo_relpath::storage_string(&e.path))
+        .collect()
+}
+
+/// Test-only counters for the serial untracked walk on the current thread: directory
+/// entries consumed during check-only probes, and directories listed.
 #[cfg(test)]
 pub(crate) mod untracked_walk_probe {
     use std::cell::Cell;
 
     thread_local! {
         static ENTRIES: Cell<u32> = const { Cell::new(0) };
+        static DIRS: Cell<u32> = const { Cell::new(0) };
     }
 
     pub fn reset() {
         ENTRIES.with(|c| c.set(0));
+        DIRS.with(|c| c.set(0));
     }
 
     pub fn count() -> u32 {
         ENTRIES.with(|c| c.get())
     }
 
+    pub fn dirs_read() -> u32 {
+        DIRS.with(|c| c.get())
+    }
+
     pub(super) fn record_entry() {
         ENTRIES.with(|c| c.set(c.get().saturating_add(1)));
+    }
+
+    pub(super) fn record_dir_read() {
+        DIRS.with(|c| c.set(c.get().saturating_add(1)));
     }
 }
 
@@ -1291,6 +1307,8 @@ fn visit_untracked_node(
         Ok(e) => e,
         Err(_) => return Ok(()),
     };
+    #[cfg(test)]
+    untracked_walk_probe::record_dir_read();
 
     let tracked_subdir = !rel.is_empty() && has_tracked_under(index, gitlinks, rel);
     if check_only && !tracked_subdir {
@@ -2814,6 +2832,68 @@ mod status_op_tests {
             model.untracked.iter().any(|p| p == "foo.txt"),
             "foo.txt should be untracked, got {:?}",
             model.untracked
+        );
+    }
+
+    #[test]
+    fn expand_untracked_for_staging_walks_each_collapsed_dir_once() {
+        const DIRS: u32 = 200;
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        init_min_repo(root);
+        fs::write(root.join(".gitignore"), "build/\n*.log\n").unwrap();
+        let mut collapsed = Vec::new();
+        let mut want = Vec::new();
+        for i in 0..DIRS {
+            let dir = root.join(format!("d{i}/sub"));
+            fs::create_dir_all(&dir).unwrap();
+            fs::write(dir.join("f.txt"), b"x\n").unwrap();
+            fs::write(dir.join("f.log"), b"x\n").unwrap();
+            collapsed.push(format!("d{i}/"));
+            want.push(format!("d{i}/sub/f.txt"));
+        }
+        fs::create_dir_all(root.join("d0/build")).unwrap();
+        fs::write(root.join("d0/build/out.txt"), b"x\n").unwrap();
+        fs::create_dir_all(root.join("build")).unwrap();
+        fs::write(root.join("build/out.txt"), b"x\n").unwrap();
+        collapsed.push("build/".to_owned());
+        init_min_repo(&root.join("d1/nested"));
+        want.push("d1/nested/".to_owned());
+        want.push("loose.txt".to_owned());
+        collapsed.push("loose.txt".to_owned());
+        want.sort();
+
+        let repo = Repository::open(
+            &root.join(".git"),
+            &RepositoryOptions::empty().with_work_tree(root),
+        )
+        .unwrap();
+        let mut index = repo.load_index().unwrap();
+        for pathspecs in [vec![], vec!["*.txt".to_owned()], vec![".".to_owned()]] {
+            untracked_walk_probe::reset();
+            let expanded = expand_untracked_for_staging(
+                &repo,
+                &mut index,
+                root,
+                collapsed.clone(),
+                &pathspecs,
+            )
+            .unwrap();
+            let dirs_read = untracked_walk_probe::dirs_read();
+            assert_eq!(expanded, want, "{pathspecs:?}");
+            assert!(
+                dirs_read <= 2 * DIRS + 8,
+                "{pathspecs:?}: expanding {DIRS} collapsed directories listed {dirs_read}"
+            );
+        }
+
+        let limited =
+            expand_untracked_for_staging(&repo, &mut index, root, collapsed, &["d7/".to_owned()])
+                .unwrap();
+        assert_eq!(
+            limited,
+            vec!["d7/sub/f.txt".to_owned(), "loose.txt".to_owned()],
+            "collapsed directories are filtered by pathspec; listed files pass through"
         );
     }
 

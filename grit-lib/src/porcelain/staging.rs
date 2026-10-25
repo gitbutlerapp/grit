@@ -17,8 +17,7 @@ use crate::index::{
 };
 use crate::objects::ObjectKind;
 use crate::porcelain::status::{
-    collect_untracked_and_ignored_inner, expand_untracked_for_staging_with_rules, IgnoredMode,
-    UntrackedCacheMissAction, UntrackedScan,
+    collect_untracked_and_ignored_inner, IgnoredMode, UntrackedCacheMissAction, UntrackedScan,
 };
 use crate::precompose_config::effective_core_precomposeunicode_with_config;
 use crate::repo::Repository;
@@ -100,21 +99,13 @@ pub fn stage_worktree_changes(repo: &Repository, pathspecs: &[String]) -> Result
         pathspecs,
         UntrackedScan {
             ignored_mode: IgnoredMode::No,
-            show_all: false,
+            show_all: true,
             sort_paths: true,
             use_untracked_cache: false,
             cache_miss: UntrackedCacheMissAction::RefreshFull,
         },
         &worktree_rules,
         None,
-    )?;
-    let untracked = expand_untracked_for_staging_with_rules(
-        repo,
-        &mut index,
-        work_tree,
-        untracked,
-        pathspecs,
-        &worktree_rules,
     )?;
     for path in untracked {
         if !matcher.matches(&path) {

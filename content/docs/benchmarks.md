@@ -295,6 +295,28 @@ Same Linux VM sitting, release builds, system `git 2.43.0`, clean trees with `GI
 ./target/release/grit-bench --format json --output grit-utils/baselines/status-clean-tree-after.json status --sizes 1000,10000,50000
 ```
 
+## Adding many untracked directories (2026-10-25)
+
+`grit add .` on a tree of thousands of untracked directories was quadratic in the directory count (issue #1854): 4,000 one-file directories took 90 s and 1 GB where `git add -A` takes 34 ms. Any pathspec, `.` included, made the untracked walk collapse each wholly untracked directory to `dir/` and then re-walk the whole work tree once per collapsed directory to list its files. Two changes in `grit-lib`:
+
+- `add` treats `.` and `./` as no pathspec, and asks the walk for every untracked file in one pass. Collapsed `dir/` entries now only come from a normal-mode untracked cache on the index, which `add` reuses instead of rebuilding.
+- Expanding collapsed directories (`expand_untracked_for_staging`) walks each one once, starting at the directory itself, and filters its files by the pathspecs. `stash -u` and the commit staging engine no longer expand at all, because their walks already list every file.
+
+Same Linux VM sitting, release builds, system `git 2.43.0`, `/usr/bin/time` wall time and peak RSS, empty index (`git init` then add). Grit is `origin/main` before → after:
+
+| Layout | Git | Grit before → after | Peak RSS Git, Grit before → after |
+| --- | ---: | ---: | ---: |
+| 1,000 one-file directories | 0.01 s | 4.97 → **0.02** s | 5, 79 → **16** MiB |
+| 2,000 one-file directories | 0.02 s | 21.2 → **0.03** s | 5, 275 → **19** MiB |
+| 4,000 one-file directories | 0.04 s | 90.5 → **0.06** s | 6, 1,059 → **23** MiB |
+| 49,000 files in `d<i%200>/s<i%37>` | 0.29 s | 18.5 → **0.59** s | 14, 668 → **84** MiB |
+
+With one tracked file committed first, `grit add 'd*'` on 2,000 directories went from 21.7 to 0.04 s, and `grit commit` (stage all) from 2.25 to 0.06 s. The staged index is byte-identical to `git add -A` (`git ls-files -s`). `grit-bench add-many-dirs` records the 4,000-directory and 49,000-file rows in `add-many-dirs.json`:
+
+```bash
+./target/release/grit-bench --format json --output grit-utils/baselines/add-many-dirs.json add-many-dirs --dirs 4000 --nested-files 49000
+```
+
 ## Delete-heavy switch and hard reset (2026-10-24)
 
 On Windows with real-time antivirus, deleting about 2000 files with `grit switch` or `grit reset --hard` took several seconds where Git took half a second (issue #1754). The cost was per-file work that opens files, which antivirus scanning makes expensive, rather than the deletes themselves:
