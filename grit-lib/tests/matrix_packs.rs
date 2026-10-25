@@ -663,8 +663,11 @@ fn build_delta_fixture(algo: HashAlgo) -> Option<DeltaFixture> {
     Some(DeltaFixture { dir: tmp, tips })
 }
 
-/// Like [`build_delta_fixture`], but with `revisions` prefix-extending commits so
-/// in-pack delta chains can exceed the default `pack.depth` (50).
+/// A history of `revisions` commits of one fixed-size file, each rewriting one more
+/// line, so every revision is closest to its neighbours and Git's windowed search
+/// chains them (`git -c pack.threads=1 repack -adf --depth=250` builds one chain
+/// through all of them). Prefix-extending histories do not chain: every revision
+/// deltas straight against the largest one.
 struct DeepDeltaFixture {
     dir: tempfile::TempDir,
     tip: ObjectId,
@@ -676,18 +679,15 @@ fn build_deep_delta_fixture(revisions: usize) -> Option<DeepDeltaFixture> {
     if !git_try(dir, &["init", "-q", "-b", "main", "."]) {
         return None;
     }
-    let mut body = String::new();
-    for i in 0..4000 {
-        body.push_str(&format!(
-            "line {i:05} lorem ipsum dolor sit amet consectetur\n"
-        ));
-    }
-    std::fs::write(dir.join("big.txt"), body.as_bytes()).unwrap();
-    git(dir, &["add", "big.txt"]);
-    git(dir, &["commit", "-q", "-m", "c0"]);
-    for rev in 1..revisions {
-        body.push_str(&format!("--- revision {rev} ---\n"));
-        std::fs::write(dir.join("big.txt"), body.as_bytes()).unwrap();
+    let mut lines: Vec<String> = (0..4000)
+        .map(|i| format!("line {i:05} lorem ipsum dolor sit amet consectetur\n"))
+        .collect();
+    for rev in 0..revisions {
+        if rev > 0 {
+            let line = (rev * 37) % lines.len();
+            lines[line] = format!("edit {rev:05} lorem ipsum dolor sit amet consectetur\n");
+        }
+        std::fs::write(dir.join("big.txt"), lines.concat()).unwrap();
         git(dir, &["add", "big.txt"]);
         git(dir, &["commit", "-q", "-m", &format!("c{rev}")]);
     }
@@ -1209,14 +1209,14 @@ fn ofs_vs_ref_delta_selection() {
 
 #[test]
 fn delta_depth_limit_caps_chain_length() {
-    let Some(fx) = build_delta_fixture(HashAlgo::Sha1) else {
+    let Some(fx) = build_deep_delta_fixture(8) else {
         eprintln!("SKIP: could not init git repo");
         return;
     };
     let odb = open_odb(fx.dir.path());
-    let tip = *fx.tips.last().unwrap();
+    let tip = fx.tip;
 
-    // With a generous depth, the 6 prefix-extended blobs can form a long chain.
+    // With a generous depth, the 8 revisions form a long chain.
     let deep = build_pack(
         &odb,
         &[tip],

@@ -28,9 +28,6 @@ pub struct PackObjectSelection {
     /// candidates: blobs from the tree walk, every object the bitmap name-hash
     /// cache covers when bitmaps are used.
     pub name_hashes: HashMap<ObjectId, u32>,
-    /// Commits, trees and tags already read during a tree walk (avoids rereading loose
-    /// objects for pack build). Blobs found in trees are never read by the walk.
-    pub walk_prefetch: HashMap<ObjectId, Object>,
 }
 
 /// Parameters for [`enumerate_pack_objects`].
@@ -50,12 +47,6 @@ pub struct PackEnumerateOptions<'a> {
     /// Precomputed peer object closure to subtract from `wants` during a walk
     /// (for example when haves live in a different ODB than `wants`).
     pub exclude_objects: Option<&'a HashSet<ObjectId>>,
-    /// When true, the commits, trees and tags read by the object walk are kept in
-    /// [`PackObjectSelection::walk_prefetch`] so the pack builder does not read them
-    /// again. They are kept only for repositories without local packs, where the
-    /// builder needs payloads up front; with packs, objects are copied from the packs
-    /// at write time. Blobs found in trees are never read by the walk.
-    pub prefetch_walk_objects: bool,
 }
 
 /// Select pack objects using bitmap reachability when possible, otherwise the object walk.
@@ -75,10 +66,21 @@ pub fn enumerate_pack_objects(
 /// Whether the object walk records name hashes for trees as well as blobs.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum NameTrees {
-    /// Blobs only: the packers that pair only blobs skip the extra entries.
+    /// Blobs only: packers that run no delta search skip the extra entries.
     No,
     /// Blobs and trees, for a delta search that pairs trees too.
     Yes,
+}
+
+impl NameTrees {
+    /// [`Self::Yes`] when a pack built with `opts` runs a new delta search.
+    pub(crate) fn for_delta_search(opts: &crate::pack_objects::PackBuildOptions) -> Self {
+        if opts.delta && opts.window > 0 && opts.max_depth > 0 {
+            Self::Yes
+        } else {
+            Self::No
+        }
+    }
 }
 
 /// Like [`enumerate_pack_objects`], choosing whether the walk names trees.
@@ -185,7 +187,6 @@ fn try_bitmap_enumeration(
         send,
         have_closure,
         name_hashes,
-        walk_prefetch: HashMap::new(),
     }))
 }
 
@@ -227,33 +228,24 @@ fn walk_enumeration(
     } else {
         reachable_closure_walk(odb, haves, &HashSet::new(), true, have_shallow)?
     };
-    let (send, name_hashes, walk_prefetch) = match opts.filter {
+    let (send, name_hashes) = match opts.filter {
         Some(filter) if filter.uses_paths() => {
-            let (send, name_hashes) = rev_list_filtered_objects(odb, wants, haves, filter)?;
-            (send, name_hashes, HashMap::new())
+            rev_list_filtered_objects(odb, wants, haves, filter)?
         }
-        filter => {
-            // With local packs the delta planner copies packed objects at write time
-            // instead of reusing walked payloads, so holding them would only cost memory.
-            let keep_payloads = opts.prefetch_walk_objects
-                && !crate::pack_objects::objects_dir_has_local_packs(odb.objects_dir());
-            collect_reachable_excluding_with_name_hashes(
-                odb,
-                wants,
-                &have_closure,
-                false,
-                opts.shallow_grafts,
-                keep_payloads,
-                filter,
-                name_trees,
-            )?
-        }
+        filter => collect_reachable_excluding_with_name_hashes(
+            odb,
+            wants,
+            &have_closure,
+            false,
+            opts.shallow_grafts,
+            filter,
+            name_trees,
+        )?,
     };
     Ok(PackObjectSelection {
         send,
         have_closure,
         name_hashes,
-        walk_prefetch,
     })
 }
 
@@ -272,7 +264,6 @@ pub(crate) fn reachable_closure_walk(
         stop,
         skip_missing,
         shallow_grafts,
-        false,
         None,
         NameTrees::No,
     )?
@@ -334,24 +325,15 @@ fn rev_list_filtered_objects(
 /// Git, a root or tag target that is also some commit's root tree counts as that root
 /// tree. Trees whose entries cannot pass are not read, and blob sizes are only looked
 /// up for `blob:limit`.
-///
-/// When `keep_payloads` is set, the commits, trees and tags read by the walk are
-/// returned as well so the pack builder does not read them again.
-#[allow(clippy::type_complexity, clippy::too_many_arguments)]
 fn collect_reachable_excluding_with_name_hashes(
     odb: &Odb,
     roots: &[ObjectId],
     exclude: &HashSet<ObjectId>,
     skip_missing: bool,
     shallow_grafts: &HashSet<ObjectId>,
-    keep_payloads: bool,
     filter: Option<&ObjectFilter>,
     name_trees: NameTrees,
-) -> Result<(
-    Vec<ObjectId>,
-    HashMap<ObjectId, u32>,
-    HashMap<ObjectId, Object>,
-)> {
+) -> Result<(Vec<ObjectId>, HashMap<ObjectId, u32>)> {
     let oid_len = odb.hash_algo().len();
     let mut walk = EnumerationWalk {
         odb,
@@ -360,7 +342,6 @@ fn collect_reachable_excluding_with_name_hashes(
         filter,
         depth_sensitive: filter.is_some_and(ObjectFilter::is_depth_sensitive),
         name_trees,
-        keep_payloads,
         visited: oid_hash_set(),
         tree_depths: oid_hash_map(),
         unlisted: oid_hash_set(),
@@ -370,7 +351,6 @@ fn collect_reachable_excluding_with_name_hashes(
         queue: VecDeque::new(),
         name_hashes: HashMap::new(),
     };
-    let mut walk_prefetch: HashMap<ObjectId, Object> = HashMap::new();
     // Commit root trees the filter drops, even where a root or tag names them.
     let mut dropped_root_trees: Option<OidHashSet> = filter
         .filter(|f| !f.includes_tree(0))
@@ -398,9 +378,6 @@ fn collect_reachable_excluding_with_name_hashes(
                 dropped.insert(commit.tree);
             }
             walk.push_tree(commit.tree, String::new(), 0);
-            if let Some(obj) = commit.obj {
-                walk_prefetch.insert(commit.oid, obj);
-            }
             continue;
         }
         let Some((oid, path, depth)) = walk.queue.pop_front() else {
@@ -456,15 +433,12 @@ fn collect_reachable_excluding_with_name_hashes(
             }
             ObjectKind::Blob => {}
         }
-        if keep_payloads {
-            walk_prefetch.insert(oid, obj);
-        }
     }
 
     if let Some(dropped) = dropped_root_trees.filter(|d| !d.is_empty()) {
         walk.ordered.retain(|oid| !dropped.contains(oid));
     }
-    Ok((walk.ordered, walk.name_hashes, walk_prefetch))
+    Ok((walk.ordered, walk.name_hashes))
 }
 
 fn child_path(parent: &str, name: &[u8]) -> String {
@@ -485,8 +459,6 @@ struct EnumerationWalk<'a> {
     /// The filter's verdict for trees and blobs depends on where they are met.
     depth_sensitive: bool,
     name_trees: NameTrees,
-    /// Keep the raw object of queued commits for the caller.
-    keep_payloads: bool,
     /// Objects listed (or held by the peer), and objects the filter left out whose
     /// verdict cannot change: parent commits, and without a depth-sensitive filter,
     /// trees and size-checked blobs.
@@ -514,8 +486,6 @@ struct QueuedCommit {
     oid: ObjectId,
     tree: ObjectId,
     parents: Vec<ObjectId>,
-    /// The raw commit, kept only when the walk returns payloads.
-    obj: Option<Object>,
 }
 
 impl PartialEq for QueuedCommit {
@@ -619,7 +589,6 @@ impl EnumerationWalk<'_> {
             oid,
             tree: parsed.tree(),
             parents: parsed.parents().to_vec(),
-            obj: self.keep_payloads.then_some(obj),
         };
         self.next_seq += 1;
         self.commits.push(queued);
@@ -737,7 +706,6 @@ mod tests {
                 have_shallow_grafts: Some(&empty),
                 use_bitmaps: false,
                 exclude_objects: None,
-                prefetch_walk_objects: false,
             },
             name_trees,
         )
@@ -824,73 +792,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn walk_prefetch_skipped_when_prefetch_disabled() {
-        let dir = TempDir::new().unwrap();
-        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
-        std::fs::write(repo.work_tree().unwrap().join("blob"), b"payload").unwrap();
-        stage_for_commit(&repo, &mut NullProgress).expect("stage");
-        let ident = "Test <t@example.com> 1 +0000".to_string();
-        let tip = create_commit(
-            &repo,
-            &CommitRequest {
-                message: "init".into(),
-                author: Some(ident.parse().expect("signature")),
-                committer: Some(ident.parse().expect("signature")),
-                allow_empty: false,
-                sign_override: None,
-                amend: false,
-                assume_worktree_synced: false,
-                skip_pre_commit_tree_match: false,
-                staged_change_count: None,
-                ..Default::default()
-            },
-            &mut NullProgress,
-        )
-        .expect("commit");
-        let empty = HashSet::new();
-        let with_prefetch = enumerate_pack_objects(
-            repo.odb(),
-            &[tip.oid],
-            &[],
-            &PackEnumerateOptions {
-                filter: None,
-                shallow_grafts: &empty,
-                have_shallow_grafts: Some(&empty),
-                use_bitmaps: false,
-                exclude_objects: None,
-                prefetch_walk_objects: true,
-            },
-        )
-        .expect("prefetch");
-        assert!(
-            !with_prefetch.walk_prefetch.is_empty(),
-            "default walk should prefetch object bodies"
-        );
-        let without_prefetch = enumerate_pack_objects(
-            repo.odb(),
-            &[tip.oid],
-            &[],
-            &PackEnumerateOptions {
-                filter: None,
-                shallow_grafts: &empty,
-                have_shallow_grafts: Some(&empty),
-                use_bitmaps: false,
-                exclude_objects: None,
-                prefetch_walk_objects: false,
-            },
-        )
-        .expect("no prefetch");
-        assert_eq!(
-            with_prefetch.send, without_prefetch.send,
-            "send list must match"
-        );
-        assert!(
-            without_prefetch.walk_prefetch.is_empty(),
-            "reuse-only repack walk must not retain blob payloads"
-        );
-    }
-
     fn tree_entry(mode: &str, name: &str, oid: ObjectId) -> Vec<u8> {
         let mut bytes = format!("{mode} {name}\0").into_bytes();
         bytes.extend_from_slice(oid.as_bytes());
@@ -938,7 +839,6 @@ mod tests {
                 have_shallow_grafts: Some(&empty),
                 use_bitmaps: false,
                 exclude_objects: None,
-                prefetch_walk_objects: true,
             },
         )
         .unwrap();

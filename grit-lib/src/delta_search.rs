@@ -1,4 +1,4 @@
-//! Streaming sliding-window delta search for full repacks.
+//! Streaming sliding-window delta search for repacks and pack-objects.
 //!
 //! Candidates are described by metadata only (kind, size, name hash, recency).
 //! They are sorted so that likely delta pairs sit next to each other (same kind,
@@ -147,12 +147,21 @@ fn chunk_bounds(sorted: &[DeltaCandidate]) -> Vec<(usize, usize)> {
     out
 }
 
+/// Which (target, base) pairs the search may try, by object id.
+pub(crate) type PairFilter<'a> = &'a (dyn Fn(&ObjectId, &ObjectId) -> bool + Sync);
+
+/// A [`PairFilter`] that allows every pair.
+pub(crate) fn any_pair(_target: &ObjectId, _base: &ObjectId) -> bool {
+    true
+}
+
 /// Pick deltas for `candidates`.
 ///
 /// Returns one [`FoundDelta`] per target that got a delta; every base is another
 /// candidate, and chains (counting [`DeltaCandidate::dependent_depth`]) stay within
-/// [`DeltaSearchParams::max_depth`]. Bases may come after their targets in any
-/// caller order, so the caller must order its output so bases are written first.
+/// [`DeltaSearchParams::max_depth`]. Only pairs `allowed` accepts are tried (delta
+/// islands, for example). Bases may come after their targets in any caller order,
+/// so the caller must order its output so bases are written first.
 ///
 /// # Errors
 ///
@@ -161,6 +170,7 @@ pub(crate) fn search_deltas(
     odb: &Odb,
     mut candidates: Vec<DeltaCandidate>,
     params: DeltaSearchParams,
+    allowed: PairFilter<'_>,
 ) -> Result<Vec<FoundDelta>> {
     if params.window == 0 || params.max_depth == 0 {
         return Ok(Vec::new());
@@ -172,7 +182,7 @@ pub(crate) fn search_deltas(
     if workers == 1 {
         let mut out = Vec::new();
         for &(start, end) in &chunks {
-            search_chunk(odb, &candidates[start..end], params, &mut out)?;
+            search_chunk(odb, &candidates[start..end], params, allowed, &mut out)?;
         }
         return Ok(out);
     }
@@ -189,8 +199,9 @@ pub(crate) fn search_deltas(
                         return;
                     };
                     let mut found = Vec::new();
-                    let res = search_chunk(odb, &candidates[start..end], params, &mut found)
-                        .map(|()| found);
+                    let res =
+                        search_chunk(odb, &candidates[start..end], params, allowed, &mut found)
+                            .map(|()| found);
                     let failed = res.is_err();
                     results
                         .lock()
@@ -254,6 +265,7 @@ fn search_chunk(
     odb: &Odb,
     list: &[DeltaCandidate],
     params: DeltaSearchParams,
+    allowed: PairFilter<'_>,
     out: &mut Vec<FoundDelta>,
 ) -> Result<()> {
     let window = params.window + 1;
@@ -279,6 +291,9 @@ fn search_chunk(
                 let source = &list[src_pos];
                 if source.kind != target.kind {
                     break;
+                }
+                if !allowed(&target.oid, &source.oid) {
+                    continue;
                 }
                 if try_pair(odb, list, &mut slots, idx, other, max_depth, params)? {
                     best_slot = Some(other);
@@ -558,7 +573,7 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         let repo = Repository::init(dir.path(), &InitOptions::default()).unwrap();
         let candidates = drifting_versions(&repo, 40);
-        let found = search_deltas(repo.odb(), candidates.clone(), params(3, 1)).unwrap();
+        let found = search_deltas(repo.odb(), candidates.clone(), params(3, 1), &any_pair).unwrap();
         assert!(found.len() >= 30, "only {} deltas", found.len());
 
         let edges: HashMap<u32, u32> = found.iter().map(|d| (d.target, d.base)).collect();
@@ -595,8 +610,9 @@ mod tests {
             v.sort();
             v
         };
-        let one = key(search_deltas(repo.odb(), candidates.clone(), params(50, 1)).unwrap());
-        let four = key(search_deltas(repo.odb(), candidates, params(50, 4)).unwrap());
+        let one =
+            key(search_deltas(repo.odb(), candidates.clone(), params(50, 1), &any_pair).unwrap());
+        let four = key(search_deltas(repo.odb(), candidates, params(50, 4), &any_pair).unwrap());
         assert_eq!(one, four);
     }
 
@@ -612,10 +628,25 @@ mod tests {
         // One object from elsewhere (for example a loose object) may still pair.
         candidates[5].whole_in_pack = None;
         candidates[5].in_pack = None;
-        let found = search_deltas(repo.odb(), candidates, params(50, 1)).unwrap();
+        let found = search_deltas(repo.odb(), candidates, params(50, 1), &any_pair).unwrap();
         assert!(!found.is_empty());
         assert!(
             found.iter().all(|d| d.target == 5 || d.base == 5),
+            "{found:?}"
+        );
+    }
+
+    #[test]
+    fn search_tries_only_allowed_pairs() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let repo = Repository::init(dir.path(), &InitOptions::default()).unwrap();
+        let candidates = drifting_versions(&repo, 20);
+        let banned = candidates[0].oid;
+        let allowed = |target: &ObjectId, base: &ObjectId| *target != banned && *base != banned;
+        let found = search_deltas(repo.odb(), candidates, params(50, 1), &allowed).unwrap();
+        assert!(!found.is_empty());
+        assert!(
+            found.iter().all(|d| d.target != 0 && d.base != 0),
             "{found:?}"
         );
     }
@@ -628,7 +659,7 @@ mod tests {
         for c in &mut candidates {
             c.dependent_depth = 50;
         }
-        let found = search_deltas(repo.odb(), candidates, params(50, 1)).unwrap();
+        let found = search_deltas(repo.odb(), candidates, params(50, 1), &any_pair).unwrap();
         assert!(found.is_empty(), "{found:?}");
     }
 }

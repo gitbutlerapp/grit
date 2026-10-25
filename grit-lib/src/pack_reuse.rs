@@ -11,7 +11,7 @@ use crate::bitmap_walk::ReachableSet;
 use crate::error::{Error, Result};
 use crate::ewah_bitmap::Bitmap;
 use crate::midx::{read_midx_btmp_ranges, read_midx_pack_idx_names, read_midx_preferred_idx_name};
-use crate::objects::{oid_hash_map_from, ObjectId};
+use crate::objects::ObjectId;
 use crate::pack::{
     pack_entry_raw_end, parse_pack_object_header, read_local_pack_indexes_cached,
     read_pack_bytes_cached, read_packed_delta_dependency, PackedDeltaDependency, PackedType,
@@ -164,9 +164,8 @@ pub fn try_write_streaming_pack(
         &send,
         &have_closure,
         opts,
-        &oid_hash_map_from(&blob_name_hashes),
+        &blob_name_hashes,
         None,
-        HashMap::new(),
     )?;
     progress(PackProgress::PlannedDeltas);
 

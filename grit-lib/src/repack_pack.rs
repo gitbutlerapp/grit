@@ -186,6 +186,7 @@ pub(crate) fn write_repack_pack(
                 compression: odb.pack_compression()?,
                 threads: settings.search_threads,
             },
+            &crate::delta_search::any_pair,
         )?;
         for delta in found {
             plan[delta.target as usize] = Plan::NewDelta {

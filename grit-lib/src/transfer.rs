@@ -1192,7 +1192,7 @@ fn build_pack_for_local_transfer(
             missing,
             &HashSet::new(),
             opts,
-            &send_set.blob_name_hashes,
+            &send_set.name_hashes,
         );
     }
     build_pack_for_local_fetch(
@@ -1210,8 +1210,8 @@ fn build_pack_for_local_transfer(
 struct PeerSendSet {
     /// Objects missing from the peer, in walk order.
     objects: Vec<ObjectId>,
-    /// Pack name hash of each blob's path, for delta-window ordering.
-    blob_name_hashes: HashMap<ObjectId, u32>,
+    /// Pack name hash of each blob's and subtree's path, for delta-window ordering.
+    name_hashes: HashMap<ObjectId, u32>,
 }
 
 /// Like [`collect_reachable_excluding`], but treats every object already stored in
@@ -1229,7 +1229,7 @@ fn collect_reachable_excluding_peer(
 
     let mut visited: HashSet<ObjectId> = HashSet::new();
     let mut ordered: Vec<ObjectId> = Vec::new();
-    let mut blob_name_hashes: HashMap<ObjectId, u32> = HashMap::new();
+    let mut name_hashes: HashMap<ObjectId, u32> = HashMap::new();
     // Each queued object carries the name hash of its directory prefix ("dir/").
     let mut queue: VecDeque<(ObjectId, u32)> = VecDeque::new();
 
@@ -1285,7 +1285,7 @@ fn collect_reachable_excluding_peer(
                         continue;
                     }
                     let path_hash = pack_name_hash_extend(prefix_hash, &entry.name);
-                    if entry.mode & 0o170000 == 0o040000 {
+                    let queued = if entry.mode & 0o170000 == 0o040000 {
                         let dir_hash = pack_name_hash_extend(path_hash, b"/");
                         enqueue(
                             entry.oid,
@@ -1293,9 +1293,12 @@ fn collect_reachable_excluding_peer(
                             &mut queue,
                             &mut visited,
                             &mut ordered,
-                        );
-                    } else if enqueue(entry.oid, None, &mut queue, &mut visited, &mut ordered) {
-                        blob_name_hashes.insert(entry.oid, path_hash);
+                        )
+                    } else {
+                        enqueue(entry.oid, None, &mut queue, &mut visited, &mut ordered)
+                    };
+                    if queued {
+                        name_hashes.insert(entry.oid, path_hash);
                     }
                 }
             }
@@ -1315,7 +1318,7 @@ fn collect_reachable_excluding_peer(
 
     Ok(PeerSendSet {
         objects: ordered,
-        blob_name_hashes,
+        name_hashes,
     })
 }
 
