@@ -1,0 +1,21 @@
+---
+source: grit-test-support/src/cli_fixture.rs
+expression: payload
+---
+{
+  "human": {
+    "exit": 0,
+    "stdout": "✓ Checked out demo on alice/birch-pebble in [DURATION]\n\n  paths     src/deep\n  files     4 files, 293 KiB as a 294 KiB download\n  history   one commit, fd590c7, standing for main at 5a80f18\n\nCommit on alice/birch-pebble as usual; origin/main is the snapshot.\n",
+    "stderr": ""
+  },
+  "json": {
+    "exit": 0,
+    "stdout": "{\"url\":\"http://127.0.0.1:8080/demo.git\",\"path\":\"demo\",\"branch\":\"main\",\"work\":\"alice/birch-pebble\",\"base\":\"5a80f18e14a38d1fddfb042e0b7724901ae7b30f\",\"snapshot\":\"fd590c7ae90eb06479c29d9640d83e72504483c1\",\"paths\":[\"src/deep\"],\"files\":4,\"bytes\":300010,\"download_bytes\":300744,\"resumed_from\":0,\"id\":\"dbbb39a83cd15c85b5ed\",\"seconds\":0.117}\n",
+    "stderr": ""
+  },
+  "markdown": {
+    "exit": 0,
+    "stdout": "## Checkout complete\n\n- **path**: `demo`\n- **work branch**: `alice/birch-pebble`\n- **url**: `http://127.0.0.1:8080/demo.git`\n- **target**: `main` at `5a80f18e14a38d1fddfb042e0b7724901ae7b30f`\n- **snapshot**: `fd590c7ae90eb06479c29d9640d83e72504483c1`\n- **paths**: `src/deep`\n- **files**: 4 (300010 bytes)\n- **download**: 300744 bytes (resumed at 0)\n",
+    "stderr": ""
+  }
+}

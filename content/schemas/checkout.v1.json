@@ -1,0 +1,88 @@
+{
+  "$id": "https://grit-scm.com/schemas/checkout/v1.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Result of `grit checkout <url>`.",
+  "properties": {
+    "base": {
+      "description": "The real commit of the target branch the snapshot stands for.",
+      "type": "string"
+    },
+    "branch": {
+      "description": "The server's target branch the snapshot was taken from.",
+      "type": "string"
+    },
+    "bytes": {
+      "description": "Bytes of those files.",
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "download_bytes": {
+      "description": "Size of the download.",
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "files": {
+      "description": "Files in the snapshot.",
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "id": {
+      "description": "The server's id for the checkout.",
+      "type": "string"
+    },
+    "path": {
+      "description": "Directory the checkout was made in.",
+      "type": "string"
+    },
+    "paths": {
+      "description": "The paths checked out; empty for the whole tree.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "resumed_from": {
+      "description": "Bytes an earlier, interrupted checkout had already downloaded.",
+      "format": "uint64",
+      "minimum": 0.0,
+      "type": "integer"
+    },
+    "seconds": {
+      "description": "Wall-clock seconds.",
+      "format": "double",
+      "type": "number"
+    },
+    "snapshot": {
+      "description": "The snapshot commit (the checkout's only commit).",
+      "type": "string"
+    },
+    "url": {
+      "description": "The repository URL, configured as `origin`.",
+      "type": "string"
+    },
+    "work": {
+      "description": "The new branch checked out for your work.",
+      "type": "string"
+    }
+  },
+  "required": [
+    "base",
+    "branch",
+    "bytes",
+    "download_bytes",
+    "files",
+    "id",
+    "path",
+    "paths",
+    "resumed_from",
+    "seconds",
+    "snapshot",
+    "url",
+    "work"
+  ],
+  "title": "CheckoutOutcome",
+  "type": "object"
+}

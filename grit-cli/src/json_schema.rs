@@ -101,6 +101,7 @@ fn build_schema_registry() -> Vec<SchemaRegistryEntry> {
             BundleCreateOutcome, BundleListOutcome, BundleUnbundleOutcome, BundleVerifyOutcome,
         },
         cat::CatOutcome,
+        checkout::CheckoutOutcome,
         clean::CleanOutcome,
         clone::CloneOutcome,
         commit::CommitOutcome,
@@ -154,6 +155,7 @@ fn build_schema_registry() -> Vec<SchemaRegistryEntry> {
         entry::<StatusOutcome>("status"),
         entry::<InitOutcome>("init"),
         entry::<CloneOutcome>("clone"),
+        entry::<CheckoutOutcome>("checkout"),
         entry::<RemoteOutcome>("remote"),
         entry::<RemoteOutcome>("remote.add"),
         entry::<RemoteOutcome>("remote.refs"),
@@ -723,6 +725,7 @@ pub const SNAPSHOT_FILE_PREFIX: &str = "grit_test_support__cli_fixture__";
 pub const SNAPSHOT_JSON_SCHEMA_SKIP: &[&str] = &[
     "auth_render",
     "log_json_filter_commits_oid",
+    "checkout_render",
     "serve_render",
     "update_render",
 ];

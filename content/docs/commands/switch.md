@@ -16,7 +16,7 @@ grit switch --detach <rev>
 grit switch [--dry-run] …
 ```
 
-`grit checkout` and `grit co` do the same thing.
+`grit co` does the same thing, and so does `grit checkout <branch>`; `grit checkout <url>` makes a [snapshot checkout](../checkout/) from a server instead.
 
 ## Description
 

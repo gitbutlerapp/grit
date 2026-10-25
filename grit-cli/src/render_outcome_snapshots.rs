@@ -8,6 +8,7 @@ use grit_test_support::CliFixture;
 use time::OffsetDateTime;
 
 use crate::commands::auth::{AuthOutcome, LogoutOutcome};
+use crate::commands::checkout::CheckoutOutcome;
 use crate::commands::serve_http::{ServeGrantJson, ServeUserJson, ServeUsersOutcome};
 use crate::commands::update::UpdateOutcome;
 use crate::output::{render_to_string, HumanRender, MarkdownRender, OutputMode, RenderContext};
@@ -133,6 +134,37 @@ fn update_render() {
     let markdown = render_to_string(&outcome, OutputMode::Markdown, &ctx).expect("markdown");
 
     CliFixture::snapshot_rendered_modes("update_render", snapshot_dir(), &human, &json, &markdown);
+}
+
+#[test]
+fn checkout_render() {
+    let ctx = sample_ctx();
+    let outcome = CheckoutOutcome {
+        url: "http://127.0.0.1:8080/demo.git".to_owned(),
+        path: "demo".to_owned(),
+        branch: "main".to_owned(),
+        work: "alice/birch-pebble".to_owned(),
+        base: "5a80f18e14a38d1fddfb042e0b7724901ae7b30f".to_owned(),
+        snapshot: "fd590c7ae90eb06479c29d9640d83e72504483c1".to_owned(),
+        paths: vec!["src/deep".to_owned()],
+        files: 4,
+        bytes: 300_010,
+        download_bytes: 300_744,
+        resumed_from: 0,
+        id: "dbbb39a83cd15c85b5ed".to_owned(),
+        seconds: 0.117,
+    };
+    let human = render_to_string(&outcome, OutputMode::Human, &ctx).expect("human");
+    let json = render_to_string(&outcome, OutputMode::Json, &ctx).expect("json");
+    let markdown = render_to_string(&outcome, OutputMode::Markdown, &ctx).expect("markdown");
+
+    CliFixture::snapshot_rendered_modes(
+        "checkout_render",
+        snapshot_dir(),
+        &human,
+        &json,
+        &markdown,
+    );
 }
 
 #[test]

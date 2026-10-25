@@ -116,6 +116,14 @@ const COMMAND_CONTRACTS: &[(&str, CommandContract)] = &[
         },
     ),
     (
+        "checkout",
+        CommandContract {
+            kind: CommandKind::Mutation,
+            takes_message: false,
+            takes_paths: false,
+        },
+    ),
+    (
         "clone",
         CommandContract {
             kind: CommandKind::Mutation,
@@ -902,6 +910,12 @@ const EXCEPTIONS: &[(&str, ContractRule, &str, &str)] = &[
         ContractRule::DryRun,
         "s5 dry-run",
         "notes add has no `--dry-run` yet (step 5)",
+    ),
+    (
+        "checkout",
+        ContractRule::DryRun,
+        "clone-remote",
+        "checkout has no `--dry-run` yet",
     ),
     (
         "clone",

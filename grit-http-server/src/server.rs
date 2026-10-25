@@ -24,6 +24,7 @@
 //! | `POST /<repo>/git-receive-pack` | write | push |
 //! | `GET /<repo>/bundles/<file>` | read | a clone bundle, with `Range` ([`crate::bundles`]) |
 //! | `/<repo>/push…` (TUS) | write | resumable push ([`crate::uploads`]) |
+//! | `/.grit/checkouts/<repo>…` | read | snapshot checkouts ([`crate::checkouts`]) |
 //! | `/`, `/<repo>`, `/.grit/…` pages | a session | see [`crate::web`] |
 //!
 //! Repositories the user cannot read answer `404`, the same as missing ones.
@@ -323,6 +324,15 @@ fn router(state: Arc<ServerState>) -> Router {
         .route(web::USERS_PATH, get(web::users_page).post(web::add_user))
         .route(web::GRANTS_PATH, post(web::grant))
         .route(
+            "/.grit/checkouts/{repo}",
+            get(crate::checkouts::server_info).post(crate::checkouts::create),
+        )
+        .route("/.grit/checkouts/{repo}/{id}", get(crate::checkouts::show))
+        .route(
+            "/.grit/checkouts/{repo}/{id}/bundle",
+            get(crate::checkouts::bundle),
+        )
+        .route(
             "/{*path}",
             get(get_dispatch)
                 .post(post_dispatch)
@@ -442,7 +452,7 @@ impl ServerState {
     }
 
     /// Resolve `name` for a Git request that needs `needed` access.
-    fn authorize(
+    pub(crate) fn authorize(
         &self,
         headers: &HeaderMap,
         name: &str,

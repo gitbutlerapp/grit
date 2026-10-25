@@ -50,6 +50,10 @@ pub mod push_bundle {
     //! resumable push API (re-exported at this path).
     pub use crate::push_bundle::*;
 }
+pub mod snapshot_checkout {
+    //! snapshot checkout API (re-exported at this path).
+    pub use crate::snapshot_checkout::*;
+}
 pub mod resumable {
     //! resumable transfer API (re-exported at this path).
     pub use crate::resumable::*;

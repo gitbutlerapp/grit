@@ -6,6 +6,7 @@ pub mod blame;
 pub mod branch;
 pub mod bundle;
 pub mod cat;
+pub mod checkout;
 pub mod clean;
 pub mod clone;
 pub mod commit;

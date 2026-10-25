@@ -784,6 +784,17 @@ enum Command {
         )]
         object_format: Option<grit_lib::objects::HashAlgo>,
     },
+    /// Start work on a repository from a snapshot of its main branch (or some of its paths) instead of a clone.
+    Checkout {
+        /// The repository on a server that offers snapshot checkouts (`grit serve`).
+        url: String,
+        /// Check out only this path, plus the files in the directories above it (repeatable).
+        #[arg(short = 'p', long = "path", value_name = "PATH")]
+        paths: Vec<String>,
+        /// Directory to check out into (defaults to the repository name).
+        #[arg(long, value_name = "DIR")]
+        into: Option<std::path::PathBuf>,
+    },
     /// Copy a remote repository into a new directory.
     Clone {
         /// The repository to clone (URL or local path).
@@ -1335,7 +1346,7 @@ enum Command {
         dry_run: bool,
     },
     /// Switch to another branch, remote branch, or detached commit.
-    #[command(alias = "checkout", alias = "co")]
+    #[command(alias = "co")]
     Switch {
         /// Branch to switch to, revision with `--detach`, or new branch name with `-c`.
         #[arg(value_name = "NAME", required_unless_present = "detach")]
@@ -2492,6 +2503,11 @@ fn dispatch(
                 separate_git_dir,
                 object_format,
             )?,
+            opts,
+            ctx,
+        ),
+        Command::Checkout { url, paths, into } => emit_success(
+            &commands::checkout::run(&url, &paths, into.as_deref(), opts.mode)?,
             opts,
             ctx,
         ),
@@ -4114,6 +4130,7 @@ mod tests {
     /// In-process render snapshots that satisfy coverage for a top-level command.
     const RENDER_SNAPSHOT_FOR_COMMAND: &[(&str, &str)] = &[
         ("auth", "auth_render"),
+        ("checkout", "checkout_render"),
         ("serve", "serve_render"),
         ("update", "update_render"),
     ];

@@ -325,6 +325,7 @@ pub(crate) mod shallow;
 pub(crate) mod shared_repo;
 pub(crate) mod sideband_lines;
 pub(crate) mod signing;
+pub(crate) mod snapshot_checkout;
 pub(crate) mod sparse_checkout;
 pub(crate) mod split_index;
 pub mod state;

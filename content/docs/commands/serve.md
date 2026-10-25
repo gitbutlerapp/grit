@@ -68,6 +68,19 @@ The push advertisement carries a `pushBundle=/push` capability: a [TUS](https://
 | `PATCH /<name>/push/<id>` with `Upload-Offset` | appends the body; answers the new offset |
 | `POST /<name>/push/<id>/receive` | applies the bundle with the posted ref updates |
 
+### Snapshot checkouts
+
+[`grit checkout <url>`](../checkout/) starts work on a repository without its history: the server makes a snapshot commit of the target branch (where `HEAD` points), cut down to the paths asked for, and serves it as a resumable download. These requests have their own endpoint, apart from Git's, and need read access:
+
+| Request | Answer |
+| --- | --- |
+| `GET /.grit/checkouts/<name>` | the repository's name, target branch and its tip |
+| `POST /.grit/checkouts/<name>` | makes a checkout of the paths in the JSON body |
+| `GET /.grit/checkouts/<name>/<id>` | the checkout |
+| `GET /.grit/checkouts/<name>/<id>/bundle` | its snapshot as a bundle, with `Range` support |
+
+The server keeps checkouts in `grit-serve/checkouts/` inside the Git directory and points `refs/checkouts/<id>/target` at each one's snapshot.
+
 ### Running it
 
 `grit serve` with no subcommand and no `--setup` runs the server until interrupted. It refuses to start until `--setup` has created a user. It listens on `127.0.0.1:8080`; use `--bind 0.0.0.0:8080` to accept connections from other machines. The server speaks plain HTTP, so put it behind a TLS-terminating proxy before sending passwords and tokens across a network you don't trust.
