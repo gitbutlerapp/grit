@@ -671,14 +671,8 @@ pub(crate) fn write_index_file_split(
     // re-adding the same path must stay split-only (`base_index_pos` 0) like Git.
     if rebuild {
         for e in &mut index.entries {
-            if let Some(i) = base_snapshot
-                .iter()
-                .position(|b| b.path == e.path && b.stage() == e.stage())
-            {
-                e.base_index_pos = (i + 1) as u32;
-            } else {
-                e.base_index_pos = 0;
-            }
+            e.base_index_pos = find_entry_pos_sorted(&base_snapshot, &e.path, e.stage())
+                .map_or(0, |i| (i + 1) as u32);
         }
     }
 
