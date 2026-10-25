@@ -259,11 +259,125 @@ fn midx_git_verify_clean() {
         return;
     }
     let stderr = String::from_utf8_lossy(&out.stderr);
-    if stderr.contains("not recognized") || stderr.contains("unknown option") {
-        eprintln!("SKIP: system git does not verify this MIDX version: {stderr}");
+    if stderr.contains("unknown option") {
+        eprintln!("SKIP: system git lacks multi-pack-index verify --object-dir: {stderr}");
         return;
     }
     panic!("git multi-pack-index verify: {stderr}");
+}
+
+fn two_pack_repo(root: &Path) {
+    merge_history_repo(root);
+    fs::write(root.join("extra.txt"), b"x\n").unwrap();
+    git_cmd(root, &["add", "extra.txt"]);
+    git_cmd(root, &["commit", "-q", "-m", "extra"]);
+    git_cmd(root, &["repack", "-d"]);
+}
+
+fn midx_header_version(root: &Path) -> u8 {
+    fs::read(root.join(".git/objects/pack/multi-pack-index")).expect("read midx")[4]
+}
+
+fn write_midx_with(root: &Path, opts: &MidxOptions) -> grit_lib::error::Result<()> {
+    let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
+    repo.write_midx(opts).map(|_| ())
+}
+
+/// Issue #1876: `Repository::write_midx` writes v1 unless asked otherwise, so the stock
+/// git on the system (2.43 included) keeps reading the repository.
+#[test]
+fn write_midx_default_is_v1_and_git_reads_repository() {
+    if !git_available() {
+        eprintln!("SKIP: git unavailable");
+        return;
+    }
+    let dir = tempfile::tempdir().expect("tempdir");
+    two_pack_repo(dir.path());
+    write_midx_with(dir.path(), &MidxOptions::default()).expect("write midx");
+    assert_eq!(midx_header_version(dir.path()), 1);
+    git_out(dir.path(), &["log", "--oneline", "-1"]);
+    git_out(dir.path(), &["status", "--short"]);
+    git_cmd(dir.path(), &["fsck", "--full"]);
+    git_cmd(dir.path(), &["multi-pack-index", "verify"]);
+}
+
+#[test]
+fn write_midx_honours_midx_version_config_and_override() {
+    if !git_available() {
+        eprintln!("SKIP: git unavailable");
+        return;
+    }
+    let dir = tempfile::tempdir().expect("tempdir");
+    two_pack_repo(dir.path());
+    let root = dir.path();
+    let midx = root.join(".git/objects/pack/multi-pack-index");
+
+    git_cmd(root, &["config", "midx.version", "2"]);
+    write_midx_with(root, &MidxOptions::default()).expect("write v2");
+    assert_eq!(midx_header_version(root), 2);
+
+    fs::remove_file(&midx).unwrap();
+    git_cmd(root, &["config", "midx.version", "1"]);
+    write_midx_with(root, &MidxOptions::default()).expect("write v1");
+    assert_eq!(midx_header_version(root), 1);
+    git_cmd(root, &["multi-pack-index", "verify"]);
+
+    fs::remove_file(&midx).unwrap();
+    let mut v2 = MidxOptions::default();
+    v2.version = Some(2);
+    write_midx_with(root, &v2).expect("explicit v2 beats config");
+    assert_eq!(midx_header_version(root), 2);
+}
+
+#[test]
+fn write_midx_rejects_invalid_midx_version() {
+    use grit_lib::error::{ConfigError, Error, MidxError};
+    if !git_available() {
+        eprintln!("SKIP: git unavailable");
+        return;
+    }
+    let dir = tempfile::tempdir().expect("tempdir");
+    two_pack_repo(dir.path());
+    let root = dir.path();
+    let midx = root.join(".git/objects/pack/multi-pack-index");
+
+    git_cmd(root, &["config", "midx.version", "3"]);
+    let err = write_midx_with(root, &MidxOptions::default()).expect_err("version 3");
+    assert!(
+        matches!(
+            err,
+            Error::Midx(MidxError::UnknownWriteVersion { version: 3 })
+        ),
+        "{err:?}"
+    );
+    let err = write_midx_with(root, &MidxOptions::with_dry_run(true)).expect_err("dry run");
+    assert!(
+        matches!(
+            err,
+            Error::Midx(MidxError::UnknownWriteVersion { version: 3 })
+        ),
+        "{err:?}"
+    );
+    assert!(!midx.exists());
+
+    git_cmd(root, &["config", "midx.version", "latest"]);
+    let err = write_midx_with(root, &MidxOptions::default()).expect_err("non-numeric");
+    assert!(
+        matches!(err, Error::Config(ConfigError::BadNumericValue { ref key, .. }) if key == "midx.version"),
+        "{err:?}"
+    );
+
+    let mut bad = MidxOptions::default();
+    bad.version = Some(0);
+    let err = write_midx_with(root, &bad).expect_err("explicit 0");
+    assert!(
+        matches!(
+            err,
+            Error::Midx(MidxError::UnknownWriteVersion { version: 0 })
+        ),
+        "{err:?}"
+    );
+    assert!(!midx.exists());
 }
 
 fn seed_branched_repo(root: &Path) {

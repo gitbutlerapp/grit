@@ -100,6 +100,14 @@ pub enum MidxError {
     #[error("no packs to index")]
     NoPacksToIndex,
 
+    /// A write requested an on-disk version other than `1` or `2` (for example through
+    /// `midx.version`).
+    #[error("cannot write multi-pack-index version {version}: only versions 1 and 2 exist")]
+    UnknownWriteVersion {
+        /// Requested version, as configured.
+        version: i64,
+    },
+
     /// Preferred pack has no objects in the MIDX.
     #[error("preferred pack '{pack}' is empty in multi-pack-index")]
     PreferredPackEmpty {

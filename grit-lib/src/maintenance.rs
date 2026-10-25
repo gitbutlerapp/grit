@@ -35,8 +35,8 @@ use crate::gc::{prune_loose_unreachable_with, LazyReachable, PruneStats};
 use crate::git_date::approx::approxidate_careful_at;
 use crate::index_pack::{install_pack_bytes, install_pack_path, IngestPackOptions};
 use crate::midx::{
-    clear_pack_midx_state, write_multi_pack_index_with_options, MidxBitmapWriteOutcome,
-    WriteMultiPackIndexOptions, WriteMultiPackIndexResult,
+    clear_pack_midx_state, midx_version_from_config, write_multi_pack_index_with_options,
+    MidxBitmapWriteOutcome, WriteMultiPackIndexOptions, WriteMultiPackIndexResult,
 };
 use crate::objects::{oid_hash_map, parse_commit, parse_tag, parse_tree, ObjectId, ObjectKind};
 use crate::odb::Odb;
@@ -227,6 +227,10 @@ pub struct MidxOptions {
     pub bitmap: bool,
     /// Report without writing `multi-pack-index`.
     pub dry_run: bool,
+    /// On-disk MIDX version (`1` or `2`). `None` uses `midx.version` from the repository
+    /// config, and v1 when that is unset, so every Git with multi-pack-index support can
+    /// read the result.
+    pub version: Option<u8>,
 }
 
 impl MidxOptions {
@@ -537,12 +541,20 @@ pub fn write_commit_graph(
 
 /// Write or refresh `objects/pack/multi-pack-index` for the repository.
 ///
+/// The on-disk version comes from [`MidxOptions::version`], then `midx.version`, then v1.
+///
 /// # Errors
 ///
-/// Returns [`Error::UnsupportedObjectStore`] for non-files backends, or MIDX write failures.
+/// Returns [`Error::UnsupportedObjectStore`] for non-files backends, [`Error::Config`] when
+/// `midx.version` is not an integer, [`crate::error::MidxError::UnknownWriteVersion`] (as
+/// [`Error::Midx`]) when the version is not `1` or `2`, or MIDX write failures.
 pub fn write_midx(repo: &Repository, opts: &MidxOptions) -> Result<MidxWriteReport> {
     let odb = repo.odb();
     odb.require_files_primary("midx write")?;
+    let version = match opts.version {
+        Some(v) => Some(v),
+        None => midx_version_from_config(&*repo.config()?)?,
+    };
     let objects_dir = odb
         .files_objects_dir()
         .ok_or(Error::UnsupportedObjectStore {
@@ -568,6 +580,7 @@ pub fn write_midx(repo: &Repository, opts: &MidxOptions) -> Result<MidxWriteRepo
     }
     let write_opts = WriteMultiPackIndexOptions {
         write_bitmap: opts.bitmap,
+        version,
         ..WriteMultiPackIndexOptions::default()
     };
     let WriteMultiPackIndexResult { bitmap } =
@@ -791,10 +804,13 @@ fn repack_detail(repo: &Repository, opts: &RepackOptions) -> Result<RepackDetail
                 // Per-pack bitmaps require reachability closure within one pack; incremental
                 // repack keeps older packs and adds a new layer. Write a multi-pack-index
                 // bitmap covering all packs instead of a sidecar on the new pack alone.
+                let version = match cfg.as_ref() {
+                    Some(c) => midx_version_from_config(c)?,
+                    None => None,
+                };
                 let midx_opts = WriteMultiPackIndexOptions {
                     write_bitmap: true,
-                    // On-disk v2 is not readable by Git 2.43; match grit_write_midx compat tests.
-                    version: Some(1),
+                    version,
                     ..WriteMultiPackIndexOptions::default()
                 };
                 let WriteMultiPackIndexResult { bitmap: _ } =

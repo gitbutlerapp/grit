@@ -18,6 +18,7 @@ use std::sync::Arc;
 use crate::environment::RepositoryOptions;
 use crate::hash::verify_trailer;
 
+use crate::config::ConfigSet;
 use crate::diagnostics::{DiagnosticSink, NullDiagnostics, Warning};
 use crate::error::{Error, MidxError, Result};
 use crate::objects::{HashAlgo, ObjectId, ObjectInfo};
@@ -79,11 +80,43 @@ pub struct WriteMultiPackIndexOptions {
     /// When true with [`Self::write_bitmap`], emit a standalone `.rev` sidecar and omit the
     /// embedded RIDX chunk (Git `GIT_TEST_MIDX_WRITE_REV` compatibility).
     pub write_rev_sidecar: bool,
-    /// On-disk MIDX format version to write (`1` or `2`). `None` writes the default (v2).
-    /// Set from `midx.version`.
+    /// On-disk MIDX format version to write (`1` or `2`). `None` writes v1, which every Git
+    /// with multi-pack-index support can read; v2 (readable only by newer Git) is written
+    /// only when requested. [`crate::maintenance::write_midx`] fills this from `midx.version`.
+    /// Any other value fails with [`MidxError::UnknownWriteVersion`].
     pub version: Option<u8>,
     /// When set, non-fatal MIDX write warnings are reported here instead of being discarded.
     pub diagnostics: Option<crate::diagnostics::DiagnosticsHandle>,
+}
+
+/// Validate a requested on-disk MIDX version, using `default` when none was requested.
+fn resolve_write_version(requested: Option<u8>, default: u8) -> Result<u8> {
+    match requested {
+        None => Ok(default),
+        Some(v @ (MIDX_VERSION_V1 | MIDX_VERSION_V2)) => Ok(v),
+        Some(v) => Err(MidxError::UnknownWriteVersion {
+            version: i64::from(v),
+        }
+        .into()),
+    }
+}
+
+/// Read `midx.version` from `config`.
+///
+/// Returns `Ok(None)` when the key is unset, so the writer's own default applies.
+///
+/// # Errors
+///
+/// [`Error::Config`] when the value is not an integer, and
+/// [`MidxError::UnknownWriteVersion`] when it is an integer other than `1` or `2`.
+pub(crate) fn midx_version_from_config(config: &ConfigSet) -> Result<Option<u8>> {
+    let Some(version) = config.get_i64_strict("midx.version")? else {
+        return Ok(None);
+    };
+    match u8::try_from(version) {
+        Ok(v @ (MIDX_VERSION_V1 | MIDX_VERSION_V2)) => Ok(Some(v)),
+        _ => Err(MidxError::UnknownWriteVersion { version }.into()),
+    }
 }
 
 /// Outcome of an optional MIDX reachability bitmap write.
@@ -3027,6 +3060,8 @@ pub fn write_multi_pack_index_with_options(
     pack_dir: &Path,
     opts: &WriteMultiPackIndexOptions,
 ) -> Result<WriteMultiPackIndexResult> {
+    let version = resolve_write_version(opts.version, MIDX_VERSION_V1)?;
+
     // Git warns and ignores an existing MIDX whose checksum does not validate when
     // writing a fresh (non-stdin-packs) MIDX (git/midx-write.c `write_midx_internal`).
     if opts.pack_names_subset_ordered.is_none() {
@@ -3085,6 +3120,10 @@ pub fn write_multi_pack_index_with_options(
             }
             // Unknown names on stdin are silently ignored (Git skips packs it
             // cannot find rather than failing the whole write).
+        }
+        // Readers reject a v1 MIDX whose pack names are not strictly increasing.
+        if version == MIDX_VERSION_V1 {
+            out.sort();
         }
         out
     } else {
@@ -3246,7 +3285,7 @@ pub fn write_multi_pack_index_with_options(
         preferred_idx,
         write_bitmap_chunks,
         omit_embedded_ridx,
-        opts.version.unwrap_or(MIDX_VERSION_V2),
+        version,
         repo_midx_hash_version(pack_dir),
         exclude,
     )?;
@@ -3461,6 +3500,11 @@ fn layer_pack_names(pack_dir: &Path, hash: &str) -> Result<Vec<String>> {
 /// Mirrors `write_midx_file_compact` (git/midx-write.c). Because grit's chain layers
 /// are self-contained (each lists only its own packs/objects), layers outside the
 /// compacted range keep their existing files and checksums untouched.
+///
+/// `version` is the on-disk format of the compacted layer. `None` writes v2, which
+/// compaction needs because the merged packs keep chain order rather than sorted order;
+/// `Some(1)` fails with [`CompactError::V1Format`], and values other than `1` or `2` fail
+/// with [`MidxError::UnknownWriteVersion`] wrapped in [`CompactError::Other`].
 pub fn compact_multi_pack_index(
     pack_dir: &Path,
     from_arg: &str,
@@ -3469,7 +3513,8 @@ pub fn compact_multi_pack_index(
     write_rev: bool,
     version: Option<u8>,
 ) -> std::result::Result<(), CompactError> {
-    if version == Some(MIDX_VERSION_V1) {
+    let version = resolve_write_version(version, MIDX_VERSION_V2)?;
+    if version == MIDX_VERSION_V1 {
         return Err(CompactError::V1Format);
     }
 
@@ -3553,7 +3598,7 @@ pub fn compact_multi_pack_index(
         preferred_idx,
         write_bitmaps,
         write_rev,
-        version.unwrap_or(MIDX_VERSION_V2),
+        version,
         repo_midx_hash_version(pack_dir),
         exclude,
     )?;
@@ -4128,5 +4173,89 @@ mod tests {
             .expect("read owned")
             .expect("object owned");
         assert_eq!(mapped_obj.data, owned_obj.data);
+    }
+
+    fn config_from(text: &str) -> crate::config::ConfigSet {
+        let file = crate::config::ConfigFile::parse(
+            Path::new("test"),
+            text,
+            crate::config::ConfigScope::Local,
+        )
+        .expect("parse config");
+        let mut set = crate::config::ConfigSet::new();
+        set.merge(&file);
+        set
+    }
+
+    #[test]
+    fn write_version_defaults_and_validation() {
+        assert_eq!(super::resolve_write_version(None, 1).expect("default"), 1);
+        assert_eq!(super::resolve_write_version(None, 2).expect("default"), 2);
+        assert_eq!(super::resolve_write_version(Some(1), 2).expect("v1"), 1);
+        assert_eq!(super::resolve_write_version(Some(2), 1).expect("v2"), 2);
+        for bad in [0u8, 3, 255] {
+            assert!(matches!(
+                super::resolve_write_version(Some(bad), 1),
+                Err(Error::Midx(MidxError::UnknownWriteVersion { version })) if version == i64::from(bad)
+            ));
+        }
+    }
+
+    #[test]
+    fn midx_version_config_parsing() {
+        use crate::error::ConfigError;
+        let read = |text: &str| super::midx_version_from_config(&config_from(text));
+        assert_eq!(read("[core]\n\tbare = false\n").expect("unset"), None);
+        assert_eq!(read("[midx]\n\tversion = 1\n").expect("v1"), Some(1));
+        assert_eq!(read("[midx]\n\tversion = 2\n").expect("v2"), Some(2));
+        assert_eq!(
+            read("[midx]\n\tversion = 2\n[midx]\n\tversion = 1\n").expect("last wins"),
+            Some(1)
+        );
+        for (text, version) in [
+            ("[midx]\n\tversion = 3\n", 3),
+            ("[midx]\n\tversion = 0\n", 0),
+            ("[midx]\n\tversion = -1\n", -1),
+            ("[midx]\n\tversion = 1k\n", 1024),
+        ] {
+            assert!(
+                matches!(
+                    read(text),
+                    Err(Error::Midx(MidxError::UnknownWriteVersion { version: v })) if v == version
+                ),
+                "{text:?}"
+            );
+        }
+        assert!(matches!(
+            read("[midx]\n\tversion = two\n"),
+            Err(Error::Config(ConfigError::BadNumericValue { ref key, .. })) if key == "midx.version"
+        ));
+    }
+
+    #[test]
+    fn default_write_is_v1_and_unknown_version_is_rejected() {
+        let Some((tmp, _oid)) = midx_fixture(false) else {
+            eprintln!("SKIP: git unavailable for MIDX fixture");
+            return;
+        };
+        let pack_dir = tmp.path().join(".git/objects/pack");
+        let midx_path = pack_dir.join("multi-pack-index");
+        write_multi_pack_index(&pack_dir).expect("default write");
+        assert_eq!(fs::read(&midx_path).expect("read midx")[4], 1);
+
+        fs::remove_file(&midx_path).expect("remove midx");
+        let err = super::write_multi_pack_index_with_options(
+            &pack_dir,
+            &super::WriteMultiPackIndexOptions {
+                version: Some(3),
+                ..Default::default()
+            },
+        )
+        .expect_err("version 3");
+        assert!(matches!(
+            err,
+            Error::Midx(MidxError::UnknownWriteVersion { version: 3 })
+        ));
+        assert!(!midx_path.exists(), "rejected write must not leave a MIDX");
     }
 }

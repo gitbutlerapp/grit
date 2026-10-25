@@ -5775,6 +5775,8 @@ pub grit_lib::error::MidxError::SignatureMismatch::expected: u32
 pub grit_lib::error::MidxError::SignatureMismatch::found: u32
 pub grit_lib::error::MidxError::UnknownPreferredPack
 pub grit_lib::error::MidxError::UnknownPreferredPack::name: alloc::string::String
+pub grit_lib::error::MidxError::UnknownWriteVersion
+pub grit_lib::error::MidxError::UnknownWriteVersion::version: i64
 pub grit_lib::error::MidxError::VersionNotRecognized
 pub grit_lib::error::MidxError::VersionNotRecognized::version: u8
 impl core::clone::Clone for grit_lib::prelude::MidxError
@@ -7431,6 +7433,7 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::maintenance::GcStats
 #[non_exhaustive] pub struct grit_lib::maintenance::MidxOptions
 pub grit_lib::maintenance::MidxOptions::bitmap: bool
 pub grit_lib::maintenance::MidxOptions::dry_run: bool
+pub grit_lib::maintenance::MidxOptions::version: core::option::Option<u8>
 impl grit_lib::maintenance::MidxOptions
 pub fn grit_lib::maintenance::MidxOptions::with_bitmap(bool) -> Self
 pub fn grit_lib::maintenance::MidxOptions::with_dry_run(bool) -> Self
@@ -15343,6 +15346,8 @@ pub grit_lib::prelude::MidxError::SignatureMismatch::expected: u32
 pub grit_lib::prelude::MidxError::SignatureMismatch::found: u32
 pub grit_lib::prelude::MidxError::UnknownPreferredPack
 pub grit_lib::prelude::MidxError::UnknownPreferredPack::name: alloc::string::String
+pub grit_lib::prelude::MidxError::UnknownWriteVersion
+pub grit_lib::prelude::MidxError::UnknownWriteVersion::version: i64
 pub grit_lib::prelude::MidxError::VersionNotRecognized
 pub grit_lib::prelude::MidxError::VersionNotRecognized::version: u8
 impl core::clone::Clone for grit_lib::prelude::MidxError

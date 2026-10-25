@@ -103,6 +103,55 @@ fn grit_midx_write_variants_pass_git_verify_sha1() {
     }
 }
 
+/// Issue #1876: the default write must be v1 so every Git with MIDX support (2.43 included)
+/// keeps reading the repository, not just `multi-pack-index verify` on a recent build.
+#[test]
+fn grit_midx_default_write_is_v1_and_git_reads_repository() {
+    let Some((repo, objects, _oids)) = multi_pack_repo(HashAlgo::Sha1, 3) else {
+        eprintln!("SKIP: fixture setup failed");
+        return;
+    };
+    let pack_dir = objects.join("pack");
+    let mut idx_names: Vec<String> = pack_idx_paths(&objects)
+        .into_iter()
+        .map(|p| p.file_name().unwrap().to_string_lossy().into_owned())
+        .collect();
+    idx_names.sort();
+    idx_names.reverse();
+
+    for opts in [
+        WriteMultiPackIndexOptions::default(),
+        // Caller order is not lexical; a v1 file must still list packs sorted.
+        WriteMultiPackIndexOptions {
+            pack_names_subset_ordered: Some(idx_names.clone()),
+            ..Default::default()
+        },
+    ] {
+        grit_lib::objects::midx::clear_pack_midx_state(&pack_dir).expect("reset midx");
+        grit_write_midx(&pack_dir, &opts);
+        let bytes = std::fs::read(pack_dir.join("multi-pack-index")).expect("read midx");
+        assert_eq!(&bytes[..4], b"MIDX");
+        assert_eq!(bytes[4], 1, "default MIDX version must be 1");
+        let mut listed = read_midx_pack_idx_names(&objects).expect("pack names");
+        assert_eq!(listed.len(), idx_names.len());
+        let unsorted = listed.clone();
+        listed.sort();
+        assert_eq!(unsorted, listed, "v1 pack names must be sorted");
+
+        for args in [
+            &["log", "--oneline", "-1"][..],
+            &["status", "--short"][..],
+            &["rev-list", "--all", "--objects"][..],
+            &["fsck", "--full"][..],
+            &["multi-pack-index", "verify"][..],
+        ] {
+            let out = repo.git(args);
+            assert!(out.ok, "git {args:?} after grit MIDX write: {}", out.stderr);
+        }
+        verify_midx(&objects).expect("grit verify_midx");
+    }
+}
+
 #[test]
 fn grit_midx_write_variants_pass_git_verify_sha256() {
     if !git_available() {

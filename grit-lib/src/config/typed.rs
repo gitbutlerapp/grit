@@ -123,6 +123,23 @@ impl ConfigSet {
         parse_typed_value(key, ty, raw, env).map(Some)
     }
 
+    /// Read the winning value for `key` as a Git integer (with optional `k`/`m`/`g` suffix).
+    ///
+    /// Missing keys return `Ok(None)`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`ConfigError::BadNumericValue`] (as [`Error::Config`]) when the value is
+    /// not an integer or does not fit in an `i64`.
+    pub(crate) fn get_i64_strict(&self, key: &str) -> Result<Option<i64>> {
+        let Some(raw) = self.get(key) else {
+            return Ok(None);
+        };
+        parse_git_config_int_strict(&raw)
+            .map(Some)
+            .map_err(|e| int_parse_error(key, &raw, e))
+    }
+
     /// Entries whose canonical key starts with `prefix`.
     ///
     /// `prefix` may be a full key, a section (`remote.origin`), or a section prefix ending in `.`.

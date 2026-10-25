@@ -388,14 +388,10 @@ pub fn assert_git_midx_verify(repo: &RepoFixture) {
     assert!(v.ok, "git multi-pack-index verify: {}", v.stderr);
 }
 
-/// Write a MIDX with grit, defaulting to on-disk v1 when `version` is unset so system
-/// `git multi-pack-index verify` accepts the file on older Git builds.
+/// Write a MIDX with grit using `opts` as given (an unset `version` exercises the
+/// library default), then drop cached pack state so later reads see the new file.
 pub fn grit_write_midx(pack_dir: &Path, opts: &WriteMultiPackIndexOptions) {
-    let mut opts = opts.clone();
-    if opts.version.is_none() {
-        opts.version = Some(1);
-    }
-    write_multi_pack_index_with_options(pack_dir, &opts).expect("grit write MIDX");
+    write_multi_pack_index_with_options(pack_dir, opts).expect("grit write MIDX");
     clear_pack_cache();
 }
 
