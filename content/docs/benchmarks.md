@@ -329,6 +329,33 @@ cargo build --release -p grit-cli -p grit-utils
   --min-runs 10 --output grit-utils/baselines/daily-delete-heavy-after.json
 ```
 
+## Reset reuses the index it replaces (2026-10-25)
+
+The daily census had `reset/mixed@synth-10k` (`grit reset HEAD` on a tree with 1% of files edited) at 5× Git. A mixed reset built the new index from the target tree with empty stat data, so the refresh that followed opened and hashed all 10 000 tracked files (`strace`: 10 055 `openat`, 20 051 `read`, 30 358 `statx`) where Git only stats them.
+
+- **Mixed reset seeds the new index from the current one.** Rows whose path, mode and blob id are unchanged keep their cached stat data, so the refresh hashes only files whose stat changed (156 `openat`, 251 `read`, one `statx` per file).
+- **Unchanged subtrees come from the cache-tree, not the object database.** Like Git's one-way merge, flattening the target tree copies the current index's rows for every directory whose cache-tree node is valid and names the same tree, after checking that the node's entry count covers exactly the plain rows under that directory, so a stale node is never trusted. When the whole tree matches (`reset HEAD`), the rows are reused in place. Partial commits (`commit -- <paths>`) and `stash push` build their seeded index the same way.
+- **`reset --hard` flattens the target tree the same way and keeps the cache-tree.** It used to read every tree object on every run and then write the index without a `TREE` extension, which Git primes after a hard reset. Without it, the next command had nothing to reuse.
+
+Same VM sitting, release builds, system `git 2.43.0`, `origin/main` before → after (`grit-bench daily --min-runs 10`, committed in **`daily-reset-before.json`** and **`daily-reset-after.json`**):
+
+| Scenario | Git ms (before / after run) | Grit ms before → after | Grit ÷ Git before → after | Grit peak RSS before → after |
+| --- | ---: | ---: | ---: | ---: |
+| `reset/mixed@synth-10k` | 8.8 / 9.1 | 45.6 → **12.2** | 5.17× → **1.35×** | 20.6 → **19.6** MiB |
+| `reset/hard@synth-10k` | 16.4 / 16.5 | 21.8 → **20.1** | 1.33× → **1.22×** | 22.7 → 22.7 MiB |
+| `reset/hard-delete-heavy@wide-48k` | 240.9 / 237.1 | 236.9 → 227.9 | 0.98× → 0.96× | 50.0 → 49.3 MiB |
+| `commit/paths@synth-10k` | 22.8 / 22.7 | 28.6 → **25.5** | 1.25× → **1.12×** | 25.8 → 25.9 MiB |
+| `stash/push-pop@synth-10k` | 213.7 / 212.7 | 158.6 → 148.4 | 0.74× → 0.70× | 26.7 → 26.3 MiB |
+
+The mixed-reset samples spread from 10.2 to 14.5 ms in that run. Repeated with `hyperfine` on the dirty fixture without re-preparing, it is 43.6 → 9.9 ms (Git 7.9 ms). `status`, `switch`, `restore` and the other `commit` rows are unchanged within noise. The mixed reset's heap peak dropped from 3.9 to 2.8 MB (massif). Most of the remaining RSS gap to Git is the `grit` binary's mapped code pages (about 10.6 MB of the 16.7 MB resident at exit), not reset data.
+
+```bash
+cargo build --release -p grit-cli -p grit-utils
+./target/release/grit-bench daily \
+  --only reset/mixed@synth-10k,reset/hard@synth-10k,reset/hard-delete-heavy@wide-48k,commit/paths@synth-10k,commit/small@synth-10k,commit/dry-run@synth-10k,stash/push-pop@synth-10k,status/dirty@synth-10k,restore/paths@synth-10k,switch/branch@synth-10k \
+  --min-runs 10 --output grit-utils/baselines/daily-reset-after.json
+```
+
 ## Pick keeps the cache-tree (2026-10-24)
 
 The daily census flagged `pick/one@synth-100k` going from 0.95× to 1.22× Git. The replay sequencer had started loading the index without its cache-tree extension to save memory. Without a cache-tree, the check that the index matches `HEAD` flattens the whole `HEAD` tree into a map, which costs more time and more memory than the extension it skipped. The index was also parsed a second time for the first replay step, and the index written after the pick lost its cache-tree. Pick and revert now keep the cache-tree, and the snapshot from the cleanliness check feeds the first step.
