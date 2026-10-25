@@ -136,6 +136,11 @@ const WELL_KNOWN_EMPTY_TREE_LEGACY: [u8; 20] = [
     0x4b, 0x82, 0x5d, 0xc6, 0x42, 0xcb, 0x6e, 0xb9, 0xa0, 0x60, 0xe5, 0x4b, 0xf8, 0x99, 0xd6, 0x9f,
     0x7c, 0x69, 0x48, 0xd4,
 ];
+/// SHA-256 empty tree digest (`6ef19b41…decc5321`).
+const EMPTY_TREE_SHA256: [u8; 32] = [
+    0x6e, 0xf1, 0x9b, 0x41, 0x22, 0x5c, 0x53, 0x69, 0xf1, 0xc1, 0x04, 0xd4, 0x5d, 0x8d, 0x85, 0xef,
+    0xa9, 0xb0, 0x57, 0xb5, 0x3b, 0x14, 0xb4, 0xb9, 0xb9, 0x39, 0xdd, 0x74, 0xde, 0xcc, 0x53, 0x21,
+];
 /// SHA-1 digest of the empty blob (`e69de29bb2d1d6434b8b29ae775ad8c2e48c5391`).
 const EMPTY_BLOB_SHA1: [u8; 20] = [
     0xe6, 0x9d, 0xe2, 0x9b, 0xb2, 0xd1, 0xd6, 0x43, 0x4b, 0x8b, 0x29, 0xae, 0x77, 0x5a, 0xd8, 0xc2,
@@ -252,6 +257,16 @@ impl ObjectId {
         self.is_canonical_empty_tree()
             || (self.as_bytes().len() == HashAlgo::Sha1.len()
                 && self.as_bytes() == WELL_KNOWN_EMPTY_TREE_LEGACY)
+    }
+
+    /// Whether this OID is the empty tree of a repository using `algo`, including the legacy
+    /// SHA-1 typo id.
+    #[must_use]
+    pub(crate) fn is_empty_tree_for(&self, algo: HashAlgo) -> bool {
+        match algo {
+            HashAlgo::Sha1 => self.is_well_known_empty_tree(),
+            HashAlgo::Sha256 => self.as_bytes() == EMPTY_TREE_SHA256,
+        }
     }
 
     /// Whether this OID is the canonical SHA-1 empty tree (`4b825dc6…4904`).
@@ -1683,6 +1698,26 @@ mod commit_parse_tests {
             ObjectId::empty_tree().to_hex(),
             "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
         );
+    }
+
+    #[test]
+    fn is_empty_tree_for_matches_hashed_empty_tree() {
+        for algo in [HashAlgo::Sha1, HashAlgo::Sha256] {
+            let hashed =
+                crate::hash::hash_object(algo, ObjectKind::Tree, b"").expect("hash empty tree");
+            assert!(hashed.is_empty_tree_for(algo), "{algo:?}");
+            let other = match algo {
+                HashAlgo::Sha1 => HashAlgo::Sha256,
+                HashAlgo::Sha256 => HashAlgo::Sha1,
+            };
+            assert!(!hashed.is_empty_tree_for(other), "{algo:?}");
+            let empty_blob =
+                crate::hash::hash_object(algo, ObjectKind::Blob, b"").expect("hash empty blob");
+            assert!(!empty_blob.is_empty_tree_for(algo), "{algo:?}");
+        }
+        let legacy = ObjectId::from_hex("4b825dc642cb6eb9a060e54bf899d69f7c6948d4").expect("hex");
+        assert!(legacy.is_empty_tree_for(HashAlgo::Sha1));
+        assert!(!legacy.is_empty_tree_for(HashAlgo::Sha256));
     }
 
     #[test]

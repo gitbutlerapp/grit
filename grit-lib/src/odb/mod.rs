@@ -2724,14 +2724,7 @@ fn hash_object_data_with(algo: HashAlgo, kind: ObjectKind, data: &[u8]) -> Resul
 /// Whether `oid` is Git's empty tree for `algo` (including the legacy SHA-1 typo OID).
 #[must_use]
 pub(crate) fn empty_tree_oid_matches(algo: HashAlgo, oid: &ObjectId) -> bool {
-    if hash_object_data_with(algo, ObjectKind::Tree, b"")
-        .ok()
-        .as_ref()
-        == Some(oid)
-    {
-        return true;
-    }
-    algo == HashAlgo::Sha1 && oid.is_well_known_empty_tree()
+    oid.is_empty_tree_for(algo)
 }
 
 /// Build canonical blob store bytes (`"blob <len>\\0<payload>"`).
