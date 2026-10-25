@@ -180,6 +180,24 @@ The cargo clone and tag fetch used to fail because two annotated tags on one com
 
 Intermediate capture on the same VM before the final writer stack (**2026-10-10**) remains in **`bitmaps-before.json`** for the generated tables (`rev-list-count` **~3.3×**, object count unusable, serve **memory_cap**).
 
+## grit-lib: writing pack bitmaps
+
+`grit gc repack --bitmaps` on an already-packed `rust-lang/cargo` clone (195,008 objects in one 81 MB pack, 24,341 commits, 110,673 trees, 109 release branches) used to spend about 56 s writing the `.bitmap` ([#1877](https://github.com/gitbutlerapp/grit/issues/1877)). The writer read every blob while walking trees, re-read commits inside sorts, walked full reachability a second time to check closure, and read the whole pack to get its 20-byte trailer. It now reads only commits and trees. Types come from pack entry headers, and an unwritten bitmap at each first-parent fork keeps release branches from re-walking the main line below the fork (tree reads went from 388k to about the number of distinct trees). Commit and type bitmaps are byte-identical to before; 66 of 195,008 name-hash entries changed.
+
+4-vCPU VM, Git 2.43.0, wall time and peak RSS (`/usr/bin/time`), each on a fresh copy of the clone:
+
+| Operation | Git | Grit before | Grit after |
+| --- | ---: | ---: | ---: |
+| `grit gc repack --bitmaps` vs `git repack -a -d -b` | 1.6 s / 174 MB | 58.3 s / 414 MB | 2.9 s / 414 MB |
+| `grit repack` vs `git repack -a -d` (no bitmap, for reference) | 1.15 s / 169 MB | 2.0 s / 414 MB | 2.0–2.25 s / 414 MB |
+| Criterion `pack_bitmap/write_from_git_bitmap` (bare cargo clone) | — | 54.87 s | 0.967 s |
+
+The peak RSS comes from the repack itself, not from the bitmap write. Reproduce the library number with:
+
+```bash
+GRIT_GIT_GIT_BARE=/tmp/cargo.git cargo bench -p grit-lib --bench pack_bitmap -- write_from_git_bitmap
+```
+
 ## grit-lib: parallel index-pack (in-memory)
 
 Release [`index_pack_bench`](https://github.com/gitbutlerapp/grit/tree/main/grit-lib/examples/index_pack_bench.rs) on a **~112 500-object** depth-50 pack (`git fast-import` + `git repack -adf --depth=50`, factory VM 2026-10-12). Grit uses [`pack_index_records_with_threads`](rustdoc:grit_lib::objects::unpack_objects::pack_index_records_with_threads) (`GRIT_INDEX_PACK_BENCH_PACK` / `GRIT_INDEX_PACK_THREADS`); timings cover in-memory record building only (no `.idx` write). System **`git index-pack`** rows are end-to-end on a fresh temp directory each run (writes `.idx`).
