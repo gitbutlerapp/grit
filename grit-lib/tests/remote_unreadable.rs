@@ -40,9 +40,13 @@ fn closed_port() -> u16 {
     listener.local_addr().expect("addr").port()
 }
 
-/// Serve `status` with an empty body to every request until the test exits.
+/// Serve `status` with `extra_headers` and `body` on every request until the test exits.
 #[cfg(feature = "http-ureq")]
-fn http_status_server(status: &'static str) -> u16 {
+fn http_response_server(
+    status: &'static str,
+    extra_headers: &'static str,
+    body: &'static [u8],
+) -> u16 {
     let listener = TcpListener::bind(("127.0.0.1", 0)).expect("bind");
     let port = listener.local_addr().expect("addr").port();
     std::thread::spawn(move || {
@@ -50,12 +54,21 @@ fn http_status_server(status: &'static str) -> u16 {
             let Ok(mut stream) = stream else { continue };
             let mut buf = [0u8; 4096];
             let _ = stream.read(&mut buf);
-            let response =
-                format!("HTTP/1.1 {status}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n");
+            let response = format!(
+                "HTTP/1.1 {status}\r\n{extra_headers}Content-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            );
             let _ = stream.write_all(response.as_bytes());
+            let _ = stream.write_all(body);
         }
     });
     port
+}
+
+/// Serve `status` with an empty body to every request until the test exits.
+#[cfg(feature = "http-ureq")]
+fn http_status_server(status: &'static str) -> u16 {
+    http_response_server(status, "", b"")
 }
 
 fn http_factory() -> Option<&'static dyn HttpClientFactory> {
@@ -177,6 +190,29 @@ fn list_refs_with_http_500_is_http_status() {
     assert_eq!(
         unreadable_reason(&err),
         &RemoteUnreadableReason::HttpStatus { status: 500 }
+    );
+}
+
+#[cfg(feature = "http-ureq")]
+#[test]
+fn list_refs_with_http_200_html_is_not_git_server() {
+    let port = http_response_server(
+        "200 OK",
+        "Content-Type: text/html\r\n",
+        b"<html><body>parked</body></html>",
+    );
+    let url = format!("http://127.0.0.1:{port}/repo.git");
+    let err = list_refs(&url).expect_err("html 200 must fail");
+    assert_eq!(
+        unreadable_reason(&err),
+        &RemoteUnreadableReason::NotGitServer {
+            status: 200,
+            content_type: Some("text/html".into()),
+        }
+    );
+    assert_eq!(
+        err.to_string(),
+        format!("'{url}' did not answer like a Git server (got 200 text/html)")
     );
 }
 
@@ -389,6 +425,14 @@ fn messages_and_slugs_per_reason() {
             RemoteUnreadableReason::HttpStatus { status: 503 },
             "http_status",
             "HTTP 503 from /srv/r.git",
+        ),
+        (
+            RemoteUnreadableReason::NotGitServer {
+                status: 200,
+                content_type: Some("text/html".into()),
+            },
+            "not_git_server",
+            "'/srv/r.git' did not answer like a Git server (got 200 text/html)",
         ),
         (
             RemoteUnreadableReason::NoHandshake,

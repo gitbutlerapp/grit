@@ -180,6 +180,37 @@ fn missing_repository_is_reported_without_protocol_details() {
 }
 
 #[test]
+fn html_parked_host_is_not_git_server_with_url_hint() {
+    let (repo, home) = fresh_repo();
+    let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+    let addr = listener.local_addr().expect("addr");
+    let body = b"<html><body>parked</body></html>";
+    std::thread::spawn(move || {
+        for stream in listener.incoming() {
+            let Ok(mut stream) = stream else { continue };
+            let mut reader = BufReader::new(stream.try_clone().expect("clone stream"));
+            let mut line = String::new();
+            while reader.read_line(&mut line).is_ok_and(|n| n > 0) && line != "\r\n" {
+                line.clear();
+            }
+            let _ = write!(
+                stream,
+                "HTTP/1.1 200 OK\r\nContent-Type: text/html\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            );
+            let _ = stream.write_all(body);
+        }
+    });
+    let url = format!("http://{addr}/team/repo.git");
+    let failure = fails_with(repo.path(), home.path(), &["clone", &url, "copy"], 128);
+    assert_eq!(
+        failure.json["error"],
+        format!("'{url}' did not answer like a Git server (got 200 text/html)")
+    );
+    failure.assert_kind_and_hint("remote_unreadable", "check the URL");
+}
+
+#[test]
 fn pull_without_upstream_suggests_pull_by_name_or_push_u() {
     let (repo, home) = fresh_repo();
     let upstream = tempfile::tempdir().expect("upstream");

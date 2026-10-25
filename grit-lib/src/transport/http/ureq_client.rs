@@ -358,6 +358,7 @@ impl Default for UreqHttpClient {
 /// A raw HTTP response captured from ureq (success or error status).
 struct RawResponse {
     status: u16,
+    content_type: Option<String>,
     www_authenticate: Vec<String>,
     set_cookie: Vec<String>,
     body: Vec<u8>,
@@ -849,7 +850,13 @@ impl UreqHttpClient {
         if first.status != 401 {
             self.invalidate_auth_on_cross_origin_redirect(url, &first.final_url);
             self.save_response_cookies(&first.set_cookie);
-            return finalize_status(url, first.status, first.body, first.final_url);
+            return finalize_status(
+                url,
+                first.status,
+                first.content_type,
+                first.body,
+                first.final_url,
+            );
         }
         // 401: need credentials. Without a provider, surface a typed auth error
         // (so embedders can detect it and e.g. fall back to a subprocess path)
@@ -905,7 +912,13 @@ impl UreqHttpClient {
             self.clear_auth_header();
         }
         self.save_response_cookies(&retry.set_cookie);
-        Ok((retry.body, retry.final_url))
+        finalize_status(
+            url,
+            retry.status,
+            retry.content_type,
+            retry.body,
+            retry.final_url,
+        )
     }
 }
 
@@ -1021,6 +1034,7 @@ fn read_response(
     reader.read_to_end(&mut body).map_err(Error::Io)?;
     Ok(RawResponse {
         status: head.status,
+        content_type: head.content_type,
         www_authenticate: head.www_authenticate,
         set_cookie: head.set_cookie,
         body,
@@ -1031,6 +1045,7 @@ fn read_response(
 /// Response metadata without buffering the body.
 struct RawResponseHead {
     status: u16,
+    content_type: Option<String>,
     www_authenticate: Vec<String>,
     set_cookie: Vec<String>,
     final_url: String,
@@ -1043,6 +1058,11 @@ fn open_response_body(
     use ureq::ResponseExt as _;
     let status = resp.status().as_u16();
     let final_url = resp.get_uri().to_string();
+    let content_type = resp
+        .headers()
+        .get("Content-Type")
+        .and_then(|value| value.to_str().ok())
+        .map(ToOwned::to_owned);
     let www_authenticate = header_values(resp.headers(), "WWW-Authenticate");
     let set_cookie = header_values(resp.headers(), "Set-Cookie");
     let reader = resp.into_body().into_reader();
@@ -1051,6 +1071,7 @@ fn open_response_body(
     Ok((
         RawResponseHead {
             status,
+            content_type,
             www_authenticate,
             set_cookie,
             final_url,
@@ -1077,11 +1098,21 @@ fn header_values(headers: &ureq::http::HeaderMap, name: &str) -> Vec<String> {
 fn finalize_status(
     url: &str,
     status: u16,
+    content_type: Option<String>,
     body: Vec<u8>,
     final_url: String,
 ) -> Result<(Vec<u8>, String)> {
     if status >= 400 {
         return Err(http_status_error(url, status));
+    }
+    if super::is_info_refs_discovery_url(url)
+        && super::body_looks_like_non_git_server(&body, content_type.as_deref())
+    {
+        return Err(super::not_git_server_error(
+            repository_url_for_display(url),
+            status,
+            content_type,
+        ));
     }
     Ok((body, final_url))
 }

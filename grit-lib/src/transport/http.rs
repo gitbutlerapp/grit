@@ -32,7 +32,7 @@ use std::collections::HashSet;
 use std::io::{Cursor, Read};
 use std::path::Path;
 
-use crate::error::{Error, Result};
+use crate::error::{Error, RemoteUnreadableReason, Result};
 use crate::fetch::Progress;
 use crate::objects::ObjectId;
 use crate::pkt_line;
@@ -264,6 +264,93 @@ impl<C: HttpClient> HttpClient for std::sync::Arc<C> {
 
 const UPLOAD_PACK: &str = "git-upload-pack";
 
+/// HTTP metadata for an `info/refs` discovery response (when the transport captured it).
+#[derive(Clone, Debug)]
+pub(crate) struct InfoRefsDiscoveryHttp {
+    pub url: String,
+    pub status: u16,
+    pub content_type: Option<String>,
+}
+
+/// Whether `url` is a smart-HTTP `info/refs` discovery GET.
+#[cfg(feature = "http-ureq")]
+#[must_use]
+pub(crate) fn is_info_refs_discovery_url(url: &str) -> bool {
+    url.contains("/info/refs") && url.contains("service=git-")
+}
+
+/// True when the response body or `Content-Type` is obviously not a Git advertisement.
+#[must_use]
+pub(crate) fn body_looks_like_non_git_server(body: &[u8], content_type: Option<&str>) -> bool {
+    if let Some(ct) = content_type {
+        let mime = ct
+            .split(';')
+            .next()
+            .unwrap_or(ct)
+            .trim()
+            .to_ascii_lowercase();
+        if mime == "text/html" {
+            return true;
+        }
+    }
+    let body = body.strip_prefix(b"\xef\xbb\xbf").unwrap_or(body);
+    body.starts_with(b"<!")
+        || body
+            .get(..4)
+            .is_some_and(|prefix| prefix.eq_ignore_ascii_case(b"<htm"))
+}
+
+pub(crate) fn not_git_server_error(
+    url: impl Into<String>,
+    status: u16,
+    content_type: Option<String>,
+) -> Error {
+    Error::remote_unreadable(
+        url,
+        RemoteUnreadableReason::NotGitServer {
+            status,
+            content_type,
+        },
+    )
+}
+
+fn reject_non_git_discovery_http(http: &InfoRefsDiscoveryHttp, body: &[u8]) -> Result<()> {
+    if body_looks_like_non_git_server(body, http.content_type.as_deref()) {
+        return Err(not_git_server_error(
+            http.url.clone(),
+            http.status,
+            http.content_type.clone(),
+        ));
+    }
+    Ok(())
+}
+
+fn strip_service_advertisement_for_discovery<'a>(
+    body: &'a [u8],
+    http: Option<&InfoRefsDiscoveryHttp>,
+) -> Result<&'a [u8]> {
+    if let Some(ctx) = http {
+        reject_non_git_discovery_http(ctx, body)?;
+    } else if body_looks_like_non_git_server(body, None) {
+        return Err(not_git_server_error("the remote", 200, None));
+    }
+    match strip_service_advertisement(body) {
+        Ok(stripped) => Ok(stripped),
+        Err(Error::Io(e)) if e.kind() == std::io::ErrorKind::InvalidData => {
+            if let Some(ctx) = http {
+                Err(not_git_server_error(
+                    ctx.url.clone(),
+                    ctx.status,
+                    ctx.content_type.clone(),
+                ))
+            } else {
+                Err(not_git_server_error("the remote", 200, None))
+            }
+        }
+        Err(e) => Err(e),
+    }
+}
+
 /// Strip the optional `# service=...\n` pkt-line + flush preamble that a
 /// smart-HTTP `info/refs?service=...` response begins with, returning the
 /// remaining advertisement bytes.
@@ -460,7 +547,14 @@ fn info_refs_url(repo_url: &str) -> String {
 pub type UploadPackDiscovery = (u8, Vec<(String, ObjectId)>, Vec<String>, Option<String>);
 
 fn upload_pack_discovery_from_body(body: &[u8]) -> Result<UploadPackDiscovery> {
-    let stripped = strip_service_advertisement(body)?;
+    upload_pack_discovery_from_body_with_http(body, None)
+}
+
+fn upload_pack_discovery_from_body_with_http(
+    body: &[u8],
+    http: Option<&InfoRefsDiscoveryHttp>,
+) -> Result<UploadPackDiscovery> {
+    let stripped = strip_service_advertisement_for_discovery(body, http)?;
     let disc = parse_advertisement(stripped)?;
     let refs: Vec<(String, ObjectId)> = disc
         .refs
@@ -480,7 +574,7 @@ pub fn discover_upload_pack_from_body(body: &[u8]) -> Result<UploadPackDiscovery
 /// Like [`discover_upload_pack_from_body`], but retains annotated-tag `^{}` peel lines
 /// (for `git ls-remote`-style ref listing).
 pub fn discover_upload_pack_for_list_refs_from_body(body: &[u8]) -> Result<UploadPackDiscovery> {
-    let stripped = strip_service_advertisement(body)?;
+    let stripped = strip_service_advertisement_for_discovery(body, None)?;
     let disc = parse_advertisement(stripped)?;
     let refs: Vec<(String, ObjectId)> = disc
         .refs
@@ -691,10 +785,12 @@ impl<C: HttpClient + Clone + 'static> SmartHttpTransport<C> {
             self.client.reset_auth_after_redirect_rebase();
             let url = info_refs_url_for_service(&new_base, service);
             let body = self.client.get(&url, gp)?;
-            let disc = parse_advertisement(strip_service_advertisement(&body)?)?;
+            let stripped = strip_service_advertisement_for_discovery(&body, None)?;
+            let disc = parse_advertisement(stripped)?;
             return Ok((new_base, disc));
         }
-        let disc = parse_advertisement(strip_service_advertisement(&body)?)?;
+        let stripped = strip_service_advertisement_for_discovery(&body, None)?;
+        let disc = parse_advertisement(stripped)?;
         Ok((repo_url.to_owned(), disc))
     }
 }

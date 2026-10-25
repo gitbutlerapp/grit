@@ -151,7 +151,8 @@ fn guide_lib(err: &LibError) -> Option<Error> {
         LibError::RemoteUnreadable {
             reason:
                 RemoteUnreadableReason::RepositoryNotFound
-                | RemoteUnreadableReason::HttpStatus { status: 404 },
+                | RemoteUnreadableReason::HttpStatus { status: 404 }
+                | RemoteUnreadableReason::NotGitServer { .. },
             ..
         } => Some(guided(
             ErrorKind::RemoteUnreadable,

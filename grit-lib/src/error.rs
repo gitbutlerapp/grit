@@ -82,6 +82,14 @@ pub enum RemoteUnreadableReason {
         /// HTTP status code (`>= 400`).
         status: u16,
     },
+    /// An HTTP response looked successful but was not a Git smart-HTTP ref advertisement
+    /// (for example `200 text/html` from a parked or mistyped host).
+    NotGitServer {
+        /// HTTP status code (often `200`).
+        status: u16,
+        /// Response `Content-Type` when present (media type only, without parameters).
+        content_type: Option<String>,
+    },
     /// The transport ran, but the remote never completed the Git protocol handshake (for
     /// example `ssh` exited, or a `git://` peer closed, before any ref advertisement).
     NoHandshake,
@@ -89,13 +97,14 @@ pub enum RemoteUnreadableReason {
 
 impl RemoteUnreadableReason {
     /// Stable snake-case name for machine-readable output (`repository_not_found`,
-    /// `transport`, `http_status`, `no_handshake`).
+    /// `transport`, `http_status`, `not_git_server`, `no_handshake`).
     #[must_use]
     pub fn slug(&self) -> &'static str {
         match self {
             Self::RepositoryNotFound => "repository_not_found",
             Self::Transport { .. } => "transport",
             Self::HttpStatus { .. } => "http_status",
+            Self::NotGitServer { .. } => "not_git_server",
             Self::NoHandshake => "no_handshake",
         }
     }
@@ -114,6 +123,20 @@ fn remote_unreadable_message(url: Option<&str>, reason: &RemoteUnreadableReason)
             Some(u) => format!("HTTP {status} from {u}"),
             None => format!("HTTP {status} from the remote"),
         },
+        RemoteUnreadableReason::NotGitServer {
+            status,
+            content_type,
+        } => {
+            let got = match content_type
+                .as_deref()
+                .map(|ct| ct.split(';').next().unwrap_or(ct).trim())
+                .filter(|ct| !ct.is_empty())
+            {
+                Some(ct) => format!("{status} {ct}"),
+                None => status.to_string(),
+            };
+            format!("{target} did not answer like a Git server (got {got})")
+        }
         RemoteUnreadableReason::NoHandshake => {
             format!("could not read from {target}: no Git protocol response")
         }

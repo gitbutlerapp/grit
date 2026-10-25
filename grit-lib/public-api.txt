@@ -6087,6 +6087,9 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::error::RefLockError
 #[non_exhaustive] pub enum grit_lib::error::RemoteUnreadableReason
 pub grit_lib::error::RemoteUnreadableReason::HttpStatus
 pub grit_lib::error::RemoteUnreadableReason::HttpStatus::status: u16
+pub grit_lib::error::RemoteUnreadableReason::NotGitServer
+pub grit_lib::error::RemoteUnreadableReason::NotGitServer::content_type: core::option::Option<alloc::string::String>
+pub grit_lib::error::RemoteUnreadableReason::NotGitServer::status: u16
 pub grit_lib::error::RemoteUnreadableReason::NoHandshake
 pub grit_lib::error::RemoteUnreadableReason::RepositoryNotFound
 pub grit_lib::error::RemoteUnreadableReason::Transport
