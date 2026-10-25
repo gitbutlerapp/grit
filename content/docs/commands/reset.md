@@ -32,6 +32,8 @@ In a sparse checkout (`git sparse-checkout`), `--hard` and `--mixed` keep paths 
 
 `--dry-run` reports what would happen — including paths that `--hard` would discard or `--keep` would refuse on — without moving refs, the index, or the worktree.
 
+A successful reset (any mode except `--dry-run`) ends an in-progress merge, cherry-pick, or revert the same way Git's `reset` does: operation sentinel files such as `MERGE_HEAD` and `CHERRY_PICK_HEAD` are removed.
+
 When resetting backward, grit lists commits that would become unreachable (not reachable from `<rev>` or any other ref, including branches, tags, remotes, stash, and other worktrees). A warning is printed when any would be orphaned.
 
 `<rev>` is any revision Grit understands: branch name, `HEAD~1`, full or abbreviated commit id, and so on.

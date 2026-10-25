@@ -39,6 +39,7 @@ use crate::refs::{update_branch_for_commit_on_store, BranchCommitRefUpdate};
 use crate::repo::Repository;
 use crate::rev_list::{rev_list, OrderingMode, RevListOptions};
 use crate::rev_parse::{resolve_revision_as_commit, try_parse_double_dot_log_range};
+use crate::state::clear_replay_state;
 use crate::state::{
     read_cherry_pick_head, read_merge_msg, read_orig_head, read_revert_head,
     resolve_head_for_repository, HeadState,
@@ -1773,20 +1774,6 @@ fn read_created_records(repo: &Repository) -> Result<Vec<ReplayCreated>> {
         out.push(replay_created_record(repo, source, new_oid)?);
     }
     Ok(out)
-}
-
-fn clear_replay_state(git_dir: &Path) -> Result<()> {
-    for name in ["CHERRY_PICK_HEAD", "REVERT_HEAD", "MERGE_MSG"] {
-        let path = git_dir.join(name);
-        if path.exists() {
-            fs::remove_file(path).map_err(Error::Io)?;
-        }
-    }
-    let seq = git_dir.join("sequencer");
-    if seq.is_dir() {
-        fs::remove_dir_all(seq).map_err(Error::Io)?;
-    }
-    Ok(())
 }
 
 fn reset_index_worktree_to_head(repo: &Repository, head_oid: &ObjectId) -> Result<()> {

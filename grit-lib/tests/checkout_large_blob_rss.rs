@@ -141,6 +141,8 @@ fn materialize_without_loading(packed: bool) {
                 dry_run: false,
                 hooks: grit_lib::PostOperationHooks::Run,
             },
+            &mut grit_lib::progress::NullProgress,
+            &grit_lib::progress::NeverCancel,
         )
         .expect("switch");
     };

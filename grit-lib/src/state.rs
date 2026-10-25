@@ -1077,6 +1077,32 @@ pub fn clear_merge_state(git_dir: &Path) -> Result<()> {
     Ok(())
 }
 
+/// Remove cherry-pick, revert, and sequencer state without touching merge sentinels.
+///
+/// Git's `reset` clears merge state separately; replay abort uses this together with
+/// [`clear_merge_state`] after restoring `HEAD`.
+///
+/// # Parameters
+///
+/// - `git_dir` — path to the `.git` directory.
+///
+/// # Errors
+///
+/// Returns [`Error::Io`] if a sentinel file or the sequencer directory cannot be removed.
+pub fn clear_replay_state(git_dir: &Path) -> Result<()> {
+    for name in ["CHERRY_PICK_HEAD", "REVERT_HEAD", "MERGE_MSG"] {
+        let path = git_dir.join(name);
+        if path.exists() {
+            fs::remove_file(&path).map_err(Error::Io)?;
+        }
+    }
+    let seq = git_dir.join("sequencer");
+    if seq.is_dir() {
+        fs::remove_dir_all(&seq).map_err(Error::Io)?;
+    }
+    Ok(())
+}
+
 /// Sentinel filenames Git removes when a merge concludes with `git commit`.
 #[must_use]
 pub fn merge_completion_sentinels() -> &'static [&'static str] {
