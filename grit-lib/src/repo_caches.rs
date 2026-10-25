@@ -272,9 +272,10 @@ impl RepoCaches {
 
     /// Cached local `config` body when `config_path` matches the path loaded by [`Self::local_config_text`].
     pub(crate) fn cached_local_config_text_for_path(&self, config_path: &Path) -> Option<String> {
-        let key = canonical_config_path(config_path);
         let stored_path = self.local_config_source_path.lock().ok()?.clone()?;
-        if canonical_config_path(&stored_path) != key {
+        if stored_path != config_path
+            && canonical_config_path(&stored_path) != canonical_config_path(config_path)
+        {
             return None;
         }
         self.local_config_text.lock().ok()?.clone()
@@ -603,5 +604,44 @@ impl RepoCaches {
 impl Drop for RepoCaches {
     fn drop(&mut self) {
         self.filters.shutdown_all();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cached_local_config_text_matches_same_file_by_any_path() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let real = dir.path().join("real");
+        std::fs::create_dir(&real).expect("mkdir");
+        let config = real.join("config");
+        std::fs::write(&config, "[core]\n\tbare = false\n").expect("write config");
+        let caches = RepoCaches::new(crate::command_runner::RecordingRunner::always_success());
+
+        assert_eq!(caches.cached_local_config_text_for_path(&config), None);
+        let text = caches.local_config_text(&config).expect("read config");
+        let canonical = config.canonicalize().expect("canonicalize");
+        assert_eq!(
+            caches.cached_local_config_text_for_path(&canonical),
+            Some(text.clone())
+        );
+        assert_eq!(
+            caches.cached_local_config_text_for_path(&real.join(".").join("config")),
+            Some(text.clone())
+        );
+        #[cfg(unix)]
+        {
+            let link = dir.path().join("link");
+            std::os::unix::fs::symlink(&real, &link).expect("symlink");
+            assert_eq!(
+                caches.cached_local_config_text_for_path(&link.join("config")),
+                Some(text)
+            );
+        }
+        let other = dir.path().join("other-config");
+        std::fs::write(&other, "").expect("write other");
+        assert_eq!(caches.cached_local_config_text_for_path(&other), None);
     }
 }
