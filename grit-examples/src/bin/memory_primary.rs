@@ -27,6 +27,6 @@ fn main() -> grit_lib::error::Result<()> {
     let blob = repo.odb().write(ObjectKind::Blob, b"hello")?;
     println!("blob={blob}");
     println!("in_memory={}", store.contains(&blob)?);
-    println!("on_disk={}", repo.odb().object_path(&blob).exists());
+    println!("on_disk={}", repo.odb().count_loose_objects()? > 0);
     Ok(())
 }
