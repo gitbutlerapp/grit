@@ -1394,3 +1394,38 @@ fn stash_pop_refuses_racily_rewritten_same_size_file() {
     );
     assert_eq!(list_stashes(&repo).expect("list").len(), 1);
 }
+
+/// Like `git stash`, stash commits are never signed, even with `commit.gpgsign=true`.
+#[test]
+fn stash_commits_are_unsigned_even_with_commit_gpgsign() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    init_repo(dir.path());
+    std::fs::write(dir.path().join("a.txt"), "v0\n").expect("write");
+    git_cmd(dir.path(), &["add", "a.txt"]);
+    git_cmd(dir.path(), &["commit", "-qm", "init"]);
+    git_cmd(dir.path(), &["config", "commit.gpgsign", "true"]);
+    git_cmd(dir.path(), &["config", "gpg.format", "openpgp"]);
+    git_cmd(dir.path(), &["config", "gpg.program", "false"]);
+
+    std::fs::write(dir.path().join("a.txt"), "git\n").expect("modify");
+    git_cmd(dir.path(), &["stash", "push", "-q"]);
+
+    std::fs::write(dir.path().join("a.txt"), "grit\n").expect("modify");
+    std::fs::write(dir.path().join("u.txt"), "untracked\n").expect("untracked");
+    let repo = open_grit(dir.path());
+    push_stash(&repo, &stash_options(true, None))
+        .expect("push must not try to sign")
+        .expect("changes");
+
+    for stash in ["stash@{0}", "stash@{1}"] {
+        let parents = git_cmd(dir.path(), &["rev-list", "--parents", "-n", "1", stash]);
+        for oid in parents.split_whitespace() {
+            let raw = git_cmd(dir.path(), &["cat-file", "commit", oid]);
+            assert!(
+                !raw.contains("gpgsig"),
+                "{stash} commit {oid} must be unsigned:\n{raw}"
+            );
+        }
+    }
+    assert_fsck_strict(dir.path());
+}

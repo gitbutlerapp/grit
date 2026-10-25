@@ -806,7 +806,7 @@ fn write_untracked_stash_commit(
         raw_message: None,
         extra_headers: Vec::new(),
     };
-    write_commit_object(repo, &data, None)
+    write_commit_object(repo, &data, STASH_COMMIT_SIGNING)
 }
 
 fn remove_stashed_untracked(repo: &Repository, work_tree: &Path, paths: &[String]) -> Result<()> {
@@ -829,6 +829,10 @@ fn remove_stashed_untracked(repo: &Repository, work_tree: &Path, paths: &[String
     }
     Ok(())
 }
+
+/// Stash commits are local bookkeeping and are never signed, whatever `commit.gpgsign` says
+/// (Git creates them unsigned too).
+const STASH_COMMIT_SIGNING: Option<bool> = Some(false);
 
 struct BuiltStash {
     w_commit: ObjectId,
@@ -1328,7 +1332,7 @@ fn build_stash_commit(
         raw_message: None,
         extra_headers: Vec::new(),
     };
-    let i_commit = write_commit_object(repo, &i_commit_data, None)?;
+    let i_commit = write_commit_object(repo, &i_commit_data, STASH_COMMIT_SIGNING)?;
 
     let untracked_paths = if options.include_untracked {
         let all = collect_untracked_paths(repo, work_tree)?;
@@ -1405,7 +1409,7 @@ fn build_stash_commit(
         raw_message: None,
         extra_headers: Vec::new(),
     };
-    let w_commit = write_commit_object(repo, &w_commit_data, None)?;
+    let w_commit = write_commit_object(repo, &w_commit_data, STASH_COMMIT_SIGNING)?;
 
     Ok(Some(BuiltStash {
         w_commit,
@@ -1428,6 +1432,9 @@ fn build_stash_commit(
 ///
 /// Returns `None` when the index and worktree match `HEAD` and there are no
 /// untracked paths to save (unless `include_untracked` finds untracked files).
+///
+/// The stash commits are never signed, even when `commit.gpgsign` is set (Git
+/// creates them unsigned too).
 ///
 /// # Errors
 ///
@@ -1474,7 +1481,8 @@ pub struct StashPushResult {
 /// Create a stash entry, store it, and reset the worktree and index to `HEAD`.
 ///
 /// Returns `None` when there is nothing to stash. Untracked paths included in
-/// the stash are removed from the worktree after the reset.
+/// the stash are removed from the worktree after the reset. Like
+/// [`create_stash`], the stash commits are written unsigned.
 ///
 /// # Errors
 ///

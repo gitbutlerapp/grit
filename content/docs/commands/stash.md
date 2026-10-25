@@ -23,6 +23,8 @@ grit stash clear [--force] [--dry-run]
 
 Shelve uncommitted changes and restore them later. With no subcommand, `grit stash` saves local changes (same as `grit stash push`), resets the working tree and index to `HEAD`, and records a stash entry compatible with Git's `refs/stash` format.
 
+Like Git, stash never signs the commits it records, even when `commit.gpgsign` is true, so a configured signing program is not run on push.
+
 Pass `--` followed by pathspecs (or `--pathspec-from-file`) on push to stash only matching paths; other staged and unstaged changes stay in place. The stash commit still records the full index on its index parent; the working-tree parent and optional untracked parent are limited to those paths, matching `git stash push -- <pathspec>`.
 
 Stash indices follow Git: `0` is the newest entry. You can pass an integer or `stash@{n}`.
