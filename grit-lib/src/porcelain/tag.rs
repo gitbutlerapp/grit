@@ -37,7 +37,7 @@ use crate::refs::listing::{
 };
 use crate::refs::PackedRefPeels;
 use crate::repo::Repository;
-use crate::signing::{should_sign_tag, sign_serialized_tag, GpgConfig};
+use crate::signing::{parse_signed_buffer, should_sign_tag, sign_serialized_tag, GpgConfig};
 use crate::tree_sha256::{
     parse_tree_sha256_tag_headers, verify_tag_data, TagTreeSha256Outcome, TagVerification,
     TagVerifyOptions, TreeSha256Claim, TreeSha256Options,
@@ -510,8 +510,12 @@ fn tag_annotation_from_data(tag: &TagData) -> Option<TagAnnotation> {
         crate::ident::SignatureTimestamp::Valid(ts) => ts,
         crate::ident::SignatureTimestamp::Sentinel => epoch_from_identity(tagger_line),
     };
+    let subject_message = match parse_signed_buffer(tag.message.as_bytes()) {
+        Some((payload, _signature)) => String::from_utf8_lossy(&payload).into_owned(),
+        None => tag.message.clone(),
+    };
     Some(TagAnnotation {
-        subject: message_subject(&tag.message),
+        subject: message_subject(&subject_message),
         message: tag.message.clone(),
         tagger,
         tagger_ident: tagger_line.to_owned(),

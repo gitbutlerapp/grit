@@ -52,6 +52,49 @@ fn name_query() -> RefQuery {
     }
 }
 
+/// Signed tags append armor directly after the message; Git's `%(contents:subject)`
+/// ignores the signature even when there is no blank line before the armor.
+#[test]
+fn signed_tag_subject_ignores_appended_signature_without_blank_line() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path().join("repo");
+    std::fs::create_dir_all(&root).unwrap();
+    git(&root, &["init", "-q", "-b", "main"]);
+    git(&root, &["commit", "--allow-empty", "-q", "-m", "seed"]);
+    let commit = git(&root, &["rev-parse", "HEAD"]).trim().to_string();
+    let body = format!(
+        "object {commit}\ntype commit\ntag 0.1.0\ntagger T <t@example.com> 946684800 +0000\n\n\
+         Version 0.1.0\n-----BEGIN PGP SIGNATURE-----\nVersion: GnuPG v1\n-----END PGP SIGNATURE-----\n"
+    );
+    let mut child = Command::new("git")
+        .args(["hash-object", "-w", "-t", "tag", "--stdin"])
+        .current_dir(&root)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("git hash-object");
+    std::io::Write::write_all(child.stdin.as_mut().expect("stdin"), body.as_bytes()).unwrap();
+    let out = child.wait_with_output().expect("wait");
+    assert!(
+        out.status.success(),
+        "hash-object: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let tag_oid = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    git(&root, &["update-ref", "refs/tags/0.1.0", &tag_oid]);
+
+    let repo = open(&root);
+    let tags = list_tags(&repo, &name_query()).unwrap();
+    let tag = tags.iter().find(|t| t.name == "0.1.0").expect("0.1.0");
+    let ann = tag.annotation.as_ref().expect("annotated");
+    assert_eq!(
+        ann.subject,
+        git_tag_field(&root, "0.1.0", "contents:subject"),
+    );
+    assert_eq!(ann.subject, "Version 0.1.0");
+    assert!(ann.message.contains("-----BEGIN PGP SIGNATURE-----"));
+}
+
 #[test]
 fn annotation_fields_match_git_for_each_ref() {
     let tmp = tempfile::tempdir().expect("tempdir");
