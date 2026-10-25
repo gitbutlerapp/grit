@@ -335,6 +335,25 @@ Same Linux VM sitting, release builds, system `git 2.43.0`, clean trees with `GI
 ./target/release/grit-bench --format json --output grit-utils/baselines/status-clean-tree-after.json status --sizes 1000,10000,50000
 ```
 
+## Status right after a checkout (2026-10-25)
+
+A clone, switch or `reset --hard` writes every file and then the index within the same second, so every entry is racily clean. Under Git's default whole-second rule, the next status has to re-hash all of them once, and then rewrite the index. Git does this too. Dogfooding on Windows (issue #1914) measured that first `grit status` at 3–13 s on rust-lang/cargo, against 0.2 s for Git. Grit read the files one at a time, inside the serial pass over the stat scan, with a second `lstat` for each file, and on Windows every file open is expensive. Now `grit-lib` collects the racy entries from the scan, hashes them on the `IndexRefresh` worker pool, and applies the results from the scan's own stat data. The one-second rule is unchanged. A same-second edit with the same size is still caught by its content.
+
+Same Linux VM sitting (4 vCPUs, ext4), release builds, system `git 2.43.0`. Each run starts from the index exactly as the clone left it. Times are hyperfine means in ms; "cold" drops the page cache before each run. Peak RSS comes from `/usr/bin/time`:
+
+| Repository (tracked files, all racy) | Git | Grit before → after | Cold: Git, Grit before → after | Peak RSS Git, Grit before → after |
+| --- | ---: | ---: | ---: | ---: |
+| rust-lang/cargo (3,078) | 64.7 | 47.6 → **30.0** | 194.7, 178.3 → **106.6** | 8.4, 18.7 → 20.1 MiB |
+| git/git (4,857) | 156.8 | 132.6 → **68.5** | 353.3, 325.4 → **164.2** | 7.7, 20.5 → 23.3 MiB |
+
+After the first run, status on a clean tree is unchanged: 16.8 ms on cargo and 5.2 ms on git/git. On cargo, `grit switch --detach <old>` followed by `grit status` drops from 56 to 28 ms. The extra 1.5–3 MiB of peak memory belongs to the worker threads: with `index.threads=1`, peak RSS matches the old serial path. On Windows the parallel opens are where most of the gain comes from.
+
+`grit-bench status` now includes a `status-after-checkout-{N}` row. Its hyperfine prepare step restores the racily clean index before each run. The committed results are `status-after-checkout-before.json` → `status-after-checkout-after.json`: `status-after-checkout-10000` goes from 50.2 to **27.9** ms (Git 31.6), and `status-after-checkout-1000` from 7.5 to **6.0** ms (Git 5.0). The dirty and clean rows are unchanged within noise.
+
+```bash
+./target/release/grit-bench --format json --output grit-utils/baselines/status-after-checkout-after.json status --sizes 1000,10000
+```
+
 ## Adding many untracked directories (2026-10-25)
 
 `grit add .` on a tree of thousands of untracked directories was quadratic in the directory count (issue #1854): 4,000 one-file directories took 90 s and 1 GB where `git add -A` takes 34 ms. Any pathspec, `.` included, made the untracked walk collapse each wholly untracked directory to `dir/` and then re-walk the whole work tree once per collapsed directory to list its files. Two changes in `grit-lib`:
