@@ -44,6 +44,9 @@ pub struct ReceivePolicy {
     /// In a repository with a working tree, refuse to update or delete the
     /// branch `HEAD` points at (`receive.denyCurrentBranch`).
     pub deny_current_branch: bool,
+    /// Refuse to delete the branch `HEAD` points at, in a bare repository as
+    /// well as one with a working tree (`receive.denyDeleteCurrent`).
+    pub deny_delete_current: bool,
 }
 
 impl Default for ReceivePolicy {
@@ -52,6 +55,7 @@ impl Default for ReceivePolicy {
             deny_non_fast_forwards: false,
             deny_deletes: false,
             deny_current_branch: true,
+            deny_delete_current: true,
         }
     }
 }
@@ -62,6 +66,8 @@ impl ReceivePolicy {
     /// `receive.denyCurrentBranch` accepts Git's values: `refuse`, `true` or
     /// unset refuse the update; `ignore`, `warn`, `false` and `updateInstead`
     /// allow it (this server does not update the working tree).
+    /// `receive.denyDeleteCurrent` is the same, except that `updateInstead`
+    /// refuses: there is no working tree to update for a deleted branch.
     ///
     /// # Parameters
     ///
@@ -73,17 +79,19 @@ impl ReceivePolicy {
     #[must_use]
     pub fn from_config(config: &ConfigSet) -> Self {
         let flag = |key: &str| config.get_bool(key).and_then(|r| r.ok()).unwrap_or(false);
-        let deny_current_branch = match config.get("receive.denyCurrentBranch") {
-            None => true,
-            Some(v) => !matches!(
-                v.to_ascii_lowercase().as_str(),
-                "ignore" | "warn" | "false" | "no" | "off" | "0" | "updateinstead"
-            ),
+        // Whether a `receive.deny*` key is set to a value that lets the update through.
+        let allows = |key: &str, update_instead_allows: bool| {
+            config.get(key).is_some_and(|v| {
+                let v = v.to_ascii_lowercase();
+                matches!(v.as_str(), "ignore" | "warn" | "false" | "no" | "off" | "0")
+                    || (update_instead_allows && v == "updateinstead")
+            })
         };
         Self {
             deny_non_fast_forwards: flag("receive.denyNonFastForwards"),
             deny_deletes: flag("receive.denyDeletes"),
-            deny_current_branch,
+            deny_current_branch: !allows("receive.denyCurrentBranch", true),
+            deny_delete_current: !allows("receive.denyDeleteCurrent", false),
         }
     }
 }
@@ -139,8 +147,8 @@ pub enum RefUpdateRefusal {
     /// Deletions are refused (`receive.denyDeletes`).
     #[error("deletion prohibited")]
     DeletionProhibited,
-    /// The update would delete the checked-out branch
-    /// (`receive.denyCurrentBranch`).
+    /// The update would delete the branch `HEAD` points at
+    /// (`receive.denyDeleteCurrent`).
     #[error("deletion of the current branch prohibited")]
     CurrentBranchDeletion,
     /// The update would move the checked-out branch
@@ -179,6 +187,14 @@ pub enum RefUpdateRefusal {
     /// A [`ReceiveHook`] refused the update with this reason.
     #[error("{0}")]
     Policy(String),
+    /// The ref is a served repository's target branch, which changes only
+    /// through the server's own operations (snapshot checkouts' integrate and
+    /// slices), never by a push.
+    #[error("{target} is the target branch; it changes only through integrate")]
+    TargetBranch {
+        /// The target branch's name, without `refs/heads/`.
+        target: String,
+    },
     /// Writing the ref failed after every check passed.
     #[error("failed to update ref: {0}")]
     RefStore(String),
@@ -285,6 +301,26 @@ pub trait ReceiveHook {
         let _ = (command, odb);
         Ok(())
     }
+
+    /// What to tell the pushing client once every update has been decided,
+    /// as a hook script's output would: Git clients show each line as
+    /// `remote: <line>`.
+    ///
+    /// The text goes out on the progress side band just before the status
+    /// report, so only to clients that asked for a side band. The default
+    /// sends nothing.
+    ///
+    /// # Parameters
+    ///
+    /// - `updates`: every requested update with its result, in request order.
+    ///
+    /// # Returns
+    ///
+    /// The text, or `None` for nothing.
+    fn message(&self, updates: &[RefUpdateResult]) -> Option<String> {
+        let _ = updates;
+        None
+    }
 }
 
 impl ReceiveHook for () {}
@@ -355,7 +391,9 @@ pub fn receive_pack(
 /// (`pre-receive`, `update`, `post-receive`, `post-update`) with push options and
 /// quarantined object ingestion matching Git receive-pack. `hook` runs just
 /// before the matching script: [`ReceiveHook::pre_receive`] before
-/// `pre-receive` and [`ReceiveHook::update`] before each `update`.
+/// `pre-receive` and [`ReceiveHook::update`] before each `update`; its
+/// [`ReceiveHook::message`] reaches a client that asked for a side band just
+/// before the status report.
 ///
 /// The pack is read only up to its trailing checksum, never to end of input:
 /// a push client keeps its side open until it has read the status report.
@@ -448,6 +486,11 @@ pub fn receive_pack_with_hook(
         )?
     };
 
+    if sideband {
+        if let Some(text) = hook.message(&updates) {
+            write_progress_text(output, &text)?;
+        }
+    }
     if request.caps.contains("report-status") || request.caps.contains("report-status-v2") {
         let report = build_report(unpack_error.as_ref(), &updates)?;
         if sideband {
@@ -465,6 +508,19 @@ pub fn receive_pack_with_hook(
         hooks: hook_records,
         push_options: request.push_options.clone(),
     })
+}
+
+/// Send `text` on the progress side band (channel 2), one line per packet,
+/// as Git relays a hook script's output.
+fn write_progress_text(output: &mut dyn Write, text: &str) -> Result<()> {
+    for line in text.lines() {
+        let line = format!("{line}\n");
+        for chunk in line.as_bytes().chunks(65515) {
+            crate::pkt_line::write_sideband_packet(&mut *output, 2, chunk)
+                .map_err(ServeError::Io)?;
+        }
+    }
+    Ok(())
 }
 
 /// Write the refs the client may update, with capabilities on the first line.
@@ -598,7 +654,12 @@ fn apply_commands_with_hooks(
     hook_records: &mut Vec<HookRunRecord>,
 ) -> Result<Vec<RefUpdateResult>> {
     let lookup_odb = quarantine.as_ref().map(|q| q.odb());
-    let current_branch = ref_update_policy::checked_out_branch(repo);
+    let head_branch = ref_update_policy::head_branch(repo);
+    let checked_out = ref_update_policy::checked_out_branch(repo);
+    let branches = ref_update_policy::HeadBranches {
+        head: head_branch.as_deref(),
+        checked_out: checked_out.as_deref(),
+    };
     let mut results: Vec<RefUpdateResult> = request
         .commands
         .iter()
@@ -610,7 +671,7 @@ fn apply_commands_with_hooks(
                     c,
                     policy,
                     &opts.hidden_refs,
-                    current_branch.as_deref(),
+                    branches,
                 )? {
                     Some(reason) => c.refused(reason),
                     None => c.accepted(),
@@ -1075,6 +1136,12 @@ mod tests {
             (RefUpdateRefusal::UpdateHookDeclined, "hook declined"),
             (RefUpdateRefusal::Policy("frozen".into()), "frozen"),
             (
+                RefUpdateRefusal::TargetBranch {
+                    target: "main".into(),
+                },
+                "main is the target branch; it changes only through integrate",
+            ),
+            (
                 RefUpdateRefusal::RefStore("locked".into()),
                 "failed to update ref: locked",
             ),
@@ -1195,5 +1262,24 @@ mod tests {
         assert!(!policy_for(Some("ignore")));
         assert!(!policy_for(Some("updateInstead")));
         assert!(policy_for(Some("refuse")));
+    }
+
+    #[test]
+    fn deny_delete_current_values() {
+        let policy_for = |value: Option<&str>| {
+            let mut config = ConfigSet::new();
+            if let Some(v) = value {
+                let _ = config.add_command_override("receive.denyDeleteCurrent", v);
+            }
+            ReceivePolicy::from_config(&config).deny_delete_current
+        };
+        assert!(policy_for(None));
+        assert!(!policy_for(Some("ignore")));
+        assert!(!policy_for(Some("warn")));
+        assert!(!policy_for(Some("false")));
+        // There is no working tree to update for a deleted branch.
+        assert!(policy_for(Some("updateInstead")));
+        assert!(policy_for(Some("refuse")));
+        assert!(ReceivePolicy::default().deny_delete_current);
     }
 }

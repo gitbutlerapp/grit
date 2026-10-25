@@ -81,6 +81,44 @@ impl Signature {
         Ok(signature)
     }
 
+    /// Build a signature from a name and email that may hold characters an
+    /// identity line can't, cleaning them as Git cleans `GIT_AUTHOR_NAME` and
+    /// friends: `<`, `>` and control characters other than tab are dropped,
+    /// and punctuation and whitespace are trimmed from both ends. Use it for
+    /// identities from untrusted input, such as a request to a server, so
+    /// nothing in them can end the line early or add a header.
+    ///
+    /// # Parameters
+    ///
+    /// - `name`: display name; empty after cleaning is allowed.
+    /// - `email`: address written inside `<…>`; empty after cleaning is allowed.
+    /// - `time`: timestamp; its UTC offset becomes the `±HHMM` field.
+    ///
+    /// # Returns
+    ///
+    /// A signature whose [`Self::header_line`] `git fsck` accepts.
+    ///
+    /// # Errors
+    ///
+    /// [`SignatureError::BeforeEpoch`] and [`SignatureError::SubMinuteOffset`]
+    /// for a `time` [`Self::validate`] refuses; the name and email always pass.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// use grit_lib::ident::Signature;
+    /// use time::OffsetDateTime;
+    /// # fn main() -> Result<(), Box<dyn std::error::Error>> {
+    /// let time = OffsetDateTime::from_unix_timestamp(1_700_000_000)?;
+    /// let sig = Signature::cleaned("Eve\nencoding bogus", " <e>v<e@x> ", time)?;
+    /// assert_eq!(sig.header_line(), "Eveencoding bogus <eve@x> 1700000000 +0000");
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn cleaned(name: &str, email: &str, time: OffsetDateTime) -> Result<Self, SignatureError> {
+        Self::new(clean_ident_part(name), clean_ident_part(email), time)
+    }
+
     /// Check that [`Self::header_line`] yields an identity line `git fsck` accepts.
     ///
     /// # Errors
@@ -178,6 +216,22 @@ pub enum SignatureError {
     /// The text is not a `Name <email> <unix-seconds> <±HHMM>` identity line.
     #[error("not an identity line of the form 'Name <email> <unix-seconds> <+HHMM>'")]
     Malformed,
+}
+
+/// `part` without the characters an identity line can't hold (`<`, `>` and
+/// control characters other than tab), and without the punctuation and
+/// whitespace Git trims from the ends of a name or email.
+fn clean_ident_part(part: &str) -> String {
+    let is_crud = |c: char| {
+        c.is_whitespace()
+            || c.is_ascii_control()
+            || matches!(c, '.' | ',' | ':' | ';' | '<' | '>' | '"' | '\\' | '\'')
+    };
+    part.chars()
+        .filter(|&c| c != '<' && c != '>' && !(c.is_ascii_control() && c != '\t'))
+        .collect::<String>()
+        .trim_matches(is_crud)
+        .to_owned()
 }
 
 impl std::str::FromStr for Signature {
@@ -610,6 +664,42 @@ pub(crate) fn prepare_commit_author_from_parent(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cleaned_signatures_are_one_valid_line() {
+        let time = OffsetDateTime::from_unix_timestamp(1_700_000_000)
+            .unwrap_or(OffsetDateTime::UNIX_EPOCH);
+        for (name, email, line) in [
+            (
+                "Ada Lovelace",
+                "ada@example.com",
+                "Ada Lovelace <ada@example.com>",
+            ),
+            (
+                "Eve\nencoding bogus",
+                "e>v<e@x",
+                "Eveencoding bogus <eve@x>",
+            ),
+            ("  \"Bob\", ", "<bob@example.com>.", "Bob <bob@example.com>"),
+            ("Tab\there\r\n", "\u{7f}x@y", "Tab\there <x@y>"),
+            ("<>", "", " <>"),
+        ] {
+            let sig = Signature::cleaned(name, email, time);
+            let sig = sig.unwrap_or_else(|e| panic!("{name:?}: {e}"));
+            assert_eq!(
+                sig.header_line(),
+                format!("{line} 1700000000 +0000"),
+                "{name:?}"
+            );
+            assert!(sig.validate().is_ok());
+            assert!(!sig.header_line().contains('\n'));
+        }
+        let before = OffsetDateTime::from_unix_timestamp(-1).unwrap_or(OffsetDateTime::UNIX_EPOCH);
+        assert_eq!(
+            Signature::cleaned("A", "a@x", before),
+            Err(SignatureError::BeforeEpoch)
+        );
+    }
 
     #[test]
     fn non_numeric_author_date_is_non_numeric_tail() {

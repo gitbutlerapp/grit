@@ -8,14 +8,31 @@ use crate::repo::Repository;
 use super::receive_pack::{ReceivePolicy, RefCommand, RefUpdateRefusal};
 use super::{head_info, Result};
 
+/// Full ref name of the branch `HEAD` points at, bare repository or not.
+#[must_use]
+pub fn head_branch(repo: &Repository) -> Option<String> {
+    head_info(repo).target
+}
+
 /// Full ref name of the branch checked out in a non-bare repository, if any.
 #[must_use]
 pub fn checked_out_branch(repo: &Repository) -> Option<String> {
     if repo.is_bare() {
         None
     } else {
-        head_info(repo).target
+        head_branch(repo)
     }
+}
+
+/// The branch `HEAD` points at, as the current-branch checks see it.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct HeadBranches<'a> {
+    /// The full ref `HEAD` points at, bare repository or not
+    /// (`receive.denyDeleteCurrent`); see [`head_branch`].
+    pub head: Option<&'a str>,
+    /// The same, only in a repository with a working tree, where it is
+    /// checked out (`receive.denyCurrentBranch`); see [`checked_out_branch`].
+    pub checked_out: Option<&'a str>,
 }
 
 /// Decide whether one ref update may be applied under `receive.*` policy.
@@ -35,7 +52,7 @@ pub fn validate_ref_update(
     cmd: &RefCommand,
     policy: &ReceivePolicy,
     hidden_refs: &[String],
-    current_branch: Option<&str>,
+    branches: HeadBranches<'_>,
 ) -> Result<Option<RefUpdateRefusal>> {
     if !cmd.refname.starts_with("refs/") || !crate::refs::is_valid_storable_ref_name(&cmd.refname) {
         return Ok(Some(RefUpdateRefusal::InvalidRefName));
@@ -47,13 +64,18 @@ pub fn validate_ref_update(
     if current != cmd.old {
         return Ok(Some(RefUpdateRefusal::StaleInfo));
     }
-    let is_current_branch = current_branch == Some(cmd.refname.as_str());
+    let is_current_branch = branches.checked_out == Some(cmd.refname.as_str());
 
     let Some(new) = cmd.new else {
+        // As in Git, the checked-out branch's own check comes first, then the
+        // deletion checks.
+        if is_current_branch && policy.deny_current_branch {
+            return Ok(Some(RefUpdateRefusal::CurrentBranch));
+        }
         if policy.deny_deletes {
             return Ok(Some(RefUpdateRefusal::DeletionProhibited));
         }
-        if is_current_branch && policy.deny_current_branch {
+        if branches.head == Some(cmd.refname.as_str()) && policy.deny_delete_current {
             return Ok(Some(RefUpdateRefusal::CurrentBranchDeletion));
         }
         return Ok(None);
@@ -158,19 +180,34 @@ mod tests {
             deny_non_fast_forwards: true,
             deny_deletes: false,
             deny_current_branch: false,
+            deny_delete_current: false,
         };
         let cmd = RefCommand {
             refname: "refs/heads/main".to_owned(),
             old: Some(c2),
             new: Some(c3),
         };
-        let refusal = validate_ref_update(&remote_repo, Some(&lookup), &cmd, &policy, &[], None)
-            .expect("validate");
+        let refusal = validate_ref_update(
+            &remote_repo,
+            Some(&lookup),
+            &cmd,
+            &policy,
+            &[],
+            super::HeadBranches::default(),
+        )
+        .expect("validate");
         assert_eq!(refusal, None);
 
         let local_only = Odb::new(&local_git.join("objects"));
-        let bad = validate_ref_update(&remote_repo, Some(&local_only), &cmd, &policy, &[], None)
-            .expect("validate local only");
+        let bad = validate_ref_update(
+            &remote_repo,
+            Some(&local_only),
+            &cmd,
+            &policy,
+            &[],
+            super::HeadBranches::default(),
+        )
+        .expect("validate local only");
         assert_eq!(bad, Some(RefUpdateRefusal::BadRef));
     }
 }

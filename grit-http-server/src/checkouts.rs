@@ -23,7 +23,12 @@
 //! snapshots the branch the checkout was made from.
 //!
 //! Requests on one checkout take turns, and so do check-ins setting the
-//! repository's branches, on locks the server keeps per repository.
+//! repository's branches and the requests that move its target branch
+//! (integrations and slice changes), on locks the server keeps per
+//! repository. When the served repository has the target checked out in a
+//! worktree, the worktree moves with it, keeping local changes. Plain pushes
+//! never change the target: receive-pack refuses them
+//! ([`grit_protocol::PushGuard`]).
 
 use std::path::Path;
 use std::sync::Arc;
@@ -34,20 +39,21 @@ use axum::http::{HeaderMap, Response, StatusCode};
 use axum::response::IntoResponse;
 use axum::Json;
 use grit_lib::bundle::BundleSpec;
+use grit_lib::ident::Signature;
 use grit_lib::objects::ObjectId;
 use grit_lib::remote::snapshot_checkout::{
-    commit_slices, graft_checkin_branch, integrate, make_snapshot, missing_paths, normalize_paths,
-    read_slices, set_checked_in_branch, target_branch, target_ref, valid_checkout_id,
-    valid_slice_name, CheckinBranch, CheckinRefusal, CheckinRequest, CheckinResponse,
-    CheckinResult, CheckinStatus, CheckoutError, CheckoutErrorBody, CheckoutInfo, CheckoutRecord,
-    CheckoutRequest, CheckoutServerInfo, CheckoutState, CheckoutStore, Ident, IntegrateRequest,
-    IntegrateResponse, IntegrateStatus, Integrated, Signature, Slice, SliceChange,
-    SliceDeleteRequest, SliceRequest, SlicesResponse, SnapshotRoot, StoredCheckout,
+    edit_slices, graft_checkin_branch, integrate, make_snapshot, normalize_paths, read_slices,
+    set_checked_in_branch, target_branch, target_ref, valid_checkout_id, CheckinBranch,
+    CheckinRefusal, CheckinRequest, CheckinResponse, CheckinResult, CheckinStatus, CheckoutError,
+    CheckoutErrorBody, CheckoutInfo, CheckoutRecord, CheckoutRequest, CheckoutServerInfo,
+    CheckoutState, CheckoutStore, Ident, IntegrateRequest, IntegrateResponse, Slice, SliceChange,
+    SliceDeleteRequest, SliceEdit, SliceRequest, SlicesEdited, SlicesResponse, SnapshotRoot,
+    StoredCheckout, TargetChange, TargetRefusal,
 };
 use grit_lib::repo::Repository;
 use grit_protocol::RepositoryOptions;
 
-use crate::checkout_locks::{CheckoutSlot, RepoLocks};
+use crate::checkout_locks::{CheckoutSlot, RepoLocks, TargetSlot};
 use crate::server::{ServedRepository, ServerState};
 use crate::store::Access;
 
@@ -148,6 +154,27 @@ async fn with_checkout<T: Send + 'static>(
     let locks = state.checkout_locks.repo(&found.repo.path);
     let mut slot = locks.checkout(&id).await;
     tokio::task::spawn_blocking(move || f(found.repo, found.email, options, &locks, &mut slot))
+        .await
+        .map_err(|e| error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+}
+
+/// Run `f` for a request on `name` that moves its target branch and needs
+/// `needed` access, holding the target until it is done, with the signed-in
+/// user's email.
+async fn with_target<T: Send + 'static>(
+    state: &Arc<ServerState>,
+    headers: &HeaderMap,
+    name: &str,
+    needed: Access,
+    f: impl FnOnce(ServedRepository, String, RepositoryOptions, &mut TargetSlot) -> Result<T, Rejection>
+        + Send
+        + 'static,
+) -> Result<T, Rejection> {
+    let found = state.authorize(headers, name, needed)?;
+    let options = state.options.clone();
+    let locks = state.checkout_locks.repo(&found.repo.path);
+    let mut slot = locks.target().await;
+    tokio::task::spawn_blocking(move || f(found.repo, found.email, options, &mut slot))
         .await
         .map_err(|e| error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
 }
@@ -411,17 +438,107 @@ fn internal(e: &dyn std::fmt::Display) -> Rejection {
     error(StatusCode::INTERNAL_SERVER_ERROR, e.to_string())
 }
 
-/// The commit signature for a server-made commit: the request's author, or
-/// the signed-in user.
-fn signature(author: Option<&Ident>, email: &str) -> Signature {
-    let ident = match author {
-        Some(a) => format!("{} <{}>", a.name, a.email),
-        None => format!("{email} <{email}>"),
+/// The signature of a server-made commit, made now: the request's author,
+/// or the signed-in user. Anything in the request that would break the
+/// commit's header (`<`, `>`, newlines) is cleaned out.
+fn signature(author: Option<&Ident>, email: &str) -> Result<Signature, Rejection> {
+    let user = Ident {
+        name: email.to_owned(),
+        email: email.to_owned(),
     };
-    Signature {
-        ident,
-        when: time::OffsetDateTime::now_utc().unix_timestamp(),
+    author
+        .unwrap_or(&user)
+        .signature(time::OffsetDateTime::now_utc())
+        .map_err(|e| internal(&e))
+}
+
+/// The answer to a change of the target branch the library refused, in words.
+fn target_refused(refusal: &TargetRefusal) -> Rejection {
+    let list = |paths: &[String]| paths.join(", ");
+    let (status, message) = match refusal {
+        TargetRefusal::InvalidName { name } => (
+            StatusCode::BAD_REQUEST,
+            format!("{name} is not a valid branch name"),
+        ),
+        TargetRefusal::IsTarget { target } => (
+            StatusCode::BAD_REQUEST,
+            format!("{target} is the server's target branch; name the branch to merge into it"),
+        ),
+        TargetRefusal::NoSuchBranch { name } => (
+            StatusCode::NOT_FOUND,
+            format!("the server has no branch {name}; check it in first"),
+        ),
+        TargetRefusal::Unborn { target } => (
+            StatusCode::CONFLICT,
+            format!("{target} has no commits yet"),
+        ),
+        TargetRefusal::Unrelated { branch, target } => (
+            StatusCode::CONFLICT,
+            format!(
+                "{branch} shares no history with {target}, so it can't be merged into it; check your work in from a snapshot checkout (`grit checkin`) or rebase {branch} onto {target}, then integrate again"
+            ),
+        ),
+        TargetRefusal::Conflict {
+            branch,
+            target,
+            paths,
+        } => (
+            StatusCode::CONFLICT,
+            format!(
+                "{branch} conflicts with {target} in {}; rebase it onto the newest {target} and try again",
+                list(paths)
+            ),
+        ),
+        TargetRefusal::InvalidSliceName { slice } => (
+            StatusCode::BAD_REQUEST,
+            format!("{slice} is not a valid slice name: use letters, digits, `-`, `_` and `.`"),
+        ),
+        TargetRefusal::SliceWithoutPaths { .. } => (
+            StatusCode::BAD_REQUEST,
+            "a slice needs at least one path".to_owned(),
+        ),
+        TargetRefusal::MissingPaths { target, paths } => (
+            StatusCode::BAD_REQUEST,
+            format!("{} not in {target}", list(paths)),
+        ),
+        TargetRefusal::SliceExists { slice } => (
+            StatusCode::CONFLICT,
+            format!("slice {slice} already exists"),
+        ),
+        TargetRefusal::NoSuchSlice { slice } => (
+            StatusCode::NOT_FOUND,
+            format!("there is no slice {slice}"),
+        ),
+        TargetRefusal::WorktreeBlocked { target, paths } => (
+            StatusCode::CONFLICT,
+            format!(
+                "{target} is checked out in the server's worktree, where uncommitted changes to {} would be overwritten; commit or stash them there and try again",
+                list(paths)
+            ),
+        ),
+        TargetRefusal::Moved { target } => (
+            StatusCode::CONFLICT,
+            format!("{target} kept moving while it was being changed; try again"),
+        ),
+    };
+    error(status, message)
+}
+
+/// The log line's tail for a change of the target: whether the served
+/// worktree moved with it, and whether something outside the server had
+/// moved the target since the server last did.
+fn target_change_note(slot: &mut TargetSlot, change: &TargetChange) -> String {
+    let mut note = String::new();
+    if change.worktree_moved {
+        note.push_str("; the server's worktree moved with it");
     }
+    if let Some(last) = slot.changed(change) {
+        note.push_str(&format!(
+            "; it had moved since the server left it at {}",
+            &last.to_hex()[..12]
+        ));
+    }
+    note
 }
 
 /// `POST /.grit/checkouts/<repo>/<id>/update`: a snapshot of the newest tip
@@ -529,7 +646,7 @@ fn checkin_blocking(
     let (record, mut stored) = load_held(slot, repo, id)?;
     let before = stored.set_last.clone();
     let target = target_branch(repo);
-    let who = signature(None, email);
+    let who = signature(None, email)?;
     let reflog = format!("checkin: from checkout {id}");
     let mut results = Vec::new();
     for branch in &request.branches {
@@ -658,48 +775,46 @@ pub(crate) async fn integrate_branch(
     headers: HeaderMap,
     Json(request): Json<IntegrateRequest>,
 ) -> Response<Body> {
-    let result = with_access(
+    let result = with_target(
         &state,
         &headers,
         &name,
         Access::Write,
-        move |served, email, options, _| {
+        move |served, email, options, slot| {
             let repo = open(&served, &options)?;
-            let (target_name, previous) = target(&repo)?;
-            let refname = format!("refs/heads/{}", request.name);
-            let branch = grit_lib::refs::resolve_ref(repo.git_dir(), &refname).map_err(|_| {
-                error(
-                    StatusCode::NOT_FOUND,
-                    format!(
-                        "the server has no branch {}; check it in first",
-                        request.name
-                    ),
-                )
+            let target_name = target_branch(&repo);
+            let who = signature(request.author.as_ref(), &email)?;
+            let done = integrate(
+                &repo,
+                &format!("refs/heads/{target_name}"),
+                &request.name,
+                &who,
+            )
+            .map_err(|e| internal(&e))?
+            .map_err(|refusal| {
+                eprintln!(
+                    "integrate: {} into {target_name} of {} refused: {refusal}",
+                    request.name, served.name
+                );
+                target_refused(&refusal)
             })?;
-            let who = signature(request.author.as_ref(), &email);
-            let target_ref = format!("refs/heads/{target_name}");
-            let done = integrate(&repo, &target_ref, previous, branch, &request.name, &who)
-                .map_err(|e| internal(&e))?
-                .map_err(|e| error(StatusCode::CONFLICT, e.to_string()))?;
-            let (status, head, commits) = match done {
-                Integrated::AlreadyIntegrated => (IntegrateStatus::AlreadyIntegrated, previous, 0),
-                Integrated::Merged { head, commits } => (IntegrateStatus::Merged, head, commits),
-            };
+            let change = done.change;
             eprintln!(
-                "integrate: {} into {target_name} of {}: {:?} {} → {}",
+                "integrate: {} into {target_name} of {}: {:?} {} → {}{}",
                 request.name,
                 served.name,
-                status,
-                &previous.to_hex()[..12],
-                &head.to_hex()[..12]
+                done.status,
+                &change.previous.to_hex()[..12],
+                &change.head.to_hex()[..12],
+                target_change_note(slot, &change)
             );
             Ok(IntegrateResponse {
-                status,
+                status: done.status,
                 name: request.name.clone(),
                 target: target_name,
-                previous: previous.to_hex(),
-                head: head.to_hex(),
-                commits,
+                previous: change.previous.to_hex(),
+                head: change.head.to_hex(),
+                commits: done.commits,
             })
         },
     )
@@ -738,86 +853,27 @@ pub(crate) async fn put_slice(
     headers: HeaderMap,
     Json(request): Json<SliceRequest>,
 ) -> Response<Body> {
-    let result = with_access(
+    let result = with_target(
         &state,
         &headers,
         &name,
         Access::Write,
-        move |served, email, options, _| {
+        move |served, email, options, slot| {
             let repo = open(&served, &options)?;
-            if !valid_slice_name(&slice) {
-                return Err(error(
-                    StatusCode::BAD_REQUEST,
-                    format!(
-                        "{slice} is not a valid slice name: use letters, digits, `-`, `_` and `.`"
-                    ),
-                ));
-            }
             let paths = normalize_paths(&request.paths)
                 .map_err(|e| error(StatusCode::BAD_REQUEST, e.to_string()))?;
-            if paths.is_empty() {
-                return Err(error(
-                    StatusCode::BAD_REQUEST,
-                    "a slice needs at least one path",
-                ));
-            }
-            let (target_name, previous) = target(&repo)?;
-            let missing = missing_paths(&repo, previous, &paths).map_err(|e| internal(&e))?;
-            if !missing.is_empty() {
-                return Err(error(
-                    StatusCode::BAD_REQUEST,
-                    format!("{} not in {target_name}", missing.join(", ")),
-                ));
-            }
-            let mut slices = read_slices(&repo, previous).map_err(|e| internal(&e))?;
-            let existing = slices.iter().position(|s| s.name == slice);
-            let new = Slice {
-                name: slice.clone(),
-                description: request
-                    .description
-                    .clone()
-                    .or_else(|| existing.and_then(|i| slices[i].description.clone())),
+            let slice = Slice {
+                name: slice,
+                description: request.description.clone(),
                 paths,
             };
-            let message = match (existing, request.create) {
-                (Some(_), true) => {
-                    return Err(error(
-                        StatusCode::CONFLICT,
-                        format!("slice {slice} already exists"),
-                    ))
-                }
-                (None, false) => {
-                    return Err(error(
-                        StatusCode::NOT_FOUND,
-                        format!("there is no slice {slice}"),
-                    ))
-                }
-                (Some(i), false) => {
-                    slices[i] = new.clone();
-                    format!("Change slice {slice}")
-                }
-                (None, true) => {
-                    slices.push(new.clone());
-                    format!("Add slice {slice}")
-                }
+            let edit = if request.create {
+                SliceEdit::Create(slice)
+            } else {
+                SliceEdit::Change(slice)
             };
-            let who = signature(request.author.as_ref(), &email);
-            let head = commit_slices(
-                &repo,
-                &format!("refs/heads/{target_name}"),
-                previous,
-                &slices,
-                &who,
-                &message,
-            )
-            .map_err(|e| internal(&e))?
-            .map_err(|e| error(StatusCode::CONFLICT, e.to_string()))?;
-            Ok(SliceChange {
-                slice: Some(new),
-                target: target_name,
-                previous: previous.to_hex(),
-                head: head.to_hex(),
-            })
+            let who = signature(request.author.as_ref(), &email)?;
+            change_slices(&repo, &served, slot, &edit, &who)
         },
     )
     .await;
@@ -835,39 +891,15 @@ pub(crate) async fn delete_slice(
     body: axum::body::Bytes,
 ) -> Response<Body> {
     let request: SliceDeleteRequest = serde_json::from_slice(&body).unwrap_or_default();
-    let result = with_access(
+    let result = with_target(
         &state,
         &headers,
         &name,
         Access::Write,
-        move |served, email, options, _| {
+        move |served, email, options, slot| {
             let repo = open(&served, &options)?;
-            let (target_name, previous) = target(&repo)?;
-            let mut slices = read_slices(&repo, previous).map_err(|e| internal(&e))?;
-            let Some(i) = slices.iter().position(|s| s.name == slice) else {
-                return Err(error(
-                    StatusCode::NOT_FOUND,
-                    format!("there is no slice {slice}"),
-                ));
-            };
-            slices.remove(i);
-            let who = signature(request.author.as_ref(), &email);
-            let head = commit_slices(
-                &repo,
-                &format!("refs/heads/{target_name}"),
-                previous,
-                &slices,
-                &who,
-                &format!("Remove slice {slice}"),
-            )
-            .map_err(|e| internal(&e))?
-            .map_err(|e| error(StatusCode::CONFLICT, e.to_string()))?;
-            Ok(SliceChange {
-                slice: None,
-                target: target_name,
-                previous: previous.to_hex(),
-                head: head.to_hex(),
-            })
+            let who = signature(request.author.as_ref(), &email)?;
+            change_slices(&repo, &served, slot, &SliceEdit::Delete(slice), &who)
         },
     )
     .await;
@@ -875,4 +907,37 @@ pub(crate) async fn delete_slice(
         state.pushed();
     }
     respond(result)
+}
+
+/// Make the slice change `edit` on the target, while holding it.
+fn change_slices(
+    repo: &Repository,
+    served: &ServedRepository,
+    slot: &mut TargetSlot,
+    edit: &SliceEdit,
+    who: &Signature,
+) -> Result<SliceChange, Rejection> {
+    let target_name = target_branch(repo);
+    let SlicesEdited {
+        slice,
+        message,
+        change,
+    } = edit_slices(repo, &format!("refs/heads/{target_name}"), edit, who)
+        .map_err(|e| internal(&e))?
+        .map_err(|refusal| target_refused(&refusal))?;
+    if change.head != change.previous {
+        eprintln!(
+            "slice: {message} on {target_name} of {}: {} → {}{}",
+            served.name,
+            &change.previous.to_hex()[..12],
+            &change.head.to_hex()[..12],
+            target_change_note(slot, &change)
+        );
+    }
+    Ok(SliceChange {
+        slice,
+        target: target_name,
+        previous: change.previous.to_hex(),
+        head: change.head.to_hex(),
+    })
 }

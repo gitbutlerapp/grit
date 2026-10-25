@@ -21,7 +21,7 @@ A grafted commit has a new tree and new parents, so a signature (`gpgsig`) or me
 
 A branch is refused when:
 
-- **it is the target branch**, in any case (`Main` too): the branch the checkout was made from, or the branch the server's `HEAD` names now. Only [`grit integrate`](../integrate/) and [`grit slice`](../slice/) change the target; check your work in on another branch.
+- **it is the target branch**, in any case (`Main` too): the branch the checkout was made from, or the branch the server's `HEAD` names now. Only [`grit integrate`](../integrate/) and [`grit slice`](../slice/) change the target (the server refuses plain pushes to it too); check your work in on another branch.
 - **a commit changes a path outside your checkout's paths that the target holds differently.** A refresh never brings such a path into your checkout, so make that change from a checkout whose paths include it. The same goes for a directory replaced by a file when the target has files there your checkout can't see.
 - **a merge commit's parents conflict outside your paths**, where your checkout can't resolve them.
 - **the server's branch has commits yours doesn't.** Rebase onto the server's branch with `grit pull <branch>` and check in again, or pass `--force` to replace it. A branch this checkout set last may always be replaced (after an amend or rebase).

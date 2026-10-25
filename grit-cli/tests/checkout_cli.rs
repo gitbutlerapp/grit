@@ -325,11 +325,6 @@ fn commit_file(home: &Path, dir: &Path, path: &str, text: &str, message: &str) {
 fn work_is_checked_in_integrated_and_refreshed() {
     let (_tmp, home, repos) = setup();
     let demo = repos.join("demo");
-    ok(
-        &home,
-        &demo,
-        &["config", "receive.denyCurrentBranch", "ignore"],
-    );
     let (_server, url) = serve(&home, &repos);
     let token = std::fs::read_to_string(home.join("token")).expect("token");
     ok(&home, &home, &["login", &url, "--token", &token]);
@@ -394,12 +389,46 @@ fn work_is_checked_in_integrated_and_refreshed() {
     ok(&home, &co, &["reset", "--hard", "HEAD~1"]);
     ok(&home, &co, &["branch", "-D", "main"]);
 
-    // Someone else moves the target; integrate merges the work, and the refresh
-    // brings their change in and drops the integrated commit.
+    // Someone else moves the target. A plain push to it is refused, so they push
+    // a branch and integrate that.
     let other = home.join("other");
     ok(&home, &home, &["clone", &repo_url, "other"]);
     commit_file(&home, &other, "src/deep/b.rs", "b2\n", "Bob changes b");
-    ok(&home, &other, &["push"]);
+    let before = git(&demo, &["rev-parse", "main"]);
+    let pushed = run(&home, &other, &["push"]);
+    assert_eq!(
+        pushed.status.code(),
+        Some(1),
+        "a push to the target is refused"
+    );
+    assert_eq!(git(&demo, &["rev-parse", "main"]), before);
+    ok(&home, &other, &["push", "origin", "main:bob"]);
+    let bob = post(
+        &format!("{url}/.grit/checkouts/demo/integrate"),
+        &token,
+        r#"{"name":"bob"}"#,
+    );
+    assert_eq!(bob["status"], "merged", "{bob}");
+    // The server has main checked out; its worktree moves with the merge.
+    assert_eq!(git(&demo, &["status", "--porcelain"]), "");
+    assert_eq!(
+        std::fs::read_to_string(demo.join("src/deep/b.rs"))
+            .ok()
+            .as_deref(),
+        Some("b2\n")
+    );
+
+    // The target itself is not a branch to integrate.
+    let itself = run(&home, &co, &["integrate", "main"]);
+    assert_eq!(itself.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&itself.stderr).contains("main is the server's target branch"),
+        "{}",
+        String::from_utf8_lossy(&itself.stderr)
+    );
+
+    // Integrate merges the work, and the refresh brings their change in and
+    // drops the integrated commit.
     let integrated = json(&home, &co, &["--json", "integrate", &work]);
     assert_eq!(integrated["status"], "merged", "{integrated}");
     assert_eq!(integrated["commits"], 1);
@@ -424,6 +453,18 @@ fn work_is_checked_in_integrated_and_refreshed() {
         format!("Merge branch '{work}' into main")
     );
     assert_eq!(
+        git(&demo, &["log", "-1", "--format=%an <%ae>", "main"]),
+        "A U Thor <author@example.com>",
+        "the merge is by the author the user's own commits get"
+    );
+    assert_eq!(git(&demo, &["status", "--porcelain"]), "");
+    assert_eq!(
+        std::fs::read_to_string(demo.join("src/a.rs"))
+            .ok()
+            .as_deref(),
+        Some("a2\n")
+    );
+    assert_eq!(
         std::fs::read_to_string(co.join("src/deep/b.rs"))
             .ok()
             .as_deref(),
@@ -443,6 +484,29 @@ fn work_is_checked_in_integrated_and_refreshed() {
     let later = json(&home, &co, &["--json", "checkin"]);
     assert_eq!(later["branches"][0]["status"], "updated", "{later}");
     assert_eq!(git(&demo, &["rev-parse", &format!("{work}^")]), main);
+
+    // An uncommitted change in the server's worktree that the merge would
+    // overwrite refuses it; one the merge doesn't touch survives it.
+    std::fs::write(demo.join("src/c.rs"), "mine\n").expect("write");
+    std::fs::write(demo.join("README"), "server edit\n").expect("write");
+    let blocked = run(&home, &co, &["integrate", &work]);
+    assert_eq!(blocked.status.code(), Some(1));
+    let why = String::from_utf8_lossy(&blocked.stderr);
+    assert!(
+        why.contains("checked out in the server's worktree") && why.contains("src/c.rs"),
+        "{why}"
+    );
+    assert_eq!(git(&demo, &["rev-parse", "main"]), main);
+    std::fs::remove_file(demo.join("src/c.rs")).expect("remove");
+    let again = json(&home, &co, &["--json", "integrate", &work]);
+    assert_eq!(again["status"], "merged", "{again}");
+    assert_eq!(
+        std::fs::read_to_string(demo.join("src/c.rs"))
+            .ok()
+            .as_deref(),
+        Some("c\n")
+    );
+    assert_eq!(git(&demo, &["status", "--porcelain"]), "M README");
 
     // A plain pull when the target hasn't moved.
     let pulled = json(&home, &co, &["--json", "pull"]);
@@ -486,9 +550,13 @@ fn slices_name_paths_on_the_target_branch() {
     assert_eq!(made["action"], "new");
     assert_eq!(
         git(&demo, &["log", "-1", "--format=%an <%ae> %s", "main"]),
-        "alice@example.com <alice@example.com> Add slice deep"
+        "A U Thor <author@example.com> Add slice deep",
+        "a slice commit is by the author the user's own commits get"
     );
     assert!(git(&demo, &["show", "main:.grit/slices.toml"]).contains("[slices.deep]"));
+    // The server has main checked out; its worktree moves with the slice commit.
+    assert_eq!(git(&demo, &["status", "--porcelain"]), "");
+    assert!(demo.join(".grit/slices.toml").is_file());
     let duplicate = run(
         &home,
         &home,
@@ -516,6 +584,7 @@ fn slices_name_paths_on_the_target_branch() {
         edited["slice"]["paths"],
         serde_json::json!(["docs", "src/deep"])
     );
+    assert_eq!(git(&demo, &["status", "--porcelain"]), "");
     let listed = json(&home, &home.join("deep"), &["--json", "slice", "list"]);
     assert_eq!(listed["slices"][0]["description"], "Deep code");
     let unknown = run(&home, &home, &["checkout", &repo_url, "nosuch"]);
@@ -593,14 +662,15 @@ fn refresh_after_a_merge_pull_keeps_the_local_commit() {
     );
 }
 
-/// POST `body` (JSON) to `url` as the holder of `token`, and the JSON answer.
-fn post(url: &str, token: &str, body: &str) -> Value {
+/// Send `body` (JSON) to `url` with `method` as the holder of `token`: the
+/// HTTP status and the JSON answer.
+fn send(method: &str, url: &str, token: &str, body: &str) -> (u16, Value) {
     let rest = url.strip_prefix("http://").expect("an http URL");
     let (host, path) = rest.split_once('/').expect("a path");
     let mut stream = std::net::TcpStream::connect(host).expect("connect");
     write!(
         stream,
-        "POST /{path} HTTP/1.1\r\nHost: {host}\r\nAuthorization: Bearer {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+        "{method} /{path} HTTP/1.1\r\nHost: {host}\r\nAuthorization: Bearer {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
         token.trim(),
         body.len()
     )
@@ -608,8 +678,20 @@ fn post(url: &str, token: &str, body: &str) -> Value {
     let mut answer = String::new();
     stream.read_to_string(&mut answer).expect("read");
     let (head, body) = answer.split_once("\r\n\r\n").expect("an HTTP answer");
-    assert!(head.starts_with("HTTP/1.1 200"), "{answer}");
-    serde_json::from_str(body).expect("JSON answer")
+    let status = head
+        .split_whitespace()
+        .nth(1)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(0);
+    (status, serde_json::from_str(body).unwrap_or(Value::Null))
+}
+
+/// POST `body` (JSON) to `url` as the holder of `token`, and the JSON answer,
+/// which must be a success.
+fn post(url: &str, token: &str, body: &str) -> Value {
+    let (status, answer) = send("POST", url, token, body);
+    assert_eq!(status, 200, "{answer}");
+    answer
 }
 
 /// A server running on a fresh `demo`, the user signed in, and the URL of `demo`.
@@ -1168,4 +1250,296 @@ fn a_dry_run_refresh_asks_the_server_and_changes_nothing() {
         git(&co, &["rev-parse", "HEAD"]),
         git(&co, &["rev-parse", "origin/main"])
     );
+}
+
+/// System `git` against the test server: no config, no credential helper
+/// (so nothing reaches a keychain); the token travels in the URL.
+fn git_remote(dir: &Path, args: &[&str]) -> Output {
+    Command::new("git")
+        .args(["-c", "credential.helper=", "-c", "init.defaultBranch=main"])
+        .args(args)
+        .current_dir(dir)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GIT_AUTHOR_NAME", "Bob")
+        .env("GIT_AUTHOR_EMAIL", "bob@example.com")
+        .env("GIT_COMMITTER_NAME", "Bob")
+        .env("GIT_COMMITTER_EMAIL", "bob@example.com")
+        .env_remove("GIT_ASKPASS")
+        .env_remove("SSH_ASKPASS")
+        .output()
+        .expect("git")
+}
+
+#[test]
+fn plain_pushes_to_the_target_are_refused_once_a_repository_has_checkouts() {
+    let (_tmp, home, repos, _server, repo_url) = signed_in();
+    let token = std::fs::read_to_string(home.join("token")).expect("token");
+    git(&repos, &["clone", "-q", "--bare", "demo", "hub.git"]);
+    let hub = repos.join("hub.git");
+    let url = repo_url.trim_end_matches("/demo.git").to_owned();
+    let with_token = |name: &str| {
+        format!(
+            "http://x:{}@{}/{name}",
+            token.trim(),
+            url.trim_start_matches("http://")
+        )
+    };
+    let push = |dir: &Path, args: &[&str]| {
+        let out = git_remote(dir, &[&["push", "origin"][..], args].concat());
+        (
+            out.status.success(),
+            String::from_utf8_lossy(&out.stderr).into_owned(),
+        )
+    };
+    let commit = |dir: &Path, path: &str, message: &str| {
+        std::fs::write(dir.join(path), format!("{message}\n")).expect("write");
+        assert!(git_remote(dir, &["add", path]).status.success());
+        assert!(git_remote(dir, &["commit", "-q", "-m", message])
+            .status
+            .success());
+    };
+    let plain = home.join("plain");
+    let cloned = git_remote(&home, &["clone", "-q", &with_token("hub.git"), "plain"]);
+    assert!(
+        cloned.status.success(),
+        "{}",
+        String::from_utf8_lossy(&cloned.stderr)
+    );
+
+    // Before the repository has checkouts, it keeps Git's rules.
+    commit(&plain, "early", "Before checkouts");
+    let (pushed, err) = push(&plain, &["main"]);
+    assert!(pushed, "{err}");
+    let (pushed, err) = push(&plain, &[":main"]);
+    assert!(
+        !pushed && err.contains("deletion of the current branch prohibited"),
+        "{err}"
+    );
+
+    ok(
+        &home,
+        &home,
+        &[
+            "checkout",
+            &format!("{url}/hub.git"),
+            "-p",
+            "src",
+            "--into",
+            "hubco",
+        ],
+    );
+    let main = git(&hub, &["rev-parse", "main"]);
+
+    // Now an update, a forced rewrite and a delete of main are all refused,
+    // with what to do instead.
+    commit(&plain, "late", "After checkouts");
+    let (pushed, err) = push(&plain, &["main"]);
+    assert!(!pushed, "{err}");
+    assert!(
+        err.contains("main is the server's target branch")
+            && err.contains("grit integrate <branch>")
+            && err.contains("main is the target branch; it changes only through integrate"),
+        "{err}"
+    );
+    assert!(
+        git_remote(&plain, &["checkout", "-q", "--orphan", "rewrite"])
+            .status
+            .success()
+    );
+    commit(&plain, "other", "Unrelated root");
+    let (pushed, err) = push(&plain, &["-f", "rewrite:main"]);
+    assert!(
+        !pushed && err.contains("changes only through integrate"),
+        "{err}"
+    );
+    let (pushed, err) = push(&plain, &[":main"]);
+    assert!(!pushed && err.contains("server's target branch"), "{err}");
+    assert_eq!(git(&hub, &["rev-parse", "main"]), main, "main never moved");
+
+    // Pushing another branch works, and integrating it moves main.
+    assert!(git_remote(&plain, &["checkout", "-q", "main"])
+        .status
+        .success());
+    let (pushed, err) = push(&plain, &["main:bob"]);
+    assert!(pushed, "{err}");
+    let integrated = json(&home, &home.join("hubco"), &["--json", "integrate", "bob"]);
+    assert_eq!(integrated["status"], "merged", "{integrated}");
+    assert_eq!(
+        git(&hub, &["log", "-1", "--format=%s", "main"]),
+        "Merge branch 'bob' into main"
+    );
+
+    // grit push is refused the same way, through receive-pack and through the
+    // resumable endpoint.
+    ok(
+        &home,
+        &home,
+        &["clone", &format!("{url}/hub.git"), "gritclone"],
+    );
+    let gritclone = home.join("gritclone");
+    commit_file(&home, &gritclone, "g", "g\n", "From grit");
+    let main = git(&hub, &["rev-parse", "main"]);
+    for threshold in [None, Some("1")] {
+        if let Some(t) = threshold {
+            ok(&home, &gritclone, &["config", "push.bundleThreshold", t]);
+        }
+        let out = run(&home, &gritclone, &["--json", "push"]);
+        assert_eq!(out.status.code(), Some(1), "{threshold:?}");
+        let report: Value = serde_json::from_slice(&out.stdout).expect("push JSON");
+        assert_eq!(report["results"][0]["status"], "rejected", "{report}");
+        assert_eq!(
+            report["results"][0]["reason"],
+            "main is the target branch; it changes only through integrate"
+        );
+        assert_eq!(git(&hub, &["rev-parse", "main"]), main);
+    }
+}
+
+#[test]
+fn integrations_and_slice_changes_at_once_take_turns() {
+    let (_tmp, home, repos, _server, repo_url) = signed_in();
+    let demo = repos.join("demo");
+    let token = std::fs::read_to_string(home.join("token")).expect("token");
+    let api = format!(
+        "{}/.grit/checkouts/demo",
+        repo_url.trim_end_matches("/demo.git")
+    );
+
+    // Branches that each add their own file, pushed from a clone.
+    ok(&home, &home, &["clone", &repo_url, "other"]);
+    let other = home.join("other");
+    let names: Vec<String> = (0..6).map(|i| format!("int{i}")).collect();
+    for name in &names {
+        ok(&home, &other, &["switch", "-c", name, "main"]);
+        commit_file(&home, &other, &format!("{name}.txt"), "x\n", name);
+        ok(&home, &other, &["push", "origin", name]);
+    }
+
+    // Integrated all at once, each merges onto the main the one before left.
+    let answers: Vec<Value> = std::thread::scope(|scope| {
+        let handles: Vec<_> = names
+            .iter()
+            .map(|name| {
+                let (api, token) = (&api, &token);
+                scope.spawn(move || {
+                    post(
+                        &format!("{api}/integrate"),
+                        token,
+                        &format!(r#"{{"name":"{name}"}}"#),
+                    )
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .map(|h| h.join().expect("thread"))
+            .collect()
+    });
+    assert!(
+        answers.iter().all(|a| a["status"] == "merged"),
+        "{answers:?}"
+    );
+    let merges = git(&demo, &["log", "--merges", "--format=%s", "main"]);
+    for name in &names {
+        assert!(
+            merges.contains(&format!("Merge branch '{name}' into main")),
+            "{merges}"
+        );
+        assert!(
+            demo.join(format!("{name}.txt")).is_file(),
+            "the worktree moved along"
+        );
+    }
+    assert_eq!(git(&demo, &["status", "--porcelain"]), "");
+
+    // So do slice changes.
+    let made: Vec<(u16, Value)> = std::thread::scope(|scope| {
+        let handles: Vec<_> = (0..5)
+            .map(|i| {
+                let (api, token) = (&api, &token);
+                scope.spawn(move || {
+                    send(
+                        "PUT",
+                        &format!("{api}/slices/s{i}"),
+                        token,
+                        r#"{"paths":["src"],"create":true}"#,
+                    )
+                })
+            })
+            .collect();
+        handles
+            .into_iter()
+            .map(|h| h.join().expect("thread"))
+            .collect()
+    });
+    assert!(made.iter().all(|(status, _)| *status == 200), "{made:?}");
+    let listed = json(
+        &home,
+        &home,
+        &["--json", "slice", "list", "--url", &repo_url],
+    );
+    assert_eq!(
+        listed["slices"].as_array().map(Vec::len),
+        Some(5),
+        "{listed}"
+    );
+
+    // An author that would break the merge commit's header is cleaned.
+    ok(&home, &other, &["switch", "-c", "eve", "main"]);
+    commit_file(&home, &other, "eve.txt", "e\n", "Eve's change");
+    ok(&home, &other, &["push", "origin", "eve"]);
+    let sneaky = post(
+        &format!("{api}/integrate"),
+        &token,
+        r#"{"name":"eve","author":{"name":"Eve\nencoding bogus","email":"e>v<e@x"}}"#,
+    );
+    assert_eq!(sneaky["status"], "merged", "{sneaky}");
+    let merge = git(&demo, &["cat-file", "-p", "main"]);
+    assert!(
+        merge.contains("\nauthor Eveencoding bogus <eve@x> "),
+        "{merge}"
+    );
+    assert!(!merge.contains("\nencoding"), "{merge}");
+    git(&demo, &["fsck", "--strict", "--no-progress"]);
+
+    // Bad names, the target and unrelated histories are refused, and main stays put.
+    let main = git(&demo, &["rev-parse", "main"]);
+    for (name, status, says) in [
+        ("../checkouts/x/target", 400, "not a valid branch name"),
+        ("../../HEAD", 400, "not a valid branch name"),
+        ("main", 400, "target branch"),
+        ("MAIN", 400, "target branch"),
+        ("nosuch", 404, "has no branch nosuch"),
+    ] {
+        let (got, answer) = send(
+            "POST",
+            &format!("{api}/integrate"),
+            &token,
+            &format!(r#"{{"name":"{name}"}}"#),
+        );
+        assert_eq!(got, status, "{name}: {answer}");
+        assert!(
+            answer["error"].as_str().unwrap_or_default().contains(says),
+            "{answer}"
+        );
+    }
+    // Snapshot-rooted commits pushed straight to a branch share no history with main.
+    ok(
+        &home,
+        &home,
+        &["checkout", &repo_url, "-p", "src", "--into", "co"],
+    );
+    let co = home.join("co");
+    commit_file(&home, &co, "src/raw.rs", "raw\n", "Raw work");
+    ok(&home, &co, &["push", "origin", "HEAD:refs/heads/raw"]);
+    let raw = run(&home, &co, &["integrate", "raw"]);
+    assert_eq!(raw.status.code(), Some(1));
+    assert!(
+        String::from_utf8_lossy(&raw.stderr).contains("shares no history with main"),
+        "{}",
+        String::from_utf8_lossy(&raw.stderr)
+    );
+    assert_eq!(git(&demo, &["rev-parse", "main"]), main);
 }

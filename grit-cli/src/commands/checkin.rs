@@ -7,8 +7,8 @@ use anyhow::{bail, Result};
 use grit_lib::objects::ObjectId;
 use grit_lib::progress::NeverCancel;
 use grit_lib::remote::snapshot_checkout::{
-    branches_with_work, push_for_checkin, CheckinBranch, CheckinRequest, CheckinStatus,
-    CheckoutError, IntegrateRequest, IntegrateStatus,
+    branches_with_work, push_for_checkin, same_branch_name, valid_branch_name, CheckinBranch,
+    CheckinRequest, CheckinStatus, CheckoutError, IntegrateRequest, IntegrateStatus,
 };
 use schemars::JsonSchema;
 use serde::Serialize;
@@ -304,6 +304,14 @@ impl MarkdownRender for IntegrateOutcome {
 /// into the target on the server, then refresh this checkout.
 pub fn integrate(name: &str, mode: OutputMode) -> Result<IntegrateOutcome> {
     let co = require_checkout()?;
+    if same_branch_name(name, &co.marker.branch) {
+        bail!(
+            "{name} is the server's target branch; name the branch to merge into it, such as your work branch (`grit branch` lists them)"
+        );
+    }
+    if !valid_branch_name(name) {
+        bail!("{name} is not a valid branch name");
+    }
     let local = branches_with_work(&co.repo, &co.marker)?
         .into_iter()
         .find(|(n, _)| n == name);

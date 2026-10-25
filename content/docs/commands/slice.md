@@ -26,7 +26,7 @@ description = "The desktop app and its UI package"
 paths = ["apps/desktop", "packages/ui"]
 ```
 
-Each `new`, `edit` or `delete` is one commit on the target branch, made by the server, by you (`user.name` and `user.email`, or the signed-in user). The paths must exist on the target. Inside a [snapshot checkout](../checkout/), `grit slice` talks to the server the checkout came from; elsewhere, pass `--url`. Changing slices needs write access; listing them needs read access. A checkout made from a slice keeps its paths when the slice changes later.
+Each `new`, `edit` or `delete` is one commit on the target branch, made by the server, by you: the author your own commits get (`GIT_AUTHOR_NAME` and `GIT_AUTHOR_EMAIL`, then `author.*` and `user.*` config, as [`grit commit`](../commit/) has it), or the signed-in user when none is set. The server cleans `<`, `>` and line breaks out of the name and email. The paths must exist on the target. Slice changes and [integrations](../integrate/) take turns on the server, so several at once all land, each on the target the one before left; each is checked again on the target it lands on (a name taken meanwhile is refused). When the server's repository has the target checked out in a worktree, the worktree moves with the commit, keeping uncommitted changes there; changes the commit would overwrite refuse it. Inside a [snapshot checkout](../checkout/), `grit slice` talks to the server the checkout came from; elsewhere, pass `--url`. Changing slices needs write access; listing them needs read access. A checkout made from a slice keeps its paths when the slice changes later.
 
 ## Options
 
@@ -126,7 +126,7 @@ Schema: [slice.list v1](/schemas/slice.list/v1.json) · [slice.new v1](/schemas/
 | Code | Meaning |
 | --- | --- |
 | `0` | Success. |
-| `1` | The slice exists (`new`) or doesn't (`edit`, `delete`), a path is not on the target, the name is invalid, the server offers no snapshot checkouts, or no server was named outside a checkout. |
+| `1` | The slice exists (`new`) or doesn't (`edit`, `delete`), a path is not on the target, the name is invalid, uncommitted changes in the server's worktree block the commit, the server offers no snapshot checkouts, or no server was named outside a checkout. |
 
 ## See also
 

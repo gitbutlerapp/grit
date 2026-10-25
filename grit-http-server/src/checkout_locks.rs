@@ -8,17 +8,23 @@
 //!   the first's commits;
 //! - one lock per checkout ([`RepoLocks::checkout`]), held for a whole
 //!   request on that checkout (check-in, refresh), so its record changes one
-//!   request at a time. Different checkouts don't wait for each other.
+//!   request at a time. Different checkouts don't wait for each other;
+//! - its target branch ([`RepoLocks::target`]), held by every request that
+//!   moves it (integrate, slice changes), so they take turns: each merges
+//!   onto the target the one before it left, instead of all but one losing
+//!   the race and being asked to try again.
 //!
 //! The branch and record writes are compare-and-swap and atomic in the
-//! library as well, so these locks keep requests in one server from tripping
-//! over each other; they are not what keeps the data safe.
+//! library as well (which starts a change over when the target moved under
+//! it), so these locks keep requests in one server from tripping over each
+//! other; they are not what keeps the data safe.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex, MutexGuard};
 
-use grit_lib::remote::snapshot_checkout::{CheckoutRecord, CheckoutStore};
+use grit_lib::objects::ObjectId;
+use grit_lib::remote::snapshot_checkout::{CheckoutRecord, CheckoutStore, TargetChange};
 
 /// How many checkout locks a repository keeps before dropping the ones no
 /// request holds or waits for.
@@ -43,6 +49,7 @@ impl CheckoutLocks {
 pub(crate) struct RepoLocks {
     branches: Mutex<BranchNames>,
     checkouts: Mutex<HashMap<String, Arc<tokio::sync::Mutex<CheckoutSlot>>>>,
+    target: Arc<tokio::sync::Mutex<TargetSlot>>,
 }
 
 impl RepoLocks {
@@ -63,6 +70,35 @@ impl RepoLocks {
             all.entry(id.to_owned()).or_default().clone()
         };
         lock.lock_owned().await
+    }
+
+    /// Wait for the repository's target branch to be free, and hold it while
+    /// moving it.
+    pub(crate) async fn target(&self) -> tokio::sync::OwnedMutexGuard<TargetSlot> {
+        self.target.clone().lock_owned().await
+    }
+}
+
+/// What the server last did to a repository's target branch, kept by whoever
+/// holds [`RepoLocks::target`].
+#[derive(Debug, Default)]
+pub(crate) struct TargetSlot {
+    /// Where the server last left the target.
+    last: Option<ObjectId>,
+}
+
+impl TargetSlot {
+    /// Note that a change of the target was made on `change.previous` and left
+    /// it at `change.head`.
+    ///
+    /// # Returns
+    ///
+    /// Where the server had left the target before, when something else
+    /// (a process outside this server) moved it since.
+    pub(crate) fn changed(&mut self, change: &TargetChange) -> Option<ObjectId> {
+        let moved_outside = self.last.filter(|last| *last != change.previous);
+        self.last = Some(change.head);
+        moved_outside
     }
 }
 
@@ -125,6 +161,30 @@ mod tests {
         names.reached("alice/x", 3);
         assert_eq!(names.start("alice/x"), 3);
         assert_eq!(names.start("bob/y"), 1);
+    }
+
+    #[tokio::test]
+    async fn target_changes_take_turns_and_notice_outside_moves() {
+        let locks = CheckoutLocks::default();
+        let repo = locks.repo(Path::new("/srv/demo"));
+        let oid = |n: u8| ObjectId::from_bytes(&[n; 20]).unwrap_or_else(|_| ObjectId::zero());
+        let change = |previous, head| TargetChange {
+            previous: oid(previous),
+            head: oid(head),
+            worktree_moved: false,
+        };
+        let mut held = repo.target().await;
+        assert_eq!(held.changed(&change(1, 2)), None);
+        assert_eq!(held.changed(&change(2, 3)), None);
+        assert_eq!(held.changed(&change(9, 10)), Some(oid(3)));
+        let waiting = {
+            let repo = repo.clone();
+            tokio::spawn(async move { repo.target().await.last })
+        };
+        tokio::task::yield_now().await;
+        assert!(!waiting.is_finished());
+        drop(held);
+        assert_eq!(waiting.await.ok().flatten(), Some(oid(10)));
     }
 
     #[tokio::test]

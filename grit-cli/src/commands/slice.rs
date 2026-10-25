@@ -193,12 +193,7 @@ impl Target {
     }
 
     fn author(&self) -> Option<Ident> {
-        let email = self.config.get("user.email")?;
-        let name = self
-            .config
-            .get("user.name")
-            .unwrap_or_else(|| email.clone());
-        Some(Ident { name, email })
+        crate::commands::checkout::author_for(&self.config)
     }
 }
 

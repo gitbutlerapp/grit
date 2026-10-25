@@ -3,11 +3,12 @@
 //! reflogs.
 
 use crate::error::Error;
+use crate::ident::Signature;
 use crate::objects::ObjectId;
 use crate::refs::store::{Expected, RawRef, RefStoreError, ReflogUpdate};
 use crate::repo::Repository;
 
-use super::{Result, Signature};
+use super::Result;
 
 /// What [`swap_ref`] did.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -37,7 +38,40 @@ pub(crate) fn swap_ref(
     who: &Signature,
     message: &str,
 ) -> Result<Swap> {
-    swap_ref_as(repo, refname, expected, new, &who.line(), message)
+    swap_ref_as(repo, refname, expected, new, &who.header_line(), message)
+}
+
+/// Log a move of the branch `HEAD` names from `old` to `new` in `HEAD`'s
+/// reflog as well, as Git does for a branch that is checked out, where
+/// `core.logAllRefUpdates` asks for it or `HEAD` already has a reflog.
+///
+/// # Errors
+///
+/// Config and reflog failures.
+pub(crate) fn log_head_move(
+    repo: &Repository,
+    old: ObjectId,
+    new: ObjectId,
+    who: &Signature,
+    message: &str,
+) -> Result<()> {
+    let config = repo.config()?;
+    if !crate::refs::should_autocreate_reflog_with_config(&config, repo.git_dir(), "HEAD")
+        && !repo.refs().reflog_exists("HEAD")?
+    {
+        return Ok(());
+    }
+    crate::refs::append_reflog_on_store(
+        repo.refs(),
+        "HEAD",
+        &old,
+        &new,
+        &who.header_line(),
+        message,
+        false,
+        &config,
+    )?;
+    Ok(())
 }
 
 /// [`swap_ref`], logged as `identity`: a whole reflog identity line,
@@ -87,10 +121,9 @@ mod tests {
     use crate::repo::InitOptions;
 
     fn who() -> Signature {
-        Signature {
-            ident: "Server <server@example.com>".to_owned(),
-            when: 1_700_000_000,
-        }
+        let time = time::OffsetDateTime::from_unix_timestamp(1_700_000_000)
+            .unwrap_or(time::OffsetDateTime::UNIX_EPOCH);
+        Signature::cleaned("Server", "server@example.com", time).expect("signature")
     }
 
     #[test]

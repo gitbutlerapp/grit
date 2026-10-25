@@ -10,6 +10,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::ident::Signature;
 use crate::objects::ObjectId;
 use crate::repo::Repository;
 
@@ -17,7 +18,7 @@ use super::graft::{decide_checkin, graft, CheckinDecision, GraftError, Grafted};
 use super::refs::{swap_ref, Swap};
 use super::{
     out_ref, same_branch_name, valid_branch_name, CheckinBranch, CheckinStatus, CheckoutError,
-    CheckoutInfo, Result, Signature,
+    CheckoutInfo, Result,
 };
 
 /// How many times [`set_checked_in_branch`] decides again after losing a
@@ -287,10 +288,9 @@ mod tests {
     use crate::repo::InitOptions;
 
     fn who() -> Signature {
-        Signature {
-            ident: "Server <server@example.com>".to_owned(),
-            when: 1_700_000_000,
-        }
+        let time = time::OffsetDateTime::from_unix_timestamp(1_700_000_000)
+            .unwrap_or(time::OffsetDateTime::UNIX_EPOCH);
+        Signature::cleaned("Server", "server@example.com", time).expect("signature")
     }
 
     fn commit(repo: &Repository, parents: &[ObjectId], msg: &str) -> ObjectId {

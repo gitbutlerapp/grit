@@ -292,15 +292,18 @@ impl OpenCheckout {
         Ok(CheckoutClient::new(self.http.as_ref(), &self.marker.url)?)
     }
 
-    /// Who server-made commits are by: `user.name` and `user.email`.
+    /// Who server-made commits are by ([`author_for`]).
     pub(crate) fn author(&self) -> Option<grit_lib::remote::snapshot_checkout::Ident> {
-        let email = self.config.get("user.email")?;
-        let name = self
-            .config
-            .get("user.name")
-            .unwrap_or_else(|| email.clone());
-        Some(grit_lib::remote::snapshot_checkout::Ident { name, email })
+        author_for(&self.config)
     }
+}
+
+/// Who server-made commits (an integration's merge, a slice change) are by:
+/// the author the user's own commits get, from `GIT_AUTHOR_NAME` and
+/// `GIT_AUTHOR_EMAIL`, then `author.*` and `user.*` in `config`. `None` when
+/// none is configured, so the server uses the signed-in user.
+pub(crate) fn author_for(config: &ConfigSet) -> Option<grit_lib::remote::snapshot_checkout::Ident> {
+    grit_lib::remote::snapshot_checkout::Ident::author(&crate::context::environment(), config).ok()
 }
 
 /// The checkout the current directory is in.

@@ -32,7 +32,8 @@
 //! branches ([`set_checked_in_branch`], deciding with [`decide_checkin`]). The
 //! server can [`integrate`] a branch into the target with a merge commit, and
 //! keeps **slices** — named sets of paths — in [`SLICES_PATH`] on the target
-//! branch. A **refresh** asks the server for a snapshot of the newest target on
+//! branch ([`edit_slices`]). Those are the only ways the target changes: the
+//! server refuses plain pushes to it with a [`TargetGuard`]. A **refresh** asks the server for a snapshot of the newest target on
 //! top of the checkout's last one ([`CheckoutClient::update`]), fetches it from
 //! [`target_ref`] ([`fetch_snapshot`]) and brings the current branch onto it
 //! ([`refresh`]). The client's transfers always go to the URL its marker
@@ -43,6 +44,7 @@
 
 mod checkin;
 mod graft;
+mod guard;
 mod refresh;
 mod refs;
 mod store;
@@ -52,14 +54,15 @@ mod tree;
 
 pub use checkin::{graft_checkin_branch, set_checked_in_branch, BranchSet, CheckinRefusal};
 pub use graft::{decide_checkin, graft, CheckinDecision, GraftError, Grafted};
+pub use guard::TargetGuard;
 pub use refresh::{
     ensure_refreshable, refresh, BranchOnOldSnapshot, FollowedBranch, RefreshOutcome, RefreshedHead,
 };
 pub use store::{valid_checkout_id, CheckoutRecord, CheckoutStore, ReservedName, StoredCheckout};
 pub use target::{
-    commit_slices, integrate, missing_paths, parse_slices, read_slices, render_slices,
-    same_branch_name, target_branch, valid_slice_name, Integrated, Signature, TargetRefusal,
-    SLICES_PATH,
+    edit_slices, integrate, missing_paths, parse_slices, read_slices, render_slices,
+    same_branch_name, target_branch, valid_slice_name, Integration, SliceEdit, SlicesEdited,
+    TargetChange, TargetRefusal, SLICES_PATH,
 };
 pub use transfer::{fetch_snapshot, push_for_checkin, FetchedSnapshot};
 
@@ -297,6 +300,58 @@ pub struct Ident {
     pub name: String,
     /// Email address.
     pub email: String,
+}
+
+impl Ident {
+    /// Who the user's own commits are by, for a server-made commit made for
+    /// them (an integration's merge, a slice change): the author identity a
+    /// commit gets, from `GIT_AUTHOR_NAME` and `GIT_AUTHOR_EMAIL`, then
+    /// `author.*`, then `user.*` (see
+    /// [`crate::config::ident_resolve::resolve_name_with`]).
+    ///
+    /// # Parameters
+    ///
+    /// - `env`: the environment to read `GIT_AUTHOR_*` and fallbacks from.
+    /// - `config`: the repository's configuration.
+    ///
+    /// # Errors
+    ///
+    /// [`crate::config::ident_resolve::IdentityError`] when no name or email
+    /// is configured; a server then uses the signed-in user.
+    pub fn author<E: crate::ident_resolve::IdentityEnv>(
+        env: &E,
+        config: &crate::config::ConfigSet,
+    ) -> std::result::Result<Self, crate::ident_resolve::IdentityError> {
+        use crate::ident_resolve::{resolve_email_with, resolve_name_with, IdentRole};
+        Ok(Self {
+            name: resolve_name_with(env, config, IdentRole::Author)?,
+            email: resolve_email_with(env, config, IdentRole::Author)?,
+        })
+    }
+
+    /// The signature of a commit by this identity at `time`, cleaned of
+    /// anything that would break the commit's header
+    /// ([`crate::ident::Signature::cleaned`]), since a server takes
+    /// identities from its requests. A name that cleans away to nothing is
+    /// replaced by the email.
+    ///
+    /// # Errors
+    ///
+    /// [`crate::ident::SignatureError`] for a `time` before the epoch or with
+    /// a sub-minute offset.
+    pub fn signature(
+        &self,
+        time: time::OffsetDateTime,
+    ) -> std::result::Result<crate::ident::Signature, crate::ident::SignatureError> {
+        let signature = crate::ident::Signature::cleaned(&self.name, &self.email, time)?;
+        if signature.name.is_empty() {
+            return Ok(crate::ident::Signature {
+                name: signature.email.clone(),
+                ..signature
+            });
+        }
+        Ok(signature)
+    }
 }
 
 /// `POST /.grit/checkouts/<repo>/integrate`: merge a branch into the target.
@@ -1340,6 +1395,63 @@ pub fn suggest_work_branch(email: Option<&str>, random: [u8; 2]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn idents_resolve_like_commit_authors_and_sign_cleanly() {
+        let env_of = |vars: &[(&str, &str)]| {
+            crate::config::environment::Environment::from_vars(
+                vars.iter().map(|(k, v)| ((*k).into(), (*v).into())),
+                std::path::PathBuf::from("/"),
+            )
+        };
+        let env = env_of(&[
+            ("GIT_AUTHOR_NAME", "A U Thor"),
+            ("GIT_AUTHOR_EMAIL", "author@example.com"),
+        ]);
+        let mut config = crate::config::ConfigSet::new();
+        let _ = config.add_command_override("user.name", "Alice");
+        let _ = config.add_command_override("user.email", "alice@example.com");
+        assert_eq!(
+            Ident::author(&env, &config).ok(),
+            Some(Ident {
+                name: "A U Thor".to_owned(),
+                email: "author@example.com".to_owned()
+            }),
+            "the environment wins over config, as for a commit"
+        );
+        let bare = env_of(&[]);
+        assert_eq!(
+            Ident::author(&bare, &config).ok(),
+            Some(Ident {
+                name: "Alice".to_owned(),
+                email: "alice@example.com".to_owned()
+            })
+        );
+        assert!(Ident::author(&bare, &crate::config::ConfigSet::new()).is_err());
+
+        let time = time::OffsetDateTime::from_unix_timestamp(1_700_000_000)
+            .unwrap_or(time::OffsetDateTime::UNIX_EPOCH);
+        let sneaky = Ident {
+            name: "Eve\nencoding bogus".to_owned(),
+            email: "e>v<e@x".to_owned(),
+        };
+        assert_eq!(
+            sneaky
+                .signature(time)
+                .map(|s| s.header_line())
+                .ok()
+                .as_deref(),
+            Some("Eveencoding bogus <eve@x> 1700000000 +0000")
+        );
+        let nameless = Ident {
+            name: "<>".to_owned(),
+            email: "bob@example.com".to_owned(),
+        };
+        assert_eq!(
+            nameless.signature(time).map(|s| s.name).ok().as_deref(),
+            Some("bob@example.com")
+        );
+    }
 
     #[test]
     fn paths_are_normalized() {

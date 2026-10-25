@@ -2122,7 +2122,12 @@ fn apply_remote_receive_policy(
         .unwrap_or_else(|_| std::sync::Arc::new(crate::config::ConfigSet::new()));
     let policy = crate::serve::ReceivePolicy::from_config(cfg.as_ref());
     let hidden_refs = crate::hide_refs::hide_ref_patterns_receive(cfg.as_ref());
-    let current_branch = crate::serve::checked_out_branch(&remote_repo);
+    let head_branch = crate::serve::head_branch(&remote_repo);
+    let checked_out = crate::serve::checked_out_branch(&remote_repo);
+    let branches = crate::serve::HeadBranches {
+        head: head_branch.as_deref(),
+        checked_out: checked_out.as_deref(),
+    };
     let pre_copy_lookup = dry_run.then(|| push_policy_object_lookup(remote_git_dir, local_git_dir));
 
     for d in decisions.iter_mut().filter(|d| d.apply) {
@@ -2149,7 +2154,7 @@ fn apply_remote_receive_policy(
             &cmd,
             &policy,
             &hidden_refs,
-            current_branch.as_deref(),
+            branches,
         ) {
             Ok(r) => r,
             Err(crate::serve::ServeError::Repository(e)) => return Err(e),

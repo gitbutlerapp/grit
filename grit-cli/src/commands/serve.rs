@@ -3,7 +3,8 @@
 //! These are plumbing commands. You don't run them by hand: a Git client starts
 //! them on the remote end of an ssh connection, and `grit-http-server` runs them
 //! to answer smart HTTP requests. They speak the Git wire protocol on stdin and
-//! stdout, so they produce no human or JSON output of their own.
+//! stdout, so they produce no human or JSON output of their own. Pushes get the
+//! same guard as `grit serve` ([`grit_protocol::PushGuard`]).
 
 use std::io::{BufWriter, Write};
 use std::path::Path;
@@ -72,7 +73,8 @@ pub fn run(
         Service::UploadPack => serve::upload_pack(&repo, &mut input, &mut output, &mut opts)?,
         Service::ReceivePack => {
             let policy = ReceivePolicy::from_config(&config);
-            serve::receive_pack(&repo, &mut input, &mut output, &opts, &policy)?;
+            let guard = grit_protocol::PushGuard::for_repository(&repo);
+            serve::receive_pack_with_hook(&repo, &mut input, &mut output, &opts, &policy, &guard)?;
         }
     }
     stdio::io_result(output.flush()).context("writing the response")?;

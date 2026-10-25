@@ -44,6 +44,7 @@ Keys are written as `section.name`, for example `user.email`.
 | `receive.denyNonFastForwards` | Refuse pushes that would discard commits. Enforced on the remote for [`grit receive-pack`](../receive-pack/), smart HTTP, and local-path [`grit push`](../push/). |
 | `receive.denyDeletes` | Refuse pushes that delete branches or tags. Same enforcement as `receive.denyNonFastForwards`. |
 | `receive.denyCurrentBranch` | Refuse pushes to the branch checked out in a non-bare repository. On by default; same enforcement as the other `receive.deny*` keys. |
+| `receive.denyDeleteCurrent` | Refuse pushes that delete the branch `HEAD` points at, bare repository or not. On by default; same enforcement as the other `receive.deny*` keys. |
 
 ## Options
 
