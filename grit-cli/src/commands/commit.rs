@@ -634,6 +634,6 @@ fn map_commit_error(err: Error) -> anyhow::Error {
         ),
         hook @ Error::Hook(_) => anyhow::Error::new(hook),
         locked @ Error::IndexLocked { .. } => crate::json_error::map_lib_error(locked),
-        other => anyhow::anyhow!("{other}"),
+        other => crate::json_error::map_lib_error(other),
     }
 }
