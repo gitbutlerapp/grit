@@ -1071,6 +1071,114 @@ fn make_bare_target(root: &Path, name: &str) -> PathBuf {
     bare
 }
 
+fn build_deep_history_repo(dir: &Path, commits: usize) {
+    git(dir, &["init", "-q", "-b", "main", "."]);
+    for i in 0..commits {
+        std::fs::write(dir.join(format!("f{i:03}.txt")), format!("content {i}\n")).unwrap();
+        std::fs::write(dir.join("shared.txt"), format!("shared rev {i}\n")).unwrap();
+        git(dir, &["add", "-A"]);
+        git(dir, &["commit", "-q", "-m", &format!("commit {i}")]);
+    }
+}
+
+/// Count delta entries in a pack index the way `git verify-pack -v` reports them.
+fn verify_pack_delta_count(pack_idx: &Path) -> usize {
+    let out = Command::new("git")
+        .args(["verify-pack", "-v"])
+        .arg(pack_idx)
+        .output()
+        .expect("verify-pack");
+    assert!(
+        out.status.success(),
+        "verify-pack failed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    String::from_utf8_lossy(&out.stdout)
+        .lines()
+        .filter(|line| line.split_whitespace().count() == 7)
+        .count()
+}
+
+fn first_pack_idx(bare: &Path) -> Option<PathBuf> {
+    let pack_dir = bare.join("objects/pack");
+    let mut idxs: Vec<_> = std::fs::read_dir(&pack_dir)
+        .ok()?
+        .filter_map(|e| e.ok())
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|x| x == "idx"))
+        .collect();
+    idxs.sort();
+    idxs.into_iter().next()
+}
+
+#[test]
+fn push_over_smart_http_initial_pack_is_delta_compressed() {
+    let Some(server_bin) = find_binary("grit-http-server") else {
+        eprintln!("SKIP: `grit-http-server` binary not found (build grit-http-server first)");
+        return;
+    };
+
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let local = tmp.path().join("local");
+    std::fs::create_dir_all(&local).unwrap();
+    build_deep_history_repo(&local, 50);
+    git(&local, &["repack", "-adf"]);
+    let local_git = local.join(".git");
+    let main_oid = rev_parse(&local, "refs/heads/main");
+
+    let root = tmp.path().join("srv");
+    std::fs::create_dir_all(&root).unwrap();
+    let bare = make_bare_target(&root, "delta.git");
+    git(&bare, &["config", "receive.unpacklimit", "1"]);
+
+    let Some(port) = free_port() else {
+        eprintln!("SKIP: could not allocate a free port");
+        return;
+    };
+    let Some(child) = spawn_server(&server_bin, &root, port) else {
+        eprintln!("SKIP: could not spawn grit-http-server");
+        return;
+    };
+    let _guard = ServerGuard(child);
+    if !wait_ready(port) {
+        eprintln!("SKIP: grit-http-server did not become ready on port {port}");
+        return;
+    }
+
+    let url = format!("http://127.0.0.1:{port}/delta.git");
+    let client = http_client_arc(UreqHttpClient::new());
+    let spec = PushRefSpec {
+        src: Some(main_oid),
+        src_ref: None,
+        dst: "refs/heads/main".to_owned(),
+        force: false,
+        delete: false,
+        expected_old: None,
+        expect_absent: false,
+        ..Default::default()
+    };
+    let outcome = push_http(
+        client,
+        &local_git,
+        &url,
+        &[spec],
+        &PushOptions::default(),
+        &mut NoProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .expect("push_http initial deep history");
+    assert_eq!(outcome.results[0].status, PushRefStatus::Ok);
+
+    let Some(idx) = first_pack_idx(&bare) else {
+        panic!("remote bare repo has no pack after push");
+    };
+    let deltas = verify_pack_delta_count(&idx);
+    assert!(
+        deltas > 0,
+        "http push pack must contain delta objects (got {deltas})"
+    );
+}
+
 #[test]
 fn push_over_smart_http_lands_ref_and_objects_and_reports_rejection() {
     let Some(server_bin) = find_binary("grit-http-server") else {

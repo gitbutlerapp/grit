@@ -32,13 +32,12 @@ use crate::branch_tracking;
 use crate::environment::RepositoryOptions;
 use crate::error::{Error, Result};
 use crate::fetch::Progress;
-use crate::objects::{HashAlgo, ObjectId, ObjectKind};
+use crate::objects::{HashAlgo, ObjectId};
 use crate::pkt_line::{self, Packet};
 use crate::progress::{poll_cancel, Cancel};
 use crate::push_report::{PushRefResult, PushRefStatus};
 use crate::transfer::{
-    build_pack, build_pack_push_fast, open_odb, PackBuildOptions, PushOptions, PushOutcome,
-    PushRefSpec,
+    build_pack, open_odb, PackBuildOptions, PushOptions, PushOutcome, PushRefSpec,
 };
 use crate::transport::Connection;
 
@@ -505,31 +504,18 @@ fn build_push_pack(
             .chain(&adv.advertised_haves)
             .copied(),
     )?;
-    let mut pack_opts = PackBuildOptions {
-        thin: true,
-        delta: true,
-        use_ofs_delta: adv.server_ofs_delta,
-        ..PackBuildOptions::default()
+    let local_cfg = crate::config::ConfigSet::load(
+        &crate::environment::Environment::empty(),
+        Some(local_git_dir),
+        true,
+    )
+    .ok();
+    let mut pack_opts = if haves.is_empty() {
+        PackBuildOptions::for_local_copy(local_cfg.as_ref())
+    } else {
+        PackBuildOptions::for_local_push(local_cfg.as_ref())
     };
-    // Small pushes (typical empty-commit series) spend more time planning deltas
-    // than a whole-object pack costs to build and send.
-    let wants_all_commits = wants.iter().all(|oid| {
-        local_odb
-            .read(oid)
-            .map(|obj| obj.kind == ObjectKind::Commit)
-            .unwrap_or(false)
-    });
-    if wants.len() <= 128 && wants_all_commits {
-        pack_opts.delta = false;
-        pack_opts.reuse_deltas = false;
-        pack_opts.thin = false;
-        // Negotiation `.have` lines name individual objects, not ref tips; using
-        // them as hide roots makes the commit walk treat most of history as
-        // visible and defeats the fast push path.
-        let hide_tips = local_odb.present_oids(adv.remote_refs.values().copied())?;
-        return build_pack_push_fast(local_git_dir, local_odb, &wants, &hide_tips, &pack_opts)
-            .map(Some);
-    }
+    pack_opts.use_ofs_delta = adv.server_ofs_delta;
     build_pack(local_odb, &wants, &haves, &pack_opts).map(Some)
 }
 
@@ -941,6 +927,7 @@ fn demux_report_and_remote_messages(input: &[u8], progress: &mut dyn Progress) -
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::objects::ObjectKind;
 
     fn make_decision(refname: &str, send: bool) -> PushDecision {
         PushDecision {
@@ -1357,5 +1344,116 @@ mod tests {
         read_push_report(&mut reader, &["refs/heads/main"], true, &mut cap)
             .expect("reset after complete side-band report");
         assert_eq!(cap.0.as_slice(), hook);
+    }
+
+    /// Initial push of one branch tip must not disable deltas just because there
+    /// is a single want (regression for #1941).
+    #[test]
+    fn push_pack_initial_branch_push_uses_deltas() {
+        use std::process::Command;
+
+        fn pack_delta_count(bytes: &[u8], algo_len: usize) -> usize {
+            fn read_type_size(b: &[u8]) -> (u8, usize, usize) {
+                let type_code = (b[0] >> 4) & 7;
+                let mut size = (b[0] & 0x0f) as usize;
+                let mut shift = 4;
+                let mut i = 1;
+                while b[i - 1] & 0x80 != 0 {
+                    size |= ((b[i] & 0x7f) as usize) << shift;
+                    shift += 7;
+                    i += 1;
+                }
+                (type_code, size, i)
+            }
+            fn zlib_consume(b: &[u8]) -> usize {
+                use std::io::Read as _;
+                let mut dec = flate2::bufread::ZlibDecoder::new(b);
+                let mut sink = Vec::new();
+                dec.read_to_end(&mut sink).expect("zlib");
+                dec.total_in() as usize
+            }
+            let nr = u32::from_be_bytes(bytes[8..12].try_into().unwrap()) as usize;
+            let mut pos = 12usize;
+            let mut deltas = 0usize;
+            for _ in 0..nr {
+                let (type_code, _, consumed) = read_type_size(&bytes[pos..]);
+                pos += consumed;
+                match type_code {
+                    6 | 7 => {
+                        deltas += 1;
+                        if type_code == 7 {
+                            pos += algo_len;
+                        } else {
+                            while bytes[pos] & 0x80 != 0 {
+                                pos += 1;
+                            }
+                            pos += 1;
+                        }
+                    }
+                    _ => {}
+                }
+                pos += zlib_consume(&bytes[pos..]);
+            }
+            deltas
+        }
+
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path();
+        for i in 0..40 {
+            if i == 0 {
+                Command::new("git")
+                    .current_dir(dir)
+                    .args(["init", "-q", "-b", "main", "."])
+                    .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                    .env("GIT_CONFIG_SYSTEM", "/dev/null")
+                    .status()
+                    .unwrap();
+            }
+            std::fs::write(dir.join(format!("f{i:03}.txt")), format!("content {i}\n")).unwrap();
+            std::fs::write(dir.join("shared.txt"), format!("shared rev {i}\n")).unwrap();
+            Command::new("git")
+                .current_dir(dir)
+                .args(["add", "-A"])
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_CONFIG_SYSTEM", "/dev/null")
+                .status()
+                .unwrap();
+            Command::new("git")
+                .current_dir(dir)
+                .args(["commit", "-q", "-m", &format!("commit {i}")])
+                .env("GIT_AUTHOR_NAME", "T")
+                .env("GIT_AUTHOR_EMAIL", "t@example.com")
+                .env("GIT_AUTHOR_DATE", "2005-04-07T22:13:13 +0200")
+                .env("GIT_COMMITTER_NAME", "T")
+                .env("GIT_COMMITTER_EMAIL", "t@example.com")
+                .env("GIT_COMMITTER_DATE", "2005-04-07T22:13:13 +0200")
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_CONFIG_SYSTEM", "/dev/null")
+                .status()
+                .unwrap();
+        }
+        Command::new("git")
+            .current_dir(dir)
+            .args(["repack", "-adf"])
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .status()
+            .unwrap();
+        let git_dir = dir.join(".git");
+        let odb = open_odb(&git_dir);
+        let tip = crate::refs::resolve_ref(&git_dir, "HEAD").expect("head");
+        let plan = PushPlan {
+            decisions: vec![send_decision("refs/heads/main", tip)],
+            to_send: vec![0],
+        };
+        let adv = adv_state(false, true, false);
+        let pack = build_push_pack(&plan, &git_dir, &odb, &adv)
+            .unwrap()
+            .expect("pack bytes");
+        let deltas = pack_delta_count(&pack, odb.hash_algo().len());
+        assert!(
+            deltas > 0,
+            "initial push pack must contain delta objects (got {deltas})"
+        );
     }
 }
