@@ -66,7 +66,7 @@ use store::{
 use crate::check_ref_format::{check_refname_format, RefNameOptions};
 use crate::config::ConfigSet;
 use crate::error::{Error, RefLockError, Result};
-use crate::objects::ObjectId;
+use crate::objects::{HashAlgo, ObjectId};
 use crate::pack;
 
 /// Maximum symbolic ref hops when resolving a ref (Git `SYMREF_MAXDEPTH`).
@@ -892,21 +892,25 @@ fn packed_refs_unterminated_line(path: &Path, line: impl Into<String>) -> Error 
     }
 }
 
-fn parse_packed_ref_peel_line(path: &Path, line: &str, expect_peel: bool) -> Result<()> {
+/// Validate a `^<peeled-oid>` line and return the peeled id.
+fn parse_packed_ref_peel_line(path: &Path, line: &str, expect_peel: bool) -> Result<ObjectId> {
     if !expect_peel {
         return Err(packed_refs_unexpected_line(path, line));
     }
-    let inner = line
-        .strip_prefix('^')
-        .ok_or_else(|| packed_refs_unexpected_line(path, line))?;
-    let mut j = 0usize;
-    while j < inner.len() && inner.as_bytes()[j].is_ascii_hexdigit() {
-        j += 1;
-    }
-    if !ObjectId::is_hex_len(j) || j != inner.len() {
-        return Err(packed_refs_unexpected_line(path, line));
-    }
-    Ok(())
+    line.strip_prefix('^')
+        .and_then(|inner| ObjectId::from_hex(inner).ok())
+        .ok_or_else(|| packed_refs_unexpected_line(path, line))
+}
+
+/// Id-prefix length and id of a record line: 40 or 64 hex digits followed by a space.
+fn packed_line_oid(line: &str) -> Option<(usize, ObjectId)> {
+    let bytes = line.as_bytes();
+    let hex_len = [HashAlgo::Sha1.hex_len(), HashAlgo::Sha256.hex_len()]
+        .into_iter()
+        .find(|&len| bytes.get(len) == Some(&b' '))?;
+    // Byte `hex_len` is an ASCII space, so the slice ends on a char boundary.
+    let oid = ObjectId::from_hex(&line[..hex_len]).ok()?;
+    Some((hex_len, oid))
 }
 
 fn packed_ref_data_line_refname(line: &str) -> Option<&str> {
@@ -939,22 +943,16 @@ fn parse_packed_ref_data_line_borrowed<'a>(
     line: &'a str,
     ref_opts: &RefNameOptions,
 ) -> Result<(&'a str, ObjectId)> {
-    let bytes = line.as_bytes();
-    let mut j = 0usize;
-    while j < bytes.len() && bytes[j].is_ascii_hexdigit() {
-        j += 1;
-    }
-    if !ObjectId::is_hex_len(j) || j + 1 >= bytes.len() || bytes[j] != b' ' {
+    let Some((hex_len, oid)) = packed_line_oid(line) else {
         return Err(packed_refs_unexpected_line(path, line));
-    }
-    let refname = &line[j + 1..];
+    };
+    let refname = &line[hex_len + 1..];
     if refname.is_empty() || refname.as_bytes().iter().any(|b| b.is_ascii_whitespace()) {
         return Err(packed_refs_unexpected_line(path, line));
     }
     if check_refname_format(refname, ref_opts).is_err() {
         return Err(packed_refs_unexpected_line(path, line));
     }
-    let oid: ObjectId = line[..j].parse()?;
     Ok((refname, oid))
 }
 
@@ -1295,10 +1293,10 @@ fn parse_packed_refs_region(
             expect_peel = false;
             continue;
         }
-        if let Some(peel_hex) = line.strip_prefix('^') {
-            parse_packed_ref_peel_line(path, line, expect_peel)?;
+        if line.starts_with('^') {
+            let peel = parse_packed_ref_peel_line(path, line, expect_peel)?;
             if let Some((_, _, peeled)) = pending.as_mut() {
-                *peeled = ObjectId::from_hex(peel_hex).ok();
+                *peeled = Some(peel);
             }
             expect_peel = false;
             continue;
@@ -4901,7 +4899,7 @@ mod read_raw_ref_tests {
 #[cfg(test)]
 mod packed_refs_parse_tests {
     use super::*;
-    use crate::objects::HashAlgo;
+
     use tempfile::tempdir;
 
     #[test]
