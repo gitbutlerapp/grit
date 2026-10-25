@@ -820,7 +820,7 @@ pub fn validate_log_bench_grit_shell(script: &str, grit: &Path) -> Result<(), St
     if !script.contains(&format!("page=$({grit_q} log)")) {
         return Err("log benchmark shell missing first-page grit log".into());
     }
-    if !script.contains(&format!("page=$({grit_q} log --before=\"$before\")")) {
+    if !script.contains(&format!("page=$({grit_q} log --cursor=\"$before\")")) {
         return Err("log benchmark shell missing paged grit log".into());
     }
     Ok(())
@@ -887,10 +887,10 @@ for _ in $(seq 1 {pages}); do
   if [ -z "$before" ]; then
     page=$({grit_q} log) || exit $?
   else
-    page=$({grit_q} log --before="$before") || exit $?
+    page=$({grit_q} log --cursor="$before") || exit $?
   fi
   printf '%s\n' "$page" | awk '!/^→/ && !/^$/ {{print}}'
-  before=$(printf '%s\n' "$page" | sed -n 's|^→ more: grit log --before=||p')
+  before=$(printf '%s\n' "$page" | sed -n 's|^→ more: grit log --cursor=||p')
   if [ -z "$before" ]; then break; fi
 done"#
     )
@@ -938,7 +938,7 @@ mod log_bench_tests {
             script.contains("if [ -z \"$before\" ]; then break; fi"),
             "must not use `[ -z ] && break` under set -eu"
         );
-        assert!(script.contains("sed -n 's|^→ more: grit log --before=||p'"));
+        assert!(script.contains("sed -n 's|^→ more: grit log --cursor=||p'"));
     }
 }
 

@@ -1020,10 +1020,12 @@ fn malformed_reachable_tag_is_bad_object_not_error() {
     let bad_tag = ObjectId::from_hex(bad_hex.trim()).expect("parse oid");
     write_ref_loose(dir.path(), "refs/tags/bad-tag", bad_tag);
     let git_text = git(dir.path(), &["fsck"]);
+    let bad_hex = bad_tag.to_hex();
     assert!(
         git_text.to_lowercase().contains("could not be parsed")
             || git_text.contains("badTag")
-            || git_text.contains("bogus"),
+            || git_text.contains("bogus")
+            || git_text.contains(&format!("{bad_hex}: object corrupt or missing")),
         "{git_text}"
     );
     let report = grit_fsck(&repo, &FsckOptions::full_repository(false));

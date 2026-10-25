@@ -533,15 +533,16 @@ pub fn branch_delete_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv)
     )
 }
 
+/// Undo the previous iteration's rename. The client is a remote fixture, not a worktree
+/// fixture, so the worktree base reset does not apply to it.
 pub fn prepare_remote_rename_reset(ctx: &DailyHeadlineContext) -> DailyPrepare {
-    let reset = prepare_daily_reset_script(&ctx.git);
     let undo = shell_command(
         &ctx.git,
         &["remote", "rename", REMOTE_RENAME_TARGET, "origin"],
     );
     let script = format!(
-        "{reset}\ncd {} && ({undo} 2>/dev/null || true)\n",
-        ctx.repo.display()
+        "set -eu\ncd {} && ({undo} 2>/dev/null || true)\n",
+        shell_quote_path(&ctx.repo)
     );
     DailyPrepare::Shell(BenchArgv::new("/bin/sh", ["-c", script.as_str()]))
 }

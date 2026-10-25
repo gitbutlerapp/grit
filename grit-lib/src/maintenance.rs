@@ -1009,7 +1009,7 @@ fn skipping_repack_would_retain_prunable_packed_objects(
     } else {
         UnreachablePackRetention::DropAll
     };
-    let indexes = crate::pack::read_local_pack_indexes_cached(odb.objects_dir())?;
+    let indexes = odb.local_pack_indexes()?;
     for idx in indexes {
         if pack_has_keep_marker(pack_dir, &idx.pack_path) {
             continue;

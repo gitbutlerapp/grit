@@ -366,7 +366,8 @@ pub struct LogRecord {
     pub email: String,
     /// Time in seconds since epoch.
     pub time_seconds: u64,
-    /// Timezone offset in minutes (signed).
+    /// Timezone offset as Git writes it: the signed `±HHMM` value read as decimal
+    /// (`+0530` is `530`, `-0800` is `-800`).
     pub tz_offset: i16,
     /// Log message.
     pub message: String,
@@ -4008,12 +4009,11 @@ pub(crate) fn parse_identity_string(identity: &str) -> (String, String, u64, i16
 
     let time_secs = time_str.parse::<u64>().unwrap_or(0);
 
-    // Parse timezone: +HHMM or -HHMM
-    let tz_minutes = if tz_str.len() >= 5 {
+    let tz_hhmm = if tz_str.len() >= 5 {
         let sign = if tz_str.starts_with('-') { -1i16 } else { 1 };
         let hours = tz_str[1..3].parse::<i16>().unwrap_or(0);
         let mins = tz_str[3..5].parse::<i16>().unwrap_or(0);
-        sign * (hours * 60 + mins)
+        sign * (hours * 100 + mins)
     } else {
         0
     };
@@ -4031,7 +4031,7 @@ pub(crate) fn parse_identity_string(identity: &str) -> (String, String, u64, i16
         (name_email.to_owned(), String::new())
     };
 
-    (name, email, time_secs, tz_minutes)
+    (name, email, time_secs, tz_hhmm)
 }
 
 // ---------------------------------------------------------------------------
@@ -4214,10 +4214,8 @@ mod tests {
             stack.table_names.len()
         );
 
-        let subset = ReftableStack::subset_stack(
-            stack.reftable_dir.clone(),
-            vec![stack.table_names[0].clone()],
-        );
+        let (_newest, older) = stack.table_names.split_last().expect("tables");
+        let subset = ReftableStack::subset_stack(stack.reftable_dir.clone(), older.to_vec());
         let refs = subset.read_refs().expect("subset read");
         let names: Vec<&str> = refs.iter().map(|r| r.name.as_str()).collect();
         assert!(names.iter().any(|n| *n == "refs/heads/only-in-first-table"));
@@ -4226,7 +4224,16 @@ mod tests {
             .any(|n| *n == "refs/heads/only-in-second-table"));
 
         let full = stack.read_refs().expect("full read");
-        assert_eq!(full.len(), 2);
+        let mut full_names: Vec<&str> = full.iter().map(|r| r.name.as_str()).collect();
+        full_names.sort_unstable();
+        assert_eq!(
+            full_names,
+            [
+                "HEAD",
+                "refs/heads/only-in-first-table",
+                "refs/heads/only-in-second-table"
+            ]
+        );
     }
 
     #[test]
@@ -4436,7 +4443,7 @@ mod tests {
         assert_eq!(name, "Test User");
         assert_eq!(email, "test@example.com");
         assert_eq!(ts, 1700000000);
-        assert_eq!(tz, -480);
+        assert_eq!(tz, -800);
     }
 
     #[test]

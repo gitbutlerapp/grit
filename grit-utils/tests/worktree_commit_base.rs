@@ -2,6 +2,7 @@
 
 use std::path::Path;
 use std::process::Command;
+use std::sync::{Mutex, MutexGuard};
 
 use grit_utils::fixture_registry::{self, FixtureKind};
 use grit_utils::worktree_fixture::{
@@ -10,12 +11,23 @@ use grit_utils::worktree_fixture::{
 };
 use tempfile::TempDir;
 
-#[test]
-fn commit_prepare_resets_to_fixture_base_after_git_commits() {
+/// Both tests point the process-wide bench cache, scratch dir and working directory at a
+/// fixture repository they mutate, so they must not overlap.
+static FIXTURE_LOCK: Mutex<()> = Mutex::new(());
+
+/// Serialize on [`FIXTURE_LOCK`] and point the bench cache and scratch dirs at fresh temp dirs.
+fn isolated_fixture_env() -> (MutexGuard<'static, ()>, TempDir, TempDir) {
+    let guard = FIXTURE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let cache = TempDir::new().expect("tempdir");
     let scratch = TempDir::new().expect("tempdir");
     std::env::set_var("GRIT_BENCH_CACHE", cache.path());
     std::env::set_var("GRIT_BENCH_SCRATCH", scratch.path());
+    (guard, cache, scratch)
+}
+
+#[test]
+fn commit_prepare_resets_to_fixture_base_after_git_commits() {
+    let (_guard, _cache, _scratch) = isolated_fixture_env();
 
     let git = grit_utils::binary::resolve_binary("git", None).expect("git");
     fixture_registry::ensure_cached(&git, FixtureKind::SynthS, false).expect("cache");
@@ -50,6 +62,7 @@ fn commit_prepare_resets_to_fixture_base_after_git_commits() {
 
 #[test]
 fn worktree_commit_prepare_leaves_head_at_fixture_base() {
+    let (_guard, _cache, _scratch) = isolated_fixture_env();
     let git = grit_utils::binary::resolve_binary("git", None).expect("git");
     let (repo, _record) =
         ensure_worktree_bench_repo(&git, FixtureKind::SynthS, false).expect("worktree repo");

@@ -49,6 +49,64 @@ pub fn git_supports_sha256() -> bool {
         .unwrap_or(false)
 }
 
+/// Run `git index-pack --stdin <extra_args>` on a SHA-1 `pack`.
+///
+/// The pack is indexed into a scratch bare repository whose alternates point at
+/// `base_objects`, so thin-pack bases resolve and the result never depends on
+/// (or writes into) the caller's working directory.
+pub fn git_index_pack_stdin(
+    pack: &[u8],
+    base_objects: &Path,
+    extra_args: &[&str],
+) -> GitToolOutcome {
+    use std::io::Write;
+
+    let fail = |output: String| GitToolOutcome { ok: false, output };
+    let scratch = match tempfile::tempdir() {
+        Ok(d) => d,
+        Err(e) => return fail(format!("scratch dir: {e}")),
+    };
+    let init = run_git(scratch.path(), &["init", "-q", "--bare"]);
+    if !init.ok {
+        return fail(init.stderr);
+    }
+    let alternates = scratch.path().join("objects/info/alternates");
+    if let Err(e) = std::fs::write(&alternates, format!("{}\n", base_objects.display())) {
+        return fail(format!("write alternates: {e}"));
+    }
+
+    let mut child = match Command::new("git")
+        .current_dir(scratch.path())
+        .args(["index-pack", "--stdin"])
+        .args(extra_args)
+        .env("GIT_CONFIG_GLOBAL", null_device())
+        .env("GIT_CONFIG_SYSTEM", null_device())
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+    {
+        Ok(c) => c,
+        Err(e) => return fail(format!("spawn index-pack: {e}")),
+    };
+    let write_err = child
+        .stdin
+        .take()
+        .map(|mut stdin| stdin.write_all(pack))
+        .and_then(Result::err);
+    match child.wait_with_output() {
+        Ok(out) => GitToolOutcome {
+            ok: out.status.success() && write_err.is_none(),
+            output: format!(
+                "{}\n{}",
+                String::from_utf8_lossy(&out.stdout),
+                String::from_utf8_lossy(&out.stderr)
+            ),
+        },
+        Err(e) => fail(format!("wait index-pack: {e}")),
+    }
+}
+
 /// Run `git fsck` and collect documented msg-ids without panicking.
 ///
 /// When `strict` is true, `--strict` is passed (matching Git's strict fsck mode).

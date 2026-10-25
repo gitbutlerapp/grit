@@ -371,7 +371,7 @@ pub fn install_pack_path_with_progress(
                 ))
             })?;
             poll_ingest_cancel(&mut progress, cancel)?;
-            let trailer = pack_bytes[pack_bytes.len() - hb..].to_vec();
+            let mut trailer = pack_bytes[pack_bytes.len() - hb..].to_vec();
             if let Some(rows) = &opts.trusted_index_rows {
                 if rows.len()
                     != u32::from_be_bytes([
@@ -406,6 +406,7 @@ pub fn install_pack_path_with_progress(
                         std::fs::write(&stage_pack, &fixed).map_err(Error::Io)?;
                         indexed = PackData::open(&stage_pack)?;
                         let pack_bytes: &[u8] = indexed.deref();
+                        trailer = pack_bytes[pack_bytes.len() - hb..].to_vec();
                         records = crate::pack_index_build::build_pack_index_records_with_progress(
                             pack_bytes,
                             odb,
@@ -431,6 +432,15 @@ pub fn install_pack_path_with_progress(
         };
         drop(indexed);
         poll_ingest_cancel(&mut progress, cancel)?;
+        let (final_pack, idx_path) = if trailer == pack_hash.as_bytes() {
+            (final_pack.clone(), idx_path.clone())
+        } else {
+            let fixed_stem = format!("pack-{}", ObjectId::from_bytes(&trailer)?.to_hex());
+            (
+                pack_dir.join(format!("{fixed_stem}.pack")),
+                pack_dir.join(format!("{fixed_stem}.idx")),
+            )
+        };
         write_v2_pack_index_with_trailer(&stage_idx, &entries, &trailer, hb, Some(sort_threads))?;
         poll_ingest_cancel(&mut progress, cancel)?;
         if !opts.skip_post_index_verify {

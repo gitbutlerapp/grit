@@ -1414,8 +1414,8 @@ mod reverse_scan_tests {
     fn reverse_reader_returns_newest_first() {
         let dir = tempfile::tempdir().expect("tempdir");
         let git_dir = dir.path().join(".git");
-        fs::create_dir_all(git_dir.join("logs/refs/heads")).expect("mkdir");
         let path = reflog_path(&git_dir, "refs/heads/main");
+        fs::create_dir_all(path.parent().expect("reflog dir")).expect("mkdir");
         let mut f = fs::File::create(&path).expect("create");
         write!(f, "{}", sample_line(1)).expect("w");
         write!(f, "{}", sample_line(2)).expect("w");

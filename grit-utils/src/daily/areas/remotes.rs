@@ -17,7 +17,7 @@ use super::super::remote_fixture::{
     verify_fetch_incremental, verify_fetch_incremental_http, verify_fetch_noop,
     verify_fetch_one_branch, verify_ls_remote_all, verify_pull_check, verify_pull_fast_forward,
     verify_pull_rebase, verify_push_force_with_lease, verify_push_incremental,
-    verify_push_incremental_http, verify_push_refspec,
+    verify_push_incremental_http, verify_push_refspec, GIT_NO_AUTO_MAINTENANCE,
 };
 use super::super::runner::BenchArgv;
 use crate::shell::shell_quote;
@@ -93,8 +93,9 @@ fn correctness_fetch_deepen(ctx: &DailyHeadlineContext) -> anyhow::Result<()> {
 fn prepare_fetch_deepen_client(ctx: &DailyHeadlineContext) -> DailyPrepare {
     let branch = default_remote_branch(ctx);
     DailyPrepare::Shell(sh_script(format!(
-        "set -e\ncd {}\ngit fetch --depth 1 -q origin {}\n{} fetch --depth 1 origin {}\n",
+        "set -e\ncd {}\ngit {} fetch --depth 1 -q origin {}\n{} fetch --depth 1 origin {}\n",
         ctx.repo.display(),
+        GIT_NO_AUTO_MAINTENANCE.join(" "),
         branch,
         ctx.grit.display(),
         branch,
@@ -102,7 +103,9 @@ fn prepare_fetch_deepen_client(ctx: &DailyHeadlineContext) -> DailyPrepare {
 }
 
 fn fetch_deepen_git(ctx: &DailyHeadlineContext) -> BenchArgv {
-    sh_devnull(&ctx.git, &["fetch", "--deepen", "50", "-q", "origin"])
+    let mut args: Vec<&str> = GIT_NO_AUTO_MAINTENANCE.to_vec();
+    args.extend(["fetch", "--deepen", "50", "-q", "origin"]);
+    sh_devnull(&ctx.git, &args)
 }
 
 fn fetch_deepen_grit(ctx: &DailyHeadlineContext) -> BenchArgv {

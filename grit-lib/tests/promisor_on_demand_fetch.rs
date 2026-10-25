@@ -94,6 +94,7 @@ fn grit_blobless_clone(
             url: url.to_owned(),
             dest: dest.to_path_buf(),
             filter: Some(ObjectFilterSpec::BlobNone),
+            checkout: false,
             ..CloneOptions::new(url, dest.to_path_buf())
         },
         &mut NoProgress,

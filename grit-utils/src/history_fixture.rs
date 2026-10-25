@@ -53,22 +53,37 @@ pub fn history_cache_root() -> PathBuf {
 
 /// Cached worktree clone of a synthetic tier for history scenarios.
 pub fn ensure_synth_history_repo(git: &Path, tier: SynthTier) -> Result<PathBuf> {
-    let dest = history_cache_root().join(format!("synth-history-{}", tier_label(tier)));
+    static SCRATCH_SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+    let name = format!("synth-history-{}", tier_label(tier));
+    let dest = history_cache_root().join(&name);
     if dest.join(READY_MARKER).is_file() {
         return Ok(dest);
     }
-    if dest.exists() {
-        remove_dir_robust(&dest);
-    }
+    // Concurrent tests and grit-bench processes share this cache: build the fixture in a
+    // private directory and move it into place only once it is complete.
+    let seq = SCRATCH_SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let scratch = dest.with_file_name(format!("{name}.tmp-{}-{seq}", std::process::id()));
+    remove_dir_robust(&scratch);
     eprintln!(
         "Generating synthetic history fixture ({}) at {} …",
         tier_label(tier),
         dest.display()
     );
-    generate_synth_repo(&dest, tier).context("generate synth history fixture")?;
-    write_history_meta(git, &dest)?;
-    fs::write(dest.join(READY_MARKER), b"ok").context("write history ready marker")?;
-    Ok(dest)
+    generate_synth_repo(&scratch, tier).context("generate synth history fixture")?;
+    write_history_meta(git, &scratch)?;
+    fs::write(scratch.join(READY_MARKER), b"ok").context("write history ready marker")?;
+    if dest.exists() && !dest.join(READY_MARKER).is_file() {
+        remove_dir_robust(&dest);
+    }
+    match fs::rename(&scratch, &dest) {
+        Ok(()) => Ok(dest),
+        Err(_) if dest.join(READY_MARKER).is_file() => {
+            remove_dir_robust(&scratch);
+            Ok(dest)
+        }
+        Err(e) => Err(e).context("install synth history fixture"),
+    }
 }
 
 fn tier_label(tier: SynthTier) -> &'static str {

@@ -613,22 +613,27 @@ pub fn verify_fetch_dry_run(ctx: &DailyHeadlineContext, cwd: &Path) -> Result<()
     Ok(())
 }
 
+/// `git -c …` options that keep git's detached auto-maintenance from running.
+///
+/// Background `gc`/`prune` rewrites `.git/shallow` while the next fetch runs, which git
+/// rejects ("shallow file has changed since we read it") on shallow-client scenarios.
+pub(crate) const GIT_NO_AUTO_MAINTENANCE: [&str; 4] =
+    ["-c", "maintenance.auto=false", "-c", "gc.auto=0"];
+
 pub fn verify_fetch_deepen(ctx: &DailyHeadlineContext, cwd: &Path) -> Result<()> {
     let remote = remote_state(ctx)?;
     configure_client_remote(&ctx.git, cwd, remote)?;
     let branch = remote.meta.default_branch.as_str();
-    run_git(
-        &ctx.git,
-        cwd,
-        &["fetch", "--depth", "1", "-q", "origin", branch],
-    )?;
+    let git_fetch = |args: &[&str]| -> Result<()> {
+        let mut argv: Vec<&str> = GIT_NO_AUTO_MAINTENANCE.to_vec();
+        argv.push("fetch");
+        argv.extend_from_slice(args);
+        run_git(&ctx.git, cwd, &argv)
+    };
+    git_fetch(&["--depth", "1", "-q", "origin", branch])?;
     run_grit(&ctx.grit, cwd, &["fetch", "--depth", "1", "origin", branch])?;
     prepare_network_fetch_incr(&ctx.git, &remote.bare)?;
-    run_git(
-        &ctx.git,
-        cwd,
-        &["fetch", "--deepen", "50", "-q", "origin", branch],
-    )?;
+    git_fetch(&["--deepen", "50", "-q", "origin", branch])?;
     prepare_network_fetch_incr(&ctx.git, &remote.bare)?;
     run_grit(
         &ctx.grit,

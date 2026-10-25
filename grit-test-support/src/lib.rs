@@ -17,10 +17,10 @@ pub use cli_fixture::{
     SnapshotExitCodes, SnapshotOutputMode,
 };
 pub use objects::{
-    git_cat_file_batch_check, git_commit_graph_verify, git_fsck, git_hash_object_literally,
-    git_midx_verify, git_supports_sha256, git_verify_pack, hash_loose_object, loose_object_path,
-    write_loose_object, BatchCheckOutcome, FsckOutcome, GitToolOutcome, HashAlgo, ObjectKind,
-    PackBuilder, RepoFixture,
+    git_cat_file_batch_check, git_commit_graph_verify, git_dir_state_digest, git_fsck,
+    git_hash_object_literally, git_index_pack_stdin, git_midx_verify, git_supports_sha256,
+    git_verify_pack, hash_loose_object, loose_object_path, write_loose_object, BatchCheckOutcome,
+    FsckOutcome, GitToolOutcome, HashAlgo, ObjectKind, PackBuilder, RepoFixture,
 };
 pub use parallel::{
     forced_parallel_options, forced_parallel_policy, forced_parallelism, heavy_disk_serial_guard,
@@ -703,56 +703,6 @@ fn grit_bin() -> OsString {
         }
     }
     OsString::from(format!("target/debug/{program}"))
-}
-
-/// Stable digest of a `.git` directory tree (objects, refs, logs) for before/after comparisons.
-///
-/// Only regular files under `objects/`, `refs/`, and `logs/` are included, sorted by relative path.
-#[must_use]
-pub fn git_dir_state_digest(git_dir: &Path) -> String {
-    use sha1::{Digest, Sha1};
-
-    let mut paths = Vec::new();
-    for sub in ["objects", "refs", "logs"] {
-        let root = git_dir.join(sub);
-        if root.is_dir() {
-            collect_git_state_files(&root, &mut paths);
-        }
-    }
-    paths.sort();
-    let mut hasher = Sha1::new();
-    for path in paths {
-        let rel = path
-            .strip_prefix(git_dir)
-            .unwrap_or(&path)
-            .to_string_lossy();
-        hasher.update(rel.as_bytes());
-        hasher.update([0u8]);
-        if let Ok(bytes) = fs::read(&path) {
-            hasher.update(bytes);
-        }
-        hasher.update([0u8]);
-    }
-    hex::encode(hasher.finalize())
-}
-
-fn collect_git_state_files(dir: &Path, out: &mut Vec<PathBuf>) {
-    let entries = match fs::read_dir(dir) {
-        Ok(e) => e,
-        Err(_) => return,
-    };
-    for entry in entries.flatten() {
-        let path = entry.path();
-        let meta = match fs::symlink_metadata(&path) {
-            Ok(m) => m,
-            Err(_) => continue,
-        };
-        if meta.is_dir() {
-            collect_git_state_files(&path, out);
-        } else if meta.is_file() {
-            out.push(path);
-        }
-    }
 }
 
 fn copy_dir_contents(source: &Path, dest: &Path) -> io::Result<()> {

@@ -379,6 +379,71 @@ mod coverage_tests {
     use crate::pack::{read_pack_index, write_v2_pack_index_with_trailer};
 
     #[test]
+    fn checksum_valid_rejects_data_shorter_than_trailer() {
+        assert!(!hashfile_checksum_valid(b"short", 20));
+        assert!(!hashfile_checksum_valid(&[], SHA256_TRAILER));
+    }
+
+    #[test]
+    fn rev_sidecar_built_from_git_pack_once_and_accepted_by_git() {
+        use std::process::Command;
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        let git = |args: &[&str]| {
+            let out = Command::new("git")
+                .current_dir(root)
+                .args(args)
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_CONFIG_SYSTEM", "/dev/null")
+                .env("GIT_AUTHOR_NAME", "T")
+                .env("GIT_AUTHOR_EMAIL", "t@example.com")
+                .env("GIT_COMMITTER_NAME", "T")
+                .env("GIT_COMMITTER_EMAIL", "t@example.com")
+                .output()
+                .expect("spawn git");
+            assert!(
+                out.status.success(),
+                "git {args:?}: {}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        };
+        git(&["init", "-q", "-b", "main", "."]);
+        for i in 0..3 {
+            fs::write(root.join(format!("f{i}.txt")), format!("file {i}\n")).expect("write");
+            git(&["add", "."]);
+            git(&["commit", "-q", "-m", &format!("c{i}")]);
+        }
+        git(&["-c", "pack.writeReverseIndex=false", "repack", "-adq"]);
+        let pack_dir = root.join(".git/objects/pack");
+        let idx = fs::read_dir(&pack_dir)
+            .expect("pack dir")
+            .filter_map(|e| e.ok().map(|e| e.path()))
+            .find(|p| p.extension().is_some_and(|x| x == "idx"))
+            .expect("pack index");
+        let rev = rev_path_for_index(&idx);
+        assert!(!rev.exists(), "repack must not have written a .rev");
+
+        let index = read_pack_index(&idx).expect("read idx");
+        assert!(build_pack_rev_bytes(&index)
+            .expect("rev bytes")
+            .starts_with(b"RIDX"));
+
+        write_pack_rev_sidecar_for_index_path(&idx).expect("write rev");
+        verify_pack_rev_file(&rev, &index).expect("valid rev");
+        let written = fs::read(&rev).expect("read rev");
+        write_pack_rev_sidecar_for_index_path(&idx).expect("keep valid rev");
+        assert_eq!(fs::read(&rev).expect("reread rev"), written);
+
+        git(&[
+            "-c",
+            "pack.readReverseIndex=true",
+            "verify-pack",
+            &idx.to_string_lossy(),
+        ]);
+        git(&["-c", "pack.readReverseIndex=true", "fsck", "--strict"]);
+    }
+
+    #[test]
     fn append_checksum_sha256_and_short_pack_trailer_padding() {
         let mut out = b"RIDX".to_vec();
         append_hashfile_checksum(&mut out, SHA256_TRAILER);

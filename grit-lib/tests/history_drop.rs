@@ -361,12 +361,14 @@ fn history_drop_matches_git_history_when_available() {
     }
     let grit_dir = tempfile::tempdir().expect("grit dir");
     let git_dir = tempfile::tempdir().expect("git dir");
-    for dir in [grit_dir.path(), git_dir.path()] {
-        git(dir, &["init", "-b", "main"]);
-        commit_file(dir, "first.t", "1\n", "first");
-        commit_file(dir, "second.t", "2\n", "second");
-        commit_file(dir, "third.t", "3\n", "third");
-    }
+    git(grit_dir.path(), &["init", "-b", "main"]);
+    commit_file(grit_dir.path(), "first.t", "1\n", "first");
+    commit_file(grit_dir.path(), "second.t", "2\n", "second");
+    commit_file(grit_dir.path(), "third.t", "3\n", "third");
+    git(
+        git_dir.path(),
+        &["clone", "-q", &grit_dir.path().to_string_lossy(), "."],
+    );
     let b = git(grit_dir.path(), &["rev-parse", "HEAD~"])
         .trim()
         .to_string();
@@ -390,10 +392,10 @@ fn history_drop_matches_git_history_when_available() {
         .args(["history", "drop", "HEAD~"])
         .env("GIT_AUTHOR_NAME", "Test User")
         .env("GIT_AUTHOR_EMAIL", "test@example.com")
-        .env("GIT_COMMITTER_NAME", "Test User")
-        .env("GIT_COMMITTER_EMAIL", "test@example.com")
+        .env("GIT_COMMITTER_NAME", "Dropper")
+        .env("GIT_COMMITTER_EMAIL", "drop@grit.test")
         .env("GIT_AUTHOR_DATE", "1700000001 +0000")
-        .env("GIT_COMMITTER_DATE", "1700000002 +0000")
+        .env("GIT_COMMITTER_DATE", "@8 +0000")
         .env("GIT_CONFIG_GLOBAL", "/dev/null")
         .env("GIT_CONFIG_SYSTEM", "/dev/null")
         .output()

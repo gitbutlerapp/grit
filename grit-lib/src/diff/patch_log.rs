@@ -469,7 +469,11 @@ pub fn write_commits_log_patch<W: Write>(
     }
     let opts = effective_log_patch_options(repo, opts)?;
     let mut abbrev_cache = OidAbbrevCache::new(opts.abbrev_len);
-    for (oid, commit) in &parsed {
+    for (index, (oid, commit)) in parsed.iter().enumerate() {
+        // Like `git log -p`, the default header separates entries with a blank line.
+        if index > 0 && matches!(opts.commit_header, LogPatchCommitHeader::Full) {
+            writeln!(out)?;
+        }
         let parent_tree = parent_tree_for_commit(odb, commit, Some(&trees_by_commit))?;
         write_parsed_commit_log_patch(
             out,

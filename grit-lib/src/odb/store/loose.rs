@@ -421,6 +421,16 @@ pub(crate) fn strip_decompressed_object_header(
     Ok(kind)
 }
 
+/// On-disk (compressed) size of `oid`'s loose file under `objects_dir`.
+///
+/// Returns `None` when the object is not stored as a readable loose file there.
+pub(crate) fn loose_file_size(objects_dir: &Path, oid: &ObjectId) -> Option<u64> {
+    fs::metadata(oid.loose_path_in(objects_dir))
+        .ok()
+        .filter(fs::Metadata::is_file)
+        .map(|meta| meta.len())
+}
+
 /// Read kind and size from a loose object file without loading the full payload.
 pub fn read_loose_object_info(path: &Path) -> Result<ObjectInfo> {
     let mut file = fs::File::open(path).map_err(Error::Io)?;

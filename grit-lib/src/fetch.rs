@@ -482,14 +482,23 @@ fn push_unique_prefix(out: &mut Vec<String>, value: &str) {
     }
 }
 
-/// Ref namespace prefixes to enumerate when advertising refs for fetch (local dir,
-/// v2 `ls-refs`, and opportunistic remote-tracking updates).
+/// Ref namespace prefixes to enumerate when advertising refs for fetch (local dir
+/// and opportunistic remote-tracking updates).
 ///
 /// Always includes `refs/heads/` and `refs/tags/`. Explicit refspec sources also
 /// add literal prefixes (e.g. `refs/heads/main`, `refs/pull/123/head`) so DWIM can
 /// resolve `pull/123/head` under `refs/`.
 pub(crate) fn fetch_ref_list_prefixes(refspecs: &[String]) -> Vec<String> {
-    let mut out = vec!["refs/heads/".to_owned(), "refs/tags/".to_owned()];
+    refspec_ref_prefixes(refspecs, true)
+}
+
+/// Like [`fetch_ref_list_prefixes`], adding `refs/tags/` only when `always_tags` is
+/// set or a refspec names the tag namespace.
+fn refspec_ref_prefixes(refspecs: &[String], always_tags: bool) -> Vec<String> {
+    let mut out = vec!["refs/heads/".to_owned()];
+    if always_tags {
+        out.push("refs/tags/".to_owned());
+    }
     for spec in refspecs {
         if spec.starts_with('^') {
             continue;
@@ -518,9 +527,11 @@ pub(crate) fn fetch_ref_list_prefixes(refspecs: &[String]) -> Vec<String> {
         if src.starts_with("refs/") {
             push_unique_prefix(&mut out, src);
         } else {
-            push_unique_prefix(&mut out, &format!("refs/heads/{src}"));
-            // Git DWIM: bare names may live directly under `refs/` (pull refs, etc.).
-            push_unique_prefix(&mut out, &format!("refs/{src}"));
+            // A short name resolves through every ref lookup rule, so ask for each
+            // namespace it may live in (bare `refs/` covers pull refs and the like).
+            for namespace in ["refs/heads/", "refs/", "refs/tags/", "refs/remotes/"] {
+                push_unique_prefix(&mut out, &format!("{namespace}{src}"));
+            }
         }
     }
     out
@@ -638,7 +649,7 @@ pub(crate) fn build_v2_ls_refs_request(
     // drives `FetchOutcome::default_branch` (the wire equivalent of the v0/v1
     // `symref=HEAD:` capability). `HEAD` is dropped from the fetchable ref set.
     pkt_line::write_line(&mut req, "ref-prefix HEAD")?;
-    let mut prefixes = fetch_ref_list_prefixes(refspecs);
+    let mut prefixes = refspec_ref_prefixes(refspecs, false);
     if tags != crate::transfer::TagMode::None && !prefixes.iter().any(|p| p == "refs/tags/") {
         // Tag-following / `--tags` wants the tag namespace advertised so we can
         // add tags from the ls-refs result, even if the refspecs only name heads.

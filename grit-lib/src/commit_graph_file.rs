@@ -1799,6 +1799,34 @@ pub fn dump_bloom_filters(path: &Path) -> Option<Vec<String>> {
 }
 
 #[cfg(test)]
+mod chunk_bounds_tests {
+    use super::{body_slice, checked_add_end, parse_toc_offset};
+    use crate::error::Error;
+
+    #[test]
+    fn chunk_bounds_reject_out_of_range_ends_and_offsets() {
+        assert_eq!(checked_add_end(2, 3, 5).expect("in range"), 5);
+        assert!(matches!(
+            checked_add_end(10, 5, 12),
+            Err(Error::CorruptObject(_))
+        ));
+        assert!(matches!(
+            checked_add_end(usize::MAX, 1, usize::MAX),
+            Err(Error::CorruptObject(_))
+        ));
+        assert!(matches!(
+            body_slice(&[0u8; 4], 2, 8),
+            Err(Error::CorruptObject(_))
+        ));
+        assert_eq!(parse_toc_offset(10, 4u64.to_be_bytes()).expect("offset"), 4);
+        assert!(matches!(
+            parse_toc_offset(10, 20u64.to_be_bytes()),
+            Err(Error::CorruptObject(_))
+        ));
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use std::collections::HashMap;
 
