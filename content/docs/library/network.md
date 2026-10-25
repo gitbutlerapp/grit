@@ -102,6 +102,8 @@ When a fetcher is installed and [`fetch.promisorLazy`](rustdoc:grit_lib::objects
 
 [`CloneOptions::promisor_fetcher`](rustdoc:grit_lib::remote::clone::CloneOptions) carries the fetcher through to the opened repository so blobless clone checkout can prefetch without a separate reopen.
 
+On the serving side, pass the client's [`ObjectFilter`](rustdoc:grit_lib::revwalk::rev_list::ObjectFilter) to [`write_upload_pack_stream`](rustdoc:grit_lib::objects::pack_objects::write_upload_pack_stream) (or [`build_pack_with_shallow_and_filter`](rustdoc:grit_lib::objects::pack_objects::build_pack_with_shallow_and_filter) for an in-memory pack). The filtered pack streams like an unfiltered one and holds the objects `git pack-objects --filter` selects: wanted objects and tag targets always, then the commits, trees and blobs the filter keeps.
+
 ## Bundles
 
 Offline bundle files are documented on the [Bundle](../bundle/) guide (`RepositoryBundles`). Smart HTTP and local remotes above cover online fetch/push.

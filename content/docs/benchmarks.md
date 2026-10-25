@@ -130,7 +130,7 @@ cargo bench -p grit-lib --bench odb_read_parallel -- packed_blobs
 
 ## grit-bench: reachability bitmaps (`git.git`)
 
-Scenario group **`bitmaps`** measures three acceptance metrics on upstream **`git/git`**: commit counting, object counting with bitmap index, and stateless **`upload-pack`** clone serving. A fourth scenario, **`serve-clone-no-bitmaps-git.git`**, serves the same clone from a copy of the fixture with the `.bitmap` removed (one Git-written pack with its `.rev` reverse index, `ensure_git_git_no_bitmaps`), which is how most servers that never wrote bitmaps look: objects are enumerated by walking history and the pack reuses the on-disk deltas. The fixture is a bare **single-branch tag clone** at **`v2.47.0`** (override with **`GRIT_BENCH_GIT_GIT_TAG`**) under **`GRIT_BENCH_ODB_CACHE`**, prepared once with **Git-written** pack bitmaps (`git repack -adb`, `git commit-graph write --reachable`) and separately with **grit-written** pack bitmaps (`git repack -ad`, commit-graph, then `PackBitmapWriter` — see `ensure_bitmaps_grit_repo` in `grit-utils/src/bitmap_fixture.rs`). Library workloads use hidden **`grit-bench drive`** commands (`rev-list-count`, `rev-list-count-objects`, `serve-clone`); Git runs the equivalent **`git rev-list`** / **`git upload-pack`** invocations with the same isolated config as other grit-bench suites.
+Scenario group **`bitmaps`** measures three acceptance metrics on upstream **`git/git`**: commit counting, object counting with bitmap index, and stateless **`upload-pack`** clone serving. A fourth scenario, **`serve-clone-no-bitmaps-git.git`**, serves the same clone from a copy of the fixture with the `.bitmap` removed (one Git-written pack with its `.rev` reverse index, `ensure_git_git_no_bitmaps`), which is how most servers that never wrote bitmaps look: objects are enumerated by walking history and the pack reuses the on-disk deltas. **`serve-clone-blobless-git.git`** and **`serve-clone-blobless-no-bitmaps-git.git`** send the same request with `filter blob:none` (the server side of a blobless partial clone, `drive serve-blobless`), with `uploadpack.allowFilter` enabled on both fixtures. The fixture is a bare **single-branch tag clone** at **`v2.47.0`** (override with **`GRIT_BENCH_GIT_GIT_TAG`**) under **`GRIT_BENCH_ODB_CACHE`**, prepared once with **Git-written** pack bitmaps (`git repack -adb`, `git commit-graph write --reachable`) and separately with **grit-written** pack bitmaps (`git repack -ad`, commit-graph, then `PackBitmapWriter` — see `ensure_bitmaps_grit_repo` in `grit-utils/src/bitmap_fixture.rs`). Library workloads use hidden **`grit-bench drive`** commands (`rev-list-count`, `rev-list-count-objects`, `serve-clone`); Git runs the equivalent **`git rev-list`** / **`git upload-pack`** invocations with the same isolated config as other grit-bench suites.
 
 **Methodology.** Hyperfine warmups and minimum runs match other factory captures (see each JSON `machine` block). Ratios are **Grit median ÷ Git median**. **Peak RSS** is recorded per side via `grit-bench measure-rss` / hyperfine wrappers. **`serve-clone`** runs under **`GRIT_BENCH_SERVE_TIMEOUT_SECS`** (default **120**) and **`GRIT_BENCH_SERVE_MAX_RSS_GIB`** (default **12**). Reproducibility: run the suite twice back-to-back on the same fixture; medians should agree within **±10% relative** (`grit-bench compare … --tolerance 0.10` uses an absolute ratio tolerance — interpret large ratios accordingly).
 
@@ -145,16 +145,30 @@ GRIT_BENCH_BITMAP_FIXTURE=grit ./target/release/grit-bench bitmaps --format json
 
 **First acceptance run (factory VM 2026-10-16, release `grit` on the pack-reuse + bitmap stack):** `rev-list-count` **18.0×**, `rev-list-count-objects` **63.2×**, and `serve-clone-git.git` hit the **120 s** cap (`exit 124`). Two back-to-back runs agreed within **~6–8% relative** on Grit medians for the rev-list scenarios.
 
-**Current (`bitmaps-after.json`, factory VM 2026-10-24, after the serve-path fix for [#1744](https://github.com/gitbutlerapp/grit/issues/1744)):**
+**Current (`bitmaps-after.json`, 4-vCPU Xeon VM 2026-10-25, Git 2.43.0, after the filtered-serve fix for [#1819](https://github.com/gitbutlerapp/grit/issues/1819)):**
 
 | Scenario | Git median | Grit median | Ratio | Git peak RSS | Grit peak RSS |
 | --- | ---: | ---: | ---: | ---: | ---: |
-| `rev-list-count-git.git` | 56.9 ms | 658.6 ms | **11.6×** | ~29 MiB | ~79 MiB |
-| `rev-list-count-objects-git.git` | 16.8 ms | 656.4 ms | **39.1×** | ~23 MiB | ~80 MiB |
-| `serve-clone-git.git` | 626.5 ms | 3960.7 ms | **6.3×** | ~279 MiB | ~986 MiB |
-| `serve-clone-no-bitmaps-git.git` | 3587.4 ms | 11408.8 ms | **3.2×** | ~463 MiB | ~1031 MiB |
+| `rev-list-count-git.git` | 56.5 ms | 686.0 ms | **12.1×** | ~29 MiB | ~79 MiB |
+| `rev-list-count-objects-git.git` | 16.9 ms | 719.7 ms | **42.7×** | ~23 MiB | ~79 MiB |
+| `serve-clone-git.git` | 654.4 ms | 4235.8 ms | **6.5×** | ~278 MiB | ~765 MiB |
+| `serve-clone-blobless-git.git` | 296.1 ms | 2146.1 ms | **7.2×** | ~156 MiB | ~364 MiB |
+| `serve-clone-no-bitmaps-git.git` | 3920.3 ms | 12079.7 ms | **3.1×** | ~462 MiB | ~811 MiB |
+| `serve-clone-blobless-no-bitmaps-git.git` | 2810.2 ms | 8817.5 ms | **3.1×** | ~325 MiB | ~446 MiB |
 
-Serving used to load every object of the clone into memory (blobs included) and decode the pack's `.rev` file again for every `OFS_DELTA` base, so both serve scenarios ran past the cap. Upload-pack now copies packed objects and deltas as they are, delta-searches only blobs that are not already deltas, and streams the pack. On `rust-lang/cargo` (195k objects, 80 MB pack, no bitmap) the server side of a full clone went from **91.3 s / 3.6 GB** peak RSS to **3.0 s / 420 MB** (Git **2.5 s / 161 MB**).
+Serving used to load every object of the clone into memory (blobs included) and decode the pack's `.rev` file again for every `OFS_DELTA` base, so both serve scenarios ran past the cap. Upload-pack now copies packed objects and deltas as they are, delta-searches only blobs that are not already deltas, and streams the pack. On `rust-lang/cargo` (195k objects, 80 MB pack, no bitmap) the server side of a full clone went from **91.3 s / 3.6 GB** peak RSS to **3.0 s / 420 MB** (Git **2.5 s / 161 MB**).
+
+**Filtered serving.** Without a usable bitmap, a `filter` request used to go through a separate `rev-list` walk that read every reachable tree once per commit. The pack enumeration walk now applies the filter itself, so a filtered pack costs what an unfiltered one does minus the objects it leaves out. Server side of `blob:none` requests on the same VM (single runs; the bitmap row is a hyperfine mean of 10):
+
+| Request | Git | Grit before | Grit after |
+| --- | ---: | ---: | ---: |
+| `git.git` every ref, no bitmap | 2.9 s / 316 MB | 277.9 s / 11.7 GB | 8.6 s / 451 MB |
+| `git.git` every ref, bitmap | 0.33 s / 143 MB | 2.18 s / 367 MB | 2.19 s / 367 MB |
+| `rust-lang/cargo` clone, no bitmap | 1.4–1.7 s / 148 MB | 55.7 s / 1.8 GB, then failed | 1.4–1.5 s / 260 MB |
+| `rust-lang/cargo` fetch of tag `0.58.0` | 0.53 s / 69 MB | 5.8 s, then failed | 0.65 s / 132 MB |
+| `rust-lang/cargo` fetch of 400 new commits | 0.16 s / 29 MB | failed | 1.65 s / 161 MB |
+
+The cargo clone and tag fetch used to fail because two annotated tags on one commit (`0.58`, `0.58.0`) kept only one tag object in the pack, and every filtered fetch with haves failed. With a bitmap, the bitmap already selected the objects; the remaining gap there is the same planning and writing cost as the unfiltered `serve-clone-git.git`.
 
 **Grit-written bitmap fixture:** set **`GRIT_BENCH_BITMAP_FIXTURE=grit`** when running `grit-bench bitmaps` to prepare the same pinned **`git.git`** clone with **`git repack -ad`**, commit-graph, and a grit-lib **`PackBitmapWriter`** sidecar (`ensure_bitmaps_grit_repo`). The committed **`bitmaps-after.json`** uses the **Git-prepared** fixture (default); capture a separate JSON for grit-written bitmaps when comparing interoperability (see factory notes for the grit-fixture run ratios).
 
