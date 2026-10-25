@@ -70,7 +70,7 @@ pub enum HistoryError {
     Conflict {
         /// Original commit that could not be replayed cleanly.
         commit: ObjectId,
-        /// Repository-relative paths that conflicted.
+        /// Repository-relative paths that conflicted, sorted and deduplicated.
         paths: Vec<String>,
     },
 

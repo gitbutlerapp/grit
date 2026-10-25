@@ -1473,7 +1473,7 @@ fn transplant_tree_across_parent_move(
     .map_err(library_err)?;
 
     if merge.index.has_unmerged_entries() || !merge.conflict_content.is_empty() {
-        let paths = conflict_paths(&merge);
+        let paths = crate::operation::tree_merge_conflict_path_strings(&merge);
         if REPLAY_STOP_COMMIT.with(|c| c.get()) == Some(commit) {
             if let Some(replayed_parent) = REPLAY_STOP_PARENT.with(|p| p.get()) {
                 note_resumable_conflict(commit, replayed_parent, merge);
@@ -1482,19 +1482,6 @@ fn transplant_tree_across_parent_move(
         return Err(HistoryError::Conflict { commit, paths });
     }
     Ok(merge.result_tree)
-}
-
-fn conflict_paths(merge: &crate::merge_trees::TreeMergeOutput) -> Vec<String> {
-    let mut paths = HashSet::new();
-    for key in merge.conflict_content.keys() {
-        paths.insert(String::from_utf8_lossy(key).into_owned());
-    }
-    for entry in &merge.index.entries {
-        if entry.stage() != 0 {
-            paths.insert(String::from_utf8_lossy(&entry.path).into_owned());
-        }
-    }
-    paths.into_iter().collect()
 }
 
 fn commit_tree(repo: &Repository, commit: ObjectId) -> Result<ObjectId, HistoryError> {

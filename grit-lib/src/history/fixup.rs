@@ -93,7 +93,7 @@ pub fn fixup(
     if merge.index.has_unmerged_entries() || !merge.conflict_content.is_empty() {
         return Err(HistoryError::Conflict {
             commit: target,
-            paths: conflict_paths(&merge),
+            paths: crate::operation::tree_merge_conflict_path_strings(&merge),
         });
     }
 
@@ -502,20 +502,6 @@ fn fixup_target_became_empty(
 ) -> Result<bool, HistoryError> {
     let parent_tree = first_parent_tree(repo, target)?;
     Ok(merged_tree == parent_tree)
-}
-
-fn conflict_paths(merge: &crate::merge_trees::TreeMergeOutput) -> Vec<String> {
-    use std::collections::HashSet;
-    let mut paths = HashSet::new();
-    for key in merge.conflict_content.keys() {
-        paths.insert(String::from_utf8_lossy(key).into_owned());
-    }
-    for entry in &merge.index.entries {
-        if entry.stage() != 0 {
-            paths.insert(String::from_utf8_lossy(&entry.path).into_owned());
-        }
-    }
-    paths.into_iter().collect()
 }
 
 #[cfg(any(test, feature = "unstable-bench-helpers"))]

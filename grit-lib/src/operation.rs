@@ -158,7 +158,8 @@ pub fn next_step_grit_commands(steps: &[NextStep]) -> Vec<String> {
     steps.iter().filter_map(NextStep::grit_command).collect()
 }
 
-fn tree_merge_conflict_path_strings(merged: &TreeMergeOutput) -> Vec<String> {
+/// Conflicted paths of a tree merge (marker blobs and unmerged stages), sorted and deduplicated.
+pub(crate) fn tree_merge_conflict_path_strings(merged: &TreeMergeOutput) -> Vec<String> {
     let mut paths: Vec<String> = merged
         .conflict_content
         .keys()
