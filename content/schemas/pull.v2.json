@@ -77,6 +77,23 @@
         "null"
       ]
     },
+    "alternatives": {
+      "description": "Abort/skip commands (not part of the ordered sequence).",
+      "items": {
+        "type": "string"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
+    "autostash": {
+      "description": "Autostash commit kept on `refs/stash` (rebase stopped, or re-applying it conflicted).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "behind": {
       "format": "uint",
       "minimum": 0.0,
@@ -104,6 +121,13 @@
         }
       ]
     },
+    "commit": {
+      "description": "Local commit the rebase stopped on (`operation` is `rebase`).",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "conflict_details": {
       "items": {
         "$ref": "#/definitions/MergeConflictJson"
@@ -122,7 +146,24 @@
         "null"
       ]
     },
+    "next_steps": {
+      "description": "Ordered `grit` commands to finish the paused operation.",
+      "items": {
+        "type": "string"
+      },
+      "type": [
+        "array",
+        "null"
+      ]
+    },
     "oid": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "operation": {
+      "description": "Paused operation when `result` is `conflicts`: `merge` or `rebase`.",
       "type": [
         "string",
         "null"

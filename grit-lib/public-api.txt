@@ -6096,6 +6096,7 @@ impl core::panic::unwind_safe::UnwindSafe for grit_lib::error::SparseCheckoutWar
 #[non_exhaustive] pub enum grit_lib::error::WorktreeOperation
 pub grit_lib::error::WorktreeOperation::Merge
 pub grit_lib::error::WorktreeOperation::Pick
+pub grit_lib::error::WorktreeOperation::Rebase
 pub grit_lib::error::WorktreeOperation::RebaseExec
 pub grit_lib::error::WorktreeOperation::Switch
 impl core::clone::Clone for grit_lib::error::WorktreeOperation
@@ -13861,6 +13862,7 @@ pub grit_lib::porcelain::pull::PullError::DetachedHead
 pub grit_lib::porcelain::pull::PullError::InvalidHead
 pub grit_lib::porcelain::pull::PullError::NoUpstream
 pub grit_lib::porcelain::pull::PullError::NoUpstream::branch: alloc::string::String
+pub grit_lib::porcelain::pull::PullError::Rebase(grit_lib::revwalk::history::RebaseSessionError)
 pub grit_lib::porcelain::pull::PullError::RebaseInteractive
 pub grit_lib::porcelain::pull::PullError::Remote(grit_lib::remote::RemoteError)
 pub grit_lib::porcelain::pull::PullError::Repository(grit_lib::error::Error)
@@ -13908,6 +13910,7 @@ pub grit_lib::porcelain::pull::PullResult::AutostashConflict
 pub grit_lib::porcelain::pull::PullResult::Conflicts
 pub grit_lib::porcelain::pull::PullResult::FastForward
 pub grit_lib::porcelain::pull::PullResult::Merged
+pub grit_lib::porcelain::pull::PullResult::RebaseConflicts
 pub grit_lib::porcelain::pull::PullResult::Rebased
 pub grit_lib::porcelain::pull::PullResult::RefusedNotFf
 pub grit_lib::porcelain::pull::PullResult::SetUpstream
@@ -13971,6 +13974,7 @@ impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::pull::Pul
 impl !core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::pull::PullOptions
 pub struct grit_lib::porcelain::pull::PullOutcome
 pub grit_lib::porcelain::pull::PullOutcome::ahead: core::option::Option<usize>
+pub grit_lib::porcelain::pull::PullOutcome::autostash: core::option::Option<grit_lib::objects::ObjectId>
 pub grit_lib::porcelain::pull::PullOutcome::behind: core::option::Option<usize>
 pub grit_lib::porcelain::pull::PullOutcome::change_id: core::option::Option<grit_lib::change_id::ChangeId>
 pub grit_lib::porcelain::pull::PullOutcome::check: core::option::Option<grit_lib::porcelain::pull::PullCheck>
@@ -13978,6 +13982,7 @@ pub grit_lib::porcelain::pull::PullOutcome::conflicts: core::option::Option<allo
 pub grit_lib::porcelain::pull::PullOutcome::label: alloc::string::String
 pub grit_lib::porcelain::pull::PullOutcome::oid: core::option::Option<grit_lib::objects::ObjectId>
 pub grit_lib::porcelain::pull::PullOutcome::result: grit_lib::porcelain::pull::PullResult
+pub grit_lib::porcelain::pull::PullOutcome::stopped_commit: core::option::Option<grit_lib::objects::ObjectId>
 pub grit_lib::porcelain::pull::PullOutcome::transfer: grit_lib::remote::transfer::TransferStats
 pub grit_lib::porcelain::pull::PullOutcome::upstream: core::option::Option<alloc::string::String>
 impl core::clone::Clone for grit_lib::porcelain::pull::PullOutcome

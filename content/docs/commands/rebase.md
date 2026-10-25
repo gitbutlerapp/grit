@@ -23,7 +23,9 @@ When the rebase moves the branch, grit runs the `post-checkout` hook with Git's 
 
 When `<upstream>` is omitted, grit uses `@{upstream}` of the current branch. If no upstream is configured, the command fails with a hint to run [`grit branch -u`](branch.md).
 
-When replay stops on conflicts, grit writes Git-compatible `.git/rebase-merge/` state (including `grit-plan`), leaves conflict markers in the worktree, and exits **1**. The branch tip recorded in `orig-head` is unchanged until you `--continue`, `--skip`, or `--abort`. Resume with the same conflict model as [`grit pick`](pick.md) and [`grit revert`](revert.md): inspect (`grit diff`), resolve, stage (`grit add`), then `grit rebase --continue`, or use `--skip` / `--abort`.
+When replay stops on conflicts, grit writes Git-compatible `.git/rebase-merge/` state (including `grit-plan`), leaves conflict markers in the worktree, and exits **1**. The branch tip recorded in `orig-head` is unchanged until you `--continue`, `--skip`, or `--abort`. Resume with the same conflict model as [`grit pick`](pick.md) and [`grit revert`](revert.md): inspect (`grit diff`), resolve, stage (`grit add`), then `grit rebase --continue`, or use `--skip` / `--abort`. [`grit pull --rebase`](pull.md) stops the same way.
+
+Stopping resets the index and worktree to the replayed commits, so grit only stops when that loses nothing. If replay would conflict while you have staged or unstaged changes, or an untracked file sits where the stop would check out a path, the rebase refuses (`kind: dirty_worktree`, or the untracked-overwrite error) and nothing changes; commit or stash first. A rebase that replays cleanly still carries local changes along, like a branch switch.
 
 The stopped state is complete enough for `git` to take over: `git rebase --continue`, `--skip` and `--abort` all work on a rebase grit started (grit writes `author-script`, `stopped-sha` and the current pick in `done`, as git does).
 

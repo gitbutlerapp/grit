@@ -787,11 +787,26 @@ pub fn print_pull_outcome(
                     outln!(w, "- `{path}`");
                 }
             }
-            if outcome.oid.is_some() {
-                outln!(
+            if outcome.operation.as_deref() == Some("rebase") {
+                if let Some(commit) = &outcome.commit {
+                    outln!(
+                        w,
+                        "- Rebase stopped at commit `{short}`",
+                        short = short_hex(commit)
+                    );
+                }
+                if let Some(stash) = &outcome.autostash {
+                    outln!(
+                        w,
+                        "- Local changes kept in the stash (`{short}`); `grit stash pop` after the rebase",
+                        short = short_hex(stash)
+                    );
+                }
+                crate::operation_output::render_operation_guidance_markdown(
+                    outcome.next_steps.as_deref().unwrap_or(&[]),
+                    outcome.alternatives.as_deref(),
                     w,
-                    "→ rebase stopped with conflicts; the branch, index, and worktree are unchanged"
-                );
+                )?;
             } else {
                 outln!(
                     w,

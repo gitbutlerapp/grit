@@ -168,7 +168,7 @@ Failures with a known next step carry a `hint` in `--json` (and a `hint:` line o
 | Shallow fetch controls | `grit fetch --depth N`, `--deepen N`, or `--unshallow` (same semantics as Git; mutually exclusive) |
 | Fetch and merge the remote copy of this branch | `grit pull` |
 | Pull only when a fast-forward is possible | `grit pull --ff-only` (exit **0** on success, **1** with `refused_not_ff` when diverged; branch unchanged) |
-| Fetch and replay local commits on top of upstream | `grit pull --rebase` (or `pull.rebase` in config; rebase conflicts abort atomically, exit **1**) |
+| Fetch and replay local commits on top of upstream | `grit pull --rebase` (or `pull.rebase` in config; a conflict stops with markers, exit **1**, `operation: rebase` and `next_steps` in `--json`: resolve, `grit add`, `grit rebase --continue`, or `--abort` / `--skip`; `grit pull --check` predicts it) |
 | Replay local commits onto another base | `grit rebase [<upstream>]` (default `@{upstream}`; `--onto`; `--check` predicts conflicts without side effects; `-X ours\|theirs` matches `git rebase -X` where **ours** is onto/upstream; stop on conflicts with `--continue` / `--abort` / `--skip`, exit **1**) |
 | Publish this branch to `origin` under the same name | `grit push` |
 | Push to a different remote branch name | `grit push origin HEAD:refs/heads/<name>` |

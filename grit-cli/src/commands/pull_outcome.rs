@@ -2,6 +2,7 @@
 
 use crate::commands::merge::MergeConflictJson;
 use crate::markdown;
+use crate::operation_output::{render_rebase_conflict_footer_human, OperationConflictBlock};
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 use crate::progress::summary::{stdout_color, TransferSummary};
 use anyhow::Result;
@@ -58,6 +59,26 @@ pub struct PullOutcome {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(skip_serializing_if = "Option::is_none")]
     pub conflict_details: Option<Vec<MergeConflictJson>>,
+    /// Paused operation when `result` is `conflicts`: `merge` or `rebase`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub operation: Option<String>,
+    /// Local commit the rebase stopped on (`operation` is `rebase`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub commit: Option<String>,
+    /// Ordered `grit` commands to finish the paused operation.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub next_steps: Option<Vec<String>>,
+    /// Abort/skip commands (not part of the ordered sequence).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub alternatives: Option<Vec<String>>,
+    /// Autostash commit kept on `refs/stash` (rebase stopped, or re-applying it conflicted).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub autostash: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(skip_serializing_if = "Option::is_none")]
     pub ahead: Option<usize>,
@@ -74,22 +95,33 @@ pub struct PullOutcome {
 }
 
 pub fn map_outcome(outcome: LibPullOutcome) -> PullOutcome {
+    let rebase_stop = outcome.result == LibPullResult::RebaseConflicts;
+    let details = outcome.conflicts.as_deref().unwrap_or(&[]);
     let (conflicts, conflict_details) = outcome
         .conflicts
         .as_ref()
-        .map(|details| map_conflicts(details, &outcome.label))
+        .map(|details| map_conflicts(details, &outcome.label, rebase_stop))
         .unwrap_or((None, None));
+    let guidance = match outcome.result {
+        LibPullResult::Conflicts => Some((
+            "merge",
+            OperationConflictBlock::for_merge(details, &outcome.label),
+        )),
+        LibPullResult::RebaseConflicts => {
+            Some(("rebase", OperationConflictBlock::for_rebase(details)))
+        }
+        _ => None,
+    };
+    let (operation, next_steps, alternatives) = match guidance {
+        Some((operation, block)) => (
+            Some(operation.to_owned()),
+            Some(block.next_steps),
+            block.alternatives,
+        ),
+        None => (None, None, None),
+    };
     PullOutcome {
-        result: match outcome.result {
-            LibPullResult::UpToDate => PullResult::UpToDate,
-            LibPullResult::FastForward => PullResult::FastForward,
-            LibPullResult::Merged => PullResult::Merged,
-            LibPullResult::RefusedNotFf => PullResult::RefusedNotFf,
-            LibPullResult::Conflicts => PullResult::Conflicts,
-            LibPullResult::SetUpstream => PullResult::SetUpstream,
-            LibPullResult::Rebased => PullResult::Rebased,
-            LibPullResult::AutostashConflict => PullResult::AutostashConflict,
-        },
+        result: map_result(outcome.result),
         branch: outcome.label,
         oid: outcome.oid.as_ref().map(ObjectId::to_hex),
         change_id: outcome
@@ -99,10 +131,29 @@ pub fn map_outcome(outcome: LibPullOutcome) -> PullOutcome {
         upstream: outcome.upstream,
         conflicts,
         conflict_details,
+        operation,
+        commit: outcome.stopped_commit.as_ref().map(ObjectId::to_hex),
+        next_steps,
+        alternatives,
+        autostash: outcome.autostash.as_ref().map(ObjectId::to_hex),
         ahead: outcome.ahead,
         behind: outcome.behind,
         check: outcome.check.map(map_check),
         transfer: TransferSummary::new(outcome.transfer, Vec::new(), Default::default()),
+    }
+}
+
+/// Rebase stops share `conflicts` with merge stops; `operation` tells them apart.
+fn map_result(result: LibPullResult) -> PullResult {
+    match result {
+        LibPullResult::UpToDate => PullResult::UpToDate,
+        LibPullResult::FastForward => PullResult::FastForward,
+        LibPullResult::Merged => PullResult::Merged,
+        LibPullResult::RefusedNotFf => PullResult::RefusedNotFf,
+        LibPullResult::Conflicts | LibPullResult::RebaseConflicts => PullResult::Conflicts,
+        LibPullResult::SetUpstream => PullResult::SetUpstream,
+        LibPullResult::Rebased => PullResult::Rebased,
+        LibPullResult::AutostashConflict => PullResult::AutostashConflict,
     }
 }
 
@@ -111,28 +162,32 @@ fn map_check(check: LibPullCheck) -> PullCheckJson {
         ahead: check.ahead,
         behind: check.behind,
         fast_forward_possible: check.fast_forward_possible,
-        would: match check.would {
-            LibPullResult::UpToDate => PullResult::UpToDate,
-            LibPullResult::FastForward => PullResult::FastForward,
-            LibPullResult::Merged => PullResult::Merged,
-            LibPullResult::RefusedNotFf => PullResult::RefusedNotFf,
-            LibPullResult::Conflicts => PullResult::Conflicts,
-            LibPullResult::SetUpstream => PullResult::SetUpstream,
-            LibPullResult::Rebased => PullResult::Rebased,
-            LibPullResult::AutostashConflict => PullResult::AutostashConflict,
-        },
+        would: map_result(check.would),
     }
 }
 
 fn map_conflicts(
     details: &[MergeConflictDetail],
     merge_label: &str,
+    rebase_stop: bool,
 ) -> (Option<Vec<String>>, Option<Vec<MergeConflictJson>>) {
     let paths: Vec<String> = details.iter().map(|d| d.path.clone()).collect();
+    // Merge-style summaries name the current branch as "ours"; during a rebase replay the
+    // sides are swapped, so rebase stops report kinds only, as `grit rebase` does.
     let conflict_details = Some(
         details
             .iter()
-            .map(|d| crate::commands::merge::merge_conflict_json(d, merge_label))
+            .map(|d| {
+                if rebase_stop {
+                    MergeConflictJson {
+                        path: d.path.clone(),
+                        kind: d.kind.as_str().to_owned(),
+                        summary: None,
+                    }
+                } else {
+                    crate::commands::merge::merge_conflict_json(d, merge_label)
+                }
+            })
             .collect(),
     );
     (Some(paths), conflict_details)
@@ -188,10 +243,14 @@ impl HumanRender for PullOutcome {
                         eprintln!("  {path}");
                     }
                 }
-                if self.oid.is_some() {
-                    eprintln!(
-                        "\nRebase stopped with conflicts; the branch, index, and worktree are unchanged."
-                    );
+                if self.operation.as_deref() == Some("rebase") {
+                    render_rebase_conflict_footer_human();
+                    if let Some(stash) = &self.autostash {
+                        eprintln!(
+                            "Your local changes are kept in the stash ({}); run `grit stash pop` once the rebase is finished or aborted.",
+                            short_hex(stash)
+                        );
+                    }
                 } else {
                     eprintln!(
                         "\nAutomatic merge failed; fix conflicts and run `grit commit`, or run `grit merge --abort`."

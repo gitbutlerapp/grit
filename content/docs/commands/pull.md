@@ -27,17 +27,17 @@ The default remote is `branch.<name>.remote`, or `origin`; every mode (`--ff-onl
 
 On a branch with no commits yet, the branch is created at the upstream commit with an `initial pull` reflog entry.
 
-Like `grit merge`, `grit pull` uses the same scoped local-change rules as [`grit switch`](../switch/), won't run with a detached HEAD, and stops without changing anything if there are conflicts (except merge-mode conflicts, which leave merge state).
+Like `grit merge`, `grit pull` uses the same scoped local-change rules as [`grit switch`](../switch/) and won't run with a detached HEAD. Conflicts follow the same model as `grit merge` and `grit rebase`: the pull stops with conflict markers and an operation in progress (a merge, or a rebase), and the result tells you how to finish it.
 
 The fetch step uses the same terminal progress as [`grit fetch`](../fetch/) and [`grit clone`](../clone/): a `Pulling <remote> <url>` line, then live stderr progress with an overall bar on a TTY in human mode, silent when stderr is piped or when you pass `--json` or `--markdown`. When the fetch received objects, the result line is followed by the same `time`, `data` and `objects` summary rows as `grit fetch`. When you need an explicit fetch refspec or fetch-only flags (`--depth`, `--deepen`, `--unshallow`, `--tags`, `--no-tags`, `--prune`, `--no-prune`, `--dry-run`, `-q`), run [`grit fetch`](../fetch/) first, then integrate with `grit merge` or the pull integration flags below.
 
-Integration mode follows Git's `pull.ff`, `pull.rebase`, and `branch.<name>.rebase` unless overridden on the command line. With rebase, local commits replay onto the fetched upstream tip via the history engine (no sequencer files). Rebase conflicts abort atomically: nothing changes and exit is **1** (stop/continue rebase is planned once the shared conflict model lands). `pull.rebase=interactive` is rejected. For a standalone rebase without fetching, use [`grit rebase`](rebase.md).
+Integration mode follows Git's `pull.ff`, `pull.rebase`, and `branch.<name>.rebase` unless overridden on the command line. With rebase, local commits replay onto the fetched upstream tip via the history engine, exactly as [`grit rebase`](../rebase/) does. When a commit conflicts, the rebase stops (exit **1**) with conflict markers, unmerged paths and Git-compatible `.git/rebase-merge/` state; the branch still points at its old tip until the rebase finishes. Resolve, `grit add`, then `grit rebase --continue`, or run `grit rebase --skip` / `grit rebase --abort` (`git rebase --continue` / `--abort` work on the same state). The rebase only stops when it can do so without losing work: if staged or unstaged changes exist, or an untracked file sits where the stop would check out a path, the pull refuses with `kind: dirty_worktree` (or the overwrite error) and nothing changes. Use `--autostash` or commit first. `pull.rebase=interactive` is rejected. For a standalone rebase without fetching, use [`grit rebase`](rebase.md).
 
 Integration runs the same hooks as `git pull`: `post-merge 0` after a fast-forward or merge commit (in rebase mode too, when the branch is only behind and simply fast-forwards), and `post-checkout <old tip> <upstream> 1` plus `post-rewrite rebase` after a rebase (see [`grit hooks`](../hooks/)).
 
-`--autostash` stashes dirty index/worktree changes (including untracked files) before integrating, then re-applies them afterward. Config `merge.autoStash` / `rebase.autoStash` enables the same behavior by default for merge and rebase pulls respectively. If re-applying the stash conflicts, the pull integration is kept, the stash entry remains on `refs/stash`, and the result is `autostash_conflict` (exit **1**).
+`--autostash` stashes dirty index/worktree changes (including untracked files) before integrating, then re-applies them afterward. Config `merge.autoStash` / `rebase.autoStash` enables the same behavior by default for merge and rebase pulls respectively. If re-applying the stash conflicts, the pull integration is kept, the stash entry remains on `refs/stash`, and the result is `autostash_conflict` (exit **1**). When a rebase pull stops on conflicts, the stash is not applied over the conflict markers: it stays on `refs/stash` (reported as `autostash`) so you can `grit stash pop` once the rebase is finished or aborted.
 
-`--check` fetches (always for real — not a dry run) and reports whether the branch could fast-forward or is already up to date, without changing `HEAD`, the index, the worktree, or reflogs. It cannot be combined with `--autostash` or integration mode overrides (`--ff-only`, `--rebase`, `--no-rebase`).
+`--check` fetches (always for real — not a dry run) and reports whether the branch could fast-forward or is already up to date, without changing `HEAD`, the index, the worktree, or reflogs. In rebase mode it also predicts whether the replay would stop on conflicts (`would` is `conflicts`). It cannot be combined with `--autostash` or integration mode overrides (`--ff-only`, `--rebase`, `--no-rebase`).
 
 ## Options
 
@@ -83,6 +83,23 @@ $ grit pull --autostash
 Merged origin/main into the current branch (acd1d4b)
 ```
 
+When a rebase pull conflicts:
+
+```console
+$ grit pull --rebase
+CONFLICT (content): f
+
+Rebase stopped on conflicts; fix them and run `grit rebase --continue`, or `grit rebase --abort` / `grit rebase --skip`.
+$ grit status
+Rebasing main onto 3f6a904
+…
+$ grit add f
+$ grit rebase --continue
+Rebased 1 commit(s)
+  commit 1e64458 → e79b420 (local)
+  refs/heads/main 1e64458 → e79b420
+```
+
 When the branch has no upstream yet:
 
 ```console
@@ -99,17 +116,22 @@ Schema: [v2](/schemas/pull/v2.json) · [v1](/schemas/pull/v1.json)
 
 Pass `--json` for stable, scripting-friendly output:
 
-Exit codes (also apply to default human output): **0** on success (`up_to_date`, `fast_forward`, `merged`, `rebased`, or `set_upstream`) and on `--check` when `check.fast_forward_possible` is true; **1** when `--ff-only` refuses diverged history (`refused_not_ff`), integration stops with conflicts (`conflicts`; rebase conflicts leave the repository unchanged), `--check` when a merge or rebase would be required, or `autostash_conflict`.
+Exit codes (also apply to default human output): **0** on success (`up_to_date`, `fast_forward`, `merged`, `rebased`, or `set_upstream`) and on `--check` when `check.fast_forward_possible` is true; **1** when `--ff-only` refuses diverged history (`refused_not_ff`), integration stops with conflicts (`conflicts`, with `operation` `merge` or `rebase` in progress), `--check` when a merge or rebase would be required, or `autostash_conflict`.
 
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
 | `result` | string | `up_to_date`, `fast_forward`, `merged`, `rebased`, `refused_not_ff`, `conflicts`, `set_upstream`, or `autostash_conflict`. |
 | `branch` | string | Remote branch label that was integrated (or checked). |
-| `oid` | string or null | Commit the current branch points at after the pull, when applicable. |
+| `oid` | string or null | Commit the current branch points at after the pull, when applicable (absent when a rebase stopped). |
 | `change_id` | string or null | Stored `change-id` on `oid` when present. |
 | `upstream` | string or null | For `set_upstream`, the remote-tracking branch that was adopted. |
 | `conflicts` | array of strings or null | Path names when `result` is `conflicts` (legacy list). |
-| `conflict_details` | array or null | Structured conflict items when `result` is `conflicts`. |
+| `conflict_details` | array or null | Structured conflict items when `result` is `conflicts`: `path`, `kind` (`content`, `add_add`, `modify_delete`), and for merges a `summary`. |
+| `operation` | string or null | When `result` is `conflicts`: the operation left in progress, `merge` or `rebase`. |
+| `commit` | string or null | When `operation` is `rebase`: the local commit that could not be replayed. |
+| `next_steps` | array of strings or null | When `result` is `conflicts`: ordered `grit` commands to finish (for a rebase, ending in `grit rebase --continue`). |
+| `alternatives` | array of strings or null | When `result` is `conflicts`: other ways out (`grit merge --abort`, or `grit rebase --abort` / `grit rebase --skip`). |
+| `autostash` | string or null | Autostash commit kept on `refs/stash` because a rebase stopped or re-applying it conflicted. |
 | `ahead` | integer or null | Local-only commits when `result` is `refused_not_ff` or with `--check`. |
 | `behind` | integer or null | Upstream-only commits when `result` is `refused_not_ff` or with `--check`. |
 | `check` | object or null | Present with `--check`: `ahead`, `behind`, `fast_forward_possible`, and `would` (same result strings as `result`). |
@@ -121,6 +143,21 @@ Example:
   "result": "fast_forward",
   "branch": "origin/main",
   "oid": "b52cca65378cf17309f0b1f917c6dc4fdd9256f2"
+}
+```
+
+A rebase pull that stopped on conflicts:
+
+```json
+{
+  "result": "conflicts",
+  "branch": "origin/main",
+  "conflicts": ["f"],
+  "conflict_details": [{ "path": "f", "kind": "content" }],
+  "operation": "rebase",
+  "commit": "1e644589243fb885b773ec4d697b779000495741",
+  "next_steps": ["grit diff", "grit add .", "grit rebase --continue"],
+  "alternatives": ["grit rebase --abort", "grit rebase --skip"]
 }
 ```
 
