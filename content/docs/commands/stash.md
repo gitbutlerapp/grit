@@ -29,7 +29,7 @@ Pass `--` followed by pathspecs (or `--pathspec-from-file`) on push to stash onl
 
 Stash indices follow Git: `0` is the newest entry. You can pass an integer or `stash@{n}`.
 
-`grit stash pop` applies the entry and removes it when there are no conflicts. When applying would leave merge conflicts, the stash entry is kept and the command exits non-zero; conflicting paths are listed.
+`grit stash pop` applies the entry and removes it when there are no conflicts. When applying would leave merge conflicts, the stash entry is kept and the command exits non-zero; conflicting paths are listed. There is no merge to continue: edit the files, mark them resolved with `grit add <file>`, then remove the kept entry with `grit stash drop` (or pick a side with `grit restore --ours|--theirs <file>`). `grit stash apply` stops the same way but never drops the entry.
 
 When a stash was created with `-u` / `--include-untracked`, `apply` and `pop` refuse to write stashed untracked files onto a path that already exists on disk (visible untracked, ignored, or tracked content you added after stashing). The command exits non-zero, the stash entry is kept, and your existing file bytes are unchanged.
 
@@ -100,6 +100,12 @@ $ grit stash pop
 Stash pop left conflicts in:
   f.txt
 The stash entry was kept.
+→ resolve conflicts, grit add <file>, then grit stash drop
+$ echo resolved > f.txt
+$ grit add f.txt
+Staged f.txt
+$ grit stash drop
+Dropped stash@{0}
 ```
 
 When pop would overwrite an existing path from a `-u` stash:
@@ -307,6 +313,17 @@ With `--markdown`, list/apply/pop/drop use bullet lists; `show` renders the diff
 ## Stash
 
 - Saved **On main: wip** · `690b7a6`
+```
+
+A conflicted pop lists the paths and the next steps:
+
+```text
+## Stash pop
+
+- **stash@{0}** · stopped with conflicts (entry kept)
+  - `f.txt`
+
+→ resolve conflicts, `grit add PATH`, then `grit stash drop`
 ```
 
 ## Exit status

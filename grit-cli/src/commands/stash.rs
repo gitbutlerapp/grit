@@ -258,6 +258,7 @@ impl HumanRender for StashApplyOutcome {
             for path in &self.conflict_paths {
                 eprintln!("  {path}");
             }
+            eprintln!("→ resolve conflicts, then grit add <file> to mark them resolved");
         } else {
             outln!(w, "Applied stash@{{{}}}", self.index);
         }
@@ -284,6 +285,16 @@ pub struct StashPopOutcome {
     pub conflict_paths: Vec<String>,
 }
 
+impl StashPopOutcome {
+    /// The `grit stash drop` invocation that discards the kept entry once conflicts are resolved.
+    pub fn drop_command(&self) -> String {
+        match self.index {
+            0 => "grit stash drop".to_owned(),
+            n => format!("grit stash drop {n}"),
+        }
+    }
+}
+
 impl HumanRender for StashPopOutcome {
     fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         if self.conflicts {
@@ -292,6 +303,10 @@ impl HumanRender for StashPopOutcome {
                 eprintln!("  {path}");
             }
             eprintln!("The stash entry was kept.");
+            eprintln!(
+                "→ resolve conflicts, grit add <file>, then {}",
+                self.drop_command()
+            );
         } else {
             outln!(
                 w,
