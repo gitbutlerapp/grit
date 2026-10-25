@@ -1012,7 +1012,7 @@ fn collect_filtered_send_list(
     for (oid, _) in &walk.objects {
         push(*oid);
     }
-    for tag_oid in walk.tip_annotated_tag_by_commit.values() {
+    for tag_oid in walk.tip_annotated_tag_by_commit.values().flatten() {
         push(*tag_oid);
     }
     send

@@ -68,7 +68,11 @@ impl MissingAction {
     }
 }
 
-type ResolvedSpecsWithTagMap = (Vec<ObjectId>, Vec<RootObject>, HashMap<ObjectId, ObjectId>);
+type ResolvedSpecsWithTagMap = (
+    Vec<ObjectId>,
+    Vec<RootObject>,
+    HashMap<ObjectId, Vec<ObjectId>>,
+);
 type StdinRevisionSpecs = (Vec<String>, Vec<String>, bool, Vec<String>);
 type ReachableObjectsSegmented = (
     Vec<(ObjectId, String)>,
@@ -249,6 +253,40 @@ impl ObjectFilter {
             ObjectFilter::SparseOid(_) => true,
             ObjectFilter::ObjectType(kind) => *kind == FilterObjectKind::Tree,
             ObjectFilter::Combine(filters) => filters.iter().all(|f| f.includes_tree(depth)),
+        }
+    }
+
+    /// Whether nothing inside a tree at `depth` (a commit's root tree is `0`) can pass this
+    /// filter, so a walk need not read the tree's entries.
+    pub(crate) fn prunes_tree_entries(&self, depth: u64) -> bool {
+        match self {
+            ObjectFilter::BlobNone | ObjectFilter::BlobLimit(_) | ObjectFilter::SparseOid(_) => {
+                false
+            }
+            ObjectFilter::TreeDepth(max_depth) => depth.saturating_add(1) >= *max_depth,
+            ObjectFilter::ObjectType(kind) => {
+                matches!(kind, FilterObjectKind::Commit | FilterObjectKind::Tag)
+            }
+            ObjectFilter::Combine(filters) => filters.iter().any(|f| f.prunes_tree_entries(depth)),
+        }
+    }
+
+    /// Whether the outcome for a tree or blob depends on the depth it is reached at
+    /// (`tree:<n>` with `n > 0`), so a walk must revisit trees met again closer to the root.
+    pub(crate) fn is_depth_sensitive(&self) -> bool {
+        match self {
+            ObjectFilter::TreeDepth(max_depth) => *max_depth > 0,
+            ObjectFilter::Combine(filters) => filters.iter().any(Self::is_depth_sensitive),
+            _ => false,
+        }
+    }
+
+    /// Whether the filter selects by path (`sparse:oid`), which needs object names.
+    pub(crate) fn uses_paths(&self) -> bool {
+        match self {
+            ObjectFilter::SparseOid(_) => true,
+            ObjectFilter::Combine(filters) => filters.iter().any(Self::uses_paths),
+            _ => false,
         }
     }
 
@@ -748,8 +786,10 @@ pub struct RevListResult {
     pub reachable_commit_count: Option<usize>,
     /// Non-commit objects counted for `--count --objects` without listing [`Self::objects`].
     pub reachable_non_commit_object_count: Option<usize>,
-    /// When a positive spec named a ref to an annotated tag of a commit, maps peeled commit → tag OID.
-    pub tip_annotated_tag_by_commit: HashMap<ObjectId, ObjectId>,
+    /// When positive specs named annotated tags of a commit, maps the peeled commit to every
+    /// tag object on the way to it (several tags may share one commit, and a tag of a tag
+    /// contributes both tag objects), in the order the specs named them.
+    pub tip_annotated_tag_by_commit: HashMap<ObjectId, Vec<ObjectId>>,
     /// Populated by bounded topological walks for `log --graph` (avoids a second linkage pass).
     pub log_graph_linkage: Option<LogGraphLinkage>,
     /// Parsed listed commits, keyed by id, when [`RevListOptions::retain_commit_data`] is set.
@@ -3294,7 +3334,7 @@ fn resolve_specs_for_objects_with_options(
 ) -> Result<ResolvedSpecsWithTagMap> {
     let mut commits = Vec::new();
     let mut roots = Vec::new();
-    let mut tip_annotated_tag_by_commit: HashMap<ObjectId, ObjectId> = HashMap::new();
+    let mut tip_annotated_tag_by_commit: HashMap<ObjectId, Vec<ObjectId>> = HashMap::new();
 
     for spec in specs {
         if let Ok(raw_oid) = spec.parse::<ObjectId>() {
@@ -3332,7 +3372,7 @@ fn resolve_specs_for_objects_with_options(
                         // `tip_annotated_tag_by_commit`, matching how a tag named by ref is handled.
                         // Routing it through a commit `RootObject` instead would print the commit with
                         // an empty object name (`<oid> \0`) rather than as a commit line (t5305).
-                        tip_annotated_tag_by_commit.insert(tag.object, raw_oid);
+                        push_tip_tags(&mut tip_annotated_tag_by_commit, tag.object, [raw_oid]);
                         commits.push(tag.object);
                     } else {
                         roots.push(RootObject {
@@ -3396,7 +3436,8 @@ fn resolve_specs_for_objects_with_options(
         match repo.odb().peel_to_commit(oid) {
             Ok(Some(commit_oid)) => {
                 if commit_oid != oid {
-                    tip_annotated_tag_by_commit.insert(commit_oid, oid);
+                    let chain = annotated_tag_chain(repo, oid)?;
+                    push_tip_tags(&mut tip_annotated_tag_by_commit, commit_oid, chain);
                 }
                 commits.push(commit_oid);
             }
@@ -3416,6 +3457,34 @@ fn resolve_specs_for_objects_with_options(
     }
 
     Ok((commits, roots, tip_annotated_tag_by_commit))
+}
+
+/// Record `tags` as annotated tags of `commit`, skipping ones already listed.
+fn push_tip_tags(
+    map: &mut HashMap<ObjectId, Vec<ObjectId>>,
+    commit: ObjectId,
+    tags: impl IntoIterator<Item = ObjectId>,
+) {
+    let listed = map.entry(commit).or_default();
+    for tag in tags {
+        if !listed.contains(&tag) {
+            listed.push(tag);
+        }
+    }
+}
+
+/// Tag objects met while peeling `oid`, outermost first (`[oid]` for a plain annotated tag).
+fn annotated_tag_chain(repo: &Repository, oid: ObjectId) -> Result<Vec<ObjectId>> {
+    let mut chain = Vec::new();
+    let mut current = oid;
+    loop {
+        let object = repo.odb().read(&current)?;
+        if object.kind != ObjectKind::Tag {
+            return Ok(chain);
+        }
+        chain.push(current);
+        current = parse_tag(&object.data)?.object;
+    }
 }
 
 fn reflog_commit_tips(repo: &Repository) -> Result<Vec<ObjectId>> {
@@ -8590,7 +8659,7 @@ fn collect_reachable_objects_segmented(
     graph: &mut CommitGraph<'_>,
     commits: &[ObjectId],
     object_roots: &[RootObject],
-    tip_annotated_tags: &HashMap<ObjectId, ObjectId>,
+    tip_annotated_tags: &HashMap<ObjectId, Vec<ObjectId>>,
     filter: Option<&ObjectFilter>,
     filter_provided: bool,
     missing_action: MissingAction,
@@ -8624,6 +8693,11 @@ fn collect_reachable_objects_segmented(
             }
             Err(err) => return Err(err),
         };
+        for &tag_oid in tip_annotated_tags.get(&commit_oid).into_iter().flatten() {
+            if emitted.insert(tag_oid) {
+                result.push((tag_oid, "tag".to_owned()));
+            }
+        }
         let parent_trees_slice = if filter.is_some() {
             None
         } else {
@@ -8633,13 +8707,8 @@ fn collect_reachable_objects_segmented(
             .as_ref()
             .is_some_and(|parents| !parents.is_empty() && parents.iter().all(|&t| t == commit_tree))
         {
-            segments.push(Vec::new());
+            segments.push(result[start..].to_vec());
             continue;
-        }
-        if let Some(&tag_oid) = tip_annotated_tags.get(&commit_oid) {
-            if emitted.insert(tag_oid) {
-                result.push((tag_oid, "tag".to_owned()));
-            }
         }
         // The parent_union short-circuit dedups objects already reachable from a parent commit.
         // With an active filter this changes which trees are *visited* per commit, which breaks
@@ -9589,7 +9658,7 @@ fn collect_reachable_objects_in_commit_order(
     _graph: &mut CommitGraph<'_>,
     commits: &[ObjectId],
     object_roots: &[RootObject],
-    tip_annotated_tags: &HashMap<ObjectId, ObjectId>,
+    tip_annotated_tags: &HashMap<ObjectId, Vec<ObjectId>>,
     filter: Option<&ObjectFilter>,
     filter_provided: bool,
     missing_action: MissingAction,
@@ -9622,7 +9691,7 @@ fn collect_reachable_objects_in_commit_order(
             Err(err) => return Err(err),
         };
         let before = result.len();
-        if let Some(&tag_oid) = tip_annotated_tags.get(&commit_oid) {
+        for &tag_oid in tip_annotated_tags.get(&commit_oid).into_iter().flatten() {
             if emitted.insert(tag_oid) {
                 result.push((tag_oid, "tag".to_owned()));
             }
@@ -11522,6 +11591,59 @@ mod line_coverage_tests {
         .expect_err("unsupported tag type");
         assert!(matches!(err, Error::CorruptObject(_)));
 
+        Ok(())
+    }
+
+    /// Two annotated tags on one commit, a tag of one of them, and a tagged commit whose
+    /// tree equals its parent's: every tag object is listed, with or without a filter.
+    #[test]
+    fn object_walk_lists_every_tag_of_a_commit() -> Result<()> {
+        let (_dir, repo, tip) = seed_repo(3, false);
+        let write_tag = |name: &str, target: ObjectId, kind: &str| -> Result<ObjectId> {
+            let body = format!("object {target}\ntype {kind}\ntag {name}\n\nmsg\n");
+            let oid = repo.odb().write(ObjectKind::Tag, body.as_bytes())?;
+            fs::write(
+                repo.git_dir().join("refs/tags").join(name),
+                format!("{oid}\n"),
+            )?;
+            Ok(oid)
+        };
+        let first = write_tag("first", tip, "commit")?;
+        let second = write_tag("second", tip, "commit")?;
+        let nested = write_tag("nested", first, "tag")?;
+        let tip_commit = parse_commit(&repo.odb().read(&tip)?.data)?;
+        let same_tree = format!(
+            "tree {}\nparent {tip}\nauthor A <a@example.com> 1 +0000\ncommitter A <a@example.com> 1 +0000\n\nsame tree\n",
+            tip_commit.tree
+        );
+        let empty_change = repo.odb().write(ObjectKind::Commit, same_tree.as_bytes())?;
+        let on_empty_change = write_tag("on-empty-change", empty_change, "commit")?;
+
+        let specs: Vec<String> = ["refs/tags/first", "refs/tags/second", "refs/tags/nested"]
+            .into_iter()
+            .map(String::from)
+            .chain([on_empty_change.to_hex()])
+            .collect();
+        for filter in [None, Some(ObjectFilter::BlobNone)] {
+            let walked = rev_list(
+                &repo,
+                &specs,
+                &[],
+                &RevListOptions {
+                    objects: true,
+                    filter: filter.clone(),
+                    ..RevListOptions::default()
+                },
+            )?;
+            let listed: HashSet<ObjectId> = walked.objects.iter().map(|(o, _)| *o).collect();
+            for tag in [first, second, nested, on_empty_change] {
+                assert!(listed.contains(&tag), "tag {tag} missing ({filter:?})");
+            }
+            assert_eq!(
+                walked.tip_annotated_tag_by_commit.get(&tip),
+                Some(&vec![first, second, nested])
+            );
+        }
         Ok(())
     }
 
