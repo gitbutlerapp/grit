@@ -50,6 +50,16 @@ fn hostile_names() -> Vec<HostileName> {
             mode: "100644",
         },
         HostileName {
+            label: "git tilde1 trailing dot",
+            entry: b"GIT~1.",
+            mode: "100644",
+        },
+        HostileName {
+            label: "git tilde1 trailing spaces",
+            entry: b"git~1  ",
+            mode: "100644",
+        },
+        HostileName {
             label: "ntfs trailing dot",
             entry: b".git.",
             mode: "100644",
