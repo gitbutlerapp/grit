@@ -1542,6 +1542,25 @@ fn normalize_colon_path_for_tree(repo: &Repository, raw_path: &str) -> Result<St
     Ok(s.trim_end_matches('/').to_owned())
 }
 
+/// True when `oid` is a commit that no replace ref redirects, known from the commit-graph or the
+/// object header without inflating the object.
+///
+/// Hide sets peel every ref in the repository, so the common case must stay cheap.
+fn is_unreplaced_commit(repo: &Repository, oid: ObjectId) -> bool {
+    if repo.object_id_after_replace(&oid) != oid {
+        return false;
+    }
+    let in_commit_graph = repo
+        .caches()
+        .commit_graph_chain(repo.odb().objects_dir())
+        .is_some_and(|graph| graph.find_commit(&oid).is_some());
+    in_commit_graph
+        || repo
+            .odb()
+            .read_info(&oid)
+            .is_ok_and(|info| info.kind == ObjectKind::Commit)
+}
+
 /// Peel tags to a commit OID for merge-base computation (`A...B` and `rev-parse` output).
 pub fn peel_to_commit_for_merge_base(repo: &Repository, mut oid: ObjectId) -> Result<ObjectId> {
     oid = apply_peel(repo, oid, Some(""))?;
@@ -1564,6 +1583,9 @@ pub fn try_peel_to_commit_for_merge_base(
     repo: &Repository,
     oid: ObjectId,
 ) -> Result<Option<ObjectId>> {
+    if is_unreplaced_commit(repo, oid) {
+        return Ok(Some(oid));
+    }
     let oid = apply_peel(repo, oid, Some(""))?;
     let obj = repo.odb().read(&oid)?;
     match obj.kind {
