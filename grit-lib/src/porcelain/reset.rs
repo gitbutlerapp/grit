@@ -1,28 +1,21 @@
 //! Move `HEAD` and optionally the index and working tree to a target commit.
 
-use crate::change_id::resolved_change_id;
 use crate::config::ConfigSet;
 use crate::diff::DiffEntry;
 use crate::error::{Error, Result};
-use crate::git_path::path_for_disk_compare;
-use crate::merge_base::{
-    is_ancestor, walk_commits_reachable_excluding_ancestors_of, ReachableWalkLimit,
-};
-use crate::objects::{parse_commit, read_commit_subject_line, ObjectId, ObjectKind};
+use crate::objects::{parse_commit, ObjectId, ObjectKind};
 use crate::porcelain::checkout::checkout_hard_to_tree_from_head_tree;
 use crate::porcelain::index_from_tree::index_from_tree_with_worktree_stats;
+use crate::porcelain::orphans::compute_orphan_info;
 use crate::porcelain::switch::{
     checkout_tree_transition_allow_local_reset, keep_style_transition_would_block_paths_for_preview,
 };
 use crate::porcelain::worktree_guard::{load_worktree_snapshot, local_change_diffs};
 use crate::refs;
 use crate::repo::Repository;
-use crate::rev_parse::try_peel_to_commit_for_merge_base;
 use crate::state::{resolve_head_for_repository, HeadState};
-use crate::worktree::{list_worktrees, WorktreeEntry};
 
-/// Default cap on [`ResetOptions::orphan_limit`] and orphaned commit listings.
-pub const DEFAULT_ORPHAN_LIMIT: usize = 20;
+pub use crate::porcelain::orphans::{OrphanedCommitSummary, DEFAULT_ORPHAN_LIMIT};
 
 /// Which parts of the repository [`reset_to_commit`] updates.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -49,17 +42,6 @@ impl ResetMode {
             Self::Keep => "keep",
         }
     }
-}
-
-/// One commit that would become unreachable after resetting away from `previous`.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct OrphanedCommitSummary {
-    /// Commit object id.
-    pub oid: ObjectId,
-    /// Stored or derived change id for the commit.
-    pub change_id: String,
-    /// First line of the commit message.
-    pub subject: String,
 }
 
 /// Inputs for [`reset_to_commit`] and [`preview_reset`].
@@ -276,127 +258,6 @@ fn plan_reset(
             orphaned_truncated: orphan.truncated,
         },
     ))
-}
-
-struct OrphanComputation {
-    commits: Vec<OrphanedCommitSummary>,
-    total: usize,
-    truncated: bool,
-}
-
-fn compute_orphan_info(
-    repo: &Repository,
-    head: &HeadState,
-    previous: ObjectId,
-    target: ObjectId,
-    limit: usize,
-) -> Result<OrphanComputation> {
-    if previous == target || is_ancestor(repo, previous, target)? {
-        return Ok(OrphanComputation {
-            commits: Vec::new(),
-            total: 0,
-            truncated: false,
-        });
-    }
-    let hide = orphan_hide_tips(repo, head, target, previous)?;
-    let (total, oids) = walk_commits_reachable_excluding_ancestors_of(
-        repo,
-        std::slice::from_ref(&previous),
-        &hide,
-        ReachableWalkLimit::CountAllRetainNewest(limit),
-    )?;
-    let truncated = total > oids.len();
-    let mut commits = Vec::with_capacity(oids.len());
-    for oid in oids {
-        commits.push(orphan_commit_summary(repo, oid)?);
-    }
-    Ok(OrphanComputation {
-        commits,
-        total,
-        truncated,
-    })
-}
-
-fn orphan_hide_tips(
-    repo: &Repository,
-    head: &HeadState,
-    target: ObjectId,
-    _previous: ObjectId,
-) -> Result<Vec<ObjectId>> {
-    let moving_branch = match head {
-        HeadState::Branch { refname, .. } => Some(refname.as_str()),
-        _ => None,
-    };
-    let mut hide = vec![target];
-    for (refname, oid) in refs::list_refs_for_repository(repo, "refs/")? {
-        if moving_branch == Some(refname.as_str()) {
-            continue;
-        }
-        orphan_hide_push_peeled_commit(repo, &mut hide, oid)?;
-    }
-    if let Ok(oid) = repo.resolve_ref_oid("refs/stash") {
-        orphan_hide_push_peeled_commit(repo, &mut hide, oid)?;
-    }
-    for wt in list_worktrees(repo)? {
-        if worktree_is_reset_moving_head(repo, head, &wt) {
-            continue;
-        }
-        match &wt.head {
-            HeadState::Detached { oid } => orphan_hide_push_peeled_commit(repo, &mut hide, *oid)?,
-            HeadState::Branch { oid: Some(oid), .. } => {
-                orphan_hide_push_peeled_commit(repo, &mut hide, *oid)?;
-            }
-            HeadState::Branch { .. } | HeadState::Invalid => {}
-        }
-    }
-    hide.sort_unstable();
-    hide.dedup();
-    Ok(hide)
-}
-
-/// Add a ref or peeled tip to the orphan hide set when it names a commit.
-fn orphan_hide_push_peeled_commit(
-    repo: &Repository,
-    hide: &mut Vec<ObjectId>,
-    oid: ObjectId,
-) -> Result<()> {
-    if let Some(commit) = try_peel_to_commit_for_merge_base(repo, oid)? {
-        hide.push(commit);
-    }
-    Ok(())
-}
-
-/// True when this listed worktree is the one whose HEAD ref/file is being moved by the reset.
-fn worktree_is_reset_moving_head(repo: &Repository, head: &HeadState, wt: &WorktreeEntry) -> bool {
-    let Some(repo_wt) = repo.work_tree() else {
-        return false;
-    };
-    if path_for_disk_compare(&wt.path) != path_for_disk_compare(repo_wt) {
-        return false;
-    }
-    match head {
-        HeadState::Branch { refname, .. } => matches!(
-            &wt.head,
-            HeadState::Branch { refname: wt_ref, .. } if wt_ref == refname
-        ),
-        HeadState::Detached { oid } => matches!(
-            &wt.head,
-            HeadState::Detached { oid: wt_oid } if wt_oid == oid
-        ),
-        HeadState::Invalid => false,
-    }
-}
-
-fn orphan_commit_summary(repo: &Repository, oid: ObjectId) -> Result<OrphanedCommitSummary> {
-    let obj = repo.odb().read(&oid)?;
-    let data = parse_commit(&obj.data)?;
-    let subject = read_commit_subject_line(&obj.data).unwrap_or_default();
-    let change_id = resolved_change_id(&oid, &data).id.as_str().to_owned();
-    Ok(OrphanedCommitSummary {
-        oid,
-        change_id,
-        subject,
-    })
 }
 
 fn apply_reset_worktree(repo: &Repository, opts: &ResetOptions, previous: ObjectId) -> Result<()> {

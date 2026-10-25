@@ -72,6 +72,7 @@ pub(crate) mod index_from_tree;
 pub mod index_mode;
 pub mod log;
 pub mod merge;
+pub(crate) mod orphans;
 pub mod paths;
 pub mod pathspec_match;
 pub mod pull;
