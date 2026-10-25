@@ -113,6 +113,8 @@ pub struct ReplayCreated {
     pub new_oid: ObjectId,
     /// Stored `change-id` on `new_oid` when present.
     pub change_id: Option<ChangeId>,
+    /// First line of `new_oid`'s message, trimmed.
+    pub subject: String,
 }
 
 /// In-memory prediction of [`start_replay_sequence`] (no refs, index, worktree, or on-disk object writes).
@@ -129,6 +131,8 @@ pub enum SequencePrediction {
     Conflicts {
         /// Source commit that would conflict.
         commit: ObjectId,
+        /// First line of `commit`'s message, trimmed.
+        subject: String,
         /// Conflicted paths and kinds.
         conflicts: Vec<Conflict>,
     },
@@ -136,6 +140,8 @@ pub enum SequencePrediction {
     Empty {
         /// Source commit that would be empty.
         commit: ObjectId,
+        /// First line of `commit`'s message, trimmed.
+        subject: String,
     },
 }
 
@@ -192,6 +198,8 @@ pub enum SequenceOutcome {
     Conflicts {
         /// Source commit being replayed.
         current: ObjectId,
+        /// First line of `current`'s message, trimmed.
+        current_subject: String,
         /// Conflicted paths and kinds.
         conflicts: Vec<Conflict>,
         /// Commits created before this stop in the sequence.
@@ -203,6 +211,8 @@ pub enum SequenceOutcome {
     Empty {
         /// Source commit that would be empty.
         current: ObjectId,
+        /// First line of `current`'s message, trimmed.
+        current_subject: String,
         /// Commits created before this stop.
         created_so_far: Vec<ReplayCreated>,
         /// Remaining todo oids (including `current`).
@@ -331,7 +341,7 @@ pub fn continue_replay_sequence(repo: &Repository, identity: &str) -> Result<Seq
         }
     }
     let mut todo = active.todo;
-    let mut created_records = read_created_records(repo.git_dir())?;
+    let mut created_records = read_created_records(repo)?;
     let mut created_so_far: Vec<ObjectId> = created_records.iter().map(|r| r.new_oid).collect();
     if active.opts.no_commit {
         let head_tree = commit_tree(repo, &head_oid)?;
@@ -418,7 +428,7 @@ pub fn skip_replay_step(repo: &Repository, identity: &str) -> Result<SequenceOut
         Some(todo.remove(0).oid)
     };
     write_sequencer_todo(repo.git_dir(), &todo)?;
-    let mut created_records = read_created_records(repo.git_dir())?;
+    let mut created_records = read_created_records(repo)?;
     if todo.is_empty() {
         clear_replay_state(repo.git_dir())?;
         return Ok(SequenceOutcome::Completed {
@@ -537,13 +547,11 @@ fn build_todo_from_commits(
 fn commit_subject(repo: &Repository, oid: ObjectId) -> Result<String> {
     let obj = repo.odb().read(&oid)?;
     let commit = parse_commit(&obj.data)?;
-    Ok(commit
-        .message
-        .lines()
-        .next()
-        .unwrap_or("")
-        .trim()
-        .to_owned())
+    Ok(message_subject(&commit.message))
+}
+
+fn message_subject(message: &str) -> String {
+    message.lines().next().unwrap_or("").trim().to_owned()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -687,6 +695,7 @@ fn run_sequence(
                 write_created_records(repo.git_dir(), created_records)?;
                 return Ok(SequenceOutcome::Conflicts {
                     current: entry.oid,
+                    current_subject: entry.subject,
                     conflicts,
                     created_so_far: created_records.clone(),
                     remaining,
@@ -716,6 +725,7 @@ fn run_sequence(
                 write_created_records(repo.git_dir(), created_records)?;
                 return Ok(SequenceOutcome::Empty {
                     current: entry.oid,
+                    current_subject: entry.subject,
                     created_so_far: created_records.clone(),
                     remaining,
                 });
@@ -761,11 +771,15 @@ fn predict_sequence(
             PredictStepResult::Conflicts { conflicts } => {
                 return Ok(SequencePrediction::Conflicts {
                     commit: entry.oid,
+                    subject: entry.subject.clone(),
                     conflicts,
                 });
             }
             PredictStepResult::EmptyStop => {
-                return Ok(SequencePrediction::Empty { commit: entry.oid });
+                return Ok(SequencePrediction::Empty {
+                    commit: entry.oid,
+                    subject: entry.subject.clone(),
+                });
             }
         }
     }
@@ -1185,6 +1199,7 @@ fn replay_created_record(
         source,
         new_oid,
         change_id: change_id(&commit),
+        subject: message_subject(&commit.message),
     })
 }
 
@@ -1727,8 +1742,8 @@ fn write_created_records(git_dir: &Path, records: &[ReplayCreated]) -> Result<()
     fs::write(seq.join("created"), body).map_err(Error::Io)
 }
 
-fn read_created_records(git_dir: &Path) -> Result<Vec<ReplayCreated>> {
-    let path = git_dir.join("sequencer").join("created");
+fn read_created_records(repo: &Repository) -> Result<Vec<ReplayCreated>> {
+    let path = repo.git_dir().join("sequencer").join("created");
     if !path.is_file() {
         return Ok(Vec::new());
     }
@@ -1750,11 +1765,7 @@ fn read_created_records(git_dir: &Path) -> Result<Vec<ReplayCreated>> {
             .map_err(|_| Error::Message("invalid sequencer/created line: bad source oid".into()))?;
         let new_oid = ObjectId::from_hex(new)
             .map_err(|_| Error::Message("invalid sequencer/created line: bad new oid".into()))?;
-        out.push(ReplayCreated {
-            source,
-            new_oid,
-            change_id: None,
-        });
+        out.push(replay_created_record(repo, source, new_oid)?);
     }
     Ok(out)
 }

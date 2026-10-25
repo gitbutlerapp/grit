@@ -577,3 +577,45 @@ fn revert_mixed_valid_and_tree_ish_fails_without_mutating_repo() -> TestResult {
     assert_eq!(fs::read_to_string(repo.join("a.txt"))?, worktree_before);
     Ok(())
 }
+
+#[test]
+fn revert_continue_json_reports_change_ids_of_earlier_steps() -> TestResult {
+    let scratch = Scratch::new("continue-change-ids")?;
+    let repo = scratch.path();
+    init_repo(repo)?;
+    commit_file(repo, "shared.txt", "base\n", "base")?;
+    let add_clean = commit_file(repo, "clean.txt", "clean\n", "add clean")?;
+    let edit_shared = commit_file(repo, "shared.txt", "b\n", "edit shared")?;
+    commit_file(repo, "shared.txt", "c\n", "edit shared again")?;
+
+    let out = gs(repo, ["--json", "revert", &add_clean, &edit_shared])?;
+    assert_eq!(out.status, Some(1), "{}", out.dump());
+    let v: Value = serde_json::from_str(out.stdout.trim())?;
+    assert_eq!(v["result"], "conflicts");
+    assert_eq!(v["commits"][0]["subject"], "Revert \"add clean\"");
+
+    fs::write(repo.join("shared.txt"), "resolved\n")?;
+    git(repo, &["add", "shared.txt"])?;
+    let out = gs(repo, ["--json", "revert", "--continue"])?;
+    assert_eq!(out.status, Some(0), "{}", out.dump());
+    let v: Value = serde_json::from_str(out.stdout.trim())?;
+    assert_eq!(v["result"], "completed");
+    let commits = v["commits"].as_array().ok_or("commits array")?;
+    assert_eq!(commits.len(), 2, "{}", out.dump());
+    assert_eq!(commits[0]["source"].as_str(), Some(add_clean.as_str()));
+    assert_eq!(commits[0]["subject"], "Revert \"add clean\"");
+    assert_eq!(commits[1]["subject"], "Revert \"edit shared\"");
+    for commit in commits {
+        let oid = commit["oid"].as_str().ok_or("oid")?;
+        let raw = git(repo, &["cat-file", "commit", oid])?;
+        let header = raw
+            .lines()
+            .take_while(|line| !line.is_empty())
+            .find_map(|line| line.strip_prefix("change-id "))
+            .ok_or("revert commit carries a change-id header")?;
+        assert_eq!(commit["change_id"].as_str(), Some(header), "{}", out.dump());
+    }
+    assert_eq!(v["change_id"], commits[1]["change_id"]);
+    git_fsck_strict(repo)?;
+    Ok(())
+}

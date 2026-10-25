@@ -1,5 +1,7 @@
 //! Shared merge-favor and conflict-marker flags for pick and revert.
 
+use std::num::NonZeroU32;
+
 use clap::Args;
 use grit_lib::diff::merge_file::{ConflictStyle, MergeFavor};
 
@@ -15,6 +17,16 @@ pub struct ReplayMergeArgs {
     /// Conflict marker style when a step would stop with conflicts.
     #[arg(long = "conflict", value_enum)]
     pub conflict_style: Option<ConflictStyleArg>,
+}
+
+/// Validate `--mainline <n>` (1-based parent number) for pick / revert.
+pub fn mainline_parent(n: Option<u32>) -> anyhow::Result<Option<NonZeroU32>> {
+    n.map(|n| {
+        NonZeroU32::new(n).ok_or_else(|| {
+            anyhow::anyhow!("--mainline requires a positive parent number (1, 2, …)")
+        })
+    })
+    .transpose()
 }
 
 impl ReplayMergeArgs {

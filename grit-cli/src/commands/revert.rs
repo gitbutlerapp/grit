@@ -1,6 +1,6 @@
 //! `grit revert` — undo one or more commits with new inverse commits.
 
-use crate::commands::replay_merge_args::ReplayMergeArgs;
+use crate::commands::replay_merge_args::{mainline_parent, ReplayMergeArgs};
 use crate::context;
 use crate::markdown;
 use crate::message_input::{read_message_input, MessageInputArgs};
@@ -9,6 +9,7 @@ use crate::operation_output::{
     OperationConflictBlock,
 };
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
+use crate::revision_errors::map_commit_spec_error;
 use anyhow::{bail, Context, Result};
 use clap::ValueEnum;
 use grit_lib::config::ident_resolve::IdentRole;
@@ -25,7 +26,6 @@ use grit_lib::porcelain::revert::commits_to_revert;
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::io::Write;
-use std::num::NonZeroU32;
 
 /// How to handle a revert step whose patch would not change `HEAD`.
 #[derive(Debug, Clone, Copy, ValueEnum, Default, PartialEq, Eq)]
@@ -124,9 +124,9 @@ pub struct RevertOutcome {
 }
 
 impl RevertOutcome {
-    fn aborted() -> Self {
+    fn new(result: RevertResult) -> Self {
         Self {
-            result: RevertResult::Aborted,
+            result,
             source: None,
             oid: None,
             subject: None,
@@ -143,11 +143,6 @@ impl RevertOutcome {
 
     fn dry_run(sources: Vec<ObjectId>) -> Self {
         Self {
-            result: RevertResult::Completed,
-            source: None,
-            oid: None,
-            subject: None,
-            change_id: None,
             commits: sources
                 .into_iter()
                 .map(|oid| RevertCommitEntry {
@@ -157,12 +152,19 @@ impl RevertOutcome {
                     change_id: None,
                 })
                 .collect(),
-            dropped: Vec::new(),
-            conflicts: None,
-            next_steps: None,
-            alternatives: None,
             dry_run: Some(true),
-            check: false,
+            ..Self::new(RevertResult::Completed)
+        }
+    }
+}
+
+impl From<&ReplayCreated> for RevertCommitEntry {
+    fn from(record: &ReplayCreated) -> Self {
+        Self {
+            source: record.source.to_hex(),
+            oid: record.new_oid.to_hex(),
+            subject: context::subject_line(&record.subject),
+            change_id: record.change_id.as_ref().map(|id| id.as_str().to_owned()),
         }
     }
 }
@@ -249,7 +251,7 @@ pub fn run(opts: &RevertRunOptions) -> Result<RevertOutcome> {
     let repo = context::discover()?;
     if opts.abort {
         abort_replay_sequence(&repo).map_err(map_replay_error)?;
-        return Ok(RevertOutcome::aborted());
+        return Ok(RevertOutcome::new(RevertResult::Aborted));
     }
 
     let env = repo.environment();
@@ -264,271 +266,114 @@ pub fn run(opts: &RevertRunOptions) -> Result<RevertOutcome> {
 
     if opts.continue_revert {
         let outcome = continue_replay_sequence(&repo, &committer).map_err(map_replay_error)?;
-        return map_sequence_outcome(&repo, outcome);
+        return Ok(map_sequence_outcome(outcome));
     }
     if opts.skip {
         let outcome = skip_replay_step(&repo, &committer).map_err(map_replay_error)?;
-        return map_sequence_outcome(&repo, outcome);
+        return Ok(map_sequence_outcome(outcome));
     }
 
     if opts.commits.is_empty() {
         bail!("at least one commit is required unless using --continue, --abort, or --skip");
     }
-    let sources = commits_to_revert(&repo, &opts.commits).map_err(map_revert_committish_error)?;
+    let sources = commits_to_revert(&repo, &opts.commits).map_err(map_commit_spec_error)?;
     if opts.dry_run {
         return Ok(RevertOutcome::dry_run(sources));
     }
 
     let favor = opts.replay_merge.favor();
     let conflict_style = opts.replay_merge.conflict_style(&repo);
-
+    let message_override = if opts.check {
+        None
+    } else {
+        read_message_input(&opts.message)?
+    };
+    let req = ReplaySequenceRequest {
+        commits: sources,
+        direction: ReplayDirection::Revert,
+        committer,
+        options: ReplayOptions {
+            no_commit: opts.no_commit,
+            empty: opts.empty.into(),
+            message_override,
+            mainline: mainline_parent(opts.mainline)?,
+            favor,
+            conflict_style,
+            ..ReplayOptions::default()
+        },
+    };
     if opts.check {
-        return run_check(&repo, sources, opts, favor, conflict_style);
+        let prediction = predict_replay_sequence(&repo, &req).map_err(map_replay_error)?;
+        return Ok(map_prediction_outcome(prediction));
     }
-
-    let message_override = read_message_input(&opts.message)?;
-    let mainline = opts
-        .mainline
-        .map(|n| {
-            NonZeroU32::new(n).ok_or_else(|| {
-                anyhow::anyhow!("--mainline requires a positive parent number (1, 2, …)")
-            })
-        })
-        .transpose()?;
-    let replay_opts = ReplayOptions {
-        no_commit: opts.no_commit,
-        empty: opts.empty.into(),
-        message_override,
-        mainline,
-        favor,
-        conflict_style,
-        ..ReplayOptions::default()
-    };
-
-    let outcome = start_replay_sequence(
-        &repo,
-        &ReplaySequenceRequest {
-            commits: sources,
-            direction: ReplayDirection::Revert,
-            committer,
-            options: replay_opts,
-        },
-    )
-    .map_err(map_replay_error)?;
-    map_sequence_outcome(&repo, outcome)
+    let outcome = start_replay_sequence(&repo, &req).map_err(map_replay_error)?;
+    Ok(map_sequence_outcome(outcome))
 }
 
-fn run_check(
-    repo: &grit_lib::repo::Repository,
-    sources: Vec<ObjectId>,
-    opts: &RevertRunOptions,
-    favor: grit_lib::diff::merge_file::MergeFavor,
-    conflict_style: grit_lib::diff::merge_file::ConflictStyle,
-) -> Result<RevertOutcome> {
-    let mainline = opts
-        .mainline
-        .map(|n| {
-            NonZeroU32::new(n).ok_or_else(|| {
-                anyhow::anyhow!("--mainline requires a positive parent number (1, 2, …)")
-            })
-        })
-        .transpose()?;
-    let replay_opts = ReplayOptions {
-        no_commit: opts.no_commit,
-        empty: opts.empty.into(),
-        message_override: None,
-        mainline,
-        favor,
-        conflict_style,
-        ..ReplayOptions::default()
-    };
-    let prediction = predict_replay_sequence(
-        repo,
-        &ReplaySequenceRequest {
-            commits: sources,
-            direction: ReplayDirection::Revert,
-            committer: String::new(),
-            options: replay_opts,
-        },
-    )
-    .map_err(map_replay_error)?;
-    map_prediction_outcome(prediction)
-}
-
-fn map_prediction_outcome(prediction: SequencePrediction) -> Result<RevertOutcome> {
-    match prediction {
-        SequencePrediction::Clean { tree, dropped } => Ok(RevertOutcome {
-            result: RevertResult::Clean,
-            source: None,
+fn map_prediction_outcome(prediction: SequencePrediction) -> RevertOutcome {
+    let outcome = match prediction {
+        SequencePrediction::Clean { tree, dropped } => RevertOutcome {
             oid: Some(tree.to_hex()),
-            subject: None,
-            change_id: None,
-            commits: Vec::new(),
             dropped: dropped.iter().map(ObjectId::to_hex).collect(),
-            conflicts: None,
-            next_steps: None,
-            alternatives: None,
-            dry_run: None,
-            check: true,
-        }),
-        SequencePrediction::Conflicts { commit, conflicts } => {
-            let block = OperationConflictBlock::for_revert(&conflicts);
-            Ok(RevertOutcome {
-                result: RevertResult::Conflicts,
-                source: Some(commit.to_hex()),
-                oid: None,
-                subject: None,
-                change_id: None,
-                commits: Vec::new(),
-                dropped: Vec::new(),
-                conflicts: Some(block.conflicts),
-                next_steps: None,
-                alternatives: None,
-                dry_run: None,
-                check: true,
-            })
-        }
-        SequencePrediction::Empty { commit } => Ok(RevertOutcome {
-            result: RevertResult::Empty,
+            ..RevertOutcome::new(RevertResult::Clean)
+        },
+        SequencePrediction::Conflicts {
+            commit, conflicts, ..
+        } => RevertOutcome {
             source: Some(commit.to_hex()),
-            oid: None,
-            subject: None,
-            change_id: None,
-            commits: Vec::new(),
-            dropped: Vec::new(),
-            conflicts: None,
-            next_steps: None,
-            alternatives: None,
-            dry_run: None,
-            check: true,
-        }),
+            conflicts: Some(OperationConflictBlock::for_revert(&conflicts).conflicts),
+            ..RevertOutcome::new(RevertResult::Conflicts)
+        },
+        SequencePrediction::Empty { commit, .. } => RevertOutcome {
+            source: Some(commit.to_hex()),
+            ..RevertOutcome::new(RevertResult::Empty)
+        },
+    };
+    RevertOutcome {
+        check: true,
+        ..outcome
     }
 }
 
-fn map_sequence_outcome(
-    repo: &grit_lib::repo::Repository,
-    outcome: SequenceOutcome,
-) -> Result<RevertOutcome> {
+fn map_sequence_outcome(outcome: SequenceOutcome) -> RevertOutcome {
     match outcome {
         SequenceOutcome::Completed { created, dropped } => {
-            build_completed_outcome(repo, &created, &dropped)
+            let commits: Vec<RevertCommitEntry> =
+                created.iter().map(RevertCommitEntry::from).collect();
+            let last = commits.last().cloned();
+            RevertOutcome {
+                source: last.as_ref().map(|e| e.source.clone()),
+                oid: last.as_ref().map(|e| e.oid.clone()),
+                subject: last.as_ref().map(|e| e.subject.clone()),
+                change_id: last.and_then(|e| e.change_id),
+                commits,
+                dropped: dropped.iter().map(ObjectId::to_hex).collect(),
+                ..RevertOutcome::new(RevertResult::Completed)
+            }
         }
         SequenceOutcome::Conflicts {
             conflicts,
             created_so_far,
             ..
-        } => Ok(build_conflicts_outcome(&conflicts, &created_so_far, repo)),
-        SequenceOutcome::Empty { created_so_far, .. } => {
-            Ok(build_empty_outcome(repo, &created_so_far))
+        } => {
+            let block = OperationConflictBlock::for_revert(&conflicts);
+            RevertOutcome {
+                commits: created_so_far.iter().map(RevertCommitEntry::from).collect(),
+                conflicts: Some(block.conflicts),
+                next_steps: Some(block.next_steps),
+                alternatives: block.alternatives,
+                ..RevertOutcome::new(RevertResult::Conflicts)
+            }
         }
-    }
-}
-
-fn build_completed_outcome(
-    repo: &grit_lib::repo::Repository,
-    created: &[ReplayCreated],
-    dropped: &[ObjectId],
-) -> Result<RevertOutcome> {
-    let commits = created
-        .iter()
-        .map(|record| entry_from_record(repo, record))
-        .collect::<Result<Vec<_>>>()?;
-    let (source, oid, subject, change_id) = commits.last().map_or((None, None, None, None), |e| {
-        (
-            Some(e.source.clone()),
-            Some(e.oid.clone()),
-            Some(e.subject.clone()),
-            e.change_id.clone(),
-        )
-    });
-    Ok(RevertOutcome {
-        result: RevertResult::Completed,
-        source,
-        oid,
-        subject,
-        change_id,
-        commits,
-        dropped: dropped.iter().map(ObjectId::to_hex).collect(),
-        conflicts: None,
-        next_steps: None,
-        alternatives: None,
-        dry_run: None,
-        check: false,
-    })
-}
-
-fn build_conflicts_outcome(
-    conflicts: &[grit_lib::operation::Conflict],
-    created_so_far: &[ReplayCreated],
-    repo: &grit_lib::repo::Repository,
-) -> RevertOutcome {
-    let block = OperationConflictBlock::for_revert(conflicts);
-    let commits = created_so_far
-        .iter()
-        .filter_map(|record| entry_from_record(repo, record).ok())
-        .collect();
-    RevertOutcome {
-        result: RevertResult::Conflicts,
-        source: None,
-        oid: None,
-        subject: None,
-        change_id: None,
-        commits,
-        dropped: Vec::new(),
-        conflicts: Some(block.conflicts),
-        next_steps: Some(block.next_steps),
-        alternatives: block.alternatives,
-        dry_run: None,
-        check: false,
-    }
-}
-
-fn build_empty_outcome(
-    repo: &grit_lib::repo::Repository,
-    created_so_far: &[ReplayCreated],
-) -> RevertOutcome {
-    let block = OperationConflictBlock::for_revert(&[]);
-    let commits = created_so_far
-        .iter()
-        .filter_map(|record| entry_from_record(repo, record).ok())
-        .collect();
-    RevertOutcome {
-        result: RevertResult::Empty,
-        source: None,
-        oid: None,
-        subject: None,
-        change_id: None,
-        commits,
-        dropped: Vec::new(),
-        conflicts: None,
-        next_steps: Some(block.next_steps),
-        alternatives: block.alternatives,
-        dry_run: None,
-        check: false,
-    }
-}
-
-fn entry_from_record(
-    repo: &grit_lib::repo::Repository,
-    record: &ReplayCreated,
-) -> Result<RevertCommitEntry> {
-    let commit = context::read_commit(repo, &record.new_oid)?;
-    Ok(RevertCommitEntry {
-        source: record.source.to_hex(),
-        oid: record.new_oid.to_hex(),
-        subject: context::subject_line(&commit.message),
-        change_id: record.change_id.as_ref().map(|id| id.as_str().to_owned()),
-    })
-}
-
-fn map_revert_committish_error(err: Error) -> anyhow::Error {
-    if let Some(msg) = crate::revision_errors::map_lib_revision_error(&err) {
-        return anyhow::anyhow!(msg);
-    }
-    match err {
-        Error::InvalidRef(msg) => anyhow::anyhow!(msg),
-        Error::ObjectNotFound(msg) => anyhow::anyhow!("could not resolve commit: {msg}"),
-        other => anyhow::Error::new(other),
+        SequenceOutcome::Empty { created_so_far, .. } => {
+            let block = OperationConflictBlock::for_revert(&[]);
+            RevertOutcome {
+                commits: created_so_far.iter().map(RevertCommitEntry::from).collect(),
+                next_steps: Some(block.next_steps),
+                alternatives: block.alternatives,
+                ..RevertOutcome::new(RevertResult::Empty)
+            }
+        }
     }
 }
 

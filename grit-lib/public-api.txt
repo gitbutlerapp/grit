@@ -13758,10 +13758,12 @@ pub grit_lib::porcelain::replay_sequence::SequenceOutcome::Conflicts
 pub grit_lib::porcelain::replay_sequence::SequenceOutcome::Conflicts::conflicts: alloc::vec::Vec<grit_lib::operation::Conflict>
 pub grit_lib::porcelain::replay_sequence::SequenceOutcome::Conflicts::created_so_far: alloc::vec::Vec<grit_lib::porcelain::replay_sequence::ReplayCreated>
 pub grit_lib::porcelain::replay_sequence::SequenceOutcome::Conflicts::current: grit_lib::objects::ObjectId
+pub grit_lib::porcelain::replay_sequence::SequenceOutcome::Conflicts::current_subject: alloc::string::String
 pub grit_lib::porcelain::replay_sequence::SequenceOutcome::Conflicts::remaining: alloc::vec::Vec<grit_lib::objects::ObjectId>
 pub grit_lib::porcelain::replay_sequence::SequenceOutcome::Empty
 pub grit_lib::porcelain::replay_sequence::SequenceOutcome::Empty::created_so_far: alloc::vec::Vec<grit_lib::porcelain::replay_sequence::ReplayCreated>
 pub grit_lib::porcelain::replay_sequence::SequenceOutcome::Empty::current: grit_lib::objects::ObjectId
+pub grit_lib::porcelain::replay_sequence::SequenceOutcome::Empty::current_subject: alloc::string::String
 pub grit_lib::porcelain::replay_sequence::SequenceOutcome::Empty::remaining: alloc::vec::Vec<grit_lib::objects::ObjectId>
 impl core::clone::Clone for grit_lib::porcelain::replay_sequence::SequenceOutcome
 pub fn grit_lib::porcelain::replay_sequence::SequenceOutcome::clone(&self) -> Self
@@ -13785,8 +13787,10 @@ pub grit_lib::porcelain::replay_sequence::SequencePrediction::Clean::tree: grit_
 pub grit_lib::porcelain::replay_sequence::SequencePrediction::Conflicts
 pub grit_lib::porcelain::replay_sequence::SequencePrediction::Conflicts::commit: grit_lib::objects::ObjectId
 pub grit_lib::porcelain::replay_sequence::SequencePrediction::Conflicts::conflicts: alloc::vec::Vec<grit_lib::operation::Conflict>
+pub grit_lib::porcelain::replay_sequence::SequencePrediction::Conflicts::subject: alloc::string::String
 pub grit_lib::porcelain::replay_sequence::SequencePrediction::Empty
 pub grit_lib::porcelain::replay_sequence::SequencePrediction::Empty::commit: grit_lib::objects::ObjectId
+pub grit_lib::porcelain::replay_sequence::SequencePrediction::Empty::subject: alloc::string::String
 impl core::clone::Clone for grit_lib::porcelain::replay_sequence::SequencePrediction
 pub fn grit_lib::porcelain::replay_sequence::SequencePrediction::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::porcelain::replay_sequence::SequencePrediction
@@ -13806,6 +13810,7 @@ pub struct grit_lib::porcelain::replay_sequence::ReplayCreated
 pub grit_lib::porcelain::replay_sequence::ReplayCreated::change_id: core::option::Option<grit_lib::change_id::ChangeId>
 pub grit_lib::porcelain::replay_sequence::ReplayCreated::new_oid: grit_lib::objects::ObjectId
 pub grit_lib::porcelain::replay_sequence::ReplayCreated::source: grit_lib::objects::ObjectId
+pub grit_lib::porcelain::replay_sequence::ReplayCreated::subject: alloc::string::String
 impl core::clone::Clone for grit_lib::porcelain::replay_sequence::ReplayCreated
 pub fn grit_lib::porcelain::replay_sequence::ReplayCreated::clone(&self) -> Self
 impl core::cmp::Eq for grit_lib::porcelain::replay_sequence::ReplayCreated

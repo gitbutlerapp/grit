@@ -36,6 +36,19 @@ pub fn map_lib_revision_error(err: &LibError) -> Option<String> {
     }
 }
 
+/// Map an error from expanding commit arguments (`grit pick` / `grit revert`) to a user-facing error.
+#[must_use]
+pub fn map_commit_spec_error(err: LibError) -> anyhow::Error {
+    if let Some(msg) = map_lib_revision_error(&err) {
+        return anyhow::anyhow!(msg);
+    }
+    match err {
+        LibError::InvalidRef(msg) => anyhow::anyhow!(msg),
+        LibError::ObjectNotFound(msg) => anyhow::anyhow!("could not resolve commit: {msg}"),
+        other => anyhow::Error::new(other),
+    }
+}
+
 /// Map [`ResolveError`] from [`Repository::resolve`](grit_lib::repo::Repository::resolve).
 #[must_use]
 pub fn map_resolve_error(spec: &str, err: ResolveError) -> anyhow::Error {

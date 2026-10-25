@@ -229,8 +229,13 @@ fn predict_pick_range_first_conflict() {
         predict_replay_sequence(&repo, &pick_req(vec![c1, c2], ReplayOptions::default()))
             .expect("predict");
     match prediction {
-        SequencePrediction::Conflicts { commit, conflicts } => {
+        SequencePrediction::Conflicts {
+            commit,
+            subject,
+            conflicts,
+        } => {
             assert_eq!(commit, c2);
+            assert_eq!(subject, "topic f");
             assert!(conflicts.iter().any(|c| c.path == "f.txt"));
         }
         other => panic!("expected conflict on second pick, got {other:?}"),

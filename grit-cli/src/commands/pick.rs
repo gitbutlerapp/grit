@@ -1,6 +1,6 @@
 //! `grit pick` — cherry-pick one or more commits onto the current branch.
 
-use crate::commands::replay_merge_args::ReplayMergeArgs;
+use crate::commands::replay_merge_args::{mainline_parent, ReplayMergeArgs};
 use crate::context;
 use crate::markdown;
 use crate::message_input::{read_message_input, MessageInputArgs};
@@ -9,9 +9,9 @@ use crate::operation_output::{
     ConflictJson, OperationConflictBlock,
 };
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
+use crate::revision_errors::map_commit_spec_error;
 use anyhow::{bail, Context, Result};
 use clap::ValueEnum;
-use grit_lib::change_id::resolved_change_id;
 use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::config::ConfigSet;
 use grit_lib::error::Error;
@@ -22,14 +22,13 @@ use grit_lib::operation::{
 use grit_lib::porcelain::replay::ReplayDirection;
 use grit_lib::porcelain::replay_sequence::{
     abort_replay_sequence, commits_to_replay, continue_replay_sequence, predict_replay_sequence,
-    skip_replay_step, start_replay_sequence, ReplayEmptyPolicy, ReplayOptions,
+    skip_replay_step, start_replay_sequence, ReplayCreated, ReplayEmptyPolicy, ReplayOptions,
     ReplaySequenceRequest, SequenceOutcome, SequencePrediction,
 };
 use grit_lib::state::InProgressOperation;
 use schemars::JsonSchema;
 use serde::Serialize;
 use std::io::Write;
-use std::num::NonZeroU32;
 
 /// Integration result for `grit pick` (`--json` contract).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, JsonSchema)]
@@ -230,47 +229,26 @@ pub fn run(opts: PickRunOptions) -> Result<PickOutcome> {
 
     if opts.abort {
         abort_replay_sequence(&repo).map_err(map_replay_error)?;
-        return Ok(PickOutcome {
-            result: PickResult::Aborted,
-            commits: Vec::new(),
-            dropped: Vec::new(),
-            conflicts: None,
-            next_steps: None,
-            alternatives: None,
-            dry_run: None,
-            oid: None,
-            check: false,
-        });
+        return Ok(PickOutcome::new(PickResult::Aborted));
     }
 
     if opts.continue_pick {
         let outcome = continue_replay_sequence(&repo, &committer).map_err(map_replay_error)?;
-        return Ok(map_sequence_outcome(
-            &repo,
-            &[],
-            outcome,
-            PickResult::Picked,
-        ));
+        return Ok(map_sequence_outcome(outcome, PickResult::Picked));
     }
 
     if opts.skip {
         let outcome = skip_replay_step(&repo, &committer).map_err(map_replay_error)?;
-        return Ok(map_sequence_outcome(
-            &repo,
-            &[],
-            outcome,
-            PickResult::Skipped,
-        ));
+        return Ok(map_sequence_outcome(outcome, PickResult::Skipped));
     }
 
     if opts.commits.is_empty() {
         bail!("at least one commit or `--continue` / `--abort` / `--skip` is required");
     }
 
-    let sources = commits_to_replay(&repo, &opts.commits).map_err(map_pick_committish_error)?;
+    let sources = commits_to_replay(&repo, &opts.commits).map_err(map_commit_spec_error)?;
     if opts.dry_run {
         return Ok(PickOutcome {
-            result: PickResult::Picked,
             commits: sources
                 .iter()
                 .map(|oid| PickCommitRecord {
@@ -280,279 +258,147 @@ pub fn run(opts: PickRunOptions) -> Result<PickOutcome> {
                     subject: String::new(),
                 })
                 .collect(),
-            dropped: Vec::new(),
-            conflicts: None,
-            next_steps: None,
-            alternatives: None,
             dry_run: Some(true),
-            oid: None,
-            check: false,
+            ..PickOutcome::new(PickResult::Picked)
         });
     }
     let favor = opts.replay_merge.favor();
     let conflict_style = opts.replay_merge.conflict_style(&repo);
-    if opts.check {
-        return run_check(&repo, sources, &opts, favor, conflict_style);
-    }
-
-    let message_override = read_message_input(&opts.message)?;
+    let message_override = if opts.check {
+        None
+    } else {
+        read_message_input(&opts.message)?
+    };
     if message_override.is_some() && opts.commits.len() != 1 {
         bail!("--message and --message-file are only allowed when picking exactly one commit");
     }
-
-    let mainline = opts
-        .mainline
-        .map(|n| {
-            NonZeroU32::new(n).ok_or_else(|| {
-                anyhow::anyhow!("--mainline requires a positive parent number (1, 2, …)")
-            })
-        })
-        .transpose()?;
-    let replay_opts = ReplayOptions {
-        record_origin: opts.record_origin,
-        no_commit: opts.no_commit,
-        empty: opts.empty.into(),
-        message_override,
-        mainline,
-        favor,
-        conflict_style,
-    };
     let req = ReplaySequenceRequest {
-        commits: sources.clone(),
+        commits: sources,
         direction: ReplayDirection::Pick,
         committer,
-        options: replay_opts,
+        options: ReplayOptions {
+            record_origin: opts.record_origin,
+            no_commit: opts.no_commit,
+            empty: opts.empty.into(),
+            message_override,
+            mainline: mainline_parent(opts.mainline)?,
+            favor,
+            conflict_style,
+        },
     };
+    if opts.check {
+        let prediction = predict_replay_sequence(&repo, &req).map_err(map_replay_error)?;
+        return Ok(map_prediction_outcome(prediction));
+    }
     let outcome = start_replay_sequence(&repo, &req).map_err(map_replay_error)?;
-    Ok(map_sequence_outcome(
-        &repo,
-        &sources,
-        outcome,
-        PickResult::Picked,
-    ))
+    Ok(map_sequence_outcome(outcome, PickResult::Picked))
 }
 
-fn map_sequence_outcome(
-    repo: &grit_lib::repo::Repository,
-    sources: &[ObjectId],
-    outcome: SequenceOutcome,
-    ok_result: PickResult,
-) -> PickOutcome {
-    match outcome {
-        SequenceOutcome::Completed { created, dropped } => {
-            let (commits, dropped_hex) = if sources.is_empty() {
-                (
-                    records_from_replay_created(repo, &created),
-                    dropped.iter().map(ObjectId::to_hex).collect(),
-                )
-            } else {
-                records_for_completed_from_replay(repo, sources, &created, &dropped)
-            };
-            PickOutcome {
-                result: ok_result,
-                commits,
-                dropped: dropped_hex,
-                conflicts: None,
-                next_steps: None,
-                alternatives: None,
-                dry_run: None,
-                oid: None,
-                check: false,
-            }
+impl PickOutcome {
+    fn new(result: PickResult) -> Self {
+        Self {
+            result,
+            commits: Vec::new(),
+            dropped: Vec::new(),
+            conflicts: None,
+            next_steps: None,
+            alternatives: None,
+            dry_run: None,
+            oid: None,
+            check: false,
         }
+    }
+}
+
+impl From<&ReplayCreated> for PickCommitRecord {
+    fn from(record: &ReplayCreated) -> Self {
+        Self {
+            source: record.source.to_hex(),
+            oid: Some(record.new_oid.to_hex()),
+            change_id: record.change_id.as_ref().map(|id| id.as_str().to_owned()),
+            subject: context::subject_line(&record.subject),
+        }
+    }
+}
+
+fn source_record(source: ObjectId, subject: &str) -> PickCommitRecord {
+    PickCommitRecord {
+        source: source.to_hex(),
+        oid: None,
+        change_id: None,
+        subject: context::subject_line(subject),
+    }
+}
+
+fn map_sequence_outcome(outcome: SequenceOutcome, ok_result: PickResult) -> PickOutcome {
+    match outcome {
+        SequenceOutcome::Completed { created, dropped } => PickOutcome {
+            commits: created.iter().map(PickCommitRecord::from).collect(),
+            dropped: dropped.iter().map(ObjectId::to_hex).collect(),
+            ..PickOutcome::new(ok_result)
+        },
         SequenceOutcome::Conflicts {
             conflicts,
             created_so_far,
             ..
         } => {
-            let commits = records_from_replay_created(repo, &created_so_far);
             let block = OperationConflictBlock::for_pick(&conflicts);
             PickOutcome {
-                result: PickResult::Conflicts,
-                commits,
-                dropped: Vec::new(),
+                commits: created_so_far.iter().map(PickCommitRecord::from).collect(),
                 conflicts: Some(block.conflicts),
                 next_steps: Some(block.next_steps),
                 alternatives: block.alternatives,
-                dry_run: None,
-                oid: None,
-                check: false,
+                ..PickOutcome::new(PickResult::Conflicts)
             }
         }
         SequenceOutcome::Empty {
             current,
+            current_subject,
             created_so_far,
             ..
         } => {
-            let mut commits = records_from_replay_created(repo, &created_so_far);
-            commits.push(source_record(repo, current, None));
+            let mut commits: Vec<PickCommitRecord> =
+                created_so_far.iter().map(PickCommitRecord::from).collect();
+            commits.push(source_record(current, &current_subject));
             let next_steps = next_step_grit_commands(&operation_next_steps_empty(
                 InProgressOperation::CherryPick,
             ));
             let alternatives =
                 next_step_grit_commands(&operation_alternatives(InProgressOperation::CherryPick));
             PickOutcome {
-                result: PickResult::Empty,
                 commits,
-                dropped: Vec::new(),
-                conflicts: None,
                 next_steps: Some(next_steps),
-                alternatives: if alternatives.is_empty() {
-                    None
-                } else {
-                    Some(alternatives)
-                },
-                dry_run: None,
-                oid: None,
-                check: false,
+                alternatives: (!alternatives.is_empty()).then_some(alternatives),
+                ..PickOutcome::new(PickResult::Empty)
             }
         }
     }
 }
 
-fn run_check(
-    repo: &grit_lib::repo::Repository,
-    sources: Vec<ObjectId>,
-    opts: &PickRunOptions,
-    favor: grit_lib::diff::merge_file::MergeFavor,
-    conflict_style: grit_lib::diff::merge_file::ConflictStyle,
-) -> Result<PickOutcome> {
-    let mainline = opts
-        .mainline
-        .map(|n| {
-            NonZeroU32::new(n).ok_or_else(|| {
-                anyhow::anyhow!("--mainline requires a positive parent number (1, 2, …)")
-            })
-        })
-        .transpose()?;
-    let replay_opts = ReplayOptions {
-        record_origin: opts.record_origin,
-        no_commit: opts.no_commit,
-        empty: opts.empty.into(),
-        message_override: None,
-        mainline,
-        favor,
-        conflict_style,
-    };
-    let prediction = predict_replay_sequence(
-        repo,
-        &ReplaySequenceRequest {
-            commits: sources,
-            direction: ReplayDirection::Pick,
-            committer: String::new(),
-            options: replay_opts,
-        },
-    )
-    .map_err(map_replay_error)?;
-    map_prediction_outcome(repo, prediction)
-}
-
-fn map_prediction_outcome(
-    repo: &grit_lib::repo::Repository,
-    prediction: SequencePrediction,
-) -> Result<PickOutcome> {
-    match prediction {
-        SequencePrediction::Clean { tree, dropped } => Ok(PickOutcome {
-            result: PickResult::Clean,
-            commits: Vec::new(),
+fn map_prediction_outcome(prediction: SequencePrediction) -> PickOutcome {
+    let outcome = match prediction {
+        SequencePrediction::Clean { tree, dropped } => PickOutcome {
             dropped: dropped.iter().map(ObjectId::to_hex).collect(),
-            conflicts: None,
-            next_steps: None,
-            alternatives: None,
-            dry_run: None,
             oid: Some(tree.to_hex()),
-            check: true,
-        }),
-        SequencePrediction::Conflicts { commit, conflicts } => {
-            let block = OperationConflictBlock::for_pick(&conflicts);
-            Ok(PickOutcome {
-                result: PickResult::Conflicts,
-                commits: vec![source_record(repo, commit, None)],
-                dropped: Vec::new(),
-                conflicts: Some(block.conflicts),
-                next_steps: None,
-                alternatives: None,
-                dry_run: None,
-                oid: None,
-                check: true,
-            })
-        }
-        SequencePrediction::Empty { commit } => Ok(PickOutcome {
-            result: PickResult::Empty,
-            commits: vec![source_record(repo, commit, None)],
-            dropped: Vec::new(),
-            conflicts: None,
-            next_steps: None,
-            alternatives: None,
-            dry_run: None,
-            oid: None,
-            check: true,
-        }),
-    }
-}
-
-fn records_for_completed_from_replay(
-    repo: &grit_lib::repo::Repository,
-    _sources: &[ObjectId],
-    created: &[grit_lib::porcelain::replay_sequence::ReplayCreated],
-    dropped: &[ObjectId],
-) -> (Vec<PickCommitRecord>, Vec<String>) {
-    (
-        records_from_replay_created(repo, created),
-        dropped.iter().map(ObjectId::to_hex).collect(),
-    )
-}
-
-fn records_from_replay_created(
-    repo: &grit_lib::repo::Repository,
-    created: &[grit_lib::porcelain::replay_sequence::ReplayCreated],
-) -> Vec<PickCommitRecord> {
-    created
-        .iter()
-        .map(|record| source_record(repo, record.source, Some(record.new_oid)))
-        .collect()
-}
-
-fn source_record(
-    repo: &grit_lib::repo::Repository,
-    source: ObjectId,
-    new_oid: Option<ObjectId>,
-) -> PickCommitRecord {
-    let source_commit = context::read_commit(repo, &source).ok();
-    let subject = source_commit
-        .as_ref()
-        .map(|c| context::subject_line(&c.message))
-        .unwrap_or_default();
-    let (oid, change_id, subject) = if let Some(new_oid) = new_oid {
-        let new_commit = context::read_commit(repo, &new_oid).ok();
-        let subject = new_commit
-            .as_ref()
-            .map(|c| context::subject_line(&c.message))
-            .unwrap_or(subject);
-        let change_id = new_commit.and_then(|c| {
-            let resolved = resolved_change_id(&new_oid, &c);
-            resolved.stored.then(|| resolved.id.as_str().to_owned())
-        });
-        (Some(new_oid.to_hex()), change_id, subject)
-    } else {
-        (None, None, subject)
+            ..PickOutcome::new(PickResult::Clean)
+        },
+        SequencePrediction::Conflicts {
+            commit,
+            subject,
+            conflicts,
+        } => PickOutcome {
+            commits: vec![source_record(commit, &subject)],
+            conflicts: Some(OperationConflictBlock::for_pick(&conflicts).conflicts),
+            ..PickOutcome::new(PickResult::Conflicts)
+        },
+        SequencePrediction::Empty { commit, subject } => PickOutcome {
+            commits: vec![source_record(commit, &subject)],
+            ..PickOutcome::new(PickResult::Empty)
+        },
     };
-    PickCommitRecord {
-        source: source.to_hex(),
-        oid,
-        change_id,
-        subject,
-    }
-}
-
-fn map_pick_committish_error(err: Error) -> anyhow::Error {
-    if let Some(msg) = crate::revision_errors::map_lib_revision_error(&err) {
-        return anyhow::anyhow!(msg);
-    }
-    match err {
-        Error::InvalidRef(msg) => anyhow::anyhow!(msg),
-        Error::ObjectNotFound(msg) => anyhow::anyhow!("could not resolve commit: {msg}"),
-        other => anyhow::Error::new(other),
+    PickOutcome {
+        check: true,
+        ..outcome
     }
 }
 
