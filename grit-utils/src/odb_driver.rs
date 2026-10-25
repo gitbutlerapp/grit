@@ -559,9 +559,16 @@ impl Write for CountingWriter {
 
 /// Stateless v0 upload-pack serving every ref; output goes to a sink, bytes on stdout.
 pub fn serve_clone(repo: &Repository) -> Result<()> {
-    let req_path = repo
-        .git_dir()
-        .join(crate::serve_request::SERVE_CLONE_REQUEST_FILE);
+    serve_request(repo, crate::serve_request::SERVE_CLONE_REQUEST_FILE)
+}
+
+/// Like [`serve_clone`] for the cached `blob:none` partial clone request.
+pub fn serve_blobless(repo: &Repository) -> Result<()> {
+    serve_request(repo, crate::serve_request::SERVE_BLOBLESS_REQUEST_FILE)
+}
+
+fn serve_request(repo: &Repository, request_file: &str) -> Result<()> {
+    let req_path = repo.git_dir().join(request_file);
     let req = std::fs::read(&req_path)
         .with_context(|| format!("read serve-clone request {}", req_path.display()))?;
     let mut input: &[u8] = &req;

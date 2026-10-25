@@ -1009,6 +1009,9 @@ enum DriveCmd {
     ServeClone {
         repo: PathBuf,
     },
+    ServeBlobless {
+        repo: PathBuf,
+    },
     IndexPack {
         pack: PathBuf,
         #[arg(long)]
@@ -1210,6 +1213,10 @@ fn run_drive(workload: &DriveCmd) -> Result<()> {
         DriveCmd::ServeClone { repo } => {
             let repo = open_repo(repo)?;
             odb_driver::serve_clone(&repo)?;
+        }
+        DriveCmd::ServeBlobless { repo } => {
+            let repo = open_repo(repo)?;
+            odb_driver::serve_blobless(&repo)?;
         }
         DriveCmd::IndexPack {
             pack,

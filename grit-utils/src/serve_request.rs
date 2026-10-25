@@ -15,11 +15,33 @@ pub const SERVE_CLONE_CAPABILITIES: &[&str] = &["side-band-64k", "thin-pack", "o
 /// Relative path under a prepared bitmap fixture where the request bytes are stored.
 pub const SERVE_CLONE_REQUEST_FILE: &str = ".grit-bench-serve-clone-req.bin";
 
+/// Like [`SERVE_CLONE_REQUEST_FILE`], for the `blob:none` partial clone request.
+pub const SERVE_BLOBLESS_REQUEST_FILE: &str = ".grit-bench-serve-blobless-req.bin";
+
 /// Build a v0 stateless upload-pack request that names every advertised ref tip.
 ///
 /// The wire format matches what `git upload-pack --stateless-rpc` expects: one
 /// `want` pkt-line per ref (capabilities on the first line), flush, `done`, flush.
 pub fn write_v0_serve_clone_request(repo: &Repository, out: &mut impl Write) -> Result<()> {
+    write_v0_serve_request(repo, None, out)
+}
+
+/// Like [`write_v0_serve_clone_request`] for a partial clone: the `filter` capability
+/// and a `filter <spec>` line after the wants. The served repository needs
+/// `uploadpack.allowFilter`.
+pub fn write_v0_serve_filtered_request(
+    repo: &Repository,
+    filter: &str,
+    out: &mut impl Write,
+) -> Result<()> {
+    write_v0_serve_request(repo, Some(filter), out)
+}
+
+fn write_v0_serve_request(
+    repo: &Repository,
+    filter: Option<&str>,
+    out: &mut impl Write,
+) -> Result<()> {
     let mut tips = ref_want_oids(repo)?;
     if tips.is_empty() {
         tips.push(ObjectId::null(repo.odb().hash_algo()));
@@ -28,7 +50,10 @@ pub fn write_v0_serve_clone_request(repo: &Repository, out: &mut impl Write) -> 
     tips.dedup();
 
     let mut buf = Vec::new();
-    let caps = serve_clone_capability_string(repo);
+    let mut caps = serve_clone_capability_string(repo);
+    if filter.is_some() {
+        caps.push_str(" filter");
+    }
     for (i, oid) in tips.iter().enumerate() {
         let line = if i == 0 {
             format!("want {} {caps}", oid.to_hex())
@@ -37,6 +62,10 @@ pub fn write_v0_serve_clone_request(repo: &Repository, out: &mut impl Write) -> 
         };
         grit_lib::remote::pkt_line::write_line_to_vec(&mut buf, &line)
             .context("write want line")?;
+    }
+    if let Some(spec) = filter {
+        grit_lib::remote::pkt_line::write_line_to_vec(&mut buf, &format!("filter {spec}"))
+            .context("write filter line")?;
     }
     buf.extend_from_slice(grit_lib::remote::pkt_line::FLUSH.as_bytes());
     grit_lib::remote::pkt_line::write_line_to_vec(&mut buf, "done").context("write done")?;
@@ -81,6 +110,19 @@ pub fn ensure_serve_clone_request(repo: &Path) -> Result<std::path::PathBuf> {
         .context("open repo for serve request")?;
     let mut file = std::fs::File::create(&path).context("create serve-clone request file")?;
     write_v0_serve_clone_request(&repository, &mut file)?;
+    Ok(path)
+}
+
+/// Write the cached `blob:none` serve request next to `repo` if missing.
+pub fn ensure_serve_blobless_request(repo: &Path) -> Result<std::path::PathBuf> {
+    let path = repo.join(SERVE_BLOBLESS_REQUEST_FILE);
+    if path.is_file() {
+        return Ok(path);
+    }
+    let repository = Repository::open(repo, &RepositoryOptions::empty())
+        .context("open repo for serve request")?;
+    let mut file = std::fs::File::create(&path).context("create serve-blobless request file")?;
+    write_v0_serve_filtered_request(&repository, "blob:none", &mut file)?;
     Ok(path)
 }
 
@@ -145,5 +187,28 @@ mod tests {
         assert!(first_want.contains("side-band-64k"));
         assert!(first_want.contains("thin-pack"));
         assert!(first_want.contains("ofs-delta"));
+    }
+
+    #[test]
+    fn serve_filtered_request_names_the_filter_after_the_wants() {
+        let dir = TempDir::new().expect("tempdir");
+        let status = std::process::Command::new("git")
+            .args(["init", "-b", "main"])
+            .current_dir(dir.path())
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .status()
+            .expect("git init");
+        assert!(status.success(), "git init failed");
+        let repo =
+            Repository::discover(Some(dir.path()), &RepositoryOptions::empty()).expect("discover");
+        let mut body = Vec::new();
+        write_v0_serve_filtered_request(&repo, "blob:none", &mut body).expect("write request");
+        let lines = parse_v0_request_lines(&body).expect("parse");
+        let first_want = lines.iter().position(|l| l.starts_with("want ")).unwrap();
+        assert!(lines[first_want].ends_with(" filter"));
+        let filter = lines.iter().position(|l| l == "filter blob:none").unwrap();
+        assert!(filter > first_want);
+        assert_eq!(lines[filter + 1], "", "flush follows the filter line");
     }
 }

@@ -41,6 +41,34 @@ fn sh_redirect_stdin(cmd: &str, input: &Path) -> String {
     )
 }
 
+/// Stateless `upload-pack` of every ref with `filter blob:none` on `repo`, the server
+/// side of a blobless partial clone. Enables `uploadpack.allowFilter` in `repo` (which
+/// only affects filtered requests) and caches the request next to it.
+fn blobless_serve_scenario(
+    git: &Path,
+    bench_exe: &Path,
+    repo: &Path,
+    id: &str,
+    description: &str,
+) -> Result<Scenario> {
+    crate::real_repo_fixture::run_git(git, repo, &["config", "uploadpack.allowFilter", "true"])?;
+    let req = crate::serve_request::ensure_serve_blobless_request(repo)?;
+    let grit_inner = shell_command(bench_exe, &drive_argv("serve-blobless", repo));
+    let git_inner = shell_command(git, &["upload-pack", "--stateless-rpc", "."]);
+    Ok(Scenario {
+        id: id.into(),
+        group: "bitmaps".into(),
+        fixture: "git.git".into(),
+        description: description.into(),
+        grit_argv: vec![sh_redirect_stdin(&grit_inner, &req)],
+        git_argv: vec![sh_redirect_stdin(&git_inner, &req)],
+        driver: Driver::Lib,
+        prepare_kind: None,
+        grit_via_shell: true,
+        git_via_shell: true,
+    })
+}
+
 fn bench_failure_from_termination(kind: TerminationKind) -> BenchFailure {
     match kind {
         TerminationKind::Timeout => BenchFailure {
@@ -227,6 +255,14 @@ pub fn run_bitmaps_suite(
 
     let caps = serve_clone_caps();
     let grit_failure = probe_serve_clone_failure(bench_exe, &repo, &serve_scenario, caps)?;
+    let blobless_scenario = blobless_serve_scenario(
+        git,
+        bench_exe,
+        &repo,
+        "serve-clone-blobless-git.git",
+        "upload-pack --stateless-rpc full ref closure with filter blob:none (partial clone)",
+    )?;
+    let blobless_failure = probe_serve_clone_failure(bench_exe, &repo, &blobless_scenario, caps)?;
 
     // The same history without the bitmap: enumeration walks objects and the pack
     // reuses on-disk deltas through the `.rev` reverse index (issue #1744).
@@ -248,7 +284,19 @@ pub fn run_bitmaps_suite(
             git_via_shell: true,
         };
         let failure = probe_serve_clone_failure(bench_exe, &no_bitmaps_repo, &scenario, caps)?;
-        Some((no_bitmaps_repo, scenario, failure))
+        let blobless = blobless_serve_scenario(
+            git,
+            bench_exe,
+            &no_bitmaps_repo,
+            "serve-clone-blobless-no-bitmaps-git.git",
+            "upload-pack --stateless-rpc full ref closure with filter blob:none, no pack bitmap",
+        )?;
+        let blobless_failure =
+            probe_serve_clone_failure(bench_exe, &no_bitmaps_repo, &blobless, caps)?;
+        Some((
+            no_bitmaps_repo,
+            [(scenario, failure), (blobless, blobless_failure)],
+        ))
     } else {
         None
     };
@@ -309,17 +357,28 @@ pub fn run_bitmaps_suite(
             &repo,
             grit_failure,
         )?,
-    ];
-    if let Some((no_bitmaps_repo, scenario, failure)) = no_bitmaps {
-        scenarios.push(run_scenario(
+        run_scenario(
             hyperfine,
             bench_exe,
             git,
             cfg,
-            &scenario,
-            &no_bitmaps_repo,
-            failure,
-        )?);
+            &blobless_scenario,
+            &repo,
+            blobless_failure,
+        )?,
+    ];
+    if let Some((no_bitmaps_repo, serve_scenarios)) = no_bitmaps {
+        for (scenario, failure) in serve_scenarios {
+            scenarios.push(run_scenario(
+                hyperfine,
+                bench_exe,
+                git,
+                cfg,
+                &scenario,
+                &no_bitmaps_repo,
+                failure,
+            )?);
+        }
     }
 
     Ok(BenchReport {
