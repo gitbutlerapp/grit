@@ -14,7 +14,9 @@ use std::sync::Arc;
 use flate2::write::ZlibEncoder;
 use flate2::Compression;
 
+use crate::bitmap_walk::ReachableSet;
 use crate::delta_encode::{encode_prefix_extension_delta, DeltaIndex};
+use crate::delta_islands::DeltaIslands;
 use crate::error::{Error, Result};
 use crate::objects::{
     empty_object_id_hash_set, oid_hash_map, oid_hash_map_from, oid_hash_map_with_capacity,
@@ -22,6 +24,8 @@ use crate::objects::{
     ObjectInfo, ObjectKind, OidHashMap, OidHashSet, TreeRefIter,
 };
 use crate::odb::Odb;
+use crate::pack_bitmap::BitmapIndex;
+use crate::pack_name_hash::pack_name_hash;
 use crate::parallel::{try_par_map_force, ParallelHashError};
 use crate::repo::Repository;
 use crate::rev_list::ObjectFilter;
@@ -225,6 +229,7 @@ pub enum PackProgress {
 
 /// Streaming pack-objects builder over an [`Odb`].
 pub struct PackObjects<'a> {
+    #[allow(dead_code)]
     odb: &'a Odb,
     source_odb: &'a Odb,
     opts: PackObjectsOptions,
@@ -311,13 +316,6 @@ impl<'a> PackObjects<'a> {
         let opts = self.opts.build;
         let have_shallow: HashSet<ObjectId> = self.have_shallow.iter().copied().collect();
         let source_shallow: HashSet<ObjectId> = self.source_shallow.iter().copied().collect();
-        let have_closure = crate::pack_object_select::reachable_closure_walk(
-            self.odb,
-            &self.haves,
-            &HashSet::new(),
-            true,
-            &have_shallow,
-        )?;
         let selection = crate::pack_object_select::enumerate_pack_objects(
             self.source_odb,
             &self.wants,
@@ -327,7 +325,7 @@ impl<'a> PackObjects<'a> {
                 shallow_grafts: &source_shallow,
                 have_shallow_grafts: Some(&have_shallow),
                 use_bitmaps: opts.use_bitmaps,
-                exclude_objects: Some(&have_closure),
+                exclude_objects: None,
                 prefetch_walk_objects: true,
             },
         )?;
@@ -346,7 +344,8 @@ impl<'a> PackObjects<'a> {
         let plan = plan_deltas(
             self.source_odb,
             &send,
-            &have_closure,
+            &selection.have_closure,
+            selection.peer_held.as_deref(),
             &opts,
             &oid_hash_map_from(&selection.name_hashes),
             self.opts.search_threads,
@@ -468,6 +467,7 @@ fn write_pack_with_shallow_and_filter(
         odb,
         &selection.send,
         &selection.have_closure,
+        selection.peer_held.as_deref(),
         opts,
         &oid_hash_map_from(&selection.name_hashes),
         None,
@@ -764,6 +764,7 @@ pub fn build_pack_from_send_list(
         odb,
         send,
         have_closure,
+        None,
         opts,
         blob_name_hashes,
         None,
@@ -795,7 +796,6 @@ pub(crate) fn build_pack_with_write_threads_full(
     write_threads: Option<usize>,
 ) -> Result<SerializedDeltaPack> {
     let empty_shallow = empty_object_id_hash_set();
-    let have_closure = reachable_closure(odb, haves, empty_shallow, true, empty_shallow)?;
     let selection = crate::pack_object_select::enumerate_pack_objects(
         odb,
         wants,
@@ -805,7 +805,7 @@ pub(crate) fn build_pack_with_write_threads_full(
             shallow_grafts: empty_shallow,
             have_shallow_grafts: Some(empty_shallow),
             use_bitmaps: opts.use_bitmaps,
-            exclude_objects: Some(&have_closure),
+            exclude_objects: None,
             prefetch_walk_objects: true,
         },
     )?;
@@ -813,6 +813,7 @@ pub(crate) fn build_pack_with_write_threads_full(
         odb,
         &selection.send,
         &selection.have_closure,
+        selection.peer_held.as_deref(),
         opts,
         &selection.name_hashes,
         None,
@@ -831,7 +832,6 @@ pub fn build_pack_with_parallel_threads(
     write_threads: Option<usize>,
 ) -> Result<Vec<u8>> {
     let empty_shallow = empty_object_id_hash_set();
-    let have_closure = reachable_closure(odb, haves, empty_shallow, true, empty_shallow)?;
     let selection = crate::pack_object_select::enumerate_pack_objects(
         odb,
         wants,
@@ -841,7 +841,7 @@ pub fn build_pack_with_parallel_threads(
             shallow_grafts: empty_shallow,
             have_shallow_grafts: Some(empty_shallow),
             use_bitmaps: opts.use_bitmaps,
-            exclude_objects: Some(&have_closure),
+            exclude_objects: None,
             prefetch_walk_objects: true,
         },
     )?;
@@ -849,6 +849,7 @@ pub fn build_pack_with_parallel_threads(
         odb,
         &selection.send,
         &selection.have_closure,
+        selection.peer_held.as_deref(),
         opts,
         &selection.name_hashes,
         search_threads,
@@ -870,6 +871,7 @@ pub fn build_pack_from_send_list_with_write_threads(
         odb,
         send,
         have_closure,
+        None,
         opts,
         blob_name_hashes,
         None,
@@ -883,7 +885,8 @@ pub fn build_pack_from_send_list_with_write_threads(
 pub fn build_pack_from_send_list_with_parallel_threads(
     odb: &Odb,
     send: &[ObjectId],
-    have_closure: &HashSet<ObjectId>,
+    have_tips: &HashSet<ObjectId>,
+    peer_held: Option<&ReachableSet>,
     opts: &PackBuildOptions,
     blob_name_hashes: &HashMap<ObjectId, u32>,
     search_threads: Option<usize>,
@@ -893,7 +896,8 @@ pub fn build_pack_from_send_list_with_parallel_threads(
     build_pack_from_send_list_full(
         odb,
         send,
-        have_closure,
+        have_tips,
+        peer_held,
         opts,
         blob_name_hashes,
         search_threads,
@@ -907,7 +911,8 @@ pub fn build_pack_from_send_list_with_parallel_threads(
 pub(crate) fn build_pack_from_send_list_full(
     odb: &Odb,
     send: &[ObjectId],
-    have_closure: &HashSet<ObjectId>,
+    have_tips: &HashSet<ObjectId>,
+    peer_held: Option<&ReachableSet>,
     opts: &PackBuildOptions,
     blob_name_hashes: &HashMap<ObjectId, u32>,
     search_threads: Option<usize>,
@@ -926,7 +931,8 @@ pub(crate) fn build_pack_from_send_list_full(
     let plan = plan_deltas(
         odb,
         send,
-        have_closure,
+        have_tips,
+        peer_held,
         opts,
         &blob_name_hashes_oid,
         search_threads,
@@ -1314,6 +1320,227 @@ pub(crate) fn objects_dir_has_local_packs(objects_dir: &Path) -> bool {
         .any(|e| e.path().extension().is_some_and(|ext| ext == "pack"))
 }
 
+fn peer_side_delta_base(
+    base: &ObjectId,
+    in_send: &OidHashSet,
+    have_tips: &HashSet<ObjectId>,
+    peer_held: Option<&ReachableSet>,
+) -> bool {
+    if in_send.contains(base) {
+        return false;
+    }
+    peer_held.is_some_and(|held| held.contains(base)) || have_tips.contains(base)
+}
+
+fn thin_pack_delta_size(base_data: &[u8], target_data: &[u8], max_size: usize) -> Option<usize> {
+    if target_data.starts_with(base_data) && target_data.len() > base_data.len() {
+        encode_prefix_extension_delta(base_data, target_data)
+            .ok()
+            .map(|d| d.len())
+    } else {
+        DeltaIndex::new(base_data)
+            .encode(target_data, max_size)
+            .map(|d| d.len())
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn find_thin_pack_peer_blob_base(
+    odb: &Odb,
+    target: &ObjectId,
+    target_data: &[u8],
+    name_hash: u32,
+    in_send: &OidHashSet,
+    have_tips: &HashSet<ObjectId>,
+    peer_held: Option<&ReachableSet>,
+    bitmap_index: Option<&std::sync::Arc<BitmapIndex>>,
+    islands: &DeltaIslands,
+    window: usize,
+    hash_len: usize,
+) -> Result<Option<(ObjectId, Vec<u8>)>> {
+    let max_size = target_data.len().saturating_div(2).saturating_sub(hash_len);
+    if max_size == 0 {
+        return Ok(None);
+    }
+
+    let mut best: Option<(ObjectId, usize, Vec<u8>)> = None;
+    let mut tried = 0usize;
+
+    let mut consider = |candidate: ObjectId, base_data: Vec<u8>, known_peer: bool| -> Result<()> {
+        if !known_peer && !peer_side_delta_base(&candidate, in_send, have_tips, peer_held) {
+            return Ok(());
+        }
+        if !islands.in_same_island(target, &candidate) {
+            return Ok(());
+        }
+        let sizediff = if base_data.len() < target_data.len() {
+            target_data.len() - base_data.len()
+        } else {
+            0
+        };
+        if sizediff >= max_size || target_data.len() < base_data.len() / 32 {
+            return Ok(());
+        }
+        let Some(ds) = thin_pack_delta_size(&base_data, target_data, max_size) else {
+            return Ok(());
+        };
+        let better = best.as_ref().is_none_or(|(_, prev, _)| ds < *prev);
+        if better {
+            best = Some((candidate, ds, base_data));
+        }
+        Ok(())
+    };
+
+    if let (Some(held), Some(index)) = (peer_held, bitmap_index) {
+        let peer_blobs: Vec<ObjectId> = held.iter_by_kind(ObjectKind::Blob).collect();
+        for oid in peer_blobs.into_iter().rev() {
+            if tried >= window {
+                break;
+            }
+            let Some(pos) = index.position_of(&oid) else {
+                continue;
+            };
+            let Some(h) = index.name_hash(pos) else {
+                continue;
+            };
+            if h != name_hash {
+                continue;
+            }
+            if in_send.contains(&oid) {
+                continue;
+            }
+            tried += 1;
+            let obj = odb.read(&oid)?;
+            if obj.kind != ObjectKind::Blob || obj.data.is_empty() {
+                continue;
+            }
+            consider(oid, obj.data, false)?;
+        }
+    } else if let Some(index) = open_pack_bitmap_index(odb) {
+        let count = index.object_count();
+        let mut seen_same_path = 0usize;
+        for pos in (0..count).rev() {
+            if seen_same_path >= window {
+                break;
+            }
+            let Some(h) = index.name_hash(pos) else {
+                continue;
+            };
+            if h != name_hash {
+                continue;
+            }
+            let Ok(oid) = index.oid_at(pos) else {
+                continue;
+            };
+            if in_send.contains(&oid) {
+                continue;
+            }
+            seen_same_path += 1;
+            let info = match odb.read_info(&oid) {
+                Ok(info) => info,
+                Err(_) => continue,
+            };
+            if info.kind != ObjectKind::Blob || info.size == 0 {
+                continue;
+            }
+            if !peer_side_delta_base(&oid, in_send, have_tips, peer_held) {
+                continue;
+            }
+            let obj = odb.read(&oid)?;
+            consider(oid, obj.data, false)?;
+        }
+    } else {
+        for (oid, data) in peer_blobs_from_have_commits(odb, have_tips, name_hash)? {
+            consider(oid, data, true)?;
+        }
+    }
+
+    Ok(best.map(|(oid, _, data)| (oid, data)))
+}
+
+fn blob_oids_in_commit(odb: &Odb, commit_oid: ObjectId) -> Result<HashSet<ObjectId>> {
+    let mut out = HashSet::new();
+    let commit_obj = odb.read(&commit_oid)?;
+    if commit_obj.kind != ObjectKind::Commit {
+        return Ok(out);
+    }
+    let commit = parse_commit(&commit_obj.data)?;
+    let oid_len = odb.hash_algo().len();
+    let mut queue = VecDeque::from([commit.tree]);
+    while let Some(tree_oid) = queue.pop_front() {
+        let tree_obj = odb.read(&tree_oid)?;
+        for entry in TreeRefIter::with_oid_len(&tree_obj.data, oid_len) {
+            let entry = entry?;
+            if entry.mode == 0o160000 {
+                continue;
+            }
+            if entry.mode & 0o170000 == 0o040000 {
+                queue.push_back(entry.oid);
+            } else {
+                out.insert(entry.oid);
+            }
+        }
+    }
+    Ok(out)
+}
+
+fn peer_blobs_from_have_commits(
+    odb: &Odb,
+    have_tips: &HashSet<ObjectId>,
+    name_hash: u32,
+) -> Result<Vec<(ObjectId, Vec<u8>)>> {
+    let oid_len = odb.hash_algo().len();
+    let mut out = Vec::new();
+    for &commit_oid in have_tips {
+        let commit_obj = match odb.read(&commit_oid) {
+            Ok(o) => o,
+            Err(_) => continue,
+        };
+        if commit_obj.kind != ObjectKind::Commit {
+            continue;
+        }
+        let commit = parse_commit(&commit_obj.data)?;
+        let mut queue = VecDeque::from([(commit.tree, String::new())]);
+        while let Some((tree_oid, path)) = queue.pop_front() {
+            let tree_obj = match odb.read(&tree_oid) {
+                Ok(o) => o,
+                Err(_) => continue,
+            };
+            for entry in TreeRefIter::with_oid_len(&tree_obj.data, oid_len) {
+                let entry = entry?;
+                if entry.mode == 0o160000 {
+                    continue;
+                }
+                let child_path = if path.is_empty() {
+                    String::from_utf8_lossy(entry.name).into_owned()
+                } else {
+                    format!("{}/{}", path, String::from_utf8_lossy(entry.name))
+                };
+                match entry.mode & 0o170000 {
+                    0o040000 => queue.push_back((entry.oid, child_path)),
+                    0o100000 | 0o120000 => {
+                        if pack_name_hash(&child_path) != name_hash {
+                            continue;
+                        }
+                        let blob = odb.read(&entry.oid)?;
+                        if blob.kind == ObjectKind::Blob && !blob.data.is_empty() {
+                            out.push((entry.oid, blob.data));
+                        }
+                    }
+                    _ => queue.push_back((entry.oid, child_path)),
+                }
+            }
+        }
+    }
+    Ok(out)
+}
+
+fn open_pack_bitmap_index(odb: &Odb) -> Option<std::sync::Arc<BitmapIndex>> {
+    let git_dir = odb.config_git_dir()?;
+    let repo = Repository::open(git_dir, &RepositoryOptions::empty()).ok()?;
+    BitmapIndex::open(&repo).ok().flatten()
+}
+
 /// Select blob deltas for `send` and produce an ordered emit plan.
 ///
 /// Windowed delta search via [`crate::pack_delta::search_windowed_blob_deltas`], depth-limited
@@ -1342,7 +1569,8 @@ pub(crate) fn objects_dir_has_local_packs(objects_dir: &Path) -> bool {
 pub(crate) fn plan_deltas(
     odb: &Odb,
     send: &[ObjectId],
-    have_closure: &HashSet<ObjectId>,
+    have_tips: &HashSet<ObjectId>,
+    peer_held: Option<&ReachableSet>,
     opts: &PackBuildOptions,
     blob_name_hashes: &OidHashMap<u32>,
     search_threads: Option<usize>,
@@ -1397,11 +1625,12 @@ pub(crate) fn plan_deltas(
         let in_pack_std: HashSet<ObjectId> = in_pack.iter().copied().collect();
         // A thin pack keeps an on-disk delta whose base the peer already holds; it is
         // written as `REF_DELTA` and completed by the receiver.
-        let reusable_bases: Cow<'_, HashSet<ObjectId>> = if opts.thin && !have_closure.is_empty() {
-            Cow::Owned(in_pack_std.union(have_closure).copied().collect())
-        } else {
-            Cow::Borrowed(&in_pack_std)
-        };
+        let mut reusable_bases = in_pack_std.clone();
+        if opts.thin && !have_tips.is_empty() {
+            for &commit in have_tips {
+                reusable_bases.extend(blob_oids_in_commit(odb, commit)?);
+            }
+        }
         let empty_resolved: HashMap<ObjectId, Object> = HashMap::new();
         let candidates = crate::pack::collect_packed_delta_reuse_for_send(
             objects_dir,
@@ -1521,61 +1750,33 @@ pub(crate) fn plan_deltas(
         // Peer-held blobs are only read when some blob still needs a base (a
         // `blob:none` pack has none).
         if !thin_targets.is_empty() {
-            let mut external_blob_data: OidHashMap<Vec<u8>> = oid_hash_map();
-            for &oid in have_closure {
-                if in_pack.contains(&oid) {
-                    continue;
-                }
-                if let Ok(obj) = odb.read(&oid) {
-                    if obj.kind == ObjectKind::Blob && !obj.data.is_empty() {
-                        external_blob_data.insert(oid, obj.data);
-                    }
-                }
-            }
+            let window = opts.window.max(opts.max_depth).max(1);
+            let bitmap_index = peer_held.map(ReachableSet::bitmap_index);
             for t in thin_targets {
                 let Some(obj) = objects.get(&t) else {
                     continue;
                 };
-                let t_data = &obj.data;
-                let max_size = t_data.len().saturating_div(2).saturating_sub(hash_len);
-                let mut best: Option<(ObjectId, usize)> = None;
-                for (&b, b_data) in &external_blob_data {
-                    if !islands.in_same_island(&t, &b) {
-                        continue;
-                    }
-                    let sizediff = if b_data.len() < t_data.len() {
-                        t_data.len() - b_data.len()
-                    } else {
-                        0
-                    };
-                    if sizediff >= max_size || t_data.len() < b_data.len() / 32 {
-                        continue;
-                    }
-                    let delta_size = if t_data.starts_with(b_data) && t_data.len() > b_data.len() {
-                        encode_prefix_extension_delta(b_data, t_data)
-                            .ok()
-                            .map(|d| d.len())
-                    } else {
-                        crate::delta_encode::DeltaIndex::new(b_data)
-                            .encode(t_data, max_size)
-                            .map(|d| d.len())
-                    };
-                    let Some(ds) = delta_size else {
-                        continue;
-                    };
-                    let better = best.is_none_or(|(_, prev)| ds < prev);
-                    if better {
-                        best = Some((b, ds));
-                    }
-                }
-                if let Some((base, _)) = best {
-                    delta_to_base.insert(t, base);
-                    if let Some(d) = external_blob_data.get(&base) {
-                        objects
-                            .entry(base)
-                            .or_insert_with(|| Object::new(ObjectKind::Blob, d.clone()));
-                    }
-                }
+                let path_key = blob_name_hashes.get(&t).copied().unwrap_or(0);
+                let Some((base, base_data)) = find_thin_pack_peer_blob_base(
+                    odb,
+                    &t,
+                    &obj.data,
+                    path_key,
+                    &in_pack,
+                    have_tips,
+                    peer_held,
+                    bitmap_index,
+                    &islands,
+                    window,
+                    hash_len,
+                )?
+                else {
+                    continue;
+                };
+                delta_to_base.insert(t, base);
+                objects
+                    .entry(base)
+                    .or_insert_with(|| Object::new(ObjectKind::Blob, base_data));
             }
         }
     }
@@ -1785,6 +1986,7 @@ pub(crate) mod tests {
             repo.odb(),
             &selection.send,
             &selection.have_closure,
+            selection.peer_held.as_deref(),
             &opts,
             &oid_hash_map_from(&selection.name_hashes),
             None,

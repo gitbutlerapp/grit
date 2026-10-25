@@ -5,7 +5,10 @@ use std::io::Write;
 use std::path::Path;
 use std::process::{Command, Stdio};
 
+use std::collections::HashSet;
+
 use grit_lib::objects::odb::Odb;
+use grit_lib::objects::pack_object_select::{enumerate_pack_objects, PackEnumerateOptions};
 use grit_lib::objects::pack_objects::{PackBuildOptions, PackObjects, PackObjectsOptions};
 use grit_lib::objects::unpack_objects::pack_bytes_to_object_map;
 use grit_lib::objects::ObjectId;
@@ -188,6 +191,48 @@ fn build_deep_history_repo(commits: usize) -> (tempfile::TempDir, ObjectId, Obje
     let tip = rev_parse(dir, "HEAD");
     let have = rev_parse(dir, &format!("HEAD~{}", commits.saturating_sub(2).max(1)));
     (tmp, tip, have)
+}
+
+/// Issue #1938: incremental enumeration must not walk or load the full peer closure.
+#[test]
+fn incremental_thin_pack_send_list_is_bounded() {
+    let (dir, tip, _) = build_deep_history_repo(120);
+    let have = rev_parse(dir.path(), "HEAD~1");
+    let odb = open_odb(dir.path());
+    let empty = HashSet::new();
+    let selection = enumerate_pack_objects(
+        &odb,
+        &[tip],
+        &[have],
+        &PackEnumerateOptions {
+            filter: None,
+            shallow_grafts: &empty,
+            have_shallow_grafts: Some(&empty),
+            use_bitmaps: true,
+            exclude_objects: None,
+            prefetch_walk_objects: false,
+        },
+    )
+    .expect("enumerate");
+    assert!(
+        selection.send.len() < 40,
+        "expected a small send set for one commit behind, got {} objects",
+        selection.send.len()
+    );
+    let thin = build_pack(
+        &odb,
+        &[tip],
+        &[have],
+        &PackBuildOptions {
+            delta: true,
+            thin: true,
+            ..PackBuildOptions::default()
+        },
+    )
+    .expect("thin pack");
+    git_index_pack_stdin_fix_thin(dir.path(), have, &thin);
+    let map = pack_bytes_to_object_map(&thin, &odb).expect("resolve");
+    assert!(map.contains_key(&tip));
 }
 
 #[test]

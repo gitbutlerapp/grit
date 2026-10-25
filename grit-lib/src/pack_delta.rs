@@ -1415,6 +1415,7 @@ mod tests {
             odb,
             &selection.send,
             &selection.have_closure,
+            selection.peer_held.as_deref(),
             &opts,
             &crate::objects::oid_hash_map_from(&selection.name_hashes),
             None,

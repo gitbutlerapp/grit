@@ -17,13 +17,15 @@ use crate::repo::Repository;
 use crate::rev_list::{MissingAction, ObjectFilter};
 
 /// Objects to emit in a negotiated pack plus peer-held closure for thin deltas.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 #[allow(clippy::type_complexity)]
 pub struct PackObjectSelection {
     /// Objects reachable from `wants` but not from `haves`, in valid pack order.
     pub send: Vec<ObjectId>,
-    /// Full object closure reachable from `haves` (peer-held bases for thin packs).
+    /// Negotiation boundary tips (`haves`), not the full peer object closure.
     pub have_closure: HashSet<ObjectId>,
+    /// Peer-held objects when pack reachability bitmaps are available (thin-pack bases).
+    pub peer_held: Option<Arc<ReachableSet>>,
     /// Pack name hash of the path each object was found at, used to pair delta
     /// candidates: blobs from the tree walk, every object the bitmap name-hash
     /// cache covers when bitmaps are used.
@@ -99,14 +101,14 @@ pub(crate) fn enumerate_pack_objects_naming(
 
 /// Bitmap reachability for upload-pack when shallow grafts and filters allow it.
 ///
-/// Returns the send-side [`ReachableSet`] and the peer `have` closure as object ids.
+/// Returns the send-side [`ReachableSet`] and the peer-held [`ReachableSet`].
 pub fn try_bitmap_reachable_for_upload(
     odb: &Odb,
     wants: &[ObjectId],
     haves: &[ObjectId],
     filter: Option<&ObjectFilter>,
     shallow_grafts: &HashSet<ObjectId>,
-) -> Result<Option<(ReachableSet, HashSet<ObjectId>)>> {
+) -> Result<Option<(ReachableSet, ReachableSet)>> {
     if !shallow_grafts.is_empty() || filter.is_some_and(selects_object_type) {
         return Ok(None);
     }
@@ -121,22 +123,10 @@ pub fn try_bitmap_reachable_for_upload(
         return Ok(None);
     };
     let index = Arc::new(index);
-    let missing_haves = MissingAction::Allow;
     let missing_wants = MissingAction::Error;
 
-    let have_set = match index.reachability(
-        &repo,
-        ReachabilityQuery {
-            wants: haves,
-            haves: &[],
-            filter: None,
-        },
-        missing_haves,
-    ) {
-        Ok(set) => set,
-        Err(BitmapWalkError::Unsupported(_)) => return Ok(None),
-        Err(BitmapWalkError::Bitmap(_)) => return Ok(None),
-        Err(BitmapWalkError::Repository(e)) => return Err(e),
+    let Some(have_set) = try_bitmap_peer_held(odb, haves, shallow_grafts)? else {
+        return Ok(None);
     };
 
     let send_set = match index.reachability(
@@ -154,7 +144,7 @@ pub fn try_bitmap_reachable_for_upload(
         Err(BitmapWalkError::Repository(e)) => return Err(e),
     };
 
-    Ok(Some((send_set, have_set.object_ids())))
+    Ok(Some((send_set, have_set)))
 }
 
 /// Bitmap `object:type` selection also drops the wanted commits and tags, which a
@@ -173,17 +163,19 @@ fn try_bitmap_enumeration(
     haves: &[ObjectId],
     opts: &PackEnumerateOptions<'_>,
 ) -> Result<Option<PackObjectSelection>> {
-    let Some((send_set, have_closure)) =
+    let Some((send_set, peer_held)) =
         try_bitmap_reachable_for_upload(odb, wants, haves, opts.filter, opts.shallow_grafts)?
     else {
         return Ok(None);
     };
     let index = send_set.bitmap_index();
     let send: Vec<ObjectId> = send_set.iter_grouped_by_kind().collect();
-    let name_hashes = name_hashes_from_bitmap(index, &send, &have_closure);
+    let have_closure: HashSet<ObjectId> = haves.iter().copied().collect();
+    let name_hashes = name_hashes_from_bitmap(index, &send, &HashSet::new());
     Ok(Some(PackObjectSelection {
         send,
         have_closure,
+        peer_held: Some(Arc::new(peer_held)),
         name_hashes,
         walk_prefetch: HashMap::new(),
     }))
@@ -221,12 +213,15 @@ fn walk_enumeration(
     opts: &PackEnumerateOptions<'_>,
     name_trees: NameTrees,
 ) -> Result<PackObjectSelection> {
-    let have_shallow = opts.have_shallow_grafts.unwrap_or(opts.shallow_grafts);
-    let have_closure = if let Some(ex) = opts.exclude_objects {
-        ex.clone()
-    } else {
-        reachable_closure_walk(odb, haves, &HashSet::new(), true, have_shallow)?
-    };
+    let mut boundary: HashSet<ObjectId> = haves.iter().copied().collect();
+    for &have in haves {
+        boundary.extend(objects_in_commit_snapshot(odb, have)?);
+    }
+    if let Some(extra) = opts.exclude_objects {
+        boundary.extend(extra.iter().copied());
+    }
+    let have_closure: HashSet<ObjectId> = haves.iter().copied().collect();
+    let peer_held = try_peer_held_bitmap(odb, haves, opts)?;
     let (send, name_hashes, walk_prefetch) = match opts.filter {
         Some(filter) if filter.uses_paths() => {
             let (send, name_hashes) = rev_list_filtered_objects(odb, wants, haves, filter)?;
@@ -240,7 +235,8 @@ fn walk_enumeration(
             collect_reachable_excluding_with_name_hashes(
                 odb,
                 wants,
-                &have_closure,
+                &HashSet::new(),
+                &boundary,
                 false,
                 opts.shallow_grafts,
                 keep_payloads,
@@ -252,35 +248,96 @@ fn walk_enumeration(
     Ok(PackObjectSelection {
         send,
         have_closure,
+        peer_held,
         name_hashes,
         walk_prefetch,
     })
 }
 
-/// Compute the full object closure reachable from `roots`, stopping descent into `stop`.
-pub(crate) fn reachable_closure_walk(
-    odb: &Odb,
-    roots: &[ObjectId],
-    stop: &HashSet<ObjectId>,
-    skip_missing: bool,
-    shallow_grafts: &HashSet<ObjectId>,
-) -> Result<HashSet<ObjectId>> {
-    let mut seen = HashSet::new();
-    let order = collect_reachable_excluding_with_name_hashes(
-        odb,
-        roots,
-        stop,
-        skip_missing,
-        shallow_grafts,
-        false,
-        None,
-        NameTrees::No,
-    )?
-    .0;
-    for oid in order {
-        seen.insert(oid);
+/// Objects in a commit's root tree (the commit, its trees and blobs), for negotiation boundaries.
+fn objects_in_commit_snapshot(odb: &Odb, commit_oid: ObjectId) -> Result<HashSet<ObjectId>> {
+    let mut out = HashSet::new();
+    out.insert(commit_oid);
+    let commit_obj = match odb.read(&commit_oid) {
+        Ok(o) => o,
+        Err(_) => return Ok(out),
+    };
+    if commit_obj.kind != ObjectKind::Commit {
+        return Ok(out);
     }
-    Ok(seen)
+    let commit = CommitRef::parse(&commit_obj.data)?;
+    let oid_len = odb.hash_algo().len();
+    let mut queue = VecDeque::from([commit.tree()]);
+    while let Some(tree_oid) = queue.pop_front() {
+        if !out.insert(tree_oid) {
+            continue;
+        }
+        let tree_obj = match odb.read(&tree_oid) {
+            Ok(o) => o,
+            Err(_) => continue,
+        };
+        for entry in TreeRefIter::with_oid_len(&tree_obj.data, oid_len) {
+            let entry = entry?;
+            if entry.mode == 0o160000 {
+                continue;
+            }
+            if entry.mode & 0o170000 == 0o040000 {
+                queue.push_back(entry.oid);
+            } else {
+                out.insert(entry.oid);
+            }
+        }
+    }
+    Ok(out)
+}
+
+fn try_peer_held_bitmap(
+    odb: &Odb,
+    haves: &[ObjectId],
+    opts: &PackEnumerateOptions<'_>,
+) -> Result<Option<Arc<ReachableSet>>> {
+    if haves.is_empty() || !opts.use_bitmaps {
+        return Ok(None);
+    }
+    let Some(peer) = try_bitmap_peer_held(odb, haves, opts.shallow_grafts)? else {
+        return Ok(None);
+    };
+    Ok(Some(Arc::new(peer)))
+}
+
+fn try_bitmap_peer_held(
+    odb: &Odb,
+    haves: &[ObjectId],
+    shallow_grafts: &HashSet<ObjectId>,
+) -> Result<Option<ReachableSet>> {
+    if !shallow_grafts.is_empty() {
+        return Ok(None);
+    }
+    let Some(git_dir) = odb.config_git_dir() else {
+        return Ok(None);
+    };
+    let repo = match Repository::open(git_dir, &RepositoryOptions::empty()) {
+        Ok(r) => r,
+        Err(_) => return Ok(None),
+    };
+    let Some(index) = BitmapIndex::open(&repo).ok().flatten() else {
+        return Ok(None);
+    };
+    let index = Arc::new(index);
+    match index.reachability(
+        &repo,
+        ReachabilityQuery {
+            wants: haves,
+            haves: &[],
+            filter: None,
+        },
+        MissingAction::Allow,
+    ) {
+        Ok(set) => Ok(Some(set)),
+        Err(BitmapWalkError::Unsupported(_)) => Ok(None),
+        Err(BitmapWalkError::Bitmap(_)) => Ok(None),
+        Err(BitmapWalkError::Repository(e)) => Err(e),
+    }
 }
 
 /// Objects for a path-based filter (`sparse:oid`), which needs the full object walk.
@@ -342,6 +399,7 @@ fn collect_reachable_excluding_with_name_hashes(
     odb: &Odb,
     roots: &[ObjectId],
     exclude: &HashSet<ObjectId>,
+    boundary: &HashSet<ObjectId>,
     skip_missing: bool,
     shallow_grafts: &HashSet<ObjectId>,
     keep_payloads: bool,
@@ -356,6 +414,7 @@ fn collect_reachable_excluding_with_name_hashes(
     let mut walk = EnumerationWalk {
         odb,
         exclude,
+        boundary,
         skip_missing,
         filter,
         depth_sensitive: filter.is_some_and(ObjectFilter::is_depth_sensitive),
@@ -480,6 +539,8 @@ fn child_path(parent: &str, name: &[u8]) -> String {
 struct EnumerationWalk<'a> {
     odb: &'a Odb,
     exclude: &'a HashSet<ObjectId>,
+    /// Negotiation boundaries: do not list or expand past these objects.
+    boundary: &'a HashSet<ObjectId>,
     skip_missing: bool,
     filter: Option<&'a ObjectFilter>,
     /// The filter's verdict for trees and blobs depends on where they are met.
@@ -545,8 +606,16 @@ impl EnumerationWalk<'_> {
         }
     }
 
+    fn note_boundary(&mut self, oid: ObjectId) {
+        self.visited.insert(oid);
+    }
+
     /// An object that is sent whatever the filter says: a root or a tag target.
     fn push_object(&mut self, oid: ObjectId, path: String) {
+        if self.boundary.contains(&oid) {
+            self.note_boundary(oid);
+            return;
+        }
         if self.visited.insert(oid) {
             self.list(oid);
             self.queue.push_back((oid, path, 0));
@@ -558,6 +627,10 @@ impl EnumerationWalk<'_> {
     /// A root or tag target that may be a commit: read now so a commit enters the
     /// date-ordered heap at once; anything else waits in [`Self::queue`].
     fn push_root(&mut self, oid: ObjectId) -> Result<()> {
+        if self.boundary.contains(&oid) {
+            self.note_boundary(oid);
+            return Ok(());
+        }
         if !self.visited.insert(oid) {
             if self.unlisted.remove(&oid) {
                 self.list(oid);
@@ -578,6 +651,10 @@ impl EnumerationWalk<'_> {
     /// A parent commit: always walked, listed unless the filter keeps other types only.
     /// Read now so it enters the date-ordered heap before any tree is expanded.
     fn push_parent(&mut self, oid: ObjectId) -> Result<()> {
+        if self.boundary.contains(&oid) {
+            self.note_boundary(oid);
+            return Ok(());
+        }
         let listed = self
             .filter
             .is_none_or(|f| f.includes_commit_or_tag_object(ObjectKind::Commit));
@@ -671,6 +748,10 @@ impl EnumerationWalk<'_> {
         name: Option<(&str, &[u8])>,
         tree_depth: u64,
     ) -> Result<()> {
+        if self.boundary.contains(&oid) {
+            self.note_boundary(oid);
+            return Ok(());
+        }
         if self.visited.contains(&oid) {
             return Ok(());
         }

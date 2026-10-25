@@ -137,11 +137,12 @@ pub fn try_write_streaming_pack(
     if !source_shallow.is_empty() || !have_shallow.is_empty() {
         return Ok(None);
     }
-    let Some((send_set, have_closure)) =
+    let Some((send_set, peer_held)) =
         try_bitmap_reachable_for_upload(repo.odb(), wants, haves, filter, source_shallow)?
     else {
         return Ok(None);
     };
+    let have_tips: HashSet<ObjectId> = haves.iter().copied().collect();
     let index = send_set.bitmap_index();
     let objects_dir = repo.odb().objects_dir();
     let packs = resolve_bitmapped_packs(objects_dir, index, allow_multi_pack_reuse(repo))?;
@@ -158,11 +159,12 @@ pub fn try_write_streaming_pack(
     let reuse_bits = compute_reuse_bits(&pack, send_bits, &send_set, opts)?;
 
     let blob_name_hashes =
-        crate::pack_object_select::name_hashes_for_send(index, &send, &have_closure);
+        crate::pack_object_select::name_hashes_for_send(index, &send, &HashSet::new());
     let plan = crate::pack_objects::plan_deltas(
         repo.odb(),
         &send,
-        &have_closure,
+        &have_tips,
+        Some(&peer_held),
         opts,
         &oid_hash_map_from(&blob_name_hashes),
         None,

@@ -1085,6 +1085,7 @@ fn pack_loose_objects_incremental(
         odb,
         &loose,
         &HashSet::new(),
+        None,
         &incremental_opts,
         &HashMap::new(),
         None,
