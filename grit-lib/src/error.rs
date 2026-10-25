@@ -1301,6 +1301,8 @@ pub enum Error {
     /// HTTP error status, or no Git handshake.
     ///
     /// Use [`Error::is_remote_unreadable`] to test for it through wrapper errors.
+    ///
+    /// Not used for cancellation; see [`Error::is_cancelled`].
     #[error("{}", remote_unreadable_message(url.as_deref(), reason))]
     RemoteUnreadable {
         /// Remote URL or resolved local path, with credentials redacted. `None` when the
@@ -1354,6 +1356,9 @@ pub enum Error {
     InvalidIdentity(#[from] crate::ident::CommitIdentityError),
 
     /// A long-running library operation stopped at a cancellation checkpoint.
+    ///
+    /// Use [`Error::is_cancelled`] to test for it through wrapper errors
+    /// ([`crate::remote::RemoteError::is_cancelled`], [`crate::remote::clone::CloneError::is_cancelled`], …).
     #[error("operation cancelled")]
     Cancelled,
 
@@ -1764,6 +1769,16 @@ impl Error {
     #[must_use]
     pub fn is_remote_unreadable(&self) -> bool {
         matches!(self, Self::RemoteUnreadable { .. })
+    }
+
+    /// Whether this is [`Error::Cancelled`] or a nested history failure that was cancelled.
+    #[must_use]
+    pub fn is_cancelled(&self) -> bool {
+        match self {
+            Self::Cancelled => true,
+            Self::History(e) => e.is_cancelled(),
+            _ => false,
+        }
     }
 
     /// Build [`Error::InvalidPathComponent`].

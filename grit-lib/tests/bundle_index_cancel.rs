@@ -77,8 +77,8 @@ fn bundle_unbundle_returns_cancelled_during_index_pack() {
         .unbundle_with_progress(&repo, &mut progress, &flag)
         .expect_err("cancel during index-pack");
     assert!(
-        matches!(err, BundleError::Cancelled),
-        "expected BundleError::Cancelled, got {err:?}"
+        err.is_cancelled(),
+        "expected cancelled bundle error, got {err:?}"
     );
     assert!(
         saw.load(Ordering::Relaxed),

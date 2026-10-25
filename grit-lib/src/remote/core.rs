@@ -45,7 +45,8 @@ pub mod http_client {
     pub use crate::transport::http::HttpClient;
 }
 
-type RemoteResult<T> = std::result::Result<T, RemoteError>;
+/// Result of a remote operation ([`RemoteError`] on failure).
+pub type RemoteResult<T> = std::result::Result<T, RemoteError>;
 
 /// Default remote name when none is configured (`origin`, matching Git).
 pub const DEFAULT_REMOTE: &str = "origin";
@@ -103,6 +104,12 @@ impl RemoteError {
     #[must_use]
     pub fn is_remote_unreadable(&self) -> bool {
         matches!(self, Self::Library(e) if e.is_remote_unreadable())
+    }
+
+    /// Whether the operation was cancelled ([`Error::Cancelled`]).
+    #[must_use]
+    pub fn is_cancelled(&self) -> bool {
+        matches!(self, Self::Library(e) if e.is_cancelled())
     }
 }
 

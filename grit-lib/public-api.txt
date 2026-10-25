@@ -712,6 +712,8 @@ impl core::fmt::Debug for grit_lib::bundle::BundleError
 pub fn grit_lib::bundle::BundleError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::fmt::Display for grit_lib::bundle::BundleError
 pub fn grit_lib::bundle::BundleError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl grit_lib::bundle::BundleError
+pub fn grit_lib::bundle::BundleError::is_cancelled(&self) -> bool
 impl core::marker::StructuralPartialEq for grit_lib::bundle::BundleError
 impl core::marker::Freeze for grit_lib::bundle::BundleError
 impl core::marker::Send for grit_lib::bundle::BundleError
@@ -5696,6 +5698,7 @@ impl grit_lib::error::Error
 pub fn grit_lib::error::Error::dirty_worktree(grit_lib::error::WorktreeOperation, alloc::vec::Vec<alloc::string::String>) -> Self
 pub fn grit_lib::error::Error::git_stderr_message(&self) -> alloc::string::String
 pub fn grit_lib::error::Error::invalid_path_component(impl core::convert::Into<alloc::string::String>, grit_lib::path_validate::PathComponentError) -> Self
+pub fn grit_lib::error::Error::is_cancelled(&self) -> bool
 pub fn grit_lib::error::Error::is_remote_unreadable(&self) -> bool
 pub fn grit_lib::error::Error::remote_unreadable(impl core::convert::Into<alloc::string::String>, grit_lib::error::RemoteUnreadableReason) -> Self
 pub fn grit_lib::error::Error::wants_fatal_prefix(&self) -> bool
@@ -13935,6 +13938,7 @@ pub grit_lib::porcelain::pull::PullError::RebaseInteractive
 pub grit_lib::porcelain::pull::PullError::Remote(grit_lib::remote::RemoteError)
 pub grit_lib::porcelain::pull::PullError::Repository(grit_lib::error::Error)
 impl grit_lib::porcelain::pull::PullError
+pub fn grit_lib::porcelain::pull::PullError::is_cancelled(&self) -> bool
 pub fn grit_lib::porcelain::pull::PullError::is_remote_unreadable(&self) -> bool
 impl core::convert::From<grit_lib::error::Error> for grit_lib::porcelain::pull::PullError
 pub fn grit_lib::porcelain::pull::PullError::from(grit_lib::error::Error) -> Self
@@ -15566,6 +15570,7 @@ impl grit_lib::error::Error
 pub fn grit_lib::error::Error::dirty_worktree(grit_lib::error::WorktreeOperation, alloc::vec::Vec<alloc::string::String>) -> Self
 pub fn grit_lib::error::Error::git_stderr_message(&self) -> alloc::string::String
 pub fn grit_lib::error::Error::invalid_path_component(impl core::convert::Into<alloc::string::String>, grit_lib::path_validate::PathComponentError) -> Self
+pub fn grit_lib::error::Error::is_cancelled(&self) -> bool
 pub fn grit_lib::error::Error::is_remote_unreadable(&self) -> bool
 pub fn grit_lib::error::Error::remote_unreadable(impl core::convert::Into<alloc::string::String>, grit_lib::error::RemoteUnreadableReason) -> Self
 pub fn grit_lib::error::Error::wants_fatal_prefix(&self) -> bool
@@ -18917,6 +18922,7 @@ pub grit_lib::remote::clone::CloneError::Library(grit_lib::error::Error)
 pub grit_lib::remote::clone::CloneError::Remote(grit_lib::remote::RemoteError)
 pub grit_lib::remote::clone::CloneError::RemoteRefNotFound(alloc::string::String)
 impl grit_lib::remote::clone::CloneError
+pub fn grit_lib::remote::clone::CloneError::is_cancelled(&self) -> bool
 pub fn grit_lib::remote::clone::CloneError::is_remote_ref_not_found(&self) -> bool
 pub fn grit_lib::remote::clone::CloneError::is_remote_unreadable(&self) -> bool
 pub fn grit_lib::remote::clone::CloneError::should_cleanup_failed_clone(&self) -> bool
@@ -21123,6 +21129,7 @@ pub grit_lib::remote::RemoteError::RemoteExists(alloc::string::String)
 pub grit_lib::remote::RemoteError::UnknownRemote(alloc::string::String)
 pub grit_lib::remote::RemoteError::UnsupportedScheme
 impl grit_lib::remote::RemoteError
+pub fn grit_lib::remote::RemoteError::is_cancelled(&self) -> bool
 pub fn grit_lib::remote::RemoteError::is_remote_unreadable(&self) -> bool
 impl core::convert::From<grit_lib::error::Error> for grit_lib::remote::RemoteError
 pub fn grit_lib::remote::RemoteError::from(grit_lib::error::Error) -> Self
@@ -21163,6 +21170,7 @@ impl core::cmp::Eq for grit_lib::remote::RemoteUrl
 impl core::cmp::PartialEq for grit_lib::remote::RemoteUrl
 pub fn grit_lib::remote::RemoteUrl::eq(&self, &Self) -> bool
 impl core::convert::TryFrom<&str> for grit_lib::remote::RemoteUrl
+pub type grit_lib::remote::RemoteResult<T> = core::result::Result<T, grit_lib::remote::RemoteError>
 pub type grit_lib::remote::RemoteUrl::Error = grit_lib::remote::RemoteError
 pub fn grit_lib::remote::RemoteUrl::try_from(&str) -> core::result::Result<Self, Self::Error>
 impl core::fmt::Debug for grit_lib::remote::RemoteUrl
@@ -22882,6 +22890,8 @@ pub grit_lib::revwalk::history::HistoryError::UndoStale
 pub grit_lib::revwalk::history::HistoryError::UndoStale::name: alloc::string::String
 pub grit_lib::revwalk::history::HistoryError::WorktreeApply
 pub grit_lib::revwalk::history::HistoryError::WorktreeApply::message: alloc::string::String
+impl grit_lib::revwalk::history::HistoryError
+pub fn grit_lib::revwalk::history::HistoryError::is_cancelled(&self) -> bool
 impl core::convert::From<grit_lib::error::Error> for grit_lib::revwalk::history::HistoryError
 pub fn grit_lib::revwalk::history::HistoryError::from(grit_lib::error::Error) -> Self
 impl core::convert::From<grit_lib::ident::AuthorArgError> for grit_lib::revwalk::history::HistoryError
@@ -22996,6 +23006,8 @@ pub grit_lib::revwalk::history::RebaseSessionError::NotOnBranch
 pub grit_lib::revwalk::history::RebaseSessionError::NothingToCommit
 pub grit_lib::revwalk::history::RebaseSessionError::RebaseAlreadyInProgress
 pub grit_lib::revwalk::history::RebaseSessionError::UnmergedPaths
+impl grit_lib::revwalk::history::RebaseSessionError
+pub fn grit_lib::revwalk::history::RebaseSessionError::is_cancelled(&self) -> bool
 impl core::convert::From<grit_lib::error::Error> for grit_lib::revwalk::history::RebaseSessionError
 pub fn grit_lib::revwalk::history::RebaseSessionError::from(grit_lib::error::Error) -> Self
 impl core::convert::From<grit_lib::revwalk::history::HistoryError> for grit_lib::revwalk::history::RebaseSessionError

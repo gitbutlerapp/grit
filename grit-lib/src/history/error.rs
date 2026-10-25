@@ -258,6 +258,17 @@ pub enum HistoryError {
     },
 }
 
+impl HistoryError {
+    /// Whether the rewrite was cancelled ([`Error::Cancelled`]).
+    #[must_use]
+    pub fn is_cancelled(&self) -> bool {
+        match self {
+            Self::Library(e) => e.is_cancelled(),
+            _ => false,
+        }
+    }
+}
+
 impl From<Error> for HistoryError {
     /// Unwraps [`Error::History`] back to the history failure it carries; every other library
     /// error becomes [`HistoryError::Library`].

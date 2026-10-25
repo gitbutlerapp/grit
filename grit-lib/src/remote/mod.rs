@@ -1,5 +1,8 @@
 //! Remotes, fetch/push, transport, and credential helpers.
 //!
+//! Remote operations return [`RemoteResult`] / [`RemoteError`]; use [`RemoteError::is_cancelled`]
+//! and [`RemoteError::is_remote_unreadable`] instead of matching nested library errors.
+//!
 //! Library guide: [mod](https://grit-scm.com/docs/library/network)
 //!
 //! ```rust

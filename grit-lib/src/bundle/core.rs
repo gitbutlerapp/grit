@@ -191,6 +191,14 @@ impl From<std::io::Error> for BundleError {
     }
 }
 
+impl BundleError {
+    /// Whether the bundle operation was cancelled.
+    #[must_use]
+    pub fn is_cancelled(&self) -> bool {
+        matches!(self, Self::Cancelled)
+    }
+}
+
 /// Input for [`write_bundle`].
 #[derive(Debug, Clone, Default)]
 pub struct BundleSpec {

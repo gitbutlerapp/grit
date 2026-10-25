@@ -109,6 +109,23 @@ pub enum RebaseSessionError {
     Library(#[from] crate::error::Error),
 }
 
+impl RebaseSessionError {
+    /// Whether the rebase session was cancelled ([`Error::Cancelled`]).
+    #[must_use]
+    pub fn is_cancelled(&self) -> bool {
+        match self {
+            Self::Library(e) => e.is_cancelled(),
+            Self::History(e) => e.is_cancelled(),
+            Self::NoRebaseInProgress
+            | Self::RebaseAlreadyInProgress
+            | Self::ForeignRebaseInProgress
+            | Self::UnmergedPaths
+            | Self::NothingToCommit
+            | Self::NotOnBranch => false,
+        }
+    }
+}
+
 /// Start a resumable rebase of `opts.request.branch_tip` onto the effective onto commit.
 ///
 /// On a clean replay, applies the plan atomically and returns [`RebaseOutcome::Done`].

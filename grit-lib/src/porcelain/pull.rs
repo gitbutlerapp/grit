@@ -176,6 +176,19 @@ impl PullError {
             | Self::RebaseInteractive => false,
         }
     }
+
+    /// Whether the pull was cancelled ([`Error::Cancelled`]).
+    #[must_use]
+    pub fn is_cancelled(&self) -> bool {
+        match self {
+            Self::Remote(e) => e.is_cancelled(),
+            Self::Repository(e) => e.is_cancelled(),
+            Self::DetachedHead
+            | Self::InvalidHead
+            | Self::NoUpstream { .. }
+            | Self::RebaseInteractive => false,
+        }
+    }
 }
 
 /// Resolve pull integration mode from config with optional CLI override.

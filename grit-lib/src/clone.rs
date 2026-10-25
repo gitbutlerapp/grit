@@ -82,6 +82,18 @@ impl CloneError {
             Self::DestNotEmpty(_) | Self::RemoteRefNotFound(_) | Self::InvalidCloneDepth => false,
         }
     }
+
+    /// Whether the clone was cancelled ([`Error::Cancelled`]).
+    ///
+    /// When this returns `true`, [`Self::should_cleanup_failed_clone`] is also `true`.
+    #[must_use]
+    pub fn is_cancelled(&self) -> bool {
+        match self {
+            Self::Library(e) => e.is_cancelled(),
+            Self::Remote(e) => e.is_cancelled(),
+            Self::DestNotEmpty(_) | Self::RemoteRefNotFound(_) | Self::InvalidCloneDepth => false,
+        }
+    }
 }
 
 /// Which tags to fetch during [`clone`], matching `git clone` tag behavior.
