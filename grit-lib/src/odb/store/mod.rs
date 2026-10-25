@@ -97,6 +97,22 @@ pub trait ObjectStore: Send + Sync + std::fmt::Debug {
         Ok(self.read_info(oid)?.is_some())
     }
 
+    /// For each id in `oids`, whether it is stored in this backend; the result has
+    /// one entry per input id, in input order.
+    ///
+    /// Callers that need to check many objects at once (for example write-tree
+    /// confirming that every reusable cached subtree still exists) use this instead
+    /// of one [`Self::contains`] call per id. The default implementation calls
+    /// [`Self::contains`] for each id. A database- or network-backed store should
+    /// override it to answer the whole batch in a single round trip.
+    ///
+    /// # Errors
+    ///
+    /// Propagates the first backend failure, like [`Self::contains`].
+    fn contains_many(&self, oids: &[ObjectId]) -> Result<Vec<bool>> {
+        oids.iter().map(|oid| self.contains(oid)).collect()
+    }
+
     /// Open a stream over the object's uncompressed payload.
     ///
     /// Default implementation buffers via [`Self::read`].
@@ -334,6 +350,14 @@ impl ObjectStore for MemoryStore {
         Ok(guard.contains_key(oid))
     }
 
+    fn contains_many(&self, oids: &[ObjectId]) -> Result<Vec<bool>> {
+        let guard = self
+            .objects
+            .read()
+            .map_err(|e| Error::Io(io::Error::other(e.to_string())))?;
+        Ok(oids.iter().map(|oid| guard.contains_key(oid)).collect())
+    }
+
     fn open_stream(&self, oid: &ObjectId) -> Result<Option<ObjectStream<'_>>> {
         let guard = self
             .objects
@@ -403,6 +427,29 @@ impl WritableObjectStore for MemoryStore {
     }
 }
 
+/// Ask `probe` about the ids of `oids` indexed by `pending`; mark each hit in `present` and
+/// drop it from `pending`, so the next source is only asked about what is still missing.
+///
+/// Does nothing when `pending` is empty. A short answer from `probe` counts as "absent".
+pub(crate) fn resolve_pending(
+    oids: &[ObjectId],
+    present: &mut [bool],
+    pending: &mut Vec<usize>,
+    probe: impl FnOnce(&[ObjectId]) -> Result<Vec<bool>>,
+) -> Result<()> {
+    if pending.is_empty() {
+        return Ok(());
+    }
+    let batch: Vec<ObjectId> = pending.iter().map(|&i| oids[i]).collect();
+    let mut found = probe(&batch)?.into_iter();
+    pending.retain(|&i| {
+        let hit = found.next().unwrap_or(false);
+        present[i] |= hit;
+        !hit
+    });
+    Ok(())
+}
+
 /// Run `store.for_each_object` and stop visiting further stores when `f` returns [`ControlFlow::Break`].
 pub(crate) fn for_each_propagate_break(
     store: &dyn ObjectStore,
@@ -443,6 +490,36 @@ mod tests {
         assert!(store.read_info(&ObjectId::zero()).unwrap().is_none());
         assert!(!store.contains(&ObjectId::zero()).unwrap());
         assert!(store.contains(&oid).unwrap());
+        assert_eq!(
+            store.contains_many(&[oid, ObjectId::zero(), oid]).unwrap(),
+            vec![true, false, true]
+        );
+        assert!(store.contains_many(&[]).unwrap().is_empty());
+    }
+
+    #[test]
+    fn resolve_pending_marks_hits_and_keeps_misses() {
+        let ids: Vec<ObjectId> = (1u8..=3)
+            .map(|b| ObjectId::from_bytes(&[b; 20]).unwrap())
+            .collect();
+        let mut present = vec![false; 3];
+        let mut pending = vec![0, 2];
+        resolve_pending(&ids, &mut present, &mut pending, |batch| {
+            assert_eq!(batch, [ids[0], ids[2]]);
+            Ok(vec![false, true])
+        })
+        .unwrap();
+        assert_eq!(present, [false, false, true]);
+        assert_eq!(pending, [0]);
+
+        resolve_pending(&ids, &mut present, &mut pending, |_| Ok(Vec::new())).unwrap();
+        assert_eq!(pending, [0], "a short answer counts as absent");
+
+        pending.clear();
+        resolve_pending(&ids, &mut present, &mut pending, |_| {
+            panic!("no probe when nothing is pending")
+        })
+        .unwrap();
     }
 
     #[test]
@@ -633,6 +710,10 @@ mod tests {
         )
         .unwrap();
         assert!(ObjectStore::contains(&store, &oid).unwrap());
+        assert_eq!(
+            ObjectStore::contains_many(&store, &[ObjectId::zero(), oid]).unwrap(),
+            vec![false, true]
+        );
         assert!(ObjectStore::open_stream(&store, &oid).unwrap().is_some());
         let mut prefixed = Vec::new();
         ObjectStore::lookup_prefix(&store, &oid.to_hex()[..6], 0, &mut prefixed).unwrap();

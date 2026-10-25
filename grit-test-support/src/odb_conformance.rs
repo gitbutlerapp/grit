@@ -50,6 +50,7 @@ pub fn run_read_suite<S: ObjectStore + 'static>(seed: impl Fn(&[(ObjectKind, Vec
     read_into_matches_read(&seed);
     read_info_matches_read(&seed);
     read_contains_agreement_on_misses(&seed);
+    read_contains_many_matches_contains(&seed);
     read_for_each_object_yields_each_id_once(&seed);
     read_lookup_prefix_unique_ambiguous_and_exact(&seed);
     read_concurrent_reads_from_eight_threads(&seed);
@@ -232,6 +233,45 @@ pub fn read_contains_agreement_on_misses<S: ObjectStore>(
             "read_contains_agreement_on_misses: read_info miss {oid}"
         );
     }
+}
+
+/// [`ObjectStore::contains_many`] answers one entry per id, in input order, matching
+/// [`ObjectStore::contains`] for hits, misses and repeated ids.
+pub fn read_contains_many_matches_contains<S: ObjectStore>(
+    seed: &impl Fn(&[(ObjectKind, Vec<u8>)]) -> S,
+) {
+    let algo = seed_algo(seed);
+    let specs = standard_object_specs(algo);
+    let store = seed(&specs);
+    let mut oids: Vec<ObjectId> = specs
+        .iter()
+        .map(|(kind, data)| hash::hash_object(algo, *kind, data).expect("hash"))
+        .collect();
+    oids.insert(
+        1,
+        hash::hash_object(algo, ObjectKind::Blob, b"never-written").expect("hash"),
+    );
+    oids.push(oids[0]);
+    let expected: Vec<bool> = oids
+        .iter()
+        .map(|oid| {
+            store
+                .contains(oid)
+                .expect("read_contains_many_matches_contains: contains")
+        })
+        .collect();
+    assert!(expected.contains(&true) && expected.contains(&false));
+    assert_eq!(
+        store
+            .contains_many(&oids)
+            .expect("read_contains_many_matches_contains: contains_many"),
+        expected,
+        "read_contains_many_matches_contains: answers"
+    );
+    assert!(store
+        .contains_many(&[])
+        .expect("read_contains_many_matches_contains: empty batch")
+        .is_empty());
 }
 
 /// [`ObjectStore::for_each_object`] visits every stored id exactly once.

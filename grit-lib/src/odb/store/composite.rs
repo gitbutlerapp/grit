@@ -85,6 +85,17 @@ impl ObjectStore for CompositeStore {
         Ok(false)
     }
 
+    fn contains_many(&self, oids: &[ObjectId]) -> Result<Vec<bool>> {
+        let mut present = vec![false; oids.len()];
+        let mut pending: Vec<usize> = (0..oids.len()).collect();
+        for store in &self.stores {
+            super::resolve_pending(oids, &mut present, &mut pending, |batch| {
+                store.contains_many(batch)
+            })?;
+        }
+        Ok(present)
+    }
+
     fn open_stream(&self, oid: &ObjectId) -> Result<Option<ObjectStream<'_>>> {
         for store in &self.stores {
             match store.open_stream(oid) {
@@ -231,5 +242,73 @@ mod tests {
         assert!(!composite
             .contains(&ObjectId::from_hex("deadbeefdeadbeefdeadbeefdeadbeefdeadbeef").unwrap())
             .unwrap());
+    }
+
+    /// Records the batches it is asked about.
+    #[derive(Debug)]
+    struct BatchLog {
+        inner: MemoryStore,
+        batches: std::sync::Mutex<Vec<Vec<ObjectId>>>,
+    }
+
+    impl ObjectStore for BatchLog {
+        fn hash_algo(&self) -> HashAlgo {
+            self.inner.hash_algo()
+        }
+        fn read(&self, oid: &ObjectId) -> Result<Option<Object>> {
+            self.inner.read(oid)
+        }
+        fn read_info(&self, oid: &ObjectId) -> Result<Option<ObjectInfo>> {
+            self.inner.read_info(oid)
+        }
+        fn contains_many(&self, oids: &[ObjectId]) -> Result<Vec<bool>> {
+            self.batches
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push(oids.to_vec());
+            self.inner.contains_many(oids)
+        }
+        fn for_each_object(&self, f: &mut dyn FnMut(&ObjectId) -> ControlFlow<()>) -> Result<()> {
+            self.inner.for_each_object(f)
+        }
+    }
+
+    #[test]
+    fn contains_many_asks_later_layers_only_about_misses() {
+        let first = MemoryStore::new(HashAlgo::Sha1);
+        let in_first = first
+            .write(ObjectKind::Blob, b"first", WriteOptions::default())
+            .unwrap();
+        let second = Arc::new(BatchLog {
+            inner: MemoryStore::new(HashAlgo::Sha1),
+            batches: std::sync::Mutex::new(Vec::new()),
+        });
+        let in_second = second
+            .inner
+            .write(ObjectKind::Blob, b"second", WriteOptions::default())
+            .unwrap();
+        let absent = ObjectId::from_hex("deadbeefdeadbeefdeadbeefdeadbeefdeadbeef").unwrap();
+        let composite = CompositeStore::new(
+            vec![
+                Arc::new(first) as Arc<dyn ObjectStore>,
+                second.clone() as Arc<dyn ObjectStore>,
+            ],
+            HashAlgo::Sha1,
+        );
+        assert_eq!(
+            composite
+                .contains_many(&[absent, in_first, in_second])
+                .unwrap(),
+            vec![false, true, true]
+        );
+        assert_eq!(
+            *second.batches.lock().unwrap(),
+            vec![vec![absent, in_second]],
+            "one batch for the second layer, without ids the first layer holds"
+        );
+
+        second.batches.lock().unwrap().clear();
+        assert_eq!(composite.contains_many(&[in_first]).unwrap(), vec![true]);
+        assert!(second.batches.lock().unwrap().is_empty());
     }
 }

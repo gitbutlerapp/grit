@@ -1392,6 +1392,27 @@ impl Odb {
         }))
     }
 
+    /// [`Self::try_exists_local`] for every id in `oids`, one answer per id in input order.
+    ///
+    /// A custom primary store is asked once for the whole batch through
+    /// [`ObjectStore::contains_many`].
+    pub(crate) fn try_exists_local_many(&self, oids: &[ObjectId]) -> Result<Vec<bool>> {
+        let mut present: Vec<bool> = oids.iter().map(|oid| self.is_empty_tree(oid)).collect();
+        let mut pending: Vec<usize> = (0..oids.len()).filter(|&i| !present[i]).collect();
+        if let Some(primary) = &self.custom_primary {
+            store::resolve_pending(oids, &mut present, &mut pending, |batch| {
+                primary.contains_many(batch)
+            })?;
+            return Ok(present);
+        }
+        self.with_pack_store_for(&self.objects_dir, || {
+            for i in pending {
+                present[i] = exists_materialized_in_objects_dir(&self.objects_dir, &oids[i]);
+            }
+        });
+        Ok(present)
+    }
+
     /// Whether `oid` is stored locally in loose storage or any pack (including promisor).
     ///
     /// Unlike [`Self::exists_local`], objects present only in promisor-marked packs count
@@ -1510,6 +1531,39 @@ impl Odb {
         found(self.sources().and_then(|s| s.contains(oid)))
     }
 
+    /// [`Self::contains`] for every id in `oids`, one answer per id in input order.
+    ///
+    /// Each source is asked once about the ids no earlier source holds, through
+    /// [`ObjectStore::contains_many`], so a database- or network-backed primary answers
+    /// the whole batch in one round trip instead of one per id.
+    ///
+    /// # Errors
+    ///
+    /// The first source failure, as for [`Self::contains`].
+    pub(crate) fn contains_many(&self, oids: &[ObjectId]) -> Result<Vec<bool>> {
+        #[cfg(test)]
+        self.exists_probe.fetch_add(oids.len(), Ordering::Relaxed);
+        let mut present: Vec<bool> = oids
+            .iter()
+            .map(|oid| self.is_empty_tree(oid) || self.overlay_read(oid).is_some())
+            .collect();
+        let mut pending: Vec<usize> = (0..oids.len()).filter(|&i| !present[i]).collect();
+        store::resolve_pending(oids, &mut present, &mut pending, |batch| {
+            self.primary_writable()?.contains_many(batch)
+        })?;
+        for src in &self.extra_read_sources {
+            store::resolve_pending(oids, &mut present, &mut pending, |batch| {
+                src.contains_many(batch)
+            })?;
+        }
+        if !pending.is_empty() && self.alternate_object_lookup_needed() {
+            store::resolve_pending(oids, &mut present, &mut pending, |batch| {
+                self.sources()?.contains_many(batch)
+            })?;
+        }
+        Ok(present)
+    }
+
     /// The oids from `oids` that [`Self::contains`] reports present, in input order.
     ///
     /// # Errors
@@ -1519,7 +1573,7 @@ impl Odb {
         &self,
         oids: impl IntoIterator<Item = ObjectId>,
     ) -> Result<Vec<ObjectId>> {
-        filter_oids(oids, |oid| self.contains(oid))
+        self.partition_oids(oids, true)
     }
 
     /// The oids from `oids` that [`Self::contains`] reports missing, in input order.
@@ -1531,7 +1585,22 @@ impl Odb {
         &self,
         oids: impl IntoIterator<Item = ObjectId>,
     ) -> Result<Vec<ObjectId>> {
-        filter_oids(oids, |oid| self.contains(oid).map(|has| !has))
+        self.partition_oids(oids, false)
+    }
+
+    /// The oids from `oids` whose [`Self::contains_many`] answer equals `want_present`.
+    fn partition_oids(
+        &self,
+        oids: impl IntoIterator<Item = ObjectId>,
+        want_present: bool,
+    ) -> Result<Vec<ObjectId>> {
+        let oids: Vec<ObjectId> = oids.into_iter().collect();
+        let present = self.contains_many(&oids)?;
+        Ok(oids
+            .into_iter()
+            .zip(present)
+            .filter_map(|(oid, has)| (has == want_present).then_some(oid))
+            .collect())
     }
 
     /// The oids from `oids` that are not stored locally per [`Self::exists_stored`]
@@ -3732,6 +3801,19 @@ mod tests {
         assert!(odb.contains(&odb.empty_tree_oid().unwrap()).unwrap());
         assert!(odb.contains(&alt_oid).unwrap());
         assert!(!odb.contains(&absent).unwrap());
+        let empty_tree = odb.empty_tree_oid().unwrap();
+        assert_eq!(
+            odb.contains_many(&[present, absent, alt_oid, empty_tree])
+                .unwrap(),
+            vec![true, false, true, true]
+        );
+        assert_eq!(
+            odb.try_exists_local_many(&[present, absent, alt_oid, empty_tree])
+                .unwrap(),
+            vec![true, false, false, true],
+            "local ignores alternates"
+        );
+        assert!(odb.contains_many(&[]).unwrap().is_empty());
         assert_eq!(
             odb.present_oids([present, absent, alt_oid]).unwrap(),
             vec![present, alt_oid]
@@ -3752,7 +3834,14 @@ mod tests {
         let dir = TempDir::new().unwrap();
         let (odb, flaky) = flaky_odb(dir.path());
         let oid = odb.write(ObjectKind::Blob, b"x").unwrap();
+        assert_eq!(odb.try_exists_local_many(&[oid]).unwrap(), vec![true]);
         flaky.fail_contains(true);
+        assert!(store::flaky::is_injected(
+            &odb.contains_many(&[oid]).unwrap_err()
+        ));
+        assert!(store::flaky::is_injected(
+            &odb.try_exists_local_many(&[oid]).unwrap_err()
+        ));
         assert!(store::flaky::is_injected(
             &odb.present_oids([oid]).unwrap_err()
         ));
