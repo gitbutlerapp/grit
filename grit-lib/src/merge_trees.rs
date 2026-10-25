@@ -18,6 +18,7 @@ use crate::diff::{detect_renames, diff_trees, DiffStatus};
 use crate::index::{
     entry_from_stat, worktree_path_from_index_rel, Index, IndexEntry, MODE_REGULAR,
 };
+use crate::merge_driver::{try_merge_driver, MergeDriverLabels, MergeDriverOutcome};
 use crate::merge_file::{is_binary, merge, ConflictStyle, MergeFavor, MergeInput};
 use crate::objects::{ObjectId, ObjectKind};
 use crate::odb::Odb;
@@ -875,6 +876,51 @@ pub(crate) fn stage_entry(index: &mut Index, path: &[u8], src: &IndexEntry, stag
     e.flags = path_len_flags(path) | ((stage as u16) << 12);
     index.push_entry_unsorted(e);
 }
+
+#[allow(clippy::too_many_arguments)]
+fn finish_merge_driver_result(
+    repo: &Repository,
+    index: &mut Index,
+    conflict_content: &mut BTreeMap<Vec<u8>, ObjectId>,
+    path: &[u8],
+    base: Option<&IndexEntry>,
+    ours: &IndexEntry,
+    theirs: &IndexEntry,
+    outcome: MergeDriverOutcome,
+) -> crate::error::Result<()> {
+    match outcome {
+        MergeDriverOutcome::Clean(merged) => {
+            let merged_oid = repo.odb().write(ObjectKind::Blob, &merged)?;
+            let mut entry = ours.clone();
+            entry.path = path.to_vec();
+            entry.flags = path_len_flags(path);
+            entry.oid = merged_oid;
+            if let Some(base) = base {
+                if base.mode == ours.mode && base.mode != theirs.mode {
+                    entry.mode = theirs.mode;
+                }
+            }
+            index.push_entry_unsorted(entry);
+        }
+        MergeDriverOutcome::ConflictWithMarkers(content) => {
+            let conflict_oid = repo.odb().write(ObjectKind::Blob, &content)?;
+            conflict_content.insert(path.to_vec(), conflict_oid);
+            if let Some(base) = base {
+                stage_entry(index, path, base, 1);
+            }
+            stage_entry(index, path, ours, 2);
+            stage_entry(index, path, theirs, 3);
+        }
+        MergeDriverOutcome::Conflict => {
+            if let Some(base) = base {
+                stage_entry(index, path, base, 1);
+            }
+            stage_entry(index, path, ours, 2);
+            stage_entry(index, path, theirs, 3);
+        }
+    }
+    Ok(())
+}
 #[expect(clippy::too_many_arguments)]
 fn content_merge_or_conflict(
     ctx: &PathMergeContext<'_>,
@@ -909,7 +955,45 @@ fn content_merge_or_conflict(
     let ours_obj = repo.odb().read(&ours.oid)?;
     let theirs_obj = repo.odb().read(&theirs.oid)?;
     let attrs = ctx.file_attrs(path);
+    let file_attrs = attrs.clone().unwrap_or_default();
     let favor = merge_favor_for_path(attrs.as_ref(), favor);
+    let path_str = String::from_utf8_lossy(path).into_owned();
+    let label_theirs = match presentation.label_theirs {
+        TheirsConflictLabel::PathUtf8 => path_str.clone(),
+        TheirsConflictLabel::Fixed(s) => s.to_owned(),
+    };
+    let driver_labels = MergeDriverLabels {
+        base: presentation.label_base,
+        ours: presentation.label_ours,
+        theirs: &label_theirs,
+    };
+    if let Some((outcome, _content)) = try_merge_driver(
+        repo,
+        &file_attrs,
+        &path_str,
+        Some(&base_obj.data),
+        &ours_obj.data,
+        &theirs_obj.data,
+        favor,
+        presentation.style,
+        diff_algorithm,
+        ws.ignore_all_space,
+        ws.ignore_space_change,
+        ws.ignore_space_at_eol,
+        ws.ignore_cr_at_eol,
+        driver_labels,
+    )? {
+        return finish_merge_driver_result(
+            repo,
+            index,
+            conflict_content,
+            path,
+            Some(base),
+            ours,
+            theirs,
+            outcome,
+        );
+    }
 
     if attrs_force_binary(attrs.as_ref())
         || is_binary(&base_obj.data)
@@ -940,21 +1024,16 @@ fn content_merge_or_conflict(
         }
     }
 
-    let path_label = String::from_utf8_lossy(path);
-    let label_theirs: std::borrow::Cow<'_, str> = match presentation.label_theirs {
-        TheirsConflictLabel::PathUtf8 => path_label.clone(),
-        TheirsConflictLabel::Fixed(s) => std::borrow::Cow::Borrowed(s),
-    };
     let input = MergeInput {
         base: &base_obj.data,
         ours: &ours_obj.data,
         theirs: &theirs_obj.data,
         label_ours: presentation.label_ours,
         label_base: presentation.label_base,
-        label_theirs: label_theirs.as_ref(),
+        label_theirs: &label_theirs,
         favor,
         style: presentation.style,
-        marker_size: 7,
+        marker_size: file_attrs.effective_conflict_marker_size(),
         diff_algorithm: diff_algorithm.map(str::to_owned),
         ignore_all_space: ws.ignore_all_space,
         ignore_space_change: ws.ignore_space_change,
@@ -1016,7 +1095,45 @@ fn add_add_content_conflict(
     let ours_obj = repo.odb().read(&ours.oid)?;
     let theirs_obj = repo.odb().read(&theirs.oid)?;
     let attrs = ctx.file_attrs(path);
+    let file_attrs = attrs.clone().unwrap_or_default();
     let favor = merge_favor_for_path(attrs.as_ref(), favor);
+    let path_str = String::from_utf8_lossy(path).into_owned();
+    let label_theirs = match presentation.label_theirs {
+        TheirsConflictLabel::PathUtf8 => path_str.clone(),
+        TheirsConflictLabel::Fixed(s) => s.to_owned(),
+    };
+    let driver_labels = MergeDriverLabels {
+        base: presentation.label_base,
+        ours: presentation.label_ours,
+        theirs: &label_theirs,
+    };
+    if let Some((outcome, _content)) = try_merge_driver(
+        repo,
+        &file_attrs,
+        &path_str,
+        None,
+        &ours_obj.data,
+        &theirs_obj.data,
+        favor,
+        presentation.style,
+        diff_algorithm,
+        ws.ignore_all_space,
+        ws.ignore_space_change,
+        ws.ignore_space_at_eol,
+        ws.ignore_cr_at_eol,
+        driver_labels,
+    )? {
+        return finish_merge_driver_result(
+            repo,
+            index,
+            conflict_content,
+            path,
+            None,
+            ours,
+            theirs,
+            outcome,
+        );
+    }
 
     // Binary add/add: honour an explicit favour, else leave unmerged stages.
     if attrs_force_binary(attrs.as_ref())
@@ -1044,21 +1161,16 @@ fn add_add_content_conflict(
         return Ok(());
     }
 
-    let path_label = String::from_utf8_lossy(path);
-    let label_theirs: std::borrow::Cow<'_, str> = match presentation.label_theirs {
-        TheirsConflictLabel::PathUtf8 => path_label.clone(),
-        TheirsConflictLabel::Fixed(s) => std::borrow::Cow::Borrowed(s),
-    };
     let input = MergeInput {
         base: b"",
         ours: &ours_obj.data,
         theirs: &theirs_obj.data,
         label_ours: presentation.label_ours,
         label_base: presentation.label_base,
-        label_theirs: label_theirs.as_ref(),
+        label_theirs: &label_theirs,
         favor,
         style: presentation.style,
-        marker_size: 7,
+        marker_size: file_attrs.effective_conflict_marker_size(),
         diff_algorithm: diff_algorithm.map(str::to_owned),
         ignore_all_space: ws.ignore_all_space,
         ignore_space_change: ws.ignore_space_change,

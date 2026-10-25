@@ -523,7 +523,7 @@ Shared harness: [`grit-lib/tests/support/diff_harness.rs`](grit-lib/tests/suppor
 | t6402-merge-rename.sh | rename + content merge vs merge-tree | `merge_ort_git_compat.rs` (`t6402_rename_merges_match_git_merge_tree`) | partial (core rename subset) |
 | t6403-merge-file.sh | line merge, diff3/zdiff3, union, marker size | `grit-lib/tests/merge_file_git_compat.rs` (`t6427_diff3_and_zdiff3_markers_match_git_merge_file`, `t6417_merge_union_and_marker_size_match_git_merge_file`) | partial (whitespace flags: grit API only) |
 | t6405-merge-symlinks.sh | symlink three-way conflicts | `merge_ort_git_compat.rs` (`t6405_symlink_merge_matches_git`) | covered |
-| t6406-merge-attr.sh | merge drivers (binary, union, text) | `merge_ort_git_compat.rs` (`t6406_merge_drivers_match_git`), `merge_file_git_compat.rs` (union) | partial (text driver matrix deferred) |
+| t6406-merge-attr.sh | merge drivers (binary, union, text, custom) | `merge_ort_git_compat.rs` (`t6406_merge_drivers_match_git`), `merge_file_git_compat.rs` (union), `merge_driver_git_compat.rs` (custom driver, `merge=ours`, `%L`) | partial (full text driver matrix deferred) |
 | t6407-merge-binary.sh | binary merge conflicts | `merge_ort_git_compat.rs` (`t6407_binary_conflict_matches_git`) | covered |
 | t6408-merge-up-to-date.sh | fast-forward index composition | `grit-lib/src/porcelain/merge.rs` (`compose_fast_forward_index_keeps_staged_additions`) | partial |
 | t6411-merge-filemode.sh | mode-only add/add conflicts | `merge_ort_git_compat.rs` (`t6411_filemode_merge_matches_git`) | covered |

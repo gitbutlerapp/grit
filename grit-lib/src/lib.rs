@@ -240,6 +240,7 @@ pub(crate) mod mailmap;
 pub mod maintenance;
 pub(crate) mod merge_base;
 pub(crate) mod merge_diff;
+pub(crate) mod merge_driver;
 pub(crate) mod merge_file;
 pub(crate) mod merge_trees;
 pub(crate) mod midx;
