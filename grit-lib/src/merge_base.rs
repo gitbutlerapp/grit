@@ -1725,7 +1725,9 @@ const PAINT_BOTH: u8 = PAINT_LEFT | PAINT_RIGHT;
 /// first, marking each commit with the sides that reach it. The walk stops once
 /// every queued commit is reachable from both sides: everything below that
 /// frontier is common history. Commits never painted are therefore reachable
-/// from both sides (or from neither).
+/// from both sides (or from neither). A hiding paint ([`Self::compute_hiding`])
+/// stops earlier, once nothing reachable from the left side alone is queued, so an
+/// unpainted commit reachable from the left side is reachable from the right side.
 ///
 /// With commit-graph generations the result is exact; for commits outside the
 /// graph, ordering falls back to committer dates like Git does.
@@ -1752,6 +1754,12 @@ impl SidePaint {
     /// commits, a missing object reached from `hide` is skipped rather than an error: it is
     /// hidden whatever lies behind it.
     ///
+    /// Only the left side's answer matters here (is a commit reachable from `tips` also
+    /// reachable from `hide`?), so commits reachable from `hide` alone do not keep the walk
+    /// going: it stops once every commit reachable only from `tips` is painted, plus the guard
+    /// described on [`PaintWalk::hide_may_still_reach_left`]. With an old tag among `hide`,
+    /// the walk therefore ends near the tips instead of at the tag.
+    ///
     /// # Errors
     ///
     /// Propagates commit read and parse errors for commits not reached from `hide`.
@@ -1762,6 +1770,7 @@ impl SidePaint {
     ) -> Result<Self> {
         let walk = PaintWalk {
             skip_missing_right: true,
+            close_right_only: true,
             ..PaintWalk::default()
         };
         Self::paint(cache, tips, hide, walk)
@@ -1781,7 +1790,13 @@ impl SidePaint {
                 walk.mark(cache, tip, side)?;
             }
         }
-        while walk.open > 0 {
+        let mut slop = PAINT_SLOP;
+        loop {
+            if walk.open > 0 {
+                slop = PAINT_SLOP;
+            } else if !walk.hide_may_still_reach_left(&mut slop) {
+                break;
+            }
             let Some(node) = walk.heap.pop() else {
                 break;
             };
@@ -1790,6 +1805,10 @@ impl SidePaint {
             }
             walk.popped.insert(node.oid);
             let side = walk.sides.get(&node.oid).copied().unwrap_or(0);
+            if walk.close_right_only && side == PAINT_LEFT {
+                let key = (node.rank, node.committed_at);
+                walk.left_floor = Some(walk.left_floor.map_or(key, |floor| floor.min(key)));
+            }
             for parent in cache.parents_of(node.oid)? {
                 walk.mark(cache, parent, side)?;
             }
@@ -1825,6 +1844,12 @@ impl SidePaint {
     }
 }
 
+/// Extra commits a hiding paint pops once nothing reachable only from its tips is left
+/// queued, so a hide-side commit dated slightly before an ancestor it reaches (clock skew)
+/// still repaints that ancestor. Git's `rev-list` keeps walking a few commits past its
+/// "everything left is uninteresting" point for the same reason.
+const PAINT_SLOP: usize = 5;
+
 /// Queue state for [`SidePaint::compute`].
 #[derive(Default)]
 struct PaintWalk {
@@ -1838,15 +1863,55 @@ struct PaintWalk {
     open: usize,
     /// Leave unreadable commits reached from the right side unqueued instead of failing.
     skip_missing_right: bool,
+    /// Hiding paint: only commits reachable from the left side alone keep the walk going.
+    close_right_only: bool,
+    /// Hiding paint: lowest heap key (rank, date) popped while reachable from the left
+    /// side only.
+    left_floor: Option<(u64, i64)>,
 }
 
 impl PaintWalk {
+    /// Whether a commit painted `paint` (and not yet popped) keeps the walk going.
+    fn keeps_open(&self, paint: u8) -> bool {
+        if self.close_right_only {
+            paint == PAINT_LEFT
+        } else {
+            paint != PAINT_BOTH
+        }
+    }
+
+    /// Hiding paint, once no left-only commit is queued: whether a queued hide-side commit
+    /// may still reach a commit popped as left-only, so the walk must continue.
+    ///
+    /// With commit-graph generations the heap order already guarantees it cannot (a
+    /// descendant ranks strictly higher than its ancestors and is popped first). For
+    /// commits outside the graph the order is by committer date, so the walk continues
+    /// while the next queued commit is not older than the oldest left-only commit popped,
+    /// then for [`PAINT_SLOP`] more commits to tolerate skewed dates.
+    fn hide_may_still_reach_left(&self, slop: &mut usize) -> bool {
+        if !self.close_right_only {
+            return false;
+        }
+        let (Some(floor), Some(next)) = (self.left_floor, self.heap.peek()) else {
+            return false;
+        };
+        if (next.rank, next.committed_at) >= floor {
+            return true;
+        }
+        if *slop == 0 {
+            return false;
+        }
+        *slop -= 1;
+        true
+    }
+
     /// Add `side` to `oid`, queueing it when its paint grows.
     ///
-    /// A queued commit keeps the walk going while it is not reachable from both
-    /// sides, or when it was already popped: a commit popped before the other
-    /// side reached it (equal or skewed dates) has to pass the new side on to
-    /// the ancestors it already painted.
+    /// A queued commit keeps the walk going while its paint is still open (see
+    /// [`Self::keeps_open`]), or when it was already popped: a commit popped before
+    /// the other side reached it (equal or skewed dates) has to pass the new side
+    /// on to the ancestors it already painted. A hiding paint only needs to pass on
+    /// the right side.
     fn mark(&mut self, cache: &mut CommitGraphCache<'_>, oid: ObjectId, side: u8) -> Result<()> {
         let before = self.sides.get(&oid).copied().unwrap_or(0);
         let after = before | side;
@@ -1854,9 +1919,12 @@ impl PaintWalk {
             return Ok(());
         }
         self.sides.insert(oid, after);
-        let repaint = self.popped.contains(&oid);
+        let gained = after & !before;
+        let repaint =
+            self.popped.contains(&oid) && (!self.close_right_only || gained & PAINT_RIGHT != 0);
+        let open_paint = self.keeps_open(after);
         if let Some(is_open) = self.queued.get_mut(&oid) {
-            if *is_open && after == PAINT_BOTH && !repaint {
+            if *is_open && !open_paint && !repaint {
                 *is_open = false;
                 self.open -= 1;
             }
@@ -1872,7 +1940,7 @@ impl PaintWalk {
             }
             Err(e) => return Err(e),
         };
-        let is_open = after != PAINT_BOTH || repaint;
+        let is_open = open_paint || repaint;
         self.queued.insert(oid, is_open);
         if is_open {
             self.open += 1;
@@ -3522,6 +3590,181 @@ mod tests {
             (side, graphed_tip),
         ] {
             assert_eq!(walk(a, d)?, is_ancestor_odb_walk(&q_odb, a, d)?);
+        }
+        Ok(())
+    }
+
+    /// `HEAD~1 --not` an old tag on a deep linear history: the "undo the last commit" shape.
+    /// Returns the bare repo, the new tip, its parent and the old commit.
+    fn deep_history_with_old_hide_tip(
+        dir: &tempfile::TempDir,
+        depth: i64,
+    ) -> Result<(Repository, ObjectId, ObjectId, ObjectId)> {
+        let repo = open_test_bare(dir)?;
+        let odb = repo.odb();
+        let mut parent = write_commit_same_time(&odb, &[], "root", 1_000)?;
+        let mut old = parent;
+        for i in 1..depth {
+            parent = write_commit_same_time(&odb, &[parent], &format!("c{i}"), 1_000 + i)?;
+            if i == 3 {
+                old = parent;
+            }
+        }
+        let tip = write_commit_same_time(&odb, &[parent], "wip", 1_000 + depth)?;
+        Ok((repo, tip, parent, old))
+    }
+
+    #[test]
+    fn hiding_paint_stops_near_tips_despite_an_old_hide_tip() -> Result<()> {
+        let dir = tempdir().map_err(Error::Io)?;
+        let (repo, tip, parent, old) = deep_history_with_old_hide_tip(&dir, 3_000)?;
+        let hide = [parent, old];
+
+        let mut cache = CommitGraphCache::new(&repo);
+        let paint = SidePaint::compute_hiding(&mut cache, &[tip], &hide)?;
+        assert!(
+            paint.sides.len() <= 2 + 2 * PAINT_SLOP,
+            "hiding paint must not walk down to the old hide tip; painted {} commits",
+            paint.sides.len()
+        );
+        assert_eq!(paint.reached_by(tip, PAINT_RIGHT), Some(false));
+        assert_eq!(paint.reached_by(parent, PAINT_RIGHT), Some(true));
+
+        let full = SidePaint::compute(&mut cache, &[tip], &hide)?;
+        assert!(
+            full.sides.len() > 2_900,
+            "the two-sided paint still meets both sides"
+        );
+
+        let (total, commits) = walk_commits_reachable_excluding_ancestors_of(
+            &repo,
+            &[tip],
+            &hide,
+            ReachableWalkLimit::Unlimited,
+        )?;
+        assert_eq!((total, commits), (1, vec![tip]));
+        Ok(())
+    }
+
+    #[test]
+    fn hiding_paint_with_commit_graph_stops_near_tips() -> Result<()> {
+        let dir = tempdir().map_err(Error::Io)?;
+        let (repo, tip, parent, old) = deep_history_with_old_hide_tip(&dir, 3_000)?;
+        fs::write(repo.git_dir().join("refs/heads/main"), format!("{tip}\n")).map_err(Error::Io)?;
+        repo.odb().write_commit_graph()?;
+        let repo = Repository::open(dir.path(), &RepositoryOptions::empty())?;
+
+        let mut cache = CommitGraphCache::new(&repo);
+        assert_ne!(commit_rank_for_walk(&mut cache, old), UNRANKED_COMMIT);
+        let paint = SidePaint::compute_hiding(&mut cache, &[tip], &[parent, old])?;
+        assert!(
+            paint.sides.len() <= 2 + 2 * PAINT_SLOP,
+            "painted {} commits",
+            paint.sides.len()
+        );
+        assert_eq!(paint.reached_by(tip, PAINT_RIGHT), Some(false));
+        Ok(())
+    }
+
+    #[test]
+    fn hiding_paint_repaints_a_left_commit_reached_by_an_older_dated_hide_chain() -> Result<()> {
+        let dir = tempdir().map_err(Error::Io)?;
+        let repo = open_test_bare(&dir)?;
+        let odb = repo.odb();
+        // `shared` is a root dated after every commit of the hide chain that reaches it, so
+        // the walk pops it as left-only before the hide side arrives.
+        let shared = write_commit_same_time(&odb, &[], "shared", 5_000)?;
+        let tip = write_commit_same_time(&odb, &[shared], "tip", 6_000)?;
+        let mut hide_tip = shared;
+        for i in 0..3 {
+            hide_tip = write_commit_same_time(&odb, &[hide_tip], &format!("h{i}"), 1_000 + i)?;
+        }
+        let (total, commits) = walk_commits_reachable_excluding_ancestors_of(
+            &repo,
+            &[tip],
+            &[hide_tip],
+            ReachableWalkLimit::Unlimited,
+        )?;
+        assert_eq!((total, commits), (1, vec![tip]));
+        Ok(())
+    }
+
+    #[test]
+    fn hiding_walk_with_commit_graph_matches_exhaustive_reachability_under_skew() -> Result<()> {
+        let mut state = 0x9e37_79b9_7f4a_7c15_u64;
+        let mut next = move |bound: usize| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            usize::try_from(state % bound as u64).unwrap_or_default()
+        };
+        for round in 0..4 {
+            let dir = tempdir().map_err(Error::Io)?;
+            let repo = open_test_bare(&dir)?;
+            let odb = repo.odb();
+            let mut commits: Vec<ObjectId> = Vec::new();
+            let mut parents_of: Vec<Vec<usize>> = Vec::new();
+            for i in 0..60 {
+                let mut parents = Vec::new();
+                if i > 0 && next(10) != 0 {
+                    parents.push(next(i));
+                    if next(3) == 0 {
+                        let other = next(i);
+                        if !parents.contains(&other) {
+                            parents.push(other);
+                        }
+                    }
+                }
+                let parent_oids: Vec<ObjectId> = parents.iter().map(|&p| commits[p]).collect();
+                let time = 1_000_000 + i64::try_from(next(5_000)).unwrap_or_default();
+                commits.push(write_commit_same_time(
+                    &odb,
+                    &parent_oids,
+                    &format!("r{round}c{i}"),
+                    time,
+                )?);
+                parents_of.push(parents);
+            }
+            for (n, oid) in commits.iter().enumerate() {
+                fs::write(
+                    repo.git_dir().join(format!("refs/heads/b{n}")),
+                    format!("{oid}\n"),
+                )
+                .map_err(Error::Io)?;
+            }
+            odb.write_commit_graph()?;
+            let repo = Repository::open(dir.path(), &RepositoryOptions::empty())?;
+
+            let ancestors = |from: usize| {
+                let mut seen = vec![false; parents_of.len()];
+                let mut stack = vec![from];
+                while let Some(n) = stack.pop() {
+                    if !std::mem::replace(&mut seen[n], true) {
+                        stack.extend(&parents_of[n]);
+                    }
+                }
+                seen
+            };
+            for _ in 0..40 {
+                let tip = next(commits.len());
+                let hide: Vec<usize> = (0..1 + next(4)).map(|_| next(commits.len())).collect();
+                let reach = ancestors(tip);
+                let hidden: Vec<Vec<bool>> = hide.iter().map(|&h| ancestors(h)).collect();
+                let mut expected: Vec<ObjectId> = (0..commits.len())
+                    .filter(|&n| reach[n] && !hidden.iter().any(|h| h[n]))
+                    .map(|n| commits[n])
+                    .collect();
+                let hide_oids: Vec<ObjectId> = hide.iter().map(|&h| commits[h]).collect();
+                let (_, mut got) = walk_commits_reachable_excluding_ancestors_of(
+                    &repo,
+                    &[commits[tip]],
+                    &hide_oids,
+                    ReachableWalkLimit::Unlimited,
+                )?;
+                expected.sort_unstable();
+                got.sort_unstable();
+                assert_eq!(got, expected, "round {round}: {tip} --not {hide:?}");
+            }
         }
         Ok(())
     }
