@@ -599,6 +599,55 @@ fn sha1_packed_refs_fifty_byte_last_record_matches_git() {
     }
 }
 
+/// A `sorted` header is trusted like Git trusts it: lookups binary-search the file even when
+/// its records are out of order, so grit finds exactly the refs git finds. (`fsck` reports
+/// such a file; see `refs_fsck_coverage`.)
+#[test]
+fn lying_sorted_header_lookups_match_git() {
+    let repo = files_repo();
+    let wt = wt_path(&repo);
+    let git_dir = git_dir(&repo);
+    let head = git_empty_commit_oid(wt).to_hex();
+    let names = [
+        "refs/heads/main",
+        "refs/heads/d",
+        "refs/heads/a",
+        "refs/heads/c",
+        "refs/heads/b",
+        "refs/tags/z",
+        "refs/tags/m",
+    ];
+    let mut content = String::from("# pack-refs with: peeled fully-peeled sorted \n");
+    for name in names {
+        content.push_str(&format!("{head} {name}\n"));
+    }
+    write_packed_refs(&git_dir, &content);
+    fs::remove_file(git_dir.join("refs/heads/main")).ok();
+
+    let mut found = 0;
+    for name in names.iter().chain(&["refs/heads/e", "refs/tags/a"]) {
+        let git_out = std::process::Command::new("git")
+            .current_dir(wt)
+            .args(["rev-parse", "--verify", "-q", name])
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_SYSTEM", "/dev/null")
+            .output()
+            .expect("git rev-parse");
+        let git_oid = git_out
+            .status
+            .success()
+            .then(|| String::from_utf8_lossy(&git_out.stdout).trim().to_owned());
+        let grit_oid = resolve_ref(&git_dir, name).ok().map(|oid| oid.to_hex());
+        assert_eq!(grit_oid, git_oid, "{name}");
+        found += usize::from(git_oid.is_some());
+    }
+    assert!(
+        found < names.len(),
+        "the fixture must hide some refs from a binary search"
+    );
+    assert!(found > 0);
+}
+
 /// Git does not require ref names to be UTF-8. A tag whose name is not only breaks the grit
 /// reads that cover it; branches and lookups elsewhere in a sorted file match git.
 #[test]

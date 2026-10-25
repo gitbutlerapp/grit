@@ -934,12 +934,13 @@ fn parse_packed_ref_data_line_borrowed<'a>(
 #[derive(Debug, Clone)]
 pub(crate) struct PackedRefsFileView {
     data: std::sync::Arc<crate::pack_map::PackData>,
-    /// Records are indexed in nondecreasing name order, so binary search over them is exact.
+    /// The header declares the `sorted` trait, so lookups and prefix scans binary-search the
+    /// bytes in place. Like Git, the claim is trusted; `fsck` reports a file that breaks it.
     sorted: bool,
     /// Hex length of the repository's object ids; the refname starts one byte after it.
     hex_len: usize,
-    /// Starts of the well-formed records (`<hex id> <name>`) in file order, shared by clones.
-    data_line_starts: std::sync::Arc<Vec<usize>>,
+    /// Offset just past the first line when it is a comment (the header), else 0.
+    body_start: usize,
     /// Which records the header promises a peel line for.
     peel_trait: PackedPeelTrait,
 }
@@ -951,13 +952,14 @@ impl PackedRefsFileView {
         Self::from_data(path, crate::pack_map::PackData::from_owned(data), hash_algo)
     }
 
-    /// Index `data`, the (possibly memory-mapped) bytes of `path`, for a repository using
+    /// View `data`, the (possibly memory-mapped) bytes of `path`, for a repository using
     /// `hash_algo`.
     ///
-    /// Rejects what Git rejects before any lookup: carriage returns, a missing final newline,
-    /// and a last line (after the header) too short to hold an object id. Only records with
-    /// an id-sized prefix and a space are indexed; a file that declares `sorted` but whose
-    /// indexed names are out of order is treated as unsorted.
+    /// Checks only what Git checks before any lookup: a final newline, a last line (after
+    /// the header) long enough to hold an object id, and here also a UTF-8 header. Opening
+    /// reads the header and the last line, nothing in between; each scan and lookup parses
+    /// the lines it reaches. Records are the lines with an id-sized prefix, a space and a
+    /// name.
     fn from_data(
         path: &Path,
         data: std::sync::Arc<crate::pack_map::PackData>,
@@ -969,15 +971,9 @@ impl PackedRefsFileView {
                 data,
                 sorted: false,
                 hex_len,
-                data_line_starts: Default::default(),
+                body_start: 0,
                 peel_trait: PackedPeelTrait::None,
             });
-        }
-        if memchr::memchr(b'\r', &data).is_some() {
-            return Err(packed_refs_unexpected_line(
-                path,
-                "<contains carriage return>",
-            ));
         }
         if !data.ends_with(b"\n") {
             let tail = std::str::from_utf8(&data)
@@ -1006,17 +1002,16 @@ impl PackedRefsFileView {
                 ));
             }
         }
-        let (data_line_starts, in_order) = packed_refs_data_line_starts(&data, hex_len);
         Ok(Self {
-            sorted: in_order && packed_refs_file_declares_sorted(text),
+            sorted: packed_refs_file_declares_sorted(text),
             hex_len,
-            data_line_starts: std::sync::Arc::new(data_line_starts),
+            body_start,
             peel_trait: packed_refs_peel_trait(text),
             data,
         })
     }
 
-    /// The name of the indexed record at `line_start`: everything after `<hex id> `.
+    /// The name of the record at `line_start`: everything after `<hex id> `.
     fn record_name(&self, line_start: usize) -> &[u8] {
         let end = packed_line_end(&self.data, line_start);
         &self.data[line_start + self.hex_len + 1..end]
@@ -1026,10 +1021,81 @@ impl PackedRefsFileView {
         self.record_name(line_start).cmp(name.as_bytes())
     }
 
-    /// Index of the first indexed record whose name is not less than `name`.
+    /// Start of the first record beginning at or after the line start `from` and before
+    /// `limit`.
+    fn next_record(&self, from: usize, limit: usize) -> Option<usize> {
+        let hex_len = self.hex_len;
+        let mut start = from;
+        while start < limit {
+            let rest = &self.data[start..];
+            // A peel line (`^`, an id, a newline) needs no search: any line starting inside
+            // it ends at that newline, too short to be a record.
+            if rest[0] == b'^' && rest.get(hex_len + 1) == Some(&b'\n') {
+                start += hex_len + 2;
+                continue;
+            }
+            let end = memchr::memchr(b'\n', rest).unwrap_or(rest.len());
+            if packed_line_is_record(&rest[..end], hex_len) {
+                return Some(start);
+            }
+            start += end + 1;
+        }
+        None
+    }
+
+    /// Start of the last record beginning before the line start `before`.
+    fn prev_record(&self, before: usize) -> Option<usize> {
+        let mut end = before;
+        while end > 0 {
+            let line_end = end - 1;
+            let start = memchr::memrchr(b'\n', &self.data[..line_end]).map_or(0, |nl| nl + 1);
+            if packed_line_is_record(&self.data[start..line_end], self.hex_len) {
+                return Some(start);
+            }
+            end = start;
+        }
+        None
+    }
+
+    /// Starts of every record, in file order.
+    fn records(&self) -> impl Iterator<Item = usize> + '_ {
+        let len = self.data.len();
+        std::iter::successors(self.next_record(0, len), move |&start| {
+            self.next_record(packed_line_end(&self.data, start) + 1, len)
+        })
+    }
+
+    /// Binary search of a sorted file for `name`: `Ok` with the start of a record named
+    /// `name`, else `Err` with the start of the first record after every record found
+    /// smaller (the file length when there is none).
+    ///
+    /// Each probe takes the first record starting on or after the line holding the midpoint,
+    /// so the search only reads the lines it probes. In a file whose records really are in
+    /// order the answer is exact; otherwise it is whatever the probes lead to, as in Git.
+    fn search(&self, name: &str) -> std::result::Result<usize, usize> {
+        let len = self.data.len();
+        let mut lo = self.body_start;
+        let mut hi = len;
+        while lo < hi {
+            let mid = lo + (hi - lo) / 2;
+            let line = memchr::memrchr(b'\n', &self.data[lo..mid]).map_or(lo, |nl| lo + nl + 1);
+            let Some(record) = self.next_record(line, hi) else {
+                hi = line;
+                continue;
+            };
+            match self.record_cmp(record, name) {
+                std::cmp::Ordering::Less => lo = packed_line_end(&self.data, record) + 1,
+                std::cmp::Ordering::Greater => hi = record,
+                std::cmp::Ordering::Equal => return Ok(record),
+            }
+        }
+        Err(self.next_record(lo, len).unwrap_or(len))
+    }
+
+    /// Start of the first record of a sorted file not less than `name` (or the file length).
     fn lower_bound(&self, name: &str) -> usize {
-        self.data_line_starts
-            .partition_point(|&start| self.record_cmp(start, name).is_lt())
+        let (Ok(start) | Err(start)) = self.search(name);
+        start
     }
 
     /// Object id stored for `refname`, and optional peeled tag target from the following `^` line.
@@ -1044,14 +1110,9 @@ impl PackedRefsFileView {
             normalize: false,
         };
         let line_start = if self.sorted {
-            self.data_line_starts
-                .get(self.lower_bound(refname))
-                .copied()
-                .filter(|&start| self.record_cmp(start, refname).is_eq())
+            self.search(refname).ok()
         } else {
-            self.data_line_starts
-                .iter()
-                .copied()
+            self.records()
                 .find(|&start| self.record_cmp(start, refname).is_eq())
         };
         let Some(start) = line_start else {
@@ -1092,7 +1153,7 @@ impl PackedRefsFileView {
     ///
     /// Every line the scan covers is parsed strictly, peel and comment lines included. In a
     /// sorted file a prefix scan covers the binary-searched range of matching records plus
-    /// whatever lies between them and the indexed records on either side, so a corrupt line
+    /// whatever lies between them and the records on either side, so a corrupt line
     /// in or next to the range is reported rather than skipped. Like Git, it does not read
     /// records further away. Scans without a prefix, of all of `refs/`, or of an unsorted
     /// file cover the whole file.
@@ -1114,33 +1175,27 @@ impl PackedRefsFileView {
     ) -> Result<HashMap<String, ObjectId>> {
         let prefix_trim = prefix.map(|p| p.trim_end_matches('/'));
         let range_prefix = prefix_trim.filter(|p| self.sorted && !p.is_empty() && *p != "refs");
-        let (lo, hi) = match range_prefix {
-            Some(prefix) => (
-                self.lower_bound(prefix),
-                list_prefix_upper_bound(prefix).map_or(self.data_line_starts.len(), |upper| {
-                    self.lower_bound(&upper)
-                }),
-            ),
-            None => (0, self.data_line_starts.len()),
-        };
-        // Start after the record before the range and its peel line (which belongs to that
-        // record), so anything else up to the first record in range is checked.
-        let begin = match lo.checked_sub(1) {
-            Some(prev) => {
-                let after = packed_line_end(&self.data, self.data_line_starts[prev]) + 1;
-                if self.data.get(after) == Some(&b'^') {
-                    packed_line_end(&self.data, after) + 1
-                } else {
-                    after
-                }
+        let (begin, end) = match range_prefix {
+            Some(prefix) => {
+                let first = self.lower_bound(prefix);
+                // In a file whose records are out of order the bounds can cross.
+                let end = list_prefix_upper_bound(prefix)
+                    .map_or(self.data.len(), |upper| self.lower_bound(&upper))
+                    .max(first);
+                // Start after the record before the range and its peel line (which belongs to
+                // that record), so anything else up to the first record in range is checked.
+                let begin = self.prev_record(first).map_or(0, |prev| {
+                    let after = packed_line_end(&self.data, prev) + 1;
+                    if self.data.get(after) == Some(&b'^') {
+                        packed_line_end(&self.data, after) + 1
+                    } else {
+                        after
+                    }
+                });
+                (begin, end)
             }
-            None => 0,
+            None => (0, self.data.len()),
         };
-        let end = self
-            .data_line_starts
-            .get(hi)
-            .copied()
-            .unwrap_or(self.data.len());
         // Both bounds are line starts or the end of the file, so the region is whole lines.
         let region = std::str::from_utf8(&self.data[begin..end])
             .map_err(|_| packed_refs_unexpected_line(path, "<invalid utf-8>"))?;
@@ -1253,33 +1308,10 @@ fn read_packed_refs_file_view(store: &Path) -> Result<Option<PackedRefsFileView>
     )?))
 }
 
-/// Starts of the lines shaped like a record (`hex_len` bytes, a space, a non-empty name), and
-/// whether their names are in nondecreasing order. Other lines are left for the strict parse.
-fn packed_refs_data_line_starts(data: &[u8], hex_len: usize) -> (Vec<usize>, bool) {
-    // A record takes at least an id, a space, one name byte and a newline, so this bounds the
-    // record count and the index never regrows.
-    let mut out = Vec::with_capacity(data.len() / (hex_len + 3) + 1);
-    let mut in_order = true;
-    let mut prev_name: &[u8] = &[];
-    let mut start = 0usize;
-    while let Some(rest) = data.get(start..).filter(|rest| !rest.is_empty()) {
-        // A peel line (`^`, an id, a newline) needs no search: any line starting inside it
-        // ends at that newline, too short to be a record.
-        if rest[0] == b'^' && rest.get(hex_len + 1) == Some(&b'\n') {
-            start += hex_len + 2;
-            continue;
-        }
-        let end = memchr::memchr(b'\n', rest).unwrap_or(rest.len());
-        let line = &rest[..end];
-        if line.len() > hex_len + 1 && line[hex_len] == b' ' && !matches!(line[0], b'#' | b'^') {
-            let name = &line[hex_len + 1..];
-            in_order &= prev_name <= name;
-            prev_name = name;
-            out.push(start);
-        }
-        start += end + 1;
-    }
-    (out, in_order)
+/// Whether `line` (without its newline) is shaped like a record: `hex_len` bytes, a space and
+/// a non-empty name. Other lines are left for the strict parse.
+fn packed_line_is_record(line: &[u8], hex_len: usize) -> bool {
+    line.len() > hex_len + 1 && line[hex_len] == b' ' && !matches!(line[0], b'#' | b'^')
 }
 
 fn packed_line_end(data: &[u8], line_start: usize) -> usize {
@@ -1491,7 +1523,7 @@ impl PackedPeelTrait {
 /// objects when `packed-refs` already records the peeled value, the same shortcut
 /// Git takes when iterating packed refs.
 ///
-/// Lookups trust the record shape indexed by [`PackedRefsFileView`] and skip the strict
+/// Lookups trust the record shape found by [`PackedRefsFileView`] and skip the strict
 /// per-line validation: callers pair this with a ref listing that already parsed the
 /// file strictly.
 pub(crate) struct PackedRefPeels {
@@ -1499,8 +1531,8 @@ pub(crate) struct PackedRefPeels {
     /// Record start by name for unsorted files, where binary search is not exact.
     unsorted: Option<HashMap<Box<[u8]>, usize>>,
     peel_trait: PackedPeelTrait,
-    /// Record index just past the last hit in a sorted file, so lookups made in name order
-    /// (a ref listing) are answered without a binary search.
+    /// Start of the record after the last hit in a sorted file (or the file length), so
+    /// lookups made in name order (a ref listing) are answered without a binary search.
     next: std::cell::Cell<usize>,
 }
 
@@ -1552,16 +1584,18 @@ impl PackedRefPeels {
             return empty;
         }
         let unsorted = (!view.sorted).then(|| {
-            view.data_line_starts
-                .iter()
-                .map(|&start| (Box::<[u8]>::from(view.record_name(start)), start))
+            view.records()
+                .map(|start| (Box::<[u8]>::from(view.record_name(start)), start))
                 .collect()
         });
+        let first = view
+            .next_record(view.body_start, view.data.len())
+            .unwrap_or(view.data.len());
         Self {
             view: Some(view),
             unsorted,
             peel_trait,
-            next: std::cell::Cell::new(0),
+            next: std::cell::Cell::new(first),
         }
     }
 
@@ -1584,17 +1618,15 @@ impl PackedRefPeels {
         let start = match &self.unsorted {
             Some(map) => *map.get(refname.as_bytes())?,
             None => {
+                let len = view.data.len();
                 let hint = self.next.get();
-                let idx = match view.data_line_starts.get(hint) {
-                    Some(&start) if view.record_cmp(start, refname).is_eq() => hint,
-                    _ => view.lower_bound(refname),
+                let start = if hint < len && view.record_cmp(hint, refname).is_eq() {
+                    hint
+                } else {
+                    view.search(refname).ok()?
                 };
-                let start = view
-                    .data_line_starts
-                    .get(idx)
-                    .copied()
-                    .filter(|&start| view.record_cmp(start, refname).is_eq())?;
-                self.next.set(idx + 1);
+                let after = packed_line_end(&view.data, start) + 1;
+                self.next.set(view.next_record(after, len).unwrap_or(len));
                 start
             }
         };
@@ -5227,36 +5259,55 @@ mod packed_refs_parse_tests {
     }
 
     #[test]
-    fn sorted_trait_is_ignored_when_names_are_out_of_order() {
+    fn sorted_trait_is_trusted_even_when_names_are_out_of_order() {
         let dir = tempdir().unwrap();
         let path = store::paths::packed_refs_path(dir.path());
         let oid = "1111111111111111111111111111111111111111";
-        let view = PackedRefsFileView::from_bytes(
-            &path,
-            format!(
-                "# pack-refs with: peeled fully-peeled sorted\n\
-                 {oid} refs/heads/b\n{oid} refs/heads/a\n{oid} refs/tags/t\n"
+        let records = format!("{oid} refs/heads/b\n{oid} refs/heads/a\n{oid} refs/tags/t\n");
+        let view_of = |header: &str| {
+            PackedRefsFileView::from_bytes(
+                &path,
+                format!("{header}{records}").into_bytes(),
+                HashAlgo::Sha1,
             )
-            .into_bytes(),
-            HashAlgo::Sha1,
-        )
-        .unwrap();
-        assert!(!view.sorted);
-        let heads = view.map_for_prefix(&path, Some("refs/heads")).unwrap();
+            .unwrap()
+        };
+
+        let lying = view_of("# pack-refs with: peeled fully-peeled sorted\n");
+        assert!(lying.sorted);
+        // The search probes `refs/heads/a` first, then moves right past it.
+        assert!(lying.lookup_oid(&path, "refs/heads/a").unwrap().is_some());
+        assert_eq!(lying.lookup_oid(&path, "refs/heads/b").unwrap(), None);
+        let heads = lying.map_for_prefix(&path, Some("refs/heads")).unwrap();
         assert_eq!(heads.len(), 2);
-        assert!(view.lookup_oid(&path, "refs/heads/a").unwrap().is_some());
+
+        let unsorted = view_of("# pack-refs with: peeled fully-peeled\n");
+        assert!(!unsorted.sorted);
+        for name in ["refs/heads/a", "refs/heads/b", "refs/tags/t"] {
+            assert!(
+                unsorted.lookup_oid(&path, name).unwrap().is_some(),
+                "{name}"
+            );
+        }
     }
 
     #[test]
-    fn line_index_keeps_only_record_shaped_lines() {
-        let data = b"# header\nAAA x\n^peel\n\nBBB y\n#c\nshort\nCCCz\nDDD z";
-        let (starts, in_order) = packed_refs_data_line_starts(data, 3);
-        assert_eq!(starts, [9, 22, 42]);
-        assert!(in_order);
-        assert_eq!(packed_refs_data_line_starts(b"", 3), (Vec::new(), true));
-        let (starts, in_order) = packed_refs_data_line_starts(b"AAA b\nAAA a\n", 3);
-        assert_eq!(starts, [0, 6]);
-        assert!(!in_order);
+    fn records_are_only_record_shaped_lines() {
+        let dir = tempdir().unwrap();
+        let path = store::paths::packed_refs_path(dir.path());
+        let view = |data: &[u8]| {
+            PackedRefsFileView::from_bytes(&path, data.to_vec(), HashAlgo::Sha1).unwrap()
+        };
+        let hex = "1".repeat(40);
+        let data = format!("# header\n{hex} x\n^peel\n\n{hex} y\n#c\nshort\n{hex}z\n{hex} z\n");
+        let starts: Vec<usize> = view(data.as_bytes()).records().collect();
+        assert_eq!(starts, [9, 59, 153]);
+        assert_eq!(view(b"").records().count(), 0);
+        let out_of_order = format!("{hex} b\n{hex} a\n");
+        assert_eq!(
+            view(out_of_order.as_bytes()).records().collect::<Vec<_>>(),
+            [0, 43]
+        );
     }
 
     #[test]
@@ -5523,9 +5574,14 @@ mod packed_ref_peels_tests {
                 ("refs/tags/v1", oid(4), Some(oid(1))),
                 ("refs/tags/light", oid(1), None),
             ];
-            let mut unsorted = records;
-            unsorted.reverse();
-            let (_dir, peels) = peels_for(&body(header, &unsorted));
+            // A `sorted` header is trusted, so only the file without it is written out of order.
+            let mut ordered = records;
+            if header.contains(" sorted") {
+                ordered.sort_by_key(|(name, _, _)| *name);
+            } else {
+                ordered.reverse();
+            }
+            let (_dir, peels) = peels_for(&body(header, &ordered));
             assert_eq!(peels.peeled("refs/heads/main", &oid(1)), Some(None));
             assert_eq!(
                 peels.peeled("refs/remotes/origin/tag-ish", &oid(2)),
@@ -5645,10 +5701,6 @@ mod packed_ref_peels_tests {
             .expect("packed-refs");
         let shared = peels.view.as_ref().expect("snapshot view");
         assert!(std::sync::Arc::ptr_eq(&cached.data, &shared.data));
-        assert!(std::sync::Arc::ptr_eq(
-            &cached.data_line_starts,
-            &shared.data_line_starts
-        ));
 
         let rewritten = [
             ("refs/heads/main", oid(1), None),
@@ -5674,30 +5726,66 @@ mod packed_ref_peels_tests {
         }
     }
 
-    /// Reference implementation of [`packed_refs_data_line_starts`], one line at a time.
-    fn naive_line_starts(data: &[u8], hex_len: usize) -> (Vec<usize>, bool) {
+    /// View over raw bytes, without the checks [`PackedRefsFileView::from_data`] makes.
+    fn raw_view(data: &[u8], hex_len: usize) -> PackedRefsFileView {
+        PackedRefsFileView {
+            data: crate::pack_map::PackData::from_owned(data.to_vec()),
+            sorted: true,
+            hex_len,
+            body_start: 0,
+            peel_trait: PackedPeelTrait::None,
+        }
+    }
+
+    /// Reference record scan: the start of every record-shaped line, one line at a time.
+    fn naive_record_starts(data: &[u8], hex_len: usize) -> Vec<usize> {
         let mut out = Vec::new();
-        let mut in_order = true;
-        let mut prev: &[u8] = &[];
         let mut start = 0;
         for line in data.split(|&b| b == b'\n') {
             if start >= data.len() {
                 break;
             }
-            if line.len() > hex_len + 1 && line[hex_len] == b' ' && !matches!(line[0], b'#' | b'^')
-            {
-                let name = &line[hex_len + 1..];
-                in_order &= prev <= name;
-                prev = name;
+            if packed_line_is_record(line, hex_len) {
                 out.push(start);
             }
             start += line.len() + 1;
         }
-        (out, in_order)
+        out
+    }
+
+    fn assert_record_walks_match(data: &[u8], hex_len: usize) {
+        let view = raw_view(data, hex_len);
+        let want = naive_record_starts(data, hex_len);
+        assert_eq!(
+            view.records().collect::<Vec<_>>(),
+            want,
+            "{:?} hex_len={hex_len}",
+            String::from_utf8_lossy(data)
+        );
+        let mut line_starts: Vec<usize> = memchr::memchr_iter(b'\n', data)
+            .map(|nl| nl + 1)
+            .filter(|&s| s < data.len())
+            .collect();
+        line_starts.insert(0, 0);
+        // Views always end in a newline, so the end is only a line start when it follows one.
+        if data.ends_with(b"\n") {
+            line_starts.push(data.len());
+        }
+        for before in line_starts {
+            let prev = want.iter().copied().filter(|&s| s < before).last();
+            assert_eq!(view.prev_record(before), prev, "{data:?} before={before}");
+        }
+    }
+
+    fn xorshift(state: &mut u64) -> u64 {
+        *state ^= *state << 13;
+        *state ^= *state >> 7;
+        *state ^= *state << 17;
+        *state
     }
 
     #[test]
-    fn data_line_starts_match_a_line_by_line_scan() {
+    fn record_walks_match_a_line_by_line_scan() {
         let hex = oid(1).to_hex();
         let inputs = [
             String::new(),
@@ -5713,33 +5801,61 @@ mod packed_ref_peels_tests {
             format!("^{}", &hex[1..]),
         ];
         for input in &inputs {
-            assert_eq!(
-                packed_refs_data_line_starts(input.as_bytes(), 40),
-                naive_line_starts(input.as_bytes(), 40),
-                "{input:?}"
-            );
+            assert_record_walks_match(input.as_bytes(), 40);
         }
     }
 
     #[test]
-    fn data_line_starts_match_a_line_by_line_scan_on_random_bytes() {
+    fn record_walks_match_a_line_by_line_scan_on_random_bytes() {
         let alphabet = b"^\n #ab";
         let mut state = 0x2545_f491_4f6c_dd1du64;
         for len in 0..400 {
             let input: Vec<u8> = (0..len % 97)
-                .map(|_| {
-                    state ^= state << 13;
-                    state ^= state >> 7;
-                    state ^= state << 17;
-                    alphabet[(state % alphabet.len() as u64) as usize]
-                })
+                .map(|_| alphabet[(xorshift(&mut state) % alphabet.len() as u64) as usize])
                 .collect();
             for hex_len in [1, 2, 3] {
+                assert_record_walks_match(&input, hex_len);
+            }
+        }
+    }
+
+    /// On a file whose records really are in order, the byte-level search finds exactly what
+    /// a linear scan finds, whatever peel and stray lines sit between the records.
+    #[test]
+    fn search_matches_a_linear_scan_on_sorted_records() {
+        let hex_len = 2;
+        let mut state = 0x9e37_79b9_7f4a_7c15u64;
+        for _ in 0..300 {
+            let mut names: Vec<String> = (0..xorshift(&mut state) % 12)
+                .map(|_| format!("n{}", xorshift(&mut state) % 40))
+                .collect();
+            names.sort();
+            names.dedup();
+            let mut data = b"# h\n".to_vec();
+            for name in &names {
+                data.extend_from_slice(format!("ab {name}\n").as_bytes());
+                match xorshift(&mut state) % 4 {
+                    0 => data.extend_from_slice(b"^ab\n"),
+                    1 => data.extend_from_slice(b"junk\n"),
+                    _ => {}
+                }
+            }
+            let mut view = raw_view(&data, hex_len);
+            view.body_start = 4;
+            let records: Vec<usize> = view.records().collect();
+            for probe in 0..42 {
+                let target = format!("n{probe}");
+                let want = records
+                    .iter()
+                    .copied()
+                    .find(|&s| view.record_cmp(s, &target).is_ge())
+                    .unwrap_or(data.len());
+                assert_eq!(view.lower_bound(&target), want, "{target} in {data:?}");
+                let hit = view.search(&target).ok();
                 assert_eq!(
-                    packed_refs_data_line_starts(&input, hex_len),
-                    naive_line_starts(&input, hex_len),
-                    "{:?} hex_len={hex_len}",
-                    String::from_utf8_lossy(&input)
+                    hit,
+                    names.contains(&target).then_some(want),
+                    "{target} in {data:?}"
                 );
             }
         }
