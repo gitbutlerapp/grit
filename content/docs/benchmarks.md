@@ -424,6 +424,45 @@ GRIT_CARGO_PACK=/path/to/received.pack GRIT_SKIP_VERIFY=1 \
   cargo test --release -p grit-lib --test pack_ingest_roundtrip rss_harness_install_pack_path -- --ignored --exact
 ```
 
+## Large files in the work tree (2026-10-25)
+
+Writing one 350 MB file to the work tree took grit 8–9 s and about 1 GB of memory on `restore`, `switch` and `clone`, where Git took about a second and 93 MB ([#1849](https://github.com/gitbutlerapp/grit/issues/1849)). Three costs added up:
+
+- **Loose inflate was quadratic.** The loose-object reader handed zlib the whole spare capacity of its output buffer on every call. The zlib binding zero-fills that space each time, and with one 64 KiB input chunk per call that meant re-zeroing hundreds of megabytes per chunk. The buffer is now grown and zeroed only ahead of the inflater, and it is sized straight to the size the object header declares.
+- **The blob was copied three times.** The loose store copied the payload out of the inflate buffer. The work-tree conversion copied it again even when it changed nothing. Restore then re-read and copied the written file to check it.
+- **Nothing streamed.** `Odb::open_stream` read every stream to the end before returning it.
+
+Checkout now streams a regular file larger than 1 MiB straight from the object database into the work tree when no conversion applies to its path. That means no `ident`, `working-tree-encoding`, smudge filter or LF-to-CRLF setting; see [`worktree_conversion_is_identity`](rustdoc:grit_lib::worktree::crlf::worktree_conversion_is_identity). Loose objects and objects stored whole in a pack are inflated as the file is written ([`Odb::with_stream`](rustdoc:grit_lib::objects::odb::Odb::with_stream)). Pack deltas are still rebuilt in memory, as in Git. Choosing between the two paths costs no extra lookup: a loose object's header, or a whole pack entry's header, gives its size before anything is inflated. Hashing a work-tree file (the racy-clean checks in `switch`, `restore` and `status`) no longer copies files whose content goes into Git unchanged, and hashes files of 1 MiB or more in chunks.
+
+Factory VM (4 vCPU), system `git 2.43.0`, release builds, `origin/main` (`5d5136859`) against this change in one sitting, `/usr/bin/time` wall time and peak RSS. The repository is the issue's: one 349 MB text file (`seq 1 40000000`) committed loose.
+
+| Command | Git | Grit before | Grit after |
+| --- | ---: | ---: | ---: |
+| `restore big.txt` | 0.94 s / 91 MB | 8.97 s / 1012 MB | **0.74 s / 14 MB** |
+| `switch main` (writes the file) | 0.92 s / 91 MB | 8.14 s / 1012 MB | **0.48 s / 15 MB** |
+| `restore` of 300 MB random bytes, packed | 0.43 s / 605 MB | 1.43 s / 1213 MB | **0.38 s / 314 MB** |
+| `clone` of a packed repository with both files | 1.71 s / 689 MB | 1.98 s / 1963 MB | **0.73 s / 399 MB** |
+
+In the packed rows peak RSS includes the pages of the mapped pack read through while inflating. Git reads a packed blob under `core.bigFileThreshold` (512 MiB) into memory whole.
+
+The daily matrix row `switch/large-blob@big-asset` switches away from a 300 MB loose text file and back, so each run checks the racily clean file before deleting it and then writes it again. Committed in **`daily-large-blob-before.json`** and **`daily-large-blob-after.json`**:
+
+| Scenario | Git ms (before / after run) | Grit ms before → after | Grit ÷ Git before → after | Grit peak RSS before → after |
+| --- | ---: | ---: | ---: | ---: |
+| `switch/large-blob@big-asset` | 870 / 949 | 4691 → **773** | 5.39× → **0.82×** | 915 → **17** MiB |
+
+Checkouts of many small files did not change: switching both ways between two commits that differ in every file of a 30 000-file tree measured 1.094 s → 1.090 s packed and 1.060 s → 1.044 s loose (hyperfine, 20 runs), and cloning that repository 513 → 514 ms.
+
+`grit clone` of a repository whose big file is still loose takes 5.2 s and about 1.1 GB on this repository (Git: 1.0 s and 91 MB, copying the loose objects). Grit packs the objects for a local clone, and building that pack holds the big blob in memory. That pack-building path is separate from checkout and not changed here.
+
+The `checkout_large_blob_rss` integration test restores and switches to a 64 MiB blob, loose and packed, and fails if the process's peak RSS grows by 16 MiB or more. On `origin/main` it grows by 139 MiB.
+
+```bash
+cargo test -p grit-lib --test checkout_large_blob_rss --test checkout_large_blob_streaming
+./target/release/grit-bench daily --only 'switch/large-blob@big-asset' \
+  --format json --output grit-utils/baselines/daily-large-blob-after.json --grit ./target/release/grit
+```
+
 ## Performance plan close-out (2026-10-21)
 
 After the memory and libification wave (fair single-process `grit log --limit`, mapped pack index / commit-graph / MIDX, packed-refs seek, repository path cache, LTO release profile, merge tree cache, pick/revert/merge pass reduction, status/diff scan memory, add without full index copies), the factory re-ran the **cooking dashboard** matrix on **`grit 0.5.15`** (`756aa953`) vs system **`git 2.43.0`**. Committed baselines: **`suite-after-LH.json`**, **`hot-paths-after.json`**, **`commit-after-LH.json`**, and **`dashboard/current.json`**. **`grit-bench compare`** against the pre-plan dashboard snapshot at **`grit 0.5.14`** shows **no overlapping 10k scenario regressed more than 5%** on Grit median wall time.

@@ -1,0 +1,151 @@
+{
+  "schema": "grit-daily-bench/1",
+  "generated_at": "2026-10-25T10:02:37.862351121Z",
+  "machine": {
+    "cpu_model": "Intel(R) Xeon(R) Processor",
+    "physical_cores": 4,
+    "logical_cores": 4,
+    "ram_bytes": 16780574720,
+    "os": "linux",
+    "kernel": "Linux 6.12.94+",
+    "scratch_filesystem": "ext4",
+    "rustc_version": "rustc 1.99.0 (b940084d7 2026-09-28)",
+    "cargo_profile": "release"
+  },
+  "tools": {
+    "git": "git version 2.43.0",
+    "grit": "grit 0.5.20",
+    "grit_commit": "bb7ab4d30aece02febcf540dd95c3bac8cdcb28b"
+  },
+  "scenarios": [
+    {
+      "id": "switch/large-blob@big-asset",
+      "area": "branching",
+      "description": "Switch away from a 300 MB loose text blob and back, writing it to the work tree: grit switch vs git switch",
+      "git": {
+        "median_wall_ms": 869.604786,
+        "peak_rss_bytes": 88825856,
+        "runs": 3,
+        "samples_ms": [
+          869.605,
+          864.333,
+          885.451
+        ],
+        "min_ms": 864.3327509999999,
+        "max_ms": 885.450652,
+        "stddev_ms": 10.99129629128571
+      },
+      "grit": {
+        "median_wall_ms": 4690.955542000001,
+        "peak_rss_bytes": 959893504,
+        "runs": 3,
+        "samples_ms": [
+          4690.956,
+          5295.408,
+          4184.41
+        ],
+        "min_ms": 4184.409802,
+        "max_ms": 5295.407515,
+        "stddev_ms": 556.2173874585022
+      },
+      "ratio": 5.394353409181905,
+      "detail": {
+        "prepare": "grit-bench prepare-switch --git git",
+        "commands": {
+          "git": "git switch -q bench-b && git switch -q bench-a",
+          "grit": "grit switch bench-b && grit switch bench-a"
+        },
+        "phases": {
+          "git": [
+            {
+              "name": "unpack_trees: unpack_trees",
+              "ms": 874.237,
+              "count": 2,
+              "depth": 0
+            },
+            {
+              "name": "index: refresh",
+              "ms": 594.418,
+              "count": 2,
+              "depth": 0
+            },
+            {
+              "name": "index: do_write_index",
+              "ms": 0.108,
+              "count": 2,
+              "depth": 0
+            },
+            {
+              "name": "cache_tree: update",
+              "ms": 0.097,
+              "count": 2,
+              "depth": 0
+            },
+            {
+              "name": "index: do_read_index",
+              "ms": 0.063,
+              "count": 2,
+              "depth": 0
+            },
+            {
+              "name": "unpack_trees: traverse_trees",
+              "ms": 0.047,
+              "count": 2,
+              "depth": 0
+            },
+            {
+              "name": "cache_tree: read",
+              "ms": 0.007,
+              "count": 2,
+              "depth": 0
+            },
+            {
+              "name": "cache_tree: write",
+              "ms": 0.006,
+              "count": 2,
+              "depth": 0
+            }
+          ],
+          "grit": [
+            {
+              "name": "grit.checkout.write",
+              "ms": 4133.18,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "grit.checkout.plan",
+              "ms": 29.738,
+              "count": 2,
+              "depth": 0
+            },
+            {
+              "name": "grit.repository.open",
+              "ms": 0.62,
+              "count": 2,
+              "depth": 0
+            },
+            {
+              "name": "grit.index.write",
+              "ms": 0.576,
+              "count": 2,
+              "depth": 0
+            },
+            {
+              "name": "grit.config.load",
+              "ms": 0.225,
+              "count": 4,
+              "depth": 0
+            },
+            {
+              "name": "grit.index.read",
+              "ms": 0.137,
+              "count": 2,
+              "depth": 0
+            }
+          ]
+        }
+      }
+    }
+  ]
+}
