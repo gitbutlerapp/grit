@@ -10,7 +10,8 @@ use grit_lib::error::Error;
 use grit_lib::index::Index;
 use grit_lib::maintenance::repository_fsck::{self, issue_msg_id, FsckOptions, FsckReport};
 use grit_lib::maintenance::{
-    gc, prune_loose_objects, repack_all, GcOptions, PruneOptions, RepackOptions,
+    auto_gc_needed, gc, gc_auto, prune_loose_objects, repack_all, AutoGcOutcome, AutoGcReason,
+    GcOptions, PruneOptions, RepackOptions,
 };
 use grit_lib::objects::pack::{clear_pack_cache, test_pack_cache_guard};
 use grit_lib::objects::{ObjectId, ObjectKind};
@@ -2035,4 +2036,138 @@ fn gc_commit_graph_keeps_existing_changed_path_choice_like_git() {
     );
     git(dir.path(), &["commit-graph", "verify"]);
     git_fsck(dir.path(), true);
+}
+
+fn loose_in_fanout(git_dir: &Path, fanout: &str) -> usize {
+    std::fs::read_dir(git_dir.join("objects").join(fanout))
+        .map(|entries| entries.filter_map(|e| e.ok()).count())
+        .unwrap_or(0)
+}
+
+fn now_unix() -> i64 {
+    OffsetDateTime::now_utc().unix_timestamp()
+}
+
+#[test]
+fn gc_auto_packs_loose_objects_past_gc_auto_and_git_reads_the_result() {
+    let _pack_guard = test_pack_cache_guard();
+    let dir = TempDir::new().expect("tempdir");
+    git(dir.path(), &["init", "-b", "main"]);
+    std::fs::write(dir.path().join("base.txt"), b"base\n").expect("write");
+    git(dir.path(), &["add", "base.txt"]);
+    git(dir.path(), &["commit", "-m", "base"]);
+    git(dir.path(), &["repack", "-a", "-d"]);
+    // ceil(20 / 256) = 1, so two loose objects in objects/17 trip the threshold.
+    git(dir.path(), &["config", "gc.auto", "20"]);
+    let git_dir = dir.path().join(".git");
+    let repo = Repository::discover(Some(dir.path()), &RepositoryOptions::empty()).expect("open");
+    let opts = GcOptions::full_run(false, now_unix());
+
+    let mut commits = 0;
+    while loose_in_fanout(&git_dir, "17") < 2 {
+        assert_eq!(
+            gc_auto(&repo, &opts).expect("gc_auto below threshold"),
+            AutoGcOutcome::NotNeeded,
+            "a sample at or below the threshold must not run maintenance"
+        );
+        many_grit_commits_from(&repo, commits, 1);
+        commits += 1;
+        assert!(commits < 5000, "objects/17 never filled");
+    }
+    let loose_before = git_loose_object_count(dir.path());
+    assert!(loose_before > 20);
+
+    let outcome = gc_auto(&repo, &opts).expect("gc_auto");
+    let AutoGcOutcome::Ran { reason, stats } = outcome else {
+        panic!("expected maintenance to run, got {outcome:?}");
+    };
+    assert!(matches!(
+        reason,
+        AutoGcReason::TooManyLoose { limit: 20, .. }
+    ));
+    assert_eq!(stats.repack.removed_pack_files, 0);
+    clear_pack_cache_after_disk_maintenance();
+
+    assert_eq!(
+        git_loose_object_count(dir.path()),
+        0,
+        "every loose object must be packed"
+    );
+    assert_eq!(
+        git_pack_count(&git_dir),
+        2,
+        "loose objects go into a new pack next to the existing one"
+    );
+    assert!(!git_dir.join("gc.pid").exists(), "gc.pid must be released");
+    git_fsck(dir.path(), true);
+    git(dir.path(), &["log", "--oneline", "-n", "3"]);
+    let (_, ok) = repo_fsck(&repo, &objects_and_refs(true));
+    assert!(ok, "grit fsck after gc_auto");
+
+    assert_eq!(auto_gc_needed(&repo).expect("recheck"), None);
+    assert_eq!(
+        gc_auto(&repo, &opts).expect("second gc_auto"),
+        AutoGcOutcome::NotNeeded
+    );
+}
+
+#[test]
+fn gc_auto_consolidates_packs_past_gc_auto_pack_limit_like_git() {
+    let _pack_guard = test_pack_cache_guard();
+    let dir = TempDir::new().expect("tempdir");
+    git(dir.path(), &["init", "-b", "main"]);
+    for i in 0..3 {
+        std::fs::write(dir.path().join("f.txt"), format!("v{i}\n")).expect("write");
+        git(dir.path(), &["add", "f.txt"]);
+        git(dir.path(), &["commit", "-m", &format!("c{i}")]);
+        git(dir.path(), &["repack", "-d"]);
+    }
+    let git_dir = dir.path().join(".git");
+    assert_eq!(git_pack_count(&git_dir), 3);
+    git(dir.path(), &["config", "gc.autoPackLimit", "2"]);
+
+    let git_copy = TempDir::new().expect("git copy");
+    duplicate_repo_tree(dir.path(), git_copy.path());
+
+    let repo = Repository::discover(Some(dir.path()), &RepositoryOptions::empty()).expect("open");
+    assert_eq!(
+        auto_gc_needed(&repo).expect("check"),
+        Some(AutoGcReason::TooManyPacks { count: 3, limit: 2 })
+    );
+    let outcome = gc_auto(&repo, &GcOptions::full_run(false, now_unix())).expect("gc_auto");
+    assert!(
+        matches!(outcome, AutoGcOutcome::Ran { .. }),
+        "expected maintenance to run, got {outcome:?}"
+    );
+    clear_pack_cache_after_disk_maintenance();
+    git(
+        git_copy.path(),
+        &["-c", "gc.autoDetach=false", "gc", "--auto", "--quiet"],
+    );
+
+    assert_eq!(git_pack_count(&git_dir), 1);
+    assert_eq!(
+        git_pack_count(&git_dir),
+        git_pack_count(&git_copy.path().join(".git")),
+        "grit must consolidate packs when git gc --auto does"
+    );
+    git_fsck(dir.path(), true);
+    assert_eq!(auto_gc_needed(&repo).expect("recheck"), None);
+}
+
+#[test]
+fn gc_auto_is_a_no_op_when_gc_auto_is_zero() {
+    let dir = TempDir::new().expect("tempdir");
+    git(dir.path(), &["init", "-b", "main"]);
+    git(dir.path(), &["config", "gc.auto", "0"]);
+    let repo = Repository::discover(Some(dir.path()), &RepositoryOptions::empty()).expect("open");
+    many_grit_commits(&repo, 600);
+    let loose_before = git_loose_object_count(dir.path());
+    assert!(loose_before >= 1800);
+    assert_eq!(
+        gc_auto(&repo, &GcOptions::full_run(false, now_unix())).expect("gc_auto"),
+        AutoGcOutcome::NotNeeded
+    );
+    assert_eq!(git_loose_object_count(dir.path()), loose_before);
+    assert_eq!(git_pack_count(&dir.path().join(".git")), 0);
 }

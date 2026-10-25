@@ -637,6 +637,16 @@ pub struct LockHolder {
     pub running: bool,
 }
 
+fn maintenance_running_message(holder: &crate::maintenance::GcLockHolder) -> String {
+    match (holder.pid, holder.host.as_deref()) {
+        (Some(pid), Some(host)) => {
+            format!("repository maintenance is already running (process {pid} on {host})")
+        }
+        (Some(pid), None) => format!("repository maintenance is already running (process {pid})"),
+        _ => "repository maintenance is already running".to_owned(),
+    }
+}
+
 fn index_locked_message(lock_path: &std::path::Path, holder: Option<&LockHolder>) -> String {
     let detail = match holder {
         Some(LockHolder { pid, running: true }) => {
@@ -816,6 +826,14 @@ pub enum Error {
     /// Stage-1/2/3 entries are present; a stage-0 tree cannot be built.
     #[error("index contains unmerged entries")]
     IndexUnmerged,
+
+    /// Another maintenance run holds the repository's `gc.pid` lock
+    /// ([`crate::maintenance::GcLock`]); nothing was changed.
+    #[error("{}", maintenance_running_message(holder))]
+    MaintenanceRunning {
+        /// Process recorded in `gc.pid`.
+        holder: crate::maintenance::GcLockHolder,
+    },
 
     /// The index lock file already exists, so the index cannot be written.
     ///

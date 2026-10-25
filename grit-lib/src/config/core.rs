@@ -2097,39 +2097,51 @@ impl ConfigSet {
         }
     }
 
-    /// Loose-object count at or above which `git gc --auto` may repack (`gc.auto`, Git default 6700).
-    #[must_use]
-    pub fn gc_auto_loose_limit(&self) -> usize {
-        match self.get_i64("gc.auto") {
-            None => 6700,
-            Some(Ok(0)) => 6700,
-            Some(Ok(n)) if n > 0 => usize::try_from(n).unwrap_or(6700),
-            Some(Ok(_)) | Some(Err(_)) => 6700,
-        }
-    }
-
-    /// Whether `gc.auto=0` disables automatic loose-object repack triggers.
-    #[must_use]
-    pub fn gc_auto_loose_disabled(&self) -> bool {
-        matches!(self.get_i64("gc.auto"), Some(Ok(0)))
-    }
-
-    /// Pack count above which `git gc --auto` repacks all packs (`gc.autoPackLimit`, Git default 50).
+    /// Approximate loose-object count above which automatic maintenance packs loose objects
+    /// (`gc.auto`, Git default 6700).
     ///
-    /// An explicit **`0`** disables automatic pack consolidation (never treated as “limit exceeded”).
+    /// Returns `None` when `gc.auto` is zero or negative, which turns off automatic maintenance
+    /// entirely (including the [`Self::gc_auto_pack_limit`] trigger). Unparsable values fall
+    /// back to the default.
     #[must_use]
-    pub fn gc_auto_pack_limit(&self) -> usize {
-        match self.get_i64("gc.autoPackLimit") {
-            None => 50,
-            Some(Ok(n)) if n >= 0 => usize::try_from(n).unwrap_or(50),
-            Some(Ok(_)) | Some(Err(_)) => 50,
+    pub fn gc_auto_threshold(&self) -> Option<usize> {
+        match self.get_i64("gc.auto") {
+            Some(Ok(n)) if n <= 0 => None,
+            Some(Ok(n)) => Some(usize::try_from(n).unwrap_or(usize::MAX)),
+            None | Some(Err(_)) => Some(DEFAULT_GC_AUTO_THRESHOLD),
         }
     }
 
-    /// Whether [`Self::gc_auto_pack_limit`] disables automatic pack consolidation.
+    /// Number of non-`.keep` local packs above which automatic maintenance consolidates every
+    /// pack into one (`gc.autoPackLimit`, Git default 50).
+    ///
+    /// Returns `None` when the value is zero or negative (pack consolidation trigger off).
+    /// Unparsable values fall back to the default.
     #[must_use]
-    pub fn gc_auto_pack_limit_disabled(&self) -> bool {
-        matches!(self.get_i64("gc.autoPackLimit"), Some(Ok(0)))
+    pub fn gc_auto_pack_limit(&self) -> Option<usize> {
+        match self.get_i64("gc.autoPackLimit") {
+            Some(Ok(n)) if n <= 0 => None,
+            Some(Ok(n)) => Some(usize::try_from(n).unwrap_or(usize::MAX)),
+            None | Some(Err(_)) => Some(DEFAULT_GC_AUTO_PACK_LIMIT),
+        }
+    }
+
+    /// Whether automatic maintenance runs in a detached background process
+    /// (`gc.autoDetach`, default `true`).
+    #[must_use]
+    pub fn gc_auto_detach(&self) -> bool {
+        self.get_bool("gc.autoDetach")
+            .and_then(|v| v.ok())
+            .unwrap_or(true)
+    }
+
+    /// Whether commands may start automatic maintenance at all (`maintenance.auto`, default
+    /// `true`).
+    #[must_use]
+    pub fn maintenance_auto(&self) -> bool {
+        self.get_bool("maintenance.auto")
+            .and_then(|v| v.ok())
+            .unwrap_or(true)
     }
 
     /// [`crate::hash::Parallelism`] for pack indexing from merged config.
@@ -3240,6 +3252,11 @@ pub fn parse_git_config_maybe_bool(raw: &str) -> Option<bool> {
 }
 
 const DIFF_CONTEXT_KEY: &str = "diff.context";
+
+/// Git's documented default for `gc.auto`.
+const DEFAULT_GC_AUTO_THRESHOLD: usize = 6700;
+/// Git's documented default for `gc.autoPackLimit`.
+const DEFAULT_GC_AUTO_PACK_LIMIT: usize = 50;
 
 fn bad_numeric_diff_context(
     value: &str,
@@ -4572,14 +4589,27 @@ mod pack_object_config_tests {
     #[test]
     fn gc_auto_limits_from_config() {
         let set = set_from_snippet("[gc]\n\tauto = 100\n\tautoPackLimit = 3\n");
-        assert_eq!(set.gc_auto_loose_limit(), 100);
-        assert_eq!(set.gc_auto_pack_limit(), 3);
-        assert!(!set.gc_auto_pack_limit_disabled());
+        assert_eq!(set.gc_auto_threshold(), Some(100));
+        assert_eq!(set.gc_auto_pack_limit(), Some(3));
+        let defaults = ConfigSet::new();
+        assert_eq!(defaults.gc_auto_threshold(), Some(6700));
+        assert_eq!(defaults.gc_auto_pack_limit(), Some(50));
+        assert!(defaults.gc_auto_detach());
+        assert!(defaults.maintenance_auto());
         let disabled = set_from_snippet("[gc]\n\tautoPackLimit = 0\n");
-        assert_eq!(disabled.gc_auto_pack_limit(), 0);
-        assert!(disabled.gc_auto_pack_limit_disabled());
+        assert_eq!(disabled.gc_auto_pack_limit(), None);
+        assert_eq!(disabled.gc_auto_threshold(), Some(6700));
         let auto_off = set_from_snippet("[gc]\n\tauto = 0\n");
-        assert!(auto_off.gc_auto_loose_disabled());
+        assert_eq!(auto_off.gc_auto_threshold(), None);
+        let negative = set_from_snippet("[gc]\n\tauto = -1\n\tautoPackLimit = -1\n");
+        assert_eq!(negative.gc_auto_threshold(), None);
+        assert_eq!(negative.gc_auto_pack_limit(), None);
+        let unparsable = set_from_snippet("[gc]\n\tauto = lots\n");
+        assert_eq!(unparsable.gc_auto_threshold(), Some(6700));
+        let foreground =
+            set_from_snippet("[gc]\n\tautoDetach = false\n[maintenance]\n\tauto = false\n");
+        assert!(!foreground.gc_auto_detach());
+        assert!(!foreground.maintenance_auto());
     }
 }
 

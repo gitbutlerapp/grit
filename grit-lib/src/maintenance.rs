@@ -817,12 +817,15 @@ fn repack_detail(repo: &Repository, opts: &RepackOptions) -> Result<RepackDetail
         } else {
             UnreachablePackRetention::DropAll
         };
-        let _ = odb.loosen_unreachable_from_superseded_packs(
-            &pack_dir,
-            &ingested.pack_path,
-            &reachable,
-            retention,
-        )?;
+        // Incremental repack keeps every existing pack, so nothing is superseded.
+        if !opts.incremental {
+            odb.loosen_unreachable_from_superseded_packs(
+                &pack_dir,
+                &ingested.pack_path,
+                &reachable,
+                retention,
+            )?;
+        }
 
         // Drop cached pack/index mmaps before deleting superseded pack artifacts (Windows).
         odb.invalidate_packs();
@@ -1064,12 +1067,311 @@ fn duration_ms(d: std::time::Duration) -> u64 {
 }
 
 /// Run pack-refs, reflog expiry, repack, prune, and commit-graph maintenance.
+///
+/// Unless [`RepackOptions::dry_run`] is set, holds the repository's `gc.pid` lock for the
+/// whole run, so it never overlaps another grit or Git gc (see [`GcLock`]).
+///
+/// # Errors
+///
+/// [`Error::MaintenanceRunning`] when another process holds the `gc.pid` lock, plus failures
+/// from each maintenance step.
 pub fn gc(repo: &Repository, opts: &GcOptions) -> Result<GcStats> {
-    let mut stats = GcStats::default();
-    let odb = repo.odb();
-    odb.require_files_primary("gc")?;
-
+    repo.odb().require_files_primary("gc")?;
     let now = gc_now_unix(opts.now_unix);
+    let _lock = if opts.repack.dry_run {
+        None
+    } else {
+        match GcLock::try_acquire(repo, now)? {
+            GcLockAttempt::Acquired(lock) => Some(lock),
+            GcLockAttempt::Held(holder) => return Err(Error::MaintenanceRunning { holder }),
+        }
+    };
+    gc_locked(repo, opts, now)
+}
+
+/// Why automatic maintenance is due, as decided by [`auto_gc_needed`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AutoGcReason {
+    /// The loose-object estimate is above `gc.auto`. [`gc_auto`] packs the loose objects into
+    /// one new pack and leaves existing packs alone.
+    TooManyLoose {
+        /// Loose objects in the sampled fan-out directory (`objects/17`) times 256.
+        estimate: usize,
+        /// Effective `gc.auto` threshold.
+        limit: usize,
+    },
+    /// There are more non-`.keep` packs than `gc.autoPackLimit`. [`gc_auto`] consolidates
+    /// every pack into one.
+    TooManyPacks {
+        /// Local packs without a `.keep` marker.
+        count: usize,
+        /// Effective `gc.autoPackLimit`.
+        limit: usize,
+    },
+}
+
+/// Fan-out directory sampled to estimate the loose-object count, as Git documents for `gc.auto`.
+const AUTO_GC_SAMPLE_FANOUT: &str = "17";
+
+/// Decide whether automatic maintenance is due, using Git's `gc --auto` heuristics.
+///
+/// Pack consolidation wins when the number of local packs without a `.keep` marker is above
+/// [`ConfigSet::gc_auto_pack_limit`]. Otherwise the loose-object count is estimated from a
+/// single fan-out directory (`objects/17`) and compared with [`ConfigSet::gc_auto_threshold`],
+/// so the check costs two directory reads however large the repository is. `gc.auto <= 0`
+/// turns both checks off. Repositories without a files object store never need it.
+///
+/// This does not look at `maintenance.auto`; callers that start maintenance after a command
+/// check [`ConfigSet::maintenance_auto`] themselves.
+///
+/// # Errors
+///
+/// Config load failures and I/O errors other than a missing directory.
+pub fn auto_gc_needed(repo: &Repository) -> Result<Option<AutoGcReason>> {
+    let cfg = repo.config()?;
+    let Some(threshold) = cfg.gc_auto_threshold() else {
+        return Ok(None);
+    };
+    let Some(objects_dir) = repo.odb().files_objects_dir() else {
+        return Ok(None);
+    };
+    if let Some(limit) = cfg.gc_auto_pack_limit() {
+        let count = count_pack_files(&objects_dir.join("pack"));
+        if count > limit {
+            return Ok(Some(AutoGcReason::TooManyPacks { count, limit }));
+        }
+    }
+    let name_len = repo.odb().hash_algo().hex_len() - 2;
+    let sampled = count_loose_in_fanout(&objects_dir.join(AUTO_GC_SAMPLE_FANOUT), name_len)?;
+    if sampled > threshold.div_ceil(256) {
+        return Ok(Some(AutoGcReason::TooManyLoose {
+            estimate: sampled.saturating_mul(256),
+            limit: threshold,
+        }));
+    }
+    Ok(None)
+}
+
+/// Count entries of one loose-object fan-out directory that look like object files.
+fn count_loose_in_fanout(dir: &Path, name_len: usize) -> Result<usize> {
+    let entries = match fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(0),
+        Err(e) => return Err(Error::Io(e)),
+    };
+    Ok(entries
+        .filter_map(|e| e.ok())
+        .filter(|e| {
+            let name = e.file_name();
+            let name = name.as_encoded_bytes();
+            name.len() == name_len && name.iter().all(u8::is_ascii_hexdigit)
+        })
+        .count())
+}
+
+/// Result of [`gc_auto`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum AutoGcOutcome {
+    /// Neither threshold is exceeded (or `gc.auto` is off); nothing ran.
+    NotNeeded,
+    /// Another process holds the `gc.pid` lock; nothing ran.
+    AlreadyRunning(GcLockHolder),
+    /// The `pre-auto-gc` hook exited non-zero; nothing ran.
+    DeclinedByHook {
+        /// Exit status of the hook.
+        status: i32,
+        /// What the hook wrote, when hook output is captured ([`Repository::hook_stdio`]).
+        output: crate::hooks::HookOutput,
+    },
+    /// Maintenance ran.
+    Ran {
+        /// Which threshold triggered the run.
+        reason: AutoGcReason,
+        /// What each step did.
+        stats: Box<GcStats>,
+    },
+}
+
+/// Run maintenance only when Git's `gc --auto` heuristics say it is due ([`auto_gc_needed`]).
+///
+/// When too many loose objects triggered the run, they are packed into one new pack without
+/// rewriting existing packs and without a bitmap, so the cost scales with the loose objects
+/// rather than the repository. Too many packs runs a full consolidating [`gc`]. Either way the
+/// other `opts` steps (pack-refs, reflog expiry, unreachable prune under `gc.pruneExpire`,
+/// commit-graph) run as in [`gc`].
+///
+/// Before doing any work this takes the `gc.pid` lock ([`GcLock`]) and runs the `pre-auto-gc`
+/// hook; a held lock or a failing hook ends the call without changes. With
+/// [`RepackOptions::dry_run`] neither happens and the returned stats describe the planned work.
+///
+/// The library never forks: callers that honor [`ConfigSet::gc_auto_detach`] start a separate
+/// process that calls this function.
+///
+/// # Errors
+///
+/// Config, hook spawn, lock and I/O failures, and any error from the maintenance steps.
+pub fn gc_auto(repo: &Repository, opts: &GcOptions) -> Result<AutoGcOutcome> {
+    let Some(reason) = auto_gc_needed(repo)? else {
+        return Ok(AutoGcOutcome::NotNeeded);
+    };
+    let now = gc_now_unix(opts.now_unix);
+    let dry_run = opts.repack.dry_run;
+    let _lock = if dry_run {
+        None
+    } else {
+        match GcLock::try_acquire(repo, now)? {
+            GcLockAttempt::Acquired(lock) => Some(lock),
+            GcLockAttempt::Held(holder) => return Ok(AutoGcOutcome::AlreadyRunning(holder)),
+        }
+    };
+    if !dry_run {
+        if let crate::hooks::HookResult::Failed { status, output } =
+            crate::hooks::run_hook(repo, "pre-auto-gc", &[], None)?
+        {
+            return Ok(AutoGcOutcome::DeclinedByHook { status, output });
+        }
+    }
+    let mut run_opts = opts.clone();
+    if matches!(reason, AutoGcReason::TooManyLoose { .. }) {
+        run_opts.repack.incremental = true;
+        run_opts.repack.write_bitmap = false;
+    }
+    let stats = gc_locked(repo, &run_opts, now)?;
+    Ok(AutoGcOutcome::Ran {
+        reason,
+        stats: Box::new(stats),
+    })
+}
+
+/// Process recorded in `gc.pid` by a maintenance run that is still in progress.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct GcLockHolder {
+    /// Process id from `gc.pid`, when it could be read.
+    pub pid: Option<u64>,
+    /// Host name from `gc.pid`, when it could be read.
+    pub host: Option<String>,
+}
+
+/// Outcome of [`GcLock::try_acquire`].
+#[derive(Debug)]
+#[must_use]
+pub enum GcLockAttempt {
+    /// This process now owns `gc.pid`.
+    Acquired(GcLock),
+    /// Another live maintenance run owns it.
+    Held(GcLockHolder),
+}
+
+/// How long a `gc.pid` written by another run is honored before it is treated as stale.
+const GC_PID_STALE_AFTER: time::Duration = time::Duration::hours(12);
+
+/// Repository-wide maintenance lock, compatible with Git's `gc.pid`.
+///
+/// The lock file holds `"<pid> <hostname>"` and is removed when this value is dropped. An
+/// existing `gc.pid` counts as held while it is younger than 12 hours and either names another
+/// host or a process on this host that is still running; older or dead entries are taken over.
+#[derive(Debug)]
+pub struct GcLock {
+    path: PathBuf,
+}
+
+impl GcLock {
+    /// Try to take the `gc.pid` lock in the repository's common directory without waiting.
+    ///
+    /// `now_unix` is the wall clock used to decide whether an existing `gc.pid` is stale.
+    ///
+    /// # Errors
+    ///
+    /// I/O failures while creating, writing or renaming the lock file.
+    pub fn try_acquire(repo: &Repository, now_unix: i64) -> Result<GcLockAttempt> {
+        let path = repo.common_git_dir().join("gc.pid");
+        let mut lock = match crate::lockfile::LockFile::acquire(
+            &path.with_extension("pid.lock"),
+            crate::lockfile::LockWait::Immediately,
+        ) {
+            Ok(lock) => lock,
+            Err(crate::lockfile::LockError::Held { .. }) => {
+                return Ok(GcLockAttempt::Held(read_gc_pid(&path).unwrap_or(
+                    GcLockHolder {
+                        pid: None,
+                        host: None,
+                    },
+                )));
+            }
+            Err(crate::lockfile::LockError::Io { source, .. }) => return Err(Error::Io(source)),
+        };
+        let host = local_host_name();
+        if let Some(holder) = live_gc_pid_holder(&path, &host, now_unix) {
+            lock.rollback();
+            return Ok(GcLockAttempt::Held(holder));
+        }
+        use std::io::Write as _;
+        write!(lock, "{} {host}", std::process::id())?;
+        lock.commit_to(&path).map_err(|e| match e {
+            crate::lockfile::LockError::Io { source, .. } => Error::Io(source),
+            held @ crate::lockfile::LockError::Held { .. } => Error::Io(io::Error::other(held)),
+        })?;
+        Ok(GcLockAttempt::Acquired(GcLock { path }))
+    }
+
+    /// The maintenance run currently holding `gc.pid`, without taking the lock.
+    ///
+    /// Uses the same staleness rules as [`Self::try_acquire`], so `None` means an attempt would
+    /// most likely succeed. Lets a caller avoid starting a process that would only find the
+    /// lock held.
+    #[must_use]
+    pub fn current_holder(repo: &Repository, now_unix: i64) -> Option<GcLockHolder> {
+        let path = repo.common_git_dir().join("gc.pid");
+        live_gc_pid_holder(&path, &local_host_name(), now_unix)
+    }
+}
+
+impl Drop for GcLock {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+    }
+}
+
+fn read_gc_pid(path: &Path) -> Option<GcLockHolder> {
+    let raw = fs::read_to_string(path).ok()?;
+    let mut fields = raw.split_whitespace();
+    let pid = fields.next().and_then(|p| p.parse::<u64>().ok());
+    let host = fields.next().map(str::to_owned);
+    Some(GcLockHolder { pid, host })
+}
+
+/// The holder recorded in `gc.pid` when it still blocks a new run on `host`.
+fn live_gc_pid_holder(path: &Path, host: &str, now_unix: i64) -> Option<GcLockHolder> {
+    let mtime = fs::metadata(path).and_then(|m| m.modified()).ok()?;
+    let mtime = OffsetDateTime::from(mtime);
+    let now = OffsetDateTime::from_unix_timestamp(now_unix).ok()?;
+    if now - mtime > GC_PID_STALE_AFTER {
+        return None;
+    }
+    let holder = read_gc_pid(path)?;
+    let pid = holder.pid?;
+    let same_host = holder.host.as_deref() == Some(host);
+    if same_host && !crate::index::is_process_running(pid) {
+        return None;
+    }
+    Some(holder)
+}
+
+fn local_host_name() -> String {
+    #[cfg(unix)]
+    {
+        if let Ok(uts) = nix::sys::utsname::uname() {
+            if let Some(name) = uts.nodename().to_str() {
+                return name.to_owned();
+            }
+        }
+    }
+    "localhost".to_owned()
+}
+
+fn gc_locked(repo: &Repository, opts: &GcOptions, now: i64) -> Result<GcStats> {
+    let mut stats = GcStats::default();
     let cfg = repo.config()?;
     let prune_policy = gc_loose_prune_policy(&cfg, now)?;
     let dry_run = opts.repack.dry_run;
@@ -1092,7 +1394,9 @@ pub fn gc(repo: &Repository, opts: &GcOptions) -> Result<GcStats> {
         repack_opts.now =
             Some(OffsetDateTime::from_unix_timestamp(now).unwrap_or(OffsetDateTime::UNIX_EPOCH));
     }
-    if !repack_opts.write_bitmap {
+    // Incremental runs skip bitmaps, as Git's `gc --auto` does: a bitmap covers the whole
+    // object graph and costs far more than packing the loose objects.
+    if !repack_opts.write_bitmap && !repack_opts.incremental {
         repack_opts.write_bitmap = gc_repack_writes_bitmap(repo, &cfg);
     }
     let repack_start = Instant::now();
@@ -1286,22 +1590,25 @@ fn estimate_repack_object_count(
     Ok(send.len())
 }
 
+/// Packs in `pack_dir` without a `.keep` marker, from a single directory read.
 fn count_pack_files(pack_dir: &Path) -> usize {
-    if !pack_dir.is_dir() {
+    let Ok(entries) = fs::read_dir(pack_dir) else {
         return 0;
+    };
+    let mut packs = HashSet::new();
+    let mut kept = HashSet::new();
+    for entry in entries.filter_map(|e| e.ok()) {
+        let path = PathBuf::from(entry.file_name());
+        let (Some(stem), Some(ext)) = (path.file_stem(), path.extension()) else {
+            continue;
+        };
+        if ext == "pack" {
+            packs.insert(stem.to_owned());
+        } else if ext == "keep" {
+            kept.insert(stem.to_owned());
+        }
     }
-    fs::read_dir(pack_dir)
-        .ok()
-        .map(|rd| {
-            rd.filter_map(|e| e.ok())
-                .filter(|e| {
-                    let path = e.path();
-                    path.extension().is_some_and(|ext| ext == "pack")
-                        && !pack_has_keep_marker(pack_dir, &path)
-                })
-                .count()
-        })
-        .unwrap_or(0)
+    packs.difference(&kept).count()
 }
 
 fn estimate_reachable_count(odb: &Odb, roots: &[ObjectId]) -> Result<usize> {
@@ -1487,6 +1794,174 @@ mod tests {
         fs::write(pack_dir.join("pack-bbb.pack"), b"PACK").unwrap();
         fs::write(pack_dir.join("pack-bbb.keep"), b"").unwrap();
         assert_eq!(count_pack_files(&pack_dir), 1);
+    }
+
+    fn repo_with_config(snippet: &str) -> (TempDir, Repository) {
+        let dir = TempDir::new().unwrap();
+        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        let config_path = repo.git_dir().join("config");
+        let mut config = fs::read_to_string(&config_path).unwrap();
+        config.push_str(snippet);
+        fs::write(&config_path, config).unwrap();
+        repo.reload_config().expect("reload config");
+        (dir, repo)
+    }
+
+    fn fake_loose(repo: &Repository, fanout: &str, names: &[&str]) {
+        let dir = repo.git_dir().join("objects").join(fanout);
+        fs::create_dir_all(&dir).unwrap();
+        for name in names {
+            fs::write(dir.join(name), b"").unwrap();
+        }
+    }
+
+    const NAME_A: &str = "00000000000000000000000000000000000001";
+    const NAME_B: &str = "00000000000000000000000000000000000002";
+    const NAME_C: &str = "00000000000000000000000000000000000003";
+
+    #[test]
+    fn auto_gc_needed_samples_one_fanout_directory() {
+        // gc.auto = 300 allows ceil(300 / 256) = 2 sampled objects.
+        let (_dir, repo) = repo_with_config("[gc]\n\tauto = 300\n");
+        assert_eq!(auto_gc_needed(&repo).unwrap(), None);
+        fake_loose(&repo, "17", &[NAME_A, NAME_B]);
+        fake_loose(&repo, "18", &[NAME_C]);
+        fake_loose(
+            &repo,
+            "17",
+            &["tmp_obj_123", "0000000000000000000000000000000000000z"],
+        );
+        assert_eq!(auto_gc_needed(&repo).unwrap(), None);
+        fake_loose(&repo, "17", &[NAME_C]);
+        assert_eq!(
+            auto_gc_needed(&repo).unwrap(),
+            Some(AutoGcReason::TooManyLoose {
+                estimate: 3 * 256,
+                limit: 300
+            })
+        );
+    }
+
+    #[test]
+    fn auto_gc_needed_is_off_when_gc_auto_is_zero() {
+        let (_dir, repo) = repo_with_config("[gc]\n\tauto = 0\n\tautoPackLimit = 1\n");
+        fake_loose(&repo, "17", &[NAME_A, NAME_B, NAME_C]);
+        let pack_dir = repo.git_dir().join("objects/pack");
+        fs::write(pack_dir.join("pack-aaa.pack"), b"PACK").unwrap();
+        fs::write(pack_dir.join("pack-bbb.pack"), b"PACK").unwrap();
+        assert_eq!(auto_gc_needed(&repo).unwrap(), None);
+        assert_eq!(
+            gc_auto(&repo, &GcOptions::default()).unwrap(),
+            AutoGcOutcome::NotNeeded
+        );
+    }
+
+    #[test]
+    fn auto_gc_needed_counts_packs_without_keep_markers() {
+        let (_dir, repo) = repo_with_config("[gc]\n\tautoPackLimit = 2\n");
+        let pack_dir = repo.git_dir().join("objects/pack");
+        for stem in ["pack-aaa", "pack-bbb", "pack-ccc"] {
+            fs::write(pack_dir.join(format!("{stem}.pack")), b"PACK").unwrap();
+        }
+        assert_eq!(
+            auto_gc_needed(&repo).unwrap(),
+            Some(AutoGcReason::TooManyPacks { count: 3, limit: 2 })
+        );
+        fs::write(pack_dir.join("pack-ccc.keep"), b"").unwrap();
+        assert_eq!(auto_gc_needed(&repo).unwrap(), None);
+    }
+
+    #[test]
+    fn gc_lock_is_exclusive_and_released_on_drop() {
+        let (_dir, repo) = repo_with_config("");
+        let now = OffsetDateTime::now_utc().unix_timestamp();
+        let pid_path = repo.git_dir().join("gc.pid");
+        let GcLockAttempt::Acquired(lock) = GcLock::try_acquire(&repo, now).unwrap() else {
+            panic!("first acquire must succeed");
+        };
+        let recorded = read_gc_pid(&pid_path).expect("gc.pid written");
+        assert_eq!(recorded.pid, Some(u64::from(std::process::id())));
+        assert_eq!(recorded.host.as_deref(), Some(local_host_name().as_str()));
+        match GcLock::try_acquire(&repo, now).unwrap() {
+            GcLockAttempt::Held(holder) => assert_eq!(holder, recorded),
+            GcLockAttempt::Acquired(_) => panic!("second acquire must see the live holder"),
+        }
+        assert_eq!(GcLock::current_holder(&repo, now), Some(recorded));
+        assert!(matches!(
+            gc(&repo, &GcOptions::default()),
+            Err(Error::MaintenanceRunning { .. })
+        ));
+        assert!(!repo.git_dir().join("gc.pid.lock").exists());
+        drop(lock);
+        assert!(!pid_path.exists());
+        assert_eq!(GcLock::current_holder(&repo, now), None);
+        assert!(matches!(
+            GcLock::try_acquire(&repo, now).unwrap(),
+            GcLockAttempt::Acquired(_)
+        ));
+    }
+
+    #[test]
+    fn gc_lock_takes_over_stale_entries() {
+        let (_dir, repo) = repo_with_config("");
+        let now = OffsetDateTime::now_utc().unix_timestamp();
+        let pid_path = repo.git_dir().join("gc.pid");
+        let host = local_host_name();
+
+        // A process on this host that is no longer running.
+        fs::write(&pid_path, format!("{} {host}", i32::MAX)).unwrap();
+        assert!(matches!(
+            GcLock::try_acquire(&repo, now).unwrap(),
+            GcLockAttempt::Acquired(_)
+        ));
+
+        // Another host cannot be checked, so a recent entry blocks.
+        fs::write(&pid_path, "4242 some-other-host").unwrap();
+        assert!(matches!(
+            GcLock::try_acquire(&repo, now).unwrap(),
+            GcLockAttempt::Held(GcLockHolder {
+                pid: Some(4242),
+                ..
+            })
+        ));
+
+        // The same entry is ignored once it is older than 12 hours.
+        let later = now + time::Duration::hours(13).whole_seconds();
+        assert!(matches!(
+            GcLock::try_acquire(&repo, later).unwrap(),
+            GcLockAttempt::Acquired(_)
+        ));
+    }
+
+    #[test]
+    fn gc_auto_reports_held_lock_without_running() {
+        let (_dir, repo) = repo_with_config("[gc]\n\tauto = 1\n");
+        fake_loose(&repo, "17", &[NAME_A, NAME_B]);
+        fs::write(repo.git_dir().join("gc.pid"), "4242 some-other-host").unwrap();
+        let outcome = gc_auto(&repo, &GcOptions::default()).unwrap();
+        assert!(
+            matches!(&outcome, AutoGcOutcome::AlreadyRunning(holder) if holder.pid == Some(4242)),
+            "{outcome:?}"
+        );
+        assert!(repo.git_dir().join("objects/17").join(NAME_A).exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn gc_auto_honors_failing_pre_auto_gc_hook() {
+        use std::os::unix::fs::PermissionsExt as _;
+        let (_dir, repo) = repo_with_config("[gc]\n\tauto = 1\n");
+        fake_loose(&repo, "17", &[NAME_A, NAME_B]);
+        let hook = repo.git_dir().join("hooks/pre-auto-gc");
+        fs::create_dir_all(hook.parent().unwrap()).unwrap();
+        fs::write(&hook, "#!/bin/sh\nexit 3\n").unwrap();
+        fs::set_permissions(&hook, fs::Permissions::from_mode(0o755)).unwrap();
+        let outcome = gc_auto(&repo, &GcOptions::default()).unwrap();
+        assert!(
+            matches!(outcome, AutoGcOutcome::DeclinedByHook { status: 3, .. }),
+            "{outcome:?}"
+        );
+        assert!(!repo.git_dir().join("gc.pid").exists());
     }
 
     fn git_cmd(dir: &Path, args: &[&str]) {

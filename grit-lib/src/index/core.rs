@@ -3724,7 +3724,7 @@ fn read_lock_pid(pid_path: &Path) -> Option<u64> {
     trimmed.parse::<u64>().ok()
 }
 
-fn is_process_running(pid: u64) -> bool {
+pub(crate) fn is_process_running(pid: u64) -> bool {
     if pid == 0 || pid > i32::MAX as u64 {
         return false;
     }
