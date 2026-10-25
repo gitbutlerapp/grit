@@ -35,18 +35,18 @@ use crate::commit_graph_file::CommitGraphChain;
 use crate::config::ConfigSet;
 use crate::error::{Error, Result};
 use crate::fsck_standalone::{fsck_object, FsckError, FsckObjectOptions};
-use crate::gitmodules::{DotFsckIssue, DotFsckTracker};
+use crate::gitmodules::{fsck_dot_special_tree_pass, DotFsckIssue, DotFsckTracker};
 use crate::index::MODE_GITLINK;
 use crate::midx::verify_midx;
 use crate::objects::{
-    oid_hash_map, oid_hash_set, oid_hash_set_from, parse_commit, parse_tag, parse_tree, HashAlgo,
-    ObjectId, ObjectKind, OidHashMap, OidHashSet, TreeEntry, TreeEntryRef, TreeRefIter,
+    oid_hash_map, oid_hash_set, oid_hash_set_from, parse_commit, parse_tag, HashAlgo, ObjectId,
+    ObjectKind, OidHashMap, OidHashSet, TreeEntryRef, TreeRefIter,
 };
 use crate::odb::Odb;
 use crate::pack::{prepare_pack_for_object_fsck, PackFsckTrailerIssue};
-use crate::pack_fsck_verify::{verify_pack_objects_offset_order, PackFsckObjectOutcome};
+use crate::pack_fsck_verify::{verify_pack_objects as verify_pack_file, PackFsckObjectOutcome};
 use crate::parallel::{try_par_map, ParallelOp, ParallelOptions};
-use crate::progress::{Cancel, ProgressPhase, ProgressSink};
+use crate::progress::{cancel_watch_arc, Cancel, ProgressPhase, ProgressSink};
 use crate::refs_fsck::{refs_fsck, RefsFsckIssue};
 use crate::repo::Repository;
 
@@ -628,14 +628,18 @@ enum WalkRootKind {
     IndexOnly,
 }
 
-/// Connectivity payload extracted while validating the object store (avoids re-inflating packs).
+/// Connectivity payload extracted while validating the object store.
+///
+/// Commits and tags keep their links so the walk does not re-inflate them. Trees only
+/// record their kind: their entries are re-read during the walk, because keeping every
+/// entry of every tree costs far more memory than the trees themselves.
 #[derive(Debug, Clone)]
 enum ValidatedObjectLinks {
     Commit {
         tree: ObjectId,
-        parents: Vec<ObjectId>,
+        parents: Box<[ObjectId]>,
     },
-    Tree(Vec<TreeEntry>),
+    Tree,
     Tag {
         object: ObjectId,
         object_type: ObjectKind,
@@ -650,17 +654,16 @@ fn validated_links_for(
 ) -> Option<ValidatedObjectLinks> {
     match kind {
         ObjectKind::Commit => {
-            if let Ok(c) = parse_commit(data) {
-                Some(ValidatedObjectLinks::Commit {
-                    tree: c.tree,
-                    parents: c.parents,
-                })
-            } else {
-                commit_link_targets(data, algo)
-                    .map(|(tree, parents)| ValidatedObjectLinks::Commit { tree, parents })
-            }
+            let (tree, parents) = match parse_commit(data) {
+                Ok(c) => (c.tree, c.parents),
+                Err(_) => commit_link_targets(data, algo)?,
+            };
+            Some(ValidatedObjectLinks::Commit {
+                tree,
+                parents: parents.into_boxed_slice(),
+            })
         }
-        ObjectKind::Tree => parse_tree(data).ok().map(ValidatedObjectLinks::Tree),
+        ObjectKind::Tree => Some(ValidatedObjectLinks::Tree),
         ObjectKind::Tag => {
             let tag = parse_tag(data).ok()?;
             let object_type = ObjectKind::from_tag_type_field(tag.object_type.as_bytes())?;
@@ -1075,6 +1078,49 @@ fn push_dot_issue(
     }
 }
 
+/// What pack fsck keeps about one verified object once its bytes are dropped.
+struct PackObjectFacts {
+    fsck_error: Option<FsckError>,
+    links: Option<ValidatedObjectLinks>,
+    tree_dot: Option<Box<TreeDotFacts>>,
+}
+
+/// `.gitmodules` / `.gitattributes` findings from one tree's entries.
+struct TreeDotFacts {
+    issues: Vec<DotFsckIssue>,
+    gitmodules: HashSet<ObjectId>,
+    gitattributes: HashSet<ObjectId>,
+}
+
+impl PackObjectFacts {
+    /// Run object fsck on `data` and extract what the connectivity walk and the
+    /// `.gitmodules` checks need later. Runs on pack verification worker threads.
+    fn inspect(oid: ObjectId, kind: ObjectKind, data: &[u8], opts: FsckObjectOptions) -> Self {
+        let tree_dot = (kind == ObjectKind::Tree)
+            .then(|| {
+                let mut gitmodules = HashSet::new();
+                let mut gitattributes = HashSet::new();
+                let issues =
+                    fsck_dot_special_tree_pass(&oid, data, &mut gitmodules, &mut gitattributes)
+                        .ok()?;
+                let empty = issues.is_empty() && gitmodules.is_empty() && gitattributes.is_empty();
+                (!empty).then(|| {
+                    Box::new(TreeDotFacts {
+                        issues,
+                        gitmodules,
+                        gitattributes,
+                    })
+                })
+            })
+            .flatten();
+        Self {
+            fsck_error: fsck_object(kind, data, opts).err(),
+            links: validated_links_for(kind, data, opts.hash_algo),
+            tree_dot,
+        }
+    }
+}
+
 fn verify_pack_objects(
     repo: &Repository,
     config: &ConfigSet,
@@ -1101,9 +1147,13 @@ fn verify_pack_objects(
         .collect();
     progress.start(ProgressPhase::IndexingObjects, Some(packs.len() as u64));
     let par_opts: ParallelOptions = repo.thread_policy().resolve(ParallelOp::IndexPack, config);
+    let threads = par_opts.parallelism().threads();
+    let cancel_watch = cancel_watch_arc(cancel);
     let mut checked = 0usize;
     let mut validated = oid_hash_set();
     let mut links = oid_hash_map();
+    // Blob-side `.gitmodules` / `.gitattributes` checks run in `finish_pending`, once every
+    // tree has registered the blobs it names.
     let mut dot = DotFsckTracker::default();
     for (i, idx_path) in packs.iter().enumerate() {
         if cancel.is_cancelled() {
@@ -1140,15 +1190,13 @@ fn verify_pack_objects(
         let object_count = prep.records.len();
         checked += object_count;
         validated.reserve(object_count);
-        links.reserve(object_count);
         if cancel.is_cancelled() {
             return Err(Error::Cancelled);
         }
-        let outcomes = verify_pack_objects_offset_order(prep, odb, par_opts)?;
-        for (n, outcome) in outcomes.into_iter().enumerate() {
-            if n.is_multiple_of(128) && cancel.is_cancelled() {
-                return Err(Error::Cancelled);
-            }
+        let outcomes = verify_pack_file(prep, odb, threads, &cancel_watch, |oid, kind, data| {
+            PackObjectFacts::inspect(oid, kind, data, fsck_opts)
+        })?;
+        for outcome in outcomes {
             match outcome {
                 PackFsckObjectOutcome::Failed { oid, err } => {
                     let issue = pack_object_read_issue(oid, &pack_path, err);
@@ -1156,27 +1204,30 @@ fn verify_pack_objects(
                         issues.push(issue);
                     }
                 }
-                PackFsckObjectOutcome::Clean(item) => {
-                    let oid = item.oid;
-                    let kind = item.kind;
-                    let data = item.data;
-                    if let Err(err) = fsck_object(kind, &data, fsck_opts) {
-                        push_bad_object(issues, config, strict, oid, err.clone());
-                        if object_fsck_allows_link_cache(&err, config, strict) {
-                            record_validated_object(
-                                &mut validated,
-                                &mut links,
-                                oid,
-                                kind,
-                                &data,
-                                algo,
-                            );
-                            apply_dot_checks(&mut dot, issues, config, strict, &oid, kind, &data);
+                PackFsckObjectOutcome::Clean { oid, facts } => {
+                    if let Some(err) = facts.fsck_error {
+                        let keep_links = object_fsck_allows_link_cache(&err, config, strict);
+                        push_bad_object(issues, config, strict, oid, err);
+                        if !keep_links {
+                            continue;
                         }
-                        continue;
                     }
-                    record_validated_object(&mut validated, &mut links, oid, kind, &data, algo);
-                    apply_dot_checks(&mut dot, issues, config, strict, &oid, kind, &data);
+                    validated.insert(oid);
+                    if let Some(object_links) = facts.links {
+                        links.insert(oid, object_links);
+                    }
+                    if let Some(tree_dot) = facts.tree_dot {
+                        let TreeDotFacts {
+                            issues: dot_issues,
+                            gitmodules,
+                            gitattributes,
+                        } = *tree_dot;
+                        for dot_issue in dot_issues {
+                            push_dot_issue(issues, config, strict, dot_issue);
+                        }
+                        dot.gitmodules_found.extend(gitmodules);
+                        dot.gitattributes_found.extend(gitattributes);
+                    }
                 }
             }
         }
@@ -1255,7 +1306,10 @@ fn walk_connectivity(
         if visited.is_multiple_of(256) {
             progress.set(visited);
         }
-        if let Some(links) = store_links.get(&oid) {
+        if let Some(links) = store_links
+            .get(&oid)
+            .filter(|links| !matches!(links, ValidatedObjectLinks::Tree))
+        {
             walk_from_validated_links(
                 odb,
                 store_links,
@@ -1407,7 +1461,7 @@ fn link_kind_matches(links: &ValidatedObjectLinks, expected: ObjectKind) -> bool
     matches!(
         (links, expected),
         (ValidatedObjectLinks::Commit { .. }, ObjectKind::Commit)
-            | (ValidatedObjectLinks::Tree(_), ObjectKind::Tree)
+            | (ValidatedObjectLinks::Tree, ObjectKind::Tree)
             | (ValidatedObjectLinks::Tag { .. }, ObjectKind::Tag)
             | (ValidatedObjectLinks::Blob, ObjectKind::Blob)
     )
@@ -1432,7 +1486,7 @@ fn child_exists_with_kind(
             ChildKindProbe::WrongKind
         };
     }
-    match odb.read(&target) {
+    match odb.read_info(&target) {
         Ok(child) if child.kind == expected => ChildKindProbe::Matches,
         Ok(_) => ChildKindProbe::WrongKind,
         Err(_) => ChildKindProbe::Missing,
@@ -1472,39 +1526,6 @@ fn walk_tree_entries_from_data(
             seen,
             tree_oid,
             entry,
-            promisor_parents,
-        );
-    }
-}
-
-#[allow(clippy::too_many_arguments)]
-fn walk_tree_entries(
-    odb: &Odb,
-    store_links: &OidHashMap<ValidatedObjectLinks>,
-    config: &ConfigSet,
-    strict: bool,
-    issues: &mut Vec<FsckIssue>,
-    queue: &mut VecDeque<(ObjectId, ObjectId, WalkRootKind)>,
-    seen: &mut OidHashSet,
-    tree_oid: ObjectId,
-    entries: &[TreeEntry],
-    promisor_parents: &OidHashSet,
-) {
-    for entry in entries {
-        walk_one_tree_entry(
-            odb,
-            store_links,
-            config,
-            strict,
-            issues,
-            queue,
-            seen,
-            tree_oid,
-            TreeEntryRef {
-                mode: entry.mode,
-                name: &entry.name,
-                oid: entry.oid,
-            },
             promisor_parents,
         );
     }
@@ -1609,20 +1630,6 @@ fn walk_from_validated_links(
                 promisor_parents,
             );
         }
-        ValidatedObjectLinks::Tree(entries) => {
-            walk_tree_entries(
-                odb,
-                store_links,
-                config,
-                strict,
-                issues,
-                queue,
-                seen,
-                oid,
-                entries,
-                promisor_parents,
-            );
-        }
         ValidatedObjectLinks::Tag {
             object,
             object_type,
@@ -1642,7 +1649,7 @@ fn walk_from_validated_links(
                 promisor_parents,
             );
         }
-        ValidatedObjectLinks::Blob => {}
+        ValidatedObjectLinks::Tree | ValidatedObjectLinks::Blob => {}
     }
 }
 

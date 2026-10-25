@@ -15,6 +15,10 @@ use grit_lib::porcelain::add::stage_for_commit;
 use grit_lib::porcelain::commit::{create_commit, CommitRequest, HookPolicy};
 use grit_lib::progress::{NeverCancel, NullProgress};
 use grit_lib::repo::{InitOptions, Repository};
+use grit_test_support::objects::{
+    write_pack_and_index, DeltaOps, IndexPackOptions, ObjectKind as PackKind, PackBuilder,
+    PackBuilt,
+};
 use grit_test_support::{
     git_fsck, git_hash_object_literally, write_loose_object, HashAlgo as FixtureAlgo,
 };
@@ -1403,4 +1407,162 @@ fn gitmod_dos83_symlink_matches_git() {
         "grit fsck: {:?}",
         report.issues
     );
+}
+
+/// Delta that appends `suffix` to `base`.
+fn append_delta(base: &[u8], suffix: &[u8]) -> Vec<u8> {
+    let mut ops = DeltaOps::new();
+    ops.header(base.len(), base.len() + suffix.len())
+        .copy(0, base.len())
+        .insert(suffix);
+    ops.finish()
+}
+
+/// Blob contents and pack entry indices of a delta-heavy pack, in insertion order.
+struct DeltaPack {
+    built: PackBuilt,
+    contents: Vec<Vec<u8>>,
+}
+
+/// A whole blob, a 60-deep ofs-delta chain on it, a ref-delta hanging off the middle of
+/// the chain by object id, an ofs-delta child of that ref-delta, and an unrelated blob.
+fn deep_delta_pack() -> DeltaPack {
+    let mut pb = PackBuilder::new(FixtureAlgo::Sha1);
+    let mut contents = vec![b"root of a long delta chain\n".repeat(16)];
+    let mut chain = vec![pb.add_full(PackKind::Blob, &contents[0])];
+    for i in 1..=60 {
+        let base = contents[i - 1].clone();
+        let suffix = format!("link {i}\n");
+        let delta = append_delta(&base, suffix.as_bytes());
+        chain.push(pb.add_ofs_delta(chain[i - 1], &delta, delta.len()));
+        let mut next = base;
+        next.extend_from_slice(suffix.as_bytes());
+        contents.push(next);
+    }
+    let mid = contents[30].clone();
+    let mid_oid = grit_lib::objects::HashAlgo::Sha1
+        .hash_object(ObjectKind::Blob, &mid)
+        .expect("hash");
+    let delta = append_delta(&mid, b"ref child\n");
+    let ref_idx = pb.add_ref_delta(mid_oid.as_bytes(), &delta, delta.len());
+    let mut ref_child = mid;
+    ref_child.extend_from_slice(b"ref child\n");
+    let delta = append_delta(&ref_child, b"ofs grandchild\n");
+    pb.add_ofs_delta(ref_idx, &delta, delta.len());
+    let mut grandchild = ref_child.clone();
+    grandchild.extend_from_slice(b"ofs grandchild\n");
+    contents.push(ref_child);
+    contents.push(grandchild);
+    let unrelated = b"unrelated whole blob\n".to_vec();
+    pb.add_full(PackKind::Blob, &unrelated);
+    contents.push(unrelated);
+    DeltaPack {
+        built: pb.build(),
+        contents,
+    }
+}
+
+fn blob_oid(data: &[u8]) -> ObjectId {
+    grit_lib::objects::HashAlgo::Sha1
+        .hash_object(ObjectKind::Blob, data)
+        .expect("hash")
+}
+
+fn install_pack(dir: &std::path::Path, pack: &[u8]) -> std::path::PathBuf {
+    let outcome = write_pack_and_index(
+        &dir.join(".git/objects"),
+        "pack-fsck-delta-tree",
+        pack,
+        FixtureAlgo::Sha1,
+        &IndexPackOptions::default(),
+    );
+    assert!(outcome.index_ok, "git index-pack: {}", outcome.index_stderr);
+    outcome.pack_path
+}
+
+#[test]
+fn fsck_resolves_deep_ofs_chain_and_in_pack_ref_delta() {
+    let (dir, repo) = init_repo();
+    let pack = deep_delta_pack();
+    install_pack(dir.path(), &pack.built.bytes);
+    repo.odb().invalidate_packs();
+
+    let git_out = git_fsck(dir.path(), true);
+    assert!(
+        git_out.msg_ids.is_empty(),
+        "git fsck: {:?}",
+        git_out.msg_ids
+    );
+    let config = repo.config().expect("config");
+    let opts = FsckOptions::full_repository(true);
+    let report = grit_fsck(&repo, &opts);
+    assert!(report.issues.is_empty(), "{:?}", report.issues);
+    assert!(report.ok(&config, &opts));
+    assert_eq!(report.objects_checked, pack.contents.len());
+
+    let mut expected: Vec<(ObjectKind, ObjectId)> = pack
+        .contents
+        .iter()
+        .map(|c| (ObjectKind::Blob, blob_oid(c)))
+        .collect();
+    expected.sort_by(|a, b| a.1.cmp(&b.1));
+    assert_eq!(grit_dangling_set(&report), expected);
+    assert_eq!(git_dangling_set(dir.path()), expected);
+}
+
+#[test]
+fn fsck_reports_every_descendant_of_a_corrupt_delta_base() {
+    let (dir, repo) = init_repo();
+    let pack = deep_delta_pack();
+    // Entry 10 sits in the middle of the ofs chain, so entries 11..=60 descend from it,
+    // as do the ref-delta on entry 30 and its ofs child.
+    let corrupt_entry = 10;
+    let pack_path = install_pack(dir.path(), &pack.built.bytes);
+    let slot_end = pack.built.entry_offsets[corrupt_entry + 1];
+    let mut bytes = fs::read(&pack_path).expect("read pack");
+    bytes[slot_end - 4] ^= 0x55;
+    let mut perms = fs::metadata(&pack_path).expect("meta").permissions();
+    perms.set_readonly(false);
+    fs::set_permissions(&pack_path, perms).expect("chmod");
+    fs::write(&pack_path, &bytes).expect("corrupt delta base");
+    repo.odb().invalidate_packs();
+
+    let git_text = git(dir.path(), &["fsck", "--no-dangling"]);
+    let corrupt_oid = blob_oid(&pack.contents[corrupt_entry]);
+    assert!(
+        git_text.contains(&corrupt_oid.to_hex()),
+        "git fsck must name the corrupt base: {git_text}"
+    );
+
+    let report = grit_fsck(&repo, &FsckOptions::full_repository(false));
+    let corrupt: std::collections::HashSet<ObjectId> = report
+        .issues
+        .iter()
+        .filter_map(|issue| match issue {
+            FsckIssue::BadObject { oid, error } if error.id == "corruptObject" => Some(*oid),
+            _ => None,
+        })
+        .collect();
+    let descendants: Vec<&Vec<u8>> = pack.contents[corrupt_entry..pack.contents.len() - 1]
+        .iter()
+        .collect();
+    assert_eq!(descendants.len(), 51 + 2);
+    for content in descendants {
+        let oid = blob_oid(content);
+        assert!(
+            corrupt.contains(&oid),
+            "descendant {} of the corrupt base must be reported; issues: {:?}",
+            oid.to_hex(),
+            report.issues
+        );
+    }
+    for intact in [&pack.contents[0], &pack.contents[corrupt_entry - 1]] {
+        assert!(
+            !corrupt.contains(&blob_oid(intact)),
+            "ancestors of the corrupt base still verify"
+        );
+    }
+    let unrelated = blob_oid(pack.contents.last().expect("unrelated"));
+    assert!(!corrupt.contains(&unrelated));
+    assert_eq!(report.objects_checked, pack.contents.len());
 }

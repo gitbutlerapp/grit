@@ -2032,7 +2032,8 @@ pub fn apply_delta_depth_limit(map: &mut HashMap<ObjectId, ObjectId>, max_depth:
 #[derive(Debug)]
 pub(crate) struct VerifiedPackForFsck {
     pub idx: PackIndex,
-    pub pack_bytes: Vec<u8>,
+    /// Memory-mapped pack file (owned only for tiny packs or when mapping fails).
+    pub pack_bytes: Arc<PackData>,
     pub records: Vec<VerifyObjectRecord>,
 }
 
@@ -2130,10 +2131,10 @@ pub fn verify_pack_and_collect(idx_path: &Path) -> Result<Vec<VerifyObjectRecord
 fn verify_pack_structure_and_records(
     idx_path: &Path,
     verify_pack_trailer: bool,
-) -> Result<(PackIndex, Vec<u8>, Vec<VerifyObjectRecord>)> {
+) -> Result<(PackIndex, Arc<PackData>, Vec<VerifyObjectRecord>)> {
     let idx = read_pack_index(idx_path)?;
     let idx_file_bytes = fs::read(idx_path).map_err(Error::Io)?;
-    let pack_bytes = fs::read(&idx.pack_path).map_err(Error::Io)?;
+    let pack_bytes = PackData::open_with_min_len(&idx.pack_path, 0)?;
     let hb = idx.hash_bytes();
     if pack_bytes.len() < 12 + hb {
         return Err(Error::CorruptObject(format!(
