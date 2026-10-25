@@ -1,5 +1,7 @@
 //! Hard reset honours cancellation while checking out files.
 
+mod support;
+
 use grit_lib::index::write_tree::{write_tree_update_index, WriteTreeFlags};
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
@@ -55,7 +57,11 @@ impl Cancel for CancelHardResetOnFiles {
     }
 }
 
-fn identity() -> String {
+fn reset_identity() -> grit_lib::ident::Signature {
+    support::parse_reflog_signature("T <t@t> 0 +0000")
+}
+
+fn identity_line() -> String {
     "T <t@t> 0 +0000".into()
 }
 
@@ -87,8 +93,8 @@ fn commit_file(
     let commit = objects::CommitData {
         tree,
         parents: parent.into_iter().collect(),
-        author: identity(),
-        committer: identity(),
+        author: identity_line(),
+        committer: identity_line(),
         author_raw: vec![],
         committer_raw: vec![],
         encoding: None,
@@ -141,7 +147,7 @@ fn hard_reset_returns_cancelled_and_stops_checkout_early() {
 
     reset_to_commit(
         &repo,
-        &ResetOptions::new(first, ResetMode::Hard, identity(), "reset"),
+        &ResetOptions::new(first, ResetMode::Hard, reset_identity(), "reset"),
         &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::NeverCancel,
     )
@@ -151,7 +157,7 @@ fn hard_reset_returns_cancelled_and_stops_checkout_early() {
     let cancel = progress.flag.clone();
     let err = reset_to_commit(
         &repo,
-        &ResetOptions::new(head, ResetMode::Hard, identity(), "reset"),
+        &ResetOptions::new(head, ResetMode::Hard, reset_identity(), "reset"),
         &mut progress,
         &cancel,
     )
@@ -196,7 +202,7 @@ fn hard_reset_backward_returns_cancelled_and_stops_deletes_early() {
     let cancel = progress.flag.clone();
     let err = reset_to_commit(
         &repo,
-        &ResetOptions::new(first, ResetMode::Hard, identity(), "reset"),
+        &ResetOptions::new(first, ResetMode::Hard, reset_identity(), "reset"),
         &mut progress,
         &cancel,
     )

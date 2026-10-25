@@ -18,6 +18,10 @@ use std::process::Command;
 
 const IDENT: &str = "Library Guide <guide@grit-scm.com> 1735689600 +0000";
 
+fn replay_identity() -> grit_lib::ident::Signature {
+    IDENT.parse().expect("IDENT")
+}
+
 fn open_repo(root: &Path) -> Result<Repository, grit_lib::error::Error> {
     let git_dir = if root.join(".git").is_dir() {
         root.join(".git")
@@ -96,7 +100,7 @@ fn demo_conflict_sequence(root: &Path) -> Result<(), grit_lib::error::Error> {
     let req = ReplaySequenceRequest {
         commits: vec![pick],
         direction: ReplayDirection::Pick,
-        committer: IDENT.into(),
+        committer: replay_identity(),
         options: ReplayOptions {
             empty: ReplayEmptyPolicy::Stop,
             ..ReplayOptions::default()
@@ -127,7 +131,7 @@ fn demo_conflict_sequence(root: &Path) -> Result<(), grit_lib::error::Error> {
     fs::write(root.join("f"), "merged\n").map_err(grit_lib::error::Error::Io)?;
     stage(&repo, &StageOptions::default(), &mut NullProgress)?;
 
-    match continue_replay_sequence(&repo, IDENT)? {
+    match continue_replay_sequence(&repo, &replay_identity())? {
         SequenceOutcome::Completed { created, dropped } => {
             println!(
                 "sequence completed; created={} dropped={}",
@@ -176,7 +180,7 @@ fn main() -> Result<(), grit_lib::error::Error> {
             println!("unmerged index — resolve and stage before continue");
             return Ok(());
         }
-        match continue_replay_sequence(&repo, IDENT)? {
+        match continue_replay_sequence(&repo, &replay_identity())? {
             SequenceOutcome::Completed { created, .. } => {
                 println!("continued; new commits={}", created.len());
             }

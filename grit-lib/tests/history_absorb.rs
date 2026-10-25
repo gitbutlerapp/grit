@@ -36,7 +36,7 @@ fn rewrite_opts() -> RewriteOptions {
 
 fn apply_opts() -> ApplyOptions {
     ApplyOptions {
-        identity: "Absorb <a@grit.test>".into(),
+        identity: support::reflog_signature("Absorb <a@grit.test>"),
         reflog_message: "history absorb".into(),
         record_operation: None,
         hooks: grit_lib::PostOperationHooks::Run,

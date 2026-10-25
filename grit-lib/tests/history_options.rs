@@ -30,7 +30,7 @@ fn open_grit(wt: &std::path::Path) -> Repository {
 
 fn apply_opts() -> ApplyOptions {
     ApplyOptions {
-        identity: "OptsHarness <opts@grit.test>".into(),
+        identity: support::reflog_signature("OptsHarness <opts@grit.test>"),
         reflog_message: "history options".into(),
         record_operation: None,
         hooks: grit_lib::PostOperationHooks::Run,

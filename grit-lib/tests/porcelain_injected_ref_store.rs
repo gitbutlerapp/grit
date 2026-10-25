@@ -188,7 +188,7 @@ fn battery(repo: &Repository, wt: &Path) -> BatteryResult {
         &ResetOptions::new(
             main_tip,
             ResetMode::Hard,
-            IDENT_TS,
+            support::parse_reflog_signature(IDENT_TS),
             "reset: moving to HEAD~1",
         ),
         &mut grit_lib::progress::NullProgress,
@@ -201,7 +201,12 @@ fn battery(repo: &Repository, wt: &Path) -> BatteryResult {
 
     reset_to_commit(
         repo,
-        &ResetOptions::new(merged, ResetMode::Hard, IDENT_TS, "reset: moving to v1"),
+        &ResetOptions::new(
+            merged,
+            ResetMode::Hard,
+            support::parse_reflog_signature(IDENT_TS),
+            "reset: moving to v1",
+        ),
         &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::NeverCancel,
     )
@@ -261,7 +266,12 @@ fn battery(repo: &Repository, wt: &Path) -> BatteryResult {
     stage(repo, &StageOptions::default(), &mut NullProgress).expect("stage rm");
     reset_to_commit(
         repo,
-        &ResetOptions::new(detached, ResetMode::Hard, IDENT_TS, "reset: moving to HEAD"),
+        &ResetOptions::new(
+            detached,
+            ResetMode::Hard,
+            support::parse_reflog_signature(IDENT_TS),
+            "reset: moving to HEAD",
+        ),
         &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::NeverCancel,
     )

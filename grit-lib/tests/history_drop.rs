@@ -43,7 +43,7 @@ fn opts(seq: i64) -> RewriteOptions {
 
 fn apply_opts() -> ApplyOptions {
     ApplyOptions {
-        identity: "Dropper <drop@grit.test>".into(),
+        identity: support::reflog_signature("Dropper <drop@grit.test>"),
         reflog_message: "history drop".into(),
         record_operation: None,
         hooks: grit_lib::PostOperationHooks::Run,

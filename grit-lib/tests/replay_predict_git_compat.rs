@@ -110,7 +110,7 @@ fn pick_req(commits: Vec<ObjectId>, opts: ReplayOptions) -> ReplaySequenceReques
     ReplaySequenceRequest {
         commits,
         direction: ReplayDirection::Pick,
-        committer: IDENT.to_owned(),
+        committer: IDENT.parse().expect("IDENT"),
         options: opts,
     }
 }
@@ -195,7 +195,7 @@ fn predict_no_commit_chains_index_tree_across_revert_range() {
     let req = ReplaySequenceRequest {
         commits: vec![c2, c1],
         direction: ReplayDirection::Revert,
-        committer: IDENT.to_owned(),
+        committer: IDENT.parse().expect("IDENT"),
         options: opts.clone(),
     };
     let out = start_replay_sequence(&repo, &req).expect("revert");

@@ -454,7 +454,7 @@ fn rewrite_options() -> RewriteOptions {
 
 fn apply_options(record: Option<&str>) -> ApplyOptions {
     ApplyOptions {
-        identity: IDENT.into(),
+        identity: IDENT.parse().expect("IDENT"),
         reflog_message: "history".into(),
         record_operation: record.map(str::to_owned),
         hooks: PostOperationHooks::Run,

@@ -1943,11 +1943,11 @@ fn fetch_remote_object_wants(
     })
 }
 
-/// Identity string for fetch/clone reflog entries (`Name <email> epoch tz`).
+/// Committer identity for fetch/clone reflog entries.
 pub fn fetch_operation_identity(
     env: &crate::environment::Environment,
     git_dir: &Path,
-) -> Result<String> {
+) -> Result<crate::ident::Signature> {
     use crate::ident_config::ident_default_name;
     let cfg = crate::config::ConfigSet::load(env, Some(git_dir), true)?;
     let name = ident_default_name(&cfg, env);
@@ -1956,7 +1956,7 @@ pub fn fetch_operation_identity(
         .filter(|e| !e.trim().is_empty())
         .unwrap_or_else(|| "unknown".to_owned());
     let now = time::OffsetDateTime::now_utc();
-    Ok(format!("{name} <{email}> {} +0000", now.unix_timestamp()))
+    crate::ident::Signature::new(name, email, now).map_err(crate::error::Error::InvalidSignature)
 }
 
 /// Ensure `refs/remotes/<remote>/HEAD` exists when the remote default branch is known.
@@ -2003,7 +2003,7 @@ pub(crate) fn finish_initial_remote_fetch_layout(
             if let Some(ref log) = opts.clone_reflog {
                 let zero = ObjectId::zero();
                 let tip = crate::refs::resolve_ref(git_dir, &target).unwrap_or(zero);
-                crate::refs::append_reflog(
+                crate::refs::append_reflog_with_signature(
                     git_dir,
                     &head_ref,
                     &zero,

@@ -10,9 +10,8 @@ use crate::operation_output::{
 };
 use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
 use crate::revision_errors::map_commit_spec_error;
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Result};
 use grit_lib::config::ident_resolve::IdentRole;
-use grit_lib::config::ConfigSet;
 use grit_lib::error::Error;
 use grit_lib::objects::ObjectId;
 use grit_lib::operation::{
@@ -194,14 +193,8 @@ impl MarkdownRender for PickOutcome {
 pub fn run(opts: PickRunOptions) -> Result<PickOutcome> {
     let repo = context::discover()?;
     let env = repo.environment();
-    let config =
-        ConfigSet::load(env, Some(repo.git_dir()), true).context("could not load config")?;
-    let committer = context::identity(
-        env,
-        &config,
-        IdentRole::Committer,
-        context::wall_clock_now(env),
-    )?;
+    let now = context::wall_clock_now(env);
+    let committer = context::signature(&repo, IdentRole::Committer, now)?;
 
     if (opts.continue_pick || opts.abort || opts.skip) && !opts.commits.is_empty() {
         bail!("`--continue`, `--abort`, and `--skip` cannot be used with commit arguments");

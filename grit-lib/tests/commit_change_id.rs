@@ -64,16 +64,18 @@ fn init_repo_with_generator(
     .unwrap()
 }
 
-fn ident() -> String {
-    "Change Id Test <cid@example.com> 1700000000 +0000".to_owned()
+fn ident() -> grit_lib::ident::Signature {
+    "Change Id Test <cid@example.com> 1700000000 +0000"
+        .parse()
+        .expect("ident")
 }
 
 fn commit_req(message: &str) -> CommitRequest {
     let id = ident();
     CommitRequest {
         message: message.to_owned(),
-        author: Some(id.parse().expect("signature")),
-        committer: Some(id.parse().expect("signature")),
+        author: Some(id.clone()),
+        committer: Some(id),
         allow_empty: false,
         sign_override: None,
         amend: false,
@@ -521,7 +523,7 @@ fn rewritten_commit_records_change_id_on_reword() {
         &RewriteOptions {
             scope: RefScope::Head,
             empty: EmptyPolicy::Drop,
-            committer: ident().parse().expect("signature"),
+            committer: ident(),
             preserve_committer: false,
             sign: false,
         },
@@ -578,7 +580,7 @@ fn squash_fold_preserves_oldest_change_id() {
             rewrite: RewriteOptions {
                 scope: RefScope::Head,
                 empty: EmptyPolicy::Drop,
-                committer: ident().parse().expect("signature"),
+                committer: ident(),
                 preserve_committer: false,
                 sign: false,
             },
@@ -629,7 +631,7 @@ fn reword_preserves_derived_change_id_for_headerless_git_commit() {
         &RewriteOptions {
             scope: RefScope::Head,
             empty: EmptyPolicy::Drop,
-            committer: ident().parse().expect("signature"),
+            committer: ident(),
             preserve_committer: false,
             sign: false,
         },

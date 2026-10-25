@@ -98,8 +98,8 @@ pub struct ReplaySequenceRequest {
     pub commits: Vec<ObjectId>,
     /// Pick or revert semantics for every commit in `commits`.
     pub direction: ReplayDirection,
-    /// Committer identity in Git header form: `Name <email> <unix-time> <tz>`.
-    pub committer: String,
+    /// Committer for replay commits and reflog entries.
+    pub committer: crate::ident::Signature,
     /// Merge, empty, and message options for the whole sequence.
     pub options: ReplayOptions,
 }
@@ -295,6 +295,7 @@ pub fn start_replay_sequence(
         validate_replay_step(repo, req.direction, head_oid, first, &req.options)?;
     }
     write_sequence_bootstrap(repo, head_oid, &todo, req)?;
+    let committer = req.committer.header_line();
     run_sequence(
         repo,
         &refname,
@@ -302,7 +303,7 @@ pub fn start_replay_sequence(
         head_oid,
         head_oid,
         req.direction,
-        &req.committer,
+        &committer,
         &req.options,
         &mut todo,
         Vec::new(),
@@ -318,7 +319,12 @@ pub fn start_replay_sequence(
 ///
 /// - [`Error::NoReplayInProgress`] when no sequence is active.
 /// - [`Error::ReplayContinueUnmerged`] when the index still has unmerged entries.
-pub fn continue_replay_sequence(repo: &Repository, identity: &str) -> Result<SequenceOutcome> {
+pub fn continue_replay_sequence(
+    repo: &Repository,
+    identity: &crate::ident::Signature,
+) -> Result<SequenceOutcome> {
+    identity.validate().map_err(Error::InvalidSignature)?;
+    let committer = identity.header_line();
     let active = load_active_replay(repo)?;
     let mut index = repo.load_index()?;
     if index.has_unmerged_entries() {
@@ -355,7 +361,7 @@ pub fn continue_replay_sequence(repo: &Repository, identity: &str) -> Result<Seq
             repo,
             &refname,
             head_oid,
-            identity,
+            &committer,
             &message,
             &source,
             active.direction,
@@ -389,7 +395,7 @@ pub fn continue_replay_sequence(repo: &Repository, identity: &str) -> Result<Seq
         &todo,
         &active.opts,
         active.direction,
-        identity,
+        &committer,
         &created_records,
     )?;
     run_sequence(
@@ -399,7 +405,7 @@ pub fn continue_replay_sequence(repo: &Repository, identity: &str) -> Result<Seq
         head_after,
         sequence_start,
         active.direction,
-        identity,
+        &committer,
         &active.opts,
         &mut todo,
         created_so_far,
@@ -416,7 +422,12 @@ pub fn continue_replay_sequence(repo: &Repository, identity: &str) -> Result<Seq
 /// # Errors
 ///
 /// - [`Error::NoReplayInProgress`] when no sequence is active.
-pub fn skip_replay_step(repo: &Repository, identity: &str) -> Result<SequenceOutcome> {
+pub fn skip_replay_step(
+    repo: &Repository,
+    identity: &crate::ident::Signature,
+) -> Result<SequenceOutcome> {
+    identity.validate().map_err(Error::InvalidSignature)?;
+    let committer = identity.header_line();
     let active = load_active_replay(repo)?;
     let (refname, head_oid) = branch_head(repo)?;
     reset_index_worktree_to_head(repo, &head_oid)?;
@@ -445,7 +456,7 @@ pub fn skip_replay_step(repo: &Repository, identity: &str) -> Result<SequenceOut
         head_oid,
         sequence_start,
         active.direction,
-        identity,
+        &committer,
         &active.opts,
         &mut todo,
         created_records.iter().map(|r| r.new_oid).collect(),
@@ -1361,12 +1372,15 @@ fn write_sequencer_state(
     .map_err(Error::Io)?;
     write_sequencer_todo(git_dir, todo)?;
     if rewrite_opts {
+        let committer_sig = committer
+            .parse::<crate::ident::Signature>()
+            .map_err(Error::InvalidSignature)?;
         write_persisted_options(
             git_dir,
             &ReplaySequenceRequest {
                 commits: Vec::new(),
                 direction,
-                committer: committer.to_owned(),
+                committer: committer_sig,
                 options: opts.clone(),
             },
         )?;
@@ -1436,7 +1450,7 @@ fn write_persisted_options(git_dir: &Path, req: &ReplaySequenceRequest) -> Resul
     body.push_str(&format!("favor = {favor}\n"));
     body.push_str(&format!("conflict-style = {style}\n"));
     body.push_str(&format!("mainline = {mainline}\n"));
-    body.push_str(&format!("committer = {}\n", req.committer));
+    body.push_str(&format!("committer = {}\n", req.committer.header_line()));
     if let Some(msg) = &req.options.message_override {
         body.push_str(&format!("message-override = {msg}\n"));
     }
@@ -1723,7 +1737,7 @@ fn write_sequence_bootstrap(
         todo,
         &req.options,
         req.direction,
-        &req.committer,
+        &req.committer.header_line(),
         true,
     )?;
     write_created_records(repo.git_dir(), &[])?;
@@ -1800,14 +1814,12 @@ fn reset_index_worktree_to_head(repo: &Repository, head_oid: &ObjectId) -> Resul
 fn hard_reset_branch(repo: &Repository, refname: &str, target: ObjectId) -> Result<()> {
     let short = refname.strip_prefix("refs/heads/").unwrap_or(refname);
     let _ = refname;
+    let identity = "Grit <grit@local> 0 +0000"
+        .parse()
+        .map_err(Error::InvalidSignature)?;
     reset_to_commit(
         repo,
-        &ResetOptions::new(
-            target,
-            ResetMode::Hard,
-            "Grit <grit@local> 0 +0000",
-            "abort replay",
-        ),
+        &ResetOptions::new(target, ResetMode::Hard, identity, "abort replay"),
         &mut crate::progress::NullProgress,
         &crate::progress::NeverCancel,
     )?;

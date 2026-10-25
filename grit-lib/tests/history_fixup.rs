@@ -73,7 +73,7 @@ fn harness_fixup_opts(scope: RefScope, empty: EmptyPolicy) -> FixupOptions {
 
 fn apply_opts() -> ApplyOptions {
     ApplyOptions {
-        identity: "Fixup <f@grit.test>".into(),
+        identity: support::reflog_signature("Fixup <f@grit.test>"),
         reflog_message: "history fixup".into(),
         record_operation: None,
         hooks: grit_lib::PostOperationHooks::Run,

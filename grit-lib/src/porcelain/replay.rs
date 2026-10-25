@@ -11,6 +11,7 @@ use std::fs;
 use crate::change_id::{change_id, ChangeId, ChangeIdPolicy};
 use crate::config::ConfigSet;
 use crate::error::{Error, Result};
+use crate::ident::Signature;
 use crate::merge_file::MergeFavor;
 use crate::merge_trees::{
     merge_trees_three_way, TreeMergeConflictPresentation, WhitespaceMergeOptions,
@@ -44,8 +45,8 @@ pub struct ReplayRequest {
     pub commit: ObjectId,
     /// Pick or revert semantics for the three-way merge and commit message.
     pub direction: ReplayDirection,
-    /// Committer identity in Git header form: `Name <email> <unix-time> <tz>`.
-    pub committer: String,
+    /// Committer for the replayed commit and branch reflog entries.
+    pub committer: Signature,
     /// When set, replaces the default commit message (pick: source message; revert: revert template).
     pub message_override: Option<String>,
 }
@@ -153,16 +154,17 @@ pub fn replay_commit(repo: &Repository, req: &ReplayRequest) -> Result<ReplayOut
 
     let config = repo.config()?;
     let message = commit_message(req, &source)?;
+    let committer_line = req.committer.header_line();
     let author = match req.direction {
         ReplayDirection::Pick => source.author.clone(),
-        ReplayDirection::Revert => req.committer.clone(),
+        ReplayDirection::Revert => committer_line.clone(),
     };
 
     let mut commit_data = CommitData {
         tree: new_tree,
         parents: vec![head_oid],
         author,
-        committer: req.committer.clone(),
+        committer: committer_line.clone(),
         author_raw: Vec::new(),
         committer_raw: Vec::new(),
         encoding: None,
@@ -183,7 +185,7 @@ pub fn replay_commit(repo: &Repository, req: &ReplayRequest) -> Result<ReplayOut
         branch_ref: &refname,
         expected_old: Some(head_oid),
         new_oid,
-        identity: &req.committer,
+        identity: &committer_line,
         reflog_message: &reflog_msg,
     };
 

@@ -36,7 +36,7 @@ fn rewrite_opts() -> RewriteOptions {
 
 fn apply_opts(operation: &str) -> ApplyOptions {
     ApplyOptions {
-        identity: "Undo Tester <undo@grit.test>".into(),
+        identity: support::reflog_signature("Undo Tester <undo@grit.test>"),
         reflog_message: format!("history {operation}"),
         record_operation: Some(operation.into()),
         hooks: grit_lib::PostOperationHooks::Run,
@@ -45,7 +45,7 @@ fn apply_opts(operation: &str) -> ApplyOptions {
 
 fn undo_opts() -> ApplyOptions {
     ApplyOptions {
-        identity: "Undo Tester <undo@grit.test>".into(),
+        identity: support::reflog_signature("Undo Tester <undo@grit.test>"),
         reflog_message: "history undo".into(),
         record_operation: None,
         hooks: grit_lib::PostOperationHooks::Run,

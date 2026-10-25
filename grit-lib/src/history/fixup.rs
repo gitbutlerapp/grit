@@ -651,7 +651,7 @@ mod hunk_selection_restore_tests {
         )
         .expect("stage line-18");
         let apply_opts = ApplyOptions {
-            identity: "Fixup <f@grit.test>".into(),
+            identity: "Fixup <f@grit.test> 1 +0000".parse().expect("identity"),
             reflog_message: "history fixup".into(),
             record_operation: None,
             hooks: crate::hooks::PostOperationHooks::Run,

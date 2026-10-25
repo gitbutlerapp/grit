@@ -19,6 +19,10 @@ use support::{
 };
 
 const IDENT: &str = "Test User <t@example.com> 1700000000 +0000";
+
+fn test_ident() -> grit_lib::ident::Signature {
+    IDENT.parse().expect("IDENT")
+}
 const COMMITTER: &str = "Refs Harness Author <refs-harness@example.com> 1700001000 +0000";
 
 fn open_grit(wt: &std::path::Path) -> Repository {
@@ -53,7 +57,7 @@ fn start_opts(upstream: ObjectId, onto: Option<ObjectId>, tip: ObjectId) -> Star
         },
         rebase: rebase_opts(),
         apply: grit_lib::revwalk::history::ApplyOptions {
-            identity: IDENT.into(),
+            identity: test_ident(),
             reflog_message: "rebase".into(),
             record_operation: None,
             hooks: grit_lib::PostOperationHooks::Run,
@@ -175,7 +179,7 @@ fn rebase_session_conflict_stop_continue_and_abort() {
     git(wt2, &["switch", "topic"]);
     let orig2 = git_oid(wt2, "topic");
     let _ = start_rebase(&grit2, &start_opts(upstream2, Some(onto2), tip2)).expect("stop");
-    abort_rebase(&grit2, IDENT).expect("abort");
+    abort_rebase(&grit2, &test_ident()).expect("abort");
     assert_eq!(git_oid(wt2, "topic"), orig2);
     assert!(resolve_head(grit2.git_dir()).unwrap().branch_name() == Some("topic"));
     assert_git_fsck_strict(wt2);
@@ -616,7 +620,7 @@ fn stacked_branches_move_atomically_after_continue() {
         },
         rebase: opts,
         apply: grit_lib::revwalk::history::ApplyOptions {
-            identity: IDENT.into(),
+            identity: test_ident(),
             reflog_message: "rebase".into(),
             record_operation: None,
             hooks: grit_lib::PostOperationHooks::Run,
@@ -651,7 +655,7 @@ fn abort_restores_branch_index_worktree_exactly() {
     let grit = open_grit(wt);
     git(wt, &["switch", "topic"]);
     let _ = start_rebase(&grit, &start_opts(upstream, Some(onto), tip)).expect("stop");
-    abort_rebase(&grit, IDENT).expect("abort");
+    abort_rebase(&grit, &test_ident()).expect("abort");
     assert_eq!(git_oid(wt, "topic"), orig_tip);
     assert_eq!(
         git(wt, &["rev-parse", "HEAD^{tree}"]),
@@ -863,7 +867,7 @@ fn abort_restores_git_started_rebase() {
     let (repo, main_tip, orig_tip) = git_started_conflict_rebase();
     let wt = repo.worktree();
     let grit = open_grit(wt);
-    abort_rebase(&grit, IDENT).expect("abort git rebase");
+    abort_rebase(&grit, &test_ident()).expect("abort git rebase");
     assert!(!wt.join(".git/rebase-merge").exists());
     assert_eq!(
         git(wt, &["symbolic-ref", "HEAD"]).trim(),
@@ -887,7 +891,7 @@ fn abort_restores_detached_git_rebase() {
     let out = git_unchecked(wt, &["rebase", "main"]);
     assert!(!out.status.success(), "git rebase should stop on conflict");
     let grit = open_grit(wt);
-    abort_rebase(&grit, IDENT).expect("abort detached git rebase");
+    abort_rebase(&grit, &test_ident()).expect("abort detached git rebase");
     assert!(!wt.join(".git/rebase-merge").exists());
     assert!(matches!(
         resolve_head(grit.git_dir()).unwrap(),
@@ -905,7 +909,7 @@ fn abort_refuses_git_rebase_with_autostash() {
     std::fs::write(&stash, format!("{}\n", orig_tip.to_hex())).expect("autostash");
     let grit = open_grit(wt);
     assert!(matches!(
-        abort_rebase(&grit, IDENT).unwrap_err(),
+        abort_rebase(&grit, &test_ident()).unwrap_err(),
         RebaseSessionError::ForeignRebaseInProgress
     ));
     assert!(stash.is_file(), "refusal leaves git's state untouched");
@@ -916,7 +920,7 @@ fn abort_without_rebase_reports_none_in_progress() {
     let (repo, ..) = conflict_rebase_fixture();
     let grit = open_grit(repo.worktree());
     assert!(matches!(
-        abort_rebase(&grit, IDENT).unwrap_err(),
+        abort_rebase(&grit, &test_ident()).unwrap_err(),
         RebaseSessionError::NoRebaseInProgress
     ));
 }
@@ -1085,7 +1089,7 @@ fn abort_clears_rerere_state_of_git_started_rebase_like_git() {
 
     let (repo, orig_tip) = rerere_rebase();
     let wt = repo.worktree();
-    abort_rebase(&open_grit(wt), IDENT).expect("abort git rebase");
+    abort_rebase(&open_grit(wt), &test_ident()).expect("abort git rebase");
     assert_eq!(git_oid(wt, "topic"), orig_tip);
     assert!(
         !wt.join(".git/MERGE_RR").exists(),

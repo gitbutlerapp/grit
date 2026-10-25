@@ -270,8 +270,8 @@ impl Default for FetchOptions {
 /// Identity and message for clone reflog entries written by the library.
 #[derive(Clone, Debug)]
 pub struct CloneReflog {
-    /// `"Name <email> <unix_time> <tz>"` formatted identity.
-    pub identity: String,
+    /// Committer identity for the clone reflog line.
+    pub identity: crate::ident::Signature,
     /// Reflog message (e.g. `clone: from <url>`).
     pub message: String,
 }

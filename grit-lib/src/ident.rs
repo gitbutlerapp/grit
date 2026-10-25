@@ -111,6 +111,13 @@ impl Signature {
         Ok(())
     }
 
+    /// `Name <email>` for a reflog identity column; the timestamp is taken from
+    /// [`crate::refs::store::ReflogUpdate::time`] when the entry is formatted.
+    #[must_use]
+    pub fn reflog_name_email(&self) -> String {
+        format!("{} <{}>", self.name, self.email)
+    }
+
     /// Render as a header payload: `Name <email> <unix-seconds> <±HHMM>`.
     ///
     /// The result is what follows `author ` / `committer ` / `tagger ` in an object.

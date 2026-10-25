@@ -11,6 +11,7 @@ mod refs_harness;
 mod revparse_oracle;
 mod revparse_seed;
 mod revwalk_fixtures;
+mod signature_harness;
 
 pub use attributes_harness::*;
 pub use config_oracle::*;
@@ -51,3 +52,4 @@ pub use revwalk_fixtures::{
     setup_dual_merge_back_simplify_oracle, setup_first_parent_boundary_history,
     setup_path_simplify_history, setup_treesame_history,
 };
+pub use signature_harness::{parse_reflog_signature, reflog_signature};

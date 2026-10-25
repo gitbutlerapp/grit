@@ -747,7 +747,9 @@ fn rebase_fetched_upstream(
             repo,
             &plan,
             &ApplyOptions {
-                identity: checkout_reflog_identity(repo),
+                identity: checkout_reflog_identity(repo)
+                    .parse()
+                    .map_err(|err| PullError::Repository(Error::InvalidSignature(err)))?,
                 reflog_message: format!("pull: rebase onto {label}"),
                 record_operation: Some("rebase".into()),
                 hooks: crate::hooks::PostOperationHooks::Run,

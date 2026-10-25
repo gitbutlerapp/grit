@@ -255,8 +255,9 @@ impl RewritePlan {
 /// Identity and reflog text recorded when [`super::apply_rewrite`](crate::history::apply_rewrite) moves refs.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ApplyOptions {
-    /// Reflog identity (`Name <email>`).
-    pub identity: String,
+    /// Committer identity for reflog entries (timestamp is taken from the signature).
+    #[serde(with = "signature_header_line")]
+    pub identity: Signature,
     /// Reflog message for every ref update in the batch.
     pub reflog_message: String,
     /// When set, persist ref movements to `.git/grit/history-last` after a successful apply.

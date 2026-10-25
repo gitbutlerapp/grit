@@ -2,6 +2,8 @@
 //! objects, a single pack and several packs; the system `git` must see the result as clean
 //! and the repository must pass `git fsck`. Converted paths (autocrlf) are not streamed.
 
+mod support;
+
 use std::fs;
 use std::io::Write;
 use std::path::Path;
@@ -203,7 +205,12 @@ fn exercise(storage: Storage) {
     fs::remove_file(fx.root.join("tool.sh")).expect("rm exec");
     reset_to_commit(
         &repo,
-        &ResetOptions::new(fx.main, ResetMode::Hard, "T <t@example.com>", "reset: test"),
+        &ResetOptions::new(
+            fx.main,
+            ResetMode::Hard,
+            support::parse_reflog_signature("T <t@example.com>"),
+            "reset: test",
+        ),
         &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::NeverCancel,
     )
@@ -268,7 +275,12 @@ fn corrupt_large_blob_never_leaves_a_partial_file() {
     fs::write(fx.root.join("assets/big.dat"), b"local edit\n").expect("modify");
     let err = reset_to_commit(
         &repo,
-        &ResetOptions::new(fx.main, ResetMode::Hard, "T <t@example.com>", "reset: test"),
+        &ResetOptions::new(
+            fx.main,
+            ResetMode::Hard,
+            support::parse_reflog_signature("T <t@example.com>"),
+            "reset: test",
+        ),
         &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::NeverCancel,
     );

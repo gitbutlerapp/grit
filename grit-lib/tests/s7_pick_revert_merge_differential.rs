@@ -117,7 +117,7 @@ fn replay_pick(repo: &Repository, commit: ObjectId) -> ReplayOutcome {
         &ReplayRequest {
             commit,
             direction: ReplayDirection::Pick,
-            committer: IDENT.to_owned(),
+            committer: IDENT.parse().expect("IDENT"),
             message_override: None,
         },
     )
@@ -175,7 +175,7 @@ fn s7_differential_revert_matches_git() {
         &ReplayRequest {
             commit: bad_oid,
             direction: ReplayDirection::Revert,
-            committer: IDENT.to_owned(),
+            committer: IDENT.parse().expect("IDENT"),
             message_override: None,
         },
     )
@@ -263,7 +263,7 @@ fn s7_differential_pick_refuses_dirty_worktree() {
         &ReplayRequest {
             commit: pick_source,
             direction: ReplayDirection::Pick,
-            committer: IDENT.to_owned(),
+            committer: IDENT.parse().expect("IDENT"),
             message_override: None,
         },
     )

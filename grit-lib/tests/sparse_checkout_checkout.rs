@@ -9,6 +9,8 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+mod support;
+
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::index::sparse_checkout::SparseCheckout;
 use grit_lib::objects::ObjectId;
@@ -192,7 +194,12 @@ fn assert_b_not_materialized(dir: &Path) {
 fn reset(repo: &Repository, target: ObjectId, mode: ResetMode) {
     reset_to_commit(
         repo,
-        &ResetOptions::new(target, mode, "T <t@example.com>", "reset"),
+        &ResetOptions::new(
+            target,
+            mode,
+            support::parse_reflog_signature("T <t@example.com>"),
+            "reset",
+        ),
         &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::NeverCancel,
     )

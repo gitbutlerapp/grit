@@ -3,6 +3,8 @@
 //! Regression for issue #981: `grit reset --hard` at HEAD should behave like Git's
 //! stat-only refresh on a clean tree (no content writes, mtimes unchanged).
 
+mod support;
+
 use grit_lib::index::write_tree::{write_tree_update_index, WriteTreeFlags};
 use grit_lib::objects::{serialize_commit, CommitData, ObjectKind};
 use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
@@ -59,7 +61,12 @@ fn commit_many_files(repo: &Repository, count: usize) -> grit_lib::objects::Obje
 }
 
 fn reset_opts(target: grit_lib::objects::ObjectId, mode: ResetMode) -> ResetOptions {
-    ResetOptions::new(target, mode, "T <t@t> 0 +0000", "reset")
+    ResetOptions::new(
+        target,
+        mode,
+        support::parse_reflog_signature("T <t@t> 0 +0000"),
+        "reset",
+    )
 }
 
 #[test]

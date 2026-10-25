@@ -3,6 +3,7 @@
 use crate::config::ConfigSet;
 use crate::diff::DiffEntry;
 use crate::error::{Error, Result};
+use crate::ident::Signature;
 use crate::objects::{parse_commit, ObjectId, ObjectKind};
 use crate::porcelain::checkout::checkout_hard_to_tree_from_head_tree;
 use crate::porcelain::index_from_tree::index_from_tree_with_owned_seed_worktree_stats;
@@ -12,6 +13,7 @@ use crate::porcelain::switch::{
 };
 use crate::porcelain::worktree_guard::{load_worktree_snapshot, local_change_diffs};
 use crate::refs;
+use crate::refs::store::{Expected, RawRef, RefUpdate, RefUpdateFlags, ReflogUpdate};
 use crate::repo::Repository;
 use crate::state::{resolve_head_for_repository, HeadState};
 
@@ -51,8 +53,8 @@ pub struct ResetOptions {
     pub target: ObjectId,
     /// Soft, mixed (default), hard, or keep reset.
     pub mode: ResetMode,
-    /// Reflog identity: `Name <email> <unix-time> <tz>`.
-    pub identity: String,
+    /// Committer recorded on reset reflog entries (name, email, and timestamp).
+    pub identity: Signature,
     /// Reflog message (e.g. `reset: moving to HEAD~1`).
     pub message: String,
     /// When true, compute effects without updating refs, index, or worktree.
@@ -67,13 +69,13 @@ impl ResetOptions {
     pub fn new(
         target: ObjectId,
         mode: ResetMode,
-        identity: impl Into<String>,
+        identity: Signature,
         message: impl Into<String>,
     ) -> Self {
         Self {
             target,
             mode,
-            identity: identity.into(),
+            identity,
             message: message.into(),
             dry_run: false,
             orphan_limit: DEFAULT_ORPHAN_LIMIT,
@@ -399,19 +401,30 @@ fn append_reset_reflogs(
     new: ObjectId,
     opts: &ResetOptions,
 ) -> Result<()> {
+    opts.identity.validate().map_err(Error::InvalidSignature)?;
     let config =
         ConfigSet::load(repo.environment(), Some(repo.git_dir()), true).unwrap_or_default();
+    let log = ReflogUpdate {
+        identity: opts.identity.reflog_name_email(),
+        message: opts.message.clone(),
+        time: opts.identity.time,
+        old_oid: Some(old),
+        new_oid: Some(new),
+    };
     for name in names {
         if refs::should_autocreate_reflog_with_config(&config, repo.git_dir(), name) {
-            refs::append_reflog_on_store(
+            refs::commit_ref_update_on_store(
                 repo.refs(),
-                name,
-                &old,
-                &new,
-                &opts.identity,
-                &opts.message,
-                false,
-                &config,
+                RefUpdate {
+                    name: (*name).to_owned(),
+                    new_value: Some(RawRef::Direct(new)),
+                    expected: Expected::Any,
+                    reflog: Some(log.clone()),
+                    flags: RefUpdateFlags {
+                        no_deref: true,
+                        log_only: true,
+                    },
+                },
             )?;
         }
     }
@@ -497,7 +510,7 @@ mod tests {
         ResetOptions {
             target,
             mode,
-            identity: "T <t@t> 0 +0000".into(),
+            identity: "T <t@t> 0 +0000".parse().expect("identity"),
             message: "reset".into(),
             dry_run: false,
             orphan_limit: DEFAULT_ORPHAN_LIMIT,

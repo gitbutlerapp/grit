@@ -1,5 +1,7 @@
 //! Hostile tree entry names must be rejected at checkout/index population, matching system `git`.
 
+mod support;
+
 use std::collections::BTreeMap;
 use std::fs;
 use std::path::Path;
@@ -452,7 +454,7 @@ fn hostile_paths_rejected_on_clone_switch_reset_restore() {
             &ResetOptions::new(
                 evil_commit_oid,
                 ResetMode::Hard,
-                "T <t@e.com>",
+                support::parse_reflog_signature("T <t@e.com>"),
                 "reset test",
             ),
             &mut grit_lib::progress::NullProgress,

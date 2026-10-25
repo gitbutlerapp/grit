@@ -681,7 +681,7 @@ fn setup_clone_head(
     opts: &CloneOptions,
     requested: &CloneRequestedRef,
     fetch_outcome: &crate::transfer::FetchOutcome,
-    identity: &str,
+    identity: &crate::ident::Signature,
     clone_message: &str,
 ) -> std::result::Result<(CloneHead, ObjectId), CloneError> {
     let zero = ObjectId::zero();
@@ -689,7 +689,7 @@ fn setup_clone_head(
         CloneRequestedRef::Tag { name, peel } => {
             if !peel.is_zero() {
                 refs::write_ref(repo.git_dir(), "HEAD", peel).map_err(CloneError::Library)?;
-                refs::append_reflog(
+                refs::append_reflog_with_signature(
                     repo.git_dir(),
                     "HEAD",
                     &zero,
@@ -718,7 +718,7 @@ fn setup_clone_head(
                 if !oid.is_zero() {
                     refs::write_ref(repo.git_dir(), &branch_ref, &oid)
                         .map_err(CloneError::Library)?;
-                    refs::append_reflog(
+                    refs::append_reflog_with_signature(
                         repo.git_dir(),
                         &branch_ref,
                         &zero,
@@ -734,7 +734,7 @@ fn setup_clone_head(
             refs::write_symbolic_ref(repo.git_dir(), "HEAD", &branch_ref)
                 .map_err(CloneError::Library)?;
             if !oid.is_zero() {
-                refs::append_reflog(
+                refs::append_reflog_with_signature(
                     repo.git_dir(),
                     "HEAD",
                     &zero,
@@ -777,7 +777,7 @@ fn setup_clone_head(
                 if !oid.is_zero() {
                     refs::write_ref(repo.git_dir(), &branch_ref, &oid)
                         .map_err(CloneError::Library)?;
-                    refs::append_reflog(
+                    refs::append_reflog_with_signature(
                         repo.git_dir(),
                         &branch_ref,
                         &zero,
@@ -793,7 +793,7 @@ fn setup_clone_head(
             refs::write_symbolic_ref(repo.git_dir(), "HEAD", &branch_ref)
                 .map_err(CloneError::Library)?;
             if !oid.is_zero() {
-                refs::append_reflog(
+                refs::append_reflog_with_signature(
                     repo.git_dir(),
                     "HEAD",
                     &zero,

@@ -54,7 +54,9 @@ fn main() -> Result<(), grit_lib::error::Error> {
         &repo,
         &plan,
         &ApplyOptions {
-            identity: "History Guide <guide@grit.test>".into(),
+            identity: "History Guide <guide@grit.test> 1 +0000"
+                .parse()
+                .expect("identity"),
             reflog_message: "history reword".into(),
             record_operation: None,
             hooks: grit_lib::PostOperationHooks::Run,

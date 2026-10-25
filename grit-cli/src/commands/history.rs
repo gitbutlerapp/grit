@@ -6,7 +6,6 @@ use anyhow::{bail, Context, Result};
 use clap::ValueEnum;
 use grit_lib::command_runner::system_command_runner;
 use grit_lib::config::ident_resolve::IdentRole;
-use grit_lib::config::ConfigSet;
 use grit_lib::error::Error as LibError;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::hunk_select::{parse_hunk_id_list, HunkSelectError, HunkSelection};
@@ -587,20 +586,16 @@ impl MarkdownRender for HistoryRewriteOutcome {
 /// Repository, config and rewrite options shared by every history subcommand.
 struct Rewrite {
     repo: Repository,
-    config: ConfigSet,
     options: RewriteOptions,
 }
 
 impl Rewrite {
     fn new(repo: Repository, shared: &HistoryRewriteArgs) -> Result<Self> {
         let env = repo.environment();
-        let config =
-            ConfigSet::load(env, Some(repo.git_dir()), true).context("could not load config")?;
         let committer =
             context::signature(&repo, IdentRole::Committer, context::wall_clock_now(env))?;
         Ok(Self {
             repo,
-            config,
             options: RewriteOptions {
                 scope: shared.update_refs.into(),
                 empty: shared.empty.into(),
@@ -612,8 +607,13 @@ impl Rewrite {
     }
 
     fn apply_options(&self, operation: &str, reflog_message: String) -> Result<ApplyOptions> {
+        let now = context::wall_clock_now(self.repo.environment());
         Ok(ApplyOptions {
-            identity: context::committer_reflog_identity(self.repo.environment(), &self.config)?,
+            identity: context::signature(
+                &self.repo,
+                grit_lib::config::ident_resolve::IdentRole::Committer,
+                now,
+            )?,
             reflog_message,
             record_operation: Some(operation.into()),
             hooks: PostOperationHooks::Run,
@@ -1261,11 +1261,14 @@ pub fn run_rebase(opts: &RebaseRunOptions<'_>) -> Result<RebaseRunOutcome> {
     Ok(RebaseRunOutcome::Rebase(map_rebase_outcome(outcome)?))
 }
 
-fn reflog_identity(repo: &Repository) -> Result<String> {
+fn reflog_identity(repo: &Repository) -> Result<grit_lib::ident::Signature> {
     let env = repo.environment();
-    let config =
-        ConfigSet::load(env, Some(repo.git_dir()), true).context("could not load config")?;
-    context::committer_reflog_identity(env, &config)
+    let now = context::wall_clock_now(env);
+    context::signature(
+        repo,
+        grit_lib::config::ident_resolve::IdentRole::Committer,
+        now,
+    )
 }
 
 fn map_rebase_outcome(outcome: RebaseOutcome) -> Result<RebaseCliOutcome> {
@@ -1339,8 +1342,13 @@ pub fn run_undo(shared: &HistoryRewriteArgs) -> Result<HistoryRewriteOutcome> {
     let on_err = history_error("history undo");
     let repo = context::discover()?;
     let rewrite = Rewrite::new(repo, shared)?;
+    let now = context::wall_clock_now(rewrite.repo.environment());
     let apply_opts = ApplyOptions {
-        identity: context::committer_reflog_identity(rewrite.repo.environment(), &rewrite.config)?,
+        identity: context::signature(
+            &rewrite.repo,
+            grit_lib::config::ident_resolve::IdentRole::Committer,
+            now,
+        )?,
         reflog_message: "history undo".into(),
         record_operation: None,
         hooks: PostOperationHooks::Skip,

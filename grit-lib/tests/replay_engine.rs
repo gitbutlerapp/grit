@@ -108,7 +108,7 @@ fn replay_pick(repo: &Repository, commit: ObjectId) -> grit_lib::error::Result<R
         &ReplayRequest {
             commit,
             direction: ReplayDirection::Pick,
-            committer: IDENT.to_owned(),
+            committer: IDENT.parse().expect("IDENT"),
             message_override: None,
         },
     )
@@ -120,7 +120,7 @@ fn replay_revert(repo: &Repository, commit: ObjectId) -> grit_lib::error::Result
         &ReplayRequest {
             commit,
             direction: ReplayDirection::Revert,
-            committer: IDENT.to_owned(),
+            committer: IDENT.parse().expect("IDENT"),
             message_override: None,
         },
     )

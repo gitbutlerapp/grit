@@ -48,7 +48,7 @@ fn apply_plan(wt: &std::path::Path, plan: &grit_lib::revwalk::history::RewritePl
         &grit,
         plan,
         &ApplyOptions {
-            identity: "T <t@grit.test>".into(),
+            identity: support::reflog_signature("T <t@grit.test>"),
             reflog_message: "history move".into(),
             record_operation: None,
             hooks: grit_lib::PostOperationHooks::Run,

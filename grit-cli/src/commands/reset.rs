@@ -1,7 +1,7 @@
 //! `grit reset` — move the branch tip and optionally the index or worktree.
 
-use anyhow::{Context, Result};
-use grit_lib::config::ConfigSet;
+use anyhow::Result;
+use grit_lib::config::ident_resolve::IdentRole;
 use grit_lib::error::Error;
 use grit_lib::porcelain::reset::{
     reset_to_commit, OrphanedCommitSummary, ResetMode, ResetOptions, ResetOutcome,
@@ -185,10 +185,8 @@ pub fn run(
         .map_err(|err| map_reset_committish_error(err, &spec))?;
 
     let env = repo.environment();
-    let config =
-        ConfigSet::load(env, Some(repo.git_dir()), true).context("could not load config")?;
     let now = context::wall_clock_now(env);
-    let identity = context::reflog_identity(env, &config, now);
+    let identity = context::signature(&repo, IdentRole::Committer, now)?;
 
     let message = format!("reset: moving to {spec}");
     let mut opts = ResetOptions::new(target, mode, identity, message);

@@ -29,7 +29,7 @@ fn committer(seq: i64) -> String {
 
 fn apply_opts() -> ApplyOptions {
     ApplyOptions {
-        identity: "Applier <apply@grit.test>".into(),
+        identity: support::reflog_signature("Applier <apply@grit.test>"),
         reflog_message: "history rewrite".into(),
         record_operation: None,
         hooks: grit_lib::PostOperationHooks::Run,

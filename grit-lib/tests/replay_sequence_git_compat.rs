@@ -108,7 +108,7 @@ fn pick_req(commits: Vec<ObjectId>, opts: ReplayOptions) -> ReplaySequenceReques
     ReplaySequenceRequest {
         commits,
         direction: ReplayDirection::Pick,
-        committer: IDENT.to_owned(),
+        committer: IDENT.parse().expect("IDENT"),
         options: opts,
     }
 }
@@ -117,7 +117,7 @@ fn revert_req(commits: Vec<ObjectId>, opts: ReplayOptions) -> ReplaySequenceRequ
     ReplaySequenceRequest {
         commits,
         direction: ReplayDirection::Revert,
-        committer: IDENT.to_owned(),
+        committer: IDENT.parse().expect("IDENT"),
         options: opts,
     }
 }

@@ -80,7 +80,7 @@ fn pick(repo: &Repository, commit: &str) -> ReplayOutcome {
         &ReplayRequest {
             commit: ObjectId::from_hex(commit).expect("oid"),
             direction: ReplayDirection::Pick,
-            committer: IDENT.to_owned(),
+            committer: IDENT.parse().expect("IDENT"),
             message_override: None,
         },
     )

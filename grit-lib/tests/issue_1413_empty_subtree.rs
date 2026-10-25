@@ -67,7 +67,7 @@ fn drop_opts(seq: i64) -> RewriteOptions {
 
 fn apply_opts() -> ApplyOptions {
     ApplyOptions {
-        identity: "Tester <t@grit.test>".into(),
+        identity: support::reflog_signature("Tester <t@grit.test>"),
         reflog_message: "history drop".into(),
         record_operation: None,
         hooks: grit_lib::PostOperationHooks::Run,
@@ -105,7 +105,9 @@ fn replay_revert_emptied_subdirectory_fsck_clean() {
         &ReplayRequest {
             commit: c2,
             direction: ReplayDirection::Revert,
-            committer: "Tester <t@grit.test> 1700000060 +0000".into(),
+            committer: "Tester <t@grit.test> 1700000060 +0000"
+                .parse()
+                .expect("committer"),
             message_override: None,
         },
     )
@@ -133,7 +135,9 @@ fn replay_pick_dir_delete_fsck_clean() {
         &ReplayRequest {
             commit: delete_commit,
             direction: ReplayDirection::Pick,
-            committer: "Tester <t@grit.test> 1700000120 +0000".into(),
+            committer: "Tester <t@grit.test> 1700000120 +0000"
+                .parse()
+                .expect("committer"),
             message_override: None,
         },
     )

@@ -18,8 +18,8 @@ use support::{
 };
 use tempfile::TempDir;
 
-fn identity() -> String {
-    "T <t@t> 0 +0000".into()
+fn identity() -> grit_lib::ident::Signature {
+    support::parse_reflog_signature("T <t@t> 0 +0000")
 }
 
 fn commit_file(
@@ -138,7 +138,12 @@ fn reset_keep_preserves_unrelated_local_changes_like_git() {
     let parent = resolve_revision_as_commit_without_index_dwim(&repo, "HEAD~1").expect("parent");
     reset_to_commit(
         &repo,
-        &ResetOptions::new(parent, ResetMode::Keep, "T <t@t.com> 0 +0000", "reset"),
+        &ResetOptions::new(
+            parent,
+            ResetMode::Keep,
+            support::parse_reflog_signature("T <t@t.com> 0 +0000"),
+            "reset",
+        ),
         &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::NeverCancel,
     )
@@ -167,7 +172,12 @@ fn reset_keep_refuses_when_changed_file_has_local_edits() {
     let parent = resolve_revision_as_commit_without_index_dwim(&repo, "HEAD~1").expect("parent");
     let err = reset_to_commit(
         &repo,
-        &ResetOptions::new(parent, ResetMode::Keep, "T <t@t.com> 0 +0000", "reset"),
+        &ResetOptions::new(
+            parent,
+            ResetMode::Keep,
+            support::parse_reflog_signature("T <t@t.com> 0 +0000"),
+            "reset",
+        ),
         &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::NeverCancel,
     )
@@ -204,7 +214,12 @@ fn reset_dry_run_hard_lists_overwritten_paths_and_changes_nothing() {
     let wt = repo.work_tree().expect("wt");
     std::fs::write(wt.join("a"), "dirty\n").expect("dirty");
 
-    let mut opts = ResetOptions::new(c1, ResetMode::Hard, "T <t@t.com> 0 +0000", "reset");
+    let mut opts = ResetOptions::new(
+        c1,
+        ResetMode::Hard,
+        support::parse_reflog_signature("T <t@t.com> 0 +0000"),
+        "reset",
+    );
     opts.dry_run = true;
     let outcome = reset_to_commit(
         &repo,
@@ -259,7 +274,12 @@ fn reset_orphaned_commits_main_only_git_init() {
     let c1 = resolve_revision_as_commit_without_index_dwim(&repo, "HEAD~2").expect("c1");
     assert_eq!(c1, ObjectId::from_hex(&c1_hex).expect("c1 hex"));
 
-    let mut opts = ResetOptions::new(c1, ResetMode::Hard, "T <t@t.com> 0 +0000", "reset");
+    let mut opts = ResetOptions::new(
+        c1,
+        ResetMode::Hard,
+        support::parse_reflog_signature("T <t@t.com> 0 +0000"),
+        "reset",
+    );
     opts.dry_run = true;
     let preview = reset_to_commit(
         &repo,
@@ -299,7 +319,12 @@ fn reset_orphaned_commits_excludes_commits_held_by_other_refs() {
 
     let outcome = reset_to_commit(
         &repo,
-        &ResetOptions::new(c1, ResetMode::Mixed, "T <t@t.com> 0 +0000", "reset"),
+        &ResetOptions::new(
+            c1,
+            ResetMode::Mixed,
+            support::parse_reflog_signature("T <t@t.com> 0 +0000"),
+            "reset",
+        ),
         &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::NeverCancel,
     )
@@ -327,7 +352,12 @@ fn reset_orphan_zero_when_other_ref_holds_old_tip() {
 
     let outcome = reset_to_commit(
         &repo,
-        &ResetOptions::new(c1, ResetMode::Mixed, "T <t@t.com> 0 +0000", "reset"),
+        &ResetOptions::new(
+            c1,
+            ResetMode::Mixed,
+            support::parse_reflog_signature("T <t@t.com> 0 +0000"),
+            "reset",
+        ),
         &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::NeverCancel,
     )
@@ -366,7 +396,12 @@ fn reset_keep_rejects_unmerged_index_like_git() {
     let head = refs::resolve_ref(repo.git_dir(), "HEAD").expect("head");
     let err = reset_to_commit(
         &repo,
-        &ResetOptions::new(head, ResetMode::Keep, "T <t@t.com> 0 +0000", "reset"),
+        &ResetOptions::new(
+            head,
+            ResetMode::Keep,
+            support::parse_reflog_signature("T <t@t.com> 0 +0000"),
+            "reset",
+        ),
         &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::NeverCancel,
     )
@@ -389,11 +424,44 @@ fn reset_forward_has_no_orphan_walk() {
     let c2 = commit_file(&repo, "f", "2\n", Some(c1));
     let outcome = reset_to_commit(
         &repo,
-        &ResetOptions::new(c2, ResetMode::Mixed, "T <t@t.com> 0 +0000", "reset"),
+        &ResetOptions::new(
+            c2,
+            ResetMode::Mixed,
+            support::parse_reflog_signature("T <t@t.com> 0 +0000"),
+            "reset",
+        ),
         &mut grit_lib::progress::NullProgress,
         &grit_lib::progress::NeverCancel,
     )
     .expect("reset");
     assert_eq!(outcome.orphaned_total, 0);
     assert!(outcome.orphaned_commits.is_empty());
+}
+
+#[test]
+fn append_reflog_rejects_malformed_identity() {
+    let dir = TempDir::new().expect("tempdir");
+    let repo = Repository::init(
+        dir.path(),
+        &InitOptions::new().with_initial_branch("main".to_owned()),
+    )
+    .expect("init");
+    let zero = ObjectId::zero();
+    let tip = commit_file(&repo, "f.txt", "x\n", None);
+    for bad in ["garbage", "Evil <a@b> 1 +0000\nfoo"] {
+        let err = refs::append_reflog(
+            repo.git_dir(),
+            "refs/heads/main",
+            &zero,
+            &tip,
+            bad,
+            "reset: test",
+            true,
+        )
+        .unwrap_err();
+        assert!(
+            matches!(err, Error::InvalidSignature(_)),
+            "expected InvalidSignature for {bad:?}, got {err:?}"
+        );
+    }
 }

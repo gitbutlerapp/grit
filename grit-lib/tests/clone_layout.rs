@@ -171,7 +171,7 @@ fn clone_fetch_keeps_pack_and_matches_git_layout() {
             initial_remote_fetch: true,
             remote_name: Some("origin".to_owned()),
             clone_reflog: Some(CloneReflog {
-                identity: "T <t@e.com> 1 +0000".to_owned(),
+                identity: "T <t@e.com> 1 +0000".parse().expect("identity"),
                 message: "clone: from file://fixture".to_owned(),
             }),
             ..Default::default()

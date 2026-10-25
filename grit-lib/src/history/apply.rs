@@ -1264,9 +1264,9 @@ fn reflog_for_update(
         config.is_some_and(|cfg| should_autocreate_reflog_with_config(cfg, git_dir, refname));
     if force || autocreate {
         Some(ReflogUpdate {
-            identity: opts.identity.clone(),
+            identity: opts.identity.reflog_name_email(),
             message: opts.reflog_message.clone(),
-            time: time::OffsetDateTime::now_utc(),
+            time: opts.identity.time,
             old_oid: None,
             new_oid: None,
         })
@@ -1763,7 +1763,7 @@ mod inject_and_apply_tests {
             &repo,
             &plan,
             &ApplyOptions {
-                identity: "T <t@t>".into(),
+                identity: "T <t@t> 1 +0000".parse().expect("identity"),
                 reflog_message: "rewrite".into(),
                 record_operation: None,
                 hooks: crate::hooks::PostOperationHooks::Run,
@@ -1895,7 +1895,7 @@ mod inject_and_apply_tests {
             &repo,
             &plan,
             &ApplyOptions {
-                identity: "T <t@t>".into(),
+                identity: "T <t@t> 1 +0000".parse().expect("identity"),
                 reflog_message: "rewrite".into(),
                 record_operation: None,
                 hooks: crate::hooks::PostOperationHooks::Run,
@@ -2166,7 +2166,7 @@ mod inject_and_apply_tests {
             &repo,
             &plan,
             &ApplyOptions {
-                identity: "T <t@t>".into(),
+                identity: "T <t@t> 1 +0000".parse().expect("identity"),
                 reflog_message: "fixup".into(),
                 record_operation: None,
                 hooks: crate::hooks::PostOperationHooks::Run,
@@ -2418,7 +2418,7 @@ mod inject_and_apply_tests {
             &repo,
             &plan,
             &ApplyOptions {
-                identity: "T <t@t>".into(),
+                identity: "T <t@t> 1 +0000".parse().expect("identity"),
                 reflog_message: "rewrite".into(),
                 record_operation: None,
                 hooks: crate::hooks::PostOperationHooks::Run,
@@ -2558,7 +2558,7 @@ mod inject_and_apply_tests {
             &repo,
             &plan,
             &ApplyOptions {
-                identity: "T <t@t>".into(),
+                identity: "T <t@t> 1 +0000".parse().expect("identity"),
                 reflog_message: "rewrite".into(),
                 record_operation: None,
                 hooks: crate::hooks::PostOperationHooks::Run,
@@ -2684,7 +2684,7 @@ mod inject_and_apply_tests {
             &repo,
             &plan,
             &ApplyOptions {
-                identity: "T <t@t>".into(),
+                identity: "T <t@t> 1 +0000".parse().expect("identity"),
                 reflog_message: "rewrite".into(),
                 record_operation: None,
                 hooks: crate::hooks::PostOperationHooks::Run,
@@ -2921,7 +2921,7 @@ mod inject_and_apply_tests {
             &repo,
             &plan,
             &ApplyOptions {
-                identity: "T <t@t>".into(),
+                identity: "T <t@t> 1 +0000".parse().expect("identity"),
                 reflog_message: "rewrite".into(),
                 record_operation: None,
                 hooks: crate::hooks::PostOperationHooks::Run,
@@ -3062,7 +3062,7 @@ mod inject_and_apply_tests {
             &repo,
             &plan,
             &ApplyOptions {
-                identity: "T <t@t>".into(),
+                identity: "T <t@t> 1 +0000".parse().expect("identity"),
                 reflog_message: "rewrite".into(),
                 record_operation: None,
                 hooks: crate::hooks::PostOperationHooks::Run,

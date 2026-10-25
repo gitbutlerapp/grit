@@ -66,8 +66,10 @@ use store::{
 use crate::check_ref_format::{check_refname_format, RefNameOptions};
 use crate::config::ConfigSet;
 use crate::error::{Error, RefLockError, Result};
+use crate::ident::{parse_author_arg, parse_signature, Signature, SignatureError};
 use crate::objects::{HashAlgo, ObjectId};
 use crate::pack;
+use store::{format_reflog_identity, reflog_identity_has_timestamp};
 
 /// Maximum symbolic ref hops when resolving a ref (Git `SYMREF_MAXDEPTH`).
 pub const SYMREF_MAXDEPTH: usize = 5;
@@ -2754,6 +2756,50 @@ pub(crate) fn reflog_oid_hex_pair(old: &ObjectId, new: &ObjectId) -> (String, St
     (render(old), render(new))
 }
 
+fn validate_reflog_identity_string(identity: &str) -> Result<()> {
+    if identity
+        .bytes()
+        .any(|b| b == b'\n' || b == b'\r' || (b < 0x20 && b != b'\t'))
+    {
+        return Err(Error::InvalidSignature(SignatureError::Malformed));
+    }
+    if reflog_identity_has_timestamp(identity) {
+        parse_signature(identity).ok_or(Error::InvalidSignature(SignatureError::Malformed))?;
+    } else {
+        parse_author_arg(identity)
+            .map_err(|_| Error::InvalidSignature(SignatureError::Malformed))?;
+    }
+    Ok(())
+}
+
+/// Append one line to the reflog for `refname` using a validated [`Signature`].
+///
+/// # Errors
+///
+/// Propagates I/O failures, invalid refname errors, and [`Error::InvalidSignature`].
+pub fn append_reflog_with_signature(
+    git_dir: &Path,
+    refname: &str,
+    old_oid: &ObjectId,
+    new_oid: &ObjectId,
+    identity: &Signature,
+    message: &str,
+    force_create: bool,
+) -> Result<()> {
+    identity.validate().map_err(Error::InvalidSignature)?;
+    let formatted = format_reflog_identity(&identity.reflog_name_email(), identity.time);
+    append_reflog_with_config(
+        git_dir,
+        refname,
+        old_oid,
+        new_oid,
+        &formatted,
+        message,
+        force_create,
+        None,
+    )
+}
+
 /// Append one line to the reflog for `refname`.
 ///
 /// Creates the reflog file when `force_create` is true or when the ref already
@@ -2795,6 +2841,7 @@ pub fn append_reflog_with_config(
     force_create: bool,
     config: Option<&ConfigSet>,
 ) -> Result<()> {
+    validate_reflog_identity_string(identity)?;
     test_inject_reflog_fail(refname)?;
     if open_ref_store(git_dir)?.format() != RefStorageFormat::Files {
         return crate::reftable::reftable_append_reflog(

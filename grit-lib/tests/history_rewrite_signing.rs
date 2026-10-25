@@ -179,7 +179,7 @@ fn history_rewrite_resigns_when_gpgsign() {
         &grit,
         &plan,
         &ApplyOptions {
-            identity: "Rewriter <r@grit.test>".into(),
+            identity: support::reflog_signature("Rewriter <r@grit.test>"),
             reflog_message: "history reword".into(),
             record_operation: None,
             hooks: grit_lib::PostOperationHooks::Run,

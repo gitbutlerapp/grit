@@ -30,6 +30,7 @@ pub use memory::MemoryRefStore;
 pub use open::open_ref_store;
 pub(crate) use open::{open_files_ref_store, open_ref_store_uncached};
 pub use reftable::ReftableRefStore;
+pub(crate) use semantics::{format_reflog_identity, reflog_identity_has_timestamp};
 pub use transaction::RefTransaction;
 pub use types::{
     Expected, RawRef, RefCaseOnlyRename, RefEntry, RefName, RefReflogRename, RefStorageFormat,
