@@ -4,6 +4,7 @@ use std::fs::{self, File};
 use std::io::{self, Read, Write};
 use std::ops::ControlFlow;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use flate2::write::ZlibEncoder;
 use flate2::Compression;
@@ -110,7 +111,9 @@ impl LooseStore {
             .parent()
             .ok_or_else(|| Error::PathError("object path has no parent".to_owned()))?;
         let zlib = zlib_compress_store_bytes(store_bytes, self.compression)?;
-        publish_zlib_loose_object(&path, prefix_dir, oid, &zlib, false)?;
+        publish_loose_object(&path, prefix_dir, false, |mut file| {
+            file.write_all(&zlib).map_err(Error::Io)
+        })?;
         Ok(*oid)
     }
 
@@ -135,12 +138,11 @@ impl LooseStore {
         let prefix_dir = path
             .parent()
             .ok_or_else(|| Error::PathError("object path has no parent".to_owned()))?;
-        publish_zlib_loose_object(
+        publish_loose_object(
             &path,
             prefix_dir,
-            oid,
-            zlib_store,
             options.loose_prefix_dirs_ready,
+            |mut file| file.write_all(zlib_store).map_err(Error::Io),
         )?;
         Ok(*oid)
     }
@@ -265,21 +267,14 @@ impl WritableObjectStore for LooseStore {
         let prefix_dir = path
             .parent()
             .ok_or_else(|| Error::PathError("object path has no parent".to_owned()))?;
-        fs::create_dir_all(prefix_dir).map_err(Error::Io)?;
-        let tmp_path = oid.loose_tmp_path_in_prefix(prefix_dir);
-        {
-            let tmp_file = fs::File::create(&tmp_path).map_err(Error::Io)?;
-            let mut encoder = ZlibEncoder::new(tmp_file, self.compression);
+        publish_loose_object(&path, prefix_dir, false, |file| {
+            let mut encoder = ZlibEncoder::new(file, self.compression);
             encoder
                 .write_all(&store_bytes)
                 .map_err(|e| Error::Zlib(e.to_string()))?;
             encoder.finish().map_err(|e| Error::Zlib(e.to_string()))?;
-        }
-        fs::rename(&tmp_path, &path).map_err(|e| {
-            let _ = fs::remove_file(&tmp_path);
-            Error::Io(e)
+            Ok(())
         })?;
-        set_loose_object_mode(&path);
         Ok(oid)
     }
 
@@ -555,63 +550,82 @@ fn hash_algo_digest_hex(algo: HashAlgo, data: &[u8]) -> Result<String> {
     Ok(algo.digest(data)?.to_hex())
 }
 
-fn publish_loose_tmp_path(prefix_dir: &Path, oid: &ObjectId, attempt: u32) -> PathBuf {
-    let base = oid.loose_tmp_path_in_prefix(prefix_dir);
-    let stem = base.file_name().and_then(|n| n.to_str()).unwrap_or("tmp");
-    let thread = format!("{:?}", std::thread::current().id()).replace(['/', '\\', ' '], "_");
-    prefix_dir.join(format!("{stem}.{}.{thread}.{attempt}", std::process::id()))
+/// Per-process sequence that, with the pid, makes every loose temp file name unique, so
+/// concurrent writers of the same object (threads, handles or processes) never share one.
+static LOOSE_TMP_SEQ: AtomicU64 = AtomicU64::new(0);
+
+/// A fresh `tmp_obj_<pid>_<seq>` path in `prefix_dir`; the `tmp_` prefix keeps it out of
+/// loose-object enumeration.
+fn unique_loose_tmp_path(prefix_dir: &Path) -> PathBuf {
+    let seq = LOOSE_TMP_SEQ.fetch_add(1, Ordering::Relaxed);
+    prefix_dir.join(format!("tmp_obj_{}_{seq}", std::process::id()))
 }
 
-fn publish_zlib_loose_object(
+/// Publish a loose object at `path`: `fill` writes the zlib stream into a new, uniquely
+/// named temp file in `prefix_dir`, which is then renamed into place.
+///
+/// Publishing is idempotent: when the rename fails but `path` exists, another writer
+/// published the same object and this returns `Ok`. A missing `prefix_dir` (not yet
+/// created, or pruned by a concurrent process) is recreated and the write retried; with
+/// `prefix_dir_ready` the first attempt skips the `create_dir_all`.
+///
+/// # Errors
+///
+/// Returns [`Error::Io`] when the temp file cannot be created or renamed after the
+/// retries, or whatever `fill` returns.
+fn publish_loose_object(
     path: &Path,
     prefix_dir: &Path,
-    oid: &ObjectId,
-    zlib_store: &[u8],
     prefix_dir_ready: bool,
+    mut fill: impl FnMut(File) -> Result<()>,
 ) -> Result<()> {
-    if path.is_file() {
-        set_loose_object_mode(path);
-        return Ok(());
-    }
     const MAX_ATTEMPTS: u32 = 4;
-    for attempt in 0..MAX_ATTEMPTS {
-        if !prefix_dir_ready {
+    let mut attempt = 0;
+    loop {
+        attempt += 1;
+        let can_retry = attempt < MAX_ATTEMPTS;
+        if !prefix_dir_ready || attempt > 1 {
             fs::create_dir_all(prefix_dir).map_err(Error::Io)?;
         }
-        let tmp_path = publish_loose_tmp_path(prefix_dir, oid, attempt);
-        match fs::write(&tmp_path, zlib_store) {
-            Ok(()) => match fs::rename(&tmp_path, path) {
-                Ok(()) => {
-                    set_loose_object_mode(path);
-                    return Ok(());
-                }
-                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
-                    let _ = fs::remove_file(&tmp_path);
-                    if path.is_file() {
-                        set_loose_object_mode(path);
-                        return Ok(());
-                    }
-                }
-                Err(e) => {
-                    let _ = fs::remove_file(&tmp_path);
-                    if e.kind() == io::ErrorKind::NotFound && attempt + 1 < MAX_ATTEMPTS {
-                        continue;
-                    }
-                    return Err(Error::Io(e));
-                }
-            },
+        let tmp_path = unique_loose_tmp_path(prefix_dir);
+        let file = match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&tmp_path)
+        {
+            Ok(file) => file,
+            Err(e)
+                if can_retry
+                    && matches!(
+                        e.kind(),
+                        io::ErrorKind::NotFound | io::ErrorKind::AlreadyExists
+                    ) =>
+            {
+                continue;
+            }
+            Err(e) => return Err(Error::Io(e)),
+        };
+        if let Err(e) = fill(file) {
+            let _ = fs::remove_file(&tmp_path);
+            return Err(e);
+        }
+        match fs::rename(&tmp_path, path) {
+            Ok(()) => {
+                set_loose_object_mode(path);
+                return Ok(());
+            }
             Err(e) => {
                 let _ = fs::remove_file(&tmp_path);
-                if e.kind() == io::ErrorKind::NotFound && attempt + 1 < MAX_ATTEMPTS {
+                if path.is_file() {
+                    return Ok(());
+                }
+                if can_retry && e.kind() == io::ErrorKind::NotFound {
                     continue;
                 }
                 return Err(Error::Io(e));
             }
         }
     }
-    Err(Error::Io(io::Error::other(
-        "exhausted loose object publish retries",
-    )))
 }
 
 fn set_loose_object_mode(path: &Path) {
@@ -873,6 +887,94 @@ mod tests {
         );
         fs::create_dir_all(store.objects_dir()).unwrap();
         (dir, store)
+    }
+
+    fn tmp_entries(store: &LooseStore) -> Vec<PathBuf> {
+        fs::read_dir(store.objects_dir())
+            .unwrap()
+            .flatten()
+            .filter(|shard| shard.file_type().is_ok_and(|t| t.is_dir()))
+            .flat_map(|shard| fs::read_dir(shard.path()).unwrap().flatten())
+            .map(|entry| entry.path())
+            .filter(|path| {
+                path.file_name()
+                    .is_some_and(|n| n.to_string_lossy().starts_with("tmp_"))
+            })
+            .collect()
+    }
+
+    #[test]
+    fn identical_writes_through_separate_handles_all_succeed() {
+        let (_dir, store) = temp_store();
+        let threads = 8;
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(threads));
+        let payloads: Vec<Vec<u8>> = (0..200)
+            .map(|j| format!("same {j}").into_bytes())
+            .chain(std::iter::once(vec![0x5a; 1024 * 1024]))
+            .collect();
+        let payloads = std::sync::Arc::new(payloads);
+        let handles: Vec<_> = (0..threads)
+            .map(|_| {
+                let store = store.clone();
+                let barrier = std::sync::Arc::clone(&barrier);
+                let payloads = std::sync::Arc::clone(&payloads);
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    payloads
+                        .iter()
+                        .map(|data| {
+                            WritableObjectStore::write(
+                                &store,
+                                ObjectKind::Blob,
+                                data,
+                                WriteOptions::default(),
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                })
+            })
+            .collect();
+        for handle in handles {
+            for (data, result) in payloads.iter().zip(handle.join().unwrap()) {
+                let oid = result.expect("concurrent identical write succeeds");
+                let obj = ObjectStore::read(&store, &oid).unwrap().expect("object");
+                assert!(obj.data == *data);
+            }
+        }
+        assert!(tmp_entries(&store).is_empty());
+    }
+
+    #[test]
+    fn prehashed_write_recreates_pruned_fanout_dir_marked_ready() {
+        let (_dir, store) = temp_store();
+        let data = b"fanout pruned under a ready writer";
+        let oid = hash::hash_object(HashAlgo::Sha1, ObjectKind::Blob, data).unwrap();
+        let zlib = store
+            .zlib_compress_store_bytes(&build_store_bytes(ObjectKind::Blob, data))
+            .unwrap();
+        let options = WriteOptions {
+            loose_prefix_dirs_ready: true,
+            ..WriteOptions::default()
+        };
+        assert!(!store.object_path(&oid).parent().unwrap().exists());
+        let written = store.write_zlib_prehashed(&oid, &zlib, options).unwrap();
+        assert_eq!(written, oid);
+        assert_eq!(ObjectStore::read(&store, &oid).unwrap().unwrap().data, data);
+        assert!(tmp_entries(&store).is_empty());
+    }
+
+    #[test]
+    fn unique_tmp_paths_differ_and_are_not_loose_names() {
+        let prefix = Path::new("objects/ab");
+        let a = unique_loose_tmp_path(prefix);
+        let b = unique_loose_tmp_path(prefix);
+        assert_ne!(a, b);
+        for path in [a, b] {
+            let name = path.file_name().unwrap().to_str().unwrap();
+            assert!(name.starts_with("tmp_obj_"), "{name}");
+            assert!(!is_loose_suffix_for_algo(name, HashAlgo::Sha1));
+            assert!(!is_loose_suffix_for_algo(name, HashAlgo::Sha256));
+        }
     }
 
     #[test]

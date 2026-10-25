@@ -319,24 +319,6 @@ impl ObjectId {
         path
     }
 
-    /// Temp loose-object filename (`tmp_<suffix>`) inside a prefix directory.
-    #[must_use]
-    pub(crate) fn loose_tmp_path_in_prefix(
-        &self,
-        prefix_dir: &std::path::Path,
-    ) -> std::path::PathBuf {
-        const HEX: &[u8; 16] = b"0123456789abcdef";
-        let bytes = self.as_bytes();
-        let suffix_len = (bytes.len() - 1) * 2;
-        let mut name = [0u8; 4 + 62];
-        name[..4].copy_from_slice(b"tmp_");
-        for (i, &b) in bytes[1..].iter().enumerate() {
-            name[4 + i * 2] = HEX[(b >> 4) as usize];
-            name[4 + i * 2 + 1] = HEX[(b & 0xf) as usize];
-        }
-        prefix_dir.join(unsafe { std::str::from_utf8_unchecked(&name[..4 + suffix_len]) })
-    }
-
     /// Lowercase hex representation (40 or 64 characters).
     #[must_use]
     pub fn to_hex(&self) -> String {
