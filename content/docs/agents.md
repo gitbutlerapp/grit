@@ -182,13 +182,26 @@ $ grit --json --version
 grit 0.5.1
 ```
 
-## Credentials (HTTPS GitHub)
+## Credentials (HTTPS)
 
 For `https://github.com` remotes, sign in once with [`grit auth`](../auth/). Grit uses GitHub's device flow, then stores an access token through your configured **`credential.helper`** (same mechanism as Git). Override the OAuth app id with `GRIT_GITHUB_CLIENT_ID` or `grit config --global grit.githubClientId …`.
 
 Sign out with `grit auth logout`. You need a credential helper configured (for example `grit config --global credential.helper store` on Linux — see the [`grit auth`](../auth/) page).
 
 The same helpers serve any HTTPS host, not only GitHub. In CI, a host-level line such as `https://ci:TOKEN@git.example.com` in the store file (`~/.git-credentials`) authenticates `grit clone`, `fetch` and `push` for every repository on that host, exactly as it does for Git.
+
+When no helper has the credentials, grit asks an **askpass** program for them, like Git: `GIT_ASKPASS`, then `core.askPass`, then `SSH_ASKPASS` (the first one set wins; an empty value turns askpass off). The program gets one prompt as its argument, `Username for 'https://git.example.com': ` and then `Password for 'https://ci@git.example.com': `, and prints the answer on stdout. That is how most CI systems inject a token:
+
+```bash
+cat > askpass.sh <<'SH'
+#!/bin/sh
+case "$1" in Username*) echo ci;; *) echo "$CI_TOKEN";; esac
+SH
+chmod +x askpass.sh
+GIT_ASKPASS=$PWD/askpass.sh grit clone https://git.example.com/team/app.git
+```
+
+A credential an askpass program supplies is saved with your credential helper once the server accepts it. Grit never prompts on the terminal: with no helper and no askpass program, the command fails with `kind` `auth_required`. Set `credential.interactive=never` to skip askpass as well. A `user:password@` in the URL is sent as it is; if the server refuses it the error is `auth_rejected`.
 
 SSH remotes do not use the GitHub device-flow token; they can still block on SSH prompts (see the SSH row above).
 

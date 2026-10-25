@@ -211,7 +211,7 @@ fn auth_error(err: &LibError, url: &str, reason: &AuthFailure) -> Error {
         _ => (
             ErrorKind::AuthRequired,
             Some(
-                "configure a credential helper that has your credentials (for example `grit config --global credential.helper store`), then try again",
+                "configure a credential helper that has your credentials (for example `grit config --global credential.helper store`) or point GIT_ASKPASS at a program that prints them, then try again",
             ),
         ),
     };

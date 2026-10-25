@@ -126,7 +126,7 @@ error: authentication failed for https://github.com/ada/project.git: credentials
 hint: sign in to GitHub with `grit auth` and try again; if it still fails, check the URL
 ```
 
-For other HTTPS hosts the hint points at a `credential.helper` instead of `grit auth`. With `--json` these failures are `{"error", "kind", "hint"}` objects with `kind` `no_remote`, `remote_not_found`, `remote_no_url`, `auth_required` or `auth_rejected` (see [Exit codes](../exit-codes/)).
+For other HTTPS hosts the hint points at a `credential.helper` or `GIT_ASKPASS` instead of `grit auth`. When no helper has the credentials, an askpass program (`GIT_ASKPASS`, `core.askPass`, `SSH_ASKPASS`) is asked for them, as in Git (see [Credentials](../agents/#credentials-https)). With `--json` these failures are `{"error", "kind", "hint"}` objects with `kind` `no_remote`, `remote_not_found`, `remote_no_url`, `auth_required` or `auth_rejected` (see [Exit codes](../exit-codes/)).
 
 ## JSON output
 

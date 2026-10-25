@@ -219,6 +219,8 @@ Already up to date with `origin`.
 
 See [Exit codes](../exit-codes/) for shared rules and structured `--json` `kind` values.
 
+An HTTPS remote that wants credentials fails with `kind` `auth_required` (none available) or `auth_rejected` (refused). Credentials come from your credential helper, then an askpass program (`GIT_ASKPASS`, `core.askPass`, `SSH_ASKPASS`), as in Git; see [Credentials](../agents/#credentials-https).
+
 
 ## See also
 
