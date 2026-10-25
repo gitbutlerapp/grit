@@ -1616,13 +1616,17 @@ fn append_stash_untracked_show_entries(
         if let Some(idx) = diffs.iter().position(|d| d.path() == entry.path.as_str()) {
             if diffs[idx].status == DiffStatus::Deleted {
                 let head_entry = flat_tree_lookup(&head_entries, &entry.path);
-                let (old_oid, old_mode) = if let Some(h) = head_entry {
-                    (h.oid, format_mode(h.mode))
+                let (old_oid, old_mode, status) = if let Some(h) = head_entry {
+                    (
+                        h.oid,
+                        format_mode(h.mode),
+                        DiffStatus::for_content_change(h.mode, entry.mode),
+                    )
                 } else {
-                    (zero_oid(), "000000".to_owned())
+                    (zero_oid(), "000000".to_owned(), DiffStatus::Modified)
                 };
                 diffs[idx] = DiffEntry {
-                    status: DiffStatus::Modified,
+                    status,
                     old_path: Some(entry.path.clone()),
                     new_path: Some(entry.path.clone()),
                     old_mode,

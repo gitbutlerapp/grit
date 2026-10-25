@@ -1005,7 +1005,7 @@ fn diff_index_to_tree_for_paths(
         }
         if idx_oid != tree_oid || idx_mode != tree_mode {
             result.push(DiffEntry {
-                status: DiffStatus::Modified,
+                status: DiffStatus::for_content_change(tree_mode, idx_mode),
                 old_path: Some(path.clone()),
                 new_path: Some(path.clone()),
                 old_mode: crate::diff::format_mode(tree_mode),

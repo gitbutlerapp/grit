@@ -23,7 +23,7 @@ The status screen is your home base. It shows, from top to bottom:
 - **Untracked** files, which `grit` isn't tracking yet.
 - **A hint** with the next command to run.
 
-Each change has a label: `new`, `modified`, `deleted`, `renamed`, `copied`, `type changed` or `conflict`.
+Each change has a label: `new`, `modified`, `deleted`, `renamed`, `copied`, `type changed` or `conflict`. `type changed` (`type_changed` in `--json`, Git's `T`) means the path switched between a regular file, a symlink and a submodule; a permission-only change such as `chmod +x` is `modified`.
 
 During a paused merge or grit rebase, human output also lists **Conflicts** grouped by kind (`both modified`, `both added`, …). In `--json`, each conflict is `{ "path", "kind" }` and `operation.next_steps` lists the ordered `grit` commands while an operation is paused (for example `grit diff` then `grit add .` with conflicts, or `grit merge --continue` / `grit rebase --continue` once conflicts are resolved). Use `operation.alternatives` for cancel paths such as `grit merge --abort` or `grit rebase --abort` (not part of the ordered sequence). Grit rebase sessions are detected via `.git/rebase-merge/grit-plan`.
 

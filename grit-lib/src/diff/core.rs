@@ -2340,6 +2340,21 @@ impl DiffStatus {
             Self::Unmerged => 'U',
         }
     }
+
+    /// Status for a path present on both sides with differing content or mode.
+    ///
+    /// Returns [`DiffStatus::TypeChanged`] when the object type bits of the two
+    /// modes differ (regular file, symlink, gitlink) and [`DiffStatus::Modified`]
+    /// otherwise, so a permission-only change stays `Modified`. Every diff mode
+    /// (tree, index, work tree) shares this rule.
+    #[must_use]
+    pub(crate) fn for_content_change(old_mode: u32, new_mode: u32) -> Self {
+        if old_mode & 0o170000 != new_mode & 0o170000 {
+            Self::TypeChanged
+        } else {
+            Self::Modified
+        }
+    }
 }
 
 /// A single diff entry representing one changed path.
@@ -2953,17 +2968,8 @@ fn diff_tree_entries_opts(
                                 )?;
                                 emit_added_opts(cache, n, prefix, show_trees, result)?;
                             } else {
-                                // Both blobs — modified.
-                                // A mode-only change (e.g. chmod) is Modified.
-                                // TypeChanged is only for actual type changes (blob ↔ symlink).
-                                let old_type = o.mode & 0o170000;
-                                let new_type = n.mode & 0o170000;
                                 result.push(DiffEntry {
-                                    status: if old_type != new_type {
-                                        DiffStatus::TypeChanged
-                                    } else {
-                                        DiffStatus::Modified
-                                    },
+                                    status: DiffStatus::for_content_change(o.mode, n.mode),
                                     old_path: Some(path.clone()),
                                     new_path: Some(path),
                                     old_mode: format_mode(o.mode),
@@ -3540,7 +3546,7 @@ fn diff_index_to_tree_flatten(
                 // Present in both — check for differences
                 if te.oid != ie.oid || te.mode != ie.mode {
                     result.push(DiffEntry {
-                        status: DiffStatus::Modified,
+                        status: DiffStatus::for_content_change(te.mode, ie.mode),
                         old_path: Some(path.clone()),
                         new_path: Some(path),
                         old_mode: format_mode(te.mode),
@@ -3882,7 +3888,7 @@ fn diff_index_tree_at(
                             if t_entry.oid != ie.oid || t_entry.mode != ie.mode {
                                 let path = String::from_utf8_lossy(&ie.path).into_owned();
                                 walk.result.push(DiffEntry {
-                                    status: DiffStatus::Modified,
+                                    status: DiffStatus::for_content_change(t_entry.mode, ie.mode),
                                     old_path: Some(path.clone()),
                                     new_path: Some(path),
                                     old_mode: format_mode(t_entry.mode),
@@ -4219,7 +4225,7 @@ fn parallel_process_blob_worktree_jobs(
                 Ok(Some((
                     job.entry_index,
                     DiffEntry {
-                        status: DiffStatus::Modified,
+                        status: DiffStatus::for_content_change(job.entry.mode, job.worktree_mode),
                         old_path: Some(path_owned.clone()),
                         new_path: Some(path_owned),
                         old_mode: format_mode(job.entry.mode),
@@ -4262,7 +4268,7 @@ fn try_push_status_modified_on_size_mismatch(
     }
     let path_owned = path_str_ref.to_owned();
     result.push(DiffEntry {
-        status: DiffStatus::Modified,
+        status: DiffStatus::for_content_change(ie.mode, worktree_mode),
         old_path: Some(path_owned.clone()),
         new_path: Some(path_owned),
         old_mode: format_mode(ie.mode),
@@ -4290,7 +4296,7 @@ fn try_push_status_modified_on_size_mismatch_stat(
     }
     let path_owned = path_str_ref.to_owned();
     result.push(DiffEntry {
-        status: DiffStatus::Modified,
+        status: DiffStatus::for_content_change(ie.mode, worktree_mode),
         old_path: Some(path_owned.clone()),
         new_path: Some(path_owned),
         old_mode: format_mode(ie.mode),
@@ -4355,7 +4361,7 @@ fn push_index_blob_worktree_diff(
     if stat_same && worktree_mode != ie.mode {
         let path_owned = path_str_ref.to_owned();
         result.push(DiffEntry {
-            status: DiffStatus::Modified,
+            status: DiffStatus::for_content_change(ie.mode, worktree_mode),
             old_path: Some(path_owned.clone()),
             new_path: Some(path_owned),
             old_mode: format_mode(ie.mode),
@@ -4422,7 +4428,7 @@ fn push_index_blob_worktree_diff(
             eff_oid
         };
         result.push(DiffEntry {
-            status: DiffStatus::Modified,
+            status: DiffStatus::for_content_change(ie.mode, worktree_mode),
             old_path: Some(path_owned.clone()),
             new_path: Some(path_owned),
             old_mode: format_mode(ie.mode),
@@ -5031,7 +5037,7 @@ fn diff_index_to_worktree_inner(
                     if stat_same && worktree_mode != ie.mode {
                         let path_owned = path_str_ref.to_owned();
                         result.push(DiffEntry {
-                            status: DiffStatus::Modified,
+                            status: DiffStatus::for_content_change(ie.mode, worktree_mode),
                             old_path: Some(path_owned.clone()),
                             new_path: Some(path_owned),
                             old_mode: format_mode(ie.mode),
@@ -5170,7 +5176,7 @@ fn diff_index_to_worktree_inner(
                 let wt_mode = mode_from_metadata(&meta);
                 if wt_oid != base_entry.oid || wt_mode != base_entry.mode {
                     result.push(DiffEntry {
-                        status: DiffStatus::Modified,
+                        status: DiffStatus::for_content_change(base_entry.mode, wt_mode),
                         old_path: Some(path.clone()),
                         new_path: Some(path),
                         old_mode: format_mode(base_entry.mode),
@@ -6822,7 +6828,7 @@ pub fn diff_tree_to_worktree_with_git_dir_and_rules(
                     mode_policy.index_mode_for_worktree(mode_from_metadata(meta), Some(te.mode));
                 if wt_oid != te.oid || wt_mode != te.mode {
                     result.push(DiffEntry {
-                        status: DiffStatus::Modified,
+                        status: DiffStatus::for_content_change(te.mode, wt_mode),
                         old_path: Some(path.clone()),
                         new_path: Some(path.clone()),
                         old_mode: format_mode(te.mode),
@@ -6860,7 +6866,7 @@ pub fn diff_tree_to_worktree_with_git_dir_and_rules(
                 // `core.filemode=false` does not discard an explicit index chmod vs HEAD.
                 if ie.oid == te.oid && ie.mode != te.mode {
                     result.push(DiffEntry {
-                        status: DiffStatus::Modified,
+                        status: DiffStatus::for_content_change(te.mode, ie.mode),
                         old_path: Some(path.clone()),
                         new_path: Some(path.clone()),
                         old_mode: format_mode(te.mode),
@@ -6887,7 +6893,7 @@ pub fn diff_tree_to_worktree_with_git_dir_and_rules(
                     )?;
                     if wt_oid != te.oid {
                         result.push(DiffEntry {
-                            status: DiffStatus::Modified,
+                            status: DiffStatus::for_content_change(te.mode, wt_mode),
                             old_path: Some(path.clone()),
                             new_path: Some(path.clone()),
                             old_mode: format_mode(te.mode),
@@ -6900,7 +6906,7 @@ pub fn diff_tree_to_worktree_with_git_dir_and_rules(
                         });
                     } else if wt_mode != te.mode {
                         result.push(DiffEntry {
-                            status: DiffStatus::Modified,
+                            status: DiffStatus::for_content_change(te.mode, wt_mode),
                             old_path: Some(path.clone()),
                             new_path: Some(path.clone()),
                             old_mode: format_mode(te.mode),
@@ -6927,7 +6933,7 @@ pub fn diff_tree_to_worktree_with_git_dir_and_rules(
                 if wt_oid != te.oid || wt_mode != te.mode {
                     let new_oid = if wt_oid != te.oid { zero_oid() } else { te.oid };
                     result.push(DiffEntry {
-                        status: DiffStatus::Modified,
+                        status: DiffStatus::for_content_change(te.mode, wt_mode),
                         old_path: Some(path.clone()),
                         new_path: Some(path.clone()),
                         old_mode: format_mode(te.mode),

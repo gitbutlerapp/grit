@@ -665,11 +665,7 @@ fn staged_diff_for_tree_switch_paths(
             }
             (HeadTreeSide::Present { oid, mode }, Some(ie)) if ie.oid != oid || ie.mode != mode => {
                 staged.push(DiffEntry {
-                    status: if ie.mode != mode {
-                        DiffStatus::TypeChanged
-                    } else {
-                        DiffStatus::Modified
-                    },
+                    status: DiffStatus::for_content_change(mode, ie.mode),
                     old_path: Some(path.clone()),
                     new_path: Some(path.clone()),
                     old_mode: format_mode(mode),
