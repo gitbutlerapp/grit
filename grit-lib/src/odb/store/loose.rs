@@ -178,15 +178,10 @@ impl ObjectStore for LooseStore {
     }
 
     fn read(&self, oid: &ObjectId) -> Result<Option<Object>> {
-        let path = self.object_path(oid);
-        match fs::File::open(&path) {
-            Ok(file) => {
-                let raw = read_zlib_loose_payload(file)?;
-                Ok(Some(parse_object_bytes(&raw)?))
-            }
-            Err(err) if err.kind() == io::ErrorKind::NotFound => Ok(None),
-            Err(err) => Err(Error::Io(err)),
-        }
+        let mut data = Vec::new();
+        Ok(self
+            .read_into(oid, &mut data)?
+            .map(|kind| Object::new(kind, data)))
     }
 
     fn read_into(&self, oid: &ObjectId, buf: &mut Vec<u8>) -> Result<Option<ObjectKind>> {
@@ -197,7 +192,7 @@ impl ObjectStore for LooseStore {
             Err(err) => return Err(Error::Io(err)),
         };
         read_zlib_loose_payload_into(file, buf)?;
-        let kind = strip_decompressed_object_header(buf, None)?;
+        let kind = strip_decompressed_object_header(buf, Some(oid))?;
         Ok(Some(kind))
     }
 

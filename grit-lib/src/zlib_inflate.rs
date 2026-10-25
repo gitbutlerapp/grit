@@ -52,6 +52,24 @@ fn declared_loose_object_len(out: &[u8]) -> Option<usize> {
     size.checked_add(nul + 1)
 }
 
+/// Bytes to append to a loose-object output buffer holding `len` bytes with no room left.
+///
+/// Once the header has declared the object's size the buffer grows straight towards it, so an
+/// honest object ends with exactly its size allocated. The header is untrusted until the stream
+/// ends, so growth never runs more than [`MAX_HEADER_SIZE_RESERVE`] or the bytes already
+/// produced ahead of real output. Before the header is known the first step is a guess from
+/// the compressed bytes at hand.
+fn loose_output_growth(len: usize, declared: Option<usize>, filled: usize) -> usize {
+    match declared {
+        Some(total) if total > len => {
+            let target = total.min(len.saturating_mul(2).max(MAX_HEADER_SIZE_RESERVE));
+            target - len
+        }
+        _ if len == 0 => filled.saturating_mul(4).max(256),
+        _ => len.max(256),
+    }
+}
+
 /// `read` into `buf`, retrying when interrupted by a signal.
 fn read_retrying(file: &mut std::fs::File, buf: &mut [u8]) -> Result<usize> {
     loop {
@@ -310,6 +328,11 @@ impl ZlibInflateScratch {
         result
     }
 
+    /// Inflate the rest of a loose object file into `out`.
+    ///
+    /// `out` is grown and zero-initialised only ahead of the inflater (each byte once), and
+    /// the inflater writes into that initialised slice. Handing zlib the whole spare capacity
+    /// on every call instead re-zeroes it per input chunk, which is quadratic for large objects.
     fn inflate_loose_reads(
         &mut self,
         input: &mut [u8],
@@ -328,63 +351,75 @@ impl ZlibInflateScratch {
         let preset_dictionary = cmf_flg != 0 && cmf_flg % 31 == 0 && (input[1] & 0x20) != 0;
         let mut in_off = 0usize;
         let mut eof = false;
-        let mut sized_from_header = false;
-        loop {
+        let mut declared: Option<usize> = None;
+        let mut len = 0usize;
+        // Receives the end of a stream once `out` holds exactly the declared size, so finishing
+        // the stream never grows `out` past it.
+        let mut tail = [0u8; 64];
+        let result = loop {
             if in_off == filled && !eof {
-                filled = read_retrying(file, input)?;
+                filled = match read_retrying(file, input) {
+                    Ok(n) => n,
+                    Err(e) => break Err(e),
+                };
                 in_off = 0;
                 eof = filled == 0;
             }
-            if out.len() == out.capacity() {
-                let guess = if out.is_empty() {
-                    filled.saturating_mul(4).max(256)
-                } else {
-                    out.capacity()
-                };
-                out.reserve(guess);
+            let into_tail = len == out.len() && declared == Some(len);
+            if len == out.len() && !into_tail {
+                let step = loose_output_growth(len, declared, filled);
+                out.reserve_exact(step);
+                out.resize(len + step, 0);
             }
             let flush = if eof {
                 FlushDecompress::Finish
             } else {
                 FlushDecompress::None
             };
-            let before_in = self.dec.total_in();
-            let before_out = out.len();
-            let status = match self.dec.decompress_vec(&input[in_off..filled], out, flush) {
-                Ok(s) => s,
-                Err(e) => {
-                    if preset_dictionary {
-                        return Err(Error::Zlib("needs dictionary".to_owned()));
-                    }
-                    return Err(Error::Zlib(e.to_string()));
-                }
+            let dest: &mut [u8] = if into_tail {
+                &mut tail
+            } else {
+                &mut out[len..]
             };
-            let consumed = usize::try_from(self.dec.total_in() - before_in)
-                .map_err(|_| Error::CorruptObject("inflate input overflow".to_owned()))?;
-            in_off += consumed;
-            let produced = out.len() - before_out;
-            if !sized_from_header {
-                if let Some(total) = declared_loose_object_len(out) {
-                    sized_from_header = true;
-                    let wanted = total.min(MAX_HEADER_SIZE_RESERVE);
-                    out.reserve_exact(wanted.saturating_sub(out.len()));
+            let room = dest.len();
+            let before_in = self.dec.total_in();
+            let before_out = self.dec.total_out();
+            let status = match self.dec.decompress(&input[in_off..filled], dest, flush) {
+                Ok(s) => s,
+                Err(_) if preset_dictionary => {
+                    break Err(Error::Zlib("needs dictionary".to_owned()));
                 }
+                Err(e) => break Err(Error::Zlib(e.to_string())),
+            };
+            // Both are bounded by the slices just passed to the inflater.
+            let consumed = (self.dec.total_in() - before_in) as usize;
+            let produced = (self.dec.total_out() - before_out) as usize;
+            in_off += consumed;
+            if into_tail {
+                out.truncate(len);
+                out.extend_from_slice(&tail[..produced]);
+            }
+            len += produced;
+            if declared.is_none() {
+                declared = declared_loose_object_len(&out[..len]);
             }
             match status {
-                Status::StreamEnd => return Ok(()),
+                Status::StreamEnd => break Ok(()),
                 Status::Ok | Status::BufError => {
-                    let out_has_room = out.len() < out.capacity();
+                    let out_has_room = produced < room;
                     if eof && in_off == filled && out_has_room {
-                        return Err(Error::Zlib("unexpected end of zlib stream".to_owned()));
+                        break Err(Error::Zlib("unexpected end of zlib stream".to_owned()));
                     }
                     if consumed == 0 && produced == 0 && out_has_room && in_off < filled {
-                        return Err(Error::CorruptObject(
+                        break Err(Error::CorruptObject(
                             "zlib stream stalled in loose object".to_owned(),
                         ));
                     }
                 }
             }
-        }
+        };
+        out.truncate(len);
+        result
     }
 
     /// Inflate just the `"<type> <size>\0"` header of a loose object from `file`.
@@ -850,6 +885,51 @@ mod tests {
             .expect("inflate");
         assert_eq!(out, plain);
         assert_eq!(out.capacity(), plain.len());
+    }
+
+    #[test]
+    fn inflate_loose_file_past_initial_reserve_allocates_exactly_its_size() {
+        let mut payload = Vec::with_capacity(MAX_HEADER_SIZE_RESERVE + 4 * READ_CHUNK);
+        let mut n = 0u64;
+        while payload.len() < MAX_HEADER_SIZE_RESERVE + 3 * READ_CHUNK {
+            payload.extend_from_slice(format!("{n}\n").as_bytes());
+            n += 1;
+        }
+        let plain = loose_bytes("blob", &payload);
+        let file = loose_file(&plain);
+        let mut out = Vec::new();
+        ZlibInflateScratch::default()
+            .inflate_loose_file(&mut file.reopen().expect("reopen"), &mut out)
+            .expect("inflate");
+        assert!(out == plain, "inflated bytes differ");
+        assert_eq!(out.capacity(), plain.len());
+    }
+
+    #[test]
+    fn loose_output_growth_is_geometric_and_stops_at_declared_size() {
+        assert_eq!(loose_output_growth(0, None, 100), 400);
+        assert_eq!(loose_output_growth(0, None, 10), 256);
+        assert_eq!(loose_output_growth(1000, None, 0), 1000);
+        assert_eq!(loose_output_growth(10, Some(500), 0), 490);
+        assert_eq!(
+            loose_output_growth(10, Some(usize::MAX), 0),
+            MAX_HEADER_SIZE_RESERVE - 10
+        );
+        let len = 2 * MAX_HEADER_SIZE_RESERVE;
+        assert_eq!(loose_output_growth(len, Some(usize::MAX), 0), len);
+        assert_eq!(loose_output_growth(len, Some(len + 7), 0), 7);
+        assert_eq!(loose_output_growth(len, Some(len - 1), 0), len);
+    }
+
+    #[test]
+    fn inflate_loose_file_header_smaller_than_stream_keeps_every_byte() {
+        let plain = b"blob 2\0more bytes than declared".to_vec();
+        let file = loose_file(&plain);
+        let mut out = Vec::new();
+        ZlibInflateScratch::default()
+            .inflate_loose_file(&mut file.reopen().expect("reopen"), &mut out)
+            .expect("inflate");
+        assert_eq!(out, plain);
     }
 
     #[test]
