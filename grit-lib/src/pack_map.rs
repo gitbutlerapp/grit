@@ -3,11 +3,13 @@
 //! This module is the only place that uses `unsafe` for pack backing storage.
 
 use crate::error::{Error, Result};
+use crate::objects::HashAlgo;
 use memmap2::{Mmap, MmapOptions};
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom};
 use std::ops::Deref;
 use std::path::Path;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
 const PACK_SIGNATURE: &[u8; 4] = b"PACK";
@@ -135,6 +137,22 @@ impl PackData {
         })
     }
 
+    /// Drop this mapping's pages from the process's resident set.
+    ///
+    /// The bytes stay valid: later reads fault the pages back in from the file (usually
+    /// straight from the page cache). Owned buffers and non-Unix platforms are left as is.
+    pub(crate) fn release_resident(&self) {
+        #[cfg(unix)]
+        if let Storage::Mapped(map) = &self.storage {
+            // SAFETY: the mapping is a read-only shared file mapping and the file is never
+            // modified while mapped (see the type docs), so dropping its pages only makes
+            // the next read reload the same bytes from the file; no borrow observes a change.
+            let _ = unsafe {
+                map.unchecked_advise_range(memmap2::UncheckedAdvice::DontNeed, 0, map.len())
+            };
+        }
+    }
+
     /// True when backing storage is a memory map (not an owned buffer).
     #[cfg(test)]
     pub(crate) fn is_mapped_backing(&self) -> bool {
@@ -151,6 +169,67 @@ impl PackData {
     /// Returns [`Error::CorruptObject`] when the buffer is not a well-formed pack prefix/trailer.
     pub(crate) fn fingerprint(&self, hash_bytes: usize) -> Result<PackFingerprint> {
         fingerprint_from_slice(self, hash_bytes)
+    }
+}
+
+/// Caps how much of a memory-mapped pack a sequential pass over it keeps resident.
+///
+/// Readers [`charge`](Self::charge) the bytes they read; once the charges reach the
+/// limit, the whole mapping's pages are dropped and counting starts over. Charging is
+/// lock-free and shared by all worker threads. Meant for passes that move forward
+/// through the pack: scattered small reads map whole fault-around windows each, so
+/// they are better served by positioned file reads than by a budget.
+pub(crate) struct ResidentBudget<'a> {
+    pack: Option<&'a PackData>,
+    limit: usize,
+    charged: AtomicUsize,
+}
+
+impl<'a> ResidentBudget<'a> {
+    /// A budget that never releases (the caller owns the bytes, or they are not mapped).
+    #[must_use]
+    pub(crate) fn unbounded() -> Self {
+        Self {
+            pack: None,
+            limit: usize::MAX,
+            charged: AtomicUsize::new(0),
+        }
+    }
+
+    /// Keep at most about `limit` bytes of `pack` resident.
+    #[must_use]
+    pub(crate) fn new(pack: &'a PackData, limit: usize) -> Self {
+        Self {
+            pack: Some(pack),
+            limit,
+            charged: AtomicUsize::new(0),
+        }
+    }
+
+    /// Record a read of `bytes` from the pack, releasing its pages when the limit is reached.
+    pub(crate) fn charge(&self, bytes: usize) {
+        let Some(pack) = self.pack else {
+            return;
+        };
+        let before = self.charged.fetch_add(bytes, Ordering::Relaxed);
+        if before.saturating_add(bytes) < self.limit {
+            return;
+        }
+        // Of several threads crossing the limit together, only the one that resets wins.
+        if self.charged.swap(0, Ordering::Relaxed) >= self.limit {
+            pack.release_resident();
+        }
+    }
+
+    /// Checksum `bytes` with `algo`, charging as it goes so a full pass stays within budget.
+    pub(crate) fn checksum(&self, algo: HashAlgo, bytes: &[u8]) -> Vec<u8> {
+        const CHUNK: usize = 1024 * 1024;
+        let mut hasher = algo.checksum_hasher();
+        for chunk in bytes.chunks(CHUNK) {
+            hasher.update(chunk);
+            self.charge(chunk.len());
+        }
+        hasher.finalize()
     }
 }
 
@@ -374,6 +453,99 @@ mod tests {
             fingerprint_from_slice(bytes, 20),
             Err(Error::CorruptObject(_))
         ));
+    }
+
+    /// Resident KiB of the mapping that contains `addr`, from `/proc/self/smaps`.
+    #[cfg(target_os = "linux")]
+    fn mapping_rss_kib(addr: *const u8) -> u64 {
+        let smaps = fs::read_to_string("/proc/self/smaps").expect("smaps");
+        let addr = addr as usize;
+        let mut inside = false;
+        for line in smaps.lines() {
+            let range = line.split_whitespace().next().unwrap_or_default();
+            if let Some((start, end)) = range.split_once('-') {
+                if let (Ok(start), Ok(end)) = (
+                    usize::from_str_radix(start, 16),
+                    usize::from_str_radix(end, 16),
+                ) {
+                    inside = (start..end).contains(&addr);
+                    continue;
+                }
+            }
+            if inside {
+                if let Some(kib) = line.strip_prefix("Rss:") {
+                    return kib
+                        .trim()
+                        .trim_end_matches("kB")
+                        .trim()
+                        .parse()
+                        .expect("kB");
+                }
+            }
+        }
+        panic!("no mapping contains {addr:#x}");
+    }
+
+    #[cfg(target_os = "linux")]
+    fn mapped_test_pack(dir: &Path, len: usize) -> (Arc<PackData>, Vec<u8>) {
+        let path = dir.join("resident.pack");
+        let mut bytes = Vec::from(&b"PACK\x00\x00\x00\x02\x00\x00\x00\x00"[..]);
+        bytes.extend((0..len).map(|i| u8::try_from(i % 251).unwrap_or(0)));
+        fs::write(&path, &bytes).expect("write");
+        let data = PackData::open(&path).expect("open");
+        assert!(data.is_mapped_backing());
+        (data, bytes)
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn release_resident_drops_pages_but_keeps_the_bytes() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let (data, bytes) = mapped_test_pack(dir.path(), 24 << 20);
+        let digest = HashAlgo::Sha1.checksum_digest(&data);
+        assert!(
+            mapping_rss_kib(data.as_ptr()) > 20 << 10,
+            "a full read maps the file"
+        );
+        data.release_resident();
+        assert!(
+            mapping_rss_kib(data.as_ptr()) < 1 << 10,
+            "release drops the pages"
+        );
+        assert_eq!(&data[..], &bytes[..]);
+        assert_eq!(HashAlgo::Sha1.checksum_digest(&data), digest);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn resident_budget_bounds_a_full_pass() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let (data, bytes) = mapped_test_pack(dir.path(), 24 << 20);
+        data.release_resident();
+        let budget = ResidentBudget::new(&data, 4 << 20);
+        assert_eq!(
+            budget.checksum(HashAlgo::Sha1, &data),
+            HashAlgo::Sha1.checksum_digest(&bytes)
+        );
+        let rss = mapping_rss_kib(data.as_ptr());
+        assert!(rss <= 6 << 10, "budgeted pass left {rss} KiB resident");
+
+        data.release_resident();
+        let unbounded = ResidentBudget::unbounded();
+        let _ = unbounded.checksum(HashAlgo::Sha1, &data);
+        assert!(
+            mapping_rss_kib(data.as_ptr()) > 20 << 10,
+            "unbounded never releases"
+        );
+    }
+
+    #[test]
+    fn release_resident_on_owned_bytes_is_a_no_op() {
+        let data = PackData::from_owned(b"PACK\x00\x00\x00\x02\x00\x00\x00\x00".to_vec());
+        data.release_resident();
+        let budget = ResidentBudget::new(&data, 0);
+        budget.charge(1);
+        assert_eq!(&data[..4], b"PACK");
     }
 
     #[test]

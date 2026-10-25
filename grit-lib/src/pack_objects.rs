@@ -1185,18 +1185,24 @@ pub(crate) fn append_pack_trailer(buf: &mut Vec<u8>, algo: HashAlgo) {
     buf.extend_from_slice(&algo.checksum_digest(&*buf));
 }
 
-/// Append whole objects from `odb` to an in-progress pack (header + body, no trailer).
-pub(crate) fn append_whole_objects_from_odb(
+/// Append `oid` from `odb` to an in-progress pack as one whole object (header + zlib body).
+///
+/// Returns the object's kind.
+pub(crate) fn append_whole_object_from_odb(
     buf: &mut Vec<u8>,
     odb: &Odb,
-    oids: &[ObjectId],
-) -> Result<()> {
-    let opts = PackBuildOptions::default();
-    for oid in oids {
-        let obj = odb.read(oid)?;
-        write_whole_pack_object(buf, odb, *oid, obj.kind, &obj.data, &opts)?;
-    }
-    Ok(())
+    oid: ObjectId,
+) -> Result<ObjectKind> {
+    let obj = odb.read(&oid)?;
+    write_whole_pack_object(
+        buf,
+        odb,
+        oid,
+        obj.kind,
+        &obj.data,
+        &PackBuildOptions::default(),
+    )?;
+    Ok(obj.kind)
 }
 
 /// A single object to write, either whole or as a delta against a chosen base.

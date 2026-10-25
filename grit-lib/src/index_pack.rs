@@ -13,10 +13,10 @@ use crate::error::{Error, Result};
 use crate::hash::{verify_trailer, Parallelism};
 use crate::objects::{ObjectId, ObjectKind};
 use crate::odb::Odb;
-use crate::pack::{verify_pack_and_collect, write_v2_pack_index_with_trailer};
-use crate::pack_map::PackData;
+use crate::pack::{verify_pack_and_collect, write_v2_pack_index_sorting};
+use crate::pack_index_build::{build_mapped_pack_index, RESIDENT_PACK_BYTES};
+use crate::pack_map::{PackData, ResidentBudget};
 use crate::progress::{poll_cancel, Cancel, ProgressSink};
-use crate::transfer::{fix_thin_pack, ref_delta_bases_in_pack};
 use crate::unpack_objects::PackIndexRecord;
 
 pub use crate::pack_index_build::{
@@ -342,8 +342,6 @@ pub fn install_pack_path_with_progress(
     let stem = format!("pack-{}", pack_hash.to_hex());
     let pack_dir = odb.objects_dir().join("pack");
     std::fs::create_dir_all(&pack_dir).map_err(Error::Io)?;
-    let final_pack = pack_dir.join(format!("{stem}.pack"));
-    let idx_path = pack_dir.join(format!("{stem}.idx"));
 
     let stage = pack_dir.join(format!(".{stem}-install"));
     let stage_pack = stage.join(format!("{stem}.pack"));
@@ -351,6 +349,8 @@ pub fn install_pack_path_with_progress(
 
     cleanup_stale_install_stage(&stage);
 
+    // Final `.pack`/`.idx` paths once known; completing a thin pack changes its checksum.
+    let mut published: Option<(PathBuf, PathBuf)> = None;
     let install_result = (|| -> Result<IngestedPack> {
         poll_ingest_cancel(&mut progress, cancel)?;
         std::fs::create_dir_all(&stage).map_err(Error::Io)?;
@@ -359,84 +359,84 @@ pub fn install_pack_path_with_progress(
             let _ = std::fs::remove_file(&owned);
         }
         poll_ingest_cancel(&mut progress, cancel)?;
-        let mut indexed = PackData::open(&stage_pack)?;
+        let indexed = PackData::open(&stage_pack)?;
         let parallelism = opts.index_parallelism(odb)?;
         record_resolved_ingest_threads(parallelism.threads().get());
         let sort_threads = parallelism.threads().get();
-        let (entries, oids, object_counts, trailer) = {
-            let pack_bytes: &[u8] = indexed.deref();
-            verify_trailer(odb.hash_algo(), pack_bytes).map_err(|e| {
-                Error::CorruptObject(format!(
-                    "received pack checksum mismatch (download may be incomplete): {e}"
-                ))
-            })?;
-            poll_ingest_cancel(&mut progress, cancel)?;
-            let trailer = pack_bytes[pack_bytes.len() - hb..].to_vec();
-            if let Some(rows) = &opts.trusted_index_rows {
-                if rows.len()
-                    != u32::from_be_bytes([
-                        pack_bytes[8],
-                        pack_bytes[9],
-                        pack_bytes[10],
-                        pack_bytes[11],
-                    ]) as usize
-                {
-                    return Err(Error::CorruptObject(
-                        "trusted index row count does not match pack header".to_owned(),
-                    ));
-                }
-                let oids: HashSet<ObjectId> = rows.iter().map(|(oid, _, _)| *oid).collect();
-                let object_counts = ObjectKindCounts::default();
-                (rows.clone(), oids, object_counts, trailer)
-            } else {
-                let mut records = crate::pack_index_build::build_pack_index_records_with_progress(
-                    pack_bytes,
-                    odb,
-                    parallelism,
-                    !opts.skip_post_index_verify,
-                    progress.as_mut().map(|p| p as &mut dyn ProgressSink),
-                    cancel,
-                )?;
-                if opts.fix_thin {
-                    let ref_bases = ref_delta_bases_in_pack(pack_bytes, odb.hash_algo())?;
-                    if pack_needs_thin_fix(&records, &ref_bases) {
-                        drop(indexed);
-                        let fixed =
-                            fix_thin_pack(std::fs::read(&stage_pack).map_err(Error::Io)?, odb)?;
-                        std::fs::write(&stage_pack, &fixed).map_err(Error::Io)?;
-                        indexed = PackData::open(&stage_pack)?;
-                        let pack_bytes: &[u8] = indexed.deref();
-                        records = crate::pack_index_build::build_pack_index_records_with_progress(
-                            pack_bytes,
-                            odb,
-                            parallelism,
-                            !opts.skip_post_index_verify,
-                            None,
-                            cancel,
-                        )?;
-                    }
-                }
-                let oids: HashSet<ObjectId> = records.iter().map(|r| r.oid).collect();
-                let object_counts: ObjectKindCounts = records.iter().map(|r| r.kind).collect();
-                let entries: Vec<(ObjectId, u64, u32)> = records
-                    .into_iter()
-                    .map(
-                        |PackIndexRecord {
-                             oid, offset, crc32, ..
-                         }| (oid, offset, crc32),
-                    )
-                    .collect();
-                (entries, oids, object_counts, trailer)
-            }
-        };
-        drop(indexed);
+        let resident = ResidentBudget::new(&indexed, RESIDENT_PACK_BYTES);
+        let pack_bytes: &[u8] = indexed.deref();
+        let body_len = pack_bytes.len() - hb;
+        if resident.checksum(odb.hash_algo(), &pack_bytes[..body_len]) != pack_bytes[body_len..] {
+            return Err(Error::CorruptObject(
+                "received pack checksum mismatch (download may be incomplete)".to_owned(),
+            ));
+        }
         poll_ingest_cancel(&mut progress, cancel)?;
-        write_v2_pack_index_with_trailer(&stage_idx, &entries, &trailer, hb, Some(sort_threads))?;
+        let mut trailer = pack_bytes[body_len..].to_vec();
+        let (mut entries, object_counts) = if let Some(rows) = &opts.trusted_index_rows {
+            if rows.len()
+                != u32::from_be_bytes([
+                    pack_bytes[8],
+                    pack_bytes[9],
+                    pack_bytes[10],
+                    pack_bytes[11],
+                ]) as usize
+            {
+                return Err(Error::CorruptObject(
+                    "trusted index row count does not match pack header".to_owned(),
+                ));
+            }
+            drop(indexed);
+            (rows.clone(), ObjectKindCounts::default())
+        } else {
+            let file = std::fs::File::open(&stage_pack).map_err(Error::Io)?;
+            let build = build_mapped_pack_index(
+                &indexed,
+                &file,
+                odb,
+                parallelism,
+                false,
+                progress.as_mut().map(|p| p as &mut dyn ProgressSink),
+                cancel,
+            )?;
+            drop(file);
+            drop(indexed);
+            let mut records = build.records;
+            if opts.fix_thin && !build.thin_bases.is_empty() {
+                poll_ingest_cancel(&mut progress, cancel)?;
+                trailer = append_thin_bases(&stage_pack, odb, &build.thin_bases, &mut records)?;
+            }
+            let object_counts: ObjectKindCounts = records.iter().map(|r| r.kind).collect();
+            let entries: Vec<(ObjectId, u64, u32)> = records
+                .into_iter()
+                .map(
+                    |PackIndexRecord {
+                         oid, offset, crc32, ..
+                     }| (oid, offset, crc32),
+                )
+                .collect();
+            (entries, object_counts)
+        };
+        poll_ingest_cancel(&mut progress, cancel)?;
+        write_v2_pack_index_sorting(&stage_idx, &mut entries, &trailer, hb, Some(sort_threads))?;
+        // Rebuild the id set from the index just written, so the entries and the set are
+        // never held at the same time.
+        drop(entries);
+        let index = crate::pack::read_pack_index_no_verify(&stage_idx)?;
+        let mut oids: HashSet<ObjectId> = HashSet::with_capacity(index.len());
+        for i in 0..index.len() {
+            oids.insert(ObjectId::from_bytes(index.oid_at(i))?);
+        }
+        drop(index);
         poll_ingest_cancel(&mut progress, cancel)?;
         if !opts.skip_post_index_verify {
             verify_pack_and_collect(&stage_idx)?;
         }
         poll_ingest_cancel(&mut progress, cancel)?;
+        let stem = format!("pack-{}", ObjectId::from_bytes(&trailer)?.to_hex());
+        let final_pack = pack_dir.join(format!("{stem}.pack"));
+        let idx_path = pack_dir.join(format!("{stem}.idx"));
+        published = Some((final_pack.clone(), idx_path.clone()));
         std::fs::rename(&stage_pack, &final_pack).map_err(Error::Io)?;
         poll_ingest_cancel(&mut progress, cancel)?;
         std::fs::rename(&stage_idx, &idx_path).map_err(|e| {
@@ -456,8 +456,10 @@ pub fn install_pack_path_with_progress(
 
     if install_result.is_err() {
         cleanup_stale_install_stage(&stage);
-        let _ = std::fs::remove_file(&final_pack);
-        let _ = std::fs::remove_file(&idx_path);
+        if let Some((final_pack, idx_path)) = &published {
+            let _ = std::fs::remove_file(final_pack);
+            let _ = std::fs::remove_file(idx_path);
+        }
         let _ = std::fs::remove_file(&owned);
     }
     let ingested = install_result?;
@@ -465,12 +467,75 @@ pub fn install_pack_path_with_progress(
     Ok(ingested)
 }
 
-fn pack_needs_thin_fix(records: &[PackIndexRecord], ref_bases: &[ObjectId]) -> bool {
-    if ref_bases.is_empty() {
-        return false;
+/// Complete a thin pack in place (`index-pack --fix-thin`): append each of `bases` from
+/// `odb` as a whole object, bump the header's object count and rewrite the trailer.
+///
+/// Objects are written straight to the file and the new checksum is computed by
+/// streaming the file back, so the pack is never held in memory. A record for each
+/// appended object is pushed onto `records`.
+///
+/// Returns the new pack trailer.
+///
+/// # Errors
+///
+/// Returns [`Error::Io`] on file errors, an object-database error when a base cannot be
+/// read, and [`Error::CorruptObject`] when the object count would overflow.
+fn append_thin_bases(
+    pack_path: &Path,
+    odb: &Odb,
+    bases: &[ObjectId],
+    records: &mut Vec<PackIndexRecord>,
+) -> Result<Vec<u8>> {
+    use std::io::{Read, Seek, SeekFrom, Write};
+
+    let algo = odb.hash_algo();
+    let mut file = std::fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(pack_path)
+        .map_err(Error::Io)?;
+    let mut header = [0u8; 12];
+    file.read_exact(&mut header).map_err(Error::Io)?;
+    let added = u32::try_from(bases.len()).ok();
+    let count = added
+        .and_then(|added| {
+            u32::from_be_bytes([header[8], header[9], header[10], header[11]]).checked_add(added)
+        })
+        .ok_or_else(|| Error::CorruptObject("thin pack fix: object count overflow".to_owned()))?;
+    header[8..12].copy_from_slice(&count.to_be_bytes());
+
+    let len = file.metadata().map_err(Error::Io)?.len();
+    let mut offset = len - algo.len() as u64;
+    file.seek(SeekFrom::Start(offset)).map_err(Error::Io)?;
+    let mut object = Vec::new();
+    for oid in bases {
+        object.clear();
+        let kind = crate::pack_objects::append_whole_object_from_odb(&mut object, odb, *oid)?;
+        file.write_all(&object).map_err(Error::Io)?;
+        records.push(PackIndexRecord {
+            oid: *oid,
+            offset,
+            crc32: crc32fast::hash(&object),
+            kind,
+        });
+        offset += object.len() as u64;
     }
-    let in_pack: HashSet<ObjectId> = records.iter().map(|r| r.oid).collect();
-    ref_bases.iter().any(|base| !in_pack.contains(base))
+    file.seek(SeekFrom::Start(0)).map_err(Error::Io)?;
+    file.write_all(&header).map_err(Error::Io)?;
+
+    file.seek(SeekFrom::Start(0)).map_err(Error::Io)?;
+    let mut hasher = algo.checksum_hasher();
+    let mut buf = vec![0u8; 1024 * 1024];
+    let mut remaining = offset;
+    while remaining > 0 {
+        let want = usize::try_from(remaining).map_or(buf.len(), |r| r.min(buf.len()));
+        file.read_exact(&mut buf[..want]).map_err(Error::Io)?;
+        hasher.update(&buf[..want]);
+        remaining -= want as u64;
+    }
+    let trailer = hasher.finalize();
+    file.write_all(&trailer).map_err(Error::Io)?;
+    Ok(trailer)
 }
 
 fn poll_ingest_cancel(
@@ -923,7 +988,7 @@ mod tests {
         let idx_path = pack_path.with_extension("idx");
         let fake_oid = ObjectId::from_hex("aabbccddeeff00112233445566778899aabbccdd").unwrap();
         let huge_off = 1u64 << 31;
-        write_v2_pack_index_with_trailer(
+        crate::pack::write_v2_pack_index_with_trailer(
             &idx_path,
             &[(fake_oid, huge_off, 0x1234_5678)],
             &pack[pack.len() - 20..],

@@ -1330,6 +1330,82 @@ fn pack_index_build_errors_and_thin_pack_with_odb_base() {
     .expect("fix thin install");
 }
 
+/// A thin pack installed with `fix_thin` into a repository that holds only its bases must
+/// come out as a self-contained pack whose `.idx` names the rewritten pack checksum, so
+/// `git verify-pack` and `git fsck --strict` accept it.
+#[test]
+fn fix_thin_install_rewrites_pack_and_index_that_git_accepts() {
+    let src = tempfile::tempdir().expect("src");
+    init_repo(src.path(), false);
+    let mut lines: Vec<String> = (0..400)
+        .map(|i| format!("line {i:04} of a file\n"))
+        .collect();
+    for name in ["a.txt", "b.txt"] {
+        std::fs::write(src.path().join(name), lines.concat()).expect("write");
+    }
+    git_run(src.path(), &["add", "-A"]);
+    git_run(src.path(), &["commit", "-q", "-m", "base"]);
+    git_run(src.path(), &["branch", "base"]);
+    let have = ObjectId::from_hex(git(src.path(), &["rev-parse", "HEAD"]).trim()).unwrap();
+    lines[7] = "line 0007 edited on the tip\n".to_owned();
+    for name in ["a.txt", "b.txt"] {
+        std::fs::write(src.path().join(name), lines.concat()).expect("write");
+    }
+    git_run(src.path(), &["commit", "-q", "-am", "tip"]);
+    let want = ObjectId::from_hex(git(src.path(), &["rev-parse", "HEAD"]).trim()).unwrap();
+    let src_odb = Odb::new(src.path().join(".git/objects").as_path())
+        .with_config_git_dir(src.path().join(".git"));
+    let thin = build_pack(
+        &src_odb,
+        &[want],
+        &[have],
+        &PackBuildOptions {
+            delta: true,
+            thin: true,
+            ..Default::default()
+        },
+    )
+    .expect("thin pack");
+    assert!(pack_is_thin(&thin, HashAlgo::Sha1), "fixture must be thin");
+
+    let src_arg = src.path().to_string_lossy().into_owned();
+    for threads in [1_usize, 4] {
+        let dst = tempfile::tempdir().expect("dst");
+        let git_dir = dst.path().join("repo.git");
+        git_run(dst.path(), &["init", "--bare", "-q", "repo.git"]);
+        git_run(&git_dir, &["fetch", "-q", &src_arg, "base:refs/heads/main"]);
+        let odb = Odb::new(git_dir.join("objects").as_path()).with_config_git_dir(git_dir.clone());
+        let ingested = install_pack_bytes(
+            thin.clone(),
+            &odb,
+            &IngestPackOptions {
+                fix_thin: true,
+                threads: Some(threads),
+                skip_post_index_verify: true,
+                ..Default::default()
+            },
+        )
+        .unwrap_or_else(|e| panic!("threads={threads}: fix-thin install: {e}"));
+        let idx = ingested.pack_path.with_extension("idx");
+        git_run(&git_dir, &["verify-pack", &idx.to_string_lossy()]);
+        let pack = std::fs::read(&ingested.pack_path).expect("read installed pack");
+        assert!(!pack_is_thin(&pack, HashAlgo::Sha1), "threads={threads}");
+        assert_eq!(
+            pack_header_count(&pack) as usize,
+            ingested.object_ids.len(),
+            "threads={threads}: every object in the fixed pack is indexed"
+        );
+        let trailer = ObjectId::from_bytes(&pack[pack.len() - 20..]).expect("trailer");
+        assert_eq!(
+            ingested.pack_path.file_name().and_then(|n| n.to_str()),
+            Some(format!("pack-{}.pack", trailer.to_hex()).as_str()),
+            "threads={threads}: pack is named after its rewritten checksum"
+        );
+        git_run(&git_dir, &["update-ref", "refs/heads/tip", &want.to_hex()]);
+        git_run(&git_dir, &["fsck", "--strict", "--no-progress"]);
+    }
+}
+
 /// Manual RSS harness: `GRIT_PACK_IDX=/path/to.idx cargo test --release rss_harness_verify_pack_only -- --ignored --exact`
 #[test]
 #[ignore = "manual RSS harness (set GRIT_PACK_IDX)"]
