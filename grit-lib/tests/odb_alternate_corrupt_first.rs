@@ -1,5 +1,6 @@
 //! Alternate ordering when an earlier store cannot serve an OID (system git oracle).
 
+use grit_lib::error::Error;
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::ObjectKind;
 use std::fs;
@@ -42,6 +43,59 @@ fn git_in(dir: &Path, args: &[&str]) {
         "git {:?}: {}",
         args,
         String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
+fn corrupt_object_only_in_alternate_is_reported_as_corrupt_not_missing() {
+    let layout = TempDir::new().expect("tempdir");
+    git_in(layout.path(), &["init", "-q", "--bare", "primary.git"]);
+    git_in(layout.path(), &["init", "-q", "--bare", "alt.git"]);
+    let primary_objects = layout.path().join("primary.git/objects");
+    let alt_objects = layout.path().join("alt.git/objects");
+
+    let alt_odb = Odb::new(&alt_objects);
+    let oid = alt_odb
+        .write(ObjectKind::Blob, b"precious data")
+        .expect("write");
+    let path = alt_odb.object_path(&oid);
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).expect("chmod");
+    fs::write(&path, b"not a zlib stream").expect("rot loose object");
+    fs::write(
+        primary_objects.join("info/alternates"),
+        format!(
+            "{}\n",
+            fs::canonicalize(&alt_objects).expect("canon").display()
+        ),
+    )
+    .expect("alternates");
+
+    let odb = Odb::new(&primary_objects);
+    let is_damage = |err: &Error| matches!(err, Error::Zlib(_) | Error::CorruptObject(_));
+    let err = odb.read(&oid).unwrap_err();
+    assert!(is_damage(&err), "read: {err:?}");
+    let err = odb.read_into(&oid, &mut Vec::new()).unwrap_err();
+    assert!(is_damage(&err), "read_into: {err:?}");
+    let err = odb.read_info(&oid).unwrap_err();
+    assert!(is_damage(&err), "read_info: {err:?}");
+    let Err(err) = odb.open_stream(&oid) else {
+        panic!("open_stream must fail on a corrupt object");
+    };
+    assert!(is_damage(&err), "open_stream: {err:?}");
+
+    let fsck = Command::new("git")
+        .args(["fsck", "--full"])
+        .env("GIT_DIR", layout.path().join("primary.git"))
+        .env_remove("GIT_ALTERNATE_OBJECT_DIRECTORIES")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("git fsck");
+    let stderr = String::from_utf8_lossy(&fsck.stderr);
+    assert!(!fsck.status.success(), "git fsck must flag the object");
+    assert!(
+        stderr.contains(&oid.to_hex()),
+        "git fsck must name the damaged object: {stderr}"
     );
 }
 
