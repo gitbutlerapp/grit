@@ -137,6 +137,8 @@ pub struct TerminalProgress {
     last_draw: Instant,
     frame: usize,
     remote_lines: SidebandLines,
+    /// Print side-band hook/diagnostic lines on stderr (human mode, not quiet).
+    emit_remote: bool,
     /// Present when the overall bar is drawn under the live line.
     overall: Option<OverallEstimator>,
     /// Whether the overall bar is on screen and must be cleared at the end.
@@ -158,6 +160,7 @@ impl TerminalProgress {
 
     fn new_inner(mode: OutputMode, force_silent: bool) -> Self {
         let draw = !force_silent && mode == OutputMode::Human && io::stderr().is_terminal();
+        let emit_remote = !force_silent && mode == OutputMode::Human;
         Self {
             origin: Instant::now(),
             draw,
@@ -169,6 +172,7 @@ impl TerminalProgress {
             last_draw: Instant::now() - MIN_REDRAW,
             frame: 0,
             remote_lines: SidebandLines::new(),
+            emit_remote,
             overall: None,
             overall_on_screen: false,
         }
@@ -285,24 +289,36 @@ impl TerminalProgress {
         }
         let shown = paint(self.color, DIM, &format!("  remote: {text}"));
         let mut err = io::stderr();
-        let _ = write!(err, "\r{}", clear_seq(self.color));
-        match line {
-            RemoteLine::Update(_) => {
-                let _ = write!(err, "{shown}");
+        if self.draw {
+            let _ = write!(err, "\r{}", clear_seq(self.color));
+            match line {
+                RemoteLine::Update(_) => {
+                    let _ = write!(err, "{shown}");
+                }
+                RemoteLine::Line(_) => {
+                    let _ = writeln!(err, "{shown}");
+                }
             }
-            RemoteLine::Line(_) => {
-                let _ = writeln!(err, "{shown}");
+            let _ = err.flush();
+            // Put the live phase line back underneath the remote message.
+            self.redraw(true);
+        } else {
+            match line {
+                RemoteLine::Update(_) => {
+                    let _ = write!(err, "{shown}");
+                }
+                RemoteLine::Line(_) => {
+                    let _ = writeln!(err, "{shown}");
+                }
             }
+            let _ = err.flush();
         }
-        let _ = err.flush();
-        // Put the live phase line back underneath the remote message.
-        self.redraw(true);
     }
 }
 
 impl Progress for TerminalProgress {
     fn message(&mut self, bytes: &[u8]) {
-        if !self.draw {
+        if !self.emit_remote {
             return;
         }
         let mut lines = Vec::new();

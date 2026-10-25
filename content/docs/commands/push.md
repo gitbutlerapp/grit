@@ -44,7 +44,7 @@ With `--delete`, deletes remote branches or tags (short names map like Git).
 
 `--follow-tags` pushes annotated tags that point to commits reachable from the refs being pushed (lightweight tags and unreachable annotated tags are skipped). The config key `push.followTags` enables the same behavior by default.
 
-On an interactive terminal (human output), messages the remote sends while it processes the push, such as hook output, are shown on stderr as `remote: …` lines. `-q` / `--quiet` hides them and the human summary, so a successful push prints nothing; a rejected push is still reported and exits `1`. `--json` and `--markdown` output is unchanged.
+In human output, messages the remote sends while it processes the push (hook output, CI links, policy text) are shown on stderr as `remote: …` lines, including when stderr is not a terminal. `-q` / `--quiet` hides them and the human summary, so a successful push prints nothing; a rejected push is still reported and exits `1`. With `--json` or `--markdown`, the same lines appear in `remote_messages` (omitted when empty).
 
 For GitHub over HTTPS, if a push fails because you aren't signed in, `grit` offers to run [`grit auth`](../auth/) and then tries again.
 
@@ -143,6 +143,7 @@ Pass `--json` for stable, scripting-friendly output:
 | `results` | array | Per-ref outcomes; each object has `ref`, `status` (`ok`, `up_to_date`, or `rejected`), optional `reason` (`stale` for a failed lease, `remote_ref_missing` when `--delete` targets a ref absent on the remote), `old_oid`, `new_oid`, `src`, and `forced`. |
 | `rejected` | boolean | `true` if any ref was rejected (exit status is also `1`). |
 | `upstream_set` | array of strings | Branch short names whose upstream config was written (`-u` only; omitted when empty). |
+| `remote_messages` | array of strings | Hook and diagnostic text from the remote (same lines as `remote: …` on stderr in human mode; omitted when empty). |
 
 Example:
 

@@ -93,6 +93,13 @@
     "remote": {
       "type": "string"
     },
+    "remote_messages": {
+      "description": "Hook and diagnostic lines from the remote (side-band channel 2).",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
     "results": {
       "items": {
         "$ref": "#/definitions/PushRefResult"

@@ -42,6 +42,10 @@ pub struct PushOutcome {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(skip_serializing_if = "Option::is_none")]
     pub upstream_set: Option<Vec<String>>,
+    /// Hook and diagnostic lines from the remote (`remote: …` in human output).
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[schemars(skip_serializing_if = "Vec::is_empty")]
+    pub remote_messages: Vec<String>,
 }
 
 /// JSON classification for [`PushOutcome`].
@@ -146,6 +150,7 @@ impl HumanRender for PushOutcome {
 impl MarkdownRender for PushOutcome {
     fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         let label = self.branch.as_deref().unwrap_or("refs");
+        markdown::print_push_remote_messages(w, &self.remote_messages)?;
         markdown::print_push_results(w, &self.remote, label, self.dry_run, &self.results)?;
         Ok(())
     }
@@ -301,6 +306,7 @@ pub fn run(
         rejected,
         dry_run,
         upstream_set: (!upstream_set.is_empty()).then_some(upstream_set),
+        remote_messages: report.remote_messages,
     })
 }
 

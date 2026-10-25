@@ -1585,6 +1585,18 @@ pub fn print_add_outcome(w: &mut dyn Write, outcome: &AddOutcome) -> anyhow::Res
     Ok(())
 }
 
+/// Remote hook/diagnostic lines from a push (side-band channel 2).
+pub fn print_push_remote_messages(w: &mut dyn Write, messages: &[String]) -> anyhow::Result<()> {
+    if messages.is_empty() {
+        return Ok(());
+    }
+    outln!(w, "### Remote messages");
+    for line in messages {
+        outln!(w, "- `{line}`");
+    }
+    Ok(())
+}
+
 /// Per-ref push results.
 pub fn print_push_results(
     w: &mut dyn Write,

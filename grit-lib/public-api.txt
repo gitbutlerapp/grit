@@ -20525,6 +20525,7 @@ impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::remote::transfer::Pu
 impl !core::panic::unwind_safe::UnwindSafe for grit_lib::remote::transfer::PushOptions
 pub struct grit_lib::remote::transfer::PushOutcome
 pub grit_lib::remote::transfer::PushOutcome::results: alloc::vec::Vec<grit_lib::remote::push_report::PushRefResult>
+pub grit_lib::remote::transfer::PushOutcome::remote_messages: alloc::vec::Vec<alloc::string::String>
 impl core::clone::Clone for grit_lib::remote::transfer::PushOutcome
 pub fn grit_lib::remote::transfer::PushOutcome::clone(&self) -> Self
 impl core::default::Default for grit_lib::remote::transfer::PushOutcome
