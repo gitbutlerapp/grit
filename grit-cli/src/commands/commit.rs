@@ -5,7 +5,7 @@ use grit_lib::commit::{normalize_commit_date_override, parse_trailer_command_lin
 
 use crate::message_input::parse_author_cli;
 use grit_lib::config::ident_resolve::IdentRole;
-use grit_lib::error::Error;
+use grit_lib::error::{Error, NothingToCommitReason};
 use grit_lib::objects::parse_commit;
 use grit_lib::porcelain::commit::{
     commit_with_patch, commit_with_scope, default_commit_scope, pending_commit_message,
@@ -20,6 +20,8 @@ use serde::Serialize;
 use std::io::{self, Read, Write};
 
 use crate::context::{self, subject_line};
+use crate::error_kind::ErrorKind;
+use crate::json_error::{NothingToCommitJson, StructuredCliError, StructuredJsonError};
 use crate::markdown;
 use crate::output::{outln, HumanRender, MarkdownRender, Person, RenderContext};
 use crate::pathspec_args::TrailingPathspecArgs;
@@ -154,11 +156,12 @@ pub fn hunks_exit_code(err: &anyhow::Error) -> i32 {
     }
 }
 
-fn map_patch_error(err: CommitPatchError) -> anyhow::Error {
+fn map_patch_error(err: CommitPatchError, explicit_staged: bool) -> anyhow::Error {
     match err {
-        CommitPatchError::Commit(locked @ Error::IndexLocked { .. }) => {
-            crate::json_error::map_lib_error(locked)
+        CommitPatchError::Commit(e @ Error::IndexLocked { .. }) => {
+            crate::json_error::map_lib_error(e)
         }
+        CommitPatchError::Commit(e) => map_commit_error(e, &CommitScope::Staged, explicit_staged),
         other => anyhow::Error::new(other),
     }
 }
@@ -221,7 +224,7 @@ pub fn run_hunks(
         &pathspecs,
         &mut NullProgress,
     )
-    .map_err(map_patch_error)?;
+    .map_err(|e| map_patch_error(e, false))?;
     finish_commit_outcome(
         &repo,
         req,
@@ -281,7 +284,7 @@ pub fn run_patch_file(
         &[],
         &mut NullProgress,
     )
-    .map_err(map_patch_error)?;
+    .map_err(|e| map_patch_error(e, false))?;
     finish_commit_outcome(
         &repo,
         req,
@@ -340,8 +343,8 @@ pub fn run(
         amend,
         allow_empty,
     )?;
-    let outcome =
-        commit_with_scope(&repo, &req, scope, &mut NullProgress).map_err(map_commit_error)?;
+    let outcome = commit_with_scope(&repo, &req, scope.clone(), &mut NullProgress)
+        .map_err(|e| map_commit_error(e, &scope, staged))?;
     finish_commit_outcome(
         &repo,
         req,
@@ -619,9 +622,11 @@ fn scope_json(scope: &CommitScope) -> CommitScopeJson {
     }
 }
 
-fn map_commit_error(err: Error) -> anyhow::Error {
+fn map_commit_error(err: Error, scope: &CommitScope, explicit_staged: bool) -> anyhow::Error {
     match err {
-        Error::NothingToCommit => anyhow::anyhow!("nothing to commit — working tree clean"),
+        Error::NothingToCommit { reason } => {
+            nothing_to_commit_cli_error(reason, scope, explicit_staged)
+        }
         Error::IndexUnmerged => anyhow::anyhow!(
             "cannot commit: unresolved merge conflicts remain — resolve each conflicted path (grit add or grit rm), then try again"
         ),
@@ -636,4 +641,98 @@ fn map_commit_error(err: Error) -> anyhow::Error {
         locked @ Error::IndexLocked { .. } => crate::json_error::map_lib_error(locked),
         other => anyhow::anyhow!("{other}"),
     }
+}
+
+fn nothing_to_commit_cli_error(
+    reason: NothingToCommitReason,
+    scope: &CommitScope,
+    explicit_staged: bool,
+) -> anyhow::Error {
+    match reason {
+        NothingToCommitReason::Clean => nothing_to_commit_clean_cli_error(),
+        NothingToCommitReason::Uncommitted {
+            unstaged,
+            untracked,
+            sample_paths,
+        } => {
+            let human = format_nothing_staged_message(unstaged, untracked, &sample_paths);
+            let hint = format_nothing_staged_hint(&sample_paths, scope, explicit_staged);
+            anyhow::Error::new(StructuredCliError {
+                human: human.clone(),
+                payload: StructuredJsonError {
+                    hint: Some(hint),
+                    paths: if sample_paths.is_empty() {
+                        None
+                    } else {
+                        Some(sample_paths)
+                    },
+                    nothing_to_commit: Some(NothingToCommitJson {
+                        reason: "uncommitted".into(),
+                        unstaged: Some(unstaged),
+                        untracked: Some(untracked),
+                    }),
+                    ..StructuredJsonError::new(human, ErrorKind::NothingStaged)
+                },
+            })
+        }
+        _ => nothing_to_commit_clean_cli_error(),
+    }
+}
+
+fn nothing_to_commit_clean_cli_error() -> anyhow::Error {
+    let human = "nothing to commit — working tree clean".to_owned();
+    anyhow::Error::new(StructuredCliError {
+        human: human.clone(),
+        payload: StructuredJsonError {
+            nothing_to_commit: Some(NothingToCommitJson {
+                reason: "clean".into(),
+                unstaged: None,
+                untracked: None,
+            }),
+            ..StructuredJsonError::new(human, ErrorKind::WorkingTreeClean)
+        },
+    })
+}
+
+fn format_nothing_staged_message(
+    unstaged: usize,
+    untracked: usize,
+    sample_paths: &[String],
+) -> String {
+    let path = sample_paths.first().map(String::as_str).unwrap_or("files");
+    let change_desc = if unstaged > 0 {
+        if unstaged == 1 && sample_paths.len() == 1 {
+            format!("{path} has unstaged changes")
+        } else {
+            format!("{unstaged} paths have unstaged changes")
+        }
+    } else if untracked > 0 {
+        if untracked == 1 && sample_paths.len() == 1 {
+            format!("{path} is untracked")
+        } else {
+            format!("{untracked} untracked paths remain")
+        }
+    } else {
+        "the work tree has uncommitted changes".to_owned()
+    };
+    format!("nothing staged to commit; {change_desc}")
+}
+
+fn format_nothing_staged_hint(
+    sample_paths: &[String],
+    scope: &CommitScope,
+    explicit_staged: bool,
+) -> String {
+    let path = sample_paths.first().map(String::as_str).unwrap_or("<path>");
+    let stage_cmd = format!("grit add {path}");
+    let commit_without = if explicit_staged {
+        "commit without --staged".to_owned()
+    } else if matches!(scope, CommitScope::Staged) {
+        "enable commit.autoStage or stage changes first".to_owned()
+    } else if matches!(scope, CommitScope::Paths(_)) {
+        "stage the paths with grit add or omit path arguments".to_owned()
+    } else {
+        "stage changes with grit add".to_owned()
+    };
+    format!("{stage_cmd}, or grit commit -m ... ({commit_without})")
 }

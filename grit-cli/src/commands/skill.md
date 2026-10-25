@@ -111,7 +111,7 @@ $ grit commit -m "Explain what changed and why"
 | Exclude paths from clean | `grit clean -e '<pattern>'` (repeatable) |
 | Clean files but not directories | `grit clean --files-only` |
 
-`grit commit` fails with "nothing to commit" on a clean tree unless you pass `--allow-empty`. On detached HEAD it advances `HEAD` without moving a branch; use `grit switch -c <name>` to keep the commits on a new branch. Switching anywhere else leaves them on no branch; `grit switch --json` lists them in `stranded_commits` (`--dry-run` previews it), and `grit branch <name> <oid>` keeps them.
+`grit commit` fails with "nothing to commit — working tree clean" when the index and work tree match `HEAD`, or "nothing staged to commit" when `--staged` / `commit.autoStage=false` leaves unstaged edits (`--json` `kind`: `working_tree_clean` vs `nothing_staged`). Use `--allow-empty` to record an empty tree change anyway. On detached HEAD it advances `HEAD` without moving a branch; use `grit switch -c <name>` to keep the commits on a new branch. Switching anywhere else leaves them on no branch; `grit switch --json` lists them in `stranded_commits` (`--dry-run` previews it), and `grit branch <name> <oid>` keeps them.
 
 Each commit gets a stable **`change-id`** header (on by default) that survives `--amend`. Disable with `grit config grit.changeIds false` when you need Git-identical commit objects. See the docs site section on change ids for derivation and testing config.
 

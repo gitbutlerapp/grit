@@ -337,7 +337,7 @@ pub fn continue_replay_sequence(repo: &Repository, identity: &str) -> Result<Seq
     if !allow_empty {
         let head_tree = commit_tree(repo, &head_oid)?;
         if new_tree == head_tree {
-            return Err(Error::NothingToCommit);
+            return Err(Error::nothing_to_commit_clean());
         }
     }
     let mut todo = active.todo;
@@ -1270,7 +1270,7 @@ fn write_replay_commit_with_head_tree(
     change_id_policy: &ChangeIdPolicy,
 ) -> Result<ObjectId> {
     if !allow_empty && tree == head_tree {
-        return Err(Error::NothingToCommit);
+        return Err(Error::nothing_to_commit_clean());
     }
     let author = match direction {
         ReplayDirection::Pick => source.author.clone(),
@@ -1647,9 +1647,9 @@ fn resolve_continue_replay_message(git_dir: &Path) -> Result<String> {
         raw.as_bytes(),
         &StripspaceMode::StripComments("#".to_owned()),
     );
-    let message = String::from_utf8(processed).map_err(|_| Error::NothingToCommit)?;
+    let message = String::from_utf8(processed).map_err(|_| Error::nothing_to_commit_clean())?;
     if message.trim().is_empty() {
-        return Err(Error::NothingToCommit);
+        return Err(Error::nothing_to_commit_clean());
     }
     let mut message = message;
     if !message.ends_with('\n') {

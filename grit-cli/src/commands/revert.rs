@@ -370,7 +370,7 @@ fn map_replay_error(err: Error) -> anyhow::Error {
         Error::ReplayContinueUnmerged => anyhow::anyhow!(
             "cannot continue revert: resolve conflicts and stage the result first (`grit add`)"
         ),
-        Error::NothingToCommit => {
+        Error::NothingToCommit { .. } => {
             anyhow::anyhow!("nothing to commit — the revert would not change the tree")
         }
         Error::NoReplayInProgress => {

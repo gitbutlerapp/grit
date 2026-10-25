@@ -20,7 +20,7 @@ use crate::diff::{
     materialize_worktree_blob, zero_oid, DiffEntry, DiffStatus,
 };
 use crate::error::ApplyError;
-use crate::error::{Error, Result};
+use crate::error::{Error, NothingToCommitReason, Result};
 use crate::hooks::{
     run_advisory_hook, run_commit_hook, run_post_rewrite, CommitHookEnv, HookError, HookName,
     PostOperationHooks, RewriteKind,
@@ -261,6 +261,71 @@ pub fn default_commit_scope_from_config(config: &ConfigSet) -> CommitScope {
     }
 }
 
+const NOTHING_TO_COMMIT_SAMPLE_PATHS: usize = 3;
+
+fn nothing_to_commit_error(
+    repo: &Repository,
+    index: &mut Index,
+    head_tree: Option<ObjectId>,
+) -> Error {
+    Error::NothingToCommit {
+        reason: detect_nothing_to_commit_reason(repo, index, head_tree),
+    }
+}
+
+fn detect_nothing_to_commit_reason(
+    repo: &Repository,
+    index: &mut Index,
+    head_tree: Option<ObjectId>,
+) -> NothingToCommitReason {
+    use crate::porcelain::status::{collect_untracked_and_ignored, IgnoredMode};
+    use crate::porcelain::worktree_guard::local_change_diffs;
+
+    let Some(work_tree) = repo.work_tree() else {
+        return NothingToCommitReason::Clean;
+    };
+    let Ok((_, unstaged, _)) = local_change_diffs(repo, index, head_tree) else {
+        return NothingToCommitReason::Clean;
+    };
+    let unstaged_count = unstaged.len();
+    let mut sample_paths: Vec<String> = unstaged
+        .iter()
+        .filter_map(|e| e.new_path.clone().or_else(|| e.old_path.clone()))
+        .take(NOTHING_TO_COMMIT_SAMPLE_PATHS)
+        .collect();
+
+    let mut index_for_untracked = index.clone();
+    let untracked = collect_untracked_and_ignored(
+        repo,
+        &mut index_for_untracked,
+        work_tree,
+        IgnoredMode::No,
+        false,
+        &[],
+    )
+    .map(|(u, _)| u)
+    .unwrap_or_default();
+    let untracked_count = untracked.len();
+    for path in untracked
+        .into_iter()
+        .take(NOTHING_TO_COMMIT_SAMPLE_PATHS.saturating_sub(sample_paths.len()))
+    {
+        if !sample_paths.iter().any(|p| p == &path) {
+            sample_paths.push(path);
+        }
+    }
+
+    if unstaged_count == 0 && untracked_count == 0 {
+        NothingToCommitReason::Clean
+    } else {
+        NothingToCommitReason::Uncommitted {
+            unstaged: unstaged_count,
+            untracked: untracked_count,
+            sample_paths,
+        }
+    }
+}
+
 /// Remove squash merge sentinel files after a successful commit (Git removes `SQUASH_MSG` on commit).
 ///
 /// # Errors
@@ -369,7 +434,7 @@ fn commit_patch_scope(
     let patches = match input {
         CommitPatchInput::Hunks(selection) => {
             if selection.ids.is_empty() && selection.ranges.is_empty() {
-                return Err(Error::NothingToCommit.into());
+                return Err(Error::nothing_to_commit_clean().into());
             }
             resolve_selection(
                 repo,
@@ -381,7 +446,7 @@ fn commit_patch_scope(
         }
         CommitPatchInput::Patches(patches) => {
             if patches.is_empty() {
-                return Err(Error::NothingToCommit.into());
+                return Err(Error::nothing_to_commit_clean().into());
             }
             patches
         }
@@ -757,7 +822,7 @@ pub fn commit_worktree(
         req.staged_change_count = Some(staged.total());
     }
     let result = create_commit_with_index(repo, head, &mut index, &req, progress, None);
-    if matches!(result, Err(Error::NothingToCommit)) && !req.dry_run && staged.total() > 0 {
+    if matches!(result, Err(Error::NothingToCommit { .. })) && !req.dry_run && staged.total() > 0 {
         repo.write_index(&mut index)?;
     }
     result
@@ -907,10 +972,10 @@ fn finish_commit_dry_run(
 
     if !req.allow_empty && !req_amend {
         if parent_tree.is_none() && index.entries.is_empty() {
-            return Err(Error::NothingToCommit);
+            return Err(nothing_to_commit_error(repo, index, parent_tree));
         }
         if !concluding_merge && files.is_empty() {
-            return Err(Error::NothingToCommit);
+            return Err(nothing_to_commit_error(repo, index, parent_tree));
         }
     }
 
@@ -1151,10 +1216,10 @@ fn create_commit_with_index(
         if !skip_tree_match {
             if let Some(ref old) = parent_tree {
                 if index_staged_tree_matches(repo.odb(), index, old) {
-                    return Err(Error::NothingToCommit);
+                    return Err(nothing_to_commit_error(repo, index, parent_tree));
                 }
             } else if index.entries.is_empty() {
-                return Err(Error::NothingToCommit);
+                return Err(nothing_to_commit_error(repo, index, parent_tree));
             }
         }
     }
@@ -1214,12 +1279,12 @@ fn create_commit_with_index(
 
     if !req.allow_empty && !req.amend {
         if parent_tree.is_none() && is_empty_tree_oid(repo.odb(), &tree) {
-            return Err(Error::NothingToCommit);
+            return Err(nothing_to_commit_error(repo, index, parent_tree));
         }
         if !concluding_merge {
             if let Some(ref old) = parent_tree {
                 if old == &tree {
-                    return Err(Error::NothingToCommit);
+                    return Err(nothing_to_commit_error(repo, index, parent_tree));
                 }
             }
         }
@@ -1713,7 +1778,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let repo = init_repo(tmp.path());
         let err = create_commit(&repo, &commit_req("empty"), &mut NullProgress).unwrap_err();
-        assert!(matches!(err, Error::NothingToCommit));
+        assert!(matches!(err, Error::NothingToCommit { .. }));
         assert!(resolve_ref(&repo.git_dir(), "refs/heads/main").is_err());
     }
 
@@ -1743,7 +1808,7 @@ mod tests {
         create_commit(&repo, &commit_req("first"), &mut NullProgress).unwrap();
 
         let err = create_commit(&repo, &commit_req("noop"), &mut NullProgress).unwrap_err();
-        assert!(matches!(err, Error::NothingToCommit));
+        assert!(matches!(err, Error::NothingToCommit { .. }));
     }
 
     #[test]
@@ -1760,11 +1825,11 @@ mod tests {
         fs::remove_file(root.join("n.txt")).unwrap();
 
         let err = commit_worktree(&repo, &dry_run_req("noop"), &mut NullProgress).unwrap_err();
-        assert!(matches!(err, Error::NothingToCommit));
+        assert!(matches!(err, Error::NothingToCommit { .. }));
         assert!(repo.load_index().unwrap().get(b"n.txt", 0).is_some());
 
         let err = commit_worktree(&repo, &commit_req("noop"), &mut NullProgress).unwrap_err();
-        assert!(matches!(err, Error::NothingToCommit));
+        assert!(matches!(err, Error::NothingToCommit { .. }));
         let index = repo.load_index().unwrap();
         assert!(index.get(b"n.txt", 0).is_none());
         assert!(index.get(b"a.txt", 0).is_some());
@@ -1822,7 +1887,7 @@ mod tests {
         set_test_inject_index_write_fail(true);
         let err = create_commit(&repo, &commit_req("fail"), &mut NullProgress).unwrap_err();
         set_test_inject_index_write_fail(false);
-        assert!(!matches!(err, Error::NothingToCommit));
+        assert!(!matches!(err, Error::NothingToCommit { .. }));
 
         assert!(
             resolve_ref(&repo.git_dir(), "refs/heads/main").is_err(),
@@ -1841,7 +1906,7 @@ mod tests {
         set_test_inject_reflog_fail(Some("HEAD"));
         let err = create_commit(&repo, &commit_req("fail"), &mut NullProgress).unwrap_err();
         set_test_inject_reflog_fail(None);
-        assert!(!matches!(err, Error::NothingToCommit));
+        assert!(!matches!(err, Error::NothingToCommit { .. }));
 
         assert!(
             resolve_ref(&repo.git_dir(), "refs/heads/main").is_err(),

@@ -25,10 +25,9 @@ use grit_lib::diff::{
     structured::{
         format_hunk_range, structured_file_diff, SideBytes, StructuredFileDiff, StructuredLineKind,
     },
-    submodule_porcelain_flags, tree_diff_structured_parallel,
-    write_patch, write_patch_resolved, DiffDetail, DiffEntry, DiffFilesOutput,
-    DiffIndexToWorktreeOptions, DiffMerges, DiffOptions, DiffSide, DiffStatus, PatchResolvedSide,
-    PatchSide, PatchTextOptions, TreeDiffStructured,
+    submodule_porcelain_flags, tree_diff_structured_parallel, write_patch, write_patch_resolved,
+    DiffDetail, DiffEntry, DiffFilesOutput, DiffIndexToWorktreeOptions, DiffMerges, DiffOptions,
+    DiffSide, DiffStatus, PatchResolvedSide, PatchSide, PatchTextOptions, TreeDiffStructured,
 };
 use grit_lib::index::Index;
 use grit_lib::objects::odb::Odb;

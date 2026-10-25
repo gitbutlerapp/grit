@@ -5588,6 +5588,12 @@ pub grit_lib::error::Error::MoveSourceNotTracked::src: alloc::string::String
 pub grit_lib::error::Error::NoReplayInProgress
 pub grit_lib::error::Error::NotARepository(alloc::string::String)
 pub grit_lib::error::Error::NotFastForward
+pub grit_lib::error::NothingToCommitReason
+pub grit_lib::error::NothingToCommitReason::Clean
+pub grit_lib::error::NothingToCommitReason::Uncommitted
+pub grit_lib::error::NothingToCommitReason::Uncommitted::sample_paths: alloc::vec::Vec<alloc::string::String>
+pub grit_lib::error::NothingToCommitReason::Uncommitted::unstaged: usize
+pub grit_lib::error::NothingToCommitReason::Uncommitted::untracked: usize
 pub grit_lib::error::Error::NotRemovingRecursively(alloc::string::String)
 pub grit_lib::error::Error::NoteAlreadyExists
 pub grit_lib::error::Error::NoteAlreadyExists::object: grit_lib::objects::ObjectId
@@ -5604,6 +5610,7 @@ pub grit_lib::error::Error::NotesRefNotCommit
 pub grit_lib::error::Error::NotesRefNotCommit::found: grit_lib::objects::ObjectKind
 pub grit_lib::error::Error::NotesRefNotCommit::notes_ref: alloc::string::String
 pub grit_lib::error::Error::NothingToCommit
+pub grit_lib::error::Error::NothingToCommit::reason: grit_lib::error::NothingToCommitReason
 pub grit_lib::error::Error::ObjectHeaderTooLong
 pub grit_lib::error::Error::ObjectHeaderTooLong::oid: alloc::string::String
 pub grit_lib::error::Error::ObjectNotFound(alloc::string::String)
@@ -15463,6 +15470,12 @@ pub grit_lib::prelude::Error::MoveSourceNotTracked::src: alloc::string::String
 pub grit_lib::prelude::Error::NoReplayInProgress
 pub grit_lib::prelude::Error::NotARepository(alloc::string::String)
 pub grit_lib::prelude::Error::NotFastForward
+pub grit_lib::prelude::NothingToCommitReason
+pub grit_lib::prelude::NothingToCommitReason::Clean
+pub grit_lib::prelude::NothingToCommitReason::Uncommitted
+pub grit_lib::prelude::NothingToCommitReason::Uncommitted::sample_paths: alloc::vec::Vec<alloc::string::String>
+pub grit_lib::prelude::NothingToCommitReason::Uncommitted::unstaged: usize
+pub grit_lib::prelude::NothingToCommitReason::Uncommitted::untracked: usize
 pub grit_lib::prelude::Error::NotRemovingRecursively(alloc::string::String)
 pub grit_lib::prelude::Error::NoteAlreadyExists
 pub grit_lib::prelude::Error::NoteAlreadyExists::object: grit_lib::objects::ObjectId
@@ -15479,6 +15492,7 @@ pub grit_lib::prelude::Error::NotesRefNotCommit
 pub grit_lib::prelude::Error::NotesRefNotCommit::found: grit_lib::objects::ObjectKind
 pub grit_lib::prelude::Error::NotesRefNotCommit::notes_ref: alloc::string::String
 pub grit_lib::prelude::Error::NothingToCommit
+pub grit_lib::prelude::Error::NothingToCommit::reason: grit_lib::error::NothingToCommitReason
 pub grit_lib::prelude::Error::ObjectHeaderTooLong
 pub grit_lib::prelude::Error::ObjectHeaderTooLong::oid: alloc::string::String
 pub grit_lib::prelude::Error::ObjectNotFound(alloc::string::String)

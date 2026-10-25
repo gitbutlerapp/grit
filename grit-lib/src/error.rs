@@ -748,6 +748,34 @@ fn restore_unmerged_message(paths: &[String]) -> String {
     }
 }
 
+/// Why [`Error::NothingToCommit`] was returned.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[non_exhaustive]
+pub enum NothingToCommitReason {
+    /// The index matches `HEAD` and the work tree has no unstaged tracked edits or untracked files.
+    #[default]
+    Clean,
+    /// The index matches `HEAD` but the work tree still has local changes.
+    Uncommitted {
+        /// Index-vs-worktree diff entry count (rename detection off).
+        unstaged: usize,
+        /// Untracked paths under normal `status` rules.
+        untracked: usize,
+        /// Up to three repository-relative paths for messages (`unstaged` first, then untracked).
+        sample_paths: Vec<String>,
+    },
+}
+
+impl Error {
+    /// [`Error::NothingToCommit`] with [`NothingToCommitReason::Clean`].
+    #[must_use]
+    pub fn nothing_to_commit_clean() -> Self {
+        Self::NothingToCommit {
+            reason: NothingToCommitReason::Clean,
+        }
+    }
+}
+
 /// The top-level error type for all grit-lib operations.
 ///
 /// # Examples
@@ -1379,7 +1407,10 @@ pub enum Error {
 
     /// The index tree matches the parent commit tree and [`allow_empty`](crate::porcelain::commit::CommitRequest::allow_empty) is false.
     #[error("nothing to commit")]
-    NothingToCommit,
+    NothingToCommit {
+        /// Worktree context when the failure came from a commit attempt; [`NothingToCommitReason::Clean`] elsewhere.
+        reason: NothingToCommitReason,
+    },
 
     /// [`create_commit`](crate::porcelain::commit::create_commit) requires a branch checkout.
     #[error("HEAD is detached")]

@@ -71,7 +71,7 @@ fn assert_nothing_to_commit(root: &Path, req: &CommitRequest) {
         &mut NullProgress,
     )
     .expect_err("nothing to commit");
-    assert!(matches!(err, Error::NothingToCommit), "got {err:?}");
+    assert!(matches!(err, Error::NothingToCommit { .. }), "got {err:?}");
     assert_eq!(git_out(root, &["rev-parse", "HEAD"]), head_before);
 }
 

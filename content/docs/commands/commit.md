@@ -81,6 +81,18 @@ For a `pre-commit` hook that prints a line on each stream and exits 1, `grit com
 }
 ```
 
+When the index matches `HEAD` but the work tree still has unstaged edits (for example after `grit commit --staged` or with `commit.autoStage=false`), human output names the file and suggests staging; `--json` uses `kind: "nothing_staged"` instead of claiming the tree is clean:
+
+```console
+$ grit commit --staged -m "wip"
+error: nothing staged to commit; a.txt has unstaged changes
+hint: grit add a.txt, or grit commit -m ... (commit without --staged)
+$ grit commit --staged -m "wip" --json
+{"error":"nothing staged to commit; a.txt has unstaged changes","hint":"grit add a.txt, or grit commit -m ... (commit without --staged)","kind":"nothing_staged","nothing_to_commit":{"reason":"uncommitted","unstaged":1,"untracked":0},"paths":["a.txt"]}
+```
+
+When there is truly nothing to record (index matches `HEAD` and the work tree has no unstaged or untracked paths), `kind` is `working_tree_clean` and `nothing_to_commit.reason` is `clean`.
+
 ### Change ids
 
 Every commit `grit commit` creates gets a `change-id` header (reverse-hex by default) that stays with the same logical change across amends. Commits created without the header still have a deterministic id derived from the commit object id (Jujutsu-compatible); amending such a commit stores that derived value. Set `grit.changeIds=false` to omit the header (Git byte-identical commits for tests or importers that reject extra headers). See [Change ids](../library/change-ids/) for policy, testing knobs, and library APIs.

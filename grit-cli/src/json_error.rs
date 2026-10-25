@@ -17,6 +17,21 @@ use serde::Serialize;
 use crate::error_hints;
 use crate::error_kind::ErrorKind;
 
+/// Extra detail when `kind` is `working_tree_clean` or `nothing_staged`.
+#[derive(Debug, Clone, Serialize, JsonSchema)]
+pub struct NothingToCommitJson {
+    /// `clean` or `uncommitted`.
+    pub reason: String,
+    /// Unstaged tracked paths (index-vs-worktree), when `reason == "uncommitted"`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub unstaged: Option<usize>,
+    /// Untracked paths, when `reason == "uncommitted"`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub untracked: Option<usize>,
+}
+
 /// Paths that would be overwritten, when `kind == "would_overwrite"`.
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct WouldOverwriteJson {
@@ -62,6 +77,10 @@ pub struct StructuredJsonError {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(skip_serializing_if = "Option::is_none")]
     pub hint: Option<String>,
+    /// Commit failure detail when `kind` is `working_tree_clean` or `nothing_staged`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[schemars(skip_serializing_if = "Option::is_none")]
+    pub nothing_to_commit: Option<NothingToCommitJson>,
 }
 
 impl StructuredJsonError {
@@ -78,6 +97,7 @@ impl StructuredJsonError {
             hook: None,
             paths: None,
             hint: None,
+            nothing_to_commit: None,
         }
     }
 }
