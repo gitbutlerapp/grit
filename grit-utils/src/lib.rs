@@ -51,6 +51,7 @@ pub mod refs_driver;
 pub mod refs_fixture;
 pub mod refs_suite;
 pub mod render;
+pub mod repack_fixture;
 pub mod resolve_cat_suite;
 pub mod resource;
 pub mod revision_selection_suite;

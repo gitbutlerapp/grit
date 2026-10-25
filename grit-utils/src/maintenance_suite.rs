@@ -12,6 +12,7 @@ use crate::binary::{grit_source_commit, tool_version};
 use crate::fixture::{remove_dir_robust, scratch_dir};
 use crate::machine::{collect_machine_info, format_timestamp};
 use crate::network_fixture::{ensure_fixture, NetworkFixtureKind, NetworkProfile};
+use crate::repack_fixture::{ensure_cargo_shape_repo, CargoShape};
 use crate::scenarios::{run_scenario, Driver, PrepareKind, RunConfig, Scenario};
 use crate::schema::{BenchReport, ToolVersions, SCHEMA_VERSION};
 
@@ -145,7 +146,8 @@ pub fn run_prepare_maintenance(git: &Path, worktree: Option<&Path>) -> Result<()
     Ok(())
 }
 
-/// GC, repack, and commit-graph scenarios on the deep-history worktree.
+/// GC, repack, and commit-graph scenarios on the deep-history worktree, plus
+/// repack of a freshly cloned cargo-shaped repository.
 pub fn run_maintenance_suite(
     hyperfine: &Path,
     git: &Path,
@@ -243,6 +245,50 @@ pub fn run_maintenance_suite(
         },
         &worktree,
     )?);
+
+    // Repack of a fresh clone: one pack with deltas, nothing loose (issue #1690).
+    let cargo_shape = ensure_cargo_shape_repo(
+        git,
+        if smoke {
+            CargoShape::SMOKE
+        } else {
+            CargoShape::BENCH
+        },
+    )?;
+    for (id, description, grit_argv, git_argv) in [
+        (
+            "repack-cargo-shape",
+            "grit repack vs git repack -ad on a freshly cloned cargo-shaped repo",
+            vec!["repack", "-q"],
+            vec!["repack", "-adq"],
+        ),
+        (
+            "repack-force-cargo-shape",
+            "grit repack --force vs git repack -adf on a cargo-shaped repo",
+            vec!["repack", "-q", "--force"],
+            vec!["repack", "-adfq"],
+        ),
+    ] {
+        scenarios.push(run_scenario(
+            hyperfine,
+            git,
+            grit,
+            cfg,
+            &Scenario {
+                id: id.into(),
+                group: "maintenance".into(),
+                fixture: cargo_shape.display().to_string(),
+                description: description.into(),
+                grit_argv: grit_argv.into_iter().map(String::from).collect(),
+                git_argv: git_argv.into_iter().map(String::from).collect(),
+                driver: Driver::Cli,
+                prepare_kind: None,
+                grit_via_shell: false,
+                git_via_shell: false,
+            },
+            &cargo_shape,
+        )?);
+    }
 
     Ok(BenchReport {
         schema_version: SCHEMA_VERSION,

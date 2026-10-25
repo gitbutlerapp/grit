@@ -10152,8 +10152,8 @@ impl<'a> core::marker::UnsafeUnpin for grit_lib::objects::pack_object_select::Pa
 impl<'a> core::panic::unwind_safe::RefUnwindSafe for grit_lib::objects::pack_object_select::PackEnumerateOptions<'a>
 impl<'a> core::panic::unwind_safe::UnwindSafe for grit_lib::objects::pack_object_select::PackEnumerateOptions<'a>
 pub struct grit_lib::objects::pack_object_select::PackObjectSelection
-pub grit_lib::objects::pack_object_select::PackObjectSelection::blob_name_hashes: std::collections::hash::map::HashMap<grit_lib::objects::ObjectId, u32>
 pub grit_lib::objects::pack_object_select::PackObjectSelection::have_closure: std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>
+pub grit_lib::objects::pack_object_select::PackObjectSelection::name_hashes: std::collections::hash::map::HashMap<grit_lib::objects::ObjectId, u32>
 pub grit_lib::objects::pack_object_select::PackObjectSelection::send: alloc::vec::Vec<grit_lib::objects::ObjectId>
 pub grit_lib::objects::pack_object_select::PackObjectSelection::walk_prefetch: std::collections::hash::map::HashMap<grit_lib::objects::ObjectId, grit_lib::objects::Object>
 impl core::clone::Clone for grit_lib::objects::pack_object_select::PackObjectSelection
@@ -10201,14 +10201,12 @@ pub grit_lib::objects::pack_objects::PackBuildOptions::reuse_deltas: bool
 pub grit_lib::objects::pack_objects::PackBuildOptions::reuse_objects: bool
 pub grit_lib::objects::pack_objects::PackBuildOptions::thin: bool
 pub grit_lib::objects::pack_objects::PackBuildOptions::use_bitmaps: bool
-pub grit_lib::objects::pack_objects::PackBuildOptions::stream_verbatim_single_pack: bool
 pub grit_lib::objects::pack_objects::PackBuildOptions::use_ofs_delta: bool
 pub grit_lib::objects::pack_objects::PackBuildOptions::window: usize
 impl grit_lib::objects::pack_objects::PackBuildOptions
 pub fn grit_lib::objects::pack_objects::PackBuildOptions::for_local_copy(core::option::Option<&grit_lib::config::ConfigSet>) -> Self
 pub fn grit_lib::objects::pack_objects::PackBuildOptions::for_local_push(core::option::Option<&grit_lib::config::ConfigSet>) -> Self
 pub fn grit_lib::objects::pack_objects::PackBuildOptions::for_repack_rewrite(core::option::Option<&grit_lib::config::ConfigSet>) -> Self
-pub fn grit_lib::objects::pack_objects::PackBuildOptions::for_repack_with_loose(core::option::Option<&grit_lib::config::ConfigSet>) -> Self
 pub fn grit_lib::objects::pack_objects::PackBuildOptions::for_serve(core::option::Option<&grit_lib::config::ConfigSet>, bool, bool) -> Self
 pub fn grit_lib::objects::pack_objects::PackBuildOptions::window_and_depth_from_config(core::option::Option<&grit_lib::config::ConfigSet>) -> (usize, usize)
 impl core::clone::Clone for grit_lib::objects::pack_objects::PackBuildOptions
@@ -19992,7 +19990,6 @@ impl grit_lib::objects::pack_objects::PackBuildOptions
 pub fn grit_lib::objects::pack_objects::PackBuildOptions::for_local_copy(core::option::Option<&grit_lib::config::ConfigSet>) -> Self
 pub fn grit_lib::objects::pack_objects::PackBuildOptions::for_local_push(core::option::Option<&grit_lib::config::ConfigSet>) -> Self
 pub fn grit_lib::objects::pack_objects::PackBuildOptions::for_repack_rewrite(core::option::Option<&grit_lib::config::ConfigSet>) -> Self
-pub fn grit_lib::objects::pack_objects::PackBuildOptions::for_repack_with_loose(core::option::Option<&grit_lib::config::ConfigSet>) -> Self
 pub fn grit_lib::objects::pack_objects::PackBuildOptions::for_serve(core::option::Option<&grit_lib::config::ConfigSet>, bool, bool) -> Self
 pub fn grit_lib::objects::pack_objects::PackBuildOptions::window_and_depth_from_config(core::option::Option<&grit_lib::config::ConfigSet>) -> (usize, usize)
 impl core::clone::Clone for grit_lib::objects::pack_objects::PackBuildOptions

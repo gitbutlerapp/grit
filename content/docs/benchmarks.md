@@ -534,6 +534,22 @@ cargo build --release -p grit-cli -p grit-utils
 ./target/release/grit-bench maintenance --format json --output /tmp/maintenance-medium.json
 ```
 
+#### Full repack of a fresh clone
+
+The maintenance suite also runs **`repack-cargo-shape`** (`grit repack` vs `git repack -ad`) and **`repack-force-cargo-shape`** (`grit repack --force` vs `git repack -adf`) on a synthetic cargo-shaped repository (`CargoShape::BENCH` in `grit-utils/src/repack_fixture.rs`: 8 000 commits over a nested crate layout with hot `Cargo.lock` / `CHANGELOG.md` files, imported with `git fast-import` and packed with `git repack -adf`, like a fresh clone).
+
+Default repack copies stored entries, both whole objects and deltas with their base reference rewritten, and runs the delta search only on objects that are not already deltas against a packed base. `--force` searches every object in a streaming window. Both write the pack to a staging file. Measured with `/usr/bin/time` on [rust-lang/cargo](https://github.com/rust-lang/cargo) (23 565 commits, one 78 MB pack after `grit clone`, 4-vCPU Linux VM, git 2.43.0):
+
+| Command | Before | After | `git` |
+| --- | --- | --- | --- |
+| `grit repack` vs `git repack -ad` | 2.5–4.0 s, 412 MB, 81.5 MB pack | 1.24–1.35 s, 194–197 MB, 81.4 MB pack | 1.32–1.41 s, 169 MB, 81.4 MB pack |
+| `grit repack --force` vs `git repack -adf` | 393 s, 5.5 GB, 107 MB pack | 7.3–8.9 s, 459–480 MB, 45.7 MB pack | 6.9–7.0 s, 470–476 MB, 45.2 MB pack |
+| `grit gc` vs `git gc` (already packed) | 0.33–0.37 s, 42 MB | 0.36–0.46 s, 42 MB | 1.53 s, 169 MB |
+
+Before is the parent `main` commit; its forced row is that library's `force_recompress` path, which had no CLI flag yet.
+
+The gate keeps this from regressing: `grit-utils/tests/repack_cargo_shape_budget.rs` builds `CargoShape::SMOKE` and requires both repack modes to stay within **2×** of git's peak memory (measured above each tool's `log -n 1` baseline, so debug-build code pages do not count) and, in optimized builds, within **2×** of git's time, with a pack no larger than **1.2×** git's. `grit-lib/tests/repack_delta_reuse_git_compat.rs` checks against the system `git` that default repack keeps every stored delta, `--force` stays within 1.2× of `git repack -adf`, and chains deeper than `pack.depth` are cut.
+
 ### Reproduce locally
 
 Build release binaries, install [hyperfine](https://github.com/sharkdp/hyperfine), then run matching grit-bench scenarios from the repo root (see `grit-utils/README.md` for the current subcommands):

@@ -91,7 +91,8 @@ impl PackBuildOptions {
         }
     }
 
-    /// Full repack of an on-disk repository: reuse existing pack bytes, no new delta search.
+    /// Copy stored pack entries (whole objects and deltas) without a new delta search
+    /// (`window` 0), for rebuilding a pack from objects that are already packed.
     #[must_use]
     pub fn for_repack_rewrite(cfg: Option<&crate::config::ConfigSet>) -> Self {
         let max_depth = Self::window_and_depth_from_config(cfg).1;
