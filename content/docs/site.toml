@@ -144,6 +144,7 @@ baseline = [
   "grit-utils/baselines/daily-common-paths.json",
   "grit-utils/baselines/daily-workspace-extras.json",
   "grit-utils/baselines/daily-delete-heavy-after.json",
+  "grit-utils/baselines/daily-reset-undo-commit-after.json",
   "grit-utils/baselines/bundle-create-all.json",
   "grit-utils/baselines/daily-clone-checkout-synth-100k-after.json",
   "grit-utils/baselines/daily/latest.json",

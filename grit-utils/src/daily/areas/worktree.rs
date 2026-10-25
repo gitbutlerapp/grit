@@ -276,6 +276,15 @@ pub fn plans() -> Vec<DailyHeadlinePlan> {
         correctness: None,
     });
     plans.push(DailyHeadlinePlan {
+        spec: scenario_spec("reset/undo-commit@git-git"),
+        pending: false,
+        setup: super::super::helpers::setup_git_git_history,
+        prepare: super::super::matrix_helpers::prepare_reset_undo_commit,
+        build_git: |c| super::super::helpers::reset_undo_commit_bench(c).1,
+        build_grit: |c| super::super::helpers::reset_undo_commit_bench(c).0,
+        correctness: None,
+    });
+    plans.push(DailyHeadlinePlan {
         spec: scenario_spec("rm/dir@synth-10k"),
         pending: false,
         setup: setup_synth10k,

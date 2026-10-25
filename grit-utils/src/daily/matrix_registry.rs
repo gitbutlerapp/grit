@@ -188,6 +188,13 @@ pub const MATRIX_SCENARIOS: &[ScenarioSpec] = &[
         description: "Mixed reset dirty tree: grit reset HEAD vs git reset --mixed HEAD",
     },
     ScenarioSpec {
+        id: "reset/undo-commit@git-git",
+        area: Area::Worktree,
+        headline: false,
+        name: None,
+        description: "Undo the last commit on pinned git.git (deep history, many tags): grit reset --soft HEAD~1 vs git reset --soft HEAD~1",
+    },
+    ScenarioSpec {
         id: "rm/dir@synth-10k",
         area: Area::Worktree,
         headline: false,

@@ -611,6 +611,13 @@ pub fn reset_keep_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
     )
 }
 
+pub fn reset_undo_commit_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
+    (
+        sh_devnull(&ctx.grit, &["reset", "--soft", "HEAD~1"]),
+        sh_devnull(&ctx.git, &["reset", "--soft", "HEAD~1"]),
+    )
+}
+
 pub fn rm_dry_run_bench(ctx: &DailyHeadlineContext) -> (BenchArgv, BenchArgv) {
     (
         sh_script(shell_rm_dir_dry_run_grit(&ctx.grit)),

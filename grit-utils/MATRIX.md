@@ -66,6 +66,7 @@ Overview of **grit-lib** coverage, **`grit` commands**, common workflows, and **
 | `reset/hard-delete-heavy@wide-48k` | Hard reset to a commit deleting 2000 files in 20 dirs of a 48k-file tree and back: grit reset --hard vs git reset --hard |
 | `reset/keep@synth-10k` | Reset branch with unrelated local edits: grit reset --keep HEAD~1 vs git reset --keep HEAD~1 |
 | `reset/mixed@synth-10k` | Mixed reset dirty tree: grit reset HEAD vs git reset --mixed HEAD |
+| `reset/undo-commit@git-git` | Undo the last commit on pinned git.git (deep history, many tags): grit reset --soft HEAD~1 vs git reset --soft HEAD~1 |
 | `restore/hunks@large-file` | Discard half of 500 hunks in a 50k-line file: grit restore --hunks vs git apply -R |
 | `restore/paths@synth-10k` | Restore ~1% paths from index: grit restore -- <paths> vs git restore -- <paths> |
 | `restore/hunks@large-file` | Discard half of 500 hunks in a 50k-line file: grit restore --hunks vs git apply -R |

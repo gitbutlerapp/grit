@@ -1,0 +1,101 @@
+{
+  "schema": "grit-daily-bench/1",
+  "generated_at": "2026-10-25T09:00:48.452227702Z",
+  "machine": {
+    "cpu_model": "Intel(R) Xeon(R) Processor",
+    "physical_cores": 4,
+    "logical_cores": 4,
+    "ram_bytes": 16780574720,
+    "os": "linux",
+    "kernel": "Linux 6.12.94+",
+    "scratch_filesystem": "ext4",
+    "rustc_version": "rustc 1.83.0 (90b35a623 2024-11-26)",
+    "cargo_profile": "dev"
+  },
+  "tools": {
+    "git": "git version 2.43.0",
+    "grit": "grit 0.5.20",
+    "grit_commit": "b83c306efb038154193f0b5b913efa004a22ab35"
+  },
+  "scenarios": [
+    {
+      "id": "reset/undo-commit@git-git",
+      "area": "worktree",
+      "description": "Undo the last commit on pinned git.git (deep history, many tags): grit reset --soft HEAD~1 vs git reset --soft HEAD~1",
+      "git": {
+        "median_wall_ms": 3.424861,
+        "peak_rss_bytes": 14675968,
+        "runs": 5,
+        "samples_ms": [
+          3.488,
+          2.513,
+          3.397,
+          3.425,
+          3.568
+        ],
+        "min_ms": 2.512771,
+        "max_ms": 3.568489,
+        "stddev_ms": 0.4329662409551118
+      },
+      "grit": {
+        "median_wall_ms": 627.478881,
+        "peak_rss_bytes": 86736896,
+        "runs": 5,
+        "samples_ms": [
+          633.082,
+          607.392,
+          627.479,
+          629.692,
+          614.501
+        ],
+        "min_ms": 607.3920790000001,
+        "max_ms": 633.082472,
+        "stddev_ms": 10.962565170352596
+      },
+      "ratio": 183.2129482043213,
+      "detail": {
+        "prepare": "set -eu\ngrit-bench prepare-daily-reset --git git\ncd /tmp/grit-bench-scratch/daily-git-git-wt/worktree-run-git-git-wt && git -c user.name=grit-bench -c user.email=bench@example.com commit -q --allow-empty --no-verify -m daily-bench-wip",
+        "commands": {
+          "git": "git reset --soft HEAD~1",
+          "grit": "grit reset --soft HEAD~1"
+        },
+        "phases": {
+          "git": [
+            {
+              "name": "index: do_read_index",
+              "ms": 0.627,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "cache_tree: read",
+              "ms": 0.06,
+              "count": 1,
+              "depth": 0
+            }
+          ],
+          "grit": [
+            {
+              "name": "grit.repository.open",
+              "ms": 1.16,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "grit.config.load",
+              "ms": 0.51,
+              "count": 2,
+              "depth": 0
+            },
+            {
+              "name": "grit.pack.index.open",
+              "ms": 0.022,
+              "count": 1,
+              "depth": 0
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

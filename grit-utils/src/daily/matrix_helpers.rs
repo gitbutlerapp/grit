@@ -1250,6 +1250,29 @@ echo bench-local >> "$target"
     DailyPrepare::Shell(BenchArgv::new("/bin/sh", ["-c", script.as_str()]))
 }
 
+/// Reset the fixture to its pinned tip and add one empty commit for the timed run to undo.
+pub fn prepare_reset_undo_commit(ctx: &DailyHeadlineContext) -> DailyPrepare {
+    let reset = prepare_daily_reset_script(&ctx.git);
+    let repo_q = shell_quote_path(&ctx.repo);
+    let commit = shell_command(
+        &ctx.git,
+        &[
+            "-c",
+            "user.name=grit-bench",
+            "-c",
+            "user.email=bench@example.com",
+            "commit",
+            "-q",
+            "--allow-empty",
+            "--no-verify",
+            "-m",
+            "daily-bench-wip",
+        ],
+    );
+    let script = format!("{reset}\ncd {repo_q} && {commit}");
+    DailyPrepare::Shell(BenchArgv::new("/bin/sh", ["-c", script.as_str()]))
+}
+
 /// Hyperfine prepare hook: reset fixture and apply unstaged edit on unchanged tracked path.
 pub fn run_prepare_reset_keep(git: &Path) -> Result<()> {
     run_prepare_daily_reset(git)?;
