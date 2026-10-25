@@ -1,8 +1,9 @@
 //! Write Git pack reachability bitmap (`.bitmap`) sidecars for a single pack index.
 
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs;
-use std::io::Write;
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -13,9 +14,9 @@ use thiserror::Error;
 use crate::ewah_bitmap::{Bitmap, EwahBitmap};
 use crate::gc::collect_referenced_object_roots;
 use crate::ident::parse_signature_times;
-use crate::objects::{parse_commit, parse_tag, parse_tree, ObjectId, ObjectKind};
-use crate::pack::{read_pack_index, PackIndex};
-use crate::pack_name_hash::pack_name_hash;
+use crate::objects::{parse_commit, parse_tag, Object, ObjectId, ObjectKind, TreeRefIter};
+use crate::pack::{read_pack_index, PackIndex, SingleLocalPackReader};
+use crate::pack_name_hash::pack_name_hash_extend;
 use crate::pack_rev::{
     append_hashfile_checksum, build_pack_rev_bytes_from_index_order_offsets_and_checksum,
     rev_path_for_index, verify_pack_rev_file,
@@ -243,7 +244,22 @@ impl PackBitmapWriter {
 }
 
 /// Shared bitmap writer core (pack order or MIDX pseudo-pack order).
+///
+/// Runs inside the object database's pack read context: the writer reads every commit and
+/// tree, and the context also lets [`pack_entry_kinds`] map the pack directly.
 fn write_bitmap_for_order(
+    repo: &Repository,
+    order: &BitmapOrder,
+    header_checksum: &[u8],
+    bitmap_path: &Path,
+    options: &PackBitmapWriteOptions,
+) -> Result<PathBuf, PackBitmapWriteError> {
+    repo.odb().with_pack_read_context(|| {
+        write_bitmap_for_order_in_context(repo, order, header_checksum, bitmap_path, options)
+    })
+}
+
+fn write_bitmap_for_order_in_context(
     repo: &Repository,
     order: &BitmapOrder,
     header_checksum: &[u8],
@@ -252,22 +268,19 @@ fn write_bitmap_for_order(
 ) -> Result<PathBuf, PackBitmapWriteError> {
     let roots = collect_referenced_object_roots(repo.git_dir())
         .map_err(|e| PackBitmapWriteError::Object(e.to_string()))?;
-    if options.verify_reachability_closure {
-        verify_order_closure(repo, order, &roots)?;
-    }
-    let tips = commit_tips_from_roots(repo, &roots)?;
+    let strict = options.verify_reachability_closure;
+    let (type_bitmaps, commits) = build_type_bitmaps_and_commits(repo, order)?;
+    let tips = commit_tips_from_roots(repo, order, &commits, &roots, strict)?;
     let needs_bitmap = tip_needs_flags(repo, &tips, &options.prefer_bitmap_tips)?;
     let hash_cache_len = hash_cache_row_count(order);
     let mut name_hashes = vec![0u32; hash_cache_len];
-    let (type_bitmaps, commits) = build_type_bitmaps_and_commits(repo, order)?;
-    let mut selected = select_commits(&commits, &tips, &needs_bitmap);
-    let strict = options.verify_reachability_closure;
+    let mut selected = select_commits(&commits.rows, &tips, &needs_bitmap);
     if !strict {
         selected.retain(|c| order.position_of(c).is_some());
     }
     let commit_bitmaps =
         build_commit_bitmaps(repo, order, &commits, &selected, &mut name_hashes, strict)?;
-    let (selected_sorted, xor_plan) = plan_xor_compression(repo, &selected, &commit_bitmaps);
+    let (selected_sorted, xor_plan) = plan_xor_compression(&commits, &selected, &commit_bitmaps);
     let bytes = assemble_bitmap_bytes(
         order,
         header_checksum,
@@ -294,13 +307,20 @@ fn bitmap_path_for_index(idx_path: &Path) -> PathBuf {
 }
 
 fn read_pack_trailer(idx: &PackIndex, hash_len: usize) -> Result<Vec<u8>, PackBitmapWriteError> {
-    let data = fs::read(&idx.pack_path).map_err(PackBitmapWriteError::io)?;
-    if data.len() < hash_len {
+    let mut file = fs::File::open(&idx.pack_path).map_err(PackBitmapWriteError::io)?;
+    let len = file.metadata().map_err(PackBitmapWriteError::io)?.len();
+    let trailer_len = hash_len as u64;
+    if len < trailer_len {
         return Err(PackBitmapWriteError::InvalidPackPath(
             "pack file too short".into(),
         ));
     }
-    Ok(data[data.len() - hash_len..].to_vec())
+    file.seek(SeekFrom::Start(len - trailer_len))
+        .map_err(PackBitmapWriteError::io)?;
+    let mut trailer = vec![0u8; hash_len];
+    file.read_exact(&mut trailer)
+        .map_err(PackBitmapWriteError::io)?;
+    Ok(trailer)
 }
 
 fn ensure_rev_sidecar(idx: &PackIndex) -> Result<(), PackBitmapWriteError> {
@@ -346,31 +366,124 @@ fn write_bitmap_atomically(path: &Path, bytes: &[u8]) -> Result<(), PackBitmapWr
 struct CommitRow {
     oid: ObjectId,
     committer_date: i64,
+    tree: ObjectId,
     parents: Vec<ObjectId>,
 }
 
+/// Every commit in the bitmap order, parsed once so later phases never re-read commits.
+struct CommitTable {
+    /// Newest committer date first (stable on ties, so pack order breaks them).
+    rows: Vec<CommitRow>,
+    by_oid: HashMap<ObjectId, usize>,
+}
+
+impl CommitTable {
+    fn new(mut rows: Vec<CommitRow>) -> Self {
+        rows.sort_by_key(|c| std::cmp::Reverse(c.committer_date));
+        let by_oid = rows.iter().enumerate().map(|(i, c)| (c.oid, i)).collect();
+        Self { rows, by_oid }
+    }
+
+    fn index_of(&self, oid: &ObjectId) -> Option<usize> {
+        self.by_oid.get(oid).copied()
+    }
+
+    fn get(&self, oid: &ObjectId) -> Option<&CommitRow> {
+        self.index_of(oid).map(|i| &self.rows[i])
+    }
+
+    /// Committer date of `oid`, or `0` for commits outside the order.
+    fn date(&self, oid: &ObjectId) -> i64 {
+        self.get(oid).map_or(0, |c| c.committer_date)
+    }
+
+    /// Parents of `oid`, reading commits outside the order from the object database.
+    fn parents(
+        &self,
+        repo: &Repository,
+        oid: &ObjectId,
+    ) -> Result<Cow<'_, [ObjectId]>, PackBitmapWriteError> {
+        if let Some(row) = self.get(oid) {
+            return Ok(Cow::Borrowed(&row.parents));
+        }
+        let obj = read_object(repo, oid)?;
+        let commit =
+            parse_commit(&obj.data).map_err(|e| PackBitmapWriteError::Object(e.to_string()))?;
+        Ok(Cow::Owned(commit.parents))
+    }
+}
+
+fn read_object(repo: &Repository, oid: &ObjectId) -> Result<Object, PackBitmapWriteError> {
+    repo.odb()
+        .read(oid)
+        .map_err(|e| PackBitmapWriteError::Object(e.to_string()))
+}
+
+/// Kind of each position of a single-pack `order`, read from pack entry headers.
+///
+/// Empty for MIDX orders or when the pack cannot be mapped directly; entries are `None` where
+/// the headers alone cannot tell (see
+/// [`SingleLocalPackReader::object_kinds_at_sorted_offsets`]).
+fn pack_entry_kinds(
+    repo: &Repository,
+    order: &BitmapOrder,
+) -> Result<Vec<Option<ObjectKind>>, PackBitmapWriteError> {
+    let (Some(idx), Some(objects_dir)) = (order.pack_index(), repo.odb().files_objects_dir())
+    else {
+        return Ok(Vec::new());
+    };
+    let Some(reader) = SingleLocalPackReader::open_for_pack_index(objects_dir, Arc::clone(&idx))
+        .map_err(|e| PackBitmapWriteError::Object(e.to_string()))?
+    else {
+        return Ok(Vec::new());
+    };
+    let offsets = (0..order.object_count())
+        .map(|pos| {
+            let row = order.storage_row_for_bitmap_rank(pos).ok_or_else(|| {
+                PackBitmapWriteError::Object("bitmap position out of range".into())
+            })?;
+            idx.offset_at(row as usize)
+                .map_err(|e| PackBitmapWriteError::Object(e.to_string()))
+        })
+        .collect::<Result<Vec<u64>, _>>()?;
+    reader
+        .object_kinds_at_sorted_offsets(&offsets)
+        .map_err(|e| PackBitmapWriteError::Object(e.to_string()))
+}
+
+/// Type bitmaps for every position in `order`, plus the parsed commits.
+///
+/// Only commits are inflated; other objects' types come from pack entry headers where possible,
+/// and from [`crate::odb::Odb::read_info`] otherwise.
 fn build_type_bitmaps_and_commits(
     repo: &Repository,
     order: &BitmapOrder,
-) -> Result<(TypeBitmaps, Vec<CommitRow>), PackBitmapWriteError> {
+) -> Result<(TypeBitmaps, CommitTable), PackBitmapWriteError> {
     let mut commits = Vec::new();
     let mut commit_bm = Bitmap::new();
     let mut trees = Bitmap::new();
     let mut blobs = Bitmap::new();
     let mut tags = Bitmap::new();
+    let header_kinds = pack_entry_kinds(repo, order)?;
     let n = order.object_count();
     for pos in 0..n {
         let oid = order
             .oid_at(pos)
             .map_err(|e| PackBitmapWriteError::Object(e.to_string()))?;
-        let obj = repo
-            .odb()
-            .read(&oid)
-            .map_err(|e| PackBitmapWriteError::Object(e.to_string()))?;
         let p = pos as usize;
-        match obj.kind {
+        let kind = match header_kinds.get(p).copied().flatten() {
+            Some(kind) => kind,
+            None => {
+                repo.odb()
+                    .read_info(&oid)
+                    .map_err(|e| PackBitmapWriteError::Object(e.to_string()))?
+                    .kind
+            }
+        };
+        match kind {
             ObjectKind::Commit => {
                 commit_bm.set(p);
+                let obj = read_object(repo, &oid)?;
                 let c = parse_commit(&obj.data)
                     .map_err(|e| PackBitmapWriteError::Object(e.to_string()))?;
                 let committer_date = parse_signature_times(&c.committer)
@@ -379,6 +492,7 @@ fn build_type_bitmaps_and_commits(
                 commits.push(CommitRow {
                     oid,
                     committer_date,
+                    tree: c.tree,
                     parents: c.parents,
                 });
             }
@@ -387,7 +501,6 @@ fn build_type_bitmaps_and_commits(
             ObjectKind::Tag => tags.set(p),
         }
     }
-    commits.sort_by_key(|c| std::cmp::Reverse(c.committer_date));
     Ok((
         TypeBitmaps {
             commits: EwahBitmap::from_bitmap(&commit_bm),
@@ -395,24 +508,127 @@ fn build_type_bitmaps_and_commits(
             blobs: EwahBitmap::from_bitmap(&blobs),
             tags: EwahBitmap::from_bitmap(&tags),
         },
-        commits,
+        CommitTable::new(commits),
     ))
 }
 
+/// Peel every root to the commit it names, sorted and deduplicated.
+///
+/// With `strict`, also checks that each root, every tag on its peel chain, and the full
+/// closure of roots that peel to a tree are in `order`. Closure under commits is checked by
+/// the strict bitmap walk instead: every tip is selected, and that walk fails on the first
+/// reachable object missing from the order.
+///
+/// # Errors
+///
+/// [`PackBitmapWriteError::NotClosed`] lists up to 32 missing objects;
+/// [`PackBitmapWriteError::Object`] reports unreadable or unparsable objects.
 fn commit_tips_from_roots(
     repo: &Repository,
+    order: &BitmapOrder,
+    commits: &CommitTable,
     roots: &[ObjectId],
+    strict: bool,
 ) -> Result<Vec<ObjectId>, PackBitmapWriteError> {
+    const MAX_REPORTED_MISSING: usize = 32;
     let mut tips = Vec::new();
-    for &oid in roots {
-        let Some(commit) = peel_to_commit(repo, oid)? else {
-            continue;
-        };
-        tips.push(commit);
+    let mut missing = Vec::new();
+    let mut seen_trees = HashSet::new();
+    for &root in roots {
+        let mut oid = root;
+        loop {
+            if strict && order.position_of(&oid).is_none() {
+                missing.push(oid);
+                break;
+            }
+            if commits.get(&oid).is_some() {
+                tips.push(oid);
+                break;
+            }
+            let obj = read_object(repo, &oid)?;
+            match obj.kind {
+                ObjectKind::Commit => {
+                    tips.push(oid);
+                    break;
+                }
+                ObjectKind::Tag => {
+                    oid = parse_tag(&obj.data)
+                        .map_err(|e| PackBitmapWriteError::Object(e.to_string()))?
+                        .object;
+                }
+                ObjectKind::Tree => {
+                    if strict {
+                        collect_missing_in_tree(repo, order, oid, &mut seen_trees, &mut missing)?;
+                    }
+                    break;
+                }
+                ObjectKind::Blob => break,
+            }
+        }
+        if missing.len() >= MAX_REPORTED_MISSING {
+            break;
+        }
+    }
+    if !missing.is_empty() {
+        missing.truncate(MAX_REPORTED_MISSING);
+        return Err(PackBitmapWriteError::NotClosed { missing });
     }
     tips.sort_by_key(|o| o.to_hex());
     tips.dedup();
     Ok(tips)
+}
+
+/// Record objects reachable from `tree` (already known to be in `order`) that the order lacks.
+fn collect_missing_in_tree(
+    repo: &Repository,
+    order: &BitmapOrder,
+    tree: ObjectId,
+    seen: &mut HashSet<ObjectId>,
+    missing: &mut Vec<ObjectId>,
+) -> Result<(), PackBitmapWriteError> {
+    let hash_len = repo.odb().hash_algo().len();
+    let mut stack = vec![tree];
+    while let Some(tree_oid) = stack.pop() {
+        if !seen.insert(tree_oid) {
+            continue;
+        }
+        let obj = read_object(repo, &tree_oid)?;
+        for entry in TreeRefIter::with_oid_len(&obj.data, hash_len) {
+            let entry = entry.map_err(|e| PackBitmapWriteError::Object(e.to_string()))?;
+            let kind = TreeChild::from_mode(entry.mode);
+            if kind == TreeChild::Gitlink {
+                continue;
+            }
+            if order.position_of(&entry.oid).is_none() {
+                missing.push(entry.oid);
+            } else if kind == TreeChild::Tree {
+                stack.push(entry.oid);
+            }
+        }
+    }
+    Ok(())
+}
+
+/// What a tree entry points at, decided by its mode alone (Git never stores the type).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TreeChild {
+    Tree,
+    Gitlink,
+    Blob,
+}
+
+impl TreeChild {
+    const TYPE_MASK: u32 = 0o170000;
+    const TREE: u32 = 0o040000;
+    const GITLINK: u32 = 0o160000;
+
+    fn from_mode(mode: u32) -> Self {
+        match mode & Self::TYPE_MASK {
+            Self::TREE => Self::Tree,
+            Self::GITLINK => Self::Gitlink,
+            _ => Self::Blob,
+        }
+    }
 }
 
 fn tip_needs_flags(
@@ -466,81 +682,6 @@ fn peel_to_commit(
     repo.odb()
         .peel_to_commit(oid)
         .map_err(|e| PackBitmapWriteError::Object(e.to_string()))
-}
-
-fn verify_order_closure(
-    repo: &Repository,
-    order: &BitmapOrder,
-    tips: &[ObjectId],
-) -> Result<(), PackBitmapWriteError> {
-    let reachable = reachable_from_tips(repo, tips)?;
-    let mut missing = Vec::new();
-    for oid in &reachable {
-        if order.position_of(oid).is_none() {
-            missing.push(*oid);
-            if missing.len() >= 32 {
-                break;
-            }
-        }
-    }
-    if !missing.is_empty() {
-        return Err(PackBitmapWriteError::NotClosed { missing });
-    }
-    Ok(())
-}
-
-fn reachable_from_tips(
-    repo: &Repository,
-    tips: &[ObjectId],
-) -> Result<HashSet<ObjectId>, PackBitmapWriteError> {
-    let mut seen = HashSet::new();
-    let mut queue = VecDeque::new();
-    for &tip in tips {
-        if seen.insert(tip) {
-            queue.push_back(tip);
-        }
-    }
-    while let Some(oid) = queue.pop_front() {
-        let obj = repo
-            .odb()
-            .read(&oid)
-            .map_err(|e| PackBitmapWriteError::Object(e.to_string()))?;
-        match obj.kind {
-            ObjectKind::Commit => {
-                let c = parse_commit(&obj.data)
-                    .map_err(|e| PackBitmapWriteError::Object(e.to_string()))?;
-                for p in c.parents {
-                    if seen.insert(p) {
-                        queue.push_back(p);
-                    }
-                }
-                if seen.insert(c.tree) {
-                    queue.push_back(c.tree);
-                }
-            }
-            ObjectKind::Tree => {
-                for entry in parse_tree(&obj.data)
-                    .map_err(|e| PackBitmapWriteError::Object(e.to_string()))?
-                {
-                    if entry.mode == 0o160000 {
-                        continue;
-                    }
-                    if seen.insert(entry.oid) {
-                        queue.push_back(entry.oid);
-                    }
-                }
-            }
-            ObjectKind::Tag => {
-                let tag = parse_tag(&obj.data)
-                    .map_err(|e| PackBitmapWriteError::Object(e.to_string()))?;
-                if seen.insert(tag.object) {
-                    queue.push_back(tag.object);
-                }
-            }
-            ObjectKind::Blob => {}
-        }
-    }
-    Ok(seen)
 }
 
 fn pick_window_commit(window: &[CommitRow], needs_bitmap: &HashSet<ObjectId>) -> ObjectId {
@@ -597,59 +738,88 @@ struct TypeBitmaps {
 fn build_commit_bitmaps(
     repo: &Repository,
     order: &BitmapOrder,
-    _commits: &[CommitRow],
+    commits: &CommitTable,
     selected: &[ObjectId],
     name_hashes: &mut [u32],
     strict_closure: bool,
 ) -> Result<HashMap<ObjectId, Bitmap>, PackBitmapWriteError> {
     let mut topo = selected.to_vec();
-    topo.sort_by_key(|a| commit_date(repo, *a));
+    topo.extend(first_parent_fork_points(commits, selected));
+    topo.sort_by_key(|a| commits.date(a));
+    let mut fill = TreeBitmapFill {
+        repo,
+        order,
+        hash_len: repo.odb().hash_algo().len(),
+        name_hashes,
+        strict_closure,
+    };
     let mut computed: HashMap<ObjectId, Bitmap> = HashMap::new();
     for commit in topo {
-        let mut bm = seed_from_computed_ancestors(repo, commit, &computed)?;
-        fill_commit_bitmap(
-            repo,
-            order,
-            &mut bm,
-            commit,
-            name_hashes,
-            &computed,
-            strict_closure,
-        )?;
+        let mut bm = seed_from_computed_ancestors(repo, commits, commit, &computed)?;
+        fill_commit_bitmap(&mut fill, commits, &mut bm, commit, &computed)?;
         computed.insert(commit, bm);
     }
     Ok(computed)
 }
 
+/// Unselected commits where the first-parent chains of two or more selected commits meet.
+///
+/// A release branch tip and the next selected commit on the branch it forked from both reach
+/// the history below the fork point, and neither bitmap contains the other. Computing an
+/// (unwritten) bitmap at the fork lets both seed from it, so that history is walked once.
+/// Only first-parent edges are followed: side branches merged back are already covered by the
+/// selected commit below the merge.
+fn first_parent_fork_points(commits: &CommitTable, selected: &[ObjectId]) -> Vec<ObjectId> {
+    let mut visited = vec![false; commits.rows.len()];
+    let mut children = vec![0u32; commits.rows.len()];
+    let mut is_selected = vec![false; commits.rows.len()];
+    let starts: Vec<usize> = selected
+        .iter()
+        .filter_map(|c| commits.index_of(c))
+        .collect();
+    for &i in &starts {
+        is_selected[i] = true;
+    }
+    for &start in &starts {
+        if std::mem::replace(&mut visited[start], true) {
+            continue;
+        }
+        let mut cur = start;
+        while let Some(parent) = commits.rows[cur]
+            .parents
+            .first()
+            .and_then(|p| commits.index_of(p))
+        {
+            children[parent] += 1;
+            if std::mem::replace(&mut visited[parent], true) {
+                break;
+            }
+            cur = parent;
+        }
+    }
+    let mut forks: Vec<ObjectId> = (0..commits.rows.len())
+        .filter(|&i| children[i] >= 2 && !is_selected[i])
+        .map(|i| commits.rows[i].oid)
+        .collect();
+    forks.sort_by_key(|o| o.to_hex());
+    forks
+}
+
 fn seed_from_computed_ancestors(
     repo: &Repository,
+    commits: &CommitTable,
     commit: ObjectId,
     computed: &HashMap<ObjectId, Bitmap>,
 ) -> Result<Bitmap, PackBitmapWriteError> {
-    let obj = repo
-        .odb()
-        .read(&commit)
-        .map_err(|e| PackBitmapWriteError::Object(e.to_string()))?;
-    let c = parse_commit(&obj.data).map_err(|e| PackBitmapWriteError::Object(e.to_string()))?;
     let mut bm = Bitmap::new();
-    for parent in c.parents {
-        if let Some(parent_bm) = computed.get(&parent) {
-            bm.or_assign(parent_bm);
-            continue;
-        }
+    for &parent in commits.parents(repo, &commit)?.iter() {
         let mut walk = parent;
         loop {
             if let Some(ancestor_bm) = computed.get(&walk) {
                 bm.or_assign(ancestor_bm);
                 break;
             }
-            let parent_obj = repo
-                .odb()
-                .read(&walk)
-                .map_err(|e| PackBitmapWriteError::Object(e.to_string()))?;
-            let parent_commit = parse_commit(&parent_obj.data)
-                .map_err(|e| PackBitmapWriteError::Object(e.to_string()))?;
-            match parent_commit.parents.first().copied() {
+            match commits.parents(repo, &walk)?.first().copied() {
                 Some(next) => walk = next,
                 None => break,
             }
@@ -664,45 +834,25 @@ fn hash_cache_row_count(order: &BitmapOrder) -> usize {
         .map_or(order.object_count() as usize, |idx| idx.len())
 }
 
-fn store_name_hash(order: &BitmapOrder, name_hashes: &mut [u32], oid: &ObjectId, path: &str) {
-    if path.is_empty() {
-        return;
+/// Name hash of the path `parent/name`, or of `name` alone for root tree entries.
+fn child_name_hash(parent: Option<u32>, name: &[u8]) -> u32 {
+    match parent {
+        None => pack_name_hash_extend(0, name),
+        Some(hash) => pack_name_hash_extend(pack_name_hash_extend(hash, b"/"), name),
     }
-    let Some(row) = order.storage_row_for_oid(oid) else {
-        return;
-    };
-    let r = row as usize;
-    if r < name_hashes.len() {
-        name_hashes[r] = pack_name_hash(path);
-    }
-}
-
-fn commit_date(repo: &Repository, oid: ObjectId) -> i64 {
-    repo.odb()
-        .read(&oid)
-        .ok()
-        .filter(|o| o.kind == ObjectKind::Commit)
-        .and_then(|o| parse_commit(&o.data).ok())
-        .and_then(|c| parse_signature_times(&c.committer).map(|t| t.unix_seconds))
-        .unwrap_or(0)
 }
 
 fn fill_commit_bitmap(
-    repo: &Repository,
-    order: &BitmapOrder,
+    fill: &mut TreeBitmapFill<'_>,
+    commits: &CommitTable,
     bitmap: &mut Bitmap,
     tip: ObjectId,
-    name_hashes: &mut [u32],
     computed: &HashMap<ObjectId, Bitmap>,
-    strict_closure: bool,
 ) -> Result<(), PackBitmapWriteError> {
     let mut queue: VecDeque<ObjectId> = VecDeque::new();
     queue.push_back(tip);
     while let Some(oid) = queue.pop_front() {
-        let Some(pos) = order.position_of(&oid) else {
-            if strict_closure {
-                return Err(PackBitmapWriteError::NotClosed { missing: vec![oid] });
-            }
+        let Some((pos, _)) = fill.locate(&oid)? else {
             continue;
         };
         let p = pos as usize;
@@ -714,109 +864,88 @@ fn fill_commit_bitmap(
             continue;
         }
         bitmap.set(p);
-        let obj = repo
-            .odb()
-            .read(&oid)
-            .map_err(|e| PackBitmapWriteError::Object(e.to_string()))?;
-        match obj.kind {
-            ObjectKind::Commit => {
-                let c = parse_commit(&obj.data)
-                    .map_err(|e| PackBitmapWriteError::Object(e.to_string()))?;
-                for parent in c.parents {
-                    queue.push_back(parent);
-                }
-                fill_tree_bitmap(
-                    repo,
-                    order,
-                    bitmap,
-                    c.tree,
-                    String::new(),
-                    name_hashes,
-                    strict_closure,
-                )?;
-            }
-            ObjectKind::Tree | ObjectKind::Blob | ObjectKind::Tag => {}
+        // Every commit in the order is in the table; anything else is not a commit.
+        let Some(row) = commits.get(&oid) else {
+            continue;
+        };
+        queue.extend(row.parents.iter().copied());
+        if let Some((tree_pos, tree_row)) = fill.locate(&row.tree)? {
+            fill.fill_tree(bitmap, row.tree, tree_pos, tree_row, None)?;
         }
     }
     Ok(())
 }
 
-fn fill_tree_bitmap(
-    repo: &Repository,
-    order: &BitmapOrder,
-    bitmap: &mut Bitmap,
-    tree_oid: ObjectId,
-    prefix: String,
-    name_hashes: &mut [u32],
+/// Walks trees into a commit bitmap, recording each object's path name hash.
+struct TreeBitmapFill<'a> {
+    repo: &'a Repository,
+    order: &'a BitmapOrder,
+    hash_len: usize,
+    name_hashes: &'a mut [u32],
     strict_closure: bool,
-) -> Result<(), PackBitmapWriteError> {
-    let Some(pos) = order.position_of(&tree_oid) else {
-        if strict_closure {
-            return Err(PackBitmapWriteError::NotClosed {
-                missing: vec![tree_oid],
-            });
-        }
-        return Ok(());
-    };
-    let p = pos as usize;
-    if bitmap.get(p) {
-        return Ok(());
-    }
-    bitmap.set(p);
-    store_name_hash(order, name_hashes, &tree_oid, &prefix);
-    let obj = repo
-        .odb()
-        .read(&tree_oid)
-        .map_err(|e| PackBitmapWriteError::Object(e.to_string()))?;
-    for entry in parse_tree(&obj.data).map_err(|e| PackBitmapWriteError::Object(e.to_string()))? {
-        if entry.mode == 0o160000 {
-            continue;
-        }
-        let name = String::from_utf8_lossy(&entry.name).into_owned();
-        let path = if prefix.is_empty() {
-            name.clone()
-        } else {
-            format!("{prefix}/{name}")
-        };
-        let Some(child_pos) = order.position_of(&entry.oid) else {
-            if strict_closure {
-                return Err(PackBitmapWriteError::NotClosed {
-                    missing: vec![entry.oid],
-                });
-            }
-            continue;
-        };
-        let cp = child_pos as usize;
-        let child = repo
-            .odb()
-            .read(&entry.oid)
-            .map_err(|e| PackBitmapWriteError::Object(e.to_string()))?;
-        match child.kind {
-            ObjectKind::Tree => {
-                fill_tree_bitmap(
-                    repo,
-                    order,
-                    bitmap,
-                    entry.oid,
-                    path,
-                    name_hashes,
-                    strict_closure,
-                )?;
-            }
-            ObjectKind::Blob => {
-                if !bitmap.get(cp) {
-                    bitmap.set(cp);
-                }
-                store_name_hash(order, name_hashes, &entry.oid, &path);
-            }
-            ObjectKind::Tag | ObjectKind::Commit => {
-                if !bitmap.get(cp) {
-                    bitmap.set(cp);
-                }
-            }
+}
+
+impl TreeBitmapFill<'_> {
+    /// Bitmap position and storage row of `oid`; `None` when the order lacks it and the
+    /// closure is not strict.
+    fn locate(&self, oid: &ObjectId) -> Result<Option<(u32, u32)>, PackBitmapWriteError> {
+        match self.order.locate(oid) {
+            Some(slot) => Ok(Some(slot)),
+            None if self.strict_closure => Err(PackBitmapWriteError::NotClosed {
+                missing: vec![*oid],
+            }),
+            None => Ok(None),
         }
     }
-    Ok(())
+
+    fn store_name_hash(&mut self, row: u32, hash: u32) {
+        if let Some(slot) = self.name_hashes.get_mut(row as usize) {
+            *slot = hash;
+        }
+    }
+
+    /// Set `tree` (at `pos` / `row`) and everything below it that `bitmap` lacks.
+    ///
+    /// Blobs are classified by tree entry mode and never read. A subtree whose bit is already
+    /// set (from this walk or an ancestor seed) is skipped without reading it. A blob's name
+    /// hash is overwritten by every newly walked tree that names it, so the walk order (oldest
+    /// selected commit first) leaves the newest path; a tree keeps the path it was first set by.
+    fn fill_tree(
+        &mut self,
+        bitmap: &mut Bitmap,
+        tree: ObjectId,
+        pos: u32,
+        row: u32,
+        name_hash: Option<u32>,
+    ) -> Result<(), PackBitmapWriteError> {
+        let p = pos as usize;
+        if bitmap.get(p) {
+            return Ok(());
+        }
+        bitmap.set(p);
+        if let Some(hash) = name_hash {
+            self.store_name_hash(row, hash);
+        }
+        let obj = read_object(self.repo, &tree)?;
+        for entry in TreeRefIter::with_oid_len(&obj.data, self.hash_len) {
+            let entry = entry.map_err(|e| PackBitmapWriteError::Object(e.to_string()))?;
+            let kind = TreeChild::from_mode(entry.mode);
+            if kind == TreeChild::Gitlink {
+                continue;
+            }
+            let Some((child_pos, child_row)) = self.locate(&entry.oid)? else {
+                continue;
+            };
+            let hash = child_name_hash(name_hash, entry.name);
+            if kind == TreeChild::Tree {
+                self.fill_tree(bitmap, entry.oid, child_pos, child_row, Some(hash))?;
+            } else {
+                bitmap.set(child_pos as usize);
+                self.store_name_hash(child_row, hash);
+            }
+        }
+        Ok(())
+    }
 }
 
 struct XorPlan {
@@ -826,12 +955,12 @@ struct XorPlan {
 }
 
 fn plan_xor_compression(
-    repo: &Repository,
+    commits: &CommitTable,
     selected: &[ObjectId],
     commit_bitmaps: &HashMap<ObjectId, Bitmap>,
 ) -> (Vec<ObjectId>, XorPlan) {
     let mut selected_sorted: Vec<ObjectId> = selected.to_vec();
-    selected_sorted.sort_by_key(|a| commit_date(repo, *a));
+    selected_sorted.sort_by_key(|a| commits.date(a));
     let n = selected_sorted.len();
     let mut xor_prev = vec![None; n];
     let mut payload = Vec::with_capacity(n);
@@ -982,5 +1111,30 @@ mod tests {
         assert_eq!(plan.gap_before_window(10), 0);
         assert!(plan.gap_before_window(200) >= plan.mid_stride_base);
         assert!(plan.gap_before_window(10_000) >= plan.far_stride_base);
+    }
+
+    #[test]
+    fn tree_child_kind_comes_from_mode_bits() {
+        assert_eq!(TreeChild::from_mode(0o040000), TreeChild::Tree);
+        assert_eq!(TreeChild::from_mode(0o160000), TreeChild::Gitlink);
+        for mode in [0o100644, 0o100755, 0o120000, 0o100664] {
+            assert_eq!(TreeChild::from_mode(mode), TreeChild::Blob, "{mode:o}");
+        }
+    }
+
+    #[test]
+    fn child_name_hash_matches_full_path_hash() {
+        use crate::pack_name_hash::pack_name_hash;
+        assert_eq!(
+            child_name_hash(None, b"Cargo.toml"),
+            pack_name_hash("Cargo.toml")
+        );
+        let src = child_name_hash(None, b"src");
+        let cargo = child_name_hash(Some(src), b"cargo");
+        assert_eq!(cargo, pack_name_hash("src/cargo"));
+        assert_eq!(
+            child_name_hash(Some(cargo), b"lib.rs"),
+            pack_name_hash("src/cargo/lib.rs")
+        );
     }
 }

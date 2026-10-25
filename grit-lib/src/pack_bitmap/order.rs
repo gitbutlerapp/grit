@@ -64,14 +64,19 @@ impl BitmapOrder {
     }
 
     pub(crate) fn position_of(&self, oid: &ObjectId) -> Option<u32> {
-        match self {
+        self.locate(oid).map(|(position, _)| position)
+    }
+
+    /// Bitmap position and storage row of `oid` from a single index lookup.
+    pub(crate) fn locate(&self, oid: &ObjectId) -> Option<(u32, u32)> {
+        let (row, rank) = match self {
             Self::Pack {
                 index,
                 index_row_to_rank,
                 ..
             } => {
                 let row = index.find_position(oid)?;
-                index_row_to_rank.get(row).copied()
+                (row, *index_row_to_rank.get(row)?)
             }
             Self::Midx {
                 oids,
@@ -79,9 +84,10 @@ impl BitmapOrder {
                 ..
             } => {
                 let oid_idx = oids.binary_search(oid).ok()?;
-                Some(oid_idx_to_rank[oid_idx])
+                (oid_idx, *oid_idx_to_rank.get(oid_idx)?)
             }
-        }
+        };
+        Some((rank, u32::try_from(row).ok()?))
     }
 
     /// Pack-index or MIDX object row (Git `commit_pos` / name-hash cache index).

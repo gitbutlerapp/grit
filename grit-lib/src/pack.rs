@@ -3852,6 +3852,49 @@ impl SingleLocalPackReader {
         }))
     }
 
+    /// Object kind of every entry starting at `offsets` (ascending), from entry headers alone.
+    ///
+    /// A delta takes the kind of its base, so nothing is inflated. The result is `None` for a
+    /// delta whose base is not an earlier entry of `offsets` (a REF_DELTA base stored later in
+    /// the pack or outside it), and for deltas on such entries; callers resolve those another way.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::CorruptObject`] when an offset lies outside the pack or an entry header is
+    /// malformed.
+    pub(crate) fn object_kinds_at_sorted_offsets(
+        &self,
+        offsets: &[u64],
+    ) -> Result<Vec<Option<ObjectKind>>> {
+        let pack_bytes = self.pack_bytes.as_ref();
+        let hash_bytes = self.idx.hash_bytes();
+        let mut kinds: Vec<Option<ObjectKind>> = Vec::with_capacity(offsets.len());
+        for (rank, &offset) in offsets.iter().enumerate() {
+            let mut pos = usize::try_from(offset)
+                .map_err(|_| Error::CorruptObject("pack offset out of range".to_owned()))?;
+            let (packed_type, _) = parse_pack_object_header(pack_bytes, &mut pos)?;
+            let base_offset = match packed_type {
+                PackedType::OfsDelta => Some(parse_ofs_delta_base(pack_bytes, &mut pos, offset)?),
+                PackedType::RefDelta => {
+                    let raw = pack_bytes.get(pos..pos + hash_bytes).ok_or_else(|| {
+                        Error::CorruptObject("truncated ref-delta base OID".to_owned())
+                    })?;
+                    self.idx.find_offset(&ObjectId::from_bytes(raw)?)?
+                }
+                _ => {
+                    kinds.push(Some(packed_type_to_kind(packed_type)?));
+                    continue;
+                }
+            };
+            let base_kind = base_offset
+                .and_then(|base| offsets.binary_search(&base).ok())
+                .filter(|&base_rank| base_rank < rank)
+                .and_then(|base_rank| kinds[base_rank]);
+            kinds.push(base_kind);
+        }
+        Ok(kinds)
+    }
+
     /// Whether `oid` is indexed in this reader's pack.
     pub(crate) fn contains_oid(&self, oid: &crate::objects::ObjectId) -> Result<bool> {
         Ok(self.idx.find_offset(oid)?.is_some())
