@@ -668,6 +668,25 @@ Before is the parent `main` commit; its forced row is that library's `force_reco
 
 The gate keeps this from regressing: `grit-utils/tests/repack_cargo_shape_budget.rs` builds `CargoShape::SMOKE` and requires both repack modes to stay within **2×** of git's peak memory (measured above each tool's `log -n 1` baseline, so debug-build code pages do not count) and, in optimized builds, within **2×** of git's time, with a pack no larger than **1.2×** git's. `grit-lib/tests/repack_delta_reuse_git_compat.rs` checks against the system `git` that default repack keeps every stored delta, `--force` stays within 1.2× of `git repack -adf`, and chains deeper than `pack.depth` are cut.
 
+#### Repositories full of loose objects
+
+Baseline **`grit-utils/baselines/gc-loose.json`** (`grit-bench gc-loose`) times full **`grit gc`** against **`git gc`**, with peak RSS, on repositories whose objects are all loose, restored from a pristine copy before every run (**`prepare-gc-loose`**). **`gc-loose-history`** is the deep-history network fixture with its pack exploded by `git unpack-objects`, so the delta search runs over every blob, tree and commit. **`gc-loose-wide`** is one commit of 200 000 small files (no delta work, many objects).
+
+The same shape used to break the pack-objects path that serves fetches and clones and builds pushes and bundles ([#1883](https://github.com/gitbutlerapp/grit/issues/1883)). That path loaded every loose payload, ran a second 50-deep same-path pass and only deltified blobs. It now hands blobs, trees and commits to the same streaming window search as repack, with commits walked in date order and subtrees named by path. On rust-lang/cargo with its pack exploded into 194 636 loose objects (4 vCPU, git 2.43.0, `/usr/bin/time`):
+
+| Command | Before | After | `git` |
+| --- | --- | --- | --- |
+| serve a full clone (`upload-pack`) | 195 s, 5.2 GB, 99.5 MB pack | 9.2 s, 207 MB, 39.9 MB pack | 17.0 s, 97 MB, 39.4 MB pack |
+| `grit clone file://` vs `git clone file://` | 391 s, 5.2 GB, 102.5 MB pack | 11.5 s, 228 MB, 45.5 MB pack | 18.2 s, 95 MB, 39.3 MB pack |
+| serve a full clone of the packed repository | 2.97 s, 360 MB | 2.63 s, 289 MB | 1.88 s, 166 MB |
+
+`grit-lib/tests/pack_objects_loose_git_compat.rs` checks against the system `git` that a pack built from an all-loose history indexes under `git index-pack --strict`, deltifies most trees, and stays within **1.2×** of `git repack -adf`.
+
+```bash
+cargo build --release -p grit-cli -p grit-utils
+./target/release/grit-bench gc-loose --format json --output grit-utils/baselines/gc-loose.json
+```
+
 ### Reproduce locally
 
 Build release binaries, install [hyperfine](https://github.com/sharkdp/hyperfine), then run matching grit-bench scenarios from the repo root (see `grit-utils/README.md` for the current subcommands):
