@@ -53,7 +53,7 @@ use grit_lib::objects::pack_objects::{
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::porcelain::add::stage_for_commit;
 use grit_lib::porcelain::checkout::apply_index_file_mode;
-use grit_lib::porcelain::commit::{create_commit, CommitRequest, HookPolicy};
+use grit_lib::porcelain::commit::{create_commit, CommitRequest};
 use grit_lib::porcelain::stash::worktree_bytes_for_index_mode;
 use grit_lib::porcelain::status::{expand_untracked_for_staging, status_path_matches_worktree};
 use grit_lib::porcelain::tag::creator_date;

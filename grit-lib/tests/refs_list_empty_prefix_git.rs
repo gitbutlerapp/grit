@@ -1,6 +1,5 @@
 //! Empty-prefix ref listing matches system `git for-each-ref` (no pseudoref scan).
 
-use std::fs;
 use std::process::Command;
 
 use grit_lib::refs::list_refs;

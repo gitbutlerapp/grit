@@ -8,7 +8,6 @@ use std::process::Command;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::index::write_tree::{write_tree_update_index, WriteTreeFlags};
 use grit_lib::index::Index;
-use grit_lib::objects::odb::Odb;
 use grit_lib::repo::Repository;
 
 use support::{git, seed_multidir_repo, HistoryRepo};

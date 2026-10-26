@@ -9,9 +9,7 @@ use std::process::Command;
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::objects::ObjectId;
 use grit_lib::refs::list_refs_for_repository;
-use grit_lib::refs::store::{
-    Expected, RawRef, RefStore, RefTransaction, RefUpdate, RefUpdateFlags,
-};
+use grit_lib::refs::store::{Expected, RawRef, RefTransaction, RefUpdate, RefUpdateFlags};
 use grit_lib::repo::Repository;
 
 fn sample_oid() -> ObjectId {

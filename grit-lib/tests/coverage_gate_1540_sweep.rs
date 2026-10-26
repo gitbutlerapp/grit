@@ -32,7 +32,6 @@ use grit_lib::revwalk::rev_parse::{
     resolve_revision_for_verify,
 };
 use std::fs;
-use std::io::Write;
 use tempfile::tempdir;
 
 use support::{commit_file, git, open_grit_repo, HistoryRepo};

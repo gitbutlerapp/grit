@@ -4,7 +4,7 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;
 use grit_lib::notes::{read_notes_tree, resolve_configured_notes_ref, NotesRef};
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::commit::{create_commit, CommitRequest, HookPolicy};
+use grit_lib::porcelain::commit::{create_commit, CommitRequest};
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::refs::store::RefName;

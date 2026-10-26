@@ -378,7 +378,7 @@ fn squash_divergent_side_branch_forked_from_range() {
     commit_file(wt, "f", "1", "base");
     let base = git_rev_parse_verify(wt, "HEAD").expect("base");
     commit_file(wt, "f", "2", "one");
-    let one = git_rev_parse_verify(wt, "HEAD").expect("one");
+    let _one = git_rev_parse_verify(wt, "HEAD").expect("one");
     git(wt, &["branch", "topic"]);
     git(wt, &["checkout", "topic"]);
     commit_file(wt, "g", "1", "side");

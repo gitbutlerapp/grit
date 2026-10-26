@@ -3,7 +3,6 @@
 use std::path::Path;
 use std::process::Command;
 
-use grit_lib::config::environment::Environment;
 use grit_lib::objects::parse_commit;
 use grit_lib::porcelain::checkout::checkout_between_trees;
 use grit_lib::progress::NeverCancel;

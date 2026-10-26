@@ -142,7 +142,7 @@ fn subjects(wt: &std::path::Path) -> Vec<String> {
 fn move_commit_before_and_after() {
     let repo = HistoryRepo::init();
     let wt = repo.worktree();
-    let [a, b, c, d] = init_linear_four(wt);
+    let [a, b, c, _d] = init_linear_four(wt);
     let grit = open_grit(wt);
     let opts = RewriteOptions {
         scope: RefScope::Branches,

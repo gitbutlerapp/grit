@@ -8,7 +8,6 @@ use grit_lib::objects::{serialize_commit, CommitData, ObjectKind};
 use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
 use grit_lib::refs;
 use grit_lib::repo::{InitOptions, Repository};
-use grit_lib::RefStorageFormat;
 use grit_test_support::git;
 use tempfile::TempDir;
 

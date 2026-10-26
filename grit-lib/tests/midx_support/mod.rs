@@ -1,6 +1,8 @@
 //! Shared helpers for multi-pack-index scenario tests (t5319 / t5334 / t5335).
+//!
+//! Several test binaries include this module and each uses only part of it.
 
-#![allow(clippy::unwrap_used, clippy::expect_used)]
+#![allow(dead_code, clippy::unwrap_used, clippy::expect_used)]
 
 use std::collections::HashSet;
 use std::io::{BufRead, BufReader, Read, Write};
@@ -14,9 +16,7 @@ use grit_lib::objects::midx::{
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::pack::{clear_pack_cache, read_idx_object_ids, read_pack_index_cached};
 use grit_lib::objects::{ObjectId, ObjectKind};
-use grit_test_support::objects::{
-    git_cat_file_batch_check, git_supports_sha256, BatchCheckOutcome, HashAlgo,
-};
+use grit_test_support::objects::{git_supports_sha256, HashAlgo};
 
 pub use grit_test_support::objects::RepoFixture;
 
@@ -445,12 +445,6 @@ pub fn assert_lookup_matches_idx(objects: &Path, oid: &ObjectId) {
         .clone();
     let idx = read_pack_index_cached(&pack_dir.join(idx_name)).expect("idx");
     assert_eq!(idx.find_offset(oid).expect("lookup"), Some(off));
-}
-
-pub fn batch_check_hex(repo: &Path, oids: &[ObjectId]) -> BatchCheckOutcome {
-    let hex: Vec<String> = oids.iter().map(|o| o.to_hex().to_string()).collect();
-    let refs: Vec<&str> = hex.iter().map(String::as_str).collect();
-    git_cat_file_batch_check(repo, &refs)
 }
 
 pub fn odb_with_midx_config(objects: &Path, git_dir: &Path, enabled: bool) -> Odb {

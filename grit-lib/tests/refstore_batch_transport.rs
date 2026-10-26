@@ -12,7 +12,7 @@ use grit_lib::refs::resolve_ref;
 use grit_lib::remote::transfer::{FetchOptions, TagMode};
 use grit_lib::repo::{InitOptions, Repository};
 
-use support::{each_backend, git, reftable_tables_snapshot, two_commit_oids, Backend};
+use support::{each_backend, reftable_tables_snapshot, two_commit_oids, Backend};
 
 #[test]
 fn fetch_updates_refs_in_one_transaction_reftable() {
@@ -127,7 +127,7 @@ fn receive_pack_atomic_push_both_backends() {
 }
 
 #[cfg(unix)]
-fn atomic_push_over_grit_http(ref_format: RefStorageFormat) {
+fn atomic_push_over_grit_http(_ref_format: RefStorageFormat) {
     let Some(server_bin) = find_binary("grit-http-server") else {
         eprintln!("SKIP: grit-http-server not built");
         return;
@@ -227,8 +227,6 @@ fn atomic_push_over_grit_http(ref_format: RefStorageFormat) {
 
 struct PushGraph {
     ff: grit_lib::objects::ObjectId,
-    side: grit_lib::objects::ObjectId,
-    extra: grit_lib::objects::ObjectId,
 }
 
 fn build_push_graph(dir: &Path) -> PushGraph {
@@ -251,15 +249,13 @@ fn build_push_graph(dir: &Path) -> PushGraph {
     std::fs::write(dir.join("s.txt"), "side\n").expect("s");
     run_git(dir, &["add", "s.txt"]);
     run_git(dir, &["commit", "-q", "-m", "side"]);
-    let side = rev_parse(dir, "HEAD");
 
     run_git(dir, &["checkout", "-q", "-b", "extra", &c1.to_hex()]);
     std::fs::write(dir.join("x.txt"), "extra\n").expect("x");
     run_git(dir, &["add", "x.txt"]);
     run_git(dir, &["commit", "-q", "-m", "extra"]);
-    let extra = rev_parse(dir, "HEAD");
 
-    PushGraph { ff, side, extra }
+    PushGraph { ff }
 }
 
 fn run_git_output(dir: &Path, args: &[&str]) -> String {

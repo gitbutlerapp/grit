@@ -405,7 +405,6 @@ fn init_rebase_conflict_fixture(dir: &Path) -> Result<(String, String), Box<dyn 
 }
 
 #[test]
-#[test]
 fn rebase_check_succeeds_when_gpgsign_enabled() -> TestResult {
     let scratch = Scratch::new("check-gpgsign")?;
     let dir = scratch.path();

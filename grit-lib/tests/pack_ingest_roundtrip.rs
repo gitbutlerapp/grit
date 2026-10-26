@@ -778,7 +778,7 @@ fn pack_index_records_mixed_size_whole_objects_preserve_pack_order() {
         assert_eq!(a.offset, b.offset);
         assert_eq!(a.crc32, b.crc32);
     }
-    let mut offsets: Vec<_> = one.iter().map(|r| r.offset).collect();
+    let offsets: Vec<_> = one.iter().map(|r| r.offset).collect();
     let mut sorted = offsets.clone();
     sorted.sort_unstable();
     assert_eq!(

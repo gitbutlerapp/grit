@@ -412,7 +412,7 @@ fn sha256_incremental_midx_read_objects() {
         );
     }
 
-    let algo = hash_algo_for_objects_dir(
+    let _algo = hash_algo_for_objects_dir(
         &grit_lib::config::environment::Environment::empty(),
         &objects,
     );

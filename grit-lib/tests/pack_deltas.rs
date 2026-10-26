@@ -3,7 +3,7 @@
 mod pack_delta_scenarios;
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use grit_lib::objects::delta_encode::{
     encode_delta, encode_lcp_delta, encode_prefix_extension_delta,
@@ -19,7 +19,7 @@ use grit_lib::objects::unpack_objects::apply_delta;
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_test_support::git_fsck;
 use grit_test_support::objects::{
-    hash_loose_object, write_pack_and_index, DeltaOps, HashAlgo, IndexPackOptions,
+    hash_loose_object, write_pack_and_index, HashAlgo, IndexPackOptions,
     ObjectKind as PackObjectKind, PackBuilder, RepoFixture,
 };
 

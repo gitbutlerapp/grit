@@ -84,7 +84,7 @@ fn diff_core_many_tree_and_index_paths() -> grit_lib::error::Result<()> {
         let f_name = format!("f{i}.txt");
         let g_name = format!("g{i}.txt");
         let h_name = format!("h{i}.txt");
-        let old_tree = tree_named(&odb, &[(f_name.as_str(), b_old), ("shared.txt", b_old)]);
+        let _old_tree = tree_named(&odb, &[(f_name.as_str(), b_old), ("shared.txt", b_old)]);
         let new_tree = tree_named(
             &odb,
             &[

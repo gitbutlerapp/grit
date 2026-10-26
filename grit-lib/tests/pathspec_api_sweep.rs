@@ -42,7 +42,7 @@ fn pathspec_parse_match_and_bloom_matrix() {
     assert!(pathspec_wants_descent_into_tree("src/", "src"));
     assert!(pathspec_contributes_match("src/", "src/a.rs"));
     assert!(!pathspec_exclude_matches("src/", "src/a.rs"));
-    let ctx = context_from_mode_octal("100644");
+    let _ctx = context_from_mode_octal("100644");
     let mode = 0o100644;
     let rules: &[grit_lib::worktree::crlf::AttrRule] = &[];
     let _ = matches_pathspec_set_for_object(&list, "src/a.rs", mode, rules);

@@ -4,7 +4,7 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::Arc;
 
 use grit_lib::diff::{build_file_diffs, DiffDetail, DiffOptions, DiffTarget};
-use grit_lib::objects::{ObjectId, ObjectKind, TreeEntry};
+use grit_lib::objects::{ObjectKind, TreeEntry};
 use grit_lib::parallel::ThreadPolicy;
 use grit_lib::repo::{InitOptions, Repository};
 

@@ -1,7 +1,7 @@
 //! CLI tests for `grit diff --stat`, `--numstat`, `--name-only`, `--name-status`.
 
 use grit_test_support::cli_fixture::CliFixture;
-use grit_test_support::{git, git_cmd, grit};
+use grit_test_support::{git, grit};
 
 #[test]
 fn diff_detail_flags_conflict() {

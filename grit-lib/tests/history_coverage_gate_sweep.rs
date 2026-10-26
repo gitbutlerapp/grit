@@ -12,7 +12,6 @@ use grit_lib::index::write_tree::write_tree_from_index;
 use grit_lib::index::{Index, IndexEntry, MODE_REGULAR};
 use grit_lib::objects::{ObjectId, ObjectKind};
 use grit_lib::parallel::ThreadPolicy;
-use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::revwalk::rev_list::{
     merge_bases, resolve_object_walk_roots, rev_list, OrderingMode, OutputMode, RevListOptions,

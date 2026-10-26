@@ -3,7 +3,6 @@
 mod support;
 
 use std::fs;
-use std::path::Path;
 
 use grit_lib::config::ConfigSet;
 use grit_lib::diff::{
@@ -107,7 +106,7 @@ fn t4001_rename_detection_scores_match_git() {
     git_quiet(wt, &["add", "path0"]);
     git_quiet(wt, &["commit", "-qm", "base"]);
 
-    let mut edited = path0.replace("line 11", "Line 11");
+    let edited = path0.replace("line 11", "Line 11");
     fs::remove_file(wt.join("path0")).unwrap();
     fs::write(wt.join("path1"), format!("{edited}\n")).unwrap();
     git_quiet(wt, &["add", "-A"]);

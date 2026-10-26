@@ -6,7 +6,7 @@ use std::path::Path;
 use std::time::Instant;
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::repo::{InitOptions, Repository};
+use grit_lib::repo::Repository;
 use grit_lib::revwalk::rev_list::{rev_list, RevListOptions};
 
 fn git_git_bare() -> std::path::PathBuf {

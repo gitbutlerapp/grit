@@ -10,7 +10,7 @@ use grit_lib::repo::Repository;
 
 use support::{
     assert_git_fsck_strict, assert_skip_worktree_matches_tag_oracle, clear_all_skip_worktree, git,
-    git_ls_files_tag_map, git_ls_files_verbose_map, seed_multidir_repo, HistoryRepo,
+    git_ls_files_tag_map, seed_multidir_repo, HistoryRepo,
 };
 
 fn open_grit(wt: &std::path::Path) -> Repository {

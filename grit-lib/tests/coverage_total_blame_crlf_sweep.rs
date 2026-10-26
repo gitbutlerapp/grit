@@ -4,7 +4,6 @@
 
 use grit_lib::apply::parse_patch;
 use grit_lib::blame::{blame_file, BlameOptions};
-use grit_lib::config::ConfigSet;
 use grit_lib::objects::ObjectKind;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::worktree::crlf::{
@@ -79,14 +78,13 @@ fn blame_crlf_apply_and_pathspec_deep_sweep() -> grit_lib::error::Result<()> {
         }
     }
 
-    let mut cfg_blob = ConfigSet::new();
     fs::write(
         repo.git_dir().join("config"),
         "[core]\n\tautocrlf = input\n\tsafecrlf = warn\n",
     )
     .map_err(grit_lib::error::Error::Io)?;
     repo.reload_config()?;
-    cfg_blob = (*repo.config()?).clone();
+    let cfg_blob = (*repo.config()?).clone();
     let crlf = ConversionConfig::from_config(&cfg_blob);
     let attrs = FileAttrs::default();
     let samples: &[&[u8]] = &[b"a\r\nb\r\n", b"a\nb\n", b"\x00bin", b"all\nlf\n"];

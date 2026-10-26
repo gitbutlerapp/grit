@@ -4,8 +4,6 @@
 
 mod support;
 
-use std::process::Command;
-
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::refs::store::RefName;
 use grit_lib::repo::Repository;

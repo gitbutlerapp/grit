@@ -12,7 +12,7 @@ use grit_lib::command_runner::RecordingRunner;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::{parse_commit, ObjectId};
 use grit_lib::porcelain::add::{stage, StageOptions};
-use grit_lib::porcelain::commit::{create_commit, CommitRequest, HookPolicy};
+use grit_lib::porcelain::commit::{create_commit, CommitRequest};
 use grit_lib::progress::NullProgress;
 use grit_lib::refs::resolve_ref;
 use grit_lib::repo::Repository;

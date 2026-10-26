@@ -7,7 +7,7 @@ use std::io::Write;
 use std::os::unix::ffi::OsStrExt;
 use std::process::Command;
 
-use grit_lib::config::environment::{Environment, RepositoryOptions};
+use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::diff::diff_index_to_worktree;
 use grit_lib::objects::parse_commit;
 use grit_lib::objects::ObjectId;

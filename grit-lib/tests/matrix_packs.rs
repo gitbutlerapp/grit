@@ -873,7 +873,7 @@ fn populate_issue_1011_sed_repo(dir: &Path) {
     git(dir, &["commit", "-q", "-m", "c0"]);
     for i in 1..=10 {
         let path = dir.join("f.txt");
-        let mut text = std::fs::read_to_string(&path).expect("read");
+        let text = std::fs::read_to_string(&path).expect("read");
         let mut owned: Vec<String> = text.lines().map(str::to_owned).collect();
         let line_idx = (i * 100).min(owned.len().saturating_sub(1));
         owned[line_idx] = format!("edit {i}");

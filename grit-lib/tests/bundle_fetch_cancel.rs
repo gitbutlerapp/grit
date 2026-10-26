@@ -6,7 +6,6 @@ use grit_lib::progress::FlagCancel;
 use grit_lib::remote::fetch::NoProgress;
 use grit_lib::remote::transfer::{FetchOptions, TagMode};
 use grit_test_support::git;
-use std::path::Path;
 
 #[test]
 fn bundle_fetch_returns_cancelled_when_signalled_before_unbundle() {

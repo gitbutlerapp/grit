@@ -15,7 +15,7 @@ use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::unique_tmp;
 
-#[path = "ignore_t0008_common.rs"]
+#[path = "ignore_t0008_common/mod.rs"]
 mod t0008;
 
 fn git_check_ignored(home: &std::path::Path, repo: &std::path::Path, path: &str) -> bool {

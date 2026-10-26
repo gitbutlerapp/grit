@@ -44,7 +44,7 @@ fn resolve_verify_git_compat() {
         "missing full hex must not verify without ODB object"
     );
 
-    let (_dir, bare, prefix) = bare_repo_with_ambiguous_prefix(8_000);
+    let (_dir, _bare, prefix) = bare_repo_with_ambiguous_prefix(8_000);
     let bare_wt = _dir.path();
     let bare_repo = Repository::open(
         bare_wt,

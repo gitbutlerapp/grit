@@ -865,7 +865,7 @@ fn rebase_favor_theirs_matches_git_rebase_x_theirs() {
     git(wt_g, &["config", "grit.changeIds", "false"]);
     git(wt_git, &["config", "grit.changeIds", "false"]);
     let (u_g, o_g, t_g) = init_rebase_favor_fixture(wt_g);
-    let (u_git, o_git, t_git) = init_rebase_favor_fixture(wt_git);
+    let (u_git, o_git, _t_git) = init_rebase_favor_fixture(wt_git);
     let grit = open_grit(wt_g);
     let plan = rebase_onto(
         &grit,

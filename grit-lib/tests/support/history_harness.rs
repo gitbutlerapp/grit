@@ -521,14 +521,6 @@ pub fn git_rev_list_with_boundary(dir: &Path, args: &[&str]) -> Vec<(bool, Objec
         .collect()
 }
 
-/// Resolve git tag names (or other revs) to commit OIDs in order.
-pub fn rev_parse_many(dir: &Path, specs: &[&str]) -> Vec<ObjectId> {
-    specs
-        .iter()
-        .map(|spec| git_rev_parse(dir, spec).unwrap_or_else(|| panic!("git rev-parse {spec}")))
-        .collect()
-}
-
 /// Run grit `rev_list` on a discovered repo and return commit OIDs.
 pub fn grit_rev_list_commits(
     worktree: &Path,

@@ -109,7 +109,7 @@ fn predict_conflicts_match_git_merge_tree_paths() {
         eprintln!("SKIP: git merge-tree --write-tree requires git >= 2.38");
         return;
     }
-    let (tmp, base, main, topic) = sibling_merge_repo();
+    let (tmp, base, _main, topic) = sibling_merge_repo();
     std::fs::write(tmp.path().join("a.txt"), "main conflict\n").expect("conflict main");
     git(tmp.path(), &["add", "a.txt"]);
     git(tmp.path(), &["commit", "-m", "main conflict"]);

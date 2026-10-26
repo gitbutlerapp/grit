@@ -1,7 +1,6 @@
 //! Cancellation during bundle pack indexing (after `IndexingObjects` starts).
 
 use grit_lib::bundle::Bundle;
-use grit_lib::bundle::BundleError;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::progress::{FlagCancel, ProgressPhase, ProgressSink, ProgressUnit};
 use grit_lib::repo::Repository;

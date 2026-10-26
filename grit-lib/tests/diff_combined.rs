@@ -2,8 +2,6 @@
 
 mod support;
 
-use std::io::Write;
-
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::config::ConfigSet;
 use grit_lib::diff::combined_diff_patch::{format_combined_diff_body, CombinedDiffWsOptions};

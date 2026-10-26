@@ -455,7 +455,7 @@ fn push_over_git_daemon_lands_ref_and_objects_and_reports_rejection() {
 fn push_new_branch_without_local_copy_of_advanced_remote_main() {
     use grit_lib::config::environment::RepositoryOptions;
     use grit_lib::porcelain::add::stage_for_commit;
-    use grit_lib::porcelain::commit::{create_commit, CommitRequest, HookPolicy};
+    use grit_lib::porcelain::commit::{create_commit, CommitRequest};
     use grit_lib::progress::NullProgress;
     use grit_lib::repo::Repository;
 

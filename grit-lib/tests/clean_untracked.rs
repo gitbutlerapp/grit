@@ -7,7 +7,7 @@ use std::process::Command;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::porcelain::clean::{clean_untracked, CleanOptions, CleanScope};
-use grit_lib::porcelain::commit::{create_commit, CommitRequest, HookPolicy};
+use grit_lib::porcelain::commit::{create_commit, CommitRequest};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;
 use grit_test_support::git;

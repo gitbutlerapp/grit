@@ -253,7 +253,7 @@ struct Fixture {
 }
 
 fn setup_fixture() -> Option<Fixture> {
-    let grit_bin = find_binary("grit")?;
+    let _grit_bin = find_binary("grit")?;
     let server_bin = find_binary("grit-http-server")?;
 
     let tmp = tempfile::tempdir().ok()?;

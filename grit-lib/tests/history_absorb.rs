@@ -7,7 +7,7 @@ mod support;
 use std::fs;
 
 use grit_lib::config::environment::RepositoryOptions;
-use grit_lib::objects::{parse_commit, ObjectId};
+use grit_lib::objects::parse_commit;
 use grit_lib::porcelain::status::{status, StatusOptions};
 use grit_lib::progress::NeverCancel;
 use grit_lib::progress::NullProgress;
@@ -51,12 +51,6 @@ fn fixup_opts() -> FixupOptions {
         empty: EmptyPolicy::Drop,
         rewrite: rewrite_opts(),
     }
-}
-
-fn plan_and_apply_absorb(grit: &Repository, wt: &std::path::Path, absorb_opts: &AbsorbOptions) {
-    let plan = absorb(grit, absorb_opts).expect("plan");
-    apply_absorb_rewrite(grit, &plan, &apply_opts()).expect("apply");
-    git_fsck_strict(wt);
 }
 
 #[test]
@@ -464,7 +458,7 @@ fn absorb_coordinate_safe_insertion_with_unassigned_line8() {
     commit_file(wt, "file.txt", &base8("line-4"), "root");
     let base = git_rev_parse(wt, "HEAD").expect("base");
     commit_file(wt, "file.txt", &base8("changed-4"), "touch line 4");
-    let target = git_rev_parse(wt, "HEAD").expect("target");
+    let _target = git_rev_parse(wt, "HEAD").expect("target");
     commit_file(wt, "tail.txt", "t\n", "tail");
     let staged = format!(
         "line-1\nline-2\nline-3\nassigned-ins\nline-4\nline-5\nline-6\nline-7\nunassigned-8\n"

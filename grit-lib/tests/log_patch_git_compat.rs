@@ -8,8 +8,8 @@ use std::process::Command;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::config::ConfigSet;
 use grit_lib::diff::{
-    write_commit_log_patch, write_commits_log_patch, DiffAlgorithm, DiffOptions,
-    DiffPostprocessOptions, LogPatchCommitHeader, LogPatchOptions,
+    write_commits_log_patch, DiffAlgorithm, DiffOptions, DiffPostprocessOptions,
+    LogPatchCommitHeader, LogPatchOptions,
 };
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
@@ -38,7 +38,7 @@ fn git_in(dir: &std::path::Path, args: &[&str]) -> Vec<u8> {
     out.stdout
 }
 
-fn init_corpus_repo(git: &std::path::Path, dir: &std::path::Path) {
+fn init_corpus_repo(_git: &std::path::Path, dir: &std::path::Path) {
     git_in(dir, &["init", "-q", "--initial-branch=main", "."]);
     std::fs::write(dir.join("README"), b"base\n").unwrap();
     git_in(dir, &["add", "README"]);
@@ -223,7 +223,6 @@ fn log_patch_git_git_corpus_matches_git_default_and_histogram() {
     }
 }
 
-#[test]
 #[test]
 fn log_patch_git_git_diff_tree_no_renames_matches_git() {
     let Some(corpus) = git_git_corpus_path() else {

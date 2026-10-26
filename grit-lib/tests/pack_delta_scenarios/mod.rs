@@ -1,4 +1,8 @@
 //! Shared helpers for pack delta and corruption integration tests (t5303/t5309/t5314/t5316).
+//!
+//! Several test binaries include this module and each uses only part of it.
+
+#![allow(dead_code)]
 
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -9,9 +13,9 @@ use grit_lib::error::Error;
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::pack::clear_pack_cache;
 use grit_lib::objects::unpack_objects::{apply_delta, apply_delta_into};
-use grit_lib::objects::{ObjectId, ObjectKind};
+use grit_lib::objects::ObjectId;
 use grit_test_support::objects::{
-    flip_byte_at, hash_loose_object, write_loose_object, write_pack_and_index, DeltaOps, HashAlgo,
+    hash_loose_object, write_loose_object, write_pack_and_index, DeltaOps, HashAlgo,
     IndexPackOptions, ObjectKind as PackObjectKind, PackBuilder, PackBuilt, RepoFixture,
 };
 
@@ -192,7 +196,7 @@ pub fn odb_at(objects: &Path) -> Odb {
     Odb::new(objects)
 }
 
-pub fn oid_from_hex(algo: HashAlgo, hex: &str) -> ObjectId {
+pub fn oid_from_hex(_algo: HashAlgo, hex: &str) -> ObjectId {
     ObjectId::from_hex(hex).expect("valid test oid")
 }
 
@@ -212,19 +216,6 @@ pub fn expect_delta_chain_limit(err: Error) {
         matches!(err, Error::DeltaChainTooDeep { .. }),
         "expected DeltaChainTooDeep, got {err:?}"
     );
-}
-
-pub fn expect_object_not_found(err: Error) {
-    assert!(
-        matches!(err, Error::ObjectNotFound(_)),
-        "expected ObjectNotFound, got {err:?}"
-    );
-}
-
-/// Flip one byte in a pack file at `offset` (relative to pack start).
-pub fn corrupt_pack_byte(pack_path: &Path, offset: u64) {
-    flip_byte_at(pack_path, offset).expect("flip pack byte");
-    clear_pack_cache();
 }
 
 pub fn write_loose_blob(objects: &Path, algo: HashAlgo, body: &[u8]) -> String {

@@ -508,7 +508,7 @@ fn want_ref_v2_fetch_over_http() {
         return;
     };
     let tmp = tempfile::tempdir().unwrap();
-    let (mut grit_bare, git_bare) = setup_bare_pair(tmp.path());
+    let (grit_bare, git_bare) = setup_bare_pair(tmp.path());
     git(
         Some(&grit_bare),
         &["config", "uploadpack.allowRefInWant", "true"],

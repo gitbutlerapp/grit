@@ -1,6 +1,6 @@
 //! Integration tests for the diagnostics sink wiring.
 
-use grit_lib::config::environment::{Environment, RepositoryOptions};
+use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::diagnostics::{CollectingDiagnostics, Warning};
 use grit_lib::repo::Repository;
 use grit_lib::revwalk::rev_parse::resolve_revision;

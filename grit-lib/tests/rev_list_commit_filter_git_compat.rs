@@ -12,8 +12,7 @@ use grit_lib::repo::Repository;
 use grit_lib::revwalk::filter::{CommitFilter, CommitFilterBuilder};
 use grit_lib::revwalk::rev_list::{rev_list, RevListOptions};
 use support::{
-    assert_rev_list_commits_match_git, commit_file, git, git_commit_graph_write, git_rev_list,
-    open_grit_repo, HistoryRepo,
+    commit_file, git, git_commit_graph_write, git_rev_list, open_grit_repo, HistoryRepo,
 };
 
 fn commit_tree_with_identities(

@@ -13,7 +13,7 @@ use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::{parse_commit, ObjectId};
 use grit_lib::porcelain::add::stage;
 use grit_lib::porcelain::add::StageOptions;
-use grit_lib::porcelain::commit::{create_commit, CommitRequest, HookPolicy};
+use grit_lib::porcelain::commit::{create_commit, CommitRequest};
 use grit_lib::porcelain::merge::{integrate_branch, IntegrateBranchOutcome};
 use grit_lib::porcelain::replay::{replay_commit, ReplayDirection, ReplayOutcome, ReplayRequest};
 use grit_lib::progress::NullProgress;

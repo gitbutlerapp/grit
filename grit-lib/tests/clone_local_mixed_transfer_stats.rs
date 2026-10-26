@@ -3,7 +3,6 @@
 use std::path::Path;
 use std::process::Command;
 
-use grit_lib::config::environment::Environment;
 use grit_lib::progress::NeverCancel;
 use grit_lib::remote::clone::{clone as clone_repo, CloneOptions};
 use grit_lib::remote::fetch::NoProgress;

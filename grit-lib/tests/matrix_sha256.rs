@@ -499,7 +499,7 @@ fn sha256_fetch_over_smart_http() {
         eprintln!("SKIP: local git cannot create sha256 repos");
         return;
     }
-    let Some((grit_bin, server_bin)) = http_binaries() else {
+    let Some((_grit_bin, server_bin)) = http_binaries() else {
         eprintln!("SKIP: grit / grit-http-server binary not found (build them first)");
         return;
     };
@@ -871,7 +871,7 @@ fn sha256_push_over_smart_http() {
         eprintln!("SKIP: local git cannot create sha256 repos");
         return;
     }
-    let Some((grit_bin, server_bin)) = http_binaries() else {
+    let Some((_grit_bin, server_bin)) = http_binaries() else {
         eprintln!("SKIP: grit / grit-http-server binary not found (build them first)");
         return;
     };

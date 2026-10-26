@@ -7,8 +7,8 @@ use std::process::{Command, Output};
 
 use grit_lib::config::environment::Environment;
 use grit_lib::config::{
-    canonical_key, parse_bool, parse_color, parse_git_config_int_strict, parse_i64, parse_path,
-    parse_path_optional, ConfigFile, ConfigScope, ConfigSet, IncludeContext, LoadConfigOptions,
+    canonical_key, parse_bool, parse_color, parse_i64, parse_path, parse_path_optional, ConfigFile,
+    ConfigScope, ConfigSet, IncludeContext, LoadConfigOptions,
 };
 use grit_lib::error::{ConfigError, Error};
 
@@ -43,16 +43,6 @@ pub fn git_config_with_home(home: &Path, args: &[&str]) -> Output {
     base_git_command()
         .env("HOME", home)
         .args(args)
-        .output()
-        .expect("spawn git config")
-}
-
-pub fn git_config_in(dir: &Path, args: &[&str]) -> Output {
-    Command::new("git")
-        .current_dir(dir)
-        .args(args)
-        .env("GIT_CONFIG_GLOBAL", null_device())
-        .env("GIT_CONFIG_SYSTEM", null_device())
         .output()
         .expect("spawn git config")
 }
@@ -312,12 +302,6 @@ pub fn grit_get_all(file: &ConfigFile, key: &str) -> Vec<String> {
     set.get_all(key)
 }
 
-pub fn grit_get_all_raw(file: &ConfigFile, key: &str) -> Vec<Option<String>> {
-    let mut set = ConfigSet::new();
-    set.merge(file);
-    set.get_all_raw(key)
-}
-
 pub fn isolated_env(home: &Path) -> Environment {
     let mut env = Environment::empty();
     env.home = Some(home.as_os_str().to_os_string());
@@ -492,18 +476,10 @@ pub fn grit_path_optional(env: &Environment, raw: &str) -> Option<String> {
     parse_path_optional(env, raw)
 }
 
-pub fn git_path_value(file: &Path, key: &str) -> Option<String> {
-    git_file_get_typed(file, key, "path").ok().flatten()
-}
-
 pub fn grit_color(raw: &str) -> Result<String, String> {
     parse_color(raw)
 }
 
 pub fn git_color(file: &Path, key: &str) -> Option<String> {
     git_file_get_typed(file, key, "color").ok().flatten()
-}
-
-pub fn grit_strict_int(raw: &str) -> Result<i64, grit_lib::config::GitConfigIntStrictError> {
-    parse_git_config_int_strict(raw)
 }

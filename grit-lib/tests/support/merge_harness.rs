@@ -2,7 +2,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used, dead_code)]
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::path::Path;
 use std::process::Command;
 
@@ -12,8 +12,6 @@ use grit_lib::diff::merge_trees::{
     merge_trees_three_way, TheirsConflictLabel, TreeMergeConflictPresentation, TreeMergeOutput,
     WhitespaceMergeOptions,
 };
-use grit_lib::index::write_tree::write_tree_from_index;
-use grit_lib::index::{IndexEntry, MODE_REGULAR};
 use grit_lib::objects::{parse_commit, ObjectId, ObjectKind};
 use grit_lib::repo::Repository;
 
@@ -138,17 +136,6 @@ pub fn grit_merge_result_tree(
     merged: &TreeMergeOutput,
 ) -> grit_lib::error::Result<ObjectId> {
     grit_lib::diff::merge_trees::materialized_merge_result_tree(repo.odb(), merged)
-}
-
-fn conflict_path_bytes(merged: &TreeMergeOutput) -> BTreeSet<Vec<u8>> {
-    let mut set = BTreeSet::new();
-    set.extend(merged.conflict_content.keys().cloned());
-    for entry in merged.index.entries() {
-        if entry.stage() != 0 {
-            set.insert(entry.path.clone());
-        }
-    }
-    set
 }
 
 pub fn grit_unmerged_rows(merged: &TreeMergeOutput) -> Vec<GitUnmergedRow> {
@@ -337,20 +324,6 @@ impl CommitMergeLabels {
             df_directory_theirs_commit: None,
         }
     }
-}
-
-/// Write blob objects and return tree oid via git.
-pub fn git_write_blob(worktree: &Path, path: &str, content: &[u8]) -> ObjectId {
-    let full = worktree.join(path);
-    if let Some(parent) = full.parent() {
-        std::fs::create_dir_all(parent).expect("mkdir");
-    }
-    std::fs::write(&full, content).expect("write");
-    git(worktree, &["add", "--", path]);
-    git(worktree, &["write-tree"])
-        .trim()
-        .parse()
-        .expect("write-tree")
 }
 
 pub fn git_commit_tree(

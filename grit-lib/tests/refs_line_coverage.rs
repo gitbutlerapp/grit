@@ -3,7 +3,6 @@
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
 use std::fs;
-use std::path::Path;
 
 use grit_lib::objects::ObjectId;
 use grit_lib::refs::{collect_alternate_ref_oids, list_refs_glob, ref_matches_glob, write_ref};

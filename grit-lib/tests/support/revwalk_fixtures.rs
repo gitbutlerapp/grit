@@ -4,7 +4,7 @@ use std::path::Path;
 
 use grit_lib::objects::ObjectId;
 
-use super::history_harness::{commit_file, git, HistoryRepo};
+use super::history_harness::{commit_file, git};
 
 /// Path-limited merge-back subgraph from the current `main_branch` tip (for multi-tip oracles).
 fn append_merge_back_simplify_history(wt: &Path, prefix: &str, main_branch: &str) -> ObjectId {
@@ -282,9 +282,4 @@ pub fn setup_first_parent_boundary_history(wt: &Path) -> ObjectId {
         .trim()
         .parse()
         .expect("tip oid")
-}
-
-#[allow(dead_code)]
-pub fn fresh_repo() -> HistoryRepo {
-    HistoryRepo::init()
 }

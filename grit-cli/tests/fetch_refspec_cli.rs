@@ -219,7 +219,7 @@ fn fetch_pull_request_refspec_creates_local_branch() -> TestResult {
             "refs/pull/123/head",
             &pr_oid,
         ],
-    );
+    )?;
 
     let out = grit(&client, &["fetch", "origin", "pull/123/head:pr-123"]);
     assert!(out.status.success(), "{}", stderr(&out));

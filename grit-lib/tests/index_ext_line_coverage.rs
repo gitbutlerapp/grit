@@ -10,9 +10,7 @@ use std::path::Path;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::config::ConfigSet;
-use grit_lib::index::split_index::{
-    format_dump_split_index_file, resolve_split_index_if_needed, WriteSplitIndexRequest,
-};
+use grit_lib::index::split_index::{format_dump_split_index_file, resolve_split_index_if_needed};
 use grit_lib::index::untracked_cache::{
     collect_untracked_from_cache, dir_flags_from_config, invalidate_path,
     refresh_untracked_cache_for_status, untracked_cache_ident, UntrackedCache,

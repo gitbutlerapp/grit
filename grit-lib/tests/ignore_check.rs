@@ -2,7 +2,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-#[path = "ignore_t0008_common.rs"]
+#[path = "ignore_t0008_common/mod.rs"]
 mod t0008;
 
 use grit_lib::index::Index;

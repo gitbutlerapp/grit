@@ -223,7 +223,7 @@ fn squash_empty_abort_returns_became_empty() {
     let repo = HistoryRepo::init();
     let wt = repo.worktree();
     let grit = open_grit(wt);
-    let (a, b, c) = init_undo_redo_chain(&grit);
+    let (a, _b, c) = init_undo_redo_chain(&grit);
     let tree_d = write_tree_with_blob(&grit, "f.txt", b"d\n").expect("tree d");
     let ident = "Writer <w@grit.test> 1700000001 +0000";
     let author = "Author <a@grit.test> 1700000000 +0000";

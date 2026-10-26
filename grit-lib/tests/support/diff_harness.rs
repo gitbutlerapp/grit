@@ -13,9 +13,8 @@ use grit_lib::diff::merge_file;
 use grit_lib::diff::ws::ws_blank_line;
 use grit_lib::diff::{
     anchored_unified_diff, count_changes_with_algorithm, count_git_lines, diff_commits,
-    diff_index_to_tree, diff_index_to_worktree, diff_tree_to_worktree, diff_trees,
-    diff_trees_show_tree_entries, format_raw, format_raw_abbrev, indent_heuristic_from_config,
-    normalize_ignore_space_change, postprocess_diff_entries, tree_oid_of_commit,
+    diff_index_to_tree, diff_index_to_worktree, diff_tree_to_worktree, diff_trees, format_raw,
+    format_raw_abbrev, normalize_ignore_space_change, postprocess_diff_entries, tree_oid_of_commit,
     unified_diff_histogram_ignore_with_prefix_and_funcname,
     unified_diff_with_prefix_and_funcname_and_algorithm, DiffEntry, DiffPostprocessOptions,
     DiffPostprocessWorktree,
@@ -469,10 +468,6 @@ pub fn config_from_snippet(text: &str) -> ConfigSet {
 
 pub fn resolve_indent(config: &ConfigSet, cli_on: bool, cli_off: bool) -> bool {
     grit_lib::diff::resolve_indent_heuristic(config, cli_on, cli_off)
-}
-
-pub fn indent_from_config(config: &ConfigSet) -> bool {
-    indent_heuristic_from_config(config)
 }
 
 /// Ported blob pairs from upstream `t4033`, `t4050`, `t4071`, `t4065`, `t4061`, `t4015`, etc.

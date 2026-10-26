@@ -16,7 +16,6 @@ use grit_lib::refs;
 use grit_lib::refs::reflog::read_reflog;
 use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::state::{resolve_head, HeadState};
-use grit_lib::RefStorageFormat;
 use std::os::unix::fs::PermissionsExt;
 use std::process::Command;
 use tempfile::TempDir;

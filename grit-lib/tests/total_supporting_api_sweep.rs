@@ -18,7 +18,6 @@ use grit_lib::diff::rerere::{
     rerere_post_commit, rerere_remaining_lines, rerere_status_lines, RerereAutoupdate,
 };
 use grit_lib::objects::ObjectKind;
-use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::repo::{InitOptions, Repository};
 use std::fs;
 use tempfile::tempdir;

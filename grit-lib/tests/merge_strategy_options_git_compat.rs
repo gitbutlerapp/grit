@@ -16,8 +16,7 @@ use std::fs;
 use std::process::Command;
 
 use support::{
-    assert_merge_commits_match_git_with_favor, git_merge_tree_oracle, open_grit_repo,
-    CommitMergeLabels, HistoryRepo,
+    assert_merge_commits_match_git_with_favor, open_grit_repo, CommitMergeLabels, HistoryRepo,
 };
 
 fn grit_repo(tmp: &tempfile::TempDir) -> Repository {
@@ -145,7 +144,7 @@ fn x_theirs_matches_git_tree() {
 
 #[test]
 fn diff3_markers_byte_equal_git() {
-    let (tmp, main, side) = marker_conflict_repo();
+    let (tmp, _main, _side) = marker_conflict_repo();
     git(tmp.path(), &["config", "merge.conflictStyle", "diff3"]);
     git_merge_expect_conflict(&tmp, &["side"]);
 
@@ -197,7 +196,7 @@ fn zdiff3_markers_byte_equal_git() {
 
 #[test]
 fn conflict_style_from_config() {
-    let (tmp, main, side) = marker_conflict_repo();
+    let (tmp, _main, _side) = marker_conflict_repo();
     git(tmp.path(), &["config", "merge.conflictStyle", "diff3"]);
     git_merge_expect_conflict(&tmp, &["side"]);
 
@@ -266,7 +265,7 @@ fn allow_unrelated_matches_git_tree() {
     fs::write(tmp.path().join("main.txt"), "main\n").expect("write");
     git(tmp.path(), &["add", "main.txt"]);
     git(tmp.path(), &["commit", "-m", "main"]);
-    let main: ObjectId = git(tmp.path(), &["rev-parse", "HEAD"])
+    let _main: ObjectId = git(tmp.path(), &["rev-parse", "HEAD"])
         .trim()
         .parse()
         .expect("main");
@@ -274,7 +273,7 @@ fn allow_unrelated_matches_git_tree() {
     fs::write(tmp.path().join("orph.txt"), "orph\n").expect("write");
     git(tmp.path(), &["add", "orph.txt"]);
     git(tmp.path(), &["commit", "-m", "orphan"]);
-    let orphan: ObjectId = git(tmp.path(), &["rev-parse", "HEAD"])
+    let _orphan: ObjectId = git(tmp.path(), &["rev-parse", "HEAD"])
         .trim()
         .parse()
         .expect("orphan");

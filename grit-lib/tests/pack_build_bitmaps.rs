@@ -297,7 +297,6 @@ fn free_port() -> Option<u16> {
 
 struct ServerHandle {
     _child: Child,
-    root: PathBuf,
 }
 
 fn spawn_grit_http_server(bare: &Path, port: u16) -> Option<ServerHandle> {
@@ -316,10 +315,7 @@ fn spawn_grit_http_server(bare: &Path, port: u16) -> Option<ServerHandle> {
         .ok()?;
     for _ in 0..50 {
         if TcpListener::bind(("127.0.0.1", port)).is_err() {
-            return Some(ServerHandle {
-                _child: child,
-                root,
-            });
+            return Some(ServerHandle { _child: child });
         }
         std::thread::sleep(Duration::from_millis(20));
     }

@@ -778,7 +778,7 @@ fn push_matrix_over_ssh() {
 
 #[test]
 fn push_matrix_over_smart_http() {
-    let Some(grit_bin) = find_binary("grit") else {
+    let Some(_grit_bin) = find_binary("grit") else {
         eprintln!("SKIP: `grit` binary not found (build grit-cli first)");
         return;
     };

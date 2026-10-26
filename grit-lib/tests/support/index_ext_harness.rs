@@ -48,7 +48,7 @@ pub fn git_status_porcelain_normal(repo_dir: &Path) -> String {
     )
 }
 
-use grit_lib::index::{Index, IndexEntry};
+use grit_lib::index::IndexEntry;
 use grit_lib::objects::ObjectId;
 use grit_lib::repo::Repository;
 
@@ -207,9 +207,4 @@ pub fn entry_from_worktree_path(repo: &Repository, path: &str, payload: &[u8]) -
 
 pub fn read_index_bytes(repo: &Repository) -> Vec<u8> {
     fs::read(repo.index_handle().path()).expect("read index")
-}
-
-pub fn parse_index_without_merge(path: &Path) -> Index {
-    let data = fs::read(path).expect("read index");
-    Index::parse(&data).expect("parse index")
 }

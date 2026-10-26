@@ -68,23 +68,6 @@ pub fn ignore_case(repo: &Repository) -> bool {
     attribute_matching_ignore_case(repo)
 }
 
-pub fn attr_display(v: Option<&AttrValue>) -> &'static str {
-    match v {
-        None => "unspecified",
-        Some(AttrValue::Set) => "set",
-        Some(AttrValue::Unset) => "unset",
-        Some(AttrValue::Clear) => "unspecified",
-        Some(AttrValue::Value(s)) => {
-            if s.is_empty() {
-                "unspecified"
-            } else {
-                // Values are compared as strings in callers.
-                "value"
-            }
-        }
-    }
-}
-
 pub fn grit_attr_value(
     parsed: &ParsedGitAttributes,
     repo: &Repository,
@@ -207,48 +190,6 @@ pub fn git_check_attr_all_z(
         String::from_utf8_lossy(&out.stderr)
     );
     parse_check_attr_all_z(&out.stdout, paths)
-}
-
-pub fn git_check_attr_z(
-    worktree: &Path,
-    attr: &str,
-    paths: &[&str],
-    extra_args: &[&str],
-) -> BTreeMap<String, String> {
-    let mut cmd = Command::new("git");
-    cmd.current_dir(worktree)
-        .arg("check-attr")
-        .args(extra_args)
-        .arg("-z")
-        .arg("--stdin")
-        .arg(attr)
-        .env("GIT_AUTHOR_NAME", AUTHOR)
-        .env("GIT_AUTHOR_EMAIL", EMAIL)
-        .env("GIT_COMMITTER_NAME", AUTHOR)
-        .env("GIT_COMMITTER_EMAIL", EMAIL)
-        .env("GIT_AUTHOR_DATE", DATE)
-        .env("GIT_COMMITTER_DATE", DATE)
-        .env("GIT_CONFIG_GLOBAL", null_dev())
-        .env("GIT_CONFIG_SYSTEM", null_dev())
-        .env_remove("GIT_ATTR_SOURCE")
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped());
-    let mut child = cmd.spawn().expect("spawn check-attr");
-    {
-        use std::io::Write;
-        let stdin = child.stdin.as_mut().expect("stdin");
-        for p in paths {
-            stdin.write_all(p.as_bytes()).expect("write path");
-            stdin.write_all(&[0]).expect("write nul");
-        }
-    }
-    let out = child.wait_with_output().expect("wait check-attr");
-    assert!(
-        out.status.success(),
-        "check-attr failed: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    parse_check_attr_z(&out.stdout, attr)
 }
 
 pub fn git_check_attr_paths(

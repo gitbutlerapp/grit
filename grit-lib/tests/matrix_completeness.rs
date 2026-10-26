@@ -56,7 +56,7 @@ use grit_lib::remote::pkt_line;
 use grit_lib::remote::push::{push_http, push_remote};
 use grit_lib::remote::push_report::PushRefStatus;
 use grit_lib::remote::transfer::{FetchDepth, FetchOptions, PushOptions, PushRefSpec, TagMode};
-use grit_lib::remote::transport::http::{http_client_arc, HttpClient};
+use grit_lib::remote::transport::http::HttpClient;
 use grit_lib::remote::transport::{
     read_advertisement, ConnectOptions, Connection, GitDaemonTransport, Service, SshTransport,
     Transport,

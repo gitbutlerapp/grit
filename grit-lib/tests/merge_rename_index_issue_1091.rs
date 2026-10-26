@@ -7,7 +7,7 @@ use std::fs;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::objects::ObjectId;
-use grit_lib::porcelain::commit::{create_commit, CommitRequest, HookPolicy};
+use grit_lib::porcelain::commit::{create_commit, CommitRequest};
 use grit_lib::porcelain::merge::{integrate_branch, IntegrateBranchOutcome};
 use grit_lib::progress::NullProgress;
 use grit_lib::repo::Repository;

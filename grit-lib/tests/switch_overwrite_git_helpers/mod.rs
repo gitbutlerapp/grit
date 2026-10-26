@@ -1,4 +1,8 @@
 //! Shared helpers for switch overwrite Git oracle tests.
+//!
+//! Several test binaries include this module and each uses only part of it.
+
+#![allow(dead_code)]
 
 use std::collections::BTreeMap;
 use std::path::Path;

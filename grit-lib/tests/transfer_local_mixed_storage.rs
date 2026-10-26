@@ -9,7 +9,6 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
-use grit_lib::config::environment::Environment;
 use grit_lib::objects::ObjectId;
 use grit_lib::progress::NeverCancel;
 use grit_lib::remote::clone::{clone as clone_repo, CloneOptions};

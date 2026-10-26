@@ -203,20 +203,6 @@ pub fn assert_skip_worktree_matches_tag_oracle(index: &Index, oracle: &BTreeMap<
     }
 }
 
-pub fn assert_skip_worktree_matches_git(worktree: &Path, index: &Index) {
-    let git_v = git_ls_files_verbose_map(worktree);
-    let grit = grit_skip_worktree_map(index);
-    let paths: BTreeSet<_> = git_v.keys().chain(grit.keys()).cloned().collect();
-    for path in paths {
-        let git_skip = matches!(git_v.get(&path).copied(), Some('S' | 's'));
-        assert_eq!(
-            grit.get(&path).copied().unwrap_or(false),
-            git_skip,
-            "skip-worktree mismatch on {path}"
-        );
-    }
-}
-
 /// Populate a multi-directory tree and create an initial commit.
 pub fn seed_multidir_repo(repo: &HistoryRepo) {
     let wt = repo.worktree();

@@ -9,7 +9,7 @@ use grit_lib::revwalk::rev_parse::{
     resolve_revision_for_range_end, resolve_revision_for_verify,
 };
 
-use support::{bare_repo_with_ambiguous_prefix, commit_file, git, HistoryRepo};
+use support::{bare_repo_with_ambiguous_prefix, git, HistoryRepo};
 
 #[test]
 fn ambiguous_short_hex_public_resolvers() {

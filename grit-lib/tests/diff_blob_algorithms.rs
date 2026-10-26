@@ -4,9 +4,9 @@ mod support;
 
 use support::{
     assert_patch_matches_git, blob_pairs, config_from_snippet, git_apply_and_compare,
-    git_apply_check, git_count_lines, git_diff_no_index_patch, git_numstat, git_stat_width_line,
-    grit_blob_patch, grit_diffstat_block, grit_numstat, grit_stat_line, patch_hunk_body,
-    resolve_indent, BlobPair, GritBlobPatchOpts, LineDiffAlgo, WhitespaceMode,
+    git_apply_check, git_diff_no_index_patch, git_numstat, git_stat_width_line, grit_blob_patch,
+    grit_diffstat_block, grit_numstat, grit_stat_line, patch_hunk_body, resolve_indent,
+    GritBlobPatchOpts, LineDiffAlgo, WhitespaceMode,
 };
 
 fn default_opts(algo: LineDiffAlgo) -> GritBlobPatchOpts {

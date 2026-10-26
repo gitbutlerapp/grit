@@ -156,7 +156,7 @@ fn reflog_expire_reports_actions_dry_run_and_real() {
 #[test]
 fn prune_packed_reports_removed_paths_dry_run_and_real() {
     let tmp = TempDir::new().expect("tempdir");
-    let repo = Repository::init(
+    let _repo = Repository::init(
         tmp.path(),
         &InitOptions::new()
             .with_initial_branch("main".to_owned())
