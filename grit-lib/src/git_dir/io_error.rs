@@ -65,17 +65,6 @@ fn format_layout_path(layout_git_dir: &Path, rel: &str) -> String {
     }
 }
 
-/// User-visible path for a file under `storage_root` (often `commondir`) in a repo laid out as `layout_git_dir`.
-#[must_use]
-#[allow(dead_code)]
-pub fn display_storage_path(layout_git_dir: &Path, storage_root: &Path, path: &Path) -> String {
-    if let Ok(rel) = path.strip_prefix(storage_root) {
-        let trimmed = normalize_repo_relative_suffix(&rel.to_string_lossy());
-        return format_layout_path(layout_git_dir, &trimmed);
-    }
-    display_git_dir_path(layout_git_dir, path)
-}
-
 /// Display path for ref-store I/O under `common_dir` and the checkout's `git_dir` (linked admin dir).
 #[must_use]
 pub fn display_ref_store_path(common_dir: &Path, checkout_git_dir: &Path, path: &Path) -> String {
@@ -184,23 +173,6 @@ pub fn map_git_dir_io(
     }
 }
 
-/// Like [`map_git_dir_io`], for paths under a separate storage root (linked worktrees).
-#[must_use]
-#[allow(dead_code)]
-pub fn map_storage_git_dir_io(
-    layout_git_dir: &Path,
-    storage_root: &Path,
-    path: &Path,
-    operation: GitDirPathOperation,
-    source: io::Error,
-) -> Error {
-    Error::GitDirPathIo {
-        path: display_storage_path(layout_git_dir, storage_root, path),
-        operation,
-        source,
-    }
-}
-
 /// Like [`map_git_dir_io`], for the files ref store (`common_dir` + checkout `git_dir`).
 #[must_use]
 pub fn map_ref_store_path_io(
@@ -243,20 +215,6 @@ pub fn map_index_write_error(git_dir: &Path, index_path: &Path, err: Error) -> E
         },
         other => other,
     }
-}
-
-/// Attach storage-layout git-dir context to [`std::io::Result`].
-#[allow(dead_code)]
-pub fn io_with_storage_git_path<T>(
-    layout_git_dir: &Path,
-    storage_root: &Path,
-    path: &Path,
-    operation: GitDirPathOperation,
-    result: io::Result<T>,
-) -> Result<T> {
-    result.map_err(|source| {
-        map_storage_git_dir_io(layout_git_dir, storage_root, path, operation, source)
-    })
 }
 
 /// Attach ref-store git-dir context to [`std::io::Result`].
@@ -333,7 +291,7 @@ mod tests {
         let common = PathBuf::from("/shared/commondir");
         let path = common.join("refs/heads/main");
         assert_eq!(
-            display_storage_path(&git, &common, &path),
+            display_ref_store_path(&common, &git, &path),
             ".git/refs/heads/main"
         );
     }
