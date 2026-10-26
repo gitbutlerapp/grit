@@ -1597,17 +1597,25 @@ fn is_unreplaced_commit(repo: &Repository, oid: ObjectId) -> bool {
 }
 
 /// Peel tags to a commit OID for merge-base computation (`A...B` and `rev-parse` output).
-pub fn peel_to_commit_for_merge_base(repo: &Repository, mut oid: ObjectId) -> Result<ObjectId> {
+pub fn peel_to_commit_for_merge_base(repo: &Repository, oid: ObjectId) -> Result<ObjectId> {
+    peel_tags_to_commit(repo, oid)?
+        .map_err(|other| Error::InvalidRef(format!("object {other} does not name a commit")))
+}
+
+/// Peel tags starting at `oid` until a non-tag object.
+///
+/// Returns `Ok(Ok(commit))` for a commit, or `Ok(Err(oid))` naming the tree or blob the tags led
+/// to.
+pub(crate) fn peel_tags_to_commit(
+    repo: &Repository,
+    mut oid: ObjectId,
+) -> Result<std::result::Result<ObjectId, ObjectId>> {
     // Only tags need their payload; every other kind is decided from the object header.
     loop {
         match repo.read_info_replaced(&oid)?.kind {
-            ObjectKind::Commit => return Ok(oid),
+            ObjectKind::Commit => return Ok(Ok(oid)),
             ObjectKind::Tag => oid = parse_tag_target(&repo.read_replaced(&oid)?.data)?,
-            ObjectKind::Tree | ObjectKind::Blob => {
-                return Err(Error::InvalidRef(format!(
-                    "object {oid} does not name a commit"
-                )))
-            }
+            ObjectKind::Tree | ObjectKind::Blob => return Ok(Err(oid)),
         }
     }
 }

@@ -82,7 +82,8 @@ pub(crate) use targets::{
     unstaged_raw_changes_with_peer_hunks, FileChange,
 };
 pub use targets::{
-    resolve_diff_arguments, DiffArguments, DiffTarget, FileDiff, ResolveDiffArgumentsError,
+    resolve_commit_diff_pathspecs, resolve_diff_arguments, resolve_diff_request, DiffArguments,
+    DiffRequest, DiffTarget, FileDiff, ResolveDiffArgumentsError,
 };
 pub use tree_content::{
     for_each_tree_diff_structured, tree_diff_contents_parallel, tree_diff_stat_parallel,

@@ -4490,32 +4490,38 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::RenameDetection
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::RenameDetection
 #[non_exhaustive] pub enum grit_lib::diff::ResolveDiffArgumentsError
 pub grit_lib::diff::ResolveDiffArgumentsError::AgainstWithCommits
-pub grit_lib::diff::ResolveDiffArgumentsError::Message(alloc::string::String)
+pub grit_lib::diff::ResolveDiffArgumentsError::Library(alloc::boxed::Box<grit_lib::error::Error>)
+pub grit_lib::diff::ResolveDiffArgumentsError::MultipleMergeBases
+pub grit_lib::diff::ResolveDiffArgumentsError::NoMergeBase
+pub grit_lib::diff::ResolveDiffArgumentsError::NoWorkTree
+pub grit_lib::diff::ResolveDiffArgumentsError::NotACommit
+pub grit_lib::diff::ResolveDiffArgumentsError::NotACommit::oid: grit_lib::objects::ObjectId
+pub grit_lib::diff::ResolveDiffArgumentsError::Pathspec(grit_lib::error::PathspecResolveError)
 pub grit_lib::diff::ResolveDiffArgumentsError::RangeWithSecondRevision
 pub grit_lib::diff::ResolveDiffArgumentsError::StagedAndUnstaged
 pub grit_lib::diff::ResolveDiffArgumentsError::StagedWithRevisions
 pub grit_lib::diff::ResolveDiffArgumentsError::TooManyRevisions
+pub grit_lib::diff::ResolveDiffArgumentsError::UnresolvedRevision
+pub grit_lib::diff::ResolveDiffArgumentsError::UnresolvedRevision::source: alloc::boxed::Box<grit_lib::error::Error>
+pub grit_lib::diff::ResolveDiffArgumentsError::UnresolvedRevision::spec: alloc::string::String
 pub grit_lib::diff::ResolveDiffArgumentsError::UnstagedWithRevisions
-impl core::clone::Clone for grit_lib::diff::ResolveDiffArgumentsError
-pub fn grit_lib::diff::ResolveDiffArgumentsError::clone(&self) -> Self
-impl core::cmp::Eq for grit_lib::diff::ResolveDiffArgumentsError
-impl core::cmp::PartialEq for grit_lib::diff::ResolveDiffArgumentsError
-pub fn grit_lib::diff::ResolveDiffArgumentsError::eq(&self, &Self) -> bool
 impl core::convert::From<grit_lib::error::Error> for grit_lib::diff::ResolveDiffArgumentsError
 pub fn grit_lib::diff::ResolveDiffArgumentsError::from(grit_lib::error::Error) -> Self
+impl core::convert::From<grit_lib::error::PathspecResolveError> for grit_lib::diff::ResolveDiffArgumentsError
+pub fn grit_lib::diff::ResolveDiffArgumentsError::from(grit_lib::error::PathspecResolveError) -> Self
 impl core::error::Error for grit_lib::diff::ResolveDiffArgumentsError
+pub fn grit_lib::diff::ResolveDiffArgumentsError::source(&self) -> core::option::Option<&(dyn core::error::Error + 'static)>
 impl core::fmt::Debug for grit_lib::diff::ResolveDiffArgumentsError
 pub fn grit_lib::diff::ResolveDiffArgumentsError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
 impl core::fmt::Display for grit_lib::diff::ResolveDiffArgumentsError
 pub fn grit_lib::diff::ResolveDiffArgumentsError::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
-impl core::marker::StructuralPartialEq for grit_lib::diff::ResolveDiffArgumentsError
 impl core::marker::Freeze for grit_lib::diff::ResolveDiffArgumentsError
 impl core::marker::Send for grit_lib::diff::ResolveDiffArgumentsError
 impl core::marker::Sync for grit_lib::diff::ResolveDiffArgumentsError
 impl core::marker::Unpin for grit_lib::diff::ResolveDiffArgumentsError
 impl core::marker::UnsafeUnpin for grit_lib::diff::ResolveDiffArgumentsError
-impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::ResolveDiffArgumentsError
-impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::ResolveDiffArgumentsError
+impl !core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::ResolveDiffArgumentsError
+impl !core::panic::unwind_safe::UnwindSafe for grit_lib::diff::ResolveDiffArgumentsError
 pub enum grit_lib::diff::WorktreeAddRefresh
 pub grit_lib::diff::WorktreeAddRefresh::ModeOnly
 pub grit_lib::diff::WorktreeAddRefresh::ModeOnly::mode: u32
@@ -4803,6 +4809,30 @@ impl<'a> core::marker::Unpin for grit_lib::diff::DiffPostprocessWorktree<'a>
 impl<'a> core::marker::UnsafeUnpin for grit_lib::diff::DiffPostprocessWorktree<'a>
 impl<'a> core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::DiffPostprocessWorktree<'a>
 impl<'a> core::panic::unwind_safe::UnwindSafe for grit_lib::diff::DiffPostprocessWorktree<'a>
+pub struct grit_lib::diff::DiffRequest
+pub grit_lib::diff::DiffRequest::against: core::option::Option<alloc::string::String>
+pub grit_lib::diff::DiffRequest::paths: alloc::vec::Vec<alloc::string::String>
+pub grit_lib::diff::DiffRequest::pathspec_file: core::option::Option<alloc::vec::Vec<alloc::string::String>>
+pub grit_lib::diff::DiffRequest::positionals: alloc::vec::Vec<alloc::string::String>
+pub grit_lib::diff::DiffRequest::staged: bool
+pub grit_lib::diff::DiffRequest::unstaged: bool
+impl core::clone::Clone for grit_lib::diff::DiffRequest
+pub fn grit_lib::diff::DiffRequest::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::diff::DiffRequest
+impl core::cmp::PartialEq for grit_lib::diff::DiffRequest
+pub fn grit_lib::diff::DiffRequest::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::diff::DiffRequest
+pub fn grit_lib::diff::DiffRequest::default() -> Self
+impl core::fmt::Debug for grit_lib::diff::DiffRequest
+pub fn grit_lib::diff::DiffRequest::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::diff::DiffRequest
+impl core::marker::Freeze for grit_lib::diff::DiffRequest
+impl core::marker::Send for grit_lib::diff::DiffRequest
+impl core::marker::Sync for grit_lib::diff::DiffRequest
+impl core::marker::Unpin for grit_lib::diff::DiffRequest
+impl core::marker::UnsafeUnpin for grit_lib::diff::DiffRequest
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::DiffRequest
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::DiffRequest
 pub struct grit_lib::diff::DiffTotals
 pub grit_lib::diff::DiffTotals::deletions: usize
 pub grit_lib::diff::DiffTotals::files_changed: usize
@@ -5233,7 +5263,9 @@ pub fn grit_lib::diff::refresh_index_stat_content_verified(&grit_lib::objects::o
 pub fn grit_lib::diff::refresh_index_stat_content_verified_with_rules(&grit_lib::objects::odb::Odb, &std::path::Path, &mut grit_lib::index::Index, &std::path::Path, core::option::Option<(u32, u32)>, core::option::Option<&grit_lib::config::ConfigSet>, core::option::Option<usize>, core::option::Option<&alloc::rcs::arc::Arc<std::sync::poison::mutex::Mutex<grit_lib::worktree::worktree_rules::WorktreeRules>>>) -> grit_lib::error::Result<bool>
 pub fn grit_lib::diff::rename_similarity_score(&[u8], &[u8]) -> u32
 pub fn grit_lib::diff::renames_from_config(&grit_lib::config::ConfigSet) -> grit_lib::diff::RenameDetection
+pub fn grit_lib::diff::resolve_commit_diff_pathspecs(&grit_lib::repo::Repository, core::option::Option<&str>, &[alloc::string::String]) -> core::result::Result<alloc::vec::Vec<alloc::string::String>, grit_lib::diff::ResolveDiffArgumentsError>
 pub fn grit_lib::diff::resolve_diff_arguments(&grit_lib::repo::Repository, core::option::Option<&str>, bool, bool, core::option::Option<&str>, &[alloc::string::String], &[alloc::string::String]) -> core::result::Result<grit_lib::diff::DiffArguments, grit_lib::diff::ResolveDiffArgumentsError>
+pub fn grit_lib::diff::resolve_diff_request(&grit_lib::repo::Repository, core::option::Option<&str>, &grit_lib::diff::DiffRequest) -> core::result::Result<grit_lib::diff::DiffArguments, grit_lib::diff::ResolveDiffArgumentsError>
 pub fn grit_lib::diff::resolve_indent_heuristic(&grit_lib::config::ConfigSet, bool, bool) -> bool
 pub fn grit_lib::diff::rewrite_dissimilarity_index_percent(&[u8], &[u8]) -> core::option::Option<u32>
 pub fn grit_lib::diff::rewrite_merge_score(&[u8], &[u8]) -> core::option::Option<u64>
@@ -6106,6 +6138,8 @@ impl core::cmp::PartialEq for grit_lib::error::PathspecResolveError
 pub fn grit_lib::error::PathspecResolveError::eq(&self, &Self) -> bool
 impl core::convert::From<grit_lib::error::PathspecFromFileParseError> for grit_lib::error::PathspecResolveError
 pub fn grit_lib::error::PathspecResolveError::from(grit_lib::error::PathspecFromFileParseError) -> Self
+impl core::convert::From<grit_lib::error::PathspecResolveError> for grit_lib::diff::ResolveDiffArgumentsError
+pub fn grit_lib::diff::ResolveDiffArgumentsError::from(grit_lib::error::PathspecResolveError) -> Self
 impl core::convert::From<grit_lib::pathspec::PathOutsideRepository> for grit_lib::error::PathspecResolveError
 pub fn grit_lib::error::PathspecResolveError::from(grit_lib::pathspec::PathOutsideRepository) -> Self
 impl core::error::Error for grit_lib::error::PathspecResolveError
@@ -12357,6 +12391,8 @@ impl core::cmp::PartialEq for grit_lib::error::PathspecResolveError
 pub fn grit_lib::error::PathspecResolveError::eq(&self, &Self) -> bool
 impl core::convert::From<grit_lib::error::PathspecFromFileParseError> for grit_lib::error::PathspecResolveError
 pub fn grit_lib::error::PathspecResolveError::from(grit_lib::error::PathspecFromFileParseError) -> Self
+impl core::convert::From<grit_lib::error::PathspecResolveError> for grit_lib::diff::ResolveDiffArgumentsError
+pub fn grit_lib::diff::ResolveDiffArgumentsError::from(grit_lib::error::PathspecResolveError) -> Self
 impl core::convert::From<grit_lib::pathspec::PathOutsideRepository> for grit_lib::error::PathspecResolveError
 pub fn grit_lib::error::PathspecResolveError::from(grit_lib::pathspec::PathOutsideRepository) -> Self
 impl core::error::Error for grit_lib::error::PathspecResolveError
@@ -26790,6 +26826,8 @@ impl core::cmp::PartialEq for grit_lib::error::PathspecResolveError
 pub fn grit_lib::error::PathspecResolveError::eq(&self, &Self) -> bool
 impl core::convert::From<grit_lib::error::PathspecFromFileParseError> for grit_lib::error::PathspecResolveError
 pub fn grit_lib::error::PathspecResolveError::from(grit_lib::error::PathspecFromFileParseError) -> Self
+impl core::convert::From<grit_lib::error::PathspecResolveError> for grit_lib::diff::ResolveDiffArgumentsError
+pub fn grit_lib::diff::ResolveDiffArgumentsError::from(grit_lib::error::PathspecResolveError) -> Self
 impl core::convert::From<grit_lib::pathspec::PathOutsideRepository> for grit_lib::error::PathspecResolveError
 pub fn grit_lib::error::PathspecResolveError::from(grit_lib::pathspec::PathOutsideRepository) -> Self
 impl core::error::Error for grit_lib::error::PathspecResolveError

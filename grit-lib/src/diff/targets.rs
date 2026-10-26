@@ -18,7 +18,7 @@ use crate::diff::{
     read_worktree_side_bytes_for_diff, submodule_porcelain_flags, tree_diff_structured_parallel,
     DiffEntry, DiffIndexToWorktreeOptions, DiffOptions, DiffStatus, TreeDiffStructured,
 };
-use crate::error::{Error, Result};
+use crate::error::{Error, PathspecResolveError, Result};
 use crate::index::Index;
 use crate::index::MODE_TREE;
 use crate::objects::odb::Odb;
@@ -29,10 +29,11 @@ use crate::porcelain::pathspec_match::{
     ensure_pathspec_matches_known_in_repository, pathspec_matches_known_in_repository,
 };
 use crate::repo::Repository;
-use crate::revwalk::merge_base::merge_base_for_diff_two_commits;
+use crate::rev_parse::peel_tags_to_commit;
+use crate::revwalk::merge_base::{merge_base_for_diff_two_commits, MergeBaseForDiffError};
 use crate::revwalk::rev_parse::{
-    peel_to_commit_for_merge_base, resolve_revision, resolve_revision_for_range_end,
-    split_double_dot_range, split_triple_dot_range,
+    resolve_revision, resolve_revision_for_range_end, split_double_dot_range,
+    split_triple_dot_range,
 };
 use crate::state::resolve_head;
 use crate::worktree::fsmonitor::fsmonitor_enabled;
@@ -100,9 +101,31 @@ pub struct DiffArguments {
     pub pathspecs: Vec<String>,
 }
 
+/// Unparsed `grit diff` flags and operands, as the user typed them.
+///
+/// [`resolve_diff_request`] turns this into a [`DiffArguments`].
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct DiffRequest {
+    /// Compare the index with `HEAD` (`--staged`).
+    pub staged: bool,
+    /// Compare the working tree with the index (`--unstaged`).
+    pub unstaged: bool,
+    /// Compare the working tree with this revision instead of `HEAD` (`--against`).
+    pub against: Option<String>,
+    /// Operands before `--`: revisions, ranges, or paths given without `--`.
+    pub positionals: Vec<String>,
+    /// Paths after `--`.
+    pub paths: Vec<String>,
+    /// Pathspecs read from a file (`--pathspec-from-file`), placed before the path operands.
+    ///
+    /// `Some` means a file was supplied, even when it held no entries: the combined pathspec
+    /// list must then be non-empty.
+    pub pathspec_file: Option<Vec<String>>,
+}
+
 /// Invalid `grit diff` argument combinations or revision parsing failures.
 #[non_exhaustive]
-#[derive(Debug, Error, Clone, PartialEq, Eq)]
+#[derive(Debug, Error)]
 pub enum ResolveDiffArgumentsError {
     /// `--staged` and `--unstaged` together.
     #[error("--staged and --unstaged cannot be combined")]
@@ -130,27 +153,71 @@ pub enum ResolveDiffArgumentsError {
     )]
     RangeWithSecondRevision,
 
-    /// Underlying revision or pathspec resolution failure.
-    #[error("{0}")]
-    Message(String),
+    /// Path limits for a working-tree comparison in a repository without a work tree.
+    #[error("grit diff needs a working tree")]
+    NoWorkTree,
+
+    /// A revision operand does not name an object.
+    #[error("could not resolve '{spec}'")]
+    UnresolvedRevision {
+        /// The operand as given.
+        spec: String,
+        /// Why resolution failed.
+        #[source]
+        source: Box<Error>,
+    },
+
+    /// A revision (after peeling tags) names a tree or blob instead of a commit.
+    #[error("object {oid} does not name a commit")]
+    NotACommit {
+        /// The tree or blob the revision led to.
+        oid: ObjectId,
+    },
+
+    /// A three-dot range whose sides share no history.
+    #[error("no merge base for that revision range")]
+    NoMergeBase,
+
+    /// A three-dot range whose sides have more than one merge base (criss-cross history).
+    #[error("multiple merge bases for that revision range")]
+    MultipleMergeBases,
+
+    /// A pathspec could not be parsed or normalized.
+    #[error(transparent)]
+    Pathspec(#[from] PathspecResolveError),
+
+    /// Range endpoint resolution, object reads, or a working-tree pathspec matching nothing
+    /// ([`Error::PathspecNoMatch`]).
+    #[error(transparent)]
+    Library(Box<Error>),
 }
 
 impl From<Error> for ResolveDiffArgumentsError {
     fn from(err: Error) -> Self {
-        match err {
-            Error::InvalidRef(msg) | Error::Message(msg) => Self::Message(msg),
-            other => Self::Message(other.to_string()),
-        }
+        Self::Library(Box::new(err))
     }
 }
 
+type ResolveResult<T> = std::result::Result<T, ResolveDiffArgumentsError>;
+
 /// Parse `grit diff` flags and positionals into a [`DiffTarget`] and pathspecs.
 ///
-/// `cwd_prefix` is the path from the process cwd to the work tree root (from [`pathdiff`](crate::worktree::pathspec::pathdiff)); pass `None` when unknown or in a bare repo.
+/// Shorthand for [`resolve_diff_request`] without a pathspec file.
+///
+/// # Parameters
+///
+/// - `repo` - repository the revisions and paths belong to.
+/// - `cwd_prefix` - path from the work tree root to the process cwd (from
+///   [`pathdiff`](crate::worktree::pathspec::pathdiff)); `None` at the root, when unknown, or in
+///   a bare repository.
+/// - `staged`, `unstaged`, `against` - see [`DiffRequest`].
+/// - `positionals` - operands before `--`.
+/// - `explicit_paths` - paths after `--`.
 ///
 /// # Errors
 ///
-/// Returns [`ResolveDiffArgumentsError`] for flag conflicts or unresolvable revisions.
+/// Returns [`ResolveDiffArgumentsError`] for flag conflicts, unresolvable revisions, or
+/// pathspecs that cannot be resolved.
 pub fn resolve_diff_arguments(
     repo: &Repository,
     cwd_prefix: Option<&str>,
@@ -159,35 +226,91 @@ pub fn resolve_diff_arguments(
     against: Option<&str>,
     positionals: &[String],
     explicit_paths: &[String],
-) -> std::result::Result<DiffArguments, ResolveDiffArgumentsError> {
+) -> ResolveResult<DiffArguments> {
+    let request = DiffRequest {
+        staged,
+        unstaged,
+        against: against.map(str::to_owned),
+        positionals: positionals.to_vec(),
+        paths: explicit_paths.to_vec(),
+        pathspec_file: None,
+    };
+    resolve_diff_request(repo, cwd_prefix, &request)
+}
+
+/// Decide what `grit diff` compares and which paths it is limited to.
+///
+/// Operands before `--` that are not revisions but name known paths (in the index, `HEAD`, or
+/// the working tree) are treated as paths, so `grit diff file.txt` and `grit diff HEAD~1
+/// file.txt` work without `--`. One operand selects a commit's own patch, or a tree diff for
+/// `A..B` / `A...B` (merge base of `A` and `B` against `B`); two operands compare two commits.
+/// With no operands the working tree is compared with `HEAD`, or with
+/// [`DiffRequest::against`].
+///
+/// Working-tree pathspecs must match a known path; commit and range pathspecs only need to
+/// parse, so paths deleted on either side can still be named.
+///
+/// # Parameters
+///
+/// - `repo` - repository the revisions and paths belong to.
+/// - `cwd_prefix` - path from the work tree root to the process cwd (from
+///   [`pathdiff`](crate::worktree::pathspec::pathdiff)); `None` at the root, when unknown, or in
+///   a bare repository.
+/// - `request` - flags and operands as given.
+///
+/// # Errors
+///
+/// - Flag conflicts: [`ResolveDiffArgumentsError::StagedAndUnstaged`],
+///   [`StagedWithRevisions`](ResolveDiffArgumentsError::StagedWithRevisions),
+///   [`UnstagedWithRevisions`](ResolveDiffArgumentsError::UnstagedWithRevisions),
+///   [`TooManyRevisions`](ResolveDiffArgumentsError::TooManyRevisions),
+///   [`AgainstWithCommits`](ResolveDiffArgumentsError::AgainstWithCommits),
+///   [`RangeWithSecondRevision`](ResolveDiffArgumentsError::RangeWithSecondRevision).
+/// - Revisions: [`UnresolvedRevision`](ResolveDiffArgumentsError::UnresolvedRevision),
+///   [`NotACommit`](ResolveDiffArgumentsError::NotACommit),
+///   [`NoMergeBase`](ResolveDiffArgumentsError::NoMergeBase),
+///   [`MultipleMergeBases`](ResolveDiffArgumentsError::MultipleMergeBases).
+/// - Paths: [`NoWorkTree`](ResolveDiffArgumentsError::NoWorkTree),
+///   [`Pathspec`](ResolveDiffArgumentsError::Pathspec), or
+///   [`Library`](ResolveDiffArgumentsError::Library) wrapping [`Error::PathspecNoMatch`].
+pub fn resolve_diff_request(
+    repo: &Repository,
+    cwd_prefix: Option<&str>,
+    request: &DiffRequest,
+) -> ResolveResult<DiffArguments> {
     let (commits, path_args) = disambiguate_diff_revision_and_paths(
         repo,
         cwd_prefix,
-        positionals.to_vec(),
-        explicit_paths.to_vec(),
+        request.positionals.clone(),
+        request.paths.clone(),
     );
+    let file_paths = request.pathspec_file.as_deref().unwrap_or_default();
+    let path_tokens = [file_paths, path_args.as_slice()].concat();
+    if (request.pathspec_file.is_some() || !request.paths.is_empty())
+        && (path_tokens.is_empty() || path_tokens.iter().any(String::is_empty))
+    {
+        return Err(PathspecResolveError::EmptyPathspec.into());
+    }
+    let against = request.against.as_deref();
 
-    if staged && unstaged {
+    if request.staged && request.unstaged {
         return Err(ResolveDiffArgumentsError::StagedAndUnstaged);
     }
-    if staged {
+    if request.staged || request.unstaged {
         if !commits.is_empty() || against.is_some() {
-            return Err(ResolveDiffArgumentsError::StagedWithRevisions);
+            return Err(if request.staged {
+                ResolveDiffArgumentsError::StagedWithRevisions
+            } else {
+                ResolveDiffArgumentsError::UnstagedWithRevisions
+            });
         }
-        let pathspecs = resolve_worktree_diff_pathspecs(repo, cwd_prefix, &path_args)?;
         return Ok(DiffArguments {
-            target: DiffTarget::IndexVsHead,
-            pathspecs,
-        });
-    }
-    if unstaged {
-        if !commits.is_empty() || against.is_some() {
-            return Err(ResolveDiffArgumentsError::UnstagedWithRevisions);
-        }
-        let pathspecs = resolve_worktree_diff_pathspecs(repo, cwd_prefix, &path_args)?;
-        return Ok(DiffArguments {
-            target: DiffTarget::WorktreeVsIndex,
-            pathspecs,
+            target: if request.staged {
+                DiffTarget::IndexVsHead
+            } else {
+                DiffTarget::WorktreeVsIndex
+            },
+            pathspecs: resolve_worktree_diff_pathspecs(repo, cwd_prefix, &path_tokens)?,
         });
     }
     if commits.len() > 2 {
@@ -197,90 +320,63 @@ pub fn resolve_diff_arguments(
         return Err(ResolveDiffArgumentsError::AgainstWithCommits);
     }
 
-    match commits.len() {
-        0 => {
-            let pathspecs = resolve_worktree_diff_pathspecs(repo, cwd_prefix, &path_args)?;
-            let target = if let Some(spec) = against {
-                let commit = resolve_diff_commit(repo, spec)?;
-                let tree = commit_tree(repo, &commit)?;
-                DiffTarget::WorktreeVsTree(tree)
-            } else {
-                DiffTarget::WorktreeVsHead
+    let trees = |old: ObjectId, new: ObjectId, pathspecs: Vec<String>| DiffArguments {
+        target: DiffTarget::Trees {
+            old: Some(old),
+            new,
+        },
+        pathspecs,
+    };
+    match commits.as_slice() {
+        [] => {
+            let pathspecs = resolve_worktree_diff_pathspecs(repo, cwd_prefix, &path_tokens)?;
+            let target = match against {
+                Some(spec) => DiffTarget::WorktreeVsTree(commit_tree(
+                    repo,
+                    &resolve_diff_commit(repo, spec)?,
+                )?),
+                None => DiffTarget::WorktreeVsHead,
             };
             Ok(DiffArguments { target, pathspecs })
         }
-        1 => {
-            let spec = &commits[0];
+        [spec] => {
             if let Some((base, tip)) = parse_commit_range(repo, spec)? {
-                let pathspecs = resolve_commit_diff_pathspecs(repo, cwd_prefix, &path_args)?;
-                return Ok(DiffArguments {
-                    target: DiffTarget::Trees {
-                        old: Some(base),
-                        new: tip,
-                    },
-                    pathspecs,
-                });
+                let pathspecs = resolve_commit_diff_pathspecs(repo, cwd_prefix, &path_tokens)?;
+                return Ok(trees(base, tip, pathspecs));
             }
-            if let Ok(oid) = resolve_diff_commit(repo, spec) {
-                let pathspecs = resolve_commit_diff_pathspecs(repo, cwd_prefix, &path_args)?;
-                return Ok(DiffArguments {
+            match resolve_diff_commit(repo, spec) {
+                Ok(oid) => Ok(DiffArguments {
                     target: DiffTarget::Commit(oid),
-                    pathspecs,
-                });
-            }
-            if path_args.is_empty() {
-                let pathspecs =
-                    resolve_worktree_diff_pathspecs(repo, cwd_prefix, std::slice::from_ref(spec))?;
-                Ok(DiffArguments {
+                    pathspecs: resolve_commit_diff_pathspecs(repo, cwd_prefix, &path_tokens)?,
+                }),
+                // Neither a revision nor (per disambiguation) a known path: report it as a path.
+                Err(_) if path_args.is_empty() => Ok(DiffArguments {
                     target: DiffTarget::WorktreeVsIndex,
-                    pathspecs,
-                })
-            } else if let Err(e) = resolve_diff_commit(repo, spec) {
-                Err(e.into())
-            } else {
-                Err(ResolveDiffArgumentsError::Message(
-                    "revision unresolved".into(),
-                ))
-            }
-        }
-        2 => {
-            if let Some((base, tip)) = parse_commit_range(repo, &commits[0])? {
-                if token_is_known_worktree_pathspec(repo, cwd_prefix, &commits[1]) {
-                    let pathspecs = resolve_commit_diff_pathspecs(
+                    pathspecs: resolve_worktree_diff_pathspecs(
                         repo,
                         cwd_prefix,
-                        std::slice::from_ref(&commits[1]),
-                    )?;
-                    return Ok(DiffArguments {
-                        target: DiffTarget::Trees {
-                            old: Some(base),
-                            new: tip,
-                        },
-                        pathspecs,
-                    });
-                }
-                if resolve_diff_commit(repo, &commits[1]).is_ok() {
+                        std::slice::from_ref(spec),
+                    )?,
+                }),
+                Err(err) => Err(err),
+            }
+        }
+        [first, second] => {
+            if let Some((base, tip)) = parse_commit_range(repo, first)? {
+                if !token_is_known_worktree_pathspec(repo, cwd_prefix, second) {
+                    resolve_diff_commit(repo, second)?;
                     return Err(ResolveDiffArgumentsError::RangeWithSecondRevision);
                 }
-                if let Err(e) = resolve_diff_commit(repo, &commits[1]) {
-                    return Err(e.into());
-                }
-                return Err(ResolveDiffArgumentsError::Message(
-                    "could not resolve second revision".into(),
-                ));
+                let range_paths = [file_paths, std::slice::from_ref(second)].concat();
+                let pathspecs = resolve_commit_diff_pathspecs(repo, cwd_prefix, &range_paths)?;
+                return Ok(trees(base, tip, pathspecs));
             }
-            let pathspecs = resolve_commit_diff_pathspecs(repo, cwd_prefix, &path_args)?;
-            let base = resolve_diff_commit(repo, &commits[0])?;
-            let tip = resolve_diff_commit(repo, &commits[1])?;
-            Ok(DiffArguments {
-                target: DiffTarget::Trees {
-                    old: Some(base),
-                    new: tip,
-                },
-                pathspecs,
-            })
+            let base = resolve_diff_commit(repo, first)?;
+            let tip = resolve_diff_commit(repo, second)?;
+            let pathspecs = resolve_commit_diff_pathspecs(repo, cwd_prefix, &path_tokens)?;
+            Ok(trees(base, tip, pathspecs))
         }
-        _ => unreachable!("checked above"),
+        _ => Err(ResolveDiffArgumentsError::TooManyRevisions),
     }
 }
 
@@ -527,35 +623,36 @@ fn token_is_known_worktree_pathspec(
     pathspec_matches_known_in_repository(repo, &resolved).unwrap_or(false)
 }
 
+/// Move operands that clap placed before `--` but that name paths rather than revisions.
 fn disambiguate_diff_revision_and_paths(
     repo: &Repository,
     cwd_prefix: Option<&str>,
     mut commits: Vec<String>,
     mut paths: Vec<String>,
 ) -> (Vec<String>, Vec<String>) {
-    if paths.is_empty() && commits.len() == 2 {
-        let first_rev = token_is_diff_revision(repo, &commits[0]);
-        let second_rev = token_is_diff_revision(repo, &commits[1]);
-        if first_rev
-            && !second_rev
-            && token_is_known_worktree_pathspec(repo, cwd_prefix, &commits[1])
+    if !paths.is_empty() {
+        return (commits, paths);
+    }
+    let is_path = |token: &str| token_is_known_worktree_pathspec(repo, cwd_prefix, token);
+    match commits.as_slice() {
+        [first, second]
+            if token_is_diff_revision(repo, first)
+                && !token_is_diff_revision(repo, second)
+                && is_path(second) =>
         {
-            if let Some(path) = commits.pop() {
-                paths.push(path);
-            }
+            paths.extend(commits.pop());
         }
-    } else if paths.is_empty() {
-        while commits.len() >= 2 {
-            let Some(tail) = commits.last() else {
-                break;
-            };
-            if token_is_diff_revision(repo, tail) {
+        [only] if !token_is_diff_revision(repo, only) && is_path(only) => {
+            paths.extend(commits.pop());
+        }
+        _ => {}
+    }
+    if paths.is_empty() {
+        while let [_, .., tail] = commits.as_slice() {
+            if token_is_diff_revision(repo, tail) || !is_path(tail) {
                 break;
             }
-            let Some(path) = commits.pop() else {
-                break;
-            };
-            paths.push(path);
+            paths.extend(commits.pop());
         }
     }
     (commits, paths)
@@ -565,52 +662,61 @@ fn pathspec_resolution_root(repo: &Repository) -> &Path {
     repo.work_tree().unwrap_or_else(|| repo.git_dir())
 }
 
+/// Working-tree diffs: every pathspec must match a path in the index, `HEAD`, or on disk.
 fn resolve_worktree_diff_pathspecs(
     repo: &Repository,
     cwd_prefix: Option<&str>,
     raw_paths: &[String],
-) -> std::result::Result<Vec<String>, ResolveDiffArgumentsError> {
+) -> ResolveResult<Vec<String>> {
     if raw_paths.is_empty() {
         return Ok(Vec::new());
     }
     if repo.work_tree().is_none() {
-        return Err(ResolveDiffArgumentsError::Message(
-            "grit diff needs a working tree".into(),
-        ));
+        return Err(ResolveDiffArgumentsError::NoWorkTree);
     }
-    let mut specs = Vec::with_capacity(raw_paths.len());
-    for pathspec in raw_paths {
-        let resolved = repo
-            .resolve_worktree_pathspec(pathspec, cwd_prefix)
-            .map_err(|e| ResolveDiffArgumentsError::Message(e.to_string()))?;
-        ensure_pathspec_matches_known_in_repository(repo, pathspec, &resolved)
-            .map_err(|e| ResolveDiffArgumentsError::Message(e.to_string()))?;
-        specs.push(resolved);
-    }
-    Ok(specs)
+    raw_paths
+        .iter()
+        .map(|pathspec| {
+            let resolved = repo.resolve_worktree_pathspec(pathspec, cwd_prefix)?;
+            ensure_pathspec_matches_known_in_repository(repo, pathspec, &resolved)?;
+            Ok(resolved)
+        })
+        .collect()
 }
 
-fn resolve_commit_diff_pathspecs(
+/// Normalize pathspecs for a commit or range diff to repository-relative form.
+///
+/// Unlike working-tree diffs, the paths need not exist in the current checkout (a path deleted
+/// on the tip, or exclude magic, is fine), and a bare repository resolves them against the git
+/// directory.
+///
+/// # Parameters
+///
+/// - `repo` - repository the paths belong to.
+/// - `cwd_prefix` - path from the work tree root to the process cwd; `None` at the root, when
+///   unknown, or in a bare repository.
+/// - `raw_paths` - pathspecs as given.
+///
+/// # Errors
+///
+/// Returns [`ResolveDiffArgumentsError::Pathspec`] when a pathspec cannot be parsed or lies
+/// outside the work tree.
+pub fn resolve_commit_diff_pathspecs(
     repo: &Repository,
     cwd_prefix: Option<&str>,
     raw_paths: &[String],
-) -> std::result::Result<Vec<String>, ResolveDiffArgumentsError> {
-    if raw_paths.is_empty() {
-        return Ok(Vec::new());
+) -> ResolveResult<Vec<String>> {
+    if repo.work_tree().is_none() {
+        let root = pathspec_resolution_root(repo);
+        return Ok(raw_paths
+            .iter()
+            .map(|pathspec| resolve_pathspec(pathspec, root, cwd_prefix))
+            .collect());
     }
-    let root = pathspec_resolution_root(repo);
-    let mut specs = Vec::with_capacity(raw_paths.len());
-    for pathspec in raw_paths {
-        if repo.work_tree().is_some() {
-            let resolved = repo
-                .resolve_worktree_pathspec(pathspec, cwd_prefix)
-                .map_err(|e| ResolveDiffArgumentsError::Message(e.to_string()))?;
-            specs.push(resolved);
-        } else {
-            specs.push(resolve_pathspec(pathspec, root, cwd_prefix));
-        }
-    }
-    Ok(specs)
+    raw_paths
+        .iter()
+        .map(|pathspec| Ok(repo.resolve_worktree_pathspec(pathspec, cwd_prefix)?))
+        .collect()
 }
 
 fn filter_file_changes(
@@ -991,56 +1097,49 @@ fn commit_changes(
     tree_diff_structured_parallel(repo.odb(), entries, config, thread_policy, diff_options)
 }
 
-fn resolve_diff_commit(repo: &Repository, spec: &str) -> Result<ObjectId> {
-    let oid = resolve_revision(repo, spec)
-        .map_err(|_| Error::Message(format!("could not resolve '{spec}'")))?;
-    peel_to_commit_for_merge_base(repo, oid)
+fn peel_diff_commit(repo: &Repository, oid: ObjectId) -> ResolveResult<ObjectId> {
+    peel_tags_to_commit(repo, oid)?.map_err(|oid| ResolveDiffArgumentsError::NotACommit { oid })
 }
 
-fn resolve_diff_range_end(repo: &Repository, spec: &str) -> Result<ObjectId> {
-    let oid = resolve_revision_for_range_end(repo, spec)?;
-    peel_to_commit_for_merge_base(repo, oid)
+/// Resolve a revision operand to a commit, peeling annotated tags.
+fn resolve_diff_commit(repo: &Repository, spec: &str) -> ResolveResult<ObjectId> {
+    let oid = resolve_revision(repo, spec).map_err(|source| {
+        ResolveDiffArgumentsError::UnresolvedRevision {
+            spec: spec.to_owned(),
+            source: Box::new(source),
+        }
+    })?;
+    peel_diff_commit(repo, oid)
 }
 
-fn parse_commit_range(repo: &Repository, spec: &str) -> Result<Option<(ObjectId, ObjectId)>> {
+/// Resolve one side of `A..B` / `A...B`; an empty side means `HEAD`.
+fn resolve_diff_range_end(repo: &Repository, spec: &str) -> ResolveResult<ObjectId> {
+    let spec = if spec.is_empty() { "HEAD" } else { spec };
+    peel_diff_commit(repo, resolve_revision_for_range_end(repo, spec)?)
+}
+
+/// `(old, new)` commits for a two-dot or three-dot range, or `None` when `spec` is not a range.
+fn parse_commit_range(
+    repo: &Repository,
+    spec: &str,
+) -> ResolveResult<Option<(ObjectId, ObjectId)>> {
     if let Some((left, right)) = split_triple_dot_range(spec) {
-        let left_c = if left.is_empty() {
-            resolve_diff_range_end(repo, "HEAD")?
-        } else {
-            resolve_diff_range_end(repo, left)?
-        };
-        let right_c = if right.is_empty() {
-            resolve_diff_range_end(repo, "HEAD")?
-        } else {
-            resolve_diff_range_end(repo, right)?
-        };
-        let base = merge_base_for_diff_two_commits(repo, left_c, right_c).map_err(|e| {
-            Error::Message(match e {
-                crate::revwalk::merge_base::MergeBaseForDiffError::None => {
-                    "no merge base for that revision range".to_owned()
-                }
-                crate::revwalk::merge_base::MergeBaseForDiffError::Multiple => {
-                    "multiple merge bases for that revision range".to_owned()
-                }
-                crate::revwalk::merge_base::MergeBaseForDiffError::Other(msg) => msg,
-            })
+        let left = resolve_diff_range_end(repo, left)?;
+        let right = resolve_diff_range_end(repo, right)?;
+        let base = merge_base_for_diff_two_commits(repo, left, right).map_err(|e| match e {
+            MergeBaseForDiffError::None => ResolveDiffArgumentsError::NoMergeBase,
+            MergeBaseForDiffError::Multiple => ResolveDiffArgumentsError::MultipleMergeBases,
+            MergeBaseForDiffError::Other(msg) => Error::Message(msg).into(),
         })?;
-        return Ok(Some((base, right_c)));
+        return Ok(Some((base, right)));
     }
     let Some((left, right)) = split_double_dot_range(spec) else {
         return Ok(None);
     };
-    let base = if left.is_empty() {
-        resolve_diff_range_end(repo, "HEAD")?
-    } else {
-        resolve_diff_range_end(repo, left)?
-    };
-    let tip = if right.is_empty() {
-        resolve_diff_range_end(repo, "HEAD")?
-    } else {
-        resolve_diff_range_end(repo, right)?
-    };
-    Ok(Some((base, tip)))
+    Ok(Some((
+        resolve_diff_range_end(repo, left)?,
+        resolve_diff_range_end(repo, right)?,
+    )))
 }
 
 fn read_commit(repo: &Repository, oid: &ObjectId) -> Result<CommitData> {
@@ -1501,6 +1600,6 @@ mod tests {
         let repo = crate::repo::Repository::init(dir.path(), &crate::repo::InitOptions::default())
             .expect("init");
         let err = resolve_diff_arguments(&repo, None, true, true, None, &[], &[]).unwrap_err();
-        assert_eq!(err, ResolveDiffArgumentsError::StagedAndUnstaged);
+        assert!(matches!(err, ResolveDiffArgumentsError::StagedAndUnstaged));
     }
 }

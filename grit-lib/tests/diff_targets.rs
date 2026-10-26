@@ -50,7 +50,7 @@ fn resolve_diff_staged_and_unstaged_conflict() {
     init_repo(dir.path());
     let repo = open_repo(dir.path());
     let err = resolve_diff_arguments(&repo, None, true, true, None, &[], &[]).unwrap_err();
-    assert_eq!(err, ResolveDiffArgumentsError::StagedAndUnstaged);
+    assert!(matches!(err, ResolveDiffArgumentsError::StagedAndUnstaged));
 }
 
 #[test]
@@ -328,7 +328,7 @@ fn resolve_diff_arguments_too_many_revisions() {
         &[],
     )
     .unwrap_err();
-    assert_eq!(err, ResolveDiffArgumentsError::TooManyRevisions);
+    assert!(matches!(err, ResolveDiffArgumentsError::TooManyRevisions));
 }
 
 #[test]
@@ -399,5 +399,5 @@ fn resolve_diff_arguments_against_with_commits() {
         &[],
     )
     .unwrap_err();
-    assert_eq!(err, ResolveDiffArgumentsError::AgainstWithCommits);
+    assert!(matches!(err, ResolveDiffArgumentsError::AgainstWithCommits));
 }
