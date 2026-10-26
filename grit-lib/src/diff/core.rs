@@ -4998,6 +4998,9 @@ fn diff_index_to_worktree_inner(
                     }
                     if refresh.content_verified {
                         refresh_content_verified[entry_index] = true;
+                        let path = index.entries[entry_index].path.clone();
+                        let oid = index.entries[entry_index].oid;
+                        index.mark_content_verified(&path, oid);
                     }
                     if index.fsmonitor_last_update.is_some()
                         && stat_matches_blob_stat(&index.entries[entry_index], &stat, stat_policy)
@@ -5996,16 +5999,20 @@ pub fn refresh_index_stat_content_verified_with_rules(
         let BlobDiskLookup::Present(stat) = lookup else {
             return Ok(());
         };
-        if refresh_index_blob_stat_from_scan(
+        let refresh = refresh_index_blob_stat_from_scan(
             &mut index.entries[entry_index],
             &stat,
             index_mtime,
             stat_policy,
             refresh_checks[entry_index].unwrap_or(false),
-        )
-        .index_changed
-        {
+        );
+        if refresh.index_changed {
             changed = true;
+        }
+        if refresh.content_verified {
+            let path = index.entries[entry_index].path.clone();
+            let oid = index.entries[entry_index].oid;
+            index.mark_content_verified(&path, oid);
         }
         Ok(())
     })?;
@@ -6076,6 +6083,7 @@ fn refresh_hash_parallel_options(
     stat_parallel_threads: Option<usize>,
 ) -> crate::parallel::ParallelOptions {
     let policy = crate::parallel::ThreadPolicy {
+        min_items_override: thread_policy.min_items_override.or(Some(0)),
         min_total_bytes_override: thread_policy.min_total_bytes_override.or(Some(0)),
         ..*thread_policy
     };
@@ -6085,6 +6093,8 @@ fn refresh_hash_parallel_options(
             .threads
             .min(std::num::NonZeroUsize::new(cap).unwrap_or(std::num::NonZeroUsize::MIN));
     }
+    par_opts.min_items = 0;
+    par_opts.min_total_bytes = None;
     par_opts
 }
 
@@ -6152,22 +6162,50 @@ fn refresh_content_checks(
         (ctx.work_tree, ctx.precompose_unicode, ctx.ignorecase);
     let (conv, filter_process) = (ctx.conv, ctx.filter_process);
     let entries = index.entries.as_slice();
-    let matches = crate::parallel::par_map(&jobs, par_opts, total_bytes, |job| {
-        let ie = &entries[job.entry_index];
-        let file_path =
-            index_entry_worktree_abs_bytes(work_tree, &ie.path, precompose_unicode, ignorecase);
-        hash_worktree_file_with_mode(
-            odb,
-            &file_path,
-            job.worktree_mode,
-            conv,
-            &job.file_attrs,
-            &crate::repo_relpath::storage_string(&ie.path),
-            Some(ie),
-            filter_process,
-        )
-        .is_ok_and(|oid| oid == ie.oid)
-    });
+    let matches = if par_opts.threads.get() > 1 && jobs.len() > 1 {
+        crate::parallel::try_par_map_force::<_, _, std::convert::Infallible, _>(&jobs, par_opts, |job| {
+            let ie = &entries[job.entry_index];
+            let file_path =
+                index_entry_worktree_abs_bytes(work_tree, &ie.path, precompose_unicode, ignorecase);
+            Ok(hash_worktree_file_with_mode(
+                odb,
+                &file_path,
+                job.worktree_mode,
+                conv,
+                &job.file_attrs,
+                &crate::repo_relpath::storage_string(&ie.path),
+                Some(ie),
+                filter_process,
+            )
+            .is_ok_and(|oid| oid == ie.oid))
+        })
+        .unwrap_or_else(|e| match e {
+            crate::parallel::ParallelHashError::Task(infallible) => match infallible {},
+        })
+    } else {
+        jobs.iter()
+            .map(|job| {
+                let ie = &entries[job.entry_index];
+                let file_path = index_entry_worktree_abs_bytes(
+                    work_tree,
+                    &ie.path,
+                    precompose_unicode,
+                    ignorecase,
+                );
+                hash_worktree_file_with_mode(
+                    odb,
+                    &file_path,
+                    job.worktree_mode,
+                    conv,
+                    &job.file_attrs,
+                    &crate::repo_relpath::storage_string(&ie.path),
+                    Some(ie),
+                    filter_process,
+                )
+                .is_ok_and(|oid| oid == ie.oid)
+            })
+            .collect()
+    };
     for (job, matched) in jobs.iter().zip(matches) {
         checks[job.entry_index] = Some(matched);
     }

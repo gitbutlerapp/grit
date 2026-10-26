@@ -2237,6 +2237,7 @@ pub fn status(
         let written = repo.try_write_index_at(&index_path, &mut index);
         index.skip_racy_smudge_on_write = false;
         if written? {
+            crate::index::advance_index_file_mtime_past_entries(&index, &index_path, None)?;
             index.source_mtime = crate::index::index_file_mtime(&index_path);
         }
     }
