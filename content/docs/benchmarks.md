@@ -29,6 +29,18 @@ Two **`grit-bench daily`** worktree scenarios share the same prepare hook (`prep
 
 Acceptance for both: grit median wall time and peak RSS must be **≤** git on the same scenario.
 
+### Path-limited history
+
+On 2026-10-26, release builds at upstream `818de8006` and the path-walk optimization were compared against system Git 2.55.0 on a four-vCPU AMD EPYC 7763 VM. The pinned git.git fixture is `v2.47.0`. Each tool had one warmup, then 10 alternating samples (30 for short commands) through the same `grit-bench measure-direct-run` helper used by the daily harness. The table reports median wall time and maximum peak RSS; GNU `time -v` independently checked the target.
+
+| Scenario | Git ms | Grit before ms | Grit after ms | RSS before KiB | RSS after KiB |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `log/path@git-git` | 370.22 | 3229.01 | 462.62 | 312,212 | 273,720 |
+| `log/limit-path@git-git` | 25.01 | 62.81 | 20.58 | 40,668 | 36,280 |
+| `revs/count-path-head@git-git` | 453.37 | 2512.87 | 513.56 | 311,044 | 272,028 |
+
+Path-limited history now scans the requested entries directly in reusable tree buffers, retains packed delta bases, and stops comparing merge parents once the selected path is unchanged. Commit-object caching remains available to author filters. The [full results](https://github.com/gitbutlerapp/grit/blob/main/grit-utils/baselines/daily-log-path-4526.json) include all eleven log scenarios and related operations, with individual samples and the original build recorded as `baseline_grit`. The `revs/count-path-head` row uses pinned `HEAD`; the daily row’s historical revision `7e34d81` is absent from this fixture.
+
 ## grit-lib: parallel object hashing
 
 Criterion group `hash/batch_parallel` (`cargo bench -p grit-lib --bench objects hash/batch_parallel`) hashes **20 000** Git blob objects of **16 KiB** each using [`hash_objects_parallel`](rustdoc:grit_lib::objects::hash::hash_objects_parallel) (SHA-1, release build).

@@ -157,6 +157,7 @@ baseline = [
   "grit-utils/baselines/bundle-create-all.json",
   "grit-utils/baselines/daily-clone-checkout-synth-100k-after.json",
   "grit-utils/baselines/daily-log-git-git-after.json",
+  "grit-utils/baselines/daily-log-path-4526.json",
   "grit-utils/baselines/daily-fetch-pull-git-git-before.json",
   "grit-utils/baselines/daily-fetch-pull-git-git-after.json",
   "grit-utils/baselines/daily/latest.json",
