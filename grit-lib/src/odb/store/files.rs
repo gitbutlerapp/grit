@@ -190,6 +190,7 @@ impl FilesSource {
             &self.objects_dir,
             oid,
             pack_opts,
+            false,
             buf,
         ) {
             Ok(kind) => return Ok(Some(kind)),
@@ -202,6 +203,7 @@ impl FilesSource {
                 &self.objects_dir,
                 oid,
                 PackLookupOptions::MIDX_COVERED_PACKS,
+                false,
                 buf,
             ) {
                 Ok(kind) => return Ok(Some(kind)),

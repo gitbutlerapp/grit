@@ -2062,7 +2062,7 @@ impl Odb {
             return Ok(obj.kind);
         }
 
-        if let Some(kind) = self.try_read_packed_in_batch_context_into(oid, buf)? {
+        if let Some(kind) = self.try_read_packed_in_batch_context_into(oid, false, buf)? {
             return Ok(kind);
         }
 
@@ -2113,6 +2113,30 @@ impl Odb {
         self.read_into_after_promisor_miss(oid, buf)
     }
 
+    /// Like [`Self::read_into`], but keep delta bases resolved from local packs in the
+    /// delta-base cache, as [`Self::read`] does.
+    ///
+    /// For walks that read many objects sharing delta chains (successive root trees) and do
+    /// not want the per-session object copy [`Self::read`] makes. Reads that cannot use the
+    /// pack batch context fall back to [`Self::read`].
+    ///
+    /// # Errors
+    ///
+    /// Same as [`Self::read`].
+    pub(crate) fn read_into_caching_delta_bases(
+        &self,
+        oid: &ObjectId,
+        buf: &mut Vec<u8>,
+    ) -> Result<ObjectKind> {
+        if let Some(kind) = self.try_read_packed_in_batch_context_into(oid, true, buf)? {
+            return Ok(kind);
+        }
+        let object = self.read(oid)?;
+        buf.clear();
+        buf.extend_from_slice(&object.data);
+        Ok(object.kind)
+    }
+
     #[cold]
     #[inline(never)]
     fn read_into_after_promisor_miss(
@@ -2160,7 +2184,7 @@ impl Odb {
             return Ok(Some(obj.kind));
         }
 
-        if let Some(kind) = self.try_read_packed_in_batch_context_into(oid, buf)? {
+        if let Some(kind) = self.try_read_packed_in_batch_context_into(oid, false, buf)? {
             return Ok(Some(kind));
         }
 
@@ -2227,6 +2251,7 @@ impl Odb {
     fn try_read_packed_in_batch_context_into(
         &self,
         oid: &ObjectId,
+        populate_delta_lru: bool,
         buf: &mut Vec<u8>,
     ) -> Result<Option<ObjectKind>> {
         if self.custom_primary.is_some()
@@ -2240,6 +2265,7 @@ impl Odb {
             &self.objects_dir,
             oid,
             pack::PackLookupOptions::ALL_LOCAL_PACKS,
+            populate_delta_lru,
             buf,
         ) {
             Ok(kind) => Ok(Some(kind)),

@@ -257,6 +257,7 @@ pub(crate) mod pack_cache {
     pub(crate) fn try_read_object_via_single_pack_reader_into(
         objects_dir: &Path,
         oid: &crate::objects::ObjectId,
+        populate_delta_lru: bool,
         buf: &mut Vec<u8>,
     ) -> Result<Option<crate::objects::ObjectKind>> {
         if !crate::pack_store::PackStore::read_context_matches_objects_dir(objects_dir) {
@@ -265,7 +266,7 @@ pub(crate) mod pack_cache {
         let Some(mut reader) = super::SingleLocalPackReader::open_allow_loose(objects_dir)? else {
             return Ok(None);
         };
-        match reader.read_object_into(oid, buf) {
+        match reader.read_object_into_with_delta_policy(oid, populate_delta_lru, buf) {
             Ok(kind) => Ok(Some(kind)),
             Err(Error::ObjectNotFound(_)) => Ok(None),
             Err(err) => Err(err),
@@ -465,6 +466,7 @@ pub(crate) mod pack_cache {
     pub(crate) fn try_read_from_hinted_pack_into(
         objects_dir: &Path,
         oid: &crate::objects::ObjectId,
+        populate_delta_lru: bool,
         buf: &mut Vec<u8>,
     ) -> Result<Option<crate::objects::ObjectKind>> {
         if !crate::pack_store::PackStore::read_context_matches_objects_dir(objects_dir) {
@@ -481,7 +483,7 @@ pub(crate) mod pack_cache {
         let Some(offset) = find_offset_in_pack_read_context(objects_dir, &idx, oid)? else {
             return Ok(None);
         };
-        match super::read_object_at_depth_into(&idx, offset, 0, false, buf) {
+        match super::read_object_at_depth_into(&idx, offset, 0, populate_delta_lru, buf) {
             Ok(kind) => Ok(Some(kind)),
             Err(Error::ObjectNotFound(_)) => Ok(None),
             Err(err) => Err(err),
@@ -3549,6 +3551,7 @@ fn read_object_from_packs_in_context_into(
         objects_dir,
         oid,
         PackLookupOptions::ALL_LOCAL_PACKS,
+        false,
         buf,
     ) {
         Ok(kind) => Ok(kind),
@@ -3558,6 +3561,7 @@ fn read_object_from_packs_in_context_into(
                     objects_dir,
                     oid,
                     PackLookupOptions::ALL_LOCAL_PACKS,
+                    false,
                     buf,
                 )
             } else {
@@ -4204,7 +4208,20 @@ impl SingleLocalPackReader {
     }
 
     /// Like [`Self::read_object`], inflating into `out` and preserving its capacity when possible.
+    ///
+    /// Delta bases resolved along the way are not added to the delta-base cache.
     pub fn read_object_into(&mut self, oid: &ObjectId, out: &mut Vec<u8>) -> Result<ObjectKind> {
+        self.read_object_into_with_delta_policy(oid, false, out)
+    }
+
+    /// [`Self::read_object_into`], keeping resolved delta bases in the delta-base cache when
+    /// `populate_delta_lru` is set.
+    pub(crate) fn read_object_into_with_delta_policy(
+        &mut self,
+        oid: &ObjectId,
+        populate_delta_lru: bool,
+        out: &mut Vec<u8>,
+    ) -> Result<ObjectKind> {
         let Some(offset) = self.idx.find_offset_monotonic(oid, &mut self.cursor)? else {
             return Err(Error::ObjectNotFound(oid.to_hex()));
         };
@@ -4213,7 +4230,7 @@ impl SingleLocalPackReader {
         {
             return Ok(kind);
         }
-        read_object_at_depth_into(&self.idx, offset, 0, false, out)
+        read_object_at_depth_into(&self.idx, offset, 0, populate_delta_lru, out)
     }
 
     /// Pack file offset for `oid` in this reader's index, if present.
@@ -4399,22 +4416,31 @@ pub(crate) fn try_read_object_from_packs_with_options(
 }
 
 /// Like [`try_read_object_from_packs_with_options`], writing the payload into `buf`.
+///
+/// `populate_delta_lru` controls whether delta bases resolved on the way are kept in the
+/// shared delta-base cache (as [`try_read_object_from_packs_with_options`] always does).
 pub(crate) fn try_read_object_from_packs_with_options_into(
     objects_dir: &Path,
     oid: &ObjectId,
     opts: PackLookupOptions,
+    populate_delta_lru: bool,
     buf: &mut Vec<u8>,
 ) -> Result<ObjectKind> {
     if crate::pack_store::PackStore::read_context_matches_objects_dir(objects_dir) {
         pack_cache::sync_thread_local_with_store(&crate::pack_store::PackStore::active_for_reads());
     }
     if opts.allows_pack_shortcuts() {
-        if let Some(kind) =
-            pack_cache::try_read_object_via_single_pack_reader_into(objects_dir, oid, buf)?
-        {
+        if let Some(kind) = pack_cache::try_read_object_via_single_pack_reader_into(
+            objects_dir,
+            oid,
+            populate_delta_lru,
+            buf,
+        )? {
             return Ok(kind);
         }
-        if let Some(kind) = pack_cache::try_read_from_hinted_pack_into(objects_dir, oid, buf)? {
+        if let Some(kind) =
+            pack_cache::try_read_from_hinted_pack_into(objects_dir, oid, populate_delta_lru, buf)?
+        {
             return Ok(kind);
         }
     }
@@ -4425,7 +4451,7 @@ pub(crate) fn try_read_object_from_packs_with_options_into(
         else {
             continue;
         };
-        match read_object_at_depth_into(idx, offset, 0, false, buf) {
+        match read_object_at_depth_into(idx, offset, 0, populate_delta_lru, buf) {
             Ok(kind) => {
                 pack_cache::remember_pack_hit(objects_dir, idx);
                 return Ok(kind);
@@ -5941,6 +5967,65 @@ mod tests {
             &idx.pack_path,
             pack_cache::DELTA_BASE_CACHE_DEFAULT,
         );
+    }
+
+    #[test]
+    fn odb_read_into_caching_delta_bases_fills_cache_read_into_does_not() {
+        let _guard = pack_cache_test_guard();
+        clear_pack_cache();
+        let Some((_tmp, idx, tip, odb)) = build_ofs_delta_chain_pack(12) else {
+            return;
+        };
+        let expected = read_object_from_pack(&idx, &tip)
+            .expect("baseline read")
+            .data;
+        clear_pack_cache();
+        let store = crate::pack_store::PackStore::legacy_for_pack_path(&idx.pack_path);
+        crate::pack_store::PackStore::with_context(store, || {
+            let mut buf = Vec::new();
+            assert_eq!(
+                odb.read_into(&tip, &mut buf).expect("read_into"),
+                ObjectKind::Blob
+            );
+            assert_eq!(buf, expected);
+            assert_eq!(
+                pack_cache::test_delta_base_cache_bytes_used(&idx.pack_path),
+                0,
+                "read_into must not retain delta bases"
+            );
+
+            let mut cached = Vec::new();
+            let kind = odb
+                .read_into_caching_delta_bases(&tip, &mut cached)
+                .expect("caching read");
+            assert_eq!(kind, ObjectKind::Blob);
+            assert_eq!(cached, expected);
+            assert!(
+                pack_cache::test_delta_base_cache_bytes_used(&idx.pack_path) > 0,
+                "caching read must retain the chain's delta bases"
+            );
+
+            let again = odb
+                .read_into_caching_delta_bases(&tip, &mut cached)
+                .expect("second caching read");
+            assert_eq!(again, ObjectKind::Blob);
+            assert_eq!(cached, expected);
+        });
+    }
+
+    #[test]
+    fn odb_read_into_caching_delta_bases_falls_back_outside_packs() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let odb = Odb::new(&tmp.path().join("objects"));
+        let oid = odb
+            .write(ObjectKind::Blob, b"loose only\n")
+            .expect("write loose");
+        let mut buf = vec![0u8; 4];
+        let kind = odb
+            .read_into_caching_delta_bases(&oid, &mut buf)
+            .expect("loose read");
+        assert_eq!(kind, ObjectKind::Blob);
+        assert_eq!(buf, b"loose only\n");
     }
 
     #[test]
