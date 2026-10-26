@@ -111,7 +111,7 @@ pub enum RebaseSessionError {
 }
 
 impl RebaseSessionError {
-    /// Whether the rebase session was cancelled ([`Error::Cancelled`]).
+    /// Whether the rebase session was cancelled ([`crate::error::Error::Cancelled`]).
     #[must_use]
     pub fn is_cancelled(&self) -> bool {
         match self {

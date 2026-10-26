@@ -7969,9 +7969,8 @@ pub fn shallow_borders_reachable_from_wants(
 ///
 /// Absolute depth from wanted tips (`fetch --depth N`, wire `deepen N` without
 /// `deepen-relative`). Returns shallow border commits for `shallow` lines and
-/// `pack-objects --shallow`. Relative deepen uses
-/// [`shallow_grafts_for_upload_pack_target_depth`] after
-/// [`crate::serve::relative_deepen_depth_for_request`].
+/// `pack-objects --shallow`. Relative deepen first computes an absolute target
+/// depth, then uses [`shallow_grafts_for_upload_pack_target_depth`].
 ///
 /// # Parameters
 ///
