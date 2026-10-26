@@ -507,9 +507,9 @@ fn walk_reachable_commits_from_tip_stack(
         if commits.contains(&oid) {
             continue;
         }
-        let obj = match odb.read(&oid) {
-            Ok(o) => o,
-            Err(_) => continue,
+        let obj = match odb.try_read_once(&oid) {
+            Ok(Some(o)) => o,
+            Ok(None) | Err(_) => continue,
         };
         if obj.kind != ObjectKind::Commit {
             if obj.kind == ObjectKind::Tag {
@@ -530,7 +530,8 @@ fn walk_reachable_commits_from_tip_stack(
 ///
 /// Resolves `HEAD` through [`Repository::refs`](crate::repo::Repository::refs), lists refs under
 /// `refs/` (reftable, packed-refs, and linked-worktree rules),
-/// peels annotated tags while walking, and traverses commit parents.
+/// peels annotated tags while walking, and traverses commit parents. Missing targets
+/// are skipped without fetching from a promisor remote.
 ///
 /// # Errors
 ///

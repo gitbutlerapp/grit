@@ -14,7 +14,7 @@ use std::path::Path;
 
 use crate::config::ConfigSet;
 use crate::error::Result;
-use crate::objects::{parse_commit, parse_tag, parse_tree, ObjectId, ObjectKind};
+use crate::objects::{parse_commit, parse_tag, ObjectId, ObjectKind, TreeRefIter};
 use crate::odb::Odb;
 use crate::repo::Repository;
 use std::ops::ControlFlow;
@@ -135,24 +135,41 @@ pub fn promisor_pack_and_tag_targets(repo: &Repository) -> Result<HashSet<Object
 
 /// Objects considered "promisor" for traversal, matching Git's `is_promisor_object` set:
 /// every object in promisor packs plus referenced OIDs (commit tree/parents, tag targets,
-/// tree entry OIDs), and [`read_promisor_missing_oids`] entries.
+/// tree entry OIDs), and [`read_promisor_missing_oids`] entries. Missing targets
+/// remain promises; this classification never fetches from the remote.
 ///
 /// # Errors
 ///
-/// Returns [`crate::error::Error::CorruptObject`] if a packed object has invalid bytes.
+/// Returns parse errors for invalid available objects and I/O errors for unreadable
+/// pack indexes or object storage.
 pub fn promisor_expanded_object_ids(repo: &Repository) -> Result<HashSet<ObjectId>> {
-    let objects_dir = repo.odb().objects_dir();
-    let seeds = promisor_pack_object_ids(objects_dir);
+    maintenance_promise_boundary(repo.odb())
+}
+
+/// Classify promises using only available objects. Never hydrate missing targets while
+/// deciding which objects maintenance may omit from local packs and reachability walks.
+pub(crate) fn maintenance_promise_boundary(odb: &Odb) -> Result<HashSet<ObjectId>> {
+    let mut queue = VecDeque::new();
+    odb.primary()?
+        .packed_objects()
+        .for_each_promisor_object(&mut |oid| {
+            queue.push_back(*oid);
+            ControlFlow::Continue(())
+        })?;
     let mut set: HashSet<ObjectId> = HashSet::new();
-    let mut queue: VecDeque<ObjectId> = seeds.iter().copied().collect();
 
     while let Some(oid) = queue.pop_front() {
         if !set.insert(oid) {
             continue;
         }
-        let obj = match repo.odb().read(&oid) {
-            Ok(o) => o,
-            Err(_) => continue,
+        match odb.read_info_for_serve(&oid) {
+            Ok(info) if info.kind == ObjectKind::Blob => continue,
+            Err(crate::error::Error::ObjectNotFound(_)) => continue,
+            Err(err) => return Err(err),
+            Ok(_) => {}
+        }
+        let Some(obj) = odb.try_read_once(&oid)? else {
+            continue;
         };
         match obj.kind {
             ObjectKind::Commit => {
@@ -167,10 +184,16 @@ pub fn promisor_expanded_object_ids(repo: &Repository) -> Result<HashSet<ObjectI
                 queue.push_back(t.object);
             }
             ObjectKind::Tree => {
-                let entries = parse_tree(&obj.data)?;
-                for e in entries {
-                    if e.mode != 0o160000 {
-                        queue.push_back(e.oid);
+                for entry in TreeRefIter::with_oid_len(&obj.data, odb.hash_algo().len()) {
+                    let entry = entry?;
+                    if entry.mode == 0o160000 {
+                        continue;
+                    }
+                    if entry.mode & 0o170000 == 0o040000 {
+                        queue.push_back(entry.oid);
+                    } else {
+                        // Files are leaves: record the promise without probing absent blobs.
+                        set.insert(entry.oid);
                     }
                 }
             }
@@ -178,8 +201,8 @@ pub fn promisor_expanded_object_ids(repo: &Repository) -> Result<HashSet<ObjectI
         }
     }
 
-    for oid in read_promisor_missing_oids(repo.git_dir()) {
-        set.insert(oid);
+    if let Some(git_dir) = odb.config_git_dir() {
+        set.extend(read_promisor_missing_oids(git_dir));
     }
     Ok(set)
 }

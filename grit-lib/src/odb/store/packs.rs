@@ -139,7 +139,8 @@ impl PackedObjects {
         self.with_pack(collect_kept_pack_object_ids)
     }
 
-    /// Invoke `f` for each object id in a local pack index without a sibling `.keep` file.
+    /// Invoke `f` for each object id in a local pack index without a sibling `.keep`
+    /// or `.promisor` file.
     ///
     /// Used by repack when retaining unreachable storage from packs that will be removed.
     ///
@@ -317,7 +318,7 @@ fn for_each_removable_pack_object_ids(
     let indexes = read_local_pack_indexes_cached(objects_dir)?;
     let mut seen = HashSet::new();
     for idx in indexes {
-        if pack_index_has_keep_marker(&pack_dir, &idx.pack_path) {
+        if idx.is_promisor || pack_index_has_keep_marker(&pack_dir, &idx.pack_path) {
             continue;
         }
         let hash_bytes = idx.hash_bytes();

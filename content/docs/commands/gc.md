@@ -73,6 +73,8 @@ Measured on an Ubuntu 24.04 x86-64 VM with four AMD EPYC vCPUs, using `dist` bui
 
 Every commit returned with 8,162 loose objects and no packed objects; background maintenance subsequently completed and `git fsck --strict --no-dangling` passed. Linux already detached on the baseline, so these measurements check the unchanged Unix path, not Windows job-object behavior. Windows jobs that prohibit breakaway still require the foreground fallback described above.
 
+Partial clones can run maintenance offline, including after creating local commits. GC retains existing `.promisor` packs and their sidecars separately from the new local-object pack. Promised historical blobs and trees may remain absent; GC, pruning, and `--dry-run` do not fetch them. Missing objects outside the known promise boundary still cause an error. Bitmaps are omitted when promises prevent a complete object closure.
+
 ## Options
 
 | Option | Description |

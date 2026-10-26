@@ -22,9 +22,7 @@ use std::path::Path;
 use std::time::SystemTime;
 
 use crate::error::{Error, Result};
-use crate::objects::{
-    oid_hash_set, parse_commit, parse_tag, ObjectId, ObjectKind, OidHashSet, TreeRefIter,
-};
+use crate::objects::{parse_commit, parse_tag, ObjectId, ObjectKind, OidHashSet, TreeRefIter};
 use crate::odb::Odb;
 use crate::refs::store::{Expected, RawRef, RefUpdate, RefUpdateFlags};
 use crate::refs::{self, Ref};
@@ -61,14 +59,16 @@ pub struct PruneStats {
 ///
 /// When `odb` belongs to a repository ([`Odb::config_git_dir`]), the commits listed in
 /// its `shallow` file are treated as having no parents, like every Git history walk:
-/// their trees are walked but their (absent) parents are not.
+/// their trees are walked but their (absent) parents are not. Promisor pack members
+/// and their available descendants form another boundary: promised objects may
+/// remain absent and no maintenance walk fetches them from the remote.
 ///
 /// The repository hash width is threaded through [`Odb::hash_algo`] (via the
 /// 2-char fan-out directory + suffix length), so SHA-256 repositories work.
 ///
 /// # Errors
 ///
-/// Returns [`Error::ObjectNotFound`] if a root is missing, an error if the walk runs
+/// Returns [`Error::ObjectNotFound`] if a non-promised root is missing, an error if the walk runs
 /// and a reachable object is missing or cannot be read or parsed, or on I/O failure
 /// while enumerating or deleting loose object files.
 pub fn prune_loose_unreachable(
@@ -192,6 +192,7 @@ pub(crate) struct LazyReachable<'a> {
     roots: &'a [ObjectId],
     shallow: &'a HashSet<ObjectId>,
     closure: OnceCell<OidHashSet>,
+    promised: OnceCell<HashSet<ObjectId>>,
 }
 
 impl<'a> LazyReachable<'a> {
@@ -203,6 +204,7 @@ impl<'a> LazyReachable<'a> {
             roots,
             shallow,
             closure: OnceCell::new(),
+            promised: OnceCell::new(),
         }
     }
 
@@ -210,22 +212,36 @@ impl<'a> LazyReachable<'a> {
     ///
     /// # Errors
     ///
-    /// Same as the reachability walk: [`Error::ObjectNotFound`] for a missing reachable
+    /// Same as the reachability walk: [`Error::ObjectNotFound`] for a missing non-promised
     /// object, and read or parse errors.
     pub(crate) fn get(&self) -> Result<&OidHashSet> {
         if let Some(closure) = self.closure.get() {
             return Ok(closure);
         }
-        let closure = reachable_closure(self.odb, self.roots, self.shallow)?;
+        let closure = reachable_closure(self.odb, self.roots, self.shallow, self.promised()?)?;
         Ok(self.closure.get_or_init(|| closure))
     }
 
-    /// Fail with [`Error::ObjectNotFound`] when a root is missing, without walking the graph.
+    /// Fail with [`Error::ObjectNotFound`] when a non-promised root is missing.
     pub(crate) fn require_roots_exist(&self) -> Result<()> {
         if self.closure.get().is_some() {
             return Ok(());
         }
-        require_objects_exist(self.odb, self.roots)
+        match require_objects_exist(self.odb, self.roots, &HashSet::new()) {
+            Err(Error::ObjectNotFound(_)) => {
+                require_objects_exist(self.odb, self.roots, self.promised()?)
+            }
+            result => result,
+        }
+    }
+
+    /// Promisor membership and available descendants, computed once without fetching.
+    pub(crate) fn promised(&self) -> Result<&HashSet<ObjectId>> {
+        if let Some(promised) = self.promised.get() {
+            return Ok(promised);
+        }
+        let promised = crate::promisor::maintenance_promise_boundary(self.odb)?;
+        Ok(self.promised.get_or_init(|| promised))
     }
 }
 
@@ -248,8 +264,10 @@ fn reachable_closure(
     odb: &Odb,
     roots: &[ObjectId],
     shallow: &HashSet<ObjectId>,
+    promised: &HashSet<ObjectId>,
 ) -> Result<OidHashSet> {
-    let mut seen = oid_hash_set();
+    // Protect available promised loose objects too, even beyond a stopped walk.
+    let mut seen: OidHashSet = promised.iter().copied().collect();
     let mut queue: VecDeque<ObjectId> = VecDeque::new();
     let oid_len = odb.hash_algo().len();
     let mut blobs: Vec<ObjectId> = Vec::new();
@@ -261,7 +279,9 @@ fn reachable_closure(
     }
 
     while let Some(oid) = queue.pop_front() {
-        let obj = odb.read(&oid)?;
+        let obj = odb
+            .try_read_once(&oid)?
+            .ok_or_else(|| Error::ObjectNotFound(oid.to_hex()))?;
         match obj.kind {
             ObjectKind::Commit => {
                 let commit = parse_commit(&obj.data)?;
@@ -305,7 +325,7 @@ fn reachable_closure(
         }
     }
 
-    require_objects_exist(odb, &blobs)?;
+    require_objects_exist(odb, &blobs, promised)?;
     Ok(seen)
 }
 
@@ -314,10 +334,13 @@ fn reachable_closure(
 /// Local pack indexes are loaded once and searched directly: going through
 /// [`Odb::exists`] or [`Odb::read_info`] per object revalidates the pack directory
 /// or probes for a loose file each time, which dominates prune on large trees.
-fn require_objects_exist(odb: &Odb, oids: &[ObjectId]) -> Result<()> {
+fn require_objects_exist(odb: &Odb, oids: &[ObjectId], promised: &HashSet<ObjectId>) -> Result<()> {
     let indexes =
         crate::pack::read_local_pack_indexes_cached(odb.objects_dir()).unwrap_or_default();
     for oid in oids {
+        if promised.contains(oid) {
+            continue;
+        }
         let packed = indexes.iter().any(|idx| idx.find_position(oid).is_some());
         if !packed && !odb.contains(oid)? {
             return Err(Error::ObjectNotFound(oid.to_hex()));
@@ -802,6 +825,37 @@ mod prune_walk_tests {
     use crate::maintenance::{repack, RepackOptions};
     use crate::repo::init_repository;
     use tempfile::TempDir;
+
+    #[test]
+    fn promise_boundary_is_shared_and_missing_local_objects_still_fail() {
+        let tmp = TempDir::new().expect("tempdir");
+        let repo = init_repository(
+            tmp.path(),
+            true,
+            "main",
+            None,
+            crate::RefStorageFormat::Files,
+        )
+        .expect("init");
+        let missing = ObjectId::from_hex("1234567890123456789012345678901234567890").expect("oid");
+        let mut tree = b"100644 promised\0".to_vec();
+        tree.extend_from_slice(missing.as_bytes());
+        let tree = repo.odb().write(ObjectKind::Tree, &tree).expect("tree");
+        crate::promisor::write_promisor_marker(repo.git_dir(), &HashSet::from([missing]))
+            .expect("marker");
+        let roots = [tree];
+        let shallow = HashSet::new();
+        let reachable = LazyReachable::new(repo.odb(), &roots, &shallow);
+        assert!(reachable.get().expect("closure").contains(&missing));
+        crate::promisor::write_promisor_marker(repo.git_dir(), &HashSet::new())
+            .expect("clear marker");
+        assert!(reachable
+            .promised()
+            .expect("cached promises")
+            .contains(&missing));
+        let next = LazyReachable::new(repo.odb(), &roots, &shallow);
+        assert!(matches!(next.get(), Err(Error::ObjectNotFound(_))));
+    }
 
     #[test]
     fn prune_checks_packed_blobs_without_per_object_lookups() {

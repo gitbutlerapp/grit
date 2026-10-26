@@ -14,7 +14,7 @@
 //! # }
 //! ```
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -39,9 +39,7 @@ use crate::midx::{
     write_multi_pack_index_with_options, MidxBitmapWriteOutcome, WriteMultiPackIndexOptions,
     WriteMultiPackIndexResult,
 };
-use crate::objects::{
-    oid_hash_map, parse_commit, parse_tag, parse_tree, ObjectId, ObjectKind, OidHashSet,
-};
+use crate::objects::{oid_hash_map, ObjectId, OidHashSet};
 use crate::odb::Odb;
 use crate::odb::UnreachablePackRetention;
 use crate::pack_bitmap::{PackBitmapWriteOptions, PackBitmapWriter};
@@ -55,7 +53,8 @@ use crate::pack_objects::{
 use crate::pack_rev::write_pack_rev_sidecar_for_index_path;
 use crate::prune_packed::{prune_packed_objects, PrunePackedOptions};
 use crate::reflog::{
-    expire_reflog_git, list_reflog_refs, load_gc_reflog_expire_config, ReflogExpireParams,
+    expire_reflog_git_with_promises, list_reflog_refs, load_gc_reflog_expire_config,
+    ReflogExpireParams,
 };
 use crate::repack_pack::{write_repack_pack, RepackPackSettings};
 use crate::repo::Repository;
@@ -96,6 +95,7 @@ pub struct RepackOptions {
     ///
     /// When [`Self::write_bitmap`] is true and the repository already has pack files, bitmaps are
     /// written via a multi-pack-index sidecar instead of a per-pack `.bitmap` on the new pack alone.
+    /// Bitmaps are omitted when known promises prevent a complete closure.
     pub incremental: bool,
     /// When true, [`gc()`] may skip repack on a single pack with no loose objects when every
     /// packed object is still reachable and none would be dropped by the active prune policy.
@@ -140,6 +140,7 @@ impl RepackOptions {
 
 struct RepackDetail {
     report: RepackReport,
+    pack_path: Option<PathBuf>,
     prune_packed_loose: usize,
     unreachable_loose: PruneStats,
     unreachable_prune_ms: u64,
@@ -152,7 +153,7 @@ struct RepackDetail {
 pub struct RepackReport {
     /// New pack files installed (0 or 1 for all-into-one repack).
     pub packs_written: usize,
-    /// Pack sidecar files removed from `objects/pack/` (excluding `.keep` packs).
+    /// Pack sidecar files removed from `objects/pack/` (excluding `.keep` and promisor packs).
     pub packs_removed: usize,
     /// Loose object files removed (`prune-packed` plus unreachable prune).
     pub loose_removed: usize,
@@ -168,11 +169,13 @@ pub struct RepackStats {
     pub loose_before: usize,
     /// Pack files before repack.
     pub packs_before: usize,
-    /// Objects written into the new pack (`None` when [`RepackOptions::dry_run`]).
+    /// Objects written into the new local pack, or estimated for a dry run.
+    /// `None` when no objects need packing.
     pub objects_packed: Option<usize>,
-    /// Bytes in the new pack (`None` on dry run).
+    /// Bytes in the new local pack, excluding retained packs (`None` on dry run).
     pub pack_bytes: Option<u64>,
-    /// Path to the installed pack (`None` on dry run or when nothing was packed).
+    /// Path to the installed local pack, even when other packs are retained.
+    /// `None` on dry run or when nothing was packed.
     pub pack_path: Option<PathBuf>,
     /// Sidecar/index files removed from `objects/pack/`.
     pub removed_pack_files: usize,
@@ -740,11 +743,14 @@ pub struct GcStats {
     pub phase_timings: GcPhaseTimings,
 }
 
-/// Repack all reachable objects into a single pack and drop redundant storage.
+/// Repack local objects into a single new pack and drop redundant storage.
 ///
 /// Mirrors a minimal `git repack -ad`: one pack for [`reachability_roots`](crate::fsck::reachability_roots), optional `.rev` /
 /// `.bitmap` sidecars, delete other packs, [`prune_packed_objects`], and optional unreachable
-/// loose-object pruning.
+/// loose-object pruning. Existing promisor packs and all their sidecars are retained
+/// separately. Promised objects are excluded from the local pack; missing promised
+/// targets never trigger remote reads. Bitmaps are omitted when promises prevent a
+/// complete closure. Dry runs and incremental repacks use the same promise boundary.
 ///
 /// # Errors
 ///
@@ -771,6 +777,7 @@ fn repack_detail(repo: &Repository, opts: &RepackOptions) -> Result<RepackDetail
     if roots.is_empty() && loose_before == 0 && packs_before == 0 {
         return Ok(RepackDetail {
             report,
+            pack_path: None,
             prune_packed_loose: 0,
             unreachable_loose: PruneStats::default(),
             unreachable_prune_ms: 0,
@@ -805,22 +812,48 @@ fn repack_detail(repo: &Repository, opts: &RepackOptions) -> Result<RepackDetail
         )
         && !skipping_repack_would_retain_prunable_packed_objects(odb, &pack_dir, &reachable, opts)?;
 
+    if skip_repack {
+        // Nothing is loose, but pruning still validates the roots without walking
+        // their closure. A missing local root must not become a successful no-op.
+        reachable.require_roots_exist()?;
+        return Ok(RepackDetail {
+            report,
+            pack_path: None,
+            prune_packed_loose: 0,
+            unreachable_loose: PruneStats::default(),
+            unreachable_prune_ms: 0,
+            unreachable_prune_ran: !opts.keep_unreachable && !opts.dry_run,
+        });
+    }
+    let promised = reachable.promised()?;
+    let partial_clone = !promised.is_empty()
+        || cfg.as_ref().is_some_and(|config| {
+            crate::promisor::repo_treats_promisor_packs(repo.git_dir(), config)
+        });
+    if partial_clone {
+        // Validate local reachability without giving the pack enumerator a chance to
+        // lazy-fetch genuinely missing local objects in a partial clone.
+        reachable.get()?;
+    }
     if opts.dry_run {
-        report.objects = if skip_repack {
-            0
-        } else if run_incremental {
+        report.objects = if run_incremental {
             reachable_loose_objects(odb, &reachable)?.len()
         } else {
-            estimate_repack_object_count(
-                odb,
-                &roots,
-                &shallow,
-                opts.keep_unreachable,
-                pack_opts.use_bitmaps,
-            )?
+            if !opts.keep_unreachable {
+                reachable
+                    .get()?
+                    .iter()
+                    .filter(|oid| !promised.contains(oid))
+                    .count()
+            } else {
+                repack_object_list(odb, &roots, &shallow, true, pack_opts.use_bitmaps, promised)?
+                    .send
+                    .len()
+            }
         };
         return Ok(RepackDetail {
             report,
+            pack_path: None,
             prune_packed_loose: 0,
             unreachable_loose: PruneStats::default(),
             unreachable_prune_ms: 0,
@@ -828,13 +861,7 @@ fn repack_detail(repo: &Repository, opts: &RepackOptions) -> Result<RepackDetail
         });
     }
 
-    let built_pack = if skip_repack {
-        SerializedDeltaPack {
-            bytes: Vec::new(),
-            index_rows: Vec::new(),
-            staging_path: None,
-        }
-    } else if run_incremental {
+    let built_pack = if run_incremental {
         SerializedDeltaPack {
             bytes: pack_loose_objects_incremental(odb, &reachable, &pack_opts, opts.threads)?,
             index_rows: Vec::new(),
@@ -850,6 +877,7 @@ fn repack_detail(repo: &Repository, opts: &RepackOptions) -> Result<RepackDetail
             &pack_opts,
             opts.threads,
             cfg.as_ref(),
+            promised,
         )?
     };
     let pack_bytes_len = built_pack
@@ -858,19 +886,9 @@ fn repack_detail(repo: &Repository, opts: &RepackOptions) -> Result<RepackDetail
         .and_then(|p| std::fs::metadata(p).ok())
         .map(|m| m.len() as usize)
         .unwrap_or_else(|| built_pack.bytes.len());
-    // An incremental run with only unreachable loose objects writes no pack but must still
-    // expire them below.
-    if pack_bytes_len == 0 && !run_incremental {
-        return Ok(RepackDetail {
-            report,
-            prune_packed_loose: 0,
-            unreachable_loose: PruneStats::default(),
-            unreachable_prune_ms: 0,
-            unreachable_prune_ran: false,
-        });
-    }
     let mut prune_packed_loose = 0usize;
     let mut unreachable_loose = PruneStats::default();
+    let mut installed_pack = None;
     let pack_trailer_len = 12 + odb.hash_algo().len();
     if pack_bytes_len > pack_trailer_len {
         clear_pack_midx_state(&pack_dir)?;
@@ -905,7 +923,7 @@ fn repack_detail(repo: &Repository, opts: &RepackOptions) -> Result<RepackDetail
             write_pack_rev_sidecar_for_index_path(&idx_path)?;
         }
 
-        if opts.write_bitmap {
+        if opts.write_bitmap && promised.is_empty() {
             if opts.incremental && packs_before > 0 {
                 // Per-pack bitmaps require reachability closure within one pack; incremental
                 // repack keeps older packs and adds a new layer. Write a multi-pack-index
@@ -958,6 +976,8 @@ fn repack_detail(repo: &Repository, opts: &RepackOptions) -> Result<RepackDetail
         prune_packed_loose =
             prune_packed_objects(objects_dir, PrunePackedOptions::default())?.len();
 
+        installed_pack = Some(pack_path);
+
         if opts.write_commit_graph {
             write_commit_graph(
                 repo,
@@ -981,6 +1001,7 @@ fn repack_detail(repo: &Repository, opts: &RepackOptions) -> Result<RepackDetail
     report.loose_removed = prune_packed_loose + unreachable_loose.pruned;
     Ok(RepackDetail {
         report,
+        pack_path: installed_pack,
         prune_packed_loose,
         unreachable_loose,
         unreachable_prune_ms,
@@ -1016,20 +1037,11 @@ pub fn repack_all(repo: &Repository, opts: &RepackOptions) -> Result<RepackStats
     stats.unreachable_loose_kept = detail.unreachable_loose.kept;
     stats.unreachable_prune_ms = detail.unreachable_prune_ms;
     stats.unreachable_prune_ran = detail.unreachable_prune_ran;
-    if report.packs_written > 0 {
-        let packs: Vec<_> = fs::read_dir(&pack_dir)
-            .ok()
-            .into_iter()
-            .flatten()
-            .filter_map(|e| e.ok())
-            .filter(|e| e.path().extension().is_some_and(|x| x == "pack"))
-            .map(|e| e.path())
-            .collect();
-        if packs.len() == 1 {
-            stats.pack_path = Some(packs[0].clone());
-            stats.pack_bytes = packs[0].metadata().ok().map(|m| m.len());
-        }
-    }
+    stats.pack_path = detail.pack_path;
+    stats.pack_bytes = stats
+        .pack_path
+        .as_ref()
+        .and_then(|p| p.metadata().ok().map(|m| m.len()));
     Ok(stats)
 }
 
@@ -1068,11 +1080,12 @@ fn reachable_loose_objects(odb: &Odb, reachable: &LazyReachable<'_>) -> Result<V
     if loose.is_empty() {
         return Ok(Vec::new());
     }
+    let promised = reachable.promised()?;
     let reachable = reachable.get()?;
     Ok(loose
         .into_iter()
         .map(|(oid, _)| oid)
-        .filter(|oid| reachable.contains(oid))
+        .filter(|oid| reachable.contains(oid) && !promised.contains(oid))
         .collect())
 }
 
@@ -1144,7 +1157,7 @@ fn skipping_repack_would_retain_prunable_packed_objects(
     };
     let indexes = crate::pack::read_local_pack_indexes_cached(odb.objects_dir())?;
     for idx in indexes {
-        if pack_has_keep_marker(pack_dir, &idx.pack_path) {
+        if idx.is_promisor || pack_has_keep_marker(pack_dir, &idx.pack_path) {
             continue;
         }
         let pack_mtime = fs::metadata(&idx.pack_path)
@@ -1646,8 +1659,9 @@ fn expire_reflogs_for_gc(repo: &Repository, dry_run: bool, now: i64) -> Result<u
         verbose: false,
     };
     let mut total = 0usize;
+    let promises = std::cell::OnceCell::new();
     for refname in list_reflog_refs(git_dir)? {
-        let result = expire_reflog_git(
+        let result = expire_reflog_git_with_promises(
             repo,
             git_dir,
             &refname,
@@ -1658,6 +1672,7 @@ fn expire_reflogs_for_gc(repo: &Repository, dry_run: bool, now: i64) -> Result<u
             gc_cfg.global_total,
             gc_cfg.global_unreachable,
             now,
+            &promises,
         )?;
         total += result.pruned;
     }
@@ -1680,8 +1695,23 @@ fn build_repack_pack(
     opts: &PackBuildOptions,
     threads: Option<usize>,
     cfg: Option<&ConfigSet>,
+    promised: &HashSet<ObjectId>,
 ) -> Result<SerializedDeltaPack> {
-    let selection = repack_object_list(odb, roots, shallow, keep_unreachable, opts.use_bitmaps)?;
+    let selection = repack_object_list(
+        odb,
+        roots,
+        shallow,
+        keep_unreachable,
+        opts.use_bitmaps,
+        promised,
+    )?;
+    if selection.send.is_empty() {
+        return Ok(SerializedDeltaPack {
+            bytes: Vec::new(),
+            index_rows: Vec::new(),
+            staging_path: None,
+        });
+    }
     odb.clear_delta_base_cache();
     let max_depth = if opts.delta { opts.max_depth } else { 0 };
     let settings = RepackPackSettings {
@@ -1742,10 +1772,15 @@ fn repack_object_list(
     shallow: &HashSet<ObjectId>,
     keep_unreachable: bool,
     use_bitmaps: bool,
+    promised: &HashSet<ObjectId>,
 ) -> Result<PackObjectSelection> {
     // Roots arrive in hash-set order; sorting them makes the pack (and its name)
     // the same on every run.
-    let mut roots = roots.to_vec();
+    let mut roots: Vec<_> = roots
+        .iter()
+        .copied()
+        .filter(|oid| !promised.contains(oid))
+        .collect();
     roots.sort_unstable();
     let mut selection = enumerate_pack_objects_naming(
         odb,
@@ -1755,51 +1790,40 @@ fn repack_object_list(
             filter: None,
             shallow_grafts: shallow,
             have_shallow_grafts: Some(shallow),
-            use_bitmaps,
-            exclude_objects: None,
+            use_bitmaps: use_bitmaps && promised.is_empty(),
+            exclude_objects: Some(promised),
             peer_odb: None,
             have_boundary: crate::pack_object_select::HaveBoundary::CommitClosure,
         },
         NameTrees::Yes,
     )?;
     if keep_unreachable {
-        append_repack_unreachable_retention(odb, &mut selection.send)?;
+        append_repack_unreachable_retention(odb, &mut selection.send, promised)?;
     }
     Ok(selection)
 }
 
 /// Append packed and loose objects not already selected for the repack send list.
-fn append_repack_unreachable_retention(odb: &Odb, send: &mut Vec<ObjectId>) -> Result<()> {
+fn append_repack_unreachable_retention(
+    odb: &Odb,
+    send: &mut Vec<ObjectId>,
+    promised: &HashSet<ObjectId>,
+) -> Result<()> {
     let mut in_send: OidHashSet = send.iter().copied().collect();
     odb.primary()?
         .packed_objects()
         .for_each_removable_pack_object(&mut |oid| {
-            if in_send.insert(*oid) {
+            if !promised.contains(oid) && in_send.insert(*oid) {
                 send.push(*oid);
             }
             std::ops::ControlFlow::Continue(())
         })?;
     for (oid, _) in odb.enumerate_local_loose_objects()? {
-        if in_send.insert(oid) {
+        if !promised.contains(&oid) && in_send.insert(oid) {
             send.push(oid);
         }
     }
     Ok(())
-}
-
-fn estimate_repack_object_count(
-    odb: &Odb,
-    roots: &[ObjectId],
-    shallow: &HashSet<ObjectId>,
-    keep_unreachable: bool,
-    use_bitmaps: bool,
-) -> Result<usize> {
-    if !keep_unreachable {
-        return estimate_reachable_count(odb, roots, shallow);
-    }
-    Ok(repack_object_list(odb, roots, shallow, true, use_bitmaps)?
-        .send
-        .len())
 }
 
 /// Packs in `pack_dir` without a `.keep` marker, from a single directory read.
@@ -1823,60 +1847,8 @@ fn count_pack_files(pack_dir: &Path) -> usize {
     packs.difference(&kept).count()
 }
 
-fn estimate_reachable_count(
-    odb: &Odb,
-    roots: &[ObjectId],
-    shallow: &HashSet<ObjectId>,
-) -> Result<usize> {
-    let mut seen: HashSet<ObjectId> = HashSet::new();
-    let mut queue: VecDeque<ObjectId> = VecDeque::new();
-    for &root in roots {
-        if seen.insert(root) {
-            queue.push_back(root);
-        }
-    }
-    while let Some(oid) = queue.pop_front() {
-        let obj = match odb.read(&oid) {
-            Ok(o) => o,
-            Err(_) => continue,
-        };
-        match obj.kind {
-            ObjectKind::Commit => {
-                let commit = parse_commit(&obj.data)?;
-                if !shallow.contains(&oid) {
-                    for parent in commit.parents {
-                        if seen.insert(parent) {
-                            queue.push_back(parent);
-                        }
-                    }
-                }
-                if seen.insert(commit.tree) {
-                    queue.push_back(commit.tree);
-                }
-            }
-            ObjectKind::Tree => {
-                for entry in parse_tree(&obj.data)? {
-                    if entry.mode == 0o160000 {
-                        continue;
-                    }
-                    if seen.insert(entry.oid) {
-                        queue.push_back(entry.oid);
-                    }
-                }
-            }
-            ObjectKind::Tag => {
-                let tag = parse_tag(&obj.data)?;
-                if seen.insert(tag.object) {
-                    queue.push_back(tag.object);
-                }
-            }
-            ObjectKind::Blob => {}
-        }
-    }
-    Ok(seen.len())
-}
-
-/// Remove pack artifacts in `pack_dir` except those belonging to `keep_pack`.
+/// Remove pack artifacts in `pack_dir` except `keep_pack`, `.keep` packs, and
+/// promisor packs (including every sidecar of those retained packs).
 pub fn remove_superseded_pack_files(pack_dir: &Path, keep_pack: &Path) -> Result<usize> {
     let git_dir = crate::git_dir::io_error::git_dir_from_pack_dir(pack_dir);
     let keep_stem = keep_pack
@@ -1911,7 +1883,7 @@ pub fn remove_superseded_pack_files(pack_dir: &Path, keep_pack: &Path) -> Result
         }
         let path = entry.path();
         if path.is_file() {
-            if pack_has_keep_marker(pack_dir, &path) {
+            if pack_has_keep_marker(pack_dir, &path) || path.with_extension("promisor").is_file() {
                 continue;
             }
             crate::git_dir::io_error::io_with_git_path(
@@ -1984,6 +1956,7 @@ mod tests {
 
     use super::*;
     use crate::config::{ConfigFile, ConfigScope, ConfigSet};
+    use crate::objects::ObjectKind;
     use crate::porcelain::add::stage_for_commit;
     use crate::porcelain::commit::{create_commit, CommitRequest};
     use crate::progress::{NeverCancel, NullProgress};

@@ -1028,11 +1028,19 @@ fn resolve_expire_for_ref(
     (expire_total, expire_unreachable)
 }
 
-fn tree_fully_complete(repo: &Repository, oid: ObjectId, depth: usize) -> bool {
+fn tree_fully_complete(
+    repo: &Repository,
+    oid: ObjectId,
+    depth: usize,
+    promised: &HashSet<ObjectId>,
+) -> bool {
+    if promised.contains(&oid) {
+        return true;
+    }
     if depth > 65536 {
         return false;
     }
-    let Ok(obj) = repo.odb().read(&oid) else {
+    let Ok(Some(obj)) = repo.odb().try_read_once(&oid) else {
         return false;
     };
     match obj.kind {
@@ -1042,7 +1050,7 @@ fn tree_fully_complete(repo: &Repository, oid: ObjectId, depth: usize) -> bool {
                 return false;
             };
             for e in entries {
-                if !tree_fully_complete(repo, e.oid, depth + 1) {
+                if !tree_fully_complete(repo, e.oid, depth + 1, promised) {
                     return false;
                 }
             }
@@ -1052,14 +1060,19 @@ fn tree_fully_complete(repo: &Repository, oid: ObjectId, depth: usize) -> bool {
     }
 }
 
-fn commit_chain_complete(repo: &Repository, oid: ObjectId, depth: usize) -> bool {
-    if oid.is_zero() {
+fn commit_chain_complete(
+    repo: &Repository,
+    oid: ObjectId,
+    depth: usize,
+    promised: &HashSet<ObjectId>,
+) -> bool {
+    if oid.is_zero() || promised.contains(&oid) {
         return true;
     }
     if depth > 65536 {
         return false;
     }
-    let Ok(obj) = repo.odb().read(&oid) else {
+    let Ok(Some(obj)) = repo.odb().try_read_once(&oid) else {
         return false;
     };
     if obj.kind != ObjectKind::Commit {
@@ -1068,11 +1081,11 @@ fn commit_chain_complete(repo: &Repository, oid: ObjectId, depth: usize) -> bool
     let Ok(c) = parse_commit(&obj.data) else {
         return false;
     };
-    if !tree_fully_complete(repo, c.tree, depth + 1) {
+    if !tree_fully_complete(repo, c.tree, depth + 1, promised) {
         return false;
     }
     for p in &c.parents {
-        if !commit_chain_complete(repo, *p, depth + 1) {
+        if !commit_chain_complete(repo, *p, depth + 1, promised) {
             return false;
         }
     }
@@ -1090,7 +1103,12 @@ fn is_head_ref(refname: &str) -> bool {
     refname == "HEAD" || refname.ends_with("/HEAD")
 }
 
-fn tip_commits_for_reflog(repo: &Repository, git_dir: &Path, refname: &str) -> Vec<ObjectId> {
+fn tip_commits_for_reflog(
+    repo: &Repository,
+    git_dir: &Path,
+    refname: &str,
+    promised: &HashSet<ObjectId>,
+) -> Vec<ObjectId> {
     let mut tips = Vec::new();
     if is_head_ref(refname) {
         if let Ok(oid) = refs::resolve_ref(git_dir, "HEAD") {
@@ -1106,18 +1124,29 @@ fn tip_commits_for_reflog(repo: &Repository, git_dir: &Path, refname: &str) -> V
     }
     tips.sort();
     tips.dedup();
-    tips.retain(|o| commit_chain_complete(repo, *o, 0));
+    tips.retain(|o| commit_chain_complete(repo, *o, 0, promised));
     tips
 }
 
 fn reachable_commit_set(repo: &Repository, tips: &[ObjectId]) -> HashSet<ObjectId> {
-    let mut acc = HashSet::new();
-    for t in tips {
-        if let Ok(cl) = merge_base::ancestor_closure(repo, *t) {
-            acc.extend(cl);
+    let shallow = crate::shallow::load_shallow_boundaries(repo.git_dir());
+    let mut seen = HashSet::new();
+    let mut pending = tips.to_vec();
+    while let Some(oid) = pending.pop() {
+        if !seen.insert(oid) || shallow.contains(&oid) {
+            continue;
+        }
+        let Ok(Some(obj)) = repo.odb().try_read_once(&oid) else {
+            continue;
+        };
+        if obj.kind != ObjectKind::Commit {
+            continue;
+        }
+        if let Ok(commit) = parse_commit(&obj.data) {
+            pending.extend(commit.parents);
         }
     }
-    acc
+    seen
 }
 
 fn is_unreachable_oid(
@@ -1135,7 +1164,7 @@ fn is_unreachable_oid(
     if kind == UnreachableKind::Always {
         return true;
     }
-    let Ok(obj) = repo.odb().read(&oid) else {
+    let Ok(Some(obj)) = repo.odb().try_read_once(&oid) else {
         return true;
     };
     obj.kind == ObjectKind::Commit
@@ -1145,10 +1174,16 @@ fn reflog_entry_timestamp(entry: &ReflogEntry) -> i64 {
     parse_timestamp_from_identity(&entry.identity).unwrap_or(i64::MAX)
 }
 
-fn reflog_entry_needs_stale_fix(repo: &Repository, entry: &ReflogEntry) -> bool {
-    !commit_chain_complete(repo, entry.old_oid, 0) || !commit_chain_complete(repo, entry.new_oid, 0)
+fn reflog_entry_needs_stale_fix(
+    repo: &Repository,
+    entry: &ReflogEntry,
+    promised: &HashSet<ObjectId>,
+) -> bool {
+    !commit_chain_complete(repo, entry.old_oid, 0, promised)
+        || !commit_chain_complete(repo, entry.new_oid, 0, promised)
 }
 
+#[expect(clippy::too_many_arguments)]
 fn should_drop_reflog_entry(
     repo: &Repository,
     entry: &ReflogEntry,
@@ -1157,12 +1192,13 @@ fn should_drop_reflog_entry(
     unreachable_kind: UnreachableKind,
     reachable: &HashSet<ObjectId>,
     stale_fix: bool,
+    promised: &HashSet<ObjectId>,
 ) -> bool {
     let ts = reflog_entry_timestamp(entry);
     if expire_total > 0 && ts < expire_total {
         return true;
     }
-    if stale_fix && reflog_entry_needs_stale_fix(repo, entry) {
+    if stale_fix && reflog_entry_needs_stale_fix(repo, entry, promised) {
         return true;
     }
     if expire_unreachable > 0 && ts < expire_unreachable {
@@ -1180,7 +1216,8 @@ fn should_drop_reflog_entry(
     false
 }
 
-/// Git-compatible reflog expiry for one ref.
+/// Reflog expiry for one ref. Completeness and reachability checks never fetch
+/// missing objects; known promises form a completeness boundary in partial clones.
 #[expect(clippy::too_many_arguments)]
 pub fn expire_reflog_git(
     repo: &Repository,
@@ -1193,6 +1230,36 @@ pub fn expire_reflog_git(
     gc_global_total: Option<i64>,
     gc_global_unreachable: Option<i64>,
     now: i64,
+) -> Result<ReflogExpireResult> {
+    expire_reflog_git_with_promises(
+        repo,
+        git_dir,
+        refname,
+        params,
+        explicit_total,
+        explicit_unreachable,
+        gc_patterns,
+        gc_global_total,
+        gc_global_unreachable,
+        now,
+        &std::cell::OnceCell::new(),
+    )
+}
+
+/// Share lazy promise classification across all refs in a GC reflog-expiry phase.
+#[expect(clippy::too_many_arguments)]
+pub(crate) fn expire_reflog_git_with_promises(
+    repo: &Repository,
+    git_dir: &Path,
+    refname: &str,
+    params: &ReflogExpireParams,
+    explicit_total: Option<i64>,
+    explicit_unreachable: Option<i64>,
+    gc_patterns: &[GcReflogPattern],
+    gc_global_total: Option<i64>,
+    gc_global_unreachable: Option<i64>,
+    now: i64,
+    promise_cache: &std::cell::OnceCell<HashSet<ObjectId>>,
 ) -> Result<ReflogExpireResult> {
     let is_reftable = crate::refs::store::open_ref_store(git_dir)?.format()
         != crate::refs::store::RefStorageFormat::Files;
@@ -1219,14 +1286,25 @@ pub fn expire_reflog_git(
         && entries
             .iter()
             .any(|e| reflog_entry_timestamp(e) < expire_total);
-    let may_drop_stale = params.stale_fix
-        && entries
-            .iter()
-            .any(|e| reflog_entry_needs_stale_fix(repo, e));
     let may_drop_unreachable = expire_unreachable > 0
         && entries
             .iter()
             .any(|e| reflog_entry_timestamp(e) < expire_unreachable);
+    let empty = HashSet::new();
+    let promised = if params.stale_fix || may_drop_unreachable {
+        if let Some(promised) = promise_cache.get() {
+            promised
+        } else {
+            let promised = crate::promisor::maintenance_promise_boundary(repo.odb())?;
+            promise_cache.get_or_init(|| promised)
+        }
+    } else {
+        &empty
+    };
+    let may_drop_stale = params.stale_fix
+        && entries
+            .iter()
+            .any(|e| reflog_entry_needs_stale_fix(repo, e, promised));
 
     if !may_drop_total && !may_drop_stale && !may_drop_unreachable {
         return Ok(ReflogExpireResult {
@@ -1248,7 +1326,7 @@ pub fn expire_reflog_git(
         UnreachableKind::Head
     } else {
         match refs::resolve_ref(git_dir, refname) {
-            Ok(t) if commit_chain_complete(repo, t, 0) => UnreachableKind::Normal,
+            Ok(t) if commit_chain_complete(repo, t, 0, promised) => UnreachableKind::Normal,
             _ => UnreachableKind::Always,
         }
     };
@@ -1256,7 +1334,7 @@ pub fn expire_reflog_git(
     let need_reachable =
         may_drop_unreachable && !matches!(unreachable_kind, UnreachableKind::Always);
     let reachable = if need_reachable {
-        let tips = tip_commits_for_reflog(repo, git_dir, refname);
+        let tips = tip_commits_for_reflog(repo, git_dir, refname, promised);
         reachable_commit_set(repo, &tips)
     } else {
         HashSet::new()
@@ -1275,6 +1353,7 @@ pub fn expire_reflog_git(
             unreachable_kind,
             &reachable,
             params.stale_fix,
+            promised,
         );
         let action = if drop {
             pruned += 1;
@@ -1368,7 +1447,7 @@ pub fn mark_stalefix_reachable(repo: &Repository, git_dir: &Path) -> Result<Hash
         if oid.is_zero() || !seen.insert(oid) {
             continue;
         }
-        let Ok(obj) = repo.odb().read(&oid) else {
+        let Ok(Some(obj)) = repo.odb().try_read_once(&oid) else {
             continue;
         };
         match obj.kind {

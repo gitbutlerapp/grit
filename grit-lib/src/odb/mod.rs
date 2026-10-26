@@ -1957,7 +1957,9 @@ impl Odb {
         }
     }
 
-    fn try_read_once(&self, oid: &ObjectId) -> Result<Option<Object>> {
+    /// Read available storage without consulting the promisor fetcher.
+    /// Missing objects return `None`; corrupt storage still returns an error.
+    pub(crate) fn try_read_once(&self, oid: &ObjectId) -> Result<Option<Object>> {
         if oid.is_well_known_empty_tree() {
             return Ok(Some(Object {
                 kind: ObjectKind::Tree,
@@ -3397,7 +3399,9 @@ fn superseded_pack_indexes(
         if !pack_path.is_file() {
             continue;
         }
-        if superseded_pack_has_keep_marker(pack_dir, &pack_path) {
+        if superseded_pack_has_keep_marker(pack_dir, &pack_path)
+            || pack_path.with_extension("promisor").is_file()
+        {
             continue;
         }
         let pack_mtime = fs::metadata(&pack_path)

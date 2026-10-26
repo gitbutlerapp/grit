@@ -38,6 +38,13 @@ fn grit_in(dir: &Path, args: &[&str]) -> TestResult {
         out.status,
         String::from_utf8_lossy(&out.stderr)
     );
+    if args.contains(&"--json") {
+        let value: serde_json::Value = serde_json::from_slice(&out.stdout)?;
+        assert!(value.is_object());
+    }
+    if args.contains(&"--markdown") {
+        assert!(out.stdout.starts_with(b"## "));
+    }
     Ok(())
 }
 
@@ -89,5 +96,59 @@ fn blobless_clone_grit_commands_fetch_on_demand() -> TestResult {
     grit_in(&clone, &["diff", "HEAD~1"])?;
     grit_in(&clone, &["show", "HEAD:one.txt"])?;
     grit_in(&clone, &["switch", "other"])?;
+    Ok(())
+}
+
+#[test]
+fn offline_blobless_clone_with_local_commit_runs_maintenance() -> TestResult {
+    let layout = tempfile::tempdir()?;
+    git_in(layout.path(), &["init", "-q", "-b", "main", "source"])?;
+    let source = layout.path().join("source");
+    for text in ["old\n", "new\n"] {
+        fs::write(source.join("a"), text)?;
+        git_in(&source, &["add", "a"])?;
+        git_in(&source, &["commit", "-qm", text.trim()])?;
+    }
+    git_in(&source, &["config", "uploadpack.allowFilter", "true"])?;
+    let url = format!("file://{}", source.display());
+    git_in(
+        layout.path(),
+        &["clone", "--filter=blob:none", &url, "client"],
+    )?;
+    let client = layout.path().join("client");
+    fs::write(client.join("local"), "local\n")?;
+    git_in(&client, &["add", "local"])?;
+    git_in(&client, &["commit", "-qm", "local"])?;
+    git_in(
+        &client,
+        &["remote", "set-url", "origin", "file:///unavailable.git"],
+    )?;
+    let missing = Command::new("git")
+        .current_dir(&client)
+        .args(["rev-list", "--objects", "--all", "--missing=print"])
+        .output()?
+        .stdout;
+    assert!(missing
+        .split(|b| *b == b'\n')
+        .any(|line| line.starts_with(b"?")));
+    for output in [Some("--json"), Some("--markdown"), None] {
+        for command in ["gc", "repack"] {
+            let mut args = vec![command];
+            args.extend(output);
+            grit_in(&client, &args)?;
+            args.push("--dry-run");
+            grit_in(&client, &args)?;
+        }
+    }
+    git_in(&client, &["fsck", "--strict"])?;
+    let after = Command::new("git")
+        .current_dir(&client)
+        .args(["rev-list", "--objects", "--all", "--missing=print"])
+        .output()?
+        .stdout;
+    assert_eq!(after, missing);
+    git_in(&client, &["gc"])?;
+    git_in(&client, &["repack", "-a", "-d"])?;
+    git_in(&client, &["fsck", "--strict"])?;
     Ok(())
 }

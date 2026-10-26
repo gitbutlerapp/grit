@@ -16,7 +16,7 @@ grit repack --quiet
 
 ## Description
 
-Packs every object reachable from maintenance roots (refs, reflogs, and the index) into a single packfile (similar to `git repack -ad`), removes older pack files, and deletes loose objects that are already stored in the new pack. Unlike full [`grit gc`](./gc.md), **`grit repack` always runs** (it does not apply `gc.auto` skip heuristics).
+Packs local objects reachable from maintenance roots (refs, reflogs, and the index) into a single new packfile (similar to `git repack -ad`), removes older pack files, and deletes loose objects that are already stored in the new pack. Unlike full [`grit gc`](./gc.md), **`grit repack` always runs** (it does not apply `gc.auto` skip heuristics).
 
 Objects already stored in a pack keep their stored form: whole objects are copied byte for byte and deltas are copied with only their base reference rewritten, as long as the base is packed too and the chain stays within `pack.depth`. Only the remaining objects (loose objects, and deltas whose base is dropped) go through a delta search over `pack.window` neighbours, so repacking an already packed repository costs about as much as copying it. With `--force` (like `git repack -adf`) every delta is recomputed, which takes longer but can make a pack written by a weaker packer smaller. Both modes stream object payloads and the new pack instead of holding them in memory.
 
@@ -24,7 +24,24 @@ Unreachable objects that lived only in removed packs are written loose first so 
 
 In a shallow clone (`grit clone --depth` or `git clone --depth`), the commits listed in `.git/shallow` (in the common Git directory, shared by linked worktrees) are history boundaries, as in Git: their trees are packed, but their parents are neither packed nor required to exist.
 
+In a partial clone, maintenance works offline after local commits. Existing `.promisor` packs and all their sidecars stay in place. The new unmarked pack contains local objects only; promised historical blobs or trees may remain absent. Promisor packs are never loosened or folded into the local pack. Bitmap generation is skipped when promises prevent a complete object closure. `--dry-run` follows the same boundary without fetching. `pack_path` and `pack_bytes` describe the newly written local pack even when promisor packs remain alongside it.
+
 Use this when a repository has accumulated many loose objects after local commits. Clones and fetches already install packs; repack is mainly for long-lived worktrees built entirely with `grit commit`.
+
+## Benchmarking
+
+Measured on 2026-10-26 using Linux x86_64, four CPUs, 15 GiB RAM, system Git 2.55.0, and Rust 1.99.0 with the `release` profile. The real Grit repository fixture has 11,273 commits and 124,971 objects after adding one local indexed-file commit. Its blobless copy leaves 54,098 blobs promised, with the origin unavailable. Neither fixture has a checkout.
+
+Each cell shows **wall time in ms / peak RSS in KiB**, as medians of seven fresh repository copies. Wall time includes process launch; RSS comes from `/usr/bin/time -v`. Complete-repository baseline and fixed runs alternate to control measurement variation. Git runs `gc` or `repack -a -d`; Grit runs `gc --json` or `repack --json`.
+
+| Repository / operation | System Git | Baseline main (`8a358bf6a`) | Fixed |
+| --- | ---: | ---: | ---: |
+| Complete / gc | 1,687.1 / 296,896 | 1,707.2 / 294,292 | 1,707.7 / 294,988 |
+| Complete / repack | 1,535.9 / 295,424 | 1,539.7 / 293,856 | 1,536.1 / 294,168 |
+| Blobless / gc | 448.6 / 34,936 | 1,161.5 / 173,688 (failed) | 1,895.2 / 174,608 |
+| Blobless / repack | 310.5 / 35,036 | 1,174.5 / 173,592 (failed) | 1,673.3 / 173,788 |
+
+Baseline blobless GC exits 128 and repack exits 1 while trying the unavailable remote; those measurements cover failed operations. Fixed runs finish offline. Promisor classification still costs more time and memory than Git on this metadata-heavy fixture.
 
 ## Options
 
@@ -68,7 +85,7 @@ Pass `--json` for stable, scripting-friendly output:
 | `dry_run` | boolean | Whether this run only estimated work. |
 | `loose_before` | number | Loose object files before repack. |
 | `packs_before` | number | `.pack` / `.idx` pairs before repack. |
-| `objects_packed` | number or null | Objects in the new pack (`null` on dry run). |
+| `objects_packed` | number or null | Objects in the new local pack, or the estimated count on dry run (`null` when none). |
 | `pack_bytes` | number or null | Size of the pack payload in bytes. |
 | `pack_path` | string or null | Path to the installed `.pack` file. |
 | `removed_pack_files` | number | Pack sidecar files removed. |

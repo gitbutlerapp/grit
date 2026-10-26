@@ -3042,9 +3042,9 @@ fn pack_refs_files(
         let Ok(Ref::Direct(oid)) = read_ref_file(&path) else {
             continue;
         };
-        if odb.read(&oid).is_err() {
+        let Ok(Some(_)) = odb.try_read_once(&oid) else {
             continue;
-        }
+        };
         let peel = if refname.starts_with("refs/tags/") {
             packed_ref_peel(odb, oid)
         } else {
@@ -3748,7 +3748,7 @@ fn normalize_list_refs_prefix(git_dir: &Path, prefix: &str) -> String {
 /// The `^` line of a `fully-peeled` `packed-refs` entry: the innermost non-tag object when `oid`
 /// is an annotated tag. Lightweight refs, and tags whose chain cannot be read, get no peel line.
 fn packed_ref_peel(odb: &crate::odb::Odb, oid: ObjectId) -> Option<ObjectId> {
-    odb.peel_tag_target(oid).ok().flatten()
+    odb.peel_stored_tag_target(oid).ok().flatten()
 }
 
 /// After the first clone fetch, batch remote-tracking refs into `packed-refs`
