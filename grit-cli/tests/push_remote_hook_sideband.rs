@@ -265,3 +265,83 @@ fn push_surfaces_post_receive_hook_stderr_on_success() {
         "stderr missing post-receive hook: {human_err}"
     );
 }
+
+#[cfg(unix)]
+#[test]
+fn atomic_push_json_rejects_both_refs_when_update_hook_declines_one() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let seed = tmp.path().join("seed");
+    git(
+        Some(tmp.path()),
+        &["init", "-q", "-b", "main", seed.to_str().unwrap()],
+    );
+    git(Some(&seed), &["config", "user.name", "Tester"]);
+    git(Some(&seed), &["config", "user.email", "tester@example.com"]);
+    std::fs::write(seed.join("f"), "base\n").unwrap();
+    git(Some(&seed), &["add", "f"]);
+    git(Some(&seed), &["commit", "-qm", "base"]);
+    let bare = tmp.path().join("remote.git");
+    git(
+        Some(tmp.path()),
+        &[
+            "clone",
+            "--bare",
+            seed.to_str().unwrap(),
+            bare.to_str().unwrap(),
+        ],
+    );
+    write_hook(
+        &bare,
+        "update",
+        "#!/bin/sh\ncase \"$1\" in *blocked*) echo \"policy denied $1\" >&2; exit 1;; esac\n",
+    );
+
+    let port = free_port().expect("port");
+    let child = Command::new(grit_http_server_bin())
+        .arg("--root")
+        .arg(tmp.path())
+        .arg("--bind")
+        .arg(format!("127.0.0.1:{port}"))
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("spawn server");
+    let _guard = ChildGuard(child);
+    assert!(wait_tcp(port), "grit-http-server did not listen");
+    let url = format!("http://127.0.0.1:{port}/remote.git");
+    git(Some(&seed), &["remote", "add", "origin", &url]);
+
+    let out = Command::new(GRIT)
+        .current_dir(&seed)
+        .args([
+            "push",
+            "origin",
+            "HEAD:refs/heads/review-ok",
+            "HEAD:refs/heads/review-blocked",
+            "--atomic",
+            "--json",
+        ])
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null")
+        .output()
+        .expect("grit atomic push");
+    assert_eq!(out.status.code(), Some(1));
+    let json: Value = serde_json::from_slice(&out.stdout).expect("json stdout");
+    assert_eq!(json["rejected"], true, "{json}");
+    let results = json["results"].as_array().expect("per-ref results");
+    assert_eq!(results.len(), 2, "{json}");
+    for name in ["refs/heads/review-ok", "refs/heads/review-blocked"] {
+        let result = results
+            .iter()
+            .find(|r| r["ref"] == name)
+            .expect("ref result");
+        assert_eq!(result["status"], "rejected", "{json}");
+        let check = Command::new("git")
+            .current_dir(&bare)
+            .args(["show-ref", "--verify", name])
+            .output()
+            .unwrap();
+        assert!(!check.status.success(), "atomic push published {name}");
+    }
+    git(Some(&bare), &["fsck", "--strict"]);
+}

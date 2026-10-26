@@ -1125,6 +1125,11 @@ pub enum Error {
         reason: AuthFailure,
     },
 
+    /// An atomic wire push was requested, but the remote did not advertise the
+    /// `atomic` capability. No ref-update commands or pack data were sent.
+    #[error("the remote does not support atomic pushes")]
+    PushAtomicUnsupported,
+
     /// A push carried `--push-option` values but the remote `git-receive-pack`
     /// did not advertise the `push-options` capability, so the options cannot be
     /// transmitted.

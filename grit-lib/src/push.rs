@@ -154,7 +154,7 @@ const PUSH_CAPS_BASE: &str = "report-status report-status-v2 quiet";
 /// Steps:
 /// 1. Read the receive-pack advertisement from `conn`: remote refs (name -> oid),
 ///    `.have` oids, and capabilities (`report-status(-v2)`, `side-band-64k`,
-///    `ofs-delta`, `object-format`).
+///    `ofs-delta`, `object-format`, `atomic`).
 /// 2. Decide each [`PushRefSpec`] against the advertised remote refs (up-to-date,
 ///    new, fast-forward, forced, non-fast-forward rejection, force-with-lease
 ///    stale) — the client-side gate before anything is sent.
@@ -177,7 +177,8 @@ const PUSH_CAPS_BASE: &str = "report-status report-status-v2 quiet";
 ///
 /// Returns an error if the connection is protocol v2, if a source object is
 /// missing from the local odb, if the pack build fails, or on wire/parse I/O
-/// failure.
+/// failure. An atomic push to a server without `atomic` support returns
+/// [`Error::PushAtomicUnsupported`] before sending updates or objects.
 pub fn push_remote(
     local_git_dir: &Path,
     conn: &mut dyn Connection,
@@ -234,9 +235,9 @@ pub(crate) fn push_remote_from(
         adv.remote_refs.len()
     );
 
-    // Push-options require the server's `push-options` capability; fail typed
-    // (matching Git) before sending anything if the server lacks it.
-    require_push_options_supported(&adv, opts)?;
+    // Required capabilities must be checked before even a no-op flush, so an
+    // unsupported atomic push cannot fall back to independent ref updates.
+    require_push_capabilities(&adv, opts)?;
 
     // 2–3. Decide each ref update client-side, handling atomic/dry-run/no-op
     //       early-returns; the shared planner mirrors `push_local`'s gate.
@@ -255,7 +256,7 @@ pub(crate) fn push_remote_from(
     //    push streams no pack at all (matching `git send-pack`); `receive-pack`
     //    does not read one after a delete-only command block, so sending an empty
     //    pack would leave unread bytes on the wire and reset the connection.
-    let commands = build_command_block(&plan, &adv, algo, &opts.push_options)?;
+    let commands = build_command_block(&plan, &adv, algo, opts)?;
     net_trace!(
         opts.network_trace,
         opts.diagnostics.as_ref(),
@@ -355,7 +356,8 @@ pub(crate) fn push_remote_from(
 ///
 /// Returns an error if discovery fails, the advertisement is protocol v2, a
 /// source object is missing from the local odb, the pack build fails, or on
-/// wire/parse I/O failure.
+/// wire/parse I/O failure. An atomic push to a server without `atomic` support
+/// returns [`Error::PushAtomicUnsupported`] before sending updates or objects.
 pub fn push_http(
     client: std::sync::Arc<dyn crate::transport::http::HttpClient>,
     local_git_dir: &Path,
@@ -393,6 +395,8 @@ struct AdvertisedState {
     server_ofs_delta: bool,
     /// Whether the server advertised `push-options` (server-side push options).
     server_push_options: bool,
+    /// Whether the server advertised `atomic` (one transaction for all refs).
+    server_atomic: bool,
 }
 
 impl AdvertisedState {
@@ -418,6 +422,7 @@ impl AdvertisedState {
                 .any(|c| c == "side-band-64k" || c == "side-band"),
             server_ofs_delta: caps.iter().any(|c| c == "ofs-delta"),
             server_push_options: caps.iter().any(|c| c == "push-options"),
+            server_atomic: caps.iter().any(|c| c == "atomic"),
         }
     }
 }
@@ -484,14 +489,12 @@ fn plan_push(
     Ok(PlanOutcome::Send(PushPlan { decisions, to_send }))
 }
 
-/// Reject a push that carries `push_options` when the server's receive-pack did
-/// not advertise the `push-options` capability.
-///
-/// Returns [`Error::PushOptionsUnsupported`] (matching Git's
-/// `fatal: the receiving end does not support push options`) so embedders can
-/// distinguish this negotiation failure without string-matching. A no-op when
-/// `push_options` is empty or the server advertised the capability.
-fn require_push_options_supported(adv: &AdvertisedState, opts: &PushOptions) -> Result<()> {
+/// Validate capabilities required by the requested push options before writing
+/// any commands or pack data, including for dry-run and no-op pushes.
+fn require_push_capabilities(adv: &AdvertisedState, opts: &PushOptions) -> Result<()> {
+    if opts.atomic && !adv.server_atomic {
+        return Err(Error::PushAtomicUnsupported);
+    }
     if !opts.push_options.is_empty() && !adv.server_push_options {
         return Err(Error::PushOptionsUnsupported);
     }
@@ -503,7 +506,10 @@ fn require_push_options_supported(adv: &AdvertisedState, opts: &PushOptions) -> 
 /// after a NUL; the rest are bare. The OID width is the repository's hash
 /// algorithm (zero/null OID for create/delete). Shared by both push paths.
 ///
-/// When `push_options` is non-empty, the negotiated capability list includes
+/// Atomic updates request `atomic` only when the server supports it. The caller
+/// must validate required capabilities with [`require_push_capabilities`] first.
+///
+/// When `opts.push_options` is non-empty, the negotiated capability list includes
 /// `push-options` and, after the command-list flush, one `push-option <value>`
 /// pkt-line per option is written followed by a second flush (matching Git's
 /// `send-pack`: command-list, flush, push-option lines, flush, then pack). The
@@ -512,15 +518,18 @@ fn build_command_block(
     plan: &PushPlan,
     adv: &AdvertisedState,
     algo: HashAlgo,
-    push_options: &[String],
+    opts: &PushOptions,
 ) -> Result<Vec<u8>> {
     let zero_hex = "0".repeat(algo.hex_len());
     let mut command_caps = PUSH_CAPS_BASE.to_owned();
     if adv.server_sideband {
         command_caps.push_str(" side-band-64k");
     }
-    if !push_options.is_empty() {
+    if !opts.push_options.is_empty() {
         command_caps.push_str(" push-options");
+    }
+    if opts.atomic && adv.server_atomic {
+        command_caps.push_str(" atomic");
     }
     command_caps.push_str(&format!(" object-format={}", algo.name()));
 
@@ -558,8 +567,8 @@ fn build_command_block(
     // option lines follow this flush and are themselves terminated by a second
     // flush before the pack (per the receive-pack protocol).
     commands.extend_from_slice(b"0000");
-    if !push_options.is_empty() {
-        for opt in push_options {
+    if !opts.push_options.is_empty() {
+        for opt in &opts.push_options {
             pkt_line::write_line_to_vec(&mut commands, opt)?;
         }
         commands.extend_from_slice(b"0000");
@@ -1054,6 +1063,144 @@ mod tests {
             server_sideband: sideband,
             server_ofs_delta: ofs_delta,
             server_push_options: push_options,
+            server_atomic: false,
+        }
+    }
+
+    #[derive(Default)]
+    struct TestConnection {
+        caps: Vec<String>,
+        refs: Vec<(String, ObjectId)>,
+        input: Cursor<Vec<u8>>,
+        output: Vec<u8>,
+        stateless: bool,
+    }
+
+    impl Connection for TestConnection {
+        fn reader(&mut self) -> &mut dyn Read {
+            &mut self.input
+        }
+        fn writer(&mut self) -> &mut dyn std::io::Write {
+            &mut self.output
+        }
+        fn advertised_refs(&self) -> &[(String, ObjectId)] {
+            &self.refs
+        }
+        fn capabilities(&self) -> &[String] {
+            &self.caps
+        }
+        fn head_symref(&self) -> Option<&str> {
+            None
+        }
+        fn protocol_version(&self) -> u8 {
+            0
+        }
+        fn stateless_rpc(&self) -> bool {
+            self.stateless
+        }
+    }
+
+    #[test]
+    fn advertisement_recognizes_atomic_capability_token() {
+        for caps in [
+            vec![],
+            vec!["atomic"],
+            vec!["atomic=false"],
+            vec!["atomic", "side-band-64k", "ofs-delta", "push-options"],
+        ] {
+            let mut conn = TestConnection {
+                caps: caps.iter().map(|s| (*s).to_owned()).collect(),
+                ..Default::default()
+            };
+            let adv = AdvertisedState::from_connection(&mut conn);
+            assert_eq!(adv.server_atomic, caps.contains(&"atomic"));
+            assert_eq!(adv.server_sideband, caps.contains(&"side-band-64k"));
+            assert_eq!(adv.server_ofs_delta, caps.contains(&"ofs-delta"));
+            assert_eq!(adv.server_push_options, caps.contains(&"push-options"));
+        }
+    }
+
+    #[test]
+    fn command_block_requests_atomic_only_on_first_command_when_supported_and_requested() {
+        let new = ObjectId::from_hex(&"1".repeat(40)).unwrap();
+        let plan = PushPlan {
+            decisions: vec![
+                send_decision("refs/heads/one", new),
+                send_decision("refs/heads/two", new),
+            ],
+            to_send: vec![0, 1],
+        };
+        for supported in [false, true] {
+            for requested in [false, true] {
+                let mut adv = adv_state(true, true, true);
+                adv.server_atomic = supported;
+                let opts = PushOptions {
+                    atomic: requested,
+                    push_options: vec!["ci.skip".to_owned()],
+                    ..Default::default()
+                };
+                let block = build_command_block(&plan, &adv, HashAlgo::Sha1, &opts).unwrap();
+                let pkts = decode_block(&block);
+                let (command, caps) = pkts[0].as_deref().unwrap().split_once('\0').unwrap();
+                assert_eq!(
+                    command,
+                    format!("{} {} refs/heads/one", "0".repeat(40), new)
+                );
+                let caps: Vec<_> = caps.split_whitespace().collect();
+                assert_eq!(caps.contains(&"atomic"), supported && requested);
+                assert!(caps.contains(&"push-options"));
+                assert!(caps.contains(&"side-band-64k"));
+                assert!(caps.contains(&"object-format=sha1"));
+                assert_eq!(
+                    pkts[1].as_deref().unwrap(),
+                    format!("{} {} refs/heads/two", "0".repeat(40), new)
+                );
+                assert_eq!(&pkts[2..], &[None, Some("ci.skip".to_owned()), None]);
+            }
+        }
+    }
+
+    #[test]
+    fn unsupported_atomic_push_fails_before_any_update_or_pack_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        let repo = Repository::init(dir.path(), &crate::repo::InitOptions::default()).unwrap();
+        let refs = [PushRefSpec {
+            src: Some(repo.odb().write(ObjectKind::Blob, b"payload").unwrap()),
+            dst: "refs/tags/payload".to_owned(),
+            ..Default::default()
+        }];
+        for stateless in [false, true] {
+            for dry_run in [false, true] {
+                // Also check no-op pushes: their flush must not precede the error.
+                for refs in [&[][..], &refs[..]] {
+                    let mut conn = TestConnection {
+                        stateless,
+                        ..Default::default()
+                    };
+                    let opts = PushOptions {
+                        atomic: true,
+                        dry_run,
+                        ..Default::default()
+                    };
+                    let err = push_remote(
+                        repo.git_dir(),
+                        &mut conn,
+                        refs,
+                        &opts,
+                        &mut crate::fetch::NoProgress,
+                        &crate::progress::NeverCancel,
+                    )
+                    .unwrap_err();
+                    assert!(matches!(err, Error::PushAtomicUnsupported), "{err:?}");
+                    assert!(
+                        conn.output.is_empty(),
+                        "unsupported atomic push wrote bytes"
+                    );
+                    let mut adv = adv_state(false, false, false);
+                    adv.server_atomic = true;
+                    require_push_capabilities(&adv, &opts).unwrap();
+                }
+            }
         }
     }
 
@@ -1164,8 +1311,13 @@ mod tests {
             decisions: vec![send_decision("refs/heads/main", new)],
             to_send: vec![0],
         };
-        let block = build_command_block(&plan, &adv_state(false, false, true), HashAlgo::Sha1, &[])
-            .unwrap();
+        let block = build_command_block(
+            &plan,
+            &adv_state(false, false, true),
+            HashAlgo::Sha1,
+            &PushOptions::default(),
+        )
+        .unwrap();
         let pkts = decode_block(&block);
         // command line, then a single terminating flush — nothing else.
         assert_eq!(pkts.len(), 2);
@@ -1188,7 +1340,10 @@ mod tests {
             decisions: vec![send_decision("refs/heads/main", new)],
             to_send: vec![0],
         };
-        let opts = vec!["ci.skip".to_owned(), "reviewer=alice".to_owned()];
+        let opts = PushOptions {
+            push_options: vec!["ci.skip".to_owned(), "reviewer=alice".to_owned()],
+            ..Default::default()
+        };
         let block = build_command_block(&plan, &adv_state(true, true, true), HashAlgo::Sha1, &opts)
             .unwrap();
         let pkts = decode_block(&block);
@@ -1222,7 +1377,7 @@ mod tests {
             ..PushOptions::default()
         };
         // Server did NOT advertise push-options: typed error, not Message.
-        let err = require_push_options_supported(&adv_state(true, true, false), &opts).unwrap_err();
+        let err = require_push_capabilities(&adv_state(true, true, false), &opts).unwrap_err();
         assert!(
             matches!(err, Error::PushOptionsUnsupported),
             "expected PushOptionsUnsupported, got {err:?}"
@@ -1232,10 +1387,9 @@ mod tests {
             "the receiving end does not support push options"
         );
         // Server advertised it: ok.
-        require_push_options_supported(&adv_state(true, true, true), &opts).unwrap();
+        require_push_capabilities(&adv_state(true, true, true), &opts).unwrap();
         // No options: ok regardless of capability.
-        require_push_options_supported(&adv_state(true, true, false), &PushOptions::default())
-            .unwrap();
+        require_push_capabilities(&adv_state(true, true, false), &PushOptions::default()).unwrap();
     }
 
     #[test]

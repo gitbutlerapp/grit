@@ -772,7 +772,12 @@ pub fn resolve_push_delete_ref(
 /// Options controlling a push.
 #[derive(Clone, Default)]
 pub struct PushOptions {
-    /// Apply all updates atomically (all-or-nothing).
+    /// Apply all updates atomically (all-or-nothing), including remote hook rejections.
+    ///
+    /// Wire pushes require the server's `atomic` capability. If it is absent,
+    /// returns [`crate::error::Error::PushAtomicUnsupported`] before sending any
+    /// ref-update commands or objects, including with [`Self::dry_run`]. There
+    /// is no fallback to a non-atomic push.
     pub atomic: bool,
     /// Compute results without writing to the remote.
     pub dry_run: bool,

@@ -18,6 +18,8 @@
 //!   * expect-absent lease on existing ref    -> client `RejectStale`, ref intact
 //!   * atomic all-or-nothing (one bad ref)    -> whole push aborts, nothing lands
 //!   * multi-ref push (two new refs at once)  -> both `Ok`, both land
+//!   * update-hook rejection (create/update) -> atomic rollback vs partial success
+//!   * atomic capability disabled (git/ssh)  -> typed error before updates
 //!
 //! After every mutation the remote ref + objects are cross-checked against
 //! system `git` and the bare repo is `git fsck`-ed clean.
@@ -398,6 +400,236 @@ fn make_bare_target(root: &Path, name: &str) -> PathBuf {
 /// per receive-pack session) and return the structured outcome.
 type Pusher<'a> = dyn Fn(&[PushRefSpec], &PushOptions) -> PushOutcome + 'a;
 
+fn system_push(
+    local: &Path,
+    url: &str,
+    specs: &[String],
+    atomic: bool,
+    ssh: Option<&Path>,
+) -> Output {
+    let mut cmd = Command::new("git");
+    cmd.current_dir(local)
+        .arg("push")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_CONFIG_SYSTEM", "/dev/null");
+    if atomic {
+        cmd.arg("--atomic");
+    }
+    if let Some(ssh) = ssh {
+        cmd.env("GIT_SSH_COMMAND", ssh)
+            .env("GIT_SSH_VARIANT", "ssh");
+    }
+    cmd.arg(url).args(specs).output().expect("system git push")
+}
+
+/// Exercise server-side atomicity, rather than the client's fast-forward gate.
+/// Covers update-hook rejection and accepted atomic pushes from upstream t5543.
+#[cfg(unix)]
+fn run_atomic_hook_matrix(
+    local: &Path,
+    bare: &Path,
+    graph: &Graph,
+    push: &Pusher<'_>,
+    url: &str,
+    ssh: Option<&Path>,
+) {
+    use std::os::unix::fs::PermissionsExt;
+
+    let hook = bare.join("hooks/update");
+    std::fs::write(
+        &hook,
+        "#!/bin/sh\ncase \"$1\" in *blocked*) echo \"policy denied $1\" >&2; exit 1;; esac\n",
+    )
+    .unwrap();
+    std::fs::set_permissions(&hook, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+    for existing in [false, true] {
+        for atomic in [true, false] {
+            for system_git in [false, true] {
+                let prefix = format!(
+                    "{}-{existing}-{atomic}",
+                    if system_git { "git" } else { "grit" }
+                );
+                let good = format!("refs/heads/{prefix}-ok");
+                let blocked = format!("refs/heads/{prefix}-blocked");
+                if existing {
+                    for name in [&good, &blocked] {
+                        git(bare, &["update-ref", name, &graph.c1.to_hex()]);
+                    }
+                }
+                if system_git {
+                    let out = system_push(
+                        local,
+                        url,
+                        &[
+                            format!("{}:{good}", graph.ff),
+                            format!("{}:{blocked}", graph.ff),
+                        ],
+                        atomic,
+                        ssh,
+                    );
+                    assert!(!out.status.success(), "Git must report the hook rejection");
+                } else {
+                    let out = push(
+                        &[spec(Some(graph.ff), &good), spec(Some(graph.ff), &blocked)],
+                        &PushOptions {
+                            atomic,
+                            ..Default::default()
+                        },
+                    );
+                    assert_eq!(out.results.len(), 2);
+                    assert_eq!(
+                        result_for(&out, &blocked).status,
+                        PushRefStatus::RemoteRejected
+                    );
+                    assert_eq!(
+                        result_for(&out, &good).status,
+                        if atomic {
+                            PushRefStatus::RemoteRejected
+                        } else {
+                            PushRefStatus::Ok
+                        }
+                    );
+                }
+
+                for name in [&good, &blocked] {
+                    if !atomic && name == &good {
+                        assert_remote_ref(bare, name, graph.ff);
+                    } else if existing {
+                        assert_remote_ref(bare, name, graph.c1);
+                    } else {
+                        assert!(
+                            !git_output(bare, &["show-ref", "--verify", name])
+                                .status
+                                .success(),
+                            "{prefix}: rejected creation {name} must remain absent"
+                        );
+                    }
+                }
+                fsck_clean(bare, &prefix);
+            }
+        }
+    }
+
+    // Fully accepted atomic pushes must work, including a mix of create/update.
+    for system_git in [false, true] {
+        let prefix = if system_git {
+            "git-accepted"
+        } else {
+            "grit-accepted"
+        };
+        let first = format!("refs/heads/{prefix}-a");
+        let second = format!("refs/heads/{prefix}-b");
+        git(bare, &["update-ref", &first, &graph.c1.to_hex()]);
+        if system_git {
+            let out = system_push(
+                local,
+                url,
+                &[
+                    format!("{}:{first}", graph.ff),
+                    format!("{}:{second}", graph.ff),
+                ],
+                true,
+                ssh,
+            );
+            assert!(
+                out.status.success(),
+                "{}",
+                String::from_utf8_lossy(&out.stderr)
+            );
+        } else {
+            let out = push(
+                &[spec(Some(graph.ff), &first), spec(Some(graph.ff), &second)],
+                &PushOptions {
+                    atomic: true,
+                    ..Default::default()
+                },
+            );
+            assert_eq!(out.results.len(), 2);
+            assert!(out.results.iter().all(|r| r.status == PushRefStatus::Ok));
+        }
+        for name in [&first, &second] {
+            assert_remote_ref(bare, name, graph.ff);
+        }
+        fsck_clean(bare, prefix);
+    }
+    std::fs::remove_file(hook).unwrap();
+}
+
+/// Check disabled atomic advertisement against system receive-pack (upstream t5543).
+fn run_unsupported_atomic_matrix(
+    local: &Path,
+    bare: &Path,
+    graph: &Graph,
+    transport: &dyn Transport,
+    url: &str,
+    ssh: Option<&Path>,
+) {
+    git(bare, &["config", "receive.advertiseAtomic", "false"]);
+    let names = ["refs/heads/unsupported-a", "refs/heads/unsupported-b"];
+    let specs: Vec<_> = names
+        .iter()
+        .map(|name| spec(Some(graph.ff), name))
+        .collect();
+    for dry_run in [false, true] {
+        let mut conn = transport
+            .connect(url, Service::ReceivePack, &ConnectOptions::default())
+            .unwrap();
+        assert!(!conn.capabilities().iter().any(|c| c == "atomic"));
+        let err = push_remote(
+            &local.join(".git"),
+            &mut *conn,
+            &specs,
+            &PushOptions {
+                atomic: true,
+                dry_run,
+                ..Default::default()
+            },
+            &mut NoProgress,
+            &grit_lib::progress::NeverCancel,
+        )
+        .unwrap_err();
+        assert!(
+            matches!(err, grit_lib::error::Error::PushAtomicUnsupported),
+            "{err:?}"
+        );
+    }
+    let git_specs: Vec<_> = names
+        .iter()
+        .map(|name| format!("{}:{name}", graph.ff))
+        .collect();
+    assert!(!system_push(local, url, &git_specs, true, ssh)
+        .status
+        .success());
+    for name in names {
+        assert!(!git_output(bare, &["show-ref", "--verify", name])
+            .status
+            .success());
+    }
+    fsck_clean(bare, "unsupported atomic push");
+
+    // Lack of atomic support must not disable ordinary pushes.
+    let mut conn = transport
+        .connect(url, Service::ReceivePack, &ConnectOptions::default())
+        .unwrap();
+    let out = push_remote(
+        &local.join(".git"),
+        &mut *conn,
+        &specs,
+        &PushOptions::default(),
+        &mut NoProgress,
+        &grit_lib::progress::NeverCancel,
+    )
+    .unwrap();
+    assert_eq!(out.results.len(), 2);
+    assert!(out.results.iter().all(|r| r.status == PushRefStatus::Ok));
+    for name in names {
+        assert_remote_ref(bare, name, graph.ff);
+    }
+    fsck_clean(bare, "ordinary push without atomic capability");
+    git(bare, &["config", "--unset", "receive.advertiseAtomic"]);
+}
+
 /// Run the full push matrix against `bare` using `push` (which performs a fresh
 /// connect per call) and the source repo at `local`/`graph`. `label` names the
 /// transport for assertion messages.
@@ -707,6 +939,9 @@ fn push_matrix_over_git_daemon() {
     };
 
     run_push_matrix("git", &bare, &graph, &push);
+    #[cfg(unix)]
+    run_atomic_hook_matrix(&local, &bare, &graph, &push, &url, None);
+    run_unsupported_atomic_matrix(&local, &bare, &graph, &transport, &url, None);
 }
 
 // ===========================================================================
@@ -770,6 +1005,8 @@ fn push_matrix_over_ssh() {
     };
 
     run_push_matrix("ssh", &bare, &graph, &push);
+    run_atomic_hook_matrix(&local, &bare, &graph, &push, &url, Some(&fake_ssh));
+    run_unsupported_atomic_matrix(&local, &bare, &graph, &transport, &url, Some(&fake_ssh));
 }
 
 // ===========================================================================
@@ -844,6 +1081,8 @@ fn push_matrix_over_smart_http() {
     };
 
     run_push_matrix("http", &bare, &graph, &push);
+    #[cfg(unix)]
+    run_atomic_hook_matrix(&local, &bare, &graph, &push, &url, None);
 
     // Bonus HTTP-only round-trip: fetch the pushed history back via the smart
     // transport's advertisement to prove the pushed pack is servable.

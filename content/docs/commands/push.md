@@ -40,7 +40,7 @@ With `--delete`, deletes remote branches or tags (short names map like Git).
 
 `-u` / `--set-upstream` writes `branch.<name>.remote` and `branch.<name>.merge` for each successfully pushed branch (skipped with `--dry-run`).
 
-`--atomic` requires every ref update in the push to succeed or none are applied (when the transport supports it).
+`--atomic` requires every ref update in the push to succeed or none are applied, including when a remote update hook rejects one ref. Over SSH, `git://`, and smart HTTP, the server must advertise the `atomic` capability. If it does not, grit fails before sending ref updates or objects; it never falls back to a non-atomic push. This capability check also applies to `--dry-run`.
 
 `-o` / `--push-option` sends server-side push options (for example `ci.skip`) on smart HTTP; `file://` remotes reject non-empty push options.
 
@@ -63,7 +63,7 @@ For GitHub over HTTPS, if a push fails because you aren't signed in, `grit` offe
 | `--force-with-lease` | Push only if the remote ref matches the local remote-tracking ref (or is absent when there is no tracking ref). |
 | `--force-with-lease=<rev>` | Same check against `<rev>` (exactly one ref must be pushed). |
 | `-u`, `--set-upstream` | Set upstream config for pushed branches. |
-| `--atomic` | All ref updates succeed or none are applied. |
+| `--atomic` | All ref updates succeed or none are applied; fails before sending updates if the server does not support atomic pushes. |
 | `-o`, `--push-option` | Server-side push option (repeatable; smart HTTP only). |
 | `--follow-tags` | Push annotated tags reachable from the commits being pushed. |
 | `-q`, `--quiet` | Suppress remote messages and the human summary of a successful push. |
