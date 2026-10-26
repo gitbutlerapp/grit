@@ -316,6 +316,11 @@ fn non_utf8_author_matches_git() {
     commit_with_raw_author_bytes(wt, b"\xFFAlice <alice@example.com>", "binary author name");
     let repo = open_grit_repo(wt);
     assert_rev_list_filter_matches_git(wt, &repo, &["--author=alice@example.com", "main"]);
+    assert_rev_list_filter_matches_git(
+        wt,
+        &repo,
+        &["--count", "--author=alice@example.com", "main"],
+    );
 }
 
 #[test]
@@ -525,6 +530,17 @@ fn mailmap_author_matches_git() {
         .expect("rev_list")
         .commits;
         assert_eq!(grit_oids, git_oids, "mailmap (graph={use_graph})");
+        let count = repo
+            .rev_walk()
+            .count(
+                &["main"],
+                &grit_lib::revwalk::RevWalkListOptions {
+                    commit_filter: Some(filter.clone()),
+                    ..Default::default()
+                },
+            )
+            .expect("filtered count with mailmap");
+        assert_eq!(count, git_oids.len());
     }
 }
 
@@ -588,6 +604,72 @@ fn count_with_filter_matches_git() {
     git(wt, &["update-ref", "refs/heads/main", &prev.to_hex()]);
     let repo = open_grit_repo(wt);
     assert_rev_list_filter_matches_git(wt, &repo, &["--count", "--author=Alice", "main"]);
+}
+
+#[test]
+fn filtered_counts_across_shared_ancestry_and_exclusions_match_git() {
+    let hist = HistoryRepo::init();
+    let wt = hist.worktree();
+    let a = ("Alice", "alice@example.com");
+    let b = ("Bob", "bob@example.com");
+    let root = commit_tree_with_identities(wt, "root", &[], a, b, "fix root");
+    let left = commit_tree_with_identities(wt, "left", &[root], b, a, "fix left bug");
+    let right = commit_tree_with_identities(wt, "right", &[root], a, a, "right feature");
+    let merge = commit_tree_with_identities(wt, "merge", &[left, right], b, b, "merge branches");
+    git(wt, &["update-ref", "refs/heads/main", &merge.to_hex()]);
+    git(wt, &["update-ref", "refs/heads/side", &right.to_hex()]);
+    git(wt, &["update-ref", "refs/heads/base", &root.to_hex()]);
+    git(wt, &["fsck", "--strict"]);
+
+    for packed in [false, true] {
+        if packed {
+            git(wt, &["repack", "-ad"]);
+        }
+        let repo = open_grit_repo(wt);
+        for args in [
+            vec!["--count", "--author=Alice", "main"],
+            vec!["--count", "--committer=Alice", "main"],
+            vec!["--count", "--author=Bob", "--committer=Alice", "main"],
+            vec!["--count", "--grep=fix", "--grep=feature", "main"],
+            vec!["--count", "--all-match", "--grep=fix", "--grep=bug", "main"],
+            vec!["--count", "--invert-grep", "--grep=fix", "main"],
+            vec!["--count", "--author=nobody", "main"],
+            vec!["--count", "--author=Alice", "main", "side", "main"],
+            vec!["--count", "--author=.", "base..main"],
+            vec!["--count", "--author=.", "main", "^side"],
+            vec!["--count", "--author=.", "side", "^main"],
+        ] {
+            assert_rev_list_filter_matches_git(wt, &repo, &args);
+        }
+        let filter = Arc::new(
+            CommitFilterBuilder::new()
+                .author("Alice")
+                .build()
+                .expect("filter"),
+        );
+        let n = repo
+            .rev_walk()
+            .count(
+                &["main", "side"],
+                &grit_lib::revwalk::RevWalkListOptions {
+                    commit_filter: Some(filter),
+                    ..Default::default()
+                },
+            )
+            .expect("public count");
+        assert_eq!(
+            n,
+            git_rev_list_count(wt, &["--author=Alice", "main", "side"])
+        );
+    }
+
+    std::fs::write(wt.join(".git/shallow"), format!("{left}\n{right}\n")).expect("shallow");
+    let repo = open_grit_repo(wt);
+    assert_rev_list_filter_matches_git(wt, &repo, &["--count", "--author=.", "main"]);
+    std::fs::remove_file(wt.join(".git/shallow")).expect("remove shallow");
+    std::fs::write(wt.join(".git/info/grafts"), format!("{merge} {right}\n")).expect("graft");
+    let repo = open_grit_repo(wt);
+    assert_rev_list_filter_matches_git(wt, &repo, &["--count", "--author=.", "main"]);
 }
 
 #[test]

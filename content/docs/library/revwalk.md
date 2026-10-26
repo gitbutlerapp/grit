@@ -27,6 +27,8 @@ Both list the symmetric difference for `A...B`, exactly like `git rev-list A...B
 
 [`rev_list`](rustdoc:grit_lib::revwalk::rev_list::rev_list) takes positive and negative revision specs plus [`RevListOptions`](rustdoc:grit_lib::revwalk::rev_list::RevListOptions). It returns a [`RevListResult`](rustdoc:grit_lib::revwalk::rev_list::RevListResult) whose `commits` field is the final oid list (after skip, max-count, and reverse).
 
+For counts, read [`RevListResult::commit_count`](rustdoc:grit_lib::revwalk::rev_list::RevListResult::commit_count) or use `RevWalk::count`: count-only walks can leave `commits` empty. For an unlimited count with only author, committer or message filters, the walk visits each reachable commit once, matches its borrowed bytes and discards the payload. It retains visited ids rather than parsed commit maps or a sorted list, including when subtracting excluded ancestry; shallow boundaries and grafts still apply.
+
 | Option | Meaning |
 | --- | --- |
 | [`ordering`](rustdoc:grit_lib::revwalk::rev_list::RevListOptions) | [`OrderingMode`](rustdoc:grit_lib::revwalk::rev_list::OrderingMode) — default date order, topo, author-date variants. |

@@ -123,7 +123,8 @@ impl CommitFilter {
         Ok(self.matches_bytes(&object.data))
     }
 
-    fn matches_bytes(&self, raw: &[u8]) -> bool {
+    /// Match bytes already read by a traversal, without a second ODB lookup.
+    pub(crate) fn matches_bytes(&self, raw: &[u8]) -> bool {
         let inner = &self.inner;
         let headers = scan_commit_headers(raw);
 

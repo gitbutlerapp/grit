@@ -23,8 +23,8 @@ use crate::merge_base::{
     commits_reachable_excluding_ancestors_of_with_graph, ReachableWalkCommitterCutoffs,
 };
 use crate::objects::{
-    oid_hash_map, oid_hash_set, parse_commit, parse_tag, parse_tree, CommitData, ObjectId,
-    ObjectKind, OidHashMap, OidHashSet, TreeEntry, TreeRefIter,
+    oid_hash_map, oid_hash_set, parse_commit, parse_tag, parse_tree, CommitData, CommitRef,
+    ObjectId, ObjectKind, OidHashMap, OidHashSet, TreeEntry, TreeRefIter,
 };
 use crate::odb::store::ObjectStore;
 use crate::pack_bitmap::BitmapIndex;
@@ -1072,6 +1072,12 @@ pub fn rev_list(
         &negative_object_roots,
         options,
     )? {
+        return Ok(result);
+    }
+
+    if let Some(count) = try_filtered_count_only(repo, &include, &exclude, options)? {
+        let mut result = rev_list_result_from_commits(Vec::new());
+        result.reachable_commit_count = Some(count);
         return Ok(result);
     }
 
@@ -6085,6 +6091,63 @@ fn peeled_wants_from_rev_list_inputs(
     peeled.commits.sort();
     peeled.commits.dedup();
     (peeled, filter_want_tips)
+}
+
+/// Count unbounded identity/message matches without retaining or sorting commit data.
+/// Each commit is read once into a reusable buffer; only visited ids survive the visit.
+fn try_filtered_count_only(
+    repo: &Repository,
+    include: &[ObjectId],
+    exclude: &[ObjectId],
+    options: &RevListOptions,
+) -> Result<Option<usize>> {
+    let Some(filter) = options.commit_filter.as_ref().filter(|f| f.is_active()) else {
+        return Ok(None);
+    };
+    if !options.count
+        || options.objects
+        || options.filter.is_some()
+        || !rev_list_acceleration_compatible(&RevListOptions {
+            commit_filter: None,
+            ..options.clone()
+        })
+    {
+        return Ok(None);
+    }
+
+    let shallow: OidHashSet = crate::shallow::load_shallow_boundaries(repo.git_dir())
+        .into_iter()
+        .collect();
+    let grafts = crate::rev_parse::load_graft_parents(repo.git_dir());
+    repo.odb().with_pack_read_context(|| {
+        let mut visited = oid_hash_set();
+        let mut stack = Vec::new();
+        let mut buf = Vec::new();
+        let mut count = 0;
+        // Mark excluded ancestry first, so the positive walk stops at it without
+        // retaining a second reachability set or reading those commits again.
+        for (tips, count_matches) in [(exclude, false), (include, true)] {
+            stack.extend_from_slice(tips);
+            while let Some(oid) = stack.pop() {
+                if !visited.insert(oid) {
+                    continue;
+                }
+                if repo.odb().read_into_caching_delta_bases(&oid, &mut buf)? != ObjectKind::Commit {
+                    return Err(rev_list_unexpected_kind(oid, "commit"));
+                }
+                let commit = CommitRef::parse(&buf)?;
+                if let Some(parents) = grafts.get(&oid) {
+                    stack.extend_from_slice(parents);
+                } else if !shallow.contains(&oid) {
+                    stack.extend_from_slice(commit.parents());
+                }
+                if count_matches && filter.matches_bytes(&buf) {
+                    count += 1;
+                }
+            }
+        }
+        Ok(Some(count))
+    })
 }
 
 fn try_commit_graph_count_only(
@@ -11661,6 +11724,78 @@ mod line_coverage_tests {
         assert_eq!(cache.component_cache_misses(), 1);
         assert_eq!(cache.component_tree_reads(), 1);
 
+        Ok(())
+    }
+
+    #[test]
+    fn filtered_count_reads_shared_ancestry_once() -> Result<()> {
+        let (_dir, seeded, tip) = seed_repo(24, true);
+        let repo = Repository::open(
+            seeded.git_dir(),
+            &crate::environment::RepositoryOptions::empty(),
+        )?;
+        let metrics = repo.odb().hot_path_metrics();
+        metrics.set_loose_open_counting(true);
+        let _scope = crate::hot_path_test_metrics::HotPathMetricsScope::install(
+            repo.odb().hot_path_metrics_arc(),
+        );
+        let filter = crate::revwalk::filter::CommitFilterBuilder::new()
+            .author("T")
+            .build()
+            .expect("filter");
+        let options = RevListOptions {
+            count: true,
+            commit_filter: Some(Arc::new(filter)),
+            ..RevListOptions::default()
+        };
+        assert_eq!(
+            try_filtered_count_only(&repo, &[tip, tip], &[], &options)?,
+            Some(26)
+        );
+        assert_eq!(metrics.loose_path_open_attempts(), 26);
+        let git_count = std::process::Command::new("git")
+            .arg("--git-dir")
+            .arg(repo.git_dir())
+            .args(["rev-list", "--count", "--author=T", "main"])
+            .output()?;
+        assert!(git_count.status.success());
+        assert_eq!(String::from_utf8_lossy(&git_count.stdout).trim(), "26");
+        assert!(std::process::Command::new("git")
+            .arg("--git-dir")
+            .arg(repo.git_dir())
+            .args(["fsck", "--strict"])
+            .output()?
+            .status
+            .success());
+        Ok(())
+    }
+
+    #[test]
+    fn filtered_count_reports_missing_nonmatching_ancestry() -> Result<()> {
+        let (_dir, repo, tip) = seed_repo(2, false);
+        let missing: ObjectId = "1234567890123456789012345678901234567890".parse()?;
+        let mut body = repo.odb().read(&tip)?.data;
+        let original = parse_commit(&body)?.parents[0].to_hex();
+        body = String::from_utf8(body)
+            .expect("fixture UTF-8")
+            .replace(&original, &missing.to_hex())
+            .into_bytes();
+        let tip = repo.odb().write(ObjectKind::Commit, &body)?;
+        let filter = crate::revwalk::filter::CommitFilterBuilder::new()
+            .author("nobody")
+            .build()
+            .expect("filter");
+        let result = try_filtered_count_only(
+            &repo,
+            &[tip],
+            &[],
+            &RevListOptions {
+                count: true,
+                commit_filter: Some(Arc::new(filter)),
+                ..RevListOptions::default()
+            },
+        );
+        assert!(matches!(result, Err(Error::ObjectNotFound(oid)) if oid == missing.to_hex()));
         Ok(())
     }
 
