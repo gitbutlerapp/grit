@@ -278,8 +278,8 @@ pub fn index_path_matches_worktree_dentry(work_tree: &Path, index_rel: &str) -> 
 /// Stage-0 checkout collision groups keyed by a stable group id (built once per pass).
 #[derive(Debug, Default)]
 pub(crate) struct IcaseIndexCollisionGroups {
-    path_to_group: HashMap<Vec<u8>, u32>,
-    members_by_group: HashMap<u32, Vec<String>>,
+    path_to_group: HashMap<Vec<u8>, usize>,
+    members_by_group: HashMap<usize, Vec<String>>,
 }
 
 impl IcaseIndexCollisionGroups {
@@ -291,12 +291,11 @@ impl IcaseIndexCollisionGroups {
         let grouped = icase_collision_groups(&paths, true);
         let mut path_to_group = HashMap::new();
         let mut members_by_group = HashMap::new();
-        for group in grouped {
-            let key = memihash(group[0].as_bytes());
-            members_by_group.insert(key, group.clone());
-            for path in group {
-                path_to_group.insert(path.into_bytes(), key);
+        for (key, group) in grouped.into_iter().enumerate() {
+            for path in &group {
+                path_to_group.insert(path.clone().into_bytes(), key);
             }
+            members_by_group.insert(key, group);
         }
         Self {
             path_to_group,
@@ -316,7 +315,7 @@ impl IcaseIndexCollisionGroups {
 #[derive(Debug, Default)]
 pub(crate) struct IcaseCheckoutCollisionMap {
     groups: IcaseIndexCollisionGroups,
-    winner_by_group: HashMap<u32, String>,
+    winner_by_group: HashMap<usize, String>,
 }
 
 impl IcaseCheckoutCollisionMap {
@@ -762,5 +761,30 @@ mod tests {
             !tracked.contains_bytes(b"f0688b8.txt"),
             "hash collision must not treat distinct paths as tracked"
         );
+    }
+
+    #[test]
+    fn memihash_distinct_collision_groups_keep_separate_auto_stage_winners() {
+        assert_eq!(memihash(b"f02398b.txt"), memihash(b"f0688b8.txt"));
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let wt = tmp.path();
+        std::fs::write(wt.join("f02398b.txt"), b"one\n").expect("write");
+        std::fs::write(wt.join("f0688b8.txt"), b"two\n").expect("write");
+        let mut index = Index::new();
+        for path in ["F02398b.txt", "f02398b.txt", "F0688b8.txt", "f0688b8.txt"] {
+            index.push_entry_unsorted(dummy_entry(path));
+        }
+        index.sort();
+        let map = IcaseCheckoutCollisionMap::from_index(wt, &index, true);
+        assert!(
+            !map.is_auto_stage_loser(b"f02398b.txt"),
+            "dentry winner must not be treated as a collision loser"
+        );
+        assert!(
+            !map.is_auto_stage_loser(b"f0688b8.txt"),
+            "second collision group must not inherit the first group's loser logic"
+        );
+        assert!(map.is_auto_stage_loser(b"F02398b.txt"));
+        assert!(map.is_auto_stage_loser(b"F0688b8.txt"));
     }
 }
