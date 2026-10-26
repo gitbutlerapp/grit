@@ -31,7 +31,7 @@ By default grit follows tags, fetching every tag (lightweight or annotated) that
 
 `--dry-run` negotiates and reports updates without writing refs, objects, or `FETCH_HEAD`. Human output ends with **Would fetch N update(s) from …** when anything would change, or **Already up to date with …** when nothing would.
 
-`--depth`, `--deepen`, and `--unshallow` match Git’s shallow fetch controls (mutually exclusive). `--depth` truncates history on the first shallow fetch; `--deepen` adds commits relative to an existing shallow clone; `--unshallow` fetches the rest and removes `.git/shallow`. `--unshallow` on a complete repository is a typed error.
+`--depth`, `--deepen`, and `--unshallow` match Git’s shallow fetch controls (mutually exclusive). `--depth` truncates history on the first shallow fetch; `--deepen` adds commits relative to an existing shallow clone; `--unshallow` fetches the rest and removes `.git/shallow`. `--unshallow` on a complete repository is a typed error. With default tag following, tags on newly fetched history (including annotated tags) arrive in that same operation; a second fetch is unnecessary. Following tags does not extend the requested branch depth. A shallow source can only supply its available history, so boundaries remain when the source is incomplete.
 
 `-q` / `--quiet` suppresses progress and human output (JSON and markdown are unchanged).
 

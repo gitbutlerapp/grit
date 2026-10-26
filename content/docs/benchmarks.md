@@ -57,6 +57,23 @@ variation while rejecting the old loose merge's roughly 78/95 MiB peaks. Packed 
 includes mapped pack pages and bounded object/delta caches. Git still uses less memory;
 the regression budgets preserve the measured improvement.
 
+## Local unshallow with historical tags
+
+Issue [#2053](https://github.com/gitbutlerapp/grit/issues/2053) covers tags entering newly fetched history. Local fetch now selects following tags using the shallow response's effective boundaries. Lightweight targets arrive through the branch roots; missing annotated tag objects and chains get additional wants. Already-local tags still skip the reachability walk.
+
+Factory VM, 2026-10-26: 4 vCPU AMD EPYC 9V74, 16 GiB RAM, Ubuntu 24.04, Rust 1.99 `release`, system Git 2.55.0. The packed `file://` fixture has 3,000 linear commits, 1,500 tags on even-numbered commits and 1,000 extra tip tags. Each sample starts from a fresh system-Git depth-1 clone outside the timed region. Complete no-op clients are first unshallowed by Git. One warmup precedes seven interleaved runs per binary, with rotating order and builds/tests paused. Wall time uses Python `perf_counter`; peak RSS uses `/usr/bin/time -v`. Automatic maintenance is disabled for all binaries.
+
+| Operation | System Git | Grit main | Grit fixed |
+| --- | ---: | ---: | ---: |
+| One unshallow fetch | 226.7 ms / 8.6 MiB | 213.3 ms / 23.7 MiB | 492.0 ms / 25.8 MiB |
+| Complete history and tags | 226.8 ms / 8.6 MiB | 537.6 ms / 23.3 MiB | 495.9 ms / 26.1 MiB |
+| Complete no-op fetch | 51.8 ms / 7.0 MiB | 26.5 ms / 13.8 MiB | 25.9 ms / 15.3 MiB |
+| Shallow no-op fetch | 26.9 ms / 6.1 MiB | 32.8 ms / 14.1 MiB | 32.3 ms / 15.6 MiB |
+
+Times are medians; RSS is the largest peak across seven runs. Main is `e10563aae0fde79b96e13cca50d170d3d35e7b7b`. **Main's single unshallow result is incomplete:** it omits 1,499 historical tags. The complete-result row includes its required second fetch, including both commands' elapsed time and the larger process RSS. Git and fixed Grit produce all tags in one operation. No-op timing remains within the observed sample spread; following tags does not add a history scan when every tag is already local. RSS includes the tag updates retained during object copying in the fixed single-fetch operation. In ten separate complete no-op runs sampled through `/proc/<pid>/status`, median anonymous RSS stayed about 1.8 MiB before and after; the measured no-op RSS increase is in file-backed pages. All final results pass `git fsck --strict`.
+
+Raw timing and RSS samples, fixture details and commands are recorded in [`fetch-local-unshallow-tags.json`](https://github.com/gitbutlerapp/grit/blob/main/grit-utils/baselines/fetch-local-unshallow-tags.json).
+
 ## Local fetch with many refs
 
 Local fetch reuses the repository's ref store for tag checks, tracking-ref classification, and object-copy exclusion tips. Exclusion tips are collected only when the finalized shallow/deepen request needs an object copy. Up-to-date fetches still perform pruning and fetch metadata maintenance; loose refs override packed refs, symbolic refs resolve through the store, and both files and reftable backends retain their freshness checks.

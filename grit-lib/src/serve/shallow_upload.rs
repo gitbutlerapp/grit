@@ -172,7 +172,7 @@ fn parents_in_repo(repo: &Repository, oid: ObjectId) -> crate::error::Result<boo
 }
 
 /// Mirrors Git `get_shallows_depth` + `deepen_relative` depth adjustment.
-pub(crate) fn relative_deepen_depth_for_request(
+fn relative_deepen_depth_for_request(
     repo: &Repository,
     wants: &[ObjectId],
     client_shallow: &[ObjectId],

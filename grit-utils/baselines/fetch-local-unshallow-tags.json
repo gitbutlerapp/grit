@@ -1,0 +1,652 @@
+{
+  "schema_version": 1,
+  "timestamp": "2026-10-26T19:17:28.761028+00:00",
+  "machine": {
+    "cpu_model": "AMD EPYC 9V74 80-Core Processor",
+    "logical_cores": 4,
+    "ram_bytes": 16766414848,
+    "os": "linux",
+    "kernel": "6.17.0-1022-azure",
+    "cargo_profile": "release"
+  },
+  "tools": {
+    "git": "git version 2.55.0",
+    "grit": "grit 0.5.21",
+    "grit_commit": "e10563aae0fde79b96e13cca50d170d3d35e7b7b"
+  },
+  "commands": {
+    "prepare": "git clone -q --depth 1 file://<source> <client>",
+    "git": "git -C <client> fetch [--unshallow] -q",
+    "grit": "<binary> -C <client> fetch [--unshallow] --json",
+    "complete_before": "<before> -C <client> fetch --unshallow --json; <before> -C <client> fetch --json"
+  },
+  "methodology": {
+    "baseline_commit": "e10563aae0fde79b96e13cca50d170d3d35e7b7b",
+    "after_branch": "factory/unshallow-tags",
+    "warmups": 1,
+    "runs": 7,
+    "order": "Rotating git/before/after in each round, fresh depth-1 system-git clone outside timing; gc.auto=0 and maintenance.auto=false for all commands. Builds/tests paused.",
+    "wall_time": "Python perf_counter around /usr/bin/time -v; RSS is the max across processes for the before two-fetch lifecycle.",
+    "checks": "Tag counts after every operation; git fsck --strict after the final round for every scenario/label. Before single unshallow leaves 1001 tags; all complete results have 2500.",
+    "fixture": "git fast-import, 3000 single-file revisions; committer CI <ci@example.test>, epoch 1000000000+i; file contents fixture revision i\\n; history-N tag on each even revision, tip-N tags 0..999; git repack -ad and pack-refs --all."
+  },
+  "scenarios": [
+    {
+      "id": "fetch-local-tags-unshallow-before",
+      "group": "network-fetch",
+      "fixture": "3000 linear commits, 1500 lightweight tags on even revisions + 1000 extra tip tags; packed file:// source",
+      "description": "One fetch --unshallow (before is incomplete: 1499 tags omitted)",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 228.99780628566597,
+        "median_ms": 226.6771309998603,
+        "stddev_ms": 6.215960763390863,
+        "min_ms": 225.23131200000535,
+        "max_ms": 242.81244899998455,
+        "runs_ms": [
+          227.61768999998822,
+          242.81244899998455,
+          226.6771309998603,
+          225.23131200000535,
+          228.88255500015475,
+          226.07549199983623,
+          225.68801499983238
+        ],
+        "peak_rss_bytes": 9056256,
+        "median_peak_rss_bytes": 8994816,
+        "rss_runs_kb": [
+          8784,
+          8728,
+          8732,
+          8784,
+          8740,
+          8800,
+          8844
+        ]
+      },
+      "grit": {
+        "mean_ms": 212.3543998571092,
+        "median_ms": 213.27693900002487,
+        "stddev_ms": 1.938363040536384,
+        "min_ms": 209.48915000008128,
+        "max_ms": 214.35600799986787,
+        "runs_ms": [
+          213.27693900002487,
+          211.7147199999181,
+          214.35600799986787,
+          209.48915000008128,
+          214.19657299998107,
+          210.16197599988118,
+          213.28543300001002
+        ],
+        "peak_rss_bytes": 24870912,
+        "median_peak_rss_bytes": 24002560,
+        "rss_runs_kb": [
+          23128,
+          24052,
+          23440,
+          24288,
+          23740,
+          23248,
+          23404
+        ]
+      },
+      "ratio": 0.9408842350318802
+    },
+    {
+      "id": "fetch-local-tags-unshallow-after",
+      "group": "network-fetch",
+      "fixture": "3000 linear commits, 1500 lightweight tags on even revisions + 1000 extra tip tags; packed file:// source",
+      "description": "One fetch --unshallow (before is incomplete: 1499 tags omitted)",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 228.99780628566597,
+        "median_ms": 226.6771309998603,
+        "stddev_ms": 6.215960763390863,
+        "min_ms": 225.23131200000535,
+        "max_ms": 242.81244899998455,
+        "runs_ms": [
+          227.61768999998822,
+          242.81244899998455,
+          226.6771309998603,
+          225.23131200000535,
+          228.88255500015475,
+          226.07549199983623,
+          225.68801499983238
+        ],
+        "peak_rss_bytes": 9056256,
+        "median_peak_rss_bytes": 8994816,
+        "rss_runs_kb": [
+          8784,
+          8728,
+          8732,
+          8784,
+          8740,
+          8800,
+          8844
+        ]
+      },
+      "grit": {
+        "mean_ms": 492.0172669999699,
+        "median_ms": 492.0075079999151,
+        "stddev_ms": 3.0048381259412404,
+        "min_ms": 488.65928899999744,
+        "max_ms": 496.50548799991157,
+        "runs_ms": [
+          493.17298100004336,
+          492.0075079999151,
+          496.50548799991157,
+          494.80639099988366,
+          488.65928899999744,
+          490.1211760000024,
+          488.8480360000358
+        ],
+        "peak_rss_bytes": 27013120,
+        "median_peak_rss_bytes": 26570752,
+        "rss_runs_kb": [
+          26380,
+          25852,
+          26204,
+          25560,
+          25752,
+          26152,
+          25948
+        ]
+      },
+      "ratio": 2.1705211541618565
+    },
+    {
+      "id": "fetch-local-tags-noop-before",
+      "group": "network-fetch",
+      "fixture": "3000 linear commits, 1500 lightweight tags on even revisions + 1000 extra tip tags; packed file:// source",
+      "description": "Up-to-date complete client, 2500 existing tags",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 51.594644428567854,
+        "median_ms": 51.772223999932976,
+        "stddev_ms": 0.785150327959441,
+        "min_ms": 50.57699799999682,
+        "max_ms": 52.720672000077684,
+        "runs_ms": [
+          50.969080999948346,
+          52.12954300009187,
+          50.919427000053474,
+          52.07456599987381,
+          50.57699799999682,
+          52.720672000077684,
+          51.772223999932976
+        ],
+        "peak_rss_bytes": 7335936,
+        "median_peak_rss_bytes": 7127040,
+        "rss_runs_kb": [
+          6844,
+          6892,
+          7040,
+          6960,
+          7164,
+          7164,
+          6844
+        ]
+      },
+      "grit": {
+        "mean_ms": 26.54013142854897,
+        "median_ms": 26.4588800000638,
+        "stddev_ms": 0.5489290337489875,
+        "min_ms": 25.84000299998479,
+        "max_ms": 27.407280999796058,
+        "runs_ms": [
+          26.866121000011844,
+          26.077557999997225,
+          26.4588800000638,
+          26.220811000030153,
+          27.407280999796058,
+          26.910265999958938,
+          25.84000299998479
+        ],
+        "peak_rss_bytes": 14438400,
+        "median_peak_rss_bytes": 14114816,
+        "rss_runs_kb": [
+          13784,
+          13832,
+          13528,
+          14100,
+          13632,
+          13444,
+          13836
+        ]
+      },
+      "ratio": 0.511063229582296
+    },
+    {
+      "id": "fetch-local-tags-noop-after",
+      "group": "network-fetch",
+      "fixture": "3000 linear commits, 1500 lightweight tags on even revisions + 1000 extra tip tags; packed file:// source",
+      "description": "Up-to-date complete client, 2500 existing tags",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 51.594644428567854,
+        "median_ms": 51.772223999932976,
+        "stddev_ms": 0.785150327959441,
+        "min_ms": 50.57699799999682,
+        "max_ms": 52.720672000077684,
+        "runs_ms": [
+          50.969080999948346,
+          52.12954300009187,
+          50.919427000053474,
+          52.07456599987381,
+          50.57699799999682,
+          52.720672000077684,
+          51.772223999932976
+        ],
+        "peak_rss_bytes": 7335936,
+        "median_peak_rss_bytes": 7127040,
+        "rss_runs_kb": [
+          6844,
+          6892,
+          7040,
+          6960,
+          7164,
+          7164,
+          6844
+        ]
+      },
+      "grit": {
+        "mean_ms": 25.892889714311554,
+        "median_ms": 25.933702999964225,
+        "stddev_ms": 0.23817372273259083,
+        "min_ms": 25.524624000127005,
+        "max_ms": 26.29047499999615,
+        "runs_ms": [
+          25.93926100007593,
+          25.754947999985234,
+          25.933702999964225,
+          26.012219999984154,
+          26.29047499999615,
+          25.79499700004817,
+          25.524624000127005
+        ],
+        "peak_rss_bytes": 16052224,
+        "median_peak_rss_bytes": 15732736,
+        "rss_runs_kb": [
+          15364,
+          15228,
+          15072,
+          15676,
+          15300,
+          15644,
+          15444
+        ]
+      },
+      "ratio": 0.5009192380840699
+    },
+    {
+      "id": "fetch-local-tags-noop-shallow-before",
+      "group": "network-fetch",
+      "fixture": "3000 linear commits, 1500 lightweight tags on even revisions + 1000 extra tip tags; packed file:// source",
+      "description": "Up-to-date depth-1 client, 1001 existing tags",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 26.79487628568365,
+        "median_ms": 26.866600999937873,
+        "stddev_ms": 0.26985958567369056,
+        "min_ms": 26.358058999903733,
+        "max_ms": 27.113008000014815,
+        "runs_ms": [
+          26.934911999887845,
+          26.727533999974185,
+          26.358058999903733,
+          26.866600999937873,
+          26.54189800000495,
+          27.022122000062154,
+          27.113008000014815
+        ],
+        "peak_rss_bytes": 6434816,
+        "median_peak_rss_bytes": 6381568,
+        "rss_runs_kb": [
+          6284,
+          6284,
+          6168,
+          6220,
+          6056,
+          6232,
+          6236
+        ]
+      },
+      "grit": {
+        "mean_ms": 32.88124885713322,
+        "median_ms": 32.81926699992255,
+        "stddev_ms": 0.3670347846320203,
+        "min_ms": 32.434062999982416,
+        "max_ms": 33.44518300013988,
+        "runs_ms": [
+          32.47142899999744,
+          32.81926699992255,
+          33.10104100000899,
+          33.44518300013988,
+          33.12357899994822,
+          32.434062999982416,
+          32.77417999993304
+        ],
+        "peak_rss_bytes": 14782464,
+        "median_peak_rss_bytes": 14548992,
+        "rss_runs_kb": [
+          14436,
+          14312,
+          14208,
+          14336,
+          14104,
+          13964,
+          14092
+        ]
+      },
+      "ratio": 1.2215637921595828
+    },
+    {
+      "id": "fetch-local-tags-noop-shallow-after",
+      "group": "network-fetch",
+      "fixture": "3000 linear commits, 1500 lightweight tags on even revisions + 1000 extra tip tags; packed file:// source",
+      "description": "Up-to-date depth-1 client, 1001 existing tags",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 26.79487628568365,
+        "median_ms": 26.866600999937873,
+        "stddev_ms": 0.26985958567369056,
+        "min_ms": 26.358058999903733,
+        "max_ms": 27.113008000014815,
+        "runs_ms": [
+          26.934911999887845,
+          26.727533999974185,
+          26.358058999903733,
+          26.866600999937873,
+          26.54189800000495,
+          27.022122000062154,
+          27.113008000014815
+        ],
+        "peak_rss_bytes": 6434816,
+        "median_peak_rss_bytes": 6381568,
+        "rss_runs_kb": [
+          6284,
+          6284,
+          6168,
+          6220,
+          6056,
+          6232,
+          6236
+        ]
+      },
+      "grit": {
+        "mean_ms": 32.68378557137502,
+        "median_ms": 32.26474200005214,
+        "stddev_ms": 1.00621763769427,
+        "min_ms": 32.03927599997769,
+        "max_ms": 34.907263999912175,
+        "runs_ms": [
+          32.03927599997769,
+          32.26474200005214,
+          32.46046300000671,
+          32.72832299990114,
+          34.907263999912175,
+          32.25162199987608,
+          32.13480899989918
+        ],
+        "peak_rss_bytes": 16392192,
+        "median_peak_rss_bytes": 16064512,
+        "rss_runs_kb": [
+          15692,
+          15776,
+          15632,
+          15524,
+          15492,
+          15688,
+          16008
+        ]
+      },
+      "ratio": 1.2009238533793964
+    },
+    {
+      "id": "fetch-local-tags-unshallow-complete-before",
+      "group": "network-fetch",
+      "fixture": "3000 linear commits, 1500 lightweight tags on even revisions + 1000 extra tip tags; packed file:// source",
+      "description": "Complete unshallow: before needs unshallow then a second fetch; after/git need one fetch",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 226.74905514285066,
+        "median_ms": 226.80560699996022,
+        "stddev_ms": 1.3266550840420905,
+        "min_ms": 224.892422000039,
+        "max_ms": 228.87835599999562,
+        "runs_ms": [
+          228.87835599999562,
+          226.80560699996022,
+          227.3824799999602,
+          226.22172000001228,
+          225.58223800001542,
+          227.48056299997188,
+          224.892422000039
+        ],
+        "peak_rss_bytes": 8970240,
+        "median_peak_rss_bytes": 8916992,
+        "rss_runs_kb": [
+          8708,
+          8760,
+          8728,
+          8592,
+          8656,
+          8708,
+          8720
+        ]
+      },
+      "grit": {
+        "mean_ms": 538.2347958571115,
+        "median_ms": 537.6139899999544,
+        "stddev_ms": 8.050334633704493,
+        "min_ms": 528.4526010000263,
+        "max_ms": 553.1377869999687,
+        "runs_ms": [
+          542.9807549999168,
+          534.4997629999853,
+          528.4526010000263,
+          553.1377869999687,
+          538.5624969999299,
+          537.6139899999544,
+          532.396177999999
+        ],
+        "peak_rss_bytes": 24416256,
+        "median_peak_rss_bytes": 23994368,
+        "rss_runs_kb": [
+          22908,
+          23380,
+          23480,
+          23808,
+          23212,
+          23844,
+          23432
+        ]
+      },
+      "ratio": 2.370373453774662
+    },
+    {
+      "id": "fetch-local-tags-unshallow-complete-after",
+      "group": "network-fetch",
+      "fixture": "3000 linear commits, 1500 lightweight tags on even revisions + 1000 extra tip tags; packed file:// source",
+      "description": "Complete unshallow: before needs unshallow then a second fetch; after/git need one fetch",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 226.74905514285066,
+        "median_ms": 226.80560699996022,
+        "stddev_ms": 1.3266550840420905,
+        "min_ms": 224.892422000039,
+        "max_ms": 228.87835599999562,
+        "runs_ms": [
+          228.87835599999562,
+          226.80560699996022,
+          227.3824799999602,
+          226.22172000001228,
+          225.58223800001542,
+          227.48056299997188,
+          224.892422000039
+        ],
+        "peak_rss_bytes": 8970240,
+        "median_peak_rss_bytes": 8916992,
+        "rss_runs_kb": [
+          8708,
+          8760,
+          8728,
+          8592,
+          8656,
+          8708,
+          8720
+        ]
+      },
+      "grit": {
+        "mean_ms": 495.596676285751,
+        "median_ms": 495.85199000011926,
+        "stddev_ms": 4.864959050407954,
+        "min_ms": 489.05460200012385,
+        "max_ms": 502.4021240001275,
+        "runs_ms": [
+          500.4567999999381,
+          490.22527300007823,
+          502.4021240001275,
+          495.17100299999584,
+          496.0149419998743,
+          495.85199000011926,
+          489.05460200012385
+        ],
+        "peak_rss_bytes": 27406336,
+        "median_peak_rss_bytes": 26849280,
+        "rss_runs_kb": [
+          26764,
+          25272,
+          26324,
+          25548,
+          26220,
+          26448,
+          25556
+        ]
+      },
+      "ratio": 2.18624220343991
+    }
+  ],
+  "noop_rss_breakdown": {
+    "method": "10 complete no-op fetch runs per binary on the same full system-Git clone; /proc/PID/status sampled every 1 ms. Per-field peaks are sampled independently; units KiB.",
+    "before": {
+      "median_kb": {
+        "VmRSS": 13200.0,
+        "RssAnon": 1850.0,
+        "RssFile": 11548.0
+      },
+      "samples_kb": [
+        {
+          "VmRSS": 12616,
+          "RssAnon": 1872,
+          "RssFile": 10744
+        },
+        {
+          "VmRSS": 12936,
+          "RssAnon": 1868,
+          "RssFile": 11068
+        },
+        {
+          "VmRSS": 13728,
+          "RssAnon": 1796,
+          "RssFile": 11932
+        },
+        {
+          "VmRSS": 13100,
+          "RssAnon": 1872,
+          "RssFile": 11228
+        },
+        {
+          "VmRSS": 13248,
+          "RssAnon": 1840,
+          "RssFile": 11808
+        },
+        {
+          "VmRSS": 12520,
+          "RssAnon": 1840,
+          "RssFile": 10680
+        },
+        {
+          "VmRSS": 13564,
+          "RssAnon": 1792,
+          "RssFile": 11988
+        },
+        {
+          "VmRSS": 13268,
+          "RssAnon": 1840,
+          "RssFile": 11828
+        },
+        {
+          "VmRSS": 13668,
+          "RssAnon": 1864,
+          "RssFile": 11804
+        },
+        {
+          "VmRSS": 13152,
+          "RssAnon": 1860,
+          "RssFile": 11292
+        }
+      ]
+    },
+    "after": {
+      "median_kb": {
+        "VmRSS": 14744.0,
+        "RssAnon": 1844.0,
+        "RssFile": 12924.0
+      },
+      "samples_kb": [
+        {
+          "VmRSS": 14388,
+          "RssAnon": 1848,
+          "RssFile": 12540
+        },
+        {
+          "VmRSS": 15496,
+          "RssAnon": 1864,
+          "RssFile": 13848
+        },
+        {
+          "VmRSS": 14984,
+          "RssAnon": 1800,
+          "RssFile": 13184
+        },
+        {
+          "VmRSS": 14656,
+          "RssAnon": 1796,
+          "RssFile": 12860
+        },
+        {
+          "VmRSS": 13680,
+          "RssAnon": 1844,
+          "RssFile": 11836
+        },
+        {
+          "VmRSS": 14656,
+          "RssAnon": 1796,
+          "RssFile": 12860
+        },
+        {
+          "VmRSS": 14952,
+          "RssAnon": 1844,
+          "RssFile": 13108
+        },
+        {
+          "VmRSS": 14832,
+          "RssAnon": 1844,
+          "RssFile": 12988
+        },
+        {
+          "VmRSS": 14652,
+          "RssAnon": 1792,
+          "RssFile": 12860
+        },
+        {
+          "VmRSS": 14952,
+          "RssAnon": 1844,
+          "RssFile": 13108
+        }
+      ]
+    }
+  }
+}

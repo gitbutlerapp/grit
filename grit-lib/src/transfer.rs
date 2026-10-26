@@ -125,7 +125,11 @@ pub enum TagMode {
     /// A tag is kept when the object it peels to arrives with this fetch, when
     /// it is a commit already present locally and reachable from the fetched
     /// refs, or when it is a tree or blob already present locally. Annotated
-    /// tags also need their tag object. Git also keeps a tag on a local commit
+    /// tags also need their tag object. Deepening or unshallowing follows tags
+    /// into the newly available history in the same fetch, without letting
+    /// automatic tags expand the requested branch depth.
+    ///
+    /// Git also keeps a tag on a local commit
     /// that the fetched refs do not reach; grit does not. Deciding this reads
     /// no objects for delivered targets, walks only commits for local ones, and
     /// never lazy-fetches in a partial clone, so it stays cheap on large
@@ -1523,85 +1527,29 @@ pub(crate) fn fetch_local_into(
     let mut seen_remote_ref: HashSet<String> =
         matched.iter().map(|m| m.remote_ref.clone()).collect();
 
-    // TagMode: add tags. We need the closure of objects already being fetched to
-    // decide "Following".
     let local_shallow = crate::shallow::load_shallow_boundaries(local_git_dir);
     let remote_shallow = crate::shallow::load_shallow_boundaries(remote_git_dir);
 
-    let mut tag_shallow = local_shallow.clone();
-    tag_shallow.extend(remote_shallow.iter().copied());
-
-    let mut following_only = HashSet::new();
-    if matches!(opts.tags, TagMode::All | TagMode::Following) {
-        let tags_present = if opts.tags == TagMode::Following {
-            crate::fetch::tags_already_local(local.refs(), &remote_refs)
-        } else {
-            HashSet::new()
-        };
-        following_only = apply_tag_mode(
+    // Explicitly requested tags participate in depth calculation; automatically
+    // followed tags must only use the history selected by those fetch roots.
+    if opts.tags == TagMode::All {
+        apply_tag_mode(
             opts.tags,
             &remote_refs,
             &remote_odb,
-            &tag_shallow,
+            &remote_shallow,
             &negatives,
-            &tags_present,
+            &HashSet::new(),
             &mut matched,
             &mut matched_oids,
             &mut seen_remote_ref,
         )?;
     }
-
-    let fetch_commit_oids: HashSet<ObjectId> = matched
-        .iter()
-        .filter(|m| !m.is_tag)
-        .map(|m| m.oid)
-        .collect();
-    let mut following_tag_wants =
-        crate::fetch::following_tag_wants_with_local_peel(&matched, &following_only, local_odb)?;
-    let shallow_request = opts.has_deepen_request() || !local_shallow.is_empty();
-    if shallow_request {
-        let peel_set = crate::fetch::following_peel_commit_set_for_shallow(
-            &remote_odb,
-            &fetch_commit_oids,
-            opts.absolute_depth_for_tags(),
-            &tag_shallow,
-        )?;
-        following_tag_wants.extend(
-            crate::fetch::following_tag_wants_peel_among_fetched_commits(
-                &matched,
-                &following_only,
-                &peel_set,
-            ),
-        );
-    }
-
-    // 3. Determine wants (matched oids not present locally) and haves (current
-    //    local tracking-ref tips) and copy the minimal object set.
-    let mut wants: Vec<ObjectId> = if shallow_request {
-        matched_oids
+    let shallow_response = if opts.has_deepen_request() {
+        let shallow_wants: HashSet<ObjectId> = matched
             .iter()
-            .copied()
-            .filter(|oid| !following_only.contains(oid) || following_tag_wants.contains(oid))
-            .collect()
-    } else {
-        local_odb.missing_oids(matched_oids.iter().copied())?
-    };
-
-    let mut shallow_wants_set = HashSet::new();
-    for m in &matched {
-        let tip = shallow_want_commit_tip(&remote_odb, m)?;
-        if wants.contains(&tip) || (m.is_tag && wants.contains(&m.oid)) {
-            shallow_wants_set.insert(tip);
-        }
-    }
-    let shallow_wants: Vec<ObjectId> = shallow_wants_set.into_iter().collect();
-
-    let mut pack_oids: HashSet<ObjectId> = HashSet::new();
-    let mut transfer = TransferStats::default();
-    let mut shallow_new: Vec<ObjectId> = Vec::new();
-    let mut shallow_unshallow: Vec<ObjectId> = Vec::new();
-    let mut copy_source_shallow = remote_shallow.clone();
-    if opts.has_deepen_request() {
+            .map(|m| shallow_want_commit_tip(&remote_odb, m))
+            .collect::<Result<_>>()?;
         let remote_repo =
             crate::repo::Repository::open(remote_git_dir, &RepositoryOptions::empty())?;
         let (wire_depth, deepen_relative) = opts
@@ -1618,66 +1566,102 @@ pub(crate) fn fetch_local_into(
             deepen_not: Vec::new(),
             deepen_relative,
         };
-        let resp = crate::serve::compute_shallow_response(&remote_repo, &shallow_wants, &req)?;
-        shallow_new = resp.shallow;
-        shallow_unshallow = resp.unshallow;
-        copy_source_shallow = resp.pack_shallow_grafts;
-        for oid in resp.extra_wants.iter().chain(shallow_new.iter()).copied() {
+        Some(crate::serve::compute_shallow_response(
+            &remote_repo,
+            &shallow_wants.into_iter().collect::<Vec<_>>(),
+            &req,
+        )?)
+    } else {
+        None
+    };
+    let copy_source_shallow = shallow_response
+        .as_ref()
+        .map(|resp| resp.pack_shallow_grafts.clone())
+        .unwrap_or_else(|| remote_shallow.clone());
+    let mut tag_shallow = copy_source_shallow.clone();
+    if shallow_response.is_none() {
+        tag_shallow.extend(local_shallow.iter().copied());
+    }
+
+    let following_only = if opts.tags == TagMode::Following {
+        let tags_present = crate::fetch::tags_already_local(local.refs(), &remote_refs);
+        apply_tag_mode(
+            opts.tags,
+            &remote_refs,
+            &remote_odb,
+            &tag_shallow,
+            &negatives,
+            &tags_present,
+            &mut matched,
+            &mut matched_oids,
+            &mut seen_remote_ref,
+        )?
+    } else {
+        HashSet::new()
+    };
+
+    let mut following_tag_wants = if shallow_response.is_some() {
+        // Branch roots already bring in lightweight targets. Only annotated tag
+        // objects (and their chains) need additional wants in this response.
+        local_odb
+            .missing_oids(
+                matched
+                    .iter()
+                    .filter(|m| {
+                        following_only.contains(&m.oid)
+                            && m.advertised_peel.is_some_and(|peel| peel != m.oid)
+                    })
+                    .map(|m| m.oid),
+            )?
+            .into_iter()
+            .collect()
+    } else {
+        crate::fetch::following_tag_wants_with_local_peel(&matched, &following_only, local_odb)?
+    };
+    let shallow_request = opts.has_deepen_request() || !local_shallow.is_empty();
+    if shallow_request && shallow_response.is_none() {
+        let fetch_commit_oids = matched
+            .iter()
+            .filter(|m| !m.is_tag)
+            .map(|m| m.oid)
+            .collect();
+        let peel_set = crate::fetch::following_peel_commit_set_for_shallow(
+            &remote_odb,
+            &fetch_commit_oids,
+            opts.absolute_depth_for_tags(),
+            &tag_shallow,
+        )?;
+        following_tag_wants.extend(
+            crate::fetch::following_tag_wants_peel_among_fetched_commits(
+                &matched,
+                &following_only,
+                &peel_set,
+            ),
+        );
+    }
+
+    // Determine wants and copy only the required object set.
+    let mut wants: Vec<ObjectId> = if shallow_request {
+        matched_oids
+            .iter()
+            .copied()
+            .filter(|oid| !following_only.contains(oid) || following_tag_wants.contains(oid))
+            .collect()
+    } else {
+        local_odb.missing_oids(matched_oids.iter().copied())?
+    };
+    let (shallow_new, shallow_unshallow) = if let Some(resp) = shallow_response {
+        for oid in resp.extra_wants.iter().chain(resp.shallow.iter()).copied() {
             if !wants.contains(&oid) {
                 wants.push(oid);
             }
         }
-        if opts.tags == TagMode::Following {
-            let tag_depth = opts.absolute_depth_for_tags().or_else(|| {
-                opts.wire_deepen().and_then(|(d, relative)| {
-                    if !relative {
-                        return Some(d);
-                    }
-                    let deepen = usize::try_from(d).ok()?;
-                    crate::serve::relative_deepen_depth_for_request(
-                        &remote_repo,
-                        &shallow_wants,
-                        &req.client_shallow,
-                        deepen,
-                    )
-                    .and_then(|d| u32::try_from(d).ok())
-                })
-            });
-            if let Some(depth) =
-                tag_depth.filter(|d| *d > 0 && *d != crate::shallow::INFINITE_DEPTH)
-            {
-                let mut effective_shallow = tag_shallow.clone();
-                effective_shallow.extend(shallow_new.iter().copied());
-                for oid in &shallow_unshallow {
-                    effective_shallow.remove(oid);
-                }
-                let fetch_commits = crate::fetch::shallow_fetched_commit_oids(
-                    &remote_odb,
-                    &fetch_commit_oids.iter().copied().collect::<Vec<_>>(),
-                    depth,
-                    &effective_shallow,
-                )?;
-                for m in &matched {
-                    if !m.is_tag || wants.contains(&m.oid) || local_odb.contains(&m.oid)? {
-                        continue;
-                    }
-                    let peel = remote_odb
-                        .peel_tags(m.oid)
-                        .ok()
-                        .map(|(p, _)| p)
-                        .unwrap_or(m.oid);
-                    if fetch_commits.contains(&peel) {
-                        wants.push(m.oid);
-                    }
-                }
-            }
-        }
-        for oid in &fetch_commit_oids {
-            if !wants.contains(oid) {
-                wants.push(*oid);
-            }
-        }
-    }
+        (resp.shallow, resp.unshallow)
+    } else {
+        (Vec::new(), Vec::new())
+    };
+    let mut pack_oids: HashSet<ObjectId> = HashSet::new();
+    let mut transfer = TransferStats::default();
     if !wants.is_empty() && !opts.dry_run {
         // Resolve exclusion tips only once the final shallow/deepen wants need a copy.
         let mut haves: Vec<ObjectId> = Vec::new();
@@ -2771,8 +2755,8 @@ pub(crate) fn apply_tag_mode(
         })
         .collect();
 
-    // For Following, decide reachability on the source ODB using both the local
-    // and remote shallow grafts (unioned by the caller). Post-pack pruning via
+    // For Following, decide reachability on the source ODB using the effective
+    // shallow grafts for this fetch. Post-pack pruning via
     // [`crate::fetch::retain_following_tags`] still drops tags whose objects did
     // not arrive. Using the local ODB here would miss every tip on first fetch.
     let following_closure: HashSet<ObjectId> = if mode == TagMode::Following {

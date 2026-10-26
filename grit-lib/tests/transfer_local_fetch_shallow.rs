@@ -9,7 +9,7 @@ use std::process::Command;
 
 use grit_lib::objects::ObjectId;
 use grit_lib::refs::resolve_ref;
-use grit_lib::remote::transfer::{fetch_local, FetchOptions, TagMode};
+use grit_lib::remote::transfer::{fetch_local, FetchDepth, FetchOptions, TagMode, UpdateMode};
 use grit_test_support::git;
 
 fn rev_parse(dir: &Path, rev: &str) -> ObjectId {
@@ -189,4 +189,275 @@ fn fetch_local_initial_fetch_following_imports_reachable_tags() {
         resolve_ref(&local_git, tag).unwrap_or_else(|_| panic!("missing {tag}"));
     }
     git_fsck_clean(&local);
+}
+
+fn build_historical_tag_source(bare: &Path) {
+    build_tagged_linear_source(bare);
+    git(bare, &["tag", "-d", "v1", "v3"]);
+    git(bare, &["tag", "-a", "v1", "-m", "release", "main~2"]);
+}
+
+fn depth_one_client(base: &Path, source: &Path, name: &str) -> std::path::PathBuf {
+    let client = base.join(name);
+    git(
+        base,
+        &[
+            "clone",
+            "-q",
+            "--depth",
+            "1",
+            &format!("file://{}", source.display()),
+            client.to_str().unwrap(),
+        ],
+    );
+    assert!(git(&client, &["tag", "--list"]).trim().is_empty());
+    client
+}
+
+fn assert_tag_history_matches_git(client: &Path, comparison: &Path) {
+    assert_eq!(
+        git(
+            client,
+            &[
+                "for-each-ref",
+                "--format=%(refname) %(objectname) %(*objectname)",
+                "refs/tags/"
+            ]
+        ),
+        git(
+            comparison,
+            &[
+                "for-each-ref",
+                "--format=%(refname) %(objectname) %(*objectname)",
+                "refs/tags/"
+            ]
+        ),
+        "tag names, object IDs and peeled IDs must match after one fetch",
+    );
+    assert_eq!(
+        git(client, &["rev-list", "HEAD"]),
+        git(comparison, &["rev-list", "HEAD"]),
+    );
+    assert_eq!(
+        std::fs::read(client.join(".git/shallow")).ok(),
+        std::fs::read(comparison.join(".git/shallow")).ok(),
+    );
+    git(client, &["fsck", "--strict"]);
+    git(comparison, &["fsck", "--strict"]);
+}
+
+#[test]
+fn unshallow_follows_historical_tags_in_one_fetch() {
+    let tmp = tempfile::tempdir().unwrap();
+    let source = tmp.path().join("source.git");
+    build_historical_tag_source(&source);
+    let client = depth_one_client(tmp.path(), &source, "client");
+    let comparison = depth_one_client(tmp.path(), &source, "comparison");
+    git(&comparison, &["fetch", "--unshallow"]);
+    let outcome = fetch_local(
+        &client.join(".git"),
+        &source,
+        &FetchOptions {
+            refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".into()],
+            tags: TagMode::Following,
+            fetch_depth: Some(FetchDepth::Unshallow),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_tag_history_matches_git(&client, &comparison);
+    assert_eq!(git(&client, &["tag", "--list"]).trim(), "v1\nv2");
+    assert_eq!(git(&client, &["rev-list", "--count", "HEAD"]).trim(), "3");
+    assert!(!client.join(".git/shallow").exists());
+    for name in ["refs/tags/v1", "refs/tags/v2"] {
+        let update = outcome
+            .updates
+            .iter()
+            .find(|u| u.remote_ref == name)
+            .unwrap();
+        assert_eq!(update.mode, UpdateMode::New);
+        assert_eq!(update.old_oid, None);
+        assert_eq!(update.new_oid, Some(rev_parse(&source, name)));
+    }
+}
+
+#[test]
+fn shallow_tag_following_uses_requested_history_and_tag_mode() {
+    let tmp = tempfile::tempdir().unwrap();
+    let source = tmp.path().join("source.git");
+    build_historical_tag_source(&source);
+    // A tag on side history must not deepen the selected main branch.
+    let seed = source.with_extension("wt");
+    git(&seed, &["checkout", "-q", "-b", "side", "main~2"]);
+    std::fs::write(seed.join("side"), "side history\n").unwrap();
+    git(&seed, &["add", "side"]);
+    git(&seed, &["commit", "-q", "-m", "side"]);
+    git(&seed, &["tag", "-a", "side-tag", "-m", "side release"]);
+    git(
+        &seed,
+        &["push", source.to_str().unwrap(), "refs/tags/side-tag"],
+    );
+    // Also exercise a chain of annotated tags.
+    git(
+        &source,
+        &[
+            "-c",
+            "advice.nestedTag=false",
+            "tag",
+            "-a",
+            "nested",
+            "-m",
+            "nested release",
+            "v1",
+        ],
+    );
+    let cases = [
+        (None, TagMode::Following, vec![]),
+        (
+            FetchDepth::depth(1),
+            TagMode::Following,
+            vec!["--depth", "1"],
+        ),
+        (
+            FetchDepth::depth(2),
+            TagMode::Following,
+            vec!["--depth", "2"],
+        ),
+        (
+            FetchDepth::deepen(1),
+            TagMode::Following,
+            vec!["--deepen", "1"],
+        ),
+        (
+            Some(FetchDepth::Unshallow),
+            TagMode::Following,
+            vec!["--unshallow"],
+        ),
+        (
+            Some(FetchDepth::Unshallow),
+            TagMode::None,
+            vec!["--unshallow", "--no-tags"],
+        ),
+        (
+            Some(FetchDepth::Unshallow),
+            TagMode::All,
+            vec!["--unshallow", "--tags"],
+        ),
+    ];
+    for (i, (fetch_depth, tags, args)) in cases.into_iter().enumerate() {
+        let client = depth_one_client(tmp.path(), &source, &format!("client-{i}"));
+        let comparison = depth_one_client(tmp.path(), &source, &format!("comparison-{i}"));
+        let mut git_args = vec!["fetch"];
+        git_args.extend(args);
+        git(&comparison, &git_args);
+        fetch_local(
+            &client.join(".git"),
+            &source,
+            &FetchOptions {
+                refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".into()],
+                fetch_depth,
+                tags,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert_tag_history_matches_git(&client, &comparison);
+        if tags == TagMode::Following {
+            assert!(resolve_ref(&client.join(".git"), "refs/tags/side-tag").is_err());
+        }
+    }
+}
+
+#[test]
+fn unshallow_follows_tags_only_as_far_as_shallow_source_can_supply() {
+    let tmp = tempfile::tempdir().unwrap();
+    let complete = tmp.path().join("complete.git");
+    build_historical_tag_source(&complete);
+    let source = tmp.path().join("source.git");
+    git(
+        tmp.path(),
+        &[
+            "clone",
+            "-q",
+            "--bare",
+            "--depth",
+            "2",
+            &format!("file://{}", complete.display()),
+            source.to_str().unwrap(),
+        ],
+    );
+    let client = depth_one_client(tmp.path(), &source, "client");
+    let comparison = depth_one_client(tmp.path(), &source, "comparison");
+    git(&comparison, &["fetch", "--unshallow"]);
+    fetch_local(
+        &client.join(".git"),
+        &source,
+        &FetchOptions {
+            refspecs: vec!["+refs/heads/*:refs/remotes/origin/*".into()],
+            tags: TagMode::Following,
+            fetch_depth: Some(FetchDepth::Unshallow),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    assert_tag_history_matches_git(&client, &comparison);
+    assert_eq!(git(&client, &["tag", "--list"]).trim(), "v2");
+    assert_eq!(git(&client, &["rev-list", "--count", "HEAD"]).trim(), "2");
+    assert!(client.join(".git/shallow").exists());
+}
+
+#[test]
+fn unshallow_preserves_negative_refspecs_and_existing_tags() {
+    let tmp = tempfile::tempdir().unwrap();
+    let source = tmp.path().join("source.git");
+    build_historical_tag_source(&source);
+    for existing in [false, true] {
+        let client = depth_one_client(tmp.path(), &source, &format!("client-{existing}"));
+        let mut refspecs = vec!["+refs/heads/*:refs/remotes/origin/*".into()];
+        if existing {
+            git(&client, &["tag", "v1", "HEAD"]);
+            git(&client, &["tag", "shared-tip", "HEAD"]);
+            git(&source, &["tag", "shared-tip", "main"]);
+        } else {
+            refspecs.push("^refs/tags/v1".into());
+        }
+        let outcome = fetch_local(
+            &client.join(".git"),
+            &source,
+            &FetchOptions {
+                refspecs,
+                tags: TagMode::Following,
+                fetch_depth: Some(FetchDepth::Unshallow),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        if existing {
+            let moved = outcome
+                .updates
+                .iter()
+                .find(|u| u.remote_ref == "refs/tags/v1")
+                .unwrap();
+            assert_eq!(moved.mode, UpdateMode::TagUpdateRejected);
+            assert!(!outcome
+                .updates
+                .iter()
+                .any(|u| u.remote_ref == "refs/tags/shared-tip"));
+            assert_eq!(
+                rev_parse(&client, "refs/tags/v1"),
+                rev_parse(&client, "HEAD")
+            );
+        } else {
+            assert!(!outcome
+                .updates
+                .iter()
+                .any(|u| u.remote_ref == "refs/tags/v1"));
+            assert!(resolve_ref(&client.join(".git"), "refs/tags/v1").is_err());
+        }
+        assert_eq!(
+            rev_parse(&client, "refs/tags/v2"),
+            rev_parse(&source, "refs/tags/v2")
+        );
+        git(&client, &["fsck", "--strict"]);
+    }
 }

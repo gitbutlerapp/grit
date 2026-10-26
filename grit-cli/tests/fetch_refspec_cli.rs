@@ -655,3 +655,80 @@ fn fetch_flags_after_remote_are_not_parsed_as_refspecs() -> TestResult {
     );
     Ok(())
 }
+
+#[test]
+fn clone_depth_one_then_unshallow_follows_historical_tags() -> TestResult {
+    let tmp = tempfile::tempdir()?;
+    let source = tmp.path().join("source");
+    fs::create_dir(&source)?;
+    git(&source, &["init", "-q", "-b", "main"])?;
+    for n in 1..=3 {
+        fs::write(source.join("file"), format!("{n}\n"))?;
+        git(&source, &["add", "file"])?;
+        git(
+            &source,
+            &[
+                "-c",
+                "user.name=CI",
+                "-c",
+                "user.email=ci@example.test",
+                "commit",
+                "-qm",
+                &format!("c{n}"),
+            ],
+        )?;
+        if n == 1 {
+            git(
+                &source,
+                &[
+                    "-c",
+                    "user.name=CI",
+                    "-c",
+                    "user.email=ci@example.test",
+                    "tag",
+                    "-a",
+                    "-m",
+                    "release",
+                    "v1",
+                ],
+            )?;
+        } else if n == 2 {
+            git(&source, &["tag", "v2"])?;
+        }
+    }
+    let clone = grit_json(
+        tmp.path(),
+        &[
+            "clone",
+            "--depth",
+            "1",
+            &format!("file://{}", source.display()),
+            "client",
+        ],
+    );
+    assert_eq!(clone["tag_fetch"], "following");
+    let client = tmp.path().join("client");
+    assert_eq!(git_out(&client, &["tag", "--list"]), "");
+    let fetched = grit_json(&client, &["fetch", "--unshallow"]);
+    assert_eq!(fetched["updated"], 2);
+    for name in ["refs/tags/v1", "refs/tags/v2"] {
+        let update = fetched["updates"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|u| u["ref"] == name)
+            .unwrap();
+        assert_eq!(update["status"], "new");
+        for rev in [name.to_owned(), format!("{name}^{{}}")] {
+            assert_eq!(
+                git_out(&client, &["rev-parse", &rev]),
+                git_out(&source, &["rev-parse", &rev])
+            );
+        }
+    }
+    assert_eq!(git_out(&client, &["tag", "--list"]), "v1\nv2");
+    assert_eq!(git_out(&client, &["rev-list", "--count", "HEAD"]), "3");
+    assert!(!client.join(".git/shallow").exists());
+    git(&client, &["fsck", "--strict"])?;
+    Ok(())
+}
