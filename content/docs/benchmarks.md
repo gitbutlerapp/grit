@@ -9,6 +9,57 @@ For a map of **grit-lib** modules, **grit** commands, common workflows, and ever
 
 Command-level numbers below come from the committed **grit-bench** JSON baselines listed in `content/docs/site.toml`. Scenario suites use **hyperfine** against the system **`git`** binary and a release **`grit`** build on the same machine; individual studies below document their sampling method. Times are wall-clock milliseconds.
 
+## Log statistics on packed history
+
+`grit log --limit 50 --stat` reuses its batched file counts for the JSON summary,
+without computing a second full patch. The library trims identical boundary lines
+before Myers counting, interns borrowed LF lines into compact ids, transfers owned
+blob buffers into diff inputs, and borrows valid UTF-8 while counting. CR-containing
+inputs retain the existing tokenizer and lossy decoding remains unchanged.
+
+Factory VM, 2026-10-26: four logical CPUs, AMD EPYC 7763, 16 GiB RAM, Linux x86_64,
+Rust 1.99 `release` profile, stock Git 2.55.0. The daily fixture is upstream git.git
+at v2.47.0 (`777489f9e09c8d0dd6b12f9d90de6376330577a2`). Frozen binaries compare
+origin/main `f2a97fc88fe4` with `f3c83c08a945` in the same sitting. Builds and tests
+are idle during measurement. Hyperfine uses two warmups and ten measured runs per
+tool; RSS is the maximum of three separate `/usr/bin/time -v` runs.
+
+| Command | Mean wall time | Peak RSS |
+| --- | ---: | ---: |
+| Stock `git log --stat -50` | 103.1 ms | 35.5 MiB |
+| Grit before | 385.2 ms | 112.5 MiB |
+| Grit after | 192.5 ms | 97.6 MiB |
+
+That is about **50% less time and 13% less peak RSS**. Separate Heaptrack runs count
+**348,505 → 80,281 allocations**, with peak live heap **53.77 → 49.61 MB** (decimal).
+The [before](https://github.com/gitbutlerapp/grit/blob/main/grit-utils/baselines/log-stat-before.json)
+and [after](https://github.com/gitbutlerapp/grit/blob/main/grit-utils/baselines/log-stat-after.json)
+daily reports cover all eleven log scenarios and eight related diff, show and
+shortlog scenarios. Those reports use medians and helper-inclusive peak RSS, so
+their values differ from the direct process measurements above. Raw direct samples,
+RSS samples and Criterion estimates are in
+[the measurement record](https://github.com/gitbutlerapp/grit/blob/main/grit-utils/baselines/log-stat-study.json).
+
+Thirty randomized interleaved samples per tool checked startup-heavy commands:
+JSON log **6.04 → 5.59 ms**, oneline log **5.96 → 5.63 ms**, author-filtered log
+**6.54 → 6.01 ms**, and show **4.06 → 3.39 ms** (medians). Direct RSS checks still
+show about **1 MiB more** for oneline/JSON log. The daily table records similarly
+small memory increases on other short commands. This tradeoff needs maintainer
+review against the requirement that related commands do not regress.
+
+Criterion compares the unchanged full-file counter with `line_change_counts` in
+the same process (20 samples): **19.74 → 3.17 ms** for a small edit surrounded by
+100,000 unchanged lines, and **139 → 78 µs** for 1,000 entirely replaced lines.
+The latter checks the case where boundary trimming cannot help.
+
+```bash
+cargo build --release -p grit-cli -p grit-utils
+./target/release/grit-bench --grit ./target/release/grit daily \
+  --only log/stat-n50@git-git --output /tmp/log-stat.json
+cargo bench -p grit-lib --features http-ureq,tracing --bench log_stat -- \
+  --sample-size 20 --warm-up-time 1 --measurement-time 2
+```
+
 ## Clean wide content merges
 
 Issue [#2036](https://github.com/gitbutlerapp/grit/issues/2036) measures 20,000 small text files
