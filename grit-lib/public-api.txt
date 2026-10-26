@@ -3129,6 +3129,7 @@ pub grit_lib::diagnostics::Warning::MidxUnknownPreferredPack
 pub grit_lib::diagnostics::Warning::MidxUnknownPreferredPack::name: alloc::string::String
 pub grit_lib::diagnostics::Warning::NonExecutableHookIgnored
 pub grit_lib::diagnostics::Warning::NonExecutableHookIgnored::hook_name: alloc::string::String
+pub grit_lib::diagnostics::Warning::NonExecutableHookIgnored::hook_path: core::option::Option<std::path::PathBuf>
 pub grit_lib::diagnostics::Warning::PackBitmapIgnored
 pub grit_lib::diagnostics::Warning::PackBitmapIgnored::path: std::path::PathBuf
 pub grit_lib::diagnostics::Warning::PackBitmapIgnored::reason: alloc::string::String
@@ -15866,6 +15867,7 @@ pub grit_lib::prelude::Warning::MidxUnknownPreferredPack
 pub grit_lib::prelude::Warning::MidxUnknownPreferredPack::name: alloc::string::String
 pub grit_lib::prelude::Warning::NonExecutableHookIgnored
 pub grit_lib::prelude::Warning::NonExecutableHookIgnored::hook_name: alloc::string::String
+pub grit_lib::prelude::Warning::NonExecutableHookIgnored::hook_path: core::option::Option<std::path::PathBuf>
 pub grit_lib::prelude::Warning::PackBitmapIgnored
 pub grit_lib::prelude::Warning::PackBitmapIgnored::path: std::path::PathBuf
 pub grit_lib::prelude::Warning::PackBitmapIgnored::reason: alloc::string::String

@@ -171,6 +171,8 @@ pub enum Warning {
     NonExecutableHookIgnored {
         /// Hook script basename that was skipped.
         hook_name: String,
+        /// Resolved path to the hook script, when known.
+        hook_path: Option<PathBuf>,
     },
     /// A hook whose outcome does not affect the operation (such as `post-commit`) could not be
     /// run; the operation already completed.

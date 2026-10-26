@@ -148,9 +148,21 @@ pub fn format_warning_message(w: &Warning) -> String {
         Warning::ReflogNotWritten { refname, detail } => {
             format!("{refname} was updated, but its reflog could not be written: {detail}")
         }
-        Warning::NonExecutableHookIgnored { hook_name } => format!(
-            "the '{hook_name}' hook was ignored because it is not executable (see `grit config set advice.ignoredHook false` to silence)"
-        ),
+        Warning::NonExecutableHookIgnored {
+            hook_name,
+            hook_path,
+        } => {
+            let silence = "see `grit config advice.ignoredHook false` to silence";
+            match hook_path {
+                Some(path) => format!(
+                    "the '{hook_name}' hook was ignored because it is not executable (run `chmod +x {}` to enable it, or {silence})",
+                    path.display()
+                ),
+                None => format!(
+                    "the '{hook_name}' hook was ignored because it is not executable ({silence})"
+                ),
+            }
+        }
         Warning::HookNotRun { hook_name, detail } => {
             format!("the '{hook_name}' hook did not run: {detail}")
         }
@@ -250,4 +262,22 @@ pub fn repository_options(
         )),
     ));
     (options, sink)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::PathBuf;
+
+    #[test]
+    fn non_executable_hook_warning_names_valid_config_command() {
+        let warning = Warning::NonExecutableHookIgnored {
+            hook_name: "pre-commit".into(),
+            hook_path: Some(PathBuf::from(".git/hooks/pre-commit")),
+        };
+        let message = format_warning_message(&warning);
+        assert!(message.contains("grit config advice.ignoredHook false"));
+        assert!(!message.contains("config set"));
+        assert!(message.contains("chmod +x .git/hooks/pre-commit"));
+    }
 }

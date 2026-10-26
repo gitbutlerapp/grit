@@ -147,7 +147,8 @@ fn has_non_executable_hook_warning(diag: &CollectingDiagnostics, hook_name: &str
         matches!(
             w,
             Warning::NonExecutableHookIgnored {
-                hook_name: name
+                hook_name: name,
+                ..
             } if name == hook_name
         )
     })

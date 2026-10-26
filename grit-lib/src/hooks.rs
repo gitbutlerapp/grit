@@ -423,6 +423,7 @@ fn traditional_hook_candidate(
         if show_warning {
             repo.warn(crate::diagnostics::Warning::NonExecutableHookIgnored {
                 hook_name: hook_name.to_string(),
+                hook_path: Some(path.clone()),
             });
         }
         return None;
