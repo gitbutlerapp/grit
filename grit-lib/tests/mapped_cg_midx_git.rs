@@ -203,3 +203,112 @@ fn git_midx_mapped_read_matches_owned_byte_lookup() {
         assert_eq!(mapped_obj.kind, owned_obj.kind);
     }
 }
+
+/// The owning store must prepare one backing even when an ODB first opens its primary
+/// outside a batch context, then mixes ordinary and explicitly scoped reads.
+#[cfg(target_os = "linux")]
+#[test]
+fn git_midx_odb_and_direct_stores_keep_one_mapping_per_owner() {
+    use grit_lib::objects::odb::store::{MidxObjects, ObjectStore};
+    use grit_lib::objects::odb::Odb;
+    use grit_lib::objects::pack_store::PackStore;
+    use grit_lib::objects::ObjectId;
+    use std::sync::Arc;
+
+    fn mappings(path: &Path) -> usize {
+        let maps = std::fs::read_to_string("/proc/self/maps").expect("maps");
+        maps.lines()
+            .filter(|line| line.ends_with(path.to_str().expect("path")))
+            .count()
+    }
+
+    for format in ["sha1", "sha256"] {
+        let root = tempfile::tempdir().expect("repo");
+        git(root.path(), &["init", "-q", "--object-format", format]);
+        let (objects, midx_path) = write_large_single_pack_midx(root.path());
+        std::fs::remove_file(&midx_path).expect("remove grit midx");
+        git(root.path(), &["multi-pack-index", "write"]);
+        assert_file_forces_mmap(&midx_path);
+        let oid =
+            ObjectId::from_hex(git_out(root.path(), &["rev-parse", "HEAD"]).trim()).expect("oid");
+        let expected = git_out(root.path(), &["cat-file", "commit", &oid.to_hex()]);
+        clear_pack_cache();
+        for explicit_first in [false, true] {
+            let odb = Odb::new(&objects).with_config_git_dir(root.path().join(".git"));
+            let read = || {
+                odb.primary().expect("primary");
+                assert_eq!(odb.read(&oid).expect("read").data, expected.as_bytes());
+                assert_eq!(
+                    odb.read_info(&oid).expect("info").size,
+                    expected.len() as u64
+                );
+            };
+            if explicit_first {
+                odb.with_pack_read_context(read);
+            } else {
+                read();
+            }
+            read();
+            odb.with_pack_read_context(read);
+            assert_eq!(
+                mappings(&midx_path),
+                1,
+                "{format}, explicit_first={explicit_first}"
+            );
+            let independent = Odb::new(&objects).with_config_git_dir(root.path().join(".git"));
+            odb.with_pack_read_context(|| {
+                assert_eq!(
+                    independent.read(&oid).expect("independent read").data,
+                    expected.as_bytes()
+                );
+            });
+            assert_eq!(
+                mappings(&midx_path),
+                2,
+                "independent handles own separate caches"
+            );
+            drop(independent);
+            assert_eq!(mappings(&midx_path), 1);
+            drop(odb);
+            assert_eq!(
+                mappings(&midx_path),
+                0,
+                "no implicit MIDX backing should outlive the ODB"
+            );
+        }
+
+        let store = Arc::new(PackStore::new(objects.clone()));
+        let midx = MidxObjects::new(Arc::clone(&store), true).expect("direct backend");
+        for _ in 0..3 {
+            assert_eq!(
+                midx.read(&oid).expect("read").expect("object").data,
+                expected.as_bytes()
+            );
+            assert_eq!(
+                midx.read_info(&oid).expect("info").expect("info").size,
+                expected.len() as u64
+            );
+            PackStore::with_context(Arc::clone(&store), || {
+                assert!(midx_lookup_pack_and_offset_opt(&objects, &oid)
+                    .expect("permissive")
+                    .is_some());
+            });
+            assert_eq!(
+                mappings(&midx_path),
+                1,
+                "direct backend and permissive reads share backing"
+            );
+        }
+        midx.refresh().expect("refresh");
+        assert!(midx.read(&oid).expect("after refresh").is_some());
+        assert_eq!(
+            mappings(&midx_path),
+            1,
+            "refresh releases the previous backing"
+        );
+        drop(midx);
+        drop(store);
+        assert_eq!(mappings(&midx_path), 0);
+        git(root.path(), &["fsck", "--strict"]);
+    }
+}

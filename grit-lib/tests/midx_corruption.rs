@@ -578,3 +578,25 @@ fn load_reuse_tables_rejects_bad_ridx_entry() {
 fn find_chunk(data: &[u8], id: u32) -> Option<(usize, usize)> {
     find_midx_chunk(data, id)
 }
+
+#[test]
+fn pack_names_reject_out_of_bounds_pnam_without_panicking() {
+    use grit_lib::objects::midx::read_midx_pack_idx_names;
+    let (_repo, objects, _oid) = corrupt_fixture().expect("fixture");
+    let path = objects.join("pack/multi-pack-index");
+    let mut data = fs::read(&path).expect("midx");
+    let chunks = data[6] as usize;
+    let entry = (0..chunks)
+        .map(|i| 12 + i * 12)
+        .find(|&off| data[off..off + 4] == CHUNK_PACKNAMES.to_be_bytes())
+        .expect("PNAM");
+    let off = data.len() as u64 + 4096;
+    data[entry + 4..entry + 12].copy_from_slice(&off.to_be_bytes());
+    data[entry + 16..entry + 24].copy_from_slice(&(off + 100).to_be_bytes());
+    fs::write(&path, data).expect("bad PNAM");
+    clear_pack_cache();
+    assert!(matches!(
+        read_midx_pack_idx_names(&objects),
+        Err(grit_lib::error::Error::CorruptObject(_))
+    ));
+}

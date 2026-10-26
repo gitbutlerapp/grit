@@ -1288,10 +1288,12 @@ impl Odb {
         }
         let _ = self.midx_packs_validated.get_or_init(|| {
             let diagnostics = self.diagnostics_handle();
-            validate_midx_referenced_packs_with_diagnostics(
-                &self.objects_dir,
-                diagnostics.as_ref(),
-            );
+            self.with_pack_store_for(&self.objects_dir, || {
+                validate_midx_referenced_packs_with_diagnostics(
+                    &self.objects_dir,
+                    diagnostics.as_ref(),
+                );
+            });
         });
     }
 

@@ -9,6 +9,61 @@ For a map of **grit-lib** modules, **grit** commands, common workflows, and ever
 
 Command-level numbers below come from the committed **grit-bench** JSON baselines listed in `content/docs/site.toml`. Scenario suites use **hyperfine** against the system **`git`** binary and a release **`grit`** build on the same machine; individual studies below document their sampling method. Times are wall-clock milliseconds.
 
+## Multi-pack-index preparation and clean status (2026-10-26)
+
+Issue [#2064](https://github.com/gitbutlerapp/grit/issues/2064) exposed three MIDX
+mappings and repeated checksum scans during a clean status check, plus a whole-file
+allocation just to read pack names. MIDX preparation and reads now use the owning
+repository's `PackStore`. Strict and permissive views share validated layer backing
+while retaining their own chain acceptance and diagnostic behavior. Checksums remain
+mandatory, with a 2 MiB residency budget and checksum-only pages released afterward.
+Pack-name reads reuse prepared metadata or fault in only the relevant mapped pages.
+
+Measured on a 4-vCPU AMD EPYC 7763 Linux VM with 16 GiB RAM, Rust 1.99.0 `release`
+builds and stock Git 2.55.0. The exact issue fixture is git/git at `7e34d817`, with
+82,563 reachable commits, 422,320 packed objects, packed refs, a changed-path commit
+graph, and a Git-written 12 MB MIDX. Frozen `origin/main` (`dbdf37d29`) and fixed
+binaries were run in one sitting with builds and tests paused. Each cell is the
+median of seven rotated warm-cache runs after three warmups. Python `perf_counter`
+wraps `/usr/bin/time -v`, including process launch; RSS is in KiB.
+
+| Status / MIDX | Git ms | Main ms | Fixed ms | Git RSS | Main RSS | Fixed RSS |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| human / present | 13.99 | 45.28 | 24.56 | 7,664 | 61,912 | 17,588 |
+| short / present | 13.48 | 44.00 | 24.35 | 7,580 | 61,912 | 17,848 |
+| JSON / present | 13.59 | 44.02 | 24.45 | 7,704 | 61,884 | 17,716 |
+| Markdown / present | 13.82 | 44.07 | 24.36 | 7,696 | 61,780 | 17,892 |
+| human / absent | 13.21 | 15.78 | 15.89 | 7,580 | 16,340 | 17,084 |
+
+Git's JSON and Markdown controls use ordinary `git status`; the short control uses
+`git status --short`. All present/absent samples for every format are committed in
+`grit-utils/baselines/midx-status-2064.json`. Human status removes **98.9% of the
+MIDX-only RSS increase** (45,572 → 504 KiB), reduces total RSS by **71.6%**, and
+reduces elapsed time by **45.8%**. Without MIDX, elapsed time remains near 15.8 ms;
+the measured release-binary RSS increases by 744 KiB. The remaining base footprint
+and fresh-process checksum cost leave room for further work against Git.
+
+Criterion separates fresh repository-cache preparation from warm lookups (20
+samples, 1-second warmup, 2-second measurement, OS caches warm). Preparing strict
+and permissive views over the real 12 MB MIDX improves **14.69 → 7.36 ms**. Warm
+lookups on the existing ten-pack fixture improve **96.99 → 59.27 ns** for hits and
+**82.42 → 47.26 ns** for misses. The unchanged all-pack-index hit control measures
+29.63 → 29.62 ns; its tiny miss control measures 5.32 → 6.23 ns.
+
+```bash
+GRIT_MIDX_BENCH_OBJECTS=/path/to/git/.git/objects \
+  cargo bench -p grit-lib --bench midx -- midx_prepare
+cargo bench -p grit-lib --bench midx -- midx_lookup
+cargo test -p grit-cli --test status_midx_memory -- --nocapture
+```
+
+The Linux RSS regression uses 420,000 historical blobs and a one-file clean
+checkout, exercising human, short, JSON, and Markdown output with MIDX present and
+absent. Library regressions cover one mapping per owner, explicit and implicit
+caller contexts, concurrent views, independent stores, SHA-1/SHA-256, refresh,
+missing/malformed layers, diagnostics, corruption fallback, and system-Git fsck
+round trips.
+
 ## Ignore path normalization (2026-10-26)
 
 Ignore queries used to canonicalize the same worktree root for every path. The library now checks the normalized path against the root already resolved when opening the repository, retaining the filesystem-alias fallback. On the daily 1,000-path fixture this removes **4,000 `readlink` calls** and **10,000 allocation calls**; heaptrack peak heap stays at **795,340 bytes**.

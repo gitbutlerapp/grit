@@ -354,7 +354,7 @@ pub(crate) mod midx_cache {
         repo_midx_hash_version_for_objects_dir, MidxLoadResult, MidxReadView,
         MIDX_LARGE_OFFSET_NEEDED, MIDX_MIN_FILE_LEN,
     };
-    use crate::diagnostics::{DiagnosticSink, Warning};
+    use crate::diagnostics::{CollectingDiagnostics, DiagnosticSink, Warning};
     use crate::error::{Error, Result};
     use crate::objects::{ObjectId, ObjectIdPrefix, ObjectInfo};
     use crate::pack::{read_object_at, read_pack_index_cached, PackIndex};
@@ -377,8 +377,7 @@ pub(crate) mod midx_cache {
         loff: Option<(usize, usize)>,
         pack_dir: PathBuf,
         pack_names: Vec<String>,
-        pack_indexes: Vec<Arc<OnceLock<Option<Arc<PackIndex>>>>>,
-        packs_validated: AtomicBool,
+        pack_indexes: Vec<OnceLock<Option<Arc<PackIndex>>>>,
     }
 
     impl PreparedMidxLayer {
@@ -398,12 +397,7 @@ pub(crate) mod midx_cache {
                 hash_len,
                 pack_dir: pack_dir.to_path_buf(),
                 pack_names: view.pack_names.clone(),
-                pack_indexes: view
-                    .pack_names
-                    .iter()
-                    .map(|_| Arc::new(OnceLock::new()))
-                    .collect(),
-                packs_validated: AtomicBool::new(false),
+                pack_indexes: view.pack_names.iter().map(|_| OnceLock::new()).collect(),
                 bytes,
             }
         }
@@ -493,17 +487,9 @@ pub(crate) mod midx_cache {
             None
         }
 
-        pub fn ensure_packs_validated(
-            &self,
-            pack_dir: &Path,
-            pack_names: &[String],
-            diagnostics: &dyn DiagnosticSink,
-        ) {
-            if self.packs_validated.swap(true, Ordering::Relaxed) {
-                return;
-            }
-            for idx_name in pack_names {
-                let idx_path = pack_dir.join(idx_name);
+        fn validate_packs(&self, diagnostics: &dyn DiagnosticSink) {
+            for idx_name in &self.pack_names {
+                let idx_path = self.pack_dir.join(idx_name);
                 if !idx_path.is_file() {
                     continue;
                 }
@@ -563,8 +549,7 @@ pub(crate) mod midx_cache {
                 hash_len,
                 pack_dir: PathBuf::from("/nonexistent"),
                 pack_names: vec!["test-pack.idx".into()],
-                pack_indexes: vec![Arc::new(OnceLock::new())],
-                packs_validated: AtomicBool::new(false),
+                pack_indexes: vec![OnceLock::new()],
             }
         }
 
@@ -661,6 +646,131 @@ pub(crate) mod midx_cache {
         }
 
         #[test]
+        fn strict_and_permissive_views_share_validated_backing_until_invalidation() {
+            use crate::diagnostics::NullDiagnostics;
+            use crate::pack_store::PackStore;
+            use std::sync::Arc;
+            let (root, _) = crate::midx::tests::midx_fixture(true).expect("fixture");
+            let objects = root.path().join(".git/objects");
+            let store = Arc::new(PackStore::new(objects.clone()));
+            let (permissive, strict) = PackStore::with_context(Arc::clone(&store), || {
+                (
+                    super::prepared_chain(&objects, &NullDiagnostics)
+                        .expect("permissive")
+                        .expect("chain"),
+                    super::prepared_chain_strict(&objects, &NullDiagnostics)
+                        .expect("strict")
+                        .expect("chain"),
+                )
+            });
+            assert!(Arc::ptr_eq(
+                &permissive.layers[0].bytes,
+                &strict.layers[0].bytes
+            ));
+            store.invalidate_midx();
+            let refreshed = PackStore::with_context(Arc::clone(&store), || {
+                super::prepared_chain_strict(&objects, &NullDiagnostics)
+                    .expect("refresh")
+                    .expect("chain")
+            });
+            assert!(!Arc::ptr_eq(
+                &refreshed.layers[0].bytes,
+                &strict.layers[0].bytes
+            ));
+        }
+
+        #[test]
+        fn shared_layer_replays_load_warnings_for_the_other_view() {
+            use crate::diagnostics::{CollectingDiagnostics, NullDiagnostics, Warning};
+            use crate::midx::{write_multi_pack_index_with_options, WriteMultiPackIndexOptions};
+            use crate::objects::HashAlgo;
+            use crate::pack_store::PackStore;
+            use std::sync::Arc;
+            let (root, _) = crate::midx::tests::midx_fixture(false).expect("fixture");
+            let objects = root.path().join(".git/objects");
+            let pack_dir = objects.join("pack");
+            write_multi_pack_index_with_options(
+                &pack_dir,
+                &WriteMultiPackIndexOptions {
+                    preferred_pack_idx: Some(0),
+                    ..Default::default()
+                },
+            )
+            .expect("write RIDX");
+            let path = pack_dir.join("multi-pack-index");
+            let mut data = std::fs::read(&path).expect("read");
+            let (off, len) = crate::midx::find_chunk(&data, 12, crate::midx::MIDX_CHUNKID_REVINDEX)
+                .expect("RIDX");
+            assert!(len >= 4);
+            data.drain(off..off + 4);
+            let sentinel = 12 + data[6] as usize * 12;
+            let end = crate::midx::read_be_u64(&data, sentinel + 4).expect("end") - 4;
+            data[sentinel + 4..sentinel + 12].copy_from_slice(&end.to_be_bytes());
+            let payload = data.len() - 20;
+            let hash = HashAlgo::Sha1.checksum_digest(&data[..payload]);
+            data[payload..].copy_from_slice(&hash);
+            std::fs::write(&path, data).expect("write warning fixture");
+            let store = Arc::new(PackStore::new(objects.clone()));
+            PackStore::with_context(store, || {
+                let strict = super::prepared_chain_strict(&objects, &NullDiagnostics)
+                    .expect("strict")
+                    .expect("chain");
+                let sink = CollectingDiagnostics::new();
+                let permissive = super::prepared_chain(&objects, &sink)
+                    .expect("permissive")
+                    .expect("chain");
+                assert_eq!(
+                    sink.warnings(),
+                    vec![
+                        Warning::MidxRevIndexWrongSize,
+                        Warning::MidxBitmapMissingReverseIndex
+                    ]
+                );
+                assert!(Arc::ptr_eq(
+                    &strict.layers[0].bytes,
+                    &permissive.layers[0].bytes
+                ));
+            });
+        }
+
+        #[test]
+        fn concurrent_views_share_one_layer_backing() {
+            use crate::diagnostics::NullDiagnostics;
+            use crate::pack_store::PackStore;
+            use std::sync::{Arc, Barrier};
+            let (root, _) = crate::midx::tests::midx_fixture(true).expect("fixture");
+            let objects = root.path().join(".git/objects");
+            let store = Arc::new(PackStore::new(objects.clone()));
+            let start = Arc::new(Barrier::new(4));
+            let handles: Vec<_> = (0..4)
+                .map(|i| {
+                    let store = Arc::clone(&store);
+                    let start = Arc::clone(&start);
+                    let objects = objects.clone();
+                    std::thread::spawn(move || {
+                        start.wait();
+                        PackStore::with_context(store, || {
+                            if i % 2 == 0 {
+                                super::prepared_chain(&objects, &NullDiagnostics)
+                            } else {
+                                super::prepared_chain_strict(&objects, &NullDiagnostics)
+                            }
+                        })
+                        .expect("prepare")
+                        .expect("chain")
+                    })
+                })
+                .collect();
+            let chains: Vec<_> = handles
+                .into_iter()
+                .map(|h| h.join().expect("thread"))
+                .collect();
+            assert!(chains
+                .iter()
+                .all(|chain| Arc::ptr_eq(&chain.layers[0].bytes, &chains[0].layers[0].bytes)));
+        }
+
+        #[test]
         fn midx_cache_read_be_u32_truncated() {
             assert!(read_be_u32(&[0, 1, 2], 0).is_err());
         }
@@ -668,9 +778,7 @@ pub(crate) mod midx_cache {
 
     /// All incremental MIDX layers for one `objects/pack` directory (newest first).
     pub struct PreparedMidxChain {
-        pack_dir: PathBuf,
-        pack_names_by_layer: Vec<Vec<String>>,
-        layers: Vec<PreparedMidxLayer>,
+        layers: Vec<Arc<PreparedMidxLayer>>,
         packs_validated: AtomicBool,
     }
 
@@ -694,17 +802,14 @@ pub(crate) mod midx_cache {
             oid: &ObjectId,
             diagnostics: &dyn DiagnosticSink,
         ) -> Result<Option<crate::objects::Object>> {
-            for (layer, names) in self.layers.iter().zip(self.pack_names_by_layer.iter()) {
+            for layer in &self.layers {
                 let Some((pack_id, offset)) = layer.lookup_pack_and_offset(oid) else {
                     continue;
                 };
                 self.ensure_packs_validated(diagnostics);
                 match layer.read_at(pack_id, offset)? {
                     Some(obj) => return Ok(Some(obj)),
-                    None => {
-                        layer.ensure_packs_validated(&self.pack_dir, names, diagnostics);
-                        return Ok(None);
-                    }
+                    None => return Ok(None),
                 }
             }
             Ok(None)
@@ -715,13 +820,12 @@ pub(crate) mod midx_cache {
             oid: &ObjectId,
             diagnostics: &dyn DiagnosticSink,
         ) -> Result<Option<ObjectInfo>> {
-            for (layer, names) in self.layers.iter().zip(self.pack_names_by_layer.iter()) {
+            for layer in &self.layers {
                 let Some((pack_id, _offset)) = layer.lookup_pack_and_offset(oid) else {
                     continue;
                 };
                 self.ensure_packs_validated(diagnostics);
                 let Some(idx) = layer.open_pack_index(pack_id) else {
-                    layer.ensure_packs_validated(&self.pack_dir, names, diagnostics);
                     return Ok(None);
                 };
                 return crate::pack::read_object_info_from_pack(idx.as_ref(), oid).map(Some);
@@ -733,16 +837,16 @@ pub(crate) mod midx_cache {
             if self.packs_validated.swap(true, Ordering::Relaxed) {
                 return;
             }
-            for (layer, names) in self.layers.iter().zip(self.pack_names_by_layer.iter()) {
-                layer.ensure_packs_validated(&self.pack_dir, names, diagnostics);
+            for layer in &self.layers {
+                layer.validate_packs(diagnostics);
             }
         }
 
         /// Pack index basenames referenced by any layer in this chain.
         pub(crate) fn covered_pack_basenames(&self) -> std::collections::HashSet<String> {
             let mut out = std::collections::HashSet::new();
-            for names in &self.pack_names_by_layer {
-                for name in names {
+            for layer in &self.layers {
+                for name in &layer.pack_names {
                     out.insert(name.clone());
                 }
             }
@@ -854,28 +958,22 @@ pub(crate) mod midx_cache {
         decode_midx_object_offset(data, raw_off, loff)
     }
 
+    struct CachedLayer {
+        stamp: (Option<std::time::SystemTime>, u64),
+        prepared: Arc<PreparedMidxLayer>,
+        warnings: Vec<Warning>,
+    }
+
     #[derive(Default)]
     pub(crate) struct State {
+        layers: HashMap<PathBuf, CachedLayer>,
         chains: HashMap<PathBuf, Arc<PreparedMidxChain>>,
         strict_chains: HashMap<PathBuf, Arc<PreparedMidxChain>>,
         hot_chain: Option<(PathBuf, Arc<PreparedMidxChain>)>,
     }
 
-    fn build_chain(
-        objects_dir: &Path,
-        diagnostics: &dyn DiagnosticSink,
-    ) -> Result<Option<Arc<PreparedMidxChain>>> {
-        build_chain_impl(objects_dir, diagnostics, false)
-    }
-
-    fn build_chain_strict(
-        objects_dir: &Path,
-        diagnostics: &dyn DiagnosticSink,
-    ) -> Result<Option<Arc<PreparedMidxChain>>> {
-        build_chain_impl(objects_dir, diagnostics, true)
-    }
-
     fn build_chain_impl(
+        state: &mut State,
         objects_dir: &Path,
         diagnostics: &dyn DiagnosticSink,
         require_every_layer: bool,
@@ -888,10 +986,9 @@ pub(crate) mod midx_cache {
         let path_count = paths.len();
         let hash_version = repo_midx_hash_version_for_objects_dir(objects_dir);
         let mut layers = Vec::with_capacity(path_count);
-        let mut pack_names_by_layer = Vec::with_capacity(path_count);
         for path in paths {
-            let file_len = match fs::metadata(&path) {
-                Ok(meta) => meta.len(),
+            let metadata = match fs::metadata(&path) {
+                Ok(meta) => meta,
                 Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
                     if require_every_layer {
                         return Ok(None);
@@ -900,10 +997,22 @@ pub(crate) mod midx_cache {
                 }
                 Err(err) => return Err(Error::Io(err)),
             };
-            if file_len < MIDX_MIN_FILE_LEN {
+            if metadata.len() < MIDX_MIN_FILE_LEN {
                 if require_every_layer {
                     return Ok(None);
                 }
+                continue;
+            }
+            let stamp = (metadata.modified().ok(), metadata.len());
+            if let Some(cached) = state.layers.get(&path).filter(|cached| {
+                stamp.0.is_some()
+                    && cached.stamp == stamp
+                    && cached.prepared.hash_len == if hash_version == 2 { 32 } else { 20 }
+            }) {
+                for warning in &cached.warnings {
+                    diagnostics.warn(warning.clone());
+                }
+                layers.push(Arc::clone(&cached.prepared));
                 continue;
             }
             let bytes = match open_midx_layer_bytes(&path) {
@@ -922,7 +1031,15 @@ pub(crate) mod midx_cache {
                 }
                 Err(err) => return Err(err),
             };
-            let view = match midx_load_for_read(bytes.as_ref(), hash_version, diagnostics) {
+            // Retain load warnings so preparing the other view still reports them even
+            // when the first view was opened with NullDiagnostics.
+            let collected = CollectingDiagnostics::new();
+            let loaded = midx_load_for_read(bytes.as_ref(), hash_version, &collected);
+            let warnings = collected.warnings();
+            for warning in &warnings {
+                diagnostics.warn(warning.clone());
+            }
+            let view = match loaded {
                 Ok(MidxLoadResult::Ok(v)) => v,
                 Ok(MidxLoadResult::Skip) => {
                     if require_every_layer {
@@ -933,8 +1050,16 @@ pub(crate) mod midx_cache {
                 Err(Error::Midx(_)) if require_every_layer => return Ok(None),
                 Err(err) => return Err(err),
             };
-            pack_names_by_layer.push(view.pack_names.clone());
-            layers.push(PreparedMidxLayer::prepare(bytes, view, &pack_dir));
+            let prepared = Arc::new(PreparedMidxLayer::prepare(bytes, view, &pack_dir));
+            state.layers.insert(
+                path,
+                CachedLayer {
+                    stamp,
+                    prepared: Arc::clone(&prepared),
+                    warnings,
+                },
+            );
+            layers.push(prepared);
         }
         if layers.is_empty() {
             return Ok(None);
@@ -943,76 +1068,78 @@ pub(crate) mod midx_cache {
             return Ok(None);
         }
         Ok(Some(Arc::new(PreparedMidxChain {
-            pack_dir,
-            pack_names_by_layer,
             layers,
             packs_validated: AtomicBool::new(false),
         })))
     }
 
-    /// Cached prepared chain for `objects_dir` (thread-local + read-lock on first use per thread).
+    /// Cached permissive chain: usable layers survive missing or skipped layers.
     pub fn prepared_chain(
         objects_dir: &Path,
         diagnostics: &dyn DiagnosticSink,
     ) -> Result<Option<Arc<PreparedMidxChain>>> {
-        if let Some(chain) = crate::pack_store::PackStore::with_current_or_implicit_midx(|state| {
-            state
-                .hot_chain
-                .as_ref()
-                .and_then(|(path, chain)| (path == objects_dir).then(|| Arc::clone(chain)))
-                .or_else(|| state.chains.get(&objects_dir.join("pack")).map(Arc::clone))
-        }) {
+        let (result, warnings) =
             crate::pack_store::PackStore::with_current_or_implicit_midx(|state| {
-                state.hot_chain = Some((objects_dir.to_path_buf(), Arc::clone(&chain)));
+                if let Some((path, chain)) = &state.hot_chain {
+                    if path == objects_dir {
+                        return (Ok(Some(Arc::clone(chain))), Vec::new());
+                    }
+                }
+                let pack_dir = objects_dir.join("pack");
+                if let Some(chain) = state.chains.get(&pack_dir) {
+                    let chain = Arc::clone(chain);
+                    state.hot_chain = Some((objects_dir.to_path_buf(), Arc::clone(&chain)));
+                    return (Ok(Some(chain)), Vec::new());
+                }
+                let collected = CollectingDiagnostics::new();
+                let result = build_chain_impl(state, objects_dir, &collected, false);
+                if let Ok(Some(chain)) = &result {
+                    state.chains.insert(pack_dir, Arc::clone(chain));
+                    state.hot_chain = Some((objects_dir.to_path_buf(), Arc::clone(chain)));
+                }
+                (result, collected.warnings())
             });
-            return Ok(Some(chain));
+        // Caller-provided sinks may reenter the ODB; never call them under the cache lock.
+        for warning in warnings {
+            diagnostics.warn(warning);
         }
-        let pack_dir = objects_dir.join("pack");
-        let built = build_chain(objects_dir, diagnostics)?;
-        let Some(chain) = built else {
-            return Ok(None);
-        };
-        let stored = crate::pack_store::PackStore::with_current_or_implicit_midx(|state| {
-            let chain = Arc::clone(
-                state
-                    .chains
-                    .entry(pack_dir)
-                    .or_insert_with(|| Arc::clone(&chain)),
-            );
-            state.hot_chain = Some((objects_dir.to_path_buf(), Arc::clone(&chain)));
-            chain
-        });
-        Ok(Some(stored))
+        result
     }
 
-    /// Like [`prepared_chain`], but every referenced chain layer must load cleanly.
+    /// Every referenced layer must load cleanly; valid layers share backing with
+    /// the permissive view, but a partial permissive chain never satisfies this view.
     pub fn prepared_chain_strict(
         objects_dir: &Path,
         diagnostics: &dyn DiagnosticSink,
     ) -> Result<Option<Arc<PreparedMidxChain>>> {
-        let pack_dir = objects_dir.join("pack");
-        if let Some(chain) = crate::pack_store::PackStore::with_current_or_implicit_midx(|state| {
-            state.strict_chains.get(&pack_dir).map(Arc::clone)
-        }) {
-            return Ok(Some(chain));
+        let (result, warnings) =
+            crate::pack_store::PackStore::with_current_or_implicit_midx(|state| {
+                let pack_dir = objects_dir.join("pack");
+                if let Some(chain) = state.strict_chains.get(&pack_dir) {
+                    return (Ok(Some(Arc::clone(chain))), Vec::new());
+                }
+                let collected = CollectingDiagnostics::new();
+                let result = build_chain_impl(state, objects_dir, &collected, true);
+                if let Ok(Some(chain)) = &result {
+                    state.strict_chains.insert(pack_dir, Arc::clone(chain));
+                }
+                (result, collected.warnings())
+            });
+        for warning in warnings {
+            diagnostics.warn(warning);
         }
-        let built = match build_chain_strict(objects_dir, diagnostics) {
-            Ok(v) => v,
-            Err(Error::Midx(_)) => return Ok(None),
-            Err(err) => return Err(err),
-        };
-        let Some(chain) = built else {
-            return Ok(None);
-        };
-        let stored = crate::pack_store::PackStore::with_current_or_implicit_midx(|state| {
-            Arc::clone(
-                state
-                    .strict_chains
-                    .entry(pack_dir)
-                    .or_insert_with(|| Arc::clone(&chain)),
-            )
-        });
-        Ok(Some(stored))
+        result
+    }
+
+    pub(super) fn cached_pack_names(path: &Path, metadata: &fs::Metadata) -> Option<Vec<String>> {
+        let stamp = (metadata.modified().ok(), metadata.len());
+        crate::pack_store::PackStore::with_current_or_implicit_midx(|state| {
+            state
+                .layers
+                .get(path)
+                .filter(|cached| stamp.0.is_some() && cached.stamp == stamp)
+                .map(|cached| cached.prepared.pack_names.clone())
+        })
     }
 
     pub fn evict_pack_dir(pack_dir: &Path) {
@@ -1032,6 +1159,7 @@ pub(crate) mod midx_cache {
         }) {
             state.hot_chain = None;
         }
+        state.layers.retain(|path, _| !path.starts_with(pack_dir));
         state.chains.retain(|path, _| !path.starts_with(pack_dir));
         state
             .strict_chains
@@ -2175,20 +2303,43 @@ fn midx_checksum_is_valid(data: &[u8]) -> bool {
     HashAlgo::from_len(hash_len).is_some_and(|algo| verify_trailer(algo, data).is_ok())
 }
 
-/// Return the `pack-*.idx` basename for the MIDX preferred pack (RIDX position 0).
+/// Pack index basenames stored in the active tip MIDX's pack-names chunk.
 ///
-/// `objects_dir` is the repository object database (e.g. `.git/objects`), not `objects/pack`.
+/// `objects_dir` is the repository object database (for example `.git/objects`).
+/// For incremental chains this returns only the tip layer's names, not the union
+/// of all layers. Unchanged prepared metadata is reused; otherwise only header,
+/// chunk-table and pack-name pages are read, without allocating the object tables.
 ///
-/// Used by `test-tool read-midx --preferred-pack` compatibility.
-/// Pack index basenames (`pack-*.idx`) stored in the MIDX pack-names chunk.
+/// # Errors
+///
+/// Returns I/O errors or [`Error::CorruptObject`] for missing or malformed metadata.
 pub fn read_midx_pack_idx_names(objects_dir: &Path) -> Result<Vec<String>> {
     let pack_dir = objects_dir.join("pack");
     let path = resolve_tip_midx_path(&pack_dir)
         .ok_or_else(|| Error::CorruptObject("no multi-pack-index found".to_owned()))?;
-    let data = fs::read(&path).map_err(Error::Io)?;
+    let metadata = fs::metadata(&path).map_err(Error::Io)?;
+    read_midx_pack_idx_names_from_path(&path, &metadata)
+}
+
+/// Read names using an already resolved tip path and its current metadata.
+/// Errors have the same meaning as [`read_midx_pack_idx_names`].
+pub(crate) fn read_midx_pack_idx_names_from_path(
+    path: &Path,
+    metadata: &fs::Metadata,
+) -> Result<Vec<String>> {
+    if let Some(names) = midx_cache::cached_pack_names(path, metadata) {
+        return Ok(names);
+    }
+    // Mapping only faults the header, TOC and PNAM pages; reading names must not
+    // allocate or scan the object tables of a large MIDX.
+    let data = open_midx_layer_bytes(path)?;
     let (_, hdr_end, _) = parse_midx_header(&data)?;
     let (pn_off, pn_len) = find_chunk(&data, hdr_end, MIDX_CHUNKID_PACKNAMES)?;
-    parse_pack_names_blob(&data[pn_off..pn_off + pn_len])
+    let blob = pn_off
+        .checked_add(pn_len)
+        .and_then(|end| data.get(pn_off..end))
+        .ok_or_else(|| Error::CorruptObject("MIDX pack names are outside the file".to_owned()))?;
+    parse_pack_names_blob(blob)
 }
 
 /// A single MIDX-referenced object together with the pack it is attributed to.
@@ -2724,7 +2875,7 @@ enum MidxLoadResult {
 /// in git/midx.c. Fatal corruptions return [`Error::Midx`]; recoverable corruptions emit
 /// [`Warning`] values through `diagnostics` and return [`MidxLoadResult::Skip`].
 fn midx_load_for_read(
-    data: &[u8],
+    data: &PackData,
     expected_hash_version: u8,
     diagnostics: &dyn DiagnosticSink,
 ) -> Result<MidxLoadResult> {
@@ -2830,7 +2981,17 @@ fn midx_load_for_read(
         start += rel + 1;
     }
 
-    if !midx_checksum_is_valid(data) {
+    let payload_end = data.len() - hash_len;
+    let algo = if hash_version == HASH_VERSION_SHA256 {
+        HashAlgo::Sha256
+    } else {
+        HashAlgo::Sha1
+    };
+    let budget = crate::pack_map::ResidentBudget::new(data, 2 * 1024 * 1024);
+    let valid = budget.checksum(algo, &data[..payload_end]) == data[payload_end..];
+    // Validation touches every page once. Keep only pages later lookups actually need.
+    data.release_resident();
+    if !valid {
         diagnostics.warn(Warning::MidxChecksumMismatch);
         return Ok(MidxLoadResult::Skip);
     }
@@ -2845,15 +3006,13 @@ fn midx_load_for_read(
     }))
 }
 
-/// Eagerly validate that every pack named by the active MIDX has a readable `.idx`.
+/// Validate existing pack indexes named by the active MIDX once per prepared chain view.
 ///
-/// Mirrors git/packfile.c `open_pack_index`: when `prepare_packed_git` registers the
-/// packs the MIDX references, a pack whose `.idx` cannot be opened (truncated/corrupt)
-/// triggers `error: packfile <pack> index unavailable`. Git reports this once because the
-/// MIDX/pack store is prepared a single time; this routine reproduces that even when the
-/// object that triggered the read is found loose (so it never reaches the per-object MIDX
-/// lookup). Runs at most once per process per `objects_dir`.
-/// Validate pack indexes named by the active MIDX once per prepared layer view.
+/// This advisory check also runs when an ODB read ultimately finds a loose object.
+/// Strict and permissive views retain independent diagnostic state while sharing
+/// validated MIDX backing within the active [`crate::pack_store::PackStore`].
+/// Refresh or invalidation permits a new check. This variant discards warnings;
+/// use [`validate_midx_referenced_packs_with_diagnostics`] to collect them.
 pub fn validate_midx_referenced_packs(objects_dir: &Path) {
     validate_midx_referenced_packs_with_diagnostics(objects_dir, &NullDiagnostics);
 }
@@ -3726,7 +3885,7 @@ mod tests {
     }
 
     /// Pack fixture: one commit, all objects in a single pack (no MIDX yet).
-    fn midx_fixture(with_midx: bool) -> Option<(tempfile::TempDir, ObjectId)> {
+    pub(super) fn midx_fixture(with_midx: bool) -> Option<(tempfile::TempDir, ObjectId)> {
         if !git_available() {
             return None;
         }

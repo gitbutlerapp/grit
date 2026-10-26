@@ -525,3 +525,54 @@ fn corrupt_midx_reports_unusable_and_packs_still_read() {
     let via_packs = packs.read(&oid).expect("pack read");
     assert!(via_packs.is_some());
 }
+
+#[test]
+fn partial_permissive_chain_never_satisfies_strict_store_and_refresh_recovers() {
+    use grit_lib::diagnostics::{CollectingDiagnostics, Warning};
+    use grit_lib::objects::midx::try_read_object_via_midx_with_diagnostics;
+
+    for failure in ["missing", "checksum", "structure"] {
+        let (_repo, objects, _old, new) = grit_two_layer_incremental_fixture().expect("two layers");
+        let hashes = read_chain_hashes(&objects.join("pack")).expect("hashes");
+        let base = objects.join(format!(
+            "pack/multi-pack-index.d/multi-pack-index-{}.midx",
+            hashes[0]
+        ));
+        let original = fs::read(&base).expect("base");
+        if failure == "missing" {
+            fs::remove_file(&base).expect("remove layer");
+        } else {
+            let mut bytes = original.clone();
+            if failure == "checksum" {
+                *bytes.last_mut().expect("trailer") ^= 1;
+            } else {
+                bytes[0] = 0;
+            }
+            fs::write(&base, bytes).expect("corrupt layer");
+        }
+        let store = Arc::new(PackStore::new(objects.clone()));
+        let sink = CollectingDiagnostics::new();
+        let permissive = PackStore::with_context(Arc::clone(&store), || {
+            try_read_object_via_midx_with_diagnostics(&objects, &new, &sink)
+        });
+        if failure == "structure" {
+            assert!(matches!(permissive, Err(grit_lib::error::Error::Midx(_))));
+        } else {
+            assert!(permissive.expect("partial chain").is_some());
+        }
+        if failure == "checksum" {
+            assert!(sink.warnings().contains(&Warning::MidxChecksumMismatch));
+        }
+        let midx = MidxObjects::new(Arc::clone(&store), true).expect("strict backend");
+        assert_eq!(midx.status(), MidxObjectsStatus::Unusable, "{failure}");
+        assert!(midx.read(&new).expect("unusable read").is_none());
+        assert!(PackedObjects::new(Arc::clone(&store))
+            .read(&new)
+            .expect("pack fallback")
+            .is_some());
+        fs::write(&base, &original).expect("restore layer");
+        assert!(midx.refresh().expect("refresh"));
+        assert_eq!(midx.status(), MidxObjectsStatus::Active);
+        assert!(midx.read(&new).expect("restored read").is_some());
+    }
+}

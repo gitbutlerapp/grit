@@ -654,6 +654,22 @@ cargo bench -p grit-lib --bench worktree
 cargo bench -p grit-lib --bench history
 ```
 
+The **`midx`** suite measures warm lookups and cold preparation of both strict and
+permissive views in a fresh repository cache. To use a large Git-written MIDX
+instead of the small default fixture, set `GRIT_MIDX_BENCH_OBJECTS` to its object
+directory (OS caches remain warm):
+
+```bash
+GRIT_MIDX_BENCH_OBJECTS=/path/to/repo/.git/objects \
+  cargo bench -p grit-lib --bench midx -- midx_prepare
+cargo test -p grit-lib --test mapped_cg_midx_git --test odb_conformance_midx --test midx_corruption
+cargo test -p grit-cli --test status_midx_memory -- --nocapture
+```
+
+The Linux status regression creates a Git-written MIDX over 420,000 historical
+blobs while HEAD contains one file. It compares subprocess peak RSS with and
+without MIDX for human, short, JSON, and Markdown output, with system Git controls.
+
 CI runs a one-iteration smoke pass (every benchmark once):
 
 ```bash

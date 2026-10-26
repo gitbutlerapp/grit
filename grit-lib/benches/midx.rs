@@ -8,8 +8,10 @@ use std::process::Command;
 
 use criterion::{criterion_group, criterion_main, Criterion};
 use grit_lib::objects::midx::{midx_lookup_pack_and_offset_opt, try_read_object_via_midx};
+use grit_lib::objects::odb::store::MidxObjects;
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::pack::{clear_pack_cache, read_pack_index_cached};
+use grit_lib::objects::pack_store::PackStore;
 use grit_lib::objects::ObjectId;
 use std::sync::Arc;
 
@@ -173,6 +175,37 @@ fn bench_midx_lookup(c: &mut Criterion) {
     group.finish();
 }
 
+fn bench_midx_prepare(c: &mut Criterion) {
+    // Set this to a real repository's objects directory to measure large, Git-written
+    // MIDX files. Each iteration owns a fresh cache; the OS page cache stays warm.
+    let fixture = if std::env::var_os("GRIT_MIDX_BENCH_OBJECTS").is_none() {
+        MidxBenchFixture::build(10)
+    } else {
+        None
+    };
+    let Some(objects) = std::env::var_os("GRIT_MIDX_BENCH_OBJECTS")
+        .map(std::path::PathBuf::from)
+        .or_else(|| fixture.as_ref().map(|f| f.objects.clone()))
+    else {
+        return;
+    };
+    let miss = ObjectId::from_hex("00000000000000000000000000000000000000f1").expect("oid");
+    let mut group = c.benchmark_group("midx_prepare");
+    group.bench_function("strict_and_permissive_cold", |b| {
+        b.iter(|| {
+            let store = Arc::new(PackStore::new(objects.clone()));
+            PackStore::with_context(Arc::clone(&store), || {
+                black_box(MidxObjects::new(store, true).expect("strict preparation"));
+                black_box(
+                    midx_lookup_pack_and_offset_opt(&objects, &miss)
+                        .expect("permissive preparation"),
+                );
+            });
+        });
+    });
+    group.finish();
+}
+
 fn bench_midx_batch_reads(c: &mut Criterion) {
     let Some(fx) = MidxBenchFixture::build(10) else {
         eprintln!("SKIP midx batch bench: git fixture unavailable");
@@ -242,5 +275,10 @@ fn git_cat_file_batch(git_dir: &Path, oids: &[ObjectId]) {
     assert!(status.success());
 }
 
-criterion_group!(midx, bench_midx_lookup, bench_midx_batch_reads);
+criterion_group!(
+    midx,
+    bench_midx_lookup,
+    bench_midx_prepare,
+    bench_midx_batch_reads
+);
 criterion_main!(midx);

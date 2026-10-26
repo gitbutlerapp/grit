@@ -12,7 +12,6 @@ use crate::diagnostics::NullDiagnostics;
 use crate::error::{Error, Result};
 use crate::midx::{prepared_midx_chain_strict, PreparedMidxChain};
 use crate::objects::{HashAlgo, Object, ObjectId, ObjectIdPrefix, ObjectInfo};
-use crate::pack::clear_pack_cache;
 use crate::pack_store::PackStore;
 
 use super::{ObjectStore, ObjectStream, PackedObjects};
@@ -29,6 +28,13 @@ pub enum MidxObjectsStatus {
 }
 
 /// MIDX-backed read-only [`ObjectStore`] for one `objects/` directory.
+///
+/// Preparation and payload reads use the supplied [`PackStore`], including calls
+/// made outside an explicit pack-read context. Strict and permissive MIDX views
+/// in that store share validated layer mappings. Checksums are checked once per
+/// layer with bounded residency; lookup pages are faulted in as needed.
+/// Independently opened stores keep independent snapshots. Call
+/// [`ObjectStore::refresh`] after replacing MIDX or pack files externally.
 pub struct MidxObjects {
     packs: PackedObjects,
     multi_pack_index: bool,
@@ -57,7 +63,9 @@ impl MidxObjects {
     pub fn new(store: Arc<PackStore>, multi_pack_index: bool) -> Result<Self> {
         let packs = PackedObjects::new(Arc::clone(&store));
         let status = if multi_pack_index {
-            classify_midx_status(store.objects_dir())?
+            PackStore::with_context(Arc::clone(&store), || {
+                classify_midx_status(store.objects_dir())
+            })?
         } else {
             MidxObjectsStatus::Disabled
         };
@@ -107,7 +115,10 @@ impl MidxObjects {
         if self.status() != MidxObjectsStatus::Active {
             return Ok(None);
         }
-        match prepared_midx_chain_strict(self.packs.pack_store().objects_dir()) {
+        let store = self.packs.pack_store();
+        match PackStore::with_context(Arc::clone(store), || {
+            prepared_midx_chain_strict(store.objects_dir())
+        }) {
             Ok(chain) => Ok(chain),
             Err(Error::Midx(_)) => Ok(None),
             Err(err) => Err(err),
@@ -115,17 +126,21 @@ impl MidxObjects {
     }
 
     fn read_via_chain(&self, oid: &ObjectId) -> Result<Option<Object>> {
-        let Some(chain) = self.active_chain()? else {
-            return Ok(None);
-        };
-        chain.try_read_object(oid, &NullDiagnostics)
+        PackStore::with_context(Arc::clone(self.packs.pack_store()), || {
+            let Some(chain) = self.active_chain()? else {
+                return Ok(None);
+            };
+            chain.try_read_object(oid, &NullDiagnostics)
+        })
     }
 
     fn read_info_via_chain(&self, oid: &ObjectId) -> Result<Option<ObjectInfo>> {
-        let Some(chain) = self.active_chain()? else {
-            return Ok(None);
-        };
-        chain.try_read_info(oid, &NullDiagnostics)
+        PackStore::with_context(Arc::clone(self.packs.pack_store()), || {
+            let Some(chain) = self.active_chain()? else {
+                return Ok(None);
+            };
+            chain.try_read_info(oid, &NullDiagnostics)
+        })
     }
 }
 
@@ -184,10 +199,11 @@ impl ObjectStore for MidxObjects {
         if !self.multi_pack_index {
             return Ok(false);
         }
-        let objects_dir = self.packs.pack_store().objects_dir();
-        clear_pack_cache();
-        crate::midx::evict_midx_read_cache_for_pack_dir(&objects_dir.join("pack"));
-        let new_status = classify_midx_status(objects_dir)?;
+        let store = self.packs.pack_store();
+        store.invalidate_all();
+        let new_status = PackStore::with_context(Arc::clone(store), || {
+            classify_midx_status(store.objects_dir())
+        })?;
         let mut guard = self
             .status
             .write()

@@ -1072,11 +1072,16 @@ pub(crate) mod pack_cache {
         let Some(midx_path) = crate::midx::resolve_tip_midx_path(pack_dir) else {
             return (SystemTime::UNIX_EPOCH, HashSet::new());
         };
-        let mtime = fs::metadata(&midx_path)
-            .and_then(|m| m.modified())
+        let metadata = fs::metadata(&midx_path).ok();
+        let mtime = metadata
+            .as_ref()
+            .and_then(|m| m.modified().ok())
             .unwrap_or(SystemTime::UNIX_EPOCH);
-        let objects_dir = pack_dir.parent().unwrap_or(pack_dir);
-        let names = crate::midx::read_midx_pack_idx_names(objects_dir)
+        let names = metadata
+            .as_ref()
+            .and_then(|metadata| {
+                crate::midx::read_midx_pack_idx_names_from_path(&midx_path, metadata).ok()
+            })
             .unwrap_or_default()
             .into_iter()
             .collect();

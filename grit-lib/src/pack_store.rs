@@ -242,7 +242,18 @@ impl PackStore {
     }
 
     /// Run `f` with `store` as the pack-read context on this thread.
+    ///
+    /// Nested calls for the same store reuse the current context. Distinct store
+    /// handles remain isolated even when they name the same object directory.
     pub fn with_context<R>(store: Arc<Self>, f: impl FnOnce() -> R) -> R {
+        if CURRENT.with(|current| {
+            current
+                .borrow()
+                .as_ref()
+                .is_some_and(|active| Arc::ptr_eq(active, &store))
+        }) {
+            return f();
+        }
         let _guard = PackReadContextGuard::install(store);
         f()
     }
