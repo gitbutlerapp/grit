@@ -4233,6 +4233,22 @@ pub struct IndexStatFields {
 }
 
 impl IndexStatFields {
+    /// Capture the same index fields as `from_metadata` from a Linux fstatat result.
+    #[cfg(all(target_os = "linux", target_pointer_width = "64"))]
+    pub(crate) fn from_linux_stat(stat: &libc::stat) -> Self {
+        Self {
+            ctime_sec: stat.st_ctime as u32,
+            ctime_nsec: stat.st_ctime_nsec as u32,
+            mtime_sec: stat.st_mtime as u32,
+            mtime_nsec: stat.st_mtime_nsec as u32,
+            dev: stat.st_dev as u32,
+            ino: stat.st_ino as u32,
+            uid: stat.st_uid,
+            gid: stat.st_gid,
+            size: munge_index_size(stat.st_size as u64),
+        }
+    }
+
     /// Munged size field stored in the index (see [`munge_index_size`]).
     #[must_use]
     pub(crate) fn index_size(&self) -> u32 {

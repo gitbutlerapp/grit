@@ -4848,9 +4848,9 @@ fn diff_index_to_worktree_inner(
     }
 
     use crate::worktree_scan::{
-        collect_blob_lookup_batches, group_blob_entries_by_dir, stat_scan_thread_count,
-        visit_blob_lookup_batches, BlobDiskLookup, BlobScanSparseMode, WorktreeBlobScanOptions,
-        PARALLEL_STAT_MIN_ENTRIES,
+        collect_blob_lookup_batches_with_literal_paths, group_blob_entries_by_dir,
+        stat_scan_thread_count, visit_blob_lookup_batches, BlobDiskLookup, BlobScanSparseMode,
+        WorktreeBlobScanOptions, PARALLEL_STAT_MIN_ENTRIES,
     };
     let preload_index = config
         .get_bool("core.preloadIndex")
@@ -4903,7 +4903,7 @@ fn diff_index_to_worktree_inner(
     } else {
         BlobScanSparseMode::Dense
     };
-    let blob_stat_batches = collect_blob_lookup_batches(
+    let blob_stat_batches = collect_blob_lookup_batches_with_literal_paths(
         index,
         &blob_dirs,
         blob_scan,
@@ -4911,6 +4911,7 @@ fn diff_index_to_worktree_inner(
         &config,
         dir_abs,
         file_abs,
+        !precompose_unicode && !ignorecase,
         |rel_path| {
             dir_symlinks.has_symlink_in_path_bytes(
                 work_tree,

@@ -2,9 +2,12 @@
 //!
 //! Groups indexed blob paths by parent directory. On Windows each directory is listed once with
 //! `read_dir` and tracked files reuse the listing's `DirEntry` metadata, because a path stat
-//! opens a handle per file there. Elsewhere each tracked path gets one `lstat`, like Git's
-//! preload: listing a directory costs more than stat-ing its tracked files (hashed-directory
-//! `readdir` on ext4 dominates large directories).
+//! opens a handle per file there. Elsewhere each tracked path gets one metadata probe:
+//! listing a directory costs more than probing its tracked files (`readdir` on ext4
+//! dominates large directories). Literal paths on 64-bit Linux can share a parent handle
+//! and use `fstatat` without following file symlinks, avoiding repeated absolute path
+//! construction and lookup. Small directories and paths requiring case or Unicode
+//! resolution keep the per-path metadata lookup.
 //!
 //! When [`WorktreeBlobScanOptions::preload_index`] is true and the tracked blob count is at
 //! least [`PARALLEL_STAT_MIN_ENTRIES`], stat collection preloads disk lookups in parallel by
@@ -408,6 +411,22 @@ pub(crate) struct BlobDiskStat {
 }
 
 impl BlobDiskStat {
+    #[cfg(all(target_os = "linux", target_pointer_width = "64"))]
+    fn from_linux_stat(stat: &libc::stat) -> Self {
+        let kind = stat.st_mode & libc::S_IFMT;
+        Self {
+            fields: crate::index::IndexStatFields::from_linux_stat(stat),
+            git_mode: if kind == libc::S_IFLNK {
+                crate::index::MODE_SYMLINK
+            } else if stat.st_mode & 0o111 != 0 {
+                crate::index::MODE_EXECUTABLE
+            } else {
+                crate::index::MODE_REGULAR
+            },
+            is_dir: kind == libc::S_IFDIR,
+        }
+    }
+
     #[must_use]
     pub(crate) fn from_metadata(meta: &fs::Metadata) -> Self {
         Self {
@@ -656,6 +675,7 @@ fn collect_blob_lookups_in_directory(
     entry_indices: &[usize],
     dir_abs: &dyn Fn(&[u8]) -> PathBuf,
     file_abs: &dyn Fn(&[u8]) -> PathBuf,
+    literal_paths: bool,
     under_symlink: bool,
     out: &mut Vec<(usize, BlobDiskLookup)>,
     sparse: BlobScanSparseMode,
@@ -672,6 +692,7 @@ fn collect_blob_lookups_in_directory(
         entry_indices,
         dir_abs,
         file_abs,
+        literal_paths,
         under_symlink,
         &mut |entry_index, rel_path, lookup| {
             #[cfg(not(windows))]
@@ -711,12 +732,14 @@ fn dir_has_symlink_ancestor(
 /// `under_symlink` reports every entry as [`BlobDiskLookup::Missing`] without I/O: a symlink
 /// replaced a directory on the path, so the indexed files are gone even if the link target
 /// holds files with the same names.
+#[allow(clippy::too_many_arguments)]
 fn for_each_blob_in_one_directory<F>(
     index: &Index,
     dir: &[u8],
     entry_indices: &[usize],
     dir_abs: &dyn Fn(&[u8]) -> PathBuf,
     file_abs: &dyn Fn(&[u8]) -> PathBuf,
+    literal_paths: bool,
     under_symlink: bool,
     visit: &mut F,
 ) -> Result<()>
@@ -729,6 +752,17 @@ where
             visit(entry_index, rel_path, BlobDiskLookup::Missing)?;
         }
         return Ok(());
+    }
+
+    #[cfg(not(all(target_os = "linux", target_pointer_width = "64")))]
+    let _ = literal_paths;
+    #[cfg(all(target_os = "linux", target_pointer_width = "64"))]
+    // Amortize opening and closing a parent across several file lookups.
+    if literal_paths && entry_indices.len() >= 8 {
+        let abs_dir = dir_abs(dir);
+        if let Ok(handle) = open_stat_directory(&abs_dir) {
+            return for_each_blob_at_directory(index, entry_indices, &handle, &abs_dir, visit);
+        }
     }
 
     if !LIST_PARENT_DIRECTORIES {
@@ -773,12 +807,81 @@ where
     Ok(())
 }
 
+/// O_PATH permits metadata lookups in searchable directories without requiring read access.
+#[cfg(all(target_os = "linux", target_pointer_width = "64"))]
+fn open_stat_directory(path: &Path) -> io::Result<fs::File> {
+    use std::os::unix::fs::OpenOptionsExt;
+    fs::OpenOptions::new()
+        .read(true)
+        .custom_flags(libc::O_PATH | libc::O_DIRECTORY | libc::O_NOFOLLOW)
+        .open(path)
+}
+
+/// Resolve each file relative to an already opened parent, without following file symlinks.
+#[cfg(all(target_os = "linux", target_pointer_width = "64"))]
+fn for_each_blob_at_directory<F>(
+    index: &Index,
+    entry_indices: &[usize],
+    directory: &fs::File,
+    abs_dir: &Path,
+    visit: &mut F,
+) -> Result<()>
+where
+    F: FnMut(usize, &[u8], BlobDiskLookup) -> Result<()>,
+{
+    use std::os::fd::AsRawFd;
+    let count_probes = probe_counts(abs_dir);
+    let mut name = Vec::new();
+    for &entry_index in entry_indices {
+        let rel = entry_rel_path(index, entry_index)?;
+        let file_name = entry_file_name(index, entry_index)?;
+        if file_name.contains(&0) {
+            return Err(Error::Io(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "file name contains NUL",
+            )));
+        }
+        name.clear();
+        name.reserve(file_name.len() + 1);
+        name.extend_from_slice(file_name);
+        name.push(0);
+        let mut stat = std::mem::MaybeUninit::<libc::stat>::uninit();
+        if count_probes {
+            WORKTREE_METADATA_PROBE.fetch_add(1, Ordering::Relaxed);
+        }
+        // SAFETY: directory owns a valid fd; name is NUL-terminated and stat points to
+        // writable storage. AT_SYMLINK_NOFOLLOW preserves lstat semantics for the file.
+        let result = unsafe {
+            libc::fstatat(
+                directory.as_raw_fd(),
+                name.as_ptr().cast(),
+                stat.as_mut_ptr(),
+                libc::AT_SYMLINK_NOFOLLOW,
+            )
+        };
+        let lookup = if result == 0 {
+            // SAFETY: a successful fstatat initialized the entire stat structure.
+            let stat = unsafe { stat.assume_init() };
+            BlobDiskLookup::Present(BlobDiskStat::from_linux_stat(&stat))
+        } else {
+            let error = io::Error::last_os_error();
+            match error.kind() {
+                io::ErrorKind::NotFound | io::ErrorKind::NotADirectory => BlobDiskLookup::Missing,
+                _ => return Err(Error::Io(error)),
+            }
+        };
+        visit(entry_index, rel, lookup)?;
+    }
+    Ok(())
+}
+
 fn collect_blob_lookups_serial(
     index: &Index,
     plan: &BlobScanPlan,
     has_symlink_ancestor: &mut dyn FnMut(&[u8]) -> bool,
     dir_abs: &dyn Fn(&[u8]) -> PathBuf,
     file_abs: &dyn Fn(&[u8]) -> PathBuf,
+    literal_paths: bool,
     sparse: BlobScanSparseMode,
 ) -> Result<(Vec<(usize, BlobDiskLookup)>, usize)> {
     let mut out = match sparse {
@@ -798,6 +901,7 @@ fn collect_blob_lookups_serial(
             entry_indices,
             dir_abs,
             file_abs,
+            literal_paths,
             under_symlink,
             &mut out,
             sparse,
@@ -869,6 +973,7 @@ fn lookup_lone_blob_in_directory(
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 fn preload_blob_lookups_parallel(
     index: &Index,
     plan: &BlobScanPlan,
@@ -876,6 +981,7 @@ fn preload_blob_lookups_parallel(
     has_symlink_ancestor: &(dyn Fn(&[u8]) -> bool + Sync),
     dir_abs: Arc<DirAbsFn>,
     file_abs: Arc<DirAbsFn>,
+    literal_paths: bool,
     sparse: BlobScanSparseMode,
 ) -> Result<Vec<Vec<(usize, BlobDiskLookup)>>> {
     let blob_count = plan.len();
@@ -912,6 +1018,7 @@ fn preload_blob_lookups_parallel(
                             entry_indices,
                             dir_abs.as_ref(),
                             file_abs.as_ref(),
+                            literal_paths,
                             under_symlink,
                             &mut local,
                             sparse,
@@ -969,6 +1076,7 @@ where
         &mut has_symlink_ancestor,
         &dir_abs,
         &file_abs,
+        false,
         BlobScanSparseMode::Dense,
     )?;
     if scanned != plan.len() {
@@ -1000,7 +1108,42 @@ pub(crate) fn collect_blob_lookup_batches(
     has_symlink_ancestor: impl Fn(&[u8]) -> bool + Sync,
     sparse: BlobScanSparseMode,
 ) -> Result<Vec<Vec<(usize, BlobDiskLookup)>>> {
+    collect_blob_lookup_batches_with_literal_paths(
+        index,
+        plan,
+        scan_options,
+        thread_policy,
+        config,
+        dir_abs,
+        file_abs,
+        false,
+        has_symlink_ancestor,
+        sparse,
+    )
+}
+
+/// Collect lookups with directory-relative stats when `literal_paths` is true.
+///
+/// Only enable this when `file_abs` joins the raw index path without case or Unicode
+/// resolution. On 64-bit Linux multi-file directories then share one parent handle;
+/// other directories and platforms use `file_abs` as usual.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn collect_blob_lookup_batches_with_literal_paths(
+    index: &Index,
+    plan: &BlobScanPlan,
+    scan_options: WorktreeBlobScanOptions,
+    thread_policy: &crate::parallel::ThreadPolicy,
+    config: &crate::config::ConfigSet,
+    dir_abs: impl Fn(&[u8]) -> PathBuf + Send + Sync + 'static,
+    file_abs: impl Fn(&[u8]) -> PathBuf + Send + Sync + 'static,
+    literal_paths: bool,
+    has_symlink_ancestor: impl Fn(&[u8]) -> bool + Sync,
+    sparse: BlobScanSparseMode,
+) -> Result<Vec<Vec<(usize, BlobDiskLookup)>>> {
     let blob_count = plan.len();
+    // Keep small scans on the existing metadata path: setting up descriptor-relative
+    // probes pays off on the larger indexes that also justify stat preload.
+    let literal_paths = literal_paths && blob_count >= PARALLEL_STAT_MIN_ENTRIES;
     let threads = stat_scan_thread_count(thread_policy, config, scan_options, blob_count);
     let dir_abs_arc: Arc<DirAbsFn> = Arc::new(dir_abs);
     let file_abs_arc: Arc<DirAbsFn> = Arc::new(file_abs);
@@ -1014,6 +1157,7 @@ pub(crate) fn collect_blob_lookup_batches(
             &has_symlink_ancestor,
             Arc::clone(&dir_abs_arc),
             Arc::clone(&file_abs_arc),
+            literal_paths,
             sparse,
         )?
     } else {
@@ -1023,6 +1167,7 @@ pub(crate) fn collect_blob_lookup_batches(
             &mut |rel| has_symlink_ancestor(rel),
             dir_abs_arc.as_ref(),
             file_abs_arc.as_ref(),
+            literal_paths,
             sparse,
         )?;
         if scanned != blob_count {
@@ -1223,6 +1368,94 @@ mod tests {
         }
         fs::write(&abs, bytes).unwrap();
         odb.write(ObjectKind::Blob, bytes).unwrap()
+    }
+
+    #[cfg(all(target_os = "linux", target_pointer_width = "64"))]
+    #[test]
+    fn directory_relative_stats_match_metadata_fields_and_file_types() {
+        use std::os::unix::fs::{symlink, PermissionsExt};
+        use std::os::unix::net::UnixListener;
+
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path();
+        let oid = ObjectId::null(crate::objects::HashAlgo::Sha1);
+        let mut index = Index::new();
+        for name in [
+            "file",
+            "executable",
+            "directory",
+            "link",
+            "socket",
+            "missing",
+        ] {
+            let path = root.join(name);
+            fs::write(&path, b"file\n").unwrap();
+            index.add_or_replace(entry_from_stat(&path, name.as_bytes(), oid, 0o100644).unwrap());
+        }
+        fs::OpenOptions::new()
+            .write(true)
+            .open(root.join("file"))
+            .unwrap()
+            .set_len(1_u64 << 32)
+            .unwrap();
+        filetime::set_file_mtime(
+            root.join("file"),
+            filetime::FileTime::from_unix_time(-1, 123_456),
+        )
+        .unwrap();
+        fs::set_permissions(root.join("executable"), fs::Permissions::from_mode(0o755)).unwrap();
+        for name in ["directory", "link", "socket", "missing"] {
+            fs::remove_file(root.join(name)).unwrap();
+        }
+        fs::create_dir(root.join("directory")).unwrap();
+        symlink("absent", root.join("link")).unwrap();
+        let _socket = UnixListener::bind(root.join("socket")).unwrap();
+        // Search permission suffices for lstat: the directory need not be readable.
+        fs::set_permissions(root, fs::Permissions::from_mode(0o111)).unwrap();
+        let handle = open_stat_directory(root).unwrap();
+        let indices: Vec<_> = (0..index.entries.len()).collect();
+        let result =
+            for_each_blob_at_directory(&index, &indices, &handle, root, &mut |i, rel, lookup| {
+                let expected =
+                    fs::symlink_metadata(crate::index::worktree_path_from_index_rel(root, rel));
+                match (lookup, expected) {
+                    (BlobDiskLookup::Present(actual), Ok(metadata)) => {
+                        let expected = BlobDiskStat::from_metadata(&metadata);
+                        assert_eq!(actual.git_mode, expected.git_mode);
+                        assert_eq!(actual.is_dir, expected.is_dir);
+                        assert_eq!(
+                            actual.fields.index_entry(rel, oid, actual.git_mode),
+                            expected.fields.index_entry(rel, oid, expected.git_mode),
+                            "entry {i}"
+                        );
+                    }
+                    (BlobDiskLookup::Missing, Err(error)) => {
+                        assert_eq!(error.kind(), io::ErrorKind::NotFound)
+                    }
+                    _ => panic!("relative stat disagrees with path metadata for entry {i}"),
+                }
+                Ok(())
+            });
+        fs::set_permissions(root, fs::Permissions::from_mode(0o755)).unwrap();
+        result.unwrap();
+    }
+
+    #[cfg(all(target_os = "linux", target_pointer_width = "64"))]
+    #[test]
+    fn directory_relative_stats_reject_embedded_nul() {
+        let tmp = TempDir::new().unwrap();
+        let path = tmp.path().join("file");
+        fs::write(&path, b"file\n").unwrap();
+        let oid = ObjectId::null(crate::objects::HashAlgo::Sha1);
+        let mut index = Index::new();
+        index.add_or_replace(entry_from_stat(&path, b"file\0suffix", oid, 0o100644).unwrap());
+        let handle = open_stat_directory(tmp.path()).unwrap();
+        let error =
+            for_each_blob_at_directory(&index, &[0], &handle, tmp.path(), &mut |_, _, _| {
+                panic!("invalid name must not be truncated and visited")
+            })
+            .unwrap_err();
+        assert!(matches!(error, Error::Io(error) if error.kind() == io::ErrorKind::InvalidInput));
     }
 
     #[test]

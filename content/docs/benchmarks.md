@@ -9,6 +9,24 @@ For a map of **grit-lib** modules, **grit** commands, common workflows, and ever
 
 Command-level numbers below come from the committed **grit-bench** JSON baselines listed in `content/docs/site.toml`. Each scenario runs **hyperfine** against the system **`git`** binary and a release **`grit`** build on the same machine; times are wall-clock milliseconds (mean and spread from timed runs).
 
+## Linux worktree metadata scans (2026-10-26)
+
+Status and worktree diffs used to construct an absolute path for each indexed file and repeat the lookup of its parent directories. On 64-bit Linux, larger scans now open each eligible parent once with `O_PATH` and inspect its file names with `fstatat` and `AT_SYMLINK_NOFOLLOW`. The untracked walk also reuses the operation's configuration instead of loading the cascade again to choose its worker settings. Index stat fields and file-type handling stay the same. Scans below 1,000 entries, directories below eight files, and case or Unicode path resolution keep the existing metadata lookup.
+
+The [before](https://github.com/gitbutlerapp/grit/blob/main/grit-utils/baselines/status-scan-before.json) and [after](https://github.com/gitbutlerapp/grit/blob/main/grit-utils/baselines/status-scan-after.json) reports compare release builds based on `a61c6cf` with system Git 2.55.0 on a four-CPU AMD EPYC VM using ext4. Initial reproduction used `grit-bench daily --only status/clean@synth-10k` with 20 runs per tool. The final comparisons reuse the daily fixtures with warm indexes and rotate Git/before/after through `grit-bench measure-direct-run`: 30 runs per tool, 200 for small status, 10 for deep-tree, and 60 for mutating canaries. Both Grit binaries have the same basename and equal-length parent paths (`/tmp/grit-4658-binaries/{before,after_}/grit`); copied binaries were verified byte-for-byte against the builds. Times are medians; RSS is the maximum across the runs, cross-checked with ten `/usr/bin/time -v` runs per tool.
+
+| Scenario | Git ms | Grit before ms | Grit after ms | RSS before KiB | RSS after KiB |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `status/clean@synth-10k` | 13.321 | 13.564 | 11.684 | 19744 | 19564 |
+| `status/clean@small` | 1.670 | 2.831 | 2.778 | 15656 | 15480 |
+| `status/clean@synth-100k` | 116.114 | 104.294 | 84.944 | 36104 | 35896 |
+| `status/clean@deep-tree` | 2062.934 | 1024.723 | 1014.167 | 75236 | 75404 |
+| `diff/worktree@synth-10k` | 11.841 | 10.873 | 9.061 | 19768 | 19496 |
+
+Heaptrack on the 10k-file fixture counted **70,813 → 50,252 allocations** (29% fewer), and **31,001 → 11,662 temporary allocations** (62% fewer). Peak live heap stayed about 2.08 MB; process RSS remains broadly unchanged. The full reports include every related status case and the diff/staging canaries.
+
+Related `diff`, `add`, and `commit` rows are included in the reports. The commit canary compares auto-staging `grit commit -m bench` with `git commit -am bench`; preparation and resets stay outside the timed region. The current daily `status/renamed` preparation resets to a clean tree, and `status/paths` selects `data/d0000`, absent from the current `synth-100k` fixture; those registry cases are reported as they currently run. Rust integration tests separately cover actual renames and raw-byte paths.
+
 ## grit-bench fixture cache
 
 Scenario suites reuse prepared repositories under **`GRIT_BENCH_CACHE`** (default `$XDG_CACHE_HOME/grit-bench`). **`grit-bench fixtures prepare`** clones upstream **git.git** at tag **`v2.47.0`** (bare, verified `HEAD` oid) and generates synthetic tiers **S**, **M**, and **L** with the grit-lib generator. **`grit-bench fixtures list`** prints identity (name, tier, `HEAD`, object/ref/file counts). Mutating runs take a **`git clone --local`** working copy so the cache stays read-only. JSON reports may include a top-level **`fixtures`** array with the same identity fields.

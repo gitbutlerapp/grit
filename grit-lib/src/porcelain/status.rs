@@ -817,6 +817,7 @@ pub(crate) fn collect_untracked_and_ignored_inner(
             precompose_unicode,
             &tracked_paths,
             &rules.ignore(),
+            rules.config(),
             effective_pathspecs,
             cancel_watch.clone(),
         )?;
@@ -1008,6 +1009,7 @@ fn collect_untracked_parallel_top_level(
     precompose_unicode: bool,
     tracked_paths: &crate::path_icase::Stage0TrackedPaths,
     matcher_template: &IgnoreMatcher,
+    config: &ConfigSet,
     pathspecs: &[String],
     cancel_watch: Option<std::sync::Arc<std::sync::atomic::AtomicBool>>,
 ) -> Result<(Vec<String>, Vec<String>)> {
@@ -1029,11 +1031,9 @@ fn collect_untracked_parallel_top_level(
 
     let mut untracked = Vec::new();
     let mut ignored = Vec::new();
-    let config =
-        ConfigSet::load(repo.environment(), Some(repo.git_dir()), true).unwrap_or_default();
     let parallelism = repo
         .thread_policy()
-        .resolve(ParallelOp::IndexRefresh, &config)
+        .resolve(ParallelOp::IndexRefresh, config)
         .parallelism();
     let threads = parallelism.threads();
 
