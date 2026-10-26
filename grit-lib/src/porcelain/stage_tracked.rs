@@ -466,6 +466,11 @@ fn stage_tracked_modifications_in_index_body(
                 if idx_e.skip_worktree() {
                     return Ok(());
                 }
+                if ignorecase
+                    && crate::path_icase::has_icase_checkout_collision_sibling(index, rel_path)
+                {
+                    return Ok(());
+                }
                 if rel_path_has_symlink_parent(work_tree, rel_path) {
                     pending_removals.push(raw_path);
                     return Ok(());
@@ -491,6 +496,7 @@ fn stage_tracked_modifications_in_index_body(
                     index_mtime,
                     mode_policy,
                     rules,
+                    ignorecase,
                 };
                 let defer = parallel_restage.then_some(&mut deferred_restage);
                 if refresh_present_tracked_path(ctx, stat, defer, entry_index)? {
@@ -537,6 +543,7 @@ struct PresentRefreshCtx<'a> {
     index_mtime: Option<(u32, u32)>,
     mode_policy: WorktreeModePolicy,
     rules: &'a mut WorktreeRules,
+    ignorecase: bool,
 }
 
 fn refresh_unmerged_tracked_path(
@@ -676,6 +683,7 @@ fn stage_tracked_path_individual(
                 index_mtime,
                 mode_policy,
                 rules,
+                ignorecase,
             };
             if refresh_present_tracked_path(ctx, BlobDiskStat::from_metadata(&meta), None, 0)? {
                 summary.modified.push(raw_path.to_vec());
@@ -683,6 +691,14 @@ fn stage_tracked_path_individual(
         }
         None if idx_e.skip_worktree() => {}
         None => {
+            let rel = std::str::from_utf8(raw_path).ok();
+            if ignorecase
+                && rel.is_some_and(|r| {
+                    crate::path_icase::has_icase_checkout_collision_sibling(index, r)
+                })
+            {
+                return Ok(());
+            }
             if index.remove(raw_path) {
                 summary.removed.push(raw_path.to_vec());
             }
@@ -725,6 +741,7 @@ fn refresh_present_tracked_path(
         index_mtime,
         mode_policy,
         rules,
+        ignorecase,
     } = ctx;
     let idx_mode = idx_e.mode;
     let idx_intent_to_add = idx_e.intent_to_add();
@@ -804,6 +821,11 @@ fn refresh_present_tracked_path(
                     (stream.store(repo.odb(), SERIAL_RESTAGE_WRITE)?, None)
                 }
             };
+            if crate::path_icase::is_icase_collision_loser_for_auto_stage(
+                index, idx_e, ignorecase, staged_oid,
+            ) {
+                return Ok(false);
+            }
             // Stat taken before the read, so a write racing the read is caught next time.
             let entry = entry_from_metadata(&meta, raw_path, staged_oid, wt_mode);
             if !idx_intent_to_add && staged_oid == idx_oid {
@@ -825,6 +847,11 @@ fn refresh_present_tracked_path(
         Err(_) => {
             let meta = fs::symlink_metadata(abs_path).map_err(Error::Io)?;
             let oid = read_worktree_blob_oid_raw(repo, abs_path, &meta)?;
+            if crate::path_icase::is_icase_collision_loser_for_auto_stage(
+                index, idx_e, ignorecase, oid,
+            ) {
+                return Ok(false);
+            }
             if !idx_intent_to_add && idx_oid == oid && wt_mode == idx_mode {
                 return Ok(false);
             }
@@ -958,6 +985,14 @@ fn restage_deferred_chunk(
         let mode_for_index = mode_policy.index_mode_for_worktree(prep.blob.mode, Some(idx_e.mode));
         // The read pass's stat precedes the read, like the serial path.
         let entry = entry_from_metadata(&prep.blob.meta, raw_path, prep.blob.oid, mode_for_index);
+        if crate::path_icase::is_icase_collision_loser_for_auto_stage(
+            index,
+            idx_e,
+            ignorecase,
+            prep.blob.oid,
+        ) {
+            continue;
+        }
         if prep.blob.oid == idx_e.oid && mode_for_index == idx_e.mode {
             if stat_fields_differ(&entry, idx_e) {
                 replacements.push(entry);

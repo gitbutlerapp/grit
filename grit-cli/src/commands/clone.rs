@@ -188,6 +188,9 @@ pub struct CloneOutcome {
     /// Remote branch names that have commits when `no_checkout_reason` is `unborn_default_branch`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub branches_with_commits: Option<Vec<String>>,
+    /// Index paths that collided on a case-insensitive filesystem during checkout.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub path_collisions: Vec<String>,
     /// Timing and transfer totals for the human summary.
     #[serde(skip)]
     #[schemars(skip)]
@@ -257,6 +260,15 @@ fn render_summary(o: &CloneOutcome, w: &mut dyn Write, color: bool) -> Result<()
         )
     );
 
+    if !o.path_collisions.is_empty() {
+        outln!(
+            w,
+            "warning: these tracked paths collide on this filesystem (case-insensitive paths share one file); only one path from each group exists on disk:"
+        );
+        for path in &o.path_collisions {
+            outln!(w, "  '{path}'");
+        }
+    }
     if o.files > 0 {
         outln!(
             w,
@@ -353,6 +365,12 @@ impl MarkdownRender for CloneOutcome {
         outln!(w, "- **branches**: {}", self.branches);
         outln!(w, "- **tags**: {}", self.tags);
         outln!(w, "- **files**: {}", self.files);
+        if !self.path_collisions.is_empty() {
+            outln!(w, "- **path collisions**:");
+            for path in &self.path_collisions {
+                outln!(w, "  - `{path}`");
+            }
+        }
         outln!(
             w,
             "- **worktree bytes**: {} ({})",
@@ -556,6 +574,7 @@ fn clone_into(
 
     let files = outcome.files;
     let worktree_bytes = outcome.worktree_bytes;
+    let path_collisions = outcome.path_collisions.clone();
     let (no_checkout_reason, branches_with_commits) = match outcome.checkout {
         CloneCheckout::CheckedOut(_) => (None, None),
         CloneCheckout::Skipped => {
@@ -619,6 +638,7 @@ fn clone_into(
         transfer,
         no_checkout_reason,
         branches_with_commits,
+        path_collisions,
         bare: outcome.bare,
     })
 }
@@ -684,6 +704,7 @@ mod tests {
             },
             no_checkout_reason: None,
             branches_with_commits: None,
+            path_collisions: Vec::new(),
             bare: false,
         }
     }

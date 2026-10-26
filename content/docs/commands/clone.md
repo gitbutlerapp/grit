@@ -34,6 +34,8 @@ The step under way is projected from its own pace so far. Steps that have not st
 
 After the clone, stdout gets a summary: total time with a bar showing where it went (including time spent connecting before any data arrives and finishing after the last step), bytes received with average and peak throughput, objects by type, branches and tags, and the files and bytes in the work tree. Colors follow the terminal and are turned off by `NO_COLOR`.
 
+On a case-insensitive filesystem (`core.ignorecase`), when the repository contains paths that differ only by case (or other spellings that map to one on-disk file), grit prints a **warning** on stderr listing every colliding index path. Only one path from each group exists on disk; the summary **files** and **worktree_bytes** counts reflect distinct on-disk files, not the number of index entries. With `commit.autoStage` (the default), grit does not auto-stage collision losers — their index blobs stay as recorded in the tree even though the work tree shows them as modified.
+
 For private GitHub repositories over HTTPS, sign in first with [`grit auth`](../auth/).
 
 When the remote has no commits yet (an empty bare repository), grit still creates the destination directory, configures `origin`, and points `HEAD` at the remote's default branch without checking out files. Human output includes a short note on stderr (`note: the remote repository is empty.`); `--json` reports `"files": 0`, `"no_checkout_reason": "empty_remote"`, and the configured branch name.
@@ -157,7 +159,8 @@ Pass `--json` for stable, scripting-friendly output:
 | `bytes` | integer | Size in bytes of the received pack. |
 | `branches` | integer | Remote branches fetched. |
 | `tags` | integer | Remote tags fetched. |
-| `files` | integer | Working-tree files checked out. |
+| `files` | integer | Working-tree files checked out (distinct on-disk paths when `core.ignorecase` collapsed spellings). |
+| `path_collisions` | array of strings | Index paths that collided during checkout on a case-insensitive filesystem. Omitted when empty. |
 | `object_types` | object or null | Objects received by type: `commits`, `trees`, `blobs` and `tags` (annotated tag objects). Populated when grit indexed the received pack or can tally every object in the transfer. `null` when a local pack link installed more objects than the transfer summary tracks individually (typical for a single linked pack on clone). |
 | `worktree_bytes` | integer | Total size of the checked-out files. |
 | `seconds` | number | Wall-clock seconds for the whole clone. |

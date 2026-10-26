@@ -1,10 +1,11 @@
 //! Case-insensitive path identity when `core.ignorecase` is enabled.
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::{Path, PathBuf};
 
-use crate::index::Index;
+use crate::index::{Index, IndexEntry, MODE_GITLINK, MODE_TREE};
 use crate::index_name_hash_lazy::memihash;
+use crate::objects::ObjectId;
 
 type FoldBucket = Vec<Vec<u8>>;
 
@@ -103,6 +104,20 @@ impl Stage0IcasePathMap {
     }
 }
 
+/// Whether two repository-relative paths can refer to the same on-disk file (Git `paths_collide`).
+#[must_use]
+pub fn paths_collide(a: &str, b: &str, ignorecase: bool) -> bool {
+    if a.len() == b.len() {
+        return paths_equal(a.as_bytes(), b.as_bytes(), ignorecase);
+    }
+    if a.len() < b.len() {
+        return b.as_bytes().get(a.len()) == Some(&b'/')
+            && paths_equal(a.as_bytes(), &b.as_bytes()[..a.len()], ignorecase);
+    }
+    a.as_bytes().get(b.len()) == Some(&b'/')
+        && paths_equal(&a.as_bytes()[..b.len()], b.as_bytes(), ignorecase)
+}
+
 /// Compare two repository-relative paths for identity.
 #[must_use]
 pub fn paths_equal(path_a: &[u8], path_b: &[u8], ignorecase: bool) -> bool {
@@ -148,6 +163,146 @@ fn resolve_case_alternate(work_tree: &Path, rel: &str) -> Option<PathBuf> {
     None
 }
 
+/// Stage-0 blob paths that share a worktree slot under `core.ignorecase` (sorted, unique).
+#[must_use]
+pub fn icase_checkout_collision_paths(index: &Index, ignorecase: bool) -> Vec<String> {
+    if !ignorecase {
+        return Vec::new();
+    }
+    let paths: Vec<String> = index
+        .entries
+        .iter()
+        .filter(|e| e.stage() == 0 && e.mode != MODE_TREE && e.mode != MODE_GITLINK)
+        .filter_map(|e| std::str::from_utf8(&e.path).ok().map(str::to_owned))
+        .collect();
+    let groups = icase_collision_groups(&paths, ignorecase);
+    let mut collided = BTreeSet::new();
+    for group in groups {
+        if group.len() > 1 {
+            collided.extend(group);
+        }
+    }
+    collided.into_iter().collect()
+}
+
+/// Count distinct worktree blob slots and total indexed bytes after an ignorecase checkout.
+#[must_use]
+pub fn icase_worktree_file_stats(index: &Index, ignorecase: bool) -> (u64, u64) {
+    let mut files = 0u64;
+    let mut bytes = 0u64;
+    if !ignorecase {
+        for e in &index.entries {
+            if e.stage() == 0 && e.mode != MODE_TREE && e.mode != MODE_GITLINK {
+                files += 1;
+                bytes += u64::from(e.size);
+            }
+        }
+        return (files, bytes);
+    }
+    let paths: Vec<String> = index
+        .entries
+        .iter()
+        .filter(|e| e.stage() == 0 && e.mode != MODE_TREE && e.mode != MODE_GITLINK)
+        .filter_map(|e| std::str::from_utf8(&e.path).ok().map(str::to_owned))
+        .collect();
+    let groups = icase_collision_groups(&paths, ignorecase);
+    for group in groups {
+        files += 1;
+        let Some(rep) = group.iter().min() else {
+            continue;
+        };
+        if let Some(e) = index.get(rep.as_bytes(), 0) {
+            bytes += u64::from(e.size);
+        }
+    }
+    (files, bytes)
+}
+
+/// Whether another stage-0 path shares this index entry's worktree slot under `core.ignorecase`.
+#[must_use]
+pub fn has_icase_checkout_collision_sibling(index: &Index, index_rel: &str) -> bool {
+    index
+        .entries
+        .iter()
+        .filter(|e| e.stage() == 0 && e.mode != MODE_TREE && e.mode != MODE_GITLINK)
+        .filter_map(|e| std::str::from_utf8(&e.path).ok())
+        .any(|p| p != index_rel && paths_collide(p, index_rel, true))
+}
+
+/// When auto-staging tracked paths, skip index rows whose on-disk bytes match a colliding
+/// sibling's indexed blob (the path that lost checkout on a case-insensitive filesystem).
+#[must_use]
+pub fn is_icase_collision_loser_for_auto_stage(
+    index: &Index,
+    entry: &IndexEntry,
+    ignorecase: bool,
+    worktree_blob_oid: ObjectId,
+) -> bool {
+    if !ignorecase || entry.stage() != 0 {
+        return false;
+    }
+    let Ok(my_path) = std::str::from_utf8(&entry.path) else {
+        return false;
+    };
+    if worktree_blob_oid == entry.oid {
+        return false;
+    }
+    for other in &index.entries {
+        if other.stage() != 0 || other.path == entry.path {
+            continue;
+        }
+        let Ok(other_path) = std::str::from_utf8(&other.path) else {
+            continue;
+        };
+        if paths_collide(my_path, other_path, true) && other.oid == worktree_blob_oid {
+            return true;
+        }
+    }
+    false
+}
+
+fn icase_collision_groups(paths: &[String], ignorecase: bool) -> Vec<Vec<String>> {
+    let n = paths.len();
+    if n == 0 {
+        return Vec::new();
+    }
+    let mut parent: Vec<usize> = (0..n).collect();
+    fn find(parent: &mut [usize], i: usize) -> usize {
+        if parent[i] != i {
+            let root = find(parent, parent[i]);
+            parent[i] = root;
+        }
+        parent[i]
+    }
+    fn union(parent: &mut [usize], a: usize, b: usize) {
+        let ra = find(parent, a);
+        let rb = find(parent, b);
+        if ra != rb {
+            parent[rb] = ra;
+        }
+    }
+    for i in 0..n {
+        for j in (i + 1)..n {
+            if paths_collide(&paths[i], &paths[j], ignorecase) {
+                union(&mut parent, i, j);
+            }
+        }
+    }
+    let mut by_root: HashMap<usize, Vec<String>> = HashMap::new();
+    for (i, path) in paths.iter().enumerate() {
+        by_root
+            .entry(find(&mut parent, i))
+            .or_default()
+            .push(path.clone());
+    }
+    let mut groups: Vec<Vec<String>> = by_root.into_values().collect();
+    for g in &mut groups {
+        g.sort();
+    }
+    groups.sort();
+    groups
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -172,6 +327,36 @@ mod tests {
             path: path.as_bytes().to_vec(),
             base_index_pos: 0,
         }
+    }
+
+    #[test]
+    fn paths_collide_dir_and_file() {
+        assert!(paths_collide("a", "a/b", false));
+        assert!(paths_collide("A/B", "a", true));
+        assert!(!paths_collide("a/b", "a/c", false));
+        assert!(paths_collide("File.txt", "file.txt", true));
+        assert!(paths_collide("Dir/a.txt", "dir/A.txt", true));
+    }
+
+    #[test]
+    fn icase_checkout_collision_paths_groups_case_pairs() {
+        let mut index = Index::new();
+        for path in ["Dir/a.txt", "File.txt", "dir/A.txt", "file.txt"] {
+            index.push_entry_unsorted(dummy_entry(path));
+        }
+        index.sort();
+        let collided = icase_checkout_collision_paths(&index, true);
+        assert_eq!(
+            collided,
+            vec![
+                "Dir/a.txt".to_owned(),
+                "File.txt".to_owned(),
+                "dir/A.txt".to_owned(),
+                "file.txt".to_owned(),
+            ]
+        );
+        let (files, _) = icase_worktree_file_stats(&index, true);
+        assert_eq!(files, 2);
     }
 
     #[test]
