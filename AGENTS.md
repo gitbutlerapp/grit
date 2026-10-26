@@ -83,6 +83,7 @@ The library and CLI must be **as fast as possible.**
 
 - Exercise core functionality and edge cases with **Rust tests** on the **`grit-lib`** public API (and workspace integration tests where CLI wiring matters). Cross-check against the system **`git`** binary inside tests where compatibility matters (formats, protocols, fsck).
 - Write **coverage tests for every public library interface**.
+- Integration tests build as **one binary per crate** (`tests/integration.rs`). After adding, renaming or removing a `tests/*.rs` file, run `python3 scripts/sync_integration_tests.py` (see **TESTING.md**, *Adding tests*).
 - Do not weaken or delete tests to green a change.
 
 Detail: **TESTING.md** and ROADMAP testing items.

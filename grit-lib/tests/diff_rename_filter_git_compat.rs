@@ -1,6 +1,6 @@
 //! Rename thresholds, `--no-renames`, and `--diff-filter` vs system `git diff`.
 
-mod support;
+use crate::support;
 
 use grit_lib::diff::{
     apply_diff_filter, diff_trees_with_renames, DiffEntry, DiffStatus, InvalidDiffFilter,

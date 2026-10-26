@@ -1,6 +1,6 @@
 //! Exercise rev-parse resolution paths (success and failure) for line coverage.
 
-mod support;
+use crate::support;
 
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::repo::Repository;

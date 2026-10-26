@@ -1,5 +1,7 @@
 //! Clone disk layout: pack retention, packed-refs, origin/HEAD, reflogs, tags.
 
+#![cfg(feature = "http-ureq")]
+
 use std::path::{Path, PathBuf};
 use std::process::Command;
 

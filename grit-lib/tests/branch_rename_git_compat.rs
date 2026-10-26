@@ -16,7 +16,7 @@ use grit_lib::refs::store::{
 use grit_lib::repo::Repository;
 use grit_test_support::{git, git_cmd};
 
-mod support;
+use crate::support;
 
 use support::{git_init_reftable_repo, require_reftable_git};
 

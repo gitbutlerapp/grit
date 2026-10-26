@@ -3,7 +3,7 @@
 //! Regression for issue #981: `grit reset --hard` at HEAD should behave like Git's
 //! stat-only refresh on a clean tree (no content writes, mtimes unchanged).
 
-mod support;
+use crate::support;
 
 use grit_lib::index::write_tree::{write_tree_update_index, WriteTreeFlags};
 use grit_lib::objects::{serialize_commit, CommitData, ObjectKind};

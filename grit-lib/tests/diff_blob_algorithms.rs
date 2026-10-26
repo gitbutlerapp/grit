@@ -1,6 +1,6 @@
 //! Blob diff algorithms vs system `git diff --no-index` (upstream t4033, t4050, …).
 
-mod support;
+use crate::support;
 
 use support::{
     assert_patch_matches_git, blob_pairs, config_from_snippet, git_apply_and_compare,

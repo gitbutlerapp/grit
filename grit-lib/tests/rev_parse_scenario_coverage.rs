@@ -1,6 +1,6 @@
 //! Scenario-based rev-parse coverage (special syntax paths in `resolve_revision_impl`).
 
-mod support;
+use crate::support;
 
 use std::fs;
 use std::path::Path;

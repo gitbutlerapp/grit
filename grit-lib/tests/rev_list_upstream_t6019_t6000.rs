@@ -1,7 +1,7 @@
 //! Focused ports of upstream `t/t6019-rev-list-ancestry-path.sh` and `t/t6000-rev-list-misc.sh`
 //! (`--unpacked` object walk) for grit vs system `git` parity.
 
-mod support;
+use crate::support;
 
 use std::collections::HashSet;
 

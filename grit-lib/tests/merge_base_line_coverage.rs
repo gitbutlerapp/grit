@@ -1,6 +1,6 @@
 //! Extra merge-base API coverage (diff helpers, symmetric counts, branch base).
 
-mod support;
+use crate::support;
 
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::objects::ObjectId;

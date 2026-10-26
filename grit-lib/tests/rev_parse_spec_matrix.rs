@@ -1,6 +1,6 @@
 //! Broad rev-parse oracle matrix across fixtures (line coverage complement).
 
-mod support;
+use crate::support;
 
 use std::path::Path;
 

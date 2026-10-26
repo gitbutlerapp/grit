@@ -2,7 +2,7 @@
 //! objects, a single pack and several packs; the system `git` must see the result as clean
 //! and the repository must pass `git fsck`. Converted paths (autocrlf) are not streamed.
 
-mod support;
+use crate::support;
 
 use std::fs;
 use std::io::Write;

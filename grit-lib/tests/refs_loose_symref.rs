@@ -1,6 +1,6 @@
 //! Loose refs and symbolic refs (t1400/t1401/t0600/t1405/t1430 subsets).
 
-mod support;
+use crate::support;
 
 use std::collections::{BTreeSet, HashSet};
 use std::fs;

@@ -1,6 +1,6 @@
 //! `git init --shared` and repository open paths for `repo.rs` / shared-repository helpers.
 
-mod support;
+use crate::support;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::repo::Repository;

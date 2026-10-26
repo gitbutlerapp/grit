@@ -1787,7 +1787,7 @@ Reproduce the memory guard after building both helper binaries:
 
 ```bash
 cargo build --release -p grit-cli -p grit-utils
-GRIT_LARGE_BLOB_MEMORY=1 cargo test -p grit-lib --test large_blob_memory
+GRIT_LARGE_BLOB_MEMORY=1 cargo test -p grit-lib --test integration large_blob_memory::
 ```
 
 To create the loose 1 GiB fixture, set `core.bigFileThreshold=2g` for the
@@ -2044,7 +2044,7 @@ The rows that did not negotiate a deep local history are unchanged within noise:
 cargo build --release -p grit-cli -p grit-utils -p grit-http-server
 ./target/release/grit-bench daily --only pull/check@git-git,pull/fast-forward@git-git,fetch/incremental@git-git \
   --min-runs 10 --http-server ./target/release/grit-http-server --format json --output /tmp/fetch-pull.json
-cargo test -p grit-lib --test fetch_v2_negotiation_rounds
+cargo test -p grit-lib --test integration fetch_v2_negotiation_rounds::
 ```
 
 ## Receiving a pack: clone and fetch memory (2026-10-25)
@@ -2069,7 +2069,7 @@ Two gates keep the memory from regressing. The `pack_ingest_memory` integration 
 ```bash
 cargo test -p grit-lib --test pack_ingest_memory -- --nocapture
 GRIT_CARGO_PACK=/path/to/received.pack GRIT_SKIP_VERIFY=1 \
-  cargo test --release -p grit-lib --test pack_ingest_roundtrip rss_harness_install_pack_path -- --ignored --exact
+  cargo test --release -p grit-lib --test integration pack_ingest_roundtrip::rss_harness_install_pack_path -- --ignored --exact
 ```
 
 ## Large files in the work tree (2026-10-25)
@@ -2118,7 +2118,7 @@ Raw samples, including current main in each scenario's `baseline_grit` field, ar
 The `checkout_large_blob_rss` integration test restores and switches to a 64 MiB blob, loose and packed, and fails if the process's peak RSS grows by 16 MiB or more. On the original pre-streaming baseline (`5d5136859`) it grows by 139 MiB. Packed-object RSS also includes resident pages of the compressed pack mapping; this can make the strict RSS-growth assertion sensitive to the process's earlier high-water mark.
 
 ```bash
-cargo test -p grit-lib --test checkout_large_blob_rss --test checkout_large_blob_streaming
+cargo test -p grit-lib --test integration checkout_large_blob_rss:: checkout_large_blob_streaming::
 ./target/release/grit-bench daily --only 'switch/large-blob@big-asset' \
   --format json --output grit-utils/baselines/daily-large-blob-after.json --grit ./target/release/grit
 ```

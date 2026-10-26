@@ -2,7 +2,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-mod support;
+use crate::support;
 
 use std::collections::{BTreeSet, HashSet};
 use std::fs;

@@ -1,6 +1,6 @@
 //! Large git-`pack-refs` repositories: grit resolves every packed ref like `git rev-parse`.
 
-mod support;
+use crate::support;
 
 use grit_lib::refs::{resolve_ref, PackedRefs};
 

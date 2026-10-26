@@ -10,7 +10,7 @@ use grit_lib::config::{ConfigFile, ConfigScope, ConfigSet, LoadConfigOptions};
 use grit_lib::repo::{InitOptions, Repository};
 use tempfile::tempdir;
 
-mod support;
+use crate::support;
 
 #[test]
 fn typed_getters_and_merge_set() {

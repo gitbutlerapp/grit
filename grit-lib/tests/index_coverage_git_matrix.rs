@@ -1,6 +1,6 @@
 //! Exercise index.rs APIs against git-produced repositories (coverage + compatibility).
 
-mod support;
+use crate::support;
 
 use std::fs;
 use std::process::Command;

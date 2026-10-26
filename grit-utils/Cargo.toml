@@ -2,6 +2,7 @@
 name = "grit-utils"
 version.workspace = true
 edition.workspace = true
+autotests = false
 license = "MIT"
 description = "Benchmarking and utility tools for grit"
 repository = "https://github.com/gitbutlerapp/grit"
@@ -37,3 +38,47 @@ nix = { workspace = true, features = ["process", "resource", "signal"] }
 
 [dev-dependencies]
 grit-lib = { path = "../grit-lib" }
+
+# Integration tests build as one binary, tests/integration.rs (see
+# scripts/sync_integration_tests.py). The [[test]] targets below run in their own
+# process: they change the working directory or environment, or run their own
+# binary again by test name.
+[[test]]
+name = "integration"
+path = "tests/integration.rs"
+
+[[test]]
+name = "daily_e2e"
+path = "tests/daily_e2e.rs"
+
+[[test]]
+name = "daily_remotes_e2e"
+path = "tests/daily_remotes_e2e.rs"
+
+[[test]]
+name = "daily_repack_correctness"
+path = "tests/daily_repack_correctness.rs"
+
+[[test]]
+name = "daily_reset_keep_prepare"
+path = "tests/daily_reset_keep_prepare.rs"
+
+[[test]]
+name = "daily_shapes"
+path = "tests/daily_shapes.rs"
+
+[[test]]
+name = "daily_stash_prepare"
+path = "tests/daily_stash_prepare.rs"
+
+[[test]]
+name = "shallow_clone_verify"
+path = "tests/shallow_clone_verify.rs"
+
+[[test]]
+name = "worktree_commit_base"
+path = "tests/worktree_commit_base.rs"
+
+[[test]]
+name = "worktree_scenario_e2e"
+path = "tests/worktree_scenario_e2e.rs"

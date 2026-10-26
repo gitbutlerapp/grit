@@ -1,7 +1,7 @@
 //! Upstream-style `--stdin` ref pseudo-options (`--branches`, `--tags`, `--remotes`, `--glob`).
 //! Behavioral parity vs `git rev-list --stdin` (t6017 / t6018 extensions).
 
-mod support;
+use crate::support;
 
 use grit_lib::revwalk::rev_list::{
     collect_revision_specs_from_stdin_lines, rev_list, RevListOptions,

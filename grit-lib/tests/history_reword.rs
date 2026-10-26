@@ -2,7 +2,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-mod support;
+use crate::support;
 
 use grit_lib::objects::{parse_commit, parse_tree, ObjectId};
 use grit_lib::repo::Repository;

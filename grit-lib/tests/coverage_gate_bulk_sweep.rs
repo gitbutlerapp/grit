@@ -1,6 +1,6 @@
 //! Broad API sweeps to ratchet history and total line coverage toward the 80/85 gate.
 
-mod support;
+use crate::support;
 
 use std::fs;
 use std::path::Path;

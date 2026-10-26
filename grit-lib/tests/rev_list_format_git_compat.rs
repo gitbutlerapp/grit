@@ -1,6 +1,6 @@
 //! `git rev-list --format=…` output parity for common format atoms.
 
-mod support;
+use crate::support;
 
 use grit_lib::revwalk::rev_list::{rev_list, OutputMode, RevListOptions};
 use support::{assert_grit_commits_match_git, commit_file, git, HistoryRepo};

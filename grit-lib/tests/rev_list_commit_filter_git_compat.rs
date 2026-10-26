@@ -1,6 +1,6 @@
 //! `rev-list` commit filters vs system `git rev-list` (author, committer, grep, mailmap).
 
-mod support;
+use crate::support;
 
 use std::path::Path;
 use std::process::Command;

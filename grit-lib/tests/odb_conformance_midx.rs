@@ -2,7 +2,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-pub mod midx_support;
+use crate::midx_support;
 
 use std::collections::{BTreeMap, HashSet};
 use std::fs;

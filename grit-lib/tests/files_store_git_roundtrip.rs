@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::ops::ControlFlow;
 
-mod support;
+use crate::support;
 use support::{
     assert_fsck_when_git_interop, empty_commit_oid, files_repo, git, git_for_each_ref,
     git_interop_available, Backend,

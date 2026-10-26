@@ -1,6 +1,6 @@
 //! Hard reset honours cancellation while checking out files.
 
-mod support;
+use crate::support;
 
 use grit_lib::index::write_tree::{write_tree_update_index, WriteTreeFlags};
 use grit_lib::objects::ObjectId;

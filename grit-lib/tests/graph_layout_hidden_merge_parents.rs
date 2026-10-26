@@ -1,6 +1,6 @@
 //! Parent rewriting through hidden merges keeps both branches connected.
 
-mod support;
+use crate::support;
 
 use std::collections::HashSet;
 

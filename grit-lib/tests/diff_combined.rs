@@ -1,6 +1,6 @@
 //! Combined merge diffs vs `git diff-tree -c/--cc`.
 
-mod support;
+use crate::support;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::config::ConfigSet;

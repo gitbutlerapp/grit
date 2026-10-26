@@ -2,7 +2,7 @@
 //! and reflog in the injected store (issue #1733), and the same sequence on a default files
 //! repository stays readable by the system `git`.
 
-mod support;
+use crate::support;
 
 use std::fs;
 use std::ops::ControlFlow;

@@ -1,6 +1,6 @@
 //! Additional API coverage for index format selection and sparse-checkout application.
 
-mod support;
+use crate::support;
 
 use std::fs;
 

@@ -1,6 +1,6 @@
 //! Detached HEAD commits on grit reftable repositories (issue #1513 review).
 
-mod support;
+use crate::support;
 
 use grit_lib::porcelain::commit::{commit_worktree, CommitRequest, HookPolicy};
 use grit_lib::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};

@@ -1,6 +1,6 @@
 //! Three-way tree merge vs `git merge-tree --write-tree` (merge-ort oracle).
 
-mod support;
+use crate::support;
 
 use std::fs;
 use std::os::unix::fs::symlink;

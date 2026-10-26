@@ -1,6 +1,6 @@
 //! Additional rev-parse API coverage complementing [`rev_parse_syntax`] oracles.
 
-mod support;
+use crate::support;
 
 use std::path::Path;
 

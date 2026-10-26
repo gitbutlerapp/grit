@@ -1,6 +1,6 @@
 //! `git log -p` patch output parity (Myers default and histogram).
 
-mod support;
+use crate::support;
 
 use std::io::Cursor;
 use std::process::Command;

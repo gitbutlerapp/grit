@@ -1,6 +1,6 @@
 //! Combined structured hunks vs `git show --cc`.
 
-mod support;
+use crate::support;
 
 use grit_lib::config::ConfigSet;
 use grit_lib::diff::combined_diff_patch::{

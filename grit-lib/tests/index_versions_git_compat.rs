@@ -1,6 +1,6 @@
 //! Index format versions, bogus inputs, unmerged stages, and resolve-undo (t1600/t1601/t1015/t2030/t2107).
 
-mod support;
+use crate::support;
 
 use std::fs;
 use std::process::Command;

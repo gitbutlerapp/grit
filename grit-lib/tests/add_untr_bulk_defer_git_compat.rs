@@ -1,6 +1,6 @@
 //! Regression for campaign-scale UNTR deferral during tracked restage (task #1734).
 
-mod support;
+use crate::support;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::index::Index;

@@ -1,6 +1,6 @@
 //! Issue #1091: clean merge must not duplicate index entries when the other side renamed paths.
 
-mod support;
+use crate::support;
 
 use std::collections::HashSet;
 use std::fs;

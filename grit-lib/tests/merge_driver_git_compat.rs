@@ -1,6 +1,6 @@
 //! Custom merge drivers (`merge.<name>.driver`, `merge` attributes) vs system `git`.
 
-mod support;
+use crate::support;
 
 use std::fs;
 

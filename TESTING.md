@@ -85,8 +85,8 @@ Peak RSS is printed in bytes (Linux **`getrusage(RUSAGE_CHILDREN)`** from the he
 `grit-cli/tests/output_snapshots.rs` exercises human, `--json`, and `--markdown` output together via [`CliFixture`](grit-test-support/src/cli_fixture.rs) in **`grit-test-support`**. Each scenario runs the built `grit` binary three times and compares stdout, stderr, and exit status against committed [insta](https://insta.rs/) snapshots under `grit-cli/tests/snapshots/`.
 
 ```bash
-cargo test -p grit-cli --test output_snapshots
-cargo test -p grit-cli --test output_snapshots_network
+cargo test -p grit-cli --test integration output_snapshots::
+cargo test -p grit-cli --test integration output_snapshots_network::
 ```
 
 Network snapshots use [`CliFixture::with_upstream`](grit-test-support/src/cli_fixture.rs) to publish the grit-built fixture to a bare upstream with system `git`, then exercise clone, fetch, pull, push, and `remote refs` from client repositories. Push scenarios run `git fsck --strict` on the upstream after the command; JSON stdout is checked for a single parseable value with no progress lines mixed in.
@@ -98,8 +98,8 @@ When you intentionally change CLI rendering or JSON/Markdown shape, refresh snap
 cargo insta review
 
 # Or update every snapshot in one shot (typical in CI/agent runs)
-INSTA_UPDATE=always cargo test -p grit-cli --test output_snapshots
-INSTA_UPDATE=always cargo test -p grit-cli --test output_snapshots_network
+INSTA_UPDATE=always cargo test -p grit-cli --test integration output_snapshots::
+INSTA_UPDATE=always cargo test -p grit-cli --test integration output_snapshots_network::
 ```
 
 Commit the updated `.snap` files with the code change. CI sets `CI=true`, so a stale snapshot fails the test instead of silently updating.
@@ -110,10 +110,9 @@ The smart-HTTP tests in `grit-lib/tests/` (`transport_http*`, `matrix_fetch`, `m
 
 ```bash
 cargo build -p grit-http-server
-cargo test -p grit-lib --features http-ureq \
-  --test transport_http --test transport_http_auth \
-  --test transport_http_proxy_cookies --test transport_http_redirect_auth \
-  --test matrix_fetch --test matrix_push --test matrix_sha256 --test matrix_credentials
+cargo test -p grit-lib --features http-ureq --test integration -- \
+  transport_http matrix_fetch:: matrix_push:: matrix_sha256::
+cargo test -p grit-lib --features http-ureq --test matrix_credentials
 ```
 
 Add `-- --nocapture` and look for `SKIP:` lines to confirm nothing was skipped.
@@ -125,7 +124,7 @@ Add `-- --nocapture` and look for `SKIP:` lines to confirm nothing was skipped.
 **Stable replay (CI / `make gate`):** committed seeds and crash files under `grit-lib/fuzz/corpus/<target>/` are replayed by:
 
 ```bash
-cargo test -p grit-lib --test fuzz_corpus_replay
+cargo test -p grit-lib --test integration fuzz_corpus_replay::
 ```
 
 **Nightly fuzzing locally:**
@@ -628,6 +627,7 @@ Reproduce locally with **`make docs-check`**; preview with **`make docs`** (dev 
 
 - Put **library behavior** in `grit-lib/src/**` unit tests or `grit-lib/tests/*.rs` integration tests.
 - Use **`grit-test-support`** helpers for temp repos and fixtures shared across crates.
+- Integration tests in `grit-lib`, `grit-cli`, `grit-utils`, `grit-examples`, `grit-protocol` and `grit-http-server` build as **one test binary per crate**, `tests/integration.rs`, which includes each `tests/*.rs` file as a module. After adding, renaming or removing a test file, run **`python3 scripts/sync_integration_tests.py`**; the `every_test_file_is_compiled` test fails until you do. Run one file's tests with `cargo test -p <crate> --test integration <file>::`. A file that changes the working directory or environment, or runs its own binary again by test name, gets a `[[test]]` entry in the crate's `Cargo.toml` instead, so it keeps its own process. Shared helper directories (`tests/support/`) are declared once in `integration.rs`; a test file uses them with `use crate::support;`.
 - For new **public API**, add at least one test that exercises the happy path and important errors.
 - When behavior must match Git, assert it against the system `git` binary in the test (formats, protocols, `fsck`), not against copied Git output text.
 - Do **not** weaken or delete tests to make a change pass; fix the implementation or adjust the test when requirements change.

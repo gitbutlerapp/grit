@@ -13,7 +13,7 @@ use grit_lib::repo::Repository;
 use grit_lib::revwalk::rev_list::RevListOptions;
 use grit_lib::worktree::{add_linked_worktree, AddLinkedWorktreeOptions, WorktreeBranch};
 
-mod support;
+use crate::support;
 
 use support::{
     assert_git_fsck_strict, commit_file, empty_commit_oid, files_repo, git, open_grit_repo,

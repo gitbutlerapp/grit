@@ -1,6 +1,6 @@
 //! Switch overwrite errors match system `git switch` refusal sets.
 
-mod switch_overwrite_git_helpers;
+use crate::switch_overwrite_git_helpers;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::{Error, OverwriteReason};

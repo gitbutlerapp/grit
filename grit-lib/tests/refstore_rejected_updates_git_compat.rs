@@ -1,7 +1,7 @@
 //! Updates every ref backend must refuse at `prepare` leave a repository system `git` reads
 //! cleanly (#1738): unsafe ref names and the null object id as a direct value.
 
-mod support;
+use crate::support;
 
 use grit_lib::objects::ObjectId;
 use grit_lib::refs::store::{

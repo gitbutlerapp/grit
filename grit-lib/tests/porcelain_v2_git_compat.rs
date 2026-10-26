@@ -1,6 +1,6 @@
 //! `format_porcelain_v2` vs system `git status --porcelain=v2`.
 
-mod support;
+use crate::support;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::repo::Repository;

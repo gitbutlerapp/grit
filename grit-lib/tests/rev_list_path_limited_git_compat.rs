@@ -1,6 +1,6 @@
 //! Path-limited `rev-list` count and order vs system `git`.
 
-mod support;
+use crate::support;
 
 use std::io::Write;
 use std::path::Path;

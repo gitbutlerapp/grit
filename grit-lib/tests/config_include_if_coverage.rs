@@ -1,6 +1,6 @@
 //! Additional `[includeIf]` and include-validation paths for config line coverage.
 
-mod support;
+use crate::support;
 
 use std::fs;
 

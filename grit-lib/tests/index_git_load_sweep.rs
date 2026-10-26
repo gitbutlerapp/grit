@@ -1,6 +1,6 @@
 //! Load git-written indexes after common mutations (index.rs parse/load coverage).
 
-mod support;
+use crate::support;
 
 use std::fs;
 use std::process::Command;

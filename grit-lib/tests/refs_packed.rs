@@ -3,7 +3,7 @@
 //! Scenarios ported from upstream `t1408-packed-refs`, `t0601-reffiles-pack-refs`,
 //! `t1409-avoid-packing-refs`, and `t0600` delete cases.
 
-mod support;
+use crate::support;
 
 use std::fs;
 use std::path::{Path, PathBuf};

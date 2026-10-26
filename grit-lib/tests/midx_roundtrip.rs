@@ -2,7 +2,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-pub mod midx_support;
+use crate::midx_support;
 
 use grit_lib::objects::midx::{
     cached_tip_midx_path, compact_multi_pack_index, evict_midx_read_cache_for_pack_dir,

@@ -1,6 +1,6 @@
 //! Regression tests for bounded `rev-list` / `grit log` fast paths.
 
-mod support;
+use crate::support;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;

@@ -1,6 +1,6 @@
 //! MIDX reachability bitmap writer compatibility with system Git.
 
-mod midx_support;
+use crate::midx_support;
 
 use std::collections::HashSet;
 use std::io::Write;

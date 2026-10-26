@@ -1,6 +1,6 @@
 //! Rev-parse syntax oracle tests (upstream t1500/t1503/t1505–t1514/t6101 subsets).
 
-mod support;
+use crate::support;
 
 use std::fs;
 use std::path::Path;

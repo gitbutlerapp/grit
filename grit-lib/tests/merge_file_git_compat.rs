@@ -1,6 +1,5 @@
 //! `git merge-file -p` oracle for [`grit_lib::diff::merge_file`].
 
-mod support;
 
 use std::process::Command;
 

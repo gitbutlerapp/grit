@@ -1,6 +1,6 @@
 //! `load_commits_with_decorations` loads parents and ref labels in one pass.
 
-mod support;
+use crate::support;
 
 use grit_lib::change_id::{resolved_change_id, ChangeId};
 use grit_lib::objects::{parse_commit, serialize_commit, ObjectId, OidHashMap};

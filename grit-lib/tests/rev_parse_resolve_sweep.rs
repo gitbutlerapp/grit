@@ -1,6 +1,6 @@
 //! Wide resolver sweep to raise `rev_parse.rs` line coverage (complements oracles).
 
-mod support;
+use crate::support;
 
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::repo::Repository;

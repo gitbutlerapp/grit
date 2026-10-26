@@ -1,6 +1,6 @@
 //! Targeted rev-parse coverage for index DWIM, diagnose helpers, and conflict stages.
 
-mod support;
+use crate::support;
 
 use std::fs;
 use std::path::Path;

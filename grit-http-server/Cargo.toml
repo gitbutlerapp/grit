@@ -2,6 +2,7 @@
 name = "grit-http-server"
 version.workspace = true
 edition.workspace = true
+autotests = false
 license = "MIT"
 description = "Git smart HTTP server powered by grit"
 repository = "https://github.com/gitbutlerapp/grit"
@@ -30,3 +31,11 @@ tokio-util = { version = "0.7", features = ["io", "io-util"] }
 [dev-dependencies]
 tempfile.workspace = true
 flate2.workspace = true
+
+# Integration tests build as one binary, tests/integration.rs (see
+# scripts/sync_integration_tests.py). The [[test]] targets below run in their own
+# process: they change the working directory or environment, or run their own
+# binary again by test name.
+[[test]]
+name = "integration"
+path = "tests/integration.rs"

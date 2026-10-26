@@ -1,6 +1,6 @@
 //! `grit add` and index write compatibility with system Git (v2/v3/v4, cache-tree).
 
-mod support;
+use crate::support;
 
 use std::fs;
 use std::path::{Path, PathBuf};

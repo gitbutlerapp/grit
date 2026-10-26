@@ -1,6 +1,6 @@
 //! Tree, index, and worktree diffs with rename/copy/break vs system `git` raw output.
 
-mod support;
+use crate::support;
 
 use std::fs;
 

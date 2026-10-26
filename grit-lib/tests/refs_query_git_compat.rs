@@ -2,7 +2,7 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
-mod support;
+use crate::support;
 
 use grit_lib::refs::listing::{
     query_refs, RefNamespace, RefQuery, RefQueryOptions, RefSort, SortKey,

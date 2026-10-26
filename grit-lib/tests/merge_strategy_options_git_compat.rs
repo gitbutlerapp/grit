@@ -1,6 +1,6 @@
 //! Merge strategy options (`-X`, conflict style, unrelated histories) vs system `git`.
 
-mod support;
+use crate::support;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::diff::merge_file::{ConflictStyle, MergeFavor};

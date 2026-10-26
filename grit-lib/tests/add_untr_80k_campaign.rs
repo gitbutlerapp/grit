@@ -1,6 +1,6 @@
 //! Campaign-scale (>=80k index entries) UNTR defer replay vs system Git.
 
-mod support;
+use crate::support;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::index::Index;

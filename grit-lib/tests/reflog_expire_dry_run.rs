@@ -15,7 +15,7 @@ use grit_lib::repo::{InitOptions, Repository};
 use grit_lib::repo_handles::ExpireOptions;
 use tempfile::TempDir;
 
-mod support;
+use crate::support;
 
 use support::copy_worktree;
 

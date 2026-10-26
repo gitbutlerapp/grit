@@ -1,6 +1,6 @@
 //! Populated-tree checkout (empty index → full tree) on large flat repos.
 
-mod support;
+use crate::support;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::index::Index;

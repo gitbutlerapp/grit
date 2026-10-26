@@ -5,7 +5,7 @@
 use grit_lib::object_inspect::ResolveError;
 use grit_lib::repo::Repository;
 
-mod support;
+use crate::support;
 
 use support::{
     bare_repo_with_ambiguous_prefix, commit_file, git, git_rev_parse_verify_exit, open_grit_repo,

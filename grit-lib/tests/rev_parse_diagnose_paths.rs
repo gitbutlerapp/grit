@@ -1,6 +1,6 @@
 //! Rev-parse diagnose helpers: tree/index prefix mismatches and reflog edges.
 
-mod support;
+use crate::support;
 
 use std::path::Path;
 

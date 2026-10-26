@@ -2,6 +2,7 @@
 name = "grit-cli"
 version.workspace = true
 edition.workspace = true
+autotests = false
 license = "MIT"
 description = "A simplified alternative CLI for Grit"
 repository = "https://github.com/gitbutlerapp/grit"
@@ -51,3 +52,15 @@ serde_json.workspace = true
 shell-words.workspace = true
 tempfile = "3"
 jsonschema = "0.29"
+
+# Integration tests build as one binary, tests/integration.rs (see
+# scripts/sync_integration_tests.py). The [[test]] targets below run in their own
+# process: they change the working directory or environment, or run their own
+# binary again by test name.
+[[test]]
+name = "integration"
+path = "tests/integration.rs"
+
+[[test]]
+name = "remote_refs"
+path = "tests/remote_refs.rs"

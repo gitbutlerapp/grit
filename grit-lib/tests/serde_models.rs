@@ -1,5 +1,7 @@
 //! Regression tests for the `serde-models` feature.
 
+#![cfg(feature = "serde-models")]
+
 use grit_lib::change_id::ChangeId;
 use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::log::{CommitRefDecoration, DecorationKind, LoadedCommit};

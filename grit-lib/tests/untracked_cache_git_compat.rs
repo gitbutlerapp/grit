@@ -1,6 +1,6 @@
 //! Untracked cache (UNTR index extension) compatibility with system `git` (t7063).
 
-mod support;
+use crate::support;
 
 use std::collections::BTreeSet;
 use std::fs;

@@ -1,6 +1,6 @@
 //! Config file parsing and ConfigSet precedence vs system `git config` (t1300 subset, t1303, t1308, t1310).
 
-mod support;
+use crate::support;
 
 use std::fs;
 use std::path::Path;

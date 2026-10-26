@@ -1,6 +1,6 @@
 //! Ref transactions, CAS batches, D/F conflicts, locking, and reftable atomic writes.
 
-mod support;
+use crate::support;
 
 use std::collections::BTreeMap;
 use std::fs;

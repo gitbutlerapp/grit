@@ -1,6 +1,6 @@
 //! Rev-list history simplification, object walks, and filters (upstream t60xx / t4216).
 
-mod support;
+use crate::support;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::error::Error;

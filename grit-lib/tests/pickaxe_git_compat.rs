@@ -1,6 +1,6 @@
 //! Pickaxe (`-S` / `-G`) vs system `git log`.
 
-mod support;
+use crate::support;
 
 use std::path::Path;
 use std::process::Command;

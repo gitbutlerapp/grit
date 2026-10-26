@@ -1,6 +1,6 @@
 //! Smoke test for the refs backend harness.
 
-mod support;
+use crate::support;
 
 use grit_lib::refs::write_ref;
 

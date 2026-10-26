@@ -1,6 +1,6 @@
 //! Targeted hits for `rev_parse.rs` lines needed to satisfy the 85% file floor.
 
-mod support;
+use crate::support;
 
 use std::fs;
 use std::io::Write;

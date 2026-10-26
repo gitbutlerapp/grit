@@ -1,6 +1,6 @@
 //! Batch ref-store transactions in fetch and receive-pack (task #780 acceptance).
 
-mod support;
+use crate::support;
 
 use std::path::Path;
 use std::process::{Command, Stdio};

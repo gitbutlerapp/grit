@@ -1,6 +1,6 @@
 //! Rev-list ordering, limiting, and range tests vs system `git` (history harness).
 
-mod support;
+use crate::support;
 
 use std::collections::{HashMap, HashSet};
 use std::fs;

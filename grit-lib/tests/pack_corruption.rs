@@ -1,6 +1,6 @@
 //! Pack corruption resilience (upstream t5303).
 
-mod pack_delta_scenarios;
+use crate::pack_delta_scenarios;
 
 use grit_lib::objects::odb::Odb;
 use grit_lib::objects::pack::{

@@ -1,6 +1,6 @@
 //! Smoke test for [`support::history_harness`].
 
-mod support;
+use crate::support;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::repo::Repository;

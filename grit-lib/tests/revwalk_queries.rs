@@ -1,6 +1,6 @@
 //! Rev-walk query API vs system `git rev-list` / `git merge-base`.
 
-mod support;
+use crate::support;
 
 use std::collections::HashMap;
 use std::fs;

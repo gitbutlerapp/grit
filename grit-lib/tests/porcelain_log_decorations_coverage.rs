@@ -1,6 +1,6 @@
 //! Exercise `porcelain::log` decoration collection for total coverage.
 
-mod support;
+use crate::support;
 
 use grit_lib::objects::ObjectId;
 use grit_lib::objects::ObjectKind;

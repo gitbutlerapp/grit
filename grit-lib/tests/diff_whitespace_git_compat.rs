@@ -1,6 +1,6 @@
 //! Whitespace diff modes vs system `git diff` (t4015 / t4040 semantics).
 
-mod support;
+use crate::support;
 
 use grit_lib::diff::{line_diff_unified_hunk_body, DiffAlgorithm, DiffOptions, WhitespaceMode};
 use support::{

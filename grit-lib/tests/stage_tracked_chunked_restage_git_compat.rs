@@ -3,7 +3,7 @@
 //! More changed paths than one restage chunk holds, plus deletions, mode-only changes and
 //! stat-only touches, staged with and without untracked-cache deferral.
 
-mod support;
+use crate::support;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::porcelain::stage_tracked::{

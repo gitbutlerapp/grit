@@ -1,6 +1,6 @@
 //! Pack delta resolution and apply_delta scenarios (upstream t5303/t5309/t5314/t5316).
 
-mod pack_delta_scenarios;
+use crate::pack_delta_scenarios;
 
 use std::collections::HashMap;
 use std::path::PathBuf;

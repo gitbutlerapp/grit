@@ -1,6 +1,6 @@
 //! Broad API and spec sweeps for `rev_parse.rs` line coverage (complements oracles).
 
-mod support;
+use crate::support;
 
 use std::path::Path;
 

@@ -1,6 +1,6 @@
 //! After `switch_repository`, system `git` sees a clean index and worktree.
 
-mod switch_overwrite_git_helpers;
+use crate::switch_overwrite_git_helpers;
 
 use std::process::Command;
 

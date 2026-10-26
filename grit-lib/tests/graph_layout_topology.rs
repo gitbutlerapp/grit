@@ -1,6 +1,6 @@
 //! Lane topology tests for [`grit_lib::revwalk::GraphLayout`].
 
-mod support;
+use crate::support;
 
 use std::collections::HashSet;
 

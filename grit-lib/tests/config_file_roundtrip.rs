@@ -1,6 +1,6 @@
 //! ConfigFile mutation and round-trip write coverage.
 
-mod support;
+use crate::support;
 
 use std::fs;
 use std::path::Path;

@@ -1,7 +1,7 @@
 //! `RepositoryRemotes::prune` and `set_head` compared with `git remote prune` / `set-head`.
 #![allow(clippy::expect_used, clippy::unwrap_used)]
 
-mod support;
+use crate::support;
 
 use std::path::{Path, PathBuf};
 use std::process::Command;

@@ -1,6 +1,6 @@
 //! Object-walk roots: tagged commits, treeish paths, filters, and missing objects vs `git`.
 
-mod support;
+use crate::support;
 
 use std::collections::HashSet;
 

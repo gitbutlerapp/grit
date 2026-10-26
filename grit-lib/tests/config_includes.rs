@@ -1,6 +1,6 @@
 //! Config includes and includeIf vs system `git config` (t1305, t1309, t1311).
 
-mod support;
+use crate::support;
 
 use std::fs;
 use std::path::Path;

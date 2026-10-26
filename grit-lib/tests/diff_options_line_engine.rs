@@ -1,6 +1,6 @@
 //! Structured hunk boundaries vs system `git diff` for each line algorithm.
 
-mod support;
+use crate::support;
 
 use grit_lib::diff::structured::structured_text_diff;
 use grit_lib::diff::{DiffAlgorithm, DiffOptions};

@@ -1,6 +1,6 @@
 //! In-memory merge prediction vs `git merge-tree --write-tree`.
 
-mod support;
+use crate::support;
 
 use std::fs;
 use std::path::Path;

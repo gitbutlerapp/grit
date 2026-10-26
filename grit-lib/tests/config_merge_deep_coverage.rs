@@ -1,6 +1,6 @@
 //! Deep `[include]` / `[includeIf]` merge and accessor coverage for `config.rs`.
 
-mod support;
+use crate::support;
 
 use std::fs;
 

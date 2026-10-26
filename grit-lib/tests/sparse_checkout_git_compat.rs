@@ -1,6 +1,6 @@
 //! Sparse-checkout cone/non-cone vs git ls-files -t/-v (t1091/t1092/t1011).
 
-mod support;
+use crate::support;
 
 use std::fs;
 

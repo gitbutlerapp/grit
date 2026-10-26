@@ -1,6 +1,6 @@
 //! Seeded three-way tree merge matrix vs `git merge-tree --write-tree`.
 
-mod support;
+use crate::support;
 
 use std::fs;
 

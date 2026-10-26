@@ -1,6 +1,6 @@
 //! Git-oracle repo exercises to nudge total and revwalk floors over committed gates.
 
-mod support;
+use crate::support;
 
 use grit_lib::blame::{blame_file, BlameOptions};
 use grit_lib::config::ConfigSet;

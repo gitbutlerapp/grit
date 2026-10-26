@@ -3,7 +3,7 @@
 //! Full-history walks answer parents and dates from a commit-graph written by system `git`,
 //! without reading commit objects (issue #1745).
 
-mod support;
+use crate::support;
 
 use std::fs;
 use std::path::Path;

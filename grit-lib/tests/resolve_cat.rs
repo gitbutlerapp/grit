@@ -1,6 +1,6 @@
 //! `resolve` / `read_object_for_display` compatibility with system `git`.
 
-mod support;
+use crate::support;
 
 use std::io::Write;
 use std::process::{Command, Stdio};

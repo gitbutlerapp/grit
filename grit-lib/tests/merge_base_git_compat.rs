@@ -1,6 +1,6 @@
 //! Merge-base oracle tests (upstream t6010 / t6099 subsets).
 
-mod support;
+use crate::support;
 
 use std::collections::HashMap;
 use std::fs;

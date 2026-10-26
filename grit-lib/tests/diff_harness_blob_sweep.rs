@@ -1,6 +1,6 @@
 //! Drive `diff_harness` blob matrices through grit diff APIs for line coverage.
 
-mod support;
+use crate::support;
 
 use grit_lib::diff::{
     anchored_unified_diff, annotate_unified_diff_no_newline_at_eof, count_changes_with_algorithm,

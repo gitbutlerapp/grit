@@ -439,8 +439,7 @@ jobs:
         env:
           GRIT_REQUIRE_REFTABLE_GIT: "1"
         run: |
+          cargo test -p grit-lib --features http-ureq --test integration -- \
+            transport_http matrix_fetch:: matrix_push:: matrix_sha256::
           cargo test -p grit-lib --features http-ureq \
-            --test transport_http --test transport_http_auth \
-            --test transport_http_proxy_cookies --test transport_http_redirect_auth \
-            --test matrix_fetch --test matrix_push --test matrix_sha256 \
             --test matrix_credentials --test remote_dispatch

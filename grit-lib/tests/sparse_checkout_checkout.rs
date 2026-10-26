@@ -9,7 +9,7 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-mod support;
+use crate::support;
 
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::index::sparse_checkout::SparseCheckout;

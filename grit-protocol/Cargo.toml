@@ -2,6 +2,7 @@
 name = "grit-protocol"
 version.workspace = true
 edition.workspace = true
+autotests = false
 license = "MIT"
 description = "Git smart protocol handlers for the grit implementation"
 repository = "https://github.com/gitbutlerapp/grit"
@@ -12,3 +13,11 @@ workspace = true
 [dependencies]
 grit-lib = { version = "0.5", path = "../grit-lib" }
 thiserror.workspace = true
+
+# Integration tests build as one binary, tests/integration.rs (see
+# scripts/sync_integration_tests.py). The [[test]] targets below run in their own
+# process: they change the working directory or environment, or run their own
+# binary again by test name.
+[[test]]
+name = "integration"
+path = "tests/integration.rs"

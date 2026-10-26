@@ -1,6 +1,6 @@
 //! Round-trip `grit reset` with system `git fsck` / `git status`.
 
-mod support;
+use crate::support;
 
 use std::path::Path;
 

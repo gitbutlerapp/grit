@@ -1,6 +1,6 @@
 //! Split index (`link` + `sharedindex.<oid>`) compatibility with system `git` (t1700, t1701).
 
-mod support;
+use crate::support;
 
 use filetime::FileTime;
 use grit_lib::config::environment::RepositoryOptions;

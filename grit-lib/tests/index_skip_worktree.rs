@@ -1,6 +1,6 @@
 //! Skip-worktree and assume-unchanged bits vs system git (t2104/t7011/t7012).
 
-mod support;
+use crate::support;
 
 use std::fs;
 

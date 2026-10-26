@@ -1,6 +1,6 @@
 //! Issue #1093: theirs-side rename + ours-side edit must merge at the rename target with edited content.
 
-mod support;
+use crate::support;
 
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::diff::merge_trees::merge_trees_three_way;

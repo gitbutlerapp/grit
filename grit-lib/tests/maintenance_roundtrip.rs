@@ -1,6 +1,6 @@
 //! Commit-graph, MIDX, and pack-refs maintenance vs system `git`.
 
-mod support;
+use crate::support;
 
 use std::fs;
 use std::path::Path;

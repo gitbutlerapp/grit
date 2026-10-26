@@ -1,6 +1,6 @@
 //! Ref lock backoff when another process briefly holds `refs/heads/*.lock`.
 
-mod support;
+use crate::support;
 
 use std::sync::{Arc, Barrier};
 use std::thread;

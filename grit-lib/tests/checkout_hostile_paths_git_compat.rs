@@ -1,6 +1,6 @@
 //! Hostile tree entry names must be rejected at checkout/index population, matching system `git`.
 
-mod support;
+use crate::support;
 
 use std::collections::BTreeMap;
 use std::fs;

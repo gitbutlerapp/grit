@@ -1,6 +1,6 @@
 //! Round-trip reftable [`RefStore`] transactions against system `git`.
 
-mod support;
+use crate::support;
 
 use std::collections::BTreeMap;
 

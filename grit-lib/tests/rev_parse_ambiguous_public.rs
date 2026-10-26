@@ -1,6 +1,6 @@
 //! Exercise ambiguous short-hex disambiguation through public rev-parse entry points.
 
-mod support;
+use crate::support;
 
 use grit_lib::config::environment::{Environment, RepositoryOptions};
 use grit_lib::repo::Repository;
