@@ -45,11 +45,12 @@ use grit_lib::objects::ObjectId;
 use grit_lib::remote::snapshot_checkout::{
     edit_slices, graft_checkin_branch, integrate, make_snapshot, normalize_paths, read_slices,
     set_checked_in_branch, target_branch, target_ref, valid_checkout_id, CheckinBranch,
-    CheckinRefusal, CheckinRequest, CheckinResponse, CheckinResult, CheckinStatus, CheckoutError,
-    CheckoutErrorBody, CheckoutInfo, CheckoutRecord, CheckoutRequest, CheckoutServerInfo,
-    CheckoutState, CheckoutStore, Ident, IntegrateRequest, IntegrateResponse, Slice, SliceChange,
-    SliceDeleteRequest, SliceEdit, SliceRequest, SlicesEdited, SlicesResponse, SnapshotRoot,
-    StoredCheckout, TargetChange, TargetRefusal, WorkBranchRequest, WorkBranchResponse,
+    CheckinRefusal, CheckinRequest, CheckinResponse, CheckinResult, CheckinRule, CheckinStatus,
+    CheckoutError, CheckoutErrorBody, CheckoutInfo, CheckoutRecord, CheckoutRequest,
+    CheckoutServerInfo, CheckoutState, CheckoutStore, Ident, IntegrateRequest, IntegrateResponse,
+    Slice, SliceChange, SliceDeleteRequest, SliceEdit, SliceRequest, SlicesEdited, SlicesResponse,
+    SnapshotRoot, StoredCheckout, TargetChange, TargetRefusal, WorkBranchRequest,
+    WorkBranchResponse,
 };
 use grit_lib::repo::Repository;
 use grit_protocol::RepositoryOptions;
@@ -678,6 +679,15 @@ fn checkin_blocking(
     let (record, mut stored) = load_held(slot, repo, id)?;
     let before = stored.set_last.clone();
     let target = target_branch(repo);
+    // Commits on the target are never dropped by a check-in: the branch the
+    // checkout snapshots, and the one HEAD names now if that differs.
+    let mut targets: Vec<ObjectId> = [stored.info.branch.as_str(), target.as_str()]
+        .into_iter()
+        .filter_map(|b| {
+            grit_lib::refs::resolve_ref(repo.git_dir(), &format!("refs/heads/{b}")).ok()
+        })
+        .collect();
+    targets.dedup();
     let who = signature(None, email)?;
     let reflog = format!("checkin: from checkout {id}");
     let mut results = Vec::new();
@@ -697,6 +707,8 @@ fn checkin_blocking(
                 repo,
                 &branch.name,
                 grafted.tip,
+                &targets,
+                &stored.info.paths,
                 stored.last_set(&branch.name),
                 request.force,
                 &who,
@@ -713,12 +725,15 @@ fn checkin_blocking(
         };
         stored.record_set(&branch.name, grafted.tip);
         eprintln!(
-            "checkin: {id} of {}: {} {:?} at {} ({} commits)",
+            "checkin: {id} of {}: {} {:?} at {} ({} commits{})",
             served.name,
             branch.name,
             set.status,
             &grafted.tip.to_hex()[..12],
-            grafted.commits.len()
+            grafted.commits.len(),
+            set.rule
+                .map(|rule| format!("; {}", rule_words(rule)))
+                .unwrap_or_default()
         );
         results.push(CheckinResult {
             name: branch.name.clone(),
@@ -726,6 +741,7 @@ fn checkin_blocking(
             grafted: Some(grafted.tip.to_hex()),
             previous: set.previous.map(|p| p.to_hex()),
             commits: grafted.commits.len(),
+            rule: set.rule,
             message: None,
             reason: None,
         });
@@ -734,6 +750,16 @@ fn checkin_blocking(
         record.save(&stored).map_err(|e| internal(&e))?;
     }
     Ok(CheckinResponse { results })
+}
+
+/// Why an update was allowed, in words, for the server's log.
+fn rule_words(rule: CheckinRule) -> &'static str {
+    match rule {
+        CheckinRule::FastForward => "fast-forward",
+        CheckinRule::OwnLastSet => "replaces what this checkout checked in before",
+        CheckinRule::KeepsEveryCommit => "rebased, and keeps every commit the server's branch had",
+        CheckinRule::Forced => "forced",
+    }
 }
 
 /// The result for `branch` of a check-in the server refused, with its reason
@@ -795,6 +821,7 @@ fn refused(
         grafted: None,
         previous,
         commits: 0,
+        rule: None,
         message: Some(message),
         reason: Some(refusal),
     }

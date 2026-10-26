@@ -88,6 +88,12 @@
           },
           "type": "array"
         },
+        "gave_change_ids": {
+          "description": "Commits made with plain Git on the current branch that were given a change id before the rebase (the branch was rewritten with it).",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
         "moved": {
           "description": "Whether the target had moved since the checkout's last snapshot.",
           "type": "boolean"
@@ -124,6 +130,7 @@
         "behind",
         "dry_run",
         "followed",
+        "gave_change_ids",
         "moved",
         "snapshot",
         "target",

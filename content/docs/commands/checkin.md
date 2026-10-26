@@ -19,17 +19,32 @@ With no branches named, every local branch with commits on top of the snapshot i
 
 A grafted commit has a new tree and new parents, so a signature (`gpgsig`) or merged tag (`mergetag`) it carried no longer holds and is dropped; every other header is kept. A merge commit, such as the one [`grit pull --no-rebase`](../pull/) makes, is grafted onto a three-way merge of its parents' grafts: what the target changed outside your paths since your older snapshot is kept, and inside your paths the merge's own result wins. A file that replaces a directory (or the other way round) checks in like any other change.
 
+Check-ins need write access to the repository.
+
+### Change ids
+
+Commits made with `grit commit` carry a `change-id` header, and `grit rebase` keeps it, so the server can tell a rebased copy of one of its commits from new work. Commits made with plain `git` (by an editor, an agent or a script) have none, so before anything is pushed, `grit checkin` gives every commit on the branches it checks in, above the snapshot, that lacks one the id derived from its own commit id: the id `grit log` already shows for it. The branch is rewritten with it (commits on top move to the new parents and keep their ids), and the output says so (`· gave 1 commit made with git a change id`). Only the header is added (a signature, which no longer holds, is dropped), so trees, the index and the worktree stay as they are. Nothing is rewritten under the snapshot, in remote-tracking refs, in commits that were already integrated, or when `grit.changeIds` is `false`, and nothing at all while a rebase, merge, cherry-pick or revert (one paused between its commits too) is in progress in any of the checkout's worktrees; the check-in then sends the commits as they are. The server gives a commit that reaches it without an id the same derived id when it grafts it. Plain `git rebase` drops the header, so when you share a branch, rebase it with `grit rebase`.
+
+### Refused branches
+
 A branch is refused when:
 
 - **it is the target branch**, in any case (`Main` too): the branch the checkout was made from, or the branch the server's `HEAD` names now. Only [`grit integrate`](../integrate/) and [`grit slice`](../slice/) change the target (the server refuses plain pushes to it too); check your work in on another branch.
 - **a commit changes a path outside your checkout's paths that the target holds differently.** A refresh never brings such a path into your checkout, so make that change from a checkout whose paths include it. The same goes for a directory replaced by a file when the target has files there your checkout can't see.
 - **a merge commit's parents conflict outside your paths**, where your checkout can't resolve them.
-- **the server's branch has commits yours doesn't.** Rebase onto the server's branch with `grit pull <branch>` and check in again, or pass `--force` to replace it. A branch this checkout set last may always be replaced (after an amend or rebase).
+- **the server's branch has commits yours doesn't.** Rebase onto the server's branch with `grit pull <branch>` and check in again, or pass `--force` to replace it.
 - **its name differs only in case from a branch the server has**, on a server whose file system can't tell them apart.
 
-When several checkouts check in the same branch at once, they take turns: the first sets it, and the others are refused because the server's branch now has commits they don't. On a server whose repository keeps reflogs (Git's default when it has a worktree), every branch a check-in sets gets a `checkin: from checkout <id>` reflog entry.
+### When a branch moves
 
-Check-ins need write access to the repository.
+A branch the server already has moves when one of these holds, checked in this order, and the output names the rule (`rule` in `--json`):
+
+- **fast-forward** (`fast_forward`): your branch has the server's branch in its history;
+- **this checkout set it last** (`own_last_set`), so you are replacing your own work after an amend or rebase;
+- **it keeps every commit the server's branch had** (`keeps_every_commit`), matched by change id: every commit of the server's branch that the target doesn't have is in yours, as a copy with the same id, perhaps rebased and with more on top. Say a teammate rebased the shared branch onto a newer `main` with `grit rebase` and force-pushed it, and you then add a commit to your copy: your check-in has every commit theirs had, so it goes through without `--force`. A copy only counts when it also has what the server's commit changed outside your checkout's paths, which you can't see: if the teammate amended the commit to change `docs/` as well and your checkout is of `src`, your copy would put `docs/` back, so the branch is refused as diverged instead;
+- **`--force`** (`forced`), when none of the others holds.
+
+When several checkouts check in the same branch at once, they take turns: the first sets it, and the others are refused because the server's branch now has commits they don't. On a server whose repository keeps reflogs (Git's default when it has a worktree), every branch a check-in sets gets a `checkin: from checkout <id>` reflog entry.
 
 ## Options
 
@@ -48,6 +63,17 @@ $ grit checkin
 · alice/elm-orchid already at 7fb21e5 on the server
 ```
 
+A commit made with plain `git` is given a change id first; a teammate's rebase of the shared branch is replaced without `--force` when your branch still has all its commits:
+
+```console
+$ echo a3 > src/a.rs && git commit -qam "Change a again"
+$ grit checkin
+· gave 1 commit made with git a change id
+✓ alice/elm-orchid updated on the server 7fb21e5 → 2c41d0e (1 commit; fast-forward)
+$ grit checkin shared
+✓ shared updated on the server 9a4b911 → c41d0e2 (2 commits; rebased, keeps every commit the server's branch had)
+```
+
 ```console
 $ grit checkout http://127.0.0.1:8080/demo.git -p src --into fresh && cd fresh
 $ grit checkin
@@ -61,13 +87,16 @@ Schema: [v1](/schemas/checkin/v1.json)
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
 | `url` | string | The server repository. |
-| `branches` | array | One entry per branch (empty when there was nothing to check in): `name`, `status` (`created`, `updated`, `unchanged` or `refused`), `grafted` (the server commit the branch became), `previous` (where the server's branch was), `commits` (commits replayed), and for a refused branch `message` (why, in words) and `reason`. |
+| `gave_change_ids` | integer | Commits made with plain `git` that were given a change id before the check-in (their branches were rewritten); `0` when none needed one. |
+| `branches` | array | One entry per branch (empty when there was nothing to check in): `name`, `status` (`created`, `updated`, `unchanged` or `refused`), `grafted` (the server commit the branch became), `previous` (where the server's branch was), `commits` (commits replayed), `rule` for an updated branch, and for a refused branch `message` (why, in words) and `reason`. |
+| `branches[].rule` | string or omitted | What let an `updated` branch move: `fast_forward`, `own_last_set` (this checkout set it last), `keeps_every_commit` (a rebase that keeps every commit the server's branch had, by change id) or `forced`. |
 | `branches[].reason` | string | The kind of refusal: `target_branch`, `conflict` (a path the target holds differently), `merge_conflict`, `diverged` (the server's branch has commits yours doesn't), `case_conflict`, `not_on_snapshot`, `not_pushed`, `invalid_name` or `invalid_tip`. |
 | `refused` | boolean | Whether any branch was refused; the exit status is then `1`. |
 
 ```json
 {
   "url": "http://127.0.0.1:8080/demo.git",
+  "gave_change_ids": 0,
   "branches": [
     {
       "name": "alice/elm-orchid",
@@ -80,11 +109,32 @@ Schema: [v1](/schemas/checkin/v1.json)
 }
 ```
 
+An update allowed by the change-id rule, after a commit made with `git` was given an id:
+
+```json
+{
+  "url": "http://127.0.0.1:8080/demo.git",
+  "gave_change_ids": 1,
+  "branches": [
+    {
+      "name": "shared",
+      "status": "updated",
+      "grafted": "c41d0e2b9a8f7e6d5c4b3a2f1e0d9c8b7a6f5e4d",
+      "previous": "9a4b9113f0c1e4f7d9b2e6a3c8d0f1e2a3b4c5d6",
+      "commits": 2,
+      "rule": "keeps_every_commit"
+    }
+  ],
+  "refused": false
+}
+```
+
 A refused branch, and a check-in with nothing to send:
 
 ```json
 {
   "url": "http://127.0.0.1:8080/demo.git",
+  "gave_change_ids": 0,
   "branches": [
     {
       "name": "shared",
@@ -102,6 +152,7 @@ A refused branch, and a check-in with nothing to send:
 ```json
 {
   "url": "http://127.0.0.1:8080/demo.git",
+  "gave_change_ids": 0,
   "branches": [],
   "refused": false
 }
@@ -116,9 +167,12 @@ Schema: [v1](/schemas/checkin/v1.json)
 ```markdown
 ## Check-in to `http://127.0.0.1:8080/demo.git`
 
-| Branch | Status | Server commit | Commits |
-| --- | --- | --- | ---: |
-| `alice/elm-orchid` | created | `7fb21e5a0c1e4f7d9b2e6a3c8d0f1e2a3b4c5d6e` | 1 |
+- Change ids: gave 1 commit made with git a change id
+
+| Branch | Status | Server commit | Commits | Rule |
+| --- | --- | --- | ---: | --- |
+| `alice/elm-orchid` | created | `7fb21e5a0c1e4f7d9b2e6a3c8d0f1e2a3b4c5d6e` | 1 |  |
+| `shared` | updated | `c41d0e2b9a8f7e6d5c4b3a2f1e0d9c8b7a6f5e4d` | 2 | rebased, keeps every commit the server's branch had |
 ```
 
 ## Exit status

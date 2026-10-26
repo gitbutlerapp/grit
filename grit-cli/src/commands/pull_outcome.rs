@@ -394,6 +394,9 @@ fn print_conflicts_to_stderr(outcome: &PullOutcome) {
 /// The first line of a refresh: whether the target moved, and what changed
 /// in the checkout's paths.
 fn render_refresh_head(w: &mut dyn Write, r: &PullRefreshJson) -> Result<()> {
+    if r.gave_change_ids > 0 {
+        outln!(w, "Gave {}.", gave_change_ids_phrase(r.gave_change_ids));
+    }
     let previous = r.previous_base.as_deref().map(short_hex).unwrap_or("?");
     if !r.moved {
         outln!(
@@ -427,6 +430,14 @@ fn render_refresh_head(w: &mut dyn Write, r: &PullRefreshJson) -> Result<()> {
         None => {}
     }
     Ok(())
+}
+
+/// `N commit(s) made with git a change id`, after "gave".
+pub(crate) fn gave_change_ids_phrase(n: usize) -> String {
+    format!(
+        "{n} commit{} made with git a change id",
+        if n == 1 { "" } else { "s" }
+    )
 }
 
 /// `N files changed, I insertions(+), D deletions(-)`, as `git diff --shortstat` words it.

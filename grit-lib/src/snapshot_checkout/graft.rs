@@ -6,10 +6,15 @@
 //! real history: the commit's changes against its parent (in snapshot space)
 //! are applied path by path to the full tree of the parent's graft (a
 //! snapshot's graft is the real commit it stands for). The new commit keeps
-//! the author, committer, message and other headers; only its tree and
-//! parents change, so a signature (`gpgsig`, `gpgsig-sha256`) or merged tag
-//! (`mergetag`) no longer holds for it and is dropped. Replays are
-//! deterministic, so checking in the same commit twice gives the same commit.
+//! the author, committer, message and other headers; its tree and parents
+//! change, so a signature (`gpgsig`, `gpgsig-sha256`) or merged tag
+//! (`mergetag`) no longer holds for it and is dropped. A commit without a
+//! `change-id` header (one made with plain Git) gets the id derived from its
+//! own commit id: the id it already reports
+//! ([`crate::change_id::resolved_change_id`]) and the one the client gives it
+//! before sending ([`super::give_change_ids`]), so a rebased copy made later
+//! can still be matched with it. Replays are deterministic, so checking in
+//! the same commit twice gives the same commit.
 //!
 //! A change applies only where the full tree holds what the change started
 //! from. When it doesn't (a file outside the checkout's view that the target
@@ -25,6 +30,7 @@
 
 use std::collections::{HashMap, HashSet};
 
+use crate::change_id::{change_id, set_change_id, ChangeId};
 use crate::merge_base::{
     merge_bases_first_vs_rest, walk_commits_reachable_excluding_ancestors_of, ReachableWalkLimit,
 };
@@ -37,7 +43,7 @@ use crate::odb::Odb;
 use crate::repo::Repository;
 
 use super::tree::{diff, edit, lookup, Change, TREE_MODE};
-use super::{in_view, view_tree, CheckoutError, Result, SnapshotRoot};
+use super::{in_view, view_tree, Result, SnapshotRoot};
 
 /// Why a branch could not be grafted.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
@@ -177,9 +183,10 @@ pub fn graft(
             }
         };
         data.parents = mapped;
-        data.extra_headers = remove_header_lines(&data.extra_headers, |key| {
-            matches!(key, b"gpgsig" | b"gpgsig-sha256" | b"mergetag")
-        });
+        data.extra_headers = without_signatures(&data.extra_headers);
+        if change_id(&data).is_none() {
+            set_change_id(&mut data, &ChangeId::derived_from_commit_id(&commit));
+        }
         let grafted = odb.write(ObjectKind::Commit, &serialize_commit(&data))?;
         map.insert(commit, grafted);
         made.push((commit, grafted));
@@ -193,6 +200,14 @@ pub fn graft(
             commit: tip.to_hex()[..12].to_owned(),
         })),
     }
+}
+
+/// `headers` without the ones that stop holding when a commit is rewritten:
+/// signatures (`gpgsig`, `gpgsig-sha256`) and merged tags (`mergetag`).
+pub(crate) fn without_signatures(headers: &[u8]) -> Vec<u8> {
+    remove_header_lines(headers, |key| {
+        matches!(key, b"gpgsig" | b"gpgsig-sha256" | b"mergetag")
+    })
 }
 
 fn commit_tree(odb: &Odb, commit: ObjectId) -> crate::error::Result<ObjectId> {
@@ -320,7 +335,7 @@ fn merge_parents(repo: &Repository, commits: &[ObjectId]) -> Result<(ObjectId, V
 }
 
 /// `commits` ordered so every commit comes after its parents among them.
-fn parents_first(repo: &Repository, commits: &[ObjectId]) -> Result<Vec<ObjectId>> {
+pub(crate) fn parents_first(repo: &Repository, commits: &[ObjectId]) -> Result<Vec<ObjectId>> {
     let set: HashSet<ObjectId> = commits.iter().copied().collect();
     let mut parents: HashMap<ObjectId, Vec<ObjectId>> = HashMap::new();
     for c in commits {
@@ -356,51 +371,6 @@ fn parents_first(repo: &Repository, commits: &[ObjectId]) -> Result<Vec<ObjectId
         }
     }
     Ok(out)
-}
-
-/// How the server decides whether a check-in may set a branch.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum CheckinDecision {
-    /// The branch does not exist yet.
-    Create,
-    /// The branch already points at the graft.
-    Unchanged,
-    /// The branch moves to the graft.
-    Update,
-    /// The server's branch has commits the graft would drop.
-    Diverged,
-}
-
-/// Decide whether `grafted` may replace the server's branch, now at
-/// `previous`.
-///
-/// An update is allowed when it is a fast-forward, when `force` is set, or
-/// when this checkout set the branch last (`set_last`), so a checkout can
-/// replace its own work after an amend or rebase.
-///
-/// # Errors
-///
-/// Ancestry walk failures.
-pub fn decide_checkin(
-    repo: &Repository,
-    previous: Option<ObjectId>,
-    grafted: ObjectId,
-    set_last: Option<ObjectId>,
-    force: bool,
-) -> Result<CheckinDecision> {
-    let Some(previous) = previous else {
-        return Ok(CheckinDecision::Create);
-    };
-    if previous == grafted {
-        return Ok(CheckinDecision::Unchanged);
-    }
-    if force || set_last == Some(previous) {
-        return Ok(CheckinDecision::Update);
-    }
-    if crate::merge_base::is_ancestor(repo, previous, grafted).map_err(CheckoutError::from)? {
-        return Ok(CheckinDecision::Update);
-    }
-    Ok(CheckinDecision::Diverged)
 }
 
 #[cfg(test)]
@@ -520,30 +490,6 @@ mod tests {
         let _ = CheckoutError::InvalidUrl(String::new());
     }
 
-    #[test]
-    fn checkins_update_on_fast_forward_force_or_own_last_set() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
-        let empty = edit(repo.odb(), None, &[]).expect("tree");
-        let a = commit(&repo, empty, &[], "a");
-        let b = commit(&repo, empty, &[a], "b");
-        let other = commit(&repo, empty, &[], "other");
-        let decide =
-            |prev, new, last, force| decide_checkin(&repo, prev, new, last, force).expect("decide");
-        assert_eq!(decide(None, b, None, false), CheckinDecision::Create);
-        assert_eq!(decide(Some(b), b, None, false), CheckinDecision::Unchanged);
-        assert_eq!(decide(Some(a), b, None, false), CheckinDecision::Update);
-        assert_eq!(
-            decide(Some(b), other, None, false),
-            CheckinDecision::Diverged
-        );
-        assert_eq!(
-            decide(Some(b), other, Some(b), false),
-            CheckinDecision::Update
-        );
-        assert_eq!(decide(Some(b), other, None, true), CheckinDecision::Update);
-    }
-
     /// A repository whose main has `README`, `src/a`, `src/lib/{x,y}`,
     /// `src/lib/sub/z` and `docs/d`, and a snapshot of `src`.
     fn fixture() -> (
@@ -629,6 +575,39 @@ mod tests {
         assert!(text.ends_with("\n\nSigned change\n"), "{text}");
         assert_eq!(
             graft(&repo, &roots, &["src".to_owned()], raw)
+                .expect("graft")
+                .expect("grafted"),
+            grafted,
+            "still deterministic"
+        );
+    }
+
+    #[test]
+    fn commits_made_with_git_are_grafted_with_the_change_id_derived_from_them() {
+        let (_dir, repo, _base, snap) = fixture();
+        let odb = repo.odb();
+        let paths = vec!["src".to_owned()];
+        let tree = edit(
+            odb,
+            Some(snap.tree),
+            &[(b"src/a".to_vec(), Some(blob(&repo, "a2")))],
+        )
+        .expect("tree");
+        let plain = commit(&repo, tree, &[snap.commit], "made with git");
+        let roots = roots_of(&[&snap]);
+        let grafted = graft(&repo, &roots, &paths, plain)
+            .expect("graft")
+            .expect("grafted");
+        let data = parse_commit(&odb.read(&grafted.tip).expect("read").data).expect("parse");
+        let raw = parse_commit(&odb.read(&plain).expect("read").data).expect("parse");
+        assert_eq!(
+            change_id(&data),
+            Some(crate::change_id::resolved_change_id(&plain, &raw).id),
+            "the id the checkout's commit already reports"
+        );
+        assert_eq!(data.message, "made with git\n");
+        assert_eq!(
+            graft(&repo, &roots, &paths, plain)
                 .expect("graft")
                 .expect("grafted"),
             grafted,

@@ -9,14 +9,15 @@ use grit_lib::objects::ObjectId;
 use grit_lib::porcelain::pull::PullError;
 use grit_lib::progress::NeverCancel;
 use grit_lib::remote::snapshot_checkout::{
-    branches_with_work, land_integration, push_for_checkin, same_branch_name, suggest_work_branch,
-    valid_branch_name, CheckinBranch, CheckinRequest, CheckinStatus, CheckoutError,
-    IntegrateRequest, IntegrateStatus, Landing,
+    branches_with_work, give_change_ids, land_integration, push_for_checkin, same_branch_name,
+    suggest_work_branch, valid_branch_name, CheckinBranch, CheckinRequest, CheckinRule,
+    CheckinStatus, CheckoutError, IntegrateRequest, IntegrateStatus, Landing,
 };
 use schemars::JsonSchema;
 use serde::Serialize;
 
 use crate::commands::checkout::{require_checkout, OpenCheckout};
+use crate::commands::pull::gave_change_ids_phrase;
 use crate::output::{outln, HumanRender, MarkdownRender, OutputMode, RenderContext};
 use crate::progress::TerminalProgress;
 
@@ -35,6 +36,9 @@ pub struct CheckinBranchJson {
     pub previous: Option<String>,
     /// Commits replayed onto the server's history.
     pub commits: usize,
+    /// For an `updated` branch, what allowed it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub rule: Option<CheckinRuleJson>,
     /// Why it was refused.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,
@@ -45,11 +49,51 @@ pub struct CheckinBranchJson {
     pub reason: Option<String>,
 }
 
+/// Why the server let a check-in move a branch it already had.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum CheckinRuleJson {
+    /// The server's branch is in the new commit's history.
+    FastForward,
+    /// This checkout set the branch last, so it replaces its own work.
+    OwnLastSet,
+    /// A rebase that keeps every commit the server's branch had, by change id.
+    KeepsEveryCommit,
+    /// `--force` replaced the branch.
+    Forced,
+}
+
+impl From<CheckinRule> for CheckinRuleJson {
+    fn from(rule: CheckinRule) -> Self {
+        match rule {
+            CheckinRule::FastForward => Self::FastForward,
+            CheckinRule::OwnLastSet => Self::OwnLastSet,
+            CheckinRule::KeepsEveryCommit => Self::KeepsEveryCommit,
+            CheckinRule::Forced => Self::Forced,
+        }
+    }
+}
+
+impl CheckinRuleJson {
+    /// The rule in words.
+    fn words(self) -> &'static str {
+        match self {
+            Self::FastForward => "fast-forward",
+            Self::OwnLastSet => "replaces what this checkout checked in before",
+            Self::KeepsEveryCommit => "rebased, keeps every commit the server's branch had",
+            Self::Forced => "forced",
+        }
+    }
+}
+
 /// Result of `grit checkin`.
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct CheckinOutcome {
     /// The server repository.
     pub url: String,
+    /// Commits made with plain Git that were given a change id first (their
+    /// branches were rewritten with it).
+    pub gave_change_ids: usize,
     /// One entry per branch; empty when no branch had commits to check in.
     pub branches: Vec<CheckinBranchJson>,
     /// Whether any branch was refused (the exit status is then `1`).
@@ -66,6 +110,9 @@ const NOTHING_TO_CHECK_IN: &str =
 
 impl HumanRender for CheckinOutcome {
     fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
+        if self.gave_change_ids > 0 {
+            outln!(w, "· gave {}", gave_change_ids_phrase(self.gave_change_ids));
+        }
         if self.branches.is_empty() {
             outln!(w, "· {NOTHING_TO_CHECK_IN}");
         }
@@ -76,11 +123,15 @@ impl HumanRender for CheckinOutcome {
             } else {
                 format!("{} commits", b.commits)
             };
+            let rule = b
+                .rule
+                .map(|r| format!("; {}", r.words()))
+                .unwrap_or_default();
             match b.status.as_str() {
                 "created" => outln!(w, "✓ {} created on the server at {at} ({commits})", b.name),
                 "updated" => outln!(
                     w,
-                    "✓ {} updated on the server {} → {at} ({commits})",
+                    "✓ {} updated on the server {} → {at} ({commits}{rule})",
                     b.name,
                     b.previous.as_deref().map(short).unwrap_or_default()
                 ),
@@ -101,23 +152,34 @@ impl MarkdownRender for CheckinOutcome {
     fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
         outln!(w, "## Check-in to `{}`", self.url);
         outln!(w);
+        if self.gave_change_ids > 0 {
+            outln!(
+                w,
+                "- Change ids: gave {}",
+                gave_change_ids_phrase(self.gave_change_ids)
+            );
+        }
         if self.branches.is_empty() {
             outln!(w, "- {NOTHING_TO_CHECK_IN}");
             return Ok(());
         }
-        outln!(w, "| Branch | Status | Server commit | Commits |");
-        outln!(w, "| --- | --- | --- | ---: |");
+        if self.gave_change_ids > 0 {
+            outln!(w);
+        }
+        outln!(w, "| Branch | Status | Server commit | Commits | Rule |");
+        outln!(w, "| --- | --- | --- | ---: | --- |");
         for b in &self.branches {
             outln!(
                 w,
-                "| `{}` | {} | {} | {} |",
+                "| `{}` | {} | {} | {} | {} |",
                 b.name,
                 b.status,
                 b.grafted
                     .as_deref()
                     .map(|g| format!("`{g}`"))
                     .unwrap_or_default(),
-                b.commits
+                b.commits,
+                b.rule.map(CheckinRuleJson::words).unwrap_or_default()
             );
         }
         for b in self.branches.iter().filter(|b| b.message.is_some()) {
@@ -135,10 +197,12 @@ impl MarkdownRender for CheckinOutcome {
 
 /// Push `branches` to their out refs on the checkout's server (the URL the
 /// checkout records, whatever `origin` is now) and ask it to graft them.
+/// `gave_change_ids` is how many commits were given a change id first.
 fn check_in(
     co: &OpenCheckout,
     branches: &[(String, ObjectId)],
     force: bool,
+    gave_change_ids: usize,
     mode: OutputMode,
 ) -> Result<CheckinOutcome> {
     let mut progress = TerminalProgress::new(mode);
@@ -188,12 +252,14 @@ fn check_in(
             grafted: r.grafted,
             previous: r.previous,
             commits: r.commits,
+            rule: r.rule.map(CheckinRuleJson::from),
             message: r.message,
             reason: r.reason.map(|reason| reason.kind().to_owned()),
         })
         .collect();
     Ok(CheckinOutcome {
         url: co.marker.url.clone(),
+        gave_change_ids,
         refused: branches.iter().any(|b| b.status == "refused"),
         branches,
     })
@@ -215,19 +281,28 @@ fn chosen_branches(co: &OpenCheckout, names: &[String]) -> Result<Vec<(String, O
         .collect()
 }
 
-/// `grit checkin [<branch>...] [--force]`. With no branch named and none with
-/// work on the snapshot, there is nothing to do, and that is not an error.
+/// `grit checkin [<branch>...] [--force]`: commits made with plain Git on
+/// those branches (all of them when none is named) are given a change id
+/// first. With no branch named and none with work on the snapshot, there is
+/// nothing to do, and that is not an error.
 pub fn run(names: &[String], force: bool, mode: OutputMode) -> Result<CheckinOutcome> {
     let co = require_checkout()?;
+    let gave = give_change_ids(
+        &co.repo,
+        &co.marker,
+        (!names.is_empty()).then_some(names),
+        co.repo.identity_now(),
+    )?;
     let branches = chosen_branches(&co, names)?;
     if branches.is_empty() {
         return Ok(CheckinOutcome {
             url: co.marker.url.clone(),
+            gave_change_ids: gave,
             branches: Vec::new(),
             refused: false,
         });
     }
-    check_in(&co, &branches, force, mode)
+    check_in(&co, &branches, force, gave, mode)
 }
 
 /// Result of `grit integrate`.
@@ -449,8 +524,9 @@ fn follow_up(co: &OpenCheckout, name: &str, landing: &Landing, mode: OutputMode)
     done
 }
 
-/// `grit integrate <branch>`: check the branch in (when it is here), merge it
-/// into the target on the server, then refresh this checkout. When the merge
+/// `grit integrate <branch>`: check the branch in (when it is here, after
+/// giving its commits made with plain Git a change id), merge it into the
+/// target on the server, then refresh this checkout. When the merge
 /// went into the branch this checkout follows, the branch's commits are in
 /// its next snapshot, so they are never replayed: when `HEAD` is on the
 /// branch it moves to the new snapshot, keeping uncommitted changes, and onto
@@ -465,13 +541,19 @@ pub fn integrate(name: &str, mode: OutputMode) -> Result<IntegrateOutcome> {
     if !valid_branch_name(name) {
         bail!("{name} is not a valid branch name");
     }
+    let gave = give_change_ids(
+        &co.repo,
+        &co.marker,
+        Some(&[name.to_owned()]),
+        co.repo.identity_now(),
+    )?;
     let local = branches_with_work(&co.repo, &co.marker)?
         .into_iter()
         .find(|(n, _)| n == name);
     let (checkin, checked_in) = match local {
         Some(branch) => {
             let tip = branch.1;
-            let done = check_in(&co, &[branch], false, mode)?;
+            let done = check_in(&co, &[branch], false, gave, mode)?;
             if done.refused {
                 let why = done
                     .branches

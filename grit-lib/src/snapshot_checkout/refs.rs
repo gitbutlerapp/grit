@@ -55,6 +55,22 @@ pub(crate) fn log_head_move(
     who: &Signature,
     message: &str,
 ) -> Result<()> {
+    log_head_move_as(repo, old, new, &who.header_line(), message)
+}
+
+/// [`log_head_move`], logged as `identity`: a whole reflog identity line,
+/// `Name <email> <seconds> <zone>`.
+///
+/// # Errors
+///
+/// As [`log_head_move`].
+pub(crate) fn log_head_move_as(
+    repo: &Repository,
+    old: ObjectId,
+    new: ObjectId,
+    identity: &str,
+    message: &str,
+) -> Result<()> {
     let config = repo.config()?;
     if !crate::refs::should_autocreate_reflog_with_config(&config, repo.git_dir(), "HEAD")
         && !repo.refs().reflog_exists("HEAD")?
@@ -66,7 +82,7 @@ pub(crate) fn log_head_move(
         "HEAD",
         &old,
         &new,
-        &who.header_line(),
+        identity,
         message,
         false,
         &config,

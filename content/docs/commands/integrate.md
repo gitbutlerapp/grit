@@ -15,7 +15,7 @@ grit integrate <branch>
 
 In a [snapshot checkout](../checkout/), the target branch only changes on the server. `grit integrate <branch>`:
 
-1. **checks the branch in** first when you have it here (see [`grit checkin`](../checkin/));
+1. **checks the branch in** first when you have it here, after giving its commits made with plain `git` a change id (see [`grit checkin`](../checkin/#change-ids));
 2. **merges it into the target branch on the server**, with a merge commit by you, when it merges without conflicts. The merge is by the author your own commits get (`GIT_AUTHOR_NAME` and `GIT_AUTHOR_EMAIL`, then `author.*` and `user.*` config, as [`grit commit`](../commit/) has it), or the signed-in user when none is set; the server cleans `<`, `>` and line breaks out of the name and email. A branch that conflicts is not merged: the error names the files; refresh, rebase and try again. A branch the target already has is left alone;
 3. **refreshes this checkout** onto the new target, as [`grit pull`](../pull/#in-a-snapshot-checkout) does. The branch's commits are in the new snapshot now, but not as its ancestors (a snapshot is one commit standing for the target's tree), so they are never replayed: replaying them one by one could conflict with themselves, as three commits editing one line would against a snapshot that has the last edit. Instead:
    - **when you are on the branch**, it moves to the new snapshot, keeping uncommitted and untracked changes as `git reset --keep` does (`refresh.result` is `landed`);
@@ -125,7 +125,8 @@ Schema: [v1](/schemas/integrate/v1.json)
       "changes": { "files": 1, "insertions": 1, "deletions": 1 },
       "dry_run": false,
       "followed": [],
-      "behind": []
+      "behind": [],
+      "gave_change_ids": 0
     }
   },
   "moved_to": "alice/maple-elm"
@@ -157,9 +158,9 @@ The check-in done first, and the refresh done after, have their own sections, as
 ```markdown
 ## Check-in to `http://127.0.0.1:8080/demo.git`
 
-| Branch | Status | Server commit | Commits |
-| --- | --- | --- | ---: |
-| `alice/elm-orchid` | created | `538e7ad0c3b2a1f0e9d8c7b6a5f4e3d2c1b0a9f8` | 2 |
+| Branch | Status | Server commit | Commits | Rule |
+| --- | --- | --- | ---: | --- |
+| `alice/elm-orchid` | created | `538e7ad0c3b2a1f0e9d8c7b6a5f4e3d2c1b0a9f8` | 2 |  |
 
 ## Integrate `alice/elm-orchid` into `main`
 

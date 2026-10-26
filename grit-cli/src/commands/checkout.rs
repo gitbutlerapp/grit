@@ -372,6 +372,9 @@ pub struct PullRefreshJson {
     pub followed: Vec<RefreshFollowedJson>,
     /// Other branches with commits of their own still on an older snapshot.
     pub behind: Vec<RefreshBehindJson>,
+    /// Commits made with plain Git on the current branch that were given a
+    /// change id before the rebase (the branch was rewritten with it).
+    pub gave_change_ids: usize,
 }
 
 /// What changed in a checkout's paths between two snapshots, as
@@ -441,6 +444,7 @@ impl PullRefreshJson {
                     tip: b.tip.to_hex(),
                 })
                 .collect(),
+            gave_change_ids: r.gave_change_ids,
         }
     }
 
@@ -467,6 +471,7 @@ impl PullRefreshJson {
             dry_run: true,
             followed: Vec::new(),
             behind: Vec::new(),
+            gave_change_ids: 0,
         }
     }
 }

@@ -42,9 +42,10 @@ Integration runs the same hooks as `git pull`: `post-merge 0` after a fast-forwa
 In a [snapshot checkout](../checkout/), `grit pull` with no refspecs **refreshes** the checkout (so does `grit pull origin`, or a pull naming whatever remote has the checkout's server URL now):
 
 1. It asks the server for a snapshot of the newest commit of the target branch the checkout was made from (the server keeps following that branch even when its `HEAD` moves to another), made on top of the checkout's last snapshot.
-2. It fetches that snapshot into `origin/<target>` (`refs/remotes/origin/<target>`) from the server the checkout came from, with an explicit refspec and no tags, whatever `origin` is configured as now. Only what changed in the checkout's paths comes down. The checkout records the new snapshot only once it has arrived and is the one the server described.
-3. It brings the current branch onto it: a rebase unless `--ff-only` or `--no-rebase` says otherwise. Commits already merged into the target drop out. Commits of a branch this checkout checked in and [integrated](../integrate/) into the branch it follows are never replayed, since the snapshot already has their result (replaying them one by one could conflict with themselves): a branch with nothing above them moves to the new snapshot, keeping uncommitted and untracked changes as `git reset --keep` does (`landed`), and one with commits of its own above them rebases only those, as `git rebase --onto origin/<target> <integrated tip>` would. When the rebase hits a conflict, it **stops** in a resumable rebase, as [`grit rebase`](../rebase/) does: resolve the files, `grit add` them, then `grit rebase --continue` (or `grit rebase --abort` to put the branch back on the older snapshot). Until then, another `grit pull` refuses to start. When the index or worktree has changes of their own, the rebase can't stop there, so nothing changes; commit or stash them and pull again.
-4. A local branch named after the target (a `main` you made with `grit branch main origin/main`) that has no commits of its own follows to the new snapshot, and so does any other branch whose commits have all been integrated. Every other branch with commits of its own that still builds on an older snapshot is named, with how to bring it up: `grit switch <branch>`, then `grit pull` (which leaves out its integrated commits, too).
+2. It gives the current branch's commits made with plain `git` a change id, as [`grit checkin`](../checkin/#change-ids) does, so the rebase below keeps an id the server can match them by (`Gave 1 commit made with git a change id.`; not with `--check`).
+3. It fetches that snapshot into `origin/<target>` (`refs/remotes/origin/<target>`) from the server the checkout came from, with an explicit refspec and no tags, whatever `origin` is configured as now. Only what changed in the checkout's paths comes down. The checkout records the new snapshot only once it has arrived and is the one the server described.
+4. It brings the current branch onto it: a rebase unless `--ff-only` or `--no-rebase` says otherwise. Commits already merged into the target drop out. Commits of a branch this checkout checked in and [integrated](../integrate/) into the branch it follows are never replayed, since the snapshot already has their result (replaying them one by one could conflict with themselves): a branch with nothing above them moves to the new snapshot, keeping uncommitted and untracked changes as `git reset --keep` does (`landed`), and one with commits of its own above them rebases only those, as `git rebase --onto origin/<target> <integrated tip>` would. When the rebase hits a conflict, it **stops** in a resumable rebase, as [`grit rebase`](../rebase/) does: resolve the files, `grit add` them, then `grit rebase --continue` (or `grit rebase --abort` to put the branch back on the older snapshot). Until then, another `grit pull` refuses to start. When the index or worktree has changes of their own, the rebase can't stop there, so nothing changes; commit or stash them and pull again.
+5. A local branch named after the target (a `main` you made with `grit branch main origin/main`) that has no commits of its own follows to the new snapshot, and so does any other branch whose commits have all been integrated. Every other branch with commits of its own that still builds on an older snapshot is named, with how to bring it up: `grit switch <branch>`, then `grit pull` (which leaves out its integrated commits, too).
 
 With `HEAD` detached, the refresh still fetches the new snapshot into `origin/<target>` and leaves `HEAD` where it is. It works the same from any worktree of the checkout.
 
@@ -184,6 +185,7 @@ Exit codes (also apply to default human output): **0** on success (`up_to_date`,
 | `refresh.dry_run` | boolean | True with `--dry-run`: nothing was fetched or changed, and the server made no snapshot. |
 | `refresh.followed` | array | Local branches with no commits of their own that moved along (the one named after the target, and any whose commits were all integrated): `name`, `from`, `to`. |
 | `refresh.behind` | array | Other branches with commits of their own still on an older snapshot: `name`, `tip`. |
+| `refresh.gave_change_ids` | integer | Commits made with plain `git` on the current branch that were given a change id before the rebase (the branch was rewritten); `0` when none needed one. |
 
 Example:
 
@@ -236,7 +238,8 @@ In a snapshot checkout:
     ],
     "behind": [
       { "name": "side", "tip": "8e2d26b0a1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6" }
-    ]
+    ],
+    "gave_change_ids": 0
   }
 }
 ```

@@ -1974,3 +1974,309 @@ fn a_worktree_detached_on_integrated_commits_replays_only_its_own() {
         "a\none\ntwo\n"
     );
 }
+
+/// Commit everything changed in `dir` with system `git`, which writes no
+/// change id; the new commit.
+fn git_commit_all(dir: &Path, message: &str) -> String {
+    git(
+        dir,
+        &[
+            "-c",
+            "user.name=Plain Git",
+            "-c",
+            "user.email=plain@example.com",
+            "commit",
+            "-qam",
+            message,
+        ],
+    );
+    git(dir, &["rev-parse", "HEAD"])
+}
+
+/// The `change-id` header of `rev` in `dir`, if it has one.
+fn change_id_of(dir: &Path, rev: &str) -> Option<String> {
+    git(dir, &["cat-file", "commit", rev])
+        .lines()
+        .take_while(|l| !l.is_empty())
+        .find_map(|l| l.strip_prefix("change-id ").map(str::to_owned))
+}
+
+/// The id grit derives for a commit without one.
+fn derived_change_id(hex: &str) -> String {
+    let oid = grit_lib::objects::ObjectId::from_hex(hex).expect("oid");
+    grit_lib::change_id::ChangeId::derived_from_commit_id(&oid).to_string()
+}
+
+#[test]
+fn commits_made_with_git_get_change_ids_before_they_are_sent() {
+    let (_tmp, home, repos, _server, repo_url) = signed_in();
+    let demo = repos.join("demo");
+    let first = json(
+        &home,
+        &home,
+        &["--json", "checkout", &repo_url, "-p", "src", "--into", "co"],
+    );
+    let work = first["work"].as_str().expect("work").to_owned();
+    let co = home.join("co");
+
+    // One commit made with git, and one made with grit on top of it.
+    std::fs::write(co.join("src/a.rs"), "a2\n").expect("write");
+    let plain = git_commit_all(&co, "Change a with git");
+    assert_eq!(change_id_of(&co, &plain), None);
+    commit_file(&home, &co, "src/b.rs", "b\n", "Add b with grit");
+    let grit_id = change_id_of(&co, "HEAD").expect("grit commits have ids");
+
+    let out = ok(&home, &co, &["checkin"]);
+    let text = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        text.contains("gave 1 commit made with git a change id"),
+        "{text}"
+    );
+    assert!(
+        text.contains(&format!("{work} created on the server")),
+        "{text}"
+    );
+    // Both local commits have ids now: the git one got the id it already
+    // reported (derived from its own commit id), the grit one kept its own.
+    let given = git(&co, &["rev-parse", &format!("{work}~1")]);
+    assert_ne!(given, plain, "the branch was rewritten");
+    assert_eq!(change_id_of(&co, &given), Some(derived_change_id(&plain)));
+    assert_eq!(change_id_of(&co, &work), Some(grit_id.clone()));
+    assert_eq!(git(&co, &["status", "--porcelain"]), "");
+    // The server's commits carry them.
+    assert_eq!(
+        change_id_of(&demo, &format!("{work}~1")),
+        Some(derived_change_id(&plain))
+    );
+    assert_eq!(change_id_of(&demo, &work), Some(grit_id));
+    assert_eq!(
+        git(
+            &demo,
+            &["log", "-1", "--format=%an %s", &format!("{work}~1")]
+        ),
+        "Plain Git Change a with git"
+    );
+
+    // Nothing more to give the next time.
+    let again = json(&home, &co, &["--json", "checkin"]);
+    assert_eq!(again["gave_change_ids"], 0, "{again}");
+    assert_eq!(again["branches"][0]["status"], "unchanged");
+
+    // Another commit with git: given an id, and a fast-forward on the server.
+    std::fs::write(co.join("src/a.rs"), "a3\n").expect("write");
+    let plain = git_commit_all(&co, "Change a again with git");
+    let next = json(&home, &co, &["--json", "checkin", &work]);
+    assert_eq!(next["gave_change_ids"], 1, "{next}");
+    assert_eq!(next["branches"][0]["status"], "updated");
+    assert_eq!(next["branches"][0]["rule"], "fast_forward");
+    assert_eq!(change_id_of(&demo, &work), Some(derived_change_id(&plain)));
+
+    // A refresh gives the current branch's commits ids before it rebases.
+    std::fs::write(co.join("src/a.rs"), "a4\n").expect("write");
+    let plain = git_commit_all(&co, "Change a a third time with git");
+    let pulled = json(&home, &co, &["--json", "pull"]);
+    assert_eq!(pulled["refresh"]["gave_change_ids"], 1, "{pulled}");
+    assert_eq!(change_id_of(&co, "HEAD"), Some(derived_change_id(&plain)));
+    let pulled = ok(&home, &co, &["pull"]);
+    assert!(
+        !String::from_utf8_lossy(&pulled.stdout).contains("change id"),
+        "nothing to give again"
+    );
+}
+
+#[test]
+fn a_rebase_of_the_shared_branch_that_keeps_every_commit_checks_in_without_force() {
+    let (_tmp, home, repos, _server, repo_url) = signed_in();
+    let demo = repos.join("demo");
+    let url = server_of(&repo_url).to_owned();
+    let token = std::fs::read_to_string(home.join("token")).expect("token");
+    json(
+        &home,
+        &home,
+        &["--json", "checkout", &repo_url, "-p", "src", "--into", "co"],
+    );
+    let co = home.join("co");
+    ok(&home, &co, &["switch", "-c", "shared"]);
+    commit_file(&home, &co, "src/a.rs", "a2\n", "Change a");
+    let id = change_id_of(&co, "HEAD").expect("an id");
+    let created = json(&home, &co, &["--json", "checkin", "shared"]);
+    assert_eq!(created["branches"][0]["status"], "created", "{created}");
+
+    // A teammate with a full clone moves main (through integrate), rebases
+    // shared onto it, which keeps the change id, and force-pushes it.
+    let other = home.join("other");
+    ok(&home, &home, &["clone", &repo_url, "other"]);
+    ok(&home, &other, &["switch", "-c", "bob"]);
+    commit_file(&home, &other, "docs/d.md", "d2\n", "Bob changes d");
+    ok(&home, &other, &["push", "origin", "bob"]);
+    let merged = post(
+        &format!("{url}/.grit/checkouts/demo/integrate"),
+        &token,
+        r#"{"name":"bob"}"#,
+    );
+    assert_eq!(merged["status"], "merged", "{merged}");
+    ok(&home, &other, &["fetch"]);
+    ok(&home, &other, &["switch", "-c", "shared", "origin/shared"]);
+    ok(&home, &other, &["rebase", "origin/main"]);
+    let rebased = git(&other, &["rev-parse", "HEAD"]);
+    assert_eq!(change_id_of(&other, &rebased), Some(id.clone()));
+    ok(&home, &other, &["push", "--force", "origin", "shared"]);
+    assert_eq!(git(&demo, &["rev-parse", "shared"]), rebased);
+
+    // The checkout adds a commit to its own copy and checks in: every
+    // commit the server's branch had is still there by change id.
+    commit_file(&home, &co, "src/c.rs", "c\n", "Add c");
+    let kept = json(&home, &co, &["--json", "checkin", "shared"]);
+    assert_eq!(kept["refused"], Value::Bool(false), "{kept}");
+    assert_eq!(kept["branches"][0]["status"], "updated", "{kept}");
+    assert_eq!(kept["branches"][0]["rule"], "keeps_every_commit");
+    assert_eq!(kept["branches"][0]["previous"], Value::String(rebased));
+    assert_eq!(change_id_of(&demo, "shared~1"), Some(id));
+    assert_eq!(git(&demo, &["show", "shared:src/c.rs"]), "c");
+
+    // A commit only the server's branch has is a real drop: refused, unless
+    // forced.
+    ok(&home, &other, &["fetch"]);
+    ok(&home, &other, &["reset", "--hard", "origin/shared"]);
+    commit_file(&home, &other, "src/e.rs", "e\n", "Bob adds e");
+    ok(&home, &other, &["push", "origin", "shared"]);
+    commit_file(&home, &co, "src/f.rs", "f\n", "Add f");
+    let dropped = run(&home, &co, &["--json", "checkin", "shared"]);
+    assert_eq!(dropped.status.code(), Some(1));
+    let dropped: Value = serde_json::from_slice(&dropped.stdout).expect("JSON");
+    assert_eq!(dropped["branches"][0]["reason"], "diverged", "{dropped}");
+    let forced = json(&home, &co, &["--json", "checkin", "shared", "--force"]);
+    assert_eq!(forced["branches"][0]["status"], "updated", "{forced}");
+    assert_eq!(forced["branches"][0]["rule"], "forced");
+    let human = ok(&home, &co, &["checkin", "shared"]);
+    assert!(
+        String::from_utf8_lossy(&human.stdout).contains("already at"),
+        "{}",
+        String::from_utf8_lossy(&human.stdout)
+    );
+}
+
+#[test]
+fn a_teammates_change_outside_the_checkouts_paths_is_not_dropped_by_its_copy() {
+    let (_tmp, home, repos, _server, repo_url) = signed_in();
+    let demo = repos.join("demo");
+    json(
+        &home,
+        &home,
+        &["--json", "checkout", &repo_url, "-p", "src", "--into", "co"],
+    );
+    let co = home.join("co");
+    ok(&home, &co, &["switch", "-c", "shared"]);
+    commit_file(&home, &co, "src/a.rs", "a2\n", "Change a");
+    let id = change_id_of(&co, "HEAD").expect("an id");
+    let created = json(&home, &co, &["--json", "checkin", "shared"]);
+    assert_eq!(created["branches"][0]["status"], "created", "{created}");
+
+    // A teammate with a full clone amends the commit, keeping its change id,
+    // to change docs/d.md too, which the checkout of src can't see.
+    let other = home.join("other");
+    ok(&home, &home, &["clone", &repo_url, "other"]);
+    ok(&home, &other, &["switch", "-c", "shared", "origin/shared"]);
+    std::fs::write(other.join("docs/d.md"), "docs by bob\n").expect("write");
+    ok(&home, &other, &["add", "docs/d.md"]);
+    ok(
+        &home,
+        &other,
+        &["commit", "--amend", "-m", "Change a, and the docs for it"],
+    );
+    assert_eq!(change_id_of(&other, "HEAD"), Some(id.clone()));
+    ok(&home, &other, &["push", "--force", "origin", "shared"]);
+    let amended = git(&demo, &["rev-parse", "shared"]);
+
+    // The checkout's copy of the commit lacks that change: checking it in
+    // with more on top would put docs/d.md back, so it is refused.
+    commit_file(&home, &co, "src/c.rs", "c\n", "Add c");
+    let refused = run(&home, &co, &["--json", "checkin", "shared"]);
+    assert_eq!(refused.status.code(), Some(1));
+    let refused: Value = serde_json::from_slice(&refused.stdout).expect("JSON");
+    assert_eq!(refused["branches"][0]["reason"], "diverged", "{refused}");
+    assert_eq!(git(&demo, &["rev-parse", "shared"]), amended);
+    assert_eq!(git(&demo, &["show", "shared:docs/d.md"]), "docs by bob");
+
+    // Forcing it is the explicit way to replace the teammate's version.
+    let forced = json(&home, &co, &["--json", "checkin", "shared", "--force"]);
+    assert_eq!(forced["branches"][0]["rule"], "forced", "{forced}");
+    assert_eq!(git(&demo, &["show", "shared:docs/d.md"]), "d");
+}
+
+/// Run system `git` in `dir` with an identity, returning whether it
+/// succeeded (a rebase that stops on a conflict fails).
+fn git_may_fail(dir: &Path, args: &[&str]) -> bool {
+    Command::new("git")
+        .args([
+            "-c",
+            "user.name=Plain Git",
+            "-c",
+            "user.email=plain@example.com",
+        ])
+        .args(args)
+        .current_dir(dir)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        .env("GIT_EDITOR", "true")
+        .output()
+        .expect("git")
+        .status
+        .success()
+}
+
+#[test]
+fn a_rebase_stopped_in_another_worktree_keeps_its_branch_as_it_is() {
+    let (_tmp, home, _repos, _server, repo_url) = signed_in();
+    json(
+        &home,
+        &home,
+        &["--json", "checkout", &repo_url, "-p", "src", "--into", "co"],
+    );
+    let co = home.join("co");
+    git(&co, &["switch", "-q", "-c", "work"]);
+    std::fs::write(co.join("src/a.rs"), "w1\n").expect("write");
+    git_commit_all(&co, "Work 1 with git");
+    std::fs::write(co.join("src/a.rs"), "w2\n").expect("write");
+    git_commit_all(&co, "Work 2 with git");
+    git(&co, &["switch", "-q", "-c", "other", "origin/main"]);
+    std::fs::write(co.join("src/a.rs"), "o1\n").expect("write");
+    git_commit_all(&co, "Other with git");
+    git(&co, &["switch", "-q", "work"]);
+    let wt2 = home.join("wt2");
+    git(
+        &co,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            wt2.to_str().expect("path"),
+            "--detach",
+            "origin/main",
+        ],
+    );
+    assert!(
+        !git_may_fail(&co, &["rebase", "other"]),
+        "the rebase stops on a conflict"
+    );
+    let before = git(&co, &["rev-parse", "work"]);
+
+    // A check-in from the other worktree leaves the branch to the rebase.
+    let checkin = json(&home, &wt2, &["--json", "checkin", "work"]);
+    assert_eq!(checkin["gave_change_ids"], 0, "{checkin}");
+    assert_eq!(checkin["branches"][0]["status"], "created", "{checkin}");
+    assert_eq!(git(&co, &["rev-parse", "work"]), before);
+
+    // So the rebase still finishes, and the next check-in gives the ids.
+    std::fs::write(co.join("src/a.rs"), "w1\n").expect("write");
+    git(&co, &["add", "src/a.rs"]);
+    assert!(
+        git_may_fail(&co, &["rebase", "--continue"]),
+        "rebase continues"
+    );
+    assert!(!co.join(".git/rebase-merge").exists());
+    let after = json(&home, &wt2, &["--json", "checkin", "work"]);
+    assert_eq!(after["gave_change_ids"], 3, "{after}");
+    assert_eq!(after["branches"][0]["rule"], "own_last_set", "{after}");
+    assert!(change_id_of(&co, "work").is_some());
+}

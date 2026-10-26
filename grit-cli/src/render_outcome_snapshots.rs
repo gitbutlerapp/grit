@@ -8,7 +8,9 @@ use grit_test_support::CliFixture;
 use time::OffsetDateTime;
 
 use crate::commands::auth::{AuthOutcome, LogoutOutcome};
-use crate::commands::checkin::{CheckinBranchJson, CheckinOutcome, IntegrateOutcome};
+use crate::commands::checkin::{
+    CheckinBranchJson, CheckinOutcome, CheckinRuleJson, IntegrateOutcome,
+};
 use crate::commands::checkout::{
     CheckoutOutcome, PullRefreshJson, RefreshBehindJson, RefreshChangesJson, RefreshFollowedJson,
 };
@@ -183,6 +185,7 @@ fn snapshot_modes<T: Serialize + HumanRender + MarkdownRender>(name: &str, outco
 fn sample_checkin() -> CheckinOutcome {
     CheckinOutcome {
         url: "http://127.0.0.1:8080/demo.git".to_owned(),
+        gave_change_ids: 1,
         branches: vec![
             CheckinBranchJson {
                 name: "alice/elm-orchid".to_owned(),
@@ -190,6 +193,17 @@ fn sample_checkin() -> CheckinOutcome {
                 grafted: Some("7fb21e5a0c1e4f7d9b2e6a3c8d0f1e2a3b4c5d6e".to_owned()),
                 previous: None,
                 commits: 2,
+                rule: None,
+                message: None,
+                reason: None,
+            },
+            CheckinBranchJson {
+                name: "shared".to_owned(),
+                status: "updated".to_owned(),
+                grafted: Some("c41d0e2b9a8f7e6d5c4b3a2f1e0d9c8b7a6f5e4d".to_owned()),
+                previous: Some("9a4b9113f0c1e4f7d9b2e6a3c8d0f1e2a3b4c5d6".to_owned()),
+                commits: 2,
+                rule: Some(CheckinRuleJson::KeepsEveryCommit),
                 message: None,
                 reason: None,
             },
@@ -199,6 +213,7 @@ fn sample_checkin() -> CheckinOutcome {
                 grafted: None,
                 previous: None,
                 commits: 0,
+                rule: None,
                 message: Some(
                     "main is the server's target branch and can't be changed directly".to_owned(),
                 ),
@@ -255,9 +270,21 @@ fn sample_refresh() -> PullOutcome {
                 name: "alice/side".to_owned(),
                 tip: "8e2d26b0a1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6".to_owned(),
             }],
+            gave_change_ids: 0,
         }),
         transfer: Default::default(),
     }
+}
+
+/// `grit pull` in a checkout whose branch had a commit made with git: it is
+/// given a change id before the rebase.
+#[test]
+fn pull_refresh_render() {
+    let mut outcome = sample_refresh();
+    if let Some(r) = outcome.refresh.as_mut() {
+        r.gave_change_ids = 1;
+    }
+    snapshot_modes("pull_refresh_render", &outcome);
 }
 
 /// The branch HEAD was on, merged: it moved to the new snapshot and onto a

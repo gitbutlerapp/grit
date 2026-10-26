@@ -26,10 +26,13 @@
 //! - Client side: [`CheckoutUrl`], [`CheckoutClient`], [`materialize`],
 //!   [`CheckoutMarker`], [`push_for_checkin`], [`fetch_snapshot`], [`refresh`].
 //!
-//! Work comes back with a **check-in**: the client pushes its branches' raw
-//! tips to [`out_ref`] ([`push_for_checkin`]) and asks the server to [`graft`]
-//! them onto the real history ([`graft_checkin_branch`]) and set the server's
-//! branches ([`set_checked_in_branch`], deciding with [`decide_checkin`]). The
+//! Work comes back with a **check-in**: the client gives commits made with
+//! plain Git a change id ([`give_change_ids`]), pushes its branches' raw tips
+//! to [`out_ref`] ([`push_for_checkin`]) and asks the server to [`graft`] them
+//! onto the real history ([`graft_checkin_branch`]) and set the server's
+//! branches ([`set_checked_in_branch`], deciding with [`decide_checkin`],
+//! which also accepts a rebase that keeps every commit by change id:
+//! [`keeps_every_commit`]). The
 //! server can [`integrate`] a branch into the target with a merge commit, and
 //! keeps **slices** — named sets of paths — in [`SLICES_PATH`] on the target
 //! branch ([`edit_slices`]). Those are the only ways the target changes: the
@@ -49,6 +52,7 @@
 mod checkin;
 mod graft;
 mod guard;
+mod ids;
 mod landing;
 mod refresh;
 mod refs;
@@ -57,9 +61,13 @@ mod target;
 mod transfer;
 mod tree;
 
-pub use checkin::{graft_checkin_branch, set_checked_in_branch, BranchSet, CheckinRefusal};
-pub use graft::{decide_checkin, graft, CheckinDecision, GraftError, Grafted};
+pub use checkin::{
+    decide_checkin, graft_checkin_branch, set_checked_in_branch, BranchSet, CheckinDecision,
+    CheckinRefusal, CheckinRule,
+};
+pub use graft::{graft, GraftError, Grafted};
 pub use guard::TargetGuard;
+pub use ids::{change_keys, give_change_ids, keeps_every_commit};
 pub use landing::{land_integration, move_off_landed_branch, record_landed, Landing, MovedOff};
 pub use refresh::{
     ensure_refreshable, refresh, BranchOnOldSnapshot, FollowedBranch, RefreshOutcome, RefreshedHead,
@@ -301,6 +309,9 @@ pub struct CheckinResult {
     /// Commits replayed.
     #[serde(default)]
     pub commits: usize,
+    /// For [`CheckinStatus::Updated`], the rule that allowed the update.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rule: Option<CheckinRule>,
     /// Why it was refused, in words.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub message: Option<String>,

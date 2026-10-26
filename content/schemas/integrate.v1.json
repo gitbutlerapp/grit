@@ -43,6 +43,17 @@
             "null"
           ]
         },
+        "rule": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/CheckinRuleJson"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "For an `updated` branch, what allowed it."
+        },
         "status": {
           "description": "`created`, `updated`, `unchanged` or `refused`.",
           "type": "string"
@@ -65,6 +76,12 @@
           },
           "type": "array"
         },
+        "gave_change_ids": {
+          "description": "Commits made with plain Git that were given a change id first (their branches were rewritten with it).",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
         "refused": {
           "description": "Whether any branch was refused (the exit status is then `1`).",
           "type": "boolean"
@@ -76,10 +93,44 @@
       },
       "required": [
         "branches",
+        "gave_change_ids",
         "refused",
         "url"
       ],
       "type": "object"
+    },
+    "CheckinRuleJson": {
+      "description": "Why the server let a check-in move a branch it already had.",
+      "oneOf": [
+        {
+          "description": "The server's branch is in the new commit's history.",
+          "enum": [
+            "fast_forward"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "This checkout set the branch last, so it replaces its own work.",
+          "enum": [
+            "own_last_set"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "A rebase that keeps every commit the server's branch had, by change id.",
+          "enum": [
+            "keeps_every_commit"
+          ],
+          "type": "string"
+        },
+        {
+          "description": "`--force` replaced the branch.",
+          "enum": [
+            "forced"
+          ],
+          "type": "string"
+        }
+      ]
     },
     "MergeConflictJson": {
       "description": "One conflicted path in `--json` output (pull v1 `conflict_details` and merge v2 items).",
@@ -297,6 +348,12 @@
           },
           "type": "array"
         },
+        "gave_change_ids": {
+          "description": "Commits made with plain Git on the current branch that were given a change id before the rebase (the branch was rewritten with it).",
+          "format": "uint",
+          "minimum": 0.0,
+          "type": "integer"
+        },
         "moved": {
           "description": "Whether the target had moved since the checkout's last snapshot.",
           "type": "boolean"
@@ -333,6 +390,7 @@
         "behind",
         "dry_run",
         "followed",
+        "gave_change_ids",
         "moved",
         "snapshot",
         "target",

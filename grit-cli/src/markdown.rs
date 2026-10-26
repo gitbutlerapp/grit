@@ -941,6 +941,13 @@ fn print_refresh_head(
     w: &mut dyn Write,
     r: &crate::commands::checkout::PullRefreshJson,
 ) -> anyhow::Result<()> {
+    if r.gave_change_ids > 0 {
+        outln!(
+            w,
+            "- Change ids: gave {}",
+            crate::commands::pull::gave_change_ids_phrase(r.gave_change_ids)
+        );
+    }
     let previous = r.previous_base.as_deref().map(short_hex).unwrap_or("?");
     if !r.moved {
         outln!(

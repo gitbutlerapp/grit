@@ -1,9 +1,11 @@
 //! Refreshing a snapshot checkout: bring it onto the server's newest snapshot.
 //!
-//! The server first makes the snapshot ([`super::CheckoutClient::update`]);
-//! [`refresh`] then fetches it into [`upstream_ref`] ([`fetch_snapshot`],
-//! which records it in the marker only once it has arrived), brings the
-//! current branch onto it the way [`pull`] does (a rebase by default, which
+//! The server first makes the snapshot ([`super::CheckoutClient::update`]).
+//! [`refresh`] gives the current branch's commits made with plain Git a
+//! change id ([`give_change_ids`]), fetches the snapshot into
+//! [`upstream_ref`] ([`fetch_snapshot`], which records it in the marker only
+//! once it has arrived), brings the current branch onto it the way [`pull`]
+//! does (a rebase by default, which
 //! stops in a resumable rebase session on a conflict), moves a local branch
 //! named after the target that has no commits of its own along with it, and
 //! reports every other branch still building on an older snapshot. Commits
@@ -26,8 +28,8 @@ use crate::transfer::TransferStats;
 use super::landing::{landed_base, prune_landed};
 use super::refs::{swap_ref_as, Swap};
 use super::{
-    branches_with_work, fetch_snapshot, upstream_ref, CheckoutError, CheckoutInfo, CheckoutMarker,
-    Result, SnapshotRoot,
+    branches_with_work, fetch_snapshot, give_change_ids, upstream_ref, CheckoutError, CheckoutInfo,
+    CheckoutMarker, Result, SnapshotRoot,
 };
 
 /// What a refresh did with `HEAD`.
@@ -97,6 +99,9 @@ pub struct RefreshOutcome {
     /// Other branches with work still on an older snapshot, which only a
     /// refresh (or rebase) on each of them moves.
     pub behind: Vec<BranchOnOldSnapshot>,
+    /// How many of the current branch's commits made with plain Git were
+    /// given a change id first ([`give_change_ids`]).
+    pub gave_change_ids: usize,
 }
 
 /// Refuse to refresh a checkout that is in the middle of an operation, such
@@ -117,6 +122,12 @@ pub fn ensure_refreshable(repo: &Repository) -> Result<()> {
 /// Bring the checkout onto `info`, the snapshot the server answered
 /// [`super::CheckoutClient::update`] with.
 ///
+/// 0. With `HEAD` on a branch, gives that branch's commits made with plain
+///    Git a change id ([`give_change_ids`]; not with `options.check`), so the
+///    rebase below keeps a key the server can match them by. Those moves are
+///    logged at the time of the repository handle's clock
+///    ([`Repository::identity_now`]), as the rebase's commits and reflog
+///    entries are.
 /// 1. Fetches the snapshot from the marker's URL into [`upstream_ref`] and
 ///    records it in the marker ([`fetch_snapshot`]).
 /// 2. With `HEAD` on a branch, integrates the snapshot as [`pull`] does with
@@ -160,6 +171,15 @@ pub fn refresh<P: Progress>(
     http_factory: Option<&dyn HttpClientFactory>,
 ) -> Result<RefreshOutcome> {
     ensure_refreshable(repo)?;
+    let gave_change_ids = match resolve_head_for_repository(repo)? {
+        HeadState::Branch { short_name, .. } if !options.check => give_change_ids(
+            repo,
+            marker,
+            Some(std::slice::from_ref(&short_name)),
+            repo.identity_now(),
+        )?,
+        _ => 0,
+    };
     let (current_branch, head_tip) = match resolve_head_for_repository(repo)? {
         HeadState::Branch {
             short_name, oid, ..
@@ -238,6 +258,7 @@ pub fn refresh<P: Progress>(
         head,
         followed,
         behind,
+        gave_change_ids,
     })
 }
 
@@ -746,10 +767,19 @@ mod tests {
         let outcome = refreshed(&repo, &info).expect("refresh");
         assert_eq!(pull_result(&outcome), Some(PullResult::RebaseStopped));
         assert!(co.join(".git/rebase-merge/grit-plan").is_file());
+        // The commit made with git was given a change id before the rebase.
+        assert_eq!(outcome.gave_change_ids, 1);
+        let given = oid(&git(&co, &["rev-parse", "work"]));
+        assert_ne!(given, work);
+        let data = crate::objects::parse_commit(&repo.odb().read(&given).expect("read").data)
+            .expect("parse");
+        assert_eq!(
+            crate::change_id::change_id(&data),
+            Some(crate::change_id::ChangeId::derived_from_commit_id(&work))
+        );
         // The snapshot came down and is recorded; the branch waits for the rebase.
         assert_eq!(git(&co, &["rev-parse", "origin/main"]), info.root);
         assert_eq!(marker(&repo).roots, info.roots);
-        assert_eq!(git(&co, &["rev-parse", "work"]), work.to_hex());
         assert!(matches!(
             refreshed(&repo, &info),
             Err(CheckoutError::OperationInProgress(
@@ -760,7 +790,7 @@ mod tests {
         let identity = "T <t@example.com> 0 +0000".parse().expect("signature");
         crate::revwalk::history::abort_rebase(&repo, &identity).expect("abort");
         assert!(ensure_refreshable(&repo).is_ok());
-        assert_eq!(git(&co, &["rev-parse", "HEAD"]), work.to_hex());
+        assert_eq!(git(&co, &["rev-parse", "HEAD"]), given.to_hex());
     }
 
     #[cfg_attr(

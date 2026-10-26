@@ -24,7 +24,7 @@ use grit_lib::remote::HttpClientFactory;
 use grit_lib::repo::Repository;
 use grit_lib::state::{resolve_head_for_repository, InProgressOperation};
 
-pub(crate) use pull_outcome::changes_phrase;
+pub(crate) use pull_outcome::{changes_phrase, gave_change_ids_phrase};
 pub use pull_outcome::{map_outcome, PullOutcome, PullResult};
 
 #[derive(Default)]

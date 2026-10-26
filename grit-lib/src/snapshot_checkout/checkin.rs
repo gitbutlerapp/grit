@@ -2,6 +2,13 @@
 //! client pushed and graft it ([`graft_checkin_branch`]), then set the
 //! server's branch to the graft ([`set_checked_in_branch`]).
 //!
+//! Which check-ins may move a branch the server already has is decided by
+//! [`decide_checkin`]: a fast-forward, a branch this checkout set last, and a
+//! branch that keeps every commit the server's had by change id (a rebase of
+//! it, perhaps with more on top, whose copies keep what the originals changed
+//! outside the checkout's paths) may; anything else needs `force`. The rule
+//! that allowed it ([`CheckinRule`]) is reported with the result.
+//!
 //! Setting a branch is one compare-and-swap against the tip the decision was
 //! made on (create-only for a new branch). When the branch moves in between,
 //! the decision is made again with its new tip, so a check-in that loses a
@@ -14,7 +21,8 @@ use crate::ident::Signature;
 use crate::objects::ObjectId;
 use crate::repo::Repository;
 
-use super::graft::{decide_checkin, graft, CheckinDecision, GraftError, Grafted};
+use super::graft::{graft, GraftError, Grafted};
+use super::ids::keeps_every_commit;
 use super::refs::{swap_ref, Swap};
 use super::{
     out_ref, same_branch_name, valid_branch_name, CheckinBranch, CheckinStatus, CheckoutError,
@@ -96,6 +104,112 @@ impl CheckinRefusal {
     }
 }
 
+/// Why a check-in was allowed to move a branch the server already had to a
+/// commit that does not simply replace nothing.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CheckinRule {
+    /// The graft has the server's branch in its history.
+    FastForward,
+    /// This checkout set the branch last, so it replaces its own work (after
+    /// an amend or a rebase).
+    OwnLastSet,
+    /// The graft has every commit of the server's branch that the target
+    /// lacks, matched by change id: a rebase of it, perhaps with more on top,
+    /// whose copies hold what the originals changed outside the checkout's
+    /// paths ([`keeps_every_commit`]).
+    KeepsEveryCommit,
+    /// None of the others held; the check-in asked to replace the branch.
+    Forced,
+}
+
+impl CheckinRule {
+    /// A short, stable name for the rule (its serialized form).
+    #[must_use]
+    pub fn kind(self) -> &'static str {
+        match self {
+            Self::FastForward => "fast_forward",
+            Self::OwnLastSet => "own_last_set",
+            Self::KeepsEveryCommit => "keeps_every_commit",
+            Self::Forced => "forced",
+        }
+    }
+}
+
+/// How the server decides whether a check-in may set a branch.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CheckinDecision {
+    /// The branch does not exist yet.
+    Create,
+    /// The branch already points at the graft.
+    Unchanged,
+    /// The branch moves to the graft.
+    Update {
+        /// What allows it.
+        rule: CheckinRule,
+    },
+    /// The server's branch has commits the graft would drop.
+    Diverged,
+}
+
+/// Decide whether `grafted` may replace the server's branch, now at
+/// `previous`.
+///
+/// An update is allowed, checked in this order, when it is a fast-forward;
+/// when this checkout set the branch last (`set_last`), so a checkout can
+/// replace its own work after an amend or rebase; when it keeps every commit
+/// of the server's branch that the target lacks, by change id, with what
+/// each changed outside `paths` ([`keeps_every_commit`]); and otherwise only
+/// when `force` is set.
+///
+/// # Parameters
+///
+/// - `repo`: the served repository.
+/// - `previous`: where the server's branch is; `None` when it has none.
+/// - `grafted`: the graft of the checked-in tip.
+/// - `targets`: the tips of the target branch (the one the checkout was made
+///   from and the one the server's `HEAD` names, when they differ); commits
+///   on them are never counted as dropped.
+/// - `paths`: the checking-in checkout's paths (empty: the whole tree).
+/// - `set_last`: what this checkout last set the branch to, if it did.
+/// - `force`: replace the branch even where that drops commits it has.
+///
+/// # Returns
+///
+/// The decision, naming the rule that allows an update.
+///
+/// # Errors
+///
+/// Ancestry walk and object read failures.
+pub fn decide_checkin(
+    repo: &Repository,
+    previous: Option<ObjectId>,
+    grafted: ObjectId,
+    targets: &[ObjectId],
+    paths: &[String],
+    set_last: Option<ObjectId>,
+    force: bool,
+) -> Result<CheckinDecision> {
+    let Some(previous) = previous else {
+        return Ok(CheckinDecision::Create);
+    };
+    if previous == grafted {
+        return Ok(CheckinDecision::Unchanged);
+    }
+    let rule = if crate::merge_base::is_ancestor(repo, previous, grafted)? {
+        CheckinRule::FastForward
+    } else if set_last == Some(previous) {
+        CheckinRule::OwnLastSet
+    } else if keeps_every_commit(repo, previous, grafted, targets, paths)? {
+        CheckinRule::KeepsEveryCommit
+    } else if force {
+        CheckinRule::Forced
+    } else {
+        return Ok(CheckinDecision::Diverged);
+    };
+    Ok(CheckinDecision::Update { rule })
+}
+
 impl From<GraftError> for CheckinRefusal {
     fn from(e: GraftError) -> Self {
         match e {
@@ -171,6 +285,8 @@ pub struct BranchSet {
     pub status: CheckinStatus,
     /// Where the branch was before; `None` when the server had no such branch.
     pub previous: Option<ObjectId>,
+    /// For [`CheckinStatus::Updated`], the rule that allowed it.
+    pub rule: Option<CheckinRule>,
 }
 
 /// Set the server's branch `name` to `grafted` when [`decide_checkin`]
@@ -188,6 +304,9 @@ pub struct BranchSet {
 /// - `repo`: the served repository.
 /// - `name`: the branch, without `refs/heads/`.
 /// - `grafted`: the graft of the checked-in tip.
+/// - `targets`: the tips of the target branch, whose commits a check-in never
+///   counts as dropped (see [`decide_checkin`]).
+/// - `paths`: the checking-in checkout's paths (see [`decide_checkin`]).
 /// - `set_last`: what this checkout last set the branch to, if it did.
 /// - `force`: set it even where it drops commits the server's branch has.
 /// - `who`, `message`: the reflog entry's identity, time and message.
@@ -201,37 +320,47 @@ pub struct BranchSet {
 ///
 /// [`CheckoutError::RefKeptMoving`] when the branch moved under every one of
 /// several attempts, and ref, reflog and ancestry failures.
+#[allow(clippy::too_many_arguments)]
 pub fn set_checked_in_branch(
     repo: &Repository,
     name: &str,
     grafted: ObjectId,
+    targets: &[ObjectId],
+    paths: &[String],
     set_last: Option<ObjectId>,
     force: bool,
     who: &Signature,
     message: &str,
 ) -> Result<std::result::Result<BranchSet, CheckinRefusal>> {
     let refname = format!("refs/heads/{name}");
-    set_branch_reading(
-        repo,
-        &refname,
+    let decide = Decide {
         grafted,
+        targets,
+        paths,
         set_last,
         force,
-        who,
-        message,
-        || Ok(crate::refs::resolve_ref(repo.git_dir(), &refname).ok()),
-    )
+    };
+    set_branch_reading(repo, &refname, &decide, who, message, || {
+        Ok(crate::refs::resolve_ref(repo.git_dir(), &refname).ok())
+    })
+}
+
+/// What [`decide_checkin`] is asked each time [`set_branch_reading`] reads
+/// the branch.
+struct Decide<'a> {
+    grafted: ObjectId,
+    targets: &'a [ObjectId],
+    paths: &'a [String],
+    set_last: Option<ObjectId>,
+    force: bool,
 }
 
 /// [`set_checked_in_branch`], reading the branch's tip with `read` before
 /// each decision.
-#[allow(clippy::too_many_arguments)]
 fn set_branch_reading(
     repo: &Repository,
     refname: &str,
-    grafted: ObjectId,
-    set_last: Option<ObjectId>,
-    force: bool,
+    decide: &Decide<'_>,
     who: &Signature,
     message: &str,
     mut read: impl FnMut() -> Result<Option<ObjectId>>,
@@ -239,24 +368,38 @@ fn set_branch_reading(
     if let Some(existing) = case_variant(repo, refname)? {
         return Ok(Err(CheckinRefusal::CaseConflict { existing }));
     }
+    let grafted = decide.grafted;
     for _ in 0..ATTEMPTS {
         let previous = read()?;
-        let status = match decide_checkin(repo, previous, grafted, set_last, force)? {
-            CheckinDecision::Unchanged => CheckinStatus::Unchanged,
+        let decision = decide_checkin(
+            repo,
+            previous,
+            grafted,
+            decide.targets,
+            decide.paths,
+            decide.set_last,
+            decide.force,
+        )?;
+        let (status, rule) = match decision {
+            CheckinDecision::Unchanged => (CheckinStatus::Unchanged, None),
             CheckinDecision::Diverged => {
                 return Ok(Err(CheckinRefusal::Diverged {
                     tip: previous.map(|p| p.to_hex()).unwrap_or_default(),
                 }))
             }
-            CheckinDecision::Create => CheckinStatus::Created,
-            CheckinDecision::Update => CheckinStatus::Updated,
+            CheckinDecision::Create => (CheckinStatus::Created, None),
+            CheckinDecision::Update { rule } => (CheckinStatus::Updated, Some(rule)),
         };
         if status != CheckinStatus::Unchanged
             && swap_ref(repo, refname, previous, grafted, who, message)? == Swap::Moved
         {
             continue;
         }
-        return Ok(Ok(BranchSet { status, previous }));
+        return Ok(Ok(BranchSet {
+            status,
+            previous,
+            rule,
+        }));
     }
     Err(CheckoutError::RefKeptMoving {
         refname: refname.to_owned(),
@@ -319,14 +462,25 @@ mod tests {
         let b = commit(&repo, &[a], "b");
         let other = commit(&repo, &[], "other");
         let set = |grafted, last, force| {
-            set_checked_in_branch(&repo, "topic", grafted, last, force, &who(), "checkin")
-                .expect("set")
+            set_checked_in_branch(
+                &repo,
+                "topic",
+                grafted,
+                &[],
+                &[],
+                last,
+                force,
+                &who(),
+                "checkin",
+            )
+            .expect("set")
         };
         assert_eq!(
             set(a, None, false),
             Ok(BranchSet {
                 status: CheckinStatus::Created,
-                previous: None
+                previous: None,
+                rule: None,
             })
         );
         assert_eq!(
@@ -334,8 +488,12 @@ mod tests {
             Ok(CheckinStatus::Unchanged)
         );
         assert_eq!(
-            set(b, None, false).map(|s| s.status),
-            Ok(CheckinStatus::Updated)
+            set(b, None, false),
+            Ok(BranchSet {
+                status: CheckinStatus::Updated,
+                previous: Some(a),
+                rule: Some(CheckinRule::FastForward),
+            })
         );
         assert_eq!(
             set(other, None, false),
@@ -343,11 +501,172 @@ mod tests {
         );
         assert_eq!(tip(&repo, "topic"), Some(b));
         assert_eq!(
-            set(other, Some(b), false).map(|s| s.previous),
-            Ok(Some(b)),
+            set(other, Some(b), false).map(|s| (s.previous, s.rule)),
+            Ok((Some(b), Some(CheckinRule::OwnLastSet))),
             "the checkout that set it last may replace it"
         );
         assert_eq!(tip(&repo, "topic"), Some(other));
+    }
+
+    /// A commit on `parents` with `msg`, and a `change-id` header when `id`
+    /// is given.
+    fn commit_with_id(
+        repo: &Repository,
+        parents: &[ObjectId],
+        msg: &str,
+        id: Option<&str>,
+    ) -> ObjectId {
+        let tree = repo.odb().write(ObjectKind::Tree, b"").expect("empty tree");
+        let mut s = format!("tree {}\n", tree.to_hex());
+        for p in parents {
+            s.push_str(&format!("parent {}\n", p.to_hex()));
+        }
+        s.push_str("author A <a@e> 1700000000 +0000\ncommitter A <a@e> 1700000000 +0000\n");
+        if let Some(id) = id {
+            s.push_str(&format!("change-id {id}\n"));
+        }
+        s.push_str(&format!("\n{msg}\n"));
+        repo.odb()
+            .write(ObjectKind::Commit, s.as_bytes())
+            .expect("commit")
+    }
+
+    #[test]
+    fn checkins_update_by_a_named_rule() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        let a = commit(&repo, &[], "a");
+        let b = commit(&repo, &[a], "b");
+        let other = commit(&repo, &[], "other");
+        let decide = |prev, new, last, force| {
+            decide_checkin(&repo, prev, new, &[], &[], last, force).expect("decide")
+        };
+        let update = |rule| CheckinDecision::Update { rule };
+        assert_eq!(decide(None, b, None, false), CheckinDecision::Create);
+        assert_eq!(decide(Some(b), b, None, false), CheckinDecision::Unchanged);
+        assert_eq!(
+            decide(Some(a), b, None, false),
+            update(CheckinRule::FastForward)
+        );
+        assert_eq!(
+            decide(Some(a), b, Some(a), true),
+            update(CheckinRule::FastForward),
+            "a fast-forward is named so even when forced"
+        );
+        assert_eq!(
+            decide(Some(b), other, None, false),
+            CheckinDecision::Diverged
+        );
+        assert_eq!(
+            decide(Some(b), other, Some(b), false),
+            update(CheckinRule::OwnLastSet)
+        );
+        assert_eq!(
+            decide(Some(b), other, None, true),
+            update(CheckinRule::Forced)
+        );
+        for (rule, kind) in [
+            (CheckinRule::FastForward, "fast_forward"),
+            (CheckinRule::OwnLastSet, "own_last_set"),
+            (CheckinRule::KeepsEveryCommit, "keeps_every_commit"),
+            (CheckinRule::Forced, "forced"),
+        ] {
+            assert_eq!(rule.kind(), kind);
+            assert_eq!(
+                serde_json::to_value(rule).expect("json"),
+                serde_json::json!(kind)
+            );
+        }
+    }
+
+    #[test]
+    fn a_rebase_that_keeps_every_commit_by_change_id_needs_no_force() {
+        const X: &str = "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx";
+        const Y: &str = "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy";
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+        // The target moved from m0 to m1; the server's branch is x on m0.
+        let m0 = commit(&repo, &[], "m0");
+        let m1 = commit(&repo, &[m0], "m1");
+        let x = commit_with_id(&repo, &[m0], "change x", Some(X));
+        let decide = |prev, new, targets: &[ObjectId]| {
+            decide_checkin(&repo, Some(prev), new, targets, &[], None, false).expect("decide")
+        };
+        let kept = CheckinDecision::Update {
+            rule: CheckinRule::KeepsEveryCommit,
+        };
+
+        // A rebased copy of x (same id, other parent), alone or with more on top.
+        let x2 = commit_with_id(&repo, &[m1], "change x", Some(X));
+        assert_eq!(decide(x, x2, &[m1]), kept);
+        let y = commit_with_id(&repo, &[x2], "add y", Some(Y));
+        assert_eq!(decide(x, y, &[m1]), kept);
+        let plain = commit_with_id(&repo, &[x2], "made with git", None);
+        assert_eq!(decide(x, plain, &[m1]), kept);
+        assert!(keeps_every_commit(&repo, x, y, &[m1], &[]).expect("keeps"));
+
+        // A copy with another id, or with none, drops x.
+        let renamed = commit_with_id(&repo, &[m1], "change x", Some(Y));
+        assert_eq!(decide(x, renamed, &[m1]), CheckinDecision::Diverged);
+        let unnamed = commit_with_id(&repo, &[m1], "change x", None);
+        assert_eq!(decide(x, unnamed, &[m1]), CheckinDecision::Diverged);
+        // So does a branch that leaves x out.
+        let without = commit_with_id(&repo, &[m1], "add y", Some(Y));
+        assert_eq!(decide(x, without, &[m1]), CheckinDecision::Diverged);
+
+        // A commit of the server's branch the target already has is not
+        // dropped: here x landed in the target (t), and the new branch is
+        // other work on it.
+        let t = commit(&repo, &[m1, x], "merge x");
+        let next = commit_with_id(&repo, &[t], "next", Some(Y));
+        assert_eq!(
+            decide(x, next, &[t]),
+            CheckinDecision::Update {
+                rule: CheckinRule::FastForward
+            }
+        );
+        let on_server = commit_with_id(&repo, &[m0], "server only", Some(Y));
+        let branch = commit_with_id(&repo, &[x], "on x", Some(Y));
+        let fresh = commit_with_id(&repo, &[t], "on y", Some(Y));
+        assert_eq!(
+            decide(branch, fresh, &[t]),
+            kept,
+            "x is on the target; the branch's own commit is kept by id"
+        );
+        assert_eq!(
+            decide(on_server, without, &[t]),
+            kept,
+            "the server-only commit is matched by id"
+        );
+        let other_work = commit_with_id(&repo, &[t], "other", Some(X));
+        assert_eq!(
+            decide(branch, other_work, &[t]),
+            CheckinDecision::Diverged,
+            "the branch's own commit is gone"
+        );
+
+        // set_checked_in_branch uses the same rule, naming it.
+        crate::refs::write_ref(repo.git_dir(), "refs/heads/shared", &x).expect("ref");
+        assert_eq!(
+            set_checked_in_branch(
+                &repo,
+                "shared",
+                y,
+                &[m1],
+                &[],
+                None,
+                false,
+                &who(),
+                "checkin",
+            )
+            .expect("set"),
+            Ok(BranchSet {
+                status: CheckinStatus::Updated,
+                previous: Some(x),
+                rule: Some(CheckinRule::KeepsEveryCommit),
+            })
+        );
+        assert_eq!(tip(&repo, "shared"), Some(y));
     }
 
     #[test]
@@ -360,12 +679,17 @@ mod tests {
 
         // The loser read the branch before the winner created it.
         let mut reads = 0;
+        let decide = |grafted| Decide {
+            grafted,
+            targets: &[],
+            paths: &[],
+            set_last: None,
+            force: false,
+        };
         let got = set_branch_reading(
             &repo,
             "refs/heads/shared",
-            loser,
-            None,
-            false,
+            &decide(loser),
             &who(),
             "checkin",
             || {
@@ -399,9 +723,7 @@ mod tests {
         let got = set_branch_reading(
             &repo,
             "refs/heads/shared",
-            ahead,
-            None,
-            false,
+            &decide(ahead),
             &who(),
             "checkin",
             || {
@@ -434,16 +756,36 @@ mod tests {
         repo.reload_config().expect("reload");
         let b = commit(&repo, &[a], "b");
         assert_eq!(
-            set_checked_in_branch(&repo, "Feature", b, None, false, &who(), "checkin")
-                .expect("set"),
+            set_checked_in_branch(
+                &repo,
+                "Feature",
+                b,
+                &[],
+                &[],
+                None,
+                false,
+                &who(),
+                "checkin",
+            )
+            .expect("set"),
             Err(CheckinRefusal::CaseConflict {
                 existing: "feature".to_owned()
             })
         );
         assert_eq!(
-            set_checked_in_branch(&repo, "feature", b, None, false, &who(), "checkin")
-                .expect("set")
-                .map(|s| s.status),
+            set_checked_in_branch(
+                &repo,
+                "feature",
+                b,
+                &[],
+                &[],
+                None,
+                false,
+                &who(),
+                "checkin",
+            )
+            .expect("set")
+            .map(|s| s.status),
             Ok(CheckinStatus::Updated)
         );
     }
