@@ -653,6 +653,30 @@ mod tests {
     }
 
     #[test]
+    fn a_branch_whose_reflog_is_not_utf8_is_given_ids_and_its_log_kept() {
+        let co = checkout();
+        let plain = co.on(co.snapshot, "Caf\u{e9}", None);
+        co.branch("work", plain);
+        // Plain Git logs a subject in a legacy encoding (here latin-1) as it is.
+        let log = co.repo.git_dir().join("logs/refs/heads/work");
+        std::fs::create_dir_all(log.parent().expect("parent")).expect("logs");
+        let mut written = format!(
+            "{} {} A <a@e> 1700000000 +0000\tcommit: Caf",
+            co.snapshot.to_hex(),
+            plain.to_hex()
+        )
+        .into_bytes();
+        written.extend_from_slice(b"\xe9\n");
+        std::fs::write(&log, &written).expect("log");
+
+        assert_eq!(co.give(None), 1);
+        assert_ne!(co.tip("refs/heads/work"), plain);
+        let bytes = std::fs::read(&log).expect("log");
+        assert!(bytes.starts_with(&written), "the log keeps what it had");
+        assert!(String::from_utf8_lossy(&bytes[written.len()..]).contains(REFLOG_MESSAGE));
+    }
+
+    #[test]
     fn a_copy_counts_only_with_what_its_original_changed_outside_the_paths() {
         use crate::snapshot_checkout::{decide_checkin, CheckinDecision, CheckinRule};
 

@@ -946,25 +946,49 @@ impl FilesRefStore {
                 fs::create_dir_all(parent),
             )?;
         }
-        let mut body = String::new();
-        for entry in entries {
-            let (old_hex, new_hex) =
-                crate::refs::reflog_oid_hex_pair(&entry.old_oid, &entry.new_oid);
-            if entry.message.is_empty() {
-                body.push_str(&format!("{old_hex} {new_hex} {}\n", entry.identity));
-            } else {
-                body.push_str(&format!(
-                    "{old_hex} {new_hex} {}\t{}\n",
-                    entry.identity, entry.message
-                ));
-            }
-        }
+        let body: String = entries.iter().map(reflog_line).collect();
         self.io_ref_store(
             &path,
             GitDirPathOperation::AppendReflog,
             fs::write(&path, body),
         )?;
         Ok(())
+    }
+
+    /// Add `entries` to the end of `name`'s reflog, leaving the lines it has as they are
+    /// (lines this store can't parse, and messages that are not UTF-8, included), as Git
+    /// appends to a log. A log whose last line has no line ending gets one first.
+    ///
+    /// # Returns
+    ///
+    /// `false` when the log is gone, so nothing was written.
+    fn append_reflog_entries(&self, name: &str, entries: &[ReflogEntry]) -> Result<bool> {
+        use std::io::{Read, Seek, SeekFrom, Write};
+
+        let path = self.reflog_path(name);
+        let mut file = match fs::OpenOptions::new().read(true).append(true).open(&path) {
+            Ok(file) => file,
+            Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(false),
+            Err(e) => {
+                return self.io_ref_store(&path, GitDirPathOperation::AppendReflog, Err(e));
+            }
+        };
+        let mut body = String::new();
+        if file.metadata()?.len() > 0 {
+            let mut last = [0u8; 1];
+            file.seek(SeekFrom::End(-1))?;
+            file.read_exact(&mut last)?;
+            if last[0] != b'\n' {
+                body.push('\n');
+            }
+        }
+        body.extend(entries.iter().map(reflog_line));
+        self.io_ref_store(
+            &path,
+            GitDirPathOperation::AppendReflog,
+            file.write_all(body.as_bytes()),
+        )?;
+        Ok(true)
     }
 
     fn peel_ref_to_oid(&self, start: &str) -> Result<Option<ObjectId>> {
@@ -1199,10 +1223,18 @@ impl FilesRefStore {
         names.extend(after.reflogs.keys().cloned());
 
         for name in names {
-            if before.reflogs.get(&name) != after.reflogs.get(&name) {
-                let entries = after.reflogs.get(&name).cloned().unwrap_or_default();
-                self.persist_reflog(&name, &entries)?;
+            let (old, new) = (before.reflogs.get(&name), after.reflogs.get(&name));
+            if old == new {
+                continue;
             }
+            // A log the batch only added to gets the new lines appended, so what it held
+            // stays byte for byte, as read or not.
+            if let (Some(old), Some(new)) = (old, new) {
+                if new.starts_with(old) && self.append_reflog_entries(&name, &new[old.len()..])? {
+                    continue;
+                }
+            }
+            self.persist_reflog(&name, new.map(Vec::as_slice).unwrap_or_default())?;
         }
 
         let pruned = if packed_lock_held {
@@ -1805,9 +1837,25 @@ fn file_identity(_meta: &fs::Metadata) -> Option<(u64, u64, i64, i64)> {
     None
 }
 
+/// The line `entry` is written as in a reflog file.
+fn reflog_line(entry: &ReflogEntry) -> String {
+    let (old_hex, new_hex) = crate::refs::reflog_oid_hex_pair(&entry.old_oid, &entry.new_oid);
+    if entry.message.is_empty() {
+        format!("{old_hex} {new_hex} {}\n", entry.identity)
+    } else {
+        format!(
+            "{old_hex} {new_hex} {}\t{}\n",
+            entry.identity, entry.message
+        )
+    }
+}
+
+/// The entries of the reflog file at `path` (none when it is missing). A message that is
+/// not UTF-8, which Git writes for a commit subject in a legacy encoding, is read with
+/// replacement characters rather than failing the read.
 fn read_reflog_at_path(path: &Path) -> Result<Vec<ReflogEntry>> {
-    let content = match fs::read_to_string(path) {
-        Ok(c) => c,
+    let content = match fs::read(path) {
+        Ok(bytes) => bytes,
         // A ref being created can collide with a file or directory in `logs/`; that is a
         // missing log here, and the ref conflict check reports the collision.
         Err(e)
@@ -1822,7 +1870,7 @@ fn read_reflog_at_path(path: &Path) -> Result<Vec<ReflogEntry>> {
         }
         Err(e) => return Err(Error::Io(e)),
     };
-    Ok(content
+    Ok(String::from_utf8_lossy(&content)
         .lines()
         .filter_map(reflog::parse_reflog_line_for_store)
         .collect())
@@ -2194,6 +2242,74 @@ mod tests {
         );
         assert!(!path.join("refs/heads/blocked").exists());
         assert!(!path.join("refs/heads/blocked.lock").exists());
+    }
+
+    #[test]
+    fn a_ref_whose_reflog_is_not_utf8_moves_and_its_log_keeps_what_it_had() {
+        let dir = git_dir();
+        let path = dir.path();
+        let writer = store(path);
+        let name = "refs/heads/main";
+        set(&writer, name, oid(1), Expected::Missing).expect("create");
+        // Git logs a commit subject in a legacy encoding as it is, and the
+        // store keeps a line it can't parse.
+        let log = path.join("logs/refs/heads/main");
+        fs::create_dir_all(log.parent().expect("parent")).expect("logs");
+        let mut written = format!(
+            "{} {} A <a@e> 1700000000 +0000\tcommit: Caf",
+            oid(0).to_hex(),
+            oid(1).to_hex()
+        )
+        .into_bytes();
+        written.extend_from_slice(b"\xe9 latin-1\nnot a reflog line\n");
+        fs::write(&log, &written).expect("log");
+
+        let txn = RefTransaction::new()
+            .update(RefUpdate {
+                name: name.to_owned(),
+                new_value: Some(RawRef::Direct(oid(2))),
+                expected: Expected::Oid(oid(1)),
+                reflog: Some(super::super::ReflogUpdate {
+                    identity: "T <t@t> 1700000001 +0000".into(),
+                    message: "moved".into(),
+                    time: time::OffsetDateTime::UNIX_EPOCH,
+                    old_oid: None,
+                    new_oid: None,
+                }),
+                flags: RefUpdateFlags::default(),
+            })
+            .expect("txn");
+        writer
+            .prepare(txn)
+            .expect("prepare")
+            .commit()
+            .expect("commit");
+
+        assert_eq!(
+            writer.read_raw(name).expect("read"),
+            Some(RawRef::Direct(oid(2)))
+        );
+        let bytes = fs::read(&log).expect("log");
+        assert!(
+            bytes.starts_with(&written),
+            "what the log had stays as written"
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&bytes[written.len()..]),
+            format!(
+                "{} {} T <t@t> 1700000001 +0000\tmoved\n",
+                oid(1).to_hex(),
+                oid(2).to_hex()
+            )
+        );
+        let mut messages = Vec::new();
+        writer
+            .for_each_reflog_entry(name, false, &mut |entry| {
+                messages.push(entry.message.clone());
+                ControlFlow::Continue(())
+            })
+            .expect("read log");
+        assert_eq!(messages, ["commit: Caf\u{fffd} latin-1", "moved"]);
     }
 
     #[test]

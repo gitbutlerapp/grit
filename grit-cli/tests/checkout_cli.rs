@@ -2280,3 +2280,49 @@ fn a_rebase_stopped_in_another_worktree_keeps_its_branch_as_it_is() {
     assert_eq!(after["branches"][0]["rule"], "own_last_set", "{after}");
     assert!(change_id_of(&co, "work").is_some());
 }
+
+#[test]
+fn commits_with_subjects_in_a_legacy_encoding_get_change_ids_and_keep_their_log() {
+    let (_tmp, home, _repos, _server, repo_url) = signed_in();
+    json(
+        &home,
+        &home,
+        &["--json", "checkout", &repo_url, "-p", "src", "--into", "co"],
+    );
+    let co = home.join("co");
+    git(&co, &["switch", "-q", "-c", "work"]);
+    // Plain Git logs a latin-1 subject as it is, in the branch's reflog too.
+    let message = home.join("message");
+    std::fs::write(&message, b"Caf\xe9 latin-1\n").expect("message");
+    let commit_latin1 = || {
+        assert!(git_may_fail(
+            &co,
+            &[
+                "-c",
+                "i18n.commitEncoding=ISO-8859-1",
+                "commit",
+                "-qa",
+                "-F",
+                message.to_str().expect("path"),
+            ],
+        ));
+    };
+    std::fs::write(co.join("src/a.rs"), "l1\n").expect("write");
+    commit_latin1();
+    let log = co.join(".git/logs/refs/heads/work");
+    let written = std::fs::read(&log).expect("reflog");
+    assert!(written.windows(4).any(|w| w == b"Caf\xe9"), "a latin-1 log");
+
+    let checkin = json(&home, &co, &["--json", "checkin"]);
+    assert_eq!(checkin["gave_change_ids"], 1, "{checkin}");
+    assert_eq!(checkin["branches"][0]["status"], "created", "{checkin}");
+    let logged = std::fs::read(&log).expect("reflog");
+    assert!(logged.starts_with(&written), "the log keeps what it had");
+    assert!(change_id_of(&co, "work").is_some());
+
+    // The refresh gives ids the same way.
+    std::fs::write(co.join("src/a.rs"), "l2\n").expect("write");
+    commit_latin1();
+    let pulled = json(&home, &co, &["--json", "pull"]);
+    assert_eq!(pulled["refresh"]["gave_change_ids"], 1, "{pulled}");
+}
