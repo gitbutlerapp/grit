@@ -36,7 +36,13 @@ stack. These two stack commits have the partial-failure semantics documented on
 
 ### Reading `packed-refs`
 
-The files backend maps `packed-refs` and keeps one view per store, shared by lookups, listings and peel snapshots. Opening it checks what Git checks: the file ends in a newline and its last line can hold an object id. When the header carries the `sorted` trait (Git and grit always write it), lookups and prefix listings binary-search the mapped bytes in place. They read only the lines they probe and parse strictly the lines a listing covers, so a command on a repository with tens of thousands of packed refs touches a few pages of the file. As in Git, the trait is trusted rather than verified on every read. [`refs_fsck`](rustdoc:grit_lib::refs::refs_fsck::refs_fsck) (and `grit fsck`) reports a file whose records break it as `packedRefUnsorted`. A file without the trait is scanned in full on every lookup.
+The files backend maps `packed-refs` and keeps one view per store, shared by lookups, listings and peel snapshots. Opening it checks what Git checks: the file ends in a newline and its last line can hold an object id. When the header carries the `sorted` trait (Git and grit always write it), lookups and prefix listings binary-search the mapped bytes in place. They read only the lines they probe and parse strictly the lines a listing covers, so a command on a repository with tens of thousands of packed refs touches a few pages of the file. As in Git, the trait is trusted rather than verified on every read. The trust model:
+
+- **Point lookups** (resolving one ref) trust the header completely. In a file that claims `sorted` but is not, a lookup can miss a ref, exactly as `git rev-parse` does.
+- **Prefix listings** (`refs/heads/`, `refs/tags/`, …) check name order on the records they already parse, plus the records just before and after the range. If any of those are out of order, the listing reads the whole file instead of returning part of the range. A record misplaced somewhere the listing does not read goes unnoticed, as in Git.
+- **Full scans** (all refs, `refs/` as a whole, `PackedRefs::load`) read every line. They reject a carriage return or invalid UTF-8 anywhere in the file, and they return every record whatever its order.
+
+[`refs_fsck`](rustdoc:grit_lib::refs::refs_fsck::refs_fsck) (and `grit fsck`) reports a file whose records break the trait as `packedRefUnsorted`. A file without the trait is scanned in full on every lookup.
 
 ## Lock files and contention
 

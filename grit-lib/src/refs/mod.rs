@@ -969,8 +969,24 @@ fn parse_packed_ref_data_line_borrowed<'a>(
     Ok((refname, oid))
 }
 
-/// Parse `packed-refs` bytes the way Git reads them for ref listing (strict).
-/// In-memory view of a `packed-refs` file for indexed lookup without a full parse.
+/// In-memory view of a `packed-refs` file for lookups and scans without a full parse.
+///
+/// # Trust model
+///
+/// A file whose header declares the `sorted` trait (what `git pack-refs` writes) is read the
+/// way Git reads it: opening examines only the header and the last line, and point lookups
+/// binary-search the mapped bytes, trusting the header. A file that lies about `sorted` can
+/// make a lookup miss a ref it holds, exactly as in Git (`fsck` reports such a file).
+///
+/// Prefix scans binary-search for their range, parse every line in it and the lines between it
+/// and the records on either side strictly, and check that the records they parse (and those
+/// two neighbours) are in name order. A range that is not makes the scan cover the whole file
+/// instead of returning part of it. Only what the scan reads is checked: a record misplaced
+/// elsewhere in the file, away from a range whose own records and neighbours are in order, is
+/// missed by that scan just as Git misses it.
+///
+/// Full scans (no prefix, or all of `refs/`) and files without the trait read every line:
+/// they reject a carriage return or invalid UTF-8 anywhere in the file.
 #[derive(Debug, Clone)]
 pub(crate) struct PackedRefsFileView {
     data: std::sync::Arc<crate::pack_map::PackData>,
@@ -1195,8 +1211,10 @@ impl PackedRefsFileView {
     /// sorted file a prefix scan covers the binary-searched range of matching records plus
     /// whatever lies between them and the records on either side, so a corrupt line
     /// in or next to the range is reported rather than skipped. Like Git, it does not read
-    /// records further away. Scans without a prefix, of all of `refs/`, or of an unsorted
-    /// file cover the whole file.
+    /// records further away, but when the records it covers are out of order (the header
+    /// lies) it covers the whole file instead of returning part of the range. Scans without a
+    /// prefix, of all of `refs/`, or of an unsorted file cover the whole file and reject a
+    /// carriage return anywhere in it.
     fn map_for_prefix(
         &self,
         path: &Path,
@@ -1215,31 +1233,76 @@ impl PackedRefsFileView {
     ) -> Result<HashMap<String, ObjectId>> {
         let prefix_trim = prefix.map(|p| p.trim_end_matches('/'));
         let range_prefix = prefix_trim.filter(|p| self.sorted && !p.is_empty() && *p != "refs");
-        let (begin, end) = match range_prefix {
-            Some(prefix) => {
-                let first = self.lower_bound(prefix);
-                // In a file whose records are out of order the bounds can cross.
-                let end = list_prefix_upper_bound(prefix)
-                    .map_or(self.data.len(), |upper| self.lower_bound(&upper))
-                    .max(first);
-                // Start after the record before the range and its peel line (which belongs to
-                // that record), so anything else up to the first record in range is checked.
-                let begin = self.prev_record(first).map_or(0, |prev| {
-                    let after = packed_line_end(&self.data, prev) + 1;
-                    if self.data.get(after) == Some(&b'^') {
-                        packed_line_end(&self.data, after) + 1
-                    } else {
-                        after
-                    }
-                });
-                (begin, end)
+        if let Some((begin, end)) = range_prefix.and_then(|prefix| self.prefix_region(prefix)) {
+            let (map, in_order) = self.parse_region(path, begin, end, prefix_trim, keep)?;
+            if in_order {
+                return Ok(map);
             }
-            None => (0, self.data.len()),
+        }
+        if memchr::memchr(b'\r', &self.data).is_some() {
+            return Err(packed_refs_unexpected_line(
+                path,
+                "<contains carriage return>",
+            ));
+        }
+        // Every record is parsed, so the result does not depend on their order.
+        let (map, _) = self.parse_region(path, 0, self.data.len(), prefix_trim, keep)?;
+        Ok(map)
+    }
+
+    /// Byte range a prefix scan of a sorted file covers: from just after the record before the
+    /// records matching `prefix` (and its peel line, which belongs to that record) to the first
+    /// record past them, so anything else up to and between them is checked.
+    ///
+    /// Returns `None` when the records bounding the range contradict the search: the one before
+    /// it is not below `prefix`, the first in it is, the one after it sorts before the end of
+    /// the prefix range, or the bounds cross. The file is then not in the order it claims.
+    fn prefix_region(&self, prefix: &str) -> Option<(usize, usize)> {
+        let len = self.data.len();
+        let first = self.lower_bound(prefix);
+        let upper = list_prefix_upper_bound(prefix);
+        let end = upper
+            .as_deref()
+            .map_or(len, |upper| self.lower_bound(upper));
+        if end < first || (first < end && self.record_cmp(first, prefix).is_lt()) {
+            return None;
+        }
+        if let Some(upper) = upper.as_deref() {
+            if end < len && self.record_cmp(end, upper).is_lt() {
+                return None;
+            }
+        }
+        let begin = match self.prev_record(first) {
+            Some(prev) => {
+                if !self.record_cmp(prev, prefix).is_lt() {
+                    return None;
+                }
+                let after = packed_line_end(&self.data, prev) + 1;
+                if self.data.get(after) == Some(&b'^') {
+                    packed_line_end(&self.data, after) + 1
+                } else {
+                    after
+                }
+            }
+            None => 0,
         };
-        // Both bounds are line starts or the end of the file, so the region is whole lines.
+        Some((begin, end))
+    }
+
+    /// Strictly parse the lines in `[begin, end)`, and whether their records are in name order.
+    ///
+    /// Both bounds must be line starts or the end of the file, so the region is whole lines.
+    fn parse_region(
+        &self,
+        path: &Path,
+        begin: usize,
+        end: usize,
+        prefix: Option<&str>,
+        keep: Option<PackedRecordFilter<'_>>,
+    ) -> Result<(HashMap<String, ObjectId>, bool)> {
         let region = std::str::from_utf8(&self.data[begin..end])
             .map_err(|_| packed_refs_unexpected_line(path, "<invalid utf-8>"))?;
-        parse_packed_refs_region(path, region, prefix_trim, keep, self.peel_trait)
+        parse_packed_refs_region(path, region, prefix, keep, self.peel_trait)
     }
 }
 
@@ -1259,7 +1322,8 @@ pub(crate) enum PackedPeel {
 /// record is listed.
 pub(crate) type PackedRecordFilter<'a> = &'a dyn Fn(&str, &ObjectId, PackedPeel) -> bool;
 
-/// Strictly parse the `packed-refs` lines of `region`, keeping refs that match `prefix`.
+/// Strictly parse the `packed-refs` lines of `region`, keeping refs that match `prefix`, and
+/// report whether the names of the records it parsed are in nondecreasing order.
 ///
 /// `region` starts at the beginning of the file or of a line that is not a peel line, and ends
 /// at the end of the file or just before a ref line, so peel lines stay attached to their ref.
@@ -1269,13 +1333,15 @@ fn parse_packed_refs_region(
     prefix: Option<&str>,
     keep: Option<PackedRecordFilter<'_>>,
     peel_trait: PackedPeelTrait,
-) -> Result<HashMap<String, ObjectId>> {
+) -> Result<(HashMap<String, ObjectId>, bool)> {
     let ref_opts = RefNameOptions {
         allow_onelevel: false,
         refspec_pattern: false,
         normalize: false,
     };
     let mut map = HashMap::new();
+    let mut in_order = true;
+    let mut prev_name = "";
     // With a filter, a record is decided once its peel line (if any) has been seen.
     let mut pending: Option<(&str, ObjectId, Option<ObjectId>)> = None;
     let flush = |map: &mut HashMap<String, ObjectId>,
@@ -1316,6 +1382,8 @@ fn parse_packed_refs_region(
         }
         flush(&mut map, &mut pending);
         let (refname, oid) = parse_packed_ref_data_line_borrowed(path, line, &ref_opts)?;
+        in_order &= prev_name <= refname;
+        prev_name = refname;
         if prefix.is_none_or(|p| ref_name_matches_list_prefix(refname, p)) {
             if keep.is_some() {
                 pending = Some((refname, oid, None));
@@ -1326,7 +1394,7 @@ fn parse_packed_refs_region(
         expect_peel = true;
     }
     flush(&mut map, &mut pending);
-    Ok(map)
+    Ok((map, in_order))
 }
 
 fn read_packed_refs_file_view(store: &Path) -> Result<Option<PackedRefsFileView>> {
@@ -5513,30 +5581,127 @@ mod packed_refs_parse_tests {
         );
     }
 
-    #[test]
-    fn sorted_trait_is_trusted_even_when_names_are_out_of_order() {
-        let dir = tempdir().unwrap();
-        let path = store::paths::packed_refs_path(dir.path());
+    /// A `sorted` header over records `b, a, t` (out of order), and the same records without it.
+    fn lying_and_unsorted_views(path: &Path) -> (PackedRefsFileView, PackedRefsFileView) {
         let oid = "1111111111111111111111111111111111111111";
         let records = format!("{oid} refs/heads/b\n{oid} refs/heads/a\n{oid} refs/tags/t\n");
         let view_of = |header: &str| {
             PackedRefsFileView::from_bytes(
-                &path,
+                path,
                 format!("{header}{records}").into_bytes(),
                 HashAlgo::Sha1,
             )
             .unwrap()
         };
+        (
+            view_of("# pack-refs with: peeled fully-peeled sorted\n"),
+            view_of("# pack-refs with: peeled fully-peeled\n"),
+        )
+    }
 
-        let lying = view_of("# pack-refs with: peeled fully-peeled sorted\n");
+    fn sorted_names(map: HashMap<String, ObjectId>) -> Vec<String> {
+        let mut names: Vec<String> = map.into_keys().collect();
+        names.sort();
+        names
+    }
+
+    #[test]
+    fn full_scans_of_a_lying_sorted_file_return_every_ref() {
+        let dir = tempdir().unwrap();
+        let path = store::paths::packed_refs_path(dir.path());
+        let (lying, unsorted) = lying_and_unsorted_views(&path);
         assert!(lying.sorted);
+        let every = ["refs/heads/a", "refs/heads/b", "refs/tags/t"];
+        for view in [&lying, &unsorted] {
+            for prefix in [None, Some("refs"), Some("refs/")] {
+                assert_eq!(
+                    sorted_names(view.map_for_prefix(&path, prefix).unwrap()),
+                    every,
+                    "{prefix:?}"
+                );
+            }
+        }
+        fs::write(&path, lying.data.as_ref() as &[u8]).unwrap();
+        let loaded = PackedRefs::load(dir.path()).unwrap();
+        for name in every {
+            assert!(loaded.get(name).is_some(), "{name}");
+        }
+    }
+
+    #[test]
+    fn prefix_scan_over_an_out_of_order_range_falls_back_to_the_whole_file() {
+        let dir = tempdir().unwrap();
+        let path = store::paths::packed_refs_path(dir.path());
+        let (lying, _) = lying_and_unsorted_views(&path);
+        let heads = lying.map_for_prefix(&path, Some("refs/heads")).unwrap();
+        assert_eq!(sorted_names(heads), ["refs/heads/a", "refs/heads/b"]);
+
+        // A searched range that spans a record of another namespace is out of order.
+        let oid = "1111111111111111111111111111111111111111";
+        let view_of = |names: &[&str]| {
+            let mut body = String::from("# pack-refs with: peeled fully-peeled sorted\n");
+            for name in names {
+                body.push_str(&format!("{oid} {name}\n"));
+            }
+            PackedRefsFileView::from_bytes(&path, body.into_bytes(), HashAlgo::Sha1).unwrap()
+        };
+        let interleaved = view_of(&["refs/heads/a", "refs/tags/t", "refs/heads/b", "refs/tags/u"]);
+        let (begin, end) = interleaved.prefix_region("refs/heads").unwrap();
+        let (_, in_order) = interleaved
+            .parse_region(&path, begin, end, Some("refs/heads"), None)
+            .unwrap();
+        assert!(!in_order);
+        assert_eq!(
+            sorted_names(
+                interleaved
+                    .map_for_prefix(&path, Some("refs/heads"))
+                    .unwrap()
+            ),
+            ["refs/heads/a", "refs/heads/b"]
+        );
+
+        // The record before the searched range sorts after the prefix: the bounds contradict
+        // the search before any line of the range is parsed.
+        let bad_neighbour = view_of(&["refs/heads/x", "refs/heads/a"]);
+        assert_eq!(bad_neighbour.prefix_region("refs/heads/a"), None);
+        assert_eq!(
+            sorted_names(
+                bad_neighbour
+                    .map_for_prefix(&path, Some("refs/heads/a"))
+                    .unwrap()
+            ),
+            ["refs/heads/a"]
+        );
+
+        // The fallback still checks the whole file.
+        let corrupt = PackedRefsFileView::from_bytes(
+            &path,
+            format!(
+                "# pack-refs with: peeled fully-peeled sorted\n\
+                 {oid} refs/heads/b\n{oid} refs/heads/a\n{oid} refs/tags/bad..name\n"
+            )
+            .into_bytes(),
+            HashAlgo::Sha1,
+        )
+        .unwrap();
+        assert!(matches!(
+            corrupt.map_for_prefix(&path, Some("refs/heads")),
+            Err(Error::PackedRefsUnexpectedLine { .. })
+        ));
+    }
+
+    /// Point lookups trust the `sorted` header the way Git does, so a lying file can hide a ref
+    /// from them. (`fsck` reports the file; see `refs_fsck_coverage`.)
+    #[test]
+    fn point_lookup_in_a_lying_sorted_file_behaves_like_git() {
+        let dir = tempdir().unwrap();
+        let path = store::paths::packed_refs_path(dir.path());
+        let (lying, unsorted) = lying_and_unsorted_views(&path);
         // The search probes `refs/heads/a` first, then moves right past it.
         assert!(lying.lookup_oid(&path, "refs/heads/a").unwrap().is_some());
         assert_eq!(lying.lookup_oid(&path, "refs/heads/b").unwrap(), None);
-        let heads = lying.map_for_prefix(&path, Some("refs/heads")).unwrap();
-        assert_eq!(heads.len(), 2);
+        assert!(lying.lookup_oid(&path, "refs/tags/t").unwrap().is_some());
 
-        let unsorted = view_of("# pack-refs with: peeled fully-peeled\n");
         assert!(!unsorted.sorted);
         for name in ["refs/heads/a", "refs/heads/b", "refs/tags/t"] {
             assert!(
