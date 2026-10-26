@@ -615,3 +615,116 @@ fn path_limited_glob_star_not_literal_prefix_overmatch() {
         "fixture should distinguish glob from single file"
     );
 }
+
+/// Fast-import a history with a merge, a wide root tree, and `flip` turning from a file into a
+/// directory and back, then repack it so root trees are stored as deep delta chains.
+fn import_packed_flip_repo(wt: &std::path::Path) {
+    git(wt, &["init", "-q"]);
+    let mut child = Command::new("git")
+        .current_dir(wt)
+        .args(["fast-import", "--quiet"])
+        .stdin(Stdio::piped())
+        .spawn()
+        .expect("fast-import");
+    {
+        let stdin = child.stdin.as_mut().expect("stdin");
+        let mut t = 1_600_000_000i64;
+        let mut blob = |stdin: &mut std::process::ChildStdin, mode: &str, path: &str, i: usize| {
+            let data = format!("{path} {i}\n");
+            writeln!(stdin, "M {mode} inline {path}").unwrap();
+            writeln!(stdin, "data {}", data.len()).unwrap();
+            write!(stdin, "{data}").unwrap();
+        };
+        let mut header = |stdin: &mut std::process::ChildStdin, branch: &str, mark: usize| {
+            t += 100;
+            writeln!(stdin, "commit refs/heads/{branch}").unwrap();
+            writeln!(stdin, "mark :{mark}").unwrap();
+            writeln!(stdin, "committer T <t@e> {t} +0000").unwrap();
+            writeln!(stdin, "data 1\nm").unwrap();
+        };
+        for i in 1..=120usize {
+            header(stdin, "main", i);
+            if i > 1 {
+                writeln!(stdin, "from :{}", i - 1).unwrap();
+            }
+            if i == 1 {
+                for w in 0..200 {
+                    blob(stdin, "100644", &format!("wide{w:03}.txt"), 0);
+                }
+            }
+            if i == 100 {
+                writeln!(stdin, "merge :1060").unwrap();
+            }
+            match i {
+                40 | 80 => writeln!(stdin, "D flip").unwrap(),
+                _ => {}
+            }
+            if i % 7 == 0 || i == 1 {
+                blob(stdin, "100644", "README.md", i);
+            }
+            if i % 5 == 0 || i == 1 {
+                blob(stdin, "100644", "docs/a.txt", i);
+            }
+            if (40..80).contains(&i) {
+                if i % 3 == 0 || i == 40 {
+                    blob(stdin, "100644", "flip/x", i);
+                }
+            } else if i % 3 == 0 || i == 1 || i == 80 {
+                blob(stdin, "100755", "flip", i);
+            }
+            blob(stdin, "100644", &format!("wide{:03}.txt", i % 200), i);
+            if i == 60 {
+                for s in 1..=6usize {
+                    header(stdin, "side", 1060 + s - 6);
+                    let from = if s == 1 { 60 } else { 1060 + s - 7 };
+                    writeln!(stdin, "from :{from}").unwrap();
+                    if s % 2 == 0 {
+                        blob(stdin, "100644", "README.md", 1000 + s);
+                    }
+                    blob(stdin, "100644", "docs/side.txt", s);
+                }
+            }
+        }
+    }
+    let status = child.wait().expect("wait");
+    assert!(status.success(), "fast-import failed");
+    git(wt, &["symbolic-ref", "HEAD", "refs/heads/main"]);
+    git(wt, &["repack", "-adfq", "--depth=50", "--window=250"]);
+    git(wt, &["prune-packed"]);
+}
+
+#[test]
+fn path_limited_packed_delta_trees_match_git_log() {
+    let hist = HistoryRepo::init();
+    let wt = hist.worktree();
+    import_packed_flip_repo(wt);
+    assert!(
+        std::fs::read_dir(wt.join(".git/objects/pack"))
+            .expect("pack dir")
+            .any(|e| e.is_ok_and(|e| e.path().extension().is_some_and(|x| x == "pack"))),
+        "fixture must be packed"
+    );
+    for path in [
+        "README.md",
+        "docs/a.txt",
+        "docs/side.txt",
+        "docs",
+        "flip",
+        "flip/x",
+        "wide042.txt",
+        "missing",
+        "missing/deeper",
+    ] {
+        let expected: Vec<String> = git(wt, &["rev-list", "HEAD", "--", path])
+            .lines()
+            .map(str::to_owned)
+            .collect();
+        let got: Vec<String> = grit_path_commits(wt, &["HEAD"], path, None)
+            .iter()
+            .map(ObjectId::to_hex)
+            .collect();
+        assert_eq!(got, expected, "path {path}");
+    }
+    let flip = git(wt, &["rev-list", "--count", "HEAD", "--", "flip"]);
+    assert!(flip.trim().parse::<usize>().expect("count") > 10);
+}

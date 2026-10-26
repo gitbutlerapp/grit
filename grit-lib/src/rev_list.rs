@@ -5050,9 +5050,12 @@ struct DenseBloomCtx<'a> {
 #[derive(Default)]
 struct DenseWalkCache {
     literal_tree_diff: HashMap<(ObjectId, ObjectId, u64), bool>,
-    component_child: HashMap<(ObjectId, Arc<str>, bool), CachedTreeChild>,
+    /// Path components seen in this walk, so cache keys are a small id instead of an
+    /// allocated string per lookup.
+    component_ids: HashMap<Box<str>, u32>,
+    component_child: HashMap<(ObjectId, u32), CachedTreeChild>,
     /// FIFO eviction order; stale keys are skipped when popping (O(1) insert, no scan on hit).
-    component_evict_order: VecDeque<(ObjectId, Arc<str>, bool)>,
+    component_evict_order: VecDeque<(ObjectId, u32)>,
     component_hits: u64,
     component_misses: u64,
     tree_reads: u64,
@@ -5085,14 +5088,16 @@ impl DenseWalkCache {
         self.tree_reads
     }
 
-    fn insert_component(
-        &mut self,
-        tree: ObjectId,
-        component: Arc<str>,
-        as_tree: bool,
-        value: CachedTreeChild,
-    ) {
-        let key = (tree, Arc::clone(&component), as_tree);
+    fn component_id(&mut self, component: &str) -> u32 {
+        if let Some(&id) = self.component_ids.get(component) {
+            return id;
+        }
+        let id = u32::try_from(self.component_ids.len()).unwrap_or(u32::MAX);
+        self.component_ids.insert(Box::from(component), id);
+        id
+    }
+
+    fn insert_component(&mut self, key: (ObjectId, u32), value: CachedTreeChild) {
         if let Some(slot) = self.component_child.get_mut(&key) {
             *slot = value;
             return;
@@ -5103,51 +5108,49 @@ impl DenseWalkCache {
             };
             self.component_child.remove(&evict);
         }
-        self.component_child.insert(key.clone(), value);
+        self.component_child.insert(key, value);
         self.component_evict_order.push_back(key);
     }
 
-    /// Resolve one path component under `tree` using Git tree directory ordering when `as_tree`.
+    /// Resolve the entry named `component` directly under `tree`.
+    ///
+    /// A subtree wins over a blob of the same name; callers that need a directory check the
+    /// returned mode. The tree is scanned in place (inflated into the reusable buffer) up to
+    /// the point where `component` would sort, without building an entry vector.
     fn lookup_tree_component(
         &mut self,
         repo: &Repository,
         tree: ObjectId,
         component: &str,
-        as_tree: bool,
     ) -> Result<CachedTreeChild> {
-        let key_name: Arc<str> = Arc::from(component);
-        let key = (tree, Arc::clone(&key_name), as_tree);
+        let key = (tree, self.component_id(component));
         if let Some(cached) = self.component_child.get(&key).copied() {
             self.component_hits += 1;
             return Ok(cached);
         }
         self.component_misses += 1;
         self.tree_reads += 1;
-        let entries = read_parsed_tree(repo, tree)?;
-        let resolved = match tree_entry_by_name(&entries, component, as_tree) {
+        // Successive root trees are deltas of each other; keeping their bases cached is what
+        // makes reading one per commit cheap.
+        let kind = repo
+            .odb()
+            .read_into_caching_delta_bases(&tree, &mut self.tree_read_buf)?;
+        if kind != ObjectKind::Tree {
+            return Err(Error::CorruptObject(format!("object {tree} is not a tree")));
+        }
+        let resolved = match crate::objects::find_tree_entry_by_name_dir_or_file_in_data(
+            &self.tree_read_buf,
+            repo.odb().hash_algo().len(),
+            component.as_bytes(),
+        )? {
             Some(entry) => CachedTreeChild::Found {
                 oid: entry.oid,
                 mode: entry.mode,
             },
             None => CachedTreeChild::Missing,
         };
-        self.insert_component(tree, key_name, as_tree, resolved);
+        self.insert_component(key, resolved);
         Ok(resolved)
-    }
-
-    fn lookup_tree_component_dir_or_file(
-        &mut self,
-        repo: &Repository,
-        tree: ObjectId,
-        component: &str,
-    ) -> Result<CachedTreeChild> {
-        let as_dir = self.lookup_tree_component(repo, tree, component, true)?;
-        if let CachedTreeChild::Found { mode, .. } = as_dir {
-            if is_tree_mode(mode) {
-                return Ok(as_dir);
-            }
-        }
-        self.lookup_tree_component(repo, tree, component, false)
     }
 }
 
@@ -5541,25 +5544,6 @@ fn read_parsed_tree(repo: &Repository, tree_oid: ObjectId) -> Result<Vec<TreeEnt
     parse_tree(&object.data)
 }
 
-fn tree_entry_by_name<'a>(
-    entries: &'a [TreeEntry],
-    name: &str,
-    name_is_tree: bool,
-) -> Option<&'a TreeEntry> {
-    let name_bytes = name.as_bytes();
-    let idx = entries.binary_search_by(|e| {
-        crate::objects::tree_entry_cmp(&e.name, is_tree_mode(e.mode), name_bytes, name_is_tree)
-    });
-    idx.ok().and_then(|i| {
-        let entry = &entries[i];
-        if entry.name.as_slice() == name_bytes {
-            Some(entry)
-        } else {
-            None
-        }
-    })
-}
-
 /// Whether any blob path under `tree_oid` matches `pathspecs` (root-commit visibility).
 fn tree_has_pathspec_match(
     repo: &Repository,
@@ -5813,7 +5797,7 @@ fn tree_dir_child(
     part: &str,
     cache: &mut DenseWalkCache,
 ) -> Result<Option<ObjectId>> {
-    match cache.lookup_tree_component(repo, tree, part, true)? {
+    match cache.lookup_tree_component(repo, tree, part)? {
         CachedTreeChild::Found { oid, mode } if is_tree_mode(mode) => Ok(Some(oid)),
         _ => Ok(None),
     }
@@ -5885,7 +5869,7 @@ fn trees_differ_at_literal_path(
                 let Some(oid) = tree else {
                     return Ok(None);
                 };
-                match cache.lookup_tree_component_dir_or_file(repo, oid, leaf)? {
+                match cache.lookup_tree_component(repo, oid, leaf)? {
                     CachedTreeChild::Found { oid, mode } => Ok(Some((oid, mode))),
                     CachedTreeChild::Missing => Ok(None),
                 }
@@ -7632,7 +7616,7 @@ impl<'r> CommitGraph<'r> {
             return Ok(());
         }
 
-        let mut commit = load_commit(self.repo, oid)?;
+        let mut commit = load_commit_into(self.repo, oid, &mut self.read_buf)?;
         let mut parents = if self.shallow_boundaries.contains(&oid) {
             Vec::new()
         } else {
@@ -11666,18 +11650,116 @@ mod line_coverage_tests {
         let tree = write_flat_tree(&repo.odb(), &flat);
 
         let mut cache = DenseWalkCache::default();
-        let first = cache.lookup_tree_component(&repo, tree, "f42", false)?;
+        let first = cache.lookup_tree_component(&repo, tree, "f42")?;
         assert!(matches!(first, CachedTreeChild::Found { .. }));
         assert_eq!(cache.component_cache_misses(), 1);
         assert_eq!(cache.component_cache_hits(), 0);
         assert_eq!(cache.component_tree_reads(), 1);
 
-        let second = cache.lookup_tree_component(&repo, tree, "f42", false)?;
+        let second = cache.lookup_tree_component(&repo, tree, "f42")?;
         assert!(matches!(second, CachedTreeChild::Found { .. }));
         assert_eq!(cache.component_cache_hits(), 1);
         assert_eq!(cache.component_cache_misses(), 1);
         assert_eq!(cache.component_tree_reads(), 1);
 
+        Ok(())
+    }
+
+    #[test]
+    fn dense_walk_component_lookup_resolves_dir_or_file_in_one_read() -> Result<()> {
+        let dir = tempdir().expect("tempdir");
+        Repository::init(
+            dir.path(),
+            &InitOptions {
+                bare: true,
+                ref_storage: RefStorageFormat::Files,
+                ..InitOptions::default()
+            },
+        )
+        .expect("init");
+        let repo = Repository::open(dir.path(), &crate::environment::RepositoryOptions::empty())
+            .expect("open");
+        let odb = repo.odb();
+        let blob = odb.write(ObjectKind::Blob, b"readme\n").expect("blob");
+        let other = odb.write(ObjectKind::Blob, b"other\n").expect("blob");
+        let sub = write_flat_tree(&odb, &[(0o100644, "inner", other)]);
+        // Git order: "README.md" < "README.md-old" < "doc.txt" < "doc" (a tree sorts as "doc/").
+        let root = write_flat_tree(
+            &odb,
+            &[
+                (0o100644, "README.md", blob),
+                (0o100644, "README.md-old", other),
+                (0o100644, "doc.txt", other),
+                (0o040000, "doc", sub),
+            ],
+        );
+
+        let mut cache = DenseWalkCache::default();
+        assert_eq!(
+            cache.lookup_tree_component(&repo, root, "README.md")?,
+            CachedTreeChild::Found {
+                oid: blob,
+                mode: 0o100644
+            }
+        );
+        assert_eq!(
+            cache.component_tree_reads(),
+            1,
+            "a file leaf needs one read"
+        );
+        assert_eq!(
+            cache.lookup_tree_component(&repo, root, "doc")?,
+            CachedTreeChild::Found {
+                oid: sub,
+                mode: 0o040000
+            }
+        );
+        assert_eq!(
+            cache.lookup_tree_component(&repo, root, "doc.txt")?,
+            CachedTreeChild::Found {
+                oid: other,
+                mode: 0o100644
+            }
+        );
+        assert_eq!(
+            cache.lookup_tree_component(&repo, root, "README")?,
+            CachedTreeChild::Missing
+        );
+        assert_eq!(
+            cache.lookup_tree_component(&repo, root, "zzz")?,
+            CachedTreeChild::Missing
+        );
+        assert_eq!(cache.component_tree_reads(), 5);
+        assert_eq!(cache.component_cache_hits(), 0);
+
+        assert!(matches!(
+            cache.lookup_tree_component(&repo, root, "doc")?,
+            CachedTreeChild::Found { .. }
+        ));
+        assert_eq!(cache.component_cache_hits(), 1);
+        assert_eq!(cache.component_tree_reads(), 5);
+
+        assert!(trees_differ_at_literal_path(
+            &repo,
+            Some(root),
+            Some(sub),
+            "README.md",
+            &mut cache
+        )?);
+        assert!(!trees_differ_at_literal_path(
+            &repo,
+            Some(root),
+            Some(write_flat_tree(&odb, &[(0o100644, "README.md", blob)])),
+            "README.md",
+            &mut cache
+        )?);
+        assert!(trees_differ_at_literal_path(
+            &repo,
+            Some(root),
+            Some(write_flat_tree(&odb, &[(0o100644, "inner", blob)])),
+            "doc/inner",
+            &mut cache
+        )?);
         Ok(())
     }
 
