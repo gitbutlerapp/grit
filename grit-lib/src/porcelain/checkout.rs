@@ -51,13 +51,11 @@ mod checkout_parallel;
 use checkout_delete_rollback::{CheckoutDeleteGuard, SharedCheckoutDeleteRollback};
 pub(crate) use checkout_parallel::is_eligible_for_parallel_checkout;
 use checkout_parallel::{
-    execute_write_jobs, paths_needing_serial_checkout, CheckoutPlanSlot, CheckoutWriteJob,
-    WriteJobOutcome,
+    cancellable_chunks, execute_write_jobs, paths_needing_serial_checkout, CheckoutPlanSlot,
+    CheckoutWriteJob, WriteJobOutcome,
 };
 
 const PARALLEL_PER_FILE_DELETE_MIN: usize = 32;
-/// Chunk size for parallel checkout deletes so cancellation can stop before an entire tree is removed.
-const PARALLEL_DELETE_CANCEL_CHUNK: usize = 8;
 const POPULATED_TREE_CHECKOUT_CHUNK: usize = 2048;
 
 /// Remove one tracked file during checkout, surfacing [`Error::WorktreePathIo`] on failure.
@@ -80,7 +78,8 @@ fn remove_checkout_files_parallel_cancellable(
     let mut parallel_deleted_paths = HashSet::new();
     let mut deleted_abs_paths = Vec::new();
     let wt = work_tree.to_path_buf();
-    for chunk in paths.chunks(PARALLEL_DELETE_CANCEL_CHUNK) {
+    let (chunks, options) = cancellable_chunks(paths, options);
+    for chunk in chunks {
         crate::progress::poll_cancel(progress, cancel)?;
         let rollback = delete_rollback.clone_handle();
         try_par_map(chunk, options, 0, |rel_path| {
@@ -122,7 +121,8 @@ fn remove_wholesale_dirs_parallel_cancellable(
         return Ok(removed);
     }
     let wt = work_tree.to_path_buf();
-    for chunk in dirs.chunks(PARALLEL_DELETE_CANCEL_CHUNK) {
+    let (chunks, options) = cancellable_chunks(dirs, options);
+    for chunk in chunks {
         crate::progress::poll_cancel(progress, cancel)?;
         let removed_chunk = try_par_map(chunk, options, 0, |dir| {
             let abs = wt.join(dir);
@@ -381,6 +381,7 @@ fn checkout_populated_tree(
             )?;
             apply.skip_bulk_checkout_fast_path = false;
         }
+        apply.skip_parallel_write_ramp = true;
     }
 
     attach_checkout_result_cache_tree(repo, index_mut, tree_oid)?;
@@ -1036,6 +1037,10 @@ pub(crate) struct CheckoutApplyOptions {
     /// Index rows (with `skip-worktree` set) for sparse-checkout skipped paths, merged into the
     /// index together with the rows checkout writes.
     pub skip_worktree_rows: Vec<IndexEntry>,
+    /// Flush parallel writes in full-size chunks from the start instead of ramping up from a
+    /// few files. Set by callers that already observed cancellation between earlier calls, so
+    /// only their first call needs the small chunks that stop quickly after a cancel.
+    pub skip_parallel_write_ramp: bool,
 }
 
 /// Like [`checkout_tree_changes`], but updates `index` in place instead of loading from disk.
@@ -1751,6 +1756,7 @@ fn checkout_bulk_added_tree_changes(
         &parallel_indices,
         apply.parallel_prepare_blobs,
         apply.checkout_parallel_threshold,
+        apply.skip_parallel_write_ramp,
         progress,
         cancel,
     )?;
@@ -1953,6 +1959,7 @@ fn checkout_bulk_mod_delete_tree_changes(
         &parallel_indices,
         apply.parallel_prepare_blobs,
         apply.checkout_parallel_threshold,
+        apply.skip_parallel_write_ramp,
         progress,
         cancel,
     )?;
@@ -2536,6 +2543,7 @@ fn checkout_tree_changes_with_progress(
             &parallel_indices,
             apply.parallel_prepare_blobs,
             apply.checkout_parallel_threshold,
+            apply.skip_parallel_write_ramp,
             &mut progress,
             cancel,
         )?

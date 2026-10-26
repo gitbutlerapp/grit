@@ -23,9 +23,15 @@ use super::{
     write_checkout_entry, DelayedCheckoutTarget, LeadingDirCache, WorktreeFileContent,
 };
 
-/// Maximum parallel-eligible checkout jobs buffered before a flush so cancellation can stop
-/// work without materializing an entire large tree in one batch.
-const PARALLEL_WRITE_CANCEL_CHUNK: usize = 8;
+/// Parallel-eligible checkout jobs buffered before the first flush, so a cancellation that
+/// arrives early stops after a handful of files.
+const PARALLEL_WRITE_FIRST_CHUNK: usize = 8;
+
+/// Largest flush once chunks have doubled up from [`PARALLEL_WRITE_FIRST_CHUNK`]. Big enough
+/// that worker start-up and the per-flush join stay a small share of a large checkout, small
+/// enough that cancellation is still observed within a fraction of a second and only one
+/// chunk of converted file contents is held in memory at a time.
+const PARALLEL_WRITE_MAX_CHUNK: usize = 2048;
 
 /// One blob checkout after attribute/conversion resolution on the caller thread.
 pub(crate) struct CheckoutWriteJob {
@@ -154,6 +160,96 @@ fn checkout_pool_worthwhile(len: usize, options: ParallelOptions) -> bool {
     true
 }
 
+/// Worker configuration for a checkout writing `eligible` parallel-eligible files, or `None`
+/// when they should be read and written serially.
+///
+/// Like Git, `checkout.workers` and `checkout.thresholdForParallelism` are judged once against
+/// every eligible file in the checkout. The returned options carry no threshold, so the chunks
+/// [`execute_write_jobs`] flushes for cancellation each use the pool however small they are.
+fn parallel_pool_for_checkout(
+    repo: &Repository,
+    config: &ConfigSet,
+    eligible: usize,
+    threshold_override: Option<i64>,
+) -> Option<ParallelOptions> {
+    if eligible < 2 {
+        return None;
+    }
+    let mut options = repo.thread_policy().resolve(ParallelOp::Checkout, config);
+    if let Some(threshold) = threshold_override {
+        options.signed_entry_threshold = Some(threshold);
+    }
+    chunk_pool_options(options, eligible)
+}
+
+/// Decide once from the resolved `options` whether `eligible` files get a worker pool, and if so
+/// return options that every chunk of them can use without being re-judged.
+pub(crate) fn chunk_pool_options(
+    options: ParallelOptions,
+    eligible: usize,
+) -> Option<ParallelOptions> {
+    checkout_pool_worthwhile(eligible, options).then_some(ParallelOptions {
+        signed_entry_threshold: None,
+        min_items: 0,
+        min_total_bytes: None,
+        ..options
+    })
+}
+
+/// Split `items` into cancellation chunks sized by [`ChunkSizes`], and pick the options each
+/// chunk is mapped with: the pool when `items` as a whole qualifies under `options`, otherwise a
+/// single thread.
+pub(crate) fn cancellable_chunks<T>(
+    items: &[T],
+    options: ParallelOptions,
+) -> (impl Iterator<Item = &[T]>, ParallelOptions) {
+    let chunk_options = chunk_pool_options(options, items.len()).unwrap_or(ParallelOptions {
+        threads: std::num::NonZeroUsize::MIN,
+        ..options
+    });
+    let mut sizes = ChunkSizes::new();
+    let mut rest = items;
+    let chunks = std::iter::from_fn(move || {
+        if rest.is_empty() {
+            return None;
+        }
+        let (chunk, tail) = rest.split_at(sizes.current().min(rest.len()));
+        rest = tail;
+        sizes.grow();
+        Some(chunk)
+    });
+    (chunks, chunk_options)
+}
+
+/// Flush sizes for parallel-eligible jobs: [`PARALLEL_WRITE_FIRST_CHUNK`], doubling after each
+/// full flush up to [`PARALLEL_WRITE_MAX_CHUNK`].
+struct ChunkSizes {
+    current: usize,
+}
+
+impl ChunkSizes {
+    fn new() -> Self {
+        Self {
+            current: PARALLEL_WRITE_FIRST_CHUNK,
+        }
+    }
+
+    /// Sizes that start at the cap, for callers that do not need a quick first stop.
+    fn full() -> Self {
+        Self {
+            current: PARALLEL_WRITE_MAX_CHUNK,
+        }
+    }
+
+    fn current(&self) -> usize {
+        self.current
+    }
+
+    fn grow(&mut self) {
+        self.current = (self.current * 2).min(PARALLEL_WRITE_MAX_CHUNK);
+    }
+}
+
 struct ParallelWriteWorker {
     work_tree: PathBuf,
     dir_cache: LeadingDirCache,
@@ -255,15 +351,13 @@ fn flush_prepared_writes_serial(
 
 fn flush_prepared_writes_parallel(
     repo: &Repository,
-    config: &Arc<ConfigSet>,
+    options: ParallelOptions,
     work_tree: &Path,
     jobs: &[CheckoutWriteJob],
     prepared: &[PreparedWrite],
     parent_dirs: &LeadingDirCache,
     outcomes: &mut [Option<WriteJobOutcome>],
 ) -> Result<()> {
-    let policy = repo.thread_policy();
-    let options = policy.resolve(ParallelOp::Checkout, config.as_ref());
     let work_tree = work_tree.to_path_buf();
     let parent_dirs = LeadingDirCache::with_ready_from(parent_dirs);
     let entries = try_par_map_with_local(
@@ -350,18 +444,21 @@ fn materialize_write_job_serial(
     Ok(WriteJobOutcome::Index(entry))
 }
 
+/// Write one chunk of parallel-eligible jobs.
+///
+/// `pool` is the worker configuration when the checkout as a whole qualified for parallel
+/// writes (see [`parallel_pool_for_checkout`]), or `None` to read and write serially.
 #[allow(clippy::too_many_arguments)]
 fn flush_parallel_batch(
     repo: &Repository,
-    config: &Arc<ConfigSet>,
     conv: &ConversionConfig,
     work_tree: &Path,
     jobs: &[CheckoutWriteJob],
     batch: &[usize],
     dir_cache: &mut LeadingDirCache,
     outcomes: &mut [Option<WriteJobOutcome>],
+    pool: Option<ParallelOptions>,
     parallel_prepare_blobs: bool,
-    checkout_parallel_threshold: Option<i64>,
     progress: &mut dyn crate::progress::ProgressSink,
     cancel: &dyn crate::progress::Cancel,
 ) -> Result<()> {
@@ -369,16 +466,11 @@ fn flush_parallel_batch(
         return Ok(());
     }
     crate::progress::poll_cancel(progress, cancel)?;
-    let policy = repo.thread_policy();
-    let mut options = policy.resolve(ParallelOp::Checkout, config.as_ref());
-    if let Some(threshold) = checkout_parallel_threshold {
-        options.signed_entry_threshold = Some(threshold);
-    }
-    let use_parallel = options.threads.get() > 1 && checkout_pool_worthwhile(batch.len(), options);
-    let pack_store = repo.odb().pack_store_for(repo.odb().objects_dir());
+    let pool = pool.filter(|_| batch.len() > 1);
 
-    let prepared: Vec<PreparedWrite> =
-        if parallel_prepare_blobs && options.threads.get() > 1 && batch.len() > 1 {
+    let prepared: Vec<PreparedWrite> = match pool {
+        Some(options) if parallel_prepare_blobs => {
+            let pack_store = repo.odb().pack_store_for(repo.odb().objects_dir());
             try_par_map_with_local(
                 batch,
                 options,
@@ -392,7 +484,8 @@ fn flush_parallel_batch(
             .map_err(|e: ParallelHashError<Error>| match e {
                 ParallelHashError::Task(err) => err,
             })?
-        } else {
+        }
+        _ => {
             let mut prepared = Vec::with_capacity(batch.len());
             let prepare_result = repo.odb().with_pack_read_context(|| {
                 for &idx in batch {
@@ -411,13 +504,14 @@ fn flush_parallel_batch(
                 return Err(err);
             }
             prepared
-        };
+        }
+    };
 
-    if use_parallel {
+    if let Some(options) = pool {
         let parent_snapshot = LeadingDirCache::with_ready_from(&*dir_cache);
         flush_prepared_writes_parallel(
             repo,
-            config,
+            options,
             work_tree,
             jobs,
             &prepared,
@@ -439,7 +533,9 @@ fn flush_parallel_batch(
 /// Materialize write jobs in input order: one ODB read and conversion per job.
 ///
 /// Parallel-eligible jobs are batched, but each batch is flushed before the next serial job runs
-/// so missing blobs and filter errors match the historical serial checkout behavior.
+/// so missing blobs and filter errors match the historical serial checkout behavior. Batches are
+/// also flushed at [`ChunkSizes`] boundaries so cancellation is polled between them; with
+/// `skip_chunk_ramp` they start at full size.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn execute_write_jobs(
     repo: &Repository,
@@ -453,46 +549,57 @@ pub(crate) fn execute_write_jobs(
     parallel_indices: &HashSet<usize>,
     parallel_prepare_blobs: bool,
     checkout_parallel_threshold: Option<i64>,
+    skip_chunk_ramp: bool,
     progress: &mut dyn crate::progress::ProgressSink,
     cancel: &dyn crate::progress::Cancel,
 ) -> Result<Vec<WriteJobOutcome>> {
     let mut outcomes: Vec<Option<WriteJobOutcome>> = vec![None; jobs.len()];
+    let pool = parallel_pool_for_checkout(
+        repo,
+        config,
+        parallel_indices.len(),
+        checkout_parallel_threshold,
+    );
+    let mut chunks = if skip_chunk_ramp {
+        ChunkSizes::full()
+    } else {
+        ChunkSizes::new()
+    };
     let mut parallel_batch: Vec<usize> = Vec::new();
 
     for idx in 0..jobs.len() {
         crate::progress::poll_cancel(progress, cancel)?;
         if parallel_indices.contains(&idx) {
             parallel_batch.push(idx);
-            if parallel_batch.len() >= PARALLEL_WRITE_CANCEL_CHUNK {
+            if parallel_batch.len() >= chunks.current() {
                 flush_parallel_batch(
                     repo,
-                    config,
                     conv,
                     work_tree,
                     jobs,
                     &parallel_batch,
                     dir_cache,
                     &mut outcomes,
+                    pool,
                     parallel_prepare_blobs,
-                    checkout_parallel_threshold,
                     progress,
                     cancel,
                 )?;
                 parallel_batch.clear();
+                chunks.grow();
             }
             continue;
         }
         flush_parallel_batch(
             repo,
-            config,
             conv,
             work_tree,
             jobs,
             &parallel_batch,
             dir_cache,
             &mut outcomes,
+            pool,
             parallel_prepare_blobs,
-            checkout_parallel_threshold,
             progress,
             cancel,
         )?;
@@ -504,15 +611,14 @@ pub(crate) fn execute_write_jobs(
     }
     flush_parallel_batch(
         repo,
-        config,
         conv,
         work_tree,
         jobs,
         &parallel_batch,
         dir_cache,
         &mut outcomes,
+        pool,
         parallel_prepare_blobs,
-        checkout_parallel_threshold,
         progress,
         cancel,
     )?;
@@ -570,5 +676,48 @@ mod tests {
             ..FileAttrs::default()
         };
         assert!(!is_eligible_for_parallel_checkout(MODE_REGULAR, &attrs));
+    }
+
+    fn checkout_options(threads: usize, threshold: i64) -> ParallelOptions {
+        ParallelOptions {
+            threads: std::num::NonZeroUsize::new(threads).expect("nonzero"),
+            min_items: 0,
+            min_total_bytes: None,
+            signed_entry_threshold: Some(threshold),
+        }
+    }
+
+    #[test]
+    fn threshold_is_judged_on_the_whole_checkout_not_each_chunk() {
+        let pool = chunk_pool_options(checkout_options(4, 100), 2_000)
+            .expect("2000 files clear a threshold of 100");
+        assert_eq!(pool.threads.get(), 4);
+        assert_eq!(pool.signed_entry_threshold, None);
+        assert!(
+            checkout_pool_worthwhile(PARALLEL_WRITE_FIRST_CHUNK, pool),
+            "a cancellation-sized chunk must still be written by the pool"
+        );
+    }
+
+    #[test]
+    fn small_or_single_threaded_checkouts_stay_serial() {
+        assert_eq!(chunk_pool_options(checkout_options(4, 100), 99), None);
+        assert_eq!(chunk_pool_options(checkout_options(1, 0), 2_000), None);
+        assert!(chunk_pool_options(checkout_options(4, -5), 2).is_some());
+    }
+
+    #[test]
+    fn flush_chunks_double_from_the_first_chunk_up_to_the_cap() {
+        let mut chunks = ChunkSizes::new();
+        let mut seen = vec![chunks.current()];
+        for _ in 0..12 {
+            chunks.grow();
+            seen.push(chunks.current());
+        }
+        assert_eq!(seen[0], PARALLEL_WRITE_FIRST_CHUNK);
+        assert!(seen
+            .windows(2)
+            .all(|w| w[1] == (w[0] * 2).min(PARALLEL_WRITE_MAX_CHUNK)));
+        assert_eq!(seen.last().copied(), Some(PARALLEL_WRITE_MAX_CHUNK));
     }
 }
