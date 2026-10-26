@@ -1979,7 +1979,6 @@ pub grit_lib::config::environment::RepositoryOptions::change_id_generator: alloc
 pub grit_lib::config::environment::RepositoryOptions::command_runner: alloc::rcs::arc::Arc<dyn grit_lib::command_runner::CommandRunner>
 pub grit_lib::config::environment::RepositoryOptions::diagnostics: grit_lib::diagnostics::DiagnosticsHandle
 pub grit_lib::config::environment::RepositoryOptions::environment: grit_lib::config::environment::Environment
-pub grit_lib::config::environment::RepositoryOptions::force_split_index: bool
 pub grit_lib::config::environment::RepositoryOptions::hook_stdio: grit_lib::command_runner::hooks::HookStdio
 pub grit_lib::config::environment::RepositoryOptions::network_trace: bool
 pub grit_lib::config::environment::RepositoryOptions::open_for_serving: bool
@@ -6496,15 +6495,12 @@ pub struct grit_lib::index::handle::IndexHandle<'repo>
 impl<'repo> grit_lib::index::handle::IndexHandle<'repo>
 pub fn grit_lib::index::handle::IndexHandle<'repo>::begin_update(&self) -> grit_lib::error::Result<grit_lib::index::IndexLock>
 pub fn grit_lib::index::handle::IndexHandle<'repo>::commit_update(&self, &mut grit_lib::index::IndexLock, &mut grit_lib::index::Index, bool) -> grit_lib::error::Result<()>
-pub fn grit_lib::index::handle::IndexHandle<'repo>::finish_update(&self, &mut grit_lib::index::IndexLock, bool) -> grit_lib::error::Result<()>
-pub fn grit_lib::index::handle::IndexHandle<'repo>::flush_update(&self, &mut grit_lib::index::IndexLock, &mut grit_lib::index::Index) -> grit_lib::error::Result<()>
 pub fn grit_lib::index::handle::IndexHandle<'repo>::load(&self) -> grit_lib::error::Result<grit_lib::index::Index>
 pub fn grit_lib::index::handle::IndexHandle<'repo>::load_at(&self, &std::path::Path) -> grit_lib::error::Result<grit_lib::index::Index>
 pub fn grit_lib::index::handle::IndexHandle<'repo>::new(&'repo grit_lib::repo::Repository) -> Self
 pub fn grit_lib::index::handle::IndexHandle<'repo>::path(&self) -> std::path::PathBuf
 pub fn grit_lib::index::handle::IndexHandle<'repo>::path_for_env(&self) -> grit_lib::error::Result<std::path::PathBuf>
 pub fn grit_lib::index::handle::IndexHandle<'repo>::repository(&self) -> &'repo grit_lib::repo::Repository
-pub fn grit_lib::index::handle::IndexHandle<'repo>::split_would_force_write(&self, &grit_lib::index::Index) -> bool
 pub fn grit_lib::index::handle::IndexHandle<'repo>::try_write(&self, &mut grit_lib::index::Index) -> grit_lib::error::Result<bool>
 pub fn grit_lib::index::handle::IndexHandle<'repo>::write(&self, &mut grit_lib::index::Index) -> grit_lib::error::Result<()>
 pub fn grit_lib::index::handle::IndexHandle<'repo>::write_at(&self, &std::path::Path, &mut grit_lib::index::Index) -> grit_lib::error::Result<()>
@@ -6999,15 +6995,12 @@ pub struct grit_lib::index::IndexHandle<'repo>
 impl<'repo> grit_lib::index::handle::IndexHandle<'repo>
 pub fn grit_lib::index::handle::IndexHandle<'repo>::begin_update(&self) -> grit_lib::error::Result<grit_lib::index::IndexLock>
 pub fn grit_lib::index::handle::IndexHandle<'repo>::commit_update(&self, &mut grit_lib::index::IndexLock, &mut grit_lib::index::Index, bool) -> grit_lib::error::Result<()>
-pub fn grit_lib::index::handle::IndexHandle<'repo>::finish_update(&self, &mut grit_lib::index::IndexLock, bool) -> grit_lib::error::Result<()>
-pub fn grit_lib::index::handle::IndexHandle<'repo>::flush_update(&self, &mut grit_lib::index::IndexLock, &mut grit_lib::index::Index) -> grit_lib::error::Result<()>
 pub fn grit_lib::index::handle::IndexHandle<'repo>::load(&self) -> grit_lib::error::Result<grit_lib::index::Index>
 pub fn grit_lib::index::handle::IndexHandle<'repo>::load_at(&self, &std::path::Path) -> grit_lib::error::Result<grit_lib::index::Index>
 pub fn grit_lib::index::handle::IndexHandle<'repo>::new(&'repo grit_lib::repo::Repository) -> Self
 pub fn grit_lib::index::handle::IndexHandle<'repo>::path(&self) -> std::path::PathBuf
 pub fn grit_lib::index::handle::IndexHandle<'repo>::path_for_env(&self) -> grit_lib::error::Result<std::path::PathBuf>
 pub fn grit_lib::index::handle::IndexHandle<'repo>::repository(&self) -> &'repo grit_lib::repo::Repository
-pub fn grit_lib::index::handle::IndexHandle<'repo>::split_would_force_write(&self, &grit_lib::index::Index) -> bool
 pub fn grit_lib::index::handle::IndexHandle<'repo>::try_write(&self, &mut grit_lib::index::Index) -> grit_lib::error::Result<bool>
 pub fn grit_lib::index::handle::IndexHandle<'repo>::write(&self, &mut grit_lib::index::Index) -> grit_lib::error::Result<()>
 pub fn grit_lib::index::handle::IndexHandle<'repo>::write_at(&self, &std::path::Path, &mut grit_lib::index::Index) -> grit_lib::error::Result<()>
@@ -16568,7 +16561,6 @@ pub grit_lib::prelude::RepositoryOptions::change_id_generator: alloc::rcs::arc::
 pub grit_lib::prelude::RepositoryOptions::command_runner: alloc::rcs::arc::Arc<dyn grit_lib::command_runner::CommandRunner>
 pub grit_lib::prelude::RepositoryOptions::diagnostics: grit_lib::diagnostics::DiagnosticsHandle
 pub grit_lib::prelude::RepositoryOptions::environment: grit_lib::config::environment::Environment
-pub grit_lib::prelude::RepositoryOptions::force_split_index: bool
 pub grit_lib::prelude::RepositoryOptions::hook_stdio: grit_lib::command_runner::hooks::HookStdio
 pub grit_lib::prelude::RepositoryOptions::network_trace: bool
 pub grit_lib::prelude::RepositoryOptions::open_for_serving: bool

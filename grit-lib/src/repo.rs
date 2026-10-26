@@ -429,7 +429,6 @@ pub struct Repository {
     /// Embedder override for rev-parse relative dates (`@{yesterday}`, etc.).
     reference_unix_time: Option<i64>,
     test_assume_different_owner: bool,
-    force_split_index: bool,
     thread_policy: crate::parallel::ThreadPolicy,
     hook_stdio: crate::hooks::HookStdio,
 }
@@ -601,7 +600,6 @@ impl Repository {
             network_trace: options.network_trace,
             reference_unix_time: options.reference_unix_time,
             test_assume_different_owner: options.test_assume_different_owner,
-            force_split_index: options.force_split_index,
             thread_policy: options.thread_policy,
             hook_stdio: options.hook_stdio,
         })
@@ -753,7 +751,6 @@ impl Repository {
             diagnostics: Arc::clone(&self.diagnostics),
             network_trace: self.network_trace,
             test_assume_different_owner: self.test_assume_different_owner,
-            force_split_index: self.force_split_index,
             reference_unix_time: self.reference_unix_time,
             thread_policy: self.thread_policy,
             work_tree: None,
@@ -823,7 +820,6 @@ impl Repository {
             network_trace: self.network_trace,
             reference_unix_time: self.reference_unix_time,
             test_assume_different_owner: self.test_assume_different_owner,
-            force_split_index: self.force_split_index,
             thread_policy: self.thread_policy,
             hook_stdio: self.hook_stdio,
         };
@@ -1709,7 +1705,6 @@ impl Repository {
             network_trace: options.network_trace,
             reference_unix_time: options.reference_unix_time,
             test_assume_different_owner: options.test_assume_different_owner,
-            force_split_index: options.force_split_index,
             thread_policy: options.thread_policy,
             hook_stdio: options.hook_stdio,
         };
@@ -2188,27 +2183,6 @@ impl Repository {
     /// Whether reading `index` under this repository's config would mark the cache changed solely to
     /// materialize a split index.
     ///
-    /// Git's `tweak_split_index` runs after every index read: when `core.splitIndex` is `true` and the
-    /// index is not yet a split index, `add_split_index` sets `SPLIT_INDEX_ORDERED` on `cache_changed`,
-    /// which makes opportunistic writers such as `status` (`repo_update_index_if_able`) rewrite the
-    /// index in split form, creating `.git/sharedindex.<oid>`. This returns `true` exactly when that
-    /// would happen: split index is requested (config `true` or `GIT_TEST_SPLIT_INDEX`) and the
-    /// supplied `index` does not already carry a `link` extension.
-    ///
-    /// Returns `false` when split index is disabled/unset or the index is already split.
-    #[must_use]
-    pub(crate) fn split_index_would_force_write(&self, index: &Index) -> bool {
-        if index.split_index_base_oid().is_some() {
-            return false;
-        }
-        let cfg = self.config().unwrap_or_else(|_| Arc::new(ConfigSet::new()));
-        matches!(
-            crate::split_index::split_index_config(cfg.as_ref()),
-            crate::split_index::SplitIndexConfig::Enabled
-        ) || self.force_split_index
-            || crate::split_index::git_test_split_index_env()
-    }
-
     /// Like [`Repository::write_index_at`], but passes explicit `post-index-change` hook flags.
     ///
     /// Parameters:

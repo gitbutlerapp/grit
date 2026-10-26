@@ -26,7 +26,7 @@ Pass the same `Environment` into `Repository` (`discover` / `open`) and into `Co
 | `diagnostics` | `DiagnosticSink` for warnings and trace events |
 | `network_trace` | When true, emit network trace events via the diagnostics sink |
 | `reference_unix_time` | Wall clock for rev-parse date selectors (`@{yesterday}`, etc.) |
-| Test knobs | `test_assume_different_owner`, `force_split_index`, … |
+| Test knobs | `test_assume_different_owner`, … |
 
 Use `RepositoryOptions::with_environment` and `with_command_runner` on [`RepositoryOptions`](rustdoc:grit_lib::config::environment::RepositoryOptions); assign `diagnostics` when you need a custom sink.
 

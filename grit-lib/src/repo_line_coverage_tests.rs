@@ -80,7 +80,6 @@ fn repository_open_discover_and_index_roundtrip() -> crate::error::Result<()> {
     let _ = write_tree_from_index(discovered.odb(), &index, "")?;
     discovered.write_index(&mut index)?;
     let _ = discovered.try_write_index(&mut index)?;
-    let _ = discovered.split_index_would_force_write(&index);
     let _ = trace_repo_setup_if_requested(&discovered);
     let with_policy = discovered.with_thread_policy(ThreadPolicy::default());
     let _ = with_policy.network_trace_enabled();

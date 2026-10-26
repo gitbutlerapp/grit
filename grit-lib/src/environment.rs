@@ -954,8 +954,6 @@ pub struct RepositoryOptions {
     pub network_trace: bool,
     /// When true, treat repository ownership as a different user (`safe.directory` tests).
     pub test_assume_different_owner: bool,
-    /// When true, force split-index writes (embedder/test harness).
-    pub force_split_index: bool,
     /// Wall-clock reference for rev-parse date selectors; embedders set explicitly.
     pub reference_unix_time: Option<i64>,
     /// Parallel worker overrides (`--threads` in the CLI).
@@ -991,7 +989,6 @@ impl Default for RepositoryOptions {
             diagnostics: Arc::new(NullDiagnostics),
             network_trace: false,
             test_assume_different_owner: false,
-            force_split_index: false,
             reference_unix_time: None,
             thread_policy: crate::parallel::ThreadPolicy::default(),
             work_tree: None,

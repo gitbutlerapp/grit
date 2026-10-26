@@ -102,13 +102,6 @@ impl<'repo> IndexHandle<'repo> {
         self.repo.write_index_at_with_split(path, index, split)
     }
 
-    /// Returns whether loading `index` would force a split-index rewrite on the next write.
-    #[must_use]
-    #[inline]
-    pub fn split_would_force_write(&self, index: &Index) -> bool {
-        self.repo.split_index_would_force_write(index)
-    }
-
     /// Acquire `.git/index.lock` before mutating the working tree for index+worktree commands.
     #[inline]
     pub fn begin_update(&self) -> Result<crate::index::IndexLock> {
@@ -124,26 +117,6 @@ impl<'repo> IndexHandle<'repo> {
         updated_workdir: bool,
     ) -> Result<()> {
         self.repo.commit_index_update(lock, index, updated_workdir)
-    }
-
-    /// Serialize `index` into a held lock without replacing the on-disk index.
-    #[inline]
-    pub fn flush_update(
-        &self,
-        lock: &mut crate::index::IndexLock,
-        index: &mut Index,
-    ) -> Result<()> {
-        self.repo.flush_index_update(lock, index)
-    }
-
-    /// Commit a staged index lock after a successful working-tree update.
-    #[inline]
-    pub fn finish_update(
-        &self,
-        lock: &mut crate::index::IndexLock,
-        updated_workdir: bool,
-    ) -> Result<()> {
-        self.repo.finish_index_update(lock, updated_workdir)
     }
 
     /// Persist the index when the lock can be acquired (Git `repo_update_index_if_able`).
