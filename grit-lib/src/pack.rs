@@ -6072,6 +6072,62 @@ mod tests {
     }
 
     #[test]
+    fn cached_delta_reads_support_overlay_alternates_and_custom_stores() {
+        use crate::odb::store::MemoryStore;
+        use crate::odb::OdbBuilder;
+
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let local_objects = tmp.path().join("local/objects");
+        let alternate_objects = tmp.path().join("alternate/objects");
+        let alternate = Odb::new(&alternate_objects);
+        let alternate_oid = alternate
+            .write(ObjectKind::Blob, b"alternate\n")
+            .expect("alternate object");
+        fs::create_dir_all(local_objects.join("info")).expect("info");
+        fs::write(
+            local_objects.join("info/alternates"),
+            format!("{}\n", alternate_objects.display()),
+        )
+        .expect("alternates");
+
+        let odb = Odb::new(&local_objects);
+        let mut buf = Vec::with_capacity(1024);
+        assert_eq!(
+            odb.read_into_caching_delta_bases(&alternate_oid, &mut buf)
+                .expect("alternate read"),
+            ObjectKind::Blob
+        );
+        assert_eq!(buf, b"alternate\n");
+
+        odb.enable_mem_overlay();
+        let overlay_oid = odb
+            .write(ObjectKind::Blob, b"overlay\n")
+            .expect("overlay object");
+        odb.read_into_caching_delta_bases(&overlay_oid, &mut buf)
+            .expect("overlay read");
+        assert_eq!(buf, b"overlay\n");
+
+        let custom = OdbBuilder::files(tmp.path().join("custom/objects"))
+            .primary(Arc::new(MemoryStore::new(HashAlgo::Sha1)))
+            .build();
+        let custom_oid = custom
+            .write(ObjectKind::Blob, b"custom\n")
+            .expect("custom object");
+        custom
+            .read_into_caching_delta_bases(&custom_oid, &mut buf)
+            .expect("custom read");
+        assert_eq!(buf, b"custom\n");
+
+        let missing = HashAlgo::Sha1
+            .hash_object(ObjectKind::Blob, b"missing")
+            .expect("missing id");
+        assert!(matches!(
+            custom.read_into_caching_delta_bases(&missing, &mut buf),
+            Err(Error::ObjectNotFound(_))
+        ));
+    }
+
+    #[test]
     fn delta_base_cache_invalidated_when_pack_bytes_reloaded() {
         use filetime::{set_file_mtime, FileTime};
         let _guard = pack_cache_test_guard();

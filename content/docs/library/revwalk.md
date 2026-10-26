@@ -41,6 +41,8 @@ With [`RevListOptions::default`](rustdoc:grit_lib::revwalk::rev_list::RevListOpt
 
 To print the listed commits, set `retain_commit_data` and hand `commit_data` to [`load_commits_with_decorations_reusing`](rustdoc:grit_lib::porcelain::log::load_commits_with_decorations_reusing). It moves out the commits the walk parsed and reads only the rest, such as commits whose parents came from a commit-graph.
 
+Path-limited walks compare the requested entries directly in tree data and reuse packed delta bases. At a merge, ordinary path history follows the first parent whose tree matches the requested paths. Setting `sparse: true` keeps every commit reached along those selected parent links, including merges whose paths match a parent. These rules work with SHA-1 and SHA-256 repositories, with or without commit-graph Bloom filters.
+
 For a range `main..feature`, pass `feature` as a positive spec and `main` as a negative spec (or split with [`split_double_dot_range`](rustdoc:grit_lib::revwalk::rev_parse::split_double_dot_range) as the example does). A symmetric range `main...feature` needs the merge bases, so expand it with `parse_rev_walk_tokens` and copy its `symmetric_left` / `symmetric_right` into the options; `rev_list` rejects a raw `A...B` spec with `RevListError::UnexpandedSymmetricRange`. That matches `git rev-list main..feature`, order included. In default order, with or without `max_count`, a range walk only visits commits down to where the two sides meet, not the whole history behind `main`, so a short topic range on a large repository is as quick as `git rev-list`. `OrderingMode::DateOrderWalk` (`--date-order`) and output filters such as paths or `--left-right` still sort the whole range first.
 
 ### Commit filters

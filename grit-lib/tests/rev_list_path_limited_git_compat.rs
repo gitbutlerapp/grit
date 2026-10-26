@@ -733,3 +733,72 @@ fn path_limited_packed_delta_trees_match_git_log() {
     let flip = git(wt, &["rev-list", "--count", "HEAD", "--", "flip"]);
     assert!(flip.trim().parse::<usize>().expect("count") > 10);
 }
+
+#[test]
+fn packed_path_history_modes_match_git_with_bloom_and_both_hashes() {
+    use grit_lib::revwalk::rev_list::{rev_list, RevListOptions};
+
+    for hash in ["sha1", "sha256"] {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let wt = dir.path();
+        git(wt, &["init", "-q", &format!("--object-format={hash}")]);
+        import_packed_flip_repo(wt);
+        git(wt, &["fsck", "--strict"]);
+
+        for with_graph in [false, true] {
+            if with_graph {
+                git(
+                    wt,
+                    &["commit-graph", "write", "--reachable", "--changed-paths"],
+                );
+            }
+            let repo = open_grit_repo(wt);
+            for path in ["README.md", "docs", "flip", "flip/x", "missing/deeper"] {
+                for (sparse, show_pulls, first_parent) in [
+                    (false, false, false),
+                    (true, false, false),
+                    (false, true, false),
+                    (false, false, true),
+                ] {
+                    let mut args = vec!["rev-list", "HEAD"];
+                    if sparse {
+                        args.push("--sparse");
+                    }
+                    if show_pulls {
+                        args.push("--show-pulls");
+                    }
+                    if first_parent {
+                        args.push("--first-parent");
+                    }
+                    args.extend(["--", path]);
+                    let expected: Vec<String> = git(wt, &args).lines().map(str::to_owned).collect();
+                    let actual = rev_list(
+                        &repo,
+                        &["HEAD".to_owned()],
+                        &[],
+                        &RevListOptions {
+                            paths: vec![path.to_owned()],
+                            sparse,
+                            show_pulls,
+                            first_parent,
+                            use_commit_graph: with_graph,
+                            use_commit_graph_bloom: with_graph,
+                            ..RevListOptions::default()
+                        },
+                    )
+                    .expect("path history");
+                    assert_eq!(
+                        actual
+                            .commits
+                            .iter()
+                            .map(ObjectId::to_hex)
+                            .collect::<Vec<_>>(),
+                        expected,
+                        "{hash}, graph={with_graph}, path={path}, sparse={sparse}, \
+                         show_pulls={show_pulls}, first_parent={first_parent}"
+                    );
+                }
+            }
+        }
+    }
+}

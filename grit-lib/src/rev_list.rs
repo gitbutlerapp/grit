@@ -1382,8 +1382,9 @@ pub fn rev_list(
         OrderingMode::AuthorDateTopo => topo_sort(&mut graph, &included, true)?,
     };
 
-    // Path filtering: keep only commits that modify given paths.
-    let dense_path_retain_done = dense_path_limited && !path_effective_full && !options.sparse;
+    // The dense walk has already selected visible commits, including every walked commit
+    // in sparse mode. Filtering again would discard sparse merges with a TREESAME parent.
+    let dense_path_retain_done = dense_path_limited && !path_effective_full;
     if !options.paths.is_empty() && !dense_path_retain_done {
         let paths = &options.paths;
         // The dense path-limited walk above already performed the first-parent Bloom precheck and
