@@ -652,8 +652,13 @@ fn import_packed_flip_repo(wt: &std::path::Path) {
                     blob(stdin, "100644", &format!("wide{w:03}.txt"), 0);
                 }
             }
-            if i == 100 {
+            if i == 100 || i == 110 {
                 writeln!(stdin, "merge :1060").unwrap();
+            }
+            if i == 110 {
+                // Take the side branch's README.md, so this merge is TREESAME to its second
+                // parent only.
+                blob(stdin, "100644", "README.md", 1006);
             }
             match i {
                 40 | 80 => writeln!(stdin, "D flip").unwrap(),

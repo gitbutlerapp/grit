@@ -5381,14 +5381,16 @@ fn dense_path_limited_action(
         });
     }
 
-    let mut treesame = Vec::new();
+    // Only the first TREESAME parent matters (it is the one walked, and any TREESAME parent
+    // hides a merge), so later parents are neither loaded nor diffed once one is found.
+    let mut treesame = None;
     let mut differs_any = false;
     let mut first_parent_differs = false;
     for (nth, parent_oid) in parents.iter().enumerate() {
         let parent_tree = graph.commit_tree(*parent_oid)?;
         if commit_tree == parent_tree {
-            treesame.push(*parent_oid);
-            continue;
+            treesame = Some(*parent_oid);
+            break;
         }
         let differs = trees_differ_for_pathspecs_with_bloom(
             repo,
@@ -5407,23 +5409,20 @@ fn dense_path_limited_action(
             }
             differs_any = true;
         } else {
-            treesame.push(*parent_oid);
+            treesame = Some(*parent_oid);
+            break;
         }
     }
 
-    let parents_to_walk = if parents.len() > 1 {
-        match treesame.first().copied() {
-            Some(parent) => vec![parent],
-            None => parents.clone(),
-        }
-    } else {
-        parents.clone()
+    let parents_to_walk = match treesame {
+        Some(parent) if parents.len() > 1 => vec![parent],
+        _ => parents.clone(),
     };
 
     let visible = if sparse {
         true
     } else if parents.len() > 1 {
-        treesame.is_empty() || (show_pulls && first_parent_differs && !treesame.is_empty())
+        treesame.is_none() || (show_pulls && first_parent_differs)
     } else {
         differs_any
     };
