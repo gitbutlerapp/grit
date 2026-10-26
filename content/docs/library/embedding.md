@@ -15,6 +15,12 @@ Grit is designed to be **linked into other Rust programs**, not only invoked as 
 
 Pass the same `Environment` into `Repository` (`discover` / `open`) and into `ConfigSet` loading.
 
+Clones share the captured variable map, avoiding a copy of every inherited variable during
+repository setup. Typed fields remain independent: changing or clearing an override on a
+clone leaves the original snapshot unchanged. Untyped variables, including non-Unicode
+values, remain available to subprocesses after the original snapshot is dropped.
+Empty snapshots need no allocation for the captured map.
+
 ## RepositoryOptions
 
 [`RepositoryOptions`](rustdoc:grit_lib::config::environment::RepositoryOptions) bundles everything needed to open a repository besides paths:

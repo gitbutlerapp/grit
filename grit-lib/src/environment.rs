@@ -22,6 +22,9 @@ use crate::git_date::tm::{local_tzoffset_with_tz, TzHhmm};
 use crate::ident_resolve::IdentityEnv;
 
 /// Discovery and config variables that affect repository open/discover and `ConfigSet` loading.
+///
+/// Cloning shares the captured variable map. Public fields remain independent, so callers
+/// can adjust discovery/config overrides on a clone without changing the original snapshot.
 #[derive(Debug, Clone)]
 pub struct Environment {
     /// Process working directory used for relative path resolution during discovery.
@@ -124,7 +127,9 @@ pub struct Environment {
     /// Windows `%ProgramFiles(x86)%`.
     pub program_files_x86: Option<String>,
     /// Full variable snapshot from [`Self::from_vars`] / [`Self::capture_process`].
-    pub(crate) captured_vars: HashMap<String, OsString>,
+    /// Shared across clones; typed overrides stay local to each environment.
+    /// An empty snapshot needs no allocation for this map.
+    pub(crate) captured_vars: Option<Arc<HashMap<String, OsString>>>,
 }
 
 impl Environment {
@@ -178,7 +183,7 @@ impl Environment {
             username: None,
             program_files: None,
             program_files_x86: None,
-            captured_vars: HashMap::new(),
+            captured_vars: None,
         }
     }
 
@@ -314,7 +319,7 @@ impl Environment {
             username: get("USERNAME"),
             program_files: get("ProgramFiles"),
             program_files_x86: get("ProgramFiles(x86)"),
-            captured_vars: map,
+            captured_vars: (!map.is_empty()).then(|| Arc::new(map)),
         }
     }
 
@@ -550,7 +555,8 @@ impl Environment {
             }
             _ => self
                 .captured_vars
-                .get(key)
+                .as_ref()
+                .and_then(|vars| vars.get(key))
                 .and_then(|v| v.to_str().map(str::to_owned)),
         }
     }
@@ -573,7 +579,7 @@ impl Environment {
         if let Some(v) = self.var(key) {
             return Some(OsString::from(v));
         }
-        self.captured_vars.get(key).cloned()
+        self.captured_vars.as_ref()?.get(key).cloned()
     }
 
     /// Resolve `cwd` for discovery: canonicalize when possible without `env::current_dir`.
@@ -593,6 +599,7 @@ impl Environment {
         let mut passthrough: Vec<(&String, &OsString)> = self
             .captured_vars
             .iter()
+            .flat_map(|vars| vars.iter())
             .filter(|(k, _)| !is_typed_environment_var(k))
             .collect();
         passthrough.sort_unstable_by(|a, b| a.0.cmp(b.0));
@@ -1095,8 +1102,60 @@ mod tests {
     use super::*;
 
     #[test]
+    fn cloned_environment_keeps_overrides_independent() {
+        let original = Environment::from_vars(
+            [
+                (OsString::from("GIT_DIR"), OsString::from("original.git")),
+                (OsString::from("HOME"), OsString::from("/original/home")),
+                (OsString::from("BUILD_SETTING"), OsString::from("captured")),
+            ],
+            PathBuf::from("/workspace"),
+        );
+        let sibling = original.clone();
+        let mut changed = original.clone();
+        drop(original);
+        changed.git_dir = None;
+        changed.home = Some(OsString::from("/changed/home"));
+        changed.push_config_override(&"user.name=Changed".parse().expect("override"));
+
+        assert_eq!(sibling.var("GIT_DIR").as_deref(), Some("original.git"));
+        assert_eq!(
+            sibling.home.as_deref(),
+            Some(std::ffi::OsStr::new("/original/home"))
+        );
+        assert!(sibling.git_config_parameters.is_none());
+        let exported = changed.subprocess_environment();
+        assert!(!exported.iter().any(|(key, _)| key == "GIT_DIR"));
+        assert!(exported.contains(&(OsString::from("HOME"), OsString::from("/changed/home"))));
+        assert!(exported.contains(&(OsString::from("BUILD_SETTING"), OsString::from("captured"))));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cloned_environment_preserves_non_unicode_passthrough() {
+        use std::os::unix::ffi::OsStringExt;
+
+        let value = OsString::from_vec(vec![b'a', 0xff, b'z']);
+        let original = Environment::from_vars(
+            [(OsString::from("BUILD_SETTING"), value.clone())],
+            PathBuf::from("."),
+        );
+        let cloned = original.clone();
+        drop(original);
+        assert_eq!(cloned.var("BUILD_SETTING"), None);
+        assert_eq!(cloned.var_os("BUILD_SETTING"), Some(value.clone()));
+        assert_eq!(
+            cloned.subprocess_environment(),
+            vec![(OsString::from("BUILD_SETTING"), value)]
+        );
+    }
+
+    #[test]
     fn is_fetch_options_default_matches_empty() {
         assert!(Environment::empty().is_fetch_options_default());
+        assert!(Environment::from_vars([], PathBuf::from("."))
+            .clone()
+            .is_fetch_options_default());
         let mut env = Environment::from_vars(
             [(
                 OsString::from("GIT_SSH_COMMAND"),
@@ -1105,7 +1164,7 @@ mod tests {
             PathBuf::from("."),
         );
         assert!(!env.is_fetch_options_default());
-        env.captured_vars.clear();
+        env.captured_vars = None;
         assert!(env.is_fetch_options_default());
     }
 

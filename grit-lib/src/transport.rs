@@ -1497,11 +1497,14 @@ mod tests {
         use crate::config::ConfigSet;
         use crate::environment::Environment;
 
-        let mut env = Environment::empty();
-        env.captured_vars
-            .insert("GIT_SSH_COMMAND".to_owned(), OsString::from("cmd-from-env"));
-        env.captured_vars
-            .insert("GIT_SSH".to_owned(), OsString::from("/bin/git-ssh"));
+        let mut env = Environment::from_vars(
+            [
+                ("GIT_SSH_COMMAND", "cmd-from-env"),
+                ("GIT_SSH", "/bin/git-ssh"),
+            ]
+            .map(|(key, value)| (OsString::from(key), OsString::from(value))),
+            std::path::PathBuf::from("."),
+        );
         let mut cfg = ConfigSet::new();
         cfg.add_command_override("core.sshCommand", "cmd-from-config")
             .unwrap();
@@ -1510,7 +1513,7 @@ mod tests {
             SshCommand::ShellCommand(ref c) if c == "cmd-from-env"
         ));
 
-        env.captured_vars.remove("GIT_SSH_COMMAND");
+        std::sync::Arc::make_mut(env.captured_vars.as_mut().unwrap()).remove("GIT_SSH_COMMAND");
         assert!(matches!(
             resolve_effective_ssh_command(&env, Some(&cfg)),
             SshCommand::ShellCommand(ref c) if c == "cmd-from-config"
@@ -1522,7 +1525,7 @@ mod tests {
             SshCommand::Program(ref p) if p == "/bin/git-ssh"
         ));
 
-        env.captured_vars.remove("GIT_SSH");
+        std::sync::Arc::make_mut(env.captured_vars.as_mut().unwrap()).remove("GIT_SSH");
         assert!(matches!(
             resolve_effective_ssh_command(&env, None),
             SshCommand::Program(ref p) if p == "ssh"

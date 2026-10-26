@@ -9,6 +9,56 @@ use grit_lib::repo::Repository;
 use tempfile::TempDir;
 
 #[test]
+fn cloned_environment_config_overrides_match_git() {
+    use grit_lib::repo::InitOptions;
+    use std::ffi::OsString;
+
+    let td = TempDir::new().expect("tempdir");
+    Repository::init(td.path(), &InitOptions::default()).expect("init");
+    let original = Environment::from_vars(
+        [
+            ("GIT_CONFIG_NOSYSTEM", "1"),
+            ("GIT_CONFIG_GLOBAL", "/dev/null"),
+            ("GIT_CONFIG_COUNT", "1"),
+            ("GIT_CONFIG_KEY_0", "user.name"),
+            ("GIT_CONFIG_VALUE_0", "Original"),
+            ("BUILD_SETTING", "captured"),
+        ]
+        .map(|(key, value)| (OsString::from(key), OsString::from(value))),
+        td.path().to_path_buf(),
+    );
+    let mut changed = original.clone();
+    changed.push_config_override(&"user.name=Changed".parse().expect("override"));
+    let unchanged = original.clone();
+    drop(original);
+
+    for (env, expected) in [(unchanged, "Original"), (changed, "Changed")] {
+        let options = RepositoryOptions::with_environment(env);
+        let repo = Repository::discover(None, &options.clone()).expect("discover");
+        assert_eq!(
+            repo.config().expect("config").get("user.name").as_deref(),
+            Some(expected)
+        );
+        assert_eq!(
+            repo.environment().var("BUILD_SETTING").as_deref(),
+            Some("captured")
+        );
+        let git = Command::new("git")
+            .current_dir(td.path())
+            .env_clear()
+            .envs(repo.environment().subprocess_environment())
+            .args(["config", "--get", "user.name"])
+            .output()
+            .expect("git config");
+        assert!(git.status.success());
+        assert_eq!(
+            String::from_utf8(git.stdout).expect("utf8").trim(),
+            expected
+        );
+    }
+}
+
+#[test]
 fn discover_with_global_config_from_environment_not_process() {
     let td = TempDir::new().expect("tempdir");
     let global = td.path().join("global.cfg");

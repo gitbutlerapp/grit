@@ -88,6 +88,10 @@ rustix = { version = "1.1", default-features = false, features = ["process"] }
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security_Credentials", "Win32_Storage_FileSystem", "Win32_System_Console", "Win32_System_Pipes", "Win32_System_SystemInformation", "Win32_System_Threading"] }
 
 [[bench]]
+name = "environment"
+harness = false
+
+[[bench]]
 name = "objects"
 harness = false
 
