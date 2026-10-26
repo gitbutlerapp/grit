@@ -329,12 +329,19 @@ pub struct HeadPair {
 pub enum RebaseResult {
     Completed,
     Conflicts,
+    ExecDirty,
     Aborted,
 }
 
 /// Result of `grit rebase` and `grit history rebase`.
 #[derive(Debug, Clone, Serialize, JsonSchema)]
 pub struct RebaseCliOutcome {
+    /// Successful exec dirtied tracked files; preserved at `commit` until recovery.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub command: Option<String>,
+    /// Changed tracked paths when `result` is `exec_dirty`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub paths: Vec<String>,
     pub result: RebaseResult,
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(skip_serializing_if = "Option::is_none")]
@@ -360,7 +367,7 @@ pub struct RebaseCliOutcome {
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(skip_serializing_if = "Option::is_none")]
     pub alternatives: Option<Vec<String>>,
-    /// `--exec` subprocess results when `--exec` was used (success only).
+    /// `--exec` subprocess results through completion or a dirty exec stop.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub exec: Vec<ExecResultJson>,
 }
@@ -368,6 +375,8 @@ pub struct RebaseCliOutcome {
 impl RebaseCliOutcome {
     fn aborted() -> Self {
         Self {
+            command: None,
+            paths: Vec::new(),
             result: RebaseResult::Aborted,
             operation: None,
             rewritten: Vec::new(),
@@ -384,6 +393,8 @@ impl RebaseCliOutcome {
 
     fn from_rewrite(outcome: HistoryRewriteOutcome) -> Self {
         Self {
+            command: None,
+            paths: Vec::new(),
             result: RebaseResult::Completed,
             operation: Some(outcome.operation),
             rewritten: outcome.rewritten,
@@ -398,9 +409,45 @@ impl RebaseCliOutcome {
         }
     }
 
+    fn from_exec_dirty(
+        commit: ObjectId,
+        command: String,
+        paths: Vec<String>,
+        runs: Vec<ExecRunRecord>,
+    ) -> Self {
+        let mut outcome = Self::aborted();
+        outcome.result = RebaseResult::ExecDirty;
+        outcome.operation = Some("rebase".into());
+        outcome.commit = Some(commit.to_hex());
+        outcome.command = Some(command);
+        outcome.paths = paths;
+        outcome.exec = runs
+            .iter()
+            .map(|row| {
+                write_exec_streams_to_stderr(row);
+                ExecResultJson {
+                    commit: row.commit.to_hex(),
+                    command: row.command.clone(),
+                    exit_code: row.exit_code,
+                }
+            })
+            .collect();
+        outcome.next_steps = Some(vec![
+            "grit stash push -m 'exec edits'".into(),
+            "grit rebase --continue".into(),
+        ]);
+        outcome.alternatives = Some(vec![
+            "grit rebase --skip".into(),
+            "grit rebase --abort".into(),
+        ]);
+        outcome
+    }
+
     fn from_stop(commit: ObjectId, conflicts: &[grit_lib::operation::Conflict]) -> Self {
         let block = OperationConflictBlock::for_rebase(conflicts);
         Self {
+            command: None,
+            paths: Vec::new(),
             result: RebaseResult::Conflicts,
             operation: Some("rebase".into()),
             rewritten: Vec::new(),
@@ -420,6 +467,25 @@ impl HumanRender for RebaseCliOutcome {
     fn render_human(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
         match self.result {
             RebaseResult::Aborted => outln!(w, "Rebase aborted."),
+            RebaseResult::ExecDirty => {
+                outln!(
+                    w,
+                    "Rebase stopped: exec left tracked changes; edits are preserved."
+                );
+                outln!(
+                    w,
+                    "Save edits before continuing or skipping. Aborting discards exec edits."
+                );
+                for path in &self.paths {
+                    outln!(w, "  {path}");
+                }
+                for step in self.next_steps.as_deref().unwrap_or(&[]) {
+                    outln!(w, "{step}");
+                }
+                for step in self.alternatives.as_deref().unwrap_or(&[]) {
+                    outln!(w, "{step}");
+                }
+            }
             RebaseResult::Conflicts => {
                 if let Some(details) = &self.conflicts {
                     render_conflicts_human(details, w)?;
@@ -1047,6 +1113,20 @@ fn write_exec_streams_to_stderr(row: &ExecRunRecord) {
     let _ = io::stderr().write_all(&row.stderr);
 }
 
+fn exec_failure_error(
+    exit_code: i32,
+    stdout: &[u8],
+    stderr: &[u8],
+    completed_runs: &[ExecRunRecord],
+) -> anyhow::Error {
+    for row in completed_runs {
+        write_exec_streams_to_stderr(row);
+    }
+    let _ = io::stderr().write_all(stdout);
+    let _ = io::stderr().write_all(stderr);
+    RebaseExecExit { code: exit_code }.into()
+}
+
 fn run_rebase_with_exec(
     rewrite: &Rewrite,
     request: &RebaseRequest,
@@ -1084,6 +1164,16 @@ fn run_rebase_with_exec(
                         });
                     }
                 }
+                Err(HistoryError::ExecDirty {
+                    commit,
+                    command,
+                    paths,
+                    runs,
+                }) => {
+                    return Ok(RebaseRunOutcome::Rebase(RebaseCliOutcome::from_exec_dirty(
+                        commit, command, paths, runs,
+                    )));
+                }
                 Err(HistoryError::ExecFailed {
                     exit_code,
                     stdout,
@@ -1091,12 +1181,12 @@ fn run_rebase_with_exec(
                     completed_runs,
                     ..
                 }) => {
-                    for row in &completed_runs {
-                        write_exec_streams_to_stderr(row);
-                    }
-                    let _ = io::stderr().write_all(&stdout);
-                    let _ = io::stderr().write_all(&stderr);
-                    return Err(RebaseExecExit { code: exit_code }.into());
+                    return Err(exec_failure_error(
+                        exit_code,
+                        &stdout,
+                        &stderr,
+                        &completed_runs,
+                    ));
                 }
                 Err(other) => return Err(on_err(other)),
             }
@@ -1151,11 +1241,35 @@ pub fn run_rebase(opts: &RebaseRunOptions<'_>) -> Result<RebaseRunOutcome> {
             apply: resume_apply,
         };
         let outcome = if opts.continue_rebase {
-            continue_rebase(&rewrite.repo, &resume_opts).map_err(map_rebase_session_error)?
+            continue_rebase(&rewrite.repo, &resume_opts)
         } else {
-            skip_rebase(&rewrite.repo, &resume_opts).map_err(map_rebase_session_error)?
+            skip_rebase(&rewrite.repo, &resume_opts)
         };
-        return Ok(RebaseRunOutcome::Rebase(map_rebase_outcome(outcome)?));
+        let rendered = match outcome {
+            Ok(outcome) => map_rebase_outcome(outcome)?,
+            Err(RebaseSessionError::History(HistoryError::ExecDirty {
+                commit,
+                command,
+                paths,
+                runs,
+            })) => RebaseCliOutcome::from_exec_dirty(commit, command, paths, runs),
+            Err(RebaseSessionError::History(HistoryError::ExecFailed {
+                exit_code,
+                stdout,
+                stderr,
+                completed_runs,
+                ..
+            })) => {
+                return Err(exec_failure_error(
+                    exit_code,
+                    &stdout,
+                    &stderr,
+                    &completed_runs,
+                ));
+            }
+            Err(other) => return Err(map_rebase_session_error(other)),
+        };
+        return Ok(RebaseRunOutcome::Rebase(rendered));
     }
 
     let branch_tip = resolve_commit(&rewrite.repo, "HEAD", "HEAD")?;
@@ -1273,6 +1387,23 @@ fn reflog_identity(repo: &Repository) -> Result<grit_lib::ident::Signature> {
 
 fn map_rebase_outcome(outcome: RebaseOutcome) -> Result<RebaseCliOutcome> {
     match outcome {
+        RebaseOutcome::ExecDone { plan, exec, .. } => {
+            let rows = exec
+                .runs
+                .iter()
+                .map(|row| {
+                    write_exec_streams_to_stderr(row);
+                    ExecResultJson {
+                        commit: row.commit.to_hex(),
+                        command: row.command.clone(),
+                        exit_code: row.exit_code,
+                    }
+                })
+                .collect();
+            Ok(RebaseCliOutcome::from_rewrite(
+                HistoryRewriteOutcome::new("rebase", &plan, false).with_exec(rows),
+            ))
+        }
         RebaseOutcome::Done { plan, .. } => Ok(RebaseCliOutcome::from_rewrite(
             HistoryRewriteOutcome::new("rebase", &plan, false),
         )),

@@ -644,3 +644,243 @@ fn rebase_exec_sees_each_commit_tree() -> TestResult {
     git_fsck_strict(dir)?;
     Ok(())
 }
+
+/// The issue #2032 fixture: an unchanged tracked file is edited by a successful exec.
+fn init_dirty_exec_fixture(dir: &Path, count: usize) -> Result<String, Box<dyn Error>> {
+    git(dir, &["init", "-q", "-b", "main"])?;
+    fs::write(dir.join("f"), "base\n")?;
+    git(dir, &["add", "f"])?;
+    git(dir, &["commit", "-qm", "base"])?;
+    git(dir, &["switch", "-qc", "feature"])?;
+    for step in 1..=count {
+        let path = format!("step-{step}");
+        fs::write(dir.join(&path), format!("{step}\n"))?;
+        git(dir, &["add", &path])?;
+        git(dir, &["commit", "-qm", &path])?;
+    }
+    let tip = git(dir, &["rev-parse", "feature"])?.trim().to_owned();
+    git(dir, &["switch", "-q", "main"])?;
+    fs::write(dir.join("extra"), "upstream\n")?;
+    git(dir, &["add", "extra"])?;
+    git(dir, &["commit", "-qm", "main moves"])?;
+    git(dir, &["switch", "-q", "feature"])?;
+    Ok(tip)
+}
+
+#[test]
+fn successful_dirty_exec_stops_immediately_and_preserves_index_and_worktree() -> TestResult {
+    for history_alias in [false, true] {
+        for (command, expected_file, expected_index, expected_status) in [
+            (
+                "echo hook-edit >> f",
+                Some("base\nhook-edit\n"),
+                Some("base\n"),
+                " M f\n",
+            ),
+            (
+                "echo hook-edit >> f; git add f",
+                Some("base\nhook-edit\n"),
+                Some("base\nhook-edit\n"),
+                "M  f\n",
+            ),
+            (
+                "echo staged >> f; git add f; echo unstaged >> f",
+                Some("base\nstaged\nunstaged\n"),
+                Some("base\nstaged\n"),
+                "MM f\n",
+            ),
+            ("rm f", None, Some("base\n"), " D f\n"),
+            (
+                "git rm -q f; echo new > added; git add added",
+                None,
+                None,
+                "A  added\nD  f\n",
+            ),
+        ] {
+            for (count, dirty_at) in [(1, 1), (3, 1), (3, 2), (3, 3)] {
+                let scratch = Scratch::new("exec-dirty-preserved")?;
+                let dir = scratch.path();
+                let tip = init_dirty_exec_fixture(dir, count)?;
+                let upstream = git(dir, &["rev-parse", "main"])?;
+                let conditional = format!("if test -f step-{dirty_at} && ! test -f step-{}; then {command}; echo EXEC_OUT; echo EXEC_ERR >&2; fi", dirty_at + 1);
+                let mut args = vec![];
+                if history_alias {
+                    args.push("history");
+                }
+                args.extend([
+                    "rebase",
+                    "main",
+                    "--exec",
+                    &conditional,
+                    "--exec",
+                    "echo next-command >> ran-next",
+                    "--json",
+                ]);
+                let out = gs(dir, args)?;
+                assert_eq!(out.status, Some(1), "{}\n{}", out.stdout, out.stderr);
+                let json = parse_json(&out.stdout)?;
+                assert_eq!(json["result"], "exec_dirty");
+                assert_eq!(json["command"], conditional);
+                let expected_paths: Vec<_> =
+                    expected_status.lines().map(|line| &line[3..]).collect();
+                assert_eq!(json["paths"], serde_json::json!(expected_paths));
+                assert_eq!(
+                    json["exec"].as_array().ok_or("exec")?.len(),
+                    (dirty_at - 1) * 2 + 1
+                );
+                assert_eq!(json["commit"], git(dir, &["rev-parse", "HEAD"])?.trim());
+                assert!(out.stderr.contains("EXEC_OUT") && out.stderr.contains("EXEC_ERR"));
+                assert_eq!(git(dir, &["rev-parse", "feature"])?.trim(), tip);
+                assert_eq!(git(dir, &["rev-parse", "main"])?, upstream);
+                assert_eq!(
+                    fs::read_to_string(dir.join("f")).ok().as_deref(),
+                    expected_file
+                );
+                let index_file = Command::new("git")
+                    .args(["show", ":f"])
+                    .current_dir(dir)
+                    .output()?;
+                assert_eq!(index_file.status.success(), expected_index.is_some());
+                if let Some(expected) = expected_index {
+                    assert_eq!(String::from_utf8(index_file.stdout)?, expected);
+                }
+                // The untracked exec log must contain only the earlier clean invocations.
+                assert_eq!(
+                    fs::read_to_string(dir.join("ran-next"))
+                        .unwrap_or_default()
+                        .lines()
+                        .count(),
+                    dirty_at - 1
+                );
+                let status = git(dir, &["status", "--short", "--untracked-files=no"])?;
+                assert_eq!(status, expected_status);
+                assert_eq!(
+                    fs::read_to_string(dir.join(".git/rebase-merge/orig-head"))?.trim(),
+                    tip
+                );
+                assert!(dir.join(".git/rebase-merge/grit-exec").exists());
+                let resume = gs(dir, ["rebase", "--continue", "--json"])?;
+                assert_eq!(resume.status, Some(1), "dirty continue must refuse");
+                assert_eq!(
+                    fs::read_to_string(dir.join("f")).ok().as_deref(),
+                    expected_file
+                );
+                assert_eq!(
+                    git(dir, &["status", "--short", "--untracked-files=no"])?,
+                    status
+                );
+                git_fsck_strict(dir)?;
+                let abort = gs(dir, ["rebase", "--abort", "--json"])?;
+                assert!(abort.success(), "{}\n{}", abort.stdout, abort.stderr);
+                assert_eq!(fs::read_to_string(dir.join("f"))?, "base\n");
+                assert_eq!(git(dir, &["rev-parse", "HEAD"])?.trim(), tip);
+                assert!(!dir.join(".git/rebase-merge").exists());
+                git_fsck_strict(dir)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn dirty_exec_human_and_markdown_explain_recovery() -> TestResult {
+    for format in [None, Some("--markdown")] {
+        let scratch = Scratch::new("dirty-exec-render")?;
+        init_dirty_exec_fixture(scratch.path(), 1)?;
+        let mut args = vec!["rebase", "main", "--exec", "echo edit >> f"];
+        args.extend(format);
+        let out = gs(scratch.path(), args)?;
+        assert_eq!(out.status, Some(1));
+        assert!(out.stdout.contains("preserved"));
+        assert!(out.stdout.contains("grit rebase --continue"));
+        assert!(out.stdout.contains("grit rebase --abort"));
+        assert!(out.stdout.contains("f"));
+    }
+    Ok(())
+}
+
+#[test]
+fn exec_recovery_with_grit_stash_resumes_without_repeating_dirty_command() -> TestResult {
+    for history_alias in [false, true] {
+        for skip in [false, true] {
+            let scratch = Scratch::new("exec-recovery")?;
+            let dir = scratch.path();
+            let original_tip = init_dirty_exec_fixture(dir, 2)?;
+            let mut prefix = vec![];
+            if history_alias {
+                prefix.push("history");
+            }
+            prefix.push("rebase");
+            let mut args = prefix.clone();
+            args.extend([
+                "main",
+                "--exec",
+                "if ! test -f step-2; then echo hook-edit >> f; fi",
+                "--exec",
+                "echo resumed; echo next >> exec-log",
+                "--json",
+            ]);
+            assert_eq!(gs(dir, args)?.status, Some(1));
+            let stash = gs(dir, ["stash", "push", "-m", "exec edits", "--json"])?;
+            assert!(stash.success(), "{}\n{}", stash.stdout, stash.stderr);
+            let mut resume_args = prefix;
+            resume_args.extend([if skip { "--skip" } else { "--continue" }, "--json"]);
+            let resumed = gs(dir, resume_args)?;
+            assert!(resumed.success(), "{}\n{}", resumed.stdout, resumed.stderr);
+            let json = parse_json(&resumed.stdout)?;
+            assert_eq!(json["result"], "completed");
+            assert!(resumed.stderr.contains("resumed"));
+            assert_ne!(git(dir, &["rev-parse", "feature"])?.trim(), original_tip);
+            assert_eq!(
+                git(dir, &["symbolic-ref", "HEAD"])?.trim(),
+                "refs/heads/feature"
+            );
+            assert_eq!(
+                fs::read_to_string(dir.join("exec-log"))?.lines().count(),
+                if skip { 1 } else { 2 }
+            );
+            let pop = gs(dir, ["stash", "pop", "--json"])?;
+            assert!(pop.success(), "{}\n{}", pop.stdout, pop.stderr);
+            assert_eq!(fs::read_to_string(dir.join("f"))?, "base\nhook-edit\n");
+            assert!(!dir.join(".git/rebase-merge").exists());
+            git_fsck_strict(dir)?;
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn exec_failure_after_dirty_stop_forwards_streams_and_exit_code() -> TestResult {
+    let scratch = Scratch::new("exec-resumed-failure")?;
+    let dir = scratch.path();
+    let tip = init_dirty_exec_fixture(dir, 1)?;
+    let stopped = gs(
+        dir,
+        [
+            "rebase",
+            "main",
+            "--exec",
+            "echo edit >> f",
+            "--exec",
+            "echo captured; echo failed >&2; exit 7",
+            "--json",
+        ],
+    )?;
+    assert_eq!(stopped.status, Some(1));
+    assert!(gs(dir, ["stash", "push"])?.success());
+    let failed = gs(dir, ["rebase", "--continue", "--json"])?;
+    assert_eq!(
+        failed.status,
+        Some(7),
+        "{}\n{}",
+        failed.stdout,
+        failed.stderr
+    );
+    assert!(failed.stderr.contains("captured") && failed.stderr.contains("failed"));
+    assert_eq!(git(dir, &["rev-parse", "HEAD"])?.trim(), tip);
+    assert!(!dir.join(".git/rebase-merge").exists());
+    assert!(gs(dir, ["stash", "pop"])?.success());
+    assert_eq!(fs::read_to_string(dir.join("f"))?, "base\nedit\n");
+    git_fsck_strict(dir)?;
+    Ok(())
+}

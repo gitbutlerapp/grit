@@ -13,7 +13,10 @@ use crate::porcelain::switch::{
     checkout_tree_transition_allow_local, verify_tree_transition_allow_local,
     TreeTransitionVerifyError,
 };
-use crate::porcelain::worktree_guard::ensure_worktree_clean_for_rebase_exec;
+use crate::porcelain::worktree_guard::{
+    ensure_worktree_clean_for_rebase_exec, ensure_worktree_clean_from_snapshot,
+    worktree_snapshot_with_head_tree,
+};
 use crate::refs::{update_direct_ref_on_store, write_symbolic_ref_on_store};
 use crate::repo::Repository;
 use crate::state::{resolve_head_for_repository, HeadState};
@@ -44,7 +47,7 @@ pub struct ExecRunRecord {
     pub stderr: Vec<u8>,
 }
 
-/// Successful completion of every `--exec` command (repository restored to pre-exec state).
+/// Successful exec invocations captured during one verification or recovery call.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct ExecReport {
     /// One row per command invocation, in execution order.
@@ -60,6 +63,7 @@ enum SavedHead {
 #[derive(Debug, Clone)]
 struct ExecPrestate {
     head: SavedHead,
+    head_commit: ObjectId,
     index_bytes: Vec<u8>,
     head_tree: ObjectId,
 }
@@ -89,7 +93,7 @@ fn fail_exec_session(session: &mut ExecDetachedSession<'_>, err: HistoryError) -
 }
 
 /// Checkout each rewritten commit in plan order, run `spec.commands`, then restore `HEAD`,
-/// the index, and the worktree. Refs are not modified.
+/// the index, and the worktree on clean completion. Branch refs are not modified.
 ///
 /// # Errors
 ///
@@ -97,6 +101,11 @@ fn fail_exec_session(session: &mut ExecDetachedSession<'_>, err: HistoryError) -
 /// - [`HistoryError::UncommittedChanges`] when the worktree or index is dirty.
 /// - [`HistoryError::LocalChangesWouldBeOverwritten`] when a checkout would clobber local paths.
 /// - [`HistoryError::ExecFailed`] when a command exits non-zero (state is rolled back).
+/// - [`HistoryError::ExecDirty`] when a successful command changes tracked paths. The
+///   edited index and worktree remain at the detached replay commit, branch refs stay
+///   unchanged, and exec recovery state is saved in `rebase-merge/grit-exec`.
+///   Save or remove the edits before [`super::continue_rebase`] or [`super::skip_rebase`];
+///   [`super::abort_rebase`] explicitly discards them and restores the original state.
 /// - I/O, checkout, or subprocess failures.
 pub fn verify_rebase_with_exec(
     repo: &Repository,
@@ -110,21 +119,17 @@ pub fn verify_rebase_with_exec(
     if repo.is_bare() {
         return Err(HistoryError::BareRepository);
     }
+    if repo.git_dir().join("rebase-merge").exists() || repo.git_dir().join("rebase-apply").exists()
+    {
+        return Err(exec_io("a rebase is already in progress"));
+    }
     ensure_worktree_clean_for_rebase_exec(repo).map_err(map_clean_error)?;
 
     let prestate = capture_exec_prestate(repo)?;
-    let worktree = repo
-        .work_tree()
-        .ok_or_else(|| HistoryError::WorktreeApply {
-            message: "rebase --exec requires a working tree".into(),
-        })?;
-
-    let commits: Vec<ObjectId> = plan.commits.iter().filter_map(|row| row.new).collect();
-    if commits.is_empty() {
+    if plan.commits.iter().all(|row| row.new.is_none()) {
         return Ok(ExecReport::default());
     }
 
-    let mut runs = Vec::new();
     let mut session = ExecDetachedSession {
         repo,
         prestate: &prestate,
@@ -132,7 +137,22 @@ pub fn verify_rebase_with_exec(
         active: false,
     };
 
-    for commit in commits {
+    execute_plan(&mut session, plan, spec, runner, 0, 0)
+}
+
+fn execute_plan(
+    session: &mut ExecDetachedSession<'_>,
+    plan: &RewritePlan,
+    spec: &ExecSpec,
+    runner: &dyn CommandRunner,
+    start_commit: usize,
+    start_command: usize,
+) -> Result<ExecReport, HistoryError> {
+    let repo = session.repo;
+    let mut runs = Vec::new();
+    let worktree = repo.work_tree().ok_or(HistoryError::BareRepository)?;
+    let commits: Vec<_> = plan.commits.iter().filter_map(|row| row.new).collect();
+    for (commit_index, commit) in commits.into_iter().enumerate().skip(start_commit) {
         let commit_tree = commit_tree_for_apply(repo, commit)?;
         update_direct_ref_on_store(repo.refs(), repo.git_dir(), "HEAD", &commit).map_err(|e| {
             HistoryError::WorktreeApply {
@@ -144,14 +164,19 @@ pub fn verify_rebase_with_exec(
         if let Err(err) =
             checkout_exec_tree_transition(repo, Some(&session.current_tree), &commit_tree)
         {
-            return Err(fail_exec_session(&mut session, err));
+            return Err(fail_exec_session(session, err));
         }
         session.current_tree = commit_tree;
 
-        for command in &spec.commands {
+        let first_command = if commit_index == start_commit {
+            start_command
+        } else {
+            0
+        };
+        for (command_index, command) in spec.commands.iter().enumerate().skip(first_command) {
             let output = match run_exec_command(runner, command, worktree) {
                 Ok(output) => output,
-                Err(err) => return Err(fail_exec_session(&mut session, err)),
+                Err(err) => return Err(fail_exec_session(session, err)),
             };
             let exit_code = output.status.code.unwrap_or(1);
             let stdout = output.stdout;
@@ -177,7 +202,32 @@ pub fn verify_rebase_with_exec(
                     stderr,
                     completed_runs,
                 };
-                return Err(fail_exec_session(&mut session, exec_err));
+                return Err(fail_exec_session(session, exec_err));
+            }
+            // Reload the subprocess-written index and compare against the replay tree,
+            // including racily clean worktree entries, before any further mutation.
+            let clean = worktree_snapshot_with_head_tree(repo, Some(commit_tree)).and_then(
+                |mut snapshot| {
+                    ensure_worktree_clean_from_snapshot(
+                        repo,
+                        &mut snapshot,
+                        crate::error::WorktreeOperation::RebaseExec,
+                        false,
+                    )
+                },
+            );
+            if let Err(err) = clean {
+                session.active = false;
+                store_exec_stop(session, plan, spec, commit_index, command_index + 1)?;
+                return Err(match err {
+                    Error::DirtyWorktree { paths, .. } => HistoryError::ExecDirty {
+                        commit,
+                        command: command.clone(),
+                        paths,
+                        runs,
+                    },
+                    other => exec_io(other),
+                });
             }
         }
     }
@@ -263,6 +313,7 @@ fn capture_exec_prestate(repo: &Repository) -> Result<ExecPrestate, HistoryError
     })?;
     Ok(ExecPrestate {
         head,
+        head_commit,
         index_bytes,
         head_tree,
     })
@@ -275,6 +326,11 @@ fn restore_exec_prestate(
 ) -> Result<(), HistoryError> {
     match &pre.head {
         SavedHead::Symbolic(refname) => {
+            if repo.resolve_ref_oid(refname)? != pre.head_commit {
+                return Err(HistoryError::RefCasMismatch {
+                    name: refname.clone(),
+                });
+            }
             write_symbolic_ref_on_store(repo.refs(), repo.git_dir(), "HEAD", refname).map_err(
                 |e| HistoryError::WorktreeApply {
                     message: e.to_string(),
@@ -303,6 +359,248 @@ fn restore_exec_prestate(
         message: e.to_string(),
     })?;
     Ok(())
+}
+
+// The exec stop is deliberately distinct from a conflicted pick: the current commit
+// is already replayed, and continuing must never commit its index as a resolution.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct StoredExec {
+    head_ref: Option<String>,
+    original_head: String,
+    original_tree: String,
+    index: Vec<u8>,
+    commits: Vec<(String, Option<String>, bool)>,
+    refs: Vec<(String, String, String)>,
+    checkout_onto: Option<String>,
+    new_tree: Option<String>,
+    commit_changes: bool,
+    commands: Vec<String>,
+    commit_index: usize,
+    next_command: usize,
+}
+
+fn exec_io(err: impl std::fmt::Display) -> HistoryError {
+    HistoryError::WorktreeApply {
+        message: err.to_string(),
+    }
+}
+
+fn store_exec_stop(
+    session: &ExecDetachedSession<'_>,
+    plan: &RewritePlan,
+    spec: &ExecSpec,
+    commit_index: usize,
+    next_command: usize,
+) -> Result<(), HistoryError> {
+    use std::io::Write;
+    let pre = session.prestate;
+    let state = StoredExec {
+        head_ref: match &pre.head {
+            SavedHead::Symbolic(name) => Some(name.clone()),
+            SavedHead::Detached(_) => None,
+        },
+        original_head: pre.head_commit.to_hex(),
+        original_tree: pre.head_tree.to_hex(),
+        index: pre.index_bytes.clone(),
+        commits: plan
+            .commits
+            .iter()
+            .map(|r| (r.old.to_hex(), r.new.map(|o| o.to_hex()), r.reused))
+            .collect(),
+        refs: plan
+            .ref_updates
+            .iter()
+            .map(|r| (r.name.clone(), r.old.to_hex(), r.new.to_hex()))
+            .collect(),
+        checkout_onto: plan.head.checkout_onto.map(|o| o.to_hex()),
+        new_tree: plan.head.new_tree.map(|o| o.to_hex()),
+        commit_changes: plan.head.commit_changes,
+        commands: spec.commands.clone(),
+        commit_index,
+        next_command,
+    };
+    let dir = session.repo.git_dir().join("rebase-merge");
+    fs::create_dir_all(&dir).map_err(exec_io)?;
+    let mut lock = crate::lockfile::LockFile::acquire(
+        &dir.join("grit-exec.lock"),
+        crate::lockfile::LockWait::Immediately,
+    )
+    .map_err(exec_io)?;
+    lock.write_all(&serde_json::to_vec(&state).map_err(exec_io)?)
+        .map_err(exec_io)?;
+    lock.commit_to(&dir.join("grit-exec")).map_err(exec_io)?;
+    fs::write(dir.join("orig-head"), format!("{}\n", state.original_head)).map_err(exec_io)?;
+    fs::write(
+        dir.join("head-name"),
+        format!("{}\n", state.head_ref.as_deref().unwrap_or("detached HEAD")),
+    )
+    .map_err(exec_io)?;
+    Ok(())
+}
+
+fn load_exec_stop(repo: &Repository) -> Result<StoredExec, HistoryError> {
+    serde_json::from_slice(
+        &fs::read(repo.git_dir().join("rebase-merge/grit-exec")).map_err(exec_io)?,
+    )
+    .map_err(exec_io)
+}
+
+fn stored_prestate(state: &StoredExec) -> Result<ExecPrestate, HistoryError> {
+    let head_commit = ObjectId::from_hex(&state.original_head)?;
+    Ok(ExecPrestate {
+        head: state
+            .head_ref
+            .as_ref()
+            .map_or(SavedHead::Detached(head_commit), |name| {
+                SavedHead::Symbolic(name.clone())
+            }),
+        head_commit,
+        head_tree: ObjectId::from_hex(&state.original_tree)?,
+        index_bytes: state.index.clone(),
+    })
+}
+
+/// Resume only after the caller has explicitly saved or removed the exec's edits.
+pub(super) fn resume_exec_rebase(
+    repo: &Repository,
+    apply: &super::ApplyOptions,
+    skip: bool,
+) -> Result<super::RebaseOutcome, super::RebaseSessionError> {
+    use super::{HeadEffect, PlannedRefUpdate, RewrittenCommit};
+    let state = load_exec_stop(repo)?;
+    let prestate = stored_prestate(&state)?;
+    let plan = RewritePlan {
+        commits: state
+            .commits
+            .iter()
+            .map(|(old, new, reused)| {
+                let old = ObjectId::from_hex(old)?;
+                let new = new.as_deref().map(ObjectId::from_hex).transpose()?;
+                let data = repo.odb().read_commit(&new.unwrap_or(old))?;
+                Ok(RewrittenCommit {
+                    old,
+                    new,
+                    change_id: new
+                        .map(|oid| crate::change_id::logical_change_id_for_commit(repo, oid))
+                        .transpose()?
+                        .flatten(),
+                    subject: Some(super::subject::commit_message_subject_line(&data.message)),
+                    reused: *reused,
+                })
+            })
+            .collect::<Result<_, HistoryError>>()?,
+        ref_updates: state
+            .refs
+            .iter()
+            .map(|(name, old, new)| {
+                Ok(PlannedRefUpdate {
+                    name: name.clone(),
+                    old: ObjectId::from_hex(old)?,
+                    new: ObjectId::from_hex(new)?,
+                })
+            })
+            .collect::<Result<_, HistoryError>>()?,
+        head: HeadEffect {
+            commit_changes: state.commit_changes,
+            old_commit: Some(prestate.head_commit),
+            head_ref: state.head_ref.clone(),
+            old_tree: Some(prestate.head_tree),
+            new_tree: state
+                .new_tree
+                .as_deref()
+                .map(ObjectId::from_hex)
+                .transpose()
+                .map_err(HistoryError::from)?,
+            checkout_onto: state
+                .checkout_onto
+                .as_deref()
+                .map(ObjectId::from_hex)
+                .transpose()
+                .map_err(HistoryError::from)?,
+        },
+    };
+    let commits: Vec<_> = plan.commits.iter().filter_map(|r| r.new).collect();
+    let commit = *commits
+        .get(state.commit_index)
+        .ok_or_else(|| exec_io("invalid exec replay position"))?;
+    let head = resolve_head_for_repository(repo).map_err(exec_io)?;
+    if head != (HeadState::Detached { oid: commit }) {
+        return Err(super::RebaseSessionError::ExecHeadChanged { expected: commit });
+    }
+    if let Err(err) = ensure_worktree_clean_for_rebase_exec(repo) {
+        return Err(match err {
+            Error::DirtyWorktree { paths, .. } => HistoryError::ExecDirty {
+                commit,
+                command: state
+                    .commands
+                    .get(state.next_command.saturating_sub(1))
+                    .cloned()
+                    .ok_or_else(|| exec_io("invalid exec command position"))?,
+                paths,
+                runs: Vec::new(),
+            },
+            other => exec_io(other),
+        }
+        .into());
+    }
+    let spec = ExecSpec {
+        commands: state.commands,
+    };
+    let next_command = if skip {
+        spec.commands.len()
+    } else {
+        state.next_command
+    };
+    let mut session = ExecDetachedSession {
+        repo,
+        prestate: &prestate,
+        current_tree: commit_tree_for_apply(repo, commit)?,
+        active: true,
+    };
+    let exec = match execute_plan(
+        &mut session,
+        &plan,
+        &spec,
+        repo.command_runner().as_ref(),
+        state.commit_index,
+        next_command,
+    ) {
+        Ok(exec) => exec,
+        // ExecFailed is returned only after a successful rollback. The saved stop
+        // no longer describes HEAD, so finish cancelling that session too.
+        Err(err @ HistoryError::ExecFailed { .. }) => {
+            super::rebase_session::clear_rebase_state(repo.git_dir())?;
+            return Err(err.into());
+        }
+        Err(err) => return Err(err.into()),
+    };
+    // Restore the exact pre-exec HEAD/index before applying the original atomic plan.
+    // Keep the stop state until apply succeeds, so ref failures remain recoverable.
+    let applied = super::apply_rewrite(
+        repo,
+        &plan,
+        apply,
+        &mut crate::progress::NullProgress,
+        &crate::progress::NeverCancel,
+    )?;
+    super::rebase_session::clear_rebase_state(repo.git_dir())?;
+    Ok(super::RebaseOutcome::ExecDone {
+        applied,
+        plan: Box::new(plan),
+        exec,
+    })
+}
+
+pub(super) fn abort_exec_rebase(repo: &Repository) -> Result<(), super::RebaseSessionError> {
+    let state = load_exec_stop(repo)?;
+    let prestate = stored_prestate(&state)?;
+    let head = resolve_head_for_repository(repo).map_err(exec_io)?;
+    let current = head
+        .oid()
+        .copied()
+        .ok_or_else(|| exec_io("exec replay HEAD is unreadable"))?;
+    restore_exec_prestate(repo, &prestate, commit_tree_for_apply(repo, current)?)?;
+    super::rebase_session::clear_rebase_state(repo.git_dir())
 }
 
 #[cfg(test)]
@@ -555,6 +853,43 @@ mod tests {
     }
 
     #[test]
+    fn exec_success_preserves_tracked_edits_before_next_command() {
+        for staged in [false, true] {
+            let (_dir, repo) = init_repo();
+            let root = commit_file(&repo, "main", "a.txt", b"base\n", "root\n", None);
+            let tip = commit_file(&repo, "main", "b.txt", b"one\n", "tip\n", Some(root));
+            let plan = two_commit_plan(&repo, root, tip);
+            let command = if staged {
+                "echo hook-edit >> a.txt; git add a.txt"
+            } else {
+                "echo hook-edit >> a.txt"
+            };
+            let result = verify_rebase_with_exec(
+                &repo,
+                &plan,
+                &ExecSpec {
+                    commands: vec![command.into(), "touch should-not-run".into()],
+                },
+                system_command_runner().as_ref(),
+            );
+            assert!(result.is_err(), "successful exec edits must stop replay");
+            assert_eq!(
+                fs::read(repo.work_tree().expect("wt").join("a.txt")).expect("edit"),
+                b"base\nhook-edit\n"
+            );
+            assert_eq!(
+                resolve_ref(repo.git_dir(), "refs/heads/main").expect("main"),
+                tip
+            );
+            assert!(!repo
+                .work_tree()
+                .expect("wt")
+                .join("should-not-run")
+                .exists());
+        }
+    }
+
+    #[test]
     fn exec_runs_once_per_rewritten_commit_in_order() {
         let (_dir, repo) = init_repo();
         let root = commit_file(&repo, "main", "a.txt", b"1\n", "root\n", None);
@@ -742,6 +1077,68 @@ mod tests {
             "worktree must be clean after exec rollback, staged={:?} unstaged={:?}",
             model.staged,
             model.unstaged
+        );
+    }
+
+    #[test]
+    fn exec_detects_same_size_racy_edit_with_unchanged_stat_fields() {
+        struct RacyEditRunner<'a> {
+            repo: &'a Repository,
+            inner: Arc<dyn CommandRunner>,
+        }
+        impl CommandRunner for RacyEditRunner<'_> {
+            fn spawn(&self, spec: &CommandSpec) -> io::Result<RunningCommand> {
+                let path = self.repo.work_tree().expect("worktree").join("a.txt");
+                let stamp = filetime::FileTime::from_unix_time(1_700_000_000, 0);
+                filetime::set_file_mtime(&path, stamp)?;
+                let mut index = self.repo.load_index().expect("reload index");
+                let entry = index.get_mut(b"a.txt", 0).expect("entry");
+                entry.mtime_sec = 1_700_000_000;
+                entry.mtime_nsec = 0;
+                self.repo.write_index(&mut index).expect("write index");
+                filetime::set_file_mtime(&self.repo.index_path(), stamp)?;
+                fs::write(&path, b"X\n")?;
+                filetime::set_file_mtime(&path, stamp)?;
+                self.inner.spawn(spec)
+            }
+        }
+        let (_dir, repo) = init_repo();
+        let root = commit_file(&repo, "main", "a.txt", b"1\n", "root\n", None);
+        let tip = commit_file(&repo, "main", "b.txt", b"2\n", "tip\n", Some(root));
+        let mut cfg = fs::OpenOptions::new()
+            .append(true)
+            .open(repo.git_dir().join("config"))
+            .expect("config");
+        use std::io::Write;
+        writeln!(cfg, "[core]\ntrustctime = false").expect("config");
+        let plan = two_commit_plan(&repo, root, tip);
+        let repo = Repository::open(
+            repo.git_dir(),
+            &crate::environment::RepositoryOptions::empty()
+                .with_work_tree(repo.work_tree().expect("wt")),
+        )
+        .expect("reopen with trustctime disabled");
+        let runner = RacyEditRunner {
+            repo: &repo,
+            inner: RecordingRunner::always_success(),
+        };
+        let err = verify_rebase_with_exec(
+            &repo,
+            &plan,
+            &ExecSpec {
+                commands: vec!["true".into()],
+            },
+            &runner,
+        )
+        .expect_err("racy edit");
+        assert!(matches!(err, HistoryError::ExecDirty { paths, .. } if paths == ["a.txt"]));
+        assert_eq!(
+            fs::read(repo.work_tree().expect("wt").join("a.txt")).expect("edit"),
+            b"X\n"
+        );
+        assert_eq!(
+            resolve_ref(repo.git_dir(), "refs/heads/main").expect("branch"),
+            tip
         );
     }
 

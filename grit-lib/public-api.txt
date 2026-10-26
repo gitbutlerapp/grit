@@ -23177,6 +23177,11 @@ pub grit_lib::revwalk::history::HistoryError::Conflict::paths: alloc::vec::Vec<a
 pub grit_lib::revwalk::history::HistoryError::DivergentBranch
 pub grit_lib::revwalk::history::HistoryError::DivergentBranch::name: alloc::string::String
 pub grit_lib::revwalk::history::HistoryError::EmptyMessage
+pub grit_lib::revwalk::history::HistoryError::ExecDirty
+pub grit_lib::revwalk::history::HistoryError::ExecDirty::command: alloc::string::String
+pub grit_lib::revwalk::history::HistoryError::ExecDirty::commit: grit_lib::objects::ObjectId
+pub grit_lib::revwalk::history::HistoryError::ExecDirty::paths: alloc::vec::Vec<alloc::string::String>
+pub grit_lib::revwalk::history::HistoryError::ExecDirty::runs: alloc::vec::Vec<grit_lib::revwalk::history::ExecRunRecord>
 pub grit_lib::revwalk::history::HistoryError::ExecFailed
 pub grit_lib::revwalk::history::HistoryError::ExecFailed::commit: grit_lib::objects::ObjectId
 pub grit_lib::revwalk::history::HistoryError::ExecFailed::completed_runs: alloc::vec::Vec<grit_lib::revwalk::history::ExecRunRecord>
@@ -23305,6 +23310,10 @@ pub enum grit_lib::revwalk::history::RebaseOutcome
 pub grit_lib::revwalk::history::RebaseOutcome::Done
 pub grit_lib::revwalk::history::RebaseOutcome::Done::applied: grit_lib::revwalk::history::AppliedRewrite
 pub grit_lib::revwalk::history::RebaseOutcome::Done::plan: grit_lib::revwalk::history::RewritePlan
+pub grit_lib::revwalk::history::RebaseOutcome::ExecDone
+pub grit_lib::revwalk::history::RebaseOutcome::ExecDone::applied: grit_lib::revwalk::history::AppliedRewrite
+pub grit_lib::revwalk::history::RebaseOutcome::ExecDone::exec: grit_lib::revwalk::history::ExecReport
+pub grit_lib::revwalk::history::RebaseOutcome::ExecDone::plan: alloc::boxed::Box<grit_lib::revwalk::history::RewritePlan>
 pub grit_lib::revwalk::history::RebaseOutcome::Stopped(grit_lib::revwalk::history::RebaseStop)
 impl core::clone::Clone for grit_lib::revwalk::history::RebaseOutcome
 pub fn grit_lib::revwalk::history::RebaseOutcome::clone(&self) -> Self
@@ -23343,6 +23352,8 @@ impl core::marker::UnsafeUnpin for grit_lib::revwalk::history::RebasePlan
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::history::RebasePlan
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::history::RebasePlan
 #[non_exhaustive] pub enum grit_lib::revwalk::history::RebaseSessionError
+pub grit_lib::revwalk::history::RebaseSessionError::ExecHeadChanged
+pub grit_lib::revwalk::history::RebaseSessionError::ExecHeadChanged::expected: grit_lib::objects::ObjectId
 pub grit_lib::revwalk::history::RebaseSessionError::ForeignRebaseInProgress
 pub grit_lib::revwalk::history::RebaseSessionError::History(grit_lib::revwalk::history::HistoryError)
 pub grit_lib::revwalk::history::RebaseSessionError::Library(grit_lib::error::Error)

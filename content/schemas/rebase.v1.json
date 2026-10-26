@@ -71,6 +71,7 @@
       "enum": [
         "completed",
         "conflicts",
+        "exec_dirty",
         "aborted"
       ],
       "type": "string"
@@ -149,6 +150,13 @@
         "null"
       ]
     },
+    "command": {
+      "description": "Successful exec dirtied tracked files; preserved at `commit` until recovery.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "commit": {
       "type": [
         "string",
@@ -168,7 +176,7 @@
       "type": "boolean"
     },
     "exec": {
-      "description": "`--exec` subprocess results when `--exec` was used (success only).",
+      "description": "`--exec` subprocess results through completion or a dirty exec stop.",
       "items": {
         "$ref": "#/definitions/ExecResultJson"
       },
@@ -200,6 +208,13 @@
         "string",
         "null"
       ]
+    },
+    "paths": {
+      "description": "Changed tracked paths when `result` is `exec_dirty`.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
     },
     "refs": {
       "items": {

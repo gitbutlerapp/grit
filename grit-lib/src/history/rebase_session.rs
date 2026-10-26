@@ -65,6 +65,15 @@ pub enum RebaseOutcome {
         /// Final rewrite plan (commits and ref updates).
         plan: RewritePlan,
     },
+    /// An exec stop was resumed to completion and the atomic plan was applied.
+    ExecDone {
+        /// Ref movements performed on completion.
+        applied: AppliedRewrite,
+        /// Final rewrite plan; boxed to keep the outcome small.
+        plan: Box<RewritePlan>,
+        /// Invocations captured during this continue/skip call.
+        exec: super::ExecReport,
+    },
     /// Replay stopped on conflicts; `.git/rebase-merge/` and grit state were written.
     Stopped(RebaseStop),
 }
@@ -101,6 +110,14 @@ pub enum RebaseSessionError {
     #[error("rebase session requires HEAD on a branch")]
     NotOnBranch,
 
+    /// The caller moved HEAD away from the recorded exec stop. Save new commits on
+    /// a branch, abort, and restart instead of silently discarding them on continue.
+    #[error("exec replay HEAD changed; expected {expected}; save new commits on a branch, then abort and restart the rebase")]
+    ExecHeadChanged {
+        /// Detached replay commit at the exec stop.
+        expected: ObjectId,
+    },
+
     /// Underlying history rewrite failure.
     #[error(transparent)]
     History(#[from] HistoryError),
@@ -122,7 +139,8 @@ impl RebaseSessionError {
             | Self::ForeignRebaseInProgress
             | Self::UnmergedPaths
             | Self::NothingToCommit
-            | Self::NotOnBranch => false,
+            | Self::NotOnBranch
+            | Self::ExecHeadChanged { .. } => false,
         }
     }
 }
@@ -205,6 +223,11 @@ pub fn start_rebase(
 
 /// Finish the current conflicted commit and replay remaining commits.
 ///
+/// For an exec stop, requires a clean index/worktree at the recorded replay HEAD,
+/// then resumes at the next command (the successful dirty command is not rerun).
+/// Save exec edits with a stash before continuing. A moved HEAD is rejected;
+/// save new commits on a branch, abort, and restart in that case.
+///
 /// # Errors
 ///
 /// Returns [`RebaseSessionError::UnmergedPaths`] when the index still records conflicts,
@@ -214,6 +237,9 @@ pub fn continue_rebase(
     repo: &Repository,
     opts: &StartRebaseOptions,
 ) -> Result<RebaseOutcome, RebaseSessionError> {
+    if matches!(active_rebase(repo.git_dir()), Some(ActiveRebase::Exec)) {
+        return super::exec::resume_exec_rebase(repo, &opts.apply, false);
+    }
     super::ensure_rewrite_apply_ready(repo)?;
     let state = load_persisted_state(repo.git_dir())?;
     if repo.load_index()?.has_unmerged_entries() {
@@ -262,6 +288,9 @@ pub fn continue_rebase(
 
 /// Skip the current todo commit and replay the rest.
 ///
+/// For an exec stop, requires the edits to be saved or removed first, then skips
+/// remaining commands at that replay commit; the already replayed commit is kept.
+///
 /// # Errors
 ///
 /// Returns [`RebaseSessionError::ForeignRebaseInProgress`] when `git` started the rebase,
@@ -271,6 +300,9 @@ pub fn skip_rebase(
     repo: &Repository,
     opts: &StartRebaseOptions,
 ) -> Result<RebaseOutcome, RebaseSessionError> {
+    if matches!(active_rebase(repo.git_dir()), Some(ActiveRebase::Exec)) {
+        return super::exec::resume_exec_rebase(repo, &opts.apply, true);
+    }
     let state = load_persisted_state(repo.git_dir())?;
     let current = state
         .remaining
@@ -338,6 +370,7 @@ pub fn abort_rebase(
             }
         }
         Some(ActiveRebase::Foreign(dir)) => abort_foreign_rebase(repo, &dir, identity),
+        Some(ActiveRebase::Exec) => super::exec::abort_exec_rebase(repo),
         Some(ActiveRebase::Grit) => {
             let state = load_persisted_state(repo.git_dir())?;
             crate::rerere::rerere_clear(repo.git_dir()).map_err(map_lib)?;
@@ -373,6 +406,8 @@ fn abort_foreign_rebase(
 
 /// Which tool owns the rebase state under the git directory.
 enum ActiveRebase {
+    /// Successful exec left tracked edits at a replay commit.
+    Exec,
     /// `rebase-merge/grit-plan` exists.
     Grit,
     /// `rebase-merge/` or `rebase-apply/` (not an `am`) without grit's plan.
@@ -381,6 +416,9 @@ enum ActiveRebase {
 
 fn active_rebase(git_dir: &Path) -> Option<ActiveRebase> {
     let merge = git_dir.join("rebase-merge");
+    if merge.join("grit-exec").is_file() {
+        return Some(ActiveRebase::Exec);
+    }
     if merge.join("grit-plan").is_file() {
         return Some(ActiveRebase::Grit);
     }
@@ -630,6 +668,7 @@ fn load_persisted_state(git_dir: &Path) -> Result<LoadedState, RebaseSessionErro
     match active_rebase(git_dir) {
         None => return Err(RebaseSessionError::NoRebaseInProgress),
         Some(ActiveRebase::Foreign(_)) => return Err(RebaseSessionError::ForeignRebaseInProgress),
+        Some(ActiveRebase::Exec) => return Err(RebaseSessionError::NoRebaseInProgress),
         Some(ActiveRebase::Grit) => {}
     }
     let path = git_dir.join("rebase-merge").join("grit-plan");
@@ -900,7 +939,7 @@ fn author_script(author: &str) -> Option<String> {
     ))
 }
 
-fn clear_rebase_state(git_dir: &Path) -> Result<(), RebaseSessionError> {
+pub(super) fn clear_rebase_state(git_dir: &Path) -> Result<(), RebaseSessionError> {
     for name in ["ORIG_HEAD", "MERGE_MSG"] {
         let path = git_dir.join(name);
         if path.exists() {

@@ -776,12 +776,19 @@ fn rebase_fetched_upstream(
             stopped_commit: Some(stop.commit),
             ..PullOutcome::new(PullResult::RebaseConflicts, label)
         }),
-        RebaseOutcome::Done { applied, .. } if applied.head != head_oid => Ok(
-            PullOutcome::at_commit(PullResult::Rebased, label, repo, applied.head)?,
-        ),
+        RebaseOutcome::Done { applied, .. } | RebaseOutcome::ExecDone { applied, .. }
+            if applied.head != head_oid =>
+        {
+            Ok(PullOutcome::at_commit(
+                PullResult::Rebased,
+                label,
+                repo,
+                applied.head,
+            )?)
+        }
         // Nothing was rewritten: integrate like `git pull --rebase`, which fast-forwards when
         // the branch is simply behind the upstream tip.
-        RebaseOutcome::Done { .. } => {
+        RebaseOutcome::Done { .. } | RebaseOutcome::ExecDone { .. } => {
             let integrate = integrate_branch_with_options(
                 repo,
                 refname,

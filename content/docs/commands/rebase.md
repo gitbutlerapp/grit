@@ -1,6 +1,6 @@
 ---
 title: grit rebase
-summary: Replay local commits onto a new base; stop on conflicts and resume with --continue.
+summary: Replay local commits onto a new base; recover from conflicts and exec commands that leave edits.
 group: History
 order: 5
 ---
@@ -27,7 +27,7 @@ When replay stops on conflicts, grit writes Git-compatible `.git/rebase-merge/` 
 
 Stopping resets the index and worktree to the replayed commits, so grit only stops when that loses nothing. If replay would conflict while you have staged or unstaged changes, or an untracked file sits where the stop would check out a path, the rebase refuses (`kind: dirty_worktree`, or the untracked-overwrite error) and nothing changes; commit or stash first. A rebase that replays cleanly still carries local changes along, like a branch switch.
 
-The stopped state is complete enough for `git` to take over: `git rebase --continue`, `--skip` and `--abort` all work on a rebase grit started (grit writes `author-script`, `stopped-sha` and the current pick in `done`, as git does).
+The conflict stop state is complete enough for `git` to take over: `git rebase --continue`, `--skip` and `--abort` all work on a rebase grit started (grit writes `author-script`, `stopped-sha` and the current pick in `done`, as git does).
 
 A rebase that `git` started (`.git/rebase-merge/` or `.git/rebase-apply/` without `grit-plan`) blocks `grit rebase <upstream>` and [`grit switch`](switch.md). `grit rebase --abort` cancels it: `HEAD` is re-attached to the rebased branch at `orig-head`, the index and worktree are reset, git's state directory is removed, and unresolved rerere records for the abandoned conflict (`MERGE_RR`) are cleared, as `git rebase --abort` does. When git recorded an autostash, grit leaves the rebase alone and asks you to run `git rebase --abort`. `grit rebase --continue` and `--skip` refuse with a pointer to `git rebase --continue` / `--skip`, since only git can resume its own todo list.
 
@@ -41,21 +41,47 @@ When there is nothing to replay, human output is `Already up to date` and `--jso
 
 Shared rewrite flags match [`grit history`](history.md): `--dry-run`, `--update-refs`, `--empty`, and `--keep-committer`.
 
+### Successful exec commands that leave edits
+
+After **every** successful `--exec` command, grit reloads the index and checks tracked
+staged and unstaged changes against the replay commit. If anything changed, replay
+stops immediately with exit **1** and `result: "exec_dirty"`. The edits and index
+stay exactly as the command left them, `HEAD` remains detached at the replay commit,
+and the original branch refs remain unchanged. Later exec commands do not run.
+
+Save the edits before continuing:
+
+```bash
+grit stash push -m "exec edits"
+grit rebase --continue
+grit stash pop
+```
+
+`--continue` resumes after the successful command, so it does not repeat the edit.
+`--skip` skips any remaining exec commands at that commit and keeps the already
+replayed commit. Both require a clean index and worktree at the recorded replay
+HEAD. If you move HEAD or create a commit while stopped, save new commits on a
+branch, then abort and restart. `--abort` explicitly discards exec edits and restores
+the original HEAD, index, and tracked files; save any edits you want first.
+
+Exec stops use grit's `rebase-merge/grit-exec` recovery record. Resume these with
+grit. Commands exiting nonzero retain their existing rollback behavior and command
+exit code.
+
 ## Options
 
 | Option | Description |
 | --- | --- |
 | `<upstream>` | Exclude commits reachable from this revision (default: `@{upstream}`). |
 | `--onto` | Replay onto this revision instead of `<upstream>`. |
-| `--continue` | Finish the current commit after resolving conflicts, then replay the rest. |
+| `--continue` | Finish the current conflict resolution, or resume exec after saving its edits. |
 | `--abort` | Cancel the rebase and restore the branch to `orig-head`. Also cancels a rebase that `git` started. |
-| `--skip` | Skip the current commit and replay the rest. |
+| `--skip` | Skip a conflicted commit, or remaining exec commands at an exec stop (save edits first). |
 | `--dry-run` | List ref updates without moving refs (no session). |
 | `--update-refs` | `branches` (default) or `head`. |
 | `--empty` | `drop` (default), `keep`, or `abort` when a replay would become empty. |
-| `--keep-committer` |
-| `--exec` | After each replayed commit is checked out, run `CMD` via `sh -c` in the worktree (repeatable; runs in order at every commit). Requires a clean index and worktree. Incompatible with `--dry-run`, `--check`, and `-X`. Command output goes to stderr. On failure grit restores `HEAD`, the index, and the worktree without moving refs; exit code is the command's exit code. |
- Preserve committer ident and timestamp on replayed commits. |
+| `--keep-committer` | Preserve committer ident and timestamp on replayed commits. |
+| `--exec` | After each replayed commit is checked out, run `CMD` via `sh -c` in the worktree (repeatable; runs in order at every commit). Requires a clean index and worktree. Incompatible with `--dry-run`, `--check`, and `-X`. Command output goes to stderr. On nonzero command exit, grit restores `HEAD`, the index, and the worktree without moving refs; exit code is the command's exit code. A successful command that leaves tracked edits stops with `exec_dirty` and preserves them for recovery. |
 | `--check` | Predict success or conflicts without changing refs, index, or worktree (conflicts with `--dry-run`). |
 | `-X ours\|theirs` | Auto-resolve replay conflicts in favor of the onto side (`ours`) or replayed commits (`theirs`). |
 
@@ -86,14 +112,16 @@ Pass `--json` on `grit rebase` or `grit history rebase`:
 
 | Field | Type | Meaning |
 | --- | --- | --- |
-| `result` | string | `completed`, `conflicts`, or `aborted`. |
+| `result` | string | `completed`, `conflicts`, `exec_dirty`, or `aborted`. |
 | `operation` | string | `rebase` when present. |
 | `rewritten` | array | `{old,new,change_id,subject}` per replayed commit when `result` is `completed`. |
 | `refs` | array | `{ref,old,new}` for each ref that moved. |
 | `head` | object or null | `{old,new}` when `HEAD`'s commit OID changes. |
 | `dry_run` | boolean | Whether refs were left unchanged. |
-| `exec` | array | When `--exec` was used and the rebase succeeded: `{commit, command, exit_code}` per invocation (full hex `commit`). |
-| `commit` | string | Source commit that stopped replay when `result` is `conflicts`. |
+| `exec` | array | Captured invocations during this call, on completion or an exec stop: `{commit, command, exit_code}` per invocation (full hex `commit`). |
+| `commit` | string | Source commit for `conflicts`; checked-out replay commit for `exec_dirty`. |
+| `command` | string | Successful command that left edits, for `exec_dirty`. |
+| `paths` | array of strings | Changed tracked paths at an exec stop. |
 | `conflicts` | array | `{path,kind,summary?}` when `result` is `conflicts`. |
 | `next_steps` | array | Ordered `grit` commands after a stop. |
 | `alternatives` | array | `grit rebase --abort` and `grit rebase --skip` when paused. |
@@ -127,7 +155,7 @@ Exit code is **0** for `up_to_date` and `clean`, **1** for `conflicts`.
 
 Schema: [v1](/schemas/rebase/v1.json)
 
-Pass [`--markdown`](../global-options/) for a `## Rebase` heading (or `## History rebase` for the alias). On conflicts, lists paths, the stopped commit, and `next_steps` / `alternatives` like pick and revert.
+Pass [`--markdown`](../global-options/) for a `## Rebase` heading (or `## History rebase` for the alias). On conflict or exec stops, lists paths, the stopped commit, and `next_steps` / `alternatives` like pick and revert.
 
 
 
@@ -144,7 +172,7 @@ On a branch with no commits yet, rebase onto any upstream fails with `branch_no_
 | Code | Meaning |
 | ---: | --- |
 | `0` | Rebase completed, `--check` predicts success, or `--dry-run`. |
-| `1` | Conflicts or other failure. |
+| `1` | Conflicts, successful exec with tracked edits, or other failure. |
 | `2` | Invalid flags ([`usage`](../exit-codes/)). |
 | *varies* | `--exec` command failure ([`custom`](../exit-codes/)). |
 

@@ -225,7 +225,11 @@ impl ExitStatus {
     pub fn from_rebase_run(outcome: &commands::history::RebaseRunOutcome) -> Self {
         use commands::history::{RebaseCheckResult, RebaseResult, RebaseRunOutcome};
         match outcome {
-            RebaseRunOutcome::Rebase(r) if r.result == RebaseResult::Conflicts => Self::Failure,
+            RebaseRunOutcome::Rebase(r)
+                if matches!(r.result, RebaseResult::Conflicts | RebaseResult::ExecDirty) =>
+            {
+                Self::Failure
+            }
             RebaseRunOutcome::Check(c) if c.result == RebaseCheckResult::Conflicts => Self::Failure,
             _ => Self::Success,
         }

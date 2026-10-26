@@ -16,3 +16,55 @@ After planning, apply with [`apply_rewrite`](rustdoc:grit_lib::revwalk::history:
 [`start_rebase`](rustdoc:grit_lib::revwalk::history::start_rebase) runs resumable planning. When replay finishes without conflicts, it applies the plan atomically and returns [`RebaseOutcome::Done`](rustdoc:grit_lib::revwalk::history::RebaseOutcome::Done). When a commit conflicts, grit writes Git-compatible `.git/rebase-merge/` files plus `rebase-merge/grit-plan` (mapping, replay order, and options), detaches `HEAD` at the replayed parent, and leaves the branch ref at its pre-rebase tip — matching `git rebase` stop behavior.
 
 Resolve conflicts in the worktree, stage paths, then [`continue_rebase`](rustdoc:grit_lib::revwalk::history::continue_rebase) to record the resolved tree and replay remaining commits. [`skip_rebase`](rustdoc:grit_lib::revwalk::history::skip_rebase) maps the current commit to `HEAD` and replans the rest. [`abort_rebase`](rustdoc:grit_lib::revwalk::history::abort_rebase) hard-resets the branch to `orig-head` and removes session state. [`continue_rebase`](rustdoc:grit_lib::revwalk::history::continue_rebase) returns [`RebaseSessionError::UnmergedPaths`](rustdoc:grit_lib::revwalk::history::RebaseSessionError::UnmergedPaths) while the index still has conflict stages.
+
+## Exec verification and recovery
+
+[`verify_rebase_with_exec`](rustdoc:grit_lib::revwalk::history::verify_rebase_with_exec)
+checks out each replacement and runs the injected command runner. After every
+successful invocation it reloads the index and checks staged and unstaged tracked
+changes against the replay tree, including racy file timestamps. Clean commands
+restore the original HEAD, index, and tracked files before the caller applies the
+plan atomically.
+
+[`HistoryError::ExecDirty`](rustdoc:grit_lib::revwalk::history::HistoryError::ExecDirty)
+carries the replay commit, command, changed paths, and captured run records. The
+edited index and worktree are preserved at the detached replay HEAD. Original
+branch refs remain unchanged. Do **not** apply the rewrite after this error.
+The library saves the original HEAD and index, plan, and next command position in
+`rebase-merge/grit-exec`; it distinguishes this stop from an unresolved pick.
+
+Save edits with a stash, then call `continue_rebase` to run the next command and
+remaining commits. `skip_rebase` skips remaining commands at the current commit
+without dropping that commit. Both reject a dirty index/worktree without changing
+it. A moved replay HEAD returns
+[`RebaseSessionError::ExecHeadChanged`](rustdoc:grit_lib::revwalk::history::RebaseSessionError::ExecHeadChanged):
+save any new commits on a branch, abort, and restart. `abort_rebase` explicitly
+restores the saved HEAD, index, and tracked files, discarding unsaved exec edits.
+Clean recovery returns `RebaseOutcome::ExecDone` with an `exec` report containing the
+invocations captured during that call, for the embedding caller to render.
+Nonzero exec exits keep their existing `ExecFailed` rollback behavior.
+
+## Clean exec benchmark
+
+Measured on Linux x86_64 with system Git 2.55.0 and Rust's `release` profile.
+Each sample rebases a fresh copy of a repository with 200 or 2,000 tracked files
+and 40 feature commits onto a one-commit upstream advance. Commands are `git rebase main
+--exec true` and `grit rebase main --exec true --json`; output is captured. The table
+shows medians of seven runs, measured together with `/usr/bin/time -v` after builds
+and tests were idle.
+
+| Tracked files | Implementation | Wall time | Peak RSS (KiB) |
+| ---: | --- | ---: | ---: |
+| 200 | System Git 2.55.0 | 220 ms | 6,924 |
+| 200 | Grit before this fix (`34c10122c`) | 180 ms | 21,888 |
+| 200 | Grit with dirty-exec detection | 280 ms | 22,316 |
+| 2,000 | System Git 2.55.0 | 540 ms | 12,776 |
+| 2,000 | Grit before this fix (`34c10122c`) | 1,780 ms | 32,420 |
+| 2,000 | Grit with dirty-exec detection | 2,620 ms | 32,776 |
+
+Checking the index and tracked worktree after every successful command adds
+100 ms across 40 invocations (2.5 ms per command) and 428 KiB of peak RSS in this
+200-file fixture. At 2,000 files, it adds 840 ms (21 ms per command) and 356 KiB.
+This verification cost belongs to `--exec`; it closes the unchecked path that
+previously discarded successful commands' edits. The wider fixture also exposes
+an existing performance gap against Git that needs further work.

@@ -1021,6 +1021,24 @@ pub fn print_rebase_outcome(
     outln!(w);
     match outcome.result {
         RebaseResult::Aborted => outln!(w, "Rebase aborted."),
+        RebaseResult::ExecDirty => {
+            outln!(
+                w,
+                "- Rebase stopped: exec left tracked changes; edits are preserved."
+            );
+            outln!(
+                w,
+                "Save edits before continuing or skipping. Aborting discards exec edits."
+            );
+            for path in &outcome.paths {
+                outln!(w, "- `{path}`");
+            }
+            crate::operation_output::render_operation_guidance_markdown(
+                outcome.next_steps.as_deref().unwrap_or(&[]),
+                outcome.alternatives.as_deref(),
+                w,
+            )?;
+        }
         RebaseResult::Conflicts => {
             outln!(w, "- Rebase stopped with conflicts");
             outln!(w);

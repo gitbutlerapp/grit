@@ -1189,3 +1189,354 @@ fn clean_replay_still_carries_local_changes() {
     );
     assert_git_fsck_strict(wt);
 }
+
+fn exec_fixture() -> (
+    HistoryRepo,
+    StartRebaseOptions,
+    grit_lib::revwalk::history::RewritePlan,
+) {
+    use grit_lib::revwalk::history::{plan_rebase, RebasePlan};
+    let fixture = HistoryRepo::init();
+    let wt = fixture.worktree();
+    commit_file(wt, "f", "base\n", "base");
+    let upstream = git_oid(wt, "HEAD");
+    git(wt, &["switch", "-c", "topic"]);
+    commit_file(wt, "one", "one\n", "one");
+    commit_file(wt, "two", "two\n", "two");
+    let tip = git_oid(wt, "HEAD");
+    git(wt, &["switch", "main"]);
+    commit_file(wt, "extra", "upstream\n", "main moves");
+    let onto = git_oid(wt, "HEAD");
+    git(wt, &["switch", "topic"]);
+    let opts = start_opts(upstream, Some(onto), tip);
+    let RebasePlan::Plan(plan) = plan_rebase(&open_grit(wt), &opts.request, &opts.rebase).unwrap()
+    else {
+        panic!("replay plan")
+    };
+    (fixture, opts, plan)
+}
+
+fn run_dirty_exec(
+    wt: &std::path::Path,
+    plan: &grit_lib::revwalk::history::RewritePlan,
+    command: &str,
+) -> grit_lib::revwalk::history::HistoryError {
+    use grit_lib::revwalk::history::{verify_rebase_with_exec, ExecSpec};
+    verify_rebase_with_exec(
+        &open_grit(wt),
+        plan,
+        &ExecSpec {
+            commands: vec![command.into(), "echo later >> exec-log".into()],
+        },
+        grit_lib::command_runner::system_command_runner().as_ref(),
+    )
+    .unwrap_err()
+}
+
+#[test]
+fn exec_stop_keeps_dirty_index_and_resume_requires_explicit_recovery() {
+    use grit_lib::revwalk::history::{HistoryError, RebaseSessionError};
+    let (fixture, opts, plan) = exec_fixture();
+    let wt = fixture.worktree();
+    let original_index = std::fs::read(wt.join(".git/index")).unwrap();
+    let first = plan.commits.iter().find_map(|r| r.new).unwrap();
+    let err = run_dirty_exec(
+        wt,
+        &plan,
+        "echo staged >> f; git add f; echo unstaged >> f; echo captured",
+    );
+    match err {
+        HistoryError::ExecDirty {
+            commit,
+            paths,
+            runs,
+            ..
+        } => {
+            assert_eq!(commit, first);
+            assert_eq!(paths, ["f"]);
+            assert_eq!(runs.len(), 1);
+            assert_eq!(runs[0].stdout, b"captured\n");
+        }
+        other => panic!("expected typed exec stop, got {other:?}"),
+    }
+    assert_eq!(git_oid(wt, "topic"), opts.request.branch_tip);
+    assert_eq!(git_oid(wt, "HEAD"), first);
+    assert_eq!(git(wt, &["show", ":f"]), "base\nstaged\n");
+    let dirty_index = std::fs::read(wt.join(".git/index")).unwrap();
+    for skip in [false, true] {
+        let repo = open_grit(wt);
+        let result = if skip {
+            skip_rebase(&repo, &opts)
+        } else {
+            continue_rebase(&repo, &opts)
+        };
+        assert!(matches!(
+            result,
+            Err(RebaseSessionError::History(HistoryError::ExecDirty { .. }))
+        ));
+        assert_eq!(std::fs::read(wt.join(".git/index")).unwrap(), dirty_index);
+        assert_eq!(
+            std::fs::read(wt.join("f")).unwrap(),
+            b"base\nstaged\nunstaged\n"
+        );
+    }
+    assert!(!wt.join("exec-log").exists());
+    // A dirty stop is a grit-owned rebase; status must offer grit recovery.
+    let state = grit_lib::state::wt_status_get_state(
+        &wt.join(".git"),
+        &HeadState::Detached { oid: first },
+        false,
+    )
+    .unwrap();
+    assert!(state.grit_rebase_in_progress);
+    assert_git_fsck_strict(wt);
+    abort_rebase(&open_grit(wt), &test_ident()).unwrap();
+    assert_eq!(git_oid(wt, "HEAD"), opts.request.branch_tip);
+    assert_eq!(
+        std::fs::read(wt.join(".git/index")).unwrap(),
+        original_index
+    );
+    assert_eq!(std::fs::read(wt.join("f")).unwrap(), b"base\n");
+    assert!(!wt.join(".git/rebase-merge").exists());
+    assert_git_fsck_strict(wt);
+}
+
+#[test]
+fn exec_continue_resumes_after_dirty_command_and_keeps_saved_edits() {
+    let (fixture, opts, plan) = exec_fixture();
+    let wt = fixture.worktree();
+    // Only the first replay commit dirties the worktree; the second is clean.
+    run_dirty_exec(wt, &plan, "if ! test -f two; then echo hook-edit >> f; fi");
+    git(wt, &["stash", "push", "-m", "exec edits"]);
+    let outcome = continue_rebase(&open_grit(wt), &opts).unwrap();
+    let RebaseOutcome::ExecDone {
+        applied,
+        plan: resumed_plan,
+        ..
+    } = outcome
+    else {
+        panic!("completed")
+    };
+    assert_eq!(
+        *resumed_plan, plan,
+        "recovery retains the complete atomic plan and commit metadata"
+    );
+    assert_eq!(
+        applied.head,
+        plan.mapped_tip(opts.request.branch_tip).unwrap()
+    );
+    assert_eq!(git_oid(wt, "topic"), applied.head);
+    assert_eq!(
+        git(wt, &["symbolic-ref", "HEAD"]).trim(),
+        "refs/heads/topic"
+    );
+    assert_eq!(
+        std::fs::read_to_string(wt.join("exec-log")).unwrap(),
+        "later\nlater\n"
+    );
+    assert!(!wt.join(".git/rebase-merge").exists());
+    git(wt, &["stash", "pop"]);
+    assert_eq!(std::fs::read(wt.join("f")).unwrap(), b"base\nhook-edit\n");
+    assert_git_fsck_strict(wt);
+}
+
+#[test]
+fn exec_skip_skips_remaining_commands_without_dropping_replayed_commit() {
+    let (fixture, opts, plan) = exec_fixture();
+    let wt = fixture.worktree();
+    run_dirty_exec(wt, &plan, "if ! test -f two; then echo hook-edit >> f; fi");
+    git(wt, &["stash", "push"]);
+    let RebaseOutcome::ExecDone { applied, .. } = skip_rebase(&open_grit(wt), &opts).unwrap()
+    else {
+        panic!("done")
+    };
+    assert_eq!(
+        applied.head,
+        plan.mapped_tip(opts.request.branch_tip).unwrap()
+    );
+    assert_eq!(
+        std::fs::read_to_string(wt.join("exec-log")).unwrap(),
+        "later\n"
+    );
+    assert_eq!(git(wt, &["show", "HEAD:one"]), "one\n");
+    git(wt, &["stash", "pop"]);
+    assert_eq!(std::fs::read(wt.join("f")).unwrap(), b"base\nhook-edit\n");
+    assert_git_fsck_strict(wt);
+}
+
+#[test]
+fn dirty_success_preservation_matches_system_git() {
+    for command in [
+        "echo hook-edit >> f",
+        "echo hook-edit >> f; git add f",
+        "echo staged >> f; git add f; echo unstaged >> f",
+        "rm f",
+        "git rm -q f; echo new > added; git add added",
+    ] {
+        let (grit_fixture, opts, plan) = exec_fixture();
+        let wt = grit_fixture.worktree();
+        run_dirty_exec(wt, &plan, command);
+        let (git_fixture, git_opts, _) = exec_fixture();
+        let other = git_fixture.worktree();
+        let output = std::process::Command::new("git")
+            .args([
+                "rebase",
+                "--onto",
+                &git_opts.request.onto.unwrap().to_hex(),
+                &git_opts.request.upstream.to_hex(),
+                "--exec",
+                command,
+            ])
+            .current_dir(other)
+            .output()
+            .unwrap();
+        assert_eq!(output.status.code(), Some(1));
+        assert_eq!(
+            std::fs::read(wt.join("f")).ok(),
+            std::fs::read(other.join("f")).ok()
+        );
+        assert_eq!(
+            git(wt, &["diff", "--binary"]),
+            git(other, &["diff", "--binary"])
+        );
+        assert_eq!(
+            git(wt, &["diff", "--cached", "--binary"]),
+            git(other, &["diff", "--cached", "--binary"])
+        );
+        assert_eq!(git_oid(wt, "topic"), opts.request.branch_tip);
+        assert_eq!(git_oid(other, "topic"), git_opts.request.branch_tip);
+        assert_git_fsck_strict(wt);
+        assert_git_fsck_strict(other);
+    }
+}
+
+#[test]
+fn exec_continue_rejects_moved_head_and_abort_restores_original_branch() {
+    let (fixture, opts, plan) = exec_fixture();
+    let wt = fixture.worktree();
+    run_dirty_exec(wt, &plan, "echo hook-edit >> f");
+    git(wt, &["add", "f"]);
+    git(wt, &["commit", "-qm", "save exec edit"]);
+    let saved = git_oid(wt, "HEAD");
+    git(wt, &["branch", "saved-exec", &saved.to_hex()]);
+    let err = continue_rebase(&open_grit(wt), &opts).unwrap_err();
+    assert!(matches!(err, RebaseSessionError::ExecHeadChanged { .. }));
+    assert_eq!(git_oid(wt, "HEAD"), saved);
+    assert_eq!(git(wt, &["show", "HEAD:f"]), "base\nhook-edit\n");
+    abort_rebase(&open_grit(wt), &test_ident()).unwrap();
+    assert_eq!(git_oid(wt, "topic"), opts.request.branch_tip);
+    assert_eq!(git(wt, &["show", "saved-exec:f"]), "base\nhook-edit\n");
+    assert_git_fsck_strict(wt);
+}
+
+#[test]
+fn exec_abort_removes_staged_addition_and_restores_exact_index() {
+    let (fixture, opts, plan) = exec_fixture();
+    let wt = fixture.worktree();
+    let index = std::fs::read(wt.join(".git/index")).unwrap();
+    run_dirty_exec(wt, &plan, "git rm -q f; echo new > added; git add added");
+    assert_eq!(std::fs::read(wt.join("added")).unwrap(), b"new\n");
+    abort_rebase(&open_grit(wt), &test_ident()).unwrap();
+    assert_eq!(git_oid(wt, "HEAD"), opts.request.branch_tip);
+    assert_eq!(std::fs::read(wt.join(".git/index")).unwrap(), index);
+    assert_eq!(std::fs::read(wt.join("f")).unwrap(), b"base\n");
+    assert!(!wt.join("added").exists());
+    assert_eq!(git(wt, &["status", "--short"]), "");
+    assert_git_fsck_strict(wt);
+}
+
+#[test]
+fn exec_recovery_can_stop_again_at_next_command_and_final_commit() {
+    use grit_lib::revwalk::history::{verify_rebase_with_exec, ExecSpec, HistoryError};
+    let (fixture, opts, plan) = exec_fixture();
+    let wt = fixture.worktree();
+    let commands = vec!["echo first >> f".into(), "echo second >> f".into()];
+    let mut result = verify_rebase_with_exec(
+        &open_grit(wt),
+        &plan,
+        &ExecSpec {
+            commands: commands.clone(),
+        },
+        grit_lib::command_runner::system_command_runner().as_ref(),
+    )
+    .map(|_| ())
+    .map_err(RebaseSessionError::from);
+    let commits: Vec<_> = plan.commits.iter().filter_map(|r| r.new).collect();
+    for (step, expected_commit) in [commits[0], commits[0], commits[1], commits[1]]
+        .into_iter()
+        .enumerate()
+    {
+        let Err(RebaseSessionError::History(HistoryError::ExecDirty {
+            commit,
+            command,
+            runs,
+            ..
+        })) = result
+        else {
+            panic!("expected dirty exec stop at step {step}")
+        };
+        assert_eq!(commit, expected_commit);
+        assert_eq!(command, commands[step % 2]);
+        assert_eq!(runs.len(), 1);
+        assert_eq!(git_oid(wt, "topic"), opts.request.branch_tip);
+        git(wt, &["stash", "push", "-m", &format!("exec step {step}")]);
+        result = continue_rebase(&open_grit(wt), &opts).map(|outcome| {
+            if step == 3 {
+                assert!(matches!(outcome, RebaseOutcome::ExecDone { .. }));
+            }
+        });
+    }
+    result.unwrap();
+    assert_eq!(
+        git_oid(wt, "topic"),
+        plan.mapped_tip(opts.request.branch_tip).unwrap()
+    );
+    assert_eq!(git(wt, &["stash", "list"]).lines().count(), 4);
+    assert!(!wt.join(".git/rebase-merge").exists());
+    assert_git_fsck_strict(wt);
+}
+
+#[test]
+fn exec_failure_during_recovery_rolls_back_and_clears_exec_stop() {
+    use grit_lib::revwalk::history::{verify_rebase_with_exec, ExecSpec, HistoryError};
+    let (fixture, opts, plan) = exec_fixture();
+    let wt = fixture.worktree();
+    let index = std::fs::read(wt.join(".git/index")).unwrap();
+    let error = verify_rebase_with_exec(
+        &open_grit(wt),
+        &plan,
+        &ExecSpec {
+            commands: vec![
+                "echo edit >> f".into(),
+                "echo captured; echo failed >&2; exit 7".into(),
+            ],
+        },
+        grit_lib::command_runner::system_command_runner().as_ref(),
+    )
+    .unwrap_err();
+    assert!(matches!(error, HistoryError::ExecDirty { .. }));
+    git(wt, &["stash", "push"]);
+    let error = continue_rebase(&open_grit(wt), &opts).unwrap_err();
+    let RebaseSessionError::History(HistoryError::ExecFailed {
+        exit_code,
+        stdout,
+        stderr,
+        ..
+    }) = error
+    else {
+        panic!("typed exec failure")
+    };
+    assert_eq!(exit_code, 7);
+    assert_eq!(stdout, b"captured\n");
+    assert_eq!(stderr, b"failed\n");
+    assert_eq!(git_oid(wt, "HEAD"), opts.request.branch_tip);
+    assert_eq!(
+        git(wt, &["symbolic-ref", "HEAD"]).trim(),
+        "refs/heads/topic"
+    );
+    assert_eq!(std::fs::read(wt.join(".git/index")).unwrap(), index);
+    assert!(!wt.join(".git/rebase-merge").exists());
+    git(wt, &["stash", "pop"]);
+    assert_eq!(std::fs::read(wt.join("f")).unwrap(), b"base\nedit\n");
+    assert_git_fsck_strict(wt);
+}

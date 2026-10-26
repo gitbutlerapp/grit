@@ -154,6 +154,20 @@ pub enum HistoryError {
     #[error("you have uncommitted changes — commit them before rebasing with --exec")]
     UncommittedChanges,
 
+    /// A successful exec changed tracked paths. Edits and the replay HEAD are preserved;
+    /// original branch refs are unchanged and rebase recovery state is persisted.
+    #[error("rebase --exec left tracked changes at commit {commit}; save the edits before continuing, or abort the rebase")]
+    ExecDirty {
+        /// Replay commit checked out when the command ran.
+        commit: ObjectId,
+        /// Successful command that changed the index or worktree.
+        command: String,
+        /// Changed paths relative to the replay commit, sorted and deduplicated.
+        paths: Vec<String>,
+        /// Captured invocations through the dirty command, in execution order.
+        runs: Vec<super::ExecRunRecord>,
+    },
+
     /// A `rebase --exec` command exited non-zero; repository state was restored.
     #[error("rebase --exec command failed at commit {commit} (exit {exit_code})")]
     ExecFailed {

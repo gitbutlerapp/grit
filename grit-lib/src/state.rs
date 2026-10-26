@@ -586,7 +586,7 @@ fn resolve_head_impl(git_dir: &Path, repo: Option<&crate::repo::Repository>) -> 
 
 /// True when grit owns the in-progress rebase (`.git/rebase-merge/grit-plan`).
 fn grit_rebase_plan_active(rebase_merge: &Path) -> bool {
-    rebase_merge.join("grit-plan").is_file()
+    rebase_merge.join("grit-plan").is_file() || rebase_merge.join("grit-exec").is_file()
 }
 
 /// Detect in-progress operations by checking for sentinel files.
