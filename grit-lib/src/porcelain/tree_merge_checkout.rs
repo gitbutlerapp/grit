@@ -79,7 +79,8 @@ pub(crate) fn apply_clean_tree_merge_to_worktree_with_snapshot(
         &mut crate::progress::NullProgress,
         &crate::progress::NeverCancel,
         CheckoutApplyOptions {
-            parallel_prepare_blobs: tree_changes.len() > 16,
+            parallel_prepare_blobs: true,
+            checkout_result_tree: Some(merged.result_tree),
             defer_index_disk_write: true,
             ..CheckoutApplyOptions::default()
         },
@@ -93,7 +94,7 @@ pub(crate) fn apply_clean_tree_merge_to_worktree_with_snapshot(
 /// Single index write for a merge checkout, with the same racy-entry policy as checkout's own
 /// write: the clean-worktree guard already verified untouched entries and checkout just stat'ed
 /// the entries it wrote, so re-hashing every same-second entry would only repeat that work.
-fn write_index_after_merge_checkout(
+pub(crate) fn write_index_after_merge_checkout(
     repo: &Repository,
     index: &mut crate::index::Index,
 ) -> Result<()> {

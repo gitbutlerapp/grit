@@ -65,7 +65,9 @@ use crate::porcelain::switch::{
     checkout_prepared_tree_transition_for_merge, prepare_tree_transition_allow_local,
     verify_tree_transition_allow_local, TreeTransitionPrepareError, TreeTransitionVerifyError,
 };
-use crate::porcelain::tree_merge_checkout::finalize_clean_tree_merge_index;
+use crate::porcelain::tree_merge_checkout::{
+    finalize_clean_tree_merge_index, write_index_after_merge_checkout,
+};
 use crate::porcelain::worktree_guard::prepare_tree_checkout;
 use crate::progress::ProgressSink;
 use crate::refs;
@@ -854,7 +856,7 @@ fn integrate_branch_without_hooks(
     merge_checkout_tree_transition(repo, Some(&into_tree), &merged.result_tree)?;
     let mut snapshot = crate::porcelain::worktree_guard::load_worktree_snapshot(repo)?;
     finalize_clean_tree_merge_index(repo, &mut snapshot.index, &merged)?;
-    repo.write_index(&mut snapshot.index)?;
+    write_index_after_merge_checkout(repo, &mut snapshot.index)?;
 
     match options.commit {
         MergeCommitMode::Squash => {

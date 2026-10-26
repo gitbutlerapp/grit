@@ -649,27 +649,29 @@ pub fn checkout_hard_to_tree_from_head_tree(
         &target_entries,
         &changes,
     );
-    drop(pre_reset_index);
 
     let mut written_by_tree_diff: BTreeSet<Vec<u8>> = BTreeSet::new();
-    if !changes.is_empty() {
-        checkout_tree_changes_with_progress(
-            repo,
-            &changes,
-            progress,
-            cancel,
-            None,
-            CheckoutApplyOptions::default(),
-            None,
-        )?;
-        for change in &changes {
-            if change.status == DiffStatus::Deleted {
-                continue;
-            }
-            if let Some(path) = &change.new_path {
-                written_by_tree_diff.insert(crate::repo_relpath::storage_bytes(path).into_owned());
-            }
+    for change in &changes {
+        if change.status == DiffStatus::Deleted {
+            continue;
         }
+        if let Some(path) = &change.new_path {
+            written_by_tree_diff.insert(crate::repo_relpath::storage_bytes(path).into_owned());
+        }
+    }
+    let hard_reset_apply = if changes.is_empty() {
+        None
+    } else {
+        Some(CheckoutApplyOptions {
+            parallel_prepare_blobs: true,
+            checkout_result_tree: Some(*target_tree),
+            ..CheckoutApplyOptions::default()
+        })
+    };
+    drop(pre_reset_index);
+
+    if let Some(apply) = hard_reset_apply {
+        checkout_tree_changes_with_progress(repo, &changes, progress, cancel, None, apply, None)?;
     }
 
     let mut index = repo.load_index()?;
@@ -683,7 +685,15 @@ pub fn checkout_hard_to_tree_from_head_tree(
     let protect = ProtectOptions::from_config(config.as_ref());
     let mut dir_cache = LeadingDirCache::with_protect(protect);
 
-    let worktree_stats = scan_index_blob_stats(repo, work_tree, &index, config.as_ref())?;
+    let stat_positions = hard_reset_stat_probe_positions(
+        &index,
+        &target_entries,
+        trees_differ,
+        &written_by_tree_diff,
+        sparse.as_ref(),
+    );
+    let worktree_stats =
+        scan_index_blob_stats_at(repo, work_tree, &index, config.as_ref(), &stat_positions)?;
     let stat_policy = crate::index::StatMatchPolicy::from_config(Some(config.as_ref()));
     let trust_filemode = config
         .get_bool("core.filemode")
@@ -870,8 +880,43 @@ pub fn checkout_hard_to_tree_from_head_tree(
     {
         new_index.set_cache_tree(cache_tree);
     }
-    repo.write_index(&mut new_index)?;
+    new_index.skip_racy_smudge_on_write = trees_differ && !written_by_tree_diff.is_empty();
+    let result = repo.write_index_with_post_index_change(&mut new_index, true, false);
+    new_index.skip_racy_smudge_on_write = false;
+    result?;
     Ok(())
+}
+
+/// Index positions that need a worktree stat before hard reset can choose keep vs verify.
+fn hard_reset_stat_probe_positions(
+    index: &Index,
+    target_entries: &[IndexEntry],
+    trees_differ: bool,
+    written_by_tree_diff: &BTreeSet<Vec<u8>>,
+    sparse: Option<&SparseCheckout>,
+) -> Vec<usize> {
+    let mut positions = Vec::new();
+    for te in target_entries {
+        if sparse.is_some_and(|sparse| {
+            sparse.checkout_skips(index, &crate::repo_relpath::storage_string(&te.path))
+        }) {
+            continue;
+        }
+        if te.mode == MODE_GITLINK {
+            continue;
+        }
+        if trees_differ && written_by_tree_diff.contains(&te.path) {
+            continue;
+        }
+        let Some(pos) = index.find_entry_pos(&te.path, 0) else {
+            continue;
+        };
+        let existing = &index.entries[pos];
+        if existing.oid == te.oid && existing.mode == te.mode {
+            positions.push(pos);
+        }
+    }
+    positions
 }
 
 /// What a hard reset does with one target-tree entry.
@@ -923,15 +968,16 @@ fn hard_reset_entry_stat_clean(
         && !crate::diff::entry_is_racy_with_policy(existing, index_mtime, stat_policy)
 }
 
-/// Stat every scan-eligible stage-0 blob in `index` with one directory-grouped pass.
+/// Stat selected stage-0 blobs in `index` with one directory-grouped pass.
 ///
 /// Returns one slot per index entry: `Some` when the path exists on disk, `None` when it is
 /// missing, unreadable, or not part of the scan (gitlinks, skip-worktree, unmerged).
-fn scan_index_blob_stats(
+fn scan_index_blob_stats_at(
     repo: &Repository,
     work_tree: &Path,
     index: &Index,
     config: &ConfigSet,
+    positions: &[usize],
 ) -> Result<Vec<Option<crate::worktree_scan::BlobDiskStat>>> {
     use crate::worktree_scan::{
         collect_blob_lookup_batches, group_blob_entries_by_dir, BlobDiskLookup, BlobScanSparseMode,
@@ -939,7 +985,22 @@ fn scan_index_blob_stats(
     };
 
     let mut stats = vec![None; index.entries.len()];
-    let plan = group_blob_entries_by_dir(index, false);
+    if positions.is_empty() {
+        return Ok(stats);
+    }
+    let original_by_path: std::collections::HashMap<Vec<u8>, usize> = positions
+        .iter()
+        .filter_map(|&pos| index.entries.get(pos).map(|e| (e.path.clone(), pos)))
+        .collect();
+    let mut subset = Index::new();
+    subset.entries_sorted = index.entries_sorted;
+    for &pos in positions {
+        if let Some(entry) = index.entries.get(pos) {
+            subset.entries.push(entry.clone());
+        }
+    }
+    subset.sort();
+    let plan = group_blob_entries_by_dir(&subset, false);
     if plan.is_empty() {
         return Ok(stats);
     }
@@ -950,7 +1011,7 @@ fn scan_index_blob_stats(
     let dir_root = work_tree.to_path_buf();
     let file_root = work_tree.to_path_buf();
     let batches = collect_blob_lookup_batches(
-        index,
+        &subset,
         &plan,
         WorktreeBlobScanOptions {
             preload_index,
@@ -964,8 +1025,14 @@ fn scan_index_blob_stats(
         BlobScanSparseMode::Dense,
     )?;
     for (entry_index, lookup) in batches.into_iter().flatten() {
+        let Some(entry) = subset.entries.get(entry_index) else {
+            continue;
+        };
+        let Some(&orig) = original_by_path.get(&entry.path) else {
+            continue;
+        };
         if let BlobDiskLookup::Present(stat) = lookup {
-            stats[entry_index] = Some(stat);
+            stats[orig] = Some(stat);
         }
     }
     Ok(stats)

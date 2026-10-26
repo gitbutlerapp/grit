@@ -207,11 +207,18 @@ pub fn worktree_bytes_for_index_mode(path: &Path, mode: u32) -> io::Result<Vec<u
 
 /// Write a regular file at `path`, first removing any pre-existing symlink there.
 pub fn write_regular_file_replacing_symlink(path: &Path, contents: &[u8]) -> io::Result<()> {
+    use std::io::Write;
     if path
         .symlink_metadata()
         .is_ok_and(|m| m.file_type().is_symlink())
     {
         fs::remove_file(path)?;
+    }
+    if path.is_file() {
+        if let Ok(mut file) = fs::OpenOptions::new().write(true).truncate(true).open(path) {
+            file.write_all(contents)?;
+            return Ok(());
+        }
     }
     fs::write(path, contents)
 }
@@ -1832,68 +1839,11 @@ pub(crate) fn clear_stashes(repo: &Repository) -> Result<usize> {
     Ok(count)
 }
 
-/// One filter-free regular file that stash apply writes from a stash tree blob.
-struct StashFileWrite<'a> {
+/// One filter-free regular file applied from a stash tree blob via bulk checkout.
+struct StashCheckoutJob<'a> {
     rel_path: &'a str,
-    abs: std::path::PathBuf,
     mode: u32,
     oid: ObjectId,
-    file_attrs: crate::crlf::FileAttrs,
-}
-
-/// Write `jobs` into the worktree, spreading blob reads, conversion and writes over the
-/// checkout worker pool (`checkout.workers`). Parent directories must already exist.
-fn write_stash_files(
-    repo: &Repository,
-    rules: &WorktreeRules,
-    jobs: &[StashFileWrite<'_>],
-) -> Result<()> {
-    if jobs.is_empty() {
-        return Ok(());
-    }
-    let config = repo.config()?;
-    let options = repo
-        .thread_policy()
-        .resolve(crate::parallel::ParallelOp::Checkout, config.as_ref());
-    let conv = rules.conversion();
-    let smudge_context = crate::filter_process::checkout_smudge_context(repo);
-    let pack_store = repo.odb().pack_store_for(repo.odb().objects_dir());
-    crate::parallel::try_par_map_with_local(
-        jobs,
-        options,
-        0,
-        || {
-            crate::objects::pack_store::PackReadContextGuard::install(std::sync::Arc::clone(
-                &pack_store,
-            ))
-        },
-        |_, job| -> Result<()> {
-            let blob = repo.odb().read(&job.oid)?;
-            let oid_hex = job.oid.to_string();
-            let smudge_meta =
-                crate::filter_process::smudge_meta_for_checkout_blob(&smudge_context, &oid_hex);
-            let bytes = crate::crlf::convert_to_worktree_eager(
-                &blob.data,
-                job.rel_path,
-                conv,
-                &job.file_attrs,
-                Some(&oid_hex),
-                Some(&smudge_meta),
-                None,
-            )?;
-            write_regular_file_replacing_symlink(&job.abs, &bytes)?;
-            #[cfg(unix)]
-            if job.mode == MODE_EXECUTABLE {
-                use std::os::unix::fs::PermissionsExt;
-                fs::set_permissions(&job.abs, fs::Permissions::from_mode(0o755))?;
-            }
-            Ok(())
-        },
-    )
-    .map_err(|e| match e {
-        crate::parallel::ParallelHashError::Task(err) => err,
-    })?;
-    Ok(())
 }
 
 /// Write one flattened tree entry into the worktree (blob, symlink, or gitlink).
@@ -2374,10 +2324,10 @@ fn apply_stash_commit(
 
     // Apply working tree changes (with three-way merge when HEAD has moved)
     let mut prepared_dirs: HashSet<std::path::PathBuf> = HashSet::new();
-    let mut parallel_writes: Vec<StashFileWrite<'_>> = Vec::new();
+    let mut parallel_writes: Vec<StashCheckoutJob<'_>> = Vec::new();
     for (path, change) in &wt_changes {
         // Deletions all ran in the first pass. Pruning directories here could remove the
-        // parent of a regular file still queued for `write_stash_files`.
+        // parent of a regular file still queued for bulk checkout.
         let Some(entry) = change else {
             continue;
         };
@@ -2416,12 +2366,10 @@ fn apply_stash_commit(
         if !head_moved && entry.mode != MODE_SYMLINK {
             let file_attrs = worktree_rules.file_attrs(path, false);
             if is_eligible_for_parallel_checkout(entry.mode, &file_attrs) {
-                parallel_writes.push(StashFileWrite {
+                parallel_writes.push(StashCheckoutJob {
                     rel_path: path,
-                    abs: file_path,
                     mode: entry.mode,
                     oid: entry.oid,
-                    file_attrs,
                 });
                 continue;
             }
@@ -2556,7 +2504,38 @@ fn apply_stash_commit(
         }
     }
 
-    write_stash_files(repo, &worktree_rules, &parallel_writes)?;
+    if !parallel_writes.is_empty() {
+        let checkout_changes: Vec<DiffEntry> = parallel_writes
+            .iter()
+            .map(|job| {
+                let base = flat_tree_lookup(&base_tree_entries, job.rel_path);
+                DiffEntry {
+                    status: DiffStatus::Modified,
+                    old_path: Some(job.rel_path.to_string()),
+                    new_path: Some(job.rel_path.to_string()),
+                    old_mode: format_mode(
+                        base.map(|e| e.mode).unwrap_or(crate::index::MODE_REGULAR),
+                    ),
+                    new_mode: format_mode(job.mode),
+                    old_oid: base.map(|e| e.oid).unwrap_or_else(zero_oid),
+                    new_oid: job.oid,
+                    score: None,
+                }
+            })
+            .collect();
+        crate::porcelain::checkout::checkout_tree_changes_with_index_opts(
+            repo,
+            &checkout_changes,
+            &mut new_index,
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
+            crate::porcelain::checkout::CheckoutApplyOptions {
+                parallel_prepare_blobs: true,
+                ..crate::porcelain::checkout::CheckoutApplyOptions::default()
+            },
+            None,
+        )?;
+    }
     drop(parallel_writes);
     // Update the index
 

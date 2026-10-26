@@ -1314,6 +1314,92 @@ mod tests {
         git(root, &["fsck", "--no-progress"]);
     }
 
+    const ALL_MODIFIED_DIRS: usize = 100;
+    const ALL_MODIFIED_FILES_PER_DIR: usize = 50;
+
+    fn wide_repo_two_commits_all_paths_differ(root: &std::path::Path) -> (Repository, ObjectId, ObjectId) {
+        git(root, &["init", "-q", "-b", "main", "."]);
+        git(root, &["config", "gc.auto", "0"]);
+        for d in 0..ALL_MODIFIED_DIRS {
+            let dir = root.join(format!("d{d}"));
+            std::fs::create_dir_all(&dir).expect("mkdir");
+            for f in 0..ALL_MODIFIED_FILES_PER_DIR {
+                std::fs::write(dir.join(format!("f{f}.txt")), format!("line a {d} {f}\n"))
+                    .expect("write");
+            }
+        }
+        git(root, &["add", "-A"]);
+        git(root, &["commit", "-qm", "base"]);
+        for d in 0..ALL_MODIFIED_DIRS {
+            for f in 0..ALL_MODIFIED_FILES_PER_DIR {
+                let path = root.join(format!("d{d}/f{f}.txt"));
+                std::fs::write(&path, format!("line a {d} {f}\nedit\n")).expect("edit");
+            }
+        }
+        git(root, &["add", "-A"]);
+        git(root, &["commit", "-qm", "edited"]);
+        let older = ObjectId::from_hex(git(root, &["rev-parse", "HEAD~1"]).trim()).expect("older");
+        let newer = ObjectId::from_hex(git(root, &["rev-parse", "HEAD"]).trim()).expect("newer");
+        let repo = Repository::open(
+            &root.join(".git"),
+            &crate::environment::RepositoryOptions::empty().with_work_tree(root),
+        )
+        .expect("open");
+        (repo, older, newer)
+    }
+
+    #[test]
+    fn hard_reset_all_modified_tree_diff_skips_redundant_worktree_stat_scan() {
+        use crate::worktree_scan::{reset_worktree_metadata_probe, worktree_metadata_probe_count};
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        let (repo, older, newer) = wide_repo_two_commits_all_paths_differ(root);
+        let pinned = filetime::FileTime::from_unix_time(1_700_000_100, 0);
+        for d in 0..ALL_MODIFIED_DIRS {
+            for f in 0..ALL_MODIFIED_FILES_PER_DIR {
+                let path = root.join(format!("d{d}/f{f}.txt"));
+                filetime::set_file_mtime(&path, pinned).expect("pin mtime");
+            }
+        }
+        git(root, &["update-index", "-q", "--refresh"]);
+
+        let metrics = repo.odb().hot_path_metrics();
+        metrics.reset_blob_content_reads();
+        metrics.set_blob_counting(true);
+        let probes = reset_worktree_metadata_probe(root);
+        reset_to_commit(
+            &repo,
+            &reset_opts(older, ResetMode::Hard),
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .expect("hard reset to older");
+        let probe_after_first = worktree_metadata_probe_count();
+        reset_to_commit(
+            &repo,
+            &reset_opts(newer, ResetMode::Hard),
+            &mut crate::progress::NullProgress,
+            &crate::progress::NeverCancel,
+        )
+        .expect("hard reset to newer");
+        let probe_count = worktree_metadata_probe_count();
+        drop(probes);
+        metrics.set_blob_counting(false);
+
+        let total_files = ALL_MODIFIED_DIRS * ALL_MODIFIED_FILES_PER_DIR;
+        assert_eq!(
+            metrics.blob_content_reads(),
+            0,
+            "tree-diff hard reset must not re-read blob content for every modified path"
+        );
+        assert!(
+            probe_count <= probe_after_first + ALL_MODIFIED_DIRS + 8,
+            "expected about one stat per rewritten file ({total_files}), got {probe_count} (after first reset {probe_after_first})"
+        );
+        assert_git_sees_clean_repo(root);
+    }
+
     #[test]
     fn hard_reset_delete_heavy_reads_no_worktree_files_and_stats_each_once() {
         use crate::worktree_scan::{reset_worktree_metadata_probe, worktree_metadata_probe_count};
