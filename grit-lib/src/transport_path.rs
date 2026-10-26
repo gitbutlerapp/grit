@@ -151,11 +151,15 @@ pub fn normalize_local_path_for_config(path: &Path) -> String {
 /// the cwd via `getcwd`).
 #[must_use]
 pub fn absolute_local_clone_source_url(source_path: &Path) -> String {
+    absolute_local_clone_source_url_from(source_path, &crate::environment::Environment::empty().cwd)
+}
+
+/// [`absolute_local_clone_source_url`] with a relative `source_path` taken from `cwd`.
+fn absolute_local_clone_source_url_from(source_path: &Path, cwd: &Path) -> String {
     let absolute = if source_path.is_absolute() {
         source_path.to_path_buf()
     } else {
-        let c = crate::environment::Environment::empty().cwd.clone();
-        let cwd = c.canonicalize().unwrap_or(c);
+        let cwd = cwd.canonicalize().unwrap_or_else(|_| cwd.to_path_buf());
         cwd.join(source_path)
     };
     normalize_local_path_for_config(&absolute)
@@ -633,12 +637,8 @@ mod tests {
         let base = std::env::temp_dir().join(format!("grit-abs-clone-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&base);
         std::fs::create_dir_all(&base).expect("temp base");
-        let prev = Some(crate::environment::Environment::empty().cwd.clone());
-        std::env::set_current_dir(&base).expect("chdir");
-        let stored = absolute_local_clone_source_url(Path::new("./nested/../peer"));
-        if let Some(p) = prev.as_ref() {
-            let _ = std::env::set_current_dir(p);
-        }
+        // Not `set_current_dir`: that would move every test running in this process.
+        let stored = absolute_local_clone_source_url_from(Path::new("./nested/../peer"), &base);
         let _ = std::fs::remove_dir_all(&base);
         assert!(
             stored.contains("nested/../peer") || stored.ends_with("peer"),
