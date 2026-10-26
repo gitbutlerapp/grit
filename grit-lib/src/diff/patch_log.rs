@@ -40,6 +40,16 @@ pub enum LogPatchCommitHeader {
     FormatPercentH,
 }
 
+/// Binary file encoding inside a log/show patch (`git log -p` vs `git diff --binary`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum LogPatchBinaryFormat {
+    /// `Binary files a/... and b/... differ` (default for `git log -p`).
+    #[default]
+    LogShortMessage,
+    /// `GIT binary patch` sections (`git diff --binary`, accepted by `git apply`).
+    GitApplyBinaryPatch,
+}
+
 /// Options for [`write_commit_log_patch`].
 #[derive(Debug, Clone)]
 pub struct LogPatchOptions {
@@ -49,6 +59,8 @@ pub struct LogPatchOptions {
     pub abbrev_len: usize,
     /// Commit header shape before patches.
     pub commit_header: LogPatchCommitHeader,
+    /// How to encode binary file changes in the patch body.
+    pub binary_format: LogPatchBinaryFormat,
 }
 
 impl LogPatchOptions {
@@ -59,6 +71,7 @@ impl LogPatchOptions {
             diff: DiffOptions::from_config(config),
             abbrev_len: 7,
             commit_header: LogPatchCommitHeader::Full,
+            binary_format: LogPatchBinaryFormat::default(),
         }
     }
 }
@@ -110,6 +123,7 @@ pub fn write_patch<W: Write>(
         diff: opts.diff.clone(),
         abbrev_len: opts.abbrev_len,
         commit_header: LogPatchCommitHeader::FormatPercentH,
+        binary_format: LogPatchBinaryFormat::GitApplyBinaryPatch,
     };
     let abbrev_len = opts.abbrev_len;
     let mut abbrev_cache = OidAbbrevCache::new(abbrev_len);
@@ -129,7 +143,7 @@ pub fn write_patch<W: Write>(
                 &log_opts,
                 &mut abbrev_cache,
                 None,
-                DiffEntryPatchBinaryFormat::GitApplyBinaryPatch,
+                LogPatchBinaryFormat::GitApplyBinaryPatch,
                 &config,
             )?;
         }
@@ -159,7 +173,7 @@ pub fn write_patch<W: Write>(
                 &log_opts,
                 &mut worker.abbrev,
                 None,
-                DiffEntryPatchBinaryFormat::GitApplyBinaryPatch,
+                LogPatchBinaryFormat::GitApplyBinaryPatch,
                 &config,
             )?;
             Ok(buf)
@@ -197,6 +211,7 @@ pub fn write_patch_structured<W: Write>(
         diff: opts.diff.clone(),
         abbrev_len: opts.abbrev_len,
         commit_header: LogPatchCommitHeader::FormatPercentH,
+        binary_format: LogPatchBinaryFormat::GitApplyBinaryPatch,
     };
     let mut abbrev_cache = OidAbbrevCache::new(opts.abbrev_len);
     let oids = items
@@ -400,14 +415,6 @@ fn write_patch_unified_body_from_bytes<W: Write>(
         )?;
     }
     Ok(())
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum DiffEntryPatchBinaryFormat {
-    /// `Binary files a/... and b/... differ` (log/show without `--binary`).
-    LogShortMessage,
-    /// `GIT binary patch` sections (`git diff --binary`, `git apply`).
-    GitApplyBinaryPatch,
 }
 
 fn resolve_core_abbrev_len(config: &ConfigSet, odb: &Odb) -> Result<usize> {
@@ -616,7 +623,7 @@ fn write_parsed_commit_log_patch<W: Write>(
             opts,
             abbrev_cache,
             Some(&commit.tree),
-            DiffEntryPatchBinaryFormat::LogShortMessage,
+            opts.binary_format,
             &config,
         )?;
     }
@@ -728,7 +735,7 @@ pub fn write_diff_entry_log_patch<W: Write>(
         opts,
         &mut abbrev_cache,
         None,
-        DiffEntryPatchBinaryFormat::LogShortMessage,
+        opts.binary_format,
         &config,
     )
 }
@@ -843,7 +850,7 @@ fn write_diff_entry_patch<W: Write>(
     opts: &LogPatchOptions,
     abbrev_cache: &mut OidAbbrevCache,
     new_tree: Option<&ObjectId>,
-    binary_format: DiffEntryPatchBinaryFormat,
+    binary_format: LogPatchBinaryFormat,
     config: &ConfigSet,
 ) -> Result<()> {
     let old_mode = log_patch_parse_mode_u32(&entry.old_mode);
@@ -871,7 +878,7 @@ fn write_diff_entry_patch_with_resolved_bytes<W: Write>(
     entry: &DiffEntry,
     opts: &LogPatchOptions,
     abbrev_cache: &mut OidAbbrevCache,
-    binary_format: DiffEntryPatchBinaryFormat,
+    binary_format: LogPatchBinaryFormat,
     config: &ConfigSet,
     old_bytes: &[u8],
     new_bytes: &[u8],
@@ -891,8 +898,7 @@ fn write_diff_entry_patch_with_resolved_bytes<W: Write>(
     let old_mode = log_patch_parse_mode_u32(&entry.old_mode);
     let new_mode = log_patch_parse_mode_u32(&entry.new_mode);
     let is_binary = merge_file::is_binary(old_bytes) || merge_file::is_binary(new_bytes);
-    let index_full_oid =
-        is_binary && binary_format == DiffEntryPatchBinaryFormat::GitApplyBinaryPatch;
+    let index_full_oid = is_binary && binary_format == LogPatchBinaryFormat::GitApplyBinaryPatch;
     write_diff_entry_patch_headers(out, repo, entry, opts, abbrev_cache, index_full_oid)?;
 
     if old_bytes == new_bytes {
@@ -901,7 +907,7 @@ fn write_diff_entry_patch_with_resolved_bytes<W: Write>(
 
     if is_binary {
         match binary_format {
-            DiffEntryPatchBinaryFormat::LogShortMessage => {
+            LogPatchBinaryFormat::LogShortMessage => {
                 let old_side = if old_mode == 0 {
                     "/dev/null".to_owned()
                 } else {
@@ -914,14 +920,14 @@ fn write_diff_entry_patch_with_resolved_bytes<W: Write>(
                 };
                 writeln!(out, "Binary files {old_side} and {new_side} differ")?;
             }
-            DiffEntryPatchBinaryFormat::GitApplyBinaryPatch => {
+            LogPatchBinaryFormat::GitApplyBinaryPatch => {
                 crate::apply::write_git_binary_patch_sections(out, old_bytes, new_bytes)?;
             }
         }
         return Ok(());
     }
 
-    if binary_format == DiffEntryPatchBinaryFormat::GitApplyBinaryPatch && new_tree.is_none() {
+    if binary_format == LogPatchBinaryFormat::GitApplyBinaryPatch && new_tree.is_none() {
         return write_patch_unified_body_from_bytes(
             out, old_bytes, new_bytes, git_old, git_new, old_mode, new_mode, opts,
         );
@@ -1057,6 +1063,7 @@ pub fn write_patch_resolved<W: Write>(
         diff: opts.diff.clone(),
         abbrev_len: opts.abbrev_len,
         commit_header: LogPatchCommitHeader::FormatPercentH,
+        binary_format: LogPatchBinaryFormat::GitApplyBinaryPatch,
     };
     let mut abbrev_cache = OidAbbrevCache::new(opts.abbrev_len);
     let oids = files
@@ -1078,7 +1085,7 @@ pub fn write_patch_resolved<W: Write>(
             &entry,
             &log_opts,
             &mut abbrev_cache,
-            DiffEntryPatchBinaryFormat::GitApplyBinaryPatch,
+            LogPatchBinaryFormat::GitApplyBinaryPatch,
             &config,
             &old,
             &new,

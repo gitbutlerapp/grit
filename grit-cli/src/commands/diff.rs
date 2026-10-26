@@ -25,9 +25,11 @@ use grit_lib::diff::{
     structured::{
         format_hunk_range, structured_file_diff, SideBytes, StructuredFileDiff, StructuredLineKind,
     },
-    submodule_porcelain_flags, tree_diff_structured_parallel, write_patch, write_patch_resolved,
-    DiffDetail, DiffEntry, DiffFilesOutput, DiffIndexToWorktreeOptions, DiffMerges, DiffOptions,
-    DiffSide, DiffStatus, PatchResolvedSide, PatchSide, PatchTextOptions, TreeDiffStructured,
+    submodule_porcelain_flags, tree_diff_structured_parallel, write_commit_log_patch,
+    write_commits_log_patch, write_patch, write_patch_resolved, DiffDetail, DiffEntry,
+    DiffFilesOutput, DiffIndexToWorktreeOptions, DiffMerges, DiffOptions, DiffSide, DiffStatus,
+    LogPatchCommitHeader, LogPatchOptions, PatchResolvedSide, PatchSide, PatchTextOptions,
+    TreeDiffStructured,
 };
 use grit_lib::index::Index;
 use grit_lib::objects::odb::Odb;
@@ -784,6 +786,70 @@ fn emit_patch_text_to_stdout(
         write_patch(repo, &entries, &patch_opts, &mut stdout)?;
     }
     Ok(())
+}
+
+/// Build [`LogPatchOptions`] for git-apply-compatible `grit show` / `grit log --patch-text`.
+pub fn log_patch_options_for_patch_text(
+    repo: &grit_lib::repo::Repository,
+    format: DiffFormatArgs,
+) -> Result<LogPatchOptions> {
+    let config = repo.config().context("could not load config")?;
+    let mut diff_options = DiffOptions::from_config(config.as_ref());
+    diff_options.context_lines = CONTEXT_LINES;
+    format.apply_context(&mut diff_options);
+    Ok(LogPatchOptions {
+        diff: diff_options,
+        abbrev_len: 7,
+        commit_header: LogPatchCommitHeader::Full,
+        binary_format: grit_lib::diff::LogPatchBinaryFormat::GitApplyBinaryPatch,
+    })
+}
+
+fn map_log_patch_error(err: grit_lib::error::Error) -> anyhow::Error {
+    anyhow::Error::new(err)
+}
+
+/// Outcome after streaming a show/log `--patch-text` body to stdout.
+#[must_use]
+pub fn streamed_log_patch_text_outcome(format: DiffFormatArgs) -> DiffOutcome {
+    DiffOutcome {
+        changed: true,
+        files: Vec::new(),
+        totals: None,
+        format,
+        path_display: None,
+        body_streamed: true,
+        preserve_changed: true,
+    }
+}
+
+/// Stream one commit in `git show --patch-text` shape.
+pub fn emit_show_log_patch_text(
+    repo: &grit_lib::repo::Repository,
+    oid: &ObjectId,
+    format: DiffFormatArgs,
+) -> Result<()> {
+    let opts = log_patch_options_for_patch_text(repo, format)?;
+    let mut stdout = std::io::stdout();
+    repo.odb()
+        .with_pack_read_context(|| write_commit_log_patch(repo, &mut stdout, oid, &opts))
+        .map_err(map_log_patch_error)
+}
+
+/// Stream many commits in `git log --patch-text` shape.
+pub fn emit_commits_log_patch_text(
+    repo: &grit_lib::repo::Repository,
+    oids: &[ObjectId],
+    format: DiffFormatArgs,
+) -> Result<()> {
+    if oids.is_empty() {
+        return Ok(());
+    }
+    let opts = log_patch_options_for_patch_text(repo, format)?;
+    let mut stdout = std::io::stdout();
+    repo.odb()
+        .with_pack_read_context(|| write_commits_log_patch(repo, &mut stdout, oids, &opts))
+        .map_err(map_log_patch_error)
 }
 
 fn patch_text_outcome(
@@ -2758,6 +2824,11 @@ impl DiffOutcome {
     #[must_use]
     pub(crate) fn format_flags(&self) -> DiffFormatArgs {
         self.format
+    }
+
+    #[must_use]
+    pub(crate) fn body_was_streamed(&self) -> bool {
+        self.body_streamed
     }
 
     pub(crate) fn path_display_opts(&self) -> Option<&PathDisplayOptions> {

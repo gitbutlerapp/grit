@@ -2576,6 +2576,9 @@ fn dispatch(
                 graph,
                 graph_unicode,
             };
+            if format.patch_text && opts.mode != OutputMode::Human {
+                bail!("`--patch-text` cannot be used with --json or --markdown");
+            }
             emit_success(
                 &commands::log::run(rev, pathspecs, cursor, format, display, opts.mode)?,
                 opts,
@@ -2736,6 +2739,9 @@ fn dispatch(
             pathspecs,
             format,
         } => {
+            if format.patch_text && opts.mode != OutputMode::Human {
+                bail!("`--patch-text` cannot be used with --json or --markdown");
+            }
             let diff_merges =
                 grit_lib::diff::DiffMerges::parse(&diff_merges).map_err(|e| anyhow::anyhow!(e))?;
             emit_success(

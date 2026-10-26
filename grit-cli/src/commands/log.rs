@@ -123,6 +123,9 @@ pub struct LogAuthorGroupJson {
 
 impl HumanRender for LogOutcome {
     fn render_human(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
+        if self.format.log_patch_text() {
+            return Ok(());
+        }
         if self.display.group_by.is_some() {
             if self.author_group_rows.is_empty() {
                 outln!(w, "No commits yet.");
@@ -700,12 +703,32 @@ fn build_commit_outcome(
         && !format.any_format_flag()
         && !display.decorate;
     let need_refs = display.decorate || json_output;
-    let need_commit_details = need_refs || format.any_format_flag();
+    let need_commit_details = need_refs || (format.any_format_flag() && !format.log_patch_text());
     let head_branch = if display.oneline || display.decorate {
         resolve_current_branch(repo)?
     } else {
         None
     };
+
+    if format.log_patch_text() {
+        crate::commands::diff::emit_commits_log_patch_text(repo, oids, format)?;
+        return Ok(LogOutcome {
+            commits: Vec::new(),
+            groups: None,
+            next,
+            truncated,
+            commit_rows: Vec::new(),
+            author_group_rows: Vec::new(),
+            display,
+            head_branch: None,
+            oneline_lines: Vec::new(),
+            graph_lines: Vec::new(),
+            graph_note: None,
+            continuation_args,
+            format,
+            commit_diffs: Vec::new(),
+        });
+    }
 
     if graph_human_oneline {
         let graph_lines = build_graph_oneline_lines(repo, oids, display, &graph)?;
