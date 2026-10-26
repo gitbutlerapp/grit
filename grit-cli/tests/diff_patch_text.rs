@@ -454,3 +454,79 @@ fn diff_patch_text_no_index_emits_patch() {
         "expected patch bytes on stdout, got:\n{patch}"
     );
 }
+
+#[test]
+fn patch_id_json_matches_git_and_normal_diff_on_ten_line_file() {
+    use std::io::Write;
+    use std::process::Stdio;
+
+    let dir = TempDir::new().unwrap();
+    git_in(dir.path(), &["init", "-q", "-b", "main"]);
+    fs::write(
+        dir.path().join("file"),
+        (1..=10).map(|i| format!("{i}\n")).collect::<String>(),
+    )
+    .unwrap();
+    git_in(dir.path(), &["add", "file"]);
+    git_in(dir.path(), &["commit", "-qm", "base"]);
+    fs::write(
+        dir.path().join("file"),
+        (1..=9).map(|i| format!("{i}\n")).collect::<String>() + "changed\n",
+    )
+    .unwrap();
+    git_in(dir.path(), &["commit", "-qam", "change"]);
+
+    let grit = env!("CARGO_BIN_EXE_grit");
+    let patch = Command::new(grit)
+        .current_dir(dir.path())
+        .args(["diff", "--patch-text", "HEAD"])
+        .output()
+        .unwrap();
+    assert!(
+        patch.status.success(),
+        "{}",
+        String::from_utf8_lossy(&patch.stderr)
+    );
+    let show = Command::new("git")
+        .current_dir(dir.path())
+        .args(["show", "--format=", "--no-ext-diff", "-U3", "HEAD"])
+        .output()
+        .unwrap();
+    assert!(show.status.success());
+    for text in [&show.stdout, &patch.stdout] {
+        let mut child = Command::new("git")
+            .current_dir(dir.path())
+            .args(["patch-id", "--stable"])
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .spawn()
+            .unwrap();
+        child.stdin.take().unwrap().write_all(text).unwrap();
+        let out = child.wait_with_output().unwrap();
+        assert!(out.status.success());
+        assert_eq!(
+            String::from_utf8(out.stdout)
+                .unwrap()
+                .split_whitespace()
+                .next(),
+            Some("5ab484ff6e8f56d89403fae49e2063b0712ed58e")
+        );
+    }
+    let output = Command::new(grit)
+        .current_dir(dir.path())
+        .args(["patch-id", "HEAD", "--json"])
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let json: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(json["entries"].as_array().unwrap().len(), 1);
+    assert_eq!(
+        json["entries"][0]["patch_id"],
+        "5ab484ff6e8f56d89403fae49e2063b0712ed58e"
+    );
+    git_in(dir.path(), &["fsck", "--strict"]);
+}

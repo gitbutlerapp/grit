@@ -404,13 +404,17 @@ fn split_lines_with_nl(input: &[u8]) -> Vec<&[u8]> {
 ///
 /// Returns `None` for merge commits (more than one parent), since those do not
 /// have a well-defined single-parent diff.  Root commits (no parents) are
-/// compared against the empty tree.
+/// compared against the empty tree. Text diffs use unified hunks with three
+/// context lines on each side, matching `git show --format= --no-ext-diff -U3`
+/// piped to `git patch-id` in the corresponding mode. Unchanged lines outside
+/// those hunks do not contribute to the ID.
 ///
 /// # Parameters
 ///
 /// - `algo` — object hash algorithm (must match `odb`'s configured format).
 /// - `odb` — object database used to read commit, tree, and blob objects.
 /// - `commit_oid` — OID of the commit to compute the patch-ID for.
+/// - `mode` — accumulation and whitespace rules for the patch-ID.
 ///
 /// # Errors
 ///
@@ -435,6 +439,7 @@ pub fn compute_patch_id(
 /// - `odb` — object database used to read commit, tree, and blob objects.
 /// - `commit_oid` — OID of the commit to compute the patch-ID for.
 /// - `paths` — pathspec strings used to limit the files included in the diff.
+/// - `mode` — accumulation and whitespace rules for the patch-ID.
 ///
 /// # Errors
 ///
@@ -880,7 +885,14 @@ fn patch_id_hash_rename_entry_into_ctx(
 
 fn patch_id_hash_text_hunks(ctx: &mut ChecksumHasher, old_str: &str, new_str: &str) {
     let diff = TextDiff::from_lines(old_str, new_str);
-    for change in diff.iter_all_changes() {
+    // Hash ordinary unified hunks, retaining nearby context without including
+    // unchanged portions of the file outside those hunks.
+    for change in diff
+        .grouped_ops(3)
+        .iter()
+        .flatten()
+        .flat_map(|op| diff.iter_changes(op))
+    {
         let prefix = match change.tag() {
             ChangeTag::Equal => b' ',
             ChangeTag::Delete => b'-',
@@ -952,6 +964,42 @@ mod tests {
             String::from_utf8_lossy(&out.stderr)
         );
         String::from_utf8_lossy(&out.stdout).into_owned()
+    }
+
+    #[test]
+    fn text_hunks_hash_only_three_context_lines() {
+        let old: String = (1..=10).map(|i| format!("{i}\n")).collect();
+        for (new, expected) in [
+            (
+                old.replace("10\n", "changed \t\n"),
+                b"789-10+changed".as_slice(),
+            ),
+            (
+                old.replacen("1\n", "changed\n", 1),
+                b"-1+changed234".as_slice(),
+            ),
+            (old.replace("10\n", "changed"), b"789-10+changed".as_slice()),
+        ] {
+            for algo in [HashAlgo::Sha1, HashAlgo::Sha256] {
+                let mut ctx = ChecksumHasher::new(algo);
+                patch_id_hash_text_hunks(&mut ctx, &old, &new);
+                assert_eq!(ctx.finalize(), algo.checksum_digest(expected));
+            }
+        }
+    }
+
+    #[test]
+    fn text_hunks_hash_overlapping_context_once() {
+        let old: String = (1..=20).map(|i| format!("{i}\n")).collect();
+        let new = old
+            .replacen("8\n", "first\n", 1)
+            .replace("12\n", "second\n");
+        let mut ctx = ChecksumHasher::new(HashAlgo::Sha1);
+        patch_id_hash_text_hunks(&mut ctx, &old, &new);
+        assert_eq!(
+            ctx.finalize(),
+            HashAlgo::Sha1.checksum_digest(b"567-8+first91011-12+second131415")
+        );
     }
 
     #[test]

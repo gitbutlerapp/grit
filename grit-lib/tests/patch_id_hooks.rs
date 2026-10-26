@@ -122,7 +122,10 @@ fn patch_id_matches_git_patch_id_stable() {
 
 fn git_patch_id_from_show(dir: &std::path::Path, flag: &str) -> ObjectId {
     let show_p = git_in(dir, &["show", "-p", "HEAD"]);
-    use std::io::Write;
+    git_patch_id_from_text(dir, show_p.as_bytes(), flag)
+}
+
+fn git_patch_id_from_text(dir: &std::path::Path, patch: &[u8], flag: &str) -> ObjectId {
     let mut child = Command::new("git")
         .current_dir(dir)
         .args(["patch-id", flag])
@@ -130,12 +133,7 @@ fn git_patch_id_from_show(dir: &std::path::Path, flag: &str) -> ObjectId {
         .stdout(std::process::Stdio::piped())
         .spawn()
         .expect("spawn git patch-id");
-    child
-        .stdin
-        .take()
-        .unwrap()
-        .write_all(show_p.as_bytes())
-        .unwrap();
+    child.stdin.take().unwrap().write_all(patch).unwrap();
     let out = child.wait_with_output().unwrap();
     assert!(out.status.success(), "git patch-id {flag}");
     ObjectId::from_hex(
@@ -327,5 +325,148 @@ fn non_executable_hook_reported() {
     assert_eq!(
         hooks[0].source,
         grit_lib::repo_handles::HookSource::CoreHooksPath
+    );
+}
+
+// Compare the ODB and text entry points against the same ordinary unified patch.
+fn assert_patch_id_matches_normal_patch(
+    dir: &std::path::Path,
+    paths: &[String],
+    label: &str,
+) -> ObjectId {
+    use grit_lib::diff::patch_ids::{compute_patch_id_for_paths, compute_patch_ids_from_text};
+    use grit_lib::objects::HashAlgo;
+
+    let commit: ObjectId = git_in(dir, &["rev-parse", "HEAD"]).trim().parse().unwrap();
+    let repo = Repository::open(
+        &dir.join(".git"),
+        &RepositoryOptions::empty().with_work_tree(dir),
+    )
+    .unwrap();
+    let mut args = vec!["show", "--format=", "--no-ext-diff", "-U3", "HEAD", "--"];
+    args.extend(paths.iter().map(String::as_str));
+    let patch = git_in(dir, &args);
+    let mut stable = None;
+    for (mode, flag) in [
+        (PatchIdMode::Stable, "--stable"),
+        (PatchIdMode::Unstable, "--unstable"),
+        (PatchIdMode::Verbatim, "--verbatim"),
+    ] {
+        let expected = git_patch_id_from_text(dir, patch.as_bytes(), flag);
+        let from_text = compute_patch_ids_from_text(HashAlgo::Sha1, patch.as_bytes(), mode);
+        assert_eq!(from_text.len(), 1, "{label}: {flag}");
+        assert_eq!(from_text[0].0, expected, "{label}: text {flag}");
+        let actual = compute_patch_id_for_paths(HashAlgo::Sha1, repo.odb(), &commit, paths, mode)
+            .unwrap()
+            .unwrap();
+        assert_eq!(actual, expected, "{label}: filtered ODB {flag}");
+        if paths.is_empty() {
+            assert_eq!(
+                repo.patch_id(&commit, mode).unwrap(),
+                Some(expected),
+                "{label}: repository {flag}"
+            );
+        }
+        if mode == PatchIdMode::Stable {
+            stable = Some(actual);
+        }
+    }
+    git_in(dir, &["fsck", "--strict"]);
+    stable.unwrap()
+}
+
+#[test]
+fn patch_id_uses_three_context_lines_for_text_hunks() {
+    for (label, count, edits, rename, final_newline) in [
+        ("ten-line last-line edit", 10, vec![9], false, true),
+        ("beginning", 40, vec![0], false, true),
+        ("middle", 40, vec![19], false, true),
+        ("separated hunks", 40, vec![4, 30], false, true),
+        ("overlapping context", 40, vec![14, 19], false, true),
+        ("touching context", 40, vec![14, 21], false, true),
+        ("one-line gap between hunks", 40, vec![14, 22], false, true),
+        ("edited rename", 80, vec![39], true, true),
+        ("EOF without newline", 40, vec![39], false, false),
+    ] {
+        let dir = TempDir::new().unwrap();
+        git_in(dir.path(), &["init", "-q", "-b", "main"]);
+        let mut lines: Vec<String> = (1..=count).map(|i| format!("{i}\n")).collect();
+        if !final_newline {
+            lines.last_mut().unwrap().pop();
+        }
+        std::fs::write(dir.path().join("file"), lines.concat()).unwrap();
+        git_in(dir.path(), &["add", "file"]);
+        git_in(dir.path(), &["commit", "-qm", "base"]);
+        for i in edits {
+            lines[i] = if i == count - 1 && !final_newline {
+                "changed".to_owned()
+            } else {
+                "changed\n".to_owned()
+            };
+        }
+        let path = if rename {
+            git_in(dir.path(), &["mv", "file", "renamed"]);
+            "renamed"
+        } else {
+            "file"
+        };
+        std::fs::write(dir.path().join(path), lines.concat()).unwrap();
+        git_in(dir.path(), &["commit", "-qam", "change"]);
+        let id = assert_patch_id_matches_normal_patch(dir.path(), &[], label);
+        if label == "ten-line last-line edit" {
+            assert_eq!(id.to_hex(), "5ab484ff6e8f56d89403fae49e2063b0712ed58e");
+        }
+        // A second file makes filtered and whole-commit IDs distinct, and exercises
+        // per-file accumulation for both stable and unstable hashing.
+        std::fs::write(dir.path().join("other"), "unrelated\n").unwrap();
+        git_in(dir.path(), &["add", "other"]);
+        git_in(dir.path(), &["commit", "--amend", "--no-edit", "-q"]);
+        assert_patch_id_matches_normal_patch(dir.path(), &[], label);
+        // Include both rename endpoints so Git retains rename detection when filtering.
+        let paths = if rename {
+            vec!["file".to_owned(), path.to_owned()]
+        } else {
+            vec![path.to_owned()]
+        };
+        assert_eq!(
+            assert_patch_id_matches_normal_patch(dir.path(), &paths, label),
+            id,
+            "{label}: selecting only the edited file"
+        );
+    }
+}
+
+#[test]
+fn patch_id_equivalence_ignores_distant_context_but_keeps_nearby_context() {
+    let mut ids = Vec::new();
+    for (distant, nearby) in [
+        ("original", "nearby"),
+        ("different", "nearby"),
+        ("original", "different"),
+    ] {
+        let dir = TempDir::new().unwrap();
+        git_in(dir.path(), &["init", "-q", "-b", "main"]);
+        let mut lines: Vec<String> = (1..=40).map(|i| format!("{i}\n")).collect();
+        lines[0] = format!("{distant}\n");
+        lines[18] = format!("{nearby}\n");
+        std::fs::write(dir.path().join("file"), lines.concat()).unwrap();
+        git_in(dir.path(), &["add", "file"]);
+        git_in(dir.path(), &["commit", "-qm", "base"]);
+        lines[19] = "changed\n".into();
+        std::fs::write(dir.path().join("file"), lines.concat()).unwrap();
+        git_in(dir.path(), &["commit", "-qam", "change"]);
+        ids.push(assert_patch_id_matches_normal_patch(
+            dir.path(),
+            &[],
+            "equivalence",
+        ));
+    }
+    assert_eq!(
+        ids[0], ids[1],
+        "distant unchanged lines are outside the patch"
+    );
+    assert_ne!(
+        ids[0], ids[2],
+        "nearby unchanged lines are part of the patch"
     );
 }

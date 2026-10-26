@@ -1185,6 +1185,10 @@ impl Repository {
 
     /// Patch-ID for a single commit (merge commits and empty diffs return `None`).
     ///
+    /// Text diffs use unified hunks with three context lines on each side,
+    /// matching `git show --format= --no-ext-diff -U3` piped to `git patch-id`
+    /// in the selected mode. Only context inside those hunks contributes to the ID.
+    ///
     /// # Errors
     ///
     /// Propagates object database read/parse failures.
