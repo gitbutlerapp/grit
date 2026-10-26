@@ -21,12 +21,26 @@ cargo test -p grit-lib --lib
 # CI unit-test job (grit-lib + grit-cli)
 cargo test -p grit-lib -p grit-cli
 
-# Broader workspace
-cargo test --workspace
+# Broader workspace (what `make test` runs: nextest when installed, then doctests)
+cargo nextest run --workspace && cargo test --workspace --doc
+cargo test --workspace   # without nextest
 
 # Release build sanity (optional)
 cargo test -p grit-lib --lib --release
 ```
+
+[cargo-nextest](https://nexte.st) (`cargo install cargo-nextest --locked`) runs the
+workspace's ~900 test binaries in parallel, each test in its own process, so a test
+that changes the working directory or environment cannot disturb another. Its
+settings are in [`.config/nextest.toml`](.config/nextest.toml): tests slower than a
+minute are reported, a test that hangs is stopped after four minutes, and the few
+known timing-sensitive tests get a retry (a retried pass shows as flaky).
+
+On macOS, the system checks every newly built executable the first time it runs
+(`syspolicyd`), which can add seconds to each of those binaries and to the hook
+scripts tests write. Exempting your terminal removes that cost: run
+`sudo spctl developer-mode enable-terminal`, then enable the terminal under
+System Settings → Privacy & Security → Developer Tools.
 
 ### Case-insensitive worktree tests
 
@@ -150,9 +164,10 @@ This executes [`scripts/gate.sh`](scripts/gate.sh) in order, stopping at the fir
 1. `cargo fmt --all --check`
 2. `cargo clippy --workspace -- -D warnings`
 3. `RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features`
-4. `cargo test --workspace`
+4. `cargo test -p grit-lib --test public_module_doctests`
+5. `cargo nextest run --workspace` and `cargo test --workspace --doc` when cargo-nextest is installed, otherwise `cargo test --workspace`
 
-The script exports **`CARGO_BUILD_JOBS=$(nproc)`** for the run so builds use all cores despite the **`jobs = 2`** cap in [`.cargo/config.toml`](.cargo/config.toml). Each stage prints wall time on success or failure.
+The script exports **`CARGO_BUILD_JOBS`** as the CPU count (`nproc`, or `sysctl -n hw.ncpu` on macOS) for the run so builds use all cores despite the **`jobs = 2`** cap in [`.cargo/config.toml`](.cargo/config.toml). Each stage prints wall time on success or failure.
 
 **Integration procedure (maintainers and factory integrators):**
 

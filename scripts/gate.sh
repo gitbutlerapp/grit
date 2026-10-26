@@ -8,7 +8,7 @@ set -euo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO"
 
-export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-$(nproc)}"
+export CARGO_BUILD_JOBS="${CARGO_BUILD_JOBS:-$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 2)}"
 
 run_stage() {
 	local label="$1"
@@ -33,7 +33,12 @@ run_stage "fmt" cargo fmt --all --check
 run_stage "clippy" cargo clippy --workspace -- -D warnings
 run_stage "rustdoc" env RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features
 run_stage "public module doctests" cargo test -p grit-lib --test public_module_doctests
-run_stage "test" cargo test --workspace
+if cargo nextest --version >/dev/null 2>&1; then
+	run_stage "test" cargo nextest run --workspace
+	run_stage "doctests" cargo test --workspace --doc
+else
+	run_stage "test" cargo test --workspace
+fi
 
 echo ""
 echo "Gate passed."

@@ -1,0 +1,29 @@
+# cargo-nextest settings (https://nexte.st). `make test` and the gate use nextest
+# when it is installed (`cargo install cargo-nextest --locked`).
+#
+# nextest runs every test in its own process and runs test binaries in parallel,
+# so a test that changes the working directory or environment cannot disturb
+# another, and the ~900 test binaries no longer run one after another.
+
+[profile.default]
+# Report tests slower than a minute; stop one that hangs (a credential helper
+# waiting on a prompt, a server that never answers) after four.
+slow-timeout = { period = "60s", terminate-after = 4 }
+fail-fast = false
+
+# Known timing-sensitive tests get a retry; a retried pass is reported as flaky.
+[[profile.default.overrides]]
+# Asserts on what happens within one wall-clock second of the index write.
+filter = 'test(status_skips_index_rewrite_within_the_second_of_racy_entries)'
+retries = 2
+
+[profile.ci]
+fail-fast = false
+slow-timeout = { period = "60s", terminate-after = 4 }
+
+[[profile.ci.overrides]]
+filter = 'test(status_skips_index_rewrite_within_the_second_of_racy_entries)'
+retries = 2
+
+[profile.ci.junit]
+path = "junit.xml"

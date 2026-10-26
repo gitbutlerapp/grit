@@ -16,7 +16,7 @@
 #   make clean        - remove build artifacts
 
 CARGO ?= cargo
-CARGO_BUILD_JOBS ?= $(shell nproc 2>/dev/null || echo 2)
+CARGO_BUILD_JOBS ?= $(shell nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 2)
 export CARGO_BUILD_JOBS
 # Shipped CLI and benchmark timings use the `dist` profile (see root Cargo.toml).
 GRIT_PROFILE ?= dist
@@ -41,8 +41,14 @@ build:
 debug:
 	$(CARGO) build -p grit-cli
 
+# nextest runs test binaries in parallel, each test in its own process
+# (.config/nextest.toml); it does not run doctests, so those go through cargo test.
 test:
-	$(CARGO) test --workspace
+	@if $(CARGO) nextest --version >/dev/null 2>&1; then \
+		$(CARGO) nextest run --workspace && $(CARGO) test --workspace --doc; \
+	else \
+		$(CARGO) test --workspace; \
+	fi
 
 clippy:
 	$(CARGO) clippy --workspace -- -D warnings
