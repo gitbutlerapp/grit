@@ -57,6 +57,22 @@ Batch ref updates use [`RefTransaction`](rustdoc:grit_lib::refs::store::RefTrans
 
 Every backend (files, reftable, memory, or your own wrapper around one) refuses the same malformed batches in `prepare`, before taking any lock. A name that is not safe to store (path traversal, a `.lock` suffix, spaces, empty or doubled components, a non-`refs/` name that is not an all-caps pseudo-ref like `ORIG_HEAD`), on an update or on either side of a reflog or case-only rename, fails with [`RefStoreError::InvalidRefName`](rustdoc:grit_lib::refs::store::RefStoreError::InvalidRefName). Storing the all-zero object id as a direct value fails with [`RefStoreError::NullOid`](rustdoc:grit_lib::refs::store::RefStoreError::NullOid), because Git reads such a ref as broken. To delete a ref, set `new_value: None`. Reflog-only updates may still record the null id.
 
+## Reset validation
+
+[`reset_to_commit`](rustdoc:grit_lib::porcelain::reset::reset_to_commit) validates
+[`ResetOptions::identity`](rustdoc:grit_lib::porcelain::reset::ResetOptions::identity)
+before changing any repository state. If a caller modifies a public
+[`Signature`](rustdoc:grit_lib::ident::Signature) field to an invalid value, reset
+returns [`Error::InvalidSignature`](rustdoc:grit_lib::error::Error::InvalidSignature)
+with HEAD, branch refs, index bytes, worktree files, reflogs, and operation state
+unchanged. This includes merge autostashes and `refs/stash`.
+
+The same validation applies to
+[`preview_reset`](rustdoc:grit_lib::porcelain::reset::preview_reset) and dry runs,
+even when the target is already HEAD or `core.logAllRefUpdates=false`. This is a
+preflight guarantee for invalid signatures; later I/O errors can leave partial
+updates.
+
 ## Resolving HEAD and symbolic refs
 
 `resolve_head` reads `HEAD` from a git directory and returns a `HeadState`; `resolve_head_for_repository` reads it through the repository's store (an empty injected store gives `HeadState::Invalid`). When you only need the commit `HEAD` is on, call [`Repository::head_commit`](rustdoc:grit_lib::repo::Repository::head_commit): it reads through the same store and fails with `Error::UnbornHead` on a branch with no commits yet, or `Error::InvalidHead` when `HEAD` names nothing. `resolve_ref` (or `RefStore::resolve` on the repository store) follows symbolic refs with cycle detection. `read_ref_file` returns a `Ref` without resolving the full chain.

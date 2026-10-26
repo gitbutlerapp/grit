@@ -137,7 +137,9 @@ pub struct ResetOutcome {
 ///
 /// # Errors
 ///
-/// Same validation failures as [`reset_to_commit`] (missing commit, invalid `HEAD`, parse errors).
+/// Same validation failures as [`reset_to_commit`], including [`Error::InvalidSignature`]
+/// for an invalid [`ResetOptions::identity`], even when the target is already `HEAD`
+/// or reflog updates are disabled. No repository state is changed.
 pub fn preview_reset(repo: &Repository, opts: &ResetOptions) -> Result<ResetPreview> {
     let (_previous, _head, preview) = plan_reset(repo, opts, true)?;
     Ok(preview)
@@ -145,7 +147,7 @@ pub fn preview_reset(repo: &Repository, opts: &ResetOptions) -> Result<ResetPrev
 
 /// Move `HEAD` to `opts.target` according to `opts.mode`.
 ///
-/// Index and worktree updates run before the ref moves so a failure leaves refs unchanged.
+/// Index and worktree updates run before the branch or detached `HEAD` moves.
 /// When [`ResetOptions::dry_run`] is true, nothing is written and the returned
 /// [`ResetOutcome::target`] is still the requested commit.
 ///
@@ -153,6 +155,10 @@ pub fn preview_reset(repo: &Repository, opts: &ResetOptions) -> Result<ResetPrev
 ///
 /// Returns an error when there is no current commit, the work tree is required but
 /// missing (hard/keep reset), local edits block keep reset, or ref/index/checkout I/O fails.
+/// An invalid [`ResetOptions::identity`] returns [`Error::InvalidSignature`] before
+/// changing HEAD, branch refs, index, worktree, reflogs, or operation state (including
+/// merge autostashes). This also applies to dry runs, resets to the current HEAD,
+/// and resets with reflog updates disabled. Later I/O failures may leave partial updates.
 pub fn reset_to_commit(
     repo: &Repository,
     opts: &ResetOptions,
@@ -227,6 +233,7 @@ fn plan_reset(
     opts: &ResetOptions,
     with_worktree_preview: bool,
 ) -> Result<(ObjectId, HeadState, ResetPreview)> {
+    opts.identity.validate().map_err(Error::InvalidSignature)?;
     let head = resolve_head_for_repository(repo)?;
     let previous = head.oid().copied().ok_or(Error::UnbornHead)?;
 
@@ -404,7 +411,6 @@ fn append_reset_reflogs(
     new: ObjectId,
     opts: &ResetOptions,
 ) -> Result<()> {
-    opts.identity.validate().map_err(Error::InvalidSignature)?;
     let config =
         ConfigSet::load(repo.environment(), Some(repo.git_dir()), true).unwrap_or_default();
     let log = ReflogUpdate {
@@ -517,6 +523,24 @@ mod tests {
             message: "reset".into(),
             dry_run: false,
             orphan_limit: DEFAULT_ORPHAN_LIMIT,
+        }
+    }
+
+    #[test]
+    fn invalid_signature_fails_shared_preflight_at_current_head() {
+        let (_dir, repo) = init_repo();
+        let head = commit_file(&repo, "f", "base\n", None);
+        let mut opts = reset_opts(head, ResetMode::Hard);
+        opts.identity.email.push('\n');
+        for with_worktree_preview in [false, true] {
+            let error = plan_reset(&repo, &opts, with_worktree_preview).unwrap_err();
+            assert!(matches!(
+                error,
+                Error::InvalidSignature(crate::ident::SignatureError::ForbiddenCharacter {
+                    field: crate::ident::SignatureField::Email,
+                    ch: '\n',
+                })
+            ));
         }
     }
 

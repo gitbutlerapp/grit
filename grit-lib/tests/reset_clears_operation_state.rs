@@ -2,6 +2,9 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+#[path = "support/reset_snapshot.rs"]
+mod reset_snapshot;
+
 use std::fs;
 use std::path::Path;
 use std::process::Command;
@@ -307,4 +310,65 @@ fn reset_hard_removes_merge_autostash_without_applying_like_git() {
         git_stash.trim(),
         "stash list should match git after equivalent reset"
     );
+}
+
+fn assert_invalid_reset_preserves_operation(root: &Path, repo: &Repository, head: ObjectId) {
+    let before = reset_snapshot::snapshot(root);
+    let mut identity = test_ident();
+    identity.name = "bad\nname".into();
+    for mode in [
+        ResetMode::Soft,
+        ResetMode::Mixed,
+        ResetMode::Hard,
+        ResetMode::Keep,
+    ] {
+        let mut opts = ResetOptions::new(head, mode, identity.clone(), "invalid reset");
+        let err = grit_lib::porcelain::reset::preview_reset(repo, &opts).unwrap_err();
+        assert!(matches!(err, Error::InvalidSignature(_)), "{err:?}");
+        reset_snapshot::assert_unchanged(root, &before);
+        for dry_run in [true, false] {
+            opts.dry_run = dry_run;
+            let err = reset_to_commit(
+                repo,
+                &opts,
+                &mut NullProgress,
+                &grit_lib::progress::NeverCancel,
+            )
+            .unwrap_err();
+            assert!(matches!(err, Error::InvalidSignature(_)), "{err:?}");
+            reset_snapshot::assert_unchanged(root, &before);
+        }
+    }
+}
+
+#[test]
+fn invalid_reset_preserves_conflicted_merge_and_autostash() {
+    let root = tempfile::tempdir().expect("tempdir");
+    let autostash = merge_autostash_conflict(root.path());
+    git(
+        root.path(),
+        &[
+            "stash",
+            "store",
+            "-m",
+            "existing stash",
+            &autostash.to_hex(),
+        ],
+    );
+    let repo = open_repo(root.path());
+    let head = resolve_head_for_repository(&repo)
+        .unwrap()
+        .oid()
+        .copied()
+        .unwrap();
+    assert_invalid_reset_preserves_operation(root.path(), &repo, head);
+    git(root.path(), &["fsck", "--strict"]);
+}
+
+#[test]
+fn invalid_reset_preserves_conflicted_replay_and_sequencer() {
+    let (root, repo, head) = conflicted_pick_repo();
+    assert!(repo.git_dir().join("sequencer").is_dir());
+    assert_invalid_reset_preserves_operation(root.path(), &repo, head);
+    git(root.path(), &["fsck", "--strict"]);
 }
