@@ -50,7 +50,7 @@ When either fires, `grit gc --auto` runs: pack-refs, reflog expiry, the repack a
 | --- | --- | --- |
 | `gc.auto` | `6700` | Loose-object threshold. `0` or a negative value turns automatic maintenance off entirely. |
 | `gc.autoPackLimit` | `50` | Pack-count threshold. `0` or a negative value turns off only this trigger. |
-| `gc.autoDetach` | `true` | Run in the background (`grit gc --auto --quiet` in a separate process) so the command returns at once. `false` runs it before the command exits. |
+| `gc.autoDetach` | `true` | Run in the background (`grit gc --auto --quiet` in a separate process) so the command returns at once. `false` runs it before the command exits. On Windows, grit requests job breakaway when spawning so PowerShell job objects and similar harnesses do not keep the triggering command alive until maintenance finishes. |
 | `maintenance.auto` | `true` | `false` stops commands from starting automatic maintenance; `grit gc --auto` still works. |
 
 Before doing any work, an automatic run takes the `gc.pid` lock that Git uses, so it never overlaps another grit or Git gc, and runs the `pre-auto-gc` hook; a non-zero hook exit skips the run. In human mode the triggering command prints one line on stderr when it starts background maintenance, or after foreground maintenance has run (nothing when the hook declines or another gc holds the lock); `--json` and `--markdown` output are unchanged.

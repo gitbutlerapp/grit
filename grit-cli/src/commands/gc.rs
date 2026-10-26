@@ -625,10 +625,22 @@ pub fn run_auto_after_command(mode: OutputMode, now: OffsetDateTime) {
                 }
                 return;
             }
-            Err(err) if human => {
-                eprintln!("warning: could not start background maintenance: {err}");
+            Err(first) => {
+                #[cfg(windows)]
+                {
+                    if spawn_detached_auto_gc_impl(detach_creation_flags(false)).is_ok() {
+                        if human {
+                            eprintln!(
+                                "Packing the repository in the background (gc.auto); see `grit gc`."
+                            );
+                        }
+                        return;
+                    }
+                }
+                if human {
+                    eprintln!("warning: could not start background maintenance: {first}");
+                }
             }
-            Err(_) => {}
         }
     }
     let opts = GcOptions::full_run(false, now.unix_timestamp());
@@ -641,7 +653,34 @@ pub fn run_auto_after_command(mode: OutputMode, now: OffsetDateTime) {
     }
 }
 
+/// Windows: allow the child to leave the caller's job object (PowerShell, CI, Defender
+/// harnesses). Without this, the parent can remain blocked until background gc finishes even
+/// after `spawn` returns.
+#[cfg(windows)]
+const CREATE_BREAKAWAY_FROM_JOB: u32 = 0x0100_0000;
+
 fn spawn_detached_auto_gc() -> std::io::Result<()> {
+    spawn_detached_auto_gc_impl(detach_creation_flags(true)).map(|_| ())
+}
+
+#[cfg(windows)]
+fn detach_creation_flags(breakaway_from_job: bool) -> u32 {
+    use windows_sys::Win32::System::Threading::{CREATE_NEW_PROCESS_GROUP, DETACHED_PROCESS};
+    let mut flags = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP;
+    if breakaway_from_job {
+        flags |= CREATE_BREAKAWAY_FROM_JOB;
+    }
+    flags
+}
+
+#[cfg(unix)]
+fn detach_creation_flags(_breakaway_from_job: bool) -> u32 {
+    0
+}
+
+fn spawn_detached_auto_gc_impl(
+    #[cfg_attr(not(windows), allow(unused_variables))] creation_flags: u32,
+) -> std::io::Result<u32> {
     let exe = std::env::current_exe()?;
     let mut cmd = std::process::Command::new(exe);
     cmd.args(["gc", "--auto", "--quiet"])
@@ -657,11 +696,16 @@ fn spawn_detached_auto_gc() -> std::io::Result<()> {
     #[cfg(windows)]
     {
         use std::os::windows::process::CommandExt as _;
-        use windows_sys::Win32::System::Threading::{CREATE_NEW_PROCESS_GROUP, DETACHED_PROCESS};
-        // No console and a new process group, so Ctrl-C in the user's console does not stop it.
-        cmd.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP);
+        cmd.creation_flags(creation_flags);
     }
-    cmd.spawn().map(drop)
+    let child = cmd.spawn()?;
+    let pid = child.id();
+    if pid == 0 {
+        return Err(std::io::Error::other(
+            "background maintenance spawn returned pid 0",
+        ));
+    }
+    Ok(pid)
 }
 
 pub fn run_repack(

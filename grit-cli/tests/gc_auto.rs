@@ -109,14 +109,27 @@ fn json_commit_output_stays_clean_when_maintenance_runs() {
     git(root, &["fsck", "--strict", "--no-dangling"]);
 }
 
+/// Regression for issue #2008: detached auto-gc must not block `grit commit` until repack
+/// finishes (including under Windows job objects when breakaway is required).
 #[test]
 fn commit_detaches_maintenance_by_default() {
     let fixture = seeded_repo(&[("gc.auto", "1")]);
     let root = fixture.path();
 
+    let started = Instant::now();
     let out = grit_with_repo_maintenance(root, &["commit", "-m", "bulk"]);
+    let commit_elapsed = started.elapsed();
     assert!(out.ok(), "{}", out.dump("commit"));
     assert!(out.stderr.contains("in the background"), "{}", out.stderr);
+    assert_eq!(
+        pack_count(root),
+        0,
+        "commit must return before background maintenance writes a pack"
+    );
+    assert!(
+        commit_elapsed < Duration::from_millis(800),
+        "commit blocked for {commit_elapsed:?} (foreground gc would wait for repack)"
+    );
 
     let deadline = Instant::now() + Duration::from_secs(60);
     while (pack_count(root) == 0 || root.join(".git/gc.pid").exists()) && Instant::now() < deadline
