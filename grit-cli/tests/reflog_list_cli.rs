@@ -68,3 +68,30 @@ fn reflog_list_cli() {
     assert!(dry["refs"].is_array());
     assert!(dry["entries_pruned"].is_number());
 }
+
+#[test]
+fn invalid_reflog_index_keeps_the_parse_explanation_in_every_output_mode() {
+    let fixture = CliFixture::new();
+    let message = "invalid reflog index in 'HEAD@{bad}': invalid digit found in string";
+    for mode in [None, Some("--json"), Some("--markdown")] {
+        let mut args = vec!["reflog", "delete", "HEAD@{bad}"];
+        args.extend(mode);
+        let out = fixture.run(&args);
+        assert!(!out.ok());
+        match mode {
+            Some("--json") => {
+                let value: Value = serde_json::from_str(&out.stdout).expect("JSON error");
+                assert_eq!(value["error"], message);
+                assert!(out.stderr.is_empty());
+            }
+            Some("--markdown") => {
+                assert_eq!(out.stdout, format!("**Error:** {message}\n"));
+                assert!(out.stderr.is_empty());
+            }
+            _ => {
+                assert_eq!(out.stderr, format!("error: {message}\n"));
+                assert!(out.stdout.is_empty());
+            }
+        }
+    }
+}

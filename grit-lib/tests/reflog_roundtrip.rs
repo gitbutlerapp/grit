@@ -16,8 +16,9 @@ use grit_lib::objects::ObjectId;
 use grit_lib::refs::reflog::{
     all_reflog_oids, all_reflog_oids_ordered, delete_reflog_entries, expire_reflog,
     expire_reflog_git, expire_reflog_unreachable, list_reflog_refs, load_gc_reflog_expire_config,
-    mark_stalefix_reachable, mirror_branch_reflog_to_head, read_reflog, read_reflog_dwim,
-    reflog_exists, truncate_last_reflog_line, ReflogEntry, ReflogExpireParams,
+    mark_stalefix_reachable, mirror_branch_reflog_to_head, parse_reflog_ref, read_reflog,
+    read_reflog_dwim, reflog_exists, truncate_last_reflog_line, ReflogEntry, ReflogExpireParams,
+    ReflogSelector,
 };
 use grit_lib::refs::reftable::{reftable_create_reflog, reftable_replace_reflog};
 use grit_lib::refs::store::RefName;
@@ -1212,5 +1213,79 @@ fn delete_out_of_range_is_typed_error() {
             .expect_err("out of range");
         assert!(matches!(err, Error::ReflogIndexOutOfRange { .. }));
         let _ = backend;
+    });
+}
+
+#[test]
+fn typed_selectors_query_and_delete_across_git_and_grit() {
+    each_backend_git_oracle(|_, fixture| {
+        let refname = "refs/heads/main";
+        git(fixture.worktree(), &["symbolic-ref", "HEAD", refname]);
+        let first = git_empty_commit_oid(fixture.worktree());
+        let second = git_empty_commit_oid(fixture.worktree());
+        let third = git_empty_commit_oid(fixture.worktree());
+        let repo = open_repo(fixture.worktree());
+        let selector: ReflogSelector = "main@{1}".parse().expect("parse selector");
+        let entries = repo
+            .reflogs()
+            .entries(&selector.ref_name)
+            .expect("read git log");
+        assert_eq!(entries[selector.index].entry.new_oid, second);
+        assert_eq!(
+            git(fixture.worktree(), &["rev-parse", "main@{1}"]).trim(),
+            second.to_hex()
+        );
+
+        repo.reflogs()
+            .delete(&selector.ref_name, &[selector.index], false)
+            .expect("delete with grit");
+        assert_eq!(
+            git(
+                fixture.worktree(),
+                &["reflog", "show", "--format=%H", refname]
+            )
+            .lines()
+            .collect::<Vec<_>>(),
+            vec![third.to_hex(), first.to_hex()]
+        );
+        assert!(git_fsck_strict(fixture.worktree()));
+
+        git(fixture.worktree(), &["reflog", "delete", "main@{1}"]);
+        // Read the external writer's log with a fresh repository handle.
+        let repo = open_repo(fixture.worktree());
+        let name = parse_reflog_ref("main").expect("parse ref");
+        let entries = repo.reflogs().entries(&name).expect("read git deletion");
+        assert_eq!(entries.len(), 1, "{:?}", fixture.backend());
+        assert_eq!(entries[0].entry.new_oid, third);
+
+        append_reflog(
+            repo.git_dir(),
+            refname,
+            &third,
+            &third,
+            &reflog_identity(NOW),
+            "typed selector roundtrip",
+            true,
+        )
+        .expect("write with grit");
+        let repo = open_repo(fixture.worktree());
+        let selector: ReflogSelector = "refs/heads/main@{0}".parse().expect("parse full ref");
+        let entries = repo
+            .reflogs()
+            .entries(&selector.ref_name)
+            .expect("read grit log");
+        assert_eq!(
+            entries[selector.index].entry.message,
+            "typed selector roundtrip"
+        );
+        assert_eq!(
+            git(
+                fixture.worktree(),
+                &["reflog", "show", "-n", "1", "--format=%gs", refname]
+            )
+            .trim(),
+            "typed selector roundtrip"
+        );
+        assert!(git_fsck_strict(fixture.worktree()));
     });
 }

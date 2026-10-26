@@ -5,8 +5,7 @@ use std::io::Write;
 use anyhow::{Context, Result};
 use grit_lib::error::Error;
 use grit_lib::ident::Signature;
-use grit_lib::refs::reflog::reflog_identity_timestamp;
-use grit_lib::refs::store::RefName;
+use grit_lib::refs::reflog::{parse_reflog_ref, reflog_identity_timestamp, ReflogSelector};
 use grit_lib::repo::Repository;
 use grit_lib::repo_handles::{ExpireOptions, IndexedReflogEntry, MessageMatcher, ReflogQuery};
 use schemars::JsonSchema;
@@ -212,7 +211,7 @@ pub fn run_show(r#ref: Option<String>, options: ReflogListOptions) -> Result<Ref
     let env = repo.environment();
     let now = context::wall_clock_now(env).unix_timestamp();
     let spec = r#ref.as_deref().unwrap_or("HEAD");
-    let ref_name = reflog_ref_name(spec)?;
+    let ref_name = parse_reflog_ref(spec)?;
     let since = parse_since(options.since.as_deref().or(options.after.as_deref()), now)?;
     let until = parse_until(options.until.as_deref().or(options.before.as_deref()), now)?;
     let grep = options.grep.as_deref().map(MessageMatcher::new);
@@ -265,10 +264,9 @@ pub fn run_delete(specs: Vec<String>) -> Result<ReflogDeleteOutcome> {
     let repo = context::discover()?;
     let mut deleted = Vec::new();
     for spec in specs {
-        let (ref_part, index) = parse_reflog_selector(&spec)?;
-        let ref_name = reflog_ref_name(&ref_part)?;
+        let selector: ReflogSelector = spec.parse().map_err(map_selector_error)?;
         repo.reflogs()
-            .delete(&ref_name, &[index], false)
+            .delete(&selector.ref_name, &[selector.index], false)
             .map_err(map_reflog_error)?;
         deleted.push(spec);
     }
@@ -359,37 +357,14 @@ fn person_from_signature(sig: &Signature) -> Person {
     }
 }
 
-/// Parse `ref@{n}` or bare `n` with a separate ref (not used here).
-pub fn parse_reflog_selector(spec: &str) -> Result<(String, usize)> {
-    let spec = spec.trim();
-    let Some(at) = spec.find("@{") else {
-        anyhow::bail!("expected ref@{{n}} form, got '{spec}'");
-    };
-    let ref_part = spec[..at].trim();
-    let rest = spec[at + 2..]
-        .strip_suffix('}')
-        .ok_or_else(|| anyhow::anyhow!("expected ref@{{n}} form, got '{spec}'"))?;
-    let index = rest
-        .parse::<usize>()
-        .with_context(|| format!("invalid reflog index in '{spec}'"))?;
-    if ref_part.is_empty() {
-        anyhow::bail!("expected ref@{{n}} form, got '{spec}'");
-    }
-    Ok((ref_part.to_owned(), index))
-}
-
-fn reflog_ref_name(spec: &str) -> Result<RefName, Error> {
-    if let Ok(name) = RefName::try_from(spec) {
-        return Ok(name);
-    }
-    if spec != "HEAD" && !spec.starts_with("refs/") {
-        if let Ok(name) = RefName::try_from(&format!("refs/heads/{spec}")) {
-            return Ok(name);
+// Include the integer parser's explanation in CLI output as well as the error chain.
+fn map_selector_error(err: Error) -> anyhow::Error {
+    match err {
+        Error::ReflogInvalidIndex { spec, source } => {
+            anyhow::Error::new(source).context(format!("invalid reflog index in '{spec}'"))
         }
+        other => anyhow::Error::new(other),
     }
-    Err(Error::ReflogUnknownRef {
-        refname: spec.to_owned(),
-    })
 }
 
 fn map_reflog_error(err: Error) -> anyhow::Error {

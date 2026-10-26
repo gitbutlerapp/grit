@@ -1542,6 +1542,23 @@ pub enum Error {
         refname: String,
     },
 
+    /// A reflog selector is missing its reference or `@{n}` delimiters.
+    #[error("expected ref@{{n}} form, got '{spec}'")]
+    ReflogInvalidSelector {
+        /// Selector after trimming surrounding whitespace.
+        spec: String,
+    },
+
+    /// A reflog selector index is not a nonnegative integer that fits in `usize`.
+    #[error("invalid reflog index in '{spec}'")]
+    ReflogInvalidIndex {
+        /// Selector after trimming surrounding whitespace.
+        spec: String,
+        /// Integer parsing failure, including overflow.
+        #[source]
+        source: std::num::ParseIntError,
+    },
+
     /// `ref@{{n}}` is out of range for the current reflog.
     #[error("reflog entry {refname}@{{{index}}} not found")]
     ReflogIndexOutOfRange {

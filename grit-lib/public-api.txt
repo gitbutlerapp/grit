@@ -5673,6 +5673,11 @@ pub grit_lib::error::Error::RefStore(grit_lib::refs::store::RefStoreError)
 pub grit_lib::error::Error::ReflogIndexOutOfRange
 pub grit_lib::error::Error::ReflogIndexOutOfRange::index: usize
 pub grit_lib::error::Error::ReflogIndexOutOfRange::refname: alloc::string::String
+pub grit_lib::error::Error::ReflogInvalidIndex
+pub grit_lib::error::Error::ReflogInvalidIndex::source: core::num::error::ParseIntError
+pub grit_lib::error::Error::ReflogInvalidIndex::spec: alloc::string::String
+pub grit_lib::error::Error::ReflogInvalidSelector
+pub grit_lib::error::Error::ReflogInvalidSelector::spec: alloc::string::String
 pub grit_lib::error::Error::ReflogUnknownRef
 pub grit_lib::error::Error::ReflogUnknownRef::refname: alloc::string::String
 pub grit_lib::error::Error::Reftable(grit_lib::refs::reftable::ReftableError)
@@ -15744,6 +15749,11 @@ pub grit_lib::prelude::Error::RefStore(grit_lib::refs::store::RefStoreError)
 pub grit_lib::prelude::Error::ReflogIndexOutOfRange
 pub grit_lib::prelude::Error::ReflogIndexOutOfRange::index: usize
 pub grit_lib::prelude::Error::ReflogIndexOutOfRange::refname: alloc::string::String
+pub grit_lib::prelude::Error::ReflogInvalidIndex
+pub grit_lib::prelude::Error::ReflogInvalidIndex::source: core::num::error::ParseIntError
+pub grit_lib::prelude::Error::ReflogInvalidIndex::spec: alloc::string::String
+pub grit_lib::prelude::Error::ReflogInvalidSelector
+pub grit_lib::prelude::Error::ReflogInvalidSelector::spec: alloc::string::String
 pub grit_lib::prelude::Error::ReflogUnknownRef
 pub grit_lib::prelude::Error::ReflogUnknownRef::refname: alloc::string::String
 pub grit_lib::prelude::Error::Reftable(grit_lib::refs::reftable::ReftableError)
@@ -18105,6 +18115,27 @@ impl core::marker::Unpin for grit_lib::refs::reflog::ReflogExpireResult
 impl core::marker::UnsafeUnpin for grit_lib::refs::reflog::ReflogExpireResult
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::refs::reflog::ReflogExpireResult
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::reflog::ReflogExpireResult
+pub struct grit_lib::refs::reflog::ReflogSelector
+pub grit_lib::refs::reflog::ReflogSelector::index: usize
+pub grit_lib::refs::reflog::ReflogSelector::ref_name: grit_lib::refs::store::RefName
+impl core::clone::Clone for grit_lib::refs::reflog::ReflogSelector
+pub fn grit_lib::refs::reflog::ReflogSelector::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::refs::reflog::ReflogSelector
+impl core::cmp::PartialEq for grit_lib::refs::reflog::ReflogSelector
+pub fn grit_lib::refs::reflog::ReflogSelector::eq(&self, &Self) -> bool
+impl core::fmt::Debug for grit_lib::refs::reflog::ReflogSelector
+pub fn grit_lib::refs::reflog::ReflogSelector::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::refs::reflog::ReflogSelector
+impl core::str::traits::FromStr for grit_lib::refs::reflog::ReflogSelector
+pub type grit_lib::refs::reflog::ReflogSelector::Err = grit_lib::error::Error
+pub fn grit_lib::refs::reflog::ReflogSelector::from_str(&str) -> grit_lib::error::Result<Self>
+impl core::marker::Freeze for grit_lib::refs::reflog::ReflogSelector
+impl core::marker::Send for grit_lib::refs::reflog::ReflogSelector
+impl core::marker::Sync for grit_lib::refs::reflog::ReflogSelector
+impl core::marker::Unpin for grit_lib::refs::reflog::ReflogSelector
+impl core::marker::UnsafeUnpin for grit_lib::refs::reflog::ReflogSelector
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::refs::reflog::ReflogSelector
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::refs::reflog::ReflogSelector
 pub fn grit_lib::refs::reflog::all_reflog_oids(&std::path::Path) -> grit_lib::error::Result<std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>>
 pub fn grit_lib::refs::reflog::all_reflog_oids_ordered(&std::path::Path) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::objects::ObjectId>>
 pub fn grit_lib::refs::reflog::delete_reflog_entries(&std::path::Path, &str, &[usize]) -> grit_lib::error::Result<()>
@@ -18117,6 +18148,7 @@ pub fn grit_lib::refs::reflog::load_gc_reflog_expire_config(&grit_lib::config::C
 pub fn grit_lib::refs::reflog::mark_stalefix_reachable(&grit_lib::repo::Repository, &std::path::Path) -> grit_lib::error::Result<std::collections::hash::set::HashSet<grit_lib::objects::ObjectId>>
 pub fn grit_lib::refs::reflog::mirror_branch_reflog_to_head(&std::path::Path, &str) -> grit_lib::error::Result<()>
 pub fn grit_lib::refs::reflog::parse_reflog_expire_spec(&str, i64) -> grit_lib::error::Result<i64>
+pub fn grit_lib::refs::reflog::parse_reflog_ref(&str) -> grit_lib::error::Result<grit_lib::refs::store::RefName>
 pub fn grit_lib::refs::reflog::read_reflog(&std::path::Path, &str) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>>
 pub fn grit_lib::refs::reflog::read_reflog_dwim(&std::path::Path, &str) -> grit_lib::error::Result<alloc::vec::Vec<grit_lib::refs::reflog::ReflogEntry>>
 pub fn grit_lib::refs::reflog::reflog_exists(&std::path::Path, &str) -> bool

@@ -92,6 +92,16 @@ match repo.refs().resolve("refs/heads/topic") {
 
 ## Listing, writing, and reflog
 
+Parse a newest-first `ref@{n}` entry with [`ReflogSelector`](rustdoc:grit_lib::refs::reflog::ReflogSelector)
+and pass its `ref_name` and `index` to `repo.reflogs().entries` or `delete`.
+[`parse_reflog_ref`](rustdoc:grit_lib::refs::reflog::parse_reflog_ref) validates a reference alone:
+`HEAD` stays `HEAD`, `main` becomes `refs/heads/main`, and already valid multi-component
+names are retained as supplied. Neither parser reads the repository or checks existence.
+Malformed selectors return `Error::ReflogInvalidSelector`, invalid or overflowing indices
+return `Error::ReflogInvalidIndex` (with the integer error as its source), and invalid
+reference names return `Error::ReflogUnknownRef`. The handle checks for missing logs
+and out-of-range indices when you query or delete entries.
+
 `list_refs` and `list_refs_for_repository` iterate with a prefix. `write_ref` and `write_symbolic_ref` update single refs; use transactions when updating many refs atomically.
 
 Reflog helpers live in [`reflog`](rustdoc:grit_lib::refs::reflog) and on [`RefStore`](rustdoc:grit_lib::refs::store::RefStore) (`for_each_reflog_entry`, `replace_reflog`, …). [`append_reflog`](rustdoc:grit_lib::refs::append_reflog) records an update; [`read_reflog`](rustdoc:grit_lib::refs::reflog::read_reflog) reads entries back.

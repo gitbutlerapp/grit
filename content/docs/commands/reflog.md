@@ -20,7 +20,7 @@ Inspect and maintain reference logs. With no subcommand, lists entries for `REF`
 
 Filters apply to the reflog entry identity timestamp (not the commit date). Scanning stops once `-n` matches are collected, so large logs are not fully materialized.
 
-`delete` removes explicit entries without rewriting the branch tip. `list` prints every ref that currently has a reflog file (sorted), bounded by `-n` / `--limit`. `expire` applies Git-compatible `gc.reflogExpire*` rules (same layering as `grit gc`), using explicit `--expire` / `--expire-unreachable` values when given and merged config otherwise. With `--dry-run`, `expire` reports per-ref prune counts without rewriting any log file.
+`delete` removes explicit entries without rewriting the branch tip. In `ref@{n}`, `n` is a nonnegative integer: `0` selects the newest entry, `1` the next older entry. Date selectors and bare indices are not accepted by `delete`. `list` prints every ref that currently has a reflog file (sorted), bounded by `-n` / `--limit`. `expire` applies Git-compatible `gc.reflogExpire*` rules (same layering as `grit gc`), using explicit `--expire` / `--expire-unreachable` values when given and merged config otherwise. With `--dry-run`, `expire` reports per-ref prune counts without rewriting any log file.
 
 A branch literally named `list` is ambiguous with the `list` subcommand; use the full ref (`refs/heads/list`) when showing that branch's entries.
 

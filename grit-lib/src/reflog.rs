@@ -26,6 +26,9 @@ use crate::refs::{self, reflog_file_path};
 use crate::repo::Repository;
 use crate::wildmatch::{wildmatch, WM_PATHNAME};
 
+mod selector;
+pub use selector::{parse_reflog_ref, ReflogSelector};
+
 /// A single reflog entry.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ReflogEntry {
