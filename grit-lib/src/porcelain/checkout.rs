@@ -461,12 +461,16 @@ pub fn checkout_between_trees_with_progress(
 /// changed between the two trees are written first (same as branch checkout); paths
 /// that stayed the same are left on disk when already up to date. When both trees
 /// are equal (reset to the current commit), only dirty or mismatched paths are
-/// rewritten. Tracked paths absent from `target_tree` are removed and the index is
+/// rewritten. Missing promised blobs needed for writes and verification (including
+/// attribute dependencies) are fetched together before content reads. Sparse-excluded
+/// paths and gitlinks do not request blob content; lazy-fetch opt-outs still apply.
+/// Tracked paths absent from `target_tree` are removed and the index is
 /// rebuilt without unmerged stages.
 ///
 /// # Errors
 ///
-/// Returns an error when the repository has no work tree or checkout I/O fails.
+/// Returns an error when the repository has no work tree, required promised objects
+/// cannot be fetched, or checkout I/O fails.
 pub fn checkout_hard_to_tree_from_head_tree(
     repo: &Repository,
     head_tree: &ObjectId,
@@ -509,41 +513,22 @@ pub fn checkout_hard_to_tree_from_head_tree(
             written_by_tree_diff.insert(crate::repo_relpath::storage_bytes(path).into_owned());
         }
     }
-    let hard_reset_apply = if changes.is_empty() {
-        None
-    } else {
-        Some(CheckoutApplyOptions {
-            parallel_prepare_blobs: true,
-            checkout_result_tree: Some(*target_tree),
-            ..CheckoutApplyOptions::default()
-        })
-    };
-    drop(pre_reset_index);
-
-    if let Some(apply) = hard_reset_apply {
-        checkout_tree_changes_with_progress(repo, &changes, progress, cancel, None, apply, None)?;
-    }
-
-    let mut index = repo.load_index()?;
-    index.source_mtime = pre_reset_index_mtime;
     let config = repo.config()?;
-    let rules = WorktreeRules::from_parts(repo, &index, config.clone())?;
     let sparse = SparseCheckout::load(repo)?;
-    let mut delayed = DelayedProcessCheckout::default();
-    let mut pending_delayed: Vec<DelayedCheckoutTarget> = Vec::new();
-    let mut new_entries: Vec<IndexEntry> = Vec::with_capacity(target_entries.len());
-    let protect = ProtectOptions::from_config(config.as_ref());
-    let mut dir_cache = LeadingDirCache::with_protect(protect);
-
     let stat_positions = hard_reset_stat_probe_positions(
-        &index,
+        &pre_reset_index,
         &target_entries,
         trees_differ,
         &written_by_tree_diff,
         sparse.as_ref(),
     );
-    let worktree_stats =
-        scan_index_blob_stats_at(repo, work_tree, &index, config.as_ref(), &stat_positions)?;
+    let worktree_stats = scan_index_blob_stats_at(
+        repo,
+        work_tree,
+        &pre_reset_index,
+        config.as_ref(),
+        &stat_positions,
+    )?;
     let stat_policy = crate::index::StatMatchPolicy::from_config(Some(config.as_ref()));
     let trust_filemode = config
         .get_bool("core.filemode")
@@ -553,23 +538,22 @@ pub fn checkout_hard_to_tree_from_head_tree(
         .iter()
         .map(|te| {
             if sparse.as_ref().is_some_and(|sparse| {
-                sparse.checkout_skips(&index, &crate::repo_relpath::storage_string(&te.path))
+                sparse.checkout_skips(
+                    &pre_reset_index,
+                    &crate::repo_relpath::storage_string(&te.path),
+                )
             }) {
                 return HardResetEntryAction::SkipWorktree;
             }
             if te.mode == MODE_GITLINK {
                 return HardResetEntryAction::Gitlink;
             }
-            let pos = index.find_entry_pos(&te.path, 0);
-            let existing = pos.map(|pos| (pos, &index.entries[pos]));
-            let matches_target = existing.filter(|(_, ie)| ie.oid == te.oid && ie.mode == te.mode);
             if trees_differ && written_by_tree_diff.contains(&te.path) {
-                return HardResetEntryAction::Written(
-                    matches_target
-                        .filter(|(_, ie)| !ie.stat_cache_unset())
-                        .map(|(pos, _)| pos),
-                );
+                return HardResetEntryAction::Written(None);
             }
+            let pos = pre_reset_index.find_entry_pos(&te.path, 0);
+            let existing = pos.map(|pos| (pos, &pre_reset_index.entries[pos]));
+            let matches_target = existing.filter(|(_, ie)| ie.oid == te.oid && ie.mode == te.mode);
             let Some((pos, existing)) = matches_target else {
                 return HardResetEntryAction::Write;
             };
@@ -589,14 +573,98 @@ pub fn checkout_hard_to_tree_from_head_tree(
             }
         })
         .collect();
-    verify_hard_reset_candidates(
-        repo,
-        work_tree,
-        &index,
-        &target_entries,
-        &rules,
-        &mut actions,
-    )?;
+    // Fetch repair blobs together with tree-diff writes before attribute resolution can
+    // trigger isolated lazy reads. Planning uses only tree/index metadata and disk stats.
+    let needs_content = |action: &HardResetEntryAction| {
+        matches!(
+            action,
+            HardResetEntryAction::Write
+                | HardResetEntryAction::Verify
+                | HardResetEntryAction::Written(_)
+        )
+    };
+    let blobs = target_entries
+        .iter()
+        .zip(&actions)
+        .filter(|(_, action)| needs_content(action))
+        .map(|(entry, _)| entry.oid);
+    let attributes = pre_reset_index
+        .entries
+        .iter()
+        .chain(&target_entries)
+        .filter(|entry| {
+            entry.stage() == 0
+                && (entry.path == b".gitattributes" || entry.path.ends_with(b"/.gitattributes"))
+                && entry.mode != MODE_GITLINK
+                && target_entries.iter().zip(&actions).any(|(target, action)| {
+                    needs_content(action)
+                        && target
+                            .path
+                            .starts_with(&entry.path[..entry.path.len() - b".gitattributes".len()])
+                })
+        })
+        .map(|entry| entry.oid);
+    prefetch_promisor_blobs(repo, blobs.chain(attributes))?;
+    let hard_reset_apply = if changes.is_empty() {
+        None
+    } else {
+        Some(CheckoutApplyOptions {
+            parallel_prepare_blobs: true,
+            checkout_result_tree: Some(*target_tree),
+            ..CheckoutApplyOptions::default()
+        })
+    };
+    drop(pre_reset_index);
+
+    if let Some(apply) = hard_reset_apply {
+        checkout_tree_changes_with_progress(repo, &changes, progress, cancel, None, apply, None)?;
+    }
+
+    let mut index = repo.load_index()?;
+    index.source_mtime = pre_reset_index_mtime;
+    let mut delayed = DelayedProcessCheckout::default();
+    let mut pending_delayed: Vec<DelayedCheckoutTarget> = Vec::new();
+    let mut new_entries: Vec<IndexEntry> = Vec::with_capacity(target_entries.len());
+    let protect = ProtectOptions::from_config(config.as_ref());
+    let mut dir_cache = LeadingDirCache::with_protect(protect);
+
+    if trees_differ {
+        for (entry, action) in target_entries.iter().zip(&mut actions) {
+            match action {
+                HardResetEntryAction::Keep(_) | HardResetEntryAction::Written(_) => {
+                    let pos = index.find_entry_pos(&entry.path, 0).filter(|&pos| {
+                        let existing = &index.entries[pos];
+                        existing.oid == entry.oid
+                            && existing.mode == entry.mode
+                            && !existing.stat_cache_unset()
+                    });
+                    *action = if matches!(action, HardResetEntryAction::Written(_)) {
+                        HardResetEntryAction::Written(pos)
+                    } else if let Some(pos) = pos {
+                        HardResetEntryAction::Keep(pos)
+                    } else {
+                        HardResetEntryAction::Write
+                    };
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut rules = actions
+        .iter()
+        .any(|action| matches!(action, HardResetEntryAction::Verify))
+        .then(|| WorktreeRules::from_parts(repo, &index, config.clone()))
+        .transpose()?;
+    if let Some(rules) = &rules {
+        verify_hard_reset_candidates(
+            repo,
+            work_tree,
+            &index,
+            &target_entries,
+            rules,
+            &mut actions,
+        )?;
+    }
 
     progress.start(
         ProgressPhase::CheckingOutFiles,
@@ -656,6 +724,10 @@ pub fn checkout_hard_to_tree_from_head_tree(
             continue;
         }
 
+        let rules = match &mut rules {
+            Some(rules) => rules,
+            empty => empty.insert(WorktreeRules::from_parts(repo, &index, config.clone())?),
+        };
         let path = crate::repo_relpath::storage_string(&te.path);
         let change = diff_entry_for_worktree_blob_refresh(work_tree, &path, te.oid, mode);
         let Some(object) = read_blob_unless_streamed(
@@ -679,7 +751,7 @@ pub fn checkout_hard_to_tree_from_head_tree(
         };
         let worktree_bytes = worktree_bytes_from_index_blob(
             repo,
-            &rules,
+            rules,
             &path,
             mode,
             &object.data,
@@ -709,15 +781,17 @@ pub fn checkout_hard_to_tree_from_head_tree(
         progress.inc(1);
     }
 
-    finish_delayed_checkouts(
-        repo,
-        &rules,
-        work_tree,
-        &mut delayed,
-        &pending_delayed,
-        &mut dir_cache,
-        &mut new_entries,
-    )?;
+    if let Some(rules) = &rules {
+        finish_delayed_checkouts(
+            repo,
+            rules,
+            work_tree,
+            &mut delayed,
+            &pending_delayed,
+            &mut dir_cache,
+            &mut new_entries,
+        )?;
+    }
 
     remove_empty_parent_dirs_batch(work_tree, &deleted_abs_paths);
     progress.finish();
@@ -2079,35 +2153,35 @@ thread_local! {
 fn prefetch_promisor_blobs_for_checkout(repo: &Repository, changes: &[DiffEntry]) -> Result<()> {
     #[cfg(test)]
     PREFETCH_PROMISOR_FOR_CHECKOUT_CALLS.with(|c| *c.borrow_mut() += 1);
-    let config = repo.config()?;
-    if !crate::promisor::repo_treats_promisor_packs(repo.git_dir(), config.as_ref()) {
-        return Ok(());
-    }
-    if !crate::promisor_fetch::promisor_lazy_fetch_enabled(config.as_ref(), repo.environment()) {
-        return Ok(());
-    }
-    if repo.caches().promisor_fetcher().is_none() {
-        return Ok(());
-    }
-    let odb = repo.odb();
-    let mut oids = Vec::new();
-    for change in changes {
+    let oids = changes.iter().filter_map(|change| {
         if change.status == DiffStatus::Deleted {
-            continue;
+            return None;
         }
         let mode = parse_git_mode(&change.new_mode);
-        if mode != MODE_REGULAR && mode != MODE_EXECUTABLE && mode != MODE_SYMLINK {
-            continue;
-        }
-        if change.new_oid.is_zero() || odb.try_exists_stored(&change.new_oid)? {
-            continue;
-        }
-        oids.push(change.new_oid);
-    }
-    if oids.is_empty() {
+        matches!(mode, MODE_REGULAR | MODE_EXECUTABLE | MODE_SYMLINK).then_some(change.new_oid)
+    });
+    prefetch_promisor_blobs(repo, oids)
+}
+
+/// Prefetch only missing, distinct blobs, retaining lazy-read behavior when disabled.
+fn prefetch_promisor_blobs(
+    repo: &Repository,
+    oids: impl IntoIterator<Item = ObjectId>,
+) -> Result<()> {
+    let config = repo.config()?;
+    if !crate::promisor::repo_treats_promisor_packs(repo.git_dir(), config.as_ref())
+        || !crate::promisor_fetch::promisor_lazy_fetch_enabled(config.as_ref(), repo.environment())
+        || repo.caches().promisor_fetcher().is_none()
+    {
         return Ok(());
     }
-    repo.prefetch_promised(&oids)
+    let unique: crate::objects::OidHashSet =
+        oids.into_iter().filter(|oid| !oid.is_zero()).collect();
+    let missing = repo.odb().missing_stored_oids(unique)?;
+    if missing.is_empty() {
+        return Ok(());
+    }
+    repo.prefetch_promised(&missing)
 }
 
 fn checkout_tree_changes_with_progress(

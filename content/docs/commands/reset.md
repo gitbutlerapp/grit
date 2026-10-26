@@ -26,6 +26,8 @@ Moves the current branch (or detached `HEAD`) to `<rev>`, which defaults to `HEA
 
 `--hard` moves the tip, resets the index, and updates tracked files in the worktree to match `<rev>`. Untracked files are left alone.
 
+In a blobless clone, `--hard` batches missing blobs needed to materialize or repair tracked paths into one promisor fetch. This includes `reset --hard HEAD` after `clone --blobs none --no-checkout`, and unchanged paths missing from the worktree when resetting to another commit. Repeated blob ids are requested once; sparse-excluded paths and submodule gitlinks do not download blob content. The usual partial-clone lazy-fetch opt-outs still apply.
+
 In a sparse checkout (`git sparse-checkout`), `--hard` and `--mixed` keep paths outside the sparse patterns out of the worktree: their index entries keep the skip-worktree bit, the same as `git reset`.
 
 `--keep` moves the tip and updates paths that differ between the current commit and `<rev>`, but refuses when a path that would change also has local staged or unstaged edits. Unrelated local changes (files that do not differ between the commits) are preserved.

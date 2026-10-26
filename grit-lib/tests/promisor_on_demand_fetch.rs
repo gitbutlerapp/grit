@@ -94,6 +94,7 @@ fn grit_blobless_clone(
             url: url.to_owned(),
             dest: dest.to_path_buf(),
             filter: Some(ObjectFilterSpec::BlobNone),
+            checkout: false,
             ..CloneOptions::new(url, dest.to_path_buf())
         },
         &mut NoProgress,
@@ -447,4 +448,357 @@ fn noop_negotiation_fetches_deltified_missing_blob() {
         .expect("git cat-file");
     assert!(expected.status.success());
     assert_eq!(obj.data, expected.stdout);
+}
+
+// The materialization and sparse-scope scenarios are based on upstream Git's
+// t5616 and t1090 behavior: metadata clones fetch only the blobs needed on disk.
+fn revision(repo: &Repository, rev: &str) -> ObjectId {
+    ObjectId::from_hex(
+        git_cmd(&["rev-parse", rev])
+            .in_dir(repo.work_tree().unwrap())
+            .exec()
+            .stdout
+            .trim(),
+    )
+    .unwrap()
+}
+
+fn hard_reset(repo: &Repository, target: ObjectId) -> grit_lib::error::Result<()> {
+    use grit_lib::ident::Signature;
+    use grit_lib::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};
+    let identity = Signature::new(
+        "T",
+        "t@example.com",
+        time::OffsetDateTime::from_unix_timestamp(1_700_000_000).unwrap(),
+    )
+    .unwrap();
+    reset_to_commit(
+        repo,
+        &ResetOptions::new(target, ResetMode::Hard, identity, "reset"),
+        &mut grit_lib::progress::NullProgress,
+        &NeverCancel,
+    )
+    .map(|_| ())
+}
+
+#[derive(Default)]
+struct ResetFetcher {
+    requests: std::sync::Mutex<Vec<Vec<ObjectId>>>,
+}
+
+impl PromisorFetcher for ResetFetcher {
+    fn fetch_missing(&self, repo: &Repository, oids: &[ObjectId]) -> grit_lib::error::Result<()> {
+        self.requests.lock().unwrap().push(oids.to_vec());
+        DefaultPromisorFetcher::new(Arc::new(DefaultHttpClientFactory::new()))
+            .fetch_missing(repo, oids)
+    }
+}
+
+fn assert_clean_index_and_worktree(repo: &Repository, source: &Path, count: usize) {
+    let index = repo.index_handle().load().unwrap();
+    assert_eq!(index.entries().len(), count);
+    for entry in index.entries() {
+        assert_eq!(entry.stage(), 0);
+        let path = std::str::from_utf8(&entry.path).unwrap();
+        assert_eq!(
+            fs::read(repo.work_tree().unwrap().join(path)).unwrap(),
+            fs::read(source.join(path)).unwrap(),
+            "{path}"
+        );
+        assert_eq!(entry.oid, revision(repo, &format!("HEAD:{path}")));
+    }
+    assert!(git_cmd(&["status", "--porcelain"])
+        .in_dir(repo.work_tree().unwrap())
+        .exec()
+        .stdout
+        .is_empty());
+    git_in(repo.work_tree().unwrap(), &["fsck", "--strict"]);
+}
+
+#[test]
+fn hard_reset_batches_200_missing_blobs_and_deduplicates() {
+    let layout = TempDir::new().unwrap();
+    git_in(layout.path(), &["init", "-q", "-b", "main", "source"]);
+    let source = layout.path().join("source");
+    for i in 1..=200 {
+        fs::write(
+            source.join(format!("file-{i}.txt")),
+            format!("file {i}\n{}", "build payload\n".repeat(100)),
+        )
+        .unwrap();
+    }
+    fs::copy(source.join("file-1.txt"), source.join("duplicate.txt")).unwrap();
+    git_in(&source, &["add", "."]);
+    git_in(&source, &["commit", "-qm", "inputs"]);
+    git_in(&source, &["config", "uploadpack.allowFilter", "true"]);
+    let url = format!("file://{}", source.display());
+    for existing_index in [false, true] {
+        let dest = TempDir::new().unwrap();
+        let fetcher = Arc::new(ResetFetcher::default());
+        let repo = grit_blobless_clone(&url, dest.path(), Some(fetcher.clone()));
+        let head = revision(&repo, "HEAD");
+        assert_eq!(promisor_sidecar_count(&repo.git_dir().join("objects")), 1);
+        assert!(!repo.odb().exists_local(&revision(&repo, "HEAD:file-1.txt")));
+        if existing_index {
+            git_in(dest.path(), &["read-tree", "HEAD"]);
+            // A staged deletion must be repaired along with absent worktree paths.
+            git_in(
+                dest.path(),
+                &["update-index", "--force-remove", "file-1.txt"],
+            );
+        }
+        hard_reset(&repo, head).unwrap();
+        let requests = fetcher.requests.lock().unwrap();
+        assert_eq!(requests.len(), 1, "all reset repairs must share one fetch");
+        assert_eq!(requests[0].len(), 200);
+        assert_eq!(
+            requests[0]
+                .iter()
+                .collect::<std::collections::HashSet<_>>()
+                .len(),
+            200
+        );
+        drop(requests);
+        assert_eq!(promisor_sidecar_count(&repo.git_dir().join("objects")), 2);
+        assert_clean_index_and_worktree(&repo, &source, 201);
+        hard_reset(&repo, head).unwrap();
+        assert_eq!(
+            fetcher.requests.lock().unwrap().len(),
+            1,
+            "second reset must use local blobs"
+        );
+    }
+}
+
+#[test]
+fn hard_reset_batches_changed_and_unchanged_missing_paths_with_attributes() {
+    let (_layout, bare) = setup_blobless_upstream();
+    let source = bare.parent().unwrap().join("upstream");
+    fs::write(source.join(".gitattributes"), "*.txt text eol=lf\n").unwrap();
+    fs::create_dir(source.join("nested")).unwrap();
+    fs::write(source.join("nested/.gitattributes"), "*.txt text eol=lf\n").unwrap();
+    fs::write(source.join("nested/input.txt"), "nested\n").unwrap();
+    git_in(&source, &["add", "."]);
+    git_in(&source, &["commit", "-qm", "attributes"]);
+    git_in(&source, &["branch", "target"]);
+    fs::write(source.join("a.txt"), "new a\n").unwrap();
+    fs::write(source.join("new.txt"), "only new\n").unwrap();
+    git_in(&source, &["add", "."]);
+    git_in(&source, &["commit", "-qm", "new tree"]);
+    git_in(&source, &["push", bare.to_str().unwrap(), "main", "target"]);
+    let dest = TempDir::new().unwrap();
+    let fetcher = Arc::new(ResetFetcher::default());
+    let repo = grit_blobless_clone(
+        &format!("file://{}", bare.display()),
+        dest.path(),
+        Some(fetcher.clone()),
+    );
+    let target = revision(&repo, "HEAD~1");
+    let unwanted = revision(&repo, "HEAD:new.txt");
+    hard_reset(&repo, target).unwrap();
+    assert_eq!(
+        fetcher.requests.lock().unwrap().len(),
+        1,
+        "diff writes, attribute reads and unchanged repairs share a fetch"
+    );
+    assert!(
+        !repo.odb().exists_local(&unwanted),
+        "deleted paths need no content"
+    );
+    git_in(&source, &["reset", "--hard", "target"]);
+    assert_clean_index_and_worktree(&repo, &source, 7);
+    assert_eq!(promisor_sidecar_count(&repo.git_dir().join("objects")), 2);
+}
+
+#[test]
+fn hard_reset_prefetch_respects_sparse_scope_and_gitlinks() {
+    let (_layout, bare) = setup_blobless_upstream();
+    let source = bare.parent().unwrap().join("upstream");
+    fs::create_dir(source.join("outside")).unwrap();
+    fs::write(source.join("outside/.gitattributes"), "*.txt text\n").unwrap();
+    fs::write(source.join("outside/missing.txt"), "excluded\n").unwrap();
+    git_in(&source, &["add", "."]);
+    git_in(
+        &source,
+        &[
+            "update-index",
+            "--add",
+            "--cacheinfo",
+            &format!(
+                "160000,{},submodule",
+                git_cmd(&["rev-parse", "HEAD"])
+                    .in_dir(&source)
+                    .exec()
+                    .stdout
+                    .trim()
+            ),
+        ],
+    );
+    git_in(&source, &["commit", "-qm", "sparse and gitlink"]);
+    git_in(&source, &["push", bare.to_str().unwrap(), "main"]);
+    let dest = TempDir::new().unwrap();
+    let fetcher = Arc::new(ResetFetcher::default());
+    let repo = grit_blobless_clone(
+        &format!("file://{}", bare.display()),
+        dest.path(),
+        Some(fetcher.clone()),
+    );
+    git_in(dest.path(), &["config", "core.sparseCheckout", "true"]);
+    fs::create_dir_all(repo.git_dir().join("info")).unwrap();
+    fs::write(
+        repo.git_dir().join("info/sparse-checkout"),
+        "/*\n!/outside/\n",
+    )
+    .unwrap();
+    repo.reload_config().unwrap();
+    hard_reset(&repo, revision(&repo, "HEAD")).unwrap();
+    let requests = fetcher.requests.lock().unwrap();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].len(), 4, "only included blobs, no gitlinks");
+    for path in ["outside/.gitattributes", "outside/missing.txt"] {
+        let oid = revision(&repo, &format!("HEAD:{path}"));
+        assert!(!repo.odb().exists_local(&oid));
+        assert!(!dest.path().join(path).exists());
+        assert!(repo
+            .index_handle()
+            .load()
+            .unwrap()
+            .get(path.as_bytes(), 0)
+            .unwrap()
+            .skip_worktree());
+    }
+    assert!(
+        git_cmd(&["status", "--porcelain", "--ignore-submodules=all"])
+            .in_dir(dest.path())
+            .exec()
+            .stdout
+            .is_empty()
+    );
+    git_in(dest.path(), &["fsck", "--strict"]);
+}
+
+#[test]
+fn hard_reset_preserves_lazy_fetch_opt_outs_and_missing_fetcher_errors() {
+    for disable in ["missing", "config", "env"] {
+        let (_layout, bare) = setup_blobless_upstream();
+        let dest = TempDir::new().unwrap();
+        let fetcher = Arc::new(ResetFetcher::default());
+        let repo = grit_blobless_clone(&format!("file://{}", bare.display()), dest.path(), None);
+        if disable == "config" {
+            git_in(dest.path(), &["config", "fetch.promisorLazy", "false"]);
+        }
+        let mut opts = RepositoryOptions::empty().with_work_tree(dest.path());
+        if disable != "missing" {
+            opts = opts.with_promisor_fetcher(Some(fetcher.clone()));
+        }
+        if disable == "env" {
+            opts.environment = grit_lib::config::environment::Environment::from_vars(
+                [("GRIT_NO_LAZY_FETCH".into(), "1".into())],
+                dest.path().to_path_buf(),
+            );
+        }
+        let repo = Repository::open(repo.git_dir(), &opts).unwrap();
+        let err = hard_reset(&repo, revision(&repo, "HEAD")).unwrap_err();
+        assert!(
+            matches!(err, Error::PromisedObjectMissing(_)),
+            "{disable}: {err:?}"
+        );
+        assert!(fetcher.requests.lock().unwrap().is_empty());
+    }
+}
+
+#[test]
+fn hard_reset_keeps_stat_clean_files_without_fetching_their_missing_blobs() {
+    let (_layout, bare) = setup_blobless_upstream();
+    let source = bare.parent().unwrap().join("upstream");
+    fs::write(source.join(".gitattributes"), "*.txt text eol=lf\n").unwrap();
+    git_in(&source, &["add", ".gitattributes"]);
+    git_in(&source, &["commit", "-qm", "attributes"]);
+    git_in(&source, &["push", bare.to_str().unwrap(), "main"]);
+    let dest = TempDir::new().unwrap();
+    let fetcher = Arc::new(ResetFetcher::default());
+    let repo = grit_blobless_clone(
+        &format!("file://{}", bare.display()),
+        dest.path(),
+        Some(fetcher.clone()),
+    );
+    let mut index = grit_lib::index::Index::new();
+    for path in [".gitattributes", "a.txt", "b.txt", "c.txt", "d.txt"] {
+        let abs = dest.path().join(path);
+        fs::copy(source.join(path), &abs).unwrap();
+        filetime::set_file_mtime(&abs, filetime::FileTime::from_unix_time(1_600_000_000, 0))
+            .unwrap();
+        let oid = revision(&repo, &format!("HEAD:{path}"));
+        assert!(!repo.odb().exists_local(&oid));
+        index.entries_mut().push(
+            grit_lib::index::entry_from_stat(
+                &abs,
+                path.as_bytes(),
+                oid,
+                grit_lib::index::MODE_REGULAR,
+            )
+            .unwrap(),
+        );
+    }
+    index.sort();
+    repo.index_handle().write(&mut index).unwrap();
+    hard_reset(&repo, revision(&repo, "HEAD")).unwrap();
+    assert!(fetcher.requests.lock().unwrap().is_empty());
+    assert!(!repo.odb().exists_local(&revision(&repo, "HEAD:a.txt")));
+    assert_clean_index_and_worktree(&repo, &source, 5);
+}
+
+#[test]
+fn hard_reset_propagates_typed_prefetch_failure() {
+    struct CancelledFetcher;
+    impl PromisorFetcher for CancelledFetcher {
+        fn fetch_missing(&self, _: &Repository, _: &[ObjectId]) -> grit_lib::error::Result<()> {
+            Err(Error::Cancelled)
+        }
+    }
+    let (_layout, bare) = setup_blobless_upstream();
+    let dest = TempDir::new().unwrap();
+    let repo = grit_blobless_clone(
+        &format!("file://{}", bare.display()),
+        dest.path(),
+        Some(Arc::new(CancelledFetcher)),
+    );
+    let head = revision(&repo, "HEAD");
+    assert!(matches!(hard_reset(&repo, head), Err(Error::Cancelled)));
+    assert_eq!(revision(&repo, "HEAD"), head);
+}
+
+#[test]
+fn hard_reset_with_every_path_sparse_skipped_does_not_fetch_attributes() {
+    let (_layout, bare) = setup_blobless_upstream();
+    let source = bare.parent().unwrap().join("upstream");
+    fs::write(source.join(".gitattributes"), "*.txt text\n").unwrap();
+    git_in(&source, &["add", ".gitattributes"]);
+    git_in(&source, &["commit", "-qm", "attributes"]);
+    git_in(&source, &["push", bare.to_str().unwrap(), "main"]);
+    let dest = TempDir::new().unwrap();
+    let fetcher = Arc::new(ResetFetcher::default());
+    let repo = grit_blobless_clone(
+        &format!("file://{}", bare.display()),
+        dest.path(),
+        Some(fetcher.clone()),
+    );
+    git_in(dest.path(), &["config", "core.sparseCheckout", "true"]);
+    fs::create_dir_all(repo.git_dir().join("info")).unwrap();
+    fs::write(repo.git_dir().join("info/sparse-checkout"), "!/*\n").unwrap();
+    repo.reload_config().unwrap();
+    hard_reset(&repo, revision(&repo, "HEAD")).unwrap();
+    assert!(fetcher.requests.lock().unwrap().is_empty());
+    assert_eq!(promisor_sidecar_count(&repo.git_dir().join("objects")), 1);
+    let index = repo.index_handle().load().unwrap();
+    assert_eq!(index.entries().len(), 5);
+    assert!(index.entries().iter().all(|entry| entry.skip_worktree()));
+    for entry in index.entries() {
+        assert!(!repo.odb().exists_local(&entry.oid));
+        assert!(!dest
+            .path()
+            .join(std::str::from_utf8(&entry.path).unwrap())
+            .exists());
+    }
+    git_in(dest.path(), &["fsck", "--strict"]);
 }

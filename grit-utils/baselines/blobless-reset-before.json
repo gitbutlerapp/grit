@@ -1,0 +1,687 @@
+{
+  "schema_version": 1,
+  "timestamp": "2026-10-26T20:24:55.900256+00:00",
+  "machine": {
+    "cpu_model": "INTEL(R) XEON(R) PLATINUM 8573C",
+    "physical_cores": 4,
+    "logical_cores": 4,
+    "ram_bytes": 16765378560,
+    "os": "linux",
+    "kernel": "6.17.0-1022-azure",
+    "scratch_filesystem": "ext4",
+    "rustc_version": "rustc 1.99.0 (b940084d7 2026-09-28)",
+    "cargo_profile": "release"
+  },
+  "tools": {
+    "git": "git version 2.55.0",
+    "grit": "grit 0.5.21",
+    "grit_commit": "fa6a9fd559b2b5e0ac4779f1d2b4c115f70c24f0"
+  },
+  "methodology": "GNU time -v for peak client RSS; Python monotonic around the complete command for wall time; clones and fsck/status/byte checks outside timing; no concurrent compilation; system Git; HTTP server debug build common to all clients.",
+  "scenarios": [
+    {
+      "id": "reset-blobless-small",
+      "group": "reset",
+      "fixture": "small",
+      "description": "Complete reset --hard HEAD (blobless, small); fresh clients for materialization",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 47.44609866687218,
+        "median_ms": 30.24097300021822,
+        "stddev_ms": 24.374201103678324,
+        "min_ms": 30.180916000063007,
+        "max_ms": 81.91640700033531,
+        "runs_ms": [
+          81.91640700033531,
+          30.24097300021822,
+          30.180916000063007
+        ],
+        "peak_rss_bytes": 5840896
+      },
+      "grit": {
+        "mean_ms": 1387.9631716666456,
+        "median_ms": 1394.2590500000733,
+        "stddev_ms": 9.000987463396461,
+        "min_ms": 1375.2340999999433,
+        "max_ms": 1394.3963649999205,
+        "runs_ms": [
+          1394.2590500000733,
+          1375.2340999999433,
+          1394.3963649999205
+        ],
+        "peak_rss_bytes": 22315008
+      },
+      "ratio": 29.253473112969548,
+      "detail": {
+        "command": "reset --hard HEAD",
+        "cargo_revision": null,
+        "git_samples": [
+          {
+            "shape": "small",
+            "label": "git-r1",
+            "mode": "blobless",
+            "wall_ms": 81.91640700033531,
+            "rss_kb": 5592,
+            "missing_before": 200,
+            "fetches": 1,
+            "packs_before": 1,
+            "packs_after": 2
+          },
+          {
+            "shape": "small",
+            "label": "git-r2",
+            "mode": "blobless",
+            "wall_ms": 30.24097300021822,
+            "rss_kb": 5704,
+            "missing_before": 200,
+            "fetches": 1,
+            "packs_before": 1,
+            "packs_after": 2
+          },
+          {
+            "shape": "small",
+            "label": "git-r3",
+            "mode": "blobless",
+            "wall_ms": 30.180916000063007,
+            "rss_kb": 5524,
+            "missing_before": 200,
+            "fetches": 1,
+            "packs_before": 1,
+            "packs_after": 2
+          }
+        ],
+        "grit_samples": [
+          {
+            "shape": "small",
+            "label": "before-r1",
+            "mode": "blobless",
+            "wall_ms": 1394.2590500000733,
+            "rss_kb": 21360,
+            "missing_before": 200,
+            "fetches": 200,
+            "packs_before": 1,
+            "packs_after": 201
+          },
+          {
+            "shape": "small",
+            "label": "before-r2",
+            "mode": "blobless",
+            "wall_ms": 1375.2340999999433,
+            "rss_kb": 21176,
+            "missing_before": 200,
+            "fetches": 200,
+            "packs_before": 1,
+            "packs_after": 201
+          },
+          {
+            "shape": "small",
+            "label": "before-r3",
+            "mode": "blobless",
+            "wall_ms": 1394.3963649999205,
+            "rss_kb": 21792,
+            "missing_before": 200,
+            "fetches": 200,
+            "packs_before": 1,
+            "packs_after": 201
+          }
+        ]
+      }
+    },
+    {
+      "id": "reset-full-small",
+      "group": "reset",
+      "fixture": "small",
+      "description": "Complete reset --hard HEAD (full, small); fresh clients for materialization",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 5.46850333345598,
+        "median_ms": 5.486196000219934,
+        "stddev_ms": 0.1068630691766846,
+        "min_ms": 5.329676999735966,
+        "max_ms": 5.58963700041204,
+        "runs_ms": [
+          5.486196000219934,
+          5.329676999735966,
+          5.58963700041204
+        ],
+        "peak_rss_bytes": 5808128
+      },
+      "grit": {
+        "mean_ms": 9.830359666769558,
+        "median_ms": 9.81626500015409,
+        "stddev_ms": 0.2589739060700837,
+        "min_ms": 9.52046500015058,
+        "max_ms": 10.154349000004004,
+        "runs_ms": [
+          10.154349000004004,
+          9.81626500015409,
+          9.52046500015058
+        ],
+        "peak_rss_bytes": 14213120
+      },
+      "ratio": 1.7976325636720378,
+      "detail": {
+        "command": "reset --hard HEAD",
+        "cargo_revision": null,
+        "git_samples": [
+          {
+            "shape": "small",
+            "label": "git-r1",
+            "mode": "full",
+            "wall_ms": 5.486196000219934,
+            "rss_kb": 5672,
+            "missing_before": 0,
+            "fetches": 0,
+            "packs_before": 1,
+            "packs_after": 1
+          },
+          {
+            "shape": "small",
+            "label": "git-r2",
+            "mode": "full",
+            "wall_ms": 5.329676999735966,
+            "rss_kb": 5360,
+            "missing_before": 0,
+            "fetches": 0,
+            "packs_before": 1,
+            "packs_after": 1
+          },
+          {
+            "shape": "small",
+            "label": "git-r3",
+            "mode": "full",
+            "wall_ms": 5.58963700041204,
+            "rss_kb": 5552,
+            "missing_before": 0,
+            "fetches": 0,
+            "packs_before": 1,
+            "packs_after": 1
+          }
+        ],
+        "grit_samples": [
+          {
+            "shape": "small",
+            "label": "before-r1",
+            "mode": "full",
+            "wall_ms": 10.154349000004004,
+            "rss_kb": 13736,
+            "missing_before": 0,
+            "fetches": 0,
+            "packs_before": 0,
+            "packs_after": 0
+          },
+          {
+            "shape": "small",
+            "label": "before-r2",
+            "mode": "full",
+            "wall_ms": 9.81626500015409,
+            "rss_kb": 13880,
+            "missing_before": 0,
+            "fetches": 0,
+            "packs_before": 0,
+            "packs_after": 0
+          },
+          {
+            "shape": "small",
+            "label": "before-r3",
+            "mode": "full",
+            "wall_ms": 9.52046500015058,
+            "rss_kb": 13828,
+            "missing_before": 0,
+            "fetches": 0,
+            "packs_before": 0,
+            "packs_after": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "reset-clean-small",
+      "group": "reset",
+      "fixture": "small",
+      "description": "Complete reset --hard HEAD (clean, small); fresh clients for materialization",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 5.879829999988336,
+        "median_ms": 5.186826000226574,
+        "stddev_ms": 0.9974498352394211,
+        "min_ms": 5.162297999959264,
+        "max_ms": 7.290365999779169,
+        "runs_ms": [
+          5.162297999959264,
+          5.186826000226574,
+          7.290365999779169
+        ],
+        "peak_rss_bytes": 5545984
+      },
+      "grit": {
+        "mean_ms": 6.4612473332393465,
+        "median_ms": 6.347174999973504,
+        "stddev_ms": 0.31679413912240706,
+        "min_ms": 6.143078999684803,
+        "max_ms": 6.893488000059733,
+        "runs_ms": [
+          6.893488000059733,
+          6.347174999973504,
+          6.143078999684803
+        ],
+        "peak_rss_bytes": 14893056
+      },
+      "ratio": 1.0988833577249961,
+      "detail": {
+        "command": "reset --hard HEAD",
+        "cargo_revision": null,
+        "git_samples": [
+          {
+            "shape": "small",
+            "label": "git-r1",
+            "mode": "clean",
+            "wall_ms": 5.162297999959264,
+            "rss_kb": 5416,
+            "packs_after": 1
+          },
+          {
+            "shape": "small",
+            "label": "git-r2",
+            "mode": "clean",
+            "wall_ms": 5.186826000226574,
+            "rss_kb": 5416,
+            "packs_after": 1
+          },
+          {
+            "shape": "small",
+            "label": "git-r3",
+            "mode": "clean",
+            "wall_ms": 7.290365999779169,
+            "rss_kb": 5368,
+            "packs_after": 1
+          }
+        ],
+        "grit_samples": [
+          {
+            "shape": "small",
+            "label": "before-r1",
+            "mode": "clean",
+            "wall_ms": 6.893488000059733,
+            "rss_kb": 14484,
+            "packs_after": 0
+          },
+          {
+            "shape": "small",
+            "label": "before-r2",
+            "mode": "clean",
+            "wall_ms": 6.347174999973504,
+            "rss_kb": 14292,
+            "packs_after": 0
+          },
+          {
+            "shape": "small",
+            "label": "before-r3",
+            "mode": "clean",
+            "wall_ms": 6.143078999684803,
+            "rss_kb": 14544,
+            "packs_after": 0
+          }
+        ]
+      }
+    },
+    {
+      "id": "reset-blobless-cargo",
+      "group": "reset",
+      "fixture": "cargo",
+      "description": "Complete reset --hard HEAD (blobless, cargo); fresh clients for materialization",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 678.5749939999732,
+        "median_ms": 678.5749939999732,
+        "stddev_ms": 0.0,
+        "min_ms": 678.5749939999732,
+        "max_ms": 678.5749939999732,
+        "runs_ms": [
+          678.5749939999732
+        ],
+        "peak_rss_bytes": 46219264
+      },
+      "grit": {
+        "mean_ms": 72193.58950200012,
+        "median_ms": 72193.58950200012,
+        "stddev_ms": 0.0,
+        "min_ms": 72193.58950200012,
+        "max_ms": 72193.58950200012,
+        "runs_ms": [
+          72193.58950200012
+        ],
+        "peak_rss_bytes": 42643456
+      },
+      "ratio": 106.38999394369515,
+      "detail": {
+        "command": "reset --hard HEAD",
+        "cargo_revision": "b57863321f8d0a0f76fcf9ad636b6e39b024d0c0",
+        "git_samples": [
+          {
+            "shape": "cargo",
+            "label": "git",
+            "mode": "blobless",
+            "wall_ms": 678.5749939999732,
+            "rss_kb": 45136,
+            "missing_before": 59756,
+            "fetches": 1,
+            "packs_before": 2,
+            "packs_after": 3
+          }
+        ],
+        "grit_samples": [
+          {
+            "shape": "cargo",
+            "label": "before",
+            "mode": "blobless",
+            "wall_ms": 72193.58950200012,
+            "rss_kb": 41644,
+            "missing_before": 59756,
+            "fetches": 2022,
+            "packs_before": 1,
+            "packs_after": 2023
+          }
+        ]
+      }
+    },
+    {
+      "id": "reset-full-cargo",
+      "group": "reset",
+      "fixture": "cargo",
+      "description": "Complete reset --hard HEAD (full, cargo); fresh clients for materialization",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 151.60737275004976,
+        "median_ms": 149.6649815001092,
+        "stddev_ms": 6.815848560199319,
+        "min_ms": 144.31203999993159,
+        "max_ms": 162.78748800004905,
+        "runs_ms": [
+          144.31203999993159,
+          162.78748800004905,
+          149.4909960001678,
+          149.83896700005062
+        ],
+        "peak_rss_bytes": 47206400
+      },
+      "grit": {
+        "mean_ms": 179.8230537500558,
+        "median_ms": 180.57149250012117,
+        "stddev_ms": 5.470057170617621,
+        "min_ms": 171.46903999991991,
+        "max_ms": 186.68019000006097,
+        "runs_ms": [
+          171.46903999991991,
+          179.63449800026865,
+          181.50848699997368,
+          186.68019000006097
+        ],
+        "peak_rss_bytes": 58101760
+      },
+      "ratio": 1.1861102167275488,
+      "detail": {
+        "command": "reset --hard HEAD",
+        "cargo_revision": "b57863321f8d0a0f76fcf9ad636b6e39b024d0c0",
+        "git_samples": [
+          {
+            "shape": "cargo",
+            "label": "git",
+            "mode": "full",
+            "wall_ms": 144.31203999993159,
+            "rss_kb": 46100,
+            "missing_before": 0,
+            "fetches": 0,
+            "packs_before": 1,
+            "packs_after": 1
+          },
+          {
+            "shape": "cargo",
+            "label": "git-full-r1",
+            "mode": "full",
+            "wall_ms": 162.78748800004905,
+            "rss_kb": 45972,
+            "missing_before": 0,
+            "fetches": 0,
+            "packs_before": 1,
+            "packs_after": 1
+          },
+          {
+            "shape": "cargo",
+            "label": "git-full-r2",
+            "mode": "full",
+            "wall_ms": 149.4909960001678,
+            "rss_kb": 46096,
+            "missing_before": 0,
+            "fetches": 0,
+            "packs_before": 1,
+            "packs_after": 1
+          },
+          {
+            "shape": "cargo",
+            "label": "git-full-r3",
+            "mode": "full",
+            "wall_ms": 149.83896700005062,
+            "rss_kb": 46032,
+            "missing_before": 0,
+            "fetches": 0,
+            "packs_before": 1,
+            "packs_after": 1
+          }
+        ],
+        "grit_samples": [
+          {
+            "shape": "cargo",
+            "label": "before",
+            "mode": "full",
+            "wall_ms": 171.46903999991991,
+            "rss_kb": 56080,
+            "missing_before": 0,
+            "fetches": 0,
+            "packs_before": 1,
+            "packs_after": 1
+          },
+          {
+            "shape": "cargo",
+            "label": "before-full-r1",
+            "mode": "full",
+            "wall_ms": 179.63449800026865,
+            "rss_kb": 56740,
+            "missing_before": 0,
+            "fetches": 0,
+            "packs_before": 1,
+            "packs_after": 1
+          },
+          {
+            "shape": "cargo",
+            "label": "before-full-r2",
+            "mode": "full",
+            "wall_ms": 181.50848699997368,
+            "rss_kb": 56236,
+            "missing_before": 0,
+            "fetches": 0,
+            "packs_before": 1,
+            "packs_after": 1
+          },
+          {
+            "shape": "cargo",
+            "label": "before-full-r3",
+            "mode": "full",
+            "wall_ms": 186.68019000006097,
+            "rss_kb": 56372,
+            "missing_before": 0,
+            "fetches": 0,
+            "packs_before": 1,
+            "packs_after": 1
+          }
+        ]
+      }
+    },
+    {
+      "id": "reset-clean-cargo",
+      "group": "reset",
+      "fixture": "cargo",
+      "description": "Complete reset --hard HEAD (clean, cargo); fresh clients for materialization",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 13.990812250085582,
+        "median_ms": 14.026111000021046,
+        "stddev_ms": 0.516167389477491,
+        "min_ms": 13.252018999992288,
+        "max_ms": 14.65900800030795,
+        "runs_ms": [
+          13.252018999992288,
+          13.837800000146672,
+          14.214421999895421,
+          14.65900800030795
+        ],
+        "peak_rss_bytes": 15667200
+      },
+      "grit": {
+        "mean_ms": 17.919468999934907,
+        "median_ms": 17.91980749976574,
+        "stddev_ms": 0.38818407785458514,
+        "min_ms": 17.47977400009404,
+        "max_ms": 18.35848700011411,
+        "runs_ms": [
+          18.35848700011411,
+          17.590657999789983,
+          18.248956999741495,
+          17.47977400009404
+        ],
+        "peak_rss_bytes": 20873216
+      },
+      "ratio": 1.280802621007604,
+      "detail": {
+        "command": "reset --hard HEAD",
+        "cargo_revision": "b57863321f8d0a0f76fcf9ad636b6e39b024d0c0",
+        "git_samples": [
+          {
+            "shape": "cargo",
+            "label": "git",
+            "mode": "clean",
+            "wall_ms": 13.252018999992288,
+            "rss_kb": 15184,
+            "packs_after": 1
+          },
+          {
+            "shape": "cargo",
+            "label": "git-full-r1",
+            "mode": "clean",
+            "wall_ms": 13.837800000146672,
+            "rss_kb": 15176,
+            "packs_after": 1
+          },
+          {
+            "shape": "cargo",
+            "label": "git-full-r2",
+            "mode": "clean",
+            "wall_ms": 14.214421999895421,
+            "rss_kb": 15300,
+            "packs_after": 1
+          },
+          {
+            "shape": "cargo",
+            "label": "git-full-r3",
+            "mode": "clean",
+            "wall_ms": 14.65900800030795,
+            "rss_kb": 15112,
+            "packs_after": 1
+          }
+        ],
+        "grit_samples": [
+          {
+            "shape": "cargo",
+            "label": "before",
+            "mode": "clean",
+            "wall_ms": 18.35848700011411,
+            "rss_kb": 20268,
+            "packs_after": 1
+          },
+          {
+            "shape": "cargo",
+            "label": "before-full-r1",
+            "mode": "clean",
+            "wall_ms": 17.590657999789983,
+            "rss_kb": 19956,
+            "packs_after": 1
+          },
+          {
+            "shape": "cargo",
+            "label": "before-full-r2",
+            "mode": "clean",
+            "wall_ms": 18.248956999741495,
+            "rss_kb": 20280,
+            "packs_after": 1
+          },
+          {
+            "shape": "cargo",
+            "label": "before-full-r3",
+            "mode": "clean",
+            "wall_ms": 17.47977400009404,
+            "rss_kb": 20384,
+            "packs_after": 1
+          }
+        ]
+      }
+    },
+    {
+      "id": "reset-blobless-http-200",
+      "group": "reset",
+      "fixture": "http-200",
+      "description": "Complete reset --hard HEAD (blobless, http-200); fresh clients for materialization",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 161.8383720001475,
+        "median_ms": 161.8383720001475,
+        "stddev_ms": 0.0,
+        "min_ms": 161.8383720001475,
+        "max_ms": 161.8383720001475,
+        "runs_ms": [
+          161.8383720001475
+        ],
+        "peak_rss_bytes": 9814016
+      },
+      "grit": {
+        "mean_ms": 1804.664541999955,
+        "median_ms": 1804.664541999955,
+        "stddev_ms": 0.0,
+        "min_ms": 1804.664541999955,
+        "max_ms": 1804.664541999955,
+        "runs_ms": [
+          1804.664541999955
+        ],
+        "peak_rss_bytes": 24543232
+      },
+      "ratio": 11.151030004171757,
+      "detail": {
+        "command": "reset --hard HEAD",
+        "cargo_revision": null,
+        "git_samples": [
+          {
+            "shape": "http-200",
+            "label": "git",
+            "mode": "blobless",
+            "wall_ms": 161.8383720001475,
+            "rss_kb": 9584,
+            "packs_before": 1,
+            "packs_after": 2,
+            "requests": 2
+          }
+        ],
+        "grit_samples": [
+          {
+            "shape": "http-200",
+            "label": "before",
+            "mode": "blobless",
+            "wall_ms": 1804.664541999955,
+            "rss_kb": 23968,
+            "packs_before": 1,
+            "packs_after": 201,
+            "requests": 400
+          }
+        ]
+      }
+    }
+  ]
+}

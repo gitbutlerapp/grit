@@ -168,6 +168,7 @@ baseline = [
   "grit-utils/baselines/daily-large-blob-after.json",
   "grit-utils/baselines/daily-delete-heavy-after.json",
   "grit-utils/baselines/daily-reset-after.json",
+  "grit-utils/baselines/blobless-reset-after.json",
   "grit-utils/baselines/daily-merge-content-wide-after.json",
   "grit-utils/baselines/daily-commit-autostage-after.json",
   "grit-utils/baselines/bundle-create-all.json",

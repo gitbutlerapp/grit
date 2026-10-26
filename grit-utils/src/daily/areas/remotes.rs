@@ -374,6 +374,112 @@ fn clone_blobless_grit(ctx: &DailyHeadlineContext) -> BenchArgv {
     ))
 }
 
+fn blobless_reset_dest(ctx: &DailyHeadlineContext, grit: bool) -> std::path::PathBuf {
+    ctx.remote
+        .as_ref()
+        .map(|r| {
+            r.meta
+                .clone_dest
+                .with_extension(if grit { "grit-reset" } else { "git-reset" })
+        })
+        .unwrap_or_default()
+}
+
+fn prepare_blobless_reset(ctx: &DailyHeadlineContext) -> DailyPrepare {
+    let Some(remote) = ctx.remote.as_ref() else {
+        return prepare_none(ctx);
+    };
+    let git = shell_quote(&ctx.git.to_string_lossy());
+    let grit = shell_quote(&ctx.grit.to_string_lossy());
+    let url = shell_quote(&remote.remote_url);
+    let git_dest = shell_quote(&blobless_reset_dest(ctx, false).to_string_lossy());
+    let grit_dest = shell_quote(&blobless_reset_dest(ctx, true).to_string_lossy());
+    DailyPrepare::Shell(sh_script(format!(
+        "set -e\nrm -rf {git_dest} {grit_dest}\n{git} clone -q --filter=blob:none --no-checkout {url} {git_dest}\n{grit} clone --blobs none --no-checkout {url} {grit_dest}\n"
+    )))
+}
+
+fn blobless_reset_git(ctx: &DailyHeadlineContext) -> BenchArgv {
+    sh_devnull(
+        &ctx.git,
+        &[
+            "-C",
+            &blobless_reset_dest(ctx, false).to_string_lossy(),
+            "reset",
+            "--hard",
+            "HEAD",
+        ],
+    )
+}
+
+fn blobless_reset_grit(ctx: &DailyHeadlineContext) -> BenchArgv {
+    sh_devnull(
+        &ctx.grit,
+        &[
+            "-C",
+            &blobless_reset_dest(ctx, true).to_string_lossy(),
+            "reset",
+            "--hard",
+            "HEAD",
+        ],
+    )
+}
+
+fn correctness_blobless_reset(ctx: &DailyHeadlineContext) -> anyhow::Result<()> {
+    use crate::real_repo_fixture::run_git;
+    use anyhow::Context;
+    let remote = ctx.remote.as_ref().context("blobless reset remote")?;
+    for (tool, grit) in [(&ctx.git, false), (&ctx.grit, true)] {
+        let dest = blobless_reset_dest(ctx, grit);
+        if dest.exists() {
+            std::fs::remove_dir_all(&dest)?;
+        }
+        let mut args = vec!["clone", "--no-checkout"];
+        if grit {
+            args.extend(["--blobs", "none"]);
+        } else {
+            args.push("--filter=blob:none");
+        }
+        let dest_str = dest.to_string_lossy();
+        args.extend([remote.remote_url.as_str(), dest_str.as_ref()]);
+        let output = std::process::Command::new(tool).args(&args).output()?;
+        anyhow::ensure!(
+            output.status.success(),
+            "blobless clone failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let output = std::process::Command::new(tool)
+            .arg("-C")
+            .arg(&dest)
+            .args(["reset", "--hard", "HEAD"])
+            .output()?;
+        anyhow::ensure!(
+            output.status.success(),
+            "blobless reset failed: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        run_git(&ctx.git, &dest, &["fsck", "--strict"])?;
+        let status = std::process::Command::new(&ctx.git)
+            .arg("-C")
+            .arg(&dest)
+            .args(["status", "--porcelain"])
+            .output()?;
+        anyhow::ensure!(
+            status.status.success() && status.stdout.is_empty(),
+            "blobless reset left dirty files"
+        );
+        let packs = std::fs::read_dir(dest.join(".git/objects/pack"))?
+            .flatten()
+            .filter(|e| e.path().extension().is_some_and(|ext| ext == "pack"))
+            .count();
+        anyhow::ensure!(
+            packs <= 3,
+            "blobless materialization produced {packs} packs"
+        );
+    }
+    Ok(())
+}
+
 fn clone_shallow_local_git(ctx: &DailyHeadlineContext) -> BenchArgv {
     let Some(remote) = ctx.remote.as_ref() else {
         return BenchArgv::new("false", Vec::<&str>::new());
@@ -632,6 +738,15 @@ fn matrix_plans() -> Vec<DailyHeadlinePlan> {
             build_git: clone_blobless_git,
             build_grit: clone_blobless_grit,
             correctness: Some(correctness_clone_blobless),
+        },
+        DailyHeadlinePlan {
+            spec: matrix_spec("reset/blobless@git-git"),
+            pending: false,
+            setup: setup_git_git_remote_blobless,
+            prepare: prepare_blobless_reset,
+            build_git: blobless_reset_git,
+            build_grit: blobless_reset_grit,
+            correctness: Some(correctness_blobless_reset),
         },
         DailyHeadlinePlan {
             spec: matrix_spec("clone/checkout@synth-100k"),
