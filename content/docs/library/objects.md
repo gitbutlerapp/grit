@@ -58,6 +58,12 @@ match hash_object(HashAlgo::Sha1, ObjectKind::Blob, payload) {
 
 Patch ids, rerere ids, and pack/index trailers use [`ChecksumHasher`](rustdoc:grit_lib::objects::hash::ChecksumHasher)—same digests, not object identities, and no collision guard on those paths.
 
+## Revision labels
+
+[`Repository::revision_label`](rustdoc:grit_lib::repo::Repository::revision_label) returns an optional [`RevisionLabel`](rustdoc:grit_lib::revwalk::object_inspect::RevisionLabel) for a short local branch or tag name. `HEAD` labels its symbolic local branch, including an unborn branch; detached `HEAD` has no label. Short branch names take precedence over equally named tags. It uses the repository's ref store, including injected backends. This is the classification used by `grit show`; resolve the revision separately when you need its object id.
+
+`RevisionLabel::Tag` carries the tag ref's short name and an optional parsed annotation. Lightweight tags have no annotation. Annotated tags retain their original tag header, tagger, target, extra headers and untrimmed message; the target is not peeled. Missing labels return `None`, while unreadable tag objects and malformed annotations return library errors.
+
 ## Reading
 
 [`Odb::read`](rustdoc:grit_lib::objects::odb::Odb) returns an [`Object`](rustdoc:grit_lib::objects::Object) with `kind` and uncompressed `data`. Packed and loose objects share the same API.

@@ -8133,6 +8133,23 @@ impl core::marker::Unpin for grit_lib::revwalk::object_inspect::ResolveError
 impl core::marker::UnsafeUnpin for grit_lib::revwalk::object_inspect::ResolveError
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::object_inspect::ResolveError
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::object_inspect::ResolveError
+pub enum grit_lib::object_inspect::RevisionLabel
+pub grit_lib::object_inspect::RevisionLabel::Branch
+pub grit_lib::object_inspect::RevisionLabel::Branch::name: alloc::string::String
+pub grit_lib::object_inspect::RevisionLabel::Tag
+pub grit_lib::object_inspect::RevisionLabel::Tag::annotation: core::option::Option<grit_lib::objects::TagData>
+pub grit_lib::object_inspect::RevisionLabel::Tag::name: alloc::string::String
+impl core::clone::Clone for grit_lib::revwalk::object_inspect::RevisionLabel
+pub fn grit_lib::revwalk::object_inspect::RevisionLabel::clone(&self) -> Self
+impl core::fmt::Debug for grit_lib::revwalk::object_inspect::RevisionLabel
+pub fn grit_lib::revwalk::object_inspect::RevisionLabel::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::revwalk::object_inspect::RevisionLabel
+impl core::marker::Send for grit_lib::revwalk::object_inspect::RevisionLabel
+impl core::marker::Sync for grit_lib::revwalk::object_inspect::RevisionLabel
+impl core::marker::Unpin for grit_lib::revwalk::object_inspect::RevisionLabel
+impl core::marker::UnsafeUnpin for grit_lib::revwalk::object_inspect::RevisionLabel
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::object_inspect::RevisionLabel
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::object_inspect::RevisionLabel
 pub struct grit_lib::object_inspect::ResolvedObject
 pub grit_lib::object_inspect::ResolvedObject::full_ref: core::option::Option<alloc::string::String>
 pub grit_lib::object_inspect::ResolvedObject::kind: grit_lib::objects::ObjectKind
@@ -16729,6 +16746,7 @@ pub fn grit_lib::repo::Repository::read_object_info_for_display(&self, &grit_lib
 pub fn grit_lib::repo::Repository::read_object_raw_for_display(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::objects::Object>
 pub fn grit_lib::repo::Repository::resolve(&self, &str) -> core::result::Result<grit_lib::revwalk::object_inspect::ResolvedObject, grit_lib::revwalk::object_inspect::ResolveError>
 pub fn grit_lib::repo::Repository::resolve_ref_name(&self, &str) -> core::result::Result<core::option::Option<grit_lib::revwalk::object_inspect::ResolvedRefName>, grit_lib::revwalk::rev_parse_error::RevParseError>
+pub fn grit_lib::repo::Repository::revision_label(&self, &str) -> grit_lib::error::Result<core::option::Option<grit_lib::revwalk::object_inspect::RevisionLabel>>
 pub fn grit_lib::repo::Repository::verify_object(&self, &str, core::option::Option<grit_lib::objects::ObjectKind>) -> core::result::Result<grit_lib::objects::ObjectId, grit_lib::revwalk::object_inspect::ResolveError>
 pub fn grit_lib::repo::Repository::with_object_stream_for_display<R>(&self, &grit_lib::objects::ObjectId, impl core::ops::function::FnOnce(grit_lib::objects::odb::store::ObjectStream<'_>) -> grit_lib::error::Result<R>) -> grit_lib::error::Result<core::option::Option<R>>
 impl grit_lib::repo::Repository
@@ -21928,6 +21946,7 @@ pub fn grit_lib::repo::Repository::read_object_info_for_display(&self, &grit_lib
 pub fn grit_lib::repo::Repository::read_object_raw_for_display(&self, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<grit_lib::objects::Object>
 pub fn grit_lib::repo::Repository::resolve(&self, &str) -> core::result::Result<grit_lib::revwalk::object_inspect::ResolvedObject, grit_lib::revwalk::object_inspect::ResolveError>
 pub fn grit_lib::repo::Repository::resolve_ref_name(&self, &str) -> core::result::Result<core::option::Option<grit_lib::revwalk::object_inspect::ResolvedRefName>, grit_lib::revwalk::rev_parse_error::RevParseError>
+pub fn grit_lib::repo::Repository::revision_label(&self, &str) -> grit_lib::error::Result<core::option::Option<grit_lib::revwalk::object_inspect::RevisionLabel>>
 pub fn grit_lib::repo::Repository::verify_object(&self, &str, core::option::Option<grit_lib::objects::ObjectKind>) -> core::result::Result<grit_lib::objects::ObjectId, grit_lib::revwalk::object_inspect::ResolveError>
 pub fn grit_lib::repo::Repository::with_object_stream_for_display<R>(&self, &grit_lib::objects::ObjectId, impl core::ops::function::FnOnce(grit_lib::objects::odb::store::ObjectStream<'_>) -> grit_lib::error::Result<R>) -> grit_lib::error::Result<core::option::Option<R>>
 impl grit_lib::repo::Repository
@@ -24351,6 +24370,23 @@ impl core::marker::Unpin for grit_lib::revwalk::object_inspect::ResolveError
 impl core::marker::UnsafeUnpin for grit_lib::revwalk::object_inspect::ResolveError
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::object_inspect::ResolveError
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::object_inspect::ResolveError
+pub enum grit_lib::revwalk::object_inspect::RevisionLabel
+pub grit_lib::revwalk::object_inspect::RevisionLabel::Branch
+pub grit_lib::revwalk::object_inspect::RevisionLabel::Branch::name: alloc::string::String
+pub grit_lib::revwalk::object_inspect::RevisionLabel::Tag
+pub grit_lib::revwalk::object_inspect::RevisionLabel::Tag::annotation: core::option::Option<grit_lib::objects::TagData>
+pub grit_lib::revwalk::object_inspect::RevisionLabel::Tag::name: alloc::string::String
+impl core::clone::Clone for grit_lib::revwalk::object_inspect::RevisionLabel
+pub fn grit_lib::revwalk::object_inspect::RevisionLabel::clone(&self) -> Self
+impl core::fmt::Debug for grit_lib::revwalk::object_inspect::RevisionLabel
+pub fn grit_lib::revwalk::object_inspect::RevisionLabel::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Freeze for grit_lib::revwalk::object_inspect::RevisionLabel
+impl core::marker::Send for grit_lib::revwalk::object_inspect::RevisionLabel
+impl core::marker::Sync for grit_lib::revwalk::object_inspect::RevisionLabel
+impl core::marker::Unpin for grit_lib::revwalk::object_inspect::RevisionLabel
+impl core::marker::UnsafeUnpin for grit_lib::revwalk::object_inspect::RevisionLabel
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::revwalk::object_inspect::RevisionLabel
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::revwalk::object_inspect::RevisionLabel
 pub struct grit_lib::revwalk::object_inspect::ResolvedObject
 pub grit_lib::revwalk::object_inspect::ResolvedObject::full_ref: core::option::Option<alloc::string::String>
 pub grit_lib::revwalk::object_inspect::ResolvedObject::kind: grit_lib::objects::ObjectKind

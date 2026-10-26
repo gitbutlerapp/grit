@@ -157,7 +157,80 @@ pub enum ObjectContents {
     Tag(TagData),
 }
 
+/// A branch or tag label for a revision, independent of its display format.
+///
+/// The label describes how a name was supplied, rather than the kind of object
+/// it resolves to. A tag can, for example, point to a blob or another tag.
+#[derive(Debug, Clone)]
+pub enum RevisionLabel {
+    /// A local branch, including the branch named by symbolic `HEAD`.
+    Branch {
+        /// Branch name without `refs/heads/`.
+        name: String,
+    },
+    /// A lightweight or annotated tag.
+    Tag {
+        /// Ref name without `refs/tags/`, which can differ from the tag header.
+        name: String,
+        /// Parsed tag object, or `None` for a lightweight tag.
+        annotation: Option<TagData>,
+    },
+}
+
 impl Repository {
+    /// Classify `spec` as a short local branch or tag name for display.
+    ///
+    /// Symbolic `HEAD` labels its local branch, including an unborn branch;
+    /// detached `HEAD` has no label. Otherwise, short branch names take precedence
+    /// over short tag names. Other inputs return `None` unless they themselves
+    /// name a short branch or tag. This does not interpret revision expressions
+    /// or fully qualified ref names; use [`Self::resolve`] to resolve a revision.
+    ///
+    /// Uses this repository's ref store, including injected backends.
+    /// Annotated tags retain their raw metadata and message, without peeling
+    /// the target or trimming whitespace. Ref lookup failures are treated as
+    /// absent labels, so callers can resolve the revision independently.
+    ///
+    /// # Errors
+    ///
+    /// Returns an object-store error if a named tag's object cannot be read, or
+    /// [`Error::CorruptObject`] if an annotated tag cannot be parsed.
+    #[inline]
+    pub fn revision_label(&self, spec: &str) -> Result<Option<RevisionLabel>> {
+        if spec == "HEAD" {
+            return Ok(crate::refs::read_symbolic_ref_for_repository(self, "HEAD")
+                .ok()
+                .flatten()
+                .and_then(|target| {
+                    target
+                        .strip_prefix("refs/heads/")
+                        .map(|name| RevisionLabel::Branch {
+                            name: name.to_owned(),
+                        })
+                }));
+        }
+
+        if self.refs().resolve(&format!("refs/heads/{spec}")).is_ok() {
+            return Ok(Some(RevisionLabel::Branch {
+                name: spec.to_owned(),
+            }));
+        }
+
+        let Ok(oid) = self.refs().resolve(&format!("refs/tags/{spec}")) else {
+            return Ok(None);
+        };
+        let object = self.odb().read(&oid)?;
+        let annotation = if object.kind == ObjectKind::Tag {
+            Some(parse_tag(&object.data)?)
+        } else {
+            None
+        };
+        Ok(Some(RevisionLabel::Tag {
+            name: spec.to_owned(),
+            annotation,
+        }))
+    }
+
     /// Resolve `spec` to an object id, kind, and size.
     ///
     /// Supports the same revision forms as [`crate::revwalk::rev_parse::resolve_revision`]
@@ -531,5 +604,154 @@ mod tests {
     fn tree_entry_mode_cat_file_p_uses_six_digit_tree_mode() {
         assert_eq!(tree_entry_mode_cat_file_p(0o040000), "040000");
         assert_eq!(tree_entry_mode_cat_file_p(0o100644), "100644");
+    }
+    fn label_repo() -> (tempfile::TempDir, Repository, ObjectId) {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = Repository::init(
+            dir.path(),
+            &crate::repo::InitOptions::new().with_initial_branch("main"),
+        )
+        .expect("init");
+        let tree = repo.odb().write(ObjectKind::Tree, b"").expect("tree");
+        let commit = repo.odb().write(ObjectKind::Commit, format!(
+            "tree {tree}\nauthor A <a@example.com> 1 +0000\ncommitter A <a@example.com> 1 +0000\n\ninitial\n"
+        ).as_bytes()).expect("commit");
+        crate::refs::write_ref(repo.git_dir(), "refs/heads/main", &commit).expect("branch");
+        (dir, repo, commit)
+    }
+
+    #[test]
+    fn revision_labels_distinguish_names_from_expressions() {
+        let (_dir, repo, oid) = label_repo();
+        for spec in ["HEAD", "main"] {
+            assert!(matches!(repo.revision_label(spec).expect("label"),
+                Some(RevisionLabel::Branch { name }) if name == "main"));
+        }
+        for spec in [
+            oid.to_hex().as_str(),
+            "HEAD~1",
+            "refs/heads/main",
+            "missing",
+        ] {
+            assert!(
+                repo.revision_label(spec).expect("label").is_none(),
+                "{spec}"
+            );
+        }
+        crate::refs::write_ref(repo.git_dir(), "HEAD", &oid).expect("detach");
+        assert!(repo
+            .revision_label("HEAD")
+            .expect("detached label")
+            .is_none());
+        crate::refs::write_symbolic_ref(repo.git_dir(), "HEAD", "refs/tags/main")
+            .expect("non-branch HEAD");
+        assert!(repo
+            .revision_label("HEAD")
+            .expect("non-branch label")
+            .is_none());
+    }
+
+    #[test]
+    fn revision_label_keeps_unborn_branch() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = Repository::init(
+            dir.path(),
+            &crate::repo::InitOptions::new().with_initial_branch("new"),
+        )
+        .expect("init");
+        assert!(matches!(repo.revision_label("HEAD").expect("label"),
+            Some(RevisionLabel::Branch { name }) if name == "new"));
+        assert!(repo
+            .revision_label("new")
+            .expect("missing branch")
+            .is_none());
+    }
+
+    #[test]
+    fn revision_label_preserves_tag_metadata_and_branch_precedence() {
+        let (_dir, repo, oid) = label_repo();
+        crate::refs::write_ref(repo.git_dir(), "refs/tags/main", &oid).expect("tag");
+        assert!(matches!(
+            repo.revision_label("main").expect("branch wins"),
+            Some(RevisionLabel::Branch { .. })
+        ));
+        crate::refs::write_ref(repo.git_dir(), "refs/tags/light", &oid).expect("tag");
+        assert!(
+            matches!(repo.revision_label("light").expect("lightweight tag"),
+            Some(RevisionLabel::Tag { name, annotation: None }) if name == "light")
+        );
+
+        let blob = repo
+            .odb()
+            .write(ObjectKind::Blob, b"content")
+            .expect("blob");
+        let tag = repo
+            .odb()
+            .write(
+                ObjectKind::Tag,
+                format!("object {blob}\ntype blob\ntag original\n\nmessage\n\n").as_bytes(),
+            )
+            .expect("tag object");
+        crate::refs::write_ref(repo.git_dir(), "refs/tags/alias", &tag).expect("tag ref");
+        let Some(RevisionLabel::Tag {
+            name,
+            annotation: Some(tag),
+        }) = repo.revision_label("alias").expect("annotated tag")
+        else {
+            panic!("expected annotation");
+        };
+        assert_eq!(name, "alias");
+        assert_eq!(tag.tag, "original");
+        assert_eq!(tag.object, blob);
+        assert_eq!(tag.object_type, "blob");
+        assert_eq!(tag.tagger, None);
+        assert_eq!(tag.message, "message\n\n");
+    }
+
+    #[test]
+    fn revision_label_propagates_tag_object_errors() {
+        let (_dir, repo, _oid) = label_repo();
+        let broken = repo
+            .odb()
+            .write(ObjectKind::Tag, b"invalid")
+            .expect("broken object");
+        crate::refs::write_ref(repo.git_dir(), "refs/tags/broken", &broken).expect("tag ref");
+        assert!(matches!(
+            repo.revision_label("broken"),
+            Err(Error::CorruptObject(_))
+        ));
+        let missing = ObjectId::from_hex("1111111111111111111111111111111111111111").expect("oid");
+        crate::refs::write_ref(repo.git_dir(), "refs/tags/missing", &missing).expect("tag ref");
+        assert!(matches!(
+            repo.revision_label("missing"),
+            Err(Error::ObjectNotFound(_))
+        ));
+    }
+    #[test]
+    fn revision_labels_use_injected_ref_store() {
+        use crate::refs::store::MemoryRefStore;
+        use std::sync::Arc;
+
+        let (_dir, repo, oid) = label_repo();
+        let refs = Arc::new(MemoryRefStore::new());
+        refs.set_ref("HEAD", RawRef::Symbolic("refs/heads/virtual".into()))
+            .expect("HEAD");
+        refs.set_ref("refs/heads/virtual", RawRef::Direct(oid))
+            .expect("branch");
+        refs.set_ref("refs/tags/virtual-tag", RawRef::Direct(oid))
+            .expect("tag");
+        let repo = repo.with_ref_store(refs);
+        for spec in ["HEAD", "virtual"] {
+            assert!(matches!(repo.revision_label(spec).expect("branch label"),
+                Some(RevisionLabel::Branch { name }) if name == "virtual"));
+        }
+        assert!(
+            matches!(repo.revision_label("virtual-tag").expect("tag label"),
+            Some(RevisionLabel::Tag { name, annotation: None }) if name == "virtual-tag")
+        );
+        assert!(repo
+            .revision_label("main")
+            .expect("disk branch is excluded")
+            .is_none());
     }
 }

@@ -16,11 +16,9 @@ use anyhow::{bail, Context, Result};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use grit_lib::diff::DiffMerges;
 use grit_lib::object_inspect::{
-    format_tree_cat_file_p, tree_entry_cat_file_type, tree_entry_mode_cat_file_p,
+    format_tree_cat_file_p, tree_entry_cat_file_type, tree_entry_mode_cat_file_p, RevisionLabel,
 };
-use grit_lib::objects::{parse_tag, ObjectKind};
-use grit_lib::refs;
-use grit_lib::repo::Repository;
+use grit_lib::objects::ObjectKind;
 use schemars::JsonSchema;
 use serde::Serialize;
 
@@ -300,7 +298,25 @@ fn show_one(spec: &str, opts: &ShowRunOptions) -> Result<ShowObjectResult> {
 
 fn show_commit(spec: &str, opts: &ShowRunOptions) -> Result<ShowOutcome> {
     let (repo, sink) = context::discover_with_warnings()?;
-    let (kind, ref_name, tag) = classify(&repo, spec)?;
+    let (kind, ref_name, tag) = match repo.revision_label(spec)? {
+        Some(RevisionLabel::Branch { name }) => (ShowKind::Branch, Some(name), None),
+        Some(RevisionLabel::Tag {
+            name,
+            annotation: Some(tag),
+        }) => {
+            let info = TagInfo {
+                name: name.clone(),
+                tagger: tag.tagger.as_deref().map(Person::from_identity_line),
+                message: tag.message.trim_end().to_owned(),
+            };
+            (ShowKind::AnnotatedTag, Some(name), Some(info))
+        }
+        Some(RevisionLabel::Tag {
+            name,
+            annotation: None,
+        }) => (ShowKind::Tag, Some(name), None),
+        None => (ShowKind::Commit, None, None),
+    };
 
     let resolved = grit_lib::revwalk::rev_parse::resolve_revision_without_index_dwim(&repo, spec)
         .with_context(|| format!("could not resolve '{spec}'"))?;
@@ -550,44 +566,6 @@ impl MarkdownRender for ShowPathOutcome {
 /// Back-compat wrapper for stash and log.
 pub(crate) fn diffstat(diff: &crate::commands::diff::DiffOutcome) -> DiffStat {
     diffstat_from_files(&diff.files)
-}
-
-/// Determine what `target` names: a branch, a tag (light or annotated), or a
-/// bare commit. Returns `(kind, ref_name, annotated_tag_info)`.
-fn classify(
-    repo: &Repository,
-    target: &str,
-) -> Result<(ShowKind, Option<String>, Option<TagInfo>)> {
-    let git_dir = repo.git_dir();
-
-    if target == "HEAD" {
-        if let Ok(Some(sym)) = refs::read_symbolic_ref(git_dir, "HEAD") {
-            if let Some(branch) = sym.strip_prefix("refs/heads/") {
-                return Ok((ShowKind::Branch, Some(branch.to_owned()), None));
-            }
-        }
-        return Ok((ShowKind::Commit, None, None));
-    }
-
-    if refs::resolve_ref(git_dir, &format!("refs/heads/{target}")).is_ok() {
-        return Ok((ShowKind::Branch, Some(target.to_owned()), None));
-    }
-
-    if let Ok(tag_oid) = refs::resolve_ref(git_dir, &format!("refs/tags/{target}")) {
-        let object = repo.odb().read(&tag_oid)?;
-        if object.kind == ObjectKind::Tag {
-            let td = parse_tag(&object.data)?;
-            let info = TagInfo {
-                name: target.to_owned(),
-                tagger: td.tagger.as_deref().map(Person::from_identity_line),
-                message: td.message.trim_end().to_owned(),
-            };
-            return Ok((ShowKind::AnnotatedTag, Some(target.to_owned()), Some(info)));
-        }
-        return Ok((ShowKind::Tag, Some(target.to_owned()), None));
-    }
-
-    Ok((ShowKind::Commit, None, None))
 }
 
 // --- Human rendering --------------------------------------------------------
