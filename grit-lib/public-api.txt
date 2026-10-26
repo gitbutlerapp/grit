@@ -4344,6 +4344,27 @@ impl core::marker::Unpin for grit_lib::diff::InvalidDiffFilter
 impl core::marker::UnsafeUnpin for grit_lib::diff::InvalidDiffFilter
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::InvalidDiffFilter
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::InvalidDiffFilter
+pub enum grit_lib::diff::LogPatchBinaryFormat
+pub grit_lib::diff::LogPatchBinaryFormat::GitApplyBinaryPatch
+pub grit_lib::diff::LogPatchBinaryFormat::LogShortMessage
+impl core::clone::Clone for grit_lib::diff::LogPatchBinaryFormat
+pub fn grit_lib::diff::LogPatchBinaryFormat::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::diff::LogPatchBinaryFormat
+impl core::cmp::PartialEq for grit_lib::diff::LogPatchBinaryFormat
+pub fn grit_lib::diff::LogPatchBinaryFormat::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::diff::LogPatchBinaryFormat
+pub fn grit_lib::diff::LogPatchBinaryFormat::default() -> Self
+impl core::fmt::Debug for grit_lib::diff::LogPatchBinaryFormat
+pub fn grit_lib::diff::LogPatchBinaryFormat::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::Copy for grit_lib::diff::LogPatchBinaryFormat
+impl core::marker::StructuralPartialEq for grit_lib::diff::LogPatchBinaryFormat
+impl core::marker::Freeze for grit_lib::diff::LogPatchBinaryFormat
+impl core::marker::Send for grit_lib::diff::LogPatchBinaryFormat
+impl core::marker::Sync for grit_lib::diff::LogPatchBinaryFormat
+impl core::marker::Unpin for grit_lib::diff::LogPatchBinaryFormat
+impl core::marker::UnsafeUnpin for grit_lib::diff::LogPatchBinaryFormat
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::LogPatchBinaryFormat
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::LogPatchBinaryFormat
 pub enum grit_lib::diff::LogPatchCommitHeader
 pub grit_lib::diff::LogPatchCommitHeader::FormatPercentH
 pub grit_lib::diff::LogPatchCommitHeader::Full
@@ -4917,6 +4938,7 @@ impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::diff::ListedFileDiff
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::diff::ListedFileDiff
 pub struct grit_lib::diff::LogPatchOptions
 pub grit_lib::diff::LogPatchOptions::abbrev_len: usize
+pub grit_lib::diff::LogPatchOptions::binary_format: grit_lib::diff::LogPatchBinaryFormat
 pub grit_lib::diff::LogPatchOptions::commit_header: grit_lib::diff::LogPatchCommitHeader
 pub grit_lib::diff::LogPatchOptions::diff: grit_lib::diff::DiffOptions
 impl grit_lib::diff::LogPatchOptions

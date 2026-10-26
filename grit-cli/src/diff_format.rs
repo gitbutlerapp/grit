@@ -141,10 +141,16 @@ impl DiffFormatArgs {
     /// Selected [`DiffDetail`] when a format flag is set; `None` for plain log listing.
     #[must_use]
     pub fn detail_for_log(self) -> Option<DiffDetail> {
-        if !self.any_format_flag() {
+        if !self.any_format_flag() || self.patch_text {
             return None;
         }
         Some(self.detail())
+    }
+
+    /// Whether stdout should stream git-apply-compatible log/show patches.
+    #[must_use]
+    pub fn log_patch_text(self) -> bool {
+        self.patch_text
     }
 
     /// Selected [`DiffDetail`] for the library.

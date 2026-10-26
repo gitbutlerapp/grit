@@ -33,7 +33,7 @@ Use `--stat` (or other diff format flags below) instead of the default patch. Li
 | `<object>…` | Commits, branches, tags, or `rev:path` specs. Defaults to `HEAD`. |
 | `--diff-merges` | `combined` (default) or `first-parent` for merge commits. |
 | `-p`, `--patch` | Full patch (the default). |
-| `--patch-text` | Accepted for CLI parity with [`grit diff`](diff.md); use `grit diff --patch-text` for git-apply output. |
+| `--patch-text` | Git-apply-compatible unified patch on stdout (`git diff --binary` shape): commit metadata, then `diff --git` / `index` / hunks. Human output only; not combinable with `--json` or `--markdown`. |
 | `-W`, `--function-context` | Expand patch hunks to enclosing function boundaries (same as [`grit diff`](diff.md)). |
 | `--stat` | Summary with change bars per file instead of a full patch. |
 | `--numstat` | Machine-readable `insertions<TAB>deletions<TAB>path` lines. |

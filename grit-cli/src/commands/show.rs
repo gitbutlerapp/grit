@@ -327,13 +327,18 @@ fn show_commit(spec: &str, opts: &ShowRunOptions) -> Result<ShowOutcome> {
     };
 
     let paths = resolve_cli_diff_pathspecs(&repo, &opts.pathspecs, &[], DiffPathspecMode::Commit)?;
-    let diff_opts = CommitDiffOptions {
-        paths: paths.clone(),
-        format: opts.format,
-        word_level_inline: opts.word_level_inline,
-        diff_merges: opts.diff_merges,
+    let diff = if opts.format.log_patch_text() {
+        crate::commands::diff::emit_show_log_patch_text(&repo, &commit_oid, opts.format)?;
+        crate::commands::diff::streamed_log_patch_text_outcome(opts.format)
+    } else {
+        let diff_opts = CommitDiffOptions {
+            paths: paths.clone(),
+            format: opts.format,
+            word_level_inline: opts.word_level_inline,
+            diff_merges: opts.diff_merges,
+        };
+        crate::commands::diff::diff_for_commit(&repo, &commit_oid, diff_opts)?
     };
-    let diff = crate::commands::diff::diff_for_commit(&repo, &commit_oid, diff_opts)?;
     let stat = match opts.format.detail() {
         grit_lib::diff::DiffDetail::NameOnly | grit_lib::diff::DiffDetail::NameStatus => {
             let stat_diff = crate::commands::diff::diff_for_commit(
@@ -659,6 +664,9 @@ impl HumanRender for ShowOutcome {
             }
         }
 
+        if self.diff.body_was_streamed() && self.diff.format_flags().log_patch_text() {
+            return Ok(());
+        }
         outln!(
             w,
             "{}",
