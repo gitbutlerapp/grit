@@ -262,6 +262,11 @@ pub struct Odb {
     session_tree_entries: Arc<Mutex<SessionTreeEntries>>,
 }
 
+/// Largest loose object [`Odb::read_unless_larger`] keeps in the session read cache. Its callers
+/// (checkout) promise bounded memory, so a cache of up to a few hundred entries must not be
+/// able to pin hundreds of near-limit blobs.
+const SESSION_BOUNDED_LOOSE_CACHE_MAX: usize = 64 * 1024;
+
 /// Recently parsed trees for [`Odb::cached_tree_entries`], bounded by total entry count.
 #[derive(Default)]
 struct SessionTreeEntries {
@@ -2426,6 +2431,12 @@ impl Odb {
     ///
     /// Same as [`Self::read`], including [`Error::ObjectNotFound`].
     pub(crate) fn read_unless_larger(&self, oid: &ObjectId, limit: u64) -> Result<BoundedRead> {
+        if let Some(obj) = self.session_cached_loose_read(oid) {
+            if obj.data.len() as u64 > limit {
+                return Ok(BoundedRead::Larger);
+            }
+            return Ok(BoundedRead::Object(obj));
+        }
         if self.custom_primary.is_none() && !self.multi_pack_index_reads_enabled() {
             if let Some(read) =
                 pack::pack_cache::try_read_object_via_single_pack_reader_unless_whole_larger(
@@ -2446,6 +2457,12 @@ impl Odb {
                     return Ok(BoundedRead::Larger);
                 }
                 LocalSizedRead::Packed(_) => return self.read(oid).map(BoundedRead::Object),
+                LocalSizedRead::Loose(BoundedRead::Object(obj)) => {
+                    if obj.data.len() <= SESSION_BOUNDED_LOOSE_CACHE_MAX {
+                        self.remember_session_loose_read(oid, &obj);
+                    }
+                    return Ok(BoundedRead::Object(obj));
+                }
                 LocalSizedRead::Loose(read) => return Ok(read),
                 LocalSizedRead::Missing => {}
             }
@@ -3463,6 +3480,29 @@ mod tests {
         let odb = Odb::new(&objects);
         assert_bounded_reads(&odb, &small, &big);
         odb.with_pack_read_context(|| assert_bounded_reads(&odb, &small, &big));
+    }
+
+    #[test]
+    fn read_unless_larger_reuses_small_loose_reads_but_never_caches_big_ones() {
+        let (_dir, objects, small, big) = bounded_read_fixture();
+        let odb = Odb::new(&objects);
+        assert_bounded_reads(&odb, &small, &big);
+        for oid in [small, big] {
+            let hex = oid.to_hex();
+            fs::remove_file(objects.join(&hex[..2]).join(&hex[2..])).unwrap();
+        }
+        match odb.read_unless_larger(&small, 1000).unwrap() {
+            BoundedRead::Object(obj) => assert_eq!(obj.data, b"small blob\n"),
+            BoundedRead::Larger => panic!("small blob is within the limit"),
+        }
+        assert!(matches!(
+            odb.read_unless_larger(&small, 4),
+            Ok(BoundedRead::Larger)
+        ));
+        assert!(matches!(
+            odb.read_unless_larger(&big, 1_200_000),
+            Err(Error::ObjectNotFound(_))
+        ));
     }
 
     #[test]
