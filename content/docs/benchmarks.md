@@ -9,6 +9,41 @@ For a map of **grit-lib** modules, **grit** commands, common workflows, and ever
 
 Command-level numbers below come from the committed **grit-bench** JSON baselines listed in `content/docs/site.toml`. Scenario suites use **hyperfine** against the system **`git`** binary and a release **`grit`** build on the same machine; individual studies below document their sampling method. Times are wall-clock milliseconds.
 
+## Ignore path normalization (2026-10-26)
+
+Ignore queries used to canonicalize the same worktree root for every path. The library now checks the normalized path against the root already resolved when opening the repository, retaining the filesystem-alias fallback. On the daily 1,000-path fixture this removes **4,000 `readlink` calls** and **10,000 allocation calls**; heaptrack peak heap stays at **795,340 bytes**.
+
+Baseline: `origin/main` at `c578daa58ced74ce4a33327942e29e8409b3cb10`; change: `786ec07eeb6b34f840112964d0dcf7f5d6ea4391`. Frozen before/after binaries and stock Git 2.55.0 were measured in one sitting on an Intel Xeon Platinum 8573C VM. Builds and tests were paused during timed measurements. Both the development release profile and the shipping `dist` profile were measured.
+
+The daily harness uses its existing shell/xargs commands and 20 alternating samples per tool. Shipping-profile medians improve **8.84 → 7.11 ms** (Git: **2.50–2.53 ms**); helper-inclusive peak RSS is **14,624 → 14,560 KiB**. Release medians improve **9.27 → 7.29 ms** (Git: **2.50 ms**). The committed daily reports retain every sample.
+
+The table below uses 50 direct process invocations per tool, rotating tool order after five warmups. These omit the daily shell/xargs overhead. RSS is the median of ten per-process peak readings from `/usr/bin/time -v`; all ten readings and wall-time samples are in `ignore-normalization-dist.json` and `ignore-normalization-release.json`. Git uses `check-ignore -q --stdin`; grit uses `ignore check --all`, with output discarded.
+
+| Profile / workload | Git ms | Grit before ms | Grit after ms | Git peak KiB | Grit before peak KiB | Grit after peak KiB |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| dist / `check-1000@synth-10k` | 2.21 | 7.56 | 5.72 | 4,644 | 10,312 | 10,218 |
+| dist / `siblings-1000` | 1.25 | 5.39 | 3.99 | 4,506 | 9,974 | 10,004 |
+| dist / `deep-1000` | 1.63 | 11.35 | 9.50 | 4,426 | 10,398 | 10,482 |
+| dist / `tracked-1000` | 10.66 | 4.92 | 3.50 | 4,608 | 9,920 | 10,038 |
+| dist / `check-1@synth-10k` | 1.02 | 1.55 | 1.53 | 4,618 | 9,500 | 9,484 |
+| release / `check-1000@synth-10k` | 2.20 | 7.95 | 6.07 | 4,618 | 10,126 | 12,724 |
+| release / `siblings-1000` | 1.25 | 5.80 | 4.29 | 4,460 | 9,776 | 12,532 |
+| release / `deep-1000` | 1.61 | 11.82 | 9.96 | 4,444 | 10,382 | 13,038 |
+| release / `tracked-1000` | 10.43 | 5.12 | 3.68 | 4,594 | 9,730 | 12,276 |
+| release / `check-1@synth-10k` | 1.01 | 1.77 | 1.70 | 4,610 | 9,166 | 11,924 |
+
+All five workloads improve in wall time. Shipping-profile RSS stays within the spread of repeated process measurements; the single-path case is near the timing noise floor. The non-LTO release build increases RSS by about **2.6 MiB** despite unchanged peak heap and lower allocation traffic. This profile-dependent binary footprint remains a limitation; this change does not claim to close the memory gap to Git.
+
+The daily fixture queries 1,000 distinct parents, mostly absent, in the standard 10k-file repository with an emptied index and `*.txt`. Auxiliary fixtures use 1,000 existing files across ten directories, 1,000 files below twelve nested directories, the same wide fixture staged with `git add -f .`, and a single path from the daily fixture. All auxiliary ignore files contain `*.txt`.
+
+Reproduce the target with each frozen binary:
+
+```bash
+cargo build --release -p grit-cli -p grit-utils
+cargo build --profile dist -p grit-cli -p grit-utils
+grit-bench daily --only ignore/check-1000@synth-10k --grit /path/to/frozen/grit --output ignore.json
+```
+
 ## Clean wide content merges
 
 Issue [#2036](https://github.com/gitbutlerapp/grit/issues/2036) measures 20,000 small text files

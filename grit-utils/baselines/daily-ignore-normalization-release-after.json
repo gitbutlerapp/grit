@@ -1,0 +1,130 @@
+{
+  "schema": "grit-daily-bench/1",
+  "generated_at": "2026-10-26T18:32:56.420251993Z",
+  "machine": {
+    "cpu_model": "INTEL(R) XEON(R) PLATINUM 8573C",
+    "physical_cores": 2,
+    "logical_cores": 4,
+    "ram_bytes": 16765374464,
+    "os": "linux",
+    "kernel": "Linux 6.17.0-1022-azure",
+    "scratch_filesystem": "ext4",
+    "rustc_version": "rustc 1.99.0 (b940084d7 2026-09-28)",
+    "cargo_profile": "release"
+  },
+  "tools": {
+    "git": "git version 2.55.0",
+    "grit": "grit 0.5.21",
+    "grit_commit": "786ec07eeb6b34f840112964d0dcf7f5d6ea4391"
+  },
+  "scenarios": [
+    {
+      "id": "ignore/check-1000@synth-10k",
+      "area": "ignore",
+      "description": "Check 1000 paths against ignore rules vs git check-ignore",
+      "git": {
+        "median_wall_ms": 2.4995174999999996,
+        "peak_rss_bytes": 6864896,
+        "runs": 20,
+        "samples_ms": [
+          2.612,
+          2.573,
+          2.59,
+          2.668,
+          2.561,
+          2.439,
+          2.461,
+          2.709,
+          2.486,
+          2.461,
+          2.465,
+          2.481,
+          2.461,
+          2.499,
+          2.5,
+          2.51,
+          2.503,
+          2.447,
+          2.587,
+          2.484
+        ],
+        "min_ms": 2.438786,
+        "max_ms": 2.7094110000000002,
+        "stddev_ms": 0.07613174413404779
+      },
+      "grit": {
+        "median_wall_ms": 7.2854645,
+        "peak_rss_bytes": 17461248,
+        "runs": 20,
+        "samples_ms": [
+          7.541,
+          7.649,
+          7.565,
+          7.493,
+          7.487,
+          8.01,
+          7.297,
+          7.505,
+          7.274,
+          7.196,
+          7.187,
+          7.187,
+          7.211,
+          7.886,
+          7.212,
+          7.258,
+          7.228,
+          7.322,
+          7.248,
+          7.123
+        ],
+        "min_ms": 7.123361,
+        "max_ms": 8.009581,
+        "stddev_ms": 0.24369339955392183
+      },
+      "ratio": 2.9147483464308617,
+      "detail": {
+        "commands": {
+          "git": "cd /tmp/grit-bench-scratch/daily-synth-10k/worktree-run-synth-10k && git check-ignore -q --stdin < /tmp/grit-bench-scratch/daily-synth-10k/worktree-run-synth-10k/bench-ignore-paths.txt",
+          "grit": "set -eu\ncd /tmp/grit-bench-scratch/daily-synth-10k/worktree-run-synth-10k && xargs -a /tmp/grit-bench-scratch/daily-synth-10k/worktree-run-synth-10k/bench-ignore-paths.txt grit ignore check --all"
+        },
+        "phases": {
+          "git": [
+            {
+              "name": "index: do_read_index",
+              "ms": 0.054,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "cache_tree: read",
+              "ms": 0.019,
+              "count": 1,
+              "depth": 0
+            }
+          ],
+          "grit": [
+            {
+              "name": "grit.repository.open",
+              "ms": 0.257,
+              "count": 1,
+              "depth": 0
+            },
+            {
+              "name": "grit.config.load",
+              "ms": 0.077,
+              "count": 2,
+              "depth": 0
+            },
+            {
+              "name": "grit.index.read",
+              "ms": 0.042,
+              "count": 1,
+              "depth": 0
+            }
+          ]
+        }
+      }
+    }
+  ]
+}
