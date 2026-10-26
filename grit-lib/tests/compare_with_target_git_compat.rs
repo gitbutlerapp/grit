@@ -66,6 +66,10 @@ fn assert_matches_git(dir: &Path, target: &str, limit: usize) {
         include_behind: false,
     };
     let cmp = compare_with_target(&repo, &opts).expect("compare");
+    assert_eq!(
+        compare_with_target_optional(&repo, &opts).expect("optional compare"),
+        Some(cmp.clone())
+    );
     assert_eq!(cmp.ahead, git_ahead_count(dir, target));
     assert_eq!(cmp.newest_ahead, git_ahead_list(dir, target, limit));
     assert_eq!(cmp.base.source, BaseSource::Explicit);
@@ -165,4 +169,47 @@ fn compare_with_target_optional_none_without_candidates() {
     assert!(compare_with_target_optional(&repo, &opts)
         .expect("optional")
         .is_none());
+}
+
+#[test]
+fn both_target_comparisons_keep_exact_counts_with_bounded_lists() {
+    let dir = topic_ahead_fixture("bounded-lists");
+    git(&dir, &["checkout", "-q", "main"]);
+    commit(&dir, "a", "main-only");
+    git(&dir, &["checkout", "-q", "topic"]);
+    let repo = open(&dir);
+    for target in [None, Some(TargetSpec("main".into()))] {
+        for list_limit in [0, 1, 100] {
+            for include_behind in [false, true] {
+                let opts = TargetComparisonOptions {
+                    target: target.clone(),
+                    list_limit,
+                    include_behind,
+                };
+                let cmp = compare_with_target(&repo, &opts).expect("compare");
+                assert_eq!(
+                    compare_with_target_optional(&repo, &opts).expect("optional compare"),
+                    Some(cmp.clone())
+                );
+                let counts = git(
+                    &dir,
+                    &["rev-list", "--left-right", "--count", "HEAD...main"],
+                );
+                let counts: Vec<usize> = counts
+                    .split_whitespace()
+                    .map(|n| n.parse().unwrap())
+                    .collect();
+                assert_eq!((cmp.ahead, cmp.behind), (counts[0], counts[1]));
+                assert_eq!(cmp.newest_ahead, git_ahead_list(&dir, "main", list_limit));
+                let behind_limit = if include_behind { list_limit } else { 0 };
+                let behind = git(
+                    &dir,
+                    &["rev-list", "-n", &behind_limit.to_string(), "HEAD..main"],
+                );
+                let behind: Vec<ObjectId> =
+                    behind.lines().map(|oid| oid.parse().unwrap()).collect();
+                assert_eq!(cmp.newest_behind, behind);
+            }
+        }
+    }
 }

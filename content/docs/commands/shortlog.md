@@ -19,6 +19,8 @@ Shows the current branch, its target branch, and every commit on the current bra
 
 The target branch is found the same way as for [`grit status`](../status/#the-target-branch): the `target.branch` setting, then `origin/master`, `origin/main`, `master` and `main`. Use `--target <REF>` to compare against any ref or revision instead (branch, remote-tracking ref, tag, or commit id). `grit ahead` is an alias for the same command — grit's shortlog means commits ahead of a target, not Git's author-grouped `shortlog -sne`. Unlike `grit status`, which shows at most ten commits, `grit shortlog` lists up to `-n` / `--max-count` commits (default **100**). Full ahead and behind **counts** are always exact even when the lists are truncated.
 
+When no target branch can be discovered, the result is an empty list. An explicit `--target` that cannot be resolved is an error.
+
 With `--behind`, also lists commits that are on the target but not on this branch yet (the commits you would pick up by fast-forwarding or merging the target).
 
 For author commit counts over an arbitrary revision range (Git's `shortlog -sne` shape), use [`grit log --group-by author`](log.md#options) instead — `grit shortlog` means commits ahead of the target branch, not author grouping.
