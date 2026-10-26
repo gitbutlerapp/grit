@@ -221,6 +221,10 @@ mod tests {
 
     pub const SAMPLE_HYPERFINE_JSON: &str = include_str!("../tests/fixtures/hyperfine_sample.json");
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn parse_sample_hyperfine_json() {
         let entry = parse_hyperfine_json(SAMPLE_HYPERFINE_JSON).unwrap();
@@ -229,6 +233,10 @@ mod tests {
         assert_eq!(entry.times.as_ref().map(|t| t.len()), Some(5));
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn parse_hyperfine_v2_export() {
         const V2: &str = r#"{

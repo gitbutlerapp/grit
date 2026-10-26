@@ -575,6 +575,10 @@ mod update_refs_tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn apply_cas_rejects_after_concurrent_packed_delete() {
         let _pause_serial = refs::test_pause_injection_serial_guard();
@@ -704,6 +708,10 @@ mod update_refs_tests {
         refs::set_test_inject_ref_store_batch_pause_after_apply(0, &git_dir, None);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn unconditional_create_rejects_after_concurrent_packed_parent() {
         let _pause_serial = refs::test_pause_injection_serial_guard();

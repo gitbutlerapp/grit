@@ -1846,6 +1846,10 @@ mod tests {
         assert!(index.entries.iter().any(|e| e.path == rel));
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn pathless_add_promotes_intent_to_add_entry() {
         use std::process::Command;

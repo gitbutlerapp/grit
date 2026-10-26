@@ -1527,6 +1527,10 @@ mod integrate_tests {
         entry
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn reduce_octopus_merge_heads_drops_ancestor() {
         let tmp = tempfile::tempdir().expect("tempdir");
@@ -1553,6 +1557,10 @@ mod integrate_tests {
         assert_eq!(names, vec!["b".to_owned()]);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn compose_fast_forward_index_keeps_staged_additions() {
         let tmp = tempfile::tempdir().expect("tempdir");
@@ -1587,6 +1595,10 @@ mod integrate_tests {
         assert!(ff.get(b"tracked.txt", 0).is_some());
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn predict_merge_mem_overlay_guard_restores_outer_scope() {
         let tmp = tempfile::tempdir().expect("tempdir");
@@ -1621,6 +1633,10 @@ mod integrate_tests {
         repo.odb().disable_mem_overlay();
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn integrate_branch_fast_forward_and_up_to_date() {
         let tmp = tempfile::tempdir().expect("tempdir");
@@ -1660,6 +1676,10 @@ mod integrate_tests {
         assert!(final_index.get(b"merged.txt", 0).is_some());
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn tree_to_index_entries_and_map_roundtrip() {
         let tmp = tempfile::tempdir().expect("tempdir");
@@ -1700,6 +1720,10 @@ mod integrate_tests {
         assert!(tree_merge_has_conflicts(&merged));
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn integrate_branch_merged_without_conflicts() {
         let tmp = tempfile::tempdir().expect("tempdir");
@@ -1740,6 +1764,10 @@ mod integrate_tests {
         grit_test_support::git(tmp.path(), &["fsck", "--strict"]);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn integrate_branch_conflicts_then_abort() {
         let tmp = tempfile::tempdir().expect("tempdir");

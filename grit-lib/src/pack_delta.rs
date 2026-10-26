@@ -457,6 +457,10 @@ mod tests {
         assert_eq!(HashAlgo::Sha1.checksum_digest(body).as_slice(), trailer);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn batched_pack_stream_matches_one_batch_and_git_indexes_it() {
         let (tmp, repo, selection) = crate::pack_objects::tests::packed_selection(60);

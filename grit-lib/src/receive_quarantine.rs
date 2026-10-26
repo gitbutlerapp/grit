@@ -222,6 +222,10 @@ mod tests {
         assert!(Odb::new(&main).exists(&oid));
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn quarantine_odb_matches_repository_hash_algorithm() {
         let tmp = tempfile::tempdir().expect("tempdir");

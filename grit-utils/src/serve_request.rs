@@ -185,6 +185,10 @@ mod tests {
     use grit_lib::repo::Repository;
     use tempfile::TempDir;
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn serve_clone_request_ends_with_done_and_flush() {
         let dir = TempDir::new().expect("tempdir");
@@ -211,6 +215,10 @@ mod tests {
         assert!(first_want.contains("ofs-delta"));
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn serve_filtered_request_names_the_filter_after_the_wants() {
         let dir = TempDir::new().expect("tempdir");

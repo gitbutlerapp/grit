@@ -1845,6 +1845,10 @@ mod tests {
         assert_eq!(out.conflicts, 0);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn add_add_without_base_performs_content_merge() {
         let input = MergeInput {

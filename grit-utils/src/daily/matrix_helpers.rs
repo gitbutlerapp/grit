@@ -2137,6 +2137,10 @@ pub fn ref_query_merged_branches_bench(ctx: &DailyHeadlineContext) -> (BenchArgv
 mod tests {
     use super::*;
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn worktree_add_bench_detaches_head_on_both_sides() {
         let ctx = DailyHeadlineContext::new(

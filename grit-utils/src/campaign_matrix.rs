@@ -1399,6 +1399,10 @@ mod tests {
         }
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn campaign_conflicts_matrix_ids() {
         let meta = sample_conflicts_meta();
@@ -1476,6 +1480,10 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn shortlog_target_grit_shell_exits_zero() {
         let grit = build_grit_for_campaign_tests();

@@ -1377,6 +1377,10 @@ mod tests {
         system_git(root, &["fsck", "--strict", "--no-progress"]);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn rebuilt_shared_index_under_skip_hash_is_readable_by_git() {
         for key in ["index.skipHash", "feature.manyFiles"] {
@@ -1417,6 +1421,10 @@ mod tests {
         }
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn reused_shared_index_under_skip_hash_is_readable_by_git() {
         let tmp = tempfile::tempdir().expect("tempdir");
@@ -1438,6 +1446,10 @@ mod tests {
         assert_git_reads_index(root, "a.txt\n");
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn null_split_link_rebuilds_a_real_shared_index() {
         let tmp = tempfile::tempdir().expect("tempdir");

@@ -399,6 +399,10 @@ mod tests {
     use super::*;
     use std::path::Path;
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn hash_object_scenario_uses_lib_driver_for_grit_bench_drive() {
         let payload = Path::new("/tmp/hash-bench-256mib.bin");

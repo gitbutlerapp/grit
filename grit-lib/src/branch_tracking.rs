@@ -1202,6 +1202,10 @@ mod tests {
     use super::*;
     use crate::refspec::RefspecError;
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn target_comparison_missing_target_is_optional_only_for_discovery() {
         let tmp = TempDir::new().expect("tempdir");
@@ -1227,6 +1231,10 @@ mod tests {
         }
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn target_comparison_rejects_head_before_resolving_target() {
         let tmp = TempDir::new().expect("tempdir");
@@ -1308,6 +1316,10 @@ mod tests {
         git(dir, &["commit", "-qm", msg]);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn standing_target_and_upstream_distinct() {
         let tmp = TempDir::new().expect("tempdir");
@@ -1353,6 +1365,10 @@ mod tests {
         assert_ne!(target.full_ref, upstream.full_ref);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn standing_upstream_equals_target_computed_once() {
         let tmp = TempDir::new().expect("tempdir");
@@ -1380,6 +1396,10 @@ mod tests {
         assert_eq!(target.behind, Some(0));
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn standing_no_counts_skips_walk() {
         let tmp = TempDir::new().expect("tempdir");
@@ -1405,6 +1425,10 @@ mod tests {
         assert!(target.newest_ahead.is_empty());
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn standing_unborn_and_detached() {
         let tmp = TempDir::new().expect("tempdir");
@@ -1446,6 +1470,10 @@ mod tests {
         assert!(detached.upstream.is_none());
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn standing_upstream_counts_match_git() {
         let tmp = TempDir::new().expect("tempdir");
@@ -1624,6 +1652,10 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn status_integration_hint_merge_for_local_target() {
         let tmp = TempDir::new().expect("tempdir");
@@ -1649,6 +1681,10 @@ mod tests {
         assert_eq!(hint.ref_name, "main");
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn status_integration_hint_pull_when_upstream_matches() {
         let tmp = TempDir::new().expect("tempdir");
@@ -1676,6 +1712,10 @@ mod tests {
         assert_eq!(hint.ref_name, "origin/main");
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn upstream_tracking_full_ref_honours_custom_refspec() {
         let tmp = TempDir::new().expect("tempdir");

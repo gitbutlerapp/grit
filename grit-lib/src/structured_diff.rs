@@ -552,6 +552,10 @@ mod tests {
         String::from_utf8(out.stdout).expect("utf8")
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn zero_context_insertion_anchor_matches_git() {
         let old = "a\nb\nc\n";
@@ -574,6 +578,10 @@ mod tests {
         assert_eq!((h.old_start, h.old_lines), (2, 0));
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn zero_context_deletion_anchor_matches_git() {
         let old = "a\nb\nc\n";
@@ -596,6 +604,10 @@ mod tests {
         assert_eq!((h.new_start, h.new_lines), (1, 0));
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn structured_hunk_retains_enclosing_function_context() {
         let old = "fn foo() {\n  let x = 1;\n}\n";
@@ -607,6 +619,10 @@ mod tests {
         assert_eq!(h.context.as_deref(), Some("fn foo() {"));
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn insert_into_empty_file_matches_git_hunk_header() {
         let patch = git_diff("", "x\n");
@@ -620,6 +636,10 @@ mod tests {
         assert_eq!((h.old_start, h.old_lines), (0, 0));
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn delete_to_empty_matches_git_hunk_header() {
         let patch = git_diff("x\n", "");
@@ -633,6 +653,10 @@ mod tests {
         assert_eq!((h.new_start, h.new_lines), (0, 0));
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn line_level_multiple_hunks_match_git() {
         let old = "keep\nchange-a\nmid\nchange-b\nend\n";

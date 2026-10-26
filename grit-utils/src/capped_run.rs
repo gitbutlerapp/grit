@@ -456,6 +456,10 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn rss_bytes_from_rusage_linux_kib_to_bytes() {
         if cfg!(target_os = "macos") {
@@ -477,6 +481,10 @@ mod tests {
     }
 
     #[cfg(unix)]
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn exited_process_has_no_rss_sample() {
         let mut child = std::process::Command::new("true")
@@ -508,6 +516,10 @@ mod tests {
     }
 
     #[cfg(unix)]
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn memory_monitor_kills_before_unbounded_growth() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -575,6 +587,10 @@ mod tests {
     }
 
     #[cfg(unix)]
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn exit_status_and_peak_rss_survive_blocking_wait() {
         let dir = tempfile::tempdir().expect("tempdir");

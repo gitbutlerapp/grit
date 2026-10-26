@@ -8,6 +8,11 @@ description = "Standalone example binaries demonstrating grit-lib usage"
 repository.workspace = true
 publish = false
 
+[features]
+# Tests that start the system `git` or build heavy fixtures run only with this
+# feature (`make test-full`, the nightly CI job); see TESTING.md.
+full-tests = []
+
 [[bin]]
 name = "gritx-hash-object"
 path = "src/bin/gritx-hash-object.rs"

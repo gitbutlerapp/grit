@@ -1190,6 +1190,10 @@ mod tests {
         assert!(CloneError::Library(Error::Message("x".into())).should_cleanup_failed_clone());
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn outcome_reports_transfer_stats() {
         use std::process::Command;
@@ -1292,6 +1296,10 @@ mod tests {
         assert!(outcome.tags >= 1, "expected tag v1");
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn clone_unborn_advertised_trunk_not_populated_feature() {
         use std::process::Command;
@@ -1361,6 +1369,10 @@ mod tests {
         assert_eq!(head.trim(), "ref: refs/heads/trunk");
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn clone_empty_bare_remote_leaves_unborn_default_branch() {
         use std::process::Command;
@@ -1398,6 +1410,10 @@ mod tests {
         assert_eq!(head.trim(), "ref: refs/heads/main");
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn classify_unborn_default_when_master_advertised_but_main_has_commits() {
         use std::process::Command;
@@ -1547,6 +1563,10 @@ mod tests {
         git_cmd(&["clone", "-q", "--bare", ".", bare.to_str().unwrap()], &wt);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn clone_depth_n_writes_shallow_like_git() {
         let tmp = tempfile::tempdir().expect("tempdir");
@@ -1592,6 +1612,10 @@ mod tests {
         assert!(git_out(&["log", "--oneline"], &grit_dest).lines().count() >= 1);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn clone_branch_checks_out_named_branch() {
         for depth in [None, Some(3u32)] {
@@ -1668,6 +1692,10 @@ mod tests {
         }
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn clone_tag_detaches_head() {
         let tmp = tempfile::tempdir().expect("tempdir");
@@ -1698,6 +1726,10 @@ mod tests {
         git_fsck_strict(&grit_dest);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn clone_missing_branch_is_typed_error() {
         let tmp = tempfile::tempdir().expect("tempdir");

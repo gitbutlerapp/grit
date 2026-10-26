@@ -76,6 +76,10 @@ pub fn heavy_disk_serial_guard() -> HeavyDiskSerialGuard {
 
 #[cfg(test)]
 mod heavy_disk_lock_tests {
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     #[ignore = "spawned by heavy_disk_serial_guard_excludes_concurrent_process"]
     fn heavy_disk_serial_guard_probe_hold() {
@@ -87,6 +91,10 @@ mod heavy_disk_lock_tests {
         std::thread::sleep(std::time::Duration::from_secs(600));
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn heavy_disk_serial_guard_excludes_concurrent_process() {
         use std::io::{BufRead, BufReader};

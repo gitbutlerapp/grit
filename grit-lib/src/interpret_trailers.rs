@@ -1173,6 +1173,10 @@ mod line_coverage_tests {
     use super::*;
     use tempfile::tempdir;
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn trailer_enum_parsers_and_process_trailers_matrix() {
         assert_eq!(trailer_where_from_str("after"), Some(TrailerWhere::After));

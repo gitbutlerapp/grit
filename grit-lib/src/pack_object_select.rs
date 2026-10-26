@@ -1402,6 +1402,10 @@ mod tests {
     /// Old tools wrote tree entries with non-canonical modes (`40755` for a
     /// directory, `100664` for a file). Git walks them by their type bits, so the
     /// enumeration must too, or everything below such a directory is left out.
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn walk_descends_into_trees_with_non_canonical_modes() {
         let tmp = tempfile::tempdir().unwrap();

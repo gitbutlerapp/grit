@@ -645,6 +645,10 @@ pub(crate) mod midx_cache {
             assert_eq!(layer.test_find_position(&oid), Some(35));
         }
 
+        #[cfg_attr(
+            not(feature = "full-tests"),
+            ignore = "starts system git or is heavy; run with --features full-tests"
+        )]
         #[test]
         fn strict_and_permissive_views_share_validated_backing_until_invalidation() {
             use crate::diagnostics::NullDiagnostics;
@@ -679,6 +683,10 @@ pub(crate) mod midx_cache {
             ));
         }
 
+        #[cfg_attr(
+            not(feature = "full-tests"),
+            ignore = "starts system git or is heavy; run with --features full-tests"
+        )]
         #[test]
         fn shared_layer_replays_load_warnings_for_the_other_view() {
             use crate::diagnostics::{CollectingDiagnostics, NullDiagnostics, Warning};
@@ -733,6 +741,10 @@ pub(crate) mod midx_cache {
             });
         }
 
+        #[cfg_attr(
+            not(feature = "full-tests"),
+            ignore = "starts system git or is heavy; run with --features full-tests"
+        )]
         #[test]
         fn concurrent_views_share_one_layer_backing() {
             use crate::diagnostics::NullDiagnostics;
@@ -3914,6 +3926,10 @@ mod tests {
         Some((tmp, oid))
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn vanished_cached_tip_falls_back() {
         let Some((tmp, oid)) = midx_fixture(true) else {
@@ -3949,6 +3965,10 @@ mod tests {
         assert_eq!(via_pack.kind, crate::objects::ObjectKind::Commit);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn writer_evicts_tip_cache() {
         let Some((tmp, oid)) = midx_fixture(true) else {
@@ -3980,6 +4000,10 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn midx_hot_path_does_not_stat_after_cache_warm() {
         let Some((tmp, oid)) = midx_fixture(true) else {
@@ -4010,6 +4034,10 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn lookup_high_bit_raw_offset_written_without_loff() {
         use super::{
@@ -4054,6 +4082,10 @@ mod tests {
         assert_eq!(off, 0x8000_0010);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn tiny_midx_stub_skipped_without_aborting_reads() {
         let Some((tmp, oid)) = midx_fixture(true) else {
@@ -4075,6 +4107,10 @@ mod tests {
         read_object_from_packs(&objects, &oid).expect("pack fallback still works");
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn flipped_midx_checksum_warns_and_reads_from_pack() {
         let Some((tmp, oid)) = midx_fixture(true) else {
@@ -4110,6 +4146,10 @@ mod tests {
         assert_eq!(via_pack.data, grit_obj.data);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn midx_shorter_than_min_len_skips_without_fatal_error() {
         let Some((tmp, oid)) = midx_fixture(true) else {
@@ -4133,6 +4173,10 @@ mod tests {
         read_object_from_packs(&objects, &oid).expect("pack fallback still works");
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn large_git_midx_layer_uses_mapped_backing() {
         let Some((tmp, _oid)) = midx_fixture(false) else {
@@ -4155,6 +4199,10 @@ mod tests {
         assert!(storage.is_mapped_backing());
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn wrong_midx_hash_version_returns_typed_error() {
         let Some((tmp, oid)) = midx_fixture(true) else {
@@ -4195,6 +4243,10 @@ mod tests {
         assert!(err.to_string().contains("test"));
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn verify_midx_reports_missing_pack_name_chunk() {
         let Some((tmp, _oid)) = midx_fixture(true) else {
@@ -4218,6 +4270,10 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn find_chunk_reports_missing_id() {
         let Some((tmp, _oid)) = midx_fixture(true) else {
@@ -4231,6 +4287,10 @@ mod tests {
         assert!(err.to_string().contains("not found"));
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn read_after_in_process_pack_swap() {
         let Some((tmp, oid)) = midx_fixture(false) else {
@@ -4251,6 +4311,10 @@ mod tests {
         assert_eq!(before.data, after.data);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn git_midx_mapped_bytes_match_owned_prepare() {
         use super::midx_cache::PreparedMidxLayer;
@@ -4379,6 +4443,10 @@ mod tests {
         ));
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn default_write_is_v1_and_unknown_version_is_rejected() {
         let Some((tmp, _oid)) = midx_fixture(false) else {

@@ -7,6 +7,11 @@ publish = false
 description = "Shared integration-test infrastructure for the Grit workspace"
 repository.workspace = true
 
+[features]
+# Tests that start the system `git` or build heavy fixtures run only with this
+# feature (`make test-full`, the nightly CI job); see TESTING.md.
+full-tests = []
+
 [lints]
 workspace = true
 

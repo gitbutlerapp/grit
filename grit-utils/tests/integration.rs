@@ -5,61 +5,98 @@
 //! links one binary instead of one per file. Each file in this directory is a
 //! module here, except the `[[test]]` targets in Cargo.toml, which run in their
 //! own process.
+//!
+//! Modules marked `full-tests` start the system `git` or build heavy fixtures;
+//! they build only with `--features full-tests` (`make test-full`).
 
+#[cfg(feature = "full-tests")]
 #[path = "add_scenario_e2e.rs"]
 mod add_scenario_e2e;
+#[cfg(feature = "full-tests")]
 #[path = "campaign_conflicts_e2e.rs"]
 mod campaign_conflicts_e2e;
+#[cfg(feature = "full-tests")]
 #[path = "conflicts_scenario_e2e.rs"]
 mod conflicts_scenario_e2e;
+#[cfg(feature = "full-tests")]
 #[path = "daily_list.rs"]
 mod daily_list;
+#[cfg(feature = "full-tests")]
 #[path = "daily_matrix.rs"]
 mod daily_matrix;
+#[cfg(feature = "full-tests")]
 #[path = "daily_runner_linux.rs"]
 mod daily_runner_linux;
+#[cfg(feature = "full-tests")]
 #[path = "daily_validate_fixture.rs"]
 mod daily_validate_fixture;
+#[cfg(feature = "full-tests")]
 #[path = "diff_log_scenario_e2e.rs"]
 mod diff_log_scenario_e2e;
+#[cfg(feature = "full-tests")]
 #[path = "fixtures_prepare_argv.rs"]
 mod fixtures_prepare_argv;
+#[cfg(feature = "full-tests")]
 #[path = "history_rewrite_scenario_e2e.rs"]
 mod history_rewrite_scenario_e2e;
+#[cfg(feature = "full-tests")]
 #[path = "history_scenario_e2e.rs"]
 mod history_scenario_e2e;
+#[cfg(feature = "full-tests")]
 #[path = "hot_path_scenario_e2e.rs"]
 mod hot_path_scenario_e2e;
+#[cfg(feature = "full-tests")]
+#[path = "install_relr.rs"]
+mod install_relr;
+#[cfg(feature = "full-tests")]
 #[path = "measure_rss_linux.rs"]
 mod measure_rss_linux;
+#[cfg(feature = "full-tests")]
 #[path = "merge_check_scenario_e2e.rs"]
 mod merge_check_scenario_e2e;
+#[cfg(feature = "full-tests")]
 #[path = "merge_scenario_e2e.rs"]
 mod merge_scenario_e2e;
+#[cfg(feature = "full-tests")]
 #[path = "network_push_prepare_cycle.rs"]
 mod network_push_prepare_cycle;
+#[cfg(feature = "full-tests")]
 #[path = "network_scenario_e2e.rs"]
 mod network_scenario_e2e;
+#[cfg(feature = "full-tests")]
 #[path = "network_synth_s_compat.rs"]
 mod network_synth_s_compat;
+#[cfg(feature = "full-tests")]
 #[path = "odb_driver_git_compat.rs"]
 mod odb_driver_git_compat;
+#[cfg(feature = "full-tests")]
 #[path = "parallel_checkout_prepare.rs"]
 mod parallel_checkout_prepare;
+#[cfg(feature = "full-tests")]
 #[path = "parallel_scenario_e2e.rs"]
 mod parallel_scenario_e2e;
+#[cfg(feature = "full-tests")]
 #[path = "refs_driver_git_compat.rs"]
 mod refs_driver_git_compat;
+#[cfg(feature = "full-tests")]
+#[path = "release_elf.rs"]
+mod release_elf;
+#[cfg(feature = "full-tests")]
 #[path = "render_cli_e2e.rs"]
 mod render_cli_e2e;
+#[cfg(feature = "full-tests")]
 #[path = "repack_cargo_shape_budget.rs"]
 mod repack_cargo_shape_budget;
+#[cfg(feature = "full-tests")]
 #[path = "revision_selection_matrix.rs"]
 mod revision_selection_matrix;
+#[cfg(feature = "full-tests")]
 #[path = "synth_fixture_tier_s.rs"]
 mod synth_fixture_tier_s;
+#[cfg(feature = "full-tests")]
 #[path = "tag_tree_sha256_scenario_e2e.rs"]
 mod tag_tree_sha256_scenario_e2e;
+#[cfg(feature = "full-tests")]
 #[path = "tree_sha256_git_digest_script.rs"]
 mod tree_sha256_git_digest_script;
 

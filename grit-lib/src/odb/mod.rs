@@ -3903,6 +3903,10 @@ mod tests {
     }
 
     /// Objects present only in a pack must not be duplicated as loose files on [`Self::write`].
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn write_skips_loose_when_object_in_pack_only() {
         let dir = TempDir::new().unwrap();
@@ -3921,6 +3925,10 @@ mod tests {
     }
 
     /// Same as pack-only: alternates satisfy [`Self::exists`] without a local loose copy.
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn write_freshens_loose_object_in_alternate() {
         use filetime::FileTime;
@@ -3956,6 +3964,10 @@ mod tests {
         assert!(after > before, "write must freshen alternate loose object");
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn write_freshens_packed_object_in_alternate() {
         use filetime::FileTime;
@@ -4001,6 +4013,10 @@ mod tests {
         assert!(after >= before, "write must freshen alternate pack");
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn write_skips_loose_when_object_only_in_alternate() {
         let alt = TempDir::new().unwrap();
@@ -4030,6 +4046,10 @@ mod tests {
         assert!(!odb.object_path(&oid).exists());
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn write_with_mem_overlay_stays_in_memory() {
         let dir = TempDir::new().unwrap();
@@ -4398,6 +4418,10 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn exists_and_write_after_invalidate_packs_use_odb_store() {
         let dir = TempDir::new().unwrap();
@@ -4434,6 +4458,10 @@ mod tests {
         odb.read(&oid).expect("read after write");
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn write_uses_single_exists_probe_when_not_loose() {
         let dir = TempDir::new().unwrap();
@@ -4663,6 +4691,10 @@ mod tests {
     /// When a local pack is indexed but its `.pack` path cannot be utime'd, [`Odb::write`]
     /// materializes a loose copy (Git `write_object_file` fallback). Replacing the pack file
     /// with a directory simulates a failed freshen without requiring a root-owned pack.
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn write_materializes_loose_when_pack_freshen_fails() {
         let dir = TempDir::new().unwrap();
@@ -4731,6 +4763,10 @@ mod tests {
         assert!(freshened >= before);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn promisor_marker_checked_once_per_prepare() {
         use crate::pack::{
@@ -4781,6 +4817,10 @@ mod tests {
         }
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn promisor_marker_added_after_prepare_is_seen_after_reprepare() {
         use crate::pack::{
@@ -4824,6 +4864,10 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn git_promisor_marker_pack_not_materialized_for_exists_local() {
         use crate::pack::clear_pack_cache;
@@ -4860,6 +4904,10 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn packed_object_read_avoids_loose_path_open() {
         use crate::hot_path_test_metrics::HotPathMetricsScope;
@@ -4914,6 +4962,10 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn loose_and_packed_copies_return_identical_bytes() {
         use crate::pack::clear_pack_cache;
@@ -4941,6 +4993,10 @@ mod tests {
         assert_eq!(packed.kind, loose.kind);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn freshly_written_loose_object_visible_before_repack() {
         let dir = TempDir::new().unwrap();
@@ -4959,6 +5015,10 @@ mod tests {
         assert_eq!(obj.data.as_slice(), fresh);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn pack_added_after_first_read_found_via_odb_reprepare() {
         use crate::pack::{clear_pack_cache, pack_cache_test_guard};
@@ -4993,6 +5053,10 @@ mod tests {
         assert_eq!(obj.kind, ObjectKind::Commit);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn late_midx_after_warm_read_resolves_new_commit() {
         use crate::pack::{clear_pack_cache, pack_cache_test_guard};

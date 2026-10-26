@@ -233,6 +233,10 @@ mod tests {
         }
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn parse_perf_targets_and_classify() -> Result<()> {
         let dir = tempfile::tempdir()?;
@@ -338,6 +342,10 @@ documented = "known fsck gap"
         Ok(())
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn load_committed_campaign_before_report() -> Result<()> {
         let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("baselines/campaign-before.json");
@@ -349,6 +357,10 @@ documented = "known fsck gap"
         Ok(())
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn committed_campaign_after_closes_ledger() -> Result<()> {
         let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));

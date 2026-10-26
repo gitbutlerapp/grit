@@ -2013,6 +2013,10 @@ mod tests {
     use crate::repo::InitOptions;
     use tempfile::TempDir;
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn gc_auto_skip_single_pack_without_loose() {
         let dir = TempDir::new().unwrap();

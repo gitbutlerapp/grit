@@ -26,6 +26,9 @@ invalid_codeblock_attributes = "deny"
 bare_urls = "deny"
 
 [features]
+# Tests that start the system `git` or build heavy fixtures run only with this
+# feature (`make test-full`, the nightly CI job); see TESTING.md.
+full-tests = []
 # Provides the default `ureq`-backed `HttpClient` for the smart-HTTP transport
 # (`transport::http::ureq_client`). Off by default so embedders can bring their
 # own HTTP stack.
@@ -277,34 +280,42 @@ path = "tests/integration.rs"
 [[test]]
 name = "add_pathspec_staging"
 path = "tests/add_pathspec_staging.rs"
+required-features = ["full-tests"]
 
 [[test]]
 name = "clone_ssh_env"
 path = "tests/clone_ssh_env.rs"
+required-features = ["full-tests"]
 
 [[test]]
 name = "command_runner_hooks"
 path = "tests/command_runner_hooks.rs"
+required-features = ["full-tests"]
 
 [[test]]
 name = "commit_date_approxidate_git_compat"
 path = "tests/commit_date_approxidate_git_compat.rs"
+required-features = ["full-tests"]
 
 [[test]]
 name = "commit_identity_git_compat"
 path = "tests/commit_identity_git_compat.rs"
+required-features = ["full-tests"]
 
 [[test]]
 name = "credentials"
 path = "tests/credentials.rs"
+required-features = ["full-tests"]
 
 [[test]]
 name = "date_cutoff_git_compat"
 path = "tests/date_cutoff_git_compat.rs"
+required-features = ["full-tests"]
 
 [[test]]
 name = "filter_process_repo_scope"
 path = "tests/filter_process_repo_scope.rs"
+required-features = ["full-tests"]
 
 [[test]]
 name = "hygiene"
@@ -317,10 +328,12 @@ path = "tests/init_filesystem_capabilities.rs"
 [[test]]
 name = "matrix_credentials"
 path = "tests/matrix_credentials.rs"
+required-features = ["full-tests"]
 
 [[test]]
 name = "pack_ingest_memory"
 path = "tests/pack_ingest_memory.rs"
+required-features = ["full-tests"]
 
 [[test]]
 name = "public_module_doctests"
@@ -333,10 +346,12 @@ path = "tests/ref_storage_format.rs"
 [[test]]
 name = "remote_dispatch"
 path = "tests/remote_dispatch.rs"
+required-features = ["full-tests"]
 
 [[test]]
 name = "remote_rename_git_compat"
 path = "tests/remote_rename_git_compat.rs"
+required-features = ["full-tests"]
 
 [[test]]
 name = "repository_builder_relative_paths"
@@ -345,33 +360,42 @@ path = "tests/repository_builder_relative_paths.rs"
 [[test]]
 name = "signing_commit_openpgp_git_compat"
 path = "tests/signing_commit_openpgp_git_compat.rs"
+required-features = ["full-tests"]
 
 [[test]]
 name = "signing_tag_git_compat"
 path = "tests/signing_tag_git_compat.rs"
+required-features = ["full-tests"]
 
 [[test]]
 name = "stage_gitlink_to_file_typechange"
 path = "tests/stage_gitlink_to_file_typechange.rs"
+required-features = ["full-tests"]
 
 [[test]]
 name = "status_index_stat_refresh_git_compat"
 path = "tests/status_index_stat_refresh_git_compat.rs"
+required-features = ["full-tests"]
 
 [[test]]
 name = "switch_delete_cross_device_symlink_1968"
 path = "tests/switch_delete_cross_device_symlink_1968.rs"
+required-features = ["full-tests"]
 
 [[test]]
 name = "transport_ssh_empty"
 path = "tests/transport_ssh_empty.rs"
+required-features = ["full-tests"]
+
 [[test]]
 name = "diff_rename_allocations"
 path = "tests/diff_rename_allocations.rs"
+required-features = ["full-tests"]
 
 [[test]]
 name = "diff_tree_metadata_memory"
 path = "tests/diff_tree_metadata_memory.rs"
+required-features = ["full-tests"]
 
 [[bench]]
 name = "pack_frontier"

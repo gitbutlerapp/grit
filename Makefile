@@ -3,7 +3,9 @@
 # Targets:
 #   make build        - release build of the grit CLI
 #   make debug        - debug build of the grit CLI
-#   make test         - run the Rust unit/integration tests
+#   make test         - fast unit and functional tests (a few minutes)
+#   make test-full    - everything, including tests that start the system git
+#                       and heavy fixtures (the nightly CI job)
 #   make clippy       - lint all crates (warnings fail CI)
 #   make fmt          - format all crates
 #   make doc          - build API docs (rustdoc warnings fail)
@@ -24,7 +26,7 @@ GRIT_PROFILE ?= dist
 LLVM_COV_TARGET ?= target/llvm-cov-target
 GRIT_COV_BIN := $(CURDIR)/$(LLVM_COV_TARGET)/debug/grit
 
-.PHONY: all build debug test clippy fmt doc gate clean docs docs-check coverage public-api public-api-check bench-lib bench-scenarios
+.PHONY: all build debug test test-full clippy fmt doc gate clean docs docs-check coverage public-api public-api-check bench-lib bench-scenarios
 
 BENCH_DIR := target/bench
 CRITERION_DIR := target/criterion
@@ -48,6 +50,17 @@ test:
 		$(CARGO) nextest run --workspace && $(CARGO) test --workspace --doc; \
 	else \
 		$(CARGO) test --workspace; \
+	fi
+
+# Tests that start the system git (comparisons, fixtures built with git) or build
+# heavy fixtures are compiled only with the full-tests feature of each crate.
+FULL_TESTS = --features grit-lib/full-tests,grit-cli/full-tests,grit-utils/full-tests,grit-examples/full-tests,grit-protocol/full-tests,grit-http-server/full-tests,grit-test-support/full-tests
+
+test-full:
+	@if $(CARGO) nextest --version >/dev/null 2>&1; then \
+		$(CARGO) nextest run --workspace $(FULL_TESTS) && $(CARGO) test --workspace --doc $(FULL_TESTS); \
+	else \
+		$(CARGO) test --workspace $(FULL_TESTS); \
 	fi
 
 clippy:
@@ -96,7 +109,7 @@ docs-check: site/node_modules
 	$(CARGO) doc -p grit-lib --no-deps
 	cd site && GRIT_SITE_STRICT=1 npm run check && npm test && npm run typecheck && GRIT_SITE_STRICT=1 npm run build
 
-LLVM_COV_FEATURES ?= http-ureq,unstable-bench-helpers
+LLVM_COV_FEATURES ?= http-ureq,unstable-bench-helpers,full-tests
 
 coverage:
 	@mkdir -p target/llvm-cov target/doc

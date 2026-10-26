@@ -1865,6 +1865,10 @@ mod tests {
         }
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn touched_gitlink_skips_stat_only_fast_path() {
         use crate::objects::{serialize_commit, CommitData, ObjectKind};
@@ -1960,6 +1964,10 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn switch_dirty_racy_same_size_content_is_not_clean() {
         use crate::objects::{serialize_commit, CommitData, ObjectKind};
@@ -2900,6 +2908,10 @@ mod tests {
         .map(|_| ())
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn switch_delete_heavy_refuses_racy_same_size_edit() {
         let tmp = TempDir::new().expect("tempdir");
@@ -2924,6 +2936,10 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn switch_delete_heavy_hashes_racy_files_once_and_deletes_them() {
         let tmp = TempDir::new().expect("tempdir");

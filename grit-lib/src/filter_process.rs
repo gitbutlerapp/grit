@@ -856,6 +856,10 @@ mod subprocess_context_tests {
             .success());
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn filter_process_uses_repository_work_tree_as_cwd() {
         let parent = tempfile::tempdir().expect("tempdir");
@@ -895,6 +899,10 @@ mod subprocess_context_tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn filter_process_overrides_stale_git_dir_in_environment() {
         let parent = tempfile::tempdir().expect("tempdir");
@@ -931,6 +939,10 @@ mod subprocess_context_tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn linked_worktree_open_configures_filter_subprocess_cwd() {
         use crate::worktree::{add_linked_worktree, AddLinkedWorktreeOptions, WorktreeBranch};

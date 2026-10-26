@@ -193,6 +193,10 @@ mod tests {
         assert!(matches!(err, Error::BlameIgnoreRevsFileInvalidRev { .. }));
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn parse_line_accepts_crlf_suffix() {
         let dir = tempfile::tempdir().unwrap();
@@ -228,6 +232,10 @@ mod tests {
         assert_eq!(revs.len(), 1);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn parse_line_rejects_wrong_length_in_sha256_repo() {
         if !git_supports_sha256() {

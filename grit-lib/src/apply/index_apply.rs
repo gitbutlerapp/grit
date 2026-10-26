@@ -449,6 +449,10 @@ mod tests {
             .unwrap();
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn index_apply_modify() {
         let dir = tempfile::tempdir().unwrap();

@@ -1622,6 +1622,10 @@ mod tests {
 
     /// Initial push of one branch tip must not disable deltas just because there
     /// is a single want (regression for #1941).
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn push_pack_initial_branch_push_uses_deltas() {
         use std::process::Command;

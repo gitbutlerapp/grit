@@ -148,6 +148,10 @@ mod tests {
         Ok(())
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn single_branch_tag_clone_drops_other_branch_refs() -> Result<()> {
         let origin = TempDir::new()?;

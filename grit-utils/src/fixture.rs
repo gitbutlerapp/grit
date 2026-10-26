@@ -886,6 +886,10 @@ mod tests {
     use std::process::Command;
     use tempfile::TempDir;
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn prepare_add_iteration_requires_git_reset() {
         let dir = TempDir::new().unwrap();
@@ -907,6 +911,10 @@ mod tests {
         crate::binary::resolve_binary("git", None).expect("git")
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn prepare_synthetic_diff_iteration_restores_name_count() {
         let git = which_git();
@@ -929,6 +937,10 @@ mod tests {
         remove_dir_robust(&scratch_dir());
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn create_repo_with_history_has_commit_count() {
         let git = which_git();

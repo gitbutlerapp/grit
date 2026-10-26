@@ -369,6 +369,10 @@ mod tests {
         names
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn odb_reads_big_file_threshold_from_config() {
         let (_dir, odb) = repo_with_threshold("3k");
@@ -382,6 +386,10 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn odb_hash_stream_matches_hash() {
         let (_dir, odb) = repo_with_threshold("1k");
@@ -393,6 +401,10 @@ mod tests {
         assert!(pack_files(&odb).is_empty(), "hashing stores nothing");
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn write_stream_below_threshold_writes_the_same_loose_object_as_write() {
         let (_dir, odb) = repo_with_threshold("1m");
@@ -410,6 +422,10 @@ mod tests {
         assert!(pack_files(&odb).is_empty());
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn write_stream_at_threshold_packs_with_bounded_reads_and_git_reads_it() {
         let (dir, odb) = repo_with_threshold("64k");
@@ -450,6 +466,10 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn write_stream_of_an_existing_object_adds_no_pack() {
         let (_dir, odb) = repo_with_threshold("1k");
@@ -483,6 +503,10 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn truncated_write_stream_errors_and_leaves_nothing_behind() {
         let (_dir, odb) = repo_with_threshold("1k");

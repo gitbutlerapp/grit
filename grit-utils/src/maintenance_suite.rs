@@ -310,6 +310,10 @@ mod prepare_tests {
     use super::*;
     use std::process::Command;
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn hyperfine_prepare_maintenance_succeeds_after_gc_base_marker() -> Result<()> {
         let git = PathBuf::from("git");

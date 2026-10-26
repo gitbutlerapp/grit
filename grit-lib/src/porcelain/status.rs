@@ -3439,6 +3439,10 @@ mod status_op_tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn status_reports_hundred_modified_on_dense_leaf_fixture() {
         let tmp = TempDir::new().unwrap();
@@ -3497,6 +3501,10 @@ mod status_op_tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn status_scan_stats_each_tracked_path_once() {
         use crate::worktree_scan::{reset_worktree_metadata_probe, worktree_metadata_probe_count};
@@ -3540,6 +3548,10 @@ mod status_op_tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn status_lists_untracked_sibling_on_deep_indexed_chain() {
         let tmp = TempDir::new().unwrap();
@@ -3625,6 +3637,10 @@ mod status_op_tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn warm_status_reuses_populated_untr_without_rescanning_worktree() {
         let tmp = TempDir::new().unwrap();
@@ -3742,6 +3758,10 @@ mod status_op_tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn operation_next_steps_merge() {
         use crate::state::{operation_next_steps, InProgressOperation, NextStep};
@@ -3773,6 +3793,10 @@ mod status_op_tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn operation_next_steps_resolved_merge_is_commit_only() {
         use crate::state::{
@@ -3811,6 +3835,10 @@ mod status_op_tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn status_operation_git_cherry_pick_conflict_shape() {
         use crate::state::{
@@ -3952,6 +3980,10 @@ mod status_op_tests {
         assert_eq!(opts.renames, None);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn status_pathspec_limits_all_sections() {
         let tmp = TempDir::new().unwrap();
@@ -4012,6 +4044,10 @@ mod status_op_tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn short_status_lines_keep_rename_endpoints_when_filename_contains_arrow() {
         let tmp = TempDir::new().unwrap();
@@ -4053,6 +4089,10 @@ mod status_op_tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn status_rename_staged_reports_old_path() {
         let tmp = TempDir::new().unwrap();
@@ -4127,6 +4167,10 @@ mod status_op_tests {
         rows
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn status_rename_pathspec_matches_git_old_new_and_both() {
         let tmp = TempDir::new().unwrap();
@@ -4180,6 +4224,10 @@ mod status_op_tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn status_rename_limit_honors_status_key_like_git() {
         let tmp = TempDir::new().unwrap();
@@ -4233,6 +4281,10 @@ mod status_op_tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn status_unstaged_delete_and_untracked_add_not_rename() {
         let tmp = TempDir::new().unwrap();
@@ -4343,6 +4395,10 @@ mod status_op_tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn ignored_listing_matches_git() {
         let tmp = TempDir::new().unwrap();
@@ -4399,6 +4455,10 @@ mod status_op_tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn split_tracked_untracked_tasks_only_splits_plain_recursions() {
         let tmp = TempDir::new().unwrap();

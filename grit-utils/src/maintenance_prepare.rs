@@ -74,6 +74,10 @@ mod tests {
     use super::*;
     use std::process::Command;
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn campaign_prepare_maintenance_uses_campaign_cwd() -> Result<()> {
         let git = PathBuf::from("git");

@@ -783,6 +783,10 @@ mod tests {
         .expect("plan")
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn exec_restores_one_consistent_head_when_injected_ref_store_disagrees() {
         use crate::config::environment::RepositoryOptions;
@@ -854,6 +858,10 @@ mod tests {
         assert_eq!(disk_status(), "A  b.txt\n", "on-disk refs stay untouched");
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn exec_success_preserves_tracked_edits_before_next_command() {
         for staged in [false, true] {
@@ -891,6 +899,10 @@ mod tests {
         }
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn exec_runs_once_per_rewritten_commit_in_order() {
         let (_dir, repo) = init_repo();
@@ -915,6 +927,10 @@ mod tests {
         assert_eq!(resolve_ref(repo.git_dir(), "HEAD").expect("head"), tip);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn exec_failure_restores_everything_and_reports_commit() {
         let (_dir, repo) = init_repo();
@@ -965,6 +981,10 @@ mod tests {
         assert_eq!(fs::read(&a_path).expect("worktree a.txt"), a_contents);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn exec_runner_error_restores_head_index_and_worktree() {
         let (_dir, repo) = init_repo();
@@ -1001,6 +1021,10 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn exec_refuses_checkout_that_overwrites_untracked() {
         let (dir, repo) = init_repo();
@@ -1044,6 +1068,10 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn exec_failure_restores_worktree_when_exec_dirties_unchanged_blob() {
         let (_dir, repo) = init_repo();
@@ -1082,6 +1110,10 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn exec_detects_same_size_racy_edit_with_unchanged_stat_fields() {
         struct RacyEditRunner<'a> {
@@ -1144,6 +1176,10 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn exec_refuses_dirty_worktree() {
         let (dir, repo) = init_repo();

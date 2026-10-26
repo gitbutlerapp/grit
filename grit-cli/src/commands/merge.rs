@@ -748,6 +748,10 @@ mod tests {
         }
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn merge_check_exit_code_and_json() {
         let fixture = CliFixture::empty();

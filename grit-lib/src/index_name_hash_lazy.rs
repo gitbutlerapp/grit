@@ -498,6 +498,10 @@ mod tests {
         assert_eq!(memihash(b"Mixed/Case.txt"), memihash(b"mixed/case.txt"));
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn lazy_init_uses_threads_on_large_index() {
         let mut idx = Index::empty(2);

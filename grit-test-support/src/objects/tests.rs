@@ -14,6 +14,10 @@ fn run_algo(algo: HashAlgo, f: impl FnOnce(HashAlgo)) {
     f(algo);
 }
 
+#[cfg_attr(
+    not(feature = "full-tests"),
+    ignore = "starts system git or is heavy; run with --features full-tests"
+)]
 #[test]
 fn pack_builder_ofs_only_index_pack() {
     run_algo(HashAlgo::Sha1, |algo| {
@@ -39,6 +43,10 @@ fn pack_builder_ofs_only_index_pack() {
     });
 }
 
+#[cfg_attr(
+    not(feature = "full-tests"),
+    ignore = "starts system git or is heavy; run with --features full-tests"
+)]
 #[test]
 fn pack_builder_full_ofs_ref_deltas_index_and_verify() {
     run_algo(HashAlgo::Sha1, |algo| {
@@ -93,6 +101,10 @@ fn pack_builder_full_ofs_ref_deltas_index_and_verify_inner(algo: HashAlgo) {
     assert!(verify.ok, "verify-pack failed: {}", verify.output);
 }
 
+#[cfg_attr(
+    not(feature = "full-tests"),
+    ignore = "starts system git or is heavy; run with --features full-tests"
+)]
 #[test]
 fn corrupted_trailer_rejected_by_index_pack() {
     run_algo(HashAlgo::Sha1, |algo| {
@@ -115,6 +127,10 @@ fn corrupted_trailer_rejected_by_index_pack() {
     });
 }
 
+#[cfg_attr(
+    not(feature = "full-tests"),
+    ignore = "starts system git or is heavy; run with --features full-tests"
+)]
 #[test]
 fn forced_large_offset_index_version() {
     run_algo(HashAlgo::Sha1, |algo| {
@@ -151,6 +167,10 @@ fn forced_large_offset_index_version() {
     });
 }
 
+#[cfg_attr(
+    not(feature = "full-tests"),
+    ignore = "starts system git or is heavy; run with --features full-tests"
+)]
 #[test]
 fn git_fsck_reports_bad_tree_msg_id() {
     run_algo(HashAlgo::Sha1, |algo| {

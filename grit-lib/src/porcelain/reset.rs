@@ -530,6 +530,10 @@ mod tests {
         }
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn invalid_signature_fails_shared_preflight_at_current_head() {
         let (_dir, repo) = init_repo();
@@ -548,6 +552,10 @@ mod tests {
         }
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn reset_committish_peels_annotated_tag() {
         use crate::objects::{serialize_tag, TagData};
@@ -582,6 +590,10 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn reset_rejects_tree_committish() {
         use crate::revwalk::rev_parse::resolve_revision;
@@ -602,6 +614,10 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn mixed_reset_moves_tip_and_index_not_worktree() {
         let (_dir, repo) = init_repo();
@@ -632,6 +648,10 @@ mod tests {
         assert_eq!(disk, b"2\n");
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn mixed_reset_at_current_head_clears_staged_changes() {
         let (_dir, repo) = init_repo();
@@ -667,6 +687,10 @@ mod tests {
         assert!(st.staged.is_empty(), "index should match HEAD tree");
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn mixed_reset_at_head_refreshes_index_stat_for_clean_status() {
         let (_dir, repo) = init_repo();
@@ -725,6 +749,10 @@ mod tests {
         let _ = c2;
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn hard_reset_at_current_head_restores_worktree() {
         let (_dir, repo) = init_repo();
@@ -744,6 +772,10 @@ mod tests {
         assert_eq!(disk, b"base\n");
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn hard_reset_dirty_path_unchanged_between_commits() {
         let (_dir, repo) = init_repo();
@@ -777,6 +809,10 @@ mod tests {
         let _ = c2;
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn hard_reset_clears_unmerged_index_stages() {
         let (_dir, repo) = init_repo();
@@ -988,6 +1024,10 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn dry_run_hard_leaves_repo_unchanged() {
         let (_dir, repo) = init_repo();
@@ -1073,6 +1113,10 @@ mod tests {
         assert_eq!(outcome.would_block, ["f", "u"]);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn orphan_zero_when_other_ref_holds_previous_tip() {
         let (_dir, repo) = init_repo();
@@ -1089,6 +1133,10 @@ mod tests {
         let _ = c3;
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn reset_orphan_walk_ignores_tag_peeled_to_blob() {
         use crate::objects::{serialize_tag, TagData};
@@ -1135,6 +1183,10 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn orphan_lists_commits_for_detached_reset_back() {
         let (_dir, repo) = init_repo();
@@ -1157,6 +1209,10 @@ mod tests {
         assert_eq!(preview.orphaned_commits[1].oid, c2);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn keep_reset_rejects_unmerged_index() {
         let (_dir, repo) = init_repo();
@@ -1243,6 +1299,10 @@ mod tests {
         assert!(matches!(err, Error::PathError(_)));
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn orphan_walk_lists_commit_not_held_by_other_ref() {
         let (_dir, repo) = init_repo();
@@ -1259,6 +1319,10 @@ mod tests {
         assert_eq!(preview.orphaned_commits[0].oid, c3);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn forward_reset_skips_orphan_walk() {
         let (_dir, repo) = init_repo();
@@ -1275,6 +1339,10 @@ mod tests {
         assert!(outcome.orphaned_commits.is_empty());
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn orphan_count_matches_git_rev_list_with_many_tags() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -1469,6 +1537,10 @@ mod tests {
         (repo, older, newer)
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn hard_reset_all_modified_tree_diff_skips_redundant_worktree_stat_scan() {
         use crate::worktree_scan::{reset_worktree_metadata_probe, worktree_metadata_probe_count};
@@ -1533,6 +1605,10 @@ mod tests {
         assert_git_sees_clean_repo(root);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn hard_reset_delete_heavy_reads_no_worktree_files_and_stats_each_once() {
         use crate::worktree_scan::{reset_worktree_metadata_probe, worktree_metadata_probe_count};
@@ -1604,6 +1680,10 @@ mod tests {
         ]
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn mixed_reset_at_head_reads_only_stat_dirty_files_and_matches_git() {
         let grit_dir = tempfile::tempdir().expect("tempdir");
@@ -1642,6 +1722,10 @@ mod tests {
         git(grit_dir.path(), &["fsck", "--no-progress"]);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn mixed_reset_to_other_commit_matches_git() {
         let grit_dir = tempfile::tempdir().expect("tempdir");
@@ -1672,6 +1756,10 @@ mod tests {
         git(grit_dir.path(), &["fsck", "--no-progress"]);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn hard_reset_records_the_target_cache_tree_like_git() {
         let grit_dir = tempfile::tempdir().expect("tempdir");
@@ -1704,6 +1792,10 @@ mod tests {
         git(grit_dir.path(), &["fsck", "--no-progress"]);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn mixed_reset_replaces_an_unreadable_index() {
         let (_dir, repo) = init_repo();
@@ -1723,6 +1815,10 @@ mod tests {
         assert!(index.get(b"f", 0).is_some());
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn hard_reset_rewrites_racy_unchanged_file_with_same_size_edit() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -1762,6 +1858,10 @@ mod tests {
         assert_git_sees_clean_repo(root);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn hard_reset_keeps_recorded_stat_rows_for_unchanged_files() {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -1846,6 +1946,10 @@ mod tests {
         .expect("open")
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn hard_reset_restores_file_replaced_by_same_stat_directory_like_git() {
         let grit_dir = tempfile::tempdir().expect("tempdir");
@@ -1876,6 +1980,10 @@ mod tests {
         }
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn switch_refuses_to_delete_file_replaced_by_same_stat_directory_like_git() {
         use crate::porcelain::switch::{switch_repository, SwitchMode, SwitchOptions};
@@ -1919,6 +2027,10 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn hard_reset_removes_staged_only_paths_and_keeps_untracked_under_deleted_dirs() {
         let dir = tempfile::tempdir().expect("tempdir");

@@ -1,6 +1,5 @@
 //! `git merge-file -p` oracle for [`grit_lib::diff::merge_file`].
 
-
 use std::process::Command;
 
 use grit_lib::diff::merge_file::{merge, ConflictStyle, MergeFavor, MergeInput, MergeOutput};

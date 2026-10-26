@@ -1398,6 +1398,10 @@ mod tests {
         assert!(!list[0].is_bare);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn allocate_unique_worktree_id() {
         let tmp = TempDir::new().unwrap();
@@ -1423,6 +1427,10 @@ mod tests {
         assert!(!out.contains("worktree"));
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn sanitize_funny_worktree_name() {
         assert_eq!(
@@ -1447,6 +1455,10 @@ mod tests {
         assert_eq!(path, path_for_disk_compare(&wt));
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn add_and_remove_linked_worktree_via_library() {
         use std::process::Command;
@@ -1525,6 +1537,10 @@ mod tests {
         assert_eq!(common_git_dir(&git_dir), git_dir);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn sanitize_worktree_id_special_cases() {
         assert_eq!(sanitize_worktree_id_component("@"), "-");
@@ -1599,6 +1615,10 @@ mod tests {
         assert!(ensure_empty_or_missing(&missing).is_ok());
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn add_linked_worktree_rejects_bare_repository() {
         let tmp = TempDir::new().unwrap();
@@ -1630,6 +1650,10 @@ mod tests {
         ));
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn list_worktrees_from_linked_checkout_normalizes_main_path() {
         use std::process::Command;
@@ -1686,6 +1710,10 @@ mod tests {
         }
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn branch_checkout_exclusivity_helpers() {
         use std::process::Command;
@@ -1744,6 +1772,10 @@ mod tests {
         assert!(ensure_branch_not_checked_out_elsewhere(&repo, "feature").is_err());
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn missing_registered_path_rejects_add_without_force() {
         use std::process::Command;
@@ -1800,6 +1832,10 @@ mod tests {
         ));
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn remove_linked_worktree_refuses_main_and_locked() {
         use std::process::Command;

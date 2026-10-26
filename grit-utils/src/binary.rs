@@ -242,6 +242,10 @@ mod tests {
     use std::process::Command;
     use tempfile::TempDir;
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn report_grit_commit_prefers_the_override() {
         env::set_var("GRIT_BENCH_REPORT_GRIT_COMMIT", "0123abcd-override");
@@ -253,6 +257,10 @@ mod tests {
         assert_eq!(empty_override, grit_source_commit());
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn grit_source_commit_is_committish() {
         let Some(commit) = grit_source_commit() else {
@@ -292,6 +300,10 @@ mod tests {
         (dir, tip)
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn grit_source_commit_honors_bench_branch() {
         let branch = "factory/bench-branch-for-test";

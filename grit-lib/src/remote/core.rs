@@ -1453,6 +1453,10 @@ mod tests {
         assert!(!ref_matches_ls_remote_patterns("main-branch", &pats));
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn query_remote_refs_in_memory_empty_pattern_matches_nothing() {
         let entries = vec![
@@ -1475,6 +1479,10 @@ mod tests {
         assert!(out.is_empty());
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn query_remote_refs_in_memory_version_sort_and_limit() {
         let entries = vec![

@@ -273,6 +273,10 @@ mod tests {
     }
 
     /// Write with grit staging, verify index matches `git add` on the same tree.
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn stage_one_file_matches_git_index() {
         if !have_git() {

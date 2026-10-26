@@ -1007,6 +1007,10 @@ mod tests {
         assert!(!resolved.allow_fast_forward);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn pull_maps_custom_fetch_refspec() {
         let tmp = TempDir::new().expect("tempdir");
@@ -1036,6 +1040,10 @@ mod tests {
         assert_eq!(git(&clone, &["rev-parse", "main"]), tip.to_hex());
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn pull_local_upstream_skips_fetch() {
         let tmp = TempDir::new().expect("tempdir");
@@ -1062,6 +1070,10 @@ mod tests {
         assert_eq!(outcome.transfer, TransferStats::default());
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn pull_reports_objects_received_by_its_fetch() {
         let tmp = TempDir::new().expect("tempdir");
@@ -1094,6 +1106,10 @@ mod tests {
         assert_eq!(again.transfer.objects, 0, "{:?}", again.transfer);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn pull_adopts_upstream_on_unborn_branch_with_reflog() {
         let tmp = TempDir::new().expect("tempdir");
@@ -1123,6 +1139,10 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn reflog_failure_after_ref_update_is_a_warning() {
         let tmp = TempDir::new().expect("tempdir");

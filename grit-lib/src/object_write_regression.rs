@@ -214,6 +214,10 @@ fn write_tree_unchanged_index_writes_and_freshens_nothing() {
     );
 }
 
+#[cfg_attr(
+    not(feature = "full-tests"),
+    ignore = "starts system git or is heavy; run with --features full-tests"
+)]
 #[test]
 fn create_commit_one_change_writes_only_changed_path_trees() {
     let tmp = TempDir::new().unwrap();
@@ -331,6 +335,10 @@ fn create_commit_one_change_writes_only_changed_path_trees() {
     );
 }
 
+#[cfg_attr(
+    not(feature = "full-tests"),
+    ignore = "starts system git or is heavy; run with --features full-tests"
+)]
 #[test]
 fn stage_one_modified_file_hashes_one_blob() {
     let _disk = heavy_disk_serial_guard();
@@ -375,6 +383,10 @@ fn stage_one_modified_file_hashes_one_blob() {
     );
 }
 
+#[cfg_attr(
+    not(feature = "full-tests"),
+    ignore = "starts system git or is heavy; run with --features full-tests"
+)]
 #[test]
 fn pack_signature_not_restatted_per_object() {
     let _disk = heavy_disk_serial_guard();

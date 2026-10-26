@@ -1337,6 +1337,10 @@ mod tests {
         assert!(!redacted.contains("token"));
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn redact_embedded_url_credentials_in_message() {
         let msg = "GET failed: https://user:pass@example.com/repo.git (timeout)";

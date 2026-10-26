@@ -5,7 +5,11 @@
 //! links one binary instead of one per file. Each file in this directory is a
 //! module here, except the `[[test]]` targets in Cargo.toml, which run in their
 //! own process.
+//!
+//! Modules marked `full-tests` start the system `git` or build heavy fixtures;
+//! they build only with `--features full-tests` (`make test-full`).
 
+#[cfg(feature = "full-tests")]
 #[path = "git_smart_http.rs"]
 mod git_smart_http;
 

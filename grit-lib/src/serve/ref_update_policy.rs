@@ -112,6 +112,10 @@ mod tests {
     }
 
     /// Remote tip exists only on the remote; pusher store is primary with remote alternates.
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn validate_ff_with_remote_tip_in_alternate_store() {
         let tmp = tempfile::tempdir().expect("tempdir");

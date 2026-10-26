@@ -587,6 +587,10 @@ mod tests {
         assert_eq!(neg, vec!["HEAD~1"]);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn write_bundle_from_rev_specs_records_tag_dwim_as_refs_tags() {
         let tmp = tempfile::tempdir().expect("tempdir");

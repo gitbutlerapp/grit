@@ -1400,6 +1400,10 @@ mod tests {
         assert!(adv.head_symref.is_none());
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn read_advertisement_system_git_empty_bare_upload_pack() {
         if Command::new("git").arg("--version").output().is_err() {

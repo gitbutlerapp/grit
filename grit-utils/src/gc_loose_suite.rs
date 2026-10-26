@@ -263,6 +263,10 @@ pub fn run_gc_loose_suite(
 mod tests {
     use super::*;
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn loose_repo_is_built_once_and_restored_after_gc() -> Result<()> {
         let git = PathBuf::from("git");

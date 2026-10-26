@@ -3398,6 +3398,10 @@ mod hunk_push_tests {
         (tmp, repo, selection)
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn stash_push_hunks_dry_run_does_not_mutate_repo() {
         let (tmp, repo, selection) = setup_two_hunk_repo();
@@ -3425,6 +3429,10 @@ mod hunk_push_tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn stash_push_hunks_stashes_only_selected() {
         let (tmp, repo, selection) = setup_two_hunk_repo();
@@ -3454,6 +3462,10 @@ mod hunk_push_tests {
         git(tmp.path(), &["fsck", "--strict"]);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn stash_push_hunks_worktree_keeps_rest() {
         let (tmp, repo, selection) = setup_two_hunk_repo();
@@ -3483,6 +3495,10 @@ mod hunk_push_tests {
         git(tmp.path(), &["fsck", "--strict"]);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn stash_push_hunks_roundtrip_with_git_stash_apply() {
         let (tmp, repo, selection) = setup_two_hunk_repo();
@@ -3510,6 +3526,10 @@ mod hunk_push_tests {
         git(tmp.path(), &["fsck", "--strict"]);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn stash_push_hunks_pop_restores() {
         let (tmp, repo, selection) = setup_two_hunk_repo();

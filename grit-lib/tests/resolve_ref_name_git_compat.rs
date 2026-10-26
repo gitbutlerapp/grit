@@ -2,11 +2,11 @@
 
 #![allow(clippy::unwrap_used, clippy::expect_used)]
 
+use crate::support;
 use grit_lib::config::environment::RepositoryOptions;
 use grit_lib::object_inspect::ResolvedRefName;
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::repo::{InitOptions, Repository};
-use crate::support;
 use support::{git, git_init_reftable_repo, require_reftable_git};
 
 fn git_rev_parse_ref(dir: &std::path::Path, abbrev: bool, spec: &str) -> Option<String> {

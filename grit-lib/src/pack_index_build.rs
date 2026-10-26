@@ -1451,6 +1451,10 @@ mod line_coverage_tests {
             .unwrap_or(false)
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn deep_ofs_delta_chain_matches_git_index_pack() {
         const EXTRA: usize = 3002;

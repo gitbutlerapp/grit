@@ -450,6 +450,10 @@ mod tests {
         refs.iter().map(|r| (r.name.as_str(), r.peeled)).collect()
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn advertised_refs_lists_requested_prefixes_and_skips_hidden() {
         let (_dir, repo, commit, _tag) = fixture();

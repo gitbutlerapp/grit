@@ -120,21 +120,37 @@ fn assert_clean_without_content_reads(files: usize, filemode: bool, threads: usi
     }
 }
 
+#[cfg_attr(
+    not(feature = "full-tests"),
+    ignore = "starts system git or is heavy; run with --features full-tests"
+)]
 #[test]
 fn serial_status_trusts_stat_with_filemode_false() {
     assert_clean_without_content_reads(96, false, 1);
 }
 
+#[cfg_attr(
+    not(feature = "full-tests"),
+    ignore = "starts system git or is heavy; run with --features full-tests"
+)]
 #[test]
 fn serial_status_trusts_stat_with_filemode_true() {
     assert_clean_without_content_reads(96, true, 1);
 }
 
+#[cfg_attr(
+    not(feature = "full-tests"),
+    ignore = "starts system git or is heavy; run with --features full-tests"
+)]
 #[test]
 fn parallel_status_trusts_stat_with_filemode_false() {
     assert_clean_without_content_reads(PARALLEL_STAT_MIN_ENTRIES + 24, false, 4);
 }
 
+#[cfg_attr(
+    not(feature = "full-tests"),
+    ignore = "starts system git or is heavy; run with --features full-tests"
+)]
 #[test]
 fn parallel_status_trusts_stat_with_filemode_true() {
     assert_clean_without_content_reads(PARALLEL_STAT_MIN_ENTRIES + 24, true, 4);
@@ -153,6 +169,10 @@ fn make_index_racy(root: &Path, files: usize) {
     .expect("index mtime");
 }
 
+#[cfg_attr(
+    not(feature = "full-tests"),
+    ignore = "starts system git or is heavy; run with --features full-tests"
+)]
 #[test]
 fn status_rewrites_racy_index_once_then_trusts_stat() {
     const FILES: usize = 64;
@@ -184,6 +204,10 @@ fn status_rewrites_racy_index_once_then_trusts_stat() {
     git_in(root, &["fsck", "--no-progress"]);
 }
 
+#[cfg_attr(
+    not(feature = "full-tests"),
+    ignore = "starts system git or is heavy; run with --features full-tests"
+)]
 #[test]
 fn status_skips_index_rewrite_within_the_second_of_racy_entries() {
     const FILES: usize = 16;
@@ -211,6 +235,10 @@ fn status_skips_index_rewrite_within_the_second_of_racy_entries() {
 
 /// Status right after a checkout: every entry shares the index's timestamp second, so each one
 /// must be verified by content once, spread over the worker pool rather than read one by one.
+#[cfg_attr(
+    not(feature = "full-tests"),
+    ignore = "starts system git or is heavy; run with --features full-tests"
+)]
 #[test]
 fn parallel_status_verifies_racy_tree_once_on_worker_threads() {
     const FILES: usize = PARALLEL_STAT_MIN_ENTRIES + 24;
@@ -267,11 +295,19 @@ fn assert_racy_same_size_edit_stays_modified(files: usize, threads: usize) {
     assert_eq!(git_status_porcelain(root), format!(" M {rel}\n"));
 }
 
+#[cfg_attr(
+    not(feature = "full-tests"),
+    ignore = "starts system git or is heavy; run with --features full-tests"
+)]
 #[test]
 fn racy_same_size_edit_stays_modified_after_status_rewrites_index() {
     assert_racy_same_size_edit_stays_modified(16, 1);
 }
 
+#[cfg_attr(
+    not(feature = "full-tests"),
+    ignore = "starts system git or is heavy; run with --features full-tests"
+)]
 #[test]
 fn parallel_racy_same_size_edit_stays_modified_after_status_rewrites_index() {
     assert_racy_same_size_edit_stays_modified(PARALLEL_STAT_MIN_ENTRIES + 24, 4);
@@ -279,6 +315,10 @@ fn parallel_racy_same_size_edit_stays_modified_after_status_rewrites_index() {
 
 /// The standalone stat refresh (used before index writes by reset and stash) verifies racy
 /// entries on the worker pool, adopts nothing for an edited one, and smudges it for later scans.
+#[cfg_attr(
+    not(feature = "full-tests"),
+    ignore = "starts system git or is heavy; run with --features full-tests"
+)]
 #[test]
 fn stat_refresh_verifies_racy_entries_in_parallel_and_smudges_the_edited_one() {
     const FILES: usize = PARALLEL_STAT_MIN_ENTRIES + 24;
@@ -372,16 +412,28 @@ fn assert_smudged_empty_file_is_modified(files: usize, threads: usize) {
     assert_eq!(git_status_porcelain(root), format!(" M {rel}\n"));
 }
 
+#[cfg_attr(
+    not(feature = "full-tests"),
+    ignore = "starts system git or is heavy; run with --features full-tests"
+)]
 #[test]
 fn serial_status_hashes_smudged_entry_whose_file_is_empty() {
     assert_smudged_empty_file_is_modified(24, 1);
 }
 
+#[cfg_attr(
+    not(feature = "full-tests"),
+    ignore = "starts system git or is heavy; run with --features full-tests"
+)]
 #[test]
 fn parallel_status_hashes_smudged_entry_whose_file_is_empty() {
     assert_smudged_empty_file_is_modified(PARALLEL_STAT_MIN_ENTRIES + 24, 4);
 }
 
+#[cfg_attr(
+    not(feature = "full-tests"),
+    ignore = "starts system git or is heavy; run with --features full-tests"
+)]
 #[test]
 fn untracked_walk_matches_git_around_submodules_and_tracked_dirs() {
     let tmp = tempfile::tempdir().expect("tempdir");
@@ -437,6 +489,10 @@ fn untracked_walk_matches_git_around_submodules_and_tracked_dirs() {
     assert_eq!(untracked, git_untracked);
 }
 
+#[cfg_attr(
+    not(feature = "full-tests"),
+    ignore = "starts system git or is heavy; run with --features full-tests"
+)]
 #[test]
 fn filemode_false_status_still_hashes_same_size_edit() {
     let tmp = tempfile::tempdir().expect("tempdir");

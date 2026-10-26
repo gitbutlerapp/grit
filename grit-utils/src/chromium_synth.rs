@@ -227,6 +227,10 @@ mod tests {
         crate::binary::resolve_binary("git", None).expect("git")
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn deterministic_tree_oid_at_smoke_scale() -> Result<()> {
         let spec = ChromiumSynthSpec::smoke();

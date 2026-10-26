@@ -1146,6 +1146,10 @@ mod tests {
         ctx
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn git_patch_id_bench_pipes_show_to_patch_id() {
         let ctx = sample_ctx();
@@ -1157,6 +1161,10 @@ mod tests {
         assert!(!script.contains("patch-id --stable HEAD"));
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn cat_blob_bench_uses_resolved_blob_oid() {
         let ctx = sample_ctx();

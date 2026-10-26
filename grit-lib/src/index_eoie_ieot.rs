@@ -568,6 +568,10 @@ mod tests {
         (tmp, bytes, cfg)
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn read_eoie_finds_git_written_trailer() {
         let _disk = heavy_disk_serial_guard();
@@ -578,6 +582,10 @@ mod tests {
         assert!(off >= 12);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn parallel_ieot_entry_load_runs_for_large_git_index() {
         let _disk = heavy_disk_serial_guard();

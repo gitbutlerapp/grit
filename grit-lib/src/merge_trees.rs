@@ -1473,6 +1473,10 @@ mod tests {
     use crate::objects::{parse_commit, ObjectId};
     use crate::repo::Repository;
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn merge_trees_df_skips_relocation_when_theirs_expands_base_file() {
         let tmp = tempfile::tempdir().expect("tempdir");
@@ -1532,6 +1536,10 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn merge_trees_three_way_theirs_only_addition() {
         let tmp = tempfile::tempdir().expect("tempdir");
@@ -1585,6 +1593,10 @@ mod tests {
         assert!(out.conflict_content.is_empty());
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn merge_trees_clean_textual_merge_auto_resolves() {
         let tmp = tempfile::tempdir().expect("tempdir");
@@ -1646,6 +1658,10 @@ mod tests {
         assert_eq!(blob.data, b"1\nTWO\n3\nFOUR\n");
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn merge_trees_gitlink_three_way_conflict_stages() {
         let tmp = tempfile::tempdir().expect("tempdir");
@@ -1742,6 +1758,10 @@ mod tests {
         assert!(out.index.get(b"sub", 3).is_some());
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn merge_trees_binary_conflict_honors_ours_favor() {
         let tmp = tempfile::tempdir().expect("tempdir");
@@ -1799,6 +1819,10 @@ mod tests {
         assert_eq!(blob.data, vec![0, 1, 4]);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn merge_trees_binary_conflict_honors_theirs_favor() {
         let tmp = tempfile::tempdir().expect("tempdir");
@@ -1865,6 +1889,10 @@ mod tests {
         parse_commit(&obj.data).expect("parse").tree
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn merge_trees_loads_attributes_once_and_applies_them_per_path() {
         use crate::worktree_rules::file_load_counters;

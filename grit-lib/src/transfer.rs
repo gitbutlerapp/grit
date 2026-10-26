@@ -3237,6 +3237,10 @@ mod tests {
         }
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn local_fetch_classifies_through_repository_ref_store() {
         use crate::refs::store::{MemoryRefStore, RawRef};
@@ -3277,6 +3281,10 @@ mod tests {
         assert_eq!(outcome.updates[0].mode, UpdateMode::UpToDate);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn fetch_local_reports_copy_progress() {
         let remote = tempfile::tempdir().expect("remote");
@@ -3379,6 +3387,10 @@ mod tests {
         assert_eq!(total.kinds, None);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn transfer_stats_for_local_operation_counts_new_pack_index() {
         let tmp = tempfile::tempdir().expect("tempdir");

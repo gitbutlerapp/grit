@@ -242,6 +242,10 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn diff_tree_to_worktree_uses_repo_git_dir() {
         let tmp = TempDir::new().unwrap();
@@ -366,6 +370,10 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn index_write_with_config_honors_skip_hash_git_compat() {
         let tmp = TempDir::new().unwrap();
@@ -490,6 +498,10 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn hook_that_writes_config_is_visible_after_hook_returns() {
         let tmp = TempDir::new().unwrap();
@@ -541,6 +553,10 @@ printf '%s\n' '	hookKey = from-hook' >> "$cfg"
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn replace_ref_created_by_git_honored_on_new_repository() {
         let tmp = TempDir::new().unwrap();

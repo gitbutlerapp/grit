@@ -1390,6 +1390,10 @@ mod tests {
         assert!(notes_merge_worktree_nonempty(&wt));
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn combine_notes_helpers_and_upsert() {
         let tmp = TempDir::new().unwrap();
@@ -1409,6 +1413,10 @@ mod tests {
         assert_eq!(entries[0].oid, b);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn read_and_write_notes_roundtrip() {
         let tmp = TempDir::new().unwrap();
@@ -1432,6 +1440,10 @@ mod tests {
         assert_eq!(read_back[0].oid, blob);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn notes_merge_ours_keeps_local_note() {
         let tmp = TempDir::new().unwrap();
@@ -1495,6 +1507,10 @@ mod tests {
         assert_eq!(String::from_utf8_lossy(&show.stdout).trim(), "local");
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn notes_merge_manual_leaves_conflict_commit() {
         let tmp = TempDir::new().unwrap();
@@ -1579,6 +1595,10 @@ mod tests {
         ));
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn read_notes_tree_missing_ref_is_empty() {
         let tmp = TempDir::new().unwrap();
@@ -1588,6 +1608,10 @@ mod tests {
             .is_empty());
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn notes_merge_empty_remote_adopts_remote() {
         let tmp = TempDir::new().unwrap();
@@ -1611,6 +1635,10 @@ mod tests {
         assert_eq!(result.expect("ok"), local);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn notes_merge_of_two_empty_refs_is_typed() {
         let tmp = TempDir::new().unwrap();
@@ -1629,6 +1657,10 @@ mod tests {
         ));
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn read_notes_tree_rejects_blob_tip() {
         let tmp = TempDir::new().unwrap();
@@ -1660,6 +1692,10 @@ mod tests {
         ));
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn write_notes_commit_goes_through_injected_ref_store() {
         let tmp = TempDir::new().unwrap();

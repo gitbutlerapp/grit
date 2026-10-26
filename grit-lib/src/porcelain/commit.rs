@@ -2261,6 +2261,10 @@ mod tests {
         assert!(index.get(b"new.txt", 0).is_some());
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn scope_paths_nested_dirs_round_trip_with_git() {
         use std::process::Command;
@@ -2481,6 +2485,10 @@ mod tests {
         system_git(root, &["fsck", "--strict", "--no-progress"]);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn scope_paths_with_held_index_lock_creates_nothing() {
         let tmp = TempDir::new().unwrap();
@@ -2504,6 +2512,10 @@ mod tests {
         system_git(root, &["fsck", "--strict", "--no-progress"]);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn scope_staged_and_auto_stage_with_held_index_lock_create_nothing() {
         let tmp = TempDir::new().unwrap();
@@ -2533,6 +2545,10 @@ mod tests {
         assert_eq!(fs::read(&lock_path).unwrap(), b"foreign\n");
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn scope_patch_with_held_index_lock_creates_nothing() {
         use crate::diff::hunk_id::{hunk_ids_with_duplicate_peers, DiffSide};
@@ -2579,6 +2595,10 @@ mod tests {
         system_git(root, &["fsck", "--strict", "--no-progress"]);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn scope_paths_split_index_round_trips_with_git() {
         let tmp = TempDir::new().unwrap();
@@ -2626,6 +2646,10 @@ mod tests {
         assert!(!shared.is_empty(), "index must stay split");
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn commit_on_split_index_with_skip_hash_stays_readable_by_git() {
         for key in ["index.skipHash", "feature.manyFiles"] {
@@ -2695,6 +2719,10 @@ mod tests {
         String::from_utf8(bytes[i..].to_vec()).expect("utf-8 commit message")
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn message_file_stripspace() {
         let raw = "  subject  \n\n  body line  \n\n";
@@ -2733,6 +2761,10 @@ mod tests {
         assert_eq!(msg, git_body);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn message_normalization_crlf_and_trailing_blanks_match_git_commit_f() {
         let raw = "\r\n  title  \r\n\r\n  body  \r\n\r\n\r\n";
@@ -3292,6 +3324,10 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn commit_hunks_leaves_other_unstaged() {
         use crate::diff::hunk_id::{hunk_ids_with_duplicate_peers, DiffSide};
@@ -3401,6 +3437,10 @@ mod tests {
         out
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn commit_patch_file_matches_git_apply_cached_then_commit() {
         use crate::diff::hunk_id::{hunk_ids_with_duplicate_peers, DiffSide};

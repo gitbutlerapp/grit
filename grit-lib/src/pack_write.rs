@@ -306,6 +306,10 @@ mod tests {
     use crate::pack::read_pack_index;
     use crate::transfer::{build_pack, PackBuildOptions};
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn install_pack_passes_git_verify_pack() {
         let tmp = tempfile::tempdir().expect("tempdir");

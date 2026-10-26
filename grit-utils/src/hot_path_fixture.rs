@@ -569,6 +569,10 @@ mod tests {
         crate::binary::resolve_binary("git", None).expect("git")
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn switch_fixture_branches_differ_by_expected_path_count() {
         let git = which_git();
@@ -604,6 +608,10 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn pick_merge_fixture_has_sibling_branch_topology() {
         let git = which_git();
@@ -622,6 +630,10 @@ mod tests {
         assert_ne!(meta.main_tip, meta.pick_commit);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn fsmonitor_fixture_writes_fsmn_token() {
         let git = which_git();

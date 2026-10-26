@@ -746,6 +746,10 @@ mod tests {
         }
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn sparse_reset_and_switch_do_not_expand_unchanged_monorepo_directories() {
         use crate::porcelain::reset::{reset_to_commit, ResetMode, ResetOptions};

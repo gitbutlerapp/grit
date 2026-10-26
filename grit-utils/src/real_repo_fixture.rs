@@ -415,6 +415,10 @@ mod tests {
         Ok(())
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn single_branch_tag_clone_drops_other_branch_refs() -> Result<()> {
         let origin = TempDir::new()?;
@@ -475,6 +479,10 @@ mod tests {
         Ok(())
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn cached_worktree_reuse_restores_fixture_tip_not_leftover_head() -> Result<()> {
         let git = PathBuf::from("git");
@@ -533,6 +541,10 @@ mod tests {
         Ok(())
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn clear_branch_head_refs_deletes_full_ref_names() -> Result<()> {
         let bare = TempDir::new()?;
@@ -592,6 +604,10 @@ mod tests {
         Ok(())
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn assert_tag_pinned_fails_on_campaign_branch_pollution_before_clear() -> Result<()> {
         let origin = TempDir::new()?;

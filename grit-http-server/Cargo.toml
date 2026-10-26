@@ -8,6 +8,11 @@ description = "Git smart HTTP server powered by grit"
 repository = "https://github.com/gitbutlerapp/grit"
 publish = false
 
+[features]
+# Tests that start the system `git` or build heavy fixtures run only with this
+# feature (`make test-full`, the nightly CI job); see TESTING.md.
+full-tests = []
+
 [lints]
 workspace = true
 

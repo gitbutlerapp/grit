@@ -289,6 +289,10 @@ mod tests {
 06:45:41.660000 run-command.c:996            | d0 | main                     | child_exit   |     |  0.170000 |  0.166949 |              | ....[ch0] pid:16016 code:0
 ";
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn git_perf_regions_and_children() {
         let phases = parse_git_perf(GIT_PERF);

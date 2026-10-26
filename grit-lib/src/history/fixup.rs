@@ -570,6 +570,10 @@ mod hunk_selection_restore_tests {
         "Fixup <f@grit.test> 1 +0000".into()
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn restore_after_apply_failure_keeps_pre_call_index_and_worktree() {
         let dir = tempfile::tempdir().expect("tempdir");

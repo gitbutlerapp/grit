@@ -159,6 +159,10 @@ mod tests {
         }
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn peak_rss_guard_accepts_git_range_and_rejects_regressions() {
         // cargo: git 232 MiB; this branch 277 MiB, before the fix 2392 MiB.
@@ -171,6 +175,10 @@ mod tests {
         assert!(check_fsck_peak_rss(&scenario(Some(232 * MIB), Some(465 * MIB))).is_err());
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn peak_rss_guard_allows_fixed_overhead_on_small_fixtures() {
         // fsck-medium: git's peak varies between ~30 and ~44 MiB; grit sits near 75 MiB.
@@ -181,6 +189,10 @@ mod tests {
         assert!(check_fsck_peak_rss(&scenario(Some(0), Some(65 * MIB))).is_err());
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn peak_rss_guard_skips_missing_measurements() {
         assert!(check_fsck_peak_rss(&scenario(None, Some(4096 * MIB))).is_ok());

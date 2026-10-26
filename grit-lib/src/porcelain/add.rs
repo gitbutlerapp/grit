@@ -2684,6 +2684,10 @@ mod tests {
         assert_eq!(blob.data, b"resolved\n");
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn stage_linked_worktree_uses_common_repository_config() {
         let tmp = TempDir::new().unwrap();
@@ -3121,6 +3125,10 @@ mod tests {
         assert!(index.get(b"f", 0).is_some());
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn add_update_unmerged_deletion_pathless() {
         if !std::process::Command::new("git")
@@ -3276,6 +3284,10 @@ mod tests {
             .collect()
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn add_update_deleted_file() {
         if !std::process::Command::new("git")
@@ -3333,6 +3345,10 @@ mod tests {
             .success());
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn add_update_subdirectory_pathspec() {
         if !std::process::Command::new("git")
@@ -3438,6 +3454,10 @@ mod tests {
         assert!(index.get(b"a.log", 0).is_some());
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn intent_to_add_entry_round_trips_with_git() {
         use std::process::Command;

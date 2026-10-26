@@ -1987,6 +1987,10 @@ pub(crate) mod tests {
         (tmp, repo, selection)
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn serve_plan_reuses_on_disk_deltas() {
         let (_tmp, repo, selection) = packed_selection(80);
@@ -2057,6 +2061,10 @@ pub(crate) mod tests {
         (tmp, repo, tip)
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn loose_plan_deltifies_trees_and_blobs_with_compressed_search_output() {
         let (tmp, repo, tip) = loose_history(12);

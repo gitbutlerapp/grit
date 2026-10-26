@@ -10,6 +10,11 @@ repository = "https://github.com/gitbutlerapp/grit"
 publish = false
 build = "build.rs"
 
+[features]
+# Tests that start the system `git` or build heavy fixtures run only with this
+# feature (`make test-full`, the nightly CI job); see TESTING.md.
+full-tests = []
+
 [lints]
 workspace = true
 
@@ -50,35 +55,44 @@ path = "tests/integration.rs"
 [[test]]
 name = "daily_e2e"
 path = "tests/daily_e2e.rs"
+required-features = ["full-tests"]
 
 [[test]]
 name = "daily_remotes_e2e"
 path = "tests/daily_remotes_e2e.rs"
+required-features = ["full-tests"]
 
 [[test]]
 name = "daily_repack_correctness"
 path = "tests/daily_repack_correctness.rs"
+required-features = ["full-tests"]
 
 [[test]]
 name = "daily_reset_keep_prepare"
 path = "tests/daily_reset_keep_prepare.rs"
+required-features = ["full-tests"]
 
 [[test]]
 name = "daily_shapes"
 path = "tests/daily_shapes.rs"
+required-features = ["full-tests"]
 
 [[test]]
 name = "daily_stash_prepare"
 path = "tests/daily_stash_prepare.rs"
+required-features = ["full-tests"]
 
 [[test]]
 name = "shallow_clone_verify"
 path = "tests/shallow_clone_verify.rs"
+required-features = ["full-tests"]
 
 [[test]]
 name = "worktree_commit_base"
 path = "tests/worktree_commit_base.rs"
+required-features = ["full-tests"]
 
 [[test]]
 name = "worktree_scenario_e2e"
 path = "tests/worktree_scenario_e2e.rs"
+required-features = ["full-tests"]

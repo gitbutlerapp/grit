@@ -2346,6 +2346,10 @@ mod tests {
         ));
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn large_git_split_chain_layers_use_mapped_backing() {
         use std::process::Command;

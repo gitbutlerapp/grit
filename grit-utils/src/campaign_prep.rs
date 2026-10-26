@@ -515,6 +515,10 @@ mod tests {
         Ok(())
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn prepare_status_dirty_leaves_tracked_modifications() -> Result<()> {
         let git = resolve_binary("git", None)?;
@@ -529,6 +533,10 @@ mod tests {
         Ok(())
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn hot_path_branches_have_distinct_tips() -> Result<()> {
         let git = resolve_binary("git", None)?;
@@ -552,6 +560,10 @@ mod tests {
         Ok(())
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn wide_branch_has_larger_diff_than_narrow_b() -> Result<()> {
         let git = resolve_binary("git", None)?;
@@ -586,6 +598,10 @@ mod tests {
             .count())
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn campaign_conflicts_meta_has_series_and_merge() -> Result<()> {
         let git = resolve_binary("git", None)?;
@@ -620,6 +636,10 @@ mod tests {
     }
 
     /// System git must succeed on clean rows and stop on the conflict merge (campaign matrix smoke).
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn campaign_conflicts_git_matrix_rows_runnable() -> Result<()> {
         use crate::conflicts_fixture::{
@@ -682,6 +702,10 @@ mod tests {
         Ok(())
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn stale_hot_path_meta_is_regenerated() -> Result<()> {
         let git = resolve_binary("git", None)?;

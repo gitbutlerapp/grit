@@ -1633,6 +1633,10 @@ mod tests {
         (base, edited)
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn stage_hunks_subset_matches_git_apply_cached() {
         let (dir, repo) = init_repo();
@@ -1737,6 +1741,10 @@ mod tests {
         out
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn stage_hunks_sequential_ids_stay_valid() {
         let (dir, repo) = init_repo();
@@ -1785,6 +1793,10 @@ mod tests {
         git(root, &["fsck"]);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn stage_hunks_inter_hunk_context_matches_diff_ids() {
         let (dir, repo) = init_repo();
@@ -1827,6 +1839,10 @@ mod tests {
         git(root, &["fsck"]);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn stage_hunks_text_to_binary_returns_binary_error() {
         let (dir, repo) = init_repo();
@@ -1865,6 +1881,10 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn stage_hunks_stale_id_rejected_index_untouched() {
         let (dir, repo) = init_repo();
@@ -1892,6 +1912,10 @@ mod tests {
         assert_eq!(before.entries.len(), after.entries.len());
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn stage_hunks_staged_side_id_rejected() {
         let (dir, repo) = init_repo();
@@ -1921,6 +1945,10 @@ mod tests {
         assert!(matches!(err, HunkSelectError::WrongSide { .. }));
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn stage_hunks_new_file_whole() {
         let (dir, repo) = init_repo();
@@ -2023,6 +2051,10 @@ mod tests {
         git(root, &["fsck"]);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn stage_hunks_whole_file_deletion_removes_index_entry() {
         let (dir, repo) = init_repo();
@@ -2057,6 +2089,10 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn directory_pathspec_keeps_staged_peer_hunk_ids() {
         let (dir, repo) = init_repo();
@@ -2100,6 +2136,10 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn lines_selects_part_of_hunk() {
         let (dir, repo) = init_repo();
@@ -2120,6 +2160,10 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn lines_unselected_deletion_becomes_context() {
         let (dir, repo) = init_repo();
@@ -2140,6 +2184,10 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn lines_selected_deletion_at_range_edge() {
         let (dir, repo) = init_repo();
@@ -2160,6 +2208,10 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn lines_range_spanning_two_hunks() {
         let (dir, repo) = init_repo();
@@ -2181,6 +2233,10 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn glob_pathspec_includes_file_in_hunk_bundle() {
         let (dir, repo) = init_repo();
@@ -2202,6 +2258,10 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn lines_pathspec_glob_stages() {
         let (dir, repo) = init_repo();
@@ -2230,6 +2290,10 @@ mod tests {
         git(root, &["fsck"]);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn lines_mix_hunk_id_overlap_stages_via_id() {
         let (dir, repo) = init_repo();
@@ -2266,6 +2330,10 @@ mod tests {
         git(root, &["fsck"]);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn lines_unchanged_line_beyond_hunk_is_selects_nothing() {
         let (dir, repo) = init_repo();
@@ -2302,6 +2370,10 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn lines_out_of_bounds_error() {
         let (dir, repo) = init_repo();
@@ -2330,6 +2402,10 @@ mod tests {
     }
 
     #[cfg(unix)]
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn lines_symlink_dangling_target_matches_git_apply_cached() {
         use std::os::unix::fs::symlink;
@@ -2353,6 +2429,10 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn lines_no_eof_newline() {
         let (dir, repo) = init_repo();

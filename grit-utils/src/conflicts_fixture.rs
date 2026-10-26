@@ -354,6 +354,10 @@ mod tests {
         }
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn conflict_merge_fixture_reports_overlap() {
         let git = git_bin();
@@ -373,6 +377,10 @@ mod tests {
         assert_pick_merge_sibling_topology(&git, dir.path(), &meta.base).expect("topology");
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn merge_conflict_fixture_writes_meta_and_prepares() {
         let git = git_bin();
@@ -391,6 +399,10 @@ mod tests {
         prepare_conflicts_merge_conflict_continue(&git, dir.path()).expect("prepare");
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn merge_conflict_prepare_after_setup() {
         let git = git_bin();
@@ -408,6 +420,10 @@ mod tests {
         prepare_conflicts_merge_conflict_continue(&git, dir.path()).expect("prepare");
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn merge_no_ff_prepare_after_setup() {
         let git = git_bin();
@@ -424,6 +440,10 @@ mod tests {
         prepare_conflicts_merge_no_ff(&git, dir.path()).expect("prepare");
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn revert_single_prepare_cherry_picks_topic() {
         let git = git_bin();
@@ -443,6 +463,10 @@ mod tests {
         assert_eq!(parent, meta.base.main_tip);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn revert_mainline_fixture_records_merge_commit() {
         let git = git_bin();

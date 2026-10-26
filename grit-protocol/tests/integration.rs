@@ -5,6 +5,9 @@
 //! links one binary instead of one per file. Each file in this directory is a
 //! module here, except the `[[test]]` targets in Cargo.toml, which run in their
 //! own process.
+//!
+//! Modules marked `full-tests` start the system `git` or build heavy fixtures;
+//! they build only with `--features full-tests` (`make test-full`).
 
 #[path = "shallow_stateless_v0.rs"]
 mod shallow_stateless_v0;

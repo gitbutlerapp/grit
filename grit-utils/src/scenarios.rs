@@ -935,6 +935,10 @@ mod log_bench_tests {
     use super::*;
     use std::path::Path;
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn log_bench_shell_has_no_probe_and_ten_grit_invocations() {
         let grit = Path::new("/opt/grit/grit");
@@ -958,6 +962,10 @@ mod log_bench_tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn campaign_production_log_uses_hundred_grit_pages() {
         let grit = Path::new("/opt/grit/grit");

@@ -95,6 +95,7 @@ pub fn popcount_fixture(bytes: &[u8]) -> usize {
 mod coverage_smoke {
     use super::{expand_fixture, git_sized_bytes, git_sized_sample, or_into_fixture, popcount_fixture};
 
+    #[cfg_attr(not(feature = "full-tests"), ignore = "starts system git or is heavy; run with --features full-tests")]
     #[test]
     fn ewah_bench_fixture_helpers() {
         let bytes = git_sized_bytes();

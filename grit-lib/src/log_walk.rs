@@ -544,6 +544,10 @@ mod tests {
             .collect()
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn cursor_roundtrip_and_resume_matches_git_log() -> Result<()> {
         let dir = tempdir().map_err(Error::Io)?;
@@ -644,6 +648,10 @@ mod tests {
         Ok(())
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn equal_committer_dates_match_git_log_order() -> Result<()> {
         let dir = tempdir().map_err(Error::Io)?;
@@ -774,6 +782,10 @@ mod tests {
         Ok(())
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn range_pages_match_git_log_under_clock_skew() -> Result<()> {
         let dir = tempdir().map_err(Error::Io)?;
@@ -841,6 +853,10 @@ mod tests {
         Ok(())
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn pages_carry_parsed_commits_for_every_emitted_commit_read() -> Result<()> {
         let dir = tempdir().map_err(Error::Io)?;
@@ -884,6 +900,10 @@ mod tests {
         Ok(())
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn commit_graph_walks_match_git_log_without_object_reads() -> Result<()> {
         let dir = tempdir().map_err(Error::Io)?;

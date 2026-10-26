@@ -5,7 +5,11 @@
 //! links one binary instead of one per file. Each file in this directory is a
 //! module here, except the `[[test]]` targets in Cargo.toml, which run in their
 //! own process.
+//!
+//! Modules marked `full-tests` start the system `git` or build heavy fixtures;
+//! they build only with `--features full-tests` (`make test-full`).
 
+#[cfg(feature = "full-tests")]
 #[path = "add_executable_cli.rs"]
 mod add_executable_cli;
 #[path = "add_hunks.rs"]
@@ -14,390 +18,558 @@ mod add_hunks;
 mod add_intent_force;
 #[path = "add_lines.rs"]
 mod add_lines;
+#[cfg(feature = "full-tests")]
 #[path = "add_parallel_processes.rs"]
 mod add_parallel_processes;
+#[cfg(feature = "full-tests")]
 #[path = "add_patch_file.rs"]
 mod add_patch_file;
+#[cfg(feature = "full-tests")]
 #[path = "add_special_files_cli.rs"]
 mod add_special_files_cli;
+#[cfg(feature = "full-tests")]
 #[path = "add_update_dry_run.rs"]
 mod add_update_dry_run;
+#[cfg(feature = "full-tests")]
 #[path = "ambiguous_ref_warning.rs"]
 mod ambiguous_ref_warning;
+#[cfg(feature = "full-tests")]
 #[path = "auth_logout_cli.rs"]
 mod auth_logout_cli;
+#[cfg(feature = "full-tests")]
 #[path = "blame_copy_cli.rs"]
 mod blame_copy_cli;
+#[cfg(feature = "full-tests")]
 #[path = "blame_ignore_revs_cli.rs"]
 mod blame_ignore_revs_cli;
+#[cfg(feature = "full-tests")]
 #[path = "blame_original_path_cli.rs"]
 mod blame_original_path_cli;
 #[path = "blame_positional_rev_cli.rs"]
 mod blame_positional_rev_cli;
+#[cfg(feature = "full-tests")]
 #[path = "blame_range_memory.rs"]
 mod blame_range_memory;
+#[cfg(feature = "full-tests")]
 #[path = "blame_stored_path_cli.rs"]
 mod blame_stored_path_cli;
+#[cfg(feature = "full-tests")]
 #[path = "blame_whitespace_cli.rs"]
 mod blame_whitespace_cli;
+#[cfg(feature = "full-tests")]
 #[path = "branch_list_cli.rs"]
 mod branch_list_cli;
+#[cfg(feature = "full-tests")]
 #[path = "branch_list_remote_cli.rs"]
 mod branch_list_remote_cli;
+#[cfg(feature = "full-tests")]
 #[path = "branch_mutation_cli.rs"]
 mod branch_mutation_cli;
 #[path = "broken_pipe.rs"]
 mod broken_pipe;
+#[cfg(feature = "full-tests")]
 #[path = "bundle_cli.rs"]
 mod bundle_cli;
+#[cfg(feature = "full-tests")]
 #[path = "cat_replace_stream.rs"]
 mod cat_replace_stream;
+#[cfg(feature = "full-tests")]
 #[path = "cat_streaming.rs"]
 mod cat_streaming;
+#[cfg(feature = "full-tests")]
 #[path = "change_id_display.rs"]
 mod change_id_display;
+#[cfg(feature = "full-tests")]
 #[path = "change_id_resolve.rs"]
 mod change_id_resolve;
+#[cfg(feature = "full-tests")]
 #[path = "change_ids_git_compat.rs"]
 mod change_ids_git_compat;
 #[path = "cli_transport_hygiene.rs"]
 mod cli_transport_hygiene;
+#[cfg(feature = "full-tests")]
 #[path = "clone_bare_no_checkout.rs"]
 mod clone_bare_no_checkout;
+#[cfg(feature = "full-tests")]
 #[path = "clone_blobs.rs"]
 mod clone_blobs;
+#[cfg(feature = "full-tests")]
 #[path = "clone_depth_branch.rs"]
 mod clone_depth_branch;
+#[cfg(feature = "full-tests")]
 #[path = "clone_empty_remote.rs"]
 mod clone_empty_remote;
+#[cfg(feature = "full-tests")]
 #[path = "clone_invalid_origin.rs"]
 mod clone_invalid_origin;
+#[cfg(feature = "full-tests")]
 #[path = "clone_progress.rs"]
 mod clone_progress;
+#[cfg(feature = "full-tests")]
 #[path = "clone_shallow.rs"]
 mod clone_shallow;
+#[cfg(feature = "full-tests")]
 #[path = "clone_unborn_default_branch.rs"]
 mod clone_unborn_default_branch;
 #[path = "commit_allow_empty.rs"]
 mod commit_allow_empty;
 #[path = "commit_amend_committer_only.rs"]
 mod commit_amend_committer_only;
+#[cfg(feature = "full-tests")]
 #[path = "commit_amend_no_message.rs"]
 mod commit_amend_no_message;
+#[cfg(feature = "full-tests")]
 #[path = "commit_change_id.rs"]
 mod commit_change_id;
+#[cfg(feature = "full-tests")]
 #[path = "commit_concurrent_paths.rs"]
 mod commit_concurrent_paths;
+#[cfg(feature = "full-tests")]
 #[path = "commit_deep_untracked.rs"]
 mod commit_deep_untracked;
+#[cfg(feature = "full-tests")]
 #[path = "commit_detached_head.rs"]
 mod commit_detached_head;
+#[cfg(feature = "full-tests")]
 #[path = "commit_dry_run.rs"]
 mod commit_dry_run;
+#[cfg(feature = "full-tests")]
 #[path = "commit_hook_output.rs"]
 mod commit_hook_output;
+#[cfg(feature = "full-tests")]
 #[path = "commit_hook_spawn_errors.rs"]
 mod commit_hook_spawn_errors;
 #[path = "commit_hunks.rs"]
 mod commit_hunks;
+#[cfg(feature = "full-tests")]
 #[path = "commit_hyphen_values.rs"]
 mod commit_hyphen_values;
+#[cfg(feature = "full-tests")]
 #[path = "commit_message_author_hooks.rs"]
 mod commit_message_author_hooks;
 #[path = "commit_missing_identity.rs"]
 mod commit_missing_identity;
 #[path = "commit_nothing_staged.rs"]
 mod commit_nothing_staged;
+#[cfg(feature = "full-tests")]
 #[path = "commit_p1_flags.rs"]
 mod commit_p1_flags;
+#[cfg(feature = "full-tests")]
 #[path = "commit_scope_cli.rs"]
 mod commit_scope_cli;
+#[cfg(feature = "full-tests")]
 #[path = "commit_staging_before_errors.rs"]
 mod commit_staging_before_errors;
+#[cfg(feature = "full-tests")]
 #[path = "commit_timezone.rs"]
 mod commit_timezone;
+#[cfg(feature = "full-tests")]
 #[path = "commit_unmerged_merge.rs"]
 mod commit_unmerged_merge;
 #[path = "completions.rs"]
 mod completions;
+#[cfg(feature = "full-tests")]
 #[path = "config_advanced_cli.rs"]
 mod config_advanced_cli;
+#[cfg(feature = "full-tests")]
 #[path = "config_location_cli.rs"]
 mod config_location_cli;
+#[cfg(feature = "full-tests")]
 #[path = "diff_commit_range_stream.rs"]
 mod diff_commit_range_stream;
+#[cfg(feature = "full-tests")]
 #[path = "diff_exit_code_quiet.rs"]
 mod diff_exit_code_quiet;
+#[cfg(feature = "full-tests")]
 #[path = "diff_format_flags.rs"]
 mod diff_format_flags;
+#[cfg(feature = "full-tests")]
 #[path = "diff_invalid_pathspec.rs"]
 mod diff_invalid_pathspec;
+#[cfg(feature = "full-tests")]
 #[path = "diff_no_index.rs"]
 mod diff_no_index;
+#[cfg(feature = "full-tests")]
 #[path = "diff_parallel_symlinks.rs"]
 mod diff_parallel_symlinks;
+#[cfg(feature = "full-tests")]
 #[path = "diff_patch_text.rs"]
 mod diff_patch_text;
+#[cfg(feature = "full-tests")]
 #[path = "diff_pathspec.rs"]
 mod diff_pathspec;
+#[cfg(feature = "full-tests")]
 #[path = "diff_rename_algorithm_filter_flags.rs"]
 mod diff_rename_algorithm_filter_flags;
+#[cfg(feature = "full-tests")]
 #[path = "diff_single_traversal.rs"]
 mod diff_single_traversal;
+#[cfg(feature = "full-tests")]
 #[path = "diff_type_changed_status.rs"]
 mod diff_type_changed_status;
+#[cfg(feature = "full-tests")]
 #[path = "diff_unified_flag.rs"]
 mod diff_unified_flag;
+#[cfg(feature = "full-tests")]
 #[path = "diff_w_flag.rs"]
 mod diff_w_flag;
+#[cfg(feature = "full-tests")]
 #[path = "diff_w_rename.rs"]
 mod diff_w_rename;
+#[cfg(feature = "full-tests")]
 #[path = "error_next_steps.rs"]
 mod error_next_steps;
 #[path = "exit_status_contract.rs"]
 mod exit_status_contract;
+#[cfg(feature = "full-tests")]
 #[path = "fetch_all_cli.rs"]
 mod fetch_all_cli;
+#[cfg(feature = "full-tests")]
 #[path = "fetch_pull_branch_remote.rs"]
 mod fetch_pull_branch_remote;
+#[cfg(feature = "full-tests")]
 #[path = "fetch_pull_progress.rs"]
 mod fetch_pull_progress;
+#[cfg(feature = "full-tests")]
 #[path = "fetch_refspec_cli.rs"]
 mod fetch_refspec_cli;
+#[cfg(feature = "full-tests")]
 #[path = "fsck_cli.rs"]
 mod fsck_cli;
+#[cfg(feature = "full-tests")]
 #[path = "gc_auto.rs"]
 mod gc_auto;
+#[cfg(feature = "full-tests")]
 #[path = "gc_roundtrip.rs"]
 mod gc_roundtrip;
+#[cfg(feature = "full-tests")]
 #[path = "gc_subcommand_dry_run.rs"]
 mod gc_subcommand_dry_run;
 #[path = "git_dir_path_io_1970.rs"]
 mod git_dir_path_io_1970;
 #[path = "git_habit_hints.rs"]
 mod git_habit_hints;
+#[cfg(feature = "full-tests")]
 #[path = "global_repo_options.rs"]
 mod global_repo_options;
+#[cfg(feature = "full-tests")]
 #[path = "hash_collision_cli.rs"]
 mod hash_collision_cli;
 #[path = "help_descriptions.rs"]
 mod help_descriptions;
+#[cfg(feature = "full-tests")]
 #[path = "history_absorb_dry_run.rs"]
 mod history_absorb_dry_run;
+#[cfg(feature = "full-tests")]
 #[path = "history_drop.rs"]
 mod history_drop;
 #[path = "history_fixup_hunks.rs"]
 mod history_fixup_hunks;
+#[cfg(feature = "full-tests")]
 #[path = "history_reword.rs"]
 mod history_reword;
+#[cfg(feature = "full-tests")]
 #[path = "history_shared_flags.rs"]
 mod history_shared_flags;
+#[cfg(feature = "full-tests")]
 #[path = "history_split.rs"]
 mod history_split;
+#[cfg(feature = "full-tests")]
 #[path = "history_squash.rs"]
 mod history_squash;
+#[cfg(feature = "full-tests")]
 #[path = "history_undo.rs"]
 mod history_undo;
 #[path = "http_transport_error_redaction.rs"]
 mod http_transport_error_redaction;
+#[cfg(feature = "full-tests")]
 #[path = "ignorecase_add.rs"]
 mod ignorecase_add;
+#[cfg(feature = "full-tests")]
 #[path = "ignorecase_mv.rs"]
 mod ignorecase_mv;
 #[path = "init_markdown_output.rs"]
 mod init_markdown_output;
+#[cfg(feature = "full-tests")]
 #[path = "init_reftable_git_compat.rs"]
 mod init_reftable_git_compat;
+#[cfg(feature = "full-tests")]
 #[path = "intent_to_add_add_commit.rs"]
 mod intent_to_add_add_commit;
+#[cfg(feature = "full-tests")]
 #[path = "issue_1653_gc_repack.rs"]
 mod issue_1653_gc_repack;
+#[cfg(feature = "full-tests")]
 #[path = "issue_1876_gc_midx_version.rs"]
 mod issue_1876_gc_midx_version;
+#[cfg(feature = "full-tests")]
 #[path = "json_output.rs"]
 mod json_output;
 #[path = "limit_flag_consistency.rs"]
 mod limit_flag_consistency;
+#[cfg(feature = "full-tests")]
 #[path = "log_author_name.rs"]
 mod log_author_name;
+#[cfg(feature = "full-tests")]
 #[path = "log_config_open_count_linux.rs"]
 mod log_config_open_count_linux;
+#[cfg(feature = "full-tests")]
 #[path = "log_diff_detail.rs"]
 mod log_diff_detail;
+#[cfg(feature = "full-tests")]
 #[path = "log_display_regressions.rs"]
 mod log_display_regressions;
+#[cfg(feature = "full-tests")]
 #[path = "log_display_snapshots.rs"]
 mod log_display_snapshots;
+#[cfg(feature = "full-tests")]
 #[path = "log_filter_cli.rs"]
 mod log_filter_cli;
+#[cfg(feature = "full-tests")]
 #[path = "log_loose_tags_memory.rs"]
 mod log_loose_tags_memory;
+#[cfg(feature = "full-tests")]
 #[path = "log_pickaxe_json.rs"]
 mod log_pickaxe_json;
+#[cfg(feature = "full-tests")]
 #[path = "maintenance_commands.rs"]
 mod maintenance_commands;
+#[cfg(feature = "full-tests")]
 #[path = "markdown_output.rs"]
 mod markdown_output;
+#[cfg(feature = "full-tests")]
 #[path = "merge_continue_json.rs"]
 mod merge_continue_json;
+#[cfg(feature = "full-tests")]
 #[path = "merge_dry_run.rs"]
 mod merge_dry_run;
+#[cfg(feature = "full-tests")]
 #[path = "merge_missing_identity.rs"]
 mod merge_missing_identity;
+#[cfg(feature = "full-tests")]
 #[path = "merge_options.rs"]
 mod merge_options;
+#[cfg(feature = "full-tests")]
 #[path = "merge_rename_rename_cli.rs"]
 mod merge_rename_rename_cli;
+#[cfg(feature = "full-tests")]
 #[path = "merge_revision_source.rs"]
 mod merge_revision_source;
+#[cfg(feature = "full-tests")]
 #[path = "message_input_consistency.rs"]
 mod message_input_consistency;
 #[path = "nfd_precompose_add.rs"]
 mod nfd_precompose_add;
+#[cfg(feature = "full-tests")]
 #[path = "non_utf8_argv.rs"]
 mod non_utf8_argv;
+#[cfg(feature = "full-tests")]
 #[path = "notes_dry_run.rs"]
 mod notes_dry_run;
+#[cfg(feature = "full-tests")]
 #[path = "notes_ref_cli.rs"]
 mod notes_ref_cli;
+#[cfg(feature = "full-tests")]
 #[path = "object_directory_env.rs"]
 mod object_directory_env;
+#[cfg(feature = "full-tests")]
 #[path = "output_snapshots.rs"]
 mod output_snapshots;
+#[cfg(feature = "full-tests")]
 #[path = "output_snapshots_network.rs"]
 mod output_snapshots_network;
+#[cfg(feature = "full-tests")]
 #[path = "pathspec_args_cli.rs"]
 mod pathspec_args_cli;
+#[cfg(feature = "full-tests")]
 #[path = "pick_revert_check.rs"]
 mod pick_revert_check;
+#[cfg(feature = "full-tests")]
 #[path = "pick_sequence.rs"]
 mod pick_sequence;
+#[cfg(feature = "full-tests")]
 #[path = "post_operation_hooks_cli.rs"]
 mod post_operation_hooks_cli;
+#[cfg(feature = "full-tests")]
 #[path = "precise_commit_workflow.rs"]
 mod precise_commit_workflow;
+#[cfg(feature = "full-tests")]
 #[path = "promisor_blobless_cli.rs"]
 mod promisor_blobless_cli;
+#[cfg(feature = "full-tests")]
 #[path = "pull_json.rs"]
 mod pull_json;
+#[cfg(feature = "full-tests")]
 #[path = "push_delete_remote_branch.rs"]
 mod push_delete_remote_branch;
+#[cfg(feature = "full-tests")]
 #[path = "push_dry_run.rs"]
 mod push_dry_run;
+#[cfg(feature = "full-tests")]
 #[path = "push_force_lease.rs"]
 mod push_force_lease;
+#[cfg(feature = "full-tests")]
 #[path = "push_json_flags.rs"]
 mod push_json_flags;
+#[cfg(feature = "full-tests")]
 #[path = "push_remote_hook_sideband.rs"]
 mod push_remote_hook_sideband;
+#[cfg(feature = "full-tests")]
 #[path = "push_tag_label.rs"]
 mod push_tag_label;
+#[cfg(feature = "full-tests")]
 #[path = "quote_path_display.rs"]
 mod quote_path_display;
+#[cfg(feature = "full-tests")]
 #[path = "rebase_cli.rs"]
 mod rebase_cli;
+#[cfg(feature = "full-tests")]
 #[path = "rebase_conflicts_cli.rs"]
 mod rebase_conflicts_cli;
+#[cfg(feature = "full-tests")]
 #[path = "receive_pack_deny_non_ff.rs"]
 mod receive_pack_deny_non_ff;
+#[cfg(feature = "full-tests")]
 #[path = "receive_pack_git_push.rs"]
 mod receive_pack_git_push;
+#[cfg(feature = "full-tests")]
 #[path = "reflog_filter_cli.rs"]
 mod reflog_filter_cli;
 #[path = "reflog_json_fields.rs"]
 mod reflog_json_fields;
 #[path = "reflog_list_cli.rs"]
 mod reflog_list_cli;
+#[cfg(feature = "full-tests")]
 #[path = "remote_add_cli.rs"]
 mod remote_add_cli;
+#[cfg(feature = "full-tests")]
 #[path = "remote_remove_cli.rs"]
 mod remote_remove_cli;
+#[cfg(feature = "full-tests")]
 #[path = "remote_rename_cli.rs"]
 mod remote_rename_cli;
+#[cfg(feature = "full-tests")]
 #[path = "remote_set_url_cli.rs"]
 mod remote_set_url_cli;
+#[cfg(feature = "full-tests")]
 #[path = "remote_show_cli.rs"]
 mod remote_show_cli;
+#[cfg(feature = "full-tests")]
 #[path = "reset_sparse_checkout_cli.rs"]
 mod reset_sparse_checkout_cli;
+#[cfg(feature = "full-tests")]
 #[path = "reset_switch_workflow.rs"]
 mod reset_switch_workflow;
 #[path = "reset_without_identity.rs"]
 mod reset_without_identity;
+#[cfg(feature = "full-tests")]
 #[path = "resolve_ref_modes_cli.rs"]
 mod resolve_ref_modes_cli;
+#[cfg(feature = "full-tests")]
 #[path = "resolve_verify_quiet_cli.rs"]
 mod resolve_verify_quiet_cli;
 #[path = "restore_hunks.rs"]
 mod restore_hunks;
+#[cfg(feature = "full-tests")]
 #[path = "restore_ours_theirs_cli.rs"]
 mod restore_ours_theirs_cli;
+#[cfg(feature = "full-tests")]
 #[path = "rev_select_cli.rs"]
 mod rev_select_cli;
+#[cfg(feature = "full-tests")]
 #[path = "revert.rs"]
 mod revert;
+#[cfg(feature = "full-tests")]
 #[path = "rm_mv_clean_cli.rs"]
 mod rm_mv_clean_cli;
+#[cfg(feature = "full-tests")]
 #[path = "shallow_maintenance_cli.rs"]
 mod shallow_maintenance_cli;
+#[cfg(feature = "full-tests")]
 #[path = "shortlog_flags_cli.rs"]
 mod shortlog_flags_cli;
+#[cfg(feature = "full-tests")]
 #[path = "shortlog_target.rs"]
 mod shortlog_target;
+#[cfg(feature = "full-tests")]
 #[path = "show_format_flags.rs"]
 mod show_format_flags;
+#[cfg(feature = "full-tests")]
 #[path = "show_log_patch_text.rs"]
 mod show_log_patch_text;
+#[cfg(feature = "full-tests")]
 #[path = "show_p1_2384.rs"]
 mod show_p1_2384;
+#[cfg(feature = "full-tests")]
 #[path = "skill_recipes.rs"]
 mod skill_recipes;
+#[cfg(feature = "full-tests")]
 #[path = "stash.rs"]
 mod stash;
 #[path = "stash_pop_conflict_cli.rs"]
 mod stash_pop_conflict_cli;
+#[cfg(feature = "full-tests")]
 #[path = "stash_pop_memory.rs"]
 mod stash_pop_memory;
 #[path = "stash_push_hunks.rs"]
 mod stash_push_hunks;
+#[cfg(feature = "full-tests")]
 #[path = "status_conflicts_operation.rs"]
 mod status_conflicts_operation;
+#[cfg(feature = "full-tests")]
 #[path = "status_ignored_short.rs"]
 mod status_ignored_short;
+#[cfg(feature = "full-tests")]
 #[path = "status_midx_memory.rs"]
 mod status_midx_memory;
+#[cfg(feature = "full-tests")]
 #[path = "status_paths_renames.rs"]
 mod status_paths_renames;
+#[cfg(feature = "full-tests")]
 #[path = "status_untracked_mode.rs"]
 mod status_untracked_mode;
+#[cfg(feature = "full-tests")]
 #[path = "status_upstream.rs"]
 mod status_upstream;
 #[path = "status_utf8_paths.rs"]
 mod status_utf8_paths;
+#[cfg(feature = "full-tests")]
 #[path = "switch_stranded_commits.rs"]
 mod switch_stranded_commits;
+#[cfg(feature = "full-tests")]
 #[path = "tag_create_options.rs"]
 mod tag_create_options;
+#[cfg(feature = "full-tests")]
 #[path = "tag_list_cli.rs"]
 mod tag_list_cli;
+#[cfg(feature = "full-tests")]
 #[path = "tag_sign_json.rs"]
 mod tag_sign_json;
+#[cfg(feature = "full-tests")]
 #[path = "tag_verify.rs"]
 mod tag_verify;
+#[cfg(feature = "full-tests")]
 #[path = "thin_pack_transfer_git_compat.rs"]
 mod thin_pack_transfer_git_compat;
+#[cfg(feature = "full-tests")]
 #[path = "untracked_overwrite_merge_pick.rs"]
 mod untracked_overwrite_merge_pick;
+#[cfg(feature = "full-tests")]
 #[path = "upload_pack_filter.rs"]
 mod upload_pack_filter;
+#[cfg(feature = "full-tests")]
 #[path = "upload_pack_shallow_exclude_want_ref.rs"]
 mod upload_pack_shallow_exclude_want_ref;
+#[cfg(feature = "full-tests")]
 #[path = "upload_pack_shallow_tags.rs"]
 mod upload_pack_shallow_tags;
+#[cfg(feature = "full-tests")]
 #[path = "workflows.rs"]
 mod workflows;
+#[cfg(feature = "full-tests")]
 #[path = "worktree_add_prune_flags.rs"]
 mod worktree_add_prune_flags;
+#[cfg(feature = "full-tests")]
 #[path = "worktree_cli.rs"]
 mod worktree_cli;
 

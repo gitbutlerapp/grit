@@ -5857,6 +5857,10 @@ mod tests {
         }
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn reads_delta_chain_deeper_than_50() {
         let _guard = pack_cache_test_guard();
@@ -5986,6 +5990,10 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn read_object_from_pack_bytes_uses_in_memory_index_without_on_disk_idx() {
         let odb = Odb::new(tempfile::tempdir().expect("tempdir").path());
@@ -6347,6 +6355,10 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn git_repack_depth_250_matches_cat_file_batch() {
         let _guard = pack_cache_test_guard();
@@ -7027,6 +7039,10 @@ mod cached_lookup_tests {
         assert_eq!(idx.find_offset(&oid_miss).expect("miss"), None);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn cached_lookup_hit_v2_idx() {
         let _guard = pack_cache_test_guard();
@@ -7041,6 +7057,10 @@ mod cached_lookup_tests {
         assert_eq!(again.data, got.data);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn cached_lookup_hit_v1_idx() {
         let _guard = pack_cache_test_guard();
@@ -7060,6 +7080,10 @@ mod cached_lookup_tests {
         assert_eq!(obj.kind, ObjectKind::Tree);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn cached_lookup_miss() {
         let _guard = pack_cache_test_guard();
@@ -7078,6 +7102,10 @@ mod cached_lookup_tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn cached_lookup_loose_only() {
         let _guard = pack_cache_test_guard();
@@ -7112,6 +7140,10 @@ mod cached_lookup_tests {
         .is_none());
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn cached_lookup_multiple_packs() {
         let _guard = pack_cache_test_guard();
@@ -7173,6 +7205,10 @@ mod cached_lookup_tests {
         assert_eq!(obj_b.kind, ObjectKind::Blob);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn packed_delta_base_oid_uses_cached_index() {
         let _guard = pack_cache_test_guard();
@@ -7240,6 +7276,10 @@ mod cached_lookup_tests {
             );
         }
     }
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn system_git_repack_requires_clear_pack_cache_for_fresh_listing() {
         let _guard = pack_cache_test_guard();
@@ -7366,6 +7406,10 @@ mod cached_lookup_tests {
         }
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn v2_idx_crc_matches_crc32fast_over_entry_bytes() {
         let _guard = pack_cache_test_guard();
@@ -7388,6 +7432,10 @@ mod cached_lookup_tests {
         let _ = tree;
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn packed_full_object_slice_returns_on_disk_bytes() {
         let _guard = pack_cache_test_guard();
@@ -7413,6 +7461,10 @@ mod cached_lookup_tests {
         filetime::set_file_mtime(path, when).expect("set mtime");
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn packed_full_object_slice_crc_mismatch_falls_back_to_redundant_pack() {
         let _guard = pack_cache_test_guard();

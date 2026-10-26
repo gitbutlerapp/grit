@@ -5,51 +5,73 @@
 //! links one binary instead of one per file. Each file in this directory is a
 //! module here, except the `[[test]]` targets in Cargo.toml, which run in their
 //! own process.
+//!
+//! Modules marked `full-tests` start the system `git` or build heavy fixtures;
+//! they build only with `--features full-tests` (`make test-full`).
 
+#[cfg(feature = "full-tests")]
 #[path = "custom_object_store.rs"]
 mod custom_object_store;
 #[path = "custom_ref_store.rs"]
 mod custom_ref_store;
+#[cfg(feature = "full-tests")]
 #[path = "fetch_push.rs"]
 mod fetch_push;
+#[cfg(feature = "full-tests")]
 #[path = "guide_bundle.rs"]
 mod guide_bundle;
+#[cfg(feature = "full-tests")]
 #[path = "guide_config.rs"]
 mod guide_config;
+#[cfg(feature = "full-tests")]
 #[path = "guide_diff.rs"]
 mod guide_diff;
+#[cfg(feature = "full-tests")]
 #[path = "guide_index.rs"]
 mod guide_index;
+#[cfg(feature = "full-tests")]
 #[path = "guide_maintenance.rs"]
 mod guide_maintenance;
+#[cfg(feature = "full-tests")]
 #[path = "guide_merge.rs"]
 mod guide_merge;
+#[cfg(feature = "full-tests")]
 #[path = "guide_network.rs"]
 mod guide_network;
+#[cfg(feature = "full-tests")]
 #[path = "guide_notes.rs"]
 mod guide_notes;
+#[cfg(feature = "full-tests")]
 #[path = "guide_objects.rs"]
 mod guide_objects;
+#[cfg(feature = "full-tests")]
 #[path = "guide_refs.rs"]
 mod guide_refs;
+#[cfg(feature = "full-tests")]
 #[path = "guide_repository.rs"]
 mod guide_repository;
+#[cfg(feature = "full-tests")]
 #[path = "guide_revwalk.rs"]
 mod guide_revwalk;
+#[cfg(feature = "full-tests")]
 #[path = "guide_serve.rs"]
 mod guide_serve;
+#[cfg(feature = "full-tests")]
 #[path = "guide_stash.rs"]
 mod guide_stash;
+#[cfg(feature = "full-tests")]
 #[path = "guide_worktree.rs"]
 mod guide_worktree;
 #[path = "hash_info.rs"]
 mod hash_info;
 #[path = "hash_object.rs"]
 mod hash_object;
+#[cfg(feature = "full-tests")]
 #[path = "quickstart.rs"]
 mod quickstart;
 #[path = "simple_bins.rs"]
 mod simple_bins;
+#[cfg(feature = "full-tests")]
 #[path = "sqlite_odb.rs"]
 mod sqlite_odb;
 

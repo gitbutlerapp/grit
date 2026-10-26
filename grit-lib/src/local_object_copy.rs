@@ -294,6 +294,10 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn link_remote_pack_files_hardlinks_repacked_repo() {
         let tmp = tempfile::tempdir().expect("tempdir");
@@ -332,6 +336,10 @@ mod tests {
     }
 
     #[cfg(unix)]
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn parallel_link_remote_pack_files_into_one_repo_all_succeed() {
         use std::os::unix::fs::PermissionsExt;

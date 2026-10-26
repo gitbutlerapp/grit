@@ -158,6 +158,10 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn head_oid_list_is_sorted_unique() {
         let git = crate::binary::resolve_binary("git", None).expect("git");

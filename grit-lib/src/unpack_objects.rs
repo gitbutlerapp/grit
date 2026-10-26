@@ -1942,6 +1942,10 @@ mod tests {
         assert!(result.iter().all(|&b| b == 0xAB));
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn test_unpack_objects_blobs() {
         use tempfile::TempDir;
@@ -1972,6 +1976,10 @@ mod tests {
         assert_eq!(obj2.data, b"world\n");
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn test_unpack_objects_empty_tree() {
         use tempfile::TempDir;
@@ -1999,6 +2007,10 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn test_strict_skips_gitlink_tree_entries() {
         use crate::index::{MODE_GITLINK, MODE_REGULAR};
@@ -2063,6 +2075,10 @@ mod tests {
         }
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn test_unpack_objects_chunked_read_matches_full_buffer() {
         use tempfile::TempDir;
@@ -2095,6 +2111,10 @@ mod tests {
         assert!(odb2.exists(&oid));
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn test_unpack_objects_dry_run_writes_nothing() {
         use tempfile::TempDir;
@@ -2124,6 +2144,10 @@ mod tests {
         assert!(!odb.exists(&oid));
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn test_unpack_objects_bad_signature() {
         use tempfile::TempDir;
@@ -2139,6 +2163,10 @@ mod tests {
         assert!(err.to_string().contains("invalid signature"));
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn test_unpack_objects_checksum_mismatch() {
         use tempfile::TempDir;
@@ -2203,6 +2231,10 @@ mod tests {
         (pb.build().bytes, base_oid, target_oid)
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn test_unpack_objects_resolves_ref_and_ofs_deltas() {
         use grit_test_support::objects::{HashAlgo as FixtureAlgo, ObjectKind as PK, PackBuilder};
@@ -2242,6 +2274,10 @@ mod tests {
         assert!(odb2.exists(&base_oid));
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn test_unpack_objects_ref_delta_base_from_loose() {
         let base = b"loose-base";
@@ -2269,6 +2305,10 @@ mod tests {
         assert_eq!(odb.read(&target_oid).unwrap().data, target);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn test_unpack_objects_strict_commit_tree_tag() {
         use crate::objects::{serialize_commit, serialize_tag, CommitData, TagData};
@@ -2321,6 +2361,10 @@ mod tests {
         assert!(odb.exists(&commit_oid));
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn test_unpack_objects_strict_shallow_skips_missing_parent() {
         use crate::objects::{serialize_commit, CommitData};
@@ -2362,6 +2406,10 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn test_unpack_objects_max_input_bytes() {
         let pack = make_pack(&[(ObjectKind::Blob, b"small")]);
@@ -2375,6 +2423,10 @@ mod tests {
         assert!(err.to_string().contains("maximum allowed size"));
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn test_unpack_objects_unresolved_ref_delta() {
         let missing = ObjectId::from_hex(&"dd".repeat(20)).unwrap();
@@ -2391,6 +2443,10 @@ mod tests {
         assert!(err.to_string().contains("could not be resolved"));
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn missing_ref_delta_base_is_typed_on_every_ingest_path() {
         use grit_test_support::objects::{HashAlgo as FixtureAlgo, PackBuilder};
@@ -2462,6 +2518,10 @@ mod tests {
         assert!(pack_is_thin(&thin, HashAlgo::Sha1));
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn test_unpack_zero_byte_blob_via_pack_builder() {
         use grit_test_support::objects::{HashAlgo as FixtureAlgo, ObjectKind as PK, PackBuilder};
@@ -2500,6 +2560,10 @@ mod tests {
         assert!(strict_verify_packed_references(None, &pack).is_err());
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn test_unpack_large_blob_materializes_on_disk() {
         let big: Vec<u8> = vec![b'x'; 2 * 1024 * 1024 + 1];
@@ -2516,6 +2580,10 @@ mod tests {
         assert_eq!(odb.read(&oid).unwrap().data, big);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn truncated_zlib_after_complete_payload_does_not_hang() {
         use std::time::{Duration, Instant};

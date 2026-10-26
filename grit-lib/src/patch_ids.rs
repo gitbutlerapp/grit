@@ -966,6 +966,10 @@ mod tests {
         String::from_utf8_lossy(&out.stdout).into_owned()
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn text_hunks_hash_only_three_context_lines() {
         let old: String = (1..=10).map(|i| format!("{i}\n")).collect();
@@ -1002,6 +1006,10 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn verbatim_built_patch_text_matches_git_show_patch_id() {
         let dir = TempDir::new().expect("tempdir");
@@ -1041,6 +1049,10 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn stable_patch_ids_match_git_patch_id_on_log_p() {
         let dir = TempDir::new().expect("tempdir");
@@ -1139,6 +1151,10 @@ mod tests {
             .collect()
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn t4204_patch_id_modes_match_git() {
         let dir = TempDir::new().expect("tempdir");

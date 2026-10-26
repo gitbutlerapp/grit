@@ -1026,6 +1026,10 @@ mod tests {
         }
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn shallow_response_for_tag_wants_names_only_commits() {
         let fx = fixture(5, &[1, 4]);
@@ -1045,6 +1049,10 @@ mod tests {
         }
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn shallow_response_ignores_wants_that_are_not_commits() {
         let fx = fixture(2, &[]);
@@ -1058,6 +1066,10 @@ mod tests {
         assert_eq!(resp.shallow, vec![fx.commits[1]]);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn included_tags_stop_at_the_shallow_boundary() {
         let fx = fixture(6, &[1, 3, 5]);
@@ -1082,6 +1094,10 @@ mod tests {
         assert_eq!(tags, expected, "t1 lies beyond the depth-3 cut");
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn included_tags_skip_history_the_client_already_has() {
         let fx = fixture(6, &[1, 3, 5]);

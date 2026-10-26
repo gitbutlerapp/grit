@@ -918,6 +918,10 @@ mod tests {
     }
 
     /// Manual RSS: `GRIT_CARGO_PACK=/path/to.pack cargo test -p grit-lib --release rss_mmap_index_records -- --ignored --exact`
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     #[ignore = "manual RSS harness (GRIT_CARGO_PACK)"]
     fn rss_mmap_index_records() {
@@ -932,6 +936,10 @@ mod tests {
                 .expect("index records");
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn install_pack_matches_git_index_pack_layout() {
         let blob = b"clone pack retention fixture\n";
@@ -993,6 +1001,10 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn local_fetch_ingest_with_fix_thin_from_bare_remote() {
         use crate::objects::ObjectId;
@@ -1389,6 +1401,10 @@ mod tests {
         git_in(repo, &["fsck", "--strict"]);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn cancel_once_pack_published_never_strands_a_peer_install() {
         use std::cell::Cell;
@@ -1447,6 +1463,10 @@ mod tests {
         assert_repo_fsck_clean(repo.path(), &tip);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn error_after_publish_keeps_published_pack_and_index() {
         let (pack, tip) = commit_pack();

@@ -12195,6 +12195,10 @@ mod gitlink_tree_worktree_tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn untracked_only_in_checked_out_submodule_produces_no_diff_entry() {
         use std::process::Command;
@@ -12641,6 +12645,10 @@ mod smudge_racily_clean_tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn status_reports_modified_when_ctime_differs_but_mtime_sec_and_size_match_non_racy() {
         let td = tempfile::tempdir().expect("tempdir");

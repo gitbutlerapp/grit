@@ -21,9 +21,35 @@ cargo test -p grit-lib --lib
 # CI unit-test job (grit-lib + grit-cli)
 cargo test -p grit-lib -p grit-cli
 
-# Broader workspace (what `make test` runs: nextest when installed, then doctests)
+# Whole workspace, fast (what `make test` runs: nextest when installed, then doctests)
 cargo nextest run --workspace && cargo test --workspace --doc
 cargo test --workspace   # without nextest
+
+# Everything, including git comparisons and heavy fixtures (`make test-full`, nightly CI)
+make test-full
+```
+
+### Fast and full runs
+
+The default run is unit and functional tests, and takes a few minutes. Tests that
+start the system `git` (comparisons with Git, fixtures built with `git`) or build
+heavy fixtures (scale, memory and benchmark-style tests, grit-bench scenarios)
+are left out of it: each crate compiles them only with its `full-tests`
+feature. `make test-full` enables that feature in every crate; CI runs it in the
+nightly **test-full** job, not on every branch.
+
+[`scripts/classify_tests.py`](scripts/classify_tests.py) decides which tests are
+full-only: a test that calls `Command::new("git")`, or a helper that does
+(`grit_test_support::git`, the `tests/support` harnesses, …), or that matches the
+heavy patterns. Integration test files are gated as a whole in each crate's
+`tests/integration.rs` (`#[cfg(feature = "full-tests")]`, written by
+`scripts/sync_integration_tests.py`); unit tests in `src/` carry
+`#[cfg_attr(not(feature = "full-tests"), ignore = …)]`
+(`python3 scripts/classify_tests.py --mark-unit-tests` adds it).
+
+```bash
+# Run one full-only file
+cargo test -p grit-lib --features full-tests --test integration merge_tree_git_compat::
 
 # Release build sanity (optional)
 cargo test -p grit-lib --lib --release
@@ -215,8 +241,9 @@ GitHub Actions workflow: [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
 | **clippy** | `cargo clippy --workspace -- -D warnings` | `CARGO_BUILD_JOBS=$(nproc) cargo clippy --workspace -- -D warnings` |
 | **rustdoc** | Workspace API docs with warnings denied (see below) | `make doc` |
 | **public-api** | `make public-api-check` (`cargo public-api` on pinned nightly; diff vs `grit-lib/public-api.txt`) | `make public-api-check` |
-| **coverage** | `make coverage` (llvm-cov on `grit-lib`, floor ratchet) | `make coverage` |
-| **test** | `cargo nextest run --workspace --profile ci` (every test binary, in parallel, without stopping at the first failure) and `cargo test --workspace --doc`, then builds `grit` + `grit-http-server` and runs the transport tests | See [Running tests](#running-tests) and [Transport tests](#transport-tests-fetch-and-push-over-smart-http) |
+| **coverage** | Nightly and on demand only: `make coverage` (llvm-cov over every `grit-lib` test, `full-tests` included, floor ratchet) | `make coverage` |
+| **test** | The fast run: `cargo nextest run --workspace --profile ci` (every test binary, in parallel, without stopping at the first failure) and `cargo test --workspace --doc` | `make test` |
+| **test-full** | Nightly and on demand only: the same with `full-tests` on every crate (system `git` comparisons, heavy fixtures, `grit-bench` scenarios), the transport tests and Criterion smoke runs | `make test-full`; see [Transport tests](#transport-tests-fetch-and-push-over-smart-http) |
 | **test-threaded** | Nightly and on demand only (the release build of every test binary takes ~26 min): `cargo test --release --workspace` with `GIT_CONFIG_COUNT` pairs forcing parallel config (`index.threads`, `pack.threads`, `checkout.workers`, `checkout.thresholdForParallelism=0`) | Same env vars as the workflow step in [`.github/workflows/ci.yml`](.github/workflows/ci.yml) |
 | **miri** | `cargo +nightly miri test -p grit-lib --lib parallel::` over the scoped ordered pool unit tests | `rustup toolchain install nightly -c miri` then the command above |
 
@@ -240,7 +267,7 @@ cargo test --release --workspace
 
 **Latest tracked run (2026-10-12, roadmap item 15 close-out):** [`test-threaded` on `main` run 38217276891](https://github.com/gitbutlerapp/grit/actions/runs/38217276891/job/114704849345) — still **failed** (bundle CLI + other workspace tests on tip `54ef4babb`; not parallelism). **`factory/parallel-bench-1006`** adds fixes for **`config_parse`** / Git **2.55**, ODB alternates, and reftable batch transactions; the local repro below passes those suites once that branch is checked out. **Replace this link with a green `test-threaded` job on `main` after those commits integrate.**
 
-Each job uses **`ubuntu-latest`** (the **scripts** job uses **`timeout-minutes: 5`**; **coverage** and **public-api** use **30**; the others use **15**), and the jobs run in parallel. The website has its own workflow, **[`site.yml`](.github/workflows/site.yml)** (see below).
+Each job uses **`ubuntu-latest`** (the **scripts** job uses **`timeout-minutes: 5`**; **public-api** and **test** use **30**; **test-threaded** **90**; **coverage** and **test-full** **120**; the others **15**), and the jobs run in parallel. The website has its own workflow, **[`site.yml`](.github/workflows/site.yml)** (see below).
 
 ## Coverage
 
@@ -264,7 +291,7 @@ python3 scripts/coverage.py --input target/llvm-cov/summary.json --update
 
 Each floor moves to `max(previous, current − 2.0)` rounded down to one decimal; the script never lowers an existing floor. Commit the updated `coverage-floors.toml` with the tests that improved coverage.
 
-**CI:** The **coverage** job runs `make coverage` and uploads the HTML/lcov artifact. Unit tests for the gate live in `scripts/tests/test_coverage.py` and run under `python3 -m unittest discover scripts/tests` with the **scripts** job.
+**CI:** The **coverage** job runs `make coverage` nightly (and on `workflow_dispatch`) and uploads the HTML/lcov artifact. It needs the `full-tests` feature: the floors count the tests that start the system `git`. Unit tests for the gate live in `scripts/tests/test_coverage.py` and run under `python3 -m unittest discover scripts/tests` with the **scripts** job.
 
 ### Public function coverage
 

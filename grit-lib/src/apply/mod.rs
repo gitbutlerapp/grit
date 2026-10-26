@@ -1656,6 +1656,10 @@ mod tests {
         assert_eq!(err.to_string(), "invalid digit found in string");
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn write_git_binary_patch_applies_with_system_git() {
         use std::fs;
@@ -1725,6 +1729,10 @@ mod tests {
         assert_eq!(reverse, old);
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn git_produced_delta_binary_patch_parses_and_materializes() {
         use std::process::Command;

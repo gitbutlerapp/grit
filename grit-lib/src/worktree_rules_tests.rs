@@ -134,6 +134,10 @@ mod tests {
         repo
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn diff_tree_to_worktree_nested_eol_attributes_matches_git() {
         let tmp = TempDir::new().unwrap();
@@ -197,6 +201,10 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn info_attributes_override_nested_gitattributes_for_staging_oid() {
         let tmp = TempDir::new().unwrap();
@@ -238,6 +246,10 @@ mod tests {
         );
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn staging_with_eol_attributes_matches_git() {
         let tmp = TempDir::new().unwrap();

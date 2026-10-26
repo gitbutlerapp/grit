@@ -599,6 +599,10 @@ mod tests {
         Ok(())
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn campaign_bare_network_meta_tag_pinned_without_branch_refs() -> Result<()> {
         let git = crate::binary::resolve_binary("git", None).expect("git");

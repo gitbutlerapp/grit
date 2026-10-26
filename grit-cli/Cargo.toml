@@ -8,6 +8,11 @@ description = "A simplified alternative CLI for Grit"
 repository = "https://github.com/gitbutlerapp/grit"
 readme = "README.md"
 
+[features]
+# Tests that start the system `git` or build heavy fixtures run only with this
+# feature (`make test-full`, the nightly CI job); see TESTING.md.
+full-tests = []
+
 [[bin]]
 name = "grit"
 path = "src/main.rs"
@@ -64,3 +69,4 @@ path = "tests/integration.rs"
 [[test]]
 name = "remote_refs"
 path = "tests/remote_refs.rs"
+required-features = ["full-tests"]

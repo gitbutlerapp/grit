@@ -690,6 +690,10 @@ mod tests {
     use std::process::Command;
     use tempfile::TempDir;
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn cache_root_from_env_honors_grit_bench_cache() {
         let custom = "/tmp/grit-bench-custom-root";
@@ -773,6 +777,10 @@ mod tests {
         Ok(bare)
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn verify_pinned_head_rejects_mismatched_bare_clone() -> Result<()> {
         let parent = TempDir::new()?;
@@ -791,6 +799,10 @@ mod tests {
         Ok(())
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn copy_for_use_is_independent_of_cache() -> Result<()> {
         let git = crate::binary::resolve_binary("git", None)?;
@@ -805,6 +817,10 @@ mod tests {
         Ok(())
     }
 
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn bench_report_includes_fixture_block() -> Result<()> {
         use time::OffsetDateTime;
