@@ -178,6 +178,13 @@
       "description": "Destination directory.",
       "type": "string"
     },
+    "path_collisions": {
+      "description": "Index paths that collided on a case-insensitive filesystem during checkout.",
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
     "phases": {
       "description": "Time spent in each step, in order.",
       "items": {

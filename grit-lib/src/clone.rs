@@ -650,11 +650,8 @@ fn perform_clone_checkout(
         .get_bool("core.ignorecase")
         .and_then(|r| r.ok())
         .unwrap_or(false);
-    let (files, worktree_bytes) = crate::path_icase::icase_worktree_file_stats(
-        &index,
-        repo.work_tree().as_deref(),
-        ignorecase,
-    );
+    let (files, worktree_bytes) =
+        crate::path_icase::icase_worktree_file_stats(&index, repo.work_tree(), ignorecase);
     Ok((files, worktree_bytes, checkout.path_collisions))
 }
 

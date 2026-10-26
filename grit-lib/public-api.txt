@@ -12924,9 +12924,28 @@ impl core::marker::UnsafeUnpin for grit_lib::porcelain::branch_error::StartPoint
 impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::branch_error::StartPoint
 impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::branch_error::StartPoint
 pub mod grit_lib::porcelain::checkout
+pub struct grit_lib::porcelain::checkout::CheckoutOutcome
+pub grit_lib::porcelain::checkout::CheckoutOutcome::path_collisions: alloc::vec::Vec<alloc::string::String>
+impl core::clone::Clone for grit_lib::porcelain::checkout::CheckoutOutcome
+pub fn grit_lib::porcelain::checkout::CheckoutOutcome::clone(&self) -> Self
+impl core::cmp::Eq for grit_lib::porcelain::checkout::CheckoutOutcome
+impl core::cmp::PartialEq for grit_lib::porcelain::checkout::CheckoutOutcome
+pub fn grit_lib::porcelain::checkout::CheckoutOutcome::eq(&self, &Self) -> bool
+impl core::default::Default for grit_lib::porcelain::checkout::CheckoutOutcome
+pub fn grit_lib::porcelain::checkout::CheckoutOutcome::default() -> Self
+impl core::fmt::Debug for grit_lib::porcelain::checkout::CheckoutOutcome
+pub fn grit_lib::porcelain::checkout::CheckoutOutcome::fmt(&self, &mut core::fmt::Formatter<'_>) -> core::fmt::Result
+impl core::marker::StructuralPartialEq for grit_lib::porcelain::checkout::CheckoutOutcome
+impl core::marker::Freeze for grit_lib::porcelain::checkout::CheckoutOutcome
+impl core::marker::Send for grit_lib::porcelain::checkout::CheckoutOutcome
+impl core::marker::Sync for grit_lib::porcelain::checkout::CheckoutOutcome
+impl core::marker::Unpin for grit_lib::porcelain::checkout::CheckoutOutcome
+impl core::marker::UnsafeUnpin for grit_lib::porcelain::checkout::CheckoutOutcome
+impl core::panic::unwind_safe::RefUnwindSafe for grit_lib::porcelain::checkout::CheckoutOutcome
+impl core::panic::unwind_safe::UnwindSafe for grit_lib::porcelain::checkout::CheckoutOutcome
 pub fn grit_lib::porcelain::checkout::apply_index_file_mode(&std::path::Path, u32) -> grit_lib::error::Result<()>
 pub fn grit_lib::porcelain::checkout::checkout_between_trees(&grit_lib::repo::Repository, core::option::Option<&grit_lib::objects::ObjectId>, &grit_lib::objects::ObjectId) -> grit_lib::error::Result<()>
-pub fn grit_lib::porcelain::checkout::checkout_between_trees_with_progress(&grit_lib::repo::Repository, core::option::Option<&grit_lib::objects::ObjectId>, &grit_lib::objects::ObjectId, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<()>
+pub fn grit_lib::porcelain::checkout::checkout_between_trees_with_progress(&grit_lib::repo::Repository, core::option::Option<&grit_lib::objects::ObjectId>, &grit_lib::objects::ObjectId, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<grit_lib::porcelain::checkout::CheckoutOutcome>
 pub fn grit_lib::porcelain::checkout::checkout_hard_to_tree_from_head_tree(&grit_lib::repo::Repository, &grit_lib::objects::ObjectId, &grit_lib::objects::ObjectId, &mut dyn grit_lib::progress::ProgressSink, &dyn grit_lib::progress::Cancel) -> grit_lib::error::Result<()>
 pub fn grit_lib::porcelain::checkout::checkout_tree_changes(&grit_lib::repo::Repository, &[grit_lib::diff::DiffEntry]) -> grit_lib::error::Result<()>
 pub fn grit_lib::porcelain::checkout::checkout_tree_changes_with_index(&grit_lib::repo::Repository, &[grit_lib::diff::DiffEntry], &mut grit_lib::index::Index) -> grit_lib::error::Result<()>
@@ -19307,6 +19326,7 @@ pub grit_lib::remote::clone::CloneOutcome::checkout_oid: grit_lib::objects::Obje
 pub grit_lib::remote::clone::CloneOutcome::files: u64
 pub grit_lib::remote::clone::CloneOutcome::head: grit_lib::remote::clone::CloneHead
 pub grit_lib::remote::clone::CloneOutcome::path: std::path::PathBuf
+pub grit_lib::remote::clone::CloneOutcome::path_collisions: alloc::vec::Vec<alloc::string::String>
 pub grit_lib::remote::clone::CloneOutcome::repo: grit_lib::repo::Repository
 pub grit_lib::remote::clone::CloneOutcome::tags: u64
 pub grit_lib::remote::clone::CloneOutcome::transfer: grit_lib::remote::transfer::TransferStats

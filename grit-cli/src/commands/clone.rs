@@ -260,15 +260,6 @@ fn render_summary(o: &CloneOutcome, w: &mut dyn Write, color: bool) -> Result<()
         )
     );
 
-    if !o.path_collisions.is_empty() {
-        outln!(
-            w,
-            "warning: these tracked paths collide on this filesystem (case-insensitive paths share one file); only one path from each group exists on disk:"
-        );
-        for path in &o.path_collisions {
-            outln!(w, "  '{path}'");
-        }
-    }
     if o.files > 0 {
         outln!(
             w,
@@ -394,6 +385,23 @@ impl MarkdownRender for CloneOutcome {
             }
         }
         Ok(())
+    }
+}
+
+fn emit_path_collision_warning(mode: OutputMode, paths: &[String]) {
+    if paths.is_empty() {
+        return;
+    }
+    match mode {
+        OutputMode::Human => {
+            eprintln!(
+                "warning: these tracked paths collide on this filesystem (case-insensitive paths share one file); only one path from each group exists on disk:"
+            );
+            for path in paths {
+                eprintln!("  '{path}'");
+            }
+        }
+        OutputMode::Json | OutputMode::Markdown => {}
     }
 }
 
@@ -575,6 +583,7 @@ fn clone_into(
     let files = outcome.files;
     let worktree_bytes = outcome.worktree_bytes;
     let path_collisions = outcome.path_collisions.clone();
+    emit_path_collision_warning(run.mode, &path_collisions);
     let (no_checkout_reason, branches_with_commits) = match outcome.checkout {
         CloneCheckout::CheckedOut(_) => (None, None),
         CloneCheckout::Skipped => {
