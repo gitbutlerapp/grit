@@ -828,12 +828,15 @@ pub fn emit_show_log_patch_text(
     repo: &grit_lib::repo::Repository,
     oid: &ObjectId,
     format: DiffFormatArgs,
+    out: &mut dyn Write,
 ) -> Result<()> {
     let opts = log_patch_options_for_patch_text(repo, format)?;
-    let mut stdout = std::io::stdout();
+    let mut patch_buf = Vec::new();
     repo.odb()
-        .with_pack_read_context(|| write_commit_log_patch(repo, &mut stdout, oid, &opts))
-        .map_err(map_log_patch_error)
+        .with_pack_read_context(|| write_commit_log_patch(repo, &mut patch_buf, oid, &opts))
+        .map_err(map_log_patch_error)?;
+    out.write_all(&patch_buf)?;
+    Ok(())
 }
 
 /// Stream many commits in `git log --patch-text` shape.
@@ -841,15 +844,18 @@ pub fn emit_commits_log_patch_text(
     repo: &grit_lib::repo::Repository,
     oids: &[ObjectId],
     format: DiffFormatArgs,
+    out: &mut dyn Write,
 ) -> Result<()> {
     if oids.is_empty() {
         return Ok(());
     }
     let opts = log_patch_options_for_patch_text(repo, format)?;
-    let mut stdout = std::io::stdout();
+    let mut patch_buf = Vec::new();
     repo.odb()
-        .with_pack_read_context(|| write_commits_log_patch(repo, &mut stdout, oids, &opts))
-        .map_err(map_log_patch_error)
+        .with_pack_read_context(|| write_commits_log_patch(repo, &mut patch_buf, oids, &opts))
+        .map_err(map_log_patch_error)?;
+    out.write_all(&patch_buf)?;
+    Ok(())
 }
 
 fn patch_text_outcome(

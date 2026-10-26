@@ -328,7 +328,6 @@ fn show_commit(spec: &str, opts: &ShowRunOptions) -> Result<ShowOutcome> {
 
     let paths = resolve_cli_diff_pathspecs(&repo, &opts.pathspecs, &[], DiffPathspecMode::Commit)?;
     let diff = if opts.format.log_patch_text() {
-        crate::commands::diff::emit_show_log_patch_text(&repo, &commit_oid, opts.format)?;
         crate::commands::diff::streamed_log_patch_text_outcome(opts.format)
     } else {
         let diff_opts = CommitDiffOptions {
@@ -665,6 +664,15 @@ impl HumanRender for ShowOutcome {
         }
 
         if self.diff.body_was_streamed() && self.diff.format_flags().log_patch_text() {
+            let repo = context::discover()?;
+            let oid = grit_lib::objects::ObjectId::from_hex(&self.commit.oid)
+                .map_err(|e| anyhow::anyhow!("invalid commit oid: {e}"))?;
+            crate::commands::diff::emit_show_log_patch_text(
+                &repo,
+                &oid,
+                self.diff.format_flags(),
+                w,
+            )?;
             return Ok(());
         }
         outln!(

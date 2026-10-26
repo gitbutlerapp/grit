@@ -128,3 +128,39 @@ fn diff_patch_text_still_git_apply_check() {
     let patch = grit_patch_stdout(dir.path(), &["diff", "HEAD~1..HEAD", "--patch-text"]);
     git_apply_check_reverse(dir.path(), &patch);
 }
+
+fn line_index(text: &str, needle: &str) -> Option<usize> {
+    text.lines().position(|line| line.contains(needle))
+}
+
+/// Non-TTY stdout (pipe capture) must keep ref decoration before the streamed patch.
+#[test]
+fn show_patch_text_redirected_branch_before_patch() {
+    let dir = TempDir::new().expect("tempdir");
+    init_two_commit_repo(dir.path());
+    let bytes = grit_patch_stdout(dir.path(), &["show", "--patch-text", "main"]);
+    let out = String::from_utf8_lossy(&bytes);
+    let branch = line_index(&out, "branch main").expect("branch main line");
+    let commit = line_index(&out, "commit ").expect("commit line");
+    let diff = line_index(&out, "diff --git").expect("diff --git line");
+    assert!(
+        branch < commit && commit < diff,
+        "expected branch, commit, then patch; got:\n{out}"
+    );
+}
+
+#[test]
+fn show_patch_text_redirected_annotated_tag_before_patch() {
+    let dir = TempDir::new().expect("tempdir");
+    init_two_commit_repo(dir.path());
+    git_in(dir.path(), &["tag", "-a", "v1", "-m", "release note"]);
+    let bytes = grit_patch_stdout(dir.path(), &["show", "--patch-text", "v1"]);
+    let out = String::from_utf8_lossy(&bytes);
+    let tag = line_index(&out, "tag v1").expect("tag v1 line");
+    let commit = line_index(&out, "commit ").expect("commit line");
+    let diff = line_index(&out, "diff --git").expect("diff --git line");
+    assert!(
+        tag < commit && commit < diff,
+        "expected tag, commit, then patch; got:\n{out}"
+    );
+}

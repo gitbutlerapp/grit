@@ -102,6 +102,10 @@ pub struct LogOutcome {
     #[serde(skip)]
     #[schemars(skip)]
     commit_diffs: Vec<Option<DiffOutcome>>,
+    /// Commits to stream when `--patch-text` is set (deferred until human render).
+    #[serde(skip)]
+    #[schemars(skip)]
+    log_patch_oids: Vec<grit_lib::objects::ObjectId>,
 }
 
 fn format_log_cursor_command(rev_args: Option<&str>, cursor: &str) -> String {
@@ -124,6 +128,13 @@ pub struct LogAuthorGroupJson {
 impl HumanRender for LogOutcome {
     fn render_human(&self, w: &mut dyn Write, ctx: &RenderContext) -> Result<()> {
         if self.format.log_patch_text() {
+            let repo = context::discover()?;
+            crate::commands::diff::emit_commits_log_patch_text(
+                &repo,
+                &self.log_patch_oids,
+                self.format,
+                w,
+            )?;
             return Ok(());
         }
         if self.display.group_by.is_some() {
@@ -495,6 +506,7 @@ fn empty_outcome(display: LogDisplayOptions) -> Result<LogOutcome> {
         continuation_args: None,
         format: DiffFormatArgs::default(),
         commit_diffs: Vec::new(),
+        log_patch_oids: Vec::new(),
     })
 }
 
@@ -565,6 +577,7 @@ fn build_author_group_outcome_from_groups(
         continuation_args: None,
         format: DiffFormatArgs::default(),
         commit_diffs: Vec::new(),
+        log_patch_oids: Vec::new(),
     })
 }
 
@@ -711,7 +724,6 @@ fn build_commit_outcome(
     };
 
     if format.log_patch_text() {
-        crate::commands::diff::emit_commits_log_patch_text(repo, oids, format)?;
         return Ok(LogOutcome {
             commits: Vec::new(),
             groups: None,
@@ -727,6 +739,7 @@ fn build_commit_outcome(
             continuation_args,
             format,
             commit_diffs: Vec::new(),
+            log_patch_oids: oids.to_vec(),
         });
     }
 
@@ -747,6 +760,7 @@ fn build_commit_outcome(
             continuation_args,
             format,
             commit_diffs: Vec::new(),
+            log_patch_oids: Vec::new(),
         });
     }
 
@@ -818,6 +832,7 @@ fn build_commit_outcome(
         continuation_args,
         format,
         commit_diffs,
+        log_patch_oids: Vec::new(),
     })
 }
 
