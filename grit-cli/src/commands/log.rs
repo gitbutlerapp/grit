@@ -23,8 +23,8 @@ use std::collections::{HashMap, HashSet};
 use std::io::Write;
 
 use crate::commands::diff::{
-    cli_outcome_from_lib, diff_of_commit, render_log_commit_diff, resolve_commit_diff_pathspecs,
-    DiffOutcome, DiffTotalsJson, FileDiff,
+    cli_outcome_from_lib, render_log_commit_diff, resolve_commit_diff_pathspecs, DiffOutcome,
+    DiffTotalsJson, FileDiff,
 };
 use crate::commands::show::{diffstat, DiffStat};
 use crate::commits_json::{fetch_limit_plus_one, truncate_oid_list, CommitJsonLoader};
@@ -681,7 +681,7 @@ pub(crate) fn load_commits_with_format_for_oids(
         if let Some((detail, ref results)) = many_results {
             let outcome = cli_outcome_from_lib(repo, results[i].output.clone(), detail, format)?;
             let stat = if format.stat && commit_inputs[i].parents.len() < 2 {
-                Some(diffstat(&diff_of_commit(repo, &commit_inputs[i].oid)?))
+                Some(diffstat(&outcome))
             } else {
                 None
             };

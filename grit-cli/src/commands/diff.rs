@@ -33,7 +33,7 @@ use grit_lib::diff::{
 };
 use grit_lib::index::Index;
 use grit_lib::objects::odb::Odb;
-use grit_lib::objects::{parse_commit, ObjectId};
+use grit_lib::objects::ObjectId;
 use grit_lib::parallel::ParallelOp;
 use grit_lib::porcelain::pathspec_match::{
     ensure_pathspec_matches_known_in_repository, pathspec_matches_known_in_repository,
@@ -1462,31 +1462,6 @@ pub fn diff_for_commit(
         format,
         outcome_from_lib(output, format, detail),
     ))
-}
-
-pub fn diff_of_commit(repo: &grit_lib::repo::Repository, oid: &ObjectId) -> Result<DiffOutcome> {
-    let commit = parse_commit(&repo.odb().read(oid)?.data)?;
-    if commit.parents.len() >= 2 {
-        return Ok(DiffOutcome {
-            changed: false,
-            files: Vec::new(),
-            totals: None,
-            format: DiffFormatArgs::default(),
-            path_display: None,
-            body_streamed: false,
-            preserve_changed: false,
-        });
-    }
-    diff_for_commit(
-        repo,
-        oid,
-        CommitDiffOptions {
-            paths: Vec::new(),
-            format: DiffFormatArgs::default(),
-            word_level_inline: false,
-            diff_merges: DiffMerges::FirstParent,
-        },
-    )
 }
 
 /// Build a full patch-style [`DiffOutcome`] from tree diff entries (e.g. stash W vs base).

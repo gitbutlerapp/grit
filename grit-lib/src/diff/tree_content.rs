@@ -156,8 +156,8 @@ pub fn tree_diff_stat_parallel(
                 None
             } else {
                 Some(line_change_counts(
-                    &old_bytes.text(),
-                    &new_bytes.text(),
+                    &String::from_utf8_lossy(&old_bytes.data),
+                    &String::from_utf8_lossy(&new_bytes.data),
                     &line_diff_opts,
                 ))
             };
@@ -363,14 +363,14 @@ fn blob_bytes(
     }
     note_blob_read(blob_reads);
     let data = odb.read(oid)?.data;
-    Ok(bytes_for_diff(&data))
+    Ok(bytes_for_diff(data))
 }
 
-fn bytes_for_diff(data: &[u8]) -> (SideBytes, bool) {
+fn bytes_for_diff(data: Vec<u8>) -> (SideBytes, bool) {
     if data.iter().take(8000).any(|&b| b == 0) {
         (SideBytes::from_bytes(Vec::new()), true)
     } else {
-        (SideBytes::from_bytes(data.to_vec()), false)
+        (SideBytes::from_bytes(data), false)
     }
 }
 

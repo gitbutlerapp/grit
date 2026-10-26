@@ -270,3 +270,7 @@ path = "tests/add_untr_80k_campaign.rs"
 name = "serde_models"
 path = "tests/serde_models.rs"
 required-features = ["serde-models"]
+
+[[bench]]
+name = "log_stat"
+harness = false

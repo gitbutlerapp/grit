@@ -298,3 +298,51 @@ fn log_p_skips_merge_patches_like_git() {
         "merge commit should have no patch files: {files:?}"
     );
 }
+
+#[test]
+fn log_stat_summary_reuses_filtered_file_counts() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    init_repo(dir.path());
+    std::fs::write(dir.path().join("old.txt"), "keep\n").expect("write");
+    std::fs::write(dir.path().join("edit.txt"), "old\n").expect("write");
+    std::fs::write(dir.path().join("binary"), b"\0old").expect("write");
+    commit_all(dir.path(), "root");
+    git(dir.path(), &["mv", "old.txt", "new.txt"]);
+    std::fs::write(dir.path().join("edit.txt"), "new\nextra\n").expect("write");
+    std::fs::write(dir.path().join("binary"), b"\0new").expect("write");
+    commit_all(dir.path(), "change");
+
+    for paths in [&[][..], &["--", "edit.txt"][..]] {
+        let mut args = vec!["log", "--json", "--stat", "--limit", "2"];
+        args.extend_from_slice(paths);
+        let out = grit(dir.path(), &args);
+        assert!(out.ok(), "{}", out.dump("log stat"));
+        let json: Value = serde_json::from_str(out.stdout.trim()).expect("json");
+        for commit in json["commits"].as_array().expect("commits") {
+            let summary = &commit["stat"];
+            for key in ["files_changed", "insertions", "deletions"] {
+                assert_eq!(summary[key], commit["totals"][key], "{key}");
+            }
+            let files = commit["files"].as_array().expect("files");
+            let stats = summary["files"].as_array().expect("stat files");
+            assert_eq!(files.len(), stats.len());
+            for (file, stat) in files.iter().zip(stats) {
+                assert_eq!(file["path"], stat["path"]);
+                assert_eq!(file["binary"], stat["binary"]);
+                if !file["binary"].as_bool().expect("binary") {
+                    assert_eq!(file["stat"]["insertions"], stat["insertions"]);
+                    assert_eq!(file["stat"]["deletions"], stat["deletions"]);
+                }
+            }
+            if !paths.is_empty() {
+                assert_eq!(stats.len(), 1);
+                assert_eq!(stats[0]["path"], "edit.txt");
+            }
+        }
+        let mut markdown_args = vec!["log", "--markdown", "--stat", "--limit", "1"];
+        markdown_args.extend_from_slice(paths);
+        let out = grit(dir.path(), &markdown_args);
+        assert!(out.ok(), "{}", out.dump("log stat markdown"));
+        assert!(out.stdout.contains("edit.txt"));
+    }
+}

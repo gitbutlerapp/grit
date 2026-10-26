@@ -60,7 +60,7 @@ With `--graph`, human output draws a commit graph in the left margin (ASCII by d
 | `-p`, `--patch` | Unified patch under each commit (merge commits omit the patch). |
 | `--patch-text` | Git-apply-compatible unified patch per commit (`git diff --binary` shape). Honors trailing pathspecs. Paged walks print the `→ more` continuation after the final patch. Merge commits omit the patch body (same as `-p`). Human output only; not combinable with `--json` or `--markdown`. |
 | `-W`, `--function-context` | Expand patch hunks to enclosing function boundaries (same as [`grit diff`](diff.md)). |
-| `--stat` | Per-file change bars and totals under each commit. |
+| `--stat` | Per-file change bars and totals under each commit. The JSON `stat` summary uses the same path selection and counts as `files` and `totals`; it does not compute patch hunks. |
 | `--numstat` | Tab-separated insertion/deletion/path lines per commit. |
 | `--shortstat` | One summary line per commit. |
 | `--name-only` | Changed paths only, one per line per commit. |
