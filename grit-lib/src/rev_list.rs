@@ -11264,8 +11264,23 @@ mod line_coverage_tests {
         Ok(())
     }
 
+    /// Every option bit pattern, each with one of the filters in turn. The full
+    /// product (every pattern with every filter) takes six times as long.
     #[test]
+    fn rev_list_flag_patterns_with_rotating_filters() -> Result<()> {
+        rev_list_flag_product(false)
+    }
+
+    /// Every option bit pattern with every filter: about 90s in a debug build, so it
+    /// only runs on request, with
+    /// `cargo test -p grit-lib --lib exhaustive_rev_list_flag_product -- --ignored`.
+    #[test]
+    #[ignore = "slow line-coverage sweep; run with --ignored"]
     fn exhaustive_rev_list_flag_product() -> Result<()> {
+        rev_list_flag_product(true)
+    }
+
+    fn rev_list_flag_product(every_filter: bool) -> Result<()> {
         let (_dir, repo, tip) = seed_repo(220, true);
         repo.odb().write_commit_graph()?;
         let filters = [
@@ -11279,8 +11294,13 @@ mod line_coverage_tests {
                 ObjectFilter::TreeDepth(6),
             ])),
         ];
-        for mask in 0u32..1024 {
-            for filter in &filters {
+        // Bits 0-8 are the options; bit 9 only moves `mask % 5`, which 0..512 already
+        // runs through.
+        let masks = if every_filter { 1024 } else { 512 };
+        for mask in 0u32..masks {
+            let rotated = [filters[mask as usize % filters.len()].clone()];
+            let chosen: &[Option<ObjectFilter>] = if every_filter { &filters } else { &rotated };
+            for filter in chosen {
                 let opts = RevListOptions {
                     first_parent: mask & 1 != 0,
                     reverse: mask & 2 != 0,
