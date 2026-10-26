@@ -139,8 +139,9 @@ pub(crate) fn loose_reachable_from_roots(
         }
         reachable.insert(oid);
         // Blobs have no outgoing edges. Keep large payloads out of memory while
-        // still reading small commits and trees with a single object lookup.
-        let obj = match odb.read_unless_larger(&oid, 1024 * 1024)? {
+        // still reading small commits and trees with a single object lookup. Each oid
+        // is visited once, so retaining a second copy in the read cache is unnecessary.
+        let obj = match odb.read_unless_larger(&oid, 1024 * 1024, false)? {
             BoundedRead::Object(obj) => obj,
             BoundedRead::Larger if odb.read_info(&oid)?.kind == ObjectKind::Blob => continue,
             BoundedRead::Larger => odb.read(&oid)?,

@@ -665,6 +665,7 @@ pub fn checkout_hard_to_tree_from_head_tree(
             &rules.file_attrs(&path, false),
             mode,
             &te.oid,
+            true,
         )?
         else {
             new_entries.push(stream_checkout_entry(
@@ -3094,20 +3095,22 @@ fn spool_stream_to_temp(
 /// ([`crlf::worktree_conversion_is_identity`]) and whose blob is larger than
 /// [`STREAMED_CHECKOUT_LIMIT`] is left for [`stream_checkout_entry`]; everything else is read
 /// whole. Objects within the limit are read in that one lookup; a streamed object is opened
-/// again by [`stream_checkout_entry`].
+/// again by [`stream_checkout_entry`]. Bulk callers enable `cache_small` to reuse
+/// small loose objects between planning and materialization; direct writes bypass it.
 pub(crate) fn read_blob_unless_streamed(
     repo: &Repository,
     conv: &crlf::ConversionConfig,
     attrs: &crlf::FileAttrs,
     mode: u32,
     oid: &ObjectId,
+    cache_small: bool,
 ) -> Result<Option<Object>> {
     if !is_regular_git_mode(mode) || !crlf::worktree_conversion_is_identity(conv, attrs) {
         return repo.odb().read(oid).map(Some);
     }
     match repo
         .odb()
-        .read_unless_larger(oid, STREAMED_CHECKOUT_LIMIT)?
+        .read_unless_larger(oid, STREAMED_CHECKOUT_LIMIT, cache_small)?
     {
         BoundedRead::Object(object) => Ok(Some(object)),
         BoundedRead::Larger => Ok(None),
@@ -3162,7 +3165,8 @@ pub(crate) fn write_blob_to_worktree(
     dir_cache: &mut LeadingDirCache,
 ) -> Result<Option<fs::Metadata>> {
     let attrs = rules.file_attrs(rel_path, false);
-    let Some(blob) = read_blob_unless_streamed(repo, rules.conversion(), &attrs, mode, oid)? else {
+    let Some(blob) = read_blob_unless_streamed(repo, rules.conversion(), &attrs, mode, oid, false)?
+    else {
         return repo
             .odb()
             .with_stream(oid, |stream| {

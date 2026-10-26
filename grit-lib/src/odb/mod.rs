@@ -2427,20 +2427,30 @@ impl Odb {
     /// entry header before it is read. A pack delta is always read whole, since reconstructing
     /// it needs the full object in memory anyway.
     ///
+    /// `cache_small` reuses and retains small loose objects for bulk checkout; callers
+    /// doing isolated writes can bypass that bookkeeping.
+    ///
     /// # Errors
     ///
     /// Same as [`Self::read`], including [`Error::ObjectNotFound`].
-    pub(crate) fn read_unless_larger(&self, oid: &ObjectId, limit: u64) -> Result<BoundedRead> {
-        if let Some(read) = self.session_loose_reads.lock().ok().and_then(|cache| {
-            cache.get(oid).map(|obj| {
-                if obj.data.len() as u64 > limit {
-                    BoundedRead::Larger
-                } else {
-                    BoundedRead::Object(obj.clone())
-                }
-            })
-        }) {
-            return Ok(read);
+    pub(crate) fn read_unless_larger(
+        &self,
+        oid: &ObjectId,
+        limit: u64,
+        cache_small: bool,
+    ) -> Result<BoundedRead> {
+        if cache_small {
+            if let Some(read) = self.session_loose_reads.lock().ok().and_then(|cache| {
+                cache.get(oid).map(|obj| {
+                    if obj.data.len() as u64 > limit {
+                        BoundedRead::Larger
+                    } else {
+                        BoundedRead::Object(obj.clone())
+                    }
+                })
+            }) {
+                return Ok(read);
+            }
         }
         if self.custom_primary.is_none() && !self.multi_pack_index_reads_enabled() {
             if let Some(read) =
@@ -2463,7 +2473,7 @@ impl Odb {
                 }
                 LocalSizedRead::Packed(_) => return self.read(oid).map(BoundedRead::Object),
                 LocalSizedRead::Loose(BoundedRead::Object(obj)) => {
-                    if obj.data.len() <= SESSION_BOUNDED_LOOSE_CACHE_MAX {
+                    if cache_small && obj.data.len() <= SESSION_BOUNDED_LOOSE_CACHE_MAX {
                         self.remember_session_loose_read(oid, &obj);
                     }
                     return Ok(BoundedRead::Object(obj));
@@ -3453,21 +3463,21 @@ mod tests {
     }
 
     fn assert_bounded_reads(odb: &Odb, small: &ObjectId, big: &ObjectId) {
-        match odb.read_unless_larger(small, 1000).unwrap() {
+        match odb.read_unless_larger(small, 1000, false).unwrap() {
             BoundedRead::Object(obj) => assert_eq!(obj.data, b"small blob\n"),
             BoundedRead::Larger => panic!("small blob is within the limit"),
         }
         assert!(matches!(
-            odb.read_unless_larger(big, 1000).unwrap(),
+            odb.read_unless_larger(big, 1000, false).unwrap(),
             BoundedRead::Larger
         ));
-        match odb.read_unless_larger(big, 1_200_000).unwrap() {
+        match odb.read_unless_larger(big, 1_200_000, false).unwrap() {
             BoundedRead::Object(obj) => assert_eq!(obj.data.len(), 1_200_000),
             BoundedRead::Larger => panic!("limit equal to the size reads the object"),
         }
         let missing = ObjectId::from_hex("1234567890123456789012345678901234567890").unwrap();
         assert!(matches!(
-            odb.read_unless_larger(&missing, 1000),
+            odb.read_unless_larger(&missing, 1000, false),
             Err(Error::ObjectNotFound(_))
         ));
     }
@@ -3492,20 +3502,29 @@ mod tests {
         let (_dir, objects, small, big) = bounded_read_fixture();
         let odb = Odb::new(&objects);
         assert_bounded_reads(&odb, &small, &big);
+        assert!(odb.session_loose_reads.lock().unwrap().is_empty());
+        assert!(matches!(
+            odb.read_unless_larger(&small, 1000, true).unwrap(),
+            BoundedRead::Object(_)
+        ));
+        assert!(matches!(
+            odb.read_unless_larger(&big, 1_200_000, true).unwrap(),
+            BoundedRead::Object(_)
+        ));
         for oid in [small, big] {
             let hex = oid.to_hex();
             fs::remove_file(objects.join(&hex[..2]).join(&hex[2..])).unwrap();
         }
-        match odb.read_unless_larger(&small, 1000).unwrap() {
+        match odb.read_unless_larger(&small, 1000, true).unwrap() {
             BoundedRead::Object(obj) => assert_eq!(obj.data, b"small blob\n"),
             BoundedRead::Larger => panic!("small blob is within the limit"),
         }
         assert!(matches!(
-            odb.read_unless_larger(&small, 4),
+            odb.read_unless_larger(&small, 4, true),
             Ok(BoundedRead::Larger)
         ));
         assert!(matches!(
-            odb.read_unless_larger(&big, 1_200_000),
+            odb.read_unless_larger(&big, 1_200_000, true),
             Err(Error::ObjectNotFound(_))
         ));
     }
