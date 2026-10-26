@@ -33,8 +33,10 @@ use crate::ident::{
 use crate::index::{Index, IndexLock};
 use crate::objects::odb::Odb;
 use crate::objects::{parse_commit, serialize_commit, CommitData, ObjectId, ObjectKind};
-use crate::pathspec::{pathspec_is_exclude, ResolvedPathspecs};
-use crate::porcelain::add::{stage_on_index, StageMode, StageOptions};
+use crate::pathspec::{pathspec_is_exclude, PathspecListMatcher, ResolvedPathspecs};
+use crate::porcelain::add::{
+    stage_on_index, stage_on_index_with_pathspec_ignore_exempt, StageMode, StageOptions,
+};
 use crate::porcelain::hunk_select::{
     diff_options_for_hunk_select, resolve_selection, HunkSelectError, HunkSelection,
 };
@@ -461,6 +463,67 @@ pub fn plan_commit(
     })
 }
 
+/// Copy stage-0 rows from `source` into `commit_index` when they match positive pathspecs.
+///
+/// Path-scoped commits build `commit_index` from the parent tree; ignored paths that are
+/// already staged in the repository index (force-added or tracked) must appear there before
+/// worktree staging runs, or ignored untracked collection skips them.
+fn seed_commit_index_stage0_from_index(
+    repo: &Repository,
+    commit_index: &mut Index,
+    source: &Index,
+    paths: &ResolvedPathspecs,
+) -> Result<()> {
+    let positive = positive_resolved_pathspecs(paths);
+    if positive.is_empty() {
+        return Ok(());
+    }
+    let ctx = repo.pathspec_match_context();
+    let matcher = PathspecListMatcher::new(&positive, ctx);
+    let mut seeded = false;
+    for entry in &source.entries {
+        if entry.stage() != 0 {
+            continue;
+        }
+        let path = match std::str::from_utf8(&entry.path) {
+            Ok(p) if !p.is_empty() => p,
+            _ => continue,
+        };
+        if !matcher.matches(path) {
+            continue;
+        }
+        commit_index.stage_file(entry.clone());
+        seeded = true;
+    }
+    if seeded {
+        commit_index.ensure_canonical_order();
+    }
+    Ok(())
+}
+
+fn positive_resolved_pathspecs(paths: &ResolvedPathspecs) -> Vec<String> {
+    let pairs: Vec<(&str, &str)> =
+        if paths.sources.len() == paths.specs.len() && !paths.sources.is_empty() {
+            paths
+                .sources
+                .iter()
+                .zip(paths.specs.iter())
+                .map(|(a, b)| (a.as_str(), b.as_str()))
+                .collect()
+        } else {
+            paths
+                .specs
+                .iter()
+                .map(|s| (s.as_str(), s.as_str()))
+                .collect()
+        };
+    pairs
+        .into_iter()
+        .filter(|(source, _)| !pathspec_is_exclude(source))
+        .map(|(_, resolved)| resolved.to_owned())
+        .collect()
+}
+
 fn commit_paths_scope(
     repo: &Repository,
     req: &CommitRequest,
@@ -499,6 +562,7 @@ fn commit_paths_scope(
         Some(tree) => index_from_tree_with_seeded_worktree_stats(repo, tree, &real_index)?,
         None => Index::new(),
     };
+    seed_commit_index_stage0_from_index(repo, &mut commit_index, &real_index, paths)?;
 
     let stage_opts = StageOptions {
         pathspecs: paths.specs.clone(),
@@ -512,7 +576,14 @@ fn commit_paths_scope(
         ..StageOptions::default()
     };
 
-    let staged_commit = stage_on_index(repo, &mut commit_index, &stage_opts, progress)?;
+    let ignore_exempt = Some(&real_index);
+    let staged_commit = stage_on_index_with_pathspec_ignore_exempt(
+        repo,
+        &mut commit_index,
+        &stage_opts,
+        progress,
+        ignore_exempt,
+    )?;
     let real_index = match index_lock {
         Some(lock) => {
             stage_on_index(repo, &mut real_index, &stage_opts, progress)?;

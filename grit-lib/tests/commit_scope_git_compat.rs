@@ -144,6 +144,106 @@ fn paths_commit_matches_git_only() {
     fsck(git_root);
 }
 
+/// Regression for <https://github.com/gitbutlerapp/grit/issues/2006>.
+#[test]
+fn paths_commit_force_added_ignored_file_matches_git() {
+    let (grit_tmp, git_tmp) = init_pair();
+    let grit_root = grit_tmp.path();
+    let git_root = git_tmp.path();
+
+    for root in [grit_root, git_root] {
+        std::fs::write(root.join(".gitignore"), "build\n").expect("gitignore");
+        std::fs::create_dir_all(root.join("build")).expect("build dir");
+        std::fs::write(root.join("build/x.o"), b"o\n").expect("object file");
+        git(root, &["add", "-f", "build/x.o"]);
+    }
+
+    let repo = open_grit(grit_root);
+    let paths = ResolvedPathspecs {
+        specs: vec!["build/x.o".into()],
+        sources: vec!["build/x.o".into()],
+        scoped: true,
+    };
+    commit_with_scope(
+        &repo,
+        &commit_req("one"),
+        CommitScope::Paths(paths.clone()),
+        &mut NullProgress,
+    )
+    .expect("grit paths commit force-added ignored");
+    git(
+        git_root,
+        &["commit", "-m", "one", "--only", "--", "build/x.o"],
+    );
+
+    assert_eq!(tree_oid(grit_root), tree_oid(git_root));
+    fsck(grit_root);
+    fsck(git_root);
+
+    for root in [grit_root, git_root] {
+        std::fs::write(root.join("build/x.o"), b"o\nmore\n").expect("modify ignored tracked");
+    }
+
+    commit_with_scope(
+        &repo,
+        &commit_req("two"),
+        CommitScope::Paths(paths),
+        &mut NullProgress,
+    )
+    .expect("grit paths commit modified ignored tracked");
+    git(
+        git_root,
+        &["commit", "-m", "two", "--only", "--", "build/x.o"],
+    );
+
+    assert_eq!(tree_oid(grit_root), tree_oid(git_root));
+    assert_eq!(ls_files(grit_root), ls_files(git_root));
+    fsck(grit_root);
+    fsck(git_root);
+}
+
+#[test]
+fn paths_commit_tracked_ignored_after_initial_commit_matches_git() {
+    let (grit_tmp, git_tmp) = init_pair();
+    let grit_root = grit_tmp.path();
+    let git_root = git_tmp.path();
+    seed_initial(grit_root, git_root);
+
+    for root in [grit_root, git_root] {
+        std::fs::create_dir_all(root.join("build")).expect("build dir");
+        std::fs::write(root.join("build/x.o"), b"tracked\n").expect("object file");
+        git(root, &["add", "build/x.o"]);
+        git(root, &["commit", "-m", "track build"]);
+        std::fs::write(root.join(".gitignore"), "build\n").expect("gitignore");
+    }
+
+    for root in [grit_root, git_root] {
+        std::fs::write(root.join("build/x.o"), b"tracked\nmodified\n").expect("modify");
+    }
+
+    let repo = open_grit(grit_root);
+    let paths = ResolvedPathspecs {
+        specs: vec!["build/x.o".into()],
+        sources: vec!["build/x.o".into()],
+        scoped: true,
+    };
+    commit_with_scope(
+        &repo,
+        &commit_req("path only"),
+        CommitScope::Paths(paths),
+        &mut NullProgress,
+    )
+    .expect("grit paths commit tracked ignored");
+    git(
+        git_root,
+        &["commit", "-m", "path only", "--only", "--", "build/x.o"],
+    );
+
+    assert_eq!(tree_oid(grit_root), tree_oid(git_root));
+    fsck(grit_root);
+    fsck(git_root);
+}
+
 #[test]
 fn staged_commit_matches_git_without_auto_stage() {
     let (grit_tmp, git_tmp) = init_pair();
