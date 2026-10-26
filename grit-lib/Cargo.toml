@@ -142,6 +142,10 @@ name = "repack"
 harness = false
 
 [[bench]]
+name = "merge_content"
+harness = false
+
+[[bench]]
 name = "hot_paths"
 harness = false
 

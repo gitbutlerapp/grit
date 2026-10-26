@@ -7,7 +7,55 @@ Performance work is measured on the factory VM and in CI against the **system** 
 
 For a map of **grit-lib** modules, **grit** commands, common workflows, and every **`grit-bench daily`** scenario id, see [`grit-utils/MATRIX.md`](https://github.com/gitbutlerapp/grit/blob/main/grit-utils/MATRIX.md). The same ids appear with **time and memory ratios** on the [Performance overview (daily matrix)](performance-overview.md) page.
 
-Command-level numbers below come from the committed **grit-bench** JSON baselines listed in `content/docs/site.toml`. Each scenario runs **hyperfine** against the system **`git`** binary and a release **`grit`** build on the same machine; times are wall-clock milliseconds (mean and spread from timed runs).
+Command-level numbers below come from the committed **grit-bench** JSON baselines listed in `content/docs/site.toml`. Scenario suites use **hyperfine** against the system **`git`** binary and a release **`grit`** build on the same machine; individual studies below document their sampling method. Times are wall-clock milliseconds.
+
+## Clean wide content merges
+
+Issue [#2036](https://github.com/gitbutlerapp/grit/issues/2036) measures 20,000 small text files
+where one side prepends a line and the other appends one. Rename detection and result-tree
+composition now borrow existing paths and entries, parsed trees are shared with the ODB,
+and checkout write jobs borrow their diff records. Side maps are released before composing
+the result tree.
+
+Factory VM, 2026-10-26: 4 vCPU AMD EPYC 7763, 16 GiB RAM, Linux x86_64,
+Rust 1.99 `release` profile, system Git 2.55.0. One warmup precedes four interleaved
+fresh-process runs of Git, origin/main (`74adad7a`), and the fix in the same worktree,
+reset before each merge. Compilation is paused. Wall time uses Python `perf_counter`;
+peak RSS uses `/usr/bin/time -v`. The packed row reproduces the existing daily
+`merge/content-both-sides@wide-20k` fixture (200 directories, 100 files each, `git gc`
+before merging). The loose rows follow the issue's reproduction at 10k and 20k files.
+
+| Files / layout | System Git | Grit origin/main | Grit fixed |
+| --- | ---: | ---: | ---: |
+| 10k loose | 1,923 ms / 19.4 MiB | 1,525 ms / 55.8 MiB | 1,482 ms / 40.9 MiB |
+| 20k loose | 3,793 ms / 33.9 MiB | 2,986 ms / 96.0 MiB | 2,940 ms / 61.8 MiB |
+| 20k packed (daily) | 2,471 ms / 48.1 MiB | 2,832 ms / 107.5 MiB | 2,700 ms / 74.7 MiB |
+
+Times are medians; RSS is the maximum of the four measured runs. Every result tree
+matches system Git, the index and worktree remain clean, and `git fsck --strict` passes.
+Raw samples and both baselines are committed in
+[`merge-content-memory.json`](https://github.com/gitbutlerapp/grit/blob/main/grit-utils/baselines/merge-content-memory.json).
+
+Separate Heaptrack profiles put peak live allocations at **57.20 → 37.54 MB** for
+loose objects and **67.22 → 47.63 MB** for the packed fixture (decimal MB). The
+original peak retained merge maps; after removing those copies, checkout's repeated
+diff records became material and were changed to references. The RSS table excludes
+profiler overhead.
+
+Criterion's `merge_content` bench exercises the library tree merge without checkout:
+**1,345.8 ms before → 1,292.8 ms after** (10 samples, about 4% faster). Run it with:
+
+```bash
+cargo bench -p grit-lib --bench merge_content
+```
+
+Linux regression tests measure tree merging and full integration in separate fresh
+processes, including loose and packed objects. The measured debug API peaks were
+about **56/58 MiB** for loose tree/full merges and **74/82 MiB** for packed tree/full
+merges. Their budgets are **65 MiB loose** and **88 MiB packed**, allowing allocator
+variation while rejecting the old loose merge's roughly 78/95 MiB peaks. Packed RSS
+includes mapped pack pages and bounded object/delta caches. Git still uses less memory;
+the regression budgets preserve the measured improvement.
 
 ## grit-bench fixture cache
 

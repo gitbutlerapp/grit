@@ -28,11 +28,11 @@ use super::{
 const PARALLEL_WRITE_CANCEL_CHUNK: usize = 8;
 
 /// One blob checkout after attribute/conversion resolution on the caller thread.
-pub(crate) struct CheckoutWriteJob {
+pub(crate) struct CheckoutWriteJob<'a> {
     pub path: String,
     pub mode: u32,
     pub oid: ObjectId,
-    pub change: crate::diff::DiffEntry,
+    pub change: &'a crate::diff::DiffEntry,
     pub file_attrs: FileAttrs,
     pub smudge_meta: FilterSmudgeMeta,
 }
@@ -168,7 +168,7 @@ struct PreparedWrite {
 
 fn worktree_bytes_for_parallel_job(
     conv: &ConversionConfig,
-    job: &CheckoutWriteJob,
+    job: &CheckoutWriteJob<'_>,
     blob: &[u8],
 ) -> Result<Vec<u8>> {
     if job.mode == MODE_SYMLINK {
@@ -190,7 +190,7 @@ fn worktree_bytes_for_parallel_job(
 fn prepare_write_job(
     repo: &Repository,
     conv: &ConversionConfig,
-    job: &CheckoutWriteJob,
+    job: &CheckoutWriteJob<'_>,
 ) -> Result<Option<Vec<u8>>> {
     let Some(object) = read_blob_unless_streamed(repo, conv, &job.file_attrs, job.mode, &job.oid)?
     else {
@@ -202,19 +202,13 @@ fn prepare_write_job(
 fn write_prepared_job(
     repo: &Repository,
     work_tree: &Path,
-    job: &CheckoutWriteJob,
+    job: &CheckoutWriteJob<'_>,
     bytes: Option<&[u8]>,
     dir_cache: &mut LeadingDirCache,
 ) -> Result<IndexEntry> {
     let Some(bytes) = bytes else {
         return stream_checkout_entry(
-            repo,
-            work_tree,
-            &job.path,
-            job.mode,
-            &job.change,
-            dir_cache,
-            job.oid,
+            repo, work_tree, &job.path, job.mode, job.change, dir_cache, job.oid,
         );
     };
     write_checkout_entry(
@@ -222,7 +216,7 @@ fn write_prepared_job(
         &job.path,
         WorktreeFileContent::Bytes(bytes),
         job.mode,
-        &job.change,
+        job.change,
         dir_cache,
         job.oid,
     )
@@ -232,7 +226,7 @@ fn write_prepared_job(
 fn flush_prepared_writes_serial(
     repo: &Repository,
     work_tree: &Path,
-    jobs: &[CheckoutWriteJob],
+    jobs: &[CheckoutWriteJob<'_>],
     prepared: &[PreparedWrite],
     dir_cache: &mut LeadingDirCache,
     outcomes: &mut [Option<WriteJobOutcome>],
@@ -257,7 +251,7 @@ fn flush_prepared_writes_parallel(
     repo: &Repository,
     config: &Arc<ConfigSet>,
     work_tree: &Path,
-    jobs: &[CheckoutWriteJob],
+    jobs: &[CheckoutWriteJob<'_>],
     prepared: &[PreparedWrite],
     parent_dirs: &LeadingDirCache,
     outcomes: &mut [Option<WriteJobOutcome>],
@@ -298,7 +292,7 @@ fn materialize_write_job_serial(
     rules: &WorktreeRules,
     work_tree: &Path,
     dir_cache: &mut LeadingDirCache,
-    job: &CheckoutWriteJob,
+    job: &CheckoutWriteJob<'_>,
     delayed: &mut DelayedProcessCheckout,
 ) -> Result<WriteJobOutcome> {
     let Some(object) = read_blob_unless_streamed(
@@ -310,13 +304,7 @@ fn materialize_write_job_serial(
     )?
     else {
         return stream_checkout_entry(
-            repo,
-            work_tree,
-            &job.path,
-            job.mode,
-            &job.change,
-            dir_cache,
-            job.oid,
+            repo, work_tree, &job.path, job.mode, job.change, dir_cache, job.oid,
         )
         .map(WriteJobOutcome::Index);
     };
@@ -343,7 +331,7 @@ fn materialize_write_job_serial(
         &job.path,
         WorktreeFileContent::Bytes(&worktree_bytes),
         job.mode,
-        &job.change,
+        job.change,
         dir_cache,
         job.oid,
     )?;
@@ -356,7 +344,7 @@ fn flush_parallel_batch(
     config: &Arc<ConfigSet>,
     conv: &ConversionConfig,
     work_tree: &Path,
-    jobs: &[CheckoutWriteJob],
+    jobs: &[CheckoutWriteJob<'_>],
     batch: &[usize],
     dir_cache: &mut LeadingDirCache,
     outcomes: &mut [Option<WriteJobOutcome>],
@@ -449,7 +437,7 @@ pub(crate) fn execute_write_jobs(
     work_tree: &Path,
     dir_cache: &mut LeadingDirCache,
     delayed: &mut DelayedProcessCheckout,
-    jobs: &[CheckoutWriteJob],
+    jobs: &[CheckoutWriteJob<'_>],
     parallel_indices: &HashSet<usize>,
     parallel_prepare_blobs: bool,
     checkout_parallel_threshold: Option<i64>,

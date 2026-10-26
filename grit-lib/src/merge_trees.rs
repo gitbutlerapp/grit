@@ -182,15 +182,9 @@ pub(crate) fn merge_trees_three_way_cached(
     )?;
 
     let mut ours_old_to_new_pairs = rename_pairs_base_to_other(odb, &base_tree, &ours_tree)?;
-    let base_h: HashMap<Vec<u8>, IndexEntry> =
-        base.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-    let ours_h: HashMap<Vec<u8>, IndexEntry> =
-        ours.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-    augment_renames_with_same_blob(&base_h, &ours_h, &mut ours_old_to_new_pairs);
+    augment_renames_with_same_blob(&base, &ours, &mut ours_old_to_new_pairs);
     let mut theirs_pairs = rename_pairs_base_to_other(odb, &base_tree, &theirs_tree)?;
-    let theirs_h: HashMap<Vec<u8>, IndexEntry> =
-        theirs.iter().map(|(k, v)| (k.clone(), v.clone())).collect();
-    augment_renames_with_same_blob(&base_h, &theirs_h, &mut theirs_pairs);
+    augment_renames_with_same_blob(&base, &theirs, &mut theirs_pairs);
 
     let mut df_escapes = DfEscapes::default();
     if let (Some(ours_commit), Some(theirs_commit)) = (
@@ -254,6 +248,7 @@ pub(crate) fn merge_trees_three_way_cached(
     let rename_conflicts =
         rename_rename_conflicts(&ours_new_to_old, &theirs_old_to_new, &base, &ours, &theirs);
 
+    drop(ours_old_to_new_pairs);
     let mut output = merge_trees_walk::three_way_on_touched_paths(
         cache,
         repo,
@@ -286,6 +281,7 @@ pub(crate) fn merge_trees_three_way_cached(
         output.touched_paths.insert(path);
     }
     output.index.sort();
+    drop((base, ours, theirs, touched));
     let mut renamed_away = HashSet::new();
     for (old, new) in &theirs_old_to_new {
         if old != new {
@@ -297,6 +293,7 @@ pub(crate) fn merge_trees_three_way_cached(
             renamed_away.insert(old.clone());
         }
     }
+    drop((ours_new_to_old, theirs_old_to_new));
     output.result_tree = merge_trees_walk::finish_merge_result_tree(
         cache,
         odb,
@@ -310,12 +307,17 @@ pub(crate) fn merge_trees_three_way_cached(
 }
 
 fn augment_renames_with_same_blob(
-    base: &HashMap<Vec<u8>, IndexEntry>,
-    side: &HashMap<Vec<u8>, IndexEntry>,
+    base: &BTreeMap<Vec<u8>, IndexEntry>,
+    side: &BTreeMap<Vec<u8>, IndexEntry>,
     pairs: &mut Vec<RenamePathPair>,
 ) {
-    use crate::porcelain::cherry_pick::same_blob_renames;
-    for (old, new) in same_blob_renames(base, side) {
+    use crate::porcelain::cherry_pick::same_blob_renames_from_entries;
+    for (old, new) in same_blob_renames_from_entries(
+        base.iter(),
+        side.iter(),
+        |path| base.contains_key(path),
+        |path| side.contains_key(path),
+    ) {
         if pairs
             .iter()
             .any(|(o, n, _)| o.as_slice() == old.as_slice() && n.as_slice() == new.as_slice())
@@ -517,11 +519,13 @@ fn apply_df_file_directory_conflicts_trees(
 
     let odb = repo.odb();
     let mut out = DfEscapes::default();
-    let theirs_sparse = merge_trees_walk::PathPrefixIndex::new(theirs.keys());
-    let ours_sparse = merge_trees_walk::PathPrefixIndex::new(ours.keys());
+    // Relocation mutates the maps; borrow the original path snapshots for prefix queries.
     let ours_paths: Vec<Vec<u8>> = ours.keys().cloned().collect();
-    for path in ours_paths {
-        let Some(entry) = ours.get(&path) else {
+    let theirs_paths: Vec<Vec<u8>> = theirs.keys().cloned().collect();
+    let theirs_sparse = merge_trees_walk::PathPrefixIndex::new(&theirs_paths);
+    let ours_sparse = merge_trees_walk::PathPrefixIndex::new(&ours_paths);
+    for path in &ours_paths {
+        let Some(entry) = ours.get(path) else {
             continue;
         };
         if entry.mode == 0o040000 {
@@ -532,27 +536,26 @@ fn apply_df_file_directory_conflicts_trees(
             odb,
             theirs_tree,
             MergeTreeSide::Theirs,
-            &path,
+            path,
             &theirs_sparse,
         )? {
             continue;
         }
-        if skip_df_expansion_ours_file(base, ours, theirs, &path) {
+        if skip_df_expansion_ours_file(base, ours, theirs, path) {
             continue;
         }
-        if parent_has_file(theirs, &path) {
+        if parent_has_file(theirs, path) {
             continue;
         }
-        let escaped = escape_df_path_side(ours, &path, ours_commit, &mut out.stage2);
+        let escaped = escape_df_path_side(ours, path, ours_commit, &mut out.stage2);
         out.relocated_from.push(path.clone());
-        touched.insert(path);
+        touched.insert(path.clone());
         if let Some(p) = escaped {
             touched.insert(p);
         }
     }
-    let theirs_paths: Vec<Vec<u8>> = theirs.keys().cloned().collect();
-    for path in theirs_paths {
-        let Some(entry) = theirs.get(&path) else {
+    for path in &theirs_paths {
+        let Some(entry) = theirs.get(path) else {
             continue;
         };
         if entry.mode == 0o040000 {
@@ -563,20 +566,20 @@ fn apply_df_file_directory_conflicts_trees(
             odb,
             ours_tree,
             MergeTreeSide::Ours,
-            &path,
+            path,
             &ours_sparse,
         )? {
             continue;
         }
-        if skip_df_expansion_theirs_file(base, ours, theirs, &path) {
+        if skip_df_expansion_theirs_file(base, ours, theirs, path) {
             continue;
         }
-        if parent_has_file(ours, &path) {
+        if parent_has_file(ours, path) {
             continue;
         }
-        let escaped = escape_df_path_side(theirs, &path, theirs_commit, &mut out.stage3);
+        let escaped = escape_df_path_side(theirs, path, theirs_commit, &mut out.stage3);
         out.relocated_from.push(path.clone());
-        touched.insert(path);
+        touched.insert(path.clone());
         if let Some(p) = escaped {
             touched.insert(p);
         }
@@ -1950,8 +1953,8 @@ mod tests {
 
     #[test]
     fn augment_renames_includes_same_blob_pairs() {
-        let mut base = HashMap::new();
-        let mut side = HashMap::new();
+        let mut base = BTreeMap::new();
+        let mut side = BTreeMap::new();
         let oid = zero_oid();
         let old_e = IndexEntry {
             ctime_sec: 0,

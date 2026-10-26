@@ -1,0 +1,715 @@
+{
+  "schema_version": 1,
+  "timestamp": "2026-10-26T15:36:48.669449+00:00",
+  "machine": {
+    "cpu_model": "AMD EPYC 7763 64-Core Processor",
+    "physical_cores": 2,
+    "logical_cores": 4,
+    "ram_bytes": 16770748416,
+    "os": "linux",
+    "kernel": "6.17.0-1022-azure",
+    "scratch_filesystem": "ext2/ext3",
+    "rustc_version": "rustc 1.99.0 (b940084d7 2026-09-28)",
+    "cargo_profile": "release"
+  },
+  "tools": {
+    "git": "git version 2.55.0",
+    "grit": "grit 0.5.21",
+    "grit_commit": "74adad7a5732c7611479797ccfec73f41359409b"
+  },
+  "scenarios": [
+    {
+      "id": "merge-content-10000-before",
+      "group": "merge",
+      "fixture": "10000",
+      "description": "loose 10000-file issue #2036 reproduction, before",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 1911.0487995000085,
+        "median_ms": 1922.8846145001626,
+        "stddev_ms": 33.385854678885146,
+        "min_ms": 1863.5444499996083,
+        "max_ms": 1934.8815190001005,
+        "runs_ms": [
+          1863.5444499996083,
+          1911.9527550001294,
+          1934.8815190001005,
+          1933.8164740001957
+        ],
+        "peak_rss_bytes": 20348928,
+        "rss_runs_kib": [
+          19748,
+          19872,
+          19872,
+          19812
+        ]
+      },
+      "grit": {
+        "mean_ms": 1518.6179947498886,
+        "median_ms": 1524.914909500012,
+        "stddev_ms": 25.036656194870375,
+        "min_ms": 1484.0856339997117,
+        "max_ms": 1540.5565259998184,
+        "runs_ms": [
+          1516.9331460001558,
+          1484.0856339997117,
+          1532.8966729998683,
+          1540.5565259998184
+        ],
+        "peak_rss_bytes": 58478592,
+        "rss_runs_kib": [
+          57108,
+          55684,
+          55952,
+          56948
+        ]
+      },
+      "ratio": 0.7946516044735266
+    },
+    {
+      "id": "merge-content-10000-after",
+      "group": "merge",
+      "fixture": "10000",
+      "description": "loose 10000-file issue #2036 reproduction, after",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 1911.0487995000085,
+        "median_ms": 1922.8846145001626,
+        "stddev_ms": 33.385854678885146,
+        "min_ms": 1863.5444499996083,
+        "max_ms": 1934.8815190001005,
+        "runs_ms": [
+          1863.5444499996083,
+          1911.9527550001294,
+          1934.8815190001005,
+          1933.8164740001957
+        ],
+        "peak_rss_bytes": 20348928,
+        "rss_runs_kib": [
+          19748,
+          19872,
+          19872,
+          19812
+        ]
+      },
+      "grit": {
+        "mean_ms": 1483.3310604999497,
+        "median_ms": 1481.5821844999846,
+        "stddev_ms": 26.984022930573452,
+        "min_ms": 1458.1507600000805,
+        "max_ms": 1512.009112999749,
+        "runs_ms": [
+          1458.1507600000805,
+          1462.5845909999953,
+          1500.5797779999739,
+          1512.009112999749
+        ],
+        "peak_rss_bytes": 42856448,
+        "rss_runs_kib": [
+          41740,
+          41536,
+          41728,
+          41852
+        ]
+      },
+      "ratio": 0.7761869089308638
+    },
+    {
+      "id": "merge-content-20000-before",
+      "group": "merge",
+      "fixture": "20000",
+      "description": "loose 20000-file issue #2036 reproduction, before",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 3812.9018424999686,
+        "median_ms": 3793.41970649989,
+        "stddev_ms": 64.12324968695825,
+        "min_ms": 3759.8602709999795,
+        "max_ms": 3904.907686000115,
+        "runs_ms": [
+          3781.2176030001865,
+          3805.621809999593,
+          3759.8602709999795,
+          3904.907686000115
+        ],
+        "peak_rss_bytes": 35508224,
+        "rss_runs_kib": [
+          34556,
+          34528,
+          34624,
+          34676
+        ]
+      },
+      "grit": {
+        "mean_ms": 3003.577267249966,
+        "median_ms": 2985.8561234998433,
+        "stddev_ms": 71.27901118843045,
+        "min_ms": 2940.835046999837,
+        "max_ms": 3101.761775000341,
+        "runs_ms": [
+          3008.629251000002,
+          3101.761775000341,
+          2940.835046999837,
+          2963.0829959996845
+        ],
+        "peak_rss_bytes": 100614144,
+        "rss_runs_kib": [
+          97508,
+          97024,
+          96096,
+          98256
+        ]
+      },
+      "ratio": 0.7877405166246397
+    },
+    {
+      "id": "merge-content-20000-after",
+      "group": "merge",
+      "fixture": "20000",
+      "description": "loose 20000-file issue #2036 reproduction, after",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 3812.9018424999686,
+        "median_ms": 3793.41970649989,
+        "stddev_ms": 64.12324968695825,
+        "min_ms": 3759.8602709999795,
+        "max_ms": 3904.907686000115,
+        "runs_ms": [
+          3781.2176030001865,
+          3805.621809999593,
+          3759.8602709999795,
+          3904.907686000115
+        ],
+        "peak_rss_bytes": 35508224,
+        "rss_runs_kib": [
+          34556,
+          34528,
+          34624,
+          34676
+        ]
+      },
+      "grit": {
+        "mean_ms": 2930.7103174999156,
+        "median_ms": 2939.505469999858,
+        "stddev_ms": 60.0414592564776,
+        "min_ms": 2862.629878000007,
+        "max_ms": 2981.200451999939,
+        "runs_ms": [
+          2862.629878000007,
+          2897.816015999979,
+          2981.1949239997375,
+          2981.200451999939
+        ],
+        "peak_rss_bytes": 64811008,
+        "rss_runs_kib": [
+          58656,
+          63292,
+          59036,
+          59608
+        ]
+      },
+      "ratio": 0.7686298883525323
+    },
+    {
+      "id": "merge-content-daily-before",
+      "group": "merge",
+      "fixture": "daily",
+      "description": "packed daily merge/content-both-sides@wide-20k, before",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 2469.301496750063,
+        "median_ms": 2471.3334865000434,
+        "stddev_ms": 16.873212033302785,
+        "min_ms": 2448.838101000092,
+        "max_ms": 2485.7009130000733,
+        "runs_ms": [
+          2462.4406110001473,
+          2480.2263619999394,
+          2485.7009130000733,
+          2448.838101000092
+        ],
+        "peak_rss_bytes": 50450432,
+        "rss_runs_kib": [
+          49268,
+          49052,
+          49116,
+          48948
+        ]
+      },
+      "grit": {
+        "mean_ms": 2812.496307999936,
+        "median_ms": 2831.8608879999374,
+        "stddev_ms": 64.18502413824483,
+        "min_ms": 2723.833820999971,
+        "max_ms": 2862.4296349998986,
+        "runs_ms": [
+          2862.4296349998986,
+          2806.812890999936,
+          2723.833820999971,
+          2856.908884999939
+        ],
+        "peak_rss_bytes": 112672768,
+        "rss_runs_kib": [
+          109152,
+          107764,
+          108416,
+          110032
+        ]
+      },
+      "ratio": 1.1389845718319793
+    },
+    {
+      "id": "merge-content-daily-after",
+      "group": "merge",
+      "fixture": "daily",
+      "description": "packed daily merge/content-both-sides@wide-20k, after",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 2469.301496750063,
+        "median_ms": 2471.3334865000434,
+        "stddev_ms": 16.873212033302785,
+        "min_ms": 2448.838101000092,
+        "max_ms": 2485.7009130000733,
+        "runs_ms": [
+          2462.4406110001473,
+          2480.2263619999394,
+          2485.7009130000733,
+          2448.838101000092
+        ],
+        "peak_rss_bytes": 50450432,
+        "rss_runs_kib": [
+          49268,
+          49052,
+          49116,
+          48948
+        ]
+      },
+      "grit": {
+        "mean_ms": 2707.605254750092,
+        "median_ms": 2699.8375420000684,
+        "stddev_ms": 58.460189958722545,
+        "min_ms": 2644.673993000197,
+        "max_ms": 2786.071942000035,
+        "runs_ms": [
+          2702.5524999999107,
+          2786.071942000035,
+          2697.122584000226,
+          2644.673993000197
+        ],
+        "peak_rss_bytes": 78315520,
+        "rss_runs_kib": [
+          76480,
+          75936,
+          75588,
+          75212
+        ]
+      },
+      "ratio": 1.0965065458040135
+    }
+  ],
+  "methodology": "One warmup plus four interleaved runs per client, fresh processes, same worktree reset before each merge, compilation suspended. Python perf_counter wall time and /usr/bin/time -v RSS. Before is origin/main 74adad7a; after is this change. Every tree matches system Git; clean index/worktree and fsck --strict checked.",
+  "raw_runs": [
+    {
+      "fixture": "10000",
+      "client": "git",
+      "run": 0,
+      "ms": 9613.62890800001,
+      "rss_kib": 19872,
+      "tree": "1330050bd01039e8d75d506bada4edf912da4fe7"
+    },
+    {
+      "fixture": "10000",
+      "client": "before",
+      "run": 0,
+      "ms": 1601.4250870002797,
+      "rss_kib": 56772,
+      "tree": "1330050bd01039e8d75d506bada4edf912da4fe7"
+    },
+    {
+      "fixture": "10000",
+      "client": "after",
+      "run": 0,
+      "ms": 1433.827552999901,
+      "rss_kib": 41660,
+      "tree": "1330050bd01039e8d75d506bada4edf912da4fe7"
+    },
+    {
+      "fixture": "10000",
+      "client": "git",
+      "run": 1,
+      "ms": 1863.5444499996083,
+      "rss_kib": 19748,
+      "tree": "1330050bd01039e8d75d506bada4edf912da4fe7"
+    },
+    {
+      "fixture": "10000",
+      "client": "before",
+      "run": 1,
+      "ms": 1516.9331460001558,
+      "rss_kib": 57108,
+      "tree": "1330050bd01039e8d75d506bada4edf912da4fe7"
+    },
+    {
+      "fixture": "10000",
+      "client": "after",
+      "run": 1,
+      "ms": 1458.1507600000805,
+      "rss_kib": 41740,
+      "tree": "1330050bd01039e8d75d506bada4edf912da4fe7"
+    },
+    {
+      "fixture": "10000",
+      "client": "git",
+      "run": 2,
+      "ms": 1911.9527550001294,
+      "rss_kib": 19872,
+      "tree": "1330050bd01039e8d75d506bada4edf912da4fe7"
+    },
+    {
+      "fixture": "10000",
+      "client": "before",
+      "run": 2,
+      "ms": 1484.0856339997117,
+      "rss_kib": 55684,
+      "tree": "1330050bd01039e8d75d506bada4edf912da4fe7"
+    },
+    {
+      "fixture": "10000",
+      "client": "after",
+      "run": 2,
+      "ms": 1462.5845909999953,
+      "rss_kib": 41536,
+      "tree": "1330050bd01039e8d75d506bada4edf912da4fe7"
+    },
+    {
+      "fixture": "10000",
+      "client": "git",
+      "run": 3,
+      "ms": 1934.8815190001005,
+      "rss_kib": 19872,
+      "tree": "1330050bd01039e8d75d506bada4edf912da4fe7"
+    },
+    {
+      "fixture": "10000",
+      "client": "before",
+      "run": 3,
+      "ms": 1532.8966729998683,
+      "rss_kib": 55952,
+      "tree": "1330050bd01039e8d75d506bada4edf912da4fe7"
+    },
+    {
+      "fixture": "10000",
+      "client": "after",
+      "run": 3,
+      "ms": 1500.5797779999739,
+      "rss_kib": 41728,
+      "tree": "1330050bd01039e8d75d506bada4edf912da4fe7"
+    },
+    {
+      "fixture": "10000",
+      "client": "git",
+      "run": 4,
+      "ms": 1933.8164740001957,
+      "rss_kib": 19812,
+      "tree": "1330050bd01039e8d75d506bada4edf912da4fe7"
+    },
+    {
+      "fixture": "10000",
+      "client": "before",
+      "run": 4,
+      "ms": 1540.5565259998184,
+      "rss_kib": 56948,
+      "tree": "1330050bd01039e8d75d506bada4edf912da4fe7"
+    },
+    {
+      "fixture": "10000",
+      "client": "after",
+      "run": 4,
+      "ms": 1512.009112999749,
+      "rss_kib": 41852,
+      "tree": "1330050bd01039e8d75d506bada4edf912da4fe7"
+    },
+    {
+      "fixture": "20000",
+      "client": "git",
+      "run": 0,
+      "ms": 3812.3256809999475,
+      "rss_kib": 34608,
+      "tree": "8571dc4c794ad3ab96d8754705fda97151e399eb"
+    },
+    {
+      "fixture": "20000",
+      "client": "before",
+      "run": 0,
+      "ms": 2949.084394000238,
+      "rss_kib": 95164,
+      "tree": "8571dc4c794ad3ab96d8754705fda97151e399eb"
+    },
+    {
+      "fixture": "20000",
+      "client": "after",
+      "run": 0,
+      "ms": 2874.3743499999255,
+      "rss_kib": 58944,
+      "tree": "8571dc4c794ad3ab96d8754705fda97151e399eb"
+    },
+    {
+      "fixture": "20000",
+      "client": "git",
+      "run": 1,
+      "ms": 3781.2176030001865,
+      "rss_kib": 34556,
+      "tree": "8571dc4c794ad3ab96d8754705fda97151e399eb"
+    },
+    {
+      "fixture": "20000",
+      "client": "before",
+      "run": 1,
+      "ms": 3008.629251000002,
+      "rss_kib": 97508,
+      "tree": "8571dc4c794ad3ab96d8754705fda97151e399eb"
+    },
+    {
+      "fixture": "20000",
+      "client": "after",
+      "run": 1,
+      "ms": 2862.629878000007,
+      "rss_kib": 58656,
+      "tree": "8571dc4c794ad3ab96d8754705fda97151e399eb"
+    },
+    {
+      "fixture": "20000",
+      "client": "git",
+      "run": 2,
+      "ms": 3805.621809999593,
+      "rss_kib": 34528,
+      "tree": "8571dc4c794ad3ab96d8754705fda97151e399eb"
+    },
+    {
+      "fixture": "20000",
+      "client": "before",
+      "run": 2,
+      "ms": 3101.761775000341,
+      "rss_kib": 97024,
+      "tree": "8571dc4c794ad3ab96d8754705fda97151e399eb"
+    },
+    {
+      "fixture": "20000",
+      "client": "after",
+      "run": 2,
+      "ms": 2897.816015999979,
+      "rss_kib": 63292,
+      "tree": "8571dc4c794ad3ab96d8754705fda97151e399eb"
+    },
+    {
+      "fixture": "20000",
+      "client": "git",
+      "run": 3,
+      "ms": 3759.8602709999795,
+      "rss_kib": 34624,
+      "tree": "8571dc4c794ad3ab96d8754705fda97151e399eb"
+    },
+    {
+      "fixture": "20000",
+      "client": "before",
+      "run": 3,
+      "ms": 2940.835046999837,
+      "rss_kib": 96096,
+      "tree": "8571dc4c794ad3ab96d8754705fda97151e399eb"
+    },
+    {
+      "fixture": "20000",
+      "client": "after",
+      "run": 3,
+      "ms": 2981.1949239997375,
+      "rss_kib": 59036,
+      "tree": "8571dc4c794ad3ab96d8754705fda97151e399eb"
+    },
+    {
+      "fixture": "20000",
+      "client": "git",
+      "run": 4,
+      "ms": 3904.907686000115,
+      "rss_kib": 34676,
+      "tree": "8571dc4c794ad3ab96d8754705fda97151e399eb"
+    },
+    {
+      "fixture": "20000",
+      "client": "before",
+      "run": 4,
+      "ms": 2963.0829959996845,
+      "rss_kib": 98256,
+      "tree": "8571dc4c794ad3ab96d8754705fda97151e399eb"
+    },
+    {
+      "fixture": "20000",
+      "client": "after",
+      "run": 4,
+      "ms": 2981.200451999939,
+      "rss_kib": 59608,
+      "tree": "8571dc4c794ad3ab96d8754705fda97151e399eb"
+    },
+    {
+      "fixture": "daily",
+      "client": "git",
+      "run": 0,
+      "ms": 2552.9969669996717,
+      "rss_kib": 49068,
+      "tree": "eae68d3f3e0be0fa9881cefc3a4fe8cc53a06135"
+    },
+    {
+      "fixture": "daily",
+      "client": "before",
+      "run": 0,
+      "ms": 2820.7703570001286,
+      "rss_kib": 108484,
+      "tree": "eae68d3f3e0be0fa9881cefc3a4fe8cc53a06135"
+    },
+    {
+      "fixture": "daily",
+      "client": "after",
+      "run": 0,
+      "ms": 2761.8275169998014,
+      "rss_kib": 77276,
+      "tree": "eae68d3f3e0be0fa9881cefc3a4fe8cc53a06135"
+    },
+    {
+      "fixture": "daily",
+      "client": "git",
+      "run": 1,
+      "ms": 2462.4406110001473,
+      "rss_kib": 49268,
+      "tree": "eae68d3f3e0be0fa9881cefc3a4fe8cc53a06135"
+    },
+    {
+      "fixture": "daily",
+      "client": "before",
+      "run": 1,
+      "ms": 2862.4296349998986,
+      "rss_kib": 109152,
+      "tree": "eae68d3f3e0be0fa9881cefc3a4fe8cc53a06135"
+    },
+    {
+      "fixture": "daily",
+      "client": "after",
+      "run": 1,
+      "ms": 2702.5524999999107,
+      "rss_kib": 76480,
+      "tree": "eae68d3f3e0be0fa9881cefc3a4fe8cc53a06135"
+    },
+    {
+      "fixture": "daily",
+      "client": "git",
+      "run": 2,
+      "ms": 2480.2263619999394,
+      "rss_kib": 49052,
+      "tree": "eae68d3f3e0be0fa9881cefc3a4fe8cc53a06135"
+    },
+    {
+      "fixture": "daily",
+      "client": "before",
+      "run": 2,
+      "ms": 2806.812890999936,
+      "rss_kib": 107764,
+      "tree": "eae68d3f3e0be0fa9881cefc3a4fe8cc53a06135"
+    },
+    {
+      "fixture": "daily",
+      "client": "after",
+      "run": 2,
+      "ms": 2786.071942000035,
+      "rss_kib": 75936,
+      "tree": "eae68d3f3e0be0fa9881cefc3a4fe8cc53a06135"
+    },
+    {
+      "fixture": "daily",
+      "client": "git",
+      "run": 3,
+      "ms": 2485.7009130000733,
+      "rss_kib": 49116,
+      "tree": "eae68d3f3e0be0fa9881cefc3a4fe8cc53a06135"
+    },
+    {
+      "fixture": "daily",
+      "client": "before",
+      "run": 3,
+      "ms": 2723.833820999971,
+      "rss_kib": 108416,
+      "tree": "eae68d3f3e0be0fa9881cefc3a4fe8cc53a06135"
+    },
+    {
+      "fixture": "daily",
+      "client": "after",
+      "run": 3,
+      "ms": 2697.122584000226,
+      "rss_kib": 75588,
+      "tree": "eae68d3f3e0be0fa9881cefc3a4fe8cc53a06135"
+    },
+    {
+      "fixture": "daily",
+      "client": "git",
+      "run": 4,
+      "ms": 2448.838101000092,
+      "rss_kib": 48948,
+      "tree": "eae68d3f3e0be0fa9881cefc3a4fe8cc53a06135"
+    },
+    {
+      "fixture": "daily",
+      "client": "before",
+      "run": 4,
+      "ms": 2856.908884999939,
+      "rss_kib": 110032,
+      "tree": "eae68d3f3e0be0fa9881cefc3a4fe8cc53a06135"
+    },
+    {
+      "fixture": "daily",
+      "client": "after",
+      "run": 4,
+      "ms": 2644.673993000197,
+      "rss_kib": 75212,
+      "tree": "eae68d3f3e0be0fa9881cefc3a4fe8cc53a06135"
+    }
+  ],
+  "criterion": {
+    "origin-main": {
+      "mean_ms": 1345.7959173,
+      "confidence_interval_ms": [
+        1342.3007493,
+        1348.5560705
+      ],
+      "samples": 10
+    },
+    "fixed": {
+      "mean_ms": 1292.8257155,
+      "confidence_interval_ms": [
+        1289.589781435,
+        1295.999905
+      ],
+      "samples": 10
+    }
+  },
+  "profiling": {
+    "tool": "heaptrack 1.5.0",
+    "note": "Profile runs are separate from timing/RSS samples; profiler overhead is excluded from the RSS comparisons. Peak heap is in decimal bytes.",
+    "before": {
+      "loose": {
+        "allocations": 10463920,
+        "peak_heap_bytes": 57200000
+      },
+      "packed": {
+        "allocations": 10228703,
+        "peak_heap_bytes": 67220000
+      }
+    },
+    "after": {
+      "loose": {
+        "allocations": 9809139,
+        "peak_heap_bytes": 37540000
+      },
+      "packed": {
+        "allocations": 9579187,
+        "peak_heap_bytes": 47630000
+      }
+    }
+  }
+}

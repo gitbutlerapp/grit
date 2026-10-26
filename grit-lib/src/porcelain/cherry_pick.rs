@@ -125,20 +125,37 @@ pub fn same_blob_renames(
     base: &HashMap<Vec<u8>, IndexEntry>,
     side: &HashMap<Vec<u8>, IndexEntry>,
 ) -> Vec<(Vec<u8>, Vec<u8>)> {
-    let added: Vec<(&Vec<u8>, &IndexEntry)> = side
-        .iter()
-        .filter(|(path, _)| !base.contains_key(*path))
-        .collect();
-    let mut renames = Vec::new();
-    for (old_path, base_entry) in base.iter().filter(|(path, _)| !side.contains_key(*path)) {
-        if let Some((new_path, _)) = added
-            .iter()
-            .find(|(_, side_entry)| same_blob(base_entry, side_entry))
-        {
-            renames.push((old_path.clone(), (*new_path).clone()));
+    same_blob_renames_from_entries(
+        base.iter(),
+        side.iter(),
+        |path| base.contains_key(path),
+        |path| side.contains_key(path),
+    )
+}
+
+/// Share exact-rename matching with ordered sparse merge maps without copying entries.
+/// Keep the first added path for each blob/mode, and allow several sources to pair with it,
+/// just as the public HashMap API's first-match scan does.
+pub(crate) fn same_blob_renames_from_entries<'a>(
+    base: impl IntoIterator<Item = (&'a Vec<u8>, &'a IndexEntry)>,
+    side: impl IntoIterator<Item = (&'a Vec<u8>, &'a IndexEntry)>,
+    base_contains: impl Fn(&[u8]) -> bool,
+    side_contains: impl Fn(&[u8]) -> bool,
+) -> Vec<(Vec<u8>, Vec<u8>)> {
+    let mut added = HashMap::new();
+    for (path, entry) in side {
+        if !base_contains(path) {
+            added.entry((entry.oid, entry.mode)).or_insert(path);
         }
     }
-    renames
+    base.into_iter()
+        .filter(|(path, _)| !side_contains(path))
+        .filter_map(|(path, entry)| {
+            added
+                .get(&(entry.oid, entry.mode))
+                .map(|new| (path.clone(), (*new).clone()))
+        })
+        .collect()
 }
 
 /// Aggregate file renames into directory renames: for each source directory, the destination
@@ -243,6 +260,37 @@ mod tests {
         assert_eq!(renames.len(), 1);
         assert_eq!(renames[0].0, b"old.txt");
         assert_eq!(renames[0].1, b"new.txt");
+    }
+
+    #[test]
+    fn same_blob_renames_keeps_first_match_and_reuses_destinations() {
+        let base: HashMap<_, _> = ["old-a", "old-b", "unchanged", "mode-change"]
+            .into_iter()
+            .map(|path| (path.as_bytes().to_vec(), entry(path)))
+            .collect();
+        let mut side: HashMap<_, _> = ["new-a", "new-b", "unchanged", "mode-change"]
+            .into_iter()
+            .map(|path| (path.as_bytes().to_vec(), entry(path)))
+            .collect();
+        side.get_mut(b"mode-change".as_slice()).expect("entry").mode = 0o100755;
+        let added: Vec<_> = side
+            .iter()
+            .filter(|(path, _)| !base.contains_key(*path))
+            .collect();
+        let expected: Vec<_> = base
+            .iter()
+            .filter(|(path, _)| !side.contains_key(*path))
+            .filter_map(|(old, entry)| {
+                added
+                    .iter()
+                    .find(|(_, candidate)| same_blob(entry, candidate))
+                    .map(|(new, _)| (old.clone(), (*new).clone()))
+            })
+            .collect();
+        let actual = same_blob_renames(&base, &side);
+        assert_eq!(actual, expected);
+        assert_eq!(actual.len(), 2);
+        assert_eq!(actual[0].1, actual[1].1);
     }
 
     #[test]

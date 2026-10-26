@@ -21,22 +21,22 @@ const MODE_DIR: u32 = 0o040000;
 
 /// Index over a set of paths answering "is anything at or under `prefix`" and
 /// "is anything strictly under `prefix/`" with hash lookups instead of scans.
-pub(crate) struct PathPrefixIndex {
-    paths: HashSet<Vec<u8>>,
-    ancestor_dirs: HashSet<Vec<u8>>,
+pub(crate) struct PathPrefixIndex<'a> {
+    paths: HashSet<&'a [u8]>,
+    ancestor_dirs: HashSet<&'a [u8]>,
 }
 
-impl PathPrefixIndex {
-    pub(crate) fn new<'a>(paths: impl IntoIterator<Item = &'a Vec<u8>>) -> Self {
+impl<'a> PathPrefixIndex<'a> {
+    pub(crate) fn new(paths: impl IntoIterator<Item = &'a Vec<u8>>) -> Self {
         let mut index = Self {
             paths: HashSet::new(),
             ancestor_dirs: HashSet::new(),
         };
         for path in paths {
-            index.paths.insert(path.clone());
+            index.paths.insert(path.as_slice());
             for (i, &b) in path.iter().enumerate() {
                 if b == b'/' && !index.ancestor_dirs.contains(&path[..i]) {
-                    index.ancestor_dirs.insert(path[..i].to_vec());
+                    index.ancestor_dirs.insert(&path[..i]);
                 }
             }
         }
@@ -169,7 +169,7 @@ fn fill_sparse_maps_walk(
     base_oid: &ObjectId,
     ours_oid: &ObjectId,
     theirs_oid: &ObjectId,
-    touched: &PathPrefixIndex,
+    touched: &PathPrefixIndex<'_>,
     empty_tree: &ObjectId,
     base: &mut BTreeMap<Vec<u8>, IndexEntry>,
     ours: &mut BTreeMap<Vec<u8>, IndexEntry>,
@@ -262,7 +262,7 @@ pub(crate) fn side_tree_has_descendant_at(
     tree_oid: &ObjectId,
     side: MergeTreeSide,
     prefix: &[u8],
-    sparse_paths: &PathPrefixIndex,
+    sparse_paths: &PathPrefixIndex<'_>,
 ) -> crate::error::Result<bool> {
     side_tree_has_descendant_at_cached(cache, odb, tree_oid, side, prefix, sparse_paths)
 }
@@ -275,9 +275,9 @@ pub(crate) fn compose_merged_tree_oid(
     base_oid: &ObjectId,
     ours_oid: &ObjectId,
     theirs_oid: &ObjectId,
-    touched: &PathPrefixIndex,
+    touched: &PathPrefixIndex<'_>,
     renamed_away: &HashSet<Vec<u8>>,
-    stage0_by_path: &BTreeMap<Vec<u8>, IndexEntry>,
+    stage0_by_path: &BTreeMap<&[u8], &IndexEntry>,
     empty_tree: &ObjectId,
 ) -> crate::error::Result<ObjectId> {
     if !touched.subtree_touched(prefix) {
@@ -336,7 +336,7 @@ pub(crate) fn compose_merged_tree_oid(
             continue;
         }
 
-        if let Some(entry) = stage0_by_path.get(&fp) {
+        if let Some(entry) = stage0_by_path.get(fp.as_slice()) {
             out_entries.push(TreeEntry {
                 mode: entry.mode,
                 name,
@@ -347,9 +347,18 @@ pub(crate) fn compose_merged_tree_oid(
 
         let mode = o_te.or(t_te).or(b_te).map(|e| e.mode).unwrap_or(MODE_DIR);
         if mode == MODE_DIR {
-            let b_sub = b_te.map(|e| e.oid).unwrap_or(*empty_tree);
-            let o_sub = o_te.map(|e| e.oid).unwrap_or(*empty_tree);
-            let t_sub = t_te.map(|e| e.oid).unwrap_or(*empty_tree);
+            let b_sub = b_te
+                .filter(|e| e.mode == MODE_DIR)
+                .map(|e| e.oid)
+                .unwrap_or(*empty_tree);
+            let o_sub = o_te
+                .filter(|e| e.mode == MODE_DIR)
+                .map(|e| e.oid)
+                .unwrap_or(*empty_tree);
+            let t_sub = t_te
+                .filter(|e| e.mode == MODE_DIR)
+                .map(|e| e.oid)
+                .unwrap_or(*empty_tree);
             let sub = compose_merged_tree_oid(
                 cache,
                 odb,
@@ -421,8 +430,8 @@ pub(crate) fn three_way_on_touched_paths(
     let ctx = PathMergeContext::new(repo);
     let mut out = crate::index::Index::new();
     let mut conflict_content = BTreeMap::new();
-    let mut handled_base: HSet<Vec<u8>> = HSet::new();
-    let mut handled_theirs: HSet<Vec<u8>> = HSet::new();
+    let mut handled_base: HSet<&[u8]> = HSet::new();
+    let mut handled_theirs: HSet<&[u8]> = HSet::new();
     let mut rename_conflict_paths: HSet<&[u8]> = HSet::new();
 
     for conflict in &rename_conflicts {
@@ -446,8 +455,8 @@ pub(crate) fn three_way_on_touched_paths(
             diff_algorithm,
             presentation,
         )?;
-        handled_base.insert(conflict.base_path.clone());
-        handled_theirs.insert(conflict.theirs_path.clone());
+        handled_base.insert(conflict.base_path.as_slice());
+        handled_theirs.insert(conflict.theirs_path.as_slice());
         rename_conflict_paths.extend([
             conflict.base_path.as_slice(),
             conflict.ours_path.as_slice(),
@@ -455,25 +464,25 @@ pub(crate) fn three_way_on_touched_paths(
         ]);
     }
 
-    let mut ours_paths: Vec<Vec<u8>> = touched.iter().cloned().collect();
+    let mut ours_paths: Vec<&[u8]> = touched.iter().map(Vec::as_slice).collect();
     for new in ours_new_to_old.keys() {
-        ours_paths.push(new.clone());
+        ours_paths.push(new);
     }
     ours_paths.sort();
     ours_paths.dedup();
 
-    let theirs_rename_source_by_dest: HashMap<Vec<u8>, Vec<u8>> = theirs_old_to_new
+    let theirs_rename_source_by_dest: HashMap<&[u8], &[u8]> = theirs_old_to_new
         .iter()
-        .map(|(old, new)| (new.clone(), old.clone()))
+        .map(|(old, new)| (new.as_slice(), old.as_slice()))
         .collect();
 
     // When the other side renamed base paths to `new`, those destinations are also in
     // `touched`. When ours still has the rename source, the source iteration already merges
     // at `new`; skip duplicate passes (issue #1093). Do not skip when ours deleted the source.
-    let mut theirs_rename_destinations: HSet<Vec<u8>> = HSet::new();
+    let mut theirs_rename_destinations: HSet<&[u8]> = HSet::new();
     for (old, new) in theirs_old_to_new {
         if old != new && touched.contains(old) {
-            theirs_rename_destinations.insert(new.clone());
+            theirs_rename_destinations.insert(new.as_slice());
         }
     }
 
@@ -485,94 +494,85 @@ pub(crate) fn three_way_on_touched_paths(
         .collect();
 
     for op in ours_paths {
-        if rename_conflict_paths.contains(op.as_slice()) {
+        if rename_conflict_paths.contains(op) {
             continue;
         }
-        if ours_rename_sources.contains(op.as_slice())
-            && !ours.contains_key(&op)
-            && lookup_index_entry_at_path(cache, odb, &ours_tree, &op)?.is_none()
+        if ours_rename_sources.contains(op)
+            && !ours.contains_key(op)
+            && lookup_index_entry_at_path(cache, odb, &ours_tree, op)?.is_none()
         {
             continue;
         }
-        if theirs_rename_destinations.contains(&op) && !ours_new_to_old.contains_key(&op) {
-            if let Some(old) = theirs_rename_source_by_dest.get(&op) {
-                let ours_still_at_source = ours.contains_key(old)
+        if theirs_rename_destinations.contains(op) && !ours_new_to_old.contains_key(op) {
+            if let Some(old) = theirs_rename_source_by_dest.get(op) {
+                let ours_still_at_source = ours.contains_key(*old)
                     || lookup_index_entry_at_path(cache, odb, &ours_tree, old)
                         .ok()
                         .flatten()
                         .is_some();
                 if ours_still_at_source {
-                    let ours_present_at_dest = ours.contains_key(&op)
-                        || lookup_index_entry_at_path(cache, odb, &ours_tree, &op)
+                    let ours_present_at_dest = ours.contains_key(op)
+                        || lookup_index_entry_at_path(cache, odb, &ours_tree, op)
                             .ok()
                             .flatten()
                             .is_some();
                     if !ours_present_at_dest {
-                        if theirs.get(&op).is_some()
-                            || lookup_index_entry_at_path(cache, odb, &theirs_tree, &op)
+                        if theirs.get(op).is_some()
+                            || lookup_index_entry_at_path(cache, odb, &theirs_tree, op)
                                 .ok()
                                 .flatten()
                                 .is_some()
                         {
-                            handled_theirs.insert(op.clone());
+                            handled_theirs.insert(op);
                         }
                         continue;
                     }
                 }
             }
         }
-        let bp = if let Some(old) = ours_new_to_old.get(&op) {
-            Some(old.clone())
-        } else if base.contains_key(&op) {
-            Some(op.clone())
+        let bp = if let Some(old) = ours_new_to_old.get(op) {
+            Some(old.as_slice())
+        } else if base.contains_key(op) {
+            Some(op)
         } else {
             None
         };
 
-        let tp = if let Some(ref bpath) = bp {
-            theirs_old_to_new
-                .get(bpath)
-                .cloned()
-                .unwrap_or_else(|| bpath.clone())
-        } else {
-            op.clone()
-        };
+        let tp = bp.map_or(op, |path| {
+            theirs_old_to_new.get(path).map_or(path, Vec::as_slice)
+        });
 
-        let b = bp.as_ref().and_then(|p| base.get(p).cloned()).or_else(|| {
-            bp.as_ref().and_then(|p| {
+        let b = bp.and_then(|p| base.get(p).cloned()).or_else(|| {
+            bp.and_then(|p| {
                 lookup_index_entry_at_path(cache, odb, &base_tree, p)
                     .ok()
                     .flatten()
             })
         });
-        let o = ours.get(&op).cloned().or_else(|| {
-            lookup_index_entry_at_path(cache, odb, &ours_tree, &op)
+        let o = ours.get(op).cloned().or_else(|| {
+            lookup_index_entry_at_path(cache, odb, &ours_tree, op)
                 .ok()
                 .flatten()
         });
-        let t = theirs.get(&tp).cloned().or_else(|| {
-            lookup_index_entry_at_path(cache, odb, &theirs_tree, &tp)
+        let t = theirs.get(tp).cloned().or_else(|| {
+            lookup_index_entry_at_path(cache, odb, &theirs_tree, tp)
                 .ok()
                 .flatten()
         });
         if t.is_some() {
-            handled_theirs.insert(tp.clone());
+            handled_theirs.insert(tp);
         }
-        if let Some(ref p) = bp {
-            handled_base.insert(p.clone());
+        if let Some(p) = bp {
+            handled_base.insert(p);
         }
 
-        let out_path = if bp.as_ref().is_some_and(|b| b == &op) && tp != op {
-            tp.clone()
-        } else {
-            op.clone()
-        };
+        let out_path = if bp == Some(op) && tp != op { tp } else { op };
 
         merge_one_path(
             &ctx,
             &mut out,
             &mut conflict_content,
-            &out_path,
+            out_path,
             b.as_ref(),
             o.as_ref(),
             t.as_ref(),
@@ -583,38 +583,35 @@ pub(crate) fn three_way_on_touched_paths(
         )?;
     }
 
-    let mut base_paths: Vec<Vec<u8>> = touched.iter().cloned().collect();
+    let mut base_paths: Vec<&[u8]> = touched.iter().map(Vec::as_slice).collect();
     base_paths.sort();
     base_paths.dedup();
     for bp in base_paths {
-        if handled_base.contains(&bp) {
+        if handled_base.contains(bp) {
             continue;
         }
-        let tp = theirs_old_to_new
-            .get(&bp)
-            .cloned()
-            .unwrap_or_else(|| bp.clone());
-        let b = base.get(&bp).cloned().or_else(|| {
-            lookup_index_entry_at_path(cache, odb, &base_tree, &bp)
+        let tp = theirs_old_to_new.get(bp).map_or(bp, Vec::as_slice);
+        let b = base.get(bp).cloned().or_else(|| {
+            lookup_index_entry_at_path(cache, odb, &base_tree, bp)
                 .ok()
                 .flatten()
         });
         if b.is_none() {
             continue;
         }
-        let t = theirs.get(&tp).cloned().or_else(|| {
-            lookup_index_entry_at_path(cache, odb, &theirs_tree, &tp)
+        let t = theirs.get(tp).cloned().or_else(|| {
+            lookup_index_entry_at_path(cache, odb, &theirs_tree, tp)
                 .ok()
                 .flatten()
         });
         if t.is_some() {
-            handled_theirs.insert(tp.clone());
+            handled_theirs.insert(tp);
         }
         merge_one_path(
             &ctx,
             &mut out,
             &mut conflict_content,
-            &bp,
+            bp,
             b.as_ref(),
             None,
             t.as_ref(),
@@ -625,15 +622,15 @@ pub(crate) fn three_way_on_touched_paths(
         )?;
     }
 
-    let mut theirs_paths: Vec<Vec<u8>> = touched.iter().cloned().collect();
+    let mut theirs_paths: Vec<&[u8]> = touched.iter().map(Vec::as_slice).collect();
     theirs_paths.sort();
     theirs_paths.dedup();
     for tp in theirs_paths {
-        if handled_theirs.contains(&tp) {
+        if handled_theirs.contains(tp) {
             continue;
         }
-        let t = theirs.get(&tp).cloned().or_else(|| {
-            lookup_index_entry_at_path(cache, odb, &theirs_tree, &tp)
+        let t = theirs.get(tp).cloned().or_else(|| {
+            lookup_index_entry_at_path(cache, odb, &theirs_tree, tp)
                 .ok()
                 .flatten()
         });
@@ -644,7 +641,7 @@ pub(crate) fn three_way_on_touched_paths(
             &ctx,
             &mut out,
             &mut conflict_content,
-            &tp,
+            tp,
             None,
             None,
             t.as_ref(),
@@ -678,7 +675,7 @@ pub(crate) fn finish_merge_result_tree(
     let mut stage0 = BTreeMap::new();
     for entry in output.index.entries() {
         if entry.stage() == 0 {
-            stage0.insert(entry.path.clone(), entry.clone());
+            stage0.insert(entry.path.as_slice(), entry);
         }
     }
     for entry in output.index.entries() {
@@ -688,10 +685,9 @@ pub(crate) fn finish_merge_result_tree(
         if output.conflict_content.contains_key(&entry.path) {
             continue;
         }
-        if (entry.stage() == 2 || entry.stage() == 3) && !stage0.contains_key(&entry.path) {
-            let mut e = entry.clone();
-            e.set_stage(0);
-            stage0.insert(e.path.clone(), e);
+        if (entry.stage() == 2 || entry.stage() == 3) && !stage0.contains_key(entry.path.as_slice())
+        {
+            stage0.insert(entry.path.as_slice(), entry);
         }
     }
     let empty_tree = odb.empty_tree_oid()?;

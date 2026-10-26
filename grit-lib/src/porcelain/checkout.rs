@@ -1700,7 +1700,7 @@ fn checkout_bulk_added_tree_changes(
 ) -> Result<()> {
     let checkout_smudge_ctx = crate::filter_process::checkout_smudge_context(repo);
     let mut dir_cache = LeadingDirCache::with_protect(ProtectOptions::from_config(config.as_ref()));
-    let mut write_jobs: Vec<CheckoutWriteJob> = Vec::with_capacity(changes.len());
+    let mut write_jobs: Vec<CheckoutWriteJob<'_>> = Vec::with_capacity(changes.len());
     for change in changes {
         crate::progress::poll_cancel(progress, cancel)?;
         let Some(path) = change.new_path.as_deref() else {
@@ -1712,7 +1712,7 @@ fn checkout_bulk_added_tree_changes(
             path: path.to_owned(),
             mode,
             oid: change.new_oid,
-            change: change.clone(),
+            change,
             file_attrs,
             smudge_meta: crate::filter_process::smudge_meta_for_checkout_blob(
                 &checkout_smudge_ctx,
@@ -1806,11 +1806,9 @@ fn checkout_bulk_mod_delete_tree_changes(
         .iter()
         .filter(|c| c.status == DiffStatus::Deleted)
         .collect();
-    let write_changes: Vec<DiffEntry> = changes
+    let write_changes = changes
         .iter()
-        .filter(|c| matches!(c.status, DiffStatus::Modified | DiffStatus::Added))
-        .cloned()
-        .collect();
+        .filter(|c| matches!(c.status, DiffStatus::Modified | DiffStatus::Added));
     let delete_paths: Vec<String> = delete_changes
         .iter()
         .filter_map(|c| c.old_path.clone())
@@ -1840,8 +1838,9 @@ fn checkout_bulk_mod_delete_tree_changes(
 
     let checkout_smudge_ctx = crate::filter_process::checkout_smudge_context(repo);
     let mut dir_cache = LeadingDirCache::with_protect(ProtectOptions::from_config(config.as_ref()));
-    let mut write_jobs: Vec<CheckoutWriteJob> = Vec::with_capacity(write_changes.len());
-    for change in &write_changes {
+    let mut write_jobs: Vec<CheckoutWriteJob<'_>> =
+        Vec::with_capacity(changes.len() - delete_changes.len());
+    for change in write_changes {
         let Some(path) = change.new_path.as_deref() else {
             continue;
         };
@@ -1851,7 +1850,7 @@ fn checkout_bulk_mod_delete_tree_changes(
             path: path.to_owned(),
             mode,
             oid: change.new_oid,
-            change: change.clone(),
+            change,
             file_attrs,
             smudge_meta: crate::filter_process::smudge_meta_for_checkout_blob(
                 &checkout_smudge_ctx,
@@ -2290,7 +2289,7 @@ fn checkout_tree_changes_with_progress(
     let mut deleted_abs_paths: Vec<PathBuf> = Vec::with_capacity(changes.len() / 8);
     let mut dir_cache = LeadingDirCache::with_protect(protect);
     let mut plan: Vec<CheckoutPlanSlot> = Vec::with_capacity(changes.len());
-    let mut write_jobs: Vec<CheckoutWriteJob> = Vec::new();
+    let mut write_jobs: Vec<CheckoutWriteJob<'_>> = Vec::new();
     let mut rules: Option<Rc<WorktreeRules>> =
         apply.precomputed_worktree_rules.as_ref().map(Rc::clone);
     let mut conv: Option<ConversionConfig> = None;
@@ -2486,7 +2485,7 @@ fn checkout_tree_changes_with_progress(
                 path: path.clone(),
                 mode,
                 oid: change.new_oid,
-                change: change.clone(),
+                change,
                 file_attrs,
                 smudge_meta,
             });
@@ -3263,7 +3262,7 @@ pub(crate) struct LeadingDirCache {
 
 fn precreate_checkout_parent_dirs(
     work_tree: &Path,
-    jobs: &[CheckoutWriteJob],
+    jobs: &[CheckoutWriteJob<'_>],
     cache: &mut LeadingDirCache,
 ) {
     let mut dirs = BTreeSet::new();

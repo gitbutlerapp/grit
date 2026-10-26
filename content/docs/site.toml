@@ -117,6 +117,7 @@ baseline = [
   "grit-utils/baselines/delta-encode-after.json",
   "grit-utils/baselines/network.json",
   "grit-utils/baselines/push-one-commit-ssh.json",
+  "grit-utils/baselines/merge-content-memory.json",
   "grit-utils/baselines/blame-deep-2000.json",
   "grit-utils/baselines/blame-large-tail.json",
   "grit-utils/baselines/stash-push-pop-LH.json",

@@ -1,10 +1,10 @@
 //! Parsed-tree cache and per-side directory metadata for three-way tree merges.
 
 use std::collections::{HashMap, HashSet};
-use std::rc::Rc;
+use std::sync::Arc;
 
 use super::merge_trees_walk::PathPrefixIndex;
-use crate::objects::{parse_tree, ObjectId, ObjectKind, TreeEntry};
+use crate::objects::{ObjectId, TreeEntry};
 use crate::odb::Odb;
 
 const MODE_DIR: u32 = 0o040000;
@@ -20,7 +20,7 @@ pub(crate) enum MergeTreeSide {
 /// Per-merge cache: parsed tree bodies and directory paths known to contain files.
 #[derive(Default)]
 pub(crate) struct MergeTreeCache {
-    parsed: HashMap<ObjectId, Rc<[TreeEntry]>>,
+    parsed: HashMap<ObjectId, Arc<Vec<TreeEntry>>>,
     dir_with_descendant: [HashSet<Vec<u8>>; 3],
 }
 
@@ -35,17 +35,14 @@ impl MergeTreeCache {
         &mut self,
         odb: &Odb,
         oid: &ObjectId,
-    ) -> crate::error::Result<Rc<[TreeEntry]>> {
+    ) -> crate::error::Result<Arc<Vec<TreeEntry>>> {
         if let Some(entries) = self.parsed.get(oid) {
-            return Ok(Rc::clone(entries));
+            return Ok(Arc::clone(entries));
         }
-        let obj = odb.read(oid)?;
-        let entries: Rc<[TreeEntry]> = if obj.kind == ObjectKind::Tree {
-            parse_tree(&obj.data)?.into()
-        } else {
-            Rc::from(Vec::new())
-        };
-        self.parsed.insert(*oid, Rc::clone(&entries));
+        // Diff and merge share the ODB's parsed entries; the merge-local map only
+        // pins them while walking (the ODB's bounded cache may evict them).
+        let entries = odb.cached_tree_entries(oid)?;
+        self.parsed.insert(*oid, Arc::clone(&entries));
         Ok(entries)
     }
 
@@ -180,7 +177,7 @@ pub(crate) fn side_tree_has_descendant_at_cached(
     tree_oid: &ObjectId,
     side: MergeTreeSide,
     prefix: &[u8],
-    sparse_paths: &PathPrefixIndex,
+    sparse_paths: &PathPrefixIndex<'_>,
 ) -> crate::error::Result<bool> {
     if sparse_paths.has_descendant(prefix) {
         return Ok(true);
@@ -197,4 +194,41 @@ pub(crate) fn side_tree_has_descendant_at_cached(
         }
     }
     tree_has_entries_with_path_prefix_cached(cache, odb, tree_oid, side, prefix)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::objects::{serialize_tree, ObjectKind};
+    use crate::repo::{InitOptions, Repository};
+
+    #[test]
+    fn merge_cache_shares_parsed_entries_with_the_odb() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = Repository::init(dir.path(), &InitOptions::new()).expect("init");
+        let odb = repo.odb();
+        let blob = odb.write(ObjectKind::Blob, b"text\n").expect("blob");
+        let tree = odb
+            .write(
+                ObjectKind::Tree,
+                &serialize_tree(&[TreeEntry {
+                    mode: 0o100644,
+                    name: b"file".to_vec(),
+                    oid: blob,
+                }]),
+            )
+            .expect("tree");
+        let parsed = odb.cached_tree_entries(&tree).expect("parsed");
+        let mut cache = MergeTreeCache::default();
+        assert!(Arc::ptr_eq(
+            &parsed,
+            &cache.tree_entries(odb, &tree).expect("merge cache")
+        ));
+        cache.clear_retained();
+        assert!(Arc::ptr_eq(
+            &parsed,
+            &cache.tree_entries(odb, &tree).expect("reload")
+        ));
+        assert!(cache.tree_entries(odb, &blob).is_err());
+    }
 }
