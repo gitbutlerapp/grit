@@ -15,6 +15,7 @@ use serde::Serialize;
 /// Any `--json` failure object on stdout (schema contract only; see `error.v1.json`).
 #[derive(Serialize, JsonSchema)]
 #[serde(untagged)]
+#[expect(dead_code, reason = "never built; only its JSON Schema is generated")]
 enum JsonErrorEnvelope {
     /// Usual command failure (`{"error":"…"}` only).
     Plain {
@@ -46,11 +47,6 @@ pub fn schema_id(command: &str) -> String {
     format!("https://grit-scm.com/schemas/{command}/v1.json")
 }
 
-/// Stable `$id` URL for a command's v2 schema document.
-pub fn schema_id_v2(command: &str) -> String {
-    format!("https://grit-scm.com/schemas/{command}/v2.json")
-}
-
 /// Commands whose live `--json` shape is versioned separately from the frozen v1 contract.
 const SCHEMA_V2_COMMANDS: &[&str] = &[
     "add",
@@ -71,16 +67,6 @@ const SCHEMA_V2_COMMANDS: &[&str] = &[
     "tag",
     "worktree.prune",
 ];
-
-/// File name for a command schema under [`schemas_dir`].
-pub fn schema_file_name(command: &str) -> String {
-    schema_file_name_for(command, committed_schema_version(command))
-}
-
-/// File name for a v2 schema document.
-pub fn schema_file_name_v2(command: &str) -> String {
-    schema_file_name_for(command, 2)
-}
 
 /// File name for a command schema at `version` under [`schemas_dir`].
 pub fn schema_file_name_for(command: &str, version: u32) -> String {
@@ -574,10 +560,6 @@ pub fn write_all_schemas(dir: &Path) {
             panic!("write schema {}: {e}", path.display());
         }
     }
-}
-
-fn root_schema_to_document_v2(command: &str, root: RootSchema) -> serde_json::Value {
-    root_schema_to_document_at_version(command, 2, root)
 }
 
 fn root_schema_to_document_at_version(

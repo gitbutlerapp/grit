@@ -3907,10 +3907,7 @@ mod tests {
     use std::collections::HashSet;
     use std::path::PathBuf;
 
-    use clap::CommandFactory;
     use serde_json::Value;
-
-    use super::Cli;
 
     /// Options every command accepts; they're documented once on the docs
     /// overview page rather than on each command's page.

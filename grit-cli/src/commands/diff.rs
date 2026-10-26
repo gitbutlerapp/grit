@@ -3083,9 +3083,7 @@ mod tests {
     }
 
     mod stream_output_parity {
-        use super::super::{
-            file_diff_from_tree_structured, render_file, DiffFormatArgs, PathDisplayOptions,
-        };
+        use super::super::{file_diff_from_tree_structured, render_file, PathDisplayOptions};
         use crate::markdown;
         use crate::output::OutputMode;
         use grit_lib::diff::{

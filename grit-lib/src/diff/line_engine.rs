@@ -11,8 +11,8 @@ use crate::objects::HashAlgo;
 ///
 /// Skips per-line old/new coordinates; [`super::hunk_id`] only hashes kind, text, and
 /// `no_newline_at_eof`.
+#[cfg(test)]
 #[must_use]
-#[allow(dead_code)]
 pub(crate) fn structured_hunk_for_id_from_unified_slice(
     hunk_str: &str,
     before_count: usize,

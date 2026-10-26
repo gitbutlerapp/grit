@@ -470,6 +470,3 @@ impl std::fmt::Display for MissingPrerequisites {
 }
 
 impl std::error::Error for MissingPrerequisites {}
-
-/// Exit code for [`MissingPrerequisites`].
-pub const MISSING_PREREQUISITE_EXIT: i32 = 128;

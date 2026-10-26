@@ -65,7 +65,7 @@ impl ExitStatus {
     #[must_use]
     pub fn for_error(err: &Error) -> Self {
         if err.downcast_ref::<MissingPrerequisites>().is_some() {
-            return Self::from_i32(commands::bundle::MISSING_PREREQUISITE_EXIT);
+            return Self::MissingPrerequisite;
         }
         if err
             .chain()
@@ -269,38 +269,6 @@ impl ExitStatus {
             Self::Failure
         } else {
             Self::Success
-        }
-    }
-
-    /// Every variant (for docs contract tests).
-    #[must_use]
-    #[allow(dead_code)]
-    pub fn all() -> &'static [Self] {
-        &[
-            Self::Success,
-            Self::Failure,
-            Self::Usage,
-            Self::RemoteUnreadable,
-            Self::MissingPrerequisite,
-            Self::RefusedNotFf,
-            Self::InvalidCommitFilter,
-            Self::Custom(17),
-        ]
-    }
-
-    /// Snake-case slug used in [Exit codes](https://grit-scm.com/docs/exit-codes).
-    #[must_use]
-    #[allow(dead_code)]
-    pub fn doc_slug(self) -> &'static str {
-        match self {
-            Self::Success => "success",
-            Self::Failure => "failure",
-            Self::Usage => "usage",
-            Self::RemoteUnreadable => "remote_unreadable",
-            Self::MissingPrerequisite => "missing_prerequisite",
-            Self::RefusedNotFf => "refused_not_ff",
-            Self::InvalidCommitFilter => "invalid_commit_filter",
-            Self::Custom(_) => "custom",
         }
     }
 }

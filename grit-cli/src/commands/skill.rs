@@ -94,8 +94,6 @@ mod tests {
 
     #[test]
     fn skill_mentions_only_real_commands() {
-        use clap::CommandFactory;
-
         let cli = crate::cli_command::build_cli_command();
         let known: Vec<String> = cli
             .get_subcommands()
@@ -123,8 +121,6 @@ mod tests {
     /// Every flag the skill documents on a grit command path must exist on that clap command.
     #[test]
     fn skill_mentions_only_real_flags() {
-        use clap::CommandFactory;
-
         let root = with_cli_root_for_tests(crate::cli_command::build_cli_command);
         let mut missing = Vec::new();
         for invocation in skill_grit_invocations(SKILL) {

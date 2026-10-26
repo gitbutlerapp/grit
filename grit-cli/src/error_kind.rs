@@ -95,49 +95,9 @@ impl ErrorKind {
         }
     }
 
-    /// Snake-case slug documented on [Exit codes](https://grit-scm.com/docs/exit-codes).
+    /// Every variant emitted today (for contract tests).
+    #[cfg(test)]
     #[must_use]
-    #[allow(dead_code)]
-    pub fn doc_slug(self) -> &'static str {
-        match self {
-            Self::Conflict => "conflict",
-            Self::HashCollision => "hash_collision",
-            Self::WouldOverwrite => "would_overwrite",
-            Self::OperationInProgress => "operation_in_progress",
-            Self::InvalidPattern => "invalid_pattern",
-            Self::Usage => "usage",
-            Self::IncompatibleFlags => "incompatible_flags",
-            Self::IndexLocked => "index_locked",
-            Self::BranchAlreadyExists => "branch_already_exists",
-            Self::BranchNotFound => "branch_not_found",
-            Self::NoPreviousBranch => "no_previous_branch",
-            Self::BranchInvalidName => "branch_invalid_name",
-            Self::BranchNotFullyMerged => "branch_not_fully_merged",
-            Self::BranchCheckedOut => "branch_checked_out",
-            Self::BranchNoCommits => "branch_no_commits",
-            Self::BranchInvalidStartPoint => "branch_invalid_start_point",
-            Self::BranchUpstreamNotTracking => "branch_upstream_not_tracking",
-            Self::BranchNoUpstream => "branch_no_upstream",
-            Self::BranchError => "branch_error",
-            Self::HookFailed => "hook_failed",
-            Self::RevisionNotFound => "revision_not_found",
-            Self::RemoteUnreadable => "remote_unreadable",
-            Self::NoRemote => "no_remote",
-            Self::RemoteNotFound => "remote_not_found",
-            Self::RemoteNoUrl => "remote_no_url",
-            Self::AuthRequired => "auth_required",
-            Self::AuthRejected => "auth_rejected",
-            Self::UnmergedPaths => "unmerged_paths",
-            Self::DirtyWorktree => "dirty_worktree",
-            Self::WorktreePathIo => "worktree_path_io",
-            Self::NothingStaged => "nothing_staged",
-            Self::NothingToCommit => "nothing_to_commit",
-        }
-    }
-
-    /// Every variant emitted today (for docs and contract tests).
-    #[must_use]
-    #[allow(dead_code)]
     pub fn all() -> &'static [Self] {
         &[
             Self::Conflict,
