@@ -22,6 +22,8 @@ When a commit renamed or moved the file (including rename-and-edit in the same c
 
 On Unix, explicit file operands must be valid UTF-8. An operand containing invalid UTF-8 bytes is rejected before the command runs, with exit status **2** and no changes to the repository. Human output reports the usage error on stderr; `--json` writes an error object with `kind: "usage"` on stdout, and `--markdown` writes `**Error:**` on stdout. The argument is never replaced with a similar Unicode filename.
 
+Adding or removing the final newline attributes the last line to the commit that changed it. With `-w` / `--ignore-all-space`, newline-only changes are ignored along with other whitespace-only changes. Line content in the output excludes LF in either mode.
+
 ## Options
 
 | Option | Description |
@@ -152,6 +154,20 @@ Revision `83352a61f6715ec3f0a297c6d6150725154fb833`
 | ---: | :---: | --- | --- | --- | ---: | --- |
 | 1 |  | `83352a6` | Test | [TIME_AGO] | 1 | tracked v2 |
 ```
+
+## Benchmarking
+
+Measured on 2026-10-26 on a 4-core Linux VM with system Git 2.55.0 and release builds. The baseline is `origin/main` at `5d557d222cbe621d4d3bd41f7ecf1ab7d71c477b`. These are the existing deep-history and large-tail blame fixtures used by `grit-bench`.
+
+Each cell shows median wall time in milliseconds / peak RSS in KiB. Nine fresh-process measurements are interleaved across Git, baseline grit, and fixed grit after two warmups. Executable files and repository data are warmed equally before measurement; stdout is discarded. Git uses `blame --porcelain`, grit uses `blame`, and peak RSS comes from `/usr/bin/time -v`.
+
+| Scenario | System Git (ms / KiB) | Baseline grit (ms / KiB) | Fixed grit (ms / KiB) |
+| --- | ---: | ---: | ---: |
+| 2,000 commits, full file | 12.31 / 7,296 | 21.53 / 16,780 | 21.02 / 16,860 |
+| 5,000 lines / 150 commits, full file | 53.37 / 7,736 | 41.21 / 29,872 | 37.13 / 29,832 |
+| 5,000 lines / 150 commits, `-L 100,120` | 52.33 / 7,736 | 31.02 / 28,252 | 26.90 / 27,708 |
+
+Wall time improves by about 2–13% against the baseline. Peak RSS is effectively flat for deep history (+80 KiB, within observed run variation), and falls by 40 KiB for full-file tail churn and 544 KiB for the range. The unchanged-prefix/suffix shortcut remains enabled.
 
 ## Exit status
 

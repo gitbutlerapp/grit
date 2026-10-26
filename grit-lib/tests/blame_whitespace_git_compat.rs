@@ -245,3 +245,29 @@ fn ignore_whitespace_crlf_file() {
     let repo = open_repo(root);
     assert_blame_matches(&repo, root, "f.txt");
 }
+
+#[test]
+fn ignore_whitespace_passes_through_final_newline_changes() {
+    for prefix in ["", "first\n", "same\n", "first\r\n"] {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        git_run(root, &["init", "-q", "-b", "main"]);
+        git_run(root, &["config", "core.autocrlf", "false"]);
+        let body = if prefix.contains('\r') {
+            "same\r"
+        } else {
+            "same"
+        };
+        let mut original = None;
+        for ending in ["", "\n", ""] {
+            std::fs::write(root.join("f.txt"), format!("{prefix}{body}{ending}")).unwrap();
+            git_run(root, &["add", "f.txt"]);
+            git_run(root, &["commit", "-qm", "change ending"]);
+            let original = original.get_or_insert_with(|| git_blame_w(root, "f.txt"));
+            let repo = open_repo(root);
+            assert_blame_matches(&repo, root, "f.txt");
+            assert_eq!(&grit_blame_w(&repo, "f.txt"), original);
+        }
+        git_run(root, &["fsck", "--strict"]);
+    }
+}

@@ -84,3 +84,29 @@ fn ignore_all_space_flag_matches_git_on_whitespace_only_edit() {
         .expect("git sha");
     assert_eq!(git_sha, a);
 }
+
+#[test]
+fn final_newline_changes_attribute_json_line_to_modifying_commit() {
+    let dir = tempfile::tempdir().unwrap();
+    let repo = dir.path();
+    git(repo, &["init", "-q", "-b", "main"]);
+    for text in ["hello", "hello\n", "hello"] {
+        fs::write(repo.join("a.txt"), text).unwrap();
+        git(repo, &["add", "a.txt"]);
+        git(repo, &["commit", "-qm", "change ending"]);
+        let expected = Command::new("git")
+            .current_dir(repo)
+            .args(["rev-parse", "HEAD"])
+            .output()
+            .unwrap();
+        assert!(expected.status.success());
+        let expected = String::from_utf8(expected.stdout).unwrap();
+        git(repo, &["commit", "--allow-empty", "-qm", "unrelated"]);
+        let result = gs_json(repo, &["blame", "--", "a.txt"]);
+        assert_eq!(result["lines"].as_array().unwrap().len(), 1);
+        assert_eq!(result["lines"][0]["commit"], expected.trim());
+        assert_eq!(result["lines"][0]["content"], "hello");
+        assert_eq!(result["lines"][0]["final_line"], 1);
+    }
+    git(repo, &["fsck", "--strict"]);
+}

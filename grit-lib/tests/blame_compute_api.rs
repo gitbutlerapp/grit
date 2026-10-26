@@ -242,3 +242,69 @@ fn compute_blame_line_range_through_ignored_merge_after_line_insert() {
         "ranged blame must match full blame and git through ignored merge"
     );
 }
+
+#[test]
+fn compute_blame_final_newline_changes_preserve_bodies_and_ranges() {
+    let tmp = tempfile::tempdir().expect("tempdir");
+    let root = tmp.path();
+    git_run(root, &["init", "-q", "-b", "main"]);
+    let mut first_commit = None;
+    for text in ["first\nhello", "first\nhello\n", "first\nhello"] {
+        std::fs::write(root.join("a.txt"), text).unwrap();
+        git_run(root, &["add", "a.txt"]);
+        git_run(root, &["commit", "-qm", "change ending"]);
+        let modified = head_oid(root);
+        let first = *first_commit.get_or_insert(modified);
+        git_run(root, &["commit", "--allow-empty", "-qm", "unrelated"]);
+        let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).unwrap();
+        for range in [None, Some(2..=2)] {
+            let out = Command::new("git")
+                .current_dir(root)
+                .args(["blame", "--line-porcelain", "--", "a.txt"])
+                .output()
+                .unwrap();
+            assert!(out.status.success());
+            let oracle: Vec<_> = String::from_utf8(out.stdout)
+                .unwrap()
+                .lines()
+                .filter_map(|line| {
+                    let parts: Vec<_> = line.split_whitespace().collect();
+                    (parts.len() >= 3 && parts[0].len() == 40)
+                        .then(|| parts[0].parse::<ObjectId>().unwrap())
+                })
+                .collect();
+            let lines = compute_blame(
+                repo.odb(),
+                head_oid(root),
+                "a.txt",
+                &HashSet::new(),
+                BlameDiffAlgorithm::Myers,
+                None,
+                false,
+                0,
+                false,
+                &HashMap::new(),
+                true,
+                range.clone(),
+                grit_lib::diff::WhitespaceMode::default(),
+                &grit_lib::parallel::ThreadPolicy::default(),
+            )
+            .unwrap();
+            assert_eq!(oracle, vec![first, modified]);
+            assert_eq!(lines.len(), if range.is_some() { 1 } else { 2 });
+            for line in lines {
+                assert_eq!(line.oid, oracle[line.final_lineno - 1]);
+                assert_eq!(line.orig_lineno, line.final_lineno);
+                assert_eq!(
+                    line.content,
+                    if line.final_lineno == 1 {
+                        "first"
+                    } else {
+                        "hello"
+                    }
+                );
+            }
+        }
+    }
+    git_run(root, &["fsck", "--strict"]);
+}

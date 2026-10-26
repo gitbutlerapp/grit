@@ -1706,3 +1706,163 @@ fn blame_merge_same_path_and_renamed_sibling_parent_matches_git() {
     let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).expect("open");
     assert_blame_matches(&repo, root, "target.txt", None, None);
 }
+
+#[test]
+fn blame_final_newline_changes_match_git() {
+    // Include repeated bodies and transitions that change line boundaries as well as EOF.
+    let histories: &[&[&str]] = &[
+        &["hello", "hello\n", "hello"],
+        &["first\nlast", "first\nlast\n", "first\nlast"],
+        &["same\nsame", "same\nsame\n", "same\nsame"],
+        &["first\r\nlast\r", "first\r\nlast\r\n", "first\r\nlast\r"],
+        &["", "\n", "", "hello", "hello\n", ""],
+        &[
+            "first\nlast",
+            "first\nlast\nappended\n",
+            "first\nlast\nappended",
+        ],
+        &[
+            "first\nhello world",
+            "first\nhello\nworld\n",
+            "first\nhello world",
+        ],
+        &["first\n\n", "first\n", "first", "first\n"],
+    ];
+    for history in histories {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path();
+        git_run(root, &["init", "-q", "-b", "main"]);
+        git_run(root, &["config", "core.autocrlf", "false"]);
+        git_run(root, &["config", "gc.auto", "0"]);
+        for (step, text) in history.iter().enumerate() {
+            std::fs::write(root.join("a.txt"), text).unwrap();
+            git_run(root, &["add", "a.txt"]);
+            git_run(root, &["commit", "-qm", &format!("version {step}")]);
+            // Walk through a commit whose tree changes but whose blamed blob does not.
+            std::fs::write(root.join("other"), format!("unrelated {step}\n")).unwrap();
+            git_run(root, &["add", "other"]);
+            git_run(root, &["commit", "-qm", "unrelated"]);
+            for algorithm in ["myers", "minimal", "patience", "histogram"] {
+                git_run(root, &["config", "diff.algorithm", algorithm]);
+                let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).unwrap();
+                assert_blame_matches(&repo, root, "a.txt", None, None);
+                let count = text.split_inclusive('\n').count();
+                if count > 0 {
+                    assert_blame_matches(&repo, root, "a.txt", None, Some((count, count)));
+                    assert_blame_matches(&repo, root, "a.txt", None, Some((1, 1)));
+                }
+                let result = blame_file(&repo, "a.txt", &BlameOptions::default()).unwrap();
+                let bodies: Vec<_> = text
+                    .split_inclusive('\n')
+                    .map(|line| line.strip_suffix('\n').unwrap_or(line))
+                    .collect();
+                assert_eq!(
+                    result
+                        .lines
+                        .iter()
+                        .map(|line| line.content.as_str())
+                        .collect::<Vec<_>>(),
+                    bodies
+                );
+            }
+        }
+        git_run(root, &["fsck", "--strict"]);
+    }
+}
+
+#[test]
+fn blame_final_newline_from_merge_parent_matches_git() {
+    for (before, after) in [
+        ("first\nlast", "first\nlast\n"),
+        ("first\nlast\n", "first\nlast"),
+    ] {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let root = tmp.path();
+        git_run(root, &["init", "-q", "-b", "main"]);
+        std::fs::write(root.join("a.txt"), before).unwrap();
+        git_run(root, &["add", "a.txt"]);
+        git_run(root, &["commit", "-qm", "root"]);
+        git_run(root, &["checkout", "-qb", "side"]);
+        std::fs::write(root.join("a.txt"), after).unwrap();
+        git_run(root, &["commit", "-qam", "add newline"]);
+        git_run(root, &["checkout", "-q", "main"]);
+        std::fs::write(root.join("other"), "unrelated\n").unwrap();
+        git_run(root, &["add", "other"]);
+        git_run(root, &["commit", "-qm", "main"]);
+        git_run(root, &["merge", "--no-ff", "side", "-m", "merge newline"]);
+        let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).unwrap();
+        assert_blame_matches(&repo, root, "a.txt", None, None);
+        assert_blame_matches(&repo, root, "a.txt", None, Some((2, 2)));
+        git_run(root, &["fsck", "--strict"]);
+    }
+}
+
+#[test]
+fn blame_copy_matching_preserves_final_newline() {
+    use grit_lib::blame::CopyDetection;
+    let anchor = "anchoralphabetabcdefghijklmnopqrstuvwxyz0123456789";
+    let tail = "endingalphabetabcdefghijklmnopqrstuvwxyz0123456789";
+    for existing_target in [false, true] {
+        for (source_ending, target_ending) in [("", "\n"), ("\n", ""), ("\n", "\n")] {
+            let tmp = tempfile::tempdir().unwrap();
+            let root = tmp.path();
+            git_run(root, &["init", "-q", "-b", "main"]);
+            std::fs::write(
+                root.join("source"),
+                format!("{anchor}\n{tail}{source_ending}"),
+            )
+            .unwrap();
+            if existing_target {
+                std::fs::write(root.join("target"), "existing\n").unwrap();
+            }
+            git_run(root, &["add", "."]);
+            git_run(root, &["commit", "-qm", "base"]);
+            let prefix = if existing_target { "existing\n" } else { "" };
+            std::fs::write(
+                root.join("target"),
+                format!("{prefix}{anchor}\n{tail}{target_ending}"),
+            )
+            .unwrap();
+            git_run(root, &["add", "."]);
+            git_run(root, &["commit", "-qm", "copy"]);
+            let repo = Repository::discover(Some(root), &RepositoryOptions::empty()).unwrap();
+            for ignore_space in [false, true] {
+                let mut args = vec!["blame", "--porcelain", "-C", "-C", "-C"];
+                if ignore_space {
+                    args.push("-w");
+                }
+                args.extend(["--", "target"]);
+                let oracle = parse_git_blame_porcelain(&git_output(root, &args));
+                let result = blame_file(
+                    &repo,
+                    "target",
+                    &BlameOptions {
+                        copy_detection: CopyDetection::FromAnyCommit,
+                        whitespace: if ignore_space {
+                            grit_lib::diff::WhitespaceMode::ignore_all_space()
+                        } else {
+                            Default::default()
+                        },
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+                let lines: Vec<_> = result
+                    .lines
+                    .iter()
+                    .map(|line| PorcelainLine {
+                        commit: line.commit,
+                        final_line: line.final_line,
+                        original_line: line.original_line,
+                    })
+                    .collect();
+                assert_eq!(lines, oracle, "existing={existing_target} endings={source_ending:?}/{target_ending:?} -w={ignore_space}");
+                assert_eq!(
+                    result.lines[usize::from(existing_target)].original_path,
+                    "source"
+                );
+            }
+            git_run(root, &["fsck", "--strict"]);
+        }
+    }
+}
