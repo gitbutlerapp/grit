@@ -795,13 +795,24 @@ fn refresh_present_tracked_path(
                 Some(idx_e),
                 Some(rules.filter_process()),
             )?;
-            let (staged_oid, buffered) = match content {
+            enum RestagePayload {
+                Bytes(Vec<u8>),
+                Stream { file: fs::File, size: u64 },
+            }
+            let (staged_oid, payload) = match content {
                 WorktreeBlobContent::Bytes(data) => {
                     let staged_oid = repo.odb().hash(ObjectKind::Blob, &data)?;
-                    (staged_oid, Some(data))
+                    (staged_oid, RestagePayload::Bytes(data))
                 }
-                stream @ WorktreeBlobContent::Stream { .. } => {
-                    (stream.store(repo.odb(), SERIAL_RESTAGE_WRITE)?, None)
+                WorktreeBlobContent::Stream { mut file, size } => {
+                    let staged_oid = repo
+                        .odb()
+                        .hash_stream(ObjectKind::Blob, size, &mut file)?;
+                    use std::io::{Seek, SeekFrom};
+                    file.seek(SeekFrom::Start(0)).map_err(|source| {
+                        map_worktree_io(rel_path, WorktreePathOperation::Read, source)
+                    })?;
+                    (staged_oid, RestagePayload::Stream { file, size })
                 }
             };
             // Stat taken before the read, so a write racing the read is caught next time.
@@ -814,9 +825,19 @@ fn refresh_present_tracked_path(
                 }
                 return Ok(false);
             }
-            if let Some(data) = buffered {
-                repo.odb()
-                    .write_blob_prehashed(&staged_oid, &data, SERIAL_RESTAGE_WRITE)?;
+            match payload {
+                RestagePayload::Bytes(data) => {
+                    repo.odb()
+                        .write_blob_prehashed(&staged_oid, &data, SERIAL_RESTAGE_WRITE)?;
+                }
+                RestagePayload::Stream { mut file, size } => {
+                    repo.odb().write_stream(
+                        ObjectKind::Blob,
+                        size,
+                        &mut file,
+                        SERIAL_RESTAGE_WRITE,
+                    )?;
+                }
             }
             index.stage_file(entry);
             index.mark_content_verified(raw_path, staged_oid);

@@ -653,8 +653,7 @@ fn write_planned_entries(
                 }
             }
             if chunk.is_empty() {
-                let payload = odb.read(&entry.oid)?.data;
-                write_whole_pack_object(&mut chunk, odb, entry.oid, entry.kind, &payload, opts)?;
+                write_whole_pack_object_from_odb(&mut chunk, odb, entry.oid, entry.kind, opts)?;
             }
             w.write_all(&chunk).map_err(Error::Io)?;
             index_rows.push((entry.oid, start, crc32fast::hash(&chunk)));
@@ -1049,12 +1048,43 @@ fn serialize_pack(odb: &Odb, oids: &[ObjectId], opts: &PackBuildOptions) -> Resu
     buf.extend_from_slice(&count.to_be_bytes());
 
     for oid in oids {
-        let obj = odb.read(oid)?;
-        write_whole_pack_object(&mut buf, odb, *oid, obj.kind, &obj.data, opts)?;
+        let kind = odb.read_info(oid)?.kind;
+        write_whole_pack_object_from_odb(&mut buf, odb, *oid, kind, opts)?;
     }
 
     append_pack_trailer(&mut buf, odb.hash_algo());
     Ok(buf)
+}
+
+/// Append one whole object from the ODB, streaming large blobs when needed.
+fn write_whole_pack_object_from_odb(
+    buf: &mut Vec<u8>,
+    odb: &Odb,
+    oid: ObjectId,
+    kind: ObjectKind,
+    opts: &PackBuildOptions,
+) -> Result<()> {
+    if opts.reuse_objects && odb.hash_algo() == HashAlgo::Sha1 {
+        if let Some(raw) = crate::pack::packed_full_object_slice(odb.objects_dir(), &oid)? {
+            buf.extend_from_slice(&raw);
+            return Ok(());
+        }
+    }
+    let size = odb.read_info(&oid)?.size;
+    let stream_from = odb.big_file_threshold()?;
+    if kind == ObjectKind::Blob && size >= stream_from {
+        return odb
+            .with_stream(&oid, |mut stream| {
+                let payload_len = usize::try_from(stream.size).map_err(|_| {
+                    Error::CorruptObject(format!("object size overflow for {}", oid.to_hex()))
+                })?;
+                encode_pack_object_header(buf, pack_type_code(kind), payload_len);
+                write_zlib_from_reader(buf, &mut stream.reader, odb.pack_compression()?)
+            })?
+            .ok_or_else(|| Error::ObjectNotFound(oid.to_hex()));
+    }
+    let obj = odb.read(&oid)?;
+    write_whole_pack_object(buf, odb, oid, kind, &obj.data, opts)
 }
 
 /// Write one whole (non-delta) pack object, reusing on-disk bytes when allowed.
@@ -1789,6 +1819,19 @@ fn load_islands_for_pack(
 fn write_zlib(buf: &mut Vec<u8>, data: &[u8], compression: Compression) -> Result<()> {
     let mut enc = ZlibEncoder::new(Vec::new(), compression);
     enc.write_all(data).map_err(Error::Io)?;
+    let compressed = enc.finish().map_err(Error::Io)?;
+    buf.extend_from_slice(&compressed);
+    Ok(())
+}
+
+/// zlib-deflate bytes read from `reader` and append them to `buf`.
+fn write_zlib_from_reader(
+    buf: &mut Vec<u8>,
+    reader: &mut dyn std::io::Read,
+    compression: Compression,
+) -> Result<()> {
+    let mut enc = ZlibEncoder::new(Vec::new(), compression);
+    std::io::copy(reader, &mut enc).map_err(Error::Io)?;
     let compressed = enc.finish().map_err(Error::Io)?;
     buf.extend_from_slice(&compressed);
     Ok(())

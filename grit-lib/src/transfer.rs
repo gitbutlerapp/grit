@@ -917,33 +917,25 @@ fn copy_objects_for_local_fetch(
         return Ok((oids, transfer));
     }
 
-    // Hard-link loose objects only for incremental transfers; initial clones should
-    // install a pack (or pack link), not thousands of loose files.
-    if !haves.is_empty() {
-        progress.start(ProgressPhase::CopyingObjects, Some(send.len() as u64));
-        let linked_loose = link_loose_objects_for_oids(
-            &remote_objects,
-            &local_objects,
-            &still_missing,
-            progress,
-            cancel,
-        )?;
-        if linked_loose > 0 {
-            progress.inc(linked_loose as u64);
-            refresh_local_odb_after_link(local_odb);
-            still_missing = local_odb.missing_oids(still_missing)?;
-        }
-        progress.finish();
-        if still_missing.is_empty() {
-            let oids = linked_object_set(local_odb, send);
-            let transfer = transfer_stats_for_local_operation(
-                local_git_dir,
-                local_odb,
-                &oids,
-                &pack_dir_before,
-            )?;
-            return Ok((oids, transfer));
-        }
+    progress.start(ProgressPhase::CopyingObjects, Some(send.len() as u64));
+    let linked_loose = link_loose_objects_for_oids(
+        &remote_objects,
+        &local_objects,
+        &still_missing,
+        progress,
+        cancel,
+    )?;
+    if linked_loose > 0 {
+        progress.inc(linked_loose as u64);
+        refresh_local_odb_after_link(local_odb);
+        still_missing = local_odb.missing_oids(still_missing)?;
+    }
+    progress.finish();
+    if still_missing.is_empty() {
+        let oids = linked_object_set(local_odb, send);
+        let transfer =
+            transfer_stats_for_local_operation(local_git_dir, local_odb, &oids, &pack_dir_before)?;
+        return Ok((oids, transfer));
     }
 
     let pack_opts = pack_build_options_for_send(remote_odb, &still_missing, pack_build);

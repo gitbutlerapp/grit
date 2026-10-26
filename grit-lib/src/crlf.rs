@@ -1528,6 +1528,21 @@ pub fn git_conversion_is_identity(conv: &ConversionConfig, attrs: &FileAttrs) ->
         && input_eol_rule(conv, attrs) == InputEolRule::Never
 }
 
+/// Whether a worktree file can be hashed or stored without loading it whole.
+///
+/// Identity conversion always qualifies. With `text=auto` / `core.autocrlf`, Git only
+/// converts non-binary files; once the leading bytes look binary, streaming is safe.
+pub(crate) fn worktree_file_streams_unconverted(
+    conv: &ConversionConfig,
+    attrs: &FileAttrs,
+    leading_bytes: &[u8],
+) -> bool {
+    if git_conversion_is_identity(conv, attrs) {
+        return true;
+    }
+    matches!(input_eol_rule(conv, attrs), InputEolRule::UnlessBinary) && is_binary(leading_bytes)
+}
+
 /// Decide whether CRLF/LF conversion is configured for this file on input.
 /// Returns true if the file *would* be subject to conversion (even if no
 /// actual bytes need changing).
@@ -2377,6 +2392,26 @@ mod tests {
             }
         }
         assert!(identities > 0);
+    }
+
+    #[test]
+    fn unless_binary_binary_probe_allows_streaming() {
+        let conv = ConversionConfig::from_config(&ConfigSet::new());
+        let mut attrs = FileAttrs::default();
+        attrs.text = TextAttr::Auto;
+        let binary_probe = vec![0u8; 100];
+        assert!(!git_conversion_is_identity(&conv, &attrs));
+        assert!(worktree_file_streams_unconverted(
+            &conv,
+            &attrs,
+            &binary_probe
+        ));
+        let text_probe = b"hello\n".to_vec();
+        assert!(!worktree_file_streams_unconverted(
+            &conv,
+            &attrs,
+            &text_probe
+        ));
     }
 
     #[test]

@@ -65,7 +65,8 @@ Pass `--json` for stable, scripting-friendly output:
 | `content.kind` | string | Discriminator: `blob`, `tree`, `commit`, or `tag`. |
 | `content.encoding` | string | For blobs: `utf-8` or `base64`. |
 | `content.text` | string | UTF-8 blob or commit/tag body when applicable. |
-| `content.data_base64` | string | Blob bytes when not UTF-8. |
+| `content.data_base64` | string | Blob bytes when not UTF-8 (omitted when the blob is ≥ 1 MiB). |
+| `content.omitted_inline` | boolean | When `true`, the blob is too large to embed; human mode streams bytes to stdout. |
 | `content.entries` | array | Tree lines with `mode`, `type`, `oid`, and `path`. |
 
 Example (blob):

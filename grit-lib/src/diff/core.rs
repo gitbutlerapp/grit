@@ -4385,17 +4385,30 @@ fn push_index_blob_worktree_diff(
     let file_attrs = file_attrs_for(path_str_ref);
     let store = (materialize_dirty_blobs && !hash_blobs_without_write)
         .then_some(crate::odb::BULK_NEW_LOOSE_WRITE);
-    let eff_oid = worktree_blob_content(
-        odb,
-        file_path,
-        &meta,
-        conv,
-        &file_attrs,
-        path_str_ref,
-        Some(ie),
-        filter_process,
-    )?
-    .object_id(odb, store)?;
+    let eff_oid = if store.is_some() {
+        worktree_blob_content(
+            odb,
+            file_path,
+            &meta,
+            conv,
+            &file_attrs,
+            path_str_ref,
+            Some(ie),
+            filter_process,
+        )?
+        .object_id(odb, store)?
+    } else {
+        hash_worktree_file(
+            odb,
+            file_path,
+            &meta,
+            conv,
+            &file_attrs,
+            path_str_ref,
+            Some(ie),
+            filter_process,
+        )?
+    };
 
     if eff_oid != ie.oid || worktree_mode != ie.mode {
         let path_owned = path_str_ref.to_owned();
@@ -6558,6 +6571,29 @@ fn open_with_size(path: &Path, rel_path: &str) -> Result<(fs::File, u64)> {
 /// Open a regular worktree file and clean-convert it, or hand it out as a stream when it is
 /// at least `stream_from` bytes and its clean conversion is the identity.
 #[allow(clippy::too_many_arguments)]
+fn read_worktree_binary_probe(file: &mut fs::File, size: u64, rel_path: &str) -> Result<Vec<u8>> {
+    use std::io::{Read, Seek, SeekFrom};
+    const PROBE: usize = 8000;
+    let probe_len = usize::try_from(size).unwrap_or(PROBE).min(PROBE);
+    let mut probe = vec![0u8; probe_len];
+    file.read_exact(&mut probe).map_err(|source| {
+        crate::worktree::map_worktree_io(
+            rel_path,
+            crate::worktree::WorktreePathOperation::Read,
+            source,
+        )
+    })?;
+    file.seek(SeekFrom::Start(0)).map_err(|source| {
+        crate::worktree::map_worktree_io(
+            rel_path,
+            crate::worktree::WorktreePathOperation::Read,
+            source,
+        )
+    })?;
+    Ok(probe)
+}
+
+#[allow(clippy::too_many_arguments)]
 fn read_regular_worktree_blob(
     odb: &Odb,
     path: &Path,
@@ -6568,11 +6604,14 @@ fn read_regular_worktree_blob(
     filter_process: Option<&crate::filter_process::FilterProcessState>,
     stream_from: u64,
 ) -> Result<WorktreeBlobContent> {
-    let (file, size) = open_with_size(path, rel_path)?;
-    if crate::crlf::git_conversion_is_identity(conv, file_attrs) && size >= stream_from {
-        #[cfg(test)]
-        odb.hot_path_metrics().record_blob_content_read();
-        return Ok(WorktreeBlobContent::Stream { file, size });
+    let (mut file, size) = open_with_size(path, rel_path)?;
+    if size >= stream_from {
+        let probe = read_worktree_binary_probe(&mut file, size, rel_path)?;
+        if crate::crlf::worktree_file_streams_unconverted(conv, file_attrs, &probe) {
+            #[cfg(test)]
+            odb.hot_path_metrics().record_blob_content_read();
+            return Ok(WorktreeBlobContent::Stream { file, size });
+        }
     }
     read_regular_worktree_bytes(
         odb,
@@ -6609,7 +6648,7 @@ pub(crate) fn worktree_blob_content(
         rel_path,
         index_entry,
         filter_process,
-        odb.big_file_threshold()?,
+        hash_stream_threshold(odb)?,
     )
 }
 

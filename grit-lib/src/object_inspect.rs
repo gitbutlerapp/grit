@@ -374,6 +374,28 @@ impl Repository {
             ObjectKind::Tag => Ok(ObjectContents::Tag(parse_tag(&obj.data)?)),
         }
     }
+
+    /// Copy an object's uncompressed payload to `writer` without loading it whole.
+    ///
+    /// Returns `Ok(None)` when the object is missing. On success, returns the number of
+    /// payload bytes written (the size recorded in the object database).
+    ///
+    /// # Errors
+    ///
+    /// Returns I/O errors from `writer` or the object store, and backend failures from
+    /// the object database.
+    pub fn stream_object_payload_to(
+        &self,
+        oid: &ObjectId,
+        writer: &mut dyn std::io::Write,
+    ) -> Result<Option<u64>> {
+        use std::io::copy;
+        self.odb()
+            .with_stream(oid, |mut stream| {
+                copy(&mut stream.reader, writer).map_err(Error::Io)?;
+                Ok(stream.size)
+            })
+    }
 }
 
 /// Format a tree entry mode for `git cat-file -p` output (six-digit tree modes).
