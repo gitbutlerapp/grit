@@ -113,7 +113,7 @@ Deleted branch spike (was a7020c2).
 
 ## JSON output
 
-List results include `truncated: true` when `-n` / `--limit` caps the branch list and more branches matched.
+List results include `truncated: true` when `-n` / `--limit` caps the branch list and more branches matched. With `--contains` and name ordering (including `--reverse`), the limit bounds matching rows: grit checks tips in name order and stops after the extra match needed to detect truncation. Earlier nonmatching branches do not consume the limit.
 
 Schema: [v1](/schemas/branch/v1.json)
 

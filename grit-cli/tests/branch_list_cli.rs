@@ -371,3 +371,61 @@ fn upstream_honors_custom_fetch_refspec() -> TestResult {
     );
     Ok(())
 }
+
+#[test]
+fn bounded_contains_preserves_order_and_matching_row_truncation() -> TestResult {
+    let scratch = Scratch::new("bounded-contains")?;
+    let repo = scratch.child("repo");
+    init_repo(&repo);
+    let old = git(&repo, &["rev-parse", "HEAD"]).trim().to_owned();
+    git(&repo, &["commit", "--allow-empty", "-m", "target"]);
+    git(&repo, &["branch", "a-nonmatch", &old]);
+    for name in ["b-match", "d-match", "f-match"] {
+        git(&repo, &["branch", name]);
+    }
+    git(&repo, &["branch", "c-nonmatch", &old]);
+    git(&repo, &["pack-refs", "--all"]);
+    let all = git(
+        &repo,
+        &[
+            "for-each-ref",
+            "--contains=HEAD",
+            "--format=%(refname)",
+            "refs/heads/",
+        ],
+    )
+    .lines()
+    .map(str::to_owned)
+    .collect::<Vec<_>>();
+    assert_eq!(all.len(), 4);
+    for limit in [1, 3, 4, 5] {
+        let count = limit.to_string();
+        let args = ["branch", "--contains", "HEAD", "-n", &count];
+        let json = grit_json(&repo, &args);
+        let names = json["branches"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|row| row["full_ref"].as_str().unwrap().to_owned())
+            .collect::<Vec<_>>();
+        assert_eq!(names, all[..all.len().min(limit)]);
+        assert_eq!(
+            json["truncated"].as_bool().unwrap_or(false),
+            all.len() > limit
+        );
+        let human = run(&repo, GRIT, &args);
+        let markdown = run(
+            &repo,
+            GRIT,
+            &["--markdown", "branch", "--contains", "HEAD", "-n", &count],
+        );
+        for name in &names {
+            let short = name.strip_prefix("refs/heads/").unwrap();
+            assert!(human.contains(short), "{human}");
+            assert!(markdown.contains(short), "{markdown}");
+        }
+        assert!(!human.contains("nonmatch"));
+        assert!(!markdown.contains("nonmatch"));
+    }
+    Ok(())
+}

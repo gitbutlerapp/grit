@@ -2403,7 +2403,10 @@ impl<'r> CommitGraphCache<'r> {
                         Error::InvalidRef(msg) => Error::CorruptObject(msg),
                         other => other,
                     })?;
-                (commit_oid, self.read_object(&commit_oid)?)
+                (
+                    commit_oid,
+                    self.read_object(&self.repo.object_id_after_replace(&commit_oid))?,
+                )
             }
         };
         if object.kind != ObjectKind::Commit {
@@ -2708,6 +2711,180 @@ pub(crate) struct RefContainsTipState {
     pub no_contains_match: bool,
 }
 
+/// Query-scoped containment for a bounded list: each visited commit remembers whether
+/// it reaches any target. Both successful paths and exhausted histories are shared by
+/// subsequent tips, without a bitset sized to the entire ref inventory.
+pub(crate) struct RefContainsMemo<'repo> {
+    graph: CommitGraphCache<'repo>,
+    known: OidHashMap<bool>,
+    min_target_gen: Option<u64>,
+    negative_pending: Vec<ObjectId>,
+    negative_frontier: BinaryHeap<PaintKey>,
+    negative_seq: u64,
+}
+
+struct ContainsFrame {
+    oid: ObjectId,
+    parents: Vec<ObjectId>,
+    next_parent: usize,
+}
+
+impl<'repo> RefContainsMemo<'repo> {
+    pub(crate) fn new(repo: &'repo Repository, targets: &[ObjectId]) -> Result<Self> {
+        let mut graph = CommitGraphCache::new(repo);
+        // Parent rewrites invalidate the on-disk graph's linkage and generations.
+        let mut has_replacements = false;
+        if let Some(prefix) = repo.replace_ref_base_if_enabled() {
+            repo.refs().for_each_ref(&prefix, &mut |_| {
+                has_replacements = true;
+                std::ops::ControlFlow::Break(())
+            })?;
+        }
+        if has_replacements || !graph.graft_parents.is_empty() {
+            graph.graph = None;
+        }
+        let min_target_gen = min_ranked_generation(&graph, targets);
+        let mut known: OidHashMap<bool> = targets.iter().map(|&oid| (oid, true)).collect();
+        let mut negative_pending = Vec::new();
+        if graph.graph.is_none() && targets.len() == 1 {
+            // Strict ancestors of the sole target cannot contain it. Seed that boundary
+            // without reading its ancestors; expensive probes can extend it on demand.
+            for parent in graph.parents_of(targets[0])? {
+                if parent == targets[0] {
+                    return Err(Error::CorruptObject(format!(
+                        "commit ancestry cycle at {parent}"
+                    )));
+                }
+                if known.insert(parent, false).is_none() {
+                    negative_pending.push(parent);
+                }
+            }
+        }
+        Ok(Self {
+            graph,
+            known,
+            min_target_gen,
+            negative_pending,
+            negative_frontier: BinaryHeap::new(),
+            negative_seq: 0,
+        })
+    }
+
+    fn known(&self, oid: ObjectId) -> Option<bool> {
+        self.known.get(&oid).copied().or_else(|| {
+            should_prune_ref_filter_parent(&self.graph, oid, self.min_target_gen).then_some(false)
+        })
+    }
+
+    fn advance_negative_boundary(&mut self, active: &OidHashMap<usize>) -> Result<Option<usize>> {
+        for oid in self.negative_pending.drain(..) {
+            push_commit_heap_key(
+                &mut self.graph,
+                &mut self.negative_frontier,
+                &mut self.negative_seq,
+                oid,
+            )?;
+        }
+        let mut cut: Option<usize> = None;
+        if let Some(key) = self.negative_frontier.pop() {
+            for parent in self.graph.parents_of(key.oid)? {
+                match self.known.get(&parent) {
+                    Some(true) => {
+                        return Err(Error::CorruptObject(format!(
+                            "commit ancestry cycle at {parent}"
+                        )))
+                    }
+                    Some(false) => {}
+                    None => {
+                        self.known.insert(parent, false);
+                        // Dates choose exploration order only. Every negative result follows
+                        // from ancestry of the target, regardless of clock skew.
+                        push_commit_heap_key(
+                            &mut self.graph,
+                            &mut self.negative_frontier,
+                            &mut self.negative_seq,
+                            parent,
+                        )?;
+                    }
+                }
+                if let Some(&index) = active.get(&parent) {
+                    cut = Some(cut.map_or(index, |old| old.min(index)));
+                }
+            }
+        }
+        Ok(cut)
+    }
+
+    /// Evaluate one peeled tip, caching positive and negative ancestry. Committer
+    /// dates never exclude ancestry; only valid commit-graph generations may do so.
+    pub(crate) fn contains(&mut self, tip: ObjectId) -> Result<bool> {
+        if let Some(known) = self.known(tip) {
+            return Ok(known);
+        }
+        let mut active = oid_hash_map();
+        active.insert(tip, 0);
+        let mut stack = vec![ContainsFrame {
+            oid: tip,
+            parents: self.graph.parents_of(tip)?,
+            next_parent: 0,
+        }];
+        let mut visited = 1usize;
+        while !stack.is_empty() {
+            // A nearby positive probe should not walk the target's older history. Once
+            // a probe is expensive, advance both histories so an old side branch can
+            // meet a proven negative boundary without walking to the repository root.
+            if visited >= 1024 {
+                if let Some(cut) = self.advance_negative_boundary(&active)? {
+                    // Stop the whole active path below a newly proven negative ancestor,
+                    // even when the DFS has already descended far beyond that commit.
+                    for frame in stack.drain(cut..) {
+                        self.known.insert(frame.oid, false);
+                        active.remove(&frame.oid);
+                    }
+                    continue;
+                }
+            }
+            let Some(frame) = stack.last_mut() else {
+                break;
+            };
+            if self.known(frame.oid) == Some(false) {
+                active.remove(&frame.oid);
+                stack.pop();
+                continue;
+            }
+            let Some(&parent) = frame.parents.get(frame.next_parent) else {
+                self.known.insert(frame.oid, false);
+                active.remove(&frame.oid);
+                stack.pop();
+                continue;
+            };
+            frame.next_parent += 1;
+            match self.known(parent) {
+                Some(true) => {
+                    for frame in stack {
+                        self.known.insert(frame.oid, true);
+                    }
+                    return Ok(true);
+                }
+                Some(false) => continue,
+                None => {}
+            }
+            if active.insert(parent, stack.len()).is_some() {
+                return Err(Error::CorruptObject(format!(
+                    "commit ancestry cycle at {parent}"
+                )));
+            }
+            visited += 1;
+            stack.push(ContainsFrame {
+                oid: parent,
+                parents: self.graph.parents_of(parent)?,
+                next_parent: 0,
+            });
+        }
+        Ok(false)
+    }
+}
+
 /// One memoized shared-history walk over all candidate ref tips.
 pub(crate) struct RefContainsBatch<'repo> {
     graph: CommitGraphCache<'repo>,
@@ -2884,6 +3061,94 @@ mod tests {
     use crate::repo::{InitOptions, Repository};
     use std::fs;
     use tempfile::tempdir;
+
+    #[test]
+    fn containment_memo_shares_successes_and_exhausted_histories() -> Result<()> {
+        for with_graph in [false, true] {
+            let dir = tempdir()?;
+            let repo = open_test_bare(&dir)?;
+            let root = write_commit_same_time(repo.odb(), &[], "root", 100)?;
+            let target = write_commit_same_time(repo.odb(), &[root], "target", 1000)?;
+            let side = write_commit_same_time(repo.odb(), &[root], "side", 200)?;
+            let child = write_commit_same_time(repo.odb(), &[target], "skewed", 150)?;
+            let merge = write_commit_same_time(repo.odb(), &[side, child], "merge", 160)?;
+            let repo = if with_graph {
+                with_commit_graph_over_refs(&dir, repo, &[("refs/heads/main", merge)])?
+            } else {
+                repo
+            };
+            let mut memo = RefContainsMemo::new(&repo, &[target])?;
+            assert!(memo.contains(merge)?);
+            assert_eq!(memo.known(side), Some(false));
+            assert_eq!(memo.known.get(&child), Some(&true));
+            assert!(!memo.contains(side)?);
+            assert!(memo.contains(child)?);
+            assert!(memo.contains(target)?);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn containment_memo_meets_old_side_history_without_reading_the_root() -> Result<()> {
+        let dir = tempdir()?;
+        let repo = open_test_bare(&dir)?;
+        let root = write_commit_same_time(repo.odb(), &[], "root", 100)?;
+        let mut trunk = root;
+        let mut fork = root;
+        for i in 0..5000 {
+            trunk = write_commit_same_time(repo.odb(), &[trunk], &format!("trunk {i}"), 1000)?;
+            if i == 4100 {
+                fork = trunk;
+            }
+        }
+        let target = trunk;
+        let mut side = fork;
+        for i in 0..2 {
+            side = write_commit_same_time(repo.odb(), &[side], &format!("side {i}"), 200)?;
+        }
+        let mut memo = RefContainsMemo::new(&repo, &[target])?;
+        assert!(!memo.contains(side)?);
+        assert!(
+            !memo.known.contains_key(&root),
+            "old history must stay unread"
+        );
+        assert!(!memo.contains(fork)?);
+        Ok(())
+    }
+
+    #[test]
+    fn containment_memo_disables_graph_for_parent_rewrites() -> Result<()> {
+        for replace in [false, true] {
+            let dir = tempdir()?;
+            let repo = open_test_bare(&dir)?;
+            let old = write_commit_same_time(repo.odb(), &[], "old", 100)?;
+            let target = write_commit_same_time(repo.odb(), &[], "target", 1000)?;
+            let replacement = write_commit_same_time(repo.odb(), &[target], "replacement", 1100)?;
+            let repo = with_commit_graph_over_refs(
+                &dir,
+                repo,
+                &[("refs/heads/old", old), ("refs/heads/new", replacement)],
+            )?;
+            if replace {
+                crate::refs::write_ref(
+                    repo.git_dir(),
+                    &format!("refs/replace/{old}"),
+                    &replacement,
+                )?;
+            } else {
+                fs::create_dir_all(repo.git_dir().join("info"))?;
+                fs::write(
+                    repo.git_dir().join("info/grafts"),
+                    format!("{old} {target}\n"),
+                )?;
+            }
+            let repo = Repository::open(dir.path(), &RepositoryOptions::empty())?;
+            let mut memo = RefContainsMemo::new(&repo, &[target])?;
+            assert!(memo.graph.graph.is_none());
+            assert!(memo.contains(old)?);
+        }
+        Ok(())
+    }
 
     fn empty_tree(odb: &Odb) -> Result<ObjectId> {
         odb.write_loose_materialize(ObjectKind::Tree, b"")

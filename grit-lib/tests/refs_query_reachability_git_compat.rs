@@ -34,7 +34,12 @@ fn init_repo(worktree: &std::path::Path, backend: Backend) -> Repository {
     if backend == Backend::Reftable {
         opts = opts.with_ref_storage(grit_lib::refs::ref_storage::RefStorageFormat::Reftable);
     }
-    Repository::init(worktree, &opts).expect("init")
+    let repo = Repository::init(worktree, &opts).expect("init");
+    if backend == Backend::Reftable {
+        // Seed HEAD in the table too: system Git ignores the loose HEAD in a reftable repo.
+        git(worktree, &["symbolic-ref", "HEAD", "refs/heads/main"]);
+    }
+    repo
 }
 
 fn seed_linear(worktree: &std::path::Path) -> ObjectId {
@@ -428,4 +433,322 @@ fn contains_missing_object_is_typed() {
     let missing = ObjectId::from_hex("0000000000000000000000000000000000000001").expect("oid");
     let err = resolve_commit_filter_target(&repo, missing).unwrap_err();
     assert!(matches!(err, RefQueryError::MissingObject(_)));
+}
+
+#[derive(Debug)]
+struct CountingObjects {
+    inner: grit_lib::objects::odb::store::MemoryStore,
+    reads: std::sync::Mutex<std::collections::HashMap<ObjectId, usize>>,
+    info: std::sync::Mutex<std::collections::HashMap<ObjectId, usize>>,
+}
+
+impl CountingObjects {
+    fn new() -> Self {
+        Self {
+            inner: grit_lib::objects::odb::store::MemoryStore::new(
+                grit_lib::objects::HashAlgo::Sha1,
+            ),
+            reads: Default::default(),
+            info: Default::default(),
+        }
+    }
+}
+
+impl grit_lib::objects::odb::store::ObjectStore for CountingObjects {
+    fn hash_algo(&self) -> grit_lib::objects::HashAlgo {
+        self.inner.hash_algo()
+    }
+    fn read(&self, oid: &ObjectId) -> grit_lib::error::Result<Option<grit_lib::objects::Object>> {
+        *self.reads.lock().unwrap().entry(*oid).or_default() += 1;
+        self.inner.read(oid)
+    }
+    fn read_info(
+        &self,
+        oid: &ObjectId,
+    ) -> grit_lib::error::Result<Option<grit_lib::objects::ObjectInfo>> {
+        *self.info.lock().unwrap().entry(*oid).or_default() += 1;
+        self.inner.read_info(oid)
+    }
+    fn for_each_object(
+        &self,
+        f: &mut dyn FnMut(&ObjectId) -> std::ops::ControlFlow<()>,
+    ) -> grit_lib::error::Result<()> {
+        self.inner.for_each_object(f)
+    }
+}
+
+impl grit_lib::objects::odb::store::WritableObjectStore for CountingObjects {
+    fn freshen(&self, oid: &ObjectId) -> grit_lib::error::Result<bool> {
+        self.inner.freshen(oid)
+    }
+    fn write(
+        &self,
+        kind: grit_lib::objects::ObjectKind,
+        data: &[u8],
+        opts: grit_lib::objects::odb::WriteOptions,
+    ) -> grit_lib::error::Result<ObjectId> {
+        self.inner.write(kind, data, opts)
+    }
+}
+
+fn counted_repo(root: &std::path::Path, objects: std::sync::Arc<CountingObjects>) -> Repository {
+    use grit_lib::config::environment::RepositoryOptions;
+    use grit_lib::objects::odb::OdbBuilder;
+    use grit_lib::repo::RepositoryBuilder;
+    init_repo(root, Backend::Files);
+    RepositoryBuilder::new(RepositoryOptions::empty())
+        .odb_builder(
+            OdbBuilder::files(root.join(".git/objects"))
+                .primary(objects)
+                .alternates(false),
+        )
+        .open(&root.join(".git"), Some(root))
+        .unwrap()
+}
+
+fn counted_commit(repo: &Repository, parent: Option<ObjectId>, n: usize) -> ObjectId {
+    use grit_lib::objects::ObjectKind;
+    let tree = repo.odb().write(ObjectKind::Tree, b"").unwrap();
+    let parent = parent.map(|p| format!("parent {p}\n")).unwrap_or_default();
+    repo.odb().write(ObjectKind::Commit, format!("tree {tree}\n{parent}author T <t@e.com> 1700000000 +0000\ncommitter T <t@e.com> 1700000000 +0000\n\nc{n}\n").as_bytes()).unwrap()
+}
+
+/// The reported fixture shape: unique recent tips first, then older nonmatching tips.
+/// The limit must bound object work, rather than merely truncating the final output.
+#[test]
+fn bounded_contains_does_not_load_irrelevant_trailing_tips() {
+    let root = tempfile::tempdir().unwrap();
+    let objects = std::sync::Arc::new(CountingObjects::new());
+    let repo = counted_repo(root.path(), objects.clone());
+    let mut commits = Vec::new();
+    for i in 0..1200 {
+        commits.push(counted_commit(&repo, commits.last().copied(), i));
+    }
+    let target = commits[1099];
+    let mut packed = String::from("# pack-refs with: sorted\n");
+    for (i, tip) in commits.iter().rev().enumerate() {
+        packed.push_str(&format!("{tip} refs/heads/dogfood/{i:05}\n"));
+    }
+    std::fs::write(repo.git_dir().join("packed-refs"), packed).unwrap();
+    objects.reads.lock().unwrap().clear();
+    objects.info.lock().unwrap().clear();
+    let rows = query_refs(
+        &repo,
+        &RefQuery {
+            contains: vec![target],
+            limit: Some(100),
+            ..RefQuery::default()
+        },
+        &RefQueryOptions::default(),
+    )
+    .unwrap();
+    assert_eq!(
+        rows.iter().map(|r| r.full_name.clone()).collect::<Vec<_>>(),
+        (0..100)
+            .map(|i| format!("refs/heads/dogfood/{i:05}"))
+            .collect::<Vec<_>>()
+    );
+    let reads = objects.reads.lock().unwrap();
+    let info = objects.info.lock().unwrap();
+    let irrelevant = commits[..1099]
+        .iter()
+        .filter(|id| reads.contains_key(id) || info.contains_key(id))
+        .count();
+    assert_eq!(
+        irrelevant, 0,
+        "bounded containment must not load older trailing tips"
+    );
+    assert!(
+        reads.values().sum::<usize>() <= 102,
+        "shared ancestry must be read once"
+    );
+}
+
+#[test]
+fn bounded_contains_memoizes_shared_negative_history() {
+    let root = tempfile::tempdir().unwrap();
+    let objects = std::sync::Arc::new(CountingObjects::new());
+    let repo = counted_repo(root.path(), objects.clone());
+    let target = counted_commit(&repo, None, 10000);
+    let mut trunk = Vec::new();
+    for i in 0..300 {
+        trunk.push(counted_commit(&repo, trunk.last().copied(), i));
+    }
+    let mut packed = String::from("# pack-refs with: sorted\n");
+    for i in 0..100 {
+        let tip = counted_commit(&repo, trunk.last().copied(), 1000 + i);
+        packed.push_str(&format!("{tip} refs/heads/a{i:03}\n"));
+    }
+    packed.push_str(&format!("{target} refs/heads/z-match\n"));
+    std::fs::write(repo.git_dir().join("packed-refs"), packed).unwrap();
+    objects.reads.lock().unwrap().clear();
+    let rows = query_refs(
+        &repo,
+        &RefQuery {
+            contains: vec![target],
+            limit: Some(1),
+            ..RefQuery::default()
+        },
+        &RefQueryOptions::default(),
+    )
+    .unwrap();
+    assert_eq!(rows[0].short_name, "z-match");
+    let reads = objects.reads.lock().unwrap();
+    for oid in trunk {
+        assert_eq!(reads.get(&oid).copied().unwrap_or(0), 1);
+    }
+}
+
+/// Core t3201-style containment combined with bounded, ordered ref selection.
+#[test]
+fn bounded_contains_order_filters_tags_and_backends_match_git() {
+    use grit_lib::refs::listing::{RefSort, SortKey};
+    for backend in [Backend::Files, Backend::Reftable] {
+        if !git_interop_available(backend) {
+            continue;
+        }
+        for with_graph in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let worktree = root.path();
+            let repo = init_repo(worktree, backend);
+            git_commit_with_date(worktree, "946684800 +0000", "root");
+            let old = git(worktree, &["rev-parse", "HEAD"]).trim().to_owned();
+            git(worktree, &["branch", "test/a-nonmatch", &old]);
+            git_commit_with_date(worktree, "1893456000 +0000", "target");
+            let target: ObjectId = git(worktree, &["rev-parse", "HEAD"])
+                .trim()
+                .parse()
+                .unwrap();
+            git(worktree, &["branch", "test/c-target"]);
+            git(worktree, &["checkout", "-b", "side"]);
+            git_commit_with_date(worktree, "946684800 +0000", "side");
+            let side: ObjectId = git(worktree, &["rev-parse", "HEAD"])
+                .trim()
+                .parse()
+                .unwrap();
+            git(worktree, &["checkout", "main"]);
+            for i in 0..12 {
+                git_commit_with_date(worktree, "946684800 +0000", &format!("recent-{i}"));
+                git(worktree, &["branch", &format!("test/r{i}"), "HEAD"]);
+            }
+            git(worktree, &["merge", "--no-ff", "--no-edit", "side"]);
+            git(worktree, &["branch", "test/b-merge"]);
+            git(worktree, &["branch", "test/d-shared"]);
+            git(worktree, &["branch", "test/e-nonmatch", &old]);
+            git(
+                worktree,
+                &["tag", "-a", "test/tag-inner", "-m", "inner", "HEAD"],
+            );
+            git(
+                worktree,
+                &[
+                    "tag",
+                    "-a",
+                    "test/tag-outer",
+                    "-m",
+                    "outer",
+                    "test/tag-inner",
+                ],
+            );
+            let tree = git(worktree, &["rev-parse", "HEAD^{tree}"])
+                .trim()
+                .to_owned();
+            git(worktree, &["tag", "test/tag-tree", &tree]);
+            if backend == Backend::Files {
+                git(worktree, &["pack-refs", "--all"]);
+            }
+            maybe_write_graph(worktree, &repo, with_graph);
+            let base = RefQuery {
+                namespaces: vec![
+                    RefNamespace::Heads,
+                    RefNamespace::Tags,
+                    RefNamespace::Custom("refs/heads/".into()),
+                ],
+                patterns: vec!["test/".into()],
+                contains: vec![target],
+                ..RefQuery::default()
+            };
+            for sort in [SortKey::Name, SortKey::Version, SortKey::Date] {
+                for reverse in [false, true] {
+                    for filter in 0..6 {
+                        let mut query = base.clone();
+                        query.sort = RefSort { key: sort, reverse };
+                        let key = match sort {
+                            SortKey::Name => "refname",
+                            SortKey::Version => "version:refname",
+                            SortKey::Date => "creatordate",
+                        };
+                        let sort_arg = format!("--sort={}{key}", if reverse { "-" } else { "" });
+                        let mut args = vec![sort_arg, format!("--contains={target}")];
+                        match filter {
+                            1 => {
+                                query.no_contains = vec![side];
+                                args.push(format!("--no-contains={side}"));
+                            }
+                            2 => {
+                                query.merged = vec![target];
+                                args.push(format!("--merged={target}"));
+                            }
+                            3 => {
+                                query.no_merged = vec![target];
+                                args.push(format!("--no-merged={target}"));
+                            }
+                            4 => {
+                                query.points_at = vec![target];
+                                args.push(format!("--points-at={target}"));
+                            }
+                            5 => {
+                                query.contains.push(old.parse().unwrap());
+                                args.push(format!("--contains={old}"));
+                            }
+                            _ => {}
+                        }
+                        args.extend(["refs/heads/test/".into(), "refs/tags/test/".into()]);
+                        // Date ties have a name tie-break in both implementations.
+                        for limit in [Some(0), Some(1), Some(3), Some(100), None] {
+                            query.limit = limit;
+                            let mut expected = git_refnames(
+                                worktree,
+                                &args.iter().map(String::as_str).collect::<Vec<_>>(),
+                            );
+                            if let Some(limit) = limit {
+                                expected.truncate(limit);
+                            }
+                            assert_eq!(grit_refnames(&repo, query.clone()), expected,
+                                "{backend:?}, graph={with_graph}, sort={sort:?}, reverse={reverse}, filter={filter}, limit={limit:?}");
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn bounded_contains_validates_targets_even_with_zero_limit_or_no_candidates() {
+    let root = tempfile::tempdir().unwrap();
+    let repo = init_repo(root.path(), Backend::Files);
+    let blob = repo
+        .odb()
+        .write(grit_lib::objects::ObjectKind::Blob, b"x")
+        .unwrap();
+    let missing = ObjectId::from_hex("0000000000000000000000000000000000000001").unwrap();
+    for limit in [0, 1] {
+        for target in [blob, missing] {
+            let err = query_refs(
+                &repo,
+                &RefQuery {
+                    contains: vec![target],
+                    limit: Some(limit),
+                    ..RefQuery::default()
+                },
+                &RefQueryOptions::default(),
+            )
+            .unwrap_err();
+            match target {
+                t if t == blob => assert!(matches!(err, RefQueryError::NotCommit(_))),
+                _ => assert!(matches!(err, RefQueryError::MissingObject(_))),
+            }
+        }
+    }
 }

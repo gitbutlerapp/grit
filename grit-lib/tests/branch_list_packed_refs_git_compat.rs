@@ -216,7 +216,14 @@ fn branch_at_annotated_tag_is_peeled_for_filters_like_git() {
         .to_owned();
     // `git update-ref` refuses non-commits under `refs/heads/`, but Git reads such refs.
     std::fs::write(clone.join(".git/refs/heads/at-tag"), format!("{tag}\n")).unwrap();
-    git(&clone, &["pack-refs", "--all"]);
+    // System Git rejects writing a tag oid under heads, including during pack-refs.
+    // Construct the intended read-compatibility fixture directly, keeping name order.
+    let path = clone.join(".git/packed-refs");
+    let mut packed = std::fs::read_to_string(&path).unwrap();
+    let first_ref = packed.find('\n').unwrap() + 1;
+    packed.insert_str(first_ref, &format!("{tag} refs/heads/at-tag\n^{target}\n"));
+    std::fs::write(&path, packed).unwrap();
+    std::fs::remove_file(clone.join(".git/refs/heads/at-tag")).unwrap();
     assert!(std::fs::read_to_string(clone.join(".git/packed-refs"))
         .unwrap()
         .contains(&format!("{tag} refs/heads/at-tag\n^{target}\n")));
@@ -250,7 +257,54 @@ fn branch_at_annotated_tag_is_peeled_for_filters_like_git() {
         ..RefQuery::default()
     };
     assert_eq!(
-        names(list(&repo, BranchScope::Local, contains)),
+        names(list(&repo, BranchScope::Local, contains.clone())),
         git_names(&["--contains", &target.to_hex()])
     );
+    assert_eq!(
+        names(list(
+            &repo,
+            BranchScope::Local,
+            RefQuery {
+                limit: Some(1),
+                ..contains
+            }
+        )),
+        git_names(&["--contains", &target.to_hex(), "--count=1"])
+    );
+}
+
+#[test]
+fn bounded_packed_branch_contains_matches_git_metadata_and_order() {
+    let (_dir, clone) = clone_with_many_packed_refs();
+    let target: ObjectId = git_out(&clone, &["rev-parse", "main~10"])
+        .trim()
+        .parse()
+        .unwrap();
+    for reverse in [false, true] {
+        for limit in [1, 100, 200, 1000] {
+            let repo = open(&clone);
+            let rows = list(
+                &repo,
+                BranchScope::Remote,
+                RefQuery {
+                    contains: vec![target],
+                    limit: Some(limit),
+                    sort: grit_lib::refs::listing::RefSort {
+                        reverse,
+                        ..Default::default()
+                    },
+                    ..RefQuery::default()
+                },
+            );
+            let expected = git_out(&clone, &[
+                "for-each-ref",
+                &format!("--contains={target}"),
+                &format!("--count={limit}"),
+                if reverse { "--sort=-refname" } else { "--sort=refname" },
+                "--format=%(refname) %(objectname) %(upstream) %(upstream:track) %(contents:subject)",
+                "refs/remotes/",
+            ]).lines().map(str::to_owned).collect::<Vec<_>>();
+            assert_eq!(grit_rows(&rows), expected);
+        }
+    }
 }

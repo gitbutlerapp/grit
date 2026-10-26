@@ -1,0 +1,355 @@
+{
+  "schema_version": 1,
+  "timestamp": "2026-10-26T15:37:09.245530Z",
+  "machine": {
+    "cpu_model": "INTEL(R) XEON(R) PLATINUM 8573C",
+    "physical_cores": 2,
+    "logical_cores": 4,
+    "ram_bytes": 16765370368,
+    "os": "linux",
+    "kernel": "Linux 6.17.0-1022-azure",
+    "scratch_filesystem": "ext4",
+    "rustc_version": "rustc 1.99.0 (b940084d7 2026-09-28)",
+    "cargo_profile": "release"
+  },
+  "tools": {
+    "git": "git version 2.55.0",
+    "grit": "grit 0.5.21",
+    "grit_commit": "74adad7a5732c7611479797ccfec73f41359409b"
+  },
+  "fixtures": [
+    {
+      "name": "git-git-2035-10k-unique-packed-tips",
+      "head_oid": "7e34d8174dcda3435d1404c9a30bef46afe6c13e",
+      "object_count": 422320,
+      "ref_count": 10001,
+      "file_count": 4857
+    }
+  ],
+  "scenarios": [
+    {
+      "id": "branch/contains-json-before@git-git-10k-refs",
+      "group": "branch_contains",
+      "fixture": "git-git-2035-10k-unique-packed-tips",
+      "description": "contains json, limit=100; GNU time -v, one warmup, alternating Git/main/fix; origin/main",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 238.067,
+        "median_ms": 239.265,
+        "stddev_ms": 2.2357040650915034,
+        "min_ms": 234.934,
+        "max_ms": 240.002,
+        "runs_ms": [
+          239.265,
+          240.002,
+          234.934
+        ],
+        "peak_rss_bytes": 32174080
+      },
+      "grit": {
+        "mean_ms": 2466.787333333333,
+        "median_ms": 2467.438,
+        "stddev_ms": 5.973271651467142,
+        "min_ms": 2459.168,
+        "max_ms": 2473.756,
+        "runs_ms": [
+          2467.438,
+          2473.756,
+          2459.168
+        ],
+        "peak_rss_bytes": 103743488
+      },
+      "ratio": 10.312573924309866
+    },
+    {
+      "id": "branch/contains-json-1-before@git-git-10k-refs",
+      "group": "branch_contains",
+      "fixture": "git-git-2035-10k-unique-packed-tips",
+      "description": "contains json, limit=1; GNU time -v, one warmup, alternating Git/main/fix; origin/main",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 40.678,
+        "median_ms": 40.703,
+        "stddev_ms": 0.048641546028060985,
+        "min_ms": 40.61,
+        "max_ms": 40.721,
+        "runs_ms": [
+          40.703,
+          40.721,
+          40.61
+        ],
+        "peak_rss_bytes": 19697664
+      },
+      "grit": {
+        "mean_ms": 2468.7726666666667,
+        "median_ms": 2460.889,
+        "stddev_ms": 13.25130439701024,
+        "min_ms": 2457.991,
+        "max_ms": 2487.438,
+        "runs_ms": [
+          2460.889,
+          2487.438,
+          2457.991
+        ],
+        "peak_rss_bytes": 103809024
+      },
+      "ratio": 60.45964670908778
+    },
+    {
+      "id": "branch/contains-json-1000-before@git-git-10k-refs",
+      "group": "branch_contains",
+      "fixture": "git-git-2035-10k-unique-packed-tips",
+      "description": "contains json, limit=1000; GNU time -v, one warmup, alternating Git/main/fix; origin/main",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 35049.413,
+        "median_ms": 35049.413,
+        "stddev_ms": 0.0,
+        "min_ms": 35049.413,
+        "max_ms": 35049.413,
+        "runs_ms": [
+          35049.413
+        ],
+        "peak_rss_bytes": 72720384
+      },
+      "grit": {
+        "mean_ms": 2457.33,
+        "median_ms": 2457.33,
+        "stddev_ms": 0.0,
+        "min_ms": 2457.33,
+        "max_ms": 2457.33,
+        "runs_ms": [
+          2457.33
+        ],
+        "peak_rss_bytes": 103550976
+      },
+      "ratio": 0.07011044664285818
+    },
+    {
+      "id": "branch/contains-json-unlimited-before@git-git-10k-refs",
+      "group": "branch_contains",
+      "fixture": "git-git-2035-10k-unique-packed-tips",
+      "description": "contains json, limit=None; GNU time -v, one warmup, alternating Git/main/fix; origin/main",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 35237.135,
+        "median_ms": 35237.135,
+        "stddev_ms": 0.0,
+        "min_ms": 35237.135,
+        "max_ms": 35237.135,
+        "runs_ms": [
+          35237.135
+        ],
+        "peak_rss_bytes": 72794112
+      },
+      "grit": {
+        "mean_ms": 2459.308,
+        "median_ms": 2459.308,
+        "stddev_ms": 0.0,
+        "min_ms": 2459.308,
+        "max_ms": 2459.308,
+        "runs_ms": [
+          2459.308
+        ],
+        "peak_rss_bytes": 103763968
+      },
+      "ratio": 0.0697930748342622
+    },
+    {
+      "id": "branch/unfiltered-json-unfiltered-before@git-git-10k-refs",
+      "group": "branch_contains",
+      "fixture": "git-git-2035-10k-unique-packed-tips",
+      "description": "unfiltered json, limit=unfiltered; GNU time -v, one warmup, alternating Git/main/fix; origin/main",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 159.159,
+        "median_ms": 158.458,
+        "stddev_ms": 2.3317291151989976,
+        "min_ms": 156.719,
+        "max_ms": 162.3,
+        "runs_ms": [
+          162.3,
+          158.458,
+          156.719
+        ],
+        "peak_rss_bytes": 26234880
+      },
+      "grit": {
+        "mean_ms": 131.876,
+        "median_ms": 131.433,
+        "stddev_ms": 0.7071723033792163,
+        "min_ms": 131.321,
+        "max_ms": 132.874,
+        "runs_ms": [
+          131.433,
+          131.321,
+          132.874
+        ],
+        "peak_rss_bytes": 40136704
+      },
+      "ratio": 0.8294500750987643
+    },
+    {
+      "id": "branch/contains-before@git-git-10k-refs",
+      "group": "branch_contains",
+      "fixture": "git-git-2035-10k-unique-packed-tips",
+      "description": "contains human, limit=100; GNU time -v, one warmup, alternating Git/main/fix; origin/main",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 240.30033333333333,
+        "median_ms": 234.741,
+        "stddev_ms": 8.533946696706172,
+        "min_ms": 233.803,
+        "max_ms": 252.357,
+        "runs_ms": [
+          252.357,
+          234.741,
+          233.803
+        ],
+        "peak_rss_bytes": 32292864
+      },
+      "grit": {
+        "mean_ms": 2464.077,
+        "median_ms": 2462.366,
+        "stddev_ms": 10.408625365532137,
+        "min_ms": 2452.271,
+        "max_ms": 2477.594,
+        "runs_ms": [
+          2477.594,
+          2462.366,
+          2452.271
+        ],
+        "peak_rss_bytes": 103776256
+      },
+      "ratio": 10.489714195645412
+    },
+    {
+      "id": "branch/contains-1-before@git-git-10k-refs",
+      "group": "branch_contains",
+      "fixture": "git-git-2035-10k-unique-packed-tips",
+      "description": "contains human, limit=1; GNU time -v, one warmup, alternating Git/main/fix; origin/main",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 40.67933333333333,
+        "median_ms": 40.663,
+        "stddev_ms": 0.24399772312234344,
+        "min_ms": 40.389,
+        "max_ms": 40.986,
+        "runs_ms": [
+          40.986,
+          40.389,
+          40.663
+        ],
+        "peak_rss_bytes": 19648512
+      },
+      "grit": {
+        "mean_ms": 2454.45,
+        "median_ms": 2453.824,
+        "stddev_ms": 1.7748111636640826,
+        "min_ms": 2452.658,
+        "max_ms": 2456.868,
+        "runs_ms": [
+          2452.658,
+          2456.868,
+          2453.824
+        ],
+        "peak_rss_bytes": 103727104
+      },
+      "ratio": 60.34537540270025
+    },
+    {
+      "id": "branch/contains-1000-before@git-git-10k-refs",
+      "group": "branch_contains",
+      "fixture": "git-git-2035-10k-unique-packed-tips",
+      "description": "contains human, limit=1000; GNU time -v, one warmup, alternating Git/main/fix; origin/main",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 35074.216,
+        "median_ms": 35074.216,
+        "stddev_ms": 0.0,
+        "min_ms": 35074.216,
+        "max_ms": 35074.216,
+        "runs_ms": [
+          35074.216
+        ],
+        "peak_rss_bytes": 72785920
+      },
+      "grit": {
+        "mean_ms": 2450.466,
+        "median_ms": 2450.466,
+        "stddev_ms": 0.0,
+        "min_ms": 2450.466,
+        "max_ms": 2450.466,
+        "runs_ms": [
+          2450.466
+        ],
+        "peak_rss_bytes": 103546880
+      },
+      "ratio": 0.06986516819078721
+    },
+    {
+      "id": "branch/contains-unlimited-before@git-git-10k-refs",
+      "group": "branch_contains",
+      "fixture": "git-git-2035-10k-unique-packed-tips",
+      "description": "contains human, limit=None; GNU time -v, one warmup, alternating Git/main/fix; origin/main",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 35218.041,
+        "median_ms": 35218.041,
+        "stddev_ms": 0.0,
+        "min_ms": 35218.041,
+        "max_ms": 35218.041,
+        "runs_ms": [
+          35218.041
+        ],
+        "peak_rss_bytes": 72462336
+      },
+      "grit": {
+        "mean_ms": 2463.111,
+        "median_ms": 2463.111,
+        "stddev_ms": 0.0,
+        "min_ms": 2463.111,
+        "max_ms": 2463.111,
+        "runs_ms": [
+          2463.111
+        ],
+        "peak_rss_bytes": 103776256
+      },
+      "ratio": 0.06993889864572536
+    },
+    {
+      "id": "branch/unfiltered-unfiltered-before@git-git-10k-refs",
+      "group": "branch_contains",
+      "fixture": "git-git-2035-10k-unique-packed-tips",
+      "description": "unfiltered human, limit=unfiltered; GNU time -v, one warmup, alternating Git/main/fix; origin/main",
+      "driver": "cli",
+      "git": {
+        "mean_ms": 91.73333333333333,
+        "median_ms": 88.802,
+        "stddev_ms": 4.688804917626187,
+        "min_ms": 88.048,
+        "max_ms": 98.35,
+        "runs_ms": [
+          98.35,
+          88.048,
+          88.802
+        ],
+        "peak_rss_bytes": 5517312
+      },
+      "grit": {
+        "mean_ms": 83.24733333333333,
+        "median_ms": 83.113,
+        "stddev_ms": 0.2262540361825379,
+        "min_ms": 83.063,
+        "max_ms": 83.566,
+        "runs_ms": [
+          83.566,
+          83.063,
+          83.113
+        ],
+        "peak_rss_bytes": 19177472
+      },
+      "ratio": 0.9359361275646945
+    }
+  ]
+}

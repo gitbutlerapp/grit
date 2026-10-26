@@ -96,5 +96,84 @@ fn bench_contains_tags(c: &mut Criterion) {
     group.finish();
 }
 
-criterion_group!(benches, bench_contains_tags);
+/// Unique packed branch tips keep a bounded query from accidentally benchmarking
+/// only shared-tip deduplication. Build objects with grit and pack them with system Git.
+fn bench_bounded_branches(c: &mut Criterion) {
+    use criterion::{BatchSize, BenchmarkId};
+    use grit_lib::objects::ObjectKind;
+    use grit_lib::repo::InitOptions;
+
+    let dir = tempfile::tempdir().expect("fixture");
+    let repo = Repository::init(dir.path(), &InitOptions::default()).expect("init");
+    let tree = repo.odb().write(ObjectKind::Tree, b"").expect("tree");
+    let mut commits = Vec::with_capacity(10_000);
+    for i in 0..10_000 {
+        let parent = commits
+            .last()
+            .map(|p| format!("parent {p}\n"))
+            .unwrap_or_default();
+        let bytes = format!("tree {tree}\n{parent}author T <t@example.com> 1700000000 +0000\ncommitter T <t@example.com> 1700000000 +0000\n\ncommit {i}\n");
+        commits.push(
+            repo.odb()
+                .write(ObjectKind::Commit, bytes.as_bytes())
+                .expect("commit"),
+        );
+    }
+    let target = commits[9899];
+    let mut refs = String::from("# pack-refs with: sorted\n");
+    for (i, oid) in commits.iter().rev().enumerate() {
+        refs.push_str(&format!("{oid} refs/heads/dogfood/{i:05}\n"));
+    }
+    std::fs::write(repo.git_dir().join("packed-refs"), refs).expect("packed refs");
+    assert!(Command::new("git")
+        .current_dir(dir.path())
+        .args(["repack", "-adq"])
+        .status()
+        .expect("pack")
+        .success());
+    let mut group = c.benchmark_group("ref_query_contains_10k_unique_branches");
+    group.sample_size(10);
+    for graph in [false, true] {
+        if graph {
+            assert!(Command::new("git")
+                .current_dir(dir.path())
+                .args(["commit-graph", "write", "--reachable"])
+                .status()
+                .expect("graph")
+                .success());
+        }
+        for limit in [Some(1), Some(100), Some(1000), None] {
+            let label = limit
+                .map(|n| n.to_string())
+                .unwrap_or_else(|| "unlimited".into());
+            group.bench_with_input(
+                BenchmarkId::new(if graph { "graph" } else { "no_graph" }, label),
+                &limit,
+                |b, &limit| {
+                    b.iter_batched(
+                        || {
+                            Repository::discover(Some(dir.path()), &RepositoryOptions::empty())
+                                .expect("open")
+                        },
+                        |repo| {
+                            let query = RefQuery {
+                                contains: vec![target],
+                                limit,
+                                ..RefQuery::default()
+                            };
+                            std::hint::black_box(
+                                query_refs(&repo, &query, &RefQueryOptions::default())
+                                    .expect("query"),
+                            )
+                        },
+                        BatchSize::PerIteration,
+                    );
+                },
+            );
+        }
+    }
+    group.finish();
+}
+
+criterion_group!(benches, bench_contains_tags, bench_bounded_branches);
 criterion_main!(benches);

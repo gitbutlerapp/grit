@@ -3,7 +3,7 @@
 use std::collections::HashSet;
 
 use crate::error::Error;
-use crate::merge_base::{branch_tips_merged_into, RefContainsBatch};
+use crate::merge_base::{branch_tips_merged_into, RefContainsBatch, RefContainsMemo};
 use crate::objects::{oid_hash_map, oid_hash_set, OidHashMap, OidHashSet};
 use crate::objects::{parse_tag, ObjectId, ObjectKind};
 use crate::odb::Odb;
@@ -194,6 +194,58 @@ fn row_passes_reachability<'repo>(
     Ok(true)
 }
 
+/// Name ordering can be decided before containment, so a finite query needs only
+/// enough matching tips. Other filters and global sorts retain the batch walk.
+pub(super) fn can_bound_contains(query: &RefQuery) -> bool {
+    query.limit.is_some()
+        && query.sort.key == super::listing::SortKey::Name
+        && !query.contains.is_empty()
+        && query.no_contains.is_empty()
+        && query.merged.is_empty()
+        && query.no_merged.is_empty()
+        && query.points_at.is_empty()
+}
+
+fn filter_bounded_contains(
+    repo: &Repository,
+    query: &RefQuery,
+    rows: &mut Vec<(String, ObjectId, Option<ObjectId>)>,
+    targets: &[ObjectId],
+    limit: usize,
+) -> std::result::Result<(), RefQueryError> {
+    if limit == 0 || rows.is_empty() {
+        rows.clear();
+        return Ok(());
+    }
+    let mut evaluator = RefContainsMemo::new(repo, targets)?;
+    let mut peels = oid_hash_map();
+    rows.sort_by(|a, b| a.0.cmp(&b.0));
+    if query.sort.reverse {
+        rows.reverse();
+    }
+    let mut kept = Vec::with_capacity(limit.min(rows.len()));
+    for row in rows.drain(..) {
+        if kept.len() == limit {
+            break;
+        }
+        let tip = match peels.get(&row.1) {
+            Some(tip) => *tip,
+            None => {
+                let tip = peel_ref_tip_commit(repo, row.1, row.2)?;
+                peels.insert(row.1, tip);
+                tip
+            }
+        };
+        if let Some(tip) = tip {
+            if evaluator.contains(tip)? {
+                kept.push(row);
+            }
+        }
+    }
+    *rows = kept;
+    Ok(())
+}
+
 /// Drop refs that fail reachability filters in `query`.
 pub(super) fn filter_listings_by_reachability(
     repo: &Repository,
@@ -212,6 +264,11 @@ pub(super) fn filter_listings_by_reachability(
     let no_contains = resolve_targets(repo, &query.no_contains)?;
     let merged = resolve_targets(repo, &query.merged)?;
     let no_merged = resolve_targets(repo, &query.no_merged)?;
+    if can_bound_contains(query) {
+        if let Some(limit) = query.limit {
+            return filter_bounded_contains(repo, query, rows, &contains, limit);
+        }
+    }
     let odb = repo.odb();
 
     let mut peel_cache: OidHashMap<ObjectId> = oid_hash_map();

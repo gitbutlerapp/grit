@@ -486,6 +486,11 @@ pub(crate) enum PeelTips {
 
 /// Query refs on `repo` (respects linked-worktree visibility and injected ref stores).
 ///
+/// Finite, name-ordered `contains` queries without other reachability or object filters
+/// evaluate tips in result order and stop after `limit` matches. Ancestry results are
+/// shared across evaluated tips. Targets are validated even when the limit is zero.
+/// Unlimited queries, other sorts, and combined filters use a shared batch walk.
+///
 /// # Errors
 ///
 /// Propagates ref-store and object-read failures.
@@ -644,7 +649,8 @@ fn finish_query(
     repo: Option<&Repository>,
     peel: PeelTips,
 ) -> QueryResult<Vec<RefListing>> {
-    let peel = peel == PeelTips::Always || query_has_reachability(query);
+    let bounded_contains = query_reachability::can_bound_contains(query);
+    let peel = (peel == PeelTips::Always || query_has_reachability(query)) && !bounded_contains;
     if let Some(odb) = odb.filter(|_| peel) {
         // A malformed `packed-refs` only loses the shortcut; peeling falls back to the objects.
         let to_peel = collected.iter().filter(|c| c.peeled.is_none()).count();
@@ -665,6 +671,11 @@ fn finish_query(
         let keep: std::collections::HashSet<String> =
             reach_rows.into_iter().map(|(name, _, _)| name).collect();
         collected.retain(|c| keep.contains(&c.full_name));
+        if bounded_contains {
+            for entry in &mut collected {
+                fill_peeled(repo.odb(), None, entry);
+            }
+        }
     }
     if matches!(query.sort.key, SortKey::Date) {
         let odb = odb.ok_or(RefQueryError::MissingObjectDatabase)?;

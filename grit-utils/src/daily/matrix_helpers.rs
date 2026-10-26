@@ -1878,6 +1878,77 @@ pub fn setup_git_git_ref_contains(setup: &DailySetup<'_>) -> Result<DailyHeadlin
     Ok(ctx)
 }
 
+/// Isolated full-history clone with 10,000 distinct packed branch tips, newest first.
+pub fn setup_git_git_bounded_contains(setup: &DailySetup<'_>) -> Result<DailyHeadlineContext> {
+    use std::io::Write;
+    use std::process::Stdio;
+
+    let source = super::helpers::setup_git_git_worktree(setup)?;
+    with_scratch("bounded-branch-contains", |scratch| {
+        let repo = scratch.join("repo");
+        if !repo.join(".git").exists() {
+            std::fs::create_dir_all(scratch)?;
+            crate::fixture_registry::copy_for_use(setup.git, &source, &repo)?;
+            let output = Command::new(setup.git)
+                .current_dir(&repo)
+                .args(["rev-list", "-n", "10000", "HEAD"])
+                .output()?;
+            anyhow::ensure!(output.status.success(), "list branch benchmark tips");
+            let script = String::from_utf8(output.stdout)?
+                .lines()
+                .enumerate()
+                .map(|(i, oid)| format!("create refs/heads/dogfood/{i:05} {oid}\n"))
+                .collect::<String>();
+            let mut child = Command::new(setup.git)
+                .current_dir(&repo)
+                .args(["update-ref", "--stdin"])
+                .stdin(Stdio::piped())
+                .spawn()?;
+            child
+                .stdin
+                .take()
+                .context("update-ref stdin")?
+                .write_all(script.as_bytes())?;
+            anyhow::ensure!(child.wait()?.success(), "create branch benchmark tips");
+            run_git(setup.git, &repo, &["pack-refs", "--all"])?;
+        }
+        set_worktree_bench_cwd(&repo)?;
+        let mut headline = ctx(repo, setup);
+        headline.ref_query_contains = Some(git_rev_parse(setup.git, &headline.repo, "HEAD~100")?);
+        Ok(headline)
+    })
+}
+
+/// Bounded everyday branch listing, including the CLI's matching-row truncation probe.
+pub fn branch_contains_bench(ctx: &DailyHeadlineContext, json: bool) -> (BenchArgv, BenchArgv) {
+    let Some(target) = ctx.ref_query_contains.as_deref() else {
+        return noop_bench();
+    };
+    let mut args = vec!["branch", "--contains", target, "-n", "100"];
+    if json {
+        args.push("--json");
+    }
+    let format = if json {
+        "--format=%(refname) %(subject) %(committerdate:iso8601) %(upstream)"
+    } else {
+        "--format=%(refname:short)"
+    };
+    (
+        sh_devnull(&ctx.grit, &args),
+        sh_devnull(
+            &ctx.git,
+            &[
+                "for-each-ref",
+                "--contains",
+                target,
+                "--count=100",
+                format,
+                "refs/heads/",
+            ],
+        ),
+    )
+}
+
 /// Many-refs worktree with HEAD as `--merged` target for branch ref queries.
 pub fn setup_many_refs_merged(setup: &DailySetup<'_>) -> Result<DailyHeadlineContext> {
     let mut ctx = setup_many_refs(setup)?;

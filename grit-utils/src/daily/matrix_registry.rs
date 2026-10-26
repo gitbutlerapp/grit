@@ -513,6 +513,20 @@ pub const MATRIX_SCENARIOS: &[ScenarioSpec] = &[
         description: "Tag list --sort=version vs git tag -l --sort=version:refname on git.git",
     },
     ScenarioSpec {
+        id: "branch/contains@git-git-10k-refs",
+        area: Area::Branching,
+        headline: false,
+        name: None,
+        description: "Bounded branch --contains HEAD~100 -n 100 on 10,000 unique packed tips",
+    },
+    ScenarioSpec {
+        id: "branch/contains-json@git-git-10k-refs",
+        area: Area::Branching,
+        headline: false,
+        name: None,
+        description: "Bounded branch --contains HEAD~100 -n 100 on 10,000 unique packed tips",
+    },
+    ScenarioSpec {
         id: "branch/merged-ref@many-refs",
         area: Area::Branching,
         headline: false,

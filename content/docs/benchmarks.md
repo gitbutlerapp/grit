@@ -7,7 +7,49 @@ Performance work is measured on the factory VM and in CI against the **system** 
 
 For a map of **grit-lib** modules, **grit** commands, common workflows, and every **`grit-bench daily`** scenario id, see [`grit-utils/MATRIX.md`](https://github.com/gitbutlerapp/grit/blob/main/grit-utils/MATRIX.md). The same ids appear with **time and memory ratios** on the [Performance overview (daily matrix)](performance-overview.md) page.
 
-Command-level numbers below come from the committed **grit-bench** JSON baselines listed in `content/docs/site.toml`. Each scenario runs **hyperfine** against the system **`git`** binary and a release **`grit`** build on the same machine; times are wall-clock milliseconds (mean and spread from timed runs).
+Command-level numbers below come from the committed **grit-bench** JSON baselines listed in `content/docs/site.toml`. The harness usually runs **hyperfine** against the system **`git`** binary and a release **`grit`** build on the same machine; direct GNU `time` comparisons identify their sampling method below. Times are wall-clock milliseconds.
+
+### Bounded branch containment on 10,000 unique tips
+
+Issue #2035 is measured on a full clone of git.git at `7e34d8174dcda3435d1404c9a30bef46afe6c13e` (82,563 reachable commits). Create 10,000 distinct `refs/heads/dogfood/NNNNN` tips from `git rev-list -n 10000 HEAD`, then run `git pack-refs --all`. This fixture has no commit-graph. On 2026-10-26, compare the saved origin/main (`74adad7a5732`) release binary and the fixed release binary with stock Git 2.55.0 on the same checkout: Ubuntu 24.04.5, four vCPUs (Intel Xeon Platinum 8573C), 16 GiB RAM, Rust 1.99.0. No compiler runs during measurement.
+
+```bash
+grit branch --contains HEAD~100 -n 100 --json
+git for-each-ref --contains=HEAD~100 --count=100 \
+  '--format=%(refname) %(subject) %(committerdate:iso8601) %(upstream)' refs/heads/
+# Human comparison: omit --json and use --format='%(refname:short)' for Git.
+# Unlimited comparison: omit -n / --count; unfiltered control: omit --contains too.
+```
+
+Each command gets one warmup. Limits 1 and 100 and the unfiltered control use three alternating Git/main/fix samples; limit 1,000 and unlimited containment use one sample because Git scans the whole ref inventory. Wall time surrounds the subprocess, and peak RSS comes from `/usr/bin/time -v`. JSON ref order and truncation are checked against system Git. The before/after JSON baselines retain the raw timing samples and maximum RSS.
+
+| Output / limit | Git ms / KiB | Main ms / KiB | Fixed ms / KiB |
+| --- | ---: | ---: | ---: |
+| JSON / 1 | 40.70 / 19,236 | 2460.89 / 101,376 | 13.56 / 27,416 |
+| JSON / 100 | 239.26 / 31,420 | 2467.44 / 101,312 | 34.49 / 34,888 |
+| JSON / 1000 | 35049.41 / 71,016 | 2457.33 / 101,124 | 249.57 / 60,628 |
+| JSON / unlimited | 35237.14 / 71,088 | 2459.31 / 101,332 | 2503.00 / 102,544 |
+| JSON / unfiltered, unlimited | 158.46 / 25,620 | 131.43 / 39,196 | 130.86 / 40,692 |
+| Human / 1 | 40.66 / 19,188 | 2453.82 / 101,296 | 13.86 / 27,156 |
+| Human / 100 | 234.74 / 31,536 | 2462.37 / 101,344 | 33.88 / 34,068 |
+| Human / 1000 | 35074.22 / 71,080 | 2450.47 / 101,120 | 246.95 / 60,512 |
+| Human / unlimited | 35218.04 / 70,764 | 2463.11 / 101,344 | 2461.21 / 102,600 |
+| Human / unfiltered, unlimited | 88.80 / 5,388 | 83.11 / 18,728 | 82.62 / 19,936 |
+
+The finite name-ordered path shares positive and negative ancestry between evaluated tips and stops after enough matches, including the CLI's extra truncation probe. Without a commit-graph, expensive negative probes can meet an incrementally explored boundary of proven target ancestors. Committer dates order that exploration but never exclude ancestry. Unlimited queries, version/date sorts and combined filters retain the batch path.
+
+Unlimited containment remains around 2.5 seconds in both builds; unfiltered JSON listing remains around 131 ms. The control RSS samples vary by roughly 1–2 MiB, as retained in the baselines.
+
+The fixed library's synthetic 10,000-tip Criterion fixture measured these means (10 samples, 0.1-second warmup and 0.2-second requested measurement, extended automatically for long queries):
+
+| Matching-row limit | No commit-graph ms | Commit-graph ms |
+| --- | ---: | ---: |
+| 1 | 6.02 | 6.18 |
+| 100 | 7.10 | 6.86 |
+| 1,000 | 64.78 | 31.16 |
+| Unlimited | 284.22 | 184.35 |
+
+Run the library fixture with `cargo bench -p grit-lib --bench ref_query_contains_tags`. Its `ref_query_contains_10k_unique_branches` group covers limits 1, 100, 1,000 and unlimited with and without a commit-graph, opening a fresh repository handle per sample. The daily command matrix includes `branch/contains@git-git-10k-refs` and `branch/contains-json@git-git-10k-refs`, using an isolated copy of the pinned git.git fixture.
 
 ## grit-bench fixture cache
 

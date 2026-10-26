@@ -6,17 +6,18 @@ use super::super::helpers::{
     prepare_switch_reset, setup_git_git_history, setup_hot_path_pick_merge,
 };
 use super::super::matrix_helpers::{
-    branch_create_bench, branch_delete_bench, branch_list_json_bench, branch_merged_bench,
-    branch_rename_bench, history_reword_bench, merge_100k_bench, merge_content_wide_bench,
-    pick_100k_bench, prepare_branch_create, prepare_branch_delete, prepare_branch_rename,
-    prepare_stash_list, prepare_tag_create, ref_query_contains_tags_bench,
+    branch_contains_bench, branch_create_bench, branch_delete_bench, branch_list_json_bench,
+    branch_merged_bench, branch_rename_bench, history_reword_bench, merge_100k_bench,
+    merge_content_wide_bench, pick_100k_bench, prepare_branch_create, prepare_branch_delete,
+    prepare_branch_rename, prepare_stash_list, prepare_tag_create, ref_query_contains_tags_bench,
     ref_query_merged_branches_bench, revert_bench, setup_big_asset, setup_branch_create,
     setup_branch_delete, setup_branch_rename, setup_content_merge_wide, setup_delete_heavy_wide,
-    setup_git_git_ref_contains, setup_history_reword, setup_hot_path_pick_merge_100k,
-    setup_hot_path_revert, setup_hot_path_switch_100k, setup_many_refs, setup_many_refs_loose,
-    setup_many_refs_merged, setup_stash_with_entry, setup_tag_create, stash_list_bench,
-    switch_100k_bench, switch_big_asset_bench, switch_delete_heavy_bench, tag_create_bench,
-    tag_list_bench, tag_list_sort_version_git_git_bench,
+    setup_git_git_bounded_contains, setup_git_git_ref_contains, setup_history_reword,
+    setup_hot_path_pick_merge_100k, setup_hot_path_revert, setup_hot_path_switch_100k,
+    setup_many_refs, setup_many_refs_loose, setup_many_refs_merged, setup_stash_with_entry,
+    setup_tag_create, stash_list_bench, switch_100k_bench, switch_big_asset_bench,
+    switch_delete_heavy_bench, tag_create_bench, tag_list_bench,
+    tag_list_sort_version_git_git_bench,
 };
 use super::super::plan::DailyHeadlinePlan;
 
@@ -218,6 +219,24 @@ pub fn plans() -> Vec<DailyHeadlinePlan> {
             prepare: super::super::helpers::prepare_none,
             build_git: |c| ref_query_contains_tags_bench(c).1,
             build_grit: |c| ref_query_contains_tags_bench(c).0,
+            correctness: None,
+        },
+        DailyHeadlinePlan {
+            spec: matrix_spec("branch/contains@git-git-10k-refs"),
+            pending: false,
+            setup: setup_git_git_bounded_contains,
+            prepare: super::super::helpers::prepare_none,
+            build_git: |c| branch_contains_bench(c, false).1,
+            build_grit: |c| branch_contains_bench(c, false).0,
+            correctness: None,
+        },
+        DailyHeadlinePlan {
+            spec: matrix_spec("branch/contains-json@git-git-10k-refs"),
+            pending: false,
+            setup: setup_git_git_bounded_contains,
+            prepare: super::super::helpers::prepare_none,
+            build_git: |c| branch_contains_bench(c, true).1,
+            build_grit: |c| branch_contains_bench(c, true).0,
             correctness: None,
         },
         DailyHeadlinePlan {

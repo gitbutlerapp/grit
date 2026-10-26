@@ -152,6 +152,8 @@ Overview of **grit-lib** coverage, **`grit` commands**, common workflows, and **
 | `branch/list-json@many-refs` | List branches with JSON vs git branch -vv |
 | `branch/list@many-refs-loose` | List branches on loose many-refs fixture vs git branch |
 | `branch/merged@many-refs` | Branch --merged vs git branch --merged |
+| `branch/contains@git-git-10k-refs` | Bounded human branch listing: HEAD~100, 100 matches, 10,000 unique packed tips |
+| `branch/contains-json@git-git-10k-refs` | Same bounded branch listing with JSON and full metadata |
 | `branch/merged-ref@many-refs` | Branch --merged ref query vs git for-each-ref on many-refs |
 | `history/reword@synth-10k` | History reword vs git history reword or scripted rebase |
 | `merge/content-both-sides@wide-20k` | Merge a branch where both sides edited all 20k files (one content merge per path) vs git merge |
