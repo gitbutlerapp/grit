@@ -2475,6 +2475,49 @@ fn work_on_the_servers_branch_is_rebased_onto_it_with_grit_pull_branch() {
 }
 
 #[test]
+fn a_directory_the_servers_branch_made_a_file_rebases_cleanly_under_grit_pull_branch() {
+    let (_tmp, home, repos, _server, repo_url) = signed_in();
+    let demo = repos.join("demo");
+    check_out_each(
+        &home,
+        &repo_url,
+        &[("alice", &["src", "docs"]), ("bob", &["src"])],
+    );
+    let (alice, bob) = (home.join("alice"), home.join("bob"));
+    ok(&home, &alice, &["switch", "-c", "feature"]);
+    ok(&home, &alice, &["rm", "src/deep"]);
+    std::fs::write(alice.join("src/deep"), "now a file\n").expect("write");
+    ok(&home, &alice, &["add", "src/deep"]);
+    ok(&home, &alice, &["commit", "-m", "src/deep becomes a file"]);
+    ok(&home, &alice, &["checkin", "feature"]);
+
+    // Bob's own commit never touches src/deep.
+    ok(&home, &bob, &["switch", "-c", "feature"]);
+    commit_file(&home, &bob, "src/b.rs", "b\n", "Add b");
+    let pulled = json(&home, &bob, &["--json", "pull", "feature"]);
+    assert_eq!(pulled["result"], "rebased", "{pulled}");
+    assert_eq!(
+        git(&bob, &["ls-files", "--stage", "src"]).lines().count(),
+        3
+    );
+    assert_eq!(
+        git(&bob, &["ls-files", "src"]),
+        "src/a.rs\nsrc/b.rs\nsrc/deep"
+    );
+    assert_eq!(read_file(&bob, "src/deep").as_deref(), Some("now a file\n"));
+    assert_eq!(git(&bob, &["status", "--porcelain"]), "");
+    assert_eq!(
+        git(&bob, &["log", "-1", "--format=%s", "HEAD~1"]),
+        "src/deep becomes a file"
+    );
+
+    let checkin = json(&home, &bob, &["--json", "checkin", "feature"]);
+    assert_eq!(checkin["branches"][0]["rule"], "fast_forward", "{checkin}");
+    assert_eq!(git(&demo, &["show", "feature:src/deep"]), "now a file");
+    assert_eq!(git(&demo, &["show", "feature:src/b.rs"]), "b");
+}
+
+#[test]
 fn two_checkouts_of_different_paths_extend_one_branch() {
     let (_tmp, home, repos, _server, repo_url) = signed_in();
     let demo = repos.join("demo");

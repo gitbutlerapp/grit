@@ -948,7 +948,10 @@ mod tests {
         );
     }
 
-    #[cfg_attr(not(feature = "full-tests"), ignore = "starts system git or is heavy; run with --features full-tests")]
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn branches_the_checkout_cant_be_shown_are_refused() {
         let (dir, repo) = repo();

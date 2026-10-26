@@ -547,6 +547,9 @@ fn apply_df_file_directory_conflicts_trees(
         if parent_has_file(theirs, path) {
             continue;
         }
+        if directory_unchanged_from_base(cache, odb, base_tree, theirs_tree, path)? {
+            continue;
+        }
         let escaped = escape_df_path_side(ours, path, ours_commit, &mut out.stage2);
         out.relocated_from.push(path.clone());
         touched.insert(path.clone());
@@ -577,6 +580,9 @@ fn apply_df_file_directory_conflicts_trees(
         if parent_has_file(ours, path) {
             continue;
         }
+        if directory_unchanged_from_base(cache, odb, base_tree, ours_tree, path)? {
+            continue;
+        }
         let escaped = escape_df_path_side(theirs, path, theirs_commit, &mut out.stage3);
         out.relocated_from.push(path.clone());
         touched.insert(path.clone());
@@ -584,8 +590,31 @@ fn apply_df_file_directory_conflicts_trees(
             touched.insert(p);
         }
     }
-    let _ = (base_tree, base);
+    let _ = base;
     Ok(out)
+}
+
+/// True when `side_tree` holds exactly the base's directory at `path`.
+///
+/// The other side put a file at `path`, so it has nothing under `path/` and deleted every base
+/// entry there. With the directory side unchanged, all of those deletions merge cleanly, nothing
+/// is left under `path/`, and the file does not clash with a directory.
+fn directory_unchanged_from_base(
+    cache: &mut merge_tree_cache::MergeTreeCache,
+    odb: &Odb,
+    base_tree: &ObjectId,
+    side_tree: &ObjectId,
+    path: &[u8],
+) -> crate::error::Result<bool> {
+    let Some(base) = merge_trees_walk::lookup_index_entry_at_path(cache, odb, base_tree, path)?
+    else {
+        return Ok(false);
+    };
+    let Some(side) = merge_trees_walk::lookup_index_entry_at_path(cache, odb, side_tree, path)?
+    else {
+        return Ok(false);
+    };
+    Ok(base.mode == 0o040000 && side.mode == 0o040000 && base.oid == side.oid)
 }
 
 fn escape_df_path_side(
@@ -1534,6 +1563,171 @@ mod tests {
             out.index.entries().iter().all(|e| e.stage() == 0),
             "expected clean merge without df escape entries"
         );
+    }
+
+    /// A repository with `base`, `changed` (from `base`, `src/lib` swaps between a directory and
+    /// a file) and `other` (from `base`, adds `src/b.rs` and leaves `src/lib` alone).
+    struct DirectoryFileFixture {
+        dir: tempfile::TempDir,
+        repo: Repository,
+        base: ObjectId,
+        changed: ObjectId,
+        other: ObjectId,
+    }
+
+    fn directory_file_fixture(base_has_directory: bool) -> DirectoryFileFixture {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path();
+        let git = |args: &[&str]| grit_test_support::git(path, args);
+        let head = || -> ObjectId { git(&["rev-parse", "HEAD"]).trim().parse().expect("oid") };
+        git(&["init", "-q", "-b", "main"]);
+        std::fs::create_dir_all(path.join("src")).expect("mkdir");
+        std::fs::write(path.join("src/a.rs"), "a\n").expect("write");
+        let as_directory = |path: &std::path::Path| {
+            std::fs::create_dir_all(path.join("src/lib")).expect("mkdir");
+            std::fs::write(path.join("src/lib/x.rs"), "x\n").expect("write");
+        };
+        let as_file = |path: &std::path::Path| {
+            std::fs::write(path.join("src/lib"), "now a file\n").expect("write");
+        };
+        if base_has_directory {
+            as_directory(path);
+        } else {
+            as_file(path);
+        }
+        git(&["add", "."]);
+        git(&["commit", "-q", "-m", "base"]);
+        let base = head();
+        git(&["switch", "-q", "-c", "changed"]);
+        git(&["rm", "-q", "-r", "src/lib"]);
+        if base_has_directory {
+            as_file(path);
+        } else {
+            as_directory(path);
+        }
+        git(&["add", "."]);
+        git(&["commit", "-q", "-m", "swap src/lib"]);
+        let changed = head();
+        git(&["switch", "-q", "-c", "other", "main"]);
+        std::fs::write(path.join("src/b.rs"), "b\n").expect("write");
+        git(&["add", "src/b.rs"]);
+        git(&["commit", "-q", "-m", "add b"]);
+        let other = head();
+        let repo = Repository::discover(Some(path), &RepositoryOptions::empty()).expect("repo");
+        DirectoryFileFixture {
+            dir,
+            repo,
+            base,
+            changed,
+            other,
+        }
+    }
+
+    impl DirectoryFileFixture {
+        fn tree(&self, commit: ObjectId) -> ObjectId {
+            self.repo.odb().read_commit(&commit).expect("commit").tree
+        }
+
+        /// Merge `ours` and `theirs` over `base`, with or without merge's D/F relocation.
+        fn merge(&self, ours: ObjectId, theirs: ObjectId, relocate: bool) -> TreeMergeOutput {
+            let presentation = if relocate {
+                TreeMergeConflictPresentation {
+                    df_directory_ours_commit: Some(ours),
+                    df_directory_theirs_commit: Some(theirs),
+                    ..TreeMergeConflictPresentation::default()
+                }
+            } else {
+                TreeMergeConflictPresentation::default()
+            };
+            merge_trees_three_way(
+                &self.repo,
+                self.tree(self.base),
+                self.tree(ours),
+                self.tree(theirs),
+                MergeFavor::default(),
+                WhitespaceMergeOptions::default(),
+                None,
+                presentation,
+            )
+            .expect("merge")
+        }
+
+        /// The tree system git's `merge-tree` writes for the same merge, when it is clean.
+        fn git_merge_tree(&self, ours: ObjectId, theirs: ObjectId) -> Option<ObjectId> {
+            let out = grit_test_support::git_cmd(&[
+                "merge-tree",
+                "--write-tree",
+                &format!("--merge-base={}", self.base),
+                &ours.to_hex(),
+                &theirs.to_hex(),
+            ])
+            .in_dir(self.dir.path())
+            .exec();
+            out.ok().then(|| {
+                out.stdout
+                    .lines()
+                    .next()
+                    .expect("tree line")
+                    .parse()
+                    .expect("tree")
+            })
+        }
+    }
+
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
+    #[test]
+    fn a_path_swapped_between_directory_and_file_merges_with_a_side_that_left_it_alone() {
+        for base_has_directory in [true, false] {
+            let fx = directory_file_fixture(base_has_directory);
+            for (ours, theirs) in [(fx.changed, fx.other), (fx.other, fx.changed)] {
+                let expected = fx
+                    .git_merge_tree(ours, theirs)
+                    .expect("git merges this cleanly");
+                for relocate in [false, true] {
+                    let case = format!(
+                        "base has a directory: {base_has_directory}, ours is the changed side: {}, \
+                         relocate: {relocate}",
+                        ours == fx.changed
+                    );
+                    let out = fx.merge(ours, theirs, relocate);
+                    assert!(!out.index.has_unmerged_entries(), "no conflict ({case})");
+                    assert!(out.conflict_content.is_empty(), "no markers ({case})");
+                    assert!(
+                        out.index.entries().iter().all(|e| e.mode != 0o040000),
+                        "no directory rows in the index ({case})"
+                    );
+                    assert_eq!(out.result_tree, expected, "same tree as git ({case})");
+                }
+            }
+        }
+    }
+
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
+    #[test]
+    fn a_directory_changed_on_one_side_and_made_a_file_on_the_other_still_conflicts() {
+        let fx = directory_file_fixture(true);
+        let path = fx.dir.path();
+        grit_test_support::git(path, &["switch", "-q", "other"]);
+        std::fs::write(path.join("src/lib/x.rs"), "x changed\n").expect("write");
+        grit_test_support::git(path, &["commit", "-q", "-am", "change x"]);
+        let other: ObjectId = grit_test_support::git(path, &["rev-parse", "HEAD"])
+            .trim()
+            .parse()
+            .expect("oid");
+        assert_eq!(fx.git_merge_tree(fx.changed, other), None, "git conflicts");
+        for relocate in [false, true] {
+            let out = fx.merge(fx.changed, other, relocate);
+            assert!(
+                out.index.has_unmerged_entries(),
+                "a conflict (relocate: {relocate})"
+            );
+        }
     }
 
     #[cfg_attr(

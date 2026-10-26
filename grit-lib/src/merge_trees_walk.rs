@@ -92,6 +92,19 @@ pub(crate) fn lookup_index_entry_at_path(
     lookup_index_entry_at_path_cached(cache, odb, tree_oid, path)
 }
 
+/// The file (blob, symlink or gitlink) at `path` in `tree_oid`.
+///
+/// A directory at `path` is not a file there: when one side turned a directory into a file, the
+/// other side's directory must not take part in the three-way merge of that file.
+fn file_entry_at_path(
+    cache: &mut MergeTreeCache,
+    odb: &Odb,
+    tree_oid: &ObjectId,
+    path: &[u8],
+) -> crate::error::Result<Option<IndexEntry>> {
+    Ok(lookup_index_entry_at_path(cache, odb, tree_oid, path)?.filter(|e| e.mode != MODE_DIR))
+}
+
 pub(crate) fn paths_from_tree_diff(
     odb: &Odb,
     base: &ObjectId,
@@ -267,6 +280,18 @@ pub(crate) fn side_tree_has_descendant_at(
     side_tree_has_descendant_at_cached(cache, odb, tree_oid, side, prefix, sparse_paths)
 }
 
+/// True when `rows` holds a path strictly under `dir/`.
+fn has_rows_under(rows: &BTreeMap<&[u8], &IndexEntry>, dir: &[u8]) -> bool {
+    let mut prefix = dir.to_vec();
+    prefix.push(b'/');
+    rows.range::<&[u8], _>((
+        std::ops::Bound::Included(prefix.as_slice()),
+        std::ops::Bound::Unbounded,
+    ))
+    .next()
+    .is_some_and(|(path, _)| path.starts_with(&prefix))
+}
+
 #[expect(clippy::too_many_arguments)]
 pub(crate) fn compose_merged_tree_oid(
     cache: &mut MergeTreeCache,
@@ -345,7 +370,13 @@ pub(crate) fn compose_merged_tree_oid(
             continue;
         }
 
-        let mode = o_te.or(t_te).or(b_te).map(|e| e.mode).unwrap_or(MODE_DIR);
+        // Merged rows under `fp/` make it a directory, whatever ours has there: a side that
+        // turned a file into a directory wins over a side that left the file alone.
+        let mode = if has_rows_under(stage0_by_path, &fp) {
+            MODE_DIR
+        } else {
+            o_te.or(t_te).or(b_te).map(|e| e.mode).unwrap_or(MODE_DIR)
+        };
         if mode == MODE_DIR {
             let b_sub = b_te
                 .filter(|e| e.mode == MODE_DIR)
@@ -506,19 +537,19 @@ pub(crate) fn three_way_on_touched_paths(
         if theirs_rename_destinations.contains(op) && !ours_new_to_old.contains_key(op) {
             if let Some(old) = theirs_rename_source_by_dest.get(op) {
                 let ours_still_at_source = ours.contains_key(*old)
-                    || lookup_index_entry_at_path(cache, odb, &ours_tree, old)
+                    || file_entry_at_path(cache, odb, &ours_tree, old)
                         .ok()
                         .flatten()
                         .is_some();
                 if ours_still_at_source {
                     let ours_present_at_dest = ours.contains_key(op)
-                        || lookup_index_entry_at_path(cache, odb, &ours_tree, op)
+                        || file_entry_at_path(cache, odb, &ours_tree, op)
                             .ok()
                             .flatten()
                             .is_some();
                     if !ours_present_at_dest {
                         if theirs.get(op).is_some()
-                            || lookup_index_entry_at_path(cache, odb, &theirs_tree, op)
+                            || file_entry_at_path(cache, odb, &theirs_tree, op)
                                 .ok()
                                 .flatten()
                                 .is_some()
@@ -543,19 +574,15 @@ pub(crate) fn three_way_on_touched_paths(
         });
 
         let b = bp.and_then(|p| base.get(p).cloned()).or_else(|| {
-            bp.and_then(|p| {
-                lookup_index_entry_at_path(cache, odb, &base_tree, p)
-                    .ok()
-                    .flatten()
-            })
+            bp.and_then(|p| file_entry_at_path(cache, odb, &base_tree, p).ok().flatten())
         });
         let o = ours.get(op).cloned().or_else(|| {
-            lookup_index_entry_at_path(cache, odb, &ours_tree, op)
+            file_entry_at_path(cache, odb, &ours_tree, op)
                 .ok()
                 .flatten()
         });
         let t = theirs.get(tp).cloned().or_else(|| {
-            lookup_index_entry_at_path(cache, odb, &theirs_tree, tp)
+            file_entry_at_path(cache, odb, &theirs_tree, tp)
                 .ok()
                 .flatten()
         });
@@ -592,7 +619,7 @@ pub(crate) fn three_way_on_touched_paths(
         }
         let tp = theirs_old_to_new.get(bp).map_or(bp, Vec::as_slice);
         let b = base.get(bp).cloned().or_else(|| {
-            lookup_index_entry_at_path(cache, odb, &base_tree, bp)
+            file_entry_at_path(cache, odb, &base_tree, bp)
                 .ok()
                 .flatten()
         });
@@ -600,7 +627,7 @@ pub(crate) fn three_way_on_touched_paths(
             continue;
         }
         let t = theirs.get(tp).cloned().or_else(|| {
-            lookup_index_entry_at_path(cache, odb, &theirs_tree, tp)
+            file_entry_at_path(cache, odb, &theirs_tree, tp)
                 .ok()
                 .flatten()
         });
@@ -630,7 +657,7 @@ pub(crate) fn three_way_on_touched_paths(
             continue;
         }
         let t = theirs.get(tp).cloned().or_else(|| {
-            lookup_index_entry_at_path(cache, odb, &theirs_tree, tp)
+            file_entry_at_path(cache, odb, &theirs_tree, tp)
                 .ok()
                 .flatten()
         });

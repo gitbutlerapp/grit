@@ -1218,6 +1218,42 @@ mod tests {
     }
 
     #[test]
+    fn a_linear_rebase_replays_across_a_directory_that_became_a_file() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let repo = init_repo(dir.path());
+        let id = ident(1);
+        let commit = |files: &[(&str, &[u8])], parents: &[ObjectId], msg: &str| {
+            let tree = files_tree(&repo, files).expect("tree");
+            write_commit(&repo, tree, parents, msg, &id).expect("commit")
+        };
+        let a: (&str, &[u8]) = ("src/a.rs", b"a\n");
+        let b: (&str, &[u8]) = ("src/b.rs", b"b\n");
+        let lib_dir: (&str, &[u8]) = ("src/lib/x.rs", b"x\n");
+        let lib_file: (&str, &[u8]) = ("src/lib", b"now a file\n");
+        let root = commit(&[a, lib_dir], &[], "root");
+        let made_file = commit(&[a, lib_file], &[root], "src/lib becomes a file");
+        let added_b = commit(&[a, b, lib_dir], &[root], "add b");
+        let expected = files_tree(&repo, &[a, b, lib_file]).expect("tree");
+
+        // Local work that never touches src/lib, onto upstream that made it a file, and local
+        // work that made it a file, onto upstream that left it alone.
+        for (local, onto) in [(added_b, made_file), (made_file, added_b)] {
+            crate::refs::write_ref(repo.git_dir(), "refs/heads/main", &local).expect("main");
+            let plan = rebase_onto(&repo, root, onto, &[local], &flatten_opts(&id))
+                .expect("a clean replay");
+            let new = plan
+                .commits
+                .iter()
+                .find(|row| row.old == local)
+                .and_then(|row| row.new)
+                .expect("replayed");
+            let replayed = repo.odb().read_commit(&new).expect("commit");
+            assert_eq!(replayed.parents, vec![onto]);
+            assert_eq!(replayed.tree, expected, "src/lib is the file, b.rs is kept");
+        }
+    }
+
+    #[test]
     fn flattened_rebase_keeps_local_commit_under_merge_of_upstream() {
         let dir = tempfile::tempdir().expect("tempdir");
         let repo = init_repo(dir.path());

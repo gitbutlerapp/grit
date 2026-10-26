@@ -1548,7 +1548,10 @@ mod tests {
         options
     }
 
-    #[cfg_attr(not(feature = "full-tests"), ignore = "starts system git or is heavy; run with --features full-tests")]
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn a_landed_branch_moves_to_the_upstream_and_keeps_local_changes() {
         let tmp = TempDir::new().expect("tempdir");
@@ -1595,7 +1598,10 @@ mod tests {
         );
     }
 
-    #[cfg_attr(not(feature = "full-tests"), ignore = "starts system git or is heavy; run with --features full-tests")]
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn a_landed_branch_does_not_move_over_local_changes_the_upstream_has_other_content_for() {
         let tmp = TempDir::new().expect("tempdir");
@@ -1625,7 +1631,10 @@ mod tests {
         assert_eq!(git(&clone, &["status", "--porcelain"]), "M b.txt");
     }
 
-    #[cfg_attr(not(feature = "full-tests"), ignore = "starts system git or is heavy; run with --features full-tests")]
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn commits_above_a_landed_one_are_rebased_without_it() {
         let tmp = TempDir::new().expect("tempdir");

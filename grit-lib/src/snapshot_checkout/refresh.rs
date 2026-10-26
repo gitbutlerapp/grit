@@ -732,7 +732,10 @@ mod tests {
         }
     }
 
-    #[cfg_attr(not(feature = "full-tests"), ignore = "starts system git or is heavy; run with --features full-tests")]
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn landed_commits_are_never_replayed_and_the_user_moves_to_a_fresh_branch() {
         let tmp = tempfile::tempdir().expect("tempdir");
@@ -870,7 +873,10 @@ mod tests {
         }
     }
 
-    #[cfg_attr(not(feature = "full-tests"), ignore = "starts system git or is heavy; run with --features full-tests")]
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn work_merged_into_another_branch_is_rebased_on_the_next_snapshot_not_dropped() {
         let tmp = tempfile::tempdir().expect("tempdir");
@@ -920,7 +926,10 @@ mod tests {
         );
     }
 
-    #[cfg_attr(not(feature = "full-tests"), ignore = "starts system git or is heavy; run with --features full-tests")]
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn integrating_again_after_a_failed_move_off_finishes_it() {
         let tmp = tempfile::tempdir().expect("tempdir");
@@ -981,7 +990,10 @@ mod tests {
         assert_eq!(git(&co, &["symbolic-ref", "--short", "HEAD"]), "t/fresh");
     }
 
-    #[cfg_attr(not(feature = "full-tests"), ignore = "starts system git or is heavy; run with --features full-tests")]
+    #[cfg_attr(
+        not(feature = "full-tests"),
+        ignore = "starts system git or is heavy; run with --features full-tests"
+    )]
     #[test]
     fn a_landed_tip_another_worktree_is_detached_on_is_kept() {
         let tmp = tempfile::tempdir().expect("tempdir");
