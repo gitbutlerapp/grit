@@ -19,6 +19,61 @@ use grit_lib::repo::Repository;
 /// Above the library's 1 MiB streaming limit.
 const BIG: usize = 3 * 1024 * 1024 + 123;
 
+#[test]
+fn streamed_files_keep_cancellation_bounded_after_checkout_chunks_grow() {
+    use grit_lib::porcelain::checkout::checkout_between_trees_with_progress;
+    use grit_lib::progress::{FlagCancel, ProgressSink};
+
+    struct StopAfterNine {
+        completed: u64,
+        cancel: FlagCancel,
+    }
+
+    impl ProgressSink for StopAfterNine {
+        fn inc(&mut self, units: u64) {
+            self.completed += units;
+            if self.completed >= 9 {
+                self.cancel.cancel();
+            }
+        }
+    }
+
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir.path();
+    git(root, &["init", "-q", "-b", "main"]);
+    git(root, &["config", "user.name", "Test"]);
+    git(root, &["config", "user.email", "t@example.com"]);
+    git(root, &["config", "checkout.workers", "4"]);
+    git(root, &["config", "checkout.thresholdForParallelism", "0"]);
+    let first = root.join("f000.dat");
+    fs::write(&first, vec![b'x'; BIG]).expect("large file");
+    for i in 1..64 {
+        fs::hard_link(&first, root.join(format!("f{i:03}.dat"))).expect("link large file");
+    }
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "large files"]);
+    let tree = ObjectId::from_hex(git(root, &["rev-parse", "HEAD^{tree}"]).trim()).expect("tree");
+    git(root, &["rm", "-qr", "--", "."]);
+    let repo = open(root);
+    let cancel = FlagCancel::new();
+    let mut progress = StopAfterNine {
+        completed: 0,
+        cancel: cancel.clone(),
+    };
+    let err = checkout_between_trees_with_progress(&repo, None, &tree, &mut progress, &cancel)
+        .expect_err("cancel after the initial eight-file chunk");
+    assert!(matches!(err, grit_lib::error::Error::Cancelled), "{err:?}");
+    assert_eq!(progress.completed, 9);
+    let written = (0..64)
+        .filter(|i| root.join(format!("f{i:03}.dat")).is_file())
+        .count();
+    assert!(
+        (9..=16).contains(&written),
+        "streamed writes must stop within another eight files, wrote {written}"
+    );
+    git(root, &["fsck", "--strict", "--no-progress"]);
+}
+
 fn git(dir: &Path, args: &[&str]) -> String {
     let out = Command::new("git")
         .current_dir(dir)

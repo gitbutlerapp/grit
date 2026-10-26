@@ -72,13 +72,13 @@ fn checkout_bounds_medium_blob_buffers_for_serial_and_parallel_preparation() {
     git(root, &["config", "checkout.workers", "4"], b"");
     git(root, &["config", "user.name", "Test"], b"");
     git(root, &["config", "user.email", "t@example.com"], b"");
-    let blob = git(
-        root,
-        &["hash-object", "-w", "--stdin"],
-        &vec![b'x'; 512 * 1024],
-    );
-    let tree_input: String = (0..256)
-        .map(|i| format!("100644 blob {}\tf{i:04}.txt\n", blob.trim()))
+    let mut contents = vec![b'x'; 512 * 1024];
+    let tree_input: String = (0..256u32)
+        .map(|i| {
+            contents[..4].copy_from_slice(&i.to_le_bytes());
+            let blob = git(root, &["hash-object", "-w", "--stdin"], &contents);
+            format!("100644 blob {}\tf{i:04}.txt\n", blob.trim())
+        })
         .collect();
     let tree = git(root, &["mktree"], tree_input.as_bytes());
     let commit = git(root, &["commit-tree", tree.trim(), "-m", "many files"], b"");

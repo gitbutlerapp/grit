@@ -274,6 +274,16 @@ struct PreparedWrite {
     bytes: Option<Vec<u8>>,
 }
 
+impl PreparedWrite {
+    fn budget_bytes(&self) -> usize {
+        // Streamed files retain no contents here, but still need bounded write batches
+        // so cancellation is observed between at most eight large-file writes.
+        self.bytes
+            .as_ref()
+            .map_or(PREPARED_WRITE_BYTES / PARALLEL_WRITE_FIRST_CHUNK, Vec::len)
+    }
+}
+
 fn worktree_bytes_for_parallel_job(
     conv: &ConversionConfig,
     job: &CheckoutWriteJob,
@@ -498,7 +508,7 @@ fn flush_parallel_batch(
                 |_, items| {
                     crate::progress::poll_cancel(progress, cancel)?;
                     for item in items {
-                        prepared_bytes += item.bytes.as_ref().map_or(0, Vec::len);
+                        prepared_bytes += item.budget_bytes();
                         prepared.push(item);
                         if prepared_bytes >= PREPARED_WRITE_BYTES {
                             flush_prepared_batch(
@@ -527,8 +537,9 @@ fn flush_parallel_batch(
                             return Err(err);
                         }
                     };
-                    prepared_bytes += bytes.as_ref().map_or(0, Vec::len);
-                    prepared.push(PreparedWrite { idx, bytes });
+                    let item = PreparedWrite { idx, bytes };
+                    prepared_bytes += item.budget_bytes();
+                    prepared.push(item);
                     if prepared_bytes >= PREPARED_WRITE_BYTES {
                         flush_prepared_batch(
                             repo, pool, work_tree, jobs, &prepared, dir_cache, outcomes, progress,
