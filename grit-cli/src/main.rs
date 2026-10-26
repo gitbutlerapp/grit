@@ -45,6 +45,7 @@ mod quiet_args;
 mod ref_name_messages;
 mod rev_select;
 mod revision_errors;
+mod usage_hints;
 mod stdio;
 mod terminal_progress;
 mod ui;
@@ -2093,6 +2094,7 @@ fn main() {
 fn run() -> Result<ExitStatus, anyhow::Error> {
     let parse_argv =
         normalize_tag_verify_argv(diff_args::normalize_diff_argv(std::env::args().collect()));
+    usage_hints::capture_argv(parse_argv.clone());
     let cli = match Cli::try_parse_from(&parse_argv) {
         Ok(cli) => {
             if let Err(err) = validate_cli(&cli) {
@@ -2124,12 +2126,15 @@ fn run() -> Result<ExitStatus, anyhow::Error> {
             return Ok(ExitStatus::from_clap_code(err.exit_code()));
         }
         Err(err) if err.use_stderr() => {
-            let json = std::env::args().any(|a| a == "--json");
-            if json {
-                let opts = OutputOptions {
-                    mode: OutputMode::Json,
-                    filter: extract_filter_flag(),
-                };
+            let opts = clap_failure_output_options(&parse_argv);
+            if let Some(structured) = usage_hints::clap_failure(&parse_argv, &err) {
+                output::emit_error(&structured, &opts);
+                if opts.mode == OutputMode::Human {
+                    usage_hints::eprint_clap_trailer(&parse_argv, &err);
+                }
+                return Ok(ExitStatus::from_clap_code(err.exit_code()));
+            }
+            if opts.mode == OutputMode::Json {
                 let message = clap_json_error_message(&err);
                 let payload = json_error::StructuredJsonError::new(
                     message.clone(),
@@ -2304,11 +2309,29 @@ fn clap_json_error_message(err: &clap::Error) -> String {
     }
 }
 
+fn clap_failure_output_options(argv: &[String]) -> OutputOptions {
+    let mode = if argv.iter().any(|a| a == "--json") {
+        OutputMode::Json
+    } else if argv.iter().any(|a| a == "--markdown") {
+        OutputMode::Markdown
+    } else {
+        OutputMode::Human
+    };
+    OutputOptions {
+        mode,
+        filter: extract_filter_flag_from(argv),
+    }
+}
+
 fn extract_filter_flag() -> Option<String> {
-    let mut args = std::env::args();
+    extract_filter_flag_from(&std::env::args().collect::<Vec<_>>())
+}
+
+fn extract_filter_flag_from(argv: &[String]) -> Option<String> {
+    let mut args = argv.iter();
     while let Some(arg) = args.next() {
         if arg == "--filter" {
-            return args.next();
+            return args.next().cloned();
         }
         if let Some(expr) = arg.strip_prefix("--filter=") {
             return Some(expr.to_owned());

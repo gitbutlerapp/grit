@@ -18,6 +18,7 @@ use grit_lib::remote::{RemoteError, DEFAULT_REMOTE};
 
 use crate::error_kind::ErrorKind;
 use crate::json_error::{StructuredCliError, StructuredJsonError};
+use crate::usage_hints;
 
 /// Paths shown in human messages and hints before the rest are summarized as a count.
 const MAX_LISTED_PATHS: usize = 10;
@@ -184,14 +185,25 @@ fn guide_lib(err: &LibError) -> Option<Error> {
             Some("close programs that may have the file open, then try again".to_owned()),
             Some(vec![path.clone()]),
         )),
-        LibError::Branch(BranchError::NotFound { name }) => Some(guided(
-            ErrorKind::BranchNotFound,
-            format!("no branch named '{name}'"),
-            Some(format!(
-                "`grit branch` lists your branches; create this one with `grit switch -c {name}`"
-            )),
-            None,
-        )),
+        LibError::Branch(BranchError::NotFound { name }) => {
+            if let Some(hint) = usage_hints::checkout_restore_hint(name) {
+                Some(guided(
+                    ErrorKind::BranchNotFound,
+                    format!("no branch named '{name}'"),
+                    Some(hint),
+                    None,
+                ))
+            } else {
+                Some(guided(
+                    ErrorKind::BranchNotFound,
+                    format!("no branch named '{name}'"),
+                    Some(format!(
+                        "`grit branch` lists your branches; create this one with `grit switch -c {name}`"
+                    )),
+                    None,
+                ))
+            }
+        }
         _ => None,
     }
 }
