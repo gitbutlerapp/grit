@@ -156,6 +156,28 @@ fn grit_rows(rows: &[BranchSummary]) -> Vec<String> {
 }
 
 #[test]
+fn branch_listing_refreshes_upstream_config_between_calls() {
+    let (_dir, clone) = clone_with_many_packed_refs();
+    let repo = open(&clone);
+    for (merge, upstream, gone) in [
+        ("refs/heads/main", "refs/remotes/origin/main", false),
+        (
+            "refs/heads/synth/b0007",
+            "refs/remotes/origin/synth/b0007",
+            false,
+        ),
+        ("refs/heads/missing", "refs/remotes/origin/missing", true),
+    ] {
+        git(&clone, &["config", "branch.main.merge", merge]);
+        let rows = list(&repo, BranchScope::Local, RefQuery::default());
+        assert_eq!(grit_rows(&rows), git_rows(&clone, "refs/heads/"));
+        let actual = rows[0].upstream.as_ref().expect("upstream");
+        assert_eq!(actual.full_ref, upstream);
+        assert_eq!(actual.gone, gone);
+    }
+}
+
+#[test]
 fn clone_branch_listing_matches_git_and_follows_packed_refs_rewrites() {
     let (_dir, clone) = clone_with_many_packed_refs();
     let repo = open(&clone);

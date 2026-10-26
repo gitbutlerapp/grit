@@ -648,6 +648,47 @@ fn lying_sorted_header_lookups_match_git() {
     assert!(found > 0);
 }
 
+/// A prefix scan that encounters an ordering violation retries a full scan. It must not
+/// lose matching refs, even when a filter would otherwise discard the misplaced records.
+#[test]
+fn lying_sorted_header_prefix_scan_recovers_all_matching_refs() {
+    let repo = files_repo();
+    let wt = wt_path(&repo);
+    let git_dir = git_dir(&repo);
+    let oid = git_empty_commit_oid(wt).to_hex();
+    git(wt, &["pack-refs", "--all"]);
+    write_packed_refs(
+        &git_dir,
+        &format!(
+            "# pack-refs with: peeled fully-peeled sorted\n\
+             {oid} refs/heads/b\n{oid} refs/heads/a\n{oid} refs/tags/t\n"
+        ),
+    );
+    let heads = list_refs(&git_dir, "refs/heads/").expect("fallback");
+    assert_eq!(
+        heads
+            .iter()
+            .map(|(name, _)| name.as_str())
+            .collect::<Vec<_>>(),
+        ["refs/heads/a", "refs/heads/b"]
+    );
+    let loaded = PackedRefs::load(&git_dir).expect("full load");
+    for name in ["refs/heads/a", "refs/heads/b", "refs/tags/t"] {
+        assert_eq!(loaded.get(name).unwrap().to_hex(), oid);
+    }
+
+    // Grit writes through the same file backend; Git reads the new ref and validates the
+    // repository after the malformed ordering has been repaired.
+    let sorted = format!(
+        "# pack-refs with: peeled fully-peeled sorted\n\
+         {oid} refs/heads/a\n{oid} refs/heads/b\n{oid} refs/heads/main\n{oid} refs/tags/t\n"
+    );
+    write_packed_refs(&git_dir, &sorted);
+    write_ref(&git_dir, "refs/heads/from-grit", &oid.parse().unwrap()).unwrap();
+    assert_list_refs_match_git(wt, "refs/");
+    assert!(git_fsck_strict(wt));
+}
+
 /// Git does not require ref names to be UTF-8. A tag whose name is not only breaks the grit
 /// reads that cover it; branches and lookups elsewhere in a sorted file match git.
 #[test]

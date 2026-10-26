@@ -53,7 +53,7 @@ pub mod gc {
     pub use crate::gc::*;
 }
 
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::fs;
 use std::io;
 use std::ops::ControlFlow;
@@ -1223,6 +1223,25 @@ impl PackedRefsFileView {
         self.map_for_prefix_filtered(path, prefix, None)
     }
 
+    /// Collect a full scan in file order before building the sorted cache. This avoids a
+    /// temporary hash table and its arbitrary iteration order on already sorted files.
+    pub(crate) fn full_map(&self, path: &Path) -> Result<BTreeMap<String, ObjectId>> {
+        let (mut records, in_order) =
+            self.parse_region::<Vec<_>>(path, 0, self.data.len(), None, None)?;
+        if !in_order {
+            records.sort_by(|a, b| a.0.cmp(&b.0));
+        }
+        // Preserve the full parser's last-record-wins behavior for duplicate names.
+        records.dedup_by(|later, earlier| {
+            if later.0 != earlier.0 {
+                return false;
+            }
+            earlier.1 = later.1;
+            true
+        });
+        Ok(records.into_iter().collect())
+    }
+
     /// [`Self::map_for_prefix`], leaving out the records `keep` rejects. Rejected records are
     /// still parsed strictly; they are only spared the allocation.
     fn map_for_prefix_filtered(
@@ -1239,20 +1258,14 @@ impl PackedRefsFileView {
                 return Ok(map);
             }
         }
-        if memchr::memchr(b'\r', &self.data).is_some() {
-            return Err(packed_refs_unexpected_line(
-                path,
-                "<contains carriage return>",
-            ));
-        }
         // Every record is parsed, so the result does not depend on their order.
         let (map, _) = self.parse_region(path, 0, self.data.len(), prefix_trim, keep)?;
         Ok(map)
     }
 
-    /// Byte range a prefix scan of a sorted file covers: from just after the record before the
-    /// records matching `prefix` (and its peel line, which belongs to that record) to the first
-    /// record past them, so anything else up to and between them is checked.
+    /// Byte range a prefix scan of a sorted file covers, including the neighbouring records
+    /// and their peel lines. Parsing these neighbours validates their contents as well as
+    /// their order without scanning the rest of the file.
     ///
     /// Returns `None` when the records bounding the range contradict the search: the one before
     /// it is not below `prefix`, the first in it is, the one after it sorts before the end of
@@ -1277,14 +1290,19 @@ impl PackedRefsFileView {
                 if !self.record_cmp(prev, prefix).is_lt() {
                     return None;
                 }
-                let after = packed_line_end(&self.data, prev) + 1;
-                if self.data.get(after) == Some(&b'^') {
-                    packed_line_end(&self.data, after) + 1
-                } else {
-                    after
-                }
+                prev
             }
             None => 0,
+        };
+        let end = if end < len {
+            let after = packed_line_end(&self.data, end) + 1;
+            if self.data.get(after) == Some(&b'^') {
+                packed_line_end(&self.data, after) + 1
+            } else {
+                after
+            }
+        } else {
+            end
         };
         Some((begin, end))
     }
@@ -1292,15 +1310,22 @@ impl PackedRefsFileView {
     /// Strictly parse the lines in `[begin, end)`, and whether their records are in name order.
     ///
     /// Both bounds must be line starts or the end of the file, so the region is whole lines.
-    fn parse_region(
+    fn parse_region<C: Default + Extend<(String, ObjectId)>>(
         &self,
         path: &Path,
         begin: usize,
         end: usize,
         prefix: Option<&str>,
         keep: Option<PackedRecordFilter<'_>>,
-    ) -> Result<(HashMap<String, ObjectId>, bool)> {
-        let region = std::str::from_utf8(&self.data[begin..end])
+    ) -> Result<(C, bool)> {
+        let bytes = &self.data[begin..end];
+        if memchr::memchr(b'\r', bytes).is_some() {
+            return Err(packed_refs_unexpected_line(
+                path,
+                "<contains carriage return>",
+            ));
+        }
+        let region = std::str::from_utf8(bytes)
             .map_err(|_| packed_refs_unexpected_line(path, "<invalid utf-8>"))?;
         parse_packed_refs_region(path, region, prefix, keep, self.peel_trait)
     }
@@ -1327,25 +1352,24 @@ pub(crate) type PackedRecordFilter<'a> = &'a dyn Fn(&str, &ObjectId, PackedPeel)
 ///
 /// `region` starts at the beginning of the file or of a line that is not a peel line, and ends
 /// at the end of the file or just before a ref line, so peel lines stay attached to their ref.
-fn parse_packed_refs_region(
+fn parse_packed_refs_region<C: Default + Extend<(String, ObjectId)>>(
     path: &Path,
     region: &str,
     prefix: Option<&str>,
     keep: Option<PackedRecordFilter<'_>>,
     peel_trait: PackedPeelTrait,
-) -> Result<(HashMap<String, ObjectId>, bool)> {
+) -> Result<(C, bool)> {
     let ref_opts = RefNameOptions {
         allow_onelevel: false,
         refspec_pattern: false,
         normalize: false,
     };
-    let mut map = HashMap::new();
+    let mut map = C::default();
     let mut in_order = true;
     let mut prev_name = "";
     // With a filter, a record is decided once its peel line (if any) has been seen.
     let mut pending: Option<(&str, ObjectId, Option<ObjectId>)> = None;
-    let flush = |map: &mut HashMap<String, ObjectId>,
-                 pending: &mut Option<(&str, ObjectId, Option<ObjectId>)>| {
+    let flush = |map: &mut C, pending: &mut Option<(&str, ObjectId, Option<ObjectId>)>| {
         let (Some(keep), Some((refname, oid, peeled))) = (keep, pending.take()) else {
             return;
         };
@@ -1355,7 +1379,7 @@ fn parse_packed_refs_region(
             PackedPeel::Unknown
         };
         if keep(refname, &oid, peel) {
-            map.insert(refname.to_owned(), oid);
+            map.extend(Some((refname.to_owned(), oid)));
         }
     };
     let mut expect_peel = false;
@@ -1388,7 +1412,7 @@ fn parse_packed_refs_region(
             if keep.is_some() {
                 pending = Some((refname, oid, None));
             } else {
-                map.insert(refname.to_owned(), oid);
+                map.extend(Some((refname.to_owned(), oid)));
             }
         }
         expect_peel = true;
@@ -5348,6 +5372,7 @@ mod packed_refs_parse_tests {
             "# pack-refs with: peeled fully-peeled sorted\n\
              {oid} refs/heads/main\n\
              ^not-hex\n\
+             {oid} refs/heads/topic\n\
              {oid} refs/tags/v1\n"
         ))
         .unwrap();
@@ -5648,7 +5673,7 @@ mod packed_refs_parse_tests {
         let interleaved = view_of(&["refs/heads/a", "refs/tags/t", "refs/heads/b", "refs/tags/u"]);
         let (begin, end) = interleaved.prefix_region("refs/heads").unwrap();
         let (_, in_order) = interleaved
-            .parse_region(&path, begin, end, Some("refs/heads"), None)
+            .parse_region::<HashMap<_, _>>(&path, begin, end, Some("refs/heads"), None)
             .unwrap();
         assert!(!in_order);
         assert_eq!(
@@ -5688,6 +5713,68 @@ mod packed_refs_parse_tests {
             corrupt.map_for_prefix(&path, Some("refs/heads")),
             Err(Error::PackedRefsUnexpectedLine { .. })
         ));
+    }
+
+    #[test]
+    fn full_map_keeps_every_name_and_the_last_duplicate_value() {
+        let dir = tempdir().unwrap();
+        let path = store::paths::packed_refs_path(dir.path());
+        let first = "1111111111111111111111111111111111111111";
+        let last = "2222222222222222222222222222222222222222";
+        for header in ["# pack-refs with: sorted\n", "# pack-refs with: peeled\n"] {
+            for names in [
+                ["refs/heads/a", "refs/heads/b", "refs/heads/b"],
+                ["refs/heads/b", "refs/heads/a", "refs/heads/b"],
+            ] {
+                let body = format!(
+                    "{header}{first} {}\n{first} {}\n{last} {}\n",
+                    names[0], names[1], names[2]
+                );
+                let view = PackedRefsFileView::from_bytes(&path, body.into_bytes(), HashAlgo::Sha1)
+                    .unwrap();
+                let full = view.full_map(&path).unwrap();
+                assert_eq!(full.len(), 2);
+                assert_eq!(full["refs/heads/b"], last.parse().unwrap());
+                assert_eq!(
+                    full.into_iter().collect::<HashMap<_, _>>(),
+                    view.map_for_prefix(&path, None).unwrap()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn prefix_scan_validates_both_neighbouring_records_and_their_peels() {
+        let dir = tempdir().unwrap();
+        let path = store::paths::packed_refs_path(dir.path());
+        let oid = "1111111111111111111111111111111111111111";
+        let header = "# pack-refs with: peeled fully-peeled sorted\n";
+        for neighbour in ["refs/heads/a", "refs/tags/z"] {
+            for corrupt in [
+                format!("{oid} {neighbour}..bad\n"),
+                format!("{} {neighbour}\n", "g".repeat(40)),
+                format!("{oid} {neighbour}\n^{}\n", "g".repeat(40)),
+            ] {
+                let records = if neighbour.starts_with("refs/heads/") {
+                    format!("{corrupt}{oid} refs/heads/m\n{oid} refs/tags/z\n")
+                } else {
+                    format!("{oid} refs/heads/a\n{oid} refs/heads/m\n{corrupt}")
+                };
+                let view = PackedRefsFileView::from_bytes(
+                    &path,
+                    format!("{header}{records}").into_bytes(),
+                    HashAlgo::Sha1,
+                )
+                .unwrap();
+                assert!(
+                    matches!(
+                        view.map_for_prefix(&path, Some("refs/heads/m")),
+                        Err(Error::PackedRefsUnexpectedLine { .. })
+                    ),
+                    "{records}"
+                );
+            }
+        }
     }
 
     /// Point lookups trust the `sorted` header the way Git does, so a lying file can hide a ref
