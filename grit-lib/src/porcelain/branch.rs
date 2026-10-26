@@ -254,6 +254,22 @@ pub struct DeletedBranch {
 }
 
 /// Delete `refs/heads/<name>`, its reflog, and the `branch.<name>` config section.
+///
+/// `name` is a short local branch name. `mode` controls the merge-state check;
+/// `dry_run` validates the deletion and returns the branch's name and old tip
+/// without changing refs, reflogs, or config.
+///
+/// # Errors
+///
+/// Returns [`Error::Branch`] with [`BranchError::CurrentlyCheckedOut`] when the
+/// repository's own `HEAD` names the branch, including through an injected ref
+/// store. A branch held by another worktree returns [`BranchError::CheckedOut`],
+/// carrying the branch name and that worktree's path. Both checks run before
+/// deletion, even with [`DeleteMode::Force`] or `dry_run = true`.
+///
+/// Invalid names return [`BranchError::InvalidName`], missing branches return
+/// [`BranchError::NotFound`], and safe deletion of an unmerged branch returns
+/// [`BranchError::NotFullyMerged`]. Backend, config, and I/O errors propagate.
 pub fn delete_branch(
     repo: &Repository,
     name: &str,

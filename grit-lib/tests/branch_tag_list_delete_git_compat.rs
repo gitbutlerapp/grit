@@ -21,7 +21,7 @@ use grit_lib::progress::NullProgress;
 use grit_lib::refs::listing::{RefNamespace, RefQuery, RefSort, SortKey};
 use grit_lib::refs::ref_storage::RefStorageFormat;
 use grit_lib::refs::store::{
-    Expected, MemoryRefStore, RawRef, RefStore, RefTransaction, RefUpdate, RefUpdateFlags,
+    Expected, MemoryRefStore, RawRef, RefName, RefStore, RefTransaction, RefUpdate, RefUpdateFlags,
     ReflogUpdate,
 };
 use grit_lib::repo::{InitOptions, Repository};
@@ -98,6 +98,51 @@ fn git_fixture(root: &Path) -> std::path::PathBuf {
 
 fn open(dir: &Path) -> Repository {
     Repository::discover(Some(dir), &RepositoryOptions::empty()).expect("discover")
+}
+
+/// Both deletion modes and previews must refuse the store's own HEAD without writes.
+fn assert_current_branch_deletion_refused(repo: &Repository, branch: &str) {
+    let names = ["HEAD".to_owned(), format!("refs/heads/{branch}")];
+    let before: Vec<_> = names
+        .iter()
+        .map(|name| {
+            let name = RefName::try_from(name.as_str()).unwrap();
+            (
+                repo.refs().read_raw(name.as_str()).unwrap(),
+                repo.references().reflog(&name).unwrap(),
+                repo.refs().reflog_exists(name.as_str()).unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(before[0].0, Some(RawRef::Symbolic(names[1].clone())));
+    assert!(matches!(before[1].0, Some(RawRef::Direct(_))));
+    let config = std::fs::read(repo.git_dir().join("config")).unwrap();
+
+    for mode in [DeleteMode::Safe, DeleteMode::Force] {
+        for dry_run in [false, true] {
+            let err = delete_branch(repo, branch, mode, dry_run).unwrap_err();
+            assert!(
+                matches!(
+                    &err,
+                    Error::Branch(BranchError::CurrentlyCheckedOut { name }) if name == branch
+                ),
+                "{mode:?}, dry_run={dry_run}: {err:?}"
+            );
+            for (name, (raw, reflog, reflog_exists)) in names.iter().zip(&before) {
+                let name = RefName::try_from(name.as_str()).unwrap();
+                assert_eq!(&repo.refs().read_raw(name.as_str()).unwrap(), raw);
+                assert_eq!(&repo.references().reflog(&name).unwrap(), reflog);
+                assert_eq!(
+                    &repo.refs().reflog_exists(name.as_str()).unwrap(),
+                    reflog_exists
+                );
+            }
+            assert_eq!(
+                std::fs::read(repo.git_dir().join("config")).unwrap(),
+                config
+            );
+        }
+    }
 }
 
 #[test]
@@ -235,22 +280,30 @@ fn delete_branch_refuses_checked_out_branches() {
     let dir = git_fixture(tmp.path());
     let repo = open(&dir);
 
-    let err = delete_branch(&repo, "main", DeleteMode::Force, false).unwrap_err();
-    assert!(
-        matches!(
-            &err,
-            Error::Branch(BranchError::CurrentlyCheckedOut { name }) if name == "main"
-        ),
-        "{err:?}"
-    );
-    let err = delete_branch(&repo, "wt", DeleteMode::Force, false).unwrap_err();
-    assert!(
-        matches!(
-            &err,
-            Error::Branch(BranchError::CheckedOut { name, .. }) if name == "wt"
-        ),
-        "{err:?}"
-    );
+    assert_current_branch_deletion_refused(&repo, "main");
+    let worktree = tmp.path().join("wt").canonicalize().unwrap();
+    let head_before = git(&dir, &["symbolic-ref", "HEAD"]);
+    let refs_before = for_each_ref(&dir, "refs/");
+    let worktree_head_before = git(&worktree, &["symbolic-ref", "HEAD"]);
+    for mode in [DeleteMode::Safe, DeleteMode::Force] {
+        for dry_run in [false, true] {
+            let err = delete_branch(&repo, "wt", mode, dry_run).unwrap_err();
+            assert!(
+                matches!(
+                    &err,
+                    Error::Branch(BranchError::CheckedOut { name, worktree: held_by })
+                        if name == "wt" && Path::new(held_by).canonicalize().unwrap() == worktree
+                ),
+                "{mode:?}, dry_run={dry_run}: {err:?}"
+            );
+            assert_eq!(git(&dir, &["symbolic-ref", "HEAD"]), head_before);
+            assert_eq!(for_each_ref(&dir, "refs/"), refs_before);
+            assert_eq!(
+                git(&worktree, &["symbolic-ref", "HEAD"]),
+                worktree_head_before
+            );
+        }
+    }
     let err = delete_branch(&repo, "missing", DeleteMode::Force, false).unwrap_err();
     assert!(
         matches!(
@@ -261,6 +314,7 @@ fn delete_branch_refuses_checked_out_branches() {
     );
     assert!(ref_exists(&dir, "refs/heads/main"));
     assert!(ref_exists(&dir, "refs/heads/wt"));
+    git(&dir, &["fsck", "--no-progress"]);
 }
 
 #[test]
@@ -294,6 +348,27 @@ fn delete_packed_tags_is_seen_by_git() {
 }
 
 #[test]
+fn delete_current_branch_preserves_git_reftable_repository() {
+    let tmp = tempfile::tempdir().unwrap();
+    let dir = tmp.path();
+    git(dir, &["init", "-q", "-b", "main", "--ref-format=reftable"]);
+    commit(dir, "initial");
+    let repo = open(dir);
+    assert_eq!(
+        repo.refs().format(),
+        grit_lib::refs::store::RefStorageFormat::Reftable
+    );
+    let tip = oid(dir, "HEAD");
+    let head = git(dir, &["symbolic-ref", "HEAD"]);
+
+    assert_current_branch_deletion_refused(&repo, "main");
+    assert_eq!(oid(dir, "HEAD"), tip);
+    assert_eq!(git(dir, &["symbolic-ref", "HEAD"]), head);
+    assert_eq!(for_each_ref(dir, "refs/heads/"), [("main".to_owned(), tip)]);
+    git(dir, &["fsck", "--no-progress"]);
+}
+
+#[test]
 fn list_and_delete_on_reftable_backend() {
     let tmp = tempfile::tempdir().unwrap();
     let repo = Repository::init(
@@ -322,6 +397,7 @@ fn list_and_delete_on_reftable_backend() {
     )
     .unwrap()
     .oid;
+    assert_current_branch_deletion_refused(&repo, "main");
     create_branch(&repo, &CreateBranchOptions::at_head("topic")).unwrap();
     create_tag(
         &repo,
@@ -463,9 +539,11 @@ fn list_and_delete_use_injected_memory_ref_store() {
 
     let err = delete_branch(&repo, "main", DeleteMode::Force, false).unwrap_err();
     assert!(
-        matches!(err, Error::Branch(BranchError::CheckedOut { .. })),
+        matches!(&err, Error::Branch(BranchError::CurrentlyCheckedOut { name }) if name == "main"),
         "{err:?}"
     );
+
+    assert_current_branch_deletion_refused(&repo, "main");
 
     assert!(store.reflog_exists("refs/heads/topic").unwrap());
     let deleted = delete_branch(&repo, "topic", DeleteMode::Safe, false).unwrap();
@@ -487,6 +565,47 @@ fn list_and_delete_use_injected_memory_ref_store() {
 
     // The on-disk store was never consulted for these refs.
     assert_eq!(for_each_ref(&dir, "refs/"), [("main".to_owned(), tip)]);
+}
+
+#[test]
+fn delete_current_branch_uses_injected_head_when_disk_differs() {
+    let tmp = tempfile::tempdir().unwrap();
+    let (repo, store, tip) = memory_store_repo(tmp.path());
+    let dir = tmp.path().join("repo");
+    let disk_head = std::fs::read(dir.join(".git/HEAD")).unwrap();
+    let disk_refs = for_each_ref(&dir, "refs/");
+    let disk_main = std::fs::read(dir.join(".git/refs/heads/main")).unwrap();
+    let disk_log = std::fs::read(dir.join(".git/logs/refs/heads/main")).unwrap();
+    let txn = RefTransaction::new()
+        .update(RefUpdate {
+            name: "HEAD".to_owned(),
+            new_value: Some(RawRef::Symbolic("refs/heads/topic".to_owned())),
+            expected: Expected::Symref("refs/heads/main".to_owned()),
+            reflog: None,
+            flags: RefUpdateFlags {
+                no_deref: true,
+                ..RefUpdateFlags::default()
+            },
+        })
+        .unwrap();
+    store.prepare(txn).unwrap().commit().unwrap();
+
+    assert_current_branch_deletion_refused(&repo, "topic");
+    assert_eq!(store.resolve("HEAD").unwrap(), tip);
+    assert_eq!(store.resolve("refs/heads/main").unwrap(), tip);
+    assert_eq!(std::fs::read(dir.join(".git/HEAD")).unwrap(), disk_head);
+    assert_eq!(for_each_ref(&dir, "refs/"), disk_refs);
+    assert_eq!(
+        std::fs::read(dir.join(".git/refs/heads/main")).unwrap(),
+        disk_main
+    );
+    assert_eq!(
+        std::fs::read(dir.join(".git/logs/refs/heads/main")).unwrap(),
+        disk_log
+    );
+    assert!(!dir.join(".git/refs/heads/topic").exists());
+    assert!(!dir.join(".git/logs/refs/heads/topic").exists());
+    git(&dir, &["fsck", "--no-progress"]);
 }
 
 /// Deleting a nested branch removes its reflog and the emptied `logs/` parents, so git can

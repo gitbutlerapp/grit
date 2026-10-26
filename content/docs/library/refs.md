@@ -110,16 +110,30 @@ Reflog helpers live in [`reflog`](rustdoc:grit_lib::refs::reflog) and on [`RefSt
 
 [`porcelain::branch`](rustdoc:grit_lib::porcelain::branch) and [`porcelain::tag`](rustdoc:grit_lib::porcelain::tag) are what `grit branch` and `grit tag` call. [`list_branches`](rustdoc:grit_lib::porcelain::branch::list_branches) returns every local branch sorted by name, with the one `HEAD` is attached to marked as current. [`list_tags`](rustdoc:grit_lib::porcelain::tag::list_tags) takes a [`RefQuery`](rustdoc:grit_lib::refs::listing::RefQuery) (patterns, sort, limit, `--contains`, `--points-at`) and returns complete [`TagSummary`](rustdoc:grit_lib::porcelain::tag::TagSummary) rows. Call [`list_tags_with_detail`](rustdoc:grit_lib::porcelain::tag::list_tags_with_detail) with [`TagDetail::Names`](rustdoc:grit_lib::porcelain::tag::TagDetail::Names) for names without tag-object reads, [`TagDetail::Kind`](rustdoc:grit_lib::porcelain::tag::TagDetail::Kind) for packed-peel classification, or [`TagDetail::Annotation`](rustdoc:grit_lib::porcelain::tag::TagDetail::Annotation) for annotation messages and taggers.
 
-[`delete_branch`](rustdoc:grit_lib::porcelain::branch::delete_branch) refuses the current branch and branches checked out in another worktree. With [`DeleteMode::Safe`](rustdoc:grit_lib::porcelain::branch_error::DeleteMode::Safe) it also requires the branch tip to be reachable from the branch's upstream, or from `HEAD` when there is no upstream (the same rule as `git branch -d`). Each refusal is a typed error: `BranchNotFound`, `CannotDeleteCurrentBranch`, `BranchCheckedOutInWorktree` or `BranchNotMerged`. [`delete_tag`](rustdoc:grit_lib::porcelain::tag::delete_tag) returns the object the tag pointed at, or `TagNotFound`. Both deletes run on the repository's ref store (so an injected store is honoured), compare-and-swap against the commit they checked, and remove the ref's reflog.
+[`delete_branch`](rustdoc:grit_lib::porcelain::branch::delete_branch) refuses the current branch and branches checked out in another worktree. With [`DeleteMode::Safe`](rustdoc:grit_lib::porcelain::branch_error::DeleteMode::Safe) it also requires the branch tip to be reachable from the branch's upstream, or from `HEAD` when there is no upstream (the same rule as `git branch -d`).
+
+Each refusal is an `Error::Branch(BranchError::...)`: `NotFound` for a missing branch, `CurrentlyCheckedOut { name }` for the branch named by this repository's own `HEAD`, `CheckedOut { name, worktree }` for a branch held by another worktree, or `NotFullyMerged` for an unmerged tip.
+
+The current-branch check reads `HEAD` through the repository's store, including injected stores, even when the on-disk `HEAD` differs. `DeleteMode::Force` skips only the merge-state check; both it and dry runs retain the checked-out safety checks and leave HEAD and refs unchanged on refusal. The CLI maps both checked-out variants to the JSON kind `branch_checked_out`.
+
+[`delete_tag`](rustdoc:grit_lib::porcelain::tag::delete_tag) returns the object the tag pointed at, or `TagNotFound`. Both deletes run on the repository's ref store (so an injected store is honoured), compare-and-swap against the commit they checked, and remove the ref's reflog.
 
 ```rust
 use grit_lib::error::Error;
-use grit_lib::porcelain::branch::{delete_branch, DeleteMode};
+use grit_lib::porcelain::branch::{delete_branch, BranchError, DeleteMode};
 
 let dry_run = false;
 match delete_branch(&repo, "topic", DeleteMode::Safe, dry_run) {
     Ok(deleted) => println!("deleted topic (was {})", deleted.oid),
-    Err(Error::BranchNotMerged { .. }) => println!("topic has unmerged commits"),
+    Err(Error::Branch(BranchError::CurrentlyCheckedOut { name })) => {
+        println!("{name} is the current branch");
+    }
+    Err(Error::Branch(BranchError::CheckedOut { name, worktree })) => {
+        println!("{name} is held by {worktree}");
+    }
+    Err(Error::Branch(BranchError::NotFullyMerged { .. })) => {
+        println!("topic has unmerged commits");
+    }
     Err(err) => return Err(err),
 }
 ```

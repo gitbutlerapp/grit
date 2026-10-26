@@ -144,6 +144,46 @@ fn delete_safe_and_force_delete_match_git() {
 }
 
 #[test]
+fn delete_checked_out_errors_share_json_kind() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("repo");
+    std::fs::create_dir(&root).unwrap();
+    git(&root, &["init", "-q", "-b", "main"]);
+    git(&root, &["commit", "-q", "--allow-empty", "-m", "initial"]);
+    let worktree = tmp.path().join("linked");
+    git(
+        &root,
+        &[
+            "worktree",
+            "add",
+            "-q",
+            "-b",
+            "held",
+            worktree.to_str().unwrap(),
+        ],
+    );
+    let before = snapshot_hash(&root);
+    let head_before = git_stdout(&root, &["symbolic-ref", "HEAD"]);
+    for branch in ["main", "held"] {
+        for mode in ["--delete", "--force-delete"] {
+            for dry_run in [false, true] {
+                let mut args = vec!["branch", mode, branch, "--json"];
+                if dry_run {
+                    args.push("--dry-run");
+                }
+                let out = grit(&root, &args);
+                assert!(!out.status.success(), "{args:?}");
+                let err: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+                assert_eq!(err["kind"], "branch_checked_out", "{args:?}: {err}");
+                assert_eq!(snapshot_hash(&root), before);
+                assert_eq!(git_stdout(&root, &["symbolic-ref", "HEAD"]), head_before);
+            }
+        }
+    }
+    git(&root, &["fsck", "--no-progress"]);
+}
+
+#[test]
 fn conflicting_mutations_are_rejected_with_usage_exit() {
     let root = init_repo();
     git(&root, &["branch", "topic"]);
