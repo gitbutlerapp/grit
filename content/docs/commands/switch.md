@@ -24,7 +24,11 @@ Switches to a local branch, creates a branch from a remote-tracking ref or start
 
 Local edits are allowed when they only touch paths that are the same on both sides of the switch, or when a changed path already matches the destination tree in the index. Grit still refuses when your changes would conflict with files that differ between branches, or when an untracked file would be overwritten.
 
+After a [`clone --no-checkout`](../clone/), the first switch creates the index and materializes the entire destination tree. This works with clones created by grit or system Git, including switching to the current branch, detaching at `HEAD`, or creating a branch at a commit with the same tree. The previous `HEAD` is still used for reflogs and hooks. Untracked files at destination paths block the switch. An existing empty index continues to represent staged deletions and receives the normal local-change protection.
+
 Use `--dry-run` to run the same overwrite checks and report how many paths would change without updating `HEAD`, the index, the worktree, or reflogs. Agents can preflight a switch with `--json --dry-run` before mutating the tree.
+
+On the first switch after `clone --no-checkout`, the dry-run count includes every path to materialize, including files unchanged between the old and new commits.
 
 Switching is refused while a merge, rebase, pick, revert or `am` is paused, whether grit or `git` started it: those operations finish by committing onto the current `HEAD`, so moving it would land their result on the wrong branch. When grit knows how the operation finishes or is cancelled (merge, rebase, pick, revert), the error names those commands. `--dry-run` is refused too. A bisect does not block a switch.
 

@@ -56,6 +56,8 @@ Partial clone trades disk and bandwidth on the first fetch for extra round-trips
 
 `--bare` creates a bare repository at the destination (the directory itself is the git directory, named with a `.git` suffix when the URL is derived automatically), fetches `refs/heads/*` and tags directly, and configures only `remote.<name>.url` — matching `git clone --bare`. `--no-checkout` fetches and sets `HEAD` to the default branch without writing the index or work tree files, matching `git clone --no-checkout`.
 
+After `--no-checkout`, use [`grit switch`](../switch/) to materialize the revision you need, for example `grit -C client switch --detach HEAD~1 --json`. The first switch writes the entire destination tree, including when you select the current branch or `HEAD`. Files you created at destination paths are protected by the usual untracked-file collision checks. `switch --dry-run` previews how many paths will be written without creating an index or changing files or refs.
+
 You can also clone from a shallow repository (including one created with `git clone --depth`); grit copies the shallow boundary into the new repository so history matches the source.
 
 Working-tree materialization after fetch uses the same parallel checkout path as [`grit switch`](../switch/). Configure [`checkout.workers`](../../library/parallelism.md) and `checkout.thresholdForParallelism` in the repository config. Global [`--threads`](../global-options.md) overrides checkout workers on non-Windows hosts; on **Windows**, set `checkout.workers` explicitly (see [parallelism](../../library/parallelism.md)).

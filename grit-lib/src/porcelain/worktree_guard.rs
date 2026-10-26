@@ -76,15 +76,6 @@ fn head_tree_from_head_commit(
     Ok(Some(parse_commit(&obj.data)?.tree))
 }
 
-/// Build a snapshot when `HEAD`'s tree is already known (avoids re-resolving `HEAD`).
-pub(crate) fn worktree_snapshot_with_head_tree(
-    repo: &Repository,
-    head_tree: Option<ObjectId>,
-) -> Result<WorktreeSnapshot> {
-    let index = load_worktree_index(repo)?;
-    Ok(WorktreeSnapshot { index, head_tree })
-}
-
 /// Staged and unstaged diffs for the current worktree (no rename detection), with stat refresh
 /// in the same worktree pass as the unstaged diff.
 pub(crate) fn local_change_diffs(

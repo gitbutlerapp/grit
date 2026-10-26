@@ -7,7 +7,7 @@ use crate::check_ref_format::validate_branch_short_name;
 use crate::diff::{DiffEntry, DiffStatus};
 use crate::error::{Error, OverwriteReason, Result};
 use crate::hooks::{run_post_checkout, HookName, PostOperationHooks};
-use crate::index::MODE_GITLINK;
+use crate::index::{Index, MODE_GITLINK};
 use crate::objects::{parse_commit, ObjectId};
 use crate::porcelain::branch::resolve_create_tracking;
 use crate::porcelain::branch_error::{BranchError, TrackMode};
@@ -25,8 +25,8 @@ use crate::porcelain::orphans::{
 };
 use crate::porcelain::worktree_guard::{
     collect_untracked_and_wholesale_trust_for_tree_changes, ensure_no_untracked_overwrite,
-    load_worktree_snapshot, untracked_would_be_overwritten_by_tree_changes,
-    worktree_snapshot_with_head_tree, TreeSwitchPlan, WorktreeSnapshot,
+    load_worktree_index, load_worktree_snapshot, untracked_would_be_overwritten_by_tree_changes,
+    TreeSwitchPlan, WorktreeSnapshot,
 };
 use crate::refs;
 use crate::repo::Repository;
@@ -320,6 +320,11 @@ pub fn resolve_revision_spec(repo: &Repository, spec: &str) -> Result<ObjectId> 
 /// Git does), runs `post-checkout <old> <new> 1` unless [`SwitchOptions::hooks`] is
 /// [`PostOperationHooks::Skip`]. The hook's outcome never fails the switch.
 ///
+/// When the effective index is missing (for example after a no-checkout clone), materializes
+/// the entire target tree, even if `HEAD` already names the destination. Existing untracked
+/// paths remain protected. A valid empty index instead preserves staged deletions. Dry runs
+/// report all paths to materialize without writing the index, worktree, refs, or reflogs.
+///
 /// # Errors
 ///
 /// Returns [`Error::OperationInProgress`] (also for [`SwitchOptions::dry_run`]) while a merge,
@@ -413,7 +418,11 @@ fn switch_without_hooks(
         crate::worktree::ensure_branch_not_checked_out_elsewhere(repo, branch)?;
     }
 
-    if !detached && is_already_on_branch(repo, &branch_ref, target_oid)? {
+    // A no-op still needs an existing index, but need not parse it. Real switches load it once.
+    if !detached
+        && is_already_on_branch(repo, &branch_ref, target_oid)?
+        && repo.index_path_for_env()?.try_exists()?
+    {
         if opts.dry_run {
             return Ok(SwitchOutcome::new(
                 &branch_label,
@@ -441,7 +450,10 @@ fn switch_without_hooks(
             0,
         ));
     }
-    if detached && is_already_detached_at(repo, target_oid)? {
+    if detached
+        && is_already_detached_at(repo, target_oid)?
+        && repo.index_path_for_env()?.try_exists()?
+    {
         return Ok(SwitchOutcome::new(
             &branch_label,
             created,
@@ -452,8 +464,10 @@ fn switch_without_hooks(
         ));
     }
 
+    let index = load_worktree_index(repo)?;
     switch_to_target(
         repo,
+        index,
         &branch_ref,
         target_oid,
         created,
@@ -468,9 +482,16 @@ fn switch_without_hooks(
     )
 }
 
+// An existing empty index can record deliberate staged deletions. Only a missing index
+// starts checkout with no tracked paths, independently of the previous HEAD.
+fn needs_initial_checkout(index: &Index) -> bool {
+    index.source_mtime.is_none() && index.entries.is_empty()
+}
+
 #[allow(clippy::too_many_arguments)]
 fn switch_to_target(
     repo: &Repository,
+    index: Index,
     branch_ref: &str,
     target_oid: ObjectId,
     created: bool,
@@ -484,8 +505,12 @@ fn switch_to_target(
     cancel: &dyn crate::progress::Cancel,
 ) -> Result<SwitchOutcome> {
     let head_before = resolve_head_for_repository(repo)?;
-    let head_oid = head_before.oid().copied();
-    let (target_tree, head_tree) = match head_oid {
+    let checkout_head = if needs_initial_checkout(&index) {
+        None
+    } else {
+        head_before.oid().copied()
+    };
+    let (target_tree, head_tree) = match checkout_head {
         None => (commit_tree(repo, &target_oid)?, None),
         Some(head) if head == target_oid => {
             let tree = commit_tree(repo, &target_oid)?;
@@ -507,7 +532,7 @@ fn switch_to_target(
             )
         }
     };
-    let snapshot = worktree_snapshot_with_head_tree(repo, head_tree)?;
+    let snapshot = WorktreeSnapshot { index, head_tree };
 
     let prepared = prepare_tree_switch_allow_local_with_snapshot(repo, &target_tree, snapshot)?;
     let changed_paths = count_unique_tree_change_paths(&prepared.plan.tree_changes);
@@ -1201,6 +1226,17 @@ mod tests {
         let repo = init_repository(dir.path(), false, "main", None, RefStorageFormat::Files)
             .expect("init");
         (dir, repo)
+    }
+
+    #[test]
+    fn initial_checkout_distinguishes_missing_from_existing_empty_index() {
+        let (_dir, repo) = init_repo();
+        let mut index = load_worktree_index(&repo).expect("missing index");
+        assert!(needs_initial_checkout(&index));
+        repo.write_index(&mut index).expect("write empty index");
+        let index = load_worktree_index(&repo).expect("existing empty index");
+        assert!(index.entries.is_empty());
+        assert!(!needs_initial_checkout(&index));
     }
 
     #[test]

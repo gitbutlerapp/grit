@@ -85,6 +85,20 @@ fn clone_no_checkout_json() -> TestResult {
         ],
     );
 
+    std::fs::write(upstream.join("f"), b"second\n")?;
+    git_in(
+        &upstream,
+        &[
+            "-c",
+            "user.email=a@b.c",
+            "-c",
+            "user.name=a",
+            "commit",
+            "-qam",
+            "c2",
+        ],
+    );
+
     let dest = base.path().join("dest");
     let out = Command::new(GRIT)
         .args([
@@ -104,5 +118,59 @@ fn clone_no_checkout_json() -> TestResult {
     assert_eq!(parsed["bare"], false);
     assert_eq!(parsed["files"], 0);
     assert_eq!(parsed["no_checkout_reason"], "no_checkout");
+    assert!(!dest.join(".git/index").exists());
+    assert!(!dest.join("f").exists());
+    let head_before = std::fs::read(dest.join(".git/HEAD"))?;
+    let out = Command::new(GRIT)
+        .args([
+            "-C",
+            dest.to_str().unwrap(),
+            "switch",
+            "--detach",
+            "HEAD~1",
+            "--dry-run",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    let preview: serde_json::Value = serde_json::from_slice(&out.stdout)?;
+    assert_eq!(preview["dry_run"], true);
+    assert_eq!(preview["changed_paths"], 1);
+    assert_eq!(std::fs::read(dest.join(".git/HEAD"))?, head_before);
+    assert!(!dest.join(".git/index").exists());
+    assert!(!dest.join("f").exists());
+
+    let out = Command::new(GRIT)
+        .args([
+            "-C",
+            dest.to_str().unwrap(),
+            "switch",
+            "--detach",
+            "HEAD~1",
+            "--json",
+        ])
+        .output()?;
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+    let switched: serde_json::Value = serde_json::from_slice(&out.stdout)?;
+    assert_eq!(switched["detached"], true);
+    assert!(switched["branch"].is_null());
+    assert_eq!(switched["commit"], preview["commit"]);
+    assert_eq!(std::fs::read(dest.join("f"))?, b"x\n");
+    assert!(dest.join(".git/index").is_file());
+    let status = Command::new("git")
+        .current_dir(&dest)
+        .args(["status", "--porcelain"])
+        .output()?;
+    assert!(status.status.success());
+    assert!(status.stdout.is_empty());
+    git_in(&dest, &["fsck", "--strict"]);
     Ok(())
 }

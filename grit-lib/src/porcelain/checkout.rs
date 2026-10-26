@@ -1546,13 +1546,13 @@ fn write_checkout_index(
     bulk_index_rewrite: bool,
     index_mtime_hint: Option<(u32, u32)>,
 ) -> Result<()> {
+    let index_path = repo.index_path_for_env()?;
     index_mut.suppress_pre_write_index_housekeeping = bulk_index_rewrite;
     index_mut.skip_racy_smudge_on_write = true;
-    let result = repo.write_index_with_post_index_change(index_mut, true, false);
+    let result = repo.write_index_at_with_post_index_change(&index_path, index_mut, true, false);
     index_mut.skip_racy_smudge_on_write = false;
     index_mut.suppress_pre_write_index_housekeeping = false;
     result?;
-    let index_path = repo.index_path_for_env()?;
     crate::index::advance_index_file_mtime_past_entries(index_mut, &index_path, index_mtime_hint)?;
     index_mut.source_mtime = crate::index::index_file_mtime(&index_path);
     Ok(())
