@@ -13,7 +13,9 @@ use crate::filter_process::{DelayedProcessCheckout, FilterSmudgeMeta};
 use crate::index::{IndexEntry, MODE_EXECUTABLE, MODE_REGULAR, MODE_SYMLINK};
 use crate::objects::pack_store::PackReadContextGuard;
 use crate::objects::ObjectId;
-use crate::parallel::{try_par_map_with_local, ParallelHashError, ParallelOp, ParallelOptions};
+use crate::parallel::{
+    run_ordered_batches, try_par_map_with_local, ParallelHashError, ParallelOp, ParallelOptions,
+};
 use crate::repo::Repository;
 use crate::unicode_normalization::precompose_utf8_path;
 use crate::worktree_rules::WorktreeRules;
@@ -29,9 +31,13 @@ const PARALLEL_WRITE_FIRST_CHUNK: usize = 8;
 
 /// Largest flush once chunks have doubled up from [`PARALLEL_WRITE_FIRST_CHUNK`]. Big enough
 /// that worker start-up and the per-flush join stay a small share of a large checkout, small
-/// enough that cancellation is still observed within a fraction of a second and only one
-/// chunk of converted file contents is held in memory at a time.
+/// enough to limit work between cancellation polls. A separate byte threshold bounds the
+/// prepared contents retained within each chunk.
 const PARALLEL_WRITE_MAX_CHUNK: usize = 2048;
+
+/// Flush prepared contents at this byte threshold, independently of cancellation chunk sizes.
+/// Parallel preparation additionally keeps at most two blobs per worker in flight.
+const PREPARED_WRITE_BYTES: usize = 1024 * 1024;
 
 /// One blob checkout after attribute/conversion resolution on the caller thread.
 pub(crate) struct CheckoutWriteJob {
@@ -149,7 +155,13 @@ pub(crate) fn is_eligible_for_parallel_checkout(mode: u32, attrs: &FileAttrs) ->
 }
 
 fn checkout_pool_worthwhile(len: usize, options: ParallelOptions) -> bool {
-    if options.threads.get() <= 1 || len == 0 {
+    if !crate::parallel::parallel_worthwhile(
+        len,
+        0,
+        options.threads,
+        options.min_items,
+        options.min_total_bytes.unwrap_or(0),
+    ) {
         return false;
     }
     if let Some(threshold) = options.signed_entry_threshold {
@@ -468,45 +480,88 @@ fn flush_parallel_batch(
     crate::progress::poll_cancel(progress, cancel)?;
     let pool = pool.filter(|_| batch.len() > 1);
 
-    let prepared: Vec<PreparedWrite> = match pool {
+    let mut prepared = Vec::with_capacity(batch.len());
+    let mut prepared_bytes = 0usize;
+    match pool {
         Some(options) if parallel_prepare_blobs => {
             let pack_store = repo.odb().pack_store_for(repo.odb().objects_dir());
-            try_par_map_with_local(
+            run_ordered_batches(
                 batch,
-                options,
-                0,
+                // Keep read-ahead bounded by blobs, even when each conversion is large.
+                1,
+                options.threads.get().min(batch.len()),
                 || PackReadContextGuard::install(Arc::clone(&pack_store)),
                 |_, &idx| {
                     prepare_write_job(repo, conv, &jobs[idx])
                         .map(|bytes| PreparedWrite { idx, bytes })
                 },
-            )
-            .map_err(|e: ParallelHashError<Error>| match e {
-                ParallelHashError::Task(err) => err,
-            })?
+                |_, items| {
+                    crate::progress::poll_cancel(progress, cancel)?;
+                    for item in items {
+                        prepared_bytes += item.bytes.as_ref().map_or(0, Vec::len);
+                        prepared.push(item);
+                        if prepared_bytes >= PREPARED_WRITE_BYTES {
+                            flush_prepared_batch(
+                                repo, pool, work_tree, jobs, &prepared, dir_cache, outcomes,
+                                progress, cancel,
+                            )?;
+                            prepared.clear();
+                            prepared_bytes = 0;
+                        }
+                    }
+                    Ok(())
+                },
+            )?;
         }
         _ => {
-            let mut prepared = Vec::with_capacity(batch.len());
-            let prepare_result = repo.odb().with_pack_read_context(|| {
+            repo.odb().with_pack_read_context(|| {
                 for &idx in batch {
                     crate::progress::poll_cancel(progress, cancel)?;
-                    match prepare_write_job(repo, conv, &jobs[idx]) {
-                        Ok(bytes) => prepared.push(PreparedWrite { idx, bytes }),
-                        Err(err) => return Err(err),
+                    let bytes = match prepare_write_job(repo, conv, &jobs[idx]) {
+                        Ok(bytes) => bytes,
+                        Err(err) => {
+                            flush_prepared_writes_serial(
+                                repo, work_tree, jobs, &prepared, dir_cache, outcomes, progress,
+                                cancel,
+                            )?;
+                            return Err(err);
+                        }
+                    };
+                    prepared_bytes += bytes.as_ref().map_or(0, Vec::len);
+                    prepared.push(PreparedWrite { idx, bytes });
+                    if prepared_bytes >= PREPARED_WRITE_BYTES {
+                        flush_prepared_batch(
+                            repo, pool, work_tree, jobs, &prepared, dir_cache, outcomes, progress,
+                            cancel,
+                        )?;
+                        prepared.clear();
+                        prepared_bytes = 0;
                     }
                 }
                 Ok(())
-            });
-            if let Err(err) = prepare_result {
-                flush_prepared_writes_serial(
-                    repo, work_tree, jobs, &prepared, dir_cache, outcomes, progress, cancel,
-                )?;
-                return Err(err);
-            }
-            prepared
+            })?;
         }
-    };
+    }
+    flush_prepared_batch(
+        repo, pool, work_tree, jobs, &prepared, dir_cache, outcomes, progress, cancel,
+    )
+}
 
+#[allow(clippy::too_many_arguments)]
+fn flush_prepared_batch(
+    repo: &Repository,
+    pool: Option<ParallelOptions>,
+    work_tree: &Path,
+    jobs: &[CheckoutWriteJob],
+    prepared: &[PreparedWrite],
+    dir_cache: &mut LeadingDirCache,
+    outcomes: &mut [Option<WriteJobOutcome>],
+    progress: &mut dyn crate::progress::ProgressSink,
+    cancel: &dyn crate::progress::Cancel,
+) -> Result<()> {
+    if prepared.is_empty() {
+        return Ok(());
+    }
     if let Some(options) = pool {
         let parent_snapshot = LeadingDirCache::with_ready_from(&*dir_cache);
         flush_prepared_writes_parallel(
@@ -514,16 +569,16 @@ fn flush_parallel_batch(
             options,
             work_tree,
             jobs,
-            &prepared,
+            prepared,
             &parent_snapshot,
             outcomes,
         )?;
     } else {
         flush_prepared_writes_serial(
-            repo, work_tree, jobs, &prepared, dir_cache, outcomes, progress, cancel,
+            repo, work_tree, jobs, prepared, dir_cache, outcomes, progress, cancel,
         )?;
     }
-    for _ in batch {
+    for _ in prepared {
         progress.inc(1);
         crate::progress::poll_cancel(progress, cancel)?;
     }
@@ -704,6 +759,43 @@ mod tests {
         assert_eq!(chunk_pool_options(checkout_options(4, 100), 99), None);
         assert_eq!(chunk_pool_options(checkout_options(1, 0), 2_000), None);
         assert!(chunk_pool_options(checkout_options(4, -5), 2).is_some());
+    }
+
+    #[test]
+    fn chunk_pool_respects_explicit_policy_thresholds_before_clearing_them() {
+        let options = ParallelOptions {
+            min_items: 1_000,
+            ..checkout_options(4, 100)
+        };
+        assert_eq!(chunk_pool_options(options, 999), None);
+        assert!(chunk_pool_options(options, 1_000).is_some());
+        assert_eq!(
+            chunk_pool_options(
+                ParallelOptions {
+                    min_total_bytes: Some(1),
+                    ..options
+                },
+                1_000,
+            ),
+            None,
+        );
+        assert_eq!(chunk_pool_options(checkout_options(4, 0), 1), None);
+    }
+
+    #[test]
+    fn cancellable_chunks_cover_every_item_once_and_keep_the_selected_pool() {
+        let items: Vec<usize> = (0..10_000).collect();
+        let (chunks, options) = cancellable_chunks(&items, checkout_options(4, 100));
+        let chunks: Vec<_> = chunks.collect();
+        assert_eq!(chunks[0].len(), PARALLEL_WRITE_FIRST_CHUNK);
+        assert!(chunks
+            .iter()
+            .all(|chunk| chunk.len() <= PARALLEL_WRITE_MAX_CHUNK));
+        assert_eq!(chunks.concat(), items);
+        assert!(checkout_pool_worthwhile(chunks[0].len(), options));
+
+        let (_, options) = cancellable_chunks(&items[..99], checkout_options(4, 100));
+        assert_eq!(options.threads.get(), 1);
     }
 
     #[test]
