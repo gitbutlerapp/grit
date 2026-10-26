@@ -2388,7 +2388,7 @@ mod tests {
     }
 
     fn system_git(root: &Path, args: &[&str]) -> String {
-        let out = Command::new("git")
+        let out = grit_test_support::merge_git_config_env(&mut Command::new("git"), &[])
             .env("GIT_CONFIG_NOSYSTEM", "1")
             .env("GIT_CONFIG_GLOBAL", "/dev/null")
             .env("GIT_AUTHOR_NAME", "Test")
@@ -3210,7 +3210,7 @@ mod tests {
     }
 
     fn git(dir: &std::path::Path, args: &[&str]) {
-        let out = Command::new("git")
+        let out = grit_test_support::merge_git_config_env(&mut Command::new("git"), &[])
             .current_dir(dir)
             .args(args)
             .env("GIT_CONFIG_GLOBAL", "/dev/null")

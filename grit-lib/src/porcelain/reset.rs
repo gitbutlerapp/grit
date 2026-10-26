@@ -1353,17 +1353,18 @@ mod tests {
     }
 
     fn git(dir: &std::path::Path, args: &[&str]) -> String {
-        let out = std::process::Command::new("git")
-            .current_dir(dir)
-            .args(args)
-            .env("GIT_CONFIG_GLOBAL", "/dev/null")
-            .env("GIT_CONFIG_SYSTEM", "/dev/null")
-            .env("GIT_AUTHOR_NAME", "T")
-            .env("GIT_AUTHOR_EMAIL", "t@t")
-            .env("GIT_COMMITTER_NAME", "T")
-            .env("GIT_COMMITTER_EMAIL", "t@t")
-            .output()
-            .expect("git");
+        let out =
+            grit_test_support::merge_git_config_env(&mut std::process::Command::new("git"), &[])
+                .current_dir(dir)
+                .args(args)
+                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+                .env("GIT_CONFIG_SYSTEM", "/dev/null")
+                .env("GIT_AUTHOR_NAME", "T")
+                .env("GIT_AUTHOR_EMAIL", "t@t")
+                .env("GIT_COMMITTER_NAME", "T")
+                .env("GIT_COMMITTER_EMAIL", "t@t")
+                .output()
+                .expect("git");
         assert!(
             out.status.success(),
             "git {args:?}: {}",
