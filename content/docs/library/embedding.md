@@ -67,3 +67,21 @@ Build and run:
 ```bash
 cargo run -p grit-examples --bin guide_embedding
 ```
+
+## Blame and repository-relative paths
+
+[`blame_file`](rustdoc:grit_lib::blame::blame_file),
+[`compute_blame`](rustdoc:grit_lib::blame::compute_blame), and
+[`resolve_blame_line_range`](rustdoc:grit_lib::blame::resolve_blame_line_range)
+accept the reversible path strings returned by library status. Pass status paths
+unchanged. For a raw byte path, build the input with
+`repo_relpath::storage_string`. Ordinary UTF-8
+paths remain readable; non-UTF-8 paths and names beginning with the reserved
+`grit+pathhex:` prefix are escaped. Encoded inputs identify repository-relative
+paths without applying the caller's working-directory prefix.
+
+Every blame `original_path`, including hunks and rename/copy origins, uses that
+same storage representation. Recover its exact bytes with
+`repo_relpath::storage_bytes`. Decode once:
+a literal filename that itself resembles an encoded path is a separate file.
+Line ranges and Git-written changed-path Bloom filters use the decoded path too.

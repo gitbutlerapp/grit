@@ -1009,6 +1009,7 @@ use crate::odb::Odb;
 use crate::pack::SingleLocalPackReader;
 use crate::parallel::{ParallelOptions, ThreadPolicy};
 use crate::repo::Repository;
+use crate::repo_relpath::{format_path_stored, storage_bytes, storage_string};
 use crate::wildmatch::wildmatch;
 
 /// Cached copy-detection blame lookup: source path, lines by content, use counts.
@@ -1071,9 +1072,10 @@ pub struct BlameLine {
     pub orig_lineno: usize,
     /// Text of the line in the final file.
     pub content: String,
-    /// Path of the line in its originating commit (`git blame --porcelain` `filename`).
+    /// Reversibly stored path in the originating commit, including rename/copy origins.
+    /// Recover exact filename bytes with `repo_relpath::storage_bytes`.
     pub original_path: String,
-    /// Source path when copy detection attributed the line from another file.
+    /// Reversibly stored source path when copy detection attributed a different file.
     pub source_file: Option<String>,
     /// Line attribution passed through an ignored revision.
     pub ignored: bool,
@@ -1136,16 +1138,14 @@ fn resolve_path_in_tree_entry(
     tree_oid: &ObjectId,
     path: &str,
 ) -> Result<Option<(ObjectId, u32)>> {
-    let parts: Vec<&str> = path.split('/').collect();
+    let bytes = storage_bytes(path);
+    let parts: Vec<&[u8]> = bytes.split(|&b| b == b'/').collect();
     let mut current = *tree_oid;
 
     for (i, part) in parts.iter().enumerate() {
         let obj = read_object_for_blame(odb, &current, None)?;
         let entries = parse_tree(&obj.data)?;
-        match entries
-            .iter()
-            .find(|e| String::from_utf8_lossy(&e.name) == *part)
-        {
+        match entries.iter().find(|e| e.name == *part) {
             Some(e) if i == parts.len() - 1 => {
                 if e.mode == 0o040000 {
                     return Ok(None);
@@ -1808,9 +1808,8 @@ impl<'a> BlameSession<'a> {
             .as_ref()
             .is_none_or(|(p, v, _)| p != path || *v != version);
         if needs_refresh {
-            let norm = crate::pathspec::bloom_lookup_prefix_with_cwd(path, None)
-                .unwrap_or_else(|| path.to_owned());
-            let keys = crate::bloom::bloom_keyvec_for_path(norm.as_str(), settings);
+            let bytes = storage_bytes(path);
+            let keys = crate::bloom::bloom_keyvec_for_bytes(&bytes, settings);
             self.bloom_key_cache = Some((path.to_owned(), version, Arc::new(keys)));
         }
         if let Some((_, _, keys)) = &self.bloom_key_cache {
@@ -1867,21 +1866,32 @@ impl<'a> BlameSession<'a> {
         tree_oid: ObjectId,
         path: &str,
     ) -> Result<Option<(ObjectId, u32)>> {
+        let bytes = storage_bytes(path);
+        self.resolve_path_in_tree_bytes(tree_oid, &bytes)
+    }
+
+    // Decode only at the storage boundary. A subtree suffix may itself start with the
+    // reserved storage prefix, so recursion must keep using the original bytes.
+    fn resolve_path_in_tree_bytes(
+        &mut self,
+        tree_oid: ObjectId,
+        path: &[u8],
+    ) -> Result<Option<(ObjectId, u32)>> {
         let key = PathCacheKey {
             tree: tree_oid,
-            path: path.to_owned(),
+            path: storage_string(path),
         };
         if let Some(entry) = self.path_entries.get(&key) {
             return Ok(*entry);
         }
         // Memoizing each `(subtree, remaining path)` level means a walk only inflates
         // the trees that changed between commits: unchanged subtrees hit the cache.
-        let (head, rest) = match path.split_once('/') {
-            Some((head, rest)) => (head, Some(rest)),
+        let (head, rest) = match path.iter().position(|&b| b == b'/') {
+            Some(pos) => (&path[..pos], Some(&path[pos + 1..])),
             None => (path, None),
         };
-        let resolved = match (self.tree_entry(tree_oid, head.as_bytes())?, rest) {
-            (Some((oid, 0o040000)), Some(rest)) => self.resolve_path_in_tree(oid, rest)?,
+        let resolved = match (self.tree_entry(tree_oid, head)?, rest) {
+            (Some((oid, 0o040000)), Some(rest)) => self.resolve_path_in_tree_bytes(oid, rest)?,
             (Some((oid, mode)), None) if mode != 0o040000 => Some((oid, mode)),
             _ => None,
         };
@@ -2077,6 +2087,10 @@ struct BlameCommitCache {
 ///
 /// When `line_range` is set, only lines whose 1-based final line number lies in the range
 /// are walked and returned.
+///
+/// `file_path` is repository-relative and uses `repo_relpath::storage_string`,
+/// as do returned `original_path` and `source_file` values. Decoding preserves exact
+/// filename bytes and does not recursively interpret reserved-prefix names.
 ///
 /// Lower-level building block; prefer [`blame_file`] for repository callers.
 #[expect(clippy::too_many_arguments)]
@@ -3545,12 +3559,7 @@ fn collect_tree_file_entries(
     }
     let entries = parse_tree(&obj.data)?;
     for entry in entries {
-        let name = String::from_utf8_lossy(&entry.name);
-        let path = if prefix.is_empty() {
-            name.to_string()
-        } else {
-            format!("{prefix}/{name}")
-        };
+        let path = format_path_stored(prefix, &entry.name);
         if entry.mode == 0o040000 {
             collect_tree_file_entries(odb, &entry.oid, &path, out)?;
         } else {
@@ -3759,7 +3768,8 @@ fn commit_parents_for_blame(
 
 /// Resolve a Git-style `-L` range against the blob at `start` for `path`.
 ///
-/// Uses the same line splitting and funcname rules as [`blame_file`].
+/// Uses the same line splitting, funcname rules, and reversible stored-path input
+/// contract as [`blame_file`].
 ///
 /// # Errors
 ///
@@ -3877,7 +3887,8 @@ pub struct BlameAttributedLine {
     pub original_line: usize,
     /// 1-based line number in the blamed revision's file.
     pub final_line: usize,
-    /// Path of the line in its originating commit (`git blame --porcelain` `filename`).
+    /// Reversibly stored path in the originating commit, including rename/copy origins.
+    /// Recover exact filename bytes with `repo_relpath::storage_bytes`.
     pub original_path: String,
     /// Line text in the blamed revision.
     pub content: String,
@@ -3892,7 +3903,8 @@ pub struct BlameAttributedLine {
 pub struct BlameHunk {
     /// Commit that last modified every line in this hunk.
     pub commit: ObjectId,
-    /// Path of the lines in their originating commit.
+    /// Reversibly stored path in the originating commit.
+    /// Recover exact filename bytes with `repo_relpath::storage_bytes`.
     pub original_path: String,
     /// 1-based starting line in the originating commit.
     pub original_start: usize,
@@ -3968,7 +3980,11 @@ fn blame_lines_share_hunk(prev: &BlameAttributedLine, next: &BlameAttributedLine
 
 /// Blame `path` at `options.start` (or `HEAD`) and return per-line attributions.
 ///
-/// `path` is repository-relative when the repository has a work tree.
+/// `path` accepts the reversible strings returned by status or
+/// `repo_relpath::storage_string`. Encoded paths are repository-relative;
+/// ordinary UTF-8 paths retain work-tree cwd resolution. Decoding happens once,
+/// keeping literal reserved-prefix names distinct. Returned `original_path` values
+/// use the same storage encoding.
 ///
 /// # Errors
 ///
@@ -4058,6 +4074,11 @@ fn resolve_blame_start(repo: &Repository, start: Option<ObjectId>) -> Result<Obj
 }
 
 fn normalize_blame_path(repo: &Repository, path: &str) -> String {
+    if let std::borrow::Cow::Owned(bytes) = storage_bytes(path) {
+        // Stored paths already name a repository-relative file. Do not resolve the
+        // ASCII encoding against the work tree or decode a literal prefix twice.
+        return storage_string(&bytes);
+    }
     if let Some(work_tree) = repo.work_tree() {
         crate::pathspec::normalize_worktree_file_path_with_git_dir(
             path,
@@ -4586,6 +4607,99 @@ mod tests {
             },
         )?;
         assert!(!result.lines.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn stored_path_lookup_preserves_raw_names_and_cache_keys() -> Result<()> {
+        use crate::objects::{serialize_tree, TreeEntry};
+        use crate::repo::init_repository;
+        use crate::RefStorageFormat;
+
+        let dir = tempfile::tempdir()?;
+        let repo = init_repository(dir.path(), false, "main", None, RefStorageFormat::Files)?;
+        let mut entries = Vec::new();
+        let names: &[&[u8]] = &[
+            b"ab",
+            b"grit+pathhex:6162",
+            b"raw\xfe",
+            b"raw\xff",
+            "raw\u{fffd}".as_bytes(),
+        ];
+        for name in names {
+            let oid = repo.odb().write(ObjectKind::Blob, name)?;
+            entries.push(TreeEntry {
+                mode: 0o100644,
+                name: name.to_vec(),
+                oid,
+            });
+        }
+        entries.sort_by(|a, b| a.name.cmp(&b.name));
+        let subtree = repo
+            .odb()
+            .write(ObjectKind::Tree, &serialize_tree(&entries))?;
+        let root = repo.odb().write(
+            ObjectKind::Tree,
+            &serialize_tree(&[TreeEntry {
+                mode: 0o040000,
+                name: b"dir\xff".to_vec(),
+                oid: subtree,
+            }]),
+        )?;
+        let policy = ThreadPolicy::default();
+        let mut session = BlameSession::new(repo.odb(), None, false, &policy);
+        for entry in entries {
+            let raw = crate::repo_relpath::join_rel(b"dir\xff", &entry.name);
+            let stored = storage_string(&raw);
+            let expected = Some((entry.oid, entry.mode));
+            assert_eq!(session.resolve_path_in_tree(root, &stored)?, expected);
+            assert_eq!(
+                resolve_path_in_tree_entry(repo.odb(), &root, &stored)?,
+                expected
+            );
+            let count = session.path_entries.len();
+            let uppercase = format!(
+                "grit+pathhex:{}",
+                stored
+                    .strip_prefix("grit+pathhex:")
+                    .unwrap_or_default()
+                    .to_ascii_uppercase()
+            );
+            assert_eq!(session.resolve_path_in_tree(root, &uppercase)?, expected);
+            assert_eq!(session.path_entries.len(), count);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn stored_path_bloom_keys_hash_raw_directory_prefixes() -> Result<()> {
+        use crate::bloom::{bloom_key_hashes, BloomFilterSettings};
+        use crate::repo::init_repository;
+        use crate::RefStorageFormat;
+
+        let dir = tempfile::tempdir()?;
+        let repo = init_repository(dir.path(), false, "main", None, RefStorageFormat::Files)?;
+        let policy = ThreadPolicy::default();
+        let mut session = BlameSession::new(repo.odb(), None, false, &policy);
+        for version in [1, 2] {
+            let settings = BloomFilterSettings {
+                hash_version: version,
+                ..Default::default()
+            };
+            for path in [
+                b"dir\xff/raw\xfe.txt".as_slice(),
+                b"grit+pathhex:6162/file",
+                b"utf8/file",
+            ] {
+                let slash = path.iter().rposition(|&b| b == b'/').unwrap_or_default();
+                let expected = vec![
+                    bloom_key_hashes(path, &settings),
+                    bloom_key_hashes(&path[..slash], &settings),
+                ];
+                let keys = session.bloom_keys_for_path(&storage_string(path), &settings);
+                assert_eq!(keys.as_ref(), &expected);
+            }
+        }
         Ok(())
     }
 }

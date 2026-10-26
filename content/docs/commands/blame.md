@@ -16,6 +16,8 @@ grit blame [<rev>] [--rev <commit>] [-L RANGE] [--first-parent] [--group] [-w]
 
 Walks history for one file and prints each line with the commit that last modified it, the author, when that commit was made, and the line number in the blamed revision. The file operand uses Git pathspec cwd rules (same as [`grit diff`](../diff/)): from a subdirectory, a bare name like `f.txt` refers to that path under your current directory.
 
+Paths returned by `grit status --json` can be passed directly as the file operand, including reversible `grit+pathhex:` strings for non-UTF-8 filenames. These encoded paths are repository-relative, even when invoked from a subdirectory. Blame decodes one storage layer and compares exact filename bytes, so raw invalid-byte names, valid Unicode names, and literal names beginning with `grit+pathhex:` remain distinct. JSON `original_path` values (both lines and grouped hunks) use the same reversible encoding, including rename and copy origins. In Rust, use `repo_relpath::storage_bytes` to recover the original bytes; use `storage_string` when supplying raw names that begin with the reserved prefix.
+
 Blame visits commits newest first (by committer date) and keeps one entry per commit that still owns lines. When a merge hands lines to several parents and those branches meet again at an older commit, their lines join that commit's entry, so a commit is normally diffed against its parents once, however many merge paths reach it (a commit whose timestamp is older than one of its descendants can be visited again when clocks were skewed). File versions that no queued commit needs are dropped once more than 64 are cached, and parent/child line maps are cached only when `--ignore-rev` or `-C` can ask for the same pair twice. On git.git's `Makefile` (4.1k lines touched across thousands of merges) that is about 1.2 s and 335 MB peak RSS on a 4-core Linux VM, against about 1.0 s and 290 MB for system `git blame`. For each parent step, lines still being tracked that fall in an unchanged prefix or suffix are mapped to the parent without running a full-file diff; when every remaining line is in those affix regions, the step skips diffing entirely. With `-L`, that often avoids almost all diffs on large files whose recent edits are far from the requested range (for example tail-only churn). Stretches of history where the file does not change are skipped by reading only each commit's header and the tree entries on the file's path (unchanged subdirectories are not re-read), and no tree data is kept once its entry is found, so memory stays flat however long the history is: blaming `README.md` in git.git (22.5k first-parent commits) takes about 0.37 s and 290 MB peak RSS, against about 0.29 s and 245 MB for system `git blame`. On this repository, blaming `grit-lib/src/pack.rs` (~4.6k lines, ~90 commits) completes in a few seconds on a release build; system `git blame` on the same path is still faster on some very large real-world files, and parity work continues.
 
 When a commit renamed or moved the file (including rename-and-edit in the same commit), blame follows the predecessor path using rename detection with Git's default similarity threshold (50%, like `git blame` with `-M`). This behavior is independent of `diff.renames` (system Git blame still follows renames when that diff setting is off). Git's `diff.renameLimit` and `status.renameLimit` cap how many rename pairings diff/status consider; they do not change blame's similarity percentage.
@@ -76,7 +78,7 @@ Pass `--json` for stable, scripting-friendly output:
 | `lines` | array | One record per line (after any `-L` filter), in final-line order. |
 | `lines[].commit` | string | Full commit oid for the line. |
 | `lines[].original_line` | number | 1-based line number in the originating commit. |
-| `lines[].original_path` | string | Path of the line in its originating commit (matches `git blame --porcelain` `filename`, including after renames). |
+| `lines[].original_path` | string | Reversibly stored path in the originating commit, preserving filename bytes through renames and copies. |
 | `lines[].final_line` | number | 1-based line number in the blamed revision. |
 | `lines[].content` | string | Line text. |
 | `lines[].ignored` | boolean | Present and `true` when the line was attributed through an ignored revision. |
@@ -92,7 +94,7 @@ Same top-level `file`, `rev`, and `commits` map. Replaces `lines[]` with `hunks[
 | Field | Type | Meaning |
 | ----- | ---- | ------- |
 | `hunks[].commit` | string | Full commit oid for every line in the hunk. |
-| `hunks[].original_path` | string | Originating path for the hunk (porcelain `filename`). |
+| `hunks[].original_path` | string | Reversibly stored originating path for the hunk (same encoding as status). |
 | `hunks[].original_start` | number | 1-based first line in the originating commit. |
 | `hunks[].final_start` | number | 1-based first line in the blamed revision. |
 | `hunks[].count` | number | Number of consecutive final lines in the hunk. |
@@ -161,6 +163,33 @@ Revision `83352a61f6715ec3f0a297c6d6150725154fb833`
 
 See [Exit codes](../exit-codes/) for shared rules and structured `--json` `kind` values.
 
+
+## Benchmarking encoded paths
+
+Measured on a 4-core Linux x86_64 VM with system Git 2.55.0 and Rust 1.99.0,
+using `dist` builds of main (`5a715a522`) and this fix. Each cell reports median
+**wall milliseconds / peak RSS KiB** from ten measured invocations after two
+warmups, interleaving Git, main, and the fix on an idle VM. RSS comes from
+`/usr/bin/time -v`; stdout is discarded. Grit uses `blame --json`; Git uses
+`blame --line-porcelain`. Ranges use `-L 1,200`.
+
+The packed fixture has 201 commits and two identical 4,096-line files, one UTF-8
+path and one raw-byte directory/filename, with Git-written changed-path Bloom
+filters. The real-repository case blames `grit-lib/src/blame.rs` at the baseline
+revision, whose file history has 76 changes.
+
+| Scenario | System Git | Main | Fix |
+| --- | ---: | ---: | ---: |
+| Packed UTF-8, full file | 73.9 / 30,226 | 101.7 / 75,230 | 102.7 / 75,262 |
+| Packed UTF-8, lines 1–200 | 56.5 / 30,174 | 71.1 / 68,962 | 71.9 / 68,810 |
+| Packed encoded path, full file | 74.5 / 30,266 | Path error | 101.7 / 75,290 |
+| Packed encoded path, lines 1–200 | 56.1 / 30,196 | Path error | 70.7 / 69,194 |
+| Grit repository, UTF-8, full file | 97.6 / 40,774 | 92.8 / 68,084 | 92.2 / 68,010 |
+| Grit repository, UTF-8, lines 1–200 | 63.5 / 39,864 | 72.9 / 64,658 | 72.2 / 64,672 |
+
+UTF-8 timings remain within 1.2% of the baseline in this run, with no material
+RSS increase. Encoded paths now complete both full-file and ranged blame;
+main's path errors provide no comparable successful-operation timing.
 
 ## See also
 

@@ -230,15 +230,22 @@ pub fn bloom_filter_contains(
 
 /// Build keys for `path` and every directory prefix (Git `bloom_keyvec_new`).
 pub fn bloom_keyvec_for_path(path: &str, settings: &BloomFilterSettings) -> Vec<Vec<u32>> {
-    if path.is_empty() {
+    bloom_keyvec_for_bytes(path.as_bytes(), settings)
+}
+
+/// Build keys from raw Git path bytes, including every directory prefix.
+pub(crate) fn bloom_keyvec_for_bytes(
+    bytes: &[u8],
+    settings: &BloomFilterSettings,
+) -> Vec<Vec<u32>> {
+    if bytes.is_empty() {
         return Vec::new();
     }
-    let bytes = path.as_bytes();
     let mut out = Vec::new();
     out.push(bloom_key_hashes(bytes, settings));
     let mut end = bytes.len();
     while end > 0 {
-        let Some(pos) = path[..end].rfind('/') else {
+        let Some(pos) = bytes[..end].iter().rposition(|&b| b == b'/') else {
             break;
         };
         if pos == 0 {

@@ -973,6 +973,7 @@ fn read_blob(odb: &Odb, oid: &ObjectId) -> Vec<u8> {
 }
 
 /// Read the blob at `path` in `tree`, or `None` if missing.
+/// `path` uses the reversible `repo_relpath::storage_string` representation.
 #[must_use]
 pub fn read_blob_at_path(odb: &Odb, tree: &ObjectId, path: &str) -> Option<Vec<u8>> {
     let oid = blob_oid_at_path(odb, tree, path)?;
@@ -980,16 +981,16 @@ pub fn read_blob_at_path(odb: &Odb, tree: &ObjectId, path: &str) -> Option<Vec<u
 }
 
 /// OID of the blob at `path` in `tree`.
+/// `path` uses the reversible `repo_relpath::storage_string` representation.
 #[must_use]
 pub fn blob_oid_at_path(odb: &Odb, tree: &ObjectId, path: &str) -> Option<ObjectId> {
     let mut current = *tree;
-    let parts: Vec<&str> = path.split('/').collect();
+    let bytes = crate::repo_relpath::storage_bytes(path);
+    let parts: Vec<&[u8]> = bytes.split(|&b| b == b'/').collect();
     for (pi, part) in parts.iter().enumerate() {
         let obj = odb.read(&current).ok()?;
         let entries = crate::objects::parse_tree(&obj.data).ok()?;
-        let found = entries
-            .iter()
-            .find(|e| std::str::from_utf8(&e.name).ok() == Some(*part))?;
+        let found = entries.iter().find(|e| e.name == *part)?;
         if pi + 1 == parts.len() {
             return Some(found.oid);
         }
