@@ -2985,7 +2985,7 @@ fn dispatch(
                 )
             }
         }
-        Command::Cat { spec } => emit_success(&commands::cat::run(spec)?, opts, ctx),
+        Command::Cat { spec } => emit_success(&commands::cat::run(spec, opts.mode)?, opts, ctx),
         Command::Commit {
             commit_message,
             message_input,

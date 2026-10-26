@@ -15,7 +15,7 @@ grit cat <SPEC>
 
 Shows the contents of the object named by a revision spec:
 
-- **Blob** — raw bytes written to stdout (no extra framing).
+- **Blob** — raw bytes written to stdout (no extra framing). Blobs of 1 MiB or larger are streamed from the object database in human mode so memory stays bounded; `--json` and `--markdown` still load the payload to build structured output.
 - **Tree** — one line per entry like `git cat-file -p` (six-digit directory modes such as `040000`, then type, oid, tab, path).
 - **Commit** or **tag** — the canonical object payload (same bytes as `git cat-file -p`).
 

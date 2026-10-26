@@ -5,13 +5,14 @@ use std::io::Write;
 use crate::revision_errors::map_resolve_error;
 use anyhow::{Context, Result};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
+use grit_lib::error::Error;
 use grit_lib::object_inspect::{format_tree_cat_file_p, tree_entry_mode_cat_file_p};
 use grit_lib::objects::{Object, ObjectKind};
 use schemars::JsonSchema;
 use serde::Serialize;
 
 use crate::context;
-use crate::output::{outln, HumanRender, MarkdownRender, RenderContext};
+use crate::output::{outln, HumanRender, MarkdownRender, OutputMode, RenderContext};
 
 /// Blob payload in JSON (`--json` contract).
 #[derive(Serialize, JsonSchema)]
@@ -72,10 +73,20 @@ pub struct CatOutcome {
     #[serde(skip)]
     #[schemars(skip)]
     pub human_raw: Option<Vec<u8>>,
+    /// Large blob payload was already copied to stdout during [`run`].
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub human_blob_streamed: bool,
 }
+
+/// Blobs at or above this size stream straight to stdout in human mode.
+const CAT_STREAM_THRESHOLD: u64 = 1024 * 1024;
 
 impl HumanRender for CatOutcome {
     fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
+        if self.human_blob_streamed {
+            return Ok(());
+        }
         if let Some(bytes) = &self.human_raw {
             w.write_all(bytes)
                 .map_err(|e| anyhow::anyhow!("writing object: {e}"))?;
@@ -130,11 +141,37 @@ impl MarkdownRender for CatOutcome {
     }
 }
 
-pub fn run(spec: String) -> Result<CatOutcome> {
+pub fn run(spec: String, mode: OutputMode) -> Result<CatOutcome> {
     let (repo, sink) = context::discover_with_warnings()?;
     let resolved = repo
         .resolve(&spec)
         .map_err(|e| map_resolve_error(&spec, e))?;
+    let info = repo.odb().read_info(&resolved.oid)?;
+    let stream_human_blob = mode == OutputMode::Human
+        && info.kind == ObjectKind::Blob
+        && info.size >= CAT_STREAM_THRESHOLD;
+    if stream_human_blob {
+        repo.odb()
+            .with_stream(&resolved.oid, |mut stream| {
+                std::io::copy(&mut stream.reader, &mut std::io::stdout()).map_err(Error::Io)
+            })?
+            .ok_or_else(|| grit_lib::error::Error::ObjectNotFound(resolved.oid.to_hex()))?;
+        let placeholder = CatContentJson::Blob(BlobJson {
+            encoding: "binary".to_owned(),
+            text: None,
+            data_base64: None,
+        });
+        return Ok(CatOutcome {
+            warnings: sink.warnings(),
+            spec,
+            oid: resolved.oid.to_hex(),
+            kind: kind_label(info.kind).to_owned(),
+            size: resolved.size,
+            content: placeholder,
+            human_raw: None,
+            human_blob_streamed: true,
+        });
+    }
     let obj = repo
         .read_object_raw_for_display(&resolved.oid)
         .with_context(|| format!("read object {}", resolved.oid.to_hex()))?;
@@ -147,6 +184,7 @@ pub fn run(spec: String) -> Result<CatOutcome> {
         size: resolved.size,
         content,
         human_raw: Some(human_raw),
+        human_blob_streamed: false,
     })
 }
 

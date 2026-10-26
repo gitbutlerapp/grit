@@ -1239,12 +1239,15 @@ mod tests {
         );
         let count_text = String::from_utf8_lossy(&count_out.stdout);
         let mut in_pack = None::<u64>;
+        let mut loose_count = None::<u64>;
         for line in count_text.lines() {
             if let Some(v) = line.strip_prefix("in-pack: ") {
                 in_pack = Some(v.trim().parse().expect("in-pack"));
+            } else if let Some(v) = line.strip_prefix("count: ") {
+                loose_count = Some(v.trim().parse().expect("count"));
             }
         }
-        let git_objects = in_pack.expect("in-pack line");
+        let git_objects = in_pack.expect("in-pack line") + loose_count.unwrap_or(0);
         let git_dir = dest.path().join(".git");
         let pack_dir = git_dir.join("objects/pack");
         let pack_bytes = std::fs::read_dir(&pack_dir)
@@ -1254,13 +1257,29 @@ mod tests {
             .filter(|p| p.extension().is_some_and(|x| x == "pack"))
             .map(|p| std::fs::metadata(&p).expect("pack stat").len())
             .sum::<u64>();
+        let loose_bytes = std::fs::read_dir(git_dir.join("objects"))
+            .expect("objects")
+            .filter_map(|e| e.ok())
+            .filter(|e| {
+                e.file_name()
+                    .to_string_lossy()
+                    .len()
+                    .eq(&2)
+                    && e.file_type().is_ok_and(|t| t.is_dir())
+            })
+            .flat_map(|shard| std::fs::read_dir(shard.path()).into_iter().flatten())
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_type().is_ok_and(|t| t.is_file()))
+            .map(|e| std::fs::metadata(e.path()).expect("stat").len())
+            .sum::<u64>();
         assert_eq!(
             outcome.transfer.objects, git_objects,
-            "object count must match git count-objects -v in-pack"
+            "object count must match git count-objects -v (loose + in-pack)"
         );
         assert_eq!(
-            outcome.transfer.bytes, pack_bytes,
-            "pack bytes must match on-disk .pack file size"
+            outcome.transfer.bytes,
+            pack_bytes + loose_bytes,
+            "transfer bytes must match on-disk object storage (pack + loose)"
         );
         assert!(outcome.branches >= 2, "expected at least main and feature");
         assert!(outcome.tags >= 1, "expected tag v1");
