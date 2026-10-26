@@ -30,10 +30,14 @@ pub struct PushOutcome {
     pub remote: String,
     /// High-level push kind (`branch`, `tags`, `delete`, `refspecs`).
     pub kind: PushKind,
-    /// Local branch short name when [`Self::kind`] is `branch` (legacy `branch` field).
+    /// Local branch short name when [`Self::kind`] is `branch` or `delete` (legacy `branch` field).
     #[serde(skip_serializing_if = "Option::is_none")]
     #[schemars(skip_serializing_if = "Option::is_none")]
     pub branch: Option<String>,
+    /// Short ref name for human and markdown summaries (branch, tag, or `--tags`).
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub summary_label: Option<String>,
     pub results: Vec<PushRefResult>,
     pub rejected: bool,
     /// True when `--dry-run` was used (no refs or objects written).
@@ -111,7 +115,7 @@ pub struct PushRefResult {
 
 impl HumanRender for PushOutcome {
     fn render_human(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        let label = match (self.branch.as_deref(), self.kind) {
+        let label = match (self.summary_label.as_deref(), self.kind) {
             (Some(b), _) => b,
             (_, PushKind::Tags) => "--tags",
             (_, PushKind::Delete) => "--delete",
@@ -149,7 +153,11 @@ impl HumanRender for PushOutcome {
 
 impl MarkdownRender for PushOutcome {
     fn render_markdown(&self, w: &mut dyn Write, _ctx: &RenderContext) -> Result<()> {
-        let label = self.branch.as_deref().unwrap_or("refs");
+        let label = self
+            .summary_label
+            .as_deref()
+            .or(self.branch.as_deref())
+            .unwrap_or("refs");
         markdown::print_remote_push_messages(w, &self.remote_messages)?;
         markdown::print_push_results(w, &self.remote, label, self.dry_run, &self.results)?;
         Ok(())
@@ -298,10 +306,17 @@ pub fn run(
         })
         .collect();
 
+    let summary_label = plan.branch_label.clone();
+    let branch = match plan.kind {
+        PushPlanKind::Branch | PushPlanKind::Delete => plan.branch_label,
+        _ => None,
+    };
+
     Ok(PushOutcome {
         remote: plan.remote,
         kind: plan.kind.into(),
-        branch: plan.branch_label,
+        branch,
+        summary_label,
         results,
         rejected,
         dry_run,

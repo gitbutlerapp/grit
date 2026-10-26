@@ -76,6 +76,9 @@ $ grit push
 $ grit push origin feature
   pushed feature → origin refs/heads/feature
 
+$ grit push origin v1
+  pushed v1 → origin refs/tags/v1
+
 $ grit push origin HEAD:refs/heads/bench
   pushed refs → origin refs/heads/bench
 
@@ -138,7 +141,7 @@ Pass `--json` for stable, scripting-friendly output:
 | ----- | ---- | ------- |
 | `remote` | string | Remote that was pushed to. |
 | `kind` | string | `branch`, `tags`, `delete`, or `refspecs`. |
-| `branch` | string or null | Short branch name when `kind` is `branch`. |
+| `branch` | string or null | Short branch name when `kind` is `branch`, or the deleted ref’s short name when `kind` is `delete`. Omitted for tag and other explicit refspec pushes (`kind`: `refspecs`). |
 | `dry_run` | boolean | `true` when `--dry-run` was used (no refs or objects written). |
 | `results` | array | Per-ref outcomes; each object has `ref`, `status` (`ok`, `up_to_date`, or `rejected`), optional `reason` (`stale` for a failed lease, `remote_ref_missing` when `--delete` targets a ref absent on the remote), `old_oid`, `new_oid`, `src`, and `forced`. |
 | `rejected` | boolean | `true` if any ref was rejected (exit status is also `1`). |

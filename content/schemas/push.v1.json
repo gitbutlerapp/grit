@@ -69,7 +69,7 @@
   "description": "Result of `grit push`: the per-ref outcomes for the remote.",
   "properties": {
     "branch": {
-      "description": "Local branch short name when [`Self::kind`] is `branch` (legacy `branch` field).",
+      "description": "Local branch short name when [`Self::kind`] is `branch` or `delete` (legacy `branch` field).",
       "type": [
         "string",
         "null"

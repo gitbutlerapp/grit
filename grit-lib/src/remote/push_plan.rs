@@ -1329,19 +1329,14 @@ fn delete_branch_label(specs: &[PushRefSpec]) -> Option<String> {
     specs[0].dst.strip_prefix("refs/heads/").map(str::to_owned)
 }
 
-fn branch_label_from_specs(repo: &Repository, specs: &[PushRefSpec]) -> Option<String> {
+fn branch_label_from_specs(_repo: &Repository, specs: &[PushRefSpec]) -> Option<String> {
     if specs.len() != 1 || specs[0].delete {
         return None;
     }
     let dst = &specs[0].dst;
     dst.strip_prefix("refs/heads/")
+        .or_else(|| dst.strip_prefix("refs/tags/"))
         .map(str::to_owned)
-        .or_else(|| {
-            resolve_head(repo.git_dir()).ok().and_then(|h| match h {
-                HeadState::Branch { short_name, .. } => Some(short_name),
-                _ => None,
-            })
-        })
 }
 
 #[cfg(test)]
@@ -1638,5 +1633,44 @@ mod tests {
             load_push_plan_context(&repo, &ConfigSet::new(), Some(missing), None).expect("context");
         assert!(ctx.remote_ref_names.is_empty());
         assert!(ctx.remote_tips.as_ref().is_none_or(Vec::is_empty));
+    }
+
+    #[test]
+    fn tag_push_branch_label_is_tag_name_not_current_branch() {
+        let (_tmp, repo) = init_repo();
+        let git_dir = repo.git_dir();
+        std::fs::write(
+            git_dir.join("config"),
+            r#"[remote "origin"]
+	url = /tmp/o.git
+"#,
+        )
+        .expect("config");
+        std::fs::write(git_dir.join("HEAD"), "ref: refs/heads/main\n").expect("HEAD");
+        let oid = ObjectId::from_hex("a".repeat(40).as_str()).expect("oid");
+        std::fs::create_dir_all(git_dir.join("refs/heads")).expect("heads");
+        std::fs::write(
+            git_dir.join("refs/heads/main"),
+            format!("{}\n", oid.to_hex()),
+        )
+        .expect("main");
+        std::fs::create_dir_all(git_dir.join("refs/tags")).expect("tags");
+        std::fs::write(git_dir.join("refs/tags/v1"), format!("{}\n", oid.to_hex())).expect("tag");
+        let config = ConfigSet::load(&Environment::empty(), Some(git_dir), true).expect("config");
+        let ctx = PushPlanContext::default();
+        let resolved = resolve_push(
+            &repo,
+            &config,
+            &PushRequest {
+                remote: Some("origin".to_owned()),
+                refspecs: vec!["v1".to_owned()],
+                ..Default::default()
+            },
+            &ctx,
+        )
+        .expect("resolve tag push");
+        assert_eq!(resolved.branch_label.as_deref(), Some("v1"));
+        assert_eq!(resolved.kind, PushPlanKind::Refspecs);
+        assert_eq!(resolved.specs[0].dst, "refs/tags/v1");
     }
 }
