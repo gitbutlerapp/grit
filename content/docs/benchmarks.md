@@ -9,6 +9,33 @@ For a map of **grit-lib** modules, **grit** commands, common workflows, and ever
 
 Command-level numbers below come from the committed **grit-bench** JSON baselines listed in `content/docs/site.toml`. Each scenario runs **hyperfine** against the system **`git`** binary and a release **`grit`** build on the same machine; times are wall-clock milliseconds (mean and spread from timed runs).
 
+## Shared environment snapshots
+
+Repository discovery and config loading clone an explicit `Environment`. Its captured
+variables now share immutable storage, while typed overrides remain independent. This
+removes repeated copies of inherited variables from short commands.
+
+On the factory VM (2026-10-26, AMD EPYC 7763, four vCPUs, system Git 2.55.0,
+`release` profile), the daily `many-refs` fixture contains 10,000 refs, mostly remote-tracking
+refs, and lists one local branch by default. Direct execution with hyperfine, 300 runs in
+each command order, measured:
+
+| Operation | Git | Grit before | Grit after |
+| --- | ---: | ---: | ---: |
+| Branch JSON listing, median | 1.92 ms | 2.78 ms | 2.71 ms |
+| Peak RSS, median of 20 `time -v` runs | 5,690 KiB | 14,126 KiB | 13,890 KiB |
+
+The Git comparison is `git branch -vv`, matching the daily scenario. Heaptrack allocation
+calls fell from 5,552 to 4,447; peak live heap stayed about 323 KB because argument parsing
+sets that peak earlier. Human, JSON and Markdown output remained byte-identical.
+
+Reproduce the library measurement with `cargo bench -p grit-lib --bench environment`.
+It covers clones with 0, 64, 256 and 1,024 inherited variables. The accompanying daily
+baselines and measurement notes are recorded under `grit-utils/baselines/` for task 4643.
+Tag RSS was 2.1–2.8% higher across repetitions, despite lower peak heap usage. This
+control regression remains under review against the zero-regression requirement.
+See the measurement ledger for the complete results and limits.
+
 ## grit-bench fixture cache
 
 Scenario suites reuse prepared repositories under **`GRIT_BENCH_CACHE`** (default `$XDG_CACHE_HOME/grit-bench`). **`grit-bench fixtures prepare`** clones upstream **git.git** at tag **`v2.47.0`** (bare, verified `HEAD` oid) and generates synthetic tiers **S**, **M**, and **L** with the grit-lib generator. **`grit-bench fixtures list`** prints identity (name, tier, `HEAD`, object/ref/file counts). Mutating runs take a **`git clone --local`** working copy so the cache stays read-only. JSON reports may include a top-level **`fixtures`** array with the same identity fields.
