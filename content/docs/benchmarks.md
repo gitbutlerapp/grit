@@ -1516,3 +1516,27 @@ make docs
 The docs `--check` step fails if baseline numbers change without re-running `make docs`.
 
 For other library surfaces under test, see the [grit-lib API on docs.rs](https://docs.rs/grit-lib).
+
+## Filtered revision counts (2026-10-26)
+
+An unlimited `grit revs --count` with author, committer or message filters now counts during traversal. It reads each visited commit once into a reusable buffer, uses borrowed commit headers and keeps delta bases cached, rather than retaining per-commit maps and sorting a list. Excluded ancestry, shallow boundaries, grafts and existing filter semantics still apply.
+
+Factory VM: AMD EPYC 9V45, 4 vCPUs, Rust 1.99.0, `release` profile, system Git 2.55.0. Baseline `dbdf37d29719` and changed `c17f3c85ffb8` ran in the same sitting. The daily harness supplies the 50,000-commit / 20,000-file deep-history fixture and the upstream Git v2.47.0 fixture. After one warmup, ten interleaved runs per tool alternate Git, baseline grit and changed grit, reversing tool order on every other run; builds and tests were idle. Wall time is the median measured with Python `perf_counter` around `/usr/bin/time -v`; RSS is the maximum process peak across those runs. Raw wall/RSS samples are in `grit-utils/baselines/filtered-revision-count.json`.
+
+| Scenario | Git ms | Grit before ms | Grit after ms | Grit peak RSS before KiB | Grit peak RSS after KiB |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `revs/count-author@deep-history` | 91.88 | 283.90 | 121.02 | 61,904 | 25,964 |
+| `revs/author-n50@deep-history` | 2.17 | 3.63 | 3.64 | 17,332 | 17,408 |
+| `log/author-n50@deep-history` | 2.10 | 3.56 | 3.58 | 17,724 | 17,792 |
+| `revs/count-author@deep-history-cg` | 89.49 | 169.96 | 124.09 | 56,076 | 26,112 |
+| `revs/author-n50@deep-history-cg` | 2.41 | 3.75 | 3.75 | 19,812 | 19,836 |
+| `log/author-n50@deep-history-cg` | 2.35 | 3.64 | 3.65 | 19,876 | 20,096 |
+| `revs/count-since@deep-history` | 2.09 | 2.89 | 2.92 | 15,312 | 15,276 |
+| `revs/left-right-count@deep-history` | 2.75 | 5.40 | 5.46 | 15,784 | 15,740 |
+| `revs/count@git-git` | 375.99 | 527.63 | 534.70 | 127,520 | 127,332 |
+| `revs/count-author@git-git` | 479.37 | 917.16 | 385.81 | 129,796 | 59,256 |
+| `revs/count-grep@git-git` | 486.45 | 885.70 | 366.93 | 123,720 | 59,244 |
+
+The target drops from 3.09× to 1.32× Git time, with 57% less time and 58% less peak RSS. The other filtered counts improve by 27–59%; unchanged command paths differ by at most 1.4% in this run. Heaptrack records 1,247,228 → 266,825 allocations and 38.95 → 5.88 MB peak heap; callgrind records 4.38 → 2.14 billion instructions. `perf record -g` was blocked by the VM kernel setting, so callgrind and `strace -c` supplied CPU/syscall evidence.
+
+`revs/count-path@git-git` could not run: system Git rejects the pinned `7e34d81` revision in the harness’s v2.47.0 fixture. The fixture and scenario definition were left unchanged.
