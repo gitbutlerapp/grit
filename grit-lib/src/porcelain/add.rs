@@ -908,6 +908,9 @@ fn stage_ignorecase_spelling_updates(
         if !matches(index_rel) {
             continue;
         }
+        if crate::path_icase::has_icase_checkout_collision_sibling(index, index_rel) {
+            continue;
+        }
         let abs = worktree_path_for_index_entry(work_tree, index_rel, true);
         let Ok(rel) = abs.strip_prefix(work_tree) else {
             continue;

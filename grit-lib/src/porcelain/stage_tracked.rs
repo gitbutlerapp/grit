@@ -303,6 +303,13 @@ fn stage_tracked_modifications_in_index_body(
         .ok()
         .and_then(|cfg| cfg.get_bool("core.ignorecase").and_then(|r| r.ok()))
         .unwrap_or(false);
+    let icase_collisions = if ignorecase {
+        Some(crate::path_icase::IcaseCheckoutCollisionMap::from_index(
+            work_tree, index, true,
+        ))
+    } else {
+        None
+    };
     let dir_symlinks = SymlinkDirCache::default();
 
     for raw_path in &unmerged_paths {
@@ -335,7 +342,7 @@ fn stage_tracked_modifications_in_index_body(
             index_mtime,
             mode_policy,
             precompose_unicode,
-            ignorecase,
+            icase_collisions.as_ref(),
             &mut symlink_parent_cache,
             rules,
             &mut summary,
@@ -466,6 +473,12 @@ fn stage_tracked_modifications_in_index_body(
                 if idx_e.skip_worktree() {
                     return Ok(());
                 }
+                if icase_collisions
+                    .as_ref()
+                    .is_some_and(|map| map.preserve_missing_collision_loser(raw_path.as_slice()))
+                {
+                    return Ok(());
+                }
                 if rel_path_has_symlink_parent(work_tree, rel_path) {
                     pending_removals.push(raw_path);
                     return Ok(());
@@ -491,6 +504,7 @@ fn stage_tracked_modifications_in_index_body(
                     index_mtime,
                     mode_policy,
                     rules,
+                    icase_collisions: icase_collisions.as_ref(),
                 };
                 let defer = parallel_restage.then_some(&mut deferred_restage);
                 if refresh_present_tracked_path(ctx, stat, defer, entry_index)? {
@@ -511,6 +525,7 @@ fn stage_tracked_modifications_in_index_body(
             work_tree,
             precompose_unicode,
             ignorecase,
+            icase_collisions: icase_collisions.as_ref(),
         };
         summary.modified.extend(restage_deferred_jobs(
             repo,
@@ -537,6 +552,7 @@ struct PresentRefreshCtx<'a> {
     index_mtime: Option<(u32, u32)>,
     mode_policy: WorktreeModePolicy,
     rules: &'a mut WorktreeRules,
+    icase_collisions: Option<&'a crate::path_icase::IcaseCheckoutCollisionMap>,
 }
 
 fn refresh_unmerged_tracked_path(
@@ -652,11 +668,12 @@ fn stage_tracked_path_individual(
     index_mtime: Option<(u32, u32)>,
     mode_policy: WorktreeModePolicy,
     precompose_unicode: bool,
-    ignorecase: bool,
+    icase_collisions: Option<&crate::path_icase::IcaseCheckoutCollisionMap>,
     symlink_parent_cache: &mut HashMap<PathBuf, bool>,
     rules: &mut WorktreeRules,
     summary: &mut StageTrackedSummary,
 ) -> Result<()> {
+    let ignorecase = icase_collisions.is_some();
     let abs_path = abs_path_for_stage_tracked(work_tree, raw_path, precompose_unicode, ignorecase);
     if path_has_symlink_parent_cached(work_tree, &abs_path, symlink_parent_cache) {
         if index.remove(raw_path) {
@@ -676,6 +693,7 @@ fn stage_tracked_path_individual(
                 index_mtime,
                 mode_policy,
                 rules,
+                icase_collisions,
             };
             if refresh_present_tracked_path(ctx, BlobDiskStat::from_metadata(&meta), None, 0)? {
                 summary.modified.push(raw_path.to_vec());
@@ -683,6 +701,9 @@ fn stage_tracked_path_individual(
         }
         None if idx_e.skip_worktree() => {}
         None => {
+            if icase_collisions.is_some_and(|map| map.preserve_missing_collision_loser(raw_path)) {
+                return Ok(());
+            }
             if index.remove(raw_path) {
                 summary.removed.push(raw_path.to_vec());
             }
@@ -702,6 +723,7 @@ struct DeferredRestageContext<'a> {
     work_tree: &'a Path,
     precompose_unicode: bool,
     ignorecase: bool,
+    icase_collisions: Option<&'a crate::path_icase::IcaseCheckoutCollisionMap>,
 }
 
 const S_IFMT: u32 = 0o170000;
@@ -725,7 +747,11 @@ fn refresh_present_tracked_path(
         index_mtime,
         mode_policy,
         rules,
+        icase_collisions,
     } = ctx;
+    if icase_collisions.is_some_and(|map| map.is_auto_stage_loser(raw_path)) {
+        return Ok(false);
+    }
     let idx_mode = idx_e.mode;
     let idx_intent_to_add = idx_e.intent_to_add();
     let idx_oid = idx_e.oid;
@@ -911,6 +937,7 @@ fn restage_deferred_chunk(
         work_tree,
         precompose_unicode,
         ignorecase,
+        icase_collisions,
     } = ctx;
     let mut batch_inputs = Vec::with_capacity(jobs.len());
     for job in jobs {
@@ -958,6 +985,9 @@ fn restage_deferred_chunk(
         let mode_for_index = mode_policy.index_mode_for_worktree(prep.blob.mode, Some(idx_e.mode));
         // The read pass's stat precedes the read, like the serial path.
         let entry = entry_from_metadata(&prep.blob.meta, raw_path, prep.blob.oid, mode_for_index);
+        if icase_collisions.is_some_and(|map| map.is_auto_stage_loser(raw_path)) {
+            continue;
+        }
         if prep.blob.oid == idx_e.oid && mode_for_index == idx_e.mode {
             if stat_fields_differ(&entry, idx_e) {
                 replacements.push(entry);

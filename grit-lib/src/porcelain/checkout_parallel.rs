@@ -51,29 +51,6 @@ pub(crate) enum WriteJobOutcome {
     Delayed(DelayedCheckoutTarget),
 }
 
-#[cfg(test)]
-/// Whether two repository-relative paths can refer to the same on-disk file (Git `paths_collide`).
-#[must_use]
-pub(crate) fn paths_collide(a: &str, b: &str, ignorecase: bool) -> bool {
-    if a.len() == b.len() {
-        return paths_equal(a, b, ignorecase);
-    }
-    if a.len() < b.len() {
-        return b.as_bytes().get(a.len()) == Some(&b'/')
-            && paths_equal(a, &b[..a.len()], ignorecase);
-    }
-    a.as_bytes().get(b.len()) == Some(&b'/') && paths_equal(&a[..b.len()], b, ignorecase)
-}
-
-#[cfg(test)]
-fn paths_equal(a: &str, b: &str, ignorecase: bool) -> bool {
-    if ignorecase {
-        a.eq_ignore_ascii_case(b)
-    } else {
-        a == b
-    }
-}
-
 fn effective_path_for_collision(path: &str, precompose: bool) -> Cow<'_, str> {
     if precompose {
         precompose_utf8_path(path)
@@ -552,13 +529,6 @@ pub(crate) fn execute_write_jobs(
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn paths_collide_dir_and_file() {
-        assert!(paths_collide("a", "a/b", false));
-        assert!(paths_collide("A/B", "a", true));
-        assert!(!paths_collide("a/b", "a/c", false));
-    }
 
     #[test]
     fn ignorecase_basename_collision_marks_serial() {

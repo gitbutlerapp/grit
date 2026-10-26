@@ -424,6 +424,13 @@ impl ProgressSink for ChunkProgressSink<'_> {
     fn finish(&mut self) {}
 }
 
+/// Populated-tree checkout metadata (case-insensitive path collisions).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CheckoutOutcome {
+    /// Stage-0 paths that share a worktree slot when `core.ignorecase` is set.
+    pub path_collisions: Vec<String>,
+}
+
 fn populated_blob_to_added_diff(blob: &PopulatedTreeBlob) -> DiffEntry {
     DiffEntry {
         status: DiffStatus::Added,
@@ -443,7 +450,7 @@ fn checkout_populated_tree(
     tree_oid: &ObjectId,
     progress: &mut dyn ProgressSink,
     cancel: &dyn Cancel,
-) -> Result<()> {
+) -> Result<CheckoutOutcome> {
     let work_tree = repo
         .work_tree()
         .ok_or_else(|| Error::PathError("cannot update a bare repository's working tree".into()))?;
@@ -546,7 +553,14 @@ fn checkout_populated_tree(
     write_checkout_index(repo, index_mut, bulk_index_rewrite, None)?;
 
     progress.finish();
-    crate::progress::poll_cancel(progress, cancel)
+    crate::progress::poll_cancel(progress, cancel)?;
+
+    let path_collisions = if ignorecase {
+        crate::path_icase::icase_checkout_collision_paths(index_mut, true)
+    } else {
+        Vec::new()
+    };
+    Ok(CheckoutOutcome { path_collisions })
 }
 
 fn checkout_between_trees_slow(
@@ -584,7 +598,8 @@ pub fn checkout_between_trees(
     from: Option<&ObjectId>,
     to: &ObjectId,
 ) -> Result<()> {
-    checkout_between_trees_with_progress(repo, from, to, &mut NullProgress, &NeverCancel)
+    checkout_between_trees_with_progress(repo, from, to, &mut NullProgress, &NeverCancel)?;
+    Ok(())
 }
 
 /// Like [`checkout_between_trees`], reporting checkout progress to `progress`.
@@ -598,11 +613,12 @@ pub fn checkout_between_trees_with_progress(
     to: &ObjectId,
     progress: &mut dyn ProgressSink,
     cancel: &dyn Cancel,
-) -> Result<()> {
+) -> Result<CheckoutOutcome> {
     if from.is_none() {
         return checkout_populated_tree(repo, to, progress, cancel);
     }
-    checkout_between_trees_slow(repo, from, Some(to), progress, cancel)
+    checkout_between_trees_slow(repo, from, Some(to), progress, cancel)?;
+    Ok(CheckoutOutcome::default())
 }
 
 /// Replace the index and tracked worktree so they match `target_tree` exactly.

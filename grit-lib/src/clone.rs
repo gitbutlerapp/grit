@@ -261,6 +261,8 @@ pub struct CloneOutcome {
     pub files: u64,
     /// Total size of checked-out files in bytes.
     pub worktree_bytes: u64,
+    /// Index paths that collided on a case-insensitive filesystem during checkout.
+    pub path_collisions: Vec<String>,
     /// Whether the destination is a bare repository.
     pub bare: bool,
 }
@@ -603,10 +605,12 @@ fn clone_after_claim(
 
     let mut files = 0;
     let mut worktree_bytes = 0;
+    let mut path_collisions = Vec::new();
     if opts.checkout && !bare {
         if let CloneCheckout::CheckedOut(checkout_oid) = checkout {
-            (files, worktree_bytes) = perform_clone_checkout(&repo, checkout_oid, progress, cancel)
-                .map_err(CloneError::Library)?;
+            (files, worktree_bytes, path_collisions) =
+                perform_clone_checkout(&repo, checkout_oid, progress, cancel)
+                    .map_err(CloneError::Library)?;
         }
     } else if matches!(checkout, CloneCheckout::CheckedOut(_)) {
         checkout = CloneCheckout::Skipped;
@@ -625,6 +629,7 @@ fn clone_after_claim(
         tags: fetch_outcome.tag_count(),
         files,
         worktree_bytes,
+        path_collisions,
         bare,
     })
 }
@@ -634,16 +639,23 @@ fn perform_clone_checkout(
     commit: ObjectId,
     progress: &mut dyn Progress,
     cancel: &dyn Cancel,
-) -> Result<(u64, u64)> {
+) -> Result<(u64, u64, Vec<String>)> {
     let tree = crate::diff::tree_oid_of_commit_in_repo(repo, &commit)?;
-    crate::porcelain::checkout::checkout_between_trees_with_progress(
+    let checkout = crate::porcelain::checkout::checkout_between_trees_with_progress(
         repo, None, &tree, progress, cancel,
     )?;
     let index = repo.index_handle().load()?;
-    let entries = index.entries();
-    let files = u64::try_from(entries.len()).unwrap_or(u64::MAX);
-    let worktree_bytes = entries.iter().map(|e| u64::from(e.size)).sum();
-    Ok((files, worktree_bytes))
+    let ignorecase = repo
+        .config()?
+        .get_bool("core.ignorecase")
+        .and_then(|r| r.ok())
+        .unwrap_or(false);
+    let (files, worktree_bytes) = crate::path_icase::icase_worktree_file_stats(
+        &index,
+        repo.work_tree().as_deref(),
+        ignorecase,
+    );
+    Ok((files, worktree_bytes, checkout.path_collisions))
 }
 
 fn local_branch_names_with_commits(repo: &Repository) -> Vec<String> {
