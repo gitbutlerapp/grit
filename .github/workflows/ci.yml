@@ -4,6 +4,10 @@ on:
   push:
     branches: [main]
   pull_request:
+  # test-threaded (release build of every test binary) runs nightly and on demand.
+  schedule:
+    - cron: "17 4 * * *"
+  workflow_dispatch:
 
 # Every commit on main gets its own complete run: agents land on main every few minutes,
 # faster than the test job finishes, so cancelling in-progress main runs meant no commit
@@ -54,6 +58,7 @@ jobs:
         with:
           shared-key: coverage
           save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-on-failure: true
 
       - name: Shed incremental artifacts before coverage links
         run: |
@@ -105,6 +110,7 @@ jobs:
         with:
           shared-key: fmt
           save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-on-failure: true
 
       - run: cargo fmt --all --check
 
@@ -126,6 +132,7 @@ jobs:
         with:
           shared-key: clippy
           save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-on-failure: true
 
       - run: cargo clippy --workspace -- -D warnings
 
@@ -147,6 +154,7 @@ jobs:
         with:
           shared-key: check-windows-msvc
           save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-on-failure: true
 
       # Compiles cfg(windows) paths (e.g. worktree_scan) without a Windows runner.
       - run: cargo check -p grit-lib --target x86_64-pc-windows-msvc
@@ -176,6 +184,7 @@ jobs:
         with:
           shared-key: public-api
           save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-on-failure: true
 
       - run: make public-api-check
 
@@ -195,6 +204,7 @@ jobs:
         with:
           shared-key: rustdoc
           save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-on-failure: true
 
       - run: RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --all-features
 
@@ -224,6 +234,7 @@ jobs:
         with:
           shared-key: bench-scenarios-smoke
           save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-on-failure: true
 
       - name: Scenario suite smoke (TIER=S, timings not gated)
         env:
@@ -249,6 +260,7 @@ jobs:
         with:
           shared-key: bench-daily-smoke
           save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-on-failure: true
 
       - name: Build release grit and grit-bench
         run: cargo build --release -p grit-cli -p grit-utils
@@ -267,8 +279,11 @@ jobs:
 
   test-threaded:
     name: test-threaded
+    # Building every test binary in release mode takes ~26 min on its own, so this
+    # never finished within a per-push 30 min budget; run it nightly and on demand.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
 
@@ -296,6 +311,7 @@ jobs:
         with:
           shared-key: test-threaded
           save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-on-failure: true
 
       - name: Shed incremental artifacts before release test links
         run: |
@@ -337,6 +353,7 @@ jobs:
         with:
           shared-key: miri
           save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-on-failure: true
 
       - run: |
           cargo +nightly miri test -p grit-lib --lib parallel::policy::
@@ -375,6 +392,11 @@ jobs:
         with:
           shared-key: test
           save-if: ${{ github.ref == 'refs/heads/main' }}
+          cache-on-failure: true
+
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-nextest
 
       - name: Shed incremental artifacts before workspace test links
         run: |
@@ -390,7 +412,12 @@ jobs:
           CARGO_INCREMENTAL: "0"
           CARGO_PROFILE_DEV_DEBUG: "0"
           RUSTFLAGS: "-C link-arg=-fuse-ld=bfd"
-        run: cargo test --workspace -j 1
+        # nextest runs every test binary (cargo test stopped at the first failing one,
+        # so most never ran) in parallel, each test in its own process
+        # (.config/nextest.toml); doctests still need cargo test.
+        run: |
+          cargo nextest run --workspace --profile ci
+          cargo test --workspace --doc -j 1
 
       - name: Criterion object micro-benchmarks (smoke)
         run: cargo bench -p grit-lib --bench objects -- --test

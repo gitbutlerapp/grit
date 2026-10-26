@@ -201,13 +201,13 @@ The first run may install the pinned nightly toolchain and `cargo-public-api` (O
 
 ## Continuous integration
 
-GitHub Actions workflow: [`.github/workflows/ci.yml`](.github/workflows/ci.yml). It runs on push to **`main`**, on **pull requests**, and via **workflow_dispatch**. Superseded PR runs are cancelled via workflow **`concurrency`**.
+GitHub Actions workflow: [`.github/workflows/ci.yml`](.github/workflows/ci.yml). It runs on push to **`main`**, on **pull requests**, nightly (**schedule**), and via **workflow_dispatch**. Superseded PR runs are cancelled via workflow **`concurrency`**.
 
 **Toolchain:** Rust **1.99.0** with **`rustfmt`** and **`clippy`**, pinned in [`rust-toolchain.toml`](rust-toolchain.toml) for local and agent checkouts, and in CI with [`dtolnay/rust-toolchain`](https://github.com/dtolnay/rust-toolchain) (`uses: dtolnay/rust-toolchain@1.99.0`). **Bump procedure:** set `channel` in `rust-toolchain.toml`, update the `@1.99.0` tag in every job in `ci.yml` and `release.yml` (keep all jobs on the same version; release builds install their cross targets for this toolchain), run `rustup toolchain install` for the new release locally, then refresh this section and [`AGENTS.md`](AGENTS.md) if the minimum stable version changes.
 
 **Build parallelism:** Local checkouts cap Cargo jobs at 2 in [`.cargo/config.toml`](.cargo/config.toml) for multi-worktree development. CI exports **`CARGO_BUILD_JOBS=$(nproc)`** so runners use all cores; the config file is unchanged.
 
-**Caching:** [`Swatinem/rust-cache@v2`](https://github.com/Swatinem/rust-cache) with a distinct **`shared-key`** per job; caches are saved only on **`main`**.
+**Caching:** [`Swatinem/rust-cache@v2`](https://github.com/Swatinem/rust-cache) with a distinct **`shared-key`** per job; caches are saved only on **`main`**, also when the job fails (`cache-on-failure`), so a red `main` still refreshes them.
 
 | Job | What it runs | Reproduce locally |
 | --- | --- | --- |
@@ -217,8 +217,8 @@ GitHub Actions workflow: [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
 | **rustdoc** | Workspace API docs with warnings denied (see below) | `make doc` |
 | **public-api** | `make public-api-check` (`cargo public-api` on pinned nightly; diff vs `grit-lib/public-api.txt`) | `make public-api-check` |
 | **coverage** | `make coverage` (llvm-cov on `grit-lib`, floor ratchet) | `make coverage` |
-| **test** | `cargo test -p grit-lib -p grit-cli`, then builds `grit` + `grit-http-server` and runs the transport tests | See [Running tests](#running-tests) and [Transport tests](#transport-tests-fetch-and-push-over-smart-http) |
-| **test-threaded** | `cargo test --release --workspace` with `GIT_CONFIG_COUNT` pairs forcing parallel config (`index.threads`, `pack.threads`, `checkout.workers`, `checkout.thresholdForParallelism=0`) | Same env vars as the workflow step in [`.github/workflows/ci.yml`](.github/workflows/ci.yml) |
+| **test** | `cargo nextest run --workspace --profile ci` (every test binary, in parallel, without stopping at the first failure) and `cargo test --workspace --doc`, then builds `grit` + `grit-http-server` and runs the transport tests | See [Running tests](#running-tests) and [Transport tests](#transport-tests-fetch-and-push-over-smart-http) |
+| **test-threaded** | Nightly and on demand only (the release build of every test binary takes ~26 min): `cargo test --release --workspace` with `GIT_CONFIG_COUNT` pairs forcing parallel config (`index.threads`, `pack.threads`, `checkout.workers`, `checkout.thresholdForParallelism=0`) | Same env vars as the workflow step in [`.github/workflows/ci.yml`](.github/workflows/ci.yml) |
 | **miri** | `cargo +nightly miri test -p grit-lib --lib parallel::` over the scoped ordered pool unit tests | `rustup toolchain install nightly -c miri` then the command above |
 
 ### test-threaded (release workspace with parallel config)
